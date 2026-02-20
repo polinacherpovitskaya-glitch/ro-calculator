@@ -36,6 +36,19 @@ const LOCAL_KEYS = {
     timeEntries: 'ro_calc_time_entries',
 };
 
+// Data version — increment to force cache reset for molds
+const MOLDS_DATA_VERSION = 2; // v2: updated cny_rate=12.5, delivery=8000, amort by 4500
+const MOLDS_VERSION_KEY = 'ro_calc_molds_version';
+
+function checkMoldsVersion() {
+    const stored = parseInt(localStorage.getItem(MOLDS_VERSION_KEY)) || 0;
+    if (stored < MOLDS_DATA_VERSION) {
+        localStorage.removeItem(LOCAL_KEYS.molds);
+        localStorage.setItem(MOLDS_VERSION_KEY, String(MOLDS_DATA_VERSION));
+        console.log('Molds cache reset to version', MOLDS_DATA_VERSION);
+    }
+}
+
 function getLocal(key) {
     try {
         return JSON.parse(localStorage.getItem(key)) || null;
@@ -359,6 +372,8 @@ async function deleteTimeEntry(entryId) {
 // =============================================
 
 async function loadMolds() {
+    // Check if molds data version changed — force reset cached data
+    checkMoldsVersion();
     // Molds are stored in localStorage as extended template objects
     return getLocal(LOCAL_KEYS.molds) || getDefaultMolds();
 }
@@ -386,11 +401,11 @@ async function deleteMold(moldId) {
 }
 
 function getDefaultMolds() {
-    const CNY_RATE = 14;
+    const CNY_RATE = 12.5;
     const simpleCostCNY = 800;
     const complexCostCNY = 1000;
     const nfcCostCNY = 1200;
-    const deliveryCost = 15200; // ~160$ (60$ Китай + 100$ МСК)
+    const deliveryCost = 8000; // ~100$ доставка
 
     return [
         { id: 1, name: 'Прямоугольник-бланк', category: 'blank', status: 'active', pph_min: 60, pph_max: 60, pph_actual: null, weight_grams: 20, complexity: 'simple', cost_cny: simpleCostCNY, cny_rate: CNY_RATE, delivery_cost: deliveryCost, cost_rub: simpleCostCNY * CNY_RATE + deliveryCost, hw_speed: null, client: '', notes: '', total_orders: 12, total_units_produced: 5400 },

@@ -8,6 +8,10 @@
 // НДС 5% сверху: цена_с_НДС = цена * 1.05
 // 40% чистая прибыль, 6% ОСН, 6% коммерческий отдел
 
+// Молд НЕ делим на тираж заказа — делим на макс. производительность молда
+// Макс. производительность = 5000 шт * 0.9 = 4500 шт
+const MOLD_MAX_LIFETIME = 4500; // максимальный ресурс молда (шт)
+
 const MOLD_TIERS = [50, 100, 300, 500, 1000, 5000];
 
 function calcMoldTargetPrice(cost) {
@@ -41,8 +45,11 @@ const Molds = {
             const moldCount = m.mold_count || 1;
 
             // Real mold total cost (including delivery)
-            const singleMoldCost = (m.cost_cny || 800) * (m.cny_rate || 14) + (m.delivery_cost || 15200);
+            const singleMoldCost = (m.cost_cny || 800) * (m.cny_rate || 12.5) + (m.delivery_cost || 8000);
             m.cost_rub_calc = round2(singleMoldCost * moldCount);
+
+            // Амортизация молда = стоимость / макс. ресурс (4500 шт), одинаковая для всех тиражей
+            const moldAmortPerUnit = m.cost_rub_calc / MOLD_MAX_LIFETIME;
 
             // Calculate cost per unit at each tier
             m.tiers = {};
@@ -62,9 +69,8 @@ const Molds = {
                 };
 
                 const result = calculateItemCost(item, params);
-                // Replace default mold amortization with real cost
-                const realMoldAmort = m.cost_rub_calc / qty;
-                const adjustedCost = result.costTotal - result.costMoldAmortization + realMoldAmort;
+                // Replace default mold amortization with real cost / MOLD_MAX_LIFETIME
+                const adjustedCost = result.costTotal - result.costMoldAmortization + moldAmortPerUnit;
 
                 const pricing = calcMoldTargetPrice(adjustedCost);
 
@@ -72,7 +78,7 @@ const Molds = {
                     cost: round2(adjustedCost),
                     priceNoVat: pricing.priceNoVat,
                     priceVat: pricing.priceVat,
-                    moldAmort: round2(realMoldAmort),
+                    moldAmort: round2(moldAmortPerUnit),
                 };
             });
 
@@ -82,12 +88,6 @@ const Molds = {
                 const margin = t500.priceNoVat - t500.cost;
                 m.margin_500_pct = t500.priceNoVat > 0 ? round2(margin / t500.priceNoVat * 100) : 0;
             }
-
-            // Payback units
-            const marginPerUnit = (m.tiers[500]?.priceNoVat || 0) - (m.tiers[500]?.cost || 0);
-            m.payback_units = marginPerUnit > 0 ? Math.ceil(m.cost_rub_calc / marginPerUnit) : Infinity;
-            m.payback_progress = m.total_units_produced && m.payback_units < Infinity
-                ? round2(m.total_units_produced / m.payback_units * 100) : 0;
 
             // Labels
             m.complexity_label = { simple: '2ч 800¥', complex: '2ч 1000¥', nfc_triple: '3ч 1200¥' }[m.complexity] || m.complexity;
@@ -126,7 +126,6 @@ const Molds = {
             case 'cost_desc': filtered.sort((a, b) => (b.tiers?.[500]?.cost || 0) - (a.tiers?.[500]?.cost || 0)); break;
             case 'margin_desc': filtered.sort((a, b) => (b.margin_500_pct || 0) - (a.margin_500_pct || 0)); break;
             case 'orders_desc': filtered.sort((a, b) => (b.total_orders || 0) - (a.total_orders || 0)); break;
-            case 'payback': filtered.sort((a, b) => (a.payback_units || Infinity) - (b.payback_units || Infinity)); break;
         }
 
         this.renderTable(filtered);
@@ -154,7 +153,6 @@ const Molds = {
                         <th style="width:40px">г</th>
                         <th style="width:70px">Молд ₽</th>
                         ${tierHeaders}
-                        <th class="text-right" style="width:70px">Окуп.</th>
                         <th style="width:30px"></th>
                     </tr>
                 </thead>
@@ -185,10 +183,6 @@ const Molds = {
                 return `<td class="text-right" style="font-size:11px;color:var(--green)">${t ? Math.round(t.priceVat) : '—'}</td>`;
             }).join('');
 
-            // Payback
-            const paybackText = m.payback_units < Infinity ? m.payback_units + 'шт' : '—';
-            const paybackColor = m.payback_progress >= 100 ? 'var(--green)' : m.payback_progress >= 50 ? 'var(--yellow)' : 'var(--text-muted)';
-
             html += `
                 <tr style="border-bottom:2px solid var(--border)">
                     <td rowspan="3" style="vertical-align:top; padding:6px 8px;">
@@ -203,7 +197,6 @@ const Molds = {
                     <td rowspan="3" style="vertical-align:top; font-size:12px; text-align:center">${m.weight_grams}</td>
                     <td rowspan="3" style="vertical-align:top; font-size:11px; text-align:right">${Math.round(m.cost_rub_calc).toLocaleString('ru-RU')}</td>
                     ${costCells}
-                    <td rowspan="3" style="vertical-align:top; text-align:right; font-size:11px; color:${paybackColor}; font-weight:600">${paybackText}</td>
                     <td rowspan="3" style="vertical-align:top"><button class="btn btn-sm btn-outline" style="padding:2px 6px;font-size:10px" onclick="Molds.editMold(${m.id})">&#9998;</button></td>
                 </tr>
                 <tr style="background:var(--bg)">
@@ -223,6 +216,7 @@ const Molds = {
                 <span><strong>&#9644;</strong> Цена (без НДС)</span>
                 <span><span style="color:var(--green)">&#9644;</span> Цена + НДС 5%</span>
                 <span>Формула: 40% прибыль + 6% ОСН + 6% коммерч.</span>
+                <span>Аморт. молда: на ${MOLD_MAX_LIFETIME} шт (макс. ресурс)</span>
                 <span><sup style="color:var(--green)">&#10003;</sup> = факт. скорость</span>
             </div>
         </div>`;
@@ -252,7 +246,7 @@ const Molds = {
             document.getElementById('mold-cost-cny').value = costCny;
         }
 
-        const rate = parseFloat(document.getElementById('mold-cny-rate').value) || 14;
+        const rate = parseFloat(document.getElementById('mold-cny-rate').value) || 12.5;
         const delivery = parseFloat(document.getElementById('mold-delivery-cost').value) || 0;
         const totalRub = round2((costCny * rate + delivery) * moldCount);
         document.getElementById('mold-cost-rub').value = totalRub;
@@ -281,8 +275,8 @@ const Molds = {
         document.getElementById('mold-weight').value = m.weight_grams || '';
         document.getElementById('mold-complexity').value = m.complexity || 'simple';
         document.getElementById('mold-cost-cny').value = m.cost_cny || '';
-        document.getElementById('mold-cny-rate').value = m.cny_rate || 14;
-        document.getElementById('mold-delivery-cost').value = m.delivery_cost || 15200;
+        document.getElementById('mold-cny-rate').value = m.cny_rate || 12.5;
+        document.getElementById('mold-delivery-cost').value = m.delivery_cost || 8000;
         document.getElementById('mold-cost-rub').value = m.cost_rub_calc || '';
         document.getElementById('mold-count').value = m.mold_count || 1;
         document.getElementById('mold-client').value = m.client || '';
@@ -300,8 +294,8 @@ const Molds = {
         document.getElementById('mold-category').value = 'blank';
         document.getElementById('mold-status').value = 'active';
         document.getElementById('mold-complexity').value = 'simple';
-        document.getElementById('mold-cny-rate').value = 14;
-        document.getElementById('mold-delivery-cost').value = 15200;
+        document.getElementById('mold-cny-rate').value = 12.5;
+        document.getElementById('mold-delivery-cost').value = 8000;
         document.getElementById('mold-count').value = 1;
         document.getElementById('mold-cost-rub').value = '';
     },
@@ -328,8 +322,8 @@ const Molds = {
             weight_grams: parseFloat(document.getElementById('mold-weight').value) || 0,
             complexity: document.getElementById('mold-complexity').value,
             cost_cny: parseFloat(document.getElementById('mold-cost-cny').value) || 0,
-            cny_rate: parseFloat(document.getElementById('mold-cny-rate').value) || 14,
-            delivery_cost: parseFloat(document.getElementById('mold-delivery-cost').value) || 15200,
+            cny_rate: parseFloat(document.getElementById('mold-cny-rate').value) || 12.5,
+            delivery_cost: parseFloat(document.getElementById('mold-delivery-cost').value) || 8000,
             cost_rub: parseFloat(document.getElementById('mold-cost-rub').value) || 0,
             mold_count: parseInt(document.getElementById('mold-count').value) || 1,
             client: document.getElementById('mold-client').value.trim(),
@@ -357,7 +351,7 @@ const Molds = {
         const tierCols = MOLD_TIERS.flatMap(q => [`Себест. ${q}шт`, `Цена ${q}шт`, `+НДС ${q}шт`]);
         const headers = ['Название', 'Категория', 'Статус', 'Тип', 'Кол-во молдов', 'Молд ₽',
             'Шт/ч план', 'Шт/ч факт', 'Вес г', ...tierCols,
-            'Окуп. шт', 'Заказов', 'Выпущено'];
+            'Заказов', 'Выпущено'];
 
         const rows = this.allMolds.map(m => {
             const tierData = MOLD_TIERS.flatMap(q => {
@@ -368,7 +362,7 @@ const Molds = {
                 m.name, m.category_label, m.status_label, m.complexity_label, m.mold_count || 1, m.cost_rub_calc,
                 m.pph_min + (m.pph_max !== m.pph_min ? '-' + m.pph_max : ''), m.pph_actual || '',
                 m.weight_grams, ...tierData,
-                m.payback_units < Infinity ? m.payback_units : '', m.total_orders || 0, m.total_units_produced || 0,
+                m.total_orders || 0, m.total_units_produced || 0,
             ];
         });
 
