@@ -731,3 +731,29 @@ table .text-center { text-align: center; }
     transform: translateY(0);
     opacity: 1;
 }
+
+/* =============================================
+   PRINTING ROWS (inside item blocks)
+   ============================================= */
+
+.printing-row {
+    margin-bottom: 8px;
+    padding: 8px;
+    background: var(--bg);
+    border-radius: 6px;
+}
+
+/* =============================================
+   HARDWARE & PACKAGING ROWS
+   ============================================= */
+
+.hw-row, .pkg-row {
+    padding: 10px;
+    background: var(--bg);
+    border-radius: 6px;
+    margin-bottom: 8px;
+}
+
+.hw-result, .pkg-result {
+    padding: 4px 0;
+}

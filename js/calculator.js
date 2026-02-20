@@ -40,7 +40,9 @@ function getProductionParams(settings) {
 
 /**
  * Рассчитать себестоимость одной позиции заказа
- * (аналог листа "Расчет себестоимости", один блок из 26 строк)
+ * Теперь поддерживает:
+ * - Множественные нанесения (item.printings[] — массив)
+ * - Фурнитура и упаковка рассчитываются отдельно (через calculateHardwareCost / calculatePackagingCost)
  *
  * @param {Object} item - входные данные позиции
  * @param {Object} params - производственные параметры (из getProductionParams)
@@ -95,12 +97,24 @@ function calculateItemCost(item, params) {
         costNfcIndirect = p.indirectPerHour * hoursNfc / qty;
     }
 
-    // === Нанесение ===
-    const printQty = item.printing_qty || 0;
-    const printPrice = item.printing_price_per_unit || 0;
+    // === Нанесение (теперь массив printings[]) ===
     let costPrinting = 0;
-    if (printQty > 0 && printPrice > 0) {
-        costPrinting = (printPrice * 1.06) + (p.printingDeliveryCost / printQty);
+    const printings = item.printings || [];
+    if (printings.length > 0) {
+        printings.forEach(pr => {
+            const prQty = pr.qty || 0;
+            const prPrice = pr.price || 0;
+            if (prQty > 0 && prPrice > 0) {
+                costPrinting += (prPrice * 1.06) + (p.printingDeliveryCost / prQty);
+            }
+        });
+    } else {
+        // Обратная совместимость со старыми данными
+        const printQty = item.printing_qty || 0;
+        const printPrice = item.printing_price_per_unit || 0;
+        if (printQty > 0 && printPrice > 0) {
+            costPrinting = (printPrice * 1.06) + (p.printingDeliveryCost / printQty);
+        }
     }
 
     // === Доставка за наш счет ===
@@ -111,34 +125,6 @@ function calculateItemCost(item, params) {
         + costDesign + costCutting + costCuttingIndirect
         + costNfcTag + costNfcProgramming + costNfcIndirect
         + costPrinting + costDelivery;
-
-    // === Фурнитура ===
-    const hwQty = item.hardware_qty || 0;
-    const hwSpeed = item.hardware_assembly_speed || 0;
-    let hoursHardware = 0;
-    let costHardware = 0;
-
-    if (hwQty > 0) {
-        const hwFotPerUnit = hwSpeed > 0 ? (() => {
-            hoursHardware = hwQty / hwSpeed * p.wasteFactor;
-            return hoursHardware * p.fotPerHour / hwQty;
-        })() : 0;
-        costHardware = hwFotPerUnit + (item.hardware_price_per_unit || 0) + (item.hardware_delivery_per_unit || 0);
-    }
-
-    // === Упаковка ===
-    const pkgQty = item.packaging_qty || 0;
-    const pkgSpeed = item.packaging_assembly_speed || 0;
-    let hoursPackaging = 0;
-    let costPackaging = 0;
-
-    if (pkgQty > 0) {
-        const pkgFotPerUnit = pkgSpeed > 0 ? (() => {
-            hoursPackaging = pkgQty / pkgSpeed * p.wasteFactor;
-            return hoursPackaging * p.fotPerHour / pkgQty;
-        })() : 0;
-        costPackaging = pkgFotPerUnit + (item.packaging_price_per_unit || 0) + (item.packaging_delivery_per_unit || 0);
-    }
 
     return {
         // Себестоимость изделия (за шт)
@@ -156,29 +142,67 @@ function calculateItemCost(item, params) {
         costDelivery: round2(costDelivery),
         costTotal: round2(costTotal),
 
-        // Фурнитура и упаковка (за шт)
-        costHardware: round2(costHardware),
-        costPackaging: round2(costPackaging),
-
         // Часы производства (на всю партию)
         hoursPlastic: round2(hoursPlastic),
         hoursCutting: round2(hoursCutting),
         hoursNfc: round2(hoursNfc),
-        hoursHardware: round2(hoursHardware),
-        hoursPackaging: round2(hoursPackaging),
 
-        // Всего часов
+        // Всего часов пластик+обработка
         hoursTotalPlasticNfc: round2(hoursPlastic + hoursCutting + hoursNfc),
-        hoursTotalPackagingHardware: round2(hoursHardware + hoursPackaging),
+    };
+}
+
+/**
+ * Рассчитать себестоимость одной позиции фурнитуры
+ */
+function calculateHardwareCost(hw, params) {
+    const qty = hw.qty || 0;
+    const speed = hw.assembly_speed || 0;
+    let hoursHardware = 0;
+    let fotPerUnit = 0;
+
+    if (qty > 0 && speed > 0) {
+        hoursHardware = qty / speed * params.wasteFactor;
+        fotPerUnit = hoursHardware * params.fotPerHour / qty;
+    }
+
+    const costPerUnit = fotPerUnit + (hw.price || 0) + (hw.delivery_price || 0);
+
+    return {
+        costPerUnit: round2(costPerUnit),
+        fotPerUnit: round2(fotPerUnit),
+        hoursHardware: round2(hoursHardware),
+        totalCost: round2(costPerUnit * qty),
+    };
+}
+
+/**
+ * Рассчитать себестоимость одной позиции упаковки
+ */
+function calculatePackagingCost(pkg, params) {
+    const qty = pkg.qty || 0;
+    const speed = pkg.assembly_speed || 0;
+    let hoursPackaging = 0;
+    let fotPerUnit = 0;
+
+    if (qty > 0 && speed > 0) {
+        hoursPackaging = qty / speed * params.wasteFactor;
+        fotPerUnit = hoursPackaging * params.fotPerHour / qty;
+    }
+
+    const costPerUnit = fotPerUnit + (pkg.price || 0) + (pkg.delivery_price || 0);
+
+    return {
+        costPerUnit: round2(costPerUnit),
+        fotPerUnit: round2(fotPerUnit),
+        hoursPackaging: round2(hoursPackaging),
+        totalCost: round2(costPerUnit * qty),
     };
 }
 
 /**
  * Рассчитать таргет-цену (модель 70/30)
  * Формула: (себестоимость + НДС) * (1 + маржа) / (1 - налог - НДС_выход)
- *
- * Из листа "Таргет цены":
- * = (cost + cost*0.05) * (1 + 40/100) / (1 - 0.06 - 0.065)
  */
 function calculateTargetPrice(cost, params) {
     if (cost === 0) return 0;
@@ -188,8 +212,6 @@ function calculateTargetPrice(cost, params) {
 
 /**
  * Рассчитать таргет-цену для маркетплейса
- * Из листа "Таргет цены" колонка E:
- * = (cost * 1.4) / (1 - 0.05 - 0.06 - 0.32 - (0.68 * 0.065))
  */
 function calculateMpTargetPrice(cost, params) {
     if (cost === 0) return 0;
@@ -200,7 +222,6 @@ function calculateMpTargetPrice(cost, params) {
 
 /**
  * Рассчитать фактическую маржу
- * Из листа "Таргет цены", секция "Фактическая цена"
  */
 function calculateActualMargin(sellPrice, costPerUnit) {
     if (sellPrice === 0) return { earned: 0, percent: 0 };
@@ -213,9 +234,9 @@ function calculateActualMargin(sellPrice, costPerUnit) {
 
 /**
  * Рассчитать загрузку производства
- * Из листа "Расчет себестоимости", блок F1:J10
+ * Обновлено: фурнитура и упаковка теперь отдельные массивы
  */
-function calculateProductionLoad(items, params) {
+function calculateProductionLoad(items, hardwareItems, packagingItems, params) {
     let hoursPlasticTotal = 0;
     let hoursPackagingTotal = 0;
     let hoursHardwareTotal = 0;
@@ -223,20 +244,28 @@ function calculateProductionLoad(items, params) {
     items.forEach(item => {
         if (item.result) {
             hoursPlasticTotal += item.result.hoursTotalPlasticNfc || 0;
-            hoursPackagingTotal += item.result.hoursPackaging || 0;
-            hoursHardwareTotal += item.result.hoursHardware || 0;
+        }
+    });
+
+    (hardwareItems || []).forEach(hw => {
+        if (hw.result) {
+            hoursHardwareTotal += hw.result.hoursHardware || 0;
+        }
+    });
+
+    (packagingItems || []).forEach(pkg => {
+        if (pkg.result) {
+            hoursPackagingTotal += pkg.result.hoursPackaging || 0;
         }
     });
 
     const totalHours = hoursPlasticTotal + hoursPackagingTotal + hoursHardwareTotal;
 
-    // Процент загрузки (от пластиковых часов и упаковочных)
     const plasticLoadPercent = params.plasticHours > 0
         ? round2(hoursPlasticTotal * 100 / params.plasticHours) : 0;
     const packagingLoadPercent = params.packagingHours > 0
         ? round2((hoursPackagingTotal + hoursHardwareTotal) * 100 / params.packagingHours) : 0;
 
-    // Дни для разного кол-ва сотрудников
     const days1worker = round2(totalHours / 8);
     const days2workers = round2(days1worker / 2);
     const days3workers = round2(days1worker / 3);
@@ -256,12 +285,14 @@ function calculateProductionLoad(items, params) {
 
 /**
  * Рассчитать данные для финансового директора
- * (аналог листа "Финдир")
+ * Обновлено: фурнитура и упаковка — отдельные массивы
  */
-function calculateFinDirectorData(items, params) {
+function calculateFinDirectorData(items, hardwareItems, packagingItems, params) {
     let totalSalary = 0;
     let totalHardwarePurchase = 0;
     let totalHardwareDelivery = 0;
+    let totalPackagingPurchase = 0;
+    let totalPackagingDelivery = 0;
     let totalDesign = 0;
     let totalPrinting = 0;
     let totalPlastic = 0;
@@ -277,21 +308,21 @@ function calculateFinDirectorData(items, params) {
         // Зарплата = все часы * ФОТ/час
         totalSalary += r.hoursTotalPlasticNfc * params.fotPerHour;
 
-        // Закупка фурнитуры
-        const hwQty = item.hardware_qty || 0;
-        totalHardwarePurchase += hwQty * (item.hardware_price_per_unit || 0);
-        totalHardwareDelivery += hwQty * (item.hardware_delivery_per_unit || 0);
-
         // NFC метки
         if (item.is_nfc) totalHardwarePurchase += qty * params.nfcTagCost;
 
         // Проектирование
         if (item.complex_design) totalDesign += params.designCost;
 
-        // Печать
-        const printQty = item.printing_qty || 0;
-        const printPrice = item.printing_price_per_unit || 0;
-        totalPrinting += printQty * printPrice;
+        // Печать (из массива printings)
+        const printings = item.printings || [];
+        printings.forEach(pr => {
+            totalPrinting += (pr.qty || 0) * (pr.price || 0);
+        });
+        // Обратная совместимость
+        if (printings.length === 0) {
+            totalPrinting += (item.printing_qty || 0) * (item.printing_price_per_unit || 0);
+        }
 
         // Пластик
         totalPlastic += r.costPlastic * qty;
@@ -302,10 +333,30 @@ function calculateFinDirectorData(items, params) {
         // Доставка
         if (item.delivery_included) totalDelivery += params.deliveryCostMoscow;
 
-        // Выручка
-        totalRevenue += (item.sell_price_item || 0) * qty
-            + (item.sell_price_hardware || 0) * (item.hardware_qty || 0)
-            + (item.sell_price_packaging || 0) * (item.packaging_qty || 0);
+        // Выручка изделий
+        totalRevenue += (item.sell_price_item || 0) * qty;
+    });
+
+    // Фурнитура
+    (hardwareItems || []).forEach(hw => {
+        const qty = hw.qty || 0;
+        totalHardwarePurchase += qty * (hw.price || 0);
+        totalHardwareDelivery += qty * (hw.delivery_price || 0);
+        totalRevenue += (hw.sell_price || 0) * qty;
+        if (hw.result) {
+            totalSalary += hw.result.hoursHardware * params.fotPerHour;
+        }
+    });
+
+    // Упаковка
+    (packagingItems || []).forEach(pkg => {
+        const qty = pkg.qty || 0;
+        totalPackagingPurchase += qty * (pkg.price || 0);
+        totalPackagingDelivery += qty * (pkg.delivery_price || 0);
+        totalRevenue += (pkg.sell_price || 0) * qty;
+        if (pkg.result) {
+            totalSalary += pkg.result.hoursPackaging * params.fotPerHour;
+        }
     });
 
     const totalTaxes = totalRevenue * (params.taxRate + params.vatRate);
@@ -314,6 +365,8 @@ function calculateFinDirectorData(items, params) {
         salary: round2(totalSalary),
         hardwarePurchase: round2(totalHardwarePurchase),
         hardwareDelivery: round2(totalHardwareDelivery),
+        packagingPurchase: round2(totalPackagingPurchase),
+        packagingDelivery: round2(totalPackagingDelivery),
         design: round2(totalDesign),
         printing: round2(totalPrinting),
         plastic: round2(totalPlastic),
@@ -322,33 +375,43 @@ function calculateFinDirectorData(items, params) {
         taxes: round2(totalTaxes),
         revenue: round2(totalRevenue),
         totalCosts: round2(totalSalary + totalHardwarePurchase + totalHardwareDelivery
+            + totalPackagingPurchase + totalPackagingDelivery
             + totalDesign + totalPrinting + totalPlastic + totalMolds + totalDelivery + totalTaxes),
     };
 }
 
 /**
  * Рассчитать итоговую смету заказа
- * (аналог "Фактическая смета" в листе "Таргет цены")
+ * Обновлено: фурнитура и упаковка — отдельные массивы
  */
-function calculateOrderSummary(items) {
+function calculateOrderSummary(items, hardwareItems, packagingItems) {
     let totalRevenue = 0;
     let totalEarned = 0;
 
     items.forEach(item => {
         if (!item.result) return;
         const qty = item.quantity || 0;
-        const hwQty = item.hardware_qty || 0;
-        const pkgQty = item.packaging_qty || 0;
 
-        totalRevenue += (item.sell_price_item || 0) * qty
-            + (item.sell_price_hardware || 0) * hwQty
-            + (item.sell_price_packaging || 0) * pkgQty;
+        totalRevenue += (item.sell_price_item || 0) * qty;
 
         const marginItem = calculateActualMargin(item.sell_price_item || 0, item.result.costTotal);
-        const marginHw = calculateActualMargin(item.sell_price_hardware || 0, item.result.costHardware);
-        const marginPkg = calculateActualMargin(item.sell_price_packaging || 0, item.result.costPackaging);
+        totalEarned += marginItem.earned * qty;
+    });
 
-        totalEarned += marginItem.earned * qty + marginHw.earned * hwQty + marginPkg.earned * pkgQty;
+    (hardwareItems || []).forEach(hw => {
+        const qty = hw.qty || 0;
+        if (!hw.result) return;
+        totalRevenue += (hw.sell_price || 0) * qty;
+        const m = calculateActualMargin(hw.sell_price || 0, hw.result.costPerUnit);
+        totalEarned += m.earned * qty;
+    });
+
+    (packagingItems || []).forEach(pkg => {
+        const qty = pkg.qty || 0;
+        if (!pkg.result) return;
+        totalRevenue += (pkg.sell_price || 0) * qty;
+        const m = calculateActualMargin(pkg.sell_price || 0, pkg.result.costPerUnit);
+        totalEarned += m.earned * qty;
     });
 
     const vatOnRevenue = totalRevenue * 0.05;
@@ -376,10 +439,8 @@ function getEmptyCostResult() {
         costDesign: 0, costCutting: 0, costCuttingIndirect: 0,
         costNfcTag: 0, costNfcProgramming: 0, costNfcIndirect: 0,
         costPrinting: 0, costDelivery: 0, costTotal: 0,
-        costHardware: 0, costPackaging: 0,
         hoursPlastic: 0, hoursCutting: 0, hoursNfc: 0,
-        hoursHardware: 0, hoursPackaging: 0,
-        hoursTotalPlasticNfc: 0, hoursTotalPackagingHardware: 0,
+        hoursTotalPlasticNfc: 0,
     };
 }
 
