@@ -14,13 +14,25 @@ const MOLD_MAX_LIFETIME = 4500; // максимальный ресурс мол�
 
 const MOLD_TIERS = [50, 100, 300, 500, 1000, 5000];
 
-function calcMoldTargetPrice(cost) {
+// Маржа зависит от тиража:
+// 1000 шт = 40% (базовая), мелкие тиражи дороже, крупные — со скидкой
+const TIER_MARGINS = {
+    50: 0.65,
+    100: 0.55,
+    300: 0.48,
+    500: 0.43,
+    1000: 0.40,
+    5000: 0.35,
+};
+
+function calcMoldTargetPrice(cost, qty) {
     // price = cost / (1 - margin - osn - commercial)
-    // margin=0.40, osn=0.06, commercial=0.06
-    if (cost <= 0) return { priceNoVat: 0, priceVat: 0 };
-    const priceNoVat = round2(cost / (1 - 0.40 - 0.06 - 0.06));
+    // osn=0.06, commercial=0.06
+    if (cost <= 0) return { priceNoVat: 0, priceVat: 0, margin: 0 };
+    const margin = TIER_MARGINS[qty] || 0.40;
+    const priceNoVat = round2(cost / (1 - margin - 0.06 - 0.06));
     const priceVat = round2(priceNoVat * 1.05);
-    return { priceNoVat, priceVat };
+    return { priceNoVat, priceVat, margin };
 }
 
 const Molds = {
@@ -72,13 +84,14 @@ const Molds = {
                 // Replace default mold amortization with real cost / MOLD_MAX_LIFETIME
                 const adjustedCost = result.costTotal - result.costMoldAmortization + moldAmortPerUnit;
 
-                const pricing = calcMoldTargetPrice(adjustedCost);
+                const pricing = calcMoldTargetPrice(adjustedCost, qty);
 
                 m.tiers[qty] = {
                     cost: round2(adjustedCost),
                     priceNoVat: pricing.priceNoVat,
                     priceVat: pricing.priceVat,
                     moldAmort: round2(moldAmortPerUnit),
+                    margin: pricing.margin,
                 };
             });
 
@@ -140,8 +153,12 @@ const Molds = {
             return;
         }
 
-        // Build tier headers
-        const tierHeaders = MOLD_TIERS.map(q => `<th class="text-right" style="font-size:11px">${q >= 1000 ? (q/1000) + 'K' : q}</th>`).join('');
+        // Build tier headers with margin %
+        const tierHeaders = MOLD_TIERS.map(q => {
+            const m = TIER_MARGINS[q] || 0.40;
+            const pct = Math.round(m * 100);
+            return `<th class="text-right" style="font-size:11px">${q >= 1000 ? (q/1000) + 'K' : q}<br><span style="font-size:9px;color:var(--text-muted);font-weight:400">${pct}%</span></th>`;
+        }).join('');
 
         let html = `
         <div class="card" style="padding:12px; overflow-x:auto;">
@@ -215,7 +232,7 @@ const Molds = {
                 <span><span style="color:var(--text-secondary)">&#9644;</span> Себестоимость</span>
                 <span><strong>&#9644;</strong> Цена (без НДС)</span>
                 <span><span style="color:var(--green)">&#9644;</span> Цена + НДС 5%</span>
-                <span>Формула: 40% прибыль + 6% ОСН + 6% коммерч.</span>
+                <span>Маржа: 65%→35% по тиражу + 6% ОСН + 6% коммерч.</span>
                 <span>Аморт. молда: на ${MOLD_MAX_LIFETIME} шт (макс. ресурс)</span>
                 <span><sup style="color:var(--green)">&#10003;</sup> = факт. скорость</span>
             </div>
