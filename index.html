@@ -490,16 +490,21 @@
                 </div>
                 <div class="form-row">
                     <div class="form-group">
+                        <label>Кол-во молдов в изделии</label>
+                        <input type="number" min="1" max="5" id="mold-count" value="1">
+                        <span class="form-hint">Напр. подставка = 2 молда</span>
+                    </div>
+                    <div class="form-group">
                         <label>Курс юаня (&#8381;)</label>
                         <input type="number" step="0.01" id="mold-cny-rate" value="14">
                     </div>
                     <div class="form-group">
-                        <label>Доставка молда (&#8381;)</label>
-                        <input type="number" min="0" id="mold-delivery-cost" value="2000">
-                        <span class="form-hint">Из Китая, доля от партии</span>
+                        <label>Доставка 1 молда (&#8381;)</label>
+                        <input type="number" min="0" id="mold-delivery-cost" value="15200">
+                        <span class="form-hint">~160$ (60$ Китай + 100$ МСК)</span>
                     </div>
                     <div class="form-group">
-                        <label>Стоимость молда ИТОГО (&#8381;)</label>
+                        <label>Стоимость ИТОГО (&#8381;)</label>
                         <input type="number" min="0" id="mold-cost-rub" readonly style="background:#f5f5f5;font-weight:700">
                     </div>
                 </div>

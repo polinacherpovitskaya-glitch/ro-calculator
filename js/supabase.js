@@ -346,7 +346,7 @@ function getDefaultMolds() {
     const simpleCostCNY = 800;
     const complexCostCNY = 1000;
     const nfcCostCNY = 1200;
-    const deliveryCost = 2000;
+    const deliveryCost = 15200; // ~160$ (60$ Китай + 100$ МСК)
 
     return [
         { id: 1, name: 'Прямоугольник-бланк', category: 'blank', status: 'active', pph_min: 60, pph_max: 60, pph_actual: null, weight_grams: 20, complexity: 'simple', cost_cny: simpleCostCNY, cny_rate: CNY_RATE, delivery_cost: deliveryCost, cost_rub: simpleCostCNY * CNY_RATE + deliveryCost, hw_speed: null, client: '', notes: '', total_orders: 12, total_units_produced: 5400 },
