@@ -34,6 +34,10 @@ const LOCAL_KEYS = {
     imports: 'ro_calc_imports',
     molds: 'ro_calc_molds',
     timeEntries: 'ro_calc_time_entries',
+    tasks: 'ro_calc_tasks',
+    chinaOrders: 'ro_calc_china_orders',
+    chinaDeliveries: 'ro_calc_china_deliveries',
+    vacations: 'ro_calc_vacations',
 };
 
 // Data version — increment to force cache reset for molds
@@ -428,4 +432,40 @@ function getDefaultMolds() {
         { id: 18, name: 'Ракетка теннис/падел', category: 'blank', status: 'active', pph_min: 30, pph_max: 30, pph_actual: null, weight_grams: 25, complexity: 'simple', cost_cny: simpleCostCNY, cny_rate: CNY_RATE, delivery_cost: deliveryCost, cost_rub: simpleCostCNY * CNY_RATE + deliveryCost, hw_speed: null, client: '', notes: '', total_orders: 3, total_units_produced: 900 },
         { id: 19, name: 'Новый кардхолдер', category: 'blank', status: 'active', pph_min: 20, pph_max: 20, pph_actual: null, weight_grams: 30, complexity: 'complex', cost_cny: complexCostCNY, cny_rate: CNY_RATE, delivery_cost: deliveryCost, cost_rub: complexCostCNY * CNY_RATE + deliveryCost, hw_speed: null, client: '', notes: 'Новая версия', total_orders: 1, total_units_produced: 200 },
     ];
+}
+
+// =============================================
+// TASKS (Task Tracker — ex Notion To-do)
+// =============================================
+
+async function loadTasks() {
+    return getLocal(LOCAL_KEYS.tasks) || [];
+}
+
+async function saveTasks(tasks) {
+    setLocal(LOCAL_KEYS.tasks, tasks);
+}
+
+// =============================================
+// CHINA ORDERS (Заказы в Китае)
+// =============================================
+
+async function loadChinaOrders() {
+    return getLocal(LOCAL_KEYS.chinaOrders) || [];
+}
+
+async function saveChinaOrders(orders) {
+    setLocal(LOCAL_KEYS.chinaOrders, orders);
+}
+
+// =============================================
+// VACATIONS (Календарь отпусков)
+// =============================================
+
+async function loadVacations() {
+    return getLocal(LOCAL_KEYS.vacations) || [];
+}
+
+async function saveVacations(vacations) {
+    setLocal(LOCAL_KEYS.vacations, vacations);
 }

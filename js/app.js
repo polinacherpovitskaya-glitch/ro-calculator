@@ -113,6 +113,7 @@ const App = {
             case 'analytics': Analytics.load(); break;
             case 'molds': Molds.load(); break;
             case 'timetrack': TimeTrack.load(); break;
+            case 'tasks': Tasks.load(); Tasks.populateFilters(); break;
             case 'import': Import.load(); break;
             case 'settings': Settings.load(); break;
         }
