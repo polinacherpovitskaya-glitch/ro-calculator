@@ -232,6 +232,26 @@ CREATE TABLE fintablo_imports (
   source TEXT DEFAULT 'csv_upload'
 );
 
+-- Учет рабочего времени сотрудников
+CREATE TABLE time_entries (
+  id SERIAL PRIMARY KEY,
+  worker_name TEXT NOT NULL,
+  project_name TEXT NOT NULL,
+  order_id INTEGER REFERENCES orders(id),
+  hours NUMERIC NOT NULL,
+  date DATE NOT NULL,
+  description TEXT,
+  source TEXT DEFAULT 'manual', -- 'manual' | 'telegram'
+  telegram_id BIGINT, -- Telegram user ID (for bot entries)
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Обновленная структура order_items: поддержка item_type и printings[]
+-- item_type: 'product' | 'hardware' | 'packaging'
+-- printings: JSON массив [{name, qty, price}] для продуктов
+ALTER TABLE order_items ADD COLUMN IF NOT EXISTS item_type TEXT DEFAULT 'product';
+ALTER TABLE order_items ADD COLUMN IF NOT EXISTS printings JSONB;
+
 -- Пароль доступа (хешированный)
 CREATE TABLE app_config (
   id SERIAL PRIMARY KEY,
@@ -248,3 +268,6 @@ CREATE INDEX idx_orders_status ON orders(status);
 CREATE INDEX idx_orders_created ON orders(created_at DESC);
 CREATE INDEX idx_order_items_order ON order_items(order_id);
 CREATE INDEX idx_fintablo_order ON fintablo_imports(order_id);
+CREATE INDEX idx_time_entries_date ON time_entries(date DESC);
+CREATE INDEX idx_time_entries_worker ON time_entries(worker_name);
+CREATE INDEX idx_time_entries_order ON time_entries(order_id);

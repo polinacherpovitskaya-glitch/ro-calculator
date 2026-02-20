@@ -56,6 +56,10 @@
                 <span class="nav-icon">&#9670;</span>
                 <span>Молды</span>
             </a>
+            <a href="#timetrack" data-page="timetrack">
+                <span class="nav-icon">&#9201;</span>
+                <span>Часы</span>
+            </a>
             <a href="#import" data-page="import">
                 <span class="nav-icon">&#8645;</span>
                 <span>Импорт</span>
@@ -553,6 +557,159 @@
             </div>
         </div>
 
+        <!-- ========== TIME TRACKING ========== -->
+        <div id="page-timetrack" class="page">
+            <div class="page-header">
+                <h1>Учет времени</h1>
+                <div class="flex gap-8">
+                    <button class="btn btn-outline" onclick="TimeTrack.showManualEntry()">+ Вручную</button>
+                    <button class="btn btn-primary" onclick="TimeTrack.showBotSetup()">Telegram бот</button>
+                </div>
+            </div>
+
+            <!-- Bot setup info -->
+            <div class="card" id="tt-bot-setup" style="display:none">
+                <div class="card-header">
+                    <h3>Настройка Telegram бота</h3>
+                    <button class="btn btn-sm btn-outline" onclick="TimeTrack.hideBotSetup()">Закрыть</button>
+                </div>
+                <div style="font-size:13px; color:var(--text-secondary); line-height:1.8">
+                    <p><b>1.</b> Создайте бота через <a href="https://t.me/BotFather" target="_blank" style="color:var(--accent)">@BotFather</a> в Telegram</p>
+                    <p><b>2.</b> Скопируйте токен бота и вставьте ниже</p>
+                    <p><b>3.</b> Разверните бота на сервере (Vercel / Railway / VPS)</p>
+                    <p><b>4.</b> Сотрудники добавляют бота и каждый день отчитываются:</p>
+                    <div style="background:var(--bg); padding:12px; border-radius:6px; margin:8px 0; font-family:monospace; font-size:12px">
+                        /report<br>
+                        Бот: На какой проект?<br>
+                        <span style="color:var(--accent)">[Показывает кнопки с проектами]</span><br>
+                        Бот: Сколько часов?<br>
+                        Ответ: 4.5<br>
+                        Бот: Записано! Брелоки Яндекс — 4.5ч
+                    </div>
+                </div>
+                <div class="form-row" style="margin-top:12px">
+                    <div class="form-group">
+                        <label>Токен бота</label>
+                        <input type="text" id="tt-bot-token" placeholder="123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11">
+                    </div>
+                    <div class="form-group">
+                        <label>Webhook URL</label>
+                        <input type="text" id="tt-webhook-url" placeholder="https://your-server.com/api/bot" readonly style="background:var(--bg)">
+                    </div>
+                </div>
+                <p class="text-muted" style="font-size:11px; margin-top:8px">
+                    Код бота доступен в файле <code>bot/timebot.js</code> в репозитории проекта.
+                </p>
+            </div>
+
+            <!-- Manual entry form -->
+            <div class="card" id="tt-manual-form" style="display:none">
+                <div class="card-header">
+                    <h3>Добавить запись вручную</h3>
+                    <button class="btn btn-sm btn-outline" onclick="TimeTrack.hideManualEntry()">Закрыть</button>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Сотрудник</label>
+                        <input type="text" id="tt-worker-name" placeholder="Имя">
+                    </div>
+                    <div class="form-group">
+                        <label>Проект / заказ</label>
+                        <select id="tt-project-select">
+                            <option value="">-- Выберите проект --</option>
+                            <option value="__general">Общие работы (сайка, МП, интернет-магазин)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Часы</label>
+                        <input type="number" step="0.5" min="0" max="12" id="tt-hours" value="">
+                    </div>
+                    <div class="form-group">
+                        <label>Дата</label>
+                        <input type="date" id="tt-date">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Описание (необязательно)</label>
+                    <input type="text" id="tt-description" placeholder="Что делали">
+                </div>
+                <button class="btn btn-success" onclick="TimeTrack.saveEntry()">Сохранить</button>
+            </div>
+
+            <!-- Summary stats -->
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-label">Часов за неделю</div>
+                    <div class="stat-value" id="tt-week-hours">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Часов за месяц</div>
+                    <div class="stat-value" id="tt-month-hours">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Сотрудников</div>
+                    <div class="stat-value" id="tt-workers-count">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Проектов</div>
+                    <div class="stat-value" id="tt-projects-count">0</div>
+                </div>
+            </div>
+
+            <!-- Filters -->
+            <div class="card" style="padding: 12px 20px;">
+                <div class="form-row" style="align-items:end">
+                    <div class="form-group" style="margin:0">
+                        <label>Период</label>
+                        <select id="tt-filter-period" onchange="TimeTrack.filterAndRender()">
+                            <option value="week">Эта неделя</option>
+                            <option value="month" selected>Этот месяц</option>
+                            <option value="all">Все записи</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin:0">
+                        <label>Сотрудник</label>
+                        <select id="tt-filter-worker" onchange="TimeTrack.filterAndRender()">
+                            <option value="">Все</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin:0">
+                        <label>Проект</label>
+                        <select id="tt-filter-project" onchange="TimeTrack.filterAndRender()">
+                            <option value="">Все</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Time entries table -->
+            <div class="card">
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Дата</th>
+                                <th>Сотрудник</th>
+                                <th>Проект</th>
+                                <th class="text-right">Часы</th>
+                                <th>Описание</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody id="tt-table-body">
+                            <tr><td colspan="6" class="text-center text-muted">Нет записей</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Summary by project -->
+            <div class="card">
+                <div class="card-header"><h3>Итого по проектам</h3></div>
+                <div id="tt-project-summary"></div>
+            </div>
+        </div>
+
         <!-- ========== IMPORT ========== -->
         <div id="page-import" class="page">
             <div class="page-header">
@@ -836,6 +993,7 @@
 <script src="js/analytics.js"></script>
 <script src="js/molds.js"></script>
 <script src="js/kp.js"></script>
+<script src="js/timetrack.js"></script>
 <script src="js/import.js"></script>
 <script src="js/settings.js"></script>
 </body>

@@ -33,6 +33,7 @@ const LOCAL_KEYS = {
     orderItems: 'ro_calc_order_items',
     imports: 'ro_calc_imports',
     molds: 'ro_calc_molds',
+    timeEntries: 'ro_calc_time_entries',
 };
 
 function getLocal(key) {
@@ -308,6 +309,49 @@ async function loadFintabloImports(orderId) {
     }
     const imports = getLocal(LOCAL_KEYS.imports) || [];
     return imports.filter(i => i.order_id === orderId);
+}
+
+// =============================================
+// TIME ENTRIES (employee time tracking)
+// =============================================
+
+async function loadTimeEntries() {
+    if (isSupabaseReady()) {
+        const { data, error } = await supabaseClient
+            .from('time_entries')
+            .select('*')
+            .order('date', { ascending: false });
+        if (error) { console.error('loadTimeEntries error:', error); return []; }
+        return data;
+    }
+    return getLocal(LOCAL_KEYS.timeEntries) || [];
+}
+
+async function saveTimeEntry(entry) {
+    if (isSupabaseReady()) {
+        const { data, error } = await supabaseClient
+            .from('time_entries')
+            .insert(entry)
+            .select('id')
+            .single();
+        if (error) { console.error('saveTimeEntry error:', error); return null; }
+        return data.id;
+    }
+    const entries = getLocal(LOCAL_KEYS.timeEntries) || [];
+    const id = Date.now();
+    entries.push({ ...entry, id, created_at: new Date().toISOString() });
+    setLocal(LOCAL_KEYS.timeEntries, entries);
+    return id;
+}
+
+async function deleteTimeEntry(entryId) {
+    if (isSupabaseReady()) {
+        const { error } = await supabaseClient.from('time_entries').delete().eq('id', entryId);
+        if (error) console.error('deleteTimeEntry error:', error);
+    } else {
+        const entries = (getLocal(LOCAL_KEYS.timeEntries) || []).filter(e => e.id !== entryId);
+        setLocal(LOCAL_KEYS.timeEntries, entries);
+    }
 }
 
 // =============================================

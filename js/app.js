@@ -112,6 +112,7 @@ const App = {
             case 'orders': Orders.loadList(); break;
             case 'analytics': Analytics.load(); break;
             case 'molds': Molds.load(); break;
+            case 'timetrack': TimeTrack.load(); break;
             case 'import': Import.load(); break;
             case 'settings': Settings.load(); break;
         }
