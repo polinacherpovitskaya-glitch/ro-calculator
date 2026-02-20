@@ -1,0 +1,634 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Recycle Object — Калькулятор заказов</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<!-- =============================================
+     AUTH SCREEN
+     ============================================= -->
+<div id="auth-screen" class="auth-screen">
+    <div class="auth-box">
+        <h1>Recycle Object</h1>
+        <p>Калькулятор заказов</p>
+        <input type="password" id="auth-password" placeholder="Введите пароль" autocomplete="off">
+        <div id="auth-error" class="auth-error">Неверный пароль</div>
+        <button class="btn btn-primary btn-lg" style="width:100%" onclick="App.login()">Войти</button>
+    </div>
+</div>
+
+<!-- =============================================
+     APP LAYOUT
+     ============================================= -->
+<div id="app-layout" class="app-layout">
+
+    <!-- Sidebar -->
+    <aside class="sidebar">
+        <div class="sidebar-brand">
+            <h2>Recycle Object</h2>
+            <span>Калькулятор v1.0</span>
+        </div>
+        <nav class="sidebar-nav">
+            <a href="#dashboard" data-page="dashboard">
+                <span class="nav-icon">&#9632;</span>
+                <span>Дашборд</span>
+            </a>
+            <a href="#calculator" data-page="calculator">
+                <span class="nav-icon">&#9998;</span>
+                <span>Калькулятор</span>
+            </a>
+            <a href="#orders" data-page="orders">
+                <span class="nav-icon">&#9776;</span>
+                <span>Заказы</span>
+            </a>
+            <a href="#analytics" data-page="analytics">
+                <span class="nav-icon">&#9673;</span>
+                <span>Аналитика</span>
+            </a>
+            <a href="#import" data-page="import">
+                <span class="nav-icon">&#8645;</span>
+                <span>Импорт</span>
+            </a>
+            <a href="#settings" data-page="settings">
+                <span class="nav-icon">&#9881;</span>
+                <span>Настройки</span>
+            </a>
+        </nav>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="main-content">
+
+        <!-- ========== DASHBOARD ========== -->
+        <div id="page-dashboard" class="page">
+            <div class="page-header">
+                <h1>Дашборд</h1>
+                <button class="btn btn-primary" onclick="App.navigate('calculator')">+ Новый расчет</button>
+            </div>
+
+            <div class="stats-grid" id="dashboard-stats">
+                <div class="stat-card">
+                    <div class="stat-label">Заказов в работе</div>
+                    <div class="stat-value" id="dash-orders-active">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Загрузка литья</div>
+                    <div class="stat-value" id="dash-load-plastic">0%</div>
+                    <div class="load-bar"><div class="load-bar-fill green" id="dash-load-plastic-bar" style="width:0"></div></div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Загрузка упаковки</div>
+                    <div class="stat-value" id="dash-load-packaging">0%</div>
+                    <div class="load-bar"><div class="load-bar-fill green" id="dash-load-packaging-bar" style="width:0"></div></div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Выручка (план)</div>
+                    <div class="stat-value" id="dash-revenue">0 &#8381;</div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h3>Последние расчеты</h3>
+                    <a href="#orders" class="btn btn-sm btn-outline" onclick="App.navigate('orders')">Все заказы</a>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Заказ</th>
+                                <th>Клиент</th>
+                                <th>Статус</th>
+                                <th class="text-right">Выручка</th>
+                                <th class="text-right">Маржа</th>
+                                <th>Дата</th>
+                            </tr>
+                        </thead>
+                        <tbody id="dashboard-orders-table">
+                            <tr><td colspan="6" class="text-center text-muted">Загрузка...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- ========== CALCULATOR ========== -->
+        <div id="page-calculator" class="page">
+            <div class="page-header">
+                <h1>Калькулятор заказа</h1>
+                <div class="flex gap-8">
+                    <button class="btn btn-outline" onclick="Calculator.resetForm()">Сбросить</button>
+                    <button class="btn btn-success" onclick="Calculator.saveOrder()">Сохранить заказ</button>
+                </div>
+            </div>
+
+            <!-- Order info -->
+            <div class="card">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Название заказа</label>
+                        <input type="text" id="calc-order-name" placeholder="Например: Брелоки для Яндекс">
+                    </div>
+                    <div class="form-group">
+                        <label>Клиент</label>
+                        <input type="text" id="calc-client-name" placeholder="Компания">
+                    </div>
+                    <div class="form-group">
+                        <label>Менеджер</label>
+                        <input type="text" id="calc-manager-name" placeholder="Имя">
+                    </div>
+                    <div class="form-group">
+                        <label>Дедлайн</label>
+                        <input type="date" id="calc-deadline">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Заметки</label>
+                    <textarea id="calc-notes" rows="2" placeholder="Доп. информация по заказу"></textarea>
+                </div>
+            </div>
+
+            <!-- Item blocks container -->
+            <div id="calc-items-container"></div>
+
+            <div style="text-align:center; margin: 12px 0;">
+                <button class="btn btn-outline" id="calc-add-item-btn" onclick="Calculator.addItem()">+ Добавить изделие</button>
+            </div>
+
+            <!-- Production load -->
+            <div class="card" id="calc-production-load" style="display:none">
+                <div class="card-header">
+                    <h3>Загрузка производства</h3>
+                </div>
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-label">Литьё + обработка</div>
+                        <div class="stat-value" id="calc-hours-plastic">0 ч</div>
+                        <div class="load-bar"><div class="load-bar-fill green" id="calc-load-plastic-bar" style="width:0"></div></div>
+                        <div class="stat-sub" id="calc-load-plastic-pct">0% от мощности</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Упаковка + фурнитура</div>
+                        <div class="stat-value" id="calc-hours-packaging">0 ч</div>
+                        <div class="load-bar"><div class="load-bar-fill green" id="calc-load-packaging-bar" style="width:0"></div></div>
+                        <div class="stat-sub" id="calc-load-packaging-pct">0% от мощности</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Всего часов</div>
+                        <div class="stat-value" id="calc-hours-total">0 ч</div>
+                    </div>
+                </div>
+                <div class="form-row" style="max-width:500px">
+                    <div class="stat-card">
+                        <div class="stat-label">1 сотрудник</div>
+                        <div class="stat-value" id="calc-days-1w">0 дн</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">2 сотрудника</div>
+                        <div class="stat-value" id="calc-days-2w">0 дн</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">3 сотрудника</div>
+                        <div class="stat-value" id="calc-days-3w">0 дн</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- FinDirector summary -->
+            <div class="card" id="calc-findirector" style="display:none">
+                <div class="card-header">
+                    <h3>Смета для финдиректора</h3>
+                </div>
+                <div class="cost-breakdown">
+                    <div class="cost-row"><span class="cost-label">Зарплата производство</span><span class="cost-value" id="fin-salary">0 &#8381;</span></div>
+                    <div class="cost-row"><span class="cost-label">Закупка фурнитуры</span><span class="cost-value" id="fin-hardware">0 &#8381;</span></div>
+                    <div class="cost-row"><span class="cost-label">Доставка фурнитуры</span><span class="cost-value" id="fin-hw-delivery">0 &#8381;</span></div>
+                    <div class="cost-row"><span class="cost-label">Проектирование</span><span class="cost-value" id="fin-design">0 &#8381;</span></div>
+                    <div class="cost-row"><span class="cost-label">Нанесение</span><span class="cost-value" id="fin-printing">0 &#8381;</span></div>
+                    <div class="cost-row"><span class="cost-label">Пластик</span><span class="cost-value" id="fin-plastic">0 &#8381;</span></div>
+                    <div class="cost-row"><span class="cost-label">Молды</span><span class="cost-value" id="fin-molds">0 &#8381;</span></div>
+                    <div class="cost-row"><span class="cost-label">Доставка клиенту</span><span class="cost-value" id="fin-delivery">0 &#8381;</span></div>
+                    <div class="cost-row"><span class="cost-label">Налоги (НДС + налог)</span><span class="cost-value" id="fin-taxes">0 &#8381;</span></div>
+                    <div class="cost-row cost-total"><span class="cost-label">ИТОГО расходы</span><span class="cost-value" id="fin-total-costs">0 &#8381;</span></div>
+                    <div class="cost-row" style="margin-top:8px"><span class="cost-label">Выручка</span><span class="cost-value text-green" id="fin-revenue">0 &#8381;</span></div>
+                </div>
+            </div>
+
+            <!-- Summary footer -->
+            <div class="summary-footer" id="calc-summary-footer" style="display:none">
+                <div class="summary-stats">
+                    <div class="summary-stat-item">
+                        <div class="label">Выручка</div>
+                        <div class="value" id="sum-revenue">0 &#8381;</div>
+                    </div>
+                    <div class="summary-stat-item">
+                        <div class="label">Заработок</div>
+                        <div class="value" id="sum-earned">0 &#8381;</div>
+                    </div>
+                    <div class="summary-stat-item">
+                        <div class="label">Маржа</div>
+                        <div class="value" id="sum-margin">0%</div>
+                    </div>
+                    <div class="summary-stat-item">
+                        <div class="label">Часы</div>
+                        <div class="value" id="sum-hours">0 ч</div>
+                    </div>
+                </div>
+                <button class="btn btn-success btn-lg" onclick="Calculator.saveOrder()">Сохранить</button>
+            </div>
+        </div>
+
+        <!-- ========== ORDERS ========== -->
+        <div id="page-orders" class="page">
+            <div class="page-header">
+                <h1>История заказов</h1>
+                <button class="btn btn-primary" onclick="App.navigate('calculator')">+ Новый расчет</button>
+            </div>
+
+            <div class="card" style="padding: 12px 20px;">
+                <div class="form-row" style="align-items:end">
+                    <div class="form-group" style="margin:0">
+                        <label>Статус</label>
+                        <select id="orders-filter-status" onchange="Orders.loadList()">
+                            <option value="">Все</option>
+                            <option value="draft">Черновик</option>
+                            <option value="calculated">Рассчитан</option>
+                            <option value="in_production">В производстве</option>
+                            <option value="completed">Выполнен</option>
+                            <option value="cancelled">Отменен</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin:0">
+                        <label>Поиск</label>
+                        <input type="text" id="orders-search" placeholder="Название / клиент" oninput="Orders.filterLocal()">
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Заказ</th>
+                                <th>Клиент</th>
+                                <th>Менеджер</th>
+                                <th>Статус</th>
+                                <th class="text-right">Выручка</th>
+                                <th class="text-right">Маржа</th>
+                                <th>Дата</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody id="orders-table-body">
+                            <tr><td colspan="8" class="text-center text-muted">Загрузка...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- ========== ANALYTICS ========== -->
+        <div id="page-analytics" class="page">
+            <div class="page-header">
+                <h1>Аналитика</h1>
+            </div>
+
+            <div class="stats-grid" id="analytics-stats">
+                <div class="stat-card">
+                    <div class="stat-label">Всего заказов</div>
+                    <div class="stat-value" id="anl-total-orders">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Средняя маржа</div>
+                    <div class="stat-value" id="anl-avg-margin">0%</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Общая выручка</div>
+                    <div class="stat-value" id="anl-total-revenue">0 &#8381;</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Общий заработок</div>
+                    <div class="stat-value" id="anl-total-earned">0 &#8381;</div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h3>Заказы по маржинальности</h3>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Заказ</th>
+                                <th>Клиент</th>
+                                <th class="text-right">Выручка</th>
+                                <th class="text-right">Себестоимость</th>
+                                <th class="text-right">Маржа</th>
+                            </tr>
+                        </thead>
+                        <tbody id="analytics-table-body">
+                            <tr><td colspan="5" class="text-center text-muted">Нет данных</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header"><h3>Структура себестоимости</h3></div>
+                <canvas id="analytics-cost-chart" height="300" style="max-width:500px"></canvas>
+            </div>
+        </div>
+
+        <!-- ========== IMPORT ========== -->
+        <div id="page-import" class="page">
+            <div class="page-header">
+                <h1>Импорт из FinTablo</h1>
+            </div>
+
+            <div class="card">
+                <h3 style="margin-bottom: 12px;">Загрузить CSV-отчет</h3>
+                <p class="text-muted" style="margin-bottom: 16px; font-size: 13px;">
+                    Экспортируйте отчет из FinTablo (ОПиУ по проектам) и загрузите CSV-файл.
+                    Система автоматически сопоставит статьи расходов.
+                </p>
+                <div class="form-group">
+                    <label>Выберите заказ</label>
+                    <select id="import-order-select">
+                        <option value="">-- Выберите заказ --</option>
+                    </select>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Период с</label>
+                        <input type="date" id="import-period-start">
+                    </div>
+                    <div class="form-group">
+                        <label>Период по</label>
+                        <input type="date" id="import-period-end">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>CSV-файл</label>
+                    <input type="file" id="import-csv-file" accept=".csv">
+                </div>
+                <button class="btn btn-primary" onclick="Import.processCSV()">Загрузить и обработать</button>
+            </div>
+
+            <div class="card" id="import-preview" style="display:none">
+                <div class="card-header">
+                    <h3>Предварительный просмотр</h3>
+                </div>
+                <div class="cost-breakdown" id="import-preview-data"></div>
+                <div style="margin-top: 16px;">
+                    <button class="btn btn-success" onclick="Import.confirmImport()">Подтвердить импорт</button>
+                    <button class="btn btn-outline" onclick="Import.cancelImport()">Отмена</button>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h3>История импортов</h3>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Дата</th>
+                                <th>Заказ</th>
+                                <th>Период</th>
+                                <th class="text-right">Факт расходы</th>
+                                <th class="text-right">Факт выручка</th>
+                            </tr>
+                        </thead>
+                        <tbody id="import-history-body">
+                            <tr><td colspan="5" class="text-center text-muted">Нет импортов</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- ========== SETTINGS ========== -->
+        <div id="page-settings" class="page">
+            <div class="page-header">
+                <h1>Настройки</h1>
+                <button class="btn btn-success" onclick="Settings.saveAll()">Сохранить</button>
+            </div>
+
+            <div class="tabs">
+                <div class="tab active" data-tab="production" onclick="Settings.switchTab('production')">Производство</div>
+                <div class="tab" data-tab="costs" onclick="Settings.switchTab('costs')">Расходы</div>
+                <div class="tab" data-tab="pricing" onclick="Settings.switchTab('pricing')">Ценообразование</div>
+                <div class="tab" data-tab="templates" onclick="Settings.switchTab('templates')">Справочник форм</div>
+            </div>
+
+            <!-- Production tab -->
+            <div id="settings-tab-production" class="settings-tab-content">
+                <div class="card">
+                    <h3 style="margin-bottom: 16px;">Параметры производства</h3>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Кол-во сотрудников</label>
+                            <input type="number" step="0.5" id="set-workers_count" data-key="workers_count">
+                            <span class="form-hint">чел</span>
+                        </div>
+                        <div class="form-group">
+                            <label>Часов на 1 сотрудника</label>
+                            <input type="number" id="set-hours_per_worker" data-key="hours_per_worker">
+                            <span class="form-hint">ч/мес (9ч x 21дн = 189)</span>
+                        </div>
+                        <div class="form-group">
+                            <label>Коэфф. загрузки</label>
+                            <input type="number" step="0.05" id="set-work_load_ratio" data-key="work_load_ratio">
+                            <span class="form-hint">0.8 = 80%</span>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Доля литья пластика</label>
+                            <input type="number" step="0.05" id="set-plastic_injection_ratio" data-key="plastic_injection_ratio">
+                            <span class="form-hint">0.7 = 70%</span>
+                        </div>
+                        <div class="form-group">
+                            <label>Доля упаковки</label>
+                            <input type="number" step="0.05" id="set-packaging_ratio" data-key="packaging_ratio">
+                            <span class="form-hint">0.3 = 30%</span>
+                        </div>
+                        <div class="form-group">
+                            <label>Коэфф. потерь</label>
+                            <input type="number" step="0.05" id="set-waste_factor" data-key="waste_factor">
+                            <span class="form-hint">1.1 = 10% запас</span>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Скорость срезки лейников</label>
+                            <input type="number" id="set-cutting_speed" data-key="cutting_speed">
+                            <span class="form-hint">шт/ч</span>
+                        </div>
+                        <div class="form-group">
+                            <label>Скорость записи NFC</label>
+                            <input type="number" id="set-nfc_write_speed" data-key="nfc_write_speed">
+                            <span class="form-hint">шт/ч</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Costs tab -->
+            <div id="settings-tab-costs" class="settings-tab-content" style="display:none">
+                <div class="card">
+                    <h3 style="margin-bottom: 16px;">Себестоимость</h3>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>ФОТ производства в час</label>
+                            <input type="number" id="set-fot_per_hour" data-key="fot_per_hour">
+                            <span class="form-hint">руб/ч</span>
+                        </div>
+                        <div class="form-group">
+                            <label>Косвенные расходы (месяц)</label>
+                            <input type="number" id="set-indirect_costs_monthly" data-key="indirect_costs_monthly">
+                            <span class="form-hint">руб/мес</span>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Стоимость пластика за кг</label>
+                            <input type="number" id="set-plastic_cost_per_kg" data-key="plastic_cost_per_kg">
+                            <span class="form-hint">руб/кг</span>
+                        </div>
+                        <div class="form-group">
+                            <label>Стоимость NFC метки</label>
+                            <input type="number" id="set-nfc_tag_cost" data-key="nfc_tag_cost">
+                            <span class="form-hint">руб/шт</span>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Амортизация молда (базовая)</label>
+                            <input type="number" id="set-mold_base_cost" data-key="mold_base_cost">
+                            <span class="form-hint">руб</span>
+                        </div>
+                        <div class="form-group">
+                            <label>Проектирование формы</label>
+                            <input type="number" id="set-design_cost" data-key="design_cost">
+                            <span class="form-hint">руб</span>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Доставка по МСК</label>
+                            <input type="number" id="set-delivery_cost_moscow" data-key="delivery_cost_moscow">
+                            <span class="form-hint">руб</span>
+                        </div>
+                        <div class="form-group">
+                            <label>Доставка с печати</label>
+                            <input type="number" id="set-printing_delivery_cost" data-key="printing_delivery_cost">
+                            <span class="form-hint">руб</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Pricing tab -->
+            <div id="settings-tab-pricing" class="settings-tab-content" style="display:none">
+                <div class="card">
+                    <h3 style="margin-bottom: 16px;">Ценообразование</h3>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Целевая маржа</label>
+                            <input type="number" step="0.05" id="set-margin_target" data-key="margin_target">
+                            <span class="form-hint">0.40 = 40%</span>
+                        </div>
+                        <div class="form-group">
+                            <label>Ставка НДС</label>
+                            <input type="number" step="0.01" id="set-vat_rate" data-key="vat_rate">
+                            <span class="form-hint">0.05 = 5%</span>
+                        </div>
+                        <div class="form-group">
+                            <label>Ставка налога</label>
+                            <input type="number" step="0.01" id="set-tax_rate" data-key="tax_rate">
+                            <span class="form-hint">0.06 = 6%</span>
+                        </div>
+                    </div>
+                    <h3 style="margin: 20px 0 16px;">Маркетплейс</h3>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Комиссия МП</label>
+                            <input type="number" step="0.01" id="set-mp_commission" data-key="mp_commission">
+                            <span class="form-hint">0.05 = 5%</span>
+                        </div>
+                        <div class="form-group">
+                            <label>Логистика МП</label>
+                            <input type="number" step="0.01" id="set-mp_logistics" data-key="mp_logistics">
+                            <span class="form-hint">0.06 = 6%</span>
+                        </div>
+                        <div class="form-group">
+                            <label>Хранение МП</label>
+                            <input type="number" step="0.01" id="set-mp_storage_ratio" data-key="mp_storage_ratio">
+                            <span class="form-hint">0.32 = 32%</span>
+                        </div>
+                        <div class="form-group">
+                            <label>Эквайринг МП</label>
+                            <input type="number" step="0.001" id="set-mp_acquiring" data-key="mp_acquiring">
+                            <span class="form-hint">0.065 = 6.5%</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Templates tab -->
+            <div id="settings-tab-templates" class="settings-tab-content" style="display:none">
+                <div class="card">
+                    <div class="card-header">
+                        <h3>Справочник форм/бланков</h3>
+                        <button class="btn btn-sm btn-primary" onclick="Settings.addTemplate()">+ Добавить</button>
+                    </div>
+                    <div class="table-wrap">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Название</th>
+                                    <th>Категория</th>
+                                    <th class="text-right">Шт/ч (мин)</th>
+                                    <th class="text-right">Шт/ч (макс)</th>
+                                    <th class="text-right">Вес (г)</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody id="settings-templates-body">
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </main>
+</div>
+
+<!-- Toast notification -->
+<div id="toast" class="toast"></div>
+
+<!-- Scripts -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<script src="js/supabase.js"></script>
+<script src="js/calculator.js"></script>
+<script src="js/app.js"></script>
+<script src="js/dashboard.js"></script>
+<script src="js/orders.js"></script>
+<script src="js/analytics.js"></script>
+<script src="js/import.js"></script>
+<script src="js/settings.js"></script>
+</body>
+</html>
