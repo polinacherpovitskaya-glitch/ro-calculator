@@ -52,6 +52,10 @@
                 <span class="nav-icon">&#9673;</span>
                 <span>Аналитика</span>
             </a>
+            <a href="#molds" data-page="molds">
+                <span class="nav-icon">&#9670;</span>
+                <span>Молды</span>
+            </a>
             <a href="#import" data-page="import">
                 <span class="nav-icon">&#8645;</span>
                 <span>Импорт</span>
@@ -348,6 +352,179 @@
             </div>
         </div>
 
+        <!-- ========== MOLDS ========== -->
+        <div id="page-molds" class="page">
+            <div class="page-header">
+                <h1>Справочник молдов</h1>
+                <div class="flex gap-8">
+                    <button class="btn btn-outline" onclick="Molds.exportCSV()">Экспорт CSV</button>
+                    <button class="btn btn-primary" onclick="Molds.showAddForm()">+ Новый молд</button>
+                </div>
+            </div>
+
+            <!-- Summary stats -->
+            <div class="stats-grid" id="molds-stats">
+                <div class="stat-card">
+                    <div class="stat-label">Всего молдов</div>
+                    <div class="stat-value" id="molds-total">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Активных</div>
+                    <div class="stat-value" id="molds-active">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Ср. себестоимость (100 шт)</div>
+                    <div class="stat-value" id="molds-avg-cost">0 &#8381;</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Общая стоимость молдов</div>
+                    <div class="stat-value" id="molds-total-value">0 &#8381;</div>
+                </div>
+            </div>
+
+            <!-- Filters -->
+            <div class="card" style="padding: 12px 20px;">
+                <div class="form-row" style="align-items:end">
+                    <div class="form-group" style="margin:0">
+                        <label>Статус</label>
+                        <select id="molds-filter-status" onchange="Molds.filterAndRender()">
+                            <option value="">Все</option>
+                            <option value="active">Активные</option>
+                            <option value="client">Клиентские</option>
+                            <option value="retired">Неактивные</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin:0">
+                        <label>Категория</label>
+                        <select id="molds-filter-category" onchange="Molds.filterAndRender()">
+                            <option value="">Все</option>
+                            <option value="blank">Бланки</option>
+                            <option value="nfc">NFC</option>
+                            <option value="custom">Кастомные</option>
+                            <option value="client_custom">Клиентские</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin:0">
+                        <label>Сортировка</label>
+                        <select id="molds-sort" onchange="Molds.filterAndRender()">
+                            <option value="name">По названию</option>
+                            <option value="cost_asc">Себестоимость ↑</option>
+                            <option value="cost_desc">Себестоимость ↓</option>
+                            <option value="margin_desc">Маржа ↓</option>
+                            <option value="orders_desc">Кол-во заказов ↓</option>
+                            <option value="payback">Окупаемость</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin:0">
+                        <label>Поиск</label>
+                        <input type="text" id="molds-search" placeholder="Название" oninput="Molds.filterAndRender()">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Molds cards container -->
+            <div id="molds-cards-container"></div>
+
+            <!-- Add/Edit modal (inline) -->
+            <div class="card" id="mold-edit-form" style="display:none;">
+                <div class="card-header">
+                    <h3 id="mold-form-title">Новый молд</h3>
+                    <button class="btn btn-sm btn-outline" onclick="Molds.hideForm()">Закрыть</button>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Название</label>
+                        <input type="text" id="mold-name">
+                    </div>
+                    <div class="form-group">
+                        <label>Категория</label>
+                        <select id="mold-category">
+                            <option value="blank">Бланк (ходовой)</option>
+                            <option value="nfc">NFC (3 части)</option>
+                            <option value="custom">Кастомный наш</option>
+                            <option value="client_custom">Кастомный клиентский</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Статус</label>
+                        <select id="mold-status">
+                            <option value="active">Активный</option>
+                            <option value="client">Клиентский (ждём повтора)</option>
+                            <option value="retired">Неактивный</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Шт/час (план мин)</label>
+                        <input type="number" min="0" id="mold-pph-min">
+                    </div>
+                    <div class="form-group">
+                        <label>Шт/час (план макс)</label>
+                        <input type="number" min="0" id="mold-pph-max">
+                    </div>
+                    <div class="form-group">
+                        <label>Шт/час (факт)</label>
+                        <input type="number" min="0" id="mold-pph-actual">
+                        <span class="form-hint">Реальная скорость по хронометражу</span>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Вес изделия (г)</label>
+                        <input type="number" min="0" id="mold-weight">
+                    </div>
+                    <div class="form-group">
+                        <label>Тип молда</label>
+                        <select id="mold-complexity">
+                            <option value="simple">Простой (2 части) — 800&#165;</option>
+                            <option value="complex">Сложный (2 части) — 1000&#165;</option>
+                            <option value="nfc_triple">NFC (3 части) — 1200&#165;</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Стоимость молда (&#165;)</label>
+                        <input type="number" min="0" id="mold-cost-cny">
+                        <span class="form-hint">Авто: 800/1000/1200 по типу</span>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Курс юаня (&#8381;)</label>
+                        <input type="number" step="0.01" id="mold-cny-rate" value="14">
+                    </div>
+                    <div class="form-group">
+                        <label>Доставка молда (&#8381;)</label>
+                        <input type="number" min="0" id="mold-delivery-cost" value="2000">
+                        <span class="form-hint">Из Китая, доля от партии</span>
+                    </div>
+                    <div class="form-group">
+                        <label>Стоимость молда ИТОГО (&#8381;)</label>
+                        <input type="number" min="0" id="mold-cost-rub" readonly style="background:#f5f5f5;font-weight:700">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Клиент (если клиентский)</label>
+                        <input type="text" id="mold-client" placeholder="Название компании">
+                    </div>
+                    <div class="form-group">
+                        <label>Скорость сборки фурнитуры (шт/ч)</label>
+                        <input type="number" min="0" id="mold-hw-speed">
+                        <span class="form-hint">Факт. данные хронометража</span>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Заметки</label>
+                    <textarea id="mold-notes" rows="2" placeholder="Особенности, проблемы, история"></textarea>
+                </div>
+                <div style="margin-top: 12px;">
+                    <button class="btn btn-success" onclick="Molds.saveMold()">Сохранить</button>
+                    <button class="btn btn-outline" onclick="Molds.hideForm()">Отмена</button>
+                </div>
+            </div>
+        </div>
+
         <!-- ========== IMPORT ========== -->
         <div id="page-import" class="page">
             <div class="page-header">
@@ -628,6 +805,7 @@
 <script src="js/dashboard.js"></script>
 <script src="js/orders.js"></script>
 <script src="js/analytics.js"></script>
+<script src="js/molds.js"></script>
 <script src="js/import.js"></script>
 <script src="js/settings.js"></script>
 </body>

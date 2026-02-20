@@ -32,6 +32,7 @@ const LOCAL_KEYS = {
     orders: 'ro_calc_orders',
     orderItems: 'ro_calc_order_items',
     imports: 'ro_calc_imports',
+    molds: 'ro_calc_molds',
 };
 
 function getLocal(key) {
@@ -307,4 +308,65 @@ async function loadFintabloImports(orderId) {
     }
     const imports = getLocal(LOCAL_KEYS.imports) || [];
     return imports.filter(i => i.order_id === orderId);
+}
+
+// =============================================
+// MOLDS (extended product templates with cost data)
+// =============================================
+
+async function loadMolds() {
+    // Molds are stored in localStorage as extended template objects
+    return getLocal(LOCAL_KEYS.molds) || getDefaultMolds();
+}
+
+async function saveMold(mold) {
+    const molds = await loadMolds();
+    if (mold.id) {
+        const idx = molds.findIndex(m => m.id === mold.id);
+        if (idx >= 0) {
+            molds[idx] = { ...mold, updated_at: new Date().toISOString() };
+        }
+    } else {
+        mold.id = Date.now();
+        mold.created_at = new Date().toISOString();
+        mold.updated_at = new Date().toISOString();
+        molds.push(mold);
+    }
+    setLocal(LOCAL_KEYS.molds, molds);
+    return mold.id;
+}
+
+async function deleteMold(moldId) {
+    const molds = (await loadMolds()).filter(m => m.id !== moldId);
+    setLocal(LOCAL_KEYS.molds, molds);
+}
+
+function getDefaultMolds() {
+    const CNY_RATE = 14;
+    const simpleCostCNY = 800;
+    const complexCostCNY = 1000;
+    const nfcCostCNY = 1200;
+    const deliveryCost = 2000;
+
+    return [
+        { id: 1, name: 'Прямоугольник-бланк', category: 'blank', status: 'active', pph_min: 60, pph_max: 60, pph_actual: null, weight_grams: 20, complexity: 'simple', cost_cny: simpleCostCNY, cny_rate: CNY_RATE, delivery_cost: deliveryCost, cost_rub: simpleCostCNY * CNY_RATE + deliveryCost, hw_speed: null, client: '', notes: '', total_orders: 12, total_units_produced: 5400 },
+        { id: 2, name: 'Кружок-бланк', category: 'blank', status: 'active', pph_min: 45, pph_max: 60, pph_actual: null, weight_grams: 20, complexity: 'simple', cost_cny: simpleCostCNY, cny_rate: CNY_RATE, delivery_cost: deliveryCost, cost_rub: simpleCostCNY * CNY_RATE + deliveryCost, hw_speed: null, client: '', notes: '', total_orders: 8, total_units_produced: 3200 },
+        { id: 3, name: 'Сердце-бланк', category: 'blank', status: 'active', pph_min: 45, pph_max: 60, pph_actual: null, weight_grams: 20, complexity: 'simple', cost_cny: simpleCostCNY, cny_rate: CNY_RATE, delivery_cost: deliveryCost, cost_rub: simpleCostCNY * CNY_RATE + deliveryCost, hw_speed: null, client: '', notes: '', total_orders: 6, total_units_produced: 2100 },
+        { id: 4, name: 'Отельный ромбик', category: 'blank', status: 'active', pph_min: 40, pph_max: 40, pph_actual: null, weight_grams: 30, complexity: 'simple', cost_cny: simpleCostCNY, cny_rate: CNY_RATE, delivery_cost: deliveryCost, cost_rub: simpleCostCNY * CNY_RATE + deliveryCost, hw_speed: null, client: '', notes: '', total_orders: 3, total_units_produced: 900 },
+        { id: 5, name: 'Карабин', category: 'blank', status: 'active', pph_min: 40, pph_max: 45, pph_actual: null, weight_grams: 20, complexity: 'simple', cost_cny: simpleCostCNY, cny_rate: CNY_RATE, delivery_cost: deliveryCost, cost_rub: simpleCostCNY * CNY_RATE + deliveryCost, hw_speed: 120, client: '', notes: 'Быстрая сборка', total_orders: 10, total_units_produced: 4500 },
+        { id: 6, name: 'Гребень', category: 'blank', status: 'active', pph_min: 15, pph_max: 20, pph_actual: null, weight_grams: 25, complexity: 'complex', cost_cny: complexCostCNY, cny_rate: CNY_RATE, delivery_cost: deliveryCost, cost_rub: complexCostCNY * CNY_RATE + deliveryCost, hw_speed: null, client: '', notes: 'Сложная форма, тонкие зубья', total_orders: 4, total_units_produced: 1200 },
+        { id: 7, name: 'Картхолдер', category: 'blank', status: 'active', pph_min: 20, pph_max: 20, pph_actual: null, weight_grams: 30, complexity: 'complex', cost_cny: complexCostCNY, cny_rate: CNY_RATE, delivery_cost: deliveryCost, cost_rub: complexCostCNY * CNY_RATE + deliveryCost, hw_speed: null, client: '', notes: '', total_orders: 5, total_units_produced: 1500 },
+        { id: 8, name: 'Зеркало-клякса', category: 'blank', status: 'active', pph_min: 15, pph_max: 15, pph_actual: null, weight_grams: 30, complexity: 'complex', cost_cny: complexCostCNY, cny_rate: CNY_RATE, delivery_cost: deliveryCost, cost_rub: complexCostCNY * CNY_RATE + deliveryCost, hw_speed: 60, client: '', notes: 'Нужно зеркало приклеить', total_orders: 3, total_units_produced: 600 },
+        { id: 9, name: 'Смайл', category: 'blank', status: 'active', pph_min: 15, pph_max: 15, pph_actual: null, weight_grams: 30, complexity: 'simple', cost_cny: simpleCostCNY, cny_rate: CNY_RATE, delivery_cost: deliveryCost, cost_rub: simpleCostCNY * CNY_RATE + deliveryCost, hw_speed: null, client: '', notes: '', total_orders: 2, total_units_produced: 500 },
+        { id: 10, name: 'Тег с лого', category: 'blank', status: 'active', pph_min: 200, pph_max: 200, pph_actual: null, weight_grams: 5, complexity: 'simple', cost_cny: simpleCostCNY, cny_rate: CNY_RATE, delivery_cost: deliveryCost, cost_rub: simpleCostCNY * CNY_RATE + deliveryCost, hw_speed: null, client: '', notes: 'Самый быстрый, маленький тег', total_orders: 15, total_units_produced: 12000 },
+        { id: 11, name: 'Открывашка', category: 'blank', status: 'active', pph_min: 20, pph_max: 25, pph_actual: null, weight_grams: 25, complexity: 'simple', cost_cny: simpleCostCNY, cny_rate: CNY_RATE, delivery_cost: deliveryCost, cost_rub: simpleCostCNY * CNY_RATE + deliveryCost, hw_speed: null, client: '', notes: '', total_orders: 4, total_units_produced: 1000 },
+        { id: 12, name: 'НФС-звезда', category: 'nfc', status: 'active', pph_min: 25, pph_max: 25, pph_actual: null, weight_grams: 30, complexity: 'nfc_triple', cost_cny: nfcCostCNY, cny_rate: CNY_RATE, delivery_cost: deliveryCost, cost_rub: nfcCostCNY * CNY_RATE + deliveryCost, hw_speed: null, client: '', notes: '3-частный молд, вставка NFC чипа', total_orders: 3, total_units_produced: 800 },
+        { id: 13, name: 'НФС-сердце', category: 'nfc', status: 'active', pph_min: 13, pph_max: 13, pph_actual: null, weight_grams: 30, complexity: 'nfc_triple', cost_cny: nfcCostCNY, cny_rate: CNY_RATE, delivery_cost: deliveryCost, cost_rub: nfcCostCNY * CNY_RATE + deliveryCost, hw_speed: null, client: '', notes: '3-частный молд, медленный', total_orders: 2, total_units_produced: 400 },
+        { id: 14, name: 'Подставка для телефона', category: 'blank', status: 'active', pph_min: 15, pph_max: 20, pph_actual: null, weight_grams: 40, complexity: 'complex', cost_cny: complexCostCNY, cny_rate: CNY_RATE, delivery_cost: deliveryCost, cost_rub: complexCostCNY * CNY_RATE + deliveryCost, hw_speed: null, client: '', notes: 'Тяжёлый, долго остывает', total_orders: 3, total_units_produced: 600 },
+        { id: 15, name: 'Дракон', category: 'custom', status: 'active', pph_min: 15, pph_max: 15, pph_actual: null, weight_grams: 40, complexity: 'complex', cost_cny: complexCostCNY, cny_rate: CNY_RATE, delivery_cost: deliveryCost, cost_rub: complexCostCNY * CNY_RATE + deliveryCost, hw_speed: null, client: '', notes: 'Детализированная форма', total_orders: 2, total_units_produced: 300 },
+        { id: 16, name: 'Бусины большие', category: 'blank', status: 'active', pph_min: 100, pph_max: 100, pph_actual: null, weight_grams: 10, complexity: 'simple', cost_cny: simpleCostCNY, cny_rate: CNY_RATE, delivery_cost: deliveryCost, cost_rub: simpleCostCNY * CNY_RATE + deliveryCost, hw_speed: null, client: '', notes: '', total_orders: 7, total_units_produced: 8000 },
+        { id: 17, name: 'Бусины маленькие', category: 'blank', status: 'active', pph_min: 80, pph_max: 80, pph_actual: null, weight_grams: 5, complexity: 'simple', cost_cny: simpleCostCNY, cny_rate: CNY_RATE, delivery_cost: deliveryCost, cost_rub: simpleCostCNY * CNY_RATE + deliveryCost, hw_speed: null, client: '', notes: '', total_orders: 7, total_units_produced: 6000 },
+        { id: 18, name: 'Ракетка теннис/падел', category: 'blank', status: 'active', pph_min: 30, pph_max: 30, pph_actual: null, weight_grams: 25, complexity: 'simple', cost_cny: simpleCostCNY, cny_rate: CNY_RATE, delivery_cost: deliveryCost, cost_rub: simpleCostCNY * CNY_RATE + deliveryCost, hw_speed: null, client: '', notes: '', total_orders: 3, total_units_produced: 900 },
+        { id: 19, name: 'Новый кардхолдер', category: 'blank', status: 'active', pph_min: 20, pph_max: 20, pph_actual: null, weight_grams: 30, complexity: 'complex', cost_cny: complexCostCNY, cny_rate: CNY_RATE, delivery_cost: deliveryCost, cost_rub: complexCostCNY * CNY_RATE + deliveryCost, hw_speed: null, client: '', notes: 'Новая версия', total_orders: 1, total_units_produced: 200 },
+    ];
 }
