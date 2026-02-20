@@ -73,8 +73,12 @@ function calculateItemCost(item, params) {
     const costPlastic = p.plasticCostPerKg / 1000 * weight * p.wasteFactor;
 
     // Амортизация молда
+    // Бланковая форма → делим на 4500 (макс. ресурс молда)
+    // Кастомная форма → делим на тираж заказа
     const extraMolds = item.extra_molds || 0;
-    const costMoldAmortization = p.moldBaseCost * (1 + extraMolds) / qty;
+    const MOLD_LIFETIME = 4500;
+    const moldDivisor = item.is_blank_mold ? MOLD_LIFETIME : qty;
+    const costMoldAmortization = p.moldBaseCost * (1 + extraMolds) / moldDivisor;
 
     // Проектирование формы (если сложная)
     const costDesign = item.complex_design ? p.designCost / qty : 0;
@@ -201,13 +205,33 @@ function calculatePackagingCost(pkg, params) {
 }
 
 /**
+ * Маржа по тиражу (совпадает с TIER_MARGINS в molds.js)
+ * 1000 шт = 40% (базовая), мелкие дороже, крупные со скидкой
+ */
+const CALC_TIER_MARGINS = [
+    { min: 0, max: 75, margin: 0.65 },
+    { min: 75, max: 200, margin: 0.55 },
+    { min: 200, max: 400, margin: 0.48 },
+    { min: 400, max: 750, margin: 0.43 },
+    { min: 750, max: 2500, margin: 0.40 },
+    { min: 2500, max: Infinity, margin: 0.35 },
+];
+
+function getMarginForQty(qty) {
+    const tier = CALC_TIER_MARGINS.find(t => qty >= t.min && qty < t.max);
+    return tier ? tier.margin : 0.40;
+}
+
+/**
  * Рассчитать таргет-цену (модель 70/30)
  * Формула: (себестоимость + НДС) * (1 + маржа) / (1 - налог - НДС_выход)
+ * Маржа зависит от тиража: 65% при 50шт → 35% при 5000шт
  */
-function calculateTargetPrice(cost, params) {
+function calculateTargetPrice(cost, params, qty) {
     if (cost === 0) return 0;
+    const margin = qty ? getMarginForQty(qty) : params.marginTarget;
     const vatOnCost = cost * params.vatRate;
-    return round2((cost + vatOnCost) * (1 + params.marginTarget) / (1 - params.taxRate - 0.065));
+    return round2((cost + vatOnCost) * (1 + margin) / (1 - params.taxRate - 0.065));
 }
 
 /**

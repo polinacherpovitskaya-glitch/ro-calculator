@@ -214,6 +214,7 @@ const Calculator = {
             weight_grams: 0,
             extra_molds: 0,
             complex_design: false,
+            is_blank_mold: false,
             is_nfc: false,
             nfc_programming: false,
             delivery_included: false,
@@ -297,6 +298,14 @@ const Calculator = {
                 <div class="form-group">
                     <label>Доп. молды</label>
                     <input type="number" min="0" value="${item.extra_molds || 0}" oninput="Calculator.onNumChange(${idx}, 'extra_molds', this.value)">
+                </div>
+                <div class="form-group">
+                    <label>Тип формы</label>
+                    <div class="mold-type-toggle" id="mold-type-${idx}">
+                        <button class="mold-type-btn ${item.is_blank_mold ? 'active' : ''}" data-type="blank" onclick="Calculator.setMoldType(${idx}, true)">Бланковая</button>
+                        <button class="mold-type-btn ${!item.is_blank_mold ? 'active' : ''}" data-type="custom" onclick="Calculator.setMoldType(${idx}, false)">Кастомная</button>
+                    </div>
+                    <span class="form-hint" id="mold-type-hint-${idx}">${item.is_blank_mold ? 'Амортизация на 4500 шт' : 'Амортизация на тираж'}</span>
                 </div>
             </div>
 
@@ -601,6 +610,11 @@ const Calculator = {
         this.items[idx].pieces_per_hour = tpl.pieces_per_hour_min;
         this.items[idx].weight_grams = tpl.weight_grams || 0;
 
+        // Авто-определение типа формы по категории шаблона
+        const isBlank = tpl.category === 'blank';
+        this.items[idx].is_blank_mold = isBlank;
+        this.updateMoldTypeUI(idx, isBlank);
+
         const block = document.getElementById('item-block-' + idx);
         const inputs = block.querySelectorAll('input[type="text"], input[type="number"]');
         inputs[0].value = tpl.name;
@@ -610,6 +624,26 @@ const Calculator = {
         document.getElementById('item-title-' + idx).textContent = tpl.name;
 
         this.recalculate();
+    },
+
+    setMoldType(idx, isBlank) {
+        this.items[idx].is_blank_mold = isBlank;
+        this.updateMoldTypeUI(idx, isBlank);
+        this.recalculate();
+    },
+
+    updateMoldTypeUI(idx, isBlank) {
+        const toggle = document.getElementById('mold-type-' + idx);
+        if (toggle) {
+            toggle.querySelectorAll('.mold-type-btn').forEach(btn => {
+                const isBtnBlank = btn.dataset.type === 'blank';
+                btn.classList.toggle('active', isBtnBlank === isBlank);
+            });
+        }
+        const hint = document.getElementById('mold-type-hint-' + idx);
+        if (hint) {
+            hint.textContent = isBlank ? 'Амортизация на 4500 шт' : 'Амортизация на тираж';
+        }
     },
 
     onFieldChange(idx, field, value) {
@@ -684,9 +718,11 @@ const Calculator = {
                 this.setText('c-' + idx + '-delivery', formatRub(result.costDelivery));
                 this.setText('c-' + idx + '-total', formatRub(result.costTotal));
 
-                const targetItem = calculateTargetPrice(result.costTotal, params);
+                const qty = item.quantity || 0;
+                const margin = qty ? getMarginForQty(qty) : params.marginTarget;
+                const targetItem = calculateTargetPrice(result.costTotal, params, qty);
                 item.target_price_item = targetItem;
-                this.setText('t-' + idx + '-item', formatRub(targetItem));
+                this.setText('t-' + idx + '-item', formatRub(targetItem) + ` (маржа ${Math.round(margin * 100)}%)`);
 
                 if (item.sell_price_item > 0) {
                     const mi = calculateActualMargin(item.sell_price_item, result.costTotal);
@@ -707,7 +743,8 @@ const Calculator = {
                 hasData = true;
                 if (resEl) resEl.style.display = '';
                 this.setText('hw-cost-' + idx, formatRub(result.costPerUnit));
-                const targetHw = calculateTargetPrice(result.costPerUnit, params);
+                const hwQty = hw.qty || 0;
+                const targetHw = calculateTargetPrice(result.costPerUnit, params, hwQty);
                 hw.target_price = targetHw;
                 this.setText('hw-target-' + idx, formatRub(targetHw));
                 if (hw.sell_price > 0) {
@@ -730,7 +767,8 @@ const Calculator = {
                 hasData = true;
                 if (resEl) resEl.style.display = '';
                 this.setText('pkg-cost-' + idx, formatRub(result.costPerUnit));
-                const targetPkg = calculateTargetPrice(result.costPerUnit, params);
+                const pkgQty = pkg.qty || 0;
+                const targetPkg = calculateTargetPrice(result.costPerUnit, params, pkgQty);
                 pkg.target_price = targetPkg;
                 this.setText('pkg-target-' + idx, formatRub(targetPkg));
                 if (pkg.sell_price > 0) {
@@ -853,6 +891,7 @@ const Calculator = {
                 weight_grams: item.weight_grams,
                 extra_molds: item.extra_molds,
                 complex_design: item.complex_design,
+                is_blank_mold: item.is_blank_mold,
                 is_nfc: item.is_nfc,
                 nfc_programming: item.nfc_programming,
                 delivery_included: item.delivery_included,
