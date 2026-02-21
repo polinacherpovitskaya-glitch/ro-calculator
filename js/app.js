@@ -1452,7 +1452,7 @@ const Calculator = {
     // КП (Commercial Proposal) PDF
     // ==========================================
 
-    generateKP() {
+    async generateKP() {
         const orderName = document.getElementById('calc-order-name').value.trim();
         const clientName = document.getElementById('calc-client-name').value.trim();
 
@@ -1554,7 +1554,7 @@ const Calculator = {
             return;
         }
 
-        KPGenerator.generate(orderName, clientName, kpItems);
+        await KPGenerator.generate(orderName, clientName, kpItems);
     },
 };
 
