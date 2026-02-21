@@ -14,7 +14,7 @@ function getProductionParams(settings) {
     const workLoadHours = totalHoursAll * s('work_load_ratio');
     const plasticHours = workLoadHours * s('plastic_injection_ratio');
     const packagingHours = workLoadHours * s('packaging_ratio');
-    const indirectPerHour = s('indirect_costs_monthly') / plasticHours;
+    const indirectPerHour = plasticHours > 0 ? s('indirect_costs_monthly') / plasticHours : 0;
 
     return {
         totalHoursAll,
@@ -85,7 +85,7 @@ function calculateItemCost(item, params) {
 
     // === Срезание лейника ===
     // Косвенные НЕ закладываем: срезание происходит параллельно с литьём пластика
-    const hoursCutting = qty / p.cuttingSpeed * p.wasteFactor;
+    const hoursCutting = p.cuttingSpeed > 0 ? qty / p.cuttingSpeed * p.wasteFactor : 0;
     const costCutting = hoursCutting * p.fotPerHour / qty;
     const costCuttingIndirect = 0; // убрано — лейник срезается пока льётся пластик
 
@@ -126,10 +126,11 @@ function calculateItemCost(item, params) {
     const costDelivery = item.delivery_included ? p.deliveryCostMoscow / qty : 0;
 
     // === ИТОГО себестоимость изделия (за штуку) ===
-    const costTotal = costFot + costIndirect + costPlastic + costMoldAmortization
+    let costTotal = costFot + costIndirect + costPlastic + costMoldAmortization
         + costDesign + costCutting + costCuttingIndirect
         + costNfcTag + costNfcProgramming + costNfcIndirect
         + costPrinting + costDelivery;
+    if (!isFinite(costTotal)) costTotal = 0;
 
     return {
         // Себестоимость изделия (за шт)
