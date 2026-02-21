@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v22';
+const APP_VERSION = 'v23';
 
 const App = {
     currentPage: 'dashboard',
@@ -1461,48 +1461,53 @@ const Calculator = {
             return;
         }
 
-        // Auto-fill blank mold prices before validation
+        // Auto-fill ALL sell prices before validation using target pricing
         const params = App.params || {};
+        const calcTarget = (cost, marginPct) => {
+            if (cost === 0) return 0;
+            const vatOnCost = cost * (params.vatRate || 0.05);
+            return round2((cost + vatOnCost) * (1 + marginPct) / (1 - (params.taxRate || 0.06) - 0.065));
+        };
+
         this.items.forEach(item => {
             if (!item.result || !item.quantity) return;
-            if ((!item.sell_price_item || item.sell_price_item <= 0) && item.is_blank_mold && item.result.costTotal > 0) {
-                const costPrintingPart = item.result.costPrinting || 0;
-                const costItemOnly = round2(item.result.costTotal - costPrintingPart);
-                const blankMargin = getBlankMargin(item.quantity || 500);
-                const blankMult = getBlankMultiplier(item.quantity || 500);
-                const vatOnCost = costItemOnly * (params.vatRate || 0.05);
-                const taxRate = params.taxRate || 0.06;
-                item.sell_price_item = roundTo5(round2((costItemOnly + vatOnCost) * (1 + blankMargin) * blankMult / (1 - taxRate - 0.065)));
+            const costPrintingPart = item.result.costPrinting || 0;
+            const costItemOnly = round2(item.result.costTotal - costPrintingPart);
+
+            // Auto-fill item sell price if not set
+            if ((!item.sell_price_item || item.sell_price_item <= 0) && costItemOnly > 0) {
+                if (item.is_blank_mold) {
+                    const blankMargin = getBlankMargin(item.quantity || 500);
+                    const blankMult = getBlankMultiplier(item.quantity || 500);
+                    item.sell_price_item = roundTo5(calcTarget(costItemOnly, blankMargin) * blankMult);
+                } else {
+                    // Default to 40% margin for custom molds
+                    item.sell_price_item = roundTo5(calcTarget(costItemOnly, 0.40));
+                }
+            }
+
+            // Auto-fill printing sell price if not set
+            if (costPrintingPart > 0 && (!item.sell_price_printing || item.sell_price_printing <= 0)) {
+                item.sell_price_printing = roundTo5(calcTarget(costPrintingPart, 0.40));
             }
         });
 
-        // Validate: all sell prices must be filled
-        let missingPrices = [];
-        this.items.forEach((item, i) => {
-            if (!item.result || !item.quantity) return;
-            if (!item.sell_price_item || item.sell_price_item <= 0) {
-                missingPrices.push(`Изделие "${item.product_name || (i+1)}": цена продажи`);
-            }
-            // Check printing sell price if there is a printing cost
-            if ((item.result.costPrinting || 0) > 0 && (!item.sell_price_printing || item.sell_price_printing <= 0)) {
-                missingPrices.push(`Нанесение "${item.product_name || (i+1)}": цена продажи`);
-            }
-        });
-        this.hardwareItems.forEach((hw, i) => {
-            if (hw.qty > 0 && (!hw.sell_price || hw.sell_price <= 0)) {
-                missingPrices.push(`Фурнитура "${hw.name || (i+1)}": цена продажи`);
-            }
-        });
-        this.packagingItems.forEach((pkg, i) => {
-            if (pkg.qty > 0 && (!pkg.sell_price || pkg.sell_price <= 0)) {
-                missingPrices.push(`Упаковка "${pkg.name || (i+1)}": цена продажи`);
+        // Auto-fill hardware sell prices
+        this.hardwareItems.forEach(hw => {
+            if (hw.result && hw.qty > 0 && (!hw.sell_price || hw.sell_price <= 0)) {
+                hw.sell_price = roundTo5(calcTarget(hw.result.costPerUnit, 0.40));
             }
         });
 
-        if (missingPrices.length > 0) {
-            App.toast('Заполните цены продажи: ' + missingPrices.join(', '), 5000);
-            return;
-        }
+        // Auto-fill packaging sell prices
+        this.packagingItems.forEach(pkg => {
+            if (pkg.result && pkg.qty > 0 && (!pkg.sell_price || pkg.sell_price <= 0)) {
+                pkg.sell_price = roundTo5(calcTarget(pkg.result.costPerUnit, 0.40));
+            }
+        });
+
+        // After auto-fill, update the pricing card inputs to show the values
+        this.renderPricingCard(params);
 
         // Collect data for КП — 4 entities: item, printing, hw, pkg
         const kpItems = [];
