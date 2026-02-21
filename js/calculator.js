@@ -84,9 +84,10 @@ function calculateItemCost(item, params) {
     const costDesign = item.complex_design ? p.designCost / qty : 0;
 
     // === Срезание лейника ===
+    // Косвенные НЕ закладываем: срезание происходит параллельно с литьём пластика
     const hoursCutting = qty / p.cuttingSpeed * p.wasteFactor;
     const costCutting = hoursCutting * p.fotPerHour / qty;
-    const costCuttingIndirect = p.indirectPerHour * hoursCutting / qty;
+    const costCuttingIndirect = 0; // убрано — лейник срезается пока льётся пластик
 
     // === NFC ===
     const costNfcTag = item.is_nfc ? p.nfcTagCost : 0;
@@ -151,7 +152,13 @@ function calculateItemCost(item, params) {
         hoursCutting: round2(hoursCutting),
         hoursNfc: round2(hoursNfc),
 
-        // Всего часов пластик+обработка
+        // Часы по зонам загрузки:
+        // 70% зона (литьё) — только литьё пластика + NFC
+        hoursPlasticZone: round2(hoursPlastic + hoursNfc),
+        // 30% зона (упаковка/обработка) — срезание лейника
+        hoursCuttingZone: round2(hoursCutting),
+
+        // Обратная совместимость — общие часы
         hoursTotalPlasticNfc: round2(hoursPlastic + hoursCutting + hoursNfc),
     };
 }
@@ -267,7 +274,10 @@ function calculateProductionLoad(items, hardwareItems, packagingItems, params) {
 
     items.forEach(item => {
         if (item.result) {
-            hoursPlasticTotal += item.result.hoursTotalPlasticNfc || 0;
+            // 70% зона — только литьё пластика + NFC
+            hoursPlasticTotal += item.result.hoursPlasticZone || 0;
+            // 30% зона — срезание лейника
+            hoursPackagingTotal += item.result.hoursCuttingZone || 0;
         }
     });
 
@@ -464,6 +474,7 @@ function getEmptyCostResult() {
         costNfcTag: 0, costNfcProgramming: 0, costNfcIndirect: 0,
         costPrinting: 0, costDelivery: 0, costTotal: 0,
         hoursPlastic: 0, hoursCutting: 0, hoursNfc: 0,
+        hoursPlasticZone: 0, hoursCuttingZone: 0,
         hoursTotalPlasticNfc: 0,
     };
 }

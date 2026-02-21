@@ -4,8 +4,9 @@
 // =============================================
 
 // Pricing formula for blanks page:
-// Цена продажи = себестоимость + 10 000 ₽ / тираж
-// 10 000 ₽ — фиксированная наценка (работа менеджера), делится на тираж
+// 1. Себестоимость рассчитывается как для любых изделий (молд / 4500)
+// 2. Таргет цена = формула 70/30 с маржой 40% (30% для тиража 5000)
+// 3. Цена продажи = таргет + 10 000 ₽ / тираж (работа менеджера)
 
 // Молд НЕ делим на тираж заказа — делим на макс. производительность молда
 // Макс. производительность = 5000 шт * 0.9 = 4500 шт
@@ -13,10 +14,31 @@ const MOLD_MAX_LIFETIME = 4500; // максимальный ресурс мол�
 
 const MOLD_TIERS = [50, 100, 300, 500, 1000, 5000];
 const BLANKS_FIXED_MARKUP = 10000; // фиксированная наценка ₽
+const BLANKS_MARGIN_DEFAULT = 0.40; // маржа для всех тиражей
+const BLANKS_MARGIN_5K = 0.30; // маржа для тиража 5000
 
-function calcBlankSellPrice(cost, qty) {
+function getBlankMargin(qty) {
+    return qty >= 5000 ? BLANKS_MARGIN_5K : BLANKS_MARGIN_DEFAULT;
+}
+
+/**
+ * Таргет цена бланка = (себест + НДС) * (1 + маржа) / (1 - налог - НДС_выход)
+ * Используем стандартную формулу 70/30, но с фиксированной маржой 40% (30% для 5K)
+ */
+function calcBlankTargetPrice(cost, qty, params) {
     if (cost <= 0 || qty <= 0) return 0;
-    return round2(cost + BLANKS_FIXED_MARKUP / qty);
+    const margin = getBlankMargin(qty);
+    const vatOnCost = cost * (params.vatRate || 0.05);
+    return round2((cost + vatOnCost) * (1 + margin) / (1 - (params.taxRate || 0.06) - 0.065));
+}
+
+/**
+ * Цена продажи бланка = таргет цена + 10 000 ₽ / тираж
+ */
+function calcBlankSellPrice(cost, qty, params) {
+    if (cost <= 0 || qty <= 0) return 0;
+    const target = calcBlankTargetPrice(cost, qty, params);
+    return round2(target + BLANKS_FIXED_MARKUP / qty);
 }
 
 const Molds = {
@@ -80,23 +102,28 @@ const Molds = {
                     adjustedCost += hwCostPerUnit;
                 }
 
-                // New formula: sell price = cost + 10000 / qty
-                const sellPrice = calcBlankSellPrice(adjustedCost, qty);
+                // Таргет = формула 70/30 с маржой 40% (30% для 5K)
+                // Продажа = таргет + 10000/тираж (работа менеджера)
+                const targetPrice = calcBlankTargetPrice(adjustedCost, qty, params);
+                const sellPrice = calcBlankSellPrice(adjustedCost, qty, params);
+                const margin = getBlankMargin(qty);
 
                 m.tiers[qty] = {
                     cost: round2(adjustedCost),
+                    targetPrice: targetPrice,
                     sellPrice: sellPrice,
+                    margin: margin,
                     moldAmort: round2(moldAmortPerUnit),
                     hwCost: round2(hwCostPerUnit),
                     markup: round2(BLANKS_FIXED_MARKUP / qty),
                 };
             });
 
-            // Margin info at 500 units
+            // Margin info at 500 units (based on sell price vs cost)
             const t500 = m.tiers[500];
             if (t500) {
-                const margin = t500.sellPrice - t500.cost;
-                m.margin_500_pct = t500.sellPrice > 0 ? round2(margin / t500.sellPrice * 100) : 0;
+                const marginAbs = t500.sellPrice - t500.cost;
+                m.margin_500_pct = t500.sellPrice > 0 ? round2(marginAbs / t500.sellPrice * 100) : 0;
             }
 
             // Labels
@@ -176,37 +203,47 @@ const Molds = {
                 : `${m.pph_min}${m.pph_max !== m.pph_min ? '-' + m.pph_max : ''}`;
             const moldCountBadge = (m.mold_count || 1) > 1 ? ` <sup style="color:var(--orange);font-weight:700">x${m.mold_count}</sup>` : '';
 
-            // Cost row cells (gray)
+            // Row 1: Cost (gray)
             const costCells = MOLD_TIERS.map(q => {
                 const t = m.tiers?.[q];
                 return `<td class="text-right" style="font-size:11px;color:var(--text-secondary)">${t ? Math.round(t.cost) : '—'}</td>`;
             }).join('');
 
-            // Sell price row cells (green, bold) — cost + 10000/qty
+            // Row 2: Target price (blue) — 40% маржа (30% для 5K)
+            const targetCells = MOLD_TIERS.map(q => {
+                const t = m.tiers?.[q];
+                const marginLabel = t ? Math.round(t.margin * 100) + '%' : '';
+                return `<td class="text-right" style="font-size:11px;color:var(--accent)" title="маржа ${marginLabel}">${t ? Math.round(t.targetPrice) : '—'}</td>`;
+            }).join('');
+
+            // Row 3: Sell price (green, bold) — target + 10000/qty
             const sellCells = MOLD_TIERS.map(q => {
                 const t = m.tiers?.[q];
                 return `<td class="text-right" style="font-size:12px;font-weight:600;color:var(--green)">${t ? Math.round(t.sellPrice) : '—'}</td>`;
             }).join('');
 
             html += `
-                <tr style="border-bottom:2px solid var(--border)">
-                    <td rowspan="2" style="vertical-align:top; padding:6px 8px;">
+                <tr>
+                    <td rowspan="3" style="vertical-align:top; padding:6px 8px; border-bottom:2px solid var(--border)">
                         <div style="font-weight:700; font-size:13px;"><span class="status-dot ${statusDot}"></span>${this.esc(m.name)}${moldCountBadge}</div>
                         ${m.hw_name ? `<div style="font-size:10px; color:var(--accent); margin-top:1px;">+ ${this.esc(m.hw_name)} (${formatRub(m.hw_price_per_unit || 0)}/шт, ${m.hw_speed || '?'} шт/ч)</div>` : ''}
                         ${m.client ? `<div style="font-size:10px; color:var(--text-muted); margin-top:1px;">${this.esc(m.client)}</div>` : ''}
                         ${m.notes ? `<div style="font-size:10px; color:var(--text-muted); font-style:italic">${this.esc(m.notes)}</div>` : ''}
                     </td>
-                    <td rowspan="2" style="vertical-align:top; font-size:12px; text-align:center">${pphDisplay}</td>
-                    <td rowspan="2" style="vertical-align:top; font-size:12px; text-align:center">${m.weight_grams}</td>
+                    <td rowspan="3" style="vertical-align:top; font-size:12px; text-align:center; border-bottom:2px solid var(--border)">${pphDisplay}</td>
+                    <td rowspan="3" style="vertical-align:top; font-size:12px; text-align:center; border-bottom:2px solid var(--border)">${m.weight_grams}</td>
                     ${costCells}
-                    <td rowspan="2" style="vertical-align:top">
+                    <td rowspan="3" style="vertical-align:top; border-bottom:2px solid var(--border)">
                         <div style="display:flex;flex-direction:column;gap:2px;">
                             <button class="btn btn-sm btn-outline" style="padding:2px 6px;font-size:10px" onclick="Molds.editMold(${m.id})">&#9998;</button>
                             <button class="btn-remove" style="font-size:9px;width:24px;height:24px;" title="Удалить" onclick="Molds.confirmDelete(${m.id}, '${this.esc(m.name)}')">&#10005;</button>
                         </div>
                     </td>
                 </tr>
-                <tr style="background:var(--bg)">
+                <tr>
+                    ${targetCells}
+                </tr>
+                <tr style="border-bottom:2px solid var(--border)">
                     ${sellCells}
                 </tr>`;
         });
@@ -217,9 +254,10 @@ const Molds = {
         html += `
             <div style="margin-top:10px; font-size:11px; color:var(--text-muted); display:flex; gap:16px; flex-wrap:wrap;">
                 <span><span style="color:var(--text-secondary)">&#9644;</span> Себестоимость</span>
-                <span><span style="color:var(--green);font-weight:600">&#9644;</span> Цена продажи (себест. + ${formatRub(BLANKS_FIXED_MARKUP)} / тираж)</span>
-                <span>Аморт. бланка: на ${MOLD_MAX_LIFETIME} шт (макс. ресурс)</span>
-                <span><sup style="color:var(--green)">&#10003;</sup> = факт. скорость</span>
+                <span><span style="color:var(--accent)">&#9644;</span> Таргет (${Math.round(BLANKS_MARGIN_DEFAULT*100)}%, 5K=${Math.round(BLANKS_MARGIN_5K*100)}%)</span>
+                <span><span style="color:var(--green);font-weight:600">&#9644;</span> Продажа (таргет + ${formatRub(BLANKS_FIXED_MARKUP)} / тираж)</span>
+                <span>Аморт.: /${MOLD_MAX_LIFETIME} шт</span>
+                <span><sup style="color:var(--green)">&#10003;</sup> = факт.</span>
             </div>
         </div>`;
 
