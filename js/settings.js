@@ -1,12 +1,15 @@
 // =============================================
 // Recycle Object — Settings Page
 // Now with inline editing for forms catalog
+// + Employee management for Telegram bot
 // =============================================
 
 const Settings = {
     currentTab: 'production',
     moldsData: [],   // local copy of molds for inline editing
     dirtyMolds: {},  // track which molds were edited { id: true }
+    employeesData: [],
+    editingEmployeeId: null,
 
     async load() {
         this.populateFields();
@@ -21,6 +24,11 @@ const Settings = {
         });
         const target = document.getElementById('settings-tab-' + tab);
         if (target) target.style.display = '';
+
+        // Lazy-load employees when tab is opened
+        if (tab === 'employees' && this.employeesData.length === 0) {
+            this.loadEmployeesTab();
+        }
     },
 
     populateFields() {
@@ -182,6 +190,140 @@ const Settings = {
         setTimeout(() => {
             Molds.editMold(id);
         }, 300);
+    },
+
+    // ==========================================
+    // EMPLOYEES — Management for Telegram bot
+    // ==========================================
+
+    async loadEmployeesTab() {
+        this.employeesData = await loadEmployees();
+        this.renderEmployeesTable();
+    },
+
+    renderEmployeesTable() {
+        const tbody = document.getElementById('employees-table-body');
+        if (!tbody) return;
+
+        if (!this.employeesData || this.employeesData.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="8" class="text-muted text-center">Нет сотрудников</td></tr>';
+            return;
+        }
+
+        const roleLabels = { production: 'Производство', office: 'Офис', management: 'Руководство' };
+        const roleBadges = { production: 'badge-blue', office: 'badge-yellow', management: 'badge-green' };
+
+        tbody.innerHTML = this.employeesData.map(e => {
+            const roleBadge = `<span class="badge ${roleBadges[e.role] || ''}">${roleLabels[e.role] || e.role}</span>`;
+            const tgStatus = e.telegram_id
+                ? `<span style="color:var(--green);" title="Привязан: ${this.escHtml(e.telegram_username || 'ID:' + e.telegram_id)}">&#10004;</span>`
+                : `<span style="color:var(--text-muted);" title="Не привязан">—</span>`;
+            const reminderTime = `${String(e.reminder_hour || 17).padStart(2, '0')}:${String(e.reminder_minute || 30).padStart(2, '0')} UTC+${e.timezone_offset || 3}`;
+            const tasksIcon = e.tasks_required ? '<span style="color:var(--orange);" title="Обязательное описание задач">&#9998;</span>' : '';
+            const statusBadge = e.is_active !== false
+                ? '<span class="badge badge-green">Активен</span>'
+                : '<span class="badge">Неактивен</span>';
+
+            return `
+            <tr>
+                <td style="font-weight:600;">${this.escHtml(e.name)}</td>
+                <td style="text-align:center;">${roleBadge}</td>
+                <td style="text-align:center;">${e.daily_hours || 8}ч</td>
+                <td style="text-align:center;">${tgStatus}</td>
+                <td style="text-align:center;font-size:11px;">${reminderTime}</td>
+                <td style="text-align:center;">${tasksIcon}</td>
+                <td style="text-align:center;">${statusBadge}</td>
+                <td>
+                    <button class="btn btn-sm btn-outline" style="padding:2px 6px;font-size:10px;" onclick="Settings.editEmployee(${e.id})">&#9998;</button>
+                </td>
+            </tr>`;
+        }).join('');
+    },
+
+    showAddEmployee() {
+        this.editingEmployeeId = null;
+        this.clearEmployeeForm();
+        document.getElementById('employee-form').style.display = '';
+        document.getElementById('emp-delete-btn').style.display = 'none';
+        document.getElementById('emp-name').focus();
+    },
+
+    editEmployee(id) {
+        const e = this.employeesData.find(x => x.id === id);
+        if (!e) return;
+        this.editingEmployeeId = id;
+
+        document.getElementById('emp-edit-id').value = id;
+        document.getElementById('emp-name').value = e.name || '';
+        document.getElementById('emp-role').value = e.role || 'production';
+        document.getElementById('emp-daily-hours').value = e.daily_hours || 8;
+        document.getElementById('emp-tg-username').value = e.telegram_username || '';
+        document.getElementById('emp-reminder-hour').value = e.reminder_hour ?? 17;
+        document.getElementById('emp-reminder-min').value = e.reminder_minute ?? 30;
+        document.getElementById('emp-tz-offset').value = e.timezone_offset ?? 3;
+        document.getElementById('emp-tasks-required').checked = !!e.tasks_required;
+
+        document.getElementById('employee-form').style.display = '';
+        document.getElementById('emp-delete-btn').style.display = '';
+    },
+
+    clearEmployeeForm() {
+        document.getElementById('emp-edit-id').value = '';
+        document.getElementById('emp-name').value = '';
+        document.getElementById('emp-role').value = 'production';
+        document.getElementById('emp-daily-hours').value = 8;
+        document.getElementById('emp-tg-username').value = '';
+        document.getElementById('emp-reminder-hour').value = 17;
+        document.getElementById('emp-reminder-min').value = 30;
+        document.getElementById('emp-tz-offset').value = 3;
+        document.getElementById('emp-tasks-required').checked = false;
+    },
+
+    cancelEmployee() {
+        document.getElementById('employee-form').style.display = 'none';
+        this.editingEmployeeId = null;
+    },
+
+    async saveEmployee() {
+        const name = document.getElementById('emp-name').value.trim();
+        if (!name) { App.toast('Введите имя сотрудника'); return; }
+
+        const employee = {
+            id: this.editingEmployeeId || undefined,
+            name,
+            role: document.getElementById('emp-role').value,
+            daily_hours: parseFloat(document.getElementById('emp-daily-hours').value) || 8,
+            telegram_username: document.getElementById('emp-tg-username').value.trim(),
+            reminder_hour: parseInt(document.getElementById('emp-reminder-hour').value) || 17,
+            reminder_minute: parseInt(document.getElementById('emp-reminder-min').value) || 30,
+            timezone_offset: parseInt(document.getElementById('emp-tz-offset').value) ?? 3,
+            is_active: true,
+            tasks_required: document.getElementById('emp-tasks-required').checked,
+        };
+
+        // Preserve telegram_id if editing existing
+        if (this.editingEmployeeId) {
+            const existing = this.employeesData.find(e => e.id === this.editingEmployeeId);
+            if (existing) {
+                employee.telegram_id = existing.telegram_id || null;
+            }
+        }
+
+        await saveEmployee(employee);
+        App.toast('Сотрудник сохранён');
+        this.cancelEmployee();
+        await this.loadEmployeesTab();
+    },
+
+    async deleteEmployee() {
+        if (!this.editingEmployeeId) return;
+        const e = this.employeesData.find(x => x.id === this.editingEmployeeId);
+        if (!confirm(`Удалить сотрудника "${e?.name || ''}"?`)) return;
+
+        await deleteEmployee(this.editingEmployeeId);
+        App.toast('Сотрудник удалён');
+        this.cancelEmployee();
+        await this.loadEmployeesTab();
     },
 
     escHtml(str) {

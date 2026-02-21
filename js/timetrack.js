@@ -1,17 +1,22 @@
 // =============================================
 // Recycle Object — Time Tracking
 // Учет рабочего времени сотрудников
+// + Daily status dashboard with employee awareness
 // =============================================
 
 const TimeTrack = {
     entries: [],
+    employees: [],
 
     async load() {
         this.entries = await loadTimeEntries();
+        this.employees = await loadEmployees();
+        this.populateWorkerSelect();
         this.populateFilters();
         this.filterAndRender();
         this.updateStats();
         this.populateProjectSelect();
+        this.renderDailyStatus();
         // Set today's date for manual entry
         const dateInput = document.getElementById('tt-date');
         if (dateInput && !dateInput.value) {
@@ -37,6 +42,21 @@ const TimeTrack = {
         document.getElementById('tt-manual-form').style.display = 'none';
     },
 
+    // === Populate worker select from employees list ===
+
+    populateWorkerSelect() {
+        const select = document.getElementById('tt-worker-name');
+        if (!select) return;
+        select.innerHTML = '<option value="">-- Выберите --</option>';
+        const active = this.employees.filter(e => e.is_active !== false);
+        active.forEach(e => {
+            const opt = document.createElement('option');
+            opt.value = e.name;
+            opt.textContent = e.name;
+            select.appendChild(opt);
+        });
+    },
+
     // === Populate project select with active orders ===
 
     async populateProjectSelect() {
@@ -56,14 +76,89 @@ const TimeTrack = {
         });
     },
 
+    // === Daily Status Dashboard ===
+
+    renderDailyStatus() {
+        const container = document.getElementById('tt-daily-status-content');
+        const dateEl = document.getElementById('tt-daily-date');
+        if (!container) return;
+
+        const today = new Date().toISOString().split('T')[0];
+        if (dateEl) dateEl.textContent = today;
+
+        const activeEmployees = this.employees.filter(e => e.is_active !== false);
+        if (activeEmployees.length === 0) {
+            container.innerHTML = '<p class="text-muted" style="padding:8px;">Добавьте сотрудников в Настройки → Сотрудники</p>';
+            return;
+        }
+
+        // Group today's entries by worker
+        const todayEntries = this.entries.filter(e => e.date === today);
+        const byWorker = {};
+        todayEntries.forEach(e => {
+            if (!byWorker[e.worker_name]) byWorker[e.worker_name] = [];
+            byWorker[e.worker_name].push(e);
+        });
+
+        const rows = activeEmployees.map(emp => {
+            const entries = byWorker[emp.name] || [];
+            const totalHours = entries.reduce((s, e) => s + (e.hours || 0), 0);
+            const totalPct = emp.daily_hours > 0 ? Math.round(totalHours / emp.daily_hours * 100) : 0;
+
+            let icon, statusColor, statusText;
+            if (totalPct >= 100) {
+                icon = '<span style="color:var(--green);font-size:16px;">&#10004;</span>';
+                statusColor = 'var(--green)';
+                statusText = `${totalPct}%`;
+            } else if (totalPct > 0) {
+                icon = '<span style="color:var(--orange);font-size:16px;">&#9888;</span>';
+                statusColor = 'var(--orange)';
+                statusText = `${totalPct}% — не закончил`;
+            } else {
+                icon = '<span style="color:var(--text-muted);font-size:16px;">&#10060;</span>';
+                statusColor = 'var(--text-muted)';
+                statusText = 'не отчитался';
+            }
+
+            const projectList = entries.length > 0
+                ? entries.map(e => {
+                    const pctLabel = e.percentage ? `${e.percentage}%` : `${e.hours}ч`;
+                    return `<span style="font-size:11px;">${this.esc(e.project_name)} (${pctLabel})</span>`;
+                }).join(', ')
+                : '';
+
+            const roleLabels = { production: 'Пр', office: 'Оф', management: 'Рук' };
+            const roleBadge = `<span style="font-size:9px;color:var(--text-muted);">${roleLabels[emp.role] || ''}</span>`;
+
+            return `
+            <div style="display:flex; align-items:center; gap:10px; padding:6px 0; border-bottom:1px solid var(--border);">
+                ${icon}
+                <div style="min-width:90px;">
+                    <span style="font-weight:600; font-size:13px;">${this.esc(emp.name)}</span>
+                    ${roleBadge}
+                </div>
+                <div style="flex:1;">
+                    <span style="color:${statusColor}; font-weight:600; font-size:12px;">${statusText}</span>
+                    ${projectList ? `<div style="margin-top:2px;">${projectList}</div>` : ''}
+                </div>
+                <div style="font-size:11px; color:var(--text-muted);">${totalHours.toFixed(1)}ч / ${emp.daily_hours}ч</div>
+            </div>`;
+        });
+
+        container.innerHTML = rows.join('');
+    },
+
     // === Filters ===
 
     populateFilters() {
-        // Workers filter
-        const workers = [...new Set(this.entries.map(e => e.worker_name).filter(Boolean))];
+        // Workers filter — from employees + from entries (for legacy)
+        const employeeNames = this.employees.filter(e => e.is_active !== false).map(e => e.name);
+        const entryWorkers = this.entries.map(e => e.worker_name).filter(Boolean);
+        const allWorkers = [...new Set([...employeeNames, ...entryWorkers])].sort();
+
         const wSelect = document.getElementById('tt-filter-worker');
         while (wSelect.options.length > 1) wSelect.remove(1);
-        workers.sort().forEach(w => {
+        allWorkers.forEach(w => {
             const opt = document.createElement('option');
             opt.value = w;
             opt.textContent = w;
@@ -125,16 +220,19 @@ const TimeTrack = {
             return;
         }
 
-        tbody.innerHTML = entries.map(e => `
+        tbody.innerHTML = entries.map(e => {
+            const pctLabel = e.percentage ? ` <span style="color:var(--text-muted);font-size:11px">(${e.percentage}%)</span>` : '';
+            const srcIcon = e.source === 'telegram' ? ' <span title="Из Telegram-бота" style="font-size:10px">&#128225;</span>' : '';
+            return `
             <tr>
                 <td>${App.formatDate(e.date)}</td>
-                <td><b>${this.esc(e.worker_name)}</b></td>
+                <td><b>${this.esc(e.worker_name)}</b>${srcIcon}</td>
                 <td>${this.esc(e.project_name)}${e.order_id ? ' <span class="badge badge-blue" style="font-size:10px">заказ</span>' : ''}</td>
-                <td class="text-right"><b>${e.hours}</b> ч</td>
+                <td class="text-right"><b>${e.hours}</b> ч${pctLabel}</td>
                 <td class="text-muted">${this.esc(e.description || '')}</td>
                 <td><button class="btn btn-sm btn-outline" onclick="TimeTrack.deleteEntry(${e.id})">&#10005;</button></td>
-            </tr>
-        `).join('');
+            </tr>`;
+        }).join('');
     },
 
     renderProjectSummary(entries) {

@@ -38,6 +38,7 @@ const LOCAL_KEYS = {
     chinaOrders: 'ro_calc_china_orders',
     chinaDeliveries: 'ro_calc_china_deliveries',
     vacations: 'ro_calc_vacations',
+    employees: 'ro_calc_employees',
 };
 
 // Data version — increment to force cache reset for molds
@@ -477,6 +478,65 @@ function getDefaultMolds() {
         m(41, 'NFC Квадрат',                'nfc', 0,   0,   null, 30, 'nfc_triple', nfcCostCNY, { collection: 'NFC', notes: '3-частный молд' }),
         m(42, 'NFC Сердце',                 'nfc', 13,  13,  null, 30, 'nfc_triple', nfcCostCNY, { collection: 'NFC', orders: 2, produced: 400, notes: '3-частный молд, медленный' }),
         m(43, 'NFC Камушек',                'nfc', 0,   0,   null, 30, 'nfc_triple', nfcCostCNY, { collection: 'NFC', notes: '3-частный молд' }),
+    ];
+}
+
+// =============================================
+// EMPLOYEES (Сотрудники — для Telegram-бота и учёта времени)
+// =============================================
+
+async function loadEmployees() {
+    if (isSupabaseReady()) {
+        const { data, error } = await supabaseClient.from('employees').select('*').order('name');
+        if (!error && data) return data;
+    }
+    return getLocal(LOCAL_KEYS.employees) || getDefaultEmployees();
+}
+
+async function saveEmployee(employee) {
+    if (isSupabaseReady()) {
+        if (employee.id) {
+            const { error } = await supabaseClient.from('employees').update(employee).eq('id', employee.id);
+            if (error) console.error('saveEmployee error:', error);
+        } else {
+            const { data, error } = await supabaseClient.from('employees').insert(employee).select('id').single();
+            if (error) console.error('saveEmployee error:', error);
+            if (data) employee.id = data.id;
+        }
+        return employee.id;
+    }
+    const employees = getLocal(LOCAL_KEYS.employees) || getDefaultEmployees();
+    if (employee.id) {
+        const idx = employees.findIndex(e => e.id === employee.id);
+        if (idx >= 0) employees[idx] = { ...employee, updated_at: new Date().toISOString() };
+    } else {
+        employee.id = Date.now();
+        employee.created_at = new Date().toISOString();
+        employee.updated_at = new Date().toISOString();
+        employees.push(employee);
+    }
+    setLocal(LOCAL_KEYS.employees, employees);
+    return employee.id;
+}
+
+async function deleteEmployee(employeeId) {
+    if (isSupabaseReady()) {
+        const { error } = await supabaseClient.from('employees').delete().eq('id', employeeId);
+        if (error) console.error('deleteEmployee error:', error);
+    } else {
+        const employees = (getLocal(LOCAL_KEYS.employees) || []).filter(e => e.id !== employeeId);
+        setLocal(LOCAL_KEYS.employees, employees);
+    }
+}
+
+function getDefaultEmployees() {
+    return [
+        { id: 1, name: 'Алина', role: 'office', daily_hours: 8, telegram_id: null, telegram_username: '', reminder_hour: 17, reminder_minute: 30, timezone_offset: 3, is_active: true, tasks_required: false },
+        { id: 2, name: 'Элина', role: 'office', daily_hours: 8, telegram_id: null, telegram_username: '', reminder_hour: 17, reminder_minute: 30, timezone_offset: 3, is_active: true, tasks_required: false },
+        { id: 3, name: 'Аня', role: 'office', daily_hours: 8, telegram_id: null, telegram_username: '', reminder_hour: 17, reminder_minute: 30, timezone_offset: 3, is_active: true, tasks_required: false },
+        { id: 4, name: 'Глеб', role: 'production', daily_hours: 8, telegram_id: null, telegram_username: '', reminder_hour: 17, reminder_minute: 30, timezone_offset: 3, is_active: true, tasks_required: false },
+        { id: 5, name: 'Полина', role: 'management', daily_hours: 8, telegram_id: null, telegram_username: '', reminder_hour: 17, reminder_minute: 30, timezone_offset: 3, is_active: true, tasks_required: true },
+        { id: 6, name: 'Никита', role: 'management', daily_hours: 8, telegram_id: null, telegram_username: '', reminder_hour: 17, reminder_minute: 30, timezone_offset: 3, is_active: true, tasks_required: true },
     ];
 }
 
