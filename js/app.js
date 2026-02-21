@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v20';
+const APP_VERSION = 'v21';
 
 const App = {
     currentPage: 'dashboard',
@@ -470,6 +470,13 @@ const Calculator = {
                 </div>
                 <button class="btn-remove" title="Удалить фурнитуру" onclick="Calculator.removeHardware(${idx})">&#10005;</button>
             </div>
+            <div class="cost-breakdown" id="hw-cost-${idx}" style="display:none">
+                <div class="section-title" style="margin-top:0">Себестоимость фурнитуры (за 1 шт)</div>
+                <div class="cost-row"><span class="cost-label">ФОТ сборка</span><span class="cost-value" id="hw-${idx}-fot">0</span></div>
+                <div class="cost-row"><span class="cost-label">Закупка</span><span class="cost-value" id="hw-${idx}-purchase">0</span></div>
+                <div class="cost-row"><span class="cost-label">Доставка (на шт)</span><span class="cost-value" id="hw-${idx}-delivery">0</span></div>
+                <div class="cost-row cost-total"><span class="cost-label">ИТОГО себестоимость</span><span class="cost-value" id="hw-${idx}-total">0</span></div>
+            </div>
         </div>`;
         list.insertAdjacentHTML('beforeend', html);
     },
@@ -558,6 +565,13 @@ const Calculator = {
                     <input type="number" min="0" step="0.01" value="${pkg.delivery_total || ''}" oninput="Calculator.onPkgNum(${idx}, 'delivery_total', this.value)">
                 </div>
                 <button class="btn-remove" title="Удалить упаковку" onclick="Calculator.removePackaging(${idx})">&#10005;</button>
+            </div>
+            <div class="cost-breakdown" id="pkg-cost-${idx}" style="display:none">
+                <div class="section-title" style="margin-top:0">Себестоимость упаковки (за 1 шт)</div>
+                <div class="cost-row"><span class="cost-label">ФОТ сборка</span><span class="cost-value" id="pkg-${idx}-fot">0</span></div>
+                <div class="cost-row"><span class="cost-label">Закупка</span><span class="cost-value" id="pkg-${idx}-purchase">0</span></div>
+                <div class="cost-row"><span class="cost-label">Доставка (на шт)</span><span class="cost-value" id="pkg-${idx}-delivery">0</span></div>
+                <div class="cost-row cost-total"><span class="cost-label">ИТОГО себестоимость</span><span class="cost-value" id="pkg-${idx}-total">0</span></div>
             </div>
         </div>`;
         list.insertAdjacentHTML('beforeend', html);
@@ -726,10 +740,21 @@ const Calculator = {
         this.hardwareItems.forEach((hw, idx) => {
             const result = calculateHardwareCost(hw, params);
             hw.result = result;
+
+            const hwCostEl = document.getElementById('hw-cost-' + idx);
             if (result.costPerUnit > 0) {
                 hasData = true;
                 const hwQty = hw.qty || 0;
                 hw.target_price = calculateTargetPrice(result.costPerUnit, params, hwQty);
+
+                // Show cost breakdown
+                if (hwCostEl) hwCostEl.style.display = '';
+                this.setText('hw-' + idx + '-fot', formatRub(result.fotPerUnit));
+                this.setText('hw-' + idx + '-purchase', formatRub(hw.price || 0));
+                this.setText('hw-' + idx + '-delivery', formatRub(hw.delivery_price || 0));
+                this.setText('hw-' + idx + '-total', formatRub(result.costPerUnit));
+            } else {
+                if (hwCostEl) hwCostEl.style.display = 'none';
             }
         });
 
@@ -737,10 +762,21 @@ const Calculator = {
         this.packagingItems.forEach((pkg, idx) => {
             const result = calculatePackagingCost(pkg, params);
             pkg.result = result;
+
+            const pkgCostEl = document.getElementById('pkg-cost-' + idx);
             if (result.costPerUnit > 0) {
                 hasData = true;
                 const pkgQty = pkg.qty || 0;
                 pkg.target_price = calculateTargetPrice(result.costPerUnit, params, pkgQty);
+
+                // Show cost breakdown
+                if (pkgCostEl) pkgCostEl.style.display = '';
+                this.setText('pkg-' + idx + '-fot', formatRub(result.fotPerUnit));
+                this.setText('pkg-' + idx + '-purchase', formatRub(pkg.price || 0));
+                this.setText('pkg-' + idx + '-delivery', formatRub(pkg.delivery_price || 0));
+                this.setText('pkg-' + idx + '-total', formatRub(result.costPerUnit));
+            } else {
+                if (pkgCostEl) pkgCostEl.style.display = 'none';
             }
         });
 
