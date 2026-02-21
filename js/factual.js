@@ -9,25 +9,25 @@ const Factual = {
     factData: null,
     planHours: null,
 
-    // Cost row definitions: key, label, planField
+    // Cost row definitions: key, label, planField, hint (source of fact data)
     ROWS: [
-        { key: 'salary_production',   label: 'ЗП выливание',              planField: 'salaryProduction' },
-        { key: 'salary_assembly',     label: 'ЗП сборка / упаковка',      planField: 'salaryAssembly' },
-        { key: 'hardware_purchase',   label: 'Закупка фурнитуры + NFC',   planField: 'hardwarePurchase' },
-        { key: 'hardware_delivery',   label: 'Доставка фурнитуры',        planField: 'hardwareDelivery' },
-        { key: 'packaging_purchase',  label: 'Закупка упаковки',          planField: 'packagingPurchase' },
-        { key: 'packaging_delivery',  label: 'Доставка упаковки',         planField: 'packagingDelivery' },
-        { key: 'design_printing',     label: 'Проектирование + нанесение', planField: 'designPrinting' },
-        { key: 'plastic',             label: 'Пластик',                   planField: 'plastic' },
-        { key: 'molds',               label: 'Молды',                     planField: 'molds' },
-        { key: 'delivery_client',     label: 'Доставка клиенту',          planField: 'delivery' },
-        { key: 'taxes',               label: 'Налоги',                    planField: 'taxes' },
+        { key: 'salary_production',   label: 'ЗП производство (выливание)',       planField: 'salaryProduction', hint: 'из бота: часы сотрудников на выливание' },
+        { key: 'salary_assembly',     label: 'ЗП сборка + упаковка + срезка',     planField: 'salaryAssembly',   hint: 'из бота: часы на сборку фурнитуры, упаковку, срезание' },
+        { key: 'hardware_purchase',   label: 'Закупка фурнитуры + NFC',           planField: 'hardwarePurchase', hint: 'стоимость фурнитуры (склад или кастомная закупка)' },
+        { key: 'hardware_delivery',   label: 'Доставка фурнитуры',                planField: 'hardwareDelivery', hint: 'доставка из Китая / РФ' },
+        { key: 'packaging_purchase',  label: 'Закупка упаковки',                  planField: 'packagingPurchase', hint: '' },
+        { key: 'packaging_delivery',  label: 'Доставка упаковки',                 planField: 'packagingDelivery', hint: '' },
+        { key: 'design_printing',     label: 'Нанесение (печать)',                 planField: 'designPrinting',  hint: 'фактическая стоимость печати (УФ, тампо и т.д.)' },
+        { key: 'plastic',             label: 'Пластик',                            planField: 'plastic',         hint: 'от начальника производства' },
+        { key: 'molds',               label: 'Молды (формы)',                      planField: 'molds',           hint: 'фактическая стоимость изготовления/ремонта форм' },
+        { key: 'delivery_client',     label: 'Доставка клиенту',                   planField: 'delivery',        hint: '' },
+        { key: 'taxes',               label: 'Налоги',                             planField: 'taxes',           hint: '' },
     ],
 
     HOUR_ROWS: [
-        { key: 'hours_production', label: 'Часы выливание',           planField: 'hoursPlastic' },
-        { key: 'hours_assembly',   label: 'Часы сборка фурнитуры',   planField: 'hoursHardware' },
-        { key: 'hours_packaging',  label: 'Часы упаковка / срезание', planField: 'hoursPackaging' },
+        { key: 'hours_production', label: 'Часы: выливание пластика',    planField: 'hoursPlastic' },
+        { key: 'hours_assembly',   label: 'Часы: сборка фурнитуры',      planField: 'hoursHardware' },
+        { key: 'hours_packaging',  label: 'Часы: упаковка + срезание',    planField: 'hoursPackaging' },
     ],
 
     async load() {
@@ -224,7 +224,7 @@ const Factual = {
             const alarm = this.getAlarm(factVal, planVal);
 
             html += `<tr style="${alarm.bgStyle}">`;
-            html += `<td style="padding:8px 12px; font-weight:500;">${row.label}</td>`;
+            html += `<td style="padding:8px 12px; font-weight:500;">${row.label}${row.hint ? '<div style="font-size:10px;color:var(--text-muted);font-weight:400;margin-top:1px;">' + row.hint + '</div>' : ''}</td>`;
             html += `<td style="text-align:right; padding:8px 12px; color:var(--text-muted);">${this.fmtRub(planVal)}</td>`;
             html += `<td style="text-align:right; padding:8px 4px;">
                 <input type="text" inputmode="decimal" value="${factVal || ''}"

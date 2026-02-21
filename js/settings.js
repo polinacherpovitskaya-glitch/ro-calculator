@@ -58,6 +58,11 @@ const Settings = {
         App.settings = newSettings;
         App.params = getProductionParams(newSettings);
 
+        // Recalculate if calculator has data
+        if (Calculator && Calculator.items && Calculator.items.length > 0) {
+            Calculator.recalculate();
+        }
+
         App.toast('Настройки сохранены');
     },
 

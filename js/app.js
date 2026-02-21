@@ -843,6 +843,24 @@ const Calculator = {
             loadEl.style.display = 'none';
             finEl.style.display = 'none';
             sumEl.style.display = 'none';
+            // Debug: why no data?
+            if (this.items.some(i => i.quantity > 0)) {
+                console.warn('[recalculate] hasData=false but items have qty>0. Params:', JSON.stringify({
+                    fotPerHour: params.fotPerHour,
+                    indirectPerHour: params.indirectPerHour,
+                    plasticHours: params.plasticHours,
+                    cuttingSpeed: params.cuttingSpeed,
+                    workers: params.totalHoursAll,
+                }));
+                this.items.forEach((item, i) => {
+                    if (item.quantity > 0) {
+                        console.warn('  Item', i, ':', {
+                            qty: item.quantity, pph: item.pieces_per_hour,
+                            costTotal: item.result ? item.result.costTotal : 'no result',
+                        });
+                    }
+                });
+            }
         }
     },
 
