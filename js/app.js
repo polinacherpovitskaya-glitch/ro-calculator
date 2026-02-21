@@ -232,26 +232,13 @@ const Calculator = {
         const num = idx + 1;
         const container = document.getElementById('calc-items-container');
 
-        // Build template options
-        let templateOpts = '<option value="">-- Выбрать из справочника --</option>';
+        // Build template options (only blanks shown when blank selected)
+        let templateOpts = '<option value="">-- Выбрать бланк --</option>';
         if (App.templates) {
-            const blanks = App.templates.filter(t => t.category === 'blank');
-            const customs = App.templates.filter(t => t.category === 'custom_old');
-
-            if (blanks.length) {
-                templateOpts += '<optgroup label="Бланки">';
-                blanks.forEach(t => {
-                    templateOpts += `<option value="${t.id}" data-pph-min="${t.pieces_per_hour_min}" data-pph-max="${t.pieces_per_hour_max}" data-weight="${t.weight_grams || 0}">${t.name} (${t.pieces_per_hour_display} шт/ч)</option>`;
-                });
-                templateOpts += '</optgroup>';
-            }
-            if (customs.length) {
-                templateOpts += '<optgroup label="Кастомные формы">';
-                customs.forEach(t => {
-                    templateOpts += `<option value="${t.id}" data-pph-min="${t.pieces_per_hour_min}" data-pph-max="${t.pieces_per_hour_max}" data-weight="${t.weight_grams || 0}">${t.name} (${t.pieces_per_hour_display} шт/ч)</option>`;
-                });
-                templateOpts += '</optgroup>';
-            }
+            App.templates.filter(t => t.category === 'blank').forEach(t => {
+                const sel = item.template_id == t.id ? ' selected' : '';
+                templateOpts += `<option value="${t.id}"${sel}>${t.name} (${t.pieces_per_hour_display} шт/ч)</option>`;
+            });
         }
 
         // Render printings
@@ -268,9 +255,20 @@ const Calculator = {
                 <button class="btn btn-sm btn-outline" onclick="Calculator.removeItem(${idx})">Удалить</button>
             </div>
 
-            <div class="form-group template-select">
-                <label>Форма из справочника</label>
-                <select onchange="Calculator.onTemplateSelect(${idx}, this)">
+            <!-- Step 1: Тип формы -->
+            <div class="form-group">
+                <label>Тип формы</label>
+                <div class="mold-type-toggle" id="mold-type-${idx}">
+                    <button class="mold-type-btn ${item.is_blank_mold ? 'active' : ''}" data-type="blank" onclick="Calculator.setMoldType(${idx}, true)">Бланковая</button>
+                    <button class="mold-type-btn ${!item.is_blank_mold ? 'active' : ''}" data-type="custom" onclick="Calculator.setMoldType(${idx}, false)">Кастомная</button>
+                </div>
+                <span class="form-hint" id="mold-type-hint-${idx}">${item.is_blank_mold ? 'Амортизация на 4500 шт (макс. ресурс)' : 'Амортизация на тираж заказа'}</span>
+            </div>
+
+            <!-- Step 2: Справочник бланков (только для бланковой формы) -->
+            <div class="form-group template-select" id="template-wrap-${idx}" style="${item.is_blank_mold ? '' : 'display:none'}">
+                <label>Бланк из справочника</label>
+                <select id="template-select-${idx}" onchange="Calculator.onTemplateSelect(${idx}, this)">
                     ${templateOpts}
                 </select>
             </div>
@@ -278,7 +276,7 @@ const Calculator = {
             <div class="form-row">
                 <div class="form-group">
                     <label>Название изделия</label>
-                    <input type="text" value="${item.product_name}" onchange="Calculator.onFieldChange(${idx}, 'product_name', this.value)">
+                    <input type="text" value="${item.product_name}" id="item-name-${idx}" onchange="Calculator.onFieldChange(${idx}, 'product_name', this.value)">
                 </div>
                 <div class="form-group">
                     <label>Количество (шт)</label>
@@ -298,14 +296,6 @@ const Calculator = {
                 <div class="form-group">
                     <label>Доп. молды</label>
                     <input type="number" min="0" value="${item.extra_molds || 0}" oninput="Calculator.onNumChange(${idx}, 'extra_molds', this.value)">
-                </div>
-                <div class="form-group">
-                    <label>Тип формы</label>
-                    <div class="mold-type-toggle" id="mold-type-${idx}">
-                        <button class="mold-type-btn ${item.is_blank_mold ? 'active' : ''}" data-type="blank" onclick="Calculator.setMoldType(${idx}, true)">Бланковая</button>
-                        <button class="mold-type-btn ${!item.is_blank_mold ? 'active' : ''}" data-type="custom" onclick="Calculator.setMoldType(${idx}, false)">Кастомная</button>
-                    </div>
-                    <span class="form-hint" id="mold-type-hint-${idx}">${item.is_blank_mold ? 'Амортизация на 4500 шт' : 'Амортизация на тираж'}</span>
                 </div>
             </div>
 
@@ -349,10 +339,14 @@ const Calculator = {
                 <div class="cost-row cost-total"><span class="cost-label">ИТОГО себестоимость</span><span class="cost-value" id="c-${idx}-total">0</span></div>
             </div>
 
-            <!-- Target price -->
+            <!-- Target prices (multiple margin levels) -->
             <div class="target-block" id="item-target-${idx}" style="display:none">
-                <h4>Таргет цена (70/30)</h4>
-                <div class="cost-row"><span class="cost-label">Цена изделия (за шт)</span><span class="cost-value" id="t-${idx}-item">0</span></div>
+                <h4>Таргет-цены для менеджера</h4>
+                <div class="cost-row" style="color:var(--text-muted)"><span class="cost-label">При марже 50%</span><span class="cost-value" id="t-${idx}-m50" style="color:var(--text-muted)">0</span></div>
+                <div class="cost-row" style="font-weight:700"><span class="cost-label">При марже 40% <span style="font-size:10px;font-weight:400;color:var(--green)">&larr; цель</span></span><span class="cost-value" style="color:var(--green)" id="t-${idx}-m40">0</span></div>
+                <div class="cost-row" style="color:var(--text-muted)"><span class="cost-label">При марже 30%</span><span class="cost-value" id="t-${idx}-m30" style="color:var(--text-muted)">0</span></div>
+                <div class="cost-row" style="color:var(--red)"><span class="cost-label">При марже 20% <span style="font-size:10px;font-weight:400">&larr; минимум</span></span><span class="cost-value" id="t-${idx}-m20" style="color:var(--red)">0</span></div>
+                <div style="font-size:10px; color:var(--text-muted); margin-top:4px">+ 6% ОСН + 6.5% коммерч. уже заложены в цену</div>
             </div>
 
             <!-- Sell price -->
@@ -392,7 +386,7 @@ const Calculator = {
                 <label>Цена за шт</label>
                 <input type="number" min="0" step="0.01" value="${pr.price || ''}" oninput="Calculator.onPrintingChange(${itemIdx}, ${printIdx}, 'price', this.value)">
             </div>
-            <button class="btn btn-sm btn-outline" style="margin-bottom:0; height:36px" onclick="Calculator.removePrinting(${itemIdx}, ${printIdx})">&#10005;</button>
+            <button class="btn-remove" title="Удалить нанесение" onclick="Calculator.removePrinting(${itemIdx}, ${printIdx})">&#10005;</button>
         </div>`;
     },
 
@@ -436,7 +430,8 @@ const Calculator = {
             qty: 0,
             assembly_speed: 0,
             price: 0,
-            delivery_price: 0,
+            delivery_total: 0,    // Total delivery cost (not per unit)
+            delivery_price: 0,    // Calculated: delivery_total / qty
             sell_price: 0,
             result: null,
         };
@@ -467,18 +462,18 @@ const Calculator = {
                     <input type="number" min="0" value="${hw.assembly_speed || ''}" oninput="Calculator.onHwNum(${idx}, 'assembly_speed', this.value)">
                 </div>
                 <div class="form-group" style="margin:0">
-                    <label>Цена закупки</label>
+                    <label>Цена закупки (шт)</label>
                     <input type="number" min="0" step="0.01" value="${hw.price || ''}" oninput="Calculator.onHwNum(${idx}, 'price', this.value)">
                 </div>
                 <div class="form-group" style="margin:0">
-                    <label>Доставка (шт)</label>
-                    <input type="number" min="0" step="0.01" value="${hw.delivery_price || ''}" oninput="Calculator.onHwNum(${idx}, 'delivery_price', this.value)">
+                    <label>Доставка (всего)</label>
+                    <input type="number" min="0" step="0.01" value="${hw.delivery_total || ''}" oninput="Calculator.onHwNum(${idx}, 'delivery_total', this.value)">
                 </div>
                 <div class="form-group" style="margin:0">
-                    <label>Цена продажи</label>
+                    <label>Цена продажи (шт)</label>
                     <input type="number" min="0" step="0.01" value="${hw.sell_price || ''}" oninput="Calculator.onHwNum(${idx}, 'sell_price', this.value)">
                 </div>
-                <button class="btn btn-sm btn-outline" style="margin-bottom:0; height:36px" onclick="Calculator.removeHardware(${idx})">&#10005;</button>
+                <button class="btn-remove" title="Удалить фурнитуру" onclick="Calculator.removeHardware(${idx})">&#10005;</button>
             </div>
             <div class="hw-result" id="hw-result-${idx}" style="display:none; margin-top:4px; font-size:12px; color:var(--text-secondary)">
                 <span>Себестоимость: <b id="hw-cost-${idx}">—</b></span>
@@ -507,6 +502,9 @@ const Calculator = {
 
     onHwNum(idx, field, value) {
         this.hardwareItems[idx][field] = parseFloat(value) || 0;
+        // Auto-calculate per-unit delivery from total
+        const hw = this.hardwareItems[idx];
+        hw.delivery_price = hw.qty > 0 ? round2(hw.delivery_total / hw.qty) : 0;
         this.recalculate();
     },
 
@@ -520,7 +518,8 @@ const Calculator = {
             qty: 0,
             assembly_speed: 0,
             price: 0,
-            delivery_price: 0,
+            delivery_total: 0,    // Total delivery cost
+            delivery_price: 0,    // Calculated: delivery_total / qty
             sell_price: 0,
             result: null,
         };
@@ -551,18 +550,18 @@ const Calculator = {
                     <input type="number" min="0" value="${pkg.assembly_speed || ''}" oninput="Calculator.onPkgNum(${idx}, 'assembly_speed', this.value)">
                 </div>
                 <div class="form-group" style="margin:0">
-                    <label>Цена закупки</label>
+                    <label>Цена закупки (шт)</label>
                     <input type="number" min="0" step="0.01" value="${pkg.price || ''}" oninput="Calculator.onPkgNum(${idx}, 'price', this.value)">
                 </div>
                 <div class="form-group" style="margin:0">
-                    <label>Доставка (шт)</label>
-                    <input type="number" min="0" step="0.01" value="${pkg.delivery_price || ''}" oninput="Calculator.onPkgNum(${idx}, 'delivery_price', this.value)">
+                    <label>Доставка (всего)</label>
+                    <input type="number" min="0" step="0.01" value="${pkg.delivery_total || ''}" oninput="Calculator.onPkgNum(${idx}, 'delivery_total', this.value)">
                 </div>
                 <div class="form-group" style="margin:0">
-                    <label>Цена продажи</label>
+                    <label>Цена продажи (шт)</label>
                     <input type="number" min="0" step="0.01" value="${pkg.sell_price || ''}" oninput="Calculator.onPkgNum(${idx}, 'sell_price', this.value)">
                 </div>
-                <button class="btn btn-sm btn-outline" style="margin-bottom:0; height:36px" onclick="Calculator.removePackaging(${idx})">&#10005;</button>
+                <button class="btn-remove" title="Удалить упаковку" onclick="Calculator.removePackaging(${idx})">&#10005;</button>
             </div>
             <div class="pkg-result" id="pkg-result-${idx}" style="display:none; margin-top:4px; font-size:12px; color:var(--text-secondary)">
                 <span>Себестоимость: <b id="pkg-cost-${idx}">—</b></span>
@@ -591,6 +590,9 @@ const Calculator = {
 
     onPkgNum(idx, field, value) {
         this.packagingItems[idx][field] = parseFloat(value) || 0;
+        // Auto-calculate per-unit delivery from total
+        const pkg = this.packagingItems[idx];
+        pkg.delivery_price = pkg.qty > 0 ? round2(pkg.delivery_total / pkg.qty) : 0;
         this.recalculate();
     },
 
@@ -609,18 +611,11 @@ const Calculator = {
         this.items[idx].product_name = tpl.name;
         this.items[idx].pieces_per_hour = tpl.pieces_per_hour_min;
         this.items[idx].weight_grams = tpl.weight_grams || 0;
+        this.items[idx].is_blank_mold = true; // From template = always blank
 
-        // Авто-определение типа формы по категории шаблона
-        const isBlank = tpl.category === 'blank';
-        this.items[idx].is_blank_mold = isBlank;
-        this.updateMoldTypeUI(idx, isBlank);
-
-        const block = document.getElementById('item-block-' + idx);
-        const inputs = block.querySelectorAll('input[type="text"], input[type="number"]');
-        inputs[0].value = tpl.name;
+        document.getElementById('item-name-' + idx).value = tpl.name;
         document.getElementById('item-pph-' + idx).value = tpl.pieces_per_hour_min;
         document.getElementById('item-weight-' + idx).value = tpl.weight_grams || '';
-
         document.getElementById('item-title-' + idx).textContent = tpl.name;
 
         this.recalculate();
@@ -629,6 +624,10 @@ const Calculator = {
     setMoldType(idx, isBlank) {
         this.items[idx].is_blank_mold = isBlank;
         this.updateMoldTypeUI(idx, isBlank);
+        // Clear template if switching to custom
+        if (!isBlank) {
+            this.items[idx].template_id = null;
+        }
         this.recalculate();
     },
 
@@ -642,7 +641,12 @@ const Calculator = {
         }
         const hint = document.getElementById('mold-type-hint-' + idx);
         if (hint) {
-            hint.textContent = isBlank ? 'Амортизация на 4500 шт' : 'Амортизация на тираж';
+            hint.textContent = isBlank ? 'Амортизация на 4500 шт (макс. ресурс)' : 'Амортизация на тираж заказа';
+        }
+        // Show/hide template dropdown
+        const tplWrap = document.getElementById('template-wrap-' + idx);
+        if (tplWrap) {
+            tplWrap.style.display = isBlank ? '' : 'none';
         }
     },
 
@@ -718,11 +722,22 @@ const Calculator = {
                 this.setText('c-' + idx + '-delivery', formatRub(result.costDelivery));
                 this.setText('c-' + idx + '-total', formatRub(result.costTotal));
 
-                const qty = item.quantity || 0;
-                const margin = qty ? getMarginForQty(qty) : params.marginTarget;
-                const targetItem = calculateTargetPrice(result.costTotal, params, qty);
-                item.target_price_item = targetItem;
-                this.setText('t-' + idx + '-item', formatRub(targetItem) + ` (маржа ${Math.round(margin * 100)}%)`);
+                // Target prices at different margin levels
+                const cost = result.costTotal;
+                const calcTarget = (marginPct) => {
+                    if (cost === 0) return 0;
+                    const vatOnCost = cost * params.vatRate;
+                    return round2((cost + vatOnCost) * (1 + marginPct) / (1 - params.taxRate - 0.065));
+                };
+                const t40 = calcTarget(0.40);
+                const t50 = calcTarget(0.50);
+                const t30 = calcTarget(0.30);
+                const t20 = calcTarget(0.20);
+                item.target_price_item = t40;
+                this.setText('t-' + idx + '-m50', formatRub(t50));
+                this.setText('t-' + idx + '-m40', formatRub(t40));
+                this.setText('t-' + idx + '-m30', formatRub(t30));
+                this.setText('t-' + idx + '-m20', formatRub(t20));
 
                 if (item.sell_price_item > 0) {
                     const mi = calculateActualMargin(item.sell_price_item, result.costTotal);
@@ -928,6 +943,7 @@ const Calculator = {
                 hardware_assembly_speed: hw.assembly_speed,
                 hardware_price_per_unit: hw.price,
                 hardware_delivery_per_unit: hw.delivery_price,
+                hardware_delivery_total: hw.delivery_total,
                 sell_price_hardware: hw.sell_price,
                 target_price_hardware: hw.target_price || 0,
                 cost_total: hw.result ? hw.result.costPerUnit : 0,
@@ -945,6 +961,7 @@ const Calculator = {
                 packaging_assembly_speed: pkg.assembly_speed,
                 packaging_price_per_unit: pkg.price,
                 packaging_delivery_per_unit: pkg.delivery_price,
+                packaging_delivery_total: pkg.delivery_total,
                 sell_price_packaging: pkg.sell_price,
                 target_price_packaging: pkg.target_price || 0,
                 cost_total: pkg.result ? pkg.result.costPerUnit : 0,
@@ -1008,7 +1025,10 @@ const Calculator = {
             hw.qty = dbHw.quantity || 0;
             hw.assembly_speed = dbHw.hardware_assembly_speed || 0;
             hw.price = dbHw.hardware_price_per_unit || 0;
-            hw.delivery_price = dbHw.hardware_delivery_per_unit || 0;
+            // Support both old per-unit and new total delivery
+            const perUnit = dbHw.hardware_delivery_per_unit || 0;
+            hw.delivery_total = dbHw.hardware_delivery_total || (perUnit * hw.qty);
+            hw.delivery_price = hw.qty > 0 ? round2(hw.delivery_total / hw.qty) : perUnit;
             hw.sell_price = dbHw.sell_price_hardware || 0;
             this.hardwareItems.push(hw);
             this.renderHardwareRow(this.hardwareItems.length - 1);
@@ -1022,7 +1042,9 @@ const Calculator = {
             pkg.qty = dbPkg.quantity || 0;
             pkg.assembly_speed = dbPkg.packaging_assembly_speed || 0;
             pkg.price = dbPkg.packaging_price_per_unit || 0;
-            pkg.delivery_price = dbPkg.packaging_delivery_per_unit || 0;
+            const perUnit = dbPkg.packaging_delivery_per_unit || 0;
+            pkg.delivery_total = dbPkg.packaging_delivery_total || (perUnit * pkg.qty);
+            pkg.delivery_price = pkg.qty > 0 ? round2(pkg.delivery_total / pkg.qty) : perUnit;
             pkg.sell_price = dbPkg.sell_price_packaging || 0;
             this.packagingItems.push(pkg);
             this.renderPackagingRow(this.packagingItems.length - 1);

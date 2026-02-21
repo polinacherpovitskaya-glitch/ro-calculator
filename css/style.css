@@ -373,6 +373,31 @@ body {
     background: var(--accent-light);
 }
 
+/* Remove button (red X for inline rows) */
+.btn-remove {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    min-width: 28px;
+    border: none;
+    background: var(--red-light);
+    color: var(--red);
+    border-radius: 50%;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all var(--transition);
+    margin-bottom: 4px;
+    align-self: end;
+}
+
+.btn-remove:hover {
+    background: var(--red);
+    color: #fff;
+}
+
 /* Toggle switch */
 .toggle-row {
     display: flex;
