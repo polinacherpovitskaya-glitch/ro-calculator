@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=11">
+    <link rel="stylesheet" href="css/style.css?v=12">
 </head>
 <body>
 
@@ -549,19 +549,38 @@
                         <label>Клиент (если клиентский)</label>
                         <input type="text" id="mold-client" placeholder="Название компании">
                     </div>
+                </div>
+
+                <!-- Built-in hardware (e.g. mirror for mirror blank) -->
+                <div class="section-title" style="margin-top:12px; margin-bottom:4px;">Встроенная фурнитура <span style="font-weight:400;font-size:11px;color:var(--text-muted)">(если изделие продаётся только с ней)</span></div>
+                <div class="form-row">
                     <div class="form-group">
-                        <label>Скорость сборки фурнитуры (шт/ч)</label>
+                        <label>Название фурнитуры</label>
+                        <input type="text" id="mold-hw-name" placeholder="Зеркало, магнит, кольцо...">
+                    </div>
+                    <div class="form-group">
+                        <label>Закупка (&#8381;/шт)</label>
+                        <input type="number" min="0" step="0.01" id="mold-hw-price">
+                    </div>
+                    <div class="form-group">
+                        <label>Доставка всего (&#8381;)</label>
+                        <input type="number" min="0" id="mold-hw-delivery-total" value="0">
+                    </div>
+                    <div class="form-group">
+                        <label>Сборка (шт/ч)</label>
                         <input type="number" min="0" id="mold-hw-speed">
-                        <span class="form-hint">Факт. данные хронометража</span>
+                        <span class="form-hint">Скорость приклейки/сборки</span>
                     </div>
                 </div>
+
                 <div class="form-group">
                     <label>Заметки</label>
                     <textarea id="mold-notes" rows="2" placeholder="Особенности, проблемы, история"></textarea>
                 </div>
-                <div style="margin-top: 12px;">
+                <div style="margin-top: 12px; display:flex; gap:8px; align-items:center;">
                     <button class="btn btn-success" onclick="Molds.saveMold()">Сохранить</button>
                     <button class="btn btn-outline" onclick="Molds.hideForm()">Отмена</button>
+                    <button class="btn btn-danger" id="mold-delete-btn" style="margin-left:auto; display:none;" onclick="Molds.deleteFromForm()">Удалить бланк</button>
                 </div>
             </div>
         </div>
@@ -1099,17 +1118,17 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.2/jspdf.umd.min.js"></script>
-<script src="js/supabase.js?v=11"></script>
-<script src="js/calculator.js?v=11"></script>
-<script src="js/app.js?v=11"></script>
-<script src="js/dashboard.js?v=11"></script>
-<script src="js/orders.js?v=11"></script>
-<script src="js/analytics.js?v=11"></script>
-<script src="js/molds.js?v=11"></script>
-<script src="js/kp.js?v=11"></script>
-<script src="js/timetrack.js?v=11"></script>
-<script src="js/tasks.js?v=11"></script>
-<script src="js/import.js?v=11"></script>
-<script src="js/settings.js?v=11"></script>
+<script src="js/supabase.js?v=12"></script>
+<script src="js/calculator.js?v=12"></script>
+<script src="js/app.js?v=12"></script>
+<script src="js/dashboard.js?v=12"></script>
+<script src="js/orders.js?v=12"></script>
+<script src="js/analytics.js?v=12"></script>
+<script src="js/molds.js?v=12"></script>
+<script src="js/kp.js?v=12"></script>
+<script src="js/timetrack.js?v=12"></script>
+<script src="js/tasks.js?v=12"></script>
+<script src="js/import.js?v=12"></script>
+<script src="js/settings.js?v=12"></script>
 </body>
 </html>

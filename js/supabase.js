@@ -41,7 +41,7 @@ const LOCAL_KEYS = {
 };
 
 // Data version — increment to force cache reset for molds
-const MOLDS_DATA_VERSION = 2; // v2: updated cny_rate=12.5, delivery=8000, amort by 4500
+const MOLDS_DATA_VERSION = 3; // v3: full blanks catalog with hardware fields
 const MOLDS_VERSION_KEY = 'ro_calc_molds_version';
 
 function checkMoldsVersion() {
@@ -153,27 +153,22 @@ async function loadTemplates() {
 }
 
 function getDefaultTemplates() {
-    return [
-        { id: 1, name: 'Прямоугольник-бланк', category: 'blank', pieces_per_hour_display: '60', pieces_per_hour_min: 60, pieces_per_hour_max: 60, weight_grams: 20 },
-        { id: 2, name: 'Кружок-бланк', category: 'blank', pieces_per_hour_display: '45-60', pieces_per_hour_min: 45, pieces_per_hour_max: 60, weight_grams: 20 },
-        { id: 3, name: 'Сердце-бланк', category: 'blank', pieces_per_hour_display: '45-60', pieces_per_hour_min: 45, pieces_per_hour_max: 60, weight_grams: 20 },
-        { id: 4, name: 'Отельный ромбик', category: 'blank', pieces_per_hour_display: '40', pieces_per_hour_min: 40, pieces_per_hour_max: 40, weight_grams: 30 },
-        { id: 5, name: 'Карабин', category: 'blank', pieces_per_hour_display: '40-45', pieces_per_hour_min: 40, pieces_per_hour_max: 45, weight_grams: 20 },
-        { id: 6, name: 'Гребень', category: 'blank', pieces_per_hour_display: '15-20', pieces_per_hour_min: 15, pieces_per_hour_max: 20, weight_grams: 25 },
-        { id: 7, name: 'Картхолдер', category: 'blank', pieces_per_hour_display: '20', pieces_per_hour_min: 20, pieces_per_hour_max: 20, weight_grams: 30 },
-        { id: 8, name: 'Зеркало-клякса', category: 'blank', pieces_per_hour_display: '15', pieces_per_hour_min: 15, pieces_per_hour_max: 15, weight_grams: 30 },
-        { id: 9, name: 'Смайл', category: 'blank', pieces_per_hour_display: '15', pieces_per_hour_min: 15, pieces_per_hour_max: 15, weight_grams: 30 },
-        { id: 10, name: 'Тег с лого', category: 'blank', pieces_per_hour_display: '200', pieces_per_hour_min: 200, pieces_per_hour_max: 200, weight_grams: 5 },
-        { id: 11, name: 'Открывашка', category: 'blank', pieces_per_hour_display: '20-25', pieces_per_hour_min: 20, pieces_per_hour_max: 25, weight_grams: 25 },
-        { id: 12, name: 'НФС-звезда', category: 'blank', pieces_per_hour_display: '25', pieces_per_hour_min: 25, pieces_per_hour_max: 25, weight_grams: 30 },
-        { id: 13, name: 'НФС-сердце', category: 'blank', pieces_per_hour_display: '13', pieces_per_hour_min: 13, pieces_per_hour_max: 13, weight_grams: 30 },
-        { id: 14, name: 'Подставка для телефона', category: 'blank', pieces_per_hour_display: '15-20', pieces_per_hour_min: 15, pieces_per_hour_max: 20, weight_grams: 40 },
-        { id: 15, name: 'Дракон', category: 'blank', pieces_per_hour_display: '15', pieces_per_hour_min: 15, pieces_per_hour_max: 15, weight_grams: 40 },
-        { id: 16, name: 'Бусины большие', category: 'blank', pieces_per_hour_display: '100', pieces_per_hour_min: 100, pieces_per_hour_max: 100, weight_grams: 10 },
-        { id: 17, name: 'Бусины маленькие', category: 'blank', pieces_per_hour_display: '80', pieces_per_hour_min: 80, pieces_per_hour_max: 80, weight_grams: 5 },
-        { id: 18, name: 'Ракетка теннис/падел', category: 'blank', pieces_per_hour_display: '30', pieces_per_hour_min: 30, pieces_per_hour_max: 30, weight_grams: 25 },
-        { id: 19, name: 'Новый кардхолдер', category: 'blank', pieces_per_hour_display: '20', pieces_per_hour_min: 20, pieces_per_hour_max: 20, weight_grams: 30 },
-    ];
+    // Auto-generate from default molds (blanks catalog is the source of truth)
+    const molds = getDefaultMolds();
+    return molds.map(m => {
+        const pMin = m.pph_min || 0;
+        const pMax = m.pph_max || 0;
+        const display = pMin === 0 ? '—' : (pMin === pMax ? String(pMin) : `${pMin}-${pMax}`);
+        return {
+            id: m.id,
+            name: m.name,
+            category: 'blank',
+            pieces_per_hour_display: display,
+            pieces_per_hour_min: pMin,
+            pieces_per_hour_max: pMax,
+            weight_grams: m.weight_grams,
+        };
+    });
 }
 
 // =============================================
@@ -411,26 +406,77 @@ function getDefaultMolds() {
     const nfcCostCNY = 1200;
     const deliveryCost = 8000; // ~100$ доставка
 
+    // Helper to create a mold entry
+    const m = (id, name, cat, pMin, pMax, pAct, weight, complexity, costCny, opts = {}) => ({
+        id, name, category: cat, status: opts.status || 'active',
+        pph_min: pMin, pph_max: pMax, pph_actual: pAct, weight_grams: weight,
+        complexity, cost_cny: costCny, cny_rate: CNY_RATE, delivery_cost: deliveryCost,
+        cost_rub: costCny * CNY_RATE + deliveryCost, mold_count: opts.mold_count || 1,
+        hw_name: opts.hw_name || '', hw_price_per_unit: opts.hw_price || 0,
+        hw_delivery_total: opts.hw_delivery || 0, hw_speed: opts.hw_speed || null,
+        client: opts.client || '', notes: opts.notes || '',
+        total_orders: opts.orders || 0, total_units_produced: opts.produced || 0,
+    });
+
     return [
-        { id: 1, name: 'Прямоугольник-бланк', category: 'blank', status: 'active', pph_min: 60, pph_max: 60, pph_actual: null, weight_grams: 20, complexity: 'simple', cost_cny: simpleCostCNY, cny_rate: CNY_RATE, delivery_cost: deliveryCost, cost_rub: simpleCostCNY * CNY_RATE + deliveryCost, hw_speed: null, client: '', notes: '', total_orders: 12, total_units_produced: 5400 },
-        { id: 2, name: 'Кружок-бланк', category: 'blank', status: 'active', pph_min: 45, pph_max: 60, pph_actual: null, weight_grams: 20, complexity: 'simple', cost_cny: simpleCostCNY, cny_rate: CNY_RATE, delivery_cost: deliveryCost, cost_rub: simpleCostCNY * CNY_RATE + deliveryCost, hw_speed: null, client: '', notes: '', total_orders: 8, total_units_produced: 3200 },
-        { id: 3, name: 'Сердце-бланк', category: 'blank', status: 'active', pph_min: 45, pph_max: 60, pph_actual: null, weight_grams: 20, complexity: 'simple', cost_cny: simpleCostCNY, cny_rate: CNY_RATE, delivery_cost: deliveryCost, cost_rub: simpleCostCNY * CNY_RATE + deliveryCost, hw_speed: null, client: '', notes: '', total_orders: 6, total_units_produced: 2100 },
-        { id: 4, name: 'Отельный ромбик', category: 'blank', status: 'active', pph_min: 40, pph_max: 40, pph_actual: null, weight_grams: 30, complexity: 'simple', cost_cny: simpleCostCNY, cny_rate: CNY_RATE, delivery_cost: deliveryCost, cost_rub: simpleCostCNY * CNY_RATE + deliveryCost, hw_speed: null, client: '', notes: '', total_orders: 3, total_units_produced: 900 },
-        { id: 5, name: 'Карабин', category: 'blank', status: 'active', pph_min: 40, pph_max: 45, pph_actual: null, weight_grams: 20, complexity: 'simple', cost_cny: simpleCostCNY, cny_rate: CNY_RATE, delivery_cost: deliveryCost, cost_rub: simpleCostCNY * CNY_RATE + deliveryCost, hw_speed: 120, client: '', notes: 'Быстрая сборка', total_orders: 10, total_units_produced: 4500 },
-        { id: 6, name: 'Гребень', category: 'blank', status: 'active', pph_min: 15, pph_max: 20, pph_actual: null, weight_grams: 25, complexity: 'complex', cost_cny: complexCostCNY, cny_rate: CNY_RATE, delivery_cost: deliveryCost, cost_rub: complexCostCNY * CNY_RATE + deliveryCost, hw_speed: null, client: '', notes: 'Сложная форма, тонкие зубья', total_orders: 4, total_units_produced: 1200 },
-        { id: 7, name: 'Картхолдер', category: 'blank', status: 'active', pph_min: 20, pph_max: 20, pph_actual: null, weight_grams: 30, complexity: 'complex', cost_cny: complexCostCNY, cny_rate: CNY_RATE, delivery_cost: deliveryCost, cost_rub: complexCostCNY * CNY_RATE + deliveryCost, hw_speed: null, client: '', notes: '', total_orders: 5, total_units_produced: 1500 },
-        { id: 8, name: 'Зеркало-клякса', category: 'blank', status: 'active', pph_min: 15, pph_max: 15, pph_actual: null, weight_grams: 30, complexity: 'complex', cost_cny: complexCostCNY, cny_rate: CNY_RATE, delivery_cost: deliveryCost, cost_rub: complexCostCNY * CNY_RATE + deliveryCost, hw_speed: 60, client: '', notes: 'Нужно зеркало приклеить', total_orders: 3, total_units_produced: 600 },
-        { id: 9, name: 'Смайл', category: 'blank', status: 'active', pph_min: 15, pph_max: 15, pph_actual: null, weight_grams: 30, complexity: 'simple', cost_cny: simpleCostCNY, cny_rate: CNY_RATE, delivery_cost: deliveryCost, cost_rub: simpleCostCNY * CNY_RATE + deliveryCost, hw_speed: null, client: '', notes: '', total_orders: 2, total_units_produced: 500 },
-        { id: 10, name: 'Тег с лого', category: 'blank', status: 'active', pph_min: 200, pph_max: 200, pph_actual: null, weight_grams: 5, complexity: 'simple', cost_cny: simpleCostCNY, cny_rate: CNY_RATE, delivery_cost: deliveryCost, cost_rub: simpleCostCNY * CNY_RATE + deliveryCost, hw_speed: null, client: '', notes: 'Самый быстрый, маленький тег', total_orders: 15, total_units_produced: 12000 },
-        { id: 11, name: 'Открывашка', category: 'blank', status: 'active', pph_min: 20, pph_max: 25, pph_actual: null, weight_grams: 25, complexity: 'simple', cost_cny: simpleCostCNY, cny_rate: CNY_RATE, delivery_cost: deliveryCost, cost_rub: simpleCostCNY * CNY_RATE + deliveryCost, hw_speed: null, client: '', notes: '', total_orders: 4, total_units_produced: 1000 },
-        { id: 12, name: 'НФС-звезда', category: 'nfc', status: 'active', pph_min: 25, pph_max: 25, pph_actual: null, weight_grams: 30, complexity: 'nfc_triple', cost_cny: nfcCostCNY, cny_rate: CNY_RATE, delivery_cost: deliveryCost, cost_rub: nfcCostCNY * CNY_RATE + deliveryCost, hw_speed: null, client: '', notes: '3-частный молд, вставка NFC чипа', total_orders: 3, total_units_produced: 800 },
-        { id: 13, name: 'НФС-сердце', category: 'nfc', status: 'active', pph_min: 13, pph_max: 13, pph_actual: null, weight_grams: 30, complexity: 'nfc_triple', cost_cny: nfcCostCNY, cny_rate: CNY_RATE, delivery_cost: deliveryCost, cost_rub: nfcCostCNY * CNY_RATE + deliveryCost, hw_speed: null, client: '', notes: '3-частный молд, медленный', total_orders: 2, total_units_produced: 400 },
-        { id: 14, name: 'Подставка для телефона', category: 'blank', status: 'active', pph_min: 15, pph_max: 20, pph_actual: null, weight_grams: 40, complexity: 'complex', cost_cny: complexCostCNY, cny_rate: CNY_RATE, delivery_cost: deliveryCost, cost_rub: complexCostCNY * CNY_RATE + deliveryCost, hw_speed: null, client: '', notes: 'Тяжёлый, долго остывает', total_orders: 3, total_units_produced: 600 },
-        { id: 15, name: 'Дракон', category: 'custom', status: 'active', pph_min: 15, pph_max: 15, pph_actual: null, weight_grams: 40, complexity: 'complex', cost_cny: complexCostCNY, cny_rate: CNY_RATE, delivery_cost: deliveryCost, cost_rub: complexCostCNY * CNY_RATE + deliveryCost, hw_speed: null, client: '', notes: 'Детализированная форма', total_orders: 2, total_units_produced: 300 },
-        { id: 16, name: 'Бусины большие', category: 'blank', status: 'active', pph_min: 100, pph_max: 100, pph_actual: null, weight_grams: 10, complexity: 'simple', cost_cny: simpleCostCNY, cny_rate: CNY_RATE, delivery_cost: deliveryCost, cost_rub: simpleCostCNY * CNY_RATE + deliveryCost, hw_speed: null, client: '', notes: '', total_orders: 7, total_units_produced: 8000 },
-        { id: 17, name: 'Бусины маленькие', category: 'blank', status: 'active', pph_min: 80, pph_max: 80, pph_actual: null, weight_grams: 5, complexity: 'simple', cost_cny: simpleCostCNY, cny_rate: CNY_RATE, delivery_cost: deliveryCost, cost_rub: simpleCostCNY * CNY_RATE + deliveryCost, hw_speed: null, client: '', notes: '', total_orders: 7, total_units_produced: 6000 },
-        { id: 18, name: 'Ракетка теннис/падел', category: 'blank', status: 'active', pph_min: 30, pph_max: 30, pph_actual: null, weight_grams: 25, complexity: 'simple', cost_cny: simpleCostCNY, cny_rate: CNY_RATE, delivery_cost: deliveryCost, cost_rub: simpleCostCNY * CNY_RATE + deliveryCost, hw_speed: null, client: '', notes: '', total_orders: 3, total_units_produced: 900 },
-        { id: 19, name: 'Новый кардхолдер', category: 'blank', status: 'active', pph_min: 20, pph_max: 20, pph_actual: null, weight_grams: 30, complexity: 'complex', cost_cny: complexCostCNY, cny_rate: CNY_RATE, delivery_cost: deliveryCost, cost_rub: complexCostCNY * CNY_RATE + deliveryCost, hw_speed: null, client: '', notes: 'Новая версия', total_orders: 1, total_units_produced: 200 },
+        // === Бланки простые ===
+        m(1,  'Бланк прямоугольник',       'blank', 60,  60,  null, 20, 'simple', simpleCostCNY, { orders: 12, produced: 5400 }),
+        m(2,  'Бланк круг',                'blank', 45,  60,  null, 20, 'simple', simpleCostCNY, { orders: 8, produced: 3200 }),
+        m(3,  'Бланк сердце',              'blank', 45,  60,  null, 20, 'simple', simpleCostCNY, { orders: 6, produced: 2100 }),
+        m(4,  'Бланк цветок',              'blank', 0,   0,   null, 20, 'simple', simpleCostCNY),
+        m(5,  'Бланк треугольник',          'blank', 0,   0,   null, 20, 'simple', simpleCostCNY),
+        m(6,  'Бланк квадрат',             'blank', 0,   0,   null, 20, 'simple', simpleCostCNY),
+        m(7,  'Бланк тэг',                 'blank', 200, 200, null, 5,  'simple', simpleCostCNY, { orders: 15, produced: 12000, notes: 'Самый быстрый, маленький тег' }),
+        m(8,  'Бланк конверт',             'blank', 0,   0,   null, 20, 'simple', simpleCostCNY),
+
+        // === Формы с фурнитурой ===
+        m(9,  'Карабин',                    'blank', 40,  45,  null, 20, 'simple', simpleCostCNY, { hw_speed: 120, orders: 10, produced: 4500, notes: 'Быстрая сборка' }),
+        m(10, 'Отельный',                   'blank', 40,  40,  null, 30, 'simple', simpleCostCNY, { orders: 3, produced: 900 }),
+        m(11, 'Зеркало-клякса',             'blank', 15,  15,  null, 30, 'complex', complexCostCNY, { hw_name: 'Зеркало', hw_price: 0, hw_speed: 60, orders: 3, produced: 600, notes: 'Нужно зеркало приклеить' }),
+        m(12, 'Подставка под телефон',       'blank', 15,  20,  null, 40, 'complex', complexCostCNY, { orders: 3, produced: 600, notes: 'Тяжёлый, долго остывает' }),
+
+        // === Аксессуары / формы ===
+        m(13, 'Гребень',                    'blank', 15,  20,  null, 25, 'complex', complexCostCNY, { orders: 4, produced: 1200, notes: 'Сложная форма, тонкие зубья' }),
+        m(14, 'Картхолдер',                 'blank', 20,  20,  null, 30, 'complex', complexCostCNY, { orders: 5, produced: 1500 }),
+        m(15, 'Новый кардхолдер',           'blank', 20,  20,  null, 30, 'complex', complexCostCNY, { orders: 1, produced: 200, notes: 'Новая версия' }),
+        m(16, 'Открывашка',                 'blank', 20,  25,  null, 25, 'simple', simpleCostCNY, { orders: 4, produced: 1000 }),
+        m(17, 'Смайл',                      'blank', 15,  15,  null, 30, 'simple', simpleCostCNY, { orders: 2, produced: 500 }),
+        m(18, 'Бейдж',                      'blank', 0,   0,   null, 20, 'simple', simpleCostCNY),
+        m(19, 'Смотка',                     'blank', 0,   0,   null, 20, 'simple', simpleCostCNY),
+        m(20, 'Чехол для зажигалки',        'blank', 0,   0,   null, 20, 'complex', complexCostCNY),
+        m(21, 'Мыльница',                   'blank', 0,   0,   null, 30, 'complex', complexCostCNY),
+        m(22, 'Медаль',                     'blank', 0,   0,   null, 30, 'simple', simpleCostCNY),
+
+        // === Спорт ===
+        m(23, 'Ласты для плавания',          'blank', 0,   0,   null, 30, 'complex', complexCostCNY),
+        m(24, 'Беговые кроссовки',           'blank', 0,   0,   null, 30, 'complex', complexCostCNY),
+        m(25, 'Ракетка для тенниса',         'blank', 30,  30,  null, 25, 'simple', simpleCostCNY, { orders: 3, produced: 900 }),
+        m(26, 'Падл ракетка',               'blank', 0,   0,   null, 25, 'simple', simpleCostCNY),
+        m(27, 'Велосипед',                  'blank', 0,   0,   null, 30, 'complex', complexCostCNY),
+
+        // === Бусины ===
+        m(28, 'Бусины большие',             'blank', 100, 100, null, 10, 'simple', simpleCostCNY, { orders: 7, produced: 8000 }),
+        m(29, 'Бусины маленькие',           'blank', 80,  80,  null, 5,  'simple', simpleCostCNY, { orders: 7, produced: 6000 }),
+
+        // === Буквы ===
+        m(30, 'Буква из алфавита (лат.)',    'blank', 0,   0,   null, 10, 'simple', simpleCostCNY),
+        m(31, 'Буква из алфавита (кир.)',    'blank', 0,   0,   null, 10, 'simple', simpleCostCNY),
+
+        // === Фигурки / сувениры ===
+        m(32, 'Шар',                        'blank', 0,   0,   null, 30, 'complex', complexCostCNY),
+        m(33, 'Маленькая елочка',            'blank', 0,   0,   null, 15, 'simple', simpleCostCNY),
+        m(34, 'Большой конь',               'blank', 0,   0,   null, 40, 'complex', complexCostCNY),
+        m(35, 'Маленькая снежинка',          'blank', 0,   0,   null, 10, 'simple', simpleCostCNY),
+        m(36, 'Большой дракон',             'blank', 15,  15,  null, 40, 'complex', complexCostCNY, { orders: 2, produced: 300, notes: 'Детализированная форма' }),
+        m(37, 'Маленький цветочек',          'blank', 0,   0,   null, 10, 'simple', simpleCostCNY),
+        m(38, 'Маленький конь',             'blank', 0,   0,   null, 15, 'simple', simpleCostCNY),
+        m(39, 'Маленькое сердечко',          'blank', 0,   0,   null, 10, 'simple', simpleCostCNY),
+
+        // === NFC ===
+        m(40, 'NFC Звезда',                 'nfc', 25,  25,  null, 30, 'nfc_triple', nfcCostCNY, { orders: 3, produced: 800, notes: '3-частный молд, вставка NFC чипа' }),
+        m(41, 'NFC Квадрат',                'nfc', 0,   0,   null, 30, 'nfc_triple', nfcCostCNY, { notes: '3-частный молд' }),
+        m(42, 'NFC Сердце',                 'nfc', 13,  13,  null, 30, 'nfc_triple', nfcCostCNY, { orders: 2, produced: 400, notes: '3-частный молд, медленный' }),
+        m(43, 'NFC Камушек',                'nfc', 0,   0,   null, 30, 'nfc_triple', nfcCostCNY, { notes: '3-частный молд' }),
     ];
 }
 

@@ -66,7 +66,19 @@ const Molds = {
 
                 const result = calculateItemCost(item, params);
                 // Replace default mold amortization with real cost / MOLD_MAX_LIFETIME
-                const adjustedCost = result.costTotal - result.costMoldAmortization + moldAmortPerUnit;
+                let adjustedCost = result.costTotal - result.costMoldAmortization + moldAmortPerUnit;
+
+                // Add built-in hardware cost if present
+                let hwCostPerUnit = 0;
+                if (m.hw_name && m.hw_price_per_unit > 0) {
+                    hwCostPerUnit = m.hw_price_per_unit + (m.hw_delivery_total ? m.hw_delivery_total / qty : 0);
+                    // Add assembly labor if hw_speed is set
+                    if (m.hw_speed > 0) {
+                        const hwHours = qty / m.hw_speed * (params.wasteFactor || 1.1);
+                        hwCostPerUnit += hwHours * params.fotPerHour / qty;
+                    }
+                    adjustedCost += hwCostPerUnit;
+                }
 
                 // New formula: sell price = cost + 10000 / qty
                 const sellPrice = calcBlankSellPrice(adjustedCost, qty);
@@ -75,6 +87,7 @@ const Molds = {
                     cost: round2(adjustedCost),
                     sellPrice: sellPrice,
                     moldAmort: round2(moldAmortPerUnit),
+                    hwCost: round2(hwCostPerUnit),
                     markup: round2(BLANKS_FIXED_MARKUP / qty),
                 };
             });
@@ -179,13 +192,19 @@ const Molds = {
                 <tr style="border-bottom:2px solid var(--border)">
                     <td rowspan="2" style="vertical-align:top; padding:6px 8px;">
                         <div style="font-weight:700; font-size:13px;"><span class="status-dot ${statusDot}"></span>${this.esc(m.name)}${moldCountBadge}</div>
-                        ${m.client ? `<div style="font-size:10px; color:var(--text-muted); margin-top:2px;">${this.esc(m.client)}</div>` : ''}
+                        ${m.hw_name ? `<div style="font-size:10px; color:var(--accent); margin-top:1px;">+ ${this.esc(m.hw_name)} (${formatRub(m.hw_price_per_unit || 0)}/шт, ${m.hw_speed || '?'} шт/ч)</div>` : ''}
+                        ${m.client ? `<div style="font-size:10px; color:var(--text-muted); margin-top:1px;">${this.esc(m.client)}</div>` : ''}
                         ${m.notes ? `<div style="font-size:10px; color:var(--text-muted); font-style:italic">${this.esc(m.notes)}</div>` : ''}
                     </td>
                     <td rowspan="2" style="vertical-align:top; font-size:12px; text-align:center">${pphDisplay}</td>
                     <td rowspan="2" style="vertical-align:top; font-size:12px; text-align:center">${m.weight_grams}</td>
                     ${costCells}
-                    <td rowspan="2" style="vertical-align:top"><button class="btn btn-sm btn-outline" style="padding:2px 6px;font-size:10px" onclick="Molds.editMold(${m.id})">&#9998;</button></td>
+                    <td rowspan="2" style="vertical-align:top">
+                        <div style="display:flex;flex-direction:column;gap:2px;">
+                            <button class="btn btn-sm btn-outline" style="padding:2px 6px;font-size:10px" onclick="Molds.editMold(${m.id})">&#9998;</button>
+                            <button class="btn-remove" style="font-size:9px;width:24px;height:24px;" title="Удалить" onclick="Molds.confirmDelete(${m.id}, '${this.esc(m.name)}')">&#10005;</button>
+                        </div>
+                    </td>
                 </tr>
                 <tr style="background:var(--bg)">
                     ${sellCells}
@@ -239,6 +258,7 @@ const Molds = {
         this.editingId = null;
         document.getElementById('mold-form-title').textContent = 'Новый бланк';
         this.clearForm();
+        document.getElementById('mold-delete-btn').style.display = 'none';
         document.getElementById('mold-edit-form').style.display = '';
         document.getElementById('mold-edit-form').scrollIntoView({ behavior: 'smooth' });
     },
@@ -263,16 +283,33 @@ const Molds = {
         document.getElementById('mold-cost-rub').value = m.cost_rub_calc || '';
         document.getElementById('mold-count').value = m.mold_count || 1;
         document.getElementById('mold-client').value = m.client || '';
+        document.getElementById('mold-hw-name').value = m.hw_name || '';
+        document.getElementById('mold-hw-price').value = m.hw_price_per_unit || '';
+        document.getElementById('mold-hw-delivery-total').value = m.hw_delivery_total || '';
         document.getElementById('mold-hw-speed').value = m.hw_speed || '';
         document.getElementById('mold-notes').value = m.notes || '';
 
+        document.getElementById('mold-delete-btn').style.display = '';
         document.getElementById('mold-edit-form').style.display = '';
         document.getElementById('mold-edit-form').scrollIntoView({ behavior: 'smooth' });
     },
 
+    async deleteFromForm() {
+        if (!this.editingId) return;
+        const m = this.allMolds.find(x => x.id === this.editingId);
+        const name = m ? m.name : '';
+        if (confirm(`Удалить бланк "${name}"?`)) {
+            await deleteMold(this.editingId);
+            App.toast('Бланк удален');
+            this.hideForm();
+            await this.load();
+        }
+    },
+
     clearForm() {
         ['mold-name', 'mold-pph-min', 'mold-pph-max', 'mold-pph-actual',
-         'mold-weight', 'mold-cost-cny', 'mold-client', 'mold-hw-speed', 'mold-notes'
+         'mold-weight', 'mold-cost-cny', 'mold-client',
+         'mold-hw-name', 'mold-hw-price', 'mold-hw-speed', 'mold-notes'
         ].forEach(id => { document.getElementById(id).value = ''; });
         document.getElementById('mold-category').value = 'blank';
         document.getElementById('mold-status').value = 'active';
@@ -281,6 +318,7 @@ const Molds = {
         document.getElementById('mold-delivery-cost').value = 8000;
         document.getElementById('mold-count').value = 1;
         document.getElementById('mold-cost-rub').value = '';
+        document.getElementById('mold-hw-delivery-total').value = 0;
     },
 
     hideForm() {
@@ -310,6 +348,9 @@ const Molds = {
             cost_rub: parseFloat(document.getElementById('mold-cost-rub').value) || 0,
             mold_count: parseInt(document.getElementById('mold-count').value) || 1,
             client: document.getElementById('mold-client').value.trim(),
+            hw_name: document.getElementById('mold-hw-name').value.trim(),
+            hw_price_per_unit: parseFloat(document.getElementById('mold-hw-price').value) || 0,
+            hw_delivery_total: parseFloat(document.getElementById('mold-hw-delivery-total').value) || 0,
             hw_speed: parseFloat(document.getElementById('mold-hw-speed').value) || null,
             notes: document.getElementById('mold-notes').value.trim(),
             total_orders: 0,
@@ -328,6 +369,14 @@ const Molds = {
         App.toast('Бланк сохранен');
         this.hideForm();
         await this.load();
+    },
+
+    async confirmDelete(id, name) {
+        if (confirm(`Удалить бланк "${name}"?`)) {
+            await deleteMold(id);
+            App.toast('Бланк удален');
+            await this.load();
+        }
     },
 
     exportCSV() {
