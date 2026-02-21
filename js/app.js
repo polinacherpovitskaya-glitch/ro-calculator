@@ -845,8 +845,10 @@ const Calculator = {
             if (item.is_blank_mold) {
                 // Blank mold: tiered margin price (same as blanks page)
                 // Маржа зависит от тиража: 65%@50 → 35%@3K
+                // Множитель делает кривую крутой: 1.45× при 50шт → 0.85× при 3K
                 const blankMargin = getBlankMargin(item.quantity || 500);
-                const blankTarget = calcTarget(costItemOnly, blankMargin);
+                const blankMult = getBlankMultiplier(item.quantity || 500);
+                const blankTarget = calcTarget(costItemOnly, blankMargin) * blankMult;
                 const blankSellPrice = roundTo5(blankTarget);
                 columns.push({
                     label: item.product_name || 'Изделие ' + (i + 1),

@@ -212,16 +212,16 @@ function calculatePackagingCost(pkg, params) {
 }
 
 /**
- * Маржа по тиражу (совпадает с TIER_MARGINS в molds.js)
- * 1000 шт = 40% (базовая), мелкие дороже, крупные со скидкой
+ * Маржа + множитель по тиражу (совпадает с BLANKS_TIER_MARGINS в molds.js)
+ * 500 шт — точка опоры (mult=1.00), мелкие дороже, крупные со скидкой
  */
 const CALC_TIER_MARGINS = [
-    { min: 0, max: 75, margin: 0.65 },
-    { min: 75, max: 200, margin: 0.55 },
-    { min: 200, max: 400, margin: 0.48 },
-    { min: 400, max: 750, margin: 0.43 },
-    { min: 750, max: 2500, margin: 0.40 },
-    { min: 2500, max: Infinity, margin: 0.35 },
+    { min: 0, max: 75, margin: 0.65, mult: 1.45 },
+    { min: 75, max: 200, margin: 0.55, mult: 1.25 },
+    { min: 200, max: 400, margin: 0.48, mult: 1.10 },
+    { min: 400, max: 750, margin: 0.43, mult: 1.00 },
+    { min: 750, max: 2500, margin: 0.40, mult: 0.92 },
+    { min: 2500, max: Infinity, margin: 0.35, mult: 0.85 },
 ];
 
 function getMarginForQty(qty) {
@@ -229,16 +229,23 @@ function getMarginForQty(qty) {
     return tier ? tier.margin : 0.40;
 }
 
+function getMultiplierForQty(qty) {
+    const tier = CALC_TIER_MARGINS.find(t => qty >= t.min && qty < t.max);
+    return tier ? tier.mult : 1.00;
+}
+
 /**
  * Рассчитать таргет-цену (модель 70/30)
- * Формула: (себестоимость + НДС) * (1 + маржа) / (1 - налог - НДС_выход)
+ * Формула: (себестоимость + НДС) * (1 + маржа) * множитель / (1 - налог - НДС_выход)
  * Маржа зависит от тиража: 65% при 50шт → 35% при 5000шт
+ * Множитель делает кривую крутой: 1.45× для 50 шт → 0.85× для 3K шт
  */
 function calculateTargetPrice(cost, params, qty) {
     if (cost === 0) return 0;
     const margin = qty ? getMarginForQty(qty) : params.marginTarget;
+    const mult = qty ? getMultiplierForQty(qty) : 1.00;
     const vatOnCost = cost * params.vatRate;
-    return round2((cost + vatOnCost) * (1 + margin) / (1 - params.taxRate - 0.065));
+    return round2((cost + vatOnCost) * (1 + margin) * mult / (1 - params.taxRate - 0.065));
 }
 
 /**

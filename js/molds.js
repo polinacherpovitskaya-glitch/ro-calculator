@@ -14,15 +14,17 @@ const MOLD_MAX_LIFETIME = 4500; // максимальный ресурс мол�
 
 const MOLD_TIERS = [50, 100, 300, 500, 1000, 3000];
 
-// Тиражные маржи бланков — мотивируют заказывать больше
+// Тиражные маржи + множители бланков
+// margin — базовая наценка, mult — тиражный множитель (крутая кривая цены)
 // Совпадают с CALC_TIER_MARGINS из calculator.js для единообразия
+// 500 шт — точка опоры (mult=1.00), мелкие тиражи дороже, крупные дешевле
 const BLANKS_TIER_MARGINS = [
-    { min: 0,    max: 75,       margin: 0.65 },  // 50 шт  → 65%
-    { min: 75,   max: 200,      margin: 0.55 },  // 100 шт → 55%
-    { min: 200,  max: 400,      margin: 0.48 },  // 300 шт → 48%
-    { min: 400,  max: 750,      margin: 0.43 },  // 500 шт → 43%
-    { min: 750,  max: 2500,     margin: 0.40 },  // 1K шт  → 40%
-    { min: 2500, max: Infinity, margin: 0.35 },  // 3K шт  → 35%
+    { min: 0,    max: 75,       margin: 0.65, mult: 1.45 },  // 50 шт  → 65% × 1.45
+    { min: 75,   max: 200,      margin: 0.55, mult: 1.25 },  // 100 шт → 55% × 1.25
+    { min: 200,  max: 400,      margin: 0.48, mult: 1.10 },  // 300 шт → 48% × 1.10
+    { min: 400,  max: 750,      margin: 0.43, mult: 1.00 },  // 500 шт → 43% × 1.00
+    { min: 750,  max: 2500,     margin: 0.40, mult: 0.92 },  // 1K шт  → 40% × 0.92
+    { min: 2500, max: Infinity, margin: 0.35, mult: 0.85 },  // 3K шт  → 35% × 0.85
 ];
 
 /**
@@ -38,15 +40,23 @@ function getBlankMargin(qty) {
     return tier ? tier.margin : 0.40;
 }
 
+function getBlankMultiplier(qty) {
+    const tier = BLANKS_TIER_MARGINS.find(t => qty >= t.min && qty < t.max);
+    return tier ? tier.mult : 1.00;
+}
+
 /**
- * Таргет цена бланка = (себест + НДС) * (1 + маржа) / (1 - налог - НДС_выход)
+ * Таргет цена бланка = (себест + НДС) * (1 + маржа) * множитель / (1 - налог - НДС_выход)
  * Маржа зависит от тиража: 65% при 50 шт → 35% при 3K шт
+ * Множитель делает кривую крутой: 1.45× для 50 шт → 0.85× для 3K шт
+ * 500 шт — точка опоры (mult = 1.00)
  */
 function calcBlankTargetPrice(cost, qty, params) {
     if (cost <= 0 || qty <= 0) return 0;
     const margin = getBlankMargin(qty);
+    const mult = getBlankMultiplier(qty);
     const vatOnCost = cost * (params.vatRate || 0.05);
-    return round2((cost + vatOnCost) * (1 + margin) / (1 - (params.taxRate || 0.06) - 0.065));
+    return round2((cost + vatOnCost) * (1 + margin) * mult / (1 - (params.taxRate || 0.06) - 0.065));
 }
 
 /**
@@ -172,12 +182,14 @@ const Molds = {
                 const targetPrice = calcBlankTargetPrice(adjustedCost, qty, params);
                 const sellPrice = calcBlankSellPrice(adjustedCost, qty, params);
                 const margin = getBlankMargin(qty);
+                const mult = getBlankMultiplier(qty);
 
                 m.tiers[qty] = {
                     cost: round2(adjustedCost),
                     targetPrice: targetPrice,
                     sellPrice: sellPrice,
                     margin: margin,
+                    mult: mult,
                     moldAmort: round2(moldAmortPerUnit),
                     hwCost: round2(hwCostPerUnit),
                 };
@@ -305,16 +317,18 @@ const Molds = {
 
         html += '</tbody></table>';
 
-        // Legend with tier margins
+        // Legend with tier margins + multipliers
         const marginLabels = MOLD_TIERS.map(q => {
             const label = q >= 1000 ? (q/1000) + 'K' : q;
-            return `${label}=${Math.round(getBlankMargin(q)*100)}%`;
+            const m = getBlankMargin(q);
+            const x = getBlankMultiplier(q);
+            return `${label}=${Math.round(m*100)}%×${x}`;
         }).join(', ');
         html += `
             <div style="margin-top:10px; font-size:11px; color:var(--text-muted); display:flex; gap:16px; flex-wrap:wrap;">
                 <span><span style="color:var(--text-secondary);">себес</span> — себестоимость</span>
                 <span><span style="color:var(--green);font-weight:700;">цена</span> — цена продажи</span>
-                <span>Маржа по тиражу: ${marginLabels}</span>
+                <span>Маржа×множитель: ${marginLabels}</span>
                 <span>Округление до 5₽</span>
             </div>
         </div>`;
@@ -493,7 +507,7 @@ const Molds = {
     },
 
     exportCSV() {
-        const tierCols = MOLD_TIERS.flatMap(q => [`Себест. ${q}шт`, `Цена ${q}шт`, `Маржа ${q}шт`]);
+        const tierCols = MOLD_TIERS.flatMap(q => [`Себест. ${q}шт`, `Цена ${q}шт`, `Маржа ${q}шт`, `Множ. ${q}шт`]);
         const headers = ['Название', 'Категория', 'Коллекция', 'Статус', 'Кол-во молдов',
             'Шт/ч план', 'Шт/ч факт', 'Вес г', ...tierCols,
             'Заказов', 'Выпущено'];
@@ -502,7 +516,8 @@ const Molds = {
             const tierData = MOLD_TIERS.flatMap(q => {
                 const t = m.tiers?.[q];
                 const marginPct = t ? Math.round(getBlankMargin(q) * 100) : 0;
-                return [t?.cost || 0, t?.sellPrice || 0, marginPct + '%'];
+                const mult = getBlankMultiplier(q);
+                return [t?.cost || 0, t?.sellPrice || 0, marginPct + '%', '×' + mult];
             });
             return [
                 m.name, m.category_label, m.collection || '', m.status_label, m.mold_count || 1,
