@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v21';
+const APP_VERSION = 'v22';
 
 const App = {
     currentPage: 'dashboard',
@@ -892,6 +892,10 @@ const Calculator = {
                 const blankMult = getBlankMultiplier(item.quantity || 500);
                 const blankTarget = calcTarget(costItemOnly, blankMargin) * blankMult;
                 const blankSellPrice = roundTo5(blankTarget);
+                // Auto-set sell_price_item for blanks if user hasn't entered a custom price
+                if (!item.sell_price_item) {
+                    item.sell_price_item = blankSellPrice;
+                }
                 columns.push({
                     label: item.product_name || 'Изделие ' + (i + 1),
                     type: 'item',
@@ -1068,12 +1072,24 @@ const Calculator = {
         this.items.forEach((item, i) => {
             if (!item.result || !item.quantity) return;
             const qty = item.quantity;
-            if (item.sell_price_item > 0) {
+            // For blank molds, use auto-calculated price as fallback
+            let itemPrice = item.sell_price_item;
+            if ((!itemPrice || itemPrice <= 0) && item.is_blank_mold && item.result.costTotal > 0) {
+                const costPrintingPart = item.result.costPrinting || 0;
+                const costItemOnly = round2(item.result.costTotal - costPrintingPart);
+                const blankMargin = getBlankMargin(qty || 500);
+                const blankMult = getBlankMultiplier(qty || 500);
+                const vatOnCost = costItemOnly * (params.vatRate || 0.05);
+                const taxRate = params.taxRate || 0.06;
+                itemPrice = roundTo5(round2((costItemOnly + vatOnCost) * (1 + blankMargin) * blankMult / (1 - taxRate - 0.065)));
+                item.sell_price_item = itemPrice; // persist for KP generation
+            }
+            if (itemPrice > 0) {
                 invoiceRows.push({
                     name: item.product_name || 'Изделие ' + (i + 1),
                     qty: qty,
-                    price: item.sell_price_item,
-                    total: round2(item.sell_price_item * qty),
+                    price: itemPrice,
+                    total: round2(itemPrice * qty),
                     type: 'item',
                 });
             }
@@ -1444,6 +1460,21 @@ const Calculator = {
             App.toast('Сначала заполните название заказа');
             return;
         }
+
+        // Auto-fill blank mold prices before validation
+        const params = App.params || {};
+        this.items.forEach(item => {
+            if (!item.result || !item.quantity) return;
+            if ((!item.sell_price_item || item.sell_price_item <= 0) && item.is_blank_mold && item.result.costTotal > 0) {
+                const costPrintingPart = item.result.costPrinting || 0;
+                const costItemOnly = round2(item.result.costTotal - costPrintingPart);
+                const blankMargin = getBlankMargin(item.quantity || 500);
+                const blankMult = getBlankMultiplier(item.quantity || 500);
+                const vatOnCost = costItemOnly * (params.vatRate || 0.05);
+                const taxRate = params.taxRate || 0.06;
+                item.sell_price_item = roundTo5(round2((costItemOnly + vatOnCost) * (1 + blankMargin) * blankMult / (1 - taxRate - 0.065)));
+            }
+        });
 
         // Validate: all sell prices must be filled
         let missingPrices = [];
