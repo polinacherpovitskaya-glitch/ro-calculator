@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=15">
+    <link rel="stylesheet" href="css/style.css?v=16">
 </head>
 <body>
 
@@ -1095,18 +1095,23 @@
                 <div class="card">
                     <div class="card-header">
                         <h3>Справочник форм/бланков</h3>
-                        <button class="btn btn-sm btn-primary" onclick="Settings.addTemplate()">+ Добавить</button>
+                        <div style="display:flex;gap:8px;">
+                            <button class="btn btn-sm btn-success" id="settings-save-molds-btn" style="display:none" onclick="Settings.saveMoldsChanges()">Сохранить</button>
+                        </div>
                     </div>
+                    <p style="font-size:11px;color:var(--text-muted);margin-bottom:12px;">Редактируйте параметры прямо в таблице. Изменённые строки подсветятся зелёным.</p>
                     <div class="table-wrap">
-                        <table>
+                        <table style="font-size:12px;">
                             <thead>
                                 <tr>
-                                    <th>Название</th>
-                                    <th>Категория</th>
-                                    <th class="text-right">Шт/ч (мин)</th>
-                                    <th class="text-right">Шт/ч (макс)</th>
-                                    <th class="text-right">Вес (г)</th>
-                                    <th></th>
+                                    <th style="min-width:140px">Название</th>
+                                    <th style="width:70px;text-align:center">Тип</th>
+                                    <th style="width:70px;text-align:center">Шт/ч мин</th>
+                                    <th style="width:70px;text-align:center">Шт/ч макс</th>
+                                    <th style="width:70px;text-align:center">Шт/ч факт</th>
+                                    <th style="width:70px;text-align:center">Вес (г)</th>
+                                    <th style="width:60px;text-align:center">Молды</th>
+                                    <th style="width:40px"></th>
                                 </tr>
                             </thead>
                             <tbody id="settings-templates-body">
@@ -1127,17 +1132,17 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.2/jspdf.umd.min.js"></script>
-<script src="js/supabase.js?v=15"></script>
-<script src="js/calculator.js?v=15"></script>
-<script src="js/app.js?v=15"></script>
-<script src="js/dashboard.js?v=15"></script>
-<script src="js/orders.js?v=15"></script>
-<script src="js/analytics.js?v=15"></script>
-<script src="js/molds.js?v=15"></script>
-<script src="js/kp.js?v=15"></script>
-<script src="js/timetrack.js?v=15"></script>
-<script src="js/tasks.js?v=15"></script>
-<script src="js/import.js?v=15"></script>
-<script src="js/settings.js?v=15"></script>
+<script src="js/supabase.js?v=16"></script>
+<script src="js/calculator.js?v=16"></script>
+<script src="js/app.js?v=16"></script>
+<script src="js/dashboard.js?v=16"></script>
+<script src="js/orders.js?v=16"></script>
+<script src="js/analytics.js?v=16"></script>
+<script src="js/molds.js?v=16"></script>
+<script src="js/kp.js?v=16"></script>
+<script src="js/timetrack.js?v=16"></script>
+<script src="js/tasks.js?v=16"></script>
+<script src="js/import.js?v=16"></script>
+<script src="js/settings.js?v=16"></script>
 </body>
 </html>

@@ -17,6 +17,14 @@ const BLANKS_FIXED_MARKUP = 10000; // фиксированная наценка 
 const BLANKS_MARGIN_DEFAULT = 0.40; // маржа для всех тиражей
 const BLANKS_MARGIN_5K = 0.30; // маржа для тиража 5000
 
+/**
+ * Округление цены вверх до ближайшего кратного 5₽
+ * 517₽ → 520₽, 531₽ → 535₽, 100₽ → 100₽
+ */
+function roundTo5(n) {
+    return Math.ceil(n / 5) * 5;
+}
+
 function getBlankMargin(qty) {
     return qty >= 5000 ? BLANKS_MARGIN_5K : BLANKS_MARGIN_DEFAULT;
 }
@@ -33,12 +41,12 @@ function calcBlankTargetPrice(cost, qty, params) {
 }
 
 /**
- * Цена продажи бланка = таргет цена + 10 000 ₽ / тираж
+ * Цена продажи бланка = таргет цена + 10 000 ₽ / тираж, округлённая до 5₽ вверх
  */
 function calcBlankSellPrice(cost, qty, params) {
     if (cost <= 0 || qty <= 0) return 0;
     const target = calcBlankTargetPrice(cost, qty, params);
-    return round2(target + BLANKS_FIXED_MARKUP / qty);
+    return roundTo5(round2(target + BLANKS_FIXED_MARKUP / qty));
 }
 
 const Molds = {

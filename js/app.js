@@ -815,8 +815,9 @@ const Calculator = {
             if (item.is_blank_mold) {
                 // Blank mold: fixed price from blanks page formula
                 // Target = (cost + НДС) * (1 + 40%) / (1 - 6% - 6.5%) + 10000/qty
+                // Rounded up to nearest 5₽ (same as blanks page)
                 const blankTarget = calcTarget(costItemOnly, 0.40);
-                const blankSellPrice = round2(blankTarget + 10000 / (item.quantity || 1));
+                const blankSellPrice = roundTo5(round2(blankTarget + 10000 / (item.quantity || 1)));
                 columns.push({
                     label: item.product_name || 'Изделие ' + (i + 1),
                     type: 'item',
