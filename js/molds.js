@@ -176,7 +176,7 @@ const Molds = {
         this.renderTable(filtered);
     },
 
-    // === COMPACT TABLE VIEW ===
+    // === COMPACT TABLE VIEW — 2 rows: cost (gray) + sell price (green) ===
     renderTable(molds) {
         const container = document.getElementById('molds-cards-container');
 
@@ -195,9 +195,7 @@ const Molds = {
             <table style="font-size:12px; white-space:nowrap;">
                 <thead>
                     <tr>
-                        <th style="min-width:160px">Бланк</th>
-                        <th style="width:60px">шт/ч</th>
-                        <th style="width:40px">г</th>
+                        <th style="min-width:180px">Бланк</th>
                         ${tierHeaders}
                         <th style="width:30px"></th>
                     </tr>
@@ -207,49 +205,37 @@ const Molds = {
         molds.forEach(m => {
             const statusDot = m.status === 'active' ? 'calculated' : m.status === 'client' ? 'in_production' : 'cancelled';
             const pphDisplay = m.pph_actual
-                ? `<strong>${m.pph_actual}</strong><sup style="color:var(--green);font-size:9px">&#10003;</sup>`
-                : `${m.pph_min}${m.pph_max !== m.pph_min ? '-' + m.pph_max : ''}`;
+                ? `<strong>${m.pph_actual}</strong><sup style="color:var(--green);font-size:9px">✓</sup>`
+                : (m.pph_min > 0 ? `${m.pph_min}${m.pph_max !== m.pph_min ? '-' + m.pph_max : ''}` : '—');
             const moldCountBadge = (m.mold_count || 1) > 1 ? ` <sup style="color:var(--orange);font-weight:700">x${m.mold_count}</sup>` : '';
 
-            // Row 1: Cost (gray)
+            // Row 1: Cost (gray, small)
             const costCells = MOLD_TIERS.map(q => {
                 const t = m.tiers?.[q];
-                return `<td class="text-right" style="font-size:11px;color:var(--text-secondary)">${t ? Math.round(t.cost) : '—'}</td>`;
+                return `<td class="text-right" style="font-size:10px;color:var(--text-secondary);padding:2px 6px;">${t ? Math.round(t.cost) : '—'}</td>`;
             }).join('');
 
-            // Row 2: Target price (blue) — 40% маржа (30% для 5K)
-            const targetCells = MOLD_TIERS.map(q => {
-                const t = m.tiers?.[q];
-                const marginLabel = t ? Math.round(t.margin * 100) + '%' : '';
-                return `<td class="text-right" style="font-size:11px;color:var(--accent)" title="маржа ${marginLabel}">${t ? Math.round(t.targetPrice) : '—'}</td>`;
-            }).join('');
-
-            // Row 3: Sell price (green, bold) — target + 10000/qty
+            // Row 2: Sell price (green, bold, bigger)
             const sellCells = MOLD_TIERS.map(q => {
                 const t = m.tiers?.[q];
-                return `<td class="text-right" style="font-size:12px;font-weight:600;color:var(--green)">${t ? Math.round(t.sellPrice) : '—'}</td>`;
+                return `<td class="text-right" style="font-size:13px;font-weight:700;color:var(--green);padding:4px 6px;">${t ? Math.round(t.sellPrice) : '—'}</td>`;
             }).join('');
 
             html += `
                 <tr>
-                    <td rowspan="3" style="vertical-align:top; padding:6px 8px; border-bottom:2px solid var(--border)">
+                    <td rowspan="2" style="vertical-align:top; padding:6px 8px; border-bottom:2px solid var(--border)">
                         <div style="font-weight:700; font-size:13px;"><span class="status-dot ${statusDot}"></span>${this.esc(m.name)}${moldCountBadge}</div>
-                        ${m.hw_name ? `<div style="font-size:10px; color:var(--accent); margin-top:1px;">+ ${this.esc(m.hw_name)} (${formatRub(m.hw_price_per_unit || 0)}/шт, ${m.hw_speed || '?'} шт/ч)</div>` : ''}
-                        ${m.client ? `<div style="font-size:10px; color:var(--text-muted); margin-top:1px;">${this.esc(m.client)}</div>` : ''}
+                        <div style="font-size:10px; color:var(--text-muted); margin-top:2px;">${pphDisplay} шт/ч · ${m.weight_grams}г</div>
+                        ${m.hw_name ? `<div style="font-size:10px; color:var(--accent); margin-top:1px;">+ ${this.esc(m.hw_name)}</div>` : ''}
                         ${m.notes ? `<div style="font-size:10px; color:var(--text-muted); font-style:italic">${this.esc(m.notes)}</div>` : ''}
                     </td>
-                    <td rowspan="3" style="vertical-align:top; font-size:12px; text-align:center; border-bottom:2px solid var(--border)">${pphDisplay}</td>
-                    <td rowspan="3" style="vertical-align:top; font-size:12px; text-align:center; border-bottom:2px solid var(--border)">${m.weight_grams}</td>
                     ${costCells}
-                    <td rowspan="3" style="vertical-align:top; border-bottom:2px solid var(--border)">
+                    <td rowspan="2" style="vertical-align:top; border-bottom:2px solid var(--border)">
                         <div style="display:flex;flex-direction:column;gap:2px;">
                             <button class="btn btn-sm btn-outline" style="padding:2px 6px;font-size:10px" onclick="Molds.editMold(${m.id})">&#9998;</button>
                             <button class="btn-remove" style="font-size:9px;width:24px;height:24px;" title="Удалить" onclick="Molds.confirmDelete(${m.id}, '${this.esc(m.name)}')">&#10005;</button>
                         </div>
                     </td>
-                </tr>
-                <tr>
-                    ${targetCells}
                 </tr>
                 <tr style="border-bottom:2px solid var(--border)">
                     ${sellCells}
@@ -262,10 +248,8 @@ const Molds = {
         html += `
             <div style="margin-top:10px; font-size:11px; color:var(--text-muted); display:flex; gap:16px; flex-wrap:wrap;">
                 <span><span style="color:var(--text-secondary)">&#9644;</span> Себестоимость</span>
-                <span><span style="color:var(--accent)">&#9644;</span> Таргет (${Math.round(BLANKS_MARGIN_DEFAULT*100)}%, 5K=${Math.round(BLANKS_MARGIN_5K*100)}%)</span>
-                <span><span style="color:var(--green);font-weight:600">&#9644;</span> Продажа (таргет + ${formatRub(BLANKS_FIXED_MARKUP)} / тираж)</span>
-                <span>Аморт.: /${MOLD_MAX_LIFETIME} шт</span>
-                <span><sup style="color:var(--green)">&#10003;</sup> = факт.</span>
+                <span><span style="color:var(--green);font-weight:700">&#9644;</span> Цена продажи</span>
+                <span style="color:var(--text-muted);">Маржа ${Math.round(BLANKS_MARGIN_DEFAULT*100)}% (5K=${Math.round(BLANKS_MARGIN_5K*100)}%) + ${formatRub(BLANKS_FIXED_MARKUP)}/тираж, округл. до 5₽</span>
             </div>
         </div>`;
 

@@ -352,12 +352,21 @@ const Calculator = {
     // PRINTINGS (inside items)
     // ==========================================
 
+    PRINTING_TYPES: ['УФ', 'Тампо', 'Шелкография', 'По DXF наклейка'],
+
     renderPrintingRow(itemIdx, printIdx, pr) {
+        const opts = this.PRINTING_TYPES.map(t => {
+            const sel = (pr.name === t) ? ' selected' : '';
+            return `<option value="${t}"${sel}>${t}</option>`;
+        }).join('');
         return `
         <div class="printing-row form-row" id="printing-${itemIdx}-${printIdx}" style="align-items:end">
             <div class="form-group" style="margin:0">
-                <label>Название</label>
-                <input type="text" value="${pr.name || ''}" placeholder="Тампо, UV, шелкография..." onchange="Calculator.onPrintingChange(${itemIdx}, ${printIdx}, 'name', this.value)">
+                <label>Тип нанесения</label>
+                <select onchange="Calculator.onPrintingChange(${itemIdx}, ${printIdx}, 'name', this.value)">
+                    <option value="">-- Выбрать --</option>
+                    ${opts}
+                </select>
             </div>
             <div class="form-group" style="margin:0">
                 <label>Кол-во</label>
@@ -409,7 +418,8 @@ const Calculator = {
         return {
             name: '',
             qty: 0,
-            assembly_speed: 0,
+            assembly_speed: 0,      // шт/ч (calculated from minutes)
+            assembly_minutes: 0,    // мин/шт (user input)
             price: 0,
             delivery_total: 0,    // Total delivery cost (not per unit)
             delivery_price: 0,    // Calculated: delivery_total / qty
@@ -426,6 +436,8 @@ const Calculator = {
 
     renderHardwareRow(idx) {
         const hw = this.hardwareItems[idx];
+        // Display: assembly_minutes_per_unit stored, but internally convert to шт/ч
+        const minsDisplay = hw.assembly_minutes || '';
         const list = document.getElementById('calc-hardware-list');
         const html = `
         <div class="hw-row" id="hw-row-${idx}">
@@ -439,8 +451,8 @@ const Calculator = {
                     <input type="number" min="0" value="${hw.qty || ''}" oninput="Calculator.onHwNum(${idx}, 'qty', this.value)">
                 </div>
                 <div class="form-group" style="margin:0">
-                    <label>Сборка (шт/ч)</label>
-                    <input type="number" min="0" value="${hw.assembly_speed || ''}" oninput="Calculator.onHwNum(${idx}, 'assembly_speed', this.value)">
+                    <label>Сборка (мин/шт)</label>
+                    <input type="number" min="0" step="0.1" value="${minsDisplay}" oninput="Calculator.onHwMinutes(${idx}, this.value)" placeholder="напр. 0.5">
                 </div>
                 <div class="form-group" style="margin:0">
                     <label>Закупка (&#8381;/шт)</label>
@@ -480,6 +492,14 @@ const Calculator = {
         this.recalculate();
     },
 
+    onHwMinutes(idx, value) {
+        const mins = parseFloat(value) || 0;
+        this.hardwareItems[idx].assembly_minutes = mins;
+        // Convert minutes per unit → pieces per hour
+        this.hardwareItems[idx].assembly_speed = mins > 0 ? round2(60 / mins) : 0;
+        this.recalculate();
+    },
+
     // ==========================================
     // PACKAGING ITEMS (order-level, separate section)
     // ==========================================
@@ -488,7 +508,8 @@ const Calculator = {
         return {
             name: '',
             qty: 0,
-            assembly_speed: 0,
+            assembly_speed: 0,      // шт/ч (calculated from minutes)
+            assembly_minutes: 0,    // мин/шт (user input)
             price: 0,
             delivery_total: 0,    // Total delivery cost
             delivery_price: 0,    // Calculated: delivery_total / qty
@@ -505,6 +526,7 @@ const Calculator = {
 
     renderPackagingRow(idx) {
         const pkg = this.packagingItems[idx];
+        const minsDisplay = pkg.assembly_minutes || '';
         const list = document.getElementById('calc-packaging-list');
         const html = `
         <div class="pkg-row" id="pkg-row-${idx}">
@@ -518,8 +540,8 @@ const Calculator = {
                     <input type="number" min="0" value="${pkg.qty || ''}" oninput="Calculator.onPkgNum(${idx}, 'qty', this.value)">
                 </div>
                 <div class="form-group" style="margin:0">
-                    <label>Сборка (шт/ч)</label>
-                    <input type="number" min="0" value="${pkg.assembly_speed || ''}" oninput="Calculator.onPkgNum(${idx}, 'assembly_speed', this.value)">
+                    <label>Сборка (мин/шт)</label>
+                    <input type="number" min="0" step="0.1" value="${minsDisplay}" oninput="Calculator.onPkgMinutes(${idx}, this.value)" placeholder="напр. 0.5">
                 </div>
                 <div class="form-group" style="margin:0">
                     <label>Закупка (&#8381;/шт)</label>
@@ -556,6 +578,14 @@ const Calculator = {
         // Auto-calculate per-unit delivery from total
         const pkg = this.packagingItems[idx];
         pkg.delivery_price = pkg.qty > 0 ? round2(pkg.delivery_total / pkg.qty) : 0;
+        this.recalculate();
+    },
+
+    onPkgMinutes(idx, value) {
+        const mins = parseFloat(value) || 0;
+        this.packagingItems[idx].assembly_minutes = mins;
+        // Convert minutes per unit → pieces per hour
+        this.packagingItems[idx].assembly_speed = mins > 0 ? round2(60 / mins) : 0;
         this.recalculate();
     },
 
@@ -1093,6 +1123,8 @@ const Calculator = {
         contentEl.innerHTML = pricingHtml + invoiceHtml;
     },
 
+    _sellPriceTimer: null,
+
     onPricingSellChange(type, globalIdx, value) {
         const price = parseFloat(value) || 0;
         if (type === 'item') {
@@ -1104,7 +1136,9 @@ const Calculator = {
         } else if (type === 'pkg') {
             this.packagingItems[globalIdx].sell_price = price;
         }
-        this.recalculate();
+        // Debounce: wait 800ms after user stops typing before recalculating
+        clearTimeout(this._sellPriceTimer);
+        this._sellPriceTimer = setTimeout(() => this.recalculate(), 800);
     },
 
     // ==========================================
@@ -1281,6 +1315,8 @@ const Calculator = {
             hw.name = dbHw.product_name || '';
             hw.qty = dbHw.quantity || 0;
             hw.assembly_speed = dbHw.hardware_assembly_speed || 0;
+            // Convert шт/ч → мин/шт for display
+            hw.assembly_minutes = hw.assembly_speed > 0 ? round2(60 / hw.assembly_speed) : 0;
             hw.price = dbHw.hardware_price_per_unit || 0;
             // Support both old per-unit and new total delivery
             const perUnit = dbHw.hardware_delivery_per_unit || 0;
@@ -1298,6 +1334,8 @@ const Calculator = {
             pkg.name = dbPkg.product_name || '';
             pkg.qty = dbPkg.quantity || 0;
             pkg.assembly_speed = dbPkg.packaging_assembly_speed || 0;
+            // Convert шт/ч → мин/шт for display
+            pkg.assembly_minutes = pkg.assembly_speed > 0 ? round2(60 / pkg.assembly_speed) : 0;
             pkg.price = dbPkg.packaging_price_per_unit || 0;
             const perUnit = dbPkg.packaging_delivery_per_unit || 0;
             pkg.delivery_total = dbPkg.packaging_delivery_total || (perUnit * pkg.qty);
