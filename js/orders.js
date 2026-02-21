@@ -8,6 +8,7 @@ const STATUS_OPTIONS = [
     { value: 'in_production', label: 'В производстве' },
     { value: 'completed', label: 'Выполнен' },
     { value: 'cancelled', label: 'Отменен' },
+    { value: 'deleted', label: 'Удалён' },
 ];
 
 const Orders = {
@@ -52,30 +53,47 @@ const Orders = {
         }
 
         tbody.innerHTML = orders.map(o => {
-            // Build status dropdown
-            const statusOpts = STATUS_OPTIONS.map(s =>
-                `<option value="${s.value}" ${o.status === s.value ? 'selected' : ''}>${s.label}</option>`
-            ).join('');
+            const isDeleted = o.status === 'deleted';
+
+            // Build status dropdown (exclude 'deleted' from manual selection)
+            const statusOpts = STATUS_OPTIONS
+                .filter(s => s.value !== 'deleted')
+                .map(s => `<option value="${s.value}" ${o.status === s.value ? 'selected' : ''}>${s.label}</option>`)
+                .join('');
+
+            // Deleted date display
+            const dateDisplay = isDeleted && o.deleted_at
+                ? App.formatDate(o.deleted_at) + ' <span style="color:var(--red);font-size:10px;">(удалён)</span>'
+                : App.formatDate(o.created_at);
+
+            // Action buttons differ for deleted vs active orders
+            const actionButtons = isDeleted
+                ? `<div class="flex gap-8">
+                        <button class="btn btn-sm btn-outline" onclick="Orders.restoreOrder(${o.id})" title="Восстановить" style="color:var(--green);border-color:var(--green);">&#8634; Восстановить</button>
+                        <button class="btn btn-sm btn-danger" onclick="Orders.confirmPermanentDelete(${o.id}, '${this.escHtml(o.order_name)}')">&#10005; Навсегда</button>
+                   </div>`
+                : `<div class="flex gap-8">
+                        <button class="btn btn-sm btn-outline" onclick="Orders.editOrder(${o.id})" title="Редактировать">&#9998;</button>
+                        <button class="btn btn-sm btn-danger" onclick="Orders.confirmDelete(${o.id}, '${this.escHtml(o.order_name)}')">&#10005;</button>
+                   </div>`;
+
+            // Status cell: for deleted orders show static label, for others show dropdown
+            const statusCell = isDeleted
+                ? `<span style="color:var(--red);font-weight:600;font-size:12px;">&#128465; Удалён</span>`
+                : `<select class="status-select status-${o.status}" onchange="Orders.onStatusChange(${o.id}, this.value, '${o.status}')" style="font-size:12px; padding:2px 4px; border-radius:6px; border:1px solid var(--border); background:var(--bg); cursor:pointer;">
+                        ${statusOpts}
+                   </select>`;
 
             return `
-            <tr>
+            <tr style="${isDeleted ? 'opacity:0.7;' : ''}">
                 <td><a href="#" onclick="Orders.editOrder(${o.id}); return false;" style="color:var(--accent);font-weight:600;text-decoration:none" title="Открыть в калькуляторе">${this.escHtml(o.order_name)}</a></td>
                 <td>${this.escHtml(o.client_name || '—')}</td>
                 <td>${this.escHtml(o.manager_name || '—')}</td>
-                <td>
-                    <select class="status-select status-${o.status}" onchange="Orders.onStatusChange(${o.id}, this.value, '${o.status}')" style="font-size:12px; padding:2px 4px; border-radius:6px; border:1px solid var(--border); background:var(--bg); cursor:pointer;">
-                        ${statusOpts}
-                    </select>
-                </td>
+                <td>${statusCell}</td>
                 <td class="text-right">${formatRub(o.total_revenue_plan || 0)}</td>
                 <td class="text-right ${(o.margin_percent_plan || 0) >= 30 ? 'text-green' : 'text-red'}">${formatPercent(o.margin_percent_plan || 0)}</td>
-                <td>${App.formatDate(o.created_at)}</td>
-                <td>
-                    <div class="flex gap-8">
-                        <button class="btn btn-sm btn-outline" onclick="Orders.editOrder(${o.id})" title="Редактировать">&#9998;</button>
-                        <button class="btn btn-sm btn-danger" onclick="Orders.confirmDelete(${o.id}, '${this.escHtml(o.order_name)}')">&#10005;</button>
-                    </div>
-                </td>
+                <td>${dateDisplay}</td>
+                <td>${actionButtons}</td>
             </tr>`;
         }).join('');
     },
@@ -109,9 +127,38 @@ const Orders = {
     },
 
     async confirmDelete(orderId, name) {
-        if (confirm(`Удалить заказ "${name}"?`)) {
+        if (confirm(`Перенести заказ "${name}" в корзину?`)) {
+            const managerName = document.getElementById('calc-manager-name')
+                ? (document.getElementById('calc-manager-name').value.trim() || 'Неизвестный')
+                : 'Неизвестный';
             await deleteOrder(orderId);
-            App.toast('Заказ удален');
+            await this.addChangeRecord(orderId, {
+                field: 'status',
+                old_value: 'Активный',
+                new_value: 'Удалён (в корзину)',
+                manager: managerName,
+            });
+            App.toast('Заказ перемещён в корзину');
+            this.loadList();
+        }
+    },
+
+    async restoreOrder(orderId) {
+        await restoreOrder(orderId);
+        await this.addChangeRecord(orderId, {
+            field: 'status',
+            old_value: 'Удалён',
+            new_value: 'Черновик (восстановлен)',
+            manager: 'Неизвестный',
+        });
+        App.toast('Заказ восстановлен');
+        this.loadList();
+    },
+
+    async confirmPermanentDelete(orderId, name) {
+        if (confirm(`ВНИМАНИЕ: Удалить заказ "${name}" НАВСЕГДА? Это действие нельзя отменить!`)) {
+            await permanentDeleteOrder(orderId);
+            App.toast('Заказ удалён навсегда');
             this.loadList();
         }
     },

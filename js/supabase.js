@@ -230,14 +230,24 @@ async function saveOrder(order, items) {
 async function loadOrders(filters = {}) {
     if (isSupabaseReady()) {
         let query = supabaseClient.from('orders').select('*').order('created_at', { ascending: false });
-        if (filters.status) query = query.eq('status', filters.status);
+        if (filters.status) {
+            query = query.eq('status', filters.status);
+        } else {
+            // By default, exclude deleted orders
+            query = query.neq('status', 'deleted');
+        }
         if (filters.limit) query = query.limit(filters.limit);
         const { data, error } = await query;
         if (error) { console.error('loadOrders error:', error); return []; }
         return data;
     }
     let orders = getLocal(LOCAL_KEYS.orders) || [];
-    if (filters.status) orders = orders.filter(o => o.status === filters.status);
+    if (filters.status) {
+        orders = orders.filter(o => o.status === filters.status);
+    } else {
+        // By default, exclude deleted orders
+        orders = orders.filter(o => o.status !== 'deleted');
+    }
     orders.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
     if (filters.limit) orders = orders.slice(0, filters.limit);
     return orders;
@@ -281,9 +291,49 @@ async function updateOrderStatus(orderId, status) {
 }
 
 async function deleteOrder(orderId) {
+    // Soft delete — mark as deleted, keep data for recovery
     if (isSupabaseReady()) {
-        const { error } = await supabaseClient.from('orders').delete().eq('id', orderId);
+        const { error } = await supabaseClient
+            .from('orders')
+            .update({ status: 'deleted', deleted_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+            .eq('id', orderId);
         if (error) console.error('deleteOrder error:', error);
+    } else {
+        const orders = getLocal(LOCAL_KEYS.orders) || [];
+        const idx = orders.findIndex(o => o.id === orderId);
+        if (idx >= 0) {
+            orders[idx].status = 'deleted';
+            orders[idx].deleted_at = new Date().toISOString();
+            orders[idx].updated_at = new Date().toISOString();
+            setLocal(LOCAL_KEYS.orders, orders);
+        }
+    }
+}
+
+async function restoreOrder(orderId) {
+    if (isSupabaseReady()) {
+        const { error } = await supabaseClient
+            .from('orders')
+            .update({ status: 'draft', deleted_at: null, updated_at: new Date().toISOString() })
+            .eq('id', orderId);
+        if (error) console.error('restoreOrder error:', error);
+    } else {
+        const orders = getLocal(LOCAL_KEYS.orders) || [];
+        const idx = orders.findIndex(o => o.id === orderId);
+        if (idx >= 0) {
+            orders[idx].status = 'draft';
+            orders[idx].deleted_at = null;
+            orders[idx].updated_at = new Date().toISOString();
+            setLocal(LOCAL_KEYS.orders, orders);
+        }
+    }
+}
+
+async function permanentDeleteOrder(orderId) {
+    if (isSupabaseReady()) {
+        await supabaseClient.from('order_items').delete().eq('order_id', orderId);
+        const { error } = await supabaseClient.from('orders').delete().eq('id', orderId);
+        if (error) console.error('permanentDeleteOrder error:', error);
     } else {
         const orders = (getLocal(LOCAL_KEYS.orders) || []).filter(o => o.id !== orderId);
         setLocal(LOCAL_KEYS.orders, orders);

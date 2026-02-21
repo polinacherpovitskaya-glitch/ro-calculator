@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v24';
+const APP_VERSION = 'v25';
 
 const App = {
     currentPage: 'dashboard',
@@ -150,6 +150,7 @@ const App = {
             in_production: 'В производстве',
             completed: 'Выполнен',
             cancelled: 'Отменен',
+            deleted: 'Удалён',
         };
         return map[status] || status;
     },
@@ -1351,18 +1352,63 @@ const Calculator = {
         });
 
         const isEdit = !!App.editingOrderId;
+        const managerName = document.getElementById('calc-manager-name').value.trim() || 'Неизвестный';
+
+        // === Detailed change tracking ===
+        let oldData = null;
+        if (isEdit) {
+            oldData = await loadOrder(App.editingOrderId);
+        }
+
         const orderId = await saveOrder(order, items);
         if (orderId) {
             App.editingOrderId = orderId;
-            // Record change history
-            const managerName = document.getElementById('calc-manager-name').value.trim() || 'Неизвестный';
-            await Orders.addChangeRecord(orderId, {
-                field: isEdit ? 'order_edit' : 'order_create',
-                old_value: '',
-                new_value: isEdit ? 'Заказ отредактирован' : 'Заказ создан',
-                manager: managerName,
-                description: `Выручка: ${formatRub(summary.totalRevenue)}, Маржа: ${formatPercent(summary.marginPercent)}`,
-            });
+
+            if (isEdit && oldData) {
+                // Diff order header fields
+                const headerChanges = this._diffOrderHeader(oldData.order, order);
+                for (const ch of headerChanges) {
+                    await Orders.addChangeRecord(orderId, {
+                        field: 'field_change',
+                        old_value: ch.label + ': ' + (ch.old_value || '(пусто)'),
+                        new_value: ch.label + ': ' + (ch.new_value || '(пусто)'),
+                        manager: managerName,
+                    });
+                }
+
+                // Diff items (products, hardware, packaging)
+                const itemChanges = this._diffOrderItems(oldData.items, items);
+                for (const ch of itemChanges) {
+                    await Orders.addChangeRecord(orderId, {
+                        field: ch.type,
+                        old_value: ch.old_value || '',
+                        new_value: ch.new_value || '',
+                        manager: managerName,
+                        description: ch.description || '',
+                    });
+                }
+
+                // If no field-level changes detected, record a generic edit
+                if (headerChanges.length === 0 && itemChanges.length === 0) {
+                    await Orders.addChangeRecord(orderId, {
+                        field: 'order_edit',
+                        old_value: '',
+                        new_value: 'Заказ пересохранён',
+                        manager: managerName,
+                        description: `Выручка: ${formatRub(summary.totalRevenue)}, Маржа: ${formatPercent(summary.marginPercent)}`,
+                    });
+                }
+            } else {
+                // New order
+                await Orders.addChangeRecord(orderId, {
+                    field: 'order_create',
+                    old_value: '',
+                    new_value: 'Заказ создан',
+                    manager: managerName,
+                    description: `Выручка: ${formatRub(summary.totalRevenue)}, Маржа: ${formatPercent(summary.marginPercent)}`,
+                });
+            }
+
             App.toast('Заказ сохранен');
         } else {
             App.toast('Ошибка сохранения');
@@ -1454,6 +1500,120 @@ const Calculator = {
         App.navigate('calculator');
     },
 
+    // ==========================================
+    // ORDER DIFF HELPERS
+    // ==========================================
+
+    _diffOrderHeader(oldOrder, newOrder) {
+        const changes = [];
+        const fields = [
+            { key: 'order_name', label: 'Название' },
+            { key: 'client_name', label: 'Клиент' },
+            { key: 'manager_name', label: 'Менеджер' },
+            { key: 'deadline', label: 'Дедлайн' },
+            { key: 'notes', label: 'Примечания' },
+        ];
+        fields.forEach(f => {
+            const oldVal = (oldOrder[f.key] || '').toString().trim();
+            const newVal = (newOrder[f.key] || '').toString().trim();
+            if (oldVal !== newVal) {
+                changes.push({ field: f.key, label: f.label, old_value: oldVal, new_value: newVal });
+            }
+        });
+        return changes;
+    },
+
+    _diffOrderItems(oldItems, newItems) {
+        const changes = [];
+
+        // Build lookup maps by item_type + item_number
+        const oldMap = {};
+        (oldItems || []).forEach(it => {
+            const key = (it.item_type || 'product') + '_' + it.item_number;
+            oldMap[key] = it;
+        });
+
+        const newMap = {};
+        (newItems || []).forEach(it => {
+            const key = (it.item_type || 'product') + '_' + it.item_number;
+            newMap[key] = it;
+        });
+
+        // Detect added and changed items
+        for (const key in newMap) {
+            const nItem = newMap[key];
+            const oItem = oldMap[key];
+            const itemName = nItem.product_name || key;
+            const itemType = nItem.item_type || 'product';
+
+            if (!oItem) {
+                // New item added
+                changes.push({
+                    type: 'item_added',
+                    new_value: `Добавлена позиция: ${itemName} (${nItem.quantity || 0} шт)`,
+                });
+            } else {
+                // Compare key fields
+                const compareFields = [
+                    { key: 'quantity', label: 'кол-во' },
+                    { key: 'product_name', label: 'название' },
+                ];
+
+                if (itemType === 'product') {
+                    compareFields.push(
+                        { key: 'sell_price_item', label: 'цена изделия' },
+                        { key: 'sell_price_printing', label: 'цена нанесения' },
+                        { key: 'pieces_per_hour', label: 'шт/час' },
+                        { key: 'weight_grams', label: 'вес (г)' },
+                        { key: 'extra_molds', label: 'доп. молды' },
+                    );
+                } else if (itemType === 'hardware') {
+                    compareFields.push(
+                        { key: 'sell_price_hardware', label: 'цена фурнитуры' },
+                        { key: 'hardware_price_per_unit', label: 'закупка/шт' },
+                        { key: 'hardware_delivery_total', label: 'доставка фурн.' },
+                    );
+                } else if (itemType === 'packaging') {
+                    compareFields.push(
+                        { key: 'sell_price_packaging', label: 'цена упаковки' },
+                        { key: 'packaging_price_per_unit', label: 'закупка/шт' },
+                        { key: 'packaging_delivery_total', label: 'доставка упак.' },
+                    );
+                }
+
+                compareFields.forEach(f => {
+                    const oldVal = oItem[f.key];
+                    const newVal = nItem[f.key];
+                    // Compare as numbers for numeric fields, strings for text
+                    const oStr = (oldVal === null || oldVal === undefined) ? '' : String(oldVal);
+                    const nStr = (newVal === null || newVal === undefined) ? '' : String(newVal);
+                    if (oStr !== nStr) {
+                        changes.push({
+                            type: 'item_changed',
+                            old_value: `${itemName}: ${f.label} ${oStr || '(пусто)'}`,
+                            new_value: `${itemName}: ${f.label} ${nStr || '(пусто)'}`,
+                            description: '',
+                        });
+                    }
+                });
+            }
+        }
+
+        // Detect removed items
+        for (const key in oldMap) {
+            if (!newMap[key]) {
+                const oItem = oldMap[key];
+                changes.push({
+                    type: 'item_removed',
+                    old_value: `Удалена позиция: ${oItem.product_name || key} (${oItem.quantity || 0} шт)`,
+                    new_value: '',
+                });
+            }
+        }
+
+        return changes;
+    },
+
     async showOrderHistory(orderId) {
         const historyEl = document.getElementById('calc-history');
         const listEl = document.getElementById('calc-history-list');
@@ -1469,21 +1629,41 @@ const Calculator = {
         listEl.innerHTML = history.slice().reverse().map(h => {
             const d = new Date(h.date);
             const dateStr = d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' }) + ' ' + d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
-            const desc = h.description ? ` — ${h.description}` : '';
+            const desc = h.description ? ` <span style="color:var(--text-muted);font-size:11px;">${h.description}</span>` : '';
+
             let action = '';
+            let icon = '';
+
             if (h.field === 'status') {
+                icon = '🔄';
                 action = `${h.old_value} → ${h.new_value}`;
             } else if (h.field === 'order_create') {
+                icon = '✨';
                 action = 'Заказ создан';
             } else if (h.field === 'order_edit') {
-                action = 'Заказ отредактирован';
+                icon = '📝';
+                action = h.new_value || 'Заказ отредактирован';
+            } else if (h.field === 'field_change') {
+                icon = '✏️';
+                action = `${h.old_value} → ${h.new_value}`;
+            } else if (h.field === 'item_added') {
+                icon = '➕';
+                action = `<span style="color:var(--green);">${h.new_value}</span>`;
+            } else if (h.field === 'item_removed') {
+                icon = '➖';
+                action = `<span style="color:var(--red);">${h.old_value}</span>`;
+            } else if (h.field === 'item_changed') {
+                icon = '🔧';
+                action = `${h.old_value} → ${h.new_value}`;
             } else {
-                action = h.new_value || h.description;
+                icon = '📋';
+                action = h.new_value || h.description || h.old_value;
             }
-            return `<div style="padding:4px 0; border-bottom:1px solid var(--border); display:flex; gap:12px; align-items:baseline;">
-                <span style="color:var(--text-muted); min-width:110px;">${dateStr}</span>
-                <span style="font-weight:600; min-width:100px;">${h.manager || '—'}</span>
-                <span>${action}${desc}</span>
+
+            return `<div style="padding:4px 0; border-bottom:1px solid var(--border); display:flex; gap:8px; align-items:baseline; font-size:12px;">
+                <span style="color:var(--text-muted); min-width:110px; font-size:11px;">${dateStr}</span>
+                <span style="font-weight:600; min-width:80px;">${h.manager || '—'}</span>
+                <span>${icon} ${action}${desc}</span>
             </div>`;
         }).join('');
     },
