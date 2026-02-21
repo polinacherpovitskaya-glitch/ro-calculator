@@ -43,9 +43,14 @@ const KPGenerator = {
             };
 
             try {
+                const fetchWithTimeout = (url, ms = 10000) => {
+                    const ctrl = new AbortController();
+                    const timer = setTimeout(() => ctrl.abort(), ms);
+                    return fetch(url, { signal: ctrl.signal }).finally(() => clearTimeout(timer));
+                };
                 const [regResp, boldResp] = await Promise.all([
-                    fetch(urls.reg).catch(() => fetch(fallbackUrls.reg)),
-                    fetch(urls.bold).catch(() => fetch(fallbackUrls.bold)),
+                    fetchWithTimeout(urls.reg).catch(() => fetchWithTimeout(fallbackUrls.reg)),
+                    fetchWithTimeout(urls.bold).catch(() => fetchWithTimeout(fallbackUrls.bold)),
                 ]);
 
                 const regBuf = await regResp.arrayBuffer();
@@ -81,13 +86,25 @@ const KPGenerator = {
     },
 
     _registerFonts(doc) {
-        if (this._fontData) {
-            doc.addFileToVFS('Roboto-Regular.ttf', this._fontData);
-            doc.addFont('Roboto-Regular.ttf', 'Roboto', 'normal');
-        }
-        if (this._fontBoldData) {
-            doc.addFileToVFS('Roboto-Bold.ttf', this._fontBoldData);
-            doc.addFont('Roboto-Bold.ttf', 'Roboto', 'bold');
+        try {
+            if (this._fontData) {
+                doc.addFileToVFS('Roboto-Regular.ttf', this._fontData);
+                doc.addFont('Roboto-Regular.ttf', 'Roboto', 'normal');
+            }
+            if (this._fontBoldData) {
+                doc.addFileToVFS('Roboto-Bold.ttf', this._fontBoldData);
+                doc.addFont('Roboto-Bold.ttf', 'Roboto', 'bold');
+            }
+        } catch (err) {
+            console.warn('Font registration failed, using fallback:', err);
+            // Clear broken cache
+            try {
+                localStorage.removeItem('ro_font_roboto_reg');
+                localStorage.removeItem('ro_font_roboto_bold');
+            } catch (e) {}
+            this._fontData = null;
+            this._fontBoldData = null;
+            this._fontLoaded = false;
         }
     },
 
@@ -105,6 +122,9 @@ const KPGenerator = {
         // Load font first
         await this.loadFont();
 
+        if (!window.jspdf || !window.jspdf.jsPDF) {
+            throw new Error('jsPDF не загружен. Проверьте интернет-соединение и перезагрузите страницу.');
+        }
         const { jsPDF } = window.jspdf;
         const doc = new jsPDF('p', 'mm', 'a4');
         this._registerFonts(doc);

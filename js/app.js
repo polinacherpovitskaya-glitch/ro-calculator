@@ -1560,7 +1560,13 @@ const Calculator = {
             return;
         }
 
-        await KPGenerator.generate(orderName, clientName, kpItems);
+        try {
+            App.toast('Генерация КП...');
+            await KPGenerator.generate(orderName, clientName, kpItems);
+        } catch (err) {
+            console.error('KP generation error:', err);
+            App.toast('Ошибка генерации КП: ' + err.message);
+        }
     },
 };
 
