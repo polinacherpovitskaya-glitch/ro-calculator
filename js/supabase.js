@@ -39,6 +39,7 @@ const LOCAL_KEYS = {
     chinaDeliveries: 'ro_calc_china_deliveries',
     vacations: 'ro_calc_vacations',
     employees: 'ro_calc_employees',
+    orderFactuals: 'ro_calc_order_factuals',
 };
 
 // Data version — increment to force cache reset for molds
@@ -322,6 +323,54 @@ async function loadFintabloImports(orderId) {
     }
     const imports = getLocal(LOCAL_KEYS.imports) || [];
     return imports.filter(i => i.order_id === orderId);
+}
+
+// =============================================
+// ORDER FACTUALS (Plan vs Fact data)
+// =============================================
+
+async function loadFactual(orderId) {
+    if (isSupabaseReady()) {
+        const { data, error } = await supabaseClient
+            .from('order_factuals')
+            .select('*')
+            .eq('order_id', orderId)
+            .single();
+        if (error && error.code !== 'PGRST116') console.error('loadFactual error:', error);
+        return data || null;
+    }
+    const all = getLocal(LOCAL_KEYS.orderFactuals) || [];
+    return all.find(f => f.order_id === orderId) || null;
+}
+
+async function saveFactual(orderId, factData) {
+    const record = { ...factData, order_id: orderId, updated_at: new Date().toISOString() };
+    if (isSupabaseReady()) {
+        // Check if exists
+        const existing = await loadFactual(orderId);
+        if (existing) {
+            const { error } = await supabaseClient
+                .from('order_factuals')
+                .update(record)
+                .eq('order_id', orderId);
+            if (error) console.error('saveFactual update error:', error);
+        } else {
+            const { error } = await supabaseClient
+                .from('order_factuals')
+                .insert(record);
+            if (error) console.error('saveFactual insert error:', error);
+        }
+    } else {
+        const all = getLocal(LOCAL_KEYS.orderFactuals) || [];
+        const idx = all.findIndex(f => f.order_id === orderId);
+        if (idx >= 0) {
+            all[idx] = record;
+        } else {
+            record.id = Date.now();
+            all.push(record);
+        }
+        setLocal(LOCAL_KEYS.orderFactuals, all);
+    }
 }
 
 // =============================================
