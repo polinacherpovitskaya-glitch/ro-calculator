@@ -614,6 +614,24 @@ table .text-center { text-align: center; }
 .status-dot.completed { background: var(--green); }
 .status-dot.cancelled { background: var(--red); }
 
+/* Status select dropdown in orders table */
+.status-select {
+    font-size: 12px;
+    padding: 3px 6px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    cursor: pointer;
+    transition: var(--transition);
+    font-family: var(--font);
+}
+.status-select:focus { outline: 2px solid var(--accent); border-color: var(--accent); }
+.status-select.status-draft { color: var(--text-muted); }
+.status-select.status-calculated { color: var(--accent); }
+.status-select.status-in_production { color: var(--yellow); font-weight: 600; }
+.status-select.status-completed { color: var(--green); font-weight: 600; }
+.status-select.status-cancelled { color: var(--red); }
+
 /* =============================================
    PAGES
    ============================================= */

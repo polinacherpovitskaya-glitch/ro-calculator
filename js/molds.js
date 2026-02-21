@@ -1,38 +1,22 @@
 // =============================================
-// Recycle Object — Molds (Справочник молдов)
-// Compact table view with full pricing
+// Recycle Object — Blanks (Справочник бланков)
+// Compact table view with pricing
 // =============================================
 
-// Pricing formula for molds page:
-// себестоимость → цена = себест / (1 - 0.40 - 0.06 - 0.06) = себест / 0.48
-// НДС 5% сверху: цена_с_НДС = цена * 1.05
-// 40% чистая прибыль, 6% ОСН, 6% коммерческий отдел
+// Pricing formula for blanks page:
+// Цена продажи = себестоимость + 10 000 ₽ / тираж
+// 10 000 ₽ — фиксированная наценка (работа менеджера), делится на тираж
 
 // Молд НЕ делим на тираж заказа — делим на макс. производительность молда
 // Макс. производительность = 5000 шт * 0.9 = 4500 шт
 const MOLD_MAX_LIFETIME = 4500; // максимальный ресурс молда (шт)
 
 const MOLD_TIERS = [50, 100, 300, 500, 1000, 5000];
+const BLANKS_FIXED_MARKUP = 10000; // фиксированная наценка ₽
 
-// Маржа зависит от тиража:
-// 1000 шт = 40% (базовая), мелкие тиражи дороже, крупные — со скидкой
-const TIER_MARGINS = {
-    50: 0.65,
-    100: 0.55,
-    300: 0.48,
-    500: 0.43,
-    1000: 0.40,
-    5000: 0.35,
-};
-
-function calcMoldTargetPrice(cost, qty) {
-    // price = cost / (1 - margin - osn - commercial)
-    // osn=0.06, commercial=0.06
-    if (cost <= 0) return { priceNoVat: 0, priceVat: 0, margin: 0 };
-    const margin = TIER_MARGINS[qty] || 0.40;
-    const priceNoVat = round2(cost / (1 - margin - 0.06 - 0.06));
-    const priceVat = round2(priceNoVat * 1.05);
-    return { priceNoVat, priceVat, margin };
+function calcBlankSellPrice(cost, qty) {
+    if (cost <= 0 || qty <= 0) return 0;
+    return round2(cost + BLANKS_FIXED_MARKUP / qty);
 }
 
 const Molds = {
@@ -84,22 +68,22 @@ const Molds = {
                 // Replace default mold amortization with real cost / MOLD_MAX_LIFETIME
                 const adjustedCost = result.costTotal - result.costMoldAmortization + moldAmortPerUnit;
 
-                const pricing = calcMoldTargetPrice(adjustedCost, qty);
+                // New formula: sell price = cost + 10000 / qty
+                const sellPrice = calcBlankSellPrice(adjustedCost, qty);
 
                 m.tiers[qty] = {
                     cost: round2(adjustedCost),
-                    priceNoVat: pricing.priceNoVat,
-                    priceVat: pricing.priceVat,
+                    sellPrice: sellPrice,
                     moldAmort: round2(moldAmortPerUnit),
-                    margin: pricing.margin,
+                    markup: round2(BLANKS_FIXED_MARKUP / qty),
                 };
             });
 
-            // Margin at 500 units
+            // Margin info at 500 units
             const t500 = m.tiers[500];
             if (t500) {
-                const margin = t500.priceNoVat - t500.cost;
-                m.margin_500_pct = t500.priceNoVat > 0 ? round2(margin / t500.priceNoVat * 100) : 0;
+                const margin = t500.sellPrice - t500.cost;
+                m.margin_500_pct = t500.sellPrice > 0 ? round2(margin / t500.sellPrice * 100) : 0;
             }
 
             // Labels
@@ -153,11 +137,9 @@ const Molds = {
             return;
         }
 
-        // Build tier headers with margin %
+        // Build tier headers
         const tierHeaders = MOLD_TIERS.map(q => {
-            const m = TIER_MARGINS[q] || 0.40;
-            const pct = Math.round(m * 100);
-            return `<th class="text-right" style="font-size:11px">${q >= 1000 ? (q/1000) + 'K' : q}<br><span style="font-size:9px;color:var(--text-muted);font-weight:400">${pct}%</span></th>`;
+            return `<th class="text-right" style="font-size:11px">${q >= 1000 ? (q/1000) + 'K' : q}</th>`;
         }).join('');
 
         let html = `
@@ -181,41 +163,32 @@ const Molds = {
                 : `${m.pph_min}${m.pph_max !== m.pph_min ? '-' + m.pph_max : ''}`;
             const moldCountBadge = (m.mold_count || 1) > 1 ? ` <sup style="color:var(--orange);font-weight:700">x${m.mold_count}</sup>` : '';
 
-            // Cost row cells
+            // Cost row cells (gray)
             const costCells = MOLD_TIERS.map(q => {
                 const t = m.tiers?.[q];
                 return `<td class="text-right" style="font-size:11px;color:var(--text-secondary)">${t ? Math.round(t.cost) : '—'}</td>`;
             }).join('');
 
-            // Price row cells (without VAT)
-            const priceCells = MOLD_TIERS.map(q => {
+            // Sell price row cells (green, bold) — cost + 10000/qty
+            const sellCells = MOLD_TIERS.map(q => {
                 const t = m.tiers?.[q];
-                return `<td class="text-right" style="font-size:12px;font-weight:600">${t ? Math.round(t.priceNoVat) : '—'}</td>`;
-            }).join('');
-
-            // Price with VAT row cells
-            const priceVatCells = MOLD_TIERS.map(q => {
-                const t = m.tiers?.[q];
-                return `<td class="text-right" style="font-size:11px;color:var(--green)">${t ? Math.round(t.priceVat) : '—'}</td>`;
+                return `<td class="text-right" style="font-size:12px;font-weight:600;color:var(--green)">${t ? Math.round(t.sellPrice) : '—'}</td>`;
             }).join('');
 
             html += `
                 <tr style="border-bottom:2px solid var(--border)">
-                    <td rowspan="3" style="vertical-align:top; padding:6px 8px;">
+                    <td rowspan="2" style="vertical-align:top; padding:6px 8px;">
                         <div style="font-weight:700; font-size:13px;"><span class="status-dot ${statusDot}"></span>${this.esc(m.name)}${moldCountBadge}</div>
                         ${m.client ? `<div style="font-size:10px; color:var(--text-muted); margin-top:2px;">${this.esc(m.client)}</div>` : ''}
                         ${m.notes ? `<div style="font-size:10px; color:var(--text-muted); font-style:italic">${this.esc(m.notes)}</div>` : ''}
                     </td>
-                    <td rowspan="3" style="vertical-align:top; font-size:12px; text-align:center">${pphDisplay}</td>
-                    <td rowspan="3" style="vertical-align:top; font-size:12px; text-align:center">${m.weight_grams}</td>
+                    <td rowspan="2" style="vertical-align:top; font-size:12px; text-align:center">${pphDisplay}</td>
+                    <td rowspan="2" style="vertical-align:top; font-size:12px; text-align:center">${m.weight_grams}</td>
                     ${costCells}
-                    <td rowspan="3" style="vertical-align:top"><button class="btn btn-sm btn-outline" style="padding:2px 6px;font-size:10px" onclick="Molds.editMold(${m.id})">&#9998;</button></td>
+                    <td rowspan="2" style="vertical-align:top"><button class="btn btn-sm btn-outline" style="padding:2px 6px;font-size:10px" onclick="Molds.editMold(${m.id})">&#9998;</button></td>
                 </tr>
                 <tr style="background:var(--bg)">
-                    ${priceCells}
-                </tr>
-                <tr>
-                    ${priceVatCells}
+                    ${sellCells}
                 </tr>`;
         });
 
@@ -225,9 +198,7 @@ const Molds = {
         html += `
             <div style="margin-top:10px; font-size:11px; color:var(--text-muted); display:flex; gap:16px; flex-wrap:wrap;">
                 <span><span style="color:var(--text-secondary)">&#9644;</span> Себестоимость</span>
-                <span><strong>&#9644;</strong> Цена (без НДС)</span>
-                <span><span style="color:var(--green)">&#9644;</span> Цена + НДС 5%</span>
-                <span>Маржа: 65%→35% по тиражу + 6% ОСН + 6% коммерч.</span>
+                <span><span style="color:var(--green);font-weight:600">&#9644;</span> Цена продажи (себест. + ${formatRub(BLANKS_FIXED_MARKUP)} / тираж)</span>
                 <span>Аморт. бланка: на ${MOLD_MAX_LIFETIME} шт (макс. ресурс)</span>
                 <span><sup style="color:var(--green)">&#10003;</sup> = факт. скорость</span>
             </div>
@@ -360,18 +331,18 @@ const Molds = {
     },
 
     exportCSV() {
-        const tierCols = MOLD_TIERS.flatMap(q => [`Себест. ${q}шт`, `Цена ${q}шт`, `+НДС ${q}шт`]);
-        const headers = ['Название', 'Категория', 'Статус', 'Тип', 'Кол-во молдов', 'Молд ₽',
+        const tierCols = MOLD_TIERS.flatMap(q => [`Себест. ${q}шт`, `Цена ${q}шт`]);
+        const headers = ['Название', 'Категория', 'Статус', 'Кол-во молдов',
             'Шт/ч план', 'Шт/ч факт', 'Вес г', ...tierCols,
             'Заказов', 'Выпущено'];
 
         const rows = this.allMolds.map(m => {
             const tierData = MOLD_TIERS.flatMap(q => {
                 const t = m.tiers?.[q];
-                return [t?.cost || 0, t?.priceNoVat || 0, t?.priceVat || 0];
+                return [t?.cost || 0, t?.sellPrice || 0];
             });
             return [
-                m.name, m.category_label, m.status_label, m.complexity_label, m.mold_count || 1, m.cost_rub_calc,
+                m.name, m.category_label, m.status_label, m.mold_count || 1,
                 m.pph_min + (m.pph_max !== m.pph_min ? '-' + m.pph_max : ''), m.pph_actual || '',
                 m.weight_grams, ...tierData,
                 m.total_orders || 0, m.total_units_produced || 0,

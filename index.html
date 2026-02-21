@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=10">
+    <link rel="stylesheet" href="css/style.css?v=11">
 </head>
 <body>
 
@@ -277,6 +277,12 @@
                     </div>
                 </div>
                 <button class="btn btn-success btn-lg" onclick="Calculator.saveOrder()">Сохранить</button>
+            </div>
+
+            <!-- Change history (shown when editing existing order) -->
+            <div class="card" id="calc-history" style="display:none; margin-top:16px;">
+                <h3 style="margin:0 0 8px 0; font-size:14px;">История изменений</h3>
+                <div id="calc-history-list" style="font-size:12px;"></div>
             </div>
         </div>
 
@@ -1093,17 +1099,17 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.2/jspdf.umd.min.js"></script>
-<script src="js/supabase.js?v=10"></script>
-<script src="js/calculator.js?v=10"></script>
-<script src="js/app.js?v=10"></script>
-<script src="js/dashboard.js?v=10"></script>
-<script src="js/orders.js?v=10"></script>
-<script src="js/analytics.js?v=10"></script>
-<script src="js/molds.js?v=10"></script>
-<script src="js/kp.js?v=10"></script>
-<script src="js/timetrack.js?v=10"></script>
-<script src="js/tasks.js?v=10"></script>
-<script src="js/import.js?v=10"></script>
-<script src="js/settings.js?v=10"></script>
+<script src="js/supabase.js?v=11"></script>
+<script src="js/calculator.js?v=11"></script>
+<script src="js/app.js?v=11"></script>
+<script src="js/dashboard.js?v=11"></script>
+<script src="js/orders.js?v=11"></script>
+<script src="js/analytics.js?v=11"></script>
+<script src="js/molds.js?v=11"></script>
+<script src="js/kp.js?v=11"></script>
+<script src="js/timetrack.js?v=11"></script>
+<script src="js/tasks.js?v=11"></script>
+<script src="js/import.js?v=11"></script>
+<script src="js/settings.js?v=11"></script>
 </body>
 </html>

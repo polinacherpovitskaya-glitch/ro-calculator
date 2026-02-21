@@ -184,6 +184,8 @@ const Calculator = {
         document.getElementById('calc-findirector').style.display = 'none';
         document.getElementById('calc-summary-footer').style.display = 'none';
         document.getElementById('calc-add-item-btn').style.display = '';
+        const historyEl = document.getElementById('calc-history');
+        if (historyEl) historyEl.style.display = 'none';
     },
 
     // ==========================================
@@ -969,9 +971,19 @@ const Calculator = {
             });
         });
 
+        const isEdit = !!App.editingOrderId;
         const orderId = await saveOrder(order, items);
         if (orderId) {
             App.editingOrderId = orderId;
+            // Record change history
+            const managerName = document.getElementById('calc-manager-name').value.trim() || 'Неизвестный';
+            await Orders.addChangeRecord(orderId, {
+                field: isEdit ? 'order_edit' : 'order_create',
+                old_value: '',
+                new_value: isEdit ? 'Заказ отредактирован' : 'Заказ создан',
+                manager: managerName,
+                description: `Выручка: ${formatRub(summary.totalRevenue)}, Маржа: ${formatPercent(summary.marginPercent)}`,
+            });
             App.toast('Заказ сохранен');
         } else {
             App.toast('Ошибка сохранения');
@@ -1053,7 +1065,44 @@ const Calculator = {
         if (this.items.length === 0) this.addItem();
         this.recalculate();
 
+        // Show change history
+        this.showOrderHistory(orderId);
+
         App.navigate('calculator');
+    },
+
+    async showOrderHistory(orderId) {
+        const historyEl = document.getElementById('calc-history');
+        const listEl = document.getElementById('calc-history-list');
+        if (!historyEl || !listEl) return;
+
+        const history = await Orders.loadHistory(orderId);
+        if (history.length === 0) {
+            historyEl.style.display = 'none';
+            return;
+        }
+
+        historyEl.style.display = '';
+        listEl.innerHTML = history.slice().reverse().map(h => {
+            const d = new Date(h.date);
+            const dateStr = d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' }) + ' ' + d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+            const desc = h.description ? ` — ${h.description}` : '';
+            let action = '';
+            if (h.field === 'status') {
+                action = `${h.old_value} → ${h.new_value}`;
+            } else if (h.field === 'order_create') {
+                action = 'Заказ создан';
+            } else if (h.field === 'order_edit') {
+                action = 'Заказ отредактирован';
+            } else {
+                action = h.new_value || h.description;
+            }
+            return `<div style="padding:4px 0; border-bottom:1px solid var(--border); display:flex; gap:12px; align-items:baseline;">
+                <span style="color:var(--text-muted); min-width:110px;">${dateStr}</span>
+                <span style="font-weight:600; min-width:100px;">${h.manager || '—'}</span>
+                <span>${action}${desc}</span>
+            </div>`;
+        }).join('');
     },
 
     // ==========================================
@@ -1069,28 +1118,41 @@ const Calculator = {
             return;
         }
 
-        // Collect data for КП
+        // Validate: all sell prices must be filled
+        let missingPrices = [];
+        this.items.forEach((item, i) => {
+            if (!item.result || !item.quantity) return;
+            if (!item.sell_price_item || item.sell_price_item <= 0) {
+                missingPrices.push(`Изделие "${item.product_name || (i+1)}": цена продажи`);
+            }
+        });
+        this.hardwareItems.forEach((hw, i) => {
+            if (hw.qty > 0 && (!hw.sell_price || hw.sell_price <= 0)) {
+                missingPrices.push(`Фурнитура "${hw.name || (i+1)}": цена продажи`);
+            }
+        });
+        this.packagingItems.forEach((pkg, i) => {
+            if (pkg.qty > 0 && (!pkg.sell_price || pkg.sell_price <= 0)) {
+                missingPrices.push(`Упаковка "${pkg.name || (i+1)}": цена продажи`);
+            }
+        });
+
+        if (missingPrices.length > 0) {
+            App.toast('Заполните цены продажи: ' + missingPrices.join(', '), 5000);
+            return;
+        }
+
+        // Collect data for КП — only actual sell prices
         const kpItems = [];
 
         this.items.forEach(item => {
             if (!item.result || !item.quantity) return;
+            // Item price includes printing cost — no separate printing lines in KP
             kpItems.push({
                 type: 'product',
                 name: item.product_name || 'Изделие',
                 qty: item.quantity,
-                price: item.sell_price_item || item.target_price_item || 0,
-            });
-
-            // Add printing lines
-            (item.printings || []).forEach(pr => {
-                if (pr.qty > 0 && pr.price > 0) {
-                    kpItems.push({
-                        type: 'printing',
-                        name: 'Нанесение' + (pr.name ? ': ' + pr.name : ''),
-                        qty: pr.qty,
-                        price: pr.price,
-                    });
-                }
+                price: item.sell_price_item,
             });
         });
 
@@ -1100,7 +1162,7 @@ const Calculator = {
                     type: 'hardware',
                     name: hw.name || 'Фурнитура',
                     qty: hw.qty,
-                    price: hw.sell_price || hw.target_price || 0,
+                    price: hw.sell_price,
                 });
             }
         });
@@ -1111,7 +1173,7 @@ const Calculator = {
                     type: 'packaging',
                     name: pkg.name || 'Упаковка',
                     qty: pkg.qty,
-                    price: pkg.sell_price || pkg.target_price || 0,
+                    price: pkg.sell_price,
                 });
             }
         });
