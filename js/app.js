@@ -2,6 +2,8 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
+const APP_VERSION = 'v20';
+
 const App = {
     currentPage: 'dashboard',
     settings: null,
@@ -64,6 +66,10 @@ const App = {
     async showApp() {
         document.getElementById('auth-screen').style.display = 'none';
         document.getElementById('app-layout').classList.add('active');
+
+        // Show version in sidebar
+        const verEl = document.getElementById('app-version');
+        if (verEl) verEl.textContent = APP_VERSION;
 
         initSupabase();
 
