@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=25">
+    <link rel="stylesheet" href="css/style.css?v=24">
 </head>
 <body>
 
@@ -363,17 +363,13 @@
                 <h1>Факт: план vs реальность</h1>
             </div>
 
-            <!-- Order selector (searchable) -->
+            <!-- Order selector -->
             <div class="card" style="margin-bottom:16px">
                 <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
                     <label style="font-weight:600; white-space:nowrap;">Заказ:</label>
-                    <div style="position:relative; max-width:400px; flex:1;">
-                        <input type="text" id="fact-order-search" class="form-control" placeholder="Поиск заказа..." autocomplete="off"
-                            oninput="Factual.onSearch(this.value)"
-                            onfocus="Factual.showDropdown()"
-                            style="width:100%;">
-                        <div id="fact-order-dropdown" style="display:none; position:absolute; top:100%; left:0; right:0; max-height:300px; overflow-y:auto; background:var(--card-bg); border:1px solid var(--border); border-radius:0 0 8px 8px; box-shadow:0 4px 12px rgba(0,0,0,0.15); z-index:100;"></div>
-                    </div>
+                    <select id="fact-order-select" class="form-control" style="max-width:400px" onchange="Factual.onOrderSelect(this.value)">
+                        <option value="">-- Выберите заказ --</option>
+                    </select>
                     <span id="fact-order-status" style="font-size:12px; color:var(--text-muted);"></span>
                 </div>
             </div>
@@ -1289,18 +1285,18 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.2/jspdf.umd.min.js"></script>
-<script src="js/supabase.js?v=25"></script>
-<script src="js/calculator.js?v=25"></script>
-<script src="js/app.js?v=25"></script>
-<script src="js/dashboard.js?v=25"></script>
-<script src="js/orders.js?v=25"></script>
-<script src="js/analytics.js?v=25"></script>
-<script src="js/molds.js?v=25"></script>
-<script src="js/kp.js?v=25"></script>
-<script src="js/timetrack.js?v=25"></script>
-<script src="js/tasks.js?v=25"></script>
-<script src="js/import.js?v=25"></script>
-<script src="js/factual.js?v=25"></script>
-<script src="js/settings.js?v=25"></script>
+<script src="js/supabase.js?v=24"></script>
+<script src="js/calculator.js?v=24"></script>
+<script src="js/app.js?v=24"></script>
+<script src="js/dashboard.js?v=24"></script>
+<script src="js/orders.js?v=24"></script>
+<script src="js/analytics.js?v=24"></script>
+<script src="js/molds.js?v=24"></script>
+<script src="js/kp.js?v=24"></script>
+<script src="js/timetrack.js?v=24"></script>
+<script src="js/tasks.js?v=24"></script>
+<script src="js/import.js?v=24"></script>
+<script src="js/factual.js?v=24"></script>
+<script src="js/settings.js?v=24"></script>
 </body>
 </html>

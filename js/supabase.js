@@ -244,7 +244,6 @@ async function loadOrders(filters = {}) {
 }
 
 async function loadOrder(orderId) {
-    orderId = typeof orderId === 'string' && orderId.match(/^\d+$/) ? Number(orderId) : orderId;
     if (isSupabaseReady()) {
         const { data: order, error: e1 } = await supabaseClient
             .from('orders').select('*').eq('id', orderId).single();
@@ -262,7 +261,6 @@ async function loadOrder(orderId) {
 }
 
 async function updateOrderStatus(orderId, status) {
-    orderId = typeof orderId === 'string' && orderId.match(/^\d+$/) ? Number(orderId) : orderId;
     if (isSupabaseReady()) {
         const { error } = await supabaseClient
             .from('orders')
@@ -281,7 +279,6 @@ async function updateOrderStatus(orderId, status) {
 }
 
 async function deleteOrder(orderId) {
-    orderId = typeof orderId === 'string' && orderId.match(/^\d+$/) ? Number(orderId) : orderId;
     if (isSupabaseReady()) {
         const { error } = await supabaseClient.from('orders').delete().eq('id', orderId);
         if (error) console.error('deleteOrder error:', error);
@@ -333,7 +330,6 @@ async function loadFintabloImports(orderId) {
 // =============================================
 
 async function loadFactual(orderId) {
-    orderId = typeof orderId === 'string' && orderId.match(/^\d+$/) ? Number(orderId) : orderId;
     if (isSupabaseReady()) {
         const { data, error } = await supabaseClient
             .from('order_factuals')
@@ -348,7 +344,6 @@ async function loadFactual(orderId) {
 }
 
 async function saveFactual(orderId, factData) {
-    orderId = typeof orderId === 'string' && orderId.match(/^\d+$/) ? Number(orderId) : orderId;
     const record = { ...factData, order_id: orderId, updated_at: new Date().toISOString() };
     if (isSupabaseReady()) {
         // Check if exists

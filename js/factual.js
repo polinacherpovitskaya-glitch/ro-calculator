@@ -30,88 +30,27 @@ const Factual = {
         { key: 'hours_packaging',  label: 'Часы упаковка / срезание', planField: 'hoursPackaging' },
     ],
 
-    allOrders: [],
-
     async load() {
-        const searchInput = document.getElementById('fact-order-search');
-        if (!searchInput) return;
+        const select = document.getElementById('fact-order-select');
+        if (!select) return;
 
         // Load all orders
-        this.allOrders = await loadOrders();
+        const orders = await loadOrders();
+        select.innerHTML = '<option value="">-- Выберите заказ --</option>';
+        orders.forEach(o => {
+            const opt = document.createElement('option');
+            opt.value = o.id;
+            opt.textContent = (o.order_name || 'Без названия') +
+                (o.client_name ? ' — ' + o.client_name : '') +
+                ' (' + (o.status || 'draft') + ')';
+            select.appendChild(opt);
+        });
 
-        // If we had a previous selection, restore display
+        // If we had a previous selection, restore it
         if (this.currentOrderId) {
-            const prev = this.allOrders.find(o => o.id == this.currentOrderId);
-            if (prev) searchInput.value = (prev.order_name || '') + (prev.client_name ? ' — ' + prev.client_name : '');
+            select.value = this.currentOrderId;
             await this.onOrderSelect(this.currentOrderId);
         }
-
-        // Close dropdown on outside click
-        document.addEventListener('click', (e) => {
-            const dropdown = document.getElementById('fact-order-dropdown');
-            if (dropdown && !e.target.closest('#fact-order-search') && !e.target.closest('#fact-order-dropdown')) {
-                dropdown.style.display = 'none';
-            }
-        });
-    },
-
-    showDropdown() {
-        this.renderDropdown(document.getElementById('fact-order-search').value);
-    },
-
-    onSearch(query) {
-        this.renderDropdown(query);
-    },
-
-    renderDropdown(query) {
-        const dropdown = document.getElementById('fact-order-dropdown');
-        if (!dropdown) return;
-
-        const q = (query || '').toLowerCase().trim();
-        const filtered = q
-            ? this.allOrders.filter(o => {
-                const text = ((o.order_name || '') + ' ' + (o.client_name || '')).toLowerCase();
-                return text.includes(q);
-            })
-            : this.allOrders;
-
-        if (filtered.length === 0) {
-            dropdown.innerHTML = '<div style="padding:12px; color:var(--text-muted); font-size:13px;">Ничего не найдено</div>';
-            dropdown.style.display = '';
-            return;
-        }
-
-        dropdown.innerHTML = filtered.slice(0, 30).map(o => {
-            const name = o.order_name || 'Без названия';
-            const client = o.client_name ? ' — ' + o.client_name : '';
-            const status = o.status || 'draft';
-            const isActive = o.id == this.currentOrderId;
-            return `<div onclick="Factual.selectOrder(${typeof o.id === 'number' ? o.id : "'" + o.id + "'"})"
-                style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border); font-size:13px; ${isActive ? 'background:var(--green-light);font-weight:600;' : ''}"
-                onmouseenter="this.style.background='var(--bg)'"
-                onmouseleave="this.style.background='${isActive ? 'var(--green-light)' : ''}'">
-                <div>${name}${client}</div>
-                <div style="font-size:11px; color:var(--text-muted);">${status}</div>
-            </div>`;
-        }).join('');
-
-        if (filtered.length > 30) {
-            dropdown.innerHTML += '<div style="padding:8px 12px; font-size:11px; color:var(--text-muted);">... ещё ' + (filtered.length - 30) + ' заказов</div>';
-        }
-
-        dropdown.style.display = '';
-    },
-
-    selectOrder(orderId) {
-        const dropdown = document.getElementById('fact-order-dropdown');
-        const searchInput = document.getElementById('fact-order-search');
-        if (dropdown) dropdown.style.display = 'none';
-
-        const order = this.allOrders.find(o => o.id == orderId);
-        if (order && searchInput) {
-            searchInput.value = (order.order_name || '') + (order.client_name ? ' — ' + order.client_name : '');
-        }
-        this.onOrderSelect(orderId);
     },
 
     async onOrderSelect(orderId) {

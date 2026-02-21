@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v25';
+const APP_VERSION = 'v24';
 
 const App = {
     currentPage: 'dashboard',
@@ -858,19 +858,10 @@ const Calculator = {
         const contentEl = document.getElementById('calc-pricing-content');
         if (!pricingEl || !contentEl) return;
 
-        // Collect all priced entities (guard against NaN/Infinity)
-        const pricedItems = this.items.filter(it => {
-            if (!it.result) return false;
-            if (!isFinite(it.result.costTotal) || it.result.costTotal <= 0) {
-                if (it.quantity > 0 && it.pieces_per_hour > 0) {
-                    console.warn('Item excluded from pricing (costTotal=' + it.result.costTotal + '):', it.product_name, it);
-                }
-                return false;
-            }
-            return true;
-        });
-        const pricedHw = this.hardwareItems.filter(hw => hw.result && isFinite(hw.result.costPerUnit) && hw.result.costPerUnit > 0);
-        const pricedPkg = this.packagingItems.filter(pkg => pkg.result && isFinite(pkg.result.costPerUnit) && pkg.result.costPerUnit > 0);
+        // Collect all priced entities
+        const pricedItems = this.items.filter(it => it.result && it.result.costTotal > 0);
+        const pricedHw = this.hardwareItems.filter(hw => hw.result && hw.result.costPerUnit > 0);
+        const pricedPkg = this.packagingItems.filter(pkg => pkg.result && pkg.result.costPerUnit > 0);
 
         if (pricedItems.length === 0 && pricedHw.length === 0 && pricedPkg.length === 0) {
             pricingEl.style.display = 'none';
@@ -1140,9 +1131,8 @@ const Calculator = {
 
         let invoiceHtml = '';
         if (invoiceRows.length > 0) {
-            const vatRate = params.vatRate || 0.05;
             const subtotal = invoiceRows.reduce((s, r) => s + r.total, 0);
-            const vat = round2(subtotal * vatRate);
+            const vat = round2(subtotal * 0.05);
             const grandTotal = round2(subtotal + vat);
 
             invoiceHtml = `
@@ -1152,11 +1142,9 @@ const Calculator = {
                     <thead>
                         <tr style="background:var(--bg);font-size:11px;color:var(--text-secondary);">
                             <th style="text-align:left;padding:6px 12px">Наименование</th>
-                            <th style="text-align:right;padding:6px 8px;width:70px">Кол-во</th>
-                            <th style="text-align:right;padding:6px 8px;width:90px">Цена/шт</th>
-                            <th style="text-align:right;padding:6px 8px;width:100px">Цена с НДС</th>
-                            <th style="text-align:right;padding:6px 8px;width:100px">Сумма</th>
-                            <th style="text-align:right;padding:6px 12px;width:110px">Сумма с НДС</th>
+                            <th style="text-align:right;padding:6px 8px;width:80px">Кол-во</th>
+                            <th style="text-align:right;padding:6px 8px;width:100px">Цена/шт</th>
+                            <th style="text-align:right;padding:6px 12px;width:110px">Сумма</th>
                         </tr>
                     </thead>
                     <tbody>`;
@@ -1164,16 +1152,12 @@ const Calculator = {
             invoiceRows.forEach((r, i) => {
                 const bg = i % 2 === 0 ? '' : 'background:var(--bg);';
                 const icon = r.type === 'item' ? '&#9670;' : r.type === 'printing' ? '&#9998;' : r.type === 'hw' ? '&#9881;' : '&#9744;';
-                const priceVat = round2(r.price * (1 + vatRate));
-                const totalVat = round2(r.total * (1 + vatRate));
                 invoiceHtml += `
                         <tr style="${bg}">
                             <td style="padding:6px 12px;">${icon} ${r.name}</td>
                             <td style="text-align:right;padding:6px 8px;">${r.qty} шт</td>
                             <td style="text-align:right;padding:6px 8px;">${formatRub(r.price)}</td>
-                            <td style="text-align:right;padding:6px 8px;color:var(--green);font-weight:600;">${formatRub(priceVat)}</td>
-                            <td style="text-align:right;padding:6px 8px;">${formatRub(r.total)}</td>
-                            <td style="text-align:right;padding:6px 12px;font-weight:600;color:var(--green);">${formatRub(totalVat)}</td>
+                            <td style="text-align:right;padding:6px 12px;font-weight:600;">${formatRub(r.total)}</td>
                         </tr>`;
             });
 
@@ -1181,16 +1165,16 @@ const Calculator = {
                     </tbody>
                     <tfoot>
                         <tr style="border-top:1px solid var(--border);">
-                            <td colspan="4" style="text-align:right;padding:6px 8px;color:var(--text-secondary);">Итого без НДС</td>
-                            <td colspan="2" style="text-align:right;padding:6px 12px;font-weight:600;">${formatRub(subtotal)}</td>
+                            <td colspan="3" style="text-align:right;padding:6px 8px;color:var(--text-secondary);">Итого без НДС</td>
+                            <td style="text-align:right;padding:6px 12px;font-weight:600;">${formatRub(subtotal)}</td>
                         </tr>
                         <tr>
-                            <td colspan="4" style="text-align:right;padding:4px 8px;color:var(--text-secondary);font-size:11px;">НДС ${round2(vatRate * 100)}%</td>
-                            <td colspan="2" style="text-align:right;padding:4px 12px;font-size:11px;color:var(--text-muted);">${formatRub(vat)}</td>
+                            <td colspan="3" style="text-align:right;padding:4px 8px;color:var(--text-secondary);font-size:11px;">НДС 5%</td>
+                            <td style="text-align:right;padding:4px 12px;font-size:11px;color:var(--text-muted);">${formatRub(vat)}</td>
                         </tr>
                         <tr style="background:var(--bg);">
-                            <td colspan="4" style="text-align:right;padding:8px;font-weight:700;font-size:14px;">ИТОГО с НДС</td>
-                            <td colspan="2" style="text-align:right;padding:8px 12px;font-weight:700;font-size:14px;color:var(--green);">${formatRub(grandTotal)}</td>
+                            <td colspan="3" style="text-align:right;padding:8px;font-weight:700;font-size:14px;">ИТОГО с НДС</td>
+                            <td style="text-align:right;padding:8px 12px;font-weight:700;font-size:14px;color:var(--green);">${formatRub(grandTotal)}</td>
                         </tr>
                     </tfoot>
                 </table>
