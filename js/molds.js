@@ -149,7 +149,7 @@ const Molds = {
         const container = document.getElementById('molds-cards-container');
 
         if (molds.length === 0) {
-            container.innerHTML = '<div class="empty-state"><p>Нет молдов по фильтрам</p></div>';
+            container.innerHTML = '<div class="empty-state"><p>Нет бланков по фильтрам</p></div>';
             return;
         }
 
@@ -165,10 +165,9 @@ const Molds = {
             <table style="font-size:12px; white-space:nowrap;">
                 <thead>
                     <tr>
-                        <th style="min-width:160px">Молд</th>
+                        <th style="min-width:160px">Бланк</th>
                         <th style="width:60px">шт/ч</th>
                         <th style="width:40px">г</th>
-                        <th style="width:70px">Молд ₽</th>
                         ${tierHeaders}
                         <th style="width:30px"></th>
                     </tr>
@@ -204,15 +203,11 @@ const Molds = {
                 <tr style="border-bottom:2px solid var(--border)">
                     <td rowspan="3" style="vertical-align:top; padding:6px 8px;">
                         <div style="font-weight:700; font-size:13px;"><span class="status-dot ${statusDot}"></span>${this.esc(m.name)}${moldCountBadge}</div>
-                        <div style="font-size:10px; color:var(--text-muted); margin-top:2px;">
-                            ${m.category_label} &middot; ${m.complexity_label}
-                            ${m.client ? ' &middot; ' + this.esc(m.client) : ''}
-                        </div>
+                        ${m.client ? `<div style="font-size:10px; color:var(--text-muted); margin-top:2px;">${this.esc(m.client)}</div>` : ''}
                         ${m.notes ? `<div style="font-size:10px; color:var(--text-muted); font-style:italic">${this.esc(m.notes)}</div>` : ''}
                     </td>
                     <td rowspan="3" style="vertical-align:top; font-size:12px; text-align:center">${pphDisplay}</td>
                     <td rowspan="3" style="vertical-align:top; font-size:12px; text-align:center">${m.weight_grams}</td>
-                    <td rowspan="3" style="vertical-align:top; font-size:11px; text-align:right">${Math.round(m.cost_rub_calc).toLocaleString('ru-RU')}</td>
                     ${costCells}
                     <td rowspan="3" style="vertical-align:top"><button class="btn btn-sm btn-outline" style="padding:2px 6px;font-size:10px" onclick="Molds.editMold(${m.id})">&#9998;</button></td>
                 </tr>
@@ -233,7 +228,7 @@ const Molds = {
                 <span><strong>&#9644;</strong> Цена (без НДС)</span>
                 <span><span style="color:var(--green)">&#9644;</span> Цена + НДС 5%</span>
                 <span>Маржа: 65%→35% по тиражу + 6% ОСН + 6% коммерч.</span>
-                <span>Аморт. молда: на ${MOLD_MAX_LIFETIME} шт (макс. ресурс)</span>
+                <span>Аморт. бланка: на ${MOLD_MAX_LIFETIME} шт (макс. ресурс)</span>
                 <span><sup style="color:var(--green)">&#10003;</sup> = факт. скорость</span>
             </div>
         </div>`;
@@ -271,7 +266,7 @@ const Molds = {
 
     showAddForm() {
         this.editingId = null;
-        document.getElementById('mold-form-title').textContent = 'Новый молд';
+        document.getElementById('mold-form-title').textContent = 'Новый бланк';
         this.clearForm();
         document.getElementById('mold-edit-form').style.display = '';
         document.getElementById('mold-edit-form').scrollIntoView({ behavior: 'smooth' });
@@ -281,7 +276,7 @@ const Molds = {
         const m = this.allMolds.find(x => x.id === id);
         if (!m) return;
         this.editingId = id;
-        document.getElementById('mold-form-title').textContent = 'Редактировать: ' + m.name;
+        document.getElementById('mold-form-title').textContent = 'Редактировать: ' + (m.name || '');
 
         document.getElementById('mold-name').value = m.name || '';
         document.getElementById('mold-category').value = m.category || 'blank';
@@ -324,7 +319,7 @@ const Molds = {
 
     async saveMold() {
         const name = document.getElementById('mold-name').value.trim();
-        if (!name) { App.toast('Введите название молда'); return; }
+        if (!name) { App.toast('Введите название бланка'); return; }
 
         this.recalcMoldCost();
 
@@ -359,7 +354,7 @@ const Molds = {
         }
 
         await saveMold(mold);
-        App.toast('Молд сохранен');
+        App.toast('Бланк сохранен');
         this.hideForm();
         await this.load();
     },

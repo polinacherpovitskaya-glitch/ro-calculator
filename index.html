@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=8">
+    <link rel="stylesheet" href="css/style.css?v=9">
 </head>
 <body>
 
@@ -54,7 +54,7 @@
             </a>
             <a href="#molds" data-page="molds">
                 <span class="nav-icon">&#9670;</span>
-                <span>Молды</span>
+                <span>Бланки</span>
             </a>
             <a href="#timetrack" data-page="timetrack">
                 <span class="nav-icon">&#9201;</span>
@@ -386,17 +386,17 @@
         <!-- ========== MOLDS ========== -->
         <div id="page-molds" class="page">
             <div class="page-header">
-                <h1>Справочник молдов</h1>
+                <h1>Справочник бланков</h1>
                 <div class="flex gap-8">
                     <button class="btn btn-outline" onclick="Molds.exportCSV()">Экспорт CSV</button>
-                    <button class="btn btn-primary" onclick="Molds.showAddForm()">+ Новый молд</button>
+                    <button class="btn btn-primary" onclick="Molds.showAddForm()">+ Новый бланк</button>
                 </div>
             </div>
 
             <!-- Summary stats -->
             <div class="stats-grid" id="molds-stats">
                 <div class="stat-card">
-                    <div class="stat-label">Всего молдов</div>
+                    <div class="stat-label">Всего бланков</div>
                     <div class="stat-value" id="molds-total">0</div>
                 </div>
                 <div class="stat-card">
@@ -408,7 +408,7 @@
                     <div class="stat-value" id="molds-avg-cost">0 &#8381;</div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-label">Общая стоимость молдов</div>
+                    <div class="stat-label">Общая стоимость бланков</div>
                     <div class="stat-value" id="molds-total-value">0 &#8381;</div>
                 </div>
             </div>
@@ -458,7 +458,7 @@
             <!-- Add/Edit modal (inline) -->
             <div class="card" id="mold-edit-form" style="display:none;">
                 <div class="card-header">
-                    <h3 id="mold-form-title">Новый молд</h3>
+                    <h3 id="mold-form-title">Новый бланк</h3>
                     <button class="btn btn-sm btn-outline" onclick="Molds.hideForm()">Закрыть</button>
                 </div>
                 <div class="form-row">
@@ -1093,17 +1093,17 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.2/jspdf.umd.min.js"></script>
-<script src="js/supabase.js?v=8"></script>
-<script src="js/calculator.js?v=8"></script>
-<script src="js/app.js?v=8"></script>
-<script src="js/dashboard.js?v=8"></script>
-<script src="js/orders.js?v=8"></script>
-<script src="js/analytics.js?v=8"></script>
-<script src="js/molds.js?v=8"></script>
-<script src="js/kp.js?v=8"></script>
-<script src="js/timetrack.js?v=8"></script>
-<script src="js/tasks.js?v=8"></script>
-<script src="js/import.js?v=8"></script>
-<script src="js/settings.js?v=8"></script>
+<script src="js/supabase.js?v=9"></script>
+<script src="js/calculator.js?v=9"></script>
+<script src="js/app.js?v=9"></script>
+<script src="js/dashboard.js?v=9"></script>
+<script src="js/orders.js?v=9"></script>
+<script src="js/analytics.js?v=9"></script>
+<script src="js/molds.js?v=9"></script>
+<script src="js/kp.js?v=9"></script>
+<script src="js/timetrack.js?v=9"></script>
+<script src="js/tasks.js?v=9"></script>
+<script src="js/import.js?v=9"></script>
+<script src="js/settings.js?v=9"></script>
 </body>
 </html>
