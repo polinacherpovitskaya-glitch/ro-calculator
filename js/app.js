@@ -843,11 +843,11 @@ const Calculator = {
             const costItemOnly = round2(costWithPrinting - costPrintingPart);
 
             if (item.is_blank_mold) {
-                // Blank mold: fixed price from blanks page formula
-                // Target = (cost + НДС) * (1 + 40%) / (1 - 6% - 6.5%) + 10000/qty
-                // Rounded up to nearest 5₽ (same as blanks page)
-                const blankTarget = calcTarget(costItemOnly, 0.40);
-                const blankSellPrice = roundTo5(round2(blankTarget + 10000 / (item.quantity || 1)));
+                // Blank mold: tiered margin price (same as blanks page)
+                // Маржа зависит от тиража: 65%@50 → 35%@3K
+                const blankMargin = getBlankMargin(item.quantity || 500);
+                const blankTarget = calcTarget(costItemOnly, blankMargin);
+                const blankSellPrice = roundTo5(blankTarget);
                 columns.push({
                     label: item.product_name || 'Изделие ' + (i + 1),
                     type: 'item',

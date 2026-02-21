@@ -41,7 +41,7 @@ const LOCAL_KEYS = {
 };
 
 // Data version — increment to force cache reset for molds
-const MOLDS_DATA_VERSION = 3; // v3: full blanks catalog with hardware fields
+const MOLDS_DATA_VERSION = 4; // v4: collections + new tiers (3000 instead of 5000)
 const MOLDS_VERSION_KEY = 'ro_calc_molds_version';
 
 function checkMoldsVersion() {
@@ -408,7 +408,7 @@ function getDefaultMolds() {
 
     // Helper to create a mold entry
     const m = (id, name, cat, pMin, pMax, pAct, weight, complexity, costCny, opts = {}) => ({
-        id, name, category: cat, status: opts.status || 'active',
+        id, name, category: cat, collection: opts.collection || '', status: opts.status || 'active',
         pph_min: pMin, pph_max: pMax, pph_actual: pAct, weight_grams: weight,
         complexity, cost_cny: costCny, cny_rate: CNY_RATE, delivery_cost: deliveryCost,
         cost_rub: costCny * CNY_RATE + deliveryCost, mold_count: opts.mold_count || 1,
@@ -420,63 +420,63 @@ function getDefaultMolds() {
 
     return [
         // === Бланки простые ===
-        m(1,  'Бланк прямоугольник',       'blank', 60,  60,  null, 20, 'simple', simpleCostCNY, { orders: 12, produced: 5400 }),
-        m(2,  'Бланк круг',                'blank', 45,  60,  null, 20, 'simple', simpleCostCNY, { orders: 8, produced: 3200 }),
-        m(3,  'Бланк сердце',              'blank', 45,  60,  null, 20, 'simple', simpleCostCNY, { orders: 6, produced: 2100 }),
-        m(4,  'Бланк цветок',              'blank', 0,   0,   null, 20, 'simple', simpleCostCNY),
-        m(5,  'Бланк треугольник',          'blank', 0,   0,   null, 20, 'simple', simpleCostCNY),
-        m(6,  'Бланк квадрат',             'blank', 0,   0,   null, 20, 'simple', simpleCostCNY),
-        m(7,  'Бланк тэг',                 'blank', 200, 200, null, 5,  'simple', simpleCostCNY, { orders: 15, produced: 12000, notes: 'Самый быстрый, маленький тег' }),
-        m(8,  'Бланк конверт',             'blank', 0,   0,   null, 20, 'simple', simpleCostCNY),
+        m(1,  'Бланк прямоугольник',       'blank', 60,  60,  null, 20, 'simple', simpleCostCNY, { collection: 'Бланки', orders: 12, produced: 5400 }),
+        m(2,  'Бланк круг',                'blank', 45,  60,  null, 20, 'simple', simpleCostCNY, { collection: 'Бланки', orders: 8, produced: 3200 }),
+        m(3,  'Бланк сердце',              'blank', 45,  60,  null, 20, 'simple', simpleCostCNY, { collection: 'Бланки', orders: 6, produced: 2100 }),
+        m(4,  'Бланк цветок',              'blank', 0,   0,   null, 20, 'simple', simpleCostCNY, { collection: 'Бланки' }),
+        m(5,  'Бланк треугольник',          'blank', 0,   0,   null, 20, 'simple', simpleCostCNY, { collection: 'Бланки' }),
+        m(6,  'Бланк квадрат',             'blank', 0,   0,   null, 20, 'simple', simpleCostCNY, { collection: 'Бланки' }),
+        m(7,  'Бланк тэг',                 'blank', 200, 200, null, 5,  'simple', simpleCostCNY, { collection: 'Бланки', orders: 15, produced: 12000, notes: 'Самый быстрый, маленький тег' }),
+        m(8,  'Бланк конверт',             'blank', 0,   0,   null, 20, 'simple', simpleCostCNY, { collection: 'Бланки' }),
 
         // === Формы с фурнитурой ===
-        m(9,  'Карабин',                    'blank', 40,  45,  null, 20, 'simple', simpleCostCNY, { hw_speed: 120, orders: 10, produced: 4500, notes: 'Быстрая сборка' }),
-        m(10, 'Отельный',                   'blank', 40,  40,  null, 30, 'simple', simpleCostCNY, { orders: 3, produced: 900 }),
-        m(11, 'Зеркало-клякса',             'blank', 15,  15,  null, 30, 'complex', complexCostCNY, { hw_name: 'Зеркало', hw_price: 0, hw_speed: 60, orders: 3, produced: 600, notes: 'Нужно зеркало приклеить' }),
-        m(12, 'Подставка под телефон',       'blank', 15,  20,  null, 40, 'complex', complexCostCNY, { orders: 3, produced: 600, notes: 'Тяжёлый, долго остывает' }),
+        m(9,  'Карабин',                    'blank', 40,  45,  null, 20, 'simple', simpleCostCNY, { collection: 'Аксессуары', hw_speed: 120, orders: 10, produced: 4500, notes: 'Быстрая сборка' }),
+        m(10, 'Отельный',                   'blank', 40,  40,  null, 30, 'simple', simpleCostCNY, { collection: 'Аксессуары', orders: 3, produced: 900 }),
+        m(11, 'Зеркало-клякса',             'blank', 15,  15,  null, 30, 'complex', complexCostCNY, { collection: 'Аксессуары', hw_name: 'Зеркало', hw_price: 0, hw_speed: 60, orders: 3, produced: 600, notes: 'Нужно зеркало приклеить' }),
+        m(12, 'Подставка под телефон',       'blank', 15,  20,  null, 40, 'complex', complexCostCNY, { collection: 'Аксессуары', orders: 3, produced: 600, notes: 'Тяжёлый, долго остывает' }),
 
         // === Аксессуары / формы ===
-        m(13, 'Гребень',                    'blank', 15,  20,  null, 25, 'complex', complexCostCNY, { orders: 4, produced: 1200, notes: 'Сложная форма, тонкие зубья' }),
-        m(14, 'Картхолдер',                 'blank', 20,  20,  null, 30, 'complex', complexCostCNY, { orders: 5, produced: 1500 }),
-        m(15, 'Новый кардхолдер',           'blank', 20,  20,  null, 30, 'complex', complexCostCNY, { orders: 1, produced: 200, notes: 'Новая версия' }),
-        m(16, 'Открывашка',                 'blank', 20,  25,  null, 25, 'simple', simpleCostCNY, { orders: 4, produced: 1000 }),
-        m(17, 'Смайл',                      'blank', 15,  15,  null, 30, 'simple', simpleCostCNY, { orders: 2, produced: 500 }),
-        m(18, 'Бейдж',                      'blank', 0,   0,   null, 20, 'simple', simpleCostCNY),
-        m(19, 'Смотка',                     'blank', 0,   0,   null, 20, 'simple', simpleCostCNY),
-        m(20, 'Чехол для зажигалки',        'blank', 0,   0,   null, 20, 'complex', complexCostCNY),
-        m(21, 'Мыльница',                   'blank', 0,   0,   null, 30, 'complex', complexCostCNY),
-        m(22, 'Медаль',                     'blank', 0,   0,   null, 30, 'simple', simpleCostCNY),
+        m(13, 'Гребень',                    'blank', 15,  20,  null, 25, 'complex', complexCostCNY, { collection: 'Аксессуары', orders: 4, produced: 1200, notes: 'Сложная форма, тонкие зубья' }),
+        m(14, 'Картхолдер',                 'blank', 20,  20,  null, 30, 'complex', complexCostCNY, { collection: 'Аксессуары', orders: 5, produced: 1500 }),
+        m(15, 'Новый кардхолдер',           'blank', 20,  20,  null, 30, 'complex', complexCostCNY, { collection: 'Аксессуары', orders: 1, produced: 200, notes: 'Новая версия' }),
+        m(16, 'Открывашка',                 'blank', 20,  25,  null, 25, 'simple', simpleCostCNY, { collection: 'Аксессуары', orders: 4, produced: 1000 }),
+        m(17, 'Смайл',                      'blank', 15,  15,  null, 30, 'simple', simpleCostCNY, { collection: 'Фигурки', orders: 2, produced: 500 }),
+        m(18, 'Бейдж',                      'blank', 0,   0,   null, 20, 'simple', simpleCostCNY, { collection: 'Аксессуары' }),
+        m(19, 'Смотка',                     'blank', 0,   0,   null, 20, 'simple', simpleCostCNY, { collection: 'Аксессуары' }),
+        m(20, 'Чехол для зажигалки',        'blank', 0,   0,   null, 20, 'complex', complexCostCNY, { collection: 'Аксессуары' }),
+        m(21, 'Мыльница',                   'blank', 0,   0,   null, 30, 'complex', complexCostCNY, { collection: 'Для дома' }),
+        m(22, 'Медаль',                     'blank', 0,   0,   null, 30, 'simple', simpleCostCNY, { collection: 'Фигурки' }),
 
         // === Спорт ===
-        m(23, 'Ласты для плавания',          'blank', 0,   0,   null, 30, 'complex', complexCostCNY),
-        m(24, 'Беговые кроссовки',           'blank', 0,   0,   null, 30, 'complex', complexCostCNY),
-        m(25, 'Ракетка для тенниса',         'blank', 30,  30,  null, 25, 'simple', simpleCostCNY, { orders: 3, produced: 900 }),
-        m(26, 'Падл ракетка',               'blank', 0,   0,   null, 25, 'simple', simpleCostCNY),
-        m(27, 'Велосипед',                  'blank', 0,   0,   null, 30, 'complex', complexCostCNY),
+        m(23, 'Ласты для плавания',          'blank', 0,   0,   null, 30, 'complex', complexCostCNY, { collection: 'Спорт' }),
+        m(24, 'Беговые кроссовки',           'blank', 0,   0,   null, 30, 'complex', complexCostCNY, { collection: 'Спорт' }),
+        m(25, 'Ракетка для тенниса',         'blank', 30,  30,  null, 25, 'simple', simpleCostCNY, { collection: 'Спорт', orders: 3, produced: 900 }),
+        m(26, 'Падл ракетка',               'blank', 0,   0,   null, 25, 'simple', simpleCostCNY, { collection: 'Спорт' }),
+        m(27, 'Велосипед',                  'blank', 0,   0,   null, 30, 'complex', complexCostCNY, { collection: 'Спорт' }),
 
         // === Бусины ===
-        m(28, 'Бусины большие',             'blank', 100, 100, null, 10, 'simple', simpleCostCNY, { orders: 7, produced: 8000 }),
-        m(29, 'Бусины маленькие',           'blank', 80,  80,  null, 5,  'simple', simpleCostCNY, { orders: 7, produced: 6000 }),
+        m(28, 'Бусины большие',             'blank', 100, 100, null, 10, 'simple', simpleCostCNY, { collection: 'Бусины', orders: 7, produced: 8000 }),
+        m(29, 'Бусины маленькие',           'blank', 80,  80,  null, 5,  'simple', simpleCostCNY, { collection: 'Бусины', orders: 7, produced: 6000 }),
 
         // === Буквы ===
-        m(30, 'Буква из алфавита (лат.)',    'blank', 0,   0,   null, 10, 'simple', simpleCostCNY),
-        m(31, 'Буква из алфавита (кир.)',    'blank', 0,   0,   null, 10, 'simple', simpleCostCNY),
+        m(30, 'Буква из алфавита (лат.)',    'blank', 0,   0,   null, 10, 'simple', simpleCostCNY, { collection: 'Буквы' }),
+        m(31, 'Буква из алфавита (кир.)',    'blank', 0,   0,   null, 10, 'simple', simpleCostCNY, { collection: 'Буквы' }),
 
         // === Фигурки / сувениры ===
-        m(32, 'Шар',                        'blank', 0,   0,   null, 30, 'complex', complexCostCNY),
-        m(33, 'Маленькая елочка',            'blank', 0,   0,   null, 15, 'simple', simpleCostCNY),
-        m(34, 'Большой конь',               'blank', 0,   0,   null, 40, 'complex', complexCostCNY),
-        m(35, 'Маленькая снежинка',          'blank', 0,   0,   null, 10, 'simple', simpleCostCNY),
-        m(36, 'Большой дракон',             'blank', 15,  15,  null, 40, 'complex', complexCostCNY, { orders: 2, produced: 300, notes: 'Детализированная форма' }),
-        m(37, 'Маленький цветочек',          'blank', 0,   0,   null, 10, 'simple', simpleCostCNY),
-        m(38, 'Маленький конь',             'blank', 0,   0,   null, 15, 'simple', simpleCostCNY),
-        m(39, 'Маленькое сердечко',          'blank', 0,   0,   null, 10, 'simple', simpleCostCNY),
+        m(32, 'Шар',                        'blank', 0,   0,   null, 30, 'complex', complexCostCNY, { collection: 'Фигурки' }),
+        m(33, 'Маленькая елочка',            'blank', 0,   0,   null, 15, 'simple', simpleCostCNY, { collection: 'Фигурки' }),
+        m(34, 'Большой конь',               'blank', 0,   0,   null, 40, 'complex', complexCostCNY, { collection: 'Фигурки' }),
+        m(35, 'Маленькая снежинка',          'blank', 0,   0,   null, 10, 'simple', simpleCostCNY, { collection: 'Фигурки' }),
+        m(36, 'Большой дракон',             'blank', 15,  15,  null, 40, 'complex', complexCostCNY, { collection: 'Фигурки', orders: 2, produced: 300, notes: 'Детализированная форма' }),
+        m(37, 'Маленький цветочек',          'blank', 0,   0,   null, 10, 'simple', simpleCostCNY, { collection: 'Фигурки' }),
+        m(38, 'Маленький конь',             'blank', 0,   0,   null, 15, 'simple', simpleCostCNY, { collection: 'Фигурки' }),
+        m(39, 'Маленькое сердечко',          'blank', 0,   0,   null, 10, 'simple', simpleCostCNY, { collection: 'Фигурки' }),
 
         // === NFC ===
-        m(40, 'NFC Звезда',                 'nfc', 25,  25,  null, 30, 'nfc_triple', nfcCostCNY, { orders: 3, produced: 800, notes: '3-частный молд, вставка NFC чипа' }),
-        m(41, 'NFC Квадрат',                'nfc', 0,   0,   null, 30, 'nfc_triple', nfcCostCNY, { notes: '3-частный молд' }),
-        m(42, 'NFC Сердце',                 'nfc', 13,  13,  null, 30, 'nfc_triple', nfcCostCNY, { orders: 2, produced: 400, notes: '3-частный молд, медленный' }),
-        m(43, 'NFC Камушек',                'nfc', 0,   0,   null, 30, 'nfc_triple', nfcCostCNY, { notes: '3-частный молд' }),
+        m(40, 'NFC Звезда',                 'nfc', 25,  25,  null, 30, 'nfc_triple', nfcCostCNY, { collection: 'NFC', orders: 3, produced: 800, notes: '3-частный молд, вставка NFC чипа' }),
+        m(41, 'NFC Квадрат',                'nfc', 0,   0,   null, 30, 'nfc_triple', nfcCostCNY, { collection: 'NFC', notes: '3-частный молд' }),
+        m(42, 'NFC Сердце',                 'nfc', 13,  13,  null, 30, 'nfc_triple', nfcCostCNY, { collection: 'NFC', orders: 2, produced: 400, notes: '3-частный молд, медленный' }),
+        m(43, 'NFC Камушек',                'nfc', 0,   0,   null, 30, 'nfc_triple', nfcCostCNY, { collection: 'NFC', notes: '3-частный молд' }),
     ];
 }
 
