@@ -244,6 +244,8 @@ async function loadOrders(filters = {}) {
 }
 
 async function loadOrder(orderId) {
+    // Coerce string ID to number (select values are always strings, but IDs are Date.now() numbers)
+    if (typeof orderId === 'string' && /^\d+$/.test(orderId)) orderId = Number(orderId);
     if (isSupabaseReady()) {
         const { data: order, error: e1 } = await supabaseClient
             .from('orders').select('*').eq('id', orderId).single();
@@ -330,6 +332,7 @@ async function loadFintabloImports(orderId) {
 // =============================================
 
 async function loadFactual(orderId) {
+    if (typeof orderId === 'string' && /^\d+$/.test(orderId)) orderId = Number(orderId);
     if (isSupabaseReady()) {
         const { data, error } = await supabaseClient
             .from('order_factuals')
@@ -344,6 +347,7 @@ async function loadFactual(orderId) {
 }
 
 async function saveFactual(orderId, factData) {
+    if (typeof orderId === 'string' && /^\d+$/.test(orderId)) orderId = Number(orderId);
     const record = { ...factData, order_id: orderId, updated_at: new Date().toISOString() };
     if (isSupabaseReady()) {
         // Check if exists

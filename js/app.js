@@ -697,8 +697,18 @@ const Calculator = {
 
     recalculate() {
         const params = App.params;
-        if (!params) return;
+        if (!params) {
+            console.warn('[recalculate] App.params is null, skipping');
+            return;
+        }
 
+        try { this._doRecalculate(params); } catch (err) {
+            console.error('[recalculate] CRASH:', err);
+            App.toast('Ошибка расчёта: ' + err.message);
+        }
+    },
+
+    _doRecalculate(params) {
         let hasData = false;
 
         // === Calculate product items ===
@@ -706,7 +716,7 @@ const Calculator = {
             const result = calculateItemCost(item, params);
             item.result = result;
 
-            const hasResult = result.costTotal > 0;
+            const hasResult = isFinite(result.costTotal) && result.costTotal > 0;
             if (hasResult) hasData = true;
 
             const costEl = document.getElementById('item-cost-' + idx);
@@ -856,12 +866,23 @@ const Calculator = {
     renderPricingCard(params) {
         const pricingEl = document.getElementById('calc-pricing');
         const contentEl = document.getElementById('calc-pricing-content');
-        if (!pricingEl || !contentEl) return;
+        if (!pricingEl || !contentEl) {
+            console.warn('[renderPricingCard] DOM elements not found', { pricingEl: !!pricingEl, contentEl: !!contentEl });
+            return;
+        }
 
-        // Collect all priced entities
-        const pricedItems = this.items.filter(it => it.result && it.result.costTotal > 0);
-        const pricedHw = this.hardwareItems.filter(hw => hw.result && hw.result.costPerUnit > 0);
-        const pricedPkg = this.packagingItems.filter(pkg => pkg.result && pkg.result.costPerUnit > 0);
+        // Collect all priced entities (with NaN/Infinity guard)
+        const pricedItems = this.items.filter(it => it.result && isFinite(it.result.costTotal) && it.result.costTotal > 0);
+        const pricedHw = this.hardwareItems.filter(hw => hw.result && isFinite(hw.result.costPerUnit) && hw.result.costPerUnit > 0);
+        const pricedPkg = this.packagingItems.filter(pkg => pkg.result && isFinite(pkg.result.costPerUnit) && pkg.result.costPerUnit > 0);
+
+        // Debug: log what's being filtered
+        console.log('[renderPricingCard]', {
+            items: this.items.length, pricedItems: pricedItems.length,
+            hw: this.hardwareItems.length, pricedHw: pricedHw.length,
+            pkg: this.packagingItems.length, pricedPkg: pricedPkg.length,
+            itemCosts: this.items.map(i => i.result ? i.result.costTotal : 'no result'),
+        });
 
         if (pricedItems.length === 0 && pricedHw.length === 0 && pricedPkg.length === 0) {
             pricingEl.style.display = 'none';

@@ -54,6 +54,11 @@ const Factual = {
     },
 
     async onOrderSelect(orderId) {
+        // Fix type mismatch: select value is string, but order IDs from Date.now() are numbers
+        if (orderId && typeof orderId === 'string' && /^\d+$/.test(orderId)) {
+            orderId = Number(orderId);
+        }
+
         const tableCard = document.getElementById('fact-table-card');
         const hoursCard = document.getElementById('fact-hours-card');
         const notesCard = document.getElementById('fact-notes-card');
