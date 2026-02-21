@@ -367,8 +367,8 @@ function calculateFinDirectorData(items, hardwareItems, packagingItems, params) 
         // Доставка
         if (item.delivery_included) totalDelivery += params.deliveryCostMoscow;
 
-        // Выручка изделий
-        totalRevenue += (item.sell_price_item || 0) * qty;
+        // Выручка изделий (item + printing)
+        totalRevenue += ((item.sell_price_item || 0) + (item.sell_price_printing || 0)) * qty;
     });
 
     // Фурнитура
@@ -426,9 +426,14 @@ function calculateOrderSummary(items, hardwareItems, packagingItems) {
         if (!item.result) return;
         const qty = item.quantity || 0;
 
+        // Item revenue (without printing)
         totalRevenue += (item.sell_price_item || 0) * qty;
+        // Printing revenue (separate)
+        totalRevenue += (item.sell_price_printing || 0) * qty;
 
-        const marginItem = calculateActualMargin(item.sell_price_item || 0, item.result.costTotal);
+        // Total sell = item + printing, total cost = costTotal (includes printing cost)
+        const totalSellPerUnit = (item.sell_price_item || 0) + (item.sell_price_printing || 0);
+        const marginItem = calculateActualMargin(totalSellPerUnit, item.result.costTotal);
         totalEarned += marginItem.earned * qty;
     });
 

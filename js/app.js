@@ -224,8 +224,9 @@ const Calculator = {
             delivery_included: false,
             // Multiple printings
             printings: [],
-            // Sell price for product only (hw/pkg have their own)
+            // Sell prices
             sell_price_item: 0,
+            sell_price_printing: 0,
             result: null,
             template_id: null,
         };
@@ -442,11 +443,11 @@ const Calculator = {
                     <input type="number" min="0" value="${hw.assembly_speed || ''}" oninput="Calculator.onHwNum(${idx}, 'assembly_speed', this.value)">
                 </div>
                 <div class="form-group" style="margin:0">
-                    <label>Закупка (шт)</label>
+                    <label>Закупка (&#8381;/шт)</label>
                     <input type="number" min="0" step="0.01" value="${hw.price || ''}" oninput="Calculator.onHwNum(${idx}, 'price', this.value)">
                 </div>
                 <div class="form-group" style="margin:0">
-                    <label>Доставка (всего)</label>
+                    <label>Доставка (&#8381; всего)</label>
                     <input type="number" min="0" step="0.01" value="${hw.delivery_total || ''}" oninput="Calculator.onHwNum(${idx}, 'delivery_total', this.value)">
                 </div>
                 <button class="btn-remove" title="Удалить фурнитуру" onclick="Calculator.removeHardware(${idx})">&#10005;</button>
@@ -521,11 +522,11 @@ const Calculator = {
                     <input type="number" min="0" value="${pkg.assembly_speed || ''}" oninput="Calculator.onPkgNum(${idx}, 'assembly_speed', this.value)">
                 </div>
                 <div class="form-group" style="margin:0">
-                    <label>Закупка (шт)</label>
+                    <label>Закупка (&#8381;/шт)</label>
                     <input type="number" min="0" step="0.01" value="${pkg.price || ''}" oninput="Calculator.onPkgNum(${idx}, 'price', this.value)">
                 </div>
                 <div class="form-group" style="margin:0">
-                    <label>Доставка (всего)</label>
+                    <label>Доставка (&#8381; всего)</label>
                     <input type="number" min="0" step="0.01" value="${pkg.delivery_total || ''}" oninput="Calculator.onPkgNum(${idx}, 'delivery_total', this.value)">
                 </div>
                 <button class="btn-remove" title="Удалить упаковку" onclick="Calculator.removePackaging(${idx})">&#10005;</button>
@@ -667,7 +668,6 @@ const Calculator = {
                 this.setText('c-' + idx + '-mold', formatRub(result.costMoldAmortization));
                 this.setText('c-' + idx + '-design', formatRub(result.costDesign));
                 this.setText('c-' + idx + '-cutting', formatRub(result.costCutting));
-                this.setText('c-' + idx + '-cutting-ind', formatRub(result.costCuttingIndirect));
                 this.setText('c-' + idx + '-nfc-tag', formatRub(result.costNfcTag));
                 this.setText('c-' + idx + '-nfc-prog', formatRub(result.costNfcProgramming));
                 this.setText('c-' + idx + '-nfc-ind', formatRub(result.costNfcIndirect));
@@ -676,11 +676,11 @@ const Calculator = {
                 this.setText('c-' + idx + '-total', formatRub(result.costTotal));
 
                 // Store target at 40% for reference
-                const cost = result.costTotal;
+                const costItemOnly = round2(result.costTotal - (result.costPrinting || 0));
                 const calcTarget = (marginPct) => {
-                    if (cost === 0) return 0;
-                    const vatOnCost = cost * params.vatRate;
-                    return round2((cost + vatOnCost) * (1 + marginPct) / (1 - params.taxRate - 0.065));
+                    if (costItemOnly === 0) return 0;
+                    const vatOnCost = costItemOnly * params.vatRate;
+                    return round2((costItemOnly + vatOnCost) * (1 + marginPct) / (1 - params.taxRate - 0.065));
                 };
                 item.target_price_item = calcTarget(0.40);
             }
@@ -785,7 +785,7 @@ const Calculator = {
         const contentEl = document.getElementById('calc-pricing-content');
         if (!pricingEl || !contentEl) return;
 
-        // Collect all priced items
+        // Collect all priced entities
         const pricedItems = this.items.filter(it => it.result && it.result.costTotal > 0);
         const pricedHw = this.hardwareItems.filter(hw => hw.result && hw.result.costPerUnit > 0);
         const pricedPkg = this.packagingItems.filter(pkg => pkg.result && pkg.result.costPerUnit > 0);
@@ -802,24 +802,61 @@ const Calculator = {
             return round2((cost + vatOnCost) * (1 + marginPct) / (1 - params.taxRate - 0.065));
         };
 
-        // Build columns
+        // Build columns: item, printing (per item), hw, pkg
         const columns = [];
 
         pricedItems.forEach((item, i) => {
-            const cost = item.result.costTotal;
             const globalIdx = this.items.indexOf(item);
-            columns.push({
-                label: item.product_name || 'Изделие ' + (i + 1),
-                type: 'item',
-                globalIdx,
-                cost,
-                t50: calcTarget(cost, 0.50),
-                t40: calcTarget(cost, 0.40),
-                t30: calcTarget(cost, 0.30),
-                t20: calcTarget(cost, 0.20),
-                sellPrice: item.sell_price_item || 0,
-                sellField: 'sell_price_item',
-            });
+            // Item cost WITHOUT printing (for separate pricing)
+            const costWithPrinting = item.result.costTotal;
+            const costPrintingPart = item.result.costPrinting || 0;
+            const costItemOnly = round2(costWithPrinting - costPrintingPart);
+
+            if (item.is_blank_mold) {
+                // Blank mold: fixed price from blanks page formula
+                // Target = (cost + НДС) * (1 + 40%) / (1 - 6% - 6.5%) + 10000/qty
+                const blankTarget = calcTarget(costItemOnly, 0.40);
+                const blankSellPrice = round2(blankTarget + 10000 / (item.quantity || 1));
+                columns.push({
+                    label: item.product_name || 'Изделие ' + (i + 1),
+                    type: 'item',
+                    globalIdx,
+                    isBlank: true,
+                    cost: costItemOnly,
+                    blankPrice: blankSellPrice,
+                    sellPrice: item.sell_price_item || blankSellPrice,
+                });
+            } else {
+                // Custom mold: show margin targets
+                columns.push({
+                    label: item.product_name || 'Изделие ' + (i + 1),
+                    type: 'item',
+                    globalIdx,
+                    isBlank: false,
+                    cost: costItemOnly,
+                    t50: calcTarget(costItemOnly, 0.50),
+                    t40: calcTarget(costItemOnly, 0.40),
+                    t30: calcTarget(costItemOnly, 0.30),
+                    t20: calcTarget(costItemOnly, 0.20),
+                    sellPrice: item.sell_price_item || 0,
+                });
+            }
+
+            // Printing column (if item has printing cost)
+            if (costPrintingPart > 0) {
+                columns.push({
+                    label: 'Нанесение' + (pricedItems.length > 1 ? ' ' + (i + 1) : ''),
+                    type: 'printing',
+                    globalIdx,
+                    isBlank: false,
+                    cost: costPrintingPart,
+                    t50: calcTarget(costPrintingPart, 0.50),
+                    t40: calcTarget(costPrintingPart, 0.40),
+                    t30: calcTarget(costPrintingPart, 0.30),
+                    t20: calcTarget(costPrintingPart, 0.20),
+                    sellPrice: item.sell_price_printing || 0,
+                });
+            }
         });
 
         pricedHw.forEach((hw, i) => {
@@ -829,13 +866,13 @@ const Calculator = {
                 label: hw.name || 'Фурнитура ' + (i + 1),
                 type: 'hw',
                 globalIdx,
+                isBlank: false,
                 cost,
                 t50: calcTarget(cost, 0.50),
                 t40: calcTarget(cost, 0.40),
                 t30: calcTarget(cost, 0.30),
                 t20: calcTarget(cost, 0.20),
                 sellPrice: hw.sell_price || 0,
-                sellField: 'sell_price',
             });
         });
 
@@ -846,60 +883,86 @@ const Calculator = {
                 label: pkg.name || 'Упаковка ' + (i + 1),
                 type: 'pkg',
                 globalIdx,
+                isBlank: false,
                 cost,
                 t50: calcTarget(cost, 0.50),
                 t40: calcTarget(cost, 0.40),
                 t30: calcTarget(cost, 0.30),
                 t20: calcTarget(cost, 0.20),
                 sellPrice: pkg.sell_price || 0,
-                sellField: 'sell_price',
             });
         });
 
         // Render as a compact table-like grid
+        const cellBorder = 'border-bottom:1px solid var(--border);';
+        const leftCell = `padding:6px 8px;border-right:1px solid var(--border);${cellBorder}`;
         let html = '<div class="pricing-grid" style="display:grid; grid-template-columns: 140px ' + columns.map(() => '1fr').join(' ') + '; gap:0; font-size:12px; border:1px solid var(--border); border-radius:8px; overflow:hidden;">';
 
         // Header row
-        html += '<div class="pricing-cell pricing-header" style="background:var(--bg);padding:8px;font-weight:600;border-bottom:1px solid var(--border);border-right:1px solid var(--border);"></div>';
+        html += `<div style="background:var(--bg);padding:8px;font-weight:600;${cellBorder}border-right:1px solid var(--border);"></div>`;
         columns.forEach(col => {
-            const icon = col.type === 'item' ? '&#9670;' : col.type === 'hw' ? '&#9881;' : '&#9744;';
-            html += `<div class="pricing-cell pricing-header" style="background:var(--bg);padding:8px;font-weight:600;border-bottom:1px solid var(--border);text-align:center;font-size:11px;">${icon} ${col.label}</div>`;
+            const icon = col.type === 'item' ? '&#9670;' : col.type === 'printing' ? '&#9998;' : col.type === 'hw' ? '&#9881;' : '&#9744;';
+            html += `<div style="background:var(--bg);padding:8px;font-weight:600;${cellBorder}text-align:center;font-size:11px;">${icon} ${col.label}</div>`;
         });
 
         // Себестоимость row
-        html += '<div class="pricing-cell" style="padding:6px 8px;border-right:1px solid var(--border);border-bottom:1px solid var(--border);color:var(--text-secondary);">Себестоимость</div>';
+        html += `<div style="${leftCell}color:var(--text-secondary);">Себестоимость</div>`;
         columns.forEach(col => {
-            html += `<div class="pricing-cell" style="padding:6px 8px;text-align:center;border-bottom:1px solid var(--border);font-weight:600;">${formatRub(col.cost)}</div>`;
+            html += `<div style="padding:6px 8px;text-align:center;${cellBorder}font-weight:600;">${formatRub(col.cost)}</div>`;
         });
 
-        // Target rows
-        const targets = [
-            { pct: 50, label: 'Маржа 50%', key: 't50', style: 'color:var(--text-muted);' },
-            { pct: 40, label: 'Маржа 40%', key: 't40', style: 'color:var(--green);font-weight:700;', suffix: ' ← цель' },
-            { pct: 30, label: 'Маржа 30%', key: 't30', style: 'color:var(--text-muted);' },
-            { pct: 20, label: 'Маржа 20%', key: 't20', style: 'color:var(--red);', suffix: ' ← мин.' },
-        ];
+        // Check if any column needs target spread (non-blank)
+        const hasCustom = columns.some(c => !c.isBlank);
 
-        targets.forEach(t => {
-            html += `<div class="pricing-cell" style="padding:4px 8px;border-right:1px solid var(--border);border-bottom:1px solid var(--border);font-size:11px;${t.style}">${t.label}${t.suffix ? `<span style="font-size:9px;font-weight:400">${t.suffix}</span>` : ''}</div>`;
-            columns.forEach(col => {
-                html += `<div class="pricing-cell" style="padding:4px 8px;text-align:center;border-bottom:1px solid var(--border);font-size:11px;${t.style}">${formatRub(col[t.key])}</div>`;
+        if (hasCustom) {
+            // Target rows for custom items
+            const targets = [
+                { pct: 50, label: 'Маржа 50%', key: 't50', style: 'color:var(--text-muted);' },
+                { pct: 40, label: 'Маржа 40%', key: 't40', style: 'color:var(--green);font-weight:700;', suffix: ' ← цель' },
+                { pct: 30, label: 'Маржа 30%', key: 't30', style: 'color:var(--text-muted);' },
+                { pct: 20, label: 'Маржа 20%', key: 't20', style: 'color:var(--red);', suffix: ' ← мин.' },
+            ];
+
+            targets.forEach(t => {
+                html += `<div style="padding:4px 8px;border-right:1px solid var(--border);${cellBorder}font-size:11px;${t.style}">${t.label}${t.suffix ? `<span style="font-size:9px;font-weight:400">${t.suffix}</span>` : ''}</div>`;
+                columns.forEach(col => {
+                    if (col.isBlank) {
+                        // Blank: show fixed price from blanks page formula in the 40% row
+                        if (t.pct === 40) {
+                            html += `<div style="padding:4px 8px;text-align:center;${cellBorder}font-size:11px;color:var(--green);font-weight:700;">${formatRub(col.blankPrice)}<div style="font-size:9px;font-weight:400;color:var(--text-muted)">прайс бланков</div></div>`;
+                        } else {
+                            html += `<div style="padding:4px 8px;text-align:center;${cellBorder}font-size:11px;color:var(--text-muted);">—</div>`;
+                        }
+                    } else {
+                        html += `<div style="padding:4px 8px;text-align:center;${cellBorder}font-size:11px;${t.style}">${formatRub(col[t.key])}</div>`;
+                    }
+                });
             });
-        });
+        } else {
+            // All blanks — show just the fixed price row
+            html += `<div style="padding:4px 8px;border-right:1px solid var(--border);${cellBorder}font-size:11px;color:var(--green);font-weight:700;">Прайс бланков</div>`;
+            columns.forEach(col => {
+                if (col.isBlank) {
+                    html += `<div style="padding:4px 8px;text-align:center;${cellBorder}font-size:11px;color:var(--green);font-weight:700;">${formatRub(col.blankPrice)}</div>`;
+                } else {
+                    html += `<div style="padding:4px 8px;text-align:center;${cellBorder}font-size:11px;">${formatRub(col.t40 || 0)}</div>`;
+                }
+            });
+        }
 
-        // Sell price row (editable)
-        html += '<div class="pricing-cell" style="padding:6px 8px;border-right:1px solid var(--border);border-bottom:1px solid var(--border);font-weight:600;background:var(--green-light);">Цена продажи</div>';
+        // Sell price row (editable, no spinners)
+        html += `<div style="${leftCell}font-weight:600;background:var(--green-light);">Цена продажи</div>`;
         columns.forEach(col => {
             const inputId = `sell-${col.type}-${col.globalIdx}`;
-            html += `<div class="pricing-cell" style="padding:4px;text-align:center;border-bottom:1px solid var(--border);background:var(--green-light);">
-                <input type="number" min="0" step="0.01" id="${inputId}" value="${col.sellPrice || ''}"
+            html += `<div style="padding:4px;text-align:center;${cellBorder}background:var(--green-light);">
+                <input type="text" inputmode="decimal" id="${inputId}" value="${col.sellPrice || ''}"
                     style="width:100%;text-align:center;font-weight:600;font-size:13px;border:1px solid var(--border);border-radius:4px;padding:4px;"
                     oninput="Calculator.onPricingSellChange('${col.type}', ${col.globalIdx}, this.value)">
             </div>`;
         });
 
-        // Margin row (calculated)
-        html += '<div class="pricing-cell" style="padding:6px 8px;border-right:1px solid var(--border);font-weight:600;">Маржа</div>';
+        // Margin row (% only)
+        html += `<div style="padding:6px 8px;border-right:1px solid var(--border);font-weight:600;">Маржа</div>`;
         columns.forEach(col => {
             let marginHtml = '—';
             let warnHtml = '';
@@ -911,18 +974,130 @@ const Calculator = {
                     warnHtml = '<div style="font-size:9px;color:var(--red);margin-top:2px;">Согласовать с директором</div>';
                 }
             }
-            html += `<div class="pricing-cell" id="pricing-margin-${col.type}-${col.globalIdx}" style="padding:6px 8px;text-align:center;">${marginHtml}${warnHtml}</div>`;
+            html += `<div style="padding:6px 8px;text-align:center;">${marginHtml}${warnHtml}</div>`;
         });
 
         html += '</div>';
 
-        contentEl.innerHTML = html;
+        // === Final order summary: item × qty, printing × qty, hw × qty, pkg × qty + НДС ===
+        this.renderOrderInvoice(params, html, contentEl);
+    },
+
+    /**
+     * Render the final order invoice summary below pricing grid.
+     * Shows: item, printing, hw, pkg lines with qty × price + НДС 5%
+     */
+    renderOrderInvoice(params, pricingHtml, contentEl) {
+        let invoiceRows = [];
+
+        this.items.forEach((item, i) => {
+            if (!item.result || !item.quantity) return;
+            const qty = item.quantity;
+            if (item.sell_price_item > 0) {
+                invoiceRows.push({
+                    name: item.product_name || 'Изделие ' + (i + 1),
+                    qty: qty,
+                    price: item.sell_price_item,
+                    total: round2(item.sell_price_item * qty),
+                    type: 'item',
+                });
+            }
+            if (item.sell_price_printing > 0) {
+                invoiceRows.push({
+                    name: 'Нанесение' + (this.items.filter(it => it.result && it.quantity).length > 1 ? ' — ' + (item.product_name || (i + 1)) : ''),
+                    qty: qty,
+                    price: item.sell_price_printing,
+                    total: round2(item.sell_price_printing * qty),
+                    type: 'printing',
+                });
+            }
+        });
+
+        this.hardwareItems.forEach((hw, i) => {
+            if (hw.qty > 0 && hw.sell_price > 0) {
+                invoiceRows.push({
+                    name: hw.name || 'Фурнитура ' + (i + 1),
+                    qty: hw.qty,
+                    price: hw.sell_price,
+                    total: round2(hw.sell_price * hw.qty),
+                    type: 'hw',
+                });
+            }
+        });
+
+        this.packagingItems.forEach((pkg, i) => {
+            if (pkg.qty > 0 && pkg.sell_price > 0) {
+                invoiceRows.push({
+                    name: pkg.name || 'Упаковка ' + (i + 1),
+                    qty: pkg.qty,
+                    price: pkg.sell_price,
+                    total: round2(pkg.sell_price * pkg.qty),
+                    type: 'pkg',
+                });
+            }
+        });
+
+        let invoiceHtml = '';
+        if (invoiceRows.length > 0) {
+            const subtotal = invoiceRows.reduce((s, r) => s + r.total, 0);
+            const vat = round2(subtotal * 0.05);
+            const grandTotal = round2(subtotal + vat);
+
+            invoiceHtml = `
+            <div style="margin-top:16px; border:1px solid var(--border); border-radius:8px; overflow:hidden; font-size:12px;">
+                <div style="background:var(--bg);padding:8px 12px;font-weight:700;font-size:13px;border-bottom:1px solid var(--border);">Итоговая смета для заказчика</div>
+                <table style="width:100%;border-collapse:collapse;">
+                    <thead>
+                        <tr style="background:var(--bg);font-size:11px;color:var(--text-secondary);">
+                            <th style="text-align:left;padding:6px 12px">Наименование</th>
+                            <th style="text-align:right;padding:6px 8px;width:80px">Кол-во</th>
+                            <th style="text-align:right;padding:6px 8px;width:100px">Цена/шт</th>
+                            <th style="text-align:right;padding:6px 12px;width:110px">Сумма</th>
+                        </tr>
+                    </thead>
+                    <tbody>`;
+
+            invoiceRows.forEach((r, i) => {
+                const bg = i % 2 === 0 ? '' : 'background:var(--bg);';
+                const icon = r.type === 'item' ? '&#9670;' : r.type === 'printing' ? '&#9998;' : r.type === 'hw' ? '&#9881;' : '&#9744;';
+                invoiceHtml += `
+                        <tr style="${bg}">
+                            <td style="padding:6px 12px;">${icon} ${r.name}</td>
+                            <td style="text-align:right;padding:6px 8px;">${r.qty} шт</td>
+                            <td style="text-align:right;padding:6px 8px;">${formatRub(r.price)}</td>
+                            <td style="text-align:right;padding:6px 12px;font-weight:600;">${formatRub(r.total)}</td>
+                        </tr>`;
+            });
+
+            invoiceHtml += `
+                    </tbody>
+                    <tfoot>
+                        <tr style="border-top:1px solid var(--border);">
+                            <td colspan="3" style="text-align:right;padding:6px 8px;color:var(--text-secondary);">Итого без НДС</td>
+                            <td style="text-align:right;padding:6px 12px;font-weight:600;">${formatRub(subtotal)}</td>
+                        </tr>
+                        <tr>
+                            <td colspan="3" style="text-align:right;padding:4px 8px;color:var(--text-secondary);font-size:11px;">НДС 5%</td>
+                            <td style="text-align:right;padding:4px 12px;font-size:11px;color:var(--text-muted);">${formatRub(vat)}</td>
+                        </tr>
+                        <tr style="background:var(--bg);">
+                            <td colspan="3" style="text-align:right;padding:8px;font-weight:700;font-size:14px;">ИТОГО с НДС</td>
+                            <td style="text-align:right;padding:8px 12px;font-weight:700;font-size:14px;color:var(--green);">${formatRub(grandTotal)}</td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>`;
+        }
+
+        contentEl.innerHTML = pricingHtml + invoiceHtml;
     },
 
     onPricingSellChange(type, globalIdx, value) {
         const price = parseFloat(value) || 0;
         if (type === 'item') {
             this.items[globalIdx].sell_price_item = price;
+        } else if (type === 'printing') {
+            this.items[globalIdx].sell_price_printing = price;
         } else if (type === 'hw') {
             this.hardwareItems[globalIdx].sell_price = price;
         } else if (type === 'pkg') {
@@ -995,6 +1170,7 @@ const Calculator = {
                 cost_delivery: r.costDelivery,
                 cost_total: r.costTotal,
                 sell_price_item: item.sell_price_item,
+                sell_price_printing: item.sell_price_printing || 0,
                 target_price_item: item.target_price_item || 0,
                 hours_plastic: r.hoursPlastic,
                 hours_cutting: r.hoursCutting,
@@ -1193,6 +1369,10 @@ const Calculator = {
             if (!item.sell_price_item || item.sell_price_item <= 0) {
                 missingPrices.push(`Изделие "${item.product_name || (i+1)}": цена продажи`);
             }
+            // Check printing sell price if there is a printing cost
+            if ((item.result.costPrinting || 0) > 0 && (!item.sell_price_printing || item.sell_price_printing <= 0)) {
+                missingPrices.push(`Нанесение "${item.product_name || (i+1)}": цена продажи`);
+            }
         });
         this.hardwareItems.forEach((hw, i) => {
             if (hw.qty > 0 && (!hw.sell_price || hw.sell_price <= 0)) {
@@ -1210,18 +1390,27 @@ const Calculator = {
             return;
         }
 
-        // Collect data for КП — only actual sell prices
+        // Collect data for КП — 4 entities: item, printing, hw, pkg
         const kpItems = [];
 
         this.items.forEach(item => {
             if (!item.result || !item.quantity) return;
-            // Item price includes printing cost — no separate printing lines in KP
+            // Item (without printing)
             kpItems.push({
                 type: 'product',
                 name: item.product_name || 'Изделие',
                 qty: item.quantity,
                 price: item.sell_price_item,
             });
+            // Printing (separate line)
+            if (item.sell_price_printing > 0) {
+                kpItems.push({
+                    type: 'printing',
+                    name: 'Нанесение',
+                    qty: item.quantity,
+                    price: item.sell_price_printing,
+                });
+            }
         });
 
         this.hardwareItems.forEach(hw => {

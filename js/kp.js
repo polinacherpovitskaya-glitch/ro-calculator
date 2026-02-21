@@ -180,16 +180,41 @@ const KPGenerator = {
         doc.line(margin, y, margin + contentW, y);
         y += 4;
 
-        // Grand total
+        // Subtotal
         doc.setFillColor(...bg);
+        doc.rect(margin, y, contentW, 8, 'F');
+
+        doc.setTextColor(...gray);
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'normal');
+        doc.text('Итого без НДС:', margin + 4, y + 5.5);
+        doc.setTextColor(...black);
+        doc.text(this.fmtMoney(grandTotal), colX.total, y + 5.5, { align: 'right' });
+        y += 8;
+
+        // VAT 5%
+        const vatAmount = Math.round(grandTotal * 0.05 * 100) / 100;
+        doc.setFillColor(...bg);
+        doc.rect(margin, y, contentW, 8, 'F');
+
+        doc.setTextColor(...gray);
+        doc.setFontSize(10);
+        doc.text('НДС 5%:', margin + 4, y + 5.5);
+        doc.setTextColor(...black);
+        doc.text(this.fmtMoney(vatAmount), colX.total, y + 5.5, { align: 'right' });
+        y += 8;
+
+        // Grand total with VAT
+        const grandTotalWithVat = grandTotal + vatAmount;
+        doc.setFillColor(245, 250, 245);
         doc.rect(margin, y, contentW, 12, 'F');
 
         doc.setTextColor(...black);
         doc.setFontSize(12);
         doc.setFont('helvetica', 'bold');
-        doc.text('ИТОГО:', margin + 4, y + 8);
+        doc.text('ИТОГО с НДС:', margin + 4, y + 8);
         doc.setTextColor(...accent);
-        doc.text(this.fmtMoney(grandTotal), colX.total, y + 8, { align: 'right' });
+        doc.text(this.fmtMoney(grandTotalWithVat), colX.total, y + 8, { align: 'right' });
 
         y += 18;
 
@@ -197,7 +222,7 @@ const KPGenerator = {
         doc.setFontSize(9);
         doc.setTextColor(...gray);
         doc.setFont('helvetica', 'normal');
-        doc.text('Цены указаны с учетом НДС 5%. Предложение действительно 14 дней.', margin, y);
+        doc.text('Предложение действительно 14 дней.', margin, y);
         y += 6;
         doc.text('Сроки изготовления обсуждаются индивидуально.', margin, y);
 
