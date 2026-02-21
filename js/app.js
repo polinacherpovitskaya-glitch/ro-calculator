@@ -183,6 +183,8 @@ const Calculator = {
         document.getElementById('calc-production-load').style.display = 'none';
         document.getElementById('calc-findirector').style.display = 'none';
         document.getElementById('calc-summary-footer').style.display = 'none';
+        const pricingEl = document.getElementById('calc-pricing');
+        if (pricingEl) pricingEl.style.display = 'none';
         document.getElementById('calc-add-item-btn').style.display = '';
         const historyEl = document.getElementById('calc-history');
         if (historyEl) historyEl.style.display = 'none';
@@ -341,29 +343,6 @@ const Calculator = {
                 <div class="cost-row cost-total"><span class="cost-label">ИТОГО себестоимость</span><span class="cost-value" id="c-${idx}-total">0</span></div>
             </div>
 
-            <!-- Target prices (multiple margin levels) -->
-            <div class="target-block" id="item-target-${idx}" style="display:none">
-                <h4>Таргет-цены для менеджера</h4>
-                <div class="cost-row" style="color:var(--text-muted)"><span class="cost-label">При марже 50%</span><span class="cost-value" id="t-${idx}-m50" style="color:var(--text-muted)">0</span></div>
-                <div class="cost-row" style="font-weight:700"><span class="cost-label">При марже 40% <span style="font-size:10px;font-weight:400;color:var(--green)">&larr; цель</span></span><span class="cost-value" style="color:var(--green)" id="t-${idx}-m40">0</span></div>
-                <div class="cost-row" style="color:var(--text-muted)"><span class="cost-label">При марже 30%</span><span class="cost-value" id="t-${idx}-m30" style="color:var(--text-muted)">0</span></div>
-                <div class="cost-row" style="color:var(--red)"><span class="cost-label">При марже 20% <span style="font-size:10px;font-weight:400">&larr; минимум</span></span><span class="cost-value" id="t-${idx}-m20" style="color:var(--red)">0</span></div>
-                <div style="font-size:10px; color:var(--text-muted); margin-top:4px">+ 6% ОСН + 6.5% коммерч. уже заложены в цену</div>
-            </div>
-
-            <!-- Sell price -->
-            <div class="section-title" id="item-sell-label-${idx}" style="display:none">Фактическая цена продажи</div>
-            <div class="form-row" id="item-sell-${idx}" style="display:none">
-                <div class="form-group">
-                    <label>Цена изделия (за шт)</label>
-                    <input type="number" min="0" step="0.01" value="${item.sell_price_item || ''}" oninput="Calculator.onNumChange(${idx}, 'sell_price_item', this.value)">
-                </div>
-            </div>
-
-            <!-- Margin display -->
-            <div id="item-margin-${idx}" style="display:none; margin-top: 8px;">
-                <div class="cost-row"><span class="cost-label">Маржа изделия</span><span class="cost-value" id="m-${idx}-item">—</span></div>
-            </div>
         </div>`;
 
         container.insertAdjacentHTML('beforeend', html);
@@ -464,23 +443,14 @@ const Calculator = {
                     <input type="number" min="0" value="${hw.assembly_speed || ''}" oninput="Calculator.onHwNum(${idx}, 'assembly_speed', this.value)">
                 </div>
                 <div class="form-group" style="margin:0">
-                    <label>Цена закупки (шт)</label>
+                    <label>Закупка (шт)</label>
                     <input type="number" min="0" step="0.01" value="${hw.price || ''}" oninput="Calculator.onHwNum(${idx}, 'price', this.value)">
                 </div>
                 <div class="form-group" style="margin:0">
                     <label>Доставка (всего)</label>
                     <input type="number" min="0" step="0.01" value="${hw.delivery_total || ''}" oninput="Calculator.onHwNum(${idx}, 'delivery_total', this.value)">
                 </div>
-                <div class="form-group" style="margin:0">
-                    <label>Цена продажи (шт)</label>
-                    <input type="number" min="0" step="0.01" value="${hw.sell_price || ''}" oninput="Calculator.onHwNum(${idx}, 'sell_price', this.value)">
-                </div>
                 <button class="btn-remove" title="Удалить фурнитуру" onclick="Calculator.removeHardware(${idx})">&#10005;</button>
-            </div>
-            <div class="hw-result" id="hw-result-${idx}" style="display:none; margin-top:4px; font-size:12px; color:var(--text-secondary)">
-                <span>Себестоимость: <b id="hw-cost-${idx}">—</b></span>
-                <span style="margin-left:12px">Таргет: <b id="hw-target-${idx}">—</b></span>
-                <span style="margin-left:12px" id="hw-margin-wrap-${idx}">Маржа: <b id="hw-margin-${idx}">—</b></span>
             </div>
         </div>`;
         list.insertAdjacentHTML('beforeend', html);
@@ -552,23 +522,14 @@ const Calculator = {
                     <input type="number" min="0" value="${pkg.assembly_speed || ''}" oninput="Calculator.onPkgNum(${idx}, 'assembly_speed', this.value)">
                 </div>
                 <div class="form-group" style="margin:0">
-                    <label>Цена закупки (шт)</label>
+                    <label>Закупка (шт)</label>
                     <input type="number" min="0" step="0.01" value="${pkg.price || ''}" oninput="Calculator.onPkgNum(${idx}, 'price', this.value)">
                 </div>
                 <div class="form-group" style="margin:0">
                     <label>Доставка (всего)</label>
                     <input type="number" min="0" step="0.01" value="${pkg.delivery_total || ''}" oninput="Calculator.onPkgNum(${idx}, 'delivery_total', this.value)">
                 </div>
-                <div class="form-group" style="margin:0">
-                    <label>Цена продажи (шт)</label>
-                    <input type="number" min="0" step="0.01" value="${pkg.sell_price || ''}" oninput="Calculator.onPkgNum(${idx}, 'sell_price', this.value)">
-                </div>
                 <button class="btn-remove" title="Удалить упаковку" onclick="Calculator.removePackaging(${idx})">&#10005;</button>
-            </div>
-            <div class="pkg-result" id="pkg-result-${idx}" style="display:none; margin-top:4px; font-size:12px; color:var(--text-secondary)">
-                <span>Себестоимость: <b id="pkg-cost-${idx}">—</b></span>
-                <span style="margin-left:12px">Таргет: <b id="pkg-target-${idx}">—</b></span>
-                <span style="margin-left:12px" id="pkg-margin-wrap-${idx}">Маржа: <b id="pkg-margin-${idx}">—</b></span>
             </div>
         </div>`;
         list.insertAdjacentHTML('beforeend', html);
@@ -698,16 +659,7 @@ const Calculator = {
             if (hasResult) hasData = true;
 
             const costEl = document.getElementById('item-cost-' + idx);
-            const targetEl = document.getElementById('item-target-' + idx);
-            const sellLabelEl = document.getElementById('item-sell-label-' + idx);
-            const sellEl = document.getElementById('item-sell-' + idx);
-            const marginEl = document.getElementById('item-margin-' + idx);
-
             if (costEl) costEl.style.display = hasResult ? '' : 'none';
-            if (targetEl) targetEl.style.display = hasResult ? '' : 'none';
-            if (sellLabelEl) sellLabelEl.style.display = hasResult ? '' : 'none';
-            if (sellEl) sellEl.style.display = hasResult ? 'grid' : 'none';
-            if (marginEl) marginEl.style.display = (hasResult && item.sell_price_item > 0) ? '' : 'none';
 
             if (hasResult) {
                 this.setText('c-' + idx + '-fot', formatRub(result.costFot));
@@ -724,29 +676,14 @@ const Calculator = {
                 this.setText('c-' + idx + '-delivery', formatRub(result.costDelivery));
                 this.setText('c-' + idx + '-total', formatRub(result.costTotal));
 
-                // Target prices at different margin levels
+                // Store target at 40% for reference
                 const cost = result.costTotal;
                 const calcTarget = (marginPct) => {
                     if (cost === 0) return 0;
                     const vatOnCost = cost * params.vatRate;
                     return round2((cost + vatOnCost) * (1 + marginPct) / (1 - params.taxRate - 0.065));
                 };
-                const t40 = calcTarget(0.40);
-                const t50 = calcTarget(0.50);
-                const t30 = calcTarget(0.30);
-                const t20 = calcTarget(0.20);
-                item.target_price_item = t40;
-                this.setText('t-' + idx + '-m50', formatRub(t50));
-                this.setText('t-' + idx + '-m40', formatRub(t40));
-                this.setText('t-' + idx + '-m30', formatRub(t30));
-                this.setText('t-' + idx + '-m20', formatRub(t20));
-
-                if (item.sell_price_item > 0) {
-                    const mi = calculateActualMargin(item.sell_price_item, result.costTotal);
-                    this.setText('m-' + idx + '-item', `${formatRub(mi.earned)} (${formatPercent(mi.percent)})`);
-                    const mEl = document.getElementById('m-' + idx + '-item');
-                    if (mEl) mEl.className = 'cost-value ' + (mi.percent >= 30 ? 'text-green' : 'text-red');
-                }
+                item.target_price_item = calcTarget(0.40);
             }
         });
 
@@ -754,23 +691,10 @@ const Calculator = {
         this.hardwareItems.forEach((hw, idx) => {
             const result = calculateHardwareCost(hw, params);
             hw.result = result;
-
-            const resEl = document.getElementById('hw-result-' + idx);
             if (result.costPerUnit > 0) {
                 hasData = true;
-                if (resEl) resEl.style.display = '';
-                this.setText('hw-cost-' + idx, formatRub(result.costPerUnit));
                 const hwQty = hw.qty || 0;
-                const targetHw = calculateTargetPrice(result.costPerUnit, params, hwQty);
-                hw.target_price = targetHw;
-                this.setText('hw-target-' + idx, formatRub(targetHw));
-                if (hw.sell_price > 0) {
-                    const m = calculateActualMargin(hw.sell_price, result.costPerUnit);
-                    const mEl = document.getElementById('hw-margin-' + idx);
-                    if (mEl) mEl.innerHTML = `${formatRub(m.earned)} (<span class="${m.percent >= 30 ? 'text-green' : 'text-red'}">${formatPercent(m.percent)}</span>)`;
-                }
-            } else {
-                if (resEl) resEl.style.display = 'none';
+                hw.target_price = calculateTargetPrice(result.costPerUnit, params, hwQty);
             }
         });
 
@@ -778,25 +702,15 @@ const Calculator = {
         this.packagingItems.forEach((pkg, idx) => {
             const result = calculatePackagingCost(pkg, params);
             pkg.result = result;
-
-            const resEl = document.getElementById('pkg-result-' + idx);
             if (result.costPerUnit > 0) {
                 hasData = true;
-                if (resEl) resEl.style.display = '';
-                this.setText('pkg-cost-' + idx, formatRub(result.costPerUnit));
                 const pkgQty = pkg.qty || 0;
-                const targetPkg = calculateTargetPrice(result.costPerUnit, params, pkgQty);
-                pkg.target_price = targetPkg;
-                this.setText('pkg-target-' + idx, formatRub(targetPkg));
-                if (pkg.sell_price > 0) {
-                    const m = calculateActualMargin(pkg.sell_price, result.costPerUnit);
-                    const mEl = document.getElementById('pkg-margin-' + idx);
-                    if (mEl) mEl.innerHTML = `${formatRub(m.earned)} (<span class="${m.percent >= 30 ? 'text-green' : 'text-red'}">${formatPercent(m.percent)}</span>)`;
-                }
-            } else {
-                if (resEl) resEl.style.display = 'none';
+                pkg.target_price = calculateTargetPrice(result.costPerUnit, params, pkgQty);
             }
         });
+
+        // === Unified pricing card ===
+        this.renderPricingCard(params);
 
         // === Production load, FinDirector, Summary ===
         const loadEl = document.getElementById('calc-production-load');
@@ -861,6 +775,161 @@ const Calculator = {
     setText(id, text) {
         const el = document.getElementById(id);
         if (el) el.textContent = text;
+    },
+
+    // ==========================================
+    // UNIFIED PRICING CARD
+    // ==========================================
+
+    renderPricingCard(params) {
+        const pricingEl = document.getElementById('calc-pricing');
+        const contentEl = document.getElementById('calc-pricing-content');
+        if (!pricingEl || !contentEl) return;
+
+        // Collect all priced items
+        const pricedItems = this.items.filter(it => it.result && it.result.costTotal > 0);
+        const pricedHw = this.hardwareItems.filter(hw => hw.result && hw.result.costPerUnit > 0);
+        const pricedPkg = this.packagingItems.filter(pkg => pkg.result && pkg.result.costPerUnit > 0);
+
+        if (pricedItems.length === 0 && pricedHw.length === 0 && pricedPkg.length === 0) {
+            pricingEl.style.display = 'none';
+            return;
+        }
+        pricingEl.style.display = '';
+
+        const calcTarget = (cost, marginPct) => {
+            if (cost === 0) return 0;
+            const vatOnCost = cost * params.vatRate;
+            return round2((cost + vatOnCost) * (1 + marginPct) / (1 - params.taxRate - 0.065));
+        };
+
+        // Build columns
+        const columns = [];
+
+        pricedItems.forEach((item, i) => {
+            const cost = item.result.costTotal;
+            const globalIdx = this.items.indexOf(item);
+            columns.push({
+                label: item.product_name || 'Изделие ' + (i + 1),
+                type: 'item',
+                globalIdx,
+                cost,
+                t50: calcTarget(cost, 0.50),
+                t40: calcTarget(cost, 0.40),
+                t30: calcTarget(cost, 0.30),
+                t20: calcTarget(cost, 0.20),
+                sellPrice: item.sell_price_item || 0,
+                sellField: 'sell_price_item',
+            });
+        });
+
+        pricedHw.forEach((hw, i) => {
+            const cost = hw.result.costPerUnit;
+            const globalIdx = this.hardwareItems.indexOf(hw);
+            columns.push({
+                label: hw.name || 'Фурнитура ' + (i + 1),
+                type: 'hw',
+                globalIdx,
+                cost,
+                t50: calcTarget(cost, 0.50),
+                t40: calcTarget(cost, 0.40),
+                t30: calcTarget(cost, 0.30),
+                t20: calcTarget(cost, 0.20),
+                sellPrice: hw.sell_price || 0,
+                sellField: 'sell_price',
+            });
+        });
+
+        pricedPkg.forEach((pkg, i) => {
+            const cost = pkg.result.costPerUnit;
+            const globalIdx = this.packagingItems.indexOf(pkg);
+            columns.push({
+                label: pkg.name || 'Упаковка ' + (i + 1),
+                type: 'pkg',
+                globalIdx,
+                cost,
+                t50: calcTarget(cost, 0.50),
+                t40: calcTarget(cost, 0.40),
+                t30: calcTarget(cost, 0.30),
+                t20: calcTarget(cost, 0.20),
+                sellPrice: pkg.sell_price || 0,
+                sellField: 'sell_price',
+            });
+        });
+
+        // Render as a compact table-like grid
+        let html = '<div class="pricing-grid" style="display:grid; grid-template-columns: 140px ' + columns.map(() => '1fr').join(' ') + '; gap:0; font-size:12px; border:1px solid var(--border); border-radius:8px; overflow:hidden;">';
+
+        // Header row
+        html += '<div class="pricing-cell pricing-header" style="background:var(--bg);padding:8px;font-weight:600;border-bottom:1px solid var(--border);border-right:1px solid var(--border);"></div>';
+        columns.forEach(col => {
+            const icon = col.type === 'item' ? '&#9670;' : col.type === 'hw' ? '&#9881;' : '&#9744;';
+            html += `<div class="pricing-cell pricing-header" style="background:var(--bg);padding:8px;font-weight:600;border-bottom:1px solid var(--border);text-align:center;font-size:11px;">${icon} ${col.label}</div>`;
+        });
+
+        // Себестоимость row
+        html += '<div class="pricing-cell" style="padding:6px 8px;border-right:1px solid var(--border);border-bottom:1px solid var(--border);color:var(--text-secondary);">Себестоимость</div>';
+        columns.forEach(col => {
+            html += `<div class="pricing-cell" style="padding:6px 8px;text-align:center;border-bottom:1px solid var(--border);font-weight:600;">${formatRub(col.cost)}</div>`;
+        });
+
+        // Target rows
+        const targets = [
+            { pct: 50, label: 'Маржа 50%', key: 't50', style: 'color:var(--text-muted);' },
+            { pct: 40, label: 'Маржа 40%', key: 't40', style: 'color:var(--green);font-weight:700;', suffix: ' ← цель' },
+            { pct: 30, label: 'Маржа 30%', key: 't30', style: 'color:var(--text-muted);' },
+            { pct: 20, label: 'Маржа 20%', key: 't20', style: 'color:var(--red);', suffix: ' ← мин.' },
+        ];
+
+        targets.forEach(t => {
+            html += `<div class="pricing-cell" style="padding:4px 8px;border-right:1px solid var(--border);border-bottom:1px solid var(--border);font-size:11px;${t.style}">${t.label}${t.suffix ? `<span style="font-size:9px;font-weight:400">${t.suffix}</span>` : ''}</div>`;
+            columns.forEach(col => {
+                html += `<div class="pricing-cell" style="padding:4px 8px;text-align:center;border-bottom:1px solid var(--border);font-size:11px;${t.style}">${formatRub(col[t.key])}</div>`;
+            });
+        });
+
+        // Sell price row (editable)
+        html += '<div class="pricing-cell" style="padding:6px 8px;border-right:1px solid var(--border);border-bottom:1px solid var(--border);font-weight:600;background:var(--green-light);">Цена продажи</div>';
+        columns.forEach(col => {
+            const inputId = `sell-${col.type}-${col.globalIdx}`;
+            html += `<div class="pricing-cell" style="padding:4px;text-align:center;border-bottom:1px solid var(--border);background:var(--green-light);">
+                <input type="number" min="0" step="0.01" id="${inputId}" value="${col.sellPrice || ''}"
+                    style="width:100%;text-align:center;font-weight:600;font-size:13px;border:1px solid var(--border);border-radius:4px;padding:4px;"
+                    oninput="Calculator.onPricingSellChange('${col.type}', ${col.globalIdx}, this.value)">
+            </div>`;
+        });
+
+        // Margin row (calculated)
+        html += '<div class="pricing-cell" style="padding:6px 8px;border-right:1px solid var(--border);font-weight:600;">Маржа</div>';
+        columns.forEach(col => {
+            let marginHtml = '—';
+            let warnHtml = '';
+            if (col.sellPrice > 0) {
+                const m = calculateActualMargin(col.sellPrice, col.cost);
+                const color = m.percent >= 40 ? 'var(--green)' : m.percent >= 30 ? 'var(--yellow)' : 'var(--red)';
+                marginHtml = `<span style="color:${color};font-weight:700;">${formatPercent(m.percent)}</span>`;
+                if (m.percent < 30) {
+                    warnHtml = '<div style="font-size:9px;color:var(--red);margin-top:2px;">Согласовать с директором</div>';
+                }
+            }
+            html += `<div class="pricing-cell" id="pricing-margin-${col.type}-${col.globalIdx}" style="padding:6px 8px;text-align:center;">${marginHtml}${warnHtml}</div>`;
+        });
+
+        html += '</div>';
+
+        contentEl.innerHTML = html;
+    },
+
+    onPricingSellChange(type, globalIdx, value) {
+        const price = parseFloat(value) || 0;
+        if (type === 'item') {
+            this.items[globalIdx].sell_price_item = price;
+        } else if (type === 'hw') {
+            this.hardwareItems[globalIdx].sell_price = price;
+        } else if (type === 'pkg') {
+            this.packagingItems[globalIdx].sell_price = price;
+        }
+        this.recalculate();
     },
 
     // ==========================================
