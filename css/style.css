@@ -5,11 +5,13 @@
 :root {
     --bg: #f5f5f5;
     --bg-card: #ffffff;
+    --card-bg: #ffffff;
     --bg-dark: #1a1a1a;
     --text: #1a1a1a;
     --text-secondary: #666;
     --text-muted: #999;
     --border: #e0e0e0;
+    --primary: #2563eb;
     --accent: #2563eb;
     --accent-light: #dbeafe;
     --green: #16a34a;
@@ -1167,26 +1169,47 @@ table .text-center { text-align: center; }
 }
 
 /* Image picker for calculator */
-.wh-img-picker { position: relative; }
+.wh-img-picker { position: relative; z-index: 10; }
+.wh-img-picker:focus-within { z-index: 300; }
 .wh-picker-selected {
     display: flex; align-items: center; gap: 10px;
-    padding: 8px 10px; min-height: 52px;
-    border: 1px solid var(--border); border-radius: 8px;
-    cursor: pointer; background: var(--card-bg);
+    padding: 8px 12px; min-height: 56px;
+    border: 2px solid var(--border); border-radius: 8px;
+    cursor: pointer; background: #ffffff;
     transition: border-color 0.15s, box-shadow 0.15s;
 }
-.wh-picker-selected:hover { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(59,130,246,0.12); }
+.wh-picker-selected:hover { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(37,99,235,0.15); }
 .wh-picker-dropdown {
-    position: absolute; top: 100%; left: 0; right: 0; z-index: 200;
-    background: var(--card-bg); border: 1px solid var(--border);
-    border-radius: 8px; box-shadow: 0 12px 32px rgba(0,0,0,0.18);
-    max-height: 380px; overflow: hidden; margin-top: 4px;
+    position: absolute; top: 100%; left: 0; right: 0; z-index: 9999;
+    background: #ffffff; border: 2px solid var(--accent);
+    border-radius: 10px; box-shadow: 0 16px 48px rgba(0,0,0,0.25);
+    max-height: 420px; overflow: hidden; margin-top: 4px;
 }
-.wh-picker-list { max-height: 320px; overflow-y: auto; }
-.wh-picker-item { transition: background 0.1s; }
-.wh-picker-item:hover { background: rgba(59,130,246,0.08) !important; }
+.wh-picker-list { max-height: 360px; overflow-y: auto; background: #ffffff; }
+.wh-picker-item { transition: background 0.1s; background: #ffffff; }
+.wh-picker-item:hover { background: #eff6ff !important; }
 .wh-picker-cat-header { user-select: none; }
-.wh-picker-search { box-sizing: border-box; }
+.wh-picker-search { box-sizing: border-box; background: #ffffff; }
+
+/* Source toggle (Со склада / Кастомная) */
+.hw-source-toggle,
+.pkg-source-toggle {
+    display: flex; gap: 0;
+    border: 2px solid var(--border); border-radius: 8px; overflow: hidden;
+}
+.hw-source-toggle label,
+.pkg-source-toggle label {
+    cursor: pointer; padding: 6px 16px; font-size: 13px; font-weight: 600;
+    background: #ffffff; color: #666; transition: all 0.15s;
+}
+.hw-source-toggle label:not(:first-child),
+.pkg-source-toggle label:not(:first-child) {
+    border-left: 2px solid var(--border);
+}
+.hw-source-toggle label.src-active,
+.pkg-source-toggle label.src-active {
+    background: #2563eb; color: #ffffff;
+}
 
 /* =============================================
    CHINA PURCHASES PAGE

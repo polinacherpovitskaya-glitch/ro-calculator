@@ -499,16 +499,16 @@ const Calculator = {
         const maxAttr = whItem ? ` max="${whItem.available_qty}"` : '';
 
         const html = `
-        <div class="hw-row" id="hw-row-${idx}" style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:8px;background:var(--card-bg);">
+        <div class="hw-row" id="hw-row-${idx}" style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:8px;background:#ffffff;">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-                <div class="hw-source-toggle" style="display:flex;gap:0;border:1px solid var(--border);border-radius:6px;overflow:hidden;">
-                    <label style="cursor:pointer;padding:5px 14px;font-size:12px;font-weight:600;${isWarehouse ? 'background:var(--primary);color:#fff;' : 'background:var(--card-bg);color:var(--text-muted);'}">
+                <div class="hw-source-toggle">
+                    <label class="${isWarehouse ? 'src-active' : ''}">
                         <input type="radio" name="hw-src-${idx}" value="warehouse" ${isWarehouse ? 'checked' : ''} onchange="Calculator.onHwSourceChange(${idx}, 'warehouse')" style="display:none;">
-                        Со склада
+                        &#128230; Со склада
                     </label>
-                    <label style="cursor:pointer;padding:5px 14px;font-size:12px;font-weight:600;border-left:1px solid var(--border);${isCustom ? 'background:var(--primary);color:#fff;' : 'background:var(--card-bg);color:var(--text-muted);'}">
+                    <label class="${isCustom ? 'src-active' : ''}">
                         <input type="radio" name="hw-src-${idx}" value="custom" ${isCustom ? 'checked' : ''} onchange="Calculator.onHwSourceChange(${idx}, 'custom')" style="display:none;">
-                        Кастомная
+                        &#9998; Кастомная
                     </label>
                 </div>
                 <button class="btn-remove" title="Удалить фурнитуру" onclick="Calculator.removeHardware(${idx})">&#10005;</button>
@@ -711,16 +711,16 @@ const Calculator = {
         const maxAttr = whItem ? ` max="${whItem.available_qty}"` : '';
 
         const html = `
-        <div class="pkg-row" id="pkg-row-${idx}" style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:8px;background:var(--card-bg);">
+        <div class="pkg-row" id="pkg-row-${idx}" style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:8px;background:#ffffff;">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-                <div style="display:flex;gap:0;border:1px solid var(--border);border-radius:6px;overflow:hidden;">
-                    <label style="cursor:pointer;padding:5px 14px;font-size:12px;font-weight:600;${isWarehouse ? 'background:var(--primary);color:#fff;' : 'background:var(--card-bg);color:var(--text-muted);'}">
+                <div class="pkg-source-toggle">
+                    <label class="${isWarehouse ? 'src-active' : ''}">
                         <input type="radio" name="pkg-src-${idx}" value="warehouse" ${isWarehouse ? 'checked' : ''} onchange="Calculator.onPkgSourceChange(${idx}, 'warehouse')" style="display:none;">
-                        Со склада
+                        &#128230; Со склада
                     </label>
-                    <label style="cursor:pointer;padding:5px 14px;font-size:12px;font-weight:600;border-left:1px solid var(--border);${isCustom ? 'background:var(--primary);color:#fff;' : 'background:var(--card-bg);color:var(--text-muted);'}">
+                    <label class="${isCustom ? 'src-active' : ''}">
                         <input type="radio" name="pkg-src-${idx}" value="custom" ${isCustom ? 'checked' : ''} onchange="Calculator.onPkgSourceChange(${idx}, 'custom')" style="display:none;">
-                        Кастомная
+                        &#9998; Кастомная
                     </label>
                 </div>
                 <button class="btn-remove" title="Удалить упаковку" onclick="Calculator.removePackaging(${idx})">&#10005;</button>
