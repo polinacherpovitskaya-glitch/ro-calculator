@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v28';
+const APP_VERSION = 'v29';
 
 const App = {
     currentPage: 'dashboard',
@@ -486,10 +486,10 @@ const Calculator = {
         const isCustom = hw.source === 'custom';
         const list = document.getElementById('calc-hardware-list');
 
-        // Build warehouse picker options
+        // Build warehouse picker (image-based)
         let pickerHtml = '';
         if (this._whPickerData) {
-            pickerHtml = Warehouse.buildPickerOptions(this._whPickerData, hw.warehouse_item_id);
+            pickerHtml = Warehouse.buildImagePicker(`hw-picker-${idx}`, this._whPickerData, hw.warehouse_item_id, null);
         }
 
         // Info line for warehouse item
@@ -527,9 +527,7 @@ const Calculator = {
             <div class="form-row" style="align-items:end">
                 <div class="form-group" style="margin:0;flex:2;">
                     <label>Позиция со склада</label>
-                    <select id="hw-wh-select-${idx}" onchange="Calculator.onHwWarehouseSelect(${idx}, this.value)" style="width:100%;padding:6px;border:1px solid var(--border);border-radius:4px;font-size:13px;">
-                        ${pickerHtml}
-                    </select>
+                    ${pickerHtml}
                 </div>
                 <div class="form-group" style="margin:0">
                     <label>Кол-во${hw.warehouse_item_id ? ` <span style="font-size:10px;color:var(--text-muted);">(макс: ${(this._findWhItem(hw.warehouse_item_id) || {}).available_qty || '?'})</span>` : ''}</label>
@@ -612,6 +610,9 @@ const Calculator = {
 
     onHwWarehouseSelect(idx, itemIdStr) {
         const hw = this.hardwareItems[idx];
+        // Close any open picker dropdowns
+        document.querySelectorAll('.wh-picker-dropdown').forEach(d => d.style.display = 'none');
+
         const itemId = parseInt(itemIdStr) || null;
 
         if (!itemId) {

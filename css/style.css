@@ -1165,3 +1165,11 @@ table .text-center { text-align: center; }
     color: var(--text);
     font-family: inherit;
 }
+
+/* Image picker for calculator */
+.wh-img-picker { position: relative; }
+.wh-picker-selected { transition: border-color 0.15s; }
+.wh-picker-selected:hover { border-color: var(--accent) !important; }
+.wh-picker-item { transition: background 0.1s; }
+.wh-picker-item:hover { background: rgba(59,130,246,0.08) !important; }
+.wh-picker-search { box-sizing: border-box; }

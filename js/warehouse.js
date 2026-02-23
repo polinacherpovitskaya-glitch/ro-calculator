@@ -237,6 +237,24 @@ const Warehouse = {
             this.allItems = await loadWarehouseItems();
         }
 
+        // Migrate: patch photos from WAREHOUSE_SEED_PHOTOS if items were seeded without them
+        if (typeof WAREHOUSE_SEED_PHOTOS !== 'undefined') {
+            let patched = 0;
+            this.allItems.forEach(item => {
+                if (!item.photo_thumbnail) {
+                    const seedIdx = WAREHOUSE_SEED_DATA.findIndex(s => s.sku === item.sku);
+                    if (seedIdx >= 0 && WAREHOUSE_SEED_PHOTOS[seedIdx]) {
+                        item.photo_thumbnail = WAREHOUSE_SEED_PHOTOS[seedIdx];
+                        patched++;
+                    }
+                }
+            });
+            if (patched > 0) {
+                await saveWarehouseItems(this.allItems);
+                console.log(`[Warehouse] Patched ${patched} items with seed photos`);
+            }
+        }
+
         this.allReservations = await loadWarehouseReservations();
         this.recalcReservations();
         this.populateCategoryFilter();
@@ -255,6 +273,7 @@ const Warehouse = {
             color: raw.color || '',
             unit: raw.unit || 'шт',
             photo_url: '',
+            photo_thumbnail: (typeof WAREHOUSE_SEED_PHOTOS !== 'undefined' && WAREHOUSE_SEED_PHOTOS[i]) || '',
             qty: raw.qty || 0,
             min_qty: 10,
             price_per_unit: 0,
@@ -1441,6 +1460,7 @@ const Warehouse = {
                         available_qty: i.available_qty || 0,
                         price_per_unit: i.price_per_unit || 0,
                         unit: i.unit || 'шт',
+                        photo_thumbnail: i.photo_thumbnail || '',
                     })),
                 };
             }
@@ -1466,4 +1486,105 @@ const Warehouse = {
         }
         return html;
     },
+
+    // Custom image-based picker for calculator
+    buildImagePicker(containerId, grouped, selectedId, onSelectCallback) {
+        const cat = WAREHOUSE_CATEGORIES;
+        const selectedItem = selectedId ? this._findInGrouped(grouped, selectedId) : null;
+
+        // Selected display
+        let selectedHtml = '';
+        if (selectedItem) {
+            const parts = [selectedItem.name];
+            if (selectedItem.size) parts.push(selectedItem.size);
+            if (selectedItem.color) parts.push(selectedItem.color);
+            const catObj = cat.find(c => c.key === selectedItem.category) || cat[6];
+            const photoHtml = selectedItem.photo_thumbnail
+                ? `<img src="${selectedItem.photo_thumbnail}" style="width:36px;height:36px;object-fit:cover;border-radius:4px;flex-shrink:0;">`
+                : `<span style="width:36px;height:36px;display:flex;align-items:center;justify-content:center;background:${catObj.color};border-radius:4px;font-size:16px;flex-shrink:0;">${catObj.icon}</span>`;
+            selectedHtml = `${photoHtml}<span style="flex:1;min-width:0;"><b style="display:block;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${parts.join(' · ')}</b><span style="font-size:11px;color:var(--text-muted);">${selectedItem.sku || ''} · ${selectedItem.available_qty} ${selectedItem.unit}</span></span>`;
+        } else {
+            selectedHtml = '<span style="color:var(--text-muted);font-size:13px;">— Выберите позицию —</span>';
+        }
+
+        // Build dropdown items
+        let itemsHtml = '';
+        for (const catKey of Object.keys(grouped)) {
+            const g = grouped[catKey];
+            const catObj = cat.find(c => c.key === catKey) || cat[6];
+            itemsHtml += `<div style="padding:4px 8px;font-size:11px;font-weight:700;color:${catObj.textColor};background:${catObj.color};position:sticky;top:0;z-index:1;">${catObj.icon} ${g.label}</div>`;
+            g.items.forEach(item => {
+                const parts = [item.name];
+                if (item.size) parts.push(item.size);
+                if (item.color) parts.push(item.color);
+                const label = parts.join(' · ');
+                const stock = item.available_qty > 0 ? `${item.available_qty} ${item.unit}` : '<span style="color:var(--red);">нет</span>';
+                const photoHtml = item.photo_thumbnail
+                    ? `<img src="${item.photo_thumbnail}" style="width:40px;height:40px;object-fit:cover;border-radius:4px;flex-shrink:0;">`
+                    : `<span style="width:40px;height:40px;display:flex;align-items:center;justify-content:center;background:${catObj.color};border-radius:4px;font-size:18px;flex-shrink:0;">${catObj.icon}</span>`;
+                const isSelected = item.id === selectedId ? 'background:rgba(59,130,246,0.08);' : '';
+                itemsHtml += `<div class="wh-picker-item" data-id="${item.id}" style="display:flex;align-items:center;gap:8px;padding:6px 8px;cursor:pointer;${isSelected}" onclick="Calculator.onHwWarehouseSelect(${containerId.replace('hw-picker-','')}, '${item.id}')">
+                    ${photoHtml}
+                    <div style="flex:1;min-width:0;">
+                        <div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${label}</div>
+                        <div style="font-size:11px;color:var(--text-muted);">${item.sku || ''} · ${stock}</div>
+                    </div>
+                </div>`;
+            });
+        }
+
+        return `<div id="${containerId}" class="wh-img-picker" style="position:relative;">
+            <div class="wh-picker-selected" onclick="Warehouse.togglePicker('${containerId}')" style="display:flex;align-items:center;gap:8px;padding:6px 8px;border:1px solid var(--border);border-radius:6px;cursor:pointer;background:var(--card-bg);min-height:48px;">
+                ${selectedHtml}
+                <span style="flex-shrink:0;color:var(--text-muted);">&#9662;</span>
+            </div>
+            <div class="wh-picker-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:100;background:var(--card-bg);border:1px solid var(--border);border-radius:6px;box-shadow:0 8px 24px rgba(0,0,0,0.15);max-height:320px;overflow:hidden;margin-top:2px;">
+                <div style="padding:6px 8px;border-bottom:1px solid var(--border);"><input type="text" class="wh-picker-search" placeholder="Поиск..." oninput="Warehouse.filterPicker('${containerId}', this.value)" style="width:100%;padding:4px 8px;border:1px solid var(--border);border-radius:4px;font-size:12px;"></div>
+                <div class="wh-picker-list" style="max-height:268px;overflow-y:auto;">${itemsHtml}</div>
+            </div>
+        </div>`;
+    },
+
+    _findInGrouped(grouped, id) {
+        for (const catKey of Object.keys(grouped)) {
+            const found = grouped[catKey].items.find(i => i.id === id);
+            if (found) return found;
+        }
+        return null;
+    },
+
+    togglePicker(containerId) {
+        const el = document.getElementById(containerId);
+        if (!el) return;
+        const dd = el.querySelector('.wh-picker-dropdown');
+        const isOpen = dd.style.display !== 'none';
+        // Close all pickers first
+        document.querySelectorAll('.wh-picker-dropdown').forEach(d => d.style.display = 'none');
+        if (!isOpen) {
+            dd.style.display = 'block';
+            const searchInput = dd.querySelector('.wh-picker-search');
+            if (searchInput) { searchInput.value = ''; searchInput.focus(); }
+            // Show all items
+            dd.querySelectorAll('.wh-picker-item').forEach(i => i.style.display = '');
+            dd.querySelectorAll('.wh-picker-item').forEach(i => i.previousElementSibling && i.previousElementSibling.classList && (i.previousElementSibling.style.display = ''));
+        }
+    },
+
+    filterPicker(containerId, query) {
+        const el = document.getElementById(containerId);
+        if (!el) return;
+        const q = (query || '').toLowerCase().trim();
+        const items = el.querySelectorAll('.wh-picker-item');
+        items.forEach(item => {
+            const text = item.textContent.toLowerCase();
+            item.style.display = q === '' || text.includes(q) ? '' : 'none';
+        });
+    },
 };
+
+// Close image picker dropdowns when clicking outside
+document.addEventListener('click', function(e) {
+    if (!e.target.closest('.wh-img-picker')) {
+        document.querySelectorAll('.wh-picker-dropdown').forEach(d => d.style.display = 'none');
+    }
+});
