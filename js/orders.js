@@ -45,7 +45,7 @@ const Orders = {
         const tbody = document.getElementById('orders-table-body');
 
         if (orders.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="8" class="empty-state">
+            tbody.innerHTML = `<tr><td colspan="9" class="empty-state">
                 <div class="empty-icon">&#9776;</div>
                 <p>Нет заказов</p>
             </td></tr>`;
@@ -84,12 +84,17 @@ const Orders = {
                         ${statusOpts}
                    </select>`;
 
+            // Payment status badge
+            const ps = PAYMENT_STATUSES.find(s => s.key === (o.payment_status || 'not_sent')) || PAYMENT_STATUSES[0];
+            const paymentBadge = `<span class="badge badge-${ps.color}" style="font-size:10px;">${ps.label}</span>`;
+
             return `
             <tr style="${isDeleted ? 'opacity:0.7;' : ''}">
-                <td><a href="#" onclick="Orders.editOrder(${o.id}); return false;" style="color:var(--accent);font-weight:600;text-decoration:none" title="Открыть в калькуляторе">${this.escHtml(o.order_name)}</a></td>
+                <td><a href="#order-detail/${o.id}" onclick="App.navigate('order-detail', true, ${o.id}); return false;" style="color:var(--accent);font-weight:600;text-decoration:none" title="Открыть карточку заказа">${this.escHtml(o.order_name)}</a></td>
                 <td>${this.escHtml(o.client_name || '—')}</td>
                 <td>${this.escHtml(o.manager_name || '—')}</td>
                 <td>${statusCell}</td>
+                <td>${paymentBadge}</td>
                 <td class="text-right">${formatRub(o.total_revenue_plan || 0)}</td>
                 <td class="text-right ${(o.margin_percent_plan || 0) >= 30 ? 'text-green' : 'text-red'}">${formatPercent(o.margin_percent_plan || 0)}</td>
                 <td>${dateDisplay}</td>
@@ -122,8 +127,8 @@ const Orders = {
         this.loadList();
     },
 
-    async editOrder(orderId) {
-        await Calculator.loadOrder(orderId);
+    editOrder(orderId) {
+        App.navigate('order-detail', true, orderId);
     },
 
     async confirmDelete(orderId, name) {

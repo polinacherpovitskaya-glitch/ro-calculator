@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=31b">
+    <link rel="stylesheet" href="css/style.css?v=32">
 </head>
 <body>
 
@@ -178,8 +178,35 @@
                         </select>
                     </div>
                     <div class="form-group">
-                        <label>Дедлайн</label>
-                        <input type="date" id="calc-deadline">
+                        <label>Дедлайн (начало)</label>
+                        <input type="date" id="calc-deadline-start">
+                    </div>
+                    <div class="form-group">
+                        <label>Дедлайн (конец)</label>
+                        <input type="date" id="calc-deadline-end">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group" style="flex:2">
+                        <label>Цветовое решение</label>
+                        <input type="text" id="calc-color-scheme" placeholder="напр. белый+синий+зеленый">
+                    </div>
+                    <div class="form-group">
+                        <label>Тип пластика</label>
+                        <select id="calc-plastic-type">
+                            <option value="">Не указано</option>
+                            <option value="ABS">ABS</option>
+                            <option value="PP">ПП (PP)</option>
+                            <option value="PND">ПНД (PND)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Тип печати</label>
+                        <select id="calc-print-type">
+                            <option value="">Не указано</option>
+                            <option value="uv_stepan">УФ у Степана</option>
+                            <option value="uv_stickers">УФ-наклейки</option>
+                        </select>
                     </div>
                 </div>
                 <div class="form-group">
@@ -352,6 +379,7 @@
                                 <th>Клиент</th>
                                 <th>Менеджер</th>
                                 <th>Статус</th>
+                                <th>Оплата</th>
                                 <th class="text-right">Выручка</th>
                                 <th class="text-right">Маржа</th>
                                 <th>Дата</th>
@@ -359,11 +387,44 @@
                             </tr>
                         </thead>
                         <tbody id="orders-table-body">
-                            <tr><td colspan="8" class="text-center text-muted">Загрузка...</td></tr>
+                            <tr><td colspan="9" class="text-center text-muted">Загрузка...</td></tr>
                         </tbody>
                     </table>
                 </div>
             </div>
+        </div>
+
+        <!-- ========== ORDER DETAIL ========== -->
+        <div id="page-order-detail" class="page">
+            <div class="page-header">
+                <div class="flex gap-8" style="align-items:center">
+                    <button class="btn btn-outline btn-sm" onclick="App.navigate('orders')">&larr; Назад</button>
+                    <h1 id="od-title" style="margin:0">Заказ</h1>
+                    <span class="badge" id="od-status-badge"></span>
+                </div>
+                <div class="flex gap-8">
+                    <button class="btn btn-outline" onclick="OrderDetail.openInCalculator()">&#9998; Калькулятор</button>
+                    <button class="btn btn-primary" onclick="OrderDetail.changeStatus()">Сменить статус</button>
+                </div>
+            </div>
+
+            <div class="stats-grid" id="od-stats"></div>
+
+            <div class="od-tabs">
+                <button class="od-tab-btn active" data-tab="info" onclick="OrderDetail.switchTab('info')">&#128196; Информация</button>
+                <button class="od-tab-btn" data-tab="production" onclick="OrderDetail.switchTab('production')">&#9881; Производство</button>
+                <button class="od-tab-btn" data-tab="files" onclick="OrderDetail.switchTab('files')">&#128193; Файлы</button>
+                <button class="od-tab-btn" data-tab="items" onclick="OrderDetail.switchTab('items')">&#128230; Изделия</button>
+                <button class="od-tab-btn" data-tab="tasks" onclick="OrderDetail.switchTab('tasks')">&#9745; Задачи</button>
+                <button class="od-tab-btn" data-tab="china" onclick="OrderDetail.switchTab('china')">&#127464;&#127475; Китай</button>
+            </div>
+
+            <div id="od-tab-info" class="od-tab-content"></div>
+            <div id="od-tab-production" class="od-tab-content" style="display:none"></div>
+            <div id="od-tab-files" class="od-tab-content" style="display:none"></div>
+            <div id="od-tab-items" class="od-tab-content" style="display:none"></div>
+            <div id="od-tab-tasks" class="od-tab-content" style="display:none"></div>
+            <div id="od-tab-china" class="od-tab-content" style="display:none"></div>
         </div>
 
         <!-- ========== FACTUAL (Plan vs Fact) ========== -->
@@ -1836,21 +1897,22 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="js/supabase.js?v=31b"></script>
-<script src="js/calculator.js?v=31b"></script>
-<script src="js/app.js?v=31b"></script>
-<script src="js/dashboard.js?v=31b"></script>
-<script src="js/orders.js?v=31b"></script>
-<script src="js/analytics.js?v=31b"></script>
-<script src="js/molds.js?v=31b"></script>
-<script src="js/kp.js?v=31b"></script>
-<script src="js/timetrack.js?v=31b"></script>
-<script src="js/tasks.js?v=31b"></script>
-<script src="js/import.js?v=31b"></script>
-<script src="js/factual.js?v=31b"></script>
-<script src="js/china.js?v=31b"></script>
-<script src="js/warehouse_photos.js?v=31b"></script>
-<script src="js/warehouse.js?v=31b"></script>
-<script src="js/settings.js?v=31b"></script>
+<script src="js/supabase.js?v=32"></script>
+<script src="js/calculator.js?v=32"></script>
+<script src="js/app.js?v=32"></script>
+<script src="js/dashboard.js?v=32"></script>
+<script src="js/order-detail.js?v=32"></script>
+<script src="js/orders.js?v=32"></script>
+<script src="js/analytics.js?v=32"></script>
+<script src="js/molds.js?v=32"></script>
+<script src="js/kp.js?v=32"></script>
+<script src="js/timetrack.js?v=32"></script>
+<script src="js/tasks.js?v=32"></script>
+<script src="js/import.js?v=32"></script>
+<script src="js/factual.js?v=32"></script>
+<script src="js/china.js?v=32"></script>
+<script src="js/warehouse_photos.js?v=32"></script>
+<script src="js/warehouse.js?v=32"></script>
+<script src="js/settings.js?v=32"></script>
 </body>
 </html>

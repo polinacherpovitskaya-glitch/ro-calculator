@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v31';
+const APP_VERSION = 'v32';
 
 const App = {
     currentPage: 'dashboard',
@@ -84,11 +84,13 @@ const App = {
 
     handleRoute() {
         const hash = window.location.hash.replace('#', '') || 'dashboard';
-        const page = hash.split('/')[0];
-        this.navigate(page, false);
+        const parts = hash.split('/');
+        const page = parts[0];
+        const subId = parts[1] || null;
+        this.navigate(page, false, subId);
     },
 
-    navigate(page, pushHash = true) {
+    navigate(page, pushHash = true, subId = null) {
         document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
 
         const target = document.getElementById('page-' + page);
@@ -100,22 +102,25 @@ const App = {
             this.currentPage = 'dashboard';
         }
 
+        // Highlight sidebar (order-detail highlights 'orders')
+        const navPage = page === 'order-detail' ? 'orders' : this.currentPage;
         document.querySelectorAll('.sidebar-nav a').forEach(a => {
-            a.classList.toggle('active', a.dataset.page === this.currentPage);
+            a.classList.toggle('active', a.dataset.page === navPage);
         });
 
         if (pushHash) {
-            window.location.hash = this.currentPage;
+            window.location.hash = subId ? this.currentPage + '/' + subId : this.currentPage;
         }
 
-        this.onPageEnter(this.currentPage);
+        this.onPageEnter(this.currentPage, subId);
     },
 
-    onPageEnter(page) {
+    onPageEnter(page, subId) {
         switch (page) {
             case 'dashboard': Dashboard.load(); break;
             case 'calculator': Calculator.init(); break;
             case 'orders': Orders.loadList(); break;
+            case 'order-detail': if (subId) OrderDetail.load(parseInt(subId)); break;
             case 'factual': Factual.load(); break;
             case 'analytics': Analytics.load(); break;
             case 'molds': Molds.load(); break;
@@ -182,8 +187,12 @@ const Calculator = {
         document.getElementById('calc-order-name').value = '';
         document.getElementById('calc-client-name').value = '';
         document.getElementById('calc-manager-name').value = '';
-        document.getElementById('calc-deadline').value = '';
+        document.getElementById('calc-deadline-start').value = '';
+        document.getElementById('calc-deadline-end').value = '';
         document.getElementById('calc-notes').value = '';
+        document.getElementById('calc-color-scheme').value = '';
+        document.getElementById('calc-plastic-type').value = '';
+        document.getElementById('calc-print-type').value = '';
         this.items = [];
         this.hardwareItems = [];
         this.packagingItems = [];
@@ -1548,8 +1557,13 @@ const Calculator = {
             order_name: orderName,
             client_name: document.getElementById('calc-client-name').value.trim(),
             manager_name: document.getElementById('calc-manager-name').value.trim(),
-            deadline: document.getElementById('calc-deadline').value || null,
+            deadline: document.getElementById('calc-deadline-start').value || null,
+            deadline_start: document.getElementById('calc-deadline-start').value || null,
+            deadline_end: document.getElementById('calc-deadline-end').value || null,
             notes: document.getElementById('calc-notes').value.trim(),
+            color_scheme: document.getElementById('calc-color-scheme').value.trim(),
+            plastic_type: document.getElementById('calc-plastic-type').value || null,
+            print_type: document.getElementById('calc-print-type').value || null,
             status: 'calculated',
             total_revenue_plan: summary.totalRevenue,
             total_cost_plan: summary.totalRevenue - summary.totalEarned,
@@ -1796,8 +1810,12 @@ const Calculator = {
         document.getElementById('calc-order-name').value = order.order_name || '';
         document.getElementById('calc-client-name').value = order.client_name || '';
         document.getElementById('calc-manager-name').value = order.manager_name || '';
-        document.getElementById('calc-deadline').value = order.deadline || '';
+        document.getElementById('calc-deadline-start').value = order.deadline_start || order.deadline || '';
+        document.getElementById('calc-deadline-end').value = order.deadline_end || '';
         document.getElementById('calc-notes').value = order.notes || '';
+        document.getElementById('calc-color-scheme').value = order.color_scheme || '';
+        document.getElementById('calc-plastic-type').value = order.plastic_type || '';
+        document.getElementById('calc-print-type').value = order.print_type || '';
 
         // Restore product items
         const productItems = dbItems.filter(i => !i.item_type || i.item_type === 'product');

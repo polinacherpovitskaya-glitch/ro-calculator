@@ -293,6 +293,24 @@ async function updateOrderStatus(orderId, status) {
     }
 }
 
+async function updateOrderFields(orderId, updates) {
+    if (typeof orderId === 'string' && /^\d+$/.test(orderId)) orderId = Number(orderId);
+    if (isSupabaseReady()) {
+        const { error } = await supabaseClient
+            .from('orders')
+            .update({ ...updates, updated_at: new Date().toISOString() })
+            .eq('id', orderId);
+        if (error) console.error('updateOrderFields error:', error);
+    } else {
+        const orders = getLocal(LOCAL_KEYS.orders) || [];
+        const idx = orders.findIndex(o => o.id === orderId);
+        if (idx >= 0) {
+            Object.assign(orders[idx], updates, { updated_at: new Date().toISOString() });
+            setLocal(LOCAL_KEYS.orders, orders);
+        }
+    }
+}
+
 async function deleteOrder(orderId) {
     // Soft delete — mark as deleted, keep data for recovery
     if (isSupabaseReady()) {
@@ -795,6 +813,7 @@ async function loadChinaPurchases(filters = {}) {
     let purchases = getLocal(LOCAL_KEYS.chinaPurchases) || [];
     if (filters.status) purchases = purchases.filter(p => p.status === filters.status);
     if (filters.delivery_type) purchases = purchases.filter(p => p.delivery_type === filters.delivery_type);
+    if (filters.order_id) purchases = purchases.filter(p => p.order_id === filters.order_id);
     purchases.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
     if (filters.limit) purchases = purchases.slice(0, filters.limit);
     return purchases;

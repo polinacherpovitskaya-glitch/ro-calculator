@@ -1264,3 +1264,63 @@ table .text-center { text-align: center; }
 
 /* Item row in form */
 .china-item-row { border:1px solid var(--border); border-radius:6px; padding:12px; margin-bottom:8px; background:var(--bg); }
+
+/* =============================================
+   ORDER DETAIL PAGE
+   ============================================= */
+
+/* Tab bar */
+.od-tabs { display:flex; gap:0; border-bottom:2px solid var(--border); margin-bottom:16px; overflow-x:auto; }
+.od-tab-btn {
+    padding:10px 20px; font-size:13px; font-weight:600; cursor:pointer;
+    color:var(--text-muted); border:none; background:none;
+    border-bottom:2px solid transparent; margin-bottom:-2px; white-space:nowrap;
+    transition: color .15s, border-color .15s;
+}
+.od-tab-btn:hover { color:var(--text); }
+.od-tab-btn.active { color:var(--accent); border-bottom-color:var(--accent); }
+
+/* Two-column detail grid */
+.od-detail-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+@media (max-width: 768px) { .od-detail-grid { grid-template-columns:1fr; } }
+
+/* Field row */
+.od-field-row {
+    display:flex; justify-content:space-between; align-items:center;
+    padding:10px 16px; border-bottom:1px solid var(--border);
+    transition: background .1s;
+}
+.od-field-row:hover { background:var(--bg); }
+.od-field-row:last-child { border-bottom:none; }
+.od-field-label { font-size:12px; font-weight:600; color:var(--text-muted); min-width:130px; flex-shrink:0; }
+.od-field-value { font-size:14px; flex:1; text-align:right; word-break:break-word; }
+.od-field-value a { color:var(--accent); text-decoration:none; }
+.od-field-value a:hover { text-decoration:underline; }
+
+/* URL link */
+.od-url-link {
+    display:inline-flex; align-items:center; gap:4px;
+    color:var(--accent); text-decoration:none; font-size:13px;
+    max-width:300px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.od-url-link:hover { text-decoration:underline; }
+
+/* Status select */
+.od-status-select {
+    padding:4px 10px; border:1px solid var(--border); border-radius:6px;
+    font-size:13px; background:var(--card-bg); cursor:pointer;
+}
+
+/* Item card */
+.od-item-card {
+    border:1px solid var(--border); border-radius:var(--radius, 10px);
+    padding:16px; margin-bottom:12px; background:var(--card-bg);
+}
+.od-item-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
+
+/* Badge colors for payment */
+.badge-orange { background:#fff7ed; color:#ea580c; }
+
+/* Inline edit state */
+.od-editing { padding:0 !important; }
+.od-inline-input { font-family:inherit; }
