@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v30';
+const APP_VERSION = 'v31';
 
 const App = {
     currentPage: 'dashboard',
@@ -391,7 +391,7 @@ const Calculator = {
     },
 
     addPrinting(itemIdx) {
-        this.items[itemIdx].printings.push({ name: '', qty: 0, price: 0 });
+        this.items[itemIdx].printings.push({ name: '', qty: 0, price: 0, sell_price: 0 });
         const pi = this.items[itemIdx].printings.length - 1;
         const list = document.getElementById('printings-list-' + itemIdx);
         list.insertAdjacentHTML('beforeend', this.renderPrintingRow(itemIdx, pi, this.items[itemIdx].printings[pi]));
@@ -487,37 +487,28 @@ const Calculator = {
         const isCustom = hw.source === 'custom';
         const list = document.getElementById('calc-hardware-list');
 
-        // Build warehouse picker (image-based)
+        // Build warehouse picker (hardware only — exclude packaging)
         let pickerHtml = '';
         if (this._whPickerData) {
-            pickerHtml = Warehouse.buildImagePicker(`hw-picker-${idx}`, this._whPickerData, hw.warehouse_item_id, null);
+            pickerHtml = Warehouse.buildImagePicker(`hw-picker-${idx}`, this._whPickerData, hw.warehouse_item_id, 'Calculator.onHwWarehouseSelect', 'hardware');
         }
 
-        // Info line for warehouse item
-        let whInfoHtml = '';
-        if (isWarehouse && hw.warehouse_item_id) {
-            const whItem = this._findWhItem(hw.warehouse_item_id);
-            if (whItem) {
-                const priceStr = whItem.price_per_unit > 0
-                    ? `Закупка: ${formatRub(whItem.price_per_unit)}`
-                    : '<span style="color:var(--red);">⚠ Цена не указана</span>';
-                whInfoHtml = `<div class="hw-wh-info" style="font-size:11px;color:var(--text-muted);margin-top:4px;padding:4px 8px;background:var(--bg);border-radius:4px;">
-                    ${whItem.sku ? '<b>' + whItem.sku + '</b> · ' : ''}Остаток: <b>${whItem.available_qty} ${whItem.unit}</b> · ${priceStr}
-                </div>`;
-            }
-        }
+        // Max qty from warehouse
+        const whItem = (isWarehouse && hw.warehouse_item_id) ? this._findWhItem(hw.warehouse_item_id) : null;
+        const maxQty = whItem ? whItem.available_qty : '';
+        const maxAttr = whItem ? ` max="${whItem.available_qty}"` : '';
 
         const html = `
         <div class="hw-row" id="hw-row-${idx}" style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:8px;background:var(--card-bg);">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-                <div class="hw-source-toggle" style="display:flex;gap:4px;">
-                    <label class="hw-src-btn${isWarehouse ? ' active' : ''}" style="cursor:pointer;padding:4px 12px;border-radius:4px;font-size:12px;font-weight:600;border:1px solid var(--border);${isWarehouse ? 'background:var(--primary);color:#fff;border-color:var(--primary);' : ''}">
+                <div class="hw-source-toggle" style="display:flex;gap:0;border:1px solid var(--border);border-radius:6px;overflow:hidden;">
+                    <label style="cursor:pointer;padding:5px 14px;font-size:12px;font-weight:600;${isWarehouse ? 'background:var(--primary);color:#fff;' : 'background:var(--card-bg);color:var(--text-muted);'}">
                         <input type="radio" name="hw-src-${idx}" value="warehouse" ${isWarehouse ? 'checked' : ''} onchange="Calculator.onHwSourceChange(${idx}, 'warehouse')" style="display:none;">
-                        📦 Со склада
+                        Со склада
                     </label>
-                    <label class="hw-src-btn${isCustom ? ' active' : ''}" style="cursor:pointer;padding:4px 12px;border-radius:4px;font-size:12px;font-weight:600;border:1px solid var(--border);${isCustom ? 'background:var(--primary);color:#fff;border-color:var(--primary);' : ''}">
+                    <label style="cursor:pointer;padding:5px 14px;font-size:12px;font-weight:600;border-left:1px solid var(--border);${isCustom ? 'background:var(--primary);color:#fff;' : 'background:var(--card-bg);color:var(--text-muted);'}">
                         <input type="radio" name="hw-src-${idx}" value="custom" ${isCustom ? 'checked' : ''} onchange="Calculator.onHwSourceChange(${idx}, 'custom')" style="display:none;">
-                        ✏️ Кастомная
+                        Кастомная
                     </label>
                 </div>
                 <button class="btn-remove" title="Удалить фурнитуру" onclick="Calculator.removeHardware(${idx})">&#10005;</button>
@@ -531,15 +522,14 @@ const Calculator = {
                     ${pickerHtml}
                 </div>
                 <div class="form-group" style="margin:0">
-                    <label>Кол-во${hw.warehouse_item_id ? ` <span style="font-size:10px;color:var(--text-muted);">(макс: ${(this._findWhItem(hw.warehouse_item_id) || {}).available_qty || '?'})</span>` : ''}</label>
-                    <input type="number" min="0" value="${hw.qty || ''}" oninput="Calculator.onHwNum(${idx}, 'qty', this.value)">
+                    <label>Кол-во${maxQty !== '' ? ` <span style="font-size:10px;color:var(--text-muted);">(макс: ${maxQty})</span>` : ''}</label>
+                    <input type="number" min="0"${maxAttr} value="${hw.qty || ''}" oninput="Calculator.onHwNum(${idx}, 'qty', this.value)">
                 </div>
                 <div class="form-group" style="margin:0">
                     <label>Сборка (мин/шт)</label>
                     <input type="number" min="0" step="0.1" value="${minsDisplay}" oninput="Calculator.onHwMinutes(${idx}, this.value)" placeholder="напр. 0.5">
                 </div>
             </div>
-            ${whInfoHtml}
             ` : `
             <!-- CUSTOM MODE -->
             <div class="form-row" style="align-items:end">
@@ -652,8 +642,16 @@ const Calculator = {
 
     onHwNum(idx, field, value) {
         this.hardwareItems[idx][field] = parseFloat(value) || 0;
-        // Auto-calculate per-unit delivery from total
         const hw = this.hardwareItems[idx];
+        // Enforce max qty for warehouse items
+        if (field === 'qty' && hw.source === 'warehouse' && hw.warehouse_item_id) {
+            const whItem = this._findWhItem(hw.warehouse_item_id);
+            if (whItem && hw.qty > whItem.available_qty) {
+                hw.qty = whItem.available_qty;
+                App.toast(`Максимум на складе: ${whItem.available_qty} ${whItem.unit}`);
+            }
+        }
+        // Auto-calculate per-unit delivery from total
         hw.delivery_price = hw.qty > 0 ? round2(hw.delivery_total / hw.qty) : 0;
         this.recalculate();
     },
@@ -672,6 +670,9 @@ const Calculator = {
 
     getEmptyPackaging() {
         return {
+            source: 'warehouse',        // 'warehouse' | 'custom'
+            warehouse_item_id: null,
+            warehouse_sku: '',
             name: '',
             qty: 0,
             assembly_speed: 0,      // шт/ч (calculated from minutes)
@@ -684,18 +685,65 @@ const Calculator = {
         };
     },
 
-    addPackaging() {
+    async addPackaging() {
         const idx = this.packagingItems.length;
         this.packagingItems.push(this.getEmptyPackaging());
+        await this._ensureWhPickerData();
         this.renderPackagingRow(idx);
     },
 
     renderPackagingRow(idx) {
         const pkg = this.packagingItems[idx];
         const minsDisplay = pkg.assembly_minutes || '';
+        const isWarehouse = pkg.source === 'warehouse';
+        const isCustom = pkg.source === 'custom';
         const list = document.getElementById('calc-packaging-list');
+
+        // Build warehouse picker (packaging only)
+        let pickerHtml = '';
+        if (this._whPickerData) {
+            pickerHtml = Warehouse.buildImagePicker(`pkg-picker-${idx}`, this._whPickerData, pkg.warehouse_item_id, 'Calculator.onPkgWarehouseSelect', 'packaging');
+        }
+
+        // Max qty from warehouse
+        const whItem = (isWarehouse && pkg.warehouse_item_id) ? this._findWhItem(pkg.warehouse_item_id) : null;
+        const maxQty = whItem ? whItem.available_qty : '';
+        const maxAttr = whItem ? ` max="${whItem.available_qty}"` : '';
+
         const html = `
-        <div class="pkg-row" id="pkg-row-${idx}">
+        <div class="pkg-row" id="pkg-row-${idx}" style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:8px;background:var(--card-bg);">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                <div style="display:flex;gap:0;border:1px solid var(--border);border-radius:6px;overflow:hidden;">
+                    <label style="cursor:pointer;padding:5px 14px;font-size:12px;font-weight:600;${isWarehouse ? 'background:var(--primary);color:#fff;' : 'background:var(--card-bg);color:var(--text-muted);'}">
+                        <input type="radio" name="pkg-src-${idx}" value="warehouse" ${isWarehouse ? 'checked' : ''} onchange="Calculator.onPkgSourceChange(${idx}, 'warehouse')" style="display:none;">
+                        Со склада
+                    </label>
+                    <label style="cursor:pointer;padding:5px 14px;font-size:12px;font-weight:600;border-left:1px solid var(--border);${isCustom ? 'background:var(--primary);color:#fff;' : 'background:var(--card-bg);color:var(--text-muted);'}">
+                        <input type="radio" name="pkg-src-${idx}" value="custom" ${isCustom ? 'checked' : ''} onchange="Calculator.onPkgSourceChange(${idx}, 'custom')" style="display:none;">
+                        Кастомная
+                    </label>
+                </div>
+                <button class="btn-remove" title="Удалить упаковку" onclick="Calculator.removePackaging(${idx})">&#10005;</button>
+            </div>
+
+            ${isWarehouse ? `
+            <!-- WAREHOUSE MODE -->
+            <div class="form-row" style="align-items:end">
+                <div class="form-group" style="margin:0;flex:2;">
+                    <label>Позиция со склада</label>
+                    ${pickerHtml}
+                </div>
+                <div class="form-group" style="margin:0">
+                    <label>Кол-во${maxQty !== '' ? ` <span style="font-size:10px;color:var(--text-muted);">(макс: ${maxQty})</span>` : ''}</label>
+                    <input type="number" min="0"${maxAttr} value="${pkg.qty || ''}" oninput="Calculator.onPkgNum(${idx}, 'qty', this.value)">
+                </div>
+                <div class="form-group" style="margin:0">
+                    <label>Сборка (мин/шт)</label>
+                    <input type="number" min="0" step="0.1" value="${minsDisplay}" oninput="Calculator.onPkgMinutes(${idx}, this.value)" placeholder="напр. 0.5">
+                </div>
+            </div>
+            ` : `
+            <!-- CUSTOM MODE -->
             <div class="form-row" style="align-items:end">
                 <div class="form-group" style="margin:0">
                     <label>Название</label>
@@ -717,8 +765,9 @@ const Calculator = {
                     <label>Доставка (&#8381; всего)</label>
                     <input type="number" min="0" step="0.01" value="${pkg.delivery_total || ''}" oninput="Calculator.onPkgNum(${idx}, 'delivery_total', this.value)">
                 </div>
-                <button class="btn-remove" title="Удалить упаковку" onclick="Calculator.removePackaging(${idx})">&#10005;</button>
             </div>
+            `}
+
             <div class="cost-breakdown" id="pkg-cost-${idx}" style="display:none">
                 <div class="section-title" style="margin-top:0">Себестоимость упаковки (за 1 шт)</div>
                 <div class="cost-row"><span class="cost-label">ФОТ сборка</span><span class="cost-value" id="pkg-${idx}-fot">0</span></div>
@@ -742,14 +791,70 @@ const Calculator = {
         this.packagingItems.forEach((_, i) => this.renderPackagingRow(i));
     },
 
+    onPkgSourceChange(idx, source) {
+        const pkg = this.packagingItems[idx];
+        pkg.source = source;
+        if (source === 'custom') {
+            pkg.warehouse_item_id = null;
+            pkg.warehouse_sku = '';
+        } else {
+            pkg.name = '';
+            pkg.price = 0;
+            pkg.delivery_total = 0;
+            pkg.delivery_price = 0;
+            pkg.warehouse_item_id = null;
+            pkg.warehouse_sku = '';
+        }
+        this.rerenderAllPackaging();
+        this.recalculate();
+    },
+
+    onPkgWarehouseSelect(idx, itemIdStr) {
+        const pkg = this.packagingItems[idx];
+        document.querySelectorAll('.wh-picker-dropdown').forEach(d => d.style.display = 'none');
+        const itemId = parseInt(itemIdStr) || null;
+        if (!itemId) {
+            pkg.warehouse_item_id = null;
+            pkg.warehouse_sku = '';
+            pkg.name = '';
+            pkg.price = 0;
+            pkg.delivery_total = 0;
+            pkg.delivery_price = 0;
+            this.rerenderAllPackaging();
+            this.recalculate();
+            return;
+        }
+        const whItem = this._findWhItem(itemId);
+        if (!whItem) return;
+        pkg.warehouse_item_id = whItem.id;
+        pkg.warehouse_sku = whItem.sku || '';
+        const parts = [whItem.name];
+        if (whItem.size) parts.push(whItem.size);
+        if (whItem.color) parts.push(whItem.color);
+        pkg.name = parts.join(' · ');
+        pkg.price = whItem.price_per_unit || 0;
+        pkg.delivery_total = 0;
+        pkg.delivery_price = 0;
+        this.rerenderAllPackaging();
+        this.recalculate();
+    },
+
     onPkgField(idx, field, value) {
         this.packagingItems[idx][field] = value;
     },
 
     onPkgNum(idx, field, value) {
         this.packagingItems[idx][field] = parseFloat(value) || 0;
-        // Auto-calculate per-unit delivery from total
         const pkg = this.packagingItems[idx];
+        // Enforce max qty for warehouse items
+        if (field === 'qty' && pkg.source === 'warehouse' && pkg.warehouse_item_id) {
+            const whItem = this._findWhItem(pkg.warehouse_item_id);
+            if (whItem && pkg.qty > whItem.available_qty) {
+                pkg.qty = whItem.available_qty;
+                App.toast(`Максимум на складе: ${whItem.available_qty} ${whItem.unit}`);
+            }
+        }
+        // Auto-calculate per-unit delivery from total
         pkg.delivery_price = pkg.qty > 0 ? round2(pkg.delivery_total / pkg.qty) : 0;
         this.recalculate();
     },
@@ -1113,21 +1218,28 @@ const Calculator = {
                 });
             }
 
-            // Printing column (if item has printing cost)
-            if (costPrintingPart > 0) {
-                columns.push({
-                    label: 'Нанесение' + (pricedItems.length > 1 ? ' ' + (i + 1) : ''),
-                    type: 'printing',
-                    globalIdx,
-                    isBlank: false,
-                    cost: costPrintingPart,
-                    t50: calcTarget(costPrintingPart, 0.50),
-                    t40: calcTarget(costPrintingPart, 0.40),
-                    t30: calcTarget(costPrintingPart, 0.30),
-                    t20: calcTarget(costPrintingPart, 0.20),
-                    sellPrice: item.sell_price_printing || 0,
-                });
-            }
+            // Printing columns — one per printing
+            const printingDetails = item.result.costPrintingDetails || [];
+            (item.printings || []).forEach((pr, pi) => {
+                const prCost = printingDetails[pi] || 0;
+                if (prCost > 0) {
+                    const prName = pr.name || ('Нанесение ' + (pi + 1));
+                    const suffix = pricedItems.length > 1 ? ' (' + (item.product_name || (i + 1)) + ')' : '';
+                    columns.push({
+                        label: prName + suffix,
+                        type: 'printing',
+                        globalIdx,
+                        printingIdx: pi,
+                        isBlank: false,
+                        cost: prCost,
+                        t50: calcTarget(prCost, 0.50),
+                        t40: calcTarget(prCost, 0.40),
+                        t30: calcTarget(prCost, 0.30),
+                        t20: calcTarget(prCost, 0.20),
+                        sellPrice: pr.sell_price || 0,
+                    });
+                }
+            });
         });
 
         pricedHw.forEach((hw, i) => {
@@ -1223,12 +1335,13 @@ const Calculator = {
 
         // Sell price row (editable, no spinners)
         html += `<div style="${leftCell}font-weight:600;background:var(--green-light);">Цена продажи</div>`;
-        columns.forEach(col => {
-            const inputId = `sell-${col.type}-${col.globalIdx}`;
+        columns.forEach((col, ci) => {
+            const inputId = `sell-${col.type}-${col.globalIdx}${col.printingIdx !== undefined ? '-p' + col.printingIdx : ''}`;
+            const piArg = col.printingIdx !== undefined ? `, ${col.printingIdx}` : '';
             html += `<div style="padding:4px;text-align:center;${cellBorder}background:var(--green-light);">
                 <input type="text" inputmode="decimal" id="${inputId}" value="${col.sellPrice || ''}"
                     style="width:100%;text-align:center;font-weight:600;font-size:13px;border:1px solid var(--border);border-radius:4px;padding:4px;"
-                    oninput="Calculator.onPricingSellChange('${col.type}', ${col.globalIdx}, this.value)">
+                    oninput="Calculator.onPricingSellChange('${col.type}', ${col.globalIdx}, this.value${piArg})">
             </div>`;
         });
 
@@ -1285,9 +1398,25 @@ const Calculator = {
                     type: 'item',
                 });
             }
-            if (item.sell_price_printing > 0) {
+            // Each printing as separate invoice row
+            const multiItems = this.items.filter(it => it.result && it.quantity).length > 1;
+            (item.printings || []).forEach((pr, pi) => {
+                if (pr.sell_price > 0) {
+                    const prName = pr.name || ('Нанесение ' + (pi + 1));
+                    const suffix = multiItems ? ' — ' + (item.product_name || (i + 1)) : '';
+                    invoiceRows.push({
+                        name: prName + suffix,
+                        qty: qty,
+                        price: pr.sell_price,
+                        total: round2(pr.sell_price * qty),
+                        type: 'printing',
+                    });
+                }
+            });
+            // Backwards compat: if no per-printing sell_price but aggregate exists
+            if (!(item.printings || []).some(pr => pr.sell_price > 0) && item.sell_price_printing > 0) {
                 invoiceRows.push({
-                    name: 'Нанесение' + (this.items.filter(it => it.result && it.quantity).length > 1 ? ' — ' + (item.product_name || (i + 1)) : ''),
+                    name: 'Нанесение' + (multiItems ? ' — ' + (item.product_name || (i + 1)) : ''),
                     qty: qty,
                     price: item.sell_price_printing,
                     total: round2(item.sell_price_printing * qty),
@@ -1377,12 +1506,19 @@ const Calculator = {
 
     _sellPriceTimer: null,
 
-    onPricingSellChange(type, globalIdx, value) {
+    onPricingSellChange(type, globalIdx, value, printingIdx) {
         const price = parseFloat(value) || 0;
         if (type === 'item') {
             this.items[globalIdx].sell_price_item = price;
         } else if (type === 'printing') {
-            this.items[globalIdx].sell_price_printing = price;
+            // Per-printing sell price
+            if (printingIdx !== undefined && this.items[globalIdx].printings[printingIdx]) {
+                this.items[globalIdx].printings[printingIdx].sell_price = price;
+            }
+            // Also keep backwards-compat aggregate
+            let totalPrintSell = 0;
+            (this.items[globalIdx].printings || []).forEach(pr => totalPrintSell += (pr.sell_price || 0));
+            this.items[globalIdx].sell_price_printing = totalPrintSell;
         } else if (type === 'hw') {
             this.hardwareItems[globalIdx].sell_price = price;
         } else if (type === 'pkg') {
@@ -1503,6 +1639,10 @@ const Calculator = {
                 target_price_packaging: pkg.target_price || 0,
                 cost_total: pkg.result ? pkg.result.costPerUnit : 0,
                 hours_packaging: pkg.result ? pkg.result.hoursPackaging : 0,
+                // Warehouse integration fields
+                packaging_source: pkg.source || 'custom',
+                packaging_warehouse_item_id: pkg.warehouse_item_id || null,
+                packaging_warehouse_sku: pkg.warehouse_sku || '',
             });
         });
 
@@ -1712,8 +1852,14 @@ const Calculator = {
 
         // Restore packaging items
         const pkgItems = dbItems.filter(i => i.item_type === 'packaging');
+        if (pkgItems.some(p => p.packaging_source === 'warehouse')) {
+            await this._ensureWhPickerData();
+        }
         pkgItems.forEach((dbPkg) => {
             const pkg = this.getEmptyPackaging();
+            pkg.source = dbPkg.packaging_source || 'custom';
+            pkg.warehouse_item_id = dbPkg.packaging_warehouse_item_id || null;
+            pkg.warehouse_sku = dbPkg.packaging_warehouse_sku || '';
             pkg.name = dbPkg.product_name || '';
             pkg.qty = dbPkg.quantity || 0;
             pkg.assembly_speed = dbPkg.packaging_assembly_speed || 0;
@@ -1943,10 +2089,18 @@ const Calculator = {
                 }
             }
 
-            // Auto-fill printing sell price if not set
-            if (costPrintingPart > 0 && (!item.sell_price_printing || item.sell_price_printing <= 0)) {
-                item.sell_price_printing = roundTo5(calcTarget(costPrintingPart, 0.40));
-            }
+            // Auto-fill per-printing sell prices if not set
+            const printingDetails = item.result.costPrintingDetails || [];
+            (item.printings || []).forEach((pr, pi) => {
+                const prCost = printingDetails[pi] || 0;
+                if (prCost > 0 && (!pr.sell_price || pr.sell_price <= 0)) {
+                    pr.sell_price = roundTo5(calcTarget(prCost, 0.40));
+                }
+            });
+            // Keep aggregate for backwards compat
+            let totalPrintSell = 0;
+            (item.printings || []).forEach(pr => totalPrintSell += (pr.sell_price || 0));
+            if (totalPrintSell > 0) item.sell_price_printing = totalPrintSell;
         });
 
         // Auto-fill hardware sell prices
@@ -1978,8 +2132,19 @@ const Calculator = {
                 qty: item.quantity,
                 price: item.sell_price_item,
             });
-            // Printing (separate line)
-            if (item.sell_price_printing > 0) {
+            // Printing (separate line per printing)
+            (item.printings || []).forEach((pr, pi) => {
+                if (pr.sell_price > 0) {
+                    kpItems.push({
+                        type: 'printing',
+                        name: pr.name || ('Нанесение ' + (pi + 1)),
+                        qty: item.quantity,
+                        price: pr.sell_price,
+                    });
+                }
+            });
+            // Backwards compat: if no per-printing sell_price
+            if (!(item.printings || []).some(pr => pr.sell_price > 0) && item.sell_price_printing > 0) {
                 kpItems.push({
                     type: 'printing',
                     name: 'Нанесение',

@@ -1168,10 +1168,24 @@ table .text-center { text-align: center; }
 
 /* Image picker for calculator */
 .wh-img-picker { position: relative; }
-.wh-picker-selected { transition: border-color 0.15s; }
-.wh-picker-selected:hover { border-color: var(--accent) !important; }
+.wh-picker-selected {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 10px; min-height: 52px;
+    border: 1px solid var(--border); border-radius: 8px;
+    cursor: pointer; background: var(--card-bg);
+    transition: border-color 0.15s, box-shadow 0.15s;
+}
+.wh-picker-selected:hover { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(59,130,246,0.12); }
+.wh-picker-dropdown {
+    position: absolute; top: 100%; left: 0; right: 0; z-index: 200;
+    background: var(--card-bg); border: 1px solid var(--border);
+    border-radius: 8px; box-shadow: 0 12px 32px rgba(0,0,0,0.18);
+    max-height: 380px; overflow: hidden; margin-top: 4px;
+}
+.wh-picker-list { max-height: 320px; overflow-y: auto; }
 .wh-picker-item { transition: background 0.1s; }
 .wh-picker-item:hover { background: rgba(59,130,246,0.08) !important; }
+.wh-picker-cat-header { user-select: none; }
 .wh-picker-search { box-sizing: border-box; }
 
 /* =============================================

@@ -429,6 +429,10 @@ const Warehouse = {
                 ? `<span style="font-weight:600;">${item.available_qty}</span>`
                 : `<span style="color:var(--text-muted);">—</span>`;
 
+            const priceStr = item.price_per_unit > 0
+                ? `<span style="font-weight:600;">${new Intl.NumberFormat('ru-RU').format(item.price_per_unit)} \u20BD</span>`
+                : '<span style="color:var(--text-muted);">—</span>';
+
             return `<tr style="${isOut ? 'opacity:0.5;' : (isLow ? 'background:rgba(220,38,38,0.04);' : '')}">
                 <td style="width:48px;">${photo}</td>
                 <td>
@@ -438,6 +442,7 @@ const Warehouse = {
                 <td>${catBadge}</td>
                 <td>${this.esc(item.size || '—')}</td>
                 <td>${this.esc(item.color || '—')}</td>
+                <td class="text-right">${priceStr}</td>
                 <td class="text-right"><span class="${qtyClass}">${item.qty || 0}</span></td>
                 <td class="text-right">${resInfo}</td>
                 <td class="text-right">${availInfo}</td>
@@ -460,6 +465,7 @@ const Warehouse = {
                 <th>Категория</th>
                 <th>Размер</th>
                 <th>Цвет</th>
+                <th class="text-right">Цена</th>
                 <th class="text-right">Кол-во</th>
                 <th class="text-right">Резерв</th>
                 <th class="text-right">Доступно</th>
@@ -1488,8 +1494,26 @@ const Warehouse = {
     },
 
     // Custom image-based picker for calculator
-    buildImagePicker(containerId, grouped, selectedId, onSelectCallback) {
+    // onSelectFn: string like "Calculator.onHwWarehouseSelect" or "Calculator.onPkgWarehouseSelect"
+    // categoryFilter: null = all, 'hardware' = exclude packaging, 'packaging' = only packaging
+    buildImagePicker(containerId, grouped, selectedId, onSelectFn, categoryFilter) {
         const cat = WAREHOUSE_CATEGORIES;
+        if (!onSelectFn) onSelectFn = 'Calculator.onHwWarehouseSelect';
+        const idxStr = containerId.replace(/^[a-z]+-picker-/, '');
+
+        // Filter categories
+        const packagingKeys = ['packaging'];
+        const hardwareKeys = Object.keys(grouped).filter(k => !packagingKeys.includes(k));
+
+        let visibleKeys;
+        if (categoryFilter === 'packaging') {
+            visibleKeys = Object.keys(grouped).filter(k => packagingKeys.includes(k));
+        } else if (categoryFilter === 'hardware') {
+            visibleKeys = hardwareKeys;
+        } else {
+            visibleKeys = Object.keys(grouped);
+        }
+
         const selectedItem = selectedId ? this._findInGrouped(grouped, selectedId) : null;
 
         // Selected display
@@ -1499,48 +1523,51 @@ const Warehouse = {
             if (selectedItem.size) parts.push(selectedItem.size);
             if (selectedItem.color) parts.push(selectedItem.color);
             const catObj = cat.find(c => c.key === selectedItem.category) || cat[6];
+            const priceStr = selectedItem.price_per_unit > 0 ? (' · ' + new Intl.NumberFormat('ru-RU').format(selectedItem.price_per_unit) + ' \u20BD') : '';
             const photoHtml = selectedItem.photo_thumbnail
-                ? `<img src="${selectedItem.photo_thumbnail}" style="width:36px;height:36px;object-fit:cover;border-radius:4px;flex-shrink:0;">`
-                : `<span style="width:36px;height:36px;display:flex;align-items:center;justify-content:center;background:${catObj.color};border-radius:4px;font-size:16px;flex-shrink:0;">${catObj.icon}</span>`;
-            selectedHtml = `${photoHtml}<span style="flex:1;min-width:0;"><b style="display:block;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${parts.join(' · ')}</b><span style="font-size:11px;color:var(--text-muted);">${selectedItem.sku || ''} · ${selectedItem.available_qty} ${selectedItem.unit}</span></span>`;
+                ? `<img src="${selectedItem.photo_thumbnail}" style="width:40px;height:40px;object-fit:cover;border-radius:6px;flex-shrink:0;border:1px solid var(--border);">`
+                : `<span style="width:40px;height:40px;display:flex;align-items:center;justify-content:center;background:${catObj.color};border-radius:6px;font-size:18px;flex-shrink:0;">${catObj.icon}</span>`;
+            selectedHtml = `${photoHtml}<span style="flex:1;min-width:0;"><b style="display:block;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${parts.join(' · ')}</b><span style="font-size:11px;color:var(--text-muted);">${selectedItem.sku || ''}${selectedItem.sku ? ' · ' : ''}${selectedItem.available_qty} ${selectedItem.unit}${priceStr}</span></span>`;
         } else {
             selectedHtml = '<span style="color:var(--text-muted);font-size:13px;">— Выберите позицию —</span>';
         }
 
         // Build dropdown items
         let itemsHtml = '';
-        for (const catKey of Object.keys(grouped)) {
+        for (const catKey of visibleKeys) {
             const g = grouped[catKey];
+            if (!g) continue;
             const catObj = cat.find(c => c.key === catKey) || cat[6];
-            itemsHtml += `<div style="padding:4px 8px;font-size:11px;font-weight:700;color:${catObj.textColor};background:${catObj.color};position:sticky;top:0;z-index:1;">${catObj.icon} ${g.label}</div>`;
+            itemsHtml += `<div class="wh-picker-cat-header" style="padding:6px 10px;font-size:11px;font-weight:700;color:${catObj.textColor};background:${catObj.color};position:sticky;top:0;z-index:1;">${catObj.icon} ${g.label}</div>`;
             g.items.forEach(item => {
                 const parts = [item.name];
                 if (item.size) parts.push(item.size);
                 if (item.color) parts.push(item.color);
                 const label = parts.join(' · ');
                 const stock = item.available_qty > 0 ? `${item.available_qty} ${item.unit}` : '<span style="color:var(--red);">нет</span>';
+                const priceStr = item.price_per_unit > 0 ? (' · ' + new Intl.NumberFormat('ru-RU').format(item.price_per_unit) + ' \u20BD') : '';
                 const photoHtml = item.photo_thumbnail
-                    ? `<img src="${item.photo_thumbnail}" style="width:40px;height:40px;object-fit:cover;border-radius:4px;flex-shrink:0;">`
-                    : `<span style="width:40px;height:40px;display:flex;align-items:center;justify-content:center;background:${catObj.color};border-radius:4px;font-size:18px;flex-shrink:0;">${catObj.icon}</span>`;
-                const isSelected = item.id === selectedId ? 'background:rgba(59,130,246,0.08);' : '';
-                itemsHtml += `<div class="wh-picker-item" data-id="${item.id}" style="display:flex;align-items:center;gap:8px;padding:6px 8px;cursor:pointer;${isSelected}" onclick="Calculator.onHwWarehouseSelect(${containerId.replace('hw-picker-','')}, '${item.id}')">
+                    ? `<img src="${item.photo_thumbnail}" style="width:48px;height:48px;object-fit:cover;border-radius:6px;flex-shrink:0;border:1px solid var(--border);">`
+                    : `<span style="width:48px;height:48px;display:flex;align-items:center;justify-content:center;background:${catObj.color};border-radius:6px;font-size:20px;flex-shrink:0;">${catObj.icon}</span>`;
+                const isSelected = item.id === selectedId ? 'background:rgba(59,130,246,0.1);' : '';
+                itemsHtml += `<div class="wh-picker-item" data-id="${item.id}" style="display:flex;align-items:center;gap:10px;padding:8px 10px;cursor:pointer;border-bottom:1px solid var(--border);${isSelected}" onclick="${onSelectFn}(${idxStr}, '${item.id}')">
                     ${photoHtml}
                     <div style="flex:1;min-width:0;">
-                        <div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${label}</div>
-                        <div style="font-size:11px;color:var(--text-muted);">${item.sku || ''} · ${stock}</div>
+                        <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${label}</div>
+                        <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">${item.sku || ''}${item.sku ? ' · ' : ''}${stock}${priceStr}</div>
                     </div>
                 </div>`;
             });
         }
 
-        return `<div id="${containerId}" class="wh-img-picker" style="position:relative;">
-            <div class="wh-picker-selected" onclick="Warehouse.togglePicker('${containerId}')" style="display:flex;align-items:center;gap:8px;padding:6px 8px;border:1px solid var(--border);border-radius:6px;cursor:pointer;background:var(--card-bg);min-height:48px;">
+        return `<div id="${containerId}" class="wh-img-picker">
+            <div class="wh-picker-selected" onclick="Warehouse.togglePicker('${containerId}')">
                 ${selectedHtml}
-                <span style="flex-shrink:0;color:var(--text-muted);">&#9662;</span>
+                <span style="flex-shrink:0;color:var(--text-muted);font-size:10px;">&#9662;</span>
             </div>
-            <div class="wh-picker-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:100;background:var(--card-bg);border:1px solid var(--border);border-radius:6px;box-shadow:0 8px 24px rgba(0,0,0,0.15);max-height:320px;overflow:hidden;margin-top:2px;">
-                <div style="padding:6px 8px;border-bottom:1px solid var(--border);"><input type="text" class="wh-picker-search" placeholder="Поиск..." oninput="Warehouse.filterPicker('${containerId}', this.value)" style="width:100%;padding:4px 8px;border:1px solid var(--border);border-radius:4px;font-size:12px;"></div>
-                <div class="wh-picker-list" style="max-height:268px;overflow-y:auto;">${itemsHtml}</div>
+            <div class="wh-picker-dropdown" style="display:none;">
+                <div style="padding:6px 8px;border-bottom:1px solid var(--border);"><input type="text" class="wh-picker-search" placeholder="Поиск..." oninput="Warehouse.filterPicker('${containerId}', this.value)" style="width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:4px;font-size:13px;"></div>
+                <div class="wh-picker-list">${itemsHtml}</div>
             </div>
         </div>`;
     },

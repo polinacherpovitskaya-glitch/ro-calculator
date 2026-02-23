@@ -104,13 +104,18 @@ function calculateItemCost(item, params) {
 
     // === Нанесение (теперь массив printings[]) ===
     let costPrinting = 0;
+    const costPrintingDetails = []; // per-printing cost breakdown
     const printings = item.printings || [];
     if (printings.length > 0) {
         printings.forEach(pr => {
             const prQty = pr.qty || 0;
             const prPrice = pr.price || 0;
             if (prQty > 0 && prPrice > 0) {
-                costPrinting += (prPrice * 1.06) + (p.printingDeliveryCost / prQty);
+                const c = (prPrice * 1.06) + (p.printingDeliveryCost / prQty);
+                costPrinting += c;
+                costPrintingDetails.push(round2(c));
+            } else {
+                costPrintingDetails.push(0);
             }
         });
     } else {
@@ -149,6 +154,7 @@ function calculateItemCost(item, params) {
         costNfcProgramming: round2(costNfcProgramming),
         costNfcIndirect: round2(costNfcIndirect),
         costPrinting: round2(costPrinting),
+        costPrintingDetails: costPrintingDetails,
         costDelivery: round2(costDelivery),
         costTotal: round2(costTotal),
 
