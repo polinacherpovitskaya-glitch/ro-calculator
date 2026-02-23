@@ -217,6 +217,12 @@ const Warehouse = {
     allReservations: [],
     editingId: null,
     pendingImport: null,
+    _pendingThumbnail: null,
+
+    // Shipment state
+    allShipments: [],
+    editingShipmentId: null,
+    shipmentItems: [],
 
     // ==========================================
     // LIFECYCLE
@@ -384,8 +390,9 @@ const Warehouse = {
             const isOut = item.qty <= 0;
 
             // Photo or placeholder
-            const photo = item.photo_url
-                ? `<img src="${this.esc(item.photo_url)}" class="wh-photo" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><span class="wh-placeholder" style="display:none;background:${cat.color};color:${cat.textColor};">${cat.icon}</span>`
+            const photoSrc = item.photo_thumbnail || item.photo_url;
+            const photo = photoSrc
+                ? `<img src="${photoSrc.startsWith('data:') ? photoSrc : this.esc(photoSrc)}" class="wh-photo" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><span class="wh-placeholder" style="display:none;background:${cat.color};color:${cat.textColor};">${cat.icon}</span>`
                 : `<span class="wh-placeholder" style="background:${cat.color};color:${cat.textColor};">${cat.icon}</span>`;
 
             // Qty badge
@@ -475,6 +482,12 @@ const Warehouse = {
         document.getElementById('wh-f-price').value = item.price_per_unit || 0;
         document.getElementById('wh-f-notes').value = item.notes || '';
 
+        // Photo preview
+        this._pendingThumbnail = item.photo_thumbnail || null;
+        const photoFileInput = document.getElementById('wh-f-photo-file');
+        if (photoFileInput) photoFileInput.value = '';
+        this.updatePhotoPreview(item.photo_thumbnail || item.photo_url || '');
+
         document.getElementById('wh-delete-btn').style.display = '';
         this.renderItemReservations(id);
         document.getElementById('wh-edit-form').style.display = '';
@@ -495,6 +508,12 @@ const Warehouse = {
         document.getElementById('wh-f-qty').value = 0;
         document.getElementById('wh-f-min-qty').value = 0;
         document.getElementById('wh-f-price').value = 0;
+        // Reset photo
+        this._pendingThumbnail = null;
+        const photoFileInput = document.getElementById('wh-f-photo-file');
+        if (photoFileInput) photoFileInput.value = '';
+        const preview = document.getElementById('wh-f-photo-preview');
+        if (preview) preview.innerHTML = '<span style="font-size:24px;color:var(--text-muted);">📷</span>';
     },
 
     async saveItem() {
@@ -510,6 +529,7 @@ const Warehouse = {
             color: document.getElementById('wh-f-color').value.trim(),
             unit: document.getElementById('wh-f-unit').value || 'шт',
             photo_url: document.getElementById('wh-f-photo-url').value.trim(),
+            photo_thumbnail: this._pendingThumbnail || (this.editingId ? (this.allItems.find(i => i.id === this.editingId) || {}).photo_thumbnail : '') || '',
             qty: parseFloat(document.getElementById('wh-f-qty').value) || 0,
             min_qty: parseFloat(document.getElementById('wh-f-min-qty').value) || 0,
             price_per_unit: parseFloat(document.getElementById('wh-f-price').value) || 0,
@@ -969,16 +989,413 @@ const Warehouse = {
 
     setView(view) {
         this.currentView = view;
-        // Update tab active states
         document.querySelectorAll('#wh-tabs .tab').forEach(t => {
             t.classList.toggle('active', t.dataset.tab === view);
         });
 
-        if (view === 'history') {
-            this.renderHistory();
+        const mainContent = document.getElementById('wh-content');
+        const shipmentsContent = document.getElementById('wh-shipments-content');
+
+        if (view === 'shipments') {
+            if (mainContent) mainContent.style.display = 'none';
+            if (shipmentsContent) shipmentsContent.style.display = '';
+            this.loadShipmentsList();
         } else {
-            this.filterAndRender();
+            if (mainContent) mainContent.style.display = '';
+            if (shipmentsContent) shipmentsContent.style.display = 'none';
+            if (view === 'history') {
+                this.renderHistory();
+            } else {
+                this.filterAndRender();
+            }
         }
+    },
+
+    // ==========================================
+    // PHOTO UPLOAD
+    // ==========================================
+
+    async compressImageToThumbnail(file, maxW, maxH, quality) {
+        maxW = maxW || 200; maxH = maxH || 200; quality = quality || 0.7;
+        return new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const img = new Image();
+                img.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    let w = img.width, h = img.height;
+                    if (w > maxW || h > maxH) {
+                        const ratio = Math.min(maxW / w, maxH / h);
+                        w = Math.round(w * ratio);
+                        h = Math.round(h * ratio);
+                    }
+                    canvas.width = w; canvas.height = h;
+                    canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+                    resolve(canvas.toDataURL('image/jpeg', quality));
+                };
+                img.onerror = () => resolve(null);
+                img.src = e.target.result;
+            };
+            reader.onerror = () => resolve(null);
+            reader.readAsDataURL(file);
+        });
+    },
+
+    async onPhotoFileSelected(input) {
+        if (!input.files || !input.files[0]) return;
+        const file = input.files[0];
+        if (file.size > 10 * 1024 * 1024) { App.toast('Файл слишком большой (макс 10 МБ)'); return; }
+        const thumbnail = await this.compressImageToThumbnail(file);
+        if (!thumbnail) { App.toast('Не удалось обработать фото'); return; }
+        this._pendingThumbnail = thumbnail;
+        this.updatePhotoPreview(thumbnail);
+    },
+
+    onPhotoUrlChanged(url) {
+        if (url && url.startsWith('http')) {
+            this._pendingThumbnail = null;
+            this.updatePhotoPreview(url);
+        }
+    },
+
+    clearPhoto() {
+        this._pendingThumbnail = null;
+        document.getElementById('wh-f-photo-url').value = '';
+        const fileInput = document.getElementById('wh-f-photo-file');
+        if (fileInput) fileInput.value = '';
+        const preview = document.getElementById('wh-f-photo-preview');
+        if (preview) preview.innerHTML = '<span style="font-size:24px;color:var(--text-muted);">📷</span>';
+    },
+
+    updatePhotoPreview(src) {
+        const preview = document.getElementById('wh-f-photo-preview');
+        if (!preview) return;
+        if (src) {
+            const safeSrc = src.startsWith('data:') ? src : this.esc(src);
+            preview.innerHTML = `<img src="${safeSrc}" style="width:100%;height:100%;object-fit:cover;border-radius:6px;" onerror="this.parentElement.innerHTML='<span style=\\'font-size:24px;color:var(--text-muted);\\'>❌</span>'">`;
+        } else {
+            preview.innerHTML = '<span style="font-size:24px;color:var(--text-muted);">📷</span>';
+        }
+    },
+
+    // ==========================================
+    // SHIPMENTS (Приёмки из Китая)
+    // ==========================================
+
+    async loadShipmentsList() {
+        this.allShipments = await loadShipments();
+        this.renderShipmentsList();
+    },
+
+    renderShipmentsList() {
+        const container = document.getElementById('wh-shipments-list');
+        if (!container) return;
+
+        const sorted = [...this.allShipments].sort((a, b) =>
+            new Date(b.created_at || 0) - new Date(a.created_at || 0)
+        );
+
+        if (sorted.length === 0) {
+            container.innerHTML = `<div class="card" style="text-align:center;padding:40px;">
+                <div style="font-size:48px;margin-bottom:12px;">📦</div>
+                <p style="color:var(--text-muted);margin-bottom:12px;">Нет приёмок</p>
+                <button class="btn btn-primary" onclick="Warehouse.showNewShipmentForm()">+ Новая приёмка</button>
+            </div>`;
+            return;
+        }
+
+        const statusBadge = (s) => s === 'received'
+            ? '<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;background:#d1fae5;color:#065f46;">Принята</span>'
+            : '<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;background:#fef3c7;color:#92400e;">Черновик</span>';
+
+        container.innerHTML = `
+            <div style="margin-bottom:12px;">
+                <button class="btn btn-primary" onclick="Warehouse.showNewShipmentForm()">+ Новая приёмка</button>
+            </div>
+            <div class="card"><div class="table-wrap"><table>
+                <thead><tr>
+                    <th>Дата</th><th>Название</th><th>Поставщик</th>
+                    <th class="text-right">Позиций</th><th class="text-right">Закупка</th>
+                    <th class="text-right">Доставка</th><th>Статус</th><th style="width:60px;"></th>
+                </tr></thead>
+                <tbody>${sorted.map(sh => `<tr style="cursor:pointer;" onclick="Warehouse.editShipment(${sh.id})">
+                    <td style="font-size:12px;">${App.formatDate(sh.date || sh.created_at)}</td>
+                    <td style="font-weight:600;">${this.esc(sh.shipment_name || '')}</td>
+                    <td>${this.esc(sh.supplier || '—')}</td>
+                    <td class="text-right">${(sh.items || []).length}</td>
+                    <td class="text-right">${Math.round(sh.total_purchase_rub || 0).toLocaleString('ru-RU')} ₽</td>
+                    <td class="text-right">${Math.round(sh.total_delivery || 0).toLocaleString('ru-RU')} ₽</td>
+                    <td>${statusBadge(sh.status)}</td>
+                    <td><button class="btn btn-sm btn-outline" onclick="event.stopPropagation();Warehouse.editShipment(${sh.id})">✎</button></td>
+                </tr>`).join('')}</tbody>
+            </table></div></div>`;
+    },
+
+    showNewShipmentForm() {
+        this.editingShipmentId = null;
+        this.shipmentItems = [];
+        this.clearShipmentForm();
+        document.getElementById('wh-shipment-form-title').textContent = 'Новая приёмка';
+        document.getElementById('wh-sh-delete-btn').style.display = 'none';
+        document.getElementById('wh-sh-confirm-btn').style.display = '';
+        document.getElementById('wh-shipment-form').style.display = '';
+        this.addShipmentItem();
+        document.getElementById('wh-shipment-form').scrollIntoView({ behavior: 'smooth' });
+    },
+
+    async editShipment(id) {
+        const sh = this.allShipments.find(s => s.id === id);
+        if (!sh) return;
+        this.editingShipmentId = id;
+        this.shipmentItems = JSON.parse(JSON.stringify(sh.items || []));
+
+        document.getElementById('wh-sh-name').value = sh.shipment_name || '';
+        document.getElementById('wh-sh-date').value = sh.date || '';
+        document.getElementById('wh-sh-supplier').value = sh.supplier || '';
+        document.getElementById('wh-sh-purchase-cny').value = sh.total_purchase_cny || 0;
+        document.getElementById('wh-sh-cny-rate').value = sh.cny_rate || 12.5;
+        document.getElementById('wh-sh-delivery-china').value = sh.delivery_china_to_russia || 0;
+        document.getElementById('wh-sh-delivery-moscow').value = sh.delivery_moscow || 0;
+        document.getElementById('wh-sh-customs').value = sh.customs_fees || 0;
+        document.getElementById('wh-sh-notes').value = sh.notes || '';
+
+        document.getElementById('wh-shipment-form-title').textContent = 'Редактирование приёмки';
+        document.getElementById('wh-sh-delete-btn').style.display = '';
+        document.getElementById('wh-sh-confirm-btn').style.display = sh.status === 'received' ? 'none' : '';
+        document.getElementById('wh-shipment-form').style.display = '';
+
+        this.recalcShipment();
+        document.getElementById('wh-shipment-form').scrollIntoView({ behavior: 'smooth' });
+    },
+
+    hideShipmentForm() {
+        document.getElementById('wh-shipment-form').style.display = 'none';
+    },
+
+    clearShipmentForm() {
+        ['wh-sh-name', 'wh-sh-supplier', 'wh-sh-notes'].forEach(id => {
+            const el = document.getElementById(id); if (el) el.value = '';
+        });
+        document.getElementById('wh-sh-date').value = new Date().toISOString().split('T')[0];
+        document.getElementById('wh-sh-purchase-cny').value = 0;
+        document.getElementById('wh-sh-cny-rate').value = 12.5;
+        document.getElementById('wh-sh-delivery-china').value = 0;
+        document.getElementById('wh-sh-delivery-moscow').value = 0;
+        document.getElementById('wh-sh-customs').value = 0;
+        document.getElementById('wh-sh-purchase-rub').value = 0;
+        document.getElementById('wh-sh-total-delivery').value = 0;
+        document.getElementById('wh-sh-items-table').innerHTML = '';
+        document.getElementById('wh-sh-summary').innerHTML = '';
+    },
+
+    addShipmentItem() {
+        this.shipmentItems.push({
+            warehouse_item_id: null, name: '', sku: '', category: '',
+            qty_received: 0, weight_grams: 0,
+            purchase_price_cny: 0, purchase_price_rub: 0,
+            delivery_allocated: 0, total_cost_per_unit: 0,
+        });
+        this.renderShipmentItemsTable();
+    },
+
+    removeShipmentItem(idx) {
+        this.shipmentItems.splice(idx, 1);
+        this.renderShipmentItemsTable();
+        this.recalcShipmentValues();
+    },
+
+    async renderShipmentItemsTable() {
+        const container = document.getElementById('wh-sh-items-table');
+        if (!container) return;
+
+        const grouped = await this.getItemsForPicker();
+
+        const rows = this.shipmentItems.map((item, idx) => {
+            const pickerHtml = this.buildPickerOptions(grouped, item.warehouse_item_id);
+            return `<tr>
+                <td><select onchange="Warehouse.onShipmentItemSelect(${idx}, this.value)" style="min-width:200px;padding:4px 6px;border:1px solid var(--border);border-radius:4px;font-size:12px;">${pickerHtml}</select></td>
+                <td><input type="number" value="${item.qty_received || ''}" min="0" onchange="Warehouse.onShipmentItemField(${idx}, 'qty_received', this.value)" style="width:70px;text-align:right;padding:4px;border:1px solid var(--border);border-radius:4px;font-size:12px;"></td>
+                <td><input type="number" value="${item.weight_grams || ''}" min="0" step="0.1" onchange="Warehouse.onShipmentItemField(${idx}, 'weight_grams', this.value)" style="width:80px;text-align:right;padding:4px;border:1px solid var(--border);border-radius:4px;font-size:12px;"></td>
+                <td><input type="number" value="${item.purchase_price_cny || ''}" min="0" step="0.01" onchange="Warehouse.onShipmentItemField(${idx}, 'purchase_price_cny', this.value)" style="width:80px;text-align:right;padding:4px;border:1px solid var(--border);border-radius:4px;font-size:12px;"></td>
+                <td class="text-right" style="font-size:12px;">${Math.round(item.purchase_price_rub || 0).toLocaleString('ru-RU')}</td>
+                <td class="text-right" style="font-size:12px;">${Math.round(item.delivery_allocated || 0).toLocaleString('ru-RU')}</td>
+                <td class="text-right" style="font-weight:600;font-size:12px;">${(item.total_cost_per_unit || 0).toFixed(2)}</td>
+                <td><button class="btn-remove" onclick="Warehouse.removeShipmentItem(${idx})" title="Удалить">&#10005;</button></td>
+            </tr>`;
+        }).join('');
+
+        container.innerHTML = `<div class="table-wrap"><table style="font-size:12px;">
+            <thead><tr>
+                <th>Позиция со склада</th>
+                <th style="width:70px;">Кол-во</th>
+                <th style="width:80px;">Вес (г)</th>
+                <th style="width:80px;">Цена CNY</th>
+                <th class="text-right" style="width:80px;">Цена RUB</th>
+                <th class="text-right" style="width:90px;">Доставка ₽</th>
+                <th class="text-right" style="width:90px;">С/с ед. ₽</th>
+                <th style="width:30px;"></th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+        </table></div>`;
+    },
+
+    onShipmentItemSelect(idx, itemIdStr) {
+        const itemId = parseInt(itemIdStr) || null;
+        const shItem = this.shipmentItems[idx];
+        if (!itemId) {
+            shItem.warehouse_item_id = null;
+            shItem.name = ''; shItem.sku = ''; shItem.category = '';
+        } else {
+            const whItem = this.allItems.find(i => i.id === itemId);
+            if (whItem) {
+                shItem.warehouse_item_id = whItem.id;
+                shItem.name = whItem.name || '';
+                shItem.sku = whItem.sku || '';
+                shItem.category = whItem.category || '';
+            }
+        }
+        this.recalcShipmentValues();
+    },
+
+    onShipmentItemField(idx, field, value) {
+        this.shipmentItems[idx][field] = parseFloat(value) || 0;
+        this.recalcShipmentValues();
+    },
+
+    recalcShipment() {
+        // Called from form-level inputs (oninput), recalculates and re-renders items
+        this.recalcShipmentValues();
+        this.renderShipmentItemsTable();
+    },
+
+    recalcShipmentValues() {
+        const cny = parseFloat(document.getElementById('wh-sh-purchase-cny').value) || 0;
+        const rate = parseFloat(document.getElementById('wh-sh-cny-rate').value) || 0;
+        const purchaseRub = cny * rate;
+        document.getElementById('wh-sh-purchase-rub').value = Math.round(purchaseRub);
+
+        const deliveryChina = parseFloat(document.getElementById('wh-sh-delivery-china').value) || 0;
+        const deliveryMoscow = parseFloat(document.getElementById('wh-sh-delivery-moscow').value) || 0;
+        const customs = parseFloat(document.getElementById('wh-sh-customs').value) || 0;
+        const totalDelivery = deliveryChina + deliveryMoscow + customs;
+        document.getElementById('wh-sh-total-delivery').value = Math.round(totalDelivery);
+
+        const totalWeight = this.shipmentItems.reduce((s, i) => s + (i.weight_grams || 0), 0);
+
+        this.shipmentItems.forEach(item => {
+            item.purchase_price_rub = (item.purchase_price_cny || 0) * rate;
+            item.delivery_allocated = totalWeight > 0
+                ? totalDelivery * ((item.weight_grams || 0) / totalWeight) : 0;
+            item.total_cost_per_unit = item.qty_received > 0
+                ? item.purchase_price_rub + (item.delivery_allocated / item.qty_received) : 0;
+        });
+
+        // Update summary
+        const totalItems = this.shipmentItems.length;
+        const totalQty = this.shipmentItems.reduce((s, i) => s + (i.qty_received || 0), 0);
+        const avgCost = totalQty > 0
+            ? this.shipmentItems.reduce((s, i) => s + (i.total_cost_per_unit || 0) * (i.qty_received || 0), 0) / totalQty : 0;
+
+        const summaryEl = document.getElementById('wh-sh-summary');
+        if (summaryEl) {
+            summaryEl.innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;">
+                <div><span style="color:var(--text-muted);font-size:11px;">Позиций:</span><br><b>${totalItems}</b></div>
+                <div><span style="color:var(--text-muted);font-size:11px;">Общее кол-во:</span><br><b>${totalQty.toLocaleString('ru-RU')}</b></div>
+                <div><span style="color:var(--text-muted);font-size:11px;">Общий вес:</span><br><b>${totalWeight.toLocaleString('ru-RU')} г</b></div>
+                <div><span style="color:var(--text-muted);font-size:11px;">Закупка:</span><br><b>${Math.round(purchaseRub).toLocaleString('ru-RU')} ₽</b></div>
+                <div><span style="color:var(--text-muted);font-size:11px;">Доставка:</span><br><b>${Math.round(totalDelivery).toLocaleString('ru-RU')} ₽</b></div>
+                <div><span style="color:var(--text-muted);font-size:11px;">Ср. с/с ед.:</span><br><b>${avgCost.toFixed(2)} ₽</b></div>
+            </div>`;
+        }
+    },
+
+    _buildShipmentData() {
+        const name = document.getElementById('wh-sh-name').value.trim();
+        if (!name) { App.toast('Укажите название поставки'); return null; }
+
+        const cny = parseFloat(document.getElementById('wh-sh-purchase-cny').value) || 0;
+        const rate = parseFloat(document.getElementById('wh-sh-cny-rate').value) || 0;
+
+        return {
+            id: this.editingShipmentId || undefined,
+            date: document.getElementById('wh-sh-date').value,
+            shipment_name: name,
+            supplier: document.getElementById('wh-sh-supplier').value.trim(),
+            total_purchase_cny: cny,
+            cny_rate: rate,
+            total_purchase_rub: cny * rate,
+            delivery_china_to_russia: parseFloat(document.getElementById('wh-sh-delivery-china').value) || 0,
+            delivery_moscow: parseFloat(document.getElementById('wh-sh-delivery-moscow').value) || 0,
+            customs_fees: parseFloat(document.getElementById('wh-sh-customs').value) || 0,
+            total_delivery: parseFloat(document.getElementById('wh-sh-total-delivery').value) || 0,
+            items: JSON.parse(JSON.stringify(this.shipmentItems)),
+            total_weight_grams: this.shipmentItems.reduce((s, i) => s + (i.weight_grams || 0), 0),
+            notes: document.getElementById('wh-sh-notes').value.trim(),
+        };
+    },
+
+    async saveShipmentDraft() {
+        const data = this._buildShipmentData();
+        if (!data) return;
+        data.status = this.editingShipmentId
+            ? (this.allShipments.find(s => s.id === this.editingShipmentId) || {}).status || 'draft'
+            : 'draft';
+        await saveShipment(data);
+        App.toast('Черновик сохранён');
+        this.hideShipmentForm();
+        await this.loadShipmentsList();
+    },
+
+    async confirmShipment() {
+        const data = this._buildShipmentData();
+        if (!data) return;
+
+        const validItems = data.items.filter(i => i.warehouse_item_id && i.qty_received > 0);
+        if (validItems.length === 0) {
+            App.toast('Добавьте хотя бы одну позицию с кол-вом > 0');
+            return;
+        }
+
+        if (!confirm(`Принять ${validItems.length} позиций на склад?\nОстатки и себестоимость будут обновлены.`)) return;
+
+        data.status = 'received';
+        data.received_at = new Date().toISOString();
+        await saveShipment(data);
+
+        // Add qty to warehouse + update price_per_unit
+        for (const shItem of validItems) {
+            await this.adjustStock(
+                shItem.warehouse_item_id,
+                shItem.qty_received,
+                'addition',
+                data.shipment_name,
+                `Приёмка: ${shItem.qty_received} шт, с/с: ${shItem.total_cost_per_unit.toFixed(2)} ₽`,
+                ''
+            );
+
+            // Update price_per_unit on warehouse item
+            const items = await loadWarehouseItems();
+            const idx = items.findIndex(i => i.id === shItem.warehouse_item_id);
+            if (idx >= 0) {
+                items[idx].price_per_unit = Math.round(shItem.total_cost_per_unit * 100) / 100;
+                items[idx].updated_at = new Date().toISOString();
+                await saveWarehouseItems(items);
+            }
+        }
+
+        App.toast(`Приёмка завершена: ${validItems.length} позиций на складе`);
+        this.hideShipmentForm();
+        await this.load();
+        this.setView('shipments');
+    },
+
+    async deleteShipmentFromForm() {
+        if (!this.editingShipmentId) return;
+        if (!confirm('Удалить эту приёмку?')) return;
+        await deleteShipment(this.editingShipmentId);
+        App.toast('Приёмка удалена');
+        this.hideShipmentForm();
+        await this.loadShipmentsList();
     },
 
     // ==========================================
@@ -994,22 +1411,16 @@ const Warehouse = {
     // PICKER FOR CALCULATOR INTEGRATION
     // ==========================================
 
-    /**
-     * Returns warehouse items grouped by category for the hardware picker dropdown.
-     * Used by Calculator when adding hardware "from warehouse".
-     */
     async getItemsForPicker() {
         const items = await loadWarehouseItems();
         const reservations = await loadWarehouseReservations();
 
-        // Calculate available qty
         items.forEach(item => {
             const activeRes = reservations.filter(r => r.item_id === item.id && r.status === 'active');
             const reservedQty = activeRes.reduce((s, r) => s + (r.qty || 0), 0);
             item.available_qty = Math.max(0, (item.qty || 0) - reservedQty);
         });
 
-        // Group by category
         const grouped = {};
         WAREHOUSE_CATEGORIES.forEach(cat => {
             const catItems = items
@@ -1037,11 +1448,6 @@ const Warehouse = {
         return grouped;
     },
 
-    /**
-     * Build <optgroup> HTML for a <select> picker.
-     * @param {Object} grouped — result of getItemsForPicker()
-     * @param {number|null} selectedId — currently selected item id
-     */
     buildPickerOptions(grouped, selectedId) {
         let html = '<option value="">— Выберите позицию —</option>';
         for (const catKey of Object.keys(grouped)) {

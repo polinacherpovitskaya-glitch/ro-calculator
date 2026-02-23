@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=27">
+    <link rel="stylesheet" href="css/style.css?v=28">
 </head>
 <body>
 
@@ -1029,6 +1029,7 @@
             <!-- Tabs -->
             <div id="wh-tabs" style="display:flex; gap:0; margin-bottom:12px; border-bottom:2px solid var(--border);">
                 <div class="tab active" data-tab="table" onclick="Warehouse.setView('table')" style="padding:8px 16px; cursor:pointer; font-weight:600; font-size:13px; border-bottom:2px solid var(--accent); margin-bottom:-2px;">Таблица</div>
+                <div class="tab" data-tab="shipments" onclick="Warehouse.setView('shipments')" style="padding:8px 16px; cursor:pointer; font-size:13px; color:var(--text-muted); border-bottom:2px solid transparent; margin-bottom:-2px;">Приёмки из Китая</div>
                 <div class="tab" data-tab="history" onclick="Warehouse.setView('history')" style="padding:8px 16px; cursor:pointer; font-size:13px; color:var(--text-muted); border-bottom:2px solid transparent; margin-bottom:-2px;">История движений</div>
             </div>
 
@@ -1133,8 +1134,20 @@
                 </div>
                 <div class="form-row">
                     <div class="form-group" style="flex:2">
-                        <label>Ссылка на фото (URL)</label>
-                        <input type="text" id="wh-f-photo-url" placeholder="https://...">
+                        <label>Фото позиции</label>
+                        <div style="display:flex;gap:8px;align-items:start;">
+                            <div id="wh-f-photo-preview" style="width:80px;height:80px;border-radius:6px;border:1px dashed var(--border);display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0;background:var(--bg);">
+                                <span style="font-size:24px;color:var(--text-muted);">📷</span>
+                            </div>
+                            <div style="flex:1;">
+                                <input type="file" id="wh-f-photo-file" accept="image/*" capture="environment"
+                                       onchange="Warehouse.onPhotoFileSelected(this)"
+                                       style="font-size:12px;margin-bottom:6px;">
+                                <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">Или вставьте ссылку:</div>
+                                <input type="text" id="wh-f-photo-url" placeholder="https://..." onchange="Warehouse.onPhotoUrlChanged(this.value)" style="font-size:12px;">
+                                <button class="btn btn-sm btn-outline" onclick="Warehouse.clearPhoto()" style="margin-top:4px;font-size:10px;">Очистить фото</button>
+                            </div>
+                        </div>
                     </div>
                     <div class="form-group" style="flex:3">
                         <label>Примечания</label>
@@ -1215,6 +1228,94 @@
                     <button class="btn btn-outline" onclick="Warehouse.hideAudit()">Отмена</button>
                 </div>
             </div>
+
+            <!-- =============================================
+                 SHIPMENTS (Приёмки из Китая) — container
+                 ============================================= -->
+            <div id="wh-shipments-content" style="display:none;">
+                <div id="wh-shipments-list"></div>
+
+                <div class="card" id="wh-shipment-form" style="display:none; margin-top:16px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+                        <h3 id="wh-shipment-form-title" style="margin:0;">Новая приёмка</h3>
+                        <button class="btn btn-sm btn-outline" onclick="Warehouse.hideShipmentForm()">&#10005;</button>
+                    </div>
+
+                    <!-- Header -->
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Название поставки *</label>
+                            <input type="text" id="wh-sh-name" placeholder="Поставка март 2024">
+                        </div>
+                        <div class="form-group">
+                            <label>Дата</label>
+                            <input type="date" id="wh-sh-date">
+                        </div>
+                        <div class="form-group">
+                            <label>Поставщик</label>
+                            <input type="text" id="wh-sh-supplier" placeholder="">
+                        </div>
+                    </div>
+
+                    <!-- Costs -->
+                    <h4 style="margin:16px 0 8px; font-size:13px; color:var(--text-secondary);">💰 Стоимость закупки и доставки</h4>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Закупка (CNY)</label>
+                            <input type="number" id="wh-sh-purchase-cny" value="0" min="0" step="0.01" oninput="Warehouse.recalcShipment()">
+                        </div>
+                        <div class="form-group">
+                            <label>Курс CNY→RUB</label>
+                            <input type="number" id="wh-sh-cny-rate" value="12.5" min="0" step="0.01" oninput="Warehouse.recalcShipment()">
+                        </div>
+                        <div class="form-group">
+                            <label>Закупка (RUB)</label>
+                            <input type="number" id="wh-sh-purchase-rub" value="0" readonly style="background:var(--bg);font-weight:600;">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Доставка Китай→Россия (₽)</label>
+                            <input type="number" id="wh-sh-delivery-china" value="0" min="0" step="1" oninput="Warehouse.recalcShipment()">
+                        </div>
+                        <div class="form-group">
+                            <label>Доставка по Москве (₽)</label>
+                            <input type="number" id="wh-sh-delivery-moscow" value="0" min="0" step="1" oninput="Warehouse.recalcShipment()">
+                        </div>
+                        <div class="form-group">
+                            <label>Таможня / брокер (₽)</label>
+                            <input type="number" id="wh-sh-customs" value="0" min="0" step="1" oninput="Warehouse.recalcShipment()">
+                        </div>
+                        <div class="form-group">
+                            <label>Итого доставка (₽)</label>
+                            <input type="number" id="wh-sh-total-delivery" value="0" readonly style="background:var(--bg);font-weight:700;">
+                        </div>
+                    </div>
+
+                    <!-- Items -->
+                    <h4 style="margin:16px 0 8px; font-size:13px; color:var(--text-secondary);">📦 Позиции в поставке</h4>
+                    <div id="wh-sh-items-table"></div>
+                    <button class="btn btn-outline" onclick="Warehouse.addShipmentItem()" style="margin-top:8px;">+ Добавить позицию</button>
+
+                    <!-- Summary -->
+                    <div id="wh-sh-summary" style="margin-top:16px; padding:12px; background:var(--bg); border-radius:var(--radius); border:1px solid var(--border); font-size:13px;"></div>
+
+                    <!-- Notes -->
+                    <div class="form-group" style="margin-top:12px;">
+                        <label>Примечания</label>
+                        <textarea id="wh-sh-notes" rows="2" placeholder="" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:4px;font-size:13px;resize:vertical;"></textarea>
+                    </div>
+
+                    <!-- Actions -->
+                    <div style="margin-top:16px; display:flex; gap:8px; align-items:center;">
+                        <button class="btn btn-success" onclick="Warehouse.saveShipmentDraft()">Сохранить черновик</button>
+                        <button class="btn btn-primary" onclick="Warehouse.confirmShipment()" id="wh-sh-confirm-btn">✓ Принять на склад</button>
+                        <button class="btn btn-outline" onclick="Warehouse.hideShipmentForm()">Отмена</button>
+                        <button class="btn btn-danger" id="wh-sh-delete-btn" style="margin-left:auto; display:none;" onclick="Warehouse.deleteShipmentFromForm()">Удалить</button>
+                    </div>
+                </div>
+            </div>
+
         </div>
 
         <!-- ========== SETTINGS ========== -->
@@ -1512,19 +1613,19 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="js/supabase.js?v=27"></script>
-<script src="js/calculator.js?v=27"></script>
-<script src="js/app.js?v=27"></script>
-<script src="js/dashboard.js?v=27"></script>
-<script src="js/orders.js?v=27"></script>
-<script src="js/analytics.js?v=27"></script>
-<script src="js/molds.js?v=27"></script>
-<script src="js/kp.js?v=27"></script>
-<script src="js/timetrack.js?v=27"></script>
-<script src="js/tasks.js?v=27"></script>
-<script src="js/import.js?v=27"></script>
-<script src="js/factual.js?v=27"></script>
-<script src="js/warehouse.js?v=27"></script>
-<script src="js/settings.js?v=27"></script>
+<script src="js/supabase.js?v=28"></script>
+<script src="js/calculator.js?v=28"></script>
+<script src="js/app.js?v=28"></script>
+<script src="js/dashboard.js?v=28"></script>
+<script src="js/orders.js?v=28"></script>
+<script src="js/analytics.js?v=28"></script>
+<script src="js/molds.js?v=28"></script>
+<script src="js/kp.js?v=28"></script>
+<script src="js/timetrack.js?v=28"></script>
+<script src="js/tasks.js?v=28"></script>
+<script src="js/import.js?v=28"></script>
+<script src="js/factual.js?v=28"></script>
+<script src="js/warehouse.js?v=28"></script>
+<script src="js/settings.js?v=28"></script>
 </body>
 </html>

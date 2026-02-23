@@ -43,6 +43,7 @@ const LOCAL_KEYS = {
     warehouseItems: 'ro_calc_warehouse_items',
     warehouseReservations: 'ro_calc_warehouse_reservations',
     warehouseHistory: 'ro_calc_warehouse_history',
+    shipments: 'ro_calc_shipments',
 };
 
 // Data version — increment to force cache reset for molds
@@ -733,4 +734,37 @@ async function loadWarehouseHistory() {
 
 async function saveWarehouseHistory(history) {
     setLocal(LOCAL_KEYS.warehouseHistory, history);
+}
+
+// =============================================
+// SHIPMENTS (Приёмки из Китая)
+// =============================================
+
+async function loadShipments() {
+    return getLocal(LOCAL_KEYS.shipments) || [];
+}
+
+async function saveShipment(shipment) {
+    const shipments = await loadShipments();
+    if (shipment.id) {
+        const idx = shipments.findIndex(s => s.id === shipment.id);
+        if (idx >= 0) {
+            shipments[idx] = { ...shipment, updated_at: new Date().toISOString() };
+        } else {
+            shipment.updated_at = new Date().toISOString();
+            shipments.push(shipment);
+        }
+    } else {
+        shipment.id = Date.now();
+        shipment.created_at = new Date().toISOString();
+        shipment.updated_at = new Date().toISOString();
+        shipments.push(shipment);
+    }
+    setLocal(LOCAL_KEYS.shipments, shipments);
+    return shipment.id;
+}
+
+async function deleteShipment(shipmentId) {
+    const shipments = (await loadShipments()).filter(s => s.id !== shipmentId);
+    setLocal(LOCAL_KEYS.shipments, shipments);
 }

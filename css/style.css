@@ -1134,3 +1134,34 @@ table .text-center { text-align: center; }
     color: var(--accent);
     border-bottom-color: var(--accent) !important;
 }
+
+/* Photo upload preview */
+#wh-f-photo-preview img {
+    border-radius: 6px;
+}
+#wh-f-photo-file {
+    font-size: 12px;
+}
+
+/* Shipment form */
+#wh-shipment-form select {
+    background: var(--card-bg);
+    color: var(--text);
+}
+#wh-sh-items-table table {
+    width: 100%;
+}
+#wh-sh-items-table input[type="number"] {
+    background: var(--card-bg);
+    color: var(--text);
+}
+#wh-sh-items-table select {
+    background: var(--card-bg);
+    color: var(--text);
+    max-width: 240px;
+}
+#wh-shipment-form textarea {
+    background: var(--card-bg);
+    color: var(--text);
+    font-family: inherit;
+}
