@@ -40,6 +40,9 @@ const LOCAL_KEYS = {
     vacations: 'ro_calc_vacations',
     employees: 'ro_calc_employees',
     orderFactuals: 'ro_calc_order_factuals',
+    warehouseItems: 'ro_calc_warehouse_items',
+    warehouseReservations: 'ro_calc_warehouse_reservations',
+    warehouseHistory: 'ro_calc_warehouse_history',
 };
 
 // Data version — increment to force cache reset for molds
@@ -677,4 +680,57 @@ async function loadVacations() {
 
 async function saveVacations(vacations) {
     setLocal(LOCAL_KEYS.vacations, vacations);
+}
+
+// =============================================
+// WAREHOUSE (Склад фурнитуры)
+// =============================================
+
+async function loadWarehouseItems() {
+    return getLocal(LOCAL_KEYS.warehouseItems) || [];
+}
+
+async function saveWarehouseItem(item) {
+    const items = await loadWarehouseItems();
+    if (item.id) {
+        const idx = items.findIndex(i => i.id === item.id);
+        if (idx >= 0) {
+            items[idx] = { ...item, updated_at: new Date().toISOString() };
+        } else {
+            item.updated_at = new Date().toISOString();
+            items.push(item);
+        }
+    } else {
+        item.id = Date.now();
+        item.created_at = new Date().toISOString();
+        item.updated_at = new Date().toISOString();
+        items.push(item);
+    }
+    setLocal(LOCAL_KEYS.warehouseItems, items);
+    return item.id;
+}
+
+async function saveWarehouseItems(items) {
+    setLocal(LOCAL_KEYS.warehouseItems, items);
+}
+
+async function deleteWarehouseItem(itemId) {
+    const items = (await loadWarehouseItems()).filter(i => i.id !== itemId);
+    setLocal(LOCAL_KEYS.warehouseItems, items);
+}
+
+async function loadWarehouseReservations() {
+    return getLocal(LOCAL_KEYS.warehouseReservations) || [];
+}
+
+async function saveWarehouseReservations(reservations) {
+    setLocal(LOCAL_KEYS.warehouseReservations, reservations);
+}
+
+async function loadWarehouseHistory() {
+    return getLocal(LOCAL_KEYS.warehouseHistory) || [];
+}
+
+async function saveWarehouseHistory(history) {
+    setLocal(LOCAL_KEYS.warehouseHistory, history);
 }

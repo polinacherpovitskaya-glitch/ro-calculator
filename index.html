@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=25">
+    <link rel="stylesheet" href="css/style.css?v=26">
 </head>
 <body>
 
@@ -71,6 +71,10 @@
             <a href="#import" data-page="import">
                 <span class="nav-icon">&#8645;</span>
                 <span>Импорт</span>
+            </a>
+            <a href="#warehouse" data-page="warehouse">
+                <span class="nav-icon">&#128230;</span>
+                <span>Склад</span>
             </a>
             <a href="#settings" data-page="settings">
                 <span class="nav-icon">&#9881;</span>
@@ -991,6 +995,228 @@
             </div>
         </div>
 
+        <!-- ========== WAREHOUSE (Склад) ========== -->
+        <div id="page-warehouse" class="page">
+            <div class="page-header">
+                <h1>Склад фурнитуры</h1>
+                <div class="flex gap-8">
+                    <button class="btn btn-outline" onclick="Warehouse.showImport()">&#8645; Импорт CSV</button>
+                    <button class="btn btn-outline" onclick="Warehouse.showAudit()">&#9745; Инвентаризация</button>
+                    <button class="btn btn-primary" onclick="Warehouse.showAddForm()">+ Новая позиция</button>
+                </div>
+            </div>
+
+            <!-- Stats -->
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-label">Всего позиций</div>
+                    <div class="stat-value" id="wh-total-items">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Общий остаток</div>
+                    <div class="stat-value" id="wh-total-qty">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Зарезервировано</div>
+                    <div class="stat-value" id="wh-total-reserved">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Мало на складе</div>
+                    <div class="stat-value text-red" id="wh-low-stock">0</div>
+                </div>
+            </div>
+
+            <!-- Tabs -->
+            <div id="wh-tabs" style="display:flex; gap:0; margin-bottom:12px; border-bottom:2px solid var(--border);">
+                <div class="tab active" data-tab="table" onclick="Warehouse.setView('table')" style="padding:8px 16px; cursor:pointer; font-weight:600; font-size:13px; border-bottom:2px solid var(--accent); margin-bottom:-2px;">Таблица</div>
+                <div class="tab" data-tab="history" onclick="Warehouse.setView('history')" style="padding:8px 16px; cursor:pointer; font-size:13px; color:var(--text-muted); border-bottom:2px solid transparent; margin-bottom:-2px;">История движений</div>
+            </div>
+
+            <!-- Filters -->
+            <div class="card" style="padding: 12px 20px;">
+                <div class="form-row" style="align-items:end">
+                    <div class="form-group" style="margin:0">
+                        <label>Категория</label>
+                        <select id="wh-filter-category" onchange="Warehouse.filterAndRender()">
+                            <option value="">Все категории</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin:0">
+                        <label>Наличие</label>
+                        <select id="wh-filter-stock" onchange="Warehouse.filterAndRender()">
+                            <option value="">Все</option>
+                            <option value="in_stock">В наличии</option>
+                            <option value="low">Мало (ниже мин.)</option>
+                            <option value="out">Нет в наличии</option>
+                            <option value="reserved">С резервом</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin:0">
+                        <label>Сортировка</label>
+                        <select id="wh-sort" onchange="Warehouse.filterAndRender()">
+                            <option value="name">По названию</option>
+                            <option value="qty_desc">Кол-во &#8595;</option>
+                            <option value="qty_asc">Кол-во &#8593;</option>
+                            <option value="category">По категории</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin:0">
+                        <label>Поиск</label>
+                        <input type="text" id="wh-search" placeholder="Название, артикул, цвет..." oninput="Warehouse.filterAndRender()">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Main content (table or history rendered here) -->
+            <div id="wh-content"></div>
+
+            <!-- Add/Edit form (hidden) -->
+            <div class="card" id="wh-edit-form" style="display:none; margin-top:16px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                    <h3 id="wh-form-title" style="margin:0;">Новая позиция</h3>
+                    <button class="btn btn-sm btn-outline" onclick="Warehouse.hideForm()">&#10005;</button>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Категория</label>
+                        <select id="wh-f-category">
+                            <option value="carabiners">&#128279; Карабины</option>
+                            <option value="cables">&#9881; Тросы</option>
+                            <option value="rings">&#11093; Кольца</option>
+                            <option value="chains">&#9939; Цепочки</option>
+                            <option value="cords">&#129525; Шнуры</option>
+                            <option value="packaging">&#128230; Упаковка</option>
+                            <option value="other">&#128313; Разное</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Название *</label>
+                        <input type="text" id="wh-f-name" placeholder="Карабин-кольцо">
+                    </div>
+                    <div class="form-group">
+                        <label>Артикул (SKU)</label>
+                        <input type="text" id="wh-f-sku" placeholder="CR-RNG-030-VT">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Размер</label>
+                        <input type="text" id="wh-f-size" placeholder="3 см">
+                    </div>
+                    <div class="form-group">
+                        <label>Цвет</label>
+                        <input type="text" id="wh-f-color" placeholder="фиолетовый">
+                    </div>
+                    <div class="form-group">
+                        <label>Ед. измерения</label>
+                        <select id="wh-f-unit">
+                            <option value="шт">шт</option>
+                            <option value="м">м (метры)</option>
+                            <option value="см">см</option>
+                            <option value="моток">моток</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Кол-во на складе</label>
+                        <input type="number" id="wh-f-qty" value="0" min="0">
+                    </div>
+                    <div class="form-group">
+                        <label>Минимум (для алерта)</label>
+                        <input type="number" id="wh-f-min-qty" value="0" min="0">
+                    </div>
+                    <div class="form-group">
+                        <label>Закупочная цена</label>
+                        <input type="number" id="wh-f-price" value="0" min="0" step="0.01">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group" style="flex:2">
+                        <label>Ссылка на фото (URL)</label>
+                        <input type="text" id="wh-f-photo-url" placeholder="https://...">
+                    </div>
+                    <div class="form-group" style="flex:3">
+                        <label>Примечания</label>
+                        <input type="text" id="wh-f-notes" placeholder="">
+                    </div>
+                </div>
+
+                <!-- Reservations for this item (when editing) -->
+                <div id="wh-reservations-section" style="margin-top:12px; padding-top:12px; border-top:1px solid var(--border);"></div>
+
+                <div style="margin-top:16px; display:flex; gap:8px; align-items:center;">
+                    <button class="btn btn-success" onclick="Warehouse.saveItem()">Сохранить</button>
+                    <button class="btn btn-outline" onclick="Warehouse.hideForm()">Отмена</button>
+                    <button class="btn btn-danger" id="wh-delete-btn" style="margin-left:auto; display:none;" onclick="Warehouse.deleteFromForm()">Удалить</button>
+                </div>
+            </div>
+
+            <!-- Import form (hidden) -->
+            <div class="card" id="wh-import-form" style="display:none; margin-top:16px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                    <h3 style="margin:0;">Импорт из CSV</h3>
+                    <button class="btn btn-sm btn-outline" onclick="Warehouse.hideImport()">&#10005;</button>
+                </div>
+                <p style="font-size:12px; color:var(--text-muted); margin-bottom:12px;">
+                    Экспортируйте лист из Google Sheets в CSV (Файл &rarr; Скачать &rarr; CSV). Выберите категорию и загрузите файл.
+                </p>
+                <div class="form-row" style="align-items:end">
+                    <div class="form-group">
+                        <label>Категория</label>
+                        <select id="wh-import-category">
+                            <option value="carabiners">Карабины</option>
+                            <option value="cables">Тросы</option>
+                            <option value="rings">Кольца</option>
+                            <option value="chains">Цепочки</option>
+                            <option value="cords">Шнуры</option>
+                            <option value="packaging">Упаковка</option>
+                            <option value="other">Разное</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>CSV файл</label>
+                        <input type="file" id="wh-import-file" accept=".csv,.tsv,.txt">
+                    </div>
+                    <div class="form-group">
+                        <button class="btn btn-primary" onclick="Warehouse.processImport()">Загрузить</button>
+                    </div>
+                </div>
+                <div id="wh-import-preview"></div>
+            </div>
+
+            <!-- Audit form (hidden) -->
+            <div class="card" id="wh-audit-form" style="display:none; margin-top:16px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                    <h3 style="margin:0;">Инвентаризация</h3>
+                    <button class="btn btn-sm btn-outline" onclick="Warehouse.hideAudit()">&#10005;</button>
+                </div>
+                <p style="font-size:12px; color:var(--text-muted); margin-bottom:12px;">
+                    Введите фактические остатки. Расхождения будут подсвечены. После сохранения остатки в системе будут скорректированы.
+                </p>
+                <div class="form-row" style="margin-bottom:12px; align-items:end;">
+                    <div class="form-group" style="margin:0">
+                        <label>Категория</label>
+                        <select id="wh-audit-category" onchange="Warehouse.renderAuditTable(this.value)">
+                            <option value="">Все</option>
+                            <option value="carabiners">Карабины</option>
+                            <option value="cables">Тросы</option>
+                            <option value="rings">Кольца</option>
+                            <option value="chains">Цепочки</option>
+                            <option value="cords">Шнуры</option>
+                            <option value="packaging">Упаковка</option>
+                            <option value="other">Разное</option>
+                        </select>
+                    </div>
+                </div>
+                <div id="wh-audit-table"></div>
+                <div style="margin-top:12px; display:flex; gap:8px;">
+                    <button class="btn btn-success" onclick="Warehouse.saveAuditResults()">Сохранить результаты</button>
+                    <button class="btn btn-outline" onclick="Warehouse.hideAudit()">Отмена</button>
+                </div>
+            </div>
+        </div>
+
         <!-- ========== SETTINGS ========== -->
         <div id="page-settings" class="page">
             <div class="page-header">
@@ -1286,18 +1512,19 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="js/supabase.js?v=25"></script>
-<script src="js/calculator.js?v=25"></script>
-<script src="js/app.js?v=25"></script>
-<script src="js/dashboard.js?v=25"></script>
-<script src="js/orders.js?v=25"></script>
-<script src="js/analytics.js?v=25"></script>
-<script src="js/molds.js?v=25"></script>
-<script src="js/kp.js?v=25"></script>
-<script src="js/timetrack.js?v=25"></script>
-<script src="js/tasks.js?v=25"></script>
-<script src="js/import.js?v=25"></script>
-<script src="js/factual.js?v=25"></script>
-<script src="js/settings.js?v=25"></script>
+<script src="js/supabase.js?v=26"></script>
+<script src="js/calculator.js?v=26"></script>
+<script src="js/app.js?v=26"></script>
+<script src="js/dashboard.js?v=26"></script>
+<script src="js/orders.js?v=26"></script>
+<script src="js/analytics.js?v=26"></script>
+<script src="js/molds.js?v=26"></script>
+<script src="js/kp.js?v=26"></script>
+<script src="js/timetrack.js?v=26"></script>
+<script src="js/tasks.js?v=26"></script>
+<script src="js/import.js?v=26"></script>
+<script src="js/factual.js?v=26"></script>
+<script src="js/warehouse.js?v=26"></script>
+<script src="js/settings.js?v=26"></script>
 </body>
 </html>

@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v25';
+const APP_VERSION = 'v26';
 
 const App = {
     currentPage: 'dashboard',
@@ -122,6 +122,7 @@ const App = {
             case 'timetrack': TimeTrack.load(); break;
             case 'tasks': Tasks.load(); Tasks.populateFilters(); break;
             case 'import': Import.load(); break;
+            case 'warehouse': Warehouse.load(); break;
             case 'settings': Settings.load(); break;
         }
     },
