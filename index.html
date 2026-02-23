@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=29">
+    <link rel="stylesheet" href="css/style.css?v=30">
 </head>
 <body>
 
@@ -75,6 +75,10 @@
             <a href="#warehouse" data-page="warehouse">
                 <span class="nav-icon">&#128230;</span>
                 <span>Склад</span>
+            </a>
+            <a href="#china" data-page="china">
+                <span class="nav-icon">&#127464;&#127475;</span>
+                <span>Китай</span>
             </a>
             <a href="#settings" data-page="settings">
                 <span class="nav-icon">&#9881;</span>
@@ -1319,6 +1323,224 @@
 
         </div>
 
+        <!-- ========== CHINA PURCHASES ========== -->
+        <div id="page-china" class="page">
+            <div class="page-header">
+                <h1>Закупки из Китая</h1>
+                <div class="flex gap-8">
+                    <button class="china-tab active" data-view="dashboard" onclick="ChinaPurchases.showView('dashboard')">Сводка</button>
+                    <button class="china-tab" data-view="list" onclick="ChinaPurchases.showView('list')">Список</button>
+                    <button class="btn btn-primary" onclick="ChinaPurchases.openNewForm()">+ Новая закупка</button>
+                </div>
+            </div>
+
+            <!-- DASHBOARD VIEW -->
+            <div id="china-view-dashboard" class="china-view">
+                <div class="card" style="margin-bottom:16px;">
+                    <div id="china-pipeline" class="china-pipe"></div>
+                </div>
+                <div class="stats-grid" style="margin-bottom:16px;">
+                    <div class="stat-card"><div class="stat-value" id="china-stat-total">0</div><div class="stat-label">Всего закупок</div></div>
+                    <div class="stat-card"><div class="stat-value" id="china-stat-transit">0</div><div class="stat-label">В пути</div></div>
+                    <div class="stat-card"><div class="stat-value" id="china-stat-cny">0 ¥</div><div class="stat-label">Товары CNY</div></div>
+                    <div class="stat-card"><div class="stat-value" id="china-stat-delivery">0 ¥</div><div class="stat-label">Доставка CNY</div></div>
+                </div>
+                <div class="card">
+                    <h3>Последние закупки</h3>
+                    <div class="table-container">
+                        <table><thead><tr><th>Название</th><th>Поставщик</th><th>Статус</th><th>Доставка</th><th class="text-right">Сумма</th><th>Дата</th></tr></thead>
+                        <tbody id="china-recent-body"></tbody></table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- LIST VIEW -->
+            <div id="china-view-list" class="china-view" style="display:none;">
+                <div class="card" style="margin-bottom:16px;">
+                    <div class="form-row" style="align-items:end;">
+                        <div class="form-group" style="margin:0;">
+                            <label>Статус</label>
+                            <select id="china-filter-status" onchange="ChinaPurchases.applyFilters()">
+                                <option value="">Все</option>
+                                <option value="ordered">Заказано</option>
+                                <option value="in_china_warehouse">На складе в Китае</option>
+                                <option value="consolidating">Консолидация</option>
+                                <option value="in_transit">В пути</option>
+                                <option value="delivered">Доставлено</option>
+                                <option value="received">Принято на склад</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="margin:0;">
+                            <label>Тип доставки</label>
+                            <select id="china-filter-delivery" onchange="ChinaPurchases.applyFilters()">
+                                <option value="">Все</option>
+                                <option value="air">Авиа</option>
+                                <option value="auto_fast">Авто быстро</option>
+                                <option value="auto_slow">Авто медленно</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="margin:0;flex:1;">
+                            <label>Поиск</label>
+                            <input type="text" id="china-search" placeholder="Название, поставщик, трек..." oninput="ChinaPurchases.applyFilters()">
+                        </div>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="table-container">
+                        <table><thead><tr><th>Название</th><th>Поставщик</th><th>Проект</th><th>Статус</th><th>Доставка</th><th class="text-right">Сумма</th><th>Трек</th><th></th></tr></thead>
+                        <tbody id="china-list-body"></tbody></table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- FORM VIEW -->
+            <div id="china-view-form" class="china-view" style="display:none;">
+                <div style="margin-bottom:12px;">
+                    <button class="btn btn-outline btn-sm" onclick="ChinaPurchases.showView('dashboard')">&larr; Назад</button>
+                </div>
+                <h2 id="china-form-heading" style="margin-bottom:16px;">Новая закупка</h2>
+
+                <!-- Основное -->
+                <div class="card" style="margin-bottom:16px;">
+                    <h3>Основное</h3>
+                    <div class="form-row">
+                        <div class="form-group" style="flex:2;"><label>Название закупки *</label><input type="text" id="china-f-name" placeholder="Закупка карабинов март 2024"></div>
+                        <div class="form-group"><label>Дата заказа</label><input type="date" id="china-f-date"></div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group"><label>Поставщик</label><input type="text" id="china-f-supplier" placeholder="Название продавца"></div>
+                        <div class="form-group" style="flex:2;"><label>Ссылка 1688</label><input type="url" id="china-f-url" placeholder="https://detail.1688.com/..."></div>
+                    </div>
+                    <div class="form-group">
+                        <label>Привязка к заказу</label>
+                        <select id="china-f-order"><option value="">— Не привязана —</option></select>
+                    </div>
+                </div>
+
+                <!-- Позиции -->
+                <div class="card" style="margin-bottom:16px;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                        <h3 style="margin:0;">Позиции товаров</h3>
+                        <button class="btn btn-sm btn-outline" onclick="ChinaPurchases.addItemRow()">+ Позиция</button>
+                    </div>
+                    <div id="china-f-items"></div>
+                    <div style="text-align:right;margin-top:8px;font-weight:700;">Итого: <span id="china-f-total">0 ¥</span></div>
+                </div>
+
+                <!-- Доставка -->
+                <div class="card" style="margin-bottom:16px;">
+                    <h3>Доставка</h3>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Тип доставки</label>
+                            <select id="china-f-del-type">
+                                <option value="">—</option>
+                                <option value="air">Авиа (10-15 дн)</option>
+                                <option value="auto_fast">Авто быстро (20-30 дн)</option>
+                                <option value="auto_slow">Авто медленно (35-50 дн)</option>
+                            </select>
+                        </div>
+                        <div class="form-group"><label>Ориентир. срок (дни)</label><input type="number" min="0" id="china-f-del-days"></div>
+                        <div class="form-group"><label>Трек-номер</label><input type="text" id="china-f-tracking" placeholder="SF1234567890"></div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group"><label>Стоимость доставки (CNY)</label><input type="number" min="0" step="0.01" id="china-f-del-cny"></div>
+                        <div class="form-group"><label>Стоимость доставки (RUB)</label><input type="number" min="0" step="0.01" id="china-f-del-rub"></div>
+                        <div class="form-group"><label>Курс CNY/RUB</label><input type="number" min="0" step="0.01" id="china-f-rate" placeholder="12.5"></div>
+                    </div>
+                </div>
+
+                <!-- PDF -->
+                <div class="card" style="margin-bottom:16px;">
+                    <h3>Накладная (PDF)</h3>
+                    <div style="display:flex;align-items:center;gap:12px;">
+                        <input type="file" accept=".pdf" onchange="ChinaPurchases.handlePdfUpload(this)" style="max-width:300px;">
+                        <span id="china-f-pdf-info" style="color:var(--text-muted);font-size:13px;">Файл не выбран</span>
+                    </div>
+                    <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Максимум 500 КБ</div>
+                </div>
+
+                <!-- Заметки -->
+                <div class="card" style="margin-bottom:16px;">
+                    <h3>Заметки</h3>
+                    <textarea id="china-f-notes" rows="3" placeholder="Любые заметки..."></textarea>
+                </div>
+
+                <div style="display:flex;gap:8px;">
+                    <button class="btn btn-primary" onclick="ChinaPurchases.saveForm()">Сохранить</button>
+                    <button class="btn btn-outline" onclick="ChinaPurchases.showView('dashboard')">Отмена</button>
+                </div>
+            </div>
+
+            <!-- DETAIL VIEW -->
+            <div id="china-view-detail" class="china-view" style="display:none;">
+                <div style="margin-bottom:12px;">
+                    <button class="btn btn-outline btn-sm" onclick="ChinaPurchases.showView('dashboard')">&larr; Назад</button>
+                </div>
+
+                <!-- Header -->
+                <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">
+                    <h2 id="china-d-title" style="margin:0;"></h2>
+                    <span id="china-d-badge" class="china-badge"></span>
+                    <span id="china-d-date" style="color:var(--text-muted);font-size:13px;"></span>
+                </div>
+
+                <!-- Timeline -->
+                <div class="card" style="margin-bottom:16px;">
+                    <h3>Статус</h3>
+                    <div id="china-d-timeline" class="china-tl"></div>
+                </div>
+
+                <!-- Info -->
+                <div class="card" style="margin-bottom:16px;">
+                    <h3>Информация</h3>
+                    <div class="form-row" style="gap:24px;">
+                        <div style="flex:1;"><div style="color:var(--text-muted);font-size:12px;margin-bottom:2px;">Поставщик</div><div id="china-d-supplier">—</div></div>
+                        <div style="flex:2;"><div style="color:var(--text-muted);font-size:12px;margin-bottom:2px;">Ссылка 1688</div><div id="china-d-url">—</div></div>
+                        <div style="flex:1;"><div style="color:var(--text-muted);font-size:12px;margin-bottom:2px;">Проект</div><div id="china-d-order">—</div></div>
+                    </div>
+                    <div class="form-row" style="gap:24px;margin-top:12px;">
+                        <div><div style="color:var(--text-muted);font-size:12px;margin-bottom:2px;">Тип доставки</div><div id="china-d-del-type">—</div></div>
+                        <div><div style="color:var(--text-muted);font-size:12px;margin-bottom:2px;">Трек-номер</div><div id="china-d-tracking">—</div></div>
+                        <div><div style="color:var(--text-muted);font-size:12px;margin-bottom:2px;">Срок (дни)</div><div id="china-d-days">—</div></div>
+                        <div><div style="color:var(--text-muted);font-size:12px;margin-bottom:2px;">Курс CNY</div><div id="china-d-rate">—</div></div>
+                    </div>
+                </div>
+
+                <!-- Financial -->
+                <div class="card" style="margin-bottom:16px;">
+                    <h3>Финансы</h3>
+                    <div class="form-row" style="gap:24px;">
+                        <div><div style="color:var(--text-muted);font-size:12px;margin-bottom:2px;">Товары CNY</div><div id="china-d-total-cny" style="font-weight:600;">—</div></div>
+                        <div><div style="color:var(--text-muted);font-size:12px;margin-bottom:2px;">Доставка CNY</div><div id="china-d-del-cny">—</div></div>
+                        <div><div style="color:var(--text-muted);font-size:12px;margin-bottom:2px;">Доставка RUB</div><div id="china-d-del-rub">—</div></div>
+                        <div><div style="color:var(--text-muted);font-size:12px;margin-bottom:2px;">Итого CNY</div><div id="china-d-grand-cny" style="font-weight:700;color:var(--accent);">—</div></div>
+                        <div><div style="color:var(--text-muted);font-size:12px;margin-bottom:2px;">Итого RUB</div><div id="china-d-grand-rub" style="font-weight:700;">—</div></div>
+                    </div>
+                </div>
+
+                <!-- Items -->
+                <div class="card" style="margin-bottom:16px;">
+                    <h3>Позиции</h3>
+                    <div class="table-container">
+                        <table><thead><tr><th>#</th><th>Товар</th><th class="text-right">Кол-во</th><th class="text-right">Цена</th><th class="text-right">Сумма</th></tr></thead>
+                        <tbody id="china-d-items-body"></tbody></table>
+                    </div>
+                </div>
+
+                <!-- PDF + Notes -->
+                <div class="card" style="margin-bottom:16px;">
+                    <div class="form-row" style="gap:24px;">
+                        <div style="flex:1;"><h3>Накладная</h3><div id="china-d-pdf">—</div></div>
+                        <div style="flex:2;"><h3>Заметки</h3><div id="china-d-notes">—</div></div>
+                    </div>
+                </div>
+
+                <!-- Actions -->
+                <div id="china-d-actions" class="flex gap-8" style="margin-top:16px;"></div>
+            </div>
+        </div>
+
         <!-- ========== SETTINGS ========== -->
         <div id="page-settings" class="page">
             <div class="page-header">
@@ -1614,20 +1836,21 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="js/supabase.js?v=29"></script>
-<script src="js/calculator.js?v=29"></script>
-<script src="js/app.js?v=29"></script>
-<script src="js/dashboard.js?v=29"></script>
-<script src="js/orders.js?v=29"></script>
-<script src="js/analytics.js?v=29"></script>
-<script src="js/molds.js?v=29"></script>
-<script src="js/kp.js?v=29"></script>
-<script src="js/timetrack.js?v=29"></script>
-<script src="js/tasks.js?v=29"></script>
-<script src="js/import.js?v=29"></script>
-<script src="js/factual.js?v=29"></script>
-<script src="js/warehouse_photos.js?v=29"></script>
-<script src="js/warehouse.js?v=29"></script>
-<script src="js/settings.js?v=29"></script>
+<script src="js/supabase.js?v=30"></script>
+<script src="js/calculator.js?v=30"></script>
+<script src="js/app.js?v=30"></script>
+<script src="js/dashboard.js?v=30"></script>
+<script src="js/orders.js?v=30"></script>
+<script src="js/analytics.js?v=30"></script>
+<script src="js/molds.js?v=30"></script>
+<script src="js/kp.js?v=30"></script>
+<script src="js/timetrack.js?v=30"></script>
+<script src="js/tasks.js?v=30"></script>
+<script src="js/import.js?v=30"></script>
+<script src="js/factual.js?v=30"></script>
+<script src="js/china.js?v=30"></script>
+<script src="js/warehouse_photos.js?v=30"></script>
+<script src="js/warehouse.js?v=30"></script>
+<script src="js/settings.js?v=30"></script>
 </body>
 </html>

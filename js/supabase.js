@@ -35,8 +35,7 @@ const LOCAL_KEYS = {
     molds: 'ro_calc_molds',
     timeEntries: 'ro_calc_time_entries',
     tasks: 'ro_calc_tasks',
-    chinaOrders: 'ro_calc_china_orders',
-    chinaDeliveries: 'ro_calc_china_deliveries',
+    chinaPurchases: 'ro_calc_china_purchases',
     vacations: 'ro_calc_vacations',
     employees: 'ro_calc_employees',
     orderFactuals: 'ro_calc_order_factuals',
@@ -767,4 +766,57 @@ async function saveShipment(shipment) {
 async function deleteShipment(shipmentId) {
     const shipments = (await loadShipments()).filter(s => s.id !== shipmentId);
     setLocal(LOCAL_KEYS.shipments, shipments);
+}
+
+// =============================================
+// CHINA PURCHASES
+// =============================================
+
+async function saveChinaPurchase(purchase) {
+    const purchases = getLocal(LOCAL_KEYS.chinaPurchases) || [];
+    let purchaseId = purchase.id;
+    if (purchaseId) {
+        const idx = purchases.findIndex(p => p.id === purchaseId);
+        if (idx >= 0) purchases[idx] = { ...purchase, updated_at: new Date().toISOString() };
+    } else {
+        purchaseId = Date.now();
+        purchases.push({
+            ...purchase,
+            id: purchaseId,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+        });
+    }
+    setLocal(LOCAL_KEYS.chinaPurchases, purchases);
+    return purchaseId;
+}
+
+async function loadChinaPurchases(filters = {}) {
+    let purchases = getLocal(LOCAL_KEYS.chinaPurchases) || [];
+    if (filters.status) purchases = purchases.filter(p => p.status === filters.status);
+    if (filters.delivery_type) purchases = purchases.filter(p => p.delivery_type === filters.delivery_type);
+    purchases.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    if (filters.limit) purchases = purchases.slice(0, filters.limit);
+    return purchases;
+}
+
+async function loadChinaPurchase(purchaseId) {
+    const purchases = getLocal(LOCAL_KEYS.chinaPurchases) || [];
+    return purchases.find(p => p.id === purchaseId) || null;
+}
+
+async function updateChinaPurchaseStatus(purchaseId, status, note) {
+    const purchases = getLocal(LOCAL_KEYS.chinaPurchases) || [];
+    const purchase = purchases.find(p => p.id === purchaseId);
+    if (!purchase) return;
+    purchase.status = status;
+    purchase.status_history = purchase.status_history || [];
+    purchase.status_history.push({ status, date: new Date().toISOString(), note: note || '' });
+    purchase.updated_at = new Date().toISOString();
+    setLocal(LOCAL_KEYS.chinaPurchases, purchases);
+}
+
+async function deleteChinaPurchase(purchaseId) {
+    const purchases = (getLocal(LOCAL_KEYS.chinaPurchases) || []).filter(p => p.id !== purchaseId);
+    setLocal(LOCAL_KEYS.chinaPurchases, purchases);
 }
