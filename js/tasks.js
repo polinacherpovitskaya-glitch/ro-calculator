@@ -1,19 +1,21 @@
 // =============================================
 // Recycle Object — Task Tracker (To-do Kanban)
-// Перенесено из Notion
+// v33: Tasks linked to orders
 // =============================================
 
 const Tasks = {
     allTasks: [],
+    allOrders: [], // cached for order dropdown
     view: 'kanban', // 'kanban' | 'list'
 
     async load() {
         this.allTasks = await loadTasks();
         if (this.allTasks.length === 0) {
-            // First load: import default tasks
             this.allTasks = this.getDefaultTasks();
             await saveTasks(this.allTasks);
         }
+        // Cache orders for dropdown
+        try { this.allOrders = await loadOrders({}); } catch { this.allOrders = []; }
         this.renderStats();
         this.render();
     },
@@ -51,9 +53,10 @@ const Tasks = {
         const container = document.getElementById('tasks-kanban');
         const filterAssignee = document.getElementById('tasks-filter-assignee')?.value || '';
         const filterProject = document.getElementById('tasks-filter-project')?.value || '';
+        const filterOrder = document.getElementById('tasks-filter-order')?.value || '';
         const search = (document.getElementById('tasks-search')?.value || '').toLowerCase().trim();
 
-        let filtered = this.filterTasks(filterAssignee, filterProject, search);
+        let filtered = this.filterTasks(filterAssignee, filterProject, filterOrder, search);
 
         const columns = [
             { status: 'Not started', label: 'Не начато', color: '#6b7280', icon: '○' },
@@ -87,15 +90,19 @@ const Tasks = {
             ? `<div class="task-assignees">${assignees.map(a => `<span class="task-avatar" title="${this.esc(a)}">${this.initials(a)}</span>`).join('')}</div>`
             : '';
 
-        const projectHtml = task.project
-            ? `<span class="task-project-tag">${this.esc(this.shortProject(task.project))}</span>`
+        // Show linked order name as clickable badge
+        const orderName = task.order_name || this.shortProject(task.project) || '';
+        const orderHtml = orderName
+            ? (task.order_id
+                ? `<span class="task-project-tag" onclick="event.stopPropagation(); App.navigate('order-detail', true, ${task.order_id})" style="cursor:pointer" title="Открыть заказ">${this.esc(orderName)}</span>`
+                : `<span class="task-project-tag">${this.esc(orderName)}</span>`)
             : '';
 
         return `
         <div class="kanban-card" draggable="true" ondragstart="Tasks.onDragStart(event, ${task.id})" onclick="Tasks.openTask(${task.id})">
             <div class="task-card-title">${this.esc(task.title)}</div>
             <div class="task-card-meta">
-                ${projectHtml}
+                ${orderHtml}
                 ${deadlineHtml}
             </div>
             ${assigneeHtml}
@@ -106,11 +113,11 @@ const Tasks = {
         const container = document.getElementById('tasks-kanban');
         const filterAssignee = document.getElementById('tasks-filter-assignee')?.value || '';
         const filterProject = document.getElementById('tasks-filter-project')?.value || '';
+        const filterOrder = document.getElementById('tasks-filter-order')?.value || '';
         const search = (document.getElementById('tasks-search')?.value || '').toLowerCase().trim();
 
-        let filtered = this.filterTasks(filterAssignee, filterProject, search);
+        let filtered = this.filterTasks(filterAssignee, filterProject, filterOrder, search);
 
-        // Sort: In progress first, then Not started, then Done, then Cancelled
         const order = { 'In progress': 0, 'Not started': 1, 'Done': 2, 'Cancelled': 3 };
         filtered.sort((a, b) => (order[a.status] ?? 9) - (order[b.status] ?? 9));
 
@@ -134,31 +141,36 @@ const Tasks = {
                             <th>Статус</th>
                             <th>Ответственный</th>
                             <th>Дедлайн</th>
-                            <th>Проект</th>
+                            <th>Заказ</th>
                             <th></th>
                         </tr>
                     </thead>
                     <tbody>
                         ${filtered.length === 0 ? '<tr><td colspan="6" class="text-center text-muted">Нет задач</td></tr>' : ''}
-                        ${filtered.map(t => `
+                        ${filtered.map(t => {
+                            const oName = t.order_name || this.shortProject(t.project) || '';
+                            const oLink = t.order_id
+                                ? `<a href="#order-detail/${t.order_id}" onclick="event.stopPropagation(); App.navigate('order-detail', true, ${t.order_id}); return false;" style="color:var(--accent);text-decoration:none;font-size:12px">${this.esc(oName)}</a>`
+                                : `<span style="font-size:12px">${this.esc(oName)}</span>`;
+                            return `
                         <tr onclick="Tasks.openTask(${t.id})" style="cursor:pointer">
                             <td><b>${this.esc(t.title)}</b></td>
                             <td>${statusBadge(t.status)}</td>
                             <td style="font-size:12px">${this.esc(t.assignee || '')}</td>
                             <td style="font-size:12px" class="${this.isOverdue(t.deadline) ? 'text-red' : ''}">${t.deadline ? this.formatDeadline(t.deadline) : ''}</td>
-                            <td style="font-size:12px">${this.esc(this.shortProject(t.project) || '')}</td>
+                            <td>${oLink}</td>
                             <td><button class="btn btn-sm btn-outline" onclick="event.stopPropagation(); Tasks.deleteTask(${t.id})">&#10005;</button></td>
-                        </tr>`).join('')}
+                        </tr>`;
+                        }).join('')}
                     </tbody>
                 </table>
             </div>
         </div>`;
     },
 
-    filterTasks(assignee, project, search) {
+    filterTasks(assignee, project, orderId, search) {
         let filtered = [...this.allTasks];
 
-        // Hide 'Done' and 'Cancelled' by default unless searching or filtering specifically
         const statusFilter = document.getElementById('tasks-filter-status')?.value || 'active';
         if (statusFilter === 'active') {
             filtered = filtered.filter(t => t.status === 'Not started' || t.status === 'In progress');
@@ -172,11 +184,16 @@ const Tasks = {
         if (project) {
             filtered = filtered.filter(t => (t.project || '').includes(project));
         }
+        if (orderId) {
+            const oid = parseInt(orderId);
+            filtered = filtered.filter(t => t.order_id === oid);
+        }
         if (search) {
             filtered = filtered.filter(t =>
                 (t.title || '').toLowerCase().includes(search) ||
                 (t.assignee || '').toLowerCase().includes(search) ||
-                (t.project || '').toLowerCase().includes(search)
+                (t.project || '').toLowerCase().includes(search) ||
+                (t.order_name || '').toLowerCase().includes(search)
             );
         }
         return filtered;
@@ -203,7 +220,7 @@ const Tasks = {
 
     // === CRUD ===
 
-    showAddForm() {
+    showAddForm(presetOrderId, presetOrderName) {
         document.getElementById('tasks-add-form').style.display = '';
         document.getElementById('task-edit-title').value = '';
         document.getElementById('task-edit-assignee').value = '';
@@ -212,6 +229,12 @@ const Tasks = {
         document.getElementById('task-edit-description').value = '';
         document.getElementById('task-edit-id').value = '';
         this.populateProjectOptions();
+        this.populateOrderDropdown();
+        // Pre-select order if provided
+        const orderSelect = document.getElementById('task-edit-order');
+        if (orderSelect && presetOrderId) {
+            orderSelect.value = presetOrderId;
+        }
     },
 
     hideAddForm() {
@@ -219,12 +242,23 @@ const Tasks = {
     },
 
     populateProjectOptions() {
-        // Collect unique projects from tasks
         const projects = [...new Set(this.allTasks.map(t => t.project).filter(Boolean))].sort();
         const datalist = document.getElementById('task-projects-datalist');
         if (datalist) {
             datalist.innerHTML = projects.map(p => `<option value="${this.esc(p)}">`).join('');
         }
+    },
+
+    populateOrderDropdown() {
+        const select = document.getElementById('task-edit-order');
+        if (!select) return;
+        const currentVal = select.value;
+        select.innerHTML = '<option value="">-- Без заказа --</option>';
+        this.allOrders.forEach(o => {
+            if (o.status === 'deleted') return;
+            select.innerHTML += `<option value="${o.id}">${this.esc(o.order_name || 'Без названия')} ${o.client_name ? '(' + this.esc(o.client_name) + ')' : ''}</option>`;
+        });
+        if (currentVal) select.value = currentVal;
     },
 
     async saveTask() {
@@ -235,10 +269,18 @@ const Tasks = {
         const project = document.getElementById('task-edit-project').value.trim();
         const description = document.getElementById('task-edit-description').value.trim();
 
+        // Order linking
+        const orderSelect = document.getElementById('task-edit-order');
+        const orderId = orderSelect ? (parseInt(orderSelect.value) || null) : null;
+        let orderName = '';
+        if (orderId) {
+            const selectedOrder = this.allOrders.find(o => o.id === orderId);
+            orderName = selectedOrder ? selectedOrder.order_name : '';
+        }
+
         if (!title) { App.toast('Введите название задачи'); return; }
 
         if (id) {
-            // Edit existing
             const task = this.allTasks.find(t => t.id === parseInt(id));
             if (task) {
                 task.title = title;
@@ -246,10 +288,11 @@ const Tasks = {
                 task.deadline = deadline || null;
                 task.project = project;
                 task.description = description;
+                task.order_id = orderId;
+                task.order_name = orderName;
                 task.updated_at = new Date().toISOString();
             }
         } else {
-            // New task
             this.allTasks.push({
                 id: Date.now(),
                 title,
@@ -258,6 +301,8 @@ const Tasks = {
                 deadline: deadline || null,
                 project,
                 description,
+                order_id: orderId,
+                order_name: orderName,
                 created_at: new Date().toISOString(),
                 updated_at: new Date().toISOString(),
             });
@@ -283,8 +328,12 @@ const Tasks = {
         document.getElementById('task-edit-project').value = task.project || '';
         document.getElementById('task-edit-description').value = task.description || '';
         this.populateProjectOptions();
+        this.populateOrderDropdown();
 
-        // Scroll to form
+        // Set order dropdown
+        const orderSelect = document.getElementById('task-edit-order');
+        if (orderSelect) orderSelect.value = task.order_id || '';
+
         document.getElementById('tasks-add-form').scrollIntoView({ behavior: 'smooth' });
     },
 
@@ -306,6 +355,11 @@ const Tasks = {
             this.renderStats();
             this.render();
         }
+    },
+
+    // Get tasks for a specific order (used by OrderDetail)
+    getTasksForOrder(orderId) {
+        return this.allTasks.filter(t => t.order_id === orderId);
     },
 
     populateFilters() {
@@ -334,6 +388,20 @@ const Tasks = {
                 pSelect.appendChild(opt);
             });
         }
+
+        // Orders filter
+        const oSelect = document.getElementById('tasks-filter-order');
+        if (oSelect) {
+            while (oSelect.options.length > 1) oSelect.remove(1);
+            const orderIds = [...new Set(this.allTasks.map(t => t.order_id).filter(Boolean))];
+            orderIds.forEach(oid => {
+                const task = this.allTasks.find(t => t.order_id === oid);
+                const opt = document.createElement('option');
+                opt.value = oid;
+                opt.textContent = task?.order_name || `Заказ #${oid}`;
+                oSelect.appendChild(opt);
+            });
+        }
     },
 
     // === HELPERS ===
@@ -345,7 +413,6 @@ const Tasks = {
 
     initials(name) {
         if (!name) return '?';
-        // Clean up email-like names
         const clean = name.replace(/@.*/, '').replace(/chiefoperating/, 'Операц.');
         const parts = clean.split(/\s+/).filter(Boolean);
         if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
@@ -354,16 +421,14 @@ const Tasks = {
 
     shortProject(p) {
         if (!p) return '';
-        // Remove Notion URLs from project name
         return p.replace(/\s*\(https?:\/\/[^)]+\)/g, '').trim();
     },
 
     formatDeadline(d) {
         if (!d) return '';
-        // Handle range deadlines "February 10, 2025 → February 12, 2025"
         if (d.includes('→')) {
             const parts = d.split('→').map(s => s.trim());
-            return this.formatSingleDate(parts[1]); // Show end date
+            return this.formatSingleDate(parts[1]);
         }
         return this.formatSingleDate(d);
     },
@@ -393,46 +458,39 @@ const Tasks = {
     getDefaultTasks() {
         const now = new Date().toISOString();
         const tasks = [
-            // Active tasks (Not started / In progress)
-            { id: 1, title: 'Придумать бомбическую упаковку для музеев', status: 'Not started', assignee: 'Полина Черповицкая', deadline: 'March 21, 2025', project: '', description: '' },
-            { id: 2, title: 'Сделать акты для Пушкинского', status: 'Not started', assignee: 'Алина Семенова', deadline: null, project: '', description: '' },
-            { id: 3, title: 'Найти резинку 0,5 см близкую к CMYK 32 0 67 0', status: 'In progress', assignee: 'chiefoperating@recycleobject.com', deadline: null, project: '', description: '' },
-            { id: 4, title: 'Посмотреть стоимость стержней для точки по истории заказов 1688 на тираж 200', status: 'In progress', assignee: 'chiefoperating@recycleobject.com', deadline: null, project: '', description: '' },
-            { id: 5, title: 'Покрасить пластик для Озон банка', status: 'Not started', assignee: 'chiefoperating@recycleobject.com, Алексей Маркелов', deadline: null, project: '', description: '' },
-            { id: 6, title: 'Обновить информацию о производительности для старых и новых форм (кол-во изделий в час)', status: 'Not started', assignee: 'chiefoperating@recycleobject.com, Алексей Маркелов', deadline: null, project: '', description: '' },
-            { id: 7, title: 'Уточнить можно ли сделать резинку 2 мм и в тираже 500 м, какие сроки?', status: 'Not started', assignee: 'chiefoperating@recycleobject.com', deadline: null, project: '', description: '' },
-            { id: 8, title: 'Зарегистрироваться на площадке Сбер Аст для тендера Отелло (срочная задача)', status: 'Not started', assignee: 'chiefoperating@recycleobject.com', deadline: null, project: '', description: '' },
-            { id: 9, title: 'Найти штуки для кликабельности клавиш (реф в тг)', status: 'Not started', assignee: 'chiefoperating@recycleobject.com', deadline: null, project: '', description: '' },
-            { id: 10, title: 'Благодарственные письма от заказчиков', status: 'Not started', assignee: 'Anna Ovcharenko', deadline: 'February 13, 2026 → February 16, 2026', project: '', description: '' },
-
-            // Recent Done tasks (last 30)
-            { id: 101, title: 'Заказать на пробу 4 ретрактора: 3 зеленых и 1 желтый', status: 'Done', assignee: 'chiefoperating@recycleobject.com', deadline: null, project: '', description: '' },
-            { id: 102, title: 'Найти в истории 1688 подрядчика для гравировки на карабинах', status: 'Done', assignee: 'chiefoperating@recycleobject.com', deadline: null, project: '', description: '' },
-            { id: 103, title: 'Коробки по аналогии с новыми крафтовыми на МП для заказчика (тираж 300 шт)', status: 'Done', assignee: 'chiefoperating@recycleobject.com', deadline: null, project: '', description: '' },
-            { id: 104, title: 'Заказать серебристые карабины 20 мм 800 шт', status: 'Done', assignee: 'chiefoperating@recycleobject.com', deadline: null, project: 'Точка нфс', description: '' },
-            { id: 105, title: 'Убрать бирюзовый цвет с товаров на сайте', status: 'Done', assignee: 'Elina Kemaйкина', deadline: null, project: '', description: '' },
-            { id: 106, title: 'Присвоить всей фурнитуре серийные номера для учета', status: 'Done', assignee: 'Егор', deadline: 'October 1, 2025', project: '', description: '' },
-            { id: 107, title: 'Заказать карабины для Мелон (и в сток)', status: 'Done', assignee: 'Анна Мирная', deadline: null, project: 'Melon fashion обвесы', description: '' },
-            { id: 108, title: 'Заказать шнурки для Мелон', status: 'Done', assignee: 'Анна Мирная', deadline: null, project: 'Melon fashion обвесы', description: '' },
-            { id: 109, title: 'Заказать шнуры для Фонбет, доставка АВИА', status: 'Done', assignee: 'Анна Мирная', deadline: null, project: '', description: '' },
-            { id: 110, title: 'Заказать цветные карабины', status: 'Done', assignee: 'Анна Мирная', deadline: null, project: '', description: '' },
-            { id: 111, title: 'Заказать шнуры на пробу 4 мм', status: 'Done', assignee: 'Анна Мирная', deadline: null, project: '', description: '' },
-            { id: 112, title: 'Заказать шнуры в сток', status: 'Done', assignee: 'Анна Мирная', deadline: null, project: '', description: '' },
-            { id: 113, title: 'Найти исполнителя по составлению дашборда из аналитики CRM', status: 'Done', assignee: 'Анна Мирная', deadline: null, project: '', description: '' },
-            { id: 114, title: 'Заказать молд пуговиц', status: 'Done', assignee: 'Анна Мирная', deadline: null, project: 'Гараж пуговицы', description: '' },
-            { id: 115, title: 'Фурнитура и упаковка для воркшопа ВК', status: 'Done', assignee: 'Анна Мирная', deadline: null, project: 'ВК фест kids', description: '' },
-            { id: 116, title: 'Заказать НФС клавишу', status: 'Done', assignee: 'Анна Мирная', deadline: null, project: 'Яндекс воркшоп + клавиша НФС', description: '' },
-            { id: 117, title: 'Заказать черные тросы', status: 'Done', assignee: 'Анна Мирная', deadline: null, project: 'Яндекс team смотка', description: '' },
-            { id: 118, title: 'Заказать фурнитуру для Точки 1000 стержней с синими чернилами', status: 'Done', assignee: 'Анна Мирная', deadline: null, project: '', description: '' },
-            { id: 119, title: 'Заказать паракорды для Точки 300 шт', status: 'Done', assignee: 'chiefoperating@recycleobject.com', deadline: 'November 21, 2025', project: 'обвесы точка', description: '' },
-            { id: 120, title: 'Финальная фурнитура на тираж Т-банк (1100 шт)', status: 'Done', assignee: 'chiefoperating@recycleobject.com', deadline: null, project: 'Т-банк картхолдеры для стикеров', description: '' },
+            { id: 1, title: 'Придумать бомбическую упаковку для музеев', status: 'Not started', assignee: 'Полина Черповицкая', deadline: 'March 21, 2025', project: '', description: '', order_id: null, order_name: '' },
+            { id: 2, title: 'Сделать акты для Пушкинского', status: 'Not started', assignee: 'Алина Семенова', deadline: null, project: '', description: '', order_id: null, order_name: '' },
+            { id: 3, title: 'Найти резинку 0,5 см близкую к CMYK 32 0 67 0', status: 'In progress', assignee: 'chiefoperating@recycleobject.com', deadline: null, project: '', description: '', order_id: null, order_name: '' },
+            { id: 4, title: 'Посмотреть стоимость стержней для точки по истории заказов 1688 на тираж 200', status: 'In progress', assignee: 'chiefoperating@recycleobject.com', deadline: null, project: '', description: '', order_id: null, order_name: '' },
+            { id: 5, title: 'Покрасить пластик для Озон банка', status: 'Not started', assignee: 'chiefoperating@recycleobject.com, Алексей Маркелов', deadline: null, project: '', description: '', order_id: null, order_name: '' },
+            { id: 6, title: 'Обновить информацию о производительности для старых и новых форм', status: 'Not started', assignee: 'chiefoperating@recycleobject.com, Алексей Маркелов', deadline: null, project: '', description: '', order_id: null, order_name: '' },
+            { id: 7, title: 'Уточнить можно ли сделать резинку 2 мм и в тираже 500 м', status: 'Not started', assignee: 'chiefoperating@recycleobject.com', deadline: null, project: '', description: '', order_id: null, order_name: '' },
+            { id: 8, title: 'Зарегистрироваться на площадке Сбер Аст для тендера Отелло', status: 'Not started', assignee: 'chiefoperating@recycleobject.com', deadline: null, project: '', description: '', order_id: null, order_name: '' },
+            { id: 9, title: 'Найти штуки для кликабельности клавиш (реф в тг)', status: 'Not started', assignee: 'chiefoperating@recycleobject.com', deadline: null, project: '', description: '', order_id: null, order_name: '' },
+            { id: 10, title: 'Благодарственные письма от заказчиков', status: 'Not started', assignee: 'Anna Ovcharenko', deadline: 'February 13, 2026 → February 16, 2026', project: '', description: '', order_id: null, order_name: '' },
+            { id: 101, title: 'Заказать на пробу 4 ретрактора: 3 зеленых и 1 желтый', status: 'Done', assignee: 'chiefoperating@recycleobject.com', deadline: null, project: '', description: '', order_id: null, order_name: '' },
+            { id: 102, title: 'Найти в истории 1688 подрядчика для гравировки на карабинах', status: 'Done', assignee: 'chiefoperating@recycleobject.com', deadline: null, project: '', description: '', order_id: null, order_name: '' },
+            { id: 103, title: 'Коробки по аналогии с новыми крафтовыми на МП для заказчика (тираж 300 шт)', status: 'Done', assignee: 'chiefoperating@recycleobject.com', deadline: null, project: '', description: '', order_id: null, order_name: '' },
+            { id: 104, title: 'Заказать серебристые карабины 20 мм 800 шт', status: 'Done', assignee: 'chiefoperating@recycleobject.com', deadline: null, project: 'Точка нфс', description: '', order_id: null, order_name: '' },
+            { id: 105, title: 'Убрать бирюзовый цвет с товаров на сайте', status: 'Done', assignee: 'Elina Kemaйкина', deadline: null, project: '', description: '', order_id: null, order_name: '' },
+            { id: 106, title: 'Присвоить всей фурнитуре серийные номера для учета', status: 'Done', assignee: 'Егор', deadline: 'October 1, 2025', project: '', description: '', order_id: null, order_name: '' },
+            { id: 107, title: 'Заказать карабины для Мелон (и в сток)', status: 'Done', assignee: 'Анна Мирная', deadline: null, project: 'Melon fashion обвесы', description: '', order_id: null, order_name: '' },
+            { id: 108, title: 'Заказать шнурки для Мелон', status: 'Done', assignee: 'Анна Мирная', deadline: null, project: 'Melon fashion обвесы', description: '', order_id: null, order_name: '' },
+            { id: 109, title: 'Заказать шнуры для Фонбет, доставка АВИА', status: 'Done', assignee: 'Анна Мирная', deadline: null, project: '', description: '', order_id: null, order_name: '' },
+            { id: 110, title: 'Заказать цветные карабины', status: 'Done', assignee: 'Анна Мирная', deadline: null, project: '', description: '', order_id: null, order_name: '' },
+            { id: 111, title: 'Заказать шнуры на пробу 4 мм', status: 'Done', assignee: 'Анна Мирная', deadline: null, project: '', description: '', order_id: null, order_name: '' },
+            { id: 112, title: 'Заказать шнуры в сток', status: 'Done', assignee: 'Анна Мирная', deadline: null, project: '', description: '', order_id: null, order_name: '' },
+            { id: 113, title: 'Найти исполнителя по составлению дашборда из аналитики CRM', status: 'Done', assignee: 'Анна Мирная', deadline: null, project: '', description: '', order_id: null, order_name: '' },
+            { id: 114, title: 'Заказать молд пуговиц', status: 'Done', assignee: 'Анна Мирная', deadline: null, project: 'Гараж пуговицы', description: '', order_id: null, order_name: '' },
+            { id: 115, title: 'Фурнитура и упаковка для воркшопа ВК', status: 'Done', assignee: 'Анна Мирная', deadline: null, project: 'ВК фест kids', description: '', order_id: null, order_name: '' },
+            { id: 116, title: 'Заказать НФС клавишу', status: 'Done', assignee: 'Анна Мирная', deadline: null, project: 'Яндекс воркшоп + клавиша НФС', description: '', order_id: null, order_name: '' },
+            { id: 117, title: 'Заказать черные тросы', status: 'Done', assignee: 'Анна Мирная', deadline: null, project: 'Яндекс team смотка', description: '', order_id: null, order_name: '' },
+            { id: 118, title: 'Заказать фурнитуру для Точки 1000 стержней с синими чернилами', status: 'Done', assignee: 'Анна Мирная', deadline: null, project: '', description: '', order_id: null, order_name: '' },
+            { id: 119, title: 'Заказать паракорды для Точки 300 шт', status: 'Done', assignee: 'chiefoperating@recycleobject.com', deadline: 'November 21, 2025', project: 'обвесы точка', description: '', order_id: null, order_name: '' },
+            { id: 120, title: 'Финальная фурнитура на тираж Т-банк (1100 шт)', status: 'Done', assignee: 'chiefoperating@recycleobject.com', deadline: null, project: 'Т-банк картхолдеры для стикеров', description: '', order_id: null, order_name: '' },
         ];
 
-        tasks.forEach(t => {
-            t.created_at = now;
-            t.updated_at = now;
-        });
-
+        tasks.forEach(t => { t.created_at = now; t.updated_at = now; });
         return tasks;
     },
 };

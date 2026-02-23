@@ -289,18 +289,71 @@ const OrderDetail = {
     },
 
     // ==========================================
-    // TASKS TAB (placeholder for v33)
+    // TASKS TAB (v33: linked tasks)
     // ==========================================
 
     renderTasksTab() {
         const container = document.getElementById('od-tab-tasks');
+        const orderId = this.currentOrder.id;
+
+        // Ensure Tasks module has data
+        const tasks = (typeof Tasks !== 'undefined' && Tasks.allTasks.length > 0)
+            ? Tasks.getTasksForOrder(orderId)
+            : [];
+
+        const statusIcon = (s) => {
+            const map = { 'Not started': '○', 'In progress': '◐', 'Done': '●', 'Cancelled': '✕' };
+            return map[s] || '○';
+        };
+        const statusColor = (s) => {
+            const map = { 'Not started': '#6b7280', 'In progress': '#f59e0b', 'Done': '#10b981', 'Cancelled': '#ef4444' };
+            return map[s] || '#6b7280';
+        };
+        const statusLabel = (s) => {
+            const map = { 'Not started': 'Не начато', 'In progress': 'В работе', 'Done': 'Готово', 'Cancelled': 'Отменено' };
+            return map[s] || s;
+        };
+
+        const taskRows = tasks.map(t => {
+            const deadlineHtml = t.deadline
+                ? `<span style="font-size:12px;${Tasks.isOverdue(t.deadline) ? 'color:var(--red)' : ''}">${Tasks.formatDeadline(t.deadline)}</span>`
+                : '';
+            return `
+            <tr onclick="Tasks.openTask(${t.id}); App.navigate('tasks', true);" style="cursor:pointer">
+                <td><span style="color:${statusColor(t.status)};font-size:16px;vertical-align:middle">${statusIcon(t.status)}</span> <b>${this._esc(t.title)}</b></td>
+                <td><span class="badge" style="background:${statusColor(t.status)}20;color:${statusColor(t.status)};font-size:11px">${statusLabel(t.status)}</span></td>
+                <td style="font-size:12px">${this._esc(t.assignee || '—')}</td>
+                <td>${deadlineHtml}</td>
+            </tr>`;
+        }).join('');
+
+        const inProgress = tasks.filter(t => t.status === 'In progress').length;
+        const done = tasks.filter(t => t.status === 'Done').length;
+        const total = tasks.length;
+
         container.innerHTML = `
-            <div class="card">
-                <div class="empty-state">
-                    <div class="empty-icon">&#9745;</div>
-                    <p>Связь задач с заказами — в следующем обновлении (v33)</p>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+                <div style="font-size:13px;color:var(--text-muted)">
+                    Всего: <b>${total}</b> &nbsp;|&nbsp; В работе: <b>${inProgress}</b> &nbsp;|&nbsp; Готово: <b>${done}</b>
                 </div>
-            </div>`;
+                <button class="btn btn-sm btn-success" onclick="App.navigate('tasks', true); setTimeout(() => Tasks.showAddForm(${orderId}, '${this._esc(this.currentOrder.order_name || '')}'), 100);">+ Добавить задачу</button>
+            </div>
+            ${tasks.length === 0
+                ? `<div class="card"><div class="empty-state">
+                        <div class="empty-icon">&#9745;</div>
+                        <p>Нет задач, привязанных к этому заказу</p>
+                        <button class="btn btn-sm btn-outline" onclick="App.navigate('tasks', true); setTimeout(() => Tasks.showAddForm(${orderId}, '${this._esc(this.currentOrder.order_name || '')}'), 100);">Создать первую задачу</button>
+                   </div></div>`
+                : `<div class="card" style="padding:0"><div class="table-wrap"><table>
+                    <thead><tr>
+                        <th>Задача</th>
+                        <th>Статус</th>
+                        <th>Ответственный</th>
+                        <th>Дедлайн</th>
+                    </tr></thead>
+                    <tbody>${taskRows}</tbody>
+                   </table></div></div>`
+            }`;
     },
 
     // ==========================================

@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v32';
+const APP_VERSION = 'v35';
 
 const App = {
     currentPage: 'dashboard',
@@ -126,6 +126,7 @@ const App = {
             case 'molds': Molds.load(); break;
             case 'timetrack': TimeTrack.load(); break;
             case 'tasks': Tasks.load(); Tasks.populateFilters(); break;
+            case 'gantt': Gantt.load(); break;
             case 'import': Import.load(); break;
             case 'warehouse': Warehouse.load(); break;
             case 'china': ChinaPurchases.load(); break;

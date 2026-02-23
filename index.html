@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=32">
+    <link rel="stylesheet" href="css/style.css?v=35">
 </head>
 <body>
 
@@ -67,6 +67,10 @@
             <a href="#tasks" data-page="tasks">
                 <span class="nav-icon">&#9745;</span>
                 <span>Задачи</span>
+            </a>
+            <a href="#gantt" data-page="gantt">
+                <span class="nav-icon">&#128197;</span>
+                <span>Календарь</span>
             </a>
             <a href="#import" data-page="import">
                 <span class="nav-icon">&#8645;</span>
@@ -346,7 +350,13 @@
         <div id="page-orders" class="page">
             <div class="page-header">
                 <h1>История заказов</h1>
-                <button class="btn btn-primary" onclick="App.navigate('calculator')">+ Новый расчет</button>
+                <div class="flex gap-8">
+                    <div class="orders-view-toggle">
+                        <button class="orders-view-btn active" data-view="table" onclick="Orders.setView('table')">&#9776; Таблица</button>
+                        <button class="orders-view-btn" data-view="board" onclick="Orders.setView('board')">&#9638; Доска</button>
+                    </div>
+                    <button class="btn btn-primary" onclick="App.navigate('calculator')">+ Новый расчет</button>
+                </div>
             </div>
 
             <div class="card" style="padding: 12px 20px;">
@@ -360,7 +370,7 @@
                             <option value="in_production">В производстве</option>
                             <option value="completed">Выполнен</option>
                             <option value="cancelled">Отменен</option>
-                            <option value="deleted">🗑️ Корзина</option>
+                            <option value="deleted">&#128465; Корзина</option>
                         </select>
                     </div>
                     <div class="form-group" style="margin:0">
@@ -370,7 +380,8 @@
                 </div>
             </div>
 
-            <div class="card">
+            <!-- Table view -->
+            <div id="orders-table-view" class="card">
                 <div class="table-wrap">
                     <table>
                         <thead>
@@ -392,6 +403,9 @@
                     </table>
                 </div>
             </div>
+
+            <!-- Board view (Kanban) -->
+            <div id="orders-board-view" class="orders-board" style="display:none"></div>
         </div>
 
         <!-- ========== ORDER DETAIL ========== -->
@@ -940,6 +954,12 @@
                         </select>
                     </div>
                     <div class="form-group" style="margin:0">
+                        <label>Заказ</label>
+                        <select id="tasks-filter-order" onchange="Tasks.render()">
+                            <option value="">Все</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin:0">
                         <label>Проект</label>
                         <select id="tasks-filter-project" onchange="Tasks.render()">
                             <option value="">Все</option>
@@ -975,6 +995,12 @@
                         <input type="date" id="task-edit-deadline">
                     </div>
                     <div class="form-group" style="flex:2">
+                        <label>Заказ</label>
+                        <select id="task-edit-order">
+                            <option value="">-- Без заказа --</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="flex:2">
                         <label>Проект</label>
                         <input type="text" id="task-edit-project" list="task-projects-datalist" placeholder="Название проекта">
                         <datalist id="task-projects-datalist"></datalist>
@@ -989,6 +1015,22 @@
 
             <!-- Kanban board -->
             <div class="kanban-board" id="tasks-kanban"></div>
+        </div>
+
+        <!-- ========== GANTT CALENDAR ========== -->
+        <div id="page-gantt" class="page">
+            <div class="page-header">
+                <h1>&#128197; Производственный календарь</h1>
+                <div class="flex gap-8">
+                    <button class="btn btn-sm btn-outline gantt-zoom-btn" data-zoom="day" onclick="Gantt.setZoom('day')">День</button>
+                    <button class="btn btn-sm btn-outline gantt-zoom-btn active" data-zoom="week" onclick="Gantt.setZoom('week')">Неделя</button>
+                    <button class="btn btn-sm btn-outline gantt-zoom-btn" data-zoom="month" onclick="Gantt.setZoom('month')">Месяц</button>
+                </div>
+            </div>
+
+            <div class="stats-grid" id="gantt-stats"></div>
+
+            <div id="gantt-container"></div>
         </div>
 
         <!-- ========== IMPORT ========== -->
@@ -1897,22 +1939,23 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="js/supabase.js?v=32"></script>
-<script src="js/calculator.js?v=32"></script>
-<script src="js/app.js?v=32"></script>
-<script src="js/dashboard.js?v=32"></script>
-<script src="js/order-detail.js?v=32"></script>
-<script src="js/orders.js?v=32"></script>
-<script src="js/analytics.js?v=32"></script>
-<script src="js/molds.js?v=32"></script>
-<script src="js/kp.js?v=32"></script>
-<script src="js/timetrack.js?v=32"></script>
-<script src="js/tasks.js?v=32"></script>
-<script src="js/import.js?v=32"></script>
-<script src="js/factual.js?v=32"></script>
-<script src="js/china.js?v=32"></script>
-<script src="js/warehouse_photos.js?v=32"></script>
-<script src="js/warehouse.js?v=32"></script>
-<script src="js/settings.js?v=32"></script>
+<script src="js/supabase.js?v=35"></script>
+<script src="js/calculator.js?v=35"></script>
+<script src="js/app.js?v=35"></script>
+<script src="js/dashboard.js?v=35"></script>
+<script src="js/order-detail.js?v=35"></script>
+<script src="js/orders.js?v=35"></script>
+<script src="js/analytics.js?v=35"></script>
+<script src="js/molds.js?v=35"></script>
+<script src="js/kp.js?v=35"></script>
+<script src="js/timetrack.js?v=35"></script>
+<script src="js/tasks.js?v=35"></script>
+<script src="js/gantt.js?v=35"></script>
+<script src="js/import.js?v=35"></script>
+<script src="js/factual.js?v=35"></script>
+<script src="js/china.js?v=35"></script>
+<script src="js/warehouse_photos.js?v=35"></script>
+<script src="js/warehouse.js?v=35"></script>
+<script src="js/settings.js?v=35"></script>
 </body>
 </html>

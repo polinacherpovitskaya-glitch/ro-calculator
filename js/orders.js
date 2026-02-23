@@ -1,5 +1,6 @@
 // =============================================
 // Recycle Object — Orders History Page
+// v35: Table + Kanban board views
 // =============================================
 
 const STATUS_OPTIONS = [
@@ -11,8 +12,30 @@ const STATUS_OPTIONS = [
     { value: 'deleted', label: 'Удалён' },
 ];
 
+const BOARD_COLUMNS = [
+    { status: 'draft', label: 'Черновик', color: '#6b7280', icon: '○' },
+    { status: 'calculated', label: 'Рассчитан', color: '#2563eb', icon: '◉' },
+    { status: 'in_production', label: 'В производстве', color: '#f59e0b', icon: '◐' },
+    { status: 'completed', label: 'Выполнен', color: '#10b981', icon: '●' },
+];
+
 const Orders = {
     allOrders: [],
+    view: 'table', // 'table' | 'board'
+
+    setView(v) {
+        this.view = v;
+        document.querySelectorAll('.orders-view-btn').forEach(b => b.classList.remove('active'));
+        document.querySelector(`.orders-view-btn[data-view="${v}"]`)?.classList.add('active');
+        document.getElementById('orders-table-view').style.display = v === 'table' ? '' : 'none';
+        document.getElementById('orders-board-view').style.display = v === 'board' ? '' : 'none';
+
+        if (v === 'board') {
+            this.renderBoard(this.allOrders);
+        } else {
+            this.renderTable(this.allOrders);
+        }
+    },
 
     async loadList() {
         try {
@@ -21,7 +44,12 @@ const Orders = {
             if (status) filters.status = status;
 
             this.allOrders = await loadOrders(filters);
-            this.renderTable(this.allOrders);
+
+            if (this.view === 'board') {
+                this.renderBoard(this.allOrders);
+            } else {
+                this.renderTable(this.allOrders);
+            }
         } catch (e) {
             console.error('Orders load error:', e);
         }
@@ -30,7 +58,8 @@ const Orders = {
     filterLocal() {
         const query = (document.getElementById('orders-search').value || '').toLowerCase().trim();
         if (!query) {
-            this.renderTable(this.allOrders);
+            if (this.view === 'board') this.renderBoard(this.allOrders);
+            else this.renderTable(this.allOrders);
             return;
         }
         const filtered = this.allOrders.filter(o =>
@@ -38,8 +67,13 @@ const Orders = {
             || (o.client_name || '').toLowerCase().includes(query)
             || (o.manager_name || '').toLowerCase().includes(query)
         );
-        this.renderTable(filtered);
+        if (this.view === 'board') this.renderBoard(filtered);
+        else this.renderTable(filtered);
     },
+
+    // ==========================================
+    // TABLE VIEW
+    // ==========================================
 
     renderTable(orders) {
         const tbody = document.getElementById('orders-table-body');
@@ -102,6 +136,125 @@ const Orders = {
             </tr>`;
         }).join('');
     },
+
+    // ==========================================
+    // BOARD VIEW (Kanban)
+    // ==========================================
+
+    renderBoard(orders) {
+        const container = document.getElementById('orders-board-view');
+        if (!container) return;
+
+        // Exclude deleted from board
+        const active = orders.filter(o => o.status !== 'deleted' && o.status !== 'cancelled');
+
+        container.innerHTML = BOARD_COLUMNS.map(col => {
+            const colOrders = active.filter(o => o.status === col.status);
+            const totalRevenue = colOrders.reduce((s, o) => s + (o.total_revenue_plan || 0), 0);
+
+            return `
+            <div class="orders-board-col" data-status="${col.status}"
+                 ondragover="Orders.onBoardDragOver(event)"
+                 ondragleave="Orders.onBoardDragLeave(event)"
+                 ondrop="Orders.onBoardDrop(event, '${col.status}')">
+                <div class="orders-board-col-header" style="border-top:3px solid ${col.color}">
+                    <span>${col.icon} ${col.label} <span style="font-weight:400;color:var(--text-muted)">(${colOrders.length})</span></span>
+                    <span style="font-size:11px;color:var(--text-muted)">${this.shortRub(totalRevenue)}</span>
+                </div>
+                <div class="orders-board-col-body">
+                    ${colOrders.length === 0
+                        ? '<div style="text-align:center;color:var(--text-muted);font-size:12px;padding:20px 0">Нет заказов</div>'
+                        : colOrders.map(o => this.renderBoardCard(o, col.color)).join('')}
+                </div>
+            </div>`;
+        }).join('');
+    },
+
+    renderBoardCard(order, statusColor) {
+        const ps = PAYMENT_STATUSES.find(s => s.key === (order.payment_status || 'not_sent')) || PAYMENT_STATUSES[0];
+        const margin = order.margin_percent_plan || 0;
+
+        // Deadline display
+        let deadlineHtml = '';
+        if (order.deadline_end || order.deadline_start || order.deadline) {
+            const d = order.deadline_end || order.deadline_start || order.deadline;
+            try {
+                const dt = new Date(d);
+                const isOverdue = dt < new Date() && order.status !== 'completed';
+                deadlineHtml = `<span style="font-size:10px;${isOverdue ? 'color:var(--red);font-weight:600' : 'color:var(--text-muted)'}">
+                    ${isOverdue ? '!' : ''}${dt.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })}
+                </span>`;
+            } catch {}
+        }
+
+        return `
+        <div class="order-board-card" draggable="true"
+             ondragstart="Orders.onBoardDragStart(event, ${order.id})"
+             onclick="App.navigate('order-detail', true, ${order.id})">
+            <div class="order-board-card-title">${this.escHtml(order.order_name || 'Без названия')}</div>
+            <div class="order-board-card-client">${this.escHtml(order.client_name || '')} ${order.manager_name ? '/ ' + this.escHtml(order.manager_name) : ''}</div>
+            <div class="order-board-card-footer">
+                <span class="badge badge-${ps.color}" style="font-size:9px">${ps.label}</span>
+                <span style="font-size:11px;font-weight:600;${margin >= 30 ? 'color:var(--green)' : 'color:var(--red)'}">${formatPercent(margin)}</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px">
+                <span style="font-size:11px;color:var(--text-muted)">${formatRub(order.total_revenue_plan || 0)}</span>
+                ${deadlineHtml}
+            </div>
+        </div>`;
+    },
+
+    // Drag & drop for board
+    onBoardDragStart(e, orderId) {
+        e.dataTransfer.setData('text/plain', orderId);
+        e.target.classList.add('dragging');
+    },
+
+    onBoardDragOver(e) {
+        e.preventDefault();
+        const col = e.currentTarget;
+        col.classList.add('drag-over');
+    },
+
+    onBoardDragLeave(e) {
+        e.currentTarget.classList.remove('drag-over');
+    },
+
+    async onBoardDrop(e, newStatus) {
+        e.preventDefault();
+        e.currentTarget.classList.remove('drag-over');
+
+        const orderId = parseInt(e.dataTransfer.getData('text/plain'));
+        const order = this.allOrders.find(o => o.id === orderId);
+        if (!order || order.status === newStatus) return;
+
+        const oldStatus = order.status;
+        const managerName = prompt('Имя менеджера (для истории изменений):');
+        if (managerName === null) return; // user cancelled
+
+        await updateOrderStatus(orderId, newStatus);
+        order.status = newStatus;
+
+        await this.addChangeRecord(orderId, {
+            field: 'status',
+            old_value: App.statusLabel(oldStatus),
+            new_value: App.statusLabel(newStatus),
+            manager: managerName || 'Неизвестный',
+        });
+
+        App.toast(`Статус: ${App.statusLabel(newStatus)}`);
+        this.renderBoard(this.allOrders);
+    },
+
+    shortRub(amount) {
+        if (amount >= 1000000) return (amount / 1000000).toFixed(1) + 'M';
+        if (amount >= 1000) return (amount / 1000).toFixed(0) + 'K';
+        return amount.toFixed(0);
+    },
+
+    // ==========================================
+    // STATUS CHANGE (table)
+    // ==========================================
 
     async onStatusChange(orderId, newStatus, oldStatus) {
         if (newStatus === oldStatus) return;

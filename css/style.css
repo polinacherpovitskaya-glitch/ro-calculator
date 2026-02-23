@@ -1324,3 +1324,205 @@ table .text-center { text-align: center; }
 /* Inline edit state */
 .od-editing { padding:0 !important; }
 .od-inline-input { font-family:inherit; }
+
+/* =============================================
+   GANTT PRODUCTION CALENDAR (v34)
+   ============================================= */
+
+.gantt-zoom-btn.active { background:var(--accent); color:#fff; border-color:var(--accent); }
+
+.gantt-wrapper {
+    display: flex;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--card-bg);
+    overflow: hidden;
+    box-shadow: var(--shadow);
+}
+
+.gantt-sidebar {
+    min-width: 200px;
+    max-width: 200px;
+    border-right: 2px solid var(--border);
+    flex-shrink: 0;
+    background: var(--bg);
+}
+
+.gantt-sidebar-header {
+    height: 36px;
+    display: flex;
+    align-items: center;
+    padding: 0 12px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    border-bottom: 1px solid var(--border);
+    background: var(--card-bg);
+}
+
+.gantt-sidebar-row {
+    height: 40px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 0 12px;
+    border-bottom: 1px solid var(--border);
+    overflow: hidden;
+    transition: background 0.1s;
+}
+.gantt-sidebar-row:hover { background: var(--accent-light); }
+.gantt-order-name { font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gantt-order-meta { font-size: 10px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.gantt-timeline {
+    flex: 1;
+    overflow-x: auto;
+    overflow-y: hidden;
+}
+
+.gantt-timeline-inner { position: relative; min-height: 100%; }
+
+.gantt-header {
+    height: 36px;
+    position: relative;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg);
+}
+
+.gantt-header-cell {
+    position: absolute;
+    top: 0;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text-muted);
+    border-right: 1px solid var(--border);
+    white-space: nowrap;
+}
+.gantt-weekend { background: #fef2f2; }
+
+.gantt-body { position: relative; }
+
+.gantt-row {
+    height: 40px;
+    position: relative;
+    border-bottom: 1px solid var(--border);
+}
+
+.gantt-bar {
+    position: absolute;
+    top: 6px;
+    height: 28px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    padding: 0 8px;
+    cursor: pointer;
+    transition: opacity 0.15s;
+    overflow: hidden;
+}
+.gantt-bar:hover { opacity: 0.85; }
+.gantt-bar-completed { opacity: 0.6; }
+
+.gantt-bar-text {
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.gantt-today-line {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: var(--red);
+    z-index: 5;
+    pointer-events: none;
+}
+.gantt-today-line::before {
+    content: 'Сегодня';
+    position: absolute;
+    top: -18px;
+    left: -20px;
+    font-size: 9px;
+    font-weight: 700;
+    color: var(--red);
+    white-space: nowrap;
+}
+
+@media (max-width: 768px) {
+    .gantt-sidebar { min-width: 140px; max-width: 140px; }
+}
+
+/* =============================================
+   ORDERS KANBAN BOARD (v35)
+   ============================================= */
+
+.orders-view-toggle { display: flex; gap: 0; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.orders-view-btn { padding: 6px 14px; font-size: 12px; font-weight: 600; cursor: pointer; background: var(--card-bg); color: var(--text-muted); border: none; transition: all 0.15s; }
+.orders-view-btn:not(:last-child) { border-right: 1px solid var(--border); }
+.orders-view-btn.active { background: var(--accent); color: #fff; }
+
+.orders-board {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    padding: 4px 0;
+}
+
+.orders-board-col {
+    background: var(--bg);
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    min-height: 200px;
+    padding: 0;
+    overflow: hidden;
+}
+
+.orders-board-col-header {
+    padding: 10px 14px;
+    font-size: 12px;
+    font-weight: 700;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 2px solid var(--border);
+    background: var(--card-bg);
+}
+
+.orders-board-col-body {
+    padding: 8px;
+    min-height: 150px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.order-board-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 12px;
+    cursor: grab;
+    transition: box-shadow 0.15s, transform 0.1s;
+}
+.order-board-card:hover { box-shadow: var(--shadow-lg); transform: translateY(-1px); }
+.order-board-card.dragging { opacity: 0.5; }
+.order-board-card-title { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+.order-board-card-client { font-size: 11px; color: var(--text-muted); margin-bottom: 6px; }
+.order-board-card-footer { display: flex; justify-content: space-between; align-items: center; font-size: 11px; }
+
+.orders-board-col.drag-over { background: var(--accent-light); border-color: var(--accent); }
+
+@media (max-width: 1024px) {
+    .orders-board { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 600px) {
+    .orders-board { grid-template-columns: 1fr; }
+}
