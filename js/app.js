@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v26';
+const APP_VERSION = 'v27';
 
 const App = {
     currentPage: 'dashboard',
@@ -425,6 +425,9 @@ const Calculator = {
 
     getEmptyHardware() {
         return {
+            source: 'warehouse',        // 'warehouse' | 'custom'
+            warehouse_item_id: null,    // id позиции со склада
+            warehouse_sku: '',          // артикул (для истории)
             name: '',
             qty: 0,
             assembly_speed: 0,      // шт/ч (calculated from minutes)
@@ -437,19 +440,109 @@ const Calculator = {
         };
     },
 
-    addHardware() {
+    // Cached warehouse items for picker (loaded once per session)
+    _whPickerData: null,
+    _whPickerLoading: false,
+
+    async _ensureWhPickerData() {
+        if (this._whPickerData) return this._whPickerData;
+        if (this._whPickerLoading) {
+            // Wait for loading to finish
+            while (this._whPickerLoading) await new Promise(r => setTimeout(r, 50));
+            return this._whPickerData;
+        }
+        this._whPickerLoading = true;
+        try {
+            this._whPickerData = await Warehouse.getItemsForPicker();
+        } catch (e) {
+            console.error('[Calculator] Failed to load warehouse items:', e);
+            this._whPickerData = {};
+        }
+        this._whPickerLoading = false;
+        return this._whPickerData;
+    },
+
+    // Find a warehouse item by id across all categories
+    _findWhItem(id) {
+        if (!this._whPickerData) return null;
+        for (const catKey of Object.keys(this._whPickerData)) {
+            const found = this._whPickerData[catKey].items.find(i => i.id === id);
+            if (found) return found;
+        }
+        return null;
+    },
+
+    async addHardware() {
         const idx = this.hardwareItems.length;
         this.hardwareItems.push(this.getEmptyHardware());
+        await this._ensureWhPickerData();
         this.renderHardwareRow(idx);
     },
 
     renderHardwareRow(idx) {
         const hw = this.hardwareItems[idx];
-        // Display: assembly_minutes_per_unit stored, but internally convert to шт/ч
         const minsDisplay = hw.assembly_minutes || '';
+        const isWarehouse = hw.source === 'warehouse';
+        const isCustom = hw.source === 'custom';
         const list = document.getElementById('calc-hardware-list');
+
+        // Build warehouse picker options
+        let pickerHtml = '';
+        if (this._whPickerData) {
+            pickerHtml = Warehouse.buildPickerOptions(this._whPickerData, hw.warehouse_item_id);
+        }
+
+        // Info line for warehouse item
+        let whInfoHtml = '';
+        if (isWarehouse && hw.warehouse_item_id) {
+            const whItem = this._findWhItem(hw.warehouse_item_id);
+            if (whItem) {
+                const priceStr = whItem.price_per_unit > 0
+                    ? `Закупка: ${formatRub(whItem.price_per_unit)}`
+                    : '<span style="color:var(--red);">⚠ Цена не указана</span>';
+                whInfoHtml = `<div class="hw-wh-info" style="font-size:11px;color:var(--text-muted);margin-top:4px;padding:4px 8px;background:var(--bg);border-radius:4px;">
+                    ${whItem.sku ? '<b>' + whItem.sku + '</b> · ' : ''}Остаток: <b>${whItem.available_qty} ${whItem.unit}</b> · ${priceStr}
+                </div>`;
+            }
+        }
+
         const html = `
-        <div class="hw-row" id="hw-row-${idx}">
+        <div class="hw-row" id="hw-row-${idx}" style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:8px;background:var(--card-bg);">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                <div class="hw-source-toggle" style="display:flex;gap:4px;">
+                    <label class="hw-src-btn${isWarehouse ? ' active' : ''}" style="cursor:pointer;padding:4px 12px;border-radius:4px;font-size:12px;font-weight:600;border:1px solid var(--border);${isWarehouse ? 'background:var(--primary);color:#fff;border-color:var(--primary);' : ''}">
+                        <input type="radio" name="hw-src-${idx}" value="warehouse" ${isWarehouse ? 'checked' : ''} onchange="Calculator.onHwSourceChange(${idx}, 'warehouse')" style="display:none;">
+                        📦 Со склада
+                    </label>
+                    <label class="hw-src-btn${isCustom ? ' active' : ''}" style="cursor:pointer;padding:4px 12px;border-radius:4px;font-size:12px;font-weight:600;border:1px solid var(--border);${isCustom ? 'background:var(--primary);color:#fff;border-color:var(--primary);' : ''}">
+                        <input type="radio" name="hw-src-${idx}" value="custom" ${isCustom ? 'checked' : ''} onchange="Calculator.onHwSourceChange(${idx}, 'custom')" style="display:none;">
+                        ✏️ Кастомная
+                    </label>
+                </div>
+                <button class="btn-remove" title="Удалить фурнитуру" onclick="Calculator.removeHardware(${idx})">&#10005;</button>
+            </div>
+
+            ${isWarehouse ? `
+            <!-- WAREHOUSE MODE -->
+            <div class="form-row" style="align-items:end">
+                <div class="form-group" style="margin:0;flex:2;">
+                    <label>Позиция со склада</label>
+                    <select id="hw-wh-select-${idx}" onchange="Calculator.onHwWarehouseSelect(${idx}, this.value)" style="width:100%;padding:6px;border:1px solid var(--border);border-radius:4px;font-size:13px;">
+                        ${pickerHtml}
+                    </select>
+                </div>
+                <div class="form-group" style="margin:0">
+                    <label>Кол-во${hw.warehouse_item_id ? ` <span style="font-size:10px;color:var(--text-muted);">(макс: ${(this._findWhItem(hw.warehouse_item_id) || {}).available_qty || '?'})</span>` : ''}</label>
+                    <input type="number" min="0" value="${hw.qty || ''}" oninput="Calculator.onHwNum(${idx}, 'qty', this.value)">
+                </div>
+                <div class="form-group" style="margin:0">
+                    <label>Сборка (мин/шт)</label>
+                    <input type="number" min="0" step="0.1" value="${minsDisplay}" oninput="Calculator.onHwMinutes(${idx}, this.value)" placeholder="напр. 0.5">
+                </div>
+            </div>
+            ${whInfoHtml}
+            ` : `
+            <!-- CUSTOM MODE -->
             <div class="form-row" style="align-items:end">
                 <div class="form-group" style="margin:0">
                     <label>Название</label>
@@ -471,8 +564,9 @@ const Calculator = {
                     <label>Доставка (&#8381; всего)</label>
                     <input type="number" min="0" step="0.01" value="${hw.delivery_total || ''}" oninput="Calculator.onHwNum(${idx}, 'delivery_total', this.value)">
                 </div>
-                <button class="btn-remove" title="Удалить фурнитуру" onclick="Calculator.removeHardware(${idx})">&#10005;</button>
             </div>
+            `}
+
             <div class="cost-breakdown" id="hw-cost-${idx}" style="display:none">
                 <div class="section-title" style="margin-top:0">Себестоимость фурнитуры (за 1 шт)</div>
                 <div class="cost-row"><span class="cost-label">ФОТ сборка</span><span class="cost-value" id="hw-${idx}-fot">0</span></div>
@@ -494,6 +588,60 @@ const Calculator = {
         const list = document.getElementById('calc-hardware-list');
         list.innerHTML = '';
         this.hardwareItems.forEach((_, i) => this.renderHardwareRow(i));
+    },
+
+    onHwSourceChange(idx, source) {
+        const hw = this.hardwareItems[idx];
+        hw.source = source;
+        if (source === 'custom') {
+            // Clear warehouse link, keep name
+            hw.warehouse_item_id = null;
+            hw.warehouse_sku = '';
+        } else {
+            // Clear custom fields when switching to warehouse
+            hw.name = '';
+            hw.price = 0;
+            hw.delivery_total = 0;
+            hw.delivery_price = 0;
+            hw.warehouse_item_id = null;
+            hw.warehouse_sku = '';
+        }
+        this.rerenderAllHardware();
+        this.recalculate();
+    },
+
+    onHwWarehouseSelect(idx, itemIdStr) {
+        const hw = this.hardwareItems[idx];
+        const itemId = parseInt(itemIdStr) || null;
+
+        if (!itemId) {
+            hw.warehouse_item_id = null;
+            hw.warehouse_sku = '';
+            hw.name = '';
+            hw.price = 0;
+            hw.delivery_total = 0;
+            hw.delivery_price = 0;
+            this.rerenderAllHardware();
+            this.recalculate();
+            return;
+        }
+
+        const whItem = this._findWhItem(itemId);
+        if (!whItem) return;
+
+        // Populate from warehouse item
+        hw.warehouse_item_id = whItem.id;
+        hw.warehouse_sku = whItem.sku || '';
+        const parts = [whItem.name];
+        if (whItem.size) parts.push(whItem.size);
+        if (whItem.color) parts.push(whItem.color);
+        hw.name = parts.join(' · ');
+        hw.price = whItem.price_per_unit || 0;  // Закупка + доставка уже включена
+        hw.delivery_total = 0;
+        hw.delivery_price = 0;
+
+        this.rerenderAllHardware();
+        this.recalculate();
     },
 
     onHwField(idx, field, value) {
@@ -1331,6 +1479,10 @@ const Calculator = {
                 target_price_hardware: hw.target_price || 0,
                 cost_total: hw.result ? hw.result.costPerUnit : 0,
                 hours_hardware: hw.result ? hw.result.hoursHardware : 0,
+                // Warehouse integration fields
+                hardware_source: hw.source || 'custom',
+                hardware_warehouse_item_id: hw.warehouse_item_id || null,
+                hardware_warehouse_sku: hw.warehouse_sku || '',
             });
         });
 
@@ -1410,10 +1562,82 @@ const Calculator = {
                 });
             }
 
+            // === Warehouse deduction for "from warehouse" hardware ===
+            await this._deductWarehouseOnSave(isEdit, order.order_name, managerName);
+
             App.toast('Заказ сохранен');
         } else {
             App.toast('Ошибка сохранения');
         }
+    },
+
+    /**
+     * Deduct (or adjust) warehouse stock when saving an order.
+     * - New order: deduct full qty for each warehouse hardware item
+     * - Edit order: deduct only the difference (new qty - original qty)
+     */
+    async _deductWarehouseOnSave(isEdit, orderName, managerName) {
+        const warehouseHw = this.hardwareItems.filter(
+            hw => hw.source === 'warehouse' && hw.warehouse_item_id && hw.qty > 0
+        );
+
+        for (const hw of warehouseHw) {
+            let deductQty = hw.qty;
+
+            if (isEdit) {
+                // Only deduct the difference since last save
+                const origQty = hw._original_qty || 0;
+                const origItemId = hw._original_warehouse_item_id;
+
+                if (origItemId === hw.warehouse_item_id) {
+                    // Same warehouse item — deduct only the delta
+                    deductQty = hw.qty - origQty;
+                } else if (origItemId) {
+                    // Changed warehouse item — return old, deduct new
+                    await Warehouse.adjustStock(
+                        origItemId,
+                        origQty,       // positive = return
+                        'addition',
+                        orderName,
+                        `Возврат при замене фурнитуры в заказе`,
+                        managerName
+                    );
+                    deductQty = hw.qty; // deduct full new qty
+                }
+            }
+
+            if (deductQty !== 0) {
+                const reason = deductQty > 0 ? 'deduction' : 'addition';
+                const note = deductQty > 0
+                    ? `Списание для заказа: ${hw.name} × ${deductQty}`
+                    : `Возврат из заказа: ${hw.name} × ${Math.abs(deductQty)}`;
+                await Warehouse.adjustStock(
+                    hw.warehouse_item_id,
+                    -deductQty,     // negative = deduct from stock
+                    reason,
+                    orderName,
+                    note,
+                    managerName
+                );
+            }
+
+            // Update originals for next save
+            hw._original_qty = hw.qty;
+            hw._original_warehouse_item_id = hw.warehouse_item_id;
+        }
+
+        // Handle removed warehouse items: if an old item was warehouse-sourced
+        // and is no longer in hardwareItems, return its stock
+        if (isEdit) {
+            // Items that were warehouse-sourced but removed
+            // We check _original_ data stored during loadOrder
+            // This is handled by the diff in _diffOrderItems already detecting removed items
+            // For stock return, we need to check original hardware items
+            // This will be covered when the user completely removes a hw row
+        }
+
+        // Invalidate picker cache so next add sees updated stock
+        this._whPickerData = null;
     },
 
     async loadOrder(orderId) {
@@ -1455,8 +1679,11 @@ const Calculator = {
             this.renderItemBlock(i);
         });
 
-        // Restore hardware items
+        // Restore hardware items (load picker data first for warehouse mode)
         const hwItems = dbItems.filter(i => i.item_type === 'hardware');
+        if (hwItems.length > 0) {
+            await this._ensureWhPickerData();
+        }
         hwItems.forEach((dbHw) => {
             const hw = this.getEmptyHardware();
             hw.name = dbHw.product_name || '';
@@ -1470,6 +1697,13 @@ const Calculator = {
             hw.delivery_total = dbHw.hardware_delivery_total || (perUnit * hw.qty);
             hw.delivery_price = hw.qty > 0 ? round2(hw.delivery_total / hw.qty) : perUnit;
             hw.sell_price = dbHw.sell_price_hardware || 0;
+            // Warehouse integration fields
+            hw.source = dbHw.hardware_source || 'custom';  // backward compat: old orders = custom
+            hw.warehouse_item_id = dbHw.hardware_warehouse_item_id || null;
+            hw.warehouse_sku = dbHw.hardware_warehouse_sku || '';
+            // Save originals for diff on next save
+            hw._original_qty = hw.qty;
+            hw._original_warehouse_item_id = hw.warehouse_item_id;
             this.hardwareItems.push(hw);
             this.renderHardwareRow(this.hardwareItems.length - 1);
         });

@@ -989,4 +989,75 @@ const Warehouse = {
         if (!str) return '';
         return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     },
+
+    // ==========================================
+    // PICKER FOR CALCULATOR INTEGRATION
+    // ==========================================
+
+    /**
+     * Returns warehouse items grouped by category for the hardware picker dropdown.
+     * Used by Calculator when adding hardware "from warehouse".
+     */
+    async getItemsForPicker() {
+        const items = await loadWarehouseItems();
+        const reservations = await loadWarehouseReservations();
+
+        // Calculate available qty
+        items.forEach(item => {
+            const activeRes = reservations.filter(r => r.item_id === item.id && r.status === 'active');
+            const reservedQty = activeRes.reduce((s, r) => s + (r.qty || 0), 0);
+            item.available_qty = Math.max(0, (item.qty || 0) - reservedQty);
+        });
+
+        // Group by category
+        const grouped = {};
+        WAREHOUSE_CATEGORIES.forEach(cat => {
+            const catItems = items
+                .filter(i => i.category === cat.key)
+                .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ru'));
+            if (catItems.length > 0) {
+                grouped[cat.key] = {
+                    label: cat.label,
+                    icon: cat.icon,
+                    items: catItems.map(i => ({
+                        id: i.id,
+                        category: i.category,
+                        name: i.name || '',
+                        sku: i.sku || '',
+                        size: i.size || '',
+                        color: i.color || '',
+                        qty: i.qty || 0,
+                        available_qty: i.available_qty || 0,
+                        price_per_unit: i.price_per_unit || 0,
+                        unit: i.unit || 'шт',
+                    })),
+                };
+            }
+        });
+        return grouped;
+    },
+
+    /**
+     * Build <optgroup> HTML for a <select> picker.
+     * @param {Object} grouped — result of getItemsForPicker()
+     * @param {number|null} selectedId — currently selected item id
+     */
+    buildPickerOptions(grouped, selectedId) {
+        let html = '<option value="">— Выберите позицию —</option>';
+        for (const catKey of Object.keys(grouped)) {
+            const g = grouped[catKey];
+            html += `<optgroup label="${g.icon} ${g.label}">`;
+            g.items.forEach(item => {
+                const parts = [item.name];
+                if (item.size) parts.push(item.size);
+                if (item.color) parts.push(item.color);
+                const label = parts.join(' · ');
+                const stock = item.available_qty > 0 ? `(${item.available_qty} ${item.unit})` : '(нет)';
+                const sel = item.id === selectedId ? ' selected' : '';
+                html += `<option value="${item.id}"${sel}>${label} ${stock}</option>`;
+            });
+            html += '</optgroup>';
+        }
+        return html;
+    },
 };
