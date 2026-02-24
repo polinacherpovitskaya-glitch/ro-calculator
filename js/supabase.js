@@ -251,9 +251,14 @@ async function saveOrder(order, items) {
         // Upsert order
         let orderId = order.id;
         if (orderId) {
+            // Remove undefined values to avoid overwriting existing fields
+            const updateData = { updated_at: new Date().toISOString() };
+            for (const [key, val] of Object.entries(order)) {
+                if (val !== undefined && key !== 'id') updateData[key] = val;
+            }
             const { error } = await supabaseClient
                 .from('orders')
-                .update({ ...order, updated_at: new Date().toISOString() })
+                .update(updateData)
                 .eq('id', orderId);
             if (error) { console.error('updateOrder error:', error); return null; }
         } else {
@@ -280,7 +285,16 @@ async function saveOrder(order, items) {
         let orderId = order.id;
         if (orderId) {
             const idx = orders.findIndex(o => o.id === orderId);
-            if (idx >= 0) orders[idx] = { ...order, updated_at: new Date().toISOString() };
+            if (idx >= 0) {
+                // Merge: keep existing fields, overwrite with new values (skip undefined)
+                const existing = orders[idx];
+                const merged = { ...existing };
+                for (const [key, val] of Object.entries(order)) {
+                    if (val !== undefined) merged[key] = val;
+                }
+                merged.updated_at = new Date().toISOString();
+                orders[idx] = merged;
+            }
         } else {
             orderId = Date.now();
             orders.push({ ...order, id: orderId, created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
@@ -311,6 +325,13 @@ async function loadOrders(filters = {}) {
         return data;
     }
     let orders = getLocal(LOCAL_KEYS.orders) || [];
+    // Fix orders with missing status (bug from v40e autosave)
+    let needsSave = false;
+    orders.forEach(o => {
+        if (!o.status) { o.status = 'draft'; needsSave = true; }
+    });
+    if (needsSave) setLocal(LOCAL_KEYS.orders, orders);
+
     if (filters.status) {
         orders = orders.filter(o => o.status === filters.status);
     } else {

@@ -1,13 +1,14 @@
 // =============================================
-// Recycle Object — Dashboard Page
+// Recycle Object — Dashboard (Main Page)
+// v40f: KPI stats + drafts cards + active orders
 // =============================================
 
 const Dashboard = {
     async load() {
         try {
-            const orders = await loadOrders({ limit: 10 });
+            const orders = await loadOrders({ limit: 50 });
             this.renderStats(orders);
-            this.renderTable(orders);
+            this.renderSections(orders);
         } catch (e) {
             console.error('Dashboard load error:', e);
         }
@@ -17,7 +18,6 @@ const Dashboard = {
         const active = orders.filter(o => o.status === 'in_production' || o.status === 'calculated');
         document.getElementById('dash-orders-active').textContent = active.length;
 
-        // Calculate total load from active orders
         let totalPlasticHours = 0;
         let totalPackagingHours = 0;
         let totalRevenue = 0;
@@ -27,7 +27,9 @@ const Dashboard = {
                 totalPlasticHours += o.production_hours_plastic || 0;
                 totalPackagingHours += (o.production_hours_packaging || 0) + (o.production_hours_hardware || 0);
             }
-            totalRevenue += o.total_revenue_plan || 0;
+            if (o.status !== 'cancelled') {
+                totalRevenue += o.total_revenue_plan || 0;
+            }
         });
 
         const params = App.params;
@@ -52,27 +54,65 @@ const Dashboard = {
         bar.className = 'load-bar-fill ' + (percent > 90 ? 'red' : percent > 70 ? 'yellow' : 'green');
     },
 
-    renderTable(orders) {
-        const tbody = document.getElementById('dashboard-orders-table');
-        if (orders.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="6" class="empty-state">
-                <div class="empty-icon">&#9998;</div>
-                <p>Нет расчетов. Создайте первый заказ.</p>
-                <button class="btn btn-primary" onclick="App.navigate('calculator')">Новый расчет</button>
-            </td></tr>`;
-            return;
+    renderSections(orders) {
+        const drafts = orders.filter(o => o.status === 'draft');
+        const active = orders.filter(o => o.status === 'calculated' || o.status === 'in_production');
+
+        const draftsSection = document.getElementById('dash-drafts-section');
+        const activeSection = document.getElementById('dash-active-section');
+        const emptyState = document.getElementById('dash-empty-state');
+
+        // Drafts
+        if (drafts.length > 0) {
+            draftsSection.style.display = '';
+            document.getElementById('dash-drafts-list').innerHTML =
+                drafts.slice(0, 6).map(o => this.renderCard(o, '#6b7280')).join('')
+                + (drafts.length > 6 ? `<div class="dash-card dash-card-more" onclick="App.navigate('orders')"><span>+${drafts.length - 6} ещё</span></div>` : '');
+        } else {
+            draftsSection.style.display = 'none';
         }
 
-        tbody.innerHTML = orders.slice(0, 5).map(o => `
-            <tr style="cursor:pointer" onclick="Calculator.loadOrder(${o.id})">
-                <td><strong>${this.escHtml(o.order_name)}</strong></td>
-                <td>${this.escHtml(o.client_name || '—')}</td>
-                <td><span class="status-dot ${o.status}"></span>${App.statusLabel(o.status)}</td>
-                <td class="text-right">${formatRub(o.total_revenue_plan || 0)}</td>
-                <td class="text-right ${(o.margin_percent_plan || 0) >= 30 ? 'text-green' : 'text-red'}">${formatPercent(o.margin_percent_plan || 0)}</td>
-                <td>${App.formatDate(o.created_at)}</td>
-            </tr>
-        `).join('');
+        // Active orders
+        if (active.length > 0) {
+            activeSection.style.display = '';
+            document.getElementById('dash-active-list').innerHTML =
+                active.slice(0, 6).map(o => this.renderCard(o, o.status === 'in_production' ? '#f59e0b' : '#2563eb')).join('')
+                + (active.length > 6 ? `<div class="dash-card dash-card-more" onclick="App.navigate('orders')"><span>+${active.length - 6} ещё</span></div>` : '');
+        } else {
+            activeSection.style.display = 'none';
+        }
+
+        // Empty state
+        emptyState.style.display = (drafts.length === 0 && active.length === 0) ? '' : 'none';
+    },
+
+    renderCard(order, statusColor) {
+        const margin = order.margin_percent_plan || 0;
+        const revenue = order.total_revenue_plan || 0;
+        const statusLabel = App.statusLabel(order.status);
+        const dateStr = this.shortDate(order.updated_at || order.created_at);
+
+        return `
+        <div class="dash-card" onclick="Calculator.loadOrder(${order.id})" title="Открыть в калькуляторе">
+            <div class="dash-card-header">
+                <span class="dash-card-status" style="background:${statusColor}">${statusLabel}</span>
+                <span class="dash-card-date">${dateStr}</span>
+            </div>
+            <div class="dash-card-title">${this.escHtml(order.order_name || 'Без названия')}</div>
+            <div class="dash-card-client">${this.escHtml(order.client_name || '')}</div>
+            <div class="dash-card-footer">
+                <span class="dash-card-revenue">${formatRub(revenue)}</span>
+                <span class="dash-card-margin ${margin >= 30 ? 'text-green' : 'text-red'}">${formatPercent(margin)}</span>
+            </div>
+        </div>`;
+    },
+
+    shortDate(dateStr) {
+        if (!dateStr) return '';
+        try {
+            const d = new Date(dateStr);
+            return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
+        } catch (e) { return ''; }
     },
 
     escHtml(str) {

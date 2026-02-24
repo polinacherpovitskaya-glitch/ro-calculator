@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v40';
+const APP_VERSION = 'v40f';
 
 const App = {
     currentPage: 'dashboard',
@@ -179,6 +179,7 @@ const Calculator = {
     _autosaveTimer: null,
     _isDirty: false,
     _autosaving: false,
+    _currentOrderStatus: 'draft', // Track current order status to preserve on autosave
 
     async init() {
         // Ensure colors are loaded for color picker
@@ -243,6 +244,7 @@ const Calculator = {
         this._autosaving = false;
 
         App.editingOrderId = null;
+        this._currentOrderStatus = 'draft';
         localStorage.removeItem('ro_calc_editing_order_id');
         document.getElementById('calc-order-name').value = '';
         document.getElementById('calc-client-name').value = '';
@@ -1970,7 +1972,7 @@ const Calculator = {
                 notes: document.getElementById('calc-notes').value.trim(),
                 plastic_type: 'PP',
                 print_type: null,
-                status: App.editingOrderId ? undefined : 'draft', // keep existing status on edit, draft for new
+                status: 'draft', // autosave always writes 'draft' for new; existing orders get their status preserved below
                 total_revenue_plan: summary.totalRevenue,
                 total_cost_plan: summary.totalRevenue - summary.totalEarned,
                 total_margin_plan: summary.totalEarned,
@@ -1982,9 +1984,10 @@ const Calculator = {
                 production_load_percent: load.plasticLoadPercent,
             };
 
-            // If editing existing order, preserve its current status
+            // If editing existing order, preserve its current status (don't overwrite 'calculated'/'in_production' etc.)
             if (App.editingOrderId) {
-                delete order.status; // don't overwrite status on autosave of existing order
+                // Read current status from stored orders to preserve it
+                order.status = this._currentOrderStatus || 'draft';
             }
 
             // Collect items (same logic as saveOrder but without qty filter for drafts)
@@ -2282,6 +2285,7 @@ const Calculator = {
 
         this.resetForm();
         App.editingOrderId = orderId;
+        this._currentOrderStatus = data.order.status || 'draft'; // Preserve order status for autosave
         localStorage.setItem('ro_calc_editing_order_id', String(orderId));
 
         const { order, items: dbItems } = data;

@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=40e">
+    <link rel="stylesheet" href="css/style.css?v=40f">
 </head>
 <body>
 
@@ -37,8 +37,8 @@
         </div>
         <nav class="sidebar-nav">
             <a href="#dashboard" data-page="dashboard">
-                <span class="nav-icon">&#9632;</span>
-                <span>Дашборд</span>
+                <span class="nav-icon">&#127968;</span>
+                <span>Главная</span>
             </a>
             <a href="#calculator" data-page="calculator">
                 <span class="nav-icon">&#9998;</span>
@@ -101,10 +101,11 @@
         <!-- ========== DASHBOARD ========== -->
         <div id="page-dashboard" class="page">
             <div class="page-header">
-                <h1>Дашборд</h1>
+                <h1>&#127968; Главная</h1>
                 <button class="btn btn-primary" onclick="App.navigate('calculator')">+ Новый расчет</button>
             </div>
 
+            <!-- KPI Stats -->
             <div class="stats-grid" id="dashboard-stats">
                 <div class="stat-card">
                     <div class="stat-label">Заказов в работе</div>
@@ -126,27 +127,29 @@
                 </div>
             </div>
 
-            <div class="card">
-                <div class="card-header">
-                    <h3>Последние расчеты</h3>
-                    <a href="#orders" class="btn btn-sm btn-outline" onclick="App.navigate('orders')">Все заказы</a>
+            <!-- Drafts Section -->
+            <div id="dash-drafts-section" style="display:none">
+                <div class="card-header" style="padding:12px 0 8px">
+                    <h3 style="margin:0;font-size:15px;color:var(--text-muted)">&#9998; Черновики</h3>
                 </div>
-                <div class="table-wrap">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Заказ</th>
-                                <th>Клиент</th>
-                                <th>Статус</th>
-                                <th class="text-right">Выручка</th>
-                                <th class="text-right">Маржа</th>
-                                <th>Дата</th>
-                            </tr>
-                        </thead>
-                        <tbody id="dashboard-orders-table">
-                            <tr><td colspan="6" class="text-center text-muted">Загрузка...</td></tr>
-                        </tbody>
-                    </table>
+                <div id="dash-drafts-list" class="dash-cards-row"></div>
+            </div>
+
+            <!-- Active Orders Section -->
+            <div id="dash-active-section" style="display:none">
+                <div class="card-header" style="padding:12px 0 8px">
+                    <h3 style="margin:0;font-size:15px;color:var(--text-muted)">&#128230; В работе</h3>
+                    <a href="#orders" class="btn btn-sm btn-outline" onclick="App.navigate('orders')">Все заказы &#8594;</a>
+                </div>
+                <div id="dash-active-list" class="dash-cards-row"></div>
+            </div>
+
+            <!-- Empty state -->
+            <div id="dash-empty-state" class="card" style="display:none">
+                <div class="empty-state">
+                    <div class="empty-icon">&#9998;</div>
+                    <p>Нет расчетов. Создайте первый заказ.</p>
+                    <button class="btn btn-primary" onclick="App.navigate('calculator')">Новый расчет</button>
                 </div>
             </div>
         </div>
@@ -2022,24 +2025,24 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="js/supabase.js?v=40e"></script>
-<script src="js/calculator.js?v=40e"></script>
-<script src="js/app.js?v=40e"></script>
-<script src="js/dashboard.js?v=40e"></script>
-<script src="js/order-detail.js?v=40e"></script>
-<script src="js/orders.js?v=40e"></script>
-<script src="js/analytics.js?v=40e"></script>
-<script src="js/molds.js?v=40e"></script>
-<script src="js/colors.js?v=40e"></script>
-<script src="js/kp.js?v=40e"></script>
-<script src="js/timetrack.js?v=40e"></script>
-<script src="js/tasks.js?v=40e"></script>
-<script src="js/gantt.js?v=40e"></script>
-<script src="js/import.js?v=40e"></script>
-<script src="js/factual.js?v=40e"></script>
-<script src="js/china.js?v=40e"></script>
-<script src="js/warehouse_photos.js?v=40e"></script>
-<script src="js/warehouse.js?v=40e"></script>
-<script src="js/settings.js?v=40e"></script>
+<script src="js/supabase.js?v=40f"></script>
+<script src="js/calculator.js?v=40f"></script>
+<script src="js/app.js?v=40f"></script>
+<script src="js/dashboard.js?v=40f"></script>
+<script src="js/order-detail.js?v=40f"></script>
+<script src="js/orders.js?v=40f"></script>
+<script src="js/analytics.js?v=40f"></script>
+<script src="js/molds.js?v=40f"></script>
+<script src="js/colors.js?v=40f"></script>
+<script src="js/kp.js?v=40f"></script>
+<script src="js/timetrack.js?v=40f"></script>
+<script src="js/tasks.js?v=40f"></script>
+<script src="js/gantt.js?v=40f"></script>
+<script src="js/import.js?v=40f"></script>
+<script src="js/factual.js?v=40f"></script>
+<script src="js/china.js?v=40f"></script>
+<script src="js/warehouse_photos.js?v=40f"></script>
+<script src="js/warehouse.js?v=40f"></script>
+<script src="js/settings.js?v=40f"></script>
 </body>
 </html>
