@@ -278,9 +278,10 @@ const Calculator = {
             builtin_hw_price: 0,
             builtin_hw_delivery_total: 0,
             builtin_hw_speed: 0,
-            // Color
-            color_id: null,
-            color_name: '',
+            // Colors (multiple per item)
+            colors: [],  // [{id, name}, ...]
+            color_id: null,   // backward compat (first color)
+            color_name: '',   // backward compat (first color)
             // Sell prices
             sell_price_item: 0,
             sell_price_printing: 0,
@@ -342,45 +343,64 @@ const Calculator = {
             printingsHtml += this.renderPrintingRow(idx, pi, pr);
         });
 
-        // Build color picker
+        // Build multi-color picker
         let colorPickerHtml = '';
         try {
-            const colors = Colors.data || [];
-            if (colors.length > 0) {
-                const selectedColor = colors.find(c => c.id == item.color_id);
-                const selectedColorHtml = selectedColor
-                    ? `<div style="display:flex;gap:8px;align-items:center;">
-                        ${selectedColor.photo_url ? `<img src="${this._escAttr(selectedColor.photo_url)}" style="width:32px;height:32px;object-fit:cover;border-radius:50%;border:1px solid var(--border)">` : `<span style="width:32px;height:32px;display:flex;align-items:center;justify-content:center;background:var(--accent-light);border-radius:50%;font-size:12px;font-weight:700;color:var(--accent)">${(selectedColor.name || '?')[0]}</span>`}
-                        <div><span style="font-size:11px;color:var(--text-muted)">${this._esc(selectedColor.number)}</span> <span style="font-weight:600;font-size:13px">${this._esc(selectedColor.name)}</span></div>
-                       </div>`
-                    : '<span style="color:var(--text-muted);font-size:13px">-- Выбрать цвет --</span>';
+            const allColors = Colors.data || [];
+            if (allColors.length > 0) {
+                // Migrate old single color_id to colors array
+                if (!item.colors) item.colors = [];
+                if (item.colors.length === 0 && item.color_id) {
+                    const oldC = allColors.find(c => c.id == item.color_id);
+                    if (oldC) item.colors = [{ id: oldC.id, name: oldC.name }];
+                }
 
-                const colorItemsHtml = colors.map(c => {
+                // Render selected color chips
+                const selectedIds = new Set(item.colors.map(c => c.id));
+                let chipsHtml = '';
+                if (item.colors.length > 0) {
+                    chipsHtml = item.colors.map(sc => {
+                        const full = allColors.find(c => c.id === sc.id);
+                        const photo = full?.photo_url
+                            ? `<img src="${this._escAttr(full.photo_url)}" style="width:24px;height:24px;object-fit:cover;border-radius:50%;border:1px solid var(--border)">`
+                            : `<span style="width:24px;height:24px;display:flex;align-items:center;justify-content:center;background:var(--accent-light);border-radius:50%;font-size:10px;font-weight:700;color:var(--accent)">${(sc.name||'?')[0]}</span>`;
+                        return `<span class="color-chip" style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px 3px 4px;background:var(--accent-light);border-radius:16px;font-size:11px;font-weight:600;white-space:nowrap">
+                            ${photo}
+                            <span>${this._esc(full?.number || '')} ${this._esc(sc.name)}</span>
+                            <span onclick="event.stopPropagation();Calculator.removeColor(${idx},${sc.id})" style="cursor:pointer;color:var(--text-muted);font-size:13px;margin-left:2px;line-height:1" title="Убрать">&times;</span>
+                        </span>`;
+                    }).join('');
+                }
+
+                // Color dropdown items (mark already-selected)
+                const colorItemsHtml = allColors.map(c => {
                     const photo = c.photo_url
                         ? `<img src="${this._escAttr(c.photo_url)}" style="width:36px;height:36px;object-fit:cover;border-radius:50%;border:1px solid var(--border);flex-shrink:0">`
                         : `<span style="width:36px;height:36px;display:flex;align-items:center;justify-content:center;background:var(--accent-light);border-radius:50%;font-size:14px;font-weight:700;color:var(--accent);flex-shrink:0">${(c.name || '?')[0]}</span>`;
-                    const isSelected = item.color_id == c.id;
-                    return `<div class="color-picker-item ${isSelected ? 'selected' : ''}" onclick="Calculator.onColorSelect(${idx}, ${c.id})" style="display:flex;gap:8px;align-items:center;padding:5px 8px;cursor:pointer;border-radius:6px;${isSelected ? 'background:var(--accent-light)' : ''}">
+                    const isSel = selectedIds.has(c.id);
+                    return `<div class="color-picker-item ${isSel ? 'selected' : ''}" onclick="Calculator.onColorSelect(${idx}, ${c.id})" style="display:flex;gap:8px;align-items:center;padding:5px 8px;cursor:pointer;border-radius:6px;${isSel ? 'background:var(--accent-light)' : ''}">
                         ${photo}
                         <div style="flex:1;min-width:0">
                             <span style="font-size:11px;color:var(--text-muted)">${this._esc(c.number)}</span>
                             <span style="font-size:12px;font-weight:600">${this._esc(c.name)}</span>
                         </div>
+                        ${isSel ? '<span style="color:var(--accent);font-size:14px;flex-shrink:0">&#10003;</span>' : ''}
                     </div>`;
                 }).join('');
 
                 colorPickerHtml = `
                 <div class="form-group" style="position:relative">
                     <label>Цветовое решение</label>
+                    <div id="color-chips-${idx}" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px">${chipsHtml}</div>
                     <div class="color-picker" id="color-picker-${idx}">
                         <div class="color-picker-selected" onclick="Calculator.toggleColorPicker(${idx})" style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius);cursor:pointer;background:var(--card-bg)">
-                            ${selectedColorHtml}
+                            <span style="color:var(--accent);font-size:13px;font-weight:600">+ Добавить цвет</span>
                             <span style="flex-shrink:0;color:var(--text-muted);font-size:10px;margin-left:8px">&#9662;</span>
                         </div>
                         <div class="color-picker-dropdown" id="color-picker-dd-${idx}" style="display:none;position:absolute;z-index:100;background:var(--card-bg);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow-lg);max-height:280px;overflow:hidden;width:100%">
                             <div style="padding:6px 8px;border-bottom:1px solid var(--border);display:flex;gap:4px">
                                 <input type="text" placeholder="Поиск цвета..." oninput="Calculator.filterColorPicker(${idx}, this.value)" style="flex:1;padding:5px 8px;border:1px solid var(--border);border-radius:4px;font-size:12px">
-                                <button class="btn btn-sm btn-outline" onclick="Calculator.clearColor(${idx})" title="Убрать цвет" style="padding:4px 8px;font-size:10px;">&#10005;</button>
+                                <button class="btn btn-sm btn-outline" onclick="Calculator.clearColors(${idx})" title="Убрать все" style="padding:4px 8px;font-size:10px;">&#10005; Все</button>
                             </div>
                             <div class="color-picker-list" id="color-picker-list-${idx}" style="max-height:220px;overflow-y:auto;padding:4px">${colorItemsHtml}</div>
                         </div>
@@ -1126,24 +1146,50 @@ const Calculator = {
     },
 
     onColorSelect(idx, colorId) {
-        const colors = Colors.data || [];
-        const color = colors.find(c => c.id === colorId);
-        if (color) {
-            this.items[idx].color_id = color.id;
-            this.items[idx].color_name = color.name;
+        const allColors = Colors.data || [];
+        const color = allColors.find(c => c.id === colorId);
+        if (!color) return;
+        if (!this.items[idx].colors) this.items[idx].colors = [];
+
+        // Toggle: if already selected, remove it; otherwise add it
+        const existing = this.items[idx].colors.findIndex(c => c.id === colorId);
+        if (existing >= 0) {
+            this.items[idx].colors.splice(existing, 1);
+        } else {
+            this.items[idx].colors.push({ id: color.id, name: color.name });
         }
-        // Close dropdown and re-render
+        // Sync backward-compat fields (first color)
+        this._syncColorCompat(idx);
+        this.renderItemBlock(idx);
+        this.scheduleAutosave();
+    },
+
+    removeColor(idx, colorId) {
+        if (!this.items[idx].colors) return;
+        this.items[idx].colors = this.items[idx].colors.filter(c => c.id !== colorId);
+        this._syncColorCompat(idx);
+        this.renderItemBlock(idx);
+        this.scheduleAutosave();
+    },
+
+    clearColors(idx) {
+        this.items[idx].colors = [];
+        this._syncColorCompat(idx);
         document.querySelectorAll('.color-picker-dropdown').forEach(d => d.style.display = 'none');
         this.renderItemBlock(idx);
         this.scheduleAutosave();
     },
 
-    clearColor(idx) {
-        this.items[idx].color_id = null;
-        this.items[idx].color_name = '';
-        document.querySelectorAll('.color-picker-dropdown').forEach(d => d.style.display = 'none');
-        this.renderItemBlock(idx);
-        this.scheduleAutosave();
+    _syncColorCompat(idx) {
+        // Keep color_id/color_name in sync with first color for backward compat
+        const item = this.items[idx];
+        if (item.colors && item.colors.length > 0) {
+            item.color_id = item.colors[0].id;
+            item.color_name = item.colors[0].name;
+        } else {
+            item.color_id = null;
+            item.color_name = '';
+        }
     },
 
     filterColorPicker(idx, query) {
@@ -1975,6 +2021,7 @@ const Calculator = {
                 template_id: item.template_id,
                 color_id: item.color_id || null,
                 color_name: item.color_name || '',
+                colors: JSON.stringify(item.colors || []),
             });
         });
 
@@ -2232,6 +2279,17 @@ const Calculator = {
             // Migrate old single-printing to new format
             if (item.printings.length === 0 && dbItem.printing_qty > 0) {
                 item.printings = [{ name: '', qty: dbItem.printing_qty, price: dbItem.printing_price_per_unit || 0 }];
+            }
+            // Parse colors from JSON
+            if (typeof item.colors === 'string') {
+                try { item.colors = JSON.parse(item.colors); } catch (e) { item.colors = []; }
+            }
+            if (!Array.isArray(item.colors)) item.colors = [];
+            // Migrate old single color_id to colors array
+            if (item.colors.length === 0 && item.color_id) {
+                const allC = Colors.data || [];
+                const oldC = allC.find(c => c.id == item.color_id);
+                if (oldC) item.colors = [{ id: oldC.id, name: oldC.name }];
             }
             // Re-derive built-in hardware from template (not stored in DB)
             if (item.template_id && App.templates) {
