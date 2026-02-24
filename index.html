@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=39">
+    <link rel="stylesheet" href="css/style.css?v=40">
 </head>
 <body>
 
@@ -154,11 +154,14 @@
         <!-- ========== CALCULATOR ========== -->
         <div id="page-calculator" class="page">
             <div class="page-header">
-                <h1>Калькулятор заказа</h1>
+                <div>
+                    <h1>Калькулятор заказа</h1>
+                    <span id="calc-autosave-status" style="font-size:11px;color:var(--text-muted);margin-top:2px;display:block;"></span>
+                </div>
                 <div class="flex gap-8">
                     <button class="btn btn-outline" onclick="Calculator.generateKP()">&#128196; Скачать КП</button>
                     <button class="btn btn-outline" onclick="Calculator.resetForm()">Сбросить</button>
-                    <button class="btn btn-success" onclick="Calculator.saveOrder()">Сохранить заказ</button>
+                    <button class="btn btn-success" onclick="Calculator.saveOrder()">Сохранить и рассчитать</button>
                 </div>
             </div>
 
@@ -167,15 +170,15 @@
                 <div class="form-row">
                     <div class="form-group">
                         <label>Название заказа</label>
-                        <input type="text" id="calc-order-name" placeholder="Например: Брелоки для Яндекс">
+                        <input type="text" id="calc-order-name" placeholder="Например: Брелоки для Яндекс" oninput="Calculator.scheduleAutosave()">
                     </div>
                     <div class="form-group">
                         <label>Клиент</label>
-                        <input type="text" id="calc-client-name" placeholder="Компания">
+                        <input type="text" id="calc-client-name" placeholder="Компания" oninput="Calculator.scheduleAutosave()">
                     </div>
                     <div class="form-group">
                         <label>Менеджер</label>
-                        <select id="calc-manager-name">
+                        <select id="calc-manager-name" onchange="Calculator.scheduleAutosave()">
                             <option value="">-- Выбрать --</option>
                             <option value="Алина">Алина</option>
                             <option value="Элина">Элина</option>
@@ -187,16 +190,16 @@
                     </div>
                     <div class="form-group">
                         <label>Дедлайн (начало)</label>
-                        <input type="date" id="calc-deadline-start">
+                        <input type="date" id="calc-deadline-start" onchange="Calculator.scheduleAutosave()">
                     </div>
                     <div class="form-group">
                         <label>Дедлайн (конец)</label>
-                        <input type="date" id="calc-deadline-end">
+                        <input type="date" id="calc-deadline-end" onchange="Calculator.scheduleAutosave()">
                     </div>
                 </div>
                 <div class="form-group">
                     <label>Заметки</label>
-                    <textarea id="calc-notes" rows="2" placeholder="Доп. информация по заказу"></textarea>
+                    <textarea id="calc-notes" rows="2" placeholder="Доп. информация по заказу" oninput="Calculator.scheduleAutosave()"></textarea>
                 </div>
             </div>
 
@@ -695,6 +698,35 @@
                             <input type="number" min="0" id="mold-hw-speed">
                             <span class="form-hint">Скорость приклейки/сборки</span>
                         </div>
+                    </div>
+                </div>
+
+                <!-- Custom margins per tier -->
+                <div class="section-title" style="margin-top:12px; margin-bottom:4px;">Индивидуальная маржа (%) <span style="font-weight:400;font-size:11px;color:var(--text-muted)">Пустое = стандартная маржа</span></div>
+                <div class="form-row" style="flex-wrap:wrap;">
+                    <div class="form-group" style="flex:0 0 80px;min-width:70px;">
+                        <label>50 шт</label>
+                        <input type="number" id="mold-margin-50" placeholder="75" min="0" max="99" step="1">
+                    </div>
+                    <div class="form-group" style="flex:0 0 80px;min-width:70px;">
+                        <label>100 шт</label>
+                        <input type="number" id="mold-margin-100" placeholder="70" min="0" max="99" step="1">
+                    </div>
+                    <div class="form-group" style="flex:0 0 80px;min-width:70px;">
+                        <label>300 шт</label>
+                        <input type="number" id="mold-margin-300" placeholder="60" min="0" max="99" step="1">
+                    </div>
+                    <div class="form-group" style="flex:0 0 80px;min-width:70px;">
+                        <label>500 шт</label>
+                        <input type="number" id="mold-margin-500" placeholder="50" min="0" max="99" step="1">
+                    </div>
+                    <div class="form-group" style="flex:0 0 80px;min-width:70px;">
+                        <label>1K шт</label>
+                        <input type="number" id="mold-margin-1000" placeholder="45" min="0" max="99" step="1">
+                    </div>
+                    <div class="form-group" style="flex:0 0 80px;min-width:70px;">
+                        <label>3K шт</label>
+                        <input type="number" id="mold-margin-3000" placeholder="40" min="0" max="99" step="1">
                     </div>
                 </div>
 
@@ -1984,24 +2016,24 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="js/supabase.js?v=39"></script>
-<script src="js/calculator.js?v=39"></script>
-<script src="js/app.js?v=39"></script>
-<script src="js/dashboard.js?v=39"></script>
-<script src="js/order-detail.js?v=39"></script>
-<script src="js/orders.js?v=39"></script>
-<script src="js/analytics.js?v=39"></script>
-<script src="js/molds.js?v=39"></script>
-<script src="js/colors.js?v=39"></script>
-<script src="js/kp.js?v=39"></script>
-<script src="js/timetrack.js?v=39"></script>
-<script src="js/tasks.js?v=39"></script>
-<script src="js/gantt.js?v=39"></script>
-<script src="js/import.js?v=39"></script>
-<script src="js/factual.js?v=39"></script>
-<script src="js/china.js?v=39"></script>
-<script src="js/warehouse_photos.js?v=39"></script>
-<script src="js/warehouse.js?v=39"></script>
-<script src="js/settings.js?v=39"></script>
+<script src="js/supabase.js?v=40"></script>
+<script src="js/calculator.js?v=40"></script>
+<script src="js/app.js?v=40"></script>
+<script src="js/dashboard.js?v=40"></script>
+<script src="js/order-detail.js?v=40"></script>
+<script src="js/orders.js?v=40"></script>
+<script src="js/analytics.js?v=40"></script>
+<script src="js/molds.js?v=40"></script>
+<script src="js/colors.js?v=40"></script>
+<script src="js/kp.js?v=40"></script>
+<script src="js/timetrack.js?v=40"></script>
+<script src="js/tasks.js?v=40"></script>
+<script src="js/gantt.js?v=40"></script>
+<script src="js/import.js?v=40"></script>
+<script src="js/factual.js?v=40"></script>
+<script src="js/china.js?v=40"></script>
+<script src="js/warehouse_photos.js?v=40"></script>
+<script src="js/warehouse.js?v=40"></script>
+<script src="js/settings.js?v=40"></script>
 </body>
 </html>

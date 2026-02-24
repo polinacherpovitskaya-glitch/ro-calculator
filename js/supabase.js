@@ -48,7 +48,7 @@ const LOCAL_KEYS = {
 
 // Data version — increment to trigger NON-DESTRUCTIVE migration
 // NEVER delete user data! Only add missing fields to existing molds
-const MOLDS_DATA_VERSION = 6; // v6: fill PPH from reference table
+const MOLDS_DATA_VERSION = 7; // v7: add custom_margins per mold
 const MOLDS_VERSION_KEY = 'ro_calc_molds_version';
 
 function checkMoldsVersion() {
@@ -83,6 +83,8 @@ function checkMoldsVersion() {
                 if (m.photo_url === undefined) m.photo_url = '';
                 // Ensure category field
                 if (!m.category) m.category = 'blank';
+                // Ensure custom_margins field exists (added in v7)
+                if (m.custom_margins === undefined) m.custom_margins = {};
                 return m;
             });
             setLocal(LOCAL_KEYS.molds, migrated);
@@ -226,6 +228,8 @@ function _moldToTemplate(m) {
         hw_price_per_unit: m.hw_price_per_unit || 0,
         hw_delivery_total: m.hw_delivery_total || 0,
         hw_speed: m.hw_speed || 0,
+        // Per-mold custom margins (overrides standard tier margins)
+        custom_margins: m.custom_margins || {},
     };
 }
 
@@ -599,6 +603,7 @@ function getDefaultMolds() {
         hw_delivery_total: opts.hw_delivery || 0, hw_speed: opts.hw_speed || null,
         client: opts.client || '', notes: opts.notes || '',
         total_orders: opts.orders || 0, total_units_produced: opts.produced || 0,
+        custom_margins: {},
     });
 
     return [

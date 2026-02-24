@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v39';
+const APP_VERSION = 'v40';
 
 const App = {
     currentPage: 'dashboard',
@@ -176,6 +176,9 @@ const Calculator = {
     hardwareItems: [],  // Hardware items (unlimited)
     packagingItems: [], // Packaging items (unlimited)
     maxItems: 6,
+    _autosaveTimer: null,
+    _isDirty: false,
+    _autosaving: false,
 
     async init() {
         // Ensure colors are loaded for color picker
@@ -204,6 +207,11 @@ const Calculator = {
     },
 
     resetForm() {
+        // Cancel any pending autosave
+        clearTimeout(this._autosaveTimer);
+        this._isDirty = false;
+        this._autosaving = false;
+
         App.editingOrderId = null;
         document.getElementById('calc-order-name').value = '';
         document.getElementById('calc-client-name').value = '';
@@ -225,6 +233,9 @@ const Calculator = {
         document.getElementById('calc-add-item-btn').style.display = '';
         const historyEl = document.getElementById('calc-history');
         if (historyEl) historyEl.style.display = 'none';
+        // Clear autosave indicator
+        const statusEl = document.getElementById('calc-autosave-status');
+        if (statusEl) statusEl.textContent = '';
     },
 
     // ==========================================
@@ -244,6 +255,7 @@ const Calculator = {
         if (this.items.length >= this.maxItems) {
             document.getElementById('calc-add-item-btn').style.display = 'none';
         }
+        this.scheduleAutosave();
     },
 
     getEmptyItem(num) {
@@ -519,12 +531,14 @@ const Calculator = {
         const pi = this.items[itemIdx].printings.length - 1;
         const list = document.getElementById('printings-list-' + itemIdx);
         list.insertAdjacentHTML('beforeend', this.renderPrintingRow(itemIdx, pi, this.items[itemIdx].printings[pi]));
+        this.scheduleAutosave();
     },
 
     removePrinting(itemIdx, printIdx) {
         this.items[itemIdx].printings.splice(printIdx, 1);
         this.rerenderPrintings(itemIdx);
         this.recalculate();
+        this.scheduleAutosave();
     },
 
     rerenderPrintings(itemIdx) {
@@ -542,6 +556,7 @@ const Calculator = {
             this.items[itemIdx].printings[printIdx][field] = parseFloat(value) || 0;
             this.recalculate();
         }
+        this.scheduleAutosave();
     },
 
     // ==========================================
@@ -603,6 +618,7 @@ const Calculator = {
             this.hardwareItems.push(this.getEmptyHardware());
             await this._ensureWhPickerData();
             this.renderHardwareRow(idx);
+            this.scheduleAutosave();
         } catch (err) {
             console.error('[addHardware] error:', err);
             App.toast('Ошибка добавления фурнитуры: ' + err.message);
@@ -767,6 +783,7 @@ const Calculator = {
 
     onHwField(idx, field, value) {
         this.hardwareItems[idx][field] = value;
+        this.scheduleAutosave();
     },
 
     onHwNum(idx, field, value) {
@@ -783,6 +800,7 @@ const Calculator = {
         // Auto-calculate per-unit delivery from total
         hw.delivery_price = hw.qty > 0 ? round2(hw.delivery_total / hw.qty) : 0;
         this.recalculate();
+        this.scheduleAutosave();
     },
 
     onHwMinutes(idx, value) {
@@ -791,6 +809,7 @@ const Calculator = {
         // Convert minutes per unit → pieces per hour
         this.hardwareItems[idx].assembly_speed = mins > 0 ? round2(60 / mins) : 0;
         this.recalculate();
+        this.scheduleAutosave();
     },
 
     // ==========================================
@@ -820,6 +839,7 @@ const Calculator = {
             this.packagingItems.push(this.getEmptyPackaging());
             await this._ensureWhPickerData();
             this.renderPackagingRow(idx);
+            this.scheduleAutosave();
         } catch (err) {
             console.error('[addPackaging] error:', err);
             App.toast('Ошибка добавления упаковки: ' + err.message);
@@ -975,6 +995,7 @@ const Calculator = {
 
     onPkgField(idx, field, value) {
         this.packagingItems[idx][field] = value;
+        this.scheduleAutosave();
     },
 
     onPkgNum(idx, field, value) {
@@ -991,6 +1012,7 @@ const Calculator = {
         // Auto-calculate per-unit delivery from total
         pkg.delivery_price = pkg.qty > 0 ? round2(pkg.delivery_total / pkg.qty) : 0;
         this.recalculate();
+        this.scheduleAutosave();
     },
 
     onPkgMinutes(idx, value) {
@@ -999,6 +1021,7 @@ const Calculator = {
         // Convert minutes per unit → pieces per hour
         this.packagingItems[idx].assembly_speed = mins > 0 ? round2(60 / mins) : 0;
         this.recalculate();
+        this.scheduleAutosave();
     },
 
     // ==========================================
@@ -1052,6 +1075,7 @@ const Calculator = {
         this.closeMoldPicker(idx);
         this.rerenderItem(idx);
         this.recalculate();
+        this.scheduleAutosave();
     },
 
     toggleMoldPicker(idx) {
@@ -1111,6 +1135,7 @@ const Calculator = {
         // Close dropdown and re-render
         document.querySelectorAll('.color-picker-dropdown').forEach(d => d.style.display = 'none');
         this.renderItemBlock(idx);
+        this.scheduleAutosave();
     },
 
     clearColor(idx) {
@@ -1118,6 +1143,7 @@ const Calculator = {
         this.items[idx].color_name = '';
         document.querySelectorAll('.color-picker-dropdown').forEach(d => d.style.display = 'none');
         this.renderItemBlock(idx);
+        this.scheduleAutosave();
     },
 
     filterColorPicker(idx, query) {
@@ -1170,16 +1196,19 @@ const Calculator = {
         if (field === 'product_name') {
             document.getElementById('item-title-' + idx).textContent = value || 'Изделие ' + (idx + 1);
         }
+        this.scheduleAutosave();
     },
 
     onNumChange(idx, field, value) {
         this.items[idx][field] = parseFloat(value) || 0;
         this.recalculate();
+        this.scheduleAutosave();
     },
 
     onToggle(idx, field, checked) {
         this.items[idx][field] = checked;
         this.recalculate();
+        this.scheduleAutosave();
     },
 
     removeItem(idx) {
@@ -1190,6 +1219,7 @@ const Calculator = {
         this.items.forEach((_, i) => this.renderItemBlock(i));
         document.getElementById('calc-add-item-btn').style.display = '';
         this.recalculate();
+        this.scheduleAutosave();
     },
 
     // ==========================================
@@ -1429,7 +1459,10 @@ const Calculator = {
             if (item.is_blank_mold) {
                 // Blank mold: формула бланков с наценкой
                 // цена = себест / (1 - маржа) / (1 - 0.11)
-                const blankMargin = getBlankMargin(item.quantity || 500);
+                // Use per-mold custom margin if available
+                const tpl = App.templates.find(t => t.id == item.template_id);
+                const customMargin = tpl?.custom_margins?.[item.quantity];
+                const blankMargin = (customMargin !== null && customMargin !== undefined) ? customMargin : getBlankMargin(item.quantity || 500);
                 const blankTarget = round2(costItemOnly / (1 - blankMargin) / (1 - 0.06 - 0.05));
                 const blankSellPrice = roundTo5(blankTarget);
                 // Auto-set sell_price_item for blanks if user hasn't entered a custom price
@@ -1625,7 +1658,9 @@ const Calculator = {
             if ((!itemPrice || itemPrice <= 0) && item.is_blank_mold && item.result.costTotal > 0) {
                 const costPrintingPart = item.result.costPrinting || 0;
                 const costItemOnly = round2(item.result.costTotal - costPrintingPart);
-                const blankMargin = getBlankMargin(qty || 500);
+                const tpl = App.templates.find(t => t.id == item.template_id);
+                const customMargin = tpl?.custom_margins?.[qty];
+                const blankMargin = (customMargin !== null && customMargin !== undefined) ? customMargin : getBlankMargin(qty || 500);
                 itemPrice = roundTo5(round2(costItemOnly / (1 - blankMargin) / (1 - 0.06 - 0.05)));
                 item.sell_price_item = itemPrice; // persist for KP generation
             }
@@ -1817,49 +1852,94 @@ const Calculator = {
         // Debounce: wait 800ms after user stops typing before recalculating
         clearTimeout(this._sellPriceTimer);
         this._sellPriceTimer = setTimeout(() => this.recalculate(), 800);
+        this.scheduleAutosave();
     },
 
     // ==========================================
     // SAVE / LOAD ORDER
     // ==========================================
 
-    async saveOrder() {
-        const orderName = document.getElementById('calc-order-name').value.trim();
-        if (!orderName) {
-            App.toast('Введите название заказа');
-            return;
+    // ==========================================
+    // AUTOSAVE (draft)
+    // ==========================================
+
+    scheduleAutosave() {
+        this._isDirty = true;
+        clearTimeout(this._autosaveTimer);
+        this._autosaveTimer = setTimeout(() => this._doAutosave(), 2000);
+    },
+
+    async _doAutosave() {
+        if (this._autosaving) return;
+        // Don't autosave if no items or all items are empty
+        const hasAnyData = this.items.some(i => i.product_name || i.quantity > 0 || i.template_id);
+        if (!hasAnyData) return;
+
+        this._autosaving = true;
+        try {
+            const orderName = document.getElementById('calc-order-name').value.trim();
+            const now = new Date();
+            const autoName = orderName || ('Черновик ' + String(now.getDate()).padStart(2,'0') + '.' + String(now.getMonth()+1).padStart(2,'0') + ' ' + String(now.getHours()).padStart(2,'0') + ':' + String(now.getMinutes()).padStart(2,'0'));
+
+            // Recalculate before saving
+            try { this._doRecalculate(App.params); } catch (e) { /* ignore */ }
+
+            const load = calculateProductionLoad(this.items, this.hardwareItems, this.packagingItems, App.params);
+            const summary = calculateOrderSummary(this.items, this.hardwareItems, this.packagingItems);
+
+            const order = {
+                id: App.editingOrderId || undefined,
+                order_name: autoName,
+                client_name: document.getElementById('calc-client-name').value.trim(),
+                manager_name: document.getElementById('calc-manager-name').value.trim(),
+                deadline: document.getElementById('calc-deadline-start').value || null,
+                deadline_start: document.getElementById('calc-deadline-start').value || null,
+                deadline_end: document.getElementById('calc-deadline-end').value || null,
+                notes: document.getElementById('calc-notes').value.trim(),
+                plastic_type: 'PP',
+                print_type: null,
+                status: App.editingOrderId ? undefined : 'draft', // keep existing status on edit, draft for new
+                total_revenue_plan: summary.totalRevenue,
+                total_cost_plan: summary.totalRevenue - summary.totalEarned,
+                total_margin_plan: summary.totalEarned,
+                margin_percent_plan: summary.marginPercent,
+                total_hours_plan: load.totalHours,
+                production_hours_plastic: load.hoursPlasticTotal,
+                production_hours_packaging: load.hoursPackagingTotal,
+                production_hours_hardware: load.hoursHardwareTotal,
+                production_load_percent: load.plasticLoadPercent,
+            };
+
+            // If editing existing order, preserve its current status
+            if (App.editingOrderId) {
+                delete order.status; // don't overwrite status on autosave of existing order
+            }
+
+            // Collect items (same logic as saveOrder but without qty filter for drafts)
+            const items = this._collectItemsForSave();
+
+            const orderId = await saveOrder(order, items);
+            if (orderId) {
+                App.editingOrderId = orderId;
+                this._isDirty = false;
+                // Update autosave indicator
+                const timeStr = String(now.getHours()).padStart(2,'0') + ':' + String(now.getMinutes()).padStart(2,'0');
+                const statusEl = document.getElementById('calc-autosave-status');
+                if (statusEl) statusEl.textContent = 'Черновик сохранён • ' + timeStr;
+            }
+        } catch (e) {
+            console.error('[autosave] error:', e);
         }
+        this._autosaving = false;
+    },
 
-        const load = calculateProductionLoad(this.items, this.hardwareItems, this.packagingItems, App.params);
-        const summary = calculateOrderSummary(this.items, this.hardwareItems, this.packagingItems);
+    _collectItemsForSave() {
+        const items = [];
 
-        const order = {
-            id: App.editingOrderId || undefined,
-            order_name: orderName,
-            client_name: document.getElementById('calc-client-name').value.trim(),
-            manager_name: document.getElementById('calc-manager-name').value.trim(),
-            deadline: document.getElementById('calc-deadline-start').value || null,
-            deadline_start: document.getElementById('calc-deadline-start').value || null,
-            deadline_end: document.getElementById('calc-deadline-end').value || null,
-            notes: document.getElementById('calc-notes').value.trim(),
-            plastic_type: 'PP', // always PP
-            print_type: null, // determined at printing level
-            status: 'calculated',
-            total_revenue_plan: summary.totalRevenue,
-            total_cost_plan: summary.totalRevenue - summary.totalEarned,
-            total_margin_plan: summary.totalEarned,
-            margin_percent_plan: summary.marginPercent,
-            total_hours_plan: load.totalHours,
-            production_hours_plastic: load.hoursPlasticTotal,
-            production_hours_packaging: load.hoursPackagingTotal,
-            production_hours_hardware: load.hoursHardwareTotal,
-            production_load_percent: load.plasticLoadPercent,
-        };
-
-        // Gather product items for DB
-        const items = this.items.filter(i => i.quantity > 0).map(item => {
+        // Product items
+        this.items.forEach(item => {
             const r = item.result || getEmptyCostResult();
-            return {
+            items.push({
                 item_number: item.item_number,
                 item_type: 'product',
                 product_name: item.product_name,
@@ -1895,10 +1975,10 @@ const Calculator = {
                 template_id: item.template_id,
                 color_id: item.color_id || null,
                 color_name: item.color_name || '',
-            };
+            });
         });
 
-        // Add hardware items
+        // Hardware items
         this.hardwareItems.filter(hw => hw.qty > 0).forEach((hw, i) => {
             items.push({
                 item_number: 100 + i,
@@ -1913,14 +1993,13 @@ const Calculator = {
                 target_price_hardware: hw.target_price || 0,
                 cost_total: hw.result ? hw.result.costPerUnit : 0,
                 hours_hardware: hw.result ? hw.result.hoursHardware : 0,
-                // Warehouse integration fields
                 hardware_source: hw.source || 'custom',
                 hardware_warehouse_item_id: hw.warehouse_item_id || null,
                 hardware_warehouse_sku: hw.warehouse_sku || '',
             });
         });
 
-        // Add packaging items
+        // Packaging items
         this.packagingItems.filter(pkg => pkg.qty > 0).forEach((pkg, i) => {
             items.push({
                 item_number: 200 + i,
@@ -1935,12 +2014,52 @@ const Calculator = {
                 target_price_packaging: pkg.target_price || 0,
                 cost_total: pkg.result ? pkg.result.costPerUnit : 0,
                 hours_packaging: pkg.result ? pkg.result.hoursPackaging : 0,
-                // Warehouse integration fields
                 packaging_source: pkg.source || 'custom',
                 packaging_warehouse_item_id: pkg.warehouse_item_id || null,
                 packaging_warehouse_sku: pkg.warehouse_sku || '',
             });
         });
+
+        return items;
+    },
+
+    async saveOrder() {
+        const orderName = document.getElementById('calc-order-name').value.trim();
+        if (!orderName) {
+            App.toast('Введите название заказа');
+            return;
+        }
+
+        // Cancel any pending autosave — we're doing a full save
+        clearTimeout(this._autosaveTimer);
+
+        const load = calculateProductionLoad(this.items, this.hardwareItems, this.packagingItems, App.params);
+        const summary = calculateOrderSummary(this.items, this.hardwareItems, this.packagingItems);
+
+        const order = {
+            id: App.editingOrderId || undefined,
+            order_name: orderName,
+            client_name: document.getElementById('calc-client-name').value.trim(),
+            manager_name: document.getElementById('calc-manager-name').value.trim(),
+            deadline: document.getElementById('calc-deadline-start').value || null,
+            deadline_start: document.getElementById('calc-deadline-start').value || null,
+            deadline_end: document.getElementById('calc-deadline-end').value || null,
+            notes: document.getElementById('calc-notes').value.trim(),
+            plastic_type: 'PP', // always PP
+            print_type: null, // determined at printing level
+            status: 'calculated',
+            total_revenue_plan: summary.totalRevenue,
+            total_cost_plan: summary.totalRevenue - summary.totalEarned,
+            total_margin_plan: summary.totalEarned,
+            margin_percent_plan: summary.marginPercent,
+            total_hours_plan: load.totalHours,
+            production_hours_plastic: load.hoursPlasticTotal,
+            production_hours_packaging: load.hoursPackagingTotal,
+            production_hours_hardware: load.hoursHardwareTotal,
+            production_load_percent: load.plasticLoadPercent,
+        };
+
+        const items = this._collectItemsForSave();
 
         const isEdit = !!App.editingOrderId;
         const managerName = document.getElementById('calc-manager-name').value.trim() || 'Неизвестный';
@@ -2387,7 +2506,9 @@ const Calculator = {
             // Auto-fill item sell price if not set
             if ((!item.sell_price_item || item.sell_price_item <= 0) && costItemOnly > 0) {
                 if (item.is_blank_mold) {
-                    const blankMargin = getBlankMargin(item.quantity || 500);
+                    const tpl = App.templates.find(t => t.id == item.template_id);
+                    const customMargin = tpl?.custom_margins?.[item.quantity];
+                    const blankMargin = (customMargin !== null && customMargin !== undefined) ? customMargin : getBlankMargin(item.quantity || 500);
                     item.sell_price_item = roundTo5(round2(costItemOnly / (1 - blankMargin) / (1 - 0.06 - 0.05)));
                 } else {
                     // Default to 40% margin for custom molds

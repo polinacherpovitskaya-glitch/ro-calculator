@@ -194,10 +194,18 @@ const Molds = {
 
                 // Таргет = формула 70/30 с тиражной маржой (65%@50 → 35%@3K)
                 // Продажа = таргет, округлённый до 5₽
-                const targetPrice = calcBlankTargetPrice(adjustedCost, qty, params);
-                const sellPrice = calcBlankSellPrice(adjustedCost, qty, params);
-                const margin = getBlankMargin(qty);
+                // Use per-mold custom margin if set, otherwise standard tier margin
+                const customMargin = m.custom_margins && m.custom_margins[qty];
+                const margin = (customMargin !== null && customMargin !== undefined) ? customMargin : getBlankMargin(qty);
                 const mult = getBlankMultiplier(qty);
+
+                // If custom margin, calculate target/sell directly with it
+                const targetPrice = (customMargin !== null && customMargin !== undefined)
+                    ? round2(adjustedCost / (1 - margin) / (1 - 0.06 - 0.05))
+                    : calcBlankTargetPrice(adjustedCost, qty, params);
+                const sellPrice = (customMargin !== null && customMargin !== undefined)
+                    ? roundTo5(round2(adjustedCost / (1 - margin) / (1 - 0.06 - 0.05)))
+                    : calcBlankSellPrice(adjustedCost, qty, params);
 
                 m.tiers[qty] = {
                     cost: round2(adjustedCost),
@@ -207,6 +215,7 @@ const Molds = {
                     mult: mult,
                     moldAmort: round2(moldAmortPerUnit),
                     hwCost: round2(hwCostPerUnit),
+                    isCustomMargin: !!(customMargin !== null && customMargin !== undefined),
                 };
             });
 
@@ -305,10 +314,12 @@ const Molds = {
                 return `<td class="text-right" style="font-size:10px;color:var(--text-secondary);padding:3px 6px;">${t ? Math.round(t.cost) : '—'}</td>`;
             }).join('');
 
-            // Row 2: Цена продажи (green, bold)
+            // Row 2: Цена продажи (green, bold; orange if custom margin)
             const sellCells = MOLD_TIERS.map(q => {
                 const t = m.tiers?.[q];
-                return `<td class="text-right" style="font-size:13px;font-weight:700;color:var(--green);padding:3px 6px;">${t ? Math.round(t.sellPrice) : '—'}</td>`;
+                const color = t?.isCustomMargin ? 'var(--orange)' : 'var(--green)';
+                const title = t?.isCustomMargin ? `title="Кастомная маржа: ${Math.round(t.margin * 100)}%"` : '';
+                return `<td class="text-right" ${title} style="font-size:13px;font-weight:700;color:${color};padding:3px 6px;">${t ? Math.round(t.sellPrice) : '—'}</td>`;
             }).join('');
 
             html += `
@@ -441,6 +452,13 @@ const Molds = {
         document.getElementById('mold-hw-speed').value = m.hw_speed || '';
         document.getElementById('mold-notes').value = m.notes || '';
 
+        // Custom margins per tier
+        const cm = m.custom_margins || {};
+        [50, 100, 300, 500, 1000, 3000].forEach(q => {
+            const el = document.getElementById('mold-margin-' + q);
+            if (el) el.value = (cm[q] !== null && cm[q] !== undefined) ? Math.round(cm[q] * 100) : '';
+        });
+
         // Hardware source
         this._hwSource = m.hw_source || 'custom';
         this._hwWarehouseItemId = m.hw_warehouse_item_id || null;
@@ -467,6 +485,20 @@ const Molds = {
         }
     },
 
+    _collectCustomMargins() {
+        const margins = {};
+        [50, 100, 300, 500, 1000, 3000].forEach(q => {
+            const el = document.getElementById('mold-margin-' + q);
+            if (el && el.value !== '') {
+                const pct = parseFloat(el.value);
+                if (!isNaN(pct) && pct >= 0 && pct <= 99) {
+                    margins[q] = pct / 100; // Store as decimal (e.g. 0.75 for 75%)
+                }
+            }
+        });
+        return margins;
+    },
+
     clearForm() {
         ['mold-name', 'mold-pph-min', 'mold-pph-max', 'mold-pph-actual',
          'mold-weight', 'mold-cost-cny', 'mold-client',
@@ -487,6 +519,11 @@ const Molds = {
         document.getElementById('mold-count').value = 1;
         document.getElementById('mold-cost-rub').value = '';
         document.getElementById('mold-hw-delivery-total').value = 0;
+        // Clear custom margin fields
+        [50, 100, 300, 500, 1000, 3000].forEach(q => {
+            const el = document.getElementById('mold-margin-' + q);
+            if (el) el.value = '';
+        });
     },
 
     hideForm() {
@@ -528,6 +565,7 @@ const Molds = {
             notes: document.getElementById('mold-notes').value.trim(),
             total_orders: 0,
             total_units_produced: 0,
+            custom_margins: this._collectCustomMargins(),
         };
 
         if (this.editingId) {
