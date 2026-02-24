@@ -243,16 +243,16 @@ function calculatePackagingCost(pkg, params) {
 }
 
 /**
- * Маржа + множитель по тиражу (совпадает с BLANKS_TIER_MARGINS в molds.js)
- * 500 шт — точка опоры (mult=1.00), мелкие дороже, крупные со скидкой
+ * Маржа по тиражу (совпадает с BLANKS_TIER_MARGINS в molds.js)
+ * Множитель = 1.00 (маржа уже включает всё), округление до 5₽
  */
 const CALC_TIER_MARGINS = [
-    { min: 0, max: 75, margin: 0.65, mult: 1.70 },
-    { min: 75, max: 200, margin: 0.55, mult: 1.45 },
-    { min: 200, max: 400, margin: 0.48, mult: 1.25 },
-    { min: 400, max: 750, margin: 0.43, mult: 1.00 },
-    { min: 750, max: 2500, margin: 0.40, mult: 0.92 },
-    { min: 2500, max: Infinity, margin: 0.35, mult: 0.85 },
+    { min: 0, max: 75, margin: 0.70, mult: 1.00 },       // 50 шт  → 70%
+    { min: 75, max: 200, margin: 0.65, mult: 1.00 },      // 100 шт → 65%
+    { min: 200, max: 400, margin: 0.60, mult: 1.00 },     // 300 шт → 60%
+    { min: 400, max: 750, margin: 0.55, mult: 1.00 },     // 500 шт → 55%
+    { min: 750, max: 2500, margin: 0.50, mult: 1.00 },    // 1K шт  → 50%
+    { min: 2500, max: Infinity, margin: 0.45, mult: 1.00 },// 3K шт  → 45%
 ];
 
 function getMarginForQty(qty) {
