@@ -247,12 +247,12 @@ function calculatePackagingCost(pkg, params) {
  * Множитель = 1.00 (маржа уже включает всё), округление до 5₽
  */
 const CALC_TIER_MARGINS = [
-    { min: 0, max: 75, margin: 0.70, mult: 1.00 },       // 50 шт  → 70%
-    { min: 75, max: 200, margin: 0.65, mult: 1.00 },      // 100 шт → 65%
+    { min: 0, max: 75, margin: 0.75, mult: 1.00 },       // 50 шт  → 75%
+    { min: 75, max: 200, margin: 0.70, mult: 1.00 },      // 100 шт → 70%
     { min: 200, max: 400, margin: 0.60, mult: 1.00 },     // 300 шт → 60%
-    { min: 400, max: 750, margin: 0.55, mult: 1.00 },     // 500 шт → 55%
-    { min: 750, max: 2500, margin: 0.50, mult: 1.00 },    // 1K шт  → 50%
-    { min: 2500, max: Infinity, margin: 0.45, mult: 1.00 },// 3K шт  → 45%
+    { min: 400, max: 750, margin: 0.50, mult: 1.00 },     // 500 шт → 50%
+    { min: 750, max: 2500, margin: 0.45, mult: 1.00 },    // 1K шт  → 45%
+    { min: 2500, max: Infinity, margin: 0.40, mult: 1.00 },// 3K шт  → 40%
 ];
 
 function getMarginForQty(qty) {
