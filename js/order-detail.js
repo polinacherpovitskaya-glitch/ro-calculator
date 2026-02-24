@@ -19,18 +19,7 @@ const HARDWARE_STATUSES = [
     { key: 'to_make',         label: 'Сделать',          color: 'yellow' },
 ];
 
-const PRINT_TYPES = [
-    { key: '',            label: 'Не указано' },
-    { key: 'uv_stepan',  label: 'УФ у Степана' },
-    { key: 'uv_stickers', label: 'УФ-наклейки' },
-];
-
-const PLASTIC_TYPES = [
-    { key: '',    label: 'Не указано' },
-    { key: 'ABS', label: 'ABS' },
-    { key: 'PP',  label: 'ПП (PP)' },
-    { key: 'PND', label: 'ПНД (PND)' },
-];
+// Plastic is always PP, print type is set at printing level — removed from UI
 
 const OrderDetail = {
     currentOrder: null,
@@ -170,8 +159,6 @@ const OrderDetail = {
                 <div class="card-header"><h3>Статусы</h3></div>
                 ${this._fieldRowSelect('payment_status', 'Статус оплаты', o.payment_status || 'not_sent', PAYMENT_STATUSES)}
                 ${this._fieldRowSelect('hardware_status', 'Статус фурнитуры', o.hardware_status || 'discussion', HARDWARE_STATUSES)}
-                ${this._fieldRowSelect('plastic_type', 'Тип пластика', o.plastic_type || '', PLASTIC_TYPES)}
-                ${this._fieldRowSelect('print_type', 'Тип печати', o.print_type || '', PRINT_TYPES)}
                 ${this._fieldRowCheckbox('is_blank_mold', 'Бланк (форма)', o.is_blank_mold)}
                 ${this._fieldRowCheckbox('packaging_from_stock', 'Упаковка из стока', o.packaging_from_stock)}
             </div>

@@ -72,69 +72,131 @@ const Orders = {
     },
 
     // ==========================================
-    // TABLE VIEW
+    // TABLE VIEW (grouped by status sections)
     // ==========================================
 
+    // Which sections are collapsed
+    collapsedSections: {},
+
+    toggleSection(status) {
+        this.collapsedSections[status] = !this.collapsedSections[status];
+        const body = document.getElementById('orders-section-body-' + status);
+        const icon = document.getElementById('orders-section-icon-' + status);
+        if (body) body.style.display = this.collapsedSections[status] ? 'none' : '';
+        if (icon) icon.textContent = this.collapsedSections[status] ? '▸' : '▾';
+    },
+
+    // Section display order and config
+    STATUS_SECTIONS: [
+        { status: 'in_production', label: 'В производстве', color: '#f59e0b', icon: '◐', defaultOpen: true },
+        { status: 'calculated',    label: 'Рассчитан',      color: '#2563eb', icon: '◉', defaultOpen: true },
+        { status: 'draft',         label: 'Черновик',        color: '#6b7280', icon: '○', defaultOpen: true },
+        { status: 'completed',     label: 'Выполнен',        color: '#10b981', icon: '●', defaultOpen: false },
+        { status: 'cancelled',     label: 'Отменен',         color: '#ef4444', icon: '✕', defaultOpen: false },
+        { status: 'deleted',       label: 'Корзина',         color: '#9ca3af', icon: '&#128465;', defaultOpen: false },
+    ],
+
     renderTable(orders) {
-        const tbody = document.getElementById('orders-table-body');
+        const container = document.getElementById('orders-table-view');
 
         if (orders.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="9" class="empty-state">
+            container.innerHTML = `<div class="card"><div class="empty-state">
                 <div class="empty-icon">&#9776;</div>
                 <p>Нет заказов</p>
-            </td></tr>`;
+            </div></div>`;
             return;
         }
 
-        tbody.innerHTML = orders.map(o => {
-            const isDeleted = o.status === 'deleted';
+        // Check if we're filtering by specific status
+        const statusFilter = document.getElementById('orders-filter-status').value;
 
-            // Build status dropdown (exclude 'deleted' from manual selection)
-            const statusOpts = STATUS_OPTIONS
-                .filter(s => s.value !== 'deleted')
-                .map(s => `<option value="${s.value}" ${o.status === s.value ? 'selected' : ''}>${s.label}</option>`)
-                .join('');
+        // Choose which sections to show
+        const sections = statusFilter
+            ? this.STATUS_SECTIONS.filter(s => s.status === statusFilter)
+            : this.STATUS_SECTIONS;
 
-            // Deleted date display
-            const dateDisplay = isDeleted && o.deleted_at
-                ? App.formatDate(o.deleted_at) + ' <span style="color:var(--red);font-size:10px;">(удалён)</span>'
-                : App.formatDate(o.created_at);
+        let html = '';
 
-            // Action buttons differ for deleted vs active orders
-            const actionButtons = isDeleted
-                ? `<div class="flex gap-8">
-                        <button class="btn btn-sm btn-outline" onclick="Orders.restoreOrder(${o.id})" title="Восстановить" style="color:var(--green);border-color:var(--green);">&#8634; Восстановить</button>
-                        <button class="btn btn-sm btn-danger" onclick="Orders.confirmPermanentDelete(${o.id}, '${this.escHtml(o.order_name)}')">&#10005; Навсегда</button>
-                   </div>`
-                : `<div class="flex gap-8">
-                        <button class="btn btn-sm btn-outline" onclick="Orders.editOrder(${o.id})" title="Редактировать">&#9998;</button>
-                        <button class="btn btn-sm btn-danger" onclick="Orders.confirmDelete(${o.id}, '${this.escHtml(o.order_name)}')">&#10005;</button>
-                   </div>`;
+        for (const section of sections) {
+            const sectionOrders = orders.filter(o => o.status === section.status);
+            if (sectionOrders.length === 0 && !statusFilter) continue; // skip empty sections in all-view
 
-            // Status cell: for deleted orders show static label, for others show dropdown
-            const statusCell = isDeleted
-                ? `<span style="color:var(--red);font-weight:600;font-size:12px;">&#128465; Удалён</span>`
-                : `<select class="status-select status-${o.status}" onchange="Orders.onStatusChange(${o.id}, this.value, '${o.status}')" style="font-size:12px; padding:2px 4px; border-radius:6px; border:1px solid var(--border); background:var(--bg); cursor:pointer;">
-                        ${statusOpts}
-                   </select>`;
+            const totalRevenue = sectionOrders.reduce((s, o) => s + (o.total_revenue_plan || 0), 0);
 
-            // Payment status badge
-            const ps = PAYMENT_STATUSES.find(s => s.key === (o.payment_status || 'not_sent')) || PAYMENT_STATUSES[0];
-            const paymentBadge = `<span class="badge badge-${ps.color}" style="font-size:10px;">${ps.label}</span>`;
+            // Determine collapsed state (use defaults for first render)
+            if (this.collapsedSections[section.status] === undefined) {
+                this.collapsedSections[section.status] = !section.defaultOpen;
+            }
+            const collapsed = this.collapsedSections[section.status];
 
-            return `
-            <tr style="${isDeleted ? 'opacity:0.7;' : ''}">
-                <td><a href="#order-detail/${o.id}" onclick="App.navigate('order-detail', true, ${o.id}); return false;" style="color:var(--accent);font-weight:600;text-decoration:none" title="Открыть карточку заказа">${this.escHtml(o.order_name)}</a></td>
-                <td>${this.escHtml(o.client_name || '—')}</td>
-                <td>${this.escHtml(o.manager_name || '—')}</td>
-                <td>${statusCell}</td>
-                <td>${paymentBadge}</td>
-                <td class="text-right">${formatRub(o.total_revenue_plan || 0)}</td>
-                <td class="text-right ${(o.margin_percent_plan || 0) >= 30 ? 'text-green' : 'text-red'}">${formatPercent(o.margin_percent_plan || 0)}</td>
-                <td>${dateDisplay}</td>
-                <td>${actionButtons}</td>
-            </tr>`;
-        }).join('');
+            html += `
+            <div class="orders-section" style="margin-bottom:8px">
+                <div class="orders-section-header" onclick="Orders.toggleSection('${section.status}')" style="cursor:pointer;display:flex;align-items:center;gap:10px;padding:10px 16px;background:var(--card-bg);border:1px solid var(--border);border-radius:var(--radius);${collapsed ? '' : 'border-bottom-left-radius:0;border-bottom-right-radius:0;'}">
+                    <span id="orders-section-icon-${section.status}" style="font-size:12px;color:var(--text-muted);width:12px">${collapsed ? '▸' : '▾'}</span>
+                    <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${section.color}"></span>
+                    <span style="font-weight:700;font-size:13px">${section.label}</span>
+                    <span style="font-size:12px;color:var(--text-muted);font-weight:600">${sectionOrders.length}</span>
+                    <span style="flex:1"></span>
+                    <span style="font-size:12px;color:var(--text-muted)">${this.shortRub(totalRevenue)}</span>
+                </div>
+                <div id="orders-section-body-${section.status}" style="${collapsed ? 'display:none' : ''}">
+                    ${sectionOrders.length === 0
+                        ? `<div class="card" style="border-top-left-radius:0;border-top-right-radius:0;border-top:0"><p class="text-muted" style="padding:12px;font-size:12px;text-align:center">Нет заказов</p></div>`
+                        : `<div class="card" style="padding:0;border-top-left-radius:0;border-top-right-radius:0;border-top:0"><div class="table-wrap"><table>
+                        <thead><tr>
+                            <th>Заказ</th>
+                            <th>Клиент</th>
+                            <th>Менеджер</th>
+                            <th>Оплата</th>
+                            <th class="text-right">Выручка</th>
+                            <th class="text-right">Маржа</th>
+                            <th>Дата</th>
+                            <th></th>
+                        </tr></thead>
+                        <tbody>${sectionOrders.map(o => this._renderOrderRow(o)).join('')}</tbody>
+                    </table></div></div>`
+                    }
+                </div>
+            </div>`;
+        }
+
+        container.innerHTML = html;
+    },
+
+    _renderOrderRow(o) {
+        const isDeleted = o.status === 'deleted';
+
+        // Deleted date display
+        const dateDisplay = isDeleted && o.deleted_at
+            ? App.formatDate(o.deleted_at) + ' <span style="color:var(--red);font-size:10px;">(удалён)</span>'
+            : App.formatDate(o.created_at);
+
+        // Action buttons
+        const actionButtons = isDeleted
+            ? `<div class="flex gap-8">
+                    <button class="btn btn-sm btn-outline" onclick="Orders.restoreOrder(${o.id})" title="Восстановить" style="color:var(--green);border-color:var(--green);">&#8634;</button>
+                    <button class="btn btn-sm btn-danger" onclick="Orders.confirmPermanentDelete(${o.id}, '${this.escHtml(o.order_name)}')">&#10005;</button>
+               </div>`
+            : `<div class="flex gap-8">
+                    <button class="btn btn-sm btn-outline" onclick="Orders.editOrder(${o.id})" title="Редактировать">&#9998;</button>
+                    <button class="btn btn-sm btn-danger" onclick="Orders.confirmDelete(${o.id}, '${this.escHtml(o.order_name)}')">&#10005;</button>
+               </div>`;
+
+        // Payment status badge
+        const ps = PAYMENT_STATUSES.find(s => s.key === (o.payment_status || 'not_sent')) || PAYMENT_STATUSES[0];
+        const paymentBadge = `<span class="badge badge-${ps.color}" style="font-size:10px;">${ps.label}</span>`;
+
+        return `
+        <tr style="${isDeleted ? 'opacity:0.7;' : ''}">
+            <td><a href="#order-detail/${o.id}" onclick="App.navigate('order-detail', true, ${o.id}); return false;" style="color:var(--accent);font-weight:600;text-decoration:none" title="Открыть карточку заказа">${this.escHtml(o.order_name)}</a></td>
+            <td>${this.escHtml(o.client_name || '—')}</td>
+            <td style="font-size:12px">${this.escHtml(o.manager_name || '—')}</td>
+            <td>${paymentBadge}</td>
+            <td class="text-right">${formatRub(o.total_revenue_plan || 0)}</td>
+            <td class="text-right ${(o.margin_percent_plan || 0) >= 30 ? 'text-green' : 'text-red'}">${formatPercent(o.margin_percent_plan || 0)}</td>
+            <td style="font-size:12px">${dateDisplay}</td>
+            <td>${actionButtons}</td>
+        </tr>`;
     },
 
     // ==========================================

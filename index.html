@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=35">
+    <link rel="stylesheet" href="css/style.css?v=35b">
 </head>
 <body>
 
@@ -195,23 +195,6 @@
                         <label>Цветовое решение</label>
                         <input type="text" id="calc-color-scheme" placeholder="напр. белый+синий+зеленый">
                     </div>
-                    <div class="form-group">
-                        <label>Тип пластика</label>
-                        <select id="calc-plastic-type">
-                            <option value="">Не указано</option>
-                            <option value="ABS">ABS</option>
-                            <option value="PP">ПП (PP)</option>
-                            <option value="PND">ПНД (PND)</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label>Тип печати</label>
-                        <select id="calc-print-type">
-                            <option value="">Не указано</option>
-                            <option value="uv_stepan">УФ у Степана</option>
-                            <option value="uv_stickers">УФ-наклейки</option>
-                        </select>
-                    </div>
                 </div>
                 <div class="form-group">
                     <label>Заметки</label>
@@ -380,29 +363,8 @@
                 </div>
             </div>
 
-            <!-- Table view -->
-            <div id="orders-table-view" class="card">
-                <div class="table-wrap">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Заказ</th>
-                                <th>Клиент</th>
-                                <th>Менеджер</th>
-                                <th>Статус</th>
-                                <th>Оплата</th>
-                                <th class="text-right">Выручка</th>
-                                <th class="text-right">Маржа</th>
-                                <th>Дата</th>
-                                <th></th>
-                            </tr>
-                        </thead>
-                        <tbody id="orders-table-body">
-                            <tr><td colspan="9" class="text-center text-muted">Загрузка...</td></tr>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
+            <!-- Table view (grouped by status) -->
+            <div id="orders-table-view"></div>
 
             <!-- Board view (Kanban) -->
             <div id="orders-board-view" class="orders-board" style="display:none"></div>
@@ -1939,23 +1901,23 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="js/supabase.js?v=35"></script>
-<script src="js/calculator.js?v=35"></script>
-<script src="js/app.js?v=35"></script>
-<script src="js/dashboard.js?v=35"></script>
-<script src="js/order-detail.js?v=35"></script>
-<script src="js/orders.js?v=35"></script>
-<script src="js/analytics.js?v=35"></script>
-<script src="js/molds.js?v=35"></script>
-<script src="js/kp.js?v=35"></script>
-<script src="js/timetrack.js?v=35"></script>
-<script src="js/tasks.js?v=35"></script>
-<script src="js/gantt.js?v=35"></script>
-<script src="js/import.js?v=35"></script>
-<script src="js/factual.js?v=35"></script>
-<script src="js/china.js?v=35"></script>
-<script src="js/warehouse_photos.js?v=35"></script>
-<script src="js/warehouse.js?v=35"></script>
-<script src="js/settings.js?v=35"></script>
+<script src="js/supabase.js?v=35b"></script>
+<script src="js/calculator.js?v=35b"></script>
+<script src="js/app.js?v=35b"></script>
+<script src="js/dashboard.js?v=35b"></script>
+<script src="js/order-detail.js?v=35b"></script>
+<script src="js/orders.js?v=35b"></script>
+<script src="js/analytics.js?v=35b"></script>
+<script src="js/molds.js?v=35b"></script>
+<script src="js/kp.js?v=35b"></script>
+<script src="js/timetrack.js?v=35b"></script>
+<script src="js/tasks.js?v=35b"></script>
+<script src="js/gantt.js?v=35b"></script>
+<script src="js/import.js?v=35b"></script>
+<script src="js/factual.js?v=35b"></script>
+<script src="js/china.js?v=35b"></script>
+<script src="js/warehouse_photos.js?v=35b"></script>
+<script src="js/warehouse.js?v=35b"></script>
+<script src="js/settings.js?v=35b"></script>
 </body>
 </html>

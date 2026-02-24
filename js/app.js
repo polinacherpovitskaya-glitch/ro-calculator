@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v35';
+const APP_VERSION = 'v35b';
 
 const App = {
     currentPage: 'dashboard',
@@ -192,8 +192,6 @@ const Calculator = {
         document.getElementById('calc-deadline-end').value = '';
         document.getElementById('calc-notes').value = '';
         document.getElementById('calc-color-scheme').value = '';
-        document.getElementById('calc-plastic-type').value = '';
-        document.getElementById('calc-print-type').value = '';
         this.items = [];
         this.hardwareItems = [];
         this.packagingItems = [];
@@ -1563,8 +1561,8 @@ const Calculator = {
             deadline_end: document.getElementById('calc-deadline-end').value || null,
             notes: document.getElementById('calc-notes').value.trim(),
             color_scheme: document.getElementById('calc-color-scheme').value.trim(),
-            plastic_type: document.getElementById('calc-plastic-type').value || null,
-            print_type: document.getElementById('calc-print-type').value || null,
+            plastic_type: 'PP', // always PP
+            print_type: null, // determined at printing level
             status: 'calculated',
             total_revenue_plan: summary.totalRevenue,
             total_cost_plan: summary.totalRevenue - summary.totalEarned,
@@ -1815,8 +1813,6 @@ const Calculator = {
         document.getElementById('calc-deadline-end').value = order.deadline_end || '';
         document.getElementById('calc-notes').value = order.notes || '';
         document.getElementById('calc-color-scheme').value = order.color_scheme || '';
-        document.getElementById('calc-plastic-type').value = order.plastic_type || '';
-        document.getElementById('calc-print-type').value = order.print_type || '';
 
         // Restore product items
         const productItems = dbItems.filter(i => !i.item_type || i.item_type === 'product');
