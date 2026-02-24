@@ -193,29 +193,41 @@ const Molds = {
                 }
 
                 // Таргет = формула 70/30 с тиражной маржой (65%@50 → 35%@3K)
-                // Продажа = таргет, округлённый до 5₽
-                // Use per-mold custom margin if set, otherwise standard tier margin
+                // Check for custom price override first, then custom margin, then standard
+                const customPrice = m.custom_prices && m.custom_prices[qty];
                 const customMargin = m.custom_margins && m.custom_margins[qty];
                 const margin = (customMargin !== null && customMargin !== undefined) ? customMargin : getBlankMargin(qty);
                 const mult = getBlankMultiplier(qty);
 
-                // If custom margin, calculate target/sell directly with it
-                const targetPrice = (customMargin !== null && customMargin !== undefined)
-                    ? round2(adjustedCost / (1 - margin) / (1 - 0.06 - 0.05))
-                    : calcBlankTargetPrice(adjustedCost, qty, params);
-                const sellPrice = (customMargin !== null && customMargin !== undefined)
-                    ? roundTo5(round2(adjustedCost / (1 - margin) / (1 - 0.06 - 0.05)))
-                    : calcBlankSellPrice(adjustedCost, qty, params);
+                let targetPrice, sellPrice, isCustom = false;
+                if (customPrice !== null && customPrice !== undefined && customPrice > 0) {
+                    // Absolute price override — use directly
+                    sellPrice = customPrice;
+                    targetPrice = customPrice;
+                    isCustom = true;
+                } else if (customMargin !== null && customMargin !== undefined) {
+                    // Custom margin percentage override
+                    targetPrice = round2(adjustedCost / (1 - margin) / (1 - 0.06 - 0.05));
+                    sellPrice = roundTo5(targetPrice);
+                    isCustom = true;
+                } else {
+                    // Standard tier margin
+                    targetPrice = calcBlankTargetPrice(adjustedCost, qty, params);
+                    sellPrice = calcBlankSellPrice(adjustedCost, qty, params);
+                }
+
+                // Calculate actual margin from sell price vs cost
+                const actualMargin = sellPrice > 0 ? round2((sellPrice - adjustedCost) / sellPrice) : margin;
 
                 m.tiers[qty] = {
                     cost: round2(adjustedCost),
                     targetPrice: targetPrice,
                     sellPrice: sellPrice,
-                    margin: margin,
+                    margin: actualMargin,
                     mult: mult,
                     moldAmort: round2(moldAmortPerUnit),
                     hwCost: round2(hwCostPerUnit),
-                    isCustomMargin: !!(customMargin !== null && customMargin !== undefined),
+                    isCustom: isCustom,
                 };
             });
 
@@ -314,11 +326,12 @@ const Molds = {
                 return `<td class="text-right" style="font-size:10px;color:var(--text-secondary);padding:3px 6px;">${t ? Math.round(t.cost) : '—'}</td>`;
             }).join('');
 
-            // Row 2: Цена продажи (green, bold; orange if custom margin)
+            // Row 2: Цена продажи (green, bold; orange if custom price)
             const sellCells = MOLD_TIERS.map(q => {
                 const t = m.tiers?.[q];
-                const color = t?.isCustomMargin ? 'var(--orange)' : 'var(--green)';
-                const title = t?.isCustomMargin ? `title="Кастомная маржа: ${Math.round(t.margin * 100)}%"` : '';
+                const color = t?.isCustom ? 'var(--orange)' : 'var(--green)';
+                const marginPct = t ? Math.round(t.margin * 100) : 0;
+                const title = t?.isCustom ? `title="Своя цена · маржа ${marginPct}%"` : `title="Маржа ${marginPct}%"`;
                 return `<td class="text-right" ${title} style="font-size:13px;font-weight:700;color:${color};padding:3px 6px;">${t ? Math.round(t.sellPrice) : '—'}</td>`;
             }).join('');
 
@@ -452,12 +465,15 @@ const Molds = {
         document.getElementById('mold-hw-speed').value = m.hw_speed || '';
         document.getElementById('mold-notes').value = m.notes || '';
 
-        // Custom margins per tier
-        const cm = m.custom_margins || {};
+        // Custom prices per tier
+        const cp = m.custom_prices || {};
         [50, 100, 300, 500, 1000, 3000].forEach(q => {
-            const el = document.getElementById('mold-margin-' + q);
-            if (el) el.value = (cm[q] !== null && cm[q] !== undefined) ? Math.round(cm[q] * 100) : '';
+            const el = document.getElementById('mold-price-' + q);
+            if (el) el.value = (cp[q] !== null && cp[q] !== undefined && cp[q] > 0) ? cp[q] : '';
         });
+        // Show margin hints for custom prices
+        this._editingMoldId = m.id;
+        setTimeout(() => this.onCustomPriceInput(), 50);
 
         // Hardware source
         this._hwSource = m.hw_source || 'custom';
@@ -485,18 +501,43 @@ const Molds = {
         }
     },
 
-    _collectCustomMargins() {
-        const margins = {};
+    _collectCustomPrices() {
+        const prices = {};
         [50, 100, 300, 500, 1000, 3000].forEach(q => {
-            const el = document.getElementById('mold-margin-' + q);
+            const el = document.getElementById('mold-price-' + q);
             if (el && el.value !== '') {
-                const pct = parseFloat(el.value);
-                if (!isNaN(pct) && pct >= 0 && pct <= 99) {
-                    margins[q] = pct / 100; // Store as decimal (e.g. 0.75 for 75%)
+                const price = parseFloat(el.value);
+                if (!isNaN(price) && price > 0) {
+                    prices[q] = price;
                 }
             }
         });
-        return margins;
+        return prices;
+    },
+
+    onCustomPriceInput() {
+        // Show margin % hint under each price input
+        // We need the current mold's enriched cost data
+        const mId = this._editingMoldId;
+        const mold = mId ? App.molds.find(m => m.id === mId) : null;
+        [50, 100, 300, 500, 1000, 3000].forEach(q => {
+            const priceEl = document.getElementById('mold-price-' + q);
+            const hintEl = document.getElementById('mold-price-margin-' + q);
+            if (!priceEl || !hintEl) return;
+            const price = parseFloat(priceEl.value);
+            const cost = mold?.tiers?.[q]?.cost;
+            if (price > 0 && cost > 0) {
+                const marginPct = Math.round((price - cost) / price * 100);
+                const color = marginPct >= 40 ? 'var(--green)' : marginPct >= 30 ? 'var(--orange)' : 'var(--red)';
+                hintEl.innerHTML = `<span style="color:${color};font-weight:600;">маржа ${marginPct}%</span>`;
+            } else if (price > 0) {
+                hintEl.textContent = '';
+            } else {
+                // No custom price — show what standard price would be
+                const stdPrice = mold?.tiers?.[q]?.sellPrice;
+                hintEl.innerHTML = stdPrice ? `<span style="color:var(--text-muted);">стд: ${Math.round(stdPrice)}₽</span>` : '';
+            }
+        });
     },
 
     clearForm() {
@@ -519,11 +560,14 @@ const Molds = {
         document.getElementById('mold-count').value = 1;
         document.getElementById('mold-cost-rub').value = '';
         document.getElementById('mold-hw-delivery-total').value = 0;
-        // Clear custom margin fields
+        // Clear custom price fields and hints
         [50, 100, 300, 500, 1000, 3000].forEach(q => {
-            const el = document.getElementById('mold-margin-' + q);
+            const el = document.getElementById('mold-price-' + q);
             if (el) el.value = '';
+            const hint = document.getElementById('mold-price-margin-' + q);
+            if (hint) hint.textContent = '';
         });
+        this._editingMoldId = null;
     },
 
     hideForm() {
@@ -565,7 +609,8 @@ const Molds = {
             notes: document.getElementById('mold-notes').value.trim(),
             total_orders: 0,
             total_units_produced: 0,
-            custom_margins: this._collectCustomMargins(),
+            custom_margins: {},
+            custom_prices: this._collectCustomPrices(),
         };
 
         if (this.editingId) {

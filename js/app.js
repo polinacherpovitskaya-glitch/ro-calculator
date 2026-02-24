@@ -1503,14 +1503,18 @@ const Calculator = {
             const costItemOnly = round2(costWithPrinting - costPrintingPart);
 
             if (item.is_blank_mold) {
-                // Blank mold: формула бланков с наценкой
-                // цена = себест / (1 - маржа) / (1 - 0.11)
-                // Use per-mold custom margin if available
+                // Blank mold: show recommended price from blanks table
                 const tpl = App.templates.find(t => t.id == item.template_id);
-                const customMargin = tpl?.custom_margins?.[item.quantity];
-                const blankMargin = (customMargin !== null && customMargin !== undefined) ? customMargin : getBlankMargin(item.quantity || 500);
-                const blankTarget = round2(costItemOnly / (1 - blankMargin) / (1 - 0.06 - 0.05));
-                const blankSellPrice = roundTo5(blankTarget);
+                // Check custom_prices first, then custom_margins, then standard formula
+                const customPrice = tpl?.custom_prices?.[item.quantity];
+                let blankSellPrice;
+                if (customPrice > 0) {
+                    blankSellPrice = customPrice;
+                } else {
+                    const customMargin = tpl?.custom_margins?.[item.quantity];
+                    const blankMargin = (customMargin !== null && customMargin !== undefined) ? customMargin : getBlankMargin(item.quantity || 500);
+                    blankSellPrice = roundTo5(round2(costItemOnly / (1 - blankMargin) / (1 - 0.06 - 0.05)));
+                }
                 // Do NOT auto-fill sell_price_item — manager enters manually
                 columns.push({
                     label: item.product_name || 'Изделие ' + (i + 1),

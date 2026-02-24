@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=40c">
+    <link rel="stylesheet" href="css/style.css?v=40d">
 </head>
 <body>
 
@@ -701,32 +701,38 @@
                     </div>
                 </div>
 
-                <!-- Custom margins per tier -->
-                <div class="section-title" style="margin-top:12px; margin-bottom:4px;">Индивидуальная маржа (%) <span style="font-weight:400;font-size:11px;color:var(--text-muted)">Пустое = стандартная маржа</span></div>
+                <!-- Custom sell prices per tier -->
+                <div class="section-title" style="margin-top:12px; margin-bottom:4px;">Своя цена продажи (₽) <span style="font-weight:400;font-size:11px;color:var(--text-muted)">Пустое = стандартная цена</span></div>
                 <div class="form-row" style="flex-wrap:wrap;">
-                    <div class="form-group" style="flex:0 0 80px;min-width:70px;">
+                    <div class="form-group" style="flex:0 0 90px;min-width:80px;">
                         <label>50 шт</label>
-                        <input type="number" id="mold-margin-50" placeholder="75" min="0" max="99" step="1">
+                        <input type="number" id="mold-price-50" min="0" step="5" oninput="Molds.onCustomPriceInput()">
+                        <span class="form-hint" id="mold-price-margin-50" style="font-size:10px;"></span>
                     </div>
-                    <div class="form-group" style="flex:0 0 80px;min-width:70px;">
+                    <div class="form-group" style="flex:0 0 90px;min-width:80px;">
                         <label>100 шт</label>
-                        <input type="number" id="mold-margin-100" placeholder="70" min="0" max="99" step="1">
+                        <input type="number" id="mold-price-100" min="0" step="5" oninput="Molds.onCustomPriceInput()">
+                        <span class="form-hint" id="mold-price-margin-100" style="font-size:10px;"></span>
                     </div>
-                    <div class="form-group" style="flex:0 0 80px;min-width:70px;">
+                    <div class="form-group" style="flex:0 0 90px;min-width:80px;">
                         <label>300 шт</label>
-                        <input type="number" id="mold-margin-300" placeholder="60" min="0" max="99" step="1">
+                        <input type="number" id="mold-price-300" min="0" step="5" oninput="Molds.onCustomPriceInput()">
+                        <span class="form-hint" id="mold-price-margin-300" style="font-size:10px;"></span>
                     </div>
-                    <div class="form-group" style="flex:0 0 80px;min-width:70px;">
+                    <div class="form-group" style="flex:0 0 90px;min-width:80px;">
                         <label>500 шт</label>
-                        <input type="number" id="mold-margin-500" placeholder="50" min="0" max="99" step="1">
+                        <input type="number" id="mold-price-500" min="0" step="5" oninput="Molds.onCustomPriceInput()">
+                        <span class="form-hint" id="mold-price-margin-500" style="font-size:10px;"></span>
                     </div>
-                    <div class="form-group" style="flex:0 0 80px;min-width:70px;">
+                    <div class="form-group" style="flex:0 0 90px;min-width:80px;">
                         <label>1K шт</label>
-                        <input type="number" id="mold-margin-1000" placeholder="45" min="0" max="99" step="1">
+                        <input type="number" id="mold-price-1000" min="0" step="5" oninput="Molds.onCustomPriceInput()">
+                        <span class="form-hint" id="mold-price-margin-1000" style="font-size:10px;"></span>
                     </div>
-                    <div class="form-group" style="flex:0 0 80px;min-width:70px;">
+                    <div class="form-group" style="flex:0 0 90px;min-width:80px;">
                         <label>3K шт</label>
-                        <input type="number" id="mold-margin-3000" placeholder="40" min="0" max="99" step="1">
+                        <input type="number" id="mold-price-3000" min="0" step="5" oninput="Molds.onCustomPriceInput()">
+                        <span class="form-hint" id="mold-price-margin-3000" style="font-size:10px;"></span>
                     </div>
                 </div>
 
@@ -2016,24 +2022,24 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="js/supabase.js?v=40c"></script>
-<script src="js/calculator.js?v=40c"></script>
-<script src="js/app.js?v=40c"></script>
-<script src="js/dashboard.js?v=40c"></script>
-<script src="js/order-detail.js?v=40c"></script>
-<script src="js/orders.js?v=40c"></script>
-<script src="js/analytics.js?v=40c"></script>
-<script src="js/molds.js?v=40c"></script>
-<script src="js/colors.js?v=40c"></script>
-<script src="js/kp.js?v=40c"></script>
-<script src="js/timetrack.js?v=40c"></script>
-<script src="js/tasks.js?v=40c"></script>
-<script src="js/gantt.js?v=40c"></script>
-<script src="js/import.js?v=40c"></script>
-<script src="js/factual.js?v=40c"></script>
-<script src="js/china.js?v=40c"></script>
-<script src="js/warehouse_photos.js?v=40c"></script>
-<script src="js/warehouse.js?v=40c"></script>
-<script src="js/settings.js?v=40c"></script>
+<script src="js/supabase.js?v=40d"></script>
+<script src="js/calculator.js?v=40d"></script>
+<script src="js/app.js?v=40d"></script>
+<script src="js/dashboard.js?v=40d"></script>
+<script src="js/order-detail.js?v=40d"></script>
+<script src="js/orders.js?v=40d"></script>
+<script src="js/analytics.js?v=40d"></script>
+<script src="js/molds.js?v=40d"></script>
+<script src="js/colors.js?v=40d"></script>
+<script src="js/kp.js?v=40d"></script>
+<script src="js/timetrack.js?v=40d"></script>
+<script src="js/tasks.js?v=40d"></script>
+<script src="js/gantt.js?v=40d"></script>
+<script src="js/import.js?v=40d"></script>
+<script src="js/factual.js?v=40d"></script>
+<script src="js/china.js?v=40d"></script>
+<script src="js/warehouse_photos.js?v=40d"></script>
+<script src="js/warehouse.js?v=40d"></script>
+<script src="js/settings.js?v=40d"></script>
 </body>
 </html>
