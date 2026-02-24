@@ -135,7 +135,12 @@ const Molds = {
         if (!params) return;
 
         this.allMolds.forEach(m => {
-            const pph = m.pph_actual || m.pph_min || 1;
+            // Приоритет: факт → среднее(min,max) → min → 1
+            // Среднее = единая цена для заказчика, независимо от цвета пластика
+            const pMin = m.pph_min || 0;
+            const pMax = m.pph_max || 0;
+            const pAvg = (pMin > 0 && pMax > 0) ? Math.round((pMin + pMax) / 2) : (pMin || pMax || 0);
+            const pph = m.pph_actual || pAvg || 1;
             const weight = m.weight_grams || 0;
             const moldCount = m.mold_count || 1;
 

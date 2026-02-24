@@ -932,12 +932,15 @@ const Calculator = {
 
         this.items[idx].template_id = tpl.id;
         this.items[idx].product_name = tpl.name;
-        this.items[idx].pieces_per_hour = tpl.pieces_per_hour_min;
+        // Используем среднее между min и max — единая цена для заказчика
+        // независимо от цвета/качества пластика
+        const pphAvg = tpl.pieces_per_hour_avg || tpl.pieces_per_hour_min;
+        this.items[idx].pieces_per_hour = pphAvg;
         this.items[idx].weight_grams = tpl.weight_grams || 0;
         this.items[idx].is_blank_mold = true;
 
         document.getElementById('item-name-' + idx).value = tpl.name;
-        document.getElementById('item-pph-' + idx).value = tpl.pieces_per_hour_min;
+        document.getElementById('item-pph-' + idx).value = pphAvg;
         document.getElementById('item-weight-' + idx).value = tpl.weight_grams || '';
         document.getElementById('item-title-' + idx).textContent = tpl.name;
 

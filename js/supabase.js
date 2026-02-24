@@ -161,6 +161,7 @@ async function loadTemplates() {
         return molds.map(m => {
             const pMin = m.pph_min || 0;
             const pMax = m.pph_max || 0;
+            const pAvg = (pMin > 0 && pMax > 0) ? Math.round((pMin + pMax) / 2) : (pMin || pMax || 0);
             const display = pMin === 0 ? '—' : (pMin === pMax ? String(pMin) : `${pMin}-${pMax}`);
             return {
                 id: m.id,
@@ -171,6 +172,7 @@ async function loadTemplates() {
                 pieces_per_hour_display: display,
                 pieces_per_hour_min: pMin,
                 pieces_per_hour_max: pMax,
+                pieces_per_hour_avg: pAvg,
                 weight_grams: m.weight_grams,
             };
         });
@@ -184,6 +186,7 @@ function getDefaultTemplates() {
     return molds.map(m => {
         const pMin = m.pph_min || 0;
         const pMax = m.pph_max || 0;
+        const pAvg = (pMin > 0 && pMax > 0) ? Math.round((pMin + pMax) / 2) : (pMin || pMax || 0);
         const display = pMin === 0 ? '—' : (pMin === pMax ? String(pMin) : `${pMin}-${pMax}`);
         return {
             id: m.id,
@@ -194,6 +197,7 @@ function getDefaultTemplates() {
             pieces_per_hour_display: display,
             pieces_per_hour_min: pMin,
             pieces_per_hour_max: pMax,
+            pieces_per_hour_avg: pAvg,
             weight_grams: m.weight_grams,
         };
     });
@@ -204,6 +208,7 @@ function refreshTemplatesFromMolds(molds) {
     App.templates = molds.map(m => {
         const pMin = m.pph_min || 0;
         const pMax = m.pph_max || 0;
+        const pAvg = (pMin > 0 && pMax > 0) ? Math.round((pMin + pMax) / 2) : (pMin || pMax || 0);
         const display = pMin === 0 ? '—' : (pMin === pMax ? String(pMin) : `${pMin}-${pMax}`);
         return {
             id: m.id,
@@ -214,6 +219,7 @@ function refreshTemplatesFromMolds(molds) {
             pieces_per_hour_display: display,
             pieces_per_hour_min: pMin,
             pieces_per_hour_max: pMax,
+            pieces_per_hour_avg: pAvg,
             weight_grams: m.weight_grams,
         };
     });
