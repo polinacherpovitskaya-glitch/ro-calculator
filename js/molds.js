@@ -46,22 +46,29 @@ function getBlankMultiplier(qty) {
 }
 
 /**
- * Таргет цена бланка = (себест + НДС) * (1 + маржа) * множитель / (1 - налог - НДС_выход)
- * Маржа зависит от тиража: 65% при 50 шт → 35% при 3K шт
- * Множитель делает кривую крутой: 1.45× для 50 шт → 0.85× для 3K шт
- * 500 шт — точка опоры (mult = 1.00)
+ * Менеджерский сбор (ведение заказа) — раскидывается на тираж
+ */
+const MANAGER_FEE = 10000; // ₽ на весь заказ
+
+/**
+ * Таргет цена бланка
+ * Формула: (себест + менедж.сбор/тираж) / (1 - маржа) / (1 - налоги)
+ *
+ * Маржа — «в сухом остатке» после вычета налогов:
+ *   50=70%, 100=65%, 300=60%, 500=55%, 1K=50%, 3K=45%
+ *
+ * Налоги сверху: 6% ОСН + 5% коммерческий = 11%
  */
 function calcBlankTargetPrice(cost, qty, params) {
     if (cost <= 0 || qty <= 0) return 0;
     const margin = getBlankMargin(qty);
-    const mult = getBlankMultiplier(qty);
-    const vatOnCost = cost * (params.vatRate || 0.05);
-    return round2((cost + vatOnCost) * (1 + margin) * mult / (1 - (params.taxRate || 0.06) - 0.065));
+    const costWithFee = cost + MANAGER_FEE / qty;
+    const taxOverhead = 0.06 + 0.05; // 6% ОСН + 5% коммерч.
+    return round2(costWithFee / (1 - margin) / (1 - taxOverhead));
 }
 
 /**
- * Цена продажи бланка = таргет цена, округлённая до 5₽ вверх
- * Маржа уже заложена в таргет через тиражные множители
+ * Цена продажи бланка = таргет, округлённая до 5₽ вверх
  */
 function calcBlankSellPrice(cost, qty, params) {
     if (cost <= 0 || qty <= 0) return 0;

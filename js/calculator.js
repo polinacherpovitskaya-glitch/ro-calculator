@@ -266,17 +266,14 @@ function getMultiplierForQty(qty) {
 }
 
 /**
- * Рассчитать таргет-цену (модель 70/30)
- * Формула: (себестоимость + НДС) * (1 + маржа) * множитель / (1 - налог - НДС_выход)
- * Маржа зависит от тиража: 65% при 50шт → 35% при 5000шт
- * Множитель делает кривую крутой: 1.45× для 50 шт → 0.85× для 3K шт
+ * Рассчитать таргет-цену для фурнитуры/упаковки/кастома
+ * Формула: себестоимость / (1 - маржа) / (1 - 0.11)
+ * Налоги сверху: 6% ОСН + 5% коммерч. = 11%
  */
 function calculateTargetPrice(cost, params, qty) {
     if (cost === 0) return 0;
-    const margin = qty ? getMarginForQty(qty) : params.marginTarget;
-    const mult = qty ? getMultiplierForQty(qty) : 1.00;
-    const vatOnCost = cost * params.vatRate;
-    return round2((cost + vatOnCost) * (1 + margin) * mult / (1 - params.taxRate - 0.065));
+    const margin = qty ? getMarginForQty(qty) : (params.marginTarget || 0.55);
+    return round2(cost / (1 - margin) / (1 - 0.06 - 0.05));
 }
 
 /**
