@@ -45,23 +45,51 @@ const LOCAL_KEYS = {
     shipments: 'ro_calc_shipments',
 };
 
-// Data version — increment to force cache reset for molds
-const MOLDS_DATA_VERSION = 4; // v4: collections + new tiers (3000 instead of 5000)
+// Data version — increment to trigger NON-DESTRUCTIVE migration
+// NEVER delete user data! Only add missing fields to existing molds
+const MOLDS_DATA_VERSION = 5; // v5: safe migration (no data loss)
 const MOLDS_VERSION_KEY = 'ro_calc_molds_version';
 
 function checkMoldsVersion() {
     const stored = parseInt(localStorage.getItem(MOLDS_VERSION_KEY)) || 0;
     if (stored < MOLDS_DATA_VERSION) {
-        localStorage.removeItem(LOCAL_KEYS.molds);
+        // NON-DESTRUCTIVE: migrate existing data, don't delete it
+        const existing = getLocal(LOCAL_KEYS.molds);
+        if (existing && existing.length > 0) {
+            // Add missing fields to each mold (preserve user data like photos, PPH)
+            const defaults = getDefaultMolds();
+            const migrated = existing.map(m => {
+                // Ensure collection field exists (added in v4)
+                if (!m.collection) {
+                    const def = defaults.find(d => d.id === m.id);
+                    if (def) m.collection = def.collection || '';
+                }
+                // Ensure hw fields exist (added in v3)
+                if (m.hw_name === undefined) m.hw_name = '';
+                if (m.hw_price_per_unit === undefined) m.hw_price_per_unit = 0;
+                if (m.hw_delivery_total === undefined) m.hw_delivery_total = 0;
+                if (m.hw_speed === undefined) m.hw_speed = null;
+                if (m.hw_source === undefined) m.hw_source = 'custom';
+                if (m.hw_warehouse_item_id === undefined) m.hw_warehouse_item_id = null;
+                if (m.hw_warehouse_sku === undefined) m.hw_warehouse_sku = '';
+                // Ensure photo field exists (added in v36)
+                if (m.photo_url === undefined) m.photo_url = '';
+                // Ensure category field
+                if (!m.category) m.category = 'blank';
+                return m;
+            });
+            setLocal(LOCAL_KEYS.molds, migrated);
+            console.log('Molds migrated to version', MOLDS_DATA_VERSION, '(preserved', migrated.length, 'records)');
+        }
+        // If no existing data, getDefaultMolds() will be used by loadMolds()
         localStorage.setItem(MOLDS_VERSION_KEY, String(MOLDS_DATA_VERSION));
-        console.log('Molds cache reset to version', MOLDS_DATA_VERSION);
     }
 }
 
 function getLocal(key) {
     try {
         return JSON.parse(localStorage.getItem(key)) || null;
-    } catch { return null; }
+    } catch (e) { return null; }
 }
 
 function setLocal(key, data) {

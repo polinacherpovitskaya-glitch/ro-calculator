@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v37';
+const APP_VERSION = 'v37b';
 
 const App = {
     currentPage: 'dashboard',
@@ -1311,12 +1311,10 @@ const Calculator = {
             const costItemOnly = round2(costWithPrinting - costPrintingPart);
 
             if (item.is_blank_mold) {
-                // Blank mold: формула бланков с менедж. сбором
-                // цена = (себест + 10000/тираж) / (1 - маржа) / (1 - 0.11)
+                // Blank mold: формула бланков с наценкой
+                // цена = себест / (1 - маржа) / (1 - 0.11)
                 const blankMargin = getBlankMargin(item.quantity || 500);
-                const qty = item.quantity || 500;
-                const costWithFee = costItemOnly + MANAGER_FEE / qty;
-                const blankTarget = round2(costWithFee / (1 - blankMargin) / (1 - 0.06 - 0.05));
+                const blankTarget = round2(costItemOnly / (1 - blankMargin) / (1 - 0.06 - 0.05));
                 const blankSellPrice = roundTo5(blankTarget);
                 // Auto-set sell_price_item for blanks if user hasn't entered a custom price
                 if (!item.sell_price_item) {
@@ -1512,8 +1510,7 @@ const Calculator = {
                 const costPrintingPart = item.result.costPrinting || 0;
                 const costItemOnly = round2(item.result.costTotal - costPrintingPart);
                 const blankMargin = getBlankMargin(qty || 500);
-                const costWithFee = costItemOnly + MANAGER_FEE / (qty || 500);
-                itemPrice = roundTo5(round2(costWithFee / (1 - blankMargin) / (1 - 0.06 - 0.05)));
+                itemPrice = roundTo5(round2(costItemOnly / (1 - blankMargin) / (1 - 0.06 - 0.05)));
                 item.sell_price_item = itemPrice; // persist for KP generation
             }
             if (itemPrice > 0) {
@@ -1994,7 +1991,7 @@ const Calculator = {
             });
             // Parse printings from JSON
             if (typeof item.printings === 'string') {
-                try { item.printings = JSON.parse(item.printings); } catch { item.printings = []; }
+                try { item.printings = JSON.parse(item.printings); } catch (e) { item.printings = []; }
             }
             if (!Array.isArray(item.printings)) item.printings = [];
             // Migrate old single-printing to new format
@@ -2275,9 +2272,7 @@ const Calculator = {
             if ((!item.sell_price_item || item.sell_price_item <= 0) && costItemOnly > 0) {
                 if (item.is_blank_mold) {
                     const blankMargin = getBlankMargin(item.quantity || 500);
-                    const qty = item.quantity || 500;
-                    const costWithFee = costItemOnly + MANAGER_FEE / qty;
-                    item.sell_price_item = roundTo5(round2(costWithFee / (1 - blankMargin) / (1 - 0.06 - 0.05)));
+                    item.sell_price_item = roundTo5(round2(costItemOnly / (1 - blankMargin) / (1 - 0.06 - 0.05)));
                 } else {
                     // Default to 40% margin for custom molds
                     item.sell_price_item = roundTo5(calcTarget(costItemOnly, 0.40));

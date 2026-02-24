@@ -246,7 +246,7 @@ const Orders = {
                 deadlineHtml = `<span style="font-size:10px;${isOverdue ? 'color:var(--red);font-weight:600' : 'color:var(--text-muted)'}">
                     ${isOverdue ? '!' : ''}${dt.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })}
                 </span>`;
-            } catch {}
+            } catch (e) {}
         }
 
         return `
@@ -404,7 +404,7 @@ const Orders = {
         const key = 'ro_calc_order_history_' + orderId;
         try {
             return JSON.parse(localStorage.getItem(key)) || [];
-        } catch { return []; }
+        } catch (e) { return []; }
     },
 
     async saveHistory(orderId, history) {

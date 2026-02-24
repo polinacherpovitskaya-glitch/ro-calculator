@@ -15,7 +15,7 @@ const Tasks = {
             await saveTasks(this.allTasks);
         }
         // Cache orders for dropdown
-        try { this.allOrders = await loadOrders({}); } catch { this.allOrders = []; }
+        try { this.allOrders = await loadOrders({}); } catch (e) { this.allOrders = []; }
         this.renderStats();
         this.render();
     },
@@ -439,7 +439,7 @@ const Tasks = {
             const date = new Date(d);
             if (isNaN(date.getTime())) return d;
             return date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
-        } catch { return d; }
+        } catch (e) { return d; }
     },
 
     isOverdue(d) {
@@ -450,7 +450,7 @@ const Tasks = {
             const date = new Date(dateStr);
             if (isNaN(date.getTime())) return false;
             return date < new Date() && date.toDateString() !== new Date().toDateString();
-        } catch { return false; }
+        } catch (e) { return false; }
     },
 
     // === DEFAULT DATA (from Notion CSV) ===

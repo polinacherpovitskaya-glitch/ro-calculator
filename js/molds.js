@@ -46,13 +46,8 @@ function getBlankMultiplier(qty) {
 }
 
 /**
- * Менеджерский сбор (ведение заказа) — раскидывается на тираж
- */
-const MANAGER_FEE = 10000; // ₽ на весь заказ
-
-/**
  * Таргет цена бланка
- * Формула: (себест + менедж.сбор/тираж) / (1 - маржа) / (1 - налоги)
+ * Формула: себест / (1 - маржа) / (1 - налоги)
  *
  * Маржа — «в сухом остатке» после вычета налогов:
  *   50=70%, 100=65%, 300=60%, 500=55%, 1K=50%, 3K=45%
@@ -62,9 +57,8 @@ const MANAGER_FEE = 10000; // ₽ на весь заказ
 function calcBlankTargetPrice(cost, qty, params) {
     if (cost <= 0 || qty <= 0) return 0;
     const margin = getBlankMargin(qty);
-    const costWithFee = cost + MANAGER_FEE / qty;
     const taxOverhead = 0.06 + 0.05; // 6% ОСН + 5% коммерч.
-    return round2(costWithFee / (1 - margin) / (1 - taxOverhead));
+    return round2(cost / (1 - margin) / (1 - taxOverhead));
 }
 
 /**
@@ -81,14 +75,20 @@ const Molds = {
     editingId: null,
 
     async load() {
-        this.allMolds = await loadMolds();
-        this.enrichMolds();
-        this.populateCollectionDropdowns();
-        this.renderStats();
-        this.filterAndRender();
-        this.bindFormEvents();
-        // Keep App.templates in sync with molds (photo_url, collection etc.)
-        refreshTemplatesFromMolds(this.allMolds);
+        try {
+            this.allMolds = await loadMolds();
+            this.enrichMolds();
+            this.populateCollectionDropdowns();
+            this.renderStats();
+            this.filterAndRender();
+            this.bindFormEvents();
+            // Keep App.templates in sync with molds (photo_url, collection etc.)
+            refreshTemplatesFromMolds(this.allMolds);
+        } catch (err) {
+            console.error('Molds.load() error:', err);
+            const container = document.getElementById('molds-cards-container');
+            if (container) container.innerHTML = '<div class="card" style="padding:20px;color:var(--red)">Ошибка загрузки бланков: ' + (err.message || err) + '</div>';
+        }
     },
 
     // Build unique collections list from all molds
@@ -142,6 +142,7 @@ const Molds = {
         if (!params) return;
 
         this.allMolds.forEach(m => {
+            try {
             // Приоритет: факт → среднее(min,max) → min → 1
             // Среднее = единая цена для заказчика, независимо от цвета пластика
             const pMin = m.pph_min || 0;
@@ -220,6 +221,10 @@ const Molds = {
             m.complexity_label = { simple: '2ч 800¥', complex: '2ч 1000¥', nfc_triple: '3ч 1200¥' }[m.complexity] || m.complexity;
             m.status_label = { active: 'Активный', client: 'Клиентский', retired: 'Неактив.' }[m.status] || m.status;
             m.category_label = { blank: 'Бланк', nfc: 'NFC', custom: 'Кастом', client_custom: 'Клиент.' }[m.category] || m.category;
+            } catch (err) {
+                console.error('enrichMolds error for mold', m.id, m.name, ':', err);
+                m.tiers = {};
+            }
         });
     },
 
