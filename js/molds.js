@@ -655,12 +655,12 @@ const Molds = {
     _warehouseItems: [],
 
     async loadWarehouseForHw() {
-        if (this._warehouseItems.length > 0) return;
+        if (this._warehouseItems && this._warehouseItems.length > 0) return;
         try {
             this._warehouseItems = await loadWarehouseItems();
-            // Filter to hardware category
+            // All categories except packaging (packaging = only bags/boxes)
             this._warehouseItems = this._warehouseItems.filter(i =>
-                i.category === 'hardware' || i.category === 'фурнитура'
+                i.category !== 'packaging'
             );
         } catch (e) { console.warn('loadWarehouseForHw error:', e); this._warehouseItems = []; }
     },
