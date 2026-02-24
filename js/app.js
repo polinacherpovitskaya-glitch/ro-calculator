@@ -1511,10 +1511,7 @@ const Calculator = {
                 const blankMargin = (customMargin !== null && customMargin !== undefined) ? customMargin : getBlankMargin(item.quantity || 500);
                 const blankTarget = round2(costItemOnly / (1 - blankMargin) / (1 - 0.06 - 0.05));
                 const blankSellPrice = roundTo5(blankTarget);
-                // Auto-set sell_price_item for blanks if user hasn't entered a custom price
-                if (!item.sell_price_item) {
-                    item.sell_price_item = blankSellPrice;
-                }
+                // Do NOT auto-fill sell_price_item — manager enters manually
                 columns.push({
                     label: item.product_name || 'Изделие ' + (i + 1),
                     type: 'item',
@@ -1522,7 +1519,7 @@ const Calculator = {
                     isBlank: true,
                     cost: costItemOnly,
                     blankPrice: blankSellPrice,
-                    sellPrice: item.sell_price_item || blankSellPrice,
+                    sellPrice: item.sell_price_item || 0,
                 });
             } else {
                 // Custom mold: show margin targets
@@ -1660,8 +1657,11 @@ const Calculator = {
         columns.forEach((col, ci) => {
             const inputId = `sell-${col.type}-${col.globalIdx}${col.printingIdx !== undefined ? '-p' + col.printingIdx : ''}`;
             const piArg = col.printingIdx !== undefined ? `, ${col.printingIdx}` : '';
+            // Show recommended price as placeholder for blanks
+            const placeholder = col.isBlank && col.blankPrice ? col.blankPrice : '';
             html += `<div style="padding:4px;text-align:center;${cellBorder}background:var(--green-light);">
                 <input type="text" inputmode="decimal" id="${inputId}" value="${col.sellPrice || ''}"
+                    placeholder="${placeholder}"
                     style="width:100%;text-align:center;font-weight:600;font-size:13px;border:1px solid var(--border);border-radius:4px;padding:4px;"
                     oninput="Calculator.onPricingSellChange('${col.type}', ${col.globalIdx}, this.value${piArg})">
             </div>`;
@@ -1699,17 +1699,8 @@ const Calculator = {
         this.items.forEach((item, i) => {
             if (!item.result || !item.quantity) return;
             const qty = item.quantity;
-            // For blank molds, use auto-calculated price as fallback
+            // Use only manually entered sell price (no auto-fill)
             let itemPrice = item.sell_price_item;
-            if ((!itemPrice || itemPrice <= 0) && item.is_blank_mold && item.result.costTotal > 0) {
-                const costPrintingPart = item.result.costPrinting || 0;
-                const costItemOnly = round2(item.result.costTotal - costPrintingPart);
-                const tpl = App.templates.find(t => t.id == item.template_id);
-                const customMargin = tpl?.custom_margins?.[qty];
-                const blankMargin = (customMargin !== null && customMargin !== undefined) ? customMargin : getBlankMargin(qty || 500);
-                itemPrice = roundTo5(round2(costItemOnly / (1 - blankMargin) / (1 - 0.06 - 0.05)));
-                item.sell_price_item = itemPrice; // persist for KP generation
-            }
             if (itemPrice > 0) {
                 invoiceRows.push({
                     name: item.product_name || 'Изделие ' + (i + 1),
@@ -2561,18 +2552,7 @@ const Calculator = {
             const costPrintingPart = item.result.costPrinting || 0;
             const costItemOnly = round2(item.result.costTotal - costPrintingPart);
 
-            // Auto-fill item sell price if not set
-            if ((!item.sell_price_item || item.sell_price_item <= 0) && costItemOnly > 0) {
-                if (item.is_blank_mold) {
-                    const tpl = App.templates.find(t => t.id == item.template_id);
-                    const customMargin = tpl?.custom_margins?.[item.quantity];
-                    const blankMargin = (customMargin !== null && customMargin !== undefined) ? customMargin : getBlankMargin(item.quantity || 500);
-                    item.sell_price_item = roundTo5(round2(costItemOnly / (1 - blankMargin) / (1 - 0.06 - 0.05)));
-                } else {
-                    // Default to 40% margin for custom molds
-                    item.sell_price_item = roundTo5(calcTarget(costItemOnly, 0.40));
-                }
-            }
+            // No auto-fill for item sell price — manager enters manually
 
             // Auto-fill per-printing sell prices if not set
             const printingDetails = item.result.costPrintingDetails || [];
