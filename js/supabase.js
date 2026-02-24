@@ -158,24 +158,7 @@ async function loadTemplates() {
     // so photo_url, collection etc. stay in sync
     const molds = getLocal(LOCAL_KEYS.molds);
     if (molds && molds.length > 0) {
-        return molds.map(m => {
-            const pMin = m.pph_min || 0;
-            const pMax = m.pph_max || 0;
-            const pAvg = (pMin > 0 && pMax > 0) ? Math.round((pMin + pMax) / 2) : (pMin || pMax || 0);
-            const display = pMin === 0 ? '—' : (pMin === pMax ? String(pMin) : `${pMin}-${pMax}`);
-            return {
-                id: m.id,
-                name: m.name,
-                category: m.category === 'nfc' ? 'blank' : (m.category || 'blank'),
-                collection: m.collection || '',
-                photo_url: m.photo_url || '',
-                pieces_per_hour_display: display,
-                pieces_per_hour_min: pMin,
-                pieces_per_hour_max: pMax,
-                pieces_per_hour_avg: pAvg,
-                weight_grams: m.weight_grams,
-            };
-        });
+        return molds.map(m => _moldToTemplate(m));
     }
     return getDefaultTemplates();
 }
@@ -183,46 +166,37 @@ async function loadTemplates() {
 function getDefaultTemplates() {
     // Auto-generate from default molds (blanks catalog is the source of truth)
     const molds = getDefaultMolds();
-    return molds.map(m => {
-        const pMin = m.pph_min || 0;
-        const pMax = m.pph_max || 0;
-        const pAvg = (pMin > 0 && pMax > 0) ? Math.round((pMin + pMax) / 2) : (pMin || pMax || 0);
-        const display = pMin === 0 ? '—' : (pMin === pMax ? String(pMin) : `${pMin}-${pMax}`);
-        return {
-            id: m.id,
-            name: m.name,
-            category: 'blank',
-            collection: m.collection || '',
-            photo_url: m.photo_url || '',
-            pieces_per_hour_display: display,
-            pieces_per_hour_min: pMin,
-            pieces_per_hour_max: pMax,
-            pieces_per_hour_avg: pAvg,
-            weight_grams: m.weight_grams,
-        };
-    });
+    return molds.map(m => _moldToTemplate(m));
+}
+
+/** Convert a mold object to a template object (single source of truth) */
+function _moldToTemplate(m) {
+    const pMin = m.pph_min || 0;
+    const pMax = m.pph_max || 0;
+    const pAvg = (pMin > 0 && pMax > 0) ? Math.round((pMin + pMax) / 2) : (pMin || pMax || 0);
+    const display = pMin === 0 ? '—' : (pMin === pMax ? String(pMin) : `${pMin}-${pMax}`);
+    return {
+        id: m.id,
+        name: m.name,
+        category: m.category === 'nfc' ? 'blank' : (m.category || 'blank'),
+        collection: m.collection || '',
+        photo_url: m.photo_url || '',
+        pieces_per_hour_display: display,
+        pieces_per_hour_min: pMin,
+        pieces_per_hour_max: pMax,
+        pieces_per_hour_avg: pAvg,
+        weight_grams: m.weight_grams,
+        // Built-in hardware (e.g. mirror, magnet, ring)
+        hw_name: m.hw_name || '',
+        hw_price_per_unit: m.hw_price_per_unit || 0,
+        hw_delivery_total: m.hw_delivery_total || 0,
+        hw_speed: m.hw_speed || 0,
+    };
 }
 
 /** Rebuild App.templates from molds (called after mold save) */
 function refreshTemplatesFromMolds(molds) {
-    App.templates = molds.map(m => {
-        const pMin = m.pph_min || 0;
-        const pMax = m.pph_max || 0;
-        const pAvg = (pMin > 0 && pMax > 0) ? Math.round((pMin + pMax) / 2) : (pMin || pMax || 0);
-        const display = pMin === 0 ? '—' : (pMin === pMax ? String(pMin) : `${pMin}-${pMax}`);
-        return {
-            id: m.id,
-            name: m.name,
-            category: m.category === 'nfc' ? 'blank' : (m.category || 'blank'),
-            collection: m.collection || '',
-            photo_url: m.photo_url || '',
-            pieces_per_hour_display: display,
-            pieces_per_hour_min: pMin,
-            pieces_per_hour_max: pMax,
-            pieces_per_hour_avg: pAvg,
-            weight_grams: m.weight_grams,
-        };
-    });
+    App.templates = molds.map(m => _moldToTemplate(m));
 }
 
 // =============================================

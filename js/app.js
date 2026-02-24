@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v36';
+const APP_VERSION = 'v37';
 
 const App = {
     currentPage: 'dashboard',
@@ -251,6 +251,11 @@ const Calculator = {
             delivery_included: false,
             // Multiple printings
             printings: [],
+            // Built-in hardware from blank template
+            builtin_hw_name: '',
+            builtin_hw_price: 0,
+            builtin_hw_delivery_total: 0,
+            builtin_hw_speed: 0,
             // Sell prices
             sell_price_item: 0,
             sell_price_printing: 0,
@@ -272,7 +277,7 @@ const Calculator = {
             const selectedHtml = selectedMold
                 ? `<div style="display:flex;gap:8px;align-items:center;">
                     ${selectedMold.photo_url ? `<img src="${this._escAttr(selectedMold.photo_url)}" style="width:36px;height:36px;object-fit:cover;border-radius:6px;border:1px solid var(--border)">` : `<span style="width:36px;height:36px;display:flex;align-items:center;justify-content:center;background:var(--accent-light);border-radius:6px;font-size:14px;font-weight:700;color:var(--accent)">${(selectedMold.name || '?')[0]}</span>`}
-                    <div><div style="font-weight:600;font-size:13px">${this._esc(selectedMold.name)}</div><div style="font-size:10px;color:var(--text-muted)">${selectedMold.pieces_per_hour_display} шт/ч · ${selectedMold.weight_grams || 0}г</div></div>
+                    <div><div style="font-weight:600;font-size:13px">${this._esc(selectedMold.name)}</div><div style="font-size:10px;color:var(--text-muted)">${selectedMold.pieces_per_hour_display} шт/ч · ${selectedMold.weight_grams || 0}г${selectedMold.hw_name ? ' · <span style="color:var(--accent)">+ ' + this._esc(selectedMold.hw_name) + '</span>' : ''}</div></div>
                    </div>`
                 : '<span style="color:var(--text-muted);font-size:13px">-- Выбрать бланк --</span>';
 
@@ -285,7 +290,7 @@ const Calculator = {
                     ${photo}
                     <div style="flex:1;min-width:0">
                         <div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${this._esc(t.name)}</div>
-                        <div style="font-size:10px;color:var(--text-muted)">${t.pieces_per_hour_display} шт/ч · ${t.weight_grams || 0}г${t.collection ? ' · ' + this._esc(t.collection) : ''}</div>
+                        <div style="font-size:10px;color:var(--text-muted)">${t.pieces_per_hour_display} шт/ч · ${t.weight_grams || 0}г${t.hw_name ? ' · <span style="color:var(--accent)">+ ' + this._esc(t.hw_name) + '</span>' : ''}${t.collection ? ' · ' + this._esc(t.collection) : ''}</div>
                     </div>
                 </div>`;
             }).join('');
@@ -334,6 +339,7 @@ const Calculator = {
             <div class="form-group template-select" id="template-wrap-${idx}" style="${item.is_blank_mold ? '' : 'display:none'};position:relative">
                 <label>Бланк из справочника</label>
                 ${moldPickerHtml}
+                <span id="item-hw-badge-${idx}" style="display:${item.builtin_hw_name ? '' : 'none'};font-size:11px;color:var(--accent);margin-top:4px;font-weight:600;">+ ${item.builtin_hw_name || ''}</span>
             </div>
 
             <div class="form-row">
@@ -396,6 +402,7 @@ const Calculator = {
                 <div class="cost-row"><span class="cost-label">NFC метка</span><span class="cost-value" id="c-${idx}-nfc-tag">0</span></div>
                 <div class="cost-row"><span class="cost-label">NFC программирование</span><span class="cost-value" id="c-${idx}-nfc-prog">0</span></div>
                 <div class="cost-row"><span class="cost-label">NFC (косв.)</span><span class="cost-value" id="c-${idx}-nfc-ind">0</span></div>
+                <div class="cost-row"><span class="cost-label">Встроенная фурнитура</span><span class="cost-value" id="c-${idx}-builtin-hw">0</span></div>
                 <div class="cost-row"><span class="cost-label">Нанесение</span><span class="cost-value" id="c-${idx}-printing">0</span></div>
                 <div class="cost-row"><span class="cost-label">Доставка</span><span class="cost-value" id="c-${idx}-delivery">0</span></div>
                 <div class="cost-row cost-total"><span class="cost-label">ИТОГО себестоимость</span><span class="cost-value" id="c-${idx}-total">0</span></div>
@@ -950,10 +957,27 @@ const Calculator = {
         this.items[idx].weight_grams = tpl.weight_grams || 0;
         this.items[idx].is_blank_mold = true;
 
+        // Встроенная фурнитура бланка (зеркало, магнит и т.д.)
+        this.items[idx].builtin_hw_name = tpl.hw_name || '';
+        this.items[idx].builtin_hw_price = tpl.hw_price_per_unit || 0;
+        this.items[idx].builtin_hw_delivery_total = tpl.hw_delivery_total || 0;
+        this.items[idx].builtin_hw_speed = tpl.hw_speed || 0;
+
         document.getElementById('item-name-' + idx).value = tpl.name;
         document.getElementById('item-pph-' + idx).value = pphAvg;
         document.getElementById('item-weight-' + idx).value = tpl.weight_grams || '';
         document.getElementById('item-title-' + idx).textContent = tpl.name;
+
+        // Show built-in hw badge
+        const hwBadge = document.getElementById('item-hw-badge-' + idx);
+        if (hwBadge) {
+            if (tpl.hw_name) {
+                hwBadge.style.display = '';
+                hwBadge.textContent = '+ ' + tpl.hw_name;
+            } else {
+                hwBadge.style.display = 'none';
+            }
+        }
 
         // Close picker & re-render selected display
         this.closeMoldPicker(idx);
@@ -993,9 +1017,15 @@ const Calculator = {
     setMoldType(idx, isBlank) {
         this.items[idx].is_blank_mold = isBlank;
         this.updateMoldTypeUI(idx, isBlank);
-        // Clear template if switching to custom
+        // Clear template and built-in hw if switching to custom
         if (!isBlank) {
             this.items[idx].template_id = null;
+            this.items[idx].builtin_hw_name = '';
+            this.items[idx].builtin_hw_price = 0;
+            this.items[idx].builtin_hw_delivery_total = 0;
+            this.items[idx].builtin_hw_speed = 0;
+            const hwBadge = document.getElementById('item-hw-badge-' + idx);
+            if (hwBadge) hwBadge.style.display = 'none';
         }
         this.recalculate();
     },
@@ -1087,6 +1117,7 @@ const Calculator = {
                 this.setText('c-' + idx + '-nfc-tag', formatRub(result.costNfcTag));
                 this.setText('c-' + idx + '-nfc-prog', formatRub(result.costNfcProgramming));
                 this.setText('c-' + idx + '-nfc-ind', formatRub(result.costNfcIndirect));
+                this.setText('c-' + idx + '-builtin-hw', formatRub(result.costBuiltinHw || 0));
                 this.setText('c-' + idx + '-printing', formatRub(result.costPrinting));
                 this.setText('c-' + idx + '-delivery', formatRub(result.costDelivery));
                 this.setText('c-' + idx + '-total', formatRub(result.costTotal));
@@ -1632,7 +1663,7 @@ const Calculator = {
             pickerSelected.innerHTML = `
                 <div style="display:flex;gap:8px;align-items:center;">
                     ${photoHtml}
-                    <div><div style="font-weight:600;font-size:13px">${this._esc(selectedMold.name)}</div><div style="font-size:10px;color:var(--text-muted)">${selectedMold.pieces_per_hour_display} шт/ч · ${selectedMold.weight_grams || 0}г</div></div>
+                    <div><div style="font-weight:600;font-size:13px">${this._esc(selectedMold.name)}</div><div style="font-size:10px;color:var(--text-muted)">${selectedMold.pieces_per_hour_display} шт/ч · ${selectedMold.weight_grams || 0}г${selectedMold.hw_name ? ' · <span style="color:var(--accent)">+ ' + this._esc(selectedMold.hw_name) + '</span>' : ''}</div></div>
                 </div>
                 <span style="flex-shrink:0;color:var(--text-muted);font-size:10px;margin-left:8px">&#9662;</span>`;
         } else {
@@ -1971,6 +2002,16 @@ const Calculator = {
             // Migrate old single-printing to new format
             if (item.printings.length === 0 && dbItem.printing_qty > 0) {
                 item.printings = [{ name: '', qty: dbItem.printing_qty, price: dbItem.printing_price_per_unit || 0 }];
+            }
+            // Re-derive built-in hardware from template (not stored in DB)
+            if (item.template_id && App.templates) {
+                const tpl = App.templates.find(t => t.id == item.template_id);
+                if (tpl) {
+                    item.builtin_hw_name = tpl.hw_name || '';
+                    item.builtin_hw_price = tpl.hw_price_per_unit || 0;
+                    item.builtin_hw_delivery_total = tpl.hw_delivery_total || 0;
+                    item.builtin_hw_speed = tpl.hw_speed || 0;
+                }
             }
             this.items.push(item);
             this.renderItemBlock(i);

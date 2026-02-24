@@ -127,6 +127,24 @@ function calculateItemCost(item, params) {
         }
     }
 
+    // === Встроенная фурнитура бланка (зеркало, магнит, кольцо и т.д.) ===
+    let costBuiltinHw = 0;
+    let hoursBuiltinHw = 0;
+    const hwName = item.builtin_hw_name || '';
+    const hwPricePerUnit = item.builtin_hw_price || 0;
+    const hwDeliveryTotal = item.builtin_hw_delivery_total || 0;
+    const hwSpeed = item.builtin_hw_speed || 0;
+
+    if (hwName && (hwPricePerUnit > 0 || hwSpeed > 0)) {
+        // Закупка + доставка за шт
+        costBuiltinHw = hwPricePerUnit + (hwDeliveryTotal > 0 && qty > 0 ? hwDeliveryTotal / qty : 0);
+        // ФОТ сборки
+        if (hwSpeed > 0 && qty > 0) {
+            hoursBuiltinHw = qty / hwSpeed * p.wasteFactor;
+            costBuiltinHw += hoursBuiltinHw * p.fotPerHour / qty;
+        }
+    }
+
     // === Доставка за наш счет ===
     const costDelivery = item.delivery_included ? p.deliveryCostMoscow / qty : 0;
 
@@ -134,7 +152,7 @@ function calculateItemCost(item, params) {
     let costTotal = costFot + costIndirect + costPlastic + costMoldAmortization
         + costDesign + costCutting + costCuttingIndirect
         + costNfcTag + costNfcProgramming + costNfcIndirect
-        + costPrinting + costDelivery;
+        + costPrinting + costDelivery + costBuiltinHw;
     // Protect against NaN/Infinity from division by zero in params
     if (!isFinite(costTotal)) {
         console.warn('costTotal is NaN/Infinity, components:', {costFot, costIndirect, costPlastic, costMoldAmortization, costDesign, costCutting, costNfcTag, costPrinting, costDelivery});
@@ -156,18 +174,20 @@ function calculateItemCost(item, params) {
         costPrinting: round2(costPrinting),
         costPrintingDetails: costPrintingDetails,
         costDelivery: round2(costDelivery),
+        costBuiltinHw: round2(costBuiltinHw),
         costTotal: round2(costTotal),
 
         // Часы производства (на всю партию)
         hoursPlastic: round2(hoursPlastic),
         hoursCutting: round2(hoursCutting),
         hoursNfc: round2(hoursNfc),
+        hoursBuiltinHw: round2(hoursBuiltinHw),
 
         // Часы по зонам загрузки:
-        // 70% зона (литьё) — только литьё пластика + NFC
-        hoursPlasticZone: round2(hoursPlastic + hoursNfc),
-        // 30% зона (упаковка/обработка) — срезание лейника
-        hoursCuttingZone: round2(hoursCutting),
+        // 70% зона (литьё) — литьё + срезка + NFC + встроенная фурнитура
+        hoursPlasticZone: round2(hoursPlastic + hoursCutting + hoursNfc + hoursBuiltinHw),
+        // 30% зона (упаковка/обработка) — только внешняя фурнитура/упаковка
+        hoursCuttingZone: 0,
 
         // Обратная совместимость — общие часы
         hoursTotalPlasticNfc: round2(hoursPlastic + hoursCutting + hoursNfc),
@@ -292,10 +312,9 @@ function calculateProductionLoad(items, hardwareItems, packagingItems, params) {
 
     items.forEach(item => {
         if (item.result) {
-            // 70% зона — только литьё пластика + NFC
+            // 70% зона — литьё + срезка лейника + NFC + встроенная фурнитура
             hoursPlasticTotal += item.result.hoursPlasticZone || 0;
-            // 30% зона — срезание лейника
-            hoursPackagingTotal += item.result.hoursCuttingZone || 0;
+            // (hoursCuttingZone теперь всегда 0 — срезка в зоне литья)
         }
     });
 
@@ -495,8 +514,9 @@ function getEmptyCostResult() {
         costFot: 0, costIndirect: 0, costPlastic: 0, costMoldAmortization: 0,
         costDesign: 0, costCutting: 0, costCuttingIndirect: 0,
         costNfcTag: 0, costNfcProgramming: 0, costNfcIndirect: 0,
+        costBuiltinHw: 0,
         costPrinting: 0, costDelivery: 0, costTotal: 0,
-        hoursPlastic: 0, hoursCutting: 0, hoursNfc: 0,
+        hoursPlastic: 0, hoursCutting: 0, hoursNfc: 0, hoursBuiltinHw: 0,
         hoursPlasticZone: 0, hoursCuttingZone: 0,
         hoursTotalPlasticNfc: 0,
     };
