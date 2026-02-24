@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=38">
+    <link rel="stylesheet" href="css/style.css?v=39">
 </head>
 <body>
 
@@ -59,6 +59,10 @@
             <a href="#molds" data-page="molds">
                 <span class="nav-icon">&#9670;</span>
                 <span>Бланки</span>
+            </a>
+            <a href="#colors" data-page="colors">
+                <span class="nav-icon">&#127912;</span>
+                <span>Цвета</span>
             </a>
             <a href="#timetrack" data-page="timetrack">
                 <span class="nav-icon">&#9201;</span>
@@ -188,12 +192,6 @@
                     <div class="form-group">
                         <label>Дедлайн (конец)</label>
                         <input type="date" id="calc-deadline-end">
-                    </div>
-                </div>
-                <div class="form-row">
-                    <div class="form-group" style="flex:2">
-                        <label>Цветовое решение</label>
-                        <input type="text" id="calc-color-scheme" placeholder="напр. белый+синий+зеленый">
                     </div>
                 </div>
                 <div class="form-group">
@@ -708,6 +706,75 @@
                     <button class="btn btn-success" onclick="Molds.saveMold()">Сохранить</button>
                     <button class="btn btn-outline" onclick="Molds.hideForm()">Отмена</button>
                     <button class="btn btn-danger" id="mold-delete-btn" style="margin-left:auto; display:none;" onclick="Molds.deleteFromForm()">Удалить бланк</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ========== COLORS ========== -->
+        <div id="page-colors" class="page">
+            <div class="page-header">
+                <h1>Справочник цветов</h1>
+                <button class="btn btn-primary" onclick="Colors.showAddForm()">+ Новый цвет</button>
+            </div>
+
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-label">Всего цветов</div>
+                    <div class="stat-value" id="colors-total">0</div>
+                </div>
+            </div>
+
+            <!-- Search -->
+            <div class="card" style="padding: 12px 20px;">
+                <div class="form-row" style="align-items:end">
+                    <div class="form-group" style="margin:0">
+                        <label>Поиск</label>
+                        <input type="text" id="colors-search" placeholder="Название или номер" oninput="Colors.filterAndRender()">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Colors grid -->
+            <div id="colors-cards-container"></div>
+
+            <!-- Add/Edit form -->
+            <div class="card" id="color-edit-form" style="display:none;">
+                <div class="card-header">
+                    <h3 id="color-form-title">Новый цвет</h3>
+                    <button class="btn btn-sm btn-outline" onclick="Colors.hideForm()">Закрыть</button>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Номер</label>
+                        <input type="text" id="color-number" placeholder="001" maxlength="5">
+                    </div>
+                    <div class="form-group" style="flex:2">
+                        <label>Название</label>
+                        <input type="text" id="color-name" placeholder="Белый мрамор">
+                    </div>
+                </div>
+                <!-- Photo upload -->
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Фото</label>
+                        <div style="display:flex;gap:8px;align-items:center;">
+                            <div id="color-photo-preview" class="color-photo-preview">
+                                <span style="font-size:24px;color:var(--text-muted)">&#127912;</span>
+                            </div>
+                            <div style="flex:1;">
+                                <input type="file" id="color-photo-file" accept="image/*" onchange="Colors.onPhotoFileChange(this)" style="font-size:12px;margin-bottom:4px;">
+                                <input type="text" id="color-photo-url" placeholder="или URL фото" onchange="Colors.onPhotoUrlChange(this.value)" style="font-size:12px;">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Заметки</label>
+                    <input type="text" id="color-notes" placeholder="Доп. информация">
+                </div>
+                <div style="display:flex; gap:8px; margin-top:12px;">
+                    <button class="btn btn-primary" onclick="Colors.saveColor()">Сохранить</button>
+                    <button class="btn btn-outline" onclick="Colors.hideForm()">Отмена</button>
                 </div>
             </div>
         </div>
@@ -1917,23 +1984,24 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="js/supabase.js?v=38"></script>
-<script src="js/calculator.js?v=38"></script>
-<script src="js/app.js?v=38"></script>
-<script src="js/dashboard.js?v=38"></script>
-<script src="js/order-detail.js?v=38"></script>
-<script src="js/orders.js?v=38"></script>
-<script src="js/analytics.js?v=38"></script>
-<script src="js/molds.js?v=38"></script>
-<script src="js/kp.js?v=38"></script>
-<script src="js/timetrack.js?v=38"></script>
-<script src="js/tasks.js?v=38"></script>
-<script src="js/gantt.js?v=38"></script>
-<script src="js/import.js?v=38"></script>
-<script src="js/factual.js?v=38"></script>
-<script src="js/china.js?v=38"></script>
-<script src="js/warehouse_photos.js?v=38"></script>
-<script src="js/warehouse.js?v=38"></script>
-<script src="js/settings.js?v=38"></script>
+<script src="js/supabase.js?v=39"></script>
+<script src="js/calculator.js?v=39"></script>
+<script src="js/app.js?v=39"></script>
+<script src="js/dashboard.js?v=39"></script>
+<script src="js/order-detail.js?v=39"></script>
+<script src="js/orders.js?v=39"></script>
+<script src="js/analytics.js?v=39"></script>
+<script src="js/molds.js?v=39"></script>
+<script src="js/colors.js?v=39"></script>
+<script src="js/kp.js?v=39"></script>
+<script src="js/timetrack.js?v=39"></script>
+<script src="js/tasks.js?v=39"></script>
+<script src="js/gantt.js?v=39"></script>
+<script src="js/import.js?v=39"></script>
+<script src="js/factual.js?v=39"></script>
+<script src="js/china.js?v=39"></script>
+<script src="js/warehouse_photos.js?v=39"></script>
+<script src="js/warehouse.js?v=39"></script>
+<script src="js/settings.js?v=39"></script>
 </body>
 </html>

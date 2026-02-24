@@ -43,6 +43,7 @@ const LOCAL_KEYS = {
     warehouseReservations: 'ro_calc_warehouse_reservations',
     warehouseHistory: 'ro_calc_warehouse_history',
     shipments: 'ro_calc_shipments',
+    colors: 'ro_calc_colors',
 };
 
 // Data version — increment to trigger NON-DESTRUCTIVE migration
@@ -895,4 +896,87 @@ async function updateChinaPurchaseStatus(purchaseId, status, note) {
 async function deleteChinaPurchase(purchaseId) {
     const purchases = (getLocal(LOCAL_KEYS.chinaPurchases) || []).filter(p => p.id !== purchaseId);
     setLocal(LOCAL_KEYS.chinaPurchases, purchases);
+}
+
+// =============================================
+// COLORS (Справочник цветов)
+// =============================================
+
+async function loadColors() {
+    return getLocal(LOCAL_KEYS.colors) || getDefaultColors();
+}
+
+async function saveColor(color) {
+    const colors = await loadColors();
+    if (color.id) {
+        const idx = colors.findIndex(c => c.id === color.id);
+        if (idx >= 0) {
+            colors[idx] = { ...color, updated_at: new Date().toISOString() };
+        }
+    } else {
+        color.id = Date.now();
+        color.created_at = new Date().toISOString();
+        color.updated_at = new Date().toISOString();
+        colors.push(color);
+    }
+    setLocal(LOCAL_KEYS.colors, colors);
+    return color.id;
+}
+
+async function saveColors(colors) {
+    setLocal(LOCAL_KEYS.colors, colors);
+}
+
+async function deleteColor(colorId) {
+    const colors = (await loadColors()).filter(c => c.id !== colorId);
+    setLocal(LOCAL_KEYS.colors, colors);
+}
+
+function getDefaultColors() {
+    const now = new Date().toISOString();
+    return [
+        { id: 1, number: '001', name: 'Белый мрамор', photo_url: '', notes: '', created_at: now, updated_at: now },
+        { id: 2, number: '002', name: 'Слоновая кость', photo_url: '', notes: '', created_at: now, updated_at: now },
+        { id: 3, number: '003', name: 'Ваниль', photo_url: '', notes: '', created_at: now, updated_at: now },
+        { id: 4, number: '004', name: 'Лимонный', photo_url: '', notes: '', created_at: now, updated_at: now },
+        { id: 5, number: '005', name: 'Золотой', photo_url: '', notes: '', created_at: now, updated_at: now },
+        { id: 6, number: '006', name: 'Янтарный', photo_url: '', notes: '', created_at: now, updated_at: now },
+        { id: 7, number: '007', name: 'Апельсин', photo_url: '', notes: '', created_at: now, updated_at: now },
+        { id: 8, number: '008', name: 'Коралловый', photo_url: '', notes: '', created_at: now, updated_at: now },
+        { id: 9, number: '009', name: 'Алый', photo_url: '', notes: '', created_at: now, updated_at: now },
+        { id: 10, number: '010', name: 'Рубиновый', photo_url: '', notes: '', created_at: now, updated_at: now },
+        { id: 11, number: '011', name: 'Бордо', photo_url: '', notes: '', created_at: now, updated_at: now },
+        { id: 12, number: '012', name: 'Розовый кварц', photo_url: '', notes: '', created_at: now, updated_at: now },
+        { id: 13, number: '013', name: 'Фуксия', photo_url: '', notes: '', created_at: now, updated_at: now },
+        { id: 14, number: '014', name: 'Лавандовый', photo_url: '', notes: '', created_at: now, updated_at: now },
+        { id: 15, number: '015', name: 'Фиалковый', photo_url: '', notes: '', created_at: now, updated_at: now },
+        { id: 16, number: '016', name: 'Аметист', photo_url: '', notes: '', created_at: now, updated_at: now },
+        { id: 17, number: '017', name: 'Индиго', photo_url: '', notes: '', created_at: now, updated_at: now },
+        { id: 18, number: '018', name: 'Небесный', photo_url: '', notes: '', created_at: now, updated_at: now },
+        { id: 19, number: '019', name: 'Голубой лёд', photo_url: '', notes: '', created_at: now, updated_at: now },
+        { id: 20, number: '020', name: 'Лазурный', photo_url: '', notes: '', created_at: now, updated_at: now },
+        { id: 21, number: '021', name: 'Бирюзовый', photo_url: '', notes: '', created_at: now, updated_at: now },
+        { id: 22, number: '022', name: 'Мятный', photo_url: '', notes: '', created_at: now, updated_at: now },
+        { id: 23, number: '023', name: 'Изумруд', photo_url: '', notes: '', created_at: now, updated_at: now },
+        { id: 24, number: '024', name: 'Малахит', photo_url: '', notes: '', created_at: now, updated_at: now },
+        { id: 25, number: '025', name: 'Оливковый', photo_url: '', notes: '', created_at: now, updated_at: now },
+        { id: 26, number: '026', name: 'Хаки', photo_url: '', notes: '', created_at: now, updated_at: now },
+        { id: 27, number: '027', name: 'Лесной', photo_url: '', notes: '', created_at: now, updated_at: now },
+        { id: 28, number: '028', name: 'Шоколад', photo_url: '', notes: '', created_at: now, updated_at: now },
+        { id: 29, number: '029', name: 'Карамель', photo_url: '', notes: '', created_at: now, updated_at: now },
+        { id: 30, number: '030', name: 'Терракота', photo_url: '', notes: '', created_at: now, updated_at: now },
+        { id: 31, number: '031', name: 'Серый гранит', photo_url: '', notes: '', created_at: now, updated_at: now },
+        { id: 32, number: '032', name: 'Стальной', photo_url: '', notes: '', created_at: now, updated_at: now },
+        { id: 33, number: '033', name: 'Графит', photo_url: '', notes: '', created_at: now, updated_at: now },
+        { id: 34, number: '034', name: 'Антрацит', photo_url: '', notes: '', created_at: now, updated_at: now },
+        { id: 35, number: '035', name: 'Чёрный', photo_url: '', notes: '', created_at: now, updated_at: now },
+        { id: 36, number: '036', name: 'Перламутр', photo_url: '', notes: '', created_at: now, updated_at: now },
+        { id: 37, number: '037', name: 'Серебро', photo_url: '', notes: '', created_at: now, updated_at: now },
+        { id: 38, number: '038', name: 'Медный', photo_url: '', notes: '', created_at: now, updated_at: now },
+        { id: 39, number: '039', name: 'Пудровый', photo_url: '', notes: '', created_at: now, updated_at: now },
+        { id: 40, number: '040', name: 'Персиковый', photo_url: '', notes: '', created_at: now, updated_at: now },
+        { id: 41, number: '041', name: 'Сиреневый', photo_url: '', notes: '', created_at: now, updated_at: now },
+        { id: 42, number: '042', name: 'Морская волна', photo_url: '', notes: '', created_at: now, updated_at: now },
+        { id: 43, number: '043', name: 'Жемчужный', photo_url: '', notes: '', created_at: now, updated_at: now },
+    ];
 }

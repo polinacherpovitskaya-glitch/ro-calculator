@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v38';
+const APP_VERSION = 'v39';
 
 const App = {
     currentPage: 'dashboard',
@@ -124,6 +124,7 @@ const App = {
             case 'factual': Factual.load(); break;
             case 'analytics': Analytics.load(); break;
             case 'molds': Molds.load(); break;
+            case 'colors': Colors.load(); break;
             case 'timetrack': TimeTrack.load(); break;
             case 'tasks': Tasks.load(); Tasks.populateFilters(); break;
             case 'gantt': Gantt.load(); break;
@@ -176,17 +177,27 @@ const Calculator = {
     packagingItems: [], // Packaging items (unlimited)
     maxItems: 6,
 
-    init() {
+    async init() {
+        // Ensure colors are loaded for color picker
+        try {
+            if (!Colors.data || Colors.data.length === 0) {
+                Colors.data = await loadColors();
+            }
+        } catch (e) { console.error('[Calculator.init] loadColors error:', e); }
+
         if (this.items.length === 0 && !App.editingOrderId) {
             this.resetForm();
             this.addItem();
         }
-        // Close mold picker on outside click
+        // Close mold picker & color picker on outside click
         if (!this._moldPickerBound) {
             this._moldPickerBound = true;
             document.addEventListener('click', (e) => {
                 if (!e.target.closest('.mold-picker')) {
                     document.querySelectorAll('.mold-picker-dropdown').forEach(d => d.style.display = 'none');
+                }
+                if (!e.target.closest('.color-picker')) {
+                    document.querySelectorAll('.color-picker-dropdown').forEach(d => d.style.display = 'none');
                 }
             });
         }
@@ -200,7 +211,6 @@ const Calculator = {
         document.getElementById('calc-deadline-start').value = '';
         document.getElementById('calc-deadline-end').value = '';
         document.getElementById('calc-notes').value = '';
-        document.getElementById('calc-color-scheme').value = '';
         this.items = [];
         this.hardwareItems = [];
         this.packagingItems = [];
@@ -256,6 +266,9 @@ const Calculator = {
             builtin_hw_price: 0,
             builtin_hw_delivery_total: 0,
             builtin_hw_speed: 0,
+            // Color
+            color_id: null,
+            color_name: '',
             // Sell prices
             sell_price_item: 0,
             sell_price_printing: 0,
@@ -316,6 +329,53 @@ const Calculator = {
         (item.printings || []).forEach((pr, pi) => {
             printingsHtml += this.renderPrintingRow(idx, pi, pr);
         });
+
+        // Build color picker
+        let colorPickerHtml = '';
+        try {
+            const colors = Colors.data || [];
+            if (colors.length > 0) {
+                const selectedColor = colors.find(c => c.id == item.color_id);
+                const selectedColorHtml = selectedColor
+                    ? `<div style="display:flex;gap:8px;align-items:center;">
+                        ${selectedColor.photo_url ? `<img src="${this._escAttr(selectedColor.photo_url)}" style="width:32px;height:32px;object-fit:cover;border-radius:50%;border:1px solid var(--border)">` : `<span style="width:32px;height:32px;display:flex;align-items:center;justify-content:center;background:var(--accent-light);border-radius:50%;font-size:12px;font-weight:700;color:var(--accent)">${(selectedColor.name || '?')[0]}</span>`}
+                        <div><span style="font-size:11px;color:var(--text-muted)">${this._esc(selectedColor.number)}</span> <span style="font-weight:600;font-size:13px">${this._esc(selectedColor.name)}</span></div>
+                       </div>`
+                    : '<span style="color:var(--text-muted);font-size:13px">-- Выбрать цвет --</span>';
+
+                const colorItemsHtml = colors.map(c => {
+                    const photo = c.photo_url
+                        ? `<img src="${this._escAttr(c.photo_url)}" style="width:36px;height:36px;object-fit:cover;border-radius:50%;border:1px solid var(--border);flex-shrink:0">`
+                        : `<span style="width:36px;height:36px;display:flex;align-items:center;justify-content:center;background:var(--accent-light);border-radius:50%;font-size:14px;font-weight:700;color:var(--accent);flex-shrink:0">${(c.name || '?')[0]}</span>`;
+                    const isSelected = item.color_id == c.id;
+                    return `<div class="color-picker-item ${isSelected ? 'selected' : ''}" onclick="Calculator.onColorSelect(${idx}, ${c.id})" style="display:flex;gap:8px;align-items:center;padding:5px 8px;cursor:pointer;border-radius:6px;${isSelected ? 'background:var(--accent-light)' : ''}">
+                        ${photo}
+                        <div style="flex:1;min-width:0">
+                            <span style="font-size:11px;color:var(--text-muted)">${this._esc(c.number)}</span>
+                            <span style="font-size:12px;font-weight:600">${this._esc(c.name)}</span>
+                        </div>
+                    </div>`;
+                }).join('');
+
+                colorPickerHtml = `
+                <div class="form-group" style="position:relative">
+                    <label>Цветовое решение</label>
+                    <div class="color-picker" id="color-picker-${idx}">
+                        <div class="color-picker-selected" onclick="Calculator.toggleColorPicker(${idx})" style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius);cursor:pointer;background:var(--card-bg)">
+                            ${selectedColorHtml}
+                            <span style="flex-shrink:0;color:var(--text-muted);font-size:10px;margin-left:8px">&#9662;</span>
+                        </div>
+                        <div class="color-picker-dropdown" id="color-picker-dd-${idx}" style="display:none;position:absolute;z-index:100;background:var(--card-bg);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow-lg);max-height:280px;overflow:hidden;width:100%">
+                            <div style="padding:6px 8px;border-bottom:1px solid var(--border);display:flex;gap:4px">
+                                <input type="text" placeholder="Поиск цвета..." oninput="Calculator.filterColorPicker(${idx}, this.value)" style="flex:1;padding:5px 8px;border:1px solid var(--border);border-radius:4px;font-size:12px">
+                                <button class="btn btn-sm btn-outline" onclick="Calculator.clearColor(${idx})" title="Убрать цвет" style="padding:4px 8px;font-size:10px;">&#10005;</button>
+                            </div>
+                            <div class="color-picker-list" id="color-picker-list-${idx}" style="max-height:220px;overflow-y:auto;padding:4px">${colorItemsHtml}</div>
+                        </div>
+                    </div>
+                </div>`;
+            }
+        } catch (e) { console.error('[renderItemBlock] Color picker error:', e); }
 
         const html = `
         <div class="item-block" id="item-block-${idx}">
@@ -390,6 +450,9 @@ const Calculator = {
             <div id="printings-list-${idx}">${printingsHtml}</div>
             <button class="btn btn-sm btn-outline" style="margin-top:4px" onclick="Calculator.addPrinting(${idx})">+ Нанесение</button>
 
+            <!-- Цветовое решение (per item) -->
+            ${colorPickerHtml}
+
             <!-- Cost breakdown (calculated) -->
             <div class="cost-breakdown" id="item-cost-${idx}" style="display:none">
                 <div class="section-title" style="margin-top:0">Себестоимость изделия (за 1 шт)</div>
@@ -410,7 +473,13 @@ const Calculator = {
 
         </div>`;
 
-        container.insertAdjacentHTML('beforeend', html);
+        // Replace existing block if re-rendering, otherwise append
+        const existingBlock = document.getElementById('item-block-' + idx);
+        if (existingBlock) {
+            existingBlock.outerHTML = html;
+        } else {
+            container.insertAdjacentHTML('beforeend', html);
+        }
     },
 
     // ==========================================
@@ -991,6 +1060,7 @@ const Calculator = {
         const isOpen = dd.style.display !== 'none';
         // Close all pickers first
         document.querySelectorAll('.mold-picker-dropdown').forEach(d => d.style.display = 'none');
+        document.querySelectorAll('.color-picker-dropdown').forEach(d => d.style.display = 'none');
         if (!isOpen) {
             dd.style.display = '';
             // Focus search
@@ -1009,6 +1079,52 @@ const Calculator = {
         if (!list) return;
         const q = (query || '').toLowerCase().trim();
         list.querySelectorAll('.mold-picker-item').forEach(el => {
+            const text = el.textContent.toLowerCase();
+            el.style.display = !q || text.includes(q) ? '' : 'none';
+        });
+    },
+
+    // === COLOR PICKER ===
+
+    toggleColorPicker(idx) {
+        const dd = document.getElementById('color-picker-dd-' + idx);
+        if (!dd) return;
+        const isOpen = dd.style.display !== 'none';
+        // Close all color pickers first
+        document.querySelectorAll('.color-picker-dropdown').forEach(d => d.style.display = 'none');
+        // Also close mold pickers
+        document.querySelectorAll('.mold-picker-dropdown').forEach(d => d.style.display = 'none');
+        if (!isOpen) {
+            dd.style.display = '';
+            const input = dd.querySelector('input[type="text"]');
+            if (input) input.focus();
+        }
+    },
+
+    onColorSelect(idx, colorId) {
+        const colors = Colors.data || [];
+        const color = colors.find(c => c.id === colorId);
+        if (color) {
+            this.items[idx].color_id = color.id;
+            this.items[idx].color_name = color.name;
+        }
+        // Close dropdown and re-render
+        document.querySelectorAll('.color-picker-dropdown').forEach(d => d.style.display = 'none');
+        this.renderItemBlock(idx);
+    },
+
+    clearColor(idx) {
+        this.items[idx].color_id = null;
+        this.items[idx].color_name = '';
+        document.querySelectorAll('.color-picker-dropdown').forEach(d => d.style.display = 'none');
+        this.renderItemBlock(idx);
+    },
+
+    filterColorPicker(idx, query) {
+        const list = document.getElementById('color-picker-list-' + idx);
+        if (!list) return;
+        const q = (query || '').toLowerCase().trim();
+        list.querySelectorAll('.color-picker-item').forEach(el => {
             const text = el.textContent.toLowerCase();
             el.style.display = !q || text.includes(q) ? '' : 'none';
         });
@@ -1726,7 +1842,6 @@ const Calculator = {
             deadline_start: document.getElementById('calc-deadline-start').value || null,
             deadline_end: document.getElementById('calc-deadline-end').value || null,
             notes: document.getElementById('calc-notes').value.trim(),
-            color_scheme: document.getElementById('calc-color-scheme').value.trim(),
             plastic_type: 'PP', // always PP
             print_type: null, // determined at printing level
             status: 'calculated',
@@ -1778,6 +1893,8 @@ const Calculator = {
                 hours_cutting: r.hoursCutting,
                 hours_nfc: r.hoursNfc,
                 template_id: item.template_id,
+                color_id: item.color_id || null,
+                color_name: item.color_name || '',
             };
         });
 
@@ -1978,7 +2095,6 @@ const Calculator = {
         document.getElementById('calc-deadline-start').value = order.deadline_start || order.deadline || '';
         document.getElementById('calc-deadline-end').value = order.deadline_end || '';
         document.getElementById('calc-notes').value = order.notes || '';
-        document.getElementById('calc-color-scheme').value = order.color_scheme || '';
 
         // Restore product items
         const productItems = dbItems.filter(i => !i.item_type || i.item_type === 'product');
