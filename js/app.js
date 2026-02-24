@@ -266,7 +266,7 @@ const Calculator = {
 
         // Build visual mold picker (with photos)
         let moldPickerHtml = '';
-        if (App.templates) {
+        try { if (App.templates) {
             const blanks = App.templates.filter(t => t.category === 'blank');
             const selectedMold = blanks.find(t => t.id == item.template_id);
             const selectedHtml = selectedMold
@@ -304,6 +304,7 @@ const Calculator = {
                 </div>
             </div>`;
         }
+        } catch (err) { console.error('[renderItemBlock] Mold picker error:', err); moldPickerHtml = '<p style="color:var(--red);font-size:11px">Ошибка загрузки справочника</p>'; }
 
         // Render printings
         let printingsHtml = '';
@@ -521,10 +522,15 @@ const Calculator = {
     },
 
     async addHardware() {
-        const idx = this.hardwareItems.length;
-        this.hardwareItems.push(this.getEmptyHardware());
-        await this._ensureWhPickerData();
-        this.renderHardwareRow(idx);
+        try {
+            const idx = this.hardwareItems.length;
+            this.hardwareItems.push(this.getEmptyHardware());
+            await this._ensureWhPickerData();
+            this.renderHardwareRow(idx);
+        } catch (err) {
+            console.error('[addHardware] error:', err);
+            App.toast('Ошибка добавления фурнитуры: ' + err.message);
+        }
     },
 
     renderHardwareRow(idx) {
@@ -733,10 +739,15 @@ const Calculator = {
     },
 
     async addPackaging() {
-        const idx = this.packagingItems.length;
-        this.packagingItems.push(this.getEmptyPackaging());
-        await this._ensureWhPickerData();
-        this.renderPackagingRow(idx);
+        try {
+            const idx = this.packagingItems.length;
+            this.packagingItems.push(this.getEmptyPackaging());
+            await this._ensureWhPickerData();
+            this.renderPackagingRow(idx);
+        } catch (err) {
+            console.error('[addPackaging] error:', err);
+            App.toast('Ошибка добавления упаковки: ' + err.message);
+        }
     },
 
     renderPackagingRow(idx) {

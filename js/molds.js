@@ -662,7 +662,7 @@ const Molds = {
             this._warehouseItems = this._warehouseItems.filter(i =>
                 i.category === 'hardware' || i.category === 'фурнитура'
             );
-        } catch { this._warehouseItems = []; }
+        } catch (e) { console.warn('loadWarehouseForHw error:', e); this._warehouseItems = []; }
     },
 
     setHwSource(source) {
