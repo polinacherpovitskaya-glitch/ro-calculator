@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v35b';
+const APP_VERSION = 'v36';
 
 const App = {
     currentPage: 'dashboard',
@@ -181,6 +181,15 @@ const Calculator = {
             this.resetForm();
             this.addItem();
         }
+        // Close mold picker on outside click
+        if (!this._moldPickerBound) {
+            this._moldPickerBound = true;
+            document.addEventListener('click', (e) => {
+                if (!e.target.closest('.mold-picker')) {
+                    document.querySelectorAll('.mold-picker-dropdown').forEach(d => d.style.display = 'none');
+                }
+            });
+        }
     },
 
     resetForm() {
@@ -255,13 +264,45 @@ const Calculator = {
         const num = idx + 1;
         const container = document.getElementById('calc-items-container');
 
-        // Build template options (only blanks shown when blank selected)
-        let templateOpts = '<option value="">-- Выбрать бланк --</option>';
+        // Build visual mold picker (with photos)
+        let moldPickerHtml = '';
         if (App.templates) {
-            App.templates.filter(t => t.category === 'blank').forEach(t => {
-                const sel = item.template_id == t.id ? ' selected' : '';
-                templateOpts += `<option value="${t.id}"${sel}>${t.name} (${t.pieces_per_hour_display} шт/ч)</option>`;
-            });
+            const blanks = App.templates.filter(t => t.category === 'blank');
+            const selectedMold = blanks.find(t => t.id == item.template_id);
+            const selectedHtml = selectedMold
+                ? `<div style="display:flex;gap:8px;align-items:center;">
+                    ${selectedMold.photo_url ? `<img src="${this._escAttr(selectedMold.photo_url)}" style="width:36px;height:36px;object-fit:cover;border-radius:6px;border:1px solid var(--border)">` : `<span style="width:36px;height:36px;display:flex;align-items:center;justify-content:center;background:var(--accent-light);border-radius:6px;font-size:14px;font-weight:700;color:var(--accent)">${(selectedMold.name || '?')[0]}</span>`}
+                    <div><div style="font-weight:600;font-size:13px">${this._esc(selectedMold.name)}</div><div style="font-size:10px;color:var(--text-muted)">${selectedMold.pieces_per_hour_display} шт/ч · ${selectedMold.weight_grams || 0}г</div></div>
+                   </div>`
+                : '<span style="color:var(--text-muted);font-size:13px">-- Выбрать бланк --</span>';
+
+            const itemsHtml = blanks.map(t => {
+                const photo = t.photo_url
+                    ? `<img src="${this._escAttr(t.photo_url)}" style="width:44px;height:44px;object-fit:cover;border-radius:6px;border:1px solid var(--border);flex-shrink:0">`
+                    : `<span style="width:44px;height:44px;display:flex;align-items:center;justify-content:center;background:var(--accent-light);border-radius:6px;font-size:16px;font-weight:700;color:var(--accent);flex-shrink:0">${(t.name || '?')[0]}</span>`;
+                const isSelected = item.template_id == t.id;
+                return `<div class="mold-picker-item ${isSelected ? 'selected' : ''}" onclick="Calculator.onTemplatePickerSelect(${idx}, ${t.id})" style="display:flex;gap:8px;align-items:center;padding:6px 8px;cursor:pointer;border-radius:6px;${isSelected ? 'background:var(--accent-light)' : ''}">
+                    ${photo}
+                    <div style="flex:1;min-width:0">
+                        <div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${this._esc(t.name)}</div>
+                        <div style="font-size:10px;color:var(--text-muted)">${t.pieces_per_hour_display} шт/ч · ${t.weight_grams || 0}г${t.collection ? ' · ' + this._esc(t.collection) : ''}</div>
+                    </div>
+                </div>`;
+            }).join('');
+
+            moldPickerHtml = `
+            <div class="mold-picker" id="mold-picker-${idx}">
+                <div class="mold-picker-selected" onclick="Calculator.toggleMoldPicker(${idx})" style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius);cursor:pointer;background:var(--card-bg)">
+                    ${selectedHtml}
+                    <span style="flex-shrink:0;color:var(--text-muted);font-size:10px;margin-left:8px">&#9662;</span>
+                </div>
+                <div class="mold-picker-dropdown" id="mold-picker-dd-${idx}" style="display:none;position:absolute;z-index:100;background:var(--card-bg);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow-lg);max-height:300px;overflow:hidden;width:100%">
+                    <div style="padding:6px 8px;border-bottom:1px solid var(--border)">
+                        <input type="text" placeholder="Поиск бланка..." oninput="Calculator.filterMoldPicker(${idx}, this.value)" style="width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:4px;font-size:12px">
+                    </div>
+                    <div class="mold-picker-list" id="mold-picker-list-${idx}" style="max-height:250px;overflow-y:auto;padding:4px">${itemsHtml}</div>
+                </div>
+            </div>`;
         }
 
         // Render printings
@@ -289,11 +330,9 @@ const Calculator = {
             </div>
 
             <!-- Step 2: Справочник бланков (только для бланковой формы) -->
-            <div class="form-group template-select" id="template-wrap-${idx}" style="${item.is_blank_mold ? '' : 'display:none'}">
+            <div class="form-group template-select" id="template-wrap-${idx}" style="${item.is_blank_mold ? '' : 'display:none'};position:relative">
                 <label>Бланк из справочника</label>
-                <select id="template-select-${idx}" onchange="Calculator.onTemplateSelect(${idx}, this)">
-                    ${templateOpts}
-                </select>
+                ${moldPickerHtml}
             </div>
 
             <div class="form-row">
@@ -879,25 +918,62 @@ const Calculator = {
     // ITEM EVENTS
     // ==========================================
 
+    // Legacy: kept for backward compat if <select> still used somewhere
     onTemplateSelect(idx, selectEl) {
         const opt = selectEl.selectedOptions[0];
         if (!opt || !opt.value) return;
+        this.onTemplatePickerSelect(idx, parseInt(opt.value));
+    },
 
-        const tpl = App.templates.find(t => t.id == opt.value);
+    // New visual picker
+    onTemplatePickerSelect(idx, tplId) {
+        const tpl = App.templates.find(t => t.id == tplId);
         if (!tpl) return;
 
         this.items[idx].template_id = tpl.id;
         this.items[idx].product_name = tpl.name;
         this.items[idx].pieces_per_hour = tpl.pieces_per_hour_min;
         this.items[idx].weight_grams = tpl.weight_grams || 0;
-        this.items[idx].is_blank_mold = true; // From template = always blank
+        this.items[idx].is_blank_mold = true;
 
         document.getElementById('item-name-' + idx).value = tpl.name;
         document.getElementById('item-pph-' + idx).value = tpl.pieces_per_hour_min;
         document.getElementById('item-weight-' + idx).value = tpl.weight_grams || '';
         document.getElementById('item-title-' + idx).textContent = tpl.name;
 
+        // Close picker & re-render selected display
+        this.closeMoldPicker(idx);
+        this.rerenderItem(idx);
         this.recalculate();
+    },
+
+    toggleMoldPicker(idx) {
+        const dd = document.getElementById('mold-picker-dd-' + idx);
+        if (!dd) return;
+        const isOpen = dd.style.display !== 'none';
+        // Close all pickers first
+        document.querySelectorAll('.mold-picker-dropdown').forEach(d => d.style.display = 'none');
+        if (!isOpen) {
+            dd.style.display = '';
+            // Focus search
+            const input = dd.querySelector('input[type="text"]');
+            if (input) input.focus();
+        }
+    },
+
+    closeMoldPicker(idx) {
+        const dd = document.getElementById('mold-picker-dd-' + idx);
+        if (dd) dd.style.display = 'none';
+    },
+
+    filterMoldPicker(idx, query) {
+        const list = document.getElementById('mold-picker-list-' + idx);
+        if (!list) return;
+        const q = (query || '').toLowerCase().trim();
+        list.querySelectorAll('.mold-picker-item').forEach(el => {
+            const text = el.textContent.toLowerCase();
+            el.style.display = !q || text.includes(q) ? '' : 'none';
+        });
     },
 
     setMoldType(idx, isBlank) {
@@ -1510,6 +1586,56 @@ const Calculator = {
         }
 
         contentEl.innerHTML = pricingHtml + invoiceHtml;
+    },
+
+    // ==========================================
+    // HTML ESCAPE HELPERS
+    // ==========================================
+
+    _esc(s) {
+        if (!s) return '';
+        return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    },
+
+    _escAttr(s) {
+        if (!s) return '';
+        return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    },
+
+    // Re-render just the mold picker selected display after picking a mold
+    rerenderItem(idx) {
+        const item = this.items[idx];
+        const pickerSelected = document.querySelector('#mold-picker-' + idx + ' .mold-picker-selected');
+        if (!pickerSelected) return;
+
+        const blanks = (App.templates || []).filter(t => t.category === 'blank');
+        const selectedMold = blanks.find(t => t.id == item.template_id);
+
+        if (selectedMold) {
+            const photoHtml = selectedMold.photo_url
+                ? `<img src="${this._escAttr(selectedMold.photo_url)}" style="width:36px;height:36px;object-fit:cover;border-radius:6px;border:1px solid var(--border)">`
+                : `<span style="width:36px;height:36px;display:flex;align-items:center;justify-content:center;background:var(--accent-light);border-radius:6px;font-size:14px;font-weight:700;color:var(--accent)">${(selectedMold.name || '?')[0]}</span>`;
+            pickerSelected.innerHTML = `
+                <div style="display:flex;gap:8px;align-items:center;">
+                    ${photoHtml}
+                    <div><div style="font-weight:600;font-size:13px">${this._esc(selectedMold.name)}</div><div style="font-size:10px;color:var(--text-muted)">${selectedMold.pieces_per_hour_display} шт/ч · ${selectedMold.weight_grams || 0}г</div></div>
+                </div>
+                <span style="flex-shrink:0;color:var(--text-muted);font-size:10px;margin-left:8px">&#9662;</span>`;
+        } else {
+            pickerSelected.innerHTML = `
+                <span style="color:var(--text-muted);font-size:13px">-- Выбрать бланк --</span>
+                <span style="flex-shrink:0;color:var(--text-muted);font-size:10px;margin-left:8px">&#9662;</span>`;
+        }
+
+        // Also update selected state in dropdown items
+        const list = document.getElementById('mold-picker-list-' + idx);
+        if (list) {
+            list.querySelectorAll('.mold-picker-item').forEach(el => {
+                el.classList.remove('selected');
+                el.style.background = '';
+            });
+            // The dropdown will be rebuilt on next open if needed
+        }
     },
 
     _sellPriceTimer: null,

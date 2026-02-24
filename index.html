@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=35b">
+    <link rel="stylesheet" href="css/style.css?v=36">
 </head>
 <body>
 
@@ -570,18 +570,9 @@
                     <button class="btn btn-sm btn-outline" onclick="Molds.hideForm()">Закрыть</button>
                 </div>
                 <div class="form-row">
-                    <div class="form-group">
+                    <div class="form-group" style="flex:2">
                         <label>Название</label>
                         <input type="text" id="mold-name">
-                    </div>
-                    <div class="form-group">
-                        <label>Категория</label>
-                        <select id="mold-category">
-                            <option value="blank">Бланк (ходовой)</option>
-                            <option value="nfc">NFC (3 части)</option>
-                            <option value="custom">Кастомный наш</option>
-                            <option value="client_custom">Кастомный клиентский</option>
-                        </select>
                     </div>
                     <div class="form-group">
                         <label>Коллекция</label>
@@ -599,6 +590,21 @@
                             <option value="client">Клиентский (ждём повтора)</option>
                             <option value="retired">Неактивный</option>
                         </select>
+                    </div>
+                </div>
+                <!-- Photo upload -->
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Фото</label>
+                        <div style="display:flex;gap:8px;align-items:center;">
+                            <div id="mold-photo-preview" style="width:60px;height:60px;border-radius:8px;border:1px solid var(--border);background:var(--bg);display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0">
+                                <span style="font-size:24px;color:var(--text-muted)">&#128247;</span>
+                            </div>
+                            <div style="flex:1;display:flex;flex-direction:column;gap:4px;">
+                                <input type="file" id="mold-photo-file" accept="image/*" onchange="Molds.onPhotoFileChange(this)" style="font-size:12px;">
+                                <input type="text" id="mold-photo-url" placeholder="или вставьте URL фото" oninput="Molds.onPhotoUrlChange(this.value)" style="font-size:12px;">
+                            </div>
+                        </div>
                     </div>
                 </div>
                 <div class="form-row">
@@ -664,23 +670,33 @@
 
                 <!-- Built-in hardware (e.g. mirror for mirror blank) -->
                 <div class="section-title" style="margin-top:12px; margin-bottom:4px;">Встроенная фурнитура <span style="font-weight:400;font-size:11px;color:var(--text-muted)">(если изделие продаётся только с ней)</span></div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label>Название фурнитуры</label>
-                        <input type="text" id="mold-hw-name" placeholder="Зеркало, магнит, кольцо...">
-                    </div>
-                    <div class="form-group">
-                        <label>Закупка (&#8381;/шт)</label>
-                        <input type="number" min="0" step="0.01" id="mold-hw-price">
-                    </div>
-                    <div class="form-group">
-                        <label>Доставка всего (&#8381;)</label>
-                        <input type="number" min="0" id="mold-hw-delivery-total" value="0">
-                    </div>
-                    <div class="form-group">
-                        <label>Сборка (шт/ч)</label>
-                        <input type="number" min="0" id="mold-hw-speed">
-                        <span class="form-hint">Скорость приклейки/сборки</span>
+                <div id="mold-hw-source-toggle"></div>
+
+                <!-- Warehouse picker (hidden by default) -->
+                <div id="mold-hw-warehouse-picker" style="display:none;margin-bottom:8px">
+                    <div id="mold-hw-warehouse-list" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:6px;max-height:200px;overflow-y:auto;padding:4px;"></div>
+                </div>
+
+                <!-- Custom fields (always visible to show selected data) -->
+                <div id="mold-hw-custom-fields">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Название фурнитуры</label>
+                            <input type="text" id="mold-hw-name" placeholder="Зеркало, магнит, кольцо...">
+                        </div>
+                        <div class="form-group">
+                            <label>Закупка (&#8381;/шт)</label>
+                            <input type="number" min="0" step="0.01" id="mold-hw-price">
+                        </div>
+                        <div class="form-group">
+                            <label>Доставка всего (&#8381;)</label>
+                            <input type="number" min="0" id="mold-hw-delivery-total" value="0">
+                        </div>
+                        <div class="form-group">
+                            <label>Сборка (шт/ч)</label>
+                            <input type="number" min="0" id="mold-hw-speed">
+                            <span class="form-hint">Скорость приклейки/сборки</span>
+                        </div>
                     </div>
                 </div>
 
@@ -1901,23 +1917,23 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="js/supabase.js?v=35b"></script>
-<script src="js/calculator.js?v=35b"></script>
-<script src="js/app.js?v=35b"></script>
-<script src="js/dashboard.js?v=35b"></script>
-<script src="js/order-detail.js?v=35b"></script>
-<script src="js/orders.js?v=35b"></script>
-<script src="js/analytics.js?v=35b"></script>
-<script src="js/molds.js?v=35b"></script>
-<script src="js/kp.js?v=35b"></script>
-<script src="js/timetrack.js?v=35b"></script>
-<script src="js/tasks.js?v=35b"></script>
-<script src="js/gantt.js?v=35b"></script>
-<script src="js/import.js?v=35b"></script>
-<script src="js/factual.js?v=35b"></script>
-<script src="js/china.js?v=35b"></script>
-<script src="js/warehouse_photos.js?v=35b"></script>
-<script src="js/warehouse.js?v=35b"></script>
-<script src="js/settings.js?v=35b"></script>
+<script src="js/supabase.js?v=36"></script>
+<script src="js/calculator.js?v=36"></script>
+<script src="js/app.js?v=36"></script>
+<script src="js/dashboard.js?v=36"></script>
+<script src="js/order-detail.js?v=36"></script>
+<script src="js/orders.js?v=36"></script>
+<script src="js/analytics.js?v=36"></script>
+<script src="js/molds.js?v=36"></script>
+<script src="js/kp.js?v=36"></script>
+<script src="js/timetrack.js?v=36"></script>
+<script src="js/tasks.js?v=36"></script>
+<script src="js/gantt.js?v=36"></script>
+<script src="js/import.js?v=36"></script>
+<script src="js/factual.js?v=36"></script>
+<script src="js/china.js?v=36"></script>
+<script src="js/warehouse_photos.js?v=36"></script>
+<script src="js/warehouse.js?v=36"></script>
+<script src="js/settings.js?v=36"></script>
 </body>
 </html>

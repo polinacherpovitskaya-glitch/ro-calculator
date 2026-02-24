@@ -227,9 +227,9 @@ function calculatePackagingCost(pkg, params) {
  * 500 шт — точка опоры (mult=1.00), мелкие дороже, крупные со скидкой
  */
 const CALC_TIER_MARGINS = [
-    { min: 0, max: 75, margin: 0.65, mult: 1.45 },
-    { min: 75, max: 200, margin: 0.55, mult: 1.25 },
-    { min: 200, max: 400, margin: 0.48, mult: 1.10 },
+    { min: 0, max: 75, margin: 0.65, mult: 1.70 },
+    { min: 75, max: 200, margin: 0.55, mult: 1.45 },
+    { min: 200, max: 400, margin: 0.48, mult: 1.25 },
     { min: 400, max: 750, margin: 0.43, mult: 1.00 },
     { min: 750, max: 2500, margin: 0.40, mult: 0.92 },
     { min: 2500, max: Infinity, margin: 0.35, mult: 0.85 },

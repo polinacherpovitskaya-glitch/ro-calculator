@@ -169,20 +169,7 @@ const Settings = {
         }
 
         // Also regenerate templates from molds
-        App.templates = this.moldsData.map(m => {
-            const pMin = m.pph_min || 0;
-            const pMax = m.pph_max || 0;
-            const display = pMin === 0 ? '—' : (pMin === pMax ? String(pMin) : `${pMin}-${pMax}`);
-            return {
-                id: m.id,
-                name: m.name,
-                category: m.category === 'nfc' ? 'blank' : m.category,
-                pieces_per_hour_display: display,
-                pieces_per_hour_min: pMin,
-                pieces_per_hour_max: pMax,
-                weight_grams: m.weight_grams,
-            };
-        });
+        refreshTemplatesFromMolds(this.moldsData);
 
         this.dirtyMolds = {};
         this.renderMoldsTable();

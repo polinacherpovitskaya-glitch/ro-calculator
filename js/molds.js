@@ -19,9 +19,9 @@ const MOLD_TIERS = [50, 100, 300, 500, 1000, 3000];
 // Совпадают с CALC_TIER_MARGINS из calculator.js для единообразия
 // 500 шт — точка опоры (mult=1.00), мелкие тиражи дороже, крупные дешевле
 const BLANKS_TIER_MARGINS = [
-    { min: 0,    max: 75,       margin: 0.65, mult: 1.45 },  // 50 шт  → 65% × 1.45
-    { min: 75,   max: 200,      margin: 0.55, mult: 1.25 },  // 100 шт → 55% × 1.25
-    { min: 200,  max: 400,      margin: 0.48, mult: 1.10 },  // 300 шт → 48% × 1.10
+    { min: 0,    max: 75,       margin: 0.65, mult: 1.70 },  // 50 шт  → 65% × 1.70
+    { min: 75,   max: 200,      margin: 0.55, mult: 1.45 },  // 100 шт → 55% × 1.45
+    { min: 200,  max: 400,      margin: 0.48, mult: 1.25 },  // 300 шт → 48% × 1.25
     { min: 400,  max: 750,      margin: 0.43, mult: 1.00 },  // 500 шт → 43% × 1.00
     { min: 750,  max: 2500,     margin: 0.40, mult: 0.92 },  // 1K шт  → 40% × 0.92
     { min: 2500, max: Infinity, margin: 0.35, mult: 0.85 },  // 3K шт  → 35% × 0.85
@@ -80,6 +80,8 @@ const Molds = {
         this.renderStats();
         this.filterAndRender();
         this.bindFormEvents();
+        // Keep App.templates in sync with molds (photo_url, collection etc.)
+        refreshTemplatesFromMolds(this.allMolds);
     },
 
     // Build unique collections list from all molds
@@ -295,10 +297,15 @@ const Molds = {
             html += `
                 <tr>
                     <td rowspan="2" style="vertical-align:top; padding:6px 8px; border-bottom:2px solid var(--border);">
-                        <div style="font-weight:700; font-size:13px;"><span class="status-dot ${statusDot}"></span>${this.esc(m.name)}${moldCountBadge}${collectionLabel}</div>
-                        <div style="font-size:10px; color:var(--text-muted); margin-top:2px;">${pphDisplay} шт/ч · ${m.weight_grams}г</div>
-                        ${m.hw_name ? `<div style="font-size:10px; color:var(--accent); margin-top:1px;">+ ${this.esc(m.hw_name)}</div>` : ''}
-                        ${m.notes ? `<div style="font-size:10px; color:var(--text-muted); font-style:italic;">${this.esc(m.notes)}</div>` : ''}
+                        <div style="display:flex;gap:8px;align-items:flex-start;">
+                            ${this.getPhotoThumb(m)}
+                            <div style="min-width:0">
+                                <div style="font-weight:700; font-size:13px;"><span class="status-dot ${statusDot}"></span>${this.esc(m.name)}${moldCountBadge}${collectionLabel}</div>
+                                <div style="font-size:10px; color:var(--text-muted); margin-top:2px;">${pphDisplay} шт/ч · ${m.weight_grams}г</div>
+                                ${m.hw_name ? `<div style="font-size:10px; color:var(--accent); margin-top:1px;">+ ${this.esc(m.hw_name)}</div>` : ''}
+                                ${m.notes ? `<div style="font-size:10px; color:var(--text-muted); font-style:italic;">${this.esc(m.notes)}</div>` : ''}
+                            </div>
+                        </div>
                     </td>
                     <td style="font-size:9px;color:var(--text-secondary);padding:3px 4px;white-space:nowrap;">себес</td>
                     ${costCells}
@@ -380,7 +387,11 @@ const Molds = {
         document.getElementById('mold-form-title').textContent = 'Редактировать: ' + (m.name || '');
 
         document.getElementById('mold-name').value = m.name || '';
-        document.getElementById('mold-category').value = m.category || 'blank';
+        // Photo
+        this._pendingPhoto = m.photo_url || '';
+        this.updatePhotoPreview(m.photo_url);
+        document.getElementById('mold-photo-url').value = (m.photo_url && !m.photo_url.startsWith('data:')) ? m.photo_url : '';
+        document.getElementById('mold-photo-file').value = '';
         // Set collection — add option if it doesn't exist yet
         const collEl = document.getElementById('mold-collection');
         if (collEl && m.collection) {
@@ -413,6 +424,15 @@ const Molds = {
         document.getElementById('mold-hw-speed').value = m.hw_speed || '';
         document.getElementById('mold-notes').value = m.notes || '';
 
+        // Hardware source
+        this._hwSource = m.hw_source || 'custom';
+        this._hwWarehouseItemId = m.hw_warehouse_item_id || null;
+        this._hwWarehouseSku = m.hw_warehouse_sku || '';
+        this.renderHwSourceToggle();
+        if (this._hwSource === 'warehouse') {
+            this.loadWarehouseForHw().then(() => this.renderWarehouseHwPicker());
+        }
+
         document.getElementById('mold-delete-btn').style.display = '';
         document.getElementById('mold-edit-form').style.display = '';
         document.getElementById('mold-edit-form').scrollIntoView({ behavior: 'smooth' });
@@ -433,9 +453,14 @@ const Molds = {
     clearForm() {
         ['mold-name', 'mold-pph-min', 'mold-pph-max', 'mold-pph-actual',
          'mold-weight', 'mold-cost-cny', 'mold-client',
-         'mold-hw-name', 'mold-hw-price', 'mold-hw-speed', 'mold-notes'
+         'mold-hw-name', 'mold-hw-price', 'mold-hw-speed', 'mold-notes',
+         'mold-photo-url'
         ].forEach(id => { document.getElementById(id).value = ''; });
-        document.getElementById('mold-category').value = 'blank';
+        document.getElementById('mold-photo-file').value = '';
+        this._pendingPhoto = '';
+        this.updatePhotoPreview('');
+        this._hwSource = 'custom';
+        this.renderHwSourceToggle();
         const collEl = document.getElementById('mold-collection');
         if (collEl) collEl.value = '';
         document.getElementById('mold-status').value = 'active';
@@ -461,7 +486,8 @@ const Molds = {
         const mold = {
             id: this.editingId || undefined,
             name,
-            category: document.getElementById('mold-category').value,
+            category: 'blank', // always blank
+            photo_url: this._pendingPhoto || '',
             collection: (document.getElementById('mold-collection')?.value || '').trim(),
             status: document.getElementById('mold-status').value,
             pph_min: parseFloat(document.getElementById('mold-pph-min').value) || 0,
@@ -475,10 +501,13 @@ const Molds = {
             cost_rub: parseFloat(document.getElementById('mold-cost-rub').value) || 0,
             mold_count: parseInt(document.getElementById('mold-count').value) || 1,
             client: document.getElementById('mold-client').value.trim(),
+            hw_source: this._hwSource || 'custom',
             hw_name: document.getElementById('mold-hw-name').value.trim(),
             hw_price_per_unit: parseFloat(document.getElementById('mold-hw-price').value) || 0,
             hw_delivery_total: parseFloat(document.getElementById('mold-hw-delivery-total').value) || 0,
             hw_speed: parseFloat(document.getElementById('mold-hw-speed').value) || null,
+            hw_warehouse_item_id: this._hwWarehouseItemId || null,
+            hw_warehouse_sku: this._hwWarehouseSku || '',
             notes: document.getElementById('mold-notes').value.trim(),
             total_orders: 0,
             total_units_produced: 0,
@@ -496,6 +525,8 @@ const Molds = {
         App.toast('Бланк сохранен');
         this.hideForm();
         await this.load();
+        // Sync templates so calculator sees updated photo_url, collection etc.
+        refreshTemplatesFromMolds(this.allMolds);
     },
 
     async confirmDelete(id, name) {
@@ -537,6 +568,163 @@ const Molds = {
         a.download = 'molds_' + new Date().toISOString().slice(0, 10) + '.csv';
         a.click();
         App.toast('CSV экспортирован');
+    },
+
+    // ==========================================
+    // PHOTO HANDLING
+    // ==========================================
+
+    _pendingPhoto: '',
+
+    onPhotoFileChange(input) {
+        if (!input.files || !input.files[0]) return;
+        const file = input.files[0];
+        if (file.size > 2 * 1024 * 1024) {
+            App.toast('Файл слишком большой (макс 2MB)');
+            return;
+        }
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            // Resize to thumbnail
+            this.resizeImage(e.target.result, 200, (thumb) => {
+                this._pendingPhoto = thumb;
+                this.updatePhotoPreview(thumb);
+                document.getElementById('mold-photo-url').value = '';
+            });
+        };
+        reader.readAsDataURL(file);
+    },
+
+    onPhotoUrlChange(url) {
+        if (url && url.trim()) {
+            this._pendingPhoto = url.trim();
+            this.updatePhotoPreview(url.trim());
+        } else {
+            this._pendingPhoto = '';
+            this.updatePhotoPreview('');
+        }
+    },
+
+    resizeImage(dataUrl, maxSize, callback) {
+        const img = new Image();
+        img.onload = () => {
+            const canvas = document.createElement('canvas');
+            let w = img.width, h = img.height;
+            if (w > maxSize || h > maxSize) {
+                if (w > h) { h = Math.round(h * maxSize / w); w = maxSize; }
+                else { w = Math.round(w * maxSize / h); h = maxSize; }
+            }
+            canvas.width = w;
+            canvas.height = h;
+            canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+            callback(canvas.toDataURL('image/jpeg', 0.7));
+        };
+        img.src = dataUrl;
+    },
+
+    updatePhotoPreview(url) {
+        const el = document.getElementById('mold-photo-preview');
+        if (!el) return;
+        if (url) {
+            el.innerHTML = `<img src="${this.esc(url)}" style="width:60px;height:60px;object-fit:cover;" onerror="this.parentNode.innerHTML='<span style=\\'font-size:24px;color:var(--red)\\'>!</span>'">`;
+        } else {
+            el.innerHTML = '<span style="font-size:24px;color:var(--text-muted)">&#128247;</span>';
+        }
+    },
+
+    getPhotoThumb(m) {
+        if (m.photo_url) {
+            return `<img src="${this.esc(m.photo_url)}" style="width:40px;height:40px;object-fit:cover;border-radius:6px;border:1px solid var(--border);flex-shrink:0" onerror="this.style.display='none'">`;
+        }
+        const letter = (m.name || '?')[0].toUpperCase();
+        return `<span style="width:40px;height:40px;display:flex;align-items:center;justify-content:center;background:var(--accent-light);border-radius:6px;font-size:16px;font-weight:700;color:var(--accent);flex-shrink:0">${letter}</span>`;
+    },
+
+    // ==========================================
+    // HARDWARE SOURCE (custom / warehouse)
+    // ==========================================
+
+    _hwSource: 'custom',
+    _hwWarehouseItemId: null,
+    _hwWarehouseSku: '',
+    _warehouseItems: [],
+
+    async loadWarehouseForHw() {
+        if (this._warehouseItems.length > 0) return;
+        try {
+            this._warehouseItems = await loadWarehouseItems();
+            // Filter to hardware category
+            this._warehouseItems = this._warehouseItems.filter(i =>
+                i.category === 'hardware' || i.category === 'фурнитура'
+            );
+        } catch { this._warehouseItems = []; }
+    },
+
+    setHwSource(source) {
+        this._hwSource = source;
+        this.renderHwSourceToggle();
+        if (source === 'warehouse') {
+            this.loadWarehouseForHw().then(() => this.renderWarehouseHwPicker());
+        }
+    },
+
+    renderHwSourceToggle() {
+        const container = document.getElementById('mold-hw-source-toggle');
+        if (!container) return;
+        const isW = this._hwSource === 'warehouse';
+        const isC = this._hwSource === 'custom';
+        container.innerHTML = `
+            <div class="hw-source-toggle" style="margin-bottom:8px">
+                <label class="${isC ? 'src-active' : ''}" onclick="Molds.setHwSource('custom')">
+                    &#9998; Кастомная
+                </label>
+                <label class="${isW ? 'src-active' : ''}" onclick="Molds.setHwSource('warehouse')">
+                    &#128230; Со склада
+                </label>
+            </div>`;
+
+        // Show/hide warehouse picker
+        const pickerEl = document.getElementById('mold-hw-warehouse-picker');
+        if (pickerEl) pickerEl.style.display = isW ? '' : 'none';
+
+        // Show/hide custom fields
+        const customEl = document.getElementById('mold-hw-custom-fields');
+        if (customEl) customEl.style.display = isC ? '' : 'none';
+    },
+
+    renderWarehouseHwPicker() {
+        const container = document.getElementById('mold-hw-warehouse-list');
+        if (!container) return;
+        if (this._warehouseItems.length === 0) {
+            container.innerHTML = '<p class="text-muted" style="font-size:12px">Нет фурнитуры на складе</p>';
+            return;
+        }
+        container.innerHTML = this._warehouseItems.map(item => {
+            const photo = item.photo_thumbnail
+                ? `<img src="${item.photo_thumbnail}" style="width:36px;height:36px;object-fit:cover;border-radius:4px;border:1px solid var(--border)">`
+                : `<span style="width:36px;height:36px;display:flex;align-items:center;justify-content:center;background:var(--accent-light);border-radius:4px;font-size:14px;">&#128295;</span>`;
+            const selected = this._hwWarehouseItemId === item.id ? 'border-color:var(--accent);background:var(--accent-light)' : '';
+            return `<div onclick="Molds.selectWarehouseHw(${item.id})" style="display:flex;gap:8px;align-items:center;padding:6px 8px;cursor:pointer;border:1px solid var(--border);border-radius:6px;${selected}">
+                ${photo}
+                <div style="flex:1;min-width:0">
+                    <div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${this.esc(item.name)}</div>
+                    <div style="font-size:10px;color:var(--text-muted)">${formatRub(item.price_per_unit || 0)}/шт</div>
+                </div>
+            </div>`;
+        }).join('');
+    },
+
+    selectWarehouseHw(itemId) {
+        const item = this._warehouseItems.find(i => i.id === itemId);
+        if (!item) return;
+        this._hwWarehouseItemId = item.id;
+        this._hwWarehouseSku = item.sku || '';
+        // Fill the custom fields with warehouse data
+        document.getElementById('mold-hw-name').value = item.name || '';
+        document.getElementById('mold-hw-price').value = item.price_per_unit || 0;
+        document.getElementById('mold-hw-delivery-total').value = 0;
+        this.renderWarehouseHwPicker(); // re-render to show selected
+        App.toast('Фурнитура выбрана: ' + (item.name || ''));
     },
 
     esc(str) {

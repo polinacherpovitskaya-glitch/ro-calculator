@@ -154,7 +154,28 @@ async function loadTemplates() {
         if (error) { console.error('loadTemplates error:', error); return getDefaultTemplates(); }
         return data;
     }
-    return getLocal(LOCAL_KEYS.templates) || getDefaultTemplates();
+    // In localStorage mode, always derive templates from molds (source of truth)
+    // so photo_url, collection etc. stay in sync
+    const molds = getLocal(LOCAL_KEYS.molds);
+    if (molds && molds.length > 0) {
+        return molds.map(m => {
+            const pMin = m.pph_min || 0;
+            const pMax = m.pph_max || 0;
+            const display = pMin === 0 ? '—' : (pMin === pMax ? String(pMin) : `${pMin}-${pMax}`);
+            return {
+                id: m.id,
+                name: m.name,
+                category: m.category === 'nfc' ? 'blank' : (m.category || 'blank'),
+                collection: m.collection || '',
+                photo_url: m.photo_url || '',
+                pieces_per_hour_display: display,
+                pieces_per_hour_min: pMin,
+                pieces_per_hour_max: pMax,
+                weight_grams: m.weight_grams,
+            };
+        });
+    }
+    return getDefaultTemplates();
 }
 
 function getDefaultTemplates() {
@@ -168,6 +189,28 @@ function getDefaultTemplates() {
             id: m.id,
             name: m.name,
             category: 'blank',
+            collection: m.collection || '',
+            photo_url: m.photo_url || '',
+            pieces_per_hour_display: display,
+            pieces_per_hour_min: pMin,
+            pieces_per_hour_max: pMax,
+            weight_grams: m.weight_grams,
+        };
+    });
+}
+
+/** Rebuild App.templates from molds (called after mold save) */
+function refreshTemplatesFromMolds(molds) {
+    App.templates = molds.map(m => {
+        const pMin = m.pph_min || 0;
+        const pMax = m.pph_max || 0;
+        const display = pMin === 0 ? '—' : (pMin === pMax ? String(pMin) : `${pMin}-${pMax}`);
+        return {
+            id: m.id,
+            name: m.name,
+            category: m.category === 'nfc' ? 'blank' : (m.category || 'blank'),
+            collection: m.collection || '',
+            photo_url: m.photo_url || '',
             pieces_per_hour_display: display,
             pieces_per_hour_min: pMin,
             pieces_per_hour_max: pMax,

@@ -375,6 +375,72 @@ body {
     background: var(--accent-light);
 }
 
+/* Mold picker (photo-based dropdown for calculator) */
+.mold-picker {
+    position: relative;
+    width: 100%;
+}
+
+.mold-picker-selected {
+    transition: border-color var(--transition);
+}
+
+.mold-picker-selected:hover {
+    border-color: var(--accent) !important;
+}
+
+.mold-picker-dropdown {
+    margin-top: 4px;
+    left: 0;
+    right: 0;
+}
+
+.mold-picker-item {
+    transition: background var(--transition);
+}
+
+.mold-picker-item:hover {
+    background: var(--accent-light) !important;
+}
+
+.mold-picker-item.selected {
+    background: var(--accent-light);
+    border: 1px solid var(--accent);
+}
+
+/* Mold thumbnail in molds table */
+.mold-thumb {
+    width: 40px;
+    height: 40px;
+    object-fit: cover;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    flex-shrink: 0;
+}
+
+.mold-thumb-placeholder {
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--accent-light);
+    border-radius: 6px;
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--accent);
+    flex-shrink: 0;
+}
+
+/* Mold photo preview in form */
+.mold-photo-preview {
+    width: 80px;
+    height: 80px;
+    object-fit: cover;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+}
+
 /* Remove button (red X for inline rows) */
 .btn-remove {
     display: flex;
