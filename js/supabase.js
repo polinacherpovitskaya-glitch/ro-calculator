@@ -907,7 +907,21 @@ async function deleteChinaPurchase(purchaseId) {
 // COLORS (Справочник цветов)
 // =============================================
 
+const COLORS_DATA_VERSION = 2; // v2: real photos + correct names from Yandex Disk
+const COLORS_VERSION_KEY = 'ro_colors_version';
+
+function checkColorsVersion() {
+    const stored = parseInt(localStorage.getItem(COLORS_VERSION_KEY) || '0');
+    if (stored < COLORS_DATA_VERSION) {
+        // Reset colors to new defaults (with photos)
+        setLocal(LOCAL_KEYS.colors, getDefaultColors());
+        console.log('Colors reset to version', COLORS_DATA_VERSION, 'with photos');
+    }
+    localStorage.setItem(COLORS_VERSION_KEY, String(COLORS_DATA_VERSION));
+}
+
 async function loadColors() {
+    checkColorsVersion();
     return getLocal(LOCAL_KEYS.colors) || getDefaultColors();
 }
 
@@ -939,49 +953,46 @@ async function deleteColor(colorId) {
 
 function getDefaultColors() {
     const now = new Date().toISOString();
+    const p = (n) => 'img/colors/' + n + '.png'; // photo path helper
     return [
-        { id: 1, number: '001', name: 'Белый мрамор', photo_url: '', notes: '', created_at: now, updated_at: now },
-        { id: 2, number: '002', name: 'Слоновая кость', photo_url: '', notes: '', created_at: now, updated_at: now },
-        { id: 3, number: '003', name: 'Ваниль', photo_url: '', notes: '', created_at: now, updated_at: now },
-        { id: 4, number: '004', name: 'Лимонный', photo_url: '', notes: '', created_at: now, updated_at: now },
-        { id: 5, number: '005', name: 'Золотой', photo_url: '', notes: '', created_at: now, updated_at: now },
-        { id: 6, number: '006', name: 'Янтарный', photo_url: '', notes: '', created_at: now, updated_at: now },
-        { id: 7, number: '007', name: 'Апельсин', photo_url: '', notes: '', created_at: now, updated_at: now },
-        { id: 8, number: '008', name: 'Коралловый', photo_url: '', notes: '', created_at: now, updated_at: now },
-        { id: 9, number: '009', name: 'Алый', photo_url: '', notes: '', created_at: now, updated_at: now },
-        { id: 10, number: '010', name: 'Рубиновый', photo_url: '', notes: '', created_at: now, updated_at: now },
-        { id: 11, number: '011', name: 'Бордо', photo_url: '', notes: '', created_at: now, updated_at: now },
-        { id: 12, number: '012', name: 'Розовый кварц', photo_url: '', notes: '', created_at: now, updated_at: now },
-        { id: 13, number: '013', name: 'Фуксия', photo_url: '', notes: '', created_at: now, updated_at: now },
-        { id: 14, number: '014', name: 'Лавандовый', photo_url: '', notes: '', created_at: now, updated_at: now },
-        { id: 15, number: '015', name: 'Фиалковый', photo_url: '', notes: '', created_at: now, updated_at: now },
-        { id: 16, number: '016', name: 'Аметист', photo_url: '', notes: '', created_at: now, updated_at: now },
-        { id: 17, number: '017', name: 'Индиго', photo_url: '', notes: '', created_at: now, updated_at: now },
-        { id: 18, number: '018', name: 'Небесный', photo_url: '', notes: '', created_at: now, updated_at: now },
-        { id: 19, number: '019', name: 'Голубой лёд', photo_url: '', notes: '', created_at: now, updated_at: now },
-        { id: 20, number: '020', name: 'Лазурный', photo_url: '', notes: '', created_at: now, updated_at: now },
-        { id: 21, number: '021', name: 'Бирюзовый', photo_url: '', notes: '', created_at: now, updated_at: now },
-        { id: 22, number: '022', name: 'Мятный', photo_url: '', notes: '', created_at: now, updated_at: now },
-        { id: 23, number: '023', name: 'Изумруд', photo_url: '', notes: '', created_at: now, updated_at: now },
-        { id: 24, number: '024', name: 'Малахит', photo_url: '', notes: '', created_at: now, updated_at: now },
-        { id: 25, number: '025', name: 'Оливковый', photo_url: '', notes: '', created_at: now, updated_at: now },
-        { id: 26, number: '026', name: 'Хаки', photo_url: '', notes: '', created_at: now, updated_at: now },
-        { id: 27, number: '027', name: 'Лесной', photo_url: '', notes: '', created_at: now, updated_at: now },
-        { id: 28, number: '028', name: 'Шоколад', photo_url: '', notes: '', created_at: now, updated_at: now },
-        { id: 29, number: '029', name: 'Карамель', photo_url: '', notes: '', created_at: now, updated_at: now },
-        { id: 30, number: '030', name: 'Терракота', photo_url: '', notes: '', created_at: now, updated_at: now },
-        { id: 31, number: '031', name: 'Серый гранит', photo_url: '', notes: '', created_at: now, updated_at: now },
-        { id: 32, number: '032', name: 'Стальной', photo_url: '', notes: '', created_at: now, updated_at: now },
-        { id: 33, number: '033', name: 'Графит', photo_url: '', notes: '', created_at: now, updated_at: now },
-        { id: 34, number: '034', name: 'Антрацит', photo_url: '', notes: '', created_at: now, updated_at: now },
-        { id: 35, number: '035', name: 'Чёрный', photo_url: '', notes: '', created_at: now, updated_at: now },
-        { id: 36, number: '036', name: 'Перламутр', photo_url: '', notes: '', created_at: now, updated_at: now },
-        { id: 37, number: '037', name: 'Серебро', photo_url: '', notes: '', created_at: now, updated_at: now },
-        { id: 38, number: '038', name: 'Медный', photo_url: '', notes: '', created_at: now, updated_at: now },
-        { id: 39, number: '039', name: 'Пудровый', photo_url: '', notes: '', created_at: now, updated_at: now },
-        { id: 40, number: '040', name: 'Персиковый', photo_url: '', notes: '', created_at: now, updated_at: now },
-        { id: 41, number: '041', name: 'Сиреневый', photo_url: '', notes: '', created_at: now, updated_at: now },
-        { id: 42, number: '042', name: 'Морская волна', photo_url: '', notes: '', created_at: now, updated_at: now },
-        { id: 43, number: '043', name: 'Жемчужный', photo_url: '', notes: '', created_at: now, updated_at: now },
+        { id: 1,  number: '001', name: 'Красный',              photo_url: p('001'), notes: '', created_at: now, updated_at: now },
+        { id: 2,  number: '002', name: 'Красный мрамор',       photo_url: p('002'), notes: '', created_at: now, updated_at: now },
+        { id: 3,  number: '003', name: 'Коралловый',           photo_url: p('003'), notes: '', created_at: now, updated_at: now },
+        { id: 4,  number: '004', name: 'Оранжевый',            photo_url: p('004'), notes: '', created_at: now, updated_at: now },
+        { id: 5,  number: '005', name: 'Огненный мрамор',      photo_url: p('005'), notes: '', created_at: now, updated_at: now },
+        { id: 6,  number: '006', name: 'Бордовый',             photo_url: p('006'), notes: '', created_at: now, updated_at: now },
+        { id: 7,  number: '007', name: 'Янтарный',             photo_url: p('007'), notes: '', created_at: now, updated_at: now },
+        { id: 8,  number: '008', name: 'Медовый мрамор',       photo_url: p('008'), notes: '', created_at: now, updated_at: now },
+        { id: 9,  number: '009', name: 'Жёлтый',               photo_url: p('009'), notes: '', created_at: now, updated_at: now },
+        { id: 10, number: '010', name: 'Перламутровый',        photo_url: p('010'), notes: '', created_at: now, updated_at: now },
+        { id: 11, number: '011', name: 'Дымчатый',             photo_url: p('011'), notes: '', created_at: now, updated_at: now },
+        { id: 12, number: '012', name: 'Белый',                photo_url: p('012'), notes: '', created_at: now, updated_at: now },
+        { id: 13, number: '013', name: 'Светло-серый',         photo_url: p('013'), notes: '', created_at: now, updated_at: now },
+        { id: 14, number: '014', name: 'Золотистый',           photo_url: p('014'), notes: '', created_at: now, updated_at: now },
+        { id: 15, number: '015', name: 'Чёрное золото',        photo_url: p('015'), notes: '', created_at: now, updated_at: now },
+        { id: 16, number: '016', name: 'Фуксия мрамор',       photo_url: p('016'), notes: '', created_at: now, updated_at: now },
+        { id: 17, number: '017', name: 'Лиловый',              photo_url: p('017'), notes: '', created_at: now, updated_at: now },
+        { id: 18, number: '018', name: 'Малиновый',            photo_url: p('018'), notes: '', created_at: now, updated_at: now },
+        { id: 19, number: '019', name: 'Фуксия',               photo_url: p('019'), notes: '', created_at: now, updated_at: now },
+        { id: 20, number: '020', name: 'Розовый',              photo_url: p('020'), notes: '', created_at: now, updated_at: now },
+        { id: 21, number: '021', name: 'Фиолетовый мрамор',   photo_url: p('021'), notes: '', created_at: now, updated_at: now },
+        { id: 22, number: '022', name: 'Ирис',                 photo_url: p('022'), notes: '', created_at: now, updated_at: now },
+        { id: 23, number: '023', name: 'Сиреневый',            photo_url: p('023'), notes: '', created_at: now, updated_at: now },
+        { id: 24, number: '024', name: 'Лавандовый',           photo_url: p('024'), notes: '', created_at: now, updated_at: now },
+        { id: 25, number: '025', name: 'Мятный мрамор',        photo_url: p('025'), notes: '', created_at: now, updated_at: now },
+        { id: 26, number: '026', name: 'Мятный',               photo_url: p('026'), notes: '', created_at: now, updated_at: now },
+        { id: 27, number: '027', name: 'Бирюзовый мрамор',    photo_url: p('027'), notes: '', created_at: now, updated_at: now },
+        { id: 28, number: '028', name: 'Оливковый мрамор',    photo_url: p('028'), notes: '', created_at: now, updated_at: now },
+        { id: 29, number: '029', name: 'Индиго',               photo_url: p('029'), notes: '', created_at: now, updated_at: now },
+        { id: 30, number: '030', name: 'Синий мрамор',         photo_url: p('030'), notes: '', created_at: now, updated_at: now },
+        { id: 31, number: '031', name: 'Синий',                photo_url: p('031'), notes: '', created_at: now, updated_at: now },
+        { id: 32, number: '032', name: 'Голубой мрамор',       photo_url: p('032'), notes: '', created_at: now, updated_at: now },
+        { id: 33, number: '033', name: 'Океан',                photo_url: p('033'), notes: '', created_at: now, updated_at: now },
+        { id: 34, number: '034', name: 'Салатовый',            photo_url: p('034'), notes: '', created_at: now, updated_at: now },
+        { id: 35, number: '045', name: 'Лайм',                photo_url: p('045'), notes: '', created_at: now, updated_at: now },
+        { id: 36, number: '036', name: 'Изумрудный',           photo_url: p('036'), notes: '', created_at: now, updated_at: now },
+        { id: 37, number: '037', name: 'Хаки',                 photo_url: p('037'), notes: '', created_at: now, updated_at: now },
+        { id: 38, number: '038', name: 'Оливковый',            photo_url: p('038'), notes: '', created_at: now, updated_at: now },
+        { id: 39, number: '039', name: 'Чёрный',               photo_url: p('039'), notes: '', created_at: now, updated_at: now },
     ];
 }

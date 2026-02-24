@@ -480,8 +480,8 @@ body {
 /* Color page — grid of color cards */
 .colors-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-    gap: 12px;
+    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+    gap: 10px;
     padding: 12px 0;
 }
 
@@ -489,30 +489,35 @@ body {
     display: flex;
     flex-direction: column;
     align-items: center;
-    padding: 12px;
+    padding: 0;
     background: var(--card-bg);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     cursor: pointer;
     transition: all var(--transition);
     position: relative;
+    overflow: hidden;
 }
 
 .color-card:hover {
     border-color: var(--accent);
     box-shadow: var(--shadow);
+    transform: translateY(-2px);
 }
 
 .color-card .btn-remove {
     position: absolute;
-    top: 6px;
-    right: 6px;
-    width: 22px;
-    height: 22px;
-    min-width: 22px;
-    font-size: 11px;
+    top: 4px;
+    right: 4px;
+    width: 20px;
+    height: 20px;
+    min-width: 20px;
+    font-size: 10px;
     opacity: 0;
     transition: opacity var(--transition);
+    background: rgba(255,255,255,0.85);
+    border-radius: 50%;
+    z-index: 2;
 }
 
 .color-card:hover .btn-remove {
@@ -520,32 +525,35 @@ body {
 }
 
 .color-card-photo {
-    margin-bottom: 8px;
+    width: 100%;
+    aspect-ratio: 1 / 1.6;
+    overflow: hidden;
+    background: var(--bg);
 }
 
 .color-thumb {
-    width: 60px;
-    height: 60px;
+    width: 100%;
+    height: 100%;
     object-fit: cover;
-    border-radius: 50%;
-    border: 2px solid var(--border);
+    display: block;
 }
 
 .color-thumb-placeholder {
-    width: 60px;
-    height: 60px;
+    width: 100%;
+    height: 100%;
     display: flex;
     align-items: center;
     justify-content: center;
     background: var(--accent-light);
-    border-radius: 50%;
-    font-size: 20px;
+    font-size: 28px;
     font-weight: 700;
     color: var(--accent);
 }
 
 .color-card-info {
     text-align: center;
+    padding: 6px 6px 8px;
+    width: 100%;
 }
 
 .color-card-number {
@@ -553,14 +561,18 @@ body {
     font-size: 10px;
     color: var(--text-muted);
     font-weight: 600;
+    letter-spacing: 0.5px;
 }
 
 .color-card-name {
     display: block;
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 600;
     color: var(--text-primary);
-    margin-top: 2px;
+    margin-top: 1px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .color-photo-preview {
