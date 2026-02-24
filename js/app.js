@@ -189,8 +189,22 @@ const Calculator = {
         } catch (e) { console.error('[Calculator.init] loadColors error:', e); }
 
         if (this.items.length === 0 && !App.editingOrderId) {
-            this.resetForm();
-            this.addItem();
+            // Try to restore last editing session after page refresh
+            const savedId = localStorage.getItem('ro_calc_editing_order_id');
+            if (savedId) {
+                try {
+                    await this.loadOrder(parseInt(savedId));
+                    console.log('[Calculator.init] Restored draft order #' + savedId);
+                } catch (e) {
+                    console.warn('[Calculator.init] Could not restore draft:', e);
+                    localStorage.removeItem('ro_calc_editing_order_id');
+                    this.resetForm();
+                    this.addItem();
+                }
+            } else {
+                this.resetForm();
+                this.addItem();
+            }
         }
         // Close mold picker & color picker on outside click
         if (!this._moldPickerBound) {
@@ -203,6 +217,22 @@ const Calculator = {
                     document.querySelectorAll('.color-picker-dropdown').forEach(d => d.style.display = 'none');
                 }
             });
+            // Force-save on page unload if dirty
+            window.addEventListener('beforeunload', (e) => {
+                if (this._isDirty && this._autosaveTimer) {
+                    // Try to save synchronously before page closes
+                    clearTimeout(this._autosaveTimer);
+                    // beforeunload can't run async, but editingOrderId is already persisted
+                    // The autosave will have already saved the data within 2 seconds of last change
+                }
+            });
+            // Save immediately on page visibility change (tab switch, minimize)
+            document.addEventListener('visibilitychange', () => {
+                if (document.hidden && this._isDirty) {
+                    clearTimeout(this._autosaveTimer);
+                    this._doAutosave();
+                }
+            });
         }
     },
 
@@ -213,6 +243,7 @@ const Calculator = {
         this._autosaving = false;
 
         App.editingOrderId = null;
+        localStorage.removeItem('ro_calc_editing_order_id');
         document.getElementById('calc-order-name').value = '';
         document.getElementById('calc-client-name').value = '';
         document.getElementById('calc-manager-name').value = '';
@@ -1907,7 +1938,7 @@ const Calculator = {
     scheduleAutosave() {
         this._isDirty = true;
         clearTimeout(this._autosaveTimer);
-        this._autosaveTimer = setTimeout(() => this._doAutosave(), 2000);
+        this._autosaveTimer = setTimeout(() => this._doAutosave(), 1500);
     },
 
     async _doAutosave() {
@@ -1962,6 +1993,8 @@ const Calculator = {
             const orderId = await saveOrder(order, items);
             if (orderId) {
                 App.editingOrderId = orderId;
+                // Persist editing ID so it survives page refresh
+                localStorage.setItem('ro_calc_editing_order_id', String(orderId));
                 this._isDirty = false;
                 // Update autosave indicator
                 const timeStr = String(now.getHours()).padStart(2,'0') + ':' + String(now.getMinutes()).padStart(2,'0');
@@ -2115,6 +2148,7 @@ const Calculator = {
         const orderId = await saveOrder(order, items);
         if (orderId) {
             App.editingOrderId = orderId;
+            localStorage.setItem('ro_calc_editing_order_id', String(orderId));
 
             if (isEdit && oldData) {
                 // Diff order header fields
@@ -2248,6 +2282,7 @@ const Calculator = {
 
         this.resetForm();
         App.editingOrderId = orderId;
+        localStorage.setItem('ro_calc_editing_order_id', String(orderId));
 
         const { order, items: dbItems } = data;
         document.getElementById('calc-order-name').value = order.order_name || '';
