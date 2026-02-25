@@ -122,10 +122,29 @@ async function loadSettings() {
         const { data, error } = await supabaseClient
             .from('settings')
             .select('key, value');
-        if (error) { console.error('loadSettings error:', error); return getDefaultSettings(); }
+        if (error) {
+            console.error('loadSettings error:', error);
+            // Fallback to localStorage, not just defaults
+            return getLocal(LOCAL_KEYS.settings) || getDefaultSettings();
+        }
         if (data && data.length > 0) {
+            const defaults = getDefaultSettings();
+            const numericKeys = new Set(Object.keys(defaults));
             const obj = {};
-            data.forEach(r => { obj[r.key] = r.value; });
+            data.forEach(r => {
+                // Parse numeric values back to numbers (Supabase TEXT column returns strings)
+                if (numericKeys.has(r.key) && typeof defaults[r.key] === 'number') {
+                    obj[r.key] = parseFloat(r.value) || 0;
+                } else {
+                    obj[r.key] = r.value ?? '';
+                }
+            });
+            // Ensure all default keys exist
+            Object.keys(defaults).forEach(k => {
+                if (obj[k] === undefined) obj[k] = defaults[k];
+            });
+            // Cache to localStorage for offline/backup
+            setLocal(LOCAL_KEYS.settings, obj);
             return obj;
         }
         // Supabase empty — seed from localStorage or defaults, then return
@@ -138,29 +157,32 @@ async function loadSettings() {
 }
 
 async function saveSetting(key, value) {
+    // Always save to localStorage (dual-write)
+    const s = getLocal(LOCAL_KEYS.settings) || getDefaultSettings();
+    s[key] = value;
+    setLocal(LOCAL_KEYS.settings, s);
+
     if (isSupabaseReady()) {
         const { error } = await supabaseClient
             .from('settings')
-            .upsert({ key, value, updated_at: new Date().toISOString() }, { onConflict: 'key' });
+            .upsert({ key, value: String(value ?? ''), updated_at: new Date().toISOString() }, { onConflict: 'key' });
         if (error) console.error('saveSetting error:', error);
-    } else {
-        const s = getLocal(LOCAL_KEYS.settings) || getDefaultSettings();
-        s[key] = value;
-        setLocal(LOCAL_KEYS.settings, s);
     }
 }
 
 async function saveAllSettings(settingsObj) {
+    // Always save to localStorage (dual-write for safety)
+    setLocal(LOCAL_KEYS.settings, settingsObj);
+
     if (isSupabaseReady()) {
+        // Convert ALL values to strings for Supabase TEXT column
         const rows = Object.entries(settingsObj).map(([key, value]) => ({
-            key, value, updated_at: new Date().toISOString()
+            key, value: String(value ?? ''), updated_at: new Date().toISOString()
         }));
         const { error } = await supabaseClient
             .from('settings')
             .upsert(rows, { onConflict: 'key' });
         if (error) console.error('saveAllSettings error:', error);
-    } else {
-        setLocal(LOCAL_KEYS.settings, settingsObj);
     }
 }
 
