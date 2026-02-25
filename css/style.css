@@ -1828,7 +1828,7 @@ table .text-center { text-align: center; }
 
 .orders-board {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(5, 1fr);
     gap: 12px;
     padding: 4px 0;
 }
@@ -1890,12 +1890,20 @@ table .text-center { text-align: center; }
 }
 .inline-status-select:hover { border-color: var(--accent); }
 .inline-status-select.status-draft { color: #6b7280; }
-.inline-status-select.status-calculated { color: #2563eb; }
-.inline-status-select.status-in_production { color: #f59e0b; }
-.inline-status-select.status-completed { color: #10b981; }
+.inline-status-select.status-calculated { color: #6b7280; }
+.inline-status-select.status-sample { color: #3b82f6; font-weight: 700; }
+.inline-status-select.status-production_casting,
+.inline-status-select.status-production_hardware,
+.inline-status-select.status-production_packaging,
+.inline-status-select.status-in_production { color: #f59e0b; font-weight: 700; }
+.inline-status-select.status-delivery { color: #8b5cf6; font-weight: 700; }
+.inline-status-select.status-completed { color: #22c55e; font-weight: 700; }
 .inline-status-select.status-cancelled { color: #ef4444; }
 
-@media (max-width: 1024px) {
+@media (max-width: 1280px) {
+    .orders-board { grid-template-columns: repeat(3, 1fr); }
+}
+@media (max-width: 900px) {
     .orders-board { grid-template-columns: repeat(2, 1fr); }
 }
 @media (max-width: 600px) {

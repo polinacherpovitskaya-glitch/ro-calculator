@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v43e';
+const APP_VERSION = 'v44';
 
 const App = {
     currentPage: 'dashboard',
@@ -164,12 +164,17 @@ const App = {
 
     statusLabel(status) {
         const map = {
-            draft: 'Черновик',
-            calculated: 'Рассчитан',
-            in_production: 'В производстве',
-            completed: 'Выполнен',
-            cancelled: 'Отменен',
-            deleted: 'Удалён',
+            draft:                'Черновик',
+            calculated:           'Черновик',          // backward compat
+            sample:               'Заказ образца',
+            production_casting:   'Производство: Выливание',
+            production_hardware:  'Производство: Сборка',
+            production_packaging: 'Производство: Упаковка',
+            in_production:        'Производство',      // backward compat
+            delivery:             'Доставка',
+            completed:            'Готово',
+            cancelled:            'Отменён',
+            deleted:              'Удалён',
         };
         return map[status] || status;
     },
@@ -2180,7 +2185,7 @@ const Calculator = {
             client_bank_bik: document.getElementById('calc-client-bank-bik').value.trim(),
             plastic_type: 'PP', // always PP
             print_type: null, // determined at printing level
-            status: 'calculated',
+            status: 'draft',
             total_revenue_plan: summary.totalRevenue,
             total_cost_plan: summary.totalRevenue - summary.totalEarned,
             total_margin_plan: summary.totalEarned,

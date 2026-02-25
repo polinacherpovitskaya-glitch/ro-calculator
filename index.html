@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=43e">
+    <link rel="stylesheet" href="css/style.css?v=44">
 </head>
 <body>
 
@@ -394,7 +394,7 @@
         <!-- ========== ORDERS ========== -->
         <div id="page-orders" class="page">
             <div class="page-header">
-                <h1>История заказов</h1>
+                <h1>Заказы</h1>
                 <div class="flex gap-8">
                     <div class="orders-view-toggle">
                         <button class="orders-view-btn" data-view="table" onclick="Orders.setView('table')">&#9776; Таблица</button>
@@ -411,10 +411,13 @@
                         <select id="orders-filter-status" onchange="Orders.loadList()">
                             <option value="">Все</option>
                             <option value="draft">Черновик</option>
-                            <option value="calculated">Рассчитан</option>
-                            <option value="in_production">В производстве</option>
-                            <option value="completed">Выполнен</option>
-                            <option value="cancelled">Отменен</option>
+                            <option value="sample">Заказ образца</option>
+                            <option value="production_casting">Производство: Выливание</option>
+                            <option value="production_hardware">Производство: Сборка</option>
+                            <option value="production_packaging">Производство: Упаковка</option>
+                            <option value="delivery">Доставка</option>
+                            <option value="completed">Готово</option>
+                            <option value="cancelled">Отменён</option>
                             <option value="deleted">&#128465; Корзина</option>
                         </select>
                     </div>
@@ -2221,24 +2224,24 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="js/supabase.js?v=43e"></script>
-<script src="js/calculator.js?v=43e"></script>
-<script src="js/app.js?v=43e"></script>
-<script src="js/dashboard.js?v=43e"></script>
-<script src="js/order-detail.js?v=43e"></script>
-<script src="js/orders.js?v=43e"></script>
-<script src="js/analytics.js?v=43e"></script>
-<script src="js/molds.js?v=43e"></script>
-<script src="js/colors.js?v=43e"></script>
-<script src="js/kp.js?v=43e"></script>
-<script src="js/timetrack.js?v=43e"></script>
-<script src="js/tasks.js?v=43e"></script>
-<script src="js/gantt.js?v=43e"></script>
-<script src="js/import.js?v=43e"></script>
-<script src="js/factual.js?v=43e"></script>
-<script src="js/china.js?v=43e"></script>
-<script src="js/warehouse_photos.js?v=43e"></script>
-<script src="js/warehouse.js?v=43e"></script>
-<script src="js/settings.js?v=43e"></script>
+<script src="js/supabase.js?v=44"></script>
+<script src="js/calculator.js?v=44"></script>
+<script src="js/app.js?v=44"></script>
+<script src="js/dashboard.js?v=44"></script>
+<script src="js/order-detail.js?v=44"></script>
+<script src="js/orders.js?v=44"></script>
+<script src="js/analytics.js?v=44"></script>
+<script src="js/molds.js?v=44"></script>
+<script src="js/colors.js?v=44"></script>
+<script src="js/kp.js?v=44"></script>
+<script src="js/timetrack.js?v=44"></script>
+<script src="js/tasks.js?v=44"></script>
+<script src="js/gantt.js?v=44"></script>
+<script src="js/import.js?v=44"></script>
+<script src="js/factual.js?v=44"></script>
+<script src="js/china.js?v=44"></script>
+<script src="js/warehouse_photos.js?v=44"></script>
+<script src="js/warehouse.js?v=44"></script>
+<script src="js/settings.js?v=44"></script>
 </body>
 </html>

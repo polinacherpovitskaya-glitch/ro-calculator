@@ -4,19 +4,31 @@
 // =============================================
 
 const STATUS_OPTIONS = [
-    { value: 'draft', label: 'Черновик' },
-    { value: 'calculated', label: 'Рассчитан' },
-    { value: 'in_production', label: 'В производстве' },
-    { value: 'completed', label: 'Выполнен' },
-    { value: 'cancelled', label: 'Отменен' },
-    { value: 'deleted', label: 'Удалён' },
+    { value: 'draft',                label: 'Черновик' },
+    { value: 'sample',               label: 'Заказ образца' },
+    { value: 'production_casting',   label: 'Производство: Выливание' },
+    { value: 'production_hardware',  label: 'Производство: Сборка' },
+    { value: 'production_packaging', label: 'Производство: Упаковка' },
+    { value: 'delivery',             label: 'Доставка' },
+    { value: 'completed',            label: 'Готово' },
+    { value: 'cancelled',            label: 'Отменён' },
+    { value: 'deleted',              label: 'Удалён' },
 ];
 
+// Production sub-stage labels for board card badge
+const PRODUCTION_SUBSTAGES = {
+    production_casting:   'Выливание формы',
+    production_hardware:  'Сборка фурнитуры',
+    production_packaging: 'Упаковка',
+    in_production:        'В производстве',
+};
+
 const BOARD_COLUMNS = [
-    { status: 'draft', label: 'Черновик', color: '#6b7280', icon: '○' },
-    { status: 'calculated', label: 'Рассчитан', color: '#2563eb', icon: '◉' },
-    { status: 'in_production', label: 'В производстве', color: '#f59e0b', icon: '◐' },
-    { status: 'completed', label: 'Выполнен', color: '#10b981', icon: '●' },
+    { status: 'draft',      label: 'Черновик',      color: '#6b7280', icon: '○', statuses: ['draft', 'calculated'] },
+    { status: 'sample',     label: 'Заказ образца', color: '#3b82f6', icon: '◎', statuses: ['sample'] },
+    { status: 'production', label: 'Производство',  color: '#f59e0b', icon: '◐', statuses: ['production_casting', 'production_hardware', 'production_packaging', 'in_production'] },
+    { status: 'delivery',   label: 'Доставка',      color: '#8b5cf6', icon: '→', statuses: ['delivery'] },
+    { status: 'completed',  label: 'Готово',         color: '#22c55e', icon: '●', statuses: ['completed'] },
 ];
 
 const Orders = {
@@ -86,14 +98,16 @@ const Orders = {
         if (icon) icon.textContent = this.collapsedSections[status] ? '▸' : '▾';
     },
 
-    // Section display order and config
+    // Section display order and config for table view
+    // Each section has a 'statuses' array for backward compat grouping
     STATUS_SECTIONS: [
-        { status: 'in_production', label: 'В производстве', color: '#f59e0b', icon: '◐', defaultOpen: true },
-        { status: 'calculated',    label: 'Рассчитан',      color: '#2563eb', icon: '◉', defaultOpen: true },
-        { status: 'draft',         label: 'Черновик',        color: '#6b7280', icon: '○', defaultOpen: true },
-        { status: 'completed',     label: 'Выполнен',        color: '#10b981', icon: '●', defaultOpen: false },
-        { status: 'cancelled',     label: 'Отменен',         color: '#ef4444', icon: '✕', defaultOpen: false },
-        { status: 'deleted',       label: 'Корзина',         color: '#9ca3af', icon: '&#128465;', defaultOpen: false },
+        { status: 'draft',       label: 'Черновик',      color: '#6b7280', icon: '○', defaultOpen: true,  statuses: ['draft', 'calculated'] },
+        { status: 'sample',      label: 'Заказ образца', color: '#3b82f6', icon: '◎', defaultOpen: true,  statuses: ['sample'] },
+        { status: 'production',  label: 'Производство',  color: '#f59e0b', icon: '◐', defaultOpen: true,  statuses: ['production_casting', 'production_hardware', 'production_packaging', 'in_production'] },
+        { status: 'delivery',    label: 'Доставка',      color: '#8b5cf6', icon: '→', defaultOpen: true,  statuses: ['delivery'] },
+        { status: 'completed',   label: 'Готово',         color: '#22c55e', icon: '●', defaultOpen: false, statuses: ['completed'] },
+        { status: 'cancelled',   label: 'Отменён',        color: '#ef4444', icon: '✕', defaultOpen: false, statuses: ['cancelled'] },
+        { status: 'deleted',     label: 'Корзина',        color: '#9ca3af', icon: '&#128465;', defaultOpen: false, statuses: ['deleted'] },
     ],
 
     renderTable(orders) {
@@ -111,14 +125,15 @@ const Orders = {
         const statusFilter = document.getElementById('orders-filter-status').value;
 
         // Choose which sections to show
+        // When filtering, find the section that contains the filtered status
         const sections = statusFilter
-            ? this.STATUS_SECTIONS.filter(s => s.status === statusFilter)
+            ? this.STATUS_SECTIONS.filter(s => s.statuses.includes(statusFilter))
             : this.STATUS_SECTIONS;
 
         let html = '';
 
         for (const section of sections) {
-            const sectionOrders = orders.filter(o => o.status === section.status);
+            const sectionOrders = orders.filter(o => section.statuses.includes(o.status));
             if (sectionOrders.length === 0 && !statusFilter) continue; // skip empty sections in all-view
 
             const totalRevenue = sectionOrders.reduce((s, o) => s + (o.total_revenue_plan || 0), 0);
@@ -223,7 +238,7 @@ const Orders = {
         const active = orders.filter(o => o.status !== 'deleted' && o.status !== 'cancelled');
 
         container.innerHTML = BOARD_COLUMNS.map(col => {
-            const colOrders = active.filter(o => o.status === col.status);
+            const colOrders = active.filter(o => col.statuses.includes(o.status));
             const totalRevenue = colOrders.reduce((s, o) => s + (o.total_revenue_plan || 0), 0);
 
             return `
@@ -261,11 +276,18 @@ const Orders = {
             } catch (e) {}
         }
 
+        // Production sub-stage badge
+        const subStage = PRODUCTION_SUBSTAGES[order.status];
+        const subStageBadge = subStage
+            ? `<div style="font-size:10px;color:#f59e0b;font-weight:600;margin-bottom:4px;">◉ ${subStage}</div>`
+            : '';
+
         return `
         <div class="order-board-card" draggable="true"
              ondragstart="Orders.onBoardDragStart(event, ${order.id})"
              onclick="App.navigate('order-detail', true, ${order.id})">
             <div class="order-board-card-title">${this.escHtml(order.order_name || 'Без названия')}</div>
+            ${subStageBadge}
             <div class="order-board-card-client">${this.escHtml(order.client_name || '')} ${order.manager_name ? '/ ' + this.escHtml(order.manager_name) : ''}</div>
             <div class="order-board-card-footer">
                 <span class="badge badge-${ps.color}" style="font-size:9px">${ps.label}</span>
@@ -300,23 +322,27 @@ const Orders = {
 
         const orderId = parseInt(e.dataTransfer.getData('text/plain'));
         const order = this.allOrders.find(o => o.id === orderId);
-        if (!order || order.status === newStatus) return;
+        if (!order) return;
+
+        // When dropping into «Производство» column, start at the first sub-stage
+        const actualStatus = newStatus === 'production' ? 'production_casting' : newStatus;
+        if (order.status === actualStatus) return;
 
         const oldStatus = order.status;
         const managerName = prompt('Имя менеджера (для истории изменений):');
         if (managerName === null) return; // user cancelled
 
-        await updateOrderStatus(orderId, newStatus);
-        order.status = newStatus;
+        await updateOrderStatus(orderId, actualStatus);
+        order.status = actualStatus;
 
         await this.addChangeRecord(orderId, {
             field: 'status',
             old_value: App.statusLabel(oldStatus),
-            new_value: App.statusLabel(newStatus),
+            new_value: App.statusLabel(actualStatus),
             manager: managerName || 'Неизвестный',
         });
 
-        App.toast(`Статус: ${App.statusLabel(newStatus)}`);
+        App.toast(`Статус: ${App.statusLabel(actualStatus)}`);
         this.renderBoard(this.allOrders);
     },
 
