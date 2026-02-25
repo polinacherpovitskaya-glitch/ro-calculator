@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v43c';
+const APP_VERSION = 'v43d';
 
 const App = {
     currentPage: 'dashboard',
@@ -780,6 +780,7 @@ const Calculator = {
             <div class="cost-breakdown" id="hw-cost-${idx}" style="display:none">
                 <div class="section-title" style="margin-top:0">Себестоимость фурнитуры (за 1 шт)</div>
                 <div class="cost-row"><span class="cost-label">ФОТ сборка</span><span class="cost-value" id="hw-${idx}-fot">0</span></div>
+                <div class="cost-row" style="display:none"><span class="cost-label">Косвенные расходы</span><span class="cost-value" id="hw-${idx}-indirect">0</span></div>
                 <div class="cost-row"><span class="cost-label">Закупка</span><span class="cost-value" id="hw-${idx}-purchase">0</span></div>
                 <div class="cost-row"><span class="cost-label">Доставка (на шт)</span><span class="cost-value" id="hw-${idx}-delivery">0</span></div>
                 <div class="cost-row cost-total"><span class="cost-label">ИТОГО себестоимость</span><span class="cost-value" id="hw-${idx}-total">0</span></div>
@@ -1001,6 +1002,7 @@ const Calculator = {
             <div class="cost-breakdown" id="pkg-cost-${idx}" style="display:none">
                 <div class="section-title" style="margin-top:0">Себестоимость упаковки (за 1 шт)</div>
                 <div class="cost-row"><span class="cost-label">ФОТ сборка</span><span class="cost-value" id="pkg-${idx}-fot">0</span></div>
+                <div class="cost-row" style="display:none"><span class="cost-label">Косвенные расходы</span><span class="cost-value" id="pkg-${idx}-indirect">0</span></div>
                 <div class="cost-row"><span class="cost-label">Закупка</span><span class="cost-value" id="pkg-${idx}-purchase">0</span></div>
                 <div class="cost-row"><span class="cost-label">Доставка (на шт)</span><span class="cost-value" id="pkg-${idx}-delivery">0</span></div>
                 <div class="cost-row cost-total"><span class="cost-label">ИТОГО себестоимость</span><span class="cost-value" id="pkg-${idx}-total">0</span></div>
@@ -1399,6 +1401,9 @@ const Calculator = {
                 // Show cost breakdown
                 if (hwCostEl) hwCostEl.style.display = '';
                 this.setText('hw-' + idx + '-fot', formatRub(result.fotPerUnit));
+                this.setText('hw-' + idx + '-indirect', formatRub(result.indirectPerUnit || 0));
+                const hwIndEl = document.getElementById('hw-' + idx + '-indirect');
+                if (hwIndEl) hwIndEl.parentElement.style.display = (result.indirectPerUnit || 0) > 0 ? '' : 'none';
                 this.setText('hw-' + idx + '-purchase', formatRub(hw.price || 0));
                 this.setText('hw-' + idx + '-delivery', formatRub(hw.delivery_price || 0));
                 this.setText('hw-' + idx + '-total', formatRub(result.costPerUnit));
@@ -1421,6 +1426,9 @@ const Calculator = {
                 // Show cost breakdown
                 if (pkgCostEl) pkgCostEl.style.display = '';
                 this.setText('pkg-' + idx + '-fot', formatRub(result.fotPerUnit));
+                this.setText('pkg-' + idx + '-indirect', formatRub(result.indirectPerUnit || 0));
+                const pkgIndEl = document.getElementById('pkg-' + idx + '-indirect');
+                if (pkgIndEl) pkgIndEl.parentElement.style.display = (result.indirectPerUnit || 0) > 0 ? '' : 'none';
                 this.setText('pkg-' + idx + '-purchase', formatRub(pkg.price || 0));
                 this.setText('pkg-' + idx + '-delivery', formatRub(pkg.delivery_price || 0));
                 this.setText('pkg-' + idx + '-total', formatRub(result.costPerUnit));

@@ -212,17 +212,22 @@ function calculateHardwareCost(hw, params) {
     const speed = hw.assembly_speed || 0;
     let hoursHardware = 0;
     let fotPerUnit = 0;
+    let indirectPerUnit = 0;
 
     if (qty > 0 && speed > 0) {
         hoursHardware = qty / speed * params.wasteFactor;
         fotPerUnit = hoursHardware * params.fotPerHour / qty;
+        if (params.indirectCostMode === 'all') {
+            indirectPerUnit = params.indirectPerHour * hoursHardware / qty;
+        }
     }
 
-    const costPerUnit = fotPerUnit + (hw.price || 0) + (hw.delivery_price || 0);
+    const costPerUnit = fotPerUnit + indirectPerUnit + (hw.price || 0) + (hw.delivery_price || 0);
 
     return {
         costPerUnit: round2(costPerUnit),
         fotPerUnit: round2(fotPerUnit),
+        indirectPerUnit: round2(indirectPerUnit),
         hoursHardware: round2(hoursHardware),
         totalCost: round2(costPerUnit * qty),
     };
@@ -236,17 +241,22 @@ function calculatePackagingCost(pkg, params) {
     const speed = pkg.assembly_speed || 0;
     let hoursPackaging = 0;
     let fotPerUnit = 0;
+    let indirectPerUnit = 0;
 
     if (qty > 0 && speed > 0) {
         hoursPackaging = qty / speed * params.wasteFactor;
         fotPerUnit = hoursPackaging * params.fotPerHour / qty;
+        if (params.indirectCostMode === 'all') {
+            indirectPerUnit = params.indirectPerHour * hoursPackaging / qty;
+        }
     }
 
-    const costPerUnit = fotPerUnit + (pkg.price || 0) + (pkg.delivery_price || 0);
+    const costPerUnit = fotPerUnit + indirectPerUnit + (pkg.price || 0) + (pkg.delivery_price || 0);
 
     return {
         costPerUnit: round2(costPerUnit),
         fotPerUnit: round2(fotPerUnit),
+        indirectPerUnit: round2(indirectPerUnit),
         hoursPackaging: round2(hoursPackaging),
         totalCost: round2(costPerUnit * qty),
     };
