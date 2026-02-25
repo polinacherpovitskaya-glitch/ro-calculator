@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v43';
+const APP_VERSION = 'v43b';
 
 const App = {
     currentPage: 'dashboard',
@@ -548,6 +548,7 @@ const Calculator = {
                 <div class="cost-row"><span class="cost-label">Амортизация молда</span><span class="cost-value" id="c-${idx}-mold">0</span></div>
                 <div class="cost-row"><span class="cost-label">Проектирование</span><span class="cost-value" id="c-${idx}-design">0</span></div>
                 <div class="cost-row"><span class="cost-label">Срезка лейника (ФОТ)</span><span class="cost-value" id="c-${idx}-cutting">0</span></div>
+                <div class="cost-row"><span class="cost-label">Срезка лейника (косв.)</span><span class="cost-value" id="c-${idx}-cutting-ind">0</span></div>
                 <div class="cost-row"><span class="cost-label">NFC метка</span><span class="cost-value" id="c-${idx}-nfc-tag">0</span></div>
                 <div class="cost-row"><span class="cost-label">NFC программирование</span><span class="cost-value" id="c-${idx}-nfc-prog">0</span></div>
                 <div class="cost-row"><span class="cost-label">NFC (косв.)</span><span class="cost-value" id="c-${idx}-nfc-ind">0</span></div>
@@ -1360,6 +1361,7 @@ const Calculator = {
                 this.setText('c-' + idx + '-mold', formatRub(result.costMoldAmortization));
                 this.setText('c-' + idx + '-design', formatRub(result.costDesign));
                 this.setText('c-' + idx + '-cutting', formatRub(result.costCutting));
+                this.setText('c-' + idx + '-cutting-ind', formatRub(result.costCuttingIndirect));
                 this.setText('c-' + idx + '-nfc-tag', formatRub(result.costNfcTag));
                 this.setText('c-' + idx + '-nfc-prog', formatRub(result.costNfcProgramming));
                 this.setText('c-' + idx + '-nfc-ind', formatRub(result.costNfcIndirect));

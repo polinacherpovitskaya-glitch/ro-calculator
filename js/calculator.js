@@ -84,10 +84,10 @@ function calculateItemCost(item, params) {
     const costDesign = item.complex_design ? p.designCost / qty : 0;
 
     // === Срезание лейника ===
-    // Косвенные НЕ закладываем: срезание происходит параллельно с литьём пластика
+    // Косвенные расходы закладываем: срезание занимает производственные часы
     const hoursCutting = p.cuttingSpeed > 0 ? qty / p.cuttingSpeed * p.wasteFactor : 0;
     const costCutting = hoursCutting * p.fotPerHour / qty;
-    const costCuttingIndirect = 0; // убрано — лейник срезается пока льётся пластик
+    const costCuttingIndirect = hoursCutting > 0 ? p.indirectPerHour * hoursCutting / qty : 0;
 
     // === NFC ===
     const costNfcTag = item.is_nfc ? p.nfcTagCost : 0;
@@ -155,7 +155,7 @@ function calculateItemCost(item, params) {
         + costPrinting + costDelivery + costBuiltinHw;
     // Protect against NaN/Infinity from division by zero in params
     if (!isFinite(costTotal)) {
-        console.warn('costTotal is NaN/Infinity, components:', {costFot, costIndirect, costPlastic, costMoldAmortization, costDesign, costCutting, costNfcTag, costPrinting, costDelivery});
+        console.warn('costTotal is NaN/Infinity, components:', {costFot, costIndirect, costPlastic, costMoldAmortization, costDesign, costCutting, costCuttingIndirect, costNfcTag, costPrinting, costDelivery});
         costTotal = 0;
     }
 
