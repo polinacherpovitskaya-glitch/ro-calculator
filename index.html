@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=43b">
+    <link rel="stylesheet" href="css/style.css?v=43c">
 </head>
 <body>
 
@@ -1887,6 +1887,16 @@
                         </div>
                     </div>
                     <div class="form-row">
+                        <div class="form-group" style="flex:1;">
+                            <label>Распределение косвенных</label>
+                            <select id="set-indirect_cost_mode" data-key-text="indirect_cost_mode">
+                                <option value="production">Только литьё + постобработка</option>
+                                <option value="all">Литьё + упаковка + фурнитура</option>
+                            </select>
+                            <span class="form-hint">«Литьё» — косвенные делятся на 70% часов. «Все» — на 100% рабочих часов.</span>
+                        </div>
+                    </div>
+                    <div class="form-row">
                         <div class="form-group">
                             <label>Стоимость пластика за кг</label>
                             <input type="number" id="set-plastic_cost_per_kg" data-key="plastic_cost_per_kg">
@@ -2210,24 +2220,24 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="js/supabase.js?v=43b"></script>
-<script src="js/calculator.js?v=43b"></script>
-<script src="js/app.js?v=43b"></script>
-<script src="js/dashboard.js?v=43b"></script>
-<script src="js/order-detail.js?v=43b"></script>
-<script src="js/orders.js?v=43b"></script>
-<script src="js/analytics.js?v=43b"></script>
-<script src="js/molds.js?v=43b"></script>
-<script src="js/colors.js?v=43b"></script>
-<script src="js/kp.js?v=43b"></script>
-<script src="js/timetrack.js?v=43b"></script>
-<script src="js/tasks.js?v=43b"></script>
-<script src="js/gantt.js?v=43b"></script>
-<script src="js/import.js?v=43b"></script>
-<script src="js/factual.js?v=43b"></script>
-<script src="js/china.js?v=43b"></script>
-<script src="js/warehouse_photos.js?v=43b"></script>
-<script src="js/warehouse.js?v=43b"></script>
-<script src="js/settings.js?v=43b"></script>
+<script src="js/supabase.js?v=43c"></script>
+<script src="js/calculator.js?v=43c"></script>
+<script src="js/app.js?v=43c"></script>
+<script src="js/dashboard.js?v=43c"></script>
+<script src="js/order-detail.js?v=43c"></script>
+<script src="js/orders.js?v=43c"></script>
+<script src="js/analytics.js?v=43c"></script>
+<script src="js/molds.js?v=43c"></script>
+<script src="js/colors.js?v=43c"></script>
+<script src="js/kp.js?v=43c"></script>
+<script src="js/timetrack.js?v=43c"></script>
+<script src="js/tasks.js?v=43c"></script>
+<script src="js/gantt.js?v=43c"></script>
+<script src="js/import.js?v=43c"></script>
+<script src="js/factual.js?v=43c"></script>
+<script src="js/china.js?v=43c"></script>
+<script src="js/warehouse_photos.js?v=43c"></script>
+<script src="js/warehouse.js?v=43c"></script>
+<script src="js/settings.js?v=43c"></script>
 </body>
 </html>

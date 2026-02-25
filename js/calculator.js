@@ -14,7 +14,10 @@ function getProductionParams(settings) {
     const workLoadHours = totalHoursAll * s('work_load_ratio');
     const plasticHours = workLoadHours * s('plastic_injection_ratio');
     const packagingHours = workLoadHours * s('packaging_ratio');
-    const indirectPerHour = plasticHours > 0 ? s('indirect_costs_monthly') / plasticHours : 0;
+    // Режим распределения косвенных: 'production' (только литьё) или 'all' (все часы)
+    const indirectCostMode = settings['indirect_cost_mode'] || 'production';
+    const indirectDenom = indirectCostMode === 'all' ? workLoadHours : plasticHours;
+    const indirectPerHour = indirectDenom > 0 ? s('indirect_costs_monthly') / indirectDenom : 0;
 
     return {
         totalHoursAll,
@@ -22,6 +25,7 @@ function getProductionParams(settings) {
         plasticHours,
         packagingHours,
         indirectPerHour,
+        indirectCostMode,
         fotPerHour: s('fot_per_hour'),
         cuttingSpeed: s('cutting_speed'),
         plasticCostPerKg: s('plastic_cost_per_kg'),
@@ -129,6 +133,7 @@ function calculateItemCost(item, params) {
 
     // === Встроенная фурнитура бланка (зеркало, магнит, кольцо и т.д.) ===
     let costBuiltinHw = 0;
+    let costBuiltinHwIndirect = 0;
     let hoursBuiltinHw = 0;
     const hwName = item.builtin_hw_name || '';
     const hwPricePerUnit = item.builtin_hw_price || 0;
@@ -142,6 +147,10 @@ function calculateItemCost(item, params) {
         if (hwSpeed > 0 && qty > 0) {
             hoursBuiltinHw = qty / hwSpeed * p.wasteFactor;
             costBuiltinHw += hoursBuiltinHw * p.fotPerHour / qty;
+            // Косвенные на фурнитуру — только в режиме «все»
+            if (p.indirectCostMode === 'all') {
+                costBuiltinHwIndirect = p.indirectPerHour * hoursBuiltinHw / qty;
+            }
         }
     }
 
@@ -152,7 +161,7 @@ function calculateItemCost(item, params) {
     let costTotal = costFot + costIndirect + costPlastic + costMoldAmortization
         + costDesign + costCutting + costCuttingIndirect
         + costNfcTag + costNfcProgramming + costNfcIndirect
-        + costPrinting + costDelivery + costBuiltinHw;
+        + costPrinting + costDelivery + costBuiltinHw + costBuiltinHwIndirect;
     // Protect against NaN/Infinity from division by zero in params
     if (!isFinite(costTotal)) {
         console.warn('costTotal is NaN/Infinity, components:', {costFot, costIndirect, costPlastic, costMoldAmortization, costDesign, costCutting, costCuttingIndirect, costNfcTag, costPrinting, costDelivery});
@@ -175,6 +184,7 @@ function calculateItemCost(item, params) {
         costPrintingDetails: costPrintingDetails,
         costDelivery: round2(costDelivery),
         costBuiltinHw: round2(costBuiltinHw),
+        costBuiltinHwIndirect: round2(costBuiltinHwIndirect),
         costTotal: round2(costTotal),
 
         // Часы производства (на всю партию)
@@ -511,7 +521,7 @@ function getEmptyCostResult() {
         costFot: 0, costIndirect: 0, costPlastic: 0, costMoldAmortization: 0,
         costDesign: 0, costCutting: 0, costCuttingIndirect: 0,
         costNfcTag: 0, costNfcProgramming: 0, costNfcIndirect: 0,
-        costBuiltinHw: 0,
+        costBuiltinHw: 0, costBuiltinHwIndirect: 0,
         costPrinting: 0, costDelivery: 0, costTotal: 0,
         hoursPlastic: 0, hoursCutting: 0, hoursNfc: 0, hoursBuiltinHw: 0,
         hoursPlasticZone: 0, hoursCuttingZone: 0,

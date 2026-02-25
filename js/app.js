@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v43b';
+const APP_VERSION = 'v43c';
 
 const App = {
     currentPage: 'dashboard',
@@ -553,6 +553,7 @@ const Calculator = {
                 <div class="cost-row"><span class="cost-label">NFC программирование</span><span class="cost-value" id="c-${idx}-nfc-prog">0</span></div>
                 <div class="cost-row"><span class="cost-label">NFC (косв.)</span><span class="cost-value" id="c-${idx}-nfc-ind">0</span></div>
                 <div class="cost-row"><span class="cost-label">Встроенная фурнитура</span><span class="cost-value" id="c-${idx}-builtin-hw">0</span></div>
+                <div class="cost-row" style="display:none"><span class="cost-label">Фурнитура (косв.)</span><span class="cost-value" id="c-${idx}-builtin-hw-ind">0</span></div>
                 <div class="cost-row"><span class="cost-label">Нанесение</span><span class="cost-value" id="c-${idx}-printing">0</span></div>
                 <div class="cost-row"><span class="cost-label">Доставка</span><span class="cost-value" id="c-${idx}-delivery">0</span></div>
                 <div class="cost-row cost-total"><span class="cost-label">ИТОГО себестоимость</span><span class="cost-value" id="c-${idx}-total">0</span></div>
@@ -1366,6 +1367,9 @@ const Calculator = {
                 this.setText('c-' + idx + '-nfc-prog', formatRub(result.costNfcProgramming));
                 this.setText('c-' + idx + '-nfc-ind', formatRub(result.costNfcIndirect));
                 this.setText('c-' + idx + '-builtin-hw', formatRub(result.costBuiltinHw || 0));
+                this.setText('c-' + idx + '-builtin-hw-ind', formatRub(result.costBuiltinHwIndirect || 0));
+                const hwIndEl = document.getElementById('c-' + idx + '-builtin-hw-ind');
+                if (hwIndEl) hwIndEl.parentElement.style.display = (result.costBuiltinHwIndirect || 0) > 0 ? '' : 'none';
                 this.setText('c-' + idx + '-printing', formatRub(result.costPrinting));
                 this.setText('c-' + idx + '-delivery', formatRub(result.costDelivery));
                 this.setText('c-' + idx + '-total', formatRub(result.costTotal));

@@ -211,6 +211,7 @@ function getDefaultSettings() {
         mp_storage_ratio: 0.32,
         mp_acquiring: 0.065,
         waste_factor: 1.1,
+        indirect_cost_mode: 'production',
     };
 }
 
