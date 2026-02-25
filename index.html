@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=40f">
+    <link rel="stylesheet" href="css/style.css?v=41">
 </head>
 <body>
 
@@ -192,11 +192,11 @@
                         </select>
                     </div>
                     <div class="form-group">
-                        <label>Дедлайн (начало)</label>
+                        <label>Начало</label>
                         <input type="date" id="calc-deadline-start" onchange="Calculator.scheduleAutosave()">
                     </div>
                     <div class="form-group">
-                        <label>Дедлайн (конец)</label>
+                        <label>Дедлайн</label>
                         <input type="date" id="calc-deadline-end" onchange="Calculator.scheduleAutosave()">
                     </div>
                 </div>
@@ -204,6 +204,56 @@
                     <label>Заметки</label>
                     <textarea id="calc-notes" rows="2" placeholder="Доп. информация по заказу" oninput="Calculator.scheduleAutosave()"></textarea>
                 </div>
+
+                <!-- Contacts (collapsible) -->
+                <details class="calc-contacts-details">
+                    <summary style="cursor:pointer;font-size:13px;font-weight:600;color:var(--text-muted);margin:8px 0 6px">&#128222; Контакты и ссылки</summary>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Адрес доставки</label>
+                            <input type="text" id="calc-delivery-address" placeholder="Город, улица, дом..." oninput="Calculator.scheduleAutosave()">
+                        </div>
+                        <div class="form-group">
+                            <label>Telegram чат</label>
+                            <input type="text" id="calc-telegram" placeholder="@username или ссылка" oninput="Calculator.scheduleAutosave()">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>CRM ссылка</label>
+                            <input type="url" id="calc-crm-link" placeholder="https://..." oninput="Calculator.scheduleAutosave()">
+                        </div>
+                        <div class="form-group">
+                            <label>Финтабло ссылка</label>
+                            <input type="url" id="calc-fintablo-link" placeholder="https://..." oninput="Calculator.scheduleAutosave()">
+                        </div>
+                    </div>
+                </details>
+
+                <!-- Files (collapsible) -->
+                <details class="calc-contacts-details">
+                    <summary style="cursor:pointer;font-size:13px;font-weight:600;color:var(--text-muted);margin:8px 0 6px">&#128193; Файлы и референсы</summary>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Файл печати</label>
+                            <input type="url" id="calc-print-file-url" placeholder="Ссылка на файл..." oninput="Calculator.scheduleAutosave()">
+                        </div>
+                        <div class="form-group">
+                            <label>Файл резки / формы</label>
+                            <input type="url" id="calc-cutting-file-url" placeholder="Ссылка на файл..." oninput="Calculator.scheduleAutosave()">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Документы доставки</label>
+                            <input type="url" id="calc-delivery-docs-url" placeholder="Ссылка..." oninput="Calculator.scheduleAutosave()">
+                        </div>
+                        <div class="form-group">
+                            <label>Референсы</label>
+                            <input type="text" id="calc-reference-urls" placeholder="Ссылки через запятую" oninput="Calculator.scheduleAutosave()">
+                        </div>
+                    </div>
+                </details>
             </div>
 
             <!-- Item blocks container -->
@@ -339,8 +389,8 @@
                 <h1>История заказов</h1>
                 <div class="flex gap-8">
                     <div class="orders-view-toggle">
-                        <button class="orders-view-btn active" data-view="table" onclick="Orders.setView('table')">&#9776; Таблица</button>
-                        <button class="orders-view-btn" data-view="board" onclick="Orders.setView('board')">&#9638; Доска</button>
+                        <button class="orders-view-btn" data-view="table" onclick="Orders.setView('table')">&#9776; Таблица</button>
+                        <button class="orders-view-btn active" data-view="board" onclick="Orders.setView('board')">&#9638; Доска</button>
                     </div>
                     <button class="btn btn-primary" onclick="App.navigate('calculator')">+ Новый расчет</button>
                 </div>
@@ -367,11 +417,11 @@
                 </div>
             </div>
 
-            <!-- Table view (grouped by status) -->
-            <div id="orders-table-view"></div>
+            <!-- Board view (Kanban) — default -->
+            <div id="orders-board-view" class="orders-board"></div>
 
-            <!-- Board view (Kanban) -->
-            <div id="orders-board-view" class="orders-board" style="display:none"></div>
+            <!-- Table view (grouped by status) -->
+            <div id="orders-table-view" style="display:none"></div>
         </div>
 
         <!-- ========== ORDER DETAIL ========== -->
@@ -2025,24 +2075,24 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="js/supabase.js?v=40f"></script>
-<script src="js/calculator.js?v=40f"></script>
-<script src="js/app.js?v=40f"></script>
-<script src="js/dashboard.js?v=40f"></script>
-<script src="js/order-detail.js?v=40f"></script>
-<script src="js/orders.js?v=40f"></script>
-<script src="js/analytics.js?v=40f"></script>
-<script src="js/molds.js?v=40f"></script>
-<script src="js/colors.js?v=40f"></script>
-<script src="js/kp.js?v=40f"></script>
-<script src="js/timetrack.js?v=40f"></script>
-<script src="js/tasks.js?v=40f"></script>
-<script src="js/gantt.js?v=40f"></script>
-<script src="js/import.js?v=40f"></script>
-<script src="js/factual.js?v=40f"></script>
-<script src="js/china.js?v=40f"></script>
-<script src="js/warehouse_photos.js?v=40f"></script>
-<script src="js/warehouse.js?v=40f"></script>
-<script src="js/settings.js?v=40f"></script>
+<script src="js/supabase.js?v=41"></script>
+<script src="js/calculator.js?v=41"></script>
+<script src="js/app.js?v=41"></script>
+<script src="js/dashboard.js?v=41"></script>
+<script src="js/order-detail.js?v=41"></script>
+<script src="js/orders.js?v=41"></script>
+<script src="js/analytics.js?v=41"></script>
+<script src="js/molds.js?v=41"></script>
+<script src="js/colors.js?v=41"></script>
+<script src="js/kp.js?v=41"></script>
+<script src="js/timetrack.js?v=41"></script>
+<script src="js/tasks.js?v=41"></script>
+<script src="js/gantt.js?v=41"></script>
+<script src="js/import.js?v=41"></script>
+<script src="js/factual.js?v=41"></script>
+<script src="js/china.js?v=41"></script>
+<script src="js/warehouse_photos.js?v=41"></script>
+<script src="js/warehouse.js?v=41"></script>
+<script src="js/settings.js?v=41"></script>
 </body>
 </html>

@@ -1732,6 +1732,24 @@ table .text-center { text-align: center; }
 
 .orders-board-col.drag-over { background: var(--accent-light); border-color: var(--accent); }
 
+/* Inline status select in orders table */
+.inline-status-select {
+    font-size: 11px;
+    padding: 3px 6px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--card-bg);
+    cursor: pointer;
+    font-weight: 600;
+    outline: none;
+}
+.inline-status-select:hover { border-color: var(--accent); }
+.inline-status-select.status-draft { color: #6b7280; }
+.inline-status-select.status-calculated { color: #2563eb; }
+.inline-status-select.status-in_production { color: #f59e0b; }
+.inline-status-select.status-completed { color: #10b981; }
+.inline-status-select.status-cancelled { color: #ef4444; }
+
 @media (max-width: 1024px) {
     .orders-board { grid-template-columns: repeat(2, 1fr); }
 }

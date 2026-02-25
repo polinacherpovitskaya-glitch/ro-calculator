@@ -128,18 +128,15 @@ const OrderDetail = {
                 ${this._fieldRow('order_name', 'Название', o.order_name, 'text')}
                 ${this._fieldRow('client_name', 'Клиент', o.client_name, 'text')}
                 ${this._fieldRow('manager_name', 'Менеджер', o.manager_name, 'text')}
-                ${this._fieldRow('owner', 'Владелец', o.owner, 'text')}
-                ${this._fieldRowDateRange('deadline_start', 'deadline_end', 'Дедлайн', o.deadline_start || o.deadline, o.deadline_end)}
+                ${this._fieldRowDateRange('deadline_start', 'deadline_end', 'Начало → Дедлайн', o.deadline_start || o.deadline, o.deadline_end)}
                 ${this._fieldRow('notes', 'Заметки', o.notes, 'textarea')}
             </div>
             <div class="card">
                 <div class="card-header"><h3>Контакты и ссылки</h3></div>
-                ${this._fieldRow('delivery_address', 'Адрес доставки', o.delivery_address, 'textarea')}
-                ${this._fieldRow('telegram_chat_url', 'Телеграм чат', o.telegram_chat_url, 'url')}
-                ${this._fieldRow('crm_url', 'CRM', o.crm_url, 'url')}
-                ${this._fieldRow('fintablo_deal_url', 'Финтабло', o.fintablo_deal_url, 'url')}
-                ${this._fieldRow('spreadsheet_url', 'Таблица', o.spreadsheet_url, 'url')}
-                ${this._fieldRow('file_storage_url', 'Хранилище файлов', o.file_storage_url, 'url')}
+                ${this._fieldRow('delivery_address', 'Адрес доставки', o.delivery_address, 'text')}
+                ${this._fieldRow('telegram', 'Telegram', o.telegram, 'text')}
+                ${this._fieldRow('crm_link', 'CRM', o.crm_link, 'url')}
+                ${this._fieldRow('fintablo_link', 'Финтабло', o.fintablo_link, 'url')}
             </div>
         </div>
         `;
@@ -158,16 +155,6 @@ const OrderDetail = {
             <div class="card">
                 <div class="card-header"><h3>Статусы</h3></div>
                 ${this._fieldRowSelect('payment_status', 'Статус оплаты', o.payment_status || 'not_sent', PAYMENT_STATUSES)}
-                ${this._fieldRowSelect('hardware_status', 'Статус фурнитуры', o.hardware_status || 'discussion', HARDWARE_STATUSES)}
-                ${this._fieldRowCheckbox('is_blank_mold', 'Бланк (форма)', o.is_blank_mold)}
-                ${this._fieldRowCheckbox('packaging_from_stock', 'Упаковка из стока', o.packaging_from_stock)}
-            </div>
-            <div class="card">
-                <div class="card-header"><h3>Производство</h3></div>
-                ${this._fieldRow('color_scheme', 'Цветовое решение', o.color_scheme, 'text')}
-                ${this._fieldRow('hardware_description', 'Фурнитура', o.hardware_description, 'textarea')}
-                ${this._fieldRow('packaging_description', 'Упаковка', o.packaging_description, 'textarea')}
-                ${this._fieldRow('production_status', 'Статус производства', o.production_status, 'text')}
             </div>
         </div>
         `;
@@ -349,10 +336,18 @@ const OrderDetail = {
 
     async renderChinaTab() {
         const container = document.getElementById('od-tab-china');
+        const orderId = this.currentOrder.id;
+        const orderName = this._esc(this.currentOrder.order_name || '');
         try {
-            const purchases = await loadChinaPurchases({ order_id: this.currentOrder.id });
+            const purchases = await loadChinaPurchases({ order_id: orderId });
+
+            const addBtn = `<div style="display:flex;justify-content:flex-end;margin-bottom:12px">
+                <button class="btn btn-sm btn-success" onclick="App.navigate('china', true); setTimeout(() => { if(typeof ChinaPurchases!=='undefined') { ChinaPurchases.openForm(); document.getElementById('china-f-order').value='${orderId}'; }}, 200);">+ Создать закупку для этого заказа</button>
+            </div>`;
+
             if (!purchases || purchases.length === 0) {
                 container.innerHTML = `
+                    ${addBtn}
                     <div class="card">
                         <div class="empty-state">
                             <div class="empty-icon">&#127464;&#127475;</div>
@@ -362,6 +357,7 @@ const OrderDetail = {
                 return;
             }
             container.innerHTML = `
+                ${addBtn}
                 <div class="card" style="padding:0">
                     <div class="table-wrap">
                         <table>

@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v40f';
+const APP_VERSION = 'v41';
 
 const App = {
     currentPage: 'dashboard',
@@ -249,9 +249,18 @@ const Calculator = {
         document.getElementById('calc-order-name').value = '';
         document.getElementById('calc-client-name').value = '';
         document.getElementById('calc-manager-name').value = '';
-        document.getElementById('calc-deadline-start').value = '';
+        // Auto-fill "Начало" with today's date for new orders
+        document.getElementById('calc-deadline-start').value = new Date().toISOString().slice(0, 10);
         document.getElementById('calc-deadline-end').value = '';
         document.getElementById('calc-notes').value = '';
+        document.getElementById('calc-delivery-address').value = '';
+        document.getElementById('calc-telegram').value = '';
+        document.getElementById('calc-crm-link').value = '';
+        document.getElementById('calc-fintablo-link').value = '';
+        document.getElementById('calc-print-file-url').value = '';
+        document.getElementById('calc-cutting-file-url').value = '';
+        document.getElementById('calc-delivery-docs-url').value = '';
+        document.getElementById('calc-reference-urls').value = '';
         this.items = [];
         this.hardwareItems = [];
         this.packagingItems = [];
@@ -1970,6 +1979,14 @@ const Calculator = {
                 deadline_start: document.getElementById('calc-deadline-start').value || null,
                 deadline_end: document.getElementById('calc-deadline-end').value || null,
                 notes: document.getElementById('calc-notes').value.trim(),
+                delivery_address: document.getElementById('calc-delivery-address').value.trim(),
+                telegram: document.getElementById('calc-telegram').value.trim(),
+                crm_link: document.getElementById('calc-crm-link').value.trim(),
+                fintablo_link: document.getElementById('calc-fintablo-link').value.trim(),
+                print_file_url: document.getElementById('calc-print-file-url').value.trim(),
+                cutting_file_url: document.getElementById('calc-cutting-file-url').value.trim(),
+                delivery_documents_url: document.getElementById('calc-delivery-docs-url').value.trim(),
+                reference_urls: document.getElementById('calc-reference-urls').value.trim(),
                 plastic_type: 'PP',
                 print_type: null,
                 status: 'draft', // autosave always writes 'draft' for new; existing orders get their status preserved below
@@ -2123,6 +2140,14 @@ const Calculator = {
             deadline_start: document.getElementById('calc-deadline-start').value || null,
             deadline_end: document.getElementById('calc-deadline-end').value || null,
             notes: document.getElementById('calc-notes').value.trim(),
+            delivery_address: document.getElementById('calc-delivery-address').value.trim(),
+            telegram: document.getElementById('calc-telegram').value.trim(),
+            crm_link: document.getElementById('calc-crm-link').value.trim(),
+            fintablo_link: document.getElementById('calc-fintablo-link').value.trim(),
+            print_file_url: document.getElementById('calc-print-file-url').value.trim(),
+            cutting_file_url: document.getElementById('calc-cutting-file-url').value.trim(),
+            delivery_documents_url: document.getElementById('calc-delivery-docs-url').value.trim(),
+            reference_urls: document.getElementById('calc-reference-urls').value.trim(),
             plastic_type: 'PP', // always PP
             print_type: null, // determined at printing level
             status: 'calculated',
@@ -2295,6 +2320,14 @@ const Calculator = {
         document.getElementById('calc-deadline-start').value = order.deadline_start || order.deadline || '';
         document.getElementById('calc-deadline-end').value = order.deadline_end || '';
         document.getElementById('calc-notes').value = order.notes || '';
+        document.getElementById('calc-delivery-address').value = order.delivery_address || '';
+        document.getElementById('calc-telegram').value = order.telegram || '';
+        document.getElementById('calc-crm-link').value = order.crm_link || '';
+        document.getElementById('calc-fintablo-link').value = order.fintablo_link || '';
+        document.getElementById('calc-print-file-url').value = order.print_file_url || '';
+        document.getElementById('calc-cutting-file-url').value = order.cutting_file_url || '';
+        document.getElementById('calc-delivery-docs-url').value = order.delivery_documents_url || '';
+        document.getElementById('calc-reference-urls').value = order.reference_urls || '';
 
         // Restore product items
         const productItems = dbItems.filter(i => !i.item_type || i.item_type === 'product');

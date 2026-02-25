@@ -21,7 +21,7 @@ const BOARD_COLUMNS = [
 
 const Orders = {
     allOrders: [],
-    view: 'table', // 'table' | 'board'
+    view: 'board', // 'board' | 'table'
 
     setView(v) {
         this.view = v;
@@ -147,6 +147,7 @@ const Orders = {
                             <th>Заказ</th>
                             <th>Клиент</th>
                             <th>Менеджер</th>
+                            <th>Статус</th>
                             <th>Оплата</th>
                             <th class="text-right">Выручка</th>
                             <th class="text-right">Маржа</th>
@@ -186,11 +187,21 @@ const Orders = {
         const ps = PAYMENT_STATUSES.find(s => s.key === (o.payment_status || 'not_sent')) || PAYMENT_STATUSES[0];
         const paymentBadge = `<span class="badge badge-${ps.color}" style="font-size:10px;">${ps.label}</span>`;
 
+        // Inline status select
+        const statusSelect = isDeleted
+            ? `<span style="font-size:11px;color:var(--text-muted)">Удалён</span>`
+            : `<select class="inline-status-select status-${o.status}" onchange="Orders.onStatusChange(${o.id}, this.value, '${o.status}')" onclick="event.stopPropagation()">
+                ${STATUS_OPTIONS.filter(s => s.value !== 'deleted').map(s =>
+                    `<option value="${s.value}" ${s.value === o.status ? 'selected' : ''}>${s.label}</option>`
+                ).join('')}
+            </select>`;
+
         return `
         <tr style="${isDeleted ? 'opacity:0.7;' : ''}">
             <td><a href="#order-detail/${o.id}" onclick="App.navigate('order-detail', true, ${o.id}); return false;" style="color:var(--accent);font-weight:600;text-decoration:none" title="Открыть карточку заказа">${this.escHtml(o.order_name)}</a></td>
             <td>${this.escHtml(o.client_name || '—')}</td>
             <td style="font-size:12px">${this.escHtml(o.manager_name || '—')}</td>
+            <td>${statusSelect}</td>
             <td>${paymentBadge}</td>
             <td class="text-right">${formatRub(o.total_revenue_plan || 0)}</td>
             <td class="text-right ${(o.margin_percent_plan || 0) >= 30 ? 'text-green' : 'text-red'}">${formatPercent(o.margin_percent_plan || 0)}</td>
