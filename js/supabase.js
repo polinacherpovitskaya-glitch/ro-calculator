@@ -295,40 +295,111 @@ function refreshTemplatesFromMolds(molds) {
 // ORDERS
 // =============================================
 
+// Known columns in Supabase tables (must match schema exactly)
+const _ORDER_COLS = new Set([
+    'id', 'order_name', 'client_name', 'status',
+    'deadline', 'deadline_start', 'deadline_end',
+    'delivery_address', 'telegram', 'crm_link', 'fintablo_link',
+    'client_legal_name', 'client_inn', 'client_legal_address',
+    'client_bank_name', 'client_bank_account', 'client_bank_bik',
+    'payment_status', 'total_hours_plan',
+    'production_hours_plastic', 'production_hours_packaging', 'production_hours_hardware',
+    'total_cost', 'total_revenue', 'total_margin', 'margin_percent',
+    'calculator_data', 'items_snapshot', 'hardware_snapshot', 'packaging_snapshot',
+    'manager_name', 'owner_name', 'notes',
+    'created_at', 'updated_at', 'deleted_at',
+]);
+
+const _ITEM_COLS = new Set([
+    'id', 'order_id', 'item_number', 'template_id', 'product_name',
+    'quantity', 'unit_price', 'sell_price_item', 'sell_price_printing',
+    'total_price', 'cost_total', 'item_data',
+    'created_at', 'updated_at',
+]);
+
+// Map code fields to schema fields (where names differ)
+const _ORDER_FIELD_MAP = {
+    total_revenue_plan: 'total_revenue',
+    total_cost_plan: 'total_cost',
+    total_margin_plan: 'total_margin',
+    margin_percent_plan: 'margin_percent',
+};
+
+/**
+ * Filter object to only known DB columns + store ALL data as JSON backup
+ */
+function _filterForDB(obj, knownCols, jsonCol, fieldMap) {
+    const filtered = {};
+    const fullData = {};
+
+    for (const [key, val] of Object.entries(obj)) {
+        if (val === undefined) continue;
+        fullData[key] = val;
+
+        // Map field name if needed (e.g. total_revenue_plan → total_revenue)
+        const mappedKey = fieldMap && fieldMap[key] ? fieldMap[key] : key;
+
+        if (knownCols.has(mappedKey)) {
+            filtered[mappedKey] = val;
+        }
+    }
+
+    // Store full data as JSON in the designated column
+    if (jsonCol) {
+        filtered[jsonCol] = JSON.stringify(fullData);
+    }
+
+    return filtered;
+}
+
 async function saveOrder(order, items) {
     if (isSupabaseReady()) {
-        // Upsert order
+        // Generate ID for new orders (Supabase BIGINT PK has no auto-increment)
         let orderId = order.id;
-        if (orderId) {
-            // Remove undefined values to avoid overwriting existing fields
-            const updateData = { updated_at: new Date().toISOString() };
-            for (const [key, val] of Object.entries(order)) {
-                if (val !== undefined && key !== 'id') updateData[key] = val;
-            }
+        if (!orderId) {
+            orderId = Date.now();
+            order.id = orderId;
+        }
+
+        // Filter order to known columns + store full data in calculator_data
+        const orderData = _filterForDB(order, _ORDER_COLS, 'calculator_data', _ORDER_FIELD_MAP);
+        orderData.updated_at = new Date().toISOString();
+
+        // Try update first if order exists, otherwise insert
+        const { data: existing } = await supabaseClient
+            .from('orders').select('id').eq('id', orderId).maybeSingle();
+
+        if (existing) {
+            // Update existing order
+            const { id: _id, ...updateFields } = orderData;
             const { error } = await supabaseClient
                 .from('orders')
-                .update(updateData)
+                .update(updateFields)
                 .eq('id', orderId);
             if (error) { console.error('updateOrder error:', error); return null; }
         } else {
-            const { data, error } = await supabaseClient
+            // Insert new order
+            orderData.created_at = orderData.created_at || new Date().toISOString();
+            const { error } = await supabaseClient
                 .from('orders')
-                .insert({ ...order })
-                .select('id')
-                .single();
+                .insert(orderData);
             if (error) { console.error('insertOrder error:', error); return null; }
-            orderId = data.id;
         }
 
         // Delete old items and insert new
         await supabaseClient.from('order_items').delete().eq('order_id', orderId);
         if (items.length > 0) {
-            const rows = items.map(item => ({ ...item, order_id: orderId }));
+            const rows = items.map((item, i) => {
+                const filtered = _filterForDB(item, _ITEM_COLS, 'item_data', null);
+                filtered.order_id = orderId;
+                filtered.id = item.id || (Date.now() + i + 1);
+                return filtered;
+            });
             const { error } = await supabaseClient.from('order_items').insert(rows);
             if (error) console.error('insertOrderItems error:', error);
         }
 
-        // Also save to localStorage as backup
+        // Also save to localStorage as backup (full data, no filtering)
         _saveOrderLocally({ ...order, id: orderId }, items);
 
         return orderId;
@@ -408,21 +479,41 @@ async function loadOrders(filters = {}) {
                 console.log('Migrating', activeLocal.length, 'orders from localStorage to Supabase...');
                 for (const order of localOrders) {
                     try {
-                        await supabaseClient.from('orders').upsert(order, { onConflict: 'id' });
+                        const filtered = _filterForDB(order, _ORDER_COLS, 'calculator_data', _ORDER_FIELD_MAP);
+                        await supabaseClient.from('orders').upsert(filtered, { onConflict: 'id' });
                     } catch (e) { console.warn('Order migration error:', e); }
                 }
                 // Also migrate order items
                 const localItems = getLocal(LOCAL_KEYS.orderItems) || [];
                 if (localItems.length > 0) {
                     try {
-                        await supabaseClient.from('order_items').insert(localItems);
+                        const filteredItems = localItems.map(item => {
+                            const f = _filterForDB(item, _ITEM_COLS, 'item_data', null);
+                            f.id = f.id || Date.now() + Math.floor(Math.random() * 10000);
+                            return f;
+                        });
+                        await supabaseClient.from('order_items').insert(filteredItems);
                     } catch (e) { console.warn('Items migration error:', e); }
                 }
                 return activeLocal.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
             }
         }
 
-        return data;
+        // Restore full data from calculator_data JSON for each order
+        return (data || []).map(order => {
+            if (order.calculator_data) {
+                try {
+                    const extras = JSON.parse(order.calculator_data);
+                    const merged = { ...extras, ...order };
+                    if (merged.total_revenue !== undefined) merged.total_revenue_plan = merged.total_revenue;
+                    if (merged.total_cost !== undefined) merged.total_cost_plan = merged.total_cost;
+                    if (merged.total_margin !== undefined) merged.total_margin_plan = merged.total_margin;
+                    if (merged.margin_percent !== undefined) merged.margin_percent_plan = merged.margin_percent;
+                    return merged;
+                } catch (e) { /* ignore */ }
+            }
+            return order;
+        });
     }
     let orders = getLocal(LOCAL_KEYS.orders) || [];
     // Fix orders with missing status (bug from v40e autosave)
@@ -450,10 +541,37 @@ async function loadOrder(orderId) {
         const { data: order, error: e1 } = await supabaseClient
             .from('orders').select('*').eq('id', orderId).single();
         if (e1) { console.error('loadOrder error:', e1); return null; }
-        const { data: items, error: e2 } = await supabaseClient
+
+        // Restore full order data from calculator_data JSON
+        let fullOrder = { ...order };
+        if (order.calculator_data) {
+            try {
+                const extras = JSON.parse(order.calculator_data);
+                fullOrder = { ...extras, ...order }; // DB columns take priority
+                // Reverse-map schema fields back to code fields
+                if (fullOrder.total_revenue !== undefined) fullOrder.total_revenue_plan = fullOrder.total_revenue;
+                if (fullOrder.total_cost !== undefined) fullOrder.total_cost_plan = fullOrder.total_cost;
+                if (fullOrder.total_margin !== undefined) fullOrder.total_margin_plan = fullOrder.total_margin;
+                if (fullOrder.margin_percent !== undefined) fullOrder.margin_percent_plan = fullOrder.margin_percent;
+            } catch (e) { /* ignore parse errors */ }
+        }
+
+        const { data: rawItems, error: e2 } = await supabaseClient
             .from('order_items').select('*').eq('order_id', orderId).order('item_number');
         if (e2) { console.error('loadOrderItems error:', e2); return null; }
-        return { order, items };
+
+        // Restore full item data from item_data JSON
+        const items = (rawItems || []).map(item => {
+            if (item.item_data) {
+                try {
+                    const extras = JSON.parse(item.item_data);
+                    return { ...extras, ...item }; // DB columns take priority
+                } catch (e) { /* ignore */ }
+            }
+            return item;
+        });
+
+        return { order: fullOrder, items };
     }
     const orders = getLocal(LOCAL_KEYS.orders) || [];
     const order = orders.find(o => o.id === orderId);
