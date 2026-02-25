@@ -158,19 +158,27 @@ const KPGenerator = {
         let y = 20;
 
         // ════════════════════════════════
-        // HEADER — Logo left, KP title right
+        // HEADER — Company name left, KP title right
         // ════════════════════════════════
-        doc.setFont(fn, 'bold');
-        doc.setFontSize(18);
-        doc.setTextColor(...BLACK);
         const headerTitle = (companyLegal && companyLegal.name) ? companyLegal.name.toUpperCase() : 'RECYCLE OBJECT';
+
+        // Auto-size company name: fit within left 60% of content width
+        const maxNameW = contentW * 0.58;
+        let nameFontSize = 16;
+        doc.setFont(fn, 'bold');
+        doc.setFontSize(nameFontSize);
+        while (nameFontSize > 9 && doc.getTextWidth(headerTitle) > maxNameW) {
+            nameFontSize -= 0.5;
+            doc.setFontSize(nameFontSize);
+        }
+        doc.setTextColor(...BLACK);
         doc.text(headerTitle, marginL, y);
 
         // Right side: KP title + number
         doc.setFont(fn, 'bold');
         doc.setFontSize(8.5);
         doc.setTextColor(...BLACK);
-        doc.text('KOММЕРЧЕСКОЕ ПРЕДЛОЖЕНИЕ', pageW - marginR, y - 3, { align: 'right' });
+        doc.text('КОММЕРЧЕСКОЕ ПРЕДЛОЖЕНИЕ', pageW - marginR, y - 3, { align: 'right' });
 
         doc.setFont(fn, 'normal');
         doc.setFontSize(7.5);
@@ -409,6 +417,7 @@ const KPGenerator = {
         doc.text('Предложение действительно 14 дней', marginL, y);
         y += 4;
         doc.text('Сроки изготовления обсуждаются индивидуально', marginL, y);
+        y += 4;
 
         // ════════════════════════════════
         // LEGAL DETAILS — two columns (if available)
@@ -417,6 +426,8 @@ const KPGenerator = {
         const hasClientLegal = clientLegal && (clientLegal.name || clientLegal.inn);
 
         if (hasCompanyLegal || hasClientLegal) {
+            y += 8;
+
             // Check page overflow
             if (y > pageH - 80) {
                 doc.addPage();
@@ -548,10 +559,10 @@ const KPGenerator = {
         doc.setFont(fn, 'normal');
         doc.setFontSize(7.5);
         doc.setTextColor(...LIGHT);
-        const footerCompanyName = (companyLegal && companyLegal.name) ? companyLegal.name : 'Recycle Object';
-        const footerCity = (companyLegal && companyLegal.address) ? companyLegal.address.split(',')[0] : 'Москва';
+        // Short footer: just city + phone (company name too long for footer)
+        const footerCity = (companyLegal && companyLegal.address) ? companyLegal.address.split(',')[0].trim() : 'Москва';
         const footerPhone = (companyLegal && companyLegal.phone) ? '  |  ' + companyLegal.phone : '';
-        doc.text(footerCompanyName + '  |  ' + footerCity + footerPhone, pageW - marginR, footerY - 1, { align: 'right' });
+        doc.text(footerCity + footerPhone, pageW - marginR, footerY - 1, { align: 'right' });
 
         // ════════════════════════════════
         // DOWNLOAD

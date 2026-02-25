@@ -390,6 +390,15 @@ const Warehouse = {
         this.renderTable(items);
     },
 
+    /** Collect unique color values from all warehouse items */
+    _getUniqueColors() {
+        const colors = new Set();
+        (this.allItems || []).forEach(item => {
+            if (item.color && item.color.trim()) colors.add(item.color.trim());
+        });
+        return [...colors].sort((a, b) => a.localeCompare(b, 'ru'));
+    },
+
     renderTable(items) {
         const container = document.getElementById('wh-content');
         if (!container) return;
@@ -403,6 +412,8 @@ const Warehouse = {
             return;
         }
 
+        const uniqueColors = this._getUniqueColors();
+
         const rows = items.map(item => {
             const cat = WAREHOUSE_CATEGORIES.find(c => c.key === item.category) || WAREHOUSE_CATEGORIES[6];
             const isLow = item.min_qty > 0 && item.qty < item.min_qty;
@@ -414,24 +425,21 @@ const Warehouse = {
                 ? `<img src="${photoSrc.startsWith('data:') ? photoSrc : this.esc(photoSrc)}" class="wh-photo" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><span class="wh-placeholder" style="display:none;background:${cat.color};color:${cat.textColor};">${cat.icon}</span>`
                 : `<span class="wh-placeholder" style="background:${cat.color};color:${cat.textColor};">${cat.icon}</span>`;
 
-            // Qty badge
+            // Qty badge class
             const qtyClass = isOut ? 'wh-qty-out' : (isLow ? 'wh-qty-low' : 'wh-qty-ok');
 
             // Category badge
             const catBadge = `<span class="wh-cat-badge" style="background:${cat.color};color:${cat.textColor};">${cat.label}</span>`;
 
-            // Reservations info
-            const resInfo = item.reserved_qty > 0
-                ? `<span style="color:var(--yellow);font-weight:600;">${item.reserved_qty}</span>`
-                : `<span style="color:var(--text-muted);">—</span>`;
-
+            // Available qty
             const availInfo = item.reserved_qty > 0
                 ? `<span style="font-weight:600;">${item.available_qty}</span>`
                 : `<span style="color:var(--text-muted);">—</span>`;
 
-            const priceStr = item.price_per_unit > 0
-                ? `<span style="font-weight:600;">${new Intl.NumberFormat('ru-RU').format(item.price_per_unit)} \u20BD</span>`
-                : '<span style="color:var(--text-muted);">—</span>';
+            // Color dropdown options
+            const colorOpts = uniqueColors.map(c =>
+                `<option value="${this.esc(c)}"${c === (item.color || '') ? ' selected' : ''}>${this.esc(c)}</option>`
+            ).join('');
 
             return `<tr style="${isOut ? 'opacity:0.5;' : (isLow ? 'background:rgba(220,38,38,0.04);' : '')}">
                 <td style="width:48px;">${photo}</td>
@@ -441,17 +449,28 @@ const Warehouse = {
                 </td>
                 <td>${catBadge}</td>
                 <td>${this.esc(item.size || '—')}</td>
-                <td>${this.esc(item.color || '—')}</td>
-                <td class="text-right">${priceStr}</td>
-                <td class="text-right"><span class="${qtyClass}">${item.qty || 0}</span></td>
-                <td class="text-right">${resInfo}</td>
+                <td>
+                    <select class="wh-inline-select" onchange="Warehouse.inlineColor(${item.id}, this.value)">
+                        <option value="">—</option>
+                        ${colorOpts}
+                    </select>
+                </td>
+                <td>
+                    <input type="number" class="wh-inline-input text-right" value="${item.price_per_unit || 0}" min="0" step="0.01"
+                        onchange="Warehouse.inlinePrice(${item.id}, this.value)">
+                </td>
+                <td>
+                    <input type="number" class="wh-inline-input text-right ${qtyClass}" value="${item.qty || 0}" min="0"
+                        onchange="Warehouse.inlineQty(${item.id}, this.value, ${item.qty || 0})">
+                </td>
+                <td>
+                    <input type="number" class="wh-inline-input text-right" value="${item.reserved_qty || 0}" min="0" max="${item.qty || 0}"
+                        style="${item.reserved_qty > 0 ? 'color:var(--yellow);font-weight:600;' : ''}"
+                        onchange="Warehouse.inlineReserve(${item.id}, this.value, ${item.reserved_qty || 0})">
+                </td>
                 <td class="text-right">${availInfo}</td>
                 <td>
                     <div class="flex gap-4" style="justify-content:flex-end;">
-                        <button class="btn btn-sm btn-outline" onclick="Warehouse.quickAdjust(${item.id}, 1)" title="+1" style="min-width:28px;padding:2px;">+</button>
-                        <button class="btn btn-sm btn-outline" onclick="Warehouse.quickAdjust(${item.id}, -1)" title="-1" style="min-width:28px;padding:2px;">−</button>
-                        <button class="btn btn-sm btn-outline" onclick="Warehouse.promptAdjust(${item.id})" title="Корректировка" style="min-width:28px;padding:2px;">±</button>
-                        <button class="btn btn-sm btn-outline" onclick="Warehouse.addReservation(${item.id})" title="Резервировать" style="min-width:28px;padding:2px;">📋</button>
                         <button class="btn btn-sm btn-outline" onclick="Warehouse.editItem(${item.id})" title="Редактировать">✎</button>
                     </div>
                 </td>
@@ -466,10 +485,10 @@ const Warehouse = {
                 <th>Размер</th>
                 <th>Цвет</th>
                 <th class="text-right">Цена</th>
-                <th class="text-right">Кол-во</th>
-                <th class="text-right">Резерв</th>
+                <th class="text-right" style="width:80px;">Кол-во</th>
+                <th class="text-right" style="width:70px;">Резерв</th>
                 <th class="text-right">Доступно</th>
-                <th style="width:180px;"></th>
+                <th style="width:50px;"></th>
             </tr></thead>
             <tbody>${rows}</tbody>
         </table></div></div>`;
@@ -629,6 +648,95 @@ const Warehouse = {
         const reason = prompt('Причина корректировки:') || '';
         await this.adjustStock(itemId, delta, delta > 0 ? 'addition' : 'deduction', '', reason, '');
         App.toast(`${item.name}: ${delta > 0 ? '+' : ''}${delta}`);
+        await this.load();
+    },
+
+    // ==========================================
+    // INLINE EDITING (directly in table)
+    // ==========================================
+
+    async inlineQty(itemId, newValueStr, oldQty) {
+        const newQty = Math.max(0, parseInt(newValueStr) || 0);
+        const delta = newQty - (oldQty || 0);
+        if (delta === 0) return;
+
+        await this.adjustStock(itemId, delta, delta > 0 ? 'addition' : 'deduction', '', 'Ручная правка', '');
+        await this.load();
+    },
+
+    async inlinePrice(itemId, newValueStr) {
+        const item = this.allItems.find(i => i.id === itemId);
+        if (!item) return;
+        const newPrice = Math.max(0, parseFloat(newValueStr) || 0);
+        if (newPrice === (item.price_per_unit || 0)) return;
+
+        item.price_per_unit = newPrice;
+        item.updated_at = new Date().toISOString();
+        await saveWarehouseItem(item);
+        await this.load();
+    },
+
+    async inlineColor(itemId, newColor) {
+        const item = this.allItems.find(i => i.id === itemId);
+        if (!item) return;
+        if (newColor === (item.color || '')) return;
+
+        item.color = newColor;
+        item.updated_at = new Date().toISOString();
+        await saveWarehouseItem(item);
+        await this.load();
+    },
+
+    async inlineReserve(itemId, newValueStr, oldReserved) {
+        const item = this.allItems.find(i => i.id === itemId);
+        if (!item) return;
+
+        const newReserved = Math.max(0, parseInt(newValueStr) || 0);
+        const maxReserve = item.qty || 0;
+        const clampedReserve = Math.min(newReserved, maxReserve);
+        const diff = clampedReserve - (oldReserved || 0);
+        if (diff === 0) return;
+
+        const reservations = await loadWarehouseReservations();
+
+        if (diff > 0) {
+            // Add a manual reservation
+            reservations.push({
+                id: Date.now(),
+                item_id: itemId,
+                order_name: 'Ручной резерв',
+                qty: diff,
+                status: 'active',
+                created_at: new Date().toISOString(),
+            });
+        } else {
+            // Release: reduce manual reservations first, then any others
+            let toRelease = Math.abs(diff);
+            // Sort: manual first, then by date descending
+            const itemRes = reservations
+                .filter(r => r.item_id === itemId && r.status === 'active')
+                .sort((a, b) => {
+                    if (a.order_name === 'Ручной резерв' && b.order_name !== 'Ручной резерв') return -1;
+                    if (b.order_name === 'Ручной резерв' && a.order_name !== 'Ручной резерв') return 1;
+                    return new Date(b.created_at) - new Date(a.created_at);
+                });
+
+            for (const res of itemRes) {
+                if (toRelease <= 0) break;
+                const resIdx = reservations.findIndex(r => r.id === res.id);
+                if (resIdx < 0) continue;
+
+                if (res.qty <= toRelease) {
+                    toRelease -= res.qty;
+                    reservations[resIdx].status = 'released';
+                } else {
+                    reservations[resIdx].qty -= toRelease;
+                    toRelease = 0;
+                }
+            }
+        }
+
+        await saveWarehouseReservations(reservations);
         await this.load();
     },
 
