@@ -54,6 +54,12 @@ const MOLDS_VERSION_KEY = 'ro_calc_molds_version';
 function checkMoldsVersion() {
     const stored = parseInt(localStorage.getItem(MOLDS_VERSION_KEY)) || 0;
     if (stored < MOLDS_DATA_VERSION) {
+        // Auto-backup before migration
+        try {
+            if (typeof Settings !== 'undefined' && Settings.autoBackup) {
+                Settings.autoBackup('pre-migration-v' + MOLDS_DATA_VERSION);
+            }
+        } catch (e) { /* Settings may not be loaded yet */ }
         // NON-DESTRUCTIVE: migrate existing data, don't delete it
         const existing = getLocal(LOCAL_KEYS.molds);
         if (existing && existing.length > 0) {

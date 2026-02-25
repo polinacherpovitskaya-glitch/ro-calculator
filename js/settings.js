@@ -29,6 +29,10 @@ const Settings = {
         if (tab === 'employees' && this.employeesData.length === 0) {
             this.loadEmployeesTab();
         }
+        // Load backup tab info
+        if (tab === 'backup') {
+            this.loadBackupTab();
+        }
     },
 
     populateFields() {
@@ -330,6 +334,230 @@ const Settings = {
         App.toast('Сотрудник удалён');
         this.cancelEmployee();
         await this.loadEmployeesTab();
+    },
+
+    // ==========================================
+    // BACKUP / RESTORE
+    // ==========================================
+
+    // All localStorage keys used by the app
+    BACKUP_KEYS: [
+        'ro_calc_orders', 'ro_calc_order_items', 'ro_calc_settings',
+        'ro_calc_molds', 'ro_calc_employees', 'ro_calc_tasks',
+        'ro_calc_time_entries', 'ro_calc_chinaPurchases',
+        'ro_calc_warehouseItems', 'ro_calc_warehouseReservations',
+        'ro_calc_warehouseHistory', 'ro_calc_shipments',
+        'ro_calc_vacations', 'ro_calc_order_factuals', 'ro_calc_imports',
+        'ro_calc_colors',
+    ],
+
+    downloadBackup() {
+        const backup = {
+            _meta: {
+                app: 'RecycleObject',
+                version: typeof APP_VERSION !== 'undefined' ? APP_VERSION : 'unknown',
+                date: new Date().toISOString(),
+                browser: navigator.userAgent.slice(0, 80),
+            },
+        };
+
+        let totalRecords = 0;
+        this.BACKUP_KEYS.forEach(key => {
+            try {
+                const raw = localStorage.getItem(key);
+                if (raw) {
+                    backup[key] = JSON.parse(raw);
+                    if (Array.isArray(backup[key])) totalRecords += backup[key].length;
+                }
+            } catch (e) { /* skip corrupted */ }
+        });
+
+        // Also save autosave state
+        const autosaveKeys = ['ro_calc_autosave_draft', 'ro_calc_editing_order_id'];
+        autosaveKeys.forEach(key => {
+            try {
+                const raw = localStorage.getItem(key);
+                if (raw) backup[key] = JSON.parse(raw);
+            } catch (e) {
+                const raw = localStorage.getItem(key);
+                if (raw) backup[key] = raw;
+            }
+        });
+
+        const json = JSON.stringify(backup, null, 2);
+        const blob = new Blob([json], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+
+        const a = document.createElement('a');
+        const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+        a.href = url;
+        a.download = `RO_backup_${dateStr}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+
+        const sizeKb = Math.round(json.length / 1024);
+        const infoEl = document.getElementById('backup-info');
+        if (infoEl) {
+            infoEl.innerHTML = `<span style="color:var(--green)">Бэкап скачан: ${sizeKb} КБ, ${totalRecords} записей</span>`;
+        }
+
+        App.toast(`Бэкап скачан (${sizeKb} КБ)`);
+    },
+
+    async restoreBackup(file) {
+        if (!file) return;
+        const infoEl = document.getElementById('restore-info');
+
+        try {
+            const text = await file.text();
+            const backup = JSON.parse(text);
+
+            if (!backup._meta || backup._meta.app !== 'RecycleObject') {
+                if (infoEl) infoEl.innerHTML = '<span style="color:var(--red)">Это не бэкап Recycle Object</span>';
+                return;
+            }
+
+            // Confirm
+            const backupDate = backup._meta.date ? new Date(backup._meta.date).toLocaleString('ru-RU') : '?';
+            const backupVer = backup._meta.version || '?';
+            if (!confirm(`Восстановить бэкап от ${backupDate} (${backupVer})?\n\nНовые данные будут ДОПОЛНЕНЫ к существующим.`)) {
+                return;
+            }
+
+            // Auto-backup current state first
+            this.autoBackup('pre-restore');
+
+            let restored = 0;
+            let merged = 0;
+
+            this.BACKUP_KEYS.forEach(key => {
+                if (!backup[key]) return;
+                const backupData = backup[key];
+
+                if (Array.isArray(backupData)) {
+                    // Merge arrays by ID
+                    let existing = [];
+                    try { existing = JSON.parse(localStorage.getItem(key)) || []; } catch (e) { existing = []; }
+
+                    const existingIds = new Set(existing.map(r => r.id));
+                    let added = 0;
+
+                    backupData.forEach(record => {
+                        if (record.id && !existingIds.has(record.id)) {
+                            existing.push(record);
+                            added++;
+                        }
+                    });
+
+                    if (added > 0) {
+                        localStorage.setItem(key, JSON.stringify(existing));
+                        merged += added;
+                    }
+                    restored++;
+                } else if (typeof backupData === 'object') {
+                    // Settings: merge keys (don't overwrite existing)
+                    let existing = {};
+                    try { existing = JSON.parse(localStorage.getItem(key)) || {}; } catch (e) { existing = {}; }
+
+                    const mergedSettings = { ...backupData, ...existing }; // existing takes priority
+                    localStorage.setItem(key, JSON.stringify(mergedSettings));
+                    restored++;
+                }
+            });
+
+            if (infoEl) {
+                infoEl.innerHTML = `<span style="color:var(--green)">Восстановлено: ${restored} коллекций, +${merged} новых записей</span>`;
+            }
+
+            App.toast(`Бэкап восстановлен: +${merged} записей`);
+
+            // Reload page to apply
+            setTimeout(() => { location.reload(); }, 1500);
+
+        } catch (e) {
+            console.error('Restore error:', e);
+            if (infoEl) infoEl.innerHTML = `<span style="color:var(--red)">Ошибка: ${e.message}</span>`;
+        }
+
+        // Reset file input
+        document.getElementById('backup-file-input').value = '';
+    },
+
+    autoBackup(reason) {
+        const backup = { _meta: { app: 'RecycleObject', version: typeof APP_VERSION !== 'undefined' ? APP_VERSION : '?', date: new Date().toISOString(), reason } };
+        this.BACKUP_KEYS.forEach(key => {
+            try {
+                const raw = localStorage.getItem(key);
+                if (raw) backup[key] = JSON.parse(raw);
+            } catch (e) { /* skip */ }
+        });
+
+        // Store up to 3 auto-backups
+        let autoBackups = [];
+        try { autoBackups = JSON.parse(localStorage.getItem('ro_calc_auto_backups')) || []; } catch (e) { autoBackups = []; }
+
+        autoBackups.unshift(backup);
+        if (autoBackups.length > 3) autoBackups = autoBackups.slice(0, 3);
+
+        try {
+            localStorage.setItem('ro_calc_auto_backups', JSON.stringify(autoBackups));
+        } catch (e) {
+            // localStorage full — remove oldest
+            autoBackups = autoBackups.slice(0, 1);
+            try { localStorage.setItem('ro_calc_auto_backups', JSON.stringify(autoBackups)); } catch (e2) { /* give up */ }
+        }
+    },
+
+    loadBackupTab() {
+        // Show auto-backups list
+        const listEl = document.getElementById('auto-backup-list');
+        if (!listEl) return;
+
+        let autoBackups = [];
+        try { autoBackups = JSON.parse(localStorage.getItem('ro_calc_auto_backups')) || []; } catch (e) {}
+
+        if (autoBackups.length === 0) {
+            listEl.innerHTML = 'Нет авто-бэкапов. Первый создастся при следующем обновлении.';
+        } else {
+            listEl.innerHTML = autoBackups.map((b, i) => {
+                const date = b._meta?.date ? new Date(b._meta.date).toLocaleString('ru-RU') : '?';
+                const ver = b._meta?.version || '?';
+                const reason = b._meta?.reason || '';
+                const orders = Array.isArray(b.ro_calc_orders) ? b.ro_calc_orders.length : 0;
+                return `<div style="padding:6px 0;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;">
+                    <span>${date} &middot; ${ver} &middot; ${reason} &middot; ${orders} заказов</span>
+                    <button class="btn btn-sm btn-outline" onclick="Settings.downloadAutoBackup(${i})" style="font-size:10px;padding:2px 8px;">Скачать</button>
+                </div>`;
+            }).join('');
+        }
+
+        // Supabase status
+        const statusEl = document.getElementById('supabase-status-text');
+        if (statusEl) {
+            if (typeof isSupabaseReady === 'function' && isSupabaseReady()) {
+                statusEl.innerHTML = '<span style="color:var(--green);font-weight:600;">Supabase подключён — данные синхронизируются</span>';
+            } else {
+                statusEl.innerHTML = '<span style="color:var(--red);font-weight:600;">Supabase НЕ подключён — данные только в этом браузере!</span>';
+            }
+        }
+    },
+
+    downloadAutoBackup(index) {
+        let autoBackups = [];
+        try { autoBackups = JSON.parse(localStorage.getItem('ro_calc_auto_backups')) || []; } catch (e) {}
+        const backup = autoBackups[index];
+        if (!backup) return;
+
+        const json = JSON.stringify(backup, null, 2);
+        const blob = new Blob([json], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        const dateStr = backup._meta?.date ? backup._meta.date.slice(0, 10).replace(/-/g, '') : 'unknown';
+        a.href = url;
+        a.download = `RO_autobackup_${dateStr}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+        App.toast('Авто-бэкап скачан');
     },
 
     escHtml(str) {

@@ -1814,6 +1814,7 @@
                 <div class="tab" data-tab="templates" onclick="Settings.switchTab('templates')">Справочник форм</div>
                 <div class="tab" data-tab="employees" onclick="Settings.switchTab('employees')">Сотрудники</div>
                 <div class="tab" data-tab="company" onclick="Settings.switchTab('company')">Реквизиты</div>
+                <div class="tab" data-tab="backup" onclick="Settings.switchTab('backup')">Бэкап</div>
             </div>
 
             <!-- Production tab -->
@@ -2108,6 +2109,62 @@
                             <input type="text" id="set-company_email" data-key-text="company_email" placeholder="info@recycleobject.ru">
                         </div>
                     </div>
+                </div>
+            </div>
+
+            <!-- Backup tab -->
+            <div id="settings-tab-backup" class="settings-tab-content" style="display:none">
+                <div class="card">
+                    <h3 style="margin-bottom:4px;">Резервное копирование</h3>
+                    <p style="font-size:12px;color:var(--text-muted);margin-bottom:16px;">
+                        Скачайте бэкап перед обновлениями или для переноса данных на другой компьютер.
+                        Файл содержит ВСЕ данные: заказы, настройки, формы, сотрудников и т.д.
+                    </p>
+
+                    <div class="form-row" style="gap:16px;align-items:flex-start">
+                        <div style="flex:1">
+                            <h4 style="margin-bottom:8px;font-size:14px;">Скачать бэкап</h4>
+                            <p style="font-size:11px;color:var(--text-muted);margin-bottom:12px;">
+                                Сохранит все данные приложения в JSON-файл на ваш компьютер
+                            </p>
+                            <button class="btn btn-primary" onclick="Settings.downloadBackup()">
+                                Скачать бэкап (.json)
+                            </button>
+                            <div id="backup-info" style="margin-top:8px;font-size:11px;color:var(--text-muted)"></div>
+                        </div>
+
+                        <div style="flex:1">
+                            <h4 style="margin-bottom:8px;font-size:14px;">Восстановить из бэкапа</h4>
+                            <p style="font-size:11px;color:var(--text-muted);margin-bottom:12px;">
+                                Загрузите ранее сохранённый JSON-файл. Существующие данные будут <b>дополнены</b> (не перезаписаны).
+                            </p>
+                            <input type="file" id="backup-file-input" accept=".json" style="display:none"
+                                   onchange="Settings.restoreBackup(this.files[0])">
+                            <button class="btn btn-outline" onclick="document.getElementById('backup-file-input').click()">
+                                Загрузить бэкап (.json)
+                            </button>
+                            <div id="restore-info" style="margin-top:8px;font-size:11px;"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card" style="margin-top:16px;">
+                    <h3 style="margin-bottom:4px;">Авто-бэкап</h3>
+                    <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">
+                        Система автоматически сохраняет бэкап при каждом обновлении версии.
+                    </p>
+                    <div id="auto-backup-list" style="font-size:12px;color:var(--text-muted);">Загрузка...</div>
+                </div>
+
+                <div class="card" style="margin-top:16px;border-left:3px solid var(--orange);">
+                    <h4 style="margin-bottom:8px;color:var(--orange)">Облачная синхронизация (Supabase)</h4>
+                    <p style="font-size:12px;color:var(--text-muted);margin-bottom:8px;" id="supabase-status-text">
+                        Проверка...
+                    </p>
+                    <p style="font-size:11px;color:var(--text-muted);">
+                        Для работы с нескольких компьютеров нужна облачная база данных.
+                        Обратитесь к разработчику для настройки Supabase.
+                    </p>
                 </div>
             </div>
 

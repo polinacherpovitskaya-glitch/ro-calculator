@@ -71,6 +71,16 @@ const App = {
         const verEl = document.getElementById('app-version');
         if (verEl) verEl.textContent = APP_VERSION;
 
+        // Auto-backup on version change
+        const lastVersion = localStorage.getItem('ro_calc_last_version');
+        if (lastVersion && lastVersion !== APP_VERSION) {
+            try {
+                Settings.autoBackup('upgrade-' + lastVersion + '-to-' + APP_VERSION);
+                console.log('Auto-backup created before upgrade from', lastVersion, 'to', APP_VERSION);
+            } catch (e) { console.warn('Auto-backup failed:', e); }
+        }
+        localStorage.setItem('ro_calc_last_version', APP_VERSION);
+
         initSupabase();
 
         this.settings = await loadSettings();
