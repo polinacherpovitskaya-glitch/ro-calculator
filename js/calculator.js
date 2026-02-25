@@ -533,3 +533,118 @@ function formatHours(n) {
     if (n === 0 || n === null || n === undefined) return '0 ч';
     return new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 }).format(n) + ' ч';
 }
+
+/**
+ * Build production schedule — day-by-day resource allocation
+ * Each order has 3 sequential phases: литьё → упаковка → сборка (hardware)
+ * Workers share a daily capacity pool
+ *
+ * @param {Array} orders — orders with production_hours_plastic, production_hours_packaging, production_hours_hardware
+ * @param {Object} settings — app settings (workers_count, hours_per_worker etc.)
+ * @returns {{ queue: Array, dailyCapacity: number, days: Array }}
+ */
+function buildProductionSchedule(orders, settings) {
+    const workersCount = (settings && settings.workers_count) || 3.5;
+    const hoursPerDay = 8;
+    const dailyCapacity = round2(workersCount * hoursPerDay);
+
+    // Filter schedulable orders (not cancelled/completed/deleted)
+    const schedulable = orders.filter(o =>
+        o.status === 'in_production' || o.status === 'calculated' || o.status === 'draft'
+    );
+
+    // Priority: in_production > calculated > draft, then by deadline_end ASC
+    const statusPriority = { in_production: 0, calculated: 1, draft: 2 };
+    schedulable.sort((a, b) => {
+        const pa = statusPriority[a.status] ?? 3;
+        const pb = statusPriority[b.status] ?? 3;
+        if (pa !== pb) return pa - pb;
+        const da = a.deadline_end || '9999-12-31';
+        const db = b.deadline_end || '9999-12-31';
+        return da.localeCompare(db);
+    });
+
+    // Build order queues with remaining hours per phase
+    const queue = schedulable.map(o => ({
+        orderId: o.id,
+        orderName: o.order_name || 'Без названия',
+        clientName: o.client_name || '',
+        status: o.status,
+        deadlineEnd: o.deadline_end || null,
+        phases: [
+            { name: 'molding', label: 'Литьё', remaining: o.production_hours_plastic || 0, total: o.production_hours_plastic || 0, color: '#f59e0b' },
+            { name: 'packaging', label: 'Упаковка', remaining: o.production_hours_packaging || 0, total: o.production_hours_packaging || 0, color: '#8b5cf6' },
+            { name: 'assembly', label: 'Сборка', remaining: o.production_hours_hardware || 0, total: o.production_hours_hardware || 0, color: '#06b6d4' },
+        ],
+        currentPhaseIdx: 0,
+        schedule: [], // [{ date, phase, hours }]
+        totalHours: round2((o.production_hours_plastic || 0) + (o.production_hours_packaging || 0) + (o.production_hours_hardware || 0)),
+        done: false,
+    }));
+
+    // Skip phases with 0 hours at the start
+    queue.forEach(q => {
+        while (q.currentPhaseIdx < q.phases.length && q.phases[q.currentPhaseIdx].remaining <= 0) {
+            q.currentPhaseIdx++;
+        }
+        if (q.currentPhaseIdx >= q.phases.length) q.done = true;
+    });
+
+    // Day-by-day allocation
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const maxDays = 120; // 6 months max lookahead
+    const days = []; // [{ date, allocations: [{ orderId, phase, hours }], totalUsed }]
+
+    for (let d = 0; d < maxDays; d++) {
+        const date = new Date(today);
+        date.setDate(date.getDate() + d);
+
+        // Skip weekends (Sat=6, Sun=0)
+        const dow = date.getDay();
+        if (dow === 0 || dow === 6) continue;
+
+        const dateStr = date.toISOString().slice(0, 10);
+        let remainingCapacity = dailyCapacity;
+        const dayAllocations = [];
+
+        // Allocate hours to orders in priority order
+        for (const q of queue) {
+            if (q.done || remainingCapacity <= 0) continue;
+
+            const phase = q.phases[q.currentPhaseIdx];
+            if (!phase || phase.remaining <= 0) continue;
+
+            // Give this order up to remainingCapacity hours (or whatever's left in phase)
+            const give = Math.min(remainingCapacity, phase.remaining);
+            phase.remaining = round2(phase.remaining - give);
+            remainingCapacity = round2(remainingCapacity - give);
+
+            q.schedule.push({ date: dateStr, phase: phase.name, hours: round2(give) });
+            dayAllocations.push({ orderId: q.orderId, phase: phase.name, hours: round2(give) });
+
+            // If phase done, advance to next
+            if (phase.remaining <= 0) {
+                q.currentPhaseIdx++;
+                // Skip empty phases
+                while (q.currentPhaseIdx < q.phases.length && q.phases[q.currentPhaseIdx].remaining <= 0) {
+                    q.currentPhaseIdx++;
+                }
+                if (q.currentPhaseIdx >= q.phases.length) {
+                    q.done = true;
+                }
+            }
+        }
+
+        days.push({
+            date: dateStr,
+            allocations: dayAllocations,
+            totalUsed: round2(dailyCapacity - remainingCapacity),
+        });
+
+        // Stop if all orders are done
+        if (queue.every(q => q.done)) break;
+    }
+
+    return { queue, dailyCapacity, days };
+}

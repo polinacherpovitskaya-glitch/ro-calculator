@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v41';
+const APP_VERSION = 'v42';
 
 const App = {
     currentPage: 'dashboard',
@@ -257,10 +257,12 @@ const Calculator = {
         document.getElementById('calc-telegram').value = '';
         document.getElementById('calc-crm-link').value = '';
         document.getElementById('calc-fintablo-link').value = '';
-        document.getElementById('calc-print-file-url').value = '';
-        document.getElementById('calc-cutting-file-url').value = '';
-        document.getElementById('calc-delivery-docs-url').value = '';
-        document.getElementById('calc-reference-urls').value = '';
+        document.getElementById('calc-client-legal-name').value = '';
+        document.getElementById('calc-client-inn').value = '';
+        document.getElementById('calc-client-legal-address').value = '';
+        document.getElementById('calc-client-bank-name').value = '';
+        document.getElementById('calc-client-bank-account').value = '';
+        document.getElementById('calc-client-bank-bik').value = '';
         this.items = [];
         this.hardwareItems = [];
         this.packagingItems = [];
@@ -1983,10 +1985,12 @@ const Calculator = {
                 telegram: document.getElementById('calc-telegram').value.trim(),
                 crm_link: document.getElementById('calc-crm-link').value.trim(),
                 fintablo_link: document.getElementById('calc-fintablo-link').value.trim(),
-                print_file_url: document.getElementById('calc-print-file-url').value.trim(),
-                cutting_file_url: document.getElementById('calc-cutting-file-url').value.trim(),
-                delivery_documents_url: document.getElementById('calc-delivery-docs-url').value.trim(),
-                reference_urls: document.getElementById('calc-reference-urls').value.trim(),
+                client_legal_name: document.getElementById('calc-client-legal-name').value.trim(),
+                client_inn: document.getElementById('calc-client-inn').value.trim(),
+                client_legal_address: document.getElementById('calc-client-legal-address').value.trim(),
+                client_bank_name: document.getElementById('calc-client-bank-name').value.trim(),
+                client_bank_account: document.getElementById('calc-client-bank-account').value.trim(),
+                client_bank_bik: document.getElementById('calc-client-bank-bik').value.trim(),
                 plastic_type: 'PP',
                 print_type: null,
                 status: 'draft', // autosave always writes 'draft' for new; existing orders get their status preserved below
@@ -2144,10 +2148,12 @@ const Calculator = {
             telegram: document.getElementById('calc-telegram').value.trim(),
             crm_link: document.getElementById('calc-crm-link').value.trim(),
             fintablo_link: document.getElementById('calc-fintablo-link').value.trim(),
-            print_file_url: document.getElementById('calc-print-file-url').value.trim(),
-            cutting_file_url: document.getElementById('calc-cutting-file-url').value.trim(),
-            delivery_documents_url: document.getElementById('calc-delivery-docs-url').value.trim(),
-            reference_urls: document.getElementById('calc-reference-urls').value.trim(),
+            client_legal_name: document.getElementById('calc-client-legal-name').value.trim(),
+            client_inn: document.getElementById('calc-client-inn').value.trim(),
+            client_legal_address: document.getElementById('calc-client-legal-address').value.trim(),
+            client_bank_name: document.getElementById('calc-client-bank-name').value.trim(),
+            client_bank_account: document.getElementById('calc-client-bank-account').value.trim(),
+            client_bank_bik: document.getElementById('calc-client-bank-bik').value.trim(),
             plastic_type: 'PP', // always PP
             print_type: null, // determined at printing level
             status: 'calculated',
@@ -2324,10 +2330,12 @@ const Calculator = {
         document.getElementById('calc-telegram').value = order.telegram || '';
         document.getElementById('calc-crm-link').value = order.crm_link || '';
         document.getElementById('calc-fintablo-link').value = order.fintablo_link || '';
-        document.getElementById('calc-print-file-url').value = order.print_file_url || '';
-        document.getElementById('calc-cutting-file-url').value = order.cutting_file_url || '';
-        document.getElementById('calc-delivery-docs-url').value = order.delivery_documents_url || '';
-        document.getElementById('calc-reference-urls').value = order.reference_urls || '';
+        document.getElementById('calc-client-legal-name').value = order.client_legal_name || '';
+        document.getElementById('calc-client-inn').value = order.client_inn || '';
+        document.getElementById('calc-client-legal-address').value = order.client_legal_address || '';
+        document.getElementById('calc-client-bank-name').value = order.client_bank_name || '';
+        document.getElementById('calc-client-bank-account').value = order.client_bank_account || '';
+        document.getElementById('calc-client-bank-bik').value = order.client_bank_bik || '';
 
         // Restore product items
         const productItems = dbItems.filter(i => !i.item_type || i.item_type === 'product');
@@ -2722,9 +2730,34 @@ const Calculator = {
             return;
         }
 
+        // Collect client legal details from calculator
+        const clientLegal = {
+            name: document.getElementById('calc-client-legal-name')?.value?.trim() || '',
+            inn: document.getElementById('calc-client-inn')?.value?.trim() || '',
+            address: document.getElementById('calc-client-legal-address')?.value?.trim() || '',
+            bank: document.getElementById('calc-client-bank-name')?.value?.trim() || '',
+            account: document.getElementById('calc-client-bank-account')?.value?.trim() || '',
+            bik: document.getElementById('calc-client-bank-bik')?.value?.trim() || '',
+        };
+
+        // Collect company legal details from settings
+        const s = App.settings || {};
+        const companyLegal = {
+            name: s.company_legal_name || '',
+            inn: s.company_inn || '',
+            ogrn: s.company_ogrn || '',
+            address: s.company_legal_address || '',
+            bank: s.company_bank_name || '',
+            account: s.company_bank_account || '',
+            bik: s.company_bank_bik || '',
+            corr: s.company_corr_account || '',
+            phone: s.company_phone || '',
+            email: s.company_email || '',
+        };
+
         try {
             App.toast('Генерация КП...');
-            await KPGenerator.generate(orderName, clientName, kpItems);
+            await KPGenerator.generate(orderName, clientName, kpItems, clientLegal, companyLegal);
         } catch (err) {
             console.error('KP generation error:', err);
             App.toast('Ошибка генерации КП: ' + err.message);

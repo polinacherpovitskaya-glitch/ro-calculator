@@ -117,8 +117,10 @@ const KPGenerator = {
      * @param {string} orderName - Order name
      * @param {string} clientName - Client company name
      * @param {Array} items - Array of {type, name, qty, price}
+     * @param {Object} clientLegal - Client legal details {name, inn, address, bank, account, bik}
+     * @param {Object} companyLegal - Company legal details {name, inn, ogrn, address, bank, account, bik, corr, phone, email}
      */
-    async generate(orderName, clientName, items) {
+    async generate(orderName, clientName, items, clientLegal, companyLegal) {
         // Load font first
         await this.loadFont();
 
@@ -161,7 +163,8 @@ const KPGenerator = {
         doc.setFont(fn, 'bold');
         doc.setFontSize(18);
         doc.setTextColor(...BLACK);
-        doc.text('RECYCLE OBJECT', marginL, y);
+        const headerTitle = (companyLegal && companyLegal.name) ? companyLegal.name.toUpperCase() : 'RECYCLE OBJECT';
+        doc.text(headerTitle, marginL, y);
 
         // Right side: KP title + number
         doc.setFont(fn, 'bold');
@@ -408,6 +411,93 @@ const KPGenerator = {
         doc.text('Сроки изготовления обсуждаются индивидуально', marginL, y);
 
         // ════════════════════════════════
+        // LEGAL DETAILS — two columns (if available)
+        // ════════════════════════════════
+        const hasCompanyLegal = companyLegal && (companyLegal.name || companyLegal.inn);
+        const hasClientLegal = clientLegal && (clientLegal.name || clientLegal.inn);
+
+        if (hasCompanyLegal || hasClientLegal) {
+            // Check page overflow
+            if (y > pageH - 80) {
+                doc.addPage();
+                y = 20;
+            }
+
+            doc.setFont(fn, 'bold');
+            doc.setFontSize(10);
+            doc.setTextColor(...BLACK);
+            doc.text('Реквизиты', marginL, y);
+            y += 6;
+
+            doc.setDrawColor(...BORDER);
+            doc.setLineWidth(0.5);
+            doc.line(marginL, y, pageW - marginR, y);
+            y += 6;
+
+            const legalColW = contentW * 0.48;
+            const legalRightX = marginL + contentW * 0.52;
+            const legalStartY = y;
+
+            // Left column — Исполнитель (Company)
+            if (hasCompanyLegal) {
+                doc.setFont(fn, 'normal');
+                doc.setFontSize(7.5);
+                doc.setTextColor(...LIGHT);
+                doc.text('Исполнитель', marginL, y);
+                y += 5;
+
+                doc.setFont(fn, 'bold');
+                doc.setFontSize(9);
+                doc.setTextColor(...BLACK);
+                if (companyLegal.name) { doc.text(companyLegal.name, marginL, y); y += 4.5; }
+
+                doc.setFont(fn, 'normal');
+                doc.setFontSize(8);
+                doc.setTextColor(...DARK);
+                if (companyLegal.inn) { doc.text('ИНН: ' + companyLegal.inn, marginL, y); y += 4; }
+                if (companyLegal.ogrn) { doc.text('ОГРН: ' + companyLegal.ogrn, marginL, y); y += 4; }
+                if (companyLegal.account) { doc.text('Р/с: ' + companyLegal.account, marginL, y); y += 4; }
+                if (companyLegal.bank) {
+                    let bankLine = companyLegal.bank;
+                    if (companyLegal.bik) bankLine += ', БИК ' + companyLegal.bik;
+                    doc.text(bankLine, marginL, y); y += 4;
+                }
+                if (companyLegal.corr) { doc.text('Корр: ' + companyLegal.corr, marginL, y); y += 4; }
+            }
+
+            const leftEndY = y;
+
+            // Right column — Заказчик (Client)
+            let ry2 = legalStartY;
+            if (hasClientLegal) {
+                doc.setFont(fn, 'normal');
+                doc.setFontSize(7.5);
+                doc.setTextColor(...LIGHT);
+                doc.text('Заказчик', legalRightX, ry2);
+                ry2 += 5;
+
+                doc.setFont(fn, 'bold');
+                doc.setFontSize(9);
+                doc.setTextColor(...BLACK);
+                if (clientLegal.name) { doc.text(clientLegal.name, legalRightX, ry2); ry2 += 4.5; }
+
+                doc.setFont(fn, 'normal');
+                doc.setFontSize(8);
+                doc.setTextColor(...DARK);
+                if (clientLegal.inn) { doc.text('ИНН: ' + clientLegal.inn, legalRightX, ry2); ry2 += 4; }
+                if (clientLegal.address) { doc.text(clientLegal.address, legalRightX, ry2); ry2 += 4; }
+                if (clientLegal.account) { doc.text('Р/с: ' + clientLegal.account, legalRightX, ry2); ry2 += 4; }
+                if (clientLegal.bank) {
+                    let bankLine2 = clientLegal.bank;
+                    if (clientLegal.bik) bankLine2 += ', БИК ' + clientLegal.bik;
+                    doc.text(bankLine2, legalRightX, ry2); ry2 += 4;
+                }
+            }
+
+            y = Math.max(leftEndY, ry2) + 8;
+        }
+
+        // ════════════════════════════════
         // WHY RECYCLE OBJECT — compact block
         // ════════════════════════════════
         y += 10;
@@ -452,12 +542,16 @@ const KPGenerator = {
         doc.setFontSize(7.5);
         doc.setTextColor(...LIGHT);
 
-        doc.text('recycleobject.ru', marginL, footerY - 1);
+        const footerLeft = (companyLegal && companyLegal.email) ? companyLegal.email : 'recycleobject.ru';
+        doc.text(footerLeft, marginL, footerY - 1);
 
         doc.setFont(fn, 'normal');
         doc.setFontSize(7.5);
         doc.setTextColor(...LIGHT);
-        doc.text('Recycle Object  |  Москва, Россия', pageW - marginR, footerY - 1, { align: 'right' });
+        const footerCompanyName = (companyLegal && companyLegal.name) ? companyLegal.name : 'Recycle Object';
+        const footerCity = (companyLegal && companyLegal.address) ? companyLegal.address.split(',')[0] : 'Москва';
+        const footerPhone = (companyLegal && companyLegal.phone) ? '  |  ' + companyLegal.phone : '';
+        doc.text(footerCompanyName + '  |  ' + footerCity + footerPhone, pageW - marginR, footerY - 1, { align: 'right' });
 
         // ════════════════════════════════
         // DOWNLOAD

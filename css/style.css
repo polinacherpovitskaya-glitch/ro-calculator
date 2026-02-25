@@ -1538,11 +1538,83 @@ table .text-center { text-align: center; }
 .od-inline-input { font-family:inherit; }
 
 /* =============================================
-   GANTT PRODUCTION CALENDAR (v34)
+   PRODUCTION CALENDAR (v42)
    ============================================= */
 
 .gantt-zoom-btn.active { background:var(--accent); color:#fff; border-color:var(--accent); }
 
+/* Legend */
+.gantt-legend {
+    display: flex;
+    gap: 16px;
+    padding: 8px 0;
+    font-size: 12px;
+    color: var(--text-muted);
+}
+.gantt-legend-item { display: flex; align-items: center; gap: 4px; }
+.gantt-legend-dot { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+
+/* ── Capacity Chart ── */
+.gantt-cap-wrap {
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+}
+.gantt-cap-label {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text-muted);
+    white-space: nowrap;
+    padding-bottom: 4px;
+    min-width: 50px;
+}
+.gantt-cap-chart {
+    position: relative;
+    border-bottom: 1px solid var(--border);
+    border-radius: 4px 4px 0 0;
+    background: var(--bg);
+}
+.gantt-cap-line {
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 1px;
+    border-top: 2px dashed var(--red);
+    opacity: 0.5;
+    z-index: 2;
+    pointer-events: none;
+}
+.gantt-cap-day {
+    position: absolute;
+    bottom: 0;
+}
+.gantt-cap-seg {
+    position: absolute;
+    left: 1px;
+    right: 1px;
+    border-radius: 2px 2px 0 0;
+    min-height: 1px;
+}
+.gantt-cap-overload {
+    position: absolute;
+    top: -12px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 9px;
+    font-weight: 900;
+    color: var(--red);
+    z-index: 3;
+}
+#gantt-capacity-chart {
+    margin-bottom: 8px;
+    border-radius: 8px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+}
+#gantt-capacity-chart::-webkit-scrollbar { display: none; }
+
+/* ── Timeline wrapper ── */
 .gantt-wrapper {
     display: flex;
     border: 1px solid var(--border);
@@ -1553,8 +1625,8 @@ table .text-center { text-align: center; }
 }
 
 .gantt-sidebar {
-    min-width: 200px;
-    max-width: 200px;
+    min-width: 160px;
+    max-width: 160px;
     border-right: 2px solid var(--border);
     flex-shrink: 0;
     background: var(--bg);
@@ -1578,13 +1650,13 @@ table .text-center { text-align: center; }
     display: flex;
     flex-direction: column;
     justify-content: center;
-    padding: 0 12px;
+    padding: 0 10px;
     border-bottom: 1px solid var(--border);
     overflow: hidden;
     transition: background 0.1s;
 }
 .gantt-sidebar-row:hover { background: var(--accent-light); }
-.gantt-order-name { font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gantt-order-name { font-size: 11px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .gantt-order-meta { font-size: 10px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .gantt-timeline {
@@ -1625,29 +1697,50 @@ table .text-center { text-align: center; }
     border-bottom: 1px solid var(--border);
 }
 
-.gantt-bar {
+/* Phase bars (replaces old gantt-bar) */
+.gantt-phase-bar {
     position: absolute;
     top: 6px;
     height: 28px;
     border-radius: 4px;
     display: flex;
     align-items: center;
-    padding: 0 8px;
-    cursor: pointer;
-    transition: opacity 0.15s;
+    padding: 0 6px;
+    cursor: default;
     overflow: hidden;
+    transition: opacity 0.15s;
 }
-.gantt-bar:hover { opacity: 0.85; }
-.gantt-bar-completed { opacity: 0.6; }
+.gantt-phase-bar:hover { opacity: 0.85; }
 
 .gantt-bar-text {
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 600;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
 
+/* Deadline marker */
+.gantt-deadline-marker {
+    position: absolute;
+    top: 2px;
+    font-size: 14px;
+    color: #6b7280;
+    z-index: 4;
+    transform: translateX(-50%);
+    cursor: default;
+    line-height: 1;
+}
+.gantt-deadline-marker.overdue {
+    color: var(--red);
+    animation: pulse-red 1.5s infinite;
+}
+@keyframes pulse-red {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+}
+
+/* Today line */
 .gantt-today-line {
     position: absolute;
     top: 0;
@@ -1669,7 +1762,8 @@ table .text-center { text-align: center; }
 }
 
 @media (max-width: 768px) {
-    .gantt-sidebar { min-width: 140px; max-width: 140px; }
+    .gantt-sidebar { min-width: 120px; max-width: 120px; }
+    #gantt-capacity-chart { margin-left: 120px !important; }
 }
 
 /* =============================================

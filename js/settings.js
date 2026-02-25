@@ -35,9 +35,17 @@ const Settings = {
         const s = App.settings;
         if (!s) return;
 
-        // Fill all inputs with data-key attribute
+        // Fill all numeric inputs with data-key attribute
         document.querySelectorAll('[data-key]').forEach(input => {
             const key = input.dataset.key;
+            if (s[key] !== undefined) {
+                input.value = s[key];
+            }
+        });
+
+        // Fill all text inputs with data-key-text attribute
+        document.querySelectorAll('[data-key-text]').forEach(input => {
+            const key = input.dataset.keyText;
             if (s[key] !== undefined) {
                 input.value = s[key];
             }
@@ -50,6 +58,12 @@ const Settings = {
         document.querySelectorAll('[data-key]').forEach(input => {
             const key = input.dataset.key;
             newSettings[key] = parseFloat(input.value) || 0;
+        });
+
+        // Save text fields (company legal details etc.)
+        document.querySelectorAll('[data-key-text]').forEach(input => {
+            const key = input.dataset.keyText;
+            newSettings[key] = input.value.trim();
         });
 
         await saveAllSettings(newSettings);

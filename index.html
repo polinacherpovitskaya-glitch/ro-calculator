@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=41">
+    <link rel="stylesheet" href="css/style.css?v=42">
 </head>
 <body>
 
@@ -230,27 +230,35 @@
                     </div>
                 </details>
 
-                <!-- Files (collapsible) -->
+                <!-- Client Legal Details (collapsible, for KP) -->
                 <details class="calc-contacts-details">
-                    <summary style="cursor:pointer;font-size:13px;font-weight:600;color:var(--text-muted);margin:8px 0 6px">&#128193; Файлы и референсы</summary>
+                    <summary style="cursor:pointer;font-size:13px;font-weight:600;color:var(--text-muted);margin:8px 0 6px">&#9878; Юридические данные клиента (для КП)</summary>
                     <div class="form-row">
                         <div class="form-group">
-                            <label>Файл печати</label>
-                            <input type="url" id="calc-print-file-url" placeholder="Ссылка на файл..." oninput="Calculator.scheduleAutosave()">
+                            <label>Название компании (юр.)</label>
+                            <input type="text" id="calc-client-legal-name" placeholder='ООО "Компания"' oninput="Calculator.scheduleAutosave()">
                         </div>
                         <div class="form-group">
-                            <label>Файл резки / формы</label>
-                            <input type="url" id="calc-cutting-file-url" placeholder="Ссылка на файл..." oninput="Calculator.scheduleAutosave()">
+                            <label>ИНН</label>
+                            <input type="text" id="calc-client-inn" placeholder="1234567890" oninput="Calculator.scheduleAutosave()">
                         </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Юридический адрес</label>
+                        <input type="text" id="calc-client-legal-address" placeholder="г. Москва, ул. ..." oninput="Calculator.scheduleAutosave()">
                     </div>
                     <div class="form-row">
                         <div class="form-group">
-                            <label>Документы доставки</label>
-                            <input type="url" id="calc-delivery-docs-url" placeholder="Ссылка..." oninput="Calculator.scheduleAutosave()">
+                            <label>Банк</label>
+                            <input type="text" id="calc-client-bank-name" placeholder="АО Тинькофф Банк" oninput="Calculator.scheduleAutosave()">
                         </div>
                         <div class="form-group">
-                            <label>Референсы</label>
-                            <input type="text" id="calc-reference-urls" placeholder="Ссылки через запятую" oninput="Calculator.scheduleAutosave()">
+                            <label>Р/с</label>
+                            <input type="text" id="calc-client-bank-account" placeholder="40702810..." oninput="Calculator.scheduleAutosave()">
+                        </div>
+                        <div class="form-group">
+                            <label>БИК</label>
+                            <input type="text" id="calc-client-bank-bik" placeholder="044525974" oninput="Calculator.scheduleAutosave()">
                         </div>
                     </div>
                 </details>
@@ -1166,6 +1174,18 @@
 
             <div class="stats-grid" id="gantt-stats"></div>
 
+            <!-- Capacity chart -->
+            <div id="gantt-capacity-chart"></div>
+
+            <!-- Phase legend -->
+            <div class="gantt-legend">
+                <span class="gantt-legend-item"><span class="gantt-legend-dot" style="background:#f59e0b"></span> Литьё</span>
+                <span class="gantt-legend-item"><span class="gantt-legend-dot" style="background:#8b5cf6"></span> Упаковка</span>
+                <span class="gantt-legend-item"><span class="gantt-legend-dot" style="background:#06b6d4"></span> Сборка</span>
+                <span class="gantt-legend-item"><span style="color:#e11d48;font-weight:700">&#9670;</span> Дедлайн</span>
+            </div>
+
+            <!-- Order timeline -->
             <div id="gantt-container"></div>
         </div>
 
@@ -1793,6 +1813,7 @@
                 <div class="tab" data-tab="pricing" onclick="Settings.switchTab('pricing')">Ценообразование</div>
                 <div class="tab" data-tab="templates" onclick="Settings.switchTab('templates')">Справочник форм</div>
                 <div class="tab" data-tab="employees" onclick="Settings.switchTab('employees')">Сотрудники</div>
+                <div class="tab" data-tab="company" onclick="Settings.switchTab('company')">Реквизиты</div>
             </div>
 
             <!-- Production tab -->
@@ -2033,6 +2054,63 @@
                 </div>
             </div>
 
+            <!-- Company legal details tab -->
+            <div id="settings-tab-company" class="settings-tab-content" style="display:none">
+                <div class="card">
+                    <h3 style="margin-bottom:4px;">Реквизиты компании</h3>
+                    <p style="font-size:11px;color:var(--text-muted);margin-bottom:16px;">Используются в КП и документах</p>
+                    <div class="form-row">
+                        <div class="form-group" style="flex:2">
+                            <label>Название компании</label>
+                            <input type="text" id="set-company_legal_name" data-key-text="company_legal_name" placeholder="ООО «Рисайкл Обжект»">
+                        </div>
+                        <div class="form-group">
+                            <label>ИНН</label>
+                            <input type="text" id="set-company_inn" data-key-text="company_inn" placeholder="7712345678">
+                        </div>
+                        <div class="form-group">
+                            <label>ОГРН</label>
+                            <input type="text" id="set-company_ogrn" data-key-text="company_ogrn" placeholder="1177746123456">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group" style="flex:3">
+                            <label>Юридический адрес</label>
+                            <input type="text" id="set-company_legal_address" data-key-text="company_legal_address" placeholder="г. Москва, ул. Примерная, д. 1">
+                        </div>
+                    </div>
+                    <h4 style="margin:20px 0 12px;font-size:14px;color:var(--text-muted);">Банковские реквизиты</h4>
+                    <div class="form-row">
+                        <div class="form-group" style="flex:2">
+                            <label>Банк</label>
+                            <input type="text" id="set-company_bank_name" data-key-text="company_bank_name" placeholder="АО «Тинькофф Банк»">
+                        </div>
+                        <div class="form-group">
+                            <label>Р/с</label>
+                            <input type="text" id="set-company_bank_account" data-key-text="company_bank_account" placeholder="40702810...">
+                        </div>
+                        <div class="form-group">
+                            <label>БИК</label>
+                            <input type="text" id="set-company_bank_bik" data-key-text="company_bank_bik" placeholder="044525974">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Корр. счёт</label>
+                            <input type="text" id="set-company_corr_account" data-key-text="company_corr_account" placeholder="30101810...">
+                        </div>
+                        <div class="form-group">
+                            <label>Телефон</label>
+                            <input type="text" id="set-company_phone" data-key-text="company_phone" placeholder="+7 (999) 123-45-67">
+                        </div>
+                        <div class="form-group">
+                            <label>Email</label>
+                            <input type="text" id="set-company_email" data-key-text="company_email" placeholder="info@recycleobject.ru">
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Templates tab -->
             <div id="settings-tab-templates" class="settings-tab-content" style="display:none">
                 <div class="card">
@@ -2075,24 +2153,24 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="js/supabase.js?v=41"></script>
-<script src="js/calculator.js?v=41"></script>
-<script src="js/app.js?v=41"></script>
-<script src="js/dashboard.js?v=41"></script>
-<script src="js/order-detail.js?v=41"></script>
-<script src="js/orders.js?v=41"></script>
-<script src="js/analytics.js?v=41"></script>
-<script src="js/molds.js?v=41"></script>
-<script src="js/colors.js?v=41"></script>
-<script src="js/kp.js?v=41"></script>
-<script src="js/timetrack.js?v=41"></script>
-<script src="js/tasks.js?v=41"></script>
-<script src="js/gantt.js?v=41"></script>
-<script src="js/import.js?v=41"></script>
-<script src="js/factual.js?v=41"></script>
-<script src="js/china.js?v=41"></script>
-<script src="js/warehouse_photos.js?v=41"></script>
-<script src="js/warehouse.js?v=41"></script>
-<script src="js/settings.js?v=41"></script>
+<script src="js/supabase.js?v=42"></script>
+<script src="js/calculator.js?v=42"></script>
+<script src="js/app.js?v=42"></script>
+<script src="js/dashboard.js?v=42"></script>
+<script src="js/order-detail.js?v=42"></script>
+<script src="js/orders.js?v=42"></script>
+<script src="js/analytics.js?v=42"></script>
+<script src="js/molds.js?v=42"></script>
+<script src="js/colors.js?v=42"></script>
+<script src="js/kp.js?v=42"></script>
+<script src="js/timetrack.js?v=42"></script>
+<script src="js/tasks.js?v=42"></script>
+<script src="js/gantt.js?v=42"></script>
+<script src="js/import.js?v=42"></script>
+<script src="js/factual.js?v=42"></script>
+<script src="js/china.js?v=42"></script>
+<script src="js/warehouse_photos.js?v=42"></script>
+<script src="js/warehouse.js?v=42"></script>
+<script src="js/settings.js?v=42"></script>
 </body>
 </html>
