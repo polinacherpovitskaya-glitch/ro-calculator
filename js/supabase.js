@@ -123,9 +123,16 @@ async function loadSettings() {
             .from('settings')
             .select('key, value');
         if (error) { console.error('loadSettings error:', error); return getDefaultSettings(); }
-        const obj = {};
-        data.forEach(r => { obj[r.key] = r.value; });
-        return obj;
+        if (data && data.length > 0) {
+            const obj = {};
+            data.forEach(r => { obj[r.key] = r.value; });
+            return obj;
+        }
+        // Supabase empty — seed from localStorage or defaults, then return
+        const local = getLocal(LOCAL_KEYS.settings) || getDefaultSettings();
+        console.log('Supabase settings empty, seeding from local...');
+        await saveAllSettings(local);
+        return local;
     }
     return getLocal(LOCAL_KEYS.settings) || getDefaultSettings();
 }
@@ -197,10 +204,24 @@ async function loadTemplates() {
             .order('category')
             .order('name');
         if (error) { console.error('loadTemplates error:', error); return getDefaultTemplates(); }
-        return data;
+        if (data && data.length > 0) {
+            return data;
+        }
+        // Supabase empty — seed from molds/defaults
+        console.log('Supabase templates empty, seeding from local molds...');
+        const localTemplates = _getLocalTemplates();
+        // Seed Supabase in background
+        if (localTemplates.length > 0) {
+            supabaseClient.from('product_templates').insert(localTemplates)
+                .then(({ error: e }) => { if (e) console.error('Seed templates error:', e); });
+        }
+        return localTemplates;
     }
+    return _getLocalTemplates();
+}
+
+function _getLocalTemplates() {
     // In localStorage mode, always derive templates from molds (source of truth)
-    // so photo_url, collection etc. stay in sync
     const molds = getLocal(LOCAL_KEYS.molds);
     if (molds && molds.length > 0) {
         return molds.map(m => _moldToTemplate(m));
@@ -284,6 +305,10 @@ async function saveOrder(order, items) {
             const { error } = await supabaseClient.from('order_items').insert(rows);
             if (error) console.error('insertOrderItems error:', error);
         }
+
+        // Also save to localStorage as backup
+        _saveOrderLocally({ ...order, id: orderId }, items);
+
         return orderId;
     } else {
         // Local storage
@@ -316,18 +341,65 @@ async function saveOrder(order, items) {
     }
 }
 
+/** Save order to localStorage (used as backup when Supabase is primary) */
+function _saveOrderLocally(order, items) {
+    try {
+        const orders = getLocal(LOCAL_KEYS.orders) || [];
+        const idx = orders.findIndex(o => o.id === order.id);
+        if (idx >= 0) {
+            const existing = orders[idx];
+            const merged = { ...existing };
+            for (const [key, val] of Object.entries(order)) {
+                if (val !== undefined) merged[key] = val;
+            }
+            merged.updated_at = new Date().toISOString();
+            orders[idx] = merged;
+        } else {
+            orders.push({ ...order, created_at: order.created_at || new Date().toISOString(), updated_at: new Date().toISOString() });
+        }
+        setLocal(LOCAL_KEYS.orders, orders);
+
+        const allItems = getLocal(LOCAL_KEYS.orderItems) || [];
+        const filtered = allItems.filter(i => i.order_id !== order.id);
+        const newItems = items.map((item, i) => ({ ...item, id: item.id || (Date.now() + i), order_id: order.id }));
+        setLocal(LOCAL_KEYS.orderItems, [...filtered, ...newItems]);
+    } catch (e) { console.warn('Local backup save error:', e); }
+}
+
 async function loadOrders(filters = {}) {
     if (isSupabaseReady()) {
         let query = supabaseClient.from('orders').select('*').order('created_at', { ascending: false });
         if (filters.status) {
             query = query.eq('status', filters.status);
         } else {
-            // By default, exclude deleted orders
             query = query.neq('status', 'deleted');
         }
         if (filters.limit) query = query.limit(filters.limit);
         const { data, error } = await query;
         if (error) { console.error('loadOrders error:', error); return []; }
+
+        // One-time migration: if Supabase empty but localStorage has orders, push them up
+        if ((!data || data.length === 0) && !filters.status) {
+            const localOrders = getLocal(LOCAL_KEYS.orders) || [];
+            const activeLocal = localOrders.filter(o => o.status !== 'deleted');
+            if (activeLocal.length > 0) {
+                console.log('Migrating', activeLocal.length, 'orders from localStorage to Supabase...');
+                for (const order of localOrders) {
+                    try {
+                        await supabaseClient.from('orders').upsert(order, { onConflict: 'id' });
+                    } catch (e) { console.warn('Order migration error:', e); }
+                }
+                // Also migrate order items
+                const localItems = getLocal(LOCAL_KEYS.orderItems) || [];
+                if (localItems.length > 0) {
+                    try {
+                        await supabaseClient.from('order_items').insert(localItems);
+                    } catch (e) { console.warn('Items migration error:', e); }
+                }
+                return activeLocal.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+            }
+        }
+
         return data;
     }
     let orders = getLocal(LOCAL_KEYS.orders) || [];
