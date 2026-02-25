@@ -179,6 +179,7 @@ const Orders = {
                     <button class="btn btn-sm btn-danger" onclick="Orders.confirmPermanentDelete(${o.id}, '${this.escHtml(o.order_name)}')">&#10005;</button>
                </div>`
             : `<div class="flex gap-8">
+                    <button class="btn btn-sm btn-outline" onclick="Orders.cloneOrder(${o.id})" title="Копировать">&#10697;</button>
                     <button class="btn btn-sm btn-outline" onclick="Orders.editOrder(${o.id})" title="Редактировать">&#9998;</button>
                     <button class="btn btn-sm btn-danger" onclick="Orders.confirmDelete(${o.id}, '${this.escHtml(o.order_name)}')">&#10005;</button>
                </div>`;
@@ -355,6 +356,37 @@ const Orders = {
 
     editOrder(orderId) {
         App.navigate('order-detail', true, orderId);
+    },
+
+    async cloneOrder(orderId) {
+        App.toast('Копирование заказа...');
+        try {
+            const data = await loadOrder(orderId);
+            if (!data) { App.toast('Ошибка загрузки', 'error'); return; }
+
+            const clonedOrder = { ...data.order };
+            delete clonedOrder.id;
+            clonedOrder.order_name = (clonedOrder.order_name || 'Заказ') + ' (копия)';
+            clonedOrder.status = 'draft';
+            delete clonedOrder.created_at;
+            delete clonedOrder.updated_at;
+
+            const clonedItems = (data.items || []).map(item => {
+                const c = { ...item };
+                delete c.id;
+                delete c.order_id;
+                return c;
+            });
+
+            const newId = await saveOrder(clonedOrder, clonedItems);
+            if (newId) {
+                App.toast('Заказ скопирован');
+                Calculator.loadOrder(newId);
+            }
+        } catch (e) {
+            console.error('Clone order error:', e);
+            App.toast('Ошибка копирования', 'error');
+        }
     },
 
     async confirmDelete(orderId, name) {

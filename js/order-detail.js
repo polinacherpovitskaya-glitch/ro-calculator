@@ -429,6 +429,12 @@ const OrderDetail = {
         }
     },
 
+    cloneOrder() {
+        if (this.currentOrder) {
+            Orders.cloneOrder(this.currentOrder.id);
+        }
+    },
+
     // ==========================================
     // INLINE EDIT HELPERS
     // ==========================================
