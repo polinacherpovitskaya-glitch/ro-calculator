@@ -2,9 +2,9 @@
 // Recycle Object — Supabase Client & Data Layer
 // =============================================
 
-// Supabase config — REPLACE with your project values
-const SUPABASE_URL = ''; // e.g., 'https://xxxxx.supabase.co'
-const SUPABASE_ANON_KEY = ''; // public anon key
+// Supabase config
+const SUPABASE_URL = 'https://jbpmorruwjrxcieqlbmd.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpicG1vcnJ1d2pyeGNpZXFsYm1kIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIwMTY1NzUsImV4cCI6MjA4NzU5MjU3NX0.Z26DuC4f5UM1I04N7ozr3FOUpF4tVIlUEh0cu1c0Jec';
 
 let supabaseClient = null;
 
