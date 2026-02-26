@@ -256,7 +256,7 @@ const Marketplaces = {
                     oninput="Marketplaces._filterDropdown('${uid}')">
                 <div class="mp-dropdown" id="${uid}_dd" style="display:none;position:absolute;top:100%;left:0;right:0;max-height:200px;overflow-y:auto;background:var(--card-bg);border:1px solid var(--border);border-radius:8px;z-index:100;box-shadow:0 4px 12px rgba(0,0,0,0.15);">
                     ${items.map(i => `<div class="mp-dd-item" data-id="${i.id}" data-name="${this._esc(i.name)}"
-                        onclick="${onSelectFn}(${i.id}); Marketplaces._closeDropdown('${uid}')"
+                        onclick="${onSelectFn}${i.id}); Marketplaces._closeDropdown('${uid}')"
                         style="padding:6px 10px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--border);"
                         onmouseover="this.style.background='var(--accent-light)'" onmouseout="this.style.background=''">
                         <div style="font-weight:600;">${this._esc(i.name)}</div>
@@ -312,7 +312,7 @@ const Marketplaces = {
         document.getElementById('mp-plastic-items').innerHTML = this._plasticItems.map((item, i) => `
             <div class="form-row" style="margin-bottom:4px;align-items:end;gap:6px;">
                 <div class="form-group" style="flex:2;margin:0">
-                    ${this._renderSearchableSelect('mp-pl-'+i, plasticList, item.blank_id, 'Поиск бланка...', 'Marketplaces._selectPlastic.bind(null,'+i+')')}
+                    ${this._renderSearchableSelect('mp-pl-'+i, plasticList, item.blank_id, 'Поиск бланка...', 'Marketplaces._selectPlastic('+i+',')}
                 </div>
                 <div class="form-group" style="flex:0 0 55px;margin:0">
                     <input type="number" min="1" value="${item.qty || 1}" oninput="Marketplaces._onQtyChange('plastic',${i},this.value)" style="text-align:center;" title="Кол-во">
@@ -336,7 +336,7 @@ const Marketplaces = {
                     <div class="form-group" style="flex:2;margin:0">
                         ${isCustom
                             ? `<input type="text" value="${this._esc(item.name)}" placeholder="Название" oninput="Marketplaces._hwItems[${i}].name=this.value; Marketplaces.recalcSet()">`
-                            : this._renderSearchableSelect('mp-hw-'+i, hwList, item.source === 'warehouse' ? 10000 + (item.wh_id||0) : item.blank_id, 'Поиск фурнитуры...', 'Marketplaces._selectHw.bind(null,'+i+')')
+                            : this._renderSearchableSelect('mp-hw-'+i, hwList, item.source === 'warehouse' ? 10000 + (item.wh_id||0) : item.blank_id, 'Поиск фурнитуры...', 'Marketplaces._selectHw('+i+',')
                         }
                     </div>
                     ${isCustom ? `
@@ -368,7 +368,7 @@ const Marketplaces = {
                     <div class="form-group" style="flex:2;margin:0">
                         ${isCustom
                             ? `<input type="text" value="${this._esc(item.name)}" placeholder="Название" oninput="Marketplaces._pkgItems[${i}].name=this.value; Marketplaces.recalcSet()">`
-                            : this._renderSearchableSelect('mp-pkg-'+i, pkgList, item.source === 'warehouse' ? 10000 + (item.wh_id||0) : item.blank_id, 'Поиск упаковки...', 'Marketplaces._selectPkg.bind(null,'+i+')')
+                            : this._renderSearchableSelect('mp-pkg-'+i, pkgList, item.source === 'warehouse' ? 10000 + (item.wh_id||0) : item.blank_id, 'Поиск упаковки...', 'Marketplaces._selectPkg('+i+',')
                         }
                     </div>
                     ${isCustom ? `
