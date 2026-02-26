@@ -1,37 +1,41 @@
 // =============================================
 // Recycle Object — Маркетплейсы
-// Сборка наборов и расчёт цены продажи
+// Сборка наборов и расчёт цены продажи (1 шт)
 // =============================================
 
 const Marketplaces = {
     allSets: [],
     editingSetId: null,
-    _plasticBlanks: [],
-    _hwBlanks: [],
-    _pkgBlanks: [],
+    _plasticBlanks: [],   // enriched molds
+    _allWarehouseHw: [],  // warehouse items (all except packaging)
+    _allWarehousePkg: [], // warehouse items (packaging only)
+    _hwCatalog: [],       // hw_blanks catalog
+    _pkgCatalog: [],      // pkg_blanks catalog
 
     // Current set items being edited
     _plasticItems: [],
     _hwItems: [],
     _pkgItems: [],
+    _pendingPhoto: '',
 
     async load() {
         try {
-            // Load all data in parallel
-            const [sets, plasticBlanks, hwBlanks, pkgBlanks] = await Promise.all([
+            const [sets, plasticBlanks, hwCatalog, pkgCatalog, warehouseItems] = await Promise.all([
                 loadMarketplaceSets(),
                 loadMolds(),
                 loadHwBlanks(),
                 loadPkgBlanks(),
+                loadWarehouseItems(),
             ]);
             this.allSets = sets;
             this._plasticBlanks = plasticBlanks.filter(m => m.status === 'active');
-            this._hwBlanks = hwBlanks;
-            this._pkgBlanks = pkgBlanks;
+            this._hwCatalog = hwCatalog;
+            this._pkgCatalog = pkgCatalog;
+            // Split warehouse by category
+            this._allWarehouseHw = (warehouseItems || []).filter(i => i.category !== 'packaging');
+            this._allWarehousePkg = (warehouseItems || []).filter(i => i.category === 'packaging');
 
-            // Enrich plastic blanks with tier pricing (same as Molds.enrichMolds)
             this._enrichPlasticBlanks();
-
             this.renderStats();
             this.renderSets();
         } catch(e) {
@@ -51,6 +55,10 @@ const Marketplaces = {
         document.getElementById('mp-avg-margin').textContent = margins.length ? Math.round(margins.reduce((a,b) => a+b, 0) / margins.length) + '%' : '0%';
     },
 
+    // ==========================================
+    // TABLE VIEW — photo, name, cost, MP price
+    // ==========================================
+
     renderSets() {
         const container = document.getElementById('mp-sets-container');
         if (!this.allSets.length) {
@@ -58,41 +66,54 @@ const Marketplaces = {
             return;
         }
 
-        const html = this.allSets.map(s => {
+        let html = `<div class="card" style="padding:12px;overflow-x:auto;">
+            <table style="font-size:12px;white-space:nowrap;border-collapse:collapse;width:100%;">
+            <thead><tr>
+                <th style="width:50px;padding:6px;"></th>
+                <th style="min-width:200px;padding:6px 8px;text-align:left;">Набор</th>
+                <th style="padding:6px 8px;text-align:right;">Себестоимость</th>
+                <th style="padding:6px 8px;text-align:right;">Цена МП</th>
+                <th style="padding:6px 8px;text-align:right;">Маржа</th>
+                <th style="padding:6px 8px;text-align:right;">×</th>
+                <th style="width:60px;"></th>
+            </tr></thead><tbody>`;
+
+        this.allSets.forEach(s => {
             const cost = s.total_cost || 0;
             const price = s.selling_price || 0;
             const margin = s.actual_margin || 0;
-            const qty = s.qty || 500;
+            const mult = cost > 0 ? round2(price / cost) : 0;
 
-            // Summarize items
-            const itemNames = [];
-            (s.plastic_items || []).forEach(i => itemNames.push(i.name || 'Пластик'));
-            (s.hw_items || []).forEach(i => itemNames.push(i.name || 'Фурнитура'));
-            const pkgNames = (s.pkg_items || []).map(i => i.name || 'Упаковка');
+            // Summarize composition
+            const parts = [];
+            (s.plastic_items || []).forEach(i => parts.push(i.name || 'Пластик'));
+            (s.hw_items || []).forEach(i => parts.push(i.name || 'Фурнитура'));
+            (s.pkg_items || []).forEach(i => parts.push(i.name || 'Упаковка'));
 
-            return `<div class="card" style="padding:16px;margin-bottom:8px;">
-                <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;">
-                    <div style="flex:1;min-width:200px;">
-                        <div style="font-weight:700;font-size:16px;">${this._esc(s.name || 'Набор')}</div>
-                        <div style="font-size:12px;color:var(--text-muted);margin-top:4px;">
-                            ${itemNames.join(' + ')}${pkgNames.length ? ' · ' + pkgNames.join(', ') : ''} · ${qty} шт
-                        </div>
-                        <div style="font-size:11px;color:var(--text-secondary);margin-top:2px;">
-                            Себес: ${formatRub(cost)} · Маржа: ${Math.round(margin)}%
-                        </div>
-                    </div>
-                    <div style="text-align:right;">
-                        <div style="font-size:11px;color:var(--text-muted);">Цена МП</div>
-                        <div style="font-size:24px;font-weight:800;color:var(--green);">${formatRub(price)}</div>
-                    </div>
-                    <div style="display:flex;flex-direction:column;gap:4px;">
-                        <button class="btn btn-sm btn-outline" onclick="Marketplaces.editSet(${s.id})">&#9998;</button>
+            const photo = s.photo_url
+                ? `<img src="${this._esc(s.photo_url)}" style="width:44px;height:44px;object-fit:cover;border-radius:6px;border:1px solid var(--border);" onerror="this.style.display='none'">`
+                : `<span style="width:44px;height:44px;display:flex;align-items:center;justify-content:center;background:var(--accent-light);border-radius:6px;font-size:18px;font-weight:700;color:var(--accent);">${(s.name||'?')[0].toUpperCase()}</span>`;
+
+            html += `<tr style="border-bottom:1px solid var(--border);">
+                <td style="padding:6px;">${photo}</td>
+                <td style="padding:6px 8px;">
+                    <div style="font-weight:700;font-size:13px;">${this._esc(s.name || 'Набор')}</div>
+                    <div style="font-size:10px;color:var(--text-muted);white-space:normal;max-width:300px;line-height:1.3;">${parts.join(' + ')}</div>
+                </td>
+                <td style="padding:6px 8px;text-align:right;font-size:13px;color:var(--text-secondary);">${formatRub(cost)}</td>
+                <td style="padding:6px 8px;text-align:right;font-size:16px;font-weight:800;color:var(--green);">${formatRub(price)}</td>
+                <td style="padding:6px 8px;text-align:right;font-size:12px;">${Math.round(margin)}%</td>
+                <td style="padding:6px 8px;text-align:right;font-size:12px;color:var(--text-muted);">×${mult}</td>
+                <td style="padding:6px;">
+                    <div style="display:flex;gap:4px;">
+                        <button class="btn btn-sm btn-outline" style="padding:2px 6px;font-size:10px;" onclick="Marketplaces.editSet(${s.id})">&#9998;</button>
                         <button class="btn-remove" style="font-size:9px;width:24px;height:24px;" onclick="Marketplaces.confirmDelete(${s.id}, '${this._esc(s.name)}')">&#10005;</button>
                     </div>
-                </div>
-            </div>`;
-        }).join('');
+                </td>
+            </tr>`;
+        });
 
+        html += '</tbody></table></div>';
         container.innerHTML = html;
     },
 
@@ -102,9 +123,9 @@ const Marketplaces = {
 
     showSetForm() {
         this.editingSetId = null;
+        this._pendingPhoto = '';
         document.getElementById('mp-form-title').textContent = 'Новый набор';
         document.getElementById('mp-set-name').value = '';
-        document.getElementById('mp-set-qty').value = 500;
         document.getElementById('mp-set-commission').value = 46;
         document.getElementById('mp-set-vat').value = 5;
         document.getElementById('mp-set-osn').value = 6;
@@ -113,19 +134,22 @@ const Marketplaces = {
         this._plasticItems = [];
         this._hwItems = [];
         this._pkgItems = [];
+        this._updatePhotoPreview('');
+        document.getElementById('mp-photo-file').value = '';
         document.getElementById('mp-delete-btn').style.display = 'none';
         document.getElementById('mp-set-form').style.display = '';
         this.renderFormItems();
         this.recalcSet();
+        document.getElementById('mp-set-form').scrollIntoView({ behavior: 'smooth' });
     },
 
     editSet(id) {
         const s = this.allSets.find(x => x.id === id);
         if (!s) return;
         this.editingSetId = id;
+        this._pendingPhoto = s.photo_url || '';
         document.getElementById('mp-form-title').textContent = 'Редактировать: ' + (s.name || '');
         document.getElementById('mp-set-name').value = s.name || '';
-        document.getElementById('mp-set-qty').value = s.qty || 500;
         document.getElementById('mp-set-commission').value = s.commission || 46;
         document.getElementById('mp-set-vat').value = s.vat || 5;
         document.getElementById('mp-set-osn').value = s.osn || 6;
@@ -134,10 +158,13 @@ const Marketplaces = {
         this._plasticItems = (s.plastic_items || []).map(i => ({ ...i }));
         this._hwItems = (s.hw_items || []).map(i => ({ ...i }));
         this._pkgItems = (s.pkg_items || []).map(i => ({ ...i }));
+        this._updatePhotoPreview(s.photo_url || '');
+        document.getElementById('mp-photo-file').value = '';
         document.getElementById('mp-delete-btn').style.display = '';
         document.getElementById('mp-set-form').style.display = '';
         this.renderFormItems();
         this.recalcSet();
+        document.getElementById('mp-set-form').scrollIntoView({ behavior: 'smooth' });
     },
 
     hideSetForm() {
@@ -145,19 +172,66 @@ const Marketplaces = {
         this.editingSetId = null;
     },
 
-    // Item management
+    // ==========================================
+    // PHOTO
+    // ==========================================
+
+    onPhotoFileChange(input) {
+        if (!input.files || !input.files[0]) return;
+        const file = input.files[0];
+        if (file.size > 2 * 1024 * 1024) { App.toast('Макс 2MB'); return; }
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            this._resizeImage(e.target.result, 200, (thumb) => {
+                this._pendingPhoto = thumb;
+                this._updatePhotoPreview(thumb);
+            });
+        };
+        reader.readAsDataURL(file);
+    },
+
+    _resizeImage(dataUrl, maxSize, callback) {
+        const img = new Image();
+        img.onload = () => {
+            const canvas = document.createElement('canvas');
+            let w = img.width, h = img.height;
+            if (w > maxSize || h > maxSize) {
+                if (w > h) { h = Math.round(h * maxSize / w); w = maxSize; }
+                else { w = Math.round(w * maxSize / h); h = maxSize; }
+            }
+            canvas.width = w; canvas.height = h;
+            canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+            callback(canvas.toDataURL('image/jpeg', 0.7));
+        };
+        img.src = dataUrl;
+    },
+
+    _updatePhotoPreview(url) {
+        const el = document.getElementById('mp-photo-preview');
+        if (!el) return;
+        if (url) {
+            el.innerHTML = `<img src="${this._esc(url)}" style="width:60px;height:60px;object-fit:cover;border-radius:8px;" onerror="this.parentNode.innerHTML='&#128247;'">`;
+        } else {
+            el.innerHTML = '<span style="font-size:24px;color:var(--text-muted)">&#128247;</span>';
+        }
+    },
+
+    // ==========================================
+    // ITEM MANAGEMENT
+    // ==========================================
+
     addPlasticItem() {
-        this._plasticItems.push({ blank_id: null, qty: 1, name: '' });
+        this._plasticItems.push({ blank_id: null, qty: 1, name: '', cost: 0 });
         this.renderFormItems();
     },
 
     addHwItem() {
-        this._hwItems.push({ blank_id: null, qty: 1, name: '' });
+        this._hwItems.push({ source: 'catalog', blank_id: null, wh_id: null, qty: 1, name: '', cost_per_unit: 0 });
         this.renderFormItems();
     },
 
     addPkgItem() {
-        this._pkgItems.push({ blank_id: null, qty: 1, name: '' });
+        this._pkgItems.push({ source: 'catalog', blank_id: null, wh_id: null, qty: 1, name: '', cost_per_unit: 0 });
         this.renderFormItems();
     },
 
@@ -165,114 +239,243 @@ const Marketplaces = {
     removeHwItem(idx) { this._hwItems.splice(idx, 1); this.renderFormItems(); this.recalcSet(); },
     removePkgItem(idx) { this._pkgItems.splice(idx, 1); this.renderFormItems(); this.recalcSet(); },
 
-    onPlasticChange(idx, blankId) {
+    // ==========================================
+    // SEARCHABLE DROPDOWNS
+    // ==========================================
+
+    _renderSearchableSelect(containerId, items, selectedId, placeholder, onSelectFn) {
+        // items = [{id, name, detail}]
+        const uid = containerId + '_' + Math.random().toString(36).slice(2, 6);
+        const selected = items.find(i => i.id === selectedId);
+        return `
+            <div class="mp-searchable" style="position:relative;">
+                <input type="text" class="mp-search-input" id="${uid}"
+                    value="${selected ? this._esc(selected.name) : ''}"
+                    placeholder="${placeholder}"
+                    onfocus="Marketplaces._openDropdown('${uid}')"
+                    oninput="Marketplaces._filterDropdown('${uid}')">
+                <div class="mp-dropdown" id="${uid}_dd" style="display:none;position:absolute;top:100%;left:0;right:0;max-height:200px;overflow-y:auto;background:var(--card-bg);border:1px solid var(--border);border-radius:8px;z-index:100;box-shadow:0 4px 12px rgba(0,0,0,0.15);">
+                    ${items.map(i => `<div class="mp-dd-item" data-id="${i.id}" data-name="${this._esc(i.name)}"
+                        onclick="${onSelectFn}(${i.id}); Marketplaces._closeDropdown('${uid}')"
+                        style="padding:6px 10px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--border);"
+                        onmouseover="this.style.background='var(--accent-light)'" onmouseout="this.style.background=''">
+                        <div style="font-weight:600;">${this._esc(i.name)}</div>
+                        ${i.detail ? `<div style="font-size:10px;color:var(--text-muted);">${this._esc(i.detail)}</div>` : ''}
+                    </div>`).join('')}
+                </div>
+            </div>`;
+    },
+
+    _openDropdown(uid) {
+        const dd = document.getElementById(uid + '_dd');
+        if (dd) { dd.style.display = ''; this._filterDropdown(uid); }
+        // Close on outside click
+        setTimeout(() => {
+            const handler = (e) => {
+                if (!e.target.closest('.mp-searchable')) {
+                    this._closeDropdown(uid);
+                    document.removeEventListener('click', handler);
+                }
+            };
+            document.addEventListener('click', handler);
+        }, 50);
+    },
+
+    _closeDropdown(uid) {
+        const dd = document.getElementById(uid + '_dd');
+        if (dd) dd.style.display = 'none';
+    },
+
+    _filterDropdown(uid) {
+        const input = document.getElementById(uid);
+        const dd = document.getElementById(uid + '_dd');
+        if (!input || !dd) return;
+        const search = input.value.toLowerCase().trim();
+        dd.querySelectorAll('.mp-dd-item').forEach(el => {
+            const name = (el.dataset.name || '').toLowerCase();
+            el.style.display = (!search || name.includes(search)) ? '' : 'none';
+        });
+    },
+
+    // ==========================================
+    // RENDER FORM ITEMS
+    // ==========================================
+
+    renderFormItems() {
+        // Plastic — searchable dropdown from molds
+        const plasticList = this._plasticBlanks.map(b => ({
+            id: b.id,
+            name: b.name,
+            detail: b.collection ? b.collection + ' · ' + (b.weight_grams || 0) + 'г' : (b.weight_grams || 0) + 'г',
+        }));
+
+        document.getElementById('mp-plastic-items').innerHTML = this._plasticItems.map((item, i) => `
+            <div class="form-row" style="margin-bottom:4px;align-items:end;gap:6px;">
+                <div class="form-group" style="flex:2;margin:0">
+                    ${this._renderSearchableSelect('mp-pl-'+i, plasticList, item.blank_id, 'Поиск бланка...', 'Marketplaces._selectPlastic.bind(null,'+i+')')}
+                </div>
+                <div class="form-group" style="flex:0 0 55px;margin:0">
+                    <input type="number" min="1" value="${item.qty || 1}" oninput="Marketplaces._onQtyChange('plastic',${i},this.value)" style="text-align:center;" title="Кол-во">
+                </div>
+                <button class="btn-remove" style="margin-bottom:6px;" onclick="Marketplaces.removePlasticItem(${i})">&#10005;</button>
+            </div>
+        `).join('');
+
+        // Hardware — all warehouse hw + catalog + custom option
+        const hwList = [];
+        // Catalog items
+        this._hwCatalog.forEach(b => hwList.push({ id: b.id, name: b.name, detail: '¥' + (b.price_cny||0) + ' · каталог', _type: 'catalog' }));
+        // Warehouse items
+        this._allWarehouseHw.forEach(w => hwList.push({ id: 10000 + w.id, name: w.name + (w.size ? ' ' + w.size : '') + (w.color ? ' ' + w.color : ''), detail: formatRub(w.price_per_unit || 0) + '/шт · склад', _type: 'warehouse', _whId: w.id }));
+
+        document.getElementById('mp-hw-items').innerHTML = this._hwItems.map((item, i) => {
+            const isCustom = item.source === 'custom';
+            return `
+            <div style="margin-bottom:6px;padding:6px;background:var(--bg);border-radius:6px;">
+                <div class="form-row" style="margin-bottom:2px;align-items:end;gap:6px;">
+                    <div class="form-group" style="flex:2;margin:0">
+                        ${isCustom
+                            ? `<input type="text" value="${this._esc(item.name)}" placeholder="Название" oninput="Marketplaces._hwItems[${i}].name=this.value; Marketplaces.recalcSet()">`
+                            : this._renderSearchableSelect('mp-hw-'+i, hwList, item.source === 'warehouse' ? 10000 + (item.wh_id||0) : item.blank_id, 'Поиск фурнитуры...', 'Marketplaces._selectHw.bind(null,'+i+')')
+                        }
+                    </div>
+                    ${isCustom ? `
+                    <div class="form-group" style="flex:0 0 80px;margin:0">
+                        <input type="number" min="0" step="0.1" value="${item.cost_per_unit || ''}" placeholder="₽/шт" oninput="Marketplaces._hwItems[${i}].cost_per_unit=parseFloat(this.value)||0; Marketplaces.recalcSet()">
+                    </div>` : ''}
+                    <div class="form-group" style="flex:0 0 55px;margin:0">
+                        <input type="number" min="1" value="${item.qty || 1}" oninput="Marketplaces._onQtyChange('hw',${i},this.value)" style="text-align:center;" title="Кол-во">
+                    </div>
+                    <button class="btn-remove" style="margin-bottom:6px;" onclick="Marketplaces.removeHwItem(${i})">&#10005;</button>
+                </div>
+                <div style="display:flex;gap:6px;font-size:10px;">
+                    <label style="cursor:pointer;color:${!isCustom ? 'var(--accent)' : 'var(--text-muted)'};" onclick="Marketplaces._setHwSource(${i},'catalog')">Каталог/Склад</label>
+                    <label style="cursor:pointer;color:${isCustom ? 'var(--accent)' : 'var(--text-muted)'};" onclick="Marketplaces._setHwSource(${i},'custom')">Кастомная</label>
+                </div>
+            </div>`;
+        }).join('');
+
+        // Packaging — all warehouse pkg + catalog + custom
+        const pkgList = [];
+        this._pkgCatalog.forEach(b => pkgList.push({ id: b.id, name: b.name, detail: formatRub(b.price_per_unit || 0) + '/шт · каталог', _type: 'catalog' }));
+        this._allWarehousePkg.forEach(w => pkgList.push({ id: 10000 + w.id, name: w.name + (w.size ? ' ' + w.size : ''), detail: formatRub(w.price_per_unit || 0) + '/шт · склад', _type: 'warehouse', _whId: w.id }));
+
+        document.getElementById('mp-pkg-items').innerHTML = this._pkgItems.map((item, i) => {
+            const isCustom = item.source === 'custom';
+            return `
+            <div style="margin-bottom:6px;padding:6px;background:var(--bg);border-radius:6px;">
+                <div class="form-row" style="margin-bottom:2px;align-items:end;gap:6px;">
+                    <div class="form-group" style="flex:2;margin:0">
+                        ${isCustom
+                            ? `<input type="text" value="${this._esc(item.name)}" placeholder="Название" oninput="Marketplaces._pkgItems[${i}].name=this.value; Marketplaces.recalcSet()">`
+                            : this._renderSearchableSelect('mp-pkg-'+i, pkgList, item.source === 'warehouse' ? 10000 + (item.wh_id||0) : item.blank_id, 'Поиск упаковки...', 'Marketplaces._selectPkg.bind(null,'+i+')')
+                        }
+                    </div>
+                    ${isCustom ? `
+                    <div class="form-group" style="flex:0 0 80px;margin:0">
+                        <input type="number" min="0" step="0.1" value="${item.cost_per_unit || ''}" placeholder="₽/шт" oninput="Marketplaces._pkgItems[${i}].cost_per_unit=parseFloat(this.value)||0; Marketplaces.recalcSet()">
+                    </div>` : ''}
+                    <div class="form-group" style="flex:0 0 55px;margin:0">
+                        <input type="number" min="1" value="${item.qty || 1}" oninput="Marketplaces._onQtyChange('pkg',${i},this.value)" style="text-align:center;" title="Кол-во">
+                    </div>
+                    <button class="btn-remove" style="margin-bottom:6px;" onclick="Marketplaces.removePkgItem(${i})">&#10005;</button>
+                </div>
+                <div style="display:flex;gap:6px;font-size:10px;">
+                    <label style="cursor:pointer;color:${!isCustom ? 'var(--accent)' : 'var(--text-muted)'};" onclick="Marketplaces._setPkgSource(${i},'catalog')">Каталог/Склад</label>
+                    <label style="cursor:pointer;color:${isCustom ? 'var(--accent)' : 'var(--text-muted)'};" onclick="Marketplaces._setPkgSource(${i},'custom')">Кастомная</label>
+                </div>
+            </div>`;
+        }).join('');
+    },
+
+    // Selection callbacks
+    _selectPlastic(idx, blankId) {
         const b = this._plasticBlanks.find(m => m.id === Number(blankId));
         this._plasticItems[idx].blank_id = Number(blankId);
         this._plasticItems[idx].name = b ? b.name : '';
         this.recalcSet();
     },
 
-    onHwChange(idx, blankId) {
-        const b = this._hwBlanks.find(m => m.id === Number(blankId));
-        this._hwItems[idx].blank_id = Number(blankId);
-        this._hwItems[idx].name = b ? b.name : '';
+    _selectHw(idx, listId) {
+        const item = this._hwItems[idx];
+        if (listId >= 10000) {
+            // Warehouse item
+            const wh = this._allWarehouseHw.find(w => w.id === (listId - 10000));
+            if (wh) {
+                item.source = 'warehouse';
+                item.wh_id = wh.id;
+                item.blank_id = null;
+                item.name = wh.name + (wh.size ? ' ' + wh.size : '') + (wh.color ? ' ' + wh.color : '');
+                item.cost_per_unit = wh.price_per_unit || 0;
+            }
+        } else {
+            // Catalog item
+            const hw = this._hwCatalog.find(b => b.id === listId);
+            if (hw) {
+                item.source = 'catalog';
+                item.blank_id = hw.id;
+                item.wh_id = null;
+                item.name = hw.name;
+                item.cost_per_unit = 0; // will be calculated
+            }
+        }
         this.recalcSet();
     },
 
-    onPkgChange(idx, blankId) {
-        const b = this._pkgBlanks.find(m => m.id === Number(blankId));
-        this._pkgItems[idx].blank_id = Number(blankId);
-        this._pkgItems[idx].name = b ? b.name : '';
+    _selectPkg(idx, listId) {
+        const item = this._pkgItems[idx];
+        if (listId >= 10000) {
+            const wh = this._allWarehousePkg.find(w => w.id === (listId - 10000));
+            if (wh) {
+                item.source = 'warehouse';
+                item.wh_id = wh.id;
+                item.blank_id = null;
+                item.name = wh.name + (wh.size ? ' ' + wh.size : '');
+                item.cost_per_unit = wh.price_per_unit || 0;
+            }
+        } else {
+            const pkg = this._pkgCatalog.find(b => b.id === listId);
+            if (pkg) {
+                item.source = 'catalog';
+                item.blank_id = pkg.id;
+                item.wh_id = null;
+                item.name = pkg.name;
+                item.cost_per_unit = (pkg.price_per_unit || 0) + (pkg.delivery_per_unit || 0);
+            }
+        }
         this.recalcSet();
     },
 
-    onItemQtyChange(type, idx, qty) {
-        if (type === 'plastic') this._plasticItems[idx].qty = Number(qty) || 1;
-        else if (type === 'hw') this._hwItems[idx].qty = Number(qty) || 1;
-        else if (type === 'pkg') this._pkgItems[idx].qty = Number(qty) || 1;
-        this.recalcSet();
+    _setHwSource(idx, source) {
+        this._hwItems[idx].source = source;
+        if (source === 'custom') { this._hwItems[idx].blank_id = null; this._hwItems[idx].wh_id = null; }
+        this.renderFormItems();
     },
 
-    renderFormItems() {
-        // Plastic
-        const plasticOpts = this._plasticBlanks.map(b => `<option value="${b.id}">${this._esc(b.name)}</option>`).join('');
-        document.getElementById('mp-plastic-items').innerHTML = this._plasticItems.map((item, i) => `
-            <div class="form-row" style="margin-bottom:4px;align-items:end;">
-                <div class="form-group" style="flex:2;margin:0">
-                    <select onchange="Marketplaces.onPlasticChange(${i}, this.value)">
-                        <option value="">— Выберите бланк —</option>${plasticOpts}
-                    </select>
-                </div>
-                <div class="form-group" style="flex:0 0 70px;margin:0">
-                    <input type="number" min="1" value="${item.qty || 1}" oninput="Marketplaces.onItemQtyChange('plastic',${i},this.value)" placeholder="Кол">
-                </div>
-                <button class="btn-remove" style="margin-bottom:6px;" onclick="Marketplaces.removePlasticItem(${i})">&#10005;</button>
-            </div>
-        `).join('');
-        // Set selected values
-        this._plasticItems.forEach((item, i) => {
-            if (item.blank_id) {
-                const sel = document.getElementById('mp-plastic-items').querySelectorAll('select')[i];
-                if (sel) sel.value = item.blank_id;
-            }
-        });
+    _setPkgSource(idx, source) {
+        this._pkgItems[idx].source = source;
+        if (source === 'custom') { this._pkgItems[idx].blank_id = null; this._pkgItems[idx].wh_id = null; }
+        this.renderFormItems();
+    },
 
-        // Hardware
-        const hwOpts = this._hwBlanks.map(b => `<option value="${b.id}">${this._esc(b.name)}</option>`).join('');
-        document.getElementById('mp-hw-items').innerHTML = this._hwItems.map((item, i) => `
-            <div class="form-row" style="margin-bottom:4px;align-items:end;">
-                <div class="form-group" style="flex:2;margin:0">
-                    <select onchange="Marketplaces.onHwChange(${i}, this.value)">
-                        <option value="">— Выберите фурнитуру —</option>${hwOpts}
-                    </select>
-                </div>
-                <div class="form-group" style="flex:0 0 70px;margin:0">
-                    <input type="number" min="1" value="${item.qty || 1}" oninput="Marketplaces.onItemQtyChange('hw',${i},this.value)" placeholder="Кол">
-                </div>
-                <button class="btn-remove" style="margin-bottom:6px;" onclick="Marketplaces.removeHwItem(${i})">&#10005;</button>
-            </div>
-        `).join('');
-        this._hwItems.forEach((item, i) => {
-            if (item.blank_id) {
-                const sel = document.getElementById('mp-hw-items').querySelectorAll('select')[i];
-                if (sel) sel.value = item.blank_id;
-            }
-        });
-
-        // Packaging
-        const pkgOpts = this._pkgBlanks.map(b => `<option value="${b.id}">${this._esc(b.name)}</option>`).join('');
-        document.getElementById('mp-pkg-items').innerHTML = this._pkgItems.map((item, i) => `
-            <div class="form-row" style="margin-bottom:4px;align-items:end;">
-                <div class="form-group" style="flex:2;margin:0">
-                    <select onchange="Marketplaces.onPkgChange(${i}, this.value)">
-                        <option value="">— Выберите упаковку —</option>${pkgOpts}
-                    </select>
-                </div>
-                <div class="form-group" style="flex:0 0 70px;margin:0">
-                    <input type="number" min="1" value="${item.qty || 1}" oninput="Marketplaces.onItemQtyChange('pkg',${i},this.value)" placeholder="Кол">
-                </div>
-                <button class="btn-remove" style="margin-bottom:6px;" onclick="Marketplaces.removePkgItem(${i})">&#10005;</button>
-            </div>
-        `).join('');
-        this._pkgItems.forEach((item, i) => {
-            if (item.blank_id) {
-                const sel = document.getElementById('mp-pkg-items').querySelectorAll('select')[i];
-                if (sel) sel.value = item.blank_id;
-            }
-        });
+    _onQtyChange(type, idx, val) {
+        const q = Number(val) || 1;
+        if (type === 'plastic') this._plasticItems[idx].qty = q;
+        else if (type === 'hw') this._hwItems[idx].qty = q;
+        else if (type === 'pkg') this._pkgItems[idx].qty = q;
+        this.recalcSet();
     },
 
     // ==========================================
-    // CALCULATION
+    // CALCULATION (per 1 unit of set)
     // ==========================================
 
     recalcSet() {
-        const qty = parseInt(document.getElementById('mp-set-qty').value) || 500;
-        const commissionPct = parseFloat(document.getElementById('mp-set-commission').value) || 46;
-        const vatPct = parseFloat(document.getElementById('mp-set-vat').value) || 5;
-        const osnPct = parseFloat(document.getElementById('mp-set-osn').value) || 6;
-        const commercialPct = parseFloat(document.getElementById('mp-set-commercial').value) || 6.5;
-        const targetMarginPct = parseFloat(document.getElementById('mp-set-margin').value) || 40;
+        const commissionPct = parseFloat(document.getElementById('mp-set-commission')?.value) || 46;
+        const vatPct = parseFloat(document.getElementById('mp-set-vat')?.value) || 5;
+        const osnPct = parseFloat(document.getElementById('mp-set-osn')?.value) || 6;
+        const commercialPct = parseFloat(document.getElementById('mp-set-commercial')?.value) || 6.5;
+        const targetMarginPct = parseFloat(document.getElementById('mp-set-margin')?.value) || 40;
 
         const params = App.params || {};
         const cnyRate = params.cnyRate || 12.5;
@@ -280,55 +483,50 @@ const Marketplaces = {
 
         let totalCost = 0;
 
-        // Plastic: use enriched mold tiers at qty
+        // Plastic: use enriched tier cost at 500 (standard production batch)
         this._plasticItems.forEach(item => {
             if (!item.blank_id) return;
             const mold = this._plasticBlanks.find(m => m.id === item.blank_id);
-            if (!mold) return;
-            // Enrich if needed
-            if (!mold.tiers) {
-                // Call Molds.enrichMolds but we can't rely on that here
-                // Just approximate cost from basic params
-                const pph = mold.pph_actual || ((mold.pph_min || 0) + (mold.pph_max || 0)) / 2 || 20;
-                const weight = mold.weight_grams || 10;
-                const plasticCostPerHour = (params.plasticPricePerKg || 600) * weight / 1000;
-                const costPerUnit = (fotPerHour / pph) + plasticCostPerHour;
-                totalCost += costPerUnit * (item.qty || 1);
-            } else {
-                // Find closest tier
-                const tierQty = this._findClosestTier(qty, MOLD_TIERS);
-                const tier = mold.tiers[tierQty];
-                if (tier) {
-                    totalCost += tier.cost * (item.qty || 1);
+            if (!mold || !mold.tiers) return;
+            const tier = mold.tiers[500] || mold.tiers[300] || mold.tiers[1000];
+            if (tier) totalCost += tier.cost * (item.qty || 1);
+        });
+
+        // Hardware
+        this._hwItems.forEach(item => {
+            if (item.source === 'custom') {
+                totalCost += (item.cost_per_unit || 0) * (item.qty || 1);
+            } else if (item.source === 'warehouse' && item.wh_id) {
+                totalCost += (item.cost_per_unit || 0) * (item.qty || 1);
+            } else if (item.blank_id) {
+                const hw = this._hwCatalog.find(b => b.id === item.blank_id);
+                if (hw) {
+                    const materialCost = (hw.price_cny || 0) * cnyRate + (hw.delivery_per_unit || 0);
+                    const assemblyCost = (hw.assembly_speed > 0) ? (fotPerHour / hw.assembly_speed) : 0;
+                    totalCost += (materialCost + assemblyCost) * (item.qty || 1);
                 }
             }
         });
 
-        // Hardware: material + delivery + assembly FOT
-        this._hwItems.forEach(item => {
-            if (!item.blank_id) return;
-            const hw = this._hwBlanks.find(b => b.id === item.blank_id);
-            if (!hw) return;
-            const materialCost = (hw.price_cny || 0) * cnyRate + (hw.delivery_per_unit || 0);
-            const assemblyCost = (hw.assembly_speed > 0) ? (fotPerHour / hw.assembly_speed) : 0;
-            totalCost += (materialCost + assemblyCost) * (item.qty || 1);
-        });
-
-        // Packaging: just cost + delivery (no FOT)
+        // Packaging
         this._pkgItems.forEach(item => {
-            if (!item.blank_id) return;
-            const pkg = this._pkgBlanks.find(b => b.id === item.blank_id);
-            if (!pkg) return;
-            totalCost += ((pkg.price_per_unit || 0) + (pkg.delivery_per_unit || 0)) * (item.qty || 1);
+            if (item.source === 'custom') {
+                totalCost += (item.cost_per_unit || 0) * (item.qty || 1);
+            } else if (item.source === 'warehouse' && item.wh_id) {
+                totalCost += (item.cost_per_unit || 0) * (item.qty || 1);
+            } else if (item.blank_id) {
+                const pkg = this._pkgCatalog.find(b => b.id === item.blank_id);
+                if (pkg) {
+                    totalCost += ((pkg.price_per_unit || 0) + (pkg.delivery_per_unit || 0)) * (item.qty || 1);
+                }
+            }
         });
 
         totalCost = round2(totalCost);
 
-        // Selling price formula:
-        // sellingPrice = totalCost / ((1 - commission) * (1 - vat) * (1 - osn) * (1 - commercial) * (1 - margin))
+        // Selling price: cost / ((1-mp) * (1-vat) * (1-osn) * (1-comm) * (1-margin))
         const keepFactor = (1 - commissionPct/100) * (1 - vatPct/100) * (1 - osnPct/100) * (1 - commercialPct/100) * (1 - targetMarginPct/100);
         const sellingPrice = keepFactor > 0 ? Math.ceil(totalCost / keepFactor) : 0;
-        const actualMargin = sellingPrice > 0 ? Math.round((sellingPrice * keepFactor / (1 - targetMarginPct/100) * (targetMarginPct/100)) / sellingPrice * 100) : 0;
 
         // Show result
         const resultBlock = document.getElementById('mp-result-block');
@@ -337,40 +535,27 @@ const Marketplaces = {
             document.getElementById('mp-calc-cost').textContent = formatRub(totalCost);
             document.getElementById('mp-calc-price').textContent = formatRub(sellingPrice);
 
-            // Details
             const afterCommission = round2(sellingPrice * (1 - commissionPct/100));
             const afterVat = round2(afterCommission * (1 - vatPct/100));
             const afterOsn = round2(afterVat * (1 - osnPct/100));
             const afterCommercial = round2(afterOsn * (1 - commercialPct/100));
             const profit = round2(afterCommercial - totalCost);
-            const profitMarginPct = afterCommercial > 0 ? Math.round(profit / afterCommercial * 100) : 0;
+            const profitPct = afterCommercial > 0 ? Math.round(profit / afterCommercial * 100) : 0;
 
             document.getElementById('mp-calc-details').innerHTML = `
-                Цена МП: ${formatRub(sellingPrice)}
-                → минус комиссия ${commissionPct}%: ${formatRub(afterCommission)}
-                → минус НДС ${vatPct}%: ${formatRub(afterVat)}
-                → минус ОСН ${osnPct}%: ${formatRub(afterOsn)}
-                → минус коммерч. ${commercialPct}%: ${formatRub(afterCommercial)}
-                → минус себестоимость: <strong style="color:${profit >= 0 ? 'var(--green)' : 'var(--red)'}">прибыль ${formatRub(profit)} (${profitMarginPct}%)</strong>
-                · Множитель: ×${round2(sellingPrice / totalCost)}
+                ${formatRub(sellingPrice)}
+                → −МП ${commissionPct}%: ${formatRub(afterCommission)}
+                → −НДС ${vatPct}%: ${formatRub(afterVat)}
+                → −ОСН ${osnPct}%: ${formatRub(afterOsn)}
+                → −коммерч. ${commercialPct}%: ${formatRub(afterCommercial)}
+                → −себес: <strong style="color:${profit >= 0 ? 'var(--green)' : 'var(--red)'}">чистыми ${formatRub(profit)} (${profitPct}%)</strong>
+                · ×${round2(sellingPrice / totalCost)}
             `;
         } else {
             resultBlock.style.display = 'none';
         }
 
-        // Store calculated values for saving
-        this._lastCalc = { totalCost, sellingPrice, actualMargin: targetMarginPct, qty };
-    },
-
-    _findClosestTier(qty, tiers) {
-        // Find the tier that's closest to qty
-        let closest = tiers[0];
-        let minDiff = Math.abs(qty - closest);
-        for (const t of tiers) {
-            const diff = Math.abs(qty - t);
-            if (diff < minDiff) { minDiff = diff; closest = t; }
-        }
-        return closest;
+        this._lastCalc = { totalCost, sellingPrice, actualMargin: targetMarginPct };
     },
 
     // ==========================================
@@ -386,15 +571,15 @@ const Marketplaces = {
         const mset = {
             id: this.editingSetId || undefined,
             name,
-            qty: parseInt(document.getElementById('mp-set-qty').value) || 500,
+            photo_url: this._pendingPhoto || '',
             commission: parseFloat(document.getElementById('mp-set-commission').value) || 46,
             vat: parseFloat(document.getElementById('mp-set-vat').value) || 5,
             osn: parseFloat(document.getElementById('mp-set-osn').value) || 6,
             commercial: parseFloat(document.getElementById('mp-set-commercial').value) || 6.5,
             target_margin: parseFloat(document.getElementById('mp-set-margin').value) || 40,
             plastic_items: this._plasticItems.filter(i => i.blank_id),
-            hw_items: this._hwItems.filter(i => i.blank_id),
-            pkg_items: this._pkgItems.filter(i => i.blank_id),
+            hw_items: this._hwItems.filter(i => i.blank_id || i.wh_id || (i.source === 'custom' && i.name)),
+            pkg_items: this._pkgItems.filter(i => i.blank_id || i.wh_id || (i.source === 'custom' && i.name)),
             total_cost: this._lastCalc?.totalCost || 0,
             selling_price: this._lastCalc?.sellingPrice || 0,
             actual_margin: this._lastCalc?.actualMargin || 0,
@@ -424,12 +609,16 @@ const Marketplaces = {
         }
     },
 
+    // ==========================================
+    // HELPERS
+    // ==========================================
+
     _enrichPlasticBlanks() {
         const params = App.params || {};
         const fotPerHour = params.fotPerHour || 400;
 
         this._plasticBlanks.forEach(m => {
-            if (m.tiers && Object.keys(m.tiers).length > 0) return; // already enriched
+            if (m.tiers && Object.keys(m.tiers).length > 0) return;
             const pMin = m.pph_min || 0;
             const pMax = m.pph_max || 0;
             const pAvg = (pMin > 0 && pMax > 0) ? Math.round((pMin + pMax) / 2) : (pMin || pMax || 0);
@@ -450,7 +639,6 @@ const Marketplaces = {
                 const result = calculateItemCost(item, params);
                 let adjustedCost = result.costTotal - result.costMoldAmortization + moldAmortPerUnit;
 
-                // Built-in hardware
                 if (m.hw_name && m.hw_price_per_unit > 0) {
                     let hwCostPerUnit = m.hw_price_per_unit + (m.hw_delivery_total ? m.hw_delivery_total / qty : 0);
                     if (m.hw_speed > 0) {
@@ -466,6 +654,6 @@ const Marketplaces = {
 
     _esc(str) {
         if (!str) return '';
-        return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/'/g, '&#39;');
+        return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     },
 };

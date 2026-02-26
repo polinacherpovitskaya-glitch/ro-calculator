@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=46">
+    <link rel="stylesheet" href="css/style.css?v=46b">
 </head>
 <body>
 
@@ -1715,7 +1715,15 @@
                 </div>
                 <div class="form-row">
                     <div class="form-group" style="flex:2"><label>Название набора</label><input type="text" id="mp-set-name" placeholder="Ракетка + цепочка"></div>
-                    <div class="form-group"><label>Тираж (шт)</label><input type="number" min="1" id="mp-set-qty" value="500" oninput="Marketplaces.recalcSet()"></div>
+                    <div class="form-group" style="flex:0 0 auto;">
+                        <label>Фото</label>
+                        <div style="display:flex;gap:8px;align-items:center;">
+                            <div id="mp-photo-preview" style="width:60px;height:60px;border-radius:8px;border:1px solid var(--border);background:var(--bg);display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0">
+                                <span style="font-size:24px;color:var(--text-muted)">&#128247;</span>
+                            </div>
+                            <input type="file" id="mp-photo-file" accept="image/*" onchange="Marketplaces.onPhotoFileChange(this)" style="font-size:11px;max-width:140px;">
+                        </div>
+                    </div>
                 </div>
                 <div class="form-row">
                     <div class="form-group"><label>Комиссия МП (%)</label><input type="number" min="0" max="100" step="1" id="mp-set-commission" value="46" oninput="Marketplaces.recalcSet()"></div>
@@ -2404,25 +2412,25 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="js/supabase.js?v=46"></script>
-<script src="js/calculator.js?v=46"></script>
-<script src="js/app.js?v=46"></script>
-<script src="js/dashboard.js?v=46"></script>
-<script src="js/order-detail.js?v=46"></script>
-<script src="js/orders.js?v=46"></script>
-<script src="js/analytics.js?v=46"></script>
-<script src="js/molds.js?v=46"></script>
-<script src="js/colors.js?v=46"></script>
-<script src="js/kp.js?v=46"></script>
-<script src="js/timetrack.js?v=46"></script>
-<script src="js/tasks.js?v=46"></script>
-<script src="js/gantt.js?v=46"></script>
-<script src="js/import.js?v=46"></script>
-<script src="js/factual.js?v=46"></script>
-<script src="js/china.js?v=46"></script>
-<script src="js/warehouse_photos.js?v=46"></script>
-<script src="js/marketplaces.js?v=46"></script>
-<script src="js/warehouse.js?v=46"></script>
-<script src="js/settings.js?v=46"></script>
+<script src="js/supabase.js?v=46b"></script>
+<script src="js/calculator.js?v=46b"></script>
+<script src="js/app.js?v=46b"></script>
+<script src="js/dashboard.js?v=46b"></script>
+<script src="js/order-detail.js?v=46b"></script>
+<script src="js/orders.js?v=46b"></script>
+<script src="js/analytics.js?v=46b"></script>
+<script src="js/molds.js?v=46b"></script>
+<script src="js/colors.js?v=46b"></script>
+<script src="js/kp.js?v=46b"></script>
+<script src="js/timetrack.js?v=46b"></script>
+<script src="js/tasks.js?v=46b"></script>
+<script src="js/gantt.js?v=46b"></script>
+<script src="js/import.js?v=46b"></script>
+<script src="js/factual.js?v=46b"></script>
+<script src="js/china.js?v=46b"></script>
+<script src="js/warehouse_photos.js?v=46b"></script>
+<script src="js/marketplaces.js?v=46b"></script>
+<script src="js/warehouse.js?v=46b"></script>
+<script src="js/settings.js?v=46b"></script>
 </body>
 </html>
