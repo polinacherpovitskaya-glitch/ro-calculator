@@ -894,6 +894,8 @@ const Molds = {
             const assemblyCost = speed > 0 ? round2((fotPerHour + indirectPerHour) / speed) : 0;
             b._cost = round2(priceRub + assemblyCost);
             b._assemblyCost = assemblyCost;
+            // Цена с 40% чистой прибыли
+            b._sellPrice = b._cost > 0 ? Math.ceil(b._cost / (1 - 0.40)) : 0;
 
             // Try to get photo from warehouse if not on blank itself
             if (!b.photo_url && b.warehouse_item_id) {
@@ -922,6 +924,7 @@ const Molds = {
                 <th style="padding:6px 8px;text-align:right;">Цена склада</th>
                 <th style="padding:6px 8px;text-align:right;">Сборка</th>
                 <th style="padding:6px 8px;text-align:right;font-weight:700;">Себестоимость</th>
+                <th style="padding:6px 8px;text-align:right;">Цена 40%</th>
                 <th style="width:60px;"></th>
             </tr></thead><tbody>`;
 
@@ -942,7 +945,8 @@ const Molds = {
                 </td>
                 <td style="padding:6px 8px;text-align:right;font-size:12px;color:var(--text-secondary);">${formatRub(priceRub)}</td>
                 <td style="padding:6px 8px;text-align:right;font-size:12px;color:var(--text-secondary);">${formatRub(b._assemblyCost)}</td>
-                <td style="padding:6px 8px;text-align:right;font-size:15px;font-weight:700;color:var(--green);">${formatRub(b._cost)}</td>
+                <td style="padding:6px 8px;text-align:right;font-size:15px;font-weight:700;">${formatRub(b._cost)}</td>
+                <td style="padding:6px 8px;text-align:right;font-size:15px;font-weight:700;color:var(--green);">${b._sellPrice}₽</td>
                 <td style="padding:6px;">
                     <div style="display:flex;gap:4px;">
                         <button class="btn btn-sm btn-outline" style="padding:2px 6px;font-size:10px;" onclick="Molds.editHwBlank(${b.id})">&#9998;</button>
@@ -1098,7 +1102,9 @@ const Molds = {
         const assemblyCost = round2(fotCost + indirectCost);
         const totalCost = round2(priceRub + assemblyCost);
 
-        let html = `<div style="font-weight:700;font-size:13px;margin-bottom:6px;">Себестоимость: ${formatRub(totalCost)}</div>`;
+        const sellPrice = Math.ceil(totalCost / (1 - 0.40));
+
+        let html = `<div style="font-weight:700;font-size:13px;margin-bottom:6px;">Себестоимость: ${formatRub(totalCost)} → Цена 40%: <span style="color:var(--green);">${sellPrice}₽</span></div>`;
         html += `<div style="color:var(--text-secondary);font-size:11px;line-height:1.7;">`;
         html += `Цена со склада: <b>${formatRub(priceRub)}</b> (вкл. доставку)<br>`;
         if (speed > 0) {
@@ -1180,84 +1186,55 @@ const Molds = {
 
     enrichPkgBlanks() {
         this._pkgBlanks.forEach(b => {
-            b.tiers = {};
-            this.HW_TIERS.forEach(qty => {
-                const totalCost = (b.price_per_unit || 0) + (b.delivery_per_unit || 0);
-                const margin = this.HW_TIER_MARGINS[qty] || 0.40;
-                const targetPrice = totalCost / (1 - margin);
-                const sellPrice = Math.ceil(targetPrice);
-                const actualMargin = sellPrice > 0 ? round2((sellPrice - totalCost) / sellPrice) : 0;
-
-                b.tiers[qty] = {
-                    cost: round2(totalCost),
-                    sellPrice,
-                    margin: actualMargin,
-                };
-            });
+            const totalCost = round2((b.price_per_unit || 0) + (b.delivery_per_unit || 0));
+            b._cost = totalCost;
+            // Цена с 40% чистой прибыли
+            b._sellPrice = totalCost > 0 ? Math.ceil(totalCost / (1 - 0.40)) : 0;
         });
     },
 
     renderPkgTable() {
         const container = document.getElementById('pkg-blanks-container');
         if (!this._pkgBlanks.length) {
-            container.innerHTML = '<div class="empty-state"><p>Нет упаковки</p></div>';
+            container.innerHTML = '<div class="empty-state"><p>Нет упаковки. Нажмите «+ Новый бланк».</p></div>';
             return;
         }
 
-        const tierHeaders = this.HW_TIERS.map(q => {
-            const label = q >= 1000 ? (q/1000) + 'K' : q;
-            return `<th class="text-right" style="font-size:11px;padding:4px 6px;">${label} шт</th>`;
-        }).join('');
-
         let html = `<div class="card" style="padding:12px;overflow-x:auto;">
-            <table style="font-size:12px;white-space:nowrap;border-collapse:collapse;">
+            <table style="font-size:12px;white-space:nowrap;border-collapse:collapse;width:100%;">
             <thead><tr>
-                <th style="min-width:160px;padding:6px 8px;">Упаковка</th>
-                <th style="width:50px;padding:4px 6px;"></th>
-                ${tierHeaders}
-                <th style="width:30px"></th>
+                <th style="min-width:180px;padding:6px 8px;text-align:left;">Упаковка</th>
+                <th style="padding:6px 8px;text-align:right;">Цена</th>
+                <th style="padding:6px 8px;text-align:right;">Доставка</th>
+                <th style="padding:6px 8px;text-align:right;font-weight:700;">Себестоимость</th>
+                <th style="padding:6px 8px;text-align:right;">Цена 40%</th>
+                <th style="width:60px;"></th>
             </tr></thead><tbody>`;
 
         this._pkgBlanks.forEach(b => {
-            const costCells = this.HW_TIERS.map(q => {
-                const t = b.tiers?.[q];
-                return `<td class="text-right" style="font-size:10px;color:var(--text-secondary);padding:3px 6px;">${t ? Math.round(t.cost) : '—'}</td>`;
-            }).join('');
+            const price = b.price_per_unit || 0;
+            const delivery = b.delivery_per_unit || 0;
 
-            const sellCells = this.HW_TIERS.map(q => {
-                const t = b.tiers?.[q];
-                const marginPct = t ? Math.round(t.margin * 100) : 0;
-                return `<td class="text-right" title="Маржа ${marginPct}%" style="font-size:13px;font-weight:700;color:var(--green);padding:3px 6px;">${t ? t.sellPrice : '—'}</td>`;
-            }).join('');
-
-            html += `
-                <tr>
-                    <td rowspan="2" style="vertical-align:top;padding:6px 8px;border-bottom:2px solid var(--border);">
-                        <div style="font-weight:700;font-size:13px;">${this.esc(b.name)}</div>
-                        <div style="font-size:10px;color:var(--text-muted);margin-top:2px;">${b.price_per_unit || 0}₽ + ${b.delivery_per_unit || 0}₽ дост.</div>
-                        ${b.notes ? `<div style="font-size:10px;color:var(--text-muted);font-style:italic;">${this.esc(b.notes)}</div>` : ''}
-                    </td>
-                    <td style="font-size:9px;color:var(--text-secondary);padding:3px 4px;">себес</td>
-                    ${costCells}
-                    <td rowspan="2" style="vertical-align:top;border-bottom:2px solid var(--border);">
-                        <div style="display:flex;flex-direction:column;gap:2px;">
-                            <button class="btn btn-sm btn-outline" style="padding:2px 6px;font-size:10px;" onclick="Molds.editPkgBlank(${b.id})">&#9998;</button>
-                            <button class="btn-remove" style="font-size:9px;width:24px;height:24px;" onclick="Molds.confirmDeletePkg(${b.id}, '${this.esc(b.name)}')">&#10005;</button>
-                        </div>
-                    </td>
-                </tr>
-                <tr style="border-bottom:2px solid var(--border);">
-                    <td style="font-size:9px;color:var(--green);font-weight:600;padding:3px 4px;">цена</td>
-                    ${sellCells}
-                </tr>`;
+            html += `<tr style="border-bottom:1px solid var(--border);">
+                <td style="padding:6px 8px;">
+                    <div style="font-weight:700;font-size:13px;">${this.esc(b.name)}</div>
+                    ${b.notes ? `<div style="font-size:10px;color:var(--text-muted);font-style:italic;">${this.esc(b.notes)}</div>` : ''}
+                </td>
+                <td style="padding:6px 8px;text-align:right;font-size:12px;color:var(--text-secondary);">${formatRub(price)}</td>
+                <td style="padding:6px 8px;text-align:right;font-size:12px;color:var(--text-secondary);">${formatRub(delivery)}</td>
+                <td style="padding:6px 8px;text-align:right;font-size:15px;font-weight:700;">${formatRub(b._cost)}</td>
+                <td style="padding:6px 8px;text-align:right;font-size:15px;font-weight:700;color:var(--green);">${b._sellPrice}₽</td>
+                <td style="padding:6px;">
+                    <div style="display:flex;gap:4px;">
+                        <button class="btn btn-sm btn-outline" style="padding:2px 6px;font-size:10px;" onclick="Molds.editPkgBlank(${b.id})">&#9998;</button>
+                        <button class="btn-remove" style="font-size:9px;width:24px;height:24px;" onclick="Molds.confirmDeletePkg(${b.id}, '${this.esc(b.name)}')">&#10005;</button>
+                    </div>
+                </td>
+            </tr>`;
         });
 
         html += '</tbody></table>';
-        const marginLabels = this.HW_TIERS.map(q => {
-            const label = q >= 1000 ? (q/1000) + 'K' : q;
-            return `${label}=${Math.round(this.HW_TIER_MARGINS[q] * 100)}%`;
-        }).join(', ');
-        html += `<div style="margin-top:10px;font-size:11px;color:var(--text-muted);">Маржа: ${marginLabels} · Без ФОТ · Округление до 1₽ вверх</div></div>`;
+        html += `<div style="margin-top:10px;font-size:11px;color:var(--text-muted);">Себестоимость = цена + доставка · Без ФОТ, без косвенных · Цена 40% = себестоимость / 0.6</div></div>`;
 
         container.innerHTML = html;
     },
@@ -1300,26 +1277,12 @@ const Molds = {
         if (price <= 0 && delivery <= 0) { el.style.display = 'none'; return; }
 
         const totalCost = round2(price + delivery);
+        const sellPrice = Math.ceil(totalCost / (1 - 0.40));
 
-        let html = `<div style="margin-bottom:8px;font-weight:700;font-size:13px;">Себестоимость 1 шт: ${formatRub(totalCost)}</div>`;
-        html += `<div style="color:var(--text-secondary);line-height:1.8;">`;
-        html += `Стоимость: <b>${formatRub(price)}</b>/шт + Доставка: <b>${formatRub(delivery)}</b>/шт = <b>${formatRub(totalCost)}</b>`;
-        html += `<br><span style="font-size:11px;color:var(--text-muted);">Без ФОТ сборки, без косвенных расходов</span>`;
-        html += `</div>`;
-
-        // Show prices at each tier
-        html += `<div style="margin-top:10px;display:flex;flex-wrap:wrap;gap:8px;">`;
-        this.HW_TIERS.forEach(qty => {
-            const margin = this.HW_TIER_MARGINS[qty] || 0.40;
-            const sellPrice = Math.ceil(totalCost / (1 - margin));
-            const marginPct = Math.round(margin * 100);
-            const label = qty >= 1000 ? (qty/1000) + 'K' : qty;
-            html += `<div style="text-align:center;padding:4px 8px;background:var(--card-bg);border-radius:6px;border:1px solid var(--border);">
-                <div style="font-size:10px;color:var(--text-muted);">${label} шт</div>
-                <div style="font-size:14px;font-weight:700;color:var(--green);">${sellPrice}₽</div>
-                <div style="font-size:9px;color:var(--text-muted);">маржа ${marginPct}%</div>
-            </div>`;
-        });
+        let html = `<div style="font-weight:700;font-size:13px;margin-bottom:6px;">Себестоимость: ${formatRub(totalCost)} → Цена 40%: <span style="color:var(--green);">${sellPrice}₽</span></div>`;
+        html += `<div style="color:var(--text-secondary);font-size:11px;line-height:1.7;">`;
+        html += `Стоимость: <b>${formatRub(price)}</b> + Доставка: <b>${formatRub(delivery)}</b> = <b>${formatRub(totalCost)}</b>`;
+        html += `<br><span style="color:var(--text-muted);">Без ФОТ сборки, без косвенных · Цена 40% = ${formatRub(totalCost)} / 0.6 = ${sellPrice}₽</span>`;
         html += `</div>`;
 
         el.innerHTML = html;
