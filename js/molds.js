@@ -863,11 +863,18 @@ const Molds = {
 
     // ==========================================
     // HARDWARE BLANKS TAB
+    // Фурнитура из склада + сборка
+    // Себестоимость = цена_склада + (ФОТ + косвенные) / скорость
     // ==========================================
+
+    _warehouseHwItems: [], // warehouse items for dropdown
 
     async loadHwTab() {
         try {
             this._hwBlanks = await loadHwBlanks();
+            // Load warehouse items for dropdown
+            const whItems = await loadWarehouseItems();
+            this._warehouseHwItems = (whItems || []).filter(i => i.category !== 'packaging');
             this.enrichHwBlanks();
             this.renderHwTable();
         } catch(e) {
@@ -878,94 +885,75 @@ const Molds = {
 
     enrichHwBlanks() {
         const params = App.params || {};
-        const cnyRate = params.cnyRate || 12.5;
         const fotPerHour = params.fotPerHour || 400;
+        const indirectPerHour = params.indirectPerHour || 0;
 
         this._hwBlanks.forEach(b => {
-            b.tiers = {};
-            this.HW_TIERS.forEach(qty => {
-                const materialCost = (b.price_cny || 0) * cnyRate + (b.delivery_per_unit || 0);
-                const assemblyCost = (b.assembly_speed > 0) ? (fotPerHour / b.assembly_speed) : 0;
-                const totalCost = materialCost + assemblyCost;
-                const margin = this.HW_TIER_MARGINS[qty] || 0.40;
-                const targetPrice = totalCost / (1 - margin);
-                const sellPrice = Math.ceil(targetPrice); // до целых рублей вверх
-                const actualMargin = sellPrice > 0 ? round2((sellPrice - totalCost) / sellPrice) : 0;
+            const priceRub = b.price_rub || 0;
+            const speed = b.assembly_speed || 0;
+            const assemblyCost = speed > 0 ? round2((fotPerHour + indirectPerHour) / speed) : 0;
+            b._cost = round2(priceRub + assemblyCost);
+            b._assemblyCost = assemblyCost;
 
-                b.tiers[qty] = {
-                    cost: round2(totalCost),
-                    sellPrice,
-                    margin: actualMargin,
-                };
-            });
+            // Try to get photo from warehouse if not on blank itself
+            if (!b.photo_url && b.warehouse_item_id) {
+                const whItem = this._warehouseHwItems.find(w => w.id === b.warehouse_item_id);
+                if (whItem) b._whPhoto = whItem.photo_thumbnail || whItem.photo_url || '';
+            }
         });
     },
 
     renderHwTable() {
         const container = document.getElementById('hw-blanks-container');
         if (!this._hwBlanks.length) {
-            container.innerHTML = '<div class="empty-state"><p>Нет фурнитуры</p></div>';
+            container.innerHTML = '<div class="empty-state"><p>Нет фурнитуры. Нажмите «+ Новый бланк».</p></div>';
             return;
         }
 
-        const tierHeaders = this.HW_TIERS.map(q => {
-            const label = q >= 1000 ? (q/1000) + 'K' : q;
-            return `<th class="text-right" style="font-size:11px;padding:4px 6px;">${label} шт</th>`;
-        }).join('');
+        const params = App.params || {};
+        const fotPerHour = params.fotPerHour || 400;
+        const indirectPerHour = params.indirectPerHour || 0;
 
         let html = `<div class="card" style="padding:12px;overflow-x:auto;">
-            <table style="font-size:12px;white-space:nowrap;border-collapse:collapse;">
+            <table style="font-size:12px;white-space:nowrap;border-collapse:collapse;width:100%;">
             <thead><tr>
-                <th style="min-width:160px;padding:6px 8px;">Фурнитура</th>
-                <th style="width:50px;padding:4px 6px;"></th>
-                ${tierHeaders}
-                <th style="width:30px"></th>
+                <th style="width:48px;padding:6px;"></th>
+                <th style="min-width:180px;padding:6px 8px;text-align:left;">Фурнитура</th>
+                <th style="padding:6px 8px;text-align:right;">Цена склада</th>
+                <th style="padding:6px 8px;text-align:right;">Сборка</th>
+                <th style="padding:6px 8px;text-align:right;font-weight:700;">Себестоимость</th>
+                <th style="width:60px;"></th>
             </tr></thead><tbody>`;
 
         this._hwBlanks.forEach(b => {
-            const costCells = this.HW_TIERS.map(q => {
-                const t = b.tiers?.[q];
-                return `<td class="text-right" style="font-size:10px;color:var(--text-secondary);padding:3px 6px;">${t ? Math.round(t.cost) : '—'}</td>`;
-            }).join('');
-
-            const sellCells = this.HW_TIERS.map(q => {
-                const t = b.tiers?.[q];
-                const marginPct = t ? Math.round(t.margin * 100) : 0;
-                return `<td class="text-right" title="Маржа ${marginPct}%" style="font-size:13px;font-weight:700;color:var(--green);padding:3px 6px;">${t ? t.sellPrice : '—'}</td>`;
-            }).join('');
+            const priceRub = b.price_rub || 0;
+            const photoSrc = b.photo_url || b._whPhoto || '';
+            const photo = photoSrc
+                ? `<img src="${photoSrc.startsWith('data:') ? photoSrc : this.esc(photoSrc)}" style="width:44px;height:44px;object-fit:cover;border-radius:6px;border:1px solid var(--border);" onerror="this.style.display='none'">`
+                : `<span style="width:44px;height:44px;display:flex;align-items:center;justify-content:center;background:var(--accent-light);border-radius:6px;font-size:16px;">🔩</span>`;
 
             const speedLabel = b.assembly_speed ? (b.assembly_speed + ' шт/ч') : '—';
 
-            html += `
-                <tr>
-                    <td rowspan="2" style="vertical-align:top;padding:6px 8px;border-bottom:2px solid var(--border);">
-                        <div style="font-weight:700;font-size:13px;">${this.esc(b.name)}</div>
-                        <div style="font-size:10px;color:var(--text-muted);margin-top:2px;">¥${b.price_cny || 0} + ${b.delivery_per_unit || 0}₽/шт · ${speedLabel}</div>
-                        ${b.notes ? `<div style="font-size:10px;color:var(--text-muted);font-style:italic;">${this.esc(b.notes)}</div>` : ''}
-                    </td>
-                    <td style="font-size:9px;color:var(--text-secondary);padding:3px 4px;">себес</td>
-                    ${costCells}
-                    <td rowspan="2" style="vertical-align:top;border-bottom:2px solid var(--border);">
-                        <div style="display:flex;flex-direction:column;gap:2px;">
-                            <button class="btn btn-sm btn-outline" style="padding:2px 6px;font-size:10px;" onclick="Molds.editHwBlank(${b.id})">&#9998;</button>
-                            <button class="btn-remove" style="font-size:9px;width:24px;height:24px;" onclick="Molds.confirmDeleteHw(${b.id}, '${this.esc(b.name)}')">&#10005;</button>
-                        </div>
-                    </td>
-                </tr>
-                <tr style="border-bottom:2px solid var(--border);">
-                    <td style="font-size:9px;color:var(--green);font-weight:600;padding:3px 4px;">цена</td>
-                    ${sellCells}
-                </tr>`;
+            html += `<tr style="border-bottom:1px solid var(--border);">
+                <td style="padding:6px;">${photo}</td>
+                <td style="padding:6px 8px;">
+                    <div style="font-weight:700;font-size:13px;">${this.esc(b.name)}</div>
+                    <div style="font-size:10px;color:var(--text-muted);margin-top:2px;">${speedLabel}${b.notes ? ' · ' + this.esc(b.notes) : ''}</div>
+                </td>
+                <td style="padding:6px 8px;text-align:right;font-size:12px;color:var(--text-secondary);">${formatRub(priceRub)}</td>
+                <td style="padding:6px 8px;text-align:right;font-size:12px;color:var(--text-secondary);">${formatRub(b._assemblyCost)}</td>
+                <td style="padding:6px 8px;text-align:right;font-size:15px;font-weight:700;color:var(--green);">${formatRub(b._cost)}</td>
+                <td style="padding:6px;">
+                    <div style="display:flex;gap:4px;">
+                        <button class="btn btn-sm btn-outline" style="padding:2px 6px;font-size:10px;" onclick="Molds.editHwBlank(${b.id})">&#9998;</button>
+                        <button class="btn-remove" style="font-size:9px;width:24px;height:24px;" onclick="Molds.confirmDeleteHw(${b.id}, '${this.esc(b.name)}')">&#10005;</button>
+                    </div>
+                </td>
+            </tr>`;
         });
 
         html += '</tbody></table>';
-
-        // Legend
-        const marginLabels = this.HW_TIERS.map(q => {
-            const label = q >= 1000 ? (q/1000) + 'K' : q;
-            return `${label}=${Math.round(this.HW_TIER_MARGINS[q] * 100)}%`;
-        }).join(', ');
-        html += `<div style="margin-top:10px;font-size:11px;color:var(--text-muted);">Маржа: ${marginLabels} · Округление до 1₽ вверх</div></div>`;
+        html += `<div style="margin-top:10px;font-size:11px;color:var(--text-muted);">ФОТ: ${formatRub(fotPerHour)}/ч · Косвенные: ${formatRub(round2(indirectPerHour))}/ч · Себестоимость = цена склада + (ФОТ + косвенные) ÷ скорость</div></div>`;
 
         container.innerHTML = html;
     },
@@ -973,9 +961,15 @@ const Molds = {
     showHwForm() {
         this._editingHwId = null;
         document.getElementById('hw-form-title').textContent = 'Новая фурнитура';
-        ['hw-blank-name','hw-blank-price-cny','hw-blank-delivery','hw-blank-speed','hw-blank-notes','hw-blank-photo'].forEach(id => {
-            document.getElementById(id).value = '';
-        });
+        document.getElementById('hw-blank-wh-search').value = '';
+        document.getElementById('hw-blank-speed').value = '';
+        document.getElementById('hw-blank-notes').value = '';
+        document.getElementById('hw-blank-name').value = '';
+        document.getElementById('hw-blank-price-rub').value = '0';
+        document.getElementById('hw-blank-photo').value = '';
+        document.getElementById('hw-blank-wh-id').value = '';
+        document.getElementById('hw-blank-selected').style.display = 'none';
+        document.getElementById('hw-blank-wh-dropdown').style.display = 'none';
         document.getElementById('hw-delete-btn').style.display = 'none';
         document.getElementById('hw-edit-form').style.display = '';
         this.recalcHwCost();
@@ -987,60 +981,135 @@ const Molds = {
         if (!b) return;
         this._editingHwId = id;
         document.getElementById('hw-form-title').textContent = 'Редактировать: ' + (b.name || '');
-        document.getElementById('hw-blank-name').value = b.name || '';
-        document.getElementById('hw-blank-price-cny').value = b.price_cny || '';
-        document.getElementById('hw-blank-delivery').value = b.delivery_per_unit || '';
+        document.getElementById('hw-blank-wh-search').value = b.name || '';
         document.getElementById('hw-blank-speed').value = b.assembly_speed || '';
         document.getElementById('hw-blank-notes').value = b.notes || '';
+        document.getElementById('hw-blank-name').value = b.name || '';
+        document.getElementById('hw-blank-price-rub').value = b.price_rub || 0;
         document.getElementById('hw-blank-photo').value = b.photo_url || '';
+        document.getElementById('hw-blank-wh-id').value = b.warehouse_item_id || '';
+        document.getElementById('hw-blank-wh-dropdown').style.display = 'none';
+
+        // Show selected item preview
+        const photoSrc = b.photo_url || b._whPhoto || '';
+        this._showHwSelectedItem(b.name, b.price_rub || 0, photoSrc);
+
         document.getElementById('hw-delete-btn').style.display = '';
         document.getElementById('hw-edit-form').style.display = '';
         this.recalcHwCost();
         document.getElementById('hw-edit-form').scrollIntoView({ behavior: 'smooth' });
     },
 
+    _showHwSelectedItem(name, priceRub, photoUrl) {
+        const block = document.getElementById('hw-blank-selected');
+        const nameEl = document.getElementById('hw-blank-selected-name');
+        const infoEl = document.getElementById('hw-blank-selected-info');
+        const photoEl = document.getElementById('hw-blank-photo-preview');
+
+        nameEl.textContent = name || '';
+        infoEl.textContent = `Цена: ${formatRub(priceRub)} (доставка включена)`;
+
+        if (photoUrl) {
+            photoEl.src = photoUrl;
+            photoEl.style.display = '';
+        } else {
+            photoEl.style.display = 'none';
+        }
+        block.style.display = '';
+    },
+
+    searchHwWarehouse() {
+        const query = (document.getElementById('hw-blank-wh-search').value || '').toLowerCase().trim();
+        const dropdown = document.getElementById('hw-blank-wh-dropdown');
+
+        if (!query || query.length < 1) {
+            dropdown.style.display = 'none';
+            return;
+        }
+
+        const filtered = this._warehouseHwItems.filter(item => {
+            const searchStr = [item.name, item.sku, item.color, item.size, item.category].filter(Boolean).join(' ').toLowerCase();
+            return searchStr.includes(query);
+        }).slice(0, 20);
+
+        if (!filtered.length) {
+            dropdown.innerHTML = '<div style="padding:10px;color:var(--text-muted);font-size:12px;">Ничего не найдено</div>';
+            dropdown.style.display = '';
+            return;
+        }
+
+        let html = '';
+        filtered.forEach(item => {
+            const photoSrc = item.photo_thumbnail || item.photo_url || '';
+            const photo = photoSrc
+                ? `<img src="${photoSrc.startsWith('data:') ? photoSrc : this.esc(photoSrc)}" style="width:32px;height:32px;object-fit:cover;border-radius:4px;">`
+                : `<span style="width:32px;height:32px;display:flex;align-items:center;justify-content:center;background:var(--accent-light);border-radius:4px;font-size:12px;">🔩</span>`;
+            const price = item.price_per_unit || 0;
+            const details = [item.size, item.color].filter(Boolean).join(' · ');
+
+            html += `<div style="display:flex;gap:8px;align-items:center;padding:8px 10px;cursor:pointer;border-bottom:1px solid var(--border);"
+                      onmouseover="this.style.background='var(--bg)'" onmouseout="this.style.background=''"
+                      onclick="Molds.selectHwWarehouseItem(${item.id})">
+                ${photo}
+                <div style="flex:1;min-width:0;">
+                    <div style="font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${this.esc(item.name)}</div>
+                    <div style="font-size:10px;color:var(--text-muted);">${details ? details + ' · ' : ''}${formatRub(price)}</div>
+                </div>
+            </div>`;
+        });
+
+        dropdown.innerHTML = html;
+        dropdown.style.display = '';
+    },
+
+    selectHwWarehouseItem(whId) {
+        const item = this._warehouseHwItems.find(w => w.id === whId);
+        if (!item) return;
+
+        const priceRub = item.price_per_unit || 0;
+        const photoUrl = item.photo_thumbnail || item.photo_url || '';
+        const name = item.name + (item.color ? ' ' + item.color : '') + (item.size ? ' ' + item.size : '');
+
+        document.getElementById('hw-blank-wh-search').value = name;
+        document.getElementById('hw-blank-name').value = name;
+        document.getElementById('hw-blank-price-rub').value = priceRub;
+        document.getElementById('hw-blank-photo').value = photoUrl;
+        document.getElementById('hw-blank-wh-id').value = whId;
+        document.getElementById('hw-blank-wh-dropdown').style.display = 'none';
+
+        this._showHwSelectedItem(name, priceRub, photoUrl);
+        this.recalcHwCost();
+    },
+
     recalcHwCost() {
         const el = document.getElementById('hw-cost-breakdown');
         if (!el) return;
         const params = App.params || {};
-        const cnyRate = params.cnyRate || 12.5;
         const fotPerHour = params.fotPerHour || 400;
+        const indirectPerHour = params.indirectPerHour || 0;
 
-        const priceCny = parseFloat(document.getElementById('hw-blank-price-cny').value) || 0;
-        const delivery = parseFloat(document.getElementById('hw-blank-delivery').value) || 0;
+        const priceRub = parseFloat(document.getElementById('hw-blank-price-rub').value) || 0;
         const speed = parseFloat(document.getElementById('hw-blank-speed').value) || 0;
 
-        if (priceCny <= 0 && delivery <= 0) { el.style.display = 'none'; return; }
+        if (priceRub <= 0) { el.style.display = 'none'; return; }
 
-        const materialRub = round2(priceCny * cnyRate);
-        const assemblyCost = speed > 0 ? round2(fotPerHour / speed) : 0;
-        const totalCost = round2(materialRub + delivery + assemblyCost);
+        const fotCost = speed > 0 ? round2(fotPerHour / speed) : 0;
+        const indirectCost = speed > 0 ? round2(indirectPerHour / speed) : 0;
+        const assemblyCost = round2(fotCost + indirectCost);
+        const totalCost = round2(priceRub + assemblyCost);
 
-        let html = `<div style="margin-bottom:8px;font-weight:700;font-size:13px;">Себестоимость 1 шт: ${formatRub(totalCost)}</div>`;
-        html += `<div style="color:var(--text-secondary);line-height:1.8;">`;
-        html += `Материал: ¥${priceCny} × ${cnyRate}₽ = <b>${formatRub(materialRub)}</b><br>`;
-        html += `Доставка: <b>${formatRub(delivery)}</b>/шт<br>`;
+        let html = `<div style="font-weight:700;font-size:13px;margin-bottom:6px;">Себестоимость: ${formatRub(totalCost)}</div>`;
+        html += `<div style="color:var(--text-secondary);font-size:11px;line-height:1.7;">`;
+        html += `Цена со склада: <b>${formatRub(priceRub)}</b> (вкл. доставку)<br>`;
         if (speed > 0) {
-            html += `ФОТ сборки: ${formatRub(fotPerHour)}/ч ÷ ${speed} шт/ч = <b>${formatRub(assemblyCost)}</b>/шт<br>`;
+            html += `ФОТ сборки: ${formatRub(fotPerHour)}/ч ÷ ${speed} шт/ч = <b>${formatRub(fotCost)}</b>/шт<br>`;
+            if (indirectPerHour > 0) {
+                html += `Косвенные: ${formatRub(round2(indirectPerHour))}/ч ÷ ${speed} шт/ч = <b>${formatRub(indirectCost)}</b>/шт<br>`;
+            }
+            html += `Сборка итого: <b>${formatRub(assemblyCost)}</b>/шт`;
         } else {
-            html += `ФОТ сборки: <span style="color:var(--text-muted)">не задана скорость</span><br>`;
+            html += `Сборка: <span style="color:var(--text-muted)">укажите скорость (шт/ч)</span>`;
         }
-        html += `<b>Итого: ${formatRub(materialRub)} + ${formatRub(delivery)} + ${formatRub(assemblyCost)} = ${formatRub(totalCost)}</b>`;
-        html += `</div>`;
-
-        // Show prices at each tier
-        html += `<div style="margin-top:10px;display:flex;flex-wrap:wrap;gap:8px;">`;
-        this.HW_TIERS.forEach(qty => {
-            const margin = this.HW_TIER_MARGINS[qty] || 0.40;
-            const sellPrice = Math.ceil(totalCost / (1 - margin));
-            const marginPct = Math.round(margin * 100);
-            const label = qty >= 1000 ? (qty/1000) + 'K' : qty;
-            html += `<div style="text-align:center;padding:4px 8px;background:var(--card-bg);border-radius:6px;border:1px solid var(--border);">
-                <div style="font-size:10px;color:var(--text-muted);">${label} шт</div>
-                <div style="font-size:14px;font-weight:700;color:var(--green);">${sellPrice}₽</div>
-                <div style="font-size:9px;color:var(--text-muted);">маржа ${marginPct}%</div>
-            </div>`;
-        });
         html += `</div>`;
 
         el.innerHTML = html;
@@ -1049,21 +1118,25 @@ const Molds = {
 
     hideHwForm() {
         document.getElementById('hw-edit-form').style.display = 'none';
+        document.getElementById('hw-blank-wh-dropdown').style.display = 'none';
         this._editingHwId = null;
     },
 
     async saveHwBlank() {
         const name = document.getElementById('hw-blank-name').value.trim();
-        if (!name) { App.toast('Введите название'); return; }
+        if (!name) { App.toast('Выберите позицию со склада'); return; }
 
         const blank = {
             id: this._editingHwId || undefined,
             name,
-            price_cny: parseFloat(document.getElementById('hw-blank-price-cny').value) || 0,
-            delivery_per_unit: parseFloat(document.getElementById('hw-blank-delivery').value) || 0,
+            price_rub: parseFloat(document.getElementById('hw-blank-price-rub').value) || 0,
+            warehouse_item_id: parseInt(document.getElementById('hw-blank-wh-id').value) || null,
             assembly_speed: parseFloat(document.getElementById('hw-blank-speed').value) || 0,
             notes: document.getElementById('hw-blank-notes').value.trim(),
             photo_url: document.getElementById('hw-blank-photo').value.trim(),
+            // Keep legacy fields at 0 for backward compatibility
+            price_cny: 0,
+            delivery_per_unit: 0,
         };
 
         await saveHwBlank(blank);

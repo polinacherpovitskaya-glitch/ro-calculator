@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=46e">
+    <link rel="stylesheet" href="css/style.css?v=46f">
 </head>
 <body>
 
@@ -844,7 +844,7 @@
             <!-- TAB: Фурнитура -->
             <div id="molds-tab-hardware" style="display:none">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-                    <p class="text-muted" style="font-size:12px;margin:0;">Стоковая фурнитура с ценами по тиражам. Цена = (Китай×курс + доставка + ФОТ сборки) / (1 − маржа)</p>
+                    <p class="text-muted" style="font-size:12px;margin:0;">Фурнитура со склада + сборка. Себестоимость = цена склада + (ФОТ + косвенные) / скорость</p>
                     <button class="btn btn-primary btn-sm" onclick="Molds.showHwForm()">+ Новый бланк</button>
                 </div>
                 <div id="hw-blanks-container"></div>
@@ -854,18 +854,37 @@
                         <h3 id="hw-form-title">Новая фурнитура</h3>
                         <button class="btn btn-sm btn-outline" onclick="Molds.hideHwForm()">Закрыть</button>
                     </div>
+                    <!-- Warehouse item selector -->
                     <div class="form-row">
-                        <div class="form-group" style="flex:2"><label>Название</label><input type="text" id="hw-blank-name"></div>
-                        <div class="form-group"><label>Цена Китай (&#165;)</label><input type="number" min="0" step="0.1" id="hw-blank-price-cny" oninput="Molds.recalcHwCost()"></div>
-                        <div class="form-group"><label>Доставка (&#8381;/шт)</label><input type="number" min="0" step="0.1" id="hw-blank-delivery" oninput="Molds.recalcHwCost()"></div>
-                        <div class="form-group"><label>Сборка (шт/ч)</label><input type="number" min="1" id="hw-blank-speed" oninput="Molds.recalcHwCost()"></div>
+                        <div class="form-group" style="flex:3;position:relative;">
+                            <label>Позиция со склада</label>
+                            <input type="text" id="hw-blank-wh-search" placeholder="Поиск по складу..." oninput="Molds.searchHwWarehouse()" onfocus="Molds.searchHwWarehouse()" onblur="setTimeout(()=>document.getElementById('hw-blank-wh-dropdown').style.display='none',200)" autocomplete="off">
+                            <div id="hw-blank-wh-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:100;max-height:250px;overflow-y:auto;background:var(--card-bg);border:1px solid var(--border);border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.15);"></div>
+                        </div>
+                        <div class="form-group" style="flex:1;">
+                            <label>Сборка (шт/ч)</label>
+                            <input type="number" min="1" id="hw-blank-speed" oninput="Molds.recalcHwCost()">
+                        </div>
                     </div>
+                    <!-- Selected item info (hidden fields + preview) -->
+                    <div id="hw-blank-selected" style="display:none;margin-bottom:12px;padding:10px;background:var(--bg);border-radius:8px;display:none;">
+                        <div style="display:flex;gap:12px;align-items:center;">
+                            <img id="hw-blank-photo-preview" src="" style="width:48px;height:48px;object-fit:cover;border-radius:6px;border:1px solid var(--border);display:none;">
+                            <div>
+                                <div id="hw-blank-selected-name" style="font-weight:700;font-size:13px;"></div>
+                                <div id="hw-blank-selected-info" style="font-size:11px;color:var(--text-muted);"></div>
+                            </div>
+                        </div>
+                    </div>
+                    <input type="hidden" id="hw-blank-name">
+                    <input type="hidden" id="hw-blank-price-rub" value="0">
+                    <input type="hidden" id="hw-blank-photo" value="">
+                    <input type="hidden" id="hw-blank-wh-id" value="">
                     <div class="form-row">
-                        <div class="form-group" style="flex:2"><label>Заметки</label><input type="text" id="hw-blank-notes" placeholder="Описание, размер..."></div>
-                        <div class="form-group"><label>Фото URL</label><input type="text" id="hw-blank-photo" placeholder="URL фото"></div>
+                        <div class="form-group" style="flex:2"><label>Заметки</label><input type="text" id="hw-blank-notes" placeholder="Описание, цвет, размер..."></div>
                     </div>
                     <!-- Cost breakdown -->
-                    <div id="hw-cost-breakdown" style="margin-top:12px;padding:12px;background:var(--bg);border-radius:8px;font-size:12px;display:none;"></div>
+                    <div id="hw-cost-breakdown" style="margin-top:8px;padding:12px;background:var(--bg);border-radius:8px;font-size:12px;display:none;"></div>
                     <div style="margin-top:12px;display:flex;gap:8px;">
                         <button class="btn btn-success btn-sm" onclick="Molds.saveHwBlank()">Сохранить</button>
                         <button class="btn btn-outline btn-sm" onclick="Molds.hideHwForm()">Отмена</button>
@@ -2419,25 +2438,25 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="js/supabase.js?v=46e"></script>
-<script src="js/calculator.js?v=46e"></script>
-<script src="js/app.js?v=46e"></script>
-<script src="js/dashboard.js?v=46e"></script>
-<script src="js/order-detail.js?v=46e"></script>
-<script src="js/orders.js?v=46e"></script>
-<script src="js/analytics.js?v=46e"></script>
-<script src="js/molds.js?v=46e"></script>
-<script src="js/colors.js?v=46e"></script>
-<script src="js/kp.js?v=46e"></script>
-<script src="js/timetrack.js?v=46e"></script>
-<script src="js/tasks.js?v=46e"></script>
-<script src="js/gantt.js?v=46e"></script>
-<script src="js/import.js?v=46e"></script>
-<script src="js/factual.js?v=46e"></script>
-<script src="js/china.js?v=46e"></script>
-<script src="js/warehouse_photos.js?v=46e"></script>
-<script src="js/marketplaces.js?v=46e"></script>
-<script src="js/warehouse.js?v=46e"></script>
-<script src="js/settings.js?v=46e"></script>
+<script src="js/supabase.js?v=46f"></script>
+<script src="js/calculator.js?v=46f"></script>
+<script src="js/app.js?v=46f"></script>
+<script src="js/dashboard.js?v=46f"></script>
+<script src="js/order-detail.js?v=46f"></script>
+<script src="js/orders.js?v=46f"></script>
+<script src="js/analytics.js?v=46f"></script>
+<script src="js/molds.js?v=46f"></script>
+<script src="js/colors.js?v=46f"></script>
+<script src="js/kp.js?v=46f"></script>
+<script src="js/timetrack.js?v=46f"></script>
+<script src="js/tasks.js?v=46f"></script>
+<script src="js/gantt.js?v=46f"></script>
+<script src="js/import.js?v=46f"></script>
+<script src="js/factual.js?v=46f"></script>
+<script src="js/china.js?v=46f"></script>
+<script src="js/warehouse_photos.js?v=46f"></script>
+<script src="js/marketplaces.js?v=46f"></script>
+<script src="js/warehouse.js?v=46f"></script>
+<script src="js/settings.js?v=46f"></script>
 </body>
 </html>
