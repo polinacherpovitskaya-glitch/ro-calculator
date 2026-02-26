@@ -1008,55 +1008,205 @@ async function saveVacations(vacations) {
 }
 
 // =============================================
-// WAREHOUSE (Склад фурнитуры)
+// WAREHOUSE (Склад фурнитуры) — Supabase + localStorage
+// v45: Cloud sync between computers
 // =============================================
 
 async function loadWarehouseItems() {
+    if (isSupabaseReady()) {
+        try {
+            const { data, error } = await supabaseClient
+                .from('warehouse_items').select('*').order('name');
+            if (error) { console.error('loadWarehouseItems error:', error); }
+
+            if (data && data.length > 0) {
+                // Restore full data from item_data JSON
+                const items = data.map(row => {
+                    if (row.item_data) {
+                        try {
+                            const parsed = typeof row.item_data === 'string' ? JSON.parse(row.item_data) : row.item_data;
+                            return { ...parsed, id: row.id };
+                        } catch(e) { /* fallthrough */ }
+                    }
+                    return row;
+                });
+                // Update localStorage backup
+                setLocal(LOCAL_KEYS.warehouseItems, items);
+                return items;
+            }
+
+            // One-time migration: localStorage → Supabase
+            const local = getLocal(LOCAL_KEYS.warehouseItems) || [];
+            if (local.length > 0) {
+                console.log('Migrating', local.length, 'warehouse items to Supabase...');
+                for (const item of local) {
+                    try {
+                        await supabaseClient.from('warehouse_items').upsert({
+                            id: item.id || Date.now(),
+                            name: item.name || '',
+                            sku: item.sku || '',
+                            category: item.category || '',
+                            item_data: JSON.stringify(item),
+                            created_at: item.created_at || new Date().toISOString(),
+                            updated_at: item.updated_at || new Date().toISOString(),
+                        }, { onConflict: 'id' });
+                    } catch(e) { console.warn('WH item migration error:', e); }
+                }
+                return local;
+            }
+            return [];
+        } catch(e) {
+            console.error('loadWarehouseItems exception:', e);
+            return getLocal(LOCAL_KEYS.warehouseItems) || [];
+        }
+    }
     return getLocal(LOCAL_KEYS.warehouseItems) || [];
 }
 
 async function saveWarehouseItem(item) {
-    const items = await loadWarehouseItems();
-    if (item.id) {
-        const idx = items.findIndex(i => i.id === item.id);
-        if (idx >= 0) {
-            items[idx] = { ...item, updated_at: new Date().toISOString() };
-        } else {
-            item.updated_at = new Date().toISOString();
-            items.push(item);
-        }
-    } else {
+    if (!item.id) {
         item.id = Date.now();
         item.created_at = new Date().toISOString();
-        item.updated_at = new Date().toISOString();
-        items.push(item);
     }
+    item.updated_at = new Date().toISOString();
+
+    if (isSupabaseReady()) {
+        try {
+            const row = {
+                id: item.id,
+                name: item.name || '',
+                sku: item.sku || '',
+                category: item.category || '',
+                item_data: JSON.stringify(item),
+                created_at: item.created_at || new Date().toISOString(),
+                updated_at: item.updated_at,
+            };
+            const { error } = await supabaseClient
+                .from('warehouse_items').upsert(row, { onConflict: 'id' });
+            if (error) console.error('saveWarehouseItem error:', error);
+        } catch(e) { console.error('saveWarehouseItem exception:', e); }
+    }
+
+    // localStorage backup
+    const items = getLocal(LOCAL_KEYS.warehouseItems) || [];
+    const idx = items.findIndex(i => i.id === item.id);
+    if (idx >= 0) items[idx] = item; else items.push(item);
     setLocal(LOCAL_KEYS.warehouseItems, items);
+
     return item.id;
 }
 
 async function saveWarehouseItems(items) {
+    if (isSupabaseReady()) {
+        try {
+            const rows = items.map(item => ({
+                id: item.id || Date.now(),
+                name: item.name || '',
+                sku: item.sku || '',
+                category: item.category || '',
+                item_data: JSON.stringify(item),
+                created_at: item.created_at || new Date().toISOString(),
+                updated_at: item.updated_at || new Date().toISOString(),
+            }));
+            const { error } = await supabaseClient
+                .from('warehouse_items').upsert(rows, { onConflict: 'id' });
+            if (error) console.error('saveWarehouseItems error:', error);
+        } catch(e) { console.error('saveWarehouseItems exception:', e); }
+    }
     setLocal(LOCAL_KEYS.warehouseItems, items);
 }
 
 async function deleteWarehouseItem(itemId) {
-    const items = (await loadWarehouseItems()).filter(i => i.id !== itemId);
+    if (isSupabaseReady()) {
+        try {
+            const { error } = await supabaseClient
+                .from('warehouse_items').delete().eq('id', itemId);
+            if (error) console.error('deleteWarehouseItem error:', error);
+        } catch(e) { console.error('deleteWarehouseItem exception:', e); }
+    }
+    const items = (getLocal(LOCAL_KEYS.warehouseItems) || []).filter(i => i.id !== itemId);
     setLocal(LOCAL_KEYS.warehouseItems, items);
 }
 
 async function loadWarehouseReservations() {
+    if (isSupabaseReady()) {
+        try {
+            const { data } = await supabaseClient
+                .from('warehouse_reservations').select('*').eq('id', 1).maybeSingle();
+            if (data && data.reservations_data) {
+                const parsed = typeof data.reservations_data === 'string'
+                    ? JSON.parse(data.reservations_data) : data.reservations_data;
+                setLocal(LOCAL_KEYS.warehouseReservations, parsed);
+                return parsed;
+            }
+            // Migration
+            const local = getLocal(LOCAL_KEYS.warehouseReservations) || [];
+            if (local.length > 0) {
+                console.log('Migrating warehouse reservations to Supabase...');
+                await supabaseClient.from('warehouse_reservations').upsert({
+                    id: 1, reservations_data: JSON.stringify(local), updated_at: new Date().toISOString()
+                }, { onConflict: 'id' });
+                return local;
+            }
+            return [];
+        } catch(e) {
+            console.error('loadWarehouseReservations exception:', e);
+            return getLocal(LOCAL_KEYS.warehouseReservations) || [];
+        }
+    }
     return getLocal(LOCAL_KEYS.warehouseReservations) || [];
 }
 
 async function saveWarehouseReservations(reservations) {
+    if (isSupabaseReady()) {
+        try {
+            const { error } = await supabaseClient.from('warehouse_reservations').upsert({
+                id: 1, reservations_data: JSON.stringify(reservations), updated_at: new Date().toISOString()
+            }, { onConflict: 'id' });
+            if (error) console.error('saveWarehouseReservations error:', error);
+        } catch(e) { console.error('saveWarehouseReservations exception:', e); }
+    }
     setLocal(LOCAL_KEYS.warehouseReservations, reservations);
 }
 
 async function loadWarehouseHistory() {
+    if (isSupabaseReady()) {
+        try {
+            const { data } = await supabaseClient
+                .from('warehouse_history').select('*').eq('id', 1).maybeSingle();
+            if (data && data.history_data) {
+                const parsed = typeof data.history_data === 'string'
+                    ? JSON.parse(data.history_data) : data.history_data;
+                setLocal(LOCAL_KEYS.warehouseHistory, parsed);
+                return parsed;
+            }
+            // Migration
+            const local = getLocal(LOCAL_KEYS.warehouseHistory) || [];
+            if (local.length > 0) {
+                console.log('Migrating warehouse history to Supabase...');
+                await supabaseClient.from('warehouse_history').upsert({
+                    id: 1, history_data: JSON.stringify(local), created_at: new Date().toISOString()
+                }, { onConflict: 'id' });
+                return local;
+            }
+            return [];
+        } catch(e) {
+            console.error('loadWarehouseHistory exception:', e);
+            return getLocal(LOCAL_KEYS.warehouseHistory) || [];
+        }
+    }
     return getLocal(LOCAL_KEYS.warehouseHistory) || [];
 }
 
 async function saveWarehouseHistory(history) {
+    if (isSupabaseReady()) {
+        try {
+            const { error } = await supabaseClient.from('warehouse_history').upsert({
+                id: 1, history_data: JSON.stringify(history), created_at: new Date().toISOString()
+            }, { onConflict: 'id' });
+            if (error) console.error('saveWarehouseHistory error:', error);
+        } catch(e) { console.error('saveWarehouseHistory exception:', e); }
+    }
     setLocal(LOCAL_KEYS.warehouseHistory, history);
 }
 
