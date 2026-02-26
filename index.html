@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=46c">
+    <link rel="stylesheet" href="css/style.css?v=46d">
 </head>
 <body>
 
@@ -842,26 +842,28 @@
             <div id="molds-tab-hardware" style="display:none">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
                     <p class="text-muted" style="font-size:12px;margin:0;">Стоковая фурнитура с ценами по тиражам. Цена = (Китай×курс + доставка + ФОТ сборки) / (1 − маржа)</p>
-                    <button class="btn btn-primary btn-sm" onclick="Molds.showHwForm()">+ Добавить</button>
+                    <button class="btn btn-primary btn-sm" onclick="Molds.showHwForm()">+ Новый бланк</button>
                 </div>
                 <div id="hw-blanks-container"></div>
                 <!-- HW edit form -->
-                <div class="card" id="hw-edit-form" style="display:none;margin-top:12px;">
-                    <div class="card-header">
+                <div class="card" id="hw-edit-form" style="display:none;margin-top:12px;padding:20px;">
+                    <div class="card-header" style="padding:0 0 12px 0;">
                         <h3 id="hw-form-title">Новая фурнитура</h3>
                         <button class="btn btn-sm btn-outline" onclick="Molds.hideHwForm()">Закрыть</button>
                     </div>
                     <div class="form-row">
                         <div class="form-group" style="flex:2"><label>Название</label><input type="text" id="hw-blank-name"></div>
-                        <div class="form-group"><label>Цена Китай (&#165;)</label><input type="number" min="0" step="0.1" id="hw-blank-price-cny"></div>
-                        <div class="form-group"><label>Доставка (&#8381;/шт)</label><input type="number" min="0" step="0.1" id="hw-blank-delivery"></div>
-                        <div class="form-group"><label>Сборка (шт/ч)</label><input type="number" min="1" id="hw-blank-speed"></div>
+                        <div class="form-group"><label>Цена Китай (&#165;)</label><input type="number" min="0" step="0.1" id="hw-blank-price-cny" oninput="Molds.recalcHwCost()"></div>
+                        <div class="form-group"><label>Доставка (&#8381;/шт)</label><input type="number" min="0" step="0.1" id="hw-blank-delivery" oninput="Molds.recalcHwCost()"></div>
+                        <div class="form-group"><label>Сборка (шт/ч)</label><input type="number" min="1" id="hw-blank-speed" oninput="Molds.recalcHwCost()"></div>
                     </div>
                     <div class="form-row">
                         <div class="form-group" style="flex:2"><label>Заметки</label><input type="text" id="hw-blank-notes" placeholder="Описание, размер..."></div>
                         <div class="form-group"><label>Фото URL</label><input type="text" id="hw-blank-photo" placeholder="URL фото"></div>
                     </div>
-                    <div style="margin-top:8px;display:flex;gap:8px;">
+                    <!-- Cost breakdown -->
+                    <div id="hw-cost-breakdown" style="margin-top:12px;padding:12px;background:var(--bg);border-radius:8px;font-size:12px;display:none;"></div>
+                    <div style="margin-top:12px;display:flex;gap:8px;">
                         <button class="btn btn-success btn-sm" onclick="Molds.saveHwBlank()">Сохранить</button>
                         <button class="btn btn-outline btn-sm" onclick="Molds.hideHwForm()">Отмена</button>
                         <button class="btn btn-danger btn-sm" id="hw-delete-btn" style="margin-left:auto;display:none;" onclick="Molds.deleteHwBlank()">Удалить</button>
@@ -873,25 +875,27 @@
             <div id="molds-tab-packaging" style="display:none">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
                     <p class="text-muted" style="font-size:12px;margin:0;">Упаковка: стоимость + доставка. Без сборки, без ФОТ, без косвенных.</p>
-                    <button class="btn btn-primary btn-sm" onclick="Molds.showPkgForm()">+ Добавить</button>
+                    <button class="btn btn-primary btn-sm" onclick="Molds.showPkgForm()">+ Новый бланк</button>
                 </div>
                 <div id="pkg-blanks-container"></div>
                 <!-- PKG edit form -->
-                <div class="card" id="pkg-edit-form" style="display:none;margin-top:12px;">
-                    <div class="card-header">
+                <div class="card" id="pkg-edit-form" style="display:none;margin-top:12px;padding:20px;">
+                    <div class="card-header" style="padding:0 0 12px 0;">
                         <h3 id="pkg-form-title">Новая упаковка</h3>
                         <button class="btn btn-sm btn-outline" onclick="Molds.hidePkgForm()">Закрыть</button>
                     </div>
                     <div class="form-row">
                         <div class="form-group" style="flex:2"><label>Название</label><input type="text" id="pkg-blank-name"></div>
-                        <div class="form-group"><label>Стоимость (&#8381;/шт)</label><input type="number" min="0" step="0.1" id="pkg-blank-price"></div>
-                        <div class="form-group"><label>Доставка (&#8381;/шт)</label><input type="number" min="0" step="0.1" id="pkg-blank-delivery"></div>
+                        <div class="form-group"><label>Стоимость (&#8381;/шт)</label><input type="number" min="0" step="0.1" id="pkg-blank-price" oninput="Molds.recalcPkgCost()"></div>
+                        <div class="form-group"><label>Доставка (&#8381;/шт)</label><input type="number" min="0" step="0.1" id="pkg-blank-delivery" oninput="Molds.recalcPkgCost()"></div>
                     </div>
                     <div class="form-row">
                         <div class="form-group" style="flex:2"><label>Заметки</label><input type="text" id="pkg-blank-notes" placeholder="Размер, описание..."></div>
                         <div class="form-group"><label>Фото URL</label><input type="text" id="pkg-blank-photo" placeholder="URL фото"></div>
                     </div>
-                    <div style="margin-top:8px;display:flex;gap:8px;">
+                    <!-- Cost breakdown -->
+                    <div id="pkg-cost-breakdown" style="margin-top:12px;padding:12px;background:var(--bg);border-radius:8px;font-size:12px;display:none;"></div>
+                    <div style="margin-top:12px;display:flex;gap:8px;">
                         <button class="btn btn-success btn-sm" onclick="Molds.savePkgBlank()">Сохранить</button>
                         <button class="btn btn-outline btn-sm" onclick="Molds.hidePkgForm()">Отмена</button>
                         <button class="btn btn-danger btn-sm" id="pkg-delete-btn" style="margin-left:auto;display:none;" onclick="Molds.deletePkgBlank()">Удалить</button>
@@ -2412,25 +2416,25 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="js/supabase.js?v=46c"></script>
-<script src="js/calculator.js?v=46c"></script>
-<script src="js/app.js?v=46c"></script>
-<script src="js/dashboard.js?v=46c"></script>
-<script src="js/order-detail.js?v=46c"></script>
-<script src="js/orders.js?v=46c"></script>
-<script src="js/analytics.js?v=46c"></script>
-<script src="js/molds.js?v=46c"></script>
-<script src="js/colors.js?v=46c"></script>
-<script src="js/kp.js?v=46c"></script>
-<script src="js/timetrack.js?v=46c"></script>
-<script src="js/tasks.js?v=46c"></script>
-<script src="js/gantt.js?v=46c"></script>
-<script src="js/import.js?v=46c"></script>
-<script src="js/factual.js?v=46c"></script>
-<script src="js/china.js?v=46c"></script>
-<script src="js/warehouse_photos.js?v=46c"></script>
-<script src="js/marketplaces.js?v=46c"></script>
-<script src="js/warehouse.js?v=46c"></script>
-<script src="js/settings.js?v=46c"></script>
+<script src="js/supabase.js?v=46d"></script>
+<script src="js/calculator.js?v=46d"></script>
+<script src="js/app.js?v=46d"></script>
+<script src="js/dashboard.js?v=46d"></script>
+<script src="js/order-detail.js?v=46d"></script>
+<script src="js/orders.js?v=46d"></script>
+<script src="js/analytics.js?v=46d"></script>
+<script src="js/molds.js?v=46d"></script>
+<script src="js/colors.js?v=46d"></script>
+<script src="js/kp.js?v=46d"></script>
+<script src="js/timetrack.js?v=46d"></script>
+<script src="js/tasks.js?v=46d"></script>
+<script src="js/gantt.js?v=46d"></script>
+<script src="js/import.js?v=46d"></script>
+<script src="js/factual.js?v=46d"></script>
+<script src="js/china.js?v=46d"></script>
+<script src="js/warehouse_photos.js?v=46d"></script>
+<script src="js/marketplaces.js?v=46d"></script>
+<script src="js/warehouse.js?v=46d"></script>
+<script src="js/settings.js?v=46d"></script>
 </body>
 </html>

@@ -978,6 +978,8 @@ const Molds = {
         });
         document.getElementById('hw-delete-btn').style.display = 'none';
         document.getElementById('hw-edit-form').style.display = '';
+        this.recalcHwCost();
+        document.getElementById('hw-edit-form').scrollIntoView({ behavior: 'smooth' });
     },
 
     editHwBlank(id) {
@@ -993,6 +995,56 @@ const Molds = {
         document.getElementById('hw-blank-photo').value = b.photo_url || '';
         document.getElementById('hw-delete-btn').style.display = '';
         document.getElementById('hw-edit-form').style.display = '';
+        this.recalcHwCost();
+        document.getElementById('hw-edit-form').scrollIntoView({ behavior: 'smooth' });
+    },
+
+    recalcHwCost() {
+        const el = document.getElementById('hw-cost-breakdown');
+        if (!el) return;
+        const params = App.params || {};
+        const cnyRate = params.cnyRate || 12.5;
+        const fotPerHour = params.fotPerHour || 400;
+
+        const priceCny = parseFloat(document.getElementById('hw-blank-price-cny').value) || 0;
+        const delivery = parseFloat(document.getElementById('hw-blank-delivery').value) || 0;
+        const speed = parseFloat(document.getElementById('hw-blank-speed').value) || 0;
+
+        if (priceCny <= 0 && delivery <= 0) { el.style.display = 'none'; return; }
+
+        const materialRub = round2(priceCny * cnyRate);
+        const assemblyCost = speed > 0 ? round2(fotPerHour / speed) : 0;
+        const totalCost = round2(materialRub + delivery + assemblyCost);
+
+        let html = `<div style="margin-bottom:8px;font-weight:700;font-size:13px;">Себестоимость 1 шт: ${formatRub(totalCost)}</div>`;
+        html += `<div style="color:var(--text-secondary);line-height:1.8;">`;
+        html += `Материал: ¥${priceCny} × ${cnyRate}₽ = <b>${formatRub(materialRub)}</b><br>`;
+        html += `Доставка: <b>${formatRub(delivery)}</b>/шт<br>`;
+        if (speed > 0) {
+            html += `ФОТ сборки: ${formatRub(fotPerHour)}/ч ÷ ${speed} шт/ч = <b>${formatRub(assemblyCost)}</b>/шт<br>`;
+        } else {
+            html += `ФОТ сборки: <span style="color:var(--text-muted)">не задана скорость</span><br>`;
+        }
+        html += `<b>Итого: ${formatRub(materialRub)} + ${formatRub(delivery)} + ${formatRub(assemblyCost)} = ${formatRub(totalCost)}</b>`;
+        html += `</div>`;
+
+        // Show prices at each tier
+        html += `<div style="margin-top:10px;display:flex;flex-wrap:wrap;gap:8px;">`;
+        this.HW_TIERS.forEach(qty => {
+            const margin = this.HW_TIER_MARGINS[qty] || 0.40;
+            const sellPrice = Math.ceil(totalCost / (1 - margin));
+            const marginPct = Math.round(margin * 100);
+            const label = qty >= 1000 ? (qty/1000) + 'K' : qty;
+            html += `<div style="text-align:center;padding:4px 8px;background:var(--card-bg);border-radius:6px;border:1px solid var(--border);">
+                <div style="font-size:10px;color:var(--text-muted);">${label} шт</div>
+                <div style="font-size:14px;font-weight:700;color:var(--green);">${sellPrice}₽</div>
+                <div style="font-size:9px;color:var(--text-muted);">маржа ${marginPct}%</div>
+            </div>`;
+        });
+        html += `</div>`;
+
+        el.innerHTML = html;
+        el.style.display = '';
     },
 
     hideHwForm() {
@@ -1145,6 +1197,8 @@ const Molds = {
         });
         document.getElementById('pkg-delete-btn').style.display = 'none';
         document.getElementById('pkg-edit-form').style.display = '';
+        this.recalcPkgCost();
+        document.getElementById('pkg-edit-form').scrollIntoView({ behavior: 'smooth' });
     },
 
     editPkgBlank(id) {
@@ -1159,6 +1213,44 @@ const Molds = {
         document.getElementById('pkg-blank-photo').value = b.photo_url || '';
         document.getElementById('pkg-delete-btn').style.display = '';
         document.getElementById('pkg-edit-form').style.display = '';
+        this.recalcPkgCost();
+        document.getElementById('pkg-edit-form').scrollIntoView({ behavior: 'smooth' });
+    },
+
+    recalcPkgCost() {
+        const el = document.getElementById('pkg-cost-breakdown');
+        if (!el) return;
+
+        const price = parseFloat(document.getElementById('pkg-blank-price').value) || 0;
+        const delivery = parseFloat(document.getElementById('pkg-blank-delivery').value) || 0;
+
+        if (price <= 0 && delivery <= 0) { el.style.display = 'none'; return; }
+
+        const totalCost = round2(price + delivery);
+
+        let html = `<div style="margin-bottom:8px;font-weight:700;font-size:13px;">Себестоимость 1 шт: ${formatRub(totalCost)}</div>`;
+        html += `<div style="color:var(--text-secondary);line-height:1.8;">`;
+        html += `Стоимость: <b>${formatRub(price)}</b>/шт + Доставка: <b>${formatRub(delivery)}</b>/шт = <b>${formatRub(totalCost)}</b>`;
+        html += `<br><span style="font-size:11px;color:var(--text-muted);">Без ФОТ сборки, без косвенных расходов</span>`;
+        html += `</div>`;
+
+        // Show prices at each tier
+        html += `<div style="margin-top:10px;display:flex;flex-wrap:wrap;gap:8px;">`;
+        this.HW_TIERS.forEach(qty => {
+            const margin = this.HW_TIER_MARGINS[qty] || 0.40;
+            const sellPrice = Math.ceil(totalCost / (1 - margin));
+            const marginPct = Math.round(margin * 100);
+            const label = qty >= 1000 ? (qty/1000) + 'K' : qty;
+            html += `<div style="text-align:center;padding:4px 8px;background:var(--card-bg);border-radius:6px;border:1px solid var(--border);">
+                <div style="font-size:10px;color:var(--text-muted);">${label} шт</div>
+                <div style="font-size:14px;font-weight:700;color:var(--green);">${sellPrice}₽</div>
+                <div style="font-size:9px;color:var(--text-muted);">маржа ${marginPct}%</div>
+            </div>`;
+        });
+        html += `</div>`;
+
+        el.innerHTML = html;
+        el.style.display = '';
     },
 
     hidePkgForm() {
