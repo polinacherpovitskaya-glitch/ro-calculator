@@ -655,12 +655,40 @@ const Warehouse = {
     // INLINE EDITING (directly in table)
     // ==========================================
 
+    // Visual feedback: flash green + toast
+    _inlineSaved(inputEl) {
+        // Green flash on the input
+        if (inputEl) {
+            inputEl.style.transition = 'background 0.2s';
+            inputEl.style.background = '#bbf7d0';
+            setTimeout(() => { inputEl.style.background = ''; }, 900);
+        }
+        // Toast notification
+        this._showSaveToast();
+    },
+
+    _showSaveToast() {
+        let toast = document.getElementById('wh-save-toast');
+        if (!toast) {
+            toast = document.createElement('div');
+            toast.id = 'wh-save-toast';
+            toast.style.cssText = 'position:fixed;bottom:24px;right:24px;background:#16a34a;color:#fff;padding:8px 18px;border-radius:8px;font-size:14px;font-weight:600;z-index:9999;opacity:0;transition:opacity 0.3s;pointer-events:none;box-shadow:0 4px 12px rgba(0,0,0,0.15)';
+            document.body.appendChild(toast);
+        }
+        toast.textContent = '✓ Сохранено в облако';
+        toast.style.opacity = '1';
+        clearTimeout(this._toastTimer);
+        this._toastTimer = setTimeout(() => { toast.style.opacity = '0'; }, 2000);
+    },
+
     async inlineQty(itemId, newValueStr, oldQty) {
         const newQty = Math.max(0, parseInt(newValueStr) || 0);
         const delta = newQty - (oldQty || 0);
         if (delta === 0) return;
 
+        const inputEl = document.activeElement;
         await this.adjustStock(itemId, delta, delta > 0 ? 'addition' : 'deduction', '', 'Ручная правка', '');
+        this._inlineSaved(inputEl);
         await this.load();
     },
 
@@ -670,9 +698,11 @@ const Warehouse = {
         const newPrice = Math.max(0, parseFloat(newValueStr) || 0);
         if (newPrice === (item.price_per_unit || 0)) return;
 
+        const inputEl = document.activeElement;
         item.price_per_unit = newPrice;
         item.updated_at = new Date().toISOString();
         await saveWarehouseItem(item);
+        this._inlineSaved(inputEl);
         await this.load();
     },
 
@@ -681,9 +711,11 @@ const Warehouse = {
         if (!item) return;
         if (newColor === (item.color || '')) return;
 
+        const inputEl = document.activeElement;
         item.color = newColor;
         item.updated_at = new Date().toISOString();
         await saveWarehouseItem(item);
+        this._inlineSaved(inputEl);
         await this.load();
     },
 
@@ -697,6 +729,7 @@ const Warehouse = {
         const diff = clampedReserve - (oldReserved || 0);
         if (diff === 0) return;
 
+        const inputEl = document.activeElement;
         const reservations = await loadWarehouseReservations();
 
         if (diff > 0) {
@@ -737,6 +770,7 @@ const Warehouse = {
         }
 
         await saveWarehouseReservations(reservations);
+        this._inlineSaved(inputEl);
         await this.load();
     },
 
