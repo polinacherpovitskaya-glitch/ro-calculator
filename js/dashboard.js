@@ -1,7 +1,9 @@
 // =============================================
 // Recycle Object — Dashboard (Main Page)
-// v40f: KPI stats + drafts cards + active orders
+// v44b: KPI stats + drafts cards + active orders (new statuses)
 // =============================================
+
+const DASH_LOAD_STATUSES = ['sample','production_casting','production_hardware','production_packaging','delivery','in_production'];
 
 const Dashboard = {
     async load() {
@@ -15,7 +17,7 @@ const Dashboard = {
     },
 
     renderStats(orders) {
-        const active = orders.filter(o => o.status === 'in_production' || o.status === 'calculated');
+        const active = orders.filter(o => DASH_LOAD_STATUSES.includes(o.status));
         document.getElementById('dash-orders-active').textContent = active.length;
 
         let totalPlasticHours = 0;
@@ -23,11 +25,11 @@ const Dashboard = {
         let totalRevenue = 0;
 
         orders.forEach(o => {
-            if (o.status === 'in_production' || o.status === 'calculated') {
+            if (DASH_LOAD_STATUSES.includes(o.status)) {
                 totalPlasticHours += o.production_hours_plastic || 0;
                 totalPackagingHours += (o.production_hours_packaging || 0) + (o.production_hours_hardware || 0);
             }
-            if (o.status !== 'cancelled') {
+            if (!['draft','calculated','cancelled','deleted'].includes(o.status)) {
                 totalRevenue += o.total_revenue_plan || 0;
             }
         });
@@ -55,8 +57,8 @@ const Dashboard = {
     },
 
     renderSections(orders) {
-        const drafts = orders.filter(o => o.status === 'draft');
-        const active = orders.filter(o => o.status === 'calculated' || o.status === 'in_production');
+        const drafts = orders.filter(o => o.status === 'draft' || o.status === 'calculated');
+        const active = orders.filter(o => DASH_LOAD_STATUSES.includes(o.status));
 
         const draftsSection = document.getElementById('dash-drafts-section');
         const activeSection = document.getElementById('dash-active-section');
@@ -76,7 +78,10 @@ const Dashboard = {
         if (active.length > 0) {
             activeSection.style.display = '';
             document.getElementById('dash-active-list').innerHTML =
-                active.slice(0, 6).map(o => this.renderCard(o, o.status === 'in_production' ? '#f59e0b' : '#2563eb')).join('')
+                active.slice(0, 6).map(o => {
+                    const colors = { sample: '#3b82f6', production_casting: '#f59e0b', production_hardware: '#f59e0b', production_packaging: '#f59e0b', in_production: '#f59e0b', delivery: '#8b5cf6' };
+                    return this.renderCard(o, colors[o.status] || '#2563eb');
+                }).join('')
                 + (active.length > 6 ? `<div class="dash-card dash-card-more" onclick="App.navigate('orders')"><span>+${active.length - 6} ещё</span></div>` : '');
         } else {
             activeSection.style.display = 'none';

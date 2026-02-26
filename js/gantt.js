@@ -1,6 +1,6 @@
 // =============================================
 // Recycle Object — Production Calendar
-// v42: Resource-based schedule with phase bars + capacity chart
+// v44b: Resource-based schedule with phase bars + capacity chart (new statuses)
 // =============================================
 
 const Gantt = {
@@ -12,8 +12,9 @@ const Gantt = {
         try {
             const allOrders = await loadOrders({});
             // Only schedulable orders with production hours
+            const GANTT_STATUSES = ['sample','production_casting','production_hardware','production_packaging','delivery','in_production'];
             this.orders = allOrders.filter(o =>
-                (o.status === 'in_production' || o.status === 'calculated' || o.status === 'draft')
+                GANTT_STATUSES.includes(o.status)
                 && ((o.production_hours_plastic || 0) + (o.production_hours_packaging || 0) + (o.production_hours_hardware || 0) > 0)
             );
             // Build schedule
@@ -95,9 +96,8 @@ const Gantt = {
         // Sidebar
         const sidebarRows = activeQueue.map(q => {
             const totalH = formatHours(q.totalHours);
-            const statusBadge = q.status === 'in_production' ? '<span style="color:#f59e0b">&#9679;</span>'
-                : q.status === 'calculated' ? '<span style="color:#2563eb">&#9679;</span>'
-                : '<span style="color:#6b7280">&#9679;</span>';
+            const badgeColors = { production_casting: '#f59e0b', production_hardware: '#f59e0b', production_packaging: '#f59e0b', in_production: '#f59e0b', sample: '#3b82f6', delivery: '#8b5cf6' };
+            const statusBadge = `<span style="color:${badgeColors[q.status] || '#6b7280'}">&#9679;</span>`;
             return `
                 <div class="gantt-sidebar-row" title="${this.esc(q.orderName)}" onclick="Calculator.loadOrder(${q.orderId})" style="cursor:pointer">
                     <div class="gantt-order-name">${statusBadge} ${this.esc(this.shortName(q.orderName))}</div>
@@ -171,21 +171,21 @@ const Gantt = {
             const left = i * cellWidth;
             const barW = Math.max(cellWidth - 2, 4);
 
-            // Stacked: molding (bottom) → packaging → assembly (top)
+            // Stacked: molding (bottom) → assembly → packaging (top)
             const moldPx = (moldingH / maxH) * chartH;
-            const packPx = (packagingH / maxH) * chartH;
             const asmPx = (assemblyH / maxH) * chartH;
+            const packPx = (packagingH / maxH) * chartH;
 
             barsHtml += `<div class="gantt-cap-day" style="left:${left}px;width:${barW}px;height:${chartH}px" title="${this.formatDateStr(dateStr)}: ${round2(total)}ч / ${dailyCapacity}ч">`;
 
             if (moldingH > 0) {
                 barsHtml += `<div class="gantt-cap-seg" style="height:${moldPx}px;background:#f59e0b;bottom:0"></div>`;
             }
-            if (packagingH > 0) {
-                barsHtml += `<div class="gantt-cap-seg" style="height:${packPx}px;background:#8b5cf6;bottom:${moldPx}px"></div>`;
-            }
             if (assemblyH > 0) {
-                barsHtml += `<div class="gantt-cap-seg" style="height:${asmPx}px;background:#06b6d4;bottom:${moldPx + packPx}px"></div>`;
+                barsHtml += `<div class="gantt-cap-seg" style="height:${asmPx}px;background:#06b6d4;bottom:${moldPx}px"></div>`;
+            }
+            if (packagingH > 0) {
+                barsHtml += `<div class="gantt-cap-seg" style="height:${packPx}px;background:#8b5cf6;bottom:${moldPx + asmPx}px"></div>`;
             }
 
             if (overload) {

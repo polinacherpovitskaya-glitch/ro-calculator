@@ -568,13 +568,12 @@ function buildProductionSchedule(orders, settings) {
     const hoursPerDay = 8;
     const dailyCapacity = round2(workersCount * hoursPerDay);
 
-    // Filter schedulable orders (not cancelled/completed/deleted)
-    const schedulable = orders.filter(o =>
-        o.status === 'in_production' || o.status === 'calculated' || o.status === 'draft'
-    );
+    // Filter schedulable orders: only past-draft statuses (sample, production, delivery)
+    const SCHEDULE_STATUSES = ['sample','production_casting','production_hardware','production_packaging','delivery','in_production'];
+    const schedulable = orders.filter(o => SCHEDULE_STATUSES.includes(o.status));
 
-    // Priority: in_production > calculated > draft, then by deadline_end ASC
-    const statusPriority = { in_production: 0, calculated: 1, draft: 2 };
+    // Priority: production > delivery > sample, then by deadline_end ASC
+    const statusPriority = { production_casting: 0, production_hardware: 0, production_packaging: 0, in_production: 0, delivery: 1, sample: 2 };
     schedulable.sort((a, b) => {
         const pa = statusPriority[a.status] ?? 3;
         const pb = statusPriority[b.status] ?? 3;
@@ -593,8 +592,8 @@ function buildProductionSchedule(orders, settings) {
         deadlineEnd: o.deadline_end || null,
         phases: [
             { name: 'molding', label: 'Литьё', remaining: o.production_hours_plastic || 0, total: o.production_hours_plastic || 0, color: '#f59e0b' },
-            { name: 'packaging', label: 'Упаковка', remaining: o.production_hours_packaging || 0, total: o.production_hours_packaging || 0, color: '#8b5cf6' },
             { name: 'assembly', label: 'Сборка', remaining: o.production_hours_hardware || 0, total: o.production_hours_hardware || 0, color: '#06b6d4' },
+            { name: 'packaging', label: 'Упаковка', remaining: o.production_hours_packaging || 0, total: o.production_hours_packaging || 0, color: '#8b5cf6' },
         ],
         currentPhaseIdx: 0,
         schedule: [], // [{ date, phase, hours }]
