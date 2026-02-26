@@ -66,59 +66,49 @@ const Marketplaces = {
             return;
         }
 
-        let html = `<div class="card" style="padding:12px;overflow-x:auto;">
-            <table style="font-size:12px;white-space:nowrap;border-collapse:collapse;width:100%;">
-            <thead><tr>
-                <th style="width:50px;padding:6px;"></th>
-                <th style="min-width:200px;padding:6px 8px;text-align:left;">Набор</th>
-                <th style="padding:6px 8px;text-align:right;">Себестоимость</th>
-                <th style="padding:6px 8px;text-align:right;">Цена МП</th>
-                <th style="padding:6px 8px;text-align:right;">Маржа</th>
-                <th style="padding:6px 8px;text-align:right;">×</th>
-                <th style="width:60px;"></th>
-            </tr></thead><tbody>`;
-
+        let html = '';
         this.allSets.forEach(s => {
-            const cost = s.total_cost || 0;
+            const bd = this._calcSetBreakdown(s);
+            const cost = bd.totalCost;
             const price = s.selling_price || 0;
-            const margin = s.actual_margin || 0;
-            const mult = cost > 0 ? round2(price / cost) : 0;
 
-            // Net profit (чистыми) after all deductions
-            const afterAll = price > 0 ? round2(price * (1 - (s.commission||46)/100) * (1 - (s.vat||5)/100) * (1 - (s.osn||6)/100) * (1 - (s.commercial||6.5)/100)) : 0;
-            const netProfit = round2(afterAll - cost);
-            const netProfitPct = afterAll > 0 ? Math.round(netProfit / afterAll * 100) : 0;
-
-            // Summarize composition
+            // Composition
             const parts = [];
             (s.plastic_items || []).forEach(i => parts.push(i.name || 'Пластик'));
             (s.hw_items || []).forEach(i => parts.push(i.name || 'Фурнитура'));
             (s.pkg_items || []).forEach(i => parts.push(i.name || 'Упаковка'));
 
             const photo = s.photo_url
-                ? `<img src="${this._esc(s.photo_url)}" style="width:44px;height:44px;object-fit:cover;border-radius:6px;border:1px solid var(--border);" onerror="this.style.display='none'">`
-                : `<span style="width:44px;height:44px;display:flex;align-items:center;justify-content:center;background:var(--accent-light);border-radius:6px;font-size:18px;font-weight:700;color:var(--accent);">${(s.name||'?')[0].toUpperCase()}</span>`;
+                ? `<img src="${this._esc(s.photo_url)}" style="width:80px;height:80px;object-fit:cover;border-radius:10px;border:1px solid var(--border);" onerror="this.style.display='none'">`
+                : `<span style="width:80px;height:80px;display:flex;align-items:center;justify-content:center;background:var(--accent-light);border-radius:10px;font-size:28px;font-weight:700;color:var(--accent);">${(s.name||'?')[0].toUpperCase()}</span>`;
 
-            html += `<tr style="border-bottom:1px solid var(--border);">
-                <td style="padding:6px;">${photo}</td>
-                <td style="padding:6px 8px;">
-                    <div style="font-weight:700;font-size:13px;">${this._esc(s.name || 'Набор')}</div>
-                    <div style="font-size:10px;color:var(--text-muted);white-space:normal;max-width:300px;line-height:1.3;">${parts.join(' + ')}</div>
-                </td>
-                <td style="padding:6px 8px;text-align:right;font-size:13px;color:var(--text-secondary);">${formatRub(cost)}</td>
-                <td style="padding:6px 8px;text-align:right;font-size:16px;font-weight:800;color:var(--green);">${formatRub(price)}</td>
-                <td style="padding:6px 8px;text-align:right;font-size:12px;">${Math.round(margin)}% <span style="font-size:10px;color:var(--text-muted);">${netProfitPct}% чист.</span></td>
-                <td style="padding:6px 8px;text-align:right;font-size:12px;color:var(--text-muted);">×${mult}</td>
-                <td style="padding:6px;">
-                    <div style="display:flex;gap:4px;">
-                        <button class="btn btn-sm btn-outline" style="padding:2px 6px;font-size:10px;" onclick="Marketplaces.editSet(${s.id})">&#9998;</button>
-                        <button class="btn-remove" style="font-size:9px;width:24px;height:24px;" onclick="Marketplaces.confirmDelete(${s.id}, '${this._esc(s.name)}')">&#10005;</button>
+            // Cost breakdown lines
+            const breakdownParts = [];
+            if (bd.plasticCost > 0) breakdownParts.push('Пластик ' + formatRub(bd.plasticCost));
+            if (bd.hwCost > 0) breakdownParts.push('Фурнитура ' + formatRub(bd.hwCost));
+            if (bd.pkgCost > 0) breakdownParts.push('Упаковка ' + formatRub(bd.pkgCost));
+
+            html += `<div class="card" style="padding:14px;margin-bottom:8px;display:flex;align-items:center;gap:14px;">
+                <div style="flex-shrink:0;">${photo}</div>
+                <div style="flex:1;min-width:0;">
+                    <div style="font-weight:700;font-size:15px;margin-bottom:2px;">${this._esc(s.name || 'Набор')}</div>
+                    <div style="font-size:11px;color:var(--text-muted);line-height:1.3;margin-bottom:6px;">${parts.join(' + ')}</div>
+                    <div style="font-size:12px;color:var(--text-secondary);">
+                        <span style="font-weight:600;">Себестоимость: ${formatRub(cost)}</span>
                     </div>
-                </td>
-            </tr>`;
+                    ${breakdownParts.length > 0 ? `<div style="font-size:10px;color:var(--text-muted);margin-top:2px;line-height:1.4;">${breakdownParts.join(' · ')}</div>` : ''}
+                </div>
+                <div style="text-align:right;flex-shrink:0;">
+                    <div style="font-size:24px;font-weight:800;color:var(--green);line-height:1;">${formatRub(price)}</div>
+                    <div style="font-size:10px;color:var(--text-muted);margin-top:3px;">цена МП</div>
+                </div>
+                <div style="flex-shrink:0;display:flex;flex-direction:column;gap:4px;">
+                    <button class="btn btn-sm btn-outline" style="padding:4px 8px;font-size:11px;" onclick="Marketplaces.editSet(${s.id})">&#9998;</button>
+                    <button class="btn-remove" style="font-size:10px;width:26px;height:26px;" onclick="Marketplaces.confirmDelete(${s.id}, '${this._esc(s.name)}')">&#10005;</button>
+                </div>
+            </div>`;
         });
 
-        html += '</tbody></table></div>';
         container.innerHTML = html;
     },
 
@@ -554,7 +544,6 @@ const Marketplaces = {
                 → −ОСН ${osnPct}%: ${formatRub(afterOsn)}
                 → −коммерч. ${commercialPct}%: ${formatRub(afterCommercial)}
                 → −себес: <strong style="color:${profit >= 0 ? 'var(--green)' : 'var(--red)'}">чистыми ${formatRub(profit)} (${profitPct}%)</strong>
-                · ×${round2(sellingPrice / totalCost)}
             `;
         } else {
             resultBlock.style.display = 'none';
@@ -655,6 +644,56 @@ const Marketplaces = {
                 m.tiers[qty] = { cost: round2(adjustedCost) };
             });
         });
+    },
+
+    _calcSetBreakdown(s) {
+        const params = App.params || {};
+        const cnyRate = params.cnyRate || 12.5;
+        const fotPerHour = params.fotPerHour || 400;
+        let plasticCost = 0, hwCost = 0, pkgCost = 0;
+
+        (s.plastic_items || []).forEach(item => {
+            if (!item.blank_id) return;
+            const mold = this._plasticBlanks.find(m => m.id === item.blank_id);
+            if (!mold || !mold.tiers) return;
+            const tier = mold.tiers[500] || mold.tiers[300] || mold.tiers[1000];
+            if (tier) plasticCost += tier.cost * (item.qty || 1);
+        });
+
+        (s.hw_items || []).forEach(item => {
+            if (item.source === 'custom') {
+                hwCost += (item.cost_per_unit || 0) * (item.qty || 1);
+            } else if (item.source === 'warehouse' && item.wh_id) {
+                hwCost += (item.cost_per_unit || 0) * (item.qty || 1);
+            } else if (item.blank_id) {
+                const hw = this._hwCatalog.find(b => b.id === item.blank_id);
+                if (hw) {
+                    const materialCost = (hw.price_cny || 0) * cnyRate + (hw.delivery_per_unit || 0);
+                    const assemblyCost = (hw.assembly_speed > 0) ? (fotPerHour / hw.assembly_speed) : 0;
+                    hwCost += (materialCost + assemblyCost) * (item.qty || 1);
+                }
+            }
+        });
+
+        (s.pkg_items || []).forEach(item => {
+            if (item.source === 'custom') {
+                pkgCost += (item.cost_per_unit || 0) * (item.qty || 1);
+            } else if (item.source === 'warehouse' && item.wh_id) {
+                pkgCost += (item.cost_per_unit || 0) * (item.qty || 1);
+            } else if (item.blank_id) {
+                const pkg = this._pkgCatalog.find(b => b.id === item.blank_id);
+                if (pkg) {
+                    pkgCost += ((pkg.price_per_unit || 0) + (pkg.delivery_per_unit || 0)) * (item.qty || 1);
+                }
+            }
+        });
+
+        return {
+            plasticCost: round2(plasticCost),
+            hwCost: round2(hwCost),
+            pkgCost: round2(pkgCost),
+            totalCost: round2(plasticCost + hwCost + pkgCost)
+        };
     },
 
     _esc(str) {
