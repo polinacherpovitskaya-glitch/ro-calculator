@@ -84,6 +84,11 @@ const Marketplaces = {
             const margin = s.actual_margin || 0;
             const mult = cost > 0 ? round2(price / cost) : 0;
 
+            // Net profit (чистыми) after all deductions
+            const afterAll = price > 0 ? round2(price * (1 - (s.commission||46)/100) * (1 - (s.vat||5)/100) * (1 - (s.osn||6)/100) * (1 - (s.commercial||6.5)/100)) : 0;
+            const netProfit = round2(afterAll - cost);
+            const netProfitPct = afterAll > 0 ? Math.round(netProfit / afterAll * 100) : 0;
+
             // Summarize composition
             const parts = [];
             (s.plastic_items || []).forEach(i => parts.push(i.name || 'Пластик'));
@@ -102,7 +107,7 @@ const Marketplaces = {
                 </td>
                 <td style="padding:6px 8px;text-align:right;font-size:13px;color:var(--text-secondary);">${formatRub(cost)}</td>
                 <td style="padding:6px 8px;text-align:right;font-size:16px;font-weight:800;color:var(--green);">${formatRub(price)}</td>
-                <td style="padding:6px 8px;text-align:right;font-size:12px;">${Math.round(margin)}%</td>
+                <td style="padding:6px 8px;text-align:right;font-size:12px;">${Math.round(margin)}% <span style="font-size:10px;color:var(--text-muted);">${netProfitPct}% чист.</span></td>
                 <td style="padding:6px 8px;text-align:right;font-size:12px;color:var(--text-muted);">×${mult}</td>
                 <td style="padding:6px;">
                     <div style="display:flex;gap:4px;">

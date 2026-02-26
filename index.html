@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=46d">
+    <link rel="stylesheet" href="css/style.css?v=46e">
 </head>
 <body>
 
@@ -166,9 +166,8 @@
                     <span id="calc-autosave-status" style="font-size:11px;color:var(--text-muted);margin-top:2px;display:block;"></span>
                 </div>
                 <div class="flex gap-8">
-                    <button class="btn btn-outline" onclick="Calculator.generateKP()">&#128196; Скачать КП</button>
-                    <button class="btn btn-outline" onclick="Calculator.resetForm()">Сбросить</button>
-                    <button class="btn btn-success" onclick="Calculator.saveOrder()">Сохранить и рассчитать</button>
+                    <button class="btn btn-success" onclick="Calculator.saveOrder()">Рассчитать</button>
+                    <button class="btn btn-outline" onclick="Calculator.resetForm()">Сброс</button>
                 </div>
             </div>
 
@@ -395,7 +394,11 @@
                         <div class="value" id="sum-hours">0 ч</div>
                     </div>
                 </div>
-                <button class="btn btn-success btn-lg" onclick="Calculator.saveOrder()">Сохранить</button>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px;">
+                    <button class="btn btn-success btn-lg" style="flex:1;min-width:200px;font-size:16px;padding:14px 24px;" onclick="Calculator.saveOrder()">Сохранить</button>
+                    <button class="btn btn-outline btn-lg" onclick="Calculator.resetForm()">Сброс</button>
+                    <button class="btn btn-outline btn-lg" onclick="Calculator.generateKP()">&#128196; Скачать КП</button>
+                </div>
             </div>
 
             <!-- Change history (shown when editing existing order) -->
@@ -2416,25 +2419,25 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="js/supabase.js?v=46d"></script>
-<script src="js/calculator.js?v=46d"></script>
-<script src="js/app.js?v=46d"></script>
-<script src="js/dashboard.js?v=46d"></script>
-<script src="js/order-detail.js?v=46d"></script>
-<script src="js/orders.js?v=46d"></script>
-<script src="js/analytics.js?v=46d"></script>
-<script src="js/molds.js?v=46d"></script>
-<script src="js/colors.js?v=46d"></script>
-<script src="js/kp.js?v=46d"></script>
-<script src="js/timetrack.js?v=46d"></script>
-<script src="js/tasks.js?v=46d"></script>
-<script src="js/gantt.js?v=46d"></script>
-<script src="js/import.js?v=46d"></script>
-<script src="js/factual.js?v=46d"></script>
-<script src="js/china.js?v=46d"></script>
-<script src="js/warehouse_photos.js?v=46d"></script>
-<script src="js/marketplaces.js?v=46d"></script>
-<script src="js/warehouse.js?v=46d"></script>
-<script src="js/settings.js?v=46d"></script>
+<script src="js/supabase.js?v=46e"></script>
+<script src="js/calculator.js?v=46e"></script>
+<script src="js/app.js?v=46e"></script>
+<script src="js/dashboard.js?v=46e"></script>
+<script src="js/order-detail.js?v=46e"></script>
+<script src="js/orders.js?v=46e"></script>
+<script src="js/analytics.js?v=46e"></script>
+<script src="js/molds.js?v=46e"></script>
+<script src="js/colors.js?v=46e"></script>
+<script src="js/kp.js?v=46e"></script>
+<script src="js/timetrack.js?v=46e"></script>
+<script src="js/tasks.js?v=46e"></script>
+<script src="js/gantt.js?v=46e"></script>
+<script src="js/import.js?v=46e"></script>
+<script src="js/factual.js?v=46e"></script>
+<script src="js/china.js?v=46e"></script>
+<script src="js/warehouse_photos.js?v=46e"></script>
+<script src="js/marketplaces.js?v=46e"></script>
+<script src="js/warehouse.js?v=46e"></script>
+<script src="js/settings.js?v=46e"></script>
 </body>
 </html>

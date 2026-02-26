@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v46d';
+const APP_VERSION = 'v46e';
 
 const App = {
     currentPage: 'dashboard',
@@ -2232,14 +2232,19 @@ const Calculator = {
     },
 
     async saveOrder() {
-        const orderName = document.getElementById('calc-order-name').value.trim();
-        if (!orderName) {
-            App.toast('Введите название заказа');
-            return;
-        }
-
         // Cancel any pending autosave — we're doing a full save
         clearTimeout(this._autosaveTimer);
+
+        // Recalculate before saving to ensure fresh results
+        try { this._doRecalculate(App.params); } catch (e) { /* ignore */ }
+
+        let orderName = document.getElementById('calc-order-name').value.trim();
+        if (!orderName) {
+            // Auto-generate name if empty
+            const now = new Date();
+            orderName = 'Заказ ' + String(now.getDate()).padStart(2,'0') + '.' + String(now.getMonth()+1).padStart(2,'0') + ' ' + String(now.getHours()).padStart(2,'0') + ':' + String(now.getMinutes()).padStart(2,'0');
+            document.getElementById('calc-order-name').value = orderName;
+        }
 
         const load = calculateProductionLoad(this.items, this.hardwareItems, this.packagingItems, App.params);
         const summary = calculateOrderSummary(this.items, this.hardwareItems, this.packagingItems, this.extraCosts);
