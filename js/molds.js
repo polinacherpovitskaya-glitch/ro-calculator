@@ -831,4 +831,375 @@ const Molds = {
         if (!str) return '';
         return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     },
+
+    // ==========================================
+    // TABS: Пластик | Фурнитура | Упаковка
+    // ==========================================
+
+    _currentTab: 'plastic',
+    _hwBlanks: [],
+    _pkgBlanks: [],
+    _editingHwId: null,
+    _editingPkgId: null,
+
+    // Hardware tier margins (different from plastic!)
+    HW_TIERS: [50, 100, 200, 300, 400, 500, 1000],
+    HW_TIER_MARGINS: {
+        50: 0.55, 100: 0.40, 200: 0.52, 300: 0.50, 400: 0.47, 500: 0.47, 1000: 0.40,
+    },
+
+    switchTab(tab) {
+        this._currentTab = tab;
+        ['plastic', 'hardware', 'packaging'].forEach(t => {
+            const el = document.getElementById('molds-tab-' + t);
+            if (el) el.style.display = (t === tab) ? '' : 'none';
+        });
+        document.querySelectorAll('.molds-tabs .tab-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.tab === tab);
+        });
+        if (tab === 'hardware') this.loadHwTab();
+        if (tab === 'packaging') this.loadPkgTab();
+    },
+
+    // ==========================================
+    // HARDWARE BLANKS TAB
+    // ==========================================
+
+    async loadHwTab() {
+        try {
+            this._hwBlanks = await loadHwBlanks();
+            this.enrichHwBlanks();
+            this.renderHwTable();
+        } catch(e) {
+            console.error('loadHwTab error:', e);
+            document.getElementById('hw-blanks-container').innerHTML = '<div class="card" style="padding:16px;color:var(--red)">Ошибка: ' + e.message + '</div>';
+        }
+    },
+
+    enrichHwBlanks() {
+        const params = App.params || {};
+        const cnyRate = params.cnyRate || 12.5;
+        const fotPerHour = params.fotPerHour || 400;
+
+        this._hwBlanks.forEach(b => {
+            b.tiers = {};
+            this.HW_TIERS.forEach(qty => {
+                const materialCost = (b.price_cny || 0) * cnyRate + (b.delivery_per_unit || 0);
+                const assemblyCost = (b.assembly_speed > 0) ? (fotPerHour / b.assembly_speed) : 0;
+                const totalCost = materialCost + assemblyCost;
+                const margin = this.HW_TIER_MARGINS[qty] || 0.40;
+                const targetPrice = totalCost / (1 - margin);
+                const sellPrice = Math.ceil(targetPrice); // до целых рублей вверх
+                const actualMargin = sellPrice > 0 ? round2((sellPrice - totalCost) / sellPrice) : 0;
+
+                b.tiers[qty] = {
+                    cost: round2(totalCost),
+                    sellPrice,
+                    margin: actualMargin,
+                };
+            });
+        });
+    },
+
+    renderHwTable() {
+        const container = document.getElementById('hw-blanks-container');
+        if (!this._hwBlanks.length) {
+            container.innerHTML = '<div class="empty-state"><p>Нет фурнитуры</p></div>';
+            return;
+        }
+
+        const tierHeaders = this.HW_TIERS.map(q => {
+            const label = q >= 1000 ? (q/1000) + 'K' : q;
+            return `<th class="text-right" style="font-size:11px;padding:4px 6px;">${label} шт</th>`;
+        }).join('');
+
+        let html = `<div class="card" style="padding:12px;overflow-x:auto;">
+            <table style="font-size:12px;white-space:nowrap;border-collapse:collapse;">
+            <thead><tr>
+                <th style="min-width:160px;padding:6px 8px;">Фурнитура</th>
+                <th style="width:50px;padding:4px 6px;"></th>
+                ${tierHeaders}
+                <th style="width:30px"></th>
+            </tr></thead><tbody>`;
+
+        this._hwBlanks.forEach(b => {
+            const costCells = this.HW_TIERS.map(q => {
+                const t = b.tiers?.[q];
+                return `<td class="text-right" style="font-size:10px;color:var(--text-secondary);padding:3px 6px;">${t ? Math.round(t.cost) : '—'}</td>`;
+            }).join('');
+
+            const sellCells = this.HW_TIERS.map(q => {
+                const t = b.tiers?.[q];
+                const marginPct = t ? Math.round(t.margin * 100) : 0;
+                return `<td class="text-right" title="Маржа ${marginPct}%" style="font-size:13px;font-weight:700;color:var(--green);padding:3px 6px;">${t ? t.sellPrice : '—'}</td>`;
+            }).join('');
+
+            const speedLabel = b.assembly_speed ? (b.assembly_speed + ' шт/ч') : '—';
+
+            html += `
+                <tr>
+                    <td rowspan="2" style="vertical-align:top;padding:6px 8px;border-bottom:2px solid var(--border);">
+                        <div style="font-weight:700;font-size:13px;">${this.esc(b.name)}</div>
+                        <div style="font-size:10px;color:var(--text-muted);margin-top:2px;">¥${b.price_cny || 0} + ${b.delivery_per_unit || 0}₽/шт · ${speedLabel}</div>
+                        ${b.notes ? `<div style="font-size:10px;color:var(--text-muted);font-style:italic;">${this.esc(b.notes)}</div>` : ''}
+                    </td>
+                    <td style="font-size:9px;color:var(--text-secondary);padding:3px 4px;">себес</td>
+                    ${costCells}
+                    <td rowspan="2" style="vertical-align:top;border-bottom:2px solid var(--border);">
+                        <div style="display:flex;flex-direction:column;gap:2px;">
+                            <button class="btn btn-sm btn-outline" style="padding:2px 6px;font-size:10px;" onclick="Molds.editHwBlank(${b.id})">&#9998;</button>
+                            <button class="btn-remove" style="font-size:9px;width:24px;height:24px;" onclick="Molds.confirmDeleteHw(${b.id}, '${this.esc(b.name)}')">&#10005;</button>
+                        </div>
+                    </td>
+                </tr>
+                <tr style="border-bottom:2px solid var(--border);">
+                    <td style="font-size:9px;color:var(--green);font-weight:600;padding:3px 4px;">цена</td>
+                    ${sellCells}
+                </tr>`;
+        });
+
+        html += '</tbody></table>';
+
+        // Legend
+        const marginLabels = this.HW_TIERS.map(q => {
+            const label = q >= 1000 ? (q/1000) + 'K' : q;
+            return `${label}=${Math.round(this.HW_TIER_MARGINS[q] * 100)}%`;
+        }).join(', ');
+        html += `<div style="margin-top:10px;font-size:11px;color:var(--text-muted);">Маржа: ${marginLabels} · Округление до 1₽ вверх</div></div>`;
+
+        container.innerHTML = html;
+    },
+
+    showHwForm() {
+        this._editingHwId = null;
+        document.getElementById('hw-form-title').textContent = 'Новая фурнитура';
+        ['hw-blank-name','hw-blank-price-cny','hw-blank-delivery','hw-blank-speed','hw-blank-notes','hw-blank-photo'].forEach(id => {
+            document.getElementById(id).value = '';
+        });
+        document.getElementById('hw-delete-btn').style.display = 'none';
+        document.getElementById('hw-edit-form').style.display = '';
+    },
+
+    editHwBlank(id) {
+        const b = this._hwBlanks.find(x => x.id === id);
+        if (!b) return;
+        this._editingHwId = id;
+        document.getElementById('hw-form-title').textContent = 'Редактировать: ' + (b.name || '');
+        document.getElementById('hw-blank-name').value = b.name || '';
+        document.getElementById('hw-blank-price-cny').value = b.price_cny || '';
+        document.getElementById('hw-blank-delivery').value = b.delivery_per_unit || '';
+        document.getElementById('hw-blank-speed').value = b.assembly_speed || '';
+        document.getElementById('hw-blank-notes').value = b.notes || '';
+        document.getElementById('hw-blank-photo').value = b.photo_url || '';
+        document.getElementById('hw-delete-btn').style.display = '';
+        document.getElementById('hw-edit-form').style.display = '';
+    },
+
+    hideHwForm() {
+        document.getElementById('hw-edit-form').style.display = 'none';
+        this._editingHwId = null;
+    },
+
+    async saveHwBlank() {
+        const name = document.getElementById('hw-blank-name').value.trim();
+        if (!name) { App.toast('Введите название'); return; }
+
+        const blank = {
+            id: this._editingHwId || undefined,
+            name,
+            price_cny: parseFloat(document.getElementById('hw-blank-price-cny').value) || 0,
+            delivery_per_unit: parseFloat(document.getElementById('hw-blank-delivery').value) || 0,
+            assembly_speed: parseFloat(document.getElementById('hw-blank-speed').value) || 0,
+            notes: document.getElementById('hw-blank-notes').value.trim(),
+            photo_url: document.getElementById('hw-blank-photo').value.trim(),
+        };
+
+        await saveHwBlank(blank);
+        App.toast('Фурнитура сохранена');
+        this.hideHwForm();
+        await this.loadHwTab();
+    },
+
+    async deleteHwBlank() {
+        if (!this._editingHwId) return;
+        if (confirm('Удалить эту фурнитуру?')) {
+            await deleteHwBlank(this._editingHwId);
+            App.toast('Удалено');
+            this.hideHwForm();
+            await this.loadHwTab();
+        }
+    },
+
+    async confirmDeleteHw(id, name) {
+        if (confirm(`Удалить "${name}"?`)) {
+            await deleteHwBlank(id);
+            App.toast('Удалено');
+            await this.loadHwTab();
+        }
+    },
+
+    // ==========================================
+    // PACKAGING BLANKS TAB
+    // ==========================================
+
+    async loadPkgTab() {
+        try {
+            this._pkgBlanks = await loadPkgBlanks();
+            this.enrichPkgBlanks();
+            this.renderPkgTable();
+        } catch(e) {
+            console.error('loadPkgTab error:', e);
+            document.getElementById('pkg-blanks-container').innerHTML = '<div class="card" style="padding:16px;color:var(--red)">Ошибка: ' + e.message + '</div>';
+        }
+    },
+
+    enrichPkgBlanks() {
+        this._pkgBlanks.forEach(b => {
+            b.tiers = {};
+            this.HW_TIERS.forEach(qty => {
+                const totalCost = (b.price_per_unit || 0) + (b.delivery_per_unit || 0);
+                const margin = this.HW_TIER_MARGINS[qty] || 0.40;
+                const targetPrice = totalCost / (1 - margin);
+                const sellPrice = Math.ceil(targetPrice);
+                const actualMargin = sellPrice > 0 ? round2((sellPrice - totalCost) / sellPrice) : 0;
+
+                b.tiers[qty] = {
+                    cost: round2(totalCost),
+                    sellPrice,
+                    margin: actualMargin,
+                };
+            });
+        });
+    },
+
+    renderPkgTable() {
+        const container = document.getElementById('pkg-blanks-container');
+        if (!this._pkgBlanks.length) {
+            container.innerHTML = '<div class="empty-state"><p>Нет упаковки</p></div>';
+            return;
+        }
+
+        const tierHeaders = this.HW_TIERS.map(q => {
+            const label = q >= 1000 ? (q/1000) + 'K' : q;
+            return `<th class="text-right" style="font-size:11px;padding:4px 6px;">${label} шт</th>`;
+        }).join('');
+
+        let html = `<div class="card" style="padding:12px;overflow-x:auto;">
+            <table style="font-size:12px;white-space:nowrap;border-collapse:collapse;">
+            <thead><tr>
+                <th style="min-width:160px;padding:6px 8px;">Упаковка</th>
+                <th style="width:50px;padding:4px 6px;"></th>
+                ${tierHeaders}
+                <th style="width:30px"></th>
+            </tr></thead><tbody>`;
+
+        this._pkgBlanks.forEach(b => {
+            const costCells = this.HW_TIERS.map(q => {
+                const t = b.tiers?.[q];
+                return `<td class="text-right" style="font-size:10px;color:var(--text-secondary);padding:3px 6px;">${t ? Math.round(t.cost) : '—'}</td>`;
+            }).join('');
+
+            const sellCells = this.HW_TIERS.map(q => {
+                const t = b.tiers?.[q];
+                const marginPct = t ? Math.round(t.margin * 100) : 0;
+                return `<td class="text-right" title="Маржа ${marginPct}%" style="font-size:13px;font-weight:700;color:var(--green);padding:3px 6px;">${t ? t.sellPrice : '—'}</td>`;
+            }).join('');
+
+            html += `
+                <tr>
+                    <td rowspan="2" style="vertical-align:top;padding:6px 8px;border-bottom:2px solid var(--border);">
+                        <div style="font-weight:700;font-size:13px;">${this.esc(b.name)}</div>
+                        <div style="font-size:10px;color:var(--text-muted);margin-top:2px;">${b.price_per_unit || 0}₽ + ${b.delivery_per_unit || 0}₽ дост.</div>
+                        ${b.notes ? `<div style="font-size:10px;color:var(--text-muted);font-style:italic;">${this.esc(b.notes)}</div>` : ''}
+                    </td>
+                    <td style="font-size:9px;color:var(--text-secondary);padding:3px 4px;">себес</td>
+                    ${costCells}
+                    <td rowspan="2" style="vertical-align:top;border-bottom:2px solid var(--border);">
+                        <div style="display:flex;flex-direction:column;gap:2px;">
+                            <button class="btn btn-sm btn-outline" style="padding:2px 6px;font-size:10px;" onclick="Molds.editPkgBlank(${b.id})">&#9998;</button>
+                            <button class="btn-remove" style="font-size:9px;width:24px;height:24px;" onclick="Molds.confirmDeletePkg(${b.id}, '${this.esc(b.name)}')">&#10005;</button>
+                        </div>
+                    </td>
+                </tr>
+                <tr style="border-bottom:2px solid var(--border);">
+                    <td style="font-size:9px;color:var(--green);font-weight:600;padding:3px 4px;">цена</td>
+                    ${sellCells}
+                </tr>`;
+        });
+
+        html += '</tbody></table>';
+        const marginLabels = this.HW_TIERS.map(q => {
+            const label = q >= 1000 ? (q/1000) + 'K' : q;
+            return `${label}=${Math.round(this.HW_TIER_MARGINS[q] * 100)}%`;
+        }).join(', ');
+        html += `<div style="margin-top:10px;font-size:11px;color:var(--text-muted);">Маржа: ${marginLabels} · Без ФОТ · Округление до 1₽ вверх</div></div>`;
+
+        container.innerHTML = html;
+    },
+
+    showPkgForm() {
+        this._editingPkgId = null;
+        document.getElementById('pkg-form-title').textContent = 'Новая упаковка';
+        ['pkg-blank-name','pkg-blank-price','pkg-blank-delivery','pkg-blank-notes','pkg-blank-photo'].forEach(id => {
+            document.getElementById(id).value = '';
+        });
+        document.getElementById('pkg-delete-btn').style.display = 'none';
+        document.getElementById('pkg-edit-form').style.display = '';
+    },
+
+    editPkgBlank(id) {
+        const b = this._pkgBlanks.find(x => x.id === id);
+        if (!b) return;
+        this._editingPkgId = id;
+        document.getElementById('pkg-form-title').textContent = 'Редактировать: ' + (b.name || '');
+        document.getElementById('pkg-blank-name').value = b.name || '';
+        document.getElementById('pkg-blank-price').value = b.price_per_unit || '';
+        document.getElementById('pkg-blank-delivery').value = b.delivery_per_unit || '';
+        document.getElementById('pkg-blank-notes').value = b.notes || '';
+        document.getElementById('pkg-blank-photo').value = b.photo_url || '';
+        document.getElementById('pkg-delete-btn').style.display = '';
+        document.getElementById('pkg-edit-form').style.display = '';
+    },
+
+    hidePkgForm() {
+        document.getElementById('pkg-edit-form').style.display = 'none';
+        this._editingPkgId = null;
+    },
+
+    async savePkgBlank() {
+        const name = document.getElementById('pkg-blank-name').value.trim();
+        if (!name) { App.toast('Введите название'); return; }
+
+        const blank = {
+            id: this._editingPkgId || undefined,
+            name,
+            price_per_unit: parseFloat(document.getElementById('pkg-blank-price').value) || 0,
+            delivery_per_unit: parseFloat(document.getElementById('pkg-blank-delivery').value) || 0,
+            notes: document.getElementById('pkg-blank-notes').value.trim(),
+            photo_url: document.getElementById('pkg-blank-photo').value.trim(),
+        };
+
+        await savePkgBlank(blank);
+        App.toast('Упаковка сохранена');
+        this.hidePkgForm();
+        await this.loadPkgTab();
+    },
+
+    async deletePkgBlank() {
+        if (!this._editingPkgId) return;
+        if (confirm('Удалить эту упаковку?')) {
+            await deletePkgBlank(this._editingPkgId);
+            App.toast('Удалено');
+            this.hidePkgForm();
+            await this.loadPkgTab();
+        }
+    },
+
+    async confirmDeletePkg(id, name) {
+        if (confirm(`Удалить "${name}"?`)) {
+            await deletePkgBlank(id);
+            App.toast('Удалено');
+            await this.loadPkgTab();
+        }
+    },
 };

@@ -44,11 +44,14 @@ const LOCAL_KEYS = {
     warehouseHistory: 'ro_calc_warehouse_history',
     shipments: 'ro_calc_shipments',
     colors: 'ro_calc_colors',
+    hwBlanks: 'ro_calc_hw_blanks',
+    pkgBlanks: 'ro_calc_pkg_blanks',
+    marketplaceSets: 'ro_calc_marketplace_sets',
 };
 
 // Data version — increment to trigger NON-DESTRUCTIVE migration
 // NEVER delete user data! Only add missing fields to existing molds
-const MOLDS_DATA_VERSION = 8; // v8: custom_prices per mold (replaces custom_margins)
+const MOLDS_DATA_VERSION = 9; // v9: буквы (id 30,31) — добавлены hw_name/hw_price/hw_speed
 const MOLDS_VERSION_KEY = 'ro_calc_molds_version';
 
 function checkMoldsVersion() {
@@ -93,6 +96,12 @@ function checkMoldsVersion() {
                 if (m.custom_margins === undefined) m.custom_margins = {};
                 // Ensure custom_prices field exists (added in v8)
                 if (m.custom_prices === undefined) m.custom_prices = {};
+                // v9: Update letter blanks (id 30, 31) with hw_* fields
+                if ((m.id === 30 || m.id === 31) && !m.hw_name) {
+                    m.hw_name = 'Фурнитура';
+                    m.hw_price_per_unit = 1;
+                    m.hw_speed = 60;
+                }
                 return m;
             });
             setLocal(LOCAL_KEYS.molds, migrated);
@@ -934,8 +943,8 @@ function getDefaultMolds() {
         m(29, 'Бусины маленькие',           'blank', 70,  90,  null, 5,  'simple', simpleCostCNY, { collection: 'Бусины', orders: 7, produced: 6000 }),
 
         // === Буквы ===
-        m(30, 'Буква из алфавита (лат.)',    'blank', 100, 120, null, 10, 'simple', simpleCostCNY, { collection: 'Буквы' }),
-        m(31, 'Буква из алфавита (кир.)',    'blank', 100, 120, null, 10, 'simple', simpleCostCNY, { collection: 'Буквы' }),
+        m(30, 'Буква из алфавита (лат.)',    'blank', 100, 120, null, 10, 'simple', simpleCostCNY, { collection: 'Буквы', hw_name: 'Фурнитура', hw_price: 1, hw_speed: 60 }),
+        m(31, 'Буква из алфавита (кир.)',    'blank', 100, 120, null, 10, 'simple', simpleCostCNY, { collection: 'Буквы', hw_name: 'Фурнитура', hw_price: 1, hw_speed: 60 }),
 
         // === Фигурки / сувениры ===
         m(32, 'Шар',                        'blank', 15,  20,  null, 30, 'complex', complexCostCNY, { collection: 'Фигурки' }),
@@ -1692,4 +1701,271 @@ function getDefaultColors() {
         { id: 38, number: '038', name: 'Оливковый',            photo_url: p('038'), notes: '', created_at: now, updated_at: now },
         { id: 39, number: '039', name: 'Чёрный',               photo_url: p('039'), notes: '', created_at: now, updated_at: now },
     ];
+}
+
+// =============================================
+// HARDWARE BLANKS (Справочник бланков фурнитуры)
+// =============================================
+
+async function loadHwBlanks() {
+    if (isSupabaseReady()) {
+        try {
+            const { data, error } = await supabaseClient.from('hw_blanks').select('*').order('name');
+            if (error) console.error('loadHwBlanks error:', error);
+            if (data && data.length > 0) {
+                const blanks = data.map(row => {
+                    if (row.blank_data) {
+                        try {
+                            const parsed = typeof row.blank_data === 'string' ? JSON.parse(row.blank_data) : row.blank_data;
+                            return { ...parsed, id: row.id };
+                        } catch(e) { /* fallthrough */ }
+                    }
+                    return row;
+                });
+                setLocal(LOCAL_KEYS.hwBlanks, blanks);
+                return blanks;
+            }
+            // Migration from localStorage
+            const local = getLocal(LOCAL_KEYS.hwBlanks) || getDefaultHwBlanks();
+            if (local.length > 0) {
+                console.log('Migrating', local.length, 'hw blanks to Supabase...');
+                for (const b of local) {
+                    try {
+                        await supabaseClient.from('hw_blanks').upsert({
+                            id: b.id || Date.now(), name: b.name || '',
+                            blank_data: JSON.stringify(b),
+                            created_at: b.created_at || new Date().toISOString(),
+                            updated_at: b.updated_at || new Date().toISOString(),
+                        }, { onConflict: 'id' });
+                    } catch(e) { console.warn('HwBlank migration error:', e); }
+                }
+                return local;
+            }
+            return getDefaultHwBlanks();
+        } catch(e) {
+            console.error('loadHwBlanks exception:', e);
+            return getLocal(LOCAL_KEYS.hwBlanks) || getDefaultHwBlanks();
+        }
+    }
+    return getLocal(LOCAL_KEYS.hwBlanks) || getDefaultHwBlanks();
+}
+
+async function saveHwBlank(blank) {
+    if (!blank.id) {
+        blank.id = Date.now();
+        blank.created_at = new Date().toISOString();
+    }
+    blank.updated_at = new Date().toISOString();
+
+    if (isSupabaseReady()) {
+        try {
+            const row = { id: blank.id, name: blank.name || '', blank_data: JSON.stringify(blank), created_at: blank.created_at, updated_at: blank.updated_at };
+            const { error } = await supabaseClient.from('hw_blanks').upsert(row, { onConflict: 'id' });
+            if (error) console.error('saveHwBlank error:', error);
+        } catch(e) { console.error('saveHwBlank exception:', e); }
+    }
+
+    const blanks = getLocal(LOCAL_KEYS.hwBlanks) || [];
+    const idx = blanks.findIndex(b => b.id === blank.id);
+    if (idx >= 0) blanks[idx] = blank; else blanks.push(blank);
+    setLocal(LOCAL_KEYS.hwBlanks, blanks);
+    return blank.id;
+}
+
+async function deleteHwBlank(blankId) {
+    if (isSupabaseReady()) {
+        try {
+            const { error } = await supabaseClient.from('hw_blanks').delete().eq('id', blankId);
+            if (error) console.error('deleteHwBlank error:', error);
+        } catch(e) { console.error('deleteHwBlank exception:', e); }
+    }
+    const blanks = (getLocal(LOCAL_KEYS.hwBlanks) || []).filter(b => b.id !== blankId);
+    setLocal(LOCAL_KEYS.hwBlanks, blanks);
+}
+
+function getDefaultHwBlanks() {
+    const now = new Date().toISOString();
+    return [
+        { id: 1, name: 'Карабин', price_cny: 3, delivery_per_unit: 2, assembly_speed: 120, photo_url: '', notes: '', created_at: now, updated_at: now },
+        { id: 2, name: 'Цепочка 45 см', price_cny: 5, delivery_per_unit: 3, assembly_speed: 60, photo_url: '', notes: '', created_at: now, updated_at: now },
+        { id: 3, name: 'Цепочка 60 см', price_cny: 6, delivery_per_unit: 3, assembly_speed: 60, photo_url: '', notes: '', created_at: now, updated_at: now },
+        { id: 4, name: 'Кольцо соединительное', price_cny: 1, delivery_per_unit: 1, assembly_speed: 180, photo_url: '', notes: '', created_at: now, updated_at: now },
+        { id: 5, name: 'Брелочная цепочка', price_cny: 4, delivery_per_unit: 2, assembly_speed: 90, photo_url: '', notes: '', created_at: now, updated_at: now },
+        { id: 6, name: 'Шнурок вощёный', price_cny: 2, delivery_per_unit: 1, assembly_speed: 90, photo_url: '', notes: '', created_at: now, updated_at: now },
+        { id: 7, name: 'Булавка для броши', price_cny: 2, delivery_per_unit: 1, assembly_speed: 120, photo_url: '', notes: '', created_at: now, updated_at: now },
+        { id: 8, name: 'Магнит', price_cny: 3, delivery_per_unit: 2, assembly_speed: 120, photo_url: '', notes: 'Неодимовый магнит', created_at: now, updated_at: now },
+    ];
+}
+
+// =============================================
+// PACKAGING BLANKS (Справочник бланков упаковки)
+// =============================================
+
+async function loadPkgBlanks() {
+    if (isSupabaseReady()) {
+        try {
+            const { data, error } = await supabaseClient.from('pkg_blanks').select('*').order('name');
+            if (error) console.error('loadPkgBlanks error:', error);
+            if (data && data.length > 0) {
+                const blanks = data.map(row => {
+                    if (row.blank_data) {
+                        try {
+                            const parsed = typeof row.blank_data === 'string' ? JSON.parse(row.blank_data) : row.blank_data;
+                            return { ...parsed, id: row.id };
+                        } catch(e) { /* fallthrough */ }
+                    }
+                    return row;
+                });
+                setLocal(LOCAL_KEYS.pkgBlanks, blanks);
+                return blanks;
+            }
+            // Migration from localStorage
+            const local = getLocal(LOCAL_KEYS.pkgBlanks) || getDefaultPkgBlanks();
+            if (local.length > 0) {
+                console.log('Migrating', local.length, 'pkg blanks to Supabase...');
+                for (const b of local) {
+                    try {
+                        await supabaseClient.from('pkg_blanks').upsert({
+                            id: b.id || Date.now(), name: b.name || '',
+                            blank_data: JSON.stringify(b),
+                            created_at: b.created_at || new Date().toISOString(),
+                            updated_at: b.updated_at || new Date().toISOString(),
+                        }, { onConflict: 'id' });
+                    } catch(e) { console.warn('PkgBlank migration error:', e); }
+                }
+                return local;
+            }
+            return getDefaultPkgBlanks();
+        } catch(e) {
+            console.error('loadPkgBlanks exception:', e);
+            return getLocal(LOCAL_KEYS.pkgBlanks) || getDefaultPkgBlanks();
+        }
+    }
+    return getLocal(LOCAL_KEYS.pkgBlanks) || getDefaultPkgBlanks();
+}
+
+async function savePkgBlank(blank) {
+    if (!blank.id) {
+        blank.id = Date.now();
+        blank.created_at = new Date().toISOString();
+    }
+    blank.updated_at = new Date().toISOString();
+
+    if (isSupabaseReady()) {
+        try {
+            const row = { id: blank.id, name: blank.name || '', blank_data: JSON.stringify(blank), created_at: blank.created_at, updated_at: blank.updated_at };
+            const { error } = await supabaseClient.from('pkg_blanks').upsert(row, { onConflict: 'id' });
+            if (error) console.error('savePkgBlank error:', error);
+        } catch(e) { console.error('savePkgBlank exception:', e); }
+    }
+
+    const blanks = getLocal(LOCAL_KEYS.pkgBlanks) || [];
+    const idx = blanks.findIndex(b => b.id === blank.id);
+    if (idx >= 0) blanks[idx] = blank; else blanks.push(blank);
+    setLocal(LOCAL_KEYS.pkgBlanks, blanks);
+    return blank.id;
+}
+
+async function deletePkgBlank(blankId) {
+    if (isSupabaseReady()) {
+        try {
+            const { error } = await supabaseClient.from('pkg_blanks').delete().eq('id', blankId);
+            if (error) console.error('deletePkgBlank error:', error);
+        } catch(e) { console.error('deletePkgBlank exception:', e); }
+    }
+    const blanks = (getLocal(LOCAL_KEYS.pkgBlanks) || []).filter(b => b.id !== blankId);
+    setLocal(LOCAL_KEYS.pkgBlanks, blanks);
+}
+
+function getDefaultPkgBlanks() {
+    const now = new Date().toISOString();
+    return [
+        { id: 1, name: 'Мешочек бархат (S)', price_per_unit: 15, delivery_per_unit: 2, photo_url: '', notes: '7×9 см', created_at: now, updated_at: now },
+        { id: 2, name: 'Мешочек бархат (M)', price_per_unit: 20, delivery_per_unit: 3, photo_url: '', notes: '10×12 см', created_at: now, updated_at: now },
+        { id: 3, name: 'Мешочек бархат (L)', price_per_unit: 25, delivery_per_unit: 3, photo_url: '', notes: '12×16 см', created_at: now, updated_at: now },
+        { id: 4, name: 'Коробочка картонная (S)', price_per_unit: 25, delivery_per_unit: 5, photo_url: '', notes: '5×5×3 см', created_at: now, updated_at: now },
+        { id: 5, name: 'Коробочка картонная (M)', price_per_unit: 35, delivery_per_unit: 5, photo_url: '', notes: '8×8×4 см', created_at: now, updated_at: now },
+        { id: 6, name: 'Пакет зип-лок', price_per_unit: 5, delivery_per_unit: 1, photo_url: '', notes: '10×15 см', created_at: now, updated_at: now },
+        { id: 7, name: 'Транспортная упаковка', price_per_unit: 10, delivery_per_unit: 3, photo_url: '', notes: 'Пупырка + пакет', created_at: now, updated_at: now },
+    ];
+}
+
+// =============================================
+// MARKETPLACE SETS (Наборы для маркетплейсов)
+// =============================================
+
+async function loadMarketplaceSets() {
+    if (isSupabaseReady()) {
+        try {
+            const { data, error } = await supabaseClient.from('marketplace_sets').select('*').order('name');
+            if (error) console.error('loadMarketplaceSets error:', error);
+            if (data && data.length > 0) {
+                const sets = data.map(row => {
+                    if (row.set_data) {
+                        try {
+                            const parsed = typeof row.set_data === 'string' ? JSON.parse(row.set_data) : row.set_data;
+                            return { ...parsed, id: row.id };
+                        } catch(e) { /* fallthrough */ }
+                    }
+                    return row;
+                });
+                setLocal(LOCAL_KEYS.marketplaceSets, sets);
+                return sets;
+            }
+            // Migration from localStorage
+            const local = getLocal(LOCAL_KEYS.marketplaceSets) || [];
+            if (local.length > 0) {
+                console.log('Migrating', local.length, 'marketplace sets to Supabase...');
+                for (const s of local) {
+                    try {
+                        await supabaseClient.from('marketplace_sets').upsert({
+                            id: s.id || Date.now(), name: s.name || '',
+                            set_data: JSON.stringify(s),
+                            created_at: s.created_at || new Date().toISOString(),
+                            updated_at: s.updated_at || new Date().toISOString(),
+                        }, { onConflict: 'id' });
+                    } catch(e) { console.warn('MarketplaceSet migration error:', e); }
+                }
+                return local;
+            }
+            return [];
+        } catch(e) {
+            console.error('loadMarketplaceSets exception:', e);
+            return getLocal(LOCAL_KEYS.marketplaceSets) || [];
+        }
+    }
+    return getLocal(LOCAL_KEYS.marketplaceSets) || [];
+}
+
+async function saveMarketplaceSet(mset) {
+    if (!mset.id) {
+        mset.id = Date.now();
+        mset.created_at = new Date().toISOString();
+    }
+    mset.updated_at = new Date().toISOString();
+
+    if (isSupabaseReady()) {
+        try {
+            const row = { id: mset.id, name: mset.name || '', set_data: JSON.stringify(mset), created_at: mset.created_at, updated_at: mset.updated_at };
+            const { error } = await supabaseClient.from('marketplace_sets').upsert(row, { onConflict: 'id' });
+            if (error) console.error('saveMarketplaceSet error:', error);
+        } catch(e) { console.error('saveMarketplaceSet exception:', e); }
+    }
+
+    const sets = getLocal(LOCAL_KEYS.marketplaceSets) || [];
+    const idx = sets.findIndex(s => s.id === mset.id);
+    if (idx >= 0) sets[idx] = mset; else sets.push(mset);
+    setLocal(LOCAL_KEYS.marketplaceSets, sets);
+    return mset.id;
+}
+
+async function deleteMarketplaceSet(setId) {
+    if (isSupabaseReady()) {
+        try {
+            const { error } = await supabaseClient.from('marketplace_sets').delete().eq('id', setId);
+            if (error) console.error('deleteMarketplaceSet error:', error);
+        } catch(e) { console.error('deleteMarketplaceSet exception:', e); }
+    }
+    const sets = (getLocal(LOCAL_KEYS.marketplaceSets) || []).filter(s => s.id !== setId);
+    setLocal(LOCAL_KEYS.marketplaceSets, sets);
 }

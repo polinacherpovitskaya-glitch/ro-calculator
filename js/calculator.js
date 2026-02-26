@@ -115,7 +115,9 @@ function calculateItemCost(item, params) {
             const prQty = pr.qty || 0;
             const prPrice = pr.price || 0;
             if (prQty > 0 && prPrice > 0) {
-                const c = (prPrice * 1.06) + (p.printingDeliveryCost / prQty);
+                const prDelivery = pr.delivery_total || 0;
+                const deliveryCost = prDelivery > 0 ? prDelivery / prQty : (p.printingDeliveryCost / prQty);
+                const c = (prPrice * 1.06) + deliveryCost;
                 costPrinting += c;
                 costPrintingDetails.push(round2(c));
             } else {
@@ -472,7 +474,7 @@ function calculateFinDirectorData(items, hardwareItems, packagingItems, params) 
  * Рассчитать итоговую смету заказа
  * Обновлено: фурнитура и упаковка — отдельные массивы
  */
-function calculateOrderSummary(items, hardwareItems, packagingItems) {
+function calculateOrderSummary(items, hardwareItems, packagingItems, extraCosts) {
     let totalRevenue = 0;
     let totalEarned = 0;
 
@@ -505,6 +507,12 @@ function calculateOrderSummary(items, hardwareItems, packagingItems) {
         totalRevenue += (pkg.sell_price || 0) * qty;
         const m = calculateActualMargin(pkg.sell_price || 0, pkg.result.costPerUnit);
         totalEarned += m.earned * qty;
+    });
+
+    // Extra costs — добавляются к выручке как есть
+    (extraCosts || []).forEach(ec => {
+        const amt = ec.amount || 0;
+        if (amt > 0) totalRevenue += amt;
     });
 
     const vatOnRevenue = totalRevenue * 0.05;

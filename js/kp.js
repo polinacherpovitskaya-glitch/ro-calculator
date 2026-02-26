@@ -295,6 +295,16 @@ const KPGenerator = {
             const displayName = allSameQty ? item.name : item.name + '  (' + this.fmtNum(item.qty) + ' шт)';
             doc.text(displayName, col1X, y);
 
+            // Colors under the product name (if any)
+            if (item.colors && item.colors.length > 0) {
+                y += 3.5;
+                doc.setFontSize(7.5);
+                doc.setTextColor(120, 120, 120);
+                doc.text('Цвета: ' + item.colors.join(', '), col1X, y);
+                doc.setFontSize(9.5);
+                doc.setTextColor(...DARK);
+            }
+
             // Per unit price
             doc.setFont(fn, 'normal');
             doc.setFontSize(9.5);

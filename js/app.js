@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v45b';
+const APP_VERSION = 'v46';
 
 const App = {
     currentPage: 'dashboard',
@@ -140,6 +140,7 @@ const App = {
             case 'gantt': Gantt.load(); break;
             case 'import': Import.load(); break;
             case 'warehouse': Warehouse.load(); break;
+            case 'marketplaces': Marketplaces.load(); break;
             case 'china': ChinaPurchases.load(); break;
             case 'settings': Settings.load(); break;
         }
@@ -190,6 +191,7 @@ const Calculator = {
     items: [],          // Product items (max 6)
     hardwareItems: [],  // Hardware items (unlimited)
     packagingItems: [], // Packaging items (unlimited)
+    extraCosts: [],     // Extra costs [{name, amount}]
     maxItems: 6,
     _autosaveTimer: null,
     _isDirty: false,
@@ -281,9 +283,11 @@ const Calculator = {
         this.items = [];
         this.hardwareItems = [];
         this.packagingItems = [];
+        this.extraCosts = [];
         document.getElementById('calc-items-container').innerHTML = '';
         document.getElementById('calc-hardware-list').innerHTML = '';
         document.getElementById('calc-packaging-list').innerHTML = '';
+        document.getElementById('extra-costs-list').innerHTML = '';
         document.getElementById('calc-production-load').style.display = 'none';
         document.getElementById('calc-findirector').style.display = 'none';
         document.getElementById('calc-summary-footer').style.display = 'none';
@@ -603,12 +607,16 @@ const Calculator = {
                 <label>Цена за шт</label>
                 <input type="number" min="0" step="0.01" value="${pr.price || ''}" oninput="Calculator.onPrintingChange(${itemIdx}, ${printIdx}, 'price', this.value)">
             </div>
+            <div class="form-group" style="margin:0">
+                <label>Доставка (общая)</label>
+                <input type="number" min="0" step="1" value="${pr.delivery_total || ''}" oninput="Calculator.onPrintingChange(${itemIdx}, ${printIdx}, 'delivery_total', this.value)" placeholder="0">
+            </div>
             <button class="btn-remove" title="Удалить нанесение" onclick="Calculator.removePrinting(${itemIdx}, ${printIdx})">&#10005;</button>
         </div>`;
     },
 
     addPrinting(itemIdx) {
-        this.items[itemIdx].printings.push({ name: '', qty: 0, price: 0, sell_price: 0 });
+        this.items[itemIdx].printings.push({ name: '', qty: 0, price: 0, sell_price: 0, delivery_total: 0 });
         const pi = this.items[itemIdx].printings.length - 1;
         const list = document.getElementById('printings-list-' + itemIdx);
         list.insertAdjacentHTML('beforeend', this.renderPrintingRow(itemIdx, pi, this.items[itemIdx].printings[pi]));
@@ -1108,6 +1116,53 @@ const Calculator = {
     },
 
     // ==========================================
+    // EXTRA COSTS (Доп. расходы)
+    // ==========================================
+
+    addExtraCost() {
+        this.extraCosts.push({ name: '', amount: 0 });
+        this.renderExtraCosts();
+        this.scheduleAutosave();
+    },
+
+    removeExtraCost(idx) {
+        this.extraCosts.splice(idx, 1);
+        this.renderExtraCosts();
+        this.recalculate();
+        this.scheduleAutosave();
+    },
+
+    onExtraCostChange(idx, field, value) {
+        if (field === 'name') {
+            this.extraCosts[idx].name = value;
+        } else {
+            this.extraCosts[idx][field] = parseFloat(value) || 0;
+            this.recalculate();
+        }
+        this.scheduleAutosave();
+    },
+
+    renderExtraCosts() {
+        const list = document.getElementById('extra-costs-list');
+        if (!list) return;
+        list.innerHTML = this.extraCosts.map((ec, i) => `
+            <div class="form-row" style="align-items:end;margin-bottom:8px;">
+                <div class="form-group" style="margin:0;flex:2">
+                    <label>Название</label>
+                    <input type="text" value="${this._esc(ec.name)}" placeholder="Доп. расход"
+                        oninput="Calculator.onExtraCostChange(${i}, 'name', this.value)">
+                </div>
+                <div class="form-group" style="margin:0;flex:1">
+                    <label>Сумма (₽)</label>
+                    <input type="number" min="0" step="1" value="${ec.amount || ''}" placeholder="0"
+                        oninput="Calculator.onExtraCostChange(${i}, 'amount', this.value)">
+                </div>
+                <button class="btn-remove" title="Удалить" onclick="Calculator.removeExtraCost(${i})">&#10005;</button>
+            </div>
+        `).join('');
+    },
+
+    // ==========================================
     // ITEM EVENTS
     // ==========================================
 
@@ -1485,7 +1540,7 @@ const Calculator = {
             this.setText('fin-revenue', formatRub(fin.revenue));
 
             // Summary footer
-            const summary = calculateOrderSummary(this.items, this.hardwareItems, this.packagingItems);
+            const summary = calculateOrderSummary(this.items, this.hardwareItems, this.packagingItems, this.extraCosts);
             this.setText('sum-revenue', formatRub(summary.totalRevenue));
             this.setText('sum-earned', formatRub(summary.totalEarned));
             this.setText('sum-margin', formatPercent(summary.marginPercent));
@@ -1838,6 +1893,19 @@ const Calculator = {
             }
         });
 
+        // Extra costs
+        (this.extraCosts || []).forEach(ec => {
+            if (ec.amount > 0) {
+                invoiceRows.push({
+                    name: ec.name || 'Доп. расход',
+                    qty: 1,
+                    price: ec.amount,
+                    total: ec.amount,
+                    type: 'extra',
+                });
+            }
+        });
+
         let invoiceHtml = '';
         if (invoiceRows.length > 0) {
             const subtotal = invoiceRows.reduce((s, r) => s + r.total, 0);
@@ -1860,7 +1928,7 @@ const Calculator = {
 
             invoiceRows.forEach((r, i) => {
                 const bg = i % 2 === 0 ? '' : 'background:var(--bg);';
-                const icon = r.type === 'item' ? '&#9670;' : r.type === 'printing' ? '&#9998;' : r.type === 'hw' ? '&#9881;' : '&#9744;';
+                const icon = r.type === 'item' ? '&#9670;' : r.type === 'printing' ? '&#9998;' : r.type === 'hw' ? '&#9881;' : r.type === 'extra' ? '&#10010;' : '&#9744;';
                 invoiceHtml += `
                         <tr style="${bg}">
                             <td style="padding:6px 12px;">${icon} ${r.name}</td>
@@ -1999,7 +2067,7 @@ const Calculator = {
             try { this._doRecalculate(App.params); } catch (e) { /* ignore */ }
 
             const load = calculateProductionLoad(this.items, this.hardwareItems, this.packagingItems, App.params);
-            const summary = calculateOrderSummary(this.items, this.hardwareItems, this.packagingItems);
+            const summary = calculateOrderSummary(this.items, this.hardwareItems, this.packagingItems, this.extraCosts);
 
             const order = {
                 id: App.editingOrderId || undefined,
@@ -2148,6 +2216,18 @@ const Calculator = {
             });
         });
 
+        // Extra costs
+        (this.extraCosts || []).filter(ec => ec.amount > 0 || ec.name).forEach((ec, i) => {
+            items.push({
+                item_number: 300 + i,
+                item_type: 'extra_cost',
+                product_name: ec.name || 'Доп. расход',
+                quantity: 1,
+                cost_total: ec.amount || 0,
+                sell_price_item: ec.amount || 0,
+            });
+        });
+
         return items;
     },
 
@@ -2162,7 +2242,7 @@ const Calculator = {
         clearTimeout(this._autosaveTimer);
 
         const load = calculateProductionLoad(this.items, this.hardwareItems, this.packagingItems, App.params);
-        const summary = calculateOrderSummary(this.items, this.hardwareItems, this.packagingItems);
+        const summary = calculateOrderSummary(this.items, this.hardwareItems, this.packagingItems, this.extraCosts);
 
         const order = {
             id: App.editingOrderId || undefined,
@@ -2462,6 +2542,14 @@ const Calculator = {
             this.renderPackagingRow(this.packagingItems.length - 1);
         });
 
+        // Restore extra costs
+        const extraItems = dbItems.filter(i => i.item_type === 'extra_cost');
+        this.extraCosts = extraItems.map(ec => ({
+            name: ec.product_name || '',
+            amount: ec.cost_total || ec.sell_price_item || 0,
+        }));
+        this.renderExtraCosts();
+
         if (this.items.length === 0) this.addItem();
         this.recalculate();
 
@@ -2709,6 +2797,7 @@ const Calculator = {
                 name: item.product_name || 'Изделие',
                 qty: item.quantity,
                 price: item.sell_price_item,
+                colors: (item.colors || []).map(c => c.name).filter(Boolean),
             });
             // Printing (separate line per printing)
             (item.printings || []).forEach((pr, pi) => {
@@ -2750,6 +2839,18 @@ const Calculator = {
                     name: pkg.name || 'Упаковка',
                     qty: pkg.qty,
                     price: pkg.sell_price,
+                });
+            }
+        });
+
+        // Extra costs
+        (this.extraCosts || []).forEach(ec => {
+            if (ec.amount > 0) {
+                kpItems.push({
+                    type: 'extra',
+                    name: ec.name || 'Доп. расход',
+                    qty: 1,
+                    price: ec.amount,
                 });
             }
         });

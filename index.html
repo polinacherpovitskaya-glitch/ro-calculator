@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=45b">
+    <link rel="stylesheet" href="css/style.css?v=46">
 </head>
 <body>
 
@@ -83,6 +83,10 @@
             <a href="#warehouse" data-page="warehouse">
                 <span class="nav-icon">&#128230;</span>
                 <span>Склад</span>
+            </a>
+            <a href="#marketplaces" data-page="marketplaces">
+                <span class="nav-icon">&#128722;</span>
+                <span>Маркетплейсы</span>
             </a>
             <a href="#china" data-page="china">
                 <span class="nav-icon">&#127464;&#127475;</span>
@@ -289,6 +293,16 @@
                 </div>
                 <p class="text-muted" style="font-size:12px; margin-bottom:8px">Мешочки, пакеты, коробки и т.д.</p>
                 <div id="calc-packaging-list"></div>
+            </div>
+
+            <!-- Extra costs -->
+            <div class="card" id="calc-extra-costs">
+                <div class="card-header">
+                    <h3>Доп. расходы</h3>
+                    <button class="btn btn-sm btn-outline" onclick="Calculator.addExtraCost()">+ Добавить</button>
+                </div>
+                <p class="text-muted" style="font-size:12px; margin-bottom:8px">Дополнительные расходы (название + сумма), падают в смету как есть + НДС</p>
+                <div id="extra-costs-list"></div>
             </div>
 
             <!-- Unified pricing card -->
@@ -571,6 +585,16 @@
                 </div>
             </div>
 
+            <!-- Tabs: Пластик | Фурнитура | Упаковка -->
+            <div class="molds-tabs" style="display:flex;gap:4px;margin-bottom:16px;">
+                <button class="btn btn-sm tab-btn active" data-tab="plastic" onclick="Molds.switchTab('plastic')">&#9670; Пластик</button>
+                <button class="btn btn-sm tab-btn" data-tab="hardware" onclick="Molds.switchTab('hardware')">&#128295; Фурнитура</button>
+                <button class="btn btn-sm tab-btn" data-tab="packaging" onclick="Molds.switchTab('packaging')">&#128230; Упаковка</button>
+            </div>
+
+            <!-- TAB: Пластик (existing content) -->
+            <div id="molds-tab-plastic">
+
             <!-- Summary stats -->
             <div class="stats-grid" id="molds-stats">
                 <div class="stat-card">
@@ -811,6 +835,70 @@
                     <button class="btn btn-danger" id="mold-delete-btn" style="margin-left:auto; display:none;" onclick="Molds.deleteFromForm()">Удалить бланк</button>
                 </div>
             </div>
+
+            </div><!-- /molds-tab-plastic -->
+
+            <!-- TAB: Фурнитура -->
+            <div id="molds-tab-hardware" style="display:none">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                    <p class="text-muted" style="font-size:12px;margin:0;">Стоковая фурнитура с ценами по тиражам. Цена = (Китай×курс + доставка + ФОТ сборки) / (1 − маржа)</p>
+                    <button class="btn btn-primary btn-sm" onclick="Molds.showHwForm()">+ Добавить</button>
+                </div>
+                <div id="hw-blanks-container"></div>
+                <!-- HW edit form -->
+                <div class="card" id="hw-edit-form" style="display:none;margin-top:12px;">
+                    <div class="card-header">
+                        <h3 id="hw-form-title">Новая фурнитура</h3>
+                        <button class="btn btn-sm btn-outline" onclick="Molds.hideHwForm()">Закрыть</button>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group" style="flex:2"><label>Название</label><input type="text" id="hw-blank-name"></div>
+                        <div class="form-group"><label>Цена Китай (&#165;)</label><input type="number" min="0" step="0.1" id="hw-blank-price-cny"></div>
+                        <div class="form-group"><label>Доставка (&#8381;/шт)</label><input type="number" min="0" step="0.1" id="hw-blank-delivery"></div>
+                        <div class="form-group"><label>Сборка (шт/ч)</label><input type="number" min="1" id="hw-blank-speed"></div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group" style="flex:2"><label>Заметки</label><input type="text" id="hw-blank-notes" placeholder="Описание, размер..."></div>
+                        <div class="form-group"><label>Фото URL</label><input type="text" id="hw-blank-photo" placeholder="URL фото"></div>
+                    </div>
+                    <div style="margin-top:8px;display:flex;gap:8px;">
+                        <button class="btn btn-success btn-sm" onclick="Molds.saveHwBlank()">Сохранить</button>
+                        <button class="btn btn-outline btn-sm" onclick="Molds.hideHwForm()">Отмена</button>
+                        <button class="btn btn-danger btn-sm" id="hw-delete-btn" style="margin-left:auto;display:none;" onclick="Molds.deleteHwBlank()">Удалить</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TAB: Упаковка -->
+            <div id="molds-tab-packaging" style="display:none">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                    <p class="text-muted" style="font-size:12px;margin:0;">Упаковка: стоимость + доставка. Без сборки, без ФОТ, без косвенных.</p>
+                    <button class="btn btn-primary btn-sm" onclick="Molds.showPkgForm()">+ Добавить</button>
+                </div>
+                <div id="pkg-blanks-container"></div>
+                <!-- PKG edit form -->
+                <div class="card" id="pkg-edit-form" style="display:none;margin-top:12px;">
+                    <div class="card-header">
+                        <h3 id="pkg-form-title">Новая упаковка</h3>
+                        <button class="btn btn-sm btn-outline" onclick="Molds.hidePkgForm()">Закрыть</button>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group" style="flex:2"><label>Название</label><input type="text" id="pkg-blank-name"></div>
+                        <div class="form-group"><label>Стоимость (&#8381;/шт)</label><input type="number" min="0" step="0.1" id="pkg-blank-price"></div>
+                        <div class="form-group"><label>Доставка (&#8381;/шт)</label><input type="number" min="0" step="0.1" id="pkg-blank-delivery"></div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group" style="flex:2"><label>Заметки</label><input type="text" id="pkg-blank-notes" placeholder="Размер, описание..."></div>
+                        <div class="form-group"><label>Фото URL</label><input type="text" id="pkg-blank-photo" placeholder="URL фото"></div>
+                    </div>
+                    <div style="margin-top:8px;display:flex;gap:8px;">
+                        <button class="btn btn-success btn-sm" onclick="Molds.savePkgBlank()">Сохранить</button>
+                        <button class="btn btn-outline btn-sm" onclick="Molds.hidePkgForm()">Отмена</button>
+                        <button class="btn btn-danger btn-sm" id="pkg-delete-btn" style="margin-left:auto;display:none;" onclick="Molds.deletePkgBlank()">Удалить</button>
+                    </div>
+                </div>
+            </div>
+
         </div>
 
         <!-- ========== COLORS ========== -->
@@ -1586,6 +1674,98 @@
 
         </div>
 
+        <!-- ========== MARKETPLACES ========== -->
+        <div id="page-marketplaces" class="page">
+            <div class="page-header">
+                <h1>&#128722; Маркетплейсы</h1>
+                <button class="btn btn-primary" onclick="Marketplaces.showSetForm()">+ Новый набор</button>
+            </div>
+
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-label">Всего наборов</div>
+                    <div class="stat-value" id="mp-total-sets">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Ср. себестоимость</div>
+                    <div class="stat-value" id="mp-avg-cost">0 &#8381;</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Ср. цена МП</div>
+                    <div class="stat-value" id="mp-avg-price">0 &#8381;</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Ср. маржа</div>
+                    <div class="stat-value" id="mp-avg-margin">0%</div>
+                </div>
+            </div>
+
+            <div class="card" style="padding:12px 20px;margin-bottom:12px;">
+                <p class="text-muted" style="font-size:12px;margin:0;">Соберите набор (пластик + фурнитура + упаковка) → увидите цену продажи на маркетплейсе с учётом комиссии МП (46%), НДС (5%), ОСН (6%), коммерческих (6.5%) и целевой маржи (40%).</p>
+            </div>
+
+            <!-- Sets list -->
+            <div id="mp-sets-container"></div>
+
+            <!-- Set edit form -->
+            <div class="card" id="mp-set-form" style="display:none;margin-top:12px;">
+                <div class="card-header">
+                    <h3 id="mp-form-title">Новый набор</h3>
+                    <button class="btn btn-sm btn-outline" onclick="Marketplaces.hideSetForm()">Закрыть</button>
+                </div>
+                <div class="form-row">
+                    <div class="form-group" style="flex:2"><label>Название набора</label><input type="text" id="mp-set-name" placeholder="Ракетка + цепочка"></div>
+                    <div class="form-group"><label>Тираж (шт)</label><input type="number" min="1" id="mp-set-qty" value="500" oninput="Marketplaces.recalcSet()"></div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group"><label>Комиссия МП (%)</label><input type="number" min="0" max="100" step="1" id="mp-set-commission" value="46" oninput="Marketplaces.recalcSet()"></div>
+                    <div class="form-group"><label>НДС (%)</label><input type="number" min="0" max="100" step="0.1" id="mp-set-vat" value="5" oninput="Marketplaces.recalcSet()"></div>
+                    <div class="form-group"><label>ОСН (%)</label><input type="number" min="0" max="100" step="0.1" id="mp-set-osn" value="6" oninput="Marketplaces.recalcSet()"></div>
+                    <div class="form-group"><label>Коммерч. (%)</label><input type="number" min="0" max="100" step="0.1" id="mp-set-commercial" value="6.5" oninput="Marketplaces.recalcSet()"></div>
+                    <div class="form-group"><label>Целевая маржа (%)</label><input type="number" min="0" max="100" step="1" id="mp-set-margin" value="40" oninput="Marketplaces.recalcSet()"></div>
+                </div>
+
+                <!-- Plastic items -->
+                <div class="section-title" style="margin-top:8px;">&#9670; Пластик</div>
+                <div id="mp-plastic-items"></div>
+                <button class="btn btn-sm btn-outline" onclick="Marketplaces.addPlasticItem()" style="margin-top:4px;">+ Пластик</button>
+
+                <!-- Hardware items -->
+                <div class="section-title" style="margin-top:8px;">&#128295; Фурнитура</div>
+                <div id="mp-hw-items"></div>
+                <button class="btn btn-sm btn-outline" onclick="Marketplaces.addHwItem()" style="margin-top:4px;">+ Фурнитура</button>
+
+                <!-- Packaging items -->
+                <div class="section-title" style="margin-top:8px;">&#128230; Упаковка</div>
+                <div id="mp-pkg-items"></div>
+                <button class="btn btn-sm btn-outline" onclick="Marketplaces.addPkgItem()" style="margin-top:4px;">+ Упаковка</button>
+
+                <!-- Result block -->
+                <div id="mp-result-block" style="margin-top:12px;padding:16px;border-radius:12px;background:var(--accent-light);display:none;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
+                        <div>
+                            <div style="font-size:12px;color:var(--text-muted);">Себестоимость</div>
+                            <div style="font-size:20px;font-weight:700;" id="mp-calc-cost">0 &#8381;</div>
+                        </div>
+                        <div style="text-align:center;">
+                            <div style="font-size:12px;color:var(--text-muted);">&#10132;</div>
+                        </div>
+                        <div style="text-align:right;">
+                            <div style="font-size:12px;color:var(--green);font-weight:600;">Цена на маркетплейсе</div>
+                            <div style="font-size:28px;font-weight:800;color:var(--green);" id="mp-calc-price">0 &#8381;</div>
+                        </div>
+                    </div>
+                    <div id="mp-calc-details" style="margin-top:8px;font-size:11px;color:var(--text-muted);"></div>
+                </div>
+
+                <div style="margin-top:12px;display:flex;gap:8px;">
+                    <button class="btn btn-success" onclick="Marketplaces.saveSet()">Сохранить набор</button>
+                    <button class="btn btn-outline" onclick="Marketplaces.hideSetForm()">Отмена</button>
+                    <button class="btn btn-danger" id="mp-delete-btn" style="margin-left:auto;display:none;" onclick="Marketplaces.deleteSet()">Удалить</button>
+                </div>
+            </div>
+        </div>
+
         <!-- ========== CHINA PURCHASES ========== -->
         <div id="page-china" class="page">
             <div class="page-header">
@@ -2224,24 +2404,25 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="js/supabase.js?v=45b"></script>
-<script src="js/calculator.js?v=45b"></script>
-<script src="js/app.js?v=45b"></script>
-<script src="js/dashboard.js?v=45b"></script>
-<script src="js/order-detail.js?v=45b"></script>
-<script src="js/orders.js?v=45b"></script>
-<script src="js/analytics.js?v=45b"></script>
-<script src="js/molds.js?v=45b"></script>
-<script src="js/colors.js?v=45b"></script>
-<script src="js/kp.js?v=45b"></script>
-<script src="js/timetrack.js?v=45b"></script>
-<script src="js/tasks.js?v=45b"></script>
-<script src="js/gantt.js?v=45b"></script>
-<script src="js/import.js?v=45b"></script>
-<script src="js/factual.js?v=45b"></script>
-<script src="js/china.js?v=45b"></script>
-<script src="js/warehouse_photos.js?v=45b"></script>
-<script src="js/warehouse.js?v=45b"></script>
-<script src="js/settings.js?v=45b"></script>
+<script src="js/supabase.js?v=46"></script>
+<script src="js/calculator.js?v=46"></script>
+<script src="js/app.js?v=46"></script>
+<script src="js/dashboard.js?v=46"></script>
+<script src="js/order-detail.js?v=46"></script>
+<script src="js/orders.js?v=46"></script>
+<script src="js/analytics.js?v=46"></script>
+<script src="js/molds.js?v=46"></script>
+<script src="js/colors.js?v=46"></script>
+<script src="js/kp.js?v=46"></script>
+<script src="js/timetrack.js?v=46"></script>
+<script src="js/tasks.js?v=46"></script>
+<script src="js/gantt.js?v=46"></script>
+<script src="js/import.js?v=46"></script>
+<script src="js/factual.js?v=46"></script>
+<script src="js/china.js?v=46"></script>
+<script src="js/warehouse_photos.js?v=46"></script>
+<script src="js/marketplaces.js?v=46"></script>
+<script src="js/warehouse.js?v=46"></script>
+<script src="js/settings.js?v=46"></script>
 </body>
 </html>
