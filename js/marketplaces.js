@@ -239,7 +239,7 @@ const Marketplaces = {
     // ==========================================
 
     _renderSearchableSelect(containerId, items, selectedId, placeholder, onSelectFn) {
-        // items = [{id, name, detail}]
+        // items = [{id, name, detail, photo?}]
         const uid = containerId + '_' + Math.random().toString(36).slice(2, 6);
         const selected = items.find(i => i.id === selectedId);
         return `
@@ -249,14 +249,22 @@ const Marketplaces = {
                     placeholder="${placeholder}"
                     onfocus="Marketplaces._openDropdown('${uid}')"
                     oninput="Marketplaces._filterDropdown('${uid}')">
-                <div class="mp-dropdown" id="${uid}_dd" style="display:none;position:absolute;top:100%;left:0;right:0;max-height:200px;overflow-y:auto;background:var(--card-bg);border:1px solid var(--border);border-radius:8px;z-index:100;box-shadow:0 4px 12px rgba(0,0,0,0.15);">
-                    ${items.map(i => `<div class="mp-dd-item" data-id="${i.id}" data-name="${this._esc(i.name)}"
+                <div class="mp-dropdown" id="${uid}_dd" style="display:none;position:absolute;top:100%;left:0;right:0;max-height:260px;overflow-y:auto;background:var(--card-bg);border:1px solid var(--border);border-radius:8px;z-index:100;box-shadow:0 4px 12px rgba(0,0,0,0.15);">
+                    ${items.map(i => {
+                        const photoHtml = i.photo
+                            ? `<img src="${this._esc(i.photo)}" style="width:36px;height:36px;object-fit:cover;border-radius:4px;flex-shrink:0;border:1px solid var(--border);" onerror="this.style.display='none'">`
+                            : `<span style="width:36px;height:36px;display:flex;align-items:center;justify-content:center;background:var(--accent-light);border-radius:4px;flex-shrink:0;font-size:12px;color:var(--text-muted);">?</span>`;
+                        return `<div class="mp-dd-item" data-id="${i.id}" data-name="${this._esc(i.name)}"
                         onclick="${onSelectFn}${i.id}); Marketplaces._closeDropdown('${uid}')"
-                        style="padding:6px 10px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--border);"
+                        style="padding:6px 10px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;"
                         onmouseover="this.style.background='var(--accent-light)'" onmouseout="this.style.background=''">
-                        <div style="font-weight:600;">${this._esc(i.name)}</div>
-                        ${i.detail ? `<div style="font-size:10px;color:var(--text-muted);">${this._esc(i.detail)}</div>` : ''}
-                    </div>`).join('')}
+                        ${photoHtml}
+                        <div style="min-width:0;">
+                            <div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${this._esc(i.name)}</div>
+                            ${i.detail ? `<div style="font-size:10px;color:var(--text-muted);">${this._esc(i.detail)}</div>` : ''}
+                        </div>
+                    </div>`;
+                    }).join('')}
                 </div>
             </div>`;
     },
@@ -302,6 +310,7 @@ const Marketplaces = {
             id: b.id,
             name: b.name,
             detail: b.collection ? b.collection + ' · ' + (b.weight_grams || 0) + 'г' : (b.weight_grams || 0) + 'г',
+            photo: b.photo_url || '',
         }));
 
         document.getElementById('mp-plastic-items').innerHTML = this._plasticItems.map((item, i) => `
@@ -319,9 +328,9 @@ const Marketplaces = {
         // Hardware — all warehouse hw + catalog + custom option
         const hwList = [];
         // Catalog items
-        this._hwCatalog.forEach(b => hwList.push({ id: b.id, name: b.name, detail: '¥' + (b.price_cny||0) + ' · каталог', _type: 'catalog' }));
+        this._hwCatalog.forEach(b => hwList.push({ id: b.id, name: b.name, detail: '¥' + (b.price_cny||0) + ' · каталог', photo: b.photo_url || b._whPhoto || '', _type: 'catalog' }));
         // Warehouse items
-        this._allWarehouseHw.forEach(w => hwList.push({ id: 10000 + w.id, name: w.name + (w.size ? ' ' + w.size : '') + (w.color ? ' ' + w.color : ''), detail: formatRub(w.price_per_unit || 0) + '/шт · склад', _type: 'warehouse', _whId: w.id }));
+        this._allWarehouseHw.forEach(w => hwList.push({ id: 10000 + w.id, name: w.name + (w.size ? ' ' + w.size : '') + (w.color ? ' ' + w.color : ''), detail: formatRub(w.price_per_unit || 0) + '/шт · склад', photo: w.photo_thumbnail || w.photo_url || '', _type: 'warehouse', _whId: w.id }));
 
         document.getElementById('mp-hw-items').innerHTML = this._hwItems.map((item, i) => {
             const isCustom = item.source === 'custom';
@@ -352,8 +361,8 @@ const Marketplaces = {
 
         // Packaging — all warehouse pkg + catalog + custom
         const pkgList = [];
-        this._pkgCatalog.forEach(b => pkgList.push({ id: b.id, name: b.name, detail: formatRub(b.price_per_unit || 0) + '/шт · каталог', _type: 'catalog' }));
-        this._allWarehousePkg.forEach(w => pkgList.push({ id: 10000 + w.id, name: w.name + (w.size ? ' ' + w.size : ''), detail: formatRub(w.price_per_unit || 0) + '/шт · склад', _type: 'warehouse', _whId: w.id }));
+        this._pkgCatalog.forEach(b => pkgList.push({ id: b.id, name: b.name, detail: formatRub(b.price_per_unit || 0) + '/шт · каталог', photo: b.photo_url || '', _type: 'catalog' }));
+        this._allWarehousePkg.forEach(w => pkgList.push({ id: 10000 + w.id, name: w.name + (w.size ? ' ' + w.size : ''), detail: formatRub(w.price_per_unit || 0) + '/шт · склад', photo: w.photo_thumbnail || w.photo_url || '', _type: 'warehouse', _whId: w.id }));
 
         document.getElementById('mp-pkg-items').innerHTML = this._pkgItems.map((item, i) => {
             const isCustom = item.source === 'custom';
