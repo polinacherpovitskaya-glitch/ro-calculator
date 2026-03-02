@@ -1045,6 +1045,41 @@ table .text-center { text-align: center; }
     opacity: 1;
 }
 
+.update-banner {
+    position: fixed;
+    top: 16px;
+    right: 16px;
+    z-index: 1100;
+    border: 1px solid #1d4ed8;
+    background: var(--accent);
+    color: #fff;
+    border-radius: 999px;
+    padding: 8px 12px;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    box-shadow: var(--shadow-lg);
+    transition: transform 0.15s ease, opacity 0.15s ease, background 0.15s ease;
+}
+
+.update-banner:hover {
+    background: #1d4ed8;
+    transform: translateY(-1px);
+}
+
+.update-banner:active {
+    transform: translateY(0);
+}
+
+@media (max-width: 768px) {
+    .update-banner {
+        top: 10px;
+        right: 10px;
+        font-size: 11px;
+        padding: 7px 10px;
+    }
+}
+
 /* =============================================
    PRINTING ROWS (inside item blocks)
    ============================================= */

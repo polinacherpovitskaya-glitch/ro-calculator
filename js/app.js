@@ -10,6 +10,9 @@ const App = {
     templates: null,
     params: null,
     editingOrderId: null,
+    _updateCheckTimer: null,
+    _updateCheckMs: 120000,
+    _onWindowFocus: null,
 
     async init() {
         // Check auth
@@ -52,6 +55,15 @@ const App = {
         localStorage.removeItem('ro_calc_auth_ts');
         document.getElementById('auth-screen').style.display = 'flex';
         document.getElementById('app-layout').classList.remove('active');
+        this.hideUpdateBanner();
+        if (this._updateCheckTimer) {
+            clearInterval(this._updateCheckTimer);
+            this._updateCheckTimer = null;
+        }
+        if (this._onWindowFocus) {
+            window.removeEventListener('focus', this._onWindowFocus);
+            this._onWindowFocus = null;
+        }
     },
 
     simpleHash(str) {
@@ -88,6 +100,7 @@ const App = {
         this.params = getProductionParams(this.settings);
 
         this.handleRoute();
+        this.startUpdateChecker();
     },
 
     // === ROUTING ===
@@ -153,6 +166,51 @@ const App = {
         el.textContent = message;
         el.classList.add('show');
         setTimeout(() => el.classList.remove('show'), duration);
+    },
+
+    // === UPDATE CHECKER ===
+
+    startUpdateChecker() {
+        if (this._updateCheckTimer) return;
+        this.checkForUpdate();
+        this._updateCheckTimer = setInterval(() => this.checkForUpdate(), this._updateCheckMs);
+        if (!this._onWindowFocus) {
+            this._onWindowFocus = () => this.checkForUpdate();
+            window.addEventListener('focus', this._onWindowFocus);
+        }
+    },
+
+    async checkForUpdate() {
+        try {
+            const resp = await fetch('js/app.js?t=' + Date.now(), { cache: 'no-store' });
+            if (!resp.ok) return;
+            const txt = await resp.text();
+            const m = txt.match(/const\s+APP_VERSION\s*=\s*['"]([^'"]+)['"]/);
+            const remoteVersion = m && m[1] ? m[1] : null;
+            if (!remoteVersion) return;
+
+            if (remoteVersion !== APP_VERSION) this.showUpdateBanner(remoteVersion);
+            else this.hideUpdateBanner();
+        } catch (e) {
+            // Silently ignore: no internet or temporary network issues.
+        }
+    },
+
+    showUpdateBanner(remoteVersion) {
+        const banner = document.getElementById('update-banner');
+        if (!banner) return;
+        banner.textContent = '⟳ Обновление ' + remoteVersion;
+        banner.style.display = 'inline-flex';
+    },
+
+    hideUpdateBanner() {
+        const banner = document.getElementById('update-banner');
+        if (!banner) return;
+        banner.style.display = 'none';
+    },
+
+    reloadForUpdate() {
+        window.location.reload();
     },
 
     // === UTILS ===
