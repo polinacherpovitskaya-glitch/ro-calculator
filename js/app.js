@@ -719,8 +719,8 @@ const Calculator = {
             china_delivery_method: 'avia', // 'avia_fast' | 'avia' | 'auto'
             name: '',
             qty: 0,
-            assembly_speed: 0,      // шт/ч (calculated from minutes)
-            assembly_minutes: 0,    // мин/шт (user input)
+            assembly_speed: 0,      // шт/ч (for calculator.js)
+            assembly_minutes: 0,    // шт/мин (user input, display field)
             price_cny: 0,           // Price in CNY (china/custom)
             weight_grams: 0,        // Weight in grams (china/custom)
             price: 0,               // Price in RUB per unit
@@ -821,7 +821,7 @@ const Calculator = {
                 </div>
                 <div class="form-group" style="margin:0">
                     <label>${this._assemblyTimingLabel()}</label>
-                    <input type="number" min="0" step="0.1" value="${minsDisplay}" oninput="Calculator.onHwMinutes(${idx}, this.value)" placeholder="\u043d\u0430\u043f\u0440. 0.5">
+                    <input type="number" min="0" step="1" value="${minsDisplay}" oninput="Calculator.onHwMinutes(${idx}, this.value)" placeholder="\u043d\u0430\u043f\u0440. 9">
                 </div>
             </div>`;
         } else if (isChina) {
@@ -853,7 +853,7 @@ const Calculator = {
                 </div>
                 <div class="form-group" style="margin:0">
                     <label>${this._assemblyTimingLabel()}</label>
-                    <input type="number" min="0" step="0.1" value="${minsDisplay}" oninput="Calculator.onHwMinutes(${idx}, this.value)" placeholder="\u043d\u0430\u043f\u0440. 0.5">
+                    <input type="number" min="0" step="1" value="${minsDisplay}" oninput="Calculator.onHwMinutes(${idx}, this.value)" placeholder="\u043d\u0430\u043f\u0440. 9">
                 </div>
                 <div class="form-group" style="margin:0">
                     <label>\u0414\u043e\u0441\u0442\u0430\u0432\u043a\u0430</label>
@@ -874,7 +874,7 @@ const Calculator = {
                 </div>
                 <div class="form-group" style="margin:0">
                     <label>${this._assemblyTimingLabel()}</label>
-                    <input type="number" min="0" step="0.1" value="${minsDisplay}" oninput="Calculator.onHwMinutes(${idx}, this.value)" placeholder="\u043d\u0430\u043f\u0440. 0.5">
+                    <input type="number" min="0" step="1" value="${minsDisplay}" oninput="Calculator.onHwMinutes(${idx}, this.value)" placeholder="\u043d\u0430\u043f\u0440. 9">
                 </div>
                 <div class="form-group" style="margin:0">
                     <label>\u0426\u0435\u043d\u0430 (\u00a5/\u0448\u0442)</label>
@@ -1030,10 +1030,10 @@ const Calculator = {
     },
 
     onHwMinutes(idx, value) {
-        const mins = parseFloat(value) || 0;
-        this.hardwareItems[idx].assembly_minutes = mins;
-        // Convert minutes per unit → pieces per hour
-        this.hardwareItems[idx].assembly_speed = mins > 0 ? round2(60 / mins) : 0;
+        const pcsPerMin = parseFloat(value) || 0;
+        this.hardwareItems[idx].assembly_minutes = pcsPerMin;
+        // Convert шт/мин → шт/час for calculator
+        this.hardwareItems[idx].assembly_speed = round2(pcsPerMin * 60);
         this.recalculate();
         this.scheduleAutosave();
     },
@@ -1043,7 +1043,7 @@ const Calculator = {
     // ==========================================
 
     _assemblyTimingLabel() {
-        return `Сборка (мин/шт) <span onclick="Calculator.showAssemblyTiming()" style="cursor:pointer;color:var(--accent);font-weight:700;font-size:13px;margin-left:2px;" title="Справочник тайминга">ⓘ</span>`;
+        return `Сборка (шт/мин) <span onclick="Calculator.showAssemblyTiming()" style="cursor:pointer;color:var(--accent);font-weight:700;font-size:13px;margin-left:2px;" title="Справочник тайминга">ⓘ</span>`;
     },
 
     showAssemblyTiming() {
@@ -1263,7 +1263,7 @@ const Calculator = {
                 </div>
                 <div class="form-group" style="margin:0">
                     <label>${this._assemblyTimingLabel()}</label>
-                    <input type="number" min="0" step="0.1" value="${minsDisplay}" oninput="Calculator.onPkgMinutes(${idx}, this.value)" placeholder="\u043d\u0430\u043f\u0440. 0.5">
+                    <input type="number" min="0" step="1" value="${minsDisplay}" oninput="Calculator.onPkgMinutes(${idx}, this.value)" placeholder="\u043d\u0430\u043f\u0440. 9">
                 </div>
             </div>`;
         } else if (isChina) {
@@ -1295,7 +1295,7 @@ const Calculator = {
                 </div>
                 <div class="form-group" style="margin:0">
                     <label>${this._assemblyTimingLabel()}</label>
-                    <input type="number" min="0" step="0.1" value="${minsDisplay}" oninput="Calculator.onPkgMinutes(${idx}, this.value)" placeholder="\u043d\u0430\u043f\u0440. 0.5">
+                    <input type="number" min="0" step="1" value="${minsDisplay}" oninput="Calculator.onPkgMinutes(${idx}, this.value)" placeholder="\u043d\u0430\u043f\u0440. 9">
                 </div>
                 <div class="form-group" style="margin:0">
                     <label>\u0414\u043e\u0441\u0442\u0430\u0432\u043a\u0430</label>
@@ -1316,7 +1316,7 @@ const Calculator = {
                 </div>
                 <div class="form-group" style="margin:0">
                     <label>${this._assemblyTimingLabel()}</label>
-                    <input type="number" min="0" step="0.1" value="${minsDisplay}" oninput="Calculator.onPkgMinutes(${idx}, this.value)" placeholder="\u043d\u0430\u043f\u0440. 0.5">
+                    <input type="number" min="0" step="1" value="${minsDisplay}" oninput="Calculator.onPkgMinutes(${idx}, this.value)" placeholder="\u043d\u0430\u043f\u0440. 9">
                 </div>
                 <div class="form-group" style="margin:0">
                     <label>\u0426\u0435\u043d\u0430 (\u00a5/\u0448\u0442)</label>
@@ -1462,10 +1462,10 @@ const Calculator = {
     },
 
     onPkgMinutes(idx, value) {
-        const mins = parseFloat(value) || 0;
-        this.packagingItems[idx].assembly_minutes = mins;
-        // Convert minutes per unit → pieces per hour
-        this.packagingItems[idx].assembly_speed = mins > 0 ? round2(60 / mins) : 0;
+        const pcsPerMin = parseFloat(value) || 0;
+        this.packagingItems[idx].assembly_minutes = pcsPerMin;
+        // Convert шт/мин → шт/час for calculator
+        this.packagingItems[idx].assembly_speed = round2(pcsPerMin * 60);
         this.recalculate();
         this.scheduleAutosave();
     },
@@ -2859,8 +2859,8 @@ const Calculator = {
             hw.name = dbHw.product_name || '';
             hw.qty = dbHw.quantity || 0;
             hw.assembly_speed = dbHw.hardware_assembly_speed || 0;
-            // Convert шт/ч → мин/шт for display
-            hw.assembly_minutes = hw.assembly_speed > 0 ? round2(60 / hw.assembly_speed) : 0;
+            // Convert шт/ч → шт/мин for display
+            hw.assembly_minutes = hw.assembly_speed > 0 ? round2(hw.assembly_speed / 60) : 0;
             hw.price = dbHw.hardware_price_per_unit || 0;
             // Support both old per-unit and new total delivery
             const perUnit = dbHw.hardware_delivery_per_unit || 0;
@@ -2891,8 +2891,8 @@ const Calculator = {
             pkg.name = dbPkg.product_name || '';
             pkg.qty = dbPkg.quantity || 0;
             pkg.assembly_speed = dbPkg.packaging_assembly_speed || 0;
-            // Convert шт/ч → мин/шт for display
-            pkg.assembly_minutes = pkg.assembly_speed > 0 ? round2(60 / pkg.assembly_speed) : 0;
+            // Convert шт/ч → шт/мин for display
+            pkg.assembly_minutes = pkg.assembly_speed > 0 ? round2(pkg.assembly_speed / 60) : 0;
             pkg.price = dbPkg.packaging_price_per_unit || 0;
             const perUnit = dbPkg.packaging_delivery_per_unit || 0;
             pkg.delivery_total = dbPkg.packaging_delivery_total || (perUnit * pkg.qty);
