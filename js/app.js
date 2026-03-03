@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v47b';
+const APP_VERSION = 'v48';
 
 const App = {
     currentPage: 'dashboard',
@@ -291,6 +291,9 @@ const Calculator = {
                 }
                 if (!e.target.closest('.color-picker')) {
                     document.querySelectorAll('.color-picker-dropdown').forEach(d => d.style.display = 'none');
+                }
+                if (!e.target.closest('.china-picker')) {
+                    document.querySelectorAll('.china-picker-dropdown').forEach(d => d.style.display = 'none');
                 }
             });
             // Force-save on page unload if dirty
@@ -880,28 +883,13 @@ const Calculator = {
                 </div>
             </div>`;
         } else if (isChina) {
-            const chinaItem = hw.china_item_id ? (ChinaCatalog._items || []).find(i => i.id === hw.china_item_id) : null;
-            const photoUrl = chinaItem?.photo_url || '';
-            const proxied = typeof ChinaCatalog._proxyPhoto === 'function' ? ChinaCatalog._proxyPhoto(photoUrl) : photoUrl;
-            const photoHtml = proxied
-                ? `<img src="${this._escAttr(proxied)}" style="width:32px;height:32px;object-fit:cover;border-radius:4px;border:1px solid var(--border);" onerror="this.style.display='none'" loading="lazy">`
-                : '';
+            const chinaPickerHtml = this._buildChinaPickerHtml('hw', idx, hw);
             modeHtml = `
+            <div class="form-group" style="margin:0 0 8px">
+                <label>\u041f\u043e\u0437\u0438\u0446\u0438\u044f \u0438\u0437 \u043a\u0430\u0442\u0430\u043b\u043e\u0433\u0430 \u041a\u0438\u0442\u0430\u0439</label>
+                ${chinaPickerHtml}
+            </div>
             <div class="form-row" style="align-items:end">
-                <div class="form-group" style="margin:0;flex:2;">
-                    <label>\u041f\u043e\u0437\u0438\u0446\u0438\u044f \u0438\u0437 \u043a\u0430\u0442\u0430\u043b\u043e\u0433\u0430 \u041a\u0438\u0442\u0430\u0439</label>
-                    <div style="position:relative;">
-                        <div style="display:flex;gap:6px;align-items:center;">
-                            ${photoHtml}
-                            <input type="text" id="hw-china-search-${idx}" placeholder="\u041f\u043e\u0438\u0441\u043a \u043f\u043e \u043a\u0430\u0442\u0430\u043b\u043e\u0433\u0443..."
-                                value="${this._esc(hw.name || '')}"
-                                oninput="Calculator.searchChinaCatalog('hw', ${idx}, this.value)"
-                                onfocus="if(this.value.length>=1) Calculator.searchChinaCatalog('hw', ${idx}, this.value)"
-                                style="flex:1">
-                        </div>
-                        <div id="hw-china-dropdown-${idx}" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:100;background:#fff;border:1px solid var(--border);border-radius:8px;max-height:240px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,0.15);"></div>
-                    </div>
-                </div>
                 <div class="form-group" style="margin:0">
                     <label>\u041a\u043e\u043b-\u0432\u043e</label>
                     <input type="number" min="0" value="${hw.qty || ''}" oninput="Calculator.onHwNum(${idx}, 'qty', this.value)">
@@ -1161,8 +1149,158 @@ const Calculator = {
     },
 
     // ==========================================
-    // CHINA CATALOG — shared methods for HW & PKG
+    // CHINA CATALOG — visual picker + shared methods
     // ==========================================
+
+    /**
+     * Build the visual China catalog picker HTML (mold-picker style)
+     */
+    _buildChinaPickerHtml(type, idx, item) {
+        const chinaItem = item.china_item_id ? (ChinaCatalog._items || []).find(i => i.id === item.china_item_id) : null;
+        const cnyRate = ChinaCatalog._cnyRate || 12.5;
+
+        // Selected display
+        let selectedHtml;
+        if (chinaItem) {
+            const photoUrl = chinaItem.photo_url || '';
+            const proxied = typeof ChinaCatalog._proxyPhoto === 'function' ? ChinaCatalog._proxyPhoto(photoUrl) : photoUrl;
+            const photoEl = proxied
+                ? `<img src="${this._escAttr(proxied)}" style="width:40px;height:40px;object-fit:cover;border-radius:6px;border:1px solid var(--border);flex-shrink:0" onerror="this.style.display='none'" loading="lazy">`
+                : `<span style="width:40px;height:40px;display:flex;align-items:center;justify-content:center;background:var(--accent-light);border-radius:6px;font-size:14px;flex-shrink:0">🇨🇳</span>`;
+            const priceRub = round2(chinaItem.price_cny * cnyRate);
+            selectedHtml = `<div style="display:flex;gap:8px;align-items:center;flex:1;min-width:0">
+                ${photoEl}
+                <div style="min-width:0"><div style="font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${this._esc(chinaItem.name)}${chinaItem.size ? ' ' + this._esc(chinaItem.size) : ''}</div>
+                <div style="font-size:10px;color:var(--text-muted)">${this._esc(chinaItem.category_ru)} · ${chinaItem.weight_grams || 0}г · ${chinaItem.price_cny}¥ ≈ ${formatRub(priceRub)}</div></div>
+            </div>`;
+        } else {
+            selectedHtml = '<span style="color:var(--text-muted);font-size:13px">-- Выбрать из каталога Китай --</span>';
+        }
+
+        return `<div class="china-picker" id="${type}-china-picker-${idx}" style="position:relative">
+            <div class="china-picker-selected" onclick="Calculator.toggleChinaPicker('${type}', ${idx})" style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius);cursor:pointer;background:var(--card-bg)">
+                ${selectedHtml}
+                <span style="flex-shrink:0;color:var(--text-muted);font-size:10px;margin-left:8px">&#9662;</span>
+            </div>
+            <div class="china-picker-dropdown" id="${type}-china-dd-${idx}" style="display:none;position:absolute;z-index:100;background:var(--card-bg);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow-lg);width:100%;max-width:480px;overflow:hidden;">
+                <div style="padding:6px 8px;border-bottom:1px solid var(--border)">
+                    <input type="text" id="${type}-china-filter-${idx}" placeholder="Поиск по каталогу..." oninput="Calculator.filterChinaPicker('${type}', ${idx})" style="width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:4px;font-size:12px">
+                </div>
+                <div id="${type}-china-cats-${idx}" style="padding:4px 8px;display:flex;flex-wrap:wrap;gap:4px;border-bottom:1px solid var(--border)"></div>
+                <div id="${type}-china-list-${idx}" class="china-picker-list" style="max-height:320px;overflow-y:auto;padding:4px"></div>
+            </div>
+        </div>`;
+    },
+
+    /**
+     * Render picker list items with filtering
+     */
+    _renderChinaPickerList(type, idx) {
+        const listEl = document.getElementById(type + '-china-list-' + idx);
+        if (!listEl) return;
+
+        const searchEl = document.getElementById(type + '-china-filter-' + idx);
+        const query = (searchEl?.value || '').toLowerCase().trim();
+
+        // Get active category
+        const catsEl = document.getElementById(type + '-china-cats-' + idx);
+        const activePill = catsEl?.querySelector('.cat-pill.active');
+        const activeCat = activePill?.dataset.cat || 'all';
+
+        const items = (ChinaCatalog._items || []).filter(item => {
+            if (activeCat !== 'all' && item.category !== activeCat) return false;
+            if (query) {
+                const s = [item.name, item.category_ru, item.size, item.notes].filter(Boolean).join(' ').toLowerCase();
+                if (!s.includes(query)) return false;
+            }
+            return true;
+        });
+
+        const cnyRate = ChinaCatalog._cnyRate || 12.5;
+        if (!items.length) {
+            listEl.innerHTML = '<div style="padding:12px;color:var(--text-muted);font-size:12px;text-align:center;">Ничего не найдено</div>';
+            return;
+        }
+
+        listEl.innerHTML = items.map(item => {
+            const photoUrl = item.photo_url || '';
+            const proxied = typeof ChinaCatalog._proxyPhoto === 'function' ? ChinaCatalog._proxyPhoto(photoUrl) : photoUrl;
+            const photoHtml = proxied
+                ? `<img src="${this._escAttr(proxied)}" style="width:48px;height:48px;object-fit:cover;border-radius:6px;border:1px solid var(--border);flex-shrink:0" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'" loading="lazy"><span style="width:48px;height:48px;display:none;align-items:center;justify-content:center;background:var(--accent-light);border-radius:6px;font-size:16px;flex-shrink:0">📦</span>`
+                : `<span style="width:48px;height:48px;display:flex;align-items:center;justify-content:center;background:var(--accent-light);border-radius:6px;font-size:16px;flex-shrink:0">📦</span>`;
+            const priceRub = round2(item.price_cny * cnyRate);
+            return `<div class="china-picker-item" style="display:flex;gap:8px;align-items:center;padding:6px 8px;cursor:pointer;border-radius:6px;"
+                      onmouseover="this.style.background='var(--bg)'" onmouseout="this.style.background=''"
+                      onclick="Calculator.selectChinaCatalogItem('${type}', ${idx}, ${item.id})">
+                ${photoHtml}
+                <div style="flex:1;min-width:0">
+                    <div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${this._esc(item.name)}${item.size ? ' <span style="color:var(--text-muted);font-weight:400">' + this._esc(item.size) + '</span>' : ''}</div>
+                    <div style="font-size:10px;color:var(--text-muted)">${this._esc(item.category_ru)} · ${item.weight_grams || 0}г · ${item.price_cny}¥ ≈ ${formatRub(priceRub)}</div>
+                </div>
+            </div>`;
+        }).join('');
+    },
+
+    /**
+     * Render category pills
+     */
+    _renderChinaPickerCats(type, idx) {
+        const catsEl = document.getElementById(type + '-china-cats-' + idx);
+        if (!catsEl) return;
+        const categories = ChinaCatalog.getCategories();
+        let html = `<span class="cat-pill active" data-cat="all" onclick="Calculator.filterChinaPickerCat('${type}', ${idx}, this)" style="padding:3px 8px;border-radius:12px;font-size:11px;cursor:pointer;background:var(--accent);color:#fff;white-space:nowrap">Все</span>`;
+        categories.forEach((label, key) => {
+            html += `<span class="cat-pill" data-cat="${this._escAttr(key)}" onclick="Calculator.filterChinaPickerCat('${type}', ${idx}, this)" style="padding:3px 8px;border-radius:12px;font-size:11px;cursor:pointer;background:var(--bg);color:var(--text-secondary);white-space:nowrap">${this._esc(label)}</span>`;
+        });
+        catsEl.innerHTML = html;
+    },
+
+    async toggleChinaPicker(type, idx) {
+        const dd = document.getElementById(type + '-china-dd-' + idx);
+        if (!dd) return;
+        const isOpen = dd.style.display !== 'none';
+        // Close all pickers first
+        document.querySelectorAll('.china-picker-dropdown').forEach(d => d.style.display = 'none');
+        document.querySelectorAll('.mold-picker-dropdown').forEach(d => d.style.display = 'none');
+        document.querySelectorAll('.color-picker-dropdown').forEach(d => d.style.display = 'none');
+        if (!isOpen) {
+            // Lazy-load catalog
+            if ((ChinaCatalog._items || []).length === 0) {
+                ChinaCatalog._items = await ChinaCatalog._loadItems();
+            }
+            dd.style.display = '';
+            this._renderChinaPickerCats(type, idx);
+            this._renderChinaPickerList(type, idx);
+            // Focus search
+            const input = dd.querySelector('input[type="text"]');
+            if (input) input.focus();
+        }
+    },
+
+    closeChinaPicker(type, idx) {
+        const dd = document.getElementById(type + '-china-dd-' + idx);
+        if (dd) dd.style.display = 'none';
+    },
+
+    filterChinaPicker(type, idx) {
+        this._renderChinaPickerList(type, idx);
+    },
+
+    filterChinaPickerCat(type, idx, pillEl) {
+        // Update active pill style
+        const catsEl = document.getElementById(type + '-china-cats-' + idx);
+        if (catsEl) {
+            catsEl.querySelectorAll('.cat-pill').forEach(p => {
+                p.style.background = 'var(--bg)';
+                p.style.color = 'var(--text-secondary)';
+                p.classList.remove('active');
+            });
+        }
+        pillEl.style.background = 'var(--accent)';
+        pillEl.style.color = '#fff';
+        pillEl.classList.add('active');
+        this._renderChinaPickerList(type, idx);
+    },
 
     _recalcChinaPricing(item) {
         if (item.source !== 'china' && item.source !== 'custom') return;
@@ -1177,45 +1315,6 @@ const Calculator = {
         const weightKg = (item.weight_grams || 0) / 1000;
         item.delivery_price = round2(weightKg * rateUsd * usdRate * (1 + deliverySurcharge));
         item.delivery_total = round2(item.delivery_price * (item.qty || 0));
-    },
-
-    async searchChinaCatalog(type, idx, query) {
-        // Lazy load catalog items
-        if ((ChinaCatalog._items || []).length === 0) {
-            ChinaCatalog._items = await ChinaCatalog._loadItems();
-        }
-        const dropdown = document.getElementById(type + '-china-dropdown-' + idx);
-        if (!dropdown) return;
-        query = (query || '').toLowerCase().trim();
-        if (query.length < 1) { dropdown.style.display = 'none'; return; }
-        const items = ChinaCatalog._items.filter(item => {
-            const s = [item.name, item.category_ru, item.size, item.notes].filter(Boolean).join(' ').toLowerCase();
-            return s.includes(query);
-        }).slice(0, 15);
-        if (!items.length) {
-            dropdown.innerHTML = '<div style="padding:10px;color:var(--text-muted);font-size:12px;">\u041d\u0438\u0447\u0435\u0433\u043e \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d\u043e</div>';
-            dropdown.style.display = '';
-            return;
-        }
-        const cnyRate = ChinaCatalog._cnyRate || 12.5;
-        dropdown.innerHTML = items.map(item => {
-            const priceRub = round2(item.price_cny * cnyRate);
-            const photoUrl = item.photo_url || '';
-            const proxied = typeof ChinaCatalog._proxyPhoto === 'function' ? ChinaCatalog._proxyPhoto(photoUrl) : photoUrl;
-            const photoHtml = proxied
-                ? `<img src="${this._escAttr(proxied)}" style="width:32px;height:32px;object-fit:cover;border-radius:4px;border:1px solid var(--border);" onerror="this.style.display='none'" loading="lazy">`
-                : `<span style="width:32px;height:32px;display:flex;align-items:center;justify-content:center;background:var(--accent-light);border-radius:4px;font-size:11px;">\ud83c\udde8\ud83c\uddf3</span>`;
-            return `<div style="display:flex;gap:8px;align-items:center;padding:6px 10px;cursor:pointer;border-bottom:1px solid var(--border);"
-                      onmouseover="this.style.background='var(--bg)'" onmouseout="this.style.background=''"
-                      onclick="Calculator.selectChinaCatalogItem('${type}', ${idx}, ${item.id})">
-                ${photoHtml}
-                <div style="flex:1;min-width:0;">
-                    <div style="font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${this._esc(item.name)}</div>
-                    <div style="font-size:10px;color:var(--text-muted);">${this._esc(item.category_ru)} \u00b7 ${item.weight_grams || 0}\u0433 \u00b7 ${item.price_cny}\u00a5 \u2248 ${formatRub(priceRub)}</div>
-                </div>
-            </div>`;
-        }).join('');
-        dropdown.style.display = '';
     },
 
     selectChinaCatalogItem(type, idx, itemId) {
@@ -1347,28 +1446,13 @@ const Calculator = {
                 </div>
             </div>`;
         } else if (isChina) {
-            const chinaItem = pkg.china_item_id ? (ChinaCatalog._items || []).find(i => i.id === pkg.china_item_id) : null;
-            const photoUrl = chinaItem?.photo_url || '';
-            const proxied = typeof ChinaCatalog._proxyPhoto === 'function' ? ChinaCatalog._proxyPhoto(photoUrl) : photoUrl;
-            const photoHtml = proxied
-                ? `<img src="${this._escAttr(proxied)}" style="width:32px;height:32px;object-fit:cover;border-radius:4px;border:1px solid var(--border);" onerror="this.style.display='none'" loading="lazy">`
-                : '';
+            const chinaPickerHtml = this._buildChinaPickerHtml('pkg', idx, pkg);
             modeHtml = `
+            <div class="form-group" style="margin:0 0 8px">
+                <label>\u041f\u043e\u0437\u0438\u0446\u0438\u044f \u0438\u0437 \u043a\u0430\u0442\u0430\u043b\u043e\u0433\u0430 \u041a\u0438\u0442\u0430\u0439</label>
+                ${chinaPickerHtml}
+            </div>
             <div class="form-row" style="align-items:end">
-                <div class="form-group" style="margin:0;flex:2;">
-                    <label>\u041f\u043e\u0437\u0438\u0446\u0438\u044f \u0438\u0437 \u043a\u0430\u0442\u0430\u043b\u043e\u0433\u0430 \u041a\u0438\u0442\u0430\u0439</label>
-                    <div style="position:relative;">
-                        <div style="display:flex;gap:6px;align-items:center;">
-                            ${photoHtml}
-                            <input type="text" id="pkg-china-search-${idx}" placeholder="\u041f\u043e\u0438\u0441\u043a \u043f\u043e \u043a\u0430\u0442\u0430\u043b\u043e\u0433\u0443..."
-                                value="${this._esc(pkg.name || '')}"
-                                oninput="Calculator.searchChinaCatalog('pkg', ${idx}, this.value)"
-                                onfocus="if(this.value.length>=1) Calculator.searchChinaCatalog('pkg', ${idx}, this.value)"
-                                style="flex:1">
-                        </div>
-                        <div id="pkg-china-dropdown-${idx}" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:100;background:#fff;border:1px solid var(--border);border-radius:8px;max-height:240px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,0.15);"></div>
-                    </div>
-                </div>
                 <div class="form-group" style="margin:0">
                     <label>\u041a\u043e\u043b-\u0432\u043e</label>
                     <input type="number" min="0" value="${pkg.qty || ''}" oninput="Calculator.onPkgNum(${idx}, 'qty', this.value)">
