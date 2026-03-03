@@ -274,23 +274,23 @@
                 <button class="btn btn-outline" id="calc-add-item-btn" onclick="Calculator.addItem()">+ Добавить изделие</button>
             </div>
 
-            <!-- Hardware section (order-level) -->
+            <!-- Hardware section (order-level, shared) -->
             <div class="card">
                 <div class="card-header">
-                    <h3>Фурнитура</h3>
+                    <h3>🔩 Общая фурнитура</h3>
                     <button class="btn btn-sm btn-outline" onclick="Calculator.addHardware()">+ Добавить</button>
                 </div>
-                <p class="text-muted" style="font-size:12px; margin-bottom:8px">Карабины, кольца, магниты, зеркала и т.д.</p>
+                <p class="text-muted" style="font-size:12px; margin-bottom:8px">Фурнитура на весь заказ (не привязана к конкретному изделию)</p>
                 <div id="calc-hardware-list"></div>
             </div>
 
-            <!-- Packaging section (order-level) -->
+            <!-- Packaging section (order-level, shared) -->
             <div class="card">
                 <div class="card-header">
-                    <h3>Упаковка</h3>
+                    <h3>📦 Общая упаковка</h3>
                     <button class="btn btn-sm btn-outline" onclick="Calculator.addPackaging()">+ Добавить</button>
                 </div>
-                <p class="text-muted" style="font-size:12px; margin-bottom:8px">Мешочки, пакеты, коробки и т.д.</p>
+                <p class="text-muted" style="font-size:12px; margin-bottom:8px">Упаковка на весь заказ (общая коробка и т.д.)</p>
                 <div id="calc-packaging-list"></div>
             </div>
 
@@ -2544,9 +2544,9 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="js/supabase.js?v=46i"></script>
 <script src="js/calculator.js?v=46g"></script>
-<script src="js/app.js?v=46l"></script>
+<script src="js/app.js?v=47b"></script>
 <script src="js/dashboard.js?v=46g"></script>
-<script src="js/order-detail.js?v=46g"></script>
+<script src="js/order-detail.js?v=47b"></script>
 <script src="js/orders.js?v=46g"></script>
 <script src="js/analytics.js?v=46g"></script>
 <script src="js/molds.js?v=46l"></script>

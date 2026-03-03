@@ -201,22 +201,37 @@ const OrderDetail = {
     renderItemsTab() {
         const container = document.getElementById('od-tab-items');
         const products = this.currentItems.filter(i => i.item_type === 'product' || !i.item_type);
-        const hardware = this.currentItems.filter(i => i.item_type === 'hardware');
-        const packaging = this.currentItems.filter(i => i.item_type === 'packaging');
+        const allHardware = this.currentItems.filter(i => i.item_type === 'hardware');
+        const allPackaging = this.currentItems.filter(i => i.item_type === 'packaging');
+
+        // Separate order-level vs per-item hw/pkg
+        const orderHardware = allHardware.filter(i => i.hardware_parent_item_index === null || i.hardware_parent_item_index === undefined);
+        const orderPackaging = allPackaging.filter(i => i.packaging_parent_item_index === null || i.packaging_parent_item_index === undefined);
 
         let html = '';
 
         if (products.length > 0) {
             html += '<h3 style="margin:0 0 12px">Изделия</h3>';
-            html += products.map(item => this._renderItemCard(item, 'product')).join('');
+            products.forEach((item, idx) => {
+                html += this._renderItemCard(item, 'product');
+                // Per-item hw/pkg grouped under this product
+                const itemHw = allHardware.filter(h => h.hardware_parent_item_index === idx);
+                const itemPkg = allPackaging.filter(p => p.packaging_parent_item_index === idx);
+                if (itemHw.length > 0 || itemPkg.length > 0) {
+                    html += '<div style="margin-left:16px;border-left:2px solid var(--border);padding-left:12px;margin-bottom:8px">';
+                    itemHw.forEach(h => { html += this._renderItemCard(h, 'hardware'); });
+                    itemPkg.forEach(p => { html += this._renderItemCard(p, 'packaging'); });
+                    html += '</div>';
+                }
+            });
         }
-        if (hardware.length > 0) {
-            html += '<h3 style="margin:16px 0 12px">Фурнитура</h3>';
-            html += hardware.map(item => this._renderItemCard(item, 'hardware')).join('');
+        if (orderHardware.length > 0) {
+            html += '<h3 style="margin:16px 0 12px">🔩 Общая фурнитура</h3>';
+            html += orderHardware.map(item => this._renderItemCard(item, 'hardware')).join('');
         }
-        if (packaging.length > 0) {
-            html += '<h3 style="margin:16px 0 12px">Упаковка</h3>';
-            html += packaging.map(item => this._renderItemCard(item, 'packaging')).join('');
+        if (orderPackaging.length > 0) {
+            html += '<h3 style="margin:16px 0 12px">📦 Общая упаковка</h3>';
+            html += orderPackaging.map(item => this._renderItemCard(item, 'packaging')).join('');
         }
 
         if (!html) {

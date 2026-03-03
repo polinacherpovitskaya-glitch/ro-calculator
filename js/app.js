@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v46j';
+const APP_VERSION = 'v47b';
 
 const App = {
     currentPage: 'dashboard',
@@ -552,7 +552,7 @@ const Calculator = {
             <div class="form-group template-select" id="template-wrap-${idx}" style="${item.is_blank_mold ? '' : 'display:none'};position:relative">
                 <label>Бланк из справочника</label>
                 ${moldPickerHtml}
-                <span id="item-hw-badge-${idx}" style="display:${item.builtin_hw_name ? '' : 'none'};font-size:11px;color:var(--accent);margin-top:4px;font-weight:600;">+ ${item.builtin_hw_name || ''}</span>
+                <span id="item-hw-badge-${idx}" style="display:none;font-size:11px;color:var(--accent);margin-top:4px;font-weight:600;">+ ${item.builtin_hw_name || ''}</span>
             </div>
 
             <div class="form-row">
@@ -606,6 +606,16 @@ const Calculator = {
             <!-- Цветовое решение (per item) -->
             ${colorPickerHtml}
 
+            <!-- Фурнитура изделия (per-item) -->
+            <div class="section-title" style="margin-top:12px">🔩 Фурнитура</div>
+            <div id="item-hw-list-${idx}"></div>
+            <button class="btn btn-sm btn-outline" style="margin-top:4px" onclick="Calculator.addItemHardware(${idx})">+ Фурнитура</button>
+
+            <!-- Упаковка изделия (per-item) -->
+            <div class="section-title" style="margin-top:12px">📦 Упаковка</div>
+            <div id="item-pkg-list-${idx}"></div>
+            <button class="btn btn-sm btn-outline" style="margin-top:4px" onclick="Calculator.addItemPackaging(${idx})">+ Упаковка</button>
+
             <!-- Cost breakdown (calculated) -->
             <div class="cost-breakdown" id="item-cost-${idx}" style="display:none">
                 <div class="section-title" style="margin-top:0">Себестоимость изделия (за 1 шт)</div>
@@ -623,7 +633,10 @@ const Calculator = {
                 <div class="cost-row" style="display:none"><span class="cost-label">Фурнитура (косв.)</span><span class="cost-value" id="c-${idx}-builtin-hw-ind">0</span></div>
                 <div class="cost-row"><span class="cost-label">Нанесение</span><span class="cost-value" id="c-${idx}-printing">0</span></div>
                 <div class="cost-row"><span class="cost-label">Доставка</span><span class="cost-value" id="c-${idx}-delivery">0</span></div>
-                <div class="cost-row cost-total"><span class="cost-label">ИТОГО себестоимость</span><span class="cost-value" id="c-${idx}-total">0</span></div>
+                <div class="cost-row" style="border-top:1px dashed var(--border);padding-top:4px"><span class="cost-label">Себестоимость изделия</span><span class="cost-value" id="c-${idx}-subtotal">0</span></div>
+                <div id="c-${idx}-peritem-hw-rows"></div>
+                <div id="c-${idx}-peritem-pkg-rows"></div>
+                <div class="cost-row cost-total"><span class="cost-label">ИТОГО с фурнитурой/упаковкой</span><span class="cost-value" id="c-${idx}-total">0</span></div>
             </div>
 
         </div>`;
@@ -634,6 +647,33 @@ const Calculator = {
             existingBlock.outerHTML = html;
         } else {
             container.insertAdjacentHTML('beforeend', html);
+        }
+
+        // Render per-item hardware and packaging
+        this._renderPerItemHwPkg(idx);
+    },
+
+    /**
+     * Render all per-item hardware/packaging rows for a given item index
+     */
+    _renderPerItemHwPkg(itemIdx) {
+        const hwList = document.getElementById('item-hw-list-' + itemIdx);
+        const pkgList = document.getElementById('item-pkg-list-' + itemIdx);
+        if (hwList) {
+            hwList.innerHTML = '';
+            this.hardwareItems.forEach((hw, hwIdx) => {
+                if (hw.parent_item_index === itemIdx) {
+                    this.renderHardwareRow(hwIdx, 'item-hw-list-' + itemIdx);
+                }
+            });
+        }
+        if (pkgList) {
+            pkgList.innerHTML = '';
+            this.packagingItems.forEach((pkg, pkgIdx) => {
+                if (pkg.parent_item_index === itemIdx) {
+                    this.renderPackagingRow(pkgIdx, 'item-pkg-list-' + itemIdx);
+                }
+            });
         }
     },
 
@@ -710,8 +750,10 @@ const Calculator = {
     // HARDWARE ITEMS (order-level, separate section)
     // ==========================================
 
-    getEmptyHardware() {
+    getEmptyHardware(parentItemIndex) {
         return {
+            parent_item_index: parentItemIndex ?? null,  // null = order-level, number = per-item
+            _from_template: false,  // true = auto-created from blank template
             source: 'warehouse',        // 'warehouse' | 'china' | 'custom'
             warehouse_item_id: null,    // id позиции со склада
             warehouse_sku: '',          // артикул (для истории)
@@ -766,7 +808,7 @@ const Calculator = {
     async addHardware() {
         try {
             const idx = this.hardwareItems.length;
-            this.hardwareItems.push(this.getEmptyHardware());
+            this.hardwareItems.push(this.getEmptyHardware(null));  // order-level
             await this._ensureWhPickerData();
             this.renderHardwareRow(idx);
             this.scheduleAutosave();
@@ -776,13 +818,26 @@ const Calculator = {
         }
     },
 
-    renderHardwareRow(idx) {
+    async addItemHardware(itemIdx) {
+        try {
+            const idx = this.hardwareItems.length;
+            this.hardwareItems.push(this.getEmptyHardware(itemIdx));  // per-item
+            await this._ensureWhPickerData();
+            this.renderHardwareRow(idx, 'item-hw-list-' + itemIdx);
+            this.scheduleAutosave();
+        } catch (err) {
+            console.error('[addItemHardware] error:', err);
+            App.toast('Ошибка добавления фурнитуры: ' + err.message);
+        }
+    },
+
+    renderHardwareRow(idx, targetListId) {
         const hw = this.hardwareItems[idx];
         const minsDisplay = hw.assembly_minutes || '';
         const isWarehouse = hw.source === 'warehouse';
         const isChina = hw.source === 'china';
         const isCustom = hw.source === 'custom';
-        const list = document.getElementById('calc-hardware-list');
+        const list = document.getElementById(targetListId || 'calc-hardware-list');
 
         // Build warehouse picker (hardware only — exclude packaging)
         let pickerHtml = '';
@@ -925,15 +980,39 @@ const Calculator = {
     },
 
     removeHardware(idx) {
+        const hw = this.hardwareItems[idx];
+        const parentIdx = hw ? hw.parent_item_index : null;
         this.hardwareItems.splice(idx, 1);
         this.rerenderAllHardware();
+        // Also re-render per-item hw for all items (indices shifted)
+        this.items.forEach((_, i) => this._renderPerItemHwPkg(i));
         this.recalculate();
+        this.scheduleAutosave();
     },
 
     rerenderAllHardware() {
         const list = document.getElementById('calc-hardware-list');
-        list.innerHTML = '';
-        this.hardwareItems.forEach((_, i) => this.renderHardwareRow(i));
+        if (list) {
+            list.innerHTML = '';
+            this.hardwareItems.forEach((hw, i) => {
+                if (hw.parent_item_index === null || hw.parent_item_index === undefined) {
+                    this.renderHardwareRow(i);
+                }
+            });
+        }
+    },
+
+    _rerenderHwItem(idx) {
+        const hw = this.hardwareItems[idx];
+        // Remove old row
+        const oldRow = document.getElementById('hw-row-' + idx);
+        if (oldRow) oldRow.remove();
+        // Re-render in appropriate container
+        if (hw.parent_item_index !== null && hw.parent_item_index !== undefined) {
+            this.renderHardwareRow(idx, 'item-hw-list-' + hw.parent_item_index);
+        } else {
+            this.renderHardwareRow(idx);
+        }
     },
 
     onHwSourceChange(idx, source) {
@@ -961,7 +1040,9 @@ const Calculator = {
             hw.warehouse_sku = '';
             hw.china_item_id = null;
         }
+        // Smart re-render: only affected hw, not all
         this.rerenderAllHardware();
+        this.items.forEach((_, i) => this._renderPerItemHwPkg(i));
         this.recalculate();
     },
 
@@ -979,7 +1060,7 @@ const Calculator = {
             hw.price = 0;
             hw.delivery_total = 0;
             hw.delivery_price = 0;
-            this.rerenderAllHardware();
+            this._rerenderHwItem(idx);
             this.recalculate();
             return;
         }
@@ -998,7 +1079,7 @@ const Calculator = {
         hw.delivery_total = 0;
         hw.delivery_price = 0;
 
-        this.rerenderAllHardware();
+        this._rerenderHwItem(idx);
         this.recalculate();
     },
 
@@ -1147,7 +1228,7 @@ const Calculator = {
         item.price_cny = catItem.price_cny || 0;
         item.weight_grams = catItem.weight_grams || 0;
         this._recalcChinaPricing(item);
-        if (type === 'hw') this.rerenderAllHardware(); else this.rerenderAllPackaging();
+        if (type === 'hw') { this._rerenderHwItem(idx); } else { this._rerenderPkgItem(idx); }
         this.recalculate();
         this.scheduleAutosave();
     },
@@ -1156,7 +1237,7 @@ const Calculator = {
         const arr = type === 'hw' ? this.hardwareItems : this.packagingItems;
         arr[idx].china_delivery_method = method;
         this._recalcChinaPricing(arr[idx]);
-        if (type === 'hw') this.rerenderAllHardware(); else this.rerenderAllPackaging();
+        if (type === 'hw') { this._rerenderHwItem(idx); } else { this._rerenderPkgItem(idx); }
         this.recalculate();
         this.scheduleAutosave();
     },
@@ -1173,8 +1254,9 @@ const Calculator = {
     // PACKAGING ITEMS (order-level, separate section)
     // ==========================================
 
-    getEmptyPackaging() {
+    getEmptyPackaging(parentItemIndex) {
         return {
+            parent_item_index: parentItemIndex ?? null,  // null = order-level, number = per-item
             source: 'warehouse',        // 'warehouse' | 'china' | 'custom'
             warehouse_item_id: null,
             warehouse_sku: '',
@@ -1197,7 +1279,7 @@ const Calculator = {
     async addPackaging() {
         try {
             const idx = this.packagingItems.length;
-            this.packagingItems.push(this.getEmptyPackaging());
+            this.packagingItems.push(this.getEmptyPackaging(null));  // order-level
             await this._ensureWhPickerData();
             this.renderPackagingRow(idx);
             this.scheduleAutosave();
@@ -1207,13 +1289,26 @@ const Calculator = {
         }
     },
 
-    renderPackagingRow(idx) {
+    async addItemPackaging(itemIdx) {
+        try {
+            const idx = this.packagingItems.length;
+            this.packagingItems.push(this.getEmptyPackaging(itemIdx));  // per-item
+            await this._ensureWhPickerData();
+            this.renderPackagingRow(idx, 'item-pkg-list-' + itemIdx);
+            this.scheduleAutosave();
+        } catch (err) {
+            console.error('[addItemPackaging] error:', err);
+            App.toast('Ошибка добавления упаковки: ' + err.message);
+        }
+    },
+
+    renderPackagingRow(idx, targetListId) {
         const pkg = this.packagingItems[idx];
         const minsDisplay = pkg.assembly_minutes || '';
         const isWarehouse = pkg.source === 'warehouse';
         const isChina = pkg.source === 'china';
         const isCustom = pkg.source === 'custom';
-        const list = document.getElementById('calc-packaging-list');
+        const list = document.getElementById(targetListId || 'calc-packaging-list');
 
         let pickerHtml = '';
         if (this._whPickerData) {
@@ -1354,13 +1449,32 @@ const Calculator = {
     removePackaging(idx) {
         this.packagingItems.splice(idx, 1);
         this.rerenderAllPackaging();
+        this.items.forEach((_, i) => this._renderPerItemHwPkg(i));
         this.recalculate();
+        this.scheduleAutosave();
     },
 
     rerenderAllPackaging() {
         const list = document.getElementById('calc-packaging-list');
-        list.innerHTML = '';
-        this.packagingItems.forEach((_, i) => this.renderPackagingRow(i));
+        if (list) {
+            list.innerHTML = '';
+            this.packagingItems.forEach((pkg, i) => {
+                if (pkg.parent_item_index === null || pkg.parent_item_index === undefined) {
+                    this.renderPackagingRow(i);
+                }
+            });
+        }
+    },
+
+    _rerenderPkgItem(idx) {
+        const pkg = this.packagingItems[idx];
+        const oldRow = document.getElementById('pkg-row-' + idx);
+        if (oldRow) oldRow.remove();
+        if (pkg.parent_item_index !== null && pkg.parent_item_index !== undefined) {
+            this.renderPackagingRow(idx, 'item-pkg-list-' + pkg.parent_item_index);
+        } else {
+            this.renderPackagingRow(idx);
+        }
     },
 
     onPkgSourceChange(idx, source) {
@@ -1389,6 +1503,7 @@ const Calculator = {
             pkg.china_item_id = null;
         }
         this.rerenderAllPackaging();
+        this.items.forEach((_, i) => this._renderPerItemHwPkg(i));
         this.recalculate();
     },
 
@@ -1403,7 +1518,7 @@ const Calculator = {
             pkg.price = 0;
             pkg.delivery_total = 0;
             pkg.delivery_price = 0;
-            this.rerenderAllPackaging();
+            this._rerenderPkgItem(idx);
             this.recalculate();
             return;
         }
@@ -1418,7 +1533,7 @@ const Calculator = {
         pkg.price = whItem.price_per_unit || 0;
         pkg.delivery_total = 0;
         pkg.delivery_price = 0;
-        this.rerenderAllPackaging();
+        this._rerenderPkgItem(idx);
         this.recalculate();
     },
 
@@ -1527,33 +1642,56 @@ const Calculator = {
         this.items[idx].weight_grams = tpl.weight_grams || 0;
         this.items[idx].is_blank_mold = true;
 
-        // Встроенная фурнитура бланка (зеркало, магнит и т.д.)
-        this.items[idx].builtin_hw_name = tpl.hw_name || '';
-        this.items[idx].builtin_hw_price = tpl.hw_price_per_unit || 0;
-        this.items[idx].builtin_hw_delivery_total = tpl.hw_delivery_total || 0;
-        this.items[idx].builtin_hw_speed = tpl.hw_speed || 0;
+        // Clear builtin_hw fields — now handled by real per-item hardware
+        this.items[idx].builtin_hw_name = '';
+        this.items[idx].builtin_hw_price = 0;
+        this.items[idx].builtin_hw_delivery_total = 0;
+        this.items[idx].builtin_hw_speed = 0;
+
+        // Auto-create per-item hardware from template
+        this._syncTemplateHardware(idx, tpl);
 
         document.getElementById('item-name-' + idx).value = tpl.name;
         document.getElementById('item-pph-' + idx).value = pphAvg;
         document.getElementById('item-weight-' + idx).value = tpl.weight_grams || '';
         document.getElementById('item-title-' + idx).textContent = tpl.name;
 
-        // Show built-in hw badge
-        const hwBadge = document.getElementById('item-hw-badge-' + idx);
-        if (hwBadge) {
-            if (tpl.hw_name) {
-                hwBadge.style.display = '';
-                hwBadge.textContent = '+ ' + tpl.hw_name;
-            } else {
-                hwBadge.style.display = 'none';
-            }
-        }
-
         // Close picker & re-render selected display
         this.closeMoldPicker(idx);
         this.rerenderItem(idx);
         this.recalculate();
         this.scheduleAutosave();
+    },
+
+    /**
+     * Auto-create/update hardware from blank template
+     * Removes old template hw for this item, creates new if template has hw
+     */
+    _syncTemplateHardware(itemIdx, tpl) {
+        // Remove existing template-created hw for this item
+        this.hardwareItems = this.hardwareItems.filter(hw =>
+            !(hw._from_template && hw.parent_item_index === itemIdx)
+        );
+
+        // Create new hw from template if it has hardware
+        if (tpl && tpl.hw_name) {
+            const hw = this.getEmptyHardware(itemIdx);
+            hw._from_template = true;
+            hw.source = 'custom';
+            hw.name = tpl.hw_name;
+            hw.price = tpl.hw_price_per_unit || 0;
+            hw.delivery_total = tpl.hw_delivery_total || 0;
+            hw.qty = this.items[itemIdx].quantity || 0;
+            hw.delivery_price = hw.qty > 0 ? round2(hw.delivery_total / hw.qty) : 0;
+            hw.assembly_speed = tpl.hw_speed || 0;
+            hw.assembly_minutes = hw.assembly_speed > 0 ? round2(hw.assembly_speed / 60) : 0;
+            this.hardwareItems.push(hw);
+        }
+
+        // Re-render per-item hw
+        this._renderPerItemHwPkg(itemIdx);
+        // Re-render order-level hw (indices may have shifted)
+        this.rerenderAllHardware();
     },
 
     toggleMoldPicker(idx) {
@@ -1672,6 +1810,8 @@ const Calculator = {
             this.items[idx].builtin_hw_speed = 0;
             const hwBadge = document.getElementById('item-hw-badge-' + idx);
             if (hwBadge) hwBadge.style.display = 'none';
+            // Remove template-created per-item hardware
+            this._syncTemplateHardware(idx, null);
         }
         this.recalculate();
     },
@@ -1705,6 +1845,16 @@ const Calculator = {
 
     onNumChange(idx, field, value) {
         this.items[idx][field] = parseFloat(value) || 0;
+        // Sync quantity to template-created hardware
+        if (field === 'quantity') {
+            const newQty = parseFloat(value) || 0;
+            this.hardwareItems.forEach(hw => {
+                if (hw._from_template && hw.parent_item_index === idx) {
+                    hw.qty = newQty;
+                    hw.delivery_price = newQty > 0 ? round2(hw.delivery_total / newQty) : 0;
+                }
+            });
+        }
         this.recalculate();
         this.scheduleAutosave();
     },
@@ -1716,12 +1866,30 @@ const Calculator = {
     },
 
     removeItem(idx) {
+        // Cascade: remove all per-item hw/pkg for this item
+        this.hardwareItems = this.hardwareItems.filter(hw => hw.parent_item_index !== idx);
+        this.packagingItems = this.packagingItems.filter(pkg => pkg.parent_item_index !== idx);
+        // Reindex parent_item_index for items after the removed one
+        this.hardwareItems.forEach(hw => {
+            if (hw.parent_item_index !== null && hw.parent_item_index > idx) {
+                hw.parent_item_index--;
+            }
+        });
+        this.packagingItems.forEach(pkg => {
+            if (pkg.parent_item_index !== null && pkg.parent_item_index > idx) {
+                pkg.parent_item_index--;
+            }
+        });
+
         this.items.splice(idx, 1);
         this.items.forEach((item, i) => item.item_number = i + 1);
         const container = document.getElementById('calc-items-container');
         container.innerHTML = '';
         this.items.forEach((_, i) => this.renderItemBlock(i));
         document.getElementById('calc-add-item-btn').style.display = '';
+        // Re-render order-level hw/pkg (indices may have shifted)
+        this.rerenderAllHardware();
+        this.rerenderAllPackaging();
         this.recalculate();
         this.scheduleAutosave();
     },
@@ -1745,6 +1913,14 @@ const Calculator = {
 
     _doRecalculate(params) {
         let hasData = false;
+
+        // === Pre-calculate hw/pkg results (needed for per-item cost aggregation) ===
+        this.hardwareItems.forEach(hw => {
+            hw.result = calculateHardwareCost(hw, params);
+        });
+        this.packagingItems.forEach(pkg => {
+            pkg.result = calculatePackagingCost(pkg, params);
+        });
 
         // === Calculate product items ===
         this.items.forEach((item, idx) => {
@@ -1770,14 +1946,57 @@ const Calculator = {
                 this.setText('c-' + idx + '-nfc-ind', formatRub(result.costNfcIndirect));
                 this.setText('c-' + idx + '-builtin-hw', formatRub(result.costBuiltinHw || 0));
                 this.setText('c-' + idx + '-builtin-hw-ind', formatRub(result.costBuiltinHwIndirect || 0));
+                // Hide builtin hw rows when 0 (new orders use per-item hw instead)
+                const builtinHwEl = document.getElementById('c-' + idx + '-builtin-hw');
+                if (builtinHwEl) builtinHwEl.parentElement.style.display = (result.costBuiltinHw || 0) > 0 ? '' : 'none';
                 const hwIndEl = document.getElementById('c-' + idx + '-builtin-hw-ind');
                 if (hwIndEl) hwIndEl.parentElement.style.display = (result.costBuiltinHwIndirect || 0) > 0 ? '' : 'none';
                 this.setText('c-' + idx + '-printing', formatRub(result.costPrinting));
                 this.setText('c-' + idx + '-delivery', formatRub(result.costDelivery));
-                this.setText('c-' + idx + '-total', formatRub(result.costTotal));
 
-                // Store target at 40% for reference
-                const costItemOnly = round2(result.costTotal - (result.costPrinting || 0));
+                // Subtotal = item cost without per-item hw/pkg
+                this.setText('c-' + idx + '-subtotal', formatRub(result.costTotal));
+
+                // Calculate per-item hw/pkg costs
+                let perItemHwCost = 0;
+                let perItemPkgCost = 0;
+                const hwRowsEl = document.getElementById('c-' + idx + '-peritem-hw-rows');
+                const pkgRowsEl = document.getElementById('c-' + idx + '-peritem-pkg-rows');
+
+                if (hwRowsEl) {
+                    let hwHtml = '';
+                    this.hardwareItems.forEach(hw => {
+                        if (hw.parent_item_index === idx && hw.result && hw.result.costPerUnit > 0) {
+                            perItemHwCost += hw.result.costPerUnit;
+                            hwHtml += `<div class="cost-row"><span class="cost-label">🔩 ${this._esc(hw.name || 'Фурнитура')}</span><span class="cost-value">${formatRub(hw.result.costPerUnit)}</span></div>`;
+                        }
+                    });
+                    hwRowsEl.innerHTML = hwHtml;
+                }
+                if (pkgRowsEl) {
+                    let pkgHtml = '';
+                    this.packagingItems.forEach(pkg => {
+                        if (pkg.parent_item_index === idx && pkg.result && pkg.result.costPerUnit > 0) {
+                            perItemPkgCost += pkg.result.costPerUnit;
+                            pkgHtml += `<div class="cost-row"><span class="cost-label">📦 ${this._esc(pkg.name || 'Упаковка')}</span><span class="cost-value">${formatRub(pkg.result.costPerUnit)}</span></div>`;
+                        }
+                    });
+                    pkgRowsEl.innerHTML = pkgHtml;
+                }
+
+                // Total including per-item hw/pkg
+                const totalWithHwPkg = round2(result.costTotal + perItemHwCost + perItemPkgCost);
+                item.totalCostWithHwPkg = totalWithHwPkg;
+                this.setText('c-' + idx + '-total', formatRub(totalWithHwPkg));
+
+                // Show/hide subtotal row (only if there are per-item hw/pkg)
+                const subtotalEl = document.getElementById('c-' + idx + '-subtotal');
+                if (subtotalEl) {
+                    subtotalEl.parentElement.style.display = (perItemHwCost + perItemPkgCost > 0) ? '' : 'none';
+                }
+
+                // Store target at 40% for reference (including per-item hw/pkg)
+                const costItemOnly = round2(totalWithHwPkg - (result.costPrinting || 0));
                 const calcTarget = (marginPct) => {
                     if (costItemOnly === 0) return 0;
                     const vatOnCost = costItemOnly * params.vatRate;
@@ -1937,8 +2156,9 @@ const Calculator = {
 
         // Collect all priced entities (with NaN/Infinity guard)
         const pricedItems = this.items.filter(it => it.result && isFinite(it.result.costTotal) && it.result.costTotal > 0);
-        const pricedHw = this.hardwareItems.filter(hw => hw.result && isFinite(hw.result.costPerUnit) && hw.result.costPerUnit > 0);
-        const pricedPkg = this.packagingItems.filter(pkg => pkg.result && isFinite(pkg.result.costPerUnit) && pkg.result.costPerUnit > 0);
+        // Only order-level hw/pkg appear as separate pricing columns
+        const pricedHw = this.hardwareItems.filter(hw => hw.parent_item_index === null && hw.result && isFinite(hw.result.costPerUnit) && hw.result.costPerUnit > 0);
+        const pricedPkg = this.packagingItems.filter(pkg => pkg.parent_item_index === null && pkg.result && isFinite(pkg.result.costPerUnit) && pkg.result.costPerUnit > 0);
 
         // Debug: log what's being filtered
         console.log('[renderPricingCard]', {
@@ -1966,7 +2186,8 @@ const Calculator = {
         pricedItems.forEach((item, i) => {
             const globalIdx = this.items.indexOf(item);
             // Item cost WITHOUT printing (for separate pricing)
-            const costWithPrinting = item.result.costTotal;
+            // Use totalCostWithHwPkg which includes per-item hardware/packaging
+            const costWithPrinting = item.totalCostWithHwPkg || item.result.costTotal;
             const costPrintingPart = item.result.costPrinting || 0;
             const costItemOnly = round2(costWithPrinting - costPrintingPart);
 
@@ -2209,7 +2430,9 @@ const Calculator = {
             }
         });
 
+        // Only order-level hw/pkg as separate invoice lines (per-item included in item price)
         this.hardwareItems.forEach((hw, i) => {
+            if (hw.parent_item_index !== null) return;  // per-item — included in item price
             if (hw.qty > 0 && hw.sell_price > 0) {
                 invoiceRows.push({
                     name: hw.name || 'Фурнитура ' + (i + 1),
@@ -2222,6 +2445,7 @@ const Calculator = {
         });
 
         this.packagingItems.forEach((pkg, i) => {
+            if (pkg.parent_item_index !== null) return;  // per-item — included in item price
             if (pkg.qty > 0 && pkg.sell_price > 0) {
                 invoiceRows.push({
                     name: pkg.name || 'Упаковка ' + (i + 1),
@@ -2515,7 +2739,7 @@ const Calculator = {
         });
 
         // Hardware items
-        this.hardwareItems.filter(hw => hw.qty > 0).forEach((hw, i) => {
+        this.hardwareItems.filter(hw => hw.qty > 0 || hw._from_template).forEach((hw, i) => {
             items.push({
                 item_number: 100 + i,
                 item_type: 'hardware',
@@ -2532,6 +2756,8 @@ const Calculator = {
                 hardware_source: hw.source || 'custom',
                 hardware_warehouse_item_id: hw.warehouse_item_id || null,
                 hardware_warehouse_sku: hw.warehouse_sku || '',
+                hardware_parent_item_index: hw.parent_item_index ?? null,
+                hardware_from_template: hw._from_template || false,
             });
         });
 
@@ -2553,6 +2779,7 @@ const Calculator = {
                 packaging_source: pkg.source || 'custom',
                 packaging_warehouse_item_id: pkg.warehouse_item_id || null,
                 packaging_warehouse_sku: pkg.warehouse_sku || '',
+                packaging_parent_item_index: pkg.parent_item_index ?? null,
             });
         });
 
@@ -2856,11 +3083,17 @@ const Calculator = {
             hw.source = dbHw.hardware_source || 'custom';  // backward compat: old orders = custom
             hw.warehouse_item_id = dbHw.hardware_warehouse_item_id || null;
             hw.warehouse_sku = dbHw.hardware_warehouse_sku || '';
+            hw.parent_item_index = dbHw.hardware_parent_item_index ?? null;
+            hw._from_template = dbHw.hardware_from_template || false;
             // Save originals for diff on next save
             hw._original_qty = hw.qty;
             hw._original_warehouse_item_id = hw.warehouse_item_id;
             this.hardwareItems.push(hw);
-            this.renderHardwareRow(this.hardwareItems.length - 1);
+            const hwIdx = this.hardwareItems.length - 1;
+            if (hw.parent_item_index === null || hw.parent_item_index === undefined) {
+                this.renderHardwareRow(hwIdx);
+            }
+            // per-item hw will be rendered when the item block is created
         });
 
         // Restore packaging items
@@ -2873,6 +3106,7 @@ const Calculator = {
             pkg.source = dbPkg.packaging_source || 'custom';
             pkg.warehouse_item_id = dbPkg.packaging_warehouse_item_id || null;
             pkg.warehouse_sku = dbPkg.packaging_warehouse_sku || '';
+            pkg.parent_item_index = dbPkg.packaging_parent_item_index ?? null;
             pkg.name = dbPkg.product_name || '';
             pkg.qty = dbPkg.quantity || 0;
             pkg.assembly_speed = dbPkg.packaging_assembly_speed || 0;
@@ -2884,7 +3118,11 @@ const Calculator = {
             pkg.delivery_price = pkg.qty > 0 ? round2(pkg.delivery_total / pkg.qty) : perUnit;
             pkg.sell_price = dbPkg.sell_price_packaging || 0;
             this.packagingItems.push(pkg);
-            this.renderPackagingRow(this.packagingItems.length - 1);
+            const pkgIdx = this.packagingItems.length - 1;
+            if (pkg.parent_item_index === null || pkg.parent_item_index === undefined) {
+                this.renderPackagingRow(pkgIdx);
+            }
+            // per-item pkg will be rendered when the item block is created
         });
 
         // Restore extra costs
@@ -2896,6 +3134,20 @@ const Calculator = {
         this.renderExtraCosts();
 
         if (this.items.length === 0) this.addItem();
+
+        // Render per-item hw/pkg (loaded after items, so re-render now)
+        // Also clear builtin_hw fields if real per-item hw exists (prevent double-counting)
+        this.items.forEach((item, i) => {
+            const hasTemplateHw = this.hardwareItems.some(hw => hw._from_template && hw.parent_item_index === i);
+            if (hasTemplateHw) {
+                item.builtin_hw_name = '';
+                item.builtin_hw_price = 0;
+                item.builtin_hw_delivery_total = 0;
+                item.builtin_hw_speed = 0;
+            }
+            this._renderPerItemHwPkg(i);
+        });
+
         this.recalculate();
 
         // Show change history
@@ -3096,7 +3348,8 @@ const Calculator = {
         this.items.forEach(item => {
             if (!item.result || !item.quantity) return;
             const costPrintingPart = item.result.costPrinting || 0;
-            const costItemOnly = round2(item.result.costTotal - costPrintingPart);
+            // Use totalCostWithHwPkg which includes per-item hardware/packaging
+            const costItemOnly = round2((item.totalCostWithHwPkg || item.result.costTotal) - costPrintingPart);
 
             // No auto-fill for item sell price — manager enters manually
 
@@ -3114,15 +3367,17 @@ const Calculator = {
             if (totalPrintSell > 0) item.sell_price_printing = totalPrintSell;
         });
 
-        // Auto-fill hardware sell prices
+        // Auto-fill hardware sell prices (only order-level; per-item included in item price)
         this.hardwareItems.forEach(hw => {
+            if (hw.parent_item_index !== null) return;  // per-item hw — skip
             if (hw.result && hw.qty > 0 && (!hw.sell_price || hw.sell_price <= 0)) {
                 hw.sell_price = roundTo5(calcTarget(hw.result.costPerUnit, 0.40));
             }
         });
 
-        // Auto-fill packaging sell prices
+        // Auto-fill packaging sell prices (only order-level)
         this.packagingItems.forEach(pkg => {
+            if (pkg.parent_item_index !== null) return;  // per-item pkg — skip
             if (pkg.result && pkg.qty > 0 && (!pkg.sell_price || pkg.sell_price <= 0)) {
                 pkg.sell_price = roundTo5(calcTarget(pkg.result.costPerUnit, 0.40));
             }
@@ -3166,7 +3421,9 @@ const Calculator = {
             }
         });
 
+        // Only order-level hw/pkg as separate KP lines (per-item included in item price)
         this.hardwareItems.forEach(hw => {
+            if (hw.parent_item_index !== null) return;  // per-item — included in item price
             if (hw.qty > 0) {
                 kpItems.push({
                     type: 'hardware',
@@ -3178,6 +3435,7 @@ const Calculator = {
         });
 
         this.packagingItems.forEach(pkg => {
+            if (pkg.parent_item_index !== null) return;  // per-item — included in item price
             if (pkg.qty > 0) {
                 kpItems.push({
                     type: 'packaging',
