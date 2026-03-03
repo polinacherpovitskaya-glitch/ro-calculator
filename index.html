@@ -593,6 +593,7 @@
                 <button class="btn btn-sm tab-btn active" data-tab="plastic" onclick="Molds.switchTab('plastic')">&#9670; Пластик</button>
                 <button class="btn btn-sm tab-btn" data-tab="hardware" onclick="Molds.switchTab('hardware')">&#128295; Фурнитура</button>
                 <button class="btn btn-sm tab-btn" data-tab="packaging" onclick="Molds.switchTab('packaging')">&#128230; Упаковка</button>
+                <button class="btn btn-sm tab-btn" data-tab="china_catalog" onclick="Molds.switchTab('china_catalog')">&#127464;&#127475; Каталог Китай</button>
             </div>
 
             <!-- TAB: Пластик (existing content) -->
@@ -921,6 +922,41 @@
                         <button class="btn btn-success btn-sm" onclick="Molds.savePkgBlank()">Сохранить</button>
                         <button class="btn btn-outline btn-sm" onclick="Molds.hidePkgForm()">Отмена</button>
                         <button class="btn btn-danger btn-sm" id="pkg-delete-btn" style="margin-left:auto;display:none;" onclick="Molds.deletePkgBlank()">Удалить</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TAB: Каталог Китай -->
+            <div id="molds-tab-china_catalog" style="display:none">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                    <p class="text-muted" style="font-size:12px;margin:0;">Каталог фурнитуры и упаковки из Китая. Цены в &#165; + калькулятор доставки.</p>
+                    <button class="btn btn-primary btn-sm" onclick="ChinaCatalog.showAddForm()">+ Новая позиция</button>
+                </div>
+                <div id="china-catalog-container"></div>
+                <!-- Edit form -->
+                <div class="card" id="cc-edit-form" style="display:none;margin-top:12px;padding:20px;">
+                    <div class="card-header" style="padding:0 0 12px 0;">
+                        <h3 id="cc-form-title">Новая позиция</h3>
+                        <button class="btn btn-sm btn-outline" onclick="ChinaCatalog.hideForm()">Закрыть</button>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group" style="flex:2"><label>Название</label><input type="text" id="cc-item-name"></div>
+                        <div class="form-group"><label>Категория (ключ)</label><input type="text" id="cc-item-category" placeholder="carabiners, rings, boxes..."></div>
+                        <div class="form-group"><label>Размер</label><input type="text" id="cc-item-size"></div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group"><label>Вес (г/шт)</label><input type="number" step="0.1" id="cc-item-weight"></div>
+                        <div class="form-group"><label>Цена &#165; (юань)</label><input type="number" step="0.01" id="cc-item-price-cny"></div>
+                        <div class="form-group"><label>Цена &#8381; (если РФ)</label><input type="number" step="0.1" id="cc-item-price-rub"><span class="form-hint">Только для фурнитуры в России</span></div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group" style="flex:2"><label>Ссылка 1688</label><input type="text" id="cc-item-link" placeholder="https://..."></div>
+                        <div class="form-group" style="flex:2"><label>Заметки</label><input type="text" id="cc-item-notes"></div>
+                    </div>
+                    <div style="margin-top:12px;display:flex;gap:8px;">
+                        <button class="btn btn-success btn-sm" onclick="ChinaCatalog.saveItem()">Сохранить</button>
+                        <button class="btn btn-outline btn-sm" onclick="ChinaCatalog.hideForm()">Отмена</button>
+                        <button class="btn btn-danger btn-sm" id="cc-delete-btn" style="margin-left:auto;display:none;" onclick="ChinaCatalog.deleteFromForm()">Удалить</button>
                     </div>
                 </div>
             </div>
@@ -2458,6 +2494,7 @@
 <script src="js/factual.js?v=46g"></script>
 <script src="js/china.js?v=46g"></script>
 <script src="js/warehouse_photos.js?v=46g"></script>
+<script src="js/china_catalog.js?v=46i"></script>
 <script src="js/marketplaces.js?v=46h"></script>
 <script src="js/warehouse.js?v=46g"></script>
 <script src="js/settings.js?v=46g"></script>

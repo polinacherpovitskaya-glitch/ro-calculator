@@ -221,6 +221,12 @@ function getDefaultSettings() {
         mp_acquiring: 0.065,
         waste_factor: 1.1,
         indirect_cost_mode: 'production',
+        // China catalog delivery rates
+        china_cny_rate: 12.5,
+        china_usd_rate: 90,
+        china_delivery_auto: 3.5,
+        china_delivery_avia: 8.0,
+        china_delivery_slow: 2.5,
     };
 }
 

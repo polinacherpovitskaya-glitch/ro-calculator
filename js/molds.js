@@ -850,7 +850,7 @@ const Molds = {
 
     switchTab(tab) {
         this._currentTab = tab;
-        ['plastic', 'hardware', 'packaging'].forEach(t => {
+        ['plastic', 'hardware', 'packaging', 'china_catalog'].forEach(t => {
             const el = document.getElementById('molds-tab-' + t);
             if (el) el.style.display = (t === tab) ? '' : 'none';
         });
@@ -859,6 +859,7 @@ const Molds = {
         });
         if (tab === 'hardware') this.loadHwTab();
         if (tab === 'packaging') this.loadPkgTab();
+        if (tab === 'china_catalog') ChinaCatalog.load();
     },
 
     // ==========================================

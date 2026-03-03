@@ -1,0 +1,458 @@
+// =============================================
+// Recycle Object — Каталог фурнитуры из Китая
+// Catalog of hardware/packaging from China
+// with delivery cost calculator
+// =============================================
+
+const ChinaCatalog = {
+    _items: [],
+    _filter: '',
+    _search: '',
+
+    // Delivery rates (USD per kg)
+    DELIVERY_METHODS: {
+        auto:      { label: 'Авто',           rate_usd: 3.5,  days: '25-35 дн' },
+        avia:      { label: 'Авиа',           rate_usd: 8.0,  days: '10-14 дн' },
+        auto_slow: { label: 'Медленное авто', rate_usd: 2.5,  days: '40-55 дн' },
+    },
+
+    // Default exchange rates (overridden from settings)
+    _cnyRate: 12.5,
+    _usdRate: 90,
+
+    async load() {
+        try {
+            // Load rates from settings
+            const params = App.params || {};
+            this._cnyRate = params.china_cny_rate || 12.5;
+            this._usdRate = params.china_usd_rate || 90;
+
+            // Override delivery rates from settings if available
+            if (params.china_delivery_auto) this.DELIVERY_METHODS.auto.rate_usd = params.china_delivery_auto;
+            if (params.china_delivery_avia) this.DELIVERY_METHODS.avia.rate_usd = params.china_delivery_avia;
+            if (params.china_delivery_slow) this.DELIVERY_METHODS.auto_slow.rate_usd = params.china_delivery_slow;
+
+            // Load catalog: from localStorage first, then seed from JSON
+            this._items = await this._loadItems();
+            this.render();
+        } catch (err) {
+            console.error('ChinaCatalog.load() error:', err);
+            const el = document.getElementById('china-catalog-container');
+            if (el) el.innerHTML = '<div class="card" style="padding:20px;color:var(--red)">Ошибка загрузки каталога: ' + (err.message || err) + '</div>';
+        }
+    },
+
+    async _loadItems() {
+        // Try localStorage first
+        let items = getLocal('ro_calc_china_catalog');
+        if (items && items.length > 0) return items;
+
+        // Seed from JSON file
+        try {
+            const resp = await fetch('data/china_catalog.json');
+            if (resp.ok) {
+                items = await resp.json();
+                setLocal('ro_calc_china_catalog', items);
+                return items;
+            }
+        } catch (e) {
+            console.warn('Failed to load china_catalog.json:', e);
+        }
+        return [];
+    },
+
+    _saveItems() {
+        setLocal('ro_calc_china_catalog', this._items);
+    },
+
+    // ==========================================
+    // CATEGORIES
+    // ==========================================
+
+    getCategories() {
+        const cats = new Map();
+        this._items.forEach(item => {
+            if (!cats.has(item.category)) {
+                cats.set(item.category, item.category_ru || item.category);
+            }
+        });
+        return cats; // Map: key -> label_ru
+    },
+
+    // ==========================================
+    // RENDERING
+    // ==========================================
+
+    render() {
+        const container = document.getElementById('china-catalog-container');
+        if (!container) return;
+
+        const categories = this.getCategories();
+
+        // Rates bar
+        let html = `
+        <div class="card" style="padding:12px 16px;margin-bottom:12px;">
+            <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;font-size:12px;">
+                <span style="font-weight:700;">Курсы:</span>
+                <span>&#165; = <b>${this._cnyRate}</b> &#8381;</span>
+                <span>$ = <b>${this._usdRate}</b> &#8381;</span>
+                <span style="color:var(--text-muted)">|</span>
+                ${Object.entries(this.DELIVERY_METHODS).map(([k, m]) =>
+                    `<span>${m.label}: <b>$${m.rate_usd}/кг</b> <span style="color:var(--text-muted)">(${m.days})</span></span>`
+                ).join('')}
+                <button class="btn btn-sm btn-outline" style="margin-left:auto;font-size:10px;" onclick="ChinaCatalog.openRatesModal()">&#9881; Курсы</button>
+            </div>
+        </div>`;
+
+        // Category filter + search
+        html += `
+        <div class="card" style="padding:12px 16px;margin-bottom:12px;">
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                <button class="btn btn-sm ${!this._filter ? 'btn-primary' : 'btn-outline'}" onclick="ChinaCatalog.setFilter('')">Все (${this._items.length})</button>`;
+
+        categories.forEach((label, key) => {
+            const count = this._items.filter(i => i.category === key).length;
+            html += `<button class="btn btn-sm ${this._filter === key ? 'btn-primary' : 'btn-outline'}" onclick="ChinaCatalog.setFilter('${key}')">${this._esc(label)} (${count})</button>`;
+        });
+
+        html += `
+                <div style="margin-left:auto;">
+                    <input type="text" id="china-cat-search" placeholder="Поиск..." value="${this._esc(this._search)}" oninput="ChinaCatalog.onSearch(this.value)" style="width:180px;padding:6px 10px;font-size:12px;">
+                </div>
+            </div>
+        </div>`;
+
+        // Items table
+        const filtered = this._getFiltered();
+        if (filtered.length === 0) {
+            html += '<div class="empty-state"><p>Нет позиций по фильтру</p></div>';
+        } else {
+            html += this._renderTable(filtered);
+        }
+
+        container.innerHTML = html;
+    },
+
+    _getFiltered() {
+        let items = [...this._items];
+        if (this._filter) items = items.filter(i => i.category === this._filter);
+        if (this._search) {
+            const q = this._search.toLowerCase();
+            items = items.filter(i =>
+                (i.name || '').toLowerCase().includes(q) ||
+                (i.category_ru || '').toLowerCase().includes(q) ||
+                (i.size || '').toLowerCase().includes(q) ||
+                (i.notes || '').toLowerCase().includes(q)
+            );
+        }
+        return items;
+    },
+
+    _renderTable(items) {
+        let html = `<div class="card" style="padding:12px;overflow-x:auto;">
+            <table style="font-size:12px;white-space:nowrap;border-collapse:collapse;width:100%;">
+            <thead><tr>
+                <th style="padding:6px 8px;text-align:left;">Категория</th>
+                <th style="padding:6px 8px;text-align:left;min-width:200px;">Название</th>
+                <th style="padding:6px 8px;text-align:center;">Размер</th>
+                <th style="padding:6px 8px;text-align:right;">Вес (г)</th>
+                <th style="padding:6px 8px;text-align:right;">Цена &#165;</th>
+                <th style="padding:6px 8px;text-align:right;">Цена &#8381;</th>
+                <th style="padding:6px 8px;text-align:center;min-width:140px;">Доставка</th>
+                <th style="padding:6px 8px;text-align:right;">Кол-во</th>
+                <th style="padding:6px 8px;text-align:right;font-weight:700;min-width:100px;">Итого/шт &#8381;</th>
+                <th style="padding:6px 8px;text-align:right;">Ссылка</th>
+                <th style="width:60px;"></th>
+            </tr></thead><tbody>`;
+
+        items.forEach(item => {
+            const priceRub = round2(item.price_cny * this._cnyRate);
+            const isRussia = item.category === 'russia';
+            const priceDisplay = isRussia
+                ? `<span style="color:var(--text-muted)">—</span>`
+                : `${item.price_cny} &#165;`;
+            const priceRubDisplay = isRussia
+                ? `${formatRub(item.price_rub || 0)}`
+                : `${formatRub(priceRub)}`;
+
+            const deliverySelect = isRussia
+                ? `<span style="color:var(--text-muted);font-size:11px;">Россия</span>`
+                : `<select id="cc-delivery-${item.id}" onchange="ChinaCatalog.recalcRow(${item.id})" style="font-size:11px;padding:2px 4px;">
+                    <option value="auto">Авто $${this.DELIVERY_METHODS.auto.rate_usd}/кг</option>
+                    <option value="avia">Авиа $${this.DELIVERY_METHODS.avia.rate_usd}/кг</option>
+                    <option value="auto_slow">Медл. $${this.DELIVERY_METHODS.auto_slow.rate_usd}/кг</option>
+                   </select>`;
+
+            const linkHtml = item.link_1688
+                ? `<a href="${this._esc(item.link_1688)}" target="_blank" rel="noopener" style="font-size:11px;color:var(--accent);">1688</a>`
+                : '<span style="color:var(--text-muted);">—</span>';
+
+            html += `<tr style="border-bottom:1px solid var(--border);" id="cc-row-${item.id}">
+                <td style="padding:6px 8px;font-size:11px;color:var(--text-muted);">${this._esc(item.category_ru)}</td>
+                <td style="padding:6px 8px;">
+                    <div style="font-weight:600;font-size:12px;">${this._esc(item.name)}</div>
+                    ${item.notes ? `<div style="font-size:10px;color:var(--text-muted);white-space:normal;">${this._esc(item.notes)}</div>` : ''}
+                </td>
+                <td style="padding:6px 8px;text-align:center;font-size:11px;">${this._esc(item.size || '—')}</td>
+                <td style="padding:6px 8px;text-align:right;">${item.weight_grams || '—'}</td>
+                <td style="padding:6px 8px;text-align:right;">${priceDisplay}</td>
+                <td style="padding:6px 8px;text-align:right;">${priceRubDisplay}</td>
+                <td style="padding:6px 8px;text-align:center;">${deliverySelect}</td>
+                <td style="padding:6px 8px;text-align:right;">
+                    <input type="number" min="1" value="1" id="cc-qty-${item.id}" onchange="ChinaCatalog.recalcRow(${item.id})" oninput="ChinaCatalog.recalcRow(${item.id})" style="width:60px;text-align:center;font-size:11px;padding:2px 4px;">
+                </td>
+                <td style="padding:6px 8px;text-align:right;" id="cc-total-${item.id}">
+                    <span style="font-weight:700;font-size:13px;color:var(--green);">${isRussia ? formatRub(item.price_rub || 0) : formatRub(priceRub)}</span>
+                    <div style="font-size:9px;color:var(--text-muted);" id="cc-detail-${item.id}"></div>
+                </td>
+                <td style="padding:6px 8px;text-align:center;">${linkHtml}</td>
+                <td style="padding:6px;">
+                    <div style="display:flex;gap:4px;">
+                        <button class="btn btn-sm btn-outline" style="padding:2px 6px;font-size:10px;" onclick="ChinaCatalog.editItem(${item.id})">&#9998;</button>
+                        <button class="btn-remove" style="font-size:9px;width:22px;height:22px;" onclick="ChinaCatalog.deleteItem(${item.id})">&#10005;</button>
+                    </div>
+                </td>
+            </tr>`;
+        });
+
+        html += '</tbody></table></div>';
+        return html;
+    },
+
+    // ==========================================
+    // DELIVERY CALCULATOR
+    // ==========================================
+
+    recalcRow(id) {
+        const item = this._items.find(i => i.id === id);
+        if (!item) return;
+
+        const isRussia = item.category === 'russia';
+        const totalEl = document.getElementById('cc-total-' + id);
+        const detailEl = document.getElementById('cc-detail-' + id);
+        if (!totalEl) return;
+
+        if (isRussia) {
+            // Russian items — no delivery calc, price is already in RUB
+            const price = item.price_rub || 0;
+            totalEl.innerHTML = `<span style="font-weight:700;font-size:13px;color:var(--green);">${formatRub(price)}</span>`;
+            if (detailEl) detailEl.textContent = 'Россия';
+            return;
+        }
+
+        const deliveryEl = document.getElementById('cc-delivery-' + id);
+        const qtyEl = document.getElementById('cc-qty-' + id);
+        const method = deliveryEl ? deliveryEl.value : 'auto';
+        const qty = parseInt(qtyEl?.value) || 1;
+
+        const result = this.calcDelivery(item, method, qty);
+
+        totalEl.innerHTML = `<span style="font-weight:700;font-size:13px;color:var(--green);">${formatRub(result.totalPerUnit)}</span>`;
+        if (detailEl) {
+            detailEl.innerHTML = `${formatRub(result.priceRub)} + дост. ${formatRub(result.deliveryPerUnit)}`;
+        }
+    },
+
+    /**
+     * Calculate delivery cost per unit
+     * @param {Object} item - catalog item
+     * @param {string} method - delivery method key (auto/avia/auto_slow)
+     * @param {number} qty - quantity
+     * @returns {{ priceRub, deliveryPerUnit, totalPerUnit, deliveryTotal }}
+     */
+    calcDelivery(item, method, qty) {
+        const priceRub = round2(item.price_cny * this._cnyRate);
+        const weightKg = (item.weight_grams || 0) / 1000;
+        const rate = this.DELIVERY_METHODS[method]?.rate_usd || 3.5;
+
+        // Total delivery for all units: weight × qty × rate_usd × usd_rate
+        const deliveryTotal = round2(weightKg * qty * rate * this._usdRate);
+        const deliveryPerUnit = qty > 0 ? round2(deliveryTotal / qty) : 0;
+        const totalPerUnit = round2(priceRub + deliveryPerUnit);
+
+        return { priceRub, deliveryPerUnit, totalPerUnit, deliveryTotal };
+    },
+
+    // ==========================================
+    // FILTERS
+    // ==========================================
+
+    setFilter(cat) {
+        this._filter = cat;
+        this.render();
+    },
+
+    onSearch(val) {
+        this._search = val;
+        this.render();
+    },
+
+    // ==========================================
+    // RATES MODAL
+    // ==========================================
+
+    openRatesModal() {
+        const html = `
+        <div id="cc-rates-overlay" style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.4);z-index:1000;display:flex;align-items:center;justify-content:center;" onclick="if(event.target===this)ChinaCatalog.closeRatesModal()">
+            <div class="card" style="width:380px;padding:24px;" onclick="event.stopPropagation()">
+                <h3 style="margin-bottom:16px;">Курсы и ставки доставки</h3>
+                <div class="form-row">
+                    <div class="form-group"><label>Курс &#165; (юань)</label><input type="number" step="0.1" id="cc-rate-cny" value="${this._cnyRate}"><span class="form-hint">&#8381; за 1 &#165;</span></div>
+                    <div class="form-group"><label>Курс $ (доллар)</label><input type="number" step="0.1" id="cc-rate-usd" value="${this._usdRate}"><span class="form-hint">&#8381; за 1 $</span></div>
+                </div>
+                <h4 style="margin:16px 0 8px;">Ставки доставки ($/кг)</h4>
+                <div class="form-row">
+                    <div class="form-group"><label>Авто</label><input type="number" step="0.1" id="cc-rate-auto" value="${this.DELIVERY_METHODS.auto.rate_usd}"></div>
+                    <div class="form-group"><label>Авиа</label><input type="number" step="0.1" id="cc-rate-avia" value="${this.DELIVERY_METHODS.avia.rate_usd}"></div>
+                    <div class="form-group"><label>Медл. авто</label><input type="number" step="0.1" id="cc-rate-slow" value="${this.DELIVERY_METHODS.auto_slow.rate_usd}"></div>
+                </div>
+                <div style="display:flex;gap:8px;margin-top:16px;">
+                    <button class="btn btn-success btn-sm" onclick="ChinaCatalog.saveRates()">Сохранить</button>
+                    <button class="btn btn-outline btn-sm" onclick="ChinaCatalog.closeRatesModal()">Отмена</button>
+                </div>
+            </div>
+        </div>`;
+        document.body.insertAdjacentHTML('beforeend', html);
+    },
+
+    closeRatesModal() {
+        const el = document.getElementById('cc-rates-overlay');
+        if (el) el.remove();
+    },
+
+    async saveRates() {
+        this._cnyRate = parseFloat(document.getElementById('cc-rate-cny').value) || 12.5;
+        this._usdRate = parseFloat(document.getElementById('cc-rate-usd').value) || 90;
+        this.DELIVERY_METHODS.auto.rate_usd = parseFloat(document.getElementById('cc-rate-auto').value) || 3.5;
+        this.DELIVERY_METHODS.avia.rate_usd = parseFloat(document.getElementById('cc-rate-avia').value) || 8.0;
+        this.DELIVERY_METHODS.auto_slow.rate_usd = parseFloat(document.getElementById('cc-rate-slow').value) || 2.5;
+
+        // Save to settings
+        await saveSetting('china_cny_rate', this._cnyRate);
+        await saveSetting('china_usd_rate', this._usdRate);
+        await saveSetting('china_delivery_auto', this.DELIVERY_METHODS.auto.rate_usd);
+        await saveSetting('china_delivery_avia', this.DELIVERY_METHODS.avia.rate_usd);
+        await saveSetting('china_delivery_slow', this.DELIVERY_METHODS.auto_slow.rate_usd);
+
+        // Update App.params
+        if (App.params) {
+            App.params.china_cny_rate = this._cnyRate;
+            App.params.china_usd_rate = this._usdRate;
+            App.params.china_delivery_auto = this.DELIVERY_METHODS.auto.rate_usd;
+            App.params.china_delivery_avia = this.DELIVERY_METHODS.avia.rate_usd;
+            App.params.china_delivery_slow = this.DELIVERY_METHODS.auto_slow.rate_usd;
+        }
+
+        this.closeRatesModal();
+        this.render();
+        App.toast('Курсы сохранены');
+    },
+
+    // ==========================================
+    // CRUD
+    // ==========================================
+
+    _editingId: null,
+
+    showAddForm() {
+        this._editingId = null;
+        document.getElementById('cc-form-title').textContent = 'Новая позиция';
+        document.getElementById('cc-item-name').value = '';
+        document.getElementById('cc-item-category').value = '';
+        document.getElementById('cc-item-size').value = '';
+        document.getElementById('cc-item-weight').value = '';
+        document.getElementById('cc-item-price-cny').value = '';
+        document.getElementById('cc-item-price-rub').value = '';
+        document.getElementById('cc-item-link').value = '';
+        document.getElementById('cc-item-notes').value = '';
+        document.getElementById('cc-delete-btn').style.display = 'none';
+        document.getElementById('cc-edit-form').style.display = '';
+        document.getElementById('cc-edit-form').scrollIntoView({ behavior: 'smooth' });
+    },
+
+    editItem(id) {
+        const item = this._items.find(i => i.id === id);
+        if (!item) return;
+        this._editingId = id;
+        document.getElementById('cc-form-title').textContent = 'Редактировать: ' + (item.name || '');
+        document.getElementById('cc-item-name').value = item.name || '';
+        document.getElementById('cc-item-category').value = item.category || '';
+        document.getElementById('cc-item-size').value = item.size || '';
+        document.getElementById('cc-item-weight').value = item.weight_grams || '';
+        document.getElementById('cc-item-price-cny').value = item.price_cny || '';
+        document.getElementById('cc-item-price-rub').value = item.price_rub || '';
+        document.getElementById('cc-item-link').value = item.link_1688 || '';
+        document.getElementById('cc-item-notes').value = item.notes || '';
+        document.getElementById('cc-delete-btn').style.display = '';
+        document.getElementById('cc-edit-form').style.display = '';
+        document.getElementById('cc-edit-form').scrollIntoView({ behavior: 'smooth' });
+    },
+
+    hideForm() {
+        document.getElementById('cc-edit-form').style.display = 'none';
+        this._editingId = null;
+    },
+
+    saveItem() {
+        const name = document.getElementById('cc-item-name').value.trim();
+        if (!name) { App.toast('Введите название'); return; }
+
+        const category = document.getElementById('cc-item-category').value.trim() || 'misc';
+        // Determine category_ru from existing items or use category as-is
+        const existingCat = this._items.find(i => i.category === category);
+        const category_ru = existingCat?.category_ru || category;
+
+        const data = {
+            name,
+            category,
+            category_ru,
+            size: document.getElementById('cc-item-size').value.trim(),
+            weight_grams: parseFloat(document.getElementById('cc-item-weight').value) || 0,
+            price_cny: parseFloat(document.getElementById('cc-item-price-cny').value) || 0,
+            price_rub: parseFloat(document.getElementById('cc-item-price-rub').value) || 0,
+            link_1688: document.getElementById('cc-item-link').value.trim(),
+            notes: document.getElementById('cc-item-notes').value.trim(),
+        };
+
+        if (this._editingId) {
+            const idx = this._items.findIndex(i => i.id === this._editingId);
+            if (idx >= 0) {
+                this._items[idx] = { ...this._items[idx], ...data };
+            }
+        } else {
+            const maxId = this._items.reduce((max, i) => Math.max(max, i.id || 0), 0);
+            data.id = maxId + 1;
+            this._items.push(data);
+        }
+
+        this._saveItems();
+        this.hideForm();
+        this.render();
+        App.toast('Позиция сохранена');
+    },
+
+    deleteItem(id) {
+        const item = this._items.find(i => i.id === id);
+        if (!item) return;
+        if (!confirm(`Удалить "${item.name}"?`)) return;
+        this._items = this._items.filter(i => i.id !== id);
+        this._saveItems();
+        this.render();
+        App.toast('Удалено');
+    },
+
+    deleteFromForm() {
+        if (!this._editingId) return;
+        this.deleteItem(this._editingId);
+        this.hideForm();
+    },
+
+    // ==========================================
+    // UTILS
+    // ==========================================
+
+    _esc(str) {
+        if (!str) return '';
+        return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    },
+};
