@@ -33,6 +33,10 @@ const Settings = {
         if (tab === 'backup') {
             this.loadBackupTab();
         }
+        // Load timing editor
+        if (tab === 'timing') {
+            this.loadTimingTab();
+        }
     },
 
     populateFields() {
@@ -349,6 +353,7 @@ const Settings = {
         'ro_calc_warehouseHistory', 'ro_calc_shipments',
         'ro_calc_vacations', 'ro_calc_order_factuals', 'ro_calc_imports',
         'ro_calc_colors',
+        'ro_calc_assembly_timing',
     ],
 
     downloadBackup() {
@@ -560,8 +565,139 @@ const Settings = {
         App.toast('Авто-бэкап скачан');
     },
 
+    // ==========================================
+    // ASSEMBLY TIMING — Editable reference data
+    // ==========================================
+
+    TIMING_STORAGE_KEY: 'ro_calc_assembly_timing',
+
+    _defaultTimingData() {
+        return [
+            { section: 'Отдельные операции', items: [
+                ['Карабин', 4], ['Среднее кольцо', 5], ['Железный трос', 11],
+                ['Шариковая цепочка', 5], ['Шнур (миланский, кожаный)', 10], ['Приклеить зеркало', 18],
+            ]},
+            { section: 'Сборки', items: [
+                ['Кисточка + соед. кольцо', 34], ['Тег + соед. кольцо', 9],
+                ['Трос + соед. кольцо + тег', 13],
+                ['Вощ./кож. шнур 90см на изделие', 36],
+                ['NFC: карабин + изделие + соед. кольцо', 16],
+                ['Открывашка: шнур + наконечники (2шт)', 20],
+                ['NFC: карабин + плоск. кольцо + тег + соед. кольцо', 30],
+                ['Адресник: шарик. цепочка + изделие', 9],
+                ['Карабин + шарик. цепочка + тег', 17],
+                ['Милан. шнур + наконечники + вязка + 2 карабина', 50],
+                ['Шарик. цепочка + гвоздь + бусина', 65],
+                ['Колье: шарик. цепочка 90см + крепление', 128],
+            ]},
+            { section: 'Упаковка', items: [] },
+        ];
+    },
+
+    getTimingData() {
+        try {
+            const raw = localStorage.getItem(this.TIMING_STORAGE_KEY);
+            if (raw) {
+                const data = JSON.parse(raw);
+                if (Array.isArray(data) && data.length > 0) return data;
+            }
+        } catch (e) {}
+        return this._defaultTimingData();
+    },
+
+    saveTimingData(data) {
+        localStorage.setItem(this.TIMING_STORAGE_KEY, JSON.stringify(data));
+    },
+
+    loadTimingTab() {
+        const container = document.getElementById('timing-editor');
+        if (!container) return;
+        const data = this.getTimingData();
+
+        let html = '';
+        data.forEach((group, gi) => {
+            html += `<div class="card" style="margin-bottom:12px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                    <input type="text" value="${this.escHtml(group.section)}" style="font-weight:700;font-size:14px;border:none;padding:0;background:transparent;flex:1;"
+                        onchange="Settings.onTimingSectionName(${gi}, this.value)">
+                    <button class="btn-remove" style="font-size:9px;width:20px;height:20px;" onclick="Settings.deleteTimingSection(${gi})" title="Удалить раздел">✕</button>
+                </div>
+                <table style="width:100%;font-size:12px;">
+                    <thead><tr style="color:var(--text-muted);font-size:10px;text-transform:uppercase;">
+                        <th style="text-align:left;padding:2px 4px;">Операция</th>
+                        <th style="width:70px;text-align:center;padding:2px 4px;">Секунды</th>
+                        <th style="width:70px;text-align:center;padding:2px 4px;">шт/мин</th>
+                        <th style="width:30px;"></th>
+                    </tr></thead>
+                    <tbody>`;
+
+            (group.items || []).forEach(([name, sec], ii) => {
+                const pcsPerMin = Math.floor(60 / (sec * 1.3));
+                html += `<tr style="border-bottom:1px solid var(--border);">
+                    <td style="padding:3px 4px;"><input type="text" value="${this.escHtml(name)}" style="width:100%;font-size:12px;padding:2px 4px;border:1px solid var(--border);border-radius:4px;" onchange="Settings.onTimingItem(${gi},${ii},'name',this.value)"></td>
+                    <td style="padding:3px 4px;"><input type="number" min="1" value="${sec}" style="width:100%;text-align:center;font-size:12px;padding:2px 4px;" onchange="Settings.onTimingItem(${gi},${ii},'sec',this.value)"></td>
+                    <td style="padding:3px 4px;text-align:center;font-weight:600;color:var(--accent);">${pcsPerMin}</td>
+                    <td style="padding:3px 4px;"><button class="btn-remove" style="font-size:8px;width:18px;height:18px;" onclick="Settings.deleteTimingItem(${gi},${ii})">✕</button></td>
+                </tr>`;
+            });
+
+            html += `</tbody></table>
+                <button class="btn btn-sm btn-outline" style="margin-top:6px;font-size:11px;" onclick="Settings.addTimingItem(${gi})">+ Добавить операцию</button>
+            </div>`;
+        });
+
+        html += `<button class="btn btn-sm btn-outline" onclick="Settings.addTimingSection()">+ Добавить раздел</button>`;
+        container.innerHTML = html;
+    },
+
+    onTimingSectionName(gi, value) {
+        const data = this.getTimingData();
+        if (data[gi]) { data[gi].section = value.trim(); this.saveTimingData(data); }
+    },
+
+    onTimingItem(gi, ii, field, value) {
+        const data = this.getTimingData();
+        if (!data[gi] || !data[gi].items[ii]) return;
+        if (field === 'name') data[gi].items[ii][0] = value.trim();
+        if (field === 'sec') data[gi].items[ii][1] = parseInt(value) || 1;
+        this.saveTimingData(data);
+        this.loadTimingTab();
+    },
+
+    addTimingItem(gi) {
+        const data = this.getTimingData();
+        if (!data[gi]) return;
+        data[gi].items.push(['Новая операция', 10]);
+        this.saveTimingData(data);
+        this.loadTimingTab();
+    },
+
+    deleteTimingItem(gi, ii) {
+        const data = this.getTimingData();
+        if (!data[gi] || !data[gi].items[ii]) return;
+        data[gi].items.splice(ii, 1);
+        this.saveTimingData(data);
+        this.loadTimingTab();
+    },
+
+    addTimingSection() {
+        const data = this.getTimingData();
+        data.push({ section: 'Новый раздел', items: [] });
+        this.saveTimingData(data);
+        this.loadTimingTab();
+    },
+
+    deleteTimingSection(gi) {
+        const data = this.getTimingData();
+        if (!data[gi]) return;
+        if (data[gi].items.length > 0 && !confirm(`Удалить раздел "${data[gi].section}" с ${data[gi].items.length} операциями?`)) return;
+        data.splice(gi, 1);
+        this.saveTimingData(data);
+        this.loadTimingTab();
+    },
+
     escHtml(str) {
         if (!str) return '';
-        return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     },
 };

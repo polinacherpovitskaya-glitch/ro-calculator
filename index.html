@@ -930,8 +930,8 @@
                     <!-- Common fields -->
                     <div class="form-row">
                         <div class="form-group" style="flex:1;">
-                            <label>Сборка (шт/ч)</label>
-                            <input type="number" min="1" id="hw-blank-speed" oninput="Molds.recalcHwCost()">
+                            <label>Сборка (шт/мин) <span onclick="Calculator.showAssemblyTiming()" style="cursor:pointer;color:var(--accent);font-weight:700;font-size:13px;margin-left:2px;" title="Справочник тайминга">ⓘ</span></label>
+                            <input type="number" min="0" step="1" id="hw-blank-speed" oninput="Molds.recalcHwCost()" placeholder="напр. 9">
                         </div>
                         <div class="form-group" style="flex:2"><label>Заметки</label><input type="text" id="hw-blank-notes" placeholder="Описание, цвет, размер..."></div>
                     </div>
@@ -2123,6 +2123,7 @@
                 <div class="tab" data-tab="templates" onclick="Settings.switchTab('templates')">Справочник форм</div>
                 <div class="tab" data-tab="employees" onclick="Settings.switchTab('employees')">Сотрудники</div>
                 <div class="tab" data-tab="company" onclick="Settings.switchTab('company')">Реквизиты</div>
+                <div class="tab" data-tab="timing" onclick="Settings.switchTab('timing')">⏱ Тайминг</div>
                 <div class="tab" data-tab="backup" onclick="Settings.switchTab('backup')">Бэкап</div>
             </div>
 
@@ -2432,6 +2433,15 @@
             </div>
 
             <!-- Backup tab -->
+            <!-- Timing tab -->
+            <div id="settings-tab-timing" class="settings-tab-content" style="display:none">
+                <div style="margin-bottom:12px;">
+                    <h3 style="margin-bottom:4px;">⏱ Справочник тайминга сборки</h3>
+                    <p style="font-size:12px;color:var(--text-muted);">Время операций в секундах → шт/мин с запасом +30%. Нажмите ⓘ в калькуляторе, чтобы использовать эти значения.</p>
+                </div>
+                <div id="timing-editor"></div>
+            </div>
+
             <div id="settings-tab-backup" class="settings-tab-content" style="display:none">
                 <div class="card">
                     <h3 style="margin-bottom:4px;">Резервное копирование</h3>
@@ -2534,12 +2544,12 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="js/supabase.js?v=46i"></script>
 <script src="js/calculator.js?v=46g"></script>
-<script src="js/app.js?v=46j"></script>
+<script src="js/app.js?v=46l"></script>
 <script src="js/dashboard.js?v=46g"></script>
 <script src="js/order-detail.js?v=46g"></script>
 <script src="js/orders.js?v=46g"></script>
 <script src="js/analytics.js?v=46g"></script>
-<script src="js/molds.js?v=46i"></script>
+<script src="js/molds.js?v=46l"></script>
 <script src="js/colors.js?v=46g"></script>
 <script src="js/kp.js?v=46g"></script>
 <script src="js/timetrack.js?v=46g"></script>
@@ -2552,6 +2562,6 @@
 <script src="js/china_catalog.js?v=46k"></script>
 <script src="js/marketplaces.js?v=46h"></script>
 <script src="js/warehouse.js?v=46g"></script>
-<script src="js/settings.js?v=46g"></script>
+<script src="js/settings.js?v=46l"></script>
 </body>
 </html>

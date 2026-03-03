@@ -965,7 +965,8 @@ const Molds = {
                 ? `<img src="${photoSrc.startsWith('data:') ? photoSrc : this.esc(photoSrc)}" style="width:44px;height:44px;object-fit:cover;border-radius:6px;border:1px solid var(--border);" onerror="this.style.display='none'">`
                 : `<span style="width:44px;height:44px;display:flex;align-items:center;justify-content:center;background:var(--accent-light);border-radius:6px;font-size:16px;">🔩</span>`;
 
-            const speedLabel = b.assembly_speed ? (b.assembly_speed + ' шт/ч') : '—';
+            const speedPcsMin = b.assembly_speed ? round2(b.assembly_speed / 60) : 0;
+            const speedLabel = speedPcsMin > 0 ? (speedPcsMin + ' шт/мин') : '—';
             const src = b.hw_form_source || 'warehouse';
             const srcBadge = b._srcBadge || '📦';
             // Extra info line for china/custom
@@ -1079,7 +1080,7 @@ const Molds = {
         if (!b) return;
         this._editingHwId = id;
         document.getElementById('hw-form-title').textContent = 'Редактировать: ' + (b.name || '');
-        document.getElementById('hw-blank-speed').value = b.assembly_speed || '';
+        document.getElementById('hw-blank-speed').value = b.assembly_speed ? round2(b.assembly_speed / 60) : '';
         document.getElementById('hw-blank-notes').value = b.notes || '';
         document.getElementById('hw-blank-name').value = b.name || '';
         document.getElementById('hw-blank-price-rub').value = b.price_rub || 0;
@@ -1311,7 +1312,8 @@ const Molds = {
         const params = App.params || {};
         const fotPerHour = params.fotPerHour || 400;
         const indirectPerHour = params.indirectPerHour || 0;
-        const speed = parseFloat(document.getElementById('hw-blank-speed').value) || 0;
+        const pcsPerMin = parseFloat(document.getElementById('hw-blank-speed').value) || 0;
+        const speed = round2(pcsPerMin * 60); // шт/мин → шт/час для расчёта
 
         let priceRub = 0;
         let priceLabel = '';
@@ -1394,13 +1396,13 @@ const Molds = {
         html += priceLabel + '<br>';
         detailLines.forEach(line => { html += line + '<br>'; });
         if (speed > 0) {
-            html += `ФОТ сборки: ${formatRub(fotPerHour)}/ч ÷ ${speed} шт/ч = <b>${formatRub(fotCost)}</b>/шт<br>`;
+            html += `ФОТ сборки: ${formatRub(fotPerHour)}/ч ÷ ${speed} шт/ч (${pcsPerMin} шт/мин) = <b>${formatRub(fotCost)}</b>/шт<br>`;
             if (indirectPerHour > 0) {
                 html += `Косвенные: ${formatRub(round2(indirectPerHour))}/ч ÷ ${speed} шт/ч = <b>${formatRub(indirectCost)}</b>/шт<br>`;
             }
             html += `Сборка итого: <b>${formatRub(assemblyCost)}</b>/шт`;
         } else {
-            html += `Сборка: <span style="color:var(--text-muted)">укажите скорость (шт/ч)</span>`;
+            html += `Сборка: <span style="color:var(--text-muted)">укажите скорость (шт/мин)</span>`;
         }
         html += `</div>`;
 
@@ -1436,7 +1438,7 @@ const Molds = {
             price_rub: parseFloat(document.getElementById('hw-blank-price-rub').value) || 0,
             warehouse_item_id: parseInt(document.getElementById('hw-blank-wh-id').value) || null,
             china_catalog_id: parseInt(document.getElementById('hw-blank-china-id').value) || null,
-            assembly_speed: parseFloat(document.getElementById('hw-blank-speed').value) || 0,
+            assembly_speed: round2((parseFloat(document.getElementById('hw-blank-speed').value) || 0) * 60),
             notes: document.getElementById('hw-blank-notes').value.trim(),
             photo_url: document.getElementById('hw-blank-photo').value.trim(),
             hw_form_source: src,

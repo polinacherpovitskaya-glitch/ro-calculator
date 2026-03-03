@@ -1051,25 +1051,8 @@ const Calculator = {
         const existing = document.getElementById('assembly-timing-popup');
         if (existing) { existing.remove(); return; }
 
-        const data = [
-            { section: 'Отдельные операции', items: [
-                ['Карабин', 4], ['Среднее кольцо', 5], ['Железный трос', 11],
-                ['Шариковая цепочка', 5], ['Шнур (миланский, кожаный)', 10], ['Приклеить зеркало', 18],
-            ]},
-            { section: 'Сборки', items: [
-                ['Кисточка + соед. кольцо', 34], ['Тег + соед. кольцо', 9],
-                ['Трос + соед. кольцо + тег', 13],
-                ['Вощ./кож. шнур 90см на изделие', 36],
-                ['NFC: карабин + изделие + соед. кольцо', 16],
-                ['Открывашка: шнур + наконечники (2шт)', 20],
-                ['NFC: карабин + плоск. кольцо + тег + соед. кольцо', 30],
-                ['Адресник: шарик. цепочка + изделие', 9],
-                ['Карабин + шарик. цепочка + тег', 17],
-                ['Милан. шнур + наконечники + вязка + 2 карабина', 50],
-                ['Шарик. цепочка + гвоздь + бусина', 65],
-                ['Колье: шарик. цепочка 90см + крепление', 128],
-            ]},
-        ];
+        // Read from stored data (editable in Settings → Тайминг)
+        const data = Settings.getTimingData();
 
         let html = `<div id="assembly-timing-popup" onclick="if(event.target===this)this.remove()" style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.35);z-index:1000;display:flex;align-items:center;justify-content:center;">
             <div class="card" style="width:420px;max-height:80vh;overflow-y:auto;padding:20px;" onclick="event.stopPropagation()">
@@ -1077,9 +1060,10 @@ const Calculator = {
                     <h3 style="margin:0;">⏱ Тайминг сборки</h3>
                     <button class="btn-remove" style="font-size:10px;width:24px;height:24px;" onclick="document.getElementById('assembly-timing-popup').remove()">✕</button>
                 </div>
-                <p style="font-size:11px;color:var(--text-muted);margin-bottom:12px;">Нажмите на строку, чтобы скопировать значение в шт/мин (с запасом +30%)</p>`;
+                <p style="font-size:11px;color:var(--text-muted);margin-bottom:12px;">Нажмите на строку, чтобы скопировать шт/мин (+30%). <a href="#" onclick="event.preventDefault();document.getElementById('assembly-timing-popup').remove();App.navigate('settings');setTimeout(()=>Settings.switchTab('timing'),200);" style="color:var(--accent);">Редактировать ⚙</a></p>`;
 
         data.forEach(group => {
+            if (!group.items || group.items.length === 0) return;
             html += `<div style="font-weight:700;font-size:11px;color:var(--text-muted);text-transform:uppercase;margin:12px 0 6px;letter-spacing:0.5px;">${group.section}</div>`;
             group.items.forEach(([name, sec]) => {
                 const pcsPerMin = Math.floor(60 / (sec * 1.3));
