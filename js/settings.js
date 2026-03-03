@@ -632,7 +632,8 @@ const Settings = {
                     <tbody>`;
 
             (group.items || []).forEach(([name, sec], ii) => {
-                const pcsPerMin = Math.floor(60 / (sec * 1.3));
+                const raw = 60 / (sec * 1.3);
+                const pcsPerMin = raw >= 1 ? Math.floor(raw) : Math.round(raw * 10) / 10;
                 html += `<tr style="border-bottom:1px solid var(--border);">
                     <td style="padding:3px 4px;"><input type="text" value="${this.escHtml(name)}" style="width:100%;font-size:12px;padding:2px 4px;border:1px solid var(--border);border-radius:4px;" onchange="Settings.onTimingItem(${gi},${ii},'name',this.value)"></td>
                     <td style="padding:3px 4px;"><input type="number" min="1" value="${sec}" style="width:100%;text-align:center;font-size:12px;padding:2px 4px;" onchange="Settings.onTimingItem(${gi},${ii},'sec',this.value)"></td>

@@ -1066,7 +1066,8 @@ const Calculator = {
             if (!group.items || group.items.length === 0) return;
             html += `<div style="font-weight:700;font-size:11px;color:var(--text-muted);text-transform:uppercase;margin:12px 0 6px;letter-spacing:0.5px;">${group.section}</div>`;
             group.items.forEach(([name, sec]) => {
-                const pcsPerMin = Math.floor(60 / (sec * 1.3));
+                const raw = 60 / (sec * 1.3);
+                const pcsPerMin = raw >= 1 ? Math.floor(raw) : Math.round(raw * 10) / 10;
                 html += `<div onclick="navigator.clipboard.writeText('${pcsPerMin}');App.toast('Скопировано: ${pcsPerMin} шт/мин');document.getElementById('assembly-timing-popup').remove();" style="display:flex;justify-content:space-between;padding:6px 8px;border-bottom:1px solid var(--border);cursor:pointer;font-size:12px;border-radius:4px;" onmouseover="this.style.background='var(--bg)'" onmouseout="this.style.background=''">
                     <span>${name}</span>
                     <span style="font-weight:600;white-space:nowrap;margin-left:8px;">${sec}с → <span style="color:var(--accent);">${pcsPerMin} шт/мин</span></span>
