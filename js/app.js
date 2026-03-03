@@ -820,7 +820,7 @@ const Calculator = {
                     <input type="number" min="0"${maxAttr} value="${hw.qty || ''}" oninput="Calculator.onHwNum(${idx}, 'qty', this.value)">
                 </div>
                 <div class="form-group" style="margin:0">
-                    <label>\u0421\u0431\u043e\u0440\u043a\u0430 (\u043c\u0438\u043d/\u0448\u0442)</label>
+                    <label>${this._assemblyTimingLabel()}</label>
                     <input type="number" min="0" step="0.1" value="${minsDisplay}" oninput="Calculator.onHwMinutes(${idx}, this.value)" placeholder="\u043d\u0430\u043f\u0440. 0.5">
                 </div>
             </div>`;
@@ -852,7 +852,7 @@ const Calculator = {
                     <input type="number" min="0" value="${hw.qty || ''}" oninput="Calculator.onHwNum(${idx}, 'qty', this.value)">
                 </div>
                 <div class="form-group" style="margin:0">
-                    <label>\u0421\u0431\u043e\u0440\u043a\u0430 (\u043c\u0438\u043d/\u0448\u0442)</label>
+                    <label>${this._assemblyTimingLabel()}</label>
                     <input type="number" min="0" step="0.1" value="${minsDisplay}" oninput="Calculator.onHwMinutes(${idx}, this.value)" placeholder="\u043d\u0430\u043f\u0440. 0.5">
                 </div>
                 <div class="form-group" style="margin:0">
@@ -873,7 +873,7 @@ const Calculator = {
                     <input type="number" min="0" value="${hw.qty || ''}" oninput="Calculator.onHwNum(${idx}, 'qty', this.value)">
                 </div>
                 <div class="form-group" style="margin:0">
-                    <label>\u0421\u0431\u043e\u0440\u043a\u0430 (\u043c\u0438\u043d/\u0448\u0442)</label>
+                    <label>${this._assemblyTimingLabel()}</label>
                     <input type="number" min="0" step="0.1" value="${minsDisplay}" oninput="Calculator.onHwMinutes(${idx}, this.value)" placeholder="\u043d\u0430\u043f\u0440. 0.5">
                 </div>
                 <div class="form-group" style="margin:0">
@@ -1036,6 +1036,62 @@ const Calculator = {
         this.hardwareItems[idx].assembly_speed = mins > 0 ? round2(60 / mins) : 0;
         this.recalculate();
         this.scheduleAutosave();
+    },
+
+    // ==========================================
+    // ASSEMBLY TIMING REFERENCE
+    // ==========================================
+
+    _assemblyTimingLabel() {
+        return `Сборка (мин/шт) <span onclick="Calculator.showAssemblyTiming()" style="cursor:pointer;color:var(--accent);font-weight:700;font-size:13px;margin-left:2px;" title="Справочник тайминга">ⓘ</span>`;
+    },
+
+    showAssemblyTiming() {
+        // Remove existing popup if any
+        const existing = document.getElementById('assembly-timing-popup');
+        if (existing) { existing.remove(); return; }
+
+        const data = [
+            { section: 'Отдельные операции', items: [
+                ['Карабин', 4], ['Среднее кольцо', 5], ['Железный трос', 11],
+                ['Шариковая цепочка', 5], ['Шнур (миланский, кожаный)', 10], ['Приклеить зеркало', 18],
+            ]},
+            { section: 'Сборки', items: [
+                ['Кисточка + соед. кольцо', 34], ['Тег + соед. кольцо', 9],
+                ['Трос + соед. кольцо + тег', 13],
+                ['Вощ./кож. шнур 90см на изделие', 36],
+                ['NFC: карабин + изделие + соед. кольцо', 16],
+                ['Открывашка: шнур + наконечники (2шт)', 20],
+                ['NFC: карабин + плоск. кольцо + тег + соед. кольцо', 30],
+                ['Адресник: шарик. цепочка + изделие', 9],
+                ['Карабин + шарик. цепочка + тег', 17],
+                ['Милан. шнур + наконечники + вязка + 2 карабина', 50],
+                ['Шарик. цепочка + гвоздь + бусина', 65],
+                ['Колье: шарик. цепочка 90см + крепление', 128],
+            ]},
+        ];
+
+        let html = `<div id="assembly-timing-popup" onclick="if(event.target===this)this.remove()" style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.35);z-index:1000;display:flex;align-items:center;justify-content:center;">
+            <div class="card" style="width:420px;max-height:80vh;overflow-y:auto;padding:20px;" onclick="event.stopPropagation()">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                    <h3 style="margin:0;">⏱ Тайминг сборки</h3>
+                    <button class="btn-remove" style="font-size:10px;width:24px;height:24px;" onclick="document.getElementById('assembly-timing-popup').remove()">✕</button>
+                </div>
+                <p style="font-size:11px;color:var(--text-muted);margin-bottom:12px;">Нажмите на строку, чтобы скопировать значение в минутах</p>`;
+
+        data.forEach(group => {
+            html += `<div style="font-weight:700;font-size:11px;color:var(--text-muted);text-transform:uppercase;margin:12px 0 6px;letter-spacing:0.5px;">${group.section}</div>`;
+            group.items.forEach(([name, sec]) => {
+                const mins = Math.round(sec / 60 * 100) / 100;
+                html += `<div onclick="navigator.clipboard.writeText('${mins}');App.toast('Скопировано: ${mins} мин');document.getElementById('assembly-timing-popup').remove();" style="display:flex;justify-content:space-between;padding:6px 8px;border-bottom:1px solid var(--border);cursor:pointer;font-size:12px;border-radius:4px;" onmouseover="this.style.background='var(--bg)'" onmouseout="this.style.background=''">
+                    <span>${name}</span>
+                    <span style="font-weight:600;white-space:nowrap;margin-left:8px;">${sec}с <span style="color:var(--text-muted);">(${mins} мин)</span></span>
+                </div>`;
+            });
+        });
+
+        html += '</div></div>';
+        document.body.insertAdjacentHTML('beforeend', html);
     },
 
     // ==========================================
@@ -1206,7 +1262,7 @@ const Calculator = {
                     <input type="number" min="0"${maxAttr} value="${pkg.qty || ''}" oninput="Calculator.onPkgNum(${idx}, 'qty', this.value)">
                 </div>
                 <div class="form-group" style="margin:0">
-                    <label>\u0421\u0431\u043e\u0440\u043a\u0430 (\u043c\u0438\u043d/\u0448\u0442)</label>
+                    <label>${this._assemblyTimingLabel()}</label>
                     <input type="number" min="0" step="0.1" value="${minsDisplay}" oninput="Calculator.onPkgMinutes(${idx}, this.value)" placeholder="\u043d\u0430\u043f\u0440. 0.5">
                 </div>
             </div>`;
@@ -1238,7 +1294,7 @@ const Calculator = {
                     <input type="number" min="0" value="${pkg.qty || ''}" oninput="Calculator.onPkgNum(${idx}, 'qty', this.value)">
                 </div>
                 <div class="form-group" style="margin:0">
-                    <label>\u0421\u0431\u043e\u0440\u043a\u0430 (\u043c\u0438\u043d/\u0448\u0442)</label>
+                    <label>${this._assemblyTimingLabel()}</label>
                     <input type="number" min="0" step="0.1" value="${minsDisplay}" oninput="Calculator.onPkgMinutes(${idx}, this.value)" placeholder="\u043d\u0430\u043f\u0440. 0.5">
                 </div>
                 <div class="form-group" style="margin:0">
@@ -1259,7 +1315,7 @@ const Calculator = {
                     <input type="number" min="0" value="${pkg.qty || ''}" oninput="Calculator.onPkgNum(${idx}, 'qty', this.value)">
                 </div>
                 <div class="form-group" style="margin:0">
-                    <label>\u0421\u0431\u043e\u0440\u043a\u0430 (\u043c\u0438\u043d/\u0448\u0442)</label>
+                    <label>${this._assemblyTimingLabel()}</label>
                     <input type="number" min="0" step="0.1" value="${minsDisplay}" oninput="Calculator.onPkgMinutes(${idx}, this.value)" placeholder="\u043d\u0430\u043f\u0440. 0.5">
                 </div>
                 <div class="form-group" style="margin:0">
