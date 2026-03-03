@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v46i';
+const APP_VERSION = 'v46j';
 
 const App = {
     currentPage: 'dashboard',
@@ -712,16 +712,20 @@ const Calculator = {
 
     getEmptyHardware() {
         return {
-            source: 'warehouse',        // 'warehouse' | 'custom'
+            source: 'warehouse',        // 'warehouse' | 'china' | 'custom'
             warehouse_item_id: null,    // id позиции со склада
             warehouse_sku: '',          // артикул (для истории)
+            china_item_id: null,        // id from ChinaCatalog
+            china_delivery_method: 'avia', // 'avia_fast' | 'avia' | 'auto'
             name: '',
             qty: 0,
             assembly_speed: 0,      // шт/ч (calculated from minutes)
             assembly_minutes: 0,    // мин/шт (user input)
-            price: 0,
-            delivery_total: 0,    // Total delivery cost (not per unit)
-            delivery_price: 0,    // Calculated: delivery_total / qty
+            price_cny: 0,           // Price in CNY (china/custom)
+            weight_grams: 0,        // Weight in grams (china/custom)
+            price: 0,               // Price in RUB per unit
+            delivery_total: 0,    // Total delivery cost
+            delivery_price: 0,    // Per-unit delivery cost
             sell_price: 0,
             result: null,
         };
@@ -776,6 +780,7 @@ const Calculator = {
         const hw = this.hardwareItems[idx];
         const minsDisplay = hw.assembly_minutes || '';
         const isWarehouse = hw.source === 'warehouse';
+        const isChina = hw.source === 'china';
         const isCustom = hw.source === 'custom';
         const list = document.getElementById('calc-hardware-list');
 
@@ -790,71 +795,130 @@ const Calculator = {
         const maxQty = whItem ? whItem.available_qty : '';
         const maxAttr = whItem ? ` max="${whItem.available_qty}"` : '';
 
+        // Delivery method options for china/custom
+        const deliveryOpts = Object.entries(ChinaCatalog.DELIVERY_METHODS || {}).map(([key, m]) => {
+            const sel = (hw.china_delivery_method || 'avia') === key ? ' selected' : '';
+            return `<option value="${key}"${sel}>${m.label} ($${m.rate_usd}/\u043a\u0433)</option>`;
+        }).join('');
+
+        // China pricing info line
+        const chinaInfo = (isChina || isCustom) && hw.price_cny > 0
+            ? `<div style="font-size:11px;color:var(--text-muted);margin-top:6px;padding:4px 8px;background:var(--bg);border-radius:4px;">
+                \ud83d\udcb0 ${hw.price_cny}\u00a5 = <b>${formatRub(hw.price)}</b>/\u0448\u0442 \u00b7 \ud83d\udce6 \u0414\u043e\u0441\u0442\u0430\u0432\u043a\u0430: <b>${formatRub(hw.delivery_price)}</b>/\u0448\u0442 (${hw.weight_grams || 0}\u0433)
+               </div>` : '';
+
+        let modeHtml = '';
+        if (isWarehouse) {
+            modeHtml = `
+            <div class="form-row" style="align-items:end">
+                <div class="form-group" style="margin:0;flex:2;">
+                    <label>\u041f\u043e\u0437\u0438\u0446\u0438\u044f \u0441\u043e \u0441\u043a\u043b\u0430\u0434\u0430</label>
+                    ${pickerHtml}
+                </div>
+                <div class="form-group" style="margin:0">
+                    <label>\u041a\u043e\u043b-\u0432\u043e${maxQty !== '' ? ` <span style="font-size:10px;color:var(--text-muted);">(\u043c\u0430\u043a\u0441: ${maxQty})</span>` : ''}</label>
+                    <input type="number" min="0"${maxAttr} value="${hw.qty || ''}" oninput="Calculator.onHwNum(${idx}, 'qty', this.value)">
+                </div>
+                <div class="form-group" style="margin:0">
+                    <label>\u0421\u0431\u043e\u0440\u043a\u0430 (\u043c\u0438\u043d/\u0448\u0442)</label>
+                    <input type="number" min="0" step="0.1" value="${minsDisplay}" oninput="Calculator.onHwMinutes(${idx}, this.value)" placeholder="\u043d\u0430\u043f\u0440. 0.5">
+                </div>
+            </div>`;
+        } else if (isChina) {
+            const chinaItem = hw.china_item_id ? (ChinaCatalog._items || []).find(i => i.id === hw.china_item_id) : null;
+            const photoUrl = chinaItem?.photo_url || '';
+            const proxied = typeof ChinaCatalog._proxyPhoto === 'function' ? ChinaCatalog._proxyPhoto(photoUrl) : photoUrl;
+            const photoHtml = proxied
+                ? `<img src="${this._escAttr(proxied)}" style="width:32px;height:32px;object-fit:cover;border-radius:4px;border:1px solid var(--border);" onerror="this.style.display='none'" loading="lazy">`
+                : '';
+            modeHtml = `
+            <div class="form-row" style="align-items:end">
+                <div class="form-group" style="margin:0;flex:2;">
+                    <label>\u041f\u043e\u0437\u0438\u0446\u0438\u044f \u0438\u0437 \u043a\u0430\u0442\u0430\u043b\u043e\u0433\u0430 \u041a\u0438\u0442\u0430\u0439</label>
+                    <div style="position:relative;">
+                        <div style="display:flex;gap:6px;align-items:center;">
+                            ${photoHtml}
+                            <input type="text" id="hw-china-search-${idx}" placeholder="\u041f\u043e\u0438\u0441\u043a \u043f\u043e \u043a\u0430\u0442\u0430\u043b\u043e\u0433\u0443..."
+                                value="${this._esc(hw.name || '')}"
+                                oninput="Calculator.searchChinaCatalog('hw', ${idx}, this.value)"
+                                onfocus="if(this.value.length>=1) Calculator.searchChinaCatalog('hw', ${idx}, this.value)"
+                                style="flex:1">
+                        </div>
+                        <div id="hw-china-dropdown-${idx}" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:100;background:#fff;border:1px solid var(--border);border-radius:8px;max-height:240px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,0.15);"></div>
+                    </div>
+                </div>
+                <div class="form-group" style="margin:0">
+                    <label>\u041a\u043e\u043b-\u0432\u043e</label>
+                    <input type="number" min="0" value="${hw.qty || ''}" oninput="Calculator.onHwNum(${idx}, 'qty', this.value)">
+                </div>
+                <div class="form-group" style="margin:0">
+                    <label>\u0421\u0431\u043e\u0440\u043a\u0430 (\u043c\u0438\u043d/\u0448\u0442)</label>
+                    <input type="number" min="0" step="0.1" value="${minsDisplay}" oninput="Calculator.onHwMinutes(${idx}, this.value)" placeholder="\u043d\u0430\u043f\u0440. 0.5">
+                </div>
+                <div class="form-group" style="margin:0">
+                    <label>\u0414\u043e\u0441\u0442\u0430\u0432\u043a\u0430</label>
+                    <select onchange="Calculator.onChinaDeliveryMethod('hw', ${idx}, this.value)">${deliveryOpts}</select>
+                </div>
+            </div>
+            ${chinaInfo}`;
+        } else {
+            modeHtml = `
+            <div class="form-row" style="align-items:end">
+                <div class="form-group" style="margin:0;flex:1.5">
+                    <label>\u041d\u0430\u0437\u0432\u0430\u043d\u0438\u0435</label>
+                    <input type="text" value="${this._esc(hw.name || '')}" placeholder="\u041a\u0430\u0440\u0430\u0431\u0438\u043d, \u043a\u043e\u043b\u044c\u0446\u043e, \u043c\u0430\u0433\u043d\u0438\u0442..." onchange="Calculator.onHwField(${idx}, 'name', this.value)">
+                </div>
+                <div class="form-group" style="margin:0">
+                    <label>\u041a\u043e\u043b-\u0432\u043e</label>
+                    <input type="number" min="0" value="${hw.qty || ''}" oninput="Calculator.onHwNum(${idx}, 'qty', this.value)">
+                </div>
+                <div class="form-group" style="margin:0">
+                    <label>\u0421\u0431\u043e\u0440\u043a\u0430 (\u043c\u0438\u043d/\u0448\u0442)</label>
+                    <input type="number" min="0" step="0.1" value="${minsDisplay}" oninput="Calculator.onHwMinutes(${idx}, this.value)" placeholder="\u043d\u0430\u043f\u0440. 0.5">
+                </div>
+                <div class="form-group" style="margin:0">
+                    <label>\u0426\u0435\u043d\u0430 (\u00a5/\u0448\u0442)</label>
+                    <input type="number" min="0" step="0.01" value="${hw.price_cny || ''}" oninput="Calculator.onChinaNum('hw', ${idx}, 'price_cny', this.value)">
+                </div>
+                <div class="form-group" style="margin:0">
+                    <label>\u0412\u0435\u0441 (\u0433)</label>
+                    <input type="number" min="0" step="0.1" value="${hw.weight_grams || ''}" oninput="Calculator.onChinaNum('hw', ${idx}, 'weight_grams', this.value)">
+                </div>
+                <div class="form-group" style="margin:0">
+                    <label>\u0414\u043e\u0441\u0442\u0430\u0432\u043a\u0430</label>
+                    <select onchange="Calculator.onChinaDeliveryMethod('hw', ${idx}, this.value)">${deliveryOpts}</select>
+                </div>
+            </div>
+            ${chinaInfo}`;
+        }
+
         const html = `
         <div class="hw-row" id="hw-row-${idx}" style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:8px;background:#ffffff;">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
                 <div class="hw-source-toggle">
                     <label class="${isWarehouse ? 'src-active' : ''}">
                         <input type="radio" name="hw-src-${idx}" value="warehouse" ${isWarehouse ? 'checked' : ''} onchange="Calculator.onHwSourceChange(${idx}, 'warehouse')" style="display:none;">
-                        &#128230; Со склада
+                        &#128230; \u0421\u043e \u0441\u043a\u043b\u0430\u0434\u0430
+                    </label>
+                    <label class="${isChina ? 'src-active' : ''}">
+                        <input type="radio" name="hw-src-${idx}" value="china" ${isChina ? 'checked' : ''} onchange="Calculator.onHwSourceChange(${idx}, 'china')" style="display:none;">
+                        \ud83c\udde8\ud83c\uddf3 \u0418\u0437 \u043a\u0430\u0442\u0430\u043b\u043e\u0433\u0430
                     </label>
                     <label class="${isCustom ? 'src-active' : ''}">
                         <input type="radio" name="hw-src-${idx}" value="custom" ${isCustom ? 'checked' : ''} onchange="Calculator.onHwSourceChange(${idx}, 'custom')" style="display:none;">
-                        &#9998; Кастомная
+                        &#9998; \u041a\u0430\u0441\u0442\u043e\u043c\u043d\u0430\u044f
                     </label>
                 </div>
-                <button class="btn-remove" title="Удалить фурнитуру" onclick="Calculator.removeHardware(${idx})">&#10005;</button>
+                <button class="btn-remove" title="\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u0444\u0443\u0440\u043d\u0438\u0442\u0443\u0440\u0443" onclick="Calculator.removeHardware(${idx})">&#10005;</button>
             </div>
-
-            ${isWarehouse ? `
-            <!-- WAREHOUSE MODE -->
-            <div class="form-row" style="align-items:end">
-                <div class="form-group" style="margin:0;flex:2;">
-                    <label>Позиция со склада</label>
-                    ${pickerHtml}
-                </div>
-                <div class="form-group" style="margin:0">
-                    <label>Кол-во${maxQty !== '' ? ` <span style="font-size:10px;color:var(--text-muted);">(макс: ${maxQty})</span>` : ''}</label>
-                    <input type="number" min="0"${maxAttr} value="${hw.qty || ''}" oninput="Calculator.onHwNum(${idx}, 'qty', this.value)">
-                </div>
-                <div class="form-group" style="margin:0">
-                    <label>Сборка (мин/шт)</label>
-                    <input type="number" min="0" step="0.1" value="${minsDisplay}" oninput="Calculator.onHwMinutes(${idx}, this.value)" placeholder="напр. 0.5">
-                </div>
-            </div>
-            ` : `
-            <!-- CUSTOM MODE -->
-            <div class="form-row" style="align-items:end">
-                <div class="form-group" style="margin:0">
-                    <label>Название</label>
-                    <input type="text" value="${hw.name || ''}" placeholder="Карабин, кольцо, магнит..." onchange="Calculator.onHwField(${idx}, 'name', this.value)">
-                </div>
-                <div class="form-group" style="margin:0">
-                    <label>Кол-во</label>
-                    <input type="number" min="0" value="${hw.qty || ''}" oninput="Calculator.onHwNum(${idx}, 'qty', this.value)">
-                </div>
-                <div class="form-group" style="margin:0">
-                    <label>Сборка (мин/шт)</label>
-                    <input type="number" min="0" step="0.1" value="${minsDisplay}" oninput="Calculator.onHwMinutes(${idx}, this.value)" placeholder="напр. 0.5">
-                </div>
-                <div class="form-group" style="margin:0">
-                    <label>Закупка (&#8381;/шт)</label>
-                    <input type="number" min="0" step="0.01" value="${hw.price || ''}" oninput="Calculator.onHwNum(${idx}, 'price', this.value)">
-                </div>
-                <div class="form-group" style="margin:0">
-                    <label>Доставка (&#8381; всего)</label>
-                    <input type="number" min="0" step="0.01" value="${hw.delivery_total || ''}" oninput="Calculator.onHwNum(${idx}, 'delivery_total', this.value)">
-                </div>
-            </div>
-            `}
-
+            ${modeHtml}
             <div class="cost-breakdown" id="hw-cost-${idx}" style="display:none">
-                <div class="section-title" style="margin-top:0">Себестоимость фурнитуры (за 1 шт)</div>
-                <div class="cost-row"><span class="cost-label">ФОТ сборка</span><span class="cost-value" id="hw-${idx}-fot">0</span></div>
-                <div class="cost-row" style="display:none"><span class="cost-label">Косвенные расходы</span><span class="cost-value" id="hw-${idx}-indirect">0</span></div>
-                <div class="cost-row"><span class="cost-label">Закупка</span><span class="cost-value" id="hw-${idx}-purchase">0</span></div>
-                <div class="cost-row"><span class="cost-label">Доставка (на шт)</span><span class="cost-value" id="hw-${idx}-delivery">0</span></div>
-                <div class="cost-row cost-total"><span class="cost-label">ИТОГО себестоимость</span><span class="cost-value" id="hw-${idx}-total">0</span></div>
+                <div class="section-title" style="margin-top:0">\u0421\u0435\u0431\u0435\u0441\u0442\u043e\u0438\u043c\u043e\u0441\u0442\u044c \u0444\u0443\u0440\u043d\u0438\u0442\u0443\u0440\u044b (\u0437\u0430 1 \u0448\u0442)</div>
+                <div class="cost-row"><span class="cost-label">\u0424\u041e\u0422 \u0441\u0431\u043e\u0440\u043a\u0430</span><span class="cost-value" id="hw-${idx}-fot">0</span></div>
+                <div class="cost-row" style="display:none"><span class="cost-label">\u041a\u043e\u0441\u0432\u0435\u043d\u043d\u044b\u0435 \u0440\u0430\u0441\u0445\u043e\u0434\u044b</span><span class="cost-value" id="hw-${idx}-indirect">0</span></div>
+                <div class="cost-row"><span class="cost-label">\u0417\u0430\u043a\u0443\u043f\u043a\u0430</span><span class="cost-value" id="hw-${idx}-purchase">0</span></div>
+                <div class="cost-row"><span class="cost-label">\u0414\u043e\u0441\u0442\u0430\u0432\u043a\u0430 (\u043d\u0430 \u0448\u0442)</span><span class="cost-value" id="hw-${idx}-delivery">0</span></div>
+                <div class="cost-row cost-total"><span class="cost-label">\u0418\u0422\u041e\u0413\u041e \u0441\u0435\u0431\u0435\u0441\u0442\u043e\u0438\u043c\u043e\u0441\u0442\u044c</span><span class="cost-value" id="hw-${idx}-total">0</span></div>
             </div>
         </div>`;
         list.insertAdjacentHTML('beforeend', html);
@@ -875,18 +939,27 @@ const Calculator = {
     onHwSourceChange(idx, source) {
         const hw = this.hardwareItems[idx];
         hw.source = source;
-        if (source === 'custom') {
-            // Clear warehouse link, keep name
+        if (source === 'china') {
             hw.warehouse_item_id = null;
             hw.warehouse_sku = '';
+            if (!hw.china_delivery_method) hw.china_delivery_method = 'avia';
+            this._recalcChinaPricing(hw);
+        } else if (source === 'custom') {
+            hw.warehouse_item_id = null;
+            hw.warehouse_sku = '';
+            hw.china_item_id = null;
+            if (!hw.china_delivery_method) hw.china_delivery_method = 'avia';
+            this._recalcChinaPricing(hw);
         } else {
-            // Clear custom fields when switching to warehouse
             hw.name = '';
             hw.price = 0;
+            hw.price_cny = 0;
+            hw.weight_grams = 0;
             hw.delivery_total = 0;
             hw.delivery_price = 0;
             hw.warehouse_item_id = null;
             hw.warehouse_sku = '';
+            hw.china_item_id = null;
         }
         this.rerenderAllHardware();
         this.recalculate();
@@ -945,8 +1018,13 @@ const Calculator = {
                 App.toast(`Максимум на складе: ${whItem.available_qty} ${whItem.unit}`);
             }
         }
-        // Auto-calculate per-unit delivery from total
-        hw.delivery_price = hw.qty > 0 ? round2(hw.delivery_total / hw.qty) : 0;
+        // For china/custom sources, recalc from CNY pricing
+        if (hw.source === 'china' || hw.source === 'custom') {
+            this._recalcChinaPricing(hw);
+        } else {
+            // Auto-calculate per-unit delivery from total (warehouse)
+            hw.delivery_price = hw.qty > 0 ? round2(hw.delivery_total / hw.qty) : 0;
+        }
         this.recalculate();
         this.scheduleAutosave();
     },
@@ -961,21 +1039,115 @@ const Calculator = {
     },
 
     // ==========================================
+    // CHINA CATALOG — shared methods for HW & PKG
+    // ==========================================
+
+    _recalcChinaPricing(item) {
+        if (item.source !== 'china' && item.source !== 'custom') return;
+        const cnyRate = ChinaCatalog._cnyRate || 12.5;
+        const usdRate = ChinaCatalog._usdRate || 90;
+        const itemSurcharge = ChinaCatalog.ITEM_SURCHARGE || 0.035;
+        const deliverySurcharge = ChinaCatalog.DELIVERY_SURCHARGE || 0.10;
+        const priceCny = item.price_cny || 0;
+        item.price = round2(priceCny * cnyRate * (1 + itemSurcharge));
+        const method = (ChinaCatalog.DELIVERY_METHODS || {})[item.china_delivery_method || 'avia'];
+        const rateUsd = method ? method.rate_usd : 33;
+        const weightKg = (item.weight_grams || 0) / 1000;
+        item.delivery_price = round2(weightKg * rateUsd * usdRate * (1 + deliverySurcharge));
+        item.delivery_total = round2(item.delivery_price * (item.qty || 0));
+    },
+
+    async searchChinaCatalog(type, idx, query) {
+        // Lazy load catalog items
+        if ((ChinaCatalog._items || []).length === 0) {
+            ChinaCatalog._items = await ChinaCatalog._loadItems();
+        }
+        const dropdown = document.getElementById(type + '-china-dropdown-' + idx);
+        if (!dropdown) return;
+        query = (query || '').toLowerCase().trim();
+        if (query.length < 1) { dropdown.style.display = 'none'; return; }
+        const items = ChinaCatalog._items.filter(item => {
+            const s = [item.name, item.category_ru, item.size, item.notes].filter(Boolean).join(' ').toLowerCase();
+            return s.includes(query);
+        }).slice(0, 15);
+        if (!items.length) {
+            dropdown.innerHTML = '<div style="padding:10px;color:var(--text-muted);font-size:12px;">\u041d\u0438\u0447\u0435\u0433\u043e \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d\u043e</div>';
+            dropdown.style.display = '';
+            return;
+        }
+        const cnyRate = ChinaCatalog._cnyRate || 12.5;
+        dropdown.innerHTML = items.map(item => {
+            const priceRub = round2(item.price_cny * cnyRate);
+            const photoUrl = item.photo_url || '';
+            const proxied = typeof ChinaCatalog._proxyPhoto === 'function' ? ChinaCatalog._proxyPhoto(photoUrl) : photoUrl;
+            const photoHtml = proxied
+                ? `<img src="${this._escAttr(proxied)}" style="width:32px;height:32px;object-fit:cover;border-radius:4px;border:1px solid var(--border);" onerror="this.style.display='none'" loading="lazy">`
+                : `<span style="width:32px;height:32px;display:flex;align-items:center;justify-content:center;background:var(--accent-light);border-radius:4px;font-size:11px;">\ud83c\udde8\ud83c\uddf3</span>`;
+            return `<div style="display:flex;gap:8px;align-items:center;padding:6px 10px;cursor:pointer;border-bottom:1px solid var(--border);"
+                      onmouseover="this.style.background='var(--bg)'" onmouseout="this.style.background=''"
+                      onclick="Calculator.selectChinaCatalogItem('${type}', ${idx}, ${item.id})">
+                ${photoHtml}
+                <div style="flex:1;min-width:0;">
+                    <div style="font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${this._esc(item.name)}</div>
+                    <div style="font-size:10px;color:var(--text-muted);">${this._esc(item.category_ru)} \u00b7 ${item.weight_grams || 0}\u0433 \u00b7 ${item.price_cny}\u00a5 \u2248 ${formatRub(priceRub)}</div>
+                </div>
+            </div>`;
+        }).join('');
+        dropdown.style.display = '';
+    },
+
+    selectChinaCatalogItem(type, idx, itemId) {
+        const arr = type === 'hw' ? this.hardwareItems : this.packagingItems;
+        const item = arr[idx];
+        const catItem = ChinaCatalog._items.find(i => i.id === itemId);
+        if (!catItem) return;
+        item.china_item_id = catItem.id;
+        item.name = catItem.name + (catItem.size ? ' ' + catItem.size : '');
+        item.price_cny = catItem.price_cny || 0;
+        item.weight_grams = catItem.weight_grams || 0;
+        this._recalcChinaPricing(item);
+        if (type === 'hw') this.rerenderAllHardware(); else this.rerenderAllPackaging();
+        this.recalculate();
+        this.scheduleAutosave();
+    },
+
+    onChinaDeliveryMethod(type, idx, method) {
+        const arr = type === 'hw' ? this.hardwareItems : this.packagingItems;
+        arr[idx].china_delivery_method = method;
+        this._recalcChinaPricing(arr[idx]);
+        if (type === 'hw') this.rerenderAllHardware(); else this.rerenderAllPackaging();
+        this.recalculate();
+        this.scheduleAutosave();
+    },
+
+    onChinaNum(type, idx, field, value) {
+        const arr = type === 'hw' ? this.hardwareItems : this.packagingItems;
+        arr[idx][field] = parseFloat(value) || 0;
+        this._recalcChinaPricing(arr[idx]);
+        this.recalculate();
+        this.scheduleAutosave();
+    },
+
+    // ==========================================
     // PACKAGING ITEMS (order-level, separate section)
     // ==========================================
 
     getEmptyPackaging() {
         return {
-            source: 'warehouse',        // 'warehouse' | 'custom'
+            source: 'warehouse',        // 'warehouse' | 'china' | 'custom'
             warehouse_item_id: null,
             warehouse_sku: '',
+            china_item_id: null,
+            china_delivery_method: 'avia',
             name: '',
             qty: 0,
-            assembly_speed: 0,      // шт/ч (calculated from minutes)
-            assembly_minutes: 0,    // мин/шт (user input)
+            assembly_speed: 0,
+            assembly_minutes: 0,
+            price_cny: 0,
+            weight_grams: 0,
             price: 0,
-            delivery_total: 0,    // Total delivery cost
-            delivery_price: 0,    // Calculated: delivery_total / qty
+            delivery_total: 0,
+            delivery_price: 0,
             sell_price: 0,
             result: null,
         };
@@ -998,19 +1170,113 @@ const Calculator = {
         const pkg = this.packagingItems[idx];
         const minsDisplay = pkg.assembly_minutes || '';
         const isWarehouse = pkg.source === 'warehouse';
+        const isChina = pkg.source === 'china';
         const isCustom = pkg.source === 'custom';
         const list = document.getElementById('calc-packaging-list');
 
-        // Build warehouse picker (packaging only)
         let pickerHtml = '';
         if (this._whPickerData) {
             pickerHtml = Warehouse.buildImagePicker(`pkg-picker-${idx}`, this._whPickerData, pkg.warehouse_item_id, 'Calculator.onPkgWarehouseSelect', 'packaging');
         }
 
-        // Max qty from warehouse
         const whItem = (isWarehouse && pkg.warehouse_item_id) ? this._findWhItem(pkg.warehouse_item_id) : null;
         const maxQty = whItem ? whItem.available_qty : '';
         const maxAttr = whItem ? ` max="${whItem.available_qty}"` : '';
+
+        const deliveryOpts = Object.entries(ChinaCatalog.DELIVERY_METHODS || {}).map(([key, m]) => {
+            const sel = (pkg.china_delivery_method || 'avia') === key ? ' selected' : '';
+            return `<option value="${key}"${sel}>${m.label} ($${m.rate_usd}/\u043a\u0433)</option>`;
+        }).join('');
+
+        const chinaInfo = (isChina || isCustom) && pkg.price_cny > 0
+            ? `<div style="font-size:11px;color:var(--text-muted);margin-top:6px;padding:4px 8px;background:var(--bg);border-radius:4px;">
+                \ud83d\udcb0 ${pkg.price_cny}\u00a5 = <b>${formatRub(pkg.price)}</b>/\u0448\u0442 \u00b7 \ud83d\udce6 \u0414\u043e\u0441\u0442\u0430\u0432\u043a\u0430: <b>${formatRub(pkg.delivery_price)}</b>/\u0448\u0442 (${pkg.weight_grams || 0}\u0433)
+               </div>` : '';
+
+        let modeHtml = '';
+        if (isWarehouse) {
+            modeHtml = `
+            <div class="form-row" style="align-items:end">
+                <div class="form-group" style="margin:0;flex:2;">
+                    <label>\u041f\u043e\u0437\u0438\u0446\u0438\u044f \u0441\u043e \u0441\u043a\u043b\u0430\u0434\u0430</label>
+                    ${pickerHtml}
+                </div>
+                <div class="form-group" style="margin:0">
+                    <label>\u041a\u043e\u043b-\u0432\u043e${maxQty !== '' ? ` <span style="font-size:10px;color:var(--text-muted);">(\u043c\u0430\u043a\u0441: ${maxQty})</span>` : ''}</label>
+                    <input type="number" min="0"${maxAttr} value="${pkg.qty || ''}" oninput="Calculator.onPkgNum(${idx}, 'qty', this.value)">
+                </div>
+                <div class="form-group" style="margin:0">
+                    <label>\u0421\u0431\u043e\u0440\u043a\u0430 (\u043c\u0438\u043d/\u0448\u0442)</label>
+                    <input type="number" min="0" step="0.1" value="${minsDisplay}" oninput="Calculator.onPkgMinutes(${idx}, this.value)" placeholder="\u043d\u0430\u043f\u0440. 0.5">
+                </div>
+            </div>`;
+        } else if (isChina) {
+            const chinaItem = pkg.china_item_id ? (ChinaCatalog._items || []).find(i => i.id === pkg.china_item_id) : null;
+            const photoUrl = chinaItem?.photo_url || '';
+            const proxied = typeof ChinaCatalog._proxyPhoto === 'function' ? ChinaCatalog._proxyPhoto(photoUrl) : photoUrl;
+            const photoHtml = proxied
+                ? `<img src="${this._escAttr(proxied)}" style="width:32px;height:32px;object-fit:cover;border-radius:4px;border:1px solid var(--border);" onerror="this.style.display='none'" loading="lazy">`
+                : '';
+            modeHtml = `
+            <div class="form-row" style="align-items:end">
+                <div class="form-group" style="margin:0;flex:2;">
+                    <label>\u041f\u043e\u0437\u0438\u0446\u0438\u044f \u0438\u0437 \u043a\u0430\u0442\u0430\u043b\u043e\u0433\u0430 \u041a\u0438\u0442\u0430\u0439</label>
+                    <div style="position:relative;">
+                        <div style="display:flex;gap:6px;align-items:center;">
+                            ${photoHtml}
+                            <input type="text" id="pkg-china-search-${idx}" placeholder="\u041f\u043e\u0438\u0441\u043a \u043f\u043e \u043a\u0430\u0442\u0430\u043b\u043e\u0433\u0443..."
+                                value="${this._esc(pkg.name || '')}"
+                                oninput="Calculator.searchChinaCatalog('pkg', ${idx}, this.value)"
+                                onfocus="if(this.value.length>=1) Calculator.searchChinaCatalog('pkg', ${idx}, this.value)"
+                                style="flex:1">
+                        </div>
+                        <div id="pkg-china-dropdown-${idx}" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:100;background:#fff;border:1px solid var(--border);border-radius:8px;max-height:240px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,0.15);"></div>
+                    </div>
+                </div>
+                <div class="form-group" style="margin:0">
+                    <label>\u041a\u043e\u043b-\u0432\u043e</label>
+                    <input type="number" min="0" value="${pkg.qty || ''}" oninput="Calculator.onPkgNum(${idx}, 'qty', this.value)">
+                </div>
+                <div class="form-group" style="margin:0">
+                    <label>\u0421\u0431\u043e\u0440\u043a\u0430 (\u043c\u0438\u043d/\u0448\u0442)</label>
+                    <input type="number" min="0" step="0.1" value="${minsDisplay}" oninput="Calculator.onPkgMinutes(${idx}, this.value)" placeholder="\u043d\u0430\u043f\u0440. 0.5">
+                </div>
+                <div class="form-group" style="margin:0">
+                    <label>\u0414\u043e\u0441\u0442\u0430\u0432\u043a\u0430</label>
+                    <select onchange="Calculator.onChinaDeliveryMethod('pkg', ${idx}, this.value)">${deliveryOpts}</select>
+                </div>
+            </div>
+            ${chinaInfo}`;
+        } else {
+            modeHtml = `
+            <div class="form-row" style="align-items:end">
+                <div class="form-group" style="margin:0;flex:1.5">
+                    <label>\u041d\u0430\u0437\u0432\u0430\u043d\u0438\u0435</label>
+                    <input type="text" value="${this._esc(pkg.name || '')}" placeholder="\u041c\u0435\u0448\u043e\u0447\u0435\u043a, \u043f\u0430\u043a\u0435\u0442\u0438\u043a, \u043a\u043e\u0440\u043e\u0431\u043a\u0430..." onchange="Calculator.onPkgField(${idx}, 'name', this.value)">
+                </div>
+                <div class="form-group" style="margin:0">
+                    <label>\u041a\u043e\u043b-\u0432\u043e</label>
+                    <input type="number" min="0" value="${pkg.qty || ''}" oninput="Calculator.onPkgNum(${idx}, 'qty', this.value)">
+                </div>
+                <div class="form-group" style="margin:0">
+                    <label>\u0421\u0431\u043e\u0440\u043a\u0430 (\u043c\u0438\u043d/\u0448\u0442)</label>
+                    <input type="number" min="0" step="0.1" value="${minsDisplay}" oninput="Calculator.onPkgMinutes(${idx}, this.value)" placeholder="\u043d\u0430\u043f\u0440. 0.5">
+                </div>
+                <div class="form-group" style="margin:0">
+                    <label>\u0426\u0435\u043d\u0430 (\u00a5/\u0448\u0442)</label>
+                    <input type="number" min="0" step="0.01" value="${pkg.price_cny || ''}" oninput="Calculator.onChinaNum('pkg', ${idx}, 'price_cny', this.value)">
+                </div>
+                <div class="form-group" style="margin:0">
+                    <label>\u0412\u0435\u0441 (\u0433)</label>
+                    <input type="number" min="0" step="0.1" value="${pkg.weight_grams || ''}" oninput="Calculator.onChinaNum('pkg', ${idx}, 'weight_grams', this.value)">
+                </div>
+                <div class="form-group" style="margin:0">
+                    <label>\u0414\u043e\u0441\u0442\u0430\u0432\u043a\u0430</label>
+                    <select onchange="Calculator.onChinaDeliveryMethod('pkg', ${idx}, this.value)">${deliveryOpts}</select>
+                </div>
+            </div>
+            ${chinaInfo}`;
+        }
 
         const html = `
         <div class="pkg-row" id="pkg-row-${idx}" style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:8px;background:#ffffff;">
@@ -1018,65 +1284,27 @@ const Calculator = {
                 <div class="pkg-source-toggle">
                     <label class="${isWarehouse ? 'src-active' : ''}">
                         <input type="radio" name="pkg-src-${idx}" value="warehouse" ${isWarehouse ? 'checked' : ''} onchange="Calculator.onPkgSourceChange(${idx}, 'warehouse')" style="display:none;">
-                        &#128230; Со склада
+                        &#128230; \u0421\u043e \u0441\u043a\u043b\u0430\u0434\u0430
+                    </label>
+                    <label class="${isChina ? 'src-active' : ''}">
+                        <input type="radio" name="pkg-src-${idx}" value="china" ${isChina ? 'checked' : ''} onchange="Calculator.onPkgSourceChange(${idx}, 'china')" style="display:none;">
+                        \ud83c\udde8\ud83c\uddf3 \u0418\u0437 \u043a\u0430\u0442\u0430\u043b\u043e\u0433\u0430
                     </label>
                     <label class="${isCustom ? 'src-active' : ''}">
                         <input type="radio" name="pkg-src-${idx}" value="custom" ${isCustom ? 'checked' : ''} onchange="Calculator.onPkgSourceChange(${idx}, 'custom')" style="display:none;">
-                        &#9998; Кастомная
+                        &#9998; \u041a\u0430\u0441\u0442\u043e\u043c\u043d\u0430\u044f
                     </label>
                 </div>
-                <button class="btn-remove" title="Удалить упаковку" onclick="Calculator.removePackaging(${idx})">&#10005;</button>
+                <button class="btn-remove" title="\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u0443\u043f\u0430\u043a\u043e\u0432\u043a\u0443" onclick="Calculator.removePackaging(${idx})">&#10005;</button>
             </div>
-
-            ${isWarehouse ? `
-            <!-- WAREHOUSE MODE -->
-            <div class="form-row" style="align-items:end">
-                <div class="form-group" style="margin:0;flex:2;">
-                    <label>Позиция со склада</label>
-                    ${pickerHtml}
-                </div>
-                <div class="form-group" style="margin:0">
-                    <label>Кол-во${maxQty !== '' ? ` <span style="font-size:10px;color:var(--text-muted);">(макс: ${maxQty})</span>` : ''}</label>
-                    <input type="number" min="0"${maxAttr} value="${pkg.qty || ''}" oninput="Calculator.onPkgNum(${idx}, 'qty', this.value)">
-                </div>
-                <div class="form-group" style="margin:0">
-                    <label>Сборка (мин/шт)</label>
-                    <input type="number" min="0" step="0.1" value="${minsDisplay}" oninput="Calculator.onPkgMinutes(${idx}, this.value)" placeholder="напр. 0.5">
-                </div>
-            </div>
-            ` : `
-            <!-- CUSTOM MODE -->
-            <div class="form-row" style="align-items:end">
-                <div class="form-group" style="margin:0">
-                    <label>Название</label>
-                    <input type="text" value="${pkg.name || ''}" placeholder="Мешочек, пакетик, коробка..." onchange="Calculator.onPkgField(${idx}, 'name', this.value)">
-                </div>
-                <div class="form-group" style="margin:0">
-                    <label>Кол-во</label>
-                    <input type="number" min="0" value="${pkg.qty || ''}" oninput="Calculator.onPkgNum(${idx}, 'qty', this.value)">
-                </div>
-                <div class="form-group" style="margin:0">
-                    <label>Сборка (мин/шт)</label>
-                    <input type="number" min="0" step="0.1" value="${minsDisplay}" oninput="Calculator.onPkgMinutes(${idx}, this.value)" placeholder="напр. 0.5">
-                </div>
-                <div class="form-group" style="margin:0">
-                    <label>Закупка (&#8381;/шт)</label>
-                    <input type="number" min="0" step="0.01" value="${pkg.price || ''}" oninput="Calculator.onPkgNum(${idx}, 'price', this.value)">
-                </div>
-                <div class="form-group" style="margin:0">
-                    <label>Доставка (&#8381; всего)</label>
-                    <input type="number" min="0" step="0.01" value="${pkg.delivery_total || ''}" oninput="Calculator.onPkgNum(${idx}, 'delivery_total', this.value)">
-                </div>
-            </div>
-            `}
-
+            ${modeHtml}
             <div class="cost-breakdown" id="pkg-cost-${idx}" style="display:none">
-                <div class="section-title" style="margin-top:0">Себестоимость упаковки (за 1 шт)</div>
-                <div class="cost-row"><span class="cost-label">ФОТ сборка</span><span class="cost-value" id="pkg-${idx}-fot">0</span></div>
-                <div class="cost-row" style="display:none"><span class="cost-label">Косвенные расходы</span><span class="cost-value" id="pkg-${idx}-indirect">0</span></div>
-                <div class="cost-row"><span class="cost-label">Закупка</span><span class="cost-value" id="pkg-${idx}-purchase">0</span></div>
-                <div class="cost-row"><span class="cost-label">Доставка (на шт)</span><span class="cost-value" id="pkg-${idx}-delivery">0</span></div>
-                <div class="cost-row cost-total"><span class="cost-label">ИТОГО себестоимость</span><span class="cost-value" id="pkg-${idx}-total">0</span></div>
+                <div class="section-title" style="margin-top:0">\u0421\u0435\u0431\u0435\u0441\u0442\u043e\u0438\u043c\u043e\u0441\u0442\u044c \u0443\u043f\u0430\u043a\u043e\u0432\u043a\u0438 (\u0437\u0430 1 \u0448\u0442)</div>
+                <div class="cost-row"><span class="cost-label">\u0424\u041e\u0422 \u0441\u0431\u043e\u0440\u043a\u0430</span><span class="cost-value" id="pkg-${idx}-fot">0</span></div>
+                <div class="cost-row" style="display:none"><span class="cost-label">\u041a\u043e\u0441\u0432\u0435\u043d\u043d\u044b\u0435 \u0440\u0430\u0441\u0445\u043e\u0434\u044b</span><span class="cost-value" id="pkg-${idx}-indirect">0</span></div>
+                <div class="cost-row"><span class="cost-label">\u0417\u0430\u043a\u0443\u043f\u043a\u0430</span><span class="cost-value" id="pkg-${idx}-purchase">0</span></div>
+                <div class="cost-row"><span class="cost-label">\u0414\u043e\u0441\u0442\u0430\u0432\u043a\u0430 (\u043d\u0430 \u0448\u0442)</span><span class="cost-value" id="pkg-${idx}-delivery">0</span></div>
+                <div class="cost-row cost-total"><span class="cost-label">\u0418\u0422\u041e\u0413\u041e \u0441\u0435\u0431\u0435\u0441\u0442\u043e\u0438\u043c\u043e\u0441\u0442\u044c</span><span class="cost-value" id="pkg-${idx}-total">0</span></div>
             </div>
         </div>`;
         list.insertAdjacentHTML('beforeend', html);
@@ -1097,16 +1325,27 @@ const Calculator = {
     onPkgSourceChange(idx, source) {
         const pkg = this.packagingItems[idx];
         pkg.source = source;
-        if (source === 'custom') {
+        if (source === 'china') {
             pkg.warehouse_item_id = null;
             pkg.warehouse_sku = '';
+            if (!pkg.china_delivery_method) pkg.china_delivery_method = 'avia';
+            this._recalcChinaPricing(pkg);
+        } else if (source === 'custom') {
+            pkg.warehouse_item_id = null;
+            pkg.warehouse_sku = '';
+            pkg.china_item_id = null;
+            if (!pkg.china_delivery_method) pkg.china_delivery_method = 'avia';
+            this._recalcChinaPricing(pkg);
         } else {
             pkg.name = '';
             pkg.price = 0;
+            pkg.price_cny = 0;
+            pkg.weight_grams = 0;
             pkg.delivery_total = 0;
             pkg.delivery_price = 0;
             pkg.warehouse_item_id = null;
             pkg.warehouse_sku = '';
+            pkg.china_item_id = null;
         }
         this.rerenderAllPackaging();
         this.recalculate();
@@ -1150,7 +1389,6 @@ const Calculator = {
     onPkgNum(idx, field, value) {
         this.packagingItems[idx][field] = parseFloat(value) || 0;
         const pkg = this.packagingItems[idx];
-        // Enforce max qty for warehouse items
         if (field === 'qty' && pkg.source === 'warehouse' && pkg.warehouse_item_id) {
             const whItem = this._findWhItem(pkg.warehouse_item_id);
             if (whItem && pkg.qty > whItem.available_qty) {
@@ -1158,8 +1396,11 @@ const Calculator = {
                 App.toast(`Максимум на складе: ${whItem.available_qty} ${whItem.unit}`);
             }
         }
-        // Auto-calculate per-unit delivery from total
-        pkg.delivery_price = pkg.qty > 0 ? round2(pkg.delivery_total / pkg.qty) : 0;
+        if (pkg.source === 'china' || pkg.source === 'custom') {
+            this._recalcChinaPricing(pkg);
+        } else {
+            pkg.delivery_price = pkg.qty > 0 ? round2(pkg.delivery_total / pkg.qty) : 0;
+        }
         this.recalculate();
         this.scheduleAutosave();
     },
