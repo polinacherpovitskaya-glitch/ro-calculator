@@ -11,10 +11,14 @@ const ChinaCatalog = {
 
     // Delivery rates (USD per kg)
     DELIVERY_METHODS: {
-        auto:      { label: 'Авто',           rate_usd: 3.5,  days: '25-35 дн' },
-        avia:      { label: 'Авиа',           rate_usd: 8.0,  days: '10-14 дн' },
-        auto_slow: { label: 'Медленное авто', rate_usd: 2.5,  days: '40-55 дн' },
+        avia_fast: { label: 'Авиа быстрая',  rate_usd: 38,   days: '3 дн' },
+        avia:      { label: 'Авиа',           rate_usd: 33,   days: '5-7 дн' },
+        auto:      { label: 'Авто',           rate_usd: 4.8,  days: '18-25 дн' },
     },
+
+    // Surcharges: withdrawal + crypto card + unfavorable rates
+    ITEM_SURCHARGE: 0.035,     // +3.5% на товар (1.5% вывод + 2% крипта)
+    DELIVERY_SURCHARGE: 0.10,  // +10% на доставку (вывод + невыгодный курс)
 
     // Default exchange rates (overridden from settings)
     _cnyRate: 12.5,
@@ -28,9 +32,12 @@ const ChinaCatalog = {
             this._usdRate = params.china_usd_rate || 90;
 
             // Override delivery rates from settings if available
-            if (params.china_delivery_auto) this.DELIVERY_METHODS.auto.rate_usd = params.china_delivery_auto;
+            if (params.china_delivery_avia_fast) this.DELIVERY_METHODS.avia_fast.rate_usd = params.china_delivery_avia_fast;
             if (params.china_delivery_avia) this.DELIVERY_METHODS.avia.rate_usd = params.china_delivery_avia;
-            if (params.china_delivery_slow) this.DELIVERY_METHODS.auto_slow.rate_usd = params.china_delivery_slow;
+            if (params.china_delivery_auto) this.DELIVERY_METHODS.auto.rate_usd = params.china_delivery_auto;
+            // Surcharges
+            if (params.china_item_surcharge !== undefined) this.ITEM_SURCHARGE = params.china_item_surcharge;
+            if (params.china_delivery_surcharge !== undefined) this.DELIVERY_SURCHARGE = params.china_delivery_surcharge;
 
             // Load catalog: from localStorage first, then seed from JSON
             this._items = await this._loadItems();
@@ -90,6 +97,8 @@ const ChinaCatalog = {
         const categories = this.getCategories();
 
         // Rates bar
+        const itemPct = Math.round(this.ITEM_SURCHARGE * 100);
+        const delPct = Math.round(this.DELIVERY_SURCHARGE * 100);
         let html = `
         <div class="card" style="padding:12px 16px;margin-bottom:12px;">
             <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;font-size:12px;">
@@ -100,6 +109,8 @@ const ChinaCatalog = {
                 ${Object.entries(this.DELIVERY_METHODS).map(([k, m]) =>
                     `<span>${m.label}: <b>$${m.rate_usd}/кг</b> <span style="color:var(--text-muted)">(${m.days})</span></span>`
                 ).join('')}
+                <span style="color:var(--text-muted)">|</span>
+                <span style="color:var(--orange);">Товар +${itemPct}% · Дост. +${delPct}%</span>
                 <button class="btn btn-sm btn-outline" style="margin-left:auto;font-size:10px;" onclick="ChinaCatalog.openRatesModal()">&#9881; Курсы</button>
             </div>
         </div>`;
@@ -178,9 +189,9 @@ const ChinaCatalog = {
             const deliverySelect = isRussia
                 ? `<span style="color:var(--text-muted);font-size:11px;">Россия</span>`
                 : `<select id="cc-delivery-${item.id}" onchange="ChinaCatalog.recalcRow(${item.id})" style="font-size:11px;padding:2px 4px;">
-                    <option value="auto">Авто $${this.DELIVERY_METHODS.auto.rate_usd}/кг</option>
-                    <option value="avia">Авиа $${this.DELIVERY_METHODS.avia.rate_usd}/кг</option>
-                    <option value="auto_slow">Медл. $${this.DELIVERY_METHODS.auto_slow.rate_usd}/кг</option>
+                    ${Object.entries(this.DELIVERY_METHODS).map(([k, m]) =>
+                        `<option value="${k}">${m.label} $${m.rate_usd}/кг</option>`
+                    ).join('')}
                    </select>`;
 
             const linkHtml = item.link_1688
@@ -202,8 +213,8 @@ const ChinaCatalog = {
                     <input type="number" min="1" value="1" id="cc-qty-${item.id}" onchange="ChinaCatalog.recalcRow(${item.id})" oninput="ChinaCatalog.recalcRow(${item.id})" style="width:60px;text-align:center;font-size:11px;padding:2px 4px;">
                 </td>
                 <td style="padding:6px 8px;text-align:right;" id="cc-total-${item.id}">
-                    <span style="font-weight:700;font-size:13px;color:var(--green);">${isRussia ? formatRub(item.price_rub || 0) : formatRub(priceRub)}</span>
-                    <div style="font-size:9px;color:var(--text-muted);" id="cc-detail-${item.id}"></div>
+                    <span style="font-weight:700;font-size:13px;color:var(--green);">${isRussia ? formatRub(item.price_rub || 0) : formatRub(round2(priceRub * (1 + this.ITEM_SURCHARGE)))}</span>
+                    <div style="font-size:9px;color:var(--text-muted);" id="cc-detail-${item.id}">${isRussia ? '' : 'без дост.'}</div>
                 </td>
                 <td style="padding:6px 8px;text-align:center;">${linkHtml}</td>
                 <td style="padding:6px;">
@@ -249,28 +260,32 @@ const ChinaCatalog = {
 
         totalEl.innerHTML = `<span style="font-weight:700;font-size:13px;color:var(--green);">${formatRub(result.totalPerUnit)}</span>`;
         if (detailEl) {
-            detailEl.innerHTML = `${formatRub(result.priceRub)} + дост. ${formatRub(result.deliveryPerUnit)}`;
+            detailEl.innerHTML = `${formatRub(result.priceWithSurcharge)} + дост. ${formatRub(result.deliveryWithSurcharge)}`;
         }
     },
 
     /**
-     * Calculate delivery cost per unit
+     * Calculate delivery cost per unit with surcharges
      * @param {Object} item - catalog item
-     * @param {string} method - delivery method key (auto/avia/auto_slow)
+     * @param {string} method - delivery method key (avia_fast/avia/auto)
      * @param {number} qty - quantity
-     * @returns {{ priceRub, deliveryPerUnit, totalPerUnit, deliveryTotal }}
+     * @returns {{ priceRub, priceWithSurcharge, deliveryPerUnit, deliveryWithSurcharge, totalPerUnit, deliveryTotal }}
      */
     calcDelivery(item, method, qty) {
+        // Item price + 3.5% surcharge (withdrawal + crypto)
         const priceRub = round2(item.price_cny * this._cnyRate);
-        const weightKg = (item.weight_grams || 0) / 1000;
-        const rate = this.DELIVERY_METHODS[method]?.rate_usd || 3.5;
+        const priceWithSurcharge = round2(priceRub * (1 + this.ITEM_SURCHARGE));
 
-        // Total delivery for all units: weight × qty × rate_usd × usd_rate
+        // Delivery + 10% surcharge (withdrawal + unfavorable rate)
+        const weightKg = (item.weight_grams || 0) / 1000;
+        const rate = this.DELIVERY_METHODS[method]?.rate_usd || 4.8;
         const deliveryTotal = round2(weightKg * qty * rate * this._usdRate);
         const deliveryPerUnit = qty > 0 ? round2(deliveryTotal / qty) : 0;
-        const totalPerUnit = round2(priceRub + deliveryPerUnit);
+        const deliveryWithSurcharge = round2(deliveryPerUnit * (1 + this.DELIVERY_SURCHARGE));
 
-        return { priceRub, deliveryPerUnit, totalPerUnit, deliveryTotal };
+        const totalPerUnit = round2(priceWithSurcharge + deliveryWithSurcharge);
+
+        return { priceRub, priceWithSurcharge, deliveryPerUnit, deliveryWithSurcharge, totalPerUnit, deliveryTotal };
     },
 
     // ==========================================
@@ -302,9 +317,14 @@ const ChinaCatalog = {
                 </div>
                 <h4 style="margin:16px 0 8px;">Ставки доставки ($/кг)</h4>
                 <div class="form-row">
-                    <div class="form-group"><label>Авто</label><input type="number" step="0.1" id="cc-rate-auto" value="${this.DELIVERY_METHODS.auto.rate_usd}"></div>
-                    <div class="form-group"><label>Авиа</label><input type="number" step="0.1" id="cc-rate-avia" value="${this.DELIVERY_METHODS.avia.rate_usd}"></div>
-                    <div class="form-group"><label>Медл. авто</label><input type="number" step="0.1" id="cc-rate-slow" value="${this.DELIVERY_METHODS.auto_slow.rate_usd}"></div>
+                    <div class="form-group"><label>Авиа быстрая (3 дн)</label><input type="number" step="0.1" id="cc-rate-avia-fast" value="${this.DELIVERY_METHODS.avia_fast.rate_usd}"></div>
+                    <div class="form-group"><label>Авиа (5-7 дн)</label><input type="number" step="0.1" id="cc-rate-avia" value="${this.DELIVERY_METHODS.avia.rate_usd}"></div>
+                    <div class="form-group"><label>Авто (18-25 дн)</label><input type="number" step="0.1" id="cc-rate-auto" value="${this.DELIVERY_METHODS.auto.rate_usd}"></div>
+                </div>
+                <h4 style="margin:16px 0 8px;">Наценки (%)</h4>
+                <div class="form-row">
+                    <div class="form-group"><label>На товар</label><input type="number" step="0.5" id="cc-surcharge-item" value="${this.ITEM_SURCHARGE * 100}"><span class="form-hint">% (вывод + крипта)</span></div>
+                    <div class="form-group"><label>На доставку</label><input type="number" step="0.5" id="cc-surcharge-delivery" value="${this.DELIVERY_SURCHARGE * 100}"><span class="form-hint">% (вывод + курс)</span></div>
                 </div>
                 <div style="display:flex;gap:8px;margin-top:16px;">
                     <button class="btn btn-success btn-sm" onclick="ChinaCatalog.saveRates()">Сохранить</button>
@@ -323,24 +343,30 @@ const ChinaCatalog = {
     async saveRates() {
         this._cnyRate = parseFloat(document.getElementById('cc-rate-cny').value) || 12.5;
         this._usdRate = parseFloat(document.getElementById('cc-rate-usd').value) || 90;
-        this.DELIVERY_METHODS.auto.rate_usd = parseFloat(document.getElementById('cc-rate-auto').value) || 3.5;
-        this.DELIVERY_METHODS.avia.rate_usd = parseFloat(document.getElementById('cc-rate-avia').value) || 8.0;
-        this.DELIVERY_METHODS.auto_slow.rate_usd = parseFloat(document.getElementById('cc-rate-slow').value) || 2.5;
+        this.DELIVERY_METHODS.avia_fast.rate_usd = parseFloat(document.getElementById('cc-rate-avia-fast').value) || 38;
+        this.DELIVERY_METHODS.avia.rate_usd = parseFloat(document.getElementById('cc-rate-avia').value) || 33;
+        this.DELIVERY_METHODS.auto.rate_usd = parseFloat(document.getElementById('cc-rate-auto').value) || 4.8;
+        this.ITEM_SURCHARGE = (parseFloat(document.getElementById('cc-surcharge-item').value) || 3.5) / 100;
+        this.DELIVERY_SURCHARGE = (parseFloat(document.getElementById('cc-surcharge-delivery').value) || 10) / 100;
 
         // Save to settings
         await saveSetting('china_cny_rate', this._cnyRate);
         await saveSetting('china_usd_rate', this._usdRate);
-        await saveSetting('china_delivery_auto', this.DELIVERY_METHODS.auto.rate_usd);
+        await saveSetting('china_delivery_avia_fast', this.DELIVERY_METHODS.avia_fast.rate_usd);
         await saveSetting('china_delivery_avia', this.DELIVERY_METHODS.avia.rate_usd);
-        await saveSetting('china_delivery_slow', this.DELIVERY_METHODS.auto_slow.rate_usd);
+        await saveSetting('china_delivery_auto', this.DELIVERY_METHODS.auto.rate_usd);
+        await saveSetting('china_item_surcharge', this.ITEM_SURCHARGE);
+        await saveSetting('china_delivery_surcharge', this.DELIVERY_SURCHARGE);
 
         // Update App.params
         if (App.params) {
             App.params.china_cny_rate = this._cnyRate;
             App.params.china_usd_rate = this._usdRate;
-            App.params.china_delivery_auto = this.DELIVERY_METHODS.auto.rate_usd;
+            App.params.china_delivery_avia_fast = this.DELIVERY_METHODS.avia_fast.rate_usd;
             App.params.china_delivery_avia = this.DELIVERY_METHODS.avia.rate_usd;
-            App.params.china_delivery_slow = this.DELIVERY_METHODS.auto_slow.rate_usd;
+            App.params.china_delivery_auto = this.DELIVERY_METHODS.auto.rate_usd;
+            App.params.china_item_surcharge = this.ITEM_SURCHARGE;
+            App.params.china_delivery_surcharge = this.DELIVERY_SURCHARGE;
         }
 
         this.closeRatesModal();
