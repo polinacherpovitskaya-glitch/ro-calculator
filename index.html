@@ -855,20 +855,64 @@
                         <h3 id="hw-form-title">Новая фурнитура</h3>
                         <button class="btn btn-sm btn-outline" onclick="Molds.hideHwForm()">Закрыть</button>
                     </div>
-                    <!-- Warehouse item selector -->
-                    <div class="form-row">
-                        <div class="form-group" style="flex:3;position:relative;">
-                            <label>Позиция со склада</label>
-                            <input type="text" id="hw-blank-wh-search" placeholder="Поиск по складу..." oninput="Molds.searchHwWarehouse()" onfocus="Molds.searchHwWarehouse()" onblur="setTimeout(()=>document.getElementById('hw-blank-wh-dropdown').style.display='none',200)" autocomplete="off">
-                            <div id="hw-blank-wh-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:100;max-height:250px;overflow-y:auto;background:var(--card-bg);border:1px solid var(--border);border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.15);"></div>
-                        </div>
-                        <div class="form-group" style="flex:1;">
-                            <label>Сборка (шт/ч)</label>
-                            <input type="number" min="1" id="hw-blank-speed" oninput="Molds.recalcHwCost()">
+
+                    <!-- Source toggle: Склад / Каталог Китай / Кастом -->
+                    <div id="hw-source-toggle" style="display:flex;gap:4px;margin-bottom:14px;">
+                        <button class="btn btn-sm btn-primary" data-hw-src="warehouse" onclick="Molds.setHwFormSource('warehouse')">&#128230; Со склада</button>
+                        <button class="btn btn-sm btn-outline" data-hw-src="china" onclick="Molds.setHwFormSource('china')">&#127464;&#127475; Каталог Китай</button>
+                        <button class="btn btn-sm btn-outline" data-hw-src="custom_cny" onclick="Molds.setHwFormSource('custom_cny')">&#9998; Кастом (&#165;)</button>
+                    </div>
+
+                    <!-- === SOURCE: Warehouse === -->
+                    <div id="hw-src-warehouse">
+                        <div class="form-row">
+                            <div class="form-group" style="flex:3;position:relative;">
+                                <label>Позиция со склада</label>
+                                <input type="text" id="hw-blank-wh-search" placeholder="Поиск по складу..." oninput="Molds.searchHwWarehouse()" onfocus="Molds.searchHwWarehouse()" onblur="setTimeout(()=>document.getElementById('hw-blank-wh-dropdown').style.display='none',200)" autocomplete="off">
+                                <div id="hw-blank-wh-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:100;max-height:250px;overflow-y:auto;background:var(--card-bg);border:1px solid var(--border);border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.15);"></div>
+                            </div>
                         </div>
                     </div>
+
+                    <!-- === SOURCE: China catalog === -->
+                    <div id="hw-src-china" style="display:none;">
+                        <div class="form-row">
+                            <div class="form-group" style="flex:3;position:relative;">
+                                <label>Поиск по каталогу Китай</label>
+                                <input type="text" id="hw-china-search" placeholder="Карабин, кольцо, шнур..." oninput="Molds.searchHwChina()" onfocus="Molds.searchHwChina()" onblur="setTimeout(()=>document.getElementById('hw-china-dropdown').style.display='none',200)" autocomplete="off">
+                                <div id="hw-china-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:100;max-height:280px;overflow-y:auto;background:var(--card-bg);border:1px solid var(--border);border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.15);"></div>
+                            </div>
+                            <div class="form-group" style="flex:1;">
+                                <label>Доставка</label>
+                                <select id="hw-china-delivery" onchange="Molds.recalcHwCost()" style="font-size:12px;"></select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- === SOURCE: Custom CNY === -->
+                    <div id="hw-src-custom_cny" style="display:none;">
+                        <div class="form-row">
+                            <div class="form-group" style="flex:2;">
+                                <label>Название</label>
+                                <input type="text" id="hw-custom-name" placeholder="Название фурнитуры">
+                            </div>
+                            <div class="form-group">
+                                <label>Цена (&#165;/шт)</label>
+                                <input type="number" step="0.01" min="0" id="hw-custom-price-cny" placeholder="0.6" oninput="Molds.recalcHwCost()">
+                            </div>
+                            <div class="form-group">
+                                <label>Вес (г/шт)</label>
+                                <input type="number" step="0.1" min="0" id="hw-custom-weight" placeholder="3" oninput="Molds.recalcHwCost()">
+                            </div>
+                            <div class="form-group">
+                                <label>Доставка</label>
+                                <select id="hw-custom-delivery" onchange="Molds.recalcHwCost()" style="font-size:12px;"></select>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- Selected item info (hidden fields + preview) -->
-                    <div id="hw-blank-selected" style="display:none;margin-bottom:12px;padding:10px;background:var(--bg);border-radius:8px;display:none;">
+                    <div id="hw-blank-selected" style="display:none;margin-bottom:12px;padding:10px;background:var(--bg);border-radius:8px;">
                         <div style="display:flex;gap:12px;align-items:center;">
                             <img id="hw-blank-photo-preview" src="" style="width:48px;height:48px;object-fit:cover;border-radius:6px;border:1px solid var(--border);display:none;">
                             <div>
@@ -881,7 +925,14 @@
                     <input type="hidden" id="hw-blank-price-rub" value="0">
                     <input type="hidden" id="hw-blank-photo" value="">
                     <input type="hidden" id="hw-blank-wh-id" value="">
+                    <input type="hidden" id="hw-blank-china-id" value="">
+
+                    <!-- Common fields -->
                     <div class="form-row">
+                        <div class="form-group" style="flex:1;">
+                            <label>Сборка (шт/ч)</label>
+                            <input type="number" min="1" id="hw-blank-speed" oninput="Molds.recalcHwCost()">
+                        </div>
                         <div class="form-group" style="flex:2"><label>Заметки</label><input type="text" id="hw-blank-notes" placeholder="Описание, цвет, размер..."></div>
                     </div>
                     <!-- Cost breakdown -->

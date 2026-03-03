@@ -876,6 +876,20 @@ const Molds = {
             // Load warehouse items for dropdown
             const whItems = await loadWarehouseItems();
             this._warehouseHwItems = (whItems || []).filter(i => i.category !== 'packaging');
+            // Ensure ChinaCatalog has rates loaded (for enrichHwBlanks recalc)
+            if (ChinaCatalog._items.length === 0) {
+                ChinaCatalog._items = await ChinaCatalog._loadItems();
+            }
+            // Make sure ChinaCatalog rates are from settings
+            const params = App.params || {};
+            ChinaCatalog._cnyRate = params.china_cny_rate || ChinaCatalog._cnyRate || 12.5;
+            ChinaCatalog._usdRate = params.china_usd_rate || ChinaCatalog._usdRate || 90;
+            if (params.china_delivery_avia_fast) ChinaCatalog.DELIVERY_METHODS.avia_fast.rate_usd = params.china_delivery_avia_fast;
+            if (params.china_delivery_avia) ChinaCatalog.DELIVERY_METHODS.avia.rate_usd = params.china_delivery_avia;
+            if (params.china_delivery_auto) ChinaCatalog.DELIVERY_METHODS.auto.rate_usd = params.china_delivery_auto;
+            if (params.china_item_surcharge !== undefined) ChinaCatalog.ITEM_SURCHARGE = params.china_item_surcharge;
+            if (params.china_delivery_surcharge !== undefined) ChinaCatalog.DELIVERY_SURCHARGE = params.china_delivery_surcharge;
+
             this.enrichHwBlanks();
             this.renderHwTable();
         } catch(e) {
@@ -890,13 +904,28 @@ const Molds = {
         const indirectPerHour = params.indirectPerHour || 0;
 
         this._hwBlanks.forEach(b => {
-            const priceRub = b.price_rub || 0;
+            let priceRub = b.price_rub || 0;
+            const src = b.hw_form_source || 'warehouse';
+
+            // For china/custom_cny sources: recalculate price from current CNY rates
+            if ((src === 'china' || src === 'custom_cny') && b.price_cny > 0) {
+                const virtualItem = { price_cny: b.price_cny, weight_grams: b.weight_grams || 0 };
+                const method = b.delivery_method || 'auto';
+                const calc = ChinaCatalog.calcDelivery(virtualItem, method, 1);
+                priceRub = calc.totalPerUnit;
+                b.price_rub = round2(priceRub); // update with fresh rates
+            }
+
             const speed = b.assembly_speed || 0;
             const assemblyCost = speed > 0 ? round2((fotPerHour + indirectPerHour) / speed) : 0;
             b._cost = round2(priceRub + assemblyCost);
             b._assemblyCost = assemblyCost;
+            b._priceRubCalc = round2(priceRub);
             // Цена с 40% чистой прибыли
             b._sellPrice = b._cost > 0 ? Math.ceil(b._cost / (1 - 0.40)) : 0;
+
+            // Source badge
+            b._srcBadge = src === 'china' ? '🇨🇳' : src === 'custom_cny' ? '¥' : '📦';
 
             // Try to get photo from warehouse if not on blank itself
             if (!b.photo_url && b.warehouse_item_id) {
@@ -922,7 +951,7 @@ const Molds = {
             <thead><tr>
                 <th style="width:48px;padding:6px;"></th>
                 <th style="min-width:180px;padding:6px 8px;text-align:left;">Фурнитура</th>
-                <th style="padding:6px 8px;text-align:right;">Цена склада</th>
+                <th style="padding:6px 8px;text-align:right;">Цена/шт</th>
                 <th style="padding:6px 8px;text-align:right;">Сборка</th>
                 <th style="padding:6px 8px;text-align:right;font-weight:700;">Себестоимость</th>
                 <th style="padding:6px 8px;text-align:right;">Цена 40%</th>
@@ -930,19 +959,28 @@ const Molds = {
             </tr></thead><tbody>`;
 
         this._hwBlanks.forEach(b => {
-            const priceRub = b.price_rub || 0;
+            const priceRub = b._priceRubCalc || b.price_rub || 0;
             const photoSrc = b.photo_url || b._whPhoto || '';
             const photo = photoSrc
                 ? `<img src="${photoSrc.startsWith('data:') ? photoSrc : this.esc(photoSrc)}" style="width:44px;height:44px;object-fit:cover;border-radius:6px;border:1px solid var(--border);" onerror="this.style.display='none'">`
                 : `<span style="width:44px;height:44px;display:flex;align-items:center;justify-content:center;background:var(--accent-light);border-radius:6px;font-size:16px;">🔩</span>`;
 
             const speedLabel = b.assembly_speed ? (b.assembly_speed + ' шт/ч') : '—';
+            const src = b.hw_form_source || 'warehouse';
+            const srcBadge = b._srcBadge || '📦';
+            // Extra info line for china/custom
+            let extraInfo = '';
+            if (src === 'china' || src === 'custom_cny') {
+                const methodInfo = ChinaCatalog.DELIVERY_METHODS[b.delivery_method];
+                const deliveryLabel = methodInfo ? methodInfo.label : (b.delivery_method || '');
+                extraInfo = ` · ${b.price_cny || 0}¥ · ${deliveryLabel}`;
+            }
 
             html += `<tr style="border-bottom:1px solid var(--border);">
                 <td style="padding:6px;">${photo}</td>
                 <td style="padding:6px 8px;">
-                    <div style="font-weight:700;font-size:13px;">${this.esc(b.name)}</div>
-                    <div style="font-size:10px;color:var(--text-muted);margin-top:2px;">${speedLabel}${b.notes ? ' · ' + this.esc(b.notes) : ''}</div>
+                    <div style="font-weight:700;font-size:13px;">${srcBadge} ${this.esc(b.name)}</div>
+                    <div style="font-size:10px;color:var(--text-muted);margin-top:2px;">${speedLabel}${extraInfo}${b.notes ? ' · ' + this.esc(b.notes) : ''}</div>
                 </td>
                 <td style="padding:6px 8px;text-align:right;font-size:12px;color:var(--text-secondary);">${formatRub(priceRub)}</td>
                 <td style="padding:6px 8px;text-align:right;font-size:12px;color:var(--text-secondary);">${formatRub(b._assemblyCost)}</td>
@@ -958,13 +996,52 @@ const Molds = {
         });
 
         html += '</tbody></table>';
-        html += `<div style="margin-top:10px;font-size:11px;color:var(--text-muted);">ФОТ: ${formatRub(fotPerHour)}/ч · Косвенные: ${formatRub(round2(indirectPerHour))}/ч · Себестоимость = цена склада + (ФОТ + косвенные) ÷ скорость</div></div>`;
+        html += `<div style="margin-top:10px;font-size:11px;color:var(--text-muted);">ФОТ: ${formatRub(fotPerHour)}/ч · Косвенные: ${formatRub(round2(indirectPerHour))}/ч · Себестоимость = цена/шт + (ФОТ + косвенные) ÷ скорость · 📦 склад · 🇨🇳 каталог · ¥ кастом</div></div>`;
 
         container.innerHTML = html;
     },
 
+    _hwFormSource: 'warehouse', // 'warehouse' | 'china' | 'custom_cny'
+
+    setHwFormSource(src) {
+        this._hwFormSource = src;
+        // Toggle visibility
+        ['warehouse', 'china', 'custom_cny'].forEach(s => {
+            const el = document.getElementById('hw-src-' + s);
+            if (el) el.style.display = (s === src) ? '' : 'none';
+        });
+        // Toggle button styles
+        document.querySelectorAll('#hw-source-toggle button').forEach(btn => {
+            const isCurrent = btn.dataset.hwSrc === src;
+            btn.className = isCurrent ? 'btn btn-sm btn-primary' : 'btn btn-sm btn-outline';
+        });
+        // Populate delivery dropdowns for china/custom_cny
+        if (src === 'china' || src === 'custom_cny') {
+            this._populateDeliveryDropdown(src === 'china' ? 'hw-china-delivery' : 'hw-custom-delivery');
+        }
+        // Load china catalog items if needed
+        if (src === 'china' && ChinaCatalog._items.length === 0) {
+            ChinaCatalog._loadItems().then(items => { ChinaCatalog._items = items; });
+        }
+        // Reset selection
+        document.getElementById('hw-blank-selected').style.display = 'none';
+        this.recalcHwCost();
+    },
+
+    _populateDeliveryDropdown(selectId) {
+        const sel = document.getElementById(selectId);
+        if (!sel || sel.options.length > 0) return;
+        Object.entries(ChinaCatalog.DELIVERY_METHODS).forEach(([k, m]) => {
+            const opt = document.createElement('option');
+            opt.value = k;
+            opt.textContent = `${m.label} $${m.rate_usd}/кг (${m.days})`;
+            sel.appendChild(opt);
+        });
+    },
+
     showHwForm() {
         this._editingHwId = null;
+        this._hwFormSource = 'warehouse';
         document.getElementById('hw-form-title').textContent = 'Новая фурнитура';
         document.getElementById('hw-blank-wh-search').value = '';
         document.getElementById('hw-blank-speed').value = '';
@@ -973,9 +1050,25 @@ const Molds = {
         document.getElementById('hw-blank-price-rub').value = '0';
         document.getElementById('hw-blank-photo').value = '';
         document.getElementById('hw-blank-wh-id').value = '';
+        document.getElementById('hw-blank-china-id').value = '';
         document.getElementById('hw-blank-selected').style.display = 'none';
         document.getElementById('hw-blank-wh-dropdown').style.display = 'none';
         document.getElementById('hw-delete-btn').style.display = 'none';
+        // Reset custom fields
+        const customName = document.getElementById('hw-custom-name');
+        if (customName) customName.value = '';
+        const customCny = document.getElementById('hw-custom-price-cny');
+        if (customCny) customCny.value = '';
+        const customWeight = document.getElementById('hw-custom-weight');
+        if (customWeight) customWeight.value = '';
+        const chinaSearch = document.getElementById('hw-china-search');
+        if (chinaSearch) chinaSearch.value = '';
+        // Clear delivery dropdowns so they get re-populated with latest rates
+        ['hw-china-delivery', 'hw-custom-delivery'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.innerHTML = '';
+        });
+        this.setHwFormSource('warehouse');
         document.getElementById('hw-edit-form').style.display = '';
         this.recalcHwCost();
         document.getElementById('hw-edit-form').scrollIntoView({ behavior: 'smooth' });
@@ -986,14 +1079,42 @@ const Molds = {
         if (!b) return;
         this._editingHwId = id;
         document.getElementById('hw-form-title').textContent = 'Редактировать: ' + (b.name || '');
-        document.getElementById('hw-blank-wh-search').value = b.name || '';
         document.getElementById('hw-blank-speed').value = b.assembly_speed || '';
         document.getElementById('hw-blank-notes').value = b.notes || '';
         document.getElementById('hw-blank-name').value = b.name || '';
         document.getElementById('hw-blank-price-rub').value = b.price_rub || 0;
         document.getElementById('hw-blank-photo').value = b.photo_url || '';
         document.getElementById('hw-blank-wh-id').value = b.warehouse_item_id || '';
-        document.getElementById('hw-blank-wh-dropdown').style.display = 'none';
+        document.getElementById('hw-blank-china-id').value = b.china_catalog_id || '';
+
+        // Clear delivery dropdowns so they get re-populated
+        ['hw-china-delivery', 'hw-custom-delivery'].forEach(ddId => {
+            const el = document.getElementById(ddId);
+            if (el) el.innerHTML = '';
+        });
+
+        // Determine source
+        const src = b.hw_form_source || (b.warehouse_item_id ? 'warehouse' : (b.price_cny > 0 ? 'custom_cny' : 'warehouse'));
+        this.setHwFormSource(src);
+
+        if (src === 'warehouse') {
+            document.getElementById('hw-blank-wh-search').value = b.name || '';
+        } else if (src === 'china') {
+            const chinaSearch = document.getElementById('hw-china-search');
+            if (chinaSearch) chinaSearch.value = b.name || '';
+            // Set delivery method
+            const dd = document.getElementById('hw-china-delivery');
+            if (dd && b.delivery_method) dd.value = b.delivery_method;
+        } else if (src === 'custom_cny') {
+            const customName = document.getElementById('hw-custom-name');
+            if (customName) customName.value = b.name || '';
+            const customCny = document.getElementById('hw-custom-price-cny');
+            if (customCny) customCny.value = b.price_cny || '';
+            const customWeight = document.getElementById('hw-custom-weight');
+            if (customWeight) customWeight.value = b.weight_grams || '';
+            const dd = document.getElementById('hw-custom-delivery');
+            if (dd && b.delivery_method) dd.value = b.delivery_method;
+        }
 
         // Show selected item preview
         const photoSrc = b.photo_url || b._whPhoto || '';
@@ -1067,6 +1188,93 @@ const Molds = {
         dropdown.style.display = '';
     },
 
+    // ---- China catalog search & select ----
+
+    searchHwChina() {
+        const query = (document.getElementById('hw-china-search').value || '').toLowerCase().trim();
+        const dropdown = document.getElementById('hw-china-dropdown');
+
+        if (!query || query.length < 1) {
+            dropdown.style.display = 'none';
+            return;
+        }
+
+        // Search through ChinaCatalog items
+        const filtered = ChinaCatalog._items.filter(item => {
+            const searchStr = [item.name, item.category_ru, item.size, item.notes].filter(Boolean).join(' ').toLowerCase();
+            return searchStr.includes(query);
+        }).slice(0, 20);
+
+        if (!filtered.length) {
+            dropdown.innerHTML = '<div style="padding:10px;color:var(--text-muted);font-size:12px;">Ничего не найдено</div>';
+            dropdown.style.display = '';
+            return;
+        }
+
+        let html = '';
+        filtered.forEach(item => {
+            const priceRub = round2(item.price_cny * ChinaCatalog._cnyRate);
+            const isRussia = item.category === 'russia';
+            const priceLabel = isRussia
+                ? `${formatRub(item.price_rub || 0)} (РФ)`
+                : `${item.price_cny}¥ ≈ ${formatRub(priceRub)}`;
+
+            html += `<div style="display:flex;gap:8px;align-items:center;padding:8px 10px;cursor:pointer;border-bottom:1px solid var(--border);"
+                      onmouseover="this.style.background='var(--bg)'" onmouseout="this.style.background=''"
+                      onclick="Molds.selectHwChinaItem(${item.id})">
+                <span style="width:32px;height:32px;display:flex;align-items:center;justify-content:center;background:var(--accent-light);border-radius:4px;font-size:12px;">🇨🇳</span>
+                <div style="flex:1;min-width:0;">
+                    <div style="font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${Molds.esc(item.name)}</div>
+                    <div style="font-size:10px;color:var(--text-muted);">${Molds.esc(item.category_ru)} · ${item.weight_grams || 0}г · ${priceLabel}</div>
+                </div>
+            </div>`;
+        });
+
+        dropdown.innerHTML = html;
+        dropdown.style.display = '';
+    },
+
+    selectHwChinaItem(chinaId) {
+        const item = ChinaCatalog._items.find(i => i.id === chinaId);
+        if (!item) return;
+
+        // Get selected delivery method
+        const deliverySel = document.getElementById('hw-china-delivery');
+        const method = deliverySel ? deliverySel.value : 'auto';
+
+        // Use calcDelivery to compute price (with qty=1 for per-unit)
+        const isRussia = item.category === 'russia';
+        let priceRub, totalPerUnit;
+        if (isRussia) {
+            priceRub = item.price_rub || 0;
+            totalPerUnit = priceRub;
+        } else {
+            const calc = ChinaCatalog.calcDelivery(item, method, 1);
+            priceRub = calc.totalPerUnit;
+            totalPerUnit = calc.totalPerUnit;
+        }
+
+        const name = item.name + (item.size ? ' ' + item.size : '');
+
+        // Fill hidden fields
+        document.getElementById('hw-blank-name').value = name;
+        document.getElementById('hw-blank-price-rub').value = round2(totalPerUnit);
+        document.getElementById('hw-blank-china-id').value = chinaId;
+        document.getElementById('hw-blank-photo').value = '';
+        document.getElementById('hw-blank-wh-id').value = '';
+        document.getElementById('hw-china-search').value = name;
+        document.getElementById('hw-china-dropdown').style.display = 'none';
+
+        // Show preview
+        const infoText = isRussia
+            ? `Цена: ${formatRub(priceRub)} (Россия)`
+            : `Цена: ${item.price_cny}¥ → ${formatRub(totalPerUnit)} (вкл. доставку + наценки)`;
+        this._showHwSelectedItem(name, totalPerUnit, '');
+        document.getElementById('hw-blank-selected-info').textContent = infoText;
+
+        this.recalcHwCost();
+    },
+
     selectHwWarehouseItem(whId) {
         const item = this._warehouseHwItems.find(w => w.id === whId);
         if (!item) return;
@@ -1092,11 +1300,76 @@ const Molds = {
         const params = App.params || {};
         const fotPerHour = params.fotPerHour || 400;
         const indirectPerHour = params.indirectPerHour || 0;
-
-        const priceRub = parseFloat(document.getElementById('hw-blank-price-rub').value) || 0;
         const speed = parseFloat(document.getElementById('hw-blank-speed').value) || 0;
 
-        if (priceRub <= 0) { el.style.display = 'none'; return; }
+        let priceRub = 0;
+        let priceLabel = '';
+        let detailLines = [];
+
+        const src = this._hwFormSource;
+
+        if (src === 'china') {
+            // --- China catalog source ---
+            const chinaId = parseInt(document.getElementById('hw-blank-china-id').value) || 0;
+            const item = chinaId ? ChinaCatalog._items.find(i => i.id === chinaId) : null;
+            if (!item) { el.style.display = 'none'; return; }
+
+            const isRussia = item.category === 'russia';
+            const deliverySel = document.getElementById('hw-china-delivery');
+            const method = deliverySel ? deliverySel.value : 'auto';
+
+            if (isRussia) {
+                priceRub = item.price_rub || 0;
+                priceLabel = `Цена (Россия): <b>${formatRub(priceRub)}</b>`;
+            } else {
+                const calc = ChinaCatalog.calcDelivery(item, method, 1);
+                priceRub = calc.totalPerUnit;
+                // Update hidden price field
+                document.getElementById('hw-blank-price-rub').value = round2(priceRub);
+                const methodInfo = ChinaCatalog.DELIVERY_METHODS[method];
+                priceLabel = `Товар: ${item.price_cny}¥ × ${ChinaCatalog._cnyRate}₽ = ${formatRub(calc.priceRub)} → +${Math.round(ChinaCatalog.ITEM_SURCHARGE*100)}% = <b>${formatRub(calc.priceWithSurcharge)}</b>`;
+                detailLines.push(`Доставка: ${item.weight_grams}г × $${methodInfo?.rate_usd || '?'}/кг × ${ChinaCatalog._usdRate}₽ = ${formatRub(calc.deliveryPerUnit)} → +${Math.round(ChinaCatalog.DELIVERY_SURCHARGE*100)}% = <b>${formatRub(calc.deliveryWithSurcharge)}</b>`);
+                detailLines.push(`Итого товар: <b>${formatRub(priceRub)}</b>/шт (${methodInfo?.label || method}, ${methodInfo?.days || ''})`);
+            }
+
+        } else if (src === 'custom_cny') {
+            // --- Custom CNY source ---
+            const priceCny = parseFloat(document.getElementById('hw-custom-price-cny').value) || 0;
+            const weightG = parseFloat(document.getElementById('hw-custom-weight').value) || 0;
+            const deliverySel = document.getElementById('hw-custom-delivery');
+            const method = deliverySel ? deliverySel.value : 'auto';
+
+            if (priceCny <= 0) { el.style.display = 'none'; return; }
+
+            // Build a virtual item for calcDelivery
+            const virtualItem = { price_cny: priceCny, weight_grams: weightG };
+            const calc = ChinaCatalog.calcDelivery(virtualItem, method, 1);
+            priceRub = calc.totalPerUnit;
+
+            // Update hidden fields
+            document.getElementById('hw-blank-price-rub').value = round2(priceRub);
+            const customName = document.getElementById('hw-custom-name').value.trim();
+            if (customName) document.getElementById('hw-blank-name').value = customName;
+
+            const methodInfo = ChinaCatalog.DELIVERY_METHODS[method];
+            priceLabel = `Товар: ${priceCny}¥ × ${ChinaCatalog._cnyRate}₽ = ${formatRub(calc.priceRub)} → +${Math.round(ChinaCatalog.ITEM_SURCHARGE*100)}% = <b>${formatRub(calc.priceWithSurcharge)}</b>`;
+            if (weightG > 0) {
+                detailLines.push(`Доставка: ${weightG}г × $${methodInfo?.rate_usd || '?'}/кг × ${ChinaCatalog._usdRate}₽ = ${formatRub(calc.deliveryPerUnit)} → +${Math.round(ChinaCatalog.DELIVERY_SURCHARGE*100)}% = <b>${formatRub(calc.deliveryWithSurcharge)}</b>`);
+            }
+            detailLines.push(`Итого товар: <b>${formatRub(priceRub)}</b>/шт (${methodInfo?.label || method})`);
+
+            // Show preview if name entered
+            if (customName) {
+                this._showHwSelectedItem(customName, priceRub, '');
+                document.getElementById('hw-blank-selected-info').textContent = `Цена: ${priceCny}¥ → ${formatRub(priceRub)} (вкл. доставку + наценки)`;
+            }
+
+        } else {
+            // --- Warehouse source (original logic) ---
+            priceRub = parseFloat(document.getElementById('hw-blank-price-rub').value) || 0;
+            if (priceRub <= 0) { el.style.display = 'none'; return; }
+            priceLabel = `Цена со склада: <b>${formatRub(priceRub)}</b> (вкл. доставку)`;
+        }
 
         const fotCost = speed > 0 ? round2(fotPerHour / speed) : 0;
         const indirectCost = speed > 0 ? round2(indirectPerHour / speed) : 0;
@@ -1107,7 +1380,8 @@ const Molds = {
 
         let html = `<div style="font-weight:700;font-size:13px;margin-bottom:6px;">Себестоимость: ${formatRub(totalCost)} → Цена 40%: <span style="color:var(--green);">${sellPrice}₽</span></div>`;
         html += `<div style="color:var(--text-secondary);font-size:11px;line-height:1.7;">`;
-        html += `Цена со склада: <b>${formatRub(priceRub)}</b> (вкл. доставку)<br>`;
+        html += priceLabel + '<br>';
+        detailLines.forEach(line => { html += line + '<br>'; });
         if (speed > 0) {
             html += `ФОТ сборки: ${formatRub(fotPerHour)}/ч ÷ ${speed} шт/ч = <b>${formatRub(fotCost)}</b>/шт<br>`;
             if (indirectPerHour > 0) {
@@ -1130,21 +1404,52 @@ const Molds = {
     },
 
     async saveHwBlank() {
-        const name = document.getElementById('hw-blank-name').value.trim();
-        if (!name) { App.toast('Выберите позицию со склада'); return; }
+        const src = this._hwFormSource;
+        let name = document.getElementById('hw-blank-name').value.trim();
+
+        // For custom_cny, name comes from custom-name field
+        if (src === 'custom_cny') {
+            const customName = document.getElementById('hw-custom-name').value.trim();
+            if (customName) name = customName;
+        }
+
+        if (!name) {
+            const hint = src === 'warehouse' ? 'Выберите позицию со склада' : src === 'china' ? 'Выберите позицию из каталога' : 'Введите название';
+            App.toast(hint);
+            return;
+        }
 
         const blank = {
             id: this._editingHwId || undefined,
             name,
             price_rub: parseFloat(document.getElementById('hw-blank-price-rub').value) || 0,
             warehouse_item_id: parseInt(document.getElementById('hw-blank-wh-id').value) || null,
+            china_catalog_id: parseInt(document.getElementById('hw-blank-china-id').value) || null,
             assembly_speed: parseFloat(document.getElementById('hw-blank-speed').value) || 0,
             notes: document.getElementById('hw-blank-notes').value.trim(),
             photo_url: document.getElementById('hw-blank-photo').value.trim(),
-            // Keep legacy fields at 0 for backward compatibility
+            hw_form_source: src,
+            // China/Custom CNY fields
             price_cny: 0,
+            weight_grams: 0,
+            delivery_method: '',
             delivery_per_unit: 0,
         };
+
+        if (src === 'china') {
+            const chinaItem = blank.china_catalog_id ? ChinaCatalog._items.find(i => i.id === blank.china_catalog_id) : null;
+            if (chinaItem) {
+                blank.price_cny = chinaItem.price_cny || 0;
+                blank.weight_grams = chinaItem.weight_grams || 0;
+            }
+            const dd = document.getElementById('hw-china-delivery');
+            blank.delivery_method = dd ? dd.value : 'auto';
+        } else if (src === 'custom_cny') {
+            blank.price_cny = parseFloat(document.getElementById('hw-custom-price-cny').value) || 0;
+            blank.weight_grams = parseFloat(document.getElementById('hw-custom-weight').value) || 0;
+            const dd = document.getElementById('hw-custom-delivery');
+            blank.delivery_method = dd ? dd.value : 'auto';
+        }
 
         await saveHwBlank(blank);
         App.toast('Фурнитура сохранена');
