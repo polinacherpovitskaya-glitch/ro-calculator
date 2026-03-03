@@ -52,7 +52,18 @@ const ChinaCatalog = {
     async _loadItems() {
         // Try localStorage first
         let items = getLocal('ro_calc_china_catalog');
-        if (items && items.length > 0) return items;
+        if (items && items.length > 0) {
+            // Migrate: add photo_url field if missing (v46i+)
+            let migrated = false;
+            items.forEach(item => {
+                if (!item.hasOwnProperty('photo_url')) {
+                    item.photo_url = '';
+                    migrated = true;
+                }
+            });
+            if (migrated) setLocal('ro_calc_china_catalog', items);
+            return items;
+        }
 
         // Seed from JSON file
         try {
@@ -163,6 +174,7 @@ const ChinaCatalog = {
         let html = `<div class="card" style="padding:12px;overflow-x:auto;">
             <table style="font-size:12px;white-space:nowrap;border-collapse:collapse;width:100%;">
             <thead><tr>
+                <th style="width:48px;padding:6px;"></th>
                 <th style="padding:6px 8px;text-align:left;">Категория</th>
                 <th style="padding:6px 8px;text-align:left;min-width:200px;">Название</th>
                 <th style="padding:6px 8px;text-align:center;">Размер</th>
@@ -198,7 +210,13 @@ const ChinaCatalog = {
                 ? `<a href="${this._esc(item.link_1688)}" target="_blank" rel="noopener" style="font-size:11px;color:var(--accent);">1688</a>`
                 : '<span style="color:var(--text-muted);">—</span>';
 
+            const photoSrc = this._proxyPhoto(item.photo_url || '');
+            const photoCell = photoSrc
+                ? `<img src="${this._esc(photoSrc)}" style="width:40px;height:40px;object-fit:cover;border-radius:6px;border:1px solid var(--border);" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'" loading="lazy"><span style="width:40px;height:40px;display:none;align-items:center;justify-content:center;background:var(--accent-light);border-radius:6px;font-size:14px;">📦</span>`
+                : `<span style="width:40px;height:40px;display:flex;align-items:center;justify-content:center;background:var(--accent-light);border-radius:6px;font-size:14px;">📦</span>`;
+
             html += `<tr style="border-bottom:1px solid var(--border);" id="cc-row-${item.id}">
+                <td style="padding:6px;">${photoCell}</td>
                 <td style="padding:6px 8px;font-size:11px;color:var(--text-muted);">${this._esc(item.category_ru)}</td>
                 <td style="padding:6px 8px;">
                     <div style="font-weight:600;font-size:12px;">${this._esc(item.name)}</div>
@@ -390,7 +408,9 @@ const ChinaCatalog = {
         document.getElementById('cc-item-price-cny').value = '';
         document.getElementById('cc-item-price-rub').value = '';
         document.getElementById('cc-item-link').value = '';
+        document.getElementById('cc-item-photo').value = '';
         document.getElementById('cc-item-notes').value = '';
+        this._updatePhotoPreview('');
         document.getElementById('cc-delete-btn').style.display = 'none';
         document.getElementById('cc-edit-form').style.display = '';
         document.getElementById('cc-edit-form').scrollIntoView({ behavior: 'smooth' });
@@ -408,7 +428,9 @@ const ChinaCatalog = {
         document.getElementById('cc-item-price-cny').value = item.price_cny || '';
         document.getElementById('cc-item-price-rub').value = item.price_rub || '';
         document.getElementById('cc-item-link').value = item.link_1688 || '';
+        document.getElementById('cc-item-photo').value = item.photo_url || '';
         document.getElementById('cc-item-notes').value = item.notes || '';
+        this._updatePhotoPreview(item.photo_url || '');
         document.getElementById('cc-delete-btn').style.display = '';
         document.getElementById('cc-edit-form').style.display = '';
         document.getElementById('cc-edit-form').scrollIntoView({ behavior: 'smooth' });
@@ -437,6 +459,7 @@ const ChinaCatalog = {
             price_cny: parseFloat(document.getElementById('cc-item-price-cny').value) || 0,
             price_rub: parseFloat(document.getElementById('cc-item-price-rub').value) || 0,
             link_1688: document.getElementById('cc-item-link').value.trim(),
+            photo_url: document.getElementById('cc-item-photo').value.trim(),
             notes: document.getElementById('cc-item-notes').value.trim(),
         };
 
@@ -476,6 +499,28 @@ const ChinaCatalog = {
     // ==========================================
     // UTILS
     // ==========================================
+
+    // Proxy alicdn images to bypass hotlink protection
+    _proxyPhoto(url) {
+        if (!url) return '';
+        // alicdn/1688 images need proxy
+        if (url.includes('alicdn.com') || url.includes('1688.com')) {
+            return 'https://images.weserv.nl/?url=' + encodeURIComponent(url) + '&w=80&h=80&fit=cover&default=1';
+        }
+        return url;
+    },
+
+    _updatePhotoPreview(url) {
+        const preview = document.getElementById('cc-item-photo-preview');
+        if (!preview) return;
+        if (url) {
+            preview.src = this._proxyPhoto(url);
+            preview.style.display = '';
+            preview.onerror = () => { preview.style.display = 'none'; };
+        } else {
+            preview.style.display = 'none';
+        }
+    },
 
     _esc(str) {
         if (!str) return '';

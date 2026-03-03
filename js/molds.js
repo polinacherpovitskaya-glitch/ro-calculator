@@ -1219,10 +1219,19 @@ const Molds = {
                 ? `${formatRub(item.price_rub || 0)} (РФ)`
                 : `${item.price_cny}¥ ≈ ${formatRub(priceRub)}`;
 
+            const photoUrl = item.photo_url || '';
+            const proxiedPhoto = photoUrl && (photoUrl.includes('alicdn.com') || photoUrl.includes('1688.com'))
+                ? 'https://images.weserv.nl/?url=' + encodeURIComponent(photoUrl) + '&w=72&h=72&fit=cover&default=1'
+                : photoUrl;
+            const photoHtml = proxiedPhoto
+                ? `<img src="${Molds.esc(proxiedPhoto)}" style="width:36px;height:36px;object-fit:cover;border-radius:4px;border:1px solid var(--border);" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'" loading="lazy">`
+                  + `<span style="width:36px;height:36px;display:none;align-items:center;justify-content:center;background:var(--accent-light);border-radius:4px;font-size:12px;">🇨🇳</span>`
+                : `<span style="width:36px;height:36px;display:flex;align-items:center;justify-content:center;background:var(--accent-light);border-radius:4px;font-size:12px;">🇨🇳</span>`;
+
             html += `<div style="display:flex;gap:8px;align-items:center;padding:8px 10px;cursor:pointer;border-bottom:1px solid var(--border);"
                       onmouseover="this.style.background='var(--bg)'" onmouseout="this.style.background=''"
                       onclick="Molds.selectHwChinaItem(${item.id})">
-                <span style="width:32px;height:32px;display:flex;align-items:center;justify-content:center;background:var(--accent-light);border-radius:4px;font-size:12px;">🇨🇳</span>
+                ${photoHtml}
                 <div style="flex:1;min-width:0;">
                     <div style="font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${Molds.esc(item.name)}</div>
                     <div style="font-size:10px;color:var(--text-muted);">${Molds.esc(item.category_ru)} · ${item.weight_grams || 0}г · ${priceLabel}</div>
@@ -1256,11 +1265,13 @@ const Molds = {
 
         const name = item.name + (item.size ? ' ' + item.size : '');
 
+        const photoUrl = item.photo_url || '';
+
         // Fill hidden fields
         document.getElementById('hw-blank-name').value = name;
         document.getElementById('hw-blank-price-rub').value = round2(totalPerUnit);
         document.getElementById('hw-blank-china-id').value = chinaId;
-        document.getElementById('hw-blank-photo').value = '';
+        document.getElementById('hw-blank-photo').value = photoUrl;
         document.getElementById('hw-blank-wh-id').value = '';
         document.getElementById('hw-china-search').value = name;
         document.getElementById('hw-china-dropdown').style.display = 'none';
@@ -1269,7 +1280,7 @@ const Molds = {
         const infoText = isRussia
             ? `Цена: ${formatRub(priceRub)} (Россия)`
             : `Цена: ${item.price_cny}¥ → ${formatRub(totalPerUnit)} (вкл. доставку + наценки)`;
-        this._showHwSelectedItem(name, totalPerUnit, '');
+        this._showHwSelectedItem(name, totalPerUnit, photoUrl);
         document.getElementById('hw-blank-selected-info').textContent = infoText;
 
         this.recalcHwCost();

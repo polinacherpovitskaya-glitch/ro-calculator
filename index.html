@@ -1004,6 +1004,10 @@
                         <div class="form-group" style="flex:2"><label>Ссылка 1688</label><input type="text" id="cc-item-link" placeholder="https://..."></div>
                         <div class="form-group" style="flex:2"><label>Заметки</label><input type="text" id="cc-item-notes"></div>
                     </div>
+                    <div class="form-row" style="align-items:end;">
+                        <div class="form-group" style="flex:3"><label>Фото URL</label><input type="text" id="cc-item-photo" placeholder="https://cbu01.alicdn.com/..." oninput="ChinaCatalog._updatePhotoPreview(this.value)"></div>
+                        <div class="form-group" style="flex:0 0 auto;"><img id="cc-item-photo-preview" src="" style="width:48px;height:48px;object-fit:cover;border-radius:6px;border:1px solid var(--border);display:none;"></div>
+                    </div>
                     <div style="margin-top:12px;display:flex;gap:8px;">
                         <button class="btn btn-success btn-sm" onclick="ChinaCatalog.saveItem()">Сохранить</button>
                         <button class="btn btn-outline btn-sm" onclick="ChinaCatalog.hideForm()">Отмена</button>
