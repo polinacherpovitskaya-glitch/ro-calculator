@@ -1077,15 +1077,15 @@ const Calculator = {
                     <h3 style="margin:0;">⏱ Тайминг сборки</h3>
                     <button class="btn-remove" style="font-size:10px;width:24px;height:24px;" onclick="document.getElementById('assembly-timing-popup').remove()">✕</button>
                 </div>
-                <p style="font-size:11px;color:var(--text-muted);margin-bottom:12px;">Нажмите на строку, чтобы скопировать значение в минутах</p>`;
+                <p style="font-size:11px;color:var(--text-muted);margin-bottom:12px;">Нажмите на строку, чтобы скопировать значение в шт/час (с запасом +20%)</p>`;
 
         data.forEach(group => {
             html += `<div style="font-weight:700;font-size:11px;color:var(--text-muted);text-transform:uppercase;margin:12px 0 6px;letter-spacing:0.5px;">${group.section}</div>`;
             group.items.forEach(([name, sec]) => {
-                const mins = Math.round(sec / 60 * 100) / 100;
-                html += `<div onclick="navigator.clipboard.writeText('${mins}');App.toast('Скопировано: ${mins} мин');document.getElementById('assembly-timing-popup').remove();" style="display:flex;justify-content:space-between;padding:6px 8px;border-bottom:1px solid var(--border);cursor:pointer;font-size:12px;border-radius:4px;" onmouseover="this.style.background='var(--bg)'" onmouseout="this.style.background=''">
+                const pcsPerHour = Math.floor(3600 / (sec * 1.2));
+                html += `<div onclick="navigator.clipboard.writeText('${pcsPerHour}');App.toast('Скопировано: ${pcsPerHour} шт/час');document.getElementById('assembly-timing-popup').remove();" style="display:flex;justify-content:space-between;padding:6px 8px;border-bottom:1px solid var(--border);cursor:pointer;font-size:12px;border-radius:4px;" onmouseover="this.style.background='var(--bg)'" onmouseout="this.style.background=''">
                     <span>${name}</span>
-                    <span style="font-weight:600;white-space:nowrap;margin-left:8px;">${sec}с <span style="color:var(--text-muted);">(${mins} мин)</span></span>
+                    <span style="font-weight:600;white-space:nowrap;margin-left:8px;">${sec}с → <span style="color:var(--accent);">${pcsPerHour} шт/час</span></span>
                 </div>`;
             });
         });
