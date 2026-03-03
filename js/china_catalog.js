@@ -52,12 +52,31 @@ const ChinaCatalog = {
     async _loadItems() {
         // Try localStorage first
         let items = getLocal('ro_calc_china_catalog');
+
+        // Always load seed JSON to merge missing fields (photos, links)
+        let seedItems = [];
+        try {
+            const resp = await fetch('data/china_catalog.json');
+            if (resp.ok) seedItems = await resp.json();
+        } catch (e) {
+            console.warn('Failed to load china_catalog.json:', e);
+        }
+
         if (items && items.length > 0) {
-            // Migrate: add photo_url field if missing (v46i+)
+            // Build lookup by ID from seed JSON
+            const seedMap = new Map();
+            seedItems.forEach(si => seedMap.set(si.id, si));
+
+            // Merge missing photo_url and link_1688 from JSON
             let migrated = false;
             items.forEach(item => {
-                if (!item.hasOwnProperty('photo_url')) {
-                    item.photo_url = '';
+                const seed = seedMap.get(item.id);
+                if (!item.photo_url && seed && seed.photo_url) {
+                    item.photo_url = seed.photo_url;
+                    migrated = true;
+                }
+                if (!item.link_1688 && seed && seed.link_1688) {
+                    item.link_1688 = seed.link_1688;
                     migrated = true;
                 }
             });
@@ -65,16 +84,10 @@ const ChinaCatalog = {
             return items;
         }
 
-        // Seed from JSON file
-        try {
-            const resp = await fetch('data/china_catalog.json');
-            if (resp.ok) {
-                items = await resp.json();
-                setLocal('ro_calc_china_catalog', items);
-                return items;
-            }
-        } catch (e) {
-            console.warn('Failed to load china_catalog.json:', e);
+        // No localStorage — seed from JSON
+        if (seedItems.length > 0) {
+            setLocal('ro_calc_china_catalog', seedItems);
+            return seedItems;
         }
         return [];
     },
@@ -171,74 +184,84 @@ const ChinaCatalog = {
     },
 
     _renderTable(items) {
-        let html = `<div class="card" style="padding:12px;overflow-x:auto;">
-            <table style="font-size:12px;white-space:nowrap;border-collapse:collapse;width:100%;">
+        let html = `<div class="card" style="padding:12px;">
+            <table style="font-size:12px;border-collapse:collapse;width:100%;table-layout:fixed;">
+            <colgroup>
+                <col style="width:auto;">
+                <col style="width:68px;">
+                <col style="width:108px;">
+                <col style="width:46px;">
+                <col style="width:80px;">
+                <col style="width:68px;">
+            </colgroup>
             <thead><tr>
-                <th style="width:48px;padding:6px;"></th>
-                <th style="padding:6px 8px;text-align:left;">Категория</th>
-                <th style="padding:6px 8px;text-align:left;min-width:200px;">Название</th>
-                <th style="padding:6px 8px;text-align:center;">Размер</th>
-                <th style="padding:6px 8px;text-align:right;">Вес (г)</th>
-                <th style="padding:6px 8px;text-align:right;">Цена &#165;</th>
-                <th style="padding:6px 8px;text-align:right;">Цена &#8381;</th>
-                <th style="padding:6px 8px;text-align:center;min-width:140px;">Доставка</th>
-                <th style="padding:6px 8px;text-align:right;">Кол-во</th>
-                <th style="padding:6px 8px;text-align:right;font-weight:700;min-width:100px;">Итого/шт &#8381;</th>
-                <th style="padding:6px 8px;text-align:right;">Ссылка</th>
-                <th style="width:60px;"></th>
+                <th style="padding:6px 8px;text-align:left;">Позиция</th>
+                <th style="padding:6px 8px;text-align:right;">Цена</th>
+                <th style="padding:6px 8px;text-align:center;">Доставка</th>
+                <th style="padding:6px 8px;text-align:center;">Кол</th>
+                <th style="padding:6px 8px;text-align:right;">Итого/шт</th>
+                <th style="padding:6px 4px;"></th>
             </tr></thead><tbody>`;
 
         items.forEach(item => {
             const priceRub = round2(item.price_cny * this._cnyRate);
             const isRussia = item.category === 'russia';
-            const priceDisplay = isRussia
-                ? `<span style="color:var(--text-muted)">—</span>`
-                : `${item.price_cny} &#165;`;
-            const priceRubDisplay = isRussia
-                ? `${formatRub(item.price_rub || 0)}`
-                : `${formatRub(priceRub)}`;
 
+            // Price column
+            const priceHtml = isRussia
+                ? `<div style="font-weight:600;">${formatRub(item.price_rub || 0)}</div>`
+                : `<div style="font-weight:600;">${item.price_cny}&#165;</div>
+                   <div style="font-size:10px;color:var(--text-muted);">${formatRub(priceRub)}</div>`;
+
+            // Delivery (short labels for compact table)
+            const shortLabels = { avia_fast: 'Быстр', avia: 'Авиа', auto: 'Авто' };
             const deliverySelect = isRussia
-                ? `<span style="color:var(--text-muted);font-size:11px;">Россия</span>`
-                : `<select id="cc-delivery-${item.id}" onchange="ChinaCatalog.recalcRow(${item.id})" style="font-size:11px;padding:2px 4px;">
+                ? `<span style="color:var(--text-muted);font-size:10px;">Россия</span>`
+                : `<select id="cc-delivery-${item.id}" onchange="ChinaCatalog.recalcRow(${item.id})" style="font-size:10px;padding:1px 2px;width:100%;">
                     ${Object.entries(this.DELIVERY_METHODS).map(([k, m]) =>
-                        `<option value="${k}">${m.label} $${m.rate_usd}/кг</option>`
+                        `<option value="${k}">${shortLabels[k] || m.label} $${m.rate_usd}</option>`
                     ).join('')}
                    </select>`;
 
-            const linkHtml = item.link_1688
-                ? `<a href="${this._esc(item.link_1688)}" target="_blank" rel="noopener" style="font-size:11px;color:var(--accent);">1688</a>`
-                : '<span style="color:var(--text-muted);">—</span>';
-
+            // Photo
             const photoSrc = this._proxyPhoto(item.photo_url || '');
-            const photoCell = photoSrc
-                ? `<img src="${this._esc(photoSrc)}" style="width:40px;height:40px;object-fit:cover;border-radius:6px;border:1px solid var(--border);" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'" loading="lazy"><span style="width:40px;height:40px;display:none;align-items:center;justify-content:center;background:var(--accent-light);border-radius:6px;font-size:14px;">📦</span>`
-                : `<span style="width:40px;height:40px;display:flex;align-items:center;justify-content:center;background:var(--accent-light);border-radius:6px;font-size:14px;">📦</span>`;
+            const photoHtml = photoSrc
+                ? `<img src="${this._esc(photoSrc)}" style="width:36px;height:36px;object-fit:cover;border-radius:4px;border:1px solid var(--border);flex-shrink:0;" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'" loading="lazy"><span style="width:36px;height:36px;display:none;align-items:center;justify-content:center;background:var(--accent-light);border-radius:4px;font-size:12px;flex-shrink:0;">📦</span>`
+                : `<span style="width:36px;height:36px;display:flex;align-items:center;justify-content:center;background:var(--accent-light);border-radius:4px;font-size:12px;flex-shrink:0;">📦</span>`;
+
+            // Link icon
+            const linkIcon = item.link_1688
+                ? `<a href="${this._esc(item.link_1688)}" target="_blank" rel="noopener" title="1688" style="font-size:12px;text-decoration:none;">🔗</a>`
+                : '';
+
+            // Size + weight subtitle
+            const details = [item.category_ru, item.size, item.weight_grams ? item.weight_grams + 'г' : ''].filter(Boolean).join(' · ');
 
             html += `<tr style="border-bottom:1px solid var(--border);" id="cc-row-${item.id}">
-                <td style="padding:6px;">${photoCell}</td>
-                <td style="padding:6px 8px;font-size:11px;color:var(--text-muted);">${this._esc(item.category_ru)}</td>
                 <td style="padding:6px 8px;">
-                    <div style="font-weight:600;font-size:12px;">${this._esc(item.name)}</div>
-                    ${item.notes ? `<div style="font-size:10px;color:var(--text-muted);white-space:normal;">${this._esc(item.notes)}</div>` : ''}
+                    <div style="display:flex;gap:8px;align-items:center;">
+                        ${photoHtml}
+                        <div style="min-width:0;overflow:hidden;">
+                            <div style="font-weight:600;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${this._esc(item.name)}</div>
+                            <div style="font-size:10px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${this._esc(details)}</div>
+                            ${item.notes ? `<div style="font-size:9px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${this._esc(item.notes)}</div>` : ''}
+                        </div>
+                    </div>
                 </td>
-                <td style="padding:6px 8px;text-align:center;font-size:11px;">${this._esc(item.size || '—')}</td>
-                <td style="padding:6px 8px;text-align:right;">${item.weight_grams || '—'}</td>
-                <td style="padding:6px 8px;text-align:right;">${priceDisplay}</td>
-                <td style="padding:6px 8px;text-align:right;">${priceRubDisplay}</td>
-                <td style="padding:6px 8px;text-align:center;">${deliverySelect}</td>
-                <td style="padding:6px 8px;text-align:right;">
-                    <input type="number" min="1" value="1" id="cc-qty-${item.id}" onchange="ChinaCatalog.recalcRow(${item.id})" oninput="ChinaCatalog.recalcRow(${item.id})" style="width:60px;text-align:center;font-size:11px;padding:2px 4px;">
+                <td style="padding:6px 8px;text-align:right;vertical-align:middle;">${priceHtml}</td>
+                <td style="padding:6px 4px;text-align:center;vertical-align:middle;">${deliverySelect}</td>
+                <td style="padding:6px 2px;text-align:center;vertical-align:middle;">
+                    <input type="number" min="1" value="1" id="cc-qty-${item.id}" onchange="ChinaCatalog.recalcRow(${item.id})" oninput="ChinaCatalog.recalcRow(${item.id})" style="width:42px;text-align:center;font-size:11px;padding:2px;">
                 </td>
-                <td style="padding:6px 8px;text-align:right;" id="cc-total-${item.id}">
+                <td style="padding:6px 8px;text-align:right;vertical-align:middle;" id="cc-total-${item.id}">
                     <span style="font-weight:700;font-size:13px;color:var(--green);">${isRussia ? formatRub(item.price_rub || 0) : formatRub(round2(priceRub * (1 + this.ITEM_SURCHARGE)))}</span>
                     <div style="font-size:9px;color:var(--text-muted);" id="cc-detail-${item.id}">${isRussia ? '' : 'без дост.'}</div>
                 </td>
-                <td style="padding:6px 8px;text-align:center;">${linkHtml}</td>
-                <td style="padding:6px;">
-                    <div style="display:flex;gap:4px;">
-                        <button class="btn btn-sm btn-outline" style="padding:2px 6px;font-size:10px;" onclick="ChinaCatalog.editItem(${item.id})">&#9998;</button>
-                        <button class="btn-remove" style="font-size:9px;width:22px;height:22px;" onclick="ChinaCatalog.deleteItem(${item.id})">&#10005;</button>
+                <td style="padding:4px 2px;vertical-align:middle;">
+                    <div style="display:flex;gap:2px;align-items:center;justify-content:center;">
+                        ${linkIcon}
+                        <button class="btn btn-sm btn-outline" style="padding:2px 5px;font-size:9px;" onclick="ChinaCatalog.editItem(${item.id})">&#9998;</button>
+                        <button class="btn-remove" style="font-size:8px;width:20px;height:20px;" onclick="ChinaCatalog.deleteItem(${item.id})">&#10005;</button>
                     </div>
                 </td>
             </tr>`;
