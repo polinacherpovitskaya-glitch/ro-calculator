@@ -191,12 +191,12 @@ const Orders = {
         const actionButtons = isDeleted
             ? `<div class="flex gap-8">
                     <button class="btn btn-sm btn-outline" onclick="Orders.restoreOrder(${o.id})" title="Восстановить" style="color:var(--green);border-color:var(--green);">&#8634;</button>
-                    <button class="btn btn-sm btn-danger" onclick="Orders.confirmPermanentDelete(${o.id}, '${this.escHtml(o.order_name)}')">&#10005;</button>
+                    <button class="btn btn-sm btn-danger" onclick="Orders.confirmPermanentDelete(${o.id})">&#10005;</button>
                </div>`
             : `<div class="flex gap-8">
                     <button class="btn btn-sm btn-outline" onclick="Orders.cloneOrder(${o.id})" title="Копировать">&#10697;</button>
                     <button class="btn btn-sm btn-outline" onclick="Orders.editOrder(${o.id})" title="Редактировать">&#9998;</button>
-                    <button class="btn btn-sm btn-danger" onclick="Orders.confirmDelete(${o.id}, '${this.escHtml(o.order_name)}')">&#10005;</button>
+                    <button class="btn btn-sm btn-danger" onclick="Orders.confirmDelete(${o.id})">&#10005;</button>
                </div>`;
 
         // Payment status badge
@@ -415,7 +415,9 @@ const Orders = {
         }
     },
 
-    async confirmDelete(orderId, name) {
+    async confirmDelete(orderId) {
+        const order = this.allOrders.find(o => o.id === orderId);
+        const name = order && order.order_name ? order.order_name : 'Без названия';
         if (confirm(`Перенести заказ "${name}" в корзину?`)) {
             const managerName = document.getElementById('calc-manager-name')
                 ? (document.getElementById('calc-manager-name').value.trim() || 'Неизвестный')
@@ -444,7 +446,9 @@ const Orders = {
         this.loadList();
     },
 
-    async confirmPermanentDelete(orderId, name) {
+    async confirmPermanentDelete(orderId) {
+        const order = this.allOrders.find(o => o.id === orderId);
+        const name = order && order.order_name ? order.order_name : 'Без названия';
         if (confirm(`ВНИМАНИЕ: Удалить заказ "${name}" НАВСЕГДА? Это действие нельзя отменить!`)) {
             await permanentDeleteOrder(orderId);
             App.toast('Заказ удалён навсегда');
@@ -483,6 +487,11 @@ const Orders = {
 
     escHtml(str) {
         if (!str) return '';
-        return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        return str
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
     },
 };

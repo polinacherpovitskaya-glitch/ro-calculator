@@ -34,9 +34,10 @@ const App = {
     login() {
         const pwd = document.getElementById('auth-password').value;
         const hash = this.simpleHash(pwd);
-        if (pwd === 'recycle2026' || pwd === 'demo') {
+        if (this.isAllowedAuthHash(hash)) {
             localStorage.setItem('ro_calc_auth', hash);
             localStorage.setItem('ro_calc_auth_ts', Date.now().toString());
+            document.getElementById('auth-error').style.display = 'none';
             this.showApp();
         } else {
             document.getElementById('auth-error').style.display = 'block';
@@ -46,7 +47,11 @@ const App = {
     isAuthenticated() {
         const auth = localStorage.getItem('ro_calc_auth');
         const ts = parseInt(localStorage.getItem('ro_calc_auth_ts') || '0');
-        if (auth && (Date.now() - ts) < 86400000) return true;
+        if (auth && this.isAllowedAuthHash(auth) && (Date.now() - ts) < 86400000) return true;
+        if (auth && !this.isAllowedAuthHash(auth)) {
+            localStorage.removeItem('ro_calc_auth');
+            localStorage.removeItem('ro_calc_auth_ts');
+        }
         return false;
     },
 
@@ -73,6 +78,10 @@ const App = {
             hash |= 0;
         }
         return hash.toString();
+    },
+
+    isAllowedAuthHash(hash) {
+        return hash === this.simpleHash('recycle2026') || hash === this.simpleHash('demo');
     },
 
     async showApp() {
@@ -182,11 +191,10 @@ const App = {
 
     async checkForUpdate() {
         try {
-            const resp = await fetch('js/app.js?t=' + Date.now(), { cache: 'no-store' });
+            const resp = await fetch('js/version.json?t=' + Date.now(), { cache: 'no-store' });
             if (!resp.ok) return;
-            const txt = await resp.text();
-            const m = txt.match(/const\s+APP_VERSION\s*=\s*['"]([^'"]+)['"]/);
-            const remoteVersion = m && m[1] ? m[1] : null;
+            const payload = await resp.json();
+            const remoteVersion = payload && payload.version ? String(payload.version) : null;
             if (!remoteVersion) return;
 
             if (remoteVersion !== APP_VERSION) this.showUpdateBanner(remoteVersion);
