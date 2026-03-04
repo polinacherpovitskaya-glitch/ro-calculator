@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v51';
+const APP_VERSION = 'v52';
 
 const App = {
     currentPage: 'dashboard',
@@ -13,6 +13,8 @@ const App = {
     _updateCheckTimer: null,
     _updateCheckMs: 120000,
     _onWindowFocus: null,
+    employees: [],
+    currentEmployeeId: null,
 
     async init() {
         // Check auth
@@ -107,9 +109,90 @@ const App = {
         this.settings = await loadSettings();
         this.templates = await loadTemplates();
         this.params = getProductionParams(this.settings);
+        await this.initEmployeeContext();
 
         this.handleRoute();
         this.startUpdateChecker();
+    },
+
+    // === EMPLOYEE IDENTITY ===
+
+    async initEmployeeContext() {
+        await this.refreshEmployees();
+        this.applyCurrentEmployeeToCalculator(true);
+    },
+
+    async refreshEmployees() {
+        let all = [];
+        try {
+            all = await loadEmployees();
+        } catch (e) {
+            console.error('[App] Failed to load employees:', e);
+        }
+
+        this.employees = (all || []).filter(e => e && e.name && e.is_active !== false);
+        const selectEl = document.getElementById('app-current-employee');
+        const calcManagerEl = document.getElementById('calc-manager-name');
+        const savedId = localStorage.getItem('ro_calc_current_employee_id');
+        const calcCurrentName = calcManagerEl ? (calcManagerEl.value || '').trim() : '';
+        const fallbackByName = calcCurrentName
+            ? this.employees.find(e => (e.name || '').trim() === calcCurrentName)
+            : null;
+        const fallback = fallbackByName || this.employees[0] || null;
+        const selected = this.employees.find(e => String(e.id) === String(savedId)) || fallback;
+
+        this.currentEmployeeId = selected ? selected.id : null;
+        if (selected) localStorage.setItem('ro_calc_current_employee_id', String(selected.id));
+        else localStorage.removeItem('ro_calc_current_employee_id');
+
+        if (selectEl) {
+            let html = '<option value="">Не выбран</option>';
+            html += this.employees.map(e => `<option value="${this.escHtml(String(e.id))}">${this.escHtml(e.name || '')}</option>`).join('');
+            selectEl.innerHTML = html;
+            selectEl.value = this.currentEmployeeId != null ? String(this.currentEmployeeId) : '';
+        }
+
+        if (calcManagerEl) {
+            const previousValue = (calcManagerEl.value || '').trim();
+            let html = '<option value="">-- Выбрать --</option>';
+            html += this.employees.map(e => `<option value="${this.escHtml(e.name || '')}">${this.escHtml(e.name || '')}</option>`).join('');
+            calcManagerEl.innerHTML = html;
+
+            const preferred = previousValue || this.getCurrentEmployeeName();
+            if (preferred) calcManagerEl.value = preferred;
+        }
+    },
+
+    onCurrentEmployeeChange(employeeId) {
+        const selected = this.employees.find(e => String(e.id) === String(employeeId));
+        if (!selected) {
+            this.currentEmployeeId = null;
+            localStorage.removeItem('ro_calc_current_employee_id');
+            return;
+        }
+        this.currentEmployeeId = selected.id;
+        localStorage.setItem('ro_calc_current_employee_id', String(selected.id));
+        this.applyCurrentEmployeeToCalculator(true);
+    },
+
+    getCurrentEmployee() {
+        return this.employees.find(e => String(e.id) === String(this.currentEmployeeId)) || null;
+    },
+
+    getCurrentEmployeeName() {
+        const e = this.getCurrentEmployee();
+        return (e && e.name) ? e.name : 'Неизвестный';
+    },
+
+    applyCurrentEmployeeToCalculator(force = false) {
+        const calcManagerEl = document.getElementById('calc-manager-name');
+        if (!calcManagerEl) return;
+        if (force || !calcManagerEl.value) {
+            const name = this.getCurrentEmployeeName();
+            if (name && name !== 'Неизвестный') {
+                calcManagerEl.value = name;
+            }
+        }
     },
 
     // === ROUTING ===
@@ -245,6 +328,16 @@ const App = {
         };
         return map[status] || status;
     },
+
+    escHtml(str) {
+        if (!str) return '';
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    },
 };
 
 // =============================================
@@ -334,7 +427,7 @@ const Calculator = {
         localStorage.removeItem('ro_calc_editing_order_id');
         document.getElementById('calc-order-name').value = '';
         document.getElementById('calc-client-name').value = '';
-        document.getElementById('calc-manager-name').value = '';
+        App.applyCurrentEmployeeToCalculator(true);
         // Auto-fill "Начало" with today's date for new orders
         document.getElementById('calc-deadline-start').value = new Date().toISOString().slice(0, 10);
         document.getElementById('calc-deadline-end').value = '';
@@ -2918,7 +3011,7 @@ const Calculator = {
             id: App.editingOrderId || undefined,
             order_name: orderName,
             client_name: document.getElementById('calc-client-name').value.trim(),
-            manager_name: document.getElementById('calc-manager-name').value.trim(),
+            manager_name: '',
             deadline: document.getElementById('calc-deadline-start').value || null,
             deadline_start: document.getElementById('calc-deadline-start').value || null,
             deadline_end: document.getElementById('calc-deadline-end').value || null,
@@ -2950,7 +3043,12 @@ const Calculator = {
         const items = this._collectItemsForSave();
 
         const isEdit = !!App.editingOrderId;
-        const managerName = document.getElementById('calc-manager-name').value.trim() || 'Неизвестный';
+        const assignedManagerName = document.getElementById('calc-manager-name').value.trim() || App.getCurrentEmployeeName();
+        if (assignedManagerName && assignedManagerName !== 'Неизвестный') {
+            document.getElementById('calc-manager-name').value = assignedManagerName;
+        }
+        order.manager_name = assignedManagerName;
+        const actorName = App.getCurrentEmployeeName();
 
         // === Detailed change tracking ===
         let oldData = null;
@@ -2978,7 +3076,7 @@ const Calculator = {
                         field: 'field_change',
                         old_value: ch.label + ': ' + (ch.old_value || '(пусто)'),
                         new_value: ch.label + ': ' + (ch.new_value || '(пусто)'),
-                        manager: managerName,
+                        manager: actorName,
                     });
                 }
 
@@ -2989,7 +3087,7 @@ const Calculator = {
                         field: ch.type,
                         old_value: ch.old_value || '',
                         new_value: ch.new_value || '',
-                        manager: managerName,
+                        manager: actorName,
                         description: ch.description || '',
                     });
                 }
@@ -3000,7 +3098,7 @@ const Calculator = {
                         field: 'order_edit',
                         old_value: '',
                         new_value: 'Заказ пересохранён',
-                        manager: managerName,
+                        manager: actorName,
                         description: `Выручка: ${formatRub(summary.totalRevenue)}, Маржа: ${formatPercent(summary.marginPercent)}`,
                     });
                 }
@@ -3010,7 +3108,7 @@ const Calculator = {
                     field: 'order_create',
                     old_value: '',
                     new_value: 'Заказ создан',
-                    manager: managerName,
+                    manager: actorName,
                     description: `Выручка: ${formatRub(summary.totalRevenue)}, Маржа: ${formatPercent(summary.marginPercent)}`,
                 });
             }
@@ -3028,12 +3126,12 @@ const Calculator = {
                 'completed',
             ]);
             if (order.status === 'sample') {
-                await this._syncWarehouseReservationsOnSave(orderId, order.order_name, managerName, true);
+                await this._syncWarehouseReservationsOnSave(orderId, order.order_name, actorName, true);
             } else if (consumeStatuses.has(order.status)) {
-                await this._syncWarehouseReservationsOnSave(orderId, order.order_name, managerName, false);
-                await this._deductWarehouseOnSave(isEdit, order.order_name, managerName);
+                await this._syncWarehouseReservationsOnSave(orderId, order.order_name, actorName, false);
+                await this._deductWarehouseOnSave(isEdit, order.order_name, actorName);
             } else {
-                await this._syncWarehouseReservationsOnSave(orderId, order.order_name, managerName, false);
+                await this._syncWarehouseReservationsOnSave(orderId, order.order_name, actorName, false);
             }
 
             App.toast('Заказ сохранен');
@@ -3209,7 +3307,7 @@ const Calculator = {
         const { order, items: dbItems } = data;
         document.getElementById('calc-order-name').value = order.order_name || '';
         document.getElementById('calc-client-name').value = order.client_name || '';
-        document.getElementById('calc-manager-name').value = order.manager_name || '';
+        document.getElementById('calc-manager-name').value = order.manager_name || App.getCurrentEmployeeName() || '';
         document.getElementById('calc-deadline-start').value = order.deadline_start || order.deadline || '';
         document.getElementById('calc-deadline-end').value = order.deadline_end || '';
         document.getElementById('calc-notes').value = order.notes || '';

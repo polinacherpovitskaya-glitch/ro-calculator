@@ -97,6 +97,12 @@
                 <span>Настройки</span>
             </a>
         </nav>
+        <div style="padding:10px 12px;border-top:1px solid var(--border);margin-top:8px;">
+            <label for="app-current-employee" style="display:block;font-size:11px;color:var(--text-muted);margin-bottom:6px;">Текущий сотрудник</label>
+            <select id="app-current-employee" onchange="App.onCurrentEmployeeChange(this.value)" style="width:100%;">
+                <option value="">Не выбран</option>
+            </select>
+        </div>
     </aside>
 
     <!-- Main Content Area -->
@@ -186,12 +192,6 @@
                         <label>Менеджер</label>
                         <select id="calc-manager-name" onchange="Calculator.scheduleAutosave()">
                             <option value="">-- Выбрать --</option>
-                            <option value="Алина">Алина</option>
-                            <option value="Элина">Элина</option>
-                            <option value="Аня">Аня</option>
-                            <option value="Глеб">Глеб</option>
-                            <option value="Полина">Полина</option>
-                            <option value="Никита">Никита</option>
                         </select>
                     </div>
                     <div class="form-group">
@@ -2565,10 +2565,10 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="js/supabase.js?v=46i"></script>
 <script src="js/calculator.js?v=46g"></script>
-<script src="js/app.js?v=51"></script>
+<script src="js/app.js?v=52"></script>
 <script src="js/dashboard.js?v=46g"></script>
 <script src="js/order-detail.js?v=47b"></script>
-<script src="js/orders.js?v=46g"></script>
+<script src="js/orders.js?v=52"></script>
 <script src="js/analytics.js?v=46g"></script>
 <script src="js/molds.js?v=46l"></script>
 <script src="js/colors.js?v=46g"></script>

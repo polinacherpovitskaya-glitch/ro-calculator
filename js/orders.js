@@ -330,8 +330,7 @@ const Orders = {
         if (order.status === actualStatus) return;
 
         const oldStatus = order.status;
-        const managerName = prompt('Имя менеджера (для истории изменений):');
-        if (managerName === null) return; // user cancelled
+        const managerName = App.getCurrentEmployeeName();
 
         await updateOrderStatus(orderId, actualStatus);
         await this._syncWarehouseByStatus(orderId, oldStatus, actualStatus, order.order_name, managerName || 'Неизвестный');
@@ -361,12 +360,7 @@ const Orders = {
     async onStatusChange(orderId, newStatus, oldStatus) {
         if (newStatus === oldStatus) return;
 
-        const managerName = prompt('Имя менеджера (для истории изменений):');
-        if (managerName === null) {
-            // User cancelled — revert select
-            this.loadList();
-            return;
-        }
+        const managerName = App.getCurrentEmployeeName();
 
         await updateOrderStatus(orderId, newStatus);
         const order = this.allOrders.find(o => o.id === orderId);
@@ -396,7 +390,12 @@ const Orders = {
         };
 
         (items || []).forEach(it => {
-            const qty = parseFloat(it.quantity) || 0;
+            const qty = parseFloat(
+                it.quantity
+                ?? it.hardware_qty
+                ?? it.packaging_qty
+                ?? it.qty
+            ) || 0;
             if (qty <= 0) return;
             if (it.item_type === 'hardware' && it.hardware_source === 'warehouse' && it.hardware_warehouse_item_id) {
                 add(it.hardware_warehouse_item_id, qty);
@@ -537,9 +536,7 @@ const Orders = {
         const order = this.allOrders.find(o => o.id === orderId);
         const name = order && order.order_name ? order.order_name : 'Без названия';
         if (confirm(`Перенести заказ "${name}" в корзину?`)) {
-            const managerName = document.getElementById('calc-manager-name')
-                ? (document.getElementById('calc-manager-name').value.trim() || 'Неизвестный')
-                : 'Неизвестный';
+            const managerName = App.getCurrentEmployeeName();
             await deleteOrder(orderId);
             await this.addChangeRecord(orderId, {
                 field: 'status',
@@ -558,7 +555,7 @@ const Orders = {
             field: 'status',
             old_value: 'Удалён',
             new_value: 'Черновик (восстановлен)',
-            manager: 'Неизвестный',
+            manager: App.getCurrentEmployeeName(),
         });
         App.toast('Заказ восстановлен');
         this.loadList();

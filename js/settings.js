@@ -327,6 +327,7 @@ const Settings = {
         App.toast('Сотрудник сохранён');
         this.cancelEmployee();
         await this.loadEmployeesTab();
+        await App.refreshEmployees();
     },
 
     async deleteEmployee() {
@@ -338,6 +339,7 @@ const Settings = {
         App.toast('Сотрудник удалён');
         this.cancelEmployee();
         await this.loadEmployeesTab();
+        await App.refreshEmployees();
     },
 
     // ==========================================
