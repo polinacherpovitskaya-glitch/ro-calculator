@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v49';
+const APP_VERSION = 'v50';
 
 const App = {
     currentPage: 'dashboard',
@@ -2952,6 +2952,13 @@ const Calculator = {
             oldData = await loadOrder(App.editingOrderId);
         }
 
+        // Preserve workflow status for existing orders (sample/production/etc.)
+        if (isEdit) {
+            order.status = (oldData && oldData.order && oldData.order.status)
+                || this._currentOrderStatus
+                || 'draft';
+        }
+
         const orderId = await saveOrder(order, items);
         if (orderId) {
             App.editingOrderId = orderId;
@@ -3002,13 +3009,103 @@ const Calculator = {
                 });
             }
 
-            // === Warehouse deduction for "from warehouse" hardware ===
-            await this._deductWarehouseOnSave(isEdit, order.order_name, managerName);
+            // === Warehouse sync ===
+            // For sample orders we keep stock on hand and create reservations.
+            // For all other statuses we release auto-reservations and apply stock deduction.
+            if (order.status === 'sample') {
+                await this._syncWarehouseReservationsOnSave(orderId, order.order_name, managerName, true);
+            } else {
+                await this._syncWarehouseReservationsOnSave(orderId, order.order_name, managerName, false);
+                await this._deductWarehouseOnSave(isEdit, order.order_name, managerName);
+            }
 
             App.toast('Заказ сохранен');
         } else {
             App.toast('Ошибка сохранения');
         }
+    },
+
+    _collectWarehouseReservationDemand() {
+        const demand = new Map();
+        const addQty = (itemId, qty) => {
+            if (!itemId || qty <= 0) return;
+            demand.set(itemId, (demand.get(itemId) || 0) + qty);
+        };
+
+        (this.hardwareItems || []).forEach(hw => {
+            if (hw.source === 'warehouse' && hw.warehouse_item_id) {
+                addQty(hw.warehouse_item_id, parseFloat(hw.qty) || 0);
+            }
+        });
+        (this.packagingItems || []).forEach(pkg => {
+            if (pkg.source === 'warehouse' && pkg.warehouse_item_id) {
+                addQty(pkg.warehouse_item_id, parseFloat(pkg.qty) || 0);
+            }
+        });
+
+        return demand;
+    },
+
+    async _syncWarehouseReservationsOnSave(orderId, orderName, managerName, shouldReserve) {
+        const reservations = await loadWarehouseReservations();
+        const nowIso = new Date().toISOString();
+
+        // Release existing auto reservations for this order
+        reservations.forEach(r => {
+            if (r.status === 'active' && r.source === 'order_calc' && r.order_id === orderId) {
+                r.status = 'released';
+                r.released_at = nowIso;
+            }
+        });
+
+        if (shouldReserve) {
+            const demand = this._collectWarehouseReservationDemand();
+            if (demand.size > 0) {
+                const items = await loadWarehouseItems();
+                const activeByItem = new Map();
+                reservations.forEach(r => {
+                    if (r.status !== 'active') return;
+                    activeByItem.set(r.item_id, (activeByItem.get(r.item_id) || 0) + (parseFloat(r.qty) || 0));
+                });
+
+                let hasShortage = false;
+                demand.forEach((requestedQty, itemId) => {
+                    const whItem = items.find(i => i.id === itemId);
+                    if (!whItem) return;
+                    const stockQty = parseFloat(whItem.qty) || 0;
+                    const alreadyReserved = activeByItem.get(itemId) || 0;
+                    const available = Math.max(0, stockQty - alreadyReserved);
+                    const reserveQty = Math.min(requestedQty, available);
+
+                    if (reserveQty > 0) {
+                        reservations.push({
+                            id: Date.now() + Math.floor(Math.random() * 1000),
+                            item_id: itemId,
+                            order_id: orderId,
+                            order_name: orderName || 'Заказ',
+                            qty: reserveQty,
+                            status: 'active',
+                            source: 'order_calc',
+                            created_at: nowIso,
+                            created_by: managerName || '',
+                        });
+                        activeByItem.set(itemId, alreadyReserved + reserveQty);
+                    }
+
+                    if (reserveQty < requestedQty) {
+                        hasShortage = true;
+                    }
+                });
+
+                if (hasShortage) {
+                    App.toast('Часть позиций не встала в полный резерв: недостаточно остатка');
+                } else {
+                    App.toast('Резервы для заказа образца обновлены');
+                }
+            }
+        }
+
+        await saveWarehouseReservations(reservations);
     },
 
     /**
