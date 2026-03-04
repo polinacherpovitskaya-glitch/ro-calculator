@@ -29,6 +29,7 @@ const BOARD_COLUMNS = [
     { status: 'production', label: 'Производство',  color: '#f59e0b', icon: '◐', statuses: ['production_casting', 'production_hardware', 'production_packaging', 'in_production'] },
     { status: 'delivery',   label: 'Доставка',      color: '#8b5cf6', icon: '→', statuses: ['delivery'] },
     { status: 'completed',  label: 'Готово',         color: '#22c55e', icon: '●', statuses: ['completed'] },
+    { status: 'cancelled',  label: 'Отменён',        color: '#ef4444', icon: '✕', statuses: ['cancelled'] },
 ];
 
 const Orders = {
@@ -234,8 +235,8 @@ const Orders = {
         const container = document.getElementById('orders-board-view');
         if (!container) return;
 
-        // Exclude deleted from board
-        const active = orders.filter(o => o.status !== 'deleted' && o.status !== 'cancelled');
+        // Exclude only deleted from board (cancelled has its own column)
+        const active = orders.filter(o => o.status !== 'deleted');
 
         container.innerHTML = BOARD_COLUMNS.map(col => {
             const colOrders = active.filter(o => col.statuses.includes(o.status));
@@ -333,6 +334,7 @@ const Orders = {
         if (managerName === null) return; // user cancelled
 
         await updateOrderStatus(orderId, actualStatus);
+        await this._syncWarehouseByStatus(orderId, oldStatus, actualStatus, order.order_name, managerName || 'Неизвестный');
         order.status = actualStatus;
 
         await this.addChangeRecord(orderId, {
@@ -367,6 +369,8 @@ const Orders = {
         }
 
         await updateOrderStatus(orderId, newStatus);
+        const order = this.allOrders.find(o => o.id === orderId);
+        await this._syncWarehouseByStatus(orderId, oldStatus, newStatus, order && order.order_name, managerName || 'Неизвестный');
 
         // Save change history
         await this.addChangeRecord(orderId, {
@@ -378,6 +382,120 @@ const Orders = {
 
         App.toast(`Статус: ${App.statusLabel(newStatus)}`);
         this.loadList();
+    },
+
+    _isConsumedStatus(status) {
+        return ['production_casting', 'production_hardware', 'production_packaging', 'in_production', 'delivery', 'completed'].includes(status);
+    },
+
+    _collectWarehouseDemand(items) {
+        const demand = new Map();
+        const add = (itemId, qty) => {
+            if (!itemId || qty <= 0) return;
+            demand.set(itemId, (demand.get(itemId) || 0) + qty);
+        };
+
+        (items || []).forEach(it => {
+            const qty = parseFloat(it.quantity) || 0;
+            if (qty <= 0) return;
+            if (it.item_type === 'hardware' && it.hardware_source === 'warehouse' && it.hardware_warehouse_item_id) {
+                add(it.hardware_warehouse_item_id, qty);
+            }
+            if (it.item_type === 'packaging' && it.packaging_source === 'warehouse' && it.packaging_warehouse_item_id) {
+                add(it.packaging_warehouse_item_id, qty);
+            }
+        });
+        return demand;
+    },
+
+    async _syncWarehouseByStatus(orderId, oldStatus, newStatus, orderName, managerName) {
+        if (oldStatus === newStatus) return;
+        const data = await loadOrder(orderId);
+        if (!data) return;
+        const demand = this._collectWarehouseDemand(data.items);
+        if (demand.size === 0) return;
+
+        const wasConsumed = this._isConsumedStatus(oldStatus);
+        const nowConsumed = this._isConsumedStatus(newStatus);
+        const nowSample = newStatus === 'sample';
+
+        // 1) Release old auto-reservations for this order
+        const reservations = await loadWarehouseReservations();
+        const nowIso = new Date().toISOString();
+        reservations.forEach(r => {
+            if (r.status === 'active' && r.source === 'order_calc' && r.order_id === orderId) {
+                r.status = 'released';
+                r.released_at = nowIso;
+            }
+        });
+        await saveWarehouseReservations(reservations);
+
+        // 2) Return stock when leaving consumed statuses to non-consumed
+        if (wasConsumed && !nowConsumed) {
+            for (const [itemId, qty] of demand.entries()) {
+                await Warehouse.adjustStock(
+                    itemId,
+                    qty,
+                    'addition',
+                    orderName || 'Заказ',
+                    `Возврат на склад при смене статуса: ${App.statusLabel(oldStatus)} → ${App.statusLabel(newStatus)}`,
+                    managerName || ''
+                );
+            }
+        }
+
+        // 3) Reserve stock for sample
+        if (nowSample) {
+            const freshReservations = await loadWarehouseReservations();
+            const items = await loadWarehouseItems();
+            const activeReservedByItem = new Map();
+            freshReservations.forEach(r => {
+                if (r.status !== 'active') return;
+                activeReservedByItem.set(r.item_id, (activeReservedByItem.get(r.item_id) || 0) + (parseFloat(r.qty) || 0));
+            });
+
+            const toInsert = [];
+            demand.forEach((qty, itemId) => {
+                const wh = items.find(i => i.id === itemId);
+                if (!wh) return;
+                const stock = parseFloat(wh.qty) || 0;
+                const reserved = activeReservedByItem.get(itemId) || 0;
+                const available = Math.max(0, stock - reserved);
+                const reserveQty = Math.min(qty, available);
+                if (reserveQty > 0) {
+                    toInsert.push({
+                        id: Date.now() + Math.floor(Math.random() * 1000),
+                        item_id: itemId,
+                        order_id: orderId,
+                        order_name: orderName || 'Заказ',
+                        qty: reserveQty,
+                        status: 'active',
+                        source: 'order_calc',
+                        created_at: new Date().toISOString(),
+                        created_by: managerName || '',
+                    });
+                }
+            });
+
+            if (toInsert.length > 0) {
+                await saveWarehouseReservations([...freshReservations, ...toInsert]);
+            }
+            return;
+        }
+
+        // 4) Deduct stock when entering consumed statuses from non-consumed
+        if (!wasConsumed && nowConsumed) {
+            for (const [itemId, qty] of demand.entries()) {
+                await Warehouse.adjustStock(
+                    itemId,
+                    -qty,
+                    'deduction',
+                    orderName || 'Заказ',
+                    `Списание при смене статуса: ${App.statusLabel(oldStatus)} → ${App.statusLabel(newStatus)}`,
+                    managerName || ''
+                );
+            }
+        }
     },
 
     editOrder(orderId) {

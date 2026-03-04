@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v50';
+const APP_VERSION = 'v51';
 
 const App = {
     currentPage: 'dashboard',
@@ -1063,6 +1063,9 @@ const Calculator = {
 
         const whItem = this._findWhItem(itemId);
         if (!whItem) return;
+        if ((whItem.available_qty || 0) <= 0) {
+            App.toast(`На складе нет "${whItem.name}". Закажите из Китая.`);
+        }
 
         // Populate from warehouse item
         hw.warehouse_item_id = whItem.id;
@@ -1092,7 +1095,7 @@ const Calculator = {
             const whItem = this._findWhItem(hw.warehouse_item_id);
             if (whItem && hw.qty > whItem.available_qty) {
                 hw.qty = whItem.available_qty;
-                App.toast(`Максимум на складе: ${whItem.available_qty} ${whItem.unit}`);
+                App.toast(`Максимум на складе: ${whItem.available_qty} ${whItem.unit}. Остальное — из Китая.`);
             }
         }
         // For china/custom sources, recalc from CNY pricing
@@ -1616,6 +1619,9 @@ const Calculator = {
         }
         const whItem = this._findWhItem(itemId);
         if (!whItem) return;
+        if ((whItem.available_qty || 0) <= 0) {
+            App.toast(`На складе нет "${whItem.name}". Закажите из Китая.`);
+        }
         pkg.warehouse_item_id = whItem.id;
         pkg.warehouse_sku = whItem.sku || '';
         const parts = [whItem.name];
@@ -1641,7 +1647,7 @@ const Calculator = {
             const whItem = this._findWhItem(pkg.warehouse_item_id);
             if (whItem && pkg.qty > whItem.available_qty) {
                 pkg.qty = whItem.available_qty;
-                App.toast(`Максимум на складе: ${whItem.available_qty} ${whItem.unit}`);
+                App.toast(`Максимум на складе: ${whItem.available_qty} ${whItem.unit}. Остальное — из Китая.`);
             }
         }
         if (pkg.source === 'china' || pkg.source === 'custom') {
@@ -3010,13 +3016,24 @@ const Calculator = {
             }
 
             // === Warehouse sync ===
-            // For sample orders we keep stock on hand and create reservations.
-            // For all other statuses we release auto-reservations and apply stock deduction.
+            // sample -> reserve only
+            // production/delivery/completed -> release reserve + deduct stock
+            // draft/cancelled/etc -> release reserve only
+            const consumeStatuses = new Set([
+                'production_casting',
+                'production_hardware',
+                'production_packaging',
+                'in_production',
+                'delivery',
+                'completed',
+            ]);
             if (order.status === 'sample') {
                 await this._syncWarehouseReservationsOnSave(orderId, order.order_name, managerName, true);
-            } else {
+            } else if (consumeStatuses.has(order.status)) {
                 await this._syncWarehouseReservationsOnSave(orderId, order.order_name, managerName, false);
                 await this._deductWarehouseOnSave(isEdit, order.order_name, managerName);
+            } else {
+                await this._syncWarehouseReservationsOnSave(orderId, order.order_name, managerName, false);
             }
 
             App.toast('Заказ сохранен');
