@@ -1735,15 +1735,33 @@
                     <div class="form-row">
                         <div class="form-group">
                             <label>Закупка (CNY)</label>
-                            <input type="number" id="wh-sh-purchase-cny" value="0" min="0" step="0.01" oninput="Warehouse.recalcShipment()">
+                            <input type="number" id="wh-sh-purchase-cny" value="0" readonly style="background:var(--bg);font-weight:600;">
                         </div>
                         <div class="form-group">
                             <label>Курс CNY→RUB</label>
                             <input type="number" id="wh-sh-cny-rate" value="12.5" min="0" step="0.01" oninput="Warehouse.recalcShipment()">
                         </div>
                         <div class="form-group">
-                            <label>Закупка (RUB)</label>
+                            <label>Закупка c комиссиями (RUB)</label>
                             <input type="number" id="wh-sh-purchase-rub" value="0" readonly style="background:var(--bg);font-weight:600;">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Обналичка (%)</label>
+                            <input type="number" id="wh-sh-fee-cashout" value="1.5" min="0" step="0.01" oninput="Warehouse.recalcShipment()">
+                        </div>
+                        <div class="form-group">
+                            <label>Крипта (%)</label>
+                            <input type="number" id="wh-sh-fee-crypto" value="2" min="0" step="0.01" oninput="Warehouse.recalcShipment()">
+                        </div>
+                        <div class="form-group">
+                            <label>Комиссия 1688 (%)</label>
+                            <input type="number" id="wh-sh-fee-1688" value="3" min="0" step="0.01" oninput="Warehouse.recalcShipment()">
+                        </div>
+                        <div class="form-group">
+                            <label>Всего комиссий (%)</label>
+                            <input type="number" id="wh-sh-fee-total" value="0" readonly style="background:var(--bg);font-weight:700;">
                         </div>
                     </div>
                     <div class="form-row">
@@ -1756,12 +1774,15 @@
                             <input type="number" id="wh-sh-delivery-moscow" value="0" min="0" step="1" oninput="Warehouse.recalcShipment()">
                         </div>
                         <div class="form-group">
-                            <label>Таможня / брокер (₽)</label>
-                            <input type="number" id="wh-sh-customs" value="0" min="0" step="1" oninput="Warehouse.recalcShipment()">
-                        </div>
-                        <div class="form-group">
                             <label>Итого доставка (₽)</label>
                             <input type="number" id="wh-sh-total-delivery" value="0" readonly style="background:var(--bg);font-weight:700;">
+                        </div>
+                        <div class="form-group">
+                            <label>Учёт цены на складе</label>
+                            <select id="wh-sh-pricing-mode">
+                                <option value="weighted_avg">Средневзвешенная цена</option>
+                                <option value="weighted_with_layers">Средневзвешенная + слои партий</option>
+                            </select>
                         </div>
                     </div>
 
@@ -2544,7 +2565,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="js/supabase.js?v=46i"></script>
 <script src="js/calculator.js?v=46g"></script>
-<script src="js/app.js?v=48"></script>
+<script src="js/app.js?v=49"></script>
 <script src="js/dashboard.js?v=46g"></script>
 <script src="js/order-detail.js?v=47b"></script>
 <script src="js/orders.js?v=46g"></script>
@@ -2561,7 +2582,7 @@
 <script src="js/warehouse_photos.js?v=46g"></script>
 <script src="js/china_catalog.js?v=46k"></script>
 <script src="js/marketplaces.js?v=46h"></script>
-<script src="js/warehouse.js?v=46g"></script>
+<script src="js/warehouse.js?v=46h"></script>
 <script src="js/settings.js?v=46l"></script>
 </body>
 </html>

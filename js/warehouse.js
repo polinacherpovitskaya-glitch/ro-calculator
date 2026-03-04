@@ -1332,16 +1332,24 @@ const Warehouse = {
         const sh = this.allShipments.find(s => s.id === id);
         if (!sh) return;
         this.editingShipmentId = id;
-        this.shipmentItems = JSON.parse(JSON.stringify(sh.items || []));
+        this.shipmentItems = JSON.parse(JSON.stringify(sh.items || [])).map(it => ({
+            ...it,
+            source: it.source || (it.warehouse_item_id ? 'existing' : 'new'),
+            unit: it.unit || 'шт',
+            category: it.category || 'other',
+        }));
 
         document.getElementById('wh-sh-name').value = sh.shipment_name || '';
         document.getElementById('wh-sh-date').value = sh.date || '';
         document.getElementById('wh-sh-supplier').value = sh.supplier || '';
         document.getElementById('wh-sh-purchase-cny').value = sh.total_purchase_cny || 0;
         document.getElementById('wh-sh-cny-rate').value = sh.cny_rate || 12.5;
+        document.getElementById('wh-sh-fee-cashout').value = sh.fee_cashout_percent ?? 1.5;
+        document.getElementById('wh-sh-fee-crypto').value = sh.fee_crypto_percent ?? 2;
+        document.getElementById('wh-sh-fee-1688').value = sh.fee_1688_percent ?? 3;
         document.getElementById('wh-sh-delivery-china').value = sh.delivery_china_to_russia || 0;
-        document.getElementById('wh-sh-delivery-moscow').value = sh.delivery_moscow || 0;
-        document.getElementById('wh-sh-customs').value = sh.customs_fees || 0;
+        document.getElementById('wh-sh-delivery-moscow').value = (sh.delivery_moscow || 0) + (sh.customs_fees || 0);
+        document.getElementById('wh-sh-pricing-mode').value = sh.pricing_mode || 'weighted_avg';
         document.getElementById('wh-sh-notes').value = sh.notes || '';
 
         document.getElementById('wh-shipment-form-title').textContent = 'Редактирование приёмки';
@@ -1364,9 +1372,13 @@ const Warehouse = {
         document.getElementById('wh-sh-date').value = new Date().toISOString().split('T')[0];
         document.getElementById('wh-sh-purchase-cny').value = 0;
         document.getElementById('wh-sh-cny-rate').value = 12.5;
+        document.getElementById('wh-sh-fee-cashout').value = 1.5;
+        document.getElementById('wh-sh-fee-crypto').value = 2;
+        document.getElementById('wh-sh-fee-1688').value = 3;
+        document.getElementById('wh-sh-fee-total').value = 0;
         document.getElementById('wh-sh-delivery-china').value = 0;
         document.getElementById('wh-sh-delivery-moscow').value = 0;
-        document.getElementById('wh-sh-customs').value = 0;
+        document.getElementById('wh-sh-pricing-mode').value = 'weighted_avg';
         document.getElementById('wh-sh-purchase-rub').value = 0;
         document.getElementById('wh-sh-total-delivery').value = 0;
         document.getElementById('wh-sh-items-table').innerHTML = '';
@@ -1375,7 +1387,10 @@ const Warehouse = {
 
     addShipmentItem() {
         this.shipmentItems.push({
+            source: 'existing',
             warehouse_item_id: null, name: '', sku: '', category: '',
+            size: '', color: '', unit: 'шт',
+            photo_url: '', photo_thumbnail: '',
             qty_received: 0, weight_grams: 0,
             purchase_price_cny: 0, purchase_price_rub: 0,
             delivery_allocated: 0, total_cost_per_unit: 0,
@@ -1394,15 +1409,62 @@ const Warehouse = {
         if (!container) return;
 
         const grouped = await this.getItemsForPicker();
+        const categoryOptions = WAREHOUSE_CATEGORIES.map(c =>
+            `<option value="${c.key}">${c.icon} ${c.label}</option>`
+        ).join('');
 
         const rows = this.shipmentItems.map((item, idx) => {
-            const pickerHtml = this.buildPickerOptions(grouped, item.warehouse_item_id);
+            const pickerHtml = this.buildImagePicker(
+                `shpicker-picker-${idx}`,
+                grouped,
+                item.warehouse_item_id,
+                'Warehouse.onShipmentPickerSelect',
+                null
+            );
+            const photoSrc = item.photo_thumbnail || item.photo_url || '';
+            const photoPreview = photoSrc
+                ? `<img src="${this.esc(photoSrc)}" style="width:36px;height:36px;object-fit:cover;border-radius:6px;border:1px solid var(--border);" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';"><span style="width:36px;height:36px;display:none;align-items:center;justify-content:center;background:var(--bg);border-radius:6px;font-size:14px;">📷</span>`
+                : `<span style="width:36px;height:36px;display:flex;align-items:center;justify-content:center;background:var(--bg);border-radius:6px;font-size:14px;">📷</span>`;
+
+            const itemSourceCell = item.source === 'new'
+                ? `<div>
+                    <div style="display:flex;gap:6px;margin-bottom:6px;">
+                        <button class="btn btn-sm ${item.source === 'existing' ? 'btn-primary' : 'btn-outline'}" type="button" style="padding:2px 8px;font-size:11px;" onclick="Warehouse.setShipmentItemSource(${idx}, 'existing')">Со склада</button>
+                        <button class="btn btn-sm ${item.source === 'new' ? 'btn-primary' : 'btn-outline'}" type="button" style="padding:2px 8px;font-size:11px;" onclick="Warehouse.setShipmentItemSource(${idx}, 'new')">Новая</button>
+                    </div>
+                    <div style="display:grid;grid-template-columns:minmax(200px,1fr) 120px;gap:6px;">
+                        <input type="text" value="${this.esc(item.name || '')}" placeholder="Название позиции" oninput="Warehouse.onShipmentItemField(${idx}, 'name', this.value)" style="padding:4px 6px;border:1px solid var(--border);border-radius:4px;font-size:12px;">
+                        <input type="text" value="${this.esc(item.sku || '')}" placeholder="SKU" oninput="Warehouse.onShipmentItemField(${idx}, 'sku', this.value)" style="padding:4px 6px;border:1px solid var(--border);border-radius:4px;font-size:12px;">
+                        <select onchange="Warehouse.onShipmentItemField(${idx}, 'category', this.value)" style="padding:4px;border:1px solid var(--border);border-radius:4px;font-size:12px;">
+                            ${categoryOptions.replace(`value="${item.category}"`, `value="${item.category}" selected`)}
+                        </select>
+                        <input type="text" value="${this.esc(item.color || '')}" placeholder="Цвет" oninput="Warehouse.onShipmentItemField(${idx}, 'color', this.value)" style="padding:4px 6px;border:1px solid var(--border);border-radius:4px;font-size:12px;">
+                        <input type="text" value="${this.esc(item.size || '')}" placeholder="Размер" oninput="Warehouse.onShipmentItemField(${idx}, 'size', this.value)" style="padding:4px 6px;border:1px solid var(--border);border-radius:4px;font-size:12px;">
+                        <input type="text" value="${this.esc(item.unit || 'шт')}" placeholder="Ед. изм." oninput="Warehouse.onShipmentItemField(${idx}, 'unit', this.value)" style="padding:4px 6px;border:1px solid var(--border);border-radius:4px;font-size:12px;">
+                    </div>
+                    <div style="display:flex;align-items:center;gap:6px;margin-top:6px;">
+                        ${photoPreview}
+                        <input type="url" value="${this.esc(item.photo_url || '')}" placeholder="Ссылка на фото" onchange="Warehouse.onShipmentItemPhotoUrl(${idx}, this.value)" style="flex:1;min-width:120px;padding:4px 6px;border:1px solid var(--border);border-radius:4px;font-size:12px;">
+                        <label class="btn btn-sm btn-outline" style="padding:3px 8px;cursor:pointer;font-size:11px;">
+                            Фото
+                            <input type="file" accept="image/*" style="display:none" onchange="Warehouse.onShipmentItemPhotoFile(${idx}, this)">
+                        </label>
+                    </div>
+                </div>`
+                : `<div>
+                    <div style="display:flex;gap:6px;margin-bottom:6px;">
+                        <button class="btn btn-sm ${item.source === 'existing' ? 'btn-primary' : 'btn-outline'}" type="button" style="padding:2px 8px;font-size:11px;" onclick="Warehouse.setShipmentItemSource(${idx}, 'existing')">Со склада</button>
+                        <button class="btn btn-sm ${item.source === 'new' ? 'btn-primary' : 'btn-outline'}" type="button" style="padding:2px 8px;font-size:11px;" onclick="Warehouse.setShipmentItemSource(${idx}, 'new')">Новая</button>
+                    </div>
+                    ${pickerHtml}
+                </div>`;
+
             return `<tr>
-                <td><select onchange="Warehouse.onShipmentItemSelect(${idx}, this.value)" style="min-width:200px;padding:4px 6px;border:1px solid var(--border);border-radius:4px;font-size:12px;">${pickerHtml}</select></td>
+                <td>${itemSourceCell}</td>
                 <td><input type="number" value="${item.qty_received || ''}" min="0" onchange="Warehouse.onShipmentItemField(${idx}, 'qty_received', this.value)" style="width:70px;text-align:right;padding:4px;border:1px solid var(--border);border-radius:4px;font-size:12px;"></td>
                 <td><input type="number" value="${item.weight_grams || ''}" min="0" step="0.1" onchange="Warehouse.onShipmentItemField(${idx}, 'weight_grams', this.value)" style="width:80px;text-align:right;padding:4px;border:1px solid var(--border);border-radius:4px;font-size:12px;"></td>
                 <td><input type="number" value="${item.purchase_price_cny || ''}" min="0" step="0.01" onchange="Warehouse.onShipmentItemField(${idx}, 'purchase_price_cny', this.value)" style="width:80px;text-align:right;padding:4px;border:1px solid var(--border);border-radius:4px;font-size:12px;"></td>
-                <td class="text-right" style="font-size:12px;">${Math.round(item.purchase_price_rub || 0).toLocaleString('ru-RU')}</td>
+                <td class="text-right" style="font-size:12px;">${(item.purchase_price_rub || 0).toFixed(2)}</td>
                 <td class="text-right" style="font-size:12px;">${Math.round(item.delivery_allocated || 0).toLocaleString('ru-RU')}</td>
                 <td class="text-right" style="font-weight:600;font-size:12px;">${(item.total_cost_per_unit || 0).toFixed(2)}</td>
                 <td><button class="btn-remove" onclick="Warehouse.removeShipmentItem(${idx})" title="Удалить">&#10005;</button></td>
@@ -1415,13 +1477,32 @@ const Warehouse = {
                 <th style="width:70px;">Кол-во</th>
                 <th style="width:80px;">Вес (г)</th>
                 <th style="width:80px;">Цена CNY</th>
-                <th class="text-right" style="width:80px;">Цена RUB</th>
+                <th class="text-right" style="width:80px;">Цена RUB/ед</th>
                 <th class="text-right" style="width:90px;">Доставка ₽</th>
                 <th class="text-right" style="width:90px;">С/с ед. ₽</th>
                 <th style="width:30px;"></th>
             </tr></thead>
             <tbody>${rows}</tbody>
         </table></div>`;
+    },
+
+    onShipmentPickerSelect(idx, itemId) {
+        this.onShipmentItemSelect(idx, itemId);
+        document.querySelectorAll('.wh-picker-dropdown').forEach(d => d.style.display = 'none');
+        this.renderShipmentItemsTable();
+    },
+
+    setShipmentItemSource(idx, source) {
+        const item = this.shipmentItems[idx];
+        if (!item) return;
+        item.source = source === 'new' ? 'new' : 'existing';
+        if (item.source === 'new') {
+            item.warehouse_item_id = null;
+            if (!item.category) item.category = 'other';
+            if (!item.unit) item.unit = 'шт';
+        }
+        this.renderShipmentItemsTable();
+        this.recalcShipmentValues();
     },
 
     onShipmentItemSelect(idx, itemIdStr) {
@@ -1433,18 +1514,46 @@ const Warehouse = {
         } else {
             const whItem = this.allItems.find(i => i.id === itemId);
             if (whItem) {
+                shItem.source = 'existing';
                 shItem.warehouse_item_id = whItem.id;
                 shItem.name = whItem.name || '';
                 shItem.sku = whItem.sku || '';
                 shItem.category = whItem.category || '';
+                shItem.color = whItem.color || '';
+                shItem.size = whItem.size || '';
+                shItem.unit = whItem.unit || 'шт';
+                shItem.photo_url = whItem.photo_url || '';
+                shItem.photo_thumbnail = whItem.photo_thumbnail || '';
             }
         }
         this.recalcShipmentValues();
     },
 
     onShipmentItemField(idx, field, value) {
-        this.shipmentItems[idx][field] = parseFloat(value) || 0;
+        const numericFields = new Set(['qty_received', 'weight_grams', 'purchase_price_cny', 'purchase_price_rub', 'delivery_allocated', 'total_cost_per_unit']);
+        this.shipmentItems[idx][field] = numericFields.has(field) ? (parseFloat(value) || 0) : String(value || '');
         this.recalcShipmentValues();
+    },
+
+    onShipmentItemPhotoUrl(idx, value) {
+        const item = this.shipmentItems[idx];
+        if (!item) return;
+        item.photo_url = String(value || '').trim();
+        if (item.photo_url) item.photo_thumbnail = '';
+        this.renderShipmentItemsTable();
+    },
+
+    async onShipmentItemPhotoFile(idx, input) {
+        if (!input || !input.files || !input.files[0]) return;
+        const file = input.files[0];
+        if (file.size > 10 * 1024 * 1024) { App.toast('Файл слишком большой (макс 10 МБ)'); return; }
+        const thumbnail = await this.compressImageToThumbnail(file, 200, 200, 0.72);
+        if (!thumbnail) { App.toast('Не удалось обработать фото'); return; }
+        const item = this.shipmentItems[idx];
+        if (!item) return;
+        item.photo_thumbnail = thumbnail;
+        item.photo_url = '';
+        this.renderShipmentItemsTable();
     },
 
     recalcShipment() {
@@ -1454,21 +1563,33 @@ const Warehouse = {
     },
 
     recalcShipmentValues() {
-        const cny = parseFloat(document.getElementById('wh-sh-purchase-cny').value) || 0;
+        const cny = this.shipmentItems.reduce((sum, i) => {
+            const qty = parseFloat(i.qty_received) || 0;
+            const priceCny = parseFloat(i.purchase_price_cny) || 0;
+            return sum + (qty * priceCny);
+        }, 0);
+        document.getElementById('wh-sh-purchase-cny').value = (Math.round(cny * 100) / 100).toString();
+
         const rate = parseFloat(document.getElementById('wh-sh-cny-rate').value) || 0;
-        const purchaseRub = cny * rate;
-        document.getElementById('wh-sh-purchase-rub').value = Math.round(purchaseRub);
+        const feeCashout = parseFloat(document.getElementById('wh-sh-fee-cashout').value) || 0;
+        const feeCrypto = parseFloat(document.getElementById('wh-sh-fee-crypto').value) || 0;
+        const fee1688 = parseFloat(document.getElementById('wh-sh-fee-1688').value) || 0;
+        const feeTotalPct = feeCashout + feeCrypto + fee1688;
+        const feeMultiplier = 1 + (feeTotalPct / 100);
+        document.getElementById('wh-sh-fee-total').value = (Math.round(feeTotalPct * 100) / 100).toString();
+
+        const purchaseRub = cny * rate * feeMultiplier;
+        document.getElementById('wh-sh-purchase-rub').value = Math.round(purchaseRub).toString();
 
         const deliveryChina = parseFloat(document.getElementById('wh-sh-delivery-china').value) || 0;
         const deliveryMoscow = parseFloat(document.getElementById('wh-sh-delivery-moscow').value) || 0;
-        const customs = parseFloat(document.getElementById('wh-sh-customs').value) || 0;
-        const totalDelivery = deliveryChina + deliveryMoscow + customs;
-        document.getElementById('wh-sh-total-delivery').value = Math.round(totalDelivery);
+        const totalDelivery = deliveryChina + deliveryMoscow;
+        document.getElementById('wh-sh-total-delivery').value = Math.round(totalDelivery).toString();
 
         const totalWeight = this.shipmentItems.reduce((s, i) => s + (i.weight_grams || 0), 0);
 
         this.shipmentItems.forEach(item => {
-            item.purchase_price_rub = (item.purchase_price_cny || 0) * rate;
+            item.purchase_price_rub = (item.purchase_price_cny || 0) * rate * feeMultiplier;
             item.delivery_allocated = totalWeight > 0
                 ? totalDelivery * ((item.weight_grams || 0) / totalWeight) : 0;
             item.total_cost_per_unit = item.qty_received > 0
@@ -1487,7 +1608,8 @@ const Warehouse = {
                 <div><span style="color:var(--text-muted);font-size:11px;">Позиций:</span><br><b>${totalItems}</b></div>
                 <div><span style="color:var(--text-muted);font-size:11px;">Общее кол-во:</span><br><b>${totalQty.toLocaleString('ru-RU')}</b></div>
                 <div><span style="color:var(--text-muted);font-size:11px;">Общий вес:</span><br><b>${totalWeight.toLocaleString('ru-RU')} г</b></div>
-                <div><span style="color:var(--text-muted);font-size:11px;">Закупка:</span><br><b>${Math.round(purchaseRub).toLocaleString('ru-RU')} ₽</b></div>
+                <div><span style="color:var(--text-muted);font-size:11px;">Товары (CNY):</span><br><b>${(Math.round(cny * 100) / 100).toLocaleString('ru-RU')} ¥</b></div>
+                <div><span style="color:var(--text-muted);font-size:11px;">Закупка с комиссиями:</span><br><b>${Math.round(purchaseRub).toLocaleString('ru-RU')} ₽</b></div>
                 <div><span style="color:var(--text-muted);font-size:11px;">Доставка:</span><br><b>${Math.round(totalDelivery).toLocaleString('ru-RU')} ₽</b></div>
                 <div><span style="color:var(--text-muted);font-size:11px;">Ср. с/с ед.:</span><br><b>${avgCost.toFixed(2)} ₽</b></div>
             </div>`;
@@ -1498,8 +1620,17 @@ const Warehouse = {
         const name = document.getElementById('wh-sh-name').value.trim();
         if (!name) { App.toast('Укажите название поставки'); return null; }
 
-        const cny = parseFloat(document.getElementById('wh-sh-purchase-cny').value) || 0;
+        const cny = this.shipmentItems.reduce((sum, i) => {
+            const qty = parseFloat(i.qty_received) || 0;
+            const priceCny = parseFloat(i.purchase_price_cny) || 0;
+            return sum + (qty * priceCny);
+        }, 0);
         const rate = parseFloat(document.getElementById('wh-sh-cny-rate').value) || 0;
+        const feeCashout = parseFloat(document.getElementById('wh-sh-fee-cashout').value) || 0;
+        const feeCrypto = parseFloat(document.getElementById('wh-sh-fee-crypto').value) || 0;
+        const fee1688 = parseFloat(document.getElementById('wh-sh-fee-1688').value) || 0;
+        const feeTotalPct = feeCashout + feeCrypto + fee1688;
+        const feeMultiplier = 1 + feeTotalPct / 100;
 
         return {
             id: this.editingShipmentId || undefined,
@@ -1508,11 +1639,16 @@ const Warehouse = {
             supplier: document.getElementById('wh-sh-supplier').value.trim(),
             total_purchase_cny: cny,
             cny_rate: rate,
-            total_purchase_rub: cny * rate,
+            fee_cashout_percent: feeCashout,
+            fee_crypto_percent: feeCrypto,
+            fee_1688_percent: fee1688,
+            fee_total_percent: feeTotalPct,
+            total_purchase_rub: cny * rate * feeMultiplier,
             delivery_china_to_russia: parseFloat(document.getElementById('wh-sh-delivery-china').value) || 0,
             delivery_moscow: parseFloat(document.getElementById('wh-sh-delivery-moscow').value) || 0,
-            customs_fees: parseFloat(document.getElementById('wh-sh-customs').value) || 0,
+            customs_fees: 0,
             total_delivery: parseFloat(document.getElementById('wh-sh-total-delivery').value) || 0,
+            pricing_mode: document.getElementById('wh-sh-pricing-mode').value || 'weighted_avg',
             items: JSON.parse(JSON.stringify(this.shipmentItems)),
             total_weight_grams: this.shipmentItems.reduce((s, i) => s + (i.weight_grams || 0), 0),
             notes: document.getElementById('wh-sh-notes').value.trim(),
@@ -1535,7 +1671,11 @@ const Warehouse = {
         const data = this._buildShipmentData();
         if (!data) return;
 
-        const validItems = data.items.filter(i => i.warehouse_item_id && i.qty_received > 0);
+        const validItems = data.items.filter(i => {
+            const qty = parseFloat(i.qty_received) || 0;
+            if (qty <= 0) return false;
+            return !!i.warehouse_item_id || (i.source === 'new' && (i.name || '').trim());
+        });
         if (validItems.length === 0) {
             App.toast('Добавьте хотя бы одну позицию с кол-вом > 0');
             return;
@@ -1543,11 +1683,40 @@ const Warehouse = {
 
         if (!confirm(`Принять ${validItems.length} позиций на склад?\nОстатки и себестоимость будут обновлены.`)) return;
 
+        const itemsBefore = await loadWarehouseItems();
+        const beforeById = new Map(itemsBefore.map(i => [i.id, {
+            qty: i.qty || 0,
+            price: i.price_per_unit || 0,
+        }]));
+
+        // Ensure all "new" items exist in warehouse first
+        for (const shItem of validItems) {
+            if (shItem.warehouse_item_id) continue;
+            const newItem = {
+                category: shItem.category || 'other',
+                name: (shItem.name || '').trim(),
+                sku: (shItem.sku || '').trim(),
+                size: (shItem.size || '').trim(),
+                color: (shItem.color || '').trim(),
+                unit: (shItem.unit || 'шт').trim() || 'шт',
+                photo_url: (shItem.photo_url || '').trim(),
+                photo_thumbnail: shItem.photo_thumbnail || '',
+                qty: 0,
+                min_qty: 0,
+                price_per_unit: Math.round((shItem.total_cost_per_unit || 0) * 100) / 100,
+                notes: 'Создано автоматически из приёмки Китая',
+            };
+            const newId = await saveWarehouseItem(newItem);
+            shItem.warehouse_item_id = newId;
+            beforeById.set(newId, { qty: 0, price: newItem.price_per_unit || 0 });
+        }
+
+        data.items = validItems;
         data.status = 'received';
         data.received_at = new Date().toISOString();
         await saveShipment(data);
 
-        // Add qty to warehouse + update price_per_unit
+        // Add qty to warehouse + write history
         for (const shItem of validItems) {
             await this.adjustStock(
                 shItem.warehouse_item_id,
@@ -1557,16 +1726,41 @@ const Warehouse = {
                 `Приёмка: ${shItem.qty_received} шт, с/с: ${shItem.total_cost_per_unit.toFixed(2)} ₽`,
                 ''
             );
-
-            // Update price_per_unit on warehouse item
-            const items = await loadWarehouseItems();
-            const idx = items.findIndex(i => i.id === shItem.warehouse_item_id);
-            if (idx >= 0) {
-                items[idx].price_per_unit = Math.round(shItem.total_cost_per_unit * 100) / 100;
-                items[idx].updated_at = new Date().toISOString();
-                await saveWarehouseItems(items);
-            }
         }
+
+        // Update price model after receipt
+        const pricingMode = data.pricing_mode || 'weighted_avg';
+        const itemsAfter = await loadWarehouseItems();
+        validItems.forEach(shItem => {
+            const idx = itemsAfter.findIndex(i => i.id === shItem.warehouse_item_id);
+            if (idx < 0) return;
+
+            const after = itemsAfter[idx];
+            const before = beforeById.get(shItem.warehouse_item_id) || { qty: 0, price: after.price_per_unit || 0 };
+            const addedQty = parseFloat(shItem.qty_received) || 0;
+            const newCost = Math.round((parseFloat(shItem.total_cost_per_unit) || 0) * 100) / 100;
+            const totalQty = (before.qty || 0) + addedQty;
+            const weighted = totalQty > 0
+                ? (((before.qty || 0) * (before.price || 0) + addedQty * newCost) / totalQty)
+                : newCost;
+
+            after.price_per_unit = Math.round(weighted * 100) / 100;
+            after.updated_at = new Date().toISOString();
+
+            if (pricingMode === 'weighted_with_layers') {
+                if (!Array.isArray(after.cost_layers)) after.cost_layers = [];
+                after.cost_layers.push({
+                    shipment_id: data.id,
+                    shipment_name: data.shipment_name || '',
+                    received_at: data.received_at,
+                    qty_added: addedQty,
+                    unit_cost: newCost,
+                });
+            }
+
+            itemsAfter[idx] = after;
+        });
+        await saveWarehouseItems(itemsAfter);
 
         App.toast(`Приёмка завершена: ${validItems.length} позиций на складе`);
         this.hideShipmentForm();
