@@ -1463,7 +1463,7 @@ const Warehouse = {
                 <td>${itemSourceCell}</td>
                 <td><input type="number" value="${item.qty_received || ''}" min="0" onchange="Warehouse.onShipmentItemField(${idx}, 'qty_received', this.value)" style="width:70px;text-align:right;padding:4px;border:1px solid var(--border);border-radius:4px;font-size:12px;"></td>
                 <td><input type="number" value="${item.weight_grams || ''}" min="0" step="0.1" onchange="Warehouse.onShipmentItemField(${idx}, 'weight_grams', this.value)" style="width:80px;text-align:right;padding:4px;border:1px solid var(--border);border-radius:4px;font-size:12px;"></td>
-                <td><input type="number" value="${item.purchase_price_cny || ''}" min="0" step="0.01" onchange="Warehouse.onShipmentItemField(${idx}, 'purchase_price_cny', this.value)" style="width:80px;text-align:right;padding:4px;border:1px solid var(--border);border-radius:4px;font-size:12px;"></td>
+                <td><input type="number" value="${item.purchase_price_cny || ''}" min="0" step="0.01" onchange="Warehouse.onShipmentItemField(${idx}, 'purchase_price_cny', this.value)" title="Цена за всю позицию/тираж в CNY" style="width:80px;text-align:right;padding:4px;border:1px solid var(--border);border-radius:4px;font-size:12px;"></td>
                 <td class="text-right" style="font-size:12px;">${(item.purchase_price_rub || 0).toFixed(2)}</td>
                 <td class="text-right" style="font-size:12px;">${Math.round(item.delivery_allocated || 0).toLocaleString('ru-RU')}</td>
                 <td class="text-right" style="font-weight:600;font-size:12px;">${(item.total_cost_per_unit || 0).toFixed(2)}</td>
@@ -1476,7 +1476,7 @@ const Warehouse = {
                 <th>Позиция со склада</th>
                 <th style="width:70px;">Кол-во</th>
                 <th style="width:80px;">Вес (г)</th>
-                <th style="width:80px;">Цена CNY</th>
+                <th style="width:80px;">Цена CNY (за позицию)</th>
                 <th class="text-right" style="width:80px;">Цена RUB/ед</th>
                 <th class="text-right" style="width:90px;">Доставка ₽</th>
                 <th class="text-right" style="width:90px;">С/с ед. ₽</th>
@@ -1563,10 +1563,10 @@ const Warehouse = {
     },
 
     recalcShipmentValues() {
+        // purchase_price_cny хранится как цена за всю позицию (тираж), не за 1 шт.
         const cny = this.shipmentItems.reduce((sum, i) => {
-            const qty = parseFloat(i.qty_received) || 0;
-            const priceCny = parseFloat(i.purchase_price_cny) || 0;
-            return sum + (qty * priceCny);
+            const priceCnyTotal = parseFloat(i.purchase_price_cny) || 0;
+            return sum + priceCnyTotal;
         }, 0);
         document.getElementById('wh-sh-purchase-cny').value = (Math.round(cny * 100) / 100).toString();
 
@@ -1589,11 +1589,14 @@ const Warehouse = {
         const totalWeight = this.shipmentItems.reduce((s, i) => s + (i.weight_grams || 0), 0);
 
         this.shipmentItems.forEach(item => {
-            item.purchase_price_rub = (item.purchase_price_cny || 0) * rate * feeMultiplier;
+            const qty = parseFloat(item.qty_received) || 0;
+            const lineCnyTotal = parseFloat(item.purchase_price_cny) || 0;
+            const lineRubTotal = lineCnyTotal * rate * feeMultiplier;
+            item.purchase_price_rub = qty > 0 ? (lineRubTotal / qty) : 0;
             item.delivery_allocated = totalWeight > 0
                 ? totalDelivery * ((item.weight_grams || 0) / totalWeight) : 0;
-            item.total_cost_per_unit = item.qty_received > 0
-                ? item.purchase_price_rub + (item.delivery_allocated / item.qty_received) : 0;
+            item.total_cost_per_unit = qty > 0
+                ? item.purchase_price_rub + (item.delivery_allocated / qty) : 0;
         });
 
         // Update summary
@@ -1621,9 +1624,8 @@ const Warehouse = {
         if (!name) { App.toast('Укажите название поставки'); return null; }
 
         const cny = this.shipmentItems.reduce((sum, i) => {
-            const qty = parseFloat(i.qty_received) || 0;
-            const priceCny = parseFloat(i.purchase_price_cny) || 0;
-            return sum + (qty * priceCny);
+            const priceCnyTotal = parseFloat(i.purchase_price_cny) || 0;
+            return sum + priceCnyTotal;
         }, 0);
         const rate = parseFloat(document.getElementById('wh-sh-cny-rate').value) || 0;
         const feeCashout = parseFloat(document.getElementById('wh-sh-fee-cashout').value) || 0;
