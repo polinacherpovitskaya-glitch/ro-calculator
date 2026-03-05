@@ -474,7 +474,7 @@ function calculateFinDirectorData(items, hardwareItems, packagingItems, params) 
  * Рассчитать итоговую смету заказа
  * Обновлено: фурнитура и упаковка — отдельные массивы
  */
-function calculateOrderSummary(items, hardwareItems, packagingItems, extraCosts) {
+function calculateOrderSummary(items, hardwareItems, packagingItems, extraCosts, params = {}) {
     let totalRevenue = 0;
     let totalEarned = 0;
 
@@ -509,10 +509,15 @@ function calculateOrderSummary(items, hardwareItems, packagingItems, extraCosts)
         totalEarned += m.earned * qty;
     });
 
-    // Extra costs — добавляются к выручке как есть
+    // Extra income — full amount goes to revenue, and net (after taxes/commission) goes to earned.
+    const taxRate = Number.isFinite(params.taxRate) ? params.taxRate : 0.06;
+    const commercialRate = 0.065;
     (extraCosts || []).forEach(ec => {
         const amt = ec.amount || 0;
-        if (amt > 0) totalRevenue += amt;
+        if (amt > 0) {
+            totalRevenue += amt;
+            totalEarned += amt * (1 - taxRate - commercialRate);
+        }
     });
 
     const vatOnRevenue = totalRevenue * 0.05;

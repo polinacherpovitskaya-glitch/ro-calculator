@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v61';
+const APP_VERSION = 'v62';
 
 const App = {
     currentPage: 'dashboard',
@@ -782,6 +782,7 @@ const Calculator = {
         const item = this.items[idx];
         const num = idx + 1;
         const container = document.getElementById('calc-items-container');
+        const showCustomOnly = !item.is_blank_mold;
 
         // Build visual mold picker (with photos)
         let moldPickerHtml = '';
@@ -902,6 +903,7 @@ const Calculator = {
             <div class="item-block-header">
                 <div class="item-num">${num}</div>
                 <div class="item-title" id="item-title-${idx}">${item.product_name || 'Изделие ' + num}</div>
+                <button class="btn btn-sm btn-outline" onclick="Calculator.cloneItem(${idx})">Клонировать</button>
                 <button class="btn btn-sm btn-outline" onclick="Calculator.removeItem(${idx})">Удалить</button>
             </div>
 
@@ -941,6 +943,7 @@ const Calculator = {
                 </div>
             </div>
 
+            ${showCustomOnly ? `
             <div class="form-row">
                 <div class="form-group">
                     <label>Доп. молды</label>
@@ -960,6 +963,7 @@ const Calculator = {
                 <input type="checkbox" class="toggle" id="item-nfcprog-${idx}" ${item.nfc_programming ? 'checked' : ''} onchange="Calculator.onToggle(${idx}, 'nfc_programming', this.checked)">
                 <label for="item-nfcprog-${idx}">Программирование NFC</label>
             </div>
+            ` : ''}
             <div class="toggle-row">
                 <input type="checkbox" class="toggle" id="item-delivery-${idx}" ${item.delivery_included ? 'checked' : ''} onchange="Calculator.onToggle(${idx}, 'delivery_included', this.checked)">
                 <label for="item-delivery-${idx}">Доставка за наш счет (+${formatRub(App.settings.delivery_cost_moscow)})</label>
@@ -974,12 +978,12 @@ const Calculator = {
             ${colorPickerHtml}
 
             <!-- Фурнитура изделия (per-item) -->
-            <div class="section-title" style="margin-top:12px">🔩 Фурнитура</div>
+            <div class="section-title" style="margin-top:12px">🔩 Фурнитура внутри изделия</div>
             <div id="item-hw-list-${idx}"></div>
             <button class="btn btn-sm btn-outline" style="margin-top:4px" onclick="Calculator.addItemHardware(${idx})">+ Фурнитура</button>
 
             <!-- Упаковка изделия (per-item) -->
-            <div class="section-title" style="margin-top:12px">📦 Упаковка</div>
+            <div class="section-title" style="margin-top:12px">📦 Упаковка внутри изделия</div>
             <div id="item-pkg-list-${idx}"></div>
             <button class="btn btn-sm btn-outline" style="margin-top:4px" onclick="Calculator.addItemPackaging(${idx})">+ Упаковка</button>
 
@@ -2087,7 +2091,7 @@ const Calculator = {
     },
 
     // ==========================================
-    // EXTRA COSTS (Доп. расходы)
+    // EXTRA INCOME (Доп. доходы)
     // ==========================================
 
     addExtraCost() {
@@ -2120,11 +2124,11 @@ const Calculator = {
             <div class="form-row" style="align-items:end;margin-bottom:8px;">
                 <div class="form-group" style="margin:0;flex:2">
                     <label>Название</label>
-                    <input type="text" value="${this._esc(ec.name)}" placeholder="Доп. расход"
+                    <input type="text" value="${this._esc(ec.name)}" placeholder="Доп. доход"
                         oninput="Calculator.onExtraCostChange(${i}, 'name', this.value)">
                 </div>
                 <div class="form-group" style="margin:0;flex:1">
-                    <label>Сумма (₽)</label>
+                    <label>Сумма дохода (₽)</label>
                     <input type="number" min="0" step="1" value="${ec.amount || ''}" placeholder="0"
                         oninput="Calculator.onExtraCostChange(${i}, 'amount', this.value)">
                 </div>
@@ -2316,6 +2320,13 @@ const Calculator = {
 
     setMoldType(idx, isBlank) {
         this.items[idx].is_blank_mold = isBlank;
+        if (isBlank) {
+            // For blank molds these options are not used.
+            this.items[idx].extra_molds = 0;
+            this.items[idx].complex_design = false;
+            this.items[idx].is_nfc = false;
+            this.items[idx].nfc_programming = false;
+        }
         this.updateMoldTypeUI(idx, isBlank);
         // Clear template and built-in hw if switching to custom
         if (!isBlank) {
@@ -2329,7 +2340,9 @@ const Calculator = {
             // Remove template-created per-item hardware
             this._syncTemplateHardware(idx, null);
         }
+        this.renderItemBlock(idx);
         this.recalculate();
+        this.scheduleAutosave();
     },
 
     updateMoldTypeUI(idx, isBlank) {
@@ -2410,6 +2423,56 @@ const Calculator = {
         this.scheduleAutosave();
     },
 
+    cloneItem(idx) {
+        const source = this.items[idx];
+        if (!source) return;
+
+        const cloned = JSON.parse(JSON.stringify(source));
+        cloned.result = null;
+        cloned.totalCostWithHwPkg = 0;
+        cloned.target_price_item = 0;
+
+        // Insert cloned item right after source
+        this.items.splice(idx + 1, 0, cloned);
+        this.items.forEach((item, i) => item.item_number = i + 1);
+
+        // Shift per-item bindings for existing rows after insertion point
+        this.hardwareItems.forEach(hw => {
+            if (hw.parent_item_index !== null && hw.parent_item_index > idx) hw.parent_item_index++;
+        });
+        this.packagingItems.forEach(pkg => {
+            if (pkg.parent_item_index !== null && pkg.parent_item_index > idx) pkg.parent_item_index++;
+        });
+
+        // Clone per-item hardware/packaging attached to source item
+        const hwClones = this.hardwareItems
+            .filter(hw => hw.parent_item_index === idx)
+            .map(hw => {
+                const copy = JSON.parse(JSON.stringify(hw));
+                copy.parent_item_index = idx + 1;
+                copy.result = null;
+                return copy;
+            });
+        const pkgClones = this.packagingItems
+            .filter(pkg => pkg.parent_item_index === idx)
+            .map(pkg => {
+                const copy = JSON.parse(JSON.stringify(pkg));
+                copy.parent_item_index = idx + 1;
+                copy.result = null;
+                return copy;
+            });
+        this.hardwareItems.push(...hwClones);
+        this.packagingItems.push(...pkgClones);
+
+        const container = document.getElementById('calc-items-container');
+        container.innerHTML = '';
+        this.items.forEach((_, i) => this.renderItemBlock(i));
+        this.rerenderAllHardware();
+        this.rerenderAllPackaging();
+        this.recalculate();
+        this.scheduleAutosave();
+    },
+
     // ==========================================
     // RECALCULATE
     // ==========================================
@@ -2440,6 +2503,12 @@ const Calculator = {
 
         // === Calculate product items ===
         this.items.forEach((item, idx) => {
+            if (item.is_blank_mold) {
+                item.extra_molds = 0;
+                item.complex_design = false;
+                item.is_nfc = false;
+                item.nfc_programming = false;
+            }
             const result = calculateItemCost(item, params);
             item.result = result;
 
@@ -2450,25 +2519,20 @@ const Calculator = {
             if (costEl) costEl.style.display = hasResult ? '' : 'none';
 
             if (hasResult) {
-                this.setText('c-' + idx + '-fot', formatRub(result.costFot));
-                this.setText('c-' + idx + '-indirect', formatRub(result.costIndirect));
-                this.setText('c-' + idx + '-plastic', formatRub(result.costPlastic));
-                this.setText('c-' + idx + '-mold', formatRub(result.costMoldAmortization));
-                this.setText('c-' + idx + '-design', formatRub(result.costDesign));
-                this.setText('c-' + idx + '-cutting', formatRub(result.costCutting));
-                this.setText('c-' + idx + '-cutting-ind', formatRub(result.costCuttingIndirect));
-                this.setText('c-' + idx + '-nfc-tag', formatRub(result.costNfcTag));
-                this.setText('c-' + idx + '-nfc-prog', formatRub(result.costNfcProgramming));
-                this.setText('c-' + idx + '-nfc-ind', formatRub(result.costNfcIndirect));
-                this.setText('c-' + idx + '-builtin-hw', formatRub(result.costBuiltinHw || 0));
-                this.setText('c-' + idx + '-builtin-hw-ind', formatRub(result.costBuiltinHwIndirect || 0));
-                // Hide builtin hw rows when 0 (new orders use per-item hw instead)
-                const builtinHwEl = document.getElementById('c-' + idx + '-builtin-hw');
-                if (builtinHwEl) builtinHwEl.parentElement.style.display = (result.costBuiltinHw || 0) > 0 ? '' : 'none';
-                const hwIndEl = document.getElementById('c-' + idx + '-builtin-hw-ind');
-                if (hwIndEl) hwIndEl.parentElement.style.display = (result.costBuiltinHwIndirect || 0) > 0 ? '' : 'none';
-                this.setText('c-' + idx + '-printing', formatRub(result.costPrinting));
-                this.setText('c-' + idx + '-delivery', formatRub(result.costDelivery));
+                this._setCostValueAndVisibility('c-' + idx + '-fot', result.costFot);
+                this._setCostValueAndVisibility('c-' + idx + '-indirect', result.costIndirect);
+                this._setCostValueAndVisibility('c-' + idx + '-plastic', result.costPlastic);
+                this._setCostValueAndVisibility('c-' + idx + '-mold', result.costMoldAmortization);
+                this._setCostValueAndVisibility('c-' + idx + '-design', result.costDesign);
+                this._setCostValueAndVisibility('c-' + idx + '-cutting', result.costCutting);
+                this._setCostValueAndVisibility('c-' + idx + '-cutting-ind', result.costCuttingIndirect);
+                this._setCostValueAndVisibility('c-' + idx + '-nfc-tag', result.costNfcTag);
+                this._setCostValueAndVisibility('c-' + idx + '-nfc-prog', result.costNfcProgramming);
+                this._setCostValueAndVisibility('c-' + idx + '-nfc-ind', result.costNfcIndirect);
+                this._setCostValueAndVisibility('c-' + idx + '-builtin-hw', result.costBuiltinHw || 0);
+                this._setCostValueAndVisibility('c-' + idx + '-builtin-hw-ind', result.costBuiltinHwIndirect || 0);
+                this._setCostValueAndVisibility('c-' + idx + '-printing', result.costPrinting);
+                this._setCostValueAndVisibility('c-' + idx + '-delivery', result.costDelivery);
 
                 // Subtotal = item cost without per-item hw/pkg
                 this.setText('c-' + idx + '-subtotal', formatRub(result.costTotal));
@@ -2511,8 +2575,8 @@ const Calculator = {
                     subtotalEl.parentElement.style.display = (perItemHwCost + perItemPkgCost > 0) ? '' : 'none';
                 }
 
-                // Store target at 40% for reference (including per-item hw/pkg)
-                const costItemOnly = round2(totalWithHwPkg - (result.costPrinting || 0));
+                // Store target at 40% for reference (item itself, without per-item hw/pkg)
+                const costItemOnly = round2(result.costTotal - (result.costPrinting || 0));
                 const calcTarget = (marginPct) => {
                     if (costItemOnly === 0) return 0;
                     const vatOnCost = costItemOnly * params.vatRate;
@@ -2535,12 +2599,10 @@ const Calculator = {
 
                 // Show cost breakdown
                 if (hwCostEl) hwCostEl.style.display = '';
-                this.setText('hw-' + idx + '-fot', formatRub(result.fotPerUnit));
-                this.setText('hw-' + idx + '-indirect', formatRub(result.indirectPerUnit || 0));
-                const hwIndEl = document.getElementById('hw-' + idx + '-indirect');
-                if (hwIndEl) hwIndEl.parentElement.style.display = (result.indirectPerUnit || 0) > 0 ? '' : 'none';
-                this.setText('hw-' + idx + '-purchase', formatRub(hw.price || 0));
-                this.setText('hw-' + idx + '-delivery', formatRub(hw.delivery_price || 0));
+                this._setCostValueAndVisibility('hw-' + idx + '-fot', result.fotPerUnit);
+                this._setCostValueAndVisibility('hw-' + idx + '-indirect', result.indirectPerUnit || 0);
+                this._setCostValueAndVisibility('hw-' + idx + '-purchase', hw.price || 0);
+                this._setCostValueAndVisibility('hw-' + idx + '-delivery', hw.delivery_price || 0);
                 this.setText('hw-' + idx + '-total', formatRub(result.costPerUnit));
             } else {
                 if (hwCostEl) hwCostEl.style.display = 'none';
@@ -2560,12 +2622,10 @@ const Calculator = {
 
                 // Show cost breakdown
                 if (pkgCostEl) pkgCostEl.style.display = '';
-                this.setText('pkg-' + idx + '-fot', formatRub(result.fotPerUnit));
-                this.setText('pkg-' + idx + '-indirect', formatRub(result.indirectPerUnit || 0));
-                const pkgIndEl = document.getElementById('pkg-' + idx + '-indirect');
-                if (pkgIndEl) pkgIndEl.parentElement.style.display = (result.indirectPerUnit || 0) > 0 ? '' : 'none';
-                this.setText('pkg-' + idx + '-purchase', formatRub(pkg.price || 0));
-                this.setText('pkg-' + idx + '-delivery', formatRub(pkg.delivery_price || 0));
+                this._setCostValueAndVisibility('pkg-' + idx + '-fot', result.fotPerUnit);
+                this._setCostValueAndVisibility('pkg-' + idx + '-indirect', result.indirectPerUnit || 0);
+                this._setCostValueAndVisibility('pkg-' + idx + '-purchase', pkg.price || 0);
+                this._setCostValueAndVisibility('pkg-' + idx + '-delivery', pkg.delivery_price || 0);
                 this.setText('pkg-' + idx + '-total', formatRub(result.costPerUnit));
             } else {
                 if (pkgCostEl) pkgCostEl.style.display = 'none';
@@ -2615,7 +2675,7 @@ const Calculator = {
             this.setText('fin-revenue', formatRub(fin.revenue));
 
             // Summary footer
-            const summary = calculateOrderSummary(this.items, this.hardwareItems, this.packagingItems, this.extraCosts);
+            const summary = calculateOrderSummary(this.items, this.hardwareItems, this.packagingItems, this.extraCosts, params);
             this.setText('sum-revenue', formatRub(summary.totalRevenue));
             this.setText('sum-earned', formatRub(summary.totalEarned));
             this.setText('sum-margin', formatPercent(summary.marginPercent));
@@ -2658,6 +2718,19 @@ const Calculator = {
         if (el) el.textContent = text;
     },
 
+    _setCostValueAndVisibility(id, value, alwaysShow = false) {
+        const el = document.getElementById(id);
+        if (!el) return;
+        const num = parseFloat(value) || 0;
+        el.textContent = formatRub(num);
+        const row = el.parentElement;
+        if (row && !alwaysShow) {
+            row.style.display = Math.abs(num) > 0.0001 ? '' : 'none';
+        } else if (row) {
+            row.style.display = '';
+        }
+    },
+
     // ==========================================
     // UNIFIED PRICING CARD
     // ==========================================
@@ -2672,9 +2745,8 @@ const Calculator = {
 
         // Collect all priced entities (with NaN/Infinity guard)
         const pricedItems = this.items.filter(it => it.result && isFinite(it.result.costTotal) && it.result.costTotal > 0);
-        // Only order-level hw/pkg appear as separate pricing columns
-        const pricedHw = this.hardwareItems.filter(hw => hw.parent_item_index === null && hw.result && isFinite(hw.result.costPerUnit) && hw.result.costPerUnit > 0);
-        const pricedPkg = this.packagingItems.filter(pkg => pkg.parent_item_index === null && pkg.result && isFinite(pkg.result.costPerUnit) && pkg.result.costPerUnit > 0);
+        const pricedHw = this.hardwareItems.filter(hw => hw.result && isFinite(hw.result.costPerUnit) && hw.result.costPerUnit > 0);
+        const pricedPkg = this.packagingItems.filter(pkg => pkg.result && isFinite(pkg.result.costPerUnit) && pkg.result.costPerUnit > 0);
 
         // Debug: log what's being filtered
         console.log('[renderPricingCard]', {
@@ -2701,11 +2773,9 @@ const Calculator = {
 
         pricedItems.forEach((item, i) => {
             const globalIdx = this.items.indexOf(item);
-            // Item cost WITHOUT printing (for separate pricing)
-            // Use totalCostWithHwPkg which includes per-item hardware/packaging
-            const costWithPrinting = item.totalCostWithHwPkg || item.result.costTotal;
+            // Item cost WITHOUT printing and WITHOUT per-item hw/pkg
             const costPrintingPart = item.result.costPrinting || 0;
-            const costItemOnly = round2(costWithPrinting - costPrintingPart);
+            const costItemOnly = round2(item.result.costTotal - costPrintingPart);
 
             if (item.is_blank_mold) {
                 // Blank mold: show recommended price from blanks table
@@ -2773,8 +2843,12 @@ const Calculator = {
         pricedHw.forEach((hw, i) => {
             const cost = hw.result.costPerUnit;
             const globalIdx = this.hardwareItems.indexOf(hw);
+            const parentIdx = hw.parent_item_index;
+            const parentName = (parentIdx !== null && parentIdx !== undefined)
+                ? (this.items[parentIdx]?.product_name || ('Изделие ' + (parentIdx + 1)))
+                : '';
             columns.push({
-                label: hw.name || 'Фурнитура ' + (i + 1),
+                label: (parentName ? `↳ 🔩 ${parentName}` : '🔩 Общая фурнитура') + ' · ' + (hw.name || ('Фурнитура ' + (i + 1))),
                 type: 'hw',
                 globalIdx,
                 isBlank: false,
@@ -2790,8 +2864,12 @@ const Calculator = {
         pricedPkg.forEach((pkg, i) => {
             const cost = pkg.result.costPerUnit;
             const globalIdx = this.packagingItems.indexOf(pkg);
+            const parentIdx = pkg.parent_item_index;
+            const parentName = (parentIdx !== null && parentIdx !== undefined)
+                ? (this.items[parentIdx]?.product_name || ('Изделие ' + (parentIdx + 1)))
+                : '';
             columns.push({
-                label: pkg.name || 'Упаковка ' + (i + 1),
+                label: (parentName ? `↳ 📦 ${parentName}` : '📦 Общая упаковка') + ' · ' + (pkg.name || ('Упаковка ' + (i + 1))),
                 type: 'pkg',
                 globalIdx,
                 isBlank: false,
@@ -2946,12 +3024,14 @@ const Calculator = {
             }
         });
 
-        // Only order-level hw/pkg as separate invoice lines (per-item included in item price)
+        // Hardware rows (both per-item and order-level)
         this.hardwareItems.forEach((hw, i) => {
-            if (hw.parent_item_index !== null) return;  // per-item — included in item price
             if (hw.qty > 0 && hw.sell_price > 0) {
+                const parentName = (hw.parent_item_index !== null && hw.parent_item_index !== undefined)
+                    ? (this.items[hw.parent_item_index]?.product_name || ('Изделие ' + (hw.parent_item_index + 1)))
+                    : '';
                 invoiceRows.push({
-                    name: hw.name || 'Фурнитура ' + (i + 1),
+                    name: (parentName ? `Фурнитура (${parentName})` : 'Общая фурнитура') + ' · ' + (hw.name || ('Фурнитура ' + (i + 1))),
                     qty: hw.qty,
                     price: hw.sell_price,
                     total: round2(hw.sell_price * hw.qty),
@@ -2960,11 +3040,14 @@ const Calculator = {
             }
         });
 
+        // Packaging rows (both per-item and order-level)
         this.packagingItems.forEach((pkg, i) => {
-            if (pkg.parent_item_index !== null) return;  // per-item — included in item price
             if (pkg.qty > 0 && pkg.sell_price > 0) {
+                const parentName = (pkg.parent_item_index !== null && pkg.parent_item_index !== undefined)
+                    ? (this.items[pkg.parent_item_index]?.product_name || ('Изделие ' + (pkg.parent_item_index + 1)))
+                    : '';
                 invoiceRows.push({
-                    name: pkg.name || 'Упаковка ' + (i + 1),
+                    name: (parentName ? `Упаковка (${parentName})` : 'Общая упаковка') + ' · ' + (pkg.name || ('Упаковка ' + (i + 1))),
                     qty: pkg.qty,
                     price: pkg.sell_price,
                     total: round2(pkg.sell_price * pkg.qty),
@@ -2977,7 +3060,7 @@ const Calculator = {
         (this.extraCosts || []).forEach(ec => {
             if (ec.amount > 0) {
                 invoiceRows.push({
-                    name: ec.name || 'Доп. расход',
+                    name: ec.name || 'Доп. доход',
                     qty: 1,
                     price: ec.amount,
                     total: ec.amount,
@@ -3147,7 +3230,7 @@ const Calculator = {
             try { this._doRecalculate(App.params); } catch (e) { /* ignore */ }
 
             const load = calculateProductionLoad(this.items, this.hardwareItems, this.packagingItems, App.params);
-            const summary = calculateOrderSummary(this.items, this.hardwareItems, this.packagingItems, this.extraCosts);
+            const summary = calculateOrderSummary(this.items, this.hardwareItems, this.packagingItems, this.extraCosts, App.params || {});
 
             const order = {
                 id: App.editingOrderId || undefined,
@@ -3304,7 +3387,7 @@ const Calculator = {
             items.push({
                 item_number: 300 + i,
                 item_type: 'extra_cost',
-                product_name: ec.name || 'Доп. расход',
+                product_name: ec.name || 'Доп. доход',
                 quantity: 1,
                 cost_total: ec.amount || 0,
                 sell_price_item: ec.amount || 0,
@@ -3330,7 +3413,7 @@ const Calculator = {
         }
 
         const load = calculateProductionLoad(this.items, this.hardwareItems, this.packagingItems, App.params);
-        const summary = calculateOrderSummary(this.items, this.hardwareItems, this.packagingItems, this.extraCosts);
+        const summary = calculateOrderSummary(this.items, this.hardwareItems, this.packagingItems, this.extraCosts, App.params || {});
 
         const order = {
             id: App.editingOrderId || undefined,
@@ -4080,7 +4163,7 @@ const Calculator = {
             if (ec.amount > 0) {
                 kpItems.push({
                     type: 'extra',
-                    name: ec.name || 'Доп. расход',
+                    name: ec.name || 'Доп. доход',
                     qty: 1,
                     price: ec.amount,
                 });
