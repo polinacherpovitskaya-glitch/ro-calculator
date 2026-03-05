@@ -982,21 +982,48 @@ function getDefaultMolds() {
 async function loadEmployees() {
     if (isSupabaseReady()) {
         const { data, error } = await supabaseClient.from('employees').select('*').order('name');
-        if (!error && data) return data;
+        if (!error && data && data.length > 0) return data;
+        if (!error && data && data.length === 0) {
+            // Seed default employees for fresh databases
+            const defaults = getLocal(LOCAL_KEYS.employees) || getDefaultEmployees();
+            try {
+                await supabaseClient.from('employees').upsert(defaults, { onConflict: 'id' });
+            } catch (e) {
+                console.error('loadEmployees seed error:', e);
+            }
+            return defaults;
+        }
     }
     return getLocal(LOCAL_KEYS.employees) || getDefaultEmployees();
 }
 
 async function saveEmployee(employee) {
     if (isSupabaseReady()) {
+        if (!employee.id) {
+            employee.id = Date.now();
+        }
         if (employee.id) {
             const { error } = await supabaseClient.from('employees').update(employee).eq('id', employee.id);
-            if (error) console.error('saveEmployee error:', error);
+            if (error) {
+                const { error: insError } = await supabaseClient.from('employees').insert(employee);
+                if (insError) {
+                    console.error('saveEmployee error:', insError);
+                    return null;
+                }
+            }
         } else {
-            const { data, error } = await supabaseClient.from('employees').insert(employee).select('id').single();
-            if (error) console.error('saveEmployee error:', error);
-            if (data) employee.id = data.id;
+            const { error } = await supabaseClient.from('employees').insert(employee);
+            if (error) {
+                console.error('saveEmployee error:', error);
+                return null;
+            }
         }
+        // Keep local mirror updated for fallback and faster UI render
+        const local = getLocal(LOCAL_KEYS.employees) || [];
+        const idx = local.findIndex(e => e.id === employee.id);
+        if (idx >= 0) local[idx] = { ...local[idx], ...employee, updated_at: new Date().toISOString() };
+        else local.push({ ...employee, created_at: employee.created_at || new Date().toISOString(), updated_at: new Date().toISOString() });
+        setLocal(LOCAL_KEYS.employees, local);
         return employee.id;
     }
     const employees = getLocal(LOCAL_KEYS.employees) || getDefaultEmployees();

@@ -333,7 +333,11 @@ const Settings = {
             }
         }
 
-        await saveEmployee(employee);
+        const savedId = await saveEmployee(employee);
+        if (!savedId) {
+            App.toast('Не удалось сохранить сотрудника', 'error');
+            return;
+        }
         App.toast('Сотрудник сохранён');
         this.cancelEmployee();
         await this.loadEmployeesTab();
