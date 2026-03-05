@@ -50,6 +50,7 @@ const LOCAL_KEYS = {
     hwBlanks: 'ro_calc_hw_blanks',
     pkgBlanks: 'ro_calc_pkg_blanks',
     marketplaceSets: 'ro_calc_marketplace_sets',
+    productionPlan: 'ro_calc_production_plan',
 };
 
 // Data version — increment to trigger NON-DESTRUCTIVE migration
@@ -1174,6 +1175,46 @@ async function saveAuthSessions(sessions) {
                 updated_at: new Date().toISOString(),
             }, { onConflict: 'key' });
         if (error) console.error('saveAuthSessions error:', error);
+    }
+}
+
+// =============================================
+// PRODUCTION PLAN (manual order/ranking state)
+// =============================================
+
+async function loadProductionPlanState() {
+    const fallback = getLocal(LOCAL_KEYS.productionPlan) || { order_ids: [] };
+    if (isSupabaseReady()) {
+        try {
+            const { data, error } = await supabaseClient
+                .from('settings')
+                .select('value')
+                .eq('key', 'production_plan_state_json')
+                .maybeSingle();
+            if (!error && data && data.value) {
+                const parsed = JSON.parse(data.value) || { order_ids: [] };
+                setLocal(LOCAL_KEYS.productionPlan, parsed);
+                return parsed;
+            }
+        } catch (e) {
+            console.error('loadProductionPlanState error:', e);
+        }
+    }
+    return fallback;
+}
+
+async function saveProductionPlanState(state) {
+    const payload = state && typeof state === 'object' ? state : { order_ids: [] };
+    setLocal(LOCAL_KEYS.productionPlan, payload);
+    if (isSupabaseReady()) {
+        const { error } = await supabaseClient
+            .from('settings')
+            .upsert({
+                key: 'production_plan_state_json',
+                value: JSON.stringify(payload),
+                updated_at: new Date().toISOString(),
+            }, { onConflict: 'key' });
+        if (error) console.error('saveProductionPlanState error:', error);
     }
 }
 

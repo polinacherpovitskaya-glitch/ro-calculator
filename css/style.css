@@ -2065,3 +2065,60 @@ table .text-center { text-align: center; }
         grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
     }
 }
+
+/* Production plan */
+.pp-table th,
+.pp-table td {
+    vertical-align: top;
+    font-size: 12px;
+}
+.pp-order-name {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+.pp-sub {
+    font-size: 11px;
+    color: var(--text-muted);
+    line-height: 1.4;
+}
+.pp-rank {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.pp-files {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-top: 6px;
+}
+.pp-attachment {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 6px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    text-decoration: none;
+    color: var(--text-primary);
+    font-size: 10px;
+    max-width: 180px;
+}
+.pp-attachment img {
+    width: 28px;
+    height: 28px;
+    object-fit: cover;
+    border-radius: 6px;
+}
+.pp-file-link {
+    text-decoration: none;
+    font-size: 10px;
+    color: var(--accent);
+}
+#pp-mobile-list { display: none; }
+
+@media (max-width: 900px) {
+    #pp-table-wrap { display: none; }
+    #pp-mobile-list { display: block; }
+}

@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=46g">
+    <link rel="stylesheet" href="css/style.css?v=68">
 </head>
 <body>
 
@@ -50,6 +50,10 @@
             <a href="#orders" data-page="orders">
                 <span class="nav-icon">&#9776;</span>
                 <span>Заказы</span>
+            </a>
+            <a href="#production-plan" data-page="production-plan">
+                <span class="nav-icon">&#128736;</span>
+                <span>План производства</span>
             </a>
             <a href="#factual" data-page="factual">
                 <span class="nav-icon">&#9646;</span>
@@ -487,6 +491,59 @@
             <div id="od-tab-items" class="od-tab-content" style="display:none"></div>
             <div id="od-tab-tasks" class="od-tab-content" style="display:none"></div>
             <div id="od-tab-china" class="od-tab-content" style="display:none"></div>
+        </div>
+
+        <!-- ========== PRODUCTION PLAN ========== -->
+        <div id="page-production-plan" class="page">
+            <div class="page-header">
+                <h1>План производства</h1>
+                <div class="flex gap-8">
+                    <button class="btn btn-outline" onclick="ProductionPlan.load()">Обновить</button>
+                </div>
+            </div>
+
+            <div class="stats-grid" style="margin-bottom:12px;">
+                <div class="stat-card">
+                    <div class="stat-label">Заказов в работе</div>
+                    <div class="stat-value" id="pp-stat-count">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Общий тираж (шт)</div>
+                    <div class="stat-value" id="pp-stat-qty">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Просрочено</div>
+                    <div class="stat-value" id="pp-stat-late">0</div>
+                </div>
+            </div>
+
+            <div class="card" style="padding:12px 20px;">
+                <div class="form-row" style="align-items:end">
+                    <div class="form-group" style="margin:0">
+                        <label>Поиск</label>
+                        <input type="text" id="pp-search" placeholder="Заказ, цвет, фурнитура, заметки..." oninput="ProductionPlan.applyFilters()">
+                    </div>
+                    <div class="form-group" style="margin:0">
+                        <label>Менеджер</label>
+                        <select id="pp-filter-manager" onchange="ProductionPlan.applyFilters()">
+                            <option value="">Все</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin:0">
+                        <label>Этап</label>
+                        <select id="pp-filter-stage" onchange="ProductionPlan.applyFilters()">
+                            <option value="">Все этапы</option>
+                            <option value="production_casting">Выливание</option>
+                            <option value="production_hardware">Сборка</option>
+                            <option value="production_packaging">Упаковка</option>
+                            <option value="in_production">В производстве</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <div id="pp-table-wrap" style="margin-top:12px;"></div>
+            <div id="pp-mobile-list" style="margin-top:12px;"></div>
         </div>
 
         <!-- ========== FACTUAL (Plan vs Fact) ========== -->
@@ -2763,12 +2820,13 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="js/supabase.js?v=59"></script>
+<script src="js/supabase.js?v=68"></script>
 <script src="js/calculator.js?v=62"></script>
-<script src="js/app.js?v=67"></script>
+<script src="js/app.js?v=68"></script>
 <script src="js/dashboard.js?v=46g"></script>
 <script src="js/order-detail.js?v=47b"></script>
 <script src="js/orders.js?v=52"></script>
+<script src="js/production_plan.js?v=68"></script>
 <script src="js/analytics.js?v=46g"></script>
 <script src="js/molds.js?v=66"></script>
 <script src="js/colors.js?v=46g"></script>
