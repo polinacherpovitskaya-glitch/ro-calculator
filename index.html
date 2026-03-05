@@ -2200,6 +2200,7 @@
                 <div class="tab" data-tab="templates" onclick="Settings.switchTab('templates')">Справочник форм</div>
                 <div class="tab" data-tab="employees" onclick="Settings.switchTab('employees')">Сотрудники</div>
                 <div class="tab" data-tab="logins" onclick="Settings.switchTab('logins')">Логины</div>
+                <div class="tab" data-tab="sessions" onclick="Settings.switchTab('sessions')">Сессии</div>
                 <div class="tab" data-tab="company" onclick="Settings.switchTab('company')">Реквизиты</div>
                 <div class="tab" data-tab="timing" onclick="Settings.switchTab('timing')">⏱ Тайминг</div>
                 <div class="tab" data-tab="backup" onclick="Settings.switchTab('backup')">Бэкап</div>
@@ -2528,6 +2529,67 @@
                 </div>
             </div>
 
+            <div id="settings-tab-sessions" class="settings-tab-content" style="display:none">
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-label">Сегодня в системе</div>
+                        <div class="stat-value" id="sessions-today-hours">0ч</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">За 7 дней</div>
+                        <div class="stat-value" id="sessions-week-hours">0ч</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Активных сейчас</div>
+                        <div class="stat-value" id="sessions-active-now">0</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Сотрудников с сессиями</div>
+                        <div class="stat-value" id="sessions-users-count">0</div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header"><h3>Итого по сотрудникам</h3></div>
+                    <div class="table-wrap">
+                        <table style="font-size:13px;">
+                            <thead>
+                                <tr>
+                                    <th>Сотрудник</th>
+                                    <th class="text-right">Сегодня</th>
+                                    <th class="text-right">7 дней</th>
+                                    <th class="text-right">Сессий</th>
+                                    <th>Последняя активность</th>
+                                </tr>
+                            </thead>
+                            <tbody id="sessions-summary-body">
+                                <tr><td colspan="5" class="text-center text-muted">Нет данных</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header"><h3>Последние сессии</h3></div>
+                    <div class="table-wrap">
+                        <table style="font-size:12px;">
+                            <thead>
+                                <tr>
+                                    <th>Старт</th>
+                                    <th>Конец</th>
+                                    <th>Сотрудник</th>
+                                    <th class="text-right">Длительность</th>
+                                    <th>Статус</th>
+                                </tr>
+                            </thead>
+                            <tbody id="sessions-list-body">
+                                <tr><td colspan="5" class="text-center text-muted">Нет данных</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
             <!-- Company legal details tab -->
             <div id="settings-tab-company" class="settings-tab-content" style="display:none">
                 <div class="card">
@@ -2697,7 +2759,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="js/supabase.js?v=46i"></script>
 <script src="js/calculator.js?v=46g"></script>
-<script src="js/app.js?v=56"></script>
+<script src="js/app.js?v=57"></script>
 <script src="js/dashboard.js?v=46g"></script>
 <script src="js/order-detail.js?v=47b"></script>
 <script src="js/orders.js?v=52"></script>
@@ -2715,6 +2777,6 @@
 <script src="js/china_catalog.js?v=46k"></script>
 <script src="js/marketplaces.js?v=46h"></script>
 <script src="js/warehouse.js?v=55"></script>
-<script src="js/settings.js?v=56"></script>
+<script src="js/settings.js?v=57"></script>
 </body>
 </html>

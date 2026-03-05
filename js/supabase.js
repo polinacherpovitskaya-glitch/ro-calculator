@@ -40,6 +40,7 @@ const LOCAL_KEYS = {
     employees: 'ro_calc_employees',
     authAccounts: 'ro_calc_auth_accounts',
     authActivity: 'ro_calc_auth_activity',
+    authSessions: 'ro_calc_auth_sessions',
     orderFactuals: 'ro_calc_order_factuals',
     warehouseItems: 'ro_calc_warehouse_items',
     warehouseReservations: 'ro_calc_warehouse_reservations',
@@ -1111,6 +1112,60 @@ async function appendAuthActivity(event) {
     });
     const trimmed = list.slice(0, 800);
     await saveAuthActivity(trimmed);
+}
+
+// =============================================
+// AUTH SESSIONS (time spent in app)
+// =============================================
+
+async function loadAuthSessions() {
+    const fallback = getLocal(LOCAL_KEYS.authSessions) || [];
+    if (isSupabaseReady()) {
+        try {
+            const { data, error } = await supabaseClient
+                .from('settings')
+                .select('value')
+                .eq('key', 'auth_sessions_json')
+                .maybeSingle();
+            if (!error && data && data.value) {
+                const parsed = JSON.parse(data.value) || [];
+                setLocal(LOCAL_KEYS.authSessions, parsed);
+                return parsed;
+            }
+        } catch (e) {
+            console.error('loadAuthSessions error:', e);
+        }
+    }
+    return fallback;
+}
+
+async function saveAuthSessions(sessions) {
+    const payload = Array.isArray(sessions) ? sessions : [];
+    setLocal(LOCAL_KEYS.authSessions, payload);
+    if (isSupabaseReady()) {
+        const { error } = await supabaseClient
+            .from('settings')
+            .upsert({
+                key: 'auth_sessions_json',
+                value: JSON.stringify(payload),
+                updated_at: new Date().toISOString(),
+            }, { onConflict: 'key' });
+        if (error) console.error('saveAuthSessions error:', error);
+    }
+}
+
+async function appendAuthSession(session) {
+    const list = await loadAuthSessions();
+    list.unshift(session);
+    await saveAuthSessions(list.slice(0, 2500));
+}
+
+async function updateAuthSession(sessionId, patch) {
+    const list = await loadAuthSessions();
+    const idx = list.findIndex(s => String(s.id) === String(sessionId));
+    if (idx < 0) return;
+    list[idx] = { ...list[idx], ...patch };
+    await saveAuthSessions(list);
 }
 
 function getDefaultEmployees() {

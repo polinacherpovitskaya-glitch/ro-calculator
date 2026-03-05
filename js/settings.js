@@ -12,6 +12,7 @@ const Settings = {
     editingEmployeeId: null,
     authAccountsData: [],
     authActivityData: [],
+    authSessionsData: [],
     editingAuthAccountId: null,
 
     async load() {
@@ -34,6 +35,9 @@ const Settings = {
         }
         if (tab === 'logins') {
             this.loadLoginsTab();
+        }
+        if (tab === 'sessions') {
+            this.loadSessionsTab();
         }
         // Load backup tab info
         if (tab === 'backup') {
@@ -360,6 +364,13 @@ const Settings = {
         this.renderAuthActivityTable();
     },
 
+    async loadSessionsTab() {
+        this.authSessionsData = await loadAuthSessions();
+        this.renderSessionsStats();
+        this.renderSessionsSummary();
+        this.renderSessionsList();
+    },
+
     showAddAuthAccount() {
         this.editingAuthAccountId = null;
         this.clearAuthAccountForm();
@@ -536,6 +547,130 @@ const Settings = {
         tbody.innerHTML = rows.join('');
     },
 
+    renderSessionsStats() {
+        const sessions = this.normalizeSessions(this.authSessionsData || []);
+        const now = new Date();
+        const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+        const weekStart = now.getTime() - (7 * 24 * 3600 * 1000);
+
+        const todaySec = sessions
+            .filter(s => new Date(s.started_at).getTime() >= todayStart)
+            .reduce((sum, s) => sum + (s.duration_sec || 0), 0);
+
+        const weekSec = sessions
+            .filter(s => new Date(s.started_at).getTime() >= weekStart)
+            .reduce((sum, s) => sum + (s.duration_sec || 0), 0);
+
+        const activeNow = sessions.filter(s => s.effective_status === 'active').length;
+        const users = new Set(sessions.map(s => s.actor || '—').filter(Boolean)).size;
+
+        const todayEl = document.getElementById('sessions-today-hours');
+        const weekEl = document.getElementById('sessions-week-hours');
+        const activeEl = document.getElementById('sessions-active-now');
+        const usersEl = document.getElementById('sessions-users-count');
+        if (todayEl) todayEl.textContent = this.formatDuration(todaySec);
+        if (weekEl) weekEl.textContent = this.formatDuration(weekSec);
+        if (activeEl) activeEl.textContent = String(activeNow);
+        if (usersEl) usersEl.textContent = String(users);
+    },
+
+    renderSessionsSummary() {
+        const tbody = document.getElementById('sessions-summary-body');
+        if (!tbody) return;
+        const sessions = this.normalizeSessions(this.authSessionsData || []);
+        if (sessions.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">Нет данных</td></tr>';
+            return;
+        }
+
+        const now = new Date();
+        const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+        const weekStart = now.getTime() - (7 * 24 * 3600 * 1000);
+        const byUser = new Map();
+
+        sessions.forEach(s => {
+            const actor = s.actor || '—';
+            const row = byUser.get(actor) || {
+                actor,
+                todaySec: 0,
+                weekSec: 0,
+                count: 0,
+                lastSeenAt: null,
+            };
+            const startMs = new Date(s.started_at).getTime();
+            if (startMs >= todayStart) row.todaySec += (s.duration_sec || 0);
+            if (startMs >= weekStart) row.weekSec += (s.duration_sec || 0);
+            row.count += 1;
+            const lastSeenMs = s.last_seen_at ? new Date(s.last_seen_at).getTime() : 0;
+            if (!row.lastSeenAt || lastSeenMs > new Date(row.lastSeenAt).getTime()) row.lastSeenAt = s.last_seen_at || s.started_at;
+            byUser.set(actor, row);
+        });
+
+        const rows = [...byUser.values()]
+            .sort((a, b) => b.weekSec - a.weekSec)
+            .map(r => `<tr>
+                <td style="font-weight:600;">${this.escHtml(r.actor)}</td>
+                <td class="text-right">${this.formatDuration(r.todaySec)}</td>
+                <td class="text-right">${this.formatDuration(r.weekSec)}</td>
+                <td class="text-right">${r.count}</td>
+                <td>${r.lastSeenAt ? new Date(r.lastSeenAt).toLocaleString('ru-RU') : '—'}</td>
+            </tr>`);
+
+        tbody.innerHTML = rows.join('');
+    },
+
+    renderSessionsList() {
+        const tbody = document.getElementById('sessions-list-body');
+        if (!tbody) return;
+        const sessions = this.normalizeSessions(this.authSessionsData || []).slice(0, 200);
+        if (sessions.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">Нет данных</td></tr>';
+            return;
+        }
+
+        const rows = sessions.map(s => {
+            const start = s.started_at ? new Date(s.started_at).toLocaleString('ru-RU') : '—';
+            const end = s.ended_at ? new Date(s.ended_at).toLocaleString('ru-RU') : '—';
+            const status = s.effective_status === 'active'
+                ? '<span class="badge badge-green">Активна</span>'
+                : '<span class="badge">Завершена</span>';
+            return `<tr>
+                <td>${start}</td>
+                <td>${end}</td>
+                <td>${this.escHtml(s.actor || '—')}</td>
+                <td class="text-right">${this.formatDuration(s.duration_sec || 0)}</td>
+                <td>${status}</td>
+            </tr>`;
+        });
+
+        tbody.innerHTML = rows.join('');
+    },
+
+    normalizeSessions(sessions) {
+        const nowMs = Date.now();
+        return (sessions || []).map(s => {
+            const startedMs = s.started_at ? new Date(s.started_at).getTime() : Date.now();
+            const endedMs = s.ended_at ? new Date(s.ended_at).getTime() : Date.now();
+            const computed = Math.max(0, Math.round((endedMs - startedMs) / 1000));
+            const lastSeenMs = s.last_seen_at ? new Date(s.last_seen_at).getTime() : startedMs;
+            const stale = (nowMs - lastSeenMs) > (2 * 60 * 1000);
+            const effectiveStatus = (s.status === 'active' && !stale) ? 'active' : 'closed';
+            return {
+                ...s,
+                duration_sec: Math.max(0, parseInt(s.duration_sec || 0, 10) || computed),
+                started_at: s.started_at || new Date(startedMs).toISOString(),
+                effective_status: effectiveStatus,
+            };
+        }).sort((a, b) => new Date(b.started_at) - new Date(a.started_at));
+    },
+
+    formatDuration(sec) {
+        const total = Math.max(0, Math.round(sec || 0));
+        const h = Math.floor(total / 3600);
+        const m = Math.floor((total % 3600) / 60);
+        return `${h}ч ${String(m).padStart(2, '0')}м`;
+    },
+
     // ==========================================
     // BACKUP / RESTORE
     // ==========================================
@@ -550,6 +685,7 @@ const Settings = {
         'ro_calc_vacations', 'ro_calc_order_factuals', 'ro_calc_imports',
         'ro_calc_colors',
         'ro_calc_auth_accounts', 'ro_calc_auth_activity',
+        'ro_calc_auth_sessions',
         'ro_calc_assembly_timing',
     ],
 

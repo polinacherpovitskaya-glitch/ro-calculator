@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v56';
+const APP_VERSION = 'v57';
 
 const App = {
     currentPage: 'dashboard',
@@ -18,6 +18,8 @@ const App = {
     currentEmployeeId: null,
     currentUser: null,
     _sessionStartedAt: null,
+    _sessionId: null,
+    _sessionHeartbeatTimer: null,
 
     async init() {
         initSupabase();
@@ -36,6 +38,14 @@ const App = {
 
         // Hash routing
         window.addEventListener('hashchange', () => this.handleRoute());
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'hidden') {
+                this.endSessionTracking('hidden');
+            } else if (this.isAuthenticated() && !this._sessionId) {
+                this.startSessionTracking();
+            }
+        });
+        window.addEventListener('beforeunload', () => this.endSessionTracking('unload'));
     },
 
     // === AUTH ===
@@ -144,6 +154,7 @@ const App = {
     },
 
     logout() {
+        this.endSessionTracking('logout');
         this.trackAuthEvent('logout');
         localStorage.removeItem('ro_calc_auth');
         localStorage.removeItem('ro_calc_auth_ts');
@@ -151,6 +162,7 @@ const App = {
         localStorage.removeItem('ro_calc_auth_user_id');
         this.currentUser = null;
         this._sessionStartedAt = null;
+        this._sessionId = null;
         document.getElementById('auth-screen').style.display = 'flex';
         document.getElementById('app-layout').classList.remove('active');
         this.hideUpdateBanner();
@@ -241,6 +253,7 @@ const App = {
         this.params = getProductionParams(this.settings);
         await this.initEmployeeContext();
         this._sessionStartedAt = Date.now();
+        this.startSessionTracking();
         this.trackAuthEvent('session_start');
 
         this.handleRoute();
@@ -335,6 +348,70 @@ const App = {
             ...extra,
         };
         appendAuthActivity(payload);
+    },
+
+    getCurrentActorId() {
+        if (this.currentUser && this.currentUser.id && this.currentUser.id !== '__admin') {
+            return String(this.currentUser.id);
+        }
+        if (this.currentEmployeeId != null) return String(this.currentEmployeeId);
+        return '__admin';
+    },
+
+    startSessionTracking() {
+        if (this._sessionId) return;
+        const now = new Date().toISOString();
+        const sessionId = Date.now() + '-' + Math.floor(Math.random() * 10000);
+        this._sessionId = sessionId;
+        this._sessionStartedAt = this._sessionStartedAt || Date.now();
+
+        appendAuthSession({
+            id: sessionId,
+            actor: this.getCurrentEmployeeName(),
+            actor_id: this.getCurrentActorId(),
+            user_id: this.currentUser ? String(this.currentUser.id) : null,
+            started_at: now,
+            last_seen_at: now,
+            ended_at: null,
+            duration_sec: 0,
+            status: 'active',
+        });
+
+        if (this._sessionHeartbeatTimer) clearInterval(this._sessionHeartbeatTimer);
+        this._sessionHeartbeatTimer = setInterval(() => this.touchSession(), 60000);
+    },
+
+    touchSession() {
+        if (!this._sessionId || !this._sessionStartedAt) return;
+        const nowIso = new Date().toISOString();
+        const durationSec = Math.max(0, Math.round((Date.now() - this._sessionStartedAt) / 1000));
+        updateAuthSession(this._sessionId, {
+            last_seen_at: nowIso,
+            duration_sec: durationSec,
+            actor: this.getCurrentEmployeeName(),
+            actor_id: this.getCurrentActorId(),
+        });
+    },
+
+    endSessionTracking(reason = 'unknown') {
+        if (!this._sessionId || !this._sessionStartedAt) return;
+        const nowIso = new Date().toISOString();
+        const durationSec = Math.max(0, Math.round((Date.now() - this._sessionStartedAt) / 1000));
+        updateAuthSession(this._sessionId, {
+            ended_at: nowIso,
+            last_seen_at: nowIso,
+            duration_sec: durationSec,
+            status: 'closed',
+            end_reason: reason,
+            actor: this.getCurrentEmployeeName(),
+            actor_id: this.getCurrentActorId(),
+        });
+
+        if (this._sessionHeartbeatTimer) {
+            clearInterval(this._sessionHeartbeatTimer);
+            this._sessionHeartbeatTimer = null;
+        }
+        this._sessionId = null;
     },
 
     applyCurrentEmployeeToCalculator(force = false) {
