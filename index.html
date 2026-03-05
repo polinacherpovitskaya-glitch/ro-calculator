@@ -955,7 +955,7 @@
             <!-- TAB: Упаковка -->
             <div id="molds-tab-packaging" style="display:none">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-                    <p class="text-muted" style="font-size:12px;margin:0;">Упаковка: стоимость + доставка. Без сборки, без ФОТ, без косвенных.</p>
+                    <p class="text-muted" style="font-size:12px;margin:0;">Упаковка: стоимость + доставка + сборка. Себестоимость считается как у фурнитуры.</p>
                     <button class="btn btn-primary btn-sm" onclick="Molds.showPkgForm()">+ Новый бланк</button>
                 </div>
                 <div id="pkg-blanks-container"></div>
@@ -969,6 +969,7 @@
                         <div class="form-group" style="flex:2"><label>Название</label><input type="text" id="pkg-blank-name"></div>
                         <div class="form-group"><label>Стоимость (&#8381;/шт)</label><input type="number" min="0" step="0.1" id="pkg-blank-price" oninput="Molds.recalcPkgCost()"></div>
                         <div class="form-group"><label>Доставка (&#8381;/шт)</label><input type="number" min="0" step="0.1" id="pkg-blank-delivery" oninput="Molds.recalcPkgCost()"></div>
+                        <div class="form-group"><label>Сборка (шт/мин)</label><input type="number" min="0" step="0.1" id="pkg-blank-speed" oninput="Molds.recalcPkgCost()"></div>
                         <div class="form-group"><label>Цена продажи (&#8381;/шт)</label><input type="number" min="0" step="0.1" id="pkg-blank-sell" oninput="Molds.recalcPkgCost()"></div>
                     </div>
                     <div class="form-row">
@@ -2764,12 +2765,12 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="js/supabase.js?v=59"></script>
 <script src="js/calculator.js?v=62"></script>
-<script src="js/app.js?v=65"></script>
+<script src="js/app.js?v=66"></script>
 <script src="js/dashboard.js?v=46g"></script>
 <script src="js/order-detail.js?v=47b"></script>
 <script src="js/orders.js?v=52"></script>
 <script src="js/analytics.js?v=46g"></script>
-<script src="js/molds.js?v=64"></script>
+<script src="js/molds.js?v=66"></script>
 <script src="js/colors.js?v=46g"></script>
 <script src="js/kp.js?v=46g"></script>
 <script src="js/timetrack.js?v=53"></script>

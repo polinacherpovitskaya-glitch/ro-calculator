@@ -1536,8 +1536,15 @@ const Molds = {
     },
 
     enrichPkgBlanks() {
+        const params = App.params || {};
+        const fotPerHour = params.fotPerHour || 400;
+        const indirectPerHour = params.indirectPerHour || 0;
+
         this._pkgBlanks.forEach(b => {
-            const totalCost = round2((b.price_per_unit || 0) + (b.delivery_per_unit || 0));
+            const speed = b.assembly_speed || 0;
+            const assemblyCost = speed > 0 ? round2((fotPerHour + indirectPerHour) / speed) : 0;
+            const totalCost = round2((b.price_per_unit || 0) + (b.delivery_per_unit || 0) + assemblyCost);
+            b._assemblyCost = assemblyCost;
             b._cost = totalCost;
             // Fixed sell price from blank form (fallback to old 40% formula for legacy records).
             const fixedSell = parseFloat(b.sell_price) || 0;
@@ -1558,6 +1565,7 @@ const Molds = {
                 <th style="min-width:180px;padding:6px 8px;text-align:left;">Упаковка</th>
                 <th style="padding:6px 8px;text-align:right;">Цена</th>
                 <th style="padding:6px 8px;text-align:right;">Доставка</th>
+                <th style="padding:6px 8px;text-align:right;">Сборка</th>
                 <th style="padding:6px 8px;text-align:right;font-weight:700;">Себестоимость</th>
                 <th style="padding:6px 8px;text-align:right;">Цена продажи</th>
                 <th style="width:60px;"></th>
@@ -1566,14 +1574,17 @@ const Molds = {
         this._pkgBlanks.forEach(b => {
             const price = b.price_per_unit || 0;
             const delivery = b.delivery_per_unit || 0;
+            const speedPcsMin = b.assembly_speed ? round2(b.assembly_speed / 60) : 0;
+            const speedLabel = speedPcsMin > 0 ? (speedPcsMin + ' шт/мин') : '—';
 
             html += `<tr style="border-bottom:1px solid var(--border);">
                 <td style="padding:6px 8px;">
                     <div style="font-weight:700;font-size:13px;">${this.esc(b.name)}</div>
-                    ${b.notes ? `<div style="font-size:10px;color:var(--text-muted);font-style:italic;">${this.esc(b.notes)}</div>` : ''}
+                    <div style="font-size:10px;color:var(--text-muted);font-style:italic;">${speedLabel}${b.notes ? ' · ' + this.esc(b.notes) : ''}</div>
                 </td>
                 <td style="padding:6px 8px;text-align:right;font-size:12px;color:var(--text-secondary);">${formatRub(price)}</td>
                 <td style="padding:6px 8px;text-align:right;font-size:12px;color:var(--text-secondary);">${formatRub(delivery)}</td>
+                <td style="padding:6px 8px;text-align:right;font-size:12px;color:var(--text-secondary);">${formatRub(b._assemblyCost)}</td>
                 <td style="padding:6px 8px;text-align:right;font-size:15px;font-weight:700;">${formatRub(b._cost)}</td>
                 <td style="padding:6px 8px;text-align:right;font-size:15px;font-weight:700;color:var(--green);">${formatRub(b._sellPrice)}</td>
                 <td style="padding:6px;">
@@ -1586,7 +1597,10 @@ const Molds = {
         });
 
         html += '</tbody></table>';
-        html += `<div style="margin-top:10px;font-size:11px;color:var(--text-muted);">Себестоимость = цена + доставка · Без ФОТ, без косвенных · Цена продажи берётся фиксированно из поля бланка</div></div>`;
+        const params = App.params || {};
+        const fotPerHour = params.fotPerHour || 400;
+        const indirectPerHour = params.indirectPerHour || 0;
+        html += `<div style="margin-top:10px;font-size:11px;color:var(--text-muted);">ФОТ: ${formatRub(fotPerHour)}/ч · Косвенные: ${formatRub(round2(indirectPerHour))}/ч · Себестоимость = цена + доставка + (ФОТ + косвенные) ÷ скорость · Цена продажи берётся фиксированно из поля бланка</div></div>`;
 
         container.innerHTML = html;
     },
@@ -1594,7 +1608,7 @@ const Molds = {
     showPkgForm() {
         this._editingPkgId = null;
         document.getElementById('pkg-form-title').textContent = 'Новая упаковка';
-        ['pkg-blank-name','pkg-blank-price','pkg-blank-delivery','pkg-blank-sell','pkg-blank-notes','pkg-blank-photo'].forEach(id => {
+        ['pkg-blank-name','pkg-blank-price','pkg-blank-delivery','pkg-blank-speed','pkg-blank-sell','pkg-blank-notes','pkg-blank-photo'].forEach(id => {
             document.getElementById(id).value = '';
         });
         document.getElementById('pkg-delete-btn').style.display = 'none';
@@ -1611,6 +1625,7 @@ const Molds = {
         document.getElementById('pkg-blank-name').value = b.name || '';
         document.getElementById('pkg-blank-price').value = b.price_per_unit || '';
         document.getElementById('pkg-blank-delivery').value = b.delivery_per_unit || '';
+        document.getElementById('pkg-blank-speed').value = b.assembly_speed ? round2(b.assembly_speed / 60) : '';
         document.getElementById('pkg-blank-sell').value = b.sell_price || '';
         document.getElementById('pkg-blank-notes').value = b.notes || '';
         document.getElementById('pkg-blank-photo').value = b.photo_url || '';
@@ -1626,16 +1641,28 @@ const Molds = {
 
         const price = parseFloat(document.getElementById('pkg-blank-price').value) || 0;
         const delivery = parseFloat(document.getElementById('pkg-blank-delivery').value) || 0;
+        const params = App.params || {};
+        const fotPerHour = params.fotPerHour || 400;
+        const indirectPerHour = params.indirectPerHour || 0;
+        const pcsPerMin = parseFloat(document.getElementById('pkg-blank-speed').value) || 0;
+        const speed = round2(pcsPerMin * 60); // шт/мин -> шт/ч
 
-        if (price <= 0 && delivery <= 0) { el.style.display = 'none'; return; }
+        if (price <= 0 && delivery <= 0 && speed <= 0) { el.style.display = 'none'; return; }
 
-        const totalCost = round2(price + delivery);
+        const assemblyCost = speed > 0 ? round2((fotPerHour + indirectPerHour) / speed) : 0;
+        const totalCost = round2(price + delivery + assemblyCost);
         const fixedSellPrice = parseFloat(document.getElementById('pkg-blank-sell').value) || 0;
-        const formulaSellPrice = calcSellByNetMargin40(totalCost, App.params || {});
+        const formulaSellPrice = calcSellByNetMargin40(totalCost, params);
 
         let html = `<div style="font-weight:700;font-size:13px;margin-bottom:6px;">Себестоимость: ${formatRub(totalCost)}</div>`;
         html += `<div style="color:var(--text-secondary);font-size:11px;line-height:1.7;">`;
-        html += `Стоимость: <b>${formatRub(price)}</b> + Доставка: <b>${formatRub(delivery)}</b> = <b>${formatRub(totalCost)}</b>`;
+        html += `Цена: <b>${formatRub(price)}</b> + Доставка: <b>${formatRub(delivery)}</b><br>`;
+        if (speed > 0) {
+            html += `Сборка: (ФОТ ${formatRub(fotPerHour)} + Косвенные ${formatRub(round2(indirectPerHour))}) ÷ ${speed} шт/ч (${pcsPerMin} шт/мин) = <b>${formatRub(assemblyCost)}</b><br>`;
+        } else {
+            html += `Сборка: <span style="color:var(--text-muted)">укажите скорость (шт/мин)</span><br>`;
+        }
+        html += `Итого себестоимость: <b>${formatRub(totalCost)}</b>`;
         if (formulaSellPrice > 0) {
             html += `<br><span style="color:var(--green);font-weight:700;">Цена продажи по формуле (40% чистой маржи, −6% ОСН, −6,5% коммерч., +НДС сверху): ${formatRub(formulaSellPrice)}</span>`;
         }
@@ -1662,6 +1689,7 @@ const Molds = {
             name,
             price_per_unit: parseFloat(document.getElementById('pkg-blank-price').value) || 0,
             delivery_per_unit: parseFloat(document.getElementById('pkg-blank-delivery').value) || 0,
+            assembly_speed: round2((parseFloat(document.getElementById('pkg-blank-speed').value) || 0) * 60),
             sell_price: parseFloat(document.getElementById('pkg-blank-sell').value) || 0,
             notes: document.getElementById('pkg-blank-notes').value.trim(),
             photo_url: document.getElementById('pkg-blank-photo').value.trim(),
