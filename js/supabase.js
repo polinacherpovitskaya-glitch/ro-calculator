@@ -1002,21 +1002,17 @@ async function saveEmployee(employee) {
         if (!employee.id) {
             employee.id = Date.now();
         }
-        if (employee.id) {
-            const { error } = await supabaseClient.from('employees').update(employee).eq('id', employee.id);
-            if (error) {
-                const { error: insError } = await supabaseClient.from('employees').insert(employee);
-                if (insError) {
-                    console.error('saveEmployee error:', insError);
-                    return null;
-                }
-            }
-        } else {
-            const { error } = await supabaseClient.from('employees').insert(employee);
-            if (error) {
-                console.error('saveEmployee error:', error);
-                return null;
-            }
+        const payload = {
+            ...employee,
+            updated_at: new Date().toISOString(),
+            created_at: employee.created_at || new Date().toISOString(),
+        };
+        const { error } = await supabaseClient
+            .from('employees')
+            .upsert(payload, { onConflict: 'id' });
+        if (error) {
+            console.error('saveEmployee error:', error);
+            return null;
         }
         // Keep local mirror updated for fallback and faster UI render
         const local = getLocal(LOCAL_KEYS.employees) || [];
