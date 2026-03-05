@@ -221,12 +221,12 @@ const Marketplaces = {
     },
 
     addHwItem() {
-        this._hwItems.push({ source: 'catalog', blank_id: null, wh_id: null, qty: 1, name: '', cost_per_unit: 0 });
+        this._hwItems.push({ source: 'catalog', blank_id: null, wh_id: null, qty: 1, name: '', cost_per_unit: 0, assembly_speed: 0 });
         this.renderFormItems();
     },
 
     addPkgItem() {
-        this._pkgItems.push({ source: 'catalog', blank_id: null, wh_id: null, qty: 1, name: '', cost_per_unit: 0 });
+        this._pkgItems.push({ source: 'catalog', blank_id: null, wh_id: null, qty: 1, name: '', cost_per_unit: 0, assembly_speed: 0 });
         this.renderFormItems();
     },
 
@@ -340,6 +340,7 @@ const Marketplaces = {
 
         document.getElementById('mp-hw-items').innerHTML = this._hwItems.map((item, i) => {
             const isCustom = item.source === 'custom';
+            const speedMin = item.assembly_speed > 0 ? round2(item.assembly_speed / 60) : '';
             return `
             <div style="margin-bottom:6px;padding:6px;background:var(--bg);border-radius:6px;">
                 <div class="form-row" style="margin-bottom:2px;align-items:end;gap:6px;">
@@ -353,6 +354,10 @@ const Marketplaces = {
                     <div class="form-group" style="flex:0 0 80px;margin:0">
                         <input type="number" min="0" step="0.1" value="${item.cost_per_unit || ''}" placeholder="₽/шт" oninput="Marketplaces._hwItems[${i}].cost_per_unit=parseFloat(this.value)||0; Marketplaces.recalcSet()">
                     </div>` : ''}
+                    <div class="form-group" style="flex:0 0 88px;margin:0">
+                        <input type="number" min="0" step="0.1" value="${speedMin}" placeholder="шт/мин" title="Сборка, шт/мин"
+                            oninput="Marketplaces._hwItems[${i}].assembly_speed=round2((parseFloat(this.value)||0)*60); Marketplaces.recalcSet()">
+                    </div>
                     <div class="form-group" style="flex:0 0 55px;margin:0">
                         <input type="number" min="1" value="${item.qty || 1}" oninput="Marketplaces._onQtyChange('hw',${i},this.value)" style="text-align:center;" title="Кол-во">
                     </div>
@@ -378,6 +383,7 @@ const Marketplaces = {
 
         document.getElementById('mp-pkg-items').innerHTML = this._pkgItems.map((item, i) => {
             const isCustom = item.source === 'custom';
+            const speedMin = item.assembly_speed > 0 ? round2(item.assembly_speed / 60) : '';
             return `
             <div style="margin-bottom:6px;padding:6px;background:var(--bg);border-radius:6px;">
                 <div class="form-row" style="margin-bottom:2px;align-items:end;gap:6px;">
@@ -391,6 +397,10 @@ const Marketplaces = {
                     <div class="form-group" style="flex:0 0 80px;margin:0">
                         <input type="number" min="0" step="0.1" value="${item.cost_per_unit || ''}" placeholder="₽/шт" oninput="Marketplaces._pkgItems[${i}].cost_per_unit=parseFloat(this.value)||0; Marketplaces.recalcSet()">
                     </div>` : ''}
+                    <div class="form-group" style="flex:0 0 88px;margin:0">
+                        <input type="number" min="0" step="0.1" value="${speedMin}" placeholder="шт/мин" title="Сборка, шт/мин"
+                            oninput="Marketplaces._pkgItems[${i}].assembly_speed=round2((parseFloat(this.value)||0)*60); Marketplaces.recalcSet()">
+                    </div>
                     <div class="form-group" style="flex:0 0 55px;margin:0">
                         <input type="number" min="1" value="${item.qty || 1}" oninput="Marketplaces._onQtyChange('pkg',${i},this.value)" style="text-align:center;" title="Кол-во">
                     </div>
@@ -423,6 +433,8 @@ const Marketplaces = {
                 item.blank_id = null;
                 item.name = wh.name + (wh.size ? ' ' + wh.size : '') + (wh.color ? ' ' + wh.color : '');
                 item.cost_per_unit = wh.price_per_unit || 0;
+                const linkedBlank = this._hwCatalog.find(b => Number(b.warehouse_item_id) === Number(wh.id));
+                item.assembly_speed = linkedBlank?.assembly_speed || 0;
             }
         } else {
             // Catalog item
@@ -433,8 +445,10 @@ const Marketplaces = {
                 item.wh_id = null;
                 item.name = hw.name;
                 item.cost_per_unit = 0; // will be calculated
+                item.assembly_speed = hw.assembly_speed || 0;
             }
         }
+        this.renderFormItems();
         this.recalcSet();
     },
 
@@ -448,6 +462,8 @@ const Marketplaces = {
                 item.blank_id = null;
                 item.name = wh.name + (wh.size ? ' ' + wh.size : '');
                 item.cost_per_unit = wh.price_per_unit || 0;
+                const linkedBlank = this._pkgCatalog.find(b => Number(b.warehouse_item_id) === Number(wh.id));
+                item.assembly_speed = linkedBlank?.assembly_speed || 0;
             }
         } else {
             const pkg = this._pkgCatalog.find(b => b.id === listId);
@@ -457,8 +473,10 @@ const Marketplaces = {
                 item.wh_id = null;
                 item.name = pkg.name;
                 item.cost_per_unit = (pkg.price_per_unit || 0) + (pkg.delivery_per_unit || 0);
+                item.assembly_speed = pkg.assembly_speed || 0;
             }
         }
+        this.renderFormItems();
         this.recalcSet();
     },
 
@@ -482,6 +500,61 @@ const Marketplaces = {
         this.recalcSet();
     },
 
+    _assemblyCostPerUnit(assemblySpeed, fotPerHour, indirectPerHour) {
+        const speed = parseFloat(assemblySpeed) || 0;
+        if (speed <= 0) return 0;
+        return round2((fotPerHour + indirectPerHour) / speed);
+    },
+
+    _calcHwUnitCost(item, params) {
+        const cnyRate = params.cnyRate || 12.5;
+        const fotPerHour = params.fotPerHour || 400;
+        const indirectPerHour = params.indirectPerHour || 0;
+        let materialCost = 0;
+        let assemblySpeed = parseFloat(item.assembly_speed) || 0;
+
+        if (item.source === 'custom' || (item.source === 'warehouse' && item.wh_id)) {
+            materialCost = parseFloat(item.cost_per_unit) || 0;
+            if (!assemblySpeed && item.wh_id) {
+                const linkedBlank = this._hwCatalog.find(b => Number(b.warehouse_item_id) === Number(item.wh_id));
+                assemblySpeed = parseFloat(linkedBlank?.assembly_speed) || 0;
+            }
+        } else if (item.blank_id) {
+            const hw = this._hwCatalog.find(b => b.id === item.blank_id);
+            if (!hw) return 0;
+            materialCost = (hw.price_rub || 0) > 0
+                ? (hw.price_rub || 0)
+                : ((hw.price_cny || 0) * cnyRate + (hw.delivery_per_unit || 0));
+            if (!assemblySpeed) assemblySpeed = parseFloat(hw.assembly_speed) || 0;
+        }
+
+        const assemblyCost = this._assemblyCostPerUnit(assemblySpeed, fotPerHour, indirectPerHour);
+        return round2(materialCost + assemblyCost);
+    },
+
+    _calcPkgUnitCost(item, params) {
+        const fotPerHour = params.fotPerHour || 400;
+        const indirectPerHour = params.indirectPerHour || 0;
+        let materialCost = 0;
+        let assemblySpeed = parseFloat(item.assembly_speed) || 0;
+
+        if (item.source === 'custom' || (item.source === 'warehouse' && item.wh_id)) {
+            materialCost = parseFloat(item.cost_per_unit) || 0;
+            if (!assemblySpeed && item.wh_id) {
+                const linkedBlank = this._pkgCatalog.find(b => Number(b.warehouse_item_id) === Number(item.wh_id));
+                assemblySpeed = parseFloat(linkedBlank?.assembly_speed) || 0;
+            }
+        } else if (item.blank_id) {
+            const pkg = this._pkgCatalog.find(b => b.id === item.blank_id);
+            if (!pkg) return 0;
+            materialCost = (pkg.price_per_unit || 0) + (pkg.delivery_per_unit || 0);
+            if (!assemblySpeed) assemblySpeed = parseFloat(pkg.assembly_speed) || 0;
+        }
+
+        const assemblyCost = this._assemblyCostPerUnit(assemblySpeed, fotPerHour, indirectPerHour);
+        return round2(materialCost + assemblyCost);
+    },
+
     // ==========================================
     // CALCULATION (per 1 unit of set)
     // ==========================================
@@ -494,10 +567,6 @@ const Marketplaces = {
         const targetMarginPct = parseFloat(document.getElementById('mp-set-margin')?.value) || 40;
 
         const params = App.params || {};
-        const cnyRate = params.cnyRate || 12.5;
-        const fotPerHour = params.fotPerHour || 400;
-        const indirectPerHour = params.indirectPerHour || 0;
-
         let totalCost = 0;
 
         // Plastic: use enriched tier cost at 500 (standard production batch)
@@ -511,34 +580,12 @@ const Marketplaces = {
 
         // Hardware
         this._hwItems.forEach(item => {
-            if (item.source === 'custom') {
-                totalCost += (item.cost_per_unit || 0) * (item.qty || 1);
-            } else if (item.source === 'warehouse' && item.wh_id) {
-                totalCost += (item.cost_per_unit || 0) * (item.qty || 1);
-            } else if (item.blank_id) {
-                const hw = this._hwCatalog.find(b => b.id === item.blank_id);
-                if (hw) {
-                    const materialCost = (hw.price_rub || 0) > 0
-                        ? (hw.price_rub || 0)
-                        : ((hw.price_cny || 0) * cnyRate + (hw.delivery_per_unit || 0));
-                    const assemblyCost = (hw.assembly_speed > 0) ? ((fotPerHour + indirectPerHour) / hw.assembly_speed) : 0;
-                    totalCost += (materialCost + assemblyCost) * (item.qty || 1);
-                }
-            }
+            totalCost += this._calcHwUnitCost(item, params) * (item.qty || 1);
         });
 
         // Packaging
         this._pkgItems.forEach(item => {
-            if (item.source === 'custom') {
-                totalCost += (item.cost_per_unit || 0) * (item.qty || 1);
-            } else if (item.source === 'warehouse' && item.wh_id) {
-                totalCost += (item.cost_per_unit || 0) * (item.qty || 1);
-            } else if (item.blank_id) {
-                const pkg = this._pkgCatalog.find(b => b.id === item.blank_id);
-                if (pkg) {
-                    totalCost += ((pkg.price_per_unit || 0) + (pkg.delivery_per_unit || 0)) * (item.qty || 1);
-                }
-            }
+            totalCost += this._calcPkgUnitCost(item, params) * (item.qty || 1);
         });
 
         totalCost = round2(totalCost);
@@ -672,9 +719,6 @@ const Marketplaces = {
 
     _calcSetBreakdown(s) {
         const params = App.params || {};
-        const cnyRate = params.cnyRate || 12.5;
-        const fotPerHour = params.fotPerHour || 400;
-        const indirectPerHour = params.indirectPerHour || 0;
         let plasticCost = 0, hwCost = 0, pkgCost = 0;
 
         (s.plastic_items || []).forEach(item => {
@@ -686,33 +730,11 @@ const Marketplaces = {
         });
 
         (s.hw_items || []).forEach(item => {
-            if (item.source === 'custom') {
-                hwCost += (item.cost_per_unit || 0) * (item.qty || 1);
-            } else if (item.source === 'warehouse' && item.wh_id) {
-                hwCost += (item.cost_per_unit || 0) * (item.qty || 1);
-            } else if (item.blank_id) {
-                const hw = this._hwCatalog.find(b => b.id === item.blank_id);
-                if (hw) {
-                    const materialCost = (hw.price_rub || 0) > 0
-                        ? (hw.price_rub || 0)
-                        : ((hw.price_cny || 0) * cnyRate + (hw.delivery_per_unit || 0));
-                    const assemblyCost = (hw.assembly_speed > 0) ? ((fotPerHour + indirectPerHour) / hw.assembly_speed) : 0;
-                    hwCost += (materialCost + assemblyCost) * (item.qty || 1);
-                }
-            }
+            hwCost += this._calcHwUnitCost(item, params) * (item.qty || 1);
         });
 
         (s.pkg_items || []).forEach(item => {
-            if (item.source === 'custom') {
-                pkgCost += (item.cost_per_unit || 0) * (item.qty || 1);
-            } else if (item.source === 'warehouse' && item.wh_id) {
-                pkgCost += (item.cost_per_unit || 0) * (item.qty || 1);
-            } else if (item.blank_id) {
-                const pkg = this._pkgCatalog.find(b => b.id === item.blank_id);
-                if (pkg) {
-                    pkgCost += ((pkg.price_per_unit || 0) + (pkg.delivery_per_unit || 0)) * (item.qty || 1);
-                }
-            }
+            pkgCost += this._calcPkgUnitCost(item, params) * (item.qty || 1);
         });
 
         return {
