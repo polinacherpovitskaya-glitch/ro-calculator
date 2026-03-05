@@ -50,6 +50,32 @@ const Factual = {
         return Number.isFinite(n) ? n : 0;
     },
 
+    _getManualOverrides() {
+        const raw = this.factData && this.factData._manual_overrides;
+        if (raw && typeof raw === 'object') return raw;
+        return {};
+    },
+
+    _isManualOverride(key) {
+        const ov = this._getManualOverrides();
+        return !!ov[key];
+    },
+
+    _setManualOverride(key, enabled) {
+        if (!this.factData || !key) return;
+        const ov = this._getManualOverrides();
+        if (enabled) ov[key] = true;
+        else delete ov[key];
+        this.factData._manual_overrides = ov;
+    },
+
+    _applyAutoFactValue(key, value) {
+        if (!this.factData || !key) return;
+        // Respect user-entered value: once overridden manually, auto-source won't overwrite it.
+        if (this._isManualOverride(key)) return;
+        this.factData[key] = round2(this._num(value));
+    },
+
     _isAutoFactRow(key) {
         if (this.AUTO_FACT_KEYS.has(key)) return true;
         if (key === 'design_printing' && this.factData && this.factData._auto_printing_from_import) return true;
@@ -350,6 +376,7 @@ const Factual = {
             const factVal = parseFloat(fact[factKey]) || 0;
             if (row.key === 'molds' && planVal === 0 && factVal === 0) return;
             const isAuto = this._isAutoFactRow(row.key);
+            const manualOverride = this._isManualOverride(factKey);
             planTotal += planVal;
             factTotal += factVal;
 
@@ -361,9 +388,10 @@ const Factual = {
             html += `<td style="padding:8px 12px; font-weight:500;">${row.label}${row.hint ? '<div style="font-size:10px;color:var(--text-muted);font-weight:400;margin-top:1px;">' + row.hint + '</div>' : ''}</td>`;
             html += `<td style="text-align:right; padding:8px 12px; color:var(--text-muted);">${this.fmtRub(planVal)}</td>`;
             html += `<td style="text-align:right; padding:8px 4px;">
-                <input type="text" inputmode="decimal" value="${factVal || ''}" ${isAuto ? 'readonly' : ''}
-                    style="width:110px; text-align:right; padding:4px 8px; border:1px solid var(--border); border-radius:4px; font-size:13px;${isAuto ? 'background:var(--bg);color:var(--text-muted);' : ''}"
-                    oninput="${isAuto ? '' : `Factual.onFactInput('${row.key}', this.value)`}">
+                <input type="text" inputmode="decimal" value="${factVal || ''}"
+                    style="width:110px; text-align:right; padding:4px 8px; border:1px solid var(--border); border-radius:4px; font-size:13px;${isAuto && !manualOverride ? 'background:var(--bg);' : ''}"
+                    oninput="Factual.onFactInput('${row.key}', this.value)">
+                ${isAuto ? `<div style="font-size:10px;color:var(--text-muted);margin-top:2px;">${manualOverride ? 'вручную' : 'авто'}</div>` : ''}
             </td>`;
             html += `<td style="text-align:right; padding:8px 12px; font-weight:600; color:${alarm.color};">
                 ${factVal > 0 ? alarm.icon + ' ' + this.fmtDelta(delta, pct) : '<span style="color:var(--text-muted);">—</span>'}
@@ -489,7 +517,9 @@ const Factual = {
         if (key === 'revenue') {
             this.factData.fact_revenue = num;
         } else {
-            this.factData['fact_' + key] = num;
+            const factKey = 'fact_' + key;
+            this.factData[factKey] = num;
+            this._setManualOverride(factKey, true);
         }
         // Recalculate totals and re-render (debounced)
         clearTimeout(this._renderTimer);
@@ -568,11 +598,11 @@ const Factual = {
         const totalHours = hProd + hTrim + hAsm + hPkg;
         const indirectPerHour = params?.indirectPerHour || 0;
 
-        this.factData.fact_salary_production = this._sumStageSalary(orderId, 'casting', params);
-        this.factData.fact_salary_trim = this._sumStageSalary(orderId, 'trim', params);
-        this.factData.fact_salary_assembly = this._sumStageSalary(orderId, 'assembly', params);
-        this.factData.fact_salary_packaging = this._sumStageSalary(orderId, 'packaging', params);
-        this.factData.fact_indirect_production = round2(totalHours * indirectPerHour);
+        this._applyAutoFactValue('fact_salary_production', this._sumStageSalary(orderId, 'casting', params));
+        this._applyAutoFactValue('fact_salary_trim', this._sumStageSalary(orderId, 'trim', params));
+        this._applyAutoFactValue('fact_salary_assembly', this._sumStageSalary(orderId, 'assembly', params));
+        this._applyAutoFactValue('fact_salary_packaging', this._sumStageSalary(orderId, 'packaging', params));
+        this._applyAutoFactValue('fact_indirect_production', totalHours * indirectPerHour);
 
         // FinTablo → auto printing (if imported for this order)
         this.factData._auto_printing_from_import = false;
@@ -581,19 +611,21 @@ const Factual = {
             const latest = [...imports].sort((a, b) => new Date(b.import_date || 0) - new Date(a.import_date || 0))[0];
             const importedPrinting = this._num(latest && latest.fact_printing);
             if (importedPrinting > 0) {
-                this.factData.fact_design_printing = round2(importedPrinting);
+                this._applyAutoFactValue('fact_design_printing', importedPrinting);
                 this.factData._auto_printing_from_import = true;
             }
         }
 
         // Warehouse history → auto hardware/packaging actuals
         const whActual = await this._deriveMaterialFactsFromWarehouse(orderId, orderName);
-        this.factData.fact_hardware_total = whActual.found
-            ? round2(whActual.hardware)
-            : round2(this.planData?.hardwareTotal || 0);
-        this.factData.fact_packaging_total = whActual.found
-            ? round2(whActual.packaging)
-            : round2(this.planData?.packagingTotal || 0);
+        this._applyAutoFactValue(
+            'fact_hardware_total',
+            whActual.found ? whActual.hardware : (this.planData?.hardwareTotal || 0)
+        );
+        this._applyAutoFactValue(
+            'fact_packaging_total',
+            whActual.found ? whActual.packaging : (this.planData?.packagingTotal || 0)
+        );
     },
 
     async _deriveMaterialFactsFromWarehouse(orderId, orderName) {
