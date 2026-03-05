@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v60';
+const APP_VERSION = 'v61';
 
 const App = {
     currentPage: 'dashboard',
@@ -511,11 +511,34 @@ const App = {
             const remoteVersion = payload && payload.version ? String(payload.version) : null;
             if (!remoteVersion) return;
 
-            if (remoteVersion !== APP_VERSION) this.showUpdateBanner(remoteVersion);
+            if (this.isRemoteVersionNewer(remoteVersion, APP_VERSION)) this.showUpdateBanner(remoteVersion);
             else this.hideUpdateBanner();
         } catch (e) {
             // Silently ignore: no internet or temporary network issues.
         }
+    },
+
+    parseVersion(versionStr) {
+        // Supports v61, 61, v61.2.3 etc.
+        const clean = String(versionStr || '').trim().toLowerCase().replace(/^v/, '');
+        if (!clean) return [0];
+        return clean.split('.').map(part => {
+            const n = parseInt(part, 10);
+            return Number.isFinite(n) ? n : 0;
+        });
+    },
+
+    isRemoteVersionNewer(remoteVersion, currentVersion) {
+        const remoteParts = this.parseVersion(remoteVersion);
+        const currentParts = this.parseVersion(currentVersion);
+        const len = Math.max(remoteParts.length, currentParts.length);
+        for (let i = 0; i < len; i++) {
+            const r = remoteParts[i] || 0;
+            const c = currentParts[i] || 0;
+            if (r > c) return true;
+            if (r < c) return false;
+        }
+        return false;
     },
 
     showUpdateBanner(remoteVersion) {
