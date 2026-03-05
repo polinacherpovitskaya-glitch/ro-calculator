@@ -328,7 +328,13 @@ const Marketplaces = {
         // Hardware — all warehouse hw + catalog + custom option
         const hwList = [];
         // Catalog items
-        this._hwCatalog.forEach(b => hwList.push({ id: b.id, name: b.name, detail: '¥' + (b.price_cny||0) + ' · каталог', photo: b.photo_url || b._whPhoto || '', _type: 'catalog' }));
+        this._hwCatalog.forEach(b => {
+            const sell = parseFloat(b.sell_price) || 0;
+            const detail = sell > 0
+                ? `прайс ${formatRub(sell)} · каталог`
+                : `${formatRub(b.price_rub || 0)} себес · каталог`;
+            hwList.push({ id: b.id, name: b.name, detail, photo: b.photo_url || b._whPhoto || '', _type: 'catalog' });
+        });
         // Warehouse items
         this._allWarehouseHw.forEach(w => hwList.push({ id: 10000 + w.id, name: w.name + (w.size ? ' ' + w.size : '') + (w.color ? ' ' + w.color : ''), detail: formatRub(w.price_per_unit || 0) + '/шт · склад', photo: w.photo_thumbnail || w.photo_url || '', _type: 'warehouse', _whId: w.id }));
 
@@ -361,7 +367,13 @@ const Marketplaces = {
 
         // Packaging — all warehouse pkg + catalog + custom
         const pkgList = [];
-        this._pkgCatalog.forEach(b => pkgList.push({ id: b.id, name: b.name, detail: formatRub(b.price_per_unit || 0) + '/шт · каталог', photo: b.photo_url || '', _type: 'catalog' }));
+        this._pkgCatalog.forEach(b => {
+            const sell = parseFloat(b.sell_price) || 0;
+            const detail = sell > 0
+                ? `прайс ${formatRub(sell)} · каталог`
+                : `${formatRub((b.price_per_unit || 0) + (b.delivery_per_unit || 0))} себес · каталог`;
+            pkgList.push({ id: b.id, name: b.name, detail, photo: b.photo_url || '', _type: 'catalog' });
+        });
         this._allWarehousePkg.forEach(w => pkgList.push({ id: 10000 + w.id, name: w.name + (w.size ? ' ' + w.size : ''), detail: formatRub(w.price_per_unit || 0) + '/шт · склад', photo: w.photo_thumbnail || w.photo_url || '', _type: 'warehouse', _whId: w.id }));
 
         document.getElementById('mp-pkg-items').innerHTML = this._pkgItems.map((item, i) => {
@@ -484,6 +496,7 @@ const Marketplaces = {
         const params = App.params || {};
         const cnyRate = params.cnyRate || 12.5;
         const fotPerHour = params.fotPerHour || 400;
+        const indirectPerHour = params.indirectPerHour || 0;
 
         let totalCost = 0;
 
@@ -505,8 +518,10 @@ const Marketplaces = {
             } else if (item.blank_id) {
                 const hw = this._hwCatalog.find(b => b.id === item.blank_id);
                 if (hw) {
-                    const materialCost = (hw.price_cny || 0) * cnyRate + (hw.delivery_per_unit || 0);
-                    const assemblyCost = (hw.assembly_speed > 0) ? (fotPerHour / hw.assembly_speed) : 0;
+                    const materialCost = (hw.price_rub || 0) > 0
+                        ? (hw.price_rub || 0)
+                        : ((hw.price_cny || 0) * cnyRate + (hw.delivery_per_unit || 0));
+                    const assemblyCost = (hw.assembly_speed > 0) ? ((fotPerHour + indirectPerHour) / hw.assembly_speed) : 0;
                     totalCost += (materialCost + assemblyCost) * (item.qty || 1);
                 }
             }
@@ -659,6 +674,7 @@ const Marketplaces = {
         const params = App.params || {};
         const cnyRate = params.cnyRate || 12.5;
         const fotPerHour = params.fotPerHour || 400;
+        const indirectPerHour = params.indirectPerHour || 0;
         let plasticCost = 0, hwCost = 0, pkgCost = 0;
 
         (s.plastic_items || []).forEach(item => {
@@ -677,8 +693,10 @@ const Marketplaces = {
             } else if (item.blank_id) {
                 const hw = this._hwCatalog.find(b => b.id === item.blank_id);
                 if (hw) {
-                    const materialCost = (hw.price_cny || 0) * cnyRate + (hw.delivery_per_unit || 0);
-                    const assemblyCost = (hw.assembly_speed > 0) ? (fotPerHour / hw.assembly_speed) : 0;
+                    const materialCost = (hw.price_rub || 0) > 0
+                        ? (hw.price_rub || 0)
+                        : ((hw.price_cny || 0) * cnyRate + (hw.delivery_per_unit || 0));
+                    const assemblyCost = (hw.assembly_speed > 0) ? ((fotPerHour + indirectPerHour) / hw.assembly_speed) : 0;
                     hwCost += (materialCost + assemblyCost) * (item.qty || 1);
                 }
             }

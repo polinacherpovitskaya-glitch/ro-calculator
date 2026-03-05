@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v59';
+const APP_VERSION = 'v60';
 
 const App = {
     currentPage: 'dashboard',
@@ -587,6 +587,9 @@ const Calculator = {
     _isDirty: false,
     _autosaving: false,
     _currentOrderStatus: 'draft', // Track current order status to preserve on autosave
+    _hwBlanksCatalog: [],
+    _pkgBlanksCatalog: [],
+    _blanksCatalogLoaded: false,
 
     async init() {
         // Ensure colors are loaded for color picker
@@ -595,6 +598,12 @@ const Calculator = {
                 Colors.data = await loadColors();
             }
         } catch (e) { console.error('[Calculator.init] loadColors error:', e); }
+
+        try {
+            await this._ensureBlanksCatalog();
+        } catch (e) {
+            console.error('[Calculator.init] load blanks catalog error:', e);
+        }
 
         if (this.items.length === 0 && !App.editingOrderId) {
             // Try to restore last editing session after page refresh
@@ -1140,6 +1149,40 @@ const Calculator = {
         return null;
     },
 
+    async _ensureBlanksCatalog(force = false) {
+        if (this._blanksCatalogLoaded && !force) return;
+        try {
+            const [hwBlanks, pkgBlanks] = await Promise.all([
+                loadHwBlanks(),
+                loadPkgBlanks(),
+            ]);
+            this._hwBlanksCatalog = Array.isArray(hwBlanks) ? hwBlanks : [];
+            this._pkgBlanksCatalog = Array.isArray(pkgBlanks) ? pkgBlanks : [];
+            this._blanksCatalogLoaded = true;
+        } catch (e) {
+            console.error('[Calculator] Failed to load blanks catalog:', e);
+            this._hwBlanksCatalog = [];
+            this._pkgBlanksCatalog = [];
+            this._blanksCatalogLoaded = false;
+        }
+    },
+
+    _findHwBlankByWarehouseItemId(warehouseItemId) {
+        if (!warehouseItemId || !Array.isArray(this._hwBlanksCatalog)) return null;
+        const matches = this._hwBlanksCatalog.filter(b => Number(b.warehouse_item_id) === Number(warehouseItemId));
+        if (!matches.length) return null;
+        matches.sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')));
+        return matches[0];
+    },
+
+    _findPkgBlankByWarehouseItemId(warehouseItemId) {
+        if (!warehouseItemId || !Array.isArray(this._pkgBlanksCatalog)) return null;
+        const matches = this._pkgBlanksCatalog.filter(b => Number(b.warehouse_item_id) === Number(warehouseItemId));
+        if (!matches.length) return null;
+        matches.sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')));
+        return matches[0];
+    },
+
     async addHardware() {
         try {
             const idx = this.hardwareItems.length;
@@ -1366,7 +1409,7 @@ const Calculator = {
         this.recalculate();
     },
 
-    onHwWarehouseSelect(idx, itemIdStr) {
+    async onHwWarehouseSelect(idx, itemIdStr) {
         const hw = this.hardwareItems[idx];
         // Close any open picker dropdowns
         document.querySelectorAll('.wh-picker-dropdown').forEach(d => d.style.display = 'none');
@@ -1402,8 +1445,24 @@ const Calculator = {
         hw.delivery_total = 0;
         hw.delivery_price = 0;
 
+        // Apply blanks defaults (assembly timing + fixed sell price) by linked warehouse item.
+        await this._ensureBlanksCatalog(true);
+        const linkedBlank = this._findHwBlankByWarehouseItemId(whItem.id);
+        if (linkedBlank) {
+            const speed = parseFloat(linkedBlank.assembly_speed) || 0;
+            if (speed > 0) {
+                hw.assembly_speed = round2(speed);
+                hw.assembly_minutes = round2(speed / 60);
+            }
+            const fixedSellPrice = parseFloat(linkedBlank.sell_price) || 0;
+            if (fixedSellPrice > 0) {
+                hw.sell_price = fixedSellPrice;
+            }
+        }
+
         this._rerenderHwItem(idx);
         this.recalculate();
+        this.scheduleAutosave();
     },
 
     onHwField(idx, field, value) {
@@ -1926,7 +1985,7 @@ const Calculator = {
         this.recalculate();
     },
 
-    onPkgWarehouseSelect(idx, itemIdStr) {
+    async onPkgWarehouseSelect(idx, itemIdStr) {
         const pkg = this.packagingItems[idx];
         document.querySelectorAll('.wh-picker-dropdown').forEach(d => d.style.display = 'none');
         const itemId = parseInt(itemIdStr) || null;
@@ -1955,8 +2014,20 @@ const Calculator = {
         pkg.price = whItem.price_per_unit || 0;
         pkg.delivery_total = 0;
         pkg.delivery_price = 0;
+
+        // Optional link: if packaging blank is linked to this warehouse position, apply fixed sell price.
+        await this._ensureBlanksCatalog(true);
+        const linkedBlank = this._findPkgBlankByWarehouseItemId(whItem.id);
+        if (linkedBlank) {
+            const fixedSellPrice = parseFloat(linkedBlank.sell_price) || 0;
+            if (fixedSellPrice > 0) {
+                pkg.sell_price = fixedSellPrice;
+            }
+        }
+
         this._rerenderPkgItem(idx);
         this.recalculate();
+        this.scheduleAutosave();
     },
 
     onPkgField(idx, field, value) {
