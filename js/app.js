@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v55';
+const APP_VERSION = 'v56';
 
 const App = {
     currentPage: 'dashboard',
@@ -14,11 +14,18 @@ const App = {
     _updateCheckMs: 120000,
     _onWindowFocus: null,
     employees: [],
+    authAccounts: [],
     currentEmployeeId: null,
+    currentUser: null,
+    _sessionStartedAt: null,
 
     async init() {
+        initSupabase();
+        await this.prepareAuthUI();
+
         // Check auth
         if (this.isAuthenticated()) {
+            await this.restoreAuthenticatedUser();
             this.showApp();
         }
 
@@ -33,33 +40,117 @@ const App = {
 
     // === AUTH ===
 
-    login() {
+    async login() {
+        const selectedUserId = (document.getElementById('auth-user-select')?.value || '__admin').trim();
         const pwd = document.getElementById('auth-password').value;
-        const hash = this.simpleHash(pwd);
-        if (this.isAllowedAuthHash(hash)) {
-            localStorage.setItem('ro_calc_auth', hash);
-            localStorage.setItem('ro_calc_auth_ts', Date.now().toString());
-            document.getElementById('auth-error').style.display = 'none';
-            this.showApp();
+        const nowTs = Date.now().toString();
+        let ok = false;
+        let errorText = 'Неверный пароль';
+
+        if (selectedUserId === '__admin') {
+            const hash = this.simpleHash(pwd);
+            if (this.isAllowedAuthHash(hash)) {
+                localStorage.setItem('ro_calc_auth', hash);
+                localStorage.setItem('ro_calc_auth_method', 'admin');
+                localStorage.setItem('ro_calc_auth_ts', nowTs);
+                localStorage.removeItem('ro_calc_auth_user_id');
+                this.currentUser = { id: '__admin', name: 'Администратор', role: 'admin', employee_id: null };
+                ok = true;
+            }
         } else {
-            document.getElementById('auth-error').style.display = 'block';
+            const account = this.authAccounts.find(a => String(a.id) === String(selectedUserId) && a.is_active !== false);
+            if (!account) {
+                errorText = 'Пользователь не найден';
+            } else {
+                const hash = this.hashUserPassword(account.username || '', pwd);
+                if (hash === account.password_hash) {
+                    localStorage.setItem('ro_calc_auth_method', 'user');
+                    localStorage.setItem('ro_calc_auth_ts', nowTs);
+                    localStorage.setItem('ro_calc_auth_user_id', String(account.id));
+                    localStorage.removeItem('ro_calc_auth');
+                    this.currentUser = {
+                        id: account.id,
+                        employee_id: account.employee_id ?? null,
+                        username: account.username || '',
+                        name: account.employee_name || account.username || 'Сотрудник',
+                        role: account.role || 'employee',
+                    };
+                    ok = true;
+                    account.last_login_at = new Date().toISOString();
+                    await saveAuthAccounts(this.authAccounts);
+                    appendAuthActivity({
+                        type: 'login',
+                        actor: this.currentUser.name,
+                        actor_user_id: this.currentUser.id,
+                        method: 'user',
+                    });
+                }
+            }
         }
+
+        if (ok) {
+            document.getElementById('auth-error').style.display = 'none';
+            document.getElementById('auth-password').value = '';
+            this.showApp();
+            return;
+        }
+        const err = document.getElementById('auth-error');
+        err.textContent = errorText;
+        err.style.display = 'block';
     },
 
     isAuthenticated() {
-        const auth = localStorage.getItem('ro_calc_auth');
+        const method = localStorage.getItem('ro_calc_auth_method') || 'admin';
         const ts = parseInt(localStorage.getItem('ro_calc_auth_ts') || '0');
-        if (auth && this.isAllowedAuthHash(auth) && (Date.now() - ts) < 86400000) return true;
+        if (!ts || (Date.now() - ts) >= 86400000) return false;
+
+        if (method === 'user') {
+            const userId = localStorage.getItem('ro_calc_auth_user_id');
+            return !!userId;
+        }
+
+        const auth = localStorage.getItem('ro_calc_auth');
+        if (auth && this.isAllowedAuthHash(auth)) return true;
         if (auth && !this.isAllowedAuthHash(auth)) {
             localStorage.removeItem('ro_calc_auth');
             localStorage.removeItem('ro_calc_auth_ts');
+            localStorage.removeItem('ro_calc_auth_method');
         }
         return false;
     },
 
+    async restoreAuthenticatedUser() {
+        const method = localStorage.getItem('ro_calc_auth_method') || 'admin';
+        if (method === 'admin') {
+            this.currentUser = { id: '__admin', name: 'Администратор', role: 'admin', employee_id: null };
+            return;
+        }
+        this.authAccounts = await loadAuthAccounts();
+        const userId = localStorage.getItem('ro_calc_auth_user_id');
+        const account = this.authAccounts.find(a => String(a.id) === String(userId));
+        if (account) {
+            this.currentUser = {
+                id: account.id,
+                employee_id: account.employee_id ?? null,
+                username: account.username || '',
+                name: account.employee_name || account.username || 'Сотрудник',
+                role: account.role || 'employee',
+            };
+            return;
+        }
+        this.currentUser = { id: '__admin', name: 'Администратор', role: 'admin', employee_id: null };
+        localStorage.setItem('ro_calc_auth_method', 'admin');
+        localStorage.removeItem('ro_calc_auth_user_id');
+    },
+
     logout() {
+        this.trackAuthEvent('logout');
         localStorage.removeItem('ro_calc_auth');
         localStorage.removeItem('ro_calc_auth_ts');
+        localStorage.removeItem('ro_calc_auth_method');
+        localStorage.removeItem('ro_calc_auth_user_id');
+        this.currentUser = null;
+        this._sessionStartedAt = null;
         document.getElementById('auth-screen').style.display = 'flex';
         document.getElementById('app-layout').classList.remove('active');
         this.hideUpdateBanner();
@@ -86,6 +177,47 @@ const App = {
         return hash === this.simpleHash('recycle2026') || hash === this.simpleHash('demo');
     },
 
+    hashUserPassword(username, password) {
+        return this.simpleHash(`ro:${String(username || '').trim().toLowerCase()}::${String(password || '')}`);
+    },
+
+    async prepareAuthUI() {
+        try {
+            const employees = await loadEmployees();
+            this.employees = (employees || []).filter(e => e && e.name && e.is_active !== false);
+        } catch (e) {
+            this.employees = [];
+        }
+        try {
+            this.authAccounts = await loadAuthAccounts();
+        } catch (e) {
+            this.authAccounts = [];
+        }
+        this.renderAuthUserSelect();
+    },
+
+    renderAuthUserSelect() {
+        const select = document.getElementById('auth-user-select');
+        if (!select) return;
+
+        const accounts = (this.authAccounts || [])
+            .filter(a => a && a.is_active !== false)
+            .sort((a, b) => String(a.employee_name || a.username || '').localeCompare(String(b.employee_name || b.username || ''), 'ru'));
+
+        let html = '<option value="__admin">Администратор</option>';
+        html += accounts.map(a => {
+            const name = this.escHtml(a.employee_name || a.username || 'Сотрудник');
+            const login = this.escHtml(a.username || '');
+            return `<option value="${this.escHtml(String(a.id))}">${name}${login ? ` (${login})` : ''}</option>`;
+        }).join('');
+        select.innerHTML = html;
+    },
+
+    async refreshAuthUsers() {
+        this.authAccounts = await loadAuthAccounts();
+        this.renderAuthUserSelect();
+    },
+
     async showApp() {
         document.getElementById('auth-screen').style.display = 'none';
         document.getElementById('app-layout').classList.add('active');
@@ -104,12 +236,12 @@ const App = {
         }
         localStorage.setItem('ro_calc_last_version', APP_VERSION);
 
-        initSupabase();
-
         this.settings = await loadSettings();
         this.templates = await loadTemplates();
         this.params = getProductionParams(this.settings);
         await this.initEmployeeContext();
+        this._sessionStartedAt = Date.now();
+        this.trackAuthEvent('session_start');
 
         this.handleRoute();
         this.startUpdateChecker();
@@ -133,12 +265,15 @@ const App = {
         this.employees = (all || []).filter(e => e && e.name && e.is_active !== false);
         const selectEl = document.getElementById('app-current-employee');
         const calcManagerEl = document.getElementById('calc-manager-name');
-        const savedId = localStorage.getItem('ro_calc_current_employee_id');
+        const userEmployeeId = this.currentUser && this.currentUser.employee_id != null
+            ? String(this.currentUser.employee_id)
+            : null;
+        const savedId = userEmployeeId || localStorage.getItem('ro_calc_current_employee_id');
         const calcCurrentName = calcManagerEl ? (calcManagerEl.value || '').trim() : '';
         const fallbackByName = calcCurrentName
             ? this.employees.find(e => (e.name || '').trim() === calcCurrentName)
             : null;
-        const fallback = fallbackByName || this.employees[0] || null;
+        const fallback = fallbackByName || null;
         const selected = this.employees.find(e => String(e.id) === String(savedId)) || fallback;
 
         this.currentEmployeeId = selected ? selected.id : null;
@@ -150,6 +285,7 @@ const App = {
             html += this.employees.map(e => `<option value="${this.escHtml(String(e.id))}">${this.escHtml(e.name || '')}</option>`).join('');
             selectEl.innerHTML = html;
             selectEl.value = this.currentEmployeeId != null ? String(this.currentEmployeeId) : '';
+            selectEl.disabled = !!userEmployeeId;
         }
 
         if (calcManagerEl) {
@@ -164,6 +300,9 @@ const App = {
     },
 
     onCurrentEmployeeChange(employeeId) {
+        if (this.currentUser && this.currentUser.employee_id != null) {
+            return;
+        }
         const selected = this.employees.find(e => String(e.id) === String(employeeId));
         if (!selected) {
             this.currentEmployeeId = null;
@@ -180,8 +319,22 @@ const App = {
     },
 
     getCurrentEmployeeName() {
+        if (this.currentUser && this.currentUser.name) return this.currentUser.name;
         const e = this.getCurrentEmployee();
         return (e && e.name) ? e.name : 'Неизвестный';
+    },
+
+    trackAuthEvent(type, extra = {}) {
+        const actor = this.getCurrentEmployeeName();
+        const payload = {
+            type,
+            actor,
+            actor_user_id: this.currentUser ? this.currentUser.id : null,
+            page: this.currentPage || '',
+            session_started_at: this._sessionStartedAt ? new Date(this._sessionStartedAt).toISOString() : null,
+            ...extra,
+        };
+        appendAuthActivity(payload);
     },
 
     applyCurrentEmployeeToCalculator(force = false) {
@@ -228,6 +381,7 @@ const App = {
         }
 
         this.onPageEnter(this.currentPage, subId);
+        this.trackAuthEvent('navigate', { to_page: this.currentPage });
     },
 
     onPageEnter(page, subId) {

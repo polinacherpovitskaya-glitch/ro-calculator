@@ -10,6 +10,9 @@ const Settings = {
     dirtyMolds: {},  // track which molds were edited { id: true }
     employeesData: [],
     editingEmployeeId: null,
+    authAccountsData: [],
+    authActivityData: [],
+    editingAuthAccountId: null,
 
     async load() {
         this.populateFields();
@@ -28,6 +31,9 @@ const Settings = {
         // Lazy-load employees when tab is opened
         if (tab === 'employees' && this.employeesData.length === 0) {
             this.loadEmployeesTab();
+        }
+        if (tab === 'logins') {
+            this.loadLoginsTab();
         }
         // Load backup tab info
         if (tab === 'backup') {
@@ -343,6 +349,194 @@ const Settings = {
     },
 
     // ==========================================
+    // AUTH LOGINS — system accounts per employee
+    // ==========================================
+
+    async loadLoginsTab() {
+        this.employeesData = await loadEmployees();
+        this.authAccountsData = await loadAuthAccounts();
+        this.authActivityData = await loadAuthActivity();
+        this.renderAuthAccountsTable();
+        this.renderAuthActivityTable();
+    },
+
+    showAddAuthAccount() {
+        this.editingAuthAccountId = null;
+        this.clearAuthAccountForm();
+        this.populateAuthEmployeeSelect();
+        document.getElementById('auth-account-form').style.display = '';
+        document.getElementById('auth-account-delete-btn').style.display = 'none';
+    },
+
+    populateAuthEmployeeSelect() {
+        const select = document.getElementById('auth-account-employee');
+        if (!select) return;
+        const active = (this.employeesData || []).filter(e => e.is_active !== false);
+        let html = '<option value="">-- Выберите сотрудника --</option>';
+        html += active.map(e => `<option value="${this.escHtml(String(e.id))}">${this.escHtml(e.name || '')}</option>`).join('');
+        select.innerHTML = html;
+    },
+
+    clearAuthAccountForm() {
+        const idEl = document.getElementById('auth-account-id');
+        if (idEl) idEl.value = '';
+        const empEl = document.getElementById('auth-account-employee');
+        if (empEl) empEl.value = '';
+        const userEl = document.getElementById('auth-account-username');
+        if (userEl) userEl.value = '';
+        const passEl = document.getElementById('auth-account-password');
+        if (passEl) passEl.value = '';
+        const activeEl = document.getElementById('auth-account-active');
+        if (activeEl) activeEl.value = '1';
+    },
+
+    cancelAuthAccount() {
+        document.getElementById('auth-account-form').style.display = 'none';
+        this.editingAuthAccountId = null;
+    },
+
+    editAuthAccount(id) {
+        const a = (this.authAccountsData || []).find(x => String(x.id) === String(id));
+        if (!a) return;
+        this.editingAuthAccountId = a.id;
+        this.populateAuthEmployeeSelect();
+        document.getElementById('auth-account-id').value = String(a.id);
+        document.getElementById('auth-account-employee').value = String(a.employee_id || '');
+        document.getElementById('auth-account-username').value = a.username || '';
+        document.getElementById('auth-account-password').value = '';
+        document.getElementById('auth-account-active').value = a.is_active === false ? '0' : '1';
+        document.getElementById('auth-account-form').style.display = '';
+        document.getElementById('auth-account-delete-btn').style.display = '';
+    },
+
+    async saveAuthAccount() {
+        const employeeId = parseInt(document.getElementById('auth-account-employee').value, 10);
+        const username = (document.getElementById('auth-account-username').value || '').trim().toLowerCase();
+        const password = document.getElementById('auth-account-password').value || '';
+        const isActive = document.getElementById('auth-account-active').value === '1';
+
+        if (!employeeId) { App.toast('Выберите сотрудника'); return; }
+        if (!username) { App.toast('Введите логин'); return; }
+
+        const employee = (this.employeesData || []).find(e => Number(e.id) === employeeId);
+        if (!employee) { App.toast('Сотрудник не найден'); return; }
+
+        const duplicate = (this.authAccountsData || []).find(a =>
+            (a.username || '').toLowerCase() === username && String(a.id) !== String(this.editingAuthAccountId)
+        );
+        if (duplicate) { App.toast('Логин уже занят'); return; }
+
+        let account = null;
+        if (this.editingAuthAccountId) {
+            account = this.authAccountsData.find(a => String(a.id) === String(this.editingAuthAccountId));
+            if (!account) return;
+        } else {
+            account = {
+                id: Date.now(),
+                created_at: new Date().toISOString(),
+                last_login_at: null,
+            };
+            this.authAccountsData.push(account);
+        }
+
+        account.employee_id = employeeId;
+        account.employee_name = employee.name || '';
+        account.role = employee.role || 'employee';
+        account.username = username;
+        account.is_active = isActive;
+        account.updated_at = new Date().toISOString();
+
+        if (password) {
+            account.password_hash = App.hashUserPassword(username, password);
+        } else if (!account.password_hash) {
+            App.toast('Укажите пароль');
+            return;
+        }
+
+        await saveAuthAccounts(this.authAccountsData);
+        await appendAuthActivity({
+            type: this.editingAuthAccountId ? 'account_update' : 'account_create',
+            actor: App.getCurrentEmployeeName(),
+            target_user: account.employee_name || account.username,
+        });
+        App.toast('Логин сохранён');
+        this.cancelAuthAccount();
+        await this.loadLoginsTab();
+        await App.refreshAuthUsers();
+    },
+
+    async deleteAuthAccount() {
+        if (!this.editingAuthAccountId) return;
+        const a = this.authAccountsData.find(x => String(x.id) === String(this.editingAuthAccountId));
+        if (!a) return;
+        if (!confirm(`Удалить логин "${a.username}"?`)) return;
+
+        this.authAccountsData = this.authAccountsData.filter(x => String(x.id) !== String(this.editingAuthAccountId));
+        await saveAuthAccounts(this.authAccountsData);
+        await appendAuthActivity({
+            type: 'account_delete',
+            actor: App.getCurrentEmployeeName(),
+            target_user: a.employee_name || a.username,
+        });
+        App.toast('Логин удалён');
+        this.cancelAuthAccount();
+        await this.loadLoginsTab();
+        await App.refreshAuthUsers();
+    },
+
+    renderAuthAccountsTable() {
+        const tbody = document.getElementById('auth-accounts-table-body');
+        if (!tbody) return;
+        if (!this.authAccountsData || this.authAccountsData.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">Нет логинов</td></tr>';
+            return;
+        }
+
+        const rows = [...this.authAccountsData]
+            .sort((a, b) => String(a.employee_name || '').localeCompare(String(b.employee_name || ''), 'ru'))
+            .map(a => {
+                const status = a.is_active === false
+                    ? '<span class="badge">Отключен</span>'
+                    : '<span class="badge badge-green">Активен</span>';
+                const last = a.last_login_at
+                    ? new Date(a.last_login_at).toLocaleString('ru-RU')
+                    : '—';
+                return `<tr>
+                    <td style="font-weight:600;">${this.escHtml(a.employee_name || '—')}</td>
+                    <td>${this.escHtml(a.username || '')}</td>
+                    <td style="text-align:center;">${status}</td>
+                    <td>${this.escHtml(last)}</td>
+                    <td><button class="btn btn-sm btn-outline" style="padding:2px 6px;font-size:10px;" onclick="Settings.editAuthAccount('${this.escHtml(String(a.id))}')">&#9998;</button></td>
+                </tr>`;
+            });
+        tbody.innerHTML = rows.join('');
+    },
+
+    renderAuthActivityTable() {
+        const tbody = document.getElementById('auth-activity-table-body');
+        if (!tbody) return;
+        const list = (this.authActivityData || []).slice(0, 100);
+        if (list.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">Нет событий</td></tr>';
+            return;
+        }
+
+        const rows = list.map(e => {
+            const at = e.at ? new Date(e.at).toLocaleString('ru-RU') : '—';
+            const actor = this.escHtml(e.actor || '—');
+            const action = this.escHtml(e.type || '');
+            const page = this.escHtml(e.to_page || e.page || '');
+            return `<tr>
+                <td>${at}</td>
+                <td>${actor}</td>
+                <td>${action}</td>
+                <td>${page || '—'}</td>
+            </tr>`;
+        });
+        tbody.innerHTML = rows.join('');
+    },
+
+    // ==========================================
     // BACKUP / RESTORE
     // ==========================================
 
@@ -355,6 +549,7 @@ const Settings = {
         'ro_calc_warehouseHistory', 'ro_calc_shipments',
         'ro_calc_vacations', 'ro_calc_order_factuals', 'ro_calc_imports',
         'ro_calc_colors',
+        'ro_calc_auth_accounts', 'ro_calc_auth_activity',
         'ro_calc_assembly_timing',
     ],
 

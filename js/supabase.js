@@ -38,6 +38,8 @@ const LOCAL_KEYS = {
     chinaPurchases: 'ro_calc_china_purchases',
     vacations: 'ro_calc_vacations',
     employees: 'ro_calc_employees',
+    authAccounts: 'ro_calc_auth_accounts',
+    authActivity: 'ro_calc_auth_activity',
     orderFactuals: 'ro_calc_order_factuals',
     warehouseItems: 'ro_calc_warehouse_items',
     warehouseReservations: 'ro_calc_warehouse_reservations',
@@ -1018,6 +1020,97 @@ async function deleteEmployee(employeeId) {
         const employees = (getLocal(LOCAL_KEYS.employees) || []).filter(e => e.id !== employeeId);
         setLocal(LOCAL_KEYS.employees, employees);
     }
+}
+
+// =============================================
+// AUTH ACCOUNTS (employee login/password mapping)
+// =============================================
+
+async function loadAuthAccounts() {
+    const fallback = getLocal(LOCAL_KEYS.authAccounts) || [];
+    if (isSupabaseReady()) {
+        try {
+            const { data, error } = await supabaseClient
+                .from('settings')
+                .select('value')
+                .eq('key', 'auth_accounts_json')
+                .maybeSingle();
+            if (!error && data && data.value) {
+                const parsed = JSON.parse(data.value) || [];
+                setLocal(LOCAL_KEYS.authAccounts, parsed);
+                return parsed;
+            }
+        } catch (e) {
+            console.error('loadAuthAccounts error:', e);
+        }
+    }
+    return fallback;
+}
+
+async function saveAuthAccounts(accounts) {
+    const payload = Array.isArray(accounts) ? accounts : [];
+    setLocal(LOCAL_KEYS.authAccounts, payload);
+    if (isSupabaseReady()) {
+        const { error } = await supabaseClient
+            .from('settings')
+            .upsert({
+                key: 'auth_accounts_json',
+                value: JSON.stringify(payload),
+                updated_at: new Date().toISOString(),
+            }, { onConflict: 'key' });
+        if (error) console.error('saveAuthAccounts error:', error);
+    }
+}
+
+// =============================================
+// AUTH ACTIVITY (audit trail for logins/navigation)
+// =============================================
+
+async function loadAuthActivity() {
+    const fallback = getLocal(LOCAL_KEYS.authActivity) || [];
+    if (isSupabaseReady()) {
+        try {
+            const { data, error } = await supabaseClient
+                .from('settings')
+                .select('value')
+                .eq('key', 'auth_activity_json')
+                .maybeSingle();
+            if (!error && data && data.value) {
+                const parsed = JSON.parse(data.value) || [];
+                setLocal(LOCAL_KEYS.authActivity, parsed);
+                return parsed;
+            }
+        } catch (e) {
+            console.error('loadAuthActivity error:', e);
+        }
+    }
+    return fallback;
+}
+
+async function saveAuthActivity(events) {
+    const payload = Array.isArray(events) ? events : [];
+    setLocal(LOCAL_KEYS.authActivity, payload);
+    if (isSupabaseReady()) {
+        const { error } = await supabaseClient
+            .from('settings')
+            .upsert({
+                key: 'auth_activity_json',
+                value: JSON.stringify(payload),
+                updated_at: new Date().toISOString(),
+            }, { onConflict: 'key' });
+        if (error) console.error('saveAuthActivity error:', error);
+    }
+}
+
+async function appendAuthActivity(event) {
+    const list = await loadAuthActivity();
+    list.unshift({
+        id: Date.now() + Math.floor(Math.random() * 1000),
+        at: new Date().toISOString(),
+        ...event,
+    });
+    const trimmed = list.slice(0, 800);
+    await saveAuthActivity(trimmed);
 }
 
 function getDefaultEmployees() {

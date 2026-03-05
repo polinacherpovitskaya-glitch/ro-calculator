@@ -18,6 +18,9 @@
     <div class="auth-box">
         <h1>Recycle Object</h1>
         <p>Калькулятор заказов</p>
+        <select id="auth-user-select" style="margin-bottom:8px;">
+            <option value="__admin">Администратор</option>
+        </select>
         <input type="password" id="auth-password" placeholder="Введите пароль" autocomplete="off">
         <div id="auth-error" class="auth-error">Неверный пароль</div>
         <button class="btn btn-primary btn-lg" style="width:100%" onclick="App.login()">Войти</button>
@@ -2196,6 +2199,7 @@
                 <div class="tab" data-tab="pricing" onclick="Settings.switchTab('pricing')">Ценообразование</div>
                 <div class="tab" data-tab="templates" onclick="Settings.switchTab('templates')">Справочник форм</div>
                 <div class="tab" data-tab="employees" onclick="Settings.switchTab('employees')">Сотрудники</div>
+                <div class="tab" data-tab="logins" onclick="Settings.switchTab('logins')">Логины</div>
                 <div class="tab" data-tab="company" onclick="Settings.switchTab('company')">Реквизиты</div>
                 <div class="tab" data-tab="timing" onclick="Settings.switchTab('timing')">⏱ Тайминг</div>
                 <div class="tab" data-tab="backup" onclick="Settings.switchTab('backup')">Бэкап</div>
@@ -2449,6 +2453,81 @@
                 </div>
             </div>
 
+            <div id="settings-tab-logins" class="settings-tab-content" style="display:none">
+                <div class="card">
+                    <div class="card-header">
+                        <h3>Доступы в систему</h3>
+                        <button class="btn btn-sm btn-primary" onclick="Settings.showAddAuthAccount()">+ Добавить логин</button>
+                    </div>
+
+                    <div id="auth-account-form" style="display:none; margin-bottom:16px; padding:16px; background:var(--bg); border-radius:8px;">
+                        <input type="hidden" id="auth-account-id">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Сотрудник</label>
+                                <select id="auth-account-employee"></select>
+                            </div>
+                            <div class="form-group">
+                                <label>Логин</label>
+                                <input type="text" id="auth-account-username" placeholder="polina">
+                            </div>
+                            <div class="form-group">
+                                <label>Пароль</label>
+                                <input type="password" id="auth-account-password" placeholder="Новый пароль">
+                            </div>
+                            <div class="form-group">
+                                <label>Статус</label>
+                                <select id="auth-account-active">
+                                    <option value="1">Активен</option>
+                                    <option value="0">Отключен</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="flex gap-8">
+                            <button class="btn btn-success" onclick="Settings.saveAuthAccount()">Сохранить</button>
+                            <button class="btn btn-outline" onclick="Settings.cancelAuthAccount()">Отмена</button>
+                            <button class="btn btn-danger" id="auth-account-delete-btn" style="margin-left:auto;display:none;" onclick="Settings.deleteAuthAccount()">Удалить</button>
+                        </div>
+                    </div>
+
+                    <div class="table-wrap">
+                        <table style="font-size:13px;">
+                            <thead>
+                                <tr>
+                                    <th>Сотрудник</th>
+                                    <th>Логин</th>
+                                    <th style="text-align:center;">Статус</th>
+                                    <th>Последний вход</th>
+                                    <th style="width:40px"></th>
+                                </tr>
+                            </thead>
+                            <tbody id="auth-accounts-table-body">
+                                <tr><td colspan="5" class="text-center text-muted">Загрузка...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header"><h3>Журнал активности</h3></div>
+                    <div class="table-wrap">
+                        <table style="font-size:12px;">
+                            <thead>
+                                <tr>
+                                    <th>Время</th>
+                                    <th>Сотрудник</th>
+                                    <th>Действие</th>
+                                    <th>Страница</th>
+                                </tr>
+                            </thead>
+                            <tbody id="auth-activity-table-body">
+                                <tr><td colspan="4" class="text-center text-muted">Нет событий</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
             <!-- Company legal details tab -->
             <div id="settings-tab-company" class="settings-tab-content" style="display:none">
                 <div class="card">
@@ -2618,7 +2697,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="js/supabase.js?v=46i"></script>
 <script src="js/calculator.js?v=46g"></script>
-<script src="js/app.js?v=55"></script>
+<script src="js/app.js?v=56"></script>
 <script src="js/dashboard.js?v=46g"></script>
 <script src="js/order-detail.js?v=47b"></script>
 <script src="js/orders.js?v=52"></script>
@@ -2636,6 +2715,6 @@
 <script src="js/china_catalog.js?v=46k"></script>
 <script src="js/marketplaces.js?v=46h"></script>
 <script src="js/warehouse.js?v=55"></script>
-<script src="js/settings.js?v=46l"></script>
+<script src="js/settings.js?v=56"></script>
 </body>
 </html>
