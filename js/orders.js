@@ -438,7 +438,8 @@ const Orders = {
                     'addition',
                     orderName || 'Заказ',
                     `Возврат на склад при смене статуса: ${App.statusLabel(oldStatus)} → ${App.statusLabel(newStatus)}`,
-                    managerName || ''
+                    managerName || '',
+                    { order_id: orderId }
                 );
             }
         }
@@ -491,7 +492,8 @@ const Orders = {
                     'deduction',
                     orderName || 'Заказ',
                     `Списание при смене статуса: ${App.statusLabel(oldStatus)} → ${App.statusLabel(newStatus)}`,
-                    managerName || ''
+                    managerName || '',
+                    { order_id: orderId }
                 );
             }
         }

@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v73';
+const APP_VERSION = 'v74';
 
 const App = {
     currentPage: 'dashboard',
@@ -3789,7 +3789,8 @@ const Calculator = {
                         'addition',
                         orderName,
                         `Возврат при замене фурнитуры в заказе`,
-                        managerName
+                        managerName,
+                        { order_id: App.editingOrderId || null }
                     );
                     deductQty = hw.qty; // deduct full new qty
                 }
@@ -3806,7 +3807,8 @@ const Calculator = {
                     reason,
                     orderName,
                     note,
-                    managerName
+                    managerName,
+                    { order_id: App.editingOrderId || null }
                 );
             }
 

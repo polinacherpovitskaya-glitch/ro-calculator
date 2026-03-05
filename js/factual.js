@@ -19,9 +19,9 @@ const Factual = {
         { key: 'salary_assembly',     label: 'ЗП сборка на фурнитуру',             planField: 'salaryAssembly',  hint: 'авто из «Часы»: этап «Сборка» × ставка сотрудника' },
         { key: 'salary_packaging',    label: 'ЗП упаковка',                        planField: 'salaryPackaging', hint: 'авто из «Часы»: этап «Упаковка» × ставка сотрудника' },
         { key: 'indirect_production', label: 'Косвенные (по фактическим часам)',  planField: 'indirectProduction', hint: 'авто: (часы выливания + срезания + сборки + упаковки) × косвенные/час' },
-        { key: 'hardware_total',      label: 'Фурнитура и NFC (закупка + доставка)', planField: 'hardwareTotal', hint: 'сейчас авто из плана (для склада = как в заказе)' },
-        { key: 'packaging_total',     label: 'Упаковка (закупка + доставка)',      planField: 'packagingTotal', hint: 'сейчас авто из плана (для склада = как в заказе)' },
-        { key: 'design_printing',     label: 'Нанесение (печать)',                 planField: 'designPrinting',  hint: 'пока вручную; позже подключим из FinTablo' },
+        { key: 'hardware_total',      label: 'Фурнитура и NFC (закупка + доставка)', planField: 'hardwareTotal', hint: 'авто из списаний склада по заказу (или план, если списаний ещё нет)' },
+        { key: 'packaging_total',     label: 'Упаковка (закупка + доставка)',      planField: 'packagingTotal', hint: 'авто из списаний склада по заказу (или план, если списаний ещё нет)' },
+        { key: 'design_printing',     label: 'Нанесение (печать)',                 planField: 'designPrinting',  hint: 'авто из последнего импорта FinTablo по заказу (если есть)' },
         { key: 'plastic',             label: 'Пластик',                            planField: 'plastic',         hint: 'от начальника производства' },
         { key: 'molds',               label: 'Молды (формы)',                      planField: 'molds',           hint: 'для бланков обычно 0; для кастома по факту закупки/ремонта' },
         { key: 'delivery_client',     label: 'Доставка клиенту',                   planField: 'delivery',        hint: 'пока вручную; позже подключим из FinTablo' },
@@ -48,6 +48,12 @@ const Factual = {
     _num(v) {
         const n = parseFloat(v);
         return Number.isFinite(n) ? n : 0;
+    },
+
+    _isAutoFactRow(key) {
+        if (this.AUTO_FACT_KEYS.has(key)) return true;
+        if (key === 'design_printing' && this.factData && this.factData._auto_printing_from_import) return true;
+        return false;
     },
 
     async load() {
@@ -302,7 +308,7 @@ const Factual = {
         this.factData = await loadFactual(orderId) || {};
         this._entries = await loadTimeEntries();
         this.applyHoursFromEntries(orderId);
-        this.applyDerivedFactCosts(params, orderId);
+        await this.applyDerivedFactCosts(params, orderId, order.order_name || '');
 
         // Render
         this.renderTable();
@@ -343,7 +349,7 @@ const Factual = {
             const factKey = 'fact_' + row.key;
             const factVal = parseFloat(fact[factKey]) || 0;
             if (row.key === 'molds' && planVal === 0 && factVal === 0) return;
-            const isAuto = this.AUTO_FACT_KEYS.has(row.key);
+            const isAuto = this._isAutoFactRow(row.key);
             planTotal += planVal;
             factTotal += factVal;
 
@@ -554,7 +560,7 @@ const Factual = {
         return round2(total);
     },
 
-    applyDerivedFactCosts(params, orderId) {
+    async applyDerivedFactCosts(params, orderId, orderName) {
         const hProd = parseFloat(this.factData.fact_hours_production) || 0;
         const hTrim = parseFloat(this.factData.fact_hours_trim) || 0;
         const hAsm = parseFloat(this.factData.fact_hours_assembly) || 0;
@@ -567,9 +573,74 @@ const Factual = {
         this.factData.fact_salary_assembly = this._sumStageSalary(orderId, 'assembly', params);
         this.factData.fact_salary_packaging = this._sumStageSalary(orderId, 'packaging', params);
         this.factData.fact_indirect_production = round2(totalHours * indirectPerHour);
-        // Current rule: for stock-based materials actual = planned.
-        this.factData.fact_hardware_total = round2(this.planData?.hardwareTotal || 0);
-        this.factData.fact_packaging_total = round2(this.planData?.packagingTotal || 0);
+
+        // FinTablo → auto printing (if imported for this order)
+        this.factData._auto_printing_from_import = false;
+        const imports = (await loadFintabloImports(orderId)) || [];
+        if (imports.length > 0) {
+            const latest = [...imports].sort((a, b) => new Date(b.import_date || 0) - new Date(a.import_date || 0))[0];
+            const importedPrinting = this._num(latest && latest.fact_printing);
+            if (importedPrinting > 0) {
+                this.factData.fact_design_printing = round2(importedPrinting);
+                this.factData._auto_printing_from_import = true;
+            }
+        }
+
+        // Warehouse history → auto hardware/packaging actuals
+        const whActual = await this._deriveMaterialFactsFromWarehouse(orderId, orderName);
+        this.factData.fact_hardware_total = whActual.found
+            ? round2(whActual.hardware)
+            : round2(this.planData?.hardwareTotal || 0);
+        this.factData.fact_packaging_total = whActual.found
+            ? round2(whActual.packaging)
+            : round2(this.planData?.packagingTotal || 0);
+    },
+
+    async _deriveMaterialFactsFromWarehouse(orderId, orderName) {
+        const history = (await loadWarehouseHistory()) || [];
+        if (history.length === 0) return { found: false, hardware: 0, packaging: 0 };
+
+        const items = (await loadWarehouseItems()) || [];
+        const itemMap = new Map(items.map(i => [Number(i.id), i]));
+
+        const sameOrder = (h) => {
+            if (h.order_id !== undefined && h.order_id !== null && h.order_id !== '') {
+                return Number(h.order_id) === Number(orderId);
+            }
+            return orderName && String(h.order_name || '').trim() === String(orderName).trim();
+        };
+
+        let hardware = 0;
+        let packaging = 0;
+        let found = false;
+
+        history.forEach(h => {
+            if (!sameOrder(h)) return;
+            const type = String(h.type || '');
+            if (type !== 'deduction' && type !== 'addition') return;
+
+            const qtyChange = this._num(h.qty_change);
+            if (qtyChange === 0) return;
+
+            const unitPrice = this._num(h.unit_price)
+                || this._num((itemMap.get(Number(h.item_id)) || {}).price_per_unit);
+            const deltaCost = round2(-qtyChange * unitPrice); // deduction(-qty)=+cost, addition(+qty)=-cost
+            if (deltaCost === 0) return;
+
+            const category = String(h.item_category || (itemMap.get(Number(h.item_id)) || {}).category || '').toLowerCase();
+            if (category === 'packaging') {
+                packaging += deltaCost;
+            } else {
+                hardware += deltaCost;
+            }
+            found = true;
+        });
+
+        return {
+            found,
+            hardware: round2(Math.max(0, hardware)),
+            packaging: round2(Math.max(0, packaging)),
+        };
     },
 
     _stageKey(entry) {

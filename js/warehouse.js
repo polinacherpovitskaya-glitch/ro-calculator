@@ -618,7 +618,7 @@ const Warehouse = {
     // STOCK ADJUSTMENTS
     // ==========================================
 
-    async adjustStock(itemId, qtyChange, reason, orderName, notes, manager) {
+    async adjustStock(itemId, qtyChange, reason, orderName, notes, manager, meta) {
         const items = await loadWarehouseItems();
         const idx = items.findIndex(i => i.id === itemId);
         if (idx < 0) return false;
@@ -637,10 +637,14 @@ const Warehouse = {
             item_id: itemId,
             item_name: item.name || '',
             item_sku: item.sku || '',
+            item_category: item.category || '',
             type: reason || 'adjustment',
             qty_change: qtyChange,
             qty_before: qtyBefore,
             qty_after: item.qty,
+            unit_price: parseFloat(item.price_per_unit) || 0,
+            total_cost_change: round2(Math.abs(qtyChange) * (parseFloat(item.price_per_unit) || 0)),
+            order_id: meta && meta.order_id ? meta.order_id : null,
             order_name: orderName || '',
             notes: notes || '',
             created_at: new Date().toISOString(),
