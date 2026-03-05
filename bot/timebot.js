@@ -1,26 +1,11 @@
 // =============================================
 // Recycle Object — Telegram Bot for Time Tracking
-// v2: Процентный отчёт, профили сотрудников, напоминания
-// =============================================
-//
-// Для запуска:
-// 1. npm init -y
-// 2. npm install node-telegram-bot-api @supabase/supabase-js
-// 3. Задать переменные окружения:
-//    - BOT_TOKEN (токен Telegram бота от @BotFather)
-//    - SUPABASE_URL (URL проекта Supabase)
-//    - SUPABASE_KEY (service_role ключ Supabase)
-// 4. node timebot.js
-//
-// Для деплоя:
-// - Railway.app (бесплатный tier)
-// - VPS с pm2
+// v3: проект -> этап -> часы, с поддержкой production-статусов
 // =============================================
 
 const TelegramBot = require('node-telegram-bot-api');
 const { createClient } = require('@supabase/supabase-js');
 
-// === Config ===
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_KEY;
@@ -33,21 +18,25 @@ if (!BOT_TOKEN || !SUPABASE_URL || !SUPABASE_KEY) {
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-// User state machine for multi-step reporting
 const userStates = {};
-
-// Role labels
 const ROLE_LABELS = { production: 'Производство', office: 'Офис', management: 'Руководство' };
+const STAGE_LABELS = {
+    casting: 'Выливание пластика',
+    trim: 'Срезание литника',
+    assembly: 'Сборка',
+    packaging: 'Упаковка',
+    other: 'Другое',
+};
+const PRODUCTION_STATUSES = ['production_casting', 'production_hardware', 'production_packaging', 'in_production'];
 
 // =============================================
-// /start — Link employee to Telegram account
+// /start — employee linking
 // =============================================
 
 bot.onText(/\/start/, async (msg) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
 
-    // Check if already linked
     const { data: existing } = await supabase
         .from('employees')
         .select('*')
@@ -58,7 +47,7 @@ bot.onText(/\/start/, async (msg) => {
         bot.sendMessage(chatId,
             `Привет, ${existing.name}! Ты уже подключён.\n\n` +
             `Команды:\n` +
-            `/report — Записать время за день\n` +
+            `/report — Записать фактические часы\n` +
             `/today — Мои записи за сегодня\n` +
             `/week — Мои записи за неделю\n` +
             `/status — Мой профиль\n` +
@@ -67,7 +56,6 @@ bot.onText(/\/start/, async (msg) => {
         return;
     }
 
-    // Not linked — show list of unlinked employees
     const { data: employees } = await supabase
         .from('employees')
         .select('id, name, role')
@@ -77,20 +65,20 @@ bot.onText(/\/start/, async (msg) => {
     if (!employees || employees.length === 0) {
         bot.sendMessage(chatId,
             'Нет доступных профилей сотрудников.\n' +
-            'Попросите администратора добавить вас через веб-интерфейс (Настройки → Сотрудники).'
+            'Попросите администратора добавить вас через Настройки -> Сотрудники.'
         );
         return;
     }
 
     const keyboard = employees.map(e => ([{
         text: `${e.name} (${ROLE_LABELS[e.role] || e.role})`,
-        callback_data: `link_${e.id}`
+        callback_data: `link_${e.id}`,
     }]));
 
     userStates[telegramId] = { step: 'link_choose_name' };
 
     bot.sendMessage(chatId, 'Выбери своё имя из списка:', {
-        reply_markup: { inline_keyboard: keyboard }
+        reply_markup: { inline_keyboard: keyboard },
     });
 });
 
@@ -100,24 +88,26 @@ bot.onText(/\/start/, async (msg) => {
 
 bot.onText(/\/help/, (msg) => {
     bot.sendMessage(msg.chat.id,
-        `Как пользоваться:\n\n` +
-        `1. Нажми /report в конце рабочего дня\n` +
-        `2. Выбери проект из кнопок\n` +
-        `3. Введи % от рабочего дня (например: 60)\n` +
-        `4. Если было несколько проектов — бот спросит дальше\n` +
-        `5. Когда 100% заполнено — опционально описание задач\n\n` +
-        `Бот сам пересчитает проценты в часы по твоему графику.\n` +
-        `Напоминание приходит за 30 мин до конца рабочего дня.`
+        `Как заполнять отчет:\n\n` +
+        `1. Нажми /report\n` +
+        `2. Выбери проект (заказ в производстве или Другое)\n` +
+        `3. Выбери этап работ\n` +
+        `4. Введи часы\n` +
+        `5. При необходимости добавь еще этап/проект\n\n` +
+        `Бот записывает фактические часы по этапам для план-факта.`
     );
 });
 
 // =============================================
-// /status — Show employee profile
+// /status
 // =============================================
 
 bot.onText(/\/status/, async (msg) => {
     const emp = await getEmployee(msg.from.id);
-    if (!emp) { bot.sendMessage(msg.chat.id, 'Ты не подключён. Нажми /start'); return; }
+    if (!emp) {
+        bot.sendMessage(msg.chat.id, 'Ты не подключён. Нажми /start');
+        return;
+    }
 
     const reminderTime = `${pad(emp.reminder_hour)}:${pad(emp.reminder_minute)} UTC+${emp.timezone_offset}`;
     bot.sendMessage(msg.chat.id,
@@ -126,13 +116,13 @@ bot.onText(/\/status/, async (msg) => {
         `Роль: ${ROLE_LABELS[emp.role] || emp.role}\n` +
         `Рабочий день: ${emp.daily_hours}ч\n` +
         `Напоминание: ${reminderTime}\n` +
-        `Описание задач: ${emp.tasks_required ? 'обязательно' : 'опционально'}`,
+        `Комментарий к отчету: ${emp.tasks_required ? 'обязательный' : 'опциональный'}`,
         { parse_mode: 'Markdown' }
     );
 });
 
 // =============================================
-// /report — Percentage-based daily reporting
+// /report
 // =============================================
 
 bot.onText(/\/report/, async (msg) => {
@@ -145,33 +135,27 @@ bot.onText(/\/report/, async (msg) => {
         return;
     }
 
-    // Check if already reported 100% today
     const today = getLocalDate(emp.timezone_offset);
     const { data: todayEntries } = await supabase
         .from('time_entries')
-        .select('hours, percentage')
+        .select('hours')
         .eq('telegram_id', telegramId)
         .eq('date', today);
 
-    const existingPct = (todayEntries || []).reduce((s, e) => s + (e.percentage || 0), 0);
-    if (existingPct >= 100) {
-        bot.sendMessage(chatId,
-            `Ты уже отчитался за сегодня (${existingPct}%).\n` +
-            `Хочешь перезаписать? Используй /clear чтобы очистить сегодняшние записи.`
-        );
-        return;
-    }
-
-    await showProjectPicker(chatId, telegramId, emp, existingPct);
+    const existingHours = round2((todayEntries || []).reduce((s, e) => s + (parseFloat(e.hours) || 0), 0));
+    await showProjectPicker(chatId, telegramId, emp, existingHours, []);
 });
 
 // =============================================
-// /clear — Clear today's entries
+// /clear
 // =============================================
 
 bot.onText(/\/clear/, async (msg) => {
     const emp = await getEmployee(msg.from.id);
-    if (!emp) { bot.sendMessage(msg.chat.id, 'Ты не подключён. Нажми /start'); return; }
+    if (!emp) {
+        bot.sendMessage(msg.chat.id, 'Ты не подключён. Нажми /start');
+        return;
+    }
 
     const today = getLocalDate(emp.timezone_offset);
     const { error } = await supabase
@@ -180,15 +164,12 @@ bot.onText(/\/clear/, async (msg) => {
         .eq('telegram_id', msg.from.id)
         .eq('date', today);
 
-    if (error) {
-        bot.sendMessage(msg.chat.id, 'Ошибка удаления. Попробуй ещё раз.');
-    } else {
-        bot.sendMessage(msg.chat.id, 'Записи за сегодня удалены. Нажми /report чтобы заполнить заново.');
-    }
+    if (error) bot.sendMessage(msg.chat.id, 'Ошибка удаления. Попробуй ещё раз.');
+    else bot.sendMessage(msg.chat.id, 'Записи за сегодня удалены. Нажми /report чтобы заполнить заново.');
 });
 
 // =============================================
-// Callback query handler (buttons)
+// callback buttons
 // =============================================
 
 bot.on('callback_query', async (query) => {
@@ -199,10 +180,9 @@ bot.on('callback_query', async (query) => {
 
     bot.answerCallbackQuery(query.id);
 
-    // --- Employee linking ---
     if (data.startsWith('link_')) {
         if (!state || state.step !== 'link_choose_name') return;
-        const empId = parseInt(data.replace('link_', ''));
+        const empId = parseInt(data.replace('link_', ''), 10);
 
         const { error } = await supabase
             .from('employees')
@@ -218,73 +198,72 @@ bot.on('callback_query', async (query) => {
             return;
         }
 
-        const { data: emp } = await supabase
-            .from('employees').select('*').eq('id', empId).single();
-
+        const { data: emp } = await supabase.from('employees').select('*').eq('id', empId).single();
         delete userStates[telegramId];
 
         bot.sendMessage(chatId,
             `Готово! Привет, ${emp.name}!\n\n` +
             `Твой рабочий день: ${emp.daily_hours}ч\n` +
-            `Напоминание в ${pad(emp.reminder_hour)}:${pad(emp.reminder_minute)} (UTC+${emp.timezone_offset})\n\n` +
-            `Нажми /report чтобы записать время.`
+            `Нажми /report чтобы записать фактическое время.`
         );
         return;
     }
 
-    // --- Project selection ---
+    if (!state) return;
+
     if (data.startsWith('proj_')) {
-        if (!state || state.step !== 'choose_project') return;
+        if (state.step !== 'choose_project') return;
 
         if (data === 'proj_general') {
             state.current_project = 'Общие работы';
             state.current_order_id = null;
-        } else if (data === 'proj_custom') {
+            await showStagePicker(chatId, state);
+            return;
+        }
+
+        if (data === 'proj_custom') {
             state.step = 'enter_custom_project';
             bot.sendMessage(chatId, 'Введи название проекта:');
             return;
-        } else {
-            const orderId = parseInt(data.replace('proj_', ''));
-            const project = state.projects.find(p => p.id === orderId);
-            state.current_project = project ? project.order_name : 'Проект #' + orderId;
-            state.current_order_id = orderId;
         }
 
-        askPercentage(chatId, state);
+        const orderId = parseInt(data.replace('proj_', ''), 10);
+        const project = (state.projects || []).find(p => Number(p.id) === orderId);
+        state.current_project = project ? project.order_name : `Проект #${orderId}`;
+        state.current_order_id = orderId;
+        await showStagePicker(chatId, state);
         return;
     }
 
-    // --- More projects or done ---
-    if (data === 'more_projects') {
-        if (!state) return;
-        await showProjectPicker(chatId, telegramId, state.employee, state.total_pct);
-        return;
-    }
+    if (data.startsWith('stage_')) {
+        if (state.step !== 'choose_stage') return;
 
-    if (data === 'fill_rest') {
-        if (!state || !state.entries.length) return;
-        // Add remaining % to last project
-        const remaining = 100 - state.total_pct;
-        if (remaining > 0) {
-            const lastEntry = state.entries[state.entries.length - 1];
-            lastEntry.percentage += remaining;
-            lastEntry.hours = round2((lastEntry.percentage / 100) * state.employee.daily_hours);
-            state.total_pct = 100;
+        const stageKey = data.replace('stage_', '');
+        if (stageKey === 'other') {
+            state.step = 'enter_stage_other';
+            bot.sendMessage(chatId, 'Опиши этап работ (своими словами):');
+            return;
         }
-        await askDescription(chatId, state);
+
+        state.current_stage = stageKey;
+        state.current_stage_label = STAGE_LABELS[stageKey] || stageKey;
+        askHours(chatId, state);
         return;
     }
 
-    if (data === 'report_done') {
-        if (!state) return;
-        // Fill remaining as the current total (allow partial)
+    if (data === 'more_entries') {
+        await showProjectPicker(chatId, telegramId, state.employee, state.existing_hours, state.entries);
+        return;
+    }
+
+    if (data === 'finish_report') {
         await askDescription(chatId, state);
         return;
     }
 });
 
 // =============================================
-// Message handler (text input)
+// text handler
 // =============================================
 
 bot.on('message', async (msg) => {
@@ -292,75 +271,74 @@ bot.on('message', async (msg) => {
     const chatId = msg.chat.id;
     const text = (msg.text || '').trim();
 
-    // Skip commands
     if (text.startsWith('/')) return;
 
     const state = userStates[telegramId];
     if (!state) return;
 
-    // --- Custom project name ---
     if (state.step === 'enter_custom_project') {
-        if (!text) { bot.sendMessage(chatId, 'Введи название проекта:'); return; }
+        if (!text) {
+            bot.sendMessage(chatId, 'Введи название проекта:');
+            return;
+        }
         state.current_project = text;
         state.current_order_id = null;
-        askPercentage(chatId, state);
+        await showStagePicker(chatId, state);
         return;
     }
 
-    // --- Percentage input ---
-    if (state.step === 'enter_percentage') {
-        const pct = parseInt(text.replace('%', '').trim());
-        const remaining = 100 - state.total_pct;
+    if (state.step === 'enter_stage_other') {
+        if (!text) {
+            bot.sendMessage(chatId, 'Опиши этап работ:');
+            return;
+        }
+        state.current_stage = 'other';
+        state.current_stage_label = text;
+        askHours(chatId, state);
+        return;
+    }
 
-        if (isNaN(pct) || pct < 1 || pct > remaining) {
-            bot.sendMessage(chatId, `Введи число от 1 до ${remaining}`);
+    if (state.step === 'enter_hours') {
+        const hours = parseFloat(text.replace(',', '.'));
+        if (Number.isNaN(hours) || hours <= 0 || hours > 24) {
+            bot.sendMessage(chatId, 'Введи корректное число часов от 0.25 до 24, например: 2.5');
             return;
         }
 
-        const hours = round2((pct / 100) * state.employee.daily_hours);
-
+        const cleanHours = round2(hours);
         state.entries.push({
             project_name: state.current_project,
             order_id: state.current_order_id,
-            percentage: pct,
-            hours: hours,
+            stage: state.current_stage,
+            stage_label: state.current_stage_label,
+            hours: cleanHours,
         });
-        state.total_pct += pct;
 
-        if (state.total_pct >= 100) {
-            await askDescription(chatId, state);
-        } else {
-            const leftPct = 100 - state.total_pct;
-            const leftHours = round2((leftPct / 100) * state.employee.daily_hours);
+        const sessionHours = round2(state.entries.reduce((s, e) => s + e.hours, 0));
+        const dayTotal = round2(state.existing_hours + sessionHours);
 
-            bot.sendMessage(chatId,
-                `✓ ${state.current_project} — ${pct}% (${hours}ч)\n` +
-                `Осталось: ${leftPct}% (${leftHours}ч)\n\n` +
-                `Ещё проект?`,
-                {
-                    reply_markup: {
-                        inline_keyboard: [
-                            [{ text: 'Да, ещё проект', callback_data: 'more_projects' }],
-                            [{ text: `Остальное ${leftPct}% сюда же`, callback_data: 'fill_rest' }],
-                            [{ text: 'Закончить (частичный)', callback_data: 'report_done' }],
-                        ]
-                    }
-                }
-            );
-            state.step = 'choose_more_or_done';
-        }
+        state.step = 'choose_more_or_done';
+        bot.sendMessage(chatId,
+            `✓ ${state.current_project} / ${state.current_stage_label} — ${cleanHours}ч\n` +
+            `За сегодня уже набрано: ${dayTotal}ч\n\n` +
+            `Добавить ещё запись?`,
+            {
+                reply_markup: {
+                    inline_keyboard: [
+                        [{ text: 'Да, добавить', callback_data: 'more_entries' }],
+                        [{ text: 'Завершить отчёт', callback_data: 'finish_report' }],
+                    ],
+                },
+            }
+        );
         return;
     }
 
-    // --- Description input ---
     if (state.step === 'enter_description') {
-        const description = text;
-        await saveAllEntries(chatId, telegramId, state, description);
-        return;
+        await saveAllEntries(chatId, telegramId, state, text);
     }
 });
 
-// Handle /skip for description
 bot.onText(/\/skip/, async (msg) => {
     const telegramId = msg.from.id;
     const chatId = msg.chat.id;
@@ -372,12 +350,15 @@ bot.onText(/\/skip/, async (msg) => {
 });
 
 // =============================================
-// /today — Today's entries
+// /today
 // =============================================
 
 bot.onText(/\/today/, async (msg) => {
     const emp = await getEmployee(msg.from.id);
-    if (!emp) { bot.sendMessage(msg.chat.id, 'Ты не подключён. Нажми /start'); return; }
+    if (!emp) {
+        bot.sendMessage(msg.chat.id, 'Ты не подключён. Нажми /start');
+        return;
+    }
 
     const today = getLocalDate(emp.timezone_offset);
     const { data } = await supabase
@@ -393,27 +374,28 @@ bot.onText(/\/today/, async (msg) => {
     }
 
     let totalHours = 0;
-    let totalPct = 0;
     let text = `Записи за *${today}*:\n\n`;
-    data.forEach(e => {
-        const pctStr = e.percentage ? ` (${e.percentage}%)` : '';
-        text += `${e.project_name} — ${e.hours}ч${pctStr}\n`;
-        totalHours += e.hours;
-        totalPct += (e.percentage || 0);
-    });
-    text += `\nИтого: *${totalHours}ч* (${totalPct}%)`;
-    if (data[0]?.description) text += `\nОписание: ${data[0].description}`;
 
+    data.forEach(e => {
+        const stage = parseStageLabel(e.description);
+        text += `${e.project_name} / ${stage} — ${e.hours}ч\n`;
+        totalHours += parseFloat(e.hours) || 0;
+    });
+
+    text += `\nИтого: *${round2(totalHours)}ч*`;
     bot.sendMessage(msg.chat.id, text, { parse_mode: 'Markdown' });
 });
 
 // =============================================
-// /week — Last 7 days
+// /week
 // =============================================
 
 bot.onText(/\/week/, async (msg) => {
     const emp = await getEmployee(msg.from.id);
-    if (!emp) { bot.sendMessage(msg.chat.id, 'Ты не подключён. Нажми /start'); return; }
+    if (!emp) {
+        bot.sendMessage(msg.chat.id, 'Ты не подключён. Нажми /start');
+        return;
+    }
 
     const weekAgo = new Date();
     weekAgo.setDate(weekAgo.getDate() - 7);
@@ -433,28 +415,31 @@ bot.onText(/\/week/, async (msg) => {
 
     const byDate = {};
     let total = 0;
+
     data.forEach(e => {
         if (!byDate[e.date]) byDate[e.date] = [];
         byDate[e.date].push(e);
-        total += e.hours;
+        total += parseFloat(e.hours) || 0;
     });
 
-    let text = `За последние 7 дней:\n\n`;
-    Object.entries(byDate).sort((a, b) => b[0].localeCompare(a[0])).forEach(([date, entries]) => {
-        const dayTotal = entries.reduce((s, e) => s + e.hours, 0);
-        const dayPct = entries.reduce((s, e) => s + (e.percentage || 0), 0);
-        text += `*${date}* (${dayTotal}ч, ${dayPct}%):\n`;
-        entries.forEach(e => {
-            text += `  ${e.project_name} — ${e.percentage || '?'}% (${e.hours}ч)\n`;
+    let text = 'За последние 7 дней:\n\n';
+    Object.entries(byDate)
+        .sort((a, b) => b[0].localeCompare(a[0]))
+        .forEach(([date, entries]) => {
+            const dayTotal = round2(entries.reduce((s, e) => s + (parseFloat(e.hours) || 0), 0));
+            text += `*${date}* (${dayTotal}ч):\n`;
+            entries.forEach(e => {
+                const stage = parseStageLabel(e.description);
+                text += `  ${e.project_name} / ${stage} — ${e.hours}ч\n`;
+            });
         });
-    });
-    text += `\nИтого: *${total}ч* за ${Object.keys(byDate).length} дней`;
 
+    text += `\nИтого: *${round2(total)}ч* за ${Object.keys(byDate).length} дней`;
     bot.sendMessage(msg.chat.id, text, { parse_mode: 'Markdown' });
 });
 
 // =============================================
-// Helper functions
+// helpers
 // =============================================
 
 async function getEmployee(telegramId) {
@@ -466,54 +451,73 @@ async function getEmployee(telegramId) {
     return data;
 }
 
-async function showProjectPicker(chatId, telegramId, emp, existingPct) {
+async function showProjectPicker(chatId, telegramId, emp, existingHours, entries) {
     let projects = [];
     try {
         const { data } = await supabase
             .from('orders')
-            .select('id, order_name, client_name')
-            .in('status', ['calculated', 'in_production'])
-            .order('created_at', { ascending: false });
-        if (data) projects = data;
+            .select('id, order_name, client_name, status')
+            .in('status', PRODUCTION_STATUSES)
+            .order('updated_at', { ascending: false });
+        projects = data || [];
     } catch (e) {
-        console.error('Failed to load orders:', e);
+        console.error('Failed to load production orders:', e);
     }
 
     const keyboard = [];
     keyboard.push([{ text: 'Общие работы', callback_data: 'proj_general' }]);
+
     projects.forEach(p => {
         const label = p.order_name + (p.client_name ? ` (${p.client_name})` : '');
         keyboard.push([{ text: label, callback_data: `proj_${p.id}` }]);
     });
-    keyboard.push([{ text: 'Другое...', callback_data: 'proj_custom' }]);
+
+    keyboard.push([{ text: 'Другое (свой проект)', callback_data: 'proj_custom' }]);
 
     userStates[telegramId] = {
         step: 'choose_project',
         employee: emp,
-        projects: projects,
-        entries: userStates[telegramId]?.entries || [],
-        total_pct: existingPct || userStates[telegramId]?.total_pct || 0,
+        projects,
+        existing_hours: existingHours || 0,
+        entries: Array.isArray(entries) ? entries : [],
     };
 
-    const remaining = 100 - (userStates[telegramId].total_pct || 0);
-    const msg = remaining < 100
-        ? `${emp.name}, на какой проект записать оставшиеся ${remaining}%?`
-        : `${emp.name}, на какой проект записать время?`;
-
-    bot.sendMessage(chatId, msg, {
-        reply_markup: { inline_keyboard: keyboard }
-    });
-}
-
-function askPercentage(chatId, state) {
-    state.step = 'enter_percentage';
-    const remaining = 100 - state.total_pct;
-    const remainHours = round2((remaining / 100) * state.employee.daily_hours);
+    const sessionHours = round2((entries || []).reduce((s, e) => s + (e.hours || 0), 0));
+    const totalHours = round2((existingHours || 0) + sessionHours);
 
     bot.sendMessage(chatId,
+        `${emp.name}, выбери проект.\n` +
+        `Сегодня уже зафиксировано: ${totalHours}ч`,
+        { reply_markup: { inline_keyboard: keyboard } }
+    );
+}
+
+async function showStagePicker(chatId, state) {
+    state.step = 'choose_stage';
+
+    const keyboard = [
+        [{ text: STAGE_LABELS.casting, callback_data: 'stage_casting' }],
+        [{ text: STAGE_LABELS.trim, callback_data: 'stage_trim' }],
+        [{ text: STAGE_LABELS.assembly, callback_data: 'stage_assembly' }],
+        [{ text: STAGE_LABELS.packaging, callback_data: 'stage_packaging' }],
+        [{ text: STAGE_LABELS.other, callback_data: 'stage_other' }],
+    ];
+
+    bot.sendMessage(chatId,
+        `Проект: *${state.current_project}*\nВыбери этап работ:`,
+        {
+            parse_mode: 'Markdown',
+            reply_markup: { inline_keyboard: keyboard },
+        }
+    );
+}
+
+function askHours(chatId, state) {
+    state.step = 'enter_hours';
+    bot.sendMessage(chatId,
         `Проект: *${state.current_project}*\n` +
-        `Осталось: ${remaining}% (${remainHours}ч из ${state.employee.daily_hours}ч)\n\n` +
-        `Сколько процентов рабочего дня ушло на этот проект? (1—${remaining})`,
+        `Этап: *${state.current_stage_label}*\n\n` +
+        `Сколько часов потратили? (например: 2.5)`,
         { parse_mode: 'Markdown' }
     );
 }
@@ -521,54 +525,90 @@ function askPercentage(chatId, state) {
 async function askDescription(chatId, state) {
     state.step = 'enter_description';
 
-    const summary = state.entries.map(e =>
-        `${e.project_name} — ${e.percentage}% (${e.hours}ч)`
-    ).join('\n');
+    const summary = state.entries
+        .map(e => `${e.project_name} / ${e.stage_label} — ${e.hours}ч`)
+        .join('\n');
 
-    const totalHours = state.entries.reduce((s, e) => s + e.hours, 0);
+    const sessionHours = round2(state.entries.reduce((s, e) => s + e.hours, 0));
+    const dayTotal = round2(state.existing_hours + sessionHours);
 
-    let prompt;
-    if (state.employee.tasks_required) {
-        prompt = '\nОпиши, *что конкретно делал сегодня* (обязательно):';
-    } else {
-        prompt = '\nОписание задач (необязательно, /skip чтобы пропустить):';
-    }
+    const suffix = state.employee.tasks_required
+        ? '\nКомментарий к дню (обязательно):'
+        : '\nКомментарий к дню (необязательно, /skip чтобы пропустить):';
 
     bot.sendMessage(chatId,
-        `Итого за день (${round2(totalHours)}ч из ${state.employee.daily_hours}ч):\n\n` +
-        summary + '\n' + prompt,
-        { parse_mode: 'Markdown' }
+        `Проверка перед сохранением:\n\n${summary}\n\n` +
+        `Добавляется: ${sessionHours}ч\n` +
+        `Итого за сегодня будет: ${dayTotal}ч` + suffix
     );
 }
 
-async function saveAllEntries(chatId, telegramId, state, description) {
+function buildMetaDescription(stageKey, stageLabel, comment) {
+    const payload = JSON.stringify({ stage: stageKey, stage_label: stageLabel });
+    return `[meta]${payload}[/meta] ${String(comment || '').trim()}`.trim();
+}
+
+function parseStageLabel(description) {
+    const raw = String(description || '');
+    const markerMatch = raw.match(/^\[meta\](\{.*?\})\[\/meta\]/);
+    if (markerMatch) {
+        try {
+            const parsed = JSON.parse(markerMatch[1]);
+            if (parsed?.stage_label) return parsed.stage_label;
+            if (parsed?.stage && STAGE_LABELS[parsed.stage]) return STAGE_LABELS[parsed.stage];
+        } catch (e) {
+            // ignore
+        }
+    }
+
+    const stageMatch = raw.match(/(?:^|\n)Этап:\s*([^\n]+)/i);
+    if (stageMatch) return stageMatch[1].trim();
+
+    return '—';
+}
+
+async function saveAllEntries(chatId, telegramId, state, comment) {
     const today = getLocalDate(state.employee.timezone_offset);
+
+    if (!state.entries || state.entries.length === 0) {
+        bot.sendMessage(chatId, 'Нет записей для сохранения. Нажми /report.');
+        delete userStates[telegramId];
+        return;
+    }
+
+    if (state.employee.tasks_required && !String(comment || '').trim()) {
+        bot.sendMessage(chatId, 'Комментарий обязателен. Опиши, что делали за день.');
+        return;
+    }
 
     try {
         for (const entry of state.entries) {
-            await supabase.from('time_entries').insert({
+            const payload = {
                 worker_name: state.employee.name,
                 project_name: entry.project_name,
                 order_id: entry.order_id,
                 hours: entry.hours,
-                percentage: entry.percentage,
                 date: today,
-                description: description,
+                description: buildMetaDescription(entry.stage, entry.stage_label, comment),
                 source: 'telegram',
                 telegram_id: telegramId,
-            });
+            };
+
+            const { error } = await supabase.from('time_entries').insert(payload);
+            if (error) throw error;
         }
 
-        const summary = state.entries.map(e =>
-            `${e.project_name} — ${e.percentage}% (${e.hours}ч)`
-        ).join('\n');
+        const summary = state.entries
+            .map(e => `${e.project_name} / ${e.stage_label} — ${e.hours}ч`)
+            .join('\n');
 
-        const totalHours = state.entries.reduce((s, e) => s + e.hours, 0);
+        const sessionHours = round2(state.entries.reduce((s, e) => s + e.hours, 0));
+        const dayTotal = round2(state.existing_hours + sessionHours);
 
         bot.sendMessage(chatId,
-            `Записано!\n\n${summary}\n` +
-            (description ? `\nОписание: ${description}\n` : '') +
-            `\nИтого: ${round2(totalHours)}ч`
+            `Записано!\n\n${summary}\n\n` +
+            `Добавлено: ${sessionHours}ч\n` +
+            `Итого за сегодня: ${dayTotal}ч`
         );
     } catch (e) {
         console.error('Save error:', e);
@@ -585,11 +625,11 @@ function getLocalDate(timezoneOffset) {
     return new Date(localMs).toISOString().split('T')[0];
 }
 
-function round2(n) { return Math.round(n * 100) / 100; }
+function round2(n) { return Math.round((parseFloat(n) || 0) * 100) / 100; }
 function pad(n) { return String(n || 0).padStart(2, '0'); }
 
 // =============================================
-// REMINDER SYSTEM — Check every minute
+// reminder system
 // =============================================
 
 setInterval(async () => {
@@ -617,7 +657,6 @@ async function checkReminders() {
         const localHour = (utcHour + (emp.timezone_offset || 3) + 24) % 24;
         const localMinute = utcMinute;
 
-        // Evening reminder — at their configured time
         if (localHour === emp.reminder_hour && localMinute === emp.reminder_minute) {
             const today = getLocalDate(emp.timezone_offset);
             const { data: todayEntries } = await supabase
@@ -628,19 +667,16 @@ async function checkReminders() {
 
             if (!todayEntries || todayEntries.length === 0) {
                 bot.sendMessage(emp.telegram_id,
-                    `${emp.name}, рабочий день подходит к концу!\n` +
-                    `Расскажи, чем занимался сегодня: /report`
+                    `${emp.name}, рабочий день подходит к концу.\n` +
+                    `Заполни, пожалуйста, фактические часы: /report`
                 );
-                console.log(`Reminder sent to ${emp.name} (evening)`);
             }
         }
 
-        // Morning follow-up at 9:00 local — check if yesterday was missed
         if (localHour === 9 && localMinute === 0) {
             const yesterday = new Date(now);
             yesterday.setDate(yesterday.getDate() - 1);
             const dayOfWeek = yesterday.getDay();
-            // Skip weekends (0=Sunday, 6=Saturday)
             if (dayOfWeek === 0 || dayOfWeek === 6) continue;
 
             const yesterdayStr = yesterday.toISOString().split('T')[0];
@@ -652,20 +688,14 @@ async function checkReminders() {
 
             if (!yesterdayEntries || yesterdayEntries.length === 0) {
                 bot.sendMessage(emp.telegram_id,
-                    `Доброе утро, ${emp.name}! Вчера (${yesterdayStr}) ты не заполнил отчёт.\n` +
+                    `Доброе утро, ${emp.name}. Вчера (${yesterdayStr}) отчёт не заполнен.\n` +
                     `Пожалуйста, заполни: /report`
                 );
-                console.log(`Reminder sent to ${emp.name} (morning follow-up for ${yesterdayStr})`);
             }
         }
     }
 }
 
-// =============================================
-// Startup
-// =============================================
-
-console.log('=== Recycle Object TimeBot v2 ===');
-console.log('Features: % reporting, employee linking, reminders');
+console.log('=== Recycle Object TimeBot v3 ===');
+console.log('Flow: project -> stage -> hours');
 console.log('Commands: /start, /report, /today, /week, /status, /clear, /help');
-console.log('Reminder check: every 60 seconds');

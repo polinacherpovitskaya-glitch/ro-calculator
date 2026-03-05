@@ -1,23 +1,34 @@
 // =============================================
 // Recycle Object — Time Tracking
-// Учет рабочего времени сотрудников
-// + Daily status dashboard with employee awareness
+// Учет рабочего времени сотрудников + план/факт по этапам
 // =============================================
+
+const TT_STAGE_LABELS = {
+    casting: 'Выливание пластика',
+    trim: 'Срезание литника',
+    assembly: 'Сборка',
+    packaging: 'Упаковка',
+    other: 'Другое',
+};
+
+const TT_STAGE_ORDER = ['casting', 'trim', 'assembly', 'packaging', 'other'];
+const TT_PRODUCTION_STATUSES = ['production_casting', 'production_hardware', 'production_packaging', 'in_production'];
 
 const TimeTrack = {
     entries: [],
     employees: [],
 
     async load() {
-        this.entries = await loadTimeEntries();
-        this.employees = await loadEmployees();
+        this.entries = (await loadTimeEntries()) || [];
+        this.employees = (await loadEmployees()) || [];
         this.populateWorkerSelect();
         this.populateFilters();
+        await this.populateProjectSelect();
         this.filterAndRender();
         this.updateStats();
-        this.populateProjectSelect();
         this.renderDailyStatus();
-        // Set today's date for manual entry
+        this.onStageChange();
+
         const dateInput = document.getElementById('tt-date');
         if (dateInput && !dateInput.value) {
             dateInput.value = new Date().toISOString().split('T')[0];
@@ -36,13 +47,95 @@ const TimeTrack = {
 
     showManualEntry() {
         document.getElementById('tt-manual-form').style.display = '';
+        this.onStageChange();
     },
 
     hideManualEntry() {
         document.getElementById('tt-manual-form').style.display = 'none';
     },
 
-    // === Populate worker select from employees list ===
+    onStageChange() {
+        const stage = (document.getElementById('tt-stage')?.value || 'casting');
+        const wrap = document.getElementById('tt-stage-other-wrap');
+        if (wrap) wrap.style.display = stage === 'other' ? '' : 'none';
+    },
+
+    // === Metadata parser for backward compatibility ===
+
+    parseMeta(entry) {
+        if (!entry) return { stage: '', stage_label: '' };
+        if (entry._parsedMeta) return entry._parsedMeta;
+
+        const desc = String(entry.description || '');
+        const meta = { stage: '', stage_label: '' };
+
+        const markerMatch = desc.match(/^\[meta\](\{.*?\})\[\/meta\]\s*/);
+        if (markerMatch) {
+            try {
+                const parsed = JSON.parse(markerMatch[1]);
+                if (parsed && parsed.stage) {
+                    meta.stage = parsed.stage;
+                    meta.stage_label = parsed.stage_label || TT_STAGE_LABELS[parsed.stage] || parsed.stage;
+                }
+            } catch (e) {
+                // ignore
+            }
+        }
+
+        if (!meta.stage) {
+            const stageMatch = desc.match(/(?:^|\n)Этап:\s*([^\n]+)/i);
+            if (stageMatch) {
+                meta.stage_label = stageMatch[1].trim();
+                meta.stage = this.labelToStageKey(meta.stage_label);
+            }
+        }
+
+        if (!meta.stage && entry.stage) {
+            meta.stage = entry.stage;
+            meta.stage_label = TT_STAGE_LABELS[entry.stage] || entry.stage;
+        }
+
+        entry._parsedMeta = meta;
+        return meta;
+    },
+
+    stripMetaPrefix(description) {
+        const raw = String(description || '');
+        return raw
+            .replace(/^\[meta\]\{.*?\}\[\/meta\]\s*/s, '')
+            .replace(/^(?:Этап:\s*[^\n]+\n?)+/i, '')
+            .trim();
+    },
+
+    labelToStageKey(label) {
+        const normalized = String(label || '').trim().toLowerCase();
+        if (!normalized) return '';
+        if (normalized.includes('вылив')) return 'casting';
+        if (normalized.includes('литник') || normalized.includes('лейник') || normalized.includes('срез')) return 'trim';
+        if (normalized.includes('сбор')) return 'assembly';
+        if (normalized.includes('упаков')) return 'packaging';
+        return 'other';
+    },
+
+    stageKey(entry) {
+        const meta = this.parseMeta(entry);
+        return meta.stage || '';
+    },
+
+    stageLabel(entry) {
+        const meta = this.parseMeta(entry);
+        if (meta.stage_label) return meta.stage_label;
+        if (meta.stage) return TT_STAGE_LABELS[meta.stage] || meta.stage;
+        return '—';
+    },
+
+    buildDescriptionWithMeta(stage, stageLabel, description) {
+        const cleanDesc = String(description || '').trim();
+        const payload = JSON.stringify({ stage, stage_label: stageLabel });
+        return `[meta]${payload}[/meta] ${cleanDesc}`.trim();
+    },
+
+    // === Populate selects ===
 
     populateWorkerSelect() {
         const select = document.getElementById('tt-worker-name');
@@ -57,18 +150,16 @@ const TimeTrack = {
         });
     },
 
-    // === Populate project select with active orders ===
-
     async populateProjectSelect() {
         const select = document.getElementById('tt-project-select');
         if (!select) return;
 
-        // Keep first two options (empty + general)
         while (select.options.length > 2) select.remove(2);
 
-        // Load active orders
         const orders = await loadOrders({});
-        orders.forEach(o => {
+        const activeProduction = (orders || []).filter(o => TT_PRODUCTION_STATUSES.includes(o.status));
+
+        activeProduction.forEach(o => {
             const opt = document.createElement('option');
             opt.value = o.id;
             opt.textContent = o.order_name + (o.client_name ? ` (${o.client_name})` : '');
@@ -76,7 +167,7 @@ const TimeTrack = {
         });
     },
 
-    // === Daily Status Dashboard ===
+    // === Daily Status ===
 
     renderDailyStatus() {
         const container = document.getElementById('tt-daily-status-content');
@@ -92,7 +183,6 @@ const TimeTrack = {
             return;
         }
 
-        // Group today's entries by worker
         const todayEntries = this.entries.filter(e => e.date === today);
         const byWorker = {};
         todayEntries.forEach(e => {
@@ -100,9 +190,11 @@ const TimeTrack = {
             byWorker[e.worker_name].push(e);
         });
 
+        const roleLabels = { production: 'Пр', office: 'Оф', management: 'Рук' };
+
         const rows = activeEmployees.map(emp => {
             const entries = byWorker[emp.name] || [];
-            const totalHours = entries.reduce((s, e) => s + (e.hours || 0), 0);
+            const totalHours = entries.reduce((s, e) => s + (parseFloat(e.hours) || 0), 0);
             const totalPct = emp.daily_hours > 0 ? Math.round(totalHours / emp.daily_hours * 100) : 0;
 
             let icon, statusColor, statusText;
@@ -122,12 +214,11 @@ const TimeTrack = {
 
             const projectList = entries.length > 0
                 ? entries.map(e => {
-                    const pctLabel = e.percentage ? `${e.percentage}%` : `${e.hours}ч`;
-                    return `<span style="font-size:11px;">${this.esc(e.project_name)} (${pctLabel})</span>`;
+                    const stage = this.stageLabel(e);
+                    return `<span style="font-size:11px;">${this.esc(e.project_name)} / ${this.esc(stage)} (${parseFloat(e.hours) || 0}ч)</span>`;
                 }).join(', ')
                 : '';
 
-            const roleLabels = { production: 'Пр', office: 'Оф', management: 'Рук' };
             const roleBadge = `<span style="font-size:9px;color:var(--text-muted);">${roleLabels[emp.role] || ''}</span>`;
 
             return `
@@ -151,7 +242,6 @@ const TimeTrack = {
     // === Filters ===
 
     populateFilters() {
-        // Workers filter — from employees + from entries (for legacy)
         const employeeNames = this.employees.filter(e => e.is_active !== false).map(e => e.name);
         const entryWorkers = this.entries.map(e => e.worker_name).filter(Boolean);
         const allWorkers = [...new Set([...employeeNames, ...entryWorkers])].sort();
@@ -165,7 +255,6 @@ const TimeTrack = {
             wSelect.appendChild(opt);
         });
 
-        // Projects filter
         const projects = [...new Set(this.entries.map(e => e.project_name).filter(Boolean))];
         const pSelect = document.getElementById('tt-filter-project');
         while (pSelect.options.length > 1) pSelect.remove(1);
@@ -181,10 +270,10 @@ const TimeTrack = {
         const period = document.getElementById('tt-filter-period').value;
         const worker = document.getElementById('tt-filter-worker').value;
         const project = document.getElementById('tt-filter-project').value;
+        const stage = document.getElementById('tt-filter-stage')?.value || '';
 
         let filtered = [...this.entries];
 
-        // Period filter
         const now = new Date();
         if (period === 'week') {
             const weekAgo = new Date(now);
@@ -195,28 +284,22 @@ const TimeTrack = {
             filtered = filtered.filter(e => new Date(e.date) >= monthStart);
         }
 
-        // Worker filter
-        if (worker) {
-            filtered = filtered.filter(e => e.worker_name === worker);
-        }
+        if (worker) filtered = filtered.filter(e => e.worker_name === worker);
+        if (project) filtered = filtered.filter(e => e.project_name === project);
+        if (stage) filtered = filtered.filter(e => this.stageKey(e) === stage);
 
-        // Project filter
-        if (project) {
-            filtered = filtered.filter(e => e.project_name === project);
-        }
-
-        // Sort by date desc
         filtered.sort((a, b) => new Date(b.date) - new Date(a.date));
 
         this.renderTable(filtered);
         this.renderProjectSummary(filtered);
+        this.renderPlanFact(filtered);
     },
 
     renderTable(entries) {
         const tbody = document.getElementById('tt-table-body');
 
         if (entries.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">Нет записей</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">Нет записей</td></tr>';
             return;
         }
 
@@ -228,8 +311,9 @@ const TimeTrack = {
                 <td>${App.formatDate(e.date)}</td>
                 <td><b>${this.esc(e.worker_name)}</b>${srcIcon}</td>
                 <td>${this.esc(e.project_name)}${e.order_id ? ' <span class="badge badge-blue" style="font-size:10px">заказ</span>' : ''}</td>
-                <td class="text-right"><b>${e.hours}</b> ч${pctLabel}</td>
-                <td class="text-muted">${this.esc(e.description || '')}</td>
+                <td>${this.esc(this.stageLabel(e))}</td>
+                <td class="text-right"><b>${parseFloat(e.hours) || 0}</b> ч${pctLabel}</td>
+                <td class="text-muted">${this.esc(this.stripMetaPrefix(e.description || ''))}</td>
                 <td><button class="btn btn-sm btn-outline" onclick="TimeTrack.deleteEntry(${e.id})">&#10005;</button></td>
             </tr>`;
         }).join('');
@@ -238,12 +322,11 @@ const TimeTrack = {
     renderProjectSummary(entries) {
         const container = document.getElementById('tt-project-summary');
 
-        // Group by project
         const byProject = {};
         entries.forEach(e => {
             const pn = e.project_name || 'Без проекта';
             if (!byProject[pn]) byProject[pn] = { hours: 0, workers: new Set() };
-            byProject[pn].hours += e.hours;
+            byProject[pn].hours += parseFloat(e.hours) || 0;
             byProject[pn].workers.add(e.worker_name);
         });
 
@@ -262,7 +345,7 @@ const TimeTrack = {
             <div style="margin-bottom:10px">
                 <div class="flex-between" style="margin-bottom:2px">
                     <span style="font-size:13px; font-weight:600">${this.esc(name)}</span>
-                    <span style="font-size:13px; font-weight:700">${data.hours} ч</span>
+                    <span style="font-size:13px; font-weight:700">${data.hours.toFixed(2)} ч</span>
                 </div>
                 <div class="load-bar" style="height:6px">
                     <div class="load-bar-fill green" style="width:${pct}%"></div>
@@ -270,6 +353,68 @@ const TimeTrack = {
                 <div style="font-size:11px; color:var(--text-muted)">${data.workers.size} сотр.</div>
             </div>`;
         }).join('');
+    },
+
+    async renderPlanFact(filteredEntries) {
+        const tbody = document.getElementById('tt-plan-fact-body');
+        if (!tbody) return;
+
+        const entries = (filteredEntries || []).filter(e => !!e.order_id);
+        if (entries.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">Нет данных</td></tr>';
+            return;
+        }
+
+        const orderIds = [...new Set(entries.map(e => Number(e.order_id)).filter(Boolean))];
+        const orders = await loadOrders({});
+        const orderMap = new Map((orders || []).map(o => [Number(o.id), o]));
+
+        const facts = new Map();
+        orderIds.forEach(id => {
+            facts.set(id, { casting: 0, assembly: 0, packaging: 0, other: 0 });
+        });
+
+        entries.forEach(e => {
+            const orderId = Number(e.order_id);
+            if (!facts.has(orderId)) return;
+            const bucket = facts.get(orderId);
+            const stage = this.stageKey(e);
+            const hours = parseFloat(e.hours) || 0;
+            if (stage === 'casting' || stage === 'trim') bucket.casting += hours;
+            else if (stage === 'assembly') bucket.assembly += hours;
+            else if (stage === 'packaging') bucket.packaging += hours;
+            else bucket.other += hours;
+        });
+
+        const rows = orderIds.map(id => {
+            const o = orderMap.get(id);
+            if (!o) return '';
+            const planCasting = parseFloat(o.production_hours_plastic) || 0;
+            const planAssembly = parseFloat(o.production_hours_hardware) || 0;
+            const planPackaging = parseFloat(o.production_hours_packaging) || 0;
+            const planTotal = planCasting + planAssembly + planPackaging;
+
+            const f = facts.get(id) || { casting: 0, assembly: 0, packaging: 0, other: 0 };
+            const factTotal = f.casting + f.assembly + f.packaging + f.other;
+            const delta = factTotal - planTotal;
+            const deltaColor = delta > 0 ? 'var(--red)' : 'var(--green)';
+
+            return `
+            <tr>
+                <td>${this.esc(o.order_name || `Заказ #${id}`)}</td>
+                <td class="text-right">${planCasting.toFixed(2)}ч</td>
+                <td class="text-right">${f.casting.toFixed(2)}ч</td>
+                <td class="text-right">${planAssembly.toFixed(2)}ч</td>
+                <td class="text-right">${f.assembly.toFixed(2)}ч</td>
+                <td class="text-right">${planPackaging.toFixed(2)}ч</td>
+                <td class="text-right">${f.packaging.toFixed(2)}ч</td>
+                <td class="text-right" style="color:${deltaColor};font-weight:600;">${delta >= 0 ? '+' : ''}${delta.toFixed(2)}ч</td>
+            </tr>`;
+        }).filter(Boolean);
+
+        tbody.innerHTML = rows.length
+            ? rows.join('')
+            : '<tr><td colspan="8" class="text-center text-muted">Нет данных</td></tr>';
     },
 
     updateStats() {
@@ -280,11 +425,11 @@ const TimeTrack = {
 
         const weekHours = this.entries
             .filter(e => new Date(e.date) >= weekAgo)
-            .reduce((s, e) => s + e.hours, 0);
+            .reduce((s, e) => s + (parseFloat(e.hours) || 0), 0);
 
         const monthHours = this.entries
             .filter(e => new Date(e.date) >= monthStart)
-            .reduce((s, e) => s + e.hours, 0);
+            .reduce((s, e) => s + (parseFloat(e.hours) || 0), 0);
 
         const workers = new Set(this.entries.map(e => e.worker_name)).size;
         const projects = new Set(this.entries.map(e => e.project_name)).size;
@@ -302,11 +447,16 @@ const TimeTrack = {
         const projectSelect = document.getElementById('tt-project-select');
         const hours = parseFloat(document.getElementById('tt-hours').value) || 0;
         const date = document.getElementById('tt-date').value;
-        const description = document.getElementById('tt-description').value.trim();
+        const comment = document.getElementById('tt-description').value.trim();
+
+        const stage = document.getElementById('tt-stage')?.value || 'casting';
+        const stageOther = document.getElementById('tt-stage-other')?.value.trim() || '';
+        const stageLabel = stage === 'other' ? (stageOther || 'Другое') : (TT_STAGE_LABELS[stage] || stage);
 
         if (!workerName) { App.toast('Укажите сотрудника'); return; }
         if (hours <= 0) { App.toast('Укажите количество часов'); return; }
         if (!date) { App.toast('Укажите дату'); return; }
+        if (stage === 'other' && !stageOther) { App.toast('Укажите этап для "Другое"'); return; }
 
         const projectValue = projectSelect.value;
         let projectName = '';
@@ -315,30 +465,31 @@ const TimeTrack = {
         if (projectValue === '__general') {
             projectName = 'Общие работы';
         } else if (projectValue) {
-            orderId = parseInt(projectValue);
+            orderId = parseInt(projectValue, 10);
             projectName = projectSelect.options[projectSelect.selectedIndex].textContent;
         } else {
-            App.toast('Выберите проект'); return;
+            App.toast('Выберите проект');
+            return;
         }
 
         const entry = {
             worker_name: workerName,
             project_name: projectName,
             order_id: orderId,
-            hours: hours,
-            date: date,
-            description: description,
+            hours,
+            date,
+            description: this.buildDescriptionWithMeta(stage, stageLabel, comment),
             source: 'manual',
         };
 
         await saveTimeEntry(entry);
         App.toast('Запись добавлена');
 
-        // Clear form
         document.getElementById('tt-hours').value = '';
         document.getElementById('tt-description').value = '';
+        const stageOtherEl = document.getElementById('tt-stage-other');
+        if (stageOtherEl) stageOtherEl.value = '';
 
-        // Reload
         this.load();
     },
 
@@ -351,6 +502,6 @@ const TimeTrack = {
 
     esc(str) {
         if (!str) return '';
-        return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     },
 };
