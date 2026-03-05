@@ -84,12 +84,13 @@ const Marketplaces = {
 
             // Cost breakdown lines
             const breakdownParts = [];
-            if (bd.castingCost > 0) breakdownParts.push('Выливание ' + formatRub(bd.castingCost));
-            if (bd.hwMaterialCost > 0) breakdownParts.push('Фурнитура ' + formatRub(bd.hwMaterialCost));
-            if (bd.fotCost > 0) breakdownParts.push('ФОТ ' + formatRub(bd.fotCost));
-            if (bd.assemblyCost > 0) breakdownParts.push('Сборка ' + formatRub(bd.assemblyCost));
-            if (bd.indirectCost > 0) breakdownParts.push('Косвенные ' + formatRub(bd.indirectCost));
-            if (bd.pkgMaterialCost > 0) breakdownParts.push('Упаковка ' + formatRub(bd.pkgMaterialCost));
+            if (bd.castingCost > 0) breakdownParts.push('Выливание (материал+молд) ' + formatRub(bd.castingCost));
+            if (bd.hwMaterialCost > 0) breakdownParts.push('Фурнитура (материалы) ' + formatRub(bd.hwMaterialCost));
+            if (bd.pkgMaterialCost > 0) breakdownParts.push('Упаковка (материалы) ' + formatRub(bd.pkgMaterialCost));
+            if (bd.fotCost > 0) breakdownParts.push('ФОТ выливания ' + formatRub(bd.fotCost));
+            if (bd.assemblyCost > 0) breakdownParts.push('ФОТ сборки ' + formatRub(bd.assemblyCost));
+            if (bd.indirectCastingCost > 0) breakdownParts.push('Косвенные выливания ' + formatRub(bd.indirectCastingCost));
+            if (bd.indirectAssemblyCost > 0) breakdownParts.push('Косвенные сборки ' + formatRub(bd.indirectAssemblyCost));
 
             html += `<div class="card" style="padding:14px;margin-bottom:8px;display:flex;align-items:center;gap:14px;">
                 <div style="flex-shrink:0;">${photo}</div>
@@ -653,15 +654,16 @@ const Marketplaces = {
                 pkg_items: this._pkgItems,
             });
             const stageParts = [];
-            if (bd.castingCost > 0) stageParts.push(`Выливание: ${formatRub(bd.castingCost)}`);
-            if (bd.hwMaterialCost > 0) stageParts.push(`Фурнитура: ${formatRub(bd.hwMaterialCost)}`);
-            if (bd.fotCost > 0) stageParts.push(`ФОТ: ${formatRub(bd.fotCost)}`);
-            if (bd.assemblyCost > 0) stageParts.push(`Сборка: ${formatRub(bd.assemblyCost)}`);
-            if (bd.indirectCost > 0) stageParts.push(`Косвенные: ${formatRub(bd.indirectCost)}`);
-            if (bd.pkgMaterialCost > 0) stageParts.push(`Упаковка: ${formatRub(bd.pkgMaterialCost)}`);
+            if (bd.castingCost > 0) stageParts.push(`Выливание (пластик + амортизация молда + тех. добавки): ${formatRub(bd.castingCost)}`);
+            if (bd.fotCost > 0) stageParts.push(`ФОТ выливания/срезки/NFC: ${formatRub(bd.fotCost)}`);
+            if (bd.indirectCastingCost > 0) stageParts.push(`Косвенные выливания: ${formatRub(bd.indirectCastingCost)}`);
+            if (bd.hwMaterialCost > 0) stageParts.push(`Фурнитура (материалы, включая встроенную): ${formatRub(bd.hwMaterialCost)}`);
+            if (bd.pkgMaterialCost > 0) stageParts.push(`Упаковка (материалы): ${formatRub(bd.pkgMaterialCost)}`);
+            if (bd.assemblyCost > 0) stageParts.push(`Сборка фурнитуры/упаковки (ФОТ): ${formatRub(bd.assemblyCost)}`);
+            if (bd.indirectAssemblyCost > 0) stageParts.push(`Косвенные сборки фурнитуры/упаковки: ${formatRub(bd.indirectAssemblyCost)}`);
 
             document.getElementById('mp-calc-details').innerHTML = `
-                ${stageParts.length ? `<div style="margin-bottom:6px;">${stageParts.join(' · ')}</div>` : ''}
+                ${stageParts.length ? `<div style="margin-bottom:6px;line-height:1.5;">${stageParts.join('<br>')}</div>` : ''}
                 ${formatRub(sellingPrice)}
                 → −МП ${commissionPct}%: ${formatRub(afterCommission)}
                 → −НДС ${vatPct}%: ${formatRub(afterVat)}
@@ -779,6 +781,8 @@ const Marketplaces = {
         let fotCost = 0;
         let assemblyCost = 0;
         let indirectCost = 0;
+        let indirectCastingCost = 0;
+        let indirectAssemblyCost = 0;
 
         (s.plastic_items || []).forEach(item => {
             if (!item.blank_id) return;
@@ -825,6 +829,7 @@ const Marketplaces = {
             castingCost += castingPerUnit * qtyMult;
             fotCost += fotPerUnit * qtyMult;
             indirectCost += indirectPerUnit * qtyMult;
+            indirectCastingCost += indirectPerUnit * qtyMult;
 
             // Built-in hardware of plastic blank (if exists)
             if (mold.hw_name && mold.hw_price_per_unit > 0) {
@@ -845,6 +850,7 @@ const Marketplaces = {
             hwMaterialCost += c.materialCost * qtyMult;
             assemblyCost += c.assemblyFot * qtyMult;
             indirectCost += c.assemblyIndirect * qtyMult;
+            indirectAssemblyCost += c.assemblyIndirect * qtyMult;
         });
 
         (s.pkg_items || []).forEach(item => {
@@ -854,6 +860,7 @@ const Marketplaces = {
             pkgMaterialCost += c.materialCost * qtyMult;
             assemblyCost += c.assemblyFot * qtyMult;
             indirectCost += c.assemblyIndirect * qtyMult;
+            indirectAssemblyCost += c.assemblyIndirect * qtyMult;
         });
 
         // fallback: if detailed split couldn't be reconstructed, keep at least basic categories
@@ -870,6 +877,8 @@ const Marketplaces = {
             pkgMaterialCost: round2(pkgMaterialCost),
             fotCost: round2(fotCost),
             assemblyCost: round2(assemblyCost),
+            indirectCastingCost: round2(indirectCastingCost),
+            indirectAssemblyCost: round2(indirectAssemblyCost),
             indirectCost: round2(indirectCost),
             totalCost: round2(plasticCost + hwCost + pkgCost)
         };
