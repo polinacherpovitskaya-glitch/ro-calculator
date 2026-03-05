@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v75';
+const APP_VERSION = 'v76';
 
 const App = {
     currentPage: 'dashboard',
@@ -1865,6 +1865,7 @@ const Calculator = {
         return {
             parent_item_index: parentItemIndex ?? null,  // null = order-level, number = per-item
             source: 'warehouse',        // 'warehouse' | 'china' | 'custom'
+            custom_country: 'china',    // for source='custom': 'china' | 'russia'
             warehouse_item_id: null,
             warehouse_sku: '',
             china_item_id: null,
@@ -1915,6 +1916,8 @@ const Calculator = {
         const isWarehouse = pkg.source === 'warehouse';
         const isChina = pkg.source === 'china';
         const isCustom = pkg.source === 'custom';
+        const isCustomChina = isCustom && (pkg.custom_country || 'china') === 'china';
+        const isCustomRussia = isCustom && (pkg.custom_country || 'china') === 'russia';
         const list = document.getElementById(targetListId || 'calc-packaging-list');
 
         let pickerHtml = '';
@@ -1931,9 +1934,13 @@ const Calculator = {
             return `<option value="${key}"${sel}>${m.label} ($${m.rate_usd}/\u043a\u0433)</option>`;
         }).join('');
 
-        const chinaInfo = (isChina || isCustom) && pkg.price_cny > 0
+        const chinaInfo = (isChina || isCustomChina) && pkg.price_cny > 0
             ? `<div style="font-size:11px;color:var(--text-muted);margin-top:6px;padding:4px 8px;background:var(--bg);border-radius:4px;">
                 \ud83d\udcb0 ${pkg.price_cny}\u00a5 = <b>${formatRub(pkg.price)}</b>/\u0448\u0442 \u00b7 \ud83d\udce6 \u0414\u043e\u0441\u0442\u0430\u0432\u043a\u0430: <b>${formatRub(pkg.delivery_price)}</b>/\u0448\u0442 (${pkg.weight_grams || 0}\u0433)
+               </div>` : '';
+        const russiaInfo = isCustomRussia
+            ? `<div style="font-size:11px;color:var(--text-muted);margin-top:6px;padding:4px 8px;background:var(--bg);border-radius:4px;">
+                Цена: <b>${formatRub(pkg.price || 0)}</b>/шт · Доставка: <b>${formatRub(pkg.delivery_total || 0)}</b> всего = <b>${formatRub(pkg.delivery_price || 0)}</b>/шт
                </div>` : '';
 
         let modeHtml = '';
@@ -1977,6 +1984,16 @@ const Calculator = {
             ${chinaInfo}`;
         } else {
             modeHtml = `
+            <div style="display:flex;gap:6px;margin-bottom:8px;">
+                <label class="${isCustomChina ? 'src-active' : ''}" style="display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border:1px solid var(--border);border-radius:16px;cursor:pointer;">
+                    <input type="radio" name="pkg-custom-country-${idx}" value="china" ${isCustomChina ? 'checked' : ''} onchange="Calculator.onPkgCustomCountryChange(${idx}, 'china')" style="display:none;">
+                    🇨🇳 Китай
+                </label>
+                <label class="${isCustomRussia ? 'src-active' : ''}" style="display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border:1px solid var(--border);border-radius:16px;cursor:pointer;">
+                    <input type="radio" name="pkg-custom-country-${idx}" value="russia" ${isCustomRussia ? 'checked' : ''} onchange="Calculator.onPkgCustomCountryChange(${idx}, 'russia')" style="display:none;">
+                    🇷🇺 Россия
+                </label>
+            </div>
             <div class="form-row" style="align-items:end">
                 <div class="form-group" style="margin:0;flex:1.5">
                     <label>\u041d\u0430\u0437\u0432\u0430\u043d\u0438\u0435</label>
@@ -1990,20 +2007,31 @@ const Calculator = {
                     <label>${this._assemblyTimingLabel()}</label>
                     <input type="number" min="0" step="1" value="${minsDisplay}" oninput="Calculator.onPkgMinutes(${idx}, this.value)" placeholder="\u043d\u0430\u043f\u0440. 9">
                 </div>
-                <div class="form-group" style="margin:0">
-                    <label>\u0426\u0435\u043d\u0430 (\u00a5/\u0448\u0442)</label>
-                    <input type="number" min="0" step="0.01" value="${pkg.price_cny || ''}" oninput="Calculator.onChinaNum('pkg', ${idx}, 'price_cny', this.value)">
-                </div>
-                <div class="form-group" style="margin:0">
-                    <label>\u0412\u0435\u0441 (\u0433)</label>
-                    <input type="number" min="0" step="0.1" value="${pkg.weight_grams || ''}" oninput="Calculator.onChinaNum('pkg', ${idx}, 'weight_grams', this.value)">
-                </div>
-                <div class="form-group" style="margin:0">
-                    <label>\u0414\u043e\u0441\u0442\u0430\u0432\u043a\u0430</label>
-                    <select onchange="Calculator.onChinaDeliveryMethod('pkg', ${idx}, this.value)">${deliveryOpts}</select>
-                </div>
+                ${isCustomChina ? `
+                    <div class="form-group" style="margin:0">
+                        <label>\u0426\u0435\u043d\u0430 (\u00a5/\u0448\u0442)</label>
+                        <input type="number" min="0" step="0.01" value="${pkg.price_cny || ''}" oninput="Calculator.onChinaNum('pkg', ${idx}, 'price_cny', this.value)">
+                    </div>
+                    <div class="form-group" style="margin:0">
+                        <label>\u0412\u0435\u0441 (\u0433)</label>
+                        <input type="number" min="0" step="0.1" value="${pkg.weight_grams || ''}" oninput="Calculator.onChinaNum('pkg', ${idx}, 'weight_grams', this.value)">
+                    </div>
+                    <div class="form-group" style="margin:0">
+                        <label>\u0414\u043e\u0441\u0442\u0430\u0432\u043a\u0430 (\u0437\u0430 \u043a\u0433)</label>
+                        <select onchange="Calculator.onChinaDeliveryMethod('pkg', ${idx}, this.value)">${deliveryOpts}</select>
+                    </div>
+                ` : `
+                    <div class="form-group" style="margin:0">
+                        <label>\u0426\u0435\u043d\u0430 (\u20BD/\u0448\u0442)</label>
+                        <input type="number" min="0" step="0.01" value="${pkg.price || ''}" oninput="Calculator.onPkgNum(${idx}, 'price', this.value)">
+                    </div>
+                    <div class="form-group" style="margin:0">
+                        <label>\u0414\u043e\u0441\u0442\u0430\u0432\u043a\u0430 (\u20BD, \u043e\u0431\u0449\u0430\u044f)</label>
+                        <input type="number" min="0" step="0.01" value="${pkg.delivery_total || ''}" oninput="Calculator.onPkgNum(${idx}, 'delivery_total', this.value)">
+                    </div>
+                `}
             </div>
-            ${chinaInfo}`;
+            ${isCustomChina ? chinaInfo : russiaInfo}`;
         }
 
         const html = `
@@ -2081,8 +2109,13 @@ const Calculator = {
             pkg.warehouse_item_id = null;
             pkg.warehouse_sku = '';
             pkg.china_item_id = null;
+            if (!pkg.custom_country) pkg.custom_country = 'china';
             if (!pkg.china_delivery_method) pkg.china_delivery_method = 'avia';
-            this._recalcChinaPricing(pkg);
+            if ((pkg.custom_country || 'china') === 'china') {
+                this._recalcChinaPricing(pkg);
+            } else {
+                pkg.delivery_price = pkg.qty > 0 ? round2(pkg.delivery_total / pkg.qty) : 0;
+            }
         } else {
             pkg.name = '';
             pkg.price = 0;
@@ -2097,6 +2130,23 @@ const Calculator = {
         this.rerenderAllPackaging();
         this.items.forEach((_, i) => this._renderPerItemHwPkg(i));
         this.recalculate();
+    },
+
+    onPkgCustomCountryChange(idx, country) {
+        const pkg = this.packagingItems[idx];
+        if (!pkg || pkg.source !== 'custom') return;
+        pkg.custom_country = country;
+        pkg.china_item_id = null;
+        if (country === 'china') {
+            this._recalcChinaPricing(pkg);
+        } else {
+            pkg.price_cny = 0;
+            pkg.weight_grams = 0;
+            pkg.delivery_price = pkg.qty > 0 ? round2((pkg.delivery_total || 0) / pkg.qty) : 0;
+        }
+        this._rerenderPkgItem(idx);
+        this.recalculate();
+        this.scheduleAutosave();
     },
 
     async onPkgWarehouseSelect(idx, itemIdStr) {
@@ -2159,7 +2209,7 @@ const Calculator = {
                 App.toast(`Максимум на складе: ${whItem.available_qty} ${whItem.unit}. Остальное — из Китая.`);
             }
         }
-        if (pkg.source === 'china' || pkg.source === 'custom') {
+        if (pkg.source === 'china' || (pkg.source === 'custom' && (pkg.custom_country || 'china') === 'china')) {
             this._recalcChinaPricing(pkg);
         } else {
             pkg.delivery_price = pkg.qty > 0 ? round2(pkg.delivery_total / pkg.qty) : 0;
@@ -3505,6 +3555,7 @@ const Calculator = {
                 cost_total: pkg.result ? pkg.result.costPerUnit : 0,
                 hours_packaging: pkg.result ? pkg.result.hoursPackaging : 0,
                 packaging_source: pkg.source || 'custom',
+                custom_country: pkg.custom_country || 'china',
                 packaging_warehouse_item_id: pkg.warehouse_item_id || null,
                 packaging_warehouse_sku: pkg.warehouse_sku || '',
                 packaging_parent_item_index: pkg.parent_item_index ?? null,
@@ -3951,6 +4002,7 @@ const Calculator = {
         pkgItems.forEach((dbPkg) => {
             const pkg = this.getEmptyPackaging();
             pkg.source = dbPkg.packaging_source || 'custom';
+            pkg.custom_country = dbPkg.custom_country || 'china';
             pkg.warehouse_item_id = dbPkg.packaging_warehouse_item_id || null;
             pkg.warehouse_sku = dbPkg.packaging_warehouse_sku || '';
             pkg.parent_item_index = dbPkg.packaging_parent_item_index ?? null;
