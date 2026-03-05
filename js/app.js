@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v62';
+const APP_VERSION = 'v63';
 
 const App = {
     currentPage: 'dashboard',
@@ -768,6 +768,7 @@ const Calculator = {
             builtin_hw_speed: 0,
             // Colors (multiple per item)
             colors: [],  // [{id, name}, ...]
+            color_solution_attachment: null, // {name, type, data_url, size}
             color_id: null,   // backward compat (first color)
             color_name: '',   // backward compat (first color)
             // Sell prices
@@ -898,6 +899,39 @@ const Calculator = {
             }
         } catch (e) { console.error('[renderItemBlock] Color picker error:', e); }
 
+        // File attachment for color mix reference (photo/PDF/etc.)
+        let colorAttachmentHtml = '';
+        try {
+            const att = item.color_solution_attachment;
+            if (att && att.data_url) {
+                const isImage = String(att.type || '').startsWith('image/');
+                const sizeKb = att.size ? Math.round(att.size / 1024) : 0;
+                colorAttachmentHtml = `
+                <div class="form-group" style="margin-top:8px;">
+                    <label>Файл цветового решения</label>
+                    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                        ${isImage ? `<img src="${this._escAttr(att.data_url)}" style="width:56px;height:56px;object-fit:cover;border-radius:8px;border:1px solid var(--border)">` : `<span style="width:56px;height:56px;display:flex;align-items:center;justify-content:center;background:var(--bg);border:1px solid var(--border);border-radius:8px;font-size:18px;">📎</span>`}
+                        <div style="min-width:0;flex:1;">
+                            <div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${this._esc(att.name || 'Файл')}</div>
+                            <div style="font-size:10px;color:var(--text-muted);">${this._esc(att.type || 'file')} ${sizeKb ? `· ${sizeKb} KB` : ''}</div>
+                        </div>
+                        <button class="btn btn-sm btn-outline" onclick="Calculator.openColorAttachment(${idx})">Открыть</button>
+                        <button class="btn btn-sm btn-outline" onclick="Calculator.removeColorAttachment(${idx})">Удалить</button>
+                    </div>
+                </div>`;
+            } else {
+                colorAttachmentHtml = `
+                <div class="form-group" style="margin-top:8px;">
+                    <label>Файл цветового решения</label>
+                    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                        <input type="file" id="item-color-file-${idx}" accept="image/*,.pdf,.ai,.psd,.svg,.zip,.rar,.7z,.doc,.docx,.xls,.xlsx,.txt"
+                            onchange="Calculator.onColorAttachmentChange(${idx}, this)" style="max-width:300px;font-size:12px;">
+                        <span style="font-size:10px;color:var(--text-muted);">До 3 МБ</span>
+                    </div>
+                </div>`;
+            }
+        } catch (e) { console.error('[renderItemBlock] attachment block error:', e); }
+
         const html = `
         <div class="item-block" id="item-block-${idx}">
             <div class="item-block-header">
@@ -976,6 +1010,7 @@ const Calculator = {
 
             <!-- Цветовое решение (per item) -->
             ${colorPickerHtml}
+            ${colorAttachmentHtml}
 
             <!-- Фурнитура изделия (per-item) -->
             <div class="section-title" style="margin-top:12px">🔩 Фурнитура внутри изделия</div>
@@ -2394,6 +2429,45 @@ const Calculator = {
         this.scheduleAutosave();
     },
 
+    onColorAttachmentChange(idx, input) {
+        const file = input?.files?.[0];
+        if (!file) return;
+        const maxBytes = 3 * 1024 * 1024; // 3 MB
+        if (file.size > maxBytes) {
+            App.toast('Файл слишком большой. Максимум 3 МБ');
+            input.value = '';
+            return;
+        }
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            this.items[idx].color_solution_attachment = {
+                name: file.name || 'file',
+                type: file.type || '',
+                size: file.size || 0,
+                data_url: e.target?.result || '',
+            };
+            this.renderItemBlock(idx);
+            this.scheduleAutosave();
+        };
+        reader.onerror = () => App.toast('Не удалось прочитать файл');
+        reader.readAsDataURL(file);
+    },
+
+    removeColorAttachment(idx) {
+        this.items[idx].color_solution_attachment = null;
+        this.renderItemBlock(idx);
+        this.scheduleAutosave();
+    },
+
+    openColorAttachment(idx) {
+        const att = this.items[idx]?.color_solution_attachment;
+        if (!att?.data_url) return;
+        const win = window.open(att.data_url, '_blank');
+        if (!win) {
+            App.toast('Браузер заблокировал открытие файла');
+        }
+    },
+
     removeItem(idx) {
         // Cascade: remove all per-item hw/pkg for this item
         this.hardwareItems = this.hardwareItems.filter(hw => hw.parent_item_index !== idx);
@@ -3334,6 +3408,7 @@ const Calculator = {
                 color_id: item.color_id || null,
                 color_name: item.color_name || '',
                 colors: JSON.stringify(item.colors || []),
+                color_solution_attachment: item.color_solution_attachment ? JSON.stringify(item.color_solution_attachment) : null,
             });
         });
 
@@ -3753,6 +3828,9 @@ const Calculator = {
                 try { item.colors = JSON.parse(item.colors); } catch (e) { item.colors = []; }
             }
             if (!Array.isArray(item.colors)) item.colors = [];
+            if (typeof item.color_solution_attachment === 'string') {
+                try { item.color_solution_attachment = JSON.parse(item.color_solution_attachment); } catch (e) { item.color_solution_attachment = null; }
+            }
             // Migrate old single color_id to colors array
             if (item.colors.length === 0 && item.color_id) {
                 const allC = Colors.data || [];
