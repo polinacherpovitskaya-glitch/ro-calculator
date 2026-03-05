@@ -99,7 +99,7 @@ const ProductionPlan = {
             <th>Менеджер</th>
             <th>Старт / дедлайн</th>
             <th>Количество</th>
-            <th>Цвет / файл</th>
+            <th>Цвет</th>
             <th>Фурнитура / упаковка</th>
             <th>Заметки</th>
             <th></th>
@@ -315,20 +315,24 @@ const ProductionPlan = {
     },
 
     _renderColorCell(row) {
-        const lines = row.colorLines.length
+        const hasColors = row.colorLines.length > 0;
+        const lines = hasColors
             ? row.colorLines.map(x => `<div class="pp-sub">${this.esc(x)}</div>`).join('')
             : '<div class="pp-sub">—</div>';
-        const files = row.attachments.map(att => {
-            const isImg = (att.type || '').startsWith('image/');
-            if (isImg) {
-                return `<a href="${att.data_url}" target="_blank" class="pp-attachment">
-                    <img src="${att.data_url}" alt="${this.esc(att.name)}">
-                    <span>${this.esc(att.name)}</span>
-                </a>`;
-            }
-            return `<a href="${att.data_url}" target="_blank" class="pp-file-link">&#128206; ${this.esc(att.name)}</a>`;
-        }).join('');
-        return lines + (files ? `<div class="pp-files">${files}</div>` : '');
+
+        const imgs = row.attachments
+            .filter(att => (att.type || '').startsWith('image/'))
+            .map(att => `<a href="${att.data_url}" target="_blank" class="pp-color-image-link"><img class="pp-color-image" src="${att.data_url}" alt="${this.esc(att.name)}"></a>`)
+            .join('');
+
+        const nonImg = row.attachments
+            .filter(att => !(att.type || '').startsWith('image/'))
+            .map(att => `<a href="${att.data_url}" target="_blank" class="pp-file-link">&#128206; ${this.esc(att.name)}</a>`)
+            .join('');
+
+        return lines
+            + (imgs ? `<div class="pp-color-images">${imgs}</div>` : '')
+            + (nonImg ? `<div class="pp-files">${nonImg}</div>` : '');
     },
 
     esc(str) {

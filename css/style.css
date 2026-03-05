@@ -2116,6 +2116,22 @@ table .text-center { text-align: center; }
     font-size: 10px;
     color: var(--accent);
 }
+.pp-color-images {
+    margin-top: 6px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+.pp-color-image-link {
+    display: inline-block;
+}
+.pp-color-image {
+    width: 96px;
+    height: 96px;
+    object-fit: cover;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+}
 #pp-mobile-list { display: none; }
 
 @media (max-width: 900px) {
