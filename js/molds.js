@@ -52,13 +52,29 @@ function getBlankMultiplier(qty) {
  * Маржа — «в сухом остатке» после вычета налогов:
  *   50=75%, 100=70%, 300=60%, 500=50%, 1K=45%, 3K=40%
  *
- * Налоги сверху: 6% ОСН + 5% коммерческий = 11%
+ * Налоги сверху: 6% ОСН + 6.5% коммерческий = 12.5%
  */
 function calcBlankTargetPrice(cost, qty, params) {
     if (cost <= 0 || qty <= 0) return 0;
     const margin = getBlankMargin(qty);
-    const taxOverhead = 0.06 + 0.05; // 6% ОСН + 5% коммерч.
-    return round2(cost / (1 - margin) / (1 - taxOverhead));
+    const taxRate = Number.isFinite(params?.taxRate) ? params.taxRate : 0.06;
+    const commercialRate = 0.065;
+    return round2(cost / (1 - margin) / (1 - taxRate - commercialRate));
+}
+
+/**
+ * Цена продажи при целевой чистой марже:
+ * себестоимость + НДС сверху, затем 40% чистой маржи
+ * с учётом 6% ОСН и 6.5% коммерческого отдела.
+ */
+function calcSellByNetMargin40(cost, params) {
+    if (!Number.isFinite(cost) || cost <= 0) return 0;
+    const taxRate = Number.isFinite(params?.taxRate) ? params.taxRate : 0.06;
+    const vatRate = Number.isFinite(params?.vatRate) ? params.vatRate : 0.05;
+    const commercialRate = 0.065;
+    const margin = 0.40;
+    const costWithVat = cost * (1 + vatRate);
+    return round2((costWithVat * (1 + margin)) / (1 - taxRate - commercialRate));
 }
 
 /**
@@ -207,7 +223,7 @@ const Molds = {
                     isCustom = true;
                 } else if (customMargin !== null && customMargin !== undefined) {
                     // Custom margin percentage override
-                    targetPrice = round2(adjustedCost / (1 - margin) / (1 - 0.06 - 0.05));
+                    targetPrice = round2(adjustedCost / (1 - margin) / (1 - (params.taxRate || 0.06) - 0.065));
                     sellPrice = roundTo5(targetPrice);
                     isCustom = true;
                 } else {
@@ -1398,8 +1414,9 @@ const Molds = {
         const totalCost = round2(priceRub + assemblyCost);
 
         const fixedSellPrice = parseFloat(document.getElementById('hw-blank-sell').value) || 0;
+        const formulaSellPrice = calcSellByNetMargin40(totalCost, params);
 
-        let html = `<div style="font-weight:700;font-size:13px;margin-bottom:6px;">Себестоимость: ${formatRub(totalCost)}${fixedSellPrice > 0 ? ` · Цена продажи: <span style="color:var(--green);">${formatRub(fixedSellPrice)}</span>` : ''}</div>`;
+        let html = `<div style="font-weight:700;font-size:13px;margin-bottom:6px;">Себестоимость: ${formatRub(totalCost)}</div>`;
         html += `<div style="color:var(--text-secondary);font-size:11px;line-height:1.7;">`;
         html += priceLabel + '<br>';
         detailLines.forEach(line => { html += line + '<br>'; });
@@ -1412,9 +1429,11 @@ const Molds = {
         } else {
             html += `Сборка: <span style="color:var(--text-muted)">укажите скорость (шт/мин)</span>`;
         }
-        if (fixedSellPrice <= 0) {
-            const suggestedSellPrice = Math.ceil(totalCost / (1 - 0.40));
-            html += `<br><span style="color:var(--text-muted)">Рекомендация (старый ориентир 40%): ${formatRub(suggestedSellPrice)}</span>`;
+        if (formulaSellPrice > 0) {
+            html += `<br><span style="color:var(--green);font-weight:700;">Цена продажи по формуле (40% чистой маржи, −6% ОСН, −6,5% коммерч., +НДС сверху): ${formatRub(formulaSellPrice)}</span>`;
+        }
+        if (fixedSellPrice > 0) {
+            html += `<br><span style="color:var(--text-muted);">Ручная цена в поле: ${formatRub(fixedSellPrice)}</span>`;
         }
         html += `</div>`;
 
@@ -1612,13 +1631,16 @@ const Molds = {
 
         const totalCost = round2(price + delivery);
         const fixedSellPrice = parseFloat(document.getElementById('pkg-blank-sell').value) || 0;
+        const formulaSellPrice = calcSellByNetMargin40(totalCost, App.params || {});
 
-        let html = `<div style="font-weight:700;font-size:13px;margin-bottom:6px;">Себестоимость: ${formatRub(totalCost)}${fixedSellPrice > 0 ? ` · Цена продажи: <span style="color:var(--green);">${formatRub(fixedSellPrice)}</span>` : ''}</div>`;
+        let html = `<div style="font-weight:700;font-size:13px;margin-bottom:6px;">Себестоимость: ${formatRub(totalCost)}</div>`;
         html += `<div style="color:var(--text-secondary);font-size:11px;line-height:1.7;">`;
         html += `Стоимость: <b>${formatRub(price)}</b> + Доставка: <b>${formatRub(delivery)}</b> = <b>${formatRub(totalCost)}</b>`;
-        if (fixedSellPrice <= 0) {
-            const suggestedSellPrice = Math.ceil(totalCost / (1 - 0.40));
-            html += `<br><span style="color:var(--text-muted);">Рекомендация (старый ориентир 40%): ${formatRub(suggestedSellPrice)}</span>`;
+        if (formulaSellPrice > 0) {
+            html += `<br><span style="color:var(--green);font-weight:700;">Цена продажи по формуле (40% чистой маржи, −6% ОСН, −6,5% коммерч., +НДС сверху): ${formatRub(formulaSellPrice)}</span>`;
+        }
+        if (fixedSellPrice > 0) {
+            html += `<br><span style="color:var(--text-muted);">Ручная цена в поле: ${formatRub(fixedSellPrice)}</span>`;
         }
         html += `</div>`;
 
