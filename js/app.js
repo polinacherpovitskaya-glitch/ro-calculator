@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v70';
+const APP_VERSION = 'v71';
 
 const App = {
     currentPage: 'dashboard',
@@ -1162,6 +1162,7 @@ const Calculator = {
             parent_item_index: parentItemIndex ?? null,  // null = order-level, number = per-item
             _from_template: false,  // true = auto-created from blank template
             source: 'warehouse',        // 'warehouse' | 'china' | 'custom'
+            custom_country: 'china',    // for source='custom': 'china' | 'russia'
             warehouse_item_id: null,    // id позиции со склада
             warehouse_sku: '',          // артикул (для истории)
             china_item_id: null,        // id from ChinaCatalog
@@ -1278,6 +1279,8 @@ const Calculator = {
         const isWarehouse = hw.source === 'warehouse';
         const isChina = hw.source === 'china';
         const isCustom = hw.source === 'custom';
+        const isCustomChina = isCustom && (hw.custom_country || 'china') === 'china';
+        const isCustomRussia = isCustom && (hw.custom_country || 'china') === 'russia';
         const list = document.getElementById(targetListId || 'calc-hardware-list');
 
         // Build warehouse picker (hardware only — exclude packaging)
@@ -1298,9 +1301,13 @@ const Calculator = {
         }).join('');
 
         // China pricing info line
-        const chinaInfo = (isChina || isCustom) && hw.price_cny > 0
+        const chinaInfo = (isChina || isCustomChina) && hw.price_cny > 0
             ? `<div style="font-size:11px;color:var(--text-muted);margin-top:6px;padding:4px 8px;background:var(--bg);border-radius:4px;">
                 \ud83d\udcb0 ${hw.price_cny}\u00a5 = <b>${formatRub(hw.price)}</b>/\u0448\u0442 \u00b7 \ud83d\udce6 \u0414\u043e\u0441\u0442\u0430\u0432\u043a\u0430: <b>${formatRub(hw.delivery_price)}</b>/\u0448\u0442 (${hw.weight_grams || 0}\u0433)
+               </div>` : '';
+        const russiaInfo = isCustomRussia
+            ? `<div style="font-size:11px;color:var(--text-muted);margin-top:6px;padding:4px 8px;background:var(--bg);border-radius:4px;">
+                Цена: <b>${formatRub(hw.price || 0)}</b>/шт · Доставка: <b>${formatRub(hw.delivery_total || 0)}</b> всего = <b>${formatRub(hw.delivery_price || 0)}</b>/шт
                </div>` : '';
 
         let modeHtml = '';
@@ -1344,6 +1351,16 @@ const Calculator = {
             ${chinaInfo}`;
         } else {
             modeHtml = `
+            <div style="display:flex;gap:6px;margin-bottom:8px;">
+                <label class="${isCustomChina ? 'src-active' : ''}" style="display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border:1px solid var(--border);border-radius:16px;cursor:pointer;">
+                    <input type="radio" name="hw-custom-country-${idx}" value="china" ${isCustomChina ? 'checked' : ''} onchange="Calculator.onHwCustomCountryChange(${idx}, 'china')" style="display:none;">
+                    🇨🇳 Китай
+                </label>
+                <label class="${isCustomRussia ? 'src-active' : ''}" style="display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border:1px solid var(--border);border-radius:16px;cursor:pointer;">
+                    <input type="radio" name="hw-custom-country-${idx}" value="russia" ${isCustomRussia ? 'checked' : ''} onchange="Calculator.onHwCustomCountryChange(${idx}, 'russia')" style="display:none;">
+                    🇷🇺 Россия
+                </label>
+            </div>
             <div class="form-row" style="align-items:end">
                 <div class="form-group" style="margin:0;flex:1.5">
                     <label>\u041d\u0430\u0437\u0432\u0430\u043d\u0438\u0435</label>
@@ -1357,20 +1374,31 @@ const Calculator = {
                     <label>${this._assemblyTimingLabel()}</label>
                     <input type="number" min="0" step="1" value="${minsDisplay}" oninput="Calculator.onHwMinutes(${idx}, this.value)" placeholder="\u043d\u0430\u043f\u0440. 9">
                 </div>
-                <div class="form-group" style="margin:0">
-                    <label>\u0426\u0435\u043d\u0430 (\u00a5/\u0448\u0442)</label>
-                    <input type="number" min="0" step="0.01" value="${hw.price_cny || ''}" oninput="Calculator.onChinaNum('hw', ${idx}, 'price_cny', this.value)">
-                </div>
-                <div class="form-group" style="margin:0">
-                    <label>\u0412\u0435\u0441 (\u0433)</label>
-                    <input type="number" min="0" step="0.1" value="${hw.weight_grams || ''}" oninput="Calculator.onChinaNum('hw', ${idx}, 'weight_grams', this.value)">
-                </div>
-                <div class="form-group" style="margin:0">
-                    <label>\u0414\u043e\u0441\u0442\u0430\u0432\u043a\u0430</label>
-                    <select onchange="Calculator.onChinaDeliveryMethod('hw', ${idx}, this.value)">${deliveryOpts}</select>
-                </div>
+                ${isCustomChina ? `
+                    <div class="form-group" style="margin:0">
+                        <label>\u0426\u0435\u043d\u0430 (\u00a5/\u0448\u0442)</label>
+                        <input type="number" min="0" step="0.01" value="${hw.price_cny || ''}" oninput="Calculator.onChinaNum('hw', ${idx}, 'price_cny', this.value)">
+                    </div>
+                    <div class="form-group" style="margin:0">
+                        <label>\u0412\u0435\u0441 (\u0433)</label>
+                        <input type="number" min="0" step="0.1" value="${hw.weight_grams || ''}" oninput="Calculator.onChinaNum('hw', ${idx}, 'weight_grams', this.value)">
+                    </div>
+                    <div class="form-group" style="margin:0">
+                        <label>\u0414\u043e\u0441\u0442\u0430\u0432\u043a\u0430 (\u0437\u0430 \u043a\u0433)</label>
+                        <select onchange="Calculator.onChinaDeliveryMethod('hw', ${idx}, this.value)">${deliveryOpts}</select>
+                    </div>
+                ` : `
+                    <div class="form-group" style="margin:0">
+                        <label>\u0426\u0435\u043d\u0430 (\u20BD/\u0448\u0442)</label>
+                        <input type="number" min="0" step="0.01" value="${hw.price || ''}" oninput="Calculator.onHwNum(${idx}, 'price', this.value)">
+                    </div>
+                    <div class="form-group" style="margin:0">
+                        <label>\u0414\u043e\u0441\u0442\u0430\u0432\u043a\u0430 (\u20BD, \u043e\u0431\u0449\u0430\u044f)</label>
+                        <input type="number" min="0" step="0.01" value="${hw.delivery_total || ''}" oninput="Calculator.onHwNum(${idx}, 'delivery_total', this.value)">
+                    </div>
+                `}
             </div>
-            ${chinaInfo}`;
+            ${isCustomChina ? chinaInfo : russiaInfo}`;
         }
 
         const html = `
@@ -1453,8 +1481,13 @@ const Calculator = {
             hw.warehouse_item_id = null;
             hw.warehouse_sku = '';
             hw.china_item_id = null;
+            if (!hw.custom_country) hw.custom_country = 'china';
             if (!hw.china_delivery_method) hw.china_delivery_method = 'avia';
-            this._recalcChinaPricing(hw);
+            if (hw.custom_country === 'china') {
+                this._recalcChinaPricing(hw);
+            } else {
+                hw.delivery_price = hw.qty > 0 ? round2(hw.delivery_total / hw.qty) : 0;
+            }
         } else {
             hw.name = '';
             hw.price = 0;
@@ -1470,6 +1503,23 @@ const Calculator = {
         this.rerenderAllHardware();
         this.items.forEach((_, i) => this._renderPerItemHwPkg(i));
         this.recalculate();
+    },
+
+    onHwCustomCountryChange(idx, country) {
+        const hw = this.hardwareItems[idx];
+        if (!hw || hw.source !== 'custom') return;
+        hw.custom_country = country;
+        hw.china_item_id = null;
+        if (country === 'china') {
+            this._recalcChinaPricing(hw);
+        } else {
+            hw.price_cny = 0;
+            hw.weight_grams = 0;
+            hw.delivery_price = hw.qty > 0 ? round2((hw.delivery_total || 0) / hw.qty) : 0;
+        }
+        this._rerenderHwItem(idx);
+        this.recalculate();
+        this.scheduleAutosave();
     },
 
     async onHwWarehouseSelect(idx, itemIdStr) {
@@ -1544,11 +1594,11 @@ const Calculator = {
                 App.toast(`Максимум на складе: ${whItem.available_qty} ${whItem.unit}. Остальное — из Китая.`);
             }
         }
-        // For china/custom sources, recalc from CNY pricing
-        if (hw.source === 'china' || hw.source === 'custom') {
+        // For china/custom(china) sources, recalc from CNY pricing
+        if (hw.source === 'china' || (hw.source === 'custom' && (hw.custom_country || 'china') === 'china')) {
             this._recalcChinaPricing(hw);
         } else {
-            // Auto-calculate per-unit delivery from total (warehouse)
+            // Auto-calculate per-unit delivery from total (warehouse/custom-russia)
             hw.delivery_price = hw.qty > 0 ? round2(hw.delivery_total / hw.qty) : 0;
         }
         this.recalculate();
@@ -1760,7 +1810,8 @@ const Calculator = {
     },
 
     _recalcChinaPricing(item) {
-        if (item.source !== 'china' && item.source !== 'custom') return;
+        const chinaMode = item.source === 'china' || (item.source === 'custom' && (item.custom_country || 'china') === 'china');
+        if (!chinaMode) return;
         const cnyRate = ChinaCatalog._cnyRate || 12.5;
         const usdRate = ChinaCatalog._usdRate || 90;
         const itemSurcharge = ChinaCatalog.ITEM_SURCHARGE || 0.035;
@@ -2234,6 +2285,7 @@ const Calculator = {
             const hw = this.getEmptyHardware(itemIdx);
             hw._from_template = true;
             hw.source = 'custom';
+            hw.custom_country = 'russia';
             hw.name = tpl.hw_name;
             hw.price = tpl.hw_price_per_unit || 0;
             hw.delivery_total = tpl.hw_delivery_total || 0;
@@ -3429,6 +3481,7 @@ const Calculator = {
                 cost_total: hw.result ? hw.result.costPerUnit : 0,
                 hours_hardware: hw.result ? hw.result.hoursHardware : 0,
                 hardware_source: hw.source || 'custom',
+                custom_country: hw.custom_country || 'china',
                 hardware_warehouse_item_id: hw.warehouse_item_id || null,
                 hardware_warehouse_sku: hw.warehouse_sku || '',
                 hardware_parent_item_index: hw.parent_item_index ?? null,
@@ -3872,6 +3925,7 @@ const Calculator = {
             hw.sell_price = dbHw.sell_price_hardware || 0;
             // Warehouse integration fields
             hw.source = dbHw.hardware_source || 'custom';  // backward compat: old orders = custom
+            hw.custom_country = dbHw.custom_country || 'china';
             hw.warehouse_item_id = dbHw.hardware_warehouse_item_id || null;
             hw.warehouse_sku = dbHw.hardware_warehouse_sku || '';
             hw.parent_item_index = dbHw.hardware_parent_item_index ?? null;
