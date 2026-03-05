@@ -84,9 +84,12 @@ const Marketplaces = {
 
             // Cost breakdown lines
             const breakdownParts = [];
-            if (bd.plasticCost > 0) breakdownParts.push('Пластик ' + formatRub(bd.plasticCost));
-            if (bd.hwCost > 0) breakdownParts.push('Фурнитура ' + formatRub(bd.hwCost));
-            if (bd.pkgCost > 0) breakdownParts.push('Упаковка ' + formatRub(bd.pkgCost));
+            if (bd.castingCost > 0) breakdownParts.push('Выливание ' + formatRub(bd.castingCost));
+            if (bd.hwMaterialCost > 0) breakdownParts.push('Фурнитура ' + formatRub(bd.hwMaterialCost));
+            if (bd.fotCost > 0) breakdownParts.push('ФОТ ' + formatRub(bd.fotCost));
+            if (bd.assemblyCost > 0) breakdownParts.push('Сборка ' + formatRub(bd.assemblyCost));
+            if (bd.indirectCost > 0) breakdownParts.push('Косвенные ' + formatRub(bd.indirectCost));
+            if (bd.pkgMaterialCost > 0) breakdownParts.push('Упаковка ' + formatRub(bd.pkgMaterialCost));
 
             html += `<div class="card" style="padding:14px;margin-bottom:8px;display:flex;align-items:center;gap:14px;">
                 <div style="flex-shrink:0;">${photo}</div>
@@ -506,10 +509,12 @@ const Marketplaces = {
         return round2((fotPerHour + indirectPerHour) / speed);
     },
 
-    _calcHwUnitCost(item, params) {
+    _calcHwUnitComponents(item, params) {
         const cnyRate = params.cnyRate || 12.5;
         const fotPerHour = params.fotPerHour || 400;
         const indirectPerHour = params.indirectPerHour || 0;
+        const wasteFactor = params.wasteFactor || 1.1;
+        const indirectModeAll = params.indirectCostMode === 'all';
         let materialCost = 0;
         let assemblySpeed = parseFloat(item.assembly_speed) || 0;
 
@@ -521,20 +526,38 @@ const Marketplaces = {
             }
         } else if (item.blank_id) {
             const hw = this._hwCatalog.find(b => b.id === item.blank_id);
-            if (!hw) return 0;
+            if (!hw) return { materialCost: 0, assemblyFot: 0, assemblyIndirect: 0, total: 0 };
             materialCost = (hw.price_rub || 0) > 0
                 ? (hw.price_rub || 0)
                 : ((hw.price_cny || 0) * cnyRate + (hw.delivery_per_unit || 0));
             if (!assemblySpeed) assemblySpeed = parseFloat(hw.assembly_speed) || 0;
         }
 
-        const assemblyCost = this._assemblyCostPerUnit(assemblySpeed, fotPerHour, indirectPerHour);
-        return round2(materialCost + assemblyCost);
+        let assemblyFot = 0;
+        let assemblyIndirect = 0;
+        if (assemblySpeed > 0) {
+            assemblyFot = fotPerHour / assemblySpeed * wasteFactor;
+            assemblyIndirect = indirectModeAll ? (indirectPerHour / assemblySpeed * wasteFactor) : 0;
+        }
+
+        const total = round2(materialCost + assemblyFot + assemblyIndirect);
+        return {
+            materialCost: round2(materialCost),
+            assemblyFot: round2(assemblyFot),
+            assemblyIndirect: round2(assemblyIndirect),
+            total,
+        };
     },
 
-    _calcPkgUnitCost(item, params) {
+    _calcHwUnitCost(item, params) {
+        return this._calcHwUnitComponents(item, params).total;
+    },
+
+    _calcPkgUnitComponents(item, params) {
         const fotPerHour = params.fotPerHour || 400;
         const indirectPerHour = params.indirectPerHour || 0;
+        const wasteFactor = params.wasteFactor || 1.1;
+        const indirectModeAll = params.indirectCostMode === 'all';
         let materialCost = 0;
         let assemblySpeed = parseFloat(item.assembly_speed) || 0;
 
@@ -546,13 +569,29 @@ const Marketplaces = {
             }
         } else if (item.blank_id) {
             const pkg = this._pkgCatalog.find(b => b.id === item.blank_id);
-            if (!pkg) return 0;
+            if (!pkg) return { materialCost: 0, assemblyFot: 0, assemblyIndirect: 0, total: 0 };
             materialCost = (pkg.price_per_unit || 0) + (pkg.delivery_per_unit || 0);
             if (!assemblySpeed) assemblySpeed = parseFloat(pkg.assembly_speed) || 0;
         }
 
-        const assemblyCost = this._assemblyCostPerUnit(assemblySpeed, fotPerHour, indirectPerHour);
-        return round2(materialCost + assemblyCost);
+        let assemblyFot = 0;
+        let assemblyIndirect = 0;
+        if (assemblySpeed > 0) {
+            assemblyFot = fotPerHour / assemblySpeed * wasteFactor;
+            assemblyIndirect = indirectModeAll ? (indirectPerHour / assemblySpeed * wasteFactor) : 0;
+        }
+
+        const total = round2(materialCost + assemblyFot + assemblyIndirect);
+        return {
+            materialCost: round2(materialCost),
+            assemblyFot: round2(assemblyFot),
+            assemblyIndirect: round2(assemblyIndirect),
+            total,
+        };
+    },
+
+    _calcPkgUnitCost(item, params) {
+        return this._calcPkgUnitComponents(item, params).total;
     },
 
     // ==========================================
@@ -608,7 +647,21 @@ const Marketplaces = {
             const profit = round2(afterCommercial - totalCost);
             const profitPct = afterCommercial > 0 ? Math.round(profit / afterCommercial * 100) : 0;
 
+            const bd = this._calcSetBreakdown({
+                plastic_items: this._plasticItems,
+                hw_items: this._hwItems,
+                pkg_items: this._pkgItems,
+            });
+            const stageParts = [];
+            if (bd.castingCost > 0) stageParts.push(`Выливание: ${formatRub(bd.castingCost)}`);
+            if (bd.hwMaterialCost > 0) stageParts.push(`Фурнитура: ${formatRub(bd.hwMaterialCost)}`);
+            if (bd.fotCost > 0) stageParts.push(`ФОТ: ${formatRub(bd.fotCost)}`);
+            if (bd.assemblyCost > 0) stageParts.push(`Сборка: ${formatRub(bd.assemblyCost)}`);
+            if (bd.indirectCost > 0) stageParts.push(`Косвенные: ${formatRub(bd.indirectCost)}`);
+            if (bd.pkgMaterialCost > 0) stageParts.push(`Упаковка: ${formatRub(bd.pkgMaterialCost)}`);
+
             document.getElementById('mp-calc-details').innerHTML = `
+                ${stageParts.length ? `<div style="margin-bottom:6px;">${stageParts.join(' · ')}</div>` : ''}
                 ${formatRub(sellingPrice)}
                 → −МП ${commissionPct}%: ${formatRub(afterCommission)}
                 → −НДС ${vatPct}%: ${formatRub(afterVat)}
@@ -720,27 +773,104 @@ const Marketplaces = {
     _calcSetBreakdown(s) {
         const params = App.params || {};
         let plasticCost = 0, hwCost = 0, pkgCost = 0;
+        let castingCost = 0;
+        let hwMaterialCost = 0;
+        let pkgMaterialCost = 0;
+        let fotCost = 0;
+        let assemblyCost = 0;
+        let indirectCost = 0;
 
         (s.plastic_items || []).forEach(item => {
             if (!item.blank_id) return;
             const mold = this._plasticBlanks.find(m => m.id === item.blank_id);
             if (!mold || !mold.tiers) return;
             const tier = mold.tiers[500] || mold.tiers[300] || mold.tiers[1000];
-            if (tier) plasticCost += tier.cost * (item.qty || 1);
+            const qtyMult = item.qty || 1;
+            if (tier) plasticCost += tier.cost * qtyMult;
+
+            // Detailed split for plastic part (as in _enrichPlasticBlanks)
+            const pMin = mold.pph_min || 0;
+            const pMax = mold.pph_max || 0;
+            const pAvg = (pMin > 0 && pMax > 0) ? Math.round((pMin + pMax) / 2) : (pMin || pMax || 0);
+            const pph = mold.pph_actual || pAvg || 1;
+            const weight = mold.weight_grams || 0;
+            const moldCount = mold.mold_count || 1;
+            const singleMoldCost = (mold.cost_cny || 800) * (mold.cny_rate || 12.5) + (mold.delivery_cost || 8000);
+            const moldAmortPerUnit = (singleMoldCost * moldCount) / MOLD_MAX_LIFETIME;
+            const baseItem = {
+                quantity: 500,
+                pieces_per_hour: pph,
+                weight_grams: weight,
+                extra_molds: 0,
+                complex_design: false,
+                is_nfc: mold.category === 'nfc',
+                nfc_programming: mold.category === 'nfc',
+                hardware_qty: 0,
+                packaging_qty: 0,
+                printing_qty: 0,
+                delivery_included: false,
+            };
+            const res = calculateItemCost(baseItem, params);
+            const castingPerUnit = round2(
+                (res.costPlastic || 0)
+                + moldAmortPerUnit
+                + (res.costDesign || 0)
+                + (res.costNfcTag || 0)
+                + (res.costPrinting || 0)
+                + (res.costDelivery || 0)
+            );
+            const fotPerUnit = round2((res.costFot || 0) + (res.costCutting || 0) + (res.costNfcProgramming || 0));
+            const indirectPerUnit = round2((res.costIndirect || 0) + (res.costCuttingIndirect || 0) + (res.costNfcIndirect || 0));
+
+            castingCost += castingPerUnit * qtyMult;
+            fotCost += fotPerUnit * qtyMult;
+            indirectCost += indirectPerUnit * qtyMult;
+
+            // Built-in hardware of plastic blank (if exists)
+            if (mold.hw_name && mold.hw_price_per_unit > 0) {
+                const hwMaterialPerUnit = round2((mold.hw_price_per_unit || 0) + ((mold.hw_delivery_total || 0) / 500));
+                let hwAssemblyFotPerUnit = 0;
+                if (mold.hw_speed > 0) {
+                    hwAssemblyFotPerUnit = round2((params.fotPerHour || 400) / mold.hw_speed * (params.wasteFactor || 1.1));
+                }
+                hwMaterialCost += hwMaterialPerUnit * qtyMult;
+                assemblyCost += hwAssemblyFotPerUnit * qtyMult;
+            }
         });
 
         (s.hw_items || []).forEach(item => {
-            hwCost += this._calcHwUnitCost(item, params) * (item.qty || 1);
+            const qtyMult = item.qty || 1;
+            const c = this._calcHwUnitComponents(item, params);
+            hwCost += c.total * qtyMult;
+            hwMaterialCost += c.materialCost * qtyMult;
+            assemblyCost += c.assemblyFot * qtyMult;
+            indirectCost += c.assemblyIndirect * qtyMult;
         });
 
         (s.pkg_items || []).forEach(item => {
-            pkgCost += this._calcPkgUnitCost(item, params) * (item.qty || 1);
+            const qtyMult = item.qty || 1;
+            const c = this._calcPkgUnitComponents(item, params);
+            pkgCost += c.total * qtyMult;
+            pkgMaterialCost += c.materialCost * qtyMult;
+            assemblyCost += c.assemblyFot * qtyMult;
+            indirectCost += c.assemblyIndirect * qtyMult;
         });
+
+        // fallback: if detailed split couldn't be reconstructed, keep at least basic categories
+        if (castingCost === 0 && plasticCost > 0) castingCost = plasticCost;
+        if (hwMaterialCost === 0 && hwCost > 0) hwMaterialCost = hwCost;
+        if (pkgMaterialCost === 0 && pkgCost > 0) pkgMaterialCost = pkgCost;
 
         return {
             plasticCost: round2(plasticCost),
             hwCost: round2(hwCost),
             pkgCost: round2(pkgCost),
+            castingCost: round2(castingCost),
+            hwMaterialCost: round2(hwMaterialCost),
+            pkgMaterialCost: round2(pkgMaterialCost),
+            fotCost: round2(fotCost),
+            assemblyCost: round2(assemblyCost),
+            indirectCost: round2(indirectCost),
             totalCost: round2(plasticCost + hwCost + pkgCost)
         };
     },
