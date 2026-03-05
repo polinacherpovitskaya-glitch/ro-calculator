@@ -9,6 +9,7 @@ const Factual = {
     factData: null,
     planHours: null,
     _entries: [],
+    _orderPlanMeta: null,
 
     // Cost row definitions: key, label, planField, hint (source of fact data)
     ROWS: [
@@ -31,6 +32,11 @@ const Factual = {
         { key: 'hours_assembly',   label: 'Часы: сборка фурнитуры',      planField: 'hoursHardware' },
         { key: 'hours_packaging',  label: 'Часы: упаковка + срезание',    planField: 'hoursPackaging' },
     ],
+
+    _num(v) {
+        const n = parseFloat(v);
+        return Number.isFinite(n) ? n : 0;
+    },
 
     async load() {
         const select = document.getElementById('fact-order-select');
@@ -121,6 +127,11 @@ const Factual = {
                     sell_price_item: ri.sell_price_item || 0,
                     sell_price_printing: ri.sell_price_printing || 0,
                     product_name: ri.product_name,
+                    template_id: ri.template_id || null,
+                    builtin_hw_name: ri.builtin_hw_name || '',
+                    builtin_hw_price: ri.builtin_hw_price || 0,
+                    builtin_hw_delivery_total: ri.builtin_hw_delivery_total || 0,
+                    builtin_hw_speed: ri.builtin_hw_speed || 0,
                 };
                 item.result = calculateItemCost(item, params);
                 calcItems.push(item);
@@ -152,7 +163,6 @@ const Factual = {
         });
 
         // Calculate plan data using the same function as findirector
-        const finData = calculateFinDirectorData(calcItems, calcHw, calcPkg, params);
         const loadData = calculateProductionLoad(calcItems, calcHw, calcPkg, params);
 
         // Split salary into production (plastic) vs assembly (hw + pkg)
@@ -170,21 +180,92 @@ const Factual = {
             if (pkg.result) salaryAssembly += pkg.result.hoursPackaging * params.fotPerHour;
         });
 
+        // Build plan rows from saved calculator components (order_items),
+        // fallback to recalculated values when old orders miss component fields.
+        let hardwarePurchase = 0;
+        let hardwareDelivery = 0;
+        let packagingPurchase = 0;
+        let packagingDelivery = 0;
+        let designPrinting = 0;
+        let plastic = 0;
+        let molds = 0;
+        let delivery = 0;
+        let taxes = 0;
+        let prodIndirect = 0;
+
+        rawItems.forEach(ri => {
+            const qty = this._num(ri.quantity);
+            if (qty <= 0) return;
+
+            if (ri.item_type === 'product') {
+                const costIndirect = this._num(ri.cost_indirect);
+                const costCuttingIndirect = this._num(ri.cost_cutting_indirect);
+                const costNfcIndirect = this._num(ri.cost_nfc_indirect);
+                const costPlastic = this._num(ri.cost_plastic);
+                const costMold = this._num(ri.cost_mold_amortization);
+                const costDesign = this._num(ri.cost_design);
+                const costPrinting = this._num(ri.cost_printing);
+                const costDelivery = this._num(ri.cost_delivery);
+                const costNfcTag = this._num(ri.cost_nfc_tag);
+
+                prodIndirect += qty * (costIndirect + costCuttingIndirect + costNfcIndirect);
+                plastic += qty * costPlastic;
+                // For blank forms molds should not be charged in plan-fact.
+                if (!ri.is_blank_mold) molds += qty * costMold;
+                designPrinting += qty * (costDesign + costPrinting);
+                delivery += qty * costDelivery;
+                hardwarePurchase += qty * costNfcTag;
+            } else if (ri.item_type === 'hardware') {
+                hardwarePurchase += qty * this._num(ri.hardware_price_per_unit);
+                hardwareDelivery += qty * this._num(ri.hardware_delivery_per_unit);
+            } else if (ri.item_type === 'packaging') {
+                packagingPurchase += qty * this._num(ri.packaging_price_per_unit);
+                packagingDelivery += qty * this._num(ri.packaging_delivery_per_unit);
+            }
+        });
+
+        // Indirect from production load/hours is the authoritative logic for this page.
+        const indirectByHours = round2((loadData.hoursPlasticTotal + loadData.hoursHardwareTotal + loadData.hoursPackagingTotal) * (params.indirectPerHour || 0));
+        if (prodIndirect <= 0) prodIndirect = indirectByHours;
+
+        const orderRevenue = this._num(order.total_revenue_plan);
+        const orderCosts = this._num(order.total_cost_plan);
+        const orderMarginPct = this._num(order.margin_percent_plan);
+        const orderEarned = this._num(order.total_margin_plan);
+
+        // Keep taxes as balancing row so row sum matches saved plan total from "Заказы".
+        const rowsWithoutTaxes = round2(
+            round2(salaryProduction) + round2(salaryAssembly) + round2(prodIndirect) +
+            round2(hardwarePurchase) + round2(hardwareDelivery) +
+            round2(packagingPurchase) + round2(packagingDelivery) +
+            round2(designPrinting) + round2(plastic) + round2(molds) + round2(delivery)
+        );
+        taxes = round2(Math.max(0, orderCosts > 0 ? (orderCosts - rowsWithoutTaxes) : 0));
+
         this.planData = {
             salaryProduction: round2(salaryProduction),
             salaryAssembly: round2(salaryAssembly),
-            indirectProduction: round2((loadData.hoursPlasticTotal + loadData.hoursHardwareTotal + loadData.hoursPackagingTotal) * (params.indirectPerHour || 0)),
-            hardwarePurchase: finData.hardwarePurchase,
-            hardwareDelivery: finData.hardwareDelivery,
-            packagingPurchase: finData.packagingPurchase,
-            packagingDelivery: finData.packagingDelivery,
-            designPrinting: round2(finData.design + finData.printing),
-            plastic: finData.plastic,
-            molds: finData.molds,
-            delivery: finData.delivery,
-            taxes: finData.taxes,
-            totalCosts: finData.totalCosts,
-            revenue: finData.revenue,
+            indirectProduction: round2(prodIndirect),
+            hardwarePurchase: round2(hardwarePurchase),
+            hardwareDelivery: round2(hardwareDelivery),
+            packagingPurchase: round2(packagingPurchase),
+            packagingDelivery: round2(packagingDelivery),
+            designPrinting: round2(designPrinting),
+            plastic: round2(plastic),
+            molds: round2(molds),
+            delivery: round2(delivery),
+            taxes: round2(taxes),
+            totalCosts: orderCosts > 0 ? round2(orderCosts) : round2(rowsWithoutTaxes + taxes),
+            revenue: orderRevenue > 0 ? round2(orderRevenue) : 0,
+            planMarginPercent: orderMarginPct,
+            planEarned: orderEarned,
+        };
+
+        this._orderPlanMeta = {
+            revenue: orderRevenue,
+            costs: orderCosts,
+            marginPercent: orderMarginPct,
+            earned: orderEarned,
         };
 
         this.planHours = {
@@ -237,6 +318,7 @@ const Factual = {
             const planVal = plan[row.planField] || 0;
             const factKey = 'fact_' + row.key;
             const factVal = parseFloat(fact[factKey]) || 0;
+            if (row.key === 'molds' && planVal === 0 && factVal === 0) return;
             planTotal += planVal;
             factTotal += factVal;
 
@@ -300,7 +382,7 @@ const Factual = {
         // Margin row (calculated)
         if (factRevenue > 0 && factTotal > 0) {
             const factMargin = round2(((factRevenue - factTotal) / factRevenue) * 100);
-            const planMargin = planRevenue > 0 ? round2(((planRevenue - planTotal) / planRevenue) * 100) : 0;
+            const planMargin = this._num(plan.planMarginPercent) || (planRevenue > 0 ? round2(((planRevenue - planTotal) / planRevenue) * 100) : 0);
             const marginColor = factMargin >= 30 ? 'var(--green)' : factMargin >= 20 ? 'var(--yellow)' : 'var(--red)';
 
             html += `<tr style="border-top:2px solid var(--border);">`;
@@ -465,9 +547,9 @@ const Factual = {
         const factRevenue = parseFloat(this.factData.fact_revenue) || 0;
         const factTotal = this.ROWS.reduce((s, r) => s + (parseFloat(this.factData['fact_' + r.key]) || 0), 0);
 
-        const planEarned = round2(planRevenue - planTotal);
+        const planEarned = this._num(this.planData.planEarned) || round2(planRevenue - planTotal);
         const factEarned = factRevenue > 0 ? round2(factRevenue - factTotal) : 0;
-        const planMargin = planRevenue > 0 ? round2(planEarned * 100 / planRevenue) : 0;
+        const planMargin = this._num(this.planData.planMarginPercent) || (planRevenue > 0 ? round2(planEarned * 100 / planRevenue) : 0);
         const factMargin = factRevenue > 0 ? round2(factEarned * 100 / factRevenue) : 0;
         const deltaEarned = round2(factEarned - planEarned);
 
