@@ -117,6 +117,7 @@ const ProductionPlan = {
                 <td>
                     <div class="pp-order-name">${this.esc(r.orderName)}</div>
                     <div class="pp-sub">${this.esc(r.statusLabel)} · ${this.esc(r.productsPlain || 'Без изделий')}</div>
+                    <div style="margin-top:8px;">${this._renderProgressBar(r)}</div>
                 </td>
                 <td>${this.esc(r.manager || '—')}</td>
                 <td>
@@ -161,6 +162,7 @@ const ProductionPlan = {
                 <div class="pp-sub" style="margin-top:6px;"><strong>Менеджер:</strong> ${this.esc(r.manager || '—')}</div>
                 <div class="pp-sub"><strong>Старт:</strong> ${this.esc(r.startLabel)}</div>
                 <div class="pp-sub ${late ? 'text-red' : ''}"><strong>Дедлайн:</strong> ${this.esc(r.deadlineLabel)}</div>
+                <div style="margin-top:8px;">${this._renderProgressBar(r)}</div>
                 <div style="margin-top:8px;">${this._renderColorCell(r)}</div>
                 <div class="pp-sub" style="margin-top:8px;"><strong>Фурнитура:</strong> ${this.esc(r.hwPlain || '—')}</div>
                 <div class="pp-sub"><strong>Упаковка:</strong> ${this.esc(r.pkgPlain || '—')}</div>
@@ -237,6 +239,7 @@ const ProductionPlan = {
         const colorLines = [];
         const attachments = [];
         const printingLines = [];
+        const hasCustomMold = productItems.some(i => !i.is_blank_mold);
         productItems.forEach(item => {
             const colors = this._extractColorNames(item);
             if (colors.length) {
@@ -272,11 +275,83 @@ const ProductionPlan = {
             colorLines,
             colorsPlain: colorLines.join(' · '),
             attachments,
+            hasCustomMold,
             startLabel,
             deadlineLabel,
             deadlineTs: endIso ? new Date(endIso).getTime() : (startIso ? new Date(startIso).getTime() : null),
             createdTs: order.created_at ? new Date(order.created_at).getTime() : 0,
         };
+    },
+
+    _getProgressStages(row) {
+        const stages = [
+            { key: 'casting', label: 'Выливание' },
+            { key: 'mold', label: 'Форма' },
+            { key: 'trim', label: 'Обрезание/линейка' },
+            { key: 'assembly', label: 'Сборка' },
+            { key: 'packaging', label: 'Упаковка' },
+        ];
+
+        const currentByStatus = {
+            production_casting: 'casting',
+            in_production: 'trim',
+            production_hardware: 'assembly',
+            production_packaging: 'packaging',
+            delivery: 'packaging',
+            completed: 'packaging',
+        };
+        const currentKey = currentByStatus[row.status] || 'casting';
+        const currentIdx = stages.findIndex(s => s.key === currentKey);
+
+        return stages.map((s, idx) => {
+            if (s.key === 'mold' && !row.hasCustomMold) {
+                return { ...s, state: 'skipped' };
+            }
+            if (idx < currentIdx) return { ...s, state: 'done' };
+            if (idx === currentIdx) return { ...s, state: 'active' };
+            return { ...s, state: 'todo' };
+        });
+    },
+
+    _renderProgressBar(row) {
+        const stages = this._getProgressStages(row);
+        const legend = stages.map(s => {
+            const dotColor =
+                s.state === 'done' ? '#16a34a' :
+                s.state === 'active' ? '#2563eb' :
+                s.state === 'skipped' ? '#9ca3af' :
+                '#d1d5db';
+            const textColor =
+                s.state === 'done' ? '#166534' :
+                s.state === 'active' ? '#1d4ed8' :
+                s.state === 'skipped' ? '#6b7280' :
+                '#6b7280';
+            const weight = s.state === 'active' ? 700 : 500;
+            const mark = s.state === 'done' ? '&#10003;' : (s.state === 'skipped' ? '&#8212;' : '&bull;');
+            return `<div style="display:flex;align-items:center;gap:4px;white-space:nowrap;color:${textColor};font-size:10px;font-weight:${weight};">
+                <span style="display:inline-flex;align-items:center;justify-content:center;width:12px;height:12px;border-radius:999px;background:${dotColor};color:#fff;font-size:8px;line-height:1;">${mark}</span>
+                <span>${this.esc(s.label)}</span>
+            </div>`;
+        }).join('<span style="color:#9ca3af;">›</span>');
+
+        const segments = stages.map((s, idx) => {
+            const bg =
+                s.state === 'done' ? '#22c55e' :
+                s.state === 'active' ? '#3b82f6' :
+                s.state === 'skipped' ? '#9ca3af' :
+                '#e5e7eb';
+            const borderRadius =
+                idx === 0 && idx === stages.length - 1 ? '6px' :
+                idx === 0 ? '6px 0 0 6px' :
+                idx === stages.length - 1 ? '0 6px 6px 0' :
+                '0';
+            return `<div style="flex:1;height:8px;background:${bg};border-radius:${borderRadius};"></div>`;
+        }).join('');
+
+        return `<div>
+            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">${legend}</div>
+            <div style="display:flex;gap:2px;margin-top:6px;">${segments}</div>
+        </div>`;
     },
 
     _extractColorNames(item) {
