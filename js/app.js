@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v54';
+const APP_VERSION = 'v55';
 
 const App = {
     currentPage: 'dashboard',

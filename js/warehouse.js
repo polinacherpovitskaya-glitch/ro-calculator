@@ -1414,13 +1414,10 @@ const Warehouse = {
         ).join('');
 
         const rows = this.shipmentItems.map((item, idx) => {
-            const pickerHtml = this.buildImagePicker(
-                `shpicker-picker-${idx}`,
-                grouped,
-                item.warehouse_item_id,
-                'Warehouse.onShipmentPickerSelect',
-                null
-            );
+            const selectOptions = this.buildPickerOptions(grouped, item.warehouse_item_id, true);
+            const simpleSelectHtml = `<select onchange="Warehouse.onShipmentItemSelect(${idx}, this.value)" style="width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;font-size:12px;">
+                ${selectOptions}
+            </select>`;
             const photoSrc = item.photo_thumbnail || item.photo_url || '';
             const photoPreview = photoSrc
                 ? `<img src="${this.esc(photoSrc)}" style="width:36px;height:36px;object-fit:cover;border-radius:6px;border:1px solid var(--border);" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';"><span style="width:36px;height:36px;display:none;align-items:center;justify-content:center;background:var(--bg);border-radius:6px;font-size:14px;">📷</span>`
@@ -1456,7 +1453,7 @@ const Warehouse = {
                         <button class="btn btn-sm ${item.source === 'existing' ? 'btn-primary' : 'btn-outline'}" type="button" style="padding:2px 8px;font-size:11px;" onclick="Warehouse.setShipmentItemSource(${idx}, 'existing')">Со склада</button>
                         <button class="btn btn-sm ${item.source === 'new' ? 'btn-primary' : 'btn-outline'}" type="button" style="padding:2px 8px;font-size:11px;" onclick="Warehouse.setShipmentItemSource(${idx}, 'new')">Новая</button>
                     </div>
-                    ${pickerHtml}
+                    ${simpleSelectHtml}
                 </div>`;
 
             return `<tr>
@@ -1830,18 +1827,19 @@ const Warehouse = {
         return grouped;
     },
 
-    buildPickerOptions(grouped, selectedId) {
+    buildPickerOptions(grouped, selectedId, showSku = false) {
         let html = '<option value="">— Выберите позицию —</option>';
         for (const catKey of Object.keys(grouped)) {
             const g = grouped[catKey];
             html += `<optgroup label="${g.icon} ${g.label}">`;
             g.items.forEach(item => {
                 const parts = [item.name];
+                if (showSku && item.sku) parts.push(item.sku);
                 if (item.size) parts.push(item.size);
                 if (item.color) parts.push(item.color);
                 const label = parts.join(' · ');
                 const stock = item.available_qty > 0 ? `(${item.available_qty} ${item.unit})` : '(нет)';
-                const sel = item.id === selectedId ? ' selected' : '';
+                const sel = String(item.id) === String(selectedId) ? ' selected' : '';
                 html += `<option value="${item.id}"${sel}>${label} ${stock}</option>`;
             });
             html += '</optgroup>';
