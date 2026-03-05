@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=69">
+    <link rel="stylesheet" href="css/style.css?v=70">
 </head>
 <body>
 
@@ -57,7 +57,7 @@
             </a>
             <a href="#factual" data-page="factual">
                 <span class="nav-icon">&#9646;</span>
-                <span>Факт</span>
+                <span>План-факт</span>
             </a>
             <a href="#analytics" data-page="analytics">
                 <span class="nav-icon">&#9673;</span>
@@ -549,18 +549,42 @@
         <!-- ========== FACTUAL (Plan vs Fact) ========== -->
         <div id="page-factual" class="page">
             <div class="page-header">
-                <h1>Факт: план vs реальность</h1>
+                <h1>План-факт</h1>
+            </div>
+
+            <div class="stats-grid" style="margin-bottom:16px;" id="fact-global-stats">
+                <div class="stat-card">
+                    <div class="stat-label">Готовых заказов</div>
+                    <div class="stat-value" id="fact-stat-orders">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">План маржа (ср.)</div>
+                    <div class="stat-value" id="fact-stat-plan-margin">0%</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Факт маржа (ср.)</div>
+                    <div class="stat-value" id="fact-stat-fact-margin">0%</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Отклонение прибыли</div>
+                    <div class="stat-value" id="fact-stat-earned-delta">0 &#8381;</div>
+                </div>
             </div>
 
             <!-- Order selector -->
             <div class="card" style="margin-bottom:16px">
                 <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
-                    <label style="font-weight:600; white-space:nowrap;">Заказ:</label>
+                    <label style="font-weight:600; white-space:nowrap;">Готовый заказ:</label>
                     <select id="fact-order-select" class="form-control" style="max-width:400px" onchange="Factual.onOrderSelect(this.value)">
-                        <option value="">-- Выберите заказ --</option>
+                        <option value="">-- Выберите заказ (статус: Готово) --</option>
                     </select>
                     <span id="fact-order-status" style="font-size:12px; color:var(--text-muted);"></span>
                 </div>
+            </div>
+
+            <div class="card" id="fact-order-analytics-card" style="display:none; margin-bottom:16px;">
+                <h3 style="margin:0 0 8px 0; font-size:14px;">Аналитика заказа</h3>
+                <div id="fact-order-analytics"></div>
             </div>
 
             <!-- Plan vs Fact table -->
@@ -576,6 +600,7 @@
             <div class="card" id="fact-hours-card" style="display:none; margin-top:16px;">
                 <h3 style="margin:0 0 12px 0; font-size:14px;">Часы: план vs факт</h3>
                 <div id="fact-hours-content"></div>
+                <div style="font-size:11px;color:var(--text-muted);margin-top:8px;">Фактические часы автоматически подтягиваются из раздела «Часы» по выбранному заказу.</div>
             </div>
 
             <!-- Notes -->
@@ -2822,7 +2847,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="js/supabase.js?v=68"></script>
 <script src="js/calculator.js?v=62"></script>
-<script src="js/app.js?v=69"></script>
+<script src="js/app.js?v=70"></script>
 <script src="js/dashboard.js?v=46g"></script>
 <script src="js/order-detail.js?v=47b"></script>
 <script src="js/orders.js?v=52"></script>
@@ -2835,7 +2860,7 @@
 <script src="js/tasks.js?v=46g"></script>
 <script src="js/gantt.js?v=46g"></script>
 <script src="js/import.js?v=46g"></script>
-<script src="js/factual.js?v=46g"></script>
+<script src="js/factual.js?v=70"></script>
 <script src="js/china.js?v=46g"></script>
 <script src="js/warehouse_photos.js?v=46g"></script>
 <script src="js/china_catalog.js?v=46k"></script>

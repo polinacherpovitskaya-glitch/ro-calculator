@@ -1,5 +1,5 @@
 // =============================================
-// Recycle Object — Factual Costs (Plan vs Fact)
+// Recycle Object — План-факт
 // Compare planned vs actual expenses per order
 // =============================================
 
@@ -8,11 +8,13 @@ const Factual = {
     planData: null,
     factData: null,
     planHours: null,
+    _entries: [],
 
     // Cost row definitions: key, label, planField, hint (source of fact data)
     ROWS: [
         { key: 'salary_production',   label: 'ЗП производство (выливание)',       planField: 'salaryProduction', hint: 'из бота: часы сотрудников на выливание' },
         { key: 'salary_assembly',     label: 'ЗП сборка + упаковка + срезка',     planField: 'salaryAssembly',   hint: 'из бота: часы на сборку фурнитуры, упаковку, срезание' },
+        { key: 'indirect_production', label: 'Косвенные (по фактическим часам)',  planField: 'indirectProduction', hint: 'авто: фактические часы × косвенные/час' },
         { key: 'hardware_purchase',   label: 'Закупка фурнитуры + NFC',           planField: 'hardwarePurchase', hint: 'стоимость фурнитуры (склад или кастомная закупка)' },
         { key: 'hardware_delivery',   label: 'Доставка фурнитуры',                planField: 'hardwareDelivery', hint: 'доставка из Китая / РФ' },
         { key: 'packaging_purchase',  label: 'Закупка упаковки',                  planField: 'packagingPurchase', hint: '' },
@@ -34,10 +36,11 @@ const Factual = {
         const select = document.getElementById('fact-order-select');
         if (!select) return;
 
-        // Load all orders
+        // Load only completed orders for plan-fact
         const orders = await loadOrders();
-        select.innerHTML = '<option value="">-- Выберите заказ --</option>';
-        orders.forEach(o => {
+        const completedOrders = (orders || []).filter(o => o.status === 'completed');
+        select.innerHTML = '<option value="">-- Выберите заказ (статус: Готово) --</option>';
+        completedOrders.forEach(o => {
             const opt = document.createElement('option');
             opt.value = o.id;
             opt.textContent = (o.order_name || 'Без названия') +
@@ -45,6 +48,8 @@ const Factual = {
                 ' (' + (o.status || 'draft') + ')';
             select.appendChild(opt);
         });
+
+        await this.renderGlobalStats(completedOrders);
 
         // If we had a previous selection, restore it
         if (this.currentOrderId) {
@@ -62,6 +67,7 @@ const Factual = {
         const tableCard = document.getElementById('fact-table-card');
         const hoursCard = document.getElementById('fact-hours-card');
         const notesCard = document.getElementById('fact-notes-card');
+        const analyticsCard = document.getElementById('fact-order-analytics-card');
         const statusEl = document.getElementById('fact-order-status');
 
         if (!orderId) {
@@ -69,6 +75,7 @@ const Factual = {
             if (tableCard) tableCard.style.display = 'none';
             if (hoursCard) hoursCard.style.display = 'none';
             if (notesCard) notesCard.style.display = 'none';
+            if (analyticsCard) analyticsCard.style.display = 'none';
             return;
         }
 
@@ -83,6 +90,14 @@ const Factual = {
 
         const { order, items: rawItems } = orderData;
         if (statusEl) statusEl.textContent = order.status || '';
+        if (order.status !== 'completed') {
+            if (statusEl) statusEl.textContent = 'Доступно только для заказов со статусом "Готово"';
+            if (tableCard) tableCard.style.display = 'none';
+            if (hoursCard) hoursCard.style.display = 'none';
+            if (notesCard) notesCard.style.display = 'none';
+            if (analyticsCard) analyticsCard.style.display = 'none';
+            return;
+        }
 
         // Reconstruct calculator items/hw/pkg from saved data
         const params = App.params || {};
@@ -158,6 +173,7 @@ const Factual = {
         this.planData = {
             salaryProduction: round2(salaryProduction),
             salaryAssembly: round2(salaryAssembly),
+            indirectProduction: round2((loadData.hoursPlasticTotal + loadData.hoursHardwareTotal + loadData.hoursPackagingTotal) * (params.indirectPerHour || 0)),
             hardwarePurchase: finData.hardwarePurchase,
             hardwareDelivery: finData.hardwareDelivery,
             packagingPurchase: finData.packagingPurchase,
@@ -179,14 +195,19 @@ const Factual = {
 
         // Load saved factual data
         this.factData = await loadFactual(orderId) || {};
+        this._entries = await loadTimeEntries();
+        this.applyHoursFromEntries(orderId, params);
+        this.applyDerivedFactCosts(params);
 
         // Render
         this.renderTable();
         this.renderHours();
+        this.renderOrderAnalytics();
 
         if (tableCard) tableCard.style.display = '';
         if (hoursCard) hoursCard.style.display = '';
         if (notesCard) notesCard.style.display = '';
+        if (analyticsCard) analyticsCard.style.display = '';
 
         // Restore notes
         const notesEl = document.getElementById('fact-notes');
@@ -316,9 +337,8 @@ const Factual = {
             html += `<span style="font-size:12px; color:var(--text-muted);">План: ${planVal.toFixed(1)} ч</span>`;
             html += `</div>`;
             html += `<div style="margin-top:4px;">`;
-            html += `<input type="text" inputmode="decimal" value="${factVal || ''}" placeholder="Факт часы"
-                style="width:100%; text-align:center; padding:6px; border:1px solid var(--border); border-radius:4px; font-size:14px; font-weight:600;"
-                oninput="Factual.onHourInput('${row.key}', this.value)">`;
+            html += `<input type="text" value="${factVal || ''}" readonly
+                style="width:100%; text-align:center; padding:6px; border:1px solid var(--border); border-radius:4px; font-size:14px; font-weight:600; background:var(--bg);">`;
             html += `</div>`;
             if (factVal > 0) {
                 html += `<div style="margin-top:4px; text-align:center; font-size:11px; font-weight:600; color:${alarm.color};">${alarm.icon} ${delta >= 0 ? '+' : ''}${delta.toFixed(1)} ч</div>`;
@@ -363,13 +383,6 @@ const Factual = {
         this._renderTimer = setTimeout(() => this.renderTable(), 400);
     },
 
-    onHourInput(key, value) {
-        const num = parseFloat(value.replace(/\s/g, '').replace(',', '.')) || 0;
-        this.factData['fact_' + key] = num;
-        clearTimeout(this._hoursTimer);
-        this._hoursTimer = setTimeout(() => this.renderHours(), 400);
-    },
-
     onNotesChange(value) {
         this.factData.notes = value;
     },
@@ -390,5 +403,117 @@ const Factual = {
 
         await saveFactual(this.currentOrderId, this.factData);
         App.toast('Фактические данные сохранены');
+        await this.load();
+    },
+
+    applyHoursFromEntries(orderId, params) {
+        const entries = (this._entries || []).filter(e => Number(e.order_id) === Number(orderId));
+        let casting = 0;
+        let assembly = 0;
+        let packaging = 0;
+        entries.forEach(e => {
+            const stage = this._stageKey(e);
+            const h = parseFloat(e.hours) || 0;
+            if (stage === 'casting' || stage === 'trim') casting += h;
+            else if (stage === 'assembly') assembly += h;
+            else if (stage === 'packaging') packaging += h;
+        });
+        this.factData.fact_hours_production = round2(casting);
+        this.factData.fact_hours_assembly = round2(assembly);
+        this.factData.fact_hours_packaging = round2(packaging);
+        this.factData._hours_source = 'timetrack';
+    },
+
+    applyDerivedFactCosts(params) {
+        const hProd = parseFloat(this.factData.fact_hours_production) || 0;
+        const hAsm = parseFloat(this.factData.fact_hours_assembly) || 0;
+        const hPkg = parseFloat(this.factData.fact_hours_packaging) || 0;
+        const totalHours = hProd + hAsm + hPkg;
+        const fot = params?.fotPerHour || 0;
+        const indirectPerHour = params?.indirectPerHour || 0;
+
+        this.factData.fact_salary_production = round2(hProd * fot);
+        this.factData.fact_salary_assembly = round2((hAsm + hPkg) * fot);
+        this.factData.fact_indirect_production = round2(totalHours * indirectPerHour);
+    },
+
+    _stageKey(entry) {
+        const desc = String(entry?.description || '');
+        const marker = desc.match(/^\[meta\](\{.*?\})\[\/meta\]\s*/);
+        if (marker) {
+            try {
+                const parsed = JSON.parse(marker[1]);
+                if (parsed?.stage) return parsed.stage;
+            } catch (e) {}
+        }
+        if (entry?.stage) return entry.stage;
+        const stageMatch = desc.match(/(?:^|\n)Этап:\s*([^\n]+)/i);
+        const label = (stageMatch?.[1] || '').toLowerCase();
+        if (label.includes('вылив')) return 'casting';
+        if (label.includes('литник') || label.includes('лейник') || label.includes('срез')) return 'trim';
+        if (label.includes('сбор')) return 'assembly';
+        if (label.includes('упаков')) return 'packaging';
+        return 'other';
+    },
+
+    renderOrderAnalytics() {
+        const el = document.getElementById('fact-order-analytics');
+        if (!el || !this.planData || !this.factData) return;
+
+        const planRevenue = parseFloat(this.planData.revenue) || 0;
+        const planTotal = this.ROWS.reduce((s, r) => s + (parseFloat(this.planData[r.planField]) || 0), 0);
+        const factRevenue = parseFloat(this.factData.fact_revenue) || 0;
+        const factTotal = this.ROWS.reduce((s, r) => s + (parseFloat(this.factData['fact_' + r.key]) || 0), 0);
+
+        const planEarned = round2(planRevenue - planTotal);
+        const factEarned = factRevenue > 0 ? round2(factRevenue - factTotal) : 0;
+        const planMargin = planRevenue > 0 ? round2(planEarned * 100 / planRevenue) : 0;
+        const factMargin = factRevenue > 0 ? round2(factEarned * 100 / factRevenue) : 0;
+        const deltaEarned = round2(factEarned - planEarned);
+
+        el.innerHTML = `<div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;">
+            <div style="padding:10px;border:1px solid var(--border);border-radius:8px;"><div style="font-size:11px;color:var(--text-muted)">План маржа</div><div style="font-size:20px;font-weight:700;">${planMargin}%</div></div>
+            <div style="padding:10px;border:1px solid var(--border);border-radius:8px;"><div style="font-size:11px;color:var(--text-muted)">Факт маржа</div><div style="font-size:20px;font-weight:700;${factRevenue > 0 ? (factMargin >= planMargin ? 'color:var(--green)' : 'color:var(--red)') : ''}">${factRevenue > 0 ? factMargin + '%' : '—'}</div></div>
+            <div style="padding:10px;border:1px solid var(--border);border-radius:8px;"><div style="font-size:11px;color:var(--text-muted)">План прибыль</div><div style="font-size:20px;font-weight:700;">${this.fmtRub(planEarned)}</div></div>
+            <div style="padding:10px;border:1px solid var(--border);border-radius:8px;"><div style="font-size:11px;color:var(--text-muted)">Отклонение прибыли</div><div style="font-size:20px;font-weight:700;${factRevenue > 0 ? (deltaEarned >= 0 ? 'color:var(--green)' : 'color:var(--red)') : ''}">${factRevenue > 0 ? ((deltaEarned >= 0 ? '+' : '') + this.fmtRub(deltaEarned)) : '—'}</div></div>
+        </div>`;
+    },
+
+    async renderGlobalStats(completedOrders) {
+        const orders = completedOrders || [];
+        const countEl = document.getElementById('fact-stat-orders');
+        const planEl = document.getElementById('fact-stat-plan-margin');
+        const factEl = document.getElementById('fact-stat-fact-margin');
+        const deltaEl = document.getElementById('fact-stat-earned-delta');
+        if (!countEl || !planEl || !factEl || !deltaEl) return;
+
+        countEl.textContent = String(orders.length);
+        const planAvg = orders.length
+            ? round2(orders.reduce((s, o) => s + (parseFloat(o.margin_percent_plan) || 0), 0) / orders.length)
+            : 0;
+        planEl.textContent = `${planAvg}%`;
+
+        const factuals = await Promise.all(orders.map(o => loadFactual(o.id)));
+        let factMargins = [];
+        let earnedDelta = 0;
+        orders.forEach((o, idx) => {
+            const f = factuals[idx];
+            if (!f) return;
+            const planRevenue = parseFloat(o.total_revenue_plan) || 0;
+            const planCosts = parseFloat(o.total_cost_plan) || 0;
+            const planEarned = planRevenue - planCosts;
+            const factRevenue = parseFloat(f.fact_revenue) || 0;
+            let factCosts = 0;
+            this.ROWS.forEach(r => { factCosts += parseFloat(f['fact_' + r.key]) || 0; });
+            if (factRevenue > 0) {
+                const m = round2((factRevenue - factCosts) * 100 / factRevenue);
+                factMargins.push(m);
+                earnedDelta += (factRevenue - factCosts) - planEarned;
+            }
+        });
+        const factAvg = factMargins.length ? round2(factMargins.reduce((s, v) => s + v, 0) / factMargins.length) : 0;
+        factEl.textContent = factMargins.length ? `${factAvg}%` : '—';
+        deltaEl.textContent = `${earnedDelta >= 0 ? '+' : ''}${this.fmtRub(earnedDelta)}`;
+        deltaEl.style.color = earnedDelta >= 0 ? 'var(--green)' : 'var(--red)';
     },
 };
