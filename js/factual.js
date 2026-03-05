@@ -10,28 +10,40 @@ const Factual = {
     planHours: null,
     _entries: [],
     _orderPlanMeta: null,
+    _employees: [],
 
     // Cost row definitions: key, label, planField, hint (source of fact data)
     ROWS: [
-        { key: 'salary_production',   label: 'ЗП производство (выливание)',       planField: 'salaryProduction', hint: 'из бота: часы сотрудников на выливание' },
-        { key: 'salary_assembly',     label: 'ЗП сборка + упаковка + срезка',     planField: 'salaryAssembly',   hint: 'из бота: часы на сборку фурнитуры, упаковку, срезание' },
-        { key: 'indirect_production', label: 'Косвенные (по фактическим часам)',  planField: 'indirectProduction', hint: 'авто: фактические часы × косвенные/час' },
-        { key: 'hardware_purchase',   label: 'Закупка фурнитуры + NFC',           planField: 'hardwarePurchase', hint: 'стоимость фурнитуры (склад или кастомная закупка)' },
-        { key: 'hardware_delivery',   label: 'Доставка фурнитуры',                planField: 'hardwareDelivery', hint: 'доставка из Китая / РФ' },
-        { key: 'packaging_purchase',  label: 'Закупка упаковки',                  planField: 'packagingPurchase', hint: '' },
-        { key: 'packaging_delivery',  label: 'Доставка упаковки',                 planField: 'packagingDelivery', hint: '' },
-        { key: 'design_printing',     label: 'Нанесение (печать)',                 planField: 'designPrinting',  hint: 'фактическая стоимость печати (УФ, тампо и т.д.)' },
+        { key: 'salary_production',   label: 'ЗП выливание пластика',              planField: 'salaryProduction', hint: 'авто из «Часы»: этап «Выливание пластика» × ставка сотрудника' },
+        { key: 'salary_trim',         label: 'ЗП срезание литника',                planField: 'salaryTrim',      hint: 'авто из «Часы»: этап «Срезание литника» × ставка сотрудника' },
+        { key: 'salary_assembly',     label: 'ЗП сборка на фурнитуру',             planField: 'salaryAssembly',  hint: 'авто из «Часы»: этап «Сборка» × ставка сотрудника' },
+        { key: 'salary_packaging',    label: 'ЗП упаковка',                        planField: 'salaryPackaging', hint: 'авто из «Часы»: этап «Упаковка» × ставка сотрудника' },
+        { key: 'indirect_production', label: 'Косвенные (по фактическим часам)',  planField: 'indirectProduction', hint: 'авто: (часы выливания + срезания + сборки + упаковки) × косвенные/час' },
+        { key: 'hardware_total',      label: 'Фурнитура и NFC (закупка + доставка)', planField: 'hardwareTotal', hint: 'сейчас авто из плана (для склада = как в заказе)' },
+        { key: 'packaging_total',     label: 'Упаковка (закупка + доставка)',      planField: 'packagingTotal', hint: 'сейчас авто из плана (для склада = как в заказе)' },
+        { key: 'design_printing',     label: 'Нанесение (печать)',                 planField: 'designPrinting',  hint: 'пока вручную; позже подключим из FinTablo' },
         { key: 'plastic',             label: 'Пластик',                            planField: 'plastic',         hint: 'от начальника производства' },
-        { key: 'molds',               label: 'Молды (формы)',                      planField: 'molds',           hint: 'фактическая стоимость изготовления/ремонта форм' },
-        { key: 'delivery_client',     label: 'Доставка клиенту',                   planField: 'delivery',        hint: '' },
-        { key: 'taxes',               label: 'Налоги',                             planField: 'taxes',           hint: '' },
+        { key: 'molds',               label: 'Молды (формы)',                      planField: 'molds',           hint: 'для бланков обычно 0; для кастома по факту закупки/ремонта' },
+        { key: 'delivery_client',     label: 'Доставка клиенту',                   planField: 'delivery',        hint: 'пока вручную; позже подключим из FinTablo' },
+        { key: 'taxes',               label: 'Налоги',                             planField: 'taxes',           hint: 'пока вручную/балансом плана' },
     ],
 
     HOUR_ROWS: [
         { key: 'hours_production', label: 'Часы: выливание пластика',    planField: 'hoursPlastic' },
+        { key: 'hours_trim',       label: 'Часы: срезание литника',      planField: 'hoursTrim' },
         { key: 'hours_assembly',   label: 'Часы: сборка фурнитуры',      planField: 'hoursHardware' },
-        { key: 'hours_packaging',  label: 'Часы: упаковка + срезание',    planField: 'hoursPackaging' },
+        { key: 'hours_packaging',  label: 'Часы: упаковка',               planField: 'hoursPackaging' },
     ],
+
+    AUTO_FACT_KEYS: new Set([
+        'salary_production',
+        'salary_trim',
+        'salary_assembly',
+        'salary_packaging',
+        'indirect_production',
+        'hardware_total',
+        'packaging_total',
+    ]),
 
     _num(v) {
         const n = parseFloat(v);
@@ -162,23 +174,29 @@ const Factual = {
             }
         });
 
-        // Calculate plan data using the same function as findirector
-        const loadData = calculateProductionLoad(calcItems, calcHw, calcPkg, params);
+        this._employees = (await loadEmployees()) || [];
 
-        // Split salary into production (plastic) vs assembly (hw + pkg)
-        let salaryProduction = 0;
-        let salaryAssembly = 0;
+        // Plan hours by stage
+        let planHoursPlastic = 0;
+        let planHoursTrim = 0;
+        let planHoursAssembly = 0;
+        let planHoursPackaging = 0;
         calcItems.forEach(item => {
             if (item.result) {
-                salaryProduction += item.result.hoursTotalPlasticNfc * params.fotPerHour;
+                planHoursPlastic += item.result.hoursPlastic || 0;
+                planHoursTrim += item.result.hoursCutting || 0;
             }
         });
         calcHw.forEach(hw => {
-            if (hw.result) salaryAssembly += hw.result.hoursHardware * params.fotPerHour;
+            if (hw.result) planHoursAssembly += hw.result.hoursHardware || 0;
         });
         calcPkg.forEach(pkg => {
-            if (pkg.result) salaryAssembly += pkg.result.hoursPackaging * params.fotPerHour;
+            if (pkg.result) planHoursPackaging += pkg.result.hoursPackaging || 0;
         });
+        const salaryProduction = round2(planHoursPlastic * (params.fotPerHour || 0));
+        const salaryTrim = round2(planHoursTrim * (params.fotPerHour || 0));
+        const salaryAssembly = round2(planHoursAssembly * (params.fotPerHour || 0));
+        const salaryPackaging = round2(planHoursPackaging * (params.fotPerHour || 0));
 
         // Build plan rows from saved calculator components (order_items),
         // fallback to recalculated values when old orders miss component fields.
@@ -225,7 +243,8 @@ const Factual = {
         });
 
         // Indirect from production load/hours is the authoritative logic for this page.
-        const indirectByHours = round2((loadData.hoursPlasticTotal + loadData.hoursHardwareTotal + loadData.hoursPackagingTotal) * (params.indirectPerHour || 0));
+        const plannedHoursTotal = planHoursPlastic + planHoursTrim + planHoursAssembly + planHoursPackaging;
+        const indirectByHours = round2(plannedHoursTotal * (params.indirectPerHour || 0));
         if (prodIndirect <= 0) prodIndirect = indirectByHours;
 
         const orderRevenue = this._num(order.total_revenue_plan);
@@ -235,7 +254,7 @@ const Factual = {
 
         // Keep taxes as balancing row so row sum matches saved plan total from "Заказы".
         const rowsWithoutTaxes = round2(
-            round2(salaryProduction) + round2(salaryAssembly) + round2(prodIndirect) +
+            round2(salaryProduction) + round2(salaryTrim) + round2(salaryAssembly) + round2(salaryPackaging) + round2(prodIndirect) +
             round2(hardwarePurchase) + round2(hardwareDelivery) +
             round2(packagingPurchase) + round2(packagingDelivery) +
             round2(designPrinting) + round2(plastic) + round2(molds) + round2(delivery)
@@ -244,12 +263,16 @@ const Factual = {
 
         this.planData = {
             salaryProduction: round2(salaryProduction),
+            salaryTrim: round2(salaryTrim),
             salaryAssembly: round2(salaryAssembly),
+            salaryPackaging: round2(salaryPackaging),
             indirectProduction: round2(prodIndirect),
             hardwarePurchase: round2(hardwarePurchase),
             hardwareDelivery: round2(hardwareDelivery),
+            hardwareTotal: round2(hardwarePurchase + hardwareDelivery),
             packagingPurchase: round2(packagingPurchase),
             packagingDelivery: round2(packagingDelivery),
+            packagingTotal: round2(packagingPurchase + packagingDelivery),
             designPrinting: round2(designPrinting),
             plastic: round2(plastic),
             molds: round2(molds),
@@ -269,16 +292,17 @@ const Factual = {
         };
 
         this.planHours = {
-            hoursPlastic: round2(loadData.hoursPlasticTotal),
-            hoursHardware: round2(loadData.hoursHardwareTotal),
-            hoursPackaging: round2(loadData.hoursPackagingTotal),
+            hoursPlastic: round2(planHoursPlastic),
+            hoursTrim: round2(planHoursTrim),
+            hoursHardware: round2(planHoursAssembly),
+            hoursPackaging: round2(planHoursPackaging),
         };
 
         // Load saved factual data
         this.factData = await loadFactual(orderId) || {};
         this._entries = await loadTimeEntries();
-        this.applyHoursFromEntries(orderId, params);
-        this.applyDerivedFactCosts(params);
+        this.applyHoursFromEntries(orderId);
+        this.applyDerivedFactCosts(params, orderId);
 
         // Render
         this.renderTable();
@@ -319,6 +343,7 @@ const Factual = {
             const factKey = 'fact_' + row.key;
             const factVal = parseFloat(fact[factKey]) || 0;
             if (row.key === 'molds' && planVal === 0 && factVal === 0) return;
+            const isAuto = this.AUTO_FACT_KEYS.has(row.key);
             planTotal += planVal;
             factTotal += factVal;
 
@@ -330,9 +355,9 @@ const Factual = {
             html += `<td style="padding:8px 12px; font-weight:500;">${row.label}${row.hint ? '<div style="font-size:10px;color:var(--text-muted);font-weight:400;margin-top:1px;">' + row.hint + '</div>' : ''}</td>`;
             html += `<td style="text-align:right; padding:8px 12px; color:var(--text-muted);">${this.fmtRub(planVal)}</td>`;
             html += `<td style="text-align:right; padding:8px 4px;">
-                <input type="text" inputmode="decimal" value="${factVal || ''}"
-                    style="width:110px; text-align:right; padding:4px 8px; border:1px solid var(--border); border-radius:4px; font-size:13px;"
-                    oninput="Factual.onFactInput('${row.key}', this.value)">
+                <input type="text" inputmode="decimal" value="${factVal || ''}" ${isAuto ? 'readonly' : ''}
+                    style="width:110px; text-align:right; padding:4px 8px; border:1px solid var(--border); border-radius:4px; font-size:13px;${isAuto ? 'background:var(--bg);color:var(--text-muted);' : ''}"
+                    oninput="${isAuto ? '' : `Factual.onFactInput('${row.key}', this.value)`}">
             </td>`;
             html += `<td style="text-align:right; padding:8px 12px; font-weight:600; color:${alarm.color};">
                 ${factVal > 0 ? alarm.icon + ' ' + this.fmtDelta(delta, pct) : '<span style="color:var(--text-muted);">—</span>'}
@@ -404,7 +429,7 @@ const Factual = {
         const plan = this.planHours;
         const fact = this.factData;
 
-        let html = '<div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px;">';
+        let html = '<div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:12px;">';
 
         this.HOUR_ROWS.forEach(row => {
             const planVal = plan[row.planField] || 0;
@@ -488,35 +513,63 @@ const Factual = {
         await this.load();
     },
 
-    applyHoursFromEntries(orderId, params) {
+    applyHoursFromEntries(orderId) {
         const entries = (this._entries || []).filter(e => Number(e.order_id) === Number(orderId));
         let casting = 0;
+        let trim = 0;
         let assembly = 0;
         let packaging = 0;
         entries.forEach(e => {
             const stage = this._stageKey(e);
             const h = parseFloat(e.hours) || 0;
-            if (stage === 'casting' || stage === 'trim') casting += h;
+            if (stage === 'casting') casting += h;
+            else if (stage === 'trim') trim += h;
             else if (stage === 'assembly') assembly += h;
             else if (stage === 'packaging') packaging += h;
         });
         this.factData.fact_hours_production = round2(casting);
+        this.factData.fact_hours_trim = round2(trim);
         this.factData.fact_hours_assembly = round2(assembly);
         this.factData.fact_hours_packaging = round2(packaging);
         this.factData._hours_source = 'timetrack';
     },
 
-    applyDerivedFactCosts(params) {
+    _employeeRateByName(name, params) {
+        const fallback = params?.fotPerHour || 0;
+        if (!name) return fallback;
+        const emp = (this._employees || []).find(e => String(e.name || '').trim() === String(name || '').trim());
+        if (!emp) return fallback;
+        const rate = this._num(emp.hourly_rate) || this._num(emp.hourly_cost) || this._num(emp.cost_per_hour) || this._num(emp.fot_per_hour);
+        return rate > 0 ? rate : fallback;
+    },
+
+    _sumStageSalary(orderId, stage, params) {
+        const entries = (this._entries || []).filter(e => Number(e.order_id) === Number(orderId) && this._stageKey(e) === stage);
+        let total = 0;
+        entries.forEach(e => {
+            const hours = parseFloat(e.hours) || 0;
+            if (hours <= 0) return;
+            total += hours * this._employeeRateByName(e.worker_name, params);
+        });
+        return round2(total);
+    },
+
+    applyDerivedFactCosts(params, orderId) {
         const hProd = parseFloat(this.factData.fact_hours_production) || 0;
+        const hTrim = parseFloat(this.factData.fact_hours_trim) || 0;
         const hAsm = parseFloat(this.factData.fact_hours_assembly) || 0;
         const hPkg = parseFloat(this.factData.fact_hours_packaging) || 0;
-        const totalHours = hProd + hAsm + hPkg;
-        const fot = params?.fotPerHour || 0;
+        const totalHours = hProd + hTrim + hAsm + hPkg;
         const indirectPerHour = params?.indirectPerHour || 0;
 
-        this.factData.fact_salary_production = round2(hProd * fot);
-        this.factData.fact_salary_assembly = round2((hAsm + hPkg) * fot);
+        this.factData.fact_salary_production = this._sumStageSalary(orderId, 'casting', params);
+        this.factData.fact_salary_trim = this._sumStageSalary(orderId, 'trim', params);
+        this.factData.fact_salary_assembly = this._sumStageSalary(orderId, 'assembly', params);
+        this.factData.fact_salary_packaging = this._sumStageSalary(orderId, 'packaging', params);
         this.factData.fact_indirect_production = round2(totalHours * indirectPerHour);
+        // Current rule: for stock-based materials actual = planned.
+        this.factData.fact_hardware_total = round2(this.planData?.hardwareTotal || 0);
+        this.factData.fact_packaging_total = round2(this.planData?.packagingTotal || 0);
     },
 
     _stageKey(entry) {
