@@ -1988,7 +1988,10 @@
         <div id="page-marketplaces" class="page">
             <div class="page-header">
                 <h1>&#128722; B2C продажи</h1>
-                <button class="btn btn-primary" onclick="Marketplaces.showSetForm()">+ Новый набор</button>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                    <button class="btn btn-outline" onclick="Marketplaces.showProductionBuilder()">Сделать заказ на производство</button>
+                    <button class="btn btn-primary" onclick="Marketplaces.showSetForm()">+ Новый набор</button>
+                </div>
             </div>
 
             <div class="stats-grid">
@@ -2016,6 +2019,19 @@
 
             <!-- Sets list -->
             <div id="mp-sets-container"></div>
+
+            <!-- Production order builder -->
+            <div class="card" id="mp-production-builder" style="display:none;margin-top:12px;">
+                <div class="card-header">
+                    <h3>Заказ в производство из B2C</h3>
+                    <button class="btn btn-sm btn-outline" onclick="Marketplaces.hideProductionBuilder()">Закрыть</button>
+                </div>
+                <div id="mp-production-list"></div>
+                <div style="margin-top:12px;display:flex;gap:8px;align-items:center;">
+                    <button class="btn btn-primary" onclick="Marketplaces.createProductionOrderFromSelection()">Создать заказ в производство</button>
+                    <button class="btn btn-outline" onclick="Marketplaces.hideProductionBuilder()">Отмена</button>
+                </div>
+            </div>
 
             <!-- Set edit form -->
             <div class="card" id="mp-set-form" style="display:none;margin-top:12px;">
@@ -2047,6 +2063,7 @@
 
                 <!-- Plastic items -->
                 <div class="section-title" style="margin-top:8px;">&#9670; Пластик</div>
+                <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">Для каждого элемента выберите цвета из справочника «Цвета».</div>
                 <div id="mp-plastic-items"></div>
                 <button class="btn btn-sm btn-outline" onclick="Marketplaces.addPlasticItem()" style="margin-top:4px;">+ Пластик</button>
 
@@ -2094,7 +2111,6 @@
 
                 <div style="margin-top:12px;display:flex;gap:8px;">
                     <button class="btn btn-success" onclick="Marketplaces.saveSet()">Сохранить набор</button>
-                    <button class="btn btn-primary" onclick="Marketplaces.createProductionOrderFromForm()">Сформировать заказ в производство</button>
                     <button class="btn btn-outline" onclick="Marketplaces.hideSetForm()">Отмена</button>
                     <button class="btn btn-danger" id="mp-delete-btn" style="margin-left:auto;display:none;" onclick="Marketplaces.deleteSet()">Удалить</button>
                 </div>
@@ -2957,7 +2973,7 @@
 <script src="js/china.js?v=46g"></script>
 <script src="js/warehouse_photos.js?v=46g"></script>
 <script src="js/china_catalog.js?v=46k"></script>
-<script src="js/marketplaces.js?v=68"></script>
+<script src="js/marketplaces.js?v=69"></script>
 <script src="js/warehouse.js?v=56"></script>
 <script src="js/settings.js?v=58"></script>
 </body>
