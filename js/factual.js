@@ -575,6 +575,11 @@ const Factual = {
         if (!name) return fallback;
         const emp = (this._employees || []).find(e => String(e.name || '').trim() === String(name || '').trim());
         if (!emp) return fallback;
+        const baseSalary = this._num(emp.pay_base_salary_month);
+        const baseHours = this._num(emp.pay_base_hours_month);
+        if (baseSalary > 0 && baseHours > 0) return baseSalary / baseHours;
+        const overtimeRate = this._num(emp.pay_overtime_hour_rate);
+        if (overtimeRate > 0) return overtimeRate;
         const rate = this._num(emp.hourly_rate) || this._num(emp.hourly_cost) || this._num(emp.cost_per_hour) || this._num(emp.fot_per_hour);
         return rate > 0 ? rate : fallback;
     },

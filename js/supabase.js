@@ -234,6 +234,7 @@ function getDefaultSettings() {
         china_delivery_auto: 4.8,
         china_item_surcharge: 0.035,    // +3.5% (вывод + крипта)
         china_delivery_surcharge: 0.10, // +10% (вывод + курс)
+        production_holidays: '',
     };
 }
 
@@ -1276,12 +1277,12 @@ async function updateAuthSession(sessionId, patch) {
 
 function getDefaultEmployees() {
     return [
-        { id: 1, name: 'Алина', role: 'office', daily_hours: 8, telegram_id: null, telegram_username: '', reminder_hour: 17, reminder_minute: 30, timezone_offset: 3, is_active: true, tasks_required: false },
-        { id: 2, name: 'Элина', role: 'office', daily_hours: 8, telegram_id: null, telegram_username: '', reminder_hour: 17, reminder_minute: 30, timezone_offset: 3, is_active: true, tasks_required: false },
-        { id: 3, name: 'Аня', role: 'office', daily_hours: 8, telegram_id: null, telegram_username: '', reminder_hour: 17, reminder_minute: 30, timezone_offset: 3, is_active: true, tasks_required: false },
-        { id: 4, name: 'Глеб', role: 'production', daily_hours: 8, telegram_id: null, telegram_username: '', reminder_hour: 17, reminder_minute: 30, timezone_offset: 3, is_active: true, tasks_required: false },
-        { id: 5, name: 'Полина', role: 'management', daily_hours: 8, telegram_id: null, telegram_username: '', reminder_hour: 17, reminder_minute: 30, timezone_offset: 3, is_active: true, tasks_required: true },
-        { id: 6, name: 'Никита', role: 'management', daily_hours: 8, telegram_id: null, telegram_username: '', reminder_hour: 17, reminder_minute: 30, timezone_offset: 3, is_active: true, tasks_required: true },
+        { id: 1, name: 'Алина', role: 'office', daily_hours: 8, telegram_id: null, telegram_username: '', reminder_hour: 17, reminder_minute: 30, timezone_offset: 3, is_active: true, tasks_required: false, pay_base_salary_month: 0, pay_base_hours_month: 176, pay_overtime_hour_rate: 0, pay_weekend_hour_rate: 0, pay_holiday_hour_rate: 0 },
+        { id: 2, name: 'Элина', role: 'office', daily_hours: 8, telegram_id: null, telegram_username: '', reminder_hour: 17, reminder_minute: 30, timezone_offset: 3, is_active: true, tasks_required: false, pay_base_salary_month: 0, pay_base_hours_month: 176, pay_overtime_hour_rate: 0, pay_weekend_hour_rate: 0, pay_holiday_hour_rate: 0 },
+        { id: 3, name: 'Аня', role: 'office', daily_hours: 8, telegram_id: null, telegram_username: '', reminder_hour: 17, reminder_minute: 30, timezone_offset: 3, is_active: true, tasks_required: false, pay_base_salary_month: 0, pay_base_hours_month: 176, pay_overtime_hour_rate: 0, pay_weekend_hour_rate: 0, pay_holiday_hour_rate: 0 },
+        { id: 4, name: 'Глеб', role: 'production', daily_hours: 8, telegram_id: null, telegram_username: '', reminder_hour: 17, reminder_minute: 30, timezone_offset: 3, is_active: true, tasks_required: false, pay_base_salary_month: 0, pay_base_hours_month: 176, pay_overtime_hour_rate: 0, pay_weekend_hour_rate: 0, pay_holiday_hour_rate: 0 },
+        { id: 5, name: 'Полина', role: 'management', daily_hours: 8, telegram_id: null, telegram_username: '', reminder_hour: 17, reminder_minute: 30, timezone_offset: 3, is_active: true, tasks_required: true, pay_base_salary_month: 0, pay_base_hours_month: 176, pay_overtime_hour_rate: 0, pay_weekend_hour_rate: 0, pay_holiday_hour_rate: 0 },
+        { id: 6, name: 'Никита', role: 'management', daily_hours: 8, telegram_id: null, telegram_username: '', reminder_hour: 17, reminder_minute: 30, timezone_offset: 3, is_active: true, tasks_required: true, pay_base_salary_month: 0, pay_base_hours_month: 176, pay_overtime_hour_rate: 0, pay_weekend_hour_rate: 0, pay_holiday_hour_rate: 0 },
     ];
 }
 

@@ -27,6 +27,7 @@ const TimeTrack = {
         this.filterAndRender();
         this.updateStats();
         this.renderDailyStatus();
+        this.renderPayrollSummary();
         this.onStageChange();
 
         const dateInput = document.getElementById('tt-date');
@@ -293,6 +294,132 @@ const TimeTrack = {
         this.renderTable(filtered);
         this.renderProjectSummary(filtered);
         this.renderPlanFact(filtered);
+        this.renderPayrollSummary();
+    },
+
+    parseHolidaySet() {
+        const raw = String((App.settings && App.settings.production_holidays) || '').trim();
+        if (!raw) return new Set();
+        const parts = raw.split(/[,\n;]/).map(s => s.trim()).filter(Boolean);
+        const set = new Set();
+        parts.forEach(p => {
+            if (/^\d{4}-\d{2}-\d{2}$/.test(p)) set.add(p);
+        });
+        return set;
+    },
+
+    isWeekend(dateStr) {
+        if (!dateStr) return false;
+        const d = new Date(`${dateStr}T00:00:00`);
+        const day = d.getDay();
+        return day === 0 || day === 6;
+    },
+
+    normalizePayrollConfig(emp) {
+        const fallbackRate = parseFloat(App.settings?.fot_per_hour) || 0;
+        const baseHours = parseFloat(emp?.pay_base_hours_month);
+        const baseSalary = parseFloat(emp?.pay_base_salary_month);
+        const overtimeRateRaw = parseFloat(emp?.pay_overtime_hour_rate);
+        const weekendRateRaw = parseFloat(emp?.pay_weekend_hour_rate);
+        const holidayRateRaw = parseFloat(emp?.pay_holiday_hour_rate);
+
+        const safeBaseHours = baseHours > 0 ? baseHours : 176;
+        const baseRateFromSalary = (baseSalary > 0 && safeBaseHours > 0) ? (baseSalary / safeBaseHours) : 0;
+        const overtimeRate = overtimeRateRaw > 0 ? overtimeRateRaw : (baseRateFromSalary || fallbackRate);
+        const weekendRate = weekendRateRaw > 0 ? weekendRateRaw : overtimeRate;
+        const holidayRate = holidayRateRaw > 0 ? holidayRateRaw : weekendRate;
+
+        return {
+            baseHours: safeBaseHours,
+            baseRate: baseRateFromSalary || overtimeRate || fallbackRate,
+            overtimeRate: overtimeRate || fallbackRate,
+            weekendRate: weekendRate || fallbackRate,
+            holidayRate: holidayRate || fallbackRate,
+        };
+    },
+
+    formatMoney(v) {
+        return `${(parseFloat(v) || 0).toLocaleString('ru-RU')} ₽`;
+    },
+
+    calculateProductionPayrollForCurrentMonth() {
+        const now = new Date();
+        const monthPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-`;
+        const holidaySet = this.parseHolidaySet();
+        const employeeByName = new Map((this.employees || []).map(e => [String(e.name || '').trim(), e]));
+
+        const stats = new Map();
+        (this.entries || []).forEach(entry => {
+            const workerName = String(entry.worker_name || '').trim();
+            if (!workerName) return;
+            if (!String(entry.date || '').startsWith(monthPrefix)) return;
+
+            const emp = employeeByName.get(workerName);
+            if (!emp || emp.role !== 'production' || emp.is_active === false) return;
+            const hours = parseFloat(entry.hours) || 0;
+            if (hours <= 0) return;
+
+            const isHoliday = holidaySet.has(entry.date);
+            const isWeekend = this.isWeekend(entry.date);
+
+            if (!stats.has(workerName)) {
+                stats.set(workerName, { employee: emp, regularHours: 0, weekendHours: 0, holidayHours: 0 });
+            }
+            const row = stats.get(workerName);
+            if (isHoliday) row.holidayHours += hours;
+            else if (isWeekend) row.weekendHours += hours;
+            else row.regularHours += hours;
+        });
+
+        const rows = Array.from(stats.values()).map(row => {
+            const cfg = this.normalizePayrollConfig(row.employee);
+            const inBaseHours = Math.min(row.regularHours, cfg.baseHours);
+            const overtimeHours = Math.max(0, row.regularHours - cfg.baseHours);
+            const payBase = inBaseHours * cfg.baseRate;
+            const payOvertime = overtimeHours * cfg.overtimeRate;
+            const payWeekend = row.weekendHours * cfg.weekendRate;
+            const payHoliday = row.holidayHours * cfg.holidayRate;
+            const totalPay = payBase + payOvertime + payWeekend + payHoliday;
+
+            return {
+                employeeName: row.employee.name || 'Сотрудник',
+                regularHours: row.regularHours,
+                inBaseHours,
+                overtimeHours,
+                weekendHours: row.weekendHours,
+                holidayHours: row.holidayHours,
+                totalPay,
+            };
+        }).sort((a, b) => b.totalPay - a.totalPay);
+
+        const total = rows.reduce((s, r) => s + r.totalPay, 0);
+        return { rows, total };
+    },
+
+    renderPayrollSummary() {
+        const tableBody = document.getElementById('tt-payroll-body');
+        const totalEl = document.getElementById('tt-month-pay');
+        if (!tableBody) return;
+
+        const { rows, total } = this.calculateProductionPayrollForCurrentMonth();
+        if (totalEl) totalEl.textContent = this.formatMoney(total);
+
+        if (!rows.length) {
+            tableBody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">Нет данных по производству за текущий месяц</td></tr>';
+            return;
+        }
+
+        tableBody.innerHTML = rows.map(r => `
+            <tr>
+                <td style="font-weight:600;">${this.esc(r.employeeName)}</td>
+                <td class="text-right">${r.regularHours.toFixed(2)}</td>
+                <td class="text-right">${r.inBaseHours.toFixed(2)}</td>
+                <td class="text-right">${r.overtimeHours.toFixed(2)}</td>
+                <td class="text-right">${r.weekendHours.toFixed(2)}</td>
+                <td class="text-right">${r.holidayHours.toFixed(2)}</td>
+                <td class="text-right" style="font-weight:700;">${this.formatMoney(r.totalPay)}</td>
+            </tr>
+        `).join('');
     },
 
     renderTable(entries) {
@@ -438,6 +565,7 @@ const TimeTrack = {
         document.getElementById('tt-month-hours').textContent = monthHours.toFixed(1);
         document.getElementById('tt-workers-count').textContent = workers;
         document.getElementById('tt-projects-count').textContent = projects;
+        this.renderPayrollSummary();
     },
 
     // === CRUD ===

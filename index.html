@@ -1295,6 +1295,10 @@
                     <div class="stat-label">Проектов</div>
                     <div class="stat-value" id="tt-projects-count">0</div>
                 </div>
+                <div class="stat-card">
+                    <div class="stat-label">Оплата производства / месяц</div>
+                    <div class="stat-value" id="tt-month-pay">0 ₽</div>
+                </div>
             </div>
 
             <!-- Daily status card -->
@@ -1391,6 +1395,28 @@
                         </thead>
                         <tbody id="tt-plan-fact-body">
                             <tr><td colspan="8" class="text-center text-muted">Нет данных</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header"><h3>Оплата производства (текущий месяц)</h3></div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Сотрудник</th>
+                                <th class="text-right">Будни (ч)</th>
+                                <th class="text-right">В окладе (ч)</th>
+                                <th class="text-right">Сверх (ч)</th>
+                                <th class="text-right">Выходные (ч)</th>
+                                <th class="text-right">Праздники (ч)</th>
+                                <th class="text-right">Оплата (₽)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tt-payroll-body">
+                            <tr><td colspan="7" class="text-center text-muted">Нет данных</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -2346,6 +2372,13 @@
                             <span class="form-hint">шт/ч</span>
                         </div>
                     </div>
+                    <div class="form-row">
+                        <div class="form-group" style="flex:1;">
+                            <label>Праздничные даты (для «Часы»)</label>
+                            <input type="text" id="set-production_holidays" data-key-text="production_holidays" placeholder="2026-01-01, 2026-01-07, 2026-02-23">
+                            <span class="form-hint">Даты через запятую в формате YYYY-MM-DD</span>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -2514,6 +2547,34 @@
                                 Обязательное описание задач (бот будет требовать «что конкретно делал»)
                             </label>
                         </div>
+                        <div style="margin:8px 0 12px 0; padding:12px; background:var(--bg); border-radius:8px;">
+                            <div style="font-weight:600; margin-bottom:8px;">Оплата (для производства)</div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label>Оклад / месяц (₽)</label>
+                                    <input type="number" id="emp-pay-base-salary" min="0" step="100">
+                                </div>
+                                <div class="form-group">
+                                    <label>Часы в окладе (ч/мес)</label>
+                                    <input type="number" id="emp-pay-base-hours" min="0" step="1" value="176">
+                                </div>
+                                <div class="form-group">
+                                    <label>Сверхчас (₽/ч)</label>
+                                    <input type="number" id="emp-pay-overtime-rate" min="0" step="10">
+                                </div>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label>Выходной (₽/ч)</label>
+                                    <input type="number" id="emp-pay-weekend-rate" min="0" step="10">
+                                </div>
+                                <div class="form-group">
+                                    <label>Праздник (₽/ч)</label>
+                                    <input type="number" id="emp-pay-holiday-rate" min="0" step="10">
+                                </div>
+                            </div>
+                            <div class="text-muted" style="font-size:11px;">Сначала считаются часы в пределах оклада, затем сверхчасы. Выходные и праздники считаются по отдельным ставкам.</div>
+                        </div>
                         <div class="flex gap-8">
                             <button class="btn btn-success" onclick="Settings.saveEmployee()">Сохранить</button>
                             <button class="btn btn-outline" onclick="Settings.cancelEmployee()">Отмена</button>
@@ -2531,13 +2592,14 @@
                                     <th style="text-align:center">Часов/день</th>
                                     <th style="text-align:center">Telegram</th>
                                     <th style="text-align:center">Напоминание</th>
+                                    <th style="text-align:center">Оплата</th>
                                     <th style="text-align:center">Задачи</th>
                                     <th style="text-align:center">Статус</th>
                                     <th style="width:40px"></th>
                                 </tr>
                             </thead>
                             <tbody id="employees-table-body">
-                                <tr><td colspan="8" class="text-center text-muted">Загрузка...</td></tr>
+                                <tr><td colspan="9" class="text-center text-muted">Загрузка...</td></tr>
                             </tbody>
                         </table>
                     </div>

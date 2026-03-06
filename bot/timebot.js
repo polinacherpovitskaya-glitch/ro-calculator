@@ -110,13 +110,17 @@ bot.onText(/\/status/, async (msg) => {
     }
 
     const reminderTime = `${pad(emp.reminder_hour)}:${pad(emp.reminder_minute)} UTC+${emp.timezone_offset}`;
+    const payInfo = emp.role === 'production'
+        ? `\nОплата: оклад ${fmtMoney(emp.pay_base_salary_month)}/мес, база ${num(emp.pay_base_hours_month, 176)}ч, сверх ${fmtMoney(emp.pay_overtime_hour_rate)}/ч`
+        : '';
     bot.sendMessage(msg.chat.id,
         `Профиль:\n\n` +
         `Имя: *${emp.name}*\n` +
         `Роль: ${ROLE_LABELS[emp.role] || emp.role}\n` +
         `Рабочий день: ${emp.daily_hours}ч\n` +
         `Напоминание: ${reminderTime}\n` +
-        `Комментарий к отчету: ${emp.tasks_required ? 'обязательный' : 'опциональный'}`,
+        `Комментарий к отчету: ${emp.tasks_required ? 'обязательный' : 'опциональный'}` +
+        payInfo,
         { parse_mode: 'Markdown' }
     );
 });
@@ -627,6 +631,8 @@ function getLocalDate(timezoneOffset) {
 
 function round2(n) { return Math.round((parseFloat(n) || 0) * 100) / 100; }
 function pad(n) { return String(n || 0).padStart(2, '0'); }
+function num(v, fallback = 0) { const n = parseFloat(v); return Number.isFinite(n) ? n : fallback; }
+function fmtMoney(v) { return `${Math.round(num(v, 0))}₽`; }
 
 // =============================================
 // reminder system

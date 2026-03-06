@@ -231,7 +231,7 @@ const Settings = {
         if (!tbody) return;
 
         if (!this.employeesData || this.employeesData.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="8" class="text-muted text-center">Нет сотрудников</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="9" class="text-muted text-center">Нет сотрудников</td></tr>';
             return;
         }
 
@@ -248,6 +248,14 @@ const Settings = {
             const statusBadge = e.is_active !== false
                 ? '<span class="badge badge-green">Активен</span>'
                 : '<span class="badge">Неактивен</span>';
+            const baseSalary = parseFloat(e.pay_base_salary_month) || 0;
+            const baseHours = parseFloat(e.pay_base_hours_month) || 0;
+            const overtime = parseFloat(e.pay_overtime_hour_rate) || 0;
+            const weekend = parseFloat(e.pay_weekend_hour_rate) || 0;
+            const holiday = parseFloat(e.pay_holiday_hour_rate) || 0;
+            const payText = e.role === 'production'
+                ? `<span style="font-size:11px;">${this.formatMoney(baseSalary)}/мес • ${baseHours || 0}ч • +${this.formatMoney(overtime)}/ч<br>вых: ${this.formatMoney(weekend)}/ч • праз: ${this.formatMoney(holiday)}/ч</span>`
+                : '<span class="text-muted" style="font-size:11px;">не используется</span>';
 
             return `
             <tr>
@@ -256,6 +264,7 @@ const Settings = {
                 <td style="text-align:center;">${e.daily_hours || 8}ч</td>
                 <td style="text-align:center;">${tgStatus}</td>
                 <td style="text-align:center;font-size:11px;">${reminderTime}</td>
+                <td style="text-align:center;">${payText}</td>
                 <td style="text-align:center;">${tasksIcon}</td>
                 <td style="text-align:center;">${statusBadge}</td>
                 <td>
@@ -287,6 +296,11 @@ const Settings = {
         document.getElementById('emp-reminder-min').value = e.reminder_minute ?? 30;
         document.getElementById('emp-tz-offset').value = e.timezone_offset ?? 3;
         document.getElementById('emp-tasks-required').checked = !!e.tasks_required;
+        document.getElementById('emp-pay-base-salary').value = parseFloat(e.pay_base_salary_month) || 0;
+        document.getElementById('emp-pay-base-hours').value = parseFloat(e.pay_base_hours_month) || 176;
+        document.getElementById('emp-pay-overtime-rate').value = parseFloat(e.pay_overtime_hour_rate) || 0;
+        document.getElementById('emp-pay-weekend-rate').value = parseFloat(e.pay_weekend_hour_rate) || 0;
+        document.getElementById('emp-pay-holiday-rate').value = parseFloat(e.pay_holiday_hour_rate) || 0;
 
         document.getElementById('employee-form').style.display = '';
         document.getElementById('emp-delete-btn').style.display = '';
@@ -302,6 +316,11 @@ const Settings = {
         document.getElementById('emp-reminder-min').value = 30;
         document.getElementById('emp-tz-offset').value = 3;
         document.getElementById('emp-tasks-required').checked = false;
+        document.getElementById('emp-pay-base-salary').value = '';
+        document.getElementById('emp-pay-base-hours').value = 176;
+        document.getElementById('emp-pay-overtime-rate').value = '';
+        document.getElementById('emp-pay-weekend-rate').value = '';
+        document.getElementById('emp-pay-holiday-rate').value = '';
     },
 
     cancelEmployee() {
@@ -325,6 +344,11 @@ const Settings = {
             timezone_offset: parseInt(document.getElementById('emp-tz-offset').value) ?? 3,
             is_active: true,
             tasks_required: document.getElementById('emp-tasks-required').checked,
+            pay_base_salary_month: parseFloat(document.getElementById('emp-pay-base-salary').value) || 0,
+            pay_base_hours_month: parseFloat(document.getElementById('emp-pay-base-hours').value) || 176,
+            pay_overtime_hour_rate: parseFloat(document.getElementById('emp-pay-overtime-rate').value) || 0,
+            pay_weekend_hour_rate: parseFloat(document.getElementById('emp-pay-weekend-rate').value) || 0,
+            pay_holiday_hour_rate: parseFloat(document.getElementById('emp-pay-holiday-rate').value) || 0,
         };
 
         // Preserve telegram_id if editing existing
@@ -1208,5 +1232,9 @@ const Settings = {
     escHtml(str) {
         if (!str) return '';
         return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    },
+
+    formatMoney(v) {
+        return `${(parseFloat(v) || 0).toLocaleString('ru-RU')} ₽`;
     },
 };
