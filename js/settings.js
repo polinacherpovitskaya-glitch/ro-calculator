@@ -69,7 +69,100 @@ const Settings = {
                 input.value = s[key];
             }
         });
+        const yFrom = document.getElementById('set-holidays-year-from');
+        const yTo = document.getElementById('set-holidays-year-to');
+        const nowYear = new Date().getFullYear();
+        if (yFrom && !yFrom.value) yFrom.value = String(nowYear);
+        if (yTo && !yTo.value) yTo.value = String(nowYear + 1);
         this.updateProductionHints();
+    },
+
+    _rfProdCalendarHolidaysByYear(year) {
+        // Official production calendars (non-working holiday dates incl. transfer days)
+        // Sources: consultant production calendars for 2024/2025/2026.
+        const m = {
+            2024: [
+                '2024-01-01','2024-01-02','2024-01-03','2024-01-04','2024-01-05','2024-01-06','2024-01-07','2024-01-08',
+                '2024-02-23','2024-03-08',
+                '2024-04-29','2024-04-30',
+                '2024-05-01','2024-05-09','2024-05-10',
+                '2024-06-12','2024-11-04',
+                '2024-12-30','2024-12-31',
+            ],
+            2025: [
+                '2025-01-01','2025-01-02','2025-01-03','2025-01-04','2025-01-05','2025-01-06','2025-01-07','2025-01-08',
+                '2025-02-23','2025-03-08',
+                '2025-05-01','2025-05-02','2025-05-08','2025-05-09',
+                '2025-06-12','2025-06-13',
+                '2025-11-03','2025-11-04',
+                '2025-12-31',
+            ],
+            2026: [
+                '2026-01-01','2026-01-02','2026-01-03','2026-01-04','2026-01-05','2026-01-06','2026-01-07','2026-01-08','2026-01-09',
+                '2026-02-23','2026-03-08','2026-03-09',
+                '2026-05-01','2026-05-09','2026-05-11',
+                '2026-06-12','2026-11-04',
+                '2026-12-31',
+            ],
+        };
+        return m[year] ? [...m[year]] : null;
+    },
+
+    _rfStatutoryFallbackByYear(year) {
+        const d = (mmdd) => `${year}-${mmdd}`;
+        return [
+            d('01-01'), d('01-02'), d('01-03'), d('01-04'),
+            d('01-05'), d('01-06'), d('01-07'), d('01-08'),
+            d('02-23'), d('03-08'),
+            d('05-01'), d('05-09'),
+            d('06-12'), d('11-04'),
+        ];
+    },
+
+    async autofillProductionHolidaysRf() {
+        const fromEl = document.getElementById('set-holidays-year-from');
+        const toEl = document.getElementById('set-holidays-year-to');
+        const inputEl = document.getElementById('set-production_holidays');
+        if (!fromEl || !toEl || !inputEl) return;
+
+        let from = parseInt(fromEl.value, 10);
+        let to = parseInt(toEl.value, 10);
+        if (!Number.isFinite(from) || !Number.isFinite(to)) {
+            App.toast('Укажите корректный диапазон лет');
+            return;
+        }
+        if (from > to) [from, to] = [to, from];
+        if (to - from > 20) {
+            App.toast('Слишком большой диапазон лет (макс. 20)');
+            return;
+        }
+
+        const allDates = [];
+        const fallbackYears = [];
+        for (let y = from; y <= to; y++) {
+            const known = this._rfProdCalendarHolidaysByYear(y);
+            if (known && known.length > 0) {
+                allDates.push(...known);
+            } else {
+                fallbackYears.push(y);
+                allDates.push(...this._rfStatutoryFallbackByYear(y));
+            }
+        }
+        const uniqueSorted = Array.from(new Set(allDates))
+            .filter(v => /^\d{4}-\d{2}-\d{2}$/.test(v))
+            .sort();
+        const value = uniqueSorted.join(', ');
+        inputEl.value = value;
+
+        App.settings = App.settings || {};
+        App.settings.production_holidays = value;
+        await saveSetting('production_holidays', value);
+
+        if (fallbackYears.length > 0) {
+            App.toast(`Праздники заполнены. Для ${fallbackYears.join(', ')} использован базовый набор ст.112 ТК РФ (без переносов).`);
+        } else {
+            App.toast('Праздничные даты заполнены из производственного календаря РФ и сохранены');
+        }
     },
 
     updateProductionHints() {

@@ -2377,6 +2377,17 @@
                             <label>Праздничные даты (для «Часы»)</label>
                             <input type="text" id="set-production_holidays" data-key-text="production_holidays" placeholder="2026-01-01, 2026-01-07, 2026-02-23">
                             <span class="form-hint">Даты через запятую в формате YYYY-MM-DD</span>
+                            <div style="display:flex;gap:8px;align-items:end;margin-top:8px;flex-wrap:wrap;">
+                                <div>
+                                    <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">Год с</div>
+                                    <input type="number" id="set-holidays-year-from" style="width:90px;">
+                                </div>
+                                <div>
+                                    <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">Год по</div>
+                                    <input type="number" id="set-holidays-year-to" style="width:90px;">
+                                </div>
+                                <button type="button" class="btn btn-outline" onclick="Settings.autofillProductionHolidaysRf()">Автозаполнить РФ</button>
+                            </div>
                         </div>
                     </div>
                 </div>
