@@ -157,17 +157,22 @@ async function loadSettings() {
             Object.keys(defaults).forEach(k => {
                 if (obj[k] === undefined) obj[k] = defaults[k];
             });
+            // Legacy normalization: old baseline used 189h/worker, now standard is 168h (21*8).
+            if ((obj.hours_per_worker || 0) === 189) obj.hours_per_worker = 168;
             // Cache to localStorage for offline/backup
             setLocal(LOCAL_KEYS.settings, obj);
             return obj;
         }
         // Supabase empty — seed from localStorage or defaults, then return
         const local = getLocal(LOCAL_KEYS.settings) || getDefaultSettings();
+        if ((local.hours_per_worker || 0) === 189) local.hours_per_worker = 168;
         console.log('Supabase settings empty, seeding from local...');
         await saveAllSettings(local);
         return local;
     }
-    return getLocal(LOCAL_KEYS.settings) || getDefaultSettings();
+    const local = getLocal(LOCAL_KEYS.settings) || getDefaultSettings();
+    if ((local.hours_per_worker || 0) === 189) local.hours_per_worker = 168;
+    return local;
 }
 
 async function saveSetting(key, value) {
@@ -208,7 +213,7 @@ function getDefaultSettings() {
         plastic_cost_per_kg: 250,
         nfc_write_speed: 350,
         workers_count: 3.5,
-        hours_per_worker: 189,
+        hours_per_worker: 168,
         work_load_ratio: 0.8,
         plastic_injection_ratio: 0.7,
         packaging_ratio: 0.3,

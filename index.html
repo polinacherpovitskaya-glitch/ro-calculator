@@ -2334,30 +2334,30 @@
                         </div>
                         <div class="form-group">
                             <label>Часов на 1 сотрудника</label>
-                            <input type="number" id="set-hours_per_worker" data-key="hours_per_worker">
-                            <span class="form-hint">ч/мес (9ч x 21дн = 189)</span>
+                            <input type="number" id="set-hours_per_worker" data-key="hours_per_worker" oninput="Settings.updateProductionHints()">
+                            <span class="form-hint" id="set-hours-per-worker-hint">ч/мес (8ч × 21дн = 168)</span>
                         </div>
                         <div class="form-group">
                             <label>Коэфф. загрузки</label>
-                            <input type="number" step="0.05" id="set-work_load_ratio" data-key="work_load_ratio">
-                            <span class="form-hint">0.8 = 80%</span>
+                            <input type="number" step="0.05" id="set-work_load_ratio" data-key="work_load_ratio" oninput="Settings.updateProductionHints()">
+                            <span class="form-hint" id="set-work-load-hint">0.8 = 80%</span>
                         </div>
                     </div>
                     <div class="form-row">
                         <div class="form-group">
                             <label>Доля литья пластика</label>
-                            <input type="number" step="0.05" id="set-plastic_injection_ratio" data-key="plastic_injection_ratio">
-                            <span class="form-hint">0.7 = 70%</span>
+                            <input type="number" step="0.05" id="set-plastic_injection_ratio" data-key="plastic_injection_ratio" oninput="Settings.updateProductionHints()">
+                            <span class="form-hint" id="set-plastic-ratio-hint">0.7 = 70%</span>
                         </div>
                         <div class="form-group">
                             <label>Доля упаковки</label>
-                            <input type="number" step="0.05" id="set-packaging_ratio" data-key="packaging_ratio">
-                            <span class="form-hint">0.3 = 30%</span>
+                            <input type="number" step="0.05" id="set-packaging_ratio" data-key="packaging_ratio" oninput="Settings.updateProductionHints()">
+                            <span class="form-hint" id="set-packaging-ratio-hint">0.3 = 30%</span>
                         </div>
                         <div class="form-group">
                             <label>Коэфф. потерь</label>
-                            <input type="number" step="0.05" id="set-waste_factor" data-key="waste_factor">
-                            <span class="form-hint">1.1 = 10% запас</span>
+                            <input type="number" step="0.05" id="set-waste_factor" data-key="waste_factor" oninput="Settings.updateProductionHints()">
+                            <span class="form-hint" id="set-waste-factor-hint">1.1 = +10% к времени/себестоимости</span>
                         </div>
                     </div>
                     <div class="form-row">

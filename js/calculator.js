@@ -9,7 +9,7 @@
  */
 function getProductionParams(settings) {
     const s = key => settings[key] || 0;
-    const totalHoursPerWorker = s('hours_per_worker'); // 9*21 = 189
+    const totalHoursPerWorker = s('hours_per_worker'); // 8*21 = 168
     const totalHoursAll = s('workers_count') * totalHoursPerWorker;
     const workLoadHours = totalHoursAll * s('work_load_ratio');
     const plasticHours = workLoadHours * s('plastic_injection_ratio');

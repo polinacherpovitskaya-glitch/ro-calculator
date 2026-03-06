@@ -69,6 +69,35 @@ const Settings = {
                 input.value = s[key];
             }
         });
+        this.updateProductionHints();
+    },
+
+    updateProductionHints() {
+        const readNum = (id, fallback = 0) => {
+            const el = document.getElementById(id);
+            if (!el) return fallback;
+            const v = parseFloat(el.value);
+            return Number.isFinite(v) ? v : fallback;
+        };
+        const setHint = (id, text) => {
+            const el = document.getElementById(id);
+            if (el) el.textContent = text;
+        };
+        const pct = (v) => `${Math.round((v || 0) * 1000) / 10}%`;
+
+        const hoursPerWorker = readNum('set-hours_per_worker', 168);
+        const workLoad = readNum('set-work_load_ratio', 0.8);
+        const plasticRatio = readNum('set-plastic_injection_ratio', 0.7);
+        const packagingRatio = readNum('set-packaging_ratio', 0.3);
+        const wasteFactor = readNum('set-waste_factor', 1.1);
+
+        setHint('set-hours-per-worker-hint', `ч/мес (сейчас: ${hoursPerWorker})`);
+        setHint('set-work-load-hint', `${workLoad} = ${pct(workLoad)}`);
+        setHint('set-plastic-ratio-hint', `${plasticRatio} = ${pct(plasticRatio)}`);
+        setHint('set-packaging-ratio-hint', `${packagingRatio} = ${pct(packagingRatio)}`);
+        const wastePct = Math.round((wasteFactor - 1) * 1000) / 10;
+        const wasteSign = wastePct >= 0 ? '+' : '';
+        setHint('set-waste-factor-hint', `${wasteFactor} = ${wasteSign}${wastePct}% к времени/себестоимости`);
     },
 
     async saveAll() {

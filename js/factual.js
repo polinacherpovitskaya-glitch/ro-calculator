@@ -5,6 +5,7 @@
 
 const Factual = {
     currentOrderId: null,
+    currentOrder: null,
     planData: null,
     factData: null,
     planHours: null,
@@ -139,6 +140,7 @@ const Factual = {
         }
 
         const { order, items: rawItems } = orderData;
+        this.currentOrder = order || null;
         if (statusEl) statusEl.textContent = order.status || '';
         if (order.status !== 'completed') {
             if (statusEl) statusEl.textContent = 'Доступно только для заказов со статусом "Готово"';
@@ -699,6 +701,25 @@ const Factual = {
         return 'other';
     },
 
+    _referenceMonth() {
+        const order = this.currentOrder || {};
+        const src = order.deadline_end || order.deadline_start || order.updated_at || order.created_at
+            || new Date().toISOString().slice(0, 10);
+        return String(src).slice(0, 7);
+    },
+
+    _monthlyProductionHours(monthPrefix) {
+        let total = 0;
+        (this._entries || []).forEach(e => {
+            const d = String(e.date || '');
+            if (!d.startsWith(monthPrefix)) return;
+            const stage = this._stageKey(e);
+            if (!['casting', 'trim', 'assembly', 'packaging'].includes(stage)) return;
+            total += parseFloat(e.hours) || 0;
+        });
+        return round2(total);
+    },
+
     renderOrderAnalytics() {
         const el = document.getElementById('fact-order-analytics');
         if (!el || !this.planData || !this.factData) return;
@@ -714,11 +735,42 @@ const Factual = {
         const factMargin = factRevenue > 0 ? round2(factEarned * 100 / factRevenue) : 0;
         const deltaEarned = round2(factEarned - planEarned);
 
+        const params = App.params || {};
+        const monthPrefix = this._referenceMonth();
+        const monthFactHours = this._monthlyProductionHours(monthPrefix);
+        const monthPlanHours = round2((params.workLoadHours || 0));
+        const monthIndirectTotal = this._num(App.settings?.indirect_costs_monthly);
+        const planIndirectPerHour = this._num(params.indirectPerHour);
+        const factIndirectPerHour = monthFactHours > 0 ? round2(monthIndirectTotal / monthFactHours) : 0;
+        const deltaIndirectPerHour = round2(factIndirectPerHour - planIndirectPerHour);
+        const orderPlanHoursTotal = round2(
+            this._num(this.planHours?.hoursPlastic)
+            + this._num(this.planHours?.hoursTrim)
+            + this._num(this.planHours?.hoursHardware)
+            + this._num(this.planHours?.hoursPackaging)
+        );
+        const loadImpactPlan = round2(orderPlanHoursTotal * deltaIndirectPerHour);
+        const adjustedPlanEarned = round2(planEarned - loadImpactPlan);
+        const adjustedPlanMargin = planRevenue > 0 ? round2(adjustedPlanEarned * 100 / planRevenue) : 0;
+        const loadColor = deltaIndirectPerHour > 0 ? 'var(--red)' : deltaIndirectPerHour < 0 ? 'var(--green)' : 'var(--text)';
+        const loadSign = (v) => v > 0 ? '+' : '';
+
         el.innerHTML = `<div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;">
             <div style="padding:10px;border:1px solid var(--border);border-radius:8px;"><div style="font-size:11px;color:var(--text-muted)">План маржа</div><div style="font-size:20px;font-weight:700;">${planMargin}%</div></div>
             <div style="padding:10px;border:1px solid var(--border);border-radius:8px;"><div style="font-size:11px;color:var(--text-muted)">Факт маржа</div><div style="font-size:20px;font-weight:700;${factRevenue > 0 ? (factMargin >= planMargin ? 'color:var(--green)' : 'color:var(--red)') : ''}">${factRevenue > 0 ? factMargin + '%' : '—'}</div></div>
             <div style="padding:10px;border:1px solid var(--border);border-radius:8px;"><div style="font-size:11px;color:var(--text-muted)">План прибыль</div><div style="font-size:20px;font-weight:700;">${this.fmtRub(planEarned)}</div></div>
             <div style="padding:10px;border:1px solid var(--border);border-radius:8px;"><div style="font-size:11px;color:var(--text-muted)">Отклонение прибыли</div><div style="font-size:20px;font-weight:700;${factRevenue > 0 ? (deltaEarned >= 0 ? 'color:var(--green)' : 'color:var(--red)') : ''}">${factRevenue > 0 ? ((deltaEarned >= 0 ? '+' : '') + this.fmtRub(deltaEarned)) : '—'}</div></div>
+        </div>
+        <div style="margin-top:10px;padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);">
+            <div style="font-size:12px;font-weight:700;margin-bottom:4px;">Эффект загрузки месяца (${monthPrefix})</div>
+            <div style="font-size:12px;color:var(--text-secondary);line-height:1.5;">
+                Плановые часы месяца: <b>${monthPlanHours}</b> · Фактические часы месяца: <b>${monthFactHours}</b><br>
+                Ставка косвенных (план): <b>${this.fmtRub(planIndirectPerHour)}/ч</b> ·
+                Ставка косвенных (факт): <b style="color:${loadColor}">${monthFactHours > 0 ? this.fmtRub(factIndirectPerHour) + '/ч' : '—'}</b><br>
+                Дельта ставки: <b style="color:${loadColor}">${monthFactHours > 0 ? (loadSign(deltaIndirectPerHour) + this.fmtRub(deltaIndirectPerHour) + '/ч') : '—'}</b> ·
+                Влияние на заказ (по план-часам ${orderPlanHoursTotal}ч): <b style="color:${loadImpactPlan > 0 ? 'var(--red)' : loadImpactPlan < 0 ? 'var(--green)' : 'var(--text)'}">${loadSign(-loadImpactPlan)}${this.fmtRub(-loadImpactPlan)}</b><br>
+                Маржа с учетом загрузки: <b>${adjustedPlanMargin}%</b> · Скорректированная прибыль: <b>${this.fmtRub(adjustedPlanEarned)}</b>
+            </div>
         </div>`;
     },
 
