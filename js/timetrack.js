@@ -64,11 +64,11 @@ const TimeTrack = {
     // === Metadata parser for backward compatibility ===
 
     parseMeta(entry) {
-        if (!entry) return { stage: '', stage_label: '' };
+        if (!entry) return { stage: '', stage_label: '', project: '' };
         if (entry._parsedMeta) return entry._parsedMeta;
 
-        const desc = String(entry.description || '');
-        const meta = { stage: '', stage_label: '' };
+        const desc = String(entry.description || entry.task_description || '');
+        const meta = { stage: '', stage_label: '', project: '' };
 
         const markerMatch = desc.match(/^\[meta\](\{.*?\})\[\/meta\]\s*/);
         if (markerMatch) {
@@ -78,6 +78,7 @@ const TimeTrack = {
                     meta.stage = parsed.stage;
                     meta.stage_label = parsed.stage_label || TT_STAGE_LABELS[parsed.stage] || parsed.stage;
                 }
+                if (parsed && parsed.project) meta.project = parsed.project;
             } catch (e) {
                 // ignore
             }
@@ -130,9 +131,11 @@ const TimeTrack = {
         return '—';
     },
 
-    buildDescriptionWithMeta(stage, stageLabel, description) {
+    buildDescriptionWithMeta(stage, stageLabel, description, projectName) {
         const cleanDesc = String(description || '').trim();
-        const payload = JSON.stringify({ stage, stage_label: stageLabel });
+        const meta = { stage, stage_label: stageLabel };
+        if (projectName) meta.project = projectName;
+        const payload = JSON.stringify(meta);
         return `[meta]${payload}[/meta] ${cleanDesc}`.trim();
     },
 
@@ -600,14 +603,16 @@ const TimeTrack = {
             return;
         }
 
+        // Find employee_id by name
+        const matchedEmp = (this.employees || []).find(e => e.name === workerName);
         const entry = {
+            employee_id: matchedEmp ? matchedEmp.id : null,
             worker_name: workerName,
             project_name: projectName,
             order_id: orderId,
             hours,
             date,
-            description: this.buildDescriptionWithMeta(stage, stageLabel, comment),
-            source: 'manual',
+            description: this.buildDescriptionWithMeta(stage, stageLabel, comment, projectName),
         };
 
         await saveTimeEntry(entry);

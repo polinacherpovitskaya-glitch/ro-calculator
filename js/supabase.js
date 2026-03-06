@@ -792,6 +792,59 @@ async function saveFactual(orderId, factData) {
 // TIME ENTRIES (employee time tracking)
 // =============================================
 
+// Transform Supabase row → web UI entry format
+function _timeEntryFromDb(row) {
+    if (!row) return row;
+    const e = { ...row };
+    // Supabase columns → web UI aliases
+    e.worker_name = e.employee_name || '';
+    e.description = e.task_description || '';
+    // Extract project_name from meta JSON inside task_description
+    const metaMatch = String(e.task_description || '').match(/^\[meta\](\{.*?\})\[\/meta\]/);
+    if (metaMatch) {
+        try {
+            const parsed = JSON.parse(metaMatch[1]);
+            if (parsed && parsed.project) e.project_name = parsed.project;
+        } catch (_) {}
+    }
+    if (!e.project_name) e.project_name = '';
+    return e;
+}
+
+// Transform web UI entry → Supabase row format
+function _timeEntryToDb(entry) {
+    const row = {
+        id: entry.id || (Date.now() + Math.floor(Math.random() * 1000)),
+        employee_id: entry.employee_id || null,
+        employee_name: entry.worker_name || entry.employee_name || '',
+        date: entry.date,
+        hours: entry.hours,
+        task_description: entry.description || entry.task_description || '',
+        order_id: entry.order_id || null,
+        notes: entry.notes || null,
+    };
+    // Inject project_name into task_description meta if present
+    if (entry.project_name) {
+        const metaMatch = row.task_description.match(/^\[meta\](\{.*?\})\[\/meta\](.*)/s);
+        if (metaMatch) {
+            try {
+                const parsed = JSON.parse(metaMatch[1]);
+                parsed.project = entry.project_name;
+                row.task_description = `[meta]${JSON.stringify(parsed)}[/meta]${metaMatch[2]}`;
+            } catch (_) {
+                // fallback: prepend project as meta
+                const payload = JSON.stringify({ project: entry.project_name });
+                row.task_description = `[meta]${payload}[/meta] ${row.task_description}`.trim();
+            }
+        } else {
+            // No meta prefix — add one with project
+            const payload = JSON.stringify({ project: entry.project_name });
+            row.task_description = `[meta]${payload}[/meta] ${row.task_description}`.trim();
+        }
+    }
+    return row;
+}
+
 async function loadTimeEntries() {
     if (isSupabaseReady()) {
         const { data, error } = await supabaseClient
@@ -799,16 +852,17 @@ async function loadTimeEntries() {
             .select('*')
             .order('date', { ascending: false });
         if (error) { console.error('loadTimeEntries error:', error); return []; }
-        return data;
+        return (data || []).map(_timeEntryFromDb);
     }
     return getLocal(LOCAL_KEYS.timeEntries) || [];
 }
 
 async function saveTimeEntry(entry) {
     if (isSupabaseReady()) {
+        const dbRow = _timeEntryToDb(entry);
         const { data, error } = await supabaseClient
             .from('time_entries')
-            .insert(entry)
+            .insert(dbRow)
             .select('id')
             .single();
         if (error) { console.error('saveTimeEntry error:', error); return null; }
