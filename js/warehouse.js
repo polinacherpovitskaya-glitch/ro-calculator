@@ -218,6 +218,10 @@ const Warehouse = {
     editingId: null,
     pendingImport: null,
     _pendingThumbnail: null,
+    currentView: 'table',
+    _viewToken: 0,
+    _shipmentsLoadedAt: 0,
+    _viewInitialized: false,
 
     // Shipment state
     allShipments: [],
@@ -292,7 +296,7 @@ const Warehouse = {
         this.recalcReservations();
         this.populateCategoryFilter();
         this.renderStats();
-        this.filterAndRender();
+        this.setView(this.currentView || 'table');
     },
 
     async _seedInitialData() {
@@ -1252,7 +1256,8 @@ const Warehouse = {
         return Array.from(grouped.values());
     },
 
-    async renderProjectHardwareView() {
+    async renderProjectHardwareView(viewToken) {
+        const token = viewToken ?? this._viewToken;
         const container = document.getElementById('wh-content');
         if (!container) return;
 
@@ -1260,6 +1265,7 @@ const Warehouse = {
             loadOrders(),
             loadWarehouseReservations(),
         ]);
+        if (token !== this._viewToken || this.currentView !== 'project-hardware') return;
         const byOrderId = new Map((orders || []).map(o => [Number(o.id), o]));
         const byItemId = new Map((this.allItems || []).map(i => [Number(i.id), i]));
 
@@ -1289,6 +1295,7 @@ const Warehouse = {
         // 2) Production block: warehouse hardware demand for production-stage orders.
         const productionOrders = (orders || []).filter(o => this._isProductionStatus(o.status));
         const details = await Promise.all(productionOrders.map(o => loadOrder(o.id).catch(() => null)));
+        if (token !== this._viewToken || this.currentView !== 'project-hardware') return;
         const productionRows = [];
         details.filter(Boolean).forEach(detail => {
             const order = detail.order || {};
@@ -1371,6 +1378,7 @@ const Warehouse = {
             </table></div>`
             : '<p class="text-muted">Нет фурнитуры со склада для заказов в производстве.</p>';
 
+        if (token !== this._viewToken || this.currentView !== 'project-hardware') return;
         container.innerHTML = `
             <div class="card">
                 <div class="card-header">
@@ -1391,11 +1399,26 @@ const Warehouse = {
     // VIEW SWITCHING
     // ==========================================
 
-    setView(view) {
-        this.currentView = view;
-        document.querySelectorAll('#wh-tabs .tab').forEach(t => {
-            t.classList.toggle('active', t.dataset.tab === view);
+    applyTabStyles(view) {
+        const tabs = document.querySelectorAll('#wh-tabs .tab');
+        tabs.forEach(t => {
+            const active = t.dataset.tab === view;
+            t.classList.toggle('active', active);
+            // Keep tab visuals deterministic (index has inline styles).
+            t.style.fontWeight = active ? '600' : '500';
+            t.style.color = active ? 'var(--text)' : 'var(--text-muted)';
+            t.style.borderBottom = active ? '2px solid var(--accent)' : '2px solid transparent';
         });
+    },
+
+    setView(view) {
+        if (!view) view = 'table';
+        if (this._viewInitialized && this.currentView === view && view !== 'shipments') return;
+        this._viewInitialized = true;
+        this.currentView = view;
+        this._viewToken += 1;
+        const token = this._viewToken;
+        this.applyTabStyles(view);
 
         const mainContent = document.getElementById('wh-content');
         const shipmentsContent = document.getElementById('wh-shipments-content');
@@ -1408,14 +1431,18 @@ const Warehouse = {
         if (view === 'shipments') {
             if (mainContent) mainContent.style.display = 'none';
             if (shipmentsContent) shipmentsContent.style.display = '';
-            this.loadShipmentsList();
+            const now = Date.now();
+            if (now - (this._shipmentsLoadedAt || 0) > 1500) {
+                this.loadShipmentsList();
+                this._shipmentsLoadedAt = now;
+            }
         } else {
             if (mainContent) mainContent.style.display = '';
             if (shipmentsContent) shipmentsContent.style.display = 'none';
             if (view === 'history') {
                 this.renderHistory();
             } else if (view === 'project-hardware') {
-                this.renderProjectHardwareView();
+                this.renderProjectHardwareView(token);
             } else {
                 this.filterAndRender();
             }
