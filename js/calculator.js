@@ -312,7 +312,13 @@ function calculateMpTargetPrice(cost, params) {
  * Рассчитать фактическую маржу
  */
 function calculateActualMargin(sellPrice, costPerUnit) {
-    if (sellPrice === 0) return { earned: 0, percent: 0 };
+    // Explicit free sale: revenue is zero, full unit cost goes to loss.
+    if (sellPrice <= 0) {
+        return {
+            earned: round2(-(costPerUnit || 0)),
+            percent: null,
+        };
+    }
     const earned = sellPrice - costPerUnit;
     return {
         earned: round2(earned),

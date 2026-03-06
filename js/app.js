@@ -3202,6 +3202,8 @@ const Calculator = {
                 if (m.percent < 30) {
                     warnHtml = '<div style="font-size:9px;color:var(--red);margin-top:2px;">Согласовать с директором</div>';
                 }
+            } else if (col.cost > 0) {
+                marginHtml = '<span style="color:var(--red);font-weight:700;">В минусе</span>';
             }
             html += `<div style="padding:6px 8px;text-align:center;">${marginHtml}${warnHtml}</div>`;
         });
