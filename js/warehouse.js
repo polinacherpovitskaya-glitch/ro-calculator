@@ -244,13 +244,15 @@ const Warehouse = {
 
         // Safe migration: patch photos only from explicit SKU->photo map.
         // Never patch by array index (it breaks when seed order changes).
-        if (typeof WAREHOUSE_SEED_PHOTOS_BY_SKU !== 'undefined' && WAREHOUSE_SEED_PHOTOS_BY_SKU) {
+        const seedPhotoMap = this._getSeedPhotoMapBySku();
+        if (Object.keys(seedPhotoMap).length > 0) {
             let patched = 0;
             this.allItems.forEach(item => {
                 if (!item.photo_thumbnail) {
-                    const photo = WAREHOUSE_SEED_PHOTOS_BY_SKU[item.sku];
+                    const photo = seedPhotoMap[this._normStr(item.sku)];
                     if (photo) {
                         item.photo_thumbnail = photo;
+                        item.photo_url = '';
                         patched++;
                     }
                 }
@@ -976,6 +978,49 @@ const Warehouse = {
         }
 
         return items;
+    },
+
+    async clearAllPhotos() {
+        if (!confirm('Удалить ВСЕ фото во всех позициях склада? Это можно будет откатить кнопкой "Восстановить фото по SKU".')) return;
+        let changed = 0;
+        this.allItems = this.allItems.map(item => {
+            const hasPhoto = !!(item.photo_thumbnail || item.photo_url);
+            if (!hasPhoto) return item;
+            changed++;
+            return { ...item, photo_thumbnail: '', photo_url: '' };
+        });
+        if (changed === 0) {
+            App.toast('Фото уже отсутствуют');
+            return;
+        }
+        await saveWarehouseItems(this.allItems);
+        this.setView(this.currentView || 'table');
+        App.toast(`Фото очищены: ${changed}`);
+    },
+
+    async restorePhotosBySku() {
+        const photoBySku = this._getSeedPhotoMapBySku();
+        const totalSeedPhotos = Object.keys(photoBySku).length;
+        if (totalSeedPhotos === 0) {
+            App.toast('Не найден источник фото для восстановления');
+            return;
+        }
+        let restored = 0;
+        this.allItems = this.allItems.map(item => {
+            const skuKey = this._normStr(item.sku);
+            const photo = photoBySku[skuKey];
+            if (!photo) return item;
+            if (item.photo_thumbnail === photo && !item.photo_url) return item;
+            restored++;
+            return { ...item, photo_thumbnail: photo, photo_url: '' };
+        });
+        if (restored === 0) {
+            App.toast('Фото уже соответствуют SKU');
+            return;
+        }
+        await saveWarehouseItems(this.allItems);
+        this.setView(this.currentView || 'table');
+        App.toast(`Фото восстановлены по SKU: ${restored}`);
     },
 
     showImportPreview(items) {
@@ -2166,6 +2211,31 @@ const Warehouse = {
 
     _normStr(v) {
         return String(v || '').trim().toLowerCase();
+    },
+
+    _getSeedPhotoMapBySku() {
+        const map = {};
+
+        // Preferred source: explicit sku->photo mapping (if present).
+        if (typeof WAREHOUSE_SEED_PHOTOS_BY_SKU !== 'undefined' && WAREHOUSE_SEED_PHOTOS_BY_SKU) {
+            Object.entries(WAREHOUSE_SEED_PHOTOS_BY_SKU).forEach(([sku, photo]) => {
+                const key = this._normStr(sku);
+                if (key && photo) map[key] = photo;
+            });
+            if (Object.keys(map).length > 0) return map;
+        }
+
+        // Fallback: build mapping from seed rows by their sku and indexed photo.
+        if (typeof WAREHOUSE_SEED_DATA === 'undefined' || typeof WAREHOUSE_SEED_PHOTOS === 'undefined') {
+            return map;
+        }
+        WAREHOUSE_SEED_DATA.forEach((seed, i) => {
+            const key = this._normStr(seed && seed.sku);
+            const photo = WAREHOUSE_SEED_PHOTOS[i];
+            if (!key || !photo) return;
+            if (!map[key]) map[key] = photo;
+        });
+        return map;
     },
 
     _itemIdentityKey(item) {
