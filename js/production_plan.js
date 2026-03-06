@@ -350,6 +350,13 @@ const ProductionPlan = {
 
     _renderProgressBar(row) {
         const stages = this._getProgressStages(row);
+        const stageToStatus = {
+            casting: 'production_casting',
+            mold: 'in_production',
+            trim: 'in_production',
+            assembly: 'production_hardware',
+            packaging: 'production_packaging',
+        };
         const legend = stages.map(s => {
             const dotColor =
                 s.state === 'done' ? '#16a34a' :
@@ -363,10 +370,15 @@ const ProductionPlan = {
                 '#6b7280';
             const weight = s.state === 'active' ? 700 : 500;
             const mark = s.state === 'done' ? '&#10003;' : (s.state === 'skipped' ? '&#8212;' : '&bull;');
-            return `<div style="display:flex;align-items:center;gap:4px;white-space:nowrap;color:${textColor};font-size:10px;font-weight:${weight};">
+            const targetStatus = stageToStatus[s.key];
+            const clickable = s.state !== 'skipped' && targetStatus ? 'cursor:pointer;' : '';
+            const onClick = s.state !== 'skipped' && targetStatus
+                ? `onclick="ProductionPlan.setOrderStageStatus(${row.id}, '${targetStatus}')"`
+                : '';
+            return `<button type="button" ${onClick} style="display:flex;align-items:center;gap:4px;white-space:nowrap;color:${textColor};font-size:10px;font-weight:${weight};border:0;background:transparent;padding:0;${clickable}">
                 <span style="display:inline-flex;align-items:center;justify-content:center;width:12px;height:12px;border-radius:999px;background:${dotColor};color:#fff;font-size:8px;line-height:1;">${mark}</span>
                 <span>${this.esc(s.label)}</span>
-            </div>`;
+            </button>`;
         }).join('<span style="color:#9ca3af;">›</span>');
 
         const segments = stages.map((s, idx) => {
@@ -383,10 +395,76 @@ const ProductionPlan = {
             return `<div style="flex:1;height:8px;background:${bg};border-radius:${borderRadius};"></div>`;
         }).join('');
 
+        const nextStatusByCurrent = {
+            production_casting: 'in_production',
+            in_production: 'production_hardware',
+            production_hardware: 'production_packaging',
+            production_packaging: 'delivery',
+        };
+        const nextStatus = nextStatusByCurrent[row.status] || '';
+        const nextLabel = nextStatus ? (App.statusLabel(nextStatus) || nextStatus) : '';
+        const nextBtn = nextStatus
+            ? `<button class="btn btn-sm btn-outline" onclick="ProductionPlan.goNextStage(${row.id})" style="margin-top:8px;">Следующий этап → ${this.esc(nextLabel)}</button>`
+            : '';
+
         return `<div>
             <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">${legend}</div>
             <div style="display:flex;gap:2px;margin-top:6px;">${segments}</div>
+            ${nextBtn}
         </div>`;
+    },
+
+    async setOrderStageStatus(orderId, newStatus) {
+        const row = this.allRows.find(r => Number(r.id) === Number(orderId));
+        if (!row || !newStatus || row.status === newStatus) return;
+        await this._changeOrderStatus(row, newStatus);
+    },
+
+    async goNextStage(orderId) {
+        const row = this.allRows.find(r => Number(r.id) === Number(orderId));
+        if (!row) return;
+        const nextStatusByCurrent = {
+            production_casting: 'in_production',
+            in_production: 'production_hardware',
+            production_hardware: 'production_packaging',
+            production_packaging: 'delivery',
+        };
+        const next = nextStatusByCurrent[row.status];
+        if (!next) return;
+        await this._changeOrderStatus(row, next);
+    },
+
+    async _changeOrderStatus(row, newStatus) {
+        const oldStatus = row.status;
+        const orderId = Number(row.id);
+        const managerName = App.getCurrentEmployeeName() || 'Неизвестный';
+
+        await updateOrderStatus(orderId, newStatus);
+
+        if (typeof Orders !== 'undefined' && Orders && typeof Orders._syncWarehouseByStatus === 'function') {
+            try {
+                await Orders._syncWarehouseByStatus(orderId, oldStatus, newStatus, row.orderName, managerName);
+            } catch (e) {
+                console.error('ProductionPlan syncWarehouseByStatus failed:', e);
+            }
+        }
+
+        if (typeof Orders !== 'undefined' && Orders && typeof Orders.addChangeRecord === 'function') {
+            try {
+                await Orders.addChangeRecord(orderId, {
+                    field: 'status',
+                    old_value: App.statusLabel(oldStatus),
+                    new_value: App.statusLabel(newStatus),
+                    manager: managerName,
+                });
+            } catch (e) {
+                console.error('ProductionPlan addChangeRecord failed:', e);
+            }
+        }
+
+        row.status = newStatus;
+        App.toast(`Статус: ${App.statusLabel(newStatus)}`);
+        await this.load();
     },
 
     _extractColorNames(item) {
