@@ -373,12 +373,21 @@ const Warehouse = {
         const totalQty = items.reduce((s, i) => s + (i.qty || 0), 0);
         const totalReserved = items.reduce((s, i) => s + (i.reserved_qty || 0), 0);
         const lowStock = items.filter(i => i.min_qty > 0 && i.qty < i.min_qty).length;
+        const frozenHardware = items.reduce((s, i) => {
+            const qty = Math.max(0, parseFloat(i.qty) || 0);
+            const unitCost = Math.max(0, parseFloat(i.price_per_unit) || 0);
+            return s + qty * unitCost;
+        }, 0);
+        const frozenReadyGoods = this._getReadyGoodsFrozenAmount();
+        const frozenTotal = frozenHardware + frozenReadyGoods;
 
         const el = (id, val) => { const e = document.getElementById(id); if (e) e.textContent = val; };
         el('wh-total-items', totalItems);
         el('wh-total-qty', totalQty.toLocaleString('ru-RU'));
         el('wh-total-reserved', totalReserved.toLocaleString('ru-RU'));
         el('wh-low-stock', lowStock);
+        el('wh-frozen-total', this._formatMoney(frozenTotal));
+        el('wh-frozen-hw', this._formatMoney(frozenHardware));
     },
 
     // ==========================================
@@ -2211,6 +2220,37 @@ const Warehouse = {
 
     _normStr(v) {
         return String(v || '').trim().toLowerCase();
+    },
+
+    _formatMoney(value) {
+        const rounded = Math.round((parseFloat(value) || 0) * 100) / 100;
+        return `${rounded.toLocaleString('ru-RU')} ₽`;
+    },
+
+    _getReadyGoodsFrozenAmount() {
+        // Future-proof: read from potential ready-goods storages when B2C stock is introduced.
+        const possibleKeys = [
+            'ro_calc_ready_goods_stock',
+            'ro_calc_b2c_stock',
+            'ro_calc_marketplace_stock',
+        ];
+        for (const key of possibleKeys) {
+            try {
+                const raw = localStorage.getItem(key);
+                if (!raw) continue;
+                const parsed = JSON.parse(raw);
+                if (!Array.isArray(parsed)) continue;
+                const total = parsed.reduce((sum, row) => {
+                    const qty = Math.max(0, parseFloat(row.qty ?? row.quantity ?? row.stock_qty) || 0);
+                    const unitCost = Math.max(0, parseFloat(row.cost_per_unit ?? row.unit_cost ?? row.price_per_unit ?? row.cost) || 0);
+                    return sum + qty * unitCost;
+                }, 0);
+                if (total > 0) return total;
+            } catch (e) {
+                // Ignore malformed data and keep default 0.
+            }
+        }
+        return 0;
     },
 
     _getSeedPhotoMapBySku() {
