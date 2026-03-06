@@ -2627,7 +2627,7 @@
                                     <input type="number" id="emp-pay-holiday-rate" min="0" step="10">
                                 </div>
                             </div>
-                            <div class="text-muted" style="font-size:11px;">Сначала считаются часы в пределах оклада, затем сверхчасы. Выходные и праздники считаются по отдельным ставкам.</div>
+                            <div class="text-muted" style="font-size:11px;">Оклад = 0 → почасовой сотрудник, все часы считаются по ставке «Сверхчас». Если оклад задан — сначала заполняются часы оклада, затем сверхчасы.</div>
                         </div>
                         <div class="flex gap-8">
                             <button class="btn btn-success" onclick="Settings.saveEmployee()">Сохранить</button>
@@ -2974,7 +2974,7 @@
 <script src="js/molds.js?v=66"></script>
 <script src="js/colors.js?v=46g"></script>
 <script src="js/kp.js?v=46g"></script>
-<script src="js/timetrack.js?v=54"></script>
+<script src="js/timetrack.js?v=55"></script>
 <script src="js/tasks.js?v=46g"></script>
 <script src="js/gantt.js?v=46g"></script>
 <script src="js/import.js?v=46g"></script>

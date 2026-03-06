@@ -320,21 +320,25 @@ const TimeTrack = {
 
     normalizePayrollConfig(emp) {
         const fallbackRate = parseFloat(App.settings?.fot_per_hour) || 0;
-        const baseHours = parseFloat(emp?.pay_base_hours_month);
-        const baseSalary = parseFloat(emp?.pay_base_salary_month);
+        const baseHoursRaw = parseFloat(emp?.pay_base_hours_month);
+        const baseSalary = parseFloat(emp?.pay_base_salary_month) || 0;
         const overtimeRateRaw = parseFloat(emp?.pay_overtime_hour_rate);
         const weekendRateRaw = parseFloat(emp?.pay_weekend_hour_rate);
         const holidayRateRaw = parseFloat(emp?.pay_holiday_hour_rate);
 
-        const safeBaseHours = baseHours > 0 ? baseHours : 176;
-        const baseRateFromSalary = (baseSalary > 0 && safeBaseHours > 0) ? (baseSalary / safeBaseHours) : 0;
+        // If no base salary — purely hourly employee, baseHours = 0
+        const hasSalary = baseSalary > 0;
+        const safeBaseHours = hasSalary ? (baseHoursRaw > 0 ? baseHoursRaw : 176) : 0;
+        const baseRateFromSalary = (hasSalary && safeBaseHours > 0) ? (baseSalary / safeBaseHours) : 0;
         const overtimeRate = overtimeRateRaw > 0 ? overtimeRateRaw : (baseRateFromSalary || fallbackRate);
         const weekendRate = weekendRateRaw > 0 ? weekendRateRaw : overtimeRate;
         const holidayRate = holidayRateRaw > 0 ? holidayRateRaw : weekendRate;
 
         return {
+            hasSalary,
+            baseSalary,
             baseHours: safeBaseHours,
-            baseRate: baseRateFromSalary || overtimeRate || fallbackRate,
+            baseRate: hasSalary ? (baseRateFromSalary || overtimeRate || fallbackRate) : 0,
             overtimeRate: overtimeRate || fallbackRate,
             weekendRate: weekendRate || fallbackRate,
             holidayRate: holidayRate || fallbackRate,
@@ -376,16 +380,29 @@ const TimeTrack = {
 
         const rows = Array.from(stats.values()).map(row => {
             const cfg = this.normalizePayrollConfig(row.employee);
-            const inBaseHours = Math.min(row.regularHours, cfg.baseHours);
-            const overtimeHours = Math.max(0, row.regularHours - cfg.baseHours);
-            const payBase = inBaseHours * cfg.baseRate;
-            const payOvertime = overtimeHours * cfg.overtimeRate;
+            let inBaseHours, overtimeHours, payBase, payOvertime;
+
+            if (cfg.hasSalary) {
+                // Salaried: base salary covers first N hours, then overtime rate
+                inBaseHours = Math.min(row.regularHours, cfg.baseHours);
+                overtimeHours = Math.max(0, row.regularHours - cfg.baseHours);
+                payBase = cfg.baseSalary * (inBaseHours / cfg.baseHours);
+                payOvertime = overtimeHours * cfg.overtimeRate;
+            } else {
+                // Purely hourly: all regular hours at overtime rate
+                inBaseHours = 0;
+                overtimeHours = row.regularHours;
+                payBase = 0;
+                payOvertime = row.regularHours * cfg.overtimeRate;
+            }
+
             const payWeekend = row.weekendHours * cfg.weekendRate;
             const payHoliday = row.holidayHours * cfg.holidayRate;
             const totalPay = payBase + payOvertime + payWeekend + payHoliday;
 
             return {
                 employeeName: row.employee.name || 'Сотрудник',
+                hasSalary: cfg.hasSalary,
                 regularHours: row.regularHours,
                 inBaseHours,
                 overtimeHours,
