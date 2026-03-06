@@ -1326,56 +1326,121 @@ const Warehouse = {
             orderProgress.set(r.order_id, current);
         });
 
-        const reserveHtml = reserveRows.length
-            ? `<div class="table-wrap"><table>
-                <thead><tr>
-                    <th>Заказ</th><th>Менеджер</th><th>Фурнитура</th><th class="text-right">Резерв</th><th></th>
-                </tr></thead>
-                <tbody>${reserveRows.map(r => `<tr>
-                    <td style="font-weight:600;">${this.esc(r.order_name)}</td>
-                    <td>${this.esc(r.manager || '—')}</td>
-                    <td>
-                        <div>${this.esc(r.item_name)}</div>
-                        ${r.item_sku ? `<div style="font-size:11px;color:var(--text-muted);">${this.esc(r.item_sku)}</div>` : ''}
-                    </td>
-                    <td class="text-right" style="font-weight:700;">${r.qty}</td>
-                    <td><button class="btn btn-sm btn-outline" onclick="App.navigate('order-detail', true, ${r.order_id})">Открыть</button></td>
-                </tr>`).join('')}</tbody>
-            </table></div>`
+        const reserveByOrder = new Map();
+        reserveRows.forEach(r => {
+            const key = Number(r.order_id);
+            const current = reserveByOrder.get(key) || {
+                order_id: key,
+                order_name: r.order_name || 'Заказ',
+                manager: r.manager || '',
+                items: [],
+                total_qty: 0,
+            };
+            current.items.push(r);
+            current.total_qty += parseFloat(r.qty) || 0;
+            reserveByOrder.set(key, current);
+        });
+        const reserveOrders = Array.from(reserveByOrder.values()).sort((a, b) =>
+            String(a.order_name).localeCompare(String(b.order_name), 'ru')
+        );
+        reserveOrders.forEach(o => {
+            o.items.sort((a, b) => String(a.item_name).localeCompare(String(b.item_name), 'ru'));
+        });
+
+        const reserveHtml = reserveOrders.length
+            ? `<div style="display:grid;gap:10px;">${reserveOrders.map(o => `
+                <div style="border:1px solid var(--border);border-radius:10px;overflow:hidden;background:#fff;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px 12px;background:var(--bg);border-bottom:1px solid var(--border);">
+                        <div>
+                            <div style="font-weight:700;">${this.esc(o.order_name)}</div>
+                            <div style="font-size:12px;color:var(--text-secondary);">Менеджер: ${this.esc(o.manager || '—')} · Резерв: ${o.total_qty}</div>
+                        </div>
+                        <button class="btn btn-sm btn-outline" onclick="App.navigate('order-detail', true, ${o.order_id})">Открыть</button>
+                    </div>
+                    <div class="table-wrap">
+                        <table>
+                            <thead>
+                                <tr><th>Фурнитура</th><th class="text-right">Резерв</th></tr>
+                            </thead>
+                            <tbody>
+                                ${o.items.map(r => `<tr>
+                                    <td>
+                                        <div>${this.esc(r.item_name)}</div>
+                                        ${r.item_sku ? `<div style="font-size:11px;color:var(--text-muted);">${this.esc(r.item_sku)}</div>` : ''}
+                                    </td>
+                                    <td class="text-right" style="font-weight:700;">${r.qty}</td>
+                                </tr>`).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `).join('')}</div>`
             : '<p class="text-muted">Нет активных резервов для заказов в статусе «Образец».</p>';
 
-        const productionHtml = productionRows.length
-            ? `<div class="table-wrap"><table>
-                <thead><tr>
-                    <th>Заказ</th><th>Менеджер</th><th>Фурнитура</th><th class="text-right">Нужно</th><th>Собрано</th><th></th>
-                </tr></thead>
-                <tbody>${productionRows.map(r => {
-                    const p = orderProgress.get(r.order_id) || { total: 0, ready: 0 };
-                    const done = p.total > 0 && p.ready === p.total;
-                    const badge = done
-                        ? '<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;background:#dcfce7;color:#166534;">готово</span>'
-                        : '<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;background:#fee2e2;color:#991b1b;">не готово</span>';
-                    return `<tr>
-                        <td>
-                            <div style="font-weight:600;">${this.esc(r.order_name)}</div>
-                            <div style="font-size:11px;color:var(--text-muted);">${this.esc(App.statusLabel(r.status))} · ${badge}</div>
-                        </td>
-                        <td>${this.esc(r.manager || '—')}</td>
-                        <td>
-                            <div>${this.esc(r.item_name)}</div>
-                            ${r.item_sku ? `<div style="font-size:11px;color:var(--text-muted);">${this.esc(r.item_sku)}</div>` : ''}
-                        </td>
-                        <td class="text-right" style="font-weight:700;">${r.qty}</td>
-                        <td>
-                            <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;">
-                                <input type="checkbox" ${r.ready ? 'checked' : ''} onchange="Warehouse.toggleProjectHardwareReady(${r.order_id}, ${r.item_id}, this.checked)">
-                                <span style="font-size:12px;color:var(--text-secondary);">собрано</span>
-                            </label>
-                        </td>
-                        <td><button class="btn btn-sm btn-outline" onclick="App.navigate('order-detail', true, ${r.order_id})">Открыть</button></td>
-                    </tr>`;
-                }).join('')}</tbody>
-            </table></div>`
+        const productionByOrder = new Map();
+        productionRows.forEach(r => {
+            const key = Number(r.order_id);
+            const current = productionByOrder.get(key) || {
+                order_id: key,
+                order_name: r.order_name || 'Заказ',
+                manager: r.manager || '',
+                status: r.status || '',
+                items: [],
+                total_qty: 0,
+            };
+            current.items.push(r);
+            current.total_qty += parseFloat(r.qty) || 0;
+            productionByOrder.set(key, current);
+        });
+        const productionOrdersGrouped = Array.from(productionByOrder.values()).sort((a, b) =>
+            String(a.order_name).localeCompare(String(b.order_name), 'ru')
+        );
+        productionOrdersGrouped.forEach(o => {
+            o.items.sort((a, b) => String(a.item_name).localeCompare(String(b.item_name), 'ru'));
+        });
+
+        const productionHtml = productionOrdersGrouped.length
+            ? `<div style="display:grid;gap:10px;">${productionOrdersGrouped.map(o => {
+                const p = orderProgress.get(o.order_id) || { total: 0, ready: 0 };
+                const done = p.total > 0 && p.ready === p.total;
+                const badge = done
+                    ? '<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;background:#dcfce7;color:#166534;">готово</span>'
+                    : '<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;background:#fee2e2;color:#991b1b;">не готово</span>';
+                return `
+                <div style="border:1px solid var(--border);border-radius:10px;overflow:hidden;background:#fff;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px 12px;background:var(--bg);border-bottom:1px solid var(--border);">
+                        <div>
+                            <div style="font-weight:700;">${this.esc(o.order_name)}</div>
+                            <div style="font-size:12px;color:var(--text-secondary);">
+                                ${this.esc(App.statusLabel(o.status))} · ${badge} · Менеджер: ${this.esc(o.manager || '—')} · Позиций: ${o.items.length}
+                            </div>
+                        </div>
+                        <button class="btn btn-sm btn-outline" onclick="App.navigate('order-detail', true, ${o.order_id})">Открыть</button>
+                    </div>
+                    <div class="table-wrap">
+                        <table>
+                            <thead>
+                                <tr><th>Фурнитура</th><th class="text-right">Нужно</th><th>Собрано</th></tr>
+                            </thead>
+                            <tbody>
+                                ${o.items.map(r => `<tr>
+                                    <td>
+                                        <div>${this.esc(r.item_name)}</div>
+                                        ${r.item_sku ? `<div style="font-size:11px;color:var(--text-muted);">${this.esc(r.item_sku)}</div>` : ''}
+                                    </td>
+                                    <td class="text-right" style="font-weight:700;">${r.qty}</td>
+                                    <td>
+                                        <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;">
+                                            <input type="checkbox" ${r.ready ? 'checked' : ''} onchange="Warehouse.toggleProjectHardwareReady(${r.order_id}, ${r.item_id}, this.checked)">
+                                            <span style="font-size:12px;color:var(--text-secondary);">собрано</span>
+                                        </label>
+                                    </td>
+                                </tr>`).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>`;
+            }).join('')}</div>`
             : '<p class="text-muted">Нет фурнитуры со склада для заказов в производстве.</p>';
 
         if (token !== this._viewToken || this.currentView !== 'project-hardware') return;
