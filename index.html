@@ -1646,12 +1646,13 @@
             <!-- Tabs -->
             <div id="wh-tabs" style="display:flex; gap:0; margin-bottom:12px; border-bottom:2px solid var(--border);">
                 <div class="tab active" data-tab="table" onclick="Warehouse.setView('table')" style="padding:8px 16px; cursor:pointer; font-weight:600; font-size:13px; border-bottom:2px solid var(--accent); margin-bottom:-2px;">Таблица</div>
+                <div class="tab" data-tab="project-hardware" onclick="Warehouse.setView('project-hardware')" style="padding:8px 16px; cursor:pointer; font-size:13px; color:var(--text-muted); border-bottom:2px solid transparent; margin-bottom:-2px;">Фурнитура для проектов</div>
                 <div class="tab" data-tab="shipments" onclick="Warehouse.setView('shipments')" style="padding:8px 16px; cursor:pointer; font-size:13px; color:var(--text-muted); border-bottom:2px solid transparent; margin-bottom:-2px;">Приёмки из Китая</div>
                 <div class="tab" data-tab="history" onclick="Warehouse.setView('history')" style="padding:8px 16px; cursor:pointer; font-size:13px; color:var(--text-muted); border-bottom:2px solid transparent; margin-bottom:-2px;">История движений</div>
             </div>
 
             <!-- Filters -->
-            <div class="card" style="padding: 12px 20px;">
+            <div class="card" id="wh-filters-card" style="padding: 12px 20px;">
                 <div class="form-row" style="align-items:end">
                     <div class="form-group" style="margin:0">
                         <label>Категория</label>
@@ -1948,6 +1949,7 @@
                     <div style="margin-top:16px; display:flex; gap:8px; align-items:center;">
                         <button class="btn btn-success" onclick="Warehouse.saveShipmentDraft()">Сохранить черновик</button>
                         <button class="btn btn-primary" onclick="Warehouse.confirmShipment()" id="wh-sh-confirm-btn">✓ Принять на склад</button>
+                        <button class="btn btn-primary" onclick="Warehouse.updateShipmentValues()" id="wh-sh-update-btn" style="display:none;">↻ Обновить значения</button>
                         <button class="btn btn-outline" onclick="Warehouse.hideShipmentForm()">Отмена</button>
                         <button class="btn btn-danger" id="wh-sh-delete-btn" style="margin-left:auto; display:none;" onclick="Warehouse.deleteShipmentFromForm()">Удалить</button>
                     </div>
@@ -2845,13 +2847,13 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="js/supabase.js?v=68"></script>
+<script src="js/supabase.js?v=69"></script>
 <script src="js/calculator.js?v=62"></script>
 <script src="js/app.js?v=77"></script>
 <script src="js/dashboard.js?v=46g"></script>
 <script src="js/order-detail.js?v=47b"></script>
 <script src="js/orders.js?v=52"></script>
-<script src="js/production_plan.js?v=70"></script>
+<script src="js/production_plan.js?v=71"></script>
 <script src="js/analytics.js?v=46g"></script>
 <script src="js/molds.js?v=66"></script>
 <script src="js/colors.js?v=46g"></script>
@@ -2865,7 +2867,7 @@
 <script src="js/warehouse_photos.js?v=46g"></script>
 <script src="js/china_catalog.js?v=46k"></script>
 <script src="js/marketplaces.js?v=67"></script>
-<script src="js/warehouse.js?v=55"></script>
+<script src="js/warehouse.js?v=56"></script>
 <script src="js/settings.js?v=58"></script>
 </body>
 </html>

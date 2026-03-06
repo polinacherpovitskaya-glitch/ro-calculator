@@ -8,14 +8,20 @@ const ProductionPlan = {
     filteredRows: [],
     priority: [],
     _state: { order_ids: [] },
+    _projectHardwareState: { checks: {} },
 
     async load() {
-        const [orders, state] = await Promise.all([
+        const [orders, state, projectHwState] = await Promise.all([
             loadOrders(),
             loadProductionPlanState(),
+            loadProjectHardwareState(),
         ]);
 
         this._state = state || { order_ids: [] };
+        this._projectHardwareState = projectHwState || { checks: {} };
+        if (!this._projectHardwareState.checks || typeof this._projectHardwareState.checks !== 'object') {
+            this._projectHardwareState.checks = {};
+        }
         this.priority = Array.isArray(this._state.order_ids) ? this._state.order_ids.map(x => Number(x)) : [];
 
         const productionOrders = (orders || []).filter(o => this.PRODUCTION_STATUSES.includes(o.status));
@@ -129,6 +135,7 @@ const ProductionPlan = {
                 <td>
                     <div class="pp-sub"><strong>Ф:</strong> ${this.esc(r.hwPlain || '—')}</div>
                     <div class="pp-sub"><strong>У:</strong> ${this.esc(r.pkgPlain || '—')}</div>
+                    <div class="pp-sub"><strong>Готовность фурнитуры:</strong> ${r.hardwareReadyLabelHtml}</div>
                 </td>
                 <td class="pp-sub">${this.esc(r.notes || '—')}</td>
                 <td><button class="btn btn-sm btn-outline" onclick="App.navigate('order-detail', true, ${r.id})">Открыть</button></td>
@@ -166,6 +173,7 @@ const ProductionPlan = {
                 <div style="margin-top:8px;">${this._renderColorCell(r)}</div>
                 <div class="pp-sub" style="margin-top:8px;"><strong>Фурнитура:</strong> ${this.esc(r.hwPlain || '—')}</div>
                 <div class="pp-sub"><strong>Упаковка:</strong> ${this.esc(r.pkgPlain || '—')}</div>
+                <div class="pp-sub"><strong>Готовность фурнитуры:</strong> ${r.hardwareReadyLabelHtml}</div>
                 <div class="pp-sub"><strong>Заметки:</strong> ${this.esc(r.notes || '—')}</div>
                 <div style="margin-top:10px;"><button class="btn btn-sm btn-outline" onclick="App.navigate('order-detail', true, ${r.id})">Открыть заказ</button></div>
             </div>`;
@@ -253,6 +261,14 @@ const ProductionPlan = {
 
         const hwPlain = hwItems.map(i => `${i.product_name || 'Фурнитура'} × ${(parseFloat(i.quantity) || 0)}`).join(', ');
         const pkgPlain = pkgItems.map(i => `${i.product_name || 'Упаковка'} × ${(parseFloat(i.quantity) || 0)}`).join(', ');
+        const hwDemands = this._collectWarehouseDemandFromOrderItems(hwItems);
+        const hwReady = hwDemands.filter(d => this._isHardwareLineReady(order.id, d.warehouse_item_id)).length;
+        const hwTotal = hwDemands.length;
+        const hardwareReadyLabelHtml = hwTotal === 0
+            ? '<span style="color:#6b7280;">не требуется</span>'
+            : (hwReady === hwTotal
+                ? '<span style="display:inline-block;padding:1px 8px;border-radius:10px;background:#dcfce7;color:#166534;font-weight:600;">да, готово</span>'
+                : `<span style="display:inline-block;padding:1px 8px;border-radius:10px;background:#fee2e2;color:#991b1b;font-weight:600;">нет (${hwReady}/${hwTotal})</span>`);
 
         const startIso = order.created_at || order.deadline_start || order.deadline || null;
         const endIso = order.deadline_end || order.deadline || null;
@@ -272,6 +288,7 @@ const ProductionPlan = {
             productsPlain,
             hwPlain,
             pkgPlain,
+            hardwareReadyLabelHtml,
             colorLines,
             colorsPlain: colorLines.join(' · '),
             attachments,
@@ -281,6 +298,24 @@ const ProductionPlan = {
             deadlineTs: endIso ? new Date(endIso).getTime() : (startIso ? new Date(startIso).getTime() : null),
             createdTs: order.created_at ? new Date(order.created_at).getTime() : 0,
         };
+    },
+
+    _collectWarehouseDemandFromOrderItems(hwItems) {
+        const grouped = new Map();
+        (hwItems || []).forEach(item => {
+            const src = (item.source || item.hardware_source || '').toLowerCase();
+            if (src !== 'warehouse') return;
+            const itemId = Number(item.warehouse_item_id || item.hardware_warehouse_item_id || 0);
+            const qty = parseFloat(item.quantity || item.qty || 0) || 0;
+            if (!itemId || qty <= 0) return;
+            grouped.set(itemId, (grouped.get(itemId) || 0) + qty);
+        });
+        return Array.from(grouped.entries()).map(([warehouse_item_id, qty]) => ({ warehouse_item_id, qty }));
+    },
+
+    _isHardwareLineReady(orderId, warehouseItemId) {
+        const checks = (this._projectHardwareState && this._projectHardwareState.checks) || {};
+        return !!checks[`${Number(orderId) || 0}:${Number(warehouseItemId) || 0}`];
     },
 
     _getProgressStages(row) {

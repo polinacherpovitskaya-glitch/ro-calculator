@@ -223,6 +223,7 @@ const Warehouse = {
     allShipments: [],
     editingShipmentId: null,
     shipmentItems: [],
+    projectHardwareState: { checks: {} },
 
     // ==========================================
     // LIFECYCLE
@@ -237,21 +238,22 @@ const Warehouse = {
             this.allItems = await loadWarehouseItems();
         }
 
-        // Migrate: patch photos from WAREHOUSE_SEED_PHOTOS if items were seeded without them
-        if (typeof WAREHOUSE_SEED_PHOTOS !== 'undefined') {
+        // Safe migration: patch photos only from explicit SKU->photo map.
+        // Never patch by array index (it breaks when seed order changes).
+        if (typeof WAREHOUSE_SEED_PHOTOS_BY_SKU !== 'undefined' && WAREHOUSE_SEED_PHOTOS_BY_SKU) {
             let patched = 0;
             this.allItems.forEach(item => {
                 if (!item.photo_thumbnail) {
-                    const seedIdx = WAREHOUSE_SEED_DATA.findIndex(s => s.sku === item.sku);
-                    if (seedIdx >= 0 && WAREHOUSE_SEED_PHOTOS[seedIdx]) {
-                        item.photo_thumbnail = WAREHOUSE_SEED_PHOTOS[seedIdx];
+                    const photo = WAREHOUSE_SEED_PHOTOS_BY_SKU[item.sku];
+                    if (photo) {
+                        item.photo_thumbnail = photo;
                         patched++;
                     }
                 }
             });
             if (patched > 0) {
                 await saveWarehouseItems(this.allItems);
-                console.log(`[Warehouse] Patched ${patched} items with seed photos`);
+                console.log(`[Warehouse] Patched ${patched} items with SKU photo map`);
             }
         }
 
@@ -273,7 +275,20 @@ const Warehouse = {
             }
         }
 
+        // Cleanup: remove exact duplicate rows with zero qty
+        if (this._cleanupZeroDuplicateItems()) {
+            await saveWarehouseItems(this.allItems);
+            console.log('[Warehouse] Removed zero-qty duplicate items');
+        }
+
         this.allReservations = await loadWarehouseReservations();
+        this.projectHardwareState = await loadProjectHardwareState();
+        if (!this.projectHardwareState || typeof this.projectHardwareState !== 'object') {
+            this.projectHardwareState = { checks: {} };
+        }
+        if (!this.projectHardwareState.checks || typeof this.projectHardwareState.checks !== 'object') {
+            this.projectHardwareState.checks = {};
+        }
         this.recalcReservations();
         this.populateCategoryFilter();
         this.renderStats();
@@ -1172,6 +1187,206 @@ const Warehouse = {
         </div></div>`;
     },
 
+    _isSampleStatus(status) {
+        return status === 'sample';
+    },
+
+    _isProductionStatus(status) {
+        return ['production_casting', 'production_hardware', 'production_packaging', 'in_production'].includes(status);
+    },
+
+    _projectHardwareKey(orderId, itemId) {
+        return `${Number(orderId) || 0}:${Number(itemId) || 0}`;
+    },
+
+    _isProjectHardwareReady(orderId, itemId) {
+        const checks = (this.projectHardwareState && this.projectHardwareState.checks) || {};
+        return !!checks[this._projectHardwareKey(orderId, itemId)];
+    },
+
+    async toggleProjectHardwareReady(orderId, itemId, checked) {
+        if (!this.projectHardwareState || typeof this.projectHardwareState !== 'object') {
+            this.projectHardwareState = { checks: {} };
+        }
+        if (!this.projectHardwareState.checks || typeof this.projectHardwareState.checks !== 'object') {
+            this.projectHardwareState.checks = {};
+        }
+        const key = this._projectHardwareKey(orderId, itemId);
+        if (checked) this.projectHardwareState.checks[key] = true;
+        else delete this.projectHardwareState.checks[key];
+
+        this.projectHardwareState.updated_at = new Date().toISOString();
+        this.projectHardwareState.updated_by = App.getCurrentEmployeeName();
+        await saveProjectHardwareState(this.projectHardwareState);
+        this.renderProjectHardwareView();
+    },
+
+    _collectWarehouseDemandFromOrderItems(items) {
+        const grouped = new Map();
+        (items || []).forEach(item => {
+            const itemType = item.item_type || '';
+            if (itemType !== 'hardware') return;
+
+            const src = (item.source || item.hardware_source || '').toLowerCase();
+            if (src !== 'warehouse') return;
+
+            const itemId = Number(item.warehouse_item_id || item.hardware_warehouse_item_id || 0);
+            const qty = parseFloat(item.quantity || item.qty || 0) || 0;
+            if (!itemId || qty <= 0) return;
+
+            const key = String(itemId);
+            const prev = grouped.get(key);
+            const name = item.product_name || item.name || '';
+            if (!prev) {
+                grouped.set(key, {
+                    warehouse_item_id: itemId,
+                    qty,
+                    names: name ? [name] : [],
+                });
+                return;
+            }
+            prev.qty += qty;
+            if (name && !prev.names.includes(name)) prev.names.push(name);
+            grouped.set(key, prev);
+        });
+        return Array.from(grouped.values());
+    },
+
+    async renderProjectHardwareView() {
+        const container = document.getElementById('wh-content');
+        if (!container) return;
+
+        const [orders, reservations] = await Promise.all([
+            loadOrders(),
+            loadWarehouseReservations(),
+        ]);
+        const byOrderId = new Map((orders || []).map(o => [Number(o.id), o]));
+        const byItemId = new Map((this.allItems || []).map(i => [Number(i.id), i]));
+
+        // 1) Reserve block: active auto-reserves for orders in sample status.
+        const reserveGrouped = new Map();
+        (reservations || []).forEach(r => {
+            if (r.status !== 'active' || r.source !== 'order_calc') return;
+            const order = byOrderId.get(Number(r.order_id));
+            if (!order || !this._isSampleStatus(order.status)) return;
+            const item = byItemId.get(Number(r.item_id));
+            const key = `${Number(r.order_id)}:${Number(r.item_id)}`;
+            const current = reserveGrouped.get(key) || {
+                order_id: Number(r.order_id),
+                order_name: order.order_name || r.order_name || 'Заказ',
+                manager: order.manager_name || '',
+                item_id: Number(r.item_id),
+                item_name: (item && item.name) || r.item_name || 'Фурнитура',
+                item_sku: (item && item.sku) || '',
+                qty: 0,
+            };
+            current.qty += parseFloat(r.qty) || 0;
+            reserveGrouped.set(key, current);
+        });
+        const reserveRows = Array.from(reserveGrouped.values());
+        reserveRows.sort((a, b) => String(a.order_name).localeCompare(String(b.order_name), 'ru'));
+
+        // 2) Production block: warehouse hardware demand for production-stage orders.
+        const productionOrders = (orders || []).filter(o => this._isProductionStatus(o.status));
+        const details = await Promise.all(productionOrders.map(o => loadOrder(o.id).catch(() => null)));
+        const productionRows = [];
+        details.filter(Boolean).forEach(detail => {
+            const order = detail.order || {};
+            const demands = this._collectWarehouseDemandFromOrderItems(detail.items || []);
+            demands.forEach(d => {
+                const item = byItemId.get(Number(d.warehouse_item_id));
+                const ready = this._isProjectHardwareReady(order.id, d.warehouse_item_id);
+                productionRows.push({
+                    order_id: Number(order.id),
+                    order_name: order.order_name || 'Заказ',
+                    manager: order.manager_name || '',
+                    status: order.status || '',
+                    item_id: Number(d.warehouse_item_id),
+                    item_name: (item && item.name) || d.names.join(', ') || 'Фурнитура',
+                    item_sku: (item && item.sku) || '',
+                    qty: parseFloat(d.qty) || 0,
+                    ready,
+                });
+            });
+        });
+        productionRows.sort((a, b) => String(a.order_name).localeCompare(String(b.order_name), 'ru'));
+
+        const orderProgress = new Map();
+        productionRows.forEach(r => {
+            const current = orderProgress.get(r.order_id) || { total: 0, ready: 0 };
+            current.total += 1;
+            if (r.ready) current.ready += 1;
+            orderProgress.set(r.order_id, current);
+        });
+
+        const reserveHtml = reserveRows.length
+            ? `<div class="table-wrap"><table>
+                <thead><tr>
+                    <th>Заказ</th><th>Менеджер</th><th>Фурнитура</th><th class="text-right">Резерв</th><th></th>
+                </tr></thead>
+                <tbody>${reserveRows.map(r => `<tr>
+                    <td style="font-weight:600;">${this.esc(r.order_name)}</td>
+                    <td>${this.esc(r.manager || '—')}</td>
+                    <td>
+                        <div>${this.esc(r.item_name)}</div>
+                        ${r.item_sku ? `<div style="font-size:11px;color:var(--text-muted);">${this.esc(r.item_sku)}</div>` : ''}
+                    </td>
+                    <td class="text-right" style="font-weight:700;">${r.qty}</td>
+                    <td><button class="btn btn-sm btn-outline" onclick="App.navigate('order-detail', true, ${r.order_id})">Открыть</button></td>
+                </tr>`).join('')}</tbody>
+            </table></div>`
+            : '<p class="text-muted">Нет активных резервов для заказов в статусе «Образец».</p>';
+
+        const productionHtml = productionRows.length
+            ? `<div class="table-wrap"><table>
+                <thead><tr>
+                    <th>Заказ</th><th>Менеджер</th><th>Фурнитура</th><th class="text-right">Нужно</th><th>Собрано</th><th></th>
+                </tr></thead>
+                <tbody>${productionRows.map(r => {
+                    const p = orderProgress.get(r.order_id) || { total: 0, ready: 0 };
+                    const done = p.total > 0 && p.ready === p.total;
+                    const badge = done
+                        ? '<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;background:#dcfce7;color:#166534;">готово</span>'
+                        : '<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;background:#fee2e2;color:#991b1b;">не готово</span>';
+                    return `<tr>
+                        <td>
+                            <div style="font-weight:600;">${this.esc(r.order_name)}</div>
+                            <div style="font-size:11px;color:var(--text-muted);">${this.esc(App.statusLabel(r.status))} · ${badge}</div>
+                        </td>
+                        <td>${this.esc(r.manager || '—')}</td>
+                        <td>
+                            <div>${this.esc(r.item_name)}</div>
+                            ${r.item_sku ? `<div style="font-size:11px;color:var(--text-muted);">${this.esc(r.item_sku)}</div>` : ''}
+                        </td>
+                        <td class="text-right" style="font-weight:700;">${r.qty}</td>
+                        <td>
+                            <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;">
+                                <input type="checkbox" ${r.ready ? 'checked' : ''} onchange="Warehouse.toggleProjectHardwareReady(${r.order_id}, ${r.item_id}, this.checked)">
+                                <span style="font-size:12px;color:var(--text-secondary);">собрано</span>
+                            </label>
+                        </td>
+                        <td><button class="btn btn-sm btn-outline" onclick="App.navigate('order-detail', true, ${r.order_id})">Открыть</button></td>
+                    </tr>`;
+                }).join('')}</tbody>
+            </table></div>`
+            : '<p class="text-muted">Нет фурнитуры со склада для заказов в производстве.</p>';
+
+        container.innerHTML = `
+            <div class="card">
+                <div class="card-header">
+                    <h3>Резерв (заказы в образце)</h3>
+                </div>
+                ${reserveHtml}
+            </div>
+            <div class="card" style="margin-top:12px;">
+                <div class="card-header">
+                    <h3>Фурнитура для проектов (заказы в производстве)</h3>
+                </div>
+                ${productionHtml}
+            </div>
+        `;
+    },
+
     // ==========================================
     // VIEW SWITCHING
     // ==========================================
@@ -1184,6 +1399,11 @@ const Warehouse = {
 
         const mainContent = document.getElementById('wh-content');
         const shipmentsContent = document.getElementById('wh-shipments-content');
+        const filtersCard = document.getElementById('wh-filters-card');
+
+        if (filtersCard) {
+            filtersCard.style.display = view === 'table' ? '' : 'none';
+        }
 
         if (view === 'shipments') {
             if (mainContent) mainContent.style.display = 'none';
@@ -1194,6 +1414,8 @@ const Warehouse = {
             if (shipmentsContent) shipmentsContent.style.display = 'none';
             if (view === 'history') {
                 this.renderHistory();
+            } else if (view === 'project-hardware') {
+                this.renderProjectHardwareView();
             } else {
                 this.filterAndRender();
             }
@@ -1327,6 +1549,8 @@ const Warehouse = {
         document.getElementById('wh-shipment-form-title').textContent = 'Новая приёмка';
         document.getElementById('wh-sh-delete-btn').style.display = 'none';
         document.getElementById('wh-sh-confirm-btn').style.display = '';
+        document.getElementById('wh-sh-confirm-btn').textContent = 'Принять на склад';
+        document.getElementById('wh-sh-update-btn').style.display = 'none';
         document.getElementById('wh-shipment-form').style.display = '';
         this.addShipmentItem();
         document.getElementById('wh-shipment-form').scrollIntoView({ behavior: 'smooth' });
@@ -1358,7 +1582,10 @@ const Warehouse = {
 
         document.getElementById('wh-shipment-form-title').textContent = 'Редактирование приёмки';
         document.getElementById('wh-sh-delete-btn').style.display = '';
-        document.getElementById('wh-sh-confirm-btn').style.display = sh.status === 'received' ? 'none' : '';
+        const isReceived = sh.status === 'received';
+        document.getElementById('wh-sh-confirm-btn').style.display = isReceived ? 'none' : '';
+        document.getElementById('wh-sh-confirm-btn').textContent = 'Принять на склад';
+        document.getElementById('wh-sh-update-btn').style.display = isReceived ? '' : 'none';
         document.getElementById('wh-shipment-form').style.display = '';
 
         this.recalcShipment();
@@ -1674,17 +1901,24 @@ const Warehouse = {
         const data = this._buildShipmentData();
         if (!data) return;
 
-        const validItems = data.items.filter(i => {
+        const validItemsRaw = data.items.filter(i => {
             const qty = parseFloat(i.qty_received) || 0;
             if (qty <= 0) return false;
             return !!i.warehouse_item_id || (i.source === 'new' && (i.name || '').trim());
         });
-        if (validItems.length === 0) {
+        if (validItemsRaw.length === 0) {
             App.toast('Добавьте хотя бы одну позицию с кол-вом > 0');
             return;
         }
 
-        if (!confirm(`Принять ${validItems.length} позиций на склад?\nОстатки и себестоимость будут обновлены.`)) return;
+        const existingShipment = this.editingShipmentId
+            ? this.allShipments.find(s => s.id === this.editingShipmentId)
+            : null;
+        const isRepost = !!(existingShipment && existingShipment.status === 'received');
+        const confirmText = isRepost
+            ? `Перепровести приёмку (${validItemsRaw.length} позиций)?\nОстатки на складе будут пересчитаны по разнице.`
+            : `Принять ${validItemsRaw.length} позиций на склад?\nОстатки и себестоимость будут обновлены.`;
+        if (!confirm(confirmText)) return;
 
         const itemsBefore = await loadWarehouseItems();
         const beforeById = new Map(itemsBefore.map(i => [i.id, {
@@ -1692,9 +1926,14 @@ const Warehouse = {
             price: i.price_per_unit || 0,
         }]));
 
-        // Ensure all "new" items exist in warehouse first
-        for (const shItem of validItems) {
+        // Ensure all "new" items are matched with existing stock or created once.
+        for (const shItem of validItemsRaw) {
             if (shItem.warehouse_item_id) continue;
+            const matched = this._findExistingItemForShipment(shItem, itemsBefore);
+            if (matched) {
+                shItem.warehouse_item_id = matched.id;
+                continue;
+            }
             const newItem = {
                 category: shItem.category || 'other',
                 name: (shItem.name || '').trim(),
@@ -1712,26 +1951,52 @@ const Warehouse = {
             const newId = await saveWarehouseItem(newItem);
             shItem.warehouse_item_id = newId;
             beforeById.set(newId, { qty: 0, price: newItem.price_per_unit || 0 });
+            itemsBefore.push({ ...newItem, id: newId, qty: 0 });
         }
+
+        const validItems = this._mergeShipmentItemsByWarehouseId(validItemsRaw);
+        const previousItems = isRepost
+            ? this._mergeShipmentItemsByWarehouseId((existingShipment.items || []).filter(i => {
+                const qty = parseFloat(i.qty_received) || 0;
+                return qty > 0 && !!i.warehouse_item_id;
+            }))
+            : [];
+
+        const prevQtyById = new Map();
+        previousItems.forEach(i => {
+            prevQtyById.set(i.warehouse_item_id, (prevQtyById.get(i.warehouse_item_id) || 0) + (parseFloat(i.qty_received) || 0));
+        });
+        const newQtyById = new Map();
+        validItems.forEach(i => {
+            newQtyById.set(i.warehouse_item_id, (newQtyById.get(i.warehouse_item_id) || 0) + (parseFloat(i.qty_received) || 0));
+        });
 
         data.items = validItems;
         data.status = 'received';
         data.received_at = new Date().toISOString();
         await saveShipment(data);
 
-        // Add qty to warehouse + write history
-        for (const shItem of validItems) {
+        // Apply stock delta for each item (supports repost/edit of already received shipment)
+        const allIds = new Set([...prevQtyById.keys(), ...newQtyById.keys()]);
+        for (const itemId of allIds) {
+            const prevQty = prevQtyById.get(itemId) || 0;
+            const nextQty = newQtyById.get(itemId) || 0;
+            const delta = nextQty - prevQty;
+            if (!delta) continue;
+            const note = isRepost
+                ? `Перепроведение приёмки: было ${prevQty}, стало ${nextQty}`
+                : `Приёмка: ${nextQty} шт`;
             await this.adjustStock(
-                shItem.warehouse_item_id,
-                shItem.qty_received,
-                'addition',
+                itemId,
+                delta,
+                delta > 0 ? 'addition' : 'deduction',
                 data.shipment_name,
-                `Приёмка: ${shItem.qty_received} шт, с/с: ${shItem.total_cost_per_unit.toFixed(2)} ₽`,
+                note,
                 ''
             );
         }
 
-        // Update price model after receipt
+        // Update weighted price only for net positive additions
         const pricingMode = data.pricing_mode || 'weighted_avg';
         const itemsAfter = await loadWarehouseItems();
         validItems.forEach(shItem => {
@@ -1740,7 +2005,10 @@ const Warehouse = {
 
             const after = itemsAfter[idx];
             const before = beforeById.get(shItem.warehouse_item_id) || { qty: 0, price: after.price_per_unit || 0 };
-            const addedQty = parseFloat(shItem.qty_received) || 0;
+            const prevQty = prevQtyById.get(shItem.warehouse_item_id) || 0;
+            const nextQty = newQtyById.get(shItem.warehouse_item_id) || 0;
+            const addedQty = Math.max(0, nextQty - prevQty);
+            if (addedQty <= 0) return;
             const newCost = Math.round((parseFloat(shItem.total_cost_per_unit) || 0) * 100) / 100;
             const totalQty = (before.qty || 0) + addedQty;
             const weighted = totalQty > 0
@@ -1765,10 +2033,25 @@ const Warehouse = {
         });
         await saveWarehouseItems(itemsAfter);
 
-        App.toast(`Приёмка завершена: ${validItems.length} позиций на складе`);
+        App.toast(isRepost
+            ? `Приёмка перепроведена: ${validItems.length} позиций обновлено`
+            : `Приёмка завершена: ${validItems.length} позиций на складе`);
         this.hideShipmentForm();
         await this.load();
         this.setView('shipments');
+    },
+
+    async updateShipmentValues() {
+        if (!this.editingShipmentId) {
+            App.toast('Сначала откройте приёмку для редактирования');
+            return;
+        }
+        const sh = this.allShipments.find(s => s.id === this.editingShipmentId);
+        if (!sh || sh.status !== 'received') {
+            App.toast('Эта кнопка доступна только для уже принятой приёмки');
+            return;
+        }
+        await this.confirmShipment();
     },
 
     async deleteShipmentFromForm() {
@@ -1787,6 +2070,99 @@ const Warehouse = {
     esc(str) {
         if (!str) return '';
         return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    },
+
+    _normStr(v) {
+        return String(v || '').trim().toLowerCase();
+    },
+
+    _itemIdentityKey(item) {
+        return [
+            this._normStr(item.category || 'other'),
+            this._normStr(item.sku),
+            this._normStr(item.name),
+            this._normStr(item.size),
+            this._normStr(item.color),
+            this._normStr(item.unit || 'шт'),
+        ].join('|');
+    },
+
+    _findExistingItemForShipment(shItem, warehouseItems) {
+        const sku = this._normStr(shItem.sku);
+        const category = this._normStr(shItem.category);
+        if (sku) {
+            const bySku = warehouseItems.find(i =>
+                this._normStr(i.sku) === sku &&
+                (!category || this._normStr(i.category) === category)
+            );
+            if (bySku) return bySku;
+        }
+        const key = this._itemIdentityKey(shItem);
+        return warehouseItems.find(i => this._itemIdentityKey(i) === key) || null;
+    },
+
+    _mergeShipmentItemsByWarehouseId(items) {
+        const map = new Map();
+        items.forEach(src => {
+            const itemId = src.warehouse_item_id;
+            const qty = parseFloat(src.qty_received) || 0;
+            if (!itemId || qty <= 0) return;
+
+            const cost = parseFloat(src.total_cost_per_unit) || 0;
+            const current = map.get(itemId);
+            if (!current) {
+                map.set(itemId, {
+                    ...src,
+                    qty_received: qty,
+                    weight_grams: parseFloat(src.weight_grams) || 0,
+                    purchase_price_cny: parseFloat(src.purchase_price_cny) || 0,
+                    purchase_price_rub: parseFloat(src.purchase_price_rub) || 0,
+                    delivery_allocated: parseFloat(src.delivery_allocated) || 0,
+                    total_cost_per_unit: cost,
+                });
+                return;
+            }
+
+            const oldQty = parseFloat(current.qty_received) || 0;
+            const newQty = oldQty + qty;
+            current.total_cost_per_unit = newQty > 0
+                ? (((parseFloat(current.total_cost_per_unit) || 0) * oldQty + cost * qty) / newQty)
+                : 0;
+            current.qty_received = newQty;
+            current.weight_grams = (parseFloat(current.weight_grams) || 0) + (parseFloat(src.weight_grams) || 0);
+            current.purchase_price_cny = (parseFloat(current.purchase_price_cny) || 0) + (parseFloat(src.purchase_price_cny) || 0);
+            current.purchase_price_rub = (parseFloat(current.purchase_price_rub) || 0) + (parseFloat(src.purchase_price_rub) || 0);
+            current.delivery_allocated = (parseFloat(current.delivery_allocated) || 0) + (parseFloat(src.delivery_allocated) || 0);
+            map.set(itemId, current);
+        });
+        return Array.from(map.values());
+    },
+
+    _cleanupZeroDuplicateItems() {
+        const grouped = new Map();
+        (this.allItems || []).forEach(item => {
+            const key = this._itemIdentityKey(item);
+            if (!grouped.has(key)) grouped.set(key, []);
+            grouped.get(key).push(item);
+        });
+
+        const toRemove = new Set();
+        grouped.forEach(group => {
+            if (group.length < 2) return;
+            const nonZero = group.filter(i => (parseFloat(i.qty) || 0) > 0);
+            if (nonZero.length > 0) {
+                group.forEach(i => {
+                    if ((parseFloat(i.qty) || 0) <= 0) toRemove.add(i.id);
+                });
+                return;
+            }
+            const sorted = [...group].sort((a, b) => (a.id || 0) - (b.id || 0));
+            sorted.slice(1).forEach(i => toRemove.add(i.id));
+        });
+
+        if (toRemove.size === 0) return false;
+        this.allItems = this.allItems.filter(i => !toRemove.has(i.id));
+        return true;
     },
 
     // ==========================================

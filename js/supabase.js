@@ -51,6 +51,7 @@ const LOCAL_KEYS = {
     pkgBlanks: 'ro_calc_pkg_blanks',
     marketplaceSets: 'ro_calc_marketplace_sets',
     productionPlan: 'ro_calc_production_plan',
+    projectHardwareState: 'ro_calc_project_hardware_state',
 };
 
 // Data version — increment to trigger NON-DESTRUCTIVE migration
@@ -1215,6 +1216,47 @@ async function saveProductionPlanState(state) {
                 updated_at: new Date().toISOString(),
             }, { onConflict: 'key' });
         if (error) console.error('saveProductionPlanState error:', error);
+    }
+}
+
+// =============================================
+// PROJECT HARDWARE PREP STATE (checkboxes)
+// =============================================
+
+async function loadProjectHardwareState() {
+    const fallback = getLocal(LOCAL_KEYS.projectHardwareState) || { checks: {} };
+    if (isSupabaseReady()) {
+        try {
+            const { data, error } = await supabaseClient
+                .from('settings')
+                .select('value')
+                .eq('key', 'project_hardware_state_json')
+                .maybeSingle();
+            if (!error && data && data.value) {
+                const parsed = JSON.parse(data.value) || { checks: {} };
+                setLocal(LOCAL_KEYS.projectHardwareState, parsed);
+                return parsed;
+            }
+        } catch (e) {
+            console.error('loadProjectHardwareState error:', e);
+        }
+    }
+    return fallback;
+}
+
+async function saveProjectHardwareState(state) {
+    const payload = state && typeof state === 'object' ? state : { checks: {} };
+    if (!payload.checks || typeof payload.checks !== 'object') payload.checks = {};
+    setLocal(LOCAL_KEYS.projectHardwareState, payload);
+    if (isSupabaseReady()) {
+        const { error } = await supabaseClient
+            .from('settings')
+            .upsert({
+                key: 'project_hardware_state_json',
+                value: JSON.stringify(payload),
+                updated_at: new Date().toISOString(),
+            }, { onConflict: 'key' });
+        if (error) console.error('saveProjectHardwareState error:', error);
     }
 }
 
