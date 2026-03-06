@@ -353,7 +353,7 @@ const Settings = {
         if (!tbody) return;
 
         if (!this.employeesData || this.employeesData.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="9" class="text-muted text-center">Нет сотрудников</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="8" class="text-muted text-center">Нет сотрудников</td></tr>';
             return;
         }
 
@@ -370,15 +370,6 @@ const Settings = {
             const statusBadge = e.is_active !== false
                 ? '<span class="badge badge-green">Активен</span>'
                 : '<span class="badge">Неактивен</span>';
-            const baseSalary = parseFloat(e.pay_base_salary_month) || 0;
-            const baseHours = parseFloat(e.pay_base_hours_month) || 0;
-            const overtime = parseFloat(e.pay_overtime_hour_rate) || 0;
-            const weekend = parseFloat(e.pay_weekend_hour_rate) || 0;
-            const holiday = parseFloat(e.pay_holiday_hour_rate) || 0;
-            const payText = e.role === 'production'
-                ? `<span style="font-size:11px;">${this.formatMoney(baseSalary)}/мес • ${baseHours || 0}ч • +${this.formatMoney(overtime)}/ч<br>вых: ${this.formatMoney(weekend)}/ч • праз: ${this.formatMoney(holiday)}/ч</span>`
-                : '<span class="text-muted" style="font-size:11px;">не используется</span>';
-
             return `
             <tr>
                 <td style="font-weight:600;">${this.escHtml(e.name)}</td>
@@ -386,7 +377,6 @@ const Settings = {
                 <td style="text-align:center;">${e.daily_hours || 8}ч</td>
                 <td style="text-align:center;">${tgStatus}</td>
                 <td style="text-align:center;font-size:11px;">${reminderTime}</td>
-                <td style="text-align:center;">${payText}</td>
                 <td style="text-align:center;">${tasksIcon}</td>
                 <td style="text-align:center;">${statusBadge}</td>
                 <td>
