@@ -132,11 +132,7 @@ const ProductionPlan = {
                 </td>
                 <td><strong>${r.qtyTotal}</strong></td>
                 <td>${this._renderColorCell(r)}</td>
-                <td>
-                    <div class="pp-sub"><strong>Ф:</strong> ${this.esc(r.hwPlain || '—')}</div>
-                    <div class="pp-sub"><strong>У:</strong> ${this.esc(r.pkgPlain || '—')}</div>
-                    <div class="pp-sub"><strong>Готовность фурнитуры:</strong> ${r.hardwareReadyLabelHtml}</div>
-                </td>
+                <td>${this._renderSupplyCell(r)}</td>
                 <td class="pp-sub">${this.esc(r.notes || '—')}</td>
                 <td><button class="btn btn-sm btn-outline" onclick="App.navigate('order-detail', true, ${r.id})">Открыть</button></td>
             </tr>`;
@@ -171,9 +167,7 @@ const ProductionPlan = {
                 <div class="pp-sub ${late ? 'text-red' : ''}"><strong>Дедлайн:</strong> ${this.esc(r.deadlineLabel)}</div>
                 <div style="margin-top:8px;">${this._renderProgressBar(r)}</div>
                 <div style="margin-top:8px;">${this._renderColorCell(r)}</div>
-                <div class="pp-sub" style="margin-top:8px;"><strong>Фурнитура:</strong> ${this.esc(r.hwPlain || '—')}</div>
-                <div class="pp-sub"><strong>Упаковка:</strong> ${this.esc(r.pkgPlain || '—')}</div>
-                <div class="pp-sub"><strong>Готовность фурнитуры:</strong> ${r.hardwareReadyLabelHtml}</div>
+                <div style="margin-top:8px;">${this._renderSupplyCell(r)}</div>
                 <div class="pp-sub"><strong>Заметки:</strong> ${this.esc(r.notes || '—')}</div>
                 <div style="margin-top:10px;"><button class="btn btn-sm btn-outline" onclick="App.navigate('order-detail', true, ${r.id})">Открыть заказ</button></div>
             </div>`;
@@ -259,8 +253,10 @@ const ProductionPlan = {
             if (printings.length) printingLines.push(`${item.product_name || 'Изделие'}: ${printings.join(', ')}`);
         });
 
-        const hwPlain = hwItems.map(i => `${i.product_name || 'Фурнитура'} × ${(parseFloat(i.quantity) || 0)}`).join(', ');
-        const pkgPlain = pkgItems.map(i => `${i.product_name || 'Упаковка'} × ${(parseFloat(i.quantity) || 0)}`).join(', ');
+        const hwLines = hwItems.map(i => `${i.product_name || 'Фурнитура'} × ${(parseFloat(i.quantity) || 0)}`);
+        const pkgLines = pkgItems.map(i => `${i.product_name || 'Упаковка'} × ${(parseFloat(i.quantity) || 0)}`);
+        const hwPlain = hwLines.join(', ');
+        const pkgPlain = pkgLines.join(', ');
         const hwDemands = this._collectWarehouseDemandFromOrderItems(hwItems);
         const hwReady = hwDemands.filter(d => this._isHardwareLineReady(order.id, d.warehouse_item_id)).length;
         const hwTotal = hwDemands.length;
@@ -286,6 +282,8 @@ const ProductionPlan = {
             statusLabel: App.statusLabel(order.status),
             qtyTotal,
             productsPlain,
+            hwLines,
+            pkgLines,
             hwPlain,
             pkgPlain,
             hardwareReadyLabelHtml,
@@ -505,7 +503,7 @@ const ProductionPlan = {
     _renderColorCell(row) {
         const hasColors = row.colorLines.length > 0;
         const lines = hasColors
-            ? row.colorLines.map(x => `<div class="pp-sub">${this.esc(x)}</div>`).join('')
+            ? `<div class="pp-lines">${row.colorLines.map(x => `<div class="pp-line-item pp-line-color">${this.esc(x)}</div>`).join('')}</div>`
             : '<div class="pp-sub">—</div>';
 
         const imgs = row.attachments
@@ -518,9 +516,35 @@ const ProductionPlan = {
             .map(att => `<a href="${att.data_url}" target="_blank" class="pp-file-link">&#128206; ${this.esc(att.name)}</a>`)
             .join('');
 
-        return lines
-            + (imgs ? `<div class="pp-color-images">${imgs}</div>` : '')
-            + (nonImg ? `<div class="pp-files">${nonImg}</div>` : '');
+        return `<div class="pp-cell-block">
+            <div class="pp-block-title">Цвет</div>
+            ${lines}
+            ${imgs ? `<div class="pp-color-images">${imgs}</div>` : ''}
+            ${nonImg ? `<div class="pp-files">${nonImg}</div>` : ''}
+        </div>`;
+    },
+
+    _renderSupplyCell(row) {
+        const hw = (row.hwLines || []).length
+            ? `<div class="pp-lines">${row.hwLines.map(x => `<div class="pp-line-item">${this.esc(x)}</div>`).join('')}</div>`
+            : '<div class="pp-sub">—</div>';
+        const pkg = (row.pkgLines || []).length
+            ? `<div class="pp-lines">${row.pkgLines.map(x => `<div class="pp-line-item">${this.esc(x)}</div>`).join('')}</div>`
+            : '<div class="pp-sub">—</div>';
+
+        return `<div class="pp-cell-block">
+            <div class="pp-duo-block">
+                <div class="pp-mini-block">
+                    <div class="pp-block-title">Фурнитура</div>
+                    ${hw}
+                </div>
+                <div class="pp-mini-block">
+                    <div class="pp-block-title">Упаковка</div>
+                    ${pkg}
+                </div>
+            </div>
+            <div class="pp-sub" style="margin-top:6px;"><strong>Готовность:</strong> ${row.hardwareReadyLabelHtml}</div>
+        </div>`;
     },
 
     esc(str) {
