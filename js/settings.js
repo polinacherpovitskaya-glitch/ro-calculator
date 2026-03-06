@@ -14,6 +14,7 @@ const Settings = {
     authActivityData: [],
     authSessionsData: [],
     editingAuthAccountId: null,
+    visiblePasswords: {},
 
     async load() {
         this.populateFields();
@@ -311,6 +312,7 @@ const Settings = {
     async saveEmployee() {
         const name = document.getElementById('emp-name').value.trim();
         if (!name) { App.toast('Введите имя сотрудника'); return; }
+        const isNewEmployee = !this.editingEmployeeId;
 
         const employee = {
             id: this.editingEmployeeId || undefined,
@@ -338,10 +340,14 @@ const Settings = {
             App.toast('Не удалось сохранить сотрудника', 'error');
             return;
         }
+        if (isNewEmployee) {
+            await this.ensureLoginForNewEmployee({ ...employee, id: savedId });
+        }
         App.toast('Сотрудник сохранён');
         this.cancelEmployee();
         await this.loadEmployeesTab();
         await App.refreshEmployees();
+        await App.refreshAuthUsers();
     },
 
     async deleteEmployee() {
@@ -363,9 +369,127 @@ const Settings = {
     async loadLoginsTab() {
         this.employeesData = await loadEmployees();
         this.authAccountsData = await loadAuthAccounts();
+        await this.ensureAutoLoginsForEmployees();
         this.authActivityData = await loadAuthActivity();
+        this.visiblePasswords = {};
         this.renderAuthAccountsTable();
         this.renderAuthActivityTable();
+    },
+
+    normalizeNameForLogin(name) {
+        return String(name || '')
+            .trim()
+            .toLowerCase()
+            .replace(/\s+/g, '_')
+            .replace(/[^a-zа-яё0-9_-]+/gi, '')
+            .replace(/_+/g, '_')
+            .replace(/^_+|_+$/g, '');
+    },
+
+    getAutoLoginBase(name) {
+        const normalized = this.normalizeNameForLogin(name);
+        const stem = normalized || 'user';
+        return `${stem}_ro`;
+    },
+
+    getUniqueAutoUsername(baseUsername) {
+        const used = new Set((this.authAccountsData || []).map(a => String(a.username || '').toLowerCase()).filter(Boolean));
+        if (!used.has(baseUsername.toLowerCase())) return baseUsername.toLowerCase();
+        let i = 1;
+        while (used.has(`${baseUsername.toLowerCase()}_${i}`)) i++;
+        return `${baseUsername.toLowerCase()}_${i}`;
+    },
+
+    generateStrongPassword(length = 12) {
+        const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%';
+        const bytes = new Uint32Array(length);
+        if (window.crypto && window.crypto.getRandomValues) {
+            window.crypto.getRandomValues(bytes);
+        } else {
+            for (let i = 0; i < length; i++) bytes[i] = Math.floor(Math.random() * 4294967295);
+        }
+        let out = '';
+        for (let i = 0; i < length; i++) {
+            out += alphabet[bytes[i] % alphabet.length];
+        }
+        return out;
+    },
+
+    shouldSkipAutoLoginForEmployee(employeeName) {
+        const skip = new Set(['алина', 'аня', 'полина']);
+        return skip.has(String(employeeName || '').trim().toLowerCase());
+    },
+
+    async ensureLoginForNewEmployee(employee) {
+        if (!employee || !employee.id) return;
+        if (this.shouldSkipAutoLoginForEmployee(employee.name)) return;
+
+        if (!this.authAccountsData || this.authAccountsData.length === 0) {
+            this.authAccountsData = await loadAuthAccounts();
+        }
+
+        const exists = (this.authAccountsData || []).some(a => Number(a.employee_id) === Number(employee.id));
+        if (exists) return;
+
+        const username = this.getUniqueAutoUsername(this.getAutoLoginBase(employee.name));
+        const passwordPlain = this.generateStrongPassword(12);
+        const account = {
+            id: Date.now(),
+            employee_id: Number(employee.id),
+            employee_name: employee.name || '',
+            role: employee.role || 'employee',
+            username,
+            is_active: true,
+            password_hash: App.hashUserPassword(username, passwordPlain),
+            password_plain: passwordPlain,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            last_login_at: null,
+        };
+        this.authAccountsData.push(account);
+        await saveAuthAccounts(this.authAccountsData);
+        await appendAuthActivity({
+            type: 'account_auto_create',
+            actor: App.getCurrentEmployeeName(),
+            target_user: account.employee_name || account.username,
+        });
+    },
+
+    async ensureAutoLoginsForEmployees() {
+        const employees = (this.employeesData || []).filter(e => e && e.is_active !== false);
+        if (!employees.length) return;
+
+        let changed = false;
+        for (const employee of employees) {
+            if (this.shouldSkipAutoLoginForEmployee(employee.name)) continue;
+            const exists = (this.authAccountsData || []).some(a => Number(a.employee_id) === Number(employee.id));
+            if (exists) continue;
+
+            const username = this.getUniqueAutoUsername(this.getAutoLoginBase(employee.name));
+            const passwordPlain = this.generateStrongPassword(12);
+            this.authAccountsData.push({
+                id: Date.now() + Math.floor(Math.random() * 100000),
+                employee_id: Number(employee.id),
+                employee_name: employee.name || '',
+                role: employee.role || 'employee',
+                username,
+                is_active: true,
+                password_hash: App.hashUserPassword(username, passwordPlain),
+                password_plain: passwordPlain,
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+                last_login_at: null,
+            });
+            changed = true;
+        }
+        if (!changed) return;
+        await saveAuthAccounts(this.authAccountsData);
+        await appendAuthActivity({
+            type: 'account_auto_create_batch',
+            actor: App.getCurrentEmployeeName(),
+            target_user: 'new employees',
+        });
+        await App.refreshAuthUsers();
     },
 
     async loadSessionsTab() {
@@ -442,9 +566,11 @@ const Settings = {
         if (duplicate) { App.toast('Логин уже занят'); return; }
 
         let account = null;
+        let prevUsername = '';
         if (this.editingAuthAccountId) {
             account = this.authAccountsData.find(a => String(a.id) === String(this.editingAuthAccountId));
             if (!account) return;
+            prevUsername = String(account.username || '').toLowerCase();
         } else {
             account = {
                 id: Date.now(),
@@ -463,6 +589,10 @@ const Settings = {
 
         if (password) {
             account.password_hash = App.hashUserPassword(username, password);
+            account.password_plain = password;
+        } else if (this.editingAuthAccountId && prevUsername && prevUsername !== username) {
+            App.toast('При смене логина укажите новый пароль');
+            return;
         } else if (!account.password_hash) {
             App.toast('Укажите пароль');
             return;
@@ -503,7 +633,7 @@ const Settings = {
         const tbody = document.getElementById('auth-accounts-table-body');
         if (!tbody) return;
         if (!this.authAccountsData || this.authAccountsData.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">Нет логинов</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">Нет логинов</td></tr>';
             return;
         }
 
@@ -516,15 +646,56 @@ const Settings = {
                 const last = a.last_login_at
                     ? new Date(a.last_login_at).toLocaleString('ru-RU')
                     : '—';
+                const isVisible = !!this.visiblePasswords[a.id];
+                const passwordMasked = '••••••••••••';
+                const passwordShown = a.password_plain || 'не сохранён';
+                const passwordCell = isVisible ? this.escHtml(passwordShown) : passwordMasked;
                 return `<tr>
                     <td style="font-weight:600;">${this.escHtml(a.employee_name || '—')}</td>
                     <td>${this.escHtml(a.username || '')}</td>
+                    <td><code>${passwordCell}</code></td>
                     <td style="text-align:center;">${status}</td>
                     <td>${this.escHtml(last)}</td>
-                    <td><button class="btn btn-sm btn-outline" style="padding:2px 6px;font-size:10px;" onclick="Settings.editAuthAccount('${this.escHtml(String(a.id))}')">&#9998;</button></td>
+                    <td style="white-space:nowrap;">
+                        <button class="btn btn-sm btn-outline" style="padding:2px 6px;font-size:10px;" onclick="Settings.toggleAuthPasswordVisibility('${this.escHtml(String(a.id))}')">${isVisible ? 'Скрыть' : 'Показать'}</button>
+                        <button class="btn btn-sm btn-outline" style="padding:2px 6px;font-size:10px;" onclick="Settings.resetAuthPassword('${this.escHtml(String(a.id))}')">Сбросить</button>
+                        <button class="btn btn-sm btn-outline" style="padding:2px 6px;font-size:10px;" onclick="Settings.editAuthAccount('${this.escHtml(String(a.id))}')">&#9998;</button>
+                    </td>
                 </tr>`;
             });
         tbody.innerHTML = rows.join('');
+    },
+
+    toggleAuthPasswordVisibility(id) {
+        if (!id) return;
+        const key = String(id);
+        this.visiblePasswords[key] = !this.visiblePasswords[key];
+        this.renderAuthAccountsTable();
+    },
+
+    async resetAuthPassword(id) {
+        const account = (this.authAccountsData || []).find(a => String(a.id) === String(id));
+        if (!account) return;
+        const generated = this.generateStrongPassword(12);
+        const nextPassword = prompt(`Новый пароль для "${account.employee_name || account.username}"`, generated);
+        if (nextPassword === null) return;
+        const pass = String(nextPassword || '').trim();
+        if (!pass) {
+            App.toast('Пароль не может быть пустым');
+            return;
+        }
+        account.password_hash = App.hashUserPassword(account.username, pass);
+        account.password_plain = pass;
+        account.updated_at = new Date().toISOString();
+        await saveAuthAccounts(this.authAccountsData);
+        await appendAuthActivity({
+            type: 'password_reset',
+            actor: App.getCurrentEmployeeName(),
+            target_user: account.employee_name || account.username,
+        });
+        this.visiblePasswords[account.id] = true;
+        this.renderAuthAccountsTable();
+        App.toast('Пароль обновлён');
     },
 
     renderAuthActivityTable() {
