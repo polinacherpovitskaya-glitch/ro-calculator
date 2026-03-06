@@ -198,12 +198,15 @@ const Molds = {
 
                 // Add built-in hardware cost if present
                 let hwCostPerUnit = 0;
-                if (m.hw_name && m.hw_price_per_unit > 0) {
+                if (m.hw_name && (m.hw_price_per_unit > 0 || m.hw_speed > 0)) {
                     hwCostPerUnit = m.hw_price_per_unit + (m.hw_delivery_total ? m.hw_delivery_total / qty : 0);
                     // Add assembly labor if hw_speed is set
                     if (m.hw_speed > 0) {
                         const hwHours = qty / m.hw_speed * (params.wasteFactor || 1.1);
                         hwCostPerUnit += hwHours * params.fotPerHour / qty;
+                        if (params.indirectCostMode === 'all') {
+                            hwCostPerUnit += params.indirectPerHour * hwHours / qty;
+                        }
                     }
                     adjustedCost += hwCostPerUnit;
                 }

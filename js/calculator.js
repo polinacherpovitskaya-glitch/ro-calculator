@@ -149,9 +149,10 @@ function calculateItemCost(item, params) {
         if (hwSpeed > 0 && qty > 0) {
             hoursBuiltinHw = qty / hwSpeed * p.wasteFactor;
             costBuiltinHw += hoursBuiltinHw * p.fotPerHour / qty;
-            // В справочнике бланков косвенные на встроенную фурнитуру не применяются.
-            // Держим ту же логику в калькуляторе, чтобы себестоимость совпадала.
-            costBuiltinHwIndirect = 0;
+            // На сборку встроенной фурнитуры также намазываем косвенные.
+            if (p.indirectCostMode === 'all') {
+                costBuiltinHwIndirect = p.indirectPerHour * hoursBuiltinHw / qty;
+            }
         }
     }
 

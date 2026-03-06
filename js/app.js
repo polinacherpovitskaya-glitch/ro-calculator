@@ -2945,12 +2945,15 @@ const Calculator = {
 
         let adjusted = Number(base.costTotal || 0) - Number(base.costMoldAmortization || 0) + moldAmortPerUnit;
 
-        if (tpl.hw_name && Number(tpl.hw_price_per_unit || 0) > 0) {
+        if (tpl.hw_name && (Number(tpl.hw_price_per_unit || 0) > 0 || Number(tpl.hw_speed || 0) > 0)) {
             let hwCost = Number(tpl.hw_price_per_unit || 0) + (Number(tpl.hw_delivery_total || 0) > 0 ? Number(tpl.hw_delivery_total || 0) / qty : 0);
             const hwSpeed = Number(tpl.hw_speed || 0);
             if (hwSpeed > 0) {
                 const hwHours = qty / hwSpeed * (params.wasteFactor || 1.1);
                 hwCost += hwHours * params.fotPerHour / qty;
+                if (params.indirectCostMode === 'all') {
+                    hwCost += params.indirectPerHour * hwHours / qty;
+                }
             }
             adjusted += hwCost;
         }
