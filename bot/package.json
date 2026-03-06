@@ -1,0 +1,17 @@
+{
+  "name": "ro-timebot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Recycle Object Telegram bot for time tracking",
+  "main": "timebot.js",
+  "scripts": {
+    "start": "node timebot.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.56.0",
+    "node-telegram-bot-api": "^0.66.0"
+  }
+}
