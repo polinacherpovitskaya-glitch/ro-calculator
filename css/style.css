@@ -30,6 +30,11 @@
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
+html, body {
+    max-width: 100%;
+    overflow-x: hidden;
+}
+
 body {
     font-family: var(--font);
     background: var(--bg);
@@ -170,6 +175,8 @@ body {
     padding: 24px;
     flex: 1;
     min-height: 100vh;
+    max-width: calc(100vw - 240px);
+    overflow-x: hidden;
 }
 
 .page-header {
@@ -871,7 +878,12 @@ table .text-center { text-align: center; }
    PAGES
    ============================================= */
 
-.page { display: none; }
+.page {
+    display: none;
+    max-width: 100%;
+    min-width: 0;
+    overflow-x: hidden;
+}
 .page.active { display: block; }
 
 /* =============================================
@@ -928,6 +940,8 @@ table .text-center { text-align: center; }
 .pricing-grid-scroll {
     width: 100%;
     max-width: 100%;
+    min-width: 0;
+    display: block;
     overflow-x: auto;
     overflow-y: hidden;
     -webkit-overflow-scrolling: touch;
@@ -956,6 +970,7 @@ table .text-center { text-align: center; }
     .main-content {
         margin-left: 60px;
         padding: 16px;
+        max-width: calc(100vw - 60px);
     }
     .form-row {
         grid-template-columns: 1fr;
