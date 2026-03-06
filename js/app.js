@@ -2952,7 +2952,13 @@ const Calculator = {
             const globalIdx = this.items.indexOf(item);
             // Item cost WITHOUT printing and WITHOUT per-item hw/pkg
             const costPrintingPart = item.result.costPrinting || 0;
-            const costItemOnly = round2(item.result.costTotal - costPrintingPart);
+            const costItemOnlyRaw = round2(item.result.costTotal - costPrintingPart);
+            // For blank molds, pricing table should match blanks directory base cost.
+            // Client delivery is shown separately in item cost breakdown and should not inflate blank base in pricing table.
+            const costItemOnly = item.is_blank_mold
+                ? round2(costItemOnlyRaw - (item.result.costDelivery || 0))
+                : costItemOnlyRaw;
+            const costItemOnlySafe = Math.max(0, costItemOnly);
 
             if (item.is_blank_mold) {
                 // Blank mold: show recommended price from blanks table
@@ -2965,7 +2971,7 @@ const Calculator = {
                 } else {
                     const customMargin = tpl?.custom_margins?.[item.quantity];
                     const blankMargin = (customMargin !== null && customMargin !== undefined) ? customMargin : getBlankMargin(item.quantity || 500);
-                    blankSellPrice = roundTo5(round2(costItemOnly / (1 - blankMargin) / (1 - 0.06 - 0.05)));
+                    blankSellPrice = roundTo5(round2(costItemOnlySafe / (1 - blankMargin) / (1 - 0.06 - 0.05)));
                 }
                 // Do NOT auto-fill sell_price_item — manager enters manually
                 columns.push({
@@ -2973,7 +2979,7 @@ const Calculator = {
                     type: 'item',
                     globalIdx,
                     isBlank: true,
-                    cost: costItemOnly,
+                    cost: costItemOnlySafe,
                     blankPrice: blankSellPrice,
                     sellPrice: item.sell_price_item || 0,
                 });
@@ -2984,11 +2990,11 @@ const Calculator = {
                     type: 'item',
                     globalIdx,
                     isBlank: false,
-                    cost: costItemOnly,
-                    t50: calcTarget(costItemOnly, 0.50),
-                    t40: calcTarget(costItemOnly, 0.40),
-                    t30: calcTarget(costItemOnly, 0.30),
-                    t20: calcTarget(costItemOnly, 0.20),
+                    cost: costItemOnlySafe,
+                    t50: calcTarget(costItemOnlySafe, 0.50),
+                    t40: calcTarget(costItemOnlySafe, 0.40),
+                    t30: calcTarget(costItemOnlySafe, 0.30),
+                    t20: calcTarget(costItemOnlySafe, 0.20),
                     sellPrice: item.sell_price_item || 0,
                 });
             }
@@ -3298,7 +3304,7 @@ const Calculator = {
             </div>`;
         }
 
-        contentEl.innerHTML = pricingHtml + invoiceHtml;
+        contentEl.innerHTML = `<div class="pricing-grid-scroll">${pricingHtml}</div>` + invoiceHtml;
     },
 
     // ==========================================
