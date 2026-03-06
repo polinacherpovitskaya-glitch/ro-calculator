@@ -924,6 +924,20 @@ table .text-center { text-align: center; }
     font-variant-numeric: tabular-nums;
 }
 
+/* Pricing grid: keep page width stable and scroll inside the block */
+#calc-pricing-content {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: visible;
+    -webkit-overflow-scrolling: touch;
+}
+
+#calc-pricing-content .pricing-grid {
+    width: max-content;
+    min-width: 100%;
+}
+
 /* =============================================
    RESPONSIVE
    ============================================= */
