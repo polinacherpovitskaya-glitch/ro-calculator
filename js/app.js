@@ -2908,6 +2908,56 @@ const Calculator = {
         }
     },
 
+    /**
+     * Blank base cost per unit (without printing and client delivery),
+     * aligned with "Бланки" calculation logic.
+     */
+    _calcBlankBaseCostFromTemplate(item, qty, params) {
+        if (!item || !item.template_id || !qty || qty <= 0) return 0;
+        const tpl = (App.templates || []).find(t => t.id == item.template_id);
+        if (!tpl) return 0;
+
+        const pph = Number(tpl.pieces_per_hour_avg || tpl.pieces_per_hour_min || item.pieces_per_hour || 0);
+        const weight = Number(tpl.weight_grams || item.weight_grams || 0);
+        if (!pph || pph <= 0) return 0;
+
+        const calcItem = {
+            quantity: qty,
+            pieces_per_hour: pph,
+            weight_grams: weight,
+            extra_molds: 0,
+            complex_design: false,
+            is_blank_mold: false,
+            is_nfc: false,
+            nfc_programming: false,
+            delivery_included: false,
+            printings: [],
+            builtin_hw_name: '',
+            builtin_hw_price: 0,
+            builtin_hw_delivery_total: 0,
+            builtin_hw_speed: 0,
+        };
+
+        const base = calculateItemCost(calcItem, params);
+        const moldCount = Number(tpl.mold_count || 1);
+        const singleMoldCost = Number(tpl.cost_cny || 800) * Number(tpl.cny_rate || 12.5) + Number(tpl.delivery_cost || 8000);
+        const moldAmortPerUnit = (singleMoldCost * moldCount) / 4500;
+
+        let adjusted = Number(base.costTotal || 0) - Number(base.costMoldAmortization || 0) + moldAmortPerUnit;
+
+        if (tpl.hw_name && Number(tpl.hw_price_per_unit || 0) > 0) {
+            let hwCost = Number(tpl.hw_price_per_unit || 0) + (Number(tpl.hw_delivery_total || 0) > 0 ? Number(tpl.hw_delivery_total || 0) / qty : 0);
+            const hwSpeed = Number(tpl.hw_speed || 0);
+            if (hwSpeed > 0) {
+                const hwHours = qty / hwSpeed * (params.wasteFactor || 1.1);
+                hwCost += hwHours * params.fotPerHour / qty;
+            }
+            adjusted += hwCost;
+        }
+
+        return round2(Math.max(0, adjusted));
+    },
+
     // ==========================================
     // UNIFIED PRICING CARD
     // ==========================================
@@ -2953,11 +3003,11 @@ const Calculator = {
             // Item cost WITHOUT printing and WITHOUT per-item hw/pkg
             const costPrintingPart = item.result.costPrinting || 0;
             const costItemOnlyRaw = round2(item.result.costTotal - costPrintingPart);
-            // For blank molds, pricing table should match blanks directory base cost.
-            // Client delivery is shown separately in item cost breakdown and should not inflate blank base in pricing table.
-            const costItemOnly = item.is_blank_mold
-                ? round2(costItemOnlyRaw - (item.result.costDelivery || 0))
-                : costItemOnlyRaw;
+            // For blanks, use base себестоимость from the same model as "Бланки" page.
+            const blankBaseCost = item.is_blank_mold
+                ? this._calcBlankBaseCostFromTemplate(item, item.quantity || 0, params)
+                : 0;
+            const costItemOnly = item.is_blank_mold ? (blankBaseCost || costItemOnlyRaw) : costItemOnlyRaw;
             const costItemOnlySafe = Math.max(0, costItemOnly);
 
             if (item.is_blank_mold) {
