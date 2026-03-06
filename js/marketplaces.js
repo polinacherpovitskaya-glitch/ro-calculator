@@ -1,5 +1,5 @@
 // =============================================
-// Recycle Object — Маркетплейсы
+// Recycle Object — B2C продажи
 // Сборка наборов и расчёт цены продажи (1 шт)
 // =============================================
 
@@ -46,13 +46,14 @@ const Marketplaces = {
     renderStats() {
         const total = this.allSets.length;
         const costs = this.allSets.map(s => s.total_cost || 0).filter(c => c > 0);
-        const prices = this.allSets.map(s => s.selling_price || 0).filter(p => p > 0);
-        const margins = this.allSets.map(s => s.actual_margin || 0).filter(m => m > 0);
+        const prices = this.allSets.map(s => (s.mp_actual_price || s.selling_price || 0)).filter(p => p > 0);
+        const shopPrices = this.allSets.map(s => (s.shop_actual_price || s.shop_suggested_price || 0)).filter(p => p > 0);
 
         document.getElementById('mp-total-sets').textContent = total;
         document.getElementById('mp-avg-cost').textContent = costs.length ? formatRub(round2(costs.reduce((a,b) => a+b, 0) / costs.length)) : '0 ₽';
         document.getElementById('mp-avg-price').textContent = prices.length ? formatRub(round2(prices.reduce((a,b) => a+b, 0) / prices.length)) : '0 ₽';
-        document.getElementById('mp-avg-margin').textContent = margins.length ? Math.round(margins.reduce((a,b) => a+b, 0) / margins.length) + '%' : '0%';
+        const shopEl = document.getElementById('mp-avg-shop-price');
+        if (shopEl) shopEl.textContent = shopPrices.length ? formatRub(round2(shopPrices.reduce((a,b) => a+b, 0) / shopPrices.length)) : '0 ₽';
     },
 
     // ==========================================
@@ -70,7 +71,10 @@ const Marketplaces = {
         this.allSets.forEach(s => {
             const bd = this._calcSetBreakdown(s);
             const cost = bd.totalCost;
-            const price = s.selling_price || 0;
+            const mpPrice = s.mp_actual_price || s.selling_price || 0;
+            const shopPrice = s.shop_actual_price || s.shop_suggested_price || 0;
+            const mpMargin = parseFloat(s.mp_margin_actual) || 0;
+            const shopMargin = parseFloat(s.shop_margin_actual) || 0;
 
             // Composition
             const parts = [];
@@ -102,11 +106,16 @@ const Marketplaces = {
                     </div>
                     ${breakdownParts.length > 0 ? `<div style="font-size:10px;color:var(--text-muted);margin-top:2px;line-height:1.4;">${breakdownParts.join(' · ')}</div>` : ''}
                 </div>
-                <div style="text-align:right;flex-shrink:0;">
-                    <div style="font-size:24px;font-weight:800;color:var(--green);line-height:1;">${formatRub(price)}</div>
-                    <div style="font-size:10px;color:var(--text-muted);margin-top:3px;">цена МП</div>
+                <div style="text-align:right;flex-shrink:0;min-width:170px;">
+                    <div style="font-size:11px;color:var(--text-muted);">Маркетплейс</div>
+                    <div style="font-size:22px;font-weight:800;color:var(--green);line-height:1.1;">${formatRub(mpPrice)}</div>
+                    <div style="font-size:10px;color:${mpMargin >= 40 ? 'var(--green)' : mpMargin >= 20 ? 'var(--yellow)' : 'var(--red)'};margin-top:2px;">чистая маржа ${Math.round(mpMargin)}%</div>
+                    <div style="font-size:11px;color:var(--text-muted);margin-top:6px;">Интернет-магазин</div>
+                    <div style="font-size:20px;font-weight:800;color:var(--accent);line-height:1.1;">${formatRub(shopPrice)}</div>
+                    <div style="font-size:10px;color:${shopMargin >= 40 ? 'var(--green)' : shopMargin >= 20 ? 'var(--yellow)' : 'var(--red)'};margin-top:2px;">чистая маржа ${Math.round(shopMargin)}%</div>
                 </div>
                 <div style="flex-shrink:0;display:flex;flex-direction:column;gap:4px;">
+                    <button class="btn btn-sm btn-primary" style="padding:4px 8px;font-size:11px;" onclick="Marketplaces.createProductionOrder(${s.id})">В производство</button>
                     <button class="btn btn-sm btn-outline" style="padding:4px 8px;font-size:11px;" onclick="Marketplaces.editSet(${s.id})">&#9998;</button>
                     <button class="btn-remove" style="font-size:10px;width:26px;height:26px;" onclick="Marketplaces.confirmDelete(${s.id}, '${this._esc(s.name)}')">&#10005;</button>
                 </div>
@@ -129,7 +138,11 @@ const Marketplaces = {
         document.getElementById('mp-set-vat').value = 5;
         document.getElementById('mp-set-osn').value = 6;
         document.getElementById('mp-set-commercial').value = 6.5;
+        document.getElementById('mp-set-acquiring').value = 4;
+        document.getElementById('mp-set-shop-multiplier').value = 3;
         document.getElementById('mp-set-margin').value = 40;
+        document.getElementById('mp-set-price-manual').value = '';
+        document.getElementById('mp-set-shop-price-manual').value = '';
         this._plasticItems = [];
         this._hwItems = [];
         this._pkgItems = [];
@@ -153,7 +166,11 @@ const Marketplaces = {
         document.getElementById('mp-set-vat').value = s.vat || 5;
         document.getElementById('mp-set-osn').value = s.osn || 6;
         document.getElementById('mp-set-commercial').value = s.commercial || 6.5;
+        document.getElementById('mp-set-acquiring').value = s.acquiring || 4;
+        document.getElementById('mp-set-shop-multiplier').value = s.shop_multiplier || 3;
         document.getElementById('mp-set-margin').value = s.target_margin || 40;
+        document.getElementById('mp-set-price-manual').value = s.mp_actual_price || s.selling_price || '';
+        document.getElementById('mp-set-shop-price-manual').value = s.shop_actual_price || s.shop_suggested_price || '';
         this._plasticItems = (s.plastic_items || []).map(i => ({ ...i }));
         this._hwItems = (s.hw_items || []).map(i => ({ ...i }));
         this._pkgItems = (s.pkg_items || []).map(i => ({ ...i }));
@@ -220,7 +237,7 @@ const Marketplaces = {
     // ==========================================
 
     addPlasticItem() {
-        this._plasticItems.push({ blank_id: null, qty: 1, name: '', cost: 0 });
+        this._plasticItems.push({ blank_id: null, qty: 1, name: '', cost: 0, color_notes: '' });
         this.renderFormItems();
     },
 
@@ -321,6 +338,10 @@ const Marketplaces = {
             <div class="form-row" style="margin-bottom:4px;align-items:end;gap:6px;">
                 <div class="form-group" style="flex:2;margin:0">
                     ${this._renderSearchableSelect('mp-pl-'+i, plasticList, item.blank_id, 'Поиск бланка...', 'Marketplaces._selectPlastic('+i+',')}
+                </div>
+                <div class="form-group" style="flex:1.3;margin:0">
+                    <input type="text" value="${this._esc(item.color_notes || '')}" placeholder="Цвет/микс (напр. белый+синий)"
+                        oninput="Marketplaces._plasticItems[${i}].color_notes=this.value">
                 </div>
                 <div class="form-group" style="flex:0 0 55px;margin:0">
                     <input type="number" min="1" value="${item.qty || 1}" oninput="Marketplaces._onQtyChange('plastic',${i},this.value)" style="text-align:center;" title="Кол-во">
@@ -604,6 +625,8 @@ const Marketplaces = {
         const vatPct = parseFloat(document.getElementById('mp-set-vat')?.value) || 5;
         const osnPct = parseFloat(document.getElementById('mp-set-osn')?.value) || 6;
         const commercialPct = parseFloat(document.getElementById('mp-set-commercial')?.value) || 6.5;
+        const acquiringPct = parseFloat(document.getElementById('mp-set-acquiring')?.value) || 4;
+        const shopMultiplier = parseFloat(document.getElementById('mp-set-shop-multiplier')?.value) || 3;
         const targetMarginPct = parseFloat(document.getElementById('mp-set-margin')?.value) || 40;
 
         const params = App.params || {};
@@ -630,23 +653,46 @@ const Marketplaces = {
 
         totalCost = round2(totalCost);
 
-        // Selling price: cost / ((1-mp) * (1-vat) * (1-osn) * (1-comm) * (1-margin))
-        const keepFactor = (1 - commissionPct/100) * (1 - vatPct/100) * (1 - osnPct/100) * (1 - commercialPct/100) * (1 - targetMarginPct/100);
-        const sellingPrice = keepFactor > 0 ? Math.ceil(totalCost / keepFactor) : 0;
+        // MP suggested price by target net margin.
+        const keepFactorMp = (1 - commissionPct/100) * (1 - vatPct/100) * (1 - osnPct/100) * (1 - commercialPct/100) * (1 - targetMarginPct/100);
+        const suggestedMpPrice = keepFactorMp > 0 ? Math.ceil(totalCost / keepFactorMp) : 0;
+        const suggestedShopPrice = totalCost > 0 ? Math.round(totalCost * Math.max(shopMultiplier, 0)) : 0;
 
         // Show result
         const resultBlock = document.getElementById('mp-result-block');
         if (totalCost > 0) {
             resultBlock.style.display = '';
             document.getElementById('mp-calc-cost').textContent = formatRub(totalCost);
-            document.getElementById('mp-calc-price').textContent = formatRub(sellingPrice);
+            document.getElementById('mp-calc-price').textContent = formatRub(suggestedMpPrice);
+            document.getElementById('mp-calc-shop-price').textContent = formatRub(suggestedShopPrice);
 
-            const afterCommission = round2(sellingPrice * (1 - commissionPct/100));
-            const afterVat = round2(afterCommission * (1 - vatPct/100));
-            const afterOsn = round2(afterVat * (1 - osnPct/100));
-            const afterCommercial = round2(afterOsn * (1 - commercialPct/100));
-            const profit = round2(afterCommercial - totalCost);
-            const profitPct = afterCommercial > 0 ? Math.round(profit / afterCommercial * 100) : 0;
+            const mpManualEl = document.getElementById('mp-set-price-manual');
+            const shopManualEl = document.getElementById('mp-set-shop-price-manual');
+            if (mpManualEl && !mpManualEl.matches(':focus') && !mpManualEl.value) mpManualEl.value = String(suggestedMpPrice);
+            if (shopManualEl && !shopManualEl.matches(':focus') && !shopManualEl.value) shopManualEl.value = String(suggestedShopPrice);
+
+            const mpActualPrice = parseFloat(mpManualEl?.value) || suggestedMpPrice || 0;
+            const shopActualPrice = parseFloat(shopManualEl?.value) || suggestedShopPrice || 0;
+
+            const mpNetFactor = (1 - commissionPct/100) * (1 - vatPct/100) * (1 - osnPct/100) * (1 - commercialPct/100);
+            const mpNet = round2(mpActualPrice * Math.max(mpNetFactor, 0));
+            const mpProfit = round2(mpNet - totalCost);
+            const mpMargin = mpNet > 0 ? round2(mpProfit * 100 / mpNet) : 0;
+
+            const shopNetFactor = (1 - vatPct/100) * (1 - osnPct/100) * (1 - commercialPct/100) * (1 - acquiringPct/100);
+            const shopNet = round2(shopActualPrice * Math.max(shopNetFactor, 0));
+            const shopProfit = round2(shopNet - totalCost);
+            const shopMargin = shopNet > 0 ? round2(shopProfit * 100 / shopNet) : 0;
+
+            const mpMarginEl = document.getElementById('mp-calc-manual-margin');
+            const shopMarginEl = document.getElementById('mp-calc-shop-margin');
+            const marginColor = (m) => m >= 40 ? 'var(--green)' : m >= 20 ? 'var(--yellow)' : 'var(--red)';
+            if (mpMarginEl) {
+                mpMarginEl.innerHTML = `Чистыми: <b style="color:${mpProfit >= 0 ? 'var(--green)' : 'var(--red)'}">${formatRub(mpProfit)}</b> · Маржа <b style="color:${marginColor(mpMargin)}">${mpMargin}%</b>`;
+            }
+            if (shopMarginEl) {
+                shopMarginEl.innerHTML = `Чистыми: <b style="color:${shopProfit >= 0 ? 'var(--green)' : 'var(--red)'}">${formatRub(shopProfit)}</b> · Маржа <b style="color:${marginColor(shopMargin)}">${shopMargin}%</b>`;
+            }
 
             const bd = this._calcSetBreakdown({
                 plastic_items: this._plasticItems,
@@ -664,18 +710,24 @@ const Marketplaces = {
 
             document.getElementById('mp-calc-details').innerHTML = `
                 ${stageParts.length ? `<div style="margin-bottom:6px;line-height:1.5;">${stageParts.join('<br>')}</div>` : ''}
-                ${formatRub(sellingPrice)}
-                → −МП ${commissionPct}%: ${formatRub(afterCommission)}
-                → −НДС ${vatPct}%: ${formatRub(afterVat)}
-                → −ОСН ${osnPct}%: ${formatRub(afterOsn)}
-                → −коммерч. ${commercialPct}%: ${formatRub(afterCommercial)}
-                → −себес: <strong style="color:${profit >= 0 ? 'var(--green)' : 'var(--red)'}">чистыми ${formatRub(profit)} (${profitPct}%)</strong>
+                МП (факт ${formatRub(mpActualPrice)}): −комиссия ${commissionPct}% · −НДС ${vatPct}% · −ОСН ${osnPct}% · −коммерч. ${commercialPct}% → чистый вход ${formatRub(mpNet)}<br>
+                ИМ (факт ${formatRub(shopActualPrice)}): −НДС ${vatPct}% · −ОСН ${osnPct}% · −коммерч. ${commercialPct}% · −эквайринг ${acquiringPct}% → чистый вход ${formatRub(shopNet)}
             `;
+
+            this._lastCalc = {
+                totalCost,
+                suggestedMpPrice,
+                suggestedShopPrice,
+                mpActualPrice,
+                shopActualPrice,
+                mpMargin,
+                shopMargin,
+                actualMargin: mpMargin,
+            };
         } else {
             resultBlock.style.display = 'none';
+            this._lastCalc = { totalCost: 0, suggestedMpPrice: 0, suggestedShopPrice: 0, mpActualPrice: 0, shopActualPrice: 0, mpMargin: 0, shopMargin: 0, actualMargin: 0 };
         }
-
-        this._lastCalc = { totalCost, sellingPrice, actualMargin: targetMarginPct };
     },
 
     // ==========================================
@@ -696,12 +748,20 @@ const Marketplaces = {
             vat: parseFloat(document.getElementById('mp-set-vat').value) || 5,
             osn: parseFloat(document.getElementById('mp-set-osn').value) || 6,
             commercial: parseFloat(document.getElementById('mp-set-commercial').value) || 6.5,
+            acquiring: parseFloat(document.getElementById('mp-set-acquiring').value) || 4,
+            shop_multiplier: parseFloat(document.getElementById('mp-set-shop-multiplier').value) || 3,
             target_margin: parseFloat(document.getElementById('mp-set-margin').value) || 40,
             plastic_items: this._plasticItems.filter(i => i.blank_id),
             hw_items: this._hwItems.filter(i => i.blank_id || i.wh_id || (i.source === 'custom' && i.name)),
             pkg_items: this._pkgItems.filter(i => i.blank_id || i.wh_id || (i.source === 'custom' && i.name)),
             total_cost: this._lastCalc?.totalCost || 0,
-            selling_price: this._lastCalc?.sellingPrice || 0,
+            selling_price: this._lastCalc?.mpActualPrice || this._lastCalc?.suggestedMpPrice || 0,
+            mp_suggested_price: this._lastCalc?.suggestedMpPrice || 0,
+            mp_actual_price: this._lastCalc?.mpActualPrice || 0,
+            shop_suggested_price: this._lastCalc?.suggestedShopPrice || 0,
+            shop_actual_price: this._lastCalc?.shopActualPrice || 0,
+            mp_margin_actual: this._lastCalc?.mpMargin || 0,
+            shop_margin_actual: this._lastCalc?.shopMargin || 0,
             actual_margin: this._lastCalc?.actualMargin || 0,
         };
 
@@ -727,6 +787,261 @@ const Marketplaces = {
             App.toast('Удалён');
             await this.load();
         }
+    },
+
+    async createProductionOrderFromForm() {
+        const tempSet = {
+            id: this.editingSetId || undefined,
+            name: (document.getElementById('mp-set-name')?.value || '').trim(),
+            plastic_items: (this._plasticItems || []).filter(i => i.blank_id),
+            hw_items: (this._hwItems || []).filter(i => i.blank_id || i.wh_id || (i.source === 'custom' && i.name)),
+            pkg_items: (this._pkgItems || []).filter(i => i.blank_id || i.wh_id || (i.source === 'custom' && i.name)),
+            total_cost: this._lastCalc?.totalCost || 0,
+            mp_actual_price: this._lastCalc?.mpActualPrice || 0,
+        };
+        if (!tempSet.name) {
+            App.toast('Сначала укажите название набора');
+            return;
+        }
+        await this._createProductionOrderFromSet(tempSet);
+    },
+
+    async createProductionOrder(setId) {
+        const s = this.allSets.find(x => Number(x.id) === Number(setId));
+        if (!s) {
+            App.toast('Набор не найден');
+            return;
+        }
+        await this._createProductionOrderFromSet(s);
+    },
+
+    _pphForMold(mold) {
+        const pMin = mold?.pph_min || 0;
+        const pMax = mold?.pph_max || 0;
+        const pAvg = (pMin > 0 && pMax > 0) ? Math.round((pMin + pMax) / 2) : (pMin || pMax || 0);
+        return mold?.pph_actual || pAvg || 1;
+    },
+
+    async _createProductionOrderFromSet(s) {
+        const setQtyRaw = prompt('Сколько наборов поставить в производство?', '50');
+        if (setQtyRaw === null) return;
+        const setQty = Math.max(1, parseInt(setQtyRaw, 10) || 0);
+        if (!setQty) {
+            App.toast('Некорректное количество');
+            return;
+        }
+        const orderNameRaw = prompt('Название заказа', `B2C ${s.name} · тираж ${setQty}`);
+        if (orderNameRaw === null) return;
+        const orderName = (orderNameRaw || '').trim();
+        if (!orderName) {
+            App.toast('Нужно название заказа');
+            return;
+        }
+
+        const nowIso = new Date().toISOString();
+        const today = nowIso.slice(0, 10);
+        const params = App.params || getProductionParams(App.settings || {});
+        const currentEmployee = App.getCurrentEmployeeName() || '';
+        const items = [];
+        let itemNumber = 1;
+        let totalRevenue = 0;
+        let totalCosts = 0;
+        let totalHoursPlastic = 0;
+        let totalHoursHardware = 0;
+        let totalHoursPackaging = 0;
+
+        // Plastic products
+        (s.plastic_items || []).forEach(pi => {
+            if (!pi.blank_id) return;
+            const mold = this._plasticBlanks.find(m => Number(m.id) === Number(pi.blank_id));
+            if (!mold) return;
+            const qty = setQty * (parseFloat(pi.qty) || 1);
+            const calcItem = {
+                quantity: qty,
+                pieces_per_hour: this._pphForMold(mold),
+                weight_grams: mold.weight_grams || 0,
+                extra_molds: 0,
+                complex_design: false,
+                is_blank_mold: true,
+                is_nfc: mold.category === 'nfc',
+                nfc_programming: mold.category === 'nfc',
+                delivery_included: false,
+                printings: [],
+            };
+            const r = calculateItemCost(calcItem, params);
+            const colorNotes = String(pi.color_notes || '').trim();
+            const productName = colorNotes ? `${mold.name} [цвет: ${colorNotes}]` : mold.name;
+            items.push({
+                item_number: itemNumber++,
+                item_type: 'product',
+                product_name: productName,
+                quantity: qty,
+                pieces_per_hour: calcItem.pieces_per_hour,
+                weight_grams: calcItem.weight_grams,
+                extra_molds: 0,
+                complex_design: false,
+                is_blank_mold: true,
+                is_nfc: calcItem.is_nfc,
+                nfc_programming: calcItem.nfc_programming,
+                delivery_included: false,
+                printings: JSON.stringify([]),
+                cost_fot: r.costFot,
+                cost_indirect: r.costIndirect,
+                cost_plastic: r.costPlastic,
+                cost_mold_amortization: r.costMoldAmortization,
+                cost_design: 0,
+                cost_cutting: r.costCutting,
+                cost_cutting_indirect: r.costCuttingIndirect,
+                cost_nfc_tag: r.costNfcTag,
+                cost_nfc_programming: r.costNfcProgramming,
+                cost_nfc_indirect: r.costNfcIndirect,
+                cost_printing: 0,
+                cost_delivery: 0,
+                cost_total: r.costTotal,
+                sell_price_item: 0,
+                sell_price_printing: 0,
+                target_price_item: 0,
+                hours_plastic: r.hoursPlastic,
+                hours_cutting: r.hoursCutting,
+                hours_nfc: r.hoursNfc,
+                template_id: mold.id,
+                color_id: null,
+                color_name: '',
+                colors: JSON.stringify([]),
+                color_solution_attachment: null,
+            });
+            totalCosts += r.costTotal * qty;
+            totalHoursPlastic += (r.hoursPlastic || 0) + (r.hoursCutting || 0) + (r.hoursNfc || 0);
+        });
+
+        // Hardware
+        (s.hw_items || []).forEach((hw, i) => {
+            const qty = setQty * (parseFloat(hw.qty) || 1);
+            if (qty <= 0) return;
+            const base = this._calcHwUnitComponents(hw, params);
+            const hwItem = {
+                name: hw.name || `Фурнитура ${i + 1}`,
+                qty,
+                assembly_speed: parseFloat(hw.assembly_speed) || 0,
+                price: base.materialCost,
+                delivery_price: 0,
+                delivery_total: 0,
+                sell_price: 0,
+            };
+            const res = calculateHardwareCost(hwItem, params);
+            items.push({
+                item_number: 100 + i,
+                item_type: 'hardware',
+                product_name: hwItem.name,
+                quantity: qty,
+                hardware_assembly_speed: hwItem.assembly_speed,
+                hardware_price_per_unit: hwItem.price,
+                hardware_delivery_per_unit: hwItem.delivery_price,
+                hardware_delivery_total: hwItem.delivery_total,
+                sell_price_hardware: 0,
+                target_price_hardware: 0,
+                cost_total: res.costPerUnit,
+                hours_hardware: res.hoursHardware,
+                hardware_source: hw.source === 'warehouse' ? 'warehouse' : 'custom',
+                custom_country: hw.custom_country || 'china',
+                hardware_warehouse_item_id: hw.source === 'warehouse' ? (hw.wh_id || null) : null,
+                hardware_warehouse_sku: hw.warehouse_sku || '',
+                hardware_parent_item_index: null,
+                hardware_from_template: false,
+            });
+            totalCosts += res.costPerUnit * qty;
+            totalHoursHardware += res.hoursHardware || 0;
+        });
+
+        // Packaging
+        (s.pkg_items || []).forEach((pkg, i) => {
+            const qty = setQty * (parseFloat(pkg.qty) || 1);
+            if (qty <= 0) return;
+            const base = this._calcPkgUnitComponents(pkg, params);
+            const pkgItem = {
+                name: pkg.name || `Упаковка ${i + 1}`,
+                qty,
+                assembly_speed: parseFloat(pkg.assembly_speed) || 0,
+                price: base.materialCost,
+                delivery_price: 0,
+                delivery_total: 0,
+                sell_price: 0,
+            };
+            const res = calculatePackagingCost(pkgItem, params);
+            items.push({
+                item_number: 200 + i,
+                item_type: 'packaging',
+                product_name: pkgItem.name,
+                quantity: qty,
+                packaging_assembly_speed: pkgItem.assembly_speed,
+                packaging_price_per_unit: pkgItem.price,
+                packaging_delivery_per_unit: pkgItem.delivery_price,
+                packaging_delivery_total: pkgItem.delivery_total,
+                sell_price_packaging: 0,
+                target_price_packaging: 0,
+                cost_total: res.costPerUnit,
+                hours_packaging: res.hoursPackaging,
+                packaging_source: pkg.source === 'warehouse' ? 'warehouse' : 'custom',
+                custom_country: pkg.custom_country || 'china',
+                packaging_warehouse_item_id: pkg.source === 'warehouse' ? (pkg.wh_id || null) : null,
+                packaging_warehouse_sku: pkg.warehouse_sku || '',
+                packaging_parent_item_index: null,
+            });
+            totalCosts += res.costPerUnit * qty;
+            totalHoursPackaging += res.hoursPackaging || 0;
+        });
+
+        totalCosts = round2(totalCosts);
+        totalRevenue = round2((parseFloat(s.mp_actual_price || s.selling_price || 0) || 0) * setQty);
+        const totalMargin = round2(totalRevenue - totalCosts);
+        const marginPercent = totalRevenue > 0 ? round2(totalMargin * 100 / totalRevenue) : 0;
+
+        const order = {
+            id: undefined,
+            order_name: orderName,
+            client_name: 'B2C',
+            manager_name: currentEmployee,
+            owner_name: currentEmployee,
+            status: 'production_casting',
+            deadline: today,
+            deadline_start: today,
+            deadline_end: null,
+            notes: `Автосоздано из B2C набора "${s.name}" · тираж ${setQty}`,
+            total_hours_plan: round2(totalHoursPlastic + totalHoursHardware + totalHoursPackaging),
+            production_hours_plastic: round2(totalHoursPlastic),
+            production_hours_packaging: round2(totalHoursPackaging),
+            production_hours_hardware: round2(totalHoursHardware),
+            total_revenue_plan: totalRevenue,
+            total_cost_plan: totalCosts,
+            total_margin_plan: totalMargin,
+            margin_percent_plan: marginPercent,
+            payment_status: 'not_paid',
+            items_snapshot: JSON.stringify({
+                source: 'b2c',
+                set_id: s.id || null,
+                set_name: s.name,
+                set_qty: setQty,
+            }),
+            hardware_snapshot: JSON.stringify(s.hw_items || []),
+            packaging_snapshot: JSON.stringify(s.pkg_items || []),
+        };
+
+        const savedOrderId = await saveOrder(order, items);
+        if (!savedOrderId) {
+            App.toast('Не удалось создать заказ');
+            return;
+        }
+        // Ensure stock deductions happen immediately (as requested: order starts in production).
+        try {
+            if (typeof Orders !== 'undefined' && Orders && typeof Orders._syncWarehouseByStatus === 'function') {
+                await Orders._syncWarehouseByStatus(savedOrderId, 'draft', 'production_casting', orderName, currentEmployee || 'B2C');
+            }
+        } catch (e) {
+            console.warn('B2C order stock sync warning:', e);
+        }
+
+        App.toast('Заказ в производство создан');
+        App.navigate('order-detail', true, savedOrderId);
     },
 
     // ==========================================

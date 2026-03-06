@@ -93,7 +93,7 @@
             </a>
             <a href="#marketplaces" data-page="marketplaces">
                 <span class="nav-icon">&#128722;</span>
-                <span>Маркетплейсы</span>
+                <span>B2C продажи</span>
             </a>
             <a href="#china" data-page="china">
                 <span class="nav-icon">&#127464;&#127475;</span>
@@ -1987,7 +1987,7 @@
         <!-- ========== MARKETPLACES ========== -->
         <div id="page-marketplaces" class="page">
             <div class="page-header">
-                <h1>&#128722; Маркетплейсы</h1>
+                <h1>&#128722; B2C продажи</h1>
                 <button class="btn btn-primary" onclick="Marketplaces.showSetForm()">+ Новый набор</button>
             </div>
 
@@ -2005,13 +2005,13 @@
                     <div class="stat-value" id="mp-avg-price">0 &#8381;</div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-label">Ср. маржа</div>
-                    <div class="stat-value" id="mp-avg-margin">0%</div>
+                    <div class="stat-label">Ср. цена интернет-магазин</div>
+                    <div class="stat-value" id="mp-avg-shop-price">0 &#8381;</div>
                 </div>
             </div>
 
             <div class="card" style="padding:12px 20px;margin-bottom:12px;">
-                <p class="text-muted" style="font-size:12px;margin:0;">Соберите набор (пластик + фурнитура + упаковка) → увидите цену продажи на маркетплейсе с учётом комиссии МП (46%), НДС (5%), ОСН (6%), коммерческих (6.5%) и целевой маржи (40%).</p>
+                <p class="text-muted" style="font-size:12px;margin:0;">База знаний B2C: соберите набор (пластик + фурнитура + упаковка), получите цену для маркетплейса (целевая чистая маржа 40%) и цену для интернет-магазина с учетом НДС, ОСН, коммерческого отдела и эквайринга.</p>
             </div>
 
             <!-- Sets list -->
@@ -2040,6 +2040,8 @@
                     <div class="form-group"><label>НДС (%)</label><input type="number" min="0" max="100" step="0.1" id="mp-set-vat" value="5" oninput="Marketplaces.recalcSet()"></div>
                     <div class="form-group"><label>ОСН (%)</label><input type="number" min="0" max="100" step="0.1" id="mp-set-osn" value="6" oninput="Marketplaces.recalcSet()"></div>
                     <div class="form-group"><label>Коммерч. (%)</label><input type="number" min="0" max="100" step="0.1" id="mp-set-commercial" value="6.5" oninput="Marketplaces.recalcSet()"></div>
+                    <div class="form-group"><label>Эквайринг ИМ (%)</label><input type="number" min="0" max="100" step="0.1" id="mp-set-acquiring" value="4" oninput="Marketplaces.recalcSet()"></div>
+                    <div class="form-group"><label>Множитель ИМ (x)</label><input type="number" min="0.1" step="0.1" id="mp-set-shop-multiplier" value="3" oninput="Marketplaces.recalcSet()"></div>
                     <div class="form-group"><label>Целевая маржа (%)</label><input type="number" min="0" max="100" step="1" id="mp-set-margin" value="40" oninput="Marketplaces.recalcSet()"></div>
                 </div>
 
@@ -2068,9 +2070,23 @@
                         <div style="text-align:center;">
                             <div style="font-size:12px;color:var(--text-muted);">&#10132;</div>
                         </div>
-                        <div style="text-align:right;">
-                            <div style="font-size:12px;color:var(--green);font-weight:600;">Цена на маркетплейсе</div>
-                            <div style="font-size:28px;font-weight:800;color:var(--green);" id="mp-calc-price">0 &#8381;</div>
+                        <div style="display:flex;gap:14px;flex-wrap:wrap;">
+                            <div style="min-width:250px;padding:10px;border:1px solid var(--border);border-radius:10px;background:#fff;">
+                                <div style="font-size:12px;color:var(--green);font-weight:700;margin-bottom:4px;">Маркетплейс</div>
+                                <div style="font-size:11px;color:var(--text-muted);">Рекомендовано</div>
+                                <div style="font-size:24px;font-weight:800;color:var(--green);" id="mp-calc-price">0 &#8381;</div>
+                                <div style="margin-top:6px;font-size:11px;color:var(--text-muted);">Фактическая цена продажи</div>
+                                <input type="number" id="mp-set-price-manual" min="0" step="1" oninput="Marketplaces.recalcSet()" style="width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:6px;">
+                                <div id="mp-calc-manual-margin" style="margin-top:6px;font-size:11px;"></div>
+                            </div>
+                            <div style="min-width:250px;padding:10px;border:1px solid var(--border);border-radius:10px;background:#fff;">
+                                <div style="font-size:12px;color:var(--accent);font-weight:700;margin-bottom:4px;">Интернет-магазин</div>
+                                <div style="font-size:11px;color:var(--text-muted);">Рекомендовано (x-множитель)</div>
+                                <div style="font-size:24px;font-weight:800;color:var(--accent);" id="mp-calc-shop-price">0 &#8381;</div>
+                                <div style="margin-top:6px;font-size:11px;color:var(--text-muted);">Фактическая цена продажи</div>
+                                <input type="number" id="mp-set-shop-price-manual" min="0" step="1" oninput="Marketplaces.recalcSet()" style="width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:6px;">
+                                <div id="mp-calc-shop-margin" style="margin-top:6px;font-size:11px;"></div>
+                            </div>
                         </div>
                     </div>
                     <div id="mp-calc-details" style="margin-top:8px;font-size:11px;color:var(--text-muted);"></div>
@@ -2078,6 +2094,7 @@
 
                 <div style="margin-top:12px;display:flex;gap:8px;">
                     <button class="btn btn-success" onclick="Marketplaces.saveSet()">Сохранить набор</button>
+                    <button class="btn btn-primary" onclick="Marketplaces.createProductionOrderFromForm()">Сформировать заказ в производство</button>
                     <button class="btn btn-outline" onclick="Marketplaces.hideSetForm()">Отмена</button>
                     <button class="btn btn-danger" id="mp-delete-btn" style="margin-left:auto;display:none;" onclick="Marketplaces.deleteSet()">Удалить</button>
                 </div>
@@ -2940,7 +2957,7 @@
 <script src="js/china.js?v=46g"></script>
 <script src="js/warehouse_photos.js?v=46g"></script>
 <script src="js/china_catalog.js?v=46k"></script>
-<script src="js/marketplaces.js?v=67"></script>
+<script src="js/marketplaces.js?v=68"></script>
 <script src="js/warehouse.js?v=56"></script>
 <script src="js/settings.js?v=58"></script>
 </body>
