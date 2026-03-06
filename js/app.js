@@ -4352,13 +4352,15 @@ const Calculator = {
         this.items.forEach(item => {
             if (!item.result || !item.quantity) return;
             // Item (without printing)
-            kpItems.push({
-                type: 'product',
-                name: item.product_name || 'Изделие',
-                qty: item.quantity,
-                price: item.sell_price_item,
-                colors: (item.colors || []).map(c => c.name).filter(Boolean),
-            });
+            if ((item.sell_price_item || 0) > 0) {
+                kpItems.push({
+                    type: 'product',
+                    name: item.product_name || 'Изделие',
+                    qty: item.quantity,
+                    price: item.sell_price_item,
+                    colors: (item.colors || []).map(c => c.name).filter(Boolean),
+                });
+            }
             // Printing (separate line per printing)
             (item.printings || []).forEach((pr, pi) => {
                 if (pr.sell_price > 0) {
@@ -4384,7 +4386,7 @@ const Calculator = {
         // Only order-level hw/pkg as separate KP lines (per-item included in item price)
         this.hardwareItems.forEach(hw => {
             if (hw.parent_item_index !== null) return;  // per-item — included in item price
-            if (hw.qty > 0) {
+            if (hw.qty > 0 && (hw.sell_price || 0) > 0) {
                 kpItems.push({
                     type: 'hardware',
                     name: hw.name || 'Фурнитура',
@@ -4396,7 +4398,7 @@ const Calculator = {
 
         this.packagingItems.forEach(pkg => {
             if (pkg.parent_item_index !== null) return;  // per-item — included in item price
-            if (pkg.qty > 0) {
+            if (pkg.qty > 0 && (pkg.sell_price || 0) > 0) {
                 kpItems.push({
                     type: 'packaging',
                     name: pkg.name || 'Упаковка',
