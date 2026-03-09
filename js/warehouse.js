@@ -242,6 +242,25 @@ const Warehouse = {
             this.allItems = await loadWarehouseItems();
         }
 
+        // ONE-TIME MIGRATION: clear all wrongly-mapped photos so they get re-patched correctly.
+        // Previous mapping used array-index (SEED_DATA[i] → SEED_PHOTOS[i]) which was wrong
+        // because SEED_DATA order differs from the spreadsheet photo order.
+        if (!localStorage.getItem('wh_photo_fix_v2')) {
+            let cleared = 0;
+            this.allItems.forEach(item => {
+                if (item.photo_thumbnail) {
+                    item.photo_thumbnail = '';
+                    item.photo_url = '';
+                    cleared++;
+                }
+            });
+            if (cleared > 0) {
+                await saveWarehouseItems(this.allItems);
+                console.log(`[Warehouse] Cleared ${cleared} wrongly-mapped photos (one-time fix)`);
+            }
+            localStorage.setItem('wh_photo_fix_v2', '1');
+        }
+
         // Safe migration: patch photos only from explicit SKU->photo map.
         // Never patch by array index (it breaks when seed order changes).
         const seedPhotoMap = this._getSeedPhotoMapBySku();
@@ -312,7 +331,7 @@ const Warehouse = {
             color: raw.color || '',
             unit: raw.unit || 'шт',
             photo_url: '',
-            photo_thumbnail: (typeof WAREHOUSE_SEED_PHOTOS !== 'undefined' && WAREHOUSE_SEED_PHOTOS[i]) || '',
+            photo_thumbnail: (typeof WAREHOUSE_SEED_PHOTOS_BY_SKU !== 'undefined' && WAREHOUSE_SEED_PHOTOS_BY_SKU[raw.sku]) || '',
             qty: raw.qty || 0,
             min_qty: 10,
             price_per_unit: 0,
