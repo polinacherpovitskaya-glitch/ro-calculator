@@ -316,6 +316,8 @@ const ProductionPlan = {
             colorLines,
             colorsPlain: colorLines.map(cl => cl.text).join(' · '),
             productsBySet: Object.fromEntries(productsBySet),
+            hwItemsRaw: hwItems,
+            pkgItemsRaw: pkgItems,
             hwBySet: Object.fromEntries(hwBySet),
             pkgBySet: Object.fromEntries(pkgBySet),
             attachments,
@@ -500,7 +502,12 @@ const ProductionPlan = {
             try { colors = JSON.parse(colors); } catch (e) { colors = []; }
         }
         if (!Array.isArray(colors)) colors = [];
-        const names = colors.map(c => (typeof c === 'string' ? c : c?.name)).filter(Boolean);
+        const names = colors.map(c => {
+            if (typeof c === 'string') return c;
+            const num = c?.number || '';
+            const name = c?.name || '';
+            return num ? `${num} ${name}`.trim() : name;
+        }).filter(Boolean);
         if (!names.length && item.color_name) names.push(item.color_name);
         return names;
     },
@@ -588,11 +595,19 @@ const ProductionPlan = {
             return keys.length > 0 && !(keys.length === 1 && keys[0] === '');
         };
 
-        const renderGrouped = (setObj, fallbackLines, label) => {
+        const renderItemLine = (i, label, skuField) => {
+            const name = i.product_name || label;
+            const qty = parseFloat(i.quantity) || 0;
+            const sku = i[skuField] || '';
+            const skuHtml = sku ? `<span style="color:#6b7280;font-size:11px;"> (${this.esc(sku)})</span>` : '';
+            return `<div class="pp-line-item" style="padding-left:8px;">${this.esc(name)}${skuHtml} &times; ${qty}</div>`;
+        };
+
+        const renderGrouped = (setObj, fallbackItems, label, skuField) => {
             if (hasSetGroups(setObj)) {
                 let html = '';
                 for (const [setName, items] of Object.entries(setObj)) {
-                    const itemsHtml = items.map(i => `<div class="pp-line-item" style="padding-left:8px;">${this.esc(i.product_name || label)} &times; ${parseFloat(i.quantity) || 0}</div>`).join('');
+                    const itemsHtml = items.map(i => renderItemLine(i, label, skuField)).join('');
                     if (setName && setName !== '') {
                         html += `<div style="font-size:11px;font-weight:600;color:#6b7280;margin-top:4px;">&#128230; ${this.esc(setName)}:</div>${itemsHtml}`;
                     } else {
@@ -601,13 +616,13 @@ const ProductionPlan = {
                 }
                 return html || '<div class="pp-sub">—</div>';
             }
-            return (fallbackLines || []).length
-                ? `<div class="pp-lines">${fallbackLines.map(x => `<div class="pp-line-item">${this.esc(x)}</div>`).join('')}</div>`
+            return (fallbackItems || []).length
+                ? `<div class="pp-lines">${fallbackItems.map(i => renderItemLine(i, label, skuField)).join('')}</div>`
                 : '<div class="pp-sub">—</div>';
         };
 
-        const hw = renderGrouped(hwBySet, row.hwLines, 'Фурнитура');
-        const pkg = renderGrouped(pkgBySet, row.pkgLines, 'Упаковка');
+        const hw = renderGrouped(hwBySet, row.hwItemsRaw, 'Фурнитура', 'hardware_warehouse_sku');
+        const pkg = renderGrouped(pkgBySet, row.pkgItemsRaw, 'Упаковка', 'packaging_warehouse_sku');
 
         return `<div class="pp-cell-block">
             <div class="pp-duo-block">
