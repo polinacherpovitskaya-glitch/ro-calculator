@@ -208,30 +208,144 @@ const OrderDetail = {
         const orderHardware = allHardware.filter(i => i.hardware_parent_item_index === null || i.hardware_parent_item_index === undefined);
         const orderPackaging = allPackaging.filter(i => i.packaging_parent_item_index === null || i.packaging_parent_item_index === undefined);
 
+        // Check if items have marketplace_set_name for grouping
+        const hasSetNames = [...products, ...orderHardware, ...orderPackaging].some(i => i.marketplace_set_name);
+
         let html = '';
 
-        if (products.length > 0) {
-            html += '<h3 style="margin:0 0 12px">Изделия</h3>';
+        if (hasSetNames) {
+            // Group all items by marketplace_set_name
+            const setGroups = new Map();
+            const noSetProducts = [];
             products.forEach((item, idx) => {
-                html += this._renderItemCard(item, 'product');
-                // Per-item hw/pkg grouped under this product
-                const itemHw = allHardware.filter(h => h.hardware_parent_item_index === idx);
-                const itemPkg = allPackaging.filter(p => p.packaging_parent_item_index === idx);
-                if (itemHw.length > 0 || itemPkg.length > 0) {
-                    html += '<div style="margin-left:16px;border-left:2px solid var(--border);padding-left:12px;margin-bottom:8px">';
-                    itemHw.forEach(h => { html += this._renderItemCard(h, 'hardware'); });
-                    itemPkg.forEach(p => { html += this._renderItemCard(p, 'packaging'); });
-                    html += '</div>';
+                const sn = item.marketplace_set_name || '';
+                if (sn) {
+                    if (!setGroups.has(sn)) setGroups.set(sn, { products: [], hw: [], pkg: [] });
+                    setGroups.get(sn).products.push({ item, idx });
+                } else {
+                    noSetProducts.push({ item, idx });
                 }
             });
-        }
-        if (orderHardware.length > 0) {
-            html += '<h3 style="margin:16px 0 12px">🔩 Общая фурнитура</h3>';
-            html += orderHardware.map(item => this._renderItemCard(item, 'hardware')).join('');
-        }
-        if (orderPackaging.length > 0) {
-            html += '<h3 style="margin:16px 0 12px">📦 Общая упаковка</h3>';
-            html += orderPackaging.map(item => this._renderItemCard(item, 'packaging')).join('');
+            orderHardware.forEach(item => {
+                const sn = item.marketplace_set_name || '';
+                if (sn) {
+                    if (!setGroups.has(sn)) setGroups.set(sn, { products: [], hw: [], pkg: [] });
+                    setGroups.get(sn).hw.push(item);
+                }
+            });
+            orderPackaging.forEach(item => {
+                const sn = item.marketplace_set_name || '';
+                if (sn) {
+                    if (!setGroups.has(sn)) setGroups.set(sn, { products: [], hw: [], pkg: [] });
+                    setGroups.get(sn).pkg.push(item);
+                }
+            });
+
+            // Render grouped by set
+            for (const [setName, group] of setGroups) {
+                const setQty = group.products.reduce((s, p) => s + (parseFloat(p.item.quantity) || 0), 0);
+                html += `<div style="margin-bottom:16px;border:1px solid var(--border);border-radius:10px;padding:12px;">`;
+                html += `<h3 style="margin:0 0 8px;display:flex;align-items:center;gap:6px;">&#128230; ${this._esc(setName)} <span class="text-muted" style="font-size:13px;font-weight:400;">(${setQty} шт)</span></h3>`;
+
+                if (group.products.length > 0) {
+                    html += '<div style="margin-bottom:6px;font-size:12px;font-weight:600;color:#6b7280;">Изделия:</div>';
+                    group.products.forEach(({ item, idx }) => {
+                        html += this._renderItemCard(item, 'product');
+                        const itemHw = allHardware.filter(h => h.hardware_parent_item_index === idx);
+                        const itemPkg = allPackaging.filter(p => p.packaging_parent_item_index === idx);
+                        if (itemHw.length > 0 || itemPkg.length > 0) {
+                            html += '<div style="margin-left:16px;border-left:2px solid var(--border);padding-left:12px;margin-bottom:8px">';
+                            itemHw.forEach(h => { html += this._renderItemCard(h, 'hardware'); });
+                            itemPkg.forEach(p => { html += this._renderItemCard(p, 'packaging'); });
+                            html += '</div>';
+                        }
+                    });
+                }
+                if (group.hw.length > 0) {
+                    html += '<div style="margin-top:8px;font-size:12px;font-weight:600;color:#6b7280;">&#128297; Фурнитура:</div>';
+                    group.hw.forEach(h => { html += this._renderItemCard(h, 'hardware'); });
+                }
+                if (group.pkg.length > 0) {
+                    html += '<div style="margin-top:8px;font-size:12px;font-weight:600;color:#6b7280;">&#128230; Упаковка:</div>';
+                    group.pkg.forEach(p => { html += this._renderItemCard(p, 'packaging'); });
+                }
+                html += '</div>';
+            }
+
+            // Products without set name
+            if (noSetProducts.length > 0) {
+                html += '<h3 style="margin:12px 0 12px">Прочие изделия</h3>';
+                noSetProducts.forEach(({ item, idx }) => {
+                    html += this._renderItemCard(item, 'product');
+                    const itemHw = allHardware.filter(h => h.hardware_parent_item_index === idx);
+                    const itemPkg = allPackaging.filter(p => p.packaging_parent_item_index === idx);
+                    if (itemHw.length > 0 || itemPkg.length > 0) {
+                        html += '<div style="margin-left:16px;border-left:2px solid var(--border);padding-left:12px;margin-bottom:8px">';
+                        itemHw.forEach(h => { html += this._renderItemCard(h, 'hardware'); });
+                        itemPkg.forEach(p => { html += this._renderItemCard(p, 'packaging'); });
+                        html += '</div>';
+                    }
+                });
+            }
+
+            // HW/PKG without set name
+            const noSetHw = orderHardware.filter(i => !i.marketplace_set_name);
+            const noSetPkg = orderPackaging.filter(i => !i.marketplace_set_name);
+            if (noSetHw.length > 0) {
+                html += '<h3 style="margin:16px 0 12px">&#128297; Общая фурнитура</h3>';
+                html += noSetHw.map(item => this._renderItemCard(item, 'hardware')).join('');
+            }
+            if (noSetPkg.length > 0) {
+                html += '<h3 style="margin:16px 0 12px">&#128230; Общая упаковка</h3>';
+                html += noSetPkg.map(item => this._renderItemCard(item, 'packaging')).join('');
+            }
+
+            // Blank summary
+            const blankMap = new Map();
+            products.forEach(item => {
+                const key = item.template_id || item.product_name || 'unknown';
+                const baseName = (item.product_name || '').replace(/\s*\[.*?\]/g, '').trim();
+                if (!blankMap.has(key)) blankMap.set(key, { name: baseName, totalQty: 0, colors: new Set() });
+                const entry = blankMap.get(key);
+                entry.totalQty += (parseFloat(item.quantity) || 0);
+                const colorName = item.color_name || '';
+                if (colorName) entry.colors.add(colorName);
+            });
+            if (blankMap.size > 1) {
+                html += `<div style="border-top:1px dashed var(--border);margin-top:12px;padding-top:12px;">
+                    <h3 style="margin:0 0 8px;">&#128203; Сводка бланков</h3>`;
+                for (const [, b] of blankMap) {
+                    const colorsStr = b.colors.size > 0 ? ` (${[...b.colors].join(', ')})` : '';
+                    html += `<div class="od-item-card" style="padding:8px 12px;">
+                        <strong>${this._esc(b.name)}</strong> — <span style="color:var(--accent);font-weight:600;">${b.totalQty} шт</span>${this._esc(colorsStr)}
+                    </div>`;
+                }
+                html += '</div>';
+            }
+        } else {
+            // Fallback: old display (no set grouping)
+            if (products.length > 0) {
+                html += '<h3 style="margin:0 0 12px">Изделия</h3>';
+                products.forEach((item, idx) => {
+                    html += this._renderItemCard(item, 'product');
+                    const itemHw = allHardware.filter(h => h.hardware_parent_item_index === idx);
+                    const itemPkg = allPackaging.filter(p => p.packaging_parent_item_index === idx);
+                    if (itemHw.length > 0 || itemPkg.length > 0) {
+                        html += '<div style="margin-left:16px;border-left:2px solid var(--border);padding-left:12px;margin-bottom:8px">';
+                        itemHw.forEach(h => { html += this._renderItemCard(h, 'hardware'); });
+                        itemPkg.forEach(p => { html += this._renderItemCard(p, 'packaging'); });
+                        html += '</div>';
+                    }
+                });
+            }
+            if (orderHardware.length > 0) {
+                html += '<h3 style="margin:16px 0 12px">&#128297; Общая фурнитура</h3>';
+                html += orderHardware.map(item => this._renderItemCard(item, 'hardware')).join('');
+            }
+            if (orderPackaging.length > 0) {
+                html += '<h3 style="margin:16px 0 12px">&#128230; Общая упаковка</h3>';
+                html += orderPackaging.map(item => this._renderItemCard(item, 'packaging')).join('');
+            }
         }
 
         if (!html) {

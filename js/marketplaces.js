@@ -1067,6 +1067,7 @@ const Marketplaces = {
                         color_name: colors[0]?.name || colorLabel || '',
                         colors: JSON.stringify(colors),
                         color_solution_attachment: null,
+                        marketplace_set_name: s.set_name || s.name || '',
                     });
                     totalCosts += r.costTotal * qty;
                     totalHoursPlastic += (r.hoursPlastic || 0) + (r.hoursCutting || 0) + (r.hoursNfc || 0);
@@ -1107,6 +1108,7 @@ const Marketplaces = {
                     hardware_warehouse_sku: hw.warehouse_sku || '',
                     hardware_parent_item_index: null,
                     hardware_from_template: false,
+                    marketplace_set_name: s.set_name || s.name || '',
                 });
                 totalCosts += res.costPerUnit * qty;
                 totalHoursHardware += res.hoursHardware || 0;
@@ -1145,6 +1147,7 @@ const Marketplaces = {
                     packaging_warehouse_item_id: pkg.source === 'warehouse' ? (pkg.wh_id || null) : null,
                     packaging_warehouse_sku: pkg.warehouse_sku || '',
                     packaging_parent_item_index: null,
+                    marketplace_set_name: s.set_name || s.name || '',
                 });
                 totalCosts += res.costPerUnit * qty;
                 totalHoursPackaging += res.hoursPackaging || 0;

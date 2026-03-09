@@ -244,13 +244,47 @@ const ProductionPlan = {
         const hasCustomMold = productItems.some(i => !i.is_blank_mold);
         productItems.forEach(item => {
             const colors = this._extractColorNames(item);
+            const qty = parseFloat(item.quantity) || 0;
             if (colors.length) {
-                colorLines.push(`${item.product_name || 'Изделие'}: ${colors.join(' + ')}`);
+                colorLines.push({ text: `${item.product_name || 'Изделие'}: ${colors.join(' + ')}`, qty, name: item.product_name || 'Изделие', colors });
+            } else {
+                colorLines.push({ text: item.product_name || 'Изделие', qty, name: item.product_name || 'Изделие', colors: [] });
             }
             const att = this._extractAttachment(item);
             if (att) attachments.push(att);
             const printings = this._extractPrintings(item);
             if (printings.length) printingLines.push(`${item.product_name || 'Изделие'}: ${printings.join(', ')}`);
+        });
+
+        // Blank summary: consolidate same blanks across variants
+        const blankMap = new Map();
+        productItems.forEach(item => {
+            const key = item.template_id || item.product_name || 'unknown';
+            const baseName = (item.product_name || '').replace(/\s*\[.*?\]/g, '').trim();
+            if (!blankMap.has(key)) blankMap.set(key, { name: baseName, totalQty: 0, colors: new Set() });
+            const entry = blankMap.get(key);
+            entry.totalQty += (parseFloat(item.quantity) || 0);
+            const colorNames = this._extractColorNames(item);
+            colorNames.forEach(c => entry.colors.add(c));
+        });
+        const blankSummary = [...blankMap.values()].map(b => ({
+            name: b.name,
+            qty: b.totalQty,
+            colors: [...b.colors],
+        }));
+
+        // HW/PKG grouped by marketplace set name
+        const hwBySet = new Map();
+        hwItems.forEach(item => {
+            const setName = item.marketplace_set_name || '';
+            if (!hwBySet.has(setName)) hwBySet.set(setName, []);
+            hwBySet.get(setName).push(item);
+        });
+        const pkgBySet = new Map();
+        pkgItems.forEach(item => {
+            const setName = item.marketplace_set_name || '';
+            if (!pkgBySet.has(setName)) pkgBySet.set(setName, []);
+            pkgBySet.get(setName).push(item);
         });
 
         const hwLines = hwItems.map(i => `${i.product_name || 'Фурнитура'} × ${(parseFloat(i.quantity) || 0)}`);
@@ -288,7 +322,10 @@ const ProductionPlan = {
             pkgPlain,
             hardwareReadyLabelHtml,
             colorLines,
-            colorsPlain: colorLines.join(' · '),
+            colorsPlain: colorLines.map(cl => cl.text).join(' · '),
+            blankSummary,
+            hwBySet: Object.fromEntries(hwBySet),
+            pkgBySet: Object.fromEntries(pkgBySet),
             attachments,
             hasCustomMold,
             startLabel,
@@ -502,9 +539,27 @@ const ProductionPlan = {
 
     _renderColorCell(row) {
         const hasColors = row.colorLines.length > 0;
+        // Each colorLine is now an object: { text, qty, name, colors }
         const lines = hasColors
-            ? `<div class="pp-lines">${row.colorLines.map(x => `<div class="pp-line-item pp-line-color">${this.esc(x)}</div>`).join('')}</div>`
+            ? `<div class="pp-lines">${row.colorLines.map(cl => {
+                const qtyLabel = cl.qty ? ` <strong style="color:var(--accent);">&times; ${cl.qty} шт</strong>` : '';
+                const colorStr = cl.colors.length ? `: ${cl.colors.join(' + ')}` : '';
+                const baseName = (cl.name || '').replace(/\s*\[.*?\]/g, '').trim();
+                return `<div class="pp-line-item pp-line-color">${this.esc(baseName)}${qtyLabel}${colorStr ? ' — ' + this.esc(cl.colors.join(' + ')) : ''}</div>`;
+            }).join('')}</div>`
             : '<div class="pp-sub">—</div>';
+
+        // Blank summary (consolidation)
+        let summaryHtml = '';
+        if (row.blankSummary && row.blankSummary.length > 1) {
+            summaryHtml = `<div style="border-top:1px dashed var(--border);margin-top:6px;padding-top:6px;">
+                <div style="font-size:11px;font-weight:600;color:#6b7280;margin-bottom:3px;">&#128203; Сводка бланков:</div>
+                ${row.blankSummary.map(b => {
+                    const colorsStr = b.colors.length ? ` (${b.colors.join(', ')})` : '';
+                    return `<div style="font-size:12px;padding:1px 0;"><strong>${this.esc(b.name)}</strong> — ${b.qty} шт${this.esc(colorsStr)}</div>`;
+                }).join('')}
+            </div>`;
+        }
 
         const imgs = row.attachments
             .filter(att => (att.type || '').startsWith('image/'))
@@ -517,20 +572,43 @@ const ProductionPlan = {
             .join('');
 
         return `<div class="pp-cell-block">
-            <div class="pp-block-title">Цвет</div>
+            <div class="pp-block-title">Детали</div>
             ${lines}
+            ${summaryHtml}
             ${imgs ? `<div class="pp-color-images">${imgs}</div>` : ''}
             ${nonImg ? `<div class="pp-files">${nonImg}</div>` : ''}
         </div>`;
     },
 
     _renderSupplyCell(row) {
-        const hw = (row.hwLines || []).length
-            ? `<div class="pp-lines">${row.hwLines.map(x => `<div class="pp-line-item">${this.esc(x)}</div>`).join('')}</div>`
-            : '<div class="pp-sub">—</div>';
-        const pkg = (row.pkgLines || []).length
-            ? `<div class="pp-lines">${row.pkgLines.map(x => `<div class="pp-line-item">${this.esc(x)}</div>`).join('')}</div>`
-            : '<div class="pp-sub">—</div>';
+        // Group hw/pkg by set if available
+        const hwBySet = row.hwBySet || {};
+        const pkgBySet = row.pkgBySet || {};
+        const hasSetGroups = (setObj) => {
+            const keys = Object.keys(setObj);
+            return keys.length > 0 && !(keys.length === 1 && keys[0] === '');
+        };
+
+        const renderGrouped = (setObj, fallbackLines, label) => {
+            if (hasSetGroups(setObj)) {
+                let html = '';
+                for (const [setName, items] of Object.entries(setObj)) {
+                    const itemsHtml = items.map(i => `<div class="pp-line-item" style="padding-left:8px;">${this.esc(i.product_name || label)} &times; ${parseFloat(i.quantity) || 0}</div>`).join('');
+                    if (setName && setName !== '') {
+                        html += `<div style="font-size:11px;font-weight:600;color:#6b7280;margin-top:4px;">&#128230; ${this.esc(setName)}:</div>${itemsHtml}`;
+                    } else {
+                        html += itemsHtml;
+                    }
+                }
+                return html || '<div class="pp-sub">—</div>';
+            }
+            return (fallbackLines || []).length
+                ? `<div class="pp-lines">${fallbackLines.map(x => `<div class="pp-line-item">${this.esc(x)}</div>`).join('')}</div>`
+                : '<div class="pp-sub">—</div>';
+        };
+
+        const hw = renderGrouped(hwBySet, row.hwLines, 'Фурнитура');
+        const pkg = renderGrouped(pkgBySet, row.pkgLines, 'Упаковка');
 
         return `<div class="pp-cell-block">
             <div class="pp-duo-block">
