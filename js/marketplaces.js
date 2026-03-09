@@ -918,7 +918,6 @@ const Marketplaces = {
         const selected = (this._productionSelection || []).filter(r => {
             if (!r.selected) return false;
             if (r.qty > 0) return true;
-            // Check variant quantities
             if (r.variantQtys && Object.values(r.variantQtys).some(q => q > 0)) return true;
             return false;
         });
@@ -926,14 +925,64 @@ const Marketplaces = {
             App.toast('Выберите хотя бы один набор и укажите тираж');
             return;
         }
-        const orderNameRaw = prompt('Название заказа', `B2C партия ${new Date().toLocaleDateString('ru-RU')}`);
-        if (orderNameRaw === null) return;
-        const orderName = (orderNameRaw || '').trim();
-        if (!orderName) {
-            App.toast('Нужно название заказа');
-            return;
-        }
-        await this._createProductionOrderFromSets(selected, orderName);
+
+        const result = await this._showCreateOrderDialog();
+        if (!result) return;
+        await this._createProductionOrderFromSets(selected, result.orderName, result.deadlineEnd);
+    },
+
+    _showCreateOrderDialog() {
+        return new Promise(resolve => {
+            const existing = document.getElementById('b2c-create-order-dialog');
+            if (existing) existing.remove();
+
+            const defaultName = `B2C партия ${new Date().toLocaleDateString('ru-RU')}`;
+            const overlay = document.createElement('div');
+            overlay.id = 'b2c-create-order-dialog';
+            overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.35);z-index:1000;display:flex;align-items:center;justify-content:center;';
+            overlay.onclick = (e) => { if (e.target === overlay) { overlay.remove(); resolve(null); } };
+
+            overlay.innerHTML = `
+                <div style="background:var(--card-bg,#fff);border-radius:12px;padding:24px;width:400px;max-width:90vw;box-shadow:0 8px 32px rgba(0,0,0,.2);">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+                        <h3 style="margin:0;font-size:16px;">Создание заказа</h3>
+                        <button id="b2c-dialog-close" class="btn-remove" style="font-size:10px;width:24px;height:24px;">✕</button>
+                    </div>
+                    <div style="margin-bottom:12px;">
+                        <label style="display:block;font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:4px;">Название заказа</label>
+                        <input id="b2c-dialog-name" type="text" class="calc-input" value="${defaultName}" style="width:100%;font-size:14px;padding:8px 10px;">
+                    </div>
+                    <div style="margin-bottom:16px;">
+                        <label style="display:block;font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:4px;">Дедлайн (дата окончания)</label>
+                        <input id="b2c-dialog-deadline" type="date" class="calc-input" style="width:100%;font-size:14px;padding:8px 10px;">
+                        <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">Когда заказ должен быть готов</div>
+                    </div>
+                    <div style="display:flex;gap:8px;justify-content:flex-end;">
+                        <button id="b2c-dialog-cancel" class="btn btn-outline">Отмена</button>
+                        <button id="b2c-dialog-ok" class="btn btn-primary">Создать заказ</button>
+                    </div>
+                </div>`;
+
+            document.body.appendChild(overlay);
+
+            const nameInput = document.getElementById('b2c-dialog-name');
+            const deadlineInput = document.getElementById('b2c-dialog-deadline');
+            nameInput.focus();
+            nameInput.select();
+
+            const submit = () => {
+                const name = (nameInput.value || '').trim();
+                if (!name) { App.toast('Нужно название заказа'); nameInput.focus(); return; }
+                const deadlineEnd = deadlineInput.value || null;
+                overlay.remove();
+                resolve({ orderName: name, deadlineEnd });
+            };
+
+            document.getElementById('b2c-dialog-ok').onclick = submit;
+            document.getElementById('b2c-dialog-cancel').onclick = () => { overlay.remove(); resolve(null); };
+            document.getElementById('b2c-dialog-close').onclick = () => { overlay.remove(); resolve(null); };
+            nameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+        });
     },
 
     _pphForMold(mold) {
@@ -943,7 +992,7 @@ const Marketplaces = {
         return mold?.pph_actual || pAvg || 1;
     },
 
-    async _createProductionOrderFromSets(selectedRows, orderName) {
+    async _createProductionOrderFromSets(selectedRows, orderName, deadlineEnd) {
         const selectedSets = selectedRows.map(r => {
             const set = this.allSets.find(s => Number(s.id) === Number(r.id));
             if (!set) return null;
@@ -1169,9 +1218,9 @@ const Marketplaces = {
             manager_name: currentEmployee,
             owner_name: currentEmployee,
             status: 'production_casting',
-            deadline: today,
+            deadline: deadlineEnd || today,
             deadline_start: today,
-            deadline_end: null,
+            deadline_end: deadlineEnd || null,
             notes: `Автосоздано из B2C: ${notesParts.join('; ')}`,
             total_hours_plan: round2(totalHoursPlastic + totalHoursHardware + totalHoursPackaging),
             production_hours_plastic: round2(totalHoursPlastic),
