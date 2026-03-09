@@ -245,10 +245,11 @@ const ProductionPlan = {
         productItems.forEach(item => {
             const colors = this._extractColorNames(item);
             const qty = parseFloat(item.quantity) || 0;
+            const setName = item.marketplace_set_name || '';
             if (colors.length) {
-                colorLines.push({ text: `${item.product_name || 'Изделие'}: ${colors.join(' + ')}`, qty, name: item.product_name || 'Изделие', colors });
+                colorLines.push({ text: `${item.product_name || 'Изделие'}: ${colors.join(' + ')}`, qty, name: item.product_name || 'Изделие', colors, setName });
             } else {
-                colorLines.push({ text: item.product_name || 'Изделие', qty, name: item.product_name || 'Изделие', colors: [] });
+                colorLines.push({ text: item.product_name || 'Изделие', qty, name: item.product_name || 'Изделие', colors: [], setName });
             }
             const att = this._extractAttachment(item);
             if (att) attachments.push(att);
@@ -256,22 +257,13 @@ const ProductionPlan = {
             if (printings.length) printingLines.push(`${item.product_name || 'Изделие'}: ${printings.join(', ')}`);
         });
 
-        // Blank summary: consolidate same blanks across variants
-        const blankMap = new Map();
-        productItems.forEach(item => {
-            const key = item.template_id || item.product_name || 'unknown';
-            const baseName = (item.product_name || '').replace(/\s*\[.*?\]/g, '').trim();
-            if (!blankMap.has(key)) blankMap.set(key, { name: baseName, totalQty: 0, colors: new Set() });
-            const entry = blankMap.get(key);
-            entry.totalQty += (parseFloat(item.quantity) || 0);
-            const colorNames = this._extractColorNames(item);
-            colorNames.forEach(c => entry.colors.add(c));
+        // Products grouped by marketplace set name
+        const productsBySet = new Map();
+        colorLines.forEach(cl => {
+            const sn = cl.setName || '';
+            if (!productsBySet.has(sn)) productsBySet.set(sn, []);
+            productsBySet.get(sn).push(cl);
         });
-        const blankSummary = [...blankMap.values()].map(b => ({
-            name: b.name,
-            qty: b.totalQty,
-            colors: [...b.colors],
-        }));
 
         // HW/PKG grouped by marketplace set name
         const hwBySet = new Map();
@@ -323,7 +315,7 @@ const ProductionPlan = {
             hardwareReadyLabelHtml,
             colorLines,
             colorsPlain: colorLines.map(cl => cl.text).join(' · '),
-            blankSummary,
+            productsBySet: Object.fromEntries(productsBySet),
             hwBySet: Object.fromEntries(hwBySet),
             pkgBySet: Object.fromEntries(pkgBySet),
             attachments,
@@ -539,26 +531,34 @@ const ProductionPlan = {
 
     _renderColorCell(row) {
         const hasColors = row.colorLines.length > 0;
-        // Each colorLine is now an object: { text, qty, name, colors }
-        const lines = hasColors
-            ? `<div class="pp-lines">${row.colorLines.map(cl => {
-                const qtyLabel = cl.qty ? ` <strong style="color:var(--accent);">&times; ${cl.qty} шт</strong>` : '';
-                const colorStr = cl.colors.length ? `: ${cl.colors.join(' + ')}` : '';
-                const baseName = (cl.name || '').replace(/\s*\[.*?\]/g, '').trim();
-                return `<div class="pp-line-item pp-line-color">${this.esc(baseName)}${qtyLabel}${colorStr ? ' — ' + this.esc(cl.colors.join(' + ')) : ''}</div>`;
-            }).join('')}</div>`
-            : '<div class="pp-sub">—</div>';
+        if (!hasColors) {
+            return `<div class="pp-cell-block"><div class="pp-block-title">Детали</div><div class="pp-sub">—</div></div>`;
+        }
 
-        // Blank summary (consolidation)
-        let summaryHtml = '';
-        if (row.blankSummary && row.blankSummary.length > 1) {
-            summaryHtml = `<div style="border-top:1px dashed var(--border);margin-top:6px;padding-top:6px;">
-                <div style="font-size:11px;font-weight:600;color:#6b7280;margin-bottom:3px;">&#128203; Сводка бланков:</div>
-                ${row.blankSummary.map(b => {
-                    const colorsStr = b.colors.length ? ` (${b.colors.join(', ')})` : '';
-                    return `<div style="font-size:12px;padding:1px 0;"><strong>${this.esc(b.name)}</strong> — ${b.qty} шт${this.esc(colorsStr)}</div>`;
-                }).join('')}
-            </div>`;
+        // Check if we have set grouping
+        const productsBySet = row.productsBySet || {};
+        const setKeys = Object.keys(productsBySet);
+        const hasSetGroups = setKeys.length > 0 && !(setKeys.length === 1 && setKeys[0] === '');
+
+        const renderProductLine = (cl) => {
+            const qtyLabel = cl.qty ? ` <strong style="color:var(--accent);">&times; ${cl.qty} шт</strong>` : '';
+            const baseName = (cl.name || '').replace(/\s*\[.*?\]/g, '').trim();
+            const colorStr = cl.colors.length ? ' — ' + this.esc(cl.colors.join(' + ')) : '';
+            return `<div class="pp-line-item pp-line-color">${this.esc(baseName)}${qtyLabel}${colorStr}</div>`;
+        };
+
+        let linesHtml = '';
+        if (hasSetGroups) {
+            for (const [setName, items] of Object.entries(productsBySet)) {
+                const itemsHtml = items.map(cl => renderProductLine(cl)).join('');
+                if (setName) {
+                    linesHtml += `<div style="margin-bottom:6px;"><div style="font-size:11px;font-weight:600;color:#6b7280;margin-bottom:2px;">&#128230; ${this.esc(setName)}:</div>${itemsHtml}</div>`;
+                } else {
+                    linesHtml += itemsHtml;
+                }
+            }
+        } else {
+            linesHtml = `<div class="pp-lines">${row.colorLines.map(cl => renderProductLine(cl)).join('')}</div>`;
         }
 
         const imgs = row.attachments
@@ -573,8 +573,7 @@ const ProductionPlan = {
 
         return `<div class="pp-cell-block">
             <div class="pp-block-title">Детали</div>
-            ${lines}
-            ${summaryHtml}
+            ${linesHtml}
             ${imgs ? `<div class="pp-color-images">${imgs}</div>` : ''}
             ${nonImg ? `<div class="pp-files">${nonImg}</div>` : ''}
         </div>`;

@@ -300,28 +300,6 @@ const OrderDetail = {
                 html += noSetPkg.map(item => this._renderItemCard(item, 'packaging')).join('');
             }
 
-            // Blank summary
-            const blankMap = new Map();
-            products.forEach(item => {
-                const key = item.template_id || item.product_name || 'unknown';
-                const baseName = (item.product_name || '').replace(/\s*\[.*?\]/g, '').trim();
-                if (!blankMap.has(key)) blankMap.set(key, { name: baseName, totalQty: 0, colors: new Set() });
-                const entry = blankMap.get(key);
-                entry.totalQty += (parseFloat(item.quantity) || 0);
-                const colorName = item.color_name || '';
-                if (colorName) entry.colors.add(colorName);
-            });
-            if (blankMap.size > 1) {
-                html += `<div style="border-top:1px dashed var(--border);margin-top:12px;padding-top:12px;">
-                    <h3 style="margin:0 0 8px;">&#128203; Сводка бланков</h3>`;
-                for (const [, b] of blankMap) {
-                    const colorsStr = b.colors.size > 0 ? ` (${[...b.colors].join(', ')})` : '';
-                    html += `<div class="od-item-card" style="padding:8px 12px;">
-                        <strong>${this._esc(b.name)}</strong> — <span style="color:var(--accent);font-weight:600;">${b.totalQty} шт</span>${this._esc(colorsStr)}
-                    </div>`;
-                }
-                html += '</div>';
-            }
         } else {
             // Fallback: old display (no set grouping)
             if (products.length > 0) {
