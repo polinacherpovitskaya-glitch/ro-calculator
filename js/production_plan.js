@@ -230,6 +230,13 @@ const ProductionPlan = {
         await saveProductionPlanState(this._state);
     },
 
+    // Extract color group from product name brackets, e.g.
+    // "Бланк треугольник [Желтый]" → "Желтый"
+    _extractColorGroup(productName) {
+        const match = (productName || '').match(/\[([^\]]+)\]/);
+        return match ? match[1] : '';
+    },
+
     _buildRow(order, items) {
         const productItems = (items || []).filter(i => !i.item_type || i.item_type === 'product');
         const hwItems = (items || []).filter(i => i.item_type === 'hardware');
@@ -237,6 +244,12 @@ const ProductionPlan = {
 
         const qtyTotal = productItems.reduce((s, i) => s + (parseFloat(i.quantity) || 0), 0);
         const productsPlain = productItems.map(i => i.product_name).filter(Boolean).join(', ');
+
+        // Build product-index → colorGroup map for hardware/packaging linking
+        const productColorGroupByIndex = {};
+        productItems.forEach((item, idx) => {
+            productColorGroupByIndex[idx] = this._extractColorGroup(item.product_name);
+        });
 
         const colorLines = [];
         const attachments = [];
@@ -246,10 +259,11 @@ const ProductionPlan = {
             const colors = this._extractColorNames(item);
             const qty = parseFloat(item.quantity) || 0;
             const setName = item.marketplace_set_name || '';
+            const colorGroup = this._extractColorGroup(item.product_name);
             if (colors.length) {
-                colorLines.push({ text: `${item.product_name || 'Изделие'}: ${colors.join(' + ')}`, qty, name: item.product_name || 'Изделие', colors, setName });
+                colorLines.push({ text: `${item.product_name || 'Изделие'}: ${colors.join(' + ')}`, qty, name: item.product_name || 'Изделие', colors, setName, colorGroup });
             } else {
-                colorLines.push({ text: item.product_name || 'Изделие', qty, name: item.product_name || 'Изделие', colors: [], setName });
+                colorLines.push({ text: item.product_name || 'Изделие', qty, name: item.product_name || 'Изделие', colors: [], setName, colorGroup });
             }
             const att = this._extractAttachment(item);
             if (att) attachments.push(att);
@@ -265,6 +279,14 @@ const ProductionPlan = {
             productsBySet.get(sn).push(cl);
         });
 
+        // Products grouped by color group (bracket content in product name)
+        const productsByColorGroup = new Map();
+        colorLines.forEach(cl => {
+            const cg = cl.colorGroup || '';
+            if (!productsByColorGroup.has(cg)) productsByColorGroup.set(cg, []);
+            productsByColorGroup.get(cg).push(cl);
+        });
+
         // HW/PKG grouped by marketplace set name
         const hwBySet = new Map();
         hwItems.forEach(item => {
@@ -277,6 +299,26 @@ const ProductionPlan = {
             const setName = item.marketplace_set_name || '';
             if (!pkgBySet.has(setName)) pkgBySet.set(setName, []);
             pkgBySet.get(setName).push(item);
+        });
+
+        // HW/PKG grouped by parent product's color group
+        const hwByColorGroup = new Map();
+        hwItems.forEach(item => {
+            const parentIdx = item.hardware_parent_item_index;
+            const cg = (parentIdx !== null && parentIdx !== undefined)
+                ? (productColorGroupByIndex[parentIdx] || '')
+                : '';
+            if (!hwByColorGroup.has(cg)) hwByColorGroup.set(cg, []);
+            hwByColorGroup.get(cg).push(item);
+        });
+        const pkgByColorGroup = new Map();
+        pkgItems.forEach(item => {
+            const parentIdx = item.packaging_parent_item_index;
+            const cg = (parentIdx !== null && parentIdx !== undefined)
+                ? (productColorGroupByIndex[parentIdx] || '')
+                : '';
+            if (!pkgByColorGroup.has(cg)) pkgByColorGroup.set(cg, []);
+            pkgByColorGroup.get(cg).push(item);
         });
 
         const hwLines = hwItems.map(i => `${i.product_name || 'Фурнитура'} × ${(parseFloat(i.quantity) || 0)}`);
@@ -316,10 +358,13 @@ const ProductionPlan = {
             colorLines,
             colorsPlain: colorLines.map(cl => cl.text).join(' · '),
             productsBySet: Object.fromEntries(productsBySet),
+            productsByColorGroup: Object.fromEntries(productsByColorGroup),
             hwItemsRaw: hwItems,
             pkgItemsRaw: pkgItems,
             hwBySet: Object.fromEntries(hwBySet),
             pkgBySet: Object.fromEntries(pkgBySet),
+            hwByColorGroup: Object.fromEntries(hwByColorGroup),
+            pkgByColorGroup: Object.fromEntries(pkgByColorGroup),
             attachments,
             hasCustomMold,
             startLabel,
@@ -542,11 +587,6 @@ const ProductionPlan = {
             return `<div class="pp-cell-block"><div class="pp-block-title">Детали</div><div class="pp-sub">—</div></div>`;
         }
 
-        // Check if we have set grouping
-        const productsBySet = row.productsBySet || {};
-        const setKeys = Object.keys(productsBySet);
-        const hasSetGroups = setKeys.length > 0 && !(setKeys.length === 1 && setKeys[0] === '');
-
         const renderProductLine = (cl) => {
             const qtyLabel = cl.qty ? ` <strong style="color:var(--accent);">&times; ${cl.qty} шт</strong>` : '';
             const baseName = (cl.name || '').replace(/\s*\[.*?\]/g, '').trim();
@@ -554,8 +594,53 @@ const ProductionPlan = {
             return `<div class="pp-line-item pp-line-color">${this.esc(baseName)}${qtyLabel}${colorStr}</div>`;
         };
 
+        // Check for color groups (bracket content like [Желтый], [Черно-белый])
+        const colorGroups = row.productsByColorGroup || {};
+        const cgKeys = Object.keys(colorGroups);
+        const hasColorGroups = cgKeys.length > 1 || (cgKeys.length === 1 && cgKeys[0] !== '');
+
+        // Check for set grouping
+        const productsBySet = row.productsBySet || {};
+        const setKeys = Object.keys(productsBySet);
+        const hasSetGroups = setKeys.length > 0 && !(setKeys.length === 1 && setKeys[0] === '');
+
         let linesHtml = '';
-        if (hasSetGroups) {
+
+        if (hasColorGroups) {
+            // Primary grouping: by color group
+            if (hasSetGroups) {
+                // Within each set, sub-group by color group
+                for (const [setName, setItems] of Object.entries(productsBySet)) {
+                    const byColor = new Map();
+                    setItems.forEach(cl => {
+                        const cg = cl.colorGroup || '';
+                        if (!byColor.has(cg)) byColor.set(cg, []);
+                        byColor.get(cg).push(cl);
+                    });
+
+                    let setHtml = '';
+                    if (setName) {
+                        setHtml += `<div style="font-size:11px;font-weight:600;color:#6b7280;margin-bottom:2px;">&#128230; ${this.esc(setName)}:</div>`;
+                    }
+                    for (const [cg, items] of byColor) {
+                        if (cg) {
+                            setHtml += `<div style="margin-left:4px;margin-top:6px;margin-bottom:3px;padding:2px 8px;background:#f3f4f6;border-radius:6px;font-size:11px;font-weight:600;color:#374151;">&#127912; ${this.esc(cg)}</div>`;
+                        }
+                        setHtml += `<div style="margin-left:${cg ? '8' : '0'}px;">${items.map(cl => renderProductLine(cl)).join('')}</div>`;
+                    }
+                    linesHtml += `<div style="margin-bottom:8px;">${setHtml}</div>`;
+                }
+            } else {
+                // No set names — just group by color group
+                for (const [cg, items] of Object.entries(colorGroups)) {
+                    if (cg) {
+                        linesHtml += `<div style="margin-top:6px;margin-bottom:3px;padding:2px 8px;background:#f3f4f6;border-radius:6px;font-size:11px;font-weight:600;color:#374151;">&#127912; ${this.esc(cg)}</div>`;
+                    }
+                    linesHtml += `<div style="margin-left:${cg ? '4' : '0'}px;">${items.map(cl => renderProductLine(cl)).join('')}</div>`;
+                }
+            }
+        } else if (hasSetGroups) {
+            // Only set grouping, no color groups
             for (const [setName, items] of Object.entries(productsBySet)) {
                 const itemsHtml = items.map(cl => renderProductLine(cl)).join('');
                 if (setName) {
@@ -565,6 +650,7 @@ const ProductionPlan = {
                 }
             }
         } else {
+            // Flat list
             linesHtml = `<div class="pp-lines">${row.colorLines.map(cl => renderProductLine(cl)).join('')}</div>`;
         }
 
@@ -587,7 +673,13 @@ const ProductionPlan = {
     },
 
     _renderSupplyCell(row) {
-        // Group hw/pkg by set if available
+        const hwByColorGroup = row.hwByColorGroup || {};
+        const pkgByColorGroup = row.pkgByColorGroup || {};
+        const hwCgKeys = Object.keys(hwByColorGroup);
+        const pkgCgKeys = Object.keys(pkgByColorGroup);
+        const hasHwColorGroups = hwCgKeys.length > 1 || (hwCgKeys.length === 1 && hwCgKeys[0] !== '');
+        const hasPkgColorGroups = pkgCgKeys.length > 1 || (pkgCgKeys.length === 1 && pkgCgKeys[0] !== '');
+
         const hwBySet = row.hwBySet || {};
         const pkgBySet = row.pkgBySet || {};
         const hasSetGroups = (setObj) => {
@@ -603,10 +695,22 @@ const ProductionPlan = {
             return `<div class="pp-line-item" style="padding-left:8px;">${this.esc(name)}${skuHtml} &times; ${qty}</div>`;
         };
 
-        const renderGrouped = (setObj, fallbackItems, label, skuField) => {
-            if (hasSetGroups(setObj)) {
+        const renderByColor = (byColorGroup, fallbackBySet, fallbackItems, label, skuField, hasColorGrouping) => {
+            // Primary: group by color if available
+            if (hasColorGrouping) {
                 let html = '';
-                for (const [setName, items] of Object.entries(setObj)) {
+                for (const [cg, items] of Object.entries(byColorGroup)) {
+                    if (cg) {
+                        html += `<div style="margin-top:4px;margin-bottom:2px;padding:1px 6px;background:#f3f4f6;border-radius:4px;font-size:10px;font-weight:600;color:#374151;">&#127912; ${this.esc(cg)}</div>`;
+                    }
+                    html += items.map(i => renderItemLine(i, label, skuField)).join('');
+                }
+                return html || '<div class="pp-sub">—</div>';
+            }
+            // Fallback: group by set
+            if (hasSetGroups(fallbackBySet)) {
+                let html = '';
+                for (const [setName, items] of Object.entries(fallbackBySet)) {
                     const itemsHtml = items.map(i => renderItemLine(i, label, skuField)).join('');
                     if (setName && setName !== '') {
                         html += `<div style="font-size:11px;font-weight:600;color:#6b7280;margin-top:4px;">&#128230; ${this.esc(setName)}:</div>${itemsHtml}`;
@@ -616,13 +720,14 @@ const ProductionPlan = {
                 }
                 return html || '<div class="pp-sub">—</div>';
             }
+            // Flat
             return (fallbackItems || []).length
                 ? `<div class="pp-lines">${fallbackItems.map(i => renderItemLine(i, label, skuField)).join('')}</div>`
                 : '<div class="pp-sub">—</div>';
         };
 
-        const hw = renderGrouped(hwBySet, row.hwItemsRaw, 'Фурнитура', 'hardware_warehouse_sku');
-        const pkg = renderGrouped(pkgBySet, row.pkgItemsRaw, 'Упаковка', 'packaging_warehouse_sku');
+        const hw = renderByColor(hwByColorGroup, hwBySet, row.hwItemsRaw, 'Фурнитура', 'hardware_warehouse_sku', hasHwColorGroups);
+        const pkg = renderByColor(pkgByColorGroup, pkgBySet, row.pkgItemsRaw, 'Упаковка', 'packaging_warehouse_sku', hasPkgColorGroups);
 
         return `<div class="pp-cell-block">
             <div class="pp-duo-block">
