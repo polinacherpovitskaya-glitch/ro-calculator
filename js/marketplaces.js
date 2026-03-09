@@ -19,6 +19,7 @@ const Marketplaces = {
     _pkgItems: [],
     _productionSelection: [],
     _pendingPhoto: '',
+    _colorVariants: [],
 
     async load() {
         try {
@@ -108,14 +109,20 @@ const Marketplaces = {
                     <div style="font-size:12px;color:var(--text-secondary);">
                         <span style="font-weight:600;">Себестоимость: ${formatRub(cost)}</span>
                     </div>
-                    ${(s.plastic_items || []).some(i => Array.isArray(i.colors) && i.colors.length) ? `
-                        <div style="font-size:10px;color:var(--text-muted);margin-top:2px;line-height:1.4;">
-                            Цвета: ${(s.plastic_items || []).map(i => {
-                                const cs = Array.isArray(i.colors) ? i.colors : [];
-                                if (!cs.length) return '';
-                                const label = cs.map(c => `${c.number || ''} ${c.name || ''}`.trim()).filter(Boolean).join(' + ');
-                                return `${this._esc(i.name || 'Элемент')}: ${this._esc(label)}`;
-                            }).filter(Boolean).join(' · ')}
+                    ${Array.isArray(s.color_variants) && s.color_variants.length > 0 ? `
+                        <div style="display:flex;gap:6px;margin-top:4px;flex-wrap:wrap;align-items:center;">
+                            <span style="font-size:10px;color:var(--text-muted);margin-right:2px;">Цвета:</span>
+                            ${s.color_variants.map(v => {
+                                const vPhoto = v.photo_url
+                                    ? `<img src="${this._esc(v.photo_url)}" style="width:36px;height:36px;object-fit:cover;border-radius:6px;border:1px solid var(--border);" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
+                                    : '';
+                                const vPlaceholder = `<span style="width:36px;height:36px;display:${v.photo_url ? 'none' : 'flex'};align-items:center;justify-content:center;background:var(--accent-light);border-radius:6px;font-size:11px;color:var(--text-muted);border:1px solid var(--border);">${(v.name||'?')[0]}</span>`;
+                                const vName = v.name || (v.assignments || []).map(a => a.color_name).filter(Boolean).join('+') || '?';
+                                return `<div style="display:flex;flex-direction:column;align-items:center;gap:2px;" title="${this._esc(vName)}">
+                                    ${vPhoto}${vPlaceholder}
+                                    <span style="font-size:9px;color:var(--text-muted);max-width:60px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center;">${this._esc(vName)}</span>
+                                </div>`;
+                            }).join('')}
                         </div>
                     ` : ''}
                     ${breakdownParts.length > 0 ? `<div style="font-size:10px;color:var(--text-muted);margin-top:2px;line-height:1.4;">${breakdownParts.join(' · ')}</div>` : ''}
@@ -159,6 +166,7 @@ const Marketplaces = {
         this._plasticItems = [];
         this._hwItems = [];
         this._pkgItems = [];
+        this._colorVariants = [];
         this.hideProductionBuilder();
         this._updatePhotoPreview('');
         document.getElementById('mp-photo-file').value = '';
@@ -188,6 +196,21 @@ const Marketplaces = {
         this._plasticItems = (s.plastic_items || []).map(i => ({ ...i, colors: Array.isArray(i.colors) ? i.colors : [] }));
         this._hwItems = (s.hw_items || []).map(i => ({ ...i }));
         this._pkgItems = (s.pkg_items || []).map(i => ({ ...i }));
+        this._colorVariants = (s.color_variants || []).map(v => ({ ...v, assignments: Array.isArray(v.assignments) ? v.assignments.map(a => ({...a})) : [] }));
+        // Auto-migrate: if no variants but plastic items have old-style colors, create variant from them
+        if (!this._colorVariants.length && this._plasticItems.some(pi => Array.isArray(pi.colors) && pi.colors.length > 0)) {
+            const assignments = this._plasticItems.map(pi => {
+                const c = (pi.colors || [])[0];
+                return c ? { color_id: c.id, color_number: c.number || '', color_name: c.name || '', color_photo: '' }
+                          : { color_id: null, color_number: '', color_name: '', color_photo: '' };
+            });
+            this._colorVariants = [{
+                id: Date.now(),
+                name: this._plasticItems.map(pi => (pi.colors || []).map(c => c.name || '').join('+')).filter(Boolean).join(' / '),
+                photo_url: '',
+                assignments,
+            }];
+        }
         this._updatePhotoPreview(s.photo_url || '');
         document.getElementById('mp-photo-file').value = '';
         document.getElementById('mp-delete-btn').style.display = '';
@@ -350,15 +373,8 @@ const Marketplaces = {
 
         document.getElementById('mp-plastic-items').innerHTML = this._plasticItems.map((item, i) => `
             <div class="form-row" style="margin-bottom:4px;align-items:end;gap:6px;">
-                <div class="form-group" style="flex:2;margin:0">
+                <div class="form-group" style="flex:3;margin:0">
                     ${this._renderSearchableSelect('mp-pl-'+i, plasticList, item.blank_id, 'Поиск бланка...', 'Marketplaces._selectPlastic('+i+',')}
-                </div>
-                <div class="form-group" style="flex:1.15;margin:0">
-                    <input type="text" value="${this._esc(item.color_notes || '')}" placeholder="Цвет/микс (напр. белый+синий)"
-                        oninput="Marketplaces._plasticItems[${i}].color_notes=this.value">
-                </div>
-                <div class="form-group" style="flex:1.25;margin:0">
-                    ${this._renderPlasticColorsPicker(i, item)}
                 </div>
                 <div class="form-group" style="flex:0 0 55px;margin:0">
                     <input type="number" min="1" value="${item.qty || 1}" oninput="Marketplaces._onQtyChange('plastic',${i},this.value)" style="text-align:center;" title="Кол-во">
@@ -454,6 +470,9 @@ const Marketplaces = {
                 </div>
             </div>`;
         }).join('');
+
+        // Render color variants section
+        this.renderColorVariants();
     },
 
     // Selection callbacks
@@ -465,33 +484,7 @@ const Marketplaces = {
         this.recalcSet();
     },
 
-    _renderPlasticColorsPicker(idx, item) {
-        const selected = Array.isArray(item.colors) ? item.colors : [];
-        const options = (this._colors || []).map(c => {
-            const sel = selected.some(sc => Number(sc.id) === Number(c.id));
-            const label = `${c.number || ''} ${c.name || ''}`.trim();
-            return `<option value="${c.id}" ${sel ? 'selected' : ''}>${this._esc(label)}</option>`;
-        }).join('');
-        const chips = selected.length
-            ? selected.map(sc => this._esc(`${sc.number || ''} ${sc.name || ''}`.trim())).join(' · ')
-            : 'не выбрано';
-        return `
-            <label style="font-size:10px;color:var(--text-muted);display:block;margin-bottom:2px;">Цвета</label>
-            <select multiple size="3" onchange="Marketplaces._onPlasticColorsChange(${idx}, this)" style="width:100%;padding:4px;border:1px solid var(--border);border-radius:6px;font-size:11px;background:var(--card-bg);">
-                ${options}
-            </select>
-            <div style="margin-top:2px;font-size:10px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${chips}</div>
-        `;
-    },
-
-    _onPlasticColorsChange(idx, selectEl) {
-        const selectedIds = Array.from(selectEl.selectedOptions || []).map(o => Number(o.value));
-        this._plasticItems[idx].colors = selectedIds.map(id => {
-            const c = (this._colors || []).find(x => Number(x.id) === Number(id));
-            return c ? { id: c.id, number: c.number || '', name: c.name || '' } : null;
-        }).filter(Boolean);
-        this.renderFormItems();
-    },
+    // Color variant methods moved to COLOR VARIANTS section below
 
     _selectHw(idx, listId) {
         const item = this._hwItems[idx];
@@ -800,6 +793,7 @@ const Marketplaces = {
             plastic_items: this._plasticItems.filter(i => i.blank_id),
             hw_items: this._hwItems.filter(i => i.blank_id || i.wh_id || (i.source === 'custom' && i.name)),
             pkg_items: this._pkgItems.filter(i => i.blank_id || i.wh_id || (i.source === 'custom' && i.name)),
+            color_variants: this._colorVariants.filter(v => v.name || (v.assignments && v.assignments.some(a => a.color_id))),
             total_cost: this._lastCalc?.totalCost || 0,
             selling_price: this._lastCalc?.mpActualPrice || this._lastCalc?.suggestedMpPrice || 0,
             mp_suggested_price: this._lastCalc?.suggestedMpPrice || 0,
@@ -844,17 +838,41 @@ const Marketplaces = {
             App.toast('Нет наборов для производства');
             return;
         }
-        this._productionSelection = this.allSets.map(s => ({ id: s.id, qty: 0, selected: false }));
-        list.innerHTML = this.allSets.map(s => `
-            <div style="display:grid;grid-template-columns:auto 1fr 110px;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);">
-                <input type="checkbox" id="mp-prod-sel-${s.id}" onchange="Marketplaces._toggleProductionSet(${s.id}, this.checked)">
-                <label for="mp-prod-sel-${s.id}" style="cursor:pointer;">
-                    <div style="font-weight:600;">${this._esc(s.name || 'Набор')}</div>
-                    <div style="font-size:11px;color:var(--text-muted);">Себестоимость ${formatRub(s.total_cost || 0)} · МП ${formatRub(s.mp_actual_price || s.selling_price || 0)}</div>
-                </label>
-                <input type="number" min="1" placeholder="Тираж" disabled id="mp-prod-qty-${s.id}" oninput="Marketplaces._setProductionQty(${s.id}, this.value)" style="width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:6px;">
-            </div>
-        `).join('');
+        this._productionSelection = this.allSets.map(s => ({ id: s.id, qty: 0, selected: false, variantQtys: {} }));
+        list.innerHTML = this.allSets.map(s => {
+            const hasVariants = Array.isArray(s.color_variants) && s.color_variants.length > 0;
+
+            let variantsHtml = '';
+            if (hasVariants) {
+                variantsHtml = '<div id="mp-prod-vars-' + s.id + '" style="display:none;padding:6px 0 4px 28px;">'
+                    + s.color_variants.map((v, vi) => {
+                        const photo = v.photo_url
+                            ? '<img src="' + this._esc(v.photo_url) + '" style="width:32px;height:32px;object-fit:cover;border-radius:4px;border:1px solid var(--border);" onerror="this.style.display=\'none\'">'
+                            : '<span style="width:32px;height:32px;display:flex;align-items:center;justify-content:center;background:var(--accent-light);border-radius:4px;font-size:11px;color:var(--text-muted);border:1px solid var(--border);">' + (v.name || '?')[0] + '</span>';
+                        const vName = v.name || (v.assignments || []).map(a => a.color_name).filter(Boolean).join('+') || ('Вариант ' + (vi + 1));
+                        return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">'
+                            + photo
+                            + '<span style="font-size:12px;flex:1;">' + this._esc(vName) + '</span>'
+                            + '<input type="number" min="0" placeholder="Кол-во" id="mp-prod-var-qty-' + s.id + '-' + vi + '"'
+                            + ' oninput="Marketplaces._setProductionVarQty(' + s.id + ', ' + vi + ', this.value)"'
+                            + ' style="width:80px;padding:4px 6px;border:1px solid var(--border);border-radius:6px;font-size:11px;">'
+                            + '</div>';
+                    }).join('')
+                    + '</div>';
+            }
+
+            return '<div style="padding:8px 0;border-bottom:1px solid var(--border);">'
+                + '<div style="display:grid;grid-template-columns:auto 1fr' + (hasVariants ? '' : ' 110px') + ';gap:8px;align-items:center;">'
+                + '<input type="checkbox" id="mp-prod-sel-' + s.id + '" onchange="Marketplaces._toggleProductionSet(' + s.id + ', this.checked)">'
+                + '<label for="mp-prod-sel-' + s.id + '" style="cursor:pointer;">'
+                + '<div style="font-weight:600;">' + this._esc(s.name || 'Набор') + (hasVariants ? ' <span style="font-size:10px;color:var(--accent);">(' + s.color_variants.length + ' цвет.)</span>' : '') + '</div>'
+                + '<div style="font-size:11px;color:var(--text-muted);">Себестоимость ' + formatRub(s.total_cost || 0) + ' · МП ' + formatRub(s.mp_actual_price || s.selling_price || 0) + '</div>'
+                + '</label>'
+                + (hasVariants ? '' : '<input type="number" min="1" placeholder="Тираж" disabled id="mp-prod-qty-' + s.id + '" oninput="Marketplaces._setProductionQty(' + s.id + ', this.value)" style="width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:6px;">')
+                + '</div>'
+                + variantsHtml
+                + '</div>';
+        }).join('');
         panel.style.display = '';
         panel.scrollIntoView({ behavior: 'smooth' });
     },
@@ -867,6 +885,7 @@ const Marketplaces = {
     _toggleProductionSet(setId, checked) {
         const row = this._productionSelection.find(r => Number(r.id) === Number(setId));
         const qtyEl = document.getElementById(`mp-prod-qty-${setId}`);
+        const varsEl = document.getElementById(`mp-prod-vars-${setId}`);
         if (!row) return;
         row.selected = !!checked;
         if (qtyEl) {
@@ -877,6 +896,9 @@ const Marketplaces = {
             }
             if (!checked) qtyEl.value = '';
         }
+        if (varsEl) {
+            varsEl.style.display = checked ? '' : 'none';
+        }
     },
 
     _setProductionQty(setId, value) {
@@ -885,10 +907,23 @@ const Marketplaces = {
         row.qty = Math.max(1, parseInt(value, 10) || 0);
     },
 
+    _setProductionVarQty(setId, varIdx, value) {
+        const row = this._productionSelection.find(r => Number(r.id) === Number(setId));
+        if (!row) return;
+        if (!row.variantQtys) row.variantQtys = {};
+        row.variantQtys[varIdx] = Math.max(0, parseInt(value, 10) || 0);
+    },
+
     async createProductionOrderFromSelection() {
-        const selected = (this._productionSelection || []).filter(r => r.selected && r.qty > 0);
+        const selected = (this._productionSelection || []).filter(r => {
+            if (!r.selected) return false;
+            if (r.qty > 0) return true;
+            // Check variant quantities
+            if (r.variantQtys && Object.values(r.variantQtys).some(q => q > 0)) return true;
+            return false;
+        });
         if (!selected.length) {
-            App.toast('Выберите хотя бы один набор и тираж');
+            App.toast('Выберите хотя бы один набор и укажите тираж');
             return;
         }
         const orderNameRaw = prompt('Название заказа', `B2C партия ${new Date().toLocaleDateString('ru-RU')}`);
@@ -909,10 +944,18 @@ const Marketplaces = {
     },
 
     async _createProductionOrderFromSets(selectedRows, orderName) {
-        const selectedSets = selectedRows.map(r => ({
-            set: this.allSets.find(s => Number(s.id) === Number(r.id)),
-            qty: r.qty,
-        })).filter(x => x.set && x.qty > 0);
+        const selectedSets = selectedRows.map(r => {
+            const set = this.allSets.find(s => Number(s.id) === Number(r.id));
+            if (!set) return null;
+            const hasVariants = Array.isArray(set.color_variants) && set.color_variants.length > 0;
+            if (hasVariants) {
+                const vq = r.variantQtys || {};
+                let totalQty = 0;
+                (set.color_variants || []).forEach((v, vi) => { totalQty += (vq[vi] || 0); });
+                return { set, qty: totalQty, variantQtys: vq, hasVariants: true };
+            }
+            return { set, qty: r.qty, variantQtys: {}, hasVariants: false };
+        }).filter(x => x && x.set && x.qty > 0);
 
         if (!selectedSets.length) {
             App.toast('Наборы не найдены');
@@ -931,72 +974,103 @@ const Marketplaces = {
         let totalHoursHardware = 0;
         let totalHoursPackaging = 0;
 
-        selectedSets.forEach(({ set: s, qty: setQty }) => {
-            // Plastic products
-            (s.plastic_items || []).forEach(pi => {
-                if (!pi.blank_id) return;
-                const mold = this._plasticBlanks.find(m => Number(m.id) === Number(pi.blank_id));
-                if (!mold) return;
-                const qty = setQty * (parseFloat(pi.qty) || 1);
-                const calcItem = {
-                    quantity: qty,
-                    pieces_per_hour: this._pphForMold(mold),
-                    weight_grams: mold.weight_grams || 0,
-                    extra_molds: 0,
-                    complex_design: false,
-                    is_blank_mold: true,
-                    is_nfc: mold.category === 'nfc',
-                    nfc_programming: mold.category === 'nfc',
-                    delivery_included: false,
-                    printings: [],
-                };
-                const r = calculateItemCost(calcItem, params);
-                const colors = Array.isArray(pi.colors) ? pi.colors : [];
-                const colorLabel = colors.length
-                    ? colors.map(c => `${c.number || ''} ${c.name || ''}`.trim()).filter(Boolean).join(' + ')
-                    : String(pi.color_notes || '').trim();
-                const productName = colorLabel ? `${mold.name} [цвет: ${colorLabel}]` : mold.name;
-                items.push({
-                    item_number: itemNumber++,
-                    item_type: 'product',
-                    product_name: productName,
-                    quantity: qty,
-                    pieces_per_hour: calcItem.pieces_per_hour,
-                    weight_grams: calcItem.weight_grams,
-                    extra_molds: 0,
-                    complex_design: false,
-                    is_blank_mold: true,
-                    is_nfc: calcItem.is_nfc,
-                    nfc_programming: calcItem.nfc_programming,
-                    delivery_included: false,
-                    printings: JSON.stringify([]),
-                    cost_fot: r.costFot,
-                    cost_indirect: r.costIndirect,
-                    cost_plastic: r.costPlastic,
-                    cost_mold_amortization: r.costMoldAmortization,
-                    cost_design: 0,
-                    cost_cutting: r.costCutting,
-                    cost_cutting_indirect: r.costCuttingIndirect,
-                    cost_nfc_tag: r.costNfcTag,
-                    cost_nfc_programming: r.costNfcProgramming,
-                    cost_nfc_indirect: r.costNfcIndirect,
-                    cost_printing: 0,
-                    cost_delivery: 0,
-                    cost_total: r.costTotal,
-                    sell_price_item: 0,
-                    sell_price_printing: 0,
-                    target_price_item: 0,
-                    hours_plastic: r.hoursPlastic,
-                    hours_cutting: r.hoursCutting,
-                    hours_nfc: r.hoursNfc,
-                    template_id: mold.id,
-                    color_id: colors[0]?.id || null,
-                    color_name: colors[0]?.name || colorLabel || '',
-                    colors: JSON.stringify(colors),
-                    color_solution_attachment: null,
+        selectedSets.forEach(({ set: s, qty: setQty, variantQtys = {}, hasVariants = false }) => {
+            // Build plastic batches: one per variant (with variant-specific qty and colors)
+            // or one single batch for the whole set (backward compat)
+            const plasticBatches = [];
+            if (hasVariants && Array.isArray(s.color_variants)) {
+                s.color_variants.forEach((v, vi) => {
+                    const vQty = variantQtys[vi] || 0;
+                    if (vQty <= 0) return;
+                    plasticBatches.push({
+                        variantName: v.name || ('Вариант ' + (vi + 1)),
+                        assignments: v.assignments || [],
+                        qty: vQty,
+                    });
                 });
-                totalCosts += r.costTotal * qty;
-                totalHoursPlastic += (r.hoursPlastic || 0) + (r.hoursCutting || 0) + (r.hoursNfc || 0);
+            } else {
+                plasticBatches.push({ variantName: '', assignments: [], qty: setQty });
+            }
+
+            // Plastic products — per batch (variant)
+            plasticBatches.forEach(batch => {
+                (s.plastic_items || []).forEach((pi, piIdx) => {
+                    if (!pi.blank_id) return;
+                    const mold = this._plasticBlanks.find(m => Number(m.id) === Number(pi.blank_id));
+                    if (!mold) return;
+                    const qty = batch.qty * (parseFloat(pi.qty) || 1);
+                    const calcItem = {
+                        quantity: qty,
+                        pieces_per_hour: this._pphForMold(mold),
+                        weight_grams: mold.weight_grams || 0,
+                        extra_molds: 0,
+                        complex_design: false,
+                        is_blank_mold: true,
+                        is_nfc: mold.category === 'nfc',
+                        nfc_programming: mold.category === 'nfc',
+                        delivery_included: false,
+                        printings: [],
+                    };
+                    const r = calculateItemCost(calcItem, params);
+
+                    // Colors from variant assignment or from old per-item colors
+                    const assignment = batch.assignments[piIdx] || {};
+                    let colors, colorLabel;
+                    if (assignment.color_id) {
+                        colors = [{ id: assignment.color_id, number: assignment.color_number || '', name: assignment.color_name || '' }];
+                        colorLabel = colors.map(c => `${c.number || ''} ${c.name || ''}`.trim()).filter(Boolean).join(' + ');
+                    } else {
+                        colors = Array.isArray(pi.colors) ? pi.colors : [];
+                        colorLabel = colors.length
+                            ? colors.map(c => `${c.number || ''} ${c.name || ''}`.trim()).filter(Boolean).join(' + ')
+                            : String(pi.color_notes || '').trim();
+                    }
+
+                    let productName = mold.name;
+                    if (batch.variantName) productName += ` [${batch.variantName}]`;
+                    if (colorLabel) productName += ` [цвет: ${colorLabel}]`;
+                    items.push({
+                        item_number: itemNumber++,
+                        item_type: 'product',
+                        product_name: productName,
+                        quantity: qty,
+                        pieces_per_hour: calcItem.pieces_per_hour,
+                        weight_grams: calcItem.weight_grams,
+                        extra_molds: 0,
+                        complex_design: false,
+                        is_blank_mold: true,
+                        is_nfc: calcItem.is_nfc,
+                        nfc_programming: calcItem.nfc_programming,
+                        delivery_included: false,
+                        printings: JSON.stringify([]),
+                        cost_fot: r.costFot,
+                        cost_indirect: r.costIndirect,
+                        cost_plastic: r.costPlastic,
+                        cost_mold_amortization: r.costMoldAmortization,
+                        cost_design: 0,
+                        cost_cutting: r.costCutting,
+                        cost_cutting_indirect: r.costCuttingIndirect,
+                        cost_nfc_tag: r.costNfcTag,
+                        cost_nfc_programming: r.costNfcProgramming,
+                        cost_nfc_indirect: r.costNfcIndirect,
+                        cost_printing: 0,
+                        cost_delivery: 0,
+                        cost_total: r.costTotal,
+                        sell_price_item: 0,
+                        sell_price_printing: 0,
+                        target_price_item: 0,
+                        hours_plastic: r.hoursPlastic,
+                        hours_cutting: r.hoursCutting,
+                        hours_nfc: r.hoursNfc,
+                        template_id: mold.id,
+                        color_id: colors[0]?.id || null,
+                        color_name: colors[0]?.name || colorLabel || '',
+                        colors: JSON.stringify(colors),
+                        color_solution_attachment: null,
+                    });
+                    totalCosts += r.costTotal * qty;
+                    totalHoursPlastic += (r.hoursPlastic || 0) + (r.hoursCutting || 0) + (r.hoursNfc || 0);
+                });
             });
 
             // Hardware
@@ -1133,6 +1207,147 @@ const Marketplaces = {
     // ==========================================
     // HELPERS
     // ==========================================
+
+    // ==========================================
+    // COLOR VARIANTS
+    // ==========================================
+
+    addColorVariant() {
+        const assignments = this._plasticItems.map(() => ({ color_id: null, color_number: '', color_name: '', color_photo: '' }));
+        this._colorVariants.push({
+            id: Date.now() + Math.floor(Math.random() * 1000),
+            name: '',
+            photo_url: '',
+            assignments,
+        });
+        this.renderColorVariants();
+    },
+
+    removeColorVariant(idx) {
+        this._colorVariants.splice(idx, 1);
+        this.renderColorVariants();
+    },
+
+    _onVariantNameChange(idx, name) {
+        if (this._colorVariants[idx]) this._colorVariants[idx].name = name;
+    },
+
+    onVariantPhotoFile(idx, input) {
+        if (!input.files || !input.files[0]) return;
+        const file = input.files[0];
+        if (file.size > 2 * 1024 * 1024) { App.toast('Макс 2MB'); return; }
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            this._resizeImage(e.target.result, 200, (thumb) => {
+                if (this._colorVariants[idx]) {
+                    this._colorVariants[idx].photo_url = thumb;
+                    this.renderColorVariants();
+                }
+            });
+        };
+        reader.readAsDataURL(file);
+    },
+
+    _selectVariantColor(varIdx, plasticIdx, colorId) {
+        if (!this._colorVariants[varIdx]) return;
+        const c = (this._colors || []).find(x => Number(x.id) === Number(colorId));
+        // Ensure assignments array is long enough
+        while (this._colorVariants[varIdx].assignments.length <= plasticIdx) {
+            this._colorVariants[varIdx].assignments.push({ color_id: null, color_number: '', color_name: '', color_photo: '' });
+        }
+        this._colorVariants[varIdx].assignments[plasticIdx] = {
+            color_id: c ? c.id : null,
+            color_number: c ? (c.number || '') : '',
+            color_name: c ? (c.name || '') : '',
+            color_photo: c ? (c.photo_url || '') : '',
+        };
+        this.renderColorVariants();
+    },
+
+    renderColorVariants() {
+        const container = document.getElementById('mp-color-variants');
+        if (!container) return;
+
+        if (!this._colorVariants.length) {
+            container.innerHTML = '<div style="font-size:12px;color:var(--text-muted);padding:8px 0;">Нет вариантов. Нажмите «+ Цветовой вариант» чтобы добавить.</div>';
+            return;
+        }
+
+        const plasticNames = this._plasticItems.map((pi, i) => pi.name || ('Пластик ' + (i + 1)));
+
+        let html = '';
+        this._colorVariants.forEach((v, varIdx) => {
+            const photoHtml = v.photo_url
+                ? '<img src="' + this._esc(v.photo_url) + '" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'">'
+                : '';
+            const photoPlaceholder = '<span style="font-size:18px;color:var(--text-muted);' + (v.photo_url ? 'display:none' : 'display:flex') + ';align-items:center;justify-content:center;width:100%;height:100%;">&#127912;</span>';
+
+            // Color assignment rows
+            let assignHtml = '';
+            if (this._plasticItems.length === 0) {
+                assignHtml = '<div style="font-size:11px;color:var(--text-muted);padding:4px 0;">Сначала добавьте пластиковые элементы выше</div>';
+            } else {
+                this._plasticItems.forEach((pi, plasticIdx) => {
+                    const assignment = (v.assignments && v.assignments[plasticIdx]) || {};
+                    const selectedColor = assignment.color_id ? (this._colors || []).find(c => Number(c.id) === Number(assignment.color_id)) : null;
+
+                    const uid = 'mp-vc-' + varIdx + '-' + plasticIdx + '-' + Math.random().toString(36).slice(2, 6);
+                    const selectedLabel = selectedColor
+                        ? (selectedColor.number || '') + ' ' + (selectedColor.name || '')
+                        : 'Выберите цвет';
+                    const selectedPhoto = selectedColor && selectedColor.photo_url
+                        ? '<img src="' + this._esc(selectedColor.photo_url) + '" style="width:24px;height:24px;object-fit:cover;border-radius:4px;flex-shrink:0;border:1px solid var(--border);" onerror="this.style.display=\'none\'">'
+                        : '<span style="width:24px;height:24px;display:flex;align-items:center;justify-content:center;background:var(--accent-light);border-radius:4px;flex-shrink:0;font-size:10px;color:var(--text-muted);">?</span>';
+
+                    const colorOptions = (this._colors || []).map(c => {
+                        const cPhoto = c.photo_url
+                            ? '<img src="' + this._esc(c.photo_url) + '" style="width:28px;height:28px;object-fit:cover;border-radius:4px;flex-shrink:0;border:1px solid var(--border);" onerror="this.style.display=\'none\'">'
+                            : '<span style="width:28px;height:28px;display:flex;align-items:center;justify-content:center;background:var(--accent-light);border-radius:4px;flex-shrink:0;font-size:11px;color:var(--text-muted);">' + (c.name || '?')[0] + '</span>';
+                        const label = ((c.number || '') + ' ' + (c.name || '')).trim();
+                        return '<div class="mp-dd-item" data-id="' + c.id + '" data-name="' + this._esc(label) + '"'
+                            + ' onclick="Marketplaces._selectVariantColor(' + varIdx + ',' + plasticIdx + ',' + c.id + '); Marketplaces._closeDropdown(\'' + uid + '\')"'
+                            + ' style="padding:5px 8px;cursor:pointer;font-size:11px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:6px;"'
+                            + ' onmouseover="this.style.background=\'var(--accent-light)\'" onmouseout="this.style.background=\'\'">'
+                            + cPhoto
+                            + '<span>' + this._esc(label) + '</span>'
+                            + '</div>';
+                    }).join('');
+
+                    assignHtml += ''
+                        + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">'
+                        + '<span style="font-size:11px;color:var(--text-muted);min-width:100px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="' + this._esc(plasticNames[plasticIdx]) + '">' + this._esc(plasticNames[plasticIdx]) + ':</span>'
+                        + '<div class="mp-searchable" style="position:relative;flex:1;">'
+                        + '<div style="display:flex;align-items:center;gap:6px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;cursor:pointer;background:var(--card-bg);font-size:11px;"'
+                        + ' onclick="Marketplaces._openDropdown(\'' + uid + '\'); setTimeout(function(){var e=document.getElementById(\'' + uid + '\');if(e)e.focus();},50)">'
+                        + selectedPhoto
+                        + '<span style="flex:1;">' + this._esc(selectedLabel.trim()) + '</span>'
+                        + '<span style="color:var(--text-muted);font-size:10px;">&#9662;</span>'
+                        + '</div>'
+                        + '<div class="mp-dropdown" id="' + uid + '_dd" style="display:none;position:absolute;top:100%;left:0;right:0;max-height:200px;overflow-y:auto;background:var(--card-bg);border:1px solid var(--border);border-radius:8px;z-index:100;box-shadow:0 4px 12px rgba(0,0,0,0.15);">'
+                        + '<input type="text" id="' + uid + '" placeholder="Поиск цвета..." oninput="Marketplaces._filterDropdown(\'' + uid + '\')" style="width:100%;padding:6px 8px;border:none;border-bottom:1px solid var(--border);font-size:11px;outline:none;box-sizing:border-box;">'
+                        + colorOptions
+                        + '</div>'
+                        + '</div>'
+                        + '</div>';
+                });
+            }
+
+            html += ''
+                + '<div style="margin-bottom:8px;padding:10px;background:var(--bg);border-radius:8px;border:1px solid var(--border);">'
+                + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">'
+                + '<div style="width:48px;height:48px;border-radius:6px;border:1px solid var(--border);background:var(--card-bg);display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0;cursor:pointer;" onclick="document.getElementById(\'mp-var-photo-' + varIdx + '\').click()" title="Загрузить фото варианта">'
+                + photoHtml + photoPlaceholder
+                + '</div>'
+                + '<input type="file" id="mp-var-photo-' + varIdx + '" accept="image/*" style="display:none" onchange="Marketplaces.onVariantPhotoFile(' + varIdx + ', this)">'
+                + '<input type="text" value="' + this._esc(v.name || '') + '" placeholder="Название (напр. Красно-белый)" style="flex:1;padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;" oninput="Marketplaces._onVariantNameChange(' + varIdx + ', this.value)">'
+                + '<button class="btn-remove" onclick="Marketplaces.removeColorVariant(' + varIdx + ')">&#10005;</button>'
+                + '</div>'
+                + assignHtml
+                + '</div>';
+        });
+
+        container.innerHTML = html;
+    },
 
     _enrichPlasticBlanks() {
         const params = App.params || {};
