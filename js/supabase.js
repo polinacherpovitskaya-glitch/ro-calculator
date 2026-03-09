@@ -52,6 +52,9 @@ const LOCAL_KEYS = {
     marketplaceSets: 'ro_calc_marketplace_sets',
     productionPlan: 'ro_calc_production_plan',
     projectHardwareState: 'ro_calc_project_hardware_state',
+    readyGoods: 'ro_calc_ready_goods_stock',
+    readyGoodsHistory: 'ro_calc_ready_goods_history',
+    salesRecords: 'ro_calc_sales_records',
 };
 
 // Data version — increment to trigger NON-DESTRUCTIVE migration
@@ -2296,4 +2299,36 @@ async function deleteMarketplaceSet(setId) {
     }
     const sets = (getLocal(LOCAL_KEYS.marketplaceSets) || []).filter(s => s.id !== setId);
     setLocal(LOCAL_KEYS.marketplaceSets, sets);
+}
+
+// =============================================
+// READY GOODS (Готовая продукция)
+// =============================================
+
+function loadReadyGoods() {
+    return getLocal(LOCAL_KEYS.readyGoods) || [];
+}
+
+function saveReadyGoods(items) {
+    setLocal(LOCAL_KEYS.readyGoods, items);
+}
+
+function loadReadyGoodsHistory() {
+    return getLocal(LOCAL_KEYS.readyGoodsHistory) || [];
+}
+
+function saveReadyGoodsHistory(history) {
+    setLocal(LOCAL_KEYS.readyGoodsHistory, history);
+}
+
+// =============================================
+// SALES RECORDS (Записи продаж)
+// =============================================
+
+function loadSalesRecords() {
+    return getLocal(LOCAL_KEYS.salesRecords) || [];
+}
+
+function saveSalesRecords(records) {
+    setLocal(LOCAL_KEYS.salesRecords, records);
 }

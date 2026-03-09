@@ -1,6 +1,6 @@
 // =============================================
 // Recycle Object — Orders History Page
-// v35: Table + Kanban board views
+// v36: B2C excluded from totals, finished goods
 // =============================================
 
 const STATUS_OPTIONS = [
@@ -137,7 +137,10 @@ const Orders = {
             const sectionOrders = orders.filter(o => section.statuses.includes(o.status));
             if (sectionOrders.length === 0 && !statusFilter) continue; // skip empty sections in all-view
 
-            const totalRevenue = sectionOrders.reduce((s, o) => s + (o.total_revenue_plan || 0), 0);
+            const totalRevenue = sectionOrders
+                .filter(o => (o.client_name || '').toUpperCase() !== 'B2C')
+                .reduce((s, o) => s + (o.total_revenue_plan || 0), 0);
+            const b2cCount = sectionOrders.filter(o => (o.client_name || '').toUpperCase() === 'B2C').length;
 
             // Determine collapsed state (use defaults for first render)
             if (this.collapsedSections[section.status] === undefined) {
@@ -153,6 +156,7 @@ const Orders = {
                     <span style="font-weight:700;font-size:13px">${section.label}</span>
                     <span style="font-size:12px;color:var(--text-muted);font-weight:600">${sectionOrders.length}</span>
                     <span style="flex:1"></span>
+                    ${b2cCount > 0 ? `<span style="font-size:10px;color:var(--text-muted);margin-right:6px;" title="B2C заказы (${b2cCount}) не учтены в сумме">B2C: ${b2cCount}</span>` : ''}
                     <span style="font-size:12px;color:var(--text-muted)">${this.shortRub(totalRevenue)}</span>
                 </div>
                 <div id="orders-section-body-${section.status}" style="${collapsed ? 'display:none' : ''}">
@@ -240,7 +244,10 @@ const Orders = {
 
         container.innerHTML = BOARD_COLUMNS.map(col => {
             const colOrders = active.filter(o => col.statuses.includes(o.status));
-            const totalRevenue = colOrders.reduce((s, o) => s + (o.total_revenue_plan || 0), 0);
+            const totalRevenue = colOrders
+                .filter(o => (o.client_name || '').toUpperCase() !== 'B2C')
+                .reduce((s, o) => s + (o.total_revenue_plan || 0), 0);
+            const b2cCount = colOrders.filter(o => (o.client_name || '').toUpperCase() === 'B2C').length;
 
             return `
             <div class="orders-board-col" data-status="${col.status}"
@@ -249,7 +256,7 @@ const Orders = {
                  ondrop="Orders.onBoardDrop(event, '${col.status}')">
                 <div class="orders-board-col-header" style="border-top:3px solid ${col.color}">
                     <span>${col.icon} ${col.label} <span style="font-weight:400;color:var(--text-muted)">(${colOrders.length})</span></span>
-                    <span style="font-size:11px;color:var(--text-muted)">${this.shortRub(totalRevenue)}</span>
+                    <span style="font-size:11px;color:var(--text-muted)">${this.shortRub(totalRevenue)}${b2cCount > 0 ? ` <span title="B2C (${b2cCount}) не в сумме" style="font-size:9px;opacity:.6">−B2C</span>` : ''}</span>
                 </div>
                 <div class="orders-board-col-body">
                     ${colOrders.length === 0
@@ -283,11 +290,14 @@ const Orders = {
             ? `<div style="font-size:10px;color:#f59e0b;font-weight:600;margin-bottom:4px;">◉ ${subStage}</div>`
             : '';
 
+        const isB2C = (order.client_name || '').toUpperCase() === 'B2C';
+        const b2cBadge = isB2C ? '<span style="display:inline-block;font-size:9px;font-weight:700;color:#7c3aed;background:rgba(124,58,237,.1);padding:1px 5px;border-radius:4px;margin-left:4px;">B2C</span>' : '';
+
         return `
         <div class="order-board-card" draggable="true"
              ondragstart="Orders.onBoardDragStart(event, ${order.id})"
              onclick="App.navigate('order-detail', true, ${order.id})">
-            <div class="order-board-card-title">${this.escHtml(order.order_name || 'Без названия')}</div>
+            <div class="order-board-card-title">${this.escHtml(order.order_name || 'Без названия')}${b2cBadge}</div>
             ${subStageBadge}
             <div class="order-board-card-client">${this.escHtml(order.client_name || '')} ${order.manager_name ? '/ ' + this.escHtml(order.manager_name) : ''}</div>
             <div class="order-board-card-footer">
@@ -334,6 +344,12 @@ const Orders = {
 
         await updateOrderStatus(orderId, actualStatus);
         await this._syncWarehouseByStatus(orderId, oldStatus, actualStatus, order.order_name, managerName || 'Неизвестный');
+
+        // When completing an order, move products to ready goods
+        if (actualStatus === 'completed' && oldStatus !== 'completed') {
+            await this._moveToReadyGoods(orderId, order);
+        }
+
         order.status = actualStatus;
 
         await this.addChangeRecord(orderId, {
@@ -365,6 +381,11 @@ const Orders = {
         await updateOrderStatus(orderId, newStatus);
         const order = this.allOrders.find(o => o.id === orderId);
         await this._syncWarehouseByStatus(orderId, oldStatus, newStatus, order && order.order_name, managerName || 'Неизвестный');
+
+        // When completing an order, move products to ready goods (finished goods warehouse)
+        if (newStatus === 'completed' && oldStatus !== 'completed') {
+            await this._moveToReadyGoods(orderId, order);
+        }
 
         // Save change history
         await this.addChangeRecord(orderId, {
@@ -496,6 +517,19 @@ const Orders = {
                     { order_id: orderId }
                 );
             }
+        }
+    },
+
+    async _moveToReadyGoods(orderId, order) {
+        try {
+            if (typeof Warehouse !== 'undefined' && Warehouse.moveOrderToReadyGoods) {
+                const count = await Warehouse.moveOrderToReadyGoods(orderId, order && order.order_name);
+                if (count > 0) {
+                    App.toast(`${count} товар(ов) → Готовая продукция`);
+                }
+            }
+        } catch (e) {
+            console.warn('moveToReadyGoods warning:', e);
         }
     },
 

@@ -1677,6 +1677,14 @@
                     <div class="stat-label">Заморожено в фурнитуре</div>
                     <div class="stat-value" id="wh-frozen-hw">0 ₽</div>
                 </div>
+                <div class="stat-card">
+                    <div class="stat-label">Готовая продукция</div>
+                    <div class="stat-value" id="wh-ready-goods-count" style="color:var(--accent)">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Заморожено в гот. прод.</div>
+                    <div class="stat-value" id="wh-frozen-rg">0 ₽</div>
+                </div>
             </div>
 
             <!-- Tabs -->
@@ -1684,6 +1692,7 @@
                 <div class="tab active" data-tab="table" onclick="Warehouse.setView('table')" style="padding:8px 16px; cursor:pointer; font-weight:600; font-size:13px; border-bottom:2px solid var(--accent); margin-bottom:-2px;">Таблица</div>
                 <div class="tab" data-tab="project-hardware" onclick="Warehouse.setView('project-hardware')" style="padding:8px 16px; cursor:pointer; font-size:13px; color:var(--text-muted); border-bottom:2px solid transparent; margin-bottom:-2px;">Фурнитура для проектов</div>
                 <div class="tab" data-tab="shipments" onclick="Warehouse.setView('shipments')" style="padding:8px 16px; cursor:pointer; font-size:13px; color:var(--text-muted); border-bottom:2px solid transparent; margin-bottom:-2px;">Приёмки из Китая</div>
+                <div class="tab" data-tab="ready-goods" onclick="Warehouse.setView('ready-goods')" style="padding:8px 16px; cursor:pointer; font-size:13px; color:var(--text-muted); border-bottom:2px solid transparent; margin-bottom:-2px;">📦 Готовая продукция</div>
                 <div class="tab" data-tab="history" onclick="Warehouse.setView('history')" style="padding:8px 16px; cursor:pointer; font-size:13px; color:var(--text-muted); border-bottom:2px solid transparent; margin-bottom:-2px;">История движений</div>
             </div>
 
@@ -2969,12 +2978,12 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="js/supabase.js?v=70"></script>
+<script src="js/supabase.js?v=71"></script>
 <script src="js/calculator.js?v=62"></script>
-<script src="js/app.js?v=77"></script>
+<script src="js/app.js?v=78"></script>
 <script src="js/dashboard.js?v=46g"></script>
 <script src="js/order-detail.js?v=48"></script>
-<script src="js/orders.js?v=52"></script>
+<script src="js/orders.js?v=53"></script>
 <script src="js/production_plan.js?v=73"></script>
 <script src="js/analytics.js?v=46g"></script>
 <script src="js/molds.js?v=66"></script>
@@ -2989,7 +2998,7 @@
 <script src="js/warehouse_photos.js?v=46g"></script>
 <script src="js/china_catalog.js?v=46k"></script>
 <script src="js/marketplaces.js?v=71"></script>
-<script src="js/warehouse.js?v=58"></script>
+<script src="js/warehouse.js?v=59"></script>
 <script src="js/settings.js?v=59"></script>
 </body>
 </html>

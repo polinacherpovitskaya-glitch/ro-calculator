@@ -388,6 +388,13 @@ const Warehouse = {
         el('wh-low-stock', lowStock);
         el('wh-frozen-total', this._formatMoney(frozenTotal));
         el('wh-frozen-hw', this._formatMoney(frozenHardware));
+
+        // Ready goods stats
+        const rg = loadReadyGoods();
+        const rgTotalQty = rg.reduce((s, i) => s + (parseFloat(i.qty) || 0), 0);
+        const rgFrozen = rg.reduce((s, i) => s + (parseFloat(i.qty) || 0) * (parseFloat(i.cost_per_unit) || 0), 0);
+        el('wh-ready-goods-count', rgTotalQty.toLocaleString('ru-RU'));
+        el('wh-frozen-rg', this._formatMoney(rgFrozen));
     },
 
     // ==========================================
@@ -1562,6 +1569,8 @@ const Warehouse = {
                 this.renderHistory();
             } else if (view === 'project-hardware') {
                 this.renderProjectHardwareView(token);
+            } else if (view === 'ready-goods') {
+                this.renderReadyGoodsView();
             } else {
                 this.filterAndRender();
             }
@@ -2228,29 +2237,398 @@ const Warehouse = {
     },
 
     _getReadyGoodsFrozenAmount() {
-        // Future-proof: read from potential ready-goods storages when B2C stock is introduced.
-        const possibleKeys = [
-            'ro_calc_ready_goods_stock',
-            'ro_calc_b2c_stock',
-            'ro_calc_marketplace_stock',
-        ];
-        for (const key of possibleKeys) {
-            try {
-                const raw = localStorage.getItem(key);
-                if (!raw) continue;
-                const parsed = JSON.parse(raw);
-                if (!Array.isArray(parsed)) continue;
-                const total = parsed.reduce((sum, row) => {
-                    const qty = Math.max(0, parseFloat(row.qty ?? row.quantity ?? row.stock_qty) || 0);
-                    const unitCost = Math.max(0, parseFloat(row.cost_per_unit ?? row.unit_cost ?? row.price_per_unit ?? row.cost) || 0);
-                    return sum + qty * unitCost;
-                }, 0);
-                if (total > 0) return total;
-            } catch (e) {
-                // Ignore malformed data and keep default 0.
-            }
+        const rg = loadReadyGoods();
+        return rg.reduce((sum, row) => {
+            const qty = Math.max(0, parseFloat(row.qty) || 0);
+            const unitCost = Math.max(0, parseFloat(row.cost_per_unit) || 0);
+            return sum + qty * unitCost;
+        }, 0);
+    },
+
+    // ==========================================
+    // READY GOODS (Готовая продукция)
+    // ==========================================
+
+    renderReadyGoodsView() {
+        const container = document.getElementById('wh-content');
+        if (!container) return;
+        const filtersCard = document.getElementById('wh-filters-card');
+        if (filtersCard) filtersCard.style.display = 'none';
+
+        const rg = loadReadyGoods();
+        const salesRecords = loadSalesRecords();
+
+        // Stats
+        const totalQty = rg.reduce((s, i) => s + (parseFloat(i.qty) || 0), 0);
+        const totalValue = rg.reduce((s, i) => s + (parseFloat(i.qty) || 0) * (parseFloat(i.cost_per_unit) || 0), 0);
+        const totalSalesRevenue = salesRecords.reduce((s, r) => s + (parseFloat(r.revenue) || 0), 0);
+        const totalSalesCost = salesRecords.reduce((s, r) => s + (parseFloat(r.qty) || 0) * (parseFloat(r.cost_per_unit) || 0), 0);
+        const totalProfit = totalSalesRevenue - totalSalesCost;
+
+        let html = `
+        <div class="stats-grid" style="margin-bottom:16px;">
+            <div class="stat-card">
+                <div class="stat-label">На складе (шт)</div>
+                <div class="stat-value">${totalQty}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Стоимость на складе</div>
+                <div class="stat-value">${this._formatMoney(totalValue)}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Выручка продаж</div>
+                <div class="stat-value" style="color:var(--green)">${this._formatMoney(totalSalesRevenue)}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Прибыль продаж</div>
+                <div class="stat-value" style="color:${totalProfit >= 0 ? 'var(--green)' : 'var(--red)'}">${this._formatMoney(totalProfit)}</div>
+            </div>
+        </div>
+
+        <div style="display:flex;gap:8px;margin-bottom:12px;">
+            <button class="btn btn-primary" onclick="Warehouse.showWriteOffDialog()">📤 Списать продажу</button>
+            <button class="btn btn-outline" onclick="Warehouse.showAddReadyGoodsDialog()">+ Добавить вручную</button>
+        </div>
+        `;
+
+        // Ready goods table
+        if (rg.length === 0) {
+            html += `<div class="card"><div class="empty-state">
+                <div class="empty-icon">📦</div>
+                <p>Нет готовой продукции на складе</p>
+                <p style="font-size:12px;color:var(--text-muted);">Товары появятся здесь когда заказы перейдут в статус «Готово»</p>
+            </div></div>`;
+        } else {
+            const rows = rg.filter(i => (parseFloat(i.qty) || 0) > 0).map(item => {
+                const cost = parseFloat(item.cost_per_unit) || 0;
+                const qty = parseFloat(item.qty) || 0;
+                return `<tr>
+                    <td style="font-weight:600;">${this.esc(item.product_name || '—')}</td>
+                    <td style="font-size:12px;color:var(--text-muted);">${this.esc(item.order_name || '—')}</td>
+                    <td style="font-size:12px;">${this.esc(item.marketplace_set || '—')}</td>
+                    <td class="text-right">${qty}</td>
+                    <td class="text-right">${this._formatMoney(cost)}</td>
+                    <td class="text-right">${this._formatMoney(qty * cost)}</td>
+                    <td style="font-size:11px;color:var(--text-muted);">${item.added_at ? new Date(item.added_at).toLocaleDateString('ru-RU') : '—'}</td>
+                </tr>`;
+            }).join('');
+
+            html += `<div class="card" style="margin-bottom:16px;"><div class="table-wrap"><table>
+                <thead><tr>
+                    <th>Товар</th>
+                    <th>Из заказа</th>
+                    <th>Набор</th>
+                    <th class="text-right">Кол-во</th>
+                    <th class="text-right">Себестоимость/шт</th>
+                    <th class="text-right">Сумма</th>
+                    <th>Дата</th>
+                </tr></thead>
+                <tbody>${rows}</tbody>
+            </table></div></div>`;
         }
-        return 0;
+
+        // Sales history
+        if (salesRecords.length > 0) {
+            const salesRows = [...salesRecords].sort((a, b) => new Date(b.date) - new Date(a.date)).map(r => {
+                const channel = r.channel === 'marketplace' ? '🏪 Маркетплейс' : (r.channel === 'website' ? '🌐 Сайт' : '📋 Другое');
+                const profit = (parseFloat(r.revenue) || 0) - (parseFloat(r.qty) || 0) * (parseFloat(r.cost_per_unit) || 0);
+                return `<tr>
+                    <td style="font-size:12px;">${r.date ? new Date(r.date).toLocaleDateString('ru-RU') : '—'}</td>
+                    <td style="font-weight:600;">${this.esc(r.product_name || '—')}</td>
+                    <td>${channel}</td>
+                    <td class="text-right">${r.qty || 0}</td>
+                    <td class="text-right">${this._formatMoney(r.revenue || 0)}</td>
+                    <td class="text-right">${this._formatMoney(r.payout || 0)}</td>
+                    <td class="text-right" style="color:${profit >= 0 ? 'var(--green)' : 'var(--red)'}">${this._formatMoney(profit)}</td>
+                    <td style="font-size:11px;color:var(--text-muted);">${this.esc(r.notes || '')}</td>
+                </tr>`;
+            }).join('');
+
+            html += `<h3 style="margin:16px 0 8px;">История продаж</h3>
+            <div class="card"><div class="table-wrap"><table>
+                <thead><tr>
+                    <th>Дата</th>
+                    <th>Товар</th>
+                    <th>Канал</th>
+                    <th class="text-right">Кол-во</th>
+                    <th class="text-right">Выручка</th>
+                    <th class="text-right">Поступление</th>
+                    <th class="text-right">Прибыль</th>
+                    <th>Заметки</th>
+                </tr></thead>
+                <tbody>${salesRows}</tbody>
+            </table></div></div>`;
+        }
+
+        container.innerHTML = html;
+    },
+
+    showWriteOffDialog() {
+        const rg = loadReadyGoods().filter(i => (parseFloat(i.qty) || 0) > 0);
+        if (rg.length === 0) {
+            App.toast('Нет товаров для списания');
+            return;
+        }
+
+        const existing = document.getElementById('rg-writeoff-dialog');
+        if (existing) existing.remove();
+
+        const opts = rg.map((item, i) => {
+            const label = `${item.product_name} (${item.qty} шт, себест. ${this._formatMoney(item.cost_per_unit || 0)})`;
+            return `<option value="${i}">${this.esc(label)}</option>`;
+        }).join('');
+
+        const overlay = document.createElement('div');
+        overlay.id = 'rg-writeoff-dialog';
+        overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.35);z-index:1000;display:flex;align-items:center;justify-content:center;';
+        overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+
+        overlay.innerHTML = `
+        <div style="background:var(--card-bg,#fff);border-radius:12px;padding:24px;width:480px;max-width:90vw;box-shadow:0 8px 32px rgba(0,0,0,.2);">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+                <h3 style="margin:0;font-size:16px;">📤 Списать продажу</h3>
+                <button onclick="this.closest('#rg-writeoff-dialog').remove()" class="btn-remove" style="font-size:10px;width:24px;height:24px;">✕</button>
+            </div>
+            <div style="margin-bottom:12px;">
+                <label style="display:block;font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:4px;">Товар</label>
+                <select id="rg-wo-product" class="calc-input" style="width:100%;">${opts}</select>
+            </div>
+            <div style="display:flex;gap:8px;margin-bottom:12px;">
+                <div style="flex:1;">
+                    <label style="display:block;font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:4px;">Кол-во</label>
+                    <input id="rg-wo-qty" type="number" class="calc-input" value="1" min="1" style="width:100%;">
+                </div>
+                <div style="flex:1;">
+                    <label style="display:block;font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:4px;">Канал</label>
+                    <select id="rg-wo-channel" class="calc-input" style="width:100%;">
+                        <option value="website">🌐 Сайт (эквайринг)</option>
+                        <option value="marketplace">🏪 Маркетплейс</option>
+                        <option value="other">📋 Другое</option>
+                    </select>
+                </div>
+            </div>
+            <div style="display:flex;gap:8px;margin-bottom:12px;">
+                <div style="flex:1;">
+                    <label style="display:block;font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:4px;">Выручка (цена продажи × кол-во)</label>
+                    <input id="rg-wo-revenue" type="number" class="calc-input" value="0" min="0" step="0.01" style="width:100%;">
+                </div>
+                <div style="flex:1;">
+                    <label style="display:block;font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:4px;">Фактическое поступление (за вычетом комиссий)</label>
+                    <input id="rg-wo-payout" type="number" class="calc-input" value="0" min="0" step="0.01" style="width:100%;">
+                </div>
+            </div>
+            <div style="margin-bottom:16px;">
+                <label style="display:block;font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:4px;">Заметки</label>
+                <input id="rg-wo-notes" type="text" class="calc-input" placeholder="Wildberries, Ozon, эквайринг..." style="width:100%;">
+            </div>
+            <div style="display:flex;gap:8px;justify-content:flex-end;">
+                <button class="btn btn-outline" onclick="this.closest('#rg-writeoff-dialog').remove()">Отмена</button>
+                <button class="btn btn-primary" onclick="Warehouse.doWriteOff()">Списать</button>
+            </div>
+        </div>`;
+        document.body.appendChild(overlay);
+    },
+
+    doWriteOff() {
+        const rg = loadReadyGoods().filter(i => (parseFloat(i.qty) || 0) > 0);
+        const idx = parseInt(document.getElementById('rg-wo-product').value);
+        const item = rg[idx];
+        if (!item) { App.toast('Товар не найден'); return; }
+
+        const qty = parseInt(document.getElementById('rg-wo-qty').value) || 0;
+        if (qty <= 0) { App.toast('Укажите количество'); return; }
+        if (qty > item.qty) { App.toast(`На складе только ${item.qty} шт`); return; }
+
+        const channel = document.getElementById('rg-wo-channel').value;
+        const revenue = parseFloat(document.getElementById('rg-wo-revenue').value) || 0;
+        const payout = parseFloat(document.getElementById('rg-wo-payout').value) || 0;
+        const notes = (document.getElementById('rg-wo-notes').value || '').trim();
+
+        // Deduct from ready goods
+        const allRg = loadReadyGoods();
+        const rgItem = allRg.find(i => i.id === item.id);
+        if (rgItem) {
+            rgItem.qty = Math.max(0, (rgItem.qty || 0) - qty);
+        }
+        saveReadyGoods(allRg);
+
+        // Record sale
+        const records = loadSalesRecords();
+        records.push({
+            id: Date.now(),
+            ready_goods_id: item.id,
+            product_name: item.product_name,
+            order_name: item.order_name || '',
+            marketplace_set: item.marketplace_set || '',
+            channel,
+            qty,
+            cost_per_unit: item.cost_per_unit || 0,
+            revenue,
+            payout,
+            notes,
+            date: new Date().toISOString(),
+            created_by: App.getCurrentEmployeeName() || '',
+        });
+        saveSalesRecords(records);
+
+        // History
+        const history = loadReadyGoodsHistory();
+        history.push({
+            id: Date.now(),
+            type: 'writeoff',
+            product_name: item.product_name,
+            qty: -qty,
+            channel,
+            revenue,
+            payout,
+            notes: `Продажа: ${channel === 'marketplace' ? 'маркетплейс' : channel === 'website' ? 'сайт' : 'другое'}. ${notes}`,
+            date: new Date().toISOString(),
+            created_by: App.getCurrentEmployeeName() || '',
+        });
+        saveReadyGoodsHistory(history);
+
+        const dialog = document.getElementById('rg-writeoff-dialog');
+        if (dialog) dialog.remove();
+
+        App.toast(`Списано ${qty} шт «${item.product_name}»`);
+        this.renderStats();
+        this.renderReadyGoodsView();
+    },
+
+    showAddReadyGoodsDialog() {
+        const existing = document.getElementById('rg-add-dialog');
+        if (existing) existing.remove();
+
+        const overlay = document.createElement('div');
+        overlay.id = 'rg-add-dialog';
+        overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.35);z-index:1000;display:flex;align-items:center;justify-content:center;';
+        overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+
+        overlay.innerHTML = `
+        <div style="background:var(--card-bg,#fff);border-radius:12px;padding:24px;width:440px;max-width:90vw;box-shadow:0 8px 32px rgba(0,0,0,.2);">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+                <h3 style="margin:0;font-size:16px;">+ Добавить готовую продукцию</h3>
+                <button onclick="this.closest('#rg-add-dialog').remove()" class="btn-remove" style="font-size:10px;width:24px;height:24px;">✕</button>
+            </div>
+            <div style="margin-bottom:12px;">
+                <label style="display:block;font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:4px;">Название товара</label>
+                <input id="rg-add-name" type="text" class="calc-input" placeholder="Брелок Треугольник" style="width:100%;">
+            </div>
+            <div style="display:flex;gap:8px;margin-bottom:12px;">
+                <div style="flex:1;">
+                    <label style="display:block;font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:4px;">Количество</label>
+                    <input id="rg-add-qty" type="number" class="calc-input" value="1" min="1" style="width:100%;">
+                </div>
+                <div style="flex:1;">
+                    <label style="display:block;font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:4px;">Себестоимость/шт</label>
+                    <input id="rg-add-cost" type="number" class="calc-input" value="0" min="0" step="0.01" style="width:100%;">
+                </div>
+            </div>
+            <div style="margin-bottom:16px;">
+                <label style="display:block;font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:4px;">Набор / Заметка</label>
+                <input id="rg-add-set" type="text" class="calc-input" placeholder="Название набора" style="width:100%;">
+            </div>
+            <div style="display:flex;gap:8px;justify-content:flex-end;">
+                <button class="btn btn-outline" onclick="this.closest('#rg-add-dialog').remove()">Отмена</button>
+                <button class="btn btn-primary" onclick="Warehouse.doAddReadyGoods()">Добавить</button>
+            </div>
+        </div>`;
+        document.body.appendChild(overlay);
+    },
+
+    doAddReadyGoods() {
+        const name = (document.getElementById('rg-add-name').value || '').trim();
+        if (!name) { App.toast('Укажите название'); return; }
+        const qty = parseInt(document.getElementById('rg-add-qty').value) || 0;
+        if (qty <= 0) { App.toast('Укажите количество'); return; }
+        const cost = parseFloat(document.getElementById('rg-add-cost').value) || 0;
+        const setName = (document.getElementById('rg-add-set').value || '').trim();
+
+        const rg = loadReadyGoods();
+        rg.push({
+            id: Date.now(),
+            product_name: name,
+            order_name: 'Ручное добавление',
+            order_id: null,
+            marketplace_set: setName,
+            qty,
+            cost_per_unit: cost,
+            added_at: new Date().toISOString(),
+            added_by: App.getCurrentEmployeeName() || '',
+        });
+        saveReadyGoods(rg);
+
+        const history = loadReadyGoodsHistory();
+        history.push({
+            id: Date.now(),
+            type: 'manual_add',
+            product_name: name,
+            qty,
+            notes: `Ручное добавление: ${name} × ${qty}`,
+            date: new Date().toISOString(),
+            created_by: App.getCurrentEmployeeName() || '',
+        });
+        saveReadyGoodsHistory(history);
+
+        const dialog = document.getElementById('rg-add-dialog');
+        if (dialog) dialog.remove();
+        App.toast(`Добавлено ${qty} шт «${name}»`);
+        this.renderStats();
+        this.renderReadyGoodsView();
+    },
+
+    // Move products from a completed order to ready goods
+    async moveOrderToReadyGoods(orderId, orderName) {
+        const data = await loadOrder(orderId);
+        if (!data || !data.items) return;
+
+        const rg = loadReadyGoods();
+        const history = loadReadyGoodsHistory();
+        const nowIso = new Date().toISOString();
+        const employee = App.getCurrentEmployeeName() || '';
+        let addedCount = 0;
+
+        // Only move product-type items (not hardware/packaging raw materials)
+        data.items.filter(it => it.item_type === 'product').forEach(item => {
+            const qty = parseFloat(item.quantity) || 0;
+            if (qty <= 0) return;
+
+            // Calculate unit cost: total cost / quantity
+            const costTotal = parseFloat(item.cost_total) || 0;
+            const costPerUnit = qty > 0 ? Math.round(costTotal * 100) / 100 : 0;
+
+            rg.push({
+                id: Date.now() + addedCount,
+                product_name: item.product_name || 'Товар',
+                order_name: orderName || 'Заказ',
+                order_id: orderId,
+                marketplace_set: item.marketplace_set_name || '',
+                qty,
+                cost_per_unit: costPerUnit,
+                added_at: nowIso,
+                added_by: employee,
+            });
+
+            history.push({
+                id: Date.now() + addedCount + 50000,
+                type: 'from_order',
+                product_name: item.product_name || 'Товар',
+                order_name: orderName,
+                qty,
+                cost_per_unit: costPerUnit,
+                notes: `Из заказа «${orderName}»: ${item.product_name} × ${qty}`,
+                date: nowIso,
+                created_by: employee,
+            });
+
+            addedCount++;
+        });
+
+        if (addedCount > 0) {
+            saveReadyGoods(rg);
+            saveReadyGoodsHistory(history);
+        }
+        return addedCount;
     },
 
     _getSeedPhotoMapBySku() {
