@@ -579,6 +579,10 @@ const App = {
         return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
     },
 
+    getItemOriginLabel(item) {
+        return item && item.is_blank_mold ? 'бланк' : 'кастом';
+    },
+
     statusLabel(status) {
         const map = {
             draft:                'Черновик',
@@ -3040,7 +3044,7 @@ const Calculator = {
                 }
                 // Do NOT auto-fill sell_price_item — manager enters manually
                 columns.push({
-                    label: item.product_name || 'Изделие ' + (i + 1),
+                    label: (item.product_name || 'Изделие ' + (i + 1)) + ` (${App.getItemOriginLabel(item)})`,
                     type: 'item',
                     globalIdx,
                     isBlank: true,
@@ -3051,7 +3055,7 @@ const Calculator = {
             } else {
                 // Custom mold: show margin targets
                 columns.push({
-                    label: item.product_name || 'Изделие ' + (i + 1),
+                    label: (item.product_name || 'Изделие ' + (i + 1)) + ` (${App.getItemOriginLabel(item)})`,
                     type: 'item',
                     globalIdx,
                     isBlank: false,
@@ -3240,7 +3244,7 @@ const Calculator = {
             let itemPrice = item.sell_price_item;
             if (itemPrice > 0) {
                 invoiceRows.push({
-                    name: item.product_name || 'Изделие ' + (i + 1),
+                    name: (item.product_name || 'Изделие ' + (i + 1)) + ` (${App.getItemOriginLabel(item)})`,
                     qty: qty,
                     price: itemPrice,
                     total: round2(itemPrice * qty),
