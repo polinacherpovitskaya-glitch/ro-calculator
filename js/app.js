@@ -563,7 +563,19 @@ const App = {
 
     formatDate(dateStr) {
         if (!dateStr) return '—';
+        const raw = String(dateStr).trim();
+        const plainDateMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (plainDateMatch) {
+            const [, year, month, day] = plainDateMatch;
+            return `${day}.${month}.${year}`;
+        }
+        const isoLikeMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})T/);
+        if (isoLikeMatch) {
+            const [, year, month, day] = isoLikeMatch;
+            return `${day}.${month}.${year}`;
+        }
         const d = new Date(dateStr);
+        if (Number.isNaN(d.getTime())) return raw;
         return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
     },
 
