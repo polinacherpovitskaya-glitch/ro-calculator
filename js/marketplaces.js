@@ -488,9 +488,11 @@ const Marketplaces = {
 
     _selectHw(idx, listId) {
         const item = this._hwItems[idx];
-        if (listId >= 10000) {
+        const numericId = Number(listId);
+        if (numericId >= 10000) {
             // Warehouse item
-            const wh = this._allWarehouseHw.find(w => w.id === (listId - 10000));
+            const whId = numericId - 10000;
+            const wh = this._allWarehouseHw.find(w => Number(w.id) === whId);
             if (wh) {
                 item.source = 'warehouse';
                 item.wh_id = wh.id;
@@ -502,7 +504,7 @@ const Marketplaces = {
             }
         } else {
             // Catalog item
-            const hw = this._hwCatalog.find(b => b.id === listId);
+            const hw = this._hwCatalog.find(b => Number(b.id) === numericId);
             if (hw) {
                 item.source = 'catalog';
                 item.blank_id = hw.id;
@@ -518,8 +520,10 @@ const Marketplaces = {
 
     _selectPkg(idx, listId) {
         const item = this._pkgItems[idx];
-        if (listId >= 10000) {
-            const wh = this._allWarehousePkg.find(w => w.id === (listId - 10000));
+        const numericId = Number(listId);
+        if (numericId >= 10000) {
+            const whId = numericId - 10000;
+            const wh = this._allWarehousePkg.find(w => Number(w.id) === whId);
             if (wh) {
                 item.source = 'warehouse';
                 item.wh_id = wh.id;
@@ -530,7 +534,7 @@ const Marketplaces = {
                 item.assembly_speed = linkedBlank?.assembly_speed || 0;
             }
         } else {
-            const pkg = this._pkgCatalog.find(b => b.id === listId);
+            const pkg = this._pkgCatalog.find(b => Number(b.id) === numericId);
             if (pkg) {
                 item.source = 'catalog';
                 item.blank_id = pkg.id;

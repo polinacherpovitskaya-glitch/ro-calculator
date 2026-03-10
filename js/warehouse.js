@@ -386,7 +386,7 @@ const Warehouse = {
     // STATS
     // ==========================================
 
-    renderStats() {
+    async renderStats() {
         const items = this.allItems;
         const totalItems = items.length;
         const totalQty = items.reduce((s, i) => s + (i.qty || 0), 0);
@@ -397,7 +397,7 @@ const Warehouse = {
             const unitCost = Math.max(0, parseFloat(i.price_per_unit) || 0);
             return s + qty * unitCost;
         }, 0);
-        const frozenReadyGoods = this._getReadyGoodsFrozenAmount();
+        const frozenReadyGoods = await this._getReadyGoodsFrozenAmount();
         const frozenTotal = frozenHardware + frozenReadyGoods;
 
         const el = (id, val) => { const e = document.getElementById(id); if (e) e.textContent = val; };
@@ -409,7 +409,7 @@ const Warehouse = {
         el('wh-frozen-hw', this._formatMoney(frozenHardware));
 
         // Ready goods stats
-        const rg = loadReadyGoods();
+        const rg = await loadReadyGoods();
         const rgTotalQty = rg.reduce((s, i) => s + (parseFloat(i.qty) || 0), 0);
         const rgFrozen = rg.reduce((s, i) => s + (parseFloat(i.qty) || 0) * (parseFloat(i.cost_per_unit) || 0), 0);
         el('wh-ready-goods-count', rgTotalQty.toLocaleString('ru-RU'));
@@ -2276,8 +2276,8 @@ const Warehouse = {
         return `${rounded.toLocaleString('ru-RU')} ₽`;
     },
 
-    _getReadyGoodsFrozenAmount() {
-        const rg = loadReadyGoods();
+    async _getReadyGoodsFrozenAmount() {
+        const rg = await loadReadyGoods();
         return rg.reduce((sum, row) => {
             const qty = Math.max(0, parseFloat(row.qty) || 0);
             const unitCost = Math.max(0, parseFloat(row.cost_per_unit) || 0);
@@ -2289,14 +2289,14 @@ const Warehouse = {
     // READY GOODS (Готовая продукция)
     // ==========================================
 
-    renderReadyGoodsView() {
+    async renderReadyGoodsView() {
         const container = document.getElementById('wh-content');
         if (!container) return;
         const filtersCard = document.getElementById('wh-filters-card');
         if (filtersCard) filtersCard.style.display = 'none';
 
-        const rg = loadReadyGoods();
-        const salesRecords = loadSalesRecords();
+        const rg = await loadReadyGoods();
+        const salesRecords = await loadSalesRecords();
 
         // Stats
         const totalQty = rg.reduce((s, i) => s + (parseFloat(i.qty) || 0), 0);
@@ -2403,8 +2403,8 @@ const Warehouse = {
         container.innerHTML = html;
     },
 
-    showWriteOffDialog() {
-        const rg = loadReadyGoods().filter(i => (parseFloat(i.qty) || 0) > 0);
+    async showWriteOffDialog() {
+        const rg = (await loadReadyGoods()).filter(i => (parseFloat(i.qty) || 0) > 0);
         if (rg.length === 0) {
             App.toast('Нет товаров для списания');
             return;
@@ -2469,8 +2469,8 @@ const Warehouse = {
         document.body.appendChild(overlay);
     },
 
-    doWriteOff() {
-        const rg = loadReadyGoods().filter(i => (parseFloat(i.qty) || 0) > 0);
+    async doWriteOff() {
+        const rg = (await loadReadyGoods()).filter(i => (parseFloat(i.qty) || 0) > 0);
         const idx = parseInt(document.getElementById('rg-wo-product').value);
         const item = rg[idx];
         if (!item) { App.toast('Товар не найден'); return; }
@@ -2485,15 +2485,15 @@ const Warehouse = {
         const notes = (document.getElementById('rg-wo-notes').value || '').trim();
 
         // Deduct from ready goods
-        const allRg = loadReadyGoods();
+        const allRg = await loadReadyGoods();
         const rgItem = allRg.find(i => i.id === item.id);
         if (rgItem) {
             rgItem.qty = Math.max(0, (rgItem.qty || 0) - qty);
         }
-        saveReadyGoods(allRg);
+        await saveReadyGoods(allRg);
 
         // Record sale
-        const records = loadSalesRecords();
+        const records = await loadSalesRecords();
         records.push({
             id: Date.now(),
             ready_goods_id: item.id,
@@ -2509,10 +2509,10 @@ const Warehouse = {
             date: new Date().toISOString(),
             created_by: App.getCurrentEmployeeName() || '',
         });
-        saveSalesRecords(records);
+        await saveSalesRecords(records);
 
         // History
-        const history = loadReadyGoodsHistory();
+        const history = await loadReadyGoodsHistory();
         history.push({
             id: Date.now(),
             type: 'writeoff',
@@ -2525,7 +2525,7 @@ const Warehouse = {
             date: new Date().toISOString(),
             created_by: App.getCurrentEmployeeName() || '',
         });
-        saveReadyGoodsHistory(history);
+        await saveReadyGoodsHistory(history);
 
         const dialog = document.getElementById('rg-writeoff-dialog');
         if (dialog) dialog.remove();
@@ -2576,7 +2576,7 @@ const Warehouse = {
         document.body.appendChild(overlay);
     },
 
-    doAddReadyGoods() {
+    async doAddReadyGoods() {
         const name = (document.getElementById('rg-add-name').value || '').trim();
         if (!name) { App.toast('Укажите название'); return; }
         const qty = parseInt(document.getElementById('rg-add-qty').value) || 0;
@@ -2584,7 +2584,7 @@ const Warehouse = {
         const cost = parseFloat(document.getElementById('rg-add-cost').value) || 0;
         const setName = (document.getElementById('rg-add-set').value || '').trim();
 
-        const rg = loadReadyGoods();
+        const rg = await loadReadyGoods();
         rg.push({
             id: Date.now(),
             product_name: name,
@@ -2596,9 +2596,9 @@ const Warehouse = {
             added_at: new Date().toISOString(),
             added_by: App.getCurrentEmployeeName() || '',
         });
-        saveReadyGoods(rg);
+        await saveReadyGoods(rg);
 
-        const history = loadReadyGoodsHistory();
+        const history = await loadReadyGoodsHistory();
         history.push({
             id: Date.now(),
             type: 'manual_add',
@@ -2608,7 +2608,7 @@ const Warehouse = {
             date: new Date().toISOString(),
             created_by: App.getCurrentEmployeeName() || '',
         });
-        saveReadyGoodsHistory(history);
+        await saveReadyGoodsHistory(history);
 
         const dialog = document.getElementById('rg-add-dialog');
         if (dialog) dialog.remove();
@@ -2622,8 +2622,8 @@ const Warehouse = {
         const data = await loadOrder(orderId);
         if (!data || !data.items) return;
 
-        const rg = loadReadyGoods();
-        const history = loadReadyGoodsHistory();
+        const rg = await loadReadyGoods();
+        const history = await loadReadyGoodsHistory();
         const nowIso = new Date().toISOString();
         const employee = App.getCurrentEmployeeName() || '';
         let addedCount = 0;
@@ -2665,8 +2665,8 @@ const Warehouse = {
         });
 
         if (addedCount > 0) {
-            saveReadyGoods(rg);
-            saveReadyGoodsHistory(history);
+            await saveReadyGoods(rg);
+            await saveReadyGoodsHistory(history);
         }
         return addedCount;
     },

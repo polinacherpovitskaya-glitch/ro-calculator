@@ -36,6 +36,7 @@ const LOCAL_KEYS = {
     timeEntries: 'ro_calc_time_entries',
     tasks: 'ro_calc_tasks',
     chinaPurchases: 'ro_calc_china_purchases',
+    chinaOrders: 'ro_calc_china_orders',
     vacations: 'ro_calc_vacations',
     employees: 'ro_calc_employees',
     authAccounts: 'ro_calc_auth_accounts',
@@ -764,7 +765,6 @@ async function saveFactual(orderId, factData) {
     if (typeof orderId === 'string' && /^\d+$/.test(orderId)) orderId = Number(orderId);
     const record = { ...factData, order_id: orderId, updated_at: new Date().toISOString() };
     if (isSupabaseReady()) {
-        // Check if exists
         const existing = await loadFactual(orderId);
         if (existing) {
             const { error } = await supabaseClient
@@ -778,17 +778,17 @@ async function saveFactual(orderId, factData) {
                 .insert(record);
             if (error) console.error('saveFactual insert error:', error);
         }
-    } else {
-        const all = getLocal(LOCAL_KEYS.orderFactuals) || [];
-        const idx = all.findIndex(f => f.order_id === orderId);
-        if (idx >= 0) {
-            all[idx] = record;
-        } else {
-            record.id = Date.now();
-            all.push(record);
-        }
-        setLocal(LOCAL_KEYS.orderFactuals, all);
     }
+    // ALWAYS write to localStorage (dual-write)
+    const all = getLocal(LOCAL_KEYS.orderFactuals) || [];
+    const idx = all.findIndex(f => f.order_id === orderId);
+    if (idx >= 0) {
+        all[idx] = record;
+    } else {
+        record.id = record.id || Date.now();
+        all.push(record);
+    }
+    setLocal(LOCAL_KEYS.orderFactuals, all);
 }
 
 // =============================================
@@ -898,34 +898,71 @@ async function loadMolds() {
         try {
             const { data, error } = await supabaseClient.from('molds').select('*').order('name');
             if (error) console.error('loadMolds error:', error);
-            if (data && data.length > 0) {
-                const molds = data.map(row => {
-                    if (row.mold_data) {
-                        try {
-                            const parsed = typeof row.mold_data === 'string' ? JSON.parse(row.mold_data) : row.mold_data;
-                            return { ...parsed, id: row.id };
-                        } catch(e) { /* fallthrough */ }
-                    }
-                    return row;
-                });
-                setLocal(LOCAL_KEYS.molds, molds);
-                return molds;
-            }
-            // Migration
-            const local = getLocal(LOCAL_KEYS.molds) || getDefaultMolds();
-            if (local.length > 0) {
-                console.log('Migrating', local.length, 'molds to Supabase...');
-                for (const m of local) {
+
+            // Parse Supabase rows
+            const _parseMoldRow = (row) => {
+                if (row.mold_data) {
                     try {
-                        await supabaseClient.from('molds').upsert({
-                            id: m.id || Date.now(), name: m.name || '', mold_data: JSON.stringify(m),
-                            created_at: m.created_at || new Date().toISOString(), updated_at: m.updated_at || new Date().toISOString(),
-                        }, { onConflict: 'id' });
-                    } catch(e) { console.warn('Mold migration error:', e); }
+                        const parsed = typeof row.mold_data === 'string' ? JSON.parse(row.mold_data) : row.mold_data;
+                        return { ...parsed, id: row.id };
+                    } catch(e) { /* fallthrough */ }
                 }
-                return local;
+                return row;
+            };
+            const supabaseMolds = (data || []).map(_parseMoldRow);
+
+            // Smart merge: push local records that are newer or missing in Supabase
+            const localMolds = getLocal(LOCAL_KEYS.molds) || [];
+            if (localMolds.length > 0) {
+                const sbMap = new Map(supabaseMolds.map(m => [m.id, m]));
+                const sbUpdatedMap = new Map((data || []).map(r => [r.id, r.updated_at]));
+                let pushed = 0;
+                for (const local of localMolds) {
+                    if (!local.id) continue;
+                    const sbExists = sbMap.has(local.id);
+                    const sbTime = sbUpdatedMap.get(local.id);
+                    const localNewer = local.updated_at && sbTime && new Date(local.updated_at) > new Date(sbTime);
+                    if (!sbExists || localNewer) {
+                        try {
+                            await supabaseClient.from('molds').upsert({
+                                id: local.id, name: local.name || '', mold_data: JSON.stringify(local),
+                                created_at: local.created_at || new Date().toISOString(),
+                                updated_at: local.updated_at || new Date().toISOString(),
+                            }, { onConflict: 'id' });
+                            pushed++;
+                        } catch(e) { console.warn('Mold merge error:', e); }
+                    }
+                }
+                if (pushed > 0) {
+                    console.log(`[Molds] Smart-merged ${pushed} local records to Supabase`);
+                    // Re-fetch merged data
+                    const { data: refreshed } = await supabaseClient.from('molds').select('*').order('name');
+                    if (refreshed && refreshed.length > 0) {
+                        const merged = refreshed.map(_parseMoldRow);
+                        setLocal(LOCAL_KEYS.molds, merged);
+                        return merged;
+                    }
+                }
             }
-            return getDefaultMolds();
+
+            if (supabaseMolds.length > 0) {
+                setLocal(LOCAL_KEYS.molds, supabaseMolds);
+                return supabaseMolds;
+            }
+
+            // Supabase truly empty — seed from localStorage or defaults
+            const seedData = localMolds.length > 0 ? localMolds : getDefaultMolds();
+            console.log('Seeding', seedData.length, 'molds to Supabase...');
+            for (const m of seedData) {
+                try {
+                    await supabaseClient.from('molds').upsert({
+                        id: m.id || Date.now(), name: m.name || '', mold_data: JSON.stringify(m),
+                        created_at: m.created_at || new Date().toISOString(), updated_at: m.updated_at || new Date().toISOString(),
+                    }, { onConflict: 'id' });
+                } catch(e) { console.warn('Mold seed error:', e); }
+            }
+            setLocal(LOCAL_KEYS.molds, seedData);
+            return seedData;
         } catch(e) {
             console.error('loadMolds exception:', e);
             return getLocal(LOCAL_KEYS.molds) || getDefaultMolds();
@@ -2305,19 +2342,64 @@ async function deleteMarketplaceSet(setId) {
 // READY GOODS (Готовая продукция)
 // =============================================
 
-function loadReadyGoods() {
+async function loadReadyGoods() {
+    if (isSupabaseReady()) {
+        try {
+            const { data } = await supabaseClient.from('ready_goods').select('*').eq('id', 1).maybeSingle();
+            if (data && data.goods_data) {
+                const parsed = typeof data.goods_data === 'string' ? JSON.parse(data.goods_data) : data.goods_data;
+                setLocal(LOCAL_KEYS.readyGoods, parsed);
+                return parsed;
+            }
+            // Migration from localStorage
+            const local = getLocal(LOCAL_KEYS.readyGoods) || [];
+            if (local.length > 0) {
+                console.log('Migrating', local.length, 'ready goods to Supabase...');
+                await supabaseClient.from('ready_goods').upsert({ id: 1, goods_data: JSON.stringify(local), updated_at: new Date().toISOString() }, { onConflict: 'id' });
+            }
+            return local;
+        } catch(e) { console.error('loadReadyGoods exception:', e); return getLocal(LOCAL_KEYS.readyGoods) || []; }
+    }
     return getLocal(LOCAL_KEYS.readyGoods) || [];
 }
 
-function saveReadyGoods(items) {
+async function saveReadyGoods(items) {
+    if (isSupabaseReady()) {
+        try {
+            const { error } = await supabaseClient.from('ready_goods').upsert({ id: 1, goods_data: JSON.stringify(items), updated_at: new Date().toISOString() }, { onConflict: 'id' });
+            if (error) console.error('saveReadyGoods error:', error);
+        } catch(e) { console.error('saveReadyGoods exception:', e); }
+    }
     setLocal(LOCAL_KEYS.readyGoods, items);
 }
 
-function loadReadyGoodsHistory() {
+async function loadReadyGoodsHistory() {
+    if (isSupabaseReady()) {
+        try {
+            const { data } = await supabaseClient.from('ready_goods_history').select('*').eq('id', 1).maybeSingle();
+            if (data && data.history_data) {
+                const parsed = typeof data.history_data === 'string' ? JSON.parse(data.history_data) : data.history_data;
+                setLocal(LOCAL_KEYS.readyGoodsHistory, parsed);
+                return parsed;
+            }
+            const local = getLocal(LOCAL_KEYS.readyGoodsHistory) || [];
+            if (local.length > 0) {
+                console.log('Migrating ready goods history to Supabase...');
+                await supabaseClient.from('ready_goods_history').upsert({ id: 1, history_data: JSON.stringify(local), updated_at: new Date().toISOString() }, { onConflict: 'id' });
+            }
+            return local;
+        } catch(e) { console.error('loadReadyGoodsHistory exception:', e); return getLocal(LOCAL_KEYS.readyGoodsHistory) || []; }
+    }
     return getLocal(LOCAL_KEYS.readyGoodsHistory) || [];
 }
 
-function saveReadyGoodsHistory(history) {
+async function saveReadyGoodsHistory(history) {
+    if (isSupabaseReady()) {
+        try {
+            const { error } = await supabaseClient.from('ready_goods_history').upsert({ id: 1, history_data: JSON.stringify(history), updated_at: new Date().toISOString() }, { onConflict: 'id' });
+            if (error) console.error('saveReadyGoodsHistory error:', error);
+        } catch(e) { console.error('saveReadyGoodsHistory exception:', e); }
+    }
     setLocal(LOCAL_KEYS.readyGoodsHistory, history);
 }
 
@@ -2325,10 +2407,32 @@ function saveReadyGoodsHistory(history) {
 // SALES RECORDS (Записи продаж)
 // =============================================
 
-function loadSalesRecords() {
+async function loadSalesRecords() {
+    if (isSupabaseReady()) {
+        try {
+            const { data } = await supabaseClient.from('sales_records').select('*').eq('id', 1).maybeSingle();
+            if (data && data.records_data) {
+                const parsed = typeof data.records_data === 'string' ? JSON.parse(data.records_data) : data.records_data;
+                setLocal(LOCAL_KEYS.salesRecords, parsed);
+                return parsed;
+            }
+            const local = getLocal(LOCAL_KEYS.salesRecords) || [];
+            if (local.length > 0) {
+                console.log('Migrating sales records to Supabase...');
+                await supabaseClient.from('sales_records').upsert({ id: 1, records_data: JSON.stringify(local), updated_at: new Date().toISOString() }, { onConflict: 'id' });
+            }
+            return local;
+        } catch(e) { console.error('loadSalesRecords exception:', e); return getLocal(LOCAL_KEYS.salesRecords) || []; }
+    }
     return getLocal(LOCAL_KEYS.salesRecords) || [];
 }
 
-function saveSalesRecords(records) {
+async function saveSalesRecords(records) {
+    if (isSupabaseReady()) {
+        try {
+            const { error } = await supabaseClient.from('sales_records').upsert({ id: 1, records_data: JSON.stringify(records), updated_at: new Date().toISOString() }, { onConflict: 'id' });
+            if (error) console.error('saveSalesRecords error:', error);
+        } catch(e) { console.error('saveSalesRecords exception:', e); }
+    }
     setLocal(LOCAL_KEYS.salesRecords, records);
 }
