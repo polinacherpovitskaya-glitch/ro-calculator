@@ -638,6 +638,7 @@ const Calculator = {
     _hwBlanksCatalog: [],
     _pkgBlanksCatalog: [],
     _blanksCatalogLoaded: false,
+    _preserveStateOnNextInit: false,
 
     async init() {
         // Ensure colors are loaded for color picker
@@ -653,23 +654,11 @@ const Calculator = {
             console.error('[Calculator.init] load blanks catalog error:', e);
         }
 
-        if (this.items.length === 0 && !App.editingOrderId) {
-            // Try to restore last editing session after page refresh
-            const savedId = localStorage.getItem('ro_calc_editing_order_id');
-            if (savedId) {
-                try {
-                    await this.loadOrder(parseInt(savedId));
-                    console.log('[Calculator.init] Restored draft order #' + savedId);
-                } catch (e) {
-                    console.warn('[Calculator.init] Could not restore draft:', e);
-                    localStorage.removeItem('ro_calc_editing_order_id');
-                    this.resetForm();
-                    this.addItem();
-                }
-            } else {
-                this.resetForm();
-                this.addItem();
-            }
+        if (this._preserveStateOnNextInit) {
+            this._preserveStateOnNextInit = false;
+        } else {
+            this.resetForm();
+            this.addItem();
         }
         // Close mold picker & color picker on outside click
         if (!this._moldPickerBound) {
@@ -685,20 +674,9 @@ const Calculator = {
                     document.querySelectorAll('.china-picker-dropdown').forEach(d => d.style.display = 'none');
                 }
             });
-            // Force-save on page unload if dirty
             window.addEventListener('beforeunload', (e) => {
                 if (this._isDirty && this._autosaveTimer) {
-                    // Try to save synchronously before page closes
                     clearTimeout(this._autosaveTimer);
-                    // beforeunload can't run async, but editingOrderId is already persisted
-                    // The autosave will have already saved the data within 2 seconds of last change
-                }
-            });
-            // Save immediately on page visibility change (tab switch, minimize)
-            document.addEventListener('visibilitychange', () => {
-                if (document.hidden && this._isDirty) {
-                    clearTimeout(this._autosaveTimer);
-                    this._doAutosave();
                 }
             });
         }
@@ -717,7 +695,7 @@ const Calculator = {
         document.getElementById('calc-client-name').value = '';
         App.applyCurrentEmployeeToCalculator(true);
         // Auto-fill "Начало" with today's date for new orders
-        document.getElementById('calc-deadline-start').value = new Date().toISOString().slice(0, 10);
+        document.getElementById('calc-deadline-start').value = App.todayLocalYMD();
         document.getElementById('calc-deadline-end').value = '';
         document.getElementById('calc-notes').value = '';
         document.getElementById('calc-delivery-address').value = '';
@@ -746,7 +724,7 @@ const Calculator = {
         document.getElementById('calc-add-item-btn').style.display = '';
         const historyEl = document.getElementById('calc-history');
         if (historyEl) historyEl.style.display = 'none';
-        // Clear autosave indicator
+        // Clear save indicator
         const statusEl = document.getElementById('calc-autosave-status');
         if (statusEl) statusEl.textContent = '';
     },
@@ -2780,8 +2758,9 @@ const Calculator = {
                 const costItemOnly = round2(result.costTotal - (result.costPrinting || 0));
                 const calcTarget = (marginPct) => {
                     if (costItemOnly === 0) return 0;
-                    const vatOnCost = costItemOnly * params.vatRate;
-                    return round2((costItemOnly + vatOnCost) * (1 + marginPct) / (1 - params.taxRate - 0.065));
+                    const keepRate = 1 - (params.taxRate || 0.06) - 0.065 - marginPct;
+                    if (keepRate <= 0) return 0;
+                    return round2(costItemOnly / keepRate);
                 };
                 item.target_price_item = calcTarget(0.40);
             }
@@ -3018,8 +2997,9 @@ const Calculator = {
 
         const calcTarget = (cost, marginPct) => {
             if (cost === 0) return 0;
-            const vatOnCost = cost * params.vatRate;
-            return round2((cost + vatOnCost) * (1 + marginPct) / (1 - params.taxRate - 0.065));
+            const keepRate = 1 - (params.taxRate || 0.06) - 0.065 - marginPct;
+            if (keepRate <= 0) return 0;
+            return round2(cost / keepRate);
         };
 
         // Build columns: item, printing (per item), hw, pkg
@@ -3473,7 +3453,8 @@ const Calculator = {
     scheduleAutosave() {
         this._isDirty = true;
         clearTimeout(this._autosaveTimer);
-        this._autosaveTimer = setTimeout(() => this._doAutosave(), 1500);
+        const statusEl = document.getElementById('calc-autosave-status');
+        if (statusEl) statusEl.textContent = 'Есть несохраненные изменения';
     },
 
     async _doAutosave() {
@@ -3740,6 +3721,9 @@ const Calculator = {
         if (orderId) {
             App.editingOrderId = orderId;
             localStorage.setItem('ro_calc_editing_order_id', String(orderId));
+            this._isDirty = false;
+            const statusEl = document.getElementById('calc-autosave-status');
+            if (statusEl) statusEl.textContent = 'Сохранено';
 
             if (isEdit && oldData) {
                 // Diff order header fields
@@ -4133,10 +4117,14 @@ const Calculator = {
         });
 
         this.recalculate();
+        this._isDirty = false;
+        const statusEl = document.getElementById('calc-autosave-status');
+        if (statusEl) statusEl.textContent = 'Загружен сохраненный заказ';
 
         // Show change history
         this.showOrderHistory(orderId);
 
+        this._preserveStateOnNextInit = true;
         App.navigate('calculator');
     },
 
@@ -4325,8 +4313,9 @@ const Calculator = {
         const params = App.params || {};
         const calcTarget = (cost, marginPct) => {
             if (cost === 0) return 0;
-            const vatOnCost = cost * (params.vatRate || 0.05);
-            return round2((cost + vatOnCost) * (1 + marginPct) / (1 - (params.taxRate || 0.06) - 0.065));
+            const keepRate = 1 - (params.taxRate || 0.06) - 0.065 - marginPct;
+            if (keepRate <= 0) return 0;
+            return round2(cost / keepRate);
         };
 
         this.items.forEach(item => {

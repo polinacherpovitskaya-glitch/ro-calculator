@@ -6,7 +6,8 @@
 // Pricing formula for blanks page:
 // 1. Себестоимость рассчитывается как для любых изделий (молд / 4500)
 // 2. Маржа зависит от тиража: чем больше заказ, тем ниже маржа
-// 3. Цена = (себест + НДС) * (1 + маржа) / (1 - налог - 6.5%), округлено до 5₽
+// 3. Цена без НДС = себест / (1 - ОСН - коммерч. - целевая чистая маржа)
+// 4. НДС добавляется отдельно сверху
 
 // Молд НЕ делим на тираж заказа — делим на макс. производительность молда
 // Макс. производительность = 5000 шт * 0.9 = 4500 шт
@@ -47,34 +48,36 @@ function getBlankMultiplier(qty) {
 
 /**
  * Таргет цена бланка
- * Формула: себест / (1 - маржа) / (1 - налоги)
+ * Формула: себест / (1 - ОСН - коммерч. - чистая маржа)
  *
  * Маржа — «в сухом остатке» после вычета налогов:
  *   50=75%, 100=70%, 300=60%, 500=50%, 1K=45%, 3K=40%
  *
- * Налоги сверху: 6% ОСН + 6.5% коммерческий = 12.5%
+ * ОСН 6% + коммерческий 6.5% удерживаются из цены.
  */
 function calcBlankTargetPrice(cost, qty, params) {
     if (cost <= 0 || qty <= 0) return 0;
     const margin = getBlankMargin(qty);
     const taxRate = Number.isFinite(params?.taxRate) ? params.taxRate : 0.06;
     const commercialRate = 0.065;
-    return round2(cost / (1 - margin) / (1 - taxRate - commercialRate));
+    const keepRate = 1 - taxRate - commercialRate - margin;
+    if (keepRate <= 0) return 0;
+    return round2(cost / keepRate);
 }
 
 /**
  * Цена продажи при целевой чистой марже:
- * себестоимость + НДС сверху, затем 40% чистой маржи
- * с учётом 6% ОСН и 6.5% коммерческого отдела.
+ * цена без НДС = себестоимость / (1 - ОСН - коммерч. - 40%)
+ * НДС добавляется отдельно сверху.
  */
 function calcSellByNetMargin40(cost, params) {
     if (!Number.isFinite(cost) || cost <= 0) return 0;
     const taxRate = Number.isFinite(params?.taxRate) ? params.taxRate : 0.06;
-    const vatRate = Number.isFinite(params?.vatRate) ? params.vatRate : 0.05;
     const commercialRate = 0.065;
     const margin = 0.40;
-    const costWithVat = cost * (1 + vatRate);
-    return round2((costWithVat * (1 + margin)) / (1 - taxRate - commercialRate));
+    const keepRate = 1 - taxRate - commercialRate - margin;
+    if (keepRate <= 0) return 0;
+    return round2(cost / keepRate);
 }
 
 /**
@@ -226,7 +229,8 @@ const Molds = {
                     isCustom = true;
                 } else if (customMargin !== null && customMargin !== undefined) {
                     // Custom margin percentage override
-                    targetPrice = round2(adjustedCost / (1 - margin) / (1 - (params.taxRate || 0.06) - 0.065));
+                    const keepRate = 1 - (params.taxRate || 0.06) - 0.065 - margin;
+                    targetPrice = keepRate > 0 ? round2(adjustedCost / keepRate) : 0;
                     sellPrice = roundTo5(targetPrice);
                     isCustom = true;
                 } else {
@@ -235,8 +239,11 @@ const Molds = {
                     sellPrice = calcBlankSellPrice(adjustedCost, qty, params);
                 }
 
-                // Calculate actual margin from sell price vs cost
-                const actualMargin = sellPrice > 0 ? round2((sellPrice - adjustedCost) / sellPrice) : margin;
+                // Calculate actual net margin after OSN + commercial, VAT excluded.
+                const keepNetRate = 1 - (params.taxRate || 0.06) - 0.065;
+                const actualMargin = sellPrice > 0
+                    ? round2(((sellPrice * keepNetRate) - adjustedCost) / sellPrice)
+                    : margin;
 
                 m.tiers[qty] = {
                     cost: round2(adjustedCost),

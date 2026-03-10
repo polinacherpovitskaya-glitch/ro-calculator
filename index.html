@@ -179,7 +179,7 @@
                     <span id="calc-autosave-status" style="font-size:11px;color:var(--text-muted);margin-top:2px;display:block;"></span>
                 </div>
                 <div class="flex gap-8">
-                    <button class="btn btn-success" onclick="Calculator.saveOrder()">Рассчитать</button>
+                    <button class="btn btn-success" onclick="Calculator.saveOrder()">Сохранить</button>
                     <button class="btn btn-outline" onclick="Calculator.resetForm()">Сброс</button>
                 </div>
             </div>
@@ -413,6 +413,13 @@
                 <h3 style="margin:0 0 8px 0; font-size:14px;">История изменений</h3>
                 <div id="calc-history-list" style="font-size:12px;"></div>
             </div>
+
+            <button
+                id="calc-save-fab"
+                class="btn btn-success"
+                onclick="Calculator.saveOrder()"
+                style="position:fixed;right:24px;bottom:24px;z-index:120;box-shadow:0 10px 25px rgba(0,0,0,.18);padding:14px 18px;border-radius:999px;font-weight:700;"
+            >Сохранить</button>
         </div>
 
         <!-- ========== ORDERS ========== -->
@@ -3068,14 +3075,14 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="js/supabase.js?v=71"></script>
-<script src="js/calculator.js?v=62"></script>
-<script src="js/app.js?v=81"></script>
+<script src="js/calculator.js?v=63"></script>
+<script src="js/app.js?v=82"></script>
 <script src="js/dashboard.js?v=46g"></script>
 <script src="js/order-detail.js?v=48"></script>
 <script src="js/orders.js?v=53"></script>
 <script src="js/production_plan.js?v=73"></script>
 <script src="js/analytics.js?v=46g"></script>
-<script src="js/molds.js?v=66"></script>
+<script src="js/molds.js?v=67"></script>
 <script src="js/colors.js?v=46g"></script>
 <script src="js/kp.js?v=46g"></script>
 <script src="js/timetrack.js?v=55"></script>

@@ -289,13 +289,18 @@ function getMultiplierForQty(qty) {
 
 /**
  * Рассчитать таргет-цену для фурнитуры/упаковки/кастома
- * Формула: себестоимость / (1 - маржа) / (1 - 0.11)
- * Налоги сверху: 6% ОСН + 5% коммерч. = 11%
+ * Формула:
+ * цена без НДС = себестоимость / (1 - ОСН - коммерч. - целевая чистая маржа)
+ * НДС добавляется отдельно сверху в КП/счёте и в эту цену не входит.
  */
 function calculateTargetPrice(cost, params, qty) {
     if (cost === 0) return 0;
     const margin = qty ? getMarginForQty(qty) : (params.marginTarget || 0.55);
-    return round2(cost / (1 - margin) / (1 - 0.06 - 0.05));
+    const taxRate = Number.isFinite(params?.taxRate) ? params.taxRate : 0.06;
+    const commercialRate = 0.065;
+    const keepRate = 1 - taxRate - commercialRate - margin;
+    if (keepRate <= 0) return 0;
+    return round2(cost / keepRate);
 }
 
 /**
@@ -319,7 +324,10 @@ function calculateActualMargin(sellPrice, costPerUnit) {
             percent: null,
         };
     }
-    const earned = sellPrice - costPerUnit;
+    const taxRate = Number.isFinite(App?.params?.taxRate) ? App.params.taxRate : 0.06;
+    const commercialRate = 0.065;
+    const netBeforeCost = sellPrice * (1 - taxRate - commercialRate);
+    const earned = netBeforeCost - (costPerUnit || 0);
     return {
         earned: round2(earned),
         percent: round2(earned * 100 / sellPrice),
@@ -526,9 +534,10 @@ function calculateOrderSummary(items, hardwareItems, packagingItems, extraCosts,
         }
     });
 
-    const vatOnRevenue = totalRevenue * 0.05;
+    const vatRate = Number.isFinite(params.vatRate) ? params.vatRate : 0.05;
+    const vatOnRevenue = totalRevenue * vatRate;
     const totalWithVat = totalRevenue + vatOnRevenue;
-    const marginPercent = totalWithVat > 0 ? round2(totalEarned * 100 / totalWithVat) : 0;
+    const marginPercent = totalRevenue > 0 ? round2(totalEarned * 100 / totalRevenue) : 0;
 
     return {
         totalRevenue: round2(totalRevenue),
