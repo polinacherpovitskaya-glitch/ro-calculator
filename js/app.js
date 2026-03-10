@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v78';
+const APP_VERSION = 'v79';
 
 const App = {
     currentPage: 'dashboard',
@@ -577,6 +577,14 @@ const App = {
         const d = new Date(dateStr);
         if (Number.isNaN(d.getTime())) return raw;
         return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    },
+
+    todayLocalYMD() {
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const day = String(now.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
     },
 
     getItemOriginLabel(item) {

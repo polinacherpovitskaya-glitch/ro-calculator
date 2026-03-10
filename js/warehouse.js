@@ -1774,7 +1774,7 @@ const Warehouse = {
         ['wh-sh-name', 'wh-sh-supplier', 'wh-sh-notes'].forEach(id => {
             const el = document.getElementById(id); if (el) el.value = '';
         });
-        document.getElementById('wh-sh-date').value = new Date().toISOString().split('T')[0];
+        document.getElementById('wh-sh-date').value = App.todayLocalYMD();
         document.getElementById('wh-sh-purchase-cny').value = 0;
         document.getElementById('wh-sh-cny-rate').value = 12.5;
         document.getElementById('wh-sh-fee-cashout').value = 1.5;

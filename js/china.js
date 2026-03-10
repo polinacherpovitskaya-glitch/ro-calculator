@@ -228,7 +228,7 @@ const ChinaPurchases = {
 
     _buildShipmentSupplier(purchases) {
         const suppliers = [...new Set((purchases || []).map(p => String(p.supplier_name || '').trim()).filter(Boolean))];
-        if (!suppliers.length) return 'Консолидация Китай';
+        if (!suppliers.length) return 'Склад в Китае';
         if (suppliers.length === 1) return suppliers[0];
         return suppliers.slice(0, 3).join(', ') + (suppliers.length > 3 ? '…' : '');
     },
@@ -276,7 +276,9 @@ const ChinaPurchases = {
 
         // Recent table
         const tbody = document.getElementById('china-recent-body');
-        const recent = all.slice(0, 5);
+        const recent = [...all]
+            .sort((a, b) => new Date(b.date || b.created_at || 0) - new Date(a.date || a.created_at || 0))
+            .slice(0, 5);
         if (recent.length === 0) {
             tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:32px;">Нет закупок. Нажмите «+ Новая закупка»</td></tr>';
             return;
@@ -367,7 +369,7 @@ const ChinaPurchases = {
             linkedIds.forEach(id => { this.consolidationSelection[id] = true; });
             if (shipment) {
                 document.getElementById('china-cons-name').value = shipment.shipment_name || '';
-                document.getElementById('china-cons-date').value = shipment.date || new Date().toISOString().split('T')[0];
+                document.getElementById('china-cons-date').value = shipment.date || App.todayLocalYMD();
                 document.getElementById('china-cons-supplier').value = shipment.supplier || '';
                 document.getElementById('china-cons-type').value = shipment.china_delivery_type || '';
                 document.getElementById('china-cons-days').value = shipment.china_estimated_days || '';
@@ -402,7 +404,7 @@ const ChinaPurchases = {
         this.consolidationEditingShipmentId = null;
         this._pendingBoxPdfName = null;
         this._pendingBoxPdfData = null;
-        const today = new Date().toISOString().split('T')[0];
+        const today = App.todayLocalYMD();
         const defaults = {
             'china-cons-name': '',
             'china-cons-date': today,
@@ -548,7 +550,7 @@ const ChinaPurchases = {
         const shipment = this._findShipment(shipmentId);
         if (!shipment) return;
         shipment.china_box_status = status;
-        if (status === 'received') shipment.status = 'received';
+        shipment.status = status;
         await saveShipment(shipment);
         const linkedIds = Array.isArray(shipment.china_purchase_ids)
             ? shipment.china_purchase_ids
@@ -620,7 +622,7 @@ const ChinaPurchases = {
         const estimatedUsd = parseFloat(document.getElementById('china-cons-estimated-usd').value) || 0;
         const shipmentData = {
             id: currentShipment?.id,
-            date: document.getElementById('china-cons-date').value || new Date().toISOString().split('T')[0],
+            date: document.getElementById('china-cons-date').value || App.todayLocalYMD(),
             shipment_name: shipmentName,
             supplier: (document.getElementById('china-cons-supplier').value || '').trim() || this._buildShipmentSupplier(selectedPurchases),
             total_purchase_cny: Math.round(totalPurchaseCny * 100) / 100,
@@ -638,8 +640,8 @@ const ChinaPurchases = {
             total_weight_grams: shipmentItems.reduce((sum, item) => sum + (parseFloat(item.weight_grams) || 0), 0),
             items: shipmentItems,
             notes: (document.getElementById('china-cons-notes').value || '').trim(),
-            status: currentShipment?.status || 'draft',
-            china_box_status: currentShipment?.china_box_status || 'in_transit',
+            status: currentShipment?.status || currentShipment?.china_box_status || 'in_transit',
+            china_box_status: currentShipment?.china_box_status || currentShipment?.status || 'in_transit',
             source: 'china_consolidation',
             china_purchase_ids: selectedIds,
             china_delivery_type: document.getElementById('china-cons-type').value || '',
@@ -740,7 +742,7 @@ const ChinaPurchases = {
 
     resetFormFields() {
         document.getElementById('china-f-name').value = '';
-        document.getElementById('china-f-date').value = new Date().toISOString().split('T')[0];
+        document.getElementById('china-f-date').value = App.todayLocalYMD();
         document.getElementById('china-f-supplier').value = '';
         document.getElementById('china-f-url').value = '';
         document.getElementById('china-f-order').value = '';
