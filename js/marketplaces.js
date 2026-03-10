@@ -313,7 +313,7 @@ const Marketplaces = {
                             ? `<img src="${this._esc(i.photo)}" style="width:36px;height:36px;object-fit:cover;border-radius:4px;flex-shrink:0;border:1px solid var(--border);" onerror="this.style.display='none'">`
                             : `<span style="width:36px;height:36px;display:flex;align-items:center;justify-content:center;background:var(--accent-light);border-radius:4px;flex-shrink:0;font-size:12px;color:var(--text-muted);">?</span>`;
                         return `<div class="mp-dd-item" data-id="${i.id}" data-name="${this._esc(i.name)}"
-                        onclick="${onSelectFn}${i.id}); Marketplaces._closeDropdown('${uid}')"
+                        onmousedown="event.preventDefault(); event.stopPropagation(); ${onSelectFn}${i.id}); Marketplaces._closeDropdown('${uid}')"
                         style="padding:6px 10px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;"
                         onmouseover="this.style.background='var(--accent-light)'" onmouseout="this.style.background=''">
                         ${photoHtml}
