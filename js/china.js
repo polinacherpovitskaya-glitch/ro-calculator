@@ -83,6 +83,33 @@ const ChinaPurchases = {
         return new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 }).format(n) + ' \u00A5';
     },
 
+    _proxyPhoto(url) {
+        if (!url) return '';
+        if (url.includes('alicdn.com') || url.includes('1688.com')) {
+            return 'https://images.weserv.nl/?url=' + encodeURIComponent(url) + '&w=80&h=80&fit=cover&default=1';
+        }
+        return url;
+    },
+
+    _normStr(v) {
+        return String(v || '').trim().toLowerCase();
+    },
+
+    _resolveItemPhoto(item) {
+        const direct = this._proxyPhoto(item && item.photo_url ? item.photo_url : '');
+        if (direct) return direct;
+
+        try {
+            const catalog = getLocal('ro_calc_china_catalog') || [];
+            const itemName = this._normStr(item && item.name);
+            if (!itemName) return '';
+            const match = catalog.find(c => this._normStr(c.name) === itemName && c.photo_url);
+            return match ? this._proxyPhoto(match.photo_url) : '';
+        } catch (e) {
+            return '';
+        }
+    },
+
     esc(str) {
         if (!str) return '';
         return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -466,17 +493,24 @@ const ChinaPurchases = {
         // Items
         const itemsBody = document.getElementById('china-d-items-body');
         if (p.items && p.items.length > 0) {
-            itemsBody.innerHTML = p.items.map((item, i) => `<tr>
+            itemsBody.innerHTML = p.items.map((item, i) => {
+                const photoSrc = this._resolveItemPhoto(item);
+                const photoHtml = photoSrc
+                    ? `<img src="${this.esc(photoSrc)}" style="width:32px;height:32px;object-fit:cover;border-radius:4px;margin-right:6px;vertical-align:middle;border:1px solid var(--border);" onerror="this.style.display='none';this.nextElementSibling.style.display='inline-flex'">`
+                    : '';
+                const fallbackHtml = `<span style="width:32px;height:32px;display:${photoSrc ? 'none' : 'inline-flex'};align-items:center;justify-content:center;background:var(--accent-light);border-radius:4px;margin-right:6px;vertical-align:middle;font-size:12px;color:var(--text-muted);">📦</span>`;
+                return `<tr>
                 <td>${i + 1}</td>
                 <td>
-                    ${item.photo_url ? `<img src="${this.esc(item.photo_url)}" style="width:32px;height:32px;object-fit:cover;border-radius:4px;margin-right:6px;vertical-align:middle;">` : ''}
+                    ${photoHtml}${fallbackHtml}
                     <strong>${this.esc(item.name)}</strong>
                     ${item.description ? `<div style="font-size:11px;color:var(--text-muted);">${this.esc(item.description)}</div>` : ''}
                 </td>
                 <td class="text-right">${item.qty}</td>
                 <td class="text-right">${this.formatCny(item.price_cny)}</td>
                 <td class="text-right">${this.formatCny(item.qty * item.price_cny)}</td>
-            </tr>`).join('');
+            </tr>`;
+            }).join('');
         } else {
             itemsBody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);">Нет позиций</td></tr>';
         }
