@@ -4125,7 +4125,11 @@ const Calculator = {
         this.showOrderHistory(orderId);
 
         this._preserveStateOnNextInit = true;
-        App.navigate('calculator');
+        // Navigate WITHOUT setting hash (pushHash=false) to avoid hashchange
+        // firing a second Calculator.init() that would reset the form.
+        App.navigate('calculator', false);
+        // Silently update URL so browser address bar shows #calculator
+        window.history.replaceState(null, '', '#calculator');
     },
 
     // ==========================================
