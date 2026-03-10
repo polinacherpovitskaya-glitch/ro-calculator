@@ -223,7 +223,6 @@ const ChinaPurchases = {
         document.getElementById('china-f-del-type').value = '';
         document.getElementById('china-f-del-days').value = '';
         document.getElementById('china-f-tracking').value = '';
-        document.getElementById('china-f-del-cny').value = '';
         document.getElementById('china-f-del-rub').value = '';
         document.getElementById('china-f-rate').value = '';
         document.getElementById('china-f-notes').value = '';
@@ -241,7 +240,6 @@ const ChinaPurchases = {
         document.getElementById('china-f-del-type').value = p.delivery_type || '';
         document.getElementById('china-f-del-days').value = p.estimated_days || '';
         document.getElementById('china-f-tracking').value = p.tracking_number || '';
-        document.getElementById('china-f-del-cny').value = p.delivery_cost_cny || '';
         document.getElementById('china-f-del-rub').value = p.delivery_cost_rub || '';
         document.getElementById('china-f-rate').value = p.cny_rate || '';
         document.getElementById('china-f-notes').value = p.notes || '';
@@ -349,7 +347,7 @@ const ChinaPurchases = {
             items,
             total_cny: Math.round(totalCny * 100) / 100,
             delivery_type: document.getElementById('china-f-del-type').value,
-            delivery_cost_cny: parseFloat(document.getElementById('china-f-del-cny').value) || 0,
+            delivery_cost_cny: 0,
             delivery_cost_rub: parseFloat(document.getElementById('china-f-del-rub').value) || 0,
             cny_rate: parseFloat(document.getElementById('china-f-rate').value) || 0,
             estimated_days: parseInt(document.getElementById('china-f-del-days').value) || 0,
