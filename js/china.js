@@ -4,8 +4,11 @@
 
 const ChinaPurchases = {
     allPurchases: [],
+    allShipments: [],
     currentView: 'dashboard',
     editingPurchaseId: null,
+    consolidationEditingShipmentId: null,
+    consolidationSelection: {},
     itemCounter: 0,
     _pendingPdfName: null,
     _pendingPdfData: null,
@@ -31,6 +34,7 @@ const ChinaPurchases = {
 
     async load() {
         this.allPurchases = await loadChinaPurchases({});
+        this.allShipments = await loadShipments();
         this.showView(this.currentView);
     },
 
@@ -49,6 +53,10 @@ const ChinaPurchases = {
             case 'list':
                 document.getElementById('china-view-list').style.display = '';
                 this.renderList();
+                break;
+            case 'consolidation':
+                document.getElementById('china-view-consolidation').style.display = '';
+                this.renderConsolidationView();
                 break;
             case 'form':
                 document.getElementById('china-view-form').style.display = '';
@@ -113,6 +121,91 @@ const ChinaPurchases = {
     esc(str) {
         if (!str) return '';
         return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    },
+
+    _selectedConsolidationIds() {
+        return Object.entries(this.consolidationSelection || {})
+            .filter(([, selected]) => !!selected)
+            .map(([id]) => parseInt(id, 10))
+            .filter(Boolean);
+    },
+
+    _findShipment(id) {
+        return (this.allShipments || []).find(sh => String(sh.id) === String(id)) || null;
+    },
+
+    _appendStatusHistory(purchase, status, note) {
+        purchase.status_history = Array.isArray(purchase.status_history) ? purchase.status_history : [];
+        purchase.status_history.push({
+            status,
+            date: new Date().toISOString(),
+            note: note || '',
+        });
+    },
+
+    _availableConsolidationPurchases() {
+        const editingShipmentId = this.consolidationEditingShipmentId;
+        return (this.allPurchases || []).filter(p => {
+            if (!p) return false;
+            if (editingShipmentId && String(p.shipment_id || '') === String(editingShipmentId)) return true;
+            return p.status === 'in_china_warehouse';
+        });
+    },
+
+    _buildShipmentItemsFromPurchases(purchases) {
+        const items = [];
+        (purchases || []).forEach(purchase => {
+            const rows = Array.isArray(purchase.items) ? purchase.items : [];
+            const purchaseTotal = rows.reduce((sum, item) => {
+                return sum + ((parseFloat(item.qty) || 0) * (parseFloat(item.price_cny) || 0));
+            }, 0);
+            const localDelivery = parseFloat(purchase.delivery_cost_cny) || 0;
+            const fallbackDivisor = rows.length || 1;
+
+            rows.forEach((item, index) => {
+                const qty = parseFloat(item.qty) || 0;
+                const priceCny = parseFloat(item.price_cny) || 0;
+                const lineTotal = qty * priceCny;
+                let deliveryShare = 0;
+                if (localDelivery > 0) {
+                    if (purchaseTotal > 0 && lineTotal > 0) {
+                        deliveryShare = localDelivery * (lineTotal / purchaseTotal);
+                    } else {
+                        deliveryShare = localDelivery / fallbackDivisor;
+                    }
+                }
+
+                items.push({
+                    source: item.warehouse_item_id ? 'existing' : 'new',
+                    warehouse_item_id: item.warehouse_item_id || null,
+                    name: item.name || `Позиция ${index + 1}`,
+                    sku: item.sku || '',
+                    category: item.category || 'other',
+                    size: item.size || '',
+                    color: item.color || '',
+                    unit: item.unit || 'шт',
+                    photo_url: item.photo_url || '',
+                    photo_thumbnail: '',
+                    qty_received: qty,
+                    weight_grams: parseFloat(item.weight_grams) || 0,
+                    purchase_price_cny: Math.round((lineTotal + deliveryShare) * 100) / 100,
+                    purchase_price_rub: 0,
+                    delivery_allocated: 0,
+                    total_cost_per_unit: 0,
+                    china_purchase_id: purchase.id,
+                    china_purchase_name: purchase.purchase_name || '',
+                    notes: purchase.purchase_name ? `Закупка: ${purchase.purchase_name}` : '',
+                });
+            });
+        });
+        return items;
+    },
+
+    _buildShipmentSupplier(purchases) {
+        const suppliers = [...new Set((purchases || []).map(p => String(p.supplier_name || '').trim()).filter(Boolean))];
+        if (!suppliers.length) return 'Консолидация Китай';
+        if (suppliers.length === 1) return suppliers[0];
+        return suppliers.slice(0, 3).join(', ') + (suppliers.length > 3 ? '…' : '');
     },
 
     // ==========================================
@@ -213,6 +306,277 @@ const ChinaPurchases = {
     },
 
     applyFilters() { this.renderList(); },
+
+    // ==========================================
+    // CONSOLIDATION VIEW
+    // ==========================================
+
+    async openConsolidation(purchaseIds = [], shipmentId = null) {
+        if (!Array.isArray(purchaseIds)) purchaseIds = purchaseIds ? [purchaseIds] : [];
+        this.allPurchases = await loadChinaPurchases({});
+        this.allShipments = await loadShipments();
+        this.resetConsolidationForm(false);
+
+        if (shipmentId) {
+            const shipment = this._findShipment(shipmentId);
+            this.consolidationEditingShipmentId = shipmentId;
+            const linkedIds = (shipment && Array.isArray(shipment.china_purchase_ids) && shipment.china_purchase_ids.length)
+                ? shipment.china_purchase_ids
+                : this.allPurchases.filter(p => String(p.shipment_id || '') === String(shipmentId)).map(p => p.id);
+            this.consolidationSelection = {};
+            linkedIds.forEach(id => { this.consolidationSelection[id] = true; });
+            if (shipment) {
+                document.getElementById('china-cons-name').value = shipment.shipment_name || '';
+                document.getElementById('china-cons-date').value = shipment.date || new Date().toISOString().split('T')[0];
+                document.getElementById('china-cons-supplier').value = shipment.supplier || '';
+                document.getElementById('china-cons-type').value = shipment.china_delivery_type || '';
+                document.getElementById('china-cons-days').value = shipment.china_estimated_days || '';
+                document.getElementById('china-cons-tracking').value = shipment.china_tracking_number || '';
+                document.getElementById('china-cons-rate').value = shipment.cny_rate || App?.params?.china_cny_rate || 12.5;
+                document.getElementById('china-cons-delivery-rub').value = shipment.delivery_china_to_russia || 0;
+                document.getElementById('china-cons-moscow-rub').value = shipment.delivery_moscow || 0;
+                document.getElementById('china-cons-notes').value = shipment.notes || '';
+            }
+        } else {
+            this.consolidationEditingShipmentId = null;
+            this.consolidationSelection = {};
+            purchaseIds.forEach(id => { this.consolidationSelection[id] = true; });
+            if (purchaseIds.length === 1) {
+                const purchase = this.allPurchases.find(p => String(p.id) === String(purchaseIds[0]));
+                if (purchase) {
+                    document.getElementById('china-cons-name').value = `Коробка: ${purchase.purchase_name || 'закупка'}`;
+                    document.getElementById('china-cons-supplier').value = purchase.supplier_name || '';
+                    document.getElementById('china-cons-rate').value = purchase.cny_rate || App?.params?.china_cny_rate || 12.5;
+                }
+            }
+        }
+
+        this.showView('consolidation');
+    },
+
+    resetConsolidationForm(clearSelection = true) {
+        if (clearSelection) this.consolidationSelection = {};
+        this.consolidationEditingShipmentId = null;
+        const today = new Date().toISOString().split('T')[0];
+        const defaults = {
+            'china-cons-name': '',
+            'china-cons-date': today,
+            'china-cons-supplier': '',
+            'china-cons-type': '',
+            'china-cons-days': '',
+            'china-cons-tracking': '',
+            'china-cons-rate': App?.params?.china_cny_rate || 12.5,
+            'china-cons-delivery-rub': '',
+            'china-cons-moscow-rub': '',
+            'china-cons-notes': '',
+        };
+        Object.entries(defaults).forEach(([id, value]) => {
+            const el = document.getElementById(id);
+            if (el) el.value = value;
+        });
+        const btn = document.getElementById('china-cons-open-shipment-btn');
+        if (btn) btn.style.display = 'none';
+        if (this.currentView === 'consolidation') this.renderConsolidationView();
+    },
+
+    toggleConsolidationPurchase(purchaseId, checked) {
+        this.consolidationSelection[purchaseId] = !!checked;
+        this.renderConsolidationView();
+    },
+
+    renderConsolidationView() {
+        const available = this._availableConsolidationPurchases();
+        const listEl = document.getElementById('china-cons-purchase-list');
+        const selectedIds = this._selectedConsolidationIds();
+        const selectedSet = new Set(selectedIds.map(String));
+
+        const btn = document.getElementById('china-cons-open-shipment-btn');
+        if (btn) btn.style.display = this.consolidationEditingShipmentId ? '' : 'none';
+
+        if (!available.length) {
+            listEl.innerHTML = '<div style="padding:20px;color:var(--text-muted);text-align:center;">Нет закупок на складе в Китае для сборки коробки.</div>';
+        } else {
+            listEl.innerHTML = `<div style="display:flex;flex-direction:column;gap:8px;">${available.map(p => {
+                const checked = selectedSet.has(String(p.id));
+                const itemCount = Array.isArray(p.items) ? p.items.length : 0;
+                const localDelivery = parseFloat(p.delivery_cost_cny) || 0;
+                const linkedBadge = p.shipment_id ? `<span class="china-badge china-badge-${String(p.shipment_id) === String(this.consolidationEditingShipmentId) ? 'blue' : 'yellow'}" style="font-size:11px;">${String(p.shipment_id) === String(this.consolidationEditingShipmentId) ? 'В этой коробке' : 'Уже в коробке'}</span>` : '';
+                return `
+                    <label style="display:block;border:1px solid ${checked ? 'var(--accent)' : 'var(--border)'};border-radius:10px;padding:12px;background:${checked ? 'rgba(59,130,246,0.05)' : 'var(--card-bg)'};cursor:pointer;">
+                        <div style="display:flex;align-items:flex-start;gap:10px;">
+                            <input type="checkbox" ${checked ? 'checked' : ''} onchange="ChinaPurchases.toggleConsolidationPurchase(${p.id}, this.checked)" style="margin-top:4px;">
+                            <div style="flex:1;min-width:0;">
+                                <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                                    <strong>${this.esc(p.purchase_name || 'Без названия')}</strong>
+                                    <span class="china-dot ${p.status}"></span>
+                                    <span style="font-size:12px;color:var(--text-muted);">${this.statusLabel(p.status)}</span>
+                                    ${linkedBadge}
+                                </div>
+                                <div style="font-size:12px;color:var(--text-muted);margin-top:4px;">${this.esc(p.supplier_name || 'Без поставщика')} · ${itemCount} поз. · Товары ${this.formatCny(p.total_cny)} · Доставка по магазину ${this.formatCny(localDelivery)}</div>
+                                ${p.order_name ? `<div style="font-size:12px;color:var(--text-muted);margin-top:2px;">Проект: ${this.esc(p.order_name)}</div>` : ''}
+                            </div>
+                        </div>
+                    </label>
+                `;
+            }).join('')}</div>`;
+        }
+
+        document.getElementById('china-cons-count').textContent = `Выбрано: ${selectedIds.length}`;
+        this.renderConsolidationSummary();
+    },
+
+    renderConsolidationSummary() {
+        const selectedIds = this._selectedConsolidationIds();
+        const selectedPurchases = (this.allPurchases || []).filter(p => selectedIds.includes(p.id));
+        const summaryEl = document.getElementById('china-cons-summary');
+        if (!selectedPurchases.length) {
+            summaryEl.innerHTML = '<span style="color:var(--text-muted);">Ничего не выбрано</span>';
+            return;
+        }
+
+        const items = this._buildShipmentItemsFromPurchases(selectedPurchases);
+        const totalCny = items.reduce((sum, item) => sum + (parseFloat(item.purchase_price_cny) || 0), 0);
+        const totalQty = items.reduce((sum, item) => sum + (parseFloat(item.qty_received) || 0), 0);
+        const localDeliveryCny = selectedPurchases.reduce((sum, p) => sum + (parseFloat(p.delivery_cost_cny) || 0), 0);
+        const totalWeight = items.reduce((sum, item) => sum + (parseFloat(item.weight_grams) || 0), 0);
+        const deliveryRub = (parseFloat(document.getElementById('china-cons-delivery-rub').value) || 0)
+            + (parseFloat(document.getElementById('china-cons-moscow-rub').value) || 0);
+
+        summaryEl.innerHTML = `
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;">
+                <div><div style="font-size:12px;color:var(--text-muted);">Закупок</div><div style="font-weight:700;">${selectedPurchases.length}</div></div>
+                <div><div style="font-size:12px;color:var(--text-muted);">Позиций в коробке</div><div style="font-weight:700;">${items.length}</div></div>
+                <div><div style="font-size:12px;color:var(--text-muted);">Общее кол-во</div><div style="font-weight:700;">${new Intl.NumberFormat('ru-RU').format(totalQty)}</div></div>
+                <div><div style="font-size:12px;color:var(--text-muted);">Товары + локал. доставка</div><div style="font-weight:700;">${this.formatCny(totalCny)}</div></div>
+                <div><div style="font-size:12px;color:var(--text-muted);">Локальная доставка CNY</div><div style="font-weight:700;">${this.formatCny(localDeliveryCny)}</div></div>
+                <div><div style="font-size:12px;color:var(--text-muted);">Вес в приёмке</div><div style="font-weight:700;">${new Intl.NumberFormat('ru-RU').format(totalWeight)} г</div></div>
+                <div><div style="font-size:12px;color:var(--text-muted);">Доставка RUB на коробку</div><div style="font-weight:700;">${Math.round(deliveryRub).toLocaleString('ru-RU')} ₽</div></div>
+            </div>
+        `;
+    },
+
+    async saveConsolidation() {
+        const selectedIds = this._selectedConsolidationIds();
+        if (!selectedIds.length) {
+            App.toast('Выберите хотя бы одну закупку');
+            return;
+        }
+
+        const shipmentName = (document.getElementById('china-cons-name').value || '').trim();
+        if (!shipmentName) {
+            App.toast('Укажите название коробки');
+            return;
+        }
+
+        const selectedPurchases = (this.allPurchases || []).filter(p => selectedIds.includes(p.id));
+        const shipmentItems = this._buildShipmentItemsFromPurchases(selectedPurchases);
+        if (!shipmentItems.length) {
+            App.toast('В выбранных закупках нет позиций');
+            return;
+        }
+
+        const currentShipment = this.consolidationEditingShipmentId ? this._findShipment(this.consolidationEditingShipmentId) : null;
+        const rate = parseFloat(document.getElementById('china-cons-rate').value) || App?.params?.china_cny_rate || 12.5;
+        const feeCashout = currentShipment?.fee_cashout_percent ?? 1.5;
+        const feeCrypto = currentShipment?.fee_crypto_percent ?? 2;
+        const fee1688 = currentShipment?.fee_1688_percent ?? 3;
+        const feeTotalPct = feeCashout + feeCrypto + fee1688;
+        const totalPurchaseCny = shipmentItems.reduce((sum, item) => sum + (parseFloat(item.purchase_price_cny) || 0), 0);
+        const chinaRub = parseFloat(document.getElementById('china-cons-delivery-rub').value) || 0;
+        const moscowRub = parseFloat(document.getElementById('china-cons-moscow-rub').value) || 0;
+        const shipmentData = {
+            id: currentShipment?.id,
+            date: document.getElementById('china-cons-date').value || new Date().toISOString().split('T')[0],
+            shipment_name: shipmentName,
+            supplier: (document.getElementById('china-cons-supplier').value || '').trim() || this._buildShipmentSupplier(selectedPurchases),
+            total_purchase_cny: Math.round(totalPurchaseCny * 100) / 100,
+            cny_rate: rate,
+            fee_cashout_percent: feeCashout,
+            fee_crypto_percent: feeCrypto,
+            fee_1688_percent: fee1688,
+            fee_total_percent: feeTotalPct,
+            total_purchase_rub: totalPurchaseCny * rate * (1 + feeTotalPct / 100),
+            delivery_china_to_russia: chinaRub,
+            delivery_moscow: moscowRub,
+            customs_fees: currentShipment?.customs_fees || 0,
+            total_delivery: chinaRub + moscowRub,
+            pricing_mode: currentShipment?.pricing_mode || 'weighted_avg',
+            total_weight_grams: shipmentItems.reduce((sum, item) => sum + (parseFloat(item.weight_grams) || 0), 0),
+            items: shipmentItems,
+            notes: (document.getElementById('china-cons-notes').value || '').trim(),
+            status: currentShipment?.status || 'draft',
+            source: 'china_consolidation',
+            china_purchase_ids: selectedIds,
+            china_delivery_type: document.getElementById('china-cons-type').value || '',
+            china_estimated_days: parseInt(document.getElementById('china-cons-days').value, 10) || 0,
+            china_tracking_number: (document.getElementById('china-cons-tracking').value || '').trim(),
+        };
+
+        const shipmentId = await saveShipment(shipmentData);
+        const previousSelectedIds = currentShipment && Array.isArray(currentShipment.china_purchase_ids)
+            ? currentShipment.china_purchase_ids.map(id => parseInt(id, 10)).filter(Boolean)
+            : this.allPurchases.filter(p => String(p.shipment_id || '') === String(this.consolidationEditingShipmentId)).map(p => p.id);
+        const removedIds = previousSelectedIds.filter(id => !selectedIds.includes(id));
+
+        const purchaseTotals = selectedPurchases.map(p => ({
+            id: p.id,
+            grandCny: (parseFloat(p.total_cny) || 0) + (parseFloat(p.delivery_cost_cny) || 0),
+        }));
+        const grandCnyTotal = purchaseTotals.reduce((sum, row) => sum + row.grandCny, 0);
+
+        for (const purchase of selectedPurchases) {
+            const next = JSON.parse(JSON.stringify(purchase));
+            next.shipment_id = shipmentId;
+            next.delivery_type = shipmentData.china_delivery_type || next.delivery_type || '';
+            next.estimated_days = shipmentData.china_estimated_days || next.estimated_days || 0;
+            next.tracking_number = shipmentData.china_tracking_number || next.tracking_number || '';
+            next.cny_rate = rate;
+            const grandCny = purchaseTotals.find(row => row.id === purchase.id)?.grandCny || 0;
+            next.delivery_cost_rub = grandCnyTotal > 0
+                ? Math.round((chinaRub * (grandCny / grandCnyTotal)) * 100) / 100
+                : 0;
+            if (next.status !== 'consolidating') {
+                next.status = 'consolidating';
+                this._appendStatusHistory(next, 'consolidating', `Добавлено в коробку «${shipmentName}»`);
+            }
+            await saveChinaPurchase(next);
+        }
+
+        for (const purchaseId of removedIds) {
+            const purchase = this.allPurchases.find(p => p.id === purchaseId);
+            if (!purchase) continue;
+            const next = JSON.parse(JSON.stringify(purchase));
+            next.shipment_id = null;
+            next.delivery_type = '';
+            next.estimated_days = 0;
+            next.tracking_number = '';
+            next.delivery_cost_rub = 0;
+            if (next.status === 'consolidating') {
+                next.status = 'in_china_warehouse';
+                this._appendStatusHistory(next, 'in_china_warehouse', `Убрано из коробки «${shipmentName}»`);
+            }
+            await saveChinaPurchase(next);
+        }
+
+        this.allPurchases = await loadChinaPurchases({});
+        this.allShipments = await loadShipments();
+        this.consolidationEditingShipmentId = shipmentId;
+        App.toast('Коробка сохранена, черновик приёмки создан');
+        this.showView('consolidation');
+    },
+
+    openLinkedShipment(shipmentId) {
+        if (!shipmentId) {
+            App.toast('У этой закупки ещё нет коробки');
+            return;
+        }
+        App.navigate('warehouse');
+        setTimeout(async () => {
+            Warehouse.setView('shipments');
+            await Warehouse.loadShipmentsList();
+            Warehouse.editShipment(shipmentId);
+        }, 250);
+    },
 
     // ==========================================
     // FORM VIEW
@@ -477,6 +841,11 @@ const ChinaPurchases = {
             ? `<a href="${this.esc(p.supplier_url)}" target="_blank" rel="noopener" style="color:var(--accent);word-break:break-all;">${this.esc(p.supplier_url.substring(0, 60))}${p.supplier_url.length > 60 ? '...' : ''}</a>`
             : '—';
         document.getElementById('china-d-order').textContent = p.order_name || '—';
+        const shipment = p.shipment_id ? this._findShipment(p.shipment_id) : null;
+        const shipmentEl = document.getElementById('china-d-shipment');
+        shipmentEl.innerHTML = shipment
+            ? `<a href="#" onclick="ChinaPurchases.openLinkedShipment(${shipment.id});return false" style="color:var(--accent);font-weight:600;text-decoration:none;">${this.esc(shipment.shipment_name || ('Коробка #' + shipment.id))}</a>`
+            : '—';
         document.getElementById('china-d-del-type').textContent = this.deliveryLabel(p.delivery_type);
         document.getElementById('china-d-tracking').textContent = p.tracking_number || '—';
         document.getElementById('china-d-days').textContent = p.estimated_days ? p.estimated_days + ' дн' : '—';
@@ -488,7 +857,7 @@ const ChinaPurchases = {
         document.getElementById('china-d-del-rub').textContent = p.delivery_cost_rub ? (new Intl.NumberFormat('ru-RU').format(p.delivery_cost_rub) + ' \u20BD') : '—';
         const grandCny = (p.total_cny || 0) + (p.delivery_cost_cny || 0);
         document.getElementById('china-d-grand-cny').textContent = this.formatCny(grandCny);
-        const grandRub = p.cny_rate ? Math.round(grandCny * p.cny_rate * 100) / 100 : 0;
+        const grandRub = p.cny_rate ? Math.round((grandCny * p.cny_rate + (p.delivery_cost_rub || 0)) * 100) / 100 : 0;
         document.getElementById('china-d-grand-rub').textContent = p.cny_rate
             ? (new Intl.NumberFormat('ru-RU').format(grandRub) + ' \u20BD') : '—';
 
@@ -534,6 +903,12 @@ const ChinaPurchases = {
         const container = document.getElementById('china-d-actions');
         const idx = this.STATUSES.findIndex(s => s.key === p.status);
         let html = '';
+        if (p.status === 'in_china_warehouse' || p.shipment_id) {
+            html += `<button class="btn btn-outline" onclick="ChinaPurchases.openConsolidation([${p.id}], ${p.shipment_id || 'null'})">&#128230; Коробка / консолидация</button>`;
+        }
+        if (p.shipment_id) {
+            html += `<button class="btn btn-outline" onclick="ChinaPurchases.openLinkedShipment(${p.shipment_id})">Открыть приёмку</button>`;
+        }
         if (idx < this.STATUSES.length - 1) {
             const next = this.STATUSES[idx + 1];
             html += `<button class="btn btn-primary" onclick="ChinaPurchases.promptStatusChange(${p.id}, '${next.key}')">&#8594; ${next.label}</button>`;
@@ -545,9 +920,34 @@ const ChinaPurchases = {
 
     async promptStatusChange(purchaseId, newStatus) {
         const note = prompt('Комментарий к статусу (необязательно):') || '';
-        await updateChinaPurchaseStatus(purchaseId, newStatus, note);
-        App.toast('Статус: ' + this.statusLabel(newStatus));
+        const purchase = await loadChinaPurchase(purchaseId);
+        if (!purchase) return;
+
+        let targetIds = [purchaseId];
+        if (purchase.shipment_id) {
+            targetIds = this.allPurchases
+                .filter(p => String(p.shipment_id || '') === String(purchase.shipment_id))
+                .map(p => p.id);
+        }
+
+        for (const id of targetIds) {
+            await updateChinaPurchaseStatus(id, newStatus, note);
+        }
+
+        if (purchase.shipment_id && ['in_transit', 'delivered'].includes(newStatus)) {
+            const shipment = this._findShipment(purchase.shipment_id);
+            if (shipment) {
+                shipment.china_delivery_type = shipment.china_delivery_type || purchase.delivery_type || '';
+                shipment.china_tracking_number = shipment.china_tracking_number || purchase.tracking_number || '';
+                await saveShipment(shipment);
+            }
+        }
+
+        App.toast(targetIds.length > 1
+            ? `Статус обновлён для всей коробки: ${this.statusLabel(newStatus)}`
+            : 'Статус: ' + this.statusLabel(newStatus));
         this.allPurchases = await loadChinaPurchases({});
+        this.allShipments = await loadShipments();
         this.openDetail(purchaseId);
     },
 

@@ -2150,6 +2150,26 @@ const Warehouse = {
         data.received_at = new Date().toISOString();
         await saveShipment(data);
 
+        // If this receipt came from China consolidation, mark linked purchases as received too.
+        if (Array.isArray(data.china_purchase_ids) && data.china_purchase_ids.length) {
+            for (const purchaseId of data.china_purchase_ids) {
+                const purchase = await loadChinaPurchase(purchaseId);
+                if (!purchase) continue;
+                purchase.shipment_id = data.id;
+                purchase.delivery_type = data.china_delivery_type || purchase.delivery_type || '';
+                purchase.tracking_number = data.china_tracking_number || purchase.tracking_number || '';
+                purchase.estimated_days = data.china_estimated_days || purchase.estimated_days || 0;
+                purchase.status = 'received';
+                purchase.status_history = Array.isArray(purchase.status_history) ? purchase.status_history : [];
+                purchase.status_history.push({
+                    status: 'received',
+                    date: data.received_at,
+                    note: `Принято на склад по коробке «${data.shipment_name || ''}»`,
+                });
+                await saveChinaPurchase(purchase);
+            }
+        }
+
         // Apply stock delta for each item (supports repost/edit of already received shipment)
         const allIds = new Set([...prevQtyById.keys(), ...newQtyById.keys()]);
         for (const itemId of allIds) {
