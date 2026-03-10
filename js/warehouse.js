@@ -2147,6 +2147,7 @@ const Warehouse = {
 
         data.items = validItems;
         data.status = 'received';
+        if (data.source === 'china_consolidation') data.china_box_status = 'received';
         data.received_at = new Date().toISOString();
         await saveShipment(data);
 

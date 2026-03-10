@@ -2147,7 +2147,7 @@
                 <div class="flex gap-8">
                     <button class="china-tab active" data-view="dashboard" onclick="ChinaPurchases.showView('dashboard')">Сводка</button>
                     <button class="china-tab" data-view="list" onclick="ChinaPurchases.showView('list')">Список</button>
-                    <button class="china-tab" data-view="consolidation" onclick="ChinaPurchases.openConsolidation()">Коробки / консолидация</button>
+                    <button class="china-tab" data-view="consolidation" onclick="ChinaPurchases.openConsolidation()">Коробки</button>
                     <button class="btn btn-primary" onclick="ChinaPurchases.openNewForm()">+ Новая закупка</button>
                 </div>
             </div>
@@ -2182,7 +2182,6 @@
                                 <option value="">Все</option>
                                 <option value="ordered">Заказано</option>
                                 <option value="in_china_warehouse">На складе в Китае</option>
-                                <option value="consolidating">Консолидация</option>
                                 <option value="in_transit">В пути</option>
                                 <option value="delivered">Доставлено</option>
                                 <option value="received">Принято на склад</option>
@@ -2192,9 +2191,9 @@
                             <label>Тип доставки</label>
                             <select id="china-filter-delivery" onchange="ChinaPurchases.applyFilters()">
                                 <option value="">Все</option>
-                                <option value="air">Авиа</option>
-                                <option value="auto_fast">Авто быстро</option>
-                                <option value="auto_slow">Авто медленно</option>
+                                <option value="air_fast">Авиа быстро</option>
+                                <option value="air">Авиа обычная</option>
+                                <option value="auto_slow">Авто долго</option>
                             </select>
                         </div>
                         <div class="form-group" style="margin:0;flex:1;">
@@ -2216,11 +2215,11 @@
                 <div class="card" style="margin-bottom:16px;">
                     <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
                         <div>
-                            <h3 style="margin:0 0 4px;">Коробка из Китая</h3>
-                            <div style="color:var(--text-muted);font-size:13px;">Сюда собираются несколько закупок со склада в Китае. Локальная доставка по магазину остаётся в CNY внутри позиций, а доставка Китай → Россия и Москва задаётся на коробку целиком.</div>
+                            <h3 style="margin:0 0 4px;">Коробки Китай → Россия</h3>
+                            <div style="color:var(--text-muted);font-size:13px;">Выберите закупки, которые уже лежат на складе в Китае, соберите их в коробку и отправьте в Россию одной перевозкой.</div>
                         </div>
                         <div class="flex gap-8">
-                            <button class="btn btn-outline btn-sm" onclick="ChinaPurchases.resetConsolidationForm()">Очистить</button>
+                            <button class="btn btn-outline btn-sm" onclick="ChinaPurchases.resetConsolidationForm()">Новая коробка</button>
                             <button class="btn btn-outline btn-sm" onclick="ChinaPurchases.openLinkedShipment(ChinaPurchases.consolidationEditingShipmentId)" id="china-cons-open-shipment-btn" style="display:none;">Открыть приёмку</button>
                         </div>
                     </div>
@@ -2229,7 +2228,7 @@
                 <div class="form-row" style="align-items:flex-start;">
                     <div class="card" style="flex:1.2;">
                         <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:12px;">
-                            <h3 style="margin:0;">Закупки для коробки</h3>
+                            <h3 style="margin:0;">Закупки на складе в Китае</h3>
                             <div id="china-cons-count" style="font-size:12px;color:var(--text-muted);">Выбрано: 0</div>
                         </div>
                         <div id="china-cons-purchase-list"></div>
@@ -2257,9 +2256,9 @@
                                     <label>Тип доставки</label>
                                     <select id="china-cons-type">
                                         <option value="">—</option>
-                                        <option value="air">Авиа</option>
-                                        <option value="auto_fast">Авто быстро</option>
-                                        <option value="auto_slow">Авто медленно</option>
+                                        <option value="auto_slow">Авто (долго)</option>
+                                        <option value="air_fast">Авиа (быстро)</option>
+                                        <option value="air">Авиа (обычная)</option>
                                     </select>
                                 </div>
                                 <div class="form-group">
@@ -2273,18 +2272,25 @@
                                     <input type="text" id="china-cons-tracking" placeholder="TRACK123">
                                 </div>
                                 <div class="form-group">
-                                    <label>Курс CNY/RUB</label>
-                                    <input type="number" min="0" step="0.01" id="china-cons-rate" placeholder="12.5" oninput="ChinaPurchases.renderConsolidationSummary()">
+                                    <label>Цена перевозки (план, USD)</label>
+                                    <input type="number" min="0" step="0.01" id="china-cons-estimated-usd" oninput="ChinaPurchases.renderConsolidationSummary()">
                                 </div>
                             </div>
                             <div class="form-row">
                                 <div class="form-group">
-                                    <label>Доставка Китай → Россия (RUB)</label>
+                                    <label>Цена перевозки (факт, RUB)</label>
                                     <input type="number" min="0" step="0.01" id="china-cons-delivery-rub" oninput="ChinaPurchases.renderConsolidationSummary()">
                                 </div>
                                 <div class="form-group">
                                     <label>Доставка по Москве (RUB)</label>
                                     <input type="number" min="0" step="0.01" id="china-cons-moscow-rub" oninput="ChinaPurchases.renderConsolidationSummary()">
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label>PDF коробки / накладная</label>
+                                <div style="display:flex;align-items:center;gap:12px;">
+                                    <input type="file" accept=".pdf" onchange="ChinaPurchases.handleBoxPdfUpload(this)" style="max-width:300px;">
+                                    <span id="china-cons-pdf-info" style="color:var(--text-muted);font-size:13px;">Файл не выбран</span>
                                 </div>
                             </div>
                             <div class="form-group">
@@ -2294,15 +2300,32 @@
                         </div>
 
                         <div class="card" style="margin-bottom:16px;">
-                            <h3>Сводка</h3>
+                            <h3>Сводка коробки</h3>
                             <div id="china-cons-summary" style="color:var(--text-muted);">Ничего не выбрано</div>
                         </div>
 
                         <div class="flex gap-8">
-                            <button class="btn btn-primary" onclick="ChinaPurchases.saveConsolidation()">Собрать коробку</button>
+                            <button class="btn btn-primary" onclick="ChinaPurchases.saveConsolidation()">Сохранить коробку</button>
                             <button class="btn btn-outline" onclick="ChinaPurchases.showView('dashboard')">Отмена</button>
                         </div>
                     </div>
+                </div>
+
+                <div class="card" style="margin-top:16px;">
+                    <div style="display:flex;justify-content:space-between;align-items:end;gap:12px;flex-wrap:wrap;margin-bottom:12px;">
+                        <h3 style="margin:0;">Список коробок</h3>
+                        <div class="form-group" style="margin:0;min-width:220px;">
+                            <label>Статус коробки</label>
+                            <select id="china-box-filter-status" onchange="ChinaPurchases.renderBoxesList()">
+                                <option value="">Все</option>
+                                <option value="draft">Черновик</option>
+                                <option value="in_transit">В пути</option>
+                                <option value="delivered">Доставлено</option>
+                                <option value="received">Принято на склад</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div id="china-boxes-list"></div>
                 </div>
             </div>
 
@@ -2328,6 +2351,10 @@
                         <label>Привязка к заказу</label>
                         <select id="china-f-order"><option value="">— Не привязана —</option></select>
                     </div>
+                    <div class="form-group" style="max-width:360px;">
+                        <label>Доставка по Китаю / магазину (CNY)</label>
+                        <input type="number" min="0" step="0.01" id="china-f-del-cny">
+                    </div>
                 </div>
 
                 <!-- Позиции -->
@@ -2338,39 +2365,6 @@
                     </div>
                     <div id="china-f-items"></div>
                     <div style="text-align:right;margin-top:8px;font-weight:700;">Итого: <span id="china-f-total">0 ¥</span></div>
-                </div>
-
-                <!-- Доставка -->
-                <div class="card" style="margin-bottom:16px;">
-                    <h3>Доставка</h3>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label>Тип доставки</label>
-                            <select id="china-f-del-type">
-                                <option value="">—</option>
-                                <option value="air">Авиа (10-15 дн)</option>
-                                <option value="auto_fast">Авто быстро (20-30 дн)</option>
-                                <option value="auto_slow">Авто медленно (35-50 дн)</option>
-                            </select>
-                        </div>
-                        <div class="form-group"><label>Ориентир. срок (дни)</label><input type="number" min="0" id="china-f-del-days"></div>
-                        <div class="form-group"><label>Трек-номер</label><input type="text" id="china-f-tracking" placeholder="SF1234567890"></div>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group"><label>Доставка по Китаю / магазину (CNY)</label><input type="number" min="0" step="0.01" id="china-f-del-cny"></div>
-                        <div class="form-group"><label>Доставка Китай → Россия (RUB)</label><input type="number" min="0" step="0.01" id="china-f-del-rub"></div>
-                        <div class="form-group"><label>Курс CNY/RUB</label><input type="number" min="0" step="0.01" id="china-f-rate" placeholder="12.5"></div>
-                    </div>
-                </div>
-
-                <!-- PDF -->
-                <div class="card" style="margin-bottom:16px;">
-                    <h3>Накладная (PDF)</h3>
-                    <div style="display:flex;align-items:center;gap:12px;">
-                        <input type="file" accept=".pdf" onchange="ChinaPurchases.handlePdfUpload(this)" style="max-width:300px;">
-                        <span id="china-f-pdf-info" style="color:var(--text-muted);font-size:13px;">Файл не выбран</span>
-                    </div>
-                    <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Максимум 500 КБ</div>
                 </div>
 
                 <!-- Заметки -->
@@ -2414,8 +2408,8 @@
                         <div style="flex:1;"><div style="color:var(--text-muted);font-size:12px;margin-bottom:2px;">Коробка</div><div id="china-d-shipment">—</div></div>
                     </div>
                     <div class="form-row" style="gap:24px;margin-top:12px;">
-                        <div><div style="color:var(--text-muted);font-size:12px;margin-bottom:2px;">Тип доставки</div><div id="china-d-del-type">—</div></div>
-                        <div><div style="color:var(--text-muted);font-size:12px;margin-bottom:2px;">Трек-номер</div><div id="china-d-tracking">—</div></div>
+                        <div><div style="color:var(--text-muted);font-size:12px;margin-bottom:2px;">Статус закупки</div><div id="china-d-del-type">—</div></div>
+                        <div><div style="color:var(--text-muted);font-size:12px;margin-bottom:2px;">Коробка / трек</div><div id="china-d-tracking">—</div></div>
                         <div><div style="color:var(--text-muted);font-size:12px;margin-bottom:2px;">Срок (дни)</div><div id="china-d-days">—</div></div>
                         <div><div style="color:var(--text-muted);font-size:12px;margin-bottom:2px;">Курс CNY</div><div id="china-d-rate">—</div></div>
                     </div>
@@ -2426,8 +2420,8 @@
                     <h3>Финансы</h3>
                     <div class="form-row" style="gap:24px;">
                         <div><div style="color:var(--text-muted);font-size:12px;margin-bottom:2px;">Товары CNY</div><div id="china-d-total-cny" style="font-weight:600;">—</div></div>
-                        <div><div style="color:var(--text-muted);font-size:12px;margin-bottom:2px;">Доставка CNY</div><div id="china-d-del-cny">—</div></div>
-                        <div><div style="color:var(--text-muted);font-size:12px;margin-bottom:2px;">Доставка RUB</div><div id="china-d-del-rub">—</div></div>
+                        <div><div style="color:var(--text-muted);font-size:12px;margin-bottom:2px;">Доставка по Китаю CNY</div><div id="china-d-del-cny">—</div></div>
+                        <div><div style="color:var(--text-muted);font-size:12px;margin-bottom:2px;">Коробка RUB</div><div id="china-d-del-rub">—</div></div>
                         <div><div style="color:var(--text-muted);font-size:12px;margin-bottom:2px;">Итого CNY</div><div id="china-d-grand-cny" style="font-weight:700;color:var(--accent);">—</div></div>
                         <div><div style="color:var(--text-muted);font-size:12px;margin-bottom:2px;">Итого RUB</div><div id="china-d-grand-rub" style="font-weight:700;">—</div></div>
                     </div>
@@ -2445,7 +2439,7 @@
                 <!-- PDF + Notes -->
                 <div class="card" style="margin-bottom:16px;">
                     <div class="form-row" style="gap:24px;">
-                        <div style="flex:1;"><h3>Накладная</h3><div id="china-d-pdf">—</div></div>
+                        <div style="flex:1;"><h3>PDF коробки</h3><div id="china-d-pdf">—</div></div>
                         <div style="flex:2;"><h3>Заметки</h3><div id="china-d-notes">—</div></div>
                     </div>
                 </div>
@@ -3089,11 +3083,11 @@
 <script src="js/gantt.js?v=46g"></script>
 <script src="js/import.js?v=46g"></script>
 <script src="js/factual.js?v=74"></script>
-<script src="js/china.js?v=46k"></script>
+<script src="js/china.js?v=46l"></script>
 <script src="js/warehouse_photos.js?v=47"></script>
 <script src="js/china_catalog.js?v=46k"></script>
 <script src="js/marketplaces.js?v=72"></script>
-<script src="js/warehouse.js?v=61"></script>
+<script src="js/warehouse.js?v=62"></script>
 <script src="js/settings.js?v=59"></script>
 </body>
 </html>
