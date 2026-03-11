@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=72">
+    <link rel="stylesheet" href="css/style.css?v=73">
 </head>
 <body>
 
@@ -86,6 +86,10 @@
             <a href="#import" data-page="import">
                 <span class="nav-icon">&#128176;</span>
                 <span>ФинТабло</span>
+            </a>
+            <a href="#indirect-costs" data-page="indirect-costs">
+                <span class="nav-icon">&#128202;</span>
+                <span>Косв. расходы</span>
             </a>
             <a href="#warehouse" data-page="warehouse">
                 <span class="nav-icon">&#128230;</span>
@@ -1649,6 +1653,97 @@
             </div>
         </div>
 
+        <!-- ========== INDIRECT COSTS (Косв. расходы) ========== -->
+        <div id="page-indirect-costs" class="page">
+            <div class="page-header">
+                <h1>Косвенные расходы</h1>
+                <div style="display:flex;gap:8px;align-items:center">
+                    <input type="month" id="ic-month-picker" class="form-control" style="width:auto" onchange="IndirectCosts.setMonth(this.value)">
+                    <button class="btn btn-success" onclick="IndirectCosts.saveAll()">💾 Сохранить</button>
+                </div>
+            </div>
+
+            <!-- Summary stats -->
+            <div class="stats-grid" style="margin-bottom:16px">
+                <div class="stat-card">
+                    <div class="stat-label">ЗП в косвенные</div>
+                    <div class="stat-value" id="ic-stat-salary">0 ₽</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Постоянные расходы</div>
+                    <div class="stat-value" id="ic-stat-fixed">0 ₽</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">ИТОГО / мес</div>
+                    <div class="stat-value" id="ic-stat-total" style="font-size:22px;color:var(--danger)">0 ₽</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Косвенные / час</div>
+                    <div class="stat-value" id="ic-stat-per-hour">0 ₽</div>
+                </div>
+            </div>
+
+            <!-- Employees section -->
+            <div class="card" style="margin-bottom:16px">
+                <div class="card-header" style="display:flex;justify-content:space-between;align-items:center">
+                    <h3 style="margin:0">Сотрудники</h3>
+                    <span class="text-muted" style="font-size:12px">ЗП × (100% − % произв.) = в косвенные</span>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Имя</th>
+                                <th>Должность</th>
+                                <th class="text-right">ЗП / мес</th>
+                                <th class="text-right" style="width:100px">% произв.</th>
+                                <th class="text-right">→ В косвенные</th>
+                            </tr>
+                        </thead>
+                        <tbody id="ic-employees-body"></tbody>
+                        <tfoot>
+                            <tr style="font-weight:700;background:var(--bg)">
+                                <td colspan="4">ИТОГО ЗП в косвенные</td>
+                                <td class="text-right" id="ic-employees-total">0 ₽</td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Fixed costs section -->
+            <div class="card" style="margin-bottom:16px">
+                <div class="card-header">
+                    <h3 style="margin:0">Постоянные расходы</h3>
+                </div>
+                <div id="ic-cost-items" style="padding:12px 16px"></div>
+                <div style="padding:8px 16px;border-top:2px solid var(--border);display:flex;justify-content:space-between;font-weight:700">
+                    <span>ИТОГО постоянные</span>
+                    <span id="ic-fixed-total">0 ₽</span>
+                </div>
+            </div>
+
+            <!-- Monthly history -->
+            <div class="card">
+                <div class="card-header">
+                    <h3 style="margin:0">История по месяцам</h3>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Месяц</th>
+                                <th class="text-right">ЗП косв.</th>
+                                <th class="text-right">Пост. расходы</th>
+                                <th class="text-right">Итого</th>
+                            </tr>
+                        </thead>
+                        <tbody id="ic-history-body"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
         <!-- ========== WAREHOUSE (Склад) ========== -->
         <div id="page-warehouse" class="page">
             <div class="page-header">
@@ -2564,8 +2659,8 @@
                         </div>
                         <div class="form-group">
                             <label>Косвенные расходы (месяц)</label>
-                            <input type="number" id="set-indirect_costs_monthly" data-key="indirect_costs_monthly">
-                            <span class="form-hint">руб/мес</span>
+                            <input type="number" id="set-indirect_costs_monthly" data-key="indirect_costs_monthly" readonly style="opacity:0.7;cursor:not-allowed">
+                            <span class="form-hint">Рассчитывается автоматически на странице <a href="#indirect-costs">Косв. расходы</a></span>
                         </div>
                     </div>
                     <div class="form-row">
@@ -3081,7 +3176,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="js/supabase.js?v=85"></script>
 <script src="js/calculator.js?v=63"></script>
-<script src="js/app.js?v=85"></script>
+<script src="js/app.js?v=86"></script>
 <script src="js/dashboard.js?v=46g"></script>
 <script src="js/order-detail.js?v=48"></script>
 <script src="js/orders.js?v=53"></script>
@@ -3094,6 +3189,7 @@
 <script src="js/tasks.js?v=46g"></script>
 <script src="js/gantt.js?v=46g"></script>
 <script src="js/fintablo.js?v=1"></script>
+<script src="js/indirect_costs.js?v=1"></script>
 <script src="js/factual.js?v=74"></script>
 <script src="js/china.js?v=46m"></script>
 <script src="js/warehouse_photos.js?v=48"></script>

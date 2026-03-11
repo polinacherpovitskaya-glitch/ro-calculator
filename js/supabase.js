@@ -58,6 +58,7 @@ const LOCAL_KEYS = {
     readyGoods: 'ro_calc_ready_goods_stock',
     readyGoodsHistory: 'ro_calc_ready_goods_history',
     salesRecords: 'ro_calc_sales_records',
+    indirectCosts: 'ro_calc_indirect_costs',
 };
 
 // Data version — increment to trigger NON-DESTRUCTIVE migration
@@ -2517,4 +2518,16 @@ async function saveSalesRecords(records) {
         } catch(e) { console.error('saveSalesRecords exception:', e); }
     }
     setLocal(LOCAL_KEYS.salesRecords, records);
+}
+
+// =============================================
+// INDIRECT COSTS (monthly breakdown)
+// =============================================
+
+function loadIndirectCostsData() {
+    return getLocal(LOCAL_KEYS.indirectCosts) || {};
+}
+
+function saveIndirectCostsData(data) {
+    setLocal(LOCAL_KEYS.indirectCosts, data);
 }

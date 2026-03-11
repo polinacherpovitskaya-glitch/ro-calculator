@@ -2274,6 +2274,39 @@ table .text-center { text-align: center; }
     #pp-mobile-list { display: block; }
 }
 
+/* Indirect Costs page */
+.ic-inline-input {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4px 8px;
+    font-size: 14px;
+    color: var(--text);
+    transition: border-color 0.2s;
+}
+.ic-inline-input:focus {
+    outline: none;
+    border-color: var(--primary);
+}
+.ic-cost-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+}
+.ic-cost-row:last-child { border-bottom: none; }
+.ic-cost-label { flex: 1; font-size: 14px; }
+.ic-cost-input-wrap {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+.ic-cost-input-wrap .ic-inline-input {
+    width: 120px;
+    text-align: right;
+}
+
 /* FinTablo page */
 .ft-deal-row:hover { background: var(--bg); }
 .ft-unmatched { opacity: 0.6; }
