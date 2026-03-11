@@ -19,7 +19,6 @@
         <h1>Recycle Object</h1>
         <p>Калькулятор заказов</p>
         <select id="auth-user-select" style="margin-bottom:8px;">
-            <option value="__admin">Администратор</option>
         </select>
         <input type="password" id="auth-password" placeholder="Введите пароль" autocomplete="off">
         <div id="auth-error" class="auth-error">Неверный пароль</div>
@@ -2880,6 +2879,14 @@
                             </div>
                             <div class="text-muted" style="font-size:11px;">Оклад = 0 → почасовой сотрудник, все часы считаются по ставке «Сверхчас». Если оклад задан — сначала заполняются часы оклада, затем сверхчасы.</div>
                         </div>
+                        <div id="emp-pages-section" style="margin:8px 0 12px 0; padding:12px; background:var(--bg); border-radius:8px;">
+                            <div style="font-weight:600; margin-bottom:8px;">Доступ к страницам</div>
+                            <div id="emp-pages-checkboxes" style="display:grid; grid-template-columns:1fr 1fr; gap:4px 16px; font-size:13px;"></div>
+                            <div style="margin-top:8px; display:flex; gap:8px;">
+                                <button class="btn btn-sm btn-outline" type="button" onclick="Settings.empPagesSelectAll()">Все</button>
+                                <button class="btn btn-sm btn-outline" type="button" onclick="Settings.empPagesSelectNone()">Нет</button>
+                            </div>
+                        </div>
                         <div class="flex gap-8">
                             <button class="btn btn-success" onclick="Settings.saveEmployee()">Сохранить</button>
                             <button class="btn btn-outline" onclick="Settings.cancelEmployee()">Отмена</button>
@@ -3214,9 +3221,9 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="js/supabase.js?v=85"></script>
+<script src="js/supabase.js?v=86"></script>
 <script src="js/calculator.js?v=64"></script>
-<script src="js/app.js?v=89"></script>
+<script src="js/app.js?v=90"></script>
 <script src="js/dashboard.js?v=47"></script>
 <script src="js/order-detail.js?v=49"></script>
 <script src="js/orders.js?v=54"></script>
@@ -3229,13 +3236,13 @@
 <script src="js/tasks.js?v=46g"></script>
 <script src="js/gantt.js?v=47"></script>
 <script src="js/fintablo.js?v=1"></script>
-<script src="js/indirect_costs.js?v=2"></script>
+<script src="js/indirect_costs.js?v=3"></script>
 <script src="js/factual.js?v=80"></script>
 <script src="js/china.js?v=46m"></script>
 <script src="js/warehouse_photos.js?v=48"></script>
 <script src="js/china_catalog.js?v=46k"></script>
 <script src="js/marketplaces.js?v=72"></script>
 <script src="js/warehouse.js?v=87"></script>
-<script src="js/settings.js?v=61"></script>
+<script src="js/settings.js?v=62"></script>
 </body>
 </html>

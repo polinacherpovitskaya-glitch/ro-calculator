@@ -18,13 +18,54 @@ const App = {
     currentEmployeeId: null,
     currentUser: null,
 
-    // Admin = hardcoded password OR Полина's account
-    isAdmin() {
+    // All pages in the app
+    ALL_PAGES: [
+        'dashboard', 'calculator', 'orders', 'production-plan', 'factual',
+        'analytics', 'molds', 'colors', 'timetrack', 'tasks', 'gantt',
+        'import', 'warehouse', 'marketplaces', 'china', 'settings',
+    ],
+
+    // Pages visible to everyone by default (if no custom config)
+    DEFAULT_PAGES: ['dashboard', 'timetrack', 'tasks'],
+
+    // Check if current user has access to a specific page
+    canAccess(page) {
         if (!this.currentUser) return false;
-        if (this.currentUser.role === 'admin') return true;
-        // Полина (employee_id=5) also has admin-level access
-        if (this.currentUser.employee_id === 5 || this.currentUser.employee_id === '5') return true;
-        return false;
+        // order-detail is part of orders
+        if (page === 'order-detail') page = 'orders';
+        const empId = this.currentUser.employee_id;
+        if (!empId) return true; // fallback: allow all
+        const perms = JSON.parse(localStorage.getItem('ro_employee_pages') || '{}');
+        const allowed = perms[String(empId)];
+        if (!allowed) return this.DEFAULT_PAGES.includes(page);
+        return allowed.includes(page);
+    },
+
+    // Backward-compat: isAdmin = canAccess('settings')
+    isAdmin() {
+        return this.canAccess('settings');
+    },
+
+    // Get page permissions for an employee
+    getEmployeePages(empId) {
+        const perms = JSON.parse(localStorage.getItem('ro_employee_pages') || '{}');
+        return perms[String(empId)] || null; // null = use DEFAULT_PAGES
+    },
+
+    // Save page permissions for an employee
+    setEmployeePages(empId, pages) {
+        const perms = JSON.parse(localStorage.getItem('ro_employee_pages') || '{}');
+        perms[String(empId)] = pages;
+        localStorage.setItem('ro_employee_pages', JSON.stringify(perms));
+    },
+
+    // Initialize default permissions if not set (Полина gets all pages)
+    initDefaultPermissions() {
+        const perms = JSON.parse(localStorage.getItem('ro_employee_pages') || '{}');
+        if (!perms['5']) {
+            perms['5'] = [...this.ALL_PAGES]; // Полина gets all pages
+            localStorage.setItem('ro_employee_pages', JSON.stringify(perms));
+        }
     },
 
     _sessionStartedAt: null,
@@ -33,6 +74,7 @@ const App = {
 
     async init() {
         initSupabase();
+        this.initDefaultPermissions();
         await this.prepareAuthUI();
 
         // Check auth
@@ -61,50 +103,39 @@ const App = {
     // === AUTH ===
 
     async login() {
-        const selectedUserId = (document.getElementById('auth-user-select')?.value || '__admin').trim();
+        const selectedUserId = (document.getElementById('auth-user-select')?.value || '').trim();
         const pwd = document.getElementById('auth-password').value;
         const nowTs = Date.now().toString();
         let ok = false;
         let errorText = 'Неверный пароль';
 
-        if (selectedUserId === '__admin') {
-            const hash = this.simpleHash(pwd);
-            if (this.isAllowedAuthHash(hash)) {
-                localStorage.setItem('ro_calc_auth', hash);
-                localStorage.setItem('ro_calc_auth_method', 'admin');
-                localStorage.setItem('ro_calc_auth_ts', nowTs);
-                localStorage.removeItem('ro_calc_auth_user_id');
-                this.currentUser = { id: '__admin', name: 'Администратор', role: 'admin', employee_id: null };
-                ok = true;
-            }
+        // Employee login only (no admin mode)
+        const account = this.authAccounts.find(a => String(a.id) === String(selectedUserId) && a.is_active !== false);
+        if (!account) {
+            errorText = 'Пользователь не найден';
         } else {
-            const account = this.authAccounts.find(a => String(a.id) === String(selectedUserId) && a.is_active !== false);
-            if (!account) {
-                errorText = 'Пользователь не найден';
-            } else {
-                const hash = this.hashUserPassword(account.username || '', pwd);
-                if (hash === account.password_hash) {
-                    localStorage.setItem('ro_calc_auth_method', 'user');
-                    localStorage.setItem('ro_calc_auth_ts', nowTs);
-                    localStorage.setItem('ro_calc_auth_user_id', String(account.id));
-                    localStorage.removeItem('ro_calc_auth');
-                    this.currentUser = {
-                        id: account.id,
-                        employee_id: account.employee_id ?? null,
-                        username: account.username || '',
-                        name: account.employee_name || account.username || 'Сотрудник',
-                        role: account.role || 'employee',
-                    };
-                    ok = true;
-                    account.last_login_at = new Date().toISOString();
-                    await saveAuthAccounts(this.authAccounts);
-                    appendAuthActivity({
-                        type: 'login',
-                        actor: this.currentUser.name,
-                        actor_user_id: this.currentUser.id,
-                        method: 'user',
-                    });
-                }
+            const hash = this.hashUserPassword(account.username || '', pwd);
+            if (hash === account.password_hash) {
+                localStorage.setItem('ro_calc_auth_method', 'user');
+                localStorage.setItem('ro_calc_auth_ts', nowTs);
+                localStorage.setItem('ro_calc_auth_user_id', String(account.id));
+                localStorage.removeItem('ro_calc_auth');
+                this.currentUser = {
+                    id: account.id,
+                    employee_id: account.employee_id ?? null,
+                    username: account.username || '',
+                    name: account.employee_name || account.username || 'Сотрудник',
+                    role: 'employee',
+                };
+                ok = true;
+                account.last_login_at = new Date().toISOString();
+                await saveAuthAccounts(this.authAccounts);
+                appendAuthActivity({
+                    type: 'login',
+                    actor: this.currentUser.name,
+                    actor_user_id: this.currentUser.id,
+                    method: 'user',
+                });
             }
         }
 
@@ -120,31 +151,13 @@ const App = {
     },
 
     isAuthenticated() {
-        const method = localStorage.getItem('ro_calc_auth_method') || 'admin';
         const ts = parseInt(localStorage.getItem('ro_calc_auth_ts') || '0');
         if (!ts || (Date.now() - ts) >= 86400000) return false;
-
-        if (method === 'user') {
-            const userId = localStorage.getItem('ro_calc_auth_user_id');
-            return !!userId;
-        }
-
-        const auth = localStorage.getItem('ro_calc_auth');
-        if (auth && this.isAllowedAuthHash(auth)) return true;
-        if (auth && !this.isAllowedAuthHash(auth)) {
-            localStorage.removeItem('ro_calc_auth');
-            localStorage.removeItem('ro_calc_auth_ts');
-            localStorage.removeItem('ro_calc_auth_method');
-        }
-        return false;
+        const userId = localStorage.getItem('ro_calc_auth_user_id');
+        return !!userId;
     },
 
     async restoreAuthenticatedUser() {
-        const method = localStorage.getItem('ro_calc_auth_method') || 'admin';
-        if (method === 'admin') {
-            this.currentUser = { id: '__admin', name: 'Администратор', role: 'admin', employee_id: null };
-            return;
-        }
         this.authAccounts = await loadAuthAccounts();
         const userId = localStorage.getItem('ro_calc_auth_user_id');
         const account = this.authAccounts.find(a => String(a.id) === String(userId));
@@ -154,13 +167,12 @@ const App = {
                 employee_id: account.employee_id ?? null,
                 username: account.username || '',
                 name: account.employee_name || account.username || 'Сотрудник',
-                role: account.role || 'employee',
+                role: 'employee',
             };
             return;
         }
-        this.currentUser = { id: '__admin', name: 'Администратор', role: 'admin', employee_id: null };
-        localStorage.setItem('ro_calc_auth_method', 'admin');
-        localStorage.removeItem('ro_calc_auth_user_id');
+        // No valid account — force logout
+        this.logout();
     },
 
     logout() {
@@ -226,8 +238,7 @@ const App = {
             .filter(a => a && a.is_active !== false)
             .sort((a, b) => String(a.employee_name || a.username || '').localeCompare(String(b.employee_name || b.username || ''), 'ru'));
 
-        let html = '<option value="__admin">Администратор</option>';
-        html += accounts.map(a => {
+        let html = accounts.map(a => {
             const name = this.escHtml(a.employee_name || a.username || 'Сотрудник');
             const login = this.escHtml(a.username || '');
             return `<option value="${this.escHtml(String(a.id))}">${name}${login ? ` (${login})` : ''}</option>`;
@@ -266,8 +277,17 @@ const App = {
         this.startSessionTracking();
         this.trackAuthEvent('session_start');
 
+        this.applyNavVisibility();
         this.handleRoute();
         this.startUpdateChecker();
+    },
+
+    // Hide sidebar links for pages the user has no access to
+    applyNavVisibility() {
+        document.querySelectorAll('.sidebar-nav a[data-page]').forEach(a => {
+            const page = a.dataset.page;
+            a.style.display = this.canAccess(page) ? '' : 'none';
+        });
     },
 
     // === EMPLOYEE IDENTITY ===
@@ -446,6 +466,15 @@ const App = {
     },
 
     navigate(page, pushHash = true, subId = null) {
+        // Access control: redirect to dashboard if not allowed
+        if (!this.canAccess(page) && page !== 'dashboard') {
+            // Try dashboard, otherwise first allowed page
+            const fallback = this.canAccess('dashboard') ? 'dashboard' : (this.ALL_PAGES.find(p => this.canAccess(p)) || 'dashboard');
+            page = fallback;
+            subId = null;
+            App.toast('Нет доступа к этой странице');
+        }
+
         document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
 
         const target = document.getElementById('page-' + page);

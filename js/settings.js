@@ -448,6 +448,13 @@ const Settings = {
         // Hide salary section from non-admin
         const paySection = document.getElementById('emp-pay-section');
         if (paySection) paySection.style.display = App.isAdmin() ? '' : 'none';
+
+        // Page access checkboxes (only visible if current user can manage settings)
+        const pagesSection = document.getElementById('emp-pages-section');
+        if (pagesSection) {
+            pagesSection.style.display = App.isAdmin() ? '' : 'none';
+            if (App.isAdmin()) this._renderPageCheckboxes(id);
+        }
     },
 
     clearEmployeeForm() {
@@ -470,6 +477,45 @@ const Settings = {
     cancelEmployee() {
         document.getElementById('employee-form').style.display = 'none';
         this.editingEmployeeId = null;
+    },
+
+    // Page access checkboxes
+    PAGE_LABELS: {
+        dashboard: 'Главная', calculator: 'Калькулятор', orders: 'Заказы',
+        'production-plan': 'Производство', factual: 'План-Факт', analytics: 'Аналитика',
+        molds: 'Молды', colors: 'Цвета', timetrack: 'Учёт времени',
+        tasks: 'Задачи', gantt: 'Гант', import: 'Импорт',
+        warehouse: 'Склад', marketplaces: 'Маркетплейсы', china: 'Китай',
+        settings: 'Настройки',
+    },
+
+    _renderPageCheckboxes(empId) {
+        const container = document.getElementById('emp-pages-checkboxes');
+        if (!container) return;
+        const allowed = App.getEmployeePages(empId) || [...App.DEFAULT_PAGES];
+        container.innerHTML = App.ALL_PAGES.map(page => {
+            const checked = allowed.includes(page) ? 'checked' : '';
+            const label = this.PAGE_LABELS[page] || page;
+            return `<label style="display:flex;align-items:center;gap:4px;cursor:pointer;">
+                <input type="checkbox" class="emp-page-cb" data-page="${page}" ${checked}> ${label}
+            </label>`;
+        }).join('');
+    },
+
+    _savePageCheckboxes(empId) {
+        const cbs = document.querySelectorAll('#emp-pages-checkboxes .emp-page-cb');
+        if (!cbs.length) return;
+        const pages = [];
+        cbs.forEach(cb => { if (cb.checked) pages.push(cb.dataset.page); });
+        App.setEmployeePages(empId, pages);
+    },
+
+    empPagesSelectAll() {
+        document.querySelectorAll('#emp-pages-checkboxes .emp-page-cb').forEach(cb => cb.checked = true);
+    },
+
+    empPagesSelectNone() {
+        document.querySelectorAll('#emp-pages-checkboxes .emp-page-cb').forEach(cb => cb.checked = false);
     },
 
     async saveEmployee() {
@@ -508,6 +554,11 @@ const Settings = {
             App.toast('Не удалось сохранить сотрудника', 'error');
             return;
         }
+
+        // Save page access permissions
+        const empId = this.editingEmployeeId || savedId;
+        this._savePageCheckboxes(empId);
+
         if (isNewEmployee) {
             await this.ensureLoginForNewEmployee({ ...employee, id: savedId });
         }

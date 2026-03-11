@@ -154,7 +154,12 @@ const IndirectCosts = {
         const roleLabels = { production: 'Производство', office: 'Офис', management: 'Руководство' };
         const roleBadges = { production: 'badge-blue', office: 'badge-yellow', management: 'badge-green' };
 
-        const activeEmps = this.employees.filter(e => e.is_active !== false);
+        // Only show employees who contribute to indirect costs (production_share < 100)
+        const activeEmps = this.employees.filter(e => {
+            if (e.is_active === false) return false;
+            const share = e.production_share ?? (this.ROLE_DEFAULT_SHARE[e.role] ?? 0);
+            return share < 100; // hide 100% production workers
+        });
 
         if (activeEmps.length === 0) {
             tbody.innerHTML = '<tr><td colspan="5" class="text-muted text-center">Нет активных сотрудников. Добавьте в Настройках → Сотрудники</td></tr>';

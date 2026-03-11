@@ -1472,21 +1472,20 @@ function getDefaultEmployees() {
         pay_weekend_hour_rate: opts.we || 0, pay_holiday_hour_rate: opts.ho || 0,
     });
     return [
-        // Производство
+        // Производство (сдельная ЗП — не входит в косвенные)
         e(1772800698338, 'Тая', 'production', { hours: 6, salary: 75200, ot: 500, we: 750, ho: 750 }),
         e(1772801066913, 'Женя Г', 'production', { ot: 500, we: 750, ho: 750 }),
         e(1741700001000, 'Сергей М', 'production', { ot: 500, we: 750, ho: 750 }),
         // Управление (Леша 50% производство)
         e(1772827635013, 'Леша', 'management', { salary: 180000 }),
-        e(5, 'Полина', 'management', { tasks: true }),
-        e(6, 'Никита', 'management', { tasks: true }),
-        // Офис
-        e(1, 'Алина', 'office'),
-        e(2, 'Элина', 'office'),
-        e(3, 'Аня', 'office'),
-        e(1741700002000, 'Анастасия', 'office'),
-        e(1741700003000, 'Борис', 'office'),
-        e(1741700004000, 'Женя Максименкова', 'office'),
+        e(5, 'Полина', 'management', { salary: 168000, tasks: true }),
+        // Офис (ЗП = косвенные расходы)
+        e(1, 'Алина', 'office', { salary: 45000 }),
+        e(2, 'Элина', 'office', { salary: 52000 }),
+        e(3, 'Аня', 'office', { salary: 51000 }),
+        e(1741700002000, 'Анастасия', 'office', { salary: 54000 }),
+        e(1741700003000, 'Борис', 'office', { salary: 61000 }),
+        e(1741700004000, 'Женя Максименкова', 'office', { salary: 65000 }),
     ];
 }
 
