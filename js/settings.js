@@ -16,12 +16,34 @@ const Settings = {
     editingAuthAccountId: null,
     visiblePasswords: {},
 
+    // Tabs that require admin access
+    ADMIN_TABS: new Set(['indirect', 'costs', 'logins', 'sessions', 'backup']),
+
     async load() {
+        this._applyAdminVisibility();
         this.populateFields();
         await this.loadMoldsForEditing();
     },
 
+    _applyAdminVisibility() {
+        const admin = App.isAdmin();
+        // Hide/show admin-only tabs in the tab bar
+        document.querySelectorAll('#page-settings .tabs .tab').forEach(el => {
+            const tab = el.dataset.tab;
+            if (this.ADMIN_TABS.has(tab)) {
+                el.style.display = admin ? '' : 'none';
+            }
+        });
+        // In the employees tab, hide salary columns for non-admin
+        // (handled in _renderEmployeesList and _renderEditForm)
+    },
+
     switchTab(tab) {
+        // Block non-admin from accessing restricted tabs
+        if (this.ADMIN_TABS.has(tab) && !App.isAdmin()) {
+            App.toast('Доступ ограничен');
+            return;
+        }
         this.currentTab = tab;
         document.querySelectorAll('.settings-tab-content').forEach(el => el.style.display = 'none');
         document.querySelectorAll('.tabs .tab').forEach(el => {
@@ -394,6 +416,9 @@ const Settings = {
         this.clearEmployeeForm();
         document.getElementById('employee-form').style.display = '';
         document.getElementById('emp-delete-btn').style.display = 'none';
+        // Hide salary section from non-admin
+        const paySection = document.getElementById('emp-pay-section');
+        if (paySection) paySection.style.display = App.isAdmin() ? '' : 'none';
         document.getElementById('emp-name').focus();
     },
 
@@ -419,6 +444,10 @@ const Settings = {
 
         document.getElementById('employee-form').style.display = '';
         document.getElementById('emp-delete-btn').style.display = '';
+
+        // Hide salary section from non-admin
+        const paySection = document.getElementById('emp-pay-section');
+        if (paySection) paySection.style.display = App.isAdmin() ? '' : 'none';
     },
 
     clearEmployeeForm() {

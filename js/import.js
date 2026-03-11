@@ -119,8 +119,9 @@ const Import = {
         const d = this.pendingData;
         document.getElementById('import-preview').style.display = '';
 
+        const _isAdmin = App.isAdmin();
         const html = `
-            <div class="cost-row"><span class="cost-label">Зарплата</span><span class="cost-value">${formatRub(d.fact_salary)}</span></div>
+            ${_isAdmin ? `<div class="cost-row"><span class="cost-label">Зарплата</span><span class="cost-value">${formatRub(d.fact_salary)}</span></div>` : ''}
             <div class="cost-row"><span class="cost-label">Материалы</span><span class="cost-value">${formatRub(d.fact_materials)}</span></div>
             <div class="cost-row"><span class="cost-label">Фурнитура</span><span class="cost-value">${formatRub(d.fact_hardware)}</span></div>
             <div class="cost-row"><span class="cost-label">Доставка</span><span class="cost-value">${formatRub(d.fact_delivery)}</span></div>

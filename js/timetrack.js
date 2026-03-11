@@ -419,7 +419,18 @@ const TimeTrack = {
     renderPayrollSummary() {
         const tableBody = document.getElementById('tt-payroll-body');
         const totalEl = document.getElementById('tt-month-pay');
+        const payrollCard = document.getElementById('tt-payroll-card');
         if (!tableBody) return;
+
+        // Hide entire payroll section from non-admin
+        const admin = App.isAdmin();
+        if (payrollCard) payrollCard.style.display = admin ? '' : 'none';
+        const payStatCard = document.getElementById('tt-pay-stat-card');
+        if (payStatCard) payStatCard.style.display = admin ? '' : 'none';
+        if (!admin) {
+            if (totalEl) totalEl.textContent = '—';
+            return;
+        }
 
         const { rows, total } = this.calculateProductionPayrollForCurrentMonth();
         if (totalEl) totalEl.textContent = this.formatMoney(total);

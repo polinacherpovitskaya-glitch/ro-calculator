@@ -17,6 +17,16 @@ const App = {
     authAccounts: [],
     currentEmployeeId: null,
     currentUser: null,
+
+    // Admin = hardcoded password OR Полина's account
+    isAdmin() {
+        if (!this.currentUser) return false;
+        if (this.currentUser.role === 'admin') return true;
+        // Полина (employee_id=5) also has admin-level access
+        if (this.currentUser.employee_id === 5 || this.currentUser.employee_id === '5') return true;
+        return false;
+    },
+
     _sessionStartedAt: null,
     _sessionId: null,
     _sessionHeartbeatTimer: null,
@@ -2842,7 +2852,13 @@ const Calculator = {
 
             // FinDirector
             const fin = calculateFinDirectorData(this.items, this.hardwareItems, this.packagingItems, params);
-            this.setText('fin-salary', formatRub(fin.salary));
+            const finSalaryRow = document.getElementById('fin-salary')?.closest('.cost-row');
+            if (App.isAdmin()) {
+                this.setText('fin-salary', formatRub(fin.salary));
+                if (finSalaryRow) finSalaryRow.style.display = '';
+            } else {
+                if (finSalaryRow) finSalaryRow.style.display = 'none';
+            }
             this.setText('fin-hardware', formatRub(fin.hardwarePurchase));
             this.setText('fin-hw-delivery', formatRub(fin.hardwareDelivery));
             this.setText('fin-packaging', formatRub(fin.packagingPurchase));

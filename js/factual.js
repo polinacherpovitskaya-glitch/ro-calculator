@@ -764,11 +764,14 @@ const Factual = {
         html += '<thead><tr><th style="text-align:left;width:35%">Статья</th><th class="text-right" style="width:20%">План</th><th class="text-right" style="width:25%">Факт</th><th class="text-right" style="width:20%">Δ</th></tr></thead><tbody>';
 
         let planTotal = 0, factTotal = 0;
+        const _isAdmin = App.isAdmin();
         this.ROWS.forEach(row => {
             const planVal = plan[row.planField] || 0;
             const factKey = 'fact_' + row.key;
             const factVal = parseFloat(fact[factKey]) || 0;
             if (row.key === 'molds' && planVal === 0 && factVal === 0) return;
+            // Hide salary rows from non-admin (still count in totals)
+            const isSalaryRow = row.key.startsWith('salary_') || row.key === 'indirect_production';
             const isAuto = this._isAutoFactRow(fact, row.key);
             const manualOverride = this._isManualOverride(fact, factKey);
             planTotal += planVal;
@@ -780,6 +783,10 @@ const Factual = {
             const ftSourced = fact._auto_fintablo && fact._auto_fintablo[factKey];
             const sourceHint = ftSourced && !manualOverride ? 'ФинТабло' : row.hint;
 
+            if (isSalaryRow && !_isAdmin) {
+                planTotal += planVal; factTotal += factVal;
+                return; // skip rendering salary rows for non-admin
+            }
             html += `<tr style="${alarm.bgStyle}">
                 <td style="padding:6px 8px;font-weight:500">${row.label} <span class="text-muted" style="font-size:10px">${sourceHint}</span></td>
                 <td class="text-right" style="padding:6px 8px;color:var(--text-muted)">${this.fmtRub(planVal)}</td>
