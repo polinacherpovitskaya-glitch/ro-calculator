@@ -1466,26 +1466,44 @@ async function updateAuthSession(sessionId, patch) {
 function getDefaultEmployees() {
     const e = (id, name, role, opts = {}) => ({
         id, name, role, daily_hours: opts.hours || 8, telegram_id: null, telegram_username: '',
-        reminder_hour: 17, reminder_minute: 30, timezone_offset: 3, is_active: true,
+        reminder_hour: 17, reminder_minute: 30, timezone_offset: 3,
+        is_active: opts.active !== undefined ? opts.active : true,
         tasks_required: opts.tasks || false, pay_base_salary_month: opts.salary || 0,
         pay_base_hours_month: 176, pay_overtime_hour_rate: opts.ot || 0,
         pay_weekend_hour_rate: opts.we || 0, pay_holiday_hour_rate: opts.ho || 0,
     });
+    // ЗП из FinTablo (Jan-Mar 2026). Белая часть = через трудовой, черная = наличные/переводы.
+    // Налоги ~100к/мес (НДФЛ ~50к + взносы ~50к) учтены отдельно в COST_ITEMS.
     return [
-        // Производство (сдельная ЗП — не входит в косвенные)
+        // Производство (сдельная ЗП — прямые расходы, не косвенные)
         e(1772800698338, 'Тая', 'production', { hours: 6, salary: 75200, ot: 500, we: 750, ho: 750 }),
+        // Тая: оклад 15к (белый) + сделка ~25-55к (черный). 75200 = для расчёта ставки/час
         e(1772801066913, 'Женя Г', 'production', { ot: 500, we: 750, ho: 750 }),
-        e(1741700001000, 'Сергей М', 'production', { ot: 500, we: 750, ho: 750 }),
-        // Управление (Леша 50% производство)
+        // Женя Г: сделка ~40-80к/мес (черный), нет оклада
+        e(1741700001000, 'Сергей М', 'production', { ot: 500, we: 750, ho: 750, active: false }),
+        // Сергей М: нет выплат с Dec 2025
+
+        // Управление
         e(1772827635013, 'Леша', 'management', { salary: 180000 }),
+        // Леша: 180к/мес (черный, 90к × 2). 50% производство
         e(5, 'Полина', 'management', { salary: 168000, tasks: true }),
-        // Офис (ЗП = косвенные расходы)
-        e(1, 'Алина', 'office', { salary: 45000 }),
-        e(2, 'Элина', 'office', { salary: 52000 }),
-        e(3, 'Аня', 'office', { salary: 51000 }),
-        e(1741700002000, 'Анастасия', 'office', { salary: 54000 }),
-        e(1741700003000, 'Борис', 'office', { salary: 61000 }),
+        // Полина: переводы по тел. Оценка ~168к/мес
+
+        // Офис (ЗП = 100% косвенные расходы)
+        e(2, 'Элина', 'office', { salary: 30000 }),
+        // Элина: Jan=20к, Feb=40к, Mar=31к → ~30к/мес
+        e(3, 'Аня', 'office', { salary: 40000 }),
+        // Аня: Jan=40к → ~40к/мес (нерегулярно)
+        e(1741700002000, 'Анастасия', 'office', { salary: 55000 }),
+        // Анастасия: оклад 40к (белый) + доплаты → ~55к/мес. С Dec офис.
+        e(1741700003000, 'Борис', 'office', { salary: 40000 }),
+        // Борис: Jan=30к, Feb=60к, Mar=30к → ~40к/мес (черный)
         e(1741700004000, 'Женя Максименкова', 'office', { salary: 65000 }),
+        // Ж.Максименкова: 130к за Jan+Feb → ~65к/мес (черный)
+
+        // Неактивные (были в последние 6 мес)
+        e(1, 'Алина', 'office', { salary: 45000, active: false }),
+        // Алина: последняя выплата Sep 2025
     ];
 }
 
