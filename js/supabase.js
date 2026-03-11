@@ -14,6 +14,8 @@ function initSupabase() {
         return null;
     }
     supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    // Proactive cleanup on startup to prevent QuotaExceededError
+    _cleanupLocalStorage();
     return supabaseClient;
 }
 
@@ -128,7 +130,51 @@ function getLocal(key) {
 }
 
 function setLocal(key, data) {
-    localStorage.setItem(key, JSON.stringify(data));
+    try {
+        localStorage.setItem(key, JSON.stringify(data));
+    } catch (e) {
+        if (e.name === 'QuotaExceededError' || e.code === 22) {
+            console.error('[setLocal] QuotaExceeded for key:', key, 'Attempting cleanup...');
+            _cleanupLocalStorage();
+            try {
+                localStorage.setItem(key, JSON.stringify(data));
+            } catch (e2) {
+                console.error('[setLocal] Still no space after cleanup for key:', key);
+                App.toast('Хранилище заполнено. Перейдите в Настройки для очистки.');
+            }
+        } else {
+            console.error('[setLocal] Error:', e);
+        }
+    }
+}
+
+function _cleanupLocalStorage() {
+    // 1. Trim auth activity & sessions (keep last 50 entries each)
+    ['ro_calc_auth_activity', 'ro_calc_auth_sessions'].forEach(key => {
+        try {
+            const arr = JSON.parse(localStorage.getItem(key));
+            if (Array.isArray(arr) && arr.length > 50) {
+                localStorage.setItem(key, JSON.stringify(arr.slice(-50)));
+                console.log('[cleanup] Trimmed', key, 'from', arr.length, 'to 50');
+            }
+        } catch (e) { /* ignore */ }
+    });
+
+    // 2. Trim order_items: keep only items for the 100 most recent orders
+    try {
+        const items = JSON.parse(localStorage.getItem('ro_calc_order_items'));
+        if (Array.isArray(items) && items.length > 500) {
+            const orders = JSON.parse(localStorage.getItem('ro_calc_orders')) || [];
+            const recentIds = new Set(
+                orders.sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''))
+                    .slice(0, 100)
+                    .map(o => o.id)
+            );
+            const kept = items.filter(i => recentIds.has(i.order_id));
+            localStorage.setItem('ro_calc_order_items', JSON.stringify(kept));
+            console.log('[cleanup] Trimmed order_items from', items.length, 'to', kept.length);
+        }
+    } catch (e) { /* ignore */ }
 }
 
 // =============================================
