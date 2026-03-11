@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=76">
+    <link rel="stylesheet" href="css/style.css?v=77">
 </head>
 <body>
 
@@ -572,19 +572,60 @@
                 <input type="date" id="fact-date-to" class="form-control" style="width:auto;font-size:12px" onchange="Factual.setCustomRange()">
             </div>
 
-            <!-- Global stats -->
-            <div class="stats-grid" style="margin-bottom:16px">
+            <!-- Global stats row 1 -->
+            <div class="stats-grid" style="margin-bottom:8px">
                 <div class="stat-card">
                     <div class="stat-label">Заказов</div>
                     <div class="stat-value" id="fact-stat-orders">0</div>
+                    <div class="stat-hint" id="fact-stat-orders-hint"></div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">План выручка</div>
+                    <div class="stat-value" id="fact-stat-plan-revenue">—</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">План расходы</div>
+                    <div class="stat-value" id="fact-stat-plan-costs">—</div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-label">План маржа (ср.)</div>
                     <div class="stat-value" id="fact-stat-plan-margin">—</div>
                 </div>
+            </div>
+            <!-- Global stats row 2 -->
+            <div class="stats-grid" style="margin-bottom:8px">
+                <div class="stat-card">
+                    <div class="stat-label">Загрузка произв.</div>
+                    <div class="stat-value" id="fact-stat-load">—</div>
+                    <div class="stat-hint" id="fact-stat-load-hint"></div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Факт выручка</div>
+                    <div class="stat-value" id="fact-stat-fact-revenue">—</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Факт расходы</div>
+                    <div class="stat-value" id="fact-stat-fact-costs">—</div>
+                </div>
                 <div class="stat-card">
                     <div class="stat-label">Факт маржа (ср.)</div>
                     <div class="stat-value" id="fact-stat-fact-margin">—</div>
+                </div>
+            </div>
+            <!-- Global stats row 3 — delta -->
+            <div class="stats-grid" style="margin-bottom:16px">
+                <div class="stat-card">
+                    <div class="stat-label">Косвенные / мес</div>
+                    <div class="stat-value" id="fact-stat-indirect">—</div>
+                    <div class="stat-hint" id="fact-stat-indirect-hint"></div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Δ выручки</div>
+                    <div class="stat-value" id="fact-stat-rev-delta">—</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Δ расходов</div>
+                    <div class="stat-value" id="fact-stat-cost-delta">—</div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-label">Δ прибыли</div>
@@ -3185,7 +3226,7 @@
 <script src="js/gantt.js?v=47"></script>
 <script src="js/fintablo.js?v=1"></script>
 <script src="js/indirect_costs.js?v=1"></script>
-<script src="js/factual.js?v=77"></script>
+<script src="js/factual.js?v=78"></script>
 <script src="js/china.js?v=46m"></script>
 <script src="js/warehouse_photos.js?v=48"></script>
 <script src="js/china_catalog.js?v=46k"></script>

@@ -139,41 +139,134 @@ const Factual = {
 
     async _renderGlobalStats() {
         const orders = this._filteredOrders;
-        const countEl = document.getElementById('fact-stat-orders');
-        const planEl = document.getElementById('fact-stat-plan-margin');
-        const factEl = document.getElementById('fact-stat-fact-margin');
-        const deltaEl = document.getElementById('fact-stat-earned-delta');
-        if (!countEl) return;
+        const $ = id => document.getElementById(id);
+        if (!$('fact-stat-orders')) return;
 
-        countEl.textContent = String(orders.length);
-
+        // Counts
+        const inProd = orders.filter(o => this.SECTION_PRODUCTION.has(o.status));
         const completed = orders.filter(o => o.status === 'completed');
-        const planAvg = completed.length
-            ? round2(completed.reduce((s, o) => s + (parseFloat(o.margin_percent_plan) || 0), 0) / completed.length)
-            : 0;
-        planEl.textContent = completed.length ? `${planAvg}%` : '—';
+        const samples = orders.filter(o => o.status === 'sample');
+        $('fact-stat-orders').textContent = String(orders.length);
+        $('fact-stat-orders-hint').textContent = `произв: ${inProd.length} · готово: ${completed.length} · образцы: ${samples.length}`;
 
-        const factuals = await Promise.all(completed.map(o => loadFactual(o.id)));
+        // Plan totals
+        let planRevTotal = 0, planCostTotal = 0, planHoursTotal = 0;
+        orders.forEach(o => {
+            planRevTotal += this._num(o.total_revenue_plan);
+            planCostTotal += this._num(o.total_cost_plan);
+            planHoursTotal += this._num(o.production_hours_plastic) + this._num(o.production_hours_packaging) + this._num(o.production_hours_hardware);
+        });
+        $('fact-stat-plan-revenue').textContent = this.fmtRub(planRevTotal);
+        $('fact-stat-plan-costs').textContent = this.fmtRub(planCostTotal);
+
+        // Plan average margin
+        const withRevenue = orders.filter(o => this._num(o.total_revenue_plan) > 0);
+        const planAvg = withRevenue.length
+            ? round2(withRevenue.reduce((s, o) => s + (parseFloat(o.margin_percent_plan) || 0), 0) / withRevenue.length)
+            : 0;
+        $('fact-stat-plan-margin').textContent = withRevenue.length ? `${planAvg}%` : '—';
+
+        // Production load
+        const params = App.params || {};
+        const workloadPerMonth = this._num(params.workLoadHours);
+        if (workloadPerMonth > 0) {
+            // Determine how many months in the filter range
+            const months = this._getFilterMonths();
+            const capacity = workloadPerMonth * months;
+            const loadPct = capacity > 0 ? round2(planHoursTotal * 100 / capacity) : 0;
+            const loadColor = loadPct >= 90 ? 'var(--red)' : loadPct >= 70 ? 'var(--yellow)' : 'var(--green)';
+            $('fact-stat-load').innerHTML = `<span style="color:${loadColor}">${loadPct}%</span>`;
+            $('fact-stat-load-hint').textContent = `${round2(planHoursTotal)}ч / ${round2(capacity)}ч (${months} мес)`;
+        } else {
+            $('fact-stat-load').textContent = '—';
+            $('fact-stat-load-hint').textContent = '';
+        }
+
+        // Indirect costs per month
+        const indirectMonthly = this._num(App.settings?.indirect_costs_monthly);
+        if (indirectMonthly > 0) {
+            $('fact-stat-indirect').textContent = this.fmtRub(indirectMonthly);
+            const perHour = this._num(params.indirectPerHour);
+            $('fact-stat-indirect-hint').textContent = perHour > 0 ? `${this.fmtRub(perHour)}/ч` : '';
+        } else {
+            $('fact-stat-indirect').textContent = '—';
+            $('fact-stat-indirect-hint').textContent = '';
+        }
+
+        // Fact totals (load factuals for all orders with facts)
+        const factuals = await Promise.all(orders.map(o => loadFactual(o.id)));
+        let factRevTotal = 0, factCostTotal = 0;
         let factMargins = [];
-        let earnedDelta = 0;
-        completed.forEach((o, idx) => {
+        let earnedDelta = 0, revDelta = 0, costDelta = 0;
+
+        orders.forEach((o, idx) => {
             const f = factuals[idx];
             if (!f) return;
-            const planRevenue = parseFloat(o.total_revenue_plan) || 0;
-            const planCosts = parseFloat(o.total_cost_plan) || 0;
-            const planEarned = planRevenue - planCosts;
-            const factRevenue = parseFloat(f.fact_revenue) || 0;
+            const planRevenue = this._num(o.total_revenue_plan);
+            const planCosts = this._num(o.total_cost_plan);
+            const factRevenue = this._num(f.fact_revenue);
             let factCosts = 0;
-            this.ROWS.forEach(r => { factCosts += parseFloat(f['fact_' + r.key]) || 0; });
+            this.ROWS.forEach(r => { factCosts += this._num(f['fact_' + r.key]); });
+
+            if (factRevenue > 0 || factCosts > 0) {
+                factRevTotal += factRevenue;
+                factCostTotal += factCosts;
+            }
             if (factRevenue > 0) {
-                factMargins.push(round2((factRevenue - factCosts) * 100 / factRevenue));
-                earnedDelta += (factRevenue - factCosts) - planEarned;
+                const fm = round2((factRevenue - factCosts) * 100 / factRevenue);
+                factMargins.push(fm);
+                earnedDelta += (factRevenue - factCosts) - (planRevenue - planCosts);
+                revDelta += factRevenue - planRevenue;
+                costDelta += factCosts - planCosts;
             }
         });
+
+        $('fact-stat-fact-revenue').textContent = factRevTotal > 0 ? this.fmtRub(factRevTotal) : '—';
+        $('fact-stat-fact-costs').textContent = factCostTotal > 0 ? this.fmtRub(factCostTotal) : '—';
+
         const factAvg = factMargins.length ? round2(factMargins.reduce((s, v) => s + v, 0) / factMargins.length) : 0;
-        factEl.textContent = factMargins.length ? `${factAvg}%` : '—';
-        deltaEl.textContent = `${earnedDelta >= 0 ? '+' : ''}${this.fmtRub(earnedDelta)}`;
-        deltaEl.style.color = earnedDelta >= 0 ? 'var(--green)' : 'var(--red)';
+        const factMarginEl = $('fact-stat-fact-margin');
+        factMarginEl.textContent = factMargins.length ? `${factAvg}%` : '—';
+        if (factMargins.length) {
+            factMarginEl.style.color = factAvg >= planAvg ? 'var(--green)' : factAvg >= planAvg - 5 ? 'var(--yellow)' : 'var(--red)';
+        }
+
+        // Deltas
+        this._renderDelta($('fact-stat-rev-delta'), revDelta, factMargins.length);
+        this._renderDelta($('fact-stat-cost-delta'), costDelta, factMargins.length, true);
+        this._renderDelta($('fact-stat-earned-delta'), earnedDelta, factMargins.length);
+    },
+
+    _renderDelta(el, delta, hasData, invertColor = false) {
+        if (!el) return;
+        if (!hasData) { el.textContent = '—'; el.style.color = ''; return; }
+        el.textContent = `${delta >= 0 ? '+' : ''}${this.fmtRub(delta)}`;
+        if (invertColor) {
+            el.style.color = delta <= 0 ? 'var(--green)' : 'var(--red)'; // less costs = good
+        } else {
+            el.style.color = delta >= 0 ? 'var(--green)' : 'var(--red)';
+        }
+    },
+
+    _getFilterMonths() {
+        if (this._filterRange === '1m') return 1;
+        if (this._filterRange === '3m') return 3;
+        if (this._filterRange === '6m') return 6;
+        if (this._filterRange === '1y') return 12;
+        if (this._filterRange === 'custom' && this._filterFrom && this._filterTo) {
+            const from = new Date(this._filterFrom);
+            const to = new Date(this._filterTo);
+            const diffMs = to - from;
+            return Math.max(1, Math.round(diffMs / (30.4 * 24 * 60 * 60 * 1000)));
+        }
+        // 'all' — count from earliest order
+        if (this._allOrders.length === 0) return 1;
+        const earliest = this._allOrders.reduce((min, o) => {
+            const d = new Date(o.created_at || 0);
+            return d < min ? d : min;
+        }, new Date());
+        const diffMs = Date.now() - earliest.getTime();
+        return Math.max(1, Math.round(diffMs / (30.4 * 24 * 60 * 60 * 1000)));
     },
 
     SECTION_PRODUCTION: new Set(['production_casting', 'production_printing', 'production_hardware', 'production_packaging', 'in_production', 'delivery']),

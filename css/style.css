@@ -297,6 +297,12 @@ body {
     margin-top: 2px;
 }
 
+.stat-card .stat-hint {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 2px;
+    font-weight: 400;
+}
 .stat-positive { color: var(--green); }
 .stat-negative { color: var(--red); }
 
