@@ -175,6 +175,23 @@ const Factual = {
         deltaEl.style.color = earnedDelta >= 0 ? 'var(--green)' : 'var(--red)';
     },
 
+    SECTION_PRODUCTION: new Set(['production_casting', 'production_hardware', 'production_packaging', 'in_production', 'delivery']),
+    SECTION_SAMPLE: new Set(['sample']),
+    SECTION_COMPLETED: new Set(['completed']),
+
+    SECTIONS: [
+        { key: 'production', label: '⚙️ В производстве', icon: '🔧', statuses: null },
+        { key: 'sample',     label: '🔬 Образцы',        icon: '🔬', statuses: null },
+        { key: 'completed',  label: '✅ Готово',          icon: '✅', statuses: null },
+    ],
+
+    _getSection(status) {
+        if (this.SECTION_PRODUCTION.has(status)) return 'production';
+        if (this.SECTION_SAMPLE.has(status)) return 'sample';
+        if (this.SECTION_COMPLETED.has(status)) return 'completed';
+        return 'production';
+    },
+
     _renderOrdersTable() {
         const tbody = document.getElementById('fact-orders-body');
         if (!tbody) return;
@@ -184,30 +201,34 @@ const Factual = {
             return;
         }
 
-        let html = '';
+        // Group orders by section
+        const groups = { production: [], sample: [], completed: [] };
         this._filteredOrders.forEach(o => {
-            const rev = this._num(o.total_revenue_plan);
-            const cost = this._num(o.total_cost_plan);
-            const margin = rev > 0 ? round2((rev - cost) * 100 / rev) : 0;
-            const marginColor = margin >= 30 ? 'var(--green)' : margin >= 20 ? 'var(--yellow)' : 'var(--red)';
-            const status = this.STATUS_LABELS[o.status] || o.status;
-            const isOpen = this._openOrderId === o.id;
+            const sec = this._getSection(o.status);
+            groups[sec].push(o);
+        });
 
-            html += `<tr class="fact-order-row ${isOpen ? 'fact-row-open' : ''}" onclick="Factual.toggleDetail(${o.id})" style="cursor:pointer">
-                <td style="font-weight:600;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${this._esc(o.order_name || '—')}</td>
-                <td><span class="fact-status-badge">${status}</span></td>
-                <td class="text-right text-muted">${this.fmtRub(cost)}</td>
-                <td class="text-right" id="fact-row-fcost-${o.id}"><span class="text-muted">—</span></td>
-                <td class="text-right text-muted">${this.fmtRub(rev)}</td>
-                <td class="text-right" style="color:${marginColor};font-weight:600">${margin}%</td>
-                <td class="text-right" id="fact-row-fmargin-${o.id}"><span class="text-muted">—</span></td>
-                <td style="text-align:center;font-size:12px">${isOpen ? '▼' : '▶'}</td>
-            </tr>`;
-            html += `<tr id="fact-detail-row-${o.id}" class="fact-detail-row" style="${isOpen ? '' : 'display:none'}">
-                <td colspan="8" style="padding:0;background:var(--bg)">
-                    <div id="fact-detail-${o.id}" style="padding:16px"></div>
+        const sectionMeta = [
+            { key: 'production', label: '⚙️ В производстве', color: 'var(--yellow)' },
+            { key: 'sample',     label: '🔬 Образцы',        color: 'var(--accent)' },
+            { key: 'completed',  label: '✅ Готово',          color: 'var(--green)' },
+        ];
+
+        let html = '';
+        sectionMeta.forEach(sec => {
+            const orders = groups[sec.key];
+            if (orders.length === 0) return;
+
+            // Section header row
+            html += `<tr class="fact-section-header">
+                <td colspan="8" style="padding:10px 8px 6px;font-weight:700;font-size:13px;color:${sec.color};border-bottom:2px solid ${sec.color};background:var(--bg)">
+                    ${sec.label} <span style="font-weight:400;font-size:12px;color:var(--text-muted)">(${orders.length})</span>
                 </td>
             </tr>`;
+
+            orders.forEach(o => {
+                html += this._renderOrderRow(o);
+            });
         });
 
         tbody.innerHTML = html;
@@ -223,6 +244,32 @@ const Factual = {
                 this._loadAndRenderDetail(this._openOrderId);
             }
         }
+    },
+
+    _renderOrderRow(o) {
+        const rev = this._num(o.total_revenue_plan);
+        const cost = this._num(o.total_cost_plan);
+        const margin = rev > 0 ? round2((rev - cost) * 100 / rev) : 0;
+        const marginColor = margin >= 30 ? 'var(--green)' : margin >= 20 ? 'var(--yellow)' : 'var(--red)';
+        const status = this.STATUS_LABELS[o.status] || o.status;
+        const isOpen = this._openOrderId === o.id;
+
+        let html = `<tr class="fact-order-row ${isOpen ? 'fact-row-open' : ''}" onclick="Factual.toggleDetail(${o.id})" style="cursor:pointer">
+            <td style="font-weight:600;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${this._esc(o.order_name || '—')}</td>
+            <td><span class="fact-status-badge">${status}</span></td>
+            <td class="text-right text-muted">${this.fmtRub(cost)}</td>
+            <td class="text-right" id="fact-row-fcost-${o.id}"><span class="text-muted">—</span></td>
+            <td class="text-right text-muted">${this.fmtRub(rev)}</td>
+            <td class="text-right" style="color:${marginColor};font-weight:600">${margin}%</td>
+            <td class="text-right" id="fact-row-fmargin-${o.id}"><span class="text-muted">—</span></td>
+            <td style="text-align:center;font-size:12px">${isOpen ? '▼' : '▶'}</td>
+        </tr>`;
+        html += `<tr id="fact-detail-row-${o.id}" class="fact-detail-row" style="${isOpen ? '' : 'display:none'}">
+            <td colspan="8" style="padding:0;background:var(--bg)">
+                <div id="fact-detail-${o.id}" style="padding:16px"></div>
+            </td>
+        </tr>`;
+        return html;
     },
 
     async _loadFactSummaries() {

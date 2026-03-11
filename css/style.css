@@ -2409,6 +2409,12 @@ table .text-center { text-align: center; }
     font-style: normal;
 }
 
+/* Section headers in orders table */
+.fact-section-header td {
+    user-select: none;
+    cursor: default;
+}
+
 /* Responsive for fact table */
 @media (max-width: 768px) {
     #page-factual .table-wrap {
