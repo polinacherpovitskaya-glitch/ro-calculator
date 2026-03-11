@@ -7,6 +7,7 @@ const STATUS_OPTIONS = [
     { value: 'draft',                label: 'Черновик' },
     { value: 'sample',               label: 'Заказ образца' },
     { value: 'production_casting',   label: 'Производство: Выливание' },
+    { value: 'production_printing',  label: 'Производство: Печать' },
     { value: 'production_hardware',  label: 'Производство: Сборка' },
     { value: 'production_packaging', label: 'Производство: Упаковка' },
     { value: 'delivery',             label: 'Доставка' },
@@ -18,6 +19,7 @@ const STATUS_OPTIONS = [
 // Production sub-stage labels for board card badge
 const PRODUCTION_SUBSTAGES = {
     production_casting:   'Выливание формы',
+    production_printing:  'Печать / нанесение',
     production_hardware:  'Сборка фурнитуры',
     production_packaging: 'Упаковка',
     in_production:        'В производстве',
@@ -26,8 +28,7 @@ const PRODUCTION_SUBSTAGES = {
 const BOARD_COLUMNS = [
     { status: 'draft',      label: 'Черновик',      color: '#6b7280', icon: '○', statuses: ['draft', 'calculated'] },
     { status: 'sample',     label: 'Заказ образца', color: '#3b82f6', icon: '◎', statuses: ['sample'] },
-    { status: 'production', label: 'Производство',  color: '#f59e0b', icon: '◐', statuses: ['production_casting', 'production_hardware', 'production_packaging', 'in_production'] },
-    { status: 'delivery',   label: 'Доставка',      color: '#8b5cf6', icon: '→', statuses: ['delivery'] },
+    { status: 'production', label: 'Производство',  color: '#f59e0b', icon: '◐', statuses: ['production_casting', 'production_printing', 'production_hardware', 'production_packaging', 'in_production', 'delivery'] },
     { status: 'completed',  label: 'Готово',         color: '#22c55e', icon: '●', statuses: ['completed'] },
     { status: 'cancelled',  label: 'Отменён',        color: '#ef4444', icon: '✕', statuses: ['cancelled'] },
 ];
@@ -104,8 +105,7 @@ const Orders = {
     STATUS_SECTIONS: [
         { status: 'draft',       label: 'Черновик',      color: '#6b7280', icon: '○', defaultOpen: true,  statuses: ['draft', 'calculated'] },
         { status: 'sample',      label: 'Заказ образца', color: '#3b82f6', icon: '◎', defaultOpen: true,  statuses: ['sample'] },
-        { status: 'production',  label: 'Производство',  color: '#f59e0b', icon: '◐', defaultOpen: true,  statuses: ['production_casting', 'production_hardware', 'production_packaging', 'in_production'] },
-        { status: 'delivery',    label: 'Доставка',      color: '#8b5cf6', icon: '→', defaultOpen: true,  statuses: ['delivery'] },
+        { status: 'production',  label: 'Производство',  color: '#f59e0b', icon: '◐', defaultOpen: true,  statuses: ['production_casting', 'production_printing', 'production_hardware', 'production_packaging', 'in_production', 'delivery'] },
         { status: 'completed',   label: 'Готово',         color: '#22c55e', icon: '●', defaultOpen: false, statuses: ['completed'] },
         { status: 'cancelled',   label: 'Отменён',        color: '#ef4444', icon: '✕', defaultOpen: false, statuses: ['cancelled'] },
         { status: 'deleted',     label: 'Корзина',        color: '#9ca3af', icon: '&#128465;', defaultOpen: false, statuses: ['deleted'] },

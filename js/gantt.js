@@ -12,7 +12,7 @@ const Gantt = {
         try {
             const allOrders = await loadOrders({});
             // Only schedulable orders with production hours
-            const GANTT_STATUSES = ['sample','production_casting','production_hardware','production_packaging','delivery','in_production'];
+            const GANTT_STATUSES = ['sample','production_casting','production_printing','production_hardware','production_packaging','delivery','in_production'];
             this.orders = allOrders.filter(o =>
                 GANTT_STATUSES.includes(o.status)
                 && ((o.production_hours_plastic || 0) + (o.production_hours_packaging || 0) + (o.production_hours_hardware || 0) > 0)
@@ -96,7 +96,7 @@ const Gantt = {
         // Sidebar
         const sidebarRows = activeQueue.map(q => {
             const totalH = formatHours(q.totalHours);
-            const badgeColors = { production_casting: '#f59e0b', production_hardware: '#f59e0b', production_packaging: '#f59e0b', in_production: '#f59e0b', sample: '#3b82f6', delivery: '#8b5cf6' };
+            const badgeColors = { production_casting: '#f59e0b', production_printing: '#f59e0b', production_hardware: '#f59e0b', production_packaging: '#f59e0b', in_production: '#f59e0b', sample: '#3b82f6', delivery: '#8b5cf6' };
             const statusBadge = `<span style="color:${badgeColors[q.status] || '#6b7280'}">&#9679;</span>`;
             return `
                 <div class="gantt-sidebar-row" title="${this.esc(q.orderName)}" onclick="Calculator.loadOrder(${q.orderId})" style="cursor:pointer">

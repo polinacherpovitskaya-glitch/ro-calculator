@@ -1991,10 +1991,11 @@ table .text-center { text-align: center; }
 .inline-status-select.status-calculated { color: #6b7280; }
 .inline-status-select.status-sample { color: #3b82f6; font-weight: 700; }
 .inline-status-select.status-production_casting,
+.inline-status-select.status-production_printing,
 .inline-status-select.status-production_hardware,
 .inline-status-select.status-production_packaging,
-.inline-status-select.status-in_production { color: #f59e0b; font-weight: 700; }
-.inline-status-select.status-delivery { color: #8b5cf6; font-weight: 700; }
+.inline-status-select.status-in_production,
+.inline-status-select.status-delivery { color: #f59e0b; font-weight: 700; }
 .inline-status-select.status-completed { color: #22c55e; font-weight: 700; }
 .inline-status-select.status-cancelled { color: #ef4444; }
 

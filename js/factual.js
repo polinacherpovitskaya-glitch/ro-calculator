@@ -15,10 +15,11 @@ const Factual = {
     _filterTo: null,
     _renderTimer: null,
 
-    VISIBLE_STATUSES: ['sample', 'production_casting', 'production_hardware', 'production_packaging', 'in_production', 'delivery', 'completed'],
+    VISIBLE_STATUSES: ['sample', 'production_casting', 'production_printing', 'production_hardware', 'production_packaging', 'in_production', 'delivery', 'completed'],
     STATUS_LABELS: {
         sample: '🔬 Образец',
         production_casting: '🔧 Литьё',
+        production_printing: '🖨️ Печать',
         production_hardware: '🔩 Сборка',
         production_packaging: '📦 Упаковка',
         in_production: '⚙️ Производство',
@@ -26,8 +27,8 @@ const Factual = {
         completed: '✅ Готово',
     },
     STATUS_ORDER: {
-        production_casting: 1, production_hardware: 2, production_packaging: 3, in_production: 4,
-        delivery: 5, sample: 6, completed: 7,
+        production_casting: 1, production_printing: 2, production_hardware: 3, production_packaging: 4, in_production: 5,
+        delivery: 6, sample: 7, completed: 8,
     },
 
     ROWS: [
@@ -175,7 +176,7 @@ const Factual = {
         deltaEl.style.color = earnedDelta >= 0 ? 'var(--green)' : 'var(--red)';
     },
 
-    SECTION_PRODUCTION: new Set(['production_casting', 'production_hardware', 'production_packaging', 'in_production', 'delivery']),
+    SECTION_PRODUCTION: new Set(['production_casting', 'production_printing', 'production_hardware', 'production_packaging', 'in_production', 'delivery']),
     SECTION_SAMPLE: new Set(['sample']),
     SECTION_COMPLETED: new Set(['completed']),
 

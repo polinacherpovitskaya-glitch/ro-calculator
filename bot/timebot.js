@@ -28,7 +28,7 @@ const STAGE_LABELS = {
     packaging: 'Упаковка',
     other: 'Другое',
 };
-const PRODUCTION_STATUSES = ['production_casting', 'production_hardware', 'production_packaging', 'in_production'];
+const PRODUCTION_STATUSES = ['production_casting', 'production_printing', 'production_hardware', 'production_packaging', 'in_production', 'delivery'];
 
 // Persistent reply keyboard (shown after login)
 const MAIN_KEYBOARD = {

@@ -3,7 +3,7 @@
 // =============================================
 
 const ProductionPlan = {
-    PRODUCTION_STATUSES: ['production_casting', 'production_hardware', 'production_packaging', 'in_production'],
+    PRODUCTION_STATUSES: ['production_casting', 'production_printing', 'production_hardware', 'production_packaging', 'in_production', 'delivery'],
     allRows: [],
     filteredRows: [],
     priority: [],
@@ -255,6 +255,11 @@ const ProductionPlan = {
         const attachments = [];
         const printingLines = [];
         const hasCustomMold = productItems.some(i => !i.is_blank_mold);
+        const hasPrinting = productItems.some(i => {
+            let p = i.printings;
+            if (typeof p === 'string') { try { p = JSON.parse(p); } catch(e) { p = []; } }
+            return Array.isArray(p) && p.some(pr => (parseFloat(pr.qty) || 0) > 0 || (parseFloat(pr.price) || 0) > 0 || pr.name);
+        });
         productItems.forEach(item => {
             const colors = this._extractColorNames(item);
             const qty = parseFloat(item.quantity) || 0;
@@ -367,6 +372,7 @@ const ProductionPlan = {
             pkgByColorGroup: Object.fromEntries(pkgByColorGroup),
             attachments,
             hasCustomMold,
+            hasPrinting,
             startLabel,
             deadlineLabel,
             deadlineTs: endIso ? new Date(endIso).getTime() : (startIso ? new Date(startIso).getTime() : null),
@@ -397,23 +403,29 @@ const ProductionPlan = {
             { key: 'casting', label: 'Выливание' },
             { key: 'mold', label: 'Форма' },
             { key: 'trim', label: 'Обрезание/линейка' },
+            { key: 'printing', label: 'Печать' },
             { key: 'assembly', label: 'Сборка' },
             { key: 'packaging', label: 'Упаковка' },
+            { key: 'delivery', label: 'Доставка' },
         ];
 
         const currentByStatus = {
             production_casting: 'casting',
             in_production: 'trim',
+            production_printing: 'printing',
             production_hardware: 'assembly',
             production_packaging: 'packaging',
-            delivery: 'packaging',
-            completed: 'packaging',
+            delivery: 'delivery',
+            completed: 'delivery',
         };
         const currentKey = currentByStatus[row.status] || 'casting';
         const currentIdx = stages.findIndex(s => s.key === currentKey);
 
         return stages.map((s, idx) => {
             if (s.key === 'mold' && !row.hasCustomMold) {
+                return { ...s, state: 'skipped' };
+            }
+            if (s.key === 'printing' && !row.hasPrinting) {
                 return { ...s, state: 'skipped' };
             }
             if (idx < currentIdx) return { ...s, state: 'done' };
@@ -428,8 +440,10 @@ const ProductionPlan = {
             casting: 'production_casting',
             mold: 'in_production',
             trim: 'in_production',
+            printing: 'production_printing',
             assembly: 'production_hardware',
             packaging: 'production_packaging',
+            delivery: 'delivery',
         };
         const legend = stages.map(s => {
             const dotColor =
@@ -471,9 +485,11 @@ const ProductionPlan = {
 
         const nextStatusByCurrent = {
             production_casting: 'in_production',
-            in_production: 'production_hardware',
+            in_production: 'production_printing',
+            production_printing: 'production_hardware',
             production_hardware: 'production_packaging',
             production_packaging: 'delivery',
+            delivery: 'completed',
         };
         const nextStatus = nextStatusByCurrent[row.status] || '';
         const nextLabel = nextStatus ? (App.statusLabel(nextStatus) || nextStatus) : '';
@@ -499,9 +515,11 @@ const ProductionPlan = {
         if (!row) return;
         const nextStatusByCurrent = {
             production_casting: 'in_production',
-            in_production: 'production_hardware',
+            in_production: 'production_printing',
+            production_printing: 'production_hardware',
             production_hardware: 'production_packaging',
             production_packaging: 'delivery',
+            delivery: 'completed',
         };
         const next = nextStatusByCurrent[row.status];
         if (!next) return;

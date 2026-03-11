@@ -3,7 +3,7 @@
 // v44b: KPI stats + drafts cards + active orders (new statuses)
 // =============================================
 
-const DASH_LOAD_STATUSES = ['sample','production_casting','production_hardware','production_packaging','delivery','in_production'];
+const DASH_LOAD_STATUSES = ['sample','production_casting','production_printing','production_hardware','production_packaging','delivery','in_production'];
 
 const Dashboard = {
     async load() {

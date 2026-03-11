@@ -672,7 +672,7 @@ const OrderDetail = {
     // ==========================================
 
     _statusColor(status) {
-        const map = { draft: 'gray', calculated: 'blue', in_production: 'orange', completed: 'green', cancelled: 'red', deleted: 'red' };
+        const map = { draft: 'gray', calculated: 'blue', in_production: 'orange', production_printing: 'orange', completed: 'green', cancelled: 'red', deleted: 'red' };
         return map[status] || 'gray';
     },
 

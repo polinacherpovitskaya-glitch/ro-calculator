@@ -1274,7 +1274,7 @@ const Warehouse = {
     },
 
     _isProductionStatus(status) {
-        return ['production_casting', 'production_hardware', 'production_packaging', 'in_production'].includes(status);
+        return ['production_casting', 'production_printing', 'production_hardware', 'production_packaging', 'in_production', 'delivery'].includes(status);
     },
 
     _projectHardwareKey(orderId, itemId) {

@@ -598,6 +598,7 @@ const App = {
             calculated:           'Черновик',          // backward compat
             sample:               'Заказ образца',
             production_casting:   'Производство: Выливание',
+            production_printing:  'Производство: Печать',
             production_hardware:  'Производство: Сборка',
             production_packaging: 'Производство: Упаковка',
             in_production:        'Производство',      // backward compat

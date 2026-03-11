@@ -597,11 +597,11 @@ function buildProductionSchedule(orders, settings) {
     const dailyCapacity = round2(workersCount * hoursPerDay);
 
     // Filter schedulable orders: only past-draft statuses (sample, production, delivery)
-    const SCHEDULE_STATUSES = ['sample','production_casting','production_hardware','production_packaging','delivery','in_production'];
+    const SCHEDULE_STATUSES = ['sample','production_casting','production_printing','production_hardware','production_packaging','delivery','in_production'];
     const schedulable = orders.filter(o => SCHEDULE_STATUSES.includes(o.status));
 
     // Priority: production > delivery > sample, then by deadline_end ASC
-    const statusPriority = { production_casting: 0, production_hardware: 0, production_packaging: 0, in_production: 0, delivery: 1, sample: 2 };
+    const statusPriority = { production_casting: 0, production_printing: 0, production_hardware: 0, production_packaging: 0, in_production: 0, delivery: 1, sample: 2 };
     schedulable.sort((a, b) => {
         const pa = statusPriority[a.status] ?? 3;
         const pb = statusPriority[b.status] ?? 3;
