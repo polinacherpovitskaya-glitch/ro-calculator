@@ -84,8 +84,8 @@
                 <span>Календарь</span>
             </a>
             <a href="#import" data-page="import">
-                <span class="nav-icon">&#8645;</span>
-                <span>Импорт</span>
+                <span class="nav-icon">&#128176;</span>
+                <span>ФинТабло</span>
             </a>
             <a href="#warehouse" data-page="warehouse">
                 <span class="nav-icon">&#128230;</span>
@@ -1578,69 +1578,74 @@
         <!-- ========== IMPORT ========== -->
         <div id="page-import" class="page">
             <div class="page-header">
-                <h1>Импорт из FinTablo</h1>
+                <h1>ФинТабло</h1>
+                <div class="flex gap-8">
+                    <button class="btn btn-outline" onclick="FinTablo.refresh()" id="ft-refresh-btn">&#128260; Обновить</button>
+                </div>
             </div>
 
-            <div class="card">
-                <h3 style="margin-bottom: 12px;">Загрузить CSV-отчет</h3>
+            <!-- API key setup -->
+            <div class="card" id="ft-setup" style="display:none">
+                <h3 style="margin-bottom: 12px;">Настройка подключения</h3>
                 <p class="text-muted" style="margin-bottom: 16px; font-size: 13px;">
-                    Экспортируйте отчет из FinTablo (ОПиУ по проектам) и загрузите CSV-файл.
-                    Система автоматически сопоставит статьи расходов.
+                    Введите API-ключ из профиля FinTablo для подключения.
                 </p>
                 <div class="form-group">
-                    <label>Выберите заказ</label>
-                    <select id="import-order-select">
-                        <option value="">-- Выберите заказ --</option>
-                    </select>
+                    <label>API-ключ FinTablo</label>
+                    <input type="text" id="ft-api-key" placeholder="t1.xxxxx...">
                 </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label>Период с</label>
-                        <input type="date" id="import-period-start">
-                    </div>
-                    <div class="form-group">
-                        <label>Период по</label>
-                        <input type="date" id="import-period-end">
-                    </div>
-                </div>
-                <div class="form-group">
-                    <label>CSV-файл</label>
-                    <input type="file" id="import-csv-file" accept=".csv">
-                </div>
-                <button class="btn btn-primary" onclick="Import.processCSV()">Загрузить и обработать</button>
+                <button class="btn btn-primary" onclick="FinTablo.saveApiKey()">Подключить</button>
             </div>
 
-            <div class="card" id="import-preview" style="display:none">
-                <div class="card-header">
-                    <h3>Предварительный просмотр</h3>
-                </div>
-                <div class="cost-breakdown" id="import-preview-data"></div>
-                <div style="margin-top: 16px;">
-                    <button class="btn btn-success" onclick="Import.confirmImport()">Подтвердить импорт</button>
-                    <button class="btn btn-outline" onclick="Import.cancelImport()">Отмена</button>
-                </div>
+            <!-- Loading -->
+            <div class="card" id="ft-loading" style="display:none">
+                <p class="text-center text-muted" style="padding:24px 0">&#9203; Загрузка данных из ФинТабло...</p>
             </div>
 
-            <div class="card">
+            <!-- Error -->
+            <div class="card" id="ft-error" style="display:none">
+                <p class="text-center" style="padding:16px 0;color:var(--danger)" id="ft-error-text"></p>
+            </div>
+
+            <!-- Deals table -->
+            <div class="card" id="ft-deals-card" style="display:none">
                 <div class="card-header">
-                    <h3>История импортов</h3>
+                    <h3>Сделки <span class="text-muted" id="ft-deals-count" style="font-weight:400;font-size:13px"></span></h3>
+                    <div class="flex gap-8">
+                        <select id="ft-filter" onchange="FinTablo.applyFilter()" style="min-width:160px;font-size:13px">
+                            <option value="matched">Связанные с заказами</option>
+                            <option value="all">Все сделки</option>
+                            <option value="unmatched">Без заказа</option>
+                        </select>
+                    </div>
                 </div>
                 <div class="table-wrap">
                     <table>
                         <thead>
                             <tr>
-                                <th>Дата</th>
+                                <th>Сделка</th>
                                 <th>Заказ</th>
-                                <th>Период</th>
-                                <th class="text-right">Факт расходы</th>
-                                <th class="text-right">Факт выручка</th>
+                                <th class="text-right">Сумма сделки</th>
+                                <th class="text-right">Расходы</th>
+                                <th class="text-right">Доходы</th>
+                                <th style="width:40px"></th>
                             </tr>
                         </thead>
-                        <tbody id="import-history-body">
-                            <tr><td colspan="5" class="text-center text-muted">Нет импортов</td></tr>
-                        </tbody>
+                        <tbody id="ft-deals-body"></tbody>
                     </table>
                 </div>
+            </div>
+
+            <!-- Deal detail (transactions) -->
+            <div class="card" id="ft-detail" style="display:none">
+                <div class="card-header">
+                    <h3 id="ft-detail-title">Транзакции</h3>
+                    <button class="btn btn-outline btn-sm" onclick="FinTablo.closeDetail()">&#10005; Закрыть</button>
+                </div>
+                <div id="ft-detail-loading" style="display:none">
+                    <p class="text-center text-muted" style="padding:16px 0">&#9203; Загрузка транзакций...</p>
+                </div>
+                <div id="ft-detail-content"></div>
             </div>
         </div>
 
@@ -3076,7 +3081,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="js/supabase.js?v=84"></script>
 <script src="js/calculator.js?v=63"></script>
-<script src="js/app.js?v=84"></script>
+<script src="js/app.js?v=85"></script>
 <script src="js/dashboard.js?v=46g"></script>
 <script src="js/order-detail.js?v=48"></script>
 <script src="js/orders.js?v=53"></script>
@@ -3088,7 +3093,7 @@
 <script src="js/timetrack.js?v=55"></script>
 <script src="js/tasks.js?v=46g"></script>
 <script src="js/gantt.js?v=46g"></script>
-<script src="js/import.js?v=46g"></script>
+<script src="js/fintablo.js?v=1"></script>
 <script src="js/factual.js?v=74"></script>
 <script src="js/china.js?v=46m"></script>
 <script src="js/warehouse_photos.js?v=48"></script>

@@ -2273,3 +2273,8 @@ table .text-center { text-align: center; }
     #pp-table-wrap { display: none; }
     #pp-mobile-list { display: block; }
 }
+
+/* FinTablo page */
+.ft-deal-row:hover { background: var(--bg); }
+.ft-unmatched { opacity: 0.6; }
+.ft-unmatched:hover { opacity: 1; }
