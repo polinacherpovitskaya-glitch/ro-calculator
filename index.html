@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=73">
+    <link rel="stylesheet" href="css/style.css?v=74">
 </head>
 <body>
 
@@ -563,61 +563,58 @@
                 <h1>План-факт</h1>
             </div>
 
-            <div class="stats-grid" style="margin-bottom:16px;" id="fact-global-stats">
+            <!-- Period filter -->
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+                <button class="btn btn-sm fact-filter-btn" data-range="1m" onclick="Factual.setFilter('1m')">Месяц</button>
+                <button class="btn btn-sm fact-filter-btn" data-range="3m" onclick="Factual.setFilter('3m')">3 мес</button>
+                <button class="btn btn-sm fact-filter-btn" data-range="6m" onclick="Factual.setFilter('6m')">6 мес</button>
+                <button class="btn btn-sm fact-filter-btn" data-range="1y" onclick="Factual.setFilter('1y')">Год</button>
+                <button class="btn btn-sm fact-filter-btn active" data-range="all" onclick="Factual.setFilter('all')">Все</button>
+                <span style="margin-left:8px;color:var(--text-muted)">|</span>
+                <input type="date" id="fact-date-from" class="form-control" style="width:auto;font-size:12px" onchange="Factual.setCustomRange()">
+                <span class="text-muted">—</span>
+                <input type="date" id="fact-date-to" class="form-control" style="width:auto;font-size:12px" onchange="Factual.setCustomRange()">
+            </div>
+
+            <!-- Global stats -->
+            <div class="stats-grid" style="margin-bottom:16px">
                 <div class="stat-card">
-                    <div class="stat-label">Готовых заказов</div>
+                    <div class="stat-label">Заказов</div>
                     <div class="stat-value" id="fact-stat-orders">0</div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-label">План маржа (ср.)</div>
-                    <div class="stat-value" id="fact-stat-plan-margin">0%</div>
+                    <div class="stat-value" id="fact-stat-plan-margin">—</div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-label">Факт маржа (ср.)</div>
-                    <div class="stat-value" id="fact-stat-fact-margin">0%</div>
+                    <div class="stat-value" id="fact-stat-fact-margin">—</div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-label">Отклонение прибыли</div>
-                    <div class="stat-value" id="fact-stat-earned-delta">0 &#8381;</div>
+                    <div class="stat-label">Δ прибыли</div>
+                    <div class="stat-value" id="fact-stat-earned-delta">—</div>
                 </div>
             </div>
 
-            <!-- Order selector -->
-            <div class="card" style="margin-bottom:16px">
-                <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
-                    <label style="font-weight:600; white-space:nowrap;">Готовый заказ:</label>
-                    <select id="fact-order-select" class="form-control" style="max-width:400px" onchange="Factual.onOrderSelect(this.value)">
-                        <option value="">-- Выберите заказ (статус: Готово) --</option>
-                    </select>
-                    <span id="fact-order-status" style="font-size:12px; color:var(--text-muted);"></span>
+            <!-- Orders table -->
+            <div class="card">
+                <div class="table-wrap">
+                    <table style="width:100%;font-size:13px">
+                        <thead>
+                            <tr>
+                                <th style="text-align:left">Заказ</th>
+                                <th>Статус</th>
+                                <th class="text-right">План расх.</th>
+                                <th class="text-right">Факт расх.</th>
+                                <th class="text-right">Выручка</th>
+                                <th class="text-right">М план</th>
+                                <th class="text-right">М факт</th>
+                                <th style="width:30px"></th>
+                            </tr>
+                        </thead>
+                        <tbody id="fact-orders-body"></tbody>
+                    </table>
                 </div>
-            </div>
-
-            <div class="card" id="fact-order-analytics-card" style="display:none; margin-bottom:16px;">
-                <h3 style="margin:0 0 8px 0; font-size:14px;">Аналитика заказа</h3>
-                <div id="fact-order-analytics"></div>
-            </div>
-
-            <!-- Plan vs Fact table -->
-            <div class="card" id="fact-table-card" style="display:none">
-                <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
-                    <h3>Расходы: план vs факт</h3>
-                    <button class="btn btn-success" onclick="Factual.saveFact()">Сохранить факт</button>
-                </div>
-                <div id="fact-table-content"></div>
-            </div>
-
-            <!-- Hours comparison -->
-            <div class="card" id="fact-hours-card" style="display:none; margin-top:16px;">
-                <h3 style="margin:0 0 12px 0; font-size:14px;">Часы: план vs факт</h3>
-                <div id="fact-hours-content"></div>
-                <div style="font-size:11px;color:var(--text-muted);margin-top:8px;">Фактические часы автоматически подтягиваются из раздела «Часы» по выбранному заказу.</div>
-            </div>
-
-            <!-- Notes -->
-            <div class="card" id="fact-notes-card" style="display:none; margin-top:16px;">
-                <h3 style="margin:0 0 8px 0; font-size:14px;">Комментарий</h3>
-                <textarea id="fact-notes" class="form-control" rows="3" placeholder="Заметки по фактическим расходам..." oninput="Factual.onNotesChange(this.value)"></textarea>
             </div>
         </div>
 
@@ -3190,7 +3187,7 @@
 <script src="js/gantt.js?v=46g"></script>
 <script src="js/fintablo.js?v=1"></script>
 <script src="js/indirect_costs.js?v=1"></script>
-<script src="js/factual.js?v=74"></script>
+<script src="js/factual.js?v=75"></script>
 <script src="js/china.js?v=46m"></script>
 <script src="js/warehouse_photos.js?v=48"></script>
 <script src="js/china_catalog.js?v=46k"></script>
