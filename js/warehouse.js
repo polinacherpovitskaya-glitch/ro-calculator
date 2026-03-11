@@ -260,6 +260,26 @@ const Warehouse = {
             localStorage.setItem('wh_photo_fix_v3', '1');
         }
 
+        // ONE-TIME MIGRATION v4: apply CORRECT photos from verified spreadsheet data.
+        // WAREHOUSE_SEED_PHOTOS_BY_SKU now contains the right SKU→photo mapping.
+        if (!localStorage.getItem('wh_photo_fix_v4')) {
+            let applied = 0;
+            this.allItems.forEach(item => {
+                const photo = (typeof WAREHOUSE_SEED_PHOTOS_BY_SKU !== 'undefined')
+                    ? WAREHOUSE_SEED_PHOTOS_BY_SKU[item.sku]
+                    : null;
+                if (photo && !item.photo_thumbnail) {
+                    item.photo_thumbnail = photo;
+                    applied++;
+                }
+            });
+            if (applied > 0) {
+                await saveWarehouseItems(this.allItems);
+                console.log(`[Warehouse] Applied ${applied} correct photos (v4)`);
+            }
+            localStorage.setItem('wh_photo_fix_v4', '1');
+        }
+
         // Migrate: patch prices from WAREHOUSE_SEED_DATA if items have price_per_unit = 0
         {
             let pricedCount = 0;
@@ -309,7 +329,7 @@ const Warehouse = {
             color: raw.color || '',
             unit: raw.unit || 'шт',
             photo_url: '',
-            photo_thumbnail: '',
+            photo_thumbnail: (typeof WAREHOUSE_SEED_PHOTOS_BY_SKU !== 'undefined' && WAREHOUSE_SEED_PHOTOS_BY_SKU[raw.sku]) ? WAREHOUSE_SEED_PHOTOS_BY_SKU[raw.sku] : '',
             qty: raw.qty || 0,
             min_qty: 10,
             price_per_unit: 0,
