@@ -38,19 +38,19 @@ const IndirectCosts = {
         this.monthsData = loadIndirectCostsData();
         this.currentMonth = this._todayMonth();
 
-        // Auto-fill production_share defaults for employees missing the field
-        let needsSave = false;
+        // Load production_share overrides from settings (stored separately
+        // because Supabase employees table may not have this column)
+        this._shareOverrides = JSON.parse(localStorage.getItem('ro_production_shares') || '{}');
+
+        // Apply production_share: override > role default
         this.employees.forEach(e => {
-            if (e.production_share === undefined || e.production_share === null) {
+            const key = String(e.id);
+            if (this._shareOverrides[key] !== undefined) {
+                e.production_share = this._shareOverrides[key];
+            } else {
                 e.production_share = this.ROLE_DEFAULT_SHARE[e.role] ?? 0;
-                needsSave = true;
             }
         });
-        if (needsSave) {
-            for (const e of this.employees) {
-                await saveEmployee(e);
-            }
-        }
 
         // Auto-load FinTablo history if no data yet
         if (Object.keys(this.monthsData).length === 0) {
@@ -245,6 +245,10 @@ const IndirectCosts = {
         const emp = this.employees.find(e => e.id === employeeId);
         if (emp) {
             emp.production_share = share;
+            // Persist to separate storage (Supabase employees table may lack this column)
+            if (!this._shareOverrides) this._shareOverrides = {};
+            this._shareOverrides[String(employeeId)] = share;
+            localStorage.setItem('ro_production_shares', JSON.stringify(this._shareOverrides));
         }
         this._renderStats();
         this._renderEmployees();
@@ -260,10 +264,8 @@ const IndirectCosts = {
     },
 
     async saveAll() {
-        // 1. Save employee production_share updates
-        for (const e of this.employees) {
-            await saveEmployee(e);
-        }
+        // 1. Save production_share overrides (stored separately from employees table)
+        localStorage.setItem('ro_production_shares', JSON.stringify(this._shareOverrides || {}));
 
         // 2. Save month snapshot
         const salaryIndirect = this.calcEmployeeIndirectTotal();

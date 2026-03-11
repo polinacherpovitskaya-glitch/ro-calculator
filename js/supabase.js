@@ -1464,13 +1464,29 @@ async function updateAuthSession(sessionId, patch) {
 }
 
 function getDefaultEmployees() {
+    const e = (id, name, role, opts = {}) => ({
+        id, name, role, daily_hours: opts.hours || 8, telegram_id: null, telegram_username: '',
+        reminder_hour: 17, reminder_minute: 30, timezone_offset: 3, is_active: true,
+        tasks_required: opts.tasks || false, pay_base_salary_month: opts.salary || 0,
+        pay_base_hours_month: 176, pay_overtime_hour_rate: opts.ot || 0,
+        pay_weekend_hour_rate: opts.we || 0, pay_holiday_hour_rate: opts.ho || 0,
+    });
     return [
-        { id: 1, name: 'Алина', role: 'office', daily_hours: 8, telegram_id: null, telegram_username: '', reminder_hour: 17, reminder_minute: 30, timezone_offset: 3, is_active: true, tasks_required: false, pay_base_salary_month: 0, pay_base_hours_month: 176, pay_overtime_hour_rate: 0, pay_weekend_hour_rate: 0, pay_holiday_hour_rate: 0 },
-        { id: 2, name: 'Элина', role: 'office', daily_hours: 8, telegram_id: null, telegram_username: '', reminder_hour: 17, reminder_minute: 30, timezone_offset: 3, is_active: true, tasks_required: false, pay_base_salary_month: 0, pay_base_hours_month: 176, pay_overtime_hour_rate: 0, pay_weekend_hour_rate: 0, pay_holiday_hour_rate: 0 },
-        { id: 3, name: 'Аня', role: 'office', daily_hours: 8, telegram_id: null, telegram_username: '', reminder_hour: 17, reminder_minute: 30, timezone_offset: 3, is_active: true, tasks_required: false, pay_base_salary_month: 0, pay_base_hours_month: 176, pay_overtime_hour_rate: 0, pay_weekend_hour_rate: 0, pay_holiday_hour_rate: 0 },
-        { id: 4, name: 'Глеб', role: 'production', daily_hours: 8, telegram_id: null, telegram_username: '', reminder_hour: 17, reminder_minute: 30, timezone_offset: 3, is_active: true, tasks_required: false, pay_base_salary_month: 0, pay_base_hours_month: 176, pay_overtime_hour_rate: 0, pay_weekend_hour_rate: 0, pay_holiday_hour_rate: 0 },
-        { id: 5, name: 'Полина', role: 'management', daily_hours: 8, telegram_id: null, telegram_username: '', reminder_hour: 17, reminder_minute: 30, timezone_offset: 3, is_active: true, tasks_required: true, pay_base_salary_month: 0, pay_base_hours_month: 176, pay_overtime_hour_rate: 0, pay_weekend_hour_rate: 0, pay_holiday_hour_rate: 0 },
-        { id: 6, name: 'Никита', role: 'management', daily_hours: 8, telegram_id: null, telegram_username: '', reminder_hour: 17, reminder_minute: 30, timezone_offset: 3, is_active: true, tasks_required: true, pay_base_salary_month: 0, pay_base_hours_month: 176, pay_overtime_hour_rate: 0, pay_weekend_hour_rate: 0, pay_holiday_hour_rate: 0 },
+        // Производство
+        e(1772800698338, 'Тая', 'production', { hours: 6, salary: 75200, ot: 500, we: 750, ho: 750 }),
+        e(1772801066913, 'Женя Г', 'production', { ot: 500, we: 750, ho: 750 }),
+        e(1741700001000, 'Сергей М', 'production', { ot: 500, we: 750, ho: 750 }),
+        // Управление (Леша 50% производство)
+        e(1772827635013, 'Леша', 'management', { salary: 180000 }),
+        e(5, 'Полина', 'management', { tasks: true }),
+        e(6, 'Никита', 'management', { tasks: true }),
+        // Офис
+        e(1, 'Алина', 'office'),
+        e(2, 'Элина', 'office'),
+        e(3, 'Аня', 'office'),
+        e(1741700002000, 'Анастасия', 'office'),
+        e(1741700003000, 'Борис', 'office'),
+        e(1741700004000, 'Женя Максименкова', 'office'),
     ];
 }
 
