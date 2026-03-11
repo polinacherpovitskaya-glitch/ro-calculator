@@ -656,7 +656,7 @@ const ProductionPlan = {
 
         const imgs = row.attachments
             .filter(att => (att.type || '').startsWith('image/'))
-            .map(att => `<a href="${att.data_url}" target="_blank" class="pp-color-image-link"><img class="pp-color-image" src="${att.data_url}" alt="${this.esc(att.name)}"></a>`)
+            .map(att => `<a href="javascript:void(0)" onclick="ProductionPlan.showPhotoLightbox(this)" class="pp-color-image-link"><img class="pp-color-image" src="${att.data_url}" alt="${this.esc(att.name)}"></a>`)
             .join('');
 
         const nonImg = row.attachments
@@ -751,5 +751,47 @@ const ProductionPlan = {
             .replace(/>/g, '&gt;')
             .replace(/"/g, '&quot;')
             .replace(/'/g, '&#39;');
+    },
+
+    // ==========================================
+    // Photo Lightbox
+    // ==========================================
+
+    showPhotoLightbox(linkEl) {
+        const img = linkEl.querySelector('img');
+        if (!img) return;
+        const src = img.src;
+
+        // Remove existing lightbox if any
+        const existing = document.getElementById('pp-photo-lightbox');
+        if (existing) existing.remove();
+
+        const overlay = document.createElement('div');
+        overlay.id = 'pp-photo-lightbox';
+        overlay.className = 'pp-lightbox-overlay';
+        overlay.innerHTML = `
+            <div class="pp-lightbox-content">
+                <img src="${src}" class="pp-lightbox-img" alt="Фото">
+                <button class="pp-lightbox-close" title="Закрыть">&times;</button>
+            </div>
+        `;
+
+        // Close on overlay click or close button
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay || e.target.classList.contains('pp-lightbox-close')) {
+                overlay.remove();
+            }
+        });
+
+        // Close on Escape key
+        const onKey = (e) => {
+            if (e.key === 'Escape') {
+                overlay.remove();
+                document.removeEventListener('keydown', onKey);
+            }
+        };
+        document.addEventListener('keydown', onKey);
+
+        document.body.appendChild(overlay);
     },
 };

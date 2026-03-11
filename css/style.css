@@ -2208,6 +2208,7 @@ table .text-center { text-align: center; }
 }
 .pp-color-image-link {
     display: inline-block;
+    cursor: pointer;
 }
 .pp-color-image {
     width: 64px;
@@ -2215,6 +2216,56 @@ table .text-center { text-align: center; }
     object-fit: cover;
     border-radius: 8px;
     border: 1px solid var(--border);
+    transition: opacity 0.15s;
+}
+.pp-color-image:hover {
+    opacity: 0.8;
+}
+
+/* Photo lightbox */
+.pp-lightbox-overlay {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.75);
+    z-index: 10000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+}
+.pp-lightbox-content {
+    position: relative;
+    max-width: 90vw;
+    max-height: 90vh;
+}
+.pp-lightbox-img {
+    max-width: 90vw;
+    max-height: 90vh;
+    object-fit: contain;
+    border-radius: 12px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+    cursor: default;
+}
+.pp-lightbox-close {
+    position: absolute;
+    top: -16px;
+    right: -16px;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    border: none;
+    background: #fff;
+    color: #333;
+    font-size: 22px;
+    font-weight: bold;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
+.pp-lightbox-close:hover {
+    background: #f0f0f0;
 }
 #pp-mobile-list { display: none; }
 
