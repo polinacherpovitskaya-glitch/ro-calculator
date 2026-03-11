@@ -160,19 +160,47 @@ function _cleanupLocalStorage() {
         } catch (e) { /* ignore */ }
     });
 
-    // 2. Trim order_items: keep only items for the 100 most recent orders
+    // 2. Trim order_items if they take too much space (> 1MB)
     try {
-        const items = JSON.parse(localStorage.getItem('ro_calc_order_items'));
-        if (Array.isArray(items) && items.length > 500) {
-            const orders = JSON.parse(localStorage.getItem('ro_calc_orders')) || [];
-            const recentIds = new Set(
-                orders.sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''))
-                    .slice(0, 100)
-                    .map(o => o.id)
-            );
-            const kept = items.filter(i => recentIds.has(i.order_id));
-            localStorage.setItem('ro_calc_order_items', JSON.stringify(kept));
-            console.log('[cleanup] Trimmed order_items from', items.length, 'to', kept.length);
+        const raw = localStorage.getItem('ro_calc_order_items');
+        if (raw && raw.length > 500000) { // > ~1MB in UTF-16
+            const items = JSON.parse(raw);
+            if (Array.isArray(items)) {
+                // Strip bulky item_data JSON blobs, keep only essential fields
+                const slim = items.map(i => {
+                    const copy = { ...i };
+                    delete copy.item_data; // stored as JSON blob, very large
+                    return copy;
+                });
+                const slimStr = JSON.stringify(slim);
+                if (slimStr.length < raw.length * 0.7) {
+                    localStorage.setItem('ro_calc_order_items', slimStr);
+                    console.log('[cleanup] Stripped item_data from order_items, saved',
+                        Math.round((raw.length - slimStr.length) * 2 / 1024), 'KB');
+                }
+            }
+        }
+    } catch (e) { /* ignore */ }
+
+    // 3. Trim settings if oversized (> 200KB) — remove backup_data blobs
+    try {
+        const raw = localStorage.getItem('ro_calc_settings');
+        if (raw && raw.length > 100000) {
+            const settings = JSON.parse(raw);
+            if (settings && typeof settings === 'object') {
+                let cleaned = false;
+                // Remove old backup data stored inside settings
+                ['backup_data', 'last_backup', 'auto_backup_data'].forEach(k => {
+                    if (settings[k] && JSON.stringify(settings[k]).length > 10000) {
+                        delete settings[k];
+                        cleaned = true;
+                    }
+                });
+                if (cleaned) {
+                    localStorage.setItem('ro_calc_settings', JSON.stringify(settings));
+                    console.log('[cleanup] Stripped backup blobs from settings');
+                }
+            }
         }
     } catch (e) { /* ignore */ }
 }
@@ -1287,7 +1315,7 @@ async function appendAuthActivity(event) {
         at: new Date().toISOString(),
         ...event,
     });
-    const trimmed = list.slice(0, 800);
+    const trimmed = list.slice(0, 200);
     await saveAuthActivity(trimmed);
 }
 
@@ -1305,7 +1333,7 @@ async function loadAuthSessions() {
                 .eq('key', 'auth_sessions_json')
                 .maybeSingle();
             if (!error && data && data.value) {
-                const parsed = JSON.parse(data.value) || [];
+                const parsed = (JSON.parse(data.value) || []).slice(-200);
                 setLocal(LOCAL_KEYS.authSessions, parsed);
                 return parsed;
             }
@@ -1317,7 +1345,7 @@ async function loadAuthSessions() {
 }
 
 async function saveAuthSessions(sessions) {
-    const payload = Array.isArray(sessions) ? sessions : [];
+    const payload = (Array.isArray(sessions) ? sessions : []).slice(-200);
     setLocal(LOCAL_KEYS.authSessions, payload);
     if (isSupabaseReady()) {
         const { error } = await supabaseClient
