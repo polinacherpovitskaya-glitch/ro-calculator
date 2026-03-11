@@ -9,12 +9,18 @@ const IndirectCosts = {
     currentMonth: '',
 
     COST_ITEMS: [
-        { key: 'rent',          label: 'Аренда офиса / склада' },
-        { key: 'utilities',     label: 'Коммунальные (электр., вода, интернет)' },
-        { key: 'amortization',  label: 'Амортизация оборудования' },
-        { key: 'marketing',     label: 'Маркетинг' },
-        { key: 'subscriptions', label: 'Подписки / софт' },
-        { key: 'other',         label: 'Прочее' },
+        { key: 'rent',          label: 'Аренда (все площадки)',       avg: 256054 },
+        { key: 'subscriptions', label: 'Программы и сервисы',        avg: 90513 },
+        { key: 'marketing',     label: 'Маркетинг',                  avg: 81067 },
+        { key: 'representation',label: 'Представительские',          avg: 38412 },
+        { key: 'bank',          label: 'Банковское обслуживание',    avg: 16069 },
+        { key: 'photo',         label: 'Фотограф',                   avg: 11865 },
+        { key: 'staff_costs',   label: 'Расходы на персонал',        avg: 7190 },
+        { key: 'internet',      label: 'Интернет',                   avg: 4086 },
+        { key: 'household',     label: 'Хоз. товары',                avg: 1761 },
+        { key: 'workshop',      label: 'Обслуживание цеха',          avg: 714 },
+        { key: 'fuel',          label: 'Бензин',                     avg: 214 },
+        { key: 'other',         label: 'Прочее',                     avg: 0 },
     ],
 
     ROLE_DEFAULT_SHARE: {
@@ -44,6 +50,11 @@ const IndirectCosts = {
             for (const e of this.employees) {
                 await saveEmployee(e);
             }
+        }
+
+        // Auto-load FinTablo history if no data yet
+        if (Object.keys(this.monthsData).length === 0) {
+            this.loadHistory();
         }
 
         // Set month picker
@@ -210,8 +221,7 @@ const IndirectCosts = {
         tbody.innerHTML = months.map(m => {
             const d = this.monthsData[m];
             const salaryInd = d.salary_indirect || 0;
-            const fixed = (d.rent || 0) + (d.utilities || 0) + (d.amortization || 0) +
-                          (d.marketing || 0) + (d.subscriptions || 0) + (d.other || 0);
+            const fixed = this.COST_ITEMS.reduce((s, item) => s + (parseFloat(d[item.key]) || 0), 0);
             const total = d.total || (salaryInd + fixed);
             const isCurrent = m === this.currentMonth;
 
@@ -284,6 +294,64 @@ const IndirectCosts = {
 
         App.toast('Косвенные расходы сохранены (' + formatRub(grandTotal) + ')');
         this._renderHistory();
+    },
+
+    // ==========================================
+    // Pre-fill from FinTablo averages
+    // ==========================================
+
+    prefillFromAverages() {
+        if (!this.monthsData[this.currentMonth]) {
+            this.monthsData[this.currentMonth] = {};
+        }
+        const md = this.monthsData[this.currentMonth];
+        this.COST_ITEMS.forEach(item => {
+            if (item.avg && !md[item.key]) {
+                md[item.key] = item.avg;
+            }
+        });
+        this._renderCostItems();
+        this._renderStats();
+        App.toast('Средние значения из FinTablo подставлены');
+    },
+
+    // ==========================================
+    // Pre-fill historical data (Sep 2025 – Mar 2026 from FinTablo)
+    // ==========================================
+
+    FINTABLO_HISTORY: {
+        '2025-09': { rent: 246073, subscriptions: 104277, marketing: 29000, representation: 85000, bank: 6769, photo: 0, staff_costs: 0, internet: 0, household: 488, workshop: 0, fuel: 0 },
+        '2025-10': { rent: 381960, subscriptions: 46777, marketing: 120620, representation: 0, bank: 17725, photo: 0, staff_costs: 5449, internet: 15600, household: 1901, workshop: 0, fuel: 0 },
+        '2025-11': { rent: 327232, subscriptions: 109559, marketing: 12000, representation: 1164, bank: 51950, photo: 0, staff_costs: 6150, internet: 1300, household: 2029, workshop: 0, fuel: 1500 },
+        '2025-12': { rent: 229052, subscriptions: 16110, marketing: 163800, representation: 152721, bank: 25565, photo: 0, staff_costs: 21234, internet: 0, household: 2329, workshop: 0, fuel: 0 },
+        '2026-01': { rent: 180000, subscriptions: 255610, marketing: 53000, representation: 0, bank: 10175, photo: 19902, staff_costs: 0, internet: 0, household: 0, workshop: 0, fuel: 0 },
+        '2026-02': { rent: 233063, subscriptions: 98308, marketing: 147200, representation: 0, bank: 150, photo: 40152, staff_costs: 10000, internet: 11700, household: 0, workshop: 0, fuel: 0 },
+        '2026-03': { rent: 195000, subscriptions: 2950, marketing: 41850, representation: 30000, bank: 150, photo: 23000, staff_costs: 7500, internet: 0, household: 5577, workshop: 5000, fuel: 0 },
+    },
+
+    loadHistory() {
+        let changed = false;
+        for (const [month, data] of Object.entries(this.FINTABLO_HISTORY)) {
+            if (!this.monthsData[month]) {
+                this.monthsData[month] = {};
+                changed = true;
+            }
+            const md = this.monthsData[month];
+            for (const [key, val] of Object.entries(data)) {
+                if (!md[key] && val > 0) {
+                    md[key] = val;
+                    changed = true;
+                }
+            }
+            // Calc totals
+            const fixed = this.COST_ITEMS.reduce((s, item) => s + (parseFloat(md[item.key]) || 0), 0);
+            md.total = fixed + (md.salary_indirect || 0);
+        }
+        if (changed) {
+            saveIndirectCostsData(this.monthsData);
+            this._renderHistory();
+            App.toast('История за 7 месяцев загружена из FinTablo');
+        }
     },
 
     // ==========================================

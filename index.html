@@ -2653,8 +2653,12 @@
 
                 <!-- Fixed costs section -->
                 <div class="card" style="margin-bottom:16px">
-                    <div class="card-header">
+                    <div class="card-header" style="display:flex;justify-content:space-between;align-items:center">
                         <h3 style="margin:0">Постоянные расходы</h3>
+                        <div style="display:flex;gap:6px">
+                            <button class="btn btn-outline btn-sm" onclick="IndirectCosts.prefillFromAverages()" title="Подставить средние значения за 7 мес из FinTablo">📊 Из FinTablo</button>
+                            <button class="btn btn-outline btn-sm" onclick="IndirectCosts.loadHistory()" title="Загрузить помесячную историю из FinTablo">📅 Загрузить историю</button>
+                        </div>
                     </div>
                     <div id="ic-cost-items" style="padding:12px 16px"></div>
                     <div style="padding:8px 16px;border-top:2px solid var(--border);display:flex;justify-content:space-between;font-weight:700">
@@ -3225,7 +3229,7 @@
 <script src="js/tasks.js?v=46g"></script>
 <script src="js/gantt.js?v=47"></script>
 <script src="js/fintablo.js?v=1"></script>
-<script src="js/indirect_costs.js?v=1"></script>
+<script src="js/indirect_costs.js?v=2"></script>
 <script src="js/factual.js?v=79"></script>
 <script src="js/china.js?v=46m"></script>
 <script src="js/warehouse_photos.js?v=48"></script>
