@@ -242,13 +242,12 @@ const Warehouse = {
             this.allItems = await loadWarehouseItems();
         }
 
-        // ONE-TIME MIGRATION: clear all wrongly-mapped photos so they get re-patched correctly.
-        // Previous mapping used array-index (SEED_DATA[i] → SEED_PHOTOS[i]) which was wrong
-        // because SEED_DATA order differs from the spreadsheet photo order.
-        if (!localStorage.getItem('wh_photo_fix_v2')) {
+        // ONE-TIME MIGRATION v3: clear ALL photos — the SKU->photo mapping was wrong.
+        // Photos should be added manually by users via the edit form.
+        if (!localStorage.getItem('wh_photo_fix_v3')) {
             let cleared = 0;
             this.allItems.forEach(item => {
-                if (item.photo_thumbnail) {
+                if (item.photo_thumbnail || item.photo_url) {
                     item.photo_thumbnail = '';
                     item.photo_url = '';
                     cleared++;
@@ -256,30 +255,9 @@ const Warehouse = {
             });
             if (cleared > 0) {
                 await saveWarehouseItems(this.allItems);
-                console.log(`[Warehouse] Cleared ${cleared} wrongly-mapped photos (one-time fix)`);
+                console.log(`[Warehouse] Cleared ${cleared} photos (v3 — full reset)`);
             }
-            localStorage.setItem('wh_photo_fix_v2', '1');
-        }
-
-        // Safe migration: patch photos only from explicit SKU->photo map.
-        // Never patch by array index (it breaks when seed order changes).
-        const seedPhotoMap = this._getSeedPhotoMapBySku();
-        if (Object.keys(seedPhotoMap).length > 0) {
-            let patched = 0;
-            this.allItems.forEach(item => {
-                if (!item.photo_thumbnail) {
-                    const photo = seedPhotoMap[this._normStr(item.sku)];
-                    if (photo) {
-                        item.photo_thumbnail = photo;
-                        item.photo_url = '';
-                        patched++;
-                    }
-                }
-            });
-            if (patched > 0) {
-                await saveWarehouseItems(this.allItems);
-                console.log(`[Warehouse] Patched ${patched} items with SKU photo map`);
-            }
+            localStorage.setItem('wh_photo_fix_v3', '1');
         }
 
         // Migrate: patch prices from WAREHOUSE_SEED_DATA if items have price_per_unit = 0
@@ -331,7 +309,7 @@ const Warehouse = {
             color: raw.color || '',
             unit: raw.unit || 'шт',
             photo_url: '',
-            photo_thumbnail: (typeof WAREHOUSE_SEED_PHOTOS_BY_SKU !== 'undefined' && WAREHOUSE_SEED_PHOTOS_BY_SKU[raw.sku]) || '',
+            photo_thumbnail: '',
             qty: raw.qty || 0,
             min_qty: 10,
             price_per_unit: 0,
