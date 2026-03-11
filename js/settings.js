@@ -34,6 +34,9 @@ const Settings = {
         if (tab === 'employees' && this.employeesData.length === 0) {
             this.loadEmployeesTab();
         }
+        if (tab === 'indirect') {
+            IndirectCosts.load();
+        }
         if (tab === 'logins') {
             this.loadLoginsTab();
         }

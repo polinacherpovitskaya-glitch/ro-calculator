@@ -476,7 +476,7 @@ const App = {
             case 'tasks': Tasks.load(); Tasks.populateFilters(); break;
             case 'gantt': Gantt.load(); break;
             case 'import': FinTablo.load(); break;
-            case 'indirect-costs': IndirectCosts.load(); break;
+            case 'indirect-costs': App.navigate('settings'); setTimeout(() => Settings.switchTab('indirect'), 100); break;
             case 'warehouse': Warehouse.load(); break;
             case 'marketplaces': Marketplaces.load(); break;
             case 'china': ChinaPurchases.load(); break;
