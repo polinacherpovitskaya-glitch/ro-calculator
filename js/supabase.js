@@ -787,13 +787,17 @@ async function permanentDeleteOrder(orderId) {
 
 async function saveFintabloImport(importData) {
     if (isSupabaseReady()) {
-        const { data, error } = await supabaseClient
-            .from('fintablo_imports')
-            .insert(importData)
-            .select('id')
-            .single();
-        if (error) { console.error('saveFintabloImport error:', error); return null; }
-        return data.id;
+        try {
+            const { data, error } = await supabaseClient
+                .from('fintablo_imports')
+                .insert(importData)
+                .select('id')
+                .single();
+            if (!error && data) return data.id;
+            console.warn('saveFintabloImport Supabase error, falling back to localStorage:', error);
+        } catch (e) {
+            console.warn('saveFintabloImport Supabase exception, falling back to localStorage:', e);
+        }
     }
     const imports = getLocal(LOCAL_KEYS.imports) || [];
     const id = Date.now();
@@ -804,13 +808,17 @@ async function saveFintabloImport(importData) {
 
 async function loadFintabloImports(orderId) {
     if (isSupabaseReady()) {
-        const { data, error } = await supabaseClient
-            .from('fintablo_imports')
-            .select('*')
-            .eq('order_id', orderId)
-            .order('import_date', { ascending: false });
-        if (error) { console.error('loadFintabloImports error:', error); return []; }
-        return data;
+        try {
+            const { data, error } = await supabaseClient
+                .from('fintablo_imports')
+                .select('*')
+                .eq('order_id', orderId)
+                .order('import_date', { ascending: false });
+            if (!error && data) return data;
+            console.warn('loadFintabloImports Supabase error, falling back to localStorage:', error);
+        } catch (e) {
+            console.warn('loadFintabloImports Supabase exception, falling back to localStorage:', e);
+        }
     }
     const imports = getLocal(LOCAL_KEYS.imports) || [];
     return imports.filter(i => i.order_id === orderId);
