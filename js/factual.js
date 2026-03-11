@@ -56,6 +56,7 @@ const Factual = {
     AUTO_FACT_KEYS: new Set([
         'salary_production', 'salary_trim', 'salary_assembly', 'salary_packaging',
         'indirect_production', 'hardware_total', 'packaging_total',
+        'design_printing', 'delivery_client', 'taxes',
     ]),
 
     _num(v) { const n = parseFloat(v); return Number.isFinite(n) ? n : 0; },
@@ -578,7 +579,8 @@ const Factual = {
     },
     _isAutoFactRow(factData, key) {
         if (this.AUTO_FACT_KEYS.has(key)) return true;
-        if (key === 'design_printing' && factData && factData._auto_printing_from_import) return true;
+        // Revenue is auto if sourced from fintablo
+        if (key === 'revenue' && factData?._auto_fintablo?.fact_revenue) return true;
         return false;
     },
 
@@ -631,26 +633,67 @@ const Factual = {
         const hPkg = parseFloat(factData.fact_hours_packaging) || 0;
         const totalHours = hProd + hTrim + hAsm + hPkg;
 
+        // 1. Salaries from time entries (per-stage)
         this._applyAutoFactValue(factData, 'fact_salary_production', this._sumStageSalary(orderId, 'casting', params));
         this._applyAutoFactValue(factData, 'fact_salary_trim', this._sumStageSalary(orderId, 'trim', params));
         this._applyAutoFactValue(factData, 'fact_salary_assembly', this._sumStageSalary(orderId, 'assembly', params));
         this._applyAutoFactValue(factData, 'fact_salary_packaging', this._sumStageSalary(orderId, 'packaging', params));
+
+        // 2. Indirect costs from hours
         this._applyAutoFactValue(factData, 'fact_indirect_production', totalHours * (params?.indirectPerHour || 0));
 
-        factData._auto_printing_from_import = false;
+        // 3. FinTablo imports — pull all available fact fields
+        factData._auto_fintablo = {};
         const imports = (await loadFintabloImports(orderId)) || [];
         if (imports.length > 0) {
             const latest = [...imports].sort((a, b) => new Date(b.import_date || 0) - new Date(a.import_date || 0))[0];
-            const importedPrinting = this._num(latest && latest.fact_printing);
-            if (importedPrinting > 0) {
-                this._applyAutoFactValue(factData, 'fact_design_printing', importedPrinting);
-                factData._auto_printing_from_import = true;
+
+            // Fintablo → Plan-fact mapping:
+            // fact_hardware → fact_hardware_total (Фурнитура+NFC)
+            // fact_printing → fact_design_printing (Нанесение)
+            // fact_delivery → fact_delivery_client (Доставка)
+            // fact_taxes → fact_taxes (Налоги)
+            // fact_revenue → fact_revenue (Выручка)
+            const ftMap = {
+                fact_hardware: 'fact_hardware_total',
+                fact_printing: 'fact_design_printing',
+                fact_delivery: 'fact_delivery_client',
+                fact_taxes: 'fact_taxes',
+            };
+
+            for (const [ftKey, ourKey] of Object.entries(ftMap)) {
+                const val = this._num(latest[ftKey]);
+                if (val > 0) {
+                    this._applyAutoFactValue(factData, ourKey, val);
+                    factData._auto_fintablo[ourKey] = true;
+                }
+            }
+
+            // Revenue from fintablo (actual money received)
+            const ftRevenue = this._num(latest.fact_revenue);
+            if (ftRevenue > 0) {
+                this._applyAutoFactValue(factData, 'fact_revenue', ftRevenue);
+                factData._auto_fintablo.fact_revenue = true;
+            }
+
+            // Packaging from fintablo (if separate field exists, otherwise fall through to warehouse)
+            const ftPackaging = this._num(latest.fact_packaging);
+            if (ftPackaging > 0) {
+                this._applyAutoFactValue(factData, 'fact_packaging_total', ftPackaging);
+                factData._auto_fintablo.fact_packaging_total = true;
             }
         }
 
-        const whActual = await this._deriveMaterialFacts(orderId, orderName);
-        this._applyAutoFactValue(factData, 'fact_hardware_total', whActual.found ? whActual.hardware : (planData?.hardwareTotal || 0));
-        this._applyAutoFactValue(factData, 'fact_packaging_total', whActual.found ? whActual.packaging : (planData?.packagingTotal || 0));
+        // 4. Warehouse fallback for hardware/packaging (only if fintablo didn't provide them)
+        if (!factData._auto_fintablo.fact_hardware_total || !factData._auto_fintablo.fact_packaging_total) {
+            const whActual = await this._deriveMaterialFacts(orderId, orderName);
+            if (!factData._auto_fintablo.fact_hardware_total) {
+                this._applyAutoFactValue(factData, 'fact_hardware_total', whActual.found ? whActual.hardware : (planData?.hardwareTotal || 0));
+            }
+            if (!factData._auto_fintablo.fact_packaging_total) {
+                this._applyAutoFactValue(factData, 'fact_packaging_total', whActual.found ? whActual.packaging : (planData?.packagingTotal || 0));
+            }
+        }
     },
 
     async _deriveMaterialFacts(orderId, orderName) {
@@ -734,8 +777,11 @@ const Factual = {
             const pct = planVal > 0 ? ((delta / planVal) * 100) : 0;
             const alarm = this.getAlarm(factVal, planVal);
 
+            const ftSourced = fact._auto_fintablo && fact._auto_fintablo[factKey];
+            const sourceHint = ftSourced && !manualOverride ? 'ФинТабло' : row.hint;
+
             html += `<tr style="${alarm.bgStyle}">
-                <td style="padding:6px 8px;font-weight:500">${row.label} <span class="text-muted" style="font-size:10px">${row.hint}</span></td>
+                <td style="padding:6px 8px;font-weight:500">${row.label} <span class="text-muted" style="font-size:10px">${sourceHint}</span></td>
                 <td class="text-right" style="padding:6px 8px;color:var(--text-muted)">${this.fmtRub(planVal)}</td>
                 <td class="text-right" style="padding:6px 4px">
                     <input type="text" inputmode="decimal" value="${factVal || ''}"
@@ -762,12 +808,16 @@ const Factual = {
         // Revenue
         const planRevenue = plan.revenue || 0;
         const factRevenue = parseFloat(fact.fact_revenue) || 0;
+        const revIsAuto = this._isAutoFactRow(fact, 'revenue');
+        const revManual = this._isManualOverride(fact, 'fact_revenue');
+        const revAutoClass = revIsAuto && !revManual ? 'fact-input-auto' : '';
+        const revSource = fact._auto_fintablo?.fact_revenue ? ' <span class="text-muted" style="font-size:10px">из ФинТабло</span>' : '';
         html += `<tr style="background:var(--green-light)">
-            <td style="padding:8px;font-weight:700">Выручка</td>
+            <td style="padding:8px;font-weight:700">Выручка${revSource}</td>
             <td class="text-right" style="padding:8px;color:var(--green);font-weight:600">${this.fmtRub(planRevenue)}</td>
             <td class="text-right" style="padding:8px 4px">
                 <input type="text" inputmode="decimal" value="${factRevenue || ''}"
-                    class="fact-input" style="font-weight:600"
+                    class="fact-input ${revAutoClass}" style="font-weight:600"
                     oninput="Factual.onFactInput(${orderId}, 'revenue', this.value)">
             </td>
             <td class="text-right" style="padding:8px"></td>
