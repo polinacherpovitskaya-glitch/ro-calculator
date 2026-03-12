@@ -1,11 +1,12 @@
 // =============================================
 // Recycle Object — Косвенные расходы
 // Breakdown and tracking of indirect/overhead costs
+// v7: total override, carry-forward, Supabase sync
 // =============================================
 
 const IndirectCosts = {
     employees: [],
-    monthsData: {},   // { "2026-03": { rent: ..., utilities: ..., ... } }
+    monthsData: {},   // { "2026-03": { rent: ..., utilities: ..., total_override: ..., ... } }
     currentMonth: '',
 
     COST_ITEMS: [
@@ -29,17 +30,19 @@ const IndirectCosts = {
         management: 0, // Леша = 50% через override в ro_production_shares
     },
 
+    SUPABASE_KEY: 'indirect_costs_json',
+
     // ==========================================
     // Load
     // ==========================================
 
     async load() {
         this.employees = (await loadEmployees()) || [];
-        this.monthsData = loadIndirectCostsData();
+        // Load from Supabase first, fallback to localStorage
+        await this._loadFromSupabase();
         this.currentMonth = this._todayMonth();
 
-        // Load production_share overrides from settings (stored separately
-        // because Supabase employees table may not have this column)
+        // Load production_share overrides from settings
         this._shareOverrides = JSON.parse(localStorage.getItem('ro_production_shares') || '{}');
 
         // Apply production_share: override > role default
@@ -64,6 +67,44 @@ const IndirectCosts = {
         this.render();
     },
 
+    async _loadFromSupabase() {
+        if (!supabaseClient) {
+            this.monthsData = getLocal(LOCAL_KEYS.indirectCosts) || {};
+            return;
+        }
+        try {
+            const { data, error } = await supabaseClient
+                .from('settings')
+                .select('value')
+                .eq('key', this.SUPABASE_KEY)
+                .single();
+            if (data && data.value && !error) {
+                const parsed = typeof data.value === 'string' ? JSON.parse(data.value) : data.value;
+                if (parsed && typeof parsed === 'object') {
+                    this.monthsData = parsed;
+                    // Also save to localStorage as cache
+                    setLocal(LOCAL_KEYS.indirectCosts, this.monthsData);
+                    return;
+                }
+            }
+        } catch (e) {
+            console.warn('IndirectCosts: Supabase load failed, using localStorage', e);
+        }
+        // Fallback to localStorage
+        this.monthsData = getLocal(LOCAL_KEYS.indirectCosts) || {};
+    },
+
+    async _saveToSupabase() {
+        if (!supabaseClient) return;
+        try {
+            await supabaseClient
+                .from('settings')
+                .upsert({ key: this.SUPABASE_KEY, value: JSON.stringify(this.monthsData) }, { onConflict: 'key' });
+        } catch (e) {
+            console.warn('IndirectCosts: Supabase save failed', e);
+        }
+    },
+
     // ==========================================
     // Month management
     // ==========================================
@@ -84,11 +125,13 @@ const IndirectCosts = {
         // No data for this month — carry forward from the most recent saved month
         const prev = this._getLatestSavedMonth(this.currentMonth);
         if (prev) {
-            // Clone cost items from the last saved month (without meta like salary_indirect, total, saved_at)
+            // Clone cost items + total_override from the last saved month
             const cloned = {};
             this.COST_ITEMS.forEach(item => {
                 if (prev[item.key] !== undefined) cloned[item.key] = prev[item.key];
             });
+            // Carry forward total_override too
+            if (prev.total_override) cloned.total_override = prev.total_override;
             this.monthsData[this.currentMonth] = cloned;
             return cloned;
         }
@@ -148,8 +191,18 @@ const IndirectCosts = {
         return this.COST_ITEMS.reduce((sum, item) => sum + (parseFloat(data[item.key]) || 0), 0);
     },
 
-    calcGrandTotal() {
+    /** Calculated total (salary indirect + fixed costs) */
+    calcGrandTotalCalc() {
         return this.calcEmployeeIndirectTotal() + this.calcFixedTotal();
+    },
+
+    /** Effective total — user override or calculated */
+    calcGrandTotal() {
+        const data = this._getMonthData();
+        if (data.total_override && data.total_override > 0) {
+            return data.total_override;
+        }
+        return this.calcGrandTotalCalc();
     },
 
     _getWorkloadHours() {
@@ -170,13 +223,14 @@ const IndirectCosts = {
         this._renderStats();
         this._renderEmployees();
         this._renderCostItems();
+        this._renderTotalOverride();
         this._renderHistory();
     },
 
     _renderStats() {
         const salaryIndirect = this.calcEmployeeIndirectTotal();
         const fixedTotal = this.calcFixedTotal();
-        const grandTotal = salaryIndirect + fixedTotal;
+        const grandTotal = this.calcGrandTotal();
         const hours = this._getWorkloadHours();
         const perHour = hours > 0 ? grandTotal / hours : 0;
 
@@ -271,6 +325,28 @@ const IndirectCosts = {
         document.getElementById('ic-fixed-total').textContent = formatRub(this.calcFixedTotal());
     },
 
+    _renderTotalOverride() {
+        const data = this._getMonthData();
+        const calcTotal = this.calcGrandTotalCalc();
+        const overrideInput = document.getElementById('ic-total-override');
+        const calcHint = document.getElementById('ic-calc-hint');
+
+        if (calcHint) {
+            calcHint.textContent = `Рассчитано: ${formatRub(calcTotal)} (ЗП ${formatRub(this.calcEmployeeIndirectTotal())} + постоянные ${formatRub(this.calcFixedTotal())})`;
+        }
+
+        if (overrideInput) {
+            const override = data.total_override || '';
+            overrideInput.value = override || Math.round(calcTotal);
+            // Highlight if overridden above calc
+            if (override && override > calcTotal) {
+                overrideInput.style.color = 'var(--primary)';
+            } else {
+                overrideInput.style.color = '';
+            }
+        }
+    },
+
     _renderHistory() {
         const tbody = document.getElementById('ic-history-body');
         if (!tbody) return;
@@ -285,16 +361,18 @@ const IndirectCosts = {
             const d = this.monthsData[m];
             const salaryInd = d.salary_indirect || 0;
             const fixed = this.COST_ITEMS.reduce((s, item) => s + (parseFloat(d[item.key]) || 0), 0);
-            const total = d.total || (salaryInd + fixed);
+            const effective = d.total_override || d.total || (salaryInd + fixed);
+            const isOverridden = d.total_override && d.total_override > 0;
             const isCurrent = m === this.currentMonth;
 
-            return `<tr style="${isCurrent ? 'background:var(--bg);font-weight:600' : ''}"
-                        onclick="IndirectCosts.setMonth('${m}'); document.getElementById('ic-month-picker').value='${m}';"
-                        style="cursor:pointer">
+            return `<tr style="${isCurrent ? 'background:var(--bg);font-weight:600' : ''};cursor:pointer"
+                        onclick="IndirectCosts.setMonth('${m}'); document.getElementById('ic-month-picker').value='${m}';">
                 <td>${this._monthLabel(m)}${isCurrent ? ' ←' : ''}</td>
                 <td class="text-right">${formatRub(salaryInd)}</td>
                 <td class="text-right">${formatRub(fixed)}</td>
-                <td class="text-right" style="color:var(--danger)">${formatRub(total)}</td>
+                <td class="text-right" style="color:var(--danger)">
+                    ${formatRub(effective)}${isOverridden ? ' ✏️' : ''}
+                </td>
             </tr>`;
         }).join('');
     },
@@ -308,13 +386,13 @@ const IndirectCosts = {
         const emp = this.employees.find(e => e.id === employeeId);
         if (emp) {
             emp.production_share = share;
-            // Persist to separate storage (Supabase employees table may lack this column)
             if (!this._shareOverrides) this._shareOverrides = {};
             this._shareOverrides[String(employeeId)] = share;
             localStorage.setItem('ro_production_shares', JSON.stringify(this._shareOverrides));
         }
         this._renderStats();
         this._renderEmployees();
+        this._renderTotalOverride();
     },
 
     onCostChange(key, value) {
@@ -324,41 +402,67 @@ const IndirectCosts = {
         this.monthsData[this.currentMonth][key] = parseFloat(value) || 0;
         document.getElementById('ic-fixed-total').textContent = formatRub(this.calcFixedTotal());
         this._renderStats();
+        this._renderTotalOverride();
+    },
+
+    onTotalOverrideChange(value) {
+        if (!this.monthsData[this.currentMonth]) {
+            this.monthsData[this.currentMonth] = {};
+        }
+        const v = parseFloat(value) || 0;
+        this.monthsData[this.currentMonth].total_override = v > 0 ? v : 0;
+        this._renderStats();
+    },
+
+    resetTotalToCalc() {
+        const data = this._getMonthData();
+        delete data.total_override;
+        const overrideInput = document.getElementById('ic-total-override');
+        if (overrideInput) {
+            overrideInput.value = Math.round(this.calcGrandTotalCalc());
+            overrideInput.style.color = '';
+        }
+        this._renderStats();
     },
 
     async saveAll() {
-        // 1. Save production_share overrides (stored separately from employees table)
+        // 1. Save production_share overrides
         localStorage.setItem('ro_production_shares', JSON.stringify(this._shareOverrides || {}));
 
         // 2. Save month snapshot
         const salaryIndirect = this.calcEmployeeIndirectTotal();
         const fixedTotal = this.calcFixedTotal();
-        const grandTotal = salaryIndirect + fixedTotal;
+        const effectiveTotal = this.calcGrandTotal();
 
         if (!this.monthsData[this.currentMonth]) {
             this.monthsData[this.currentMonth] = {};
         }
         const md = this.monthsData[this.currentMonth];
         md.salary_indirect = salaryIndirect;
-        md.total = grandTotal;
+        md.fixed_total = fixedTotal;
+        md.total = effectiveTotal;
         md.saved_at = new Date().toISOString();
 
+        // Save to localStorage
         saveIndirectCostsData(this.monthsData);
+        // Save to Supabase
+        await this._saveToSupabase();
 
-        // 3. Auto-sync to settings
-        await saveSetting('indirect_costs_monthly', grandTotal);
+        // 3. Auto-sync effective total to settings (for calculator)
+        await saveSetting('indirect_costs_monthly', effectiveTotal);
 
         // Update settings in memory
         if (App.settings) {
-            App.settings.indirect_costs_monthly = grandTotal;
+            App.settings.indirect_costs_monthly = effectiveTotal;
         }
 
         // Update the readonly field in settings page if visible
         const settingsInput = document.getElementById('set-indirect_costs_monthly');
-        if (settingsInput) settingsInput.value = grandTotal;
+        if (settingsInput) settingsInput.value = effectiveTotal;
 
-        App.toast('Косвенные расходы сохранены (' + formatRub(grandTotal) + ')');
+        App.toast('Косвенные расходы сохранены (' + formatRub(effectiveTotal) + ')');
         this._renderHistory();
+        this._renderTotalOverride();
     },
 
     // ==========================================
@@ -377,6 +481,7 @@ const IndirectCosts = {
         });
         this._renderCostItems();
         this._renderStats();
+        this._renderTotalOverride();
         App.toast('Средние значения из FinTablo подставлены');
     },
 
@@ -384,11 +489,10 @@ const IndirectCosts = {
     // Pre-fill historical data (Sep 2025 – Mar 2026 from FinTablo)
     // ==========================================
 
-    // Налоги на ЗП теперь считаются автоматически по сотрудникам (белая часть → НДФЛ + взносы)
     FINTABLO_HISTORY: {
         '2025-09': { rent: 246073, subscriptions: 104277, marketing: 29000, representation: 85000, bank: 6769, photo: 0, staff_costs: 0, internet: 0, household: 488, workshop: 0, fuel: 0 },
         '2025-10': { rent: 381960, subscriptions: 46777, marketing: 120620, representation: 0, bank: 17725, photo: 0, staff_costs: 5449, internet: 15600, household: 1901, workshop: 0, fuel: 0 },
-        '2025-11': { rent: 327232, subscriptions: 109559, marketing: 12000, representation: 1164, bank: 51950, photo: 0, staff_costs: 6150, internet: 1300, household: 2029, workshop: 0, fuel: 1500 },
+        '2025-11': { rent: 327232, subscriptions: 109559, marketing: 12000, representation: 1164, bank: 51950, photo: 0, staff_costs: 6150, internet: 1300, household: 2029, workshop: 0, fuel: 0 },
         '2025-12': { rent: 229052, subscriptions: 16110, marketing: 163800, representation: 152721, bank: 25565, photo: 0, staff_costs: 21234, internet: 0, household: 2329, workshop: 0, fuel: 0 },
         '2026-01': { rent: 180000, subscriptions: 255610, marketing: 53000, representation: 0, bank: 10175, photo: 19902, staff_costs: 0, internet: 0, household: 0, workshop: 0, fuel: 0 },
         '2026-02': { rent: 233063, subscriptions: 98308, marketing: 147200, representation: 0, bank: 150, photo: 40152, staff_costs: 10000, internet: 11700, household: 0, workshop: 0, fuel: 0 },
@@ -411,7 +515,7 @@ const IndirectCosts = {
             }
             // Calc totals
             const fixed = this.COST_ITEMS.reduce((s, item) => s + (parseFloat(md[item.key]) || 0), 0);
-            md.total = fixed + (md.salary_indirect || 0);
+            md.total = (md.total_override || 0) > 0 ? md.total_override : fixed + (md.salary_indirect || 0);
         }
         if (changed) {
             saveIndirectCostsData(this.monthsData);

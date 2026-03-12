@@ -2664,6 +2664,27 @@
                     </div>
                 </div>
 
+                <!-- Grand total override -->
+                <div class="card" style="margin-bottom:16px;border:2px solid var(--primary);background:var(--bg)">
+                    <div style="padding:16px">
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+                            <div>
+                                <div style="font-weight:700;font-size:15px">Итого косвенные расходы в месяц</div>
+                                <div style="font-size:12px;color:var(--text-muted)" id="ic-calc-hint">Рассчитано: 0 ₽ (ЗП + постоянные)</div>
+                            </div>
+                        </div>
+                        <div style="display:flex;align-items:center;gap:12px">
+                            <input type="number" id="ic-total-override" class="form-control" style="width:200px;font-size:18px;font-weight:700;text-align:right"
+                                placeholder="0" oninput="IndirectCosts.onTotalOverrideChange(this.value)">
+                            <span style="font-size:16px;font-weight:600">₽ / мес</span>
+                            <button class="btn btn-outline btn-sm" onclick="IndirectCosts.resetTotalToCalc()" title="Сбросить к рассчитанному">↻ Сбросить</button>
+                        </div>
+                        <div style="font-size:11px;color:var(--text-muted);margin-top:6px">
+                            Можно завысить сумму для запаса. Это значение используется в калькуляторе.
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Monthly history -->
                 <div class="card">
                     <div class="card-header">

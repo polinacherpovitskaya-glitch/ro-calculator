@@ -1,6 +1,6 @@
 // =============================================
 // Recycle Object — Telegram Bot for Time Tracking
-// v6: fixed Supabase column mapping (employee_id, task_description)
+// v7: reliability fixes — error handling, polling recovery, graceful shutdown
 // =============================================
 
 require('dotenv').config();
@@ -16,10 +16,113 @@ if (!BOT_TOKEN || !SUPABASE_URL || !SUPABASE_KEY) {
     process.exit(1);
 }
 
-const bot = new TelegramBot(BOT_TOKEN, { polling: true });
+const bot = new TelegramBot(BOT_TOKEN, {
+    polling: {
+        interval: 1000,       // poll every 1s (default 300ms is aggressive)
+        autoStart: true,
+        params: { timeout: 30 }, // long-poll 30s
+    },
+});
+
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
+// =============================================
+// Polling error handler — KEY for stability
+// =============================================
+bot.on('polling_error', (err) => {
+    const code = err?.response?.statusCode || err?.code || '';
+    // 409 = another instance is polling the same bot token
+    if (code === 409 || String(err).includes('409')) {
+        console.error('FATAL: Another bot instance is running! Conflict 409. Shutting down.');
+        process.exit(1);
+    }
+    // ETIMEOUT / EFATAL — transient, will retry
+    if (String(code).startsWith('E') || code === 502 || code === 504) {
+        console.warn(`Polling transient error (${code}), will retry...`);
+        return;
+    }
+    console.error('Polling error:', err?.message || err);
+});
+
+bot.on('error', (err) => {
+    console.error('Bot general error:', err?.message || err);
+});
+
+// =============================================
+// Graceful shutdown
+// =============================================
+function shutdown(signal) {
+    console.log(`\n${signal} received. Stopping bot...`);
+    bot.stopPolling().then(() => {
+        console.log('Polling stopped. Exiting.');
+        process.exit(0);
+    }).catch(() => process.exit(0));
+    setTimeout(() => process.exit(0), 3000); // force exit after 3s
+}
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('uncaughtException', (err) => {
+    console.error('Uncaught exception:', err);
+    // Don't exit — let polling continue
+});
+process.on('unhandledRejection', (reason) => {
+    console.error('Unhandled rejection:', reason);
+});
+
+// =============================================
+// User state management (with auto-cleanup)
+// =============================================
 const userStates = {};
+const STATE_TTL = 30 * 60 * 1000; // 30 minutes
+
+function cleanStaleStates() {
+    const now = Date.now();
+    for (const [key, state] of Object.entries(userStates)) {
+        if (now - (state._ts || 0) > STATE_TTL) {
+            delete userStates[key];
+        }
+    }
+}
+setInterval(cleanStaleStates, 5 * 60 * 1000); // every 5 min
+
+function setState(telegramId, data) {
+    userStates[telegramId] = { ...data, _ts: Date.now() };
+}
+function getState(telegramId) {
+    const s = userStates[telegramId];
+    if (s) s._ts = Date.now(); // refresh TTL on access
+    return s;
+}
+function clearState(telegramId) {
+    delete userStates[telegramId];
+}
+
+// =============================================
+// Safe message sender (catches errors, retries once)
+// =============================================
+async function send(chatId, text, opts) {
+    try {
+        return await bot.sendMessage(chatId, text, opts);
+    } catch (err) {
+        const code = err?.response?.statusCode;
+        // 429 = rate limit, retry after 1s
+        if (code === 429) {
+            await new Promise(r => setTimeout(r, 1500));
+            try { return await bot.sendMessage(chatId, text, opts); } catch (e) { /* give up */ }
+        }
+        // 403 = blocked by user, ignore
+        if (code === 403) {
+            console.log(`User ${chatId} blocked the bot, skipping.`);
+            return null;
+        }
+        console.error(`sendMessage error (${code}):`, err?.message || err);
+        return null;
+    }
+}
+
+// =============================================
+// Constants
+// =============================================
 const ROLE_LABELS = { production: 'Производство', office: 'Офис', management: 'Руководство' };
 const STAGE_LABELS = {
     casting: 'Выливание пластика',
@@ -50,45 +153,46 @@ bot.onText(/\/start/, async (msg) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
 
-    const { data: existing } = await supabase
-        .from('employees')
-        .select('*')
-        .eq('telegram_id', telegramId)
-        .single();
+    try {
+        const { data: existing } = await supabase
+            .from('employees')
+            .select('*')
+            .eq('telegram_id', telegramId)
+            .single();
 
-    if (existing) {
-        bot.sendMessage(chatId,
-            `Привет, ${existing.name}! 👋`,
-            MAIN_KEYBOARD
-        );
-        return;
+        if (existing) {
+            send(chatId, `Привет, ${existing.name}! 👋`, MAIN_KEYBOARD);
+            return;
+        }
+
+        const { data: employees } = await supabase
+            .from('employees')
+            .select('id, name, role')
+            .eq('is_active', true)
+            .is('telegram_id', null);
+
+        if (!employees || employees.length === 0) {
+            send(chatId,
+                'Нет доступных профилей сотрудников.\n' +
+                'Попросите администратора добавить вас через Настройки → Сотрудники.'
+            );
+            return;
+        }
+
+        const keyboard = employees.map(e => ([{
+            text: e.name,
+            callback_data: `link_${e.id}`,
+        }]));
+
+        setState(telegramId, { step: 'link_choose_name' });
+
+        send(chatId, 'Привет! Выбери своё имя:', {
+            reply_markup: { inline_keyboard: keyboard },
+        });
+    } catch (err) {
+        console.error('/start error:', err);
+        send(chatId, 'Произошла ошибка. Попробуй позже.');
     }
-
-    const { data: employees } = await supabase
-        .from('employees')
-        .select('id, name, role')
-        .eq('is_active', true)
-        .is('telegram_id', null);
-
-    if (!employees || employees.length === 0) {
-        bot.sendMessage(chatId,
-            'Нет доступных профилей сотрудников.\n' +
-            'Попросите администратора добавить вас через Настройки → Сотрудники.'
-        );
-        return;
-    }
-
-    // Just names, no roles
-    const keyboard = employees.map(e => ([{
-        text: e.name,
-        callback_data: `link_${e.id}`,
-    }]));
-
-    userStates[telegramId] = { step: 'link_choose_name' };
-
-    bot.sendMessage(chatId, 'Привет! Выбери своё имя:', {
-        reply_markup: { inline_keyboard: keyboard },
-    });
 });
 
 // =============================================
@@ -96,7 +200,7 @@ bot.onText(/\/start/, async (msg) => {
 // =============================================
 
 bot.onText(/\/help/, (msg) => {
-    bot.sendMessage(msg.chat.id,
+    send(msg.chat.id,
         `Как пользоваться ботом:\n\n` +
         `1. Нажми «📝 Записать часы»\n` +
         `2. Выбери проект\n` +
@@ -113,27 +217,32 @@ bot.onText(/\/help/, (msg) => {
 // =============================================
 
 bot.onText(/\/status/, async (msg) => {
-    const emp = await getEmployee(msg.from.id);
-    if (!emp) {
-        bot.sendMessage(msg.chat.id, 'Ты не подключён. Нажми /start');
-        return;
-    }
+    try {
+        const emp = await getEmployee(msg.from.id);
+        if (!emp) {
+            send(msg.chat.id, 'Ты не подключён. Нажми /start');
+            return;
+        }
 
-    const payInfo = emp.role === 'production'
-        ? `\nОплата: оклад ${fmtMoney(emp.pay_base_salary_month)}/мес, база ${num(emp.pay_base_hours_month, 176)}ч, сверх ${fmtMoney(emp.pay_overtime_hour_rate)}/ч`
-        : '';
-    bot.sendMessage(msg.chat.id,
-        `Профиль:\n\n` +
-        `Имя: *${emp.name}*\n` +
-        `Роль: ${ROLE_LABELS[emp.role] || emp.role}\n` +
-        `Рабочий день: ${emp.daily_hours}ч` +
-        payInfo,
-        { parse_mode: 'Markdown', ...MAIN_KEYBOARD }
-    );
+        const payInfo = emp.role === 'production'
+            ? `\nОплата: оклад ${fmtMoney(emp.pay_base_salary_month)}/мес, база ${num(emp.pay_base_hours_month, 176)}ч, сверх ${fmtMoney(emp.pay_overtime_hour_rate)}/ч`
+            : '';
+        send(msg.chat.id,
+            `Профиль:\n\n` +
+            `Имя: *${esc(emp.name)}*\n` +
+            `Роль: ${ROLE_LABELS[emp.role] || emp.role}\n` +
+            `Рабочий день: ${emp.daily_hours}ч` +
+            payInfo,
+            { parse_mode: 'Markdown', ...MAIN_KEYBOARD }
+        );
+    } catch (err) {
+        console.error('/status error:', err);
+        send(msg.chat.id, 'Ошибка. Попробуй ещё раз.');
+    }
 });
 
 // =============================================
-// /report (still works, but buttons are primary)
+// /report
 // =============================================
 
 bot.onText(/\/report/, async (msg) => {
@@ -145,21 +254,26 @@ bot.onText(/\/report/, async (msg) => {
 // =============================================
 
 bot.onText(/\/clear/, async (msg) => {
-    const emp = await getEmployee(msg.from.id);
-    if (!emp) {
-        bot.sendMessage(msg.chat.id, 'Ты не подключён. Нажми /start');
-        return;
+    try {
+        const emp = await getEmployee(msg.from.id);
+        if (!emp) {
+            send(msg.chat.id, 'Ты не подключён. Нажми /start');
+            return;
+        }
+
+        const today = getLocalDate(emp.timezone_offset);
+        const { error } = await supabase
+            .from('time_entries')
+            .delete()
+            .eq('employee_id', emp.id)
+            .eq('date', today);
+
+        if (error) send(msg.chat.id, 'Ошибка удаления. Попробуй ещё раз.');
+        else send(msg.chat.id, 'Записи за сегодня удалены.', MAIN_KEYBOARD);
+    } catch (err) {
+        console.error('/clear error:', err);
+        send(msg.chat.id, 'Ошибка. Попробуй ещё раз.');
     }
-
-    const today = getLocalDate(emp.timezone_offset);
-    const { error } = await supabase
-        .from('time_entries')
-        .delete()
-        .eq('employee_id', emp.id)
-        .eq('date', today);
-
-    if (error) bot.sendMessage(msg.chat.id, 'Ошибка удаления. Попробуй ещё раз.');
-    else bot.sendMessage(msg.chat.id, 'Записи за сегодня удалены.', MAIN_KEYBOARD);
 });
 
 // =============================================
@@ -170,109 +284,114 @@ bot.on('callback_query', async (query) => {
     const telegramId = query.from.id;
     const chatId = query.message.chat.id;
     const data = query.data;
-    const state = userStates[telegramId];
+    const state = getState(telegramId);
 
-    bot.answerCallbackQuery(query.id);
+    bot.answerCallbackQuery(query.id).catch(() => {});
 
-    // --- Link employee ---
-    if (data.startsWith('link_')) {
-        if (!state || state.step !== 'link_choose_name') return;
-        const empId = parseInt(data.replace('link_', ''), 10);
+    try {
+        // --- Link employee ---
+        if (data.startsWith('link_')) {
+            if (!state || state.step !== 'link_choose_name') return;
+            const empId = data.replace('link_', '');
 
-        const { error } = await supabase
-            .from('employees')
-            .update({
-                telegram_id: telegramId,
-                telegram_username: query.from.username || '',
-            })
-            .eq('id', empId);
+            const { error } = await supabase
+                .from('employees')
+                .update({
+                    telegram_id: telegramId,
+                    telegram_username: query.from.username || '',
+                })
+                .eq('id', empId);
 
-        if (error) {
-            bot.sendMessage(chatId, 'Ошибка привязки. Попробуй ещё раз: /start');
-            delete userStates[telegramId];
+            if (error) {
+                send(chatId, 'Ошибка привязки. Попробуй ещё раз: /start');
+                clearState(telegramId);
+                return;
+            }
+
+            const { data: emp } = await supabase.from('employees').select('*').eq('id', empId).single();
+            clearState(telegramId);
+
+            send(chatId,
+                `Готово! Привет, ${emp.name}! 👋\n\n` +
+                `Нажми «📝 Записать часы» чтобы начать.`,
+                MAIN_KEYBOARD
+            );
             return;
         }
 
-        const { data: emp } = await supabase.from('employees').select('*').eq('id', empId).single();
-        delete userStates[telegramId];
+        if (!state) return;
 
-        bot.sendMessage(chatId,
-            `Готово! Привет, ${emp.name}! 👋\n\n` +
-            `Нажми «📝 Записать часы» чтобы начать.`,
-            MAIN_KEYBOARD
-        );
-        return;
-    }
+        // --- Choose project ---
+        if (data.startsWith('proj_')) {
+            if (state.step !== 'choose_project') return;
 
-    if (!state) return;
+            if (data === 'proj_custom') {
+                state.step = 'enter_custom_project';
+                send(chatId, 'Введи название проекта:');
+                return;
+            }
 
-    // --- Choose project ---
-    if (data.startsWith('proj_')) {
-        if (state.step !== 'choose_project') return;
-
-        if (data === 'proj_custom') {
-            state.step = 'enter_custom_project';
-            bot.sendMessage(chatId, 'Введи название проекта:');
+            const orderId = data.replace('proj_', '');
+            const project = (state.projects || []).find(p => String(p.id) === orderId);
+            state.current_project = project ? project.order_name : `Проект #${orderId}`;
+            state.current_order_id = orderId;
+            await showStagePicker(chatId, state);
             return;
         }
 
-        const orderId = parseInt(data.replace('proj_', ''), 10);
-        const project = (state.projects || []).find(p => Number(p.id) === orderId);
-        state.current_project = project ? project.order_name : `Проект #${orderId}`;
-        state.current_order_id = orderId;
-        await showStagePicker(chatId, state);
-        return;
-    }
+        // --- Choose stage ---
+        if (data.startsWith('stage_')) {
+            if (state.step !== 'choose_stage') return;
 
-    // --- Choose stage ---
-    if (data.startsWith('stage_')) {
-        if (state.step !== 'choose_stage') return;
+            const stageKey = data.replace('stage_', '');
+            if (stageKey === 'other') {
+                state.step = 'enter_stage_other';
+                send(chatId, 'Опиши этап работ (своими словами):');
+                return;
+            }
 
-        const stageKey = data.replace('stage_', '');
-        if (stageKey === 'other') {
-            state.step = 'enter_stage_other';
-            bot.sendMessage(chatId, 'Опиши этап работ (своими словами):');
+            state.current_stage = stageKey;
+            state.current_stage_label = STAGE_LABELS[stageKey] || stageKey;
+            askHours(chatId, state);
             return;
         }
 
-        state.current_stage = stageKey;
-        state.current_stage_label = STAGE_LABELS[stageKey] || stageKey;
-        askHours(chatId, state);
-        return;
-    }
+        // --- Hours buttons ---
+        if (data.startsWith('hours_')) {
+            if (state.step !== 'enter_hours') return;
 
-    // --- Hours buttons ---
-    if (data.startsWith('hours_')) {
-        if (state.step !== 'enter_hours') return;
+            if (data === 'hours_custom') {
+                state.step = 'enter_hours_custom';
+                send(chatId, 'Введи количество часов (например: 2.5):');
+                return;
+            }
 
-        if (data === 'hours_custom') {
-            state.step = 'enter_hours_custom';
-            bot.sendMessage(chatId, 'Введи количество часов (например: 2.5):');
+            const hours = parseFloat(data.replace('hours_', ''));
+            if (Number.isNaN(hours) || hours <= 0) return;
+            handleHoursEntry(chatId, telegramId, state, hours);
             return;
         }
 
-        const hours = parseFloat(data.replace('hours_', ''));
-        if (Number.isNaN(hours) || hours <= 0) return;
-        handleHoursEntry(chatId, telegramId, state, hours);
-        return;
-    }
+        // --- More entries / finish ---
+        if (data === 'more_entries') {
+            await showProjectPicker(chatId, telegramId, state.employee, state.existing_hours, state.entries);
+            return;
+        }
 
-    // --- More entries / finish ---
-    if (data === 'more_entries') {
-        await showProjectPicker(chatId, telegramId, state.employee, state.existing_hours, state.entries);
-        return;
-    }
+        if (data === 'finish_report') {
+            await askDescription(chatId, state);
+            return;
+        }
 
-    if (data === 'finish_report') {
-        await askDescription(chatId, state);
-        return;
-    }
-
-    // --- Skip description ---
-    if (data === 'skip_description') {
-        if (state.step !== 'enter_description') return;
-        await saveAllEntries(chatId, telegramId, state, '');
-        return;
+        // --- Skip description ---
+        if (data === 'skip_description') {
+            if (state.step !== 'enter_description') return;
+            await saveAllEntries(chatId, telegramId, state, '');
+            return;
+        }
+    } catch (err) {
+        console.error('Callback error:', err);
+        send(chatId, 'Произошла ошибка. Попробуй ещё раз.', MAIN_KEYBOARD);
     }
 });
 
@@ -287,60 +406,65 @@ bot.on('message', async (msg) => {
 
     if (text.startsWith('/')) return;
 
-    // --- Reply keyboard buttons ---
-    if (text === '📝 Записать часы') {
-        await startReport(chatId, telegramId);
-        return;
-    }
-
-    if (text === '📊 Сегодня') {
-        await showToday(chatId, telegramId);
-        return;
-    }
-
-    if (text === '📅 Неделя') {
-        await showWeek(chatId, telegramId);
-        return;
-    }
-
-    // --- State-based text input ---
-    const state = userStates[telegramId];
-    if (!state) return;
-
-    if (state.step === 'enter_custom_project') {
-        if (!text) {
-            bot.sendMessage(chatId, 'Введи название проекта:');
+    try {
+        // --- Reply keyboard buttons ---
+        if (text === '📝 Записать часы') {
+            await startReport(chatId, telegramId);
             return;
         }
-        state.current_project = text;
-        state.current_order_id = null;
-        await showStagePicker(chatId, state);
-        return;
-    }
 
-    if (state.step === 'enter_stage_other') {
-        if (!text) {
-            bot.sendMessage(chatId, 'Опиши этап работ:');
+        if (text === '📊 Сегодня') {
+            await showToday(chatId, telegramId);
             return;
         }
-        state.current_stage = 'other';
-        state.current_stage_label = text;
-        askHours(chatId, state);
-        return;
-    }
 
-    if (state.step === 'enter_hours' || state.step === 'enter_hours_custom') {
-        const hours = parseFloat(text.replace(',', '.'));
-        if (Number.isNaN(hours) || hours <= 0 || hours > 24) {
-            bot.sendMessage(chatId, 'Введи число от 0.25 до 24, например: 2.5');
+        if (text === '📅 Неделя') {
+            await showWeek(chatId, telegramId);
             return;
         }
-        handleHoursEntry(chatId, telegramId, state, hours);
-        return;
-    }
 
-    if (state.step === 'enter_description') {
-        await saveAllEntries(chatId, telegramId, state, text);
+        // --- State-based text input ---
+        const state = getState(telegramId);
+        if (!state) return;
+
+        if (state.step === 'enter_custom_project') {
+            if (!text) {
+                send(chatId, 'Введи название проекта:');
+                return;
+            }
+            state.current_project = text;
+            state.current_order_id = null;
+            await showStagePicker(chatId, state);
+            return;
+        }
+
+        if (state.step === 'enter_stage_other') {
+            if (!text) {
+                send(chatId, 'Опиши этап работ:');
+                return;
+            }
+            state.current_stage = 'other';
+            state.current_stage_label = text;
+            askHours(chatId, state);
+            return;
+        }
+
+        if (state.step === 'enter_hours' || state.step === 'enter_hours_custom') {
+            const hours = parseFloat(text.replace(',', '.'));
+            if (Number.isNaN(hours) || hours <= 0 || hours > 24) {
+                send(chatId, 'Введи число от 0.25 до 24, например: 2.5');
+                return;
+            }
+            handleHoursEntry(chatId, telegramId, state, hours);
+            return;
+        }
+
+        if (state.step === 'enter_description') {
+            await saveAllEntries(chatId, telegramId, state, text);
+        }
+    } catch (err) {
+        console.error('Message handler error:', err);
+        send(chatId, 'Произошла ошибка. Попробуй ещё раз.', MAIN_KEYBOARD);
     }
 });
 
@@ -361,30 +485,36 @@ bot.onText(/\/week/, async (msg) => {
 // =============================================
 
 async function getEmployee(telegramId) {
-    const { data } = await supabase
+    const { data, error } = await supabase
         .from('employees')
         .select('*')
         .eq('telegram_id', telegramId)
         .single();
+    if (error) console.error('getEmployee error:', error.message);
     return data;
 }
 
 async function startReport(chatId, telegramId) {
-    const emp = await getEmployee(telegramId);
-    if (!emp) {
-        bot.sendMessage(chatId, 'Ты не подключён. Нажми /start');
-        return;
+    try {
+        const emp = await getEmployee(telegramId);
+        if (!emp) {
+            send(chatId, 'Ты не подключён. Нажми /start');
+            return;
+        }
+
+        const today = getLocalDate(emp.timezone_offset);
+        const { data: todayEntries } = await supabase
+            .from('time_entries')
+            .select('hours')
+            .eq('employee_id', emp.id)
+            .eq('date', today);
+
+        const existingHours = round2((todayEntries || []).reduce((s, e) => s + (parseFloat(e.hours) || 0), 0));
+        await showProjectPicker(chatId, telegramId, emp, existingHours, []);
+    } catch (err) {
+        console.error('startReport error:', err);
+        send(chatId, 'Ошибка загрузки. Попробуй ещё раз.', MAIN_KEYBOARD);
     }
-
-    const today = getLocalDate(emp.timezone_offset);
-    const { data: todayEntries } = await supabase
-        .from('time_entries')
-        .select('hours')
-        .eq('employee_id', emp.id)
-        .eq('date', today);
-
-    const existingHours = round2((todayEntries || []).reduce((s, e) => s + (parseFloat(e.hours) || 0), 0));
-    await showProjectPicker(chatId, telegramId, emp, existingHours, []);
 }
 
 function handleHoursEntry(chatId, telegramId, state, hours) {
@@ -401,7 +531,7 @@ function handleHoursEntry(chatId, telegramId, state, hours) {
     const dayTotal = round2(state.existing_hours + sessionHours);
 
     state.step = 'choose_more_or_done';
-    bot.sendMessage(chatId,
+    send(chatId,
         `✅ ${state.current_project} / ${state.current_stage_label} — ${cleanHours}ч\n` +
         `За сегодня: ${dayTotal}ч`,
         {
@@ -430,7 +560,6 @@ async function showProjectPicker(chatId, telegramId, emp, existingHours, entries
 
     const keyboard = [];
 
-    // Only production orders + Другое
     projects.forEach(p => {
         const label = p.order_name + (p.client_name ? ` (${p.client_name})` : '');
         keyboard.push([{ text: label, callback_data: `proj_${p.id}` }]);
@@ -438,13 +567,13 @@ async function showProjectPicker(chatId, telegramId, emp, existingHours, entries
 
     keyboard.push([{ text: '📎 Другое', callback_data: 'proj_custom' }]);
 
-    userStates[telegramId] = {
+    setState(telegramId, {
         step: 'choose_project',
         employee: emp,
         projects,
         existing_hours: existingHours || 0,
         entries: Array.isArray(entries) ? entries : [],
-    };
+    });
 
     const sessionHours = round2((entries || []).reduce((s, e) => s + (e.hours || 0), 0));
     const totalHours = round2((existingHours || 0) + sessionHours);
@@ -453,7 +582,7 @@ async function showProjectPicker(chatId, telegramId, emp, existingHours, entries
         ? `${emp.name}, выбери проект.\nСегодня уже: ${totalHours}ч`
         : `${emp.name}, выбери проект:`;
 
-    bot.sendMessage(chatId, intro, {
+    send(chatId, intro, {
         reply_markup: { inline_keyboard: keyboard },
     });
 }
@@ -469,8 +598,8 @@ async function showStagePicker(chatId, state) {
         [{ text: '📎 Другое', callback_data: 'stage_other' }],
     ];
 
-    bot.sendMessage(chatId,
-        `Проект: *${state.current_project}*\nЧто делали?`,
+    send(chatId,
+        `Проект: *${esc(state.current_project)}*\nЧто делали?`,
         {
             parse_mode: 'Markdown',
             reply_markup: { inline_keyboard: keyboard },
@@ -505,9 +634,9 @@ function askHours(chatId, state) {
         ],
     ];
 
-    bot.sendMessage(chatId,
-        `Проект: *${state.current_project}*\n` +
-        `Этап: *${state.current_stage_label}*\n\n` +
+    send(chatId,
+        `Проект: *${esc(state.current_project)}*\n` +
+        `Этап: *${esc(state.current_stage_label)}*\n\n` +
         `Сколько часов?`,
         {
             parse_mode: 'Markdown',
@@ -534,7 +663,7 @@ async function askDescription(chatId, state) {
         ? 'Напиши комментарий к дню:'
         : 'Комментарий к дню (или нажми Пропустить):';
 
-    bot.sendMessage(chatId,
+    send(chatId,
         `${summary}\n\n` +
         `Итого за сегодня: *${dayTotal}ч*\n\n` +
         commentLabel,
@@ -574,13 +703,13 @@ async function saveAllEntries(chatId, telegramId, state, comment) {
     const today = getLocalDate(state.employee.timezone_offset);
 
     if (!state.entries || state.entries.length === 0) {
-        bot.sendMessage(chatId, 'Нет записей для сохранения.', MAIN_KEYBOARD);
-        delete userStates[telegramId];
+        send(chatId, 'Нет записей для сохранения.', MAIN_KEYBOARD);
+        clearState(telegramId);
         return;
     }
 
     if (state.employee.tasks_required && !String(comment || '').trim()) {
-        bot.sendMessage(chatId, 'Комментарий обязателен. Опиши, что делали за день.');
+        send(chatId, 'Комментарий обязателен. Опиши, что делали за день.');
         return;
     }
 
@@ -599,7 +728,6 @@ async function saveAllEntries(chatId, telegramId, state, comment) {
 
             const { error } = await supabase.from('time_entries').insert(payload);
             if (error) throw error;
-            // Small delay to ensure unique IDs
             await new Promise(r => setTimeout(r, 5));
         }
 
@@ -611,7 +739,7 @@ async function saveAllEntries(chatId, telegramId, state, comment) {
         const dayTotal = round2(state.existing_hours + sessionHours);
 
         const emoji = dayTotal >= 8 ? '💪' : dayTotal >= 4 ? '👍' : '✅';
-        bot.sendMessage(chatId,
+        send(chatId,
             `${emoji} Супер, ${state.employee.name}! Записано!\n\n` +
             `${summary}\n\n` +
             `Сегодня ты поработал(а): *${dayTotal}ч*\n\n` +
@@ -620,10 +748,10 @@ async function saveAllEntries(chatId, telegramId, state, comment) {
         );
     } catch (e) {
         console.error('Save error:', e);
-        bot.sendMessage(chatId, 'Ошибка сохранения. Попробуй ещё раз.', MAIN_KEYBOARD);
+        send(chatId, 'Ошибка сохранения. Попробуй ещё раз.', MAIN_KEYBOARD);
     }
 
-    delete userStates[telegramId];
+    clearState(telegramId);
 }
 
 // =============================================
@@ -631,86 +759,96 @@ async function saveAllEntries(chatId, telegramId, state, comment) {
 // =============================================
 
 async function showToday(chatId, telegramId) {
-    const emp = await getEmployee(telegramId);
-    if (!emp) {
-        bot.sendMessage(chatId, 'Ты не подключён. Нажми /start');
-        return;
+    try {
+        const emp = await getEmployee(telegramId);
+        if (!emp) {
+            send(chatId, 'Ты не подключён. Нажми /start');
+            return;
+        }
+
+        const today = getLocalDate(emp.timezone_offset);
+        const { data } = await supabase
+            .from('time_entries')
+            .select('*')
+            .eq('employee_id', emp.id)
+            .eq('date', today)
+            .order('created_at');
+
+        if (!data || data.length === 0) {
+            send(chatId, 'Сегодня пока нет записей.', MAIN_KEYBOARD);
+            return;
+        }
+
+        let totalHours = 0;
+        let text = `Записи за *${today}*:\n\n`;
+
+        data.forEach(e => {
+            const meta = parseMeta(e.task_description);
+            const project = meta.project || '—';
+            text += `${project} / ${meta.stage_label} — ${e.hours}ч\n`;
+            totalHours += parseFloat(e.hours) || 0;
+        });
+
+        text += `\nИтого: *${round2(totalHours)}ч*`;
+        send(chatId, text, { parse_mode: 'Markdown', ...MAIN_KEYBOARD });
+    } catch (err) {
+        console.error('showToday error:', err);
+        send(chatId, 'Ошибка загрузки. Попробуй ещё раз.', MAIN_KEYBOARD);
     }
-
-    const today = getLocalDate(emp.timezone_offset);
-    const { data } = await supabase
-        .from('time_entries')
-        .select('*')
-        .eq('employee_id', emp.id)
-        .eq('date', today)
-        .order('created_at');
-
-    if (!data || data.length === 0) {
-        bot.sendMessage(chatId, 'Сегодня пока нет записей.', MAIN_KEYBOARD);
-        return;
-    }
-
-    let totalHours = 0;
-    let text = `Записи за *${today}*:\n\n`;
-
-    data.forEach(e => {
-        const meta = parseMeta(e.task_description);
-        const project = meta.project || '—';
-        text += `${project} / ${meta.stage_label} — ${e.hours}ч\n`;
-        totalHours += parseFloat(e.hours) || 0;
-    });
-
-    text += `\nИтого: *${round2(totalHours)}ч*`;
-    bot.sendMessage(chatId, text, { parse_mode: 'Markdown', ...MAIN_KEYBOARD });
 }
 
 async function showWeek(chatId, telegramId) {
-    const emp = await getEmployee(telegramId);
-    if (!emp) {
-        bot.sendMessage(chatId, 'Ты не подключён. Нажми /start');
-        return;
-    }
+    try {
+        const emp = await getEmployee(telegramId);
+        if (!emp) {
+            send(chatId, 'Ты не подключён. Нажми /start');
+            return;
+        }
 
-    const weekAgo = new Date();
-    weekAgo.setDate(weekAgo.getDate() - 7);
-    const weekAgoStr = weekAgo.toISOString().split('T')[0];
+        const weekAgo = new Date();
+        weekAgo.setDate(weekAgo.getDate() - 7);
+        const weekAgoStr = weekAgo.toISOString().split('T')[0];
 
-    const { data } = await supabase
-        .from('time_entries')
-        .select('*')
-        .eq('employee_id', emp.id)
-        .gte('date', weekAgoStr)
-        .order('date', { ascending: false });
+        const { data } = await supabase
+            .from('time_entries')
+            .select('*')
+            .eq('employee_id', emp.id)
+            .gte('date', weekAgoStr)
+            .order('date', { ascending: false });
 
-    if (!data || data.length === 0) {
-        bot.sendMessage(chatId, 'За последнюю неделю записей нет.', MAIN_KEYBOARD);
-        return;
-    }
+        if (!data || data.length === 0) {
+            send(chatId, 'За последнюю неделю записей нет.', MAIN_KEYBOARD);
+            return;
+        }
 
-    const byDate = {};
-    let total = 0;
+        const byDate = {};
+        let total = 0;
 
-    data.forEach(e => {
-        if (!byDate[e.date]) byDate[e.date] = [];
-        byDate[e.date].push(e);
-        total += parseFloat(e.hours) || 0;
-    });
-
-    let text = 'За последние 7 дней:\n\n';
-    Object.entries(byDate)
-        .sort((a, b) => b[0].localeCompare(a[0]))
-        .forEach(([date, entries]) => {
-            const dayTotal = round2(entries.reduce((s, e) => s + (parseFloat(e.hours) || 0), 0));
-            text += `*${date}* (${dayTotal}ч):\n`;
-            entries.forEach(e => {
-                const meta = parseMeta(e.task_description);
-                const project = meta.project || '—';
-                text += `  ${project} / ${meta.stage_label} — ${e.hours}ч\n`;
-            });
+        data.forEach(e => {
+            if (!byDate[e.date]) byDate[e.date] = [];
+            byDate[e.date].push(e);
+            total += parseFloat(e.hours) || 0;
         });
 
-    text += `\nИтого: *${round2(total)}ч* за ${Object.keys(byDate).length} дней`;
-    bot.sendMessage(chatId, text, { parse_mode: 'Markdown', ...MAIN_KEYBOARD });
+        let text = 'За последние 7 дней:\n\n';
+        Object.entries(byDate)
+            .sort((a, b) => b[0].localeCompare(a[0]))
+            .forEach(([date, entries]) => {
+                const dayTotal = round2(entries.reduce((s, e) => s + (parseFloat(e.hours) || 0), 0));
+                text += `*${date}* (${dayTotal}ч):\n`;
+                entries.forEach(e => {
+                    const meta = parseMeta(e.task_description);
+                    const project = meta.project || '—';
+                    text += `  ${project} / ${meta.stage_label} — ${e.hours}ч\n`;
+                });
+            });
+
+        text += `\nИтого: *${round2(total)}ч* за ${Object.keys(byDate).length} дней`;
+        send(chatId, text, { parse_mode: 'Markdown', ...MAIN_KEYBOARD });
+    } catch (err) {
+        console.error('showWeek error:', err);
+        send(chatId, 'Ошибка загрузки. Попробуй ещё раз.', MAIN_KEYBOARD);
+    }
 }
 
 // =============================================
@@ -725,19 +863,26 @@ function getLocalDate(timezoneOffset) {
 }
 
 function round2(n) { return Math.round((parseFloat(n) || 0) * 100) / 100; }
-function pad(n) { return String(n || 0).padStart(2, '0'); }
 function num(v, fallback = 0) { const n = parseFloat(v); return Number.isFinite(n) ? n : fallback; }
 function fmtMoney(v) { return `${Math.round(num(v, 0))}₽`; }
 
+// Escape markdown special chars in user-provided text
+function esc(s) { return String(s || '').replace(/([_*[\]()~`>#+\-=|{}.!])/g, '\\$1'); }
+
 // =============================================
-// reminder system
+// reminder system (with error isolation)
 // =============================================
 
+let reminderRunning = false;
 setInterval(async () => {
+    if (reminderRunning) return; // skip if previous run still going
+    reminderRunning = true;
     try {
         await checkReminders();
     } catch (e) {
         console.error('Reminder check error:', e);
+    } finally {
+        reminderRunning = false;
     }
 }, 60000);
 
@@ -746,34 +891,41 @@ async function checkReminders() {
     const utcHour = now.getUTCHours();
     const utcMinute = now.getUTCMinutes();
 
-    const { data: employees } = await supabase
+    const { data: employees, error } = await supabase
         .from('employees')
         .select('*')
         .eq('is_active', true)
         .not('telegram_id', 'is', null);
 
+    if (error) {
+        console.error('Reminder: failed to load employees:', error.message);
+        return;
+    }
     if (!employees || employees.length === 0) return;
 
     for (const emp of employees) {
         const localHour = (utcHour + (emp.timezone_offset || 3) + 24) % 24;
         const localMinute = utcMinute;
 
-        if (localHour === emp.reminder_hour && localMinute === emp.reminder_minute) {
+        // Evening reminder — if no entries today
+        if (localHour === (emp.reminder_hour || 17) && localMinute === (emp.reminder_minute || 30)) {
             const today = getLocalDate(emp.timezone_offset);
             const { data: todayEntries } = await supabase
                 .from('time_entries')
                 .select('id')
                 .eq('employee_id', emp.id)
-                .eq('date', today);
+                .eq('date', today)
+                .limit(1);
 
             if (!todayEntries || todayEntries.length === 0) {
-                bot.sendMessage(emp.telegram_id,
+                send(emp.telegram_id,
                     `${emp.name}, рабочий день подходит к концу.\nЗаполни часы 👇`,
                     MAIN_KEYBOARD
                 );
             }
         }
 
+        // Morning reminder — if yesterday (workday) was not filled
         if (localHour === 9 && localMinute === 0) {
             const yesterday = new Date(now);
             yesterday.setDate(yesterday.getDate() - 1);
@@ -785,10 +937,11 @@ async function checkReminders() {
                 .from('time_entries')
                 .select('id')
                 .eq('employee_id', emp.id)
-                .eq('date', yesterdayStr);
+                .eq('date', yesterdayStr)
+                .limit(1);
 
             if (!yesterdayEntries || yesterdayEntries.length === 0) {
-                bot.sendMessage(emp.telegram_id,
+                send(emp.telegram_id,
                     `Доброе утро, ${emp.name}! Вчера (${yesterdayStr}) отчёт не заполнен.\nЗаполни часы 👇`,
                     MAIN_KEYBOARD
                 );
@@ -797,6 +950,11 @@ async function checkReminders() {
     }
 }
 
-console.log('=== Recycle Object TimeBot v6 ===');
-console.log('Fixed: Supabase column mapping (employee_id, task_description)');
+// =============================================
+// Startup
+// =============================================
+
+console.log('=== Recycle Object TimeBot v7 ===');
+console.log('Improvements: error handling, polling recovery, graceful shutdown, state cleanup');
 console.log('Commands: /start, /report, /today, /week, /status, /clear, /help');
+console.log(`Polling started at ${new Date().toISOString()}`);
