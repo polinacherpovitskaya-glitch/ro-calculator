@@ -1170,6 +1170,23 @@ function getDefaultMolds() {
 // EMPLOYEES (Сотрудники — для Telegram-бота и учёта времени)
 // =============================================
 
+// Supabase employees table known columns (strip unknown fields to avoid upsert errors)
+const SUPABASE_EMPLOYEE_COLS = new Set([
+    'id', 'name', 'role', 'daily_hours', 'telegram_id', 'telegram_username',
+    'reminder_hour', 'reminder_minute', 'timezone_offset', 'is_active',
+    'tasks_required', 'pay_base_salary_month', 'pay_base_hours_month',
+    'pay_overtime_hour_rate', 'pay_weekend_hour_rate', 'pay_holiday_hour_rate',
+    'created_at', 'updated_at',
+]);
+
+function _supabaseEmployeePayload(employee) {
+    const out = {};
+    for (const k of Object.keys(employee)) {
+        if (SUPABASE_EMPLOYEE_COLS.has(k)) out[k] = employee[k];
+    }
+    return out;
+}
+
 // One-time migration: update employees with FinTablo salary data (Mar 2026)
 function _migrateEmployeeSalaries(employees) {
     const MIGRATION_KEY = 'ro_emp_salary_migration_v3';
@@ -1206,39 +1223,27 @@ function _migrateEmployeeSalaries(employees) {
 }
 
 async function loadEmployees() {
-    if (isSupabaseReady()) {
-        const { data, error } = await supabaseClient.from('employees').select('*').order('name');
-        if (!error && data && data.length > 0) return _migrateEmployeeSalaries(data);
-        if (!error && data && data.length === 0) {
-            // Seed default employees for fresh databases
-            const defaults = getLocal(LOCAL_KEYS.employees) || getDefaultEmployees();
-            try {
-                await supabaseClient.from('employees').upsert(defaults.map(_supabaseEmployeePayload), { onConflict: 'id' });
-            } catch (e) {
-                console.error('loadEmployees seed error:', e);
+    try {
+        if (isSupabaseReady()) {
+            const { data, error } = await supabaseClient.from('employees').select('*').order('name');
+            if (!error && data && data.length > 0) return _migrateEmployeeSalaries(data);
+            if (!error && data && data.length === 0) {
+                const defaults = getLocal(LOCAL_KEYS.employees) || getDefaultEmployees();
+                try {
+                    const filtered = defaults.map(d => _supabaseEmployeePayload(d));
+                    await supabaseClient.from('employees').upsert(filtered, { onConflict: 'id' });
+                } catch (e) {
+                    console.error('loadEmployees seed error:', e);
+                }
+                return defaults;
             }
-            return defaults;
+            if (error) console.error('loadEmployees supabase error:', error);
         }
+    } catch (err) {
+        console.error('loadEmployees exception:', err);
     }
     const emps = getLocal(LOCAL_KEYS.employees) || getDefaultEmployees();
     return _migrateEmployeeSalaries(emps);
-}
-
-// Supabase employees table known columns (strip unknown fields to avoid upsert errors)
-const SUPABASE_EMPLOYEE_COLS = new Set([
-    'id', 'name', 'role', 'daily_hours', 'telegram_id', 'telegram_username',
-    'reminder_hour', 'reminder_minute', 'timezone_offset', 'is_active',
-    'tasks_required', 'pay_base_salary_month', 'pay_base_hours_month',
-    'pay_overtime_hour_rate', 'pay_weekend_hour_rate', 'pay_holiday_hour_rate',
-    'created_at', 'updated_at',
-]);
-
-function _supabaseEmployeePayload(employee) {
-    const out = {};
-    for (const k of Object.keys(employee)) {
-        if (SUPABASE_EMPLOYEE_COLS.has(k)) out[k] = employee[k];
-    }
-    return out;
 }
 
 async function saveEmployee(employee) {

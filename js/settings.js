@@ -369,7 +369,15 @@ const Settings = {
     // ==========================================
 
     async loadEmployeesTab() {
-        this.employeesData = await loadEmployees();
+        try {
+            this.employeesData = await loadEmployees();
+        } catch (err) {
+            console.error('loadEmployeesTab error:', err);
+            this.employeesData = [];
+        }
+        if (!this.employeesData || !Array.isArray(this.employeesData)) {
+            this.employeesData = [];
+        }
         this.renderEmployeesTable();
     },
 
