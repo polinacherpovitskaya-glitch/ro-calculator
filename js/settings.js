@@ -405,7 +405,7 @@ const Settings = {
                 <td style="text-align:center;">${tasksIcon}</td>
                 <td style="text-align:center;">${statusBadge}</td>
                 <td>
-                    <button class="btn btn-sm btn-outline" style="padding:2px 6px;font-size:10px;" onclick="Settings.editEmployee(${e.id})">&#9998;</button>
+                    <button class="btn btn-sm btn-outline" style="padding:2px 6px;font-size:10px;" onclick="Settings.editEmployee('${e.id}')">&#9998;</button>
                 </td>
             </tr>`;
         }).join('');

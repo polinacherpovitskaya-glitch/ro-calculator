@@ -1213,7 +1213,7 @@ async function loadEmployees() {
             // Seed default employees for fresh databases
             const defaults = getLocal(LOCAL_KEYS.employees) || getDefaultEmployees();
             try {
-                await supabaseClient.from('employees').upsert(defaults, { onConflict: 'id' });
+                await supabaseClient.from('employees').upsert(defaults.map(_supabaseEmployeePayload), { onConflict: 'id' });
             } catch (e) {
                 console.error('loadEmployees seed error:', e);
             }
