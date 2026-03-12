@@ -2967,6 +2967,14 @@
                                 </select>
                             </div>
                         </div>
+                        <div id="auth-pages-section" style="margin:12px 0; padding:12px; background:var(--bg-muted); border-radius:8px;">
+                            <div style="font-weight:600; margin-bottom:8px;">Доступ к страницам</div>
+                            <div id="auth-pages-checkboxes" style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:4px 16px; font-size:13px;"></div>
+                            <div style="margin-top:8px; display:flex; gap:8px;">
+                                <button class="btn btn-sm btn-outline" type="button" onclick="Settings.authPagesSelectAll()">Все</button>
+                                <button class="btn btn-sm btn-outline" type="button" onclick="Settings.authPagesSelectNone()">Нет</button>
+                            </div>
+                        </div>
                         <div class="flex gap-8">
                             <button class="btn btn-success" onclick="Settings.saveAuthAccount()">Сохранить</button>
                             <button class="btn btn-outline" onclick="Settings.cancelAuthAccount()">Отмена</button>
@@ -3263,6 +3271,6 @@
 <script src="js/china_catalog.js?v=46k"></script>
 <script src="js/marketplaces.js?v=72"></script>
 <script src="js/warehouse.js?v=87"></script>
-<script src="js/settings.js?v=65"></script>
+<script src="js/settings.js?v=66"></script>
 </body>
 </html>

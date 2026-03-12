@@ -785,6 +785,11 @@ const Settings = {
     populateAuthEmployeeSelect() {
         const select = document.getElementById('auth-account-employee');
         if (!select) return;
+        // When employee changes, update page checkboxes
+        select.onchange = () => {
+            const empId = select.value;
+            if (empId) this._renderAuthPageCheckboxes(empId);
+        };
         const active = (this.employeesData || []).filter(e => e.is_active !== false);
         let html = '<option value="">-- Выберите сотрудника --</option>';
         html += active.map(e => `<option value="${this.escHtml(String(e.id))}">${this.escHtml(e.name || '')}</option>`).join('');
@@ -821,6 +826,38 @@ const Settings = {
         document.getElementById('auth-account-active').value = a.is_active === false ? '0' : '1';
         document.getElementById('auth-account-form').style.display = '';
         document.getElementById('auth-account-delete-btn').style.display = '';
+        // Render page access checkboxes for this employee
+        if (a.employee_id) this._renderAuthPageCheckboxes(a.employee_id);
+    },
+
+    // Page checkboxes in auth account form
+    _renderAuthPageCheckboxes(empId) {
+        const container = document.getElementById('auth-pages-checkboxes');
+        if (!container) return;
+        const allowed = App.getEmployeePages(empId) || [...App.DEFAULT_PAGES];
+        container.innerHTML = App.ALL_PAGES.map(page => {
+            const checked = allowed.includes(page) ? 'checked' : '';
+            const label = this.PAGE_LABELS[page] || page;
+            return `<label style="display:flex;align-items:center;gap:4px;cursor:pointer;">
+                <input type="checkbox" class="auth-page-cb" data-page="${page}" ${checked}> ${label}
+            </label>`;
+        }).join('');
+    },
+
+    _saveAuthPageCheckboxes(empId) {
+        const cbs = document.querySelectorAll('#auth-pages-checkboxes .auth-page-cb');
+        if (!cbs.length) return;
+        const pages = [];
+        cbs.forEach(cb => { if (cb.checked) pages.push(cb.dataset.page); });
+        App.setEmployeePages(empId, pages);
+    },
+
+    authPagesSelectAll() {
+        document.querySelectorAll('#auth-pages-checkboxes .auth-page-cb').forEach(cb => cb.checked = true);
+    },
+
+    authPagesSelectNone() {
+        document.querySelectorAll('#auth-pages-checkboxes .auth-page-cb').forEach(cb => cb.checked = false);
     },
 
     async saveAuthAccount() {
@@ -872,6 +909,9 @@ const Settings = {
             App.toast('Укажите пароль');
             return;
         }
+
+        // Save page access for this employee
+        this._saveAuthPageCheckboxes(employeeId);
 
         await saveAuthAccounts(this.authAccountsData);
         await appendAuthActivity({
