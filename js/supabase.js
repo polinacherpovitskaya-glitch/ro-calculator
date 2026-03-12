@@ -1172,7 +1172,7 @@ function getDefaultMolds() {
 
 // One-time migration: update employees with FinTablo salary data (Mar 2026)
 function _migrateEmployeeSalaries(employees) {
-    const MIGRATION_KEY = 'ro_emp_salary_migration_v2';
+    const MIGRATION_KEY = 'ro_emp_salary_migration_v3';
     if (localStorage.getItem(MIGRATION_KEY)) return employees;
 
     const defaults = getDefaultEmployees();
@@ -1519,8 +1519,8 @@ function getDefaultEmployees() {
         // Производство
         e(1772800698338, 'Тая', 'production', { w: 40000, b: 30000, hours: 6, ot: 500, we: 750, ho: 750 }),
         // Панкина Таисия — Оператор лазерного станка. Фикс 70к, белая 40к + чёрная 30к
-        e(1772801066913, 'Женя Г', 'production', { w: 0, b: 0, ot: 500, we: 750, ho: 750 }),
-        // Голубенкова Евгения — Сотрудник производства. Сдельная, нет фикса
+        e(1772801066913, 'Женя Г', 'production', { w: 0, b: 0, ot: 500, we: 750, ho: 750, active: false }),
+        // Голубенкова Евгения — Сотрудник производства. Уволена с 15.03.2026
         e(1741700001000, 'Сергей М', 'production', { ot: 500, we: 750, ho: 750, active: false }),
 
         // Управление
