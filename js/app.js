@@ -60,6 +60,31 @@ const App = {
     },
 
     // Initialize default permissions if not set (Полина gets all pages)
+    // One-time: copy page perms from localStorage into auth account objects (Supabase-synced)
+    async _migratePagePermsToAuthAccounts() {
+        if (localStorage.getItem('ro_pages_to_auth_migrated')) return;
+        try {
+            const accounts = await loadAuthAccounts();
+            if (!accounts || !accounts.length) return;
+            const perms = JSON.parse(localStorage.getItem('ro_employee_pages') || '{}');
+            let changed = false;
+            accounts.forEach(acc => {
+                const empId = String(acc.employee_id || '');
+                if (empId && perms[empId] && !acc.pages) {
+                    acc.pages = perms[empId];
+                    changed = true;
+                }
+            });
+            if (changed) {
+                await saveAuthAccounts(accounts);
+                console.log('Migrated page perms into auth accounts');
+            }
+            localStorage.setItem('ro_pages_to_auth_migrated', '1');
+        } catch (e) {
+            console.error('Page perm migration error:', e);
+        }
+    },
+
     initDefaultPermissions() {
         const perms = JSON.parse(localStorage.getItem('ro_employee_pages') || '{}');
         // Полина (id=5) always gets all pages — ensure settings access exists
@@ -83,6 +108,7 @@ const App = {
         initSupabase();
         this.initDefaultPermissions();
         await this.prepareAuthUI();
+        await this._migratePagePermsToAuthAccounts();
 
         // Check auth
         if (this.isAuthenticated()) {
@@ -135,6 +161,10 @@ const App = {
                     role: 'employee',
                 };
                 ok = true;
+                // Sync page permissions from auth account to localStorage
+                if (account.pages && Array.isArray(account.pages)) {
+                    this.setEmployeePages(account.employee_id, account.pages);
+                }
                 account.last_login_at = new Date().toISOString();
                 await saveAuthAccounts(this.authAccounts);
                 appendAuthActivity({
@@ -176,6 +206,10 @@ const App = {
                 name: account.employee_name || account.username || 'Сотрудник',
                 role: 'employee',
             };
+            // Sync page permissions from auth account to localStorage
+            if (account.pages && Array.isArray(account.pages)) {
+                this.setEmployeePages(account.employee_id, account.pages);
+            }
             return;
         }
         // No valid account — force logout
@@ -261,6 +295,12 @@ const App = {
     async showApp() {
         document.getElementById('auth-screen').style.display = 'none';
         document.getElementById('app-layout').classList.add('active');
+
+        // Show logged-in user name in sidebar
+        const userInfo = document.getElementById('sidebar-user-info');
+        if (userInfo && this.currentUser) {
+            userInfo.textContent = this.currentUser.name || this.currentUser.username || '';
+        }
 
         // Show version in sidebar
         const verEl = document.getElementById('app-version');

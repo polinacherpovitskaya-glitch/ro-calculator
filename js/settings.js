@@ -910,8 +910,14 @@ const Settings = {
             return;
         }
 
-        // Save page access for this employee
-        this._saveAuthPageCheckboxes(employeeId);
+        // Save page access: both in localStorage AND in auth account object (for Supabase sync)
+        const cbs = document.querySelectorAll('#auth-pages-checkboxes .auth-page-cb');
+        if (cbs.length) {
+            const pages = [];
+            cbs.forEach(cb => { if (cb.checked) pages.push(cb.dataset.page); });
+            account.pages = pages;
+            App.setEmployeePages(employeeId, pages);
+        }
 
         await saveAuthAccounts(this.authAccountsData);
         await appendAuthActivity({
