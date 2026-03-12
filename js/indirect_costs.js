@@ -80,7 +80,26 @@ const IndirectCosts = {
     },
 
     _getMonthData() {
-        return this.monthsData[this.currentMonth] || {};
+        if (this.monthsData[this.currentMonth]) return this.monthsData[this.currentMonth];
+        // No data for this month — carry forward from the most recent saved month
+        const prev = this._getLatestSavedMonth(this.currentMonth);
+        if (prev) {
+            // Clone cost items from the last saved month (without meta like salary_indirect, total, saved_at)
+            const cloned = {};
+            this.COST_ITEMS.forEach(item => {
+                if (prev[item.key] !== undefined) cloned[item.key] = prev[item.key];
+            });
+            this.monthsData[this.currentMonth] = cloned;
+            return cloned;
+        }
+        return {};
+    },
+
+    /** Return the month-data object from the most recent saved month strictly before `beforeMonth` */
+    _getLatestSavedMonth(beforeMonth) {
+        const months = Object.keys(this.monthsData).filter(m => m < beforeMonth).sort();
+        if (months.length === 0) return null;
+        return this.monthsData[months[months.length - 1]];
     },
 
     _monthLabel(yyyymm) {
@@ -222,8 +241,17 @@ const IndirectCosts = {
         if (!container) return;
 
         const data = this._getMonthData();
+        // Check if this month was inherited (no saved_at means auto-filled from previous month)
+        const isInherited = !data.saved_at && Object.keys(data).length > 0;
 
-        container.innerHTML = this.COST_ITEMS.map(item => {
+        let html = '';
+        if (isInherited) {
+            html += `<div style="padding:6px 10px;background:var(--warning-bg,#fff8e1);border-radius:6px;font-size:12px;color:var(--text-muted);margin-bottom:8px;">
+                ℹ Значения скопированы из предыдущего месяца. Измените при необходимости и нажмите «Сохранить».
+            </div>`;
+        }
+
+        html += this.COST_ITEMS.map(item => {
             const val = data[item.key] || '';
             const hint = item.avg ? `<span style="font-size:10px;color:var(--text-muted);margin-left:4px" title="Среднее за 6 мес из FinTablo">FinTablo: ${formatRub(item.avg)}</span>` : '';
             return `<div class="ic-cost-row">
@@ -237,6 +265,8 @@ const IndirectCosts = {
                 </div>
             </div>`;
         }).join('');
+
+        container.innerHTML = html;
 
         document.getElementById('ic-fixed-total').textContent = formatRub(this.calcFixedTotal());
     },
