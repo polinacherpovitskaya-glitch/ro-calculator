@@ -1277,30 +1277,45 @@ function _mergeEmpExtra(employees) {
     return employees;
 }
 
-// Seed default extra data (one-time)
+// Fired dates for employees
+const FIRED_DATES = {
+    '1772801066913': '2026-03-15', // Женя Г (Голубенкова)
+    '1741700004000': '2026-03-15', // Женя Максименкова
+    '1741700009000': '2026-04-01', // Аня Шатран
+    '1741700001000': '2025-12-01', // Сергей М
+};
+
+// Seed default extra data — re-seed on version change
 function _seedDefaultEmpExtra() {
-    const SEED_KEY = 'ro_emp_extra_seeded_v1';
+    const SEED_KEY = 'ro_emp_extra_seeded_v4'; // bump to re-seed
     if (localStorage.getItem(SEED_KEY)) return;
     const defaults = getDefaultEmployees();
     const extra = _getEmpExtra();
     defaults.forEach(d => {
         const key = String(d.id);
-        if (!extra[key]) {
-            extra[key] = {
-                pay_white_salary: d.pay_white_salary || 0,
-                pay_black_salary: d.pay_black_salary || 0,
-                fired_date: d.is_active === false ? '2026-03-01' : null,
-            };
-        }
+        // Always overwrite with latest defaults
+        extra[key] = {
+            pay_white_salary: d.pay_white_salary || 0,
+            pay_black_salary: d.pay_black_salary || 0,
+            fired_date: FIRED_DATES[key] || null,
+        };
     });
     _setEmpExtra(extra);
     localStorage.setItem(SEED_KEY, '1');
 }
 
 async function loadEmployees() {
-    _seedDefaultEmpExtra();
-    await _loadEmpExtraFromSupabase();
     try {
+        _seedDefaultEmpExtra();
+        // Load extra data from Supabase (with timeout to avoid hanging)
+        if (isSupabaseReady()) {
+            try {
+                await Promise.race([
+                    _loadEmpExtraFromSupabase(),
+                    new Promise((_, rej) => setTimeout(() => rej('timeout'), 5000))
+                ]);
+            } catch (e) { console.warn('loadEmpExtra timeout/error, using local:', e); }
+        }
         if (isSupabaseReady()) {
             const { data, error } = await supabaseClient.from('employees').select('*').order('name');
             if (!error && data && data.length > 0) {
@@ -1624,12 +1639,13 @@ function getDefaultEmployees() {
     // ЗП из FinTablo справочника сотрудников (Mar 2026).
     // Белая = через трудовой (нетто на руки), чёрная = наличные/переводы.
     // Налоги (НДФЛ + взносы) рассчитываются автоматически от белой части.
+    // Итого FinTablo: Фикс 1 544 945₽, Взносы 77 172₽, НДФЛ 50 806₽, Итого 1 672 923₽
     return [
         // Производство
         e(1772800698338, 'Тая', 'production', { w: 40000, b: 30000, hours: 6, ot: 500, we: 750, ho: 750 }),
         // Панкина Таисия — Оператор лазерного станка. Фикс 70к, белая 40к + чёрная 30к
         e(1772801066913, 'Женя Г', 'production', { w: 0, b: 0, ot: 500, we: 750, ho: 750, active: false }),
-        // Голубенкова Евгения — Сотрудник производства. Уволена с 15.03.2026
+        // Голубенкова Евгения — Сотрудник производства. Уволена 15.03.2026
         e(1741700001000, 'Сергей М', 'production', { ot: 500, we: 750, ho: 750, active: false }),
 
         // Управление
@@ -1638,7 +1654,9 @@ function getDefaultEmployees() {
         e(1772827635013, 'Леша', 'management', { w: 0, b: 180000 }),
         // Маркелов Алексей — Начальник производства. 180к чёрный. 50% производство
 
-        // Офис / Коммерция (ЗП = 100% косвенные расходы)
+        // Офис / Коммерция
+        e(1741700004000, 'Женя Максименкова', 'office', { w: 100000, b: 65000, active: false }),
+        // Максименкова Евгения — Операционный директор. Фикс 165к: белая 100к + чёрная 65к. Уволена 15.03.2026
         e(3, 'Аня', 'office', { w: 0, b: 100000 }),
         // Овчаренко Анна — Коммерческий директор. 100к чёрный
         e(1741700005000, 'Виолетта', 'office', { w: 0, b: 95745 }),
@@ -1653,14 +1671,12 @@ function getDefaultEmployees() {
         // ИП Соболева — Бухгалтер. 38к (ИП, налоги сам)
         e(1741700002000, 'Анастасия', 'office', { w: 0, b: 80000 }),
         // Юрасик Анастасия — Операционный менеджер. 80к чёрный
+        e(1741700009000, 'Аня Шатран', 'office', { w: 0, b: 40000, active: false }),
+        // Шатран Анна — Менеджер проектов (Маркетплейс). 40к чёрный. Уволена 01.04.2026
         e(1741700007000, 'Ксения', 'office', { w: 0, b: 55000 }),
         // Звездина Ксения — SMM менеджер. 55к чёрный
         e(1741700008000, 'Екатерина', 'office', { w: 0, b: 21200 }),
         // Кирлан Екатерина — 21 200 чёрный
-
-        // Неактивные
-        e(1741700004000, 'Женя Максименкова', 'office', { w: 0, b: 65000, active: false }),
-        // Уволена март 2026
     ];
 }
 
