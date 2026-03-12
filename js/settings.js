@@ -457,7 +457,7 @@ const Settings = {
     },
 
     editEmployee(id) {
-        const e = this.employeesData.find(x => x.id === id);
+        const e = this.employeesData.find(x => String(x.id) === String(id));
         if (!e) return;
         this.editingEmployeeId = id;
 
@@ -591,7 +591,7 @@ const Settings = {
 
         // Preserve telegram_id if editing existing
         if (this.editingEmployeeId) {
-            const existing = this.employeesData.find(e => e.id === this.editingEmployeeId);
+            const existing = this.employeesData.find(e => String(e.id) === String(this.editingEmployeeId));
             if (existing) {
                 employee.telegram_id = existing.telegram_id || null;
             }
@@ -619,7 +619,7 @@ const Settings = {
 
     async deleteEmployee() {
         if (!this.editingEmployeeId) return;
-        const e = this.employeesData.find(x => x.id === this.editingEmployeeId);
+        const e = this.employeesData.find(x => String(x.id) === String(this.editingEmployeeId));
         if (!confirm(`Удалить сотрудника "${e?.name || ''}"?`)) return;
 
         await deleteEmployee(this.editingEmployeeId);
