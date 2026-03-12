@@ -66,6 +66,12 @@ const App = {
             perms['5'] = [...this.ALL_PAGES]; // Полина gets all pages
             localStorage.setItem('ro_employee_pages', JSON.stringify(perms));
         }
+        // Default production shares for employees with non-standard split
+        const shares = JSON.parse(localStorage.getItem('ro_production_shares') || '{}');
+        if (!shares['1772827635013']) {
+            shares['1772827635013'] = 50; // Леша: 50% производство / 50% управление
+            localStorage.setItem('ro_production_shares', JSON.stringify(shares));
+        }
     },
 
     _sessionStartedAt: null,

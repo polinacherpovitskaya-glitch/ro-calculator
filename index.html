@@ -2634,7 +2634,7 @@
                                 <tr>
                                     <th>Имя</th>
                                     <th>Должность</th>
-                                    <th class="text-right">ЗП / мес</th>
+                                    <th class="text-right">Стоимость / мес</th>
                                     <th class="text-right" style="width:100px">% произв.</th>
                                     <th class="text-right">→ В косвенные</th>
                                 </tr>
@@ -2642,7 +2642,7 @@
                             <tbody id="ic-employees-body"></tbody>
                             <tfoot>
                                 <tr style="font-weight:700;background:var(--bg)">
-                                    <td colspan="4">ИТОГО ЗП в косвенные</td>
+                                    <td colspan="4">ИТОГО сотрудники в косвенные</td>
                                     <td class="text-right" id="ic-employees-total">0 ₽</td>
                                 </tr>
                             </tfoot>
@@ -2852,12 +2852,35 @@
                             </label>
                         </div>
                         <div id="emp-pay-section" style="margin:8px 0 12px 0; padding:12px; background:var(--bg); border-radius:8px;">
-                            <div style="font-weight:600; margin-bottom:8px;">Оплата (для производства)</div>
+                            <div style="font-weight:600; margin-bottom:8px;">Зарплата</div>
                             <div class="form-row">
                                 <div class="form-group">
-                                    <label>Оклад / месяц (₽)</label>
-                                    <input type="number" id="emp-pay-base-salary" min="0" step="100">
+                                    <label>Белая ЗП (нетто, ₽/мес)</label>
+                                    <input type="number" id="emp-pay-white" min="0" step="100" oninput="Settings.recalcEmployeeCost()">
                                 </div>
+                                <div class="form-group">
+                                    <label>Чёрная ЗП (₽/мес)</label>
+                                    <input type="number" id="emp-pay-black" min="0" step="100" oninput="Settings.recalcEmployeeCost()">
+                                </div>
+                            </div>
+                            <div class="form-row" style="margin-top:4px">
+                                <div class="form-group">
+                                    <label>НДФЛ (13%)</label>
+                                    <input type="text" id="emp-tax-ndfl" readonly style="background:var(--bg-muted);color:var(--text-muted)">
+                                </div>
+                                <div class="form-group">
+                                    <label>Соц. взносы (~30%)</label>
+                                    <input type="text" id="emp-tax-social" readonly style="background:var(--bg-muted);color:var(--text-muted)">
+                                </div>
+                                <div class="form-group">
+                                    <label style="font-weight:600;color:var(--danger)">Итого стоимость</label>
+                                    <input type="text" id="emp-total-cost" readonly style="background:var(--bg-muted);font-weight:700;color:var(--danger)">
+                                </div>
+                            </div>
+                            <div class="text-muted" style="font-size:11px;margin-top:6px">Белая ЗП = нетто (на руки по договору). НДФЛ и взносы рассчитываются автоматически от гросс. Чёрная ЗП = наличные/переводы.</div>
+
+                            <div style="font-weight:600; margin:12px 0 8px;">Ставки (для учёта времени)</div>
+                            <div class="form-row">
                                 <div class="form-group">
                                     <label>Часы в окладе (ч/мес)</label>
                                     <input type="number" id="emp-pay-base-hours" min="0" step="1" value="176">
@@ -2866,8 +2889,6 @@
                                     <label>Сверхчас (₽/ч)</label>
                                     <input type="number" id="emp-pay-overtime-rate" min="0" step="10">
                                 </div>
-                            </div>
-                            <div class="form-row">
                                 <div class="form-group">
                                     <label>Выходной (₽/ч)</label>
                                     <input type="number" id="emp-pay-weekend-rate" min="0" step="10">
@@ -2877,7 +2898,6 @@
                                     <input type="number" id="emp-pay-holiday-rate" min="0" step="10">
                                 </div>
                             </div>
-                            <div class="text-muted" style="font-size:11px;">Оклад = 0 → почасовой сотрудник, все часы считаются по ставке «Сверхчас». Если оклад задан — сначала заполняются часы оклада, затем сверхчасы.</div>
                         </div>
                         <div id="emp-pages-section" style="margin:8px 0 12px 0; padding:12px; background:var(--bg); border-radius:8px;">
                             <div style="font-weight:600; margin-bottom:8px;">Доступ к страницам</div>
@@ -3221,9 +3241,9 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="js/supabase.js?v=87"></script>
+<script src="js/supabase.js?v=89"></script>
 <script src="js/calculator.js?v=64"></script>
-<script src="js/app.js?v=90"></script>
+<script src="js/app.js?v=91"></script>
 <script src="js/dashboard.js?v=47"></script>
 <script src="js/order-detail.js?v=49"></script>
 <script src="js/orders.js?v=54"></script>
@@ -3236,13 +3256,13 @@
 <script src="js/tasks.js?v=46g"></script>
 <script src="js/gantt.js?v=47"></script>
 <script src="js/fintablo.js?v=1"></script>
-<script src="js/indirect_costs.js?v=4"></script>
-<script src="js/factual.js?v=80"></script>
+<script src="js/indirect_costs.js?v=5"></script>
+<script src="js/factual.js?v=81"></script>
 <script src="js/china.js?v=46m"></script>
 <script src="js/warehouse_photos.js?v=48"></script>
 <script src="js/china_catalog.js?v=46k"></script>
 <script src="js/marketplaces.js?v=72"></script>
 <script src="js/warehouse.js?v=87"></script>
-<script src="js/settings.js?v=62"></script>
+<script src="js/settings.js?v=63"></script>
 </body>
 </html>

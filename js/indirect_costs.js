@@ -10,7 +10,6 @@ const IndirectCosts = {
 
     COST_ITEMS: [
         { key: 'rent',          label: 'Аренда (все площадки)',       avg: 256054 },
-        { key: 'salary_taxes',  label: 'Налоги на ЗП (НДФЛ+взносы)',avg: 100000 },
         { key: 'subscriptions', label: 'Программы и сервисы',        avg: 90513 },
         { key: 'marketing',     label: 'Маркетинг',                  avg: 81067 },
         { key: 'representation',label: 'Представительские',          avg: 38412 },
@@ -27,7 +26,7 @@ const IndirectCosts = {
     ROLE_DEFAULT_SHARE: {
         production: 100,
         office: 0,
-        management: 50,
+        management: 0, // Леша = 50% через override в ro_production_shares
     },
 
     // ==========================================
@@ -95,13 +94,33 @@ const IndirectCosts = {
     // Calculations
     // ==========================================
 
+    // Tax calc: white salary is NET → gross = net / 0.87
+    // НДФЛ = gross × 13%, Social = gross × 30.2%
+    NDFL_RATE: 0.13,
+    SOCIAL_RATE: 0.302,
+
+    _calcEmployeeTotalCost(e) {
+        let white = e.pay_white_salary || 0;
+        let black = e.pay_black_salary || 0;
+        // Migration: if no white/black but has pay_base_salary_month, treat as all black
+        if (white === 0 && black === 0 && (e.pay_base_salary_month || 0) > 0) {
+            black = e.pay_base_salary_month;
+        }
+        let taxes = 0;
+        if (white > 0) {
+            const gross = Math.round(white / (1 - this.NDFL_RATE));
+            taxes = Math.round(gross * this.NDFL_RATE) + Math.round(gross * this.SOCIAL_RATE);
+        }
+        return white + black + taxes;
+    },
+
     calcEmployeeIndirectTotal() {
         return this.employees
             .filter(e => e.is_active !== false)
             .reduce((sum, e) => {
-                const salary = e.pay_base_salary_month || 0;
+                const totalCost = this._calcEmployeeTotalCost(e);
                 const share = e.production_share ?? 0;
-                return sum + salary * (100 - share) / 100;
+                return sum + totalCost * (100 - share) / 100;
             }, 0);
     },
 
@@ -169,15 +188,21 @@ const IndirectCosts = {
         }
 
         tbody.innerHTML = activeEmps.map(e => {
-            const salary = e.pay_base_salary_month || 0;
+            const totalCost = this._calcEmployeeTotalCost(e);
+            const white = e.pay_white_salary || 0;
+            const black = e.pay_black_salary || 0;
+            const taxes = totalCost - white - black;
             const share = e.production_share ?? 0;
-            const indirect = salary * (100 - share) / 100;
+            const indirect = totalCost * (100 - share) / 100;
             const badge = `<span class="badge ${roleBadges[e.role] || ''}">${roleLabels[e.role] || e.role || '—'}</span>`;
+            const costHint = taxes > 0
+                ? `<span class="text-muted" style="font-size:10px">б:${formatRub(white)} ч:${formatRub(black)} нал:${formatRub(taxes)}</span>`
+                : `<span class="text-muted" style="font-size:10px">${white > 0 ? 'б:' + formatRub(white) : ''}${black > 0 ? ' ч:' + formatRub(black) : ''}</span>`;
 
             return `<tr>
                 <td style="font-weight:600">${this._esc(e.name)}</td>
                 <td>${badge}</td>
-                <td class="text-right">${formatRub(salary)}</td>
+                <td class="text-right">${formatRub(totalCost)}<br>${costHint}</td>
                 <td class="text-right">
                     <input type="number" min="0" max="100" value="${share}"
                         class="ic-inline-input" style="width:60px;text-align:right"
@@ -327,15 +352,15 @@ const IndirectCosts = {
     // Pre-fill historical data (Sep 2025 – Mar 2026 from FinTablo)
     // ==========================================
 
-    // salary_taxes: НДФЛ из FinTablo + оценка соц.взносов (~50к/мес сверху). Точные взносы платятся квартально.
+    // Налоги на ЗП теперь считаются автоматически по сотрудникам (белая часть → НДФЛ + взносы)
     FINTABLO_HISTORY: {
-        '2025-09': { rent: 246073, salary_taxes: 80000, subscriptions: 104277, marketing: 29000, representation: 85000, bank: 6769, photo: 0, staff_costs: 0, internet: 0, household: 488, workshop: 0, fuel: 0 },
-        '2025-10': { rent: 381960, salary_taxes: 86000, subscriptions: 46777, marketing: 120620, representation: 0, bank: 17725, photo: 0, staff_costs: 5449, internet: 15600, household: 1901, workshop: 0, fuel: 0 },
-        '2025-11': { rent: 327232, salary_taxes: 91000, subscriptions: 109559, marketing: 12000, representation: 1164, bank: 51950, photo: 0, staff_costs: 6150, internet: 1300, household: 2029, workshop: 0, fuel: 1500 },
-        '2025-12': { rent: 229052, salary_taxes: 107000, subscriptions: 16110, marketing: 163800, representation: 152721, bank: 25565, photo: 0, staff_costs: 21234, internet: 0, household: 2329, workshop: 0, fuel: 0 },
-        '2026-01': { rent: 180000, salary_taxes: 91000, subscriptions: 255610, marketing: 53000, representation: 0, bank: 10175, photo: 19902, staff_costs: 0, internet: 0, household: 0, workshop: 0, fuel: 0 },
-        '2026-02': { rent: 233063, salary_taxes: 101000, subscriptions: 98308, marketing: 147200, representation: 0, bank: 150, photo: 40152, staff_costs: 10000, internet: 11700, household: 0, workshop: 0, fuel: 0 },
-        '2026-03': { rent: 195000, salary_taxes: 100000, subscriptions: 2950, marketing: 41850, representation: 30000, bank: 150, photo: 23000, staff_costs: 7500, internet: 0, household: 5577, workshop: 5000, fuel: 0 },
+        '2025-09': { rent: 246073, subscriptions: 104277, marketing: 29000, representation: 85000, bank: 6769, photo: 0, staff_costs: 0, internet: 0, household: 488, workshop: 0, fuel: 0 },
+        '2025-10': { rent: 381960, subscriptions: 46777, marketing: 120620, representation: 0, bank: 17725, photo: 0, staff_costs: 5449, internet: 15600, household: 1901, workshop: 0, fuel: 0 },
+        '2025-11': { rent: 327232, subscriptions: 109559, marketing: 12000, representation: 1164, bank: 51950, photo: 0, staff_costs: 6150, internet: 1300, household: 2029, workshop: 0, fuel: 1500 },
+        '2025-12': { rent: 229052, subscriptions: 16110, marketing: 163800, representation: 152721, bank: 25565, photo: 0, staff_costs: 21234, internet: 0, household: 2329, workshop: 0, fuel: 0 },
+        '2026-01': { rent: 180000, subscriptions: 255610, marketing: 53000, representation: 0, bank: 10175, photo: 19902, staff_costs: 0, internet: 0, household: 0, workshop: 0, fuel: 0 },
+        '2026-02': { rent: 233063, subscriptions: 98308, marketing: 147200, representation: 0, bank: 150, photo: 40152, staff_costs: 10000, internet: 11700, household: 0, workshop: 0, fuel: 0 },
+        '2026-03': { rent: 195000, subscriptions: 2950, marketing: 41850, representation: 30000, bank: 150, photo: 23000, staff_costs: 7500, internet: 0, household: 5577, workshop: 5000, fuel: 0 },
     },
 
     loadHistory() {

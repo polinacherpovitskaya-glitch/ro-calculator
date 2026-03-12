@@ -1170,10 +1170,45 @@ function getDefaultMolds() {
 // EMPLOYEES (Сотрудники — для Telegram-бота и учёта времени)
 // =============================================
 
+// One-time migration: update employees with FinTablo salary data (Mar 2026)
+function _migrateEmployeeSalaries(employees) {
+    const MIGRATION_KEY = 'ro_emp_salary_migration_v2';
+    if (localStorage.getItem(MIGRATION_KEY)) return employees;
+
+    const defaults = getDefaultEmployees();
+    const defaultMap = {};
+    defaults.forEach(d => { defaultMap[String(d.id)] = d; });
+
+    // Update existing employees with new salary data
+    employees.forEach(emp => {
+        const def = defaultMap[String(emp.id)];
+        if (def) {
+            emp.pay_white_salary = def.pay_white_salary;
+            emp.pay_black_salary = def.pay_black_salary;
+            emp.pay_base_salary_month = def.pay_base_salary_month;
+            emp.is_active = def.is_active;
+        }
+    });
+
+    // Add missing employees from defaults
+    const existingIds = new Set(employees.map(e => String(e.id)));
+    defaults.forEach(d => {
+        if (!existingIds.has(String(d.id))) {
+            employees.push(d);
+        }
+    });
+
+    // Save migrated data
+    setLocal(LOCAL_KEYS.employees, employees);
+    localStorage.setItem(MIGRATION_KEY, Date.now().toString());
+    console.log('Employee salary migration v2 complete');
+    return employees;
+}
+
 async function loadEmployees() {
     if (isSupabaseReady()) {
         const { data, error } = await supabaseClient.from('employees').select('*').order('name');
-        if (!error && data && data.length > 0) return data;
+        if (!error && data && data.length > 0) return _migrateEmployeeSalaries(data);
         if (!error && data && data.length === 0) {
             // Seed default employees for fresh databases
             const defaults = getLocal(LOCAL_KEYS.employees) || getDefaultEmployees();
@@ -1185,7 +1220,8 @@ async function loadEmployees() {
             return defaults;
         }
     }
-    return getLocal(LOCAL_KEYS.employees) || getDefaultEmployees();
+    const emps = getLocal(LOCAL_KEYS.employees) || getDefaultEmployees();
+    return _migrateEmployeeSalaries(emps);
 }
 
 async function saveEmployee(employee) {
@@ -1464,46 +1500,58 @@ async function updateAuthSession(sessionId, patch) {
 }
 
 function getDefaultEmployees() {
+    // w=белая(нетто), b=чёрная. pay_base_salary_month = w + b (для расчёта ставки/час)
     const e = (id, name, role, opts = {}) => ({
         id, name, role, daily_hours: opts.hours || 8, telegram_id: null, telegram_username: '',
         reminder_hour: 17, reminder_minute: 30, timezone_offset: 3,
         is_active: opts.active !== undefined ? opts.active : true,
-        tasks_required: opts.tasks || false, pay_base_salary_month: opts.salary || 0,
+        tasks_required: opts.tasks || false,
+        pay_white_salary: opts.w || 0,
+        pay_black_salary: opts.b || 0,
+        pay_base_salary_month: (opts.w || 0) + (opts.b || 0),
         pay_base_hours_month: 176, pay_overtime_hour_rate: opts.ot || 0,
         pay_weekend_hour_rate: opts.we || 0, pay_holiday_hour_rate: opts.ho || 0,
     });
-    // ЗП из FinTablo (Jan-Mar 2026). Белая часть = через трудовой, черная = наличные/переводы.
-    // Налоги ~100к/мес (НДФЛ ~50к + взносы ~50к) учтены отдельно в COST_ITEMS.
+    // ЗП из FinTablo справочника сотрудников (Mar 2026).
+    // Белая = через трудовой (нетто на руки), чёрная = наличные/переводы.
+    // Налоги (НДФЛ + взносы) рассчитываются автоматически от белой части.
     return [
-        // Производство (сдельная ЗП — прямые расходы, не косвенные)
-        e(1772800698338, 'Тая', 'production', { hours: 6, salary: 75200, ot: 500, we: 750, ho: 750 }),
-        // Тая: оклад 15к (белый) + сделка ~25-55к (черный). 75200 = для расчёта ставки/час
-        e(1772801066913, 'Женя Г', 'production', { ot: 500, we: 750, ho: 750 }),
-        // Женя Г: сделка ~40-80к/мес (черный), нет оклада
+        // Производство
+        e(1772800698338, 'Тая', 'production', { w: 40000, b: 30000, hours: 6, ot: 500, we: 750, ho: 750 }),
+        // Панкина Таисия — Оператор лазерного станка. Фикс 70к, белая 40к + чёрная 30к
+        e(1772801066913, 'Женя Г', 'production', { w: 0, b: 0, ot: 500, we: 750, ho: 750 }),
+        // Голубенкова Евгения — Сотрудник производства. Сдельная, нет фикса
         e(1741700001000, 'Сергей М', 'production', { ot: 500, we: 750, ho: 750, active: false }),
-        // Сергей М: нет выплат с Dec 2025
 
         // Управление
-        e(1772827635013, 'Леша', 'management', { salary: 180000 }),
-        // Леша: 180к/мес (черный, 90к × 2). 50% производство
-        e(5, 'Полина', 'management', { salary: 168000, tasks: true }),
-        // Полина: переводы по тел. Оценка ~168к/мес
+        e(5, 'Полина', 'management', { w: 0, b: 350000, tasks: true }),
+        // Черповицкая Полина — Директор. Фикс 350к, весь чёрный
+        e(1772827635013, 'Леша', 'management', { w: 0, b: 180000 }),
+        // Маркелов Алексей — Начальник производства. 180к чёрный. 50% производство
 
-        // Офис (ЗП = 100% косвенные расходы)
-        e(2, 'Элина', 'office', { salary: 30000 }),
-        // Элина: Jan=20к, Feb=40к, Mar=31к → ~30к/мес
-        e(3, 'Аня', 'office', { salary: 40000 }),
-        // Аня: Jan=40к → ~40к/мес (нерегулярно)
-        e(1741700002000, 'Анастасия', 'office', { salary: 55000 }),
-        // Анастасия: оклад 40к (белый) + доплаты → ~55к/мес. С Dec офис.
-        e(1741700003000, 'Борис', 'office', { salary: 40000 }),
-        // Борис: Jan=30к, Feb=60к, Mar=30к → ~40к/мес (черный)
-        e(1741700004000, 'Женя Максименкова', 'office', { salary: 65000 }),
-        // Ж.Максименкова: 130к за Jan+Feb → ~65к/мес (черный)
+        // Офис / Коммерция (ЗП = 100% косвенные расходы)
+        e(3, 'Аня', 'office', { w: 0, b: 100000 }),
+        // Овчаренко Анна — Коммерческий директор. 100к чёрный
+        e(1741700005000, 'Виолетта', 'office', { w: 0, b: 95745 }),
+        // Сорокина Виолетта — Креативный директор. 95 745 чёрный
+        e(1, 'Алина', 'office', { w: 100000, b: 50000 }),
+        // Семенова Алина — Менеджер проектов. Фикс 150к: белая 100к + чёрная 50к
+        e(1741700003000, 'Борис', 'office', { w: 60000, b: 60000 }),
+        // Журавлев Борис — Дизайнер. Фикс 120к: белая 60к + чёрная 60к
+        e(2, 'Элина', 'office', { w: 40000, b: 40000 }),
+        // Кемайкина Элина — Менеджер проектов. Фикс 80к: белая 40к + чёрная 40к
+        e(1741700006000, 'Бухгалтер (ИП Соболева)', 'office', { w: 0, b: 38000 }),
+        // ИП Соболева — Бухгалтер. 38к (ИП, налоги сам)
+        e(1741700002000, 'Анастасия', 'office', { w: 0, b: 80000 }),
+        // Юрасик Анастасия — Операционный менеджер. 80к чёрный
+        e(1741700007000, 'Ксения', 'office', { w: 0, b: 55000 }),
+        // Звездина Ксения — SMM менеджер. 55к чёрный
+        e(1741700008000, 'Екатерина', 'office', { w: 0, b: 21200 }),
+        // Кирлан Екатерина — 21 200 чёрный
 
-        // Неактивные (были в последние 6 мес)
-        e(1, 'Алина', 'office', { salary: 45000, active: false }),
-        // Алина: последняя выплата Sep 2025
+        // Неактивные
+        e(1741700004000, 'Женя Максименкова', 'office', { w: 0, b: 65000, active: false }),
+        // Уволена март 2026
     ];
 }
 

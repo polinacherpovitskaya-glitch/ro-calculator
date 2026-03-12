@@ -422,6 +422,40 @@ const Settings = {
         document.getElementById('emp-name').focus();
     },
 
+    // Tax calculation: white salary is NET → gross = net / 0.87
+    // НДФЛ = gross × 13%, Social = gross × 30.2%
+    // Total cost = white_net + black + НДФЛ + Social = gross×(1+0.302) + black
+    NDFL_RATE: 0.13,
+    SOCIAL_RATE: 0.302,
+
+    calcEmployeeTaxes(whiteNet) {
+        if (!whiteNet || whiteNet <= 0) return { gross: 0, ndfl: 0, social: 0, totalTaxes: 0 };
+        const gross = Math.round(whiteNet / (1 - this.NDFL_RATE));
+        const ndfl = Math.round(gross * this.NDFL_RATE);
+        const social = Math.round(gross * this.SOCIAL_RATE);
+        return { gross, ndfl, social, totalTaxes: ndfl + social };
+    },
+
+    calcEmployeeTotalCost(whiteNet, black) {
+        const { totalTaxes } = this.calcEmployeeTaxes(whiteNet);
+        return (whiteNet || 0) + (black || 0) + totalTaxes;
+    },
+
+    recalcEmployeeCost() {
+        const white = parseFloat(document.getElementById('emp-pay-white')?.value) || 0;
+        const black = parseFloat(document.getElementById('emp-pay-black')?.value) || 0;
+        const { ndfl, social, totalTaxes } = this.calcEmployeeTaxes(white);
+        const total = white + black + totalTaxes;
+
+        const fmt = n => new Intl.NumberFormat('ru-RU').format(n) + ' ₽';
+        const ndflEl = document.getElementById('emp-tax-ndfl');
+        const socialEl = document.getElementById('emp-tax-social');
+        const totalEl = document.getElementById('emp-total-cost');
+        if (ndflEl) ndflEl.value = white > 0 ? fmt(ndfl) : '—';
+        if (socialEl) socialEl.value = white > 0 ? fmt(social) : '—';
+        if (totalEl) totalEl.value = total > 0 ? fmt(total) : '—';
+    },
+
     editEmployee(id) {
         const e = this.employeesData.find(x => x.id === id);
         if (!e) return;
@@ -436,11 +470,19 @@ const Settings = {
         document.getElementById('emp-reminder-min').value = e.reminder_minute ?? 30;
         document.getElementById('emp-tz-offset').value = e.timezone_offset ?? 3;
         document.getElementById('emp-tasks-required').checked = !!e.tasks_required;
-        document.getElementById('emp-pay-base-salary').value = parseFloat(e.pay_base_salary_month) || 0;
+        // Migration: if no white/black split exists but pay_base_salary_month does, treat as all black
+        let white = parseFloat(e.pay_white_salary) || 0;
+        let black = parseFloat(e.pay_black_salary) || 0;
+        if (white === 0 && black === 0 && (parseFloat(e.pay_base_salary_month) || 0) > 0) {
+            black = parseFloat(e.pay_base_salary_month);
+        }
+        document.getElementById('emp-pay-white').value = white;
+        document.getElementById('emp-pay-black').value = black;
         document.getElementById('emp-pay-base-hours').value = parseFloat(e.pay_base_hours_month) || 176;
         document.getElementById('emp-pay-overtime-rate').value = parseFloat(e.pay_overtime_hour_rate) || 0;
         document.getElementById('emp-pay-weekend-rate').value = parseFloat(e.pay_weekend_hour_rate) || 0;
         document.getElementById('emp-pay-holiday-rate').value = parseFloat(e.pay_holiday_hour_rate) || 0;
+        this.recalcEmployeeCost();
 
         document.getElementById('employee-form').style.display = '';
         document.getElementById('emp-delete-btn').style.display = '';
@@ -467,11 +509,15 @@ const Settings = {
         document.getElementById('emp-reminder-min').value = 30;
         document.getElementById('emp-tz-offset').value = 3;
         document.getElementById('emp-tasks-required').checked = false;
-        document.getElementById('emp-pay-base-salary').value = '';
+        document.getElementById('emp-pay-white').value = '';
+        document.getElementById('emp-pay-black').value = '';
         document.getElementById('emp-pay-base-hours').value = 176;
         document.getElementById('emp-pay-overtime-rate').value = '';
         document.getElementById('emp-pay-weekend-rate').value = '';
         document.getElementById('emp-pay-holiday-rate').value = '';
+        document.getElementById('emp-tax-ndfl').value = '';
+        document.getElementById('emp-tax-social').value = '';
+        document.getElementById('emp-total-cost').value = '';
     },
 
     cancelEmployee() {
@@ -534,7 +580,9 @@ const Settings = {
             timezone_offset: parseInt(document.getElementById('emp-tz-offset').value) ?? 3,
             is_active: true,
             tasks_required: document.getElementById('emp-tasks-required').checked,
-            pay_base_salary_month: parseFloat(document.getElementById('emp-pay-base-salary').value) || 0,
+            pay_white_salary: parseFloat(document.getElementById('emp-pay-white').value) || 0,
+            pay_black_salary: parseFloat(document.getElementById('emp-pay-black').value) || 0,
+            pay_base_salary_month: (parseFloat(document.getElementById('emp-pay-white').value) || 0) + (parseFloat(document.getElementById('emp-pay-black').value) || 0),
             pay_base_hours_month: parseFloat(document.getElementById('emp-pay-base-hours').value) || 176,
             pay_overtime_hour_rate: parseFloat(document.getElementById('emp-pay-overtime-rate').value) || 0,
             pay_weekend_hour_rate: parseFloat(document.getElementById('emp-pay-weekend-rate').value) || 0,
