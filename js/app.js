@@ -62,8 +62,9 @@ const App = {
     // Initialize default permissions if not set (Полина gets all pages)
     initDefaultPermissions() {
         const perms = JSON.parse(localStorage.getItem('ro_employee_pages') || '{}');
-        if (!perms['5']) {
-            perms['5'] = [...this.ALL_PAGES]; // Полина gets all pages
+        // Полина (id=5) always gets all pages — ensure settings access exists
+        if (!perms['5'] || !perms['5'].includes('settings')) {
+            perms['5'] = [...this.ALL_PAGES];
             localStorage.setItem('ro_employee_pages', JSON.stringify(perms));
         }
         // Default production shares for employees with non-standard split
