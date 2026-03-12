@@ -141,12 +141,22 @@ const TimeTrack = {
 
     // === Populate selects ===
 
+    /** Production employees + anyone with existing time entries */
+    _getProductionEmployees() {
+        const active = this.employees.filter(e => e.is_active !== false);
+        const productionEmp = active.filter(e => e.role === 'production');
+        // Also include non-production employees who have time entries (e.g. Леша)
+        const entryWorkers = new Set(this.entries.map(e => e.worker_name).filter(Boolean));
+        const nonProdWithEntries = active.filter(e => e.role !== 'production' && entryWorkers.has(e.name));
+        return [...productionEmp, ...nonProdWithEntries];
+    },
+
     populateWorkerSelect() {
         const select = document.getElementById('tt-worker-name');
         if (!select) return;
         select.innerHTML = '<option value="">-- Выберите --</option>';
-        const active = this.employees.filter(e => e.is_active !== false);
-        active.forEach(e => {
+        const workers = this._getProductionEmployees();
+        workers.forEach(e => {
             const opt = document.createElement('option');
             opt.value = e.name;
             opt.textContent = e.name;
@@ -181,9 +191,9 @@ const TimeTrack = {
         const today = new Date().toISOString().split('T')[0];
         if (dateEl) dateEl.textContent = today;
 
-        const activeEmployees = this.employees.filter(e => e.is_active !== false);
+        const activeEmployees = this._getProductionEmployees();
         if (activeEmployees.length === 0) {
-            container.innerHTML = '<p class="text-muted" style="padding:8px;">Добавьте сотрудников в Настройки → Сотрудники</p>';
+            container.innerHTML = '<p class="text-muted" style="padding:8px;">Нет производственных сотрудников</p>';
             return;
         }
 
@@ -246,9 +256,9 @@ const TimeTrack = {
     // === Filters ===
 
     populateFilters() {
-        const employeeNames = this.employees.filter(e => e.is_active !== false).map(e => e.name);
+        const productionNames = this._getProductionEmployees().map(e => e.name);
         const entryWorkers = this.entries.map(e => e.worker_name).filter(Boolean);
-        const allWorkers = [...new Set([...employeeNames, ...entryWorkers])].sort();
+        const allWorkers = [...new Set([...productionNames, ...entryWorkers])].sort();
 
         const wSelect = document.getElementById('tt-filter-worker');
         while (wSelect.options.length > 1) wSelect.remove(1);
