@@ -400,11 +400,15 @@ const Settings = {
                 : `<span style="color:var(--text-muted);" title="Не привязан">—</span>`;
             const reminderTime = `${String(e.reminder_hour || 17).padStart(2, '0')}:${String(e.reminder_minute || 30).padStart(2, '0')} UTC+${e.timezone_offset || 3}`;
             const tasksIcon = e.tasks_required ? '<span style="color:var(--orange);" title="Обязательное описание задач">&#9998;</span>' : '';
-            const statusBadge = e.is_active !== false
-                ? '<span class="badge badge-green">Активен</span>'
-                : '<span class="badge">Неактивен</span>';
+            const isFired = !!e.fired_date;
+            const statusBadge = isFired
+                ? `<span class="badge" title="Уволен ${e.fired_date}">Уволен ${e.fired_date}</span>`
+                : (e.is_active !== false
+                    ? '<span class="badge badge-green">Активен</span>'
+                    : '<span class="badge">Неактивен</span>');
+            const rowStyle = isFired ? 'opacity:0.5' : '';
             return `
-            <tr>
+            <tr style="${rowStyle}">
                 <td style="font-weight:600;">${this.escHtml(e.name)}</td>
                 <td style="text-align:center;">${roleBadge}</td>
                 <td style="text-align:center;">${e.daily_hours || 8}ч</td>
@@ -465,7 +469,8 @@ const Settings = {
     },
 
     editEmployee(id) {
-        const e = this.employeesData.find(x => String(x.id) === String(id));
+        id = String(id);
+        const e = this.employeesData.find(x => String(x.id) === id);
         if (!e) return;
         this.editingEmployeeId = id;
 
@@ -491,6 +496,10 @@ const Settings = {
         document.getElementById('emp-pay-weekend-rate').value = parseFloat(e.pay_weekend_hour_rate) || 0;
         document.getElementById('emp-pay-holiday-rate').value = parseFloat(e.pay_holiday_hour_rate) || 0;
         this.recalcEmployeeCost();
+
+        // Fired date
+        const firedEl = document.getElementById('emp-fired-date');
+        if (firedEl) firedEl.value = e.fired_date || '';
 
         document.getElementById('employee-form').style.display = '';
         document.getElementById('emp-delete-btn').style.display = '';
@@ -586,7 +595,8 @@ const Settings = {
             reminder_hour: parseInt(document.getElementById('emp-reminder-hour').value) || 17,
             reminder_minute: parseInt(document.getElementById('emp-reminder-min').value) || 30,
             timezone_offset: parseInt(document.getElementById('emp-tz-offset').value) ?? 3,
-            is_active: true,
+            is_active: !document.getElementById('emp-fired-date')?.value, // active = no fired date
+            fired_date: document.getElementById('emp-fired-date')?.value || null,
             tasks_required: document.getElementById('emp-tasks-required').checked,
             pay_white_salary: parseFloat(document.getElementById('emp-pay-white').value) || 0,
             pay_black_salary: parseFloat(document.getElementById('emp-pay-black').value) || 0,

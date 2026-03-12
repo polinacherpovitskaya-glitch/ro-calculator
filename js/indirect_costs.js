@@ -225,13 +225,15 @@ const IndirectCosts = {
 
         container.innerHTML = this.COST_ITEMS.map(item => {
             const val = data[item.key] || '';
+            const hint = item.avg ? `<span style="font-size:10px;color:var(--text-muted);margin-left:4px" title="Среднее за 6 мес из FinTablo">FinTablo: ${formatRub(item.avg)}</span>` : '';
             return `<div class="ic-cost-row">
                 <label class="ic-cost-label">${item.label}</label>
                 <div class="ic-cost-input-wrap">
                     <input type="number" class="ic-inline-input" value="${val}"
-                        placeholder="0" data-cost-key="${item.key}"
+                        placeholder="${item.avg || 0}" data-cost-key="${item.key}"
                         oninput="IndirectCosts.onCostChange('${item.key}', this.value)">
                     <span class="text-muted" style="font-size:12px">₽</span>
+                    ${hint}
                 </div>
             </div>`;
         }).join('');

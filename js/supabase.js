@@ -1187,46 +1187,127 @@ function _supabaseEmployeePayload(employee) {
     return out;
 }
 
-// One-time migration: update employees with FinTablo salary data (Mar 2026)
-function _migrateEmployeeSalaries(employees) {
-    const MIGRATION_KEY = 'ro_emp_salary_migration_v3';
-    if (localStorage.getItem(MIGRATION_KEY)) return employees;
+// =============================================
+// EMPLOYEE EXTRA DATA (salary split, fired_date — synced via Supabase settings)
+// Fields that Supabase employees table doesn't have as columns.
+// =============================================
+const EMP_EXTRA_KEY = 'ro_employee_extra'; // localStorage key
+const EMP_EXTRA_SUPABASE_KEY = 'employee_extra_json'; // settings table key
 
+function _getEmpExtra() {
+    return JSON.parse(localStorage.getItem(EMP_EXTRA_KEY) || '{}');
+}
+
+function _setEmpExtra(data) {
+    localStorage.setItem(EMP_EXTRA_KEY, JSON.stringify(data));
+}
+
+async function _loadEmpExtraFromSupabase() {
+    if (!isSupabaseReady()) return;
+    try {
+        const { data, error } = await supabaseClient
+            .from('settings').select('value')
+            .eq('key', EMP_EXTRA_SUPABASE_KEY).maybeSingle();
+        if (!error && data && data.value) {
+            const parsed = JSON.parse(data.value);
+            // Merge: Supabase wins over local
+            const local = _getEmpExtra();
+            const merged = { ...local, ...parsed };
+            _setEmpExtra(merged);
+            return merged;
+        }
+    } catch (e) { console.error('loadEmpExtra error:', e); }
+    return _getEmpExtra();
+}
+
+async function _saveEmpExtraToSupabase() {
+    const data = _getEmpExtra();
+    if (!isSupabaseReady()) return;
+    try {
+        await supabaseClient.from('settings').upsert({
+            key: EMP_EXTRA_SUPABASE_KEY,
+            value: JSON.stringify(data),
+            updated_at: new Date().toISOString(),
+        }, { onConflict: 'key' });
+    } catch (e) { console.error('saveEmpExtra error:', e); }
+}
+
+// Get extra fields for one employee
+function getEmployeeExtra(empId) {
+    const all = _getEmpExtra();
+    return all[String(empId)] || {};
+}
+
+// Save extra fields for one employee
+async function saveEmployeeExtra(empId, fields) {
+    const all = _getEmpExtra();
+    all[String(empId)] = { ...(all[String(empId)] || {}), ...fields };
+    _setEmpExtra(all);
+    await _saveEmpExtraToSupabase();
+}
+
+// Merge extra data into employee objects after loading
+function _mergeEmpExtra(employees) {
+    const extra = _getEmpExtra();
     const defaults = getDefaultEmployees();
     const defaultMap = {};
     defaults.forEach(d => { defaultMap[String(d.id)] = d; });
 
-    // Update existing employees with new salary data
     employees.forEach(emp => {
+        const ex = extra[String(emp.id)];
         const def = defaultMap[String(emp.id)];
-        if (def) {
-            emp.pay_white_salary = def.pay_white_salary;
-            emp.pay_black_salary = def.pay_black_salary;
-            emp.pay_base_salary_month = def.pay_base_salary_month;
-            emp.is_active = def.is_active;
-        }
+        // Priority: extra (user-saved) > existing on employee > defaults
+        emp.pay_white_salary = (ex && ex.pay_white_salary !== undefined) ? ex.pay_white_salary : (emp.pay_white_salary ?? (def ? def.pay_white_salary : 0));
+        emp.pay_black_salary = (ex && ex.pay_black_salary !== undefined) ? ex.pay_black_salary : (emp.pay_black_salary ?? (def ? def.pay_black_salary : 0));
+        emp.fired_date = (ex && ex.fired_date) ? ex.fired_date : (emp.fired_date || null);
+        // Recalc base salary
+        emp.pay_base_salary_month = (emp.pay_white_salary || 0) + (emp.pay_black_salary || 0);
     });
 
     // Add missing employees from defaults
     const existingIds = new Set(employees.map(e => String(e.id)));
     defaults.forEach(d => {
         if (!existingIds.has(String(d.id))) {
+            const ex = extra[String(d.id)];
+            if (ex) Object.assign(d, ex);
             employees.push(d);
         }
     });
 
-    // Save migrated data
-    setLocal(LOCAL_KEYS.employees, employees);
-    localStorage.setItem(MIGRATION_KEY, Date.now().toString());
-    console.log('Employee salary migration v2 complete');
     return employees;
 }
 
+// Seed default extra data (one-time)
+function _seedDefaultEmpExtra() {
+    const SEED_KEY = 'ro_emp_extra_seeded_v1';
+    if (localStorage.getItem(SEED_KEY)) return;
+    const defaults = getDefaultEmployees();
+    const extra = _getEmpExtra();
+    defaults.forEach(d => {
+        const key = String(d.id);
+        if (!extra[key]) {
+            extra[key] = {
+                pay_white_salary: d.pay_white_salary || 0,
+                pay_black_salary: d.pay_black_salary || 0,
+                fired_date: d.is_active === false ? '2026-03-01' : null,
+            };
+        }
+    });
+    _setEmpExtra(extra);
+    localStorage.setItem(SEED_KEY, '1');
+}
+
 async function loadEmployees() {
+    _seedDefaultEmpExtra();
+    await _loadEmpExtraFromSupabase();
     try {
         if (isSupabaseReady()) {
             const { data, error } = await supabaseClient.from('employees').select('*').order('name');
-            if (!error && data && data.length > 0) return _migrateEmployeeSalaries(data);
+            if (!error && data && data.length > 0) {
+                const merged = _mergeEmpExtra(data);
+                setLocal(LOCAL_KEYS.employees, merged);
+                return merged;
+            }
             if (!error && data && data.length === 0) {
                 const defaults = getLocal(LOCAL_KEYS.employees) || getDefaultEmployees();
                 try {
@@ -1235,7 +1316,7 @@ async function loadEmployees() {
                 } catch (e) {
                     console.error('loadEmployees seed error:', e);
                 }
-                return defaults;
+                return _mergeEmpExtra(defaults);
             }
             if (error) console.error('loadEmployees supabase error:', error);
         }
@@ -1243,14 +1324,20 @@ async function loadEmployees() {
         console.error('loadEmployees exception:', err);
     }
     const emps = getLocal(LOCAL_KEYS.employees) || getDefaultEmployees();
-    return _migrateEmployeeSalaries(emps);
+    return _mergeEmpExtra(emps);
 }
 
 async function saveEmployee(employee) {
+    if (!employee.id) employee.id = Date.now();
+
+    // Always save extra fields (white/black salary, fired_date) to settings JSON
+    await saveEmployeeExtra(employee.id, {
+        pay_white_salary: employee.pay_white_salary || 0,
+        pay_black_salary: employee.pay_black_salary || 0,
+        fired_date: employee.fired_date || null,
+    });
+
     if (isSupabaseReady()) {
-        if (!employee.id) {
-            employee.id = Date.now();
-        }
         const payload = _supabaseEmployeePayload({
             ...employee,
             updated_at: new Date().toISOString(),
@@ -1263,7 +1350,7 @@ async function saveEmployee(employee) {
             console.error('saveEmployee error:', error);
             return null;
         }
-        // Keep local mirror updated (includes all fields like pay_white_salary)
+        // Keep local mirror updated
         const local = getLocal(LOCAL_KEYS.employees) || [];
         const idx = local.findIndex(e => String(e.id) === String(employee.id));
         if (idx >= 0) local[idx] = { ...local[idx], ...employee, updated_at: new Date().toISOString() };
