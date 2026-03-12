@@ -1224,16 +1224,33 @@ async function loadEmployees() {
     return _migrateEmployeeSalaries(emps);
 }
 
+// Supabase employees table known columns (strip unknown fields to avoid upsert errors)
+const SUPABASE_EMPLOYEE_COLS = new Set([
+    'id', 'name', 'role', 'daily_hours', 'telegram_id', 'telegram_username',
+    'reminder_hour', 'reminder_minute', 'timezone_offset', 'is_active',
+    'tasks_required', 'pay_base_salary_month', 'pay_base_hours_month',
+    'pay_overtime_hour_rate', 'pay_weekend_hour_rate', 'pay_holiday_hour_rate',
+    'created_at', 'updated_at',
+]);
+
+function _supabaseEmployeePayload(employee) {
+    const out = {};
+    for (const k of Object.keys(employee)) {
+        if (SUPABASE_EMPLOYEE_COLS.has(k)) out[k] = employee[k];
+    }
+    return out;
+}
+
 async function saveEmployee(employee) {
     if (isSupabaseReady()) {
         if (!employee.id) {
             employee.id = Date.now();
         }
-        const payload = {
+        const payload = _supabaseEmployeePayload({
             ...employee,
             updated_at: new Date().toISOString(),
             created_at: employee.created_at || new Date().toISOString(),
-        };
+        });
         const { error } = await supabaseClient
             .from('employees')
             .upsert(payload, { onConflict: 'id' });
@@ -1241,9 +1258,9 @@ async function saveEmployee(employee) {
             console.error('saveEmployee error:', error);
             return null;
         }
-        // Keep local mirror updated for fallback and faster UI render
+        // Keep local mirror updated (includes all fields like pay_white_salary)
         const local = getLocal(LOCAL_KEYS.employees) || [];
-        const idx = local.findIndex(e => e.id === employee.id);
+        const idx = local.findIndex(e => String(e.id) === String(employee.id));
         if (idx >= 0) local[idx] = { ...local[idx], ...employee, updated_at: new Date().toISOString() };
         else local.push({ ...employee, created_at: employee.created_at || new Date().toISOString(), updated_at: new Date().toISOString() });
         setLocal(LOCAL_KEYS.employees, local);
@@ -1251,7 +1268,7 @@ async function saveEmployee(employee) {
     }
     const employees = getLocal(LOCAL_KEYS.employees) || getDefaultEmployees();
     if (employee.id) {
-        const idx = employees.findIndex(e => e.id === employee.id);
+        const idx = employees.findIndex(e => String(e.id) === String(employee.id));
         if (idx >= 0) employees[idx] = { ...employee, updated_at: new Date().toISOString() };
     } else {
         employee.id = Date.now();
