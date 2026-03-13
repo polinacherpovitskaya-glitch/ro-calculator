@@ -403,7 +403,9 @@ const Orders = {
         return ['production_casting', 'production_hardware', 'production_packaging', 'in_production', 'delivery', 'completed'].includes(status);
     },
 
-    _collectWarehouseDemand(items) {
+    _collectWarehouseDemand(items, options) {
+        const includeHardware = !options || options.hardware !== false;
+        const includePackaging = !options || options.packaging !== false;
         const demand = new Map();
         const add = (itemId, qty) => {
             if (!itemId || qty <= 0) return;
@@ -418,10 +420,10 @@ const Orders = {
                 ?? it.qty
             ) || 0;
             if (qty <= 0) return;
-            if (it.item_type === 'hardware' && it.hardware_source === 'warehouse' && it.hardware_warehouse_item_id) {
+            if (includeHardware && it.item_type === 'hardware' && it.hardware_source === 'warehouse' && it.hardware_warehouse_item_id) {
                 add(it.hardware_warehouse_item_id, qty);
             }
-            if (it.item_type === 'packaging' && it.packaging_source === 'warehouse' && it.packaging_warehouse_item_id) {
+            if (includePackaging && it.item_type === 'packaging' && it.packaging_source === 'warehouse' && it.packaging_warehouse_item_id) {
                 add(it.packaging_warehouse_item_id, qty);
             }
         });
@@ -432,7 +434,18 @@ const Orders = {
         if (oldStatus === newStatus) return;
         const data = await loadOrder(orderId);
         if (!data) return;
-        const demand = this._collectWarehouseDemand(data.items);
+        if (typeof Warehouse !== 'undefined' && Warehouse.syncProjectHardwareOrderState) {
+            await Warehouse.syncProjectHardwareOrderState({
+                orderId,
+                orderName,
+                managerName,
+                status: newStatus,
+                currentItems: data.items || [],
+                previousItems: data.items || [],
+            });
+        }
+
+        const demand = this._collectWarehouseDemand(data.items, { hardware: false, packaging: true });
         if (demand.size === 0) return;
 
         const wasConsumed = this._isConsumedStatus(oldStatus);

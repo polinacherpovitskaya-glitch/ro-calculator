@@ -1273,12 +1273,32 @@ const Warehouse = {
         return status === 'sample';
     },
 
-    _isProductionStatus(status) {
-        return ['production_casting', 'production_printing', 'production_hardware', 'production_packaging', 'in_production', 'delivery'].includes(status);
+    _isProjectHardwareReserveStatus(status) {
+        return ['sample', 'production_casting', 'production_printing', 'production_hardware', 'production_packaging', 'in_production', 'delivery', 'completed'].includes(status);
+    },
+
+    _isProjectHardwareActionStatus(status) {
+        return ['production_casting', 'production_printing', 'production_hardware', 'production_packaging', 'in_production', 'delivery', 'completed'].includes(status);
+    },
+
+    _isProjectHardwareReservationSource(source) {
+        return source === 'project_hardware' || source === 'order_calc';
     },
 
     _projectHardwareKey(orderId, itemId) {
         return `${Number(orderId) || 0}:${Number(itemId) || 0}`;
+    },
+
+    async _ensureProjectHardwareStateLoaded() {
+        if (!this.projectHardwareState || typeof this.projectHardwareState !== 'object') {
+            this.projectHardwareState = await loadProjectHardwareState();
+        }
+        if (!this.projectHardwareState || typeof this.projectHardwareState !== 'object') {
+            this.projectHardwareState = { checks: {} };
+        }
+        if (!this.projectHardwareState.checks || typeof this.projectHardwareState.checks !== 'object') {
+            this.projectHardwareState.checks = {};
+        }
     },
 
     _isProjectHardwareReady(orderId, itemId) {
@@ -1287,20 +1307,114 @@ const Warehouse = {
     },
 
     async toggleProjectHardwareReady(orderId, itemId, checked) {
-        if (!this.projectHardwareState || typeof this.projectHardwareState !== 'object') {
-            this.projectHardwareState = { checks: {} };
-        }
-        if (!this.projectHardwareState.checks || typeof this.projectHardwareState.checks !== 'object') {
-            this.projectHardwareState.checks = {};
-        }
-        const key = this._projectHardwareKey(orderId, itemId);
-        if (checked) this.projectHardwareState.checks[key] = true;
-        else delete this.projectHardwareState.checks[key];
+        const normalizedOrderId = Number(orderId || 0);
+        const normalizedItemId = Number(itemId || 0);
+        if (!normalizedOrderId || !normalizedItemId) return;
 
-        this.projectHardwareState.updated_at = new Date().toISOString();
-        this.projectHardwareState.updated_by = App.getCurrentEmployeeName();
+        await this._ensureProjectHardwareStateLoaded();
+        const key = this._projectHardwareKey(normalizedOrderId, normalizedItemId);
+        const wasChecked = !!this.projectHardwareState.checks[key];
+        if (wasChecked === !!checked) return;
+
+        const data = await loadOrder(normalizedOrderId);
+        if (!data || !data.order) return;
+
+        const order = data.order || {};
+        const demand = this._getProjectHardwareDemandMap(data.items || []);
+        const qty = demand.get(normalizedItemId) || 0;
+        const managerName = App.getCurrentEmployeeName() || order.manager_name || '';
+        const nowIso = new Date().toISOString();
+        let reservations = await loadWarehouseReservations();
+
+        if (checked) {
+            reservations.forEach(r => {
+                if (r.status !== 'active') return;
+                if (Number(r.order_id) !== normalizedOrderId) return;
+                if (Number(r.item_id) !== normalizedItemId) return;
+                if (!this._isProjectHardwareReservationSource(r.source)) return;
+                r.status = 'released';
+                r.released_at = nowIso;
+            });
+
+            if (qty > 0) {
+                await this.adjustStock(
+                    normalizedItemId,
+                    -qty,
+                    'deduction',
+                    order.order_name || 'Заказ',
+                    `Списание собранной фурнитуры: ${qty} шт`,
+                    managerName,
+                    { order_id: normalizedOrderId }
+                );
+            }
+
+            this.projectHardwareState.checks[key] = true;
+            App.toast('Фурнитура списана со склада');
+        } else {
+            delete this.projectHardwareState.checks[key];
+
+            if (qty > 0) {
+                await this.adjustStock(
+                    normalizedItemId,
+                    qty,
+                    'addition',
+                    order.order_name || 'Заказ',
+                    `Возврат собранной фурнитуры: ${qty} шт`,
+                    managerName,
+                    { order_id: normalizedOrderId }
+                );
+
+                if (this._isProjectHardwareReserveStatus(order.status)) {
+                    const items = await loadWarehouseItems();
+                    const activeByItem = new Map();
+                    reservations.forEach(r => {
+                        if (r.status !== 'active') return;
+                        const resItemId = Number(r.item_id || 0);
+                        if (!resItemId) return;
+                        activeByItem.set(resItemId, (activeByItem.get(resItemId) || 0) + (parseFloat(r.qty) || 0));
+                    });
+
+                    const whItem = items.find(i => Number(i.id) === normalizedItemId);
+                    const stockQty = parseFloat(whItem && whItem.qty) || 0;
+                    const alreadyReserved = activeByItem.get(normalizedItemId) || 0;
+                    const available = Math.max(0, stockQty - alreadyReserved);
+                    const reserveQty = Math.min(qty, available);
+                    if (reserveQty > 0) {
+                        reservations.push({
+                            id: Date.now() + Math.floor(Math.random() * 1000),
+                            item_id: normalizedItemId,
+                            order_id: normalizedOrderId,
+                            order_name: order.order_name || 'Заказ',
+                            qty: reserveQty,
+                            status: 'active',
+                            source: 'project_hardware',
+                            created_at: nowIso,
+                            created_by: managerName || '',
+                        });
+                    }
+                    if (reserveQty < qty) {
+                        App.toast('Фурнитура возвращена не в полный резерв: недостаточно остатка');
+                    } else {
+                        App.toast('Фурнитура возвращена в резерв');
+                    }
+                } else {
+                    App.toast('Фурнитура возвращена на склад');
+                }
+            } else {
+                App.toast('Флаг сборки снят');
+            }
+        }
+
+        this.projectHardwareState.updated_at = nowIso;
+        this.projectHardwareState.updated_by = managerName;
         await saveProjectHardwareState(this.projectHardwareState);
-        this.renderProjectHardwareView();
+        await saveWarehouseReservations(reservations);
+
+        if (typeof Calculator !== 'undefined') {
+            Calculator._whPickerData = null;
+        }
+
+        await this.load();
     },
 
     _collectWarehouseDemandFromOrderItems(items) {
@@ -1334,6 +1448,141 @@ const Warehouse = {
         return Array.from(grouped.values());
     },
 
+    _getProjectHardwareDemandMap(items) {
+        const demand = new Map();
+        this._collectWarehouseDemandFromOrderItems(items).forEach(row => {
+            const itemId = Number(row.warehouse_item_id || 0);
+            const qty = parseFloat(row.qty) || 0;
+            if (!itemId || qty <= 0) return;
+            demand.set(itemId, qty);
+        });
+        return demand;
+    },
+
+    async syncProjectHardwareOrderState({ orderId, orderName, managerName, status, currentItems, previousItems }) {
+        const normalizedOrderId = Number(orderId || 0);
+        if (!normalizedOrderId) return;
+
+        await this._ensureProjectHardwareStateLoaded();
+
+        const currentDemand = this._getProjectHardwareDemandMap(currentItems || []);
+        const previousDemand = this._getProjectHardwareDemandMap(previousItems || []);
+        const itemIds = Array.from(new Set([
+            ...Array.from(currentDemand.keys()),
+            ...Array.from(previousDemand.keys()),
+        ]));
+
+        if (itemIds.length === 0) return;
+
+        const shouldReserve = this._isProjectHardwareReserveStatus(status);
+        const nowIso = new Date().toISOString();
+        const reservations = await loadWarehouseReservations();
+        let reservationsChanged = false;
+        let shortage = false;
+        let stateChanged = false;
+
+        reservations.forEach(r => {
+            if (r.status !== 'active') return;
+            if (Number(r.order_id) !== normalizedOrderId) return;
+            if (!itemIds.includes(Number(r.item_id || 0))) return;
+            if (!this._isProjectHardwareReservationSource(r.source)) return;
+            r.status = 'released';
+            r.released_at = nowIso;
+            reservationsChanged = true;
+        });
+
+        const activeByItem = new Map();
+        reservations.forEach(r => {
+            if (r.status !== 'active') return;
+            const itemId = Number(r.item_id || 0);
+            if (!itemId) return;
+            activeByItem.set(itemId, (activeByItem.get(itemId) || 0) + (parseFloat(r.qty) || 0));
+        });
+
+        const warehouseItems = await loadWarehouseItems();
+        const warehouseById = new Map((warehouseItems || []).map(item => [Number(item.id), item]));
+
+        for (const itemId of itemIds) {
+            const currentQty = currentDemand.get(itemId) || 0;
+            const previousQty = previousDemand.get(itemId) || 0;
+            const key = this._projectHardwareKey(normalizedOrderId, itemId);
+            const isReady = !!this.projectHardwareState.checks[key];
+
+            if (isReady && currentQty <= 0) {
+                delete this.projectHardwareState.checks[key];
+                stateChanged = true;
+            }
+
+            if (isReady) {
+                const delta = currentQty - previousQty;
+                if (delta !== 0) {
+                    await this.adjustStock(
+                        itemId,
+                        -delta,
+                        delta > 0 ? 'deduction' : 'addition',
+                        orderName || 'Заказ',
+                        delta > 0
+                            ? `Корректировка собранной фурнитуры: +${delta} шт`
+                            : `Корректировка собранной фурнитуры: -${Math.abs(delta)} шт`,
+                        managerName || '',
+                        { order_id: normalizedOrderId }
+                    );
+                }
+                continue;
+            }
+
+            if (!shouldReserve || currentQty <= 0) continue;
+
+            const whItem = warehouseById.get(itemId);
+            if (!whItem) continue;
+
+            const stockQty = parseFloat(whItem.qty) || 0;
+            const alreadyReserved = activeByItem.get(itemId) || 0;
+            const available = Math.max(0, stockQty - alreadyReserved);
+            const reserveQty = Math.min(currentQty, available);
+
+            if (reserveQty > 0) {
+                reservations.push({
+                    id: Date.now() + Math.floor(Math.random() * 1000),
+                    item_id: itemId,
+                    order_id: normalizedOrderId,
+                    order_name: orderName || 'Заказ',
+                    qty: reserveQty,
+                    status: 'active',
+                    source: 'project_hardware',
+                    created_at: nowIso,
+                    created_by: managerName || '',
+                });
+                activeByItem.set(itemId, alreadyReserved + reserveQty);
+                reservationsChanged = true;
+            }
+
+            if (reserveQty < currentQty) {
+                shortage = true;
+            }
+        }
+
+        if (stateChanged) {
+            this.projectHardwareState.updated_at = nowIso;
+            this.projectHardwareState.updated_by = managerName || '';
+            await saveProjectHardwareState(this.projectHardwareState);
+        }
+
+        if (reservationsChanged) {
+            await saveWarehouseReservations(reservations);
+        }
+
+        this.allReservations = reservations;
+        this.recalcReservations();
+        if (typeof Calculator !== 'undefined') {
+            Calculator._whPickerData = null;
+        }
+
+        if (shortage) {
+            App.toast('Часть фурнитуры не встала в полный резерв: недостаточно остатка');
+        }
+    },
+
     async renderProjectHardwareView(viewToken) {
         const token = viewToken ?? this._viewToken;
         const container = document.getElementById('wh-content');
@@ -1346,13 +1595,33 @@ const Warehouse = {
         if (token !== this._viewToken || this.currentView !== 'project-hardware') return;
         const byOrderId = new Map((orders || []).map(o => [Number(o.id), o]));
         const byItemId = new Map((this.allItems || []).map(i => [Number(i.id), i]));
+        const sampleOrders = (orders || []).filter(o => this._isSampleStatus(o.status));
+        const productionOrders = (orders || []).filter(o => this._isProjectHardwareActionStatus(o.status));
+        const [sampleDetails, productionDetails] = await Promise.all([
+            Promise.all(sampleOrders.map(o => loadOrder(o.id).catch(() => null))),
+            Promise.all(productionOrders.map(o => loadOrder(o.id).catch(() => null))),
+        ]);
+        if (token !== this._viewToken || this.currentView !== 'project-hardware') return;
+
+        const sampleHardwareByOrder = new Map();
+        sampleDetails.filter(Boolean).forEach(detail => {
+            const order = detail.order || {};
+            sampleHardwareByOrder.set(
+                Number(order.id),
+                new Set(Array.from(this._getProjectHardwareDemandMap(detail.items || []).keys()))
+            );
+        });
 
         // 1) Reserve block: active auto-reserves for orders in sample status.
         const reserveGrouped = new Map();
         (reservations || []).forEach(r => {
-            if (r.status !== 'active' || r.source !== 'order_calc') return;
+            if (r.status !== 'active' || !this._isProjectHardwareReservationSource(r.source)) return;
             const order = byOrderId.get(Number(r.order_id));
             if (!order || !this._isSampleStatus(order.status)) return;
+            if (r.source === 'order_calc') {
+                const legacyHw = sampleHardwareByOrder.get(Number(r.order_id));
+                if (!legacyHw || !legacyHw.has(Number(r.item_id))) return;
+            }
             const item = byItemId.get(Number(r.item_id));
             const key = `${Number(r.order_id)}:${Number(r.item_id)}`;
             const current = reserveGrouped.get(key) || {
@@ -1371,11 +1640,8 @@ const Warehouse = {
         reserveRows.sort((a, b) => String(a.order_name).localeCompare(String(b.order_name), 'ru'));
 
         // 2) Production block: warehouse hardware demand for production-stage orders.
-        const productionOrders = (orders || []).filter(o => this._isProductionStatus(o.status));
-        const details = await Promise.all(productionOrders.map(o => loadOrder(o.id).catch(() => null)));
-        if (token !== this._viewToken || this.currentView !== 'project-hardware') return;
         const productionRows = [];
-        details.filter(Boolean).forEach(detail => {
+        productionDetails.filter(Boolean).forEach(detail => {
             const order = detail.order || {};
             const demands = this._collectWarehouseDemandFromOrderItems(detail.items || []);
             demands.forEach(d => {
@@ -1531,7 +1797,7 @@ const Warehouse = {
             </div>
             <div class="card" style="margin-top:12px;">
                 <div class="card-header">
-                    <h3>Фурнитура для проектов (заказы в производстве)</h3>
+                    <h3>Фурнитура для проектов (производство, доставка, готово)</h3>
                 </div>
                 ${productionHtml}
             </div>

@@ -3865,25 +3865,26 @@ const Calculator = {
             }
 
             // === Warehouse sync ===
-            // sample -> reserve only
-            // production/delivery/completed -> release reserve + deduct stock
-            // draft/cancelled/etc -> release reserve only
-            const consumeStatuses = new Set([
-                'production_casting',
-                'production_hardware',
-                'production_packaging',
-                'in_production',
-                'delivery',
-                'completed',
-            ]);
-            if (order.status === 'sample') {
-                await this._syncWarehouseReservationsOnSave(orderId, order.order_name, actorName, true);
-            } else if (consumeStatuses.has(order.status)) {
-                await this._syncWarehouseReservationsOnSave(orderId, order.order_name, actorName, false);
-                await this._deductWarehouseOnSave(isEdit, order.order_name, actorName);
-            } else {
-                await this._syncWarehouseReservationsOnSave(orderId, order.order_name, actorName, false);
+            // Hardware from warehouse: reserve by order status, списание только по галочке "собрано" на складе.
+            if (typeof Warehouse !== 'undefined' && Warehouse.syncProjectHardwareOrderState) {
+                await Warehouse.syncProjectHardwareOrderState({
+                    orderId,
+                    orderName: order.order_name,
+                    managerName: actorName,
+                    status: order.status,
+                    currentItems: items,
+                    previousItems: (oldData && oldData.items) || [],
+                });
             }
+
+            // Packaging keeps the old flow: reserve only in sample, release otherwise.
+            await this._syncWarehouseReservationsOnSave(
+                orderId,
+                order.order_name,
+                actorName,
+                order.status === 'sample',
+                { hardware: false, packaging: true }
+            );
 
             App.toast('Заказ сохранен');
         } else {
@@ -3891,28 +3892,34 @@ const Calculator = {
         }
     },
 
-    _collectWarehouseReservationDemand() {
+    _collectWarehouseReservationDemand(options) {
+        const includeHardware = !options || options.hardware !== false;
+        const includePackaging = !options || options.packaging !== false;
         const demand = new Map();
         const addQty = (itemId, qty) => {
             if (!itemId || qty <= 0) return;
             demand.set(itemId, (demand.get(itemId) || 0) + qty);
         };
 
-        (this.hardwareItems || []).forEach(hw => {
-            if (hw.source === 'warehouse' && hw.warehouse_item_id) {
-                addQty(hw.warehouse_item_id, parseFloat(hw.qty) || 0);
-            }
-        });
-        (this.packagingItems || []).forEach(pkg => {
-            if (pkg.source === 'warehouse' && pkg.warehouse_item_id) {
-                addQty(pkg.warehouse_item_id, parseFloat(pkg.qty) || 0);
-            }
-        });
+        if (includeHardware) {
+            (this.hardwareItems || []).forEach(hw => {
+                if (hw.source === 'warehouse' && hw.warehouse_item_id) {
+                    addQty(hw.warehouse_item_id, parseFloat(hw.qty) || 0);
+                }
+            });
+        }
+        if (includePackaging) {
+            (this.packagingItems || []).forEach(pkg => {
+                if (pkg.source === 'warehouse' && pkg.warehouse_item_id) {
+                    addQty(pkg.warehouse_item_id, parseFloat(pkg.qty) || 0);
+                }
+            });
+        }
 
         return demand;
     },
 
-    async _syncWarehouseReservationsOnSave(orderId, orderName, managerName, shouldReserve) {
+    async _syncWarehouseReservationsOnSave(orderId, orderName, managerName, shouldReserve, options) {
         const reservations = await loadWarehouseReservations();
         const nowIso = new Date().toISOString();
 
@@ -3925,7 +3932,7 @@ const Calculator = {
         });
 
         if (shouldReserve) {
-            const demand = this._collectWarehouseReservationDemand();
+            const demand = this._collectWarehouseReservationDemand(options);
             if (demand.size > 0) {
                 const items = await loadWarehouseItems();
                 const activeByItem = new Map();
@@ -3966,7 +3973,7 @@ const Calculator = {
                 if (hasShortage) {
                     App.toast('Часть позиций не встала в полный резерв: недостаточно остатка');
                 } else {
-                    App.toast('Резервы для заказа образца обновлены');
+                    App.toast('Резервы склада обновлены');
                 }
             }
         }
