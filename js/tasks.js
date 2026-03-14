@@ -8,6 +8,7 @@ const Tasks = {
     createDraft: null,
     view: 'list',
     scope: 'my',
+    isLoading: false,
     calendarMonth: new Date().toISOString().slice(0, 7),
     filters: {
         search: '',
@@ -31,16 +32,35 @@ const Tasks = {
             this.currentTaskId = Number(taskId);
             this.createDraft = null;
         }
-        await this.refreshData();
+        this.isLoading = true;
         this.render();
+        try {
+            await this.refreshData();
+        } finally {
+            this.isLoading = false;
+            this.render();
+        }
     },
 
     async refreshData() {
-        this.bundle = await loadWorkBundle();
-        this.employees = await loadEmployees();
-        this.orders = await loadOrders({});
-        this.chinaPurchases = await loadChinaPurchases({});
-        this.warehouseItems = await loadWarehouseItems();
+        const [
+            bundle,
+            employees,
+            orders,
+            chinaPurchases,
+            warehouseItems,
+        ] = await Promise.all([
+            loadWorkBundle(),
+            loadEmployees(),
+            loadOrders({}),
+            loadChinaPurchases({}),
+            loadWarehouseItems(),
+        ]);
+        this.bundle = bundle;
+        this.employees = employees;
+        this.orders = orders;
+        this.chinaPurchases = chinaPurchases;
+        this.warehouseItems = warehouseItems;
     },
 
     esc(value) {
@@ -1013,6 +1033,29 @@ const Tasks = {
     render() {
         const container = document.getElementById('page-tasks');
         if (!container) return;
+        if (this.isLoading && !this.bundle) {
+            container.innerHTML = `
+                <div class="page-header">
+                    <div>
+                        <h1>Задачи</h1>
+                        <div class="text-muted" style="font-size:13px;">Собираем задачи по заказам, проектам и направлениям</div>
+                    </div>
+                </div>
+                <div class="stats-grid">
+                    <div class="stat-card"><div class="stat-label">Мои задачи</div><div class="stat-value">…</div></div>
+                    <div class="stat-card"><div class="stat-label">Все задачи</div><div class="stat-value">…</div></div>
+                    <div class="stat-card"><div class="stat-label">Просроченные</div><div class="stat-value">…</div></div>
+                    <div class="stat-card"><div class="stat-label">На согласовании</div><div class="stat-value">…</div></div>
+                </div>
+                <div class="card">
+                    <div class="empty-state">
+                        <div class="empty-icon">&#128221;</div>
+                        <p>Загружаем рабочий центр задач…</p>
+                    </div>
+                </div>
+            `;
+            return;
+        }
         const tasks = this.filteredTasks();
         const activeTask = this.editorTask();
         container.innerHTML = `

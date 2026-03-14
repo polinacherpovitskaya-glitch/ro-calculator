@@ -1469,121 +1469,26 @@
             </div>
         </div>
 
-        <!-- ========== TASKS (Kanban) ========== -->
+        <!-- ========== TASKS ========== -->
         <div id="page-tasks" class="page">
             <div class="page-header">
-                <h1>Задачи</h1>
-                <div class="flex gap-8">
-                    <div class="flex gap-4">
-                        <button class="tasks-view-btn active" data-view="kanban" onclick="Tasks.setView('kanban')">&#9634; Канбан</button>
-                        <button class="tasks-view-btn" data-view="list" onclick="Tasks.setView('list')">&#9776; Список</button>
-                    </div>
-                    <button class="btn btn-success" onclick="Tasks.showAddForm()">+ Задача</button>
+                <div>
+                    <h1>Задачи</h1>
+                    <div class="text-muted" style="font-size:13px;">Рабочий центр задач и проектов загружается…</div>
                 </div>
             </div>
-
-            <!-- Stats -->
             <div class="stats-grid">
-                <div class="stat-card">
-                    <div class="stat-label">Всего задач</div>
-                    <div class="stat-value" id="tasks-total">0</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-label">Не начато</div>
-                    <div class="stat-value" id="tasks-not-started">0</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-label">В работе</div>
-                    <div class="stat-value" id="tasks-in-progress">0</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-label">Готово</div>
-                    <div class="stat-value" id="tasks-done">0</div>
+                <div class="stat-card"><div class="stat-label">Мои задачи</div><div class="stat-value">…</div></div>
+                <div class="stat-card"><div class="stat-label">Все задачи</div><div class="stat-value">…</div></div>
+                <div class="stat-card"><div class="stat-label">Просроченные</div><div class="stat-value">…</div></div>
+                <div class="stat-card"><div class="stat-label">На согласовании</div><div class="stat-value">…</div></div>
+            </div>
+            <div class="card">
+                <div class="empty-state">
+                    <div class="empty-icon">&#128221;</div>
+                    <p>Открываем новый центр задач…</p>
                 </div>
             </div>
-
-            <!-- Filters -->
-            <div class="card" style="padding: 12px 20px;">
-                <div class="form-row" style="align-items:end">
-                    <div class="form-group" style="margin:0">
-                        <label>Статус</label>
-                        <select id="tasks-filter-status" onchange="Tasks.render()">
-                            <option value="active">Активные</option>
-                            <option value="Not started">Не начато</option>
-                            <option value="In progress">В работе</option>
-                            <option value="Done">Готово</option>
-                            <option value="Cancelled">Отменено</option>
-                            <option value="all">Все</option>
-                        </select>
-                    </div>
-                    <div class="form-group" style="margin:0">
-                        <label>Ответственный</label>
-                        <select id="tasks-filter-assignee" onchange="Tasks.render()">
-                            <option value="">Все</option>
-                        </select>
-                    </div>
-                    <div class="form-group" style="margin:0">
-                        <label>Заказ</label>
-                        <select id="tasks-filter-order" onchange="Tasks.render()">
-                            <option value="">Все</option>
-                        </select>
-                    </div>
-                    <div class="form-group" style="margin:0">
-                        <label>Проект</label>
-                        <select id="tasks-filter-project" onchange="Tasks.render()">
-                            <option value="">Все</option>
-                        </select>
-                    </div>
-                    <div class="form-group" style="margin:0">
-                        <label>Поиск</label>
-                        <input type="text" id="tasks-search" placeholder="Название" oninput="Tasks.render()">
-                    </div>
-                </div>
-            </div>
-
-            <!-- Add/Edit form -->
-            <div class="card" id="tasks-add-form" style="display:none">
-                <input type="hidden" id="task-edit-id">
-                <div class="card-header">
-                    <h3>Задача</h3>
-                    <button class="btn btn-sm btn-outline" onclick="Tasks.hideAddForm()">Закрыть</button>
-                </div>
-                <div class="form-row">
-                    <div class="form-group" style="flex:3">
-                        <label>Название</label>
-                        <input type="text" id="task-edit-title" placeholder="Что нужно сделать?">
-                    </div>
-                    <div class="form-group" style="flex:2">
-                        <label>Ответственный</label>
-                        <input type="text" id="task-edit-assignee" placeholder="Имя">
-                    </div>
-                </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label>Дедлайн</label>
-                        <input type="date" id="task-edit-deadline">
-                    </div>
-                    <div class="form-group" style="flex:2">
-                        <label>Заказ</label>
-                        <select id="task-edit-order">
-                            <option value="">-- Без заказа --</option>
-                        </select>
-                    </div>
-                    <div class="form-group" style="flex:2">
-                        <label>Проект</label>
-                        <input type="text" id="task-edit-project" list="task-projects-datalist" placeholder="Название проекта">
-                        <datalist id="task-projects-datalist"></datalist>
-                    </div>
-                </div>
-                <div class="form-group">
-                    <label>Описание (необязательно)</label>
-                    <input type="text" id="task-edit-description" placeholder="Детали задачи">
-                </div>
-                <button class="btn btn-success" onclick="Tasks.saveTask()">Сохранить</button>
-            </div>
-
-            <!-- Kanban board -->
-            <div class="kanban-board" id="tasks-kanban"></div>
         </div>
 
         <div id="page-projects" class="page"></div>
@@ -3277,7 +3182,7 @@
 <script src="js/supabase.js?v=98"></script>
 <script src="js/task-events.js?v=1"></script>
 <script src="js/calculator.js?v=64"></script>
-<script src="js/app.js?v=99"></script>
+<script src="js/app.js?v=100"></script>
 <script src="js/dashboard.js?v=47"></script>
 <script src="js/order-detail.js?v=50"></script>
 <script src="js/orders.js?v=54"></script>
@@ -3288,7 +3193,7 @@
 <script src="js/kp.js?v=46g"></script>
 <script src="js/timetrack.js?v=57"></script>
 <script src="js/projects.js?v=2"></script>
-<script src="js/tasks.js?v=48"></script>
+<script src="js/tasks.js?v=49"></script>
 <script src="js/gantt.js?v=47"></script>
 <script src="js/fintablo.js?v=1"></script>
 <script src="js/indirect_costs.js?v=7"></script>
