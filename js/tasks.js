@@ -1,496 +1,1400 @@
-// =============================================
-// Recycle Object — Task Tracker (To-do Kanban)
-// v33: Tasks linked to orders
-// =============================================
-
 const Tasks = {
-    allTasks: [],
-    allOrders: [], // cached for order dropdown
-    view: 'kanban', // 'kanban' | 'list'
+    bundle: null,
+    employees: [],
+    orders: [],
+    chinaPurchases: [],
+    warehouseItems: [],
+    currentTaskId: null,
+    createDraft: null,
+    view: 'list',
+    scope: 'my',
+    calendarMonth: new Date().toISOString().slice(0, 7),
+    filters: {
+        search: '',
+        status: '',
+        priority: '',
+        assignee_id: '',
+        reporter_id: '',
+        project_id: '',
+        order_id: '',
+        area_id: '',
+        due: '',
+        mine: false,
+        awaiting_review: false,
+        waiting_only: false,
+    },
+    sort: 'manual',
 
-    async load() {
-        this.allTasks = await loadTasks();
-        if (this.allTasks.length === 0) {
-            this.allTasks = this.getDefaultTasks();
-            await saveTasks(this.allTasks);
+    async load(taskId) {
+        if (!this.scope) this.scope = App.currentEmployeeId ? 'my' : 'all';
+        if (taskId) {
+            this.currentTaskId = Number(taskId);
+            this.createDraft = null;
         }
-        // Cache orders for dropdown
-        try { this.allOrders = await loadOrders({}); } catch (e) { this.allOrders = []; }
-        this.renderStats();
+        await this.refreshData();
         this.render();
     },
 
-    // === RENDER ===
+    async refreshData() {
+        this.bundle = await loadWorkBundle();
+        this.employees = await loadEmployees();
+        this.orders = await loadOrders({});
+        this.chinaPurchases = await loadChinaPurchases({});
+        this.warehouseItems = await loadWarehouseItems();
+    },
 
-    render() {
-        if (this.view === 'kanban') {
-            this.renderKanban();
-        } else {
-            this.renderList();
+    esc(value) {
+        return String(value || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    },
+
+    todayYmd() {
+        return new Date().toISOString().slice(0, 10);
+    },
+
+    currentEmployee() {
+        return (this.employees || []).find(item => String(item.id) === String(App.currentEmployeeId)) || null;
+    },
+
+    taskById(taskId) {
+        return (this.bundle?.tasks || []).find(item => String(item.id) === String(taskId)) || null;
+    },
+
+    projectById(projectId) {
+        return (this.bundle?.projects || []).find(item => String(item.id) === String(projectId)) || null;
+    },
+
+    areaById(areaId) {
+        return (this.bundle?.areas || []).find(item => String(item.id) === String(areaId)) || null;
+    },
+
+    orderById(orderId) {
+        return (this.orders || []).find(item => String(item.id) === String(orderId)) || null;
+    },
+
+    employeeNameById(id, fallback) {
+        return (this.employees || []).find(item => String(item.id) === String(id))?.name || fallback || '—';
+    },
+
+    formatDate(value) {
+        if (!value) return '—';
+        try {
+            return new Date(value).toLocaleDateString('ru-RU');
+        } catch (error) {
+            return value;
         }
     },
 
-    setView(v) {
-        this.view = v;
-        document.querySelectorAll('.tasks-view-btn').forEach(b => b.classList.remove('active'));
-        document.querySelector(`[data-view="${v}"]`)?.classList.add('active');
-        this.render();
+    formatTaskDue(task) {
+        if (!task?.due_date) return '—';
+        return `${this.formatDate(task.due_date)}${task.due_time ? ` ${task.due_time}` : ''}`;
     },
 
-    renderStats() {
-        const total = this.allTasks.length;
-        const notStarted = this.allTasks.filter(t => t.status === 'Not started').length;
-        const inProgress = this.allTasks.filter(t => t.status === 'In progress').length;
-        const done = this.allTasks.filter(t => t.status === 'Done').length;
-
-        document.getElementById('tasks-total').textContent = total;
-        document.getElementById('tasks-not-started').textContent = notStarted;
-        document.getElementById('tasks-in-progress').textContent = inProgress;
-        document.getElementById('tasks-done').textContent = done;
+    isOverdue(task) {
+        return WorkManagementCore.isTaskOverdue(task);
     },
 
-    renderKanban() {
-        const container = document.getElementById('tasks-kanban');
-        const filterAssignee = document.getElementById('tasks-filter-assignee')?.value || '';
-        const filterProject = document.getElementById('tasks-filter-project')?.value || '';
-        const filterOrder = document.getElementById('tasks-filter-order')?.value || '';
-        const search = (document.getElementById('tasks-search')?.value || '').toLowerCase().trim();
-
-        let filtered = this.filterTasks(filterAssignee, filterProject, filterOrder, search);
-
-        const columns = [
-            { status: 'Not started', label: 'Не начато', color: '#6b7280', icon: '○' },
-            { status: 'In progress', label: 'В работе', color: '#f59e0b', icon: '◐' },
-            { status: 'Done', label: 'Готово', color: '#10b981', icon: '●' },
-            { status: 'Cancelled', label: 'Отменено', color: '#ef4444', icon: '✕' },
-        ];
-
-        container.innerHTML = columns.map(col => {
-            const tasks = filtered.filter(t => t.status === col.status);
-            return `
-            <div class="kanban-column" data-status="${col.status}">
-                <div class="kanban-header" style="border-top: 3px solid ${col.color}">
-                    <span>${col.icon} ${col.label}</span>
-                    <span class="kanban-count">${tasks.length}</span>
-                </div>
-                <div class="kanban-cards" ondrop="Tasks.onDrop(event, '${col.status}')" ondragover="event.preventDefault()">
-                    ${tasks.map(t => this.renderCard(t)).join('')}
-                </div>
-            </div>`;
-        }).join('');
+    statusLabel(status) {
+        return WorkManagementCore.getTaskStatusLabel(status);
     },
 
-    renderCard(task) {
-        const deadlineHtml = task.deadline
-            ? `<div class="task-deadline ${this.isOverdue(task.deadline) ? 'overdue' : ''}">${this.formatDeadline(task.deadline)}</div>`
-            : '';
-
-        const assignees = (task.assignee || '').split(',').map(a => a.trim()).filter(Boolean);
-        const assigneeHtml = assignees.length > 0
-            ? `<div class="task-assignees">${assignees.map(a => `<span class="task-avatar" title="${this.esc(a)}">${this.initials(a)}</span>`).join('')}</div>`
-            : '';
-
-        // Show linked order name as clickable badge
-        const orderName = task.order_name || this.shortProject(task.project) || '';
-        const orderHtml = orderName
-            ? (task.order_id
-                ? `<span class="task-project-tag" onclick="event.stopPropagation(); App.navigate('order-detail', true, ${task.order_id})" style="cursor:pointer" title="Открыть заказ">${this.esc(orderName)}</span>`
-                : `<span class="task-project-tag">${this.esc(orderName)}</span>`)
-            : '';
-
-        return `
-        <div class="kanban-card" draggable="true" ondragstart="Tasks.onDragStart(event, ${task.id})" onclick="Tasks.openTask(${task.id})">
-            <div class="task-card-title">${this.esc(task.title)}</div>
-            <div class="task-card-meta">
-                ${orderHtml}
-                ${deadlineHtml}
-            </div>
-            ${assigneeHtml}
-        </div>`;
+    priorityLabel(priority) {
+        return (WorkManagementCore.TASK_PRIORITY_OPTIONS.find(item => item.value === priority) || WorkManagementCore.TASK_PRIORITY_OPTIONS[1]).label;
     },
 
-    renderList() {
-        const container = document.getElementById('tasks-kanban');
-        const filterAssignee = document.getElementById('tasks-filter-assignee')?.value || '';
-        const filterProject = document.getElementById('tasks-filter-project')?.value || '';
-        const filterOrder = document.getElementById('tasks-filter-order')?.value || '';
-        const search = (document.getElementById('tasks-search')?.value || '').toLowerCase().trim();
-
-        let filtered = this.filterTasks(filterAssignee, filterProject, filterOrder, search);
-
-        const order = { 'In progress': 0, 'Not started': 1, 'Done': 2, 'Cancelled': 3 };
-        filtered.sort((a, b) => (order[a.status] ?? 9) - (order[b.status] ?? 9));
-
-        const statusBadge = (s) => {
-            const map = {
-                'Not started': '<span class="badge badge-gray">Не начато</span>',
-                'In progress': '<span class="badge badge-yellow">В работе</span>',
-                'Done': '<span class="badge badge-green">Готово</span>',
-                'Cancelled': '<span class="badge badge-red">Отменено</span>',
-            };
-            return map[s] || s;
-        };
-
-        container.innerHTML = `
-        <div class="card" style="grid-column: 1 / -1; padding: 0;">
-            <div class="table-wrap">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Задача</th>
-                            <th>Статус</th>
-                            <th>Ответственный</th>
-                            <th>Дедлайн</th>
-                            <th>Заказ</th>
-                            <th></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${filtered.length === 0 ? '<tr><td colspan="6" class="text-center text-muted">Нет задач</td></tr>' : ''}
-                        ${filtered.map(t => {
-                            const oName = t.order_name || this.shortProject(t.project) || '';
-                            const oLink = t.order_id
-                                ? `<a href="#order-detail/${t.order_id}" onclick="event.stopPropagation(); App.navigate('order-detail', true, ${t.order_id}); return false;" style="color:var(--accent);text-decoration:none;font-size:12px">${this.esc(oName)}</a>`
-                                : `<span style="font-size:12px">${this.esc(oName)}</span>`;
-                            return `
-                        <tr onclick="Tasks.openTask(${t.id})" style="cursor:pointer">
-                            <td><b>${this.esc(t.title)}</b></td>
-                            <td>${statusBadge(t.status)}</td>
-                            <td style="font-size:12px">${this.esc(t.assignee || '')}</td>
-                            <td style="font-size:12px" class="${this.isOverdue(t.deadline) ? 'text-red' : ''}">${t.deadline ? this.formatDeadline(t.deadline) : ''}</td>
-                            <td>${oLink}</td>
-                            <td><button class="btn btn-sm btn-outline" onclick="event.stopPropagation(); Tasks.deleteTask(${t.id})">&#10005;</button></td>
-                        </tr>`;
-                        }).join('')}
-                    </tbody>
-                </table>
-            </div>
-        </div>`;
+    priorityBadgeClass(priority) {
+        if (priority === 'urgent') return 'badge-red';
+        if (priority === 'high') return 'badge-yellow';
+        if (priority === 'low') return 'badge-gray';
+        return 'badge-blue';
     },
 
-    filterTasks(assignee, project, orderId, search) {
-        let filtered = [...this.allTasks];
-
-        const statusFilter = document.getElementById('tasks-filter-status')?.value || 'active';
-        if (statusFilter === 'active') {
-            filtered = filtered.filter(t => t.status === 'Not started' || t.status === 'In progress');
-        } else if (statusFilter !== 'all') {
-            filtered = filtered.filter(t => t.status === statusFilter);
-        }
-
-        if (assignee) {
-            filtered = filtered.filter(t => (t.assignee || '').includes(assignee));
-        }
-        if (project) {
-            filtered = filtered.filter(t => (t.project || '').includes(project));
-        }
-        if (orderId) {
-            const oid = parseInt(orderId);
-            filtered = filtered.filter(t => t.order_id === oid);
-        }
-        if (search) {
-            filtered = filtered.filter(t =>
-                (t.title || '').toLowerCase().includes(search) ||
-                (t.assignee || '').toLowerCase().includes(search) ||
-                (t.project || '').toLowerCase().includes(search) ||
-                (t.order_name || '').toLowerCase().includes(search)
-            );
-        }
-        return filtered;
+    contextLabel(task) {
+        const project = task.project_id ? this.projectById(task.project_id) : null;
+        const order = task.order_id ? this.orderById(task.order_id) : (project?.linked_order_id ? this.orderById(project.linked_order_id) : null);
+        const area = task.area_id ? this.areaById(task.area_id) : (project?.area_id ? this.areaById(project.area_id) : null);
+        const chunks = [];
+        if (order) chunks.push(`Заказ: ${order.order_name}`);
+        if (project) chunks.push(`Проект: ${project.title}`);
+        if (area) chunks.push(`Направление: ${area.name}`);
+        return chunks.join(' · ') || 'Без контекста';
     },
 
-    // === DRAG & DROP ===
-
-    onDragStart(e, taskId) {
-        e.dataTransfer.setData('text/plain', taskId);
+    commentsForTask(taskId) {
+        return (this.bundle?.comments || [])
+            .filter(item => String(item.task_id) === String(taskId))
+            .sort((a, b) => String(a.created_at || '').localeCompare(String(b.created_at || '')));
     },
 
-    async onDrop(e, newStatus) {
-        e.preventDefault();
-        const taskId = parseInt(e.dataTransfer.getData('text/plain'));
-        const task = this.allTasks.find(t => t.id === taskId);
-        if (task) {
-            task.status = newStatus;
-            task.updated_at = new Date().toISOString();
-            await saveTasks(this.allTasks);
-            this.renderStats();
-            this.render();
-        }
+    assetsForTask(taskId) {
+        return (this.bundle?.assets || [])
+            .filter(item => String(item.task_id) === String(taskId))
+            .sort((a, b) => String(a.created_at || '').localeCompare(String(b.created_at || '')));
     },
 
-    // === CRUD ===
-
-    showAddForm(presetOrderId, presetOrderName) {
-        document.getElementById('tasks-add-form').style.display = '';
-        document.getElementById('task-edit-title').value = '';
-        document.getElementById('task-edit-assignee').value = '';
-        document.getElementById('task-edit-deadline').value = '';
-        document.getElementById('task-edit-project').value = '';
-        document.getElementById('task-edit-description').value = '';
-        document.getElementById('task-edit-id').value = '';
-        this.populateProjectOptions();
-        this.populateOrderDropdown();
-        // Pre-select order if provided
-        const orderSelect = document.getElementById('task-edit-order');
-        if (orderSelect && presetOrderId) {
-            orderSelect.value = presetOrderId;
-        }
+    checklistForTask(taskId) {
+        return (this.bundle?.checklistItems || [])
+            .filter(item => String(item.task_id) === String(taskId))
+            .sort((a, b) => (Number(a.sort_index) || 0) - (Number(b.sort_index) || 0));
     },
 
-    hideAddForm() {
-        document.getElementById('tasks-add-form').style.display = 'none';
+    watcherIdsForTask(taskId) {
+        return (this.bundle?.watchers || [])
+            .filter(item => String(item.task_id) === String(taskId))
+            .map(item => Number(item.user_id));
     },
 
-    populateProjectOptions() {
-        const projects = [...new Set(this.allTasks.map(t => t.project).filter(Boolean))].sort();
-        const datalist = document.getElementById('task-projects-datalist');
-        if (datalist) {
-            datalist.innerHTML = projects.map(p => `<option value="${this.esc(p)}">`).join('');
-        }
+    activityForTask(taskId) {
+        return (this.bundle?.activity || [])
+            .filter(item => String(item.task_id) === String(taskId))
+            .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
     },
 
-    populateOrderDropdown() {
-        const select = document.getElementById('task-edit-order');
-        if (!select) return;
-        const currentVal = select.value;
-        select.innerHTML = '<option value="">-- Без заказа --</option>';
-        this.allOrders.forEach(o => {
-            if (o.status === 'deleted') return;
-            select.innerHTML += `<option value="${o.id}">${this.esc(o.order_name || 'Без названия')} ${o.client_name ? '(' + this.esc(o.client_name) + ')' : ''}</option>`;
-        });
-        if (currentVal) select.value = currentVal;
+    subtasksForTask(taskId) {
+        return (this.bundle?.tasks || [])
+            .filter(item => String(item.parent_task_id || '') === String(taskId))
+            .sort((a, b) => (Number(a.sort_index) || 0) - (Number(b.sort_index) || 0));
     },
 
-    async saveTask() {
-        const id = document.getElementById('task-edit-id').value;
-        const title = document.getElementById('task-edit-title').value.trim();
-        const assignee = document.getElementById('task-edit-assignee').value.trim();
-        const deadline = document.getElementById('task-edit-deadline').value;
-        const project = document.getElementById('task-edit-project').value.trim();
-        const description = document.getElementById('task-edit-description').value.trim();
-
-        // Order linking
-        const orderSelect = document.getElementById('task-edit-order');
-        const orderId = orderSelect ? (parseInt(orderSelect.value) || null) : null;
-        let orderName = '';
-        if (orderId) {
-            const selectedOrder = this.allOrders.find(o => o.id === orderId);
-            orderName = selectedOrder ? selectedOrder.order_name : '';
-        }
-
-        if (!title) { App.toast('Введите название задачи'); return; }
-
-        if (id) {
-            const task = this.allTasks.find(t => t.id === parseInt(id));
-            if (task) {
-                task.title = title;
-                task.assignee = assignee;
-                task.deadline = deadline || null;
-                task.project = project;
-                task.description = description;
-                task.order_id = orderId;
-                task.order_name = orderName;
-                task.updated_at = new Date().toISOString();
-            }
-        } else {
-            this.allTasks.push({
-                id: Date.now(),
-                title,
-                status: 'Not started',
-                assignee,
-                deadline: deadline || null,
-                project,
-                description,
-                order_id: orderId,
-                order_name: orderName,
-                created_at: new Date().toISOString(),
-                updated_at: new Date().toISOString(),
-            });
-        }
-
-        await saveTasks(this.allTasks);
-        this.hideAddForm();
-        App.toast(id ? 'Задача обновлена' : 'Задача создана');
-        this.renderStats();
-        this.render();
-        this.populateFilters();
-    },
-
-    openTask(taskId) {
-        const task = this.allTasks.find(t => t.id === taskId);
-        if (!task) return;
-
-        document.getElementById('tasks-add-form').style.display = '';
-        document.getElementById('task-edit-id').value = task.id;
-        document.getElementById('task-edit-title').value = task.title || '';
-        document.getElementById('task-edit-assignee').value = task.assignee || '';
-        document.getElementById('task-edit-deadline').value = task.deadline || '';
-        document.getElementById('task-edit-project').value = task.project || '';
-        document.getElementById('task-edit-description').value = task.description || '';
-        this.populateProjectOptions();
-        this.populateOrderDropdown();
-
-        // Set order dropdown
-        const orderSelect = document.getElementById('task-edit-order');
-        if (orderSelect) orderSelect.value = task.order_id || '';
-
-        document.getElementById('tasks-add-form').scrollIntoView({ behavior: 'smooth' });
-    },
-
-    async deleteTask(taskId) {
-        if (!confirm('Удалить задачу?')) return;
-        this.allTasks = this.allTasks.filter(t => t.id !== taskId);
-        await saveTasks(this.allTasks);
-        App.toast('Задача удалена');
-        this.renderStats();
-        this.render();
-    },
-
-    async changeStatus(taskId, newStatus) {
-        const task = this.allTasks.find(t => t.id === taskId);
-        if (task) {
-            task.status = newStatus;
-            task.updated_at = new Date().toISOString();
-            await saveTasks(this.allTasks);
-            this.renderStats();
-            this.render();
-        }
-    },
-
-    // Get tasks for a specific order (used by OrderDetail)
     getTasksForOrder(orderId) {
-        return this.allTasks.filter(t => t.order_id === orderId);
+        const projectsForOrder = (this.bundle?.projects || []).filter(item => String(item.linked_order_id || '') === String(orderId));
+        const projectIds = new Set(projectsForOrder.map(item => String(item.id)));
+        return (this.bundle?.tasks || []).filter(task =>
+            String(task.order_id || '') === String(orderId)
+            || projectIds.has(String(task.project_id || ''))
+        );
     },
 
     populateFilters() {
-        // Assignees
-        const assignees = [...new Set(this.allTasks.flatMap(t => (t.assignee || '').split(',').map(a => a.trim())).filter(Boolean))].sort();
-        const aSelect = document.getElementById('tasks-filter-assignee');
-        if (aSelect) {
-            while (aSelect.options.length > 1) aSelect.remove(1);
-            assignees.forEach(a => {
-                const opt = document.createElement('option');
-                opt.value = a;
-                opt.textContent = a;
-                aSelect.appendChild(opt);
+        // Backward compatibility no-op.
+    },
+
+    openTask(taskId) {
+        this.createDraft = null;
+        this.currentTaskId = Number(taskId);
+        if (App.currentPage !== 'tasks') {
+            App.navigate('tasks', true, taskId);
+            return;
+        }
+        this.render();
+    },
+
+    showAddForm(orderId, _orderName) {
+        this.openCreate(orderId ? { order_id: orderId, primary_context_kind: 'order' } : {});
+    },
+
+    openCreate(preset = {}, templateId = null) {
+        const template = templateId
+            ? (this.bundle?.templates || []).find(item => String(item.id) === String(templateId))
+            : null;
+        const project = preset.project_id ? this.projectById(preset.project_id) : null;
+        this.createDraft = {
+            id: '',
+            template_id: template?.id || '',
+            title: preset.title || template?.title || '',
+            description: preset.description || template?.description || '',
+            status: preset.status || 'incoming',
+            priority: preset.priority || template?.default_priority || 'normal',
+            reporter_id: preset.reporter_id || App.currentEmployeeId || '',
+            assignee_id: preset.assignee_id || '',
+            reviewer_id: preset.reviewer_id || '',
+            area_id: preset.area_id || project?.area_id || template?.suggested_area_id || '',
+            order_id: preset.order_id || project?.linked_order_id || '',
+            project_id: preset.project_id || '',
+            china_purchase_id: preset.china_purchase_id || '',
+            warehouse_item_id: preset.warehouse_item_id || '',
+            primary_context_kind: preset.primary_context_kind || (preset.project_id ? 'project' : (preset.order_id ? 'order' : 'area')),
+            due_date: preset.due_date || '',
+            due_time: preset.due_time || '',
+            waiting_for_text: preset.waiting_for_text || '',
+            parent_task_id: preset.parent_task_id || '',
+            watcher_ids: preset.watcher_ids || [],
+        };
+        this.currentTaskId = null;
+        if (App.currentPage !== 'tasks') {
+            App.navigate('tasks');
+            return;
+        }
+        this.render();
+    },
+
+    cancelEditor() {
+        this.createDraft = null;
+        this.currentTaskId = null;
+        this.render();
+    },
+
+    setView(view) {
+        this.view = view;
+        this.render();
+    },
+
+    setScope(scope) {
+        this.scope = scope;
+        this.render();
+    },
+
+    setSort(value) {
+        this.sort = value || 'manual';
+        this.render();
+    },
+
+    updateFilter(field, value) {
+        this.filters[field] = value;
+        this.render();
+    },
+
+    viewTabsHtml() {
+        return `
+            <div class="flex gap-4">
+                <button class="tasks-view-btn ${this.view === 'list' ? 'active' : ''}" onclick="Tasks.setView('list')">&#9776; Список</button>
+                <button class="tasks-view-btn ${this.view === 'kanban' ? 'active' : ''}" onclick="Tasks.setView('kanban')">&#9634; Канбан</button>
+                <button class="tasks-view-btn ${this.view === 'calendar' ? 'active' : ''}" onclick="Tasks.setView('calendar')">&#128197; Календарь</button>
+            </div>
+        `;
+    },
+
+    scopeTabsHtml() {
+        const currentEmployee = this.currentEmployee();
+        const myLabel = currentEmployee ? `Мои задачи (${this.myTasks().length})` : 'Мои задачи';
+        return `
+            <div class="flex gap-4">
+                <button class="tasks-view-btn ${this.scope === 'my' ? 'active' : ''}" onclick="Tasks.setScope('my')">${this.esc(myLabel)}</button>
+                <button class="tasks-view-btn ${this.scope === 'all' ? 'active' : ''}" onclick="Tasks.setScope('all')">Все задачи</button>
+                <button class="tasks-view-btn ${this.scope === 'overdue' ? 'active' : ''}" onclick="Tasks.setScope('overdue')">Просроченные</button>
+            </div>
+        `;
+    },
+
+    myTasks() {
+        const currentEmployeeId = String(App.currentEmployeeId || '');
+        return (this.bundle?.tasks || []).filter(task => String(task.assignee_id || '') === currentEmployeeId);
+    },
+
+    filteredTasks() {
+        const search = WorkManagementCore.normalizeText(this.filters.search);
+        const commentsByTask = new Map();
+        this.bundle?.comments?.forEach(comment => {
+            const bucket = commentsByTask.get(String(comment.task_id)) || [];
+            bucket.push(comment.body || '');
+            commentsByTask.set(String(comment.task_id), bucket);
+        });
+
+        let list = (this.bundle?.tasks || []).slice();
+
+        if (this.scope === 'my' && App.currentEmployeeId) {
+            list = list.filter(task => String(task.assignee_id || '') === String(App.currentEmployeeId));
+        }
+        if (this.scope === 'overdue') {
+            list = list.filter(task => this.isOverdue(task));
+        }
+
+        if (this.filters.status) list = list.filter(task => task.status === this.filters.status);
+        if (this.filters.priority) list = list.filter(task => task.priority === this.filters.priority);
+        if (this.filters.assignee_id) list = list.filter(task => String(task.assignee_id || '') === String(this.filters.assignee_id));
+        if (this.filters.reporter_id) list = list.filter(task => String(task.reporter_id || '') === String(this.filters.reporter_id));
+        if (this.filters.project_id) list = list.filter(task => String(task.project_id || '') === String(this.filters.project_id));
+        if (this.filters.order_id) {
+            list = list.filter(task => {
+                if (String(task.order_id || '') === String(this.filters.order_id)) return true;
+                const project = task.project_id ? this.projectById(task.project_id) : null;
+                return String(project?.linked_order_id || '') === String(this.filters.order_id);
+            });
+        }
+        if (this.filters.area_id) {
+            list = list.filter(task => {
+                if (String(task.area_id || '') === String(this.filters.area_id)) return true;
+                const project = task.project_id ? this.projectById(task.project_id) : null;
+                return String(project?.area_id || '') === String(this.filters.area_id);
+            });
+        }
+        if (this.filters.mine && App.currentEmployeeId) {
+            list = list.filter(task => String(task.assignee_id || '') === String(App.currentEmployeeId));
+        }
+        if (this.filters.awaiting_review) list = list.filter(task => task.status === 'review');
+        if (this.filters.waiting_only) list = list.filter(task => task.status === 'waiting');
+        if (this.filters.due === 'overdue') list = list.filter(task => this.isOverdue(task));
+        if (this.filters.due === 'today') list = list.filter(task => task.due_date === this.todayYmd());
+        if (this.filters.due === 'week') {
+            const now = new Date();
+            const weekLater = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+            list = list.filter(task => task.due_date && task.due_date >= this.todayYmd() && task.due_date <= weekLater.toISOString().slice(0, 10));
+        }
+        if (this.filters.due === 'no_deadline') list = list.filter(task => !task.due_date);
+
+        if (search) {
+            list = list.filter(task => {
+                const project = task.project_id ? this.projectById(task.project_id) : null;
+                const order = task.order_id ? this.orderById(task.order_id) : (project?.linked_order_id ? this.orderById(project.linked_order_id) : null);
+                const haystack = WorkManagementCore.normalizeText([
+                    task.title,
+                    task.description,
+                    task.assignee_name,
+                    task.reporter_name,
+                    task.waiting_for_text,
+                    project?.title,
+                    order?.order_name,
+                    ...(commentsByTask.get(String(task.id)) || []),
+                ].join(' '));
+                return haystack.includes(search);
             });
         }
 
-        // Projects
-        const projects = [...new Set(this.allTasks.map(t => t.project).filter(Boolean))].sort();
-        const pSelect = document.getElementById('tasks-filter-project');
-        if (pSelect) {
-            while (pSelect.options.length > 1) pSelect.remove(1);
-            projects.forEach(p => {
-                const opt = document.createElement('option');
-                opt.value = p;
-                opt.textContent = this.shortProject(p);
-                pSelect.appendChild(opt);
+        list.sort((a, b) => {
+            if (this.sort === 'priority') {
+                return WorkManagementCore.priorityWeight(b.priority) - WorkManagementCore.priorityWeight(a.priority)
+                    || String(WorkManagementCore.buildTaskDueIso(a)).localeCompare(String(WorkManagementCore.buildTaskDueIso(b)), 'ru');
+            }
+            if (this.sort === 'due') {
+                return String(WorkManagementCore.buildTaskDueIso(a)).localeCompare(String(WorkManagementCore.buildTaskDueIso(b)), 'ru')
+                    || WorkManagementCore.priorityWeight(b.priority) - WorkManagementCore.priorityWeight(a.priority);
+            }
+            if (this.sort === 'created') {
+                return String(b.created_at || '').localeCompare(String(a.created_at || ''));
+            }
+            return (Number(a.sort_index) || 0) - (Number(b.sort_index) || 0)
+                || WorkManagementCore.priorityWeight(b.priority) - WorkManagementCore.priorityWeight(a.priority)
+                || String(a.title || '').localeCompare(String(b.title || ''), 'ru');
+        });
+
+        return list;
+    },
+
+    statsCardsHtml() {
+        const all = this.bundle?.tasks || [];
+        const overdue = all.filter(task => this.isOverdue(task)).length;
+        const review = all.filter(task => task.status === 'review').length;
+        const waiting = all.filter(task => task.status === 'waiting').length;
+        return `
+            <div class="stats-grid">
+                <div class="stat-card"><div class="stat-label">Всего задач</div><div class="stat-value">${all.length}</div></div>
+                <div class="stat-card"><div class="stat-label">Мои</div><div class="stat-value">${this.myTasks().length}</div></div>
+                <div class="stat-card"><div class="stat-label">На согласовании</div><div class="stat-value">${review}</div></div>
+                <div class="stat-card"><div class="stat-label">Просрочено</div><div class="stat-value">${overdue}</div></div>
+                <div class="stat-card"><div class="stat-label">Ждём</div><div class="stat-value">${waiting}</div></div>
+            </div>
+        `;
+    },
+
+    filtersHtml() {
+        const assigneeOptions = (this.employees || [])
+            .filter(item => item.is_active !== false)
+            .map(item => `<option value="${item.id}" ${String(item.id) === String(this.filters.assignee_id || '') ? 'selected' : ''}>${this.esc(item.name)}</option>`)
+            .join('');
+        const reporterOptions = assigneeOptions;
+        const projectOptions = (this.bundle?.projects || [])
+            .map(item => `<option value="${item.id}" ${String(item.id) === String(this.filters.project_id || '') ? 'selected' : ''}>${this.esc(item.title)}</option>`)
+            .join('');
+        const orderOptions = (this.orders || [])
+            .filter(item => item.status !== 'deleted')
+            .map(item => `<option value="${item.id}" ${String(item.id) === String(this.filters.order_id || '') ? 'selected' : ''}>${this.esc(item.order_name || 'Без названия')}</option>`)
+            .join('');
+        const areaOptions = (this.bundle?.areas || [])
+            .map(item => `<option value="${item.id}" ${String(item.id) === String(this.filters.area_id || '') ? 'selected' : ''}>${this.esc(item.name)}</option>`)
+            .join('');
+        const statusOptions = WorkManagementCore.TASK_STATUS_OPTIONS
+            .map(item => `<option value="${item.value}" ${item.value === this.filters.status ? 'selected' : ''}>${this.esc(item.label)}</option>`)
+            .join('');
+        const priorityOptions = WorkManagementCore.TASK_PRIORITY_OPTIONS
+            .map(item => `<option value="${item.value}" ${item.value === this.filters.priority ? 'selected' : ''}>${this.esc(item.label)}</option>`)
+            .join('');
+        return `
+            <div class="card" style="padding:12px 20px;">
+                <div class="form-row" style="align-items:end">
+                    <div class="form-group" style="margin:0;flex:2">
+                        <label>Поиск</label>
+                        <input type="text" value="${this.esc(this.filters.search)}" oninput="Tasks.updateFilter('search', this.value)" placeholder="Название, описание, комментарии">
+                    </div>
+                    <div class="form-group" style="margin:0">
+                        <label>Статус</label>
+                        <select onchange="Tasks.updateFilter('status', this.value)">
+                            <option value="">Все</option>
+                            ${statusOptions}
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin:0">
+                        <label>Приоритет</label>
+                        <select onchange="Tasks.updateFilter('priority', this.value)">
+                            <option value="">Все</option>
+                            ${priorityOptions}
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin:0">
+                        <label>Исполнитель</label>
+                        <select onchange="Tasks.updateFilter('assignee_id', this.value)">
+                            <option value="">Все</option>
+                            ${assigneeOptions}
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin:0">
+                        <label>Постановщик</label>
+                        <select onchange="Tasks.updateFilter('reporter_id', this.value)">
+                            <option value="">Все</option>
+                            ${reporterOptions}
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row" style="align-items:end">
+                    <div class="form-group" style="margin:0">
+                        <label>Проект</label>
+                        <select onchange="Tasks.updateFilter('project_id', this.value)">
+                            <option value="">Все</option>
+                            ${projectOptions}
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin:0">
+                        <label>Заказ</label>
+                        <select onchange="Tasks.updateFilter('order_id', this.value)">
+                            <option value="">Все</option>
+                            ${orderOptions}
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin:0">
+                        <label>Направление</label>
+                        <select onchange="Tasks.updateFilter('area_id', this.value)">
+                            <option value="">Все</option>
+                            ${areaOptions}
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin:0">
+                        <label>Дедлайн</label>
+                        <select onchange="Tasks.updateFilter('due', this.value)">
+                            <option value="">Все</option>
+                            <option value="today" ${this.filters.due === 'today' ? 'selected' : ''}>Сегодня</option>
+                            <option value="week" ${this.filters.due === 'week' ? 'selected' : ''}>7 дней</option>
+                            <option value="overdue" ${this.filters.due === 'overdue' ? 'selected' : ''}>Просрочено</option>
+                            <option value="no_deadline" ${this.filters.due === 'no_deadline' ? 'selected' : ''}>Без дедлайна</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin:0">
+                        <label>Сортировка</label>
+                        <select onchange="Tasks.setSort(this.value)">
+                            <option value="manual" ${this.sort === 'manual' ? 'selected' : ''}>Ручная очередь</option>
+                            <option value="priority" ${this.sort === 'priority' ? 'selected' : ''}>По приоритету</option>
+                            <option value="due" ${this.sort === 'due' ? 'selected' : ''}>По дедлайну</option>
+                            <option value="created" ${this.sort === 'created' ? 'selected' : ''}>По созданию</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row" style="align-items:center;margin-top:8px;">
+                    <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" ${this.filters.mine ? 'checked' : ''} onchange="Tasks.updateFilter('mine', this.checked)"> Только мои</label>
+                    <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" ${this.filters.awaiting_review ? 'checked' : ''} onchange="Tasks.updateFilter('awaiting_review', this.checked)"> Только на согласовании</label>
+                    <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" ${this.filters.waiting_only ? 'checked' : ''} onchange="Tasks.updateFilter('waiting_only', this.checked)"> Только «Ждём»</label>
+                </div>
+            </div>
+        `;
+    },
+
+    renderListView(tasks) {
+        const rows = tasks.map(task => `
+            <tr onclick="Tasks.openTask(${task.id})" style="cursor:pointer">
+                <td>
+                    <div style="font-weight:600">${this.esc(task.title)}</div>
+                    <div class="text-muted" style="font-size:12px">${this.esc(this.contextLabel(task))}</div>
+                </td>
+                <td><span class="badge ${task.status === 'done' ? 'badge-green' : task.status === 'cancelled' ? 'badge-red' : task.status === 'review' ? 'badge-blue' : task.status === 'waiting' ? 'badge-yellow' : 'badge-gray'}">${this.esc(this.statusLabel(task.status))}</span></td>
+                <td><span class="badge ${this.priorityBadgeClass(task.priority)}">${this.esc(this.priorityLabel(task.priority))}</span></td>
+                <td>${this.esc(task.assignee_name || this.employeeNameById(task.assignee_id, '—'))}</td>
+                <td>${this.esc(task.reporter_name || this.employeeNameById(task.reporter_id, '—'))}</td>
+                <td class="${this.isOverdue(task) ? 'text-red' : ''}">${this.esc(this.formatTaskDue(task))}</td>
+                <td>
+                    ${this.sort === 'manual' ? `
+                        <div class="flex gap-4">
+                            <button class="btn btn-sm btn-outline" onclick="event.stopPropagation(); Tasks.moveTask(${task.id}, -1)">↑</button>
+                            <button class="btn btn-sm btn-outline" onclick="event.stopPropagation(); Tasks.moveTask(${task.id}, 1)">↓</button>
+                        </div>
+                    ` : ''}
+                </td>
+            </tr>
+        `).join('');
+
+        return `
+            <div class="card" style="padding:0;">
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Задача</th>
+                                <th>Статус</th>
+                                <th>Приоритет</th>
+                                <th>Исполнитель</th>
+                                <th>Постановщик</th>
+                                <th>Дедлайн</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${rows || '<tr><td colspan="7" class="text-center text-muted">Нет задач</td></tr>'}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+    },
+
+    renderKanbanView(tasks) {
+        const columns = WorkManagementCore.TASK_STATUS_OPTIONS.map(status => {
+            const columnTasks = tasks.filter(task => task.status === status.value);
+            return `
+                <div class="kanban-column">
+                    <div class="kanban-header"><span>${this.esc(status.label)}</span><span class="kanban-count">${columnTasks.length}</span></div>
+                    <div class="kanban-cards">
+                        ${columnTasks.map(task => `
+                            <div class="kanban-card" onclick="Tasks.openTask(${task.id})">
+                                <div class="task-card-title">${this.esc(task.title)}</div>
+                                <div class="task-card-meta">
+                                    <span class="task-project-tag">${this.esc(this.priorityLabel(task.priority))}</span>
+                                    <span class="${this.isOverdue(task) ? 'text-red' : ''}">${this.esc(this.formatTaskDue(task))}</span>
+                                </div>
+                                <div class="text-muted" style="font-size:12px;">${this.esc(task.assignee_name || this.employeeNameById(task.assignee_id, '—'))}</div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        return `<div class="kanban-board">${columns}</div>`;
+    },
+
+    renderCalendarView(tasks) {
+        const [year, month] = this.calendarMonth.split('-').map(value => Number(value));
+        const firstDay = new Date(year, month - 1, 1);
+        const daysInMonth = new Date(year, month, 0).getDate();
+        const startWeekday = (firstDay.getDay() + 6) % 7;
+        const cells = [];
+
+        for (let i = 0; i < startWeekday; i += 1) {
+            cells.push('<div class="wm-calendar-cell is-empty"></div>');
+        }
+
+        for (let day = 1; day <= daysInMonth; day += 1) {
+            const dateKey = `${this.calendarMonth}-${String(day).padStart(2, '0')}`;
+            const dayTasks = tasks.filter(task => task.due_date === dateKey);
+            cells.push(`
+                <div class="wm-calendar-cell">
+                    <div class="wm-calendar-day">${day}</div>
+                    <div class="wm-calendar-tasks">
+                        ${dayTasks.map(task => `
+                            <button class="wm-calendar-task ${this.isOverdue(task) ? 'is-overdue' : ''}" onclick="Tasks.openTask(${task.id})">
+                                ${this.esc(task.title)}
+                            </button>
+                        `).join('')}
+                    </div>
+                </div>
+            `);
+        }
+
+        const monthLabel = new Date(year, month - 1, 1).toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' });
+        return `
+            <div class="card">
+                <div class="card-header">
+                    <h3>Календарь задач</h3>
+                    <div class="flex gap-8">
+                        <button class="btn btn-sm btn-outline" onclick="Tasks.shiftCalendar(-1)">←</button>
+                        <span style="font-weight:600;">${this.esc(monthLabel)}</span>
+                        <button class="btn btn-sm btn-outline" onclick="Tasks.shiftCalendar(1)">→</button>
+                    </div>
+                </div>
+                <div class="wm-calendar-grid wm-calendar-head">
+                    <div>Пн</div><div>Вт</div><div>Ср</div><div>Чт</div><div>Пт</div><div>Сб</div><div>Вс</div>
+                </div>
+                <div class="wm-calendar-grid wm-calendar-body">
+                    ${cells.join('')}
+                </div>
+            </div>
+        `;
+    },
+
+    renderMainContent(tasks) {
+        if (this.view === 'kanban') return this.renderKanbanView(tasks);
+        if (this.view === 'calendar') return this.renderCalendarView(tasks);
+        return this.renderListView(tasks);
+    },
+
+    editorTask() {
+        return this.createDraft || (this.currentTaskId ? this.taskById(this.currentTaskId) : null);
+    },
+
+    editorWatcherIds(task) {
+        if (!task) return [];
+        if (this.createDraft) return this.createDraft.watcher_ids || [];
+        return this.watcherIdsForTask(task.id);
+    },
+
+    editorTitle(task) {
+        return this.createDraft ? 'Новая задача' : 'Карточка задачи';
+    },
+
+    taskTemplateOptionsHtml(selectedTemplateId) {
+        return (this.bundle?.templates || [])
+            .filter(item => item.kind === 'task')
+            .map(item => `<option value="${item.id}" ${String(item.id) === String(selectedTemplateId || '') ? 'selected' : ''}>${this.esc(item.name)}</option>`)
+            .join('');
+    },
+
+    statusOptionsHtml(selected) {
+        return WorkManagementCore.TASK_STATUS_OPTIONS
+            .map(item => `<option value="${item.value}" ${item.value === selected ? 'selected' : ''}>${this.esc(item.label)}</option>`)
+            .join('');
+    },
+
+    priorityOptionsHtml(selected) {
+        return WorkManagementCore.TASK_PRIORITY_OPTIONS
+            .map(item => `<option value="${item.value}" ${item.value === selected ? 'selected' : ''}>${this.esc(item.label)}</option>`)
+            .join('');
+    },
+
+    employeeOptionsHtml(selected) {
+        return (this.employees || [])
+            .filter(item => item.is_active !== false)
+            .map(item => `<option value="${item.id}" ${String(item.id) === String(selected || '') ? 'selected' : ''}>${this.esc(item.name)}</option>`)
+            .join('');
+    },
+
+    orderOptionsHtml(selected) {
+        return (this.orders || [])
+            .filter(item => item.status !== 'deleted')
+            .map(item => `<option value="${item.id}" ${String(item.id) === String(selected || '') ? 'selected' : ''}>${this.esc(item.order_name || 'Без названия')}</option>`)
+            .join('');
+    },
+
+    projectOptionsHtml(selected) {
+        return (this.bundle?.projects || [])
+            .map(item => `<option value="${item.id}" ${String(item.id) === String(selected || '') ? 'selected' : ''}>${this.esc(item.title)}</option>`)
+            .join('');
+    },
+
+    areaOptionsHtml(selected) {
+        return (this.bundle?.areas || [])
+            .map(item => `<option value="${item.id}" ${String(item.id) === String(selected || '') ? 'selected' : ''}>${this.esc(item.name)}</option>`)
+            .join('');
+    },
+
+    chinaOptionsHtml(selected) {
+        return (this.chinaPurchases || [])
+            .map(item => `<option value="${item.id}" ${String(item.id) === String(selected || '') ? 'selected' : ''}>${this.esc(item.purchase_name || `Закупка #${item.id}`)}</option>`)
+            .join('');
+    },
+
+    warehouseOptionsHtml(selected) {
+        return (this.warehouseItems || [])
+            .map(item => `<option value="${item.id}" ${String(item.id) === String(selected || '') ? 'selected' : ''}>${this.esc(item.name || `Позиция #${item.id}`)}</option>`)
+            .join('');
+    },
+
+    renderChecklistSection(task) {
+        if (!task?.id) {
+            return '<div class="card"><div class="text-muted">Сначала сохраните задачу, затем добавьте чек-лист, комментарии и файлы.</div></div>';
+        }
+        const items = this.checklistForTask(task.id);
+        return `
+            <div class="card">
+                <div class="card-header"><h3>Чек-лист</h3></div>
+                <div class="wm-checklist-list">
+                    ${items.length === 0 ? '<div class="text-muted">Пока нет пунктов</div>' : items.map(item => `
+                        <label class="wm-checklist-row">
+                            <input type="checkbox" ${item.is_done ? 'checked' : ''} onchange="Tasks.toggleChecklist(${item.id}, this.checked)">
+                            <span class="${item.is_done ? 'text-muted' : ''}">${this.esc(item.title)}</span>
+                            <button class="btn btn-sm btn-outline" type="button" onclick="Tasks.deleteChecklistItem(${item.id})">Удалить</button>
+                        </label>
+                    `).join('')}
+                </div>
+                <div class="form-row" style="align-items:end;margin-top:12px;">
+                    <div class="form-group" style="flex:1">
+                        <label>Новый пункт</label>
+                        <input id="task-checklist-new" type="text" placeholder="Что проверить?">
+                    </div>
+                    <div class="form-group" style="display:flex;align-items:flex-end;">
+                        <button class="btn btn-outline" onclick="Tasks.addChecklistItem(${task.id})">Добавить</button>
+                    </div>
+                </div>
+            </div>
+        `;
+    },
+
+    renderSubtasksSection(task) {
+        if (!task?.id) return '';
+        const subtasks = this.subtasksForTask(task.id);
+        return `
+            <div class="card">
+                <div class="card-header">
+                    <h3>Подзадачи</h3>
+                    <button class="btn btn-sm btn-outline" onclick="Tasks.openCreate({ parent_task_id: ${task.id}, project_id: ${task.project_id || 'null'}, order_id: ${task.order_id || 'null'}, area_id: ${task.area_id || 'null'}, primary_context_kind: '${task.primary_context_kind || 'project'}', due_date: '${task.due_date || ''}' })">+ Подзадача</button>
+                </div>
+                <div class="wm-subtasks-list">
+                    ${subtasks.length === 0
+                        ? '<div class="text-muted">Подзадач пока нет</div>'
+                        : subtasks.map(item => `
+                            <button class="wm-subtask-row" onclick="Tasks.openTask(${item.id})">
+                                <span>${this.esc(item.title)}</span>
+                                <span class="text-muted">${this.esc(this.statusLabel(item.status))} · ${this.esc(this.formatTaskDue(item))}</span>
+                            </button>
+                        `).join('')}
+                </div>
+            </div>
+        `;
+    },
+
+    renderCommentsSection(task) {
+        if (!task?.id) return '';
+        const comments = this.commentsForTask(task.id);
+        return `
+            <div class="card">
+                <div class="card-header"><h3>Комментарии</h3></div>
+                <div class="wm-comments-list">
+                    ${comments.length === 0
+                        ? '<div class="text-muted">Комментариев пока нет</div>'
+                        : comments.map(comment => `
+                            <div class="wm-comment-row">
+                                <div style="font-weight:600">${this.esc(comment.author_name || 'Сотрудник')}</div>
+                                <div style="white-space:pre-wrap;">${this.esc(comment.body)}</div>
+                                <div class="text-muted" style="font-size:12px">${this.esc(this.formatDate(comment.created_at))}</div>
+                            </div>
+                        `).join('')}
+                </div>
+                <div class="form-group" style="margin-top:12px;">
+                    <label>Новый комментарий</label>
+                    <textarea id="task-comment-new" rows="3" placeholder="Можно упоминать коллег как @Имя Фамилия"></textarea>
+                </div>
+                <button class="btn btn-outline" onclick="Tasks.addComment(${task.id})">Добавить комментарий</button>
+            </div>
+        `;
+    },
+
+    renderAssetsSection(task) {
+        if (!task?.id) return '';
+        const assets = this.assetsForTask(task.id);
+        return `
+            <div class="card">
+                <div class="card-header"><h3>Файлы и ссылки</h3></div>
+                <div class="form-row" style="align-items:end;">
+                    <div class="form-group" style="flex:2">
+                        <label>Ссылка</label>
+                        <input id="task-link-url" type="url" placeholder="https://...">
+                    </div>
+                    <div class="form-group">
+                        <label>Название</label>
+                        <input id="task-link-title" type="text" placeholder="Например, референс">
+                    </div>
+                    <div class="form-group" style="display:flex;align-items:flex-end;">
+                        <button class="btn btn-outline" onclick="Tasks.addLink(${task.id})">Добавить ссылку</button>
+                    </div>
+                </div>
+                <div class="form-row" style="align-items:end;">
+                    <div class="form-group" style="flex:2">
+                        <label>Файл</label>
+                        <input id="task-file-input" type="file" accept="image/*,.pdf,.ai,.psd,.svg,.zip,.rar,.7z,.doc,.docx,.xls,.xlsx,.txt">
+                    </div>
+                    <div class="form-group">
+                        <label>Название</label>
+                        <input id="task-file-title" type="text" placeholder="Необязательно">
+                    </div>
+                    <div class="form-group" style="display:flex;align-items:flex-end;">
+                        <button class="btn btn-outline" onclick="Tasks.addFile(${task.id})">Загрузить</button>
+                    </div>
+                </div>
+                <div class="wm-assets-list">
+                    ${assets.length === 0
+                        ? '<div class="text-muted">Пока ничего не добавлено</div>'
+                        : assets.map(asset => asset.kind === 'file'
+                            ? `
+                                <div class="wm-asset-row">
+                                    <div>
+                                        <div style="font-weight:600">${this.esc(asset.title || asset.file_name || 'Файл')}</div>
+                                        <div class="text-muted" style="font-size:12px">${this.esc(asset.file_name || '')}</div>
+                                    </div>
+                                    <div class="flex gap-8">
+                                        <a class="btn btn-sm btn-outline" href="${this.esc(asset.data_url || asset.url)}" target="_blank">Открыть</a>
+                                        <button class="btn btn-sm btn-outline" onclick="Tasks.deleteAsset(${asset.id})">Удалить</button>
+                                    </div>
+                                </div>
+                            `
+                            : `
+                                <div class="wm-asset-row">
+                                    <div>
+                                        <div style="font-weight:600">${this.esc(asset.title || 'Ссылка')}</div>
+                                        <div class="text-muted" style="font-size:12px">${this.esc(asset.url || '')}</div>
+                                    </div>
+                                    <div class="flex gap-8">
+                                        <a class="btn btn-sm btn-outline" href="${this.esc(asset.url)}" target="_blank">Открыть</a>
+                                        <button class="btn btn-sm btn-outline" onclick="Tasks.deleteAsset(${asset.id})">Удалить</button>
+                                    </div>
+                                </div>
+                            `
+                        ).join('')}
+                </div>
+            </div>
+        `;
+    },
+
+    renderActivitySection(task) {
+        if (!task?.id) return '';
+        const items = this.activityForTask(task.id);
+        return `
+            <div class="card">
+                <div class="card-header"><h3>История</h3></div>
+                <div class="wm-activity-list">
+                    ${items.length === 0
+                        ? '<div class="text-muted">История пока пустая</div>'
+                        : items.map(item => `
+                            <div class="wm-activity-row">
+                                <div style="font-weight:600">${this.esc(item.message)}</div>
+                                <div class="text-muted" style="font-size:12px">${this.esc(item.author_name || 'Система')} · ${this.esc(this.formatDate(item.created_at))}</div>
+                            </div>
+                        `).join('')}
+                </div>
+            </div>
+        `;
+    },
+
+    renderEditor(task) {
+        if (!task) {
+            return `
+                <div class="card">
+                    <div class="empty-state">
+                        <div class="empty-icon">&#9745;</div>
+                        <p>Выберите задачу слева или создайте новую</p>
+                    </div>
+                </div>
+            `;
+        }
+
+        const isNew = !task.id;
+        const watcherIds = this.editorWatcherIds(task);
+        return `
+            <div class="card">
+                <div class="card-header">
+                    <h3>${this.esc(this.editorTitle(task))}</h3>
+                    <div class="flex gap-8">
+                        ${!isNew ? `<button class="btn btn-sm btn-outline" onclick="Tasks.deleteTask(${task.id})">Удалить</button>` : ''}
+                        <button class="btn btn-sm btn-outline" onclick="Tasks.cancelEditor()">Закрыть</button>
+                    </div>
+                </div>
+                <input type="hidden" id="task-editor-id" value="${this.esc(task.id || '')}">
+                <div class="form-row">
+                    <div class="form-group" style="flex:2">
+                        <label>Шаблон</label>
+                        <select id="task-editor-template" onchange="Tasks.onTemplateChange(this.value)">
+                            <option value="">Без шаблона</option>
+                            ${this.taskTemplateOptionsHtml(task.template_id)}
+                        </select>
+                    </div>
+                    <div class="form-group" style="flex:4">
+                        <label>Название</label>
+                        <input id="task-editor-title" type="text" value="${this.esc(task.title || '')}">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Статус</label>
+                        <select id="task-editor-status">${this.statusOptionsHtml(task.status || 'incoming')}</select>
+                    </div>
+                    <div class="form-group">
+                        <label>Приоритет</label>
+                        <select id="task-editor-priority">${this.priorityOptionsHtml(task.priority || 'normal')}</select>
+                    </div>
+                    <div class="form-group">
+                        <label>Дедлайн</label>
+                        <input id="task-editor-due-date" type="date" value="${this.esc(task.due_date || '')}">
+                    </div>
+                    <div class="form-group">
+                        <label>Время</label>
+                        <input id="task-editor-due-time" type="time" value="${this.esc(task.due_time || '')}">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Постановщик</label>
+                        <select id="task-editor-reporter">
+                            <option value="">—</option>
+                            ${this.employeeOptionsHtml(task.reporter_id)}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Исполнитель</label>
+                        <select id="task-editor-assignee">
+                            <option value="">—</option>
+                            ${this.employeeOptionsHtml(task.assignee_id)}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Проверяющий</label>
+                        <select id="task-editor-reviewer">
+                            <option value="">—</option>
+                            ${this.employeeOptionsHtml(task.reviewer_id)}
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Основной контекст</label>
+                        <select id="task-editor-context">
+                            ${WorkManagementCore.TASK_CONTEXT_OPTIONS.map(item => `<option value="${item.value}" ${item.value === (task.primary_context_kind || 'area') ? 'selected' : ''}>${this.esc(item.label)}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Заказ</label>
+                        <select id="task-editor-order">
+                            <option value="">—</option>
+                            ${this.orderOptionsHtml(task.order_id)}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Проект</label>
+                        <select id="task-editor-project">
+                            <option value="">—</option>
+                            ${this.projectOptionsHtml(task.project_id)}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Направление</label>
+                        <select id="task-editor-area">
+                            <option value="">—</option>
+                            ${this.areaOptionsHtml(task.area_id)}
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>China</label>
+                        <select id="task-editor-china">
+                            <option value="">—</option>
+                            ${this.chinaOptionsHtml(task.china_purchase_id)}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Склад</label>
+                        <select id="task-editor-warehouse">
+                            <option value="">—</option>
+                            ${this.warehouseOptionsHtml(task.warehouse_item_id)}
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Описание</label>
+                    <textarea id="task-editor-description" rows="4">${this.esc(task.description || '')}</textarea>
+                </div>
+                <div class="form-group">
+                    <label>Ждём от кого / что ждём</label>
+                    <input id="task-editor-waiting" type="text" value="${this.esc(task.waiting_for_text || '')}">
+                </div>
+                <div class="form-group">
+                    <label>Наблюдатели</label>
+                    <div class="wm-watchers-grid">
+                        ${(this.employees || []).filter(item => item.is_active !== false).map(item => `
+                            <label class="wm-watcher-chip">
+                                <input type="checkbox" value="${item.id}" ${watcherIds.includes(Number(item.id)) ? 'checked' : ''}>
+                                <span>${this.esc(item.name)}</span>
+                            </label>
+                        `).join('')}
+                    </div>
+                </div>
+                <div class="flex gap-8" style="flex-wrap:wrap;">
+                    <button class="btn btn-success" onclick="Tasks.saveTask()">Сохранить</button>
+                    ${!isNew ? `<button class="btn btn-outline" onclick="Tasks.sendToReview(${task.id})">На согласование</button>` : ''}
+                    ${!isNew ? `<button class="btn btn-outline" onclick="Tasks.returnToWork(${task.id})">Вернуть в работу</button>` : ''}
+                    ${!isNew ? `<button class="btn btn-outline" onclick="Tasks.approveTask(${task.id})">Готово</button>` : ''}
+                    ${!isNew ? `<button class="btn btn-outline" onclick="Tasks.changeStatus(${task.id}, 'cancelled')">Отменить</button>` : ''}
+                </div>
+            </div>
+            ${this.renderChecklistSection(task)}
+            ${this.renderSubtasksSection(task)}
+            ${this.renderCommentsSection(task)}
+            ${this.renderAssetsSection(task)}
+            ${this.renderActivitySection(task)}
+        `;
+    },
+
+    render() {
+        const container = document.getElementById('page-tasks');
+        if (!container) return;
+        const tasks = this.filteredTasks();
+        const activeTask = this.editorTask();
+        container.innerHTML = `
+            <div class="page-header">
+                <div>
+                    <h1>Задачи</h1>
+                    <div class="text-muted" style="font-size:13px;">Очереди исполнителей, задачи по заказам, проектам и направлениям</div>
+                </div>
+                <div class="flex gap-8">
+                    ${this.scopeTabsHtml()}
+                    ${this.viewTabsHtml()}
+                    <button class="btn btn-outline" onclick="Tasks.openCreate()">+ Задача</button>
+                    <button class="btn btn-success" onclick="Tasks.openCreate({}, ${this.defaultTaskTemplateId() || "''"})">Из шаблона</button>
+                </div>
+            </div>
+            ${this.statsCardsHtml()}
+            ${this.filtersHtml()}
+            <div class="wm-two-column">
+                <div class="wm-main-column">
+                    ${this.renderMainContent(tasks)}
+                </div>
+                <div class="wm-side-column">
+                    ${this.renderEditor(activeTask)}
+                </div>
+            </div>
+        `;
+    },
+
+    defaultTaskTemplateId() {
+        return (this.bundle?.templates || []).find(item => item.kind === 'task')?.id || '';
+    },
+
+    shiftCalendar(delta) {
+        const [year, month] = this.calendarMonth.split('-').map(value => Number(value));
+        const next = new Date(year, month - 1 + delta, 1);
+        this.calendarMonth = next.toISOString().slice(0, 7);
+        this.render();
+    },
+
+    readEditorForm() {
+        const watcherIds = Array.from(document.querySelectorAll('.wm-watcher-chip input:checked')).map(input => Number(input.value));
+        return {
+            id: document.getElementById('task-editor-id')?.value || '',
+            template_id: document.getElementById('task-editor-template')?.value || '',
+            title: document.getElementById('task-editor-title')?.value.trim() || '',
+            status: document.getElementById('task-editor-status')?.value || 'incoming',
+            priority: document.getElementById('task-editor-priority')?.value || 'normal',
+            due_date: document.getElementById('task-editor-due-date')?.value || '',
+            due_time: document.getElementById('task-editor-due-time')?.value || '',
+            reporter_id: document.getElementById('task-editor-reporter')?.value || '',
+            assignee_id: document.getElementById('task-editor-assignee')?.value || '',
+            reviewer_id: document.getElementById('task-editor-reviewer')?.value || '',
+            primary_context_kind: document.getElementById('task-editor-context')?.value || 'area',
+            order_id: document.getElementById('task-editor-order')?.value || '',
+            project_id: document.getElementById('task-editor-project')?.value || '',
+            area_id: document.getElementById('task-editor-area')?.value || '',
+            china_purchase_id: document.getElementById('task-editor-china')?.value || '',
+            warehouse_item_id: document.getElementById('task-editor-warehouse')?.value || '',
+            description: document.getElementById('task-editor-description')?.value.trim() || '',
+            waiting_for_text: document.getElementById('task-editor-waiting')?.value.trim() || '',
+            watcher_ids: watcherIds,
+            parent_task_id: this.createDraft?.parent_task_id || this.taskById(this.currentTaskId)?.parent_task_id || '',
+        };
+    },
+
+    async saveTask() {
+        const draft = this.readEditorForm();
+        const existing = draft.id ? this.taskById(draft.id) : null;
+        if (!draft.title) {
+            App.toast('Введите название задачи');
+            return;
+        }
+        if (!draft.assignee_id && !existing?.assignee_id) {
+            App.toast('Укажите исполнителя');
+            return;
+        }
+        if (!draft.due_date && !existing?.due_date) {
+            App.toast('Укажите дедлайн');
+            return;
+        }
+        if (!draft.order_id && !draft.project_id && !draft.area_id && !existing?.order_id && !existing?.project_id && !existing?.area_id) {
+            App.toast('Выберите контекст задачи');
+            return;
+        }
+
+        const previousOverdue = existing ? this.isOverdue(existing) : false;
+        const saved = await saveWorkTask(draft, {
+            actor_id: App.currentEmployeeId,
+            actor_name: App.getCurrentEmployeeName(),
+        });
+        await saveTaskWatchers(saved.id, draft.watcher_ids);
+
+        const template = draft.template_id
+            ? (this.bundle?.templates || []).find(item => String(item.id) === String(draft.template_id))
+            : null;
+        if (!existing && template) {
+            await this.applyTaskTemplateArtifacts(saved, template);
+        }
+
+        await this.emitTaskEvents(saved, existing, previousOverdue);
+        await this.refreshData();
+        this.createDraft = null;
+        this.currentTaskId = saved.id;
+        App.toast(existing ? 'Задача обновлена' : 'Задача создана');
+        this.render();
+    },
+
+    async emitTaskEvents(saved, existing, previousOverdue) {
+        if (!existing || String(existing.assignee_id || '') !== String(saved.assignee_id || '')) {
+            if (saved.assignee_id) {
+                await TaskEvents.emit('task_assigned', {
+                    task_id: saved.id,
+                    project_id: saved.project_id || null,
+                    assignee_id: saved.assignee_id,
+                });
+            }
+        }
+
+        if (saved.status === 'review' && existing?.status !== 'review') {
+            await TaskEvents.emit('task_sent_to_review', {
+                task_id: saved.id,
+                project_id: saved.project_id || null,
+                reviewer_id: saved.reviewer_id || null,
             });
         }
 
-        // Orders filter
-        const oSelect = document.getElementById('tasks-filter-order');
-        if (oSelect) {
-            while (oSelect.options.length > 1) oSelect.remove(1);
-            const orderIds = [...new Set(this.allTasks.map(t => t.order_id).filter(Boolean))];
-            orderIds.forEach(oid => {
-                const task = this.allTasks.find(t => t.order_id === oid);
-                const opt = document.createElement('option');
-                opt.value = oid;
-                opt.textContent = task?.order_name || `Заказ #${oid}`;
-                oSelect.appendChild(opt);
+        const currentOverdue = this.isOverdue(saved);
+        if (previousOverdue !== currentOverdue) {
+            await TaskEvents.emit('task_overdue_state_changed', {
+                task_id: saved.id,
+                project_id: saved.project_id || null,
+                is_overdue: currentOverdue,
+            });
+        }
+
+        if (saved.due_date && !currentOverdue && saved.status !== 'done' && saved.status !== 'cancelled') {
+            const dueAt = new Date(WorkManagementCore.buildTaskDueIso(saved));
+            const diffMs = dueAt.getTime() - Date.now();
+            if (diffMs > 0 && diffMs <= 24 * 60 * 60 * 1000) {
+                await TaskEvents.emit('task_due_soon', {
+                    task_id: saved.id,
+                    project_id: saved.project_id || null,
+                    due_date: saved.due_date,
+                    due_time: saved.due_time || null,
+                });
+            }
+        }
+    },
+
+    async applyTaskTemplateArtifacts(task, template) {
+        for (const [index, title] of (template.checklist_items || []).entries()) {
+            await saveTaskChecklistItem({
+                task_id: task.id,
+                title,
+                sort_index: (index + 1) * 100,
+            });
+        }
+        for (const [index, title] of (template.suggested_subtasks || []).entries()) {
+            await saveWorkTask({
+                title,
+                description: '',
+                status: 'incoming',
+                priority: template.default_priority || task.priority || 'normal',
+                reporter_id: task.reporter_id || App.currentEmployeeId,
+                reporter_name: task.reporter_name || App.getCurrentEmployeeName(),
+                assignee_id: task.assignee_id || App.currentEmployeeId,
+                assignee_name: task.assignee_name || App.getCurrentEmployeeName(),
+                reviewer_id: task.reviewer_id || null,
+                reviewer_name: task.reviewer_name || '',
+                area_id: task.area_id || template.suggested_area_id || null,
+                order_id: task.order_id || null,
+                project_id: task.project_id || null,
+                primary_context_kind: task.primary_context_kind || 'area',
+                due_date: task.due_date || this.todayYmd(),
+                due_time: task.due_time || null,
+                parent_task_id: task.id,
+                sort_index: (index + 1) * 100,
+            }, {
+                actor_id: App.currentEmployeeId,
+                actor_name: App.getCurrentEmployeeName(),
             });
         }
     },
 
-    // === HELPERS ===
-
-    esc(str) {
-        if (!str) return '';
-        return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    },
-
-    initials(name) {
-        if (!name) return '?';
-        const clean = name.replace(/@.*/, '').replace(/chiefoperating/, 'Операц.');
-        const parts = clean.split(/\s+/).filter(Boolean);
-        if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
-        return clean.substring(0, 2).toUpperCase();
-    },
-
-    shortProject(p) {
-        if (!p) return '';
-        return p.replace(/\s*\(https?:\/\/[^)]+\)/g, '').trim();
-    },
-
-    formatDeadline(d) {
-        if (!d) return '';
-        if (d.includes('→')) {
-            const parts = d.split('→').map(s => s.trim());
-            return this.formatSingleDate(parts[1]);
+    async addChecklistItem(taskId) {
+        const input = document.getElementById('task-checklist-new');
+        const title = input?.value.trim() || '';
+        if (!title) {
+            App.toast('Введите текст пункта');
+            return;
         }
-        return this.formatSingleDate(d);
+        await saveTaskChecklistItem({ task_id: taskId, title });
+        await this.refreshData();
+        this.currentTaskId = Number(taskId);
+        this.render();
     },
 
-    formatSingleDate(d) {
-        if (!d) return '';
-        try {
-            const date = new Date(d);
-            if (isNaN(date.getTime())) return d;
-            return date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
-        } catch (e) { return d; }
+    async toggleChecklist(itemId, checked) {
+        const item = (this.bundle?.checklistItems || []).find(entry => String(entry.id) === String(itemId));
+        if (!item) return;
+        await saveTaskChecklistItem({ ...item, is_done: checked });
+        await this.refreshData();
+        this.render();
     },
 
-    isOverdue(d) {
-        if (!d) return false;
-        try {
-            let dateStr = d;
-            if (d.includes('→')) dateStr = d.split('→').pop().trim();
-            const date = new Date(dateStr);
-            if (isNaN(date.getTime())) return false;
-            return date < new Date() && date.toDateString() !== new Date().toDateString();
-        } catch (e) { return false; }
+    async deleteChecklistItem(itemId) {
+        await deleteTaskChecklistItem(itemId);
+        await this.refreshData();
+        this.render();
     },
 
-    // === DEFAULT DATA (from Notion CSV) ===
+    async addComment(taskId) {
+        const textarea = document.getElementById('task-comment-new');
+        const body = textarea?.value.trim() || '';
+        if (!body) {
+            App.toast('Введите комментарий');
+            return;
+        }
+        const comment = await saveTaskComment({
+            task_id: taskId,
+            author_id: App.currentEmployeeId,
+            author_name: App.getCurrentEmployeeName(),
+            body,
+        });
+        if ((comment.mentions || []).length > 0) {
+            await TaskEvents.emit('task_mentioned', {
+                task_id: taskId,
+                project_id: this.taskById(taskId)?.project_id || null,
+                mention_user_ids: comment.mentions,
+                comment_id: comment.id,
+            });
+        }
+        await this.refreshData();
+        this.currentTaskId = Number(taskId);
+        this.render();
+    },
 
-    getDefaultTasks() {
-        const now = new Date().toISOString();
-        const tasks = [
-            { id: 1, title: 'Придумать бомбическую упаковку для музеев', status: 'Not started', assignee: 'Полина Черповицкая', deadline: 'March 21, 2025', project: '', description: '', order_id: null, order_name: '' },
-            { id: 2, title: 'Сделать акты для Пушкинского', status: 'Not started', assignee: 'Алина Семенова', deadline: null, project: '', description: '', order_id: null, order_name: '' },
-            { id: 3, title: 'Найти резинку 0,5 см близкую к CMYK 32 0 67 0', status: 'In progress', assignee: 'chiefoperating@recycleobject.com', deadline: null, project: '', description: '', order_id: null, order_name: '' },
-            { id: 4, title: 'Посмотреть стоимость стержней для точки по истории заказов 1688 на тираж 200', status: 'In progress', assignee: 'chiefoperating@recycleobject.com', deadline: null, project: '', description: '', order_id: null, order_name: '' },
-            { id: 5, title: 'Покрасить пластик для Озон банка', status: 'Not started', assignee: 'chiefoperating@recycleobject.com, Алексей Маркелов', deadline: null, project: '', description: '', order_id: null, order_name: '' },
-            { id: 6, title: 'Обновить информацию о производительности для старых и новых форм', status: 'Not started', assignee: 'chiefoperating@recycleobject.com, Алексей Маркелов', deadline: null, project: '', description: '', order_id: null, order_name: '' },
-            { id: 7, title: 'Уточнить можно ли сделать резинку 2 мм и в тираже 500 м', status: 'Not started', assignee: 'chiefoperating@recycleobject.com', deadline: null, project: '', description: '', order_id: null, order_name: '' },
-            { id: 8, title: 'Зарегистрироваться на площадке Сбер Аст для тендера Отелло', status: 'Not started', assignee: 'chiefoperating@recycleobject.com', deadline: null, project: '', description: '', order_id: null, order_name: '' },
-            { id: 9, title: 'Найти штуки для кликабельности клавиш (реф в тг)', status: 'Not started', assignee: 'chiefoperating@recycleobject.com', deadline: null, project: '', description: '', order_id: null, order_name: '' },
-            { id: 10, title: 'Благодарственные письма от заказчиков', status: 'Not started', assignee: 'Anna Ovcharenko', deadline: 'February 13, 2026 → February 16, 2026', project: '', description: '', order_id: null, order_name: '' },
-            { id: 101, title: 'Заказать на пробу 4 ретрактора: 3 зеленых и 1 желтый', status: 'Done', assignee: 'chiefoperating@recycleobject.com', deadline: null, project: '', description: '', order_id: null, order_name: '' },
-            { id: 102, title: 'Найти в истории 1688 подрядчика для гравировки на карабинах', status: 'Done', assignee: 'chiefoperating@recycleobject.com', deadline: null, project: '', description: '', order_id: null, order_name: '' },
-            { id: 103, title: 'Коробки по аналогии с новыми крафтовыми на МП для заказчика (тираж 300 шт)', status: 'Done', assignee: 'chiefoperating@recycleobject.com', deadline: null, project: '', description: '', order_id: null, order_name: '' },
-            { id: 104, title: 'Заказать серебристые карабины 20 мм 800 шт', status: 'Done', assignee: 'chiefoperating@recycleobject.com', deadline: null, project: 'Точка нфс', description: '', order_id: null, order_name: '' },
-            { id: 105, title: 'Убрать бирюзовый цвет с товаров на сайте', status: 'Done', assignee: 'Elina Kemaйкина', deadline: null, project: '', description: '', order_id: null, order_name: '' },
-            { id: 106, title: 'Присвоить всей фурнитуре серийные номера для учета', status: 'Done', assignee: 'Егор', deadline: 'October 1, 2025', project: '', description: '', order_id: null, order_name: '' },
-            { id: 107, title: 'Заказать карабины для Мелон (и в сток)', status: 'Done', assignee: 'Анна Мирная', deadline: null, project: 'Melon fashion обвесы', description: '', order_id: null, order_name: '' },
-            { id: 108, title: 'Заказать шнурки для Мелон', status: 'Done', assignee: 'Анна Мирная', deadline: null, project: 'Melon fashion обвесы', description: '', order_id: null, order_name: '' },
-            { id: 109, title: 'Заказать шнуры для Фонбет, доставка АВИА', status: 'Done', assignee: 'Анна Мирная', deadline: null, project: '', description: '', order_id: null, order_name: '' },
-            { id: 110, title: 'Заказать цветные карабины', status: 'Done', assignee: 'Анна Мирная', deadline: null, project: '', description: '', order_id: null, order_name: '' },
-            { id: 111, title: 'Заказать шнуры на пробу 4 мм', status: 'Done', assignee: 'Анна Мирная', deadline: null, project: '', description: '', order_id: null, order_name: '' },
-            { id: 112, title: 'Заказать шнуры в сток', status: 'Done', assignee: 'Анна Мирная', deadline: null, project: '', description: '', order_id: null, order_name: '' },
-            { id: 113, title: 'Найти исполнителя по составлению дашборда из аналитики CRM', status: 'Done', assignee: 'Анна Мирная', deadline: null, project: '', description: '', order_id: null, order_name: '' },
-            { id: 114, title: 'Заказать молд пуговиц', status: 'Done', assignee: 'Анна Мирная', deadline: null, project: 'Гараж пуговицы', description: '', order_id: null, order_name: '' },
-            { id: 115, title: 'Фурнитура и упаковка для воркшопа ВК', status: 'Done', assignee: 'Анна Мирная', deadline: null, project: 'ВК фест kids', description: '', order_id: null, order_name: '' },
-            { id: 116, title: 'Заказать НФС клавишу', status: 'Done', assignee: 'Анна Мирная', deadline: null, project: 'Яндекс воркшоп + клавиша НФС', description: '', order_id: null, order_name: '' },
-            { id: 117, title: 'Заказать черные тросы', status: 'Done', assignee: 'Анна Мирная', deadline: null, project: 'Яндекс team смотка', description: '', order_id: null, order_name: '' },
-            { id: 118, title: 'Заказать фурнитуру для Точки 1000 стержней с синими чернилами', status: 'Done', assignee: 'Анна Мирная', deadline: null, project: '', description: '', order_id: null, order_name: '' },
-            { id: 119, title: 'Заказать паракорды для Точки 300 шт', status: 'Done', assignee: 'chiefoperating@recycleobject.com', deadline: 'November 21, 2025', project: 'обвесы точка', description: '', order_id: null, order_name: '' },
-            { id: 120, title: 'Финальная фурнитура на тираж Т-банк (1100 шт)', status: 'Done', assignee: 'chiefoperating@recycleobject.com', deadline: null, project: 'Т-банк картхолдеры для стикеров', description: '', order_id: null, order_name: '' },
-        ];
+    async addLink(taskId) {
+        const url = document.getElementById('task-link-url')?.value.trim() || '';
+        const title = document.getElementById('task-link-title')?.value.trim() || '';
+        if (!url) {
+            App.toast('Укажите ссылку');
+            return;
+        }
+        const task = this.taskById(taskId);
+        await saveWorkAsset({
+            task_id: taskId,
+            project_id: task?.project_id || null,
+            kind: 'link',
+            title,
+            url,
+            created_by: App.currentEmployeeId,
+            created_by_name: App.getCurrentEmployeeName(),
+        });
+        await this.refreshData();
+        this.currentTaskId = Number(taskId);
+        this.render();
+    },
 
-        tasks.forEach(t => { t.created_at = now; t.updated_at = now; });
-        return tasks;
+    async addFile(taskId) {
+        const input = document.getElementById('task-file-input');
+        const file = input?.files?.[0];
+        if (!file) {
+            App.toast('Выберите файл');
+            return;
+        }
+        if (file.size > 3 * 1024 * 1024) {
+            App.toast('Файл слишком большой. Максимум 3 МБ');
+            return;
+        }
+        const dataUrl = await this.readFileAsDataUrl(file);
+        const task = this.taskById(taskId);
+        await saveWorkAsset({
+            task_id: taskId,
+            project_id: task?.project_id || null,
+            kind: 'file',
+            title: document.getElementById('task-file-title')?.value.trim() || file.name,
+            file_name: file.name,
+            file_type: file.type || '',
+            file_size: file.size || 0,
+            data_url: dataUrl,
+            url: dataUrl,
+            created_by: App.currentEmployeeId,
+            created_by_name: App.getCurrentEmployeeName(),
+        });
+        await this.refreshData();
+        this.currentTaskId = Number(taskId);
+        this.render();
+    },
+
+    async deleteAsset(assetId) {
+        if (!confirm('Удалить файл или ссылку?')) return;
+        await deleteWorkAsset(assetId);
+        await this.refreshData();
+        this.render();
+    },
+
+    async changeStatus(taskId, status) {
+        const task = this.taskById(taskId);
+        if (!task) return;
+        const previousOverdue = this.isOverdue(task);
+        const saved = await saveWorkTask({ ...task, status }, {
+            actor_id: App.currentEmployeeId,
+            actor_name: App.getCurrentEmployeeName(),
+        });
+        await this.emitTaskEvents(saved, task, previousOverdue);
+        await this.refreshData();
+        this.currentTaskId = Number(taskId);
+        this.render();
+    },
+
+    async sendToReview(taskId) {
+        const task = this.taskById(taskId);
+        if (!task) return;
+        if (!task.reviewer_id && !document.getElementById('task-editor-reviewer')?.value) {
+            App.toast('Сначала укажите проверяющего');
+            return;
+        }
+        await this.changeStatus(taskId, 'review');
+    },
+
+    async returnToWork(taskId) {
+        await this.changeStatus(taskId, 'in_progress');
+    },
+
+    async approveTask(taskId) {
+        await this.changeStatus(taskId, 'done');
+    },
+
+    async deleteTask(taskId) {
+        if (!confirm('Удалить задачу со всеми комментариями и файлами?')) return;
+        await deleteWorkTask(taskId);
+        await this.refreshData();
+        this.currentTaskId = null;
+        this.render();
+    },
+
+    async moveTask(taskId, direction) {
+        const task = this.taskById(taskId);
+        if (!task) return;
+        const queue = this.filteredTasks().filter(item =>
+            String(item.assignee_id || '') === String(task.assignee_id || '')
+            && String(item.parent_task_id || '') === String(task.parent_task_id || '')
+        );
+        const idx = queue.findIndex(item => String(item.id) === String(task.id));
+        const swapWith = queue[idx + direction];
+        if (!swapWith) return;
+        await saveWorkTask({ ...task, sort_index: swapWith.sort_index }, {
+            actor_id: App.currentEmployeeId,
+            actor_name: App.getCurrentEmployeeName(),
+            skipActivity: true,
+        });
+        await saveWorkTask({ ...swapWith, sort_index: task.sort_index }, {
+            actor_id: App.currentEmployeeId,
+            actor_name: App.getCurrentEmployeeName(),
+            skipActivity: true,
+        });
+        await this.refreshData();
+        this.render();
+    },
+
+    async onTemplateChange(templateId) {
+        if (!this.createDraft) return;
+        const template = (this.bundle?.templates || []).find(item => String(item.id) === String(templateId));
+        if (!template) return;
+        this.createDraft = {
+            ...this.createDraft,
+            template_id: template.id,
+            title: template.title || this.createDraft.title,
+            description: template.description || this.createDraft.description,
+            priority: template.default_priority || this.createDraft.priority,
+            area_id: template.suggested_area_id || this.createDraft.area_id,
+        };
+        this.render();
+    },
+
+    readFileAsDataUrl(file) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = event => resolve(event.target?.result || '');
+            reader.onerror = () => reject(new Error('Не удалось прочитать файл'));
+            reader.readAsDataURL(file);
+        });
     },
 };

@@ -541,7 +541,7 @@ const Settings = {
         dashboard: 'Главная', calculator: 'Калькулятор', orders: 'Заказы',
         'production-plan': 'Производство', factual: 'План-Факт', analytics: 'Аналитика',
         molds: 'Молды', colors: 'Цвета', timetrack: 'Учёт времени',
-        tasks: 'Задачи', gantt: 'Гант', import: 'Импорт',
+        tasks: 'Задачи', projects: 'Проекты', gantt: 'Гант', import: 'Импорт',
         warehouse: 'Склад', marketplaces: 'Маркетплейсы', china: 'Китай',
         settings: 'Настройки',
     },

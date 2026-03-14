@@ -59,6 +59,33 @@ const LOCAL_KEYS = {
     readyGoodsHistory: 'ro_calc_ready_goods_history',
     salesRecords: 'ro_calc_sales_records',
     indirectCosts: 'ro_calc_indirect_costs',
+    workAreas: 'ro_calc_work_areas',
+    workProjects: 'ro_calc_work_projects',
+    workTasks: 'ro_calc_work_tasks_v2',
+    taskComments: 'ro_calc_task_comments',
+    workAssets: 'ro_calc_work_assets',
+    taskChecklistItems: 'ro_calc_task_checklist_items',
+    taskWatchers: 'ro_calc_task_watchers',
+    workActivity: 'ro_calc_work_activity',
+    workTemplatesV2: 'ro_calc_work_templates_v2',
+    taskNotificationEvents: 'ro_calc_task_notification_events',
+};
+
+const WORK_SETTINGS_KEYS = {
+    areas: 'work_areas_json',
+    projects: 'work_projects_json',
+    tasks: 'work_tasks_json',
+    task_comments: 'work_task_comments_json',
+    work_assets: 'work_assets_json',
+    task_checklist_items: 'work_task_checklist_items_json',
+    task_watchers: 'work_task_watchers_json',
+    work_activity: 'work_activity_json',
+    work_templates: 'work_templates_json',
+    task_notification_events: 'work_task_notification_events_json',
+};
+
+const WORK_TABLE_ON_CONFLICT = {
+    task_watchers: 'task_id,user_id',
 };
 
 // Data version — increment to trigger NON-DESTRUCTIVE migration
@@ -333,7 +360,15 @@ async function loadTemplates() {
             .select('*')
             .order('category')
             .order('name');
-        if (error) { console.error('loadTemplates error:', error); return getDefaultTemplates(); }
+        if (error) {
+            const message = String(error?.message || '');
+            if (String(error?.code || '') === 'PGRST204' || message.includes('schema cache')) {
+                console.warn('Supabase product_templates schema is outdated. Using local templates fallback.');
+                return _getLocalTemplates();
+            }
+            console.error('loadTemplates error:', error);
+            return getDefaultTemplates();
+        }
         if (data && data.length > 0) {
             return data;
         }
@@ -343,7 +378,15 @@ async function loadTemplates() {
         // Seed Supabase in background
         if (localTemplates.length > 0) {
             supabaseClient.from('product_templates').insert(localTemplates)
-                .then(({ error: e }) => { if (e) console.error('Seed templates error:', e); });
+                .then(({ error: e }) => {
+                    const message = String(e?.message || '');
+                    if (!e) return;
+                    if (String(e?.code || '') === 'PGRST204' || message.includes('schema cache')) {
+                        console.warn('Skipped product_templates seed because live schema is older than local template model.');
+                        return;
+                    }
+                    console.error('Seed templates error:', e);
+                });
         }
         return localTemplates;
     }
@@ -2736,4 +2779,950 @@ function loadIndirectCostsData() {
 
 function saveIndirectCostsData(data) {
     setLocal(LOCAL_KEYS.indirectCosts, data);
+}
+
+// =============================================
+// WORK MANAGEMENT (Projects / Tasks / Areas)
+// =============================================
+
+let _workBootstrapPromise = null;
+
+function _workCore() {
+    return (typeof WorkManagementCore !== 'undefined') ? WorkManagementCore : null;
+}
+
+function _toNumberOrNull(value) {
+    if (value === null || value === undefined || value === '') return null;
+    const num = Number(value);
+    return Number.isFinite(num) ? num : null;
+}
+
+function _mergeLocalEntityRow(localKey, row, keyField) {
+    const list = getLocal(localKey) || [];
+    const idx = list.findIndex(item => String(item?.[keyField]) === String(row?.[keyField]));
+    if (idx >= 0) list[idx] = { ...list[idx], ...row };
+    else list.push(row);
+    setLocal(localKey, list);
+    return row;
+}
+
+function _bulkMergeLocalEntityRows(localKey, rows, keyField) {
+    const list = getLocal(localKey) || [];
+    const next = list.slice();
+    (rows || []).forEach(row => {
+        const idx = next.findIndex(item => String(item?.[keyField]) === String(row?.[keyField]));
+        if (idx >= 0) next[idx] = { ...next[idx], ...row };
+        else next.push(row);
+    });
+    setLocal(localKey, next);
+    return next;
+}
+
+function _removeLocalEntityRow(localKey, matchFn) {
+    const list = getLocal(localKey) || [];
+    const next = list.filter(item => !matchFn(item));
+    setLocal(localKey, next);
+    return next;
+}
+
+function _sortRows(rows, field, ascending) {
+    return (rows || []).slice().sort((a, b) => {
+        const av = a?.[field];
+        const bv = b?.[field];
+        if (av === bv) return 0;
+        if (av === null || av === undefined || av === '') return 1;
+        if (bv === null || bv === undefined || bv === '') return -1;
+        const cmp = String(av).localeCompare(String(bv), 'ru', { numeric: true });
+        return ascending ? cmp : -cmp;
+    });
+}
+
+let _workModuleRemoteAvailable = null;
+
+function _workSettingsKey(table) {
+    return WORK_SETTINGS_KEYS[table] || null;
+}
+
+function _workOnConflictKey(table) {
+    return WORK_TABLE_ON_CONFLICT[table] || 'id';
+}
+
+function _isWorkModuleMissingTableError(error) {
+    const code = String(error?.code || '');
+    const message = String(error?.message || '');
+    return code === 'PGRST205'
+        || message.includes("Could not find the table 'public.");
+}
+
+function _markWorkModuleRemoteUnavailable(error) {
+    if (_workModuleRemoteAvailable === false) return;
+    if (_isWorkModuleMissingTableError(error)) {
+        _workModuleRemoteAvailable = false;
+        console.warn('Work management tables are not available in Supabase yet. Using local fallback for this module.');
+    }
+}
+
+function _canUseWorkModuleRemote() {
+    return isSupabaseReady() && _workModuleRemoteAvailable !== false;
+}
+
+async function _loadJsonSetting(settingKey, fallbackValue) {
+    const fallback = fallbackValue === undefined ? null : fallbackValue;
+    if (!isSupabaseReady() || !settingKey) return fallback;
+    try {
+        const { data, error } = await supabaseClient
+            .from('settings')
+            .select('value')
+            .eq('key', settingKey)
+            .maybeSingle();
+        if (error) {
+            console.error(`load setting ${settingKey} error:`, error);
+            return fallback;
+        }
+        if (!data || !data.value) return fallback;
+        return JSON.parse(data.value);
+    } catch (error) {
+        console.error(`load setting ${settingKey} exception:`, error);
+        return fallback;
+    }
+}
+
+async function _saveJsonSetting(settingKey, value) {
+    if (!isSupabaseReady() || !settingKey) return value;
+    try {
+        const { error } = await supabaseClient
+            .from('settings')
+            .upsert({
+                key: settingKey,
+                value: JSON.stringify(value),
+                updated_at: new Date().toISOString(),
+            }, { onConflict: 'key' });
+        if (error) console.error(`save setting ${settingKey} error:`, error);
+    } catch (error) {
+        console.error(`save setting ${settingKey} exception:`, error);
+    }
+    return value;
+}
+
+async function _loadWorkTableRows(table, localKey, orderBy, ascending) {
+    const settingsKey = _workSettingsKey(table);
+    if (_canUseWorkModuleRemote()) {
+        try {
+            let query = supabaseClient.from(table).select('*');
+            if (orderBy) query = query.order(orderBy, { ascending: !!ascending });
+            const { data, error } = await query;
+            if (!error && Array.isArray(data)) {
+                _workModuleRemoteAvailable = true;
+                if (data.length === 0 && settingsKey) {
+                    const stagedRows = await _loadJsonSetting(settingsKey, []);
+                    if (Array.isArray(stagedRows) && stagedRows.length > 0) {
+                        await _upsertWorkTableRows(table, localKey, stagedRows, _workOnConflictKey(table));
+                        const hydrated = orderBy ? _sortRows(stagedRows, orderBy, ascending) : stagedRows;
+                        setLocal(localKey, hydrated);
+                        return hydrated;
+                    }
+                }
+                setLocal(localKey, data);
+                return data;
+            }
+            if (error) {
+                _markWorkModuleRemoteUnavailable(error);
+                if (!_isWorkModuleMissingTableError(error)) console.error(`load ${table} error:`, error);
+            }
+        } catch (e) {
+            console.error(`load ${table} exception:`, e);
+        }
+    }
+    const local = getLocal(localKey) || [];
+    if (settingsKey && isSupabaseReady()) {
+        const remoteFallback = await _loadJsonSetting(settingsKey, null);
+        if (Array.isArray(remoteFallback)) {
+            if (remoteFallback.length === 0 && local.length > 0) {
+                await _saveJsonSetting(settingsKey, local);
+                return orderBy ? _sortRows(local, orderBy, ascending) : local;
+            }
+            setLocal(localKey, remoteFallback);
+            return orderBy ? _sortRows(remoteFallback, orderBy, ascending) : remoteFallback;
+        }
+        if (local.length > 0) {
+            await _saveJsonSetting(settingsKey, local);
+        }
+    }
+    return orderBy ? _sortRows(local, orderBy, ascending) : local;
+}
+
+async function _upsertWorkTableRows(table, localKey, rows, onConflict) {
+    const payload = Array.isArray(rows) ? rows : [rows];
+    if (payload.length === 0) return [];
+    const conflictKey = onConflict || _workOnConflictKey(table);
+    const settingsKey = _workSettingsKey(table);
+    if (_canUseWorkModuleRemote()) {
+        try {
+            const { error } = await supabaseClient
+                .from(table)
+                .upsert(payload, { onConflict: conflictKey });
+            if (error) {
+                _markWorkModuleRemoteUnavailable(error);
+                if (!_isWorkModuleMissingTableError(error)) console.error(`upsert ${table} error:`, error);
+            } else {
+                _workModuleRemoteAvailable = true;
+            }
+        } catch (e) {
+            console.error(`upsert ${table} exception:`, e);
+        }
+    }
+    if (conflictKey && conflictKey !== 'id') {
+        const keys = conflictKey.split(',').map(part => part.trim()).filter(Boolean);
+        const list = getLocal(localKey) || [];
+        const next = list.slice();
+        payload.forEach(row => {
+            const idx = next.findIndex(item => keys.every(key => String(item?.[key]) === String(row?.[key])));
+            if (idx >= 0) next[idx] = { ...next[idx], ...row };
+            else next.push(row);
+        });
+        setLocal(localKey, next);
+        if (!_canUseWorkModuleRemote() && settingsKey) await _saveJsonSetting(settingsKey, next);
+        return payload;
+    }
+    const merged = _bulkMergeLocalEntityRows(localKey, payload, 'id');
+    if (!_canUseWorkModuleRemote() && settingsKey) await _saveJsonSetting(settingsKey, merged);
+    return payload;
+}
+
+async function _deleteWorkTableRow(table, localKey, rowId) {
+    const settingsKey = _workSettingsKey(table);
+    if (_canUseWorkModuleRemote()) {
+        try {
+            const { error } = await supabaseClient.from(table).delete().eq('id', rowId);
+            if (error) {
+                _markWorkModuleRemoteUnavailable(error);
+                if (!_isWorkModuleMissingTableError(error)) console.error(`delete ${table} error:`, error);
+            } else {
+                _workModuleRemoteAvailable = true;
+            }
+        } catch (e) {
+            console.error(`delete ${table} exception:`, e);
+        }
+    }
+    const next = _removeLocalEntityRow(localKey, item => String(item?.id) === String(rowId));
+    if (!_canUseWorkModuleRemote() && settingsKey) await _saveJsonSetting(settingsKey, next);
+}
+
+function _buildEmployeeMaps(employees, authAccounts) {
+    const core = _workCore();
+    const normalize = core ? core.normalizeText : (value => String(value || '').trim().toLowerCase());
+    const byName = new Map();
+    const byLogin = new Map();
+    (employees || []).forEach(emp => {
+        byName.set(normalize(emp.name), emp);
+    });
+    (authAccounts || []).forEach(account => {
+        const employee = (employees || []).find(emp => String(emp.id) === String(account.employee_id));
+        if (employee && account.username) {
+            byLogin.set(normalize(account.username), employee);
+        }
+    });
+    return { byName, byLogin };
+}
+
+function _resolveEmployeeToken(token, employeeMaps) {
+    const core = _workCore();
+    const normalize = core ? core.normalizeText : (value => String(value || '').trim().toLowerCase());
+    const normalized = normalize(token);
+    if (!normalized) return null;
+    if (employeeMaps.byName.has(normalized)) return employeeMaps.byName.get(normalized);
+    if (employeeMaps.byLogin.has(normalized)) return employeeMaps.byLogin.get(normalized);
+    for (const employee of employeeMaps.byName.values()) {
+        const empName = normalize(employee.name);
+        if (empName.includes(normalized) || normalized.includes(empName)) return employee;
+    }
+    return null;
+}
+
+function _resolvePersonFromPayload(personId, personName, employeesById) {
+    const employee = personId != null ? employeesById.get(String(personId)) : null;
+    return employee ? employee.name : (personName || '');
+}
+
+async function loadWorkAreas() {
+    const core = _workCore();
+    let areas = await _loadWorkTableRows('areas', LOCAL_KEYS.workAreas, 'name', true);
+    if (areas.length > 0) return areas;
+    const seeds = (core?.AREA_SEEDS || []).map(seed => ({
+        id: seed.id,
+        slug: seed.slug,
+        name: seed.name,
+        color: seed.color || '#6b7280',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+    }));
+    if (seeds.length > 0) {
+        await _upsertWorkTableRows('areas', LOCAL_KEYS.workAreas, seeds, 'id');
+        areas = await _loadWorkTableRows('areas', LOCAL_KEYS.workAreas, 'name', true);
+    }
+    return areas;
+}
+
+function findAreaBySlug(slug, areas) {
+    const core = _workCore();
+    const normalize = core ? core.normalizeText : (value => String(value || '').trim().toLowerCase());
+    return (areas || []).find(area => normalize(area.slug) === normalize(slug)) || null;
+}
+
+async function loadWorkTemplatesV2() {
+    const core = _workCore();
+    let templates = await _loadWorkTableRows('work_templates', LOCAL_KEYS.workTemplatesV2, 'name', true);
+    if (templates.length > 0) return templates;
+    const areas = await loadWorkAreas();
+    const seeded = (core?.TEMPLATE_SEEDS || []).map((seed, index) => ({
+        id: 9200 + index + 1,
+        kind: seed.kind,
+        name: seed.name,
+        title: seed.title || seed.name,
+        project_type: seed.project_type || null,
+        description: seed.description || '',
+        default_priority: seed.default_priority || 'normal',
+        suggested_area_id: findAreaBySlug(seed.suggested_area_slug, areas)?.id || null,
+        checklist_items: seed.checklist_items || [],
+        suggested_subtasks: seed.suggested_subtasks || [],
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+    }));
+    if (seeded.length > 0) {
+        await _upsertWorkTableRows('work_templates', LOCAL_KEYS.workTemplatesV2, seeded, 'id');
+        templates = await _loadWorkTableRows('work_templates', LOCAL_KEYS.workTemplatesV2, 'name', true);
+    }
+    return templates;
+}
+
+async function loadWorkProjects() {
+    return _loadWorkTableRows('projects', LOCAL_KEYS.workProjects, 'updated_at', false);
+}
+
+async function loadWorkProject(projectId) {
+    const list = await loadWorkProjects();
+    return list.find(project => String(project.id) === String(projectId)) || null;
+}
+
+async function loadWorkTasks() {
+    await ensureWorkManagementBootstrap();
+    return _loadWorkTableRows('tasks', LOCAL_KEYS.workTasks, 'updated_at', false);
+}
+
+async function loadTaskComments() {
+    await ensureWorkManagementBootstrap();
+    return _loadWorkTableRows('task_comments', LOCAL_KEYS.taskComments, 'created_at', true);
+}
+
+async function loadWorkAssets() {
+    await ensureWorkManagementBootstrap();
+    return _loadWorkTableRows('work_assets', LOCAL_KEYS.workAssets, 'created_at', true);
+}
+
+async function loadTaskChecklistItems() {
+    await ensureWorkManagementBootstrap();
+    return _loadWorkTableRows('task_checklist_items', LOCAL_KEYS.taskChecklistItems, 'sort_index', true);
+}
+
+async function loadTaskWatchers() {
+    await ensureWorkManagementBootstrap();
+    return _loadWorkTableRows('task_watchers', LOCAL_KEYS.taskWatchers, 'task_id', true);
+}
+
+async function loadWorkActivity() {
+    await ensureWorkManagementBootstrap();
+    return _loadWorkTableRows('work_activity', LOCAL_KEYS.workActivity, 'created_at', false);
+}
+
+async function loadTaskNotificationEvents() {
+    await ensureWorkManagementBootstrap();
+    return _loadWorkTableRows('task_notification_events', LOCAL_KEYS.taskNotificationEvents, 'created_at', false);
+}
+
+async function appendWorkActivity(entry) {
+    const core = _workCore();
+    const row = {
+        id: entry.id || core.generateEntityId(),
+        task_id: _toNumberOrNull(entry.task_id),
+        project_id: _toNumberOrNull(entry.project_id),
+        order_id: _toNumberOrNull(entry.order_id),
+        author_id: _toNumberOrNull(entry.author_id),
+        author_name: entry.author_name || '',
+        activity_type: entry.activity_type || 'note',
+        message: entry.message || '',
+        metadata: entry.metadata || {},
+        created_at: entry.created_at || new Date().toISOString(),
+        updated_at: entry.updated_at || new Date().toISOString(),
+    };
+    await _upsertWorkTableRows('work_activity', LOCAL_KEYS.workActivity, row, 'id');
+    return row;
+}
+
+async function appendTaskNotificationEvent(event) {
+    const core = _workCore();
+    const row = {
+        id: event.id || core.generateEntityId(),
+        task_id: _toNumberOrNull(event.task_id),
+        project_id: _toNumberOrNull(event.project_id),
+        event_type: event.event_type || '',
+        payload: event.payload || {},
+        created_at: event.created_at || new Date().toISOString(),
+        processed_at: event.processed_at || null,
+    };
+    await _upsertWorkTableRows('task_notification_events', LOCAL_KEYS.taskNotificationEvents, row, 'id');
+    return row;
+}
+
+async function saveWorkProject(project, actor) {
+    const core = _workCore();
+    const nowIso = new Date().toISOString();
+    const existing = project?.id ? await loadWorkProject(project.id) : null;
+    const employees = await loadEmployees();
+    const employeesById = new Map((employees || []).map(emp => [String(emp.id), emp]));
+    const orders = await loadOrders({});
+    const order = (orders || []).find(item => String(item.id) === String(project.linked_order_id || existing?.linked_order_id || ''));
+    const ownerId = _toNumberOrNull(project.owner_id ?? existing?.owner_id);
+    const createdById = _toNumberOrNull(project.created_by ?? existing?.created_by ?? actor?.id ?? App?.currentEmployeeId);
+    const row = {
+        id: project.id || core.generateEntityId(),
+        title: String(project.title || existing?.title || '').trim(),
+        type: String(project.type || existing?.type || 'Другое').trim(),
+        owner_id: ownerId,
+        owner_name: _resolvePersonFromPayload(ownerId, project.owner_name || existing?.owner_name || '', employeesById),
+        linked_order_id: _toNumberOrNull(project.linked_order_id ?? existing?.linked_order_id),
+        linked_order_name: order?.order_name || project.linked_order_name || existing?.linked_order_name || '',
+        area_id: _toNumberOrNull(project.area_id ?? existing?.area_id),
+        start_date: project.start_date || existing?.start_date || null,
+        due_date: project.due_date || existing?.due_date || null,
+        launch_at: project.launch_at || existing?.launch_at || null,
+        status: project.status || existing?.status || 'active',
+        brief: project.brief || existing?.brief || '',
+        goal: project.goal || existing?.goal || '',
+        result_summary: project.result_summary || existing?.result_summary || '',
+        created_by: createdById,
+        created_by_name: _resolvePersonFromPayload(createdById, project.created_by_name || existing?.created_by_name || actor?.name || App?.getCurrentEmployeeName?.() || '', employeesById),
+        created_at: existing?.created_at || nowIso,
+        updated_at: nowIso,
+    };
+    await _upsertWorkTableRows('projects', LOCAL_KEYS.workProjects, row, 'id');
+
+    const authorName = actor?.name || App?.getCurrentEmployeeName?.() || row.created_by_name || 'Система';
+    if (!existing) {
+        await appendWorkActivity({
+            project_id: row.id,
+            order_id: row.linked_order_id,
+            author_id: actor?.id || App?.currentEmployeeId || null,
+            author_name: authorName,
+            activity_type: 'project_created',
+            message: `Создан проект «${row.title}».`,
+        });
+    } else {
+        const changedFields = [];
+        ['title', 'type', 'status', 'due_date', 'launch_at', 'owner_id', 'linked_order_id', 'area_id'].forEach(field => {
+            if (String(existing[field] ?? '') !== String(row[field] ?? '')) changedFields.push(field);
+        });
+        if (changedFields.length > 0) {
+            await appendWorkActivity({
+                project_id: row.id,
+                order_id: row.linked_order_id,
+                author_id: actor?.id || App?.currentEmployeeId || null,
+                author_name: authorName,
+                activity_type: 'project_updated',
+                message: `Обновлён проект «${row.title}».`,
+                metadata: { changed_fields: changedFields },
+            });
+        }
+    }
+    return row;
+}
+
+async function saveTaskComment(comment) {
+    const core = _workCore();
+    const employees = await loadEmployees();
+    const employee = (employees || []).find(item => String(item.id) === String(comment.author_id || App?.currentEmployeeId || ''));
+    const mentions = Array.isArray(comment.mentions)
+        ? comment.mentions
+        : core.extractMentionedEmployeeIds(comment.body, employees);
+    const row = {
+        id: comment.id || core.generateEntityId(),
+        task_id: _toNumberOrNull(comment.task_id),
+        author_id: _toNumberOrNull(comment.author_id ?? App?.currentEmployeeId),
+        author_name: comment.author_name || employee?.name || App?.getCurrentEmployeeName?.() || '',
+        body: String(comment.body || '').trim(),
+        mentions: mentions,
+        created_at: comment.created_at || new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+    };
+    await _upsertWorkTableRows('task_comments', LOCAL_KEYS.taskComments, row, 'id');
+
+    const tasks = getLocal(LOCAL_KEYS.workTasks) || [];
+    const task = tasks.find(item => String(item.id) === String(row.task_id));
+    await appendWorkActivity({
+        task_id: row.task_id,
+        project_id: task?.project_id || null,
+        order_id: task?.order_id || null,
+        author_id: row.author_id,
+        author_name: row.author_name,
+        activity_type: 'comment_added',
+        message: 'Добавлен комментарий.',
+        metadata: { comment_id: row.id },
+    });
+
+    return row;
+}
+
+async function saveWorkAsset(asset) {
+    const core = _workCore();
+    const employees = await loadEmployees();
+    const employee = (employees || []).find(item => String(item.id) === String(asset.created_by || App?.currentEmployeeId || ''));
+    const row = {
+        id: asset.id || core.generateEntityId(),
+        task_id: _toNumberOrNull(asset.task_id),
+        project_id: _toNumberOrNull(asset.project_id),
+        kind: asset.kind || 'link',
+        title: asset.title || '',
+        url: asset.url || '',
+        file_name: asset.file_name || '',
+        file_type: asset.file_type || '',
+        file_size: asset.file_size || 0,
+        data_url: asset.data_url || '',
+        preview_meta: asset.preview_meta || {},
+        created_by: _toNumberOrNull(asset.created_by ?? App?.currentEmployeeId),
+        created_by_name: asset.created_by_name || employee?.name || App?.getCurrentEmployeeName?.() || '',
+        created_at: asset.created_at || new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+    };
+    await _upsertWorkTableRows('work_assets', LOCAL_KEYS.workAssets, row, 'id');
+
+    const tasks = getLocal(LOCAL_KEYS.workTasks) || [];
+    const task = row.task_id ? tasks.find(item => String(item.id) === String(row.task_id)) : null;
+    await appendWorkActivity({
+        task_id: row.task_id,
+        project_id: row.project_id || task?.project_id || null,
+        order_id: task?.order_id || null,
+        author_id: row.created_by,
+        author_name: row.created_by_name,
+        activity_type: 'asset_added',
+        message: row.kind === 'file' ? 'Добавлен файл.' : 'Добавлена ссылка.',
+        metadata: { asset_id: row.id, kind: row.kind },
+    });
+
+    return row;
+}
+
+async function deleteWorkAsset(assetId) {
+    await _deleteWorkTableRow('work_assets', LOCAL_KEYS.workAssets, assetId);
+}
+
+async function saveTaskChecklistItem(item) {
+    const core = _workCore();
+    const existingItems = getLocal(LOCAL_KEYS.taskChecklistItems) || [];
+    const existing = item.id ? existingItems.find(entry => String(entry.id) === String(item.id)) : null;
+    const forTask = existingItems.filter(entry => String(entry.task_id) === String(item.task_id));
+    const nextSort = forTask.reduce((max, entry) => Math.max(max, Number(entry.sort_index) || 0), 0) + 100;
+    const row = {
+        id: item.id || core.generateEntityId(),
+        task_id: _toNumberOrNull(item.task_id),
+        title: String(item.title || '').trim(),
+        is_done: !!item.is_done,
+        sort_index: item.sort_index != null ? Number(item.sort_index) : (existing?.sort_index ?? nextSort),
+        assignee_id: _toNumberOrNull(item.assignee_id),
+        created_at: existing?.created_at || item.created_at || new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+    };
+    await _upsertWorkTableRows('task_checklist_items', LOCAL_KEYS.taskChecklistItems, row, 'id');
+    return row;
+}
+
+async function deleteTaskChecklistItem(itemId) {
+    await _deleteWorkTableRow('task_checklist_items', LOCAL_KEYS.taskChecklistItems, itemId);
+}
+
+async function saveTaskWatchers(taskId, userIds) {
+    const targetTaskId = _toNumberOrNull(taskId);
+    const deduped = [...new Set((userIds || []).map(id => _toNumberOrNull(id)).filter(Boolean))];
+    const existing = getLocal(LOCAL_KEYS.taskWatchers) || [];
+    const remaining = existing.filter(item => String(item.task_id) !== String(targetTaskId));
+    const nextRows = deduped.map(userId => ({
+        task_id: targetTaskId,
+        user_id: userId,
+        created_at: new Date().toISOString(),
+    }));
+
+    if (_canUseWorkModuleRemote()) {
+        try {
+            const { error: deleteError } = await supabaseClient.from('task_watchers').delete().eq('task_id', targetTaskId);
+            if (deleteError) {
+                _markWorkModuleRemoteUnavailable(deleteError);
+                if (!_isWorkModuleMissingTableError(deleteError)) console.error('delete task_watchers error:', deleteError);
+            } else {
+                _workModuleRemoteAvailable = true;
+            }
+            if (nextRows.length > 0) {
+                const { error } = await supabaseClient.from('task_watchers').upsert(nextRows, { onConflict: 'task_id,user_id' });
+                if (error) {
+                    _markWorkModuleRemoteUnavailable(error);
+                    if (!_isWorkModuleMissingTableError(error)) console.error('upsert task_watchers error:', error);
+                } else {
+                    _workModuleRemoteAvailable = true;
+                }
+            }
+        } catch (e) {
+            console.error('save task_watchers exception:', e);
+        }
+    }
+    const next = [...remaining, ...nextRows];
+    setLocal(LOCAL_KEYS.taskWatchers, next);
+    if (!_canUseWorkModuleRemote()) await _saveJsonSetting(_workSettingsKey('task_watchers'), next);
+    return nextRows;
+}
+
+function _taskSortIndexForSave(task, existingTask, allTasks) {
+    if (task.sort_index != null && task.sort_index !== '') return Number(task.sort_index) || 0;
+    if (existingTask?.sort_index != null) return Number(existingTask.sort_index) || 0;
+    const sameAssignee = (allTasks || []).filter(item =>
+        String(item.assignee_id || '') === String(task.assignee_id || '')
+        && String(item.parent_task_id || '') === String(task.parent_task_id || '')
+    );
+    return sameAssignee.reduce((max, item) => Math.max(max, Number(item.sort_index) || 0), 0) + 100;
+}
+
+function _taskOrderName(task, orders, projects) {
+    const directOrder = (orders || []).find(order => String(order.id) === String(task.order_id || ''));
+    if (directOrder) return directOrder.order_name || '';
+    const project = (projects || []).find(item => String(item.id) === String(task.project_id || ''));
+    if (project && project.linked_order_name) return project.linked_order_name;
+    return '';
+}
+
+async function saveWorkTask(task, options = {}) {
+    const core = _workCore();
+    const nowIso = new Date().toISOString();
+    const allTasks = getLocal(LOCAL_KEYS.workTasks) || [];
+    const existing = task?.id ? allTasks.find(item => String(item.id) === String(task.id)) : null;
+    const employees = await loadEmployees();
+    const employeesById = new Map((employees || []).map(emp => [String(emp.id), emp]));
+    const orders = await loadOrders({});
+    const projects = await loadWorkProjects();
+    const project = (projects || []).find(item => String(item.id) === String(task.project_id || existing?.project_id || ''));
+    const reporterId = _toNumberOrNull(task.reporter_id ?? existing?.reporter_id ?? App?.currentEmployeeId);
+    const assigneeId = _toNumberOrNull(task.assignee_id ?? existing?.assignee_id);
+    const reviewerId = _toNumberOrNull(task.reviewer_id ?? existing?.reviewer_id);
+    const row = {
+        id: task.id || core.generateEntityId(),
+        title: String(task.title || existing?.title || '').trim(),
+        description: task.description || existing?.description || '',
+        status: task.status || existing?.status || 'incoming',
+        priority: task.priority || existing?.priority || 'normal',
+        reporter_id: reporterId,
+        reporter_name: _resolvePersonFromPayload(reporterId, task.reporter_name || existing?.reporter_name || App?.getCurrentEmployeeName?.() || '', employeesById),
+        assignee_id: assigneeId,
+        assignee_name: _resolvePersonFromPayload(assigneeId, task.assignee_name || existing?.assignee_name || '', employeesById),
+        reviewer_id: reviewerId,
+        reviewer_name: _resolvePersonFromPayload(reviewerId, task.reviewer_name || existing?.reviewer_name || '', employeesById),
+        area_id: _toNumberOrNull(task.area_id ?? existing?.area_id ?? project?.area_id),
+        order_id: _toNumberOrNull(task.order_id ?? existing?.order_id ?? null),
+        order_name: '',
+        project_id: _toNumberOrNull(task.project_id ?? existing?.project_id),
+        project_title: project?.title || task.project_title || existing?.project_title || '',
+        china_purchase_id: _toNumberOrNull(task.china_purchase_id ?? existing?.china_purchase_id),
+        warehouse_item_id: _toNumberOrNull(task.warehouse_item_id ?? existing?.warehouse_item_id),
+        primary_context_kind: task.primary_context_kind || existing?.primary_context_kind || 'area',
+        due_date: task.due_date || existing?.due_date || null,
+        due_time: task.due_time || existing?.due_time || null,
+        waiting_for_text: task.waiting_for_text || existing?.waiting_for_text || '',
+        sort_index: _taskSortIndexForSave(task, existing, allTasks),
+        parent_task_id: _toNumberOrNull(task.parent_task_id ?? existing?.parent_task_id),
+        completed_at: existing?.completed_at || null,
+        cancelled_at: existing?.cancelled_at || null,
+        created_at: existing?.created_at || nowIso,
+        updated_at: nowIso,
+    };
+
+    row.order_name = _taskOrderName(row, orders, projects);
+    row.primary_context_kind = core.ensurePrimaryContextKind(row, project);
+    if (!row.order_id && !row.project_id && !row.area_id) {
+        throw new Error('У задачи должен быть хотя бы один контекст');
+    }
+    if (row.status === 'done') {
+        row.completed_at = existing?.completed_at || nowIso;
+        row.cancelled_at = null;
+    } else if (row.status === 'cancelled') {
+        row.cancelled_at = existing?.cancelled_at || nowIso;
+        row.completed_at = null;
+    } else {
+        row.completed_at = null;
+        row.cancelled_at = null;
+    }
+
+    await _upsertWorkTableRows('tasks', LOCAL_KEYS.workTasks, row, 'id');
+
+    if (!options.skipActivity) {
+        const authorId = options.actor_id ?? App?.currentEmployeeId ?? reporterId;
+        const authorName = options.actor_name || App?.getCurrentEmployeeName?.() || row.reporter_name || 'Система';
+        if (!existing) {
+            await appendWorkActivity({
+                task_id: row.id,
+                project_id: row.project_id,
+                order_id: row.order_id,
+                author_id: authorId,
+                author_name: authorName,
+                activity_type: 'task_created',
+                message: `Создана задача «${row.title}».`,
+            });
+        } else {
+            if (existing.status !== row.status) {
+                const activityType = row.status === 'review'
+                    ? 'task_sent_to_review'
+                    : row.status === 'done'
+                        ? 'task_completed'
+                        : row.status === 'cancelled'
+                            ? 'task_cancelled'
+                            : 'status_changed';
+                await appendWorkActivity({
+                    task_id: row.id,
+                    project_id: row.project_id,
+                    order_id: row.order_id,
+                    author_id: authorId,
+                    author_name: authorName,
+                    activity_type: activityType,
+                    message: `Статус изменён: ${core.getTaskStatusLabel(existing.status)} → ${core.getTaskStatusLabel(row.status)}.`,
+                });
+            }
+            if (String(existing.assignee_id || '') !== String(row.assignee_id || '')) {
+                await appendWorkActivity({
+                    task_id: row.id,
+                    project_id: row.project_id,
+                    order_id: row.order_id,
+                    author_id: authorId,
+                    author_name: authorName,
+                    activity_type: 'assignee_changed',
+                    message: `Исполнитель изменён: ${existing.assignee_name || '—'} → ${row.assignee_name || '—'}.`,
+                });
+            }
+            if (String(existing.due_date || '') !== String(row.due_date || '') || String(existing.due_time || '') !== String(row.due_time || '')) {
+                await appendWorkActivity({
+                    task_id: row.id,
+                    project_id: row.project_id,
+                    order_id: row.order_id,
+                    author_id: authorId,
+                    author_name: authorName,
+                    activity_type: 'due_changed',
+                    message: 'Срок задачи обновлён.',
+                });
+            }
+            if (existing.priority !== row.priority) {
+                await appendWorkActivity({
+                    task_id: row.id,
+                    project_id: row.project_id,
+                    order_id: row.order_id,
+                    author_id: authorId,
+                    author_name: authorName,
+                    activity_type: 'priority_changed',
+                    message: `Приоритет изменён: ${existing.priority || '—'} → ${row.priority || '—'}.`,
+                });
+            }
+        }
+    }
+
+    return row;
+}
+
+async function deleteWorkTask(taskId) {
+    const targetId = _toNumberOrNull(taskId);
+    const childTasks = (getLocal(LOCAL_KEYS.workTasks) || []).filter(item => String(item.parent_task_id || '') === String(targetId));
+    for (const child of childTasks) {
+        await deleteWorkTask(child.id);
+    }
+    if (_canUseWorkModuleRemote()) {
+        try {
+            const responses = await Promise.all([
+                supabaseClient.from('task_comments').delete().eq('task_id', targetId),
+                supabaseClient.from('work_assets').delete().eq('task_id', targetId),
+                supabaseClient.from('task_checklist_items').delete().eq('task_id', targetId),
+                supabaseClient.from('task_watchers').delete().eq('task_id', targetId),
+                supabaseClient.from('work_activity').delete().eq('task_id', targetId),
+            ]);
+            const firstError = responses.map(item => item?.error).find(Boolean);
+            if (firstError) {
+                _markWorkModuleRemoteUnavailable(firstError);
+                if (!_isWorkModuleMissingTableError(firstError)) console.error('deleteWorkTask cascade error:', firstError);
+            } else {
+                _workModuleRemoteAvailable = true;
+            }
+        } catch (e) {
+            console.error('deleteWorkTask cascade exception:', e);
+        }
+    }
+    _removeLocalEntityRow(LOCAL_KEYS.taskComments, item => String(item.task_id) === String(targetId));
+    _removeLocalEntityRow(LOCAL_KEYS.workAssets, item => String(item.task_id) === String(targetId));
+    _removeLocalEntityRow(LOCAL_KEYS.taskChecklistItems, item => String(item.task_id) === String(targetId));
+    _removeLocalEntityRow(LOCAL_KEYS.taskWatchers, item => String(item.task_id) === String(targetId));
+    _removeLocalEntityRow(LOCAL_KEYS.workActivity, item => String(item.task_id) === String(targetId));
+    if (!_canUseWorkModuleRemote()) {
+        await _saveJsonSetting(_workSettingsKey('task_comments'), getLocal(LOCAL_KEYS.taskComments) || []);
+        await _saveJsonSetting(_workSettingsKey('work_assets'), getLocal(LOCAL_KEYS.workAssets) || []);
+        await _saveJsonSetting(_workSettingsKey('task_checklist_items'), getLocal(LOCAL_KEYS.taskChecklistItems) || []);
+        await _saveJsonSetting(_workSettingsKey('task_watchers'), getLocal(LOCAL_KEYS.taskWatchers) || []);
+        await _saveJsonSetting(_workSettingsKey('work_activity'), getLocal(LOCAL_KEYS.workActivity) || []);
+    }
+    await _deleteWorkTableRow('tasks', LOCAL_KEYS.workTasks, targetId);
+}
+
+async function _findOrCreateLegacyProject(projectTitle, linkedOrderId, assignee, areas, actor) {
+    const core = _workCore();
+    const title = String(projectTitle || '').trim();
+    if (!title) return null;
+    const existingProjects = await loadWorkProjects();
+    const normalize = core.normalizeText;
+    const found = existingProjects.find(project =>
+        normalize(project.title) === normalize(title)
+        && String(project.linked_order_id || '') === String(linkedOrderId || '')
+    );
+    if (found) return found;
+    const inferredArea = findAreaBySlug(core.inferAreaSlugFromText(`${title} ${assignee || ''}`), areas);
+    return saveWorkProject({
+        title,
+        type: 'Другое',
+        owner_id: assignee?.id || null,
+        owner_name: assignee?.name || assignee || '',
+        linked_order_id: linkedOrderId || null,
+        area_id: inferredArea?.id || null,
+        status: 'active',
+        brief: '',
+        goal: '',
+        result_summary: '',
+    }, actor);
+}
+
+async function migrateLegacyTasksToWorkModule() {
+    const core = _workCore();
+    const existingTasks = await _loadWorkTableRows('tasks', LOCAL_KEYS.workTasks, 'updated_at', false);
+    if (existingTasks.length > 0) return existingTasks;
+
+    const legacyTasks = await loadTasks();
+    if (!Array.isArray(legacyTasks) || legacyTasks.length === 0) return [];
+
+    const areas = await loadWorkAreas();
+    const orders = await loadOrders({});
+    const employees = await loadEmployees();
+    const authAccounts = await loadAuthAccounts();
+    const employeeMaps = _buildEmployeeMaps(employees, authAccounts);
+    const ordersById = new Map((orders || []).map(order => [String(order.id), order]));
+    const migrationActor = {
+        id: App?.currentEmployeeId || null,
+        name: App?.getCurrentEmployeeName?.() || 'Миграция',
+    };
+
+    for (const legacyTask of legacyTasks) {
+        const legacyAssignees = String(legacyTask.assignee || '')
+            .split(',')
+            .map(token => token.trim())
+            .filter(Boolean);
+        const assigneeEmployee = legacyAssignees.length > 0
+            ? _resolveEmployeeToken(legacyAssignees[0], employeeMaps)
+            : null;
+        const watcherIds = legacyAssignees
+            .slice(1)
+            .map(token => _resolveEmployeeToken(token, employeeMaps))
+            .filter(Boolean)
+            .map(employee => employee.id);
+        const deadline = core.parseLegacyDeadline(legacyTask.deadline);
+        const orderId = _toNumberOrNull(legacyTask.order_id);
+        const order = orderId != null ? ordersById.get(String(orderId)) : null;
+        const project = legacyTask.project
+            ? await _findOrCreateLegacyProject(legacyTask.project, orderId, assigneeEmployee || legacyAssignees[0] || '', areas, migrationActor)
+            : null;
+        const areaSlug = project
+            ? null
+            : core.inferAreaSlugFromText(`${legacyTask.title || ''} ${legacyTask.project || ''} ${legacyTask.description || ''}`);
+        const area = areaSlug ? findAreaBySlug(areaSlug, areas) : findAreaBySlug('general', areas);
+
+        const taskRow = await saveWorkTask({
+            id: _toNumberOrNull(legacyTask.id) || core.generateEntityId(),
+            title: legacyTask.title || 'Без названия',
+            description: legacyTask.description || '',
+            status: core.mapLegacyTaskStatus(legacyTask.status),
+            priority: 'normal',
+            reporter_id: null,
+            reporter_name: 'Legacy import',
+            assignee_id: assigneeEmployee?.id || null,
+            assignee_name: assigneeEmployee?.name || legacyAssignees[0] || '',
+            reviewer_id: null,
+            reviewer_name: '',
+            area_id: area?.id || findAreaBySlug('general', areas)?.id || null,
+            order_id: orderId,
+            order_name: order?.order_name || legacyTask.order_name || '',
+            project_id: project?.id || null,
+            project_title: project?.title || legacyTask.project || '',
+            primary_context_kind: orderId ? 'order' : (project?.id ? 'project' : 'area'),
+            due_date: deadline.due_date,
+            due_time: deadline.due_time,
+            waiting_for_text: '',
+            completed_at: core.mapLegacyTaskStatus(legacyTask.status) === 'done' ? (legacyTask.updated_at || new Date().toISOString()) : null,
+            cancelled_at: core.mapLegacyTaskStatus(legacyTask.status) === 'cancelled' ? (legacyTask.updated_at || new Date().toISOString()) : null,
+            created_at: legacyTask.created_at || new Date().toISOString(),
+            updated_at: legacyTask.updated_at || legacyTask.created_at || new Date().toISOString(),
+        }, {
+            skipActivity: true,
+            actor_name: migrationActor.name,
+            actor_id: migrationActor.id,
+        });
+
+        if (watcherIds.length > 0) {
+            await saveTaskWatchers(taskRow.id, watcherIds);
+        }
+
+        await appendWorkActivity({
+            task_id: taskRow.id,
+            project_id: taskRow.project_id,
+            order_id: taskRow.order_id,
+            author_id: migrationActor.id,
+            author_name: migrationActor.name,
+            activity_type: 'legacy_import',
+            message: 'Задача перенесена из старого модуля задач.',
+            metadata: { legacy_task_id: legacyTask.id },
+            created_at: taskRow.created_at,
+            updated_at: taskRow.updated_at,
+        });
+    }
+
+    return _loadWorkTableRows('tasks', LOCAL_KEYS.workTasks, 'updated_at', false);
+}
+
+async function ensureWorkManagementBootstrap() {
+    if (_workBootstrapPromise) return _workBootstrapPromise;
+    _workBootstrapPromise = (async () => {
+        await loadWorkAreas();
+        await loadWorkTemplatesV2();
+        await migrateLegacyTasksToWorkModule();
+        return true;
+    })();
+    return _workBootstrapPromise;
+}
+
+async function loadWorkBundle() {
+    await ensureWorkManagementBootstrap();
+    const [
+        areas,
+        projects,
+        tasks,
+        comments,
+        assets,
+        checklistItems,
+        watchers,
+        activity,
+        templates,
+    ] = await Promise.all([
+        loadWorkAreas(),
+        loadWorkProjects(),
+        _loadWorkTableRows('tasks', LOCAL_KEYS.workTasks, 'updated_at', false),
+        _loadWorkTableRows('task_comments', LOCAL_KEYS.taskComments, 'created_at', true),
+        _loadWorkTableRows('work_assets', LOCAL_KEYS.workAssets, 'created_at', true),
+        _loadWorkTableRows('task_checklist_items', LOCAL_KEYS.taskChecklistItems, 'sort_index', true),
+        _loadWorkTableRows('task_watchers', LOCAL_KEYS.taskWatchers, 'task_id', true),
+        _loadWorkTableRows('work_activity', LOCAL_KEYS.workActivity, 'created_at', false),
+        loadWorkTemplatesV2(),
+    ]);
+    return { areas, projects, tasks, comments, assets, checklistItems, watchers, activity, templates };
 }

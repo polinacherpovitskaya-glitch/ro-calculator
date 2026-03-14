@@ -1216,6 +1216,168 @@ table .text-center { text-align: center; }
     min-height: 400px;
 }
 
+.wm-two-column {
+    display: grid;
+    grid-template-columns: minmax(0, 1.35fr) minmax(340px, 0.95fr);
+    gap: 16px;
+    align-items: start;
+}
+
+.wm-main-column,
+.wm-side-column {
+    min-width: 0;
+}
+
+.wm-assets-list,
+.wm-comments-list,
+.wm-activity-list,
+.wm-subtasks-list,
+.wm-checklist-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.wm-asset-row,
+.wm-comment-row,
+.wm-activity-row {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg);
+}
+
+.wm-checklist-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg);
+}
+
+.wm-checklist-row .btn {
+    margin-left: auto;
+}
+
+.wm-subtask-row {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg);
+    cursor: pointer;
+    text-align: left;
+}
+
+.wm-watchers-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.wm-watcher-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--bg);
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.wm-calendar-grid {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.wm-calendar-head > div {
+    padding: 4px 0;
+    text-align: center;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-muted);
+}
+
+.wm-calendar-cell {
+    min-height: 120px;
+    padding: 8px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-card);
+}
+
+.wm-calendar-cell.is-empty {
+    background: transparent;
+    border-style: dashed;
+}
+
+.wm-calendar-day {
+    margin-bottom: 8px;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.wm-calendar-tasks {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.wm-calendar-task {
+    width: 100%;
+    padding: 6px 8px;
+    border: 0;
+    border-radius: 6px;
+    background: var(--accent-light);
+    color: var(--accent);
+    font-size: 12px;
+    text-align: left;
+    cursor: pointer;
+}
+
+.wm-calendar-task.is-overdue {
+    background: var(--red-light);
+    color: var(--red);
+}
+
+.od-project-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 12px;
+}
+
+.od-project-card {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 14px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg);
+    text-align: left;
+    cursor: pointer;
+}
+
+.od-project-card:hover,
+.wm-subtask-row:hover,
+.wm-calendar-task:hover {
+    filter: brightness(0.98);
+}
+
 .kanban-column {
     background: var(--bg);
     border-radius: 10px;
@@ -1359,6 +1521,11 @@ table .text-center { text-align: center; }
     .kanban-board {
         grid-template-columns: 1fr;
     }
+
+    .wm-two-column {
+        grid-template-columns: 1fr;
+    }
+
 }
 
 /* =============================================

@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=77">
+    <link rel="stylesheet" href="css/style.css?v=78">
 </head>
 <body>
 
@@ -77,6 +77,10 @@
             <a href="#tasks" data-page="tasks">
                 <span class="nav-icon">&#9745;</span>
                 <span>Задачи</span>
+            </a>
+            <a href="#projects" data-page="projects">
+                <span class="nav-icon">&#128193;</span>
+                <span>Проекты</span>
             </a>
             <a href="#gantt" data-page="gantt">
                 <span class="nav-icon">&#128197;</span>
@@ -1581,6 +1585,8 @@
             <!-- Kanban board -->
             <div class="kanban-board" id="tasks-kanban"></div>
         </div>
+
+        <div id="page-projects" class="page"></div>
 
         <!-- ========== GANTT CALENDAR ========== -->
         <div id="page-gantt" class="page">
@@ -3267,11 +3273,13 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="js/supabase.js?v=93"></script>
+<script src="js/work-management-core.js?v=1"></script>
+<script src="js/supabase.js?v=98"></script>
+<script src="js/task-events.js?v=1"></script>
 <script src="js/calculator.js?v=64"></script>
-<script src="js/app.js?v=94"></script>
+<script src="js/app.js?v=99"></script>
 <script src="js/dashboard.js?v=47"></script>
-<script src="js/order-detail.js?v=49"></script>
+<script src="js/order-detail.js?v=50"></script>
 <script src="js/orders.js?v=54"></script>
 <script src="js/production_plan.js?v=75"></script>
 <script src="js/analytics.js?v=46g"></script>
@@ -3279,7 +3287,8 @@
 <script src="js/colors.js?v=46g"></script>
 <script src="js/kp.js?v=46g"></script>
 <script src="js/timetrack.js?v=57"></script>
-<script src="js/tasks.js?v=46g"></script>
+<script src="js/projects.js?v=2"></script>
+<script src="js/tasks.js?v=48"></script>
 <script src="js/gantt.js?v=47"></script>
 <script src="js/fintablo.js?v=1"></script>
 <script src="js/indirect_costs.js?v=7"></script>
@@ -3289,6 +3298,6 @@
 <script src="js/china_catalog.js?v=46k"></script>
 <script src="js/marketplaces.js?v=72"></script>
 <script src="js/warehouse.js?v=87"></script>
-<script src="js/settings.js?v=69"></script>
+<script src="js/settings.js?v=70"></script>
 </body>
 </html>

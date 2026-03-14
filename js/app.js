@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v82';
+const APP_VERSION = 'v86';
 
 const App = {
     currentPage: 'dashboard',
@@ -21,12 +21,12 @@ const App = {
     // All pages in the app
     ALL_PAGES: [
         'dashboard', 'calculator', 'orders', 'production-plan', 'factual',
-        'analytics', 'molds', 'colors', 'timetrack', 'tasks', 'gantt',
+        'analytics', 'molds', 'colors', 'timetrack', 'tasks', 'projects', 'gantt',
         'import', 'warehouse', 'marketplaces', 'china', 'settings',
     ],
 
     // Pages visible to everyone by default (if no custom config)
-    DEFAULT_PAGES: ['dashboard', 'timetrack', 'tasks'],
+    DEFAULT_PAGES: ['dashboard', 'timetrack', 'tasks', 'projects'],
 
     // Check if current user has access to a specific page
     canAccess(page) {
@@ -38,7 +38,9 @@ const App = {
         const perms = JSON.parse(localStorage.getItem('ro_employee_pages') || '{}');
         const allowed = perms[String(empId)];
         if (!allowed) return this.DEFAULT_PAGES.includes(page);
-        return allowed.includes(page);
+        if (allowed.includes(page)) return true;
+        if (page === 'projects' && allowed.includes('tasks')) return true;
+        return false;
     },
 
     // Backward-compat: isAdmin = canAccess('settings')
@@ -559,7 +561,8 @@ const App = {
             case 'molds': Molds.load(); break;
             case 'colors': Colors.load(); break;
             case 'timetrack': TimeTrack.load(); break;
-            case 'tasks': Tasks.load(); Tasks.populateFilters(); break;
+            case 'tasks': Tasks.load(subId ? parseInt(subId, 10) : null); break;
+            case 'projects': Projects.load(subId ? parseInt(subId, 10) : null); break;
             case 'gantt': Gantt.load(); break;
             case 'import': FinTablo.load(); break;
             case 'indirect-costs': App.navigate('settings'); setTimeout(() => Settings.switchTab('indirect'), 100); break;

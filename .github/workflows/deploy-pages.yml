@@ -33,6 +33,7 @@ jobs:
           for f in js/*.js; do
             node --check "$f"
           done
+          node tests/work-management-smoke.js
 
   deploy:
     needs: verify

@@ -50,7 +50,7 @@ const OrderDetail = {
         this.renderProductionTab();
         this.renderFilesTab();
         this.renderItemsTab();
-        this.renderTasksTab();
+        await this.renderTasksTab();
         this.renderChinaTab();
 
         // Show first tab
@@ -373,57 +373,70 @@ const OrderDetail = {
     // TASKS TAB (v33: linked tasks)
     // ==========================================
 
-    renderTasksTab() {
+    async renderTasksTab() {
         const container = document.getElementById('od-tab-tasks');
         const orderId = this.currentOrder.id;
+        const bundle = await loadWorkBundle();
+        const projects = (bundle.projects || []).filter(project => String(project.linked_order_id || '') === String(orderId));
+        const projectIds = new Set(projects.map(project => String(project.id)));
+        const tasks = (bundle.tasks || []).filter(task =>
+            String(task.order_id || '') === String(orderId)
+            || projectIds.has(String(task.project_id || ''))
+        );
 
-        // Ensure Tasks module has data
-        const tasks = (typeof Tasks !== 'undefined' && Tasks.allTasks.length > 0)
-            ? Tasks.getTasksForOrder(orderId)
-            : [];
+        const projectCards = projects.length === 0
+            ? '<div class="text-muted" style="font-size:13px;">Связанных проектов пока нет</div>'
+            : projects.map(project => {
+                const projectTasks = tasks.filter(task => String(task.project_id || '') === String(project.id));
+                return `
+                    <button class="od-project-card" onclick="App.navigate('projects', true, ${project.id})">
+                        <div style="font-weight:700">${this._esc(project.title)}</div>
+                        <div class="text-muted" style="font-size:12px">${this._esc(project.type || 'Другое')} · ${this._esc(WorkManagementCore.getProjectStatusLabel(project.status))}</div>
+                        <div class="text-muted" style="font-size:12px">Задач: ${projectTasks.length} · Владелец: ${this._esc(project.owner_name || '—')}</div>
+                    </button>
+                `;
+            }).join('');
 
-        const statusIcon = (s) => {
-            const map = { 'Not started': '○', 'In progress': '◐', 'Done': '●', 'Cancelled': '✕' };
-            return map[s] || '○';
-        };
-        const statusColor = (s) => {
-            const map = { 'Not started': '#6b7280', 'In progress': '#f59e0b', 'Done': '#10b981', 'Cancelled': '#ef4444' };
-            return map[s] || '#6b7280';
-        };
-        const statusLabel = (s) => {
-            const map = { 'Not started': 'Не начато', 'In progress': 'В работе', 'Done': 'Готово', 'Cancelled': 'Отменено' };
-            return map[s] || s;
-        };
-
-        const taskRows = tasks.map(t => {
-            const deadlineHtml = t.deadline
-                ? `<span style="font-size:12px;${Tasks.isOverdue(t.deadline) ? 'color:var(--red)' : ''}">${Tasks.formatDeadline(t.deadline)}</span>`
-                : '';
+        const taskRows = tasks.map(task => {
+            const project = task.project_id ? projects.find(item => String(item.id) === String(task.project_id)) : null;
             return `
-            <tr onclick="Tasks.openTask(${t.id}); App.navigate('tasks', true);" style="cursor:pointer">
-                <td><span style="color:${statusColor(t.status)};font-size:16px;vertical-align:middle">${statusIcon(t.status)}</span> <b>${this._esc(t.title)}</b></td>
-                <td><span class="badge" style="background:${statusColor(t.status)}20;color:${statusColor(t.status)};font-size:11px">${statusLabel(t.status)}</span></td>
-                <td style="font-size:12px">${this._esc(t.assignee || '—')}</td>
-                <td>${deadlineHtml}</td>
-            </tr>`;
+                <tr onclick="App.navigate('tasks', true, ${task.id})" style="cursor:pointer">
+                    <td>
+                        <div style="font-weight:600">${this._esc(task.title)}</div>
+                        <div class="text-muted" style="font-size:12px">${this._esc(project ? `Проект: ${project.title}` : 'Прямая задача заказа')}</div>
+                    </td>
+                    <td><span class="badge">${this._esc(WorkManagementCore.getTaskStatusLabel(task.status))}</span></td>
+                    <td style="font-size:12px">${this._esc(task.assignee_name || '—')}</td>
+                    <td style="font-size:12px" class="${WorkManagementCore.isTaskOverdue(task) ? 'text-red' : ''}">${this._esc(task.due_date ? App.formatDate(task.due_date) + (task.due_time ? ' ' + task.due_time : '') : '—')}</td>
+                </tr>
+            `;
         }).join('');
 
-        const inProgress = tasks.filter(t => t.status === 'In progress').length;
-        const done = tasks.filter(t => t.status === 'Done').length;
+        const inProgress = tasks.filter(task => task.status === 'in_progress').length;
+        const done = tasks.filter(task => task.status === 'done').length;
         const total = tasks.length;
 
         container.innerHTML = `
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:12px;flex-wrap:wrap;">
                 <div style="font-size:13px;color:var(--text-muted)">
-                    Всего: <b>${total}</b> &nbsp;|&nbsp; В работе: <b>${inProgress}</b> &nbsp;|&nbsp; Готово: <b>${done}</b>
+                    Всего задач: <b>${total}</b> &nbsp;|&nbsp; В работе: <b>${inProgress}</b> &nbsp;|&nbsp; Готово: <b>${done}</b> &nbsp;|&nbsp; Проектов: <b>${projects.length}</b>
                 </div>
-                <button class="btn btn-sm btn-success" onclick="App.navigate('tasks', true); setTimeout(() => Tasks.showAddForm(${orderId}, '${this._esc(this.currentOrder.order_name || '')}'), 100);">+ Добавить задачу</button>
+                <div class="flex gap-8">
+                    <button class="btn btn-sm btn-outline" onclick="Projects.openCreate({ linked_order_id: ${orderId} })">+ Проект</button>
+                    <button class="btn btn-sm btn-success" onclick="Tasks.openCreate({ order_id: ${orderId}, primary_context_kind: 'order' })">+ Задача</button>
+                </div>
             </div>
+
+            <div class="card">
+                <div class="card-header"><h3>Связанные проекты</h3></div>
+                <div class="od-project-grid">${projectCards}</div>
+            </div>
+
             ${tasks.length === 0
                 ? `<div class="card"><div class="empty-state">
                         <div class="empty-icon">&#9745;</div>
-                        <p>Нет задач, привязанных к этому заказу</p>
-                        <button class="btn btn-sm btn-outline" onclick="App.navigate('tasks', true); setTimeout(() => Tasks.showAddForm(${orderId}, '${this._esc(this.currentOrder.order_name || '')}'), 100);">Создать первую задачу</button>
+                        <p>В этом заказе пока нет задач</p>
+                        <button class="btn btn-sm btn-outline" onclick="Tasks.openCreate({ order_id: ${orderId}, primary_context_kind: 'order' })">Создать первую задачу</button>
                    </div></div>`
                 : `<div class="card" style="padding:0"><div class="table-wrap"><table>
                     <thead><tr>
