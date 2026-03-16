@@ -2848,6 +2848,16 @@ table .text-center { text-align: center; }
    PENDANT CONFIGURATOR
    ========================================== */
 
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+}
+
 .pendant-card {
     border-left: 3px solid var(--accent);
 }
