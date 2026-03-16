@@ -90,6 +90,28 @@ const LOCAL_KEYS = {
     taskNotificationEvents: 'ro_calc_task_notification_events',
 };
 
+const NON_CRITICAL_LOCAL_CACHE_KEYS = new Set([
+    LOCAL_KEYS.chinaPurchases,
+    LOCAL_KEYS.authActivity,
+    LOCAL_KEYS.authSessions,
+    LOCAL_KEYS.productionPlan,
+    LOCAL_KEYS.projectHardwareState,
+    LOCAL_KEYS.warehouseHistory,
+    LOCAL_KEYS.shipments,
+    LOCAL_KEYS.readyGoods,
+    LOCAL_KEYS.readyGoodsHistory,
+    LOCAL_KEYS.salesRecords,
+    LOCAL_KEYS.workProjects,
+    LOCAL_KEYS.workTasks,
+    LOCAL_KEYS.taskComments,
+    LOCAL_KEYS.workAssets,
+    LOCAL_KEYS.taskChecklistItems,
+    LOCAL_KEYS.taskWatchers,
+    LOCAL_KEYS.workActivity,
+    LOCAL_KEYS.workTemplatesV2,
+    LOCAL_KEYS.taskNotificationEvents,
+]);
+
 const WORK_SETTINGS_KEYS = {
     areas: 'work_areas_json',
     projects: 'work_projects_json',
@@ -187,11 +209,29 @@ function setLocal(key, data) {
                 localStorage.setItem(key, JSON.stringify(data));
             } catch (e2) {
                 console.error('[setLocal] Still no space after cleanup for key:', key);
+                if (isSupabaseReady() && NON_CRITICAL_LOCAL_CACHE_KEYS.has(key)) {
+                    console.warn('[setLocal] Skipping non-critical local cache because Supabase is available:', key);
+                    return;
+                }
                 App.toast('Хранилище заполнено. Перейдите в Настройки для очистки.');
             }
         } else {
             console.error('[setLocal] Error:', e);
         }
+    }
+}
+
+function _estimateLocalStorageBytes() {
+    try {
+        let total = 0;
+        for (let i = 0; i < localStorage.length; i += 1) {
+            const key = localStorage.key(i) || '';
+            const value = localStorage.getItem(key) || '';
+            total += (key.length + value.length) * 2;
+        }
+        return total;
+    } catch (e) {
+        return 0;
     }
 }
 
@@ -229,7 +269,51 @@ function _cleanupLocalStorage() {
         }
     } catch (e) { /* ignore */ }
 
-    // 3. Trim settings if oversized (> 200KB) — remove backup_data blobs
+    // 4. Trim auto-backups aggressively if they became too large.
+    try {
+        const raw = localStorage.getItem('ro_calc_auto_backups');
+        if (raw && raw.length > 150000) {
+            const backups = JSON.parse(raw);
+            if (Array.isArray(backups) && backups.length > 1) {
+                localStorage.setItem('ro_calc_auto_backups', JSON.stringify(backups.slice(0, 1)));
+                console.log('[cleanup] Trimmed auto backups from', backups.length, 'to 1');
+            }
+        }
+    } catch (e) { /* ignore */ }
+
+    // 5. If Supabase is available and storage is still near browser limits,
+    // drop non-critical mirrors that can be reloaded from the backend.
+    try {
+        if (isSupabaseReady() && _estimateLocalStorageBytes() > 4.5 * 1024 * 1024) {
+            const purgeKeys = [
+                'ro_calc_auto_backups',
+                LOCAL_KEYS.workActivity,
+                LOCAL_KEYS.taskNotificationEvents,
+                LOCAL_KEYS.workAssets,
+                LOCAL_KEYS.taskComments,
+                LOCAL_KEYS.taskChecklistItems,
+                LOCAL_KEYS.taskWatchers,
+                LOCAL_KEYS.workTasks,
+                LOCAL_KEYS.workProjects,
+                LOCAL_KEYS.chinaPurchases,
+                LOCAL_KEYS.warehouseHistory,
+                LOCAL_KEYS.shipments,
+                LOCAL_KEYS.readyGoodsHistory,
+                LOCAL_KEYS.salesRecords,
+                LOCAL_KEYS.authActivity,
+                LOCAL_KEYS.authSessions,
+            ];
+            purgeKeys.forEach(key => {
+                if (_estimateLocalStorageBytes() <= 3.5 * 1024 * 1024) return;
+                if (localStorage.getItem(key)) {
+                    localStorage.removeItem(key);
+                    console.log('[cleanup] Removed non-critical cache', key);
+                }
+            });
+        }
+    } catch (e) { /* ignore */ }
+
+    // 6. Trim settings if oversized (> 200KB) — remove backup_data blobs
     try {
         const raw = localStorage.getItem('ro_calc_settings');
         if (raw && raw.length > 100000) {

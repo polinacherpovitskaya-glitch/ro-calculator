@@ -128,12 +128,7 @@ const Orders = {
         }
 
         const orderIds = orders.map(order => order.id);
-        const [projects, tasks, chinaPurchases, orderItems] = await Promise.all([
-            typeof loadWorkProjects === 'function' ? loadWorkProjects().catch(() => []) : Promise.resolve([]),
-            typeof loadWorkTasks === 'function' ? loadWorkTasks().catch(() => []) : Promise.resolve([]),
-            loadChinaPurchases({}).catch(() => []),
-            typeof loadOrderItemsByOrderIds === 'function' ? loadOrderItemsByOrderIds(orderIds).catch(() => []) : Promise.resolve([]),
-        ]);
+        const { projects, tasks, chinaPurchases, orderItems } = await this.loadMetaBundle(orderIds);
 
         const projectToOrder = new Map();
         (projects || []).forEach(project => {
@@ -179,6 +174,122 @@ const Orders = {
             );
         });
         this.metaByOrderId = nextMeta;
+    },
+
+    async loadMetaBundle(orderIds) {
+        const ids = [...new Set((orderIds || [])
+            .map(id => Number(id))
+            .filter(id => Number.isFinite(id) && id > 0))];
+        if (ids.length === 0) {
+            return { projects: [], tasks: [], chinaPurchases: [], orderItems: [] };
+        }
+
+        if (typeof isSupabaseReady === 'function' && isSupabaseReady() && typeof supabaseClient !== 'undefined' && supabaseClient) {
+            try {
+                return await this.loadMetaBundleRemote(ids);
+            } catch (e) {
+                console.warn('Orders meta remote load fallback:', e);
+            }
+        }
+        return this.loadMetaBundleLocal(ids);
+    },
+
+    async loadMetaBundleRemote(orderIds) {
+        const idSet = new Set(orderIds.map(id => String(id)));
+        const [projectsResp, directTasksResp, chinaResp, orderItems] = await Promise.all([
+            supabaseClient
+                .from('projects')
+                .select('id,linked_order_id')
+                .in('linked_order_id', orderIds),
+            supabaseClient
+                .from('tasks')
+                .select('id,status,order_id,project_id')
+                .in('order_id', orderIds),
+            supabaseClient
+                .from('china_purchases')
+                .select('id,status,purchase_data,created_at,updated_at')
+                .order('created_at', { ascending: false }),
+            typeof loadOrderItemsByOrderIds === 'function'
+                ? loadOrderItemsByOrderIds(orderIds).catch(() => [])
+                : Promise.resolve([]),
+        ]);
+
+        if (projectsResp.error) throw projectsResp.error;
+        if (directTasksResp.error) throw directTasksResp.error;
+        if (chinaResp.error) throw chinaResp.error;
+
+        const projects = (projectsResp.data || []).filter(project => idSet.has(String(project.linked_order_id)));
+        const projectIds = projects.map(project => Number(project.id)).filter(id => Number.isFinite(id) && id > 0);
+
+        let projectTasks = [];
+        if (projectIds.length > 0) {
+            const projectTasksResp = await supabaseClient
+                .from('tasks')
+                .select('id,status,order_id,project_id')
+                .in('project_id', projectIds);
+            if (projectTasksResp.error) throw projectTasksResp.error;
+            projectTasks = projectTasksResp.data || [];
+        }
+
+        const tasksById = new Map();
+        [...(directTasksResp.data || []), ...projectTasks].forEach(task => {
+            if (!task || task.id == null) return;
+            tasksById.set(String(task.id), task);
+        });
+
+        const chinaPurchases = (chinaResp.data || [])
+            .map(row => {
+                let parsed = {};
+                if (row.purchase_data) {
+                    try {
+                        parsed = typeof row.purchase_data === 'string'
+                            ? JSON.parse(row.purchase_data)
+                            : row.purchase_data;
+                    } catch (e) {
+                        parsed = {};
+                    }
+                }
+                return {
+                    ...parsed,
+                    id: row.id,
+                    status: row.status || parsed.status,
+                    created_at: row.created_at || parsed.created_at,
+                    updated_at: row.updated_at || parsed.updated_at,
+                };
+            })
+            .filter(purchase => idSet.has(String(purchase.order_id)));
+
+        return {
+            projects,
+            tasks: Array.from(tasksById.values()),
+            chinaPurchases,
+            orderItems,
+        };
+    },
+
+    async loadMetaBundleLocal(orderIds) {
+        const idSet = new Set(orderIds.map(id => String(id)));
+        const [projects, tasks, chinaPurchases, orderItems] = await Promise.all([
+            typeof loadWorkProjects === 'function' ? loadWorkProjects().catch(() => []) : Promise.resolve([]),
+            typeof loadWorkTasks === 'function' ? loadWorkTasks().catch(() => []) : Promise.resolve([]),
+            typeof loadChinaPurchases === 'function' ? loadChinaPurchases({}).catch(() => []) : Promise.resolve([]),
+            typeof loadOrderItemsByOrderIds === 'function' ? loadOrderItemsByOrderIds(orderIds).catch(() => []) : Promise.resolve([]),
+        ]);
+
+        const filteredProjects = (projects || []).filter(project => idSet.has(String(project.linked_order_id)));
+        const projectIds = new Set(filteredProjects.map(project => String(project.id)));
+        const filteredTasks = (tasks || []).filter(task =>
+            idSet.has(String(task.order_id))
+            || projectIds.has(String(task.project_id))
+        );
+        const filteredPurchases = (chinaPurchases || []).filter(purchase => idSet.has(String(purchase.order_id)));
+
+        return {
+            projects: filteredProjects,
+            tasks: filteredTasks,
+            chinaPurchases: filteredPurchases,
+            orderItems,
+        };
     },
 
     buildOrderMeta(order, items, purchases, tasks) {
