@@ -88,6 +88,7 @@ const LOCAL_KEYS = {
     workActivity: 'ro_calc_work_activity',
     workTemplatesV2: 'ro_calc_work_templates_v2',
     taskNotificationEvents: 'ro_calc_task_notification_events',
+    deletedMoldIds: 'ro_calc_deleted_mold_ids',
 };
 
 const NON_CRITICAL_LOCAL_CACHE_KEYS = new Set([
@@ -372,6 +373,30 @@ function _cleanupLocalStorage() {
     } catch (e) {
         console.warn('[cleanup] Aggressive remote-cache cleanup failed:', e);
     }
+}
+
+function _getDeletedMoldIds() {
+    const list = getLocal(LOCAL_KEYS.deletedMoldIds) || [];
+    return [...new Set(list
+        .map(id => Number(id))
+        .filter(id => Number.isFinite(id) && id > 0))];
+}
+
+function _setDeletedMoldIds(ids) {
+    setLocal(LOCAL_KEYS.deletedMoldIds, [...new Set((ids || [])
+        .map(id => Number(id))
+        .filter(id => Number.isFinite(id) && id > 0))]);
+}
+
+function _markMoldDeleted(moldId) {
+    const next = _getDeletedMoldIds();
+    next.push(Number(moldId));
+    _setDeletedMoldIds(next);
+}
+
+function _clearDeletedMold(moldId) {
+    const next = _getDeletedMoldIds().filter(id => id !== Number(moldId));
+    _setDeletedMoldIds(next);
 }
 
 // =============================================
@@ -1297,6 +1322,7 @@ async function deleteTimeEntry(entryId) {
 
 async function loadMolds() {
     checkMoldsVersion();
+    const deletedIds = new Set(_getDeletedMoldIds());
     if (isSupabaseReady()) {
         try {
             const { data, error } = await supabaseClient.from('molds').select('*').order('name');
@@ -1315,10 +1341,25 @@ async function loadMolds() {
                 }
                 return row;
             };
-            const supabaseMolds = (data || []).map(_parseMoldRow);
+            if (deletedIds.size > 0) {
+                try {
+                    const { error: deleteError } = await supabaseClient
+                        .from('molds')
+                        .delete()
+                        .in('id', Array.from(deletedIds));
+                    if (deleteError) console.warn('loadMolds deleted-id sync error:', deleteError);
+                } catch (e) {
+                    console.warn('loadMolds deleted-id sync exception:', e);
+                }
+            }
+
+            const supabaseMolds = (data || [])
+                .map(_parseMoldRow)
+                .filter(mold => !deletedIds.has(Number(mold.id)));
 
             // Smart merge: push local records that are newer or missing in Supabase
-            const localMolds = getLocal(LOCAL_KEYS.molds) || [];
+            const localMolds = (getLocal(LOCAL_KEYS.molds) || [])
+                .filter(mold => !deletedIds.has(Number(mold.id)));
             if (localMolds.length > 0) {
                 const sbMap = new Map(supabaseMolds.map(m => [m.id, m]));
                 const sbUpdatedMap = new Map((data || []).map(r => [r.id, r.updated_at]));
@@ -1357,7 +1398,8 @@ async function loadMolds() {
             }
 
             // Supabase truly empty — seed from localStorage or defaults
-            const seedData = localMolds.length > 0 ? localMolds : getDefaultMolds();
+            const seedData = (localMolds.length > 0 ? localMolds : getDefaultMolds())
+                .filter(mold => !deletedIds.has(Number(mold.id)));
             console.log('Seeding', seedData.length, 'molds to Supabase...');
             for (const m of seedData) {
                 try {
@@ -1372,15 +1414,19 @@ async function loadMolds() {
         } catch(e) {
             console.error('loadMolds exception:', e);
             if (_isSupabaseAccessError(e)) _markSupabaseAccessProblem(e);
-            return getLocal(LOCAL_KEYS.molds) || getDefaultMolds();
+            const localMolds = (getLocal(LOCAL_KEYS.molds) || getDefaultMolds())
+                .filter(mold => !deletedIds.has(Number(mold.id)));
+            return localMolds;
         }
     }
-    return getLocal(LOCAL_KEYS.molds) || getDefaultMolds();
+    return (getLocal(LOCAL_KEYS.molds) || getDefaultMolds())
+        .filter(mold => !deletedIds.has(Number(mold.id)));
 }
 
 async function saveMold(mold) {
     if (!mold.id) { mold.id = Date.now(); mold.created_at = new Date().toISOString(); }
     mold.updated_at = new Date().toISOString();
+    _clearDeletedMold(mold.id);
     if (isSupabaseReady()) {
         try {
             const { error } = await supabaseClient.from('molds').upsert({
@@ -1399,6 +1445,7 @@ async function saveMold(mold) {
 }
 
 async function deleteMold(moldId) {
+    _markMoldDeleted(moldId);
     if (isSupabaseReady()) {
         try {
             const { error } = await supabaseClient.from('molds').delete().eq('id', moldId);
