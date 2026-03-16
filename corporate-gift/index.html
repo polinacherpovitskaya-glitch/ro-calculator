@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Собери свой подвес</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="page">
+    <!-- Header with logo -->
+    <header class="header">
+      <div class="header__logo">
+        <svg viewBox="0 0 314 205" fill="none" xmlns="http://www.w3.org/2000/svg" class="header__logo-svg">
+          <path d="M0 202.128V4.09171H58.5396C90.6921 4.09171 114.197 21.4749 114.197 54.2608V62.1822C114.197 94.9682 90.8029 111.031 61.2005 112.571L120.294 202.128H88.3638L26.6089 105.2V202.128H0ZM26.6089 28.4061V90.6774H55.8787C75.2811 90.6774 87.5877 81.6557 87.5877 59.5417V56.9013C87.5877 35.9975 75.3919 28.4061 55.8787 28.4061H26.6089Z" fill="#FC4400"/>
+          <path d="M253.003 101.473V135.791C253.003 167.896 240.689 179.409 220.54 179.409C200.167 179.409 188.077 168.006 188.077 135.791V101.473H161.211V135.791C161.211 181.512 183.487 203.764 220.54 203.764C257.592 203.764 279.869 181.402 279.869 135.791V101.473H253.003Z" fill="#FC4400"/>
+          <path d="M305.237 67.429V101.473H278.742V67.429C278.742 35.8011 266.819 24.1602 246.727 24.1602C226.855 24.1602 214.711 35.8011 214.711 67.429V101.473H188.216V67.429C188.216 22.4031 210.185 0 246.727 0C283.268 0 305.237 22.4031 305.237 67.429Z" fill="#FC4400"/>
+          <path d="M295.694 204.582C306.277 204.582 313.42 196.91 313.42 187.121C313.42 177.067 306.277 169.394 295.694 169.394C285.64 169.394 278.232 177.067 278.232 187.121C278.232 196.91 285.64 204.582 295.694 204.582Z" fill="#FC4400"/>
+          <path d="M142.666 204.582C153.249 204.582 160.393 196.91 160.393 187.121C160.393 177.067 153.249 169.394 142.666 169.394C132.613 169.394 125.204 177.067 125.204 187.121C125.204 196.91 132.613 204.582 142.666 204.582Z" fill="#FC4400"/>
+        </svg>
+      </div>
+    </header>
+
+    <!-- Greeting -->
+    <section class="greeting">
+      <h1 class="greeting__title" id="greetingTitle"></h1>
+      <p class="greeting__subtitle" id="greetingSubtext"></p>
+    </section>
+
+    <main class="constructor" id="constructor">
+      <!-- Pendant Preview (smart sticky — only during customization) -->
+      <section class="preview" id="pendantPreview">
+        <div class="preview__container" id="svgContainer"></div>
+      </section>
+
+      <!-- Customization zone — preview sticks while scrolling this -->
+      <div class="customization-zone" id="customizationZone">
+        <!-- Word input + letter colors -->
+        <section class="step" id="stepWord">
+          <h2 class="step__title">Введи своё слово</h2>
+          <p class="step__hint">Кириллица или латиница, до <span id="maxLetters">8</span> букв</p>
+          <div class="word-input">
+            <input type="text" id="wordInput" maxlength="8" placeholder="ПОЛИНА" autocomplete="off" inputmode="text" spellcheck="false">
+            <div class="word-input__counter"><span id="letterCount">0</span> из <span id="maxLettersCounter">8</span></div>
+          </div>
+          <div class="letter-colors" id="letterColors"></div>
+        </section>
+
+        <!-- Cord color -->
+        <section class="step" id="stepCord">
+          <h2 class="step__title">Цвет шнура</h2>
+          <div class="swatches" id="cordSwatches"></div>
+        </section>
+
+        <!-- Carabiner color -->
+        <section class="step" id="stepCarabiner">
+          <h2 class="step__title">Цвет карабина</h2>
+          <div class="swatches" id="carabinerSwatches"></div>
+        </section>
+
+        <!-- Final preview callout -->
+        <section class="step step--result" id="stepResult">
+          <h2 class="step__title">Вот твой подвес!</h2>
+          <p class="step__hint">Проверь — всё как ты хочешь?</p>
+        </section>
+      </div>
+
+      <!-- Delivery info — preview NOT sticky here -->
+      <section class="step step--delivery" id="stepDelivery">
+        <h2 class="step__title">Данные для получения</h2>
+        <form id="orderForm" novalidate>
+          <div class="form-group">
+            <label for="fullName">Фамилия Имя Отчество</label>
+            <input type="text" id="fullName" required placeholder="Иванова Полина Сергеевна">
+          </div>
+          <div class="form-group">
+            <label for="phone">Телефон</label>
+            <input type="tel" id="phone" required placeholder="+7 (999) 123-45-67">
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="building">Башня</label>
+              <select id="building" required></select>
+            </div>
+            <div class="form-group">
+              <label for="floor">Этаж</label>
+              <select id="floor" required></select>
+            </div>
+            <div class="form-group">
+              <label for="department">Отдел</label>
+              <select id="department" required></select>
+            </div>
+          </div>
+          <button type="submit" class="submit-btn" id="submitBtn">Отправить заказ</button>
+        </form>
+      </section>
+    </main>
+
+    <!-- Thank you screen -->
+    <section class="thank-you hidden" id="thankYou">
+      <div class="thank-you__icon">
+        <svg viewBox="0 0 314 205" fill="none" xmlns="http://www.w3.org/2000/svg" class="thank-you__logo">
+          <path d="M0 202.128V4.09171H58.5396C90.6921 4.09171 114.197 21.4749 114.197 54.2608V62.1822C114.197 94.9682 90.8029 111.031 61.2005 112.571L120.294 202.128H88.3638L26.6089 105.2V202.128H0ZM26.6089 28.4061V90.6774H55.8787C75.2811 90.6774 87.5877 81.6557 87.5877 59.5417V56.9013C87.5877 35.9975 75.3919 28.4061 55.8787 28.4061H26.6089Z" fill="#FC4400"/>
+          <path d="M253.003 101.473V135.791C253.003 167.896 240.689 179.409 220.54 179.409C200.167 179.409 188.077 168.006 188.077 135.791V101.473H161.211V135.791C161.211 181.512 183.487 203.764 220.54 203.764C257.592 203.764 279.869 181.402 279.869 135.791V101.473H253.003Z" fill="#FC4400"/>
+          <path d="M305.237 67.429V101.473H278.742V67.429C278.742 35.8011 266.819 24.1602 246.727 24.1602C226.855 24.1602 214.711 35.8011 214.711 67.429V101.473H188.216V67.429C188.216 22.4031 210.185 0 246.727 0C283.268 0 305.237 22.4031 305.237 67.429Z" fill="#FC4400"/>
+          <path d="M295.694 204.582C306.277 204.582 313.42 196.91 313.42 187.121C313.42 177.067 306.277 169.394 295.694 169.394C285.64 169.394 278.232 177.067 278.232 187.121C278.232 196.91 285.64 204.582 295.694 204.582Z" fill="#FC4400"/>
+          <path d="M142.666 204.582C153.249 204.582 160.393 196.91 160.393 187.121C160.393 177.067 153.249 169.394 142.666 169.394C132.613 169.394 125.204 177.067 125.204 187.121C125.204 196.91 132.613 204.582 142.666 204.582Z" fill="#FC4400"/>
+        </svg>
+      </div>
+      <h2 class="thank-you__title">Спасибо!</h2>
+      <p class="thank-you__text">Твой подвес уже в работе.<br>В преддверии праздника он будет ждать тебя!</p>
+    </section>
+  </div>
+
+  <script src="pendant-svg.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
