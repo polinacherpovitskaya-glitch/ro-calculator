@@ -725,6 +725,7 @@ const Calculator = {
     items: [],          // Product items (max 6)
     hardwareItems: [],  // Hardware items (unlimited)
     packagingItems: [], // Packaging items (unlimited)
+    pendants: [],       // Pendant items (unlimited)
     extraCosts: [],     // Extra costs [{name, amount}]
     maxItems: 6,
     _autosaveTimer: null,
@@ -808,9 +809,12 @@ const Calculator = {
         this.hardwareItems = [];
         this.packagingItems = [];
         this.extraCosts = [];
+        this.pendants = [];
         document.getElementById('calc-items-container').innerHTML = '';
         document.getElementById('calc-hardware-list').innerHTML = '';
         document.getElementById('calc-packaging-list').innerHTML = '';
+        const pendantList = document.getElementById('calc-pendants-container');
+        if (pendantList) pendantList.innerHTML = '';
         document.getElementById('extra-costs-list').innerHTML = '';
         document.getElementById('calc-production-load').style.display = 'none';
         document.getElementById('calc-findirector').style.display = 'none';
@@ -2920,6 +2924,11 @@ const Calculator = {
             }
         });
 
+        // Calculate pendants
+        this.pendants.forEach(pnd => {
+            pnd.result = calculatePendantCost(pnd, params);
+        });
+
         // === Unified pricing card ===
         this.renderPricingCard(params);
 
@@ -2933,7 +2942,7 @@ const Calculator = {
             finEl.style.display = '';
             sumEl.style.display = '';
 
-            const load = calculateProductionLoad(this.items, this.hardwareItems, this.packagingItems, params);
+            const load = calculateProductionLoad(this.items, this.hardwareItems, this.packagingItems, params, this.pendants);
             this.setText('calc-hours-plastic', formatHours(load.hoursPlasticTotal));
             this.setText('calc-hours-packaging', formatHours(load.hoursPackagingTotal + load.hoursHardwareTotal));
             this.setText('calc-hours-total', formatHours(load.totalHours));
@@ -2947,7 +2956,7 @@ const Calculator = {
             this.setLoadBar('calc-load-packaging-bar', load.packagingLoadPercent);
 
             // FinDirector
-            const fin = calculateFinDirectorData(this.items, this.hardwareItems, this.packagingItems, params);
+            const fin = calculateFinDirectorData(this.items, this.hardwareItems, this.packagingItems, params, this.pendants);
             const finSalaryRow = document.getElementById('fin-salary')?.closest('.cost-row');
             if (App.isAdmin()) {
                 this.setText('fin-salary', formatRub(fin.salary));
@@ -2969,11 +2978,16 @@ const Calculator = {
             this.setText('fin-revenue', formatRub(fin.revenue));
 
             // Summary footer
-            const summary = calculateOrderSummary(this.items, this.hardwareItems, this.packagingItems, this.extraCosts, params);
+            const summary = calculateOrderSummary(this.items, this.hardwareItems, this.packagingItems, this.extraCosts, params, this.pendants);
             this.setText('sum-revenue', formatRub(summary.totalRevenue));
             this.setText('sum-earned', formatRub(summary.totalEarned));
             this.setText('sum-margin', formatPercent(summary.marginPercent));
             this.setText('sum-hours', formatHours(load.totalHours));
+
+            // Re-render pendant cards with updated results
+            if (typeof Pendant !== 'undefined') {
+                Pendant.renderAllCards();
+            }
         } else {
             loadEl.style.display = 'none';
             finEl.style.display = 'none';
@@ -3589,8 +3603,8 @@ const Calculator = {
             // Recalculate before saving
             try { this._doRecalculate(App.params); } catch (e) { /* ignore */ }
 
-            const load = calculateProductionLoad(this.items, this.hardwareItems, this.packagingItems, App.params);
-            const summary = calculateOrderSummary(this.items, this.hardwareItems, this.packagingItems, this.extraCosts, App.params || {});
+            const load = calculateProductionLoad(this.items, this.hardwareItems, this.packagingItems, App.params, this.pendants);
+            const summary = calculateOrderSummary(this.items, this.hardwareItems, this.packagingItems, this.extraCosts, App.params || {}, this.pendants);
 
             const order = {
                 id: App.editingOrderId || undefined,
@@ -3758,6 +3772,19 @@ const Calculator = {
             });
         });
 
+        // Pendant items
+        this.pendants.forEach((pnd, i) => {
+            items.push({
+                item_number: 400 + i,
+                item_type: 'pendant',
+                product_name: 'Подвес "' + (pnd.name || '') + '"',
+                quantity: pnd.quantity || 0,
+                cost_total: pnd.result ? pnd.result.costPerUnit : 0,
+                sell_price_item: pnd.result ? pnd.result.sellPerUnit : 0,
+                item_data: JSON.stringify(pnd),
+            });
+        });
+
         return items;
     },
 
@@ -3776,8 +3803,8 @@ const Calculator = {
             document.getElementById('calc-order-name').value = orderName;
         }
 
-        const load = calculateProductionLoad(this.items, this.hardwareItems, this.packagingItems, App.params);
-        const summary = calculateOrderSummary(this.items, this.hardwareItems, this.packagingItems, this.extraCosts, App.params || {});
+        const load = calculateProductionLoad(this.items, this.hardwareItems, this.packagingItems, App.params, this.pendants);
+        const summary = calculateOrderSummary(this.items, this.hardwareItems, this.packagingItems, this.extraCosts, App.params || {}, this.pendants);
 
         const order = {
             id: App.editingOrderId || undefined,
@@ -4225,6 +4252,22 @@ const Calculator = {
             amount: ec.cost_total || ec.sell_price_item || 0,
         }));
         this.renderExtraCosts();
+
+        // Restore pendant items
+        const pendantDbItems = dbItems.filter(i => i.item_type === 'pendant');
+        pendantDbItems.forEach(dbPnd => {
+            let pnd;
+            if (dbPnd.item_data) {
+                try { pnd = typeof dbPnd.item_data === 'string' ? JSON.parse(dbPnd.item_data) : dbPnd.item_data; } catch (e) { pnd = null; }
+            }
+            if (pnd && pnd.item_type === 'pendant') {
+                this.pendants.push(pnd);
+            }
+        });
+        // Render pendant cards (Pendant module handles this)
+        if (typeof Pendant !== 'undefined') {
+            Pendant.renderAllCards();
+        }
 
         if (this.items.length === 0) this.addItem();
 
