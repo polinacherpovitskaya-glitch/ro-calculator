@@ -245,7 +245,12 @@ const Tasks = {
     cancelEditor() {
         this.createDraft = null;
         this.currentTaskId = null;
-        this.render();
+        const drawer = document.getElementById('task-drawer-overlay');
+        if (drawer) {
+            drawer.classList.remove('is-open');
+            document.body.style.overflow = '';
+            setTimeout(() => { drawer.remove(); }, 250);
+        }
     },
 
     setView(view) {
@@ -911,17 +916,7 @@ const Tasks = {
     },
 
     renderEditor(task) {
-        if (!task) {
-            return `
-                <div class="card">
-                    <div class="empty-state">
-                        <div class="empty-icon">&#9745;</div>
-                        <p>Выберите задачу слева или создайте новую</p>
-                    </div>
-                </div>
-            `;
-        }
-
+        if (!task) return '';
         const isNew = !task.id;
         const watcherIds = this.editorWatcherIds(task);
         return `
@@ -1126,15 +1121,48 @@ const Tasks = {
                 </button>
             </div>
             ${this.filtersHtml()}
-            <div class="wm-two-column">
-                <div class="wm-main-column">
-                    ${this.renderMainContent(tasks)}
-                </div>
-                <div class="wm-side-column">
-                    ${this.renderEditor(activeTask)}
-                </div>
-            </div>
+            ${this.renderMainContent(tasks)}
         `;
+        this.renderDrawer(activeTask);
+    },
+
+    renderDrawer(task) {
+        let drawer = document.getElementById('task-drawer-overlay');
+        if (!task) {
+            if (drawer) {
+                drawer.classList.remove('is-open');
+                document.body.style.overflow = '';
+                setTimeout(() => drawer.remove(), 250);
+            }
+            return;
+        }
+        if (!drawer) {
+            drawer = document.createElement('div');
+            drawer.id = 'task-drawer-overlay';
+            drawer.className = 'task-drawer-overlay';
+            drawer.innerHTML = `
+                <div class="task-drawer-backdrop" onclick="Tasks.cancelEditor()"></div>
+                <div class="task-drawer-panel">
+                    <div class="task-drawer-content"></div>
+                </div>
+            `;
+            document.body.appendChild(drawer);
+            document.body.style.overflow = 'hidden';
+            requestAnimationFrame(() => drawer.classList.add('is-open'));
+            if (!this._escHandler) {
+                this._escHandler = (e) => { if (e.key === 'Escape') Tasks.cancelEditor(); };
+                document.addEventListener('keydown', this._escHandler);
+            }
+        } else {
+            if (!drawer.classList.contains('is-open')) {
+                document.body.style.overflow = 'hidden';
+                requestAnimationFrame(() => drawer.classList.add('is-open'));
+            }
+        }
+        const content = drawer.querySelector('.task-drawer-content');
+        if (content) {
+            content.innerHTML = this.renderEditor(task);
+        }
     },
 
     defaultTaskTemplateId() {

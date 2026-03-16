@@ -1209,6 +1209,55 @@ table .text-center { text-align: center; }
    KANBAN BOARD (Task Tracker)
    ============================================= */
 
+/* Task Drawer (slide-over panel) */
+.task-drawer-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: flex;
+    justify-content: flex-end;
+    pointer-events: none;
+}
+.task-drawer-overlay.is-open {
+    pointer-events: auto;
+}
+.task-drawer-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.3);
+    opacity: 0;
+    transition: opacity 0.25s ease;
+}
+.task-drawer-overlay.is-open .task-drawer-backdrop {
+    opacity: 1;
+}
+.task-drawer-panel {
+    position: relative;
+    width: 520px;
+    max-width: 90vw;
+    height: 100%;
+    background: var(--bg);
+    box-shadow: -4px 0 24px rgba(0, 0, 0, 0.12);
+    transform: translateX(100%);
+    transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+}
+.task-drawer-overlay.is-open .task-drawer-panel {
+    transform: translateX(0);
+}
+.task-drawer-content {
+    padding: 20px 24px 32px;
+}
+.task-drawer-content .card {
+    box-shadow: none;
+    border: 1px solid var(--border);
+    margin-bottom: 16px;
+}
+.task-drawer-content .card-header h3 {
+    font-size: 15px;
+}
+
 /* Tasks page header */
 .tasks-page-header { margin-bottom: 20px; }
 .tasks-header-top {
