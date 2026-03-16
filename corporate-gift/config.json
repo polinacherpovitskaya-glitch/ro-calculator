@@ -3,12 +3,11 @@
   "greeting": "Привет! Мы готовим для тебя особенный подарок",
   "subtext": "Собери свой уникальный подвес — выбери буквы, цвета, и мы сделаем его специально для тебя",
   "maxLetters": 8,
-  "alphabets": ["en"],
+  "alphabets": ["ru", "en"],
   "font": "'Cyberion Demo', Arial Black, sans-serif",
   "letterColors": [
     { "name": "Зелёный", "hex": "#BFFF00" },
-    { "name": "Синий", "hex": "#1B1F8A" },
-    { "name": "Разноцветный", "hex": "rainbow" }
+    { "name": "Синий", "hex": "#1B1F8A" }
   ],
   "cordColors": [
     { "name": "Тёмно-синий", "hex": "#0D0D8B" },

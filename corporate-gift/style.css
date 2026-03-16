@@ -258,6 +258,58 @@ body {
   box-shadow: 0 0 0 2px var(--surface), 0 0 0 3px var(--text);
 }
 
+/* === Rainbow Option === */
+.rainbow-option {
+  text-align: center;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border);
+}
+
+.rainbow-option__hint {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  margin-bottom: 10px;
+}
+
+.rainbow-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 24px;
+  border: 2px solid var(--border);
+  border-radius: 50px;
+  background: var(--surface);
+  cursor: pointer;
+  font-family: var(--font);
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text);
+  transition: all var(--transition);
+}
+
+.rainbow-btn:hover {
+  border-color: #999;
+  transform: scale(1.03);
+}
+
+.rainbow-btn--active {
+  border-color: var(--text);
+  box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--text);
+}
+
+.rainbow-btn__dot {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: conic-gradient(#FF4D6A, #FFD439, #BFFF00, #42D4F4, #7B68EE, #FF69B4, #FF4D6A);
+  flex-shrink: 0;
+}
+
+.rainbow-btn__label {
+  white-space: nowrap;
+}
+
 /* === Swatches (Cord & Carabiner) === */
 .swatches {
   display: flex;

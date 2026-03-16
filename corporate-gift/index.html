@@ -41,12 +41,19 @@
         <!-- Word input + letter colors -->
         <section class="step" id="stepWord">
           <h2 class="step__title">Введи своё слово</h2>
-          <p class="step__hint">Латиница, до <span id="maxLetters">8</span> букв</p>
+          <p class="step__hint">Кириллица или латиница, до <span id="maxLetters">8</span> букв</p>
           <div class="word-input">
-            <input type="text" id="wordInput" maxlength="8" placeholder="SUMMER" autocomplete="off" inputmode="text" spellcheck="false">
+            <input type="text" id="wordInput" maxlength="8" placeholder="ИМЯ" autocomplete="off" inputmode="text" spellcheck="false">
             <div class="word-input__counter"><span id="letterCount">0</span> из <span id="maxLettersCounter">8</span></div>
           </div>
           <div class="letter-colors" id="letterColors"></div>
+          <div class="rainbow-option hidden" id="rainbowOption">
+            <p class="rainbow-option__hint">А можно и так:</p>
+            <button type="button" class="rainbow-btn" id="rainbowBtn">
+              <span class="rainbow-btn__dot"></span>
+              <span class="rainbow-btn__label">Разноцветный</span>
+            </button>
+          </div>
         </section>
 
         <!-- Cord color -->

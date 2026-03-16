@@ -119,6 +119,7 @@ document.getElementById('wordInput').addEventListener('input', function(e) {
 
   document.getElementById('letterCount').textContent = state.letters.length;
   renderLetterColorPickers();
+  updateRainbowButton();
   updatePreview();
 
   // Show/hide subsequent steps based on input
@@ -134,48 +135,75 @@ function renderLetterColorPickers() {
     return;
   }
 
+  // Only show solid colors in per-letter pickers (no rainbow)
+  const solidColors = state.config.letterColors.filter(c => c.hex !== 'rainbow');
+
   container.innerHTML = '<p class="letter-colors__hint">Нажми на кружок, чтобы выбрать цвет буквы</p>' +
     state.letters.map((letter, i) => `
     <div class="letter-color-group">
       <span class="letter-color-group__char" style="color:${letter.resolvedColor}">${letter.char}</span>
       <div class="letter-color-group__dots">
-        ${state.config.letterColors.map(c => {
-          const isRainbow = c.hex === 'rainbow';
-          const dotStyle = isRainbow
-            ? 'background: conic-gradient(#FF4D6A, #FFD439, #BFFF00, #42D4F4, #7B68EE, #FF69B4, #FF4D6A)'
-            : `background:${c.hex}`;
-          return `
+        ${solidColors.map(c => `
           <button type="button" class="color-dot ${c.hex === letter.color ? 'color-dot--active' : ''}"
-            style="${dotStyle}"
+            style="background:${c.hex}"
             data-letter-index="${i}"
             data-color="${c.hex}"
             title="${c.name}"
             aria-label="Цвет ${c.name} для буквы ${letter.char}"></button>
-        `}).join('')}
+        `).join('')}
       </div>
     </div>
   `).join('');
 
-  // Delegated click
+  // Delegated click — solid colors only
   container.onclick = function(e) {
     const dot = e.target.closest('.color-dot');
     if (!dot) return;
     const idx = parseInt(dot.dataset.letterIndex);
     const color = dot.dataset.color;
 
-    if (color === 'rainbow') {
-      // Apply rainbow to ALL letters and reshuffle
-      state.letters.forEach(l => { l.color = 'rainbow'; });
-      shuffleRainbow(state.letters.length);
-      showToast('Цвета букв будут подобраны случайно — каждый раз новая комбинация!');
-    } else {
-      state.letters[idx].color = color;
-    }
-
+    state.letters[idx].color = color;
+    // If switching from rainbow, clear rainbow for this letter
     renderLetterColorPickers();
+    updateRainbowButton();
     updatePreview();
   };
 }
+
+// === Rainbow Option ===
+
+function updateRainbowButton() {
+  const rainbowOption = document.getElementById('rainbowOption');
+  const rainbowBtn = document.getElementById('rainbowBtn');
+  if (!state.letters.length) {
+    rainbowOption.classList.add('hidden');
+    return;
+  }
+  rainbowOption.classList.remove('hidden');
+
+  const isActive = state.letters.every(l => l.color === 'rainbow');
+  rainbowBtn.classList.toggle('rainbow-btn--active', isActive);
+}
+
+document.getElementById('rainbowBtn').addEventListener('click', function() {
+  if (!state.letters.length) return;
+
+  const isAlreadyRainbow = state.letters.every(l => l.color === 'rainbow');
+  if (isAlreadyRainbow) {
+    // Re-shuffle on repeated clicks
+    shuffleRainbow(state.letters.length);
+    showToast('Новая комбинация цветов!');
+  } else {
+    // Apply rainbow to ALL letters
+    state.letters.forEach(l => { l.color = 'rainbow'; });
+    shuffleRainbow(state.letters.length);
+    showToast('Цвета букв будут подобраны случайно — каждый раз новая комбинация!');
+  }
+
+  renderLetterColorPickers();
+  updateRainbowButton();
+  updatePreview();
+});
 
 // === Swatches ===
 
@@ -352,18 +380,27 @@ function svgToPngBase64() {
     const svgEl = document.querySelector('#svgContainer svg');
     if (!svgEl) return reject('No SVG found');
 
-    const svgData = new XMLSerializer().serializeToString(svgEl);
+    // Clone SVG and set explicit width/height from viewBox so the image renders at full size
+    const clone = svgEl.cloneNode(true);
+    const vb = svgEl.viewBox.baseVal;
+    const renderWidth = vb.width || 600;
+    const renderHeight = vb.height || 140;
+    clone.setAttribute('width', renderWidth);
+    clone.setAttribute('height', renderHeight);
+
+    const svgData = new XMLSerializer().serializeToString(clone);
     const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
     const url = URL.createObjectURL(svgBlob);
 
     const img = new Image();
     img.onload = function() {
+      const scale = 2;
       const canvas = document.createElement('canvas');
-      canvas.width = img.naturalWidth * 2;
-      canvas.height = img.naturalHeight * 2;
+      canvas.width = renderWidth * scale;
+      canvas.height = renderHeight * scale;
       const ctx = canvas.getContext('2d');
-      ctx.scale(2, 2);
-      ctx.drawImage(img, 0, 0);
+      ctx.scale(scale, scale);
+      ctx.drawImage(img, 0, 0, renderWidth, renderHeight);
       URL.revokeObjectURL(url);
       resolve(canvas.toDataURL('image/png'));
     };
