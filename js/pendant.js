@@ -737,11 +737,18 @@ const Pendant = {
         const totalSellPerUnit = round2(totalElemSell + cordSellPer + carabSellPer + printSellPerUnit);
         const totalCostAll = round2(totalCostPerUnit * qty);
         const totalSellAll = round2(totalSellPerUnit * qty);
-        const fivePercent = round2(totalSellAll * 0.05);
-        const totalSellWith5 = round2(totalSellAll + fivePercent);
+        const vatRate = Number.isFinite(App?.params?.vatRate) ? App.params.vatRate : 0.05;
+        const vatAmount = round2(totalSellAll * vatRate);
+        const totalSellWithVat = round2(totalSellAll + vatAmount);
         const _taxRate = App.params?.taxRate || 0.06;
         const _keepNetRate = 1 - _taxRate - 0.065;
-        const finalMarginPercent = totalSellWith5 > 0 ? round2(((totalSellWith5 * _keepNetRate) - totalCostAll) / totalSellWith5 * 100) : 0;
+        const finalMargin = typeof calculateActualMargin === 'function'
+            ? calculateActualMargin(totalSellAll, totalCostAll)
+            : {
+                percent: totalSellAll > 0 ? round2(((totalSellAll * _keepNetRate) - totalCostAll) / totalSellAll * 100) : 0,
+            };
+        const finalMarginPercent = finalMargin.percent ?? 0;
+        const vatLabel = `+${formatPercent(vatRate * 100)} НДС`;
 
         // Update pnd for calculator engine
         pnd.element_price_per_unit = elemCostPerUnit;
@@ -806,18 +813,18 @@ const Pendant = {
                         <td><b>${formatRub(totalSellAll)}</b></td>
                     </tr>
                     <tr style="font-size:12px;color:var(--text-muted);">
-                        <td colspan="4" style="text-align:right;">+5%</td>
-                        <td>${formatRub(fivePercent)}</td>
+                        <td colspan="4" style="text-align:right;">${vatLabel}</td>
+                        <td>${formatRub(vatAmount)}</td>
                     </tr>
                     <tr class="pendant-summary-total" style="font-size:14px;">
-                        <td><b>Итого с 5%</b></td>
+                        <td><b>Итого с НДС</b></td>
                         <td></td>
                         <td><b>${formatRub(totalCostAll)}</b></td>
                         <td></td>
-                        <td><b>${formatRub(totalSellWith5)}</b></td>
+                        <td><b>${formatRub(totalSellWithVat)}</b></td>
                     </tr>
                     <tr style="font-size:12px;">
-                        <td colspan="4" style="text-align:right;"><b>Финальная маржа</b></td>
+                        <td colspan="4" style="text-align:right;"><b>Маржа без НДС</b></td>
                         <td style="color:${finalMarginPercent >= 30 ? 'var(--green)' : finalMarginPercent >= 0 ? 'var(--orange)' : 'var(--red)'};font-weight:600;">${finalMarginPercent}%</td>
                     </tr>
                 </table>
