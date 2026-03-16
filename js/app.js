@@ -2,10 +2,10 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v90';
+const APP_VERSION = 'v91';
 
 const App = {
-    currentPage: 'dashboard',
+    currentPage: 'orders',
     settings: null,
     templates: null,
     params: null,
@@ -20,17 +20,18 @@ const App = {
 
     // All pages in the app
     ALL_PAGES: [
-        'dashboard', 'calculator', 'orders', 'production-plan', 'factual',
+        'calculator', 'orders', 'production-plan', 'factual',
         'analytics', 'molds', 'colors', 'timetrack', 'tasks', 'projects', 'gantt',
         'import', 'warehouse', 'marketplaces', 'china', 'settings',
     ],
 
     // Pages visible to everyone by default (if no custom config)
-    DEFAULT_PAGES: ['dashboard', 'timetrack', 'tasks', 'projects'],
+    DEFAULT_PAGES: ['orders', 'timetrack', 'tasks', 'projects'],
 
     // Check if current user has access to a specific page
     canAccess(page) {
         if (!this.currentUser) return false;
+        if (page === 'dashboard') page = 'orders';
         // order-detail is part of orders
         if (page === 'order-detail') page = 'orders';
         const empId = this.currentUser.employee_id;
@@ -39,6 +40,7 @@ const App = {
         const allowed = perms[String(empId)];
         if (!allowed) return this.DEFAULT_PAGES.includes(page);
         if (allowed.includes(page)) return true;
+        if (page === 'orders' && allowed.includes('dashboard')) return true;
         if (page === 'projects' && allowed.includes('tasks')) return true;
         return false;
     },
@@ -51,14 +53,22 @@ const App = {
     // Get page permissions for an employee
     getEmployeePages(empId) {
         const perms = JSON.parse(localStorage.getItem('ro_employee_pages') || '{}');
-        return perms[String(empId)] || null; // null = use DEFAULT_PAGES
+        return this.normalizePageList(perms[String(empId)] || null); // null = use DEFAULT_PAGES
     },
 
     // Save page permissions for an employee
     setEmployeePages(empId, pages) {
         const perms = JSON.parse(localStorage.getItem('ro_employee_pages') || '{}');
-        perms[String(empId)] = pages;
+        perms[String(empId)] = this.normalizePageList(pages);
         localStorage.setItem('ro_employee_pages', JSON.stringify(perms));
+    },
+
+    normalizePageList(pages) {
+        if (!Array.isArray(pages)) return pages;
+        const mapped = pages
+            .map(page => page === 'dashboard' ? 'orders' : page)
+            .filter(page => this.ALL_PAGES.includes(page));
+        return [...new Set(mapped)];
     },
 
     // Initialize default permissions if not set (Полина gets all pages)
@@ -73,11 +83,13 @@ const App = {
             accounts.forEach(acc => {
                 const empId = String(acc.employee_id || '');
                 if (empId && perms[empId] && !acc.pages) {
-                    acc.pages = perms[empId];
+                    acc.pages = this.normalizePageList(perms[empId]);
+                    perms[empId] = acc.pages;
                     changed = true;
                 }
             });
             if (changed) {
+                localStorage.setItem('ro_employee_pages', JSON.stringify(perms));
                 await saveAuthAccounts(accounts);
                 console.log('Migrated page perms into auth accounts');
             }
@@ -89,11 +101,14 @@ const App = {
 
     initDefaultPermissions() {
         const perms = JSON.parse(localStorage.getItem('ro_employee_pages') || '{}');
+        Object.keys(perms).forEach(empId => {
+            perms[empId] = this.normalizePageList(perms[empId]);
+        });
         // Полина (id=5) always gets all pages — ensure settings access exists
         if (!perms['5'] || !perms['5'].includes('settings')) {
             perms['5'] = [...this.ALL_PAGES];
-            localStorage.setItem('ro_employee_pages', JSON.stringify(perms));
         }
+        localStorage.setItem('ro_employee_pages', JSON.stringify(perms));
         // Default production shares for employees with non-standard split
         const shares = JSON.parse(localStorage.getItem('ro_production_shares') || '{}');
         if (!shares['1772827635013']) {
@@ -197,7 +212,10 @@ const App = {
     },
 
     async restoreAuthenticatedUser() {
-        this.authAccounts = await loadAuthAccounts();
+        this.authAccounts = (await loadAuthAccounts()).map(account => ({
+            ...account,
+            pages: this.normalizePageList(account.pages),
+        }));
         const userId = localStorage.getItem('ro_calc_auth_user_id');
         const account = this.authAccounts.find(a => String(a.id) === String(userId));
         if (account) {
@@ -266,7 +284,10 @@ const App = {
             this.employees = [];
         }
         try {
-            this.authAccounts = await loadAuthAccounts();
+            this.authAccounts = (await loadAuthAccounts()).map(account => ({
+                ...account,
+                pages: this.normalizePageList(account.pages),
+            }));
         } catch (e) {
             this.authAccounts = [];
         }
@@ -290,7 +311,10 @@ const App = {
     },
 
     async refreshAuthUsers() {
-        this.authAccounts = await loadAuthAccounts();
+        this.authAccounts = (await loadAuthAccounts()).map(account => ({
+            ...account,
+            pages: this.normalizePageList(account.pages),
+        }));
         this.renderAuthUserSelect();
     },
 
@@ -512,18 +536,19 @@ const App = {
     // === ROUTING ===
 
     handleRoute() {
-        const hash = window.location.hash.replace('#', '') || 'dashboard';
+        const hash = window.location.hash.replace('#', '') || 'orders';
         const parts = hash.split('/');
-        const page = parts[0];
+        const page = parts[0] === 'dashboard' ? 'orders' : parts[0];
         const subId = parts[1] || null;
         this.navigate(page, false, subId);
     },
 
     navigate(page, pushHash = true, subId = null) {
-        // Access control: redirect to dashboard if not allowed
-        if (!this.canAccess(page) && page !== 'dashboard') {
-            // Try dashboard, otherwise first allowed page
-            const fallback = this.canAccess('dashboard') ? 'dashboard' : (this.ALL_PAGES.find(p => this.canAccess(p)) || 'dashboard');
+        if (page === 'dashboard') page = 'orders';
+
+        // Access control: redirect to orders if not allowed
+        if (!this.canAccess(page)) {
+            const fallback = this.canAccess('orders') ? 'orders' : (this.ALL_PAGES.find(p => this.canAccess(p)) || 'orders');
             page = fallback;
             subId = null;
             App.toast('Нет доступа к этой странице');
@@ -536,8 +561,8 @@ const App = {
             target.classList.add('active');
             this.currentPage = page;
         } else {
-            document.getElementById('page-dashboard').classList.add('active');
-            this.currentPage = 'dashboard';
+            document.getElementById('page-orders').classList.add('active');
+            this.currentPage = 'orders';
         }
 
         // Highlight sidebar (order-detail highlights 'orders')
@@ -556,7 +581,6 @@ const App = {
 
     onPageEnter(page, subId) {
         switch (page) {
-            case 'dashboard': Dashboard.load(); break;
             case 'calculator': Calculator.init(); break;
             case 'orders': Orders.loadList(); break;
             case 'production-plan': ProductionPlan.load(); break;

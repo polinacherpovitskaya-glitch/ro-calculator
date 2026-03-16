@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=78">
+    <link rel="stylesheet" href="css/style.css?v=79">
 </head>
 <body>
 
@@ -49,10 +49,6 @@
             <a href="#production-plan" data-page="production-plan">
                 <span class="nav-icon">&#128736;</span>
                 <span>План производства</span>
-            </a>
-            <a href="#dashboard" data-page="dashboard">
-                <span class="nav-icon">&#127968;</span>
-                <span>Главная</span>
             </a>
             <a href="#calculator" data-page="calculator">
                 <span class="nav-icon">&#9998;</span>
@@ -115,62 +111,6 @@
 
     <!-- Main Content Area -->
     <main class="main-content">
-
-        <!-- ========== DASHBOARD ========== -->
-        <div id="page-dashboard" class="page">
-            <div class="page-header">
-                <h1>&#127968; Главная</h1>
-                <button class="btn btn-primary" onclick="App.navigate('calculator')">+ Новый расчет</button>
-            </div>
-
-            <!-- KPI Stats -->
-            <div class="stats-grid" id="dashboard-stats">
-                <div class="stat-card">
-                    <div class="stat-label">Заказов в работе</div>
-                    <div class="stat-value" id="dash-orders-active">0</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-label">Загрузка литья</div>
-                    <div class="stat-value" id="dash-load-plastic">0%</div>
-                    <div class="load-bar"><div class="load-bar-fill green" id="dash-load-plastic-bar" style="width:0"></div></div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-label">Загрузка упаковки</div>
-                    <div class="stat-value" id="dash-load-packaging">0%</div>
-                    <div class="load-bar"><div class="load-bar-fill green" id="dash-load-packaging-bar" style="width:0"></div></div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-label">Выручка (план)</div>
-                    <div class="stat-value" id="dash-revenue">0 &#8381;</div>
-                </div>
-            </div>
-
-            <!-- Drafts Section -->
-            <div id="dash-drafts-section" style="display:none">
-                <div class="card-header" style="padding:12px 0 8px">
-                    <h3 style="margin:0;font-size:15px;color:var(--text-muted)">&#9998; Черновики</h3>
-                </div>
-                <div id="dash-drafts-list" class="dash-cards-row"></div>
-            </div>
-
-            <!-- Active Orders Section -->
-            <div id="dash-active-section" style="display:none">
-                <div class="card-header" style="padding:12px 0 8px">
-                    <h3 style="margin:0;font-size:15px;color:var(--text-muted)">&#128230; В работе</h3>
-                    <a href="#orders" class="btn btn-sm btn-outline" onclick="App.navigate('orders')">Все заказы &#8594;</a>
-                </div>
-                <div id="dash-active-list" class="dash-cards-row"></div>
-            </div>
-
-            <!-- Empty state -->
-            <div id="dash-empty-state" class="card" style="display:none">
-                <div class="empty-state">
-                    <div class="empty-icon">&#9998;</div>
-                    <p>Нет расчетов. Создайте первый заказ.</p>
-                    <button class="btn btn-primary" onclick="App.navigate('calculator')">Новый расчет</button>
-                </div>
-            </div>
-        </div>
 
         <!-- ========== CALCULATOR ========== -->
         <div id="page-calculator" class="page">
@@ -435,42 +375,30 @@
                 <h1>Заказы</h1>
                 <div class="flex gap-8">
                     <div class="orders-view-toggle">
-                        <button class="orders-view-btn" data-view="table" onclick="Orders.setView('table')">&#9776; Таблица</button>
-                        <button class="orders-view-btn active" data-view="board" onclick="Orders.setView('board')">&#9638; Доска</button>
+                        <button class="orders-view-btn active" data-mode="active" onclick="Orders.setMode('active')">Active</button>
+                        <button class="orders-view-btn" data-mode="prototype" onclick="Orders.setMode('prototype')">Prototype</button>
+                        <button class="orders-view-btn" data-mode="production" onclick="Orders.setMode('production')">Production</button>
+                        <button class="orders-view-btn" data-mode="sky" onclick="Orders.setMode('sky')">Sky</button>
+                        <button class="orders-view-btn" data-mode="basket" onclick="Orders.setMode('basket')">&#128465; Корзина</button>
                     </div>
                     <button class="btn btn-primary" onclick="App.navigate('calculator')">+ Новый расчет</button>
                 </div>
             </div>
 
             <div class="card" style="padding: 12px 20px;">
-                <div class="form-row" style="align-items:end">
-                    <div class="form-group" style="margin:0">
-                        <label>Статус</label>
-                        <select id="orders-filter-status" onchange="Orders.loadList()">
-                            <option value="">Все</option>
-                            <option value="draft">Черновик</option>
-                            <option value="sample">Заказ образца</option>
-                            <option value="production_casting">Производство: Выливание</option>
-                            <option value="production_hardware">Производство: Сборка</option>
-                            <option value="production_packaging">Производство: Упаковка</option>
-                            <option value="delivery">Доставка</option>
-                            <option value="completed">Готово</option>
-                            <option value="cancelled">Отменён</option>
-                            <option value="deleted">&#128465; Корзина</option>
-                        </select>
-                    </div>
-                    <div class="form-group" style="margin:0">
+                <div class="orders-summary-row">
+                    <div class="form-group" style="margin:0; flex:1 1 320px;">
                         <label>Поиск</label>
                         <input type="text" id="orders-search" placeholder="Название / клиент" oninput="Orders.filterLocal()">
+                    </div>
+                    <div class="orders-mode-note" id="orders-mode-hint">
+                        Список по умолчанию для менеджеров: только Prototype и Production.
                     </div>
                 </div>
             </div>
 
-            <!-- Board view (Kanban) — default -->
-            <div id="orders-board-view" class="orders-board"></div>
-
-            <!-- Table view (grouped by status) -->
-            <div id="orders-table-view" style="display:none"></div>
+            <div id="orders-table-view"></div>
+            <div id="orders-board-view" class="orders-board" style="display:none"></div>
         </div>
 
         <!-- ========== ORDER DETAIL ========== -->
@@ -3185,13 +3113,12 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="js/work-management-core.js?v=1"></script>
-<script src="js/supabase.js?v=101"></script>
+<script src="js/supabase.js?v=102"></script>
 <script src="js/task-events.js?v=1"></script>
 <script src="js/calculator.js?v=65"></script>
-<script src="js/app.js?v=104"></script>
-<script src="js/dashboard.js?v=47"></script>
+<script src="js/app.js?v=105"></script>
 <script src="js/order-detail.js?v=51"></script>
-<script src="js/orders.js?v=54"></script>
+<script src="js/orders.js?v=56"></script>
 <script src="js/production_plan.js?v=75"></script>
 <script src="js/analytics.js?v=46g"></script>
 <script src="js/molds.js?v=67"></script>
@@ -3209,7 +3136,7 @@
 <script src="js/china_catalog.js?v=46k"></script>
 <script src="js/marketplaces.js?v=72"></script>
 <script src="js/warehouse.js?v=89"></script>
-<script src="js/settings.js?v=70"></script>
+<script src="js/settings.js?v=71"></script>
 <script src="js/pendant.js"></script>
 </body>
 </html>

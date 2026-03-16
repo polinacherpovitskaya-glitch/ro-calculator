@@ -1,6 +1,6 @@
 // =============================================
-// Recycle Object — Orders History Page
-// v36: B2C excluded from totals, finished goods
+// Recycle Object — Orders Home Page
+// List-first view inspired by Notion Active
 // =============================================
 
 const STATUS_OPTIONS = [
@@ -16,142 +16,438 @@ const STATUS_OPTIONS = [
     { value: 'deleted',              label: 'Удалён' },
 ];
 
-// Production sub-stage labels for board card badge
-const PRODUCTION_SUBSTAGES = {
-    production_casting:   'Выливание формы',
-    production_printing:  'Печать / нанесение',
-    production_hardware:  'Сборка фурнитуры',
-    production_packaging: 'Упаковка',
-    in_production:        'В производстве',
+const PROTOTYPE_STATUSES = ['draft', 'calculated', 'sample'];
+const PRODUCTION_STATUSES = ['production_casting', 'production_printing', 'production_hardware', 'production_packaging', 'in_production', 'delivery'];
+const ACTIVE_STATUSES = [...PROTOTYPE_STATUSES, ...PRODUCTION_STATUSES];
+const SKY_STATUSES = [...ACTIVE_STATUSES, 'completed', 'cancelled'];
+
+const ORDERS_MODE_HINTS = {
+    active: 'Список по умолчанию для менеджеров: только Prototype и Production, как в Notion Active.',
+    prototype: 'Только прототипы, черновики и образцы.',
+    production: 'Только заказы, которые уже пошли в производство.',
+    sky: 'Общий плоский список без лишних колонок: название, старт, дедлайн и текущий этап.',
+    basket: 'Удалённые заказы. Здесь можно восстановить заказ или удалить его навсегда.',
 };
 
-const BOARD_COLUMNS = [
-    { status: 'draft',      label: 'Черновик',      color: '#6b7280', icon: '○', statuses: ['draft', 'calculated'] },
-    { status: 'sample',     label: 'Заказ образца', color: '#3b82f6', icon: '◎', statuses: ['sample'] },
-    { status: 'production', label: 'Производство',  color: '#f59e0b', icon: '◐', statuses: ['production_casting', 'production_printing', 'production_hardware', 'production_packaging', 'in_production', 'delivery'] },
-    { status: 'completed',  label: 'Готово',         color: '#22c55e', icon: '●', statuses: ['completed'] },
-    { status: 'cancelled',  label: 'Отменён',        color: '#ef4444', icon: '✕', statuses: ['cancelled'] },
-];
+const ORDERS_SECTIONS = {
+    prototype: {
+        key: 'prototype',
+        label: 'Prototype',
+        color: '#9ca3af',
+        defaultOpen: true,
+        statuses: PROTOTYPE_STATUSES,
+    },
+    production: {
+        key: 'production',
+        label: 'Production',
+        color: '#f59e0b',
+        defaultOpen: true,
+        statuses: PRODUCTION_STATUSES,
+    },
+    basket: {
+        key: 'basket',
+        label: 'Корзина',
+        color: '#9ca3af',
+        defaultOpen: true,
+        statuses: ['deleted'],
+    },
+};
+
+const CHINA_STATUS_META = {
+    ordered:            { label: 'Заказано',         className: 'badge-orange' },
+    in_china_warehouse: { label: 'В Китае',          className: 'badge-yellow' },
+    in_transit:         { label: 'В пути',           className: 'badge-blue' },
+    delivered:          { label: 'Доставлено',       className: 'badge-green' },
+    received:           { label: 'Принято на склад', className: 'badge-green' },
+};
 
 const Orders = {
     allOrders: [],
-    view: 'board', // 'board' | 'table'
+    metaByOrderId: {},
+    mode: 'active',
+    collapsedSections: {},
 
-    setView(v) {
-        this.view = v;
-        document.querySelectorAll('.orders-view-btn').forEach(b => b.classList.remove('active'));
-        document.querySelector(`.orders-view-btn[data-view="${v}"]`)?.classList.add('active');
-        document.getElementById('orders-table-view').style.display = v === 'table' ? '' : 'none';
-        document.getElementById('orders-board-view').style.display = v === 'board' ? '' : 'none';
-
-        if (v === 'board') {
-            this.renderBoard(this.allOrders);
-        } else {
-            this.renderTable(this.allOrders);
+    setMode(mode) {
+        if (!mode) return;
+        const reloadRequired = this.allOrders.length === 0 || this.mode === 'basket' || mode === 'basket';
+        this.mode = mode;
+        this.updateModeControls();
+        if (reloadRequired) {
+            this.loadList();
+            return;
         }
+        this.render();
+    },
+
+    updateModeControls() {
+        document.querySelectorAll('.orders-view-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.mode === this.mode);
+        });
+        const hint = document.getElementById('orders-mode-hint');
+        if (hint) hint.textContent = ORDERS_MODE_HINTS[this.mode] || ORDERS_MODE_HINTS.active;
     },
 
     async loadList() {
         try {
-            const status = document.getElementById('orders-filter-status').value;
-            const filters = {};
-            if (status) filters.status = status;
-
+            this.updateModeControls();
+            const filters = this.mode === 'basket' ? { status: 'deleted' } : {};
             this.allOrders = await loadOrders(filters);
-
-            if (this.view === 'board') {
-                this.renderBoard(this.allOrders);
-            } else {
-                this.renderTable(this.allOrders);
-            }
+            await this.buildMeta(this.allOrders);
+            this.render();
         } catch (e) {
             console.error('Orders load error:', e);
+            const container = document.getElementById('orders-table-view');
+            if (container) {
+                container.innerHTML = this.renderEmptyState('Не удалось загрузить заказы');
+            }
         }
+    },
+
+    async buildMeta(orders) {
+        if (this.mode === 'basket' || !orders.length) {
+            this.metaByOrderId = {};
+            return;
+        }
+
+        const orderIds = orders.map(order => order.id);
+        const [projects, tasks, chinaPurchases, orderItems] = await Promise.all([
+            typeof loadWorkProjects === 'function' ? loadWorkProjects().catch(() => []) : Promise.resolve([]),
+            typeof loadWorkTasks === 'function' ? loadWorkTasks().catch(() => []) : Promise.resolve([]),
+            loadChinaPurchases({}).catch(() => []),
+            typeof loadOrderItemsByOrderIds === 'function' ? loadOrderItemsByOrderIds(orderIds).catch(() => []) : Promise.resolve([]),
+        ]);
+
+        const projectToOrder = new Map();
+        (projects || []).forEach(project => {
+            if (project && project.id != null && project.linked_order_id != null) {
+                projectToOrder.set(String(project.id), String(project.linked_order_id));
+            }
+        });
+
+        const tasksByOrder = new Map();
+        (tasks || []).forEach(task => {
+            if (!task) return;
+            const orderId = task.order_id != null
+                ? String(task.order_id)
+                : projectToOrder.get(String(task.project_id || ''));
+            if (!orderId) return;
+            if (!tasksByOrder.has(orderId)) tasksByOrder.set(orderId, []);
+            tasksByOrder.get(orderId).push(task);
+        });
+
+        const purchasesByOrder = new Map();
+        (chinaPurchases || []).forEach(purchase => {
+            if (!purchase || purchase.order_id == null) return;
+            const key = String(purchase.order_id);
+            if (!purchasesByOrder.has(key)) purchasesByOrder.set(key, []);
+            purchasesByOrder.get(key).push(purchase);
+        });
+
+        const itemsByOrder = new Map();
+        (orderItems || []).forEach(item => {
+            if (!item || item.order_id == null) return;
+            const key = String(item.order_id);
+            if (!itemsByOrder.has(key)) itemsByOrder.set(key, []);
+            itemsByOrder.get(key).push(item);
+        });
+
+        const nextMeta = {};
+        orders.forEach(order => {
+            nextMeta[order.id] = this.buildOrderMeta(
+                order,
+                itemsByOrder.get(String(order.id)) || [],
+                purchasesByOrder.get(String(order.id)) || [],
+                tasksByOrder.get(String(order.id)) || []
+            );
+        });
+        this.metaByOrderId = nextMeta;
+    },
+
+    buildOrderMeta(order, items, purchases, tasks) {
+        return {
+            todo: this.buildTodoMeta(tasks),
+            hardware: this.buildHardwareMeta(items),
+            china: this.buildChinaMeta(purchases, items),
+            production: this.buildProductionMeta(order),
+        };
+    },
+
+    buildTodoMeta(tasks) {
+        const total = (tasks || []).length;
+        const isFinished = task => (
+            typeof WorkManagementCore !== 'undefined'
+            && typeof WorkManagementCore.isTaskFinished === 'function'
+            && WorkManagementCore.isTaskFinished(task)
+        );
+        const openTasks = (tasks || []).filter(task => !isFinished(task));
+        const reviewCount = openTasks.filter(task => task.status === 'review').length;
+
+        if (total === 0) {
+            return { label: 'Empty 0', className: 'badge-gray', title: 'К заказу не привязаны задачи' };
+        }
+        if (openTasks.length === 0) {
+            return { label: `Done ${total}/${total}`, className: 'badge-green', title: `Все ${total} задач закрыты` };
+        }
+        if (reviewCount > 0) {
+            return {
+                label: `Review ${reviewCount}/${total}`,
+                className: 'badge-blue',
+                title: `На согласовании: ${reviewCount}. Открыто всего: ${openTasks.length} из ${total}`,
+            };
+        }
+        return {
+            label: `To-do ${openTasks.length}/${total}`,
+            className: 'badge-yellow',
+            title: `Открытых задач: ${openTasks.length} из ${total}`,
+        };
+    },
+
+    buildHardwareMeta(items) {
+        const hardwareItems = (items || []).filter(item => item.item_type === 'hardware');
+        if (hardwareItems.length === 0) {
+            return {
+                label: 'Фурнитура не нужна',
+                className: 'badge-red',
+                title: 'В заказе нет строк фурнитуры',
+            };
+        }
+
+        const sourceKinds = new Set(hardwareItems.map(item => {
+            const source = String(item.hardware_source || item.source || 'custom').toLowerCase();
+            const country = String(item.custom_country || 'china').toLowerCase();
+            if (source === 'warehouse') return 'warehouse';
+            if (source === 'china' || (source === 'custom' && country === 'china')) return 'china';
+            return 'custom';
+        }));
+
+        if (sourceKinds.size === 1 && sourceKinds.has('warehouse')) {
+            return {
+                label: 'Фурнитура из наличия',
+                className: 'badge-yellow',
+                title: 'Вся фурнитура берётся со склада',
+            };
+        }
+        if (sourceKinds.size === 1 && sourceKinds.has('china')) {
+            return {
+                label: 'Фурнитура из Китая',
+                className: 'badge-blue',
+                title: 'Вся фурнитура идёт через Китай',
+            };
+        }
+        if (sourceKinds.size === 1 && sourceKinds.has('custom')) {
+            return {
+                label: 'Фурнитура под заказ',
+                className: 'badge-orange',
+                title: 'Фурнитура кастомная или закупается отдельно',
+            };
+        }
+        if (sourceKinds.has('warehouse')) {
+            return {
+                label: 'Частично из наличия',
+                className: 'badge-blue',
+                title: 'Часть фурнитуры со склада, часть под заказ',
+            };
+        }
+        return {
+            label: 'Смешанная фурнитура',
+            className: 'badge-gray',
+            title: 'В заказе несколько типов источников фурнитуры',
+        };
+    },
+
+    buildChinaMeta(purchases, items) {
+        const sortedPurchases = (purchases || []).slice().sort((a, b) => String(b.updated_at || b.created_at || '').localeCompare(String(a.updated_at || a.created_at || '')));
+        if (sortedPurchases.length > 0) {
+            const latest = sortedPurchases[0];
+            const meta = CHINA_STATUS_META[latest.status] || { label: 'Есть закупка', className: 'badge-blue' };
+            return {
+                label: `${meta.label}${sortedPurchases.length > 1 ? ` · ${sortedPurchases.length}` : ''}`,
+                className: meta.className,
+                title: `Связанных закупок: ${sortedPurchases.length}`,
+            };
+        }
+
+        const hasChinaSource = (items || []).some(item => {
+            const source = String(item.hardware_source || item.packaging_source || item.source || '').toLowerCase();
+            const country = String(item.custom_country || 'china').toLowerCase();
+            return source === 'china' || (source === 'custom' && country === 'china');
+        });
+
+        if (hasChinaSource) {
+            return {
+                label: 'Нужна закупка',
+                className: 'badge-orange',
+                title: 'В заказе есть позиции с China source, но закупка ещё не создана',
+            };
+        }
+
+        return {
+            label: '—',
+            className: 'badge-gray',
+            title: 'Закупка в Китае не требуется',
+        };
+    },
+
+    buildProductionMeta(order) {
+        return {
+            label: App.statusLabel(order.status),
+            className: this.statusClassName(order.status),
+        };
+    },
+
+    statusClassName(status) {
+        if (status === 'completed') return 'badge-green';
+        if (status === 'cancelled' || status === 'deleted') return 'badge-red';
+        if (status === 'sample') return 'badge-blue';
+        if (PRODUCTION_STATUSES.includes(status)) return 'badge-yellow';
+        return 'badge-gray';
+    },
+
+    getModeOrders() {
+        if (this.mode === 'basket') {
+            return this.allOrders.filter(order => order.status === 'deleted');
+        }
+        if (this.mode === 'prototype') {
+            return this.allOrders.filter(order => PROTOTYPE_STATUSES.includes(order.status));
+        }
+        if (this.mode === 'production') {
+            return this.allOrders.filter(order => PRODUCTION_STATUSES.includes(order.status));
+        }
+        if (this.mode === 'sky') {
+            return this.allOrders.filter(order => SKY_STATUSES.includes(order.status));
+        }
+        return this.allOrders.filter(order => ACTIVE_STATUSES.includes(order.status));
+    },
+
+    getVisibleOrders() {
+        const query = String(document.getElementById('orders-search')?.value || '').toLowerCase().trim();
+        const list = this.getModeOrders().slice();
+        const filtered = !query
+            ? list
+            : list.filter(order =>
+                (order.order_name || '').toLowerCase().includes(query)
+                || (order.client_name || '').toLowerCase().includes(query)
+                || (order.manager_name || '').toLowerCase().includes(query)
+            );
+
+        const sortFn = this.mode === 'basket'
+            ? (a, b) => String(b.deleted_at || b.updated_at || b.created_at || '').localeCompare(String(a.deleted_at || a.updated_at || a.created_at || ''))
+            : (a, b) => this.compareOrders(a, b);
+
+        return filtered.sort(sortFn);
+    },
+
+    compareOrders(a, b) {
+        const aKey = this.orderSortKey(a);
+        const bKey = this.orderSortKey(b);
+        if (aKey !== bKey) return String(aKey).localeCompare(String(bKey));
+        return String(b.created_at || '').localeCompare(String(a.created_at || ''));
+    },
+
+    orderSortKey(order) {
+        return order.deadline_end || order.deadline || order.deadline_start || order.created_at || '9999-12-31';
     },
 
     filterLocal() {
-        const query = (document.getElementById('orders-search').value || '').toLowerCase().trim();
-        if (!query) {
-            if (this.view === 'board') this.renderBoard(this.allOrders);
-            else this.renderTable(this.allOrders);
-            return;
-        }
-        const filtered = this.allOrders.filter(o =>
-            (o.order_name || '').toLowerCase().includes(query)
-            || (o.client_name || '').toLowerCase().includes(query)
-            || (o.manager_name || '').toLowerCase().includes(query)
-        );
-        if (this.view === 'board') this.renderBoard(filtered);
-        else this.renderTable(filtered);
+        this.render();
     },
 
-    // ==========================================
-    // TABLE VIEW (grouped by status sections)
-    // ==========================================
-
-    // Which sections are collapsed
-    collapsedSections: {},
-
-    toggleSection(status) {
-        this.collapsedSections[status] = !this.collapsedSections[status];
-        const body = document.getElementById('orders-section-body-' + status);
-        const icon = document.getElementById('orders-section-icon-' + status);
-        if (body) body.style.display = this.collapsedSections[status] ? 'none' : '';
-        if (icon) icon.textContent = this.collapsedSections[status] ? '▸' : '▾';
-    },
-
-    // Section display order and config for table view
-    // Each section has a 'statuses' array for backward compat grouping
-    STATUS_SECTIONS: [
-        { status: 'draft',       label: 'Черновик',      color: '#6b7280', icon: '○', defaultOpen: true,  statuses: ['draft', 'calculated'] },
-        { status: 'sample',      label: 'Заказ образца', color: '#3b82f6', icon: '◎', defaultOpen: true,  statuses: ['sample'] },
-        { status: 'production',  label: 'Производство',  color: '#f59e0b', icon: '◐', defaultOpen: true,  statuses: ['production_casting', 'production_printing', 'production_hardware', 'production_packaging', 'in_production', 'delivery'] },
-        { status: 'completed',   label: 'Готово',         color: '#22c55e', icon: '●', defaultOpen: false, statuses: ['completed'] },
-        { status: 'cancelled',   label: 'Отменён',        color: '#ef4444', icon: '✕', defaultOpen: false, statuses: ['cancelled'] },
-        { status: 'deleted',     label: 'Корзина',        color: '#9ca3af', icon: '&#128465;', defaultOpen: false, statuses: ['deleted'] },
-    ],
-
-    renderTable(orders) {
+    render() {
+        this.updateModeControls();
         const container = document.getElementById('orders-table-view');
+        const board = document.getElementById('orders-board-view');
+        if (!container) return;
+        if (board) board.style.display = 'none';
+        container.style.display = '';
 
-        if (orders.length === 0) {
-            container.innerHTML = `<div class="card"><div class="empty-state">
-                <div class="empty-icon">&#9776;</div>
-                <p>Нет заказов</p>
-            </div></div>`;
+        const visibleOrders = this.getVisibleOrders();
+        if (this.mode === 'sky') {
+            container.innerHTML = this.renderSkyView(visibleOrders);
             return;
         }
+        if (this.mode === 'basket') {
+            container.innerHTML = this.renderBasketView(visibleOrders);
+            return;
+        }
+        container.innerHTML = this.renderManagerView(visibleOrders);
+    },
 
-        // Check if we're filtering by specific status
-        const statusFilter = document.getElementById('orders-filter-status').value;
+    renderManagerView(orders) {
+        if (orders.length === 0) {
+            return this.renderEmptyState('Нет заказов в этом списке');
+        }
 
-        // Choose which sections to show
-        // When filtering, find the section that contains the filtered status
-        const sections = statusFilter
-            ? this.STATUS_SECTIONS.filter(s => s.statuses.includes(statusFilter))
-            : this.STATUS_SECTIONS;
+        const sections = this.getSectionsForMode();
+        const html = sections
+            .map(section => this.renderSection(section, orders.filter(order => section.statuses.includes(order.status))))
+            .filter(Boolean)
+            .join('');
 
-        let html = '';
+        return html || this.renderEmptyState('Нет заказов в этом списке');
+    },
 
-        for (const section of sections) {
-            const sectionOrders = orders.filter(o => section.statuses.includes(o.status));
-            if (sectionOrders.length === 0 && !statusFilter) continue; // skip empty sections in all-view
+    renderSkyView(orders) {
+        if (orders.length === 0) {
+            return this.renderEmptyState('Нет заказов для списка Sky');
+        }
 
-            const totalRevenue = sectionOrders
-                .filter(o => (o.client_name || '').toUpperCase() !== 'B2C')
-                .reduce((s, o) => s + (o.total_revenue_plan || 0), 0);
-            const b2cCount = sectionOrders.filter(o => (o.client_name || '').toUpperCase() === 'B2C').length;
+        return `<div class="card" style="padding:0">
+            <div class="table-wrap">
+                <table class="orders-mini-table">
+                    <thead>
+                        <tr>
+                            <th>Заказ</th>
+                            <th>Старт</th>
+                            <th>Дедлайн</th>
+                            <th>Этап</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>${orders.map(order => this.renderSkyRow(order)).join('')}</tbody>
+                </table>
+            </div>
+        </div>`;
+    },
 
-            // Determine collapsed state (use defaults for first render)
-            if (this.collapsedSections[section.status] === undefined) {
-                this.collapsedSections[section.status] = !section.defaultOpen;
-            }
-            const collapsed = this.collapsedSections[section.status];
+    renderBasketView(orders) {
+        if (orders.length === 0) {
+            return this.renderEmptyState('Корзина пуста');
+        }
 
-            html += `
-            <div class="orders-section" style="margin-bottom:8px">
-                <div class="orders-section-header" onclick="Orders.toggleSection('${section.status}')" style="cursor:pointer;display:flex;align-items:center;gap:10px;padding:10px 16px;background:var(--card-bg);border:1px solid var(--border);border-radius:var(--radius);${collapsed ? '' : 'border-bottom-left-radius:0;border-bottom-right-radius:0;'}">
-                    <span id="orders-section-icon-${section.status}" style="font-size:12px;color:var(--text-muted);width:12px">${collapsed ? '▸' : '▾'}</span>
+        return `<div class="card" style="padding:0">
+            <div class="table-wrap">
+                <table class="orders-mini-table">
+                    <thead>
+                        <tr>
+                            <th>Заказ</th>
+                            <th>Когда удалён</th>
+                            <th>Последний статус</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>${orders.map(order => this.renderBasketRow(order)).join('')}</tbody>
+                </table>
+            </div>
+        </div>`;
+    },
+
+    renderSection(section, sectionOrders) {
+        if (sectionOrders.length === 0) return '';
+
+        if (this.collapsedSections[section.key] === undefined) {
+            this.collapsedSections[section.key] = !section.defaultOpen;
+        }
+
+        const collapsed = this.collapsedSections[section.key];
+        const totalRevenue = sectionOrders
+            .filter(order => (order.client_name || '').toUpperCase() !== 'B2C')
+            .reduce((sum, order) => sum + (order.total_revenue_plan || 0), 0);
+        const b2cCount = sectionOrders.filter(order => (order.client_name || '').toUpperCase() === 'B2C').length;
+
+        return `
+            <div class="orders-section" style="margin-bottom:10px">
+                <div class="orders-section-header" onclick="Orders.toggleSection('${section.key}')" style="cursor:pointer;display:flex;align-items:center;gap:10px;padding:10px 16px;background:var(--card-bg);border:1px solid var(--border);border-radius:var(--radius);${collapsed ? '' : 'border-bottom-left-radius:0;border-bottom-right-radius:0;'}">
+                    <span id="orders-section-icon-${section.key}" style="font-size:12px;color:var(--text-muted);width:12px">${collapsed ? '▸' : '▾'}</span>
                     <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${section.color}"></span>
                     <span style="font-weight:700;font-size:13px">${section.label}</span>
                     <span style="font-size:12px;color:var(--text-muted);font-weight:600">${sectionOrders.length}</span>
@@ -159,208 +455,182 @@ const Orders = {
                     ${b2cCount > 0 ? `<span style="font-size:10px;color:var(--text-muted);margin-right:6px;" title="B2C заказы (${b2cCount}) не учтены в сумме">B2C: ${b2cCount}</span>` : ''}
                     <span style="font-size:12px;color:var(--text-muted)">${this.shortRub(totalRevenue)}</span>
                 </div>
-                <div id="orders-section-body-${section.status}" style="${collapsed ? 'display:none' : ''}">
-                    ${sectionOrders.length === 0
-                        ? `<div class="card" style="border-top-left-radius:0;border-top-right-radius:0;border-top:0"><p class="text-muted" style="padding:12px;font-size:12px;text-align:center">Нет заказов</p></div>`
-                        : `<div class="card" style="padding:0;border-top-left-radius:0;border-top-right-radius:0;border-top:0"><div class="table-wrap"><table>
-                        <thead><tr>
-                            <th>Заказ</th>
-                            <th>Клиент</th>
-                            <th>Менеджер</th>
-                            <th>Статус</th>
-                            <th>Оплата</th>
-                            <th class="text-right">Выручка</th>
-                            <th class="text-right">Маржа</th>
-                            <th>Дата</th>
-                            <th></th>
-                        </tr></thead>
-                        <tbody>${sectionOrders.map(o => this._renderOrderRow(o)).join('')}</tbody>
-                    </table></div></div>`
-                    }
+                <div id="orders-section-body-${section.key}" style="${collapsed ? 'display:none' : ''}">
+                    <div class="card" style="padding:0;border-top-left-radius:0;border-top-right-radius:0;border-top:0">
+                        <div class="table-wrap">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Заказ</th>
+                                        <th>Дедлайн</th>
+                                        <th>To-do RO</th>
+                                        <th>Кто ведет</th>
+                                        <th>Статус оплаты</th>
+                                        <th>Статус фурнитуры</th>
+                                        <th>Статус производства</th>
+                                        <th>Китай</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody>${sectionOrders.map(order => this.renderManagerRow(order)).join('')}</tbody>
+                            </table>
+                        </div>
+                    </div>
                 </div>
             </div>`;
-        }
-
-        container.innerHTML = html;
     },
 
-    _renderOrderRow(o) {
-        const isDeleted = o.status === 'deleted';
+    getSectionsForMode() {
+        if (this.mode === 'prototype') return [ORDERS_SECTIONS.prototype];
+        if (this.mode === 'production') return [ORDERS_SECTIONS.production];
+        return [ORDERS_SECTIONS.prototype, ORDERS_SECTIONS.production];
+    },
 
-        // Deleted date display
-        const dateDisplay = isDeleted && o.deleted_at
-            ? App.formatDate(o.deleted_at) + ' <span style="color:var(--red);font-size:10px;">(удалён)</span>'
-            : App.formatDate(o.created_at);
+    toggleSection(key) {
+        this.collapsedSections[key] = !this.collapsedSections[key];
+        const body = document.getElementById(`orders-section-body-${key}`);
+        const icon = document.getElementById(`orders-section-icon-${key}`);
+        if (body) body.style.display = this.collapsedSections[key] ? 'none' : '';
+        if (icon) icon.textContent = this.collapsedSections[key] ? '▸' : '▾';
+    },
 
-        // Action buttons
-        const actionButtons = isDeleted
-            ? `<div class="flex gap-8">
-                    <button class="btn btn-sm btn-outline" onclick="Orders.restoreOrder(${o.id})" title="Восстановить" style="color:var(--green);border-color:var(--green);">&#8634;</button>
-                    <button class="btn btn-sm btn-danger" onclick="Orders.confirmPermanentDelete(${o.id})">&#10005;</button>
-               </div>`
-            : `<div class="flex gap-8">
-                    <button class="btn btn-sm btn-outline" onclick="Orders.cloneOrder(${o.id})" title="Копировать">&#10697;</button>
-                    <button class="btn btn-sm btn-outline" onclick="Orders.editOrder(${o.id})" title="Редактировать">&#9998;</button>
-                    <button class="btn btn-sm btn-danger" onclick="Orders.confirmDelete(${o.id})">&#10005;</button>
-               </div>`;
-
-        // Payment status badge
-        const ps = PAYMENT_STATUSES.find(s => s.key === (o.payment_status || 'not_sent')) || PAYMENT_STATUSES[0];
-        const paymentBadge = `<span class="badge badge-${ps.color}" style="font-size:10px;">${ps.label}</span>`;
-
-        // Inline status select
-        const statusSelect = isDeleted
-            ? `<span style="font-size:11px;color:var(--text-muted)">Удалён</span>`
-            : `<select class="inline-status-select status-${o.status}" onchange="Orders.onStatusChange(${o.id}, this.value, '${o.status}')" onclick="event.stopPropagation()">
-                ${STATUS_OPTIONS.filter(s => s.value !== 'deleted').map(s =>
-                    `<option value="${s.value}" ${s.value === o.status ? 'selected' : ''}>${s.label}</option>`
-                ).join('')}
-            </select>`;
+    renderManagerRow(order) {
+        const meta = this.metaByOrderId[order.id] || this.buildOrderMeta(order, [], [], []);
 
         return `
-        <tr style="${isDeleted ? 'opacity:0.7;' : ''}">
-            <td><a href="#order-detail/${o.id}" onclick="App.navigate('order-detail', true, ${o.id}); return false;" style="color:var(--accent);font-weight:600;text-decoration:none" title="Открыть карточку заказа">${this.escHtml(o.order_name)}</a></td>
-            <td>${this.escHtml(o.client_name || '—')}</td>
-            <td style="font-size:12px">${this.escHtml(o.manager_name || '—')}</td>
-            <td>${statusSelect}</td>
-            <td>${paymentBadge}</td>
-            <td class="text-right">${formatRub(o.total_revenue_plan || 0)}</td>
-            <td class="text-right ${(o.margin_percent_plan || 0) >= 30 ? 'text-green' : 'text-red'}">${formatPercent(o.margin_percent_plan || 0)}</td>
-            <td style="font-size:12px">${dateDisplay}</td>
-            <td>${actionButtons}</td>
-        </tr>`;
+            <tr>
+                <td>${this.renderOrderCell(order)}</td>
+                <td>${this.renderDeadlineCell(order)}</td>
+                <td>${this.renderBadge(meta.todo.label, meta.todo.className, meta.todo.title)}</td>
+                <td>${this.renderManagerCell(order)}</td>
+                <td>${this.renderPaymentBadge(order.payment_status || 'not_sent')}</td>
+                <td>${this.renderBadge(meta.hardware.label, meta.hardware.className, meta.hardware.title)}</td>
+                <td class="orders-status-cell">${this.renderStatusControl(order)}</td>
+                <td>${this.renderBadge(meta.china.label, meta.china.className, meta.china.title)}</td>
+                <td>${this.renderActionButtons(order)}</td>
+            </tr>`;
     },
 
-    // ==========================================
-    // BOARD VIEW (Kanban)
-    // ==========================================
-
-    renderBoard(orders) {
-        const container = document.getElementById('orders-board-view');
-        if (!container) return;
-
-        // Exclude only deleted from board (cancelled has its own column)
-        const active = orders.filter(o => o.status !== 'deleted');
-
-        container.innerHTML = BOARD_COLUMNS.map(col => {
-            const colOrders = active.filter(o => col.statuses.includes(o.status));
-            const totalRevenue = colOrders
-                .filter(o => (o.client_name || '').toUpperCase() !== 'B2C')
-                .reduce((s, o) => s + (o.total_revenue_plan || 0), 0);
-            const b2cCount = colOrders.filter(o => (o.client_name || '').toUpperCase() === 'B2C').length;
-
-            return `
-            <div class="orders-board-col" data-status="${col.status}"
-                 ondragover="Orders.onBoardDragOver(event)"
-                 ondragleave="Orders.onBoardDragLeave(event)"
-                 ondrop="Orders.onBoardDrop(event, '${col.status}')">
-                <div class="orders-board-col-header" style="border-top:3px solid ${col.color}">
-                    <span>${col.icon} ${col.label} <span style="font-weight:400;color:var(--text-muted)">(${colOrders.length})</span></span>
-                    <span style="font-size:11px;color:var(--text-muted)">${this.shortRub(totalRevenue)}${b2cCount > 0 ? ` <span title="B2C (${b2cCount}) не в сумме" style="font-size:9px;opacity:.6">−B2C</span>` : ''}</span>
-                </div>
-                <div class="orders-board-col-body">
-                    ${colOrders.length === 0
-                        ? '<div style="text-align:center;color:var(--text-muted);font-size:12px;padding:20px 0">Нет заказов</div>'
-                        : colOrders.map(o => this.renderBoardCard(o, col.color)).join('')}
-                </div>
-            </div>`;
-        }).join('');
+    renderSkyRow(order) {
+        return `
+            <tr>
+                <td>${this.renderOrderCell(order)}</td>
+                <td class="orders-mini-date">${this.formatOrderStart(order)}</td>
+                <td class="orders-mini-date">${this.renderDeadlineCell(order)}</td>
+                <td>${this.renderBadge(App.statusLabel(order.status), this.statusClassName(order.status))}</td>
+                <td>${this.renderActionButtons(order, { compact: true })}</td>
+            </tr>`;
     },
 
-    renderBoardCard(order, statusColor) {
-        const ps = PAYMENT_STATUSES.find(s => s.key === (order.payment_status || 'not_sent')) || PAYMENT_STATUSES[0];
-        const margin = order.margin_percent_plan || 0;
+    renderBasketRow(order) {
+        return `
+            <tr style="opacity:.75">
+                <td>${this.renderOrderCell(order)}</td>
+                <td class="orders-mini-date">${App.formatDate(order.deleted_at || order.updated_at || order.created_at)}</td>
+                <td>${this.renderBadge(App.statusLabel(order.status), 'badge-red')}</td>
+                <td>${this.renderActionButtons(order, { compact: true })}</td>
+            </tr>`;
+    },
 
-        // Deadline display
-        let deadlineHtml = '';
-        if (order.deadline_end || order.deadline_start || order.deadline) {
-            const d = order.deadline_end || order.deadline_start || order.deadline;
-            try {
-                const dt = new Date(d);
-                const isOverdue = dt < new Date() && order.status !== 'completed';
-                deadlineHtml = `<span style="font-size:10px;${isOverdue ? 'color:var(--red);font-weight:600' : 'color:var(--text-muted)'}">
-                    ${isOverdue ? '!' : ''}${dt.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })}
-                </span>`;
-            } catch (e) {}
-        }
-
-        // Production sub-stage badge
-        const subStage = PRODUCTION_SUBSTAGES[order.status];
-        const subStageBadge = subStage
-            ? `<div style="font-size:10px;color:#f59e0b;font-weight:600;margin-bottom:4px;">◉ ${subStage}</div>`
+    renderOrderCell(order) {
+        const client = this.escHtml(order.client_name || '—');
+        const b2c = (order.client_name || '').toUpperCase() === 'B2C'
+            ? this.renderBadge('B2C', 'badge-blue')
             : '';
 
-        const isB2C = (order.client_name || '').toUpperCase() === 'B2C';
-        const b2cBadge = isB2C ? '<span style="display:inline-block;font-size:9px;font-weight:700;color:#7c3aed;background:rgba(124,58,237,.1);padding:1px 5px;border-radius:4px;margin-left:4px;">B2C</span>' : '';
-
-        return `
-        <div class="order-board-card" draggable="true"
-             ondragstart="Orders.onBoardDragStart(event, ${order.id})"
-             onclick="App.navigate('order-detail', true, ${order.id})">
-            <div class="order-board-card-title">${this.escHtml(order.order_name || 'Без названия')}${b2cBadge}</div>
-            ${subStageBadge}
-            <div class="order-board-card-client">${this.escHtml(order.client_name || '')} ${order.manager_name ? '/ ' + this.escHtml(order.manager_name) : ''}</div>
-            <div class="order-board-card-footer">
-                <span class="badge badge-${ps.color}" style="font-size:9px">${ps.label}</span>
-                <span style="font-size:11px;font-weight:600;${margin >= 30 ? 'color:var(--green)' : 'color:var(--red)'}">${formatPercent(margin)}</span>
-            </div>
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px">
-                <span style="font-size:11px;color:var(--text-muted)">${formatRub(order.total_revenue_plan || 0)}</span>
-                ${deadlineHtml}
+        return `<div>
+            <a href="#order-detail/${order.id}" class="orders-order-link" onclick="App.navigate('order-detail', true, ${order.id}); return false;" title="Открыть карточку заказа">${this.escHtml(order.order_name || 'Без названия')}</a>
+            <div class="orders-order-meta">
+                <span>${client}</span>
+                ${b2c}
             </div>
         </div>`;
     },
 
-    // Drag & drop for board
-    onBoardDragStart(e, orderId) {
-        e.dataTransfer.setData('text/plain', orderId);
-        e.target.classList.add('dragging');
+    renderManagerCell(order) {
+        const manager = this.escHtml(order.manager_name || '—');
+        const start = this.formatOrderStart(order);
+        return `<div>
+            <div>${manager}</div>
+            <div class="orders-cell-muted">Старт: ${start}</div>
+        </div>`;
     },
 
-    onBoardDragOver(e) {
-        e.preventDefault();
-        const col = e.currentTarget;
-        col.classList.add('drag-over');
+    renderDeadlineCell(order) {
+        const deadline = this.formatOrderDeadline(order);
+        const overdue = this.isOverdue(order);
+        if (deadline === '—') {
+            return '<span class="orders-cell-muted">—</span>';
+        }
+        return `<span style="${overdue ? 'color:var(--red);font-weight:700;' : ''}">${deadline}</span>`;
     },
 
-    onBoardDragLeave(e) {
-        e.currentTarget.classList.remove('drag-over');
+    renderBadge(label, className, title = '') {
+        return `<span class="orders-inline-badge ${className || 'badge-gray'}" ${title ? `title="${this.escHtml(title)}"` : ''}>${this.escHtml(label || '—')}</span>`;
     },
 
-    async onBoardDrop(e, newStatus) {
-        e.preventDefault();
-        e.currentTarget.classList.remove('drag-over');
+    renderPaymentBadge(paymentStatus) {
+        const payment = PAYMENT_STATUSES.find(item => item.key === paymentStatus) || PAYMENT_STATUSES[0];
+        return this.renderBadge(payment.label, `badge-${payment.color}`);
+    },
 
-        const orderId = parseInt(e.dataTransfer.getData('text/plain'));
-        const order = this.allOrders.find(o => o.id === orderId);
-        if (!order) return;
-
-        // When dropping into «Производство» column, start at the first sub-stage
-        const actualStatus = newStatus === 'production' ? 'production_casting' : newStatus;
-        if (order.status === actualStatus) return;
-
-        const oldStatus = order.status;
-        const managerName = App.getCurrentEmployeeName();
-
-        await updateOrderStatus(orderId, actualStatus);
-        await this._syncWarehouseByStatus(orderId, oldStatus, actualStatus, order.order_name, managerName || 'Неизвестный');
-
-        // When completing an order, move products to ready goods
-        if (actualStatus === 'completed' && oldStatus !== 'completed') {
-            await this._moveToReadyGoods(orderId, order);
+    renderStatusControl(order) {
+        if (order.status === 'deleted') {
+            return '<span class="orders-cell-muted">Удалён</span>';
         }
 
-        order.status = actualStatus;
+        return `<select class="inline-status-select status-${order.status}" onchange="Orders.onStatusChange(${order.id}, this.value, '${order.status}')" onclick="event.stopPropagation()">
+            ${STATUS_OPTIONS.filter(option => option.value !== 'deleted').map(option =>
+                `<option value="${option.value}" ${option.value === order.status ? 'selected' : ''}>${option.label}</option>`
+            ).join('')}
+        </select>`;
+    },
 
-        await this.addChangeRecord(orderId, {
-            field: 'status',
-            old_value: App.statusLabel(oldStatus),
-            new_value: App.statusLabel(actualStatus),
-            manager: managerName || 'Неизвестный',
-        });
+    renderActionButtons(order, options = {}) {
+        const compact = options.compact === true;
 
-        App.toast(`Статус: ${App.statusLabel(actualStatus)}`);
-        this.renderBoard(this.allOrders);
+        if (order.status === 'deleted') {
+            return `<div class="orders-actions">
+                <button class="btn btn-sm btn-outline" onclick="Orders.restoreOrder(${order.id})" title="Восстановить" style="color:var(--green);border-color:var(--green);">&#8634;</button>
+                <button class="btn btn-sm btn-danger" onclick="Orders.confirmPermanentDelete(${order.id})" title="Удалить навсегда">&#10005;</button>
+            </div>`;
+        }
+
+        return `<div class="orders-actions">
+            ${compact ? '' : `<button class="btn btn-sm btn-outline" onclick="Orders.cloneOrder(${order.id})" title="Копировать">&#10697;</button>`}
+            <button class="btn btn-sm btn-outline" onclick="Orders.editOrder(${order.id})" title="Редактировать">&#9998;</button>
+            <button class="btn btn-sm btn-danger" onclick="Orders.confirmDelete(${order.id})" title="Удалить">&#10005;</button>
+        </div>`;
+    },
+
+    renderEmptyState(text) {
+        return `<div class="card"><div class="empty-state">
+            <div class="empty-icon">&#9776;</div>
+            <p>${this.escHtml(text || 'Нет заказов')}</p>
+        </div></div>`;
+    },
+
+    formatOrderDeadline(order) {
+        const start = order.deadline_start || '';
+        const end = order.deadline_end || order.deadline || '';
+
+        if (start && end && String(start) !== String(end)) {
+            return `${App.formatDate(start)} → ${App.formatDate(end)}`;
+        }
+        if (end) return App.formatDate(end);
+        if (start) return App.formatDate(start);
+        return '—';
+    },
+
+    formatOrderStart(order) {
+        return App.formatDate(order.deadline_start || order.created_at || '');
+    },
+
+    isOverdue(order) {
+        const target = String(order.deadline_end || order.deadline || '').slice(0, 10);
+        if (!target) return false;
+        if (['completed', 'cancelled', 'deleted'].includes(order.status)) return false;
+        return target < App.todayLocalYMD();
     },
 
     shortRub(amount) {
@@ -370,7 +640,7 @@ const Orders = {
     },
 
     // ==========================================
-    // STATUS CHANGE (table)
+    // STATUS CHANGE
     // ==========================================
 
     async onStatusChange(orderId, newStatus, oldStatus) {
@@ -379,15 +649,13 @@ const Orders = {
         const managerName = App.getCurrentEmployeeName();
 
         await updateOrderStatus(orderId, newStatus);
-        const order = this.allOrders.find(o => o.id === orderId);
+        const order = this.allOrders.find(item => item.id === orderId);
         await this._syncWarehouseByStatus(orderId, oldStatus, newStatus, order && order.order_name, managerName || 'Неизвестный');
 
-        // When completing an order, move products to ready goods (finished goods warehouse)
         if (newStatus === 'completed' && oldStatus !== 'completed') {
             await this._moveToReadyGoods(orderId, order);
         }
 
-        // Save change history
         await this.addChangeRecord(orderId, {
             field: 'status',
             old_value: App.statusLabel(oldStatus),
@@ -412,19 +680,19 @@ const Orders = {
             demand.set(itemId, (demand.get(itemId) || 0) + qty);
         };
 
-        (items || []).forEach(it => {
+        (items || []).forEach(item => {
             const qty = parseFloat(
-                it.quantity
-                ?? it.hardware_qty
-                ?? it.packaging_qty
-                ?? it.qty
+                item.quantity
+                ?? item.hardware_qty
+                ?? item.packaging_qty
+                ?? item.qty
             ) || 0;
             if (qty <= 0) return;
-            if (includeHardware && it.item_type === 'hardware' && it.hardware_source === 'warehouse' && it.hardware_warehouse_item_id) {
-                add(it.hardware_warehouse_item_id, qty);
+            if (includeHardware && item.item_type === 'hardware' && item.hardware_source === 'warehouse' && item.hardware_warehouse_item_id) {
+                add(item.hardware_warehouse_item_id, qty);
             }
-            if (includePackaging && it.item_type === 'packaging' && it.packaging_source === 'warehouse' && it.packaging_warehouse_item_id) {
-                add(it.packaging_warehouse_item_id, qty);
+            if (includePackaging && item.item_type === 'packaging' && item.packaging_source === 'warehouse' && item.packaging_warehouse_item_id) {
+                add(item.packaging_warehouse_item_id, qty);
             }
         });
         return demand;
@@ -452,18 +720,16 @@ const Orders = {
         const nowConsumed = this._isConsumedStatus(newStatus);
         const nowSample = newStatus === 'sample';
 
-        // 1) Release old auto-reservations for this order
         const reservations = await loadWarehouseReservations();
         const nowIso = new Date().toISOString();
-        reservations.forEach(r => {
-            if (r.status === 'active' && r.source === 'order_calc' && r.order_id === orderId) {
-                r.status = 'released';
-                r.released_at = nowIso;
+        reservations.forEach(reservation => {
+            if (reservation.status === 'active' && reservation.source === 'order_calc' && reservation.order_id === orderId) {
+                reservation.status = 'released';
+                reservation.released_at = nowIso;
             }
         });
         await saveWarehouseReservations(reservations);
 
-        // 2) Return stock when leaving consumed statuses to non-consumed
         if (wasConsumed && !nowConsumed) {
             for (const [itemId, qty] of demand.entries()) {
                 await Warehouse.adjustStock(
@@ -478,21 +744,21 @@ const Orders = {
             }
         }
 
-        // 3) Reserve stock for sample
         if (nowSample) {
             const freshReservations = await loadWarehouseReservations();
             const items = await loadWarehouseItems();
             const activeReservedByItem = new Map();
-            freshReservations.forEach(r => {
-                if (r.status !== 'active') return;
-                activeReservedByItem.set(r.item_id, (activeReservedByItem.get(r.item_id) || 0) + (parseFloat(r.qty) || 0));
+
+            freshReservations.forEach(reservation => {
+                if (reservation.status !== 'active') return;
+                activeReservedByItem.set(reservation.item_id, (activeReservedByItem.get(reservation.item_id) || 0) + (parseFloat(reservation.qty) || 0));
             });
 
             const toInsert = [];
             demand.forEach((qty, itemId) => {
-                const wh = items.find(i => i.id === itemId);
-                if (!wh) return;
-                const stock = parseFloat(wh.qty) || 0;
+                const whItem = items.find(item => item.id === itemId);
+                if (!whItem) return;
+                const stock = parseFloat(whItem.qty) || 0;
                 const reserved = activeReservedByItem.get(itemId) || 0;
                 const available = Math.max(0, stock - reserved);
                 const reserveQty = Math.min(qty, available);
@@ -517,7 +783,6 @@ const Orders = {
             return;
         }
 
-        // 4) Deduct stock when entering consumed statuses from non-consumed
         if (!wasConsumed && nowConsumed) {
             for (const [itemId, qty] of demand.entries()) {
                 await Warehouse.adjustStock(
@@ -554,7 +819,10 @@ const Orders = {
         App.toast('Копирование заказа...');
         try {
             const data = await loadOrder(orderId);
-            if (!data) { App.toast('Ошибка загрузки', 'error'); return; }
+            if (!data) {
+                App.toast('Ошибка загрузки', 'error');
+                return;
+            }
 
             const clonedOrder = { ...data.order };
             delete clonedOrder.id;
@@ -564,10 +832,10 @@ const Orders = {
             delete clonedOrder.updated_at;
 
             const clonedItems = (data.items || []).map(item => {
-                const c = { ...item };
-                delete c.id;
-                delete c.order_id;
-                return c;
+                const cloned = { ...item };
+                delete cloned.id;
+                delete cloned.order_id;
+                return cloned;
             });
 
             const newId = await saveOrder(clonedOrder, clonedItems);
@@ -582,7 +850,7 @@ const Orders = {
     },
 
     async confirmDelete(orderId) {
-        const order = this.allOrders.find(o => o.id === orderId);
+        const order = this.allOrders.find(item => item.id === orderId);
         const name = order && order.order_name ? order.order_name : 'Без названия';
         if (confirm(`Перенести заказ "${name}" в корзину?`)) {
             const managerName = App.getCurrentEmployeeName();
@@ -611,7 +879,7 @@ const Orders = {
     },
 
     async confirmPermanentDelete(orderId) {
-        const order = this.allOrders.find(o => o.id === orderId);
+        const order = this.allOrders.find(item => item.id === orderId);
         const name = order && order.order_name ? order.order_name : 'Без названия';
         if (confirm(`ВНИМАНИЕ: Удалить заказ "${name}" НАВСЕГДА? Это действие нельзя отменить!`)) {
             await permanentDeleteOrder(orderId);
@@ -641,7 +909,9 @@ const Orders = {
         const key = 'ro_calc_order_history_' + orderId;
         try {
             return JSON.parse(localStorage.getItem(key)) || [];
-        } catch (e) { return []; }
+        } catch (e) {
+            return [];
+        }
     },
 
     async saveHistory(orderId, history) {
@@ -651,7 +921,7 @@ const Orders = {
 
     escHtml(str) {
         if (!str) return '';
-        return str
+        return String(str)
             .replace(/&/g, '&amp;')
             .replace(/</g, '&lt;')
             .replace(/>/g, '&gt;')

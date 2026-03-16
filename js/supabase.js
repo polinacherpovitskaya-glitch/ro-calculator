@@ -854,6 +854,44 @@ async function loadOrder(orderId) {
     return order ? { order, items: dedupedItems, repaired_duplicates: repairedDuplicates } : null;
 }
 
+async function loadOrderItemsByOrderIds(orderIds = []) {
+    const ids = [...new Set((orderIds || [])
+        .map(id => Number(id))
+        .filter(id => Number.isFinite(id) && id > 0))];
+    if (ids.length === 0) return [];
+
+    if (isSupabaseReady()) {
+        const { data, error } = await supabaseClient
+            .from('order_items')
+            .select('*')
+            .in('order_id', ids)
+            .order('order_id')
+            .order('item_number');
+        if (error) {
+            console.error('loadOrderItemsByOrderIds error:', error);
+            return [];
+        }
+        return (data || []).map(item => {
+            if (item.item_data) {
+                try {
+                    const extras = JSON.parse(item.item_data);
+                    return { ...extras, ...item };
+                } catch (e) { /* ignore */ }
+            }
+            return item;
+        });
+    }
+
+    return (getLocal(LOCAL_KEYS.orderItems) || [])
+        .filter(item => ids.includes(Number(item.order_id)))
+        .sort((a, b) => {
+            if (Number(a.order_id) !== Number(b.order_id)) {
+                return Number(a.order_id) - Number(b.order_id);
+            }
+            return Number(a.item_number || 0) - Number(b.item_number || 0);
+        });
+}
+
 async function updateOrderStatus(orderId, status) {
     if (isSupabaseReady()) {
         const { error } = await supabaseClient

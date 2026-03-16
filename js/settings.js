@@ -538,7 +538,7 @@ const Settings = {
 
     // Page access checkboxes
     PAGE_LABELS: {
-        dashboard: 'Главная', calculator: 'Калькулятор', orders: 'Заказы',
+        calculator: 'Калькулятор', orders: 'Заказы',
         'production-plan': 'Производство', factual: 'План-Факт', analytics: 'Аналитика',
         molds: 'Молды', colors: 'Цвета', timetrack: 'Учёт времени',
         tasks: 'Задачи', projects: 'Проекты', gantt: 'Гант', import: 'Импорт',

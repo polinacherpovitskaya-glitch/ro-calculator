@@ -2330,10 +2330,84 @@ table .text-center { text-align: center; }
    ORDERS KANBAN BOARD (v35)
    ============================================= */
 
-.orders-view-toggle { display: flex; gap: 0; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
-.orders-view-btn { padding: 6px 14px; font-size: 12px; font-weight: 600; cursor: pointer; background: var(--card-bg); color: var(--text-muted); border: none; transition: all 0.15s; }
-.orders-view-btn:not(:last-child) { border-right: 1px solid var(--border); }
+.orders-view-toggle { display: flex; flex-wrap: wrap; gap: 8px; }
+.orders-view-btn { padding: 7px 14px; font-size: 12px; font-weight: 600; cursor: pointer; background: var(--card-bg); color: var(--text-muted); border: 1px solid var(--border); border-radius: 999px; transition: all 0.15s; }
+.orders-view-btn:not(:last-child) { border-right: none; }
 .orders-view-btn.active { background: var(--accent); color: #fff; }
+
+.orders-summary-row {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+.orders-mode-note {
+    flex: 1 1 280px;
+    min-height: 44px;
+    padding: 10px 14px;
+    border-radius: var(--radius);
+    border: 1px dashed var(--border);
+    background: var(--bg);
+    color: var(--text-muted);
+    font-size: 12px;
+    line-height: 1.45;
+}
+
+.orders-inline-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    max-width: 100%;
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.orders-order-link {
+    color: var(--accent);
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.orders-order-link:hover {
+    text-decoration: underline;
+}
+
+.orders-order-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-top: 4px;
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.orders-cell-muted {
+    margin-top: 4px;
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.orders-status-cell .inline-status-select {
+    min-width: 180px;
+}
+
+.orders-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.orders-mini-date {
+    white-space: nowrap;
+    font-size: 12px;
+}
 
 .orders-board {
     display: grid;
@@ -2415,9 +2489,12 @@ table .text-center { text-align: center; }
 }
 @media (max-width: 900px) {
     .orders-board { grid-template-columns: repeat(2, 1fr); }
+    .orders-view-btn { flex: 1 1 calc(50% - 8px); text-align: center; justify-content: center; }
+    .orders-status-cell .inline-status-select { min-width: 0; width: 100%; }
 }
 @media (max-width: 600px) {
     .orders-board { grid-template-columns: 1fr; }
+    .orders-view-btn { flex-basis: 100%; }
 }
 
 /* =============================================
