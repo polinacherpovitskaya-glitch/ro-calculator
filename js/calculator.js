@@ -277,10 +277,19 @@ function calculatePendantCost(pendant, params) {
     if (qty === 0) return { costPerUnit: 0, sellPerUnit: 0, totalCost: 0, totalRevenue: 0, assemblyHours: 0, packagingHours: 0 };
 
     const elements = pendant.elements || [];
-    const elemPrice = pendant.element_price_per_unit || 0;
-    const elementsCost = elements.length * elemPrice;
 
-    const cordCost = (pendant.cord?.price_per_unit || 0) + (pendant.cord?.delivery_price || 0);
+    // Element cost (production/purchase cost per element)
+    const elemCostPerUnit = pendant.element_price_per_unit || 0;
+    const elemCostTotal = elements.length * elemCostPerUnit;
+
+    // Hardware costs (purchase prices)
+    // Cord: depends on unit — metric (м/см) uses cord_length_cm, pieces (шт) = price_per_unit directly
+    const cordUnit = pendant.cord?.unit || 'шт';
+    const cordIsMetric = (cordUnit === 'м' || cordUnit === 'см');
+    const cordLenCm = pendant.cord_length_cm || 0;
+    const cordCost = cordIsMetric
+        ? round2((pendant.cord?.price_per_unit || 0) * cordLenCm / 100) + (pendant.cord?.delivery_price || 0)
+        : (pendant.cord?.price_per_unit || 0) + (pendant.cord?.delivery_price || 0);
     const carabinerCost = (pendant.carabiner?.price_per_unit || 0) + (pendant.carabiner?.delivery_price || 0);
 
     let printCost = 0;
@@ -288,25 +297,22 @@ function calculatePendantCost(pendant, params) {
         if (el.has_print && el.print_price) printCost += el.print_price;
     });
 
-    const pkgCost = pendant.packaging
-        ? (pendant.packaging.price_per_unit || 0) + (pendant.packaging.delivery_price || 0)
-        : 0;
+    // Total cost per pendant = elements + cord + carabiner + print
+    const costPerUnit = round2(elemCostTotal + cordCost + carabinerCost + printCost);
 
-    const costPerUnit = round2(elementsCost + cordCost + carabinerCost + printCost + pkgCost);
-
-    // Sell price
+    // Sell price: use pre-calculated total from Step 5 UI
     let sellPerUnit;
-    if (pendant.sell_price_override && pendant.sell_price_override > 0) {
-        sellPerUnit = pendant.sell_price_override;
+    if (pendant._totalSellPerUnit > 0) {
+        sellPerUnit = pendant._totalSellPerUnit;
     } else {
+        // Fallback: margin-based pricing on cost
         sellPerUnit = calculateTargetPrice(costPerUnit, params, qty);
     }
 
     // Assembly hours
     const cordSpeed = pendant.cord?.assembly_speed || 0;
     const assemblyHours = cordSpeed > 0 ? round2(qty / cordSpeed * (params.wasteFactor || 1.1)) : 0;
-    const pkgSpeed = pendant.packaging?.assembly_speed || 0;
-    const packagingHours = pkgSpeed > 0 ? round2(qty / pkgSpeed * (params.wasteFactor || 1.1)) : 0;
+    const packagingHours = 0;
 
     return {
         costPerUnit,

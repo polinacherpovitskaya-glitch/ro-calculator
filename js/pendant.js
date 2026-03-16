@@ -18,7 +18,8 @@ const Pendant = {
             name: '',
             quantity: 0,
             elements: [],
-            cord: { source: 'warehouse', warehouse_item_id: null, name: '', price_per_unit: 0, delivery_price: 0, assembly_speed: 20 },
+            cord: { source: 'warehouse', warehouse_item_id: null, name: '', price_per_unit: 0, delivery_price: 0 },
+            cord_length_cm: 0,
             carabiner: { source: 'warehouse', warehouse_item_id: null, name: '', price_per_unit: 0, delivery_price: 0 },
             packaging: null,
             element_price_per_unit: null,
@@ -180,9 +181,14 @@ const Pendant = {
     // STEP RENDERERS
     // ==========================================
 
-    _renderStep() {
+    async _renderStep() {
         const body = document.getElementById('pendant-wizard-body');
         if (!body) return;
+        // Ensure warehouse data is loaded for step 4
+        if (this._wizardStep === 4) {
+            body.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-muted);">Загрузка склада...</div>';
+            await Calculator._ensureWhPickerData();
+        }
         switch (this._wizardStep) {
             case 1: body.innerHTML = this._renderStep1(); this._bindStep1(); break;
             case 2: body.innerHTML = this._renderStep2(); this._bindStep2(); break;
@@ -204,7 +210,7 @@ const Pendant = {
             <div class="pendant-field-group">
                 <label>Надпись</label>
                 <div style="display:flex;gap:8px;align-items:center;">
-                    <input type="text" id="pw-name" value="${App.escHtml(pnd.name || '')}" placeholder="КЭШШШ" class="input" style="flex:1;font-size:18px;letter-spacing:2px;">
+                    <input type="text" id="pw-name" value="${App.escHtml(pnd.name || '')}" placeholder="КЭШШШ" class="input" style="flex:1;font-size:18px;letter-spacing:2px;text-transform:uppercase;">
                     <button class="btn btn-sm btn-outline" onclick="Pendant._insertSpecial('❤️')" title="Сердечко">❤️</button>
                     <button class="btn btn-sm btn-outline" onclick="Pendant._insertSpecial('😊')" title="Смайлик">😊</button>
                 </div>
@@ -224,7 +230,7 @@ const Pendant = {
         if (nameInput) {
             nameInput.addEventListener('input', () => {
                 const preview = document.getElementById('pw-beads-preview');
-                if (preview) preview.innerHTML = this._renderBeads(nameInput.value, []);
+                if (preview) preview.innerHTML = this._renderBeads(nameInput.value.toUpperCase(), []);
             });
         }
     },
@@ -270,7 +276,11 @@ const Pendant = {
                 </div>`).join('')}
             </div>
             <div style="display:flex;gap:8px;align-items:center;margin-top:12px;">
-                <input type="text" id="pw-color-input" placeholder="Цвет (напр. белый, голубой)" class="input" style="flex:1;">
+                <select id="pw-color-input" class="input" style="flex:1;">
+                    <option value="">— Выберите цвет —</option>
+                    ${(Colors.data || []).map(c => `<option value="${App.escHtml(c.name)}">${App.escHtml(c.number ? c.number + ' ' + c.name : c.name)}</option>`).join('')}
+                    <option value="__custom__">✏️ Ввести вручную...</option>
+                </select>
                 <button class="btn btn-primary btn-sm" onclick="Pendant._assignColor()">Назначить</button>
                 <button class="btn btn-outline btn-sm" onclick="Pendant._selectAll()">Выделить все</button>
             </div>
@@ -324,15 +334,20 @@ const Pendant = {
 
     _assignColor() {
         const input = document.getElementById('pw-color-input');
-        const color = (input?.value || '').trim();
-        if (!color) { App.toast('Введите цвет'); return; }
+        let color = (input?.value || '').trim();
+        if (color === '__custom__') {
+            color = prompt('Введите название цвета:');
+            if (!color) return;
+            color = color.trim();
+        }
+        if (!color) { App.toast('Выберите цвет'); return; }
         if (this._selectedBeads.size === 0) { App.toast('Выделите буквы'); return; }
 
         this._selectedBeads.forEach(i => {
             if (this._wizardData.elements[i]) this._wizardData.elements[i].color = color;
         });
         this._selectedBeads.clear();
-        input.value = '';
+        if (input) input.value = '';
         this._renderStep();
     },
 
@@ -376,49 +391,161 @@ const Pendant = {
 
     _renderStep4() {
         const pnd = this._wizardData;
+        const whData = Calculator._whPickerData || {};
+        // Build warehouse pickers for cords and carabiners using existing Warehouse component
+        const cordPickerHtml = this._renderWhDropdown('cord', pnd.cord, whData);
+        const carabinerPickerHtml = this._renderWhDropdown('carabiner', pnd.carabiner, whData);
+        const qty = pnd.quantity || 0;
+        const cordUnit = pnd.cord?.unit || 'шт';
+        const cordIsMetric = (cordUnit === 'м' || cordUnit === 'см');
+        const cordLenCm = pnd.cord_length_cm || 0;
+
+        // Cord stock check depends on unit type
+        const cordStock = this._getSelectedStock('cord', pnd.cord, whData);
+        let cordNeedDisplay = '';
+        let cordWarn = false;
+        let cordCostPerPendant = 0;
+
+        if (cordIsMetric) {
+            // Metric: need length per pendant, stock in м or см
+            const cordNeedMeters = round2(cordLenCm * qty / 100);
+            const stockInMeters = cordUnit === 'см' && cordStock !== null ? round2(cordStock / 100) : cordStock;
+            cordCostPerPendant = pnd.cord?.price_per_unit ? round2(pnd.cord.price_per_unit * cordLenCm / 100) : 0;
+            if (cordLenCm > 0 && qty > 0) {
+                cordNeedDisplay = `Нужно: <b>${cordNeedMeters} м</b> · Цена за подвес: <b>${formatRub(cordCostPerPendant)}</b>`;
+            }
+            cordWarn = stockInMeters !== null && cordNeedMeters > stockInMeters;
+        } else {
+            // Pieces: 1 cord = 1 pendant, no length input needed
+            cordCostPerPendant = pnd.cord?.price_per_unit || 0;
+            cordWarn = cordStock !== null && qty > cordStock;
+        }
+
+        // Carabiner: always pieces
+        const carabinerStock = this._getSelectedStock('carabiner', pnd.carabiner, whData);
+        const carabinerWarn = carabinerStock !== null && qty > carabinerStock;
+
+        const cordUnitLabel = cordIsMetric ? '/' + cordUnit : '/шт';
+
         return `
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
                 <div>
                     <h4 style="margin:0 0 8px;">🧵 Шнур</h4>
-                    ${this._renderSourcePicker('cord', pnd.cord)}
+                    ${cordPickerHtml}
+                    ${pnd.cord?.name ? `<div style="margin-top:8px;font-size:12px;color:var(--text-muted);">
+                        ${App.escHtml(pnd.cord.name)} · ${formatRub(pnd.cord.price_per_unit || 0)}${cordUnitLabel}
+                    </div>` : ''}
+                    ${cordIsMetric ? `<div class="pendant-field-group" style="margin-top:8px;">
+                        <label>Длина шнура на 1 подвес (см)</label>
+                        <input type="number" class="input" value="${cordLenCm || ''}" placeholder="50" style="max-width:150px;" onchange="Pendant._wizardData.cord_length_cm = parseFloat(this.value)||0; Pendant._renderStep();">
+                    </div>` : ''}
+                    ${cordNeedDisplay ? `<div style="font-size:12px;color:var(--text-muted);">${cordNeedDisplay}</div>` : ''}
+                    ${cordWarn ? `<div style="margin-top:4px;font-size:12px;color:var(--red);font-weight:600;">⚠️ Нужно ${cordIsMetric ? round2(cordLenCm * qty / 100) + ' м' : qty + ' шт'}, на складе ${cordStock} ${cordUnit}!</div>` : ''}
                 </div>
                 <div>
                     <h4 style="margin:0 0 8px;">🔗 Карабин</h4>
-                    ${this._renderSourcePicker('carabiner', pnd.carabiner)}
+                    ${carabinerPickerHtml}
+                    ${pnd.carabiner?.name ? `<div style="margin-top:8px;font-size:12px;color:var(--text-muted);">
+                        ${App.escHtml(pnd.carabiner.name)} · ${formatRub(pnd.carabiner.price_per_unit || 0)}/шт
+                    </div>` : ''}
+                    ${carabinerWarn ? `<div style="margin-top:4px;font-size:12px;color:var(--red);font-weight:600;">⚠️ Нужно ${qty} шт, на складе ${carabinerStock} шт!</div>` : ''}
                 </div>
             </div>
         `;
     },
 
-    _renderSourcePicker(type, data) {
-        const isWarehouse = data.source === 'warehouse';
+    _renderWhDropdown(type, data, whData) {
+        const catKey = type === 'cord' ? 'cords' : 'carabiners';
+        const catItems = whData[catKey]?.items || [];
+        if (catItems.length === 0) {
+            // Fallback to manual input if no warehouse data
+            return this._renderManualPicker(type, data);
+        }
+        const selectedId = data?.warehouse_item_id || null;
         return `
             <div class="pendant-field-group">
-                <div style="display:flex;gap:4px;margin-bottom:8px;">
-                    <button class="btn btn-sm ${isWarehouse ? 'btn-primary' : 'btn-outline'}" onclick="Pendant._setSource('${type}', 'warehouse')">Со склада</button>
-                    <button class="btn btn-sm ${!isWarehouse ? 'btn-primary' : 'btn-outline'}" onclick="Pendant._setSource('${type}', 'custom')">Кастом</button>
-                </div>
-                <div class="pendant-field-group">
-                    <label>Название</label>
-                    <input type="text" class="input" id="pw-${type}-name" value="${App.escHtml(data.name || '')}" placeholder="${type === 'cord' ? 'Шнур с силик. наконечником' : 'Круглый карабин 2.3 см'}" onchange="Pendant._updateField('${type}', 'name', this.value)">
-                </div>
-                ${isWarehouse ? `<div class="pendant-field-group"><button class="btn btn-sm btn-outline" onclick="Pendant._pickFromWarehouse('${type}')" style="width:100%;">🔍 Выбрать со склада</button></div>` : ''}
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-                    <div class="pendant-field-group">
-                        <label>Цена ₽/шт</label>
-                        <input type="number" class="input" value="${data.price_per_unit || ''}" placeholder="0" onchange="Pendant._updateField('${type}', 'price_per_unit', parseFloat(this.value)||0)">
-                    </div>
-                    <div class="pendant-field-group">
-                        <label>Доставка ₽/шт</label>
-                        <input type="number" class="input" value="${data.delivery_price || ''}" placeholder="0" onchange="Pendant._updateField('${type}', 'delivery_price', parseFloat(this.value)||0)">
-                    </div>
-                </div>
-                ${type === 'cord' ? `<div class="pendant-field-group">
-                    <label>Скорость сборки (шт/час)</label>
-                    <input type="number" class="input" value="${data.assembly_speed || 20}" placeholder="20" onchange="Pendant._updateField('${type}', 'assembly_speed', parseFloat(this.value)||0)">
-                </div>` : ''}
+                <select class="input" id="pw-wh-${type}" onchange="Pendant._onWhSelect('${type}', this.value)" style="width:100%;">
+                    <option value="">— Выберите ${type === 'cord' ? 'шнур' : 'карабин'} —</option>
+                    ${catItems.map(item => {
+                        const parts = [item.name];
+                        if (item.size) parts.push(item.size);
+                        if (item.color) parts.push(item.color);
+                        const label = parts.join(' · ');
+                        const stock = item.available_qty > 0 ? `(${item.available_qty} ${item.unit})` : '(нет)';
+                        const price = item.price_per_unit > 0 ? ' · ' + formatRub(item.price_per_unit) : '';
+                        const sel = String(item.id) === String(selectedId) ? ' selected' : '';
+                        return `<option value="${item.id}"${sel}>${label} ${stock}${price}</option>`;
+                    }).join('')}
+                    <option value="__custom__">✏️ Ввести вручную...</option>
+                </select>
             </div>
         `;
+    },
+
+    _renderManualPicker(type, data) {
+        return `
+            <div class="pendant-field-group">
+                <label>Название</label>
+                <input type="text" class="input" id="pw-${type}-name" value="${App.escHtml(data?.name || '')}" placeholder="${type === 'cord' ? 'Шнур с силик. наконечником' : 'Круглый карабин 2.3 см'}" onchange="Pendant._updateField('${type}', 'name', this.value)">
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+                <div class="pendant-field-group">
+                    <label>Цена ₽/шт</label>
+                    <input type="number" class="input" value="${data?.price_per_unit || ''}" placeholder="0" onchange="Pendant._updateField('${type}', 'price_per_unit', parseFloat(this.value)||0)">
+                </div>
+                <div class="pendant-field-group">
+                    <label>Доставка ₽/шт</label>
+                    <input type="number" class="input" value="${data?.delivery_price || ''}" placeholder="0" onchange="Pendant._updateField('${type}', 'delivery_price', parseFloat(this.value)||0)">
+                </div>
+            </div>
+        `;
+    },
+
+    _onWhSelect(type, value) {
+        if (value === '__custom__') {
+            // Switch to custom mode
+            this._wizardData[type] = { source: 'custom', warehouse_item_id: null, name: '', price_per_unit: 0, delivery_price: 0, assembly_speed: type === 'cord' ? 20 : 0 };
+            this._renderStep();
+            return;
+        }
+        if (!value) return;
+        const whData = Calculator._whPickerData || {};
+        const catKey = type === 'cord' ? 'cords' : 'carabiners';
+        const item = (whData[catKey]?.items || []).find(i => String(i.id) === String(value));
+        if (!item) return;
+        const data = this._wizardData[type];
+        data.source = 'warehouse';
+        data.warehouse_item_id = item.id;
+        data.name = [item.name, item.color, item.size].filter(Boolean).join(' ');
+        data.price_per_unit = item.price_per_unit || 0;
+        data.delivery_price = 0;
+        data.unit = item.unit || 'шт'; // 'шт', 'м', 'см'
+
+        // Look up approved sell price from hw blanks catalog
+        data.sell_price = 0;
+        const linkedBlank = Calculator._findHwBlankByWarehouseItemId?.(item.id);
+        if (linkedBlank) {
+            const fixedSellPrice = parseFloat(linkedBlank.sell_price) || 0;
+            if (fixedSellPrice > 0) data.sell_price = fixedSellPrice;
+        }
+        // Fallback: 40% net margin
+        if (!data.sell_price && data.price_per_unit > 0 && typeof calcSellByNetMargin40 === 'function') {
+            data.sell_price = calcSellByNetMargin40(data.price_per_unit, App.params);
+        }
+
+        this._renderStep();
+    },
+
+    _getSelectedStock(type, data, whData) {
+        if (!data?.warehouse_item_id) return null;
+        const catKey = type === 'cord' ? 'cords' : 'carabiners';
+        const item = (whData[catKey]?.items || []).find(i => String(i.id) === String(data.warehouse_item_id));
+        return item ? (item.available_qty || 0) : null;
+    },
+
+    _renderSourcePicker(type, data) {
+        // Used only for packaging in step 5
+        return this._renderManualPicker(type, data);
     },
 
     _bindStep4() {},
@@ -440,194 +567,290 @@ const Pendant = {
         this._wizardData[type][field] = value;
     },
 
-    async _pickFromWarehouse(type) {
-        const category = type === 'cord' ? 'cords' : 'carabiners';
-        // Load warehouse items
-        await Calculator._ensureWhPickerData();
-        const items = (Calculator._whPickerData || []).filter(w => w.category === category && (w.qty > 0 || !w.qty));
-
-        if (items.length === 0) {
-            App.toast('Нет позиций на складе в категории ' + category);
-            return;
-        }
-
-        // Show simple picker modal
-        let picker = document.getElementById('pendant-wh-picker');
-        if (picker) picker.remove();
-
-        picker = document.createElement('div');
-        picker.id = 'pendant-wh-picker';
-        picker.className = 'modal-overlay';
-        picker.style.zIndex = '10001';
-        picker.innerHTML = `
-            <div class="pendant-wizard" style="max-width:500px;max-height:70vh;" onclick="event.stopPropagation()">
-                <div class="pendant-wizard-header">
-                    <h3>Выбрать ${type === 'cord' ? 'шнур' : 'карабин'} со склада</h3>
-                    <button class="btn btn-sm" onclick="document.getElementById('pendant-wh-picker').remove()" style="font-size:18px;">&times;</button>
-                </div>
-                <div style="padding:12px;overflow-y:auto;max-height:calc(70vh - 60px);">
-                    <input type="text" class="input" placeholder="Поиск..." id="pw-wh-search" oninput="Pendant._filterWhPicker()" style="margin-bottom:8px;">
-                    <div id="pw-wh-list">
-                        ${items.map((w, i) => `<div class="pendant-wh-item" data-idx="${i}" onclick="Pendant._selectWhItem('${type}', ${i})" style="padding:8px;border-bottom:1px solid var(--border);cursor:pointer;font-size:13px;">
-                            <b>${App.escHtml(w.name || '')}</b> ${w.color ? '· ' + App.escHtml(w.color) : ''} ${w.size ? '· ' + App.escHtml(w.size) : ''}
-                            <br><span class="text-muted">${App.escHtml(w.sku || '')} · ${w.qty || '?'} шт · ${formatRub(w.price_per_unit || 0)}</span>
-                        </div>`).join('')}
-                    </div>
-                </div>
-            </div>
-        `;
-        document.body.appendChild(picker);
-        picker.addEventListener('click', (e) => { if (e.target === picker) picker.remove(); });
-        this._whPickerItems = items;
-    },
-
-    _filterWhPicker() {
-        const q = (document.getElementById('pw-wh-search')?.value || '').toLowerCase();
-        document.querySelectorAll('#pw-wh-list .pendant-wh-item').forEach(el => {
-            el.style.display = el.textContent.toLowerCase().includes(q) ? '' : 'none';
-        });
-    },
-
-    _selectWhItem(type, idx) {
-        const w = this._whPickerItems[idx];
-        if (!w) return;
-        const data = this._wizardData[type];
-        data.warehouse_item_id = w.id || w.sku;
-        data.name = [w.name, w.color, w.size].filter(Boolean).join(' ');
-        data.price_per_unit = w.price_per_unit || 0;
-        data.delivery_price = 0;
-        document.getElementById('pendant-wh-picker')?.remove();
-        this._renderStep();
-    },
 
     // --- STEP 5: Summary ---
+
+    // Find letter blank pricing from enriched Molds or App.templates
+    _getLetterBlankTier(totalElements) {
+        if (!totalElements || totalElements <= 0) return null;
+        const LETTER_BLANK_IDS = [30, 31];
+        const TIERS = [50, 100, 300, 500, 1000, 3000];
+
+        // Find closest tier (round up to next tier)
+        let tierQty = TIERS[TIERS.length - 1];
+        for (const t of TIERS) {
+            if (totalElements <= t) { tierQty = t; break; }
+        }
+
+        // Try enriched Molds first (has full cost calculation)
+        if (typeof Molds !== 'undefined' && Molds.allMolds?.length) {
+            const mold = Molds.allMolds.find(m => LETTER_BLANK_IDS.includes(Number(m.id)));
+            if (mold?.tiers?.[tierQty]) {
+                const tier = mold.tiers[tierQty];
+                return { cost: tier.cost || 0, sellPrice: tier.sellPrice || 0, margin: tier.margin || 0, tierQty };
+            }
+        }
+
+        // Fallback: use App.templates (always available after login)
+        const tpl = (App.templates || []).find(t => LETTER_BLANK_IDS.includes(Number(t.id)));
+        if (!tpl) return null;
+
+        // Sell price from custom_prices (user-defined per tier)
+        const sellPrice = tpl.custom_prices?.[tierQty] || 0;
+
+        // Compute cost like enrichMolds: calculateItemCost + mold amortization + hw
+        const params = App.params;
+        if (!params) return sellPrice > 0 ? { cost: 0, sellPrice, margin: 0, tierQty } : null;
+
+        const pph = tpl.pieces_per_hour_avg || tpl.pieces_per_hour_min || 100;
+        const weight = tpl.weight_grams || 5;
+        const moldCount = tpl.mold_count || 1;
+        const singleMoldCost = (tpl.cost_cny || 800) * (tpl.cny_rate || 12.5) + (tpl.delivery_cost || 8000);
+        const moldTotalCost = singleMoldCost * moldCount;
+        const MOLD_MAX_LIFETIME = 4500;
+        const moldAmortPerUnit = moldTotalCost / MOLD_MAX_LIFETIME;
+
+        // Simplified item cost calc (plastic + labor + indirect + mold amort)
+        const item = {
+            quantity: tierQty,
+            pieces_per_hour: pph,
+            weight_grams: weight,
+            extra_molds: 0,
+            complex_design: false,
+            is_nfc: false,
+            nfc_programming: false,
+            hardware_qty: 0,
+            packaging_qty: 0,
+            printing_qty: 0,
+            delivery_included: false,
+        };
+        let cost = 0;
+        if (typeof calculateItemCost === 'function') {
+            const result = calculateItemCost(item, params);
+            cost = result.costTotal - result.costMoldAmortization + moldAmortPerUnit;
+        }
+
+        // Add built-in hw cost (assembly)
+        if (tpl.hw_name && (tpl.hw_price_per_unit > 0 || tpl.hw_speed > 0)) {
+            let hwCost = tpl.hw_price_per_unit + (tpl.hw_delivery_total ? tpl.hw_delivery_total / tierQty : 0);
+            if (tpl.hw_speed > 0) {
+                const hwHours = tierQty / tpl.hw_speed * (params.wasteFactor || 1.1);
+                hwCost += hwHours * params.fotPerHour / tierQty;
+                if (params.indirectCostMode === 'all') {
+                    hwCost += params.indirectPerHour * hwHours / tierQty;
+                }
+            }
+            cost += hwCost;
+        }
+        cost = round2(cost);
+
+        const keepNetRate = 1 - (params.taxRate || 0.06) - 0.065;
+        const margin = sellPrice > 0 ? round2(((sellPrice * keepNetRate) - cost) / sellPrice) : 0;
+
+        return { cost, sellPrice, margin, tierQty };
+    },
+
+    _calcElementCost(pnd) {
+        const totalElements = (pnd.elements || []).length * (pnd.quantity || 0);
+        const tier = this._getLetterBlankTier(totalElements);
+        return tier ? tier.cost : 3; // fallback ~3₽
+    },
+
+    _calcAutoElementPrice(pnd) {
+        const totalElements = (pnd.elements || []).length * (pnd.quantity || 0);
+        const tier = this._getLetterBlankTier(totalElements);
+        return tier ? tier.sellPrice : null;
+    },
 
     _renderStep5() {
         const pnd = this._wizardData;
         this._readCurrentStep();
 
-        // Auto-calculate element price from blanks
         const elemCount = (pnd.elements || []).length;
         const qty = pnd.quantity || 0;
         const totalElements = elemCount * qty;
 
-        let autoPrice = null;
-        if (totalElements > 0 && typeof calcBlankSellPrice === 'function' && App.templates) {
-            // Find reference blank for letters from settings
-            const refBlankId = App.settings?.pendant_letter_blank_id;
-            if (refBlankId) {
-                const tpl = App.templates.find(t => t.id == refBlankId);
-                if (tpl) {
-                    const fakeItem = {
-                        quantity: totalElements,
-                        pieces_per_hour: tpl.pph_actual || tpl.pph_max || 100,
-                        weight_grams: tpl.weight_grams || 5,
-                        is_blank_mold: true,
-                        extra_molds: 0,
-                        complex_design: false,
-                        is_nfc: false,
-                        nfc_programming: false,
-                        delivery_included: false,
-                        printings: [],
-                        builtin_hw_name: '',
-                        builtin_hw_price: 0,
-                        builtin_hw_speed: 0,
-                    };
-                    const result = calculateItemCost(fakeItem, App.params);
-                    autoPrice = calcBlankSellPrice(result.costTotal, totalElements, App.params);
-                }
-            }
-        }
+        // Auto-calculate element prices from blanks catalog
+        const tier = this._getLetterBlankTier(totalElements);
+        const elemCostPerUnit = tier ? tier.cost : 3;
+        const autoElemSell = tier ? tier.sellPrice : null;
 
-        if (pnd.element_price_per_unit === null && autoPrice !== null) {
-            pnd.element_price_per_unit = autoPrice;
-        }
-
-        const elemPrice = pnd.element_price_per_unit || 0;
-
-        // Calculate inline for preview
-        const cordCost = (pnd.cord?.price_per_unit || 0) + (pnd.cord?.delivery_price || 0);
-        const carabinerCost = (pnd.carabiner?.price_per_unit || 0) + (pnd.carabiner?.delivery_price || 0);
-        let printCostPerUnit = 0;
-        (pnd.elements || []).forEach(el => { if (el.has_print) printCostPerUnit += (el.print_price || 0); });
-        const pkgCost = pnd.packaging ? (pnd.packaging.price_per_unit || 0) + (pnd.packaging.delivery_price || 0) : 0;
-        const totalPerUnit = elemCount * elemPrice + cordCost + carabinerCost + printCostPerUnit + pkgCost;
-        const totalAll = totalPerUnit * qty;
-
-        // Group elements by color for preview
-        const groups = {};
+        // Initialize per-element sell_price if not set
         (pnd.elements || []).forEach(el => {
-            const key = el.color || 'без цвета';
-            if (!groups[key]) groups[key] = [];
-            groups[key].push(el.char);
+            if (el.sell_price === undefined || el.sell_price === null) {
+                el.sell_price = autoElemSell || 0;
+            }
         });
+
+        // Group elements by color
+        const groups = {};
+        (pnd.elements || []).forEach((el, i) => {
+            const key = el.color || 'без цвета';
+            if (!groups[key]) groups[key] = { chars: [], indices: [], sell: el.sell_price || 0 };
+            groups[key].chars.push(el.char);
+            groups[key].indices.push(i);
+            groups[key].sell = el.sell_price || 0;
+        });
+
+        // Cord calculations — depends on unit
+        const cordUnit = pnd.cord?.unit || 'шт';
+        const cordIsMetric = (cordUnit === 'м' || cordUnit === 'см');
+        const cordLenCm = pnd.cord_length_cm || 0;
+        let cordCostPer, cordSellPer;
+        if (cordIsMetric) {
+            cordCostPer = pnd.cord?.price_per_unit ? round2(pnd.cord.price_per_unit * cordLenCm / 100) : 0;
+            cordSellPer = pnd.cord?.sell_price ? round2(pnd.cord.sell_price * cordLenCm / 100) : 0;
+        } else {
+            cordCostPer = pnd.cord?.price_per_unit || 0;
+            cordSellPer = pnd.cord?.sell_price || 0;
+        }
+        // Auto-fill cord sell if missing (round to whole rubles)
+        if (!cordSellPer && cordCostPer > 0 && typeof calcSellByNetMargin40 === 'function') {
+            cordSellPer = Math.round(calcSellByNetMargin40(cordCostPer, App.params));
+        }
+
+        // Carabiner
+        const carabCostPer = pnd.carabiner?.price_per_unit || 0;
+        let carabSellPer = pnd.carabiner?.sell_price || 0;
+        if (!carabSellPer && carabCostPer > 0 && typeof calcSellByNetMargin40 === 'function') {
+            carabSellPer = Math.round(calcSellByNetMargin40(carabCostPer, App.params));
+        }
+
+        // Print — sell price via 40% net margin, editable per-element
+        let printCostPerUnit = 0;
+        let printSellPerUnit = 0;
+        (pnd.elements || []).forEach(el => {
+            if (el.has_print && el.print_price) {
+                printCostPerUnit += el.print_price;
+                // Use stored sell_print if set, otherwise auto-calculate rounded
+                if (!el.sell_print && typeof calcSellByNetMargin40 === 'function') {
+                    el.sell_print = Math.round(calcSellByNetMargin40(el.print_price, App.params));
+                }
+                printSellPerUnit += (el.sell_print || el.print_price);
+            }
+        });
+
+        // Totals
+        let totalElemSell = 0;
+        (pnd.elements || []).forEach(el => { totalElemSell += (el.sell_price || 0); });
+        const totalCostPerUnit = round2(elemCount * elemCostPerUnit + cordCostPer + carabCostPer + printCostPerUnit);
+        const totalSellPerUnit = round2(totalElemSell + cordSellPer + carabSellPer + printSellPerUnit);
+        const totalCostAll = round2(totalCostPerUnit * qty);
+        const totalSellAll = round2(totalSellPerUnit * qty);
+        const fivePercent = round2(totalSellAll * 0.05);
+        const totalSellWith5 = round2(totalSellAll + fivePercent);
+        const _taxRate = App.params?.taxRate || 0.06;
+        const _keepNetRate = 1 - _taxRate - 0.065;
+        const finalMarginPercent = totalSellWith5 > 0 ? round2(((totalSellWith5 * _keepNetRate) - totalCostAll) / totalSellWith5 * 100) : 0;
+
+        // Update pnd for calculator engine
+        pnd.element_price_per_unit = elemCostPerUnit;
+        pnd._elemSellTotal = totalElemSell;
+        pnd._totalSellPerUnit = totalSellPerUnit;
+        pnd.sell_price_override = null;
+        pnd.packaging = null;
+
+        // Helper: margin % between cost and sell
+        const marginPct = (cost, sell) => {
+            if (!sell || sell <= 0) return '';
+            const m = round2(((sell * _keepNetRate) - cost) / sell * 100);
+            return `<div style="font-size:10px;color:${m >= 30 ? 'var(--green)' : m >= 0 ? 'var(--orange)' : 'var(--red)'};margin-top:1px;">маржа ${m}%</div>`;
+        };
+
+        const groupEntries = Object.entries(groups);
+        const inputStyle = 'width:75px;font-size:12px;padding:3px 6px;';
 
         return `
             <div class="pendant-summary">
                 <h4 style="margin:0 0 12px;">Подвес "${App.escHtml(pnd.name)}" × ${qty} шт</h4>
                 <table class="pendant-summary-table">
-                    <tr class="pendant-summary-header"><td>Позиция</td><td>Кол-во</td><td>Цена/шт</td><td>Итого</td></tr>
-                    ${Object.entries(groups).map(([color, chars]) => `
+                    <tr class="pendant-summary-header"><td>Позиция</td><td>Кол-во</td><td>Себест.</td><td>Продажа</td><td>Итого</td></tr>
+                    ${groupEntries.map(([color, g], gi) => {
+                        const gQty = g.chars.length * qty;
+                        const gSellTotal = round2(g.chars.length * qty * g.sell);
+                        return `
                         <tr>
-                            <td>Буквы ${App.escHtml(chars.join(', '))} (${App.escHtml(color)})</td>
-                            <td>${chars.length * qty}</td>
-                            <td>${formatRub(elemPrice)}</td>
-                            <td>${formatRub(chars.length * qty * elemPrice)}</td>
-                        </tr>
-                    `).join('')}
+                            <td>🔤 ${App.escHtml(g.chars.join(', '))} (${App.escHtml(color)})</td>
+                            <td>${gQty}</td>
+                            <td>${formatRub(elemCostPerUnit)}${marginPct(elemCostPerUnit, g.sell)}</td>
+                            <td><input type="number" class="input" style="${inputStyle}" value="${g.sell || ''}" placeholder="0" onchange="Pendant._setGroupSellPrice(${gi}, parseFloat(this.value)||0)"></td>
+                            <td>${formatRub(gSellTotal)}</td>
+                        </tr>`;
+                    }).join('')}
                     <tr>
-                        <td>🧵 ${App.escHtml(pnd.cord?.name || 'Шнур')}</td>
+                        <td>🧵 ${App.escHtml(pnd.cord?.name || 'Шнур')}${cordLenCm > 0 ? ' (' + cordLenCm + ' см)' : ''}</td>
                         <td>${qty}</td>
-                        <td>${formatRub(pnd.cord?.price_per_unit || 0)}</td>
-                        <td>${formatRub(qty * (pnd.cord?.price_per_unit || 0))}</td>
+                        <td>${formatRub(cordCostPer)}${marginPct(cordCostPer, cordSellPer)}</td>
+                        <td><input type="number" class="input" style="${inputStyle}" value="${cordSellPer || ''}" placeholder="0" onchange="Pendant._wizardData.cord.sell_price = round2(parseFloat(this.value)||0); Pendant._renderStep();"></td>
+                        <td>${formatRub(qty * cordSellPer)}</td>
                     </tr>
                     <tr>
                         <td>🔗 ${App.escHtml(pnd.carabiner?.name || 'Карабин')}</td>
                         <td>${qty}</td>
-                        <td>${formatRub(pnd.carabiner?.price_per_unit || 0)}</td>
-                        <td>${formatRub(qty * (pnd.carabiner?.price_per_unit || 0))}</td>
+                        <td>${formatRub(carabCostPer)}${marginPct(carabCostPer, carabSellPer)}</td>
+                        <td><input type="number" class="input" style="${inputStyle}" value="${carabSellPer || ''}" placeholder="0" onchange="Pendant._wizardData.carabiner.sell_price = round2(parseFloat(this.value)||0); Pendant._renderStep();"></td>
+                        <td>${formatRub(qty * carabSellPer)}</td>
                     </tr>
-                    ${(pnd.elements || []).filter(el => el.has_print).map(el => `
-                        <tr>
-                            <td>🖨 Печать на ${App.escHtml(el.char)}</td>
-                            <td>${qty}</td>
-                            <td>${formatRub(el.print_price || 0)}</td>
-                            <td>${formatRub(qty * (el.print_price || 0))}</td>
-                        </tr>
-                    `).join('')}
-                    ${pnd.packaging ? `<tr>
-                        <td>📦 ${App.escHtml(pnd.packaging.name || 'Упаковка')}</td>
+                    ${printCostPerUnit > 0 ? `<tr>
+                        <td>🖨 Печать (${(pnd.elements || []).filter(e => e.has_print).map(e => e.char).join(', ')})</td>
                         <td>${qty}</td>
-                        <td>${formatRub(pnd.packaging.price_per_unit || 0)}</td>
-                        <td>${formatRub(qty * (pnd.packaging.price_per_unit || 0))}</td>
+                        <td>${formatRub(printCostPerUnit)}${marginPct(printCostPerUnit, printSellPerUnit)}</td>
+                        <td><input type="number" class="input" style="${inputStyle}" value="${printSellPerUnit || ''}" placeholder="0" onchange="Pendant._setPrintSellPrice(parseFloat(this.value)||0)"></td>
+                        <td>${formatRub(qty * printSellPerUnit)}</td>
                     </tr>` : ''}
                     <tr class="pendant-summary-total">
-                        <td><b>Итого</b></td>
+                        <td><b>Итого за подвес</b></td>
                         <td></td>
-                        <td><b>${formatRub(totalPerUnit)}</b></td>
-                        <td><b>${formatRub(totalAll)}</b></td>
+                        <td><b>${formatRub(totalCostPerUnit)}</b></td>
+                        <td><b>${formatRub(totalSellPerUnit)}</b></td>
+                        <td><b>${formatRub(totalSellAll)}</b></td>
+                    </tr>
+                    <tr style="font-size:12px;color:var(--text-muted);">
+                        <td colspan="4" style="text-align:right;">+5%</td>
+                        <td>${formatRub(fivePercent)}</td>
+                    </tr>
+                    <tr class="pendant-summary-total" style="font-size:14px;">
+                        <td><b>Итого с 5%</b></td>
+                        <td></td>
+                        <td><b>${formatRub(totalCostAll)}</b></td>
+                        <td></td>
+                        <td><b>${formatRub(totalSellWith5)}</b></td>
+                    </tr>
+                    <tr style="font-size:12px;">
+                        <td colspan="4" style="text-align:right;"><b>Финальная маржа</b></td>
+                        <td style="color:${finalMarginPercent >= 30 ? 'var(--green)' : finalMarginPercent >= 0 ? 'var(--orange)' : 'var(--red)'};font-weight:600;">${finalMarginPercent}%</td>
                     </tr>
                 </table>
-
-                <div style="margin-top:16px;display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-                    <div class="pendant-field-group">
-                        <label>Цена элемента ₽/шт ${autoPrice !== null ? '<span class="text-muted">(авто из бланков)</span>' : '<span style="color:var(--orange);">(задайте вручную)</span>'}</label>
-                        <input type="number" class="input" id="pw-elem-price" value="${elemPrice || ''}" placeholder="0" onchange="Pendant._wizardData.element_price_per_unit = parseFloat(this.value)||0; Pendant._renderStep();">
-                    </div>
-                    <div class="pendant-field-group">
-                        <label>Цена продажи за подвес (переписать)</label>
-                        <input type="number" class="input" id="pw-sell-override" value="${pnd.sell_price_override || ''}" placeholder="Авто" onchange="Pendant._wizardData.sell_price_override = parseFloat(this.value)||null;">
-                    </div>
-                </div>
-
-                <details style="margin-top:12px;">
-                    <summary class="text-muted" style="font-size:12px;cursor:pointer;">📦 Добавить упаковку</summary>
-                    <div style="padding:8px 0;">
-                        ${this._renderSourcePicker('packaging', pnd.packaging || { source: 'warehouse', name: '', price_per_unit: 0, delivery_price: 0, assembly_speed: 0, warehouse_item_id: null })}
-                    </div>
-                </details>
             </div>
         `;
+    },
+
+    _setGroupSellPrice(groupIndex, price) {
+        const pnd = this._wizardData;
+        const groups = {};
+        const groupOrder = [];
+        (pnd.elements || []).forEach((el, i) => {
+            const key = el.color || 'без цвета';
+            if (!groups[key]) { groups[key] = []; groupOrder.push(key); }
+            groups[key].push(i);
+        });
+        const key = groupOrder[groupIndex];
+        if (key && groups[key]) {
+            groups[key].forEach(i => {
+                pnd.elements[i].sell_price = price;
+            });
+        }
+        this._renderStep();
+    },
+
+    _setPrintSellPrice(totalSellPrice) {
+        const pnd = this._wizardData;
+        const printElems = (pnd.elements || []).filter(el => el.has_print);
+        if (printElems.length === 0) return;
+        // Distribute evenly across print elements
+        const perElem = Math.round(totalSellPrice / printElems.length);
+        printElems.forEach(el => { el.sell_print = perElem; });
+        this._renderStep();
     },
 
     // ==========================================
@@ -638,7 +861,8 @@ const Pendant = {
         const pnd = this._wizardData;
         if (this._wizardStep === 1) {
             pnd.quantity = parseInt(document.getElementById('pw-qty')?.value) || 0;
-            const newName = document.getElementById('pw-name')?.value || '';
+            const rawName = document.getElementById('pw-name')?.value || '';
+            const newName = rawName.toUpperCase();
             if (newName !== pnd.name) {
                 pnd.name = newName;
                 this._syncElements([...newName]);
@@ -653,16 +877,9 @@ const Pendant = {
         if (!pnd.name) { App.toast('Введите надпись'); return; }
         if (!pnd.quantity || pnd.quantity <= 0) { App.toast('Введите количество'); return; }
 
-        // Read element price from step 5
-        const epInput = document.getElementById('pw-elem-price');
-        if (epInput) pnd.element_price_per_unit = parseFloat(epInput.value) || 0;
-        const soInput = document.getElementById('pw-sell-override');
-        if (soInput) pnd.sell_price_override = parseFloat(soInput.value) || null;
-
-        // Handle packaging
-        if (pnd.packaging && (!pnd.packaging.name || pnd.packaging.price_per_unit <= 0)) {
-            pnd.packaging = null;
-        }
+        // sell_price_override and packaging are no longer used
+        pnd.sell_price_override = null;
+        pnd.packaging = null;
 
         if (this._editingIndex !== null) {
             Calculator.pendants[this._editingIndex] = pnd;

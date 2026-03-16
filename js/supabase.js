@@ -33,8 +33,8 @@ function initSupabase() {
         return null;
     }
     supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-    // Proactive cleanup on startup to prevent QuotaExceededError
-    _cleanupLocalStorage();
+    // In shared-db mode localStorage is only a cache, so compact it aggressively on boot.
+    _cleanupLocalStorage({ aggressive: true });
     return supabaseClient;
 }
 
@@ -129,6 +129,8 @@ const WORK_TABLE_ON_CONFLICT = {
     task_watchers: 'task_id,user_id',
 };
 
+const _volatileLocalCache = new Map();
+
 // Data version — increment to trigger NON-DESTRUCTIVE migration
 // NEVER delete user data! Only add missing fields to existing molds
 const MOLDS_DATA_VERSION = 9; // v9: буквы (id 30,31) — добавлены hw_name/hw_price/hw_speed
@@ -194,19 +196,30 @@ function checkMoldsVersion() {
 
 function getLocal(key) {
     try {
-        return JSON.parse(localStorage.getItem(key)) || null;
-    } catch (e) { return null; }
+        const raw = localStorage.getItem(key);
+        if (raw != null) return JSON.parse(raw) || null;
+    } catch (e) { /* ignore */ }
+    return _volatileLocalCache.has(key) ? _volatileLocalCache.get(key) : null;
 }
 
 function setLocal(key, data) {
+    let payload = '';
     try {
-        localStorage.setItem(key, JSON.stringify(data));
+        payload = JSON.stringify(data);
+    } catch (e) {
+        console.error('[setLocal] JSON stringify error for key:', key, e);
+        return;
+    }
+    try {
+        localStorage.setItem(key, payload);
+        _volatileLocalCache.delete(key);
     } catch (e) {
         if (e.name === 'QuotaExceededError' || e.code === 22) {
             console.error('[setLocal] QuotaExceeded for key:', key, 'Attempting cleanup...');
-            _cleanupLocalStorage();
+            _cleanupLocalStorage({ aggressive: isSupabaseReady(), preserveKeys: [key] });
             try {
-                localStorage.setItem(key, JSON.stringify(data));
+                localStorage.setItem(key, payload);
+                _volatileLocalCache.delete(key);
             } catch (e2) {
                 console.error('[setLocal] Still no space after cleanup for key:', key);
                 if (isSupabaseReady() && NON_CRITICAL_LOCAL_CACHE_KEYS.has(key)) {
@@ -334,6 +347,31 @@ function _cleanupLocalStorage() {
             }
         }
     } catch (e) { /* ignore */ }
+
+    if (!aggressive) return;
+
+    // 4. When Supabase is available, localStorage is only a cache.
+    // Move the biggest remote-backed datasets to in-memory cache for this session.
+    try {
+        const candidates = Object.values(LOCAL_KEYS)
+            .filter(key => !preserveKeys.has(key))
+            .map(key => {
+                const raw = localStorage.getItem(key);
+                return raw ? { key, size: raw.length } : null;
+            })
+            .filter(Boolean)
+            .sort((a, b) => b.size - a.size);
+
+        let freed = 0;
+        candidates.forEach(({ key, size }, index) => {
+            if (size < 10_000) return;
+            if (freed > 1_500_000 && index > 2) return;
+            freed += _moveLocalStorageKeyToVolatileCache(key);
+            console.log('[cleanup] Moved cache key to memory:', key, `(~${Math.round(size * 2 / 1024)} KB)`);
+        });
+    } catch (e) {
+        console.warn('[cleanup] Aggressive remote-cache cleanup failed:', e);
+    }
 }
 
 // =============================================

@@ -169,6 +169,8 @@ const App = {
                 localStorage.setItem('ro_calc_auth_method', 'user');
                 localStorage.setItem('ro_calc_auth_ts', nowTs);
                 localStorage.setItem('ro_calc_auth_user_id', String(account.id));
+                localStorage.setItem('ro_calc_last_user_id', String(account.id));
+                localStorage.setItem('ro_calc_last_user_name', account.employee_name || account.username || 'Сотрудник');
                 localStorage.removeItem('ro_calc_auth');
                 this.currentUser = {
                     id: account.id,
@@ -206,7 +208,8 @@ const App = {
 
     isAuthenticated() {
         const ts = parseInt(localStorage.getItem('ro_calc_auth_ts') || '0');
-        if (!ts || (Date.now() - ts) >= 86400000) return false;
+        // Session lasts 30 days (was 24h — too aggressive, kept logging users out)
+        if (!ts || (Date.now() - ts) >= 30 * 86400000) return false;
         const userId = localStorage.getItem('ro_calc_auth_user_id');
         return !!userId;
     },
@@ -226,10 +229,25 @@ const App = {
                 name: account.employee_name || account.username || 'Сотрудник',
                 role: 'employee',
             };
+            // Refresh session timestamp on active usage (extends 30-day window)
+            localStorage.setItem('ro_calc_auth_ts', Date.now().toString());
             // Sync page permissions from auth account to localStorage
             if (account.pages && Array.isArray(account.pages)) {
                 this.setEmployeePages(account.employee_id, account.pages);
             }
+            return;
+        }
+        // If accounts failed to load but we have a cached user, keep the session alive
+        if (this.authAccounts.length === 0 && userId) {
+            const cachedName = localStorage.getItem('ro_calc_last_user_name') || 'Сотрудник';
+            this.currentUser = {
+                id: userId,
+                employee_id: null,
+                username: '',
+                name: cachedName,
+                role: 'employee',
+            };
+            localStorage.setItem('ro_calc_auth_ts', Date.now().toString());
             return;
         }
         // No valid account — force logout
@@ -302,10 +320,14 @@ const App = {
             .filter(a => a && a.is_active !== false)
             .sort((a, b) => String(a.employee_name || a.username || '').localeCompare(String(b.employee_name || b.username || ''), 'ru'));
 
+        // Remember last logged-in user to pre-select
+        const lastUserId = localStorage.getItem('ro_calc_last_user_id') || localStorage.getItem('ro_calc_auth_user_id') || '';
+
         let html = accounts.map(a => {
             const name = this.escHtml(a.employee_name || a.username || 'Сотрудник');
             const login = this.escHtml(a.username || '');
-            return `<option value="${this.escHtml(String(a.id))}">${name}${login ? ` (${login})` : ''}</option>`;
+            const sel = String(a.id) === String(lastUserId) ? ' selected' : '';
+            return `<option value="${this.escHtml(String(a.id))}"${sel}>${name}${login ? ` (${login})` : ''}</option>`;
         }).join('');
         select.innerHTML = html;
     },
@@ -779,7 +801,6 @@ const Calculator = {
             this._preserveStateOnNextInit = false;
         } else {
             this.resetForm();
-            this.addItem();
         }
         // Close mold picker & color picker on outside click
         if (!this._moldPickerBound) {
@@ -2951,6 +2972,7 @@ const Calculator = {
         // Calculate pendants
         this.pendants.forEach(pnd => {
             pnd.result = calculatePendantCost(pnd, params);
+            if (pnd.result && pnd.result.totalRevenue > 0) hasData = true;
         });
 
         // === Unified pricing card ===
@@ -3141,7 +3163,9 @@ const Calculator = {
             itemCosts: this.items.map(i => i.result ? i.result.costTotal : 'no result'),
         });
 
-        if (pricedItems.length === 0 && pricedHw.length === 0 && pricedPkg.length === 0) {
+        const pricedPendants = this.pendants.filter(pnd => pnd.result && pnd.result.sellPerUnit > 0);
+
+        if (pricedItems.length === 0 && pricedHw.length === 0 && pricedPkg.length === 0 && pricedPendants.length === 0) {
             pricingEl.style.display = 'none';
             return;
         }
@@ -3274,6 +3298,21 @@ const Calculator = {
             });
         });
 
+        // Pendant columns (read-only — edit inside wizard)
+        pricedPendants.forEach((pnd, i) => {
+            const r = pnd.result;
+            columns.push({
+                label: `🔤 Подвес "${App.escHtml(pnd.name || '...')}"`,
+                type: 'pendant',
+                globalIdx: i,
+                isBlank: false,
+                isPendant: true,
+                cost: r.costPerUnit,
+                sellPrice: r.sellPerUnit,
+                t50: 0, t40: 0, t30: 0, t20: 0,
+            });
+        });
+
         // Render as a compact table-like grid
         const cellBorder = 'border-bottom:1px solid var(--border);';
         const leftCell = `padding:6px 8px;border-right:1px solid var(--border);${cellBorder}`;
@@ -3293,7 +3332,7 @@ const Calculator = {
         });
 
         // Check if any column needs target spread (non-blank)
-        const hasCustom = columns.some(c => !c.isBlank);
+        const hasCustom = columns.some(c => !c.isBlank && !c.isPendant);
 
         if (hasCustom) {
             // Target rows for custom items
@@ -3307,7 +3346,14 @@ const Calculator = {
             targets.forEach(t => {
                 html += `<div style="padding:4px 8px;border-right:1px solid var(--border);${cellBorder}font-size:11px;${t.style}">${t.label}${t.suffix ? `<span style="font-size:9px;font-weight:400">${t.suffix}</span>` : ''}</div>`;
                 columns.forEach(col => {
-                    if (col.isBlank) {
+                    if (col.isPendant) {
+                        // Pendant: show sell price from wizard in the 40% row
+                        if (t.pct === 40) {
+                            html += `<div style="padding:4px 8px;text-align:center;${cellBorder}font-size:11px;color:var(--green);font-weight:700;">${formatRub(col.sellPrice)}<div style="font-size:9px;font-weight:400;color:var(--text-muted)">из подвеса</div></div>`;
+                        } else {
+                            html += `<div style="padding:4px 8px;text-align:center;${cellBorder}font-size:11px;color:var(--text-muted);">—</div>`;
+                        }
+                    } else if (col.isBlank) {
                         // Blank: show fixed price from blanks page formula in the 40% row
                         if (t.pct === 40) {
                             html += `<div style="padding:4px 8px;text-align:center;${cellBorder}font-size:11px;color:var(--green);font-weight:700;">${formatRub(col.blankPrice)}<div style="font-size:9px;font-weight:400;color:var(--text-muted)">прайс бланков</div></div>`;
@@ -3323,7 +3369,9 @@ const Calculator = {
             // All blanks — show just the fixed price row
             html += `<div style="padding:4px 8px;border-right:1px solid var(--border);${cellBorder}font-size:11px;color:var(--green);font-weight:700;">Прайс бланков</div>`;
             columns.forEach(col => {
-                if (col.isBlank) {
+                if (col.isPendant) {
+                    html += `<div style="padding:4px 8px;text-align:center;${cellBorder}font-size:11px;color:var(--green);font-weight:700;">${formatRub(col.sellPrice)}<div style="font-size:9px;font-weight:400;color:var(--text-muted)">из подвеса</div></div>`;
+                } else if (col.isBlank) {
                     html += `<div style="padding:4px 8px;text-align:center;${cellBorder}font-size:11px;color:var(--green);font-weight:700;">${formatRub(col.blankPrice)}</div>`;
                 } else {
                     html += `<div style="padding:4px 8px;text-align:center;${cellBorder}font-size:11px;">${formatRub(col.t40 || 0)}</div>`;
@@ -3331,19 +3379,24 @@ const Calculator = {
             });
         }
 
-        // Sell price row (editable, no spinners)
+        // Sell price row (editable, no spinners; pendants are read-only)
         html += `<div style="${leftCell}font-weight:600;background:var(--green-light);">Цена продажи</div>`;
         columns.forEach((col, ci) => {
-            const inputId = `sell-${col.type}-${col.globalIdx}${col.printingIdx !== undefined ? '-p' + col.printingIdx : ''}`;
-            const piArg = col.printingIdx !== undefined ? `, ${col.printingIdx}` : '';
-            // Show recommended price as placeholder for blanks
-            const placeholder = col.isBlank && col.blankPrice ? col.blankPrice : '';
-            html += `<div style="padding:4px;text-align:center;${cellBorder}background:var(--green-light);">
-                <input type="text" inputmode="decimal" id="${inputId}" value="${col.sellPrice || ''}"
-                    placeholder="${placeholder}"
-                    style="width:100%;text-align:center;font-weight:600;font-size:13px;border:1px solid var(--border);border-radius:4px;padding:4px;"
-                    oninput="Calculator.onPricingSellChange('${col.type}', ${col.globalIdx}, this.value${piArg})">
-            </div>`;
+            if (col.isPendant) {
+                // Pendant: read-only, edit inside wizard
+                html += `<div style="padding:6px 8px;text-align:center;${cellBorder}background:var(--green-light);font-weight:600;font-size:13px;">${formatRub(col.sellPrice)}</div>`;
+            } else {
+                const inputId = `sell-${col.type}-${col.globalIdx}${col.printingIdx !== undefined ? '-p' + col.printingIdx : ''}`;
+                const piArg = col.printingIdx !== undefined ? `, ${col.printingIdx}` : '';
+                // Show recommended price as placeholder for blanks
+                const placeholder = col.isBlank && col.blankPrice ? col.blankPrice : '';
+                html += `<div style="padding:4px;text-align:center;${cellBorder}background:var(--green-light);">
+                    <input type="text" inputmode="decimal" id="${inputId}" value="${col.sellPrice || ''}"
+                        placeholder="${placeholder}"
+                        style="width:100%;text-align:center;font-weight:600;font-size:13px;border:1px solid var(--border);border-radius:4px;padding:4px;"
+                        oninput="Calculator.onPricingSellChange('${col.type}', ${col.globalIdx}, this.value${piArg})">
+                </div>`;
+            }
         });
 
         // Margin row (% only)
@@ -3446,6 +3499,19 @@ const Calculator = {
                     price: pkg.sell_price,
                     total: round2(pkg.sell_price * pkg.qty),
                     type: 'pkg',
+                });
+            }
+        });
+
+        // Pendant rows (one line per pendant)
+        this.pendants.forEach((pnd) => {
+            if (pnd.result && pnd.quantity > 0 && pnd.result.sellPerUnit > 0) {
+                invoiceRows.push({
+                    name: `🔤 Подвес "${pnd.name || '...'}"`,
+                    qty: pnd.quantity,
+                    price: pnd.result.sellPerUnit,
+                    total: pnd.result.totalRevenue,
+                    type: 'pendant',
                 });
             }
         });
