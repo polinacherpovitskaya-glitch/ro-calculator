@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v89';
+const APP_VERSION = 'v90';
 
 const App = {
     currentPage: 'dashboard',
@@ -4245,6 +4245,9 @@ const Calculator = {
         this._isDirty = false;
         const statusEl = document.getElementById('calc-autosave-status');
         if (statusEl) statusEl.textContent = 'Загружен сохраненный заказ';
+        if (data.repaired_duplicates) {
+            App.toast('Дубли позиций в заказе были автоматически исправлены');
+        }
 
         // Show change history
         this.showOrderHistory(orderId);

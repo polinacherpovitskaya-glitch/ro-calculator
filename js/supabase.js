@@ -541,6 +541,51 @@ function _dedupeOrderItems(items, orderId = null) {
     return deduped;
 }
 
+async function _rewriteOrderItems(orderId, items) {
+    const nowIso = new Date().toISOString();
+    const normalized = (items || []).map((item, index) => ({
+        ...item,
+        id: item.id || _buildStableOrderItemId(orderId, item, index + 1),
+        order_id: orderId,
+        created_at: item.created_at || nowIso,
+        updated_at: nowIso,
+    }));
+
+    if (isSupabaseReady()) {
+        const { error: deleteError } = await supabaseClient
+            .from('order_items')
+            .delete()
+            .eq('order_id', orderId);
+        if (deleteError) {
+            console.error('rewriteOrderItems delete error:', deleteError);
+            return false;
+        }
+
+        if (normalized.length > 0) {
+            const rows = normalized.map((item, index) => {
+                const filtered = _filterForDB(item, _ITEM_COLS, 'item_data', null);
+                filtered.order_id = orderId;
+                filtered.id = item.id || _buildStableOrderItemId(orderId, item, index + 1);
+                filtered.created_at = item.created_at || nowIso;
+                filtered.updated_at = nowIso;
+                return filtered;
+            });
+            const { error: insertError } = await supabaseClient
+                .from('order_items')
+                .insert(rows);
+            if (insertError) {
+                console.error('rewriteOrderItems insert error:', insertError);
+                return false;
+            }
+        }
+    }
+
+    const localItems = getLocal(LOCAL_KEYS.orderItems) || [];
+    const filtered = localItems.filter(item => item.order_id !== orderId);
+    setLocal(LOCAL_KEYS.orderItems, [...filtered, ...normalized]);
+    return true;
+}
+
 async function saveOrder(order, items) {
     if (isSupabaseReady()) {
         // Generate ID for new orders (Supabase BIGINT PK has no auto-increment)
@@ -776,8 +821,14 @@ async function loadOrder(orderId) {
             .from('order_items').select('*').eq('order_id', orderId).order('item_number');
         if (e2) { console.error('loadOrderItems error:', e2); return null; }
 
+        const dedupedRawItems = _dedupeOrderItems(rawItems || [], orderId);
+        let repairedDuplicates = false;
+        if (dedupedRawItems.length !== (rawItems || []).length) {
+            repairedDuplicates = await _rewriteOrderItems(orderId, dedupedRawItems);
+        }
+
         // Restore full item data from item_data JSON
-        const items = _dedupeOrderItems(rawItems || [], orderId).map(item => {
+        const items = dedupedRawItems.map(item => {
             if (item.item_data) {
                 try {
                     const extras = JSON.parse(item.item_data);
@@ -787,16 +838,20 @@ async function loadOrder(orderId) {
             return item;
         });
 
-        return { order: fullOrder, items };
+        return { order: fullOrder, items, repaired_duplicates: repairedDuplicates };
     }
     const orders = getLocal(LOCAL_KEYS.orders) || [];
     const order = orders.find(o => o.id === orderId);
     const allItems = getLocal(LOCAL_KEYS.orderItems) || [];
-    const items = _dedupeOrderItems(
+    const dedupedItems = _dedupeOrderItems(
         allItems.filter(i => i.order_id === orderId),
         orderId
     );
-    return order ? { order, items } : null;
+    let repairedDuplicates = false;
+    if (order && dedupedItems.length !== allItems.filter(i => i.order_id === orderId).length) {
+        repairedDuplicates = await _rewriteOrderItems(orderId, dedupedItems);
+    }
+    return order ? { order, items: dedupedItems, repaired_duplicates: repairedDuplicates } : null;
 }
 
 async function updateOrderStatus(orderId, status) {

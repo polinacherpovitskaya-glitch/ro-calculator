@@ -55,6 +55,9 @@ const OrderDetail = {
 
         // Show first tab
         this.switchTab('info');
+        if (data.repaired_duplicates) {
+            App.toast('Дубли позиций в заказе были автоматически исправлены');
+        }
     },
 
     // ==========================================
