@@ -41,9 +41,9 @@
         <!-- Word input + letter colors -->
         <section class="step" id="stepWord">
           <h2 class="step__title">Введи своё слово</h2>
-          <p class="step__hint">Кириллица или латиница, до <span id="maxLetters">8</span> букв</p>
+          <p class="step__hint">Латиница, до <span id="maxLetters">8</span> букв</p>
           <div class="word-input">
-            <input type="text" id="wordInput" maxlength="8" placeholder="ПОЛИНА" autocomplete="off" inputmode="text" spellcheck="false">
+            <input type="text" id="wordInput" maxlength="8" placeholder="SUMMER" autocomplete="off" inputmode="text" spellcheck="false">
             <div class="word-input__counter"><span id="letterCount">0</span> из <span id="maxLettersCounter">8</span></div>
           </div>
           <div class="letter-colors" id="letterColors"></div>
@@ -80,19 +80,17 @@
             <label for="phone">Телефон</label>
             <input type="tel" id="phone" required placeholder="+7 (999) 123-45-67">
           </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label for="building">Башня</label>
-              <select id="building" required></select>
-            </div>
-            <div class="form-group">
-              <label for="floor">Этаж</label>
-              <select id="floor" required></select>
-            </div>
-            <div class="form-group">
-              <label for="department">Отдел</label>
-              <select id="department" required></select>
-            </div>
+          <div class="form-group">
+            <label for="city">Город</label>
+            <input type="text" id="city" required placeholder="Москва">
+          </div>
+          <div class="form-group">
+            <label for="address">Адрес доставки</label>
+            <input type="text" id="address" required placeholder="ул. Пушкина, д. 10, кв. 25">
+          </div>
+          <div class="form-group">
+            <label for="comment">Комментарий <span class="label-optional">(необязательно)</span></label>
+            <textarea id="comment" rows="3" placeholder="Код домофона, удобное время доставки и т.д."></textarea>
           </div>
           <button type="submit" class="submit-btn" id="submitBtn">Отправить заказ</button>
         </form>

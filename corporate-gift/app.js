@@ -19,12 +19,6 @@ async function loadConfig() {
   initPage();
 }
 
-function populateSelect(id, options) {
-  const select = document.getElementById(id);
-  select.innerHTML = '<option value="">Выбери...</option>' +
-    options.map(o => `<option value="${o}">${o}</option>`).join('');
-}
-
 function initPage() {
   const c = state.config;
 
@@ -44,11 +38,6 @@ function initPage() {
   // Render swatches
   renderSwatches('cordSwatches', c.cordColors, state.cordColor, selectCord);
   renderSwatches('carabinerSwatches', c.carabinerColors, state.carabinerColor, selectCarabiner);
-
-  // Populate delivery dropdowns
-  populateSelect('building', c.delivery.buildings);
-  populateSelect('floor', c.delivery.floors);
-  populateSelect('department', c.delivery.departments);
 
   // Restore state from any browser-persisted input value
   const existingValue = document.getElementById('wordInput').value;
@@ -104,10 +93,12 @@ document.getElementById('wordInput').addEventListener('input', function(e) {
   // Uppercase first, then filter to allowed alphabets
   let raw = e.target.value.toUpperCase();
 
-  // Filter: only Cyrillic А-ЯЁ and Latin A-Z
+  // Filter based on configured alphabets
   let filtered = '';
   for (const ch of raw) {
-    if (/[А-ЯЁ]/.test(ch) || /[A-Z]/.test(ch)) {
+    const isLatin = /[A-Z]/.test(ch);
+    const isCyrillic = /[А-ЯЁ]/.test(ch);
+    if ((c.alphabets.includes('en') && isLatin) || (c.alphabets.includes('ru') && isCyrillic)) {
       filtered += ch;
     }
   }
@@ -122,7 +113,8 @@ document.getElementById('wordInput').addEventListener('input', function(e) {
     char,
     color: (state.letters[i] && state.letters[i].char === char)
       ? state.letters[i].color
-      : (state.letters[i] ? state.letters[i].color : defaultColor)
+      : (state.letters[i] ? state.letters[i].color : defaultColor),
+    get resolvedColor() { return resolveLetterColor(this.color, i); }
   }));
 
   document.getElementById('letterCount').textContent = state.letters.length;
@@ -145,16 +137,21 @@ function renderLetterColorPickers() {
   container.innerHTML = '<p class="letter-colors__hint">Нажми на кружок, чтобы выбрать цвет буквы</p>' +
     state.letters.map((letter, i) => `
     <div class="letter-color-group">
-      <span class="letter-color-group__char" style="color:${letter.color}">${letter.char}</span>
+      <span class="letter-color-group__char" style="color:${letter.resolvedColor}">${letter.char}</span>
       <div class="letter-color-group__dots">
-        ${state.config.letterColors.map(c => `
+        ${state.config.letterColors.map(c => {
+          const isRainbow = c.hex === 'rainbow';
+          const dotStyle = isRainbow
+            ? 'background: conic-gradient(#FF4D6A, #FFD439, #BFFF00, #42D4F4, #7B68EE, #FF69B4, #FF4D6A)'
+            : `background:${c.hex}`;
+          return `
           <button type="button" class="color-dot ${c.hex === letter.color ? 'color-dot--active' : ''}"
-            style="background:${c.hex}"
+            style="${dotStyle}"
             data-letter-index="${i}"
             data-color="${c.hex}"
             title="${c.name}"
             aria-label="Цвет ${c.name} для буквы ${letter.char}"></button>
-        `).join('')}
+        `}).join('')}
       </div>
     </div>
   `).join('');
@@ -164,7 +161,17 @@ function renderLetterColorPickers() {
     const dot = e.target.closest('.color-dot');
     if (!dot) return;
     const idx = parseInt(dot.dataset.letterIndex);
-    state.letters[idx].color = dot.dataset.color;
+    const color = dot.dataset.color;
+
+    if (color === 'rainbow') {
+      // Apply rainbow to ALL letters and reshuffle
+      state.letters.forEach(l => { l.color = 'rainbow'; });
+      shuffleRainbow(state.letters.length);
+      showToast('Цвета букв будут подобраны случайно — каждый раз новая комбинация!');
+    } else {
+      state.letters[idx].color = color;
+    }
+
     renderLetterColorPickers();
     updatePreview();
   };
@@ -207,8 +214,13 @@ function selectCarabiner(hex) {
 // === Preview ===
 
 function updatePreview() {
+  // Resolve rainbow colors before passing to SVG renderer
+  const resolvedLetters = state.letters.map((l, i) => ({
+    char: l.char,
+    color: resolveLetterColor(l.color, i)
+  }));
   const svg = renderPendant({
-    letters: state.letters,
+    letters: resolvedLetters,
     cordColor: state.cordColor,
     carabinerColor: state.carabinerColor,
     charmColor: state.config.charmColor
@@ -235,9 +247,9 @@ document.getElementById('orderForm').addEventListener('submit', async function(e
 
   const fullName = document.getElementById('fullName').value.trim();
   const phone = document.getElementById('phone').value.trim();
-  const building = document.getElementById('building').value;
-  const floor = document.getElementById('floor').value;
-  const department = document.getElementById('department').value;
+  const city = document.getElementById('city').value.trim();
+  const address = document.getElementById('address').value.trim();
+  const comment = document.getElementById('comment').value.trim();
 
   // Validate pendant
   if (!state.letters.length) {
@@ -246,14 +258,13 @@ document.getElementById('orderForm').addEventListener('submit', async function(e
     return;
   }
 
-  // Validate form
-  if (!fullName || !phone || !building || !floor || !department) {
+  // Validate required fields
+  if (!fullName || !phone || !city || !address) {
     const fields = [
       { el: 'fullName', val: fullName },
       { el: 'phone', val: phone },
-      { el: 'building', val: building },
-      { el: 'floor', val: floor },
-      { el: 'department', val: department }
+      { el: 'city', val: city },
+      { el: 'address', val: address }
     ];
     for (const f of fields) {
       if (!f.val) {
@@ -276,21 +287,36 @@ document.getElementById('orderForm').addEventListener('submit', async function(e
     return found ? found.name : hex;
   }
 
+  // Check if any letter uses rainbow
+  const hasRainbow = state.letters.some(l => l.color === 'rainbow');
+
+  // Generate pendant image as base64 PNG
+  let pendantImage = '';
+  try {
+    pendantImage = await svgToPngBase64();
+  } catch (err) {
+    console.warn('Could not generate pendant image:', err);
+  }
+
   const payload = {
     date: new Date().toLocaleString('ru-RU'),
     word: state.letters.map(l => l.char).join(''),
-    lettersDetail: state.letters.map(l => {
-      const name = findColorName(l.color, state.config.letterColors);
-      return `${l.char}:${name}`;
+    lettersDetail: state.letters.map((l, i) => {
+      if (l.color === 'rainbow') {
+        return `${l.char}:РАЗНОЦВЕТНЫЙ`;
+      }
+      return `${l.char}:${findColorName(l.color, state.config.letterColors)}`;
     }).join(', '),
+    isRainbow: hasRainbow ? 'ДА — РАЗНОЦВЕТНЫЙ (случайные цвета)' : 'Нет',
     cordColor: findColorName(state.cordColor, state.config.cordColors),
     carabinerColor: findColorName(state.carabinerColor, state.config.carabinerColors),
     letterCount: state.letters.length,
     fullName,
     phone,
-    building,
-    floor,
-    department
+    city,
+    address,
+    comment: comment || '—',
+    pendantImage
   };
 
   try {
@@ -319,7 +345,79 @@ document.getElementById('orderForm').addEventListener('submit', async function(e
   }
 });
 
+// === SVG to PNG ===
+
+function svgToPngBase64() {
+  return new Promise((resolve, reject) => {
+    const svgEl = document.querySelector('#svgContainer svg');
+    if (!svgEl) return reject('No SVG found');
+
+    const svgData = new XMLSerializer().serializeToString(svgEl);
+    const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(svgBlob);
+
+    const img = new Image();
+    img.onload = function() {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth * 2;
+      canvas.height = img.naturalHeight * 2;
+      const ctx = canvas.getContext('2d');
+      ctx.scale(2, 2);
+      ctx.drawImage(img, 0, 0);
+      URL.revokeObjectURL(url);
+      resolve(canvas.toDataURL('image/png'));
+    };
+    img.onerror = reject;
+    img.src = url;
+  });
+}
+
+// === Rainbow Colors ===
+
+const RAINBOW_PALETTE = [
+  '#FF4D6A', '#FF8C42', '#FFD439', '#BFFF00', '#42D4F4',
+  '#7B68EE', '#FF69B4', '#1B1F8A', '#E8524A', '#00CED1'
+];
+
+// Store randomized colors per letter when rainbow is active
+let rainbowCache = [];
+
+function shuffleRainbow(count) {
+  rainbowCache = [];
+  const pool = [...RAINBOW_PALETTE];
+  for (let i = 0; i < count; i++) {
+    const idx = Math.floor(Math.random() * pool.length);
+    rainbowCache.push(pool[idx]);
+  }
+}
+
+function resolveLetterColor(hex, index) {
+  if (hex === 'rainbow') {
+    return rainbowCache[index] || RAINBOW_PALETTE[index % RAINBOW_PALETTE.length];
+  }
+  return hex;
+}
+
 // === Helpers ===
+
+function showToast(message) {
+  // Remove existing toast
+  const existing = document.querySelector('.toast');
+  if (existing) existing.remove();
+
+  const toast = document.createElement('div');
+  toast.className = 'toast';
+  toast.textContent = message;
+  document.body.appendChild(toast);
+
+  // Trigger animation
+  requestAnimationFrame(() => toast.classList.add('toast--visible'));
+
+  setTimeout(() => {
+    toast.classList.remove('toast--visible');
+    toast.addEventListener('transitionend', () => toast.remove(), { once: true });
+  }, 3000);
+}
 
 function shakeElement(el) {
   el.classList.add('shake');
