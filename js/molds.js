@@ -930,8 +930,11 @@ const Molds = {
         const indirectPerHour = params.indirectPerHour || 0;
 
         this._hwBlanks.forEach(b => {
-            let priceRub = b.price_rub || 0;
             const src = b.hw_form_source || 'warehouse';
+            const warehouseSnapshot = src === 'warehouse'
+                ? this._getWarehouseHwSnapshot(b.warehouse_item_id, b.notes || '')
+                : null;
+            let priceRub = warehouseSnapshot ? warehouseSnapshot.priceRub : (b.price_rub || 0);
 
             // Legacy fallback: old records could store CNY + delivery_per_unit without price_rub.
             if (priceRub <= 0 && (b.price_cny || 0) > 0) {
@@ -959,10 +962,18 @@ const Molds = {
             // Source badge
             b._srcBadge = src === 'china' ? '🇨🇳' : src === 'custom_cny' ? '¥' : '📦';
 
-            // Try to get photo from warehouse if not on blank itself
-            if (!b.photo_url && b.warehouse_item_id) {
-                const whItem = this._warehouseHwItems.find(w => w.id === b.warehouse_item_id);
-                if (whItem) b._whPhoto = whItem.photo_thumbnail || whItem.photo_url || '';
+            if (warehouseSnapshot) {
+                b._warehouseName = warehouseSnapshot.name;
+                b._displayNotes = warehouseSnapshot.notes;
+                b._whPhoto = warehouseSnapshot.photoUrl;
+            } else {
+                b._warehouseName = '';
+                b._displayNotes = b.notes || '';
+                b._whPhoto = '';
+                if (!b.photo_url && b.warehouse_item_id) {
+                    const whItem = this._warehouseHwItems.find(w => w.id === b.warehouse_item_id);
+                    if (whItem) b._whPhoto = whItem.photo_thumbnail || whItem.photo_url || '';
+                }
             }
         });
     },
@@ -991,15 +1002,19 @@ const Molds = {
             </tr></thead><tbody>`;
 
         this._hwBlanks.forEach(b => {
+            const src = b.hw_form_source || 'warehouse';
             const priceRub = b._priceRubCalc || b.price_rub || 0;
-            const photoSrc = b.photo_url || b._whPhoto || '';
+            const displayName = b._warehouseName || b.name;
+            const displayNotes = b._displayNotes || b.notes || '';
+            const photoSrc = src === 'warehouse'
+                ? (b._whPhoto || b.photo_url || '')
+                : (b.photo_url || b._whPhoto || '');
             const photo = photoSrc
                 ? `<img src="${photoSrc.startsWith('data:') ? photoSrc : this.esc(photoSrc)}" style="width:44px;height:44px;object-fit:cover;border-radius:6px;border:1px solid var(--border);" onerror="this.style.display='none'">`
                 : `<span style="width:44px;height:44px;display:flex;align-items:center;justify-content:center;background:var(--accent-light);border-radius:6px;font-size:16px;">🔩</span>`;
 
             const speedPcsMin = b.assembly_speed ? round2(b.assembly_speed / 60) : 0;
             const speedLabel = speedPcsMin > 0 ? (speedPcsMin + ' шт/мин') : '—';
-            const src = b.hw_form_source || 'warehouse';
             const srcBadge = b._srcBadge || '📦';
             // Extra info line for china/custom
             let extraInfo = '';
@@ -1012,8 +1027,8 @@ const Molds = {
             html += `<tr style="border-bottom:1px solid var(--border);">
                 <td style="padding:6px;">${photo}</td>
                 <td style="padding:6px 8px;">
-                    <div style="font-weight:700;font-size:13px;">${srcBadge} ${this.esc(b.name)}</div>
-                    <div style="font-size:10px;color:var(--text-muted);margin-top:2px;">${speedLabel}${extraInfo}${b.notes ? ' · ' + this.esc(b.notes) : ''}</div>
+                    <div style="font-weight:700;font-size:13px;">${srcBadge} ${this.esc(displayName)}</div>
+                    <div style="font-size:10px;color:var(--text-muted);margin-top:2px;">${speedLabel}${extraInfo}${displayNotes ? ' · ' + this.esc(displayNotes) : ''}</div>
                 </td>
                 <td style="padding:6px 8px;text-align:right;font-size:12px;color:var(--text-secondary);">${formatRub(priceRub)}</td>
                 <td style="padding:6px 8px;text-align:right;font-size:12px;color:var(--text-secondary);">${formatRub(b._assemblyCost)}</td>
@@ -1022,7 +1037,7 @@ const Molds = {
                 <td style="padding:6px;">
                     <div style="display:flex;gap:4px;">
                         <button class="btn btn-sm btn-outline" style="padding:2px 6px;font-size:10px;" onclick="Molds.editHwBlank(${b.id})">&#9998;</button>
-                        <button class="btn-remove" style="font-size:9px;width:24px;height:24px;" onclick="Molds.confirmDeleteHw(${b.id}, '${this.esc(b.name)}')">&#10005;</button>
+                        <button class="btn-remove" style="font-size:9px;width:24px;height:24px;" onclick="Molds.confirmDeleteHw(${b.id}, '${this.esc(displayName)}')">&#10005;</button>
                     </div>
                 </td>
             </tr>`;
@@ -1072,6 +1087,45 @@ const Molds = {
         });
     },
 
+    _formatWarehouseHwName(item) {
+        if (!item) return '';
+        return [item.name, item.color, item.size].filter(Boolean).join(' ').trim();
+    },
+
+    _looksLikeWarehouseSku(text) {
+        const value = String(text || '').trim();
+        return /^[A-Z0-9][A-Z0-9+-]*(?:-[A-Z0-9+]+)*$/i.test(value);
+    },
+
+    _normalizeHwNotesForWarehouseItem(item, notes) {
+        const sku = String(item?.sku || '').trim();
+        const raw = String(notes || '').trim();
+        if (!sku) return raw;
+        if (!raw) return sku;
+        const parts = raw.split(' + ');
+        const prefix = String(parts[0] || '').trim();
+        if (prefix === sku) return raw;
+        if (this._looksLikeWarehouseSku(prefix)) {
+            return [sku].concat(parts.slice(1).filter(Boolean)).join(' + ');
+        }
+        return raw;
+    },
+
+    _getWarehouseHwSnapshot(warehouseItemId, notes) {
+        const itemId = Number(warehouseItemId || 0);
+        if (!itemId) return null;
+        const item = this._warehouseHwItems.find(w => Number(w.id) === itemId);
+        if (!item) return null;
+        return {
+            item,
+            name: this._formatWarehouseHwName(item),
+            priceRub: round2(item.price_per_unit || 0),
+            photoUrl: item.photo_thumbnail || item.photo_url || '',
+            warehouseItemId: item.id,
+            notes: this._normalizeHwNotesForWarehouseItem(item, notes),
+        };
+    },
+
     showHwForm() {
         this._editingHwId = null;
         this._hwFormSource = 'warehouse';
@@ -1112,14 +1166,19 @@ const Molds = {
         const b = this._hwBlanks.find(x => x.id === id);
         if (!b) return;
         this._editingHwId = id;
-        document.getElementById('hw-form-title').textContent = 'Редактировать: ' + (b.name || '');
+        const src = b.hw_form_source || (b.warehouse_item_id ? 'warehouse' : (b.price_cny > 0 ? 'custom_cny' : 'warehouse'));
+        const warehouseSnapshot = src === 'warehouse'
+            ? this._getWarehouseHwSnapshot(b.warehouse_item_id, b.notes || '')
+            : null;
+        const titleName = warehouseSnapshot?.name || b._warehouseName || b.name || '';
+        document.getElementById('hw-form-title').textContent = 'Редактировать: ' + titleName;
         document.getElementById('hw-blank-speed').value = b.assembly_speed ? round2(b.assembly_speed / 60) : '';
-        document.getElementById('hw-blank-notes').value = b.notes || '';
-        document.getElementById('hw-blank-name').value = b.name || '';
-        document.getElementById('hw-blank-price-rub').value = b.price_rub || 0;
+        document.getElementById('hw-blank-notes').value = warehouseSnapshot?.notes || b.notes || '';
+        document.getElementById('hw-blank-name').value = warehouseSnapshot?.name || b.name || '';
+        document.getElementById('hw-blank-price-rub').value = warehouseSnapshot?.priceRub ?? (b.price_rub || 0);
         document.getElementById('hw-blank-sell').value = b.sell_price || '';
-        document.getElementById('hw-blank-photo').value = b.photo_url || '';
-        document.getElementById('hw-blank-wh-id').value = b.warehouse_item_id || '';
+        document.getElementById('hw-blank-photo').value = src === 'warehouse' ? '' : (b.photo_url || '');
+        document.getElementById('hw-blank-wh-id').value = warehouseSnapshot?.warehouseItemId || b.warehouse_item_id || '';
         document.getElementById('hw-blank-china-id').value = b.china_catalog_id || '';
 
         // Clear delivery dropdowns so they get re-populated
@@ -1128,12 +1187,10 @@ const Molds = {
             if (el) el.innerHTML = '';
         });
 
-        // Determine source
-        const src = b.hw_form_source || (b.warehouse_item_id ? 'warehouse' : (b.price_cny > 0 ? 'custom_cny' : 'warehouse'));
         this.setHwFormSource(src);
 
         if (src === 'warehouse') {
-            document.getElementById('hw-blank-wh-search').value = b.name || '';
+            document.getElementById('hw-blank-wh-search').value = warehouseSnapshot?.name || b.name || '';
         } else if (src === 'china') {
             const chinaSearch = document.getElementById('hw-china-search');
             if (chinaSearch) chinaSearch.value = b.name || '';
@@ -1152,8 +1209,12 @@ const Molds = {
         }
 
         // Show selected item preview
-        const photoSrc = b.photo_url || b._whPhoto || '';
-        this._showHwSelectedItem(b.name, b.price_rub || 0, photoSrc);
+        const previewName = warehouseSnapshot?.name || b._warehouseName || b.name;
+        const previewPrice = warehouseSnapshot?.priceRub ?? (b.price_rub || 0);
+        const photoSrc = src === 'warehouse'
+            ? (warehouseSnapshot?.photoUrl || b._whPhoto || b.photo_url || '')
+            : (b.photo_url || b._whPhoto || '');
+        this._showHwSelectedItem(previewName, previewPrice, photoSrc);
 
         document.getElementById('hw-delete-btn').style.display = '';
         document.getElementById('hw-edit-form').style.display = '';
@@ -1322,21 +1383,19 @@ const Molds = {
     },
 
     selectHwWarehouseItem(whId) {
-        const item = this._warehouseHwItems.find(w => w.id === whId);
-        if (!item) return;
+        const snapshot = this._getWarehouseHwSnapshot(whId, document.getElementById('hw-blank-notes').value);
+        if (!snapshot) return;
 
-        const priceRub = item.price_per_unit || 0;
-        const photoUrl = item.photo_thumbnail || item.photo_url || '';
-        const name = item.name + (item.color ? ' ' + item.color : '') + (item.size ? ' ' + item.size : '');
-
-        document.getElementById('hw-blank-wh-search').value = name;
-        document.getElementById('hw-blank-name').value = name;
-        document.getElementById('hw-blank-price-rub').value = priceRub;
-        document.getElementById('hw-blank-photo').value = photoUrl;
+        document.getElementById('hw-blank-wh-search').value = snapshot.name;
+        document.getElementById('hw-blank-name').value = snapshot.name;
+        document.getElementById('hw-blank-price-rub').value = snapshot.priceRub;
+        document.getElementById('hw-blank-photo').value = '';
         document.getElementById('hw-blank-wh-id').value = whId;
+        document.getElementById('hw-blank-china-id').value = '';
+        document.getElementById('hw-blank-notes').value = snapshot.notes;
         document.getElementById('hw-blank-wh-dropdown').style.display = 'none';
 
-        this._showHwSelectedItem(name, priceRub, photoUrl);
+        this._showHwSelectedItem(snapshot.name, snapshot.priceRub, snapshot.photoUrl);
         this.recalcHwCost();
     },
 
@@ -1460,6 +1519,7 @@ const Molds = {
     async saveHwBlank() {
         const src = this._hwFormSource;
         let name = document.getElementById('hw-blank-name').value.trim();
+        let notes = document.getElementById('hw-blank-notes').value.trim();
 
         // For custom_cny, name comes from custom-name field
         if (src === 'custom_cny') {
@@ -1481,7 +1541,7 @@ const Molds = {
             warehouse_item_id: parseInt(document.getElementById('hw-blank-wh-id').value) || null,
             china_catalog_id: parseInt(document.getElementById('hw-blank-china-id').value) || null,
             assembly_speed: round2((parseFloat(document.getElementById('hw-blank-speed').value) || 0) * 60),
-            notes: document.getElementById('hw-blank-notes').value.trim(),
+            notes,
             photo_url: document.getElementById('hw-blank-photo').value.trim(),
             hw_form_source: src,
             // China/Custom CNY fields
@@ -1491,7 +1551,18 @@ const Molds = {
             delivery_per_unit: 0,
         };
 
-        if (src === 'china') {
+        if (src === 'warehouse') {
+            const snapshot = this._getWarehouseHwSnapshot(blank.warehouse_item_id, notes);
+            if (!snapshot) {
+                App.toast('Выберите позицию со склада');
+                return;
+            }
+            blank.name = snapshot.name;
+            blank.price_rub = snapshot.priceRub;
+            blank.photo_url = '';
+            blank.notes = snapshot.notes;
+            blank.china_catalog_id = null;
+        } else if (src === 'china') {
             const chinaItem = blank.china_catalog_id ? ChinaCatalog._items.find(i => i.id === blank.china_catalog_id) : null;
             if (chinaItem) {
                 blank.price_cny = chinaItem.price_cny || 0;

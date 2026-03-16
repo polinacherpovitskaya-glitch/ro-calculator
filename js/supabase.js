@@ -2754,8 +2754,12 @@ async function loadHwBlanks() {
                     }
                     return row;
                 });
-                setLocal(LOCAL_KEYS.hwBlanks, blanks);
-                return blanks;
+                const { blanks: deduped, duplicateIds } = _dedupeHwBlanks(blanks);
+                if (duplicateIds.length > 0) {
+                    await _deleteHwBlankIds(duplicateIds);
+                }
+                setLocal(LOCAL_KEYS.hwBlanks, deduped);
+                return deduped;
             }
             // Migration from localStorage
             const local = getLocal(LOCAL_KEYS.hwBlanks) || getDefaultHwBlanks();
@@ -2771,21 +2775,50 @@ async function loadHwBlanks() {
                         }, { onConflict: 'id' });
                     } catch(e) { console.warn('HwBlank migration error:', e); }
                 }
-                return local;
+                const { blanks: deduped } = _dedupeHwBlanks(local);
+                setLocal(LOCAL_KEYS.hwBlanks, deduped);
+                return deduped;
             }
             return getDefaultHwBlanks();
         } catch(e) {
             console.error('loadHwBlanks exception:', e);
-            return getLocal(LOCAL_KEYS.hwBlanks) || getDefaultHwBlanks();
+            const fallback = getLocal(LOCAL_KEYS.hwBlanks) || getDefaultHwBlanks();
+            const { blanks: deduped } = _dedupeHwBlanks(fallback);
+            setLocal(LOCAL_KEYS.hwBlanks, deduped);
+            return deduped;
         }
     }
-    return getLocal(LOCAL_KEYS.hwBlanks) || getDefaultHwBlanks();
+    const fallback = getLocal(LOCAL_KEYS.hwBlanks) || getDefaultHwBlanks();
+    const { blanks: deduped } = _dedupeHwBlanks(fallback);
+    setLocal(LOCAL_KEYS.hwBlanks, deduped);
+    return deduped;
 }
 
 async function saveHwBlank(blank) {
+    const localBlanks = getLocal(LOCAL_KEYS.hwBlanks) || [];
+    const warehouseItemId = Number(blank.warehouse_item_id || 0);
+    const sameWarehouseItem = warehouseItemId > 0
+        ? localBlanks
+            .filter(b => _isWarehouseHwBlank(b) && Number(b.warehouse_item_id || 0) === warehouseItemId && Number(b.id) !== Number(blank.id || 0))
+            .sort(_compareHwBlankFreshnessDesc)
+        : [];
+    let duplicateIds = [];
+
+    if (!blank.id && sameWarehouseItem.length > 0) {
+        const primary = sameWarehouseItem[0];
+        blank.id = primary.id;
+        blank.created_at = primary.created_at || new Date().toISOString();
+        duplicateIds = sameWarehouseItem.slice(1).map(b => b.id).filter(Boolean);
+    } else {
+        duplicateIds = sameWarehouseItem.map(b => b.id).filter(Boolean);
+    }
+
     if (!blank.id) {
         blank.id = Date.now();
         blank.created_at = new Date().toISOString();
+    } else if (!blank.created_at) {
+        const existing = localBlanks.find(b => Number(b.id) === Number(blank.id));
+        if (existing?.created_at) blank.created_at = existing.created_at;
     }
     blank.updated_at = new Date().toISOString();
 
@@ -2794,13 +2827,21 @@ async function saveHwBlank(blank) {
             const row = { id: blank.id, name: blank.name || '', blank_data: JSON.stringify(blank), created_at: blank.created_at, updated_at: blank.updated_at };
             const { error } = await supabaseClient.from('hw_blanks').upsert(row, { onConflict: 'id' });
             if (error) console.error('saveHwBlank error:', error);
+            if (duplicateIds.length > 0) {
+                await _deleteHwBlankIds(duplicateIds);
+            }
         } catch(e) { console.error('saveHwBlank exception:', e); }
     }
 
-    const blanks = getLocal(LOCAL_KEYS.hwBlanks) || [];
+    let blanks = getLocal(LOCAL_KEYS.hwBlanks) || [];
+    if (duplicateIds.length > 0) {
+        const duplicateSet = new Set(duplicateIds.map(Number));
+        blanks = blanks.filter(b => !duplicateSet.has(Number(b.id)));
+    }
     const idx = blanks.findIndex(b => b.id === blank.id);
     if (idx >= 0) blanks[idx] = blank; else blanks.push(blank);
-    setLocal(LOCAL_KEYS.hwBlanks, blanks);
+    const { blanks: deduped } = _dedupeHwBlanks(blanks);
+    setLocal(LOCAL_KEYS.hwBlanks, deduped);
     return blank.id;
 }
 
@@ -2813,6 +2854,64 @@ async function deleteHwBlank(blankId) {
     }
     const blanks = (getLocal(LOCAL_KEYS.hwBlanks) || []).filter(b => b.id !== blankId);
     setLocal(LOCAL_KEYS.hwBlanks, blanks);
+}
+
+function _isWarehouseHwBlank(blank) {
+    if (!blank) return false;
+    if (blank.hw_form_source) return blank.hw_form_source === 'warehouse';
+    return !!blank.warehouse_item_id;
+}
+
+function _hwBlankFreshness(blank) {
+    return Date.parse(blank?.updated_at || blank?.created_at || '') || Number(blank?.id || 0) || 0;
+}
+
+function _compareHwBlankFreshnessDesc(a, b) {
+    return _hwBlankFreshness(b) - _hwBlankFreshness(a);
+}
+
+function _dedupeHwBlanks(blanks) {
+    const winners = new Map();
+    const duplicateIds = [];
+
+    (Array.isArray(blanks) ? blanks : []).forEach(blank => {
+        if (!blank || !blank.id) return;
+        const isWarehouse = _isWarehouseHwBlank(blank);
+        const key = isWarehouse && Number(blank.warehouse_item_id || 0) > 0
+            ? `warehouse:${Number(blank.warehouse_item_id)}`
+            : `id:${Number(blank.id)}`;
+        const current = winners.get(key);
+        if (!current) {
+            winners.set(key, blank);
+            return;
+        }
+        if (_compareHwBlankFreshnessDesc(blank, current) > 0) {
+            duplicateIds.push(blank.id);
+            return;
+        }
+        duplicateIds.push(current.id);
+        winners.set(key, blank);
+    });
+
+    return {
+        blanks: Array.from(winners.values()).sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'ru')),
+        duplicateIds,
+    };
+}
+
+async function _deleteHwBlankIds(blankIds) {
+    const ids = [...new Set((blankIds || []).map(Number).filter(Boolean))];
+    if (!ids.length) return;
+    if (isSupabaseReady()) {
+        try {
+            const { error } = await supabaseClient.from('hw_blanks').delete().in('id', ids);
+            if (error) console.error('delete duplicate hw_blanks error:', error);
+        } catch (e) {
+            console.error('delete duplicate hw_blanks exception:', e);
+        }
+    }
+    const remaining = (getLocal(LOCAL_KEYS.hwBlanks) || []).filter(b => !ids.includes(Number(b.id)));
+    setLocal(LOCAL_KEYS.hwBlanks, remaining);
 }
 
 function getDefaultHwBlanks() {
