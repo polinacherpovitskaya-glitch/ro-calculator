@@ -16,26 +16,28 @@ const STATUS_OPTIONS = [
     { value: 'deleted',              label: 'Удалён' },
 ];
 
-const PROTOTYPE_STATUSES = ['draft', 'calculated', 'sample'];
+const DRAFT_STATUSES = ['draft', 'calculated'];
+const SAMPLE_STATUSES = ['sample'];
 const PRODUCTION_STATUSES = ['production_casting', 'production_printing', 'production_hardware', 'production_packaging', 'in_production', 'delivery'];
-const ACTIVE_STATUSES = [...PROTOTYPE_STATUSES, ...PRODUCTION_STATUSES];
-const SKY_STATUSES = [...ACTIVE_STATUSES, 'completed', 'cancelled'];
+const ACTIVE_STATUSES = [...SAMPLE_STATUSES, ...PRODUCTION_STATUSES];
+const SKY_STATUSES = [...DRAFT_STATUSES, ...ACTIVE_STATUSES, 'completed', 'cancelled'];
 
 const ORDERS_MODE_HINTS = {
-    active: 'Список по умолчанию для менеджеров: только Prototype и Production, как в Notion Active.',
-    prototype: 'Только прототипы, черновики и образцы.',
+    active: 'Список по умолчанию для менеджеров: только Образцы и Production.',
+    sample: 'Только заказы, которые находятся в статусе образца.',
     production: 'Только заказы, которые уже пошли в производство.',
+    board: 'Доска по всем статусам: черновики, образцы, производство, готово и отменённые.',
     sky: 'Общий плоский список без лишних колонок: название, старт, дедлайн и текущий этап.',
     basket: 'Удалённые заказы. Здесь можно восстановить заказ или удалить его навсегда.',
 };
 
 const ORDERS_SECTIONS = {
-    prototype: {
-        key: 'prototype',
-        label: 'Prototype',
-        color: '#9ca3af',
+    sample: {
+        key: 'sample',
+        label: 'Образцы',
+        color: '#3b82f6',
         defaultOpen: true,
-        statuses: PROTOTYPE_STATUSES,
+        statuses: SAMPLE_STATUSES,
     },
     production: {
         key: 'production',
@@ -52,6 +54,22 @@ const ORDERS_SECTIONS = {
         statuses: ['deleted'],
     },
 };
+
+const PRODUCTION_SUBSTAGES = {
+    production_casting: 'Выливание формы',
+    production_printing: 'Печать / нанесение',
+    production_hardware: 'Сборка фурнитуры',
+    production_packaging: 'Упаковка',
+    in_production: 'В производстве',
+};
+
+const BOARD_COLUMNS = [
+    { key: 'draft', label: 'Черновики', color: '#6b7280', icon: '○', statuses: DRAFT_STATUSES },
+    { key: 'sample', label: 'Образцы', color: '#3b82f6', icon: '◎', statuses: SAMPLE_STATUSES },
+    { key: 'production', label: 'Production', color: '#f59e0b', icon: '◐', statuses: PRODUCTION_STATUSES },
+    { key: 'completed', label: 'Готово', color: '#22c55e', icon: '●', statuses: ['completed'] },
+    { key: 'cancelled', label: 'Отменён', color: '#ef4444', icon: '✕', statuses: ['cancelled'] },
+];
 
 const CHINA_STATUS_META = {
     ordered:            { label: 'Заказано',         className: 'badge-orange' },
@@ -307,11 +325,14 @@ const Orders = {
         if (this.mode === 'basket') {
             return this.allOrders.filter(order => order.status === 'deleted');
         }
-        if (this.mode === 'prototype') {
-            return this.allOrders.filter(order => PROTOTYPE_STATUSES.includes(order.status));
+        if (this.mode === 'sample') {
+            return this.allOrders.filter(order => SAMPLE_STATUSES.includes(order.status));
         }
         if (this.mode === 'production') {
             return this.allOrders.filter(order => PRODUCTION_STATUSES.includes(order.status));
+        }
+        if (this.mode === 'board') {
+            return this.allOrders.filter(order => order.status !== 'deleted');
         }
         if (this.mode === 'sky') {
             return this.allOrders.filter(order => SKY_STATUSES.includes(order.status));
@@ -357,10 +378,17 @@ const Orders = {
         const container = document.getElementById('orders-table-view');
         const board = document.getElementById('orders-board-view');
         if (!container) return;
-        if (board) board.style.display = 'none';
-        container.style.display = '';
 
         const visibleOrders = this.getVisibleOrders();
+        if (this.mode === 'board') {
+            container.style.display = 'none';
+            if (board) board.style.display = '';
+            this.renderBoard(visibleOrders);
+            return;
+        }
+
+        if (board) board.style.display = 'none';
+        container.style.display = '';
         if (this.mode === 'sky') {
             container.innerHTML = this.renderSkyView(visibleOrders);
             return;
@@ -481,9 +509,134 @@ const Orders = {
     },
 
     getSectionsForMode() {
-        if (this.mode === 'prototype') return [ORDERS_SECTIONS.prototype];
+        if (this.mode === 'sample') return [ORDERS_SECTIONS.sample];
         if (this.mode === 'production') return [ORDERS_SECTIONS.production];
-        return [ORDERS_SECTIONS.prototype, ORDERS_SECTIONS.production];
+        return [ORDERS_SECTIONS.sample, ORDERS_SECTIONS.production];
+    },
+
+    renderBoard(orders) {
+        const container = document.getElementById('orders-board-view');
+        if (!container) return;
+
+        container.innerHTML = BOARD_COLUMNS.map(column => {
+            const columnOrders = orders.filter(order => column.statuses.includes(order.status));
+            const totalRevenue = columnOrders
+                .filter(order => (order.client_name || '').toUpperCase() !== 'B2C')
+                .reduce((sum, order) => sum + (order.total_revenue_plan || 0), 0);
+            const b2cCount = columnOrders.filter(order => (order.client_name || '').toUpperCase() === 'B2C').length;
+
+            return `
+            <div class="orders-board-col" data-status="${column.key}"
+                 ondragover="Orders.onBoardDragOver(event)"
+                 ondragleave="Orders.onBoardDragLeave(event)"
+                 ondrop="Orders.onBoardDrop(event, '${column.key}')">
+                <div class="orders-board-col-header" style="border-top:3px solid ${column.color}">
+                    <span>${column.icon} ${column.label} <span style="font-weight:400;color:var(--text-muted)">(${columnOrders.length})</span></span>
+                    <span style="font-size:11px;color:var(--text-muted)">${this.shortRub(totalRevenue)}${b2cCount > 0 ? ` <span title="B2C (${b2cCount}) не в сумме" style="font-size:9px;opacity:.6">−B2C</span>` : ''}</span>
+                </div>
+                <div class="orders-board-col-body">
+                    ${columnOrders.length === 0
+                        ? '<div style="text-align:center;color:var(--text-muted);font-size:12px;padding:20px 0">Нет заказов</div>'
+                        : columnOrders.map(order => this.renderBoardCard(order)).join('')}
+                </div>
+            </div>`;
+        }).join('');
+    },
+
+    renderBoardCard(order) {
+        const payment = PAYMENT_STATUSES.find(item => item.key === (order.payment_status || 'not_sent')) || PAYMENT_STATUSES[0];
+        const margin = order.margin_percent_plan || 0;
+
+        let deadlineHtml = '';
+        if (order.deadline_end || order.deadline_start || order.deadline) {
+            const value = order.deadline_end || order.deadline_start || order.deadline;
+            const date = new Date(value);
+            if (!Number.isNaN(date.getTime())) {
+                const overdue = date < new Date() && order.status !== 'completed';
+                deadlineHtml = `<span style="font-size:10px;${overdue ? 'color:var(--red);font-weight:600' : 'color:var(--text-muted)'}">
+                    ${overdue ? '!' : ''}${date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })}
+                </span>`;
+            }
+        }
+
+        const subStage = PRODUCTION_SUBSTAGES[order.status];
+        const subStageBadge = subStage
+            ? `<div style="font-size:10px;color:#f59e0b;font-weight:600;margin-bottom:4px;">◉ ${subStage}</div>`
+            : '';
+
+        const isB2C = (order.client_name || '').toUpperCase() === 'B2C';
+        const b2cBadge = isB2C
+            ? '<span style="display:inline-block;font-size:9px;font-weight:700;color:#7c3aed;background:rgba(124,58,237,.1);padding:1px 5px;border-radius:4px;margin-left:4px;">B2C</span>'
+            : '';
+
+        return `
+        <div class="order-board-card" draggable="true"
+             ondragstart="Orders.onBoardDragStart(event, ${order.id})"
+             onclick="App.navigate('order-detail', true, ${order.id})">
+            <div class="order-board-card-title">${this.escHtml(order.order_name || 'Без названия')}${b2cBadge}</div>
+            ${subStageBadge}
+            <div class="order-board-card-client">${this.escHtml(order.client_name || '')} ${order.manager_name ? '/ ' + this.escHtml(order.manager_name) : ''}</div>
+            <div class="order-board-card-footer">
+                <span class="badge badge-${payment.color}" style="font-size:9px">${payment.label}</span>
+                <span style="font-size:11px;font-weight:600;${margin >= 30 ? 'color:var(--green)' : 'color:var(--red)'}">${formatPercent(margin)}</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px">
+                <span style="font-size:11px;color:var(--text-muted)">${formatRub(order.total_revenue_plan || 0)}</span>
+                ${deadlineHtml}
+            </div>
+        </div>`;
+    },
+
+    onBoardDragStart(event, orderId) {
+        event.dataTransfer.setData('text/plain', orderId);
+        event.currentTarget.classList.add('dragging');
+    },
+
+    onBoardDragOver(event) {
+        event.preventDefault();
+        event.currentTarget.classList.add('drag-over');
+    },
+
+    onBoardDragLeave(event) {
+        event.currentTarget.classList.remove('drag-over');
+    },
+
+    async onBoardDrop(event, newStatus) {
+        event.preventDefault();
+        event.currentTarget.classList.remove('drag-over');
+
+        const orderId = parseInt(event.dataTransfer.getData('text/plain'), 10);
+        const order = this.allOrders.find(item => item.id === orderId);
+        if (!order) return;
+
+        if (newStatus === 'production' && PRODUCTION_STATUSES.includes(order.status)) {
+            return;
+        }
+
+        const actualStatus = newStatus === 'production' ? 'production_casting' : newStatus;
+        if (order.status === actualStatus) return;
+
+        const oldStatus = order.status;
+        const managerName = App.getCurrentEmployeeName();
+
+        await updateOrderStatus(orderId, actualStatus);
+        await this._syncWarehouseByStatus(orderId, oldStatus, actualStatus, order.order_name, managerName || 'Неизвестный');
+
+        if (actualStatus === 'completed' && oldStatus !== 'completed') {
+            await this._moveToReadyGoods(orderId, order);
+        }
+
+        order.status = actualStatus;
+
+        await this.addChangeRecord(orderId, {
+            field: 'status',
+            old_value: App.statusLabel(oldStatus),
+            new_value: App.statusLabel(actualStatus),
+            manager: managerName || 'Неизвестный',
+        });
+
+        App.toast(`Статус: ${App.statusLabel(actualStatus)}`);
+        this.render();
     },
 
     toggleSection(key) {

@@ -376,8 +376,9 @@
                 <div class="flex gap-8">
                     <div class="orders-view-toggle">
                         <button class="orders-view-btn active" data-mode="active" onclick="Orders.setMode('active')">Active</button>
-                        <button class="orders-view-btn" data-mode="prototype" onclick="Orders.setMode('prototype')">Prototype</button>
+                        <button class="orders-view-btn" data-mode="sample" onclick="Orders.setMode('sample')">Образцы</button>
                         <button class="orders-view-btn" data-mode="production" onclick="Orders.setMode('production')">Production</button>
+                        <button class="orders-view-btn" data-mode="board" onclick="Orders.setMode('board')">&#9638; Доска</button>
                         <button class="orders-view-btn" data-mode="sky" onclick="Orders.setMode('sky')">Sky</button>
                         <button class="orders-view-btn" data-mode="basket" onclick="Orders.setMode('basket')">&#128465; Корзина</button>
                     </div>
@@ -392,7 +393,7 @@
                         <input type="text" id="orders-search" placeholder="Название / клиент" oninput="Orders.filterLocal()">
                     </div>
                     <div class="orders-mode-note" id="orders-mode-hint">
-                        Список по умолчанию для менеджеров: только Prototype и Production.
+                        Список по умолчанию для менеджеров: только Образцы и Production.
                     </div>
                 </div>
             </div>
@@ -3118,7 +3119,7 @@
 <script src="js/calculator.js?v=65"></script>
 <script src="js/app.js?v=105"></script>
 <script src="js/order-detail.js?v=51"></script>
-<script src="js/orders.js?v=56"></script>
+<script src="js/orders.js?v=57"></script>
 <script src="js/production_plan.js?v=75"></script>
 <script src="js/analytics.js?v=46g"></script>
 <script src="js/molds.js?v=67"></script>
