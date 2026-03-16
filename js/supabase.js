@@ -504,6 +504,43 @@ function _filterForDB(obj, knownCols, jsonCol, fieldMap) {
     return filtered;
 }
 
+function _buildStableOrderItemId(orderId, item, index = 0) {
+    const numericOrderId = Number(orderId) || 0;
+    const numericItemNumber = Number(item?.item_number);
+    const safeItemNumber = Number.isFinite(numericItemNumber) ? numericItemNumber : index;
+    return (numericOrderId * 1000) + safeItemNumber;
+}
+
+function _getOrderItemDedupKey(item) {
+    const type = item && item.item_type ? item.item_type : 'product';
+    const itemNumber = Number(item?.item_number) || 0;
+    return `${type}:${itemNumber}`;
+}
+
+function _getOrderItemFreshness(item) {
+    return String(item?.updated_at || item?.created_at || '');
+}
+
+function _dedupeOrderItems(items, orderId = null) {
+    const byKey = new Map();
+    (items || []).forEach(item => {
+        const key = _getOrderItemDedupKey(item);
+        const existing = byKey.get(key);
+        if (!existing || _getOrderItemFreshness(item) >= _getOrderItemFreshness(existing)) {
+            byKey.set(key, item);
+        }
+    });
+    const deduped = [...byKey.values()].sort((a, b) => (Number(a.item_number) || 0) - (Number(b.item_number) || 0));
+    if (orderId && deduped.length !== (items || []).length) {
+        console.warn('[loadOrder] Deduped duplicated order_items rows', {
+            orderId,
+            before: (items || []).length,
+            after: deduped.length,
+        });
+    }
+    return deduped;
+}
+
 async function saveOrder(order, items) {
     if (isSupabaseReady()) {
         // Generate ID for new orders (Supabase BIGINT PK has no auto-increment)
@@ -539,16 +576,29 @@ async function saveOrder(order, items) {
         }
 
         // Delete old items and insert new
-        await supabaseClient.from('order_items').delete().eq('order_id', orderId);
+        const { error: deleteItemsError } = await supabaseClient
+            .from('order_items')
+            .delete()
+            .eq('order_id', orderId);
+        if (deleteItemsError) {
+            console.error('deleteOrderItems error:', deleteItemsError);
+            return null;
+        }
         if (items.length > 0) {
+            const nowIso = new Date().toISOString();
             const rows = items.map((item, i) => {
                 const filtered = _filterForDB(item, _ITEM_COLS, 'item_data', null);
                 filtered.order_id = orderId;
-                filtered.id = item.id || (Date.now() + i + 1);
+                filtered.id = item.id || _buildStableOrderItemId(orderId, item, i + 1);
+                filtered.created_at = item.created_at || nowIso;
+                filtered.updated_at = nowIso;
                 return filtered;
             });
             const { error } = await supabaseClient.from('order_items').insert(rows);
-            if (error) console.error('insertOrderItems error:', error);
+            if (error) {
+                console.error('insertOrderItems error:', error);
+                return null;
+            }
         }
 
         // Also save to localStorage as backup (full data, no filtering)
@@ -579,7 +629,14 @@ async function saveOrder(order, items) {
 
         const allItems = getLocal(LOCAL_KEYS.orderItems) || [];
         const filtered = allItems.filter(i => i.order_id !== orderId);
-        const newItems = items.map((item, idx) => ({ ...item, id: Date.now() + idx, order_id: orderId }));
+        const nowIso = new Date().toISOString();
+        const newItems = items.map((item, idx) => ({
+            ...item,
+            id: item.id || _buildStableOrderItemId(orderId, item, idx + 1),
+            order_id: orderId,
+            created_at: item.created_at || nowIso,
+            updated_at: nowIso,
+        }));
         setLocal(LOCAL_KEYS.orderItems, [...filtered, ...newItems]);
 
         return orderId;
@@ -606,7 +663,14 @@ function _saveOrderLocally(order, items) {
 
         const allItems = getLocal(LOCAL_KEYS.orderItems) || [];
         const filtered = allItems.filter(i => i.order_id !== order.id);
-        const newItems = items.map((item, i) => ({ ...item, id: item.id || (Date.now() + i), order_id: order.id }));
+        const nowIso = new Date().toISOString();
+        const newItems = items.map((item, i) => ({
+            ...item,
+            id: item.id || _buildStableOrderItemId(order.id, item, i + 1),
+            order_id: order.id,
+            created_at: item.created_at || nowIso,
+            updated_at: nowIso,
+        }));
         setLocal(LOCAL_KEYS.orderItems, [...filtered, ...newItems]);
     } catch (e) { console.warn('Local backup save error:', e); }
 }
@@ -713,7 +777,7 @@ async function loadOrder(orderId) {
         if (e2) { console.error('loadOrderItems error:', e2); return null; }
 
         // Restore full item data from item_data JSON
-        const items = (rawItems || []).map(item => {
+        const items = _dedupeOrderItems(rawItems || [], orderId).map(item => {
             if (item.item_data) {
                 try {
                     const extras = JSON.parse(item.item_data);
@@ -728,7 +792,10 @@ async function loadOrder(orderId) {
     const orders = getLocal(LOCAL_KEYS.orders) || [];
     const order = orders.find(o => o.id === orderId);
     const allItems = getLocal(LOCAL_KEYS.orderItems) || [];
-    const items = allItems.filter(i => i.order_id === orderId).sort((a, b) => a.item_number - b.item_number);
+    const items = _dedupeOrderItems(
+        allItems.filter(i => i.order_id === orderId),
+        orderId
+    );
     return order ? { order, items } : null;
 }
 

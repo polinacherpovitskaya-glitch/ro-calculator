@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v88';
+const APP_VERSION = 'v89';
 
 const App = {
     currentPage: 'dashboard',
@@ -3567,6 +3567,9 @@ const Calculator = {
     scheduleAutosave() {
         this._isDirty = true;
         clearTimeout(this._autosaveTimer);
+        this._autosaveTimer = setTimeout(() => {
+            this._doAutosave().catch(e => console.error('[autosave] timer error:', e));
+        }, 1500);
         const statusEl = document.getElementById('calc-autosave-status');
         if (statusEl) statusEl.textContent = 'Есть несохраненные изменения';
     },
