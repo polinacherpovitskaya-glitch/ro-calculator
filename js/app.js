@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v87';
+const APP_VERSION = 'v88';
 
 const App = {
     currentPage: 'dashboard',
@@ -321,6 +321,11 @@ const App = {
         this.settings = await loadSettings();
         this.templates = await loadTemplates();
         this.params = getProductionParams(this.settings);
+        if (typeof window !== 'undefined' && window.__roSupabaseAccessProblem) {
+            setTimeout(() => {
+                this.toast('Нет доступа к общей базе данных. Приложение использует локальные данные браузера, поэтому значения у сотрудников могут отличаться.');
+            }, 300);
+        }
         await this.initEmployeeContext();
         this._sessionStartedAt = Date.now();
         this.startSessionTracking();

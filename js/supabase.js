@@ -7,6 +7,25 @@ const SUPABASE_URL = 'https://jbpmorruwjrxcieqlbmd.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpicG1vcnJ1d2pyeGNpZXFsYm1kIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIwMTY1NzUsImV4cCI6MjA4NzU5MjU3NX0.Z26DuC4f5UM1I04N7ozr3FOUpF4tVIlUEh0cu1c0Jec';
 
 let supabaseClient = null;
+let supabaseAccessWarningShown = false;
+
+function _isSupabaseAccessError(error) {
+    const message = String(error?.message || error || '').toLowerCase();
+    const code = String(error?.code || '').toLowerCase();
+    return message.includes('invalid api key')
+        || message.includes('jwt')
+        || message.includes('unauthorized')
+        || code === '401';
+}
+
+function _markSupabaseAccessProblem(error) {
+    if (supabaseAccessWarningShown) return;
+    supabaseAccessWarningShown = true;
+    if (typeof window !== 'undefined') {
+        window.__roSupabaseAccessProblem = String(error?.message || error || 'shared database unavailable');
+    }
+    console.error('[Supabase] Shared database unavailable, falling back to local browser data:', error);
+}
 
 function initSupabase() {
     if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
@@ -244,6 +263,7 @@ async function loadSettings() {
             .select('key, value');
         if (error) {
             console.error('loadSettings error:', error);
+            if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
             // Fallback to localStorage, not just defaults
             return getLocal(LOCAL_KEYS.settings) || getDefaultSettings();
         }
@@ -354,43 +374,15 @@ function getDefaultSettings() {
 // =============================================
 
 async function loadTemplates() {
-    if (isSupabaseReady()) {
-        const { data, error } = await supabaseClient
-            .from('product_templates')
-            .select('*')
-            .order('category')
-            .order('name');
-        if (error) {
-            const message = String(error?.message || '');
-            if (String(error?.code || '') === 'PGRST204' || message.includes('schema cache')) {
-                console.warn('Supabase product_templates schema is outdated. Using local templates fallback.');
-                return _getLocalTemplates();
-            }
-            console.error('loadTemplates error:', error);
-            return getDefaultTemplates();
-        }
-        if (data && data.length > 0) {
-            return data;
-        }
-        // Supabase empty — seed from molds/defaults
-        console.log('Supabase templates empty, seeding from local molds...');
-        const localTemplates = _getLocalTemplates();
-        // Seed Supabase in background
-        if (localTemplates.length > 0) {
-            supabaseClient.from('product_templates').insert(localTemplates)
-                .then(({ error: e }) => {
-                    const message = String(e?.message || '');
-                    if (!e) return;
-                    if (String(e?.code || '') === 'PGRST204' || message.includes('schema cache')) {
-                        console.warn('Skipped product_templates seed because live schema is older than local template model.');
-                        return;
-                    }
-                    console.error('Seed templates error:', e);
-                });
-        }
-        return localTemplates;
+    // The blanks catalog (`molds`) is the single source of truth.
+    // `product_templates` is only a legacy mirror and may lag behind edits.
+    try {
+        const molds = await loadMolds();
+        return refreshTemplatesFromMolds(molds);
+    } catch (e) {
+        console.warn('loadTemplates fallback to local templates:', e);
+        return _getLocalTemplates();
     }
-    return _getLocalTemplates();
 }
 
 function _getLocalTemplates() {
@@ -445,7 +437,10 @@ function _moldToTemplate(m) {
 
 /** Rebuild App.templates from molds (called after mold save) */
 function refreshTemplatesFromMolds(molds) {
-    App.templates = molds.map(m => _moldToTemplate(m));
+    const templates = (molds || []).map(m => _moldToTemplate(m));
+    App.templates = templates;
+    setLocal(LOCAL_KEYS.templates, templates);
+    return templates;
 }
 
 // =============================================
@@ -1023,7 +1018,10 @@ async function loadMolds() {
     if (isSupabaseReady()) {
         try {
             const { data, error } = await supabaseClient.from('molds').select('*').order('name');
-            if (error) console.error('loadMolds error:', error);
+            if (error) {
+                console.error('loadMolds error:', error);
+                if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
+            }
 
             // Parse Supabase rows
             const _parseMoldRow = (row) => {
@@ -1091,6 +1089,7 @@ async function loadMolds() {
             return seedData;
         } catch(e) {
             console.error('loadMolds exception:', e);
+            if (_isSupabaseAccessError(e)) _markSupabaseAccessProblem(e);
             return getLocal(LOCAL_KEYS.molds) || getDefaultMolds();
         }
     }
@@ -1113,6 +1112,7 @@ async function saveMold(mold) {
     const idx = molds.findIndex(m => m.id === mold.id);
     if (idx >= 0) molds[idx] = mold; else molds.push(mold);
     setLocal(LOCAL_KEYS.molds, molds);
+    refreshTemplatesFromMolds(molds);
     return mold.id;
 }
 
@@ -1125,6 +1125,7 @@ async function deleteMold(moldId) {
     }
     const molds = (getLocal(LOCAL_KEYS.molds) || []).filter(m => m.id !== moldId);
     setLocal(LOCAL_KEYS.molds, molds);
+    refreshTemplatesFromMolds(molds);
 }
 
 function getDefaultMolds() {
