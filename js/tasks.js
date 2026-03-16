@@ -263,6 +263,21 @@ const Tasks = {
         this.render();
     },
 
+    _filtersOpen: false,
+
+    toggleFilters() {
+        this._filtersOpen = !this._filtersOpen;
+        const panel = document.getElementById('tasks-filters-panel');
+        if (panel) panel.style.display = this._filtersOpen ? '' : 'none';
+        document.querySelector('.tasks-filter-toggle')?.classList.toggle('is-open', this._filtersOpen);
+    },
+
+    resetFilters() {
+        this.filters = { search: '', status: '', priority: '', assignee_id: '', reporter_id: '', project_id: '', order_id: '', area_id: '', due: '', mine: false, awaiting_review: false, waiting_only: false };
+        this.sort = 'manual';
+        this.render();
+    },
+
     updateFilter(field, value) {
         this.filters[field] = value;
         this.render();
@@ -270,22 +285,33 @@ const Tasks = {
 
     viewTabsHtml() {
         return `
-            <div class="flex gap-4">
-                <button class="tasks-view-btn ${this.view === 'list' ? 'active' : ''}" onclick="Tasks.setView('list')">&#9776; Список</button>
-                <button class="tasks-view-btn ${this.view === 'kanban' ? 'active' : ''}" onclick="Tasks.setView('kanban')">&#9634; Канбан</button>
-                <button class="tasks-view-btn ${this.view === 'calendar' ? 'active' : ''}" onclick="Tasks.setView('calendar')">&#128197; Календарь</button>
+            <div class="tasks-view-toggle">
+                <button class="tasks-view-btn ${this.view === 'list' ? 'active' : ''}" onclick="Tasks.setView('list')">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+                    Список
+                </button>
+                <button class="tasks-view-btn ${this.view === 'kanban' ? 'active' : ''}" onclick="Tasks.setView('kanban')">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="18" rx="1"/><rect x="14" y="3" width="7" height="10" rx="1"/></svg>
+                    Канбан
+                </button>
+                <button class="tasks-view-btn ${this.view === 'calendar' ? 'active' : ''}" onclick="Tasks.setView('calendar')">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                    Календарь
+                </button>
             </div>
         `;
     },
 
     scopeTabsHtml() {
         const currentEmployee = this.currentEmployee();
-        const myLabel = currentEmployee ? `Мои задачи (${this.myTasks().length})` : 'Мои задачи';
+        const myCount = this.myTasks().length;
         return `
-            <div class="flex gap-4">
-                <button class="tasks-view-btn ${this.scope === 'my' ? 'active' : ''}" onclick="Tasks.setScope('my')">${this.esc(myLabel)}</button>
-                <button class="tasks-view-btn ${this.scope === 'all' ? 'active' : ''}" onclick="Tasks.setScope('all')">Все задачи</button>
-                <button class="tasks-view-btn ${this.scope === 'overdue' ? 'active' : ''}" onclick="Tasks.setScope('overdue')">Просроченные</button>
+            <div class="tasks-scope-tabs">
+                <button class="tasks-scope-btn ${this.scope === 'my' ? 'active' : ''}" onclick="Tasks.setScope('my')">
+                    Мои задачи${currentEmployee ? ` <span class="tasks-scope-count">${myCount}</span>` : ''}
+                </button>
+                <button class="tasks-scope-btn ${this.scope === 'all' ? 'active' : ''}" onclick="Tasks.setScope('all')">Все задачи</button>
+                <button class="tasks-scope-btn ${this.scope === 'overdue' ? 'active' : ''}" onclick="Tasks.setScope('overdue')">Просроченные</button>
             </div>
         `;
     },
@@ -390,12 +416,27 @@ const Tasks = {
         const review = all.filter(task => task.status === 'review').length;
         const waiting = all.filter(task => task.status === 'waiting').length;
         return `
-            <div class="stats-grid">
-                <div class="stat-card"><div class="stat-label">Всего задач</div><div class="stat-value">${all.length}</div></div>
-                <div class="stat-card"><div class="stat-label">Мои</div><div class="stat-value">${this.myTasks().length}</div></div>
-                <div class="stat-card"><div class="stat-label">На согласовании</div><div class="stat-value">${review}</div></div>
-                <div class="stat-card"><div class="stat-label">Просрочено</div><div class="stat-value">${overdue}</div></div>
-                <div class="stat-card"><div class="stat-label">Ждём</div><div class="stat-value">${waiting}</div></div>
+            <div class="tasks-stats">
+                <div class="task-stat-card task-stat-total">
+                    <div class="task-stat-icon">&#128203;</div>
+                    <div class="task-stat-info"><div class="stat-value">${all.length}</div><div class="stat-label">Всего задач</div></div>
+                </div>
+                <div class="task-stat-card task-stat-mine">
+                    <div class="task-stat-icon">&#128100;</div>
+                    <div class="task-stat-info"><div class="stat-value">${this.myTasks().length}</div><div class="stat-label">Мои</div></div>
+                </div>
+                <div class="task-stat-card task-stat-review">
+                    <div class="task-stat-icon">&#128172;</div>
+                    <div class="task-stat-info"><div class="stat-value">${review}</div><div class="stat-label">На согласовании</div></div>
+                </div>
+                <div class="task-stat-card ${overdue > 0 ? 'task-stat-overdue-active' : 'task-stat-overdue'}">
+                    <div class="task-stat-icon">${overdue > 0 ? '&#9888;' : '&#9989;'}</div>
+                    <div class="task-stat-info"><div class="stat-value">${overdue}</div><div class="stat-label">Просрочено</div></div>
+                </div>
+                <div class="task-stat-card task-stat-waiting">
+                    <div class="task-stat-icon">&#9203;</div>
+                    <div class="task-stat-info"><div class="stat-value">${waiting}</div><div class="stat-label">Ждём</div></div>
+                </div>
             </div>
         `;
     },
@@ -423,12 +464,8 @@ const Tasks = {
             .map(item => `<option value="${item.value}" ${item.value === this.filters.priority ? 'selected' : ''}>${this.esc(item.label)}</option>`)
             .join('');
         return `
-            <div class="card" style="padding:12px 20px;">
+            <div class="tasks-filters-panel" id="tasks-filters-panel" style="display:${this._filtersOpen ? '' : 'none'}">
                 <div class="form-row" style="align-items:end">
-                    <div class="form-group" style="margin:0;flex:2">
-                        <label>Поиск</label>
-                        <input type="text" value="${this.esc(this.filters.search)}" oninput="Tasks.updateFilter('search', this.value)" placeholder="Название, описание, комментарии">
-                    </div>
                     <div class="form-group" style="margin:0">
                         <label>Статус</label>
                         <select onchange="Tasks.updateFilter('status', this.value)">
@@ -457,8 +494,6 @@ const Tasks = {
                             ${reporterOptions}
                         </select>
                     </div>
-                </div>
-                <div class="form-row" style="align-items:end">
                     <div class="form-group" style="margin:0">
                         <label>Проект</label>
                         <select onchange="Tasks.updateFilter('project_id', this.value)">
@@ -466,6 +501,8 @@ const Tasks = {
                             ${projectOptions}
                         </select>
                     </div>
+                </div>
+                <div class="form-row" style="align-items:end;margin-top:8px;">
                     <div class="form-group" style="margin:0">
                         <label>Заказ</label>
                         <select onchange="Tasks.updateFilter('order_id', this.value)">
@@ -501,9 +538,10 @@ const Tasks = {
                     </div>
                 </div>
                 <div class="form-row" style="align-items:center;margin-top:8px;">
-                    <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" ${this.filters.mine ? 'checked' : ''} onchange="Tasks.updateFilter('mine', this.checked)"> Только мои</label>
-                    <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" ${this.filters.awaiting_review ? 'checked' : ''} onchange="Tasks.updateFilter('awaiting_review', this.checked)"> Только на согласовании</label>
-                    <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" ${this.filters.waiting_only ? 'checked' : ''} onchange="Tasks.updateFilter('waiting_only', this.checked)"> Только «Ждём»</label>
+                    <label class="tasks-checkbox-label"><input type="checkbox" ${this.filters.mine ? 'checked' : ''} onchange="Tasks.updateFilter('mine', this.checked)"> Только мои</label>
+                    <label class="tasks-checkbox-label"><input type="checkbox" ${this.filters.awaiting_review ? 'checked' : ''} onchange="Tasks.updateFilter('awaiting_review', this.checked)"> На согласовании</label>
+                    <label class="tasks-checkbox-label"><input type="checkbox" ${this.filters.waiting_only ? 'checked' : ''} onchange="Tasks.updateFilter('waiting_only', this.checked)"> Только «Ждём»</label>
+                    <button class="btn btn-sm btn-outline" style="margin-left:auto" onclick="Tasks.resetFilters()">Сбросить</button>
                 </div>
             </div>
         `;
@@ -1058,20 +1096,35 @@ const Tasks = {
         }
         const tasks = this.filteredTasks();
         const activeTask = this.editorTask();
+        const hasActiveFilters = this.filters.status || this.filters.priority || this.filters.assignee_id || this.filters.reporter_id || this.filters.project_id || this.filters.order_id || this.filters.area_id || this.filters.due || this.filters.mine || this.filters.awaiting_review || this.filters.waiting_only;
         container.innerHTML = `
-            <div class="page-header">
-                <div>
-                    <h1>Задачи</h1>
-                    <div class="text-muted" style="font-size:13px;">Очереди исполнителей, задачи по заказам, проектам и направлениям</div>
+            <div class="tasks-page-header">
+                <div class="tasks-header-top">
+                    <div>
+                        <h1>Задачи</h1>
+                        <p class="tasks-page-subtitle">Очереди исполнителей, задачи по заказам и проектам</p>
+                    </div>
+                    <div class="tasks-header-actions">
+                        <button class="btn btn-outline" onclick="Tasks.openCreate()">+ Задача</button>
+                        <button class="btn btn-success" onclick="Tasks.openCreate({}, ${this.defaultTaskTemplateId() || "''"})">Из шаблона</button>
+                    </div>
                 </div>
-                <div class="flex gap-8">
+                <div class="tasks-header-controls">
                     ${this.scopeTabsHtml()}
                     ${this.viewTabsHtml()}
-                    <button class="btn btn-outline" onclick="Tasks.openCreate()">+ Задача</button>
-                    <button class="btn btn-success" onclick="Tasks.openCreate({}, ${this.defaultTaskTemplateId() || "''"})">Из шаблона</button>
                 </div>
             </div>
             ${this.statsCardsHtml()}
+            <div class="tasks-toolbar">
+                <div class="tasks-search-wrap">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                    <input type="text" value="${this.esc(this.filters.search)}" oninput="Tasks.updateFilter('search', this.value)" placeholder="Поиск по названию, описанию, комментариям...">
+                </div>
+                <button class="btn btn-outline btn-sm tasks-filter-toggle ${hasActiveFilters ? 'has-active' : ''}" onclick="Tasks.toggleFilters()">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22,3 2,3 10,12.46 10,19 14,21 14,12.46"/></svg>
+                    Фильтры${hasActiveFilters ? ' ●' : ''}
+                </button>
+            </div>
             ${this.filtersHtml()}
             <div class="wm-two-column">
                 <div class="wm-main-column">
