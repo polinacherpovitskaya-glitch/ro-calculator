@@ -206,6 +206,16 @@ const OrderDetail = {
         const products = this.currentItems.filter(i => i.item_type === 'product' || !i.item_type);
         const allHardware = this.currentItems.filter(i => i.item_type === 'hardware');
         const allPackaging = this.currentItems.filter(i => i.item_type === 'packaging');
+        const pendantItems = this.currentItems.filter(i => i.item_type === 'pendant');
+
+        // Build pendant HTML (used in both grouped and non-grouped paths)
+        let pendantHtml = '';
+        pendantItems.forEach(pndItem => {
+            let pnd;
+            try { pnd = typeof pndItem.item_data === 'string' ? JSON.parse(pndItem.item_data) : pndItem.item_data; } catch(e) { return; }
+            if (!pnd) return;
+            pendantHtml += this._renderPendantDetail(pnd, pndItem);
+        });
 
         // Separate order-level vs per-item hw/pkg
         const orderHardware = allHardware.filter(i => i.hardware_parent_item_index === null || i.hardware_parent_item_index === undefined);
@@ -303,6 +313,9 @@ const OrderDetail = {
                 html += noSetPkg.map(item => this._renderItemCard(item, 'packaging')).join('');
             }
 
+            // Pendant items
+            html += pendantHtml;
+
         } else {
             // Fallback: old display (no set grouping)
             if (products.length > 0) {
@@ -327,6 +340,9 @@ const OrderDetail = {
                 html += '<h3 style="margin:16px 0 12px">&#128230; Общая упаковка</h3>';
                 html += orderPackaging.map(item => this._renderItemCard(item, 'packaging')).join('');
             }
+
+            // Pendant items
+            html += pendantHtml;
         }
 
         if (!html) {
@@ -334,6 +350,60 @@ const OrderDetail = {
         }
 
         container.innerHTML = html;
+    },
+
+    _renderPendantDetail(pnd, dbItem) {
+        const qty = pnd.quantity || 0;
+        const elements = pnd.elements || [];
+        const elemPrice = pnd.element_price_per_unit || 0;
+
+        // Group elements by color
+        const groups = {};
+        elements.forEach(el => {
+            const key = el.color || 'без цвета';
+            if (!groups[key]) groups[key] = [];
+            groups[key].push(el);
+        });
+
+        let rows = '';
+        // Cord
+        if (pnd.cord?.name) {
+            rows += `<tr><td style="padding-left:24px;">&#129525; ${this._esc(pnd.cord.name)}</td><td>${qty}</td><td>${formatRub(pnd.cord.price_per_unit)}</td><td>${formatRub(qty * (pnd.cord.price_per_unit || 0))}</td></tr>`;
+        }
+        // Carabiner
+        if (pnd.carabiner?.name) {
+            rows += `<tr><td style="padding-left:24px;">&#128279; ${this._esc(pnd.carabiner.name)}</td><td>${qty}</td><td>${formatRub(pnd.carabiner.price_per_unit)}</td><td>${formatRub(qty * (pnd.carabiner.price_per_unit || 0))}</td></tr>`;
+        }
+        // Element groups by color
+        Object.entries(groups).forEach(([color, els]) => {
+            const chars = els.map(e => e.char).join(', ');
+            const groupQty = els.length * qty;
+            rows += `<tr><td style="padding-left:24px;">&#128292; ${this._esc(chars)} (${this._esc(color)})</td><td>${groupQty}</td><td>${formatRub(elemPrice)}</td><td>${formatRub(groupQty * elemPrice)}</td></tr>`;
+        });
+        // Print items
+        elements.filter(el => el.has_print).forEach(el => {
+            rows += `<tr><td style="padding-left:24px;">&#128424; Печать на ${this._esc(el.char)}</td><td>${qty}</td><td>${formatRub(el.print_price)}</td><td>${formatRub(qty * (el.print_price || 0))}</td></tr>`;
+        });
+        // Packaging
+        if (pnd.packaging?.name) {
+            rows += `<tr><td style="padding-left:24px;">&#128230; ${this._esc(pnd.packaging.name)}</td><td>${qty}</td><td>${formatRub(pnd.packaging.price_per_unit)}</td><td>${formatRub(qty * (pnd.packaging.price_per_unit || 0))}</td></tr>`;
+        }
+
+        const sellPrice = dbItem.sell_price_item || 0;
+        const totalRevenue = sellPrice * qty;
+
+        return `
+            <div class="card" style="border-left:3px solid var(--accent);margin-bottom:12px;">
+                <div class="card-header">
+                    <h3 style="margin:0;">&#128292; Подвес "${this._esc(pnd.name)}" × ${qty} шт</h3>
+                    <span style="font-size:14px;font-weight:700;">${formatRub(totalRevenue)}</span>
+                </div>
+                <table style="width:100%;font-size:13px;border-collapse:collapse;padding:8px 16px;">
+                    <tr style="color:var(--text-muted);font-size:11px;"><td>Позиция</td><td>Кол-во</td><td>Цена/шт</td><td>Итого</td></tr>
+                    ${rows}
+                </table>
+            </div>
+        `;
     },
 
     _renderItemCard(item, type) {
