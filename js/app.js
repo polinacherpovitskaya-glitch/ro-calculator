@@ -848,6 +848,7 @@ const Calculator = {
             pieces_per_hour: 0,
             weight_grams: 0,
             extra_molds: 0,
+            base_mold_in_stock: false,
             complex_design: false,
             is_blank_mold: false,
             is_nfc: false,
@@ -1072,10 +1073,16 @@ const Calculator = {
             </div>
 
             ${showCustomOnly ? `
+            <div class="toggle-row">
+                <input type="checkbox" class="toggle" id="item-stock-mold-${idx}" ${item.base_mold_in_stock ? 'checked' : ''} onchange="Calculator.onToggle(${idx}, 'base_mold_in_stock', this.checked)">
+                <label for="item-stock-mold-${idx}">Молд уже лежит на складе и не идет в стоимость заказа</label>
+            </div>
+
             <div class="form-row">
                 <div class="form-group">
                     <label>Доп. молды</label>
                     <input type="number" min="0" value="${item.extra_molds || 0}" oninput="Calculator.onNumChange(${idx}, 'extra_molds', this.value)">
+                    <span class="form-hint">${item.base_mold_in_stock ? 'В стоимость попадут только дополнительные молды сверх складского.' : 'Если нужен ещё один новый молд, укажите его здесь.'}</span>
                 </div>
             </div>
 
@@ -2554,6 +2561,7 @@ const Calculator = {
         if (isBlank) {
             // For blank molds these options are not used.
             this.items[idx].extra_molds = 0;
+            this.items[idx].base_mold_in_stock = false;
             this.items[idx].complex_design = false;
             this.items[idx].is_nfc = false;
             this.items[idx].nfc_programming = false;
@@ -2621,6 +2629,9 @@ const Calculator = {
 
     onToggle(idx, field, checked) {
         this.items[idx][field] = checked;
+        if (field === 'base_mold_in_stock') {
+            this.renderItemBlock(idx);
+        }
         this.recalculate();
         this.scheduleAutosave();
     },
@@ -2775,6 +2786,7 @@ const Calculator = {
         this.items.forEach((item, idx) => {
             if (item.is_blank_mold) {
                 item.extra_molds = 0;
+                item.base_mold_in_stock = false;
                 item.complex_design = false;
                 item.is_nfc = false;
                 item.nfc_programming = false;
@@ -3645,6 +3657,7 @@ const Calculator = {
                 pieces_per_hour: item.pieces_per_hour,
                 weight_grams: item.weight_grams,
                 extra_molds: item.extra_molds,
+                base_mold_in_stock: item.base_mold_in_stock,
                 complex_design: item.complex_design,
                 is_blank_mold: item.is_blank_mold,
                 is_nfc: item.is_nfc,
@@ -4301,6 +4314,7 @@ const Calculator = {
                         { key: 'sell_price_printing', label: 'цена нанесения' },
                         { key: 'pieces_per_hour', label: 'шт/час' },
                         { key: 'weight_grams', label: 'вес (г)' },
+                        { key: 'base_mold_in_stock', label: 'молд на складе' },
                         { key: 'extra_molds', label: 'доп. молды' },
                     );
                 } else if (itemType === 'hardware') {

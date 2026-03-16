@@ -80,9 +80,11 @@ function calculateItemCost(item, params) {
     // Бланковая форма → делим на 4500 (макс. ресурс молда)
     // Кастомная форма → делим на тираж заказа
     const extraMolds = item.extra_molds || 0;
+    const paidBaseMolds = (!item.is_blank_mold && item.base_mold_in_stock) ? 0 : 1;
+    const totalPaidMolds = Math.max(0, paidBaseMolds + extraMolds);
     const MOLD_LIFETIME = 4500;
     const moldDivisor = item.is_blank_mold ? MOLD_LIFETIME : qty;
-    const costMoldAmortization = p.moldBaseCost * (1 + extraMolds) / moldDivisor;
+    const costMoldAmortization = p.moldBaseCost * totalPaidMolds / moldDivisor;
 
     // Проектирование формы (если сложная)
     const costDesign = item.complex_design ? p.designCost / qty : 0;
@@ -432,7 +434,9 @@ function calculateFinDirectorData(items, hardwareItems, packagingItems, params) 
         totalPlastic += r.costPlastic * qty;
 
         // Молды
-        totalMolds += params.moldBaseCost * (1 + (item.extra_molds || 0));
+        const paidBaseMolds = (!item.is_blank_mold && item.base_mold_in_stock) ? 0 : 1;
+        const totalPaidMolds = Math.max(0, paidBaseMolds + (item.extra_molds || 0));
+        totalMolds += params.moldBaseCost * totalPaidMolds;
 
         // Доставка
         if (item.delivery_included) totalDelivery += params.deliveryCostMoscow;

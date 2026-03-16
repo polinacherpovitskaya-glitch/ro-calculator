@@ -462,6 +462,7 @@ const Factual = {
                 const item = {
                     quantity: ri.quantity, pieces_per_hour: ri.pieces_per_hour,
                     weight_grams: ri.weight_grams, extra_molds: ri.extra_molds || 0,
+                    base_mold_in_stock: ri.base_mold_in_stock || false,
                     complex_design: ri.complex_design || false, is_blank_mold: ri.is_blank_mold || false,
                     is_nfc: ri.is_nfc || false, nfc_programming: ri.nfc_programming || false,
                     delivery_included: ri.delivery_included || false,
