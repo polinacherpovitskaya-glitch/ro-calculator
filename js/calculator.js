@@ -267,6 +267,59 @@ function calculatePackagingCost(pkg, params) {
 }
 
 /**
+ * Calculate cost for a letter pendant
+ * @param {Object} pendant - pendant data (see spec)
+ * @param {Object} params - production params from getProductionParams
+ * @returns {Object} cost breakdown
+ */
+function calculatePendantCost(pendant, params) {
+    const qty = pendant.quantity || 0;
+    if (qty === 0) return { costPerUnit: 0, sellPerUnit: 0, totalCost: 0, totalRevenue: 0, assemblyHours: 0, packagingHours: 0 };
+
+    const elements = pendant.elements || [];
+    const elemPrice = pendant.element_price_per_unit || 0;
+    const elementsCost = elements.length * elemPrice;
+
+    const cordCost = (pendant.cord?.price_per_unit || 0) + (pendant.cord?.delivery_price || 0);
+    const carabinerCost = (pendant.carabiner?.price_per_unit || 0) + (pendant.carabiner?.delivery_price || 0);
+
+    let printCost = 0;
+    elements.forEach(el => {
+        if (el.has_print && el.print_price) printCost += el.print_price;
+    });
+
+    const pkgCost = pendant.packaging
+        ? (pendant.packaging.price_per_unit || 0) + (pendant.packaging.delivery_price || 0)
+        : 0;
+
+    const costPerUnit = round2(elementsCost + cordCost + carabinerCost + printCost + pkgCost);
+
+    // Sell price
+    let sellPerUnit;
+    if (pendant.sell_price_override && pendant.sell_price_override > 0) {
+        sellPerUnit = pendant.sell_price_override;
+    } else {
+        sellPerUnit = calculateTargetPrice(costPerUnit, params, qty);
+    }
+
+    // Assembly hours
+    const cordSpeed = pendant.cord?.assembly_speed || 0;
+    const assemblyHours = cordSpeed > 0 ? round2(qty / cordSpeed * (params.wasteFactor || 1.1)) : 0;
+    const pkgSpeed = pendant.packaging?.assembly_speed || 0;
+    const packagingHours = pkgSpeed > 0 ? round2(qty / pkgSpeed * (params.wasteFactor || 1.1)) : 0;
+
+    return {
+        costPerUnit,
+        sellPerUnit: round2(sellPerUnit),
+        totalCost: round2(costPerUnit * qty),
+        totalRevenue: round2(sellPerUnit * qty),
+        assemblyHours,
+        packagingHours,
+        margin: calculateActualMargin(sellPerUnit, costPerUnit),
+    };
+}
+
+/**
  * Маржа по тиражу (совпадает с BLANKS_TIER_MARGINS в molds.js)
  * Множитель = 1.00 (маржа уже включает всё), округление до 5₽
  */
@@ -340,7 +393,7 @@ function calculateActualMargin(sellPrice, costPerUnit) {
  * Рассчитать загрузку производства
  * Обновлено: фурнитура и упаковка теперь отдельные массивы
  */
-function calculateProductionLoad(items, hardwareItems, packagingItems, params) {
+function calculateProductionLoad(items, hardwareItems, packagingItems, params, pendantItems = []) {
     let hoursPlasticTotal = 0;
     let hoursPackagingTotal = 0;
     let hoursHardwareTotal = 0;
@@ -362,6 +415,13 @@ function calculateProductionLoad(items, hardwareItems, packagingItems, params) {
     (packagingItems || []).forEach(pkg => {
         if (pkg.result) {
             hoursPackagingTotal += pkg.result.hoursPackaging || 0;
+        }
+    });
+
+    (pendantItems || []).forEach(pnd => {
+        if (pnd.result) {
+            hoursHardwareTotal += pnd.result.assemblyHours || 0;
+            hoursPackagingTotal += pnd.result.packagingHours || 0;
         }
     });
 
@@ -393,7 +453,7 @@ function calculateProductionLoad(items, hardwareItems, packagingItems, params) {
  * Рассчитать данные для финансового директора
  * Обновлено: фурнитура и упаковка — отдельные массивы
  */
-function calculateFinDirectorData(items, hardwareItems, packagingItems, params) {
+function calculateFinDirectorData(items, hardwareItems, packagingItems, params, pendantItems = []) {
     let totalSalary = 0;
     let totalHardwarePurchase = 0;
     let totalHardwareDelivery = 0;
@@ -467,6 +527,32 @@ function calculateFinDirectorData(items, hardwareItems, packagingItems, params) 
         }
     });
 
+    // Pendants
+    (pendantItems || []).forEach(pnd => {
+        if (!pnd.result) return;
+        const qty = pnd.quantity || 0;
+        const r = pnd.result;
+        // Assembly salary
+        totalSalary += (r.assemblyHours + r.packagingHours) * params.fotPerHour;
+        // Cord + carabiner → hardware purchases
+        const elements = pnd.elements || [];
+        totalHardwarePurchase += qty * ((pnd.cord?.price_per_unit || 0) + (pnd.carabiner?.price_per_unit || 0));
+        totalHardwareDelivery += qty * ((pnd.cord?.delivery_price || 0) + (pnd.carabiner?.delivery_price || 0));
+        // Elements → hardware purchase
+        totalHardwarePurchase += qty * elements.length * (pnd.element_price_per_unit || 0);
+        // Printing
+        elements.forEach(el => {
+            if (el.has_print && el.print_price) totalPrinting += qty * el.print_price;
+        });
+        // Packaging
+        if (pnd.packaging) {
+            totalPackagingPurchase += qty * (pnd.packaging.price_per_unit || 0);
+            totalPackagingDelivery += qty * (pnd.packaging.delivery_price || 0);
+        }
+        // Revenue
+        totalRevenue += r.totalRevenue;
+    });
+
     const totalTaxes = totalRevenue * (params.taxRate + params.vatRate);
 
     return {
@@ -492,7 +578,7 @@ function calculateFinDirectorData(items, hardwareItems, packagingItems, params) 
  * Рассчитать итоговую смету заказа
  * Обновлено: фурнитура и упаковка — отдельные массивы
  */
-function calculateOrderSummary(items, hardwareItems, packagingItems, extraCosts, params = {}) {
+function calculateOrderSummary(items, hardwareItems, packagingItems, extraCosts, params = {}, pendantItems = []) {
     let totalRevenue = 0;
     let totalEarned = 0;
 
@@ -524,6 +610,15 @@ function calculateOrderSummary(items, hardwareItems, packagingItems, extraCosts,
         if (!pkg.result) return;
         totalRevenue += (pkg.sell_price || 0) * qty;
         const m = calculateActualMargin(pkg.sell_price || 0, pkg.result.costPerUnit);
+        totalEarned += m.earned * qty;
+    });
+
+    // Pendants
+    (pendantItems || []).forEach(pnd => {
+        if (!pnd.result) return;
+        const qty = pnd.quantity || 0;
+        totalRevenue += pnd.result.totalRevenue;
+        const m = calculateActualMargin(pnd.result.sellPerUnit, pnd.result.costPerUnit);
         totalEarned += m.earned * qty;
     });
 
