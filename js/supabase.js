@@ -249,7 +249,9 @@ function _estimateLocalStorageBytes() {
     }
 }
 
-function _cleanupLocalStorage() {
+function _cleanupLocalStorage(options = {}) {
+    const aggressive = !!options.aggressive;
+    const preserveKeys = new Set(options.preserveKeys || []);
     // 1. Trim auth activity & sessions (keep last 50 entries each)
     ['ro_calc_auth_activity', 'ro_calc_auth_sessions'].forEach(key => {
         try {
