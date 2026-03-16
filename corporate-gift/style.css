@@ -310,6 +310,13 @@ body {
   white-space: nowrap;
 }
 
+.rainbow-option__note {
+  font-size: 0.78rem;
+  color: #999;
+  margin-top: 10px;
+  line-height: 1.4;
+}
+
 /* === Swatches (Cord & Carabiner) === */
 .swatches {
   display: flex;

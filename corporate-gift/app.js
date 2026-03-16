@@ -183,6 +183,7 @@ function updateRainbowButton() {
 
   const isActive = state.letters.every(l => l.color === 'rainbow');
   rainbowBtn.classList.toggle('rainbow-btn--active', isActive);
+  document.getElementById('rainbowNote').classList.toggle('hidden', !isActive);
 }
 
 document.getElementById('rainbowBtn').addEventListener('click', function() {
