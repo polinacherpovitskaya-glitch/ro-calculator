@@ -2843,3 +2843,174 @@ table .text-center { text-align: center; }
 .ft-deal-row:hover { background: var(--bg); }
 .ft-unmatched { opacity: 0.6; }
 .ft-unmatched:hover { opacity: 1; }
+
+/* ==========================================
+   PENDANT CONFIGURATOR
+   ========================================== */
+
+.pendant-card {
+    border-left: 3px solid var(--accent);
+}
+
+.pendant-wizard {
+    background: var(--bg);
+    border-radius: 12px;
+    max-width: 700px;
+    width: 95vw;
+    max-height: 90vh;
+    overflow-y: auto;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.2);
+}
+
+.pendant-wizard-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+}
+
+.pendant-wizard-header h2 {
+    margin: 0;
+    font-size: 18px;
+}
+
+.pendant-wizard-steps {
+    display: flex;
+    gap: 4px;
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border);
+    overflow-x: auto;
+}
+
+.pendant-step-btn {
+    padding: 6px 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: none;
+    cursor: pointer;
+    font-size: 12px;
+    white-space: nowrap;
+    color: var(--text-muted);
+}
+
+.pendant-step-btn.active {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+}
+
+.pendant-step-btn.done {
+    border-color: var(--green);
+    color: var(--green);
+}
+
+.pendant-step-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.pendant-wizard-body {
+    padding: 20px;
+    min-height: 200px;
+}
+
+.pendant-wizard-footer {
+    display: flex;
+    justify-content: space-between;
+    padding: 12px 20px;
+    border-top: 1px solid var(--border);
+}
+
+.pendant-field-group {
+    margin-bottom: 12px;
+}
+
+.pendant-field-group label {
+    display: block;
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+}
+
+.pendant-beads-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 12px;
+    background: var(--bg-muted);
+    border-radius: 8px;
+    min-height: 50px;
+    align-items: flex-start;
+}
+
+.pendant-bead {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-width: 44px;
+    padding: 8px 6px;
+    border: 2px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg);
+    cursor: default;
+    transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.pendant-beads-selectable .pendant-bead {
+    cursor: pointer;
+}
+
+.pendant-beads-selectable .pendant-bead:hover {
+    border-color: var(--accent);
+}
+
+.pendant-bead.selected {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent-light);
+    background: var(--accent-light);
+}
+
+.pendant-bead-char {
+    font-size: 18px;
+    font-weight: 700;
+    line-height: 1.2;
+}
+
+.pendant-bead-color {
+    font-size: 10px;
+    color: var(--text-muted);
+    margin-top: 2px;
+    max-width: 60px;
+    text-align: center;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.pendant-summary-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+.pendant-summary-table td {
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--border);
+}
+
+.pendant-summary-table .pendant-summary-header td {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.pendant-summary-table .pendant-summary-total td {
+    border-top: 2px solid var(--text);
+    border-bottom: none;
+}
+
+.pendant-wh-item:hover {
+    background: var(--accent-light);
+}
