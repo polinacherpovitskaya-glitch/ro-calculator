@@ -118,7 +118,7 @@ const WAREHOUSE_SEED_DATA = [
     {"category":"cords","name":"Миланский шнур","sku":"MSN-PK","color":"розовый","qty":1200,"price_per_unit":70.0},
     {"category":"cords","name":"Миланский шнур","sku":"MSN-OR","color":"оранжевый","qty":2600,"price_per_unit":70.0},
     {"category":"cords","name":"Миланский шнур","sku":"MSN-LV","color":"фиолетовый","qty":3800,"price_per_unit":70.0},
-    {"category":"cords","name":"Шнур с силик. наконечником","sku":"SLS-800-PK-NN","size":"80 см","color":"розовый","qty":125,"price_per_unit":23.0},
+    {"category":"cords","name":"Шнур с силик. наконечником","sku":"SLS-800-PK-NN","size":"80 см","color":"розовый","qty":85,"price_per_unit":23.0},
     {"category":"cords","name":"Шнур с силик. наконечником","sku":"SLS-800-VT-NN","size":"80 см","color":"фиолетовый","qty":1050,"price_per_unit":23.0},
     {"category":"cords","name":"Шнур с силик. наконечником","sku":"SLS-800-LPK-NN","size":"80 см","color":"темно-розовый","price_per_unit":23},
     {"category":"cords","name":"Шнур с силик. наконечником","sku":"SLS-800-OR-NN","size":"80 см","color":"оранжевый","qty":222,"price_per_unit":23.0},
@@ -139,9 +139,9 @@ const WAREHOUSE_SEED_DATA = [
     {"category":"cords","name":"Шнур с силик. наконечником","sku":"SLS-800-PNBG-NN","size":"80 см","color":"розовый беж","price_per_unit":23},
     {"category":"cords","name":"Шнур с силик. наконечником","sku":"SLS-800-HNY-NN","size":"80 см","color":"медовый","qty":100,"price_per_unit":23.0},
     {"category":"cords","name":"Шнур с силик. наконечником","sku":"SLS-800-WHT-NN","size":"80 см","color":"белый","qty":437,"price_per_unit":23.0},
-    {"category":"cords","name":"Шнур с силик. наконечником","sku":"SLS-800-SLD-NN","size":"80 см","color":"салатовый","price_per_unit":23},
+    {"category":"cords","name":"Шнур с силик. наконечником","sku":"SLS-800-SLD-NN","size":"80 см","color":"салатовый","qty":400,"price_per_unit":23},
     {"category":"cords","name":"Шнур с силик. наконечником","sku":"SLS-800-LZR-NN","size":"80 см","color":"лазурный","qty":138,"price_per_unit":23.0},
-    {"category":"cords","name":"Шнур с черн. наконечниками","sku":"SLS-800-BCK-NNBL","size":"80 см","color":"черный","qty":88,"price_per_unit":23.0},
+    {"category":"cords","name":"Шнур с черн. наконечниками","sku":"SLS-800-BCK-NNBL","size":"80 см","color":"черный","qty":85,"price_per_unit":23.0},
     {"category":"cords","name":"Шнур кожаный","sku":"LSN-WH","color":"белый","qty":179,"unit":"м","price_per_unit":25.0},
     {"category":"cords","name":"Шнур кожаный","sku":"LSN-BK","color":"черный","qty":79,"price_per_unit":25.0},
     {"category":"cords","name":"Шнур кожаный","sku":"LSN-PNK","color":"розовый","qty":136,"price_per_unit":25.0},
@@ -295,6 +295,29 @@ const Warehouse = {
             if (pricedCount > 0) {
                 await saveWarehouseItems(this.allItems);
                 console.log(`[Warehouse] Patched ${pricedCount} items with seed prices`);
+            }
+        }
+
+        // Repair untouched seeded rows if the initial quantity in code was wrong or missing.
+        {
+            let qtyFixedCount = 0;
+            this.allItems.forEach(item => {
+                const seed = WAREHOUSE_SEED_DATA.find(s => s.sku === item.sku);
+                const seedQty = parseFloat(seed && seed.qty);
+                if (!Number.isFinite(seedQty)) return;
+                const currentQty = parseFloat(item.qty);
+                const createdAt = item.created_at ? String(item.created_at) : '';
+                const updatedAt = item.updated_at ? String(item.updated_at) : '';
+                const looksUntouched = !!createdAt && createdAt === updatedAt;
+                if (!looksUntouched) return;
+                if (currentQty === seedQty) return;
+                item.qty = seedQty;
+                item.updated_at = item.created_at || new Date().toISOString();
+                qtyFixedCount++;
+            });
+            if (qtyFixedCount > 0) {
+                await saveWarehouseItems(this.allItems);
+                console.log(`[Warehouse] Repaired ${qtyFixedCount} untouched seed quantities`);
             }
         }
 
