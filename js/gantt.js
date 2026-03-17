@@ -1,11 +1,13 @@
 // =============================================
 // Recycle Object — Production Calendar
-// v49: canonical week/month production calendar with queue + capacity
+// v50: canonical week/month production calendar with queue + capacity
 // =============================================
 
 const Gantt = {
     orders: [],
+    blockedOrders: [],
     schedule: null,
+    orderSequence: [],
     zoom: 'week',
     LOADABLE_STATUSES: ['sample', 'production_casting', 'production_printing', 'production_hardware', 'production_packaging', 'delivery', 'in_production'],
     STATUS_LABELS: {
@@ -30,16 +32,34 @@ const Gantt = {
                 : [];
             const priorityPos = new Map(priorityIds.map((id, index) => [id, index]));
 
-            this.orders = (allOrders || [])
+            const orderedOrders = (allOrders || [])
                 .filter(order => this.isSchedulableOrder(order))
                 .map((order, index) => ({
                     ...order,
                     production_priority: priorityPos.has(Number(order.id))
                         ? priorityPos.get(Number(order.id))
                         : 1000 + index,
-                }));
+                }))
+                .sort((a, b) => Number(a.production_priority || 0) - Number(b.production_priority || 0));
 
-            this.schedule = buildProductionSchedule(this.orders, App.settings || {});
+            const orderItems = await loadOrderItemsByOrderIds(orderedOrders.map(order => order.id)).catch(() => []);
+            const itemsByOrderId = new Map();
+            (orderItems || []).forEach(item => {
+                const key = Number(item.order_id);
+                if (!itemsByOrderId.has(key)) itemsByOrderId.set(key, []);
+                itemsByOrderId.get(key).push(item);
+            });
+
+            this.orders = orderedOrders.map(order => ({
+                ...order,
+                ...this.getOrderReadiness(order, itemsByOrderId.get(Number(order.id)) || []),
+            }));
+            this.blockedOrders = this.orders.filter(order => order.production_ready_state === 'blocked');
+            this.orderSequence = this.orders.map(order => Number(order.id));
+            this.schedule = buildProductionSchedule(
+                this.orders.filter(order => order.production_ready_state !== 'blocked'),
+                App.settings || {}
+            );
             this.render();
         } catch (e) {
             console.error('Gantt load error:', e);
@@ -59,8 +79,45 @@ const Gantt = {
         );
     },
 
+    getOrderReadiness(order, items = []) {
+        const productItems = (items || []).filter(item => String(item?.item_type || 'product') === 'product');
+        const customMoldItems = productItems.filter(item => item && item.is_blank_mold === false);
+        const blockedItems = customMoldItems.filter(item => !this.isTrueLike(item.base_mold_in_stock));
+        if (blockedItems.length > 0) {
+            return {
+                production_ready_state: 'blocked',
+                production_blocked_reason: this.describeBlockedByMold(blockedItems),
+                production_blocked_items: blockedItems.length,
+            };
+        }
+        return {
+            production_ready_state: 'ready',
+            production_blocked_reason: '',
+            production_blocked_items: 0,
+        };
+    },
+
+    isTrueLike(value) {
+        return value === true || value === 1 || value === '1' || value === 'true';
+    },
+
+    describeBlockedByMold(items = []) {
+        const names = Array.from(new Set((items || [])
+            .map(item => String(item?.product_name || '').trim())
+            .filter(Boolean)));
+        if (names.length === 1) {
+            return `Ждет молд: ${names[0]}`;
+        }
+        if (names.length > 1) {
+            return `Ждет молды для ${names.length} позиций`;
+        }
+        return 'Ждет молд';
+    },
+
     async moveOrder(orderId, direction) {
-        const orderIds = (this.schedule?.queue || []).map(item => Number(item.orderId));
+        const orderIds = Array.isArray(this.orderSequence) && this.orderSequence.length
+            ? [...this.orderSequence]
+            : (this.orders || []).map(item => Number(item.id || item.orderId));
         const currentIndex = orderIds.indexOf(Number(orderId));
         const targetIndex = currentIndex + direction;
         if (currentIndex < 0 || targetIndex < 0 || targetIndex >= orderIds.length) return;
@@ -92,7 +149,8 @@ const Gantt = {
         const queueContainer = document.getElementById('gantt-queue');
         if (!container) return;
 
-        if (!this.schedule || this.schedule.queue.length === 0) {
+        const blockedQueue = this.blockedOrders || [];
+        if (!this.schedule || (this.schedule.queue.length === 0 && blockedQueue.length === 0)) {
             if (capContainer) capContainer.innerHTML = '';
             if (queueContainer) queueContainer.innerHTML = '';
             container.innerHTML = `
@@ -109,11 +167,18 @@ const Gantt = {
 
         const { queue, dailyCapacity, days } = this.schedule;
         const activeQueue = queue.filter(item => item.schedule.length > 0);
-        this.renderQueue(activeQueue);
+        this.renderQueue(activeQueue, blockedQueue);
 
         if (!days.length || !activeQueue.length) {
             if (capContainer) capContainer.innerHTML = '';
-            container.innerHTML = '<div class="card"><p class="text-muted text-center">Нет данных для отображения</p></div>';
+            container.innerHTML = `
+                <div class="card">
+                    <p class="text-muted text-center">
+                        ${blockedQueue.length
+                            ? 'Сейчас нет готовых к запуску заказов: активный план пуст, а заблокированные заказы вынесены выше в отдельный блок.'
+                            : 'Нет данных для отображения'}
+                    </p>
+                </div>`;
             this.renderStats();
             return;
         }
@@ -188,53 +253,19 @@ const Gantt = {
         this.renderStats();
     },
 
-    renderQueue(queue) {
+    renderQueue(queue, blockedQueue = []) {
         const queueEl = document.getElementById('gantt-queue');
         if (!queueEl) return;
-        if (!queue.length) {
+        if (!queue.length && !blockedQueue.length) {
             queueEl.innerHTML = '';
             return;
         }
 
         const totalHours = round2(queue.reduce((sum, item) => sum + (item.totalHours || 0), 0));
         const riskCount = queue.filter(item => item.deadlineEnd && item.schedule[item.schedule.length - 1]?.date > item.deadlineEnd).length;
-
-        const cardsHtml = queue.map(item => {
-            const startDate = item.schedule[0]?.date || null;
-            const finishDate = item.schedule[item.schedule.length - 1]?.date || null;
-            const deadlineRisk = item.deadlineEnd && finishDate && finishDate > item.deadlineEnd;
-            const deadlineLabel = item.deadlineEnd ? this.formatDateStr(item.deadlineEnd) : 'без дедлайна';
-            const phasePills = [
-                { label: 'Литьё', hours: this.getPhaseHours(item, 'molding'), color: '#f59e0b' },
-                { label: 'Сборка', hours: this.getPhaseHours(item, 'assembly'), color: '#06b6d4' },
-                { label: 'Упаковка', hours: this.getPhaseHours(item, 'packaging'), color: '#8b5cf6' },
-            ].filter(phase => phase.hours > 0).map(phase => `
-                <span class="gantt-queue-phase-pill" style="--phase-color:${phase.color}">${phase.label}: ${this.formatHours(phase.hours)}</span>`).join('');
-
-            return `
-                <article class="gantt-queue-card ${deadlineRisk ? 'risk' : ''}" onclick="App.navigate('order-detail', true, ${item.orderId})">
-                    <div class="gantt-queue-card-top">
-                        <div>
-                            <div class="gantt-queue-title">${this.esc(item.orderName)}</div>
-                            <div class="gantt-queue-meta">${this.esc(this.getStatusLabel(item.status))} · ${this.esc(item.clientName || 'Без клиента')} · ${this.formatHours(item.totalHours)}</div>
-                        </div>
-                        <div class="gantt-queue-controls">
-                            <button class="btn btn-sm btn-outline" onclick="event.stopPropagation(); Gantt.moveUp(${item.orderId})" title="Поднять в очереди">&#8593;</button>
-                            <button class="btn btn-sm btn-outline" onclick="event.stopPropagation(); Gantt.moveDown(${item.orderId})" title="Опустить в очереди">&#8595;</button>
-                        </div>
-                    </div>
-                    <div class="gantt-queue-dates">
-                        <strong>План:</strong> ${this.formatDateRange(startDate, finishDate)}
-                        <span> · </span>
-                        <strong>Дедлайн:</strong> ${deadlineLabel}
-                    </div>
-                    <div class="gantt-queue-phases">${phasePills || '<span class="text-muted">Нет производственных часов</span>'}</div>
-                    <div class="gantt-queue-footer">
-                        <span class="gantt-queue-badge ${deadlineRisk ? 'risk' : 'ok'}">${deadlineRisk ? 'Риск дедлайна' : 'Вмещается в план'}</span>
-                        <span class="gantt-queue-open">Открыть заказ</span>
-                    </div>
-                </article>`;
-        }).join('');
+        const blockedCount = blockedQueue.length;
+        const cardsHtml = queue.map(item => this.renderQueueCard(item)).join('');
+        const blockedHtml = blockedQueue.map(item => this.renderQueueCard(item, { blocked: true })).join('');
 
         queueEl.innerHTML = `
             <div class="gantt-queue-card-wrap">
@@ -244,13 +275,64 @@ const Gantt = {
                         <p>Порядок сверху задает, что начальник производства запускает раньше. Его можно быстро подвигать кнопками на карточках.</p>
                     </div>
                     <div class="gantt-queue-summary">
-                        <strong>${queue.length}</strong> заказов · <strong>${this.formatHours(totalHours)}</strong>${riskCount ? ` · <span class="text-red">${riskCount} с риском дедлайна</span>` : ''}
+                        <strong>${queue.length}</strong> готово к плану · <strong>${this.formatHours(totalHours)}</strong>${riskCount ? ` · <span class="text-red">${riskCount} с риском дедлайна</span>` : ''}${blockedCount ? ` · <span class="text-orange">${blockedCount} ждут молд</span>` : ''}
                     </div>
                 </div>
-                <div class="gantt-queue-grid">
-                    ${cardsHtml}
-                </div>
+                ${queue.length ? `
+                    <div class="gantt-queue-section">
+                        <div class="gantt-queue-grid">
+                            ${cardsHtml}
+                        </div>
+                    </div>` : ''}
+                ${blockedCount ? `
+                    <div class="gantt-queue-section gantt-queue-section-blocked">
+                        <div class="gantt-queue-subhead">
+                            <h4>Ждут молд / пока не планируются</h4>
+                            <p>Эти заказы не попадают в active timeline, пока по ним нет молда на складе. Порядок очереди можно заранее настроить уже сейчас.</p>
+                        </div>
+                        <div class="gantt-queue-grid">
+                            ${blockedHtml}
+                        </div>
+                    </div>` : ''}
             </div>`;
+    },
+
+    renderQueueCard(item, options = {}) {
+        const blocked = !!options.blocked;
+        const startDate = blocked ? null : (item.schedule[0]?.date || null);
+        const finishDate = blocked ? null : (item.schedule[item.schedule.length - 1]?.date || null);
+        const deadlineRisk = !blocked && item.deadlineEnd && finishDate && finishDate > item.deadlineEnd;
+        const deadlineLabel = item.deadlineEnd ? this.formatDateStr(item.deadlineEnd) : 'без дедлайна';
+        const phasePills = [
+            { label: 'Литьё', hours: this.getPhaseHours(item, 'molding'), color: '#f59e0b' },
+            { label: 'Сборка', hours: this.getPhaseHours(item, 'assembly'), color: '#06b6d4' },
+            { label: 'Упаковка', hours: this.getPhaseHours(item, 'packaging'), color: '#8b5cf6' },
+        ].filter(phase => phase.hours > 0).map(phase => `
+            <span class="gantt-queue-phase-pill" style="--phase-color:${phase.color}">${phase.label}: ${this.formatHours(phase.hours)}</span>`).join('');
+
+        return `
+            <article class="gantt-queue-card ${deadlineRisk ? 'risk' : ''} ${blocked ? 'blocked' : ''}" onclick="App.navigate('order-detail', true, ${item.orderId || item.id})">
+                <div class="gantt-queue-card-top">
+                    <div>
+                        <div class="gantt-queue-title">${this.esc(item.orderName || item.order_name)}</div>
+                        <div class="gantt-queue-meta">${this.esc(this.getStatusLabel(item.status))} · ${this.esc(item.clientName || item.client_name || 'Без клиента')} · ${this.formatHours(item.totalHours || this.getOrderTotalHours(item))}</div>
+                    </div>
+                    <div class="gantt-queue-controls">
+                        <button class="btn btn-sm btn-outline" onclick="event.stopPropagation(); Gantt.moveUp(${item.orderId || item.id})" title="Поднять в очереди">&#8593;</button>
+                        <button class="btn btn-sm btn-outline" onclick="event.stopPropagation(); Gantt.moveDown(${item.orderId || item.id})" title="Опустить в очереди">&#8595;</button>
+                    </div>
+                </div>
+                <div class="gantt-queue-dates">
+                    <strong>${blocked ? 'Старт:' : 'План:'}</strong> ${blocked ? 'ждет готовности' : this.formatDateRange(startDate, finishDate)}
+                    <span> · </span>
+                    <strong>Дедлайн:</strong> ${deadlineLabel}
+                </div>
+                <div class="gantt-queue-phases">${phasePills || '<span class="text-muted">Нет производственных часов</span>'}</div>
+                <div class="gantt-queue-footer">
+                    <span class="gantt-queue-badge ${blocked ? 'blocked' : (deadlineRisk ? 'risk' : 'ok')}">${blocked ? this.esc(item.production_blocked_reason || 'Ждет молд') : (deadlineRisk ? 'Риск дедлайна' : 'Вмещается в план')}</span>
+                    <span class="gantt-queue-open">Открыть заказ</span>
+                </div>
+            </article>`;
     },
 
     renderCapacityChart(el, minDate, totalDays, cellWidth, totalWidth, dayMap, dailyCapacity) {
@@ -382,6 +464,7 @@ const Gantt = {
 
         const { queue, dailyCapacity, days } = this.schedule;
         const totalOrders = queue.filter(item => item.schedule.length > 0).length;
+        const blockedCount = (this.blockedOrders || []).length;
         const today = new Date().toISOString().slice(0, 10);
         const nextWorkDays = days.filter(day => day.date >= today).slice(0, 5);
         const weekUsed = round2(nextWorkDays.reduce((sum, day) => sum + day.totalUsed, 0));
@@ -392,8 +475,8 @@ const Gantt = {
 
         statsEl.innerHTML = `
             <div class="stat-card">
-                <div class="stat-value">${totalOrders}</div>
-                <div class="stat-label">Заказов в плане</div>
+                <div class="stat-value">${totalOrders}${blockedCount ? ` <span style="font-size:12px;color:var(--orange)">+${blockedCount}</span>` : ''}</div>
+                <div class="stat-label">${blockedCount ? 'В плане + ждут молд' : 'Заказов в плане'}</div>
             </div>
             <div class="stat-card">
                 <div class="stat-value">${this.formatHours(weekUsed)} <span style="font-size:12px;color:var(--text-muted)">/ ${this.formatHours(weekCapacity)}</span></div>

@@ -20,7 +20,7 @@ assert.match(indexHtml, /data-zoom="week"/, 'Week zoom button missing');
 assert.match(indexHtml, /data-zoom="month"/, 'Month zoom button missing');
 assert.doesNotMatch(indexHtml, /data-zoom="day"/, 'Day zoom must be removed');
 assert.match(ganttJs, /moveUp\(orderId\)/, 'Gantt queue reorder helpers missing');
-assert.match(ganttJs, /renderQueue\(queue\)/, 'Gantt queue renderer missing');
+assert.match(ganttJs, /renderQueue\(queue, blockedQueue = \[\]\)/, 'Gantt queue renderer must support blocked queue section');
 assert.match(ganttJs, /zoom: 'week'/, 'Default gantt zoom must stay week');
 assert.doesNotMatch(ganttJs, /'day' \| 'week'/, 'Legacy day zoom comment should be removed');
 assert.match(appJs, /normalizePageAlias\(page\)/, 'Page alias normalizer missing in app');
@@ -28,6 +28,7 @@ assert.match(appJs, /production-plan' \|\| page === 'calendar'/, 'Legacy product
 assert.match(settingsJs, /Производственный календарь/, 'Settings label must show production calendar');
 assert.match(workflow, /node tests\/production-calendar-smoke\.js/, 'CI must run production calendar smoke');
 assert.match(ganttJs, /production_holidays/, 'Gantt UI must read configured production holidays');
+assert.match(ganttJs, /loadOrderItemsByOrderIds\(/, 'Gantt must inspect order item snapshots to derive readiness');
 
 function createFixedDate(isoTimestamp) {
     const RealDate = Date;
@@ -96,5 +97,40 @@ assert.deepEqual(
     ['2026-03-16', '2026-03-18', '2026-03-19'],
     'Order allocations must not land on holiday dates'
 );
+
+const ganttContext = vm.createContext({
+    console,
+    Math,
+    Intl,
+    JSON,
+    Array,
+    Object,
+    String,
+    Number,
+    Boolean,
+    RegExp,
+    Set,
+    Date,
+    round2: (value) => Math.round((Number(value) || 0) * 100) / 100,
+    App: { settings: {} },
+});
+vm.runInContext(ganttJs, ganttContext, { filename: 'js/gantt.js' });
+
+const blockedState = JSON.parse(JSON.stringify(vm.runInContext(`
+    Gantt.getOrderReadiness(
+        { id: 1, order_name: 'Blocked mold order' },
+        [{ item_type: 'product', product_name: 'Space NFC', is_blank_mold: false, base_mold_in_stock: false }]
+    )
+`, ganttContext)));
+assert.equal(blockedState.production_ready_state, 'blocked', 'Custom order without mold in stock must be blocked');
+assert.match(blockedState.production_blocked_reason, /Ждет молд/, 'Blocked state should explain mold dependency');
+
+const readyState = JSON.parse(JSON.stringify(vm.runInContext(`
+    Gantt.getOrderReadiness(
+        { id: 2, order_name: 'Ready custom order' },
+        [{ item_type: 'product', product_name: 'Space NFC', is_blank_mold: false, base_mold_in_stock: true }]
+    )
+`, ganttContext)));
+assert.equal(readyState.production_ready_state, 'ready', 'Custom order with mold in stock must stay ready');
 
 console.log('production calendar smoke checks passed');
