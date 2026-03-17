@@ -14,8 +14,6 @@ const Settings = {
     authActivityData: [],
     authSessionsData: [],
     editingAuthAccountId: null,
-    visiblePasswords: {},
-
     // Tabs that require admin access
     ADMIN_TABS: new Set(['indirect', 'costs', 'logins', 'sessions', 'backup']),
 
@@ -618,7 +616,6 @@ const Settings = {
         this.authAccountsData = await loadAuthAccounts();
         await this.ensureAutoLoginsForEmployees();
         this.authActivityData = await loadAuthActivity();
-        this.visiblePasswords = {};
         this.renderAuthAccountsTable();
         this.renderAuthActivityTable();
     },
@@ -670,73 +667,16 @@ const Settings = {
     async ensureLoginForNewEmployee(employee) {
         if (!employee || !employee.id) return;
         if (this.shouldSkipAutoLoginForEmployee(employee.name)) return;
-
-        if (!this.authAccountsData || this.authAccountsData.length === 0) {
-            this.authAccountsData = await loadAuthAccounts();
-        }
-
-        const exists = (this.authAccountsData || []).some(a => Number(a.employee_id) === Number(employee.id));
-        if (exists) return;
-
-        const username = this.getUniqueAutoUsername(this.getAutoLoginBase(employee.name));
-        const passwordPlain = this.generateStrongPassword(12);
-        const account = {
-            id: Date.now(),
-            employee_id: Number(employee.id),
-            employee_name: employee.name || '',
-            role: employee.role || 'employee',
-            username,
-            is_active: true,
-            password_hash: App.hashUserPassword(username, passwordPlain),
-            password_plain: passwordPlain,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-            last_login_at: null,
-        };
-        this.authAccountsData.push(account);
-        await saveAuthAccounts(this.authAccountsData);
         await appendAuthActivity({
-            type: 'account_auto_create',
+            type: 'account_auto_create_skipped',
             actor: App.getCurrentEmployeeName(),
-            target_user: account.employee_name || account.username,
+            target_user: employee.name || '',
         });
+        App.toast('Автосоздание логинов отключено: создайте логин вручную во вкладке "Логины"');
     },
 
     async ensureAutoLoginsForEmployees() {
-        const employees = (this.employeesData || []).filter(e => e && e.is_active !== false);
-        if (!employees.length) return;
-
-        let changed = false;
-        for (const employee of employees) {
-            if (this.shouldSkipAutoLoginForEmployee(employee.name)) continue;
-            const exists = (this.authAccountsData || []).some(a => Number(a.employee_id) === Number(employee.id));
-            if (exists) continue;
-
-            const username = this.getUniqueAutoUsername(this.getAutoLoginBase(employee.name));
-            const passwordPlain = this.generateStrongPassword(12);
-            this.authAccountsData.push({
-                id: Date.now() + Math.floor(Math.random() * 100000),
-                employee_id: Number(employee.id),
-                employee_name: employee.name || '',
-                role: employee.role || 'employee',
-                username,
-                is_active: true,
-                password_hash: App.hashUserPassword(username, passwordPlain),
-                password_plain: passwordPlain,
-                created_at: new Date().toISOString(),
-                updated_at: new Date().toISOString(),
-                last_login_at: null,
-            });
-            changed = true;
-        }
-        if (!changed) return;
-        await saveAuthAccounts(this.authAccountsData);
-        await appendAuthActivity({
-            type: 'account_auto_create_batch',
-            actor: App.getCurrentEmployeeName(),
-            target_user: 'new employees',
-        });
-        await App.refreshAuthUsers();
+        return;
     },
 
     async loadSessionsTab() {
@@ -873,7 +813,7 @@ const Settings = {
 
         if (password) {
             account.password_hash = App.hashUserPassword(username, password);
-            account.password_plain = password;
+            delete account.password_plain;
         } else if (this.editingAuthAccountId && prevUsername && prevUsername !== username) {
             App.toast('При смене логина укажите новый пароль');
             return;
@@ -939,18 +879,13 @@ const Settings = {
                 const last = a.last_login_at
                     ? new Date(a.last_login_at).toLocaleString('ru-RU')
                     : '—';
-                const isVisible = !!this.visiblePasswords[a.id];
-                const passwordMasked = '••••••••••••';
-                const passwordShown = a.password_plain || 'не сохранён';
-                const passwordCell = isVisible ? this.escHtml(passwordShown) : passwordMasked;
                 return `<tr>
                     <td style="font-weight:600;">${this.escHtml(a.employee_name || '—')}</td>
                     <td>${this.escHtml(a.username || '')}</td>
-                    <td><code>${passwordCell}</code></td>
+                    <td><code>не хранится</code></td>
                     <td style="text-align:center;">${status}</td>
                     <td>${this.escHtml(last)}</td>
                     <td style="white-space:nowrap;">
-                        <button class="btn btn-sm btn-outline" style="padding:2px 6px;font-size:10px;" onclick="Settings.toggleAuthPasswordVisibility('${this.escHtml(String(a.id))}')">${isVisible ? 'Скрыть' : 'Показать'}</button>
                         <button class="btn btn-sm btn-outline" style="padding:2px 6px;font-size:10px;" onclick="Settings.resetAuthPassword('${this.escHtml(String(a.id))}')">Сбросить</button>
                         <button class="btn btn-sm btn-outline" style="padding:2px 6px;font-size:10px;" onclick="Settings.editAuthAccount('${this.escHtml(String(a.id))}')">&#9998;</button>
                     </td>
@@ -959,18 +894,11 @@ const Settings = {
         tbody.innerHTML = rows.join('');
     },
 
-    toggleAuthPasswordVisibility(id) {
-        if (!id) return;
-        const key = String(id);
-        this.visiblePasswords[key] = !this.visiblePasswords[key];
-        this.renderAuthAccountsTable();
-    },
-
     async resetAuthPassword(id) {
         const account = (this.authAccountsData || []).find(a => String(a.id) === String(id));
         if (!account) return;
         const generated = this.generateStrongPassword(12);
-        const nextPassword = prompt(`Новый пароль для "${account.employee_name || account.username}"`, generated);
+        const nextPassword = prompt(`Новый пароль для "${account.employee_name || account.username}". Сохраните его сейчас: система больше не покажет его после подтверждения.`, generated);
         if (nextPassword === null) return;
         const pass = String(nextPassword || '').trim();
         if (!pass) {
@@ -978,7 +906,7 @@ const Settings = {
             return;
         }
         account.password_hash = App.hashUserPassword(account.username, pass);
-        account.password_plain = pass;
+        delete account.password_plain;
         account.updated_at = new Date().toISOString();
         await saveAuthAccounts(this.authAccountsData);
         await appendAuthActivity({
@@ -986,9 +914,8 @@ const Settings = {
             actor: App.getCurrentEmployeeName(),
             target_user: account.employee_name || account.username,
         });
-        this.visiblePasswords[account.id] = true;
         this.renderAuthAccountsTable();
-        App.toast('Пароль обновлён');
+        App.toast('Пароль обновлён. Сохраните его у сотрудника: система больше не хранит его в открытом виде.');
     },
 
     renderAuthActivityTable() {

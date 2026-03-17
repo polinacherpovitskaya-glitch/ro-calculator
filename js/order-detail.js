@@ -426,6 +426,7 @@ const OrderDetail = {
         const revenue = sellPrice * qty;
         const cost = costPerUnit * qty;
         const margin = revenue > 0 ? ((revenue - cost) / revenue * 100) : 0;
+        const productMeta = type === 'product' ? this._renderProductMeta(item) : '';
 
         return `
         <div class="od-item-card">
@@ -439,7 +440,89 @@ const OrderDetail = {
                 <div><span class="text-muted">Выручка:</span> ${formatRub(revenue)}</div>
                 <div><span class="text-muted">Маржа:</span> <span class="${margin >= 30 ? 'text-green' : 'text-red'}">${margin.toFixed(1)}%</span></div>
             </div>
+            ${productMeta}
         </div>`;
+    },
+
+    _renderProductMeta(item) {
+        const colors = this._normalizeProductColors(item);
+        const attachment = this._normalizeColorAttachment(item);
+        const sections = [];
+
+        if (colors.length > 0) {
+            sections.push(`
+                <div style="display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap;">
+                    <span class="text-muted" style="min-width:62px;">Цвета:</span>
+                    <div style="display:flex;flex-wrap:wrap;gap:6px;">
+                        ${colors.map(color => `<span class="badge badge-blue">${this._esc(color.name || color.number || `#${color.id || '—'}`)}</span>`).join('')}
+                    </div>
+                </div>
+            `);
+        }
+
+        if (attachment) {
+            const label = this._esc(attachment.name || 'Файл цветового решения');
+            const linkHtml = attachment.data_url
+                ? `<a href="${this._escAttr(attachment.data_url)}" download="${this._escAttr(attachment.name || 'color-solution')}" class="od-url-link">${label}</a>`
+                : label;
+            sections.push(`
+                <div style="display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap;">
+                    <span class="text-muted" style="min-width:62px;">Файл:</span>
+                    <span>${linkHtml}</span>
+                </div>
+            `);
+        }
+
+        if (sections.length === 0) return '';
+
+        return `
+            <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:8px;font-size:12px;">
+                ${sections.join('')}
+            </div>
+        `;
+    },
+
+    _normalizeProductColors(item) {
+        let colors = item?.colors;
+        if (typeof colors === 'string') {
+            try {
+                colors = JSON.parse(colors);
+            } catch (e) {
+                colors = [];
+            }
+        }
+        if (!Array.isArray(colors)) colors = [];
+        colors = colors.filter(color => color && typeof color === 'object');
+        if (colors.length > 0) return colors;
+
+        if (item?.color_name) {
+            return [{
+                id: item.color_id || null,
+                name: item.color_name,
+            }];
+        }
+
+        if (item?.color_id) {
+            return [{
+                id: item.color_id,
+                name: `#${item.color_id}`,
+            }];
+        }
+
+        return [];
+    },
+
+    _normalizeColorAttachment(item) {
+        let attachment = item?.color_solution_attachment || null;
+        if (typeof attachment === 'string') {
+            try {
+                attachment = JSON.parse(attachment);
+            } catch (e) {
+                attachment = null;
+            }
+        }
+        if (!attachment || typeof attachment !== 'object') return null;
+        return attachment;
     },
 
     // ==========================================
@@ -535,7 +618,7 @@ const OrderDetail = {
             const purchases = await loadChinaPurchases({ order_id: orderId });
 
             const addBtn = `<div style="display:flex;justify-content:flex-end;margin-bottom:12px">
-                <button class="btn btn-sm btn-success" onclick="App.navigate('china', true); setTimeout(() => { if(typeof ChinaPurchases!=='undefined') { ChinaPurchases.openForm(); document.getElementById('china-f-order').value='${orderId}'; }}, 200);">+ Создать закупку для этого заказа</button>
+                <button class="btn btn-sm btn-success" onclick="App.navigate('china', true); setTimeout(() => { if(typeof ChinaPurchases!=='undefined') { ChinaPurchases.openNewForm(${orderId}); }}, 200);">+ Создать закупку для этого заказа</button>
             </div>`;
 
             if (!purchases || purchases.length === 0) {
@@ -566,7 +649,7 @@ const OrderDetail = {
                                     const st = (typeof ChinaPurchases !== 'undefined' && ChinaPurchases.STATUSES)
                                         ? ChinaPurchases.STATUSES.find(s => s.key === p.status)
                                         : null;
-                                    return `<tr style="cursor:pointer" onclick="App.navigate('china')">
+                                    return `<tr style="cursor:pointer" onclick="App.navigate('china', true); setTimeout(() => { if(typeof ChinaPurchases!=='undefined') { ChinaPurchases.openDetail(${p.id}); } }, 250);">
                                         <td><b>${this._esc(p.purchase_name || '')}</b></td>
                                         <td>${this._esc(p.supplier_name || '')}</td>
                                         <td>${st ? '<span class="badge badge-' + st.color + '">' + st.label + '</span>' : (p.status || '')}</td>
@@ -604,6 +687,18 @@ const OrderDetail = {
         const managerName = prompt('Имя менеджера (для истории):') || 'Неизвестный';
 
         await updateOrderStatus(this.currentOrder.id, newStatus);
+        if (typeof Orders !== 'undefined' && Orders._syncWarehouseByStatus) {
+            await Orders._syncWarehouseByStatus(
+                this.currentOrder.id,
+                o.status,
+                newStatus,
+                this.currentOrder.order_name || o.order_name,
+                managerName
+            );
+            if (Orders._syncReadyGoodsByStatus) {
+                await Orders._syncReadyGoodsByStatus(this.currentOrder.id, this.currentOrder, o.status, newStatus);
+            }
+        }
         await Orders.addChangeRecord(this.currentOrder.id, {
             field: 'status',
             old_value: App.statusLabel(o.status),

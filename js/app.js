@@ -237,18 +237,14 @@ const App = {
             }
             return;
         }
-        // If accounts failed to load but we have a cached user, keep the session alive
-        if (this.authAccounts.length === 0 && userId) {
-            const cachedName = localStorage.getItem('ro_calc_last_user_name') || 'Сотрудник';
-            this.currentUser = {
-                id: userId,
-                employee_id: null,
-                username: '',
-                name: cachedName,
-                role: 'employee',
-            };
-            localStorage.setItem('ro_calc_auth_ts', Date.now().toString());
-            return;
+        // Auth data must be available to restore a session safely.
+        if (userId) {
+            console.warn('Auth restore failed: account not found or auth accounts unavailable');
+            const err = document.getElementById('auth-error');
+            if (err) {
+                err.textContent = 'Не удалось подтвердить вход. Войдите заново.';
+                err.style.display = 'block';
+            }
         }
         // No valid account — force logout
         this.logout();
@@ -3822,6 +3818,10 @@ const Calculator = {
                 custom_country: hw.custom_country || 'china',
                 hardware_warehouse_item_id: hw.warehouse_item_id || null,
                 hardware_warehouse_sku: hw.warehouse_sku || '',
+                china_item_id: hw.china_item_id || null,
+                china_delivery_method: hw.china_delivery_method || 'avia',
+                price_cny: hw.price_cny || 0,
+                weight_grams: hw.weight_grams || 0,
                 hardware_parent_item_index: hw.parent_item_index ?? null,
                 hardware_from_template: hw._from_template || false,
             });
@@ -3846,6 +3846,10 @@ const Calculator = {
                 custom_country: pkg.custom_country || 'china',
                 packaging_warehouse_item_id: pkg.warehouse_item_id || null,
                 packaging_warehouse_sku: pkg.warehouse_sku || '',
+                china_item_id: pkg.china_item_id || null,
+                china_delivery_method: pkg.china_delivery_method || 'avia',
+                price_cny: pkg.price_cny || 0,
+                weight_grams: pkg.weight_grams || 0,
                 packaging_parent_item_index: pkg.parent_item_index ?? null,
             });
         });
@@ -3865,13 +3869,13 @@ const Calculator = {
         // Pendant items
         this.pendants.forEach((pnd, i) => {
             items.push({
+                ...pnd,
                 item_number: 400 + i,
                 item_type: 'pendant',
                 product_name: 'Подвес "' + (pnd.name || '') + '"',
                 quantity: pnd.quantity || 0,
                 cost_total: pnd.result ? pnd.result.costPerUnit : 0,
                 sell_price_item: pnd.result ? pnd.result.sellPerUnit : 0,
-                item_data: JSON.stringify(pnd),
             });
         });
 
@@ -4292,6 +4296,10 @@ const Calculator = {
             hw.custom_country = dbHw.custom_country || 'china';
             hw.warehouse_item_id = dbHw.hardware_warehouse_item_id || null;
             hw.warehouse_sku = dbHw.hardware_warehouse_sku || '';
+            hw.china_item_id = dbHw.china_item_id || null;
+            hw.china_delivery_method = dbHw.china_delivery_method || 'avia';
+            hw.price_cny = dbHw.price_cny || 0;
+            hw.weight_grams = dbHw.weight_grams || 0;
             hw.parent_item_index = dbHw.hardware_parent_item_index ?? null;
             hw._from_template = dbHw.hardware_from_template || false;
             // Save originals for diff on next save
@@ -4316,6 +4324,10 @@ const Calculator = {
             pkg.custom_country = dbPkg.custom_country || 'china';
             pkg.warehouse_item_id = dbPkg.packaging_warehouse_item_id || null;
             pkg.warehouse_sku = dbPkg.packaging_warehouse_sku || '';
+            pkg.china_item_id = dbPkg.china_item_id || null;
+            pkg.china_delivery_method = dbPkg.china_delivery_method || 'avia';
+            pkg.price_cny = dbPkg.price_cny || 0;
+            pkg.weight_grams = dbPkg.weight_grams || 0;
             pkg.parent_item_index = dbPkg.packaging_parent_item_index ?? null;
             pkg.name = dbPkg.product_name || '';
             pkg.qty = dbPkg.quantity || 0;
@@ -4346,9 +4358,20 @@ const Calculator = {
         // Restore pendant items
         const pendantDbItems = dbItems.filter(i => i.item_type === 'pendant');
         pendantDbItems.forEach(dbPnd => {
-            let pnd;
+            let pnd = { ...dbPnd };
             if (dbPnd.item_data) {
-                try { pnd = typeof dbPnd.item_data === 'string' ? JSON.parse(dbPnd.item_data) : dbPnd.item_data; } catch (e) { pnd = null; }
+                try {
+                    const outer = typeof dbPnd.item_data === 'string' ? JSON.parse(dbPnd.item_data) : dbPnd.item_data;
+                    if (outer && typeof outer === 'object') {
+                        pnd = { ...outer, ...pnd };
+                        if (outer.item_data) {
+                            const nested = typeof outer.item_data === 'string' ? JSON.parse(outer.item_data) : outer.item_data;
+                            if (nested && typeof nested === 'object') {
+                                pnd = { ...pnd, ...nested };
+                            }
+                        }
+                    }
+                } catch (e) { /* ignore malformed legacy pendant payloads */ }
             }
             if (pnd && pnd.item_type === 'pendant') {
                 this.pendants.push(pnd);

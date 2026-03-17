@@ -203,6 +203,24 @@ function getLocal(key) {
     return _volatileLocalCache.has(key) ? _volatileLocalCache.get(key) : null;
 }
 
+function _moveLocalStorageKeyToVolatileCache(key) {
+    try {
+        const raw = localStorage.getItem(key);
+        if (raw == null) return 0;
+        let parsed = raw;
+        try {
+            parsed = JSON.parse(raw);
+        } catch (e) {
+            // Keep raw payload if it is not valid JSON.
+        }
+        _volatileLocalCache.set(key, parsed);
+        localStorage.removeItem(key);
+        return raw.length * 2;
+    } catch (e) {
+        return 0;
+    }
+}
+
 function setLocal(key, data) {
     let payload = '';
     try {
@@ -1134,27 +1152,63 @@ async function permanentDeleteOrder(orderId) {
 // =============================================
 
 async function saveFintabloImport(importData) {
+    const record = {
+        ...importData,
+        id: importData.id || Date.now(),
+        import_date: importData.import_date || new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+    };
     if (isSupabaseReady()) {
         try {
             const { data, error } = await supabaseClient
                 .from('fintablo_imports')
-                .insert(importData)
+                .insert(record)
                 .select('id')
                 .single();
             if (!error && data) return data.id;
-            console.warn('saveFintabloImport Supabase error, falling back to localStorage:', error);
+            const fallbackPayload = {
+                id: record.id,
+                order_id: record.order_id,
+                import_data: record,
+                period_from: record.period_from || record.period_start || null,
+                period_to: record.period_to || record.period_end || null,
+                import_date: record.import_date,
+                created_at: record.created_at || record.import_date,
+                updated_at: record.updated_at,
+            };
+            const fallback = await supabaseClient
+                .from('fintablo_imports')
+                .insert(fallbackPayload)
+                .select('id')
+                .single();
+            if (!fallback.error && fallback.data) return fallback.data.id;
+            console.warn('saveFintabloImport Supabase error, falling back to localStorage:', fallback.error || error);
         } catch (e) {
             console.warn('saveFintabloImport Supabase exception, falling back to localStorage:', e);
         }
     }
     const imports = getLocal(LOCAL_KEYS.imports) || [];
-    const id = Date.now();
-    imports.push({ ...importData, id, import_date: new Date().toISOString() });
+    imports.push(record);
     setLocal(LOCAL_KEYS.imports, imports);
-    return id;
+    return record.id;
+}
+
+function _parseJsonObject(value) {
+    if (!value) return null;
+    if (typeof value === 'string') {
+        try { return JSON.parse(value); } catch (_) { return null; }
+    }
+    return (typeof value === 'object' && !Array.isArray(value)) ? value : null;
+}
+
+function _mergePayloadRow(row, payloadKey) {
+    if (!row || typeof row !== 'object') return row;
+    const payload = _parseJsonObject(row[payloadKey]);
+    return payload ? { ...payload, ...row } : row;
 }
 
 async function loadFintabloImports(orderId) {
+    const localImports = (getLocal(LOCAL_KEYS.imports) || []).filter(i => i.order_id === orderId);
     if (isSupabaseReady()) {
         try {
             const { data, error } = await supabaseClient
@@ -1162,14 +1216,13 @@ async function loadFintabloImports(orderId) {
                 .select('*')
                 .eq('order_id', orderId)
                 .order('import_date', { ascending: false });
-            if (!error && data) return data;
-            console.warn('loadFintabloImports Supabase error, falling back to localStorage:', error);
+            if (!error && data && data.length > 0) return data.map(row => _mergePayloadRow(row, 'import_data'));
+            if (error) console.warn('loadFintabloImports Supabase error, falling back to localStorage:', error);
         } catch (e) {
             console.warn('loadFintabloImports Supabase exception, falling back to localStorage:', e);
         }
     }
-    const imports = getLocal(LOCAL_KEYS.imports) || [];
-    return imports.filter(i => i.order_id === orderId);
+    return localImports;
 }
 
 // =============================================
@@ -1183,9 +1236,9 @@ async function loadFactual(orderId) {
             .from('order_factuals')
             .select('*')
             .eq('order_id', orderId)
-            .single();
+            .maybeSingle();
         if (error && error.code !== 'PGRST116') console.error('loadFactual error:', error);
-        return data || null;
+        if (data) return _mergePayloadRow(data, 'factual_data');
     }
     const all = getLocal(LOCAL_KEYS.orderFactuals) || [];
     return all.find(f => f.order_id === orderId) || null;
@@ -1193,19 +1246,53 @@ async function loadFactual(orderId) {
 
 async function saveFactual(orderId, factData) {
     if (typeof orderId === 'string' && /^\d+$/.test(orderId)) orderId = Number(orderId);
-    const record = { ...factData, order_id: orderId, updated_at: new Date().toISOString() };
+    const record = { ...factData, id: factData.id || Date.now(), order_id: orderId, updated_at: new Date().toISOString() };
     if (isSupabaseReady()) {
-        const existing = await loadFactual(orderId);
-        if (existing) {
-            const { error } = await supabaseClient
-                .from('order_factuals')
-                .update(record)
-                .eq('order_id', orderId);
+        const { data: existingRaw, error: existingError } = await supabaseClient
+            .from('order_factuals')
+            .select('*')
+            .eq('order_id', orderId)
+            .maybeSingle();
+        if (existingError && existingError.code !== 'PGRST116') {
+            console.error('saveFactual lookup error:', existingError);
+        }
+        const useJsonPayload = !!(existingRaw && Object.prototype.hasOwnProperty.call(existingRaw, 'factual_data'));
+
+        if (existingRaw) {
+            let error = null;
+            if (useJsonPayload) {
+                ({ error } = await supabaseClient
+                    .from('order_factuals')
+                    .update({ factual_data: record, updated_at: record.updated_at })
+                    .eq('order_id', orderId));
+            } else {
+                ({ error } = await supabaseClient
+                    .from('order_factuals')
+                    .update(record)
+                    .eq('order_id', orderId));
+                if (error) {
+                    ({ error } = await supabaseClient
+                        .from('order_factuals')
+                        .update({ factual_data: record, updated_at: record.updated_at })
+                        .eq('order_id', orderId));
+                }
+            }
             if (error) console.error('saveFactual update error:', error);
         } else {
-            const { error } = await supabaseClient
+            let { error } = await supabaseClient
                 .from('order_factuals')
                 .insert(record);
+            if (error) {
+                ({ error } = await supabaseClient
+                    .from('order_factuals')
+                    .insert({
+                        id: record.id,
+                        order_id: orderId,
+                        factual_data: record,
+                        created_at: factData.created_at || record.updated_at,
+                        updated_at: record.updated_at,
+                    }));
+            }
             if (error) console.error('saveFactual insert error:', error);
         }
     }
@@ -1776,8 +1863,15 @@ async function deleteEmployee(employeeId) {
 // AUTH ACCOUNTS (employee login/password mapping)
 // =============================================
 
+function sanitizeAuthAccount(account) {
+    if (!account || typeof account !== 'object') return account;
+    const sanitized = { ...account };
+    delete sanitized.password_plain;
+    return sanitized;
+}
+
 async function loadAuthAccounts() {
-    const fallback = getLocal(LOCAL_KEYS.authAccounts) || [];
+    const fallback = (getLocal(LOCAL_KEYS.authAccounts) || []).map(sanitizeAuthAccount);
     if (isSupabaseReady()) {
         try {
             const { data, error } = await supabaseClient
@@ -1786,7 +1880,7 @@ async function loadAuthAccounts() {
                 .eq('key', 'auth_accounts_json')
                 .maybeSingle();
             if (!error && data && data.value) {
-                const parsed = JSON.parse(data.value) || [];
+                const parsed = (JSON.parse(data.value) || []).map(sanitizeAuthAccount);
                 setLocal(LOCAL_KEYS.authAccounts, parsed);
                 return parsed;
             }
@@ -1798,7 +1892,7 @@ async function loadAuthAccounts() {
 }
 
 async function saveAuthAccounts(accounts) {
-    const payload = Array.isArray(accounts) ? accounts : [];
+    const payload = (Array.isArray(accounts) ? accounts : []).map(sanitizeAuthAccount);
     setLocal(LOCAL_KEYS.authAccounts, payload);
     if (isSupabaseReady()) {
         const { error } = await supabaseClient
@@ -3105,10 +3199,89 @@ async function deleteMarketplaceSet(setId) {
 // READY GOODS (Готовая продукция)
 // =============================================
 
+const READY_GOODS_REMOTE_CACHE_KEY = 'ro_calc_ready_goods_remote_cache';
+const READY_GOODS_REMOTE_CACHE_TTL_MS = 60 * 60 * 1000;
+
+function _readReadyGoodsRemoteCache() {
+    try {
+        const raw = sessionStorage.getItem(READY_GOODS_REMOTE_CACHE_KEY);
+        const parsed = raw ? JSON.parse(raw) : {};
+        return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch (e) {
+        return {};
+    }
+}
+
+function _writeReadyGoodsRemoteCache(cache) {
+    try {
+        sessionStorage.setItem(READY_GOODS_REMOTE_CACHE_KEY, JSON.stringify(cache || {}));
+    } catch (e) {
+        // Ignore cache write errors; ready goods can still work via in-memory fallback.
+    }
+}
+
+function _getCachedReadyGoodsRemoteAvailability(table) {
+    const cache = _readReadyGoodsRemoteCache();
+    const entry = cache?.[table];
+    if (!entry || entry.state !== false || !entry.ts) return null;
+    if ((Date.now() - entry.ts) > READY_GOODS_REMOTE_CACHE_TTL_MS) {
+        delete cache[table];
+        _writeReadyGoodsRemoteCache(cache);
+        return null;
+    }
+    return false;
+}
+
+function _setCachedReadyGoodsRemoteAvailability(table, isAvailable) {
+    const cache = _readReadyGoodsRemoteCache();
+    if (isAvailable === false) cache[table] = { state: false, ts: Date.now() };
+    else delete cache[table];
+    _writeReadyGoodsRemoteCache(cache);
+}
+
+const _readyGoodsRemoteAvailability = {
+    ready_goods: _getCachedReadyGoodsRemoteAvailability('ready_goods'),
+    ready_goods_history: _getCachedReadyGoodsRemoteAvailability('ready_goods_history'),
+    sales_records: _getCachedReadyGoodsRemoteAvailability('sales_records'),
+};
+
+function _isSupabaseMissingTableError(error) {
+    const code = String(error?.code || '');
+    const message = String(error?.message || '');
+    return code === 'PGRST205'
+        || message.includes("Could not find the table 'public.");
+}
+
+function _markReadyGoodsRemoteUnavailable(table, error) {
+    if (_readyGoodsRemoteAvailability[table] === false) return;
+    if (_isSupabaseMissingTableError(error)) {
+        _readyGoodsRemoteAvailability[table] = false;
+        _setCachedReadyGoodsRemoteAvailability(table, false);
+        console.warn(`Supabase table ${table} is not available yet. Using local fallback.`);
+    }
+}
+
+function _markReadyGoodsRemoteAvailable(table) {
+    if (Object.prototype.hasOwnProperty.call(_readyGoodsRemoteAvailability, table)) {
+        _readyGoodsRemoteAvailability[table] = true;
+        _setCachedReadyGoodsRemoteAvailability(table, true);
+    }
+}
+
+function _canUseReadyGoodsRemote(table) {
+    return isSupabaseReady() && _readyGoodsRemoteAvailability[table] !== false;
+}
+
 async function loadReadyGoods() {
-    if (isSupabaseReady()) {
+    if (_canUseReadyGoodsRemote('ready_goods')) {
         try {
-            const { data } = await supabaseClient.from('ready_goods').select('*').eq('id', 1).maybeSingle();
+            const { data, error } = await supabaseClient.from('ready_goods').select('*').eq('id', 1).maybeSingle();
+            if (error) {
+                _markReadyGoodsRemoteUnavailable('ready_goods', error);
+                if (!_isSupabaseMissingTableError(error)) console.error('loadReadyGoods error:', error);
+                return getLocal(LOCAL_KEYS.readyGoods) || [];
+            }
+            _markReadyGoodsRemoteAvailable('ready_goods');
             if (data && data.goods_data) {
                 const parsed = typeof data.goods_data === 'string' ? JSON.parse(data.goods_data) : data.goods_data;
                 setLocal(LOCAL_KEYS.readyGoods, parsed);
@@ -3118,28 +3291,52 @@ async function loadReadyGoods() {
             const local = getLocal(LOCAL_KEYS.readyGoods) || [];
             if (local.length > 0) {
                 console.log('Migrating', local.length, 'ready goods to Supabase...');
-                await supabaseClient.from('ready_goods').upsert({ id: 1, goods_data: JSON.stringify(local), updated_at: new Date().toISOString() }, { onConflict: 'id' });
+                const { error: upsertError } = await supabaseClient
+                    .from('ready_goods')
+                    .upsert({ id: 1, goods_data: JSON.stringify(local), updated_at: new Date().toISOString() }, { onConflict: 'id' });
+                if (upsertError) {
+                    _markReadyGoodsRemoteUnavailable('ready_goods', upsertError);
+                    if (!_isSupabaseMissingTableError(upsertError)) console.error('loadReadyGoods migration error:', upsertError);
+                }
             }
             return local;
-        } catch(e) { console.error('loadReadyGoods exception:', e); return getLocal(LOCAL_KEYS.readyGoods) || []; }
+        } catch(e) {
+            _markReadyGoodsRemoteUnavailable('ready_goods', e);
+            if (!_isSupabaseMissingTableError(e)) console.error('loadReadyGoods exception:', e);
+            return getLocal(LOCAL_KEYS.readyGoods) || [];
+        }
     }
     return getLocal(LOCAL_KEYS.readyGoods) || [];
 }
 
 async function saveReadyGoods(items) {
-    if (isSupabaseReady()) {
+    if (_canUseReadyGoodsRemote('ready_goods')) {
         try {
             const { error } = await supabaseClient.from('ready_goods').upsert({ id: 1, goods_data: JSON.stringify(items), updated_at: new Date().toISOString() }, { onConflict: 'id' });
-            if (error) console.error('saveReadyGoods error:', error);
-        } catch(e) { console.error('saveReadyGoods exception:', e); }
+            if (error) {
+                _markReadyGoodsRemoteUnavailable('ready_goods', error);
+                if (!_isSupabaseMissingTableError(error)) console.error('saveReadyGoods error:', error);
+            } else {
+                _markReadyGoodsRemoteAvailable('ready_goods');
+            }
+        } catch(e) {
+            _markReadyGoodsRemoteUnavailable('ready_goods', e);
+            if (!_isSupabaseMissingTableError(e)) console.error('saveReadyGoods exception:', e);
+        }
     }
     setLocal(LOCAL_KEYS.readyGoods, items);
 }
 
 async function loadReadyGoodsHistory() {
-    if (isSupabaseReady()) {
+    if (_canUseReadyGoodsRemote('ready_goods_history')) {
         try {
-            const { data } = await supabaseClient.from('ready_goods_history').select('*').eq('id', 1).maybeSingle();
+            const { data, error } = await supabaseClient.from('ready_goods_history').select('*').eq('id', 1).maybeSingle();
+            if (error) {
+                _markReadyGoodsRemoteUnavailable('ready_goods_history', error);
+                if (!_isSupabaseMissingTableError(error)) console.error('loadReadyGoodsHistory error:', error);
+                return getLocal(LOCAL_KEYS.readyGoodsHistory) || [];
+            }
+            _markReadyGoodsRemoteAvailable('ready_goods_history');
             if (data && data.history_data) {
                 const parsed = typeof data.history_data === 'string' ? JSON.parse(data.history_data) : data.history_data;
                 setLocal(LOCAL_KEYS.readyGoodsHistory, parsed);
@@ -3148,20 +3345,38 @@ async function loadReadyGoodsHistory() {
             const local = getLocal(LOCAL_KEYS.readyGoodsHistory) || [];
             if (local.length > 0) {
                 console.log('Migrating ready goods history to Supabase...');
-                await supabaseClient.from('ready_goods_history').upsert({ id: 1, history_data: JSON.stringify(local), updated_at: new Date().toISOString() }, { onConflict: 'id' });
+                const { error: upsertError } = await supabaseClient
+                    .from('ready_goods_history')
+                    .upsert({ id: 1, history_data: JSON.stringify(local), updated_at: new Date().toISOString() }, { onConflict: 'id' });
+                if (upsertError) {
+                    _markReadyGoodsRemoteUnavailable('ready_goods_history', upsertError);
+                    if (!_isSupabaseMissingTableError(upsertError)) console.error('loadReadyGoodsHistory migration error:', upsertError);
+                }
             }
             return local;
-        } catch(e) { console.error('loadReadyGoodsHistory exception:', e); return getLocal(LOCAL_KEYS.readyGoodsHistory) || []; }
+        } catch(e) {
+            _markReadyGoodsRemoteUnavailable('ready_goods_history', e);
+            if (!_isSupabaseMissingTableError(e)) console.error('loadReadyGoodsHistory exception:', e);
+            return getLocal(LOCAL_KEYS.readyGoodsHistory) || [];
+        }
     }
     return getLocal(LOCAL_KEYS.readyGoodsHistory) || [];
 }
 
 async function saveReadyGoodsHistory(history) {
-    if (isSupabaseReady()) {
+    if (_canUseReadyGoodsRemote('ready_goods_history')) {
         try {
             const { error } = await supabaseClient.from('ready_goods_history').upsert({ id: 1, history_data: JSON.stringify(history), updated_at: new Date().toISOString() }, { onConflict: 'id' });
-            if (error) console.error('saveReadyGoodsHistory error:', error);
-        } catch(e) { console.error('saveReadyGoodsHistory exception:', e); }
+            if (error) {
+                _markReadyGoodsRemoteUnavailable('ready_goods_history', error);
+                if (!_isSupabaseMissingTableError(error)) console.error('saveReadyGoodsHistory error:', error);
+            } else {
+                _markReadyGoodsRemoteAvailable('ready_goods_history');
+            }
+        } catch(e) {
+            _markReadyGoodsRemoteUnavailable('ready_goods_history', e);
+            if (!_isSupabaseMissingTableError(e)) console.error('saveReadyGoodsHistory exception:', e);
+        }
     }
     setLocal(LOCAL_KEYS.readyGoodsHistory, history);
 }
@@ -3171,9 +3386,15 @@ async function saveReadyGoodsHistory(history) {
 // =============================================
 
 async function loadSalesRecords() {
-    if (isSupabaseReady()) {
+    if (_canUseReadyGoodsRemote('sales_records')) {
         try {
-            const { data } = await supabaseClient.from('sales_records').select('*').eq('id', 1).maybeSingle();
+            const { data, error } = await supabaseClient.from('sales_records').select('*').eq('id', 1).maybeSingle();
+            if (error) {
+                _markReadyGoodsRemoteUnavailable('sales_records', error);
+                if (!_isSupabaseMissingTableError(error)) console.error('loadSalesRecords error:', error);
+                return getLocal(LOCAL_KEYS.salesRecords) || [];
+            }
+            _markReadyGoodsRemoteAvailable('sales_records');
             if (data && data.records_data) {
                 const parsed = typeof data.records_data === 'string' ? JSON.parse(data.records_data) : data.records_data;
                 setLocal(LOCAL_KEYS.salesRecords, parsed);
@@ -3182,20 +3403,38 @@ async function loadSalesRecords() {
             const local = getLocal(LOCAL_KEYS.salesRecords) || [];
             if (local.length > 0) {
                 console.log('Migrating sales records to Supabase...');
-                await supabaseClient.from('sales_records').upsert({ id: 1, records_data: JSON.stringify(local), updated_at: new Date().toISOString() }, { onConflict: 'id' });
+                const { error: upsertError } = await supabaseClient
+                    .from('sales_records')
+                    .upsert({ id: 1, records_data: JSON.stringify(local), updated_at: new Date().toISOString() }, { onConflict: 'id' });
+                if (upsertError) {
+                    _markReadyGoodsRemoteUnavailable('sales_records', upsertError);
+                    if (!_isSupabaseMissingTableError(upsertError)) console.error('loadSalesRecords migration error:', upsertError);
+                }
             }
             return local;
-        } catch(e) { console.error('loadSalesRecords exception:', e); return getLocal(LOCAL_KEYS.salesRecords) || []; }
+        } catch(e) {
+            _markReadyGoodsRemoteUnavailable('sales_records', e);
+            if (!_isSupabaseMissingTableError(e)) console.error('loadSalesRecords exception:', e);
+            return getLocal(LOCAL_KEYS.salesRecords) || [];
+        }
     }
     return getLocal(LOCAL_KEYS.salesRecords) || [];
 }
 
 async function saveSalesRecords(records) {
-    if (isSupabaseReady()) {
+    if (_canUseReadyGoodsRemote('sales_records')) {
         try {
             const { error } = await supabaseClient.from('sales_records').upsert({ id: 1, records_data: JSON.stringify(records), updated_at: new Date().toISOString() }, { onConflict: 'id' });
-            if (error) console.error('saveSalesRecords error:', error);
-        } catch(e) { console.error('saveSalesRecords exception:', e); }
+            if (error) {
+                _markReadyGoodsRemoteUnavailable('sales_records', error);
+                if (!_isSupabaseMissingTableError(error)) console.error('saveSalesRecords error:', error);
+            } else {
+                _markReadyGoodsRemoteAvailable('sales_records');
+            }
+        } catch(e) {
+            _markReadyGoodsRemoteUnavailable('sales_records', e);
+            if (!_isSupabaseMissingTableError(e)) console.error('saveSalesRecords exception:', e);
+        }
     }
     setLocal(LOCAL_KEYS.salesRecords, records);
 }
@@ -3279,10 +3518,7 @@ function _workOnConflictKey(table) {
 }
 
 function _isWorkModuleMissingTableError(error) {
-    const code = String(error?.code || '');
-    const message = String(error?.message || '');
-    return code === 'PGRST205'
-        || message.includes("Could not find the table 'public.");
+    return _isSupabaseMissingTableError(error);
 }
 
 function _markWorkModuleRemoteUnavailable(error) {

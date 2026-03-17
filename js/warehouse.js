@@ -1298,7 +1298,7 @@ const Warehouse = {
     },
 
     _isProjectHardwareReserveStatus(status) {
-        return ['sample', 'production_casting', 'production_printing', 'production_hardware', 'production_packaging', 'in_production', 'delivery', 'completed'].includes(status);
+        return ['sample', 'production_casting', 'production_printing', 'production_hardware', 'production_packaging', 'in_production', 'delivery'].includes(status);
     },
 
     _isProjectHardwareActionStatus(status) {
@@ -2509,6 +2509,18 @@ const Warehouse = {
     _buildShipmentData() {
         const name = document.getElementById('wh-sh-name').value.trim();
         if (!name) { App.toast('Укажите название поставки'); return null; }
+        const existingShipment = this.editingShipmentId
+            ? this.allShipments.find(s => s.id === this.editingShipmentId)
+            : null;
+        const derivedChinaPurchaseIds = [...new Set(
+            this.shipmentItems
+                .map(item => parseInt(item.china_purchase_id, 10))
+                .filter(Boolean)
+        )];
+        const chinaPurchaseIds = derivedChinaPurchaseIds.length
+            ? derivedChinaPurchaseIds
+            : (Array.isArray(existingShipment?.china_purchase_ids) ? existingShipment.china_purchase_ids : []);
+        const shipmentSource = existingShipment?.source || (chinaPurchaseIds.length ? 'china_consolidation' : '');
 
         const cny = this.shipmentItems.reduce((sum, i) => {
             const priceCnyTotal = parseFloat(i.purchase_price_cny) || 0;
@@ -2535,12 +2547,21 @@ const Warehouse = {
             total_purchase_rub: cny * rate * feeMultiplier,
             delivery_china_to_russia: parseFloat(document.getElementById('wh-sh-delivery-china').value) || 0,
             delivery_moscow: parseFloat(document.getElementById('wh-sh-delivery-moscow').value) || 0,
-            customs_fees: 0,
+            customs_fees: existingShipment?.customs_fees || 0,
             total_delivery: parseFloat(document.getElementById('wh-sh-total-delivery').value) || 0,
             pricing_mode: document.getElementById('wh-sh-pricing-mode').value || 'weighted_avg',
             items: JSON.parse(JSON.stringify(this.shipmentItems)),
             total_weight_grams: this.shipmentItems.reduce((s, i) => s + (i.weight_grams || 0), 0),
             notes: document.getElementById('wh-sh-notes').value.trim(),
+            source: shipmentSource || undefined,
+            china_purchase_ids: chinaPurchaseIds,
+            china_box_status: existingShipment?.china_box_status || (shipmentSource === 'china_consolidation' ? (existingShipment?.status || 'draft') : undefined),
+            china_delivery_type: existingShipment?.china_delivery_type || '',
+            china_estimated_days: existingShipment?.china_estimated_days || 0,
+            china_tracking_number: existingShipment?.china_tracking_number || '',
+            china_delivery_estimated_usd: existingShipment?.china_delivery_estimated_usd || 0,
+            waybill_pdf_name: existingShipment?.waybill_pdf_name || '',
+            waybill_pdf_data: existingShipment?.waybill_pdf_data || '',
         };
     },
 
@@ -3154,6 +3175,40 @@ const Warehouse = {
             await saveReadyGoodsHistory(history);
         }
         return addedCount;
+    },
+
+    async removeOrderFromReadyGoods(orderId, orderName, nextStatus) {
+        const readyGoods = await loadReadyGoods();
+        const history = await loadReadyGoodsHistory();
+        const nowIso = new Date().toISOString();
+        const employee = App.getCurrentEmployeeName() || '';
+        const remaining = [];
+        let removedCount = 0;
+
+        readyGoods.forEach(item => {
+            if (Number(item.order_id) === Number(orderId)) {
+                history.push({
+                    id: Date.now() + removedCount + 80000,
+                    type: 'return_to_order',
+                    product_name: item.product_name || 'Товар',
+                    order_name: item.order_name || orderName || 'Заказ',
+                    qty: -(parseFloat(item.qty) || 0),
+                    cost_per_unit: parseFloat(item.cost_per_unit) || 0,
+                    notes: `Возврат из готовой продукции: ${App.statusLabel('completed')} → ${App.statusLabel(nextStatus)}`,
+                    date: nowIso,
+                    created_by: employee,
+                });
+                removedCount++;
+                return;
+            }
+            remaining.push(item);
+        });
+
+        if (removedCount > 0) {
+            await saveReadyGoods(remaining);
+            await saveReadyGoodsHistory(history);
+        }
+        return removedCount;
     },
 
     _getSeedPhotoMapBySku() {

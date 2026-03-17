@@ -721,16 +721,23 @@ const ChinaPurchases = {
     // FORM VIEW
     // ==========================================
 
-    async openNewForm() {
+    async openNewForm(orderId = null) {
         this.editingPurchaseId = null;
         this.itemCounter = 0;
         this.resetFormFields();
         await this.loadOrderOptions();
+        if (orderId != null && orderId !== '') {
+            document.getElementById('china-f-order').value = String(orderId);
+        }
         document.getElementById('china-form-heading').textContent = 'Новая закупка';
         this.showView('form');
     },
 
     async openForm(purchaseId) {
+        if (purchaseId == null || purchaseId === '') {
+            await this.openNewForm();
+            return;
+        }
         const p = await loadChinaPurchase(purchaseId);
         if (!p) { App.toast('Закупка не найдена'); return; }
         this.editingPurchaseId = purchaseId;

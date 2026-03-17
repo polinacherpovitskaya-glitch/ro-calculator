@@ -30,10 +30,12 @@ jobs:
       - name: Syntax check JS
         run: |
           set -euo pipefail
-          for f in js/*.js; do
+          for f in js/*.js corporate-gift/*.js; do
             node --check "$f"
           done
           node tests/work-management-smoke.js
+          node tests/order-flow-smoke.js
+          node tests/supabase-fallback-smoke.js
 
   deploy:
     needs: verify

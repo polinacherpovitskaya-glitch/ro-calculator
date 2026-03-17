@@ -1,13 +1,4 @@
-/* === Custom Font for Pendant Letters === */
-@font-face {
-  font-family: 'Cyberion Demo';
-  src: url('assets/fonts/CyberionDemo.woff2') format('woff2'),
-       url('assets/fonts/CyberionDemo.woff') format('woff'),
-       url('assets/fonts/CyberionDemo.ttf') format('truetype');
-  font-weight: normal;
-  font-style: normal;
-  font-display: swap;
-}
+/* Pendant lettering falls back to bundled-safe system fonts until the custom font files are added. */
 
 /* === Reset & Base === */
 *, *::before, *::after {

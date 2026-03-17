@@ -733,9 +733,7 @@ const Orders = {
         await updateOrderStatus(orderId, actualStatus);
         await this._syncWarehouseByStatus(orderId, oldStatus, actualStatus, order.order_name, managerName || 'Неизвестный');
 
-        if (actualStatus === 'completed' && oldStatus !== 'completed') {
-            await this._moveToReadyGoods(orderId, order);
-        }
+        await this._syncReadyGoodsByStatus(orderId, order, oldStatus, actualStatus);
 
         order.status = actualStatus;
 
@@ -916,9 +914,7 @@ const Orders = {
         const order = this.allOrders.find(item => item.id === orderId);
         await this._syncWarehouseByStatus(orderId, oldStatus, newStatus, order && order.order_name, managerName || 'Неизвестный');
 
-        if (newStatus === 'completed' && oldStatus !== 'completed') {
-            await this._moveToReadyGoods(orderId, order);
-        }
+        await this._syncReadyGoodsByStatus(orderId, order, oldStatus, newStatus);
 
         await this.addChangeRecord(orderId, {
             field: 'status',
@@ -1072,6 +1068,25 @@ const Orders = {
             }
         } catch (e) {
             console.warn('moveToReadyGoods warning:', e);
+        }
+    },
+
+    async _syncReadyGoodsByStatus(orderId, order, oldStatus, newStatus) {
+        if (oldStatus !== 'completed' && newStatus === 'completed') {
+            await this._moveToReadyGoods(orderId, order);
+            return;
+        }
+        if (oldStatus === 'completed' && newStatus !== 'completed') {
+            try {
+                if (typeof Warehouse !== 'undefined' && Warehouse.removeOrderFromReadyGoods) {
+                    const count = await Warehouse.removeOrderFromReadyGoods(orderId, order && order.order_name, newStatus);
+                    if (count > 0) {
+                        App.toast(`${count} товар(ов) убрано из Готовой продукции`);
+                    }
+                }
+            } catch (e) {
+                console.warn('rollbackReadyGoods warning:', e);
+            }
         }
     },
 
