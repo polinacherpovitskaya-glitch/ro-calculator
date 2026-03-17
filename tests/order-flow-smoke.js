@@ -1197,7 +1197,9 @@ async function smokeProjectHardwarePersistenceAndBuckets(context) {
     await vm.runInContext(`Warehouse.renderProjectHardwareView(77)`, context);
     const html = String(context.document.getElementById('wh-content').innerHTML || '');
     assert.match(html, /Фурнитура и упаковка для проектов \(к сборке\)/);
-    assert.match(html, /Собрано/);
+    assert.match(html, /Уже собрано/);
+    assert.match(html, /1 заказ · скрыто из активного списка/);
+    assert.match(html, /<details class="card" style="margin-top:12px;">/);
     assert.equal((html.match(/Collected Hardware Order/g) || []).length, 0);
     assert.equal((html.match(/Collected Delivery Order/g) || []).length, 1);
     assert.equal((html.match(/Active Hardware Order/g) || []).length, 1);

@@ -2149,6 +2149,25 @@ const Warehouse = {
         const archivedCollectedNote = archivedCollectedOrders.length > 0
             ? `<div style="font-size:12px;color:var(--text-secondary);">Завершенные заказы скрыты автоматически: ${archivedCollectedOrders.length}</div>`
             : '';
+        const collectedSummary = collectedProductionOrders.length === 1
+            ? '1 заказ'
+            : `${collectedProductionOrders.length} заказ${collectedProductionOrders.length >= 2 && collectedProductionOrders.length <= 4 ? 'а' : 'ов'}`;
+        const collectedSectionHtml = collectedProductionOrders.length > 0
+            ? `
+            <details class="card" style="margin-top:12px;">
+                <summary style="display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 16px;cursor:pointer;list-style:none;">
+                    <div>
+                        <h3 style="margin:0;">Уже собрано</h3>
+                        <div style="font-size:12px;color:var(--text-secondary);margin-top:4px;">${this.esc(collectedSummary)} · скрыто из активного списка</div>
+                        ${archivedCollectedNote}
+                    </div>
+                    <span style="font-size:12px;color:var(--text-muted);white-space:nowrap;">Показать</span>
+                </summary>
+                <div style="padding:0 0 12px;">
+                    ${collectedProductionHtml}
+                </div>
+            </details>`
+            : '';
 
         if (token !== this._viewToken || this.currentView !== 'project-hardware') return;
         container.innerHTML = `
@@ -2164,15 +2183,7 @@ const Warehouse = {
                 </div>
                 ${activeProductionHtml}
             </div>
-            <div class="card" style="margin-top:12px;">
-                <div class="card-header">
-                    <div>
-                        <h3>Собрано</h3>
-                        ${archivedCollectedNote}
-                    </div>
-                </div>
-                ${collectedProductionHtml}
-            </div>
+            ${collectedSectionHtml}
         `;
     },
 
