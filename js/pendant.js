@@ -117,9 +117,9 @@ const Pendant = {
 
         modal = document.createElement('div');
         modal.id = 'pendant-wizard-modal';
-        modal.className = 'modal-overlay';
+        modal.className = 'modal-overlay pendant-wizard-overlay';
         modal.innerHTML = `
-            <div class="pendant-wizard" onclick="event.stopPropagation()">
+            <div class="${this._wizardClassName()}" onclick="event.stopPropagation()">
                 <div class="pendant-wizard-header">
                     <h2>${this._editingIndex !== null ? 'Редактировать подвес' : 'Новый подвес из букв'}</h2>
                     <button class="btn btn-sm" onclick="Pendant._closeWizard()" style="font-size:18px;line-height:1;">&times;</button>
@@ -139,6 +139,10 @@ const Pendant = {
         document.body.appendChild(modal);
         modal.addEventListener('click', (e) => { if (e.target === modal) Pendant._closeWizard(); });
         this._renderStep();
+    },
+
+    _wizardClassName() {
+        return `pendant-wizard pendant-wizard-step-${this._wizardStep}`;
     },
 
     _stepLabel(n) {

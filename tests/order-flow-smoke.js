@@ -508,6 +508,10 @@ async function smokePendantWarehousePickerRichUI() {
     assert.match(cordHtml, /cord-thumb\.png/);
     assert.match(cordHtml, /img src=/);
 
+    vm.runInContext(`Pendant._wizardStep = 4`, pendantContext);
+    const wizardClassName = String(vm.runInContext(`Pendant._wizardClassName()`, pendantContext));
+    assert.match(wizardClassName, /pendant-wizard-step-4/);
+
     await vm.runInContext(`Pendant._onWhSelect('carabiner', '801')`, pendantContext);
     const carabiner = clone(await vm.runInContext(`Pendant._wizardData.carabiner`, pendantContext));
     assert.equal(carabiner.warehouse_item_id, 801);
