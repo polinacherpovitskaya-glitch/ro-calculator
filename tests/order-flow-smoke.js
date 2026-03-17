@@ -965,6 +965,7 @@ async function smokeWarehouseManualAdjustment(context) {
 async function smokeProjectHardwarePersistenceAndBuckets(context) {
     context.__projectHardwareState = {
         checks: {
+            '200:504': true,
             '300:501': true,
             '999:999': true,
         },
@@ -975,9 +976,11 @@ async function smokeProjectHardwarePersistenceAndBuckets(context) {
         { id: 501, name: 'Collected Hardware', sku: 'COL-1', qty: 0 },
         { id: 502, name: 'Active Hardware', sku: 'ACT-1', qty: 10 },
         { id: 503, name: 'Sample Hardware', sku: 'SMP-1', qty: 5 },
+        { id: 504, name: 'Delivery Hardware', sku: 'DLV-1', qty: 0 },
     ];
     context.__orders = [
         { id: 100, order_name: 'Active Hardware Order', manager_name: 'Маша', status: 'production_hardware', created_at: '2026-03-17T10:00:00.000Z' },
+        { id: 200, order_name: 'Collected Delivery Order', manager_name: 'Оля', status: 'delivery', created_at: '2026-03-17T09:30:00.000Z' },
         { id: 300, order_name: 'Collected Hardware Order', manager_name: 'Склад', status: 'completed', created_at: '2026-03-17T09:00:00.000Z' },
         { id: 400, order_name: 'Sample Hardware Order', manager_name: 'Лена', status: 'sample', created_at: '2026-03-17T08:00:00.000Z' },
     ];
@@ -992,8 +995,18 @@ async function smokeProjectHardwarePersistenceAndBuckets(context) {
                 hardware_warehouse_item_id: 502,
             }],
         },
-        300: {
+        200: {
             order: clone(context.__orders[1]),
+            items: [{
+                item_type: 'hardware',
+                product_name: 'Collected delivery product',
+                quantity: 1,
+                hardware_source: 'warehouse',
+                hardware_warehouse_item_id: 504,
+            }],
+        },
+        300: {
+            order: clone(context.__orders[2]),
             items: [{
                 item_type: 'hardware',
                 product_name: 'Collected product',
@@ -1003,7 +1016,7 @@ async function smokeProjectHardwarePersistenceAndBuckets(context) {
             }],
         },
         400: {
-            order: clone(context.__orders[2]),
+            order: clone(context.__orders[3]),
             items: [{
                 item_type: 'hardware',
                 product_name: 'Sample product',
@@ -1023,12 +1036,7 @@ async function smokeProjectHardwarePersistenceAndBuckets(context) {
         source: 'project_hardware',
         created_at: '2026-03-17T08:00:00.000Z',
     }];
-    context.__warehouseHistory = [{
-        item_id: 501,
-        order_id: 300,
-        qty_change: -2,
-        notes: 'Списание собранной фурнитуры: 2 шт',
-    }];
+    context.__warehouseHistory = [];
     context.loadProjectHardwareState = async () => clone(context.__projectHardwareState);
     context.saveProjectHardwareState = async (state) => {
         context.__savedProjectHardwareState = clone(state);
@@ -1053,24 +1061,29 @@ async function smokeProjectHardwarePersistenceAndBuckets(context) {
 
     const reconcileResult = clone(await vm.runInContext(`Warehouse.reconcileProjectHardwareReservations()`, context));
     assert.equal(reconcileResult.stateChanged, true);
+    assert.equal(vm.runInContext(`Warehouse._isProjectHardwareReady(200, 504)`, context), true);
     assert.equal(vm.runInContext(`Warehouse._isProjectHardwareReady(300, 501)`, context), true);
     assert.equal(vm.runInContext(`Warehouse._isProjectHardwareReady(100, 502)`, context), false);
     assert.equal(Boolean(context.__projectHardwareState.checks['999:999']), false);
+    assert.equal(Boolean(context.__projectHardwareState.checks['200:504']), true);
     assert.equal(Boolean(context.__projectHardwareState.checks['300:501']), true);
 
     context.__warehouseHistory = [];
     const stickyReconcile = clone(await vm.runInContext(`Warehouse.reconcileProjectHardwareReservations()`, context));
     assert.equal(stickyReconcile.stateChanged, false);
+    assert.equal(vm.runInContext(`Warehouse._isProjectHardwareReady(200, 504)`, context), true);
     assert.equal(vm.runInContext(`Warehouse._isProjectHardwareReady(300, 501)`, context), true);
 
     await vm.runInContext(`Warehouse.renderProjectHardwareView(77)`, context);
     const html = String(context.document.getElementById('wh-content').innerHTML || '');
     assert.match(html, /Фурнитура для проектов \(к сборке\)/);
     assert.match(html, /Собрано/);
-    assert.equal((html.match(/Collected Hardware Order/g) || []).length, 1);
+    assert.equal((html.match(/Collected Hardware Order/g) || []).length, 0);
+    assert.equal((html.match(/Collected Delivery Order/g) || []).length, 1);
     assert.equal((html.match(/Active Hardware Order/g) || []).length, 1);
     assert.equal((html.match(/Sample Hardware Order/g) || []).length, 1);
-    assert.match(html, /Collected Hardware/);
+    assert.match(html, /Завершенные заказы скрыты автоматически: 1/);
+    assert.match(html, /Delivery Hardware/);
     assert.match(html, /Active Hardware/);
     assert.match(html, /Собрано 1 из 1/);
     assert.match(html, /Собрано 0 из 1/);

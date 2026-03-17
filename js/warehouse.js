@@ -1995,11 +1995,16 @@ const Warehouse = {
 
         const activeProductionOrders = [];
         const collectedProductionOrders = [];
+        const archivedCollectedOrders = [];
         productionOrdersGrouped.forEach(order => {
             const progress = orderProgress.get(order.order_id) || { total: 0, ready: 0 };
             const done = progress.total > 0 && progress.ready === progress.total;
             if (done) {
-                collectedProductionOrders.push(order);
+                if (order.status === 'completed') {
+                    archivedCollectedOrders.push(order);
+                } else {
+                    collectedProductionOrders.push(order);
+                }
             } else {
                 activeProductionOrders.push(order);
             }
@@ -2056,6 +2061,9 @@ const Warehouse = {
 
         const activeProductionHtml = renderProjectHardwareOrders(activeProductionOrders, 'active');
         const collectedProductionHtml = renderProjectHardwareOrders(collectedProductionOrders, 'collected');
+        const archivedCollectedNote = archivedCollectedOrders.length > 0
+            ? `<div style="font-size:12px;color:var(--text-secondary);">Завершенные заказы скрыты автоматически: ${archivedCollectedOrders.length}</div>`
+            : '';
 
         if (token !== this._viewToken || this.currentView !== 'project-hardware') return;
         container.innerHTML = `
@@ -2073,7 +2081,10 @@ const Warehouse = {
             </div>
             <div class="card" style="margin-top:12px;">
                 <div class="card-header">
-                    <h3>Собрано</h3>
+                    <div>
+                        <h3>Собрано</h3>
+                        ${archivedCollectedNote}
+                    </div>
                 </div>
                 ${collectedProductionHtml}
             </div>
