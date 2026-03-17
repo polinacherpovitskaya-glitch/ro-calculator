@@ -21,7 +21,7 @@
 - Setup assumptions: локальный запуск через `python3 -m http.server 4173`; browser audit через headed Playwright flow или эквивалентный живой браузер; если live auth недоступен, локальный/fallback coverage все равно обязателен и live gap фиксируется в `docs/status.md`.
 - Build/deploy assumptions: публичный релиз приходит только из `origin/main` через GitHub Pages workflow; локальный `http.server` или `python3 -m http.server` служит только для smoke и не подтверждает сам по себе, что сайт уже обновился наружу.
 - Regression artifact expectation: findings log в `docs/status.md`, плюс lightweight smoke scripts в `tests/`, если чистую бизнес-логику удастся изолировать в M1.
-- Current reproducible harness: `node tests/order-flow-smoke.js` покрывает `Calculator` persistence (`china hardware/pkg + pendant + colors`), legacy pendant restore, ready-goods rollback sync, `ready goods sales/writeoff/manual add`, warehouse manual stock adjustment + history trail, clamped partial-deduction behavior и shortage toast при `sample -> delivery`, partial reserve toast при `draft -> sample`, rollback после clamped deduction, сохранение China shipment metadata, `Orders._syncWarehouseByStatus` и `order-detail` rendering для `colors[] / color_solution_attachment`; `node tests/auth-hardening-smoke.js` отдельно проверяет versioned auth hash path, legacy verifier compatibility, `password_hash_version/password_rotated_at`, security rendering и auth-backup export; `node tests/supabase-fallback-smoke.js` проверяет missing-table fallback для `sales_records` и aggressive local-cache cleanup path в `initSupabase`; `node tests/factual-smoke.js` держит regression на `План-факт` totals, чтобы скрытые salary/indirect строки non-admin не удваивали `ИТОГО`, а saved-plan total не расходился молча с пересчитанными статьями.
+- Current reproducible harness: `node tests/order-flow-smoke.js` покрывает `Calculator` persistence (`china hardware/pkg + pendant + colors`), legacy pendant restore, ready-goods rollback sync, `ready goods sales/writeoff/manual add`, warehouse manual stock adjustment + history trail, clamped partial-deduction behavior и shortage toast при `sample -> delivery`, partial reserve toast при `draft -> sample`, rollback после clamped deduction, сохранение China shipment metadata, `Orders._syncWarehouseByStatus` и `order-detail` rendering для `colors[] / color_solution_attachment`; `node tests/auth-hardening-smoke.js` отдельно проверяет versioned auth hash path, legacy verifier compatibility, auto-upgrade legacy login в `v2`, `password_hash_version/password_rotated_at`, disabled-account restore boundary, permissions fallback без `employee_id`, security rendering и auth-backup export; `node tests/supabase-fallback-smoke.js` проверяет missing-table fallback для `sales_records` и aggressive local-cache cleanup path в `initSupabase`; `node tests/factual-smoke.js` держит regression на `План-факт` totals, чтобы скрытые salary/indirect строки non-admin не удваивали `ИТОГО`, а saved-plan total не расходился молча с пересчитанными статьями.
 
 ## Test Levels
 
@@ -57,6 +57,8 @@
 - Legacy orders/items без `hardware_source`, `packaging_source`, `item_data` или color photo должны оставаться читаемыми.
 - Duplicate `order_items` rows должны repair-иться безопасно на load без silent data loss.
 - Откат статуса из consumed back в non-consumed должен возвращать stock ровно один раз.
+- Disabled auth account не должен переживать refresh через stale `localStorage` session.
+- Auth account без `employee_id` не должен получать все страницы через permissive fallback; при этом явные `pages[]` должны продолжать работать.
 - `corporate-gift` без `googleScriptUrl` не должен падать и должен иметь предсказуемое локальное поведение.
 - `corporate-gift` с пустой или некорректной формой должен блокировать submit и фокусировать корректное поле.
 
@@ -70,6 +72,7 @@
 - [x] `node tests/supabase-fallback-smoke.js`
 - [ ] Headed browser smoke для root app order flow
 - [ ] Headed browser smoke для `corporate-gift/`
+- [x] Browser-runtime auth sanity для legacy login upgrade, disabled restore и permissions fallback на локальном сервере
 - [ ] Live-session verification для `orders/china/warehouse/ready goods` или явный blocker, зафиксированный в `docs/status.md`
 - [ ] Public deploy verification: latest GitHub Pages workflow run на `main` green и публичный `index.html` отдает ожидаемые cache-bust версии audited scripts
 

@@ -34,10 +34,10 @@ const App = {
         if (page === 'dashboard') page = 'orders';
         // order-detail is part of orders
         if (page === 'order-detail') page = 'orders';
-        const empId = this.currentUser.employee_id;
-        if (!empId) return true; // fallback: allow all
-        const perms = JSON.parse(localStorage.getItem('ro_employee_pages') || '{}');
-        const allowed = perms[String(empId)];
+        if ((this.currentUser.id === '__admin' || this.currentUser.role === 'admin') && this.currentUser.employee_id == null) {
+            return true;
+        }
+        const allowed = this.getCurrentAllowedPages();
         if (!allowed) return this.DEFAULT_PAGES.includes(page);
         if (allowed.includes(page)) return true;
         if (page === 'orders' && allowed.includes('dashboard')) return true;
@@ -61,6 +61,16 @@ const App = {
         const perms = JSON.parse(localStorage.getItem('ro_employee_pages') || '{}');
         perms[String(empId)] = this.normalizePageList(pages);
         localStorage.setItem('ro_employee_pages', JSON.stringify(perms));
+    },
+
+    getCurrentAllowedPages() {
+        if (!this.currentUser) return null;
+        const currentPages = this.normalizePageList(this.currentUser.pages);
+        if (Array.isArray(currentPages)) return currentPages;
+        const empId = this.currentUser.employee_id;
+        if (empId == null || empId === '') return null;
+        const perms = JSON.parse(localStorage.getItem('ro_employee_pages') || '{}');
+        return this.normalizePageList(perms[String(empId)] || null);
     },
 
     normalizePageList(pages) {
@@ -160,6 +170,7 @@ const App = {
         const nowTs = Date.now().toString();
         let ok = false;
         let errorText = 'Неверный пароль';
+        let upgradedLegacyHash = false;
 
         // Employee login only (no admin mode)
         const account = this.authAccounts.find(a => String(a.id) === String(selectedUserId) && a.is_active !== false);
@@ -167,22 +178,24 @@ const App = {
             errorText = 'Пользователь не найден';
         } else {
             if (this.verifyUserPassword(account, pwd)) {
+                const currentVersion = Number(this.AUTH_PASSWORD_HASH_VERSION) || 2;
+                if (this.getAccountPasswordHashVersion(account) < currentVersion) {
+                    account.password_hash = this.hashUserPassword(account.username || '', pwd, currentVersion);
+                    account.password_hash_version = currentVersion;
+                    account.password_rotated_at = new Date().toISOString();
+                    delete account.password_plain;
+                    upgradedLegacyHash = true;
+                }
                 localStorage.setItem('ro_calc_auth_method', 'user');
                 localStorage.setItem('ro_calc_auth_ts', nowTs);
                 localStorage.setItem('ro_calc_auth_user_id', String(account.id));
                 localStorage.setItem('ro_calc_last_user_id', String(account.id));
                 localStorage.setItem('ro_calc_last_user_name', account.employee_name || account.username || 'Сотрудник');
                 localStorage.removeItem('ro_calc_auth');
-                this.currentUser = {
-                    id: account.id,
-                    employee_id: account.employee_id ?? null,
-                    username: account.username || '',
-                    name: account.employee_name || account.username || 'Сотрудник',
-                    role: 'employee',
-                };
+                this.currentUser = this.buildCurrentUserFromAccount(account);
                 ok = true;
                 // Sync page permissions from auth account to localStorage
-                if (account.pages && Array.isArray(account.pages)) {
+                if (account.employee_id != null && account.pages && Array.isArray(account.pages)) {
                     this.setEmployeePages(account.employee_id, account.pages);
                 }
                 account.last_login_at = new Date().toISOString();
@@ -193,6 +206,14 @@ const App = {
                     actor_user_id: this.currentUser.id,
                     method: 'user',
                 });
+                if (upgradedLegacyHash) {
+                    appendAuthActivity({
+                        type: 'password_hash_upgrade',
+                        actor: this.currentUser.name,
+                        actor_user_id: this.currentUser.id,
+                        method: 'user',
+                    });
+                }
             }
         }
 
@@ -221,19 +242,13 @@ const App = {
             pages: this.normalizePageList(account.pages),
         }));
         const userId = localStorage.getItem('ro_calc_auth_user_id');
-        const account = this.authAccounts.find(a => String(a.id) === String(userId));
+        const account = this.authAccounts.find(a => String(a.id) === String(userId) && a.is_active !== false);
         if (account) {
-            this.currentUser = {
-                id: account.id,
-                employee_id: account.employee_id ?? null,
-                username: account.username || '',
-                name: account.employee_name || account.username || 'Сотрудник',
-                role: 'employee',
-            };
+            this.currentUser = this.buildCurrentUserFromAccount(account);
             // Refresh session timestamp on active usage (extends 30-day window)
             localStorage.setItem('ro_calc_auth_ts', Date.now().toString());
             // Sync page permissions from auth account to localStorage
-            if (account.pages && Array.isArray(account.pages)) {
+            if (account.employee_id != null && account.pages && Array.isArray(account.pages)) {
                 this.setEmployeePages(account.employee_id, account.pages);
             }
             return;
@@ -243,7 +258,7 @@ const App = {
             console.warn('Auth restore failed: account not found or auth accounts unavailable');
             const err = document.getElementById('auth-error');
             if (err) {
-                err.textContent = 'Не удалось подтвердить вход. Войдите заново.';
+                err.textContent = 'Не удалось подтвердить вход: логин отключен или данные обновились. Войдите заново.';
                 err.style.display = 'block';
             }
         }
@@ -320,6 +335,17 @@ const App = {
         if (!account || !account.password_hash) return false;
         const version = this.getAccountPasswordHashVersion(account);
         return this.hashUserPassword(account.username || '', password, version) === account.password_hash;
+    },
+
+    buildCurrentUserFromAccount(account) {
+        return {
+            id: account.id,
+            employee_id: account.employee_id ?? null,
+            username: account.username || '',
+            name: account.employee_name || account.username || 'Сотрудник',
+            role: account.role || 'employee',
+            pages: this.normalizePageList(account.pages),
+        };
     },
 
     async prepareAuthUI() {

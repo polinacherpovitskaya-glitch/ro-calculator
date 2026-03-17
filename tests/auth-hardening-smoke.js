@@ -249,6 +249,88 @@ async function smokeAuthBackup(context) {
     assert.equal(backup.auth_accounts[0].password_plain, undefined);
 }
 
+async function smokeLegacyLoginUpgrade(context) {
+    const legacyHash = String(vm.runInContext(`App.legacyHashUserPassword('legacy', 'demo123')`, context));
+    context.__authAccountsSource = [{
+        id: 11,
+        employee_id: 5,
+        employee_name: 'Legacy User',
+        username: 'legacy',
+        password_hash: legacyHash,
+        is_active: true,
+        pages: ['orders'],
+    }];
+    context.__savedAuthAccounts = null;
+    context.__appendedAuthActivity = [];
+    context.__showAppCalled = false;
+    context.document.getElementById('auth-user-select').value = '11';
+    context.document.getElementById('auth-password').value = 'demo123';
+    context.document.getElementById('auth-error');
+
+    await vm.runInContext(`(async () => {
+        App.authAccounts = await loadAuthAccounts();
+        App.showApp = () => { window.__showAppCalled = true; };
+        await App.login();
+    })()`, context);
+
+    const saved = clone(context.__savedAuthAccounts);
+    assert.equal(context.__showAppCalled, true);
+    assert.equal(saved[0].password_hash_version, 2);
+    assert.match(String(saved[0].password_hash || ''), /^v2:/);
+    assert.match(String(saved[0].password_rotated_at || ''), /T/);
+    assert.equal(context.localStorage.getItem('ro_calc_auth_user_id'), '11');
+    assert.equal(context.__appendedAuthActivity.some(entry => entry.type === 'password_hash_upgrade'), true);
+}
+
+async function smokeDisabledRestore(context) {
+    context.__authAccountsSource = [{
+        id: 21,
+        employee_id: 5,
+        employee_name: 'Disabled User',
+        username: 'disabled',
+        password_hash: String(vm.runInContext(`App.hashUserPassword('disabled', 'demo123')`, context)),
+        password_hash_version: 2,
+        is_active: false,
+    }];
+    context.localStorage.setItem('ro_calc_auth_user_id', '21');
+    context.localStorage.setItem('ro_calc_auth_ts', String(Date.now()));
+
+    await vm.runInContext(`(async () => {
+        App.currentUser = null;
+        await App.restoreAuthenticatedUser();
+    })()`, context);
+
+    assert.equal(context.localStorage.getItem('ro_calc_auth_user_id'), null);
+    assert.equal(context.document.getElementById('auth-error').style.display, 'block');
+    assert.match(String(context.document.getElementById('auth-error').textContent || ''), /логин отключен|данные обновились/i);
+}
+
+async function smokePermissionFallback(context) {
+    const defaultOnly = vm.runInContext(`(() => {
+        App.currentUser = { id: 'legacy', employee_id: null, role: 'employee', pages: null };
+        return {
+            orders: App.canAccess('orders'),
+            settings: App.canAccess('settings'),
+            warehouse: App.canAccess('warehouse'),
+        };
+    })()`, context);
+    assert.equal(defaultOnly.orders, true);
+    assert.equal(defaultOnly.settings, false);
+    assert.equal(defaultOnly.warehouse, false);
+
+    const explicitPages = vm.runInContext(`(() => {
+        App.currentUser = { id: 'legacy', employee_id: null, role: 'employee', pages: ['warehouse', 'settings'] };
+        return {
+            settings: App.canAccess('settings'),
+            warehouse: App.canAccess('warehouse'),
+            orders: App.canAccess('orders'),
+        };
+    })()`, context);
+    assert.equal(explicitPages.settings, true);
+    assert.equal(explicitPages.warehouse, true);
+    assert.equal(explicitPages.orders, false);
+}
+
 async function main() {
     const context = createContext();
     runScript(context, 'js/app.js');
@@ -258,6 +340,9 @@ async function main() {
     await smokeSaveAuthAccount(context);
     await smokeRenderSecurityState(context);
     await smokeAuthBackup(context);
+    await smokeLegacyLoginUpgrade(context);
+    await smokeDisabledRestore(context);
+    await smokePermissionFallback(context);
 
     console.log('auth hardening smoke checks passed');
 }

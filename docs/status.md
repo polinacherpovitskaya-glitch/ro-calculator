@@ -55,6 +55,7 @@
 - Усилен credential path для новых и reset-паролей: `App.hashUserPassword` переведен на versioned `v2` verifier для новых записей, при этом legacy-логины продолжают проверяться через совместимый fallback.
 - Settings `Логины` теперь явно показывает security-state аккаунта (`Legacy hash v1` / `Hash v2`) и умеет снимать отдельный sanitized `auth backup` перед forced reset или storage migration.
 - Добавлен reproducible auth smoke [`tests/auth-hardening-smoke.js`](/Users/krollipolli/Documents/Github/RO%20calculator/tests/auth-hardening-smoke.js), который проверяет versioned hash verification, сохранение `password_hash_version/password_rotated_at`, security rendering и auth-backup export.
+- Усилен auth session boundary: disabled account больше не переживает `refresh/restore`, legacy `v1` hash автоматически апгрейдится до `v2` при успешном логине, а fallback без `employee_id` больше не открывает все страницы по умолчанию.
 - Закрыт `План-факт` totals regression после sync с `FinTablo`: скрытые salary/indirect строки для non-admin больше не удваивают `ИТОГО` в деталке, а новый [`tests/factual-smoke.js`](/Users/krollipolli/Documents/Github/RO%20calculator/tests/factual-smoke.js) ловит этот сценарий воспроизводимо.
 - Закрыт второй `План-факт` drift: когда пересчитанные статьи расходились с сохраненным `total_cost_plan`, деталка больше не показывала ложный `ИТОГО`; теперь total опирается на сохраненный план заказа и честно помечает расхождение пересчета.
 - Закрыт warehouse rollback drift для packaging: после clamped-списания при нехватке остатка rollback теперь возвращает на склад только фактически списанное количество, а не полный спрос заказа; одновременно `draft -> sample` снова предупреждает о частичном резерве упаковки.
@@ -64,12 +65,14 @@
 - Повторная live/browser проверка складских edge cases уже с зафиксированным deploy source, чтобы локальный smoke и публичный релиз больше не путались между собой.
 - Повторная live/browser проверка `План-факт/FinTablo` perimeter после sync-fix и factual drift hotfix.
 - Повторная live/browser проверка `warehouse/orders` perimeter после hardening partial reserve / rollback logic.
+- Продолжение auth migration после закрытия restore/permissions gap: forced reset/storage move и clean login/logout flow уже на более реалистичном fixture path.
 
 ## Next
 - Закрыть первый незавершенный пункт M3: partial reserve, возврат и списание при нехватке warehouse hardware/packaging.
 - Дойти от частичного Phase 0 до forced reset/storage migration path из `/Users/krollipolli/Documents/Github/RO calculator/docs/auth-remediation-plan.md`.
 - Перепроверить live browser perimeter для `warehouse/ready goods` на реальных кликах после расширения smoke coverage.
 - Перепроверить tasks/projects regression perimeter и собрать финальный handoff по live gaps.
+- Добить clean login/logout browser path уже без bootstrap existing-user session.
 
 ## Decisions Made
 - Старый план заменен как source of truth, потому что пользовательский запрос сменил продуктовый фокус с задач/проектов на сквозной аудит order lifecycle.
@@ -97,7 +100,7 @@ curl -s 'https://polinacherpovitskaya-glitch.github.io/ro-calculator/' | rg 'js/
 ```
 
 ## Current Blockers
-- Полноценный live auth path для ручного входа в этой сессии не подтвержден; текущий прогон держится на локальном bootstrap existing user session.
+- Полноценный live auth path с реальными employee credentials все еще не подтвержден; однако browser-runtime clean-session checks для legacy login upgrade, disabled restore и permissions fallback уже добавлены и проходят локально.
 - `corporate-gift` submit path использует `mode: 'no-cors'`, поэтому endpoint-level success/failure без mock или intercept наблюдается ограниченно.
 - Auth risk снижен, но не снят: login/session model все еще client-side, а legacy remote payload с `password_plain` остается опасным, пока не пройдет полноценный scrub/migration path.
 - Автосоздание логинов временно отключено; для новых сотрудников логины сейчас нужно заводить вручную до следующей фазы remediation.
@@ -132,6 +135,7 @@ curl -s 'https://polinacherpovitskaya-glitch.github.io/ro-calculator/' | rg 'js/
 | 2026-03-17 | Factual totals integrity | `js/factual.js`, `tests/factual-smoke.js`, `index.html`, `.github/workflows/deploy-pages.yml` | `node --check js/factual.js && node --check tests/factual-smoke.js && node tests/factual-smoke.js` | fail -> fixed | Прогнать полный gate set и перепроверить public deploy |
 | 2026-03-17 | Factual plan drift clarity | `js/factual.js`, `tests/factual-smoke.js`, `index.html` | live `#factual` audit + `node --check js/factual.js && node tests/factual-smoke.js` | fail -> fixed | Дождаться public deploy и повторить public factual pass |
 | 2026-03-17 | Packaging rollback integrity | `js/orders.js`, `tests/order-flow-smoke.js`, `index.html` | `node --check js/orders.js && node --check tests/order-flow-smoke.js && node tests/order-flow-smoke.js` | fail -> fixed | Прогнать полный gate set и перепроверить local/public warehouse perimeter |
+| 2026-03-17 | Auth restore boundary | `js/app.js`, `tests/auth-hardening-smoke.js`, `index.html` | `node --check js/app.js && node tests/auth-hardening-smoke.js` + browser runtime auth sanity on local server | fail -> fixed | Прогнать полный gate set, public deploy и идти в forced reset/storage migration |
 
 ## Smoke / Demo Checklist
 - [x] Root app стабильно грузится локально и дает пройти навигацию `orders -> colors -> warehouse -> china` без blocker-level runtime errors.

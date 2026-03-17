@@ -54,6 +54,9 @@
 - Автосоздание логинов временно отключено как осознанный security tradeoff, пока не появится безопасный onboarding/reset path.
 - Новые и reset credentials теперь сохраняются через versioned `v2` hash path; legacy accounts продолжают логиниться только через compatibility fallback и теперь явно помечаются в UI как `Legacy hash v1`.
 - В settings появился отдельный sanitized `auth backup` export для forced reset / storage migration rehearsal без выгрузки `password_plain`.
+- Disabled accounts больше не восстанавливаются из stale browser session на refresh.
+- Успешный login legacy `v1` account теперь автоматически апгрейдит verifier до `v2`, уменьшая migration tail без ручного массового reset в ту же ночь.
+- Permission fallback для account без `employee_id` ужесточен: без явных `pages[]` такой аккаунт больше не получает все страницы по умолчанию.
 
 ### Tasks
 - Перестать писать `password_plain` при создании, редактировании и reset логинов.
@@ -66,6 +69,8 @@
 - Ни одна новая запись аккаунта не содержит `password_plain`.
 - Settings UI больше не раскрывает живой пароль.
 - Потеря auth data больше не восстанавливает прошлого пользователя из cache сама по себе.
+- Disabled account не переживает refresh через stale local session.
+- Legacy verifier path не растет дальше и постепенно схлопывается на `v2` при совместимых логинах.
 
 ### Validation
 ```sh
