@@ -59,6 +59,7 @@
 - Verify actual overlay:
   - actual monthly hours come from `TimeTrack`;
   - management-only hours do not pollute production actuals by default.
+  - linked order hours reduce the remaining scheduled hours instead of duplicating full plan.
 
 ### Integration
 - `Orders/Calculator -> Production Calendar`:
@@ -73,6 +74,7 @@
   - if stage is blocked by warehouse-dependent readiness in future slices, blocker changes should propagate.
 - `TimeTrack -> Production Calendar`:
   - monthly factual hours summary matches production-role submitted hours for selected month.
+  - linked order entries reduce remaining order hours in queue and timeline.
 - `Production manager interaction`:
   - drag order/stage;
   - lock manual start;
@@ -95,6 +97,9 @@
 - Open monthly actual strip and confirm:
   - planned hours are not identical to factual by accident;
   - factual month reflects `TimeTrack`.
+- Open queue cards and confirm:
+  - each active order shows `факт / план / осталось`;
+  - if manual start is set, the first real allocation does not begin earlier.
 
 ## Negative Cases
 - Order without `deadline_end` must not vanish; it should fall back to explicit no-deadline presentation.
@@ -103,6 +108,7 @@
 - Order waiting for China receipt must not appear as freely draggable in active production lane unless operator overrides it explicitly.
 - Pricing worker count `3.5` must not automatically become planning capacity if operational capacity is set lower.
 - Actual hours overlay must not use bubble-plan hours when time entries are absent.
+- Already logged order hours must not be re-planned as if nothing was done.
 - Manual drag override must not be lost on reload.
 - Legacy orders without perfect mold linkage must surface a clear `needs review` state rather than fake precision.
 
@@ -118,6 +124,8 @@
   - `blocked China mold`
   - `single mold constraint`
   - `drag + reload persistence`
+  - `actual linked hours reduce remaining`
+  - `manual not-before date delays first allocation`
   - `month actual hours`
 
 ## Release / Demo Readiness

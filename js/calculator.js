@@ -760,22 +760,41 @@ function buildProductionSchedule(orders, settings) {
     });
 
     // Build order queues with remaining hours per phase
-    const queue = schedulable.map(o => ({
+    const queue = schedulable.map(o => {
+        const plannedMolding = round2(o.production_hours_plastic || 0);
+        const plannedAssembly = round2(o.production_hours_hardware || 0);
+        const plannedPackaging = round2(o.production_hours_packaging || 0);
+        const actualMolding = round2(o.actual_hours_molding || 0);
+        const actualAssembly = round2(o.actual_hours_assembly || 0);
+        const actualPackaging = round2(o.actual_hours_packaging || 0);
+        const remainingMolding = round2(Math.max(plannedMolding - actualMolding, 0));
+        const remainingAssembly = round2(Math.max(plannedAssembly - actualAssembly, 0));
+        const remainingPackaging = round2(Math.max(plannedPackaging - actualPackaging, 0));
+        const plannedTotalHours = round2(plannedMolding + plannedAssembly + plannedPackaging);
+        const actualTotalHours = round2(actualMolding + actualAssembly + actualPackaging + (o.actual_hours_other || 0));
+        const remainingTotalHours = round2(remainingMolding + remainingAssembly + remainingPackaging);
+
+        return {
         orderId: o.id,
         orderName: o.order_name || 'Без названия',
         clientName: o.client_name || '',
         status: o.status,
         deadlineEnd: o.deadline_end || null,
+        notBeforeDate: o.production_not_before || '',
         phases: [
-            { name: 'molding', label: 'Литьё', remaining: o.production_hours_plastic || 0, total: o.production_hours_plastic || 0, color: '#f59e0b' },
-            { name: 'assembly', label: 'Сборка', remaining: o.production_hours_hardware || 0, total: o.production_hours_hardware || 0, color: '#06b6d4' },
-            { name: 'packaging', label: 'Упаковка', remaining: o.production_hours_packaging || 0, total: o.production_hours_packaging || 0, color: '#8b5cf6' },
+            { name: 'molding', label: 'Литьё', remaining: remainingMolding, total: plannedMolding, actual: actualMolding, color: '#f59e0b' },
+            { name: 'assembly', label: 'Сборка', remaining: remainingAssembly, total: plannedAssembly, actual: actualAssembly, color: '#06b6d4' },
+            { name: 'packaging', label: 'Упаковка', remaining: remainingPackaging, total: plannedPackaging, actual: actualPackaging, color: '#8b5cf6' },
         ],
         currentPhaseIdx: 0,
         schedule: [], // [{ date, phase, hours }]
-        totalHours: round2((o.production_hours_plastic || 0) + (o.production_hours_packaging || 0) + (o.production_hours_hardware || 0)),
+        totalHours: remainingTotalHours,
+        plannedTotalHours,
+        actualTotalHours,
+        remainingTotalHours,
         done: false,
-    }));
+        };
+    });
 
     // Skip phases with 0 hours at the start
     queue.forEach(q => {
@@ -804,6 +823,7 @@ function buildProductionSchedule(orders, settings) {
         // Allocate hours to orders in priority order
         for (const q of queue) {
             if (q.done || remainingCapacity <= 0) continue;
+            if (q.notBeforeDate && dateStr < q.notBeforeDate) continue;
 
             const phase = q.phases[q.currentPhaseIdx];
             if (!phase || phase.remaining <= 0) continue;

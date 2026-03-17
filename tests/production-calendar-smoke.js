@@ -34,6 +34,8 @@ assert.match(ganttJs, /production_holidays/, 'Gantt UI must read configured prod
 assert.match(ganttJs, /loadOrderItemsByOrderIds\(/, 'Gantt must inspect order item snapshots to derive readiness');
 assert.match(ganttJs, /loadTimeEntries\(\)/, 'Gantt must load time entries for actual-hours overlay');
 assert.match(ganttJs, /loadEmployees\(\)/, 'Gantt must load employees for actual-hours overlay');
+assert.match(ganttJs, /buildOrderActuals\(/, 'Gantt must aggregate actual order hours');
+assert.match(calculatorJs, /notBeforeDate/, 'Scheduler must respect manual not-before dates');
 
 function createFixedDate(isoTimestamp) {
     const RealDate = Date;
@@ -110,6 +112,37 @@ assert.equal(
     'Scheduler must use planning worker capacity instead of pricing worker count'
 );
 
+const constrainedSchedule = vm.runInContext(`
+    buildProductionSchedule([
+        {
+            id: 8,
+            order_name: 'Progress-aware order',
+            client_name: 'QA',
+            status: 'production_casting',
+            deadline_end: '2026-03-25',
+            production_hours_plastic: 16,
+            production_hours_hardware: 8,
+            production_hours_packaging: 0,
+            actual_hours_molding: 8,
+            actual_hours_assembly: 0,
+            actual_hours_packaging: 0,
+            production_not_before: '2026-03-18'
+        }
+    ], {
+        planning_workers_count: 1,
+        planning_hours_per_day: 8
+    })
+`, context);
+
+assert.deepEqual(
+    JSON.parse(JSON.stringify(constrainedSchedule.queue[0].schedule.map(segment => segment.date))),
+    ['2026-03-18', '2026-03-19'],
+    'Scheduler must start no earlier than the manual not-before date and plan only remaining hours'
+);
+assert.equal(constrainedSchedule.queue[0].plannedTotalHours, 24, 'Queue must keep the full planned total');
+assert.equal(constrainedSchedule.queue[0].actualTotalHours, 8, 'Queue must retain already logged actual hours');
+assert.equal(constrainedSchedule.queue[0].remainingTotalHours, 16, 'Queue must schedule only the remaining hours');
+
 const ganttContext = vm.createContext({
     console,
     Math,
@@ -183,5 +216,28 @@ const actualMonthSummary = JSON.parse(JSON.stringify(vm.runInContext(`
 `, ganttContext)));
 assert.equal(actualMonthSummary.actualHours, 11, 'Actual month summary must include only current-month production hours');
 assert.equal(actualMonthSummary.employeeCount, 2, 'Actual month summary must count only production employees with submitted hours');
+
+const actualBuckets = JSON.parse(JSON.stringify(vm.runInContext(`
+    Array.from(Gantt.buildOrderActuals(
+        [
+            { employee_id: 10, worker_name: 'Тая', date: '2026-03-02', hours: 5, order_id: 42, project_name: 'МТС 3 воркшопа', task_description: '[meta]{"stage":"assembly"}[/meta]' },
+            { employee_id: 12, worker_name: 'Женя Г', date: '2026-03-03', hours: 3, project_name: 'эндостар', task_description: '[meta]{"stage":"casting"}[/meta]' },
+            { employee_id: 11, worker_name: 'Леша', date: '2026-03-03', hours: 7, order_id: 42, project_name: 'МТС 3 воркшопа', task_description: '[meta]{"stage":"assembly"}[/meta]' }
+        ],
+        [
+            { id: 10, name: 'Тая', role: 'production' },
+            { id: 11, name: 'Леша', role: 'management' },
+            { id: 12, name: 'Женя Г', role: 'production' }
+        ],
+        [
+            { id: 42, order_name: 'МТС 3 воркшопа' },
+            { id: 77, order_name: 'НФС звезды ЭндоСтарс' }
+        ]
+    ).entries())
+`, ganttContext)));
+const actualBucketMap = new Map(actualBuckets);
+assert.equal(actualBucketMap.get(42).assembly, 5, 'Order actuals must aggregate linked production hours by phase');
+assert.equal(actualBucketMap.get(42).employeeCount, 1, 'Management hours must not affect production order progress');
+assert.equal(actualBucketMap.get(77).molding, 3, 'Order actuals should resolve unique legacy project names when there is no direct order id');
 
 console.log('production calendar smoke checks passed');

@@ -3287,6 +3287,13 @@ table .text-center { text-align: center; }
     line-height: 1.45;
 }
 
+.gantt-queue-progress {
+    font-size: 12px;
+    color: var(--text);
+    line-height: 1.45;
+    font-weight: 600;
+}
+
 .gantt-queue-controls {
     display: flex;
     gap: 6px;

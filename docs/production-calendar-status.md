@@ -1,7 +1,7 @@
 # Production Calendar Status
 
 ## Snapshot
-- Current phase: C5 factual overlay shipped, next up drag/persist layer
+- Current phase: C6 actual-vs-remaining shipped, next up richer drag/replan layer
 - Plan file: `/private/tmp/ro-codex-push-sync.v100/docs/production-calendar-plan.md`
 - Status: yellow
 - Last updated: 2026-03-17
@@ -72,6 +72,11 @@
   - календарь загружает `time_entries` и `employees` и считает фактические production-часы текущего месяца;
   - в stats появились отдельные карточки `План часов в этом месяце` и `Факт часов в этом месяце`;
   - factual overlay считает только production-сотрудников и не тащит management-часы в картину цеха.
+- Реализован седьмой usable slice `v111`:
+  - календарь теперь агрегирует production-часы по заказам и стадиям и уменьшает планируемый остаток автоматически;
+  - очередь и sidebar показывают `факт / план / осталось`, а не только абстрактный полный объем из калькулятора;
+  - ручное ограничение `не раньше этой даты` стало реальным scheduler constraint, а не просто UI-пометкой;
+  - safe unique-name fallback помогает подтянуть legacy production hours даже до полной ручной разметки `order_id`.
 - Добавлен и подключен новый regression smoke:
   - `/private/tmp/ro-codex-push-sync.v100/tests/production-calendar-smoke.js`
   - `.github/workflows/deploy-pages.yml`
@@ -90,12 +95,16 @@
 - `production-calendar-smoke` теперь страхует и factual overlay:
   - календарь загружает `time_entries` и `employees`;
   - factual monthly hours считают только production entries текущего месяца.
+- `production-calendar-smoke` теперь также страхует:
+  - уже сданные часы уменьшают `remaining` в scheduler;
+  - `production_not_before` реально сдвигает старт заказа;
+  - order actuals собираются по linked `order_id` и по safe unique-name fallback.
 
 ## In Progress
-- C6: manual drag/replan persistence.
+- C7: richer drag/replan persistence.
 
 ## Next
-- C6: добавить честный reorder/drag state и persist уже внутри канонического calendar model, без зависимости от legacy screen.
+- C7: добавить более удобный manual reschedule UX поверх канонического calendar model, без зависимости от legacy screen.
 
 ## Risks
 - Пока не разведен pricing capacity и planning capacity, календарь все еще может красиво врать по доступным часам.
@@ -135,6 +144,7 @@
 | 2026-03-17 | Planning capacity split | `js/calculator.js`, `js/settings.js`, `index.html`, `tests/production-calendar-smoke.js` | calendar capacity is separated from pricing worker count and gets dedicated settings | continue into China waiting readiness |
 | 2026-03-17 | China waiting / review states | `js/gantt.js`, `css/style.css`, `tests/production-calendar-smoke.js` | blocked custom orders now distinguish pending China vs received-but-unreconciled states | continue into drag persistence + factual overlay |
 | 2026-03-17 | Monthly factual overlay | `js/gantt.js`, `tests/production-calendar-smoke.js` | calendar now shows planned vs actual production hours for the current month using TimeTrack data | continue into drag/persist layer |
+| 2026-03-17 | Actual vs remaining hours | `js/gantt.js`, `js/calculator.js`, `tests/production-calendar-smoke.js` | factual order hours now reduce remaining scheduled work and manual `not before` dates actually delay start | continue into richer manual reschedule UX |
 
 ## Smoke / Demo Checklist
 - [x] В меню слева остается один понятный `Производственный календарь`.
@@ -145,6 +155,8 @@
 - [x] Заказ, который ждет mold из Китая, явно виден как blocked и не планируется раньше receipt.
 - [x] Заказ с конфликтом `Китай уже принят, но mold не reconciled` уходит в `Требуют проверки`.
 - [x] Фактические часы месяца видны отдельно от плановых.
+- [x] Уже сданные часы уменьшают остаток заказа прямо в календаре.
+- [x] На карточке заказа видно `факт / план / осталось`.
 - [ ] Mold-limited заказ не выглядит фальшиво распараллеленным.
 - [ ] При перегрузе до дедлайна экран явно показывает risk.
 - [ ] Заказ можно передвинуть bubble-ом и увидеть последствия.

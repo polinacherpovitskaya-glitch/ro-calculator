@@ -10,6 +10,7 @@ const Gantt = {
     schedule: null,
     orderSequence: [],
     actualMonthSummary: { actualHours: 0, employeeCount: 0 },
+    planState: { order_ids: [], manual_start_dates: {} },
     zoom: 'week',
     LOADABLE_STATUSES: ['sample', 'production_casting', 'production_printing', 'production_hardware', 'production_packaging', 'delivery', 'in_production'],
     STATUS_LABELS: {
@@ -32,8 +33,9 @@ const Gantt = {
                 loadEmployees().catch(() => []),
             ]);
 
-            const priorityIds = Array.isArray(planState?.order_ids)
-                ? planState.order_ids.map(x => Number(x)).filter(Number.isFinite)
+            this.planState = this.normalizePlanState(planState);
+            const priorityIds = Array.isArray(this.planState.order_ids)
+                ? this.planState.order_ids.map(x => Number(x)).filter(Number.isFinite)
                 : [];
             const priorityPos = new Map(priorityIds.map((id, index) => [id, index]));
 
@@ -62,14 +64,44 @@ const Gantt = {
                 chinaPurchasesByOrderId.get(key).push(purchase);
             });
 
-            this.orders = orderedOrders.map(order => ({
-                ...order,
-                ...this.getOrderReadiness(
-                    order,
-                    itemsByOrderId.get(Number(order.id)) || [],
-                    chinaPurchasesByOrderId.get(Number(order.id)) || []
-                ),
-            }));
+            const orderActuals = this.buildOrderActuals(timeEntries, employees, orderedOrders);
+            this.orders = orderedOrders.map(order => {
+                const actuals = orderActuals.get(Number(order.id)) || this.getEmptyOrderActuals();
+                const plannedMolding = round2(order.production_hours_plastic || 0);
+                const plannedAssembly = round2(order.production_hours_hardware || 0);
+                const plannedPackaging = round2(order.production_hours_packaging || 0);
+                const plannedTotal = round2(plannedMolding + plannedAssembly + plannedPackaging);
+                const remainingTotal = round2(
+                    Math.max(plannedMolding - actuals.molding, 0)
+                    + Math.max(plannedAssembly - actuals.assembly, 0)
+                    + Math.max(plannedPackaging - actuals.packaging, 0)
+                );
+                const actualTotalForPlan = round2(actuals.molding + actuals.assembly + actuals.packaging);
+                const progressPercent = plannedTotal > 0
+                    ? round2(Math.min((actualTotalForPlan / plannedTotal) * 100, 999))
+                    : 0;
+
+                return {
+                    ...order,
+                    production_not_before: this.planState.manual_start_dates[String(order.id)] || '',
+                    actual_hours_molding: actuals.molding,
+                    actual_hours_assembly: actuals.assembly,
+                    actual_hours_packaging: actuals.packaging,
+                    actual_hours_other: actuals.other,
+                    actual_hours_total: actuals.total,
+                    actual_hours_employee_count: actuals.employeeCount,
+                    actual_hours_entry_count: actuals.entryCount,
+                    actual_hours_resolved_by_name: actuals.resolvedByNameCount,
+                    planned_hours_total: plannedTotal,
+                    remaining_hours_total: remainingTotal,
+                    progress_percent: progressPercent,
+                    ...this.getOrderReadiness(
+                        order,
+                        itemsByOrderId.get(Number(order.id)) || [],
+                        chinaPurchasesByOrderId.get(Number(order.id)) || []
+                    ),
+                };
+            });
             this.blockedOrders = this.orders.filter(order => order.production_ready_state === 'blocked');
             this.reviewOrders = this.orders.filter(order => order.production_ready_state === 'needs_review');
             this.orderSequence = this.orders.map(order => Number(order.id));
@@ -95,6 +127,140 @@ const Gantt = {
             + (order?.production_hours_hardware || 0)
             + (order?.production_hours_packaging || 0)
         );
+    },
+
+    getEmptyOrderActuals() {
+        return {
+            molding: 0,
+            assembly: 0,
+            packaging: 0,
+            other: 0,
+            total: 0,
+            employeeCount: 0,
+            entryCount: 0,
+            resolvedByNameCount: 0,
+        };
+    },
+
+    buildOrderActuals(entries = [], employees = [], orders = []) {
+        const buckets = new Map();
+        const indexedOrders = (orders || [])
+            .map(order => ({
+                id: Number(order.id),
+                nameKey: this.normalizePersonName(order.order_name || ''),
+                tokens: this.tokenizeSearchText(order.order_name || ''),
+            }))
+            .filter(order => Number.isFinite(order.id) && order.id > 0);
+
+        indexedOrders.forEach(order => {
+            buckets.set(order.id, { ...this.getEmptyOrderActuals(), _employees: new Set() });
+        });
+
+        (entries || []).forEach(entry => {
+            const employee = this.findProductionEmployeeForEntry(entry, employees);
+            if (!employee) return;
+            const resolved = this.resolveEntryOrder(entry, indexedOrders);
+            if (!resolved) return;
+            const bucket = buckets.get(resolved.id);
+            if (!bucket) return;
+            const hours = round2(parseFloat(entry?.hours) || 0);
+            if (hours <= 0) return;
+            const phase = this.getTimeEntryPhase(entry);
+            if (phase === 'molding') bucket.molding = round2(bucket.molding + hours);
+            else if (phase === 'assembly') bucket.assembly = round2(bucket.assembly + hours);
+            else if (phase === 'packaging') bucket.packaging = round2(bucket.packaging + hours);
+            else bucket.other = round2(bucket.other + hours);
+            bucket.total = round2(bucket.total + hours);
+            bucket.entryCount += 1;
+            bucket._employees.add(String(employee.id || employee.name || entry.worker_name || ''));
+            if (resolved.source === 'name') bucket.resolvedByNameCount += 1;
+        });
+
+        buckets.forEach(bucket => {
+            bucket.employeeCount = bucket._employees.size;
+            delete bucket._employees;
+        });
+
+        return buckets;
+    },
+
+    resolveEntryOrder(entry, indexedOrders = []) {
+        if (!entry) return null;
+        const directOrderId = Number(entry.order_id);
+        if (Number.isFinite(directOrderId) && directOrderId > 0) {
+            const exact = indexedOrders.find(order => order.id === directOrderId);
+            if (exact) return { id: exact.id, source: 'order_id' };
+        }
+
+        const projectKey = this.normalizePersonName(entry.project_name || entry.project || '');
+        if (!projectKey) return null;
+
+        const exactMatches = indexedOrders.filter(order => order.nameKey === projectKey);
+        if (exactMatches.length === 1) return { id: exactMatches[0].id, source: 'name' };
+
+        const containsMatches = indexedOrders.filter(order =>
+            order.nameKey && (order.nameKey.includes(projectKey) || projectKey.includes(order.nameKey))
+        );
+        if (containsMatches.length === 1) return { id: containsMatches[0].id, source: 'name' };
+
+        const tokens = this.tokenizeSearchText(projectKey);
+        if (!tokens.length) return null;
+        const tokenMatches = indexedOrders.filter(order =>
+            tokens.every(token => order.tokens.includes(token) || order.nameKey.includes(token))
+        );
+        return tokenMatches.length === 1 ? { id: tokenMatches[0].id, source: 'name' } : null;
+    },
+
+    tokenizeSearchText(value) {
+        return this.normalizePersonName(value)
+            .split(' ')
+            .map(token => token.trim())
+            .filter(token => token.length >= 2);
+    },
+
+    getTimeEntryPhase(entry) {
+        if (!entry) return 'other';
+        const description = String(entry.task_description || entry.description || '');
+        const metaMatch = description.match(/^\[meta\](\{.*?\})\[\/meta\]/);
+        if (metaMatch) {
+            try {
+                const parsed = JSON.parse(metaMatch[1]);
+                const phase = this.mapStageToProductionPhase(parsed?.stage || parsed?.stage_key || '');
+                if (phase !== 'other') return phase;
+            } catch (e) {
+                // ignore invalid meta payloads
+            }
+        }
+        const stage = this.mapStageToProductionPhase(entry.stage || '');
+        if (stage !== 'other') return stage;
+        const stageLine = description.match(/(?:^|\n)Этап:\s*([^\n]+)/i);
+        return this.mapStageToProductionPhase(stageLine ? stageLine[1] : '');
+    },
+
+    mapStageToProductionPhase(stage) {
+        const value = this.normalizePersonName(stage);
+        if (!value) return 'other';
+        if (value.includes('casting') || value.includes('trim') || value.includes('вылив') || value.includes('срез') || value.includes('литник') || value.includes('лейник')) {
+            return 'molding';
+        }
+        if (value.includes('assembly') || value.includes('сбор')) return 'assembly';
+        if (value.includes('packaging') || value.includes('упаков')) return 'packaging';
+        return 'other';
+    },
+
+    normalizePlanState(state) {
+        const raw = state && typeof state === 'object' ? state : {};
+        const manualStartDates = {};
+        Object.entries(raw.manual_start_dates || {}).forEach(([orderId, value]) => {
+            const normalized = String(value || '').trim();
+            if (/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
+                manualStartDates[String(orderId)] = normalized;
+            }
+        });
+        return {
+            order_ids: Array.isArray(raw.order_ids) ? raw.order_ids : [],
+            manual_start_dates: manualStartDates,
+        };
     },
 
     getOrderReadiness(order, items = [], chinaPurchases = []) {
@@ -184,7 +350,10 @@ const Gantt = {
         if (currentIndex < 0 || targetIndex < 0 || targetIndex >= orderIds.length) return;
 
         [orderIds[currentIndex], orderIds[targetIndex]] = [orderIds[targetIndex], orderIds[currentIndex]];
-        await saveProductionPlanState({ order_ids: orderIds });
+        const nextState = this.normalizePlanState(this.planState);
+        nextState.order_ids = orderIds;
+        await saveProductionPlanState(nextState);
+        this.planState = nextState;
         await this.load();
     },
 
@@ -194,6 +363,25 @@ const Gantt = {
 
     async moveDown(orderId) {
         await this.moveOrder(orderId, 1);
+    },
+
+    async promptManualStart(orderId) {
+        const state = this.normalizePlanState(this.planState);
+        const current = state.manual_start_dates[String(orderId)] || '';
+        const answer = window.prompt('Старт не раньше даты (YYYY-MM-DD). Оставьте пусто, чтобы убрать ограничение.', current);
+        if (answer === null) return;
+        const normalized = String(answer || '').trim();
+        if (!normalized) {
+            delete state.manual_start_dates[String(orderId)];
+        } else if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
+            App.toast('Введите дату в формате YYYY-MM-DD');
+            return;
+        } else {
+            state.manual_start_dates[String(orderId)] = normalized;
+        }
+        await saveProductionPlanState(state);
+        this.planState = state;
+        await this.load();
     },
 
     setZoom(z) {
@@ -270,10 +458,11 @@ const Gantt = {
             const statusDot = item.deadlineEnd && item.schedule[item.schedule.length - 1]?.date > item.deadlineEnd
                 ? '<span style="color:#e11d48">&#9679;</span>'
                 : '<span style="color:#16a34a">&#9679;</span>';
+            const progress = this.getOrderProgress(item);
             return `
                 <div class="gantt-sidebar-row" title="${this.esc(item.orderName)}" onclick="App.navigate('order-detail', true, ${item.orderId})" style="cursor:pointer">
                     <div class="gantt-order-name">${statusDot} ${this.esc(this.shortName(item.orderName))}</div>
-                    <div class="gantt-order-meta">${this.esc(item.clientName || 'Без клиента')} · ${this.formatHours(item.totalHours)}</div>
+                    <div class="gantt-order-meta">${this.esc(item.clientName || 'Без клиента')} · осталось ${this.formatHours(progress.remaining)} · факт ${this.formatHours(progress.actual)}</div>
                 </div>`;
         }).join('');
 
@@ -323,7 +512,8 @@ const Gantt = {
             return;
         }
 
-        const totalHours = round2(queue.reduce((sum, item) => sum + (item.totalHours || 0), 0));
+        const totalHours = round2(queue.reduce((sum, item) => sum + (item.remainingTotalHours || item.totalHours || 0), 0));
+        const actualHours = round2(queue.reduce((sum, item) => sum + (item.actualTotalHours || 0), 0));
         const riskCount = queue.filter(item => item.deadlineEnd && item.schedule[item.schedule.length - 1]?.date > item.deadlineEnd).length;
         const blockedCount = blockedQueue.length;
         const reviewCount = reviewQueue.length;
@@ -336,10 +526,10 @@ const Gantt = {
                 <div class="gantt-queue-head">
                     <div>
                         <h3>Очередь к запуску</h3>
-                        <p>Порядок сверху задает, что начальник производства запускает раньше. Его можно быстро подвигать кнопками на карточках.</p>
+                        <p>Порядок сверху задает, что начальник производства запускает раньше. Фактические часы уменьшают остаток автоматически, так что календарь показывает то, что реально еще нужно сделать.</p>
                     </div>
                     <div class="gantt-queue-summary">
-                        <strong>${queue.length}</strong> готово к плану · <strong>${this.formatHours(totalHours)}</strong>${riskCount ? ` · <span class="text-red">${riskCount} с риском дедлайна</span>` : ''}${blockedCount ? ` · <span class="text-orange">${blockedCount} ждут молд/Китай</span>` : ''}${reviewCount ? ` · <span class="text-muted">${reviewCount} требуют проверки</span>` : ''}
+                        <strong>${queue.length}</strong> готово к плану · <strong>${this.formatHours(totalHours)}</strong> осталось · <strong>${this.formatHours(actualHours)}</strong> уже сдано${riskCount ? ` · <span class="text-red">${riskCount} с риском дедлайна</span>` : ''}${blockedCount ? ` · <span class="text-orange">${blockedCount} ждут молд/Китай</span>` : ''}${reviewCount ? ` · <span class="text-muted">${reviewCount} требуют проверки</span>` : ''}
                     </div>
                 </div>
                 ${queue.length ? `
@@ -380,20 +570,29 @@ const Gantt = {
         const deadlineRisk = !paused && item.deadlineEnd && finishDate && finishDate > item.deadlineEnd;
         const deadlineLabel = item.deadlineEnd ? this.formatDateStr(item.deadlineEnd) : 'без дедлайна';
         const phasePills = [
-            { label: 'Литьё', hours: this.getPhaseHours(item, 'molding'), color: '#f59e0b' },
-            { label: 'Сборка', hours: this.getPhaseHours(item, 'assembly'), color: '#06b6d4' },
-            { label: 'Упаковка', hours: this.getPhaseHours(item, 'packaging'), color: '#8b5cf6' },
-        ].filter(phase => phase.hours > 0).map(phase => `
-            <span class="gantt-queue-phase-pill" style="--phase-color:${phase.color}">${phase.label}: ${this.formatHours(phase.hours)}</span>`).join('');
+            { label: 'Литьё', key: 'molding', color: '#f59e0b' },
+            { label: 'Сборка', key: 'assembly', color: '#06b6d4' },
+            { label: 'Упаковка', key: 'packaging', color: '#8b5cf6' },
+        ].map(phase => {
+            const summary = this.getPhaseProgress(item, phase.key);
+            if (summary.planned <= 0 && summary.actual <= 0) return '';
+            return `<span class="gantt-queue-phase-pill" style="--phase-color:${phase.color}">${phase.label}: ${this.formatHours(summary.actual)} / ${this.formatHours(summary.planned)}</span>`;
+        }).filter(Boolean).join('');
+        const manualStart = item.notBeforeDate || item.production_not_before || '';
+        const progress = this.getOrderProgress(item);
+        const progressLabel = progress.overrun > 0
+            ? `Факт ${this.formatHours(progress.actual)} из ${this.formatHours(progress.planned)} · перерасход +${this.formatHours(progress.overrun)}`
+            : `Факт ${this.formatHours(progress.actual)} из ${this.formatHours(progress.planned)} · осталось ${this.formatHours(progress.remaining)}`;
 
         return `
             <article class="gantt-queue-card ${deadlineRisk ? 'risk' : ''} ${blocked ? 'blocked' : ''} ${review ? 'review' : ''}" onclick="App.navigate('order-detail', true, ${item.orderId || item.id})">
                 <div class="gantt-queue-card-top">
                     <div>
                         <div class="gantt-queue-title">${this.esc(item.orderName || item.order_name)}</div>
-                        <div class="gantt-queue-meta">${this.esc(this.getStatusLabel(item.status))} · ${this.esc(item.clientName || item.client_name || 'Без клиента')} · ${this.formatHours(item.totalHours || this.getOrderTotalHours(item))}</div>
+                        <div class="gantt-queue-meta">${this.esc(this.getStatusLabel(item.status))} · ${this.esc(item.clientName || item.client_name || 'Без клиента')} · осталось ${this.formatHours(progress.remaining)}</div>
                     </div>
                     <div class="gantt-queue-controls">
+                        <button class="btn btn-sm btn-outline" onclick="event.stopPropagation(); Gantt.promptManualStart(${item.orderId || item.id})" title="${manualStart ? 'Изменить дату «не раньше»' : 'Задать дату «не раньше»'}">&#128197;</button>
                         <button class="btn btn-sm btn-outline" onclick="event.stopPropagation(); Gantt.moveUp(${item.orderId || item.id})" title="Поднять в очереди">&#8593;</button>
                         <button class="btn btn-sm btn-outline" onclick="event.stopPropagation(); Gantt.moveDown(${item.orderId || item.id})" title="Опустить в очереди">&#8595;</button>
                     </div>
@@ -402,7 +601,9 @@ const Gantt = {
                     <strong>${paused ? 'Старт:' : 'План:'}</strong> ${paused ? 'ждет готовности' : this.formatDateRange(startDate, finishDate)}
                     <span> · </span>
                     <strong>Дедлайн:</strong> ${deadlineLabel}
+                    ${manualStart ? `<span> · </span><strong>Не раньше:</strong> ${this.formatDateStr(manualStart)}` : ''}
                 </div>
+                <div class="gantt-queue-progress">${progressLabel}${item.actual_hours_employee_count ? ` · ${item.actual_hours_employee_count} сотр.` : ''}</div>
                 <div class="gantt-queue-phases">${phasePills || '<span class="text-muted">Нет производственных часов</span>'}</div>
                 <div class="gantt-queue-footer">
                     <span class="gantt-queue-badge ${blocked ? 'blocked' : review ? 'review' : (deadlineRisk ? 'risk' : 'ok')}">${blocked || review ? this.esc(item.production_blocked_reason || (review ? 'Требует проверки' : 'Ждет молд')) : (deadlineRisk ? 'Риск дедлайна' : 'Вмещается в план')}</span>
@@ -555,6 +756,8 @@ const Gantt = {
             .reduce((sum, day) => sum + (day.totalUsed || 0), 0));
         const actualMonthHours = round2(this.actualMonthSummary?.actualHours || 0);
         const actualMonthEmployees = Number(this.actualMonthSummary?.employeeCount || 0);
+        const activeActualHours = round2(queue.reduce((sum, item) => sum + (item.actualTotalHours || 0), 0));
+        const activeRemainingHours = round2(queue.reduce((sum, item) => sum + (item.remainingTotalHours || item.totalHours || 0), 0));
 
         statsEl.innerHTML = `
             <div class="stat-card">
@@ -580,6 +783,10 @@ const Gantt = {
             <div class="stat-card">
                 <div class="stat-value">${this.formatHours(actualMonthHours)}</div>
                 <div class="stat-label">Факт часов в этом месяце${actualMonthEmployees ? ` · ${actualMonthEmployees} сотр.` : ''}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">${this.formatHours(activeRemainingHours)}</div>
+                <div class="stat-label">Осталось по активным заказам · факт ${this.formatHours(activeActualHours)}</div>
             </div>`;
     },
 
@@ -613,6 +820,23 @@ const Gantt = {
 
     getPhaseHours(item, phaseName) {
         return round2((item.phases || []).find(phase => phase.name === phaseName)?.total || 0);
+    },
+
+    getPhaseProgress(item, phaseName) {
+        const phase = (item.phases || []).find(entry => entry.name === phaseName) || {};
+        return {
+            planned: round2(phase.total || 0),
+            actual: round2(phase.actual || 0),
+            remaining: round2(phase.remaining || 0),
+        };
+    },
+
+    getOrderProgress(item) {
+        const planned = round2(item.plannedTotalHours || this.getOrderTotalHours(item));
+        const actual = round2(item.actualTotalHours || 0);
+        const remaining = round2(item.remainingTotalHours != null ? item.remainingTotalHours : Math.max(planned - actual, 0));
+        const overrun = round2(Math.max(actual - planned, 0));
+        return { planned, actual, remaining, overrun };
     },
 
     buildActualMonthSummary(entries = [], employees = [], referenceDate = new Date()) {
