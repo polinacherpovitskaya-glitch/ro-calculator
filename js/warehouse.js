@@ -1375,8 +1375,48 @@ const Warehouse = {
         const managerName = App.getCurrentEmployeeName() || order.manager_name || '';
         const nowIso = new Date().toISOString();
         let reservations = await loadWarehouseReservations();
+        const history = await loadWarehouseHistory();
+        const historyDeltaMap = this._buildProjectHardwareHistoryDeltaMap(history);
 
         if (checked) {
+            const consumedQty = this._getProjectHardwareConsumedQty(normalizedOrderId, normalizedItemId, historyDeltaMap);
+            const missingQty = Math.max(0, qty - consumedQty);
+            if (missingQty > 0) {
+                const items = await loadWarehouseItems();
+                const whItem = (items || []).find(i => Number(i.id) === normalizedItemId) || null;
+                const stockQty = parseFloat(whItem && whItem.qty) || 0;
+                if (stockQty + 0.000001 < missingQty) {
+                    App.toast('Не удалось отметить как собрано: недостаточно остатка');
+                    return;
+                }
+
+                const result = await this.adjustStock(
+                    normalizedItemId,
+                    -missingQty,
+                    'deduction',
+                    order.order_name || 'Заказ',
+                    `Списание собранной фурнитуры: ${missingQty} шт`,
+                    managerName,
+                    { order_id: normalizedOrderId }
+                );
+                const appliedQty = Math.max(0, -(parseFloat(result && result.appliedQtyChange) || 0));
+                if (!result || result.ok === false || appliedQty + 0.000001 < missingQty) {
+                    if (appliedQty > 0) {
+                        await this.adjustStock(
+                            normalizedItemId,
+                            appliedQty,
+                            'addition',
+                            order.order_name || 'Заказ',
+                            `Откат неполного списания собранной фурнитуры: ${appliedQty} шт`,
+                            managerName,
+                            { order_id: normalizedOrderId }
+                        );
+                    }
+                    App.toast('Не удалось отметить как собрано: недостаточно остатка');
+                    return;
+                }
+            }
+
             reservations.forEach(r => {
                 if (r.status !== 'active') return;
                 if (Number(r.order_id) !== normalizedOrderId) return;
@@ -1386,70 +1426,59 @@ const Warehouse = {
                 r.released_at = nowIso;
             });
 
-            if (qty > 0) {
+            this.projectHardwareState.checks[key] = true;
+            App.toast(missingQty > 0 ? 'Фурнитура списана со склада' : 'Фурнитура уже была списана со склада');
+        } else {
+            delete this.projectHardwareState.checks[key];
+            const returnQty = this._getProjectHardwareConsumedQty(normalizedOrderId, normalizedItemId, historyDeltaMap);
+
+            if (returnQty > 0) {
                 await this.adjustStock(
                     normalizedItemId,
-                    -qty,
-                    'deduction',
+                    returnQty,
+                    'addition',
                     order.order_name || 'Заказ',
-                    `Списание собранной фурнитуры: ${qty} шт`,
+                    `Возврат собранной фурнитуры: ${returnQty} шт`,
                     managerName,
                     { order_id: normalizedOrderId }
                 );
             }
 
-            this.projectHardwareState.checks[key] = true;
-            App.toast('Фурнитура списана со склада');
-        } else {
-            delete this.projectHardwareState.checks[key];
+            if (qty > 0 && this._isProjectHardwareReserveStatus(order.status)) {
+                const items = await loadWarehouseItems();
+                const activeByItem = new Map();
+                reservations.forEach(r => {
+                    if (r.status !== 'active') return;
+                    const resItemId = Number(r.item_id || 0);
+                    if (!resItemId) return;
+                    activeByItem.set(resItemId, (activeByItem.get(resItemId) || 0) + (parseFloat(r.qty) || 0));
+                });
 
-            if (qty > 0) {
-                await this.adjustStock(
-                    normalizedItemId,
-                    qty,
-                    'addition',
-                    order.order_name || 'Заказ',
-                    `Возврат собранной фурнитуры: ${qty} шт`,
-                    managerName,
-                    { order_id: normalizedOrderId }
-                );
-
-                if (this._isProjectHardwareReserveStatus(order.status)) {
-                    const items = await loadWarehouseItems();
-                    const activeByItem = new Map();
-                    reservations.forEach(r => {
-                        if (r.status !== 'active') return;
-                        const resItemId = Number(r.item_id || 0);
-                        if (!resItemId) return;
-                        activeByItem.set(resItemId, (activeByItem.get(resItemId) || 0) + (parseFloat(r.qty) || 0));
+                const whItem = items.find(i => Number(i.id) === normalizedItemId);
+                const stockQty = parseFloat(whItem && whItem.qty) || 0;
+                const alreadyReserved = activeByItem.get(normalizedItemId) || 0;
+                const available = Math.max(0, stockQty - alreadyReserved);
+                const reserveQty = Math.min(qty, available);
+                if (reserveQty > 0) {
+                    reservations.push({
+                        id: Date.now() + Math.floor(Math.random() * 1000),
+                        item_id: normalizedItemId,
+                        order_id: normalizedOrderId,
+                        order_name: order.order_name || 'Заказ',
+                        qty: reserveQty,
+                        status: 'active',
+                        source: 'project_hardware',
+                        created_at: nowIso,
+                        created_by: managerName || '',
                     });
-
-                    const whItem = items.find(i => Number(i.id) === normalizedItemId);
-                    const stockQty = parseFloat(whItem && whItem.qty) || 0;
-                    const alreadyReserved = activeByItem.get(normalizedItemId) || 0;
-                    const available = Math.max(0, stockQty - alreadyReserved);
-                    const reserveQty = Math.min(qty, available);
-                    if (reserveQty > 0) {
-                        reservations.push({
-                            id: Date.now() + Math.floor(Math.random() * 1000),
-                            item_id: normalizedItemId,
-                            order_id: normalizedOrderId,
-                            order_name: order.order_name || 'Заказ',
-                            qty: reserveQty,
-                            status: 'active',
-                            source: 'project_hardware',
-                            created_at: nowIso,
-                            created_by: managerName || '',
-                        });
-                    }
-                    if (reserveQty < qty) {
-                        App.toast('Фурнитура возвращена не в полный резерв: недостаточно остатка');
-                    } else {
-                        App.toast('Фурнитура возвращена в резерв');
-                    }
-                } else {
-                    App.toast('Фурнитура возвращена на склад');
                 }
+                if (reserveQty < qty) {
+                    App.toast('Фурнитура возвращена не в полный резерв: недостаточно остатка');
+                } else {
+                    App.toast('Фурнитура возвращена в резерв');
+                }
+            } else if (returnQty > 0) {
+                App.toast('Фурнитура возвращена на склад');
             } else {
                 App.toast('Флаг сборки снят');
             }
@@ -1522,12 +1551,43 @@ const Warehouse = {
         return deltaByKey;
     },
 
+    _getProjectHardwareHistoryNetDelta(orderId, itemId, historyDeltaMap) {
+        const key = this._projectHardwareKey(orderId, itemId);
+        return historyDeltaMap instanceof Map ? (parseFloat(historyDeltaMap.get(key)) || 0) : 0;
+    },
+
+    _getProjectHardwareConsumedQty(orderId, itemId, historyDeltaMap) {
+        return Math.max(0, -this._getProjectHardwareHistoryNetDelta(orderId, itemId, historyDeltaMap));
+    },
+
     _isProjectHardwareHistoricallyReady(orderId, itemId, requiredQty, historyDeltaMap) {
         const qty = parseFloat(requiredQty || 0) || 0;
         if (!qty) return false;
-        const key = this._projectHardwareKey(orderId, itemId);
-        const netDelta = historyDeltaMap instanceof Map ? (parseFloat(historyDeltaMap.get(key)) || 0) : 0;
-        return netDelta <= (-qty + 0.000001);
+        return this._getProjectHardwareConsumedQty(orderId, itemId, historyDeltaMap) >= (qty - 0.000001);
+    },
+
+    _hasProjectHardwareClampedShortfall(orderId, itemId, requiredQty, history, historyDeltaMap) {
+        const qty = parseFloat(requiredQty || 0) || 0;
+        if (!qty) return false;
+        if (this._getProjectHardwareConsumedQty(orderId, itemId, historyDeltaMap) >= (qty - 0.000001)) {
+            return false;
+        }
+        return (history || []).some(entry =>
+            Number(entry.order_id || 0) === Number(orderId || 0)
+            && Number(entry.item_id || 0) === Number(itemId || 0)
+            && String(entry.type || '').toLowerCase() === 'deduction'
+            && !!entry.clamped
+            && /списание собранной фурнитуры/i.test(String(entry.notes || ''))
+        );
+    },
+
+    _computeProjectHardwareReadyState(orderId, itemId, requiredQty, history, historyDeltaMap) {
+        const savedReady = this._isProjectHardwareReady(orderId, itemId);
+        const historicalReady = this._isProjectHardwareHistoricallyReady(orderId, itemId, requiredQty, historyDeltaMap);
+        if (savedReady && this._hasProjectHardwareClampedShortfall(orderId, itemId, requiredQty, history, historyDeltaMap)) {
+            return false;
+        }
+        return savedReady || historicalReady;
     },
 
     _setProjectHardwareReadyFlag(orderId, itemId, isReady) {
@@ -1578,8 +1638,7 @@ const Warehouse = {
             demand.forEach((qty, itemId) => {
                 const key = this._projectHardwareKey(order.id, itemId);
                 trackedKeys.add(key);
-                const isReady = this._isProjectHardwareReady(order.id, itemId)
-                    || this._isProjectHardwareHistoricallyReady(order.id, itemId, qty, historyDeltaMap);
+                const isReady = this._computeProjectHardwareReadyState(order.id, itemId, qty, history, historyDeltaMap);
                 if (this._setProjectHardwareReadyFlag(order.id, itemId, isReady)) {
                     stateChanged = true;
                 }
@@ -1746,8 +1805,7 @@ const Warehouse = {
             const currentQty = currentDemand.get(itemId) || 0;
             const previousQty = previousDemand.get(itemId) || 0;
             const isReady = currentQty > 0
-                ? (this._isProjectHardwareReady(normalizedOrderId, itemId)
-                    || this._isProjectHardwareHistoricallyReady(normalizedOrderId, itemId, currentQty, historyDeltaMap))
+                ? this._computeProjectHardwareReadyState(normalizedOrderId, itemId, currentQty, history, historyDeltaMap)
                 : false;
 
             if (this._setProjectHardwareReadyFlag(normalizedOrderId, itemId, currentQty > 0 && isReady)) {

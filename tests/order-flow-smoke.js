@@ -1089,6 +1089,177 @@ async function smokeProjectHardwarePersistenceAndBuckets(context) {
     assert.match(html, /Собрано 0 из 1/);
 }
 
+async function smokeProjectHardwareToggleShortageGuard(context) {
+    const originalWarehouseLoad = vm.runInContext('Warehouse.load', context);
+    context.__originalWarehouseLoad = originalWarehouseLoad;
+    const baseOrder = {
+        id: 42,
+        order_name: 'Shortage Project Order',
+        manager_name: 'Smoke',
+        status: 'production_hardware',
+        created_at: '2026-03-17T11:00:00.000Z',
+    };
+    const baseDetail = {
+        order: clone(baseOrder),
+        items: [{
+            item_type: 'hardware',
+            product_name: 'Shortage Hardware Product',
+            quantity: 5,
+            hardware_source: 'warehouse',
+            hardware_warehouse_item_id: 501,
+        }],
+    };
+
+    context.__projectHardwareState = { checks: {} };
+    context.__reservations = [{
+        id: 1,
+        item_id: 501,
+        order_id: 42,
+        order_name: 'Shortage Project Order',
+        qty: 2,
+        status: 'active',
+        source: 'project_hardware',
+        created_at: '2026-03-17T11:00:00.000Z',
+    }];
+    context.__warehouseItems = [{
+        id: 501,
+        name: 'Shortage Hardware',
+        sku: 'SH-1',
+        category: 'hardware',
+        qty: 2,
+        price_per_unit: 10,
+    }];
+    context.__warehouseHistory = [];
+    context.__orderDetails = { 42: baseDetail };
+    context.loadProjectHardwareState = async () => clone(context.__projectHardwareState);
+    context.saveProjectHardwareState = async (state) => {
+        context.__projectHardwareState = clone(state);
+    };
+    context.loadWarehouseReservations = async () => clone(context.__reservations);
+    context.saveWarehouseReservations = async (reservations) => {
+        context.__reservations = clone(reservations);
+    };
+    context.loadWarehouseItems = async () => clone(context.__warehouseItems);
+    context.saveWarehouseItems = async (items) => {
+        context.__warehouseItems = clone(items);
+    };
+    context.loadWarehouseHistory = async () => clone(context.__warehouseHistory);
+    context.saveWarehouseHistory = async (history) => {
+        context.__warehouseHistory = clone(history);
+    };
+    context.loadOrder = async (orderId) => clone(context.__orderDetails[Number(orderId)] || null);
+    context.__toasts = [];
+    vm.runInContext(`App.toast = (message) => { globalThis.__toasts.push(String(message || '')); };`, context);
+    vm.runInContext(`
+        Warehouse.projectHardwareState = null;
+        Warehouse.load = async () => {};
+    `, context);
+
+    try {
+        await vm.runInContext(`Warehouse.toggleProjectHardwareReady(42, 501, true)`, context);
+
+        assert.equal(Boolean(context.__projectHardwareState.checks['42:501']), false);
+        assert.equal(context.__warehouseItems[0].qty, 2);
+        assert.equal(context.__warehouseHistory.length, 0);
+        assert.equal(context.__reservations[0].status, 'active');
+        assert.ok(context.__toasts.some(message => /не удалось отметить как собрано/i.test(message)));
+
+        context.__projectHardwareState = { checks: { '42:501': true } };
+        context.__reservations = [];
+        context.__warehouseItems = [{
+            id: 501,
+            name: 'Shortage Hardware',
+            sku: 'SH-1',
+            category: 'hardware',
+            qty: 0,
+            price_per_unit: 10,
+        }];
+        context.__warehouseHistory = [{
+            id: 11,
+            item_id: 501,
+            item_name: 'Shortage Hardware',
+            item_sku: 'SH-1',
+            item_category: 'hardware',
+            type: 'deduction',
+            qty_change: -2,
+            requested_qty_change: -5,
+            qty_before: 2,
+            qty_after: 0,
+            unit_price: 10,
+            total_cost_change: 20,
+            order_id: 42,
+            order_name: 'Shortage Project Order',
+            notes: 'Списание собранной фурнитуры: 5 шт',
+            clamped: true,
+            created_at: '2026-03-17T11:05:00.000Z',
+            created_by: 'Smoke',
+        }];
+        context.__toasts = [];
+        vm.runInContext(`Warehouse.projectHardwareState = null;`, context);
+
+        await vm.runInContext(`Warehouse.toggleProjectHardwareReady(42, 501, false)`, context);
+
+        assert.equal(Boolean(context.__projectHardwareState.checks['42:501']), false);
+        assert.equal(context.__warehouseItems[0].qty, 2);
+        assert.equal(context.__warehouseHistory.length, 2);
+        assert.equal(context.__warehouseHistory[1].qty_change, 2);
+        assert.equal(context.__warehouseHistory[1].requested_qty_change, 2);
+        assert.match(context.__warehouseHistory[1].notes, /Возврат собранной фурнитуры: 2 шт/);
+        const restoredReservation = context.__reservations.find(item => item.order_id === 42 && item.status === 'active');
+        assert.equal(restoredReservation.qty, 2);
+        assert.ok(context.__toasts.some(message => /не в полный резерв/i.test(message)));
+
+        context.__projectHardwareState = { checks: { '42:501': true } };
+        context.__reservations = [];
+        context.__warehouseItems = [{
+            id: 501,
+            name: 'Shortage Hardware',
+            sku: 'SH-1',
+            category: 'hardware',
+            qty: 0,
+        }];
+        context.__warehouseHistory = [{
+            id: 12,
+            item_id: 501,
+            item_name: 'Shortage Hardware',
+            item_sku: 'SH-1',
+            item_category: 'hardware',
+            type: 'deduction',
+            qty_change: -2,
+            requested_qty_change: -5,
+            qty_before: 2,
+            qty_after: 0,
+            unit_price: 10,
+            total_cost_change: 20,
+            order_id: 42,
+            order_name: 'Shortage Project Order',
+            notes: 'Списание собранной фурнитуры: 5 шт',
+            clamped: true,
+            created_at: '2026-03-17T11:05:00.000Z',
+            created_by: 'Smoke',
+        }];
+        context.__orders = [clone(baseOrder)];
+        context.__orderDetails = { 42: clone(baseDetail) };
+        context.loadOrders = async () => clone(context.__orders);
+        context.loadOrder = async (orderId) => clone(context.__orderDetails[Number(orderId)] || null);
+        vm.runInContext(`
+            Warehouse.projectHardwareState = null;
+            Warehouse.allItems = globalThis.__warehouseItems;
+        `, context);
+
+        const reconcileResult = clone(await vm.runInContext(`Warehouse.reconcileProjectHardwareReservations()`, context));
+
+        assert.equal(reconcileResult.stateChanged, true);
+        assert.equal(vm.runInContext(`Warehouse._isProjectHardwareReady(42, 501)`, context), false);
+    } finally {
+        context.__toasts = [];
+        vm.runInContext(`
+            Warehouse.load = globalThis.__originalWarehouseLoad;
+            delete globalThis.__originalWarehouseLoad;
+        `, context);
+    }
+}
+
 async function smokeOrderDetailColorRendering(context) {
     const rendered = String(await vm.runInContext(`(() => {
         const rawProduct = {
@@ -1148,6 +1319,7 @@ async function main() {
     await smokeOrderStatusWarehouseSync(context);
     await smokeWarehouseManualAdjustment(context);
     await smokeProjectHardwarePersistenceAndBuckets(context);
+    await smokeProjectHardwareToggleShortageGuard(context);
     await smokeOrderDetailColorRendering(context);
 
     console.log('order-flow smoke checks passed');

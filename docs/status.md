@@ -1,7 +1,7 @@
 # Status
 
 ## Snapshot
-- Current phase: M3/M4 - build-source sanity locked, continuing warehouse shortage + auth remediation
+- Current phase: M3/M4 - build-source sanity locked, continuing warehouse shortage hardening + auth remediation
 - Plan file: `/Users/krollipolli/Documents/Github/RO calculator/docs/plans.md`
 - Status: yellow
 - Last updated: 2026-03-17
@@ -60,22 +60,23 @@
 - Закрыт второй `План-факт` drift: когда пересчитанные статьи расходились с сохраненным `total_cost_plan`, деталка больше не показывала ложный `ИТОГО`; теперь total опирается на сохраненный план заказа и честно помечает расхождение пересчета.
 - Закрыт warehouse rollback drift для packaging: после clamped-списания при нехватке остатка rollback теперь возвращает на склад только фактически списанное количество, а не полный спрос заказа; одновременно `draft -> sample` снова предупреждает о частичном резерве упаковки.
 - Починен `project_hardware` reload drift: галочки по собранной фурнитуре больше не сбрасываются на следующей загрузке; собранные, но еще не завершенные заказы уходят в блок `Собрано`, а `completed + собрано` скрывается со складской доски автоматически.
+- Закрыт `project_hardware` shortage bug: галочка `собрано` больше не ставится ложно при нехватке остатка, stale clamped-state самоснимается при reconcile, а снятие галочки возвращает только фактически списанное количество вместо полного спроса.
 
 ## In Progress
-- Продолжение Phase 0/1 для auth: forced reset/storage migration path, live verification и оставшиеся warehouse edge cases с нехваткой/partial reserve.
+- Продолжение Phase 0/1 для auth: forced reset/storage migration path, live verification и оставшиеся warehouse edge cases после shortage-safe toggle fix.
 - Повторная live/browser проверка складских edge cases уже с зафиксированным deploy source, чтобы локальный smoke и публичный релиз больше не путались между собой.
 - Повторная live/browser проверка `План-факт/FinTablo` perimeter после sync-fix и factual drift hotfix.
 - Повторная live/browser проверка `warehouse/orders` perimeter после hardening partial reserve / rollback logic.
 - Продолжение auth migration после закрытия restore/permissions gap: forced reset/storage move и clean login/logout flow уже на более реалистичном fixture path.
-- Повторная near-live проверка `project_hardware` уже на реальных складских данных после sticky-check fix, блока `Собрано` и auto-hide для завершенных заказов.
+- Повторная near-live проверка `project_hardware` уже на реальных складских данных после sticky-check fix, shortage-safe toggle, блока `Собрано` и auto-hide для завершенных заказов.
 
 ## Next
-- Закрыть первый незавершенный пункт M3: partial reserve, возврат и списание при нехватке warehouse hardware/packaging.
+- Закрыть первый незавершенный пункт M3: partial reserve, возврат и списание при нехватке warehouse hardware/packaging уже на live-click path.
 - Дойти от частичного Phase 0 до forced reset/storage migration path из `/Users/krollipolli/Documents/Github/RO calculator/docs/auth-remediation-plan.md`.
 - Перепроверить live browser perimeter для `warehouse/ready goods` на реальных кликах после расширения smoke coverage.
 - Перепроверить tasks/projects regression perimeter и собрать финальный handoff по live gaps.
 - Добить clean login/logout browser path уже без bootstrap existing-user session.
-- Наблюдать live-поведение нового правила: `completed + собрано` скрывается автоматически, остальные собранные остаются в `Собрано`.
+- Наблюдать live-поведение новых правил: shortage-safe toggle, `completed + собрано` скрывается автоматически, остальные собранные остаются в `Собрано`.
 
 ## Decisions Made
 - Старый план заменен как source of truth, потому что пользовательский запрос сменил продуктовый фокус с задач/проектов на сквозной аудит order lifecycle.
@@ -108,6 +109,7 @@ curl -s 'https://polinacherpovitskaya-glitch.github.io/ro-calculator/' | rg 'js/
 - Auth risk снижен, но не снят: login/session model все еще client-side, а legacy remote payload с `password_plain` остается опасным, пока не пройдет полноценный scrub/migration path.
 - Автосоздание логинов временно отключено; для новых сотрудников логины сейчас нужно заводить вручную до следующей фазы remediation.
 - `factual/import` еще не прогнаны отдельным полным live loop на публичном билде после sync с `FinTablo`; сейчас закрыт подтвержденный totals-bug и добавлен узкий regression smoke.
+- Локальный Playwright MCP в этой сессии флапает на launch timeout, поэтому свежий shortage-toggle hotfix подтвержден reproducible smoke coverage и будет дополнительно проверен по публичному билду после deploy.
 
 ## Audit Log
 | Date | Milestone | Files | Commands | Result | Next |
@@ -140,6 +142,7 @@ curl -s 'https://polinacherpovitskaya-glitch.github.io/ro-calculator/' | rg 'js/
 | 2026-03-17 | Packaging rollback integrity | `js/orders.js`, `tests/order-flow-smoke.js`, `index.html` | `node --check js/orders.js && node --check tests/order-flow-smoke.js && node tests/order-flow-smoke.js` | fail -> fixed | Прогнать полный gate set и перепроверить local/public warehouse perimeter |
 | 2026-03-17 | Auth restore boundary | `js/app.js`, `tests/auth-hardening-smoke.js`, `index.html` | `node --check js/app.js && node tests/auth-hardening-smoke.js` + browser runtime auth sanity on local server | fail -> fixed | Прогнать полный gate set, public deploy и идти в forced reset/storage migration |
 | 2026-03-17 | Project hardware sticky checks | `js/warehouse.js`, `tests/order-flow-smoke.js`, `index.html` | `node --check js/warehouse.js && node tests/order-flow-smoke.js` + browser runtime warehouse sanity on local server | fail -> fixed | Перепроверить live project hardware data после auto-hide правила для `completed + собрано` |
+| 2026-03-17 | Project hardware shortage toggle | `js/warehouse.js`, `tests/order-flow-smoke.js`, `index.html` | `node --check js/warehouse.js && node tests/order-flow-smoke.js` + full smoke gate set | fail -> fixed | Пушнуть публичный билд и проверить `warehouse.js?v=95` |
 
 ## Smoke / Demo Checklist
 - [x] Root app стабильно грузится локально и дает пройти навигацию `orders -> colors -> warehouse -> china` без blocker-level runtime errors.
