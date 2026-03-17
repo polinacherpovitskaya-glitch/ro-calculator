@@ -14,6 +14,7 @@ const Settings = {
     authActivityData: [],
     authSessionsData: [],
     editingAuthAccountId: null,
+    lastIssuedAuthCredentials: null,
     // Tabs that require admin access
     ADMIN_TABS: new Set(['indirect', 'costs', 'logins', 'sessions', 'backup']),
 
@@ -618,6 +619,7 @@ const Settings = {
         this.authActivityData = await loadAuthActivity();
         this.renderAuthAccountsTable();
         this.renderAuthActivityTable();
+        this.renderIssuedAuthCredentials();
     },
 
     normalizeNameForLogin(name) {
@@ -636,12 +638,27 @@ const Settings = {
         return `${stem}_ro`;
     },
 
-    getUniqueAutoUsername(baseUsername) {
-        const used = new Set((this.authAccountsData || []).map(a => String(a.username || '').toLowerCase()).filter(Boolean));
+    getUniqueAutoUsername(baseUsername, excludeAccountId = null) {
+        const used = new Set((this.authAccountsData || [])
+            .filter(a => String(a.id) !== String(excludeAccountId || ''))
+            .map(a => String(a.username || '').toLowerCase())
+            .filter(Boolean));
         if (!used.has(baseUsername.toLowerCase())) return baseUsername.toLowerCase();
         let i = 1;
         while (used.has(`${baseUsername.toLowerCase()}_${i}`)) i++;
         return `${baseUsername.toLowerCase()}_${i}`;
+    },
+
+    getExistingAuthAccountByEmployeeId(employeeId, excludeAccountId = null) {
+        return (this.authAccountsData || []).find(a =>
+            String(a.employee_id || '') === String(employeeId || '') &&
+            String(a.id) !== String(excludeAccountId || '')
+        ) || null;
+    },
+
+    getSuggestedUsernameForEmployee(employee, excludeAccountId = null) {
+        if (!employee) return '';
+        return this.getUniqueAutoUsername(this.getAutoLoginBase(employee.name), excludeAccountId);
     },
 
     generateStrongPassword(length = 12) {
@@ -689,23 +706,36 @@ const Settings = {
     showAddAuthAccount() {
         this.editingAuthAccountId = null;
         this.clearAuthAccountForm();
-        this.populateAuthEmployeeSelect();
+        this.populateAuthEmployeeSelect(true);
         document.getElementById('auth-account-form').style.display = '';
         document.getElementById('auth-account-delete-btn').style.display = 'none';
+        const select = document.getElementById('auth-account-employee');
+        if (select && select.value) {
+            this._renderAuthPageCheckboxes(select.value);
+            this.prefillSuggestedAuthCredentials(select.value);
+        }
     },
 
-    populateAuthEmployeeSelect() {
+    populateAuthEmployeeSelect(preferEmployeesWithoutAccount = false) {
         const select = document.getElementById('auth-account-employee');
         if (!select) return;
-        // When employee changes, update page checkboxes
+        const active = (this.employeesData || []).filter(e => e.is_active !== false);
+        const employeesWithoutAccount = active.filter(e => !this.getExistingAuthAccountByEmployeeId(e.id, this.editingAuthAccountId));
+        const source = preferEmployeesWithoutAccount && employeesWithoutAccount.length ? employeesWithoutAccount : active;
+        const placeholder = source.length ? '-- Выберите сотрудника --' : '-- Нет сотрудников без логина --';
+
         select.onchange = () => {
             const empId = select.value;
-            if (empId) this._renderAuthPageCheckboxes(empId);
+            if (!empId) return;
+            this._renderAuthPageCheckboxes(empId);
+            if (!this.editingAuthAccountId) this.prefillSuggestedAuthCredentials(empId);
         };
-        const active = (this.employeesData || []).filter(e => e.is_active !== false);
-        let html = '<option value="">-- Выберите сотрудника --</option>';
-        html += active.map(e => `<option value="${this.escHtml(String(e.id))}">${this.escHtml(e.name || '')}</option>`).join('');
+        let html = `<option value="">${placeholder}</option>`;
+        html += source.map(e => `<option value="${this.escHtml(String(e.id))}">${this.escHtml(e.name || '')}</option>`).join('');
         select.innerHTML = html;
+        if (!this.editingAuthAccountId && source.length === 1) {
+            select.value = String(source[0].id);
+        }
     },
 
     clearAuthAccountForm() {
@@ -719,6 +749,36 @@ const Settings = {
         if (passEl) passEl.value = '';
         const activeEl = document.getElementById('auth-account-active');
         if (activeEl) activeEl.value = '1';
+    },
+
+    prefillSuggestedAuthCredentials(employeeId) {
+        const employee = (this.employeesData || []).find(e => String(e.id) === String(employeeId || ''));
+        if (!employee) return;
+
+        const userEl = document.getElementById('auth-account-username');
+        const passEl = document.getElementById('auth-account-password');
+        if (userEl) userEl.value = this.getSuggestedUsernameForEmployee(employee, this.editingAuthAccountId);
+        if (passEl) passEl.value = this.generateStrongPassword(12);
+    },
+
+    generateSuggestedAuthUsername() {
+        const employeeId = document.getElementById('auth-account-employee')?.value || '';
+        if (!employeeId) {
+            App.toast('Сначала выберите сотрудника');
+            return;
+        }
+        const employee = (this.employeesData || []).find(e => String(e.id) === String(employeeId));
+        if (!employee) {
+            App.toast('Сотрудник не найден');
+            return;
+        }
+        const userEl = document.getElementById('auth-account-username');
+        if (userEl) userEl.value = this.getSuggestedUsernameForEmployee(employee, this.editingAuthAccountId);
+    },
+
+    generateSuggestedAuthPassword() {
+        const passEl = document.getElementById('auth-account-password');
+        if (passEl) passEl.value = this.generateStrongPassword(12);
     },
 
     cancelAuthAccount() {
@@ -774,20 +834,43 @@ const Settings = {
 
     async saveAuthAccount() {
         const employeeId = parseInt(document.getElementById('auth-account-employee').value, 10);
-        const username = (document.getElementById('auth-account-username').value || '').trim().toLowerCase();
-        const password = document.getElementById('auth-account-password').value || '';
+        const rawUsername = (document.getElementById('auth-account-username').value || '').trim().toLowerCase();
+        const typedPassword = String(document.getElementById('auth-account-password').value || '').trim();
         const isActive = document.getElementById('auth-account-active').value === '1';
 
         if (!employeeId) { App.toast('Выберите сотрудника'); return; }
-        if (!username) { App.toast('Введите логин'); return; }
 
         const employee = (this.employeesData || []).find(e => Number(e.id) === employeeId);
         if (!employee) { App.toast('Сотрудник не найден'); return; }
 
+        if (!this.editingAuthAccountId) {
+            const existingForEmployee = this.getExistingAuthAccountByEmployeeId(employeeId);
+            if (existingForEmployee) {
+                this.editAuthAccount(existingForEmployee.id);
+                App.toast('У этого сотрудника уже есть логин — открыла его для редактирования');
+                return;
+            }
+        }
+
+        let resolvedUsername = rawUsername || this.getSuggestedUsernameForEmployee(employee, this.editingAuthAccountId);
+        if (!resolvedUsername) { App.toast('Не удалось подобрать логин'); return; }
+
         const duplicate = (this.authAccountsData || []).find(a =>
-            (a.username || '').toLowerCase() === username && String(a.id) !== String(this.editingAuthAccountId)
+            (a.username || '').toLowerCase() === resolvedUsername && String(a.id) !== String(this.editingAuthAccountId)
         );
-        if (duplicate) { App.toast('Логин уже занят'); return; }
+        if (duplicate) {
+            const fallbackUsername = this.getUniqueAutoUsername(resolvedUsername, this.editingAuthAccountId);
+            if (!fallbackUsername) {
+                App.toast('Логин уже занят');
+                return;
+            }
+            if (fallbackUsername !== resolvedUsername) {
+                resolvedUsername = fallbackUsername;
+                const userEl = document.getElementById('auth-account-username');
+                if (userEl) userEl.value = resolvedUsername;
+                App.toast(`Логин был занят, подставила свободный: ${resolvedUsername}`);
+            }
+        }
 
         let account = null;
         let prevUsername = '';
@@ -807,20 +890,24 @@ const Settings = {
         account.employee_id = employeeId;
         account.employee_name = employee.name || '';
         account.role = employee.role || 'employee';
-        account.username = username;
+        account.username = resolvedUsername;
         account.is_active = isActive;
         account.updated_at = new Date().toISOString();
 
-        if (password) {
-            account.password_hash = App.hashUserPassword(username, password);
+        let issuedPassword = typedPassword;
+        if (!issuedPassword && (!this.editingAuthAccountId || !account.password_hash || (prevUsername && prevUsername !== resolvedUsername))) {
+            issuedPassword = this.generateStrongPassword(12);
+            const passEl = document.getElementById('auth-account-password');
+            if (passEl) passEl.value = issuedPassword;
+        }
+
+        if (issuedPassword) {
+            account.password_hash = App.hashUserPassword(resolvedUsername, issuedPassword);
             account.password_hash_version = App.AUTH_PASSWORD_HASH_VERSION || 2;
             account.password_rotated_at = new Date().toISOString();
             delete account.password_plain;
-        } else if (this.editingAuthAccountId && prevUsername && prevUsername !== username) {
-            App.toast('При смене логина укажите новый пароль');
-            return;
         } else if (!account.password_hash) {
-            App.toast('Укажите пароль');
+            App.toast('Не удалось сгенерировать пароль');
             return;
         }
 
@@ -839,6 +926,18 @@ const Settings = {
             actor: App.getCurrentEmployeeName(),
             target_user: account.employee_name || account.username,
         });
+
+        if (issuedPassword) {
+            this.lastIssuedAuthCredentials = {
+                accountId: account.id,
+                employeeName: account.employee_name || account.username || '',
+                username: resolvedUsername,
+                password: issuedPassword,
+                mode: this.editingAuthAccountId ? 'update' : 'create',
+            };
+            this.renderIssuedAuthCredentials();
+        }
+
         App.toast('Логин сохранён');
         this.cancelAuthAccount();
         await this.loadLoginsTab();
@@ -856,13 +955,15 @@ const Settings = {
 
         if (accountVersion < currentVersion) {
             return {
+                title: 'выдать новый',
                 label: `Legacy hash v${accountVersion}`,
                 color: 'var(--yellow)',
             };
         }
 
         return {
-            label: rotatedAt ? `Hash v${accountVersion} · ${rotatedAt}` : `Hash v${accountVersion}`,
+            title: 'скрыт',
+            label: rotatedAt ? `Hash v${accountVersion} · обновлён ${rotatedAt}` : `Hash v${accountVersion}`,
             color: 'var(--green)',
         };
     },
@@ -907,7 +1008,7 @@ const Settings = {
                 return `<tr>
                     <td style="font-weight:600;">${this.escHtml(a.employee_name || '—')}</td>
                     <td>${this.escHtml(a.username || '')}</td>
-                    <td><code>не хранится</code><div style="margin-top:4px;font-size:11px;color:${security.color};">${this.escHtml(security.label)}</div></td>
+                    <td><code>${this.escHtml(security.title)}</code><div style="margin-top:4px;font-size:11px;color:${security.color};">${this.escHtml(security.label)} · нажмите «Сбросить», чтобы выдать новый пароль</div></td>
                     <td style="text-align:center;">${status}</td>
                     <td>${this.escHtml(last)}</td>
                     <td style="white-space:nowrap;">
@@ -922,12 +1023,10 @@ const Settings = {
     async resetAuthPassword(id) {
         const account = (this.authAccountsData || []).find(a => String(a.id) === String(id));
         if (!account) return;
-        const generated = this.generateStrongPassword(12);
-        const nextPassword = prompt(`Новый пароль для "${account.employee_name || account.username}". Сохраните его сейчас: система больше не покажет его после подтверждения.`, generated);
-        if (nextPassword === null) return;
-        const pass = String(nextPassword || '').trim();
+        if (!confirm(`Сгенерировать новый пароль для "${account.employee_name || account.username}"?`)) return;
+        const pass = this.generateStrongPassword(12);
         if (!pass) {
-            App.toast('Пароль не может быть пустым');
+            App.toast('Не удалось сгенерировать пароль');
             return;
         }
         account.password_hash = App.hashUserPassword(account.username, pass);
@@ -941,8 +1040,81 @@ const Settings = {
             actor: App.getCurrentEmployeeName(),
             target_user: account.employee_name || account.username,
         });
+        this.lastIssuedAuthCredentials = {
+            accountId: account.id,
+            employeeName: account.employee_name || account.username || '',
+            username: account.username || '',
+            password: pass,
+            mode: 'reset',
+        };
+        this.renderIssuedAuthCredentials();
         this.renderAuthAccountsTable();
-        App.toast('Пароль обновлён. Сохраните его у сотрудника: система больше не хранит его в открытом виде.');
+        App.toast('Новый пароль сгенерирован и показан выше — скопируйте его для сотрудника.');
+    },
+
+    renderIssuedAuthCredentials() {
+        const container = document.getElementById('auth-issued-credentials');
+        if (!container) return;
+        const creds = this.lastIssuedAuthCredentials;
+        if (!creds || !creds.username || !creds.password) {
+            container.style.display = 'none';
+            container.innerHTML = '';
+            return;
+        }
+
+        const modeLabel = creds.mode === 'reset'
+            ? 'Новый пароль готов'
+            : creds.mode === 'update'
+                ? 'Логин обновлён'
+                : 'Новый логин создан';
+
+        container.style.display = '';
+        container.innerHTML = `
+            <div style="margin:0 0 12px;padding:12px 14px;border:1px solid rgba(34,197,94,.25);background:#f0fdf4;border-radius:10px;">
+                <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;">
+                    <div style="min-width:240px;">
+                        <div style="font-weight:700;color:#166534;">${this.escHtml(modeLabel)}</div>
+                        <div style="font-size:12px;color:#166534;margin-top:4px;">Сотрудник: ${this.escHtml(creds.employeeName || '—')}</div>
+                        <div style="font-size:12px;color:var(--text-muted);margin-top:6px;">Система не хранит пароль открытым, поэтому передайте эти данные сейчас.</div>
+                    </div>
+                    <button class="btn btn-sm btn-outline" type="button" onclick="Settings.dismissIssuedAuthCredentials()">Скрыть</button>
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;margin-top:10px;">
+                    <div style="padding:10px;border-radius:8px;background:#fff;border:1px solid var(--border);">
+                        <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">Логин</div>
+                        <div style="display:flex;gap:8px;align-items:center;justify-content:space-between;">
+                            <code style="font-size:14px;">${this.escHtml(creds.username)}</code>
+                            <button class="btn btn-sm btn-outline" type="button" onclick="Settings.copyIssuedAuthCredentials('username')">Копировать</button>
+                        </div>
+                    </div>
+                    <div style="padding:10px;border-radius:8px;background:#fff;border:1px solid var(--border);">
+                        <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">Пароль</div>
+                        <div style="display:flex;gap:8px;align-items:center;justify-content:space-between;">
+                            <code style="font-size:14px;">${this.escHtml(creds.password)}</code>
+                            <button class="btn btn-sm btn-outline" type="button" onclick="Settings.copyIssuedAuthCredentials('password')">Копировать</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    },
+
+    dismissIssuedAuthCredentials() {
+        this.lastIssuedAuthCredentials = null;
+        this.renderIssuedAuthCredentials();
+    },
+
+    async copyIssuedAuthCredentials(kind) {
+        const creds = this.lastIssuedAuthCredentials;
+        if (!creds) return;
+        const value = kind === 'password' ? creds.password : creds.username;
+        if (!value) return;
+        try {
+            await navigator.clipboard.writeText(value);
+            App.toast(kind === 'password' ? 'Пароль скопирован' : 'Логин скопирован');
+        } catch (e) {
+            App.toast('Не удалось скопировать');
+        }
     },
 
     async downloadAuthBackup() {

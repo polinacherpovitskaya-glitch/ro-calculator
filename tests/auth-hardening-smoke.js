@@ -185,13 +185,14 @@ async function smokeHashVersioning(context) {
 
 async function smokeSaveAuthAccount(context) {
     context.document.getElementById('auth-account-employee').value = '5';
-    context.document.getElementById('auth-account-username').value = 'polina';
-    context.document.getElementById('auth-account-password').value = 'Secret#123';
+    context.document.getElementById('auth-account-username').value = '';
+    context.document.getElementById('auth-account-password').value = '';
     context.document.getElementById('auth-account-active').value = '1';
     context.document.getElementById('auth-account-form').style.display = '';
     context.document.getElementById('auth-account-delete-btn').style.display = 'none';
     context.document.getElementById('auth-accounts-table-body');
     context.document.getElementById('auth-activity-table-body');
+    context.document.getElementById('auth-issued-credentials');
 
     await vm.runInContext(`(async () => {
         App.toast = () => {};
@@ -207,6 +208,11 @@ async function smokeSaveAuthAccount(context) {
     assert.equal(saved[0].password_hash_version, 2);
     assert.match(String(saved[0].password_hash || ''), /^v2:/);
     assert.match(String(saved[0].password_rotated_at || ''), /T/);
+    assert.match(String(saved[0].username || ''), /_ro/);
+    assert.equal(typeof context.__savedAuthAccounts[0].password_plain, 'undefined');
+    const issued = clone(await vm.runInContext(`Settings.lastIssuedAuthCredentials`, context));
+    assert.equal(issued.username, saved[0].username);
+    assert.ok(String(issued.password || '').length >= 12);
 }
 
 async function smokeRenderSecurityState(context) {
@@ -238,6 +244,9 @@ async function smokeRenderSecurityState(context) {
     const html = context.document.getElementById('auth-accounts-table-body').innerHTML;
     assert.match(html, /Legacy hash v1/);
     assert.match(html, /Hash v2/);
+    assert.match(html, /выдать новый/);
+    assert.match(html, /скрыт/);
+    assert.match(html, /Сбросить/);
 }
 
 async function smokeAuthBackup(context) {
@@ -331,6 +340,38 @@ async function smokePermissionFallback(context) {
     assert.equal(explicitPages.orders, false);
 }
 
+async function smokeAutoUsernameDedup(context) {
+    const deduped = String(vm.runInContext(`(() => {
+        Settings.authAccountsData = [{ id: 1, username: 'тая_ro', employee_id: 101 }];
+        return Settings.getSuggestedUsernameForEmployee({ id: 202, name: 'Тая' });
+    })()`, context));
+    assert.equal(deduped, 'тая_ro_1');
+}
+
+async function smokePasswordResetDisclosure(context) {
+    context.document.getElementById('auth-issued-credentials');
+    await vm.runInContext(`(async () => {
+        App.toast = () => {};
+        App.getCurrentEmployeeName = () => 'Smoke';
+        Settings.authAccountsData = [{
+            id: 7,
+            employee_id: 5,
+            employee_name: 'Полина',
+            username: 'polina_cherp',
+            password_hash: App.hashUserPassword('polina_cherp', 'OldPass#123'),
+            password_hash_version: 2,
+            is_active: true,
+        }];
+        await Settings.resetAuthPassword(7);
+    })()`, context);
+
+    const issued = clone(await vm.runInContext(`Settings.lastIssuedAuthCredentials`, context));
+    assert.equal(issued.username, 'polina_cherp');
+    assert.equal(issued.mode, 'reset');
+    assert.ok(String(issued.password || '').length >= 12);
+    assert.match(String(context.document.getElementById('auth-issued-credentials').innerHTML || ''), /Пароль/);
+}
+
 async function main() {
     const context = createContext();
     runScript(context, 'js/app.js');
@@ -343,6 +384,8 @@ async function main() {
     await smokeLegacyLoginUpgrade(context);
     await smokeDisabledRestore(context);
     await smokePermissionFallback(context);
+    await smokeAutoUsernameDedup(context);
+    await smokePasswordResetDisclosure(context);
 
     console.log('auth hardening smoke checks passed');
 }
