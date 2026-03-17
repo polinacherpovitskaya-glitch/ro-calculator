@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=80">
+    <link rel="stylesheet" href="css/style.css?v=81">
 </head>
 <body>
 
@@ -35,7 +35,7 @@
     <aside class="sidebar">
         <div class="sidebar-brand">
             <h2>Recycle Object</h2>
-            <span>Калькулятор <span id="app-version">v104</span></span>
+            <span>Калькулятор <span id="app-version">v105</span></span>
         </div>
         <nav class="sidebar-nav">
             <a href="#tasks" data-page="tasks">
@@ -50,9 +50,9 @@
                 <span class="nav-icon">&#9776;</span>
                 <span>Заказы</span>
             </a>
-            <a href="#production-plan" data-page="production-plan">
-                <span class="nav-icon">&#128736;</span>
-                <span>План производства</span>
+            <a href="#gantt" data-page="gantt">
+                <span class="nav-icon">&#128197;</span>
+                <span>Производственный календарь</span>
             </a>
             <a href="#factual" data-page="factual">
                 <span class="nav-icon">&#9646;</span>
@@ -77,10 +77,6 @@
             <a href="#projects" data-page="projects">
                 <span class="nav-icon">&#128193;</span>
                 <span>Проекты</span>
-            </a>
-            <a href="#gantt" data-page="gantt">
-                <span class="nav-icon">&#128197;</span>
-                <span>Календарь</span>
             </a>
             <a href="#import" data-page="import">
                 <span class="nav-icon">&#128176;</span>
@@ -1439,20 +1435,31 @@
         <!-- ========== GANTT CALENDAR ========== -->
         <div id="page-gantt" class="page">
             <div class="page-header">
-                <h1>&#128197; Производственный календарь</h1>
+                <div>
+                    <h1>&#128197; Производственный календарь</h1>
+                    <div class="text-muted gantt-header-note">Один канонический экран для очереди, загрузки цеха и рисков по дедлайнам.</div>
+                </div>
                 <div class="flex gap-8">
-                    <button class="btn btn-sm btn-outline gantt-zoom-btn" data-zoom="day" onclick="Gantt.setZoom('day')">День</button>
                     <button class="btn btn-sm btn-outline gantt-zoom-btn active" data-zoom="week" onclick="Gantt.setZoom('week')">Неделя</button>
                     <button class="btn btn-sm btn-outline gantt-zoom-btn" data-zoom="month" onclick="Gantt.setZoom('month')">Месяц</button>
                 </div>
             </div>
 
-            <div class="stats-grid" id="gantt-stats"></div>
+            <div class="gantt-intro-card">
+                <div>
+                    <strong>Очередь сверху</strong>
+                    <span>Начальник производства видит порядок запуска, сроки и суммарные часы по заказу.</span>
+                </div>
+                <div>
+                    <strong>Календарь снизу</strong>
+                    <span>Неделя и месяц показывают, как литье, сборка и упаковка влезают в доступные рабочие часы.</span>
+                </div>
+            </div>
 
-            <!-- Capacity chart -->
+            <div class="stats-grid" id="gantt-stats"></div>
+            <div id="gantt-queue"></div>
             <div id="gantt-capacity-chart"></div>
 
-            <!-- Phase legend -->
             <div class="gantt-legend">
                 <span class="gantt-legend-item"><span class="gantt-legend-dot" style="background:#f59e0b"></span> Литьё</span>
                 <span class="gantt-legend-item"><span class="gantt-legend-dot" style="background:#06b6d4"></span> Сборка</span>
@@ -1460,7 +1467,6 @@
                 <span class="gantt-legend-item"><span style="color:#e11d48;font-weight:700">&#9670;</span> Дедлайн</span>
             </div>
 
-            <!-- Order timeline -->
             <div id="gantt-container"></div>
         </div>
 
@@ -3174,7 +3180,7 @@
 <script src="js/supabase.js?v=113"></script>
 <script src="js/task-events.js?v=1"></script>
 <script src="js/calculator.js?v=65"></script>
-<script src="js/app.js?v=123"></script>
+<script src="js/app.js?v=124"></script>
 <script src="js/order-detail.js?v=58"></script>
 <script src="js/orders.js?v=61"></script>
 <script src="js/production_plan.js?v=75"></script>
@@ -3185,7 +3191,7 @@
 <script src="js/timetrack.js?v=62"></script>
 <script src="js/projects.js?v=2"></script>
 <script src="js/tasks.js?v=49"></script>
-<script src="js/gantt.js?v=47"></script>
+<script src="js/gantt.js?v=48"></script>
 <script src="js/fintablo.js?v=2"></script>
 <script src="js/indirect_costs.js?v=8"></script>
 <script src="js/factual.js?v=87"></script>
@@ -3194,7 +3200,7 @@
 <script src="js/china_catalog.js?v=46k"></script>
 <script src="js/marketplaces.js?v=72"></script>
 <script src="js/warehouse.js?v=97"></script>
-<script src="js/settings.js?v=77"></script>
+<script src="js/settings.js?v=78"></script>
 <script src="js/pendant.js?v=3"></script>
 </body>
 </html>

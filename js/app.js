@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v104';
+const APP_VERSION = 'v105';
 
 const App = {
     currentPage: 'orders',
@@ -20,7 +20,7 @@ const App = {
 
     // All pages in the app
     ALL_PAGES: [
-        'calculator', 'orders', 'production-plan', 'factual',
+        'calculator', 'orders', 'factual',
         'analytics', 'molds', 'colors', 'timetrack', 'tasks', 'projects', 'gantt',
         'import', 'warehouse', 'marketplaces', 'china', 'settings',
     ],
@@ -28,10 +28,16 @@ const App = {
     // Pages visible to everyone by default (if no custom config)
     DEFAULT_PAGES: ['orders', 'timetrack', 'tasks', 'projects'],
 
+    normalizePageAlias(page) {
+        if (page === 'dashboard') return 'orders';
+        if (page === 'production-plan' || page === 'calendar') return 'gantt';
+        return page;
+    },
+
     // Check if current user has access to a specific page
     canAccess(page) {
         if (!this.currentUser) return false;
-        if (page === 'dashboard') page = 'orders';
+        page = this.normalizePageAlias(page);
         // order-detail is part of orders
         if (page === 'order-detail') page = 'orders';
         if ((this.currentUser.id === '__admin' || this.currentUser.role === 'admin') && this.currentUser.employee_id == null) {
@@ -76,7 +82,7 @@ const App = {
     normalizePageList(pages) {
         if (!Array.isArray(pages)) return pages;
         const mapped = pages
-            .map(page => page === 'dashboard' ? 'orders' : page)
+            .map(page => this.normalizePageAlias(page))
             .filter(page => this.ALL_PAGES.includes(page));
         return [...new Set(mapped)];
     },
@@ -614,13 +620,13 @@ const App = {
     handleRoute() {
         const hash = window.location.hash.replace('#', '') || 'orders';
         const parts = hash.split('/');
-        const page = parts[0] === 'dashboard' ? 'orders' : parts[0];
+        const page = this.normalizePageAlias(parts[0]);
         const subId = parts[1] || null;
         this.navigate(page, false, subId);
     },
 
     navigate(page, pushHash = true, subId = null) {
-        if (page === 'dashboard') page = 'orders';
+        page = this.normalizePageAlias(page);
 
         // Access control: redirect to orders if not allowed
         if (!this.canAccess(page)) {
@@ -659,7 +665,8 @@ const App = {
         switch (page) {
             case 'calculator': Calculator.init(); break;
             case 'orders': Orders.loadList(); break;
-            case 'production-plan': ProductionPlan.load(); break;
+            case 'production-plan':
+            case 'gantt': Gantt.load(); break;
             case 'order-detail': if (subId) OrderDetail.load(parseInt(subId)); break;
             case 'factual': Factual.load(); break;
             case 'analytics': Analytics.load(); break;
@@ -668,7 +675,6 @@ const App = {
             case 'timetrack': TimeTrack.load(); break;
             case 'tasks': Tasks.load(subId ? parseInt(subId, 10) : null); break;
             case 'projects': Projects.load(subId ? parseInt(subId, 10) : null); break;
-            case 'gantt': Gantt.load(); break;
             case 'import': FinTablo.load(); break;
             case 'indirect-costs': App.navigate('settings'); setTimeout(() => Settings.switchTab('indirect'), 100); break;
             case 'warehouse': Warehouse.load(); break;

@@ -705,9 +705,12 @@ function buildProductionSchedule(orders, settings) {
     const SCHEDULE_STATUSES = ['sample','production_casting','production_printing','production_hardware','production_packaging','delivery','in_production'];
     const schedulable = orders.filter(o => SCHEDULE_STATUSES.includes(o.status));
 
-    // Priority: production > delivery > sample, then by deadline_end ASC
+    // Priority: explicit queue order > production status > deadline_end ASC
     const statusPriority = { production_casting: 0, production_printing: 0, production_hardware: 0, production_packaging: 0, in_production: 0, delivery: 1, sample: 2 };
     schedulable.sort((a, b) => {
+        const qa = Number.isFinite(Number(a.production_priority)) ? Number(a.production_priority) : 999999;
+        const qb = Number.isFinite(Number(b.production_priority)) ? Number(b.production_priority) : 999999;
+        if (qa !== qb) return qa - qb;
         const pa = statusPriority[a.status] ?? 3;
         const pb = statusPriority[b.status] ?? 3;
         if (pa !== pb) return pa - pb;
