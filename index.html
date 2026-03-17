@@ -35,7 +35,7 @@
     <aside class="sidebar">
         <div class="sidebar-brand">
             <h2>Recycle Object</h2>
-            <span>Калькулятор <span id="app-version">v96</span></span>
+            <span>Калькулятор <span id="app-version">v97</span></span>
         </div>
         <nav class="sidebar-nav">
             <a href="#tasks" data-page="tasks">
@@ -2718,10 +2718,24 @@
                         </div>
                         <div class="form-row" style="margin-bottom:8px;">
                             <div class="form-group">
+                                <label>Статус сотрудника</label>
+                                <select id="emp-status" onchange="Settings.onEmployeeStatusChange()">
+                                    <option value="active">Работает сейчас</option>
+                                    <option value="inactive">Пауза / неактивен</option>
+                                    <option value="fired">Уволен</option>
+                                </select>
+                                <div class="text-muted" id="emp-status-note" style="font-size:10px"></div>
+                            </div>
+                            <div class="form-group" id="emp-fired-wrap" style="display:none;">
                                 <label>Дата увольнения</label>
                                 <input type="date" id="emp-fired-date" style="max-width:180px">
-                                <div class="text-muted" style="font-size:10px">Оставьте пустым если сотрудник работает</div>
+                                <div class="text-muted" style="font-size:10px">Для повторной активации переключите статус обратно на «Работает сейчас»</div>
                             </div>
+                        </div>
+                        <div id="emp-auth-summary" style="margin:0 0 12px;padding:12px;border:1px solid var(--border);border-radius:10px;background:#fff;"></div>
+                        <div class="flex gap-8" style="margin:-4px 0 12px;">
+                            <button class="btn btn-sm btn-outline" type="button" id="emp-auth-open-btn" onclick="Settings.openEmployeeAuthAccount()" style="display:none;">Открыть логин</button>
+                            <button class="btn btn-sm btn-outline" type="button" id="emp-auth-create-btn" onclick="Settings.openNewAuthAccountForEmployee()">Создать логин</button>
                         </div>
                         <div id="emp-pay-section" style="margin:8px 0 12px 0; padding:12px; background:var(--bg); border-radius:8px;">
                             <div style="font-weight:600; margin-bottom:8px;">Зарплата</div>
@@ -2752,6 +2766,22 @@
                             <div class="text-muted" style="font-size:11px;margin-top:6px">Белая ЗП = нетто (на руки по договору). НДФЛ и взносы рассчитываются автоматически от гросс. Чёрная ЗП = наличные/переводы.</div>
 
                             <div style="font-weight:600; margin:12px 0 8px;">Ставки (для учёта времени)</div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label>Схема оплаты</label>
+                                    <select id="emp-payroll-profile" onchange="Settings.onPayrollProfileChange()">
+                                        <option value="hourly">Почасовая</option>
+                                        <option value="salary_monthly">Оклад за месяц</option>
+                                        <option value="salary_semimonth_threshold">Оклад 60 + 60</option>
+                                        <option value="management_salary_with_production_allocation">Оклад + факт. часы в производство</option>
+                                    </select>
+                                </div>
+                                <div class="form-group" id="emp-pay-half-hours-wrap" style="display:none;">
+                                    <label>Часов в 1-й / 2-й половине (ч)</label>
+                                    <input type="number" id="emp-pay-half-hours" min="0" step="1" placeholder="Например 60">
+                                </div>
+                            </div>
+                            <div class="text-muted" id="emp-pay-profile-hint" style="font-size:11px;margin:-2px 0 8px"></div>
                             <div class="form-row">
                                 <div class="form-group">
                                     <label>Часы в окладе (ч/мес)</label>
@@ -2789,12 +2819,14 @@
                                     <th style="text-align:center">Telegram</th>
                                     <th style="text-align:center">Напоминание</th>
                                     <th style="text-align:center">Задачи</th>
+                                    <th>Доступ в систему</th>
+                                    <th>Схема оплаты</th>
                                     <th style="text-align:center">Статус</th>
                                     <th style="width:40px"></th>
                                 </tr>
                             </thead>
                             <tbody id="employees-table-body">
-                                <tr><td colspan="8" class="text-center text-muted">Загрузка...</td></tr>
+                                <tr><td colspan="10" class="text-center text-muted">Загрузка...</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -2867,14 +2899,15 @@
                                 <tr>
                                     <th>Сотрудник</th>
                                     <th>Логин</th>
+                                    <th>Статус сотрудника</th>
                                     <th>Пароль</th>
-                                    <th style="text-align:center;">Статус</th>
+                                    <th style="text-align:center;">Статус логина</th>
                                     <th>Последний вход</th>
                                     <th style="width:220px">Действия</th>
                                 </tr>
                             </thead>
                             <tbody id="auth-accounts-table-body">
-                                <tr><td colspan="6" class="text-center text-muted">Загрузка...</td></tr>
+                                <tr><td colspan="7" class="text-center text-muted">Загрузка...</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -3129,10 +3162,10 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="js/work-management-core.js?v=1"></script>
-<script src="js/supabase.js?v=111"></script>
+<script src="js/supabase.js?v=112"></script>
 <script src="js/task-events.js?v=1"></script>
 <script src="js/calculator.js?v=65"></script>
-<script src="js/app.js?v=115"></script>
+<script src="js/app.js?v=116"></script>
 <script src="js/order-detail.js?v=58"></script>
 <script src="js/orders.js?v=61"></script>
 <script src="js/production_plan.js?v=75"></script>
@@ -3140,19 +3173,19 @@
 <script src="js/molds.js?v=68"></script>
 <script src="js/colors.js?v=46g"></script>
 <script src="js/kp.js?v=46g"></script>
-<script src="js/timetrack.js?v=57"></script>
+<script src="js/timetrack.js?v=58"></script>
 <script src="js/projects.js?v=2"></script>
 <script src="js/tasks.js?v=49"></script>
 <script src="js/gantt.js?v=47"></script>
 <script src="js/fintablo.js?v=2"></script>
-<script src="js/indirect_costs.js?v=7"></script>
+<script src="js/indirect_costs.js?v=8"></script>
 <script src="js/factual.js?v=85"></script>
 <script src="js/china.js?v=46o"></script>
 <script src="js/warehouse_photos.js?v=48"></script>
 <script src="js/china_catalog.js?v=46k"></script>
 <script src="js/marketplaces.js?v=72"></script>
 <script src="js/warehouse.js?v=97"></script>
-<script src="js/settings.js?v=74"></script>
+<script src="js/settings.js?v=75"></script>
 <script src="js/pendant.js?v=3"></script>
 </body>
 </html>

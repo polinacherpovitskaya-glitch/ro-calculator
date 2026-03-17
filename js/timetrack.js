@@ -328,26 +328,49 @@ const TimeTrack = {
         return day === 0 || day === 6;
     },
 
+    getPayrollProfile(emp) {
+        const explicit = String(emp?.payroll_profile || '').trim();
+        if (explicit) return explicit;
+        const baseSalary = parseFloat(emp?.pay_base_salary_month) || 0;
+        if (String(emp?.role || '') === 'management' && baseSalary > 0) {
+            return 'management_salary_with_production_allocation';
+        }
+        if (baseSalary > 0) return 'salary_monthly';
+        return 'hourly';
+    },
+
+    getHalfMonthBucket(dateStr) {
+        const day = parseInt(String(dateStr || '').slice(8, 10), 10);
+        return Number.isFinite(day) && day >= 16 ? 'second' : 'first';
+    },
+
     normalizePayrollConfig(emp) {
         const fallbackRate = parseFloat(App.settings?.fot_per_hour) || 0;
         const baseHoursRaw = parseFloat(emp?.pay_base_hours_month);
+        const baseHoursSemimonthRaw = parseFloat(emp?.pay_base_hours_semimonth);
         const baseSalary = parseFloat(emp?.pay_base_salary_month) || 0;
         const overtimeRateRaw = parseFloat(emp?.pay_overtime_hour_rate);
         const weekendRateRaw = parseFloat(emp?.pay_weekend_hour_rate);
         const holidayRateRaw = parseFloat(emp?.pay_holiday_hour_rate);
+        const payrollProfile = this.getPayrollProfile(emp);
 
         // If no base salary — purely hourly employee, baseHours = 0
-        const hasSalary = baseSalary > 0;
+        const hasSalary = baseSalary > 0 && payrollProfile !== 'hourly';
         const safeBaseHours = hasSalary ? (baseHoursRaw > 0 ? baseHoursRaw : 176) : 0;
+        const safeBaseHoursSemimonth = payrollProfile === 'salary_semimonth_threshold'
+            ? (baseHoursSemimonthRaw > 0 ? baseHoursSemimonthRaw : Math.max(1, Math.round(safeBaseHours / 2)))
+            : 0;
         const baseRateFromSalary = (hasSalary && safeBaseHours > 0) ? (baseSalary / safeBaseHours) : 0;
         const overtimeRate = overtimeRateRaw > 0 ? overtimeRateRaw : (baseRateFromSalary || fallbackRate);
         const weekendRate = weekendRateRaw > 0 ? weekendRateRaw : overtimeRate;
         const holidayRate = holidayRateRaw > 0 ? holidayRateRaw : weekendRate;
 
         return {
+            payrollProfile,
             hasSalary,
             baseSalary,
             baseHours: safeBaseHours,
+            baseHoursSemimonth: safeBaseHoursSemimonth,
             baseRate: hasSalary ? (baseRateFromSalary || overtimeRate || fallbackRate) : 0,
             overtimeRate: overtimeRate || fallbackRate,
             weekendRate: weekendRate || fallbackRate,
@@ -380,19 +403,60 @@ const TimeTrack = {
             const isWeekend = this.isWeekend(entry.date);
 
             if (!stats.has(workerName)) {
-                stats.set(workerName, { employee: emp, regularHours: 0, weekendHours: 0, holidayHours: 0 });
+                stats.set(workerName, {
+                    employee: emp,
+                    regularHours: 0,
+                    weekendHours: 0,
+                    holidayHours: 0,
+                    regularByHalf: { first: 0, second: 0 },
+                });
             }
             const row = stats.get(workerName);
             if (isHoliday) row.holidayHours += hours;
             else if (isWeekend) row.weekendHours += hours;
-            else row.regularHours += hours;
+            else {
+                row.regularHours += hours;
+                row.regularByHalf[this.getHalfMonthBucket(entry.date)] += hours;
+            }
         });
 
         const rows = Array.from(stats.values()).map(row => {
             const cfg = this.normalizePayrollConfig(row.employee);
             let inBaseHours, overtimeHours, payBase, payOvertime;
+            let halfBreakdown = [];
 
-            if (cfg.hasSalary) {
+            if (cfg.payrollProfile === 'salary_semimonth_threshold' && cfg.hasSalary) {
+                const halfSalary = cfg.baseSalary / 2;
+                const baseHoursPerHalf = cfg.baseHoursSemimonth || Math.max(1, Math.round(cfg.baseHours / 2));
+                const firstRegular = row.regularByHalf.first || 0;
+                const secondRegular = row.regularByHalf.second || 0;
+                const halves = [
+                    { key: 'first', label: '1–15', regularHours: firstRegular },
+                    { key: 'second', label: '16–конец', regularHours: secondRegular },
+                ];
+                inBaseHours = 0;
+                overtimeHours = 0;
+                payBase = 0;
+                payOvertime = 0;
+                halfBreakdown = halves.map(half => {
+                    const baseHoursUsed = Math.min(half.regularHours, baseHoursPerHalf);
+                    const overtimeHalfHours = Math.max(0, half.regularHours - baseHoursPerHalf);
+                    const payBaseHalf = baseHoursPerHalf > 0 ? halfSalary * (baseHoursUsed / baseHoursPerHalf) : 0;
+                    const payOvertimeHalf = overtimeHalfHours * cfg.overtimeRate;
+                    inBaseHours += baseHoursUsed;
+                    overtimeHours += overtimeHalfHours;
+                    payBase += payBaseHalf;
+                    payOvertime += payOvertimeHalf;
+                    return {
+                        key: half.key,
+                        label: half.label,
+                        regularHours: half.regularHours,
+                        inBaseHours: baseHoursUsed,
+                        overtimeHours: overtimeHalfHours,
+                        totalPay: payBaseHalf + payOvertimeHalf,
+                    };
+                });
+            } else if (cfg.hasSalary) {
                 // Salaried: base salary covers first N hours, then overtime rate
                 inBaseHours = Math.min(row.regularHours, cfg.baseHours);
                 overtimeHours = Math.max(0, row.regularHours - cfg.baseHours);
@@ -412,12 +476,14 @@ const TimeTrack = {
 
             return {
                 employeeName: row.employee.name || 'Сотрудник',
+                payrollProfile: cfg.payrollProfile,
                 hasSalary: cfg.hasSalary,
                 regularHours: row.regularHours,
                 inBaseHours,
                 overtimeHours,
                 weekendHours: row.weekendHours,
                 holidayHours: row.holidayHours,
+                halfBreakdown,
                 totalPay,
             };
         }).sort((a, b) => b.totalPay - a.totalPay);
@@ -452,7 +518,12 @@ const TimeTrack = {
 
         tableBody.innerHTML = rows.map(r => `
             <tr>
-                <td style="font-weight:600;">${this.esc(r.employeeName)}</td>
+                <td style="font-weight:600;">
+                    ${this.esc(r.employeeName)}
+                    ${Array.isArray(r.halfBreakdown) && r.halfBreakdown.length
+            ? `<div style="margin-top:4px;font-size:11px;color:var(--text-muted);">${r.halfBreakdown.map(half => `${this.esc(half.label)}: ${this.formatMoney(half.totalPay)}`).join(' · ')}</div>`
+            : ''}
+                </td>
                 <td class="text-right">${r.regularHours.toFixed(2)}</td>
                 <td class="text-right">${r.inBaseHours.toFixed(2)}</td>
                 <td class="text-right">${r.overtimeHours.toFixed(2)}</td>

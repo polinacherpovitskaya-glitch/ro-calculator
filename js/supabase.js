@@ -1778,6 +1778,13 @@ function _mergeEmpExtra(employees) {
         emp.pay_white_salary = (ex && ex.pay_white_salary !== undefined) ? ex.pay_white_salary : (emp.pay_white_salary ?? (def ? def.pay_white_salary : 0));
         emp.pay_black_salary = (ex && ex.pay_black_salary !== undefined) ? ex.pay_black_salary : (emp.pay_black_salary ?? (def ? def.pay_black_salary : 0));
         emp.fired_date = (ex && ex.fired_date) ? ex.fired_date : (emp.fired_date || null);
+        emp.payroll_profile = (ex && ex.payroll_profile) ? ex.payroll_profile : (emp.payroll_profile || (def ? def.payroll_profile : null));
+        emp.pay_base_hours_semimonth = (ex && ex.pay_base_hours_semimonth !== undefined)
+            ? ex.pay_base_hours_semimonth
+            : (emp.pay_base_hours_semimonth ?? (def ? def.pay_base_hours_semimonth : 0));
+        if (def && String(emp.id) === '1772800698338' && Number(emp.pay_base_hours_month) === 176) {
+            emp.pay_base_hours_month = def.pay_base_hours_month;
+        }
         // Recalc base salary
         emp.pay_base_salary_month = (emp.pay_white_salary || 0) + (emp.pay_black_salary || 0);
     });
@@ -1805,7 +1812,7 @@ const FIRED_DATES = {
 
 // Seed default extra data — re-seed on version change
 function _seedDefaultEmpExtra() {
-    const SEED_KEY = 'ro_emp_extra_seeded_v4'; // bump to re-seed
+    const SEED_KEY = 'ro_emp_extra_seeded_v5'; // bump to re-seed payroll profile defaults
     if (localStorage.getItem(SEED_KEY)) return;
     const defaults = getDefaultEmployees();
     const extra = _getEmpExtra();
@@ -1816,6 +1823,8 @@ function _seedDefaultEmpExtra() {
             pay_white_salary: d.pay_white_salary || 0,
             pay_black_salary: d.pay_black_salary || 0,
             fired_date: FIRED_DATES[key] || null,
+            payroll_profile: d.payroll_profile || null,
+            pay_base_hours_semimonth: d.pay_base_hours_semimonth || 0,
         };
     });
     _setEmpExtra(extra);
@@ -1868,6 +1877,8 @@ async function saveEmployee(employee) {
         pay_white_salary: employee.pay_white_salary || 0,
         pay_black_salary: employee.pay_black_salary || 0,
         fired_date: employee.fired_date || null,
+        payroll_profile: employee.payroll_profile || null,
+        pay_base_hours_semimonth: employee.pay_base_hours_semimonth || 0,
     });
 
     if (isSupabaseReady()) {
@@ -2158,7 +2169,10 @@ function getDefaultEmployees() {
         pay_white_salary: opts.w || 0,
         pay_black_salary: opts.b || 0,
         pay_base_salary_month: (opts.w || 0) + (opts.b || 0),
-        pay_base_hours_month: 176, pay_overtime_hour_rate: opts.ot || 0,
+        pay_base_hours_month: opts.baseHours || 176,
+        payroll_profile: opts.payroll || (((opts.w || 0) + (opts.b || 0)) > 0 ? 'salary_monthly' : 'hourly'),
+        pay_base_hours_semimonth: opts.halfHours || 0,
+        pay_overtime_hour_rate: opts.ot || 0,
         pay_weekend_hour_rate: opts.we || 0, pay_holiday_hour_rate: opts.ho || 0,
     });
     // ЗП из FinTablo справочника сотрудников (Mar 2026).
@@ -2167,16 +2181,16 @@ function getDefaultEmployees() {
     // Итого FinTablo: Фикс 1 544 945₽, Взносы 77 172₽, НДФЛ 50 806₽, Итого 1 672 923₽
     return [
         // Производство
-        e(1772800698338, 'Тая', 'production', { w: 40000, b: 30000, hours: 6, ot: 500, we: 750, ho: 750 }),
+        e(1772800698338, 'Тая', 'production', { w: 40000, b: 30000, hours: 6, baseHours: 120, halfHours: 60, payroll: 'salary_semimonth_threshold', ot: 500, we: 750, ho: 750 }),
         // Панкина Таисия — Оператор лазерного станка. Фикс 70к, белая 40к + чёрная 30к
-        e(1772801066913, 'Женя Г', 'production', { w: 0, b: 0, ot: 500, we: 750, ho: 750, active: false }),
+        e(1772801066913, 'Женя Г', 'production', { w: 0, b: 0, payroll: 'hourly', ot: 500, we: 750, ho: 750, active: false }),
         // Голубенкова Евгения — Сотрудник производства. Уволена 15.03.2026
-        e(1741700001000, 'Сергей М', 'production', { ot: 500, we: 750, ho: 750, active: false }),
+        e(1741700001000, 'Сергей М', 'production', { payroll: 'hourly', ot: 500, we: 750, ho: 750, active: false }),
 
         // Управление
         e(5, 'Полина', 'management', { w: 0, b: 350000, tasks: true }),
         // Черповицкая Полина — Директор. Фикс 350к, весь чёрный
-        e(1772827635013, 'Леша', 'management', { w: 0, b: 180000 }),
+        e(1772827635013, 'Леша', 'management', { w: 0, b: 180000, payroll: 'management_salary_with_production_allocation' }),
         // Маркелов Алексей — Начальник производства. 180к чёрный. 50% производство
 
         // Офис / Коммерция

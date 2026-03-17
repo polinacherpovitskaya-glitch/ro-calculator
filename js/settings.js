@@ -17,6 +17,12 @@ const Settings = {
     lastIssuedAuthCredentials: null,
     // Tabs that require admin access
     ADMIN_TABS: new Set(['indirect', 'costs', 'logins', 'sessions', 'backup']),
+    PAYROLL_PROFILE_LABELS: {
+        hourly: 'Почасовая',
+        salary_monthly: 'Оклад за месяц',
+        salary_semimonth_threshold: 'Оклад 60 + 60',
+        management_salary_with_production_allocation: 'Оклад + факт. часы в производство',
+    },
 
     async load() {
         this._applyAdminVisibility();
@@ -370,6 +376,7 @@ const Settings = {
     async loadEmployeesTab() {
         try {
             this.employeesData = await loadEmployees();
+            this.authAccountsData = await loadAuthAccounts();
         } catch (err) {
             console.error('loadEmployeesTab error:', err);
             this.employeesData = [];
@@ -385,7 +392,7 @@ const Settings = {
         if (!tbody) return;
 
         if (!this.employeesData || this.employeesData.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="8" class="text-muted text-center">Нет сотрудников</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="10" class="text-muted text-center">Нет сотрудников</td></tr>';
             return;
         }
 
@@ -399,12 +406,11 @@ const Settings = {
                 : `<span style="color:var(--text-muted);" title="Не привязан">—</span>`;
             const reminderTime = `${String(e.reminder_hour || 17).padStart(2, '0')}:${String(e.reminder_minute || 30).padStart(2, '0')} UTC+${e.timezone_offset || 3}`;
             const tasksIcon = e.tasks_required ? '<span style="color:var(--orange);" title="Обязательное описание задач">&#9998;</span>' : '';
-            const isFired = !!e.fired_date;
-            const statusBadge = isFired
-                ? `<span class="badge" title="Уволен ${e.fired_date}">Уволен ${e.fired_date}</span>`
-                : (e.is_active !== false
-                    ? '<span class="badge badge-green">Активен</span>'
-                    : '<span class="badge">Неактивен</span>');
+            const statusMeta = this.getEmployeeStatusMeta(e);
+            const statusBadge = `<span class="${statusMeta.badgeClass}" title="${this.escHtml(statusMeta.hint)}">${this.escHtml(statusMeta.label)}</span>`;
+            const authMeta = this.getEmployeeAuthMeta(e);
+            const payrollLabel = this.getEmployeePayrollProfileLabel(e);
+            const isFired = statusMeta.key === 'fired';
             const rowStyle = isFired ? 'opacity:0.5' : '';
             return `
             <tr style="${rowStyle}">
@@ -414,6 +420,13 @@ const Settings = {
                 <td style="text-align:center;">${tgStatus}</td>
                 <td style="text-align:center;font-size:11px;">${reminderTime}</td>
                 <td style="text-align:center;">${tasksIcon}</td>
+                <td style="font-size:12px;">
+                    <div>${authMeta.badge}</div>
+                    <div class="text-muted" style="font-size:11px;margin-top:4px;">${authMeta.details}</div>
+                </td>
+                <td style="font-size:12px;">
+                    <span class="badge badge-blue">${this.escHtml(payrollLabel)}</span>
+                </td>
                 <td style="text-align:center;">${statusBadge}</td>
                 <td>
                     <button class="btn btn-sm btn-outline" style="padding:2px 6px;font-size:10px;" onclick="Settings.editEmployee('${e.id}')">&#9998;</button>
@@ -430,6 +443,14 @@ const Settings = {
         // Hide salary section from non-admin
         const paySection = document.getElementById('emp-pay-section');
         if (paySection) paySection.style.display = App.isAdmin() ? '' : 'none';
+        this.onEmployeeStatusChange();
+        this.onPayrollProfileChange();
+        this.renderEmployeeAuthSummary({
+            id: null,
+            is_active: true,
+            fired_date: null,
+            payroll_profile: document.getElementById('emp-payroll-profile')?.value || 'hourly',
+        });
         document.getElementById('emp-name').focus();
     },
 
@@ -450,6 +471,148 @@ const Settings = {
     calcEmployeeTotalCost(whiteNet, black) {
         const { totalTaxes } = this.calcEmployeeTaxes(whiteNet);
         return (whiteNet || 0) + (black || 0) + totalTaxes;
+    },
+
+    getEmployeeEmploymentStatus(employee) {
+        if (!employee) return 'active';
+        if (employee.fired_date) return 'fired';
+        if (employee.is_active === false) return 'inactive';
+        return 'active';
+    },
+
+    getEmployeeStatusMeta(employee) {
+        const status = this.getEmployeeEmploymentStatus(employee);
+        if (status === 'fired') {
+            return {
+                key: 'fired',
+                label: employee?.fired_date ? `Уволен ${employee.fired_date}` : 'Уволен',
+                hint: 'Сотрудник уволен: история часов сохранится, но логин и новые назначения должны быть отключены.',
+                badgeClass: 'badge',
+            };
+        }
+        if (status === 'inactive') {
+            return {
+                key: 'inactive',
+                label: 'Пауза / неактивен',
+                hint: 'Сотрудник временно не работает: логин можно держать выключенным, история часов остается.',
+                badgeClass: 'badge',
+            };
+        }
+        return {
+            key: 'active',
+            label: 'Активен',
+            hint: 'Сотрудник работает сейчас и может сдавать часы и заходить в систему.',
+            badgeClass: 'badge badge-green',
+        };
+    },
+
+    getEmployeePayrollProfile(employee) {
+        const explicit = String(employee?.payroll_profile || '').trim();
+        if (explicit) return explicit;
+        const baseSalary = (parseFloat(employee?.pay_white_salary) || 0) + (parseFloat(employee?.pay_black_salary) || 0);
+        if (String(employee?.role || '') === 'management' && baseSalary > 0) return 'management_salary_with_production_allocation';
+        if (baseSalary > 0) return 'salary_monthly';
+        return 'hourly';
+    },
+
+    getEmployeePayrollProfileLabel(employee) {
+        const key = this.getEmployeePayrollProfile(employee);
+        return this.PAYROLL_PROFILE_LABELS[key] || key || '—';
+    },
+
+    getEmployeeAuthAccount(employeeId) {
+        return (this.authAccountsData || []).find(a => String(a.employee_id || '') === String(employeeId || '')) || null;
+    },
+
+    getEmployeeAuthMeta(employee) {
+        const account = this.getEmployeeAuthAccount(employee?.id);
+        if (!account) {
+            return {
+                state: 'missing',
+                badge: '<span class="badge">Нет логина</span>',
+                details: 'Логин еще не выдан',
+                account: null,
+            };
+        }
+        const stateBadge = account.is_active === false
+            ? '<span class="badge">Логин выключен</span>'
+            : '<span class="badge badge-green">Логин активен</span>';
+        const lastLogin = account.last_login_at
+            ? new Date(account.last_login_at).toLocaleString('ru-RU')
+            : 'не заходил';
+        return {
+            state: account.is_active === false ? 'disabled' : 'active',
+            badge: stateBadge,
+            details: `${this.escHtml(account.username || '—')} · ${this.escHtml(lastLogin)}`,
+            account,
+        };
+    },
+
+    renderEmployeeAuthSummary(employee) {
+        const box = document.getElementById('emp-auth-summary');
+        const openBtn = document.getElementById('emp-auth-open-btn');
+        const createBtn = document.getElementById('emp-auth-create-btn');
+        if (!box || !openBtn || !createBtn) return;
+
+        const authMeta = this.getEmployeeAuthMeta(employee);
+        const payrollLabel = this.getEmployeePayrollProfileLabel(employee);
+        const statusMeta = this.getEmployeeStatusMeta(employee);
+        box.innerHTML = `
+            <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;">
+                <div>
+                    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                        ${authMeta.badge}
+                        <span class="${statusMeta.badgeClass}">${this.escHtml(statusMeta.label)}</span>
+                    </div>
+                    <div style="margin-top:6px;font-size:12px;color:var(--text-muted);">${authMeta.details}</div>
+                    <div style="margin-top:6px;font-size:12px;color:var(--text-muted);">Схема оплаты: ${this.escHtml(payrollLabel)}</div>
+                </div>
+            </div>
+        `;
+
+        openBtn.style.display = authMeta.account ? '' : 'none';
+        createBtn.style.display = authMeta.account ? 'none' : '';
+    },
+
+    onEmployeeStatusChange() {
+        const status = document.getElementById('emp-status')?.value || 'active';
+        const firedWrap = document.getElementById('emp-fired-wrap');
+        const firedEl = document.getElementById('emp-fired-date');
+        const noteEl = document.getElementById('emp-status-note');
+        if (firedWrap) firedWrap.style.display = status === 'fired' ? '' : 'none';
+        if (status !== 'fired' && firedEl) firedEl.value = '';
+        if (status === 'fired' && firedEl && !firedEl.value) {
+            firedEl.value = new Date().toISOString().split('T')[0];
+        }
+        if (noteEl) {
+            const meta = this.getEmployeeStatusMeta({
+                is_active: status === 'active',
+                fired_date: status === 'fired' ? (firedEl?.value || null) : null,
+            });
+            noteEl.textContent = meta.hint;
+        }
+    },
+
+    onPayrollProfileChange() {
+        const profile = document.getElementById('emp-payroll-profile')?.value || 'hourly';
+        const halfWrap = document.getElementById('emp-pay-half-hours-wrap');
+        const baseHoursEl = document.getElementById('emp-pay-base-hours');
+        const hintEl = document.getElementById('emp-pay-profile-hint');
+        if (halfWrap) halfWrap.style.display = profile === 'salary_semimonth_threshold' ? '' : 'none';
+        if (baseHoursEl) {
+            if (profile === 'hourly') baseHoursEl.placeholder = 'Не используется для почасовой схемы';
+            else if (profile === 'salary_semimonth_threshold') baseHoursEl.placeholder = 'Например 120';
+            else baseHoursEl.placeholder = 'Например 176';
+        }
+        if (hintEl) {
+            const hints = {
+                hourly: 'Почасовая схема: окладные часы не используются, оплата считается по ставкам за часы.',
+                salary_monthly: 'Оклад за месяц: включенные часы считаются одним месячным bucket, как сейчас.',
+                salary_semimonth_threshold: 'Оклад 60 + 60: первая и вторая половина месяца считаются отдельными bucket для доп. часов.',
+                management_salary_with_production_allocation: 'Оклад идет в косвенные, а фактические производственные часы постепенно вытаскивают часть стоимости в производство.',
+            };
+            hintEl.textContent = hints[profile] || '';
+        }
     },
 
     recalcEmployeeCost() {
@@ -491,6 +654,8 @@ const Settings = {
         document.getElementById('emp-pay-white').value = white;
         document.getElementById('emp-pay-black').value = black;
         document.getElementById('emp-pay-base-hours').value = parseFloat(e.pay_base_hours_month) || 176;
+        document.getElementById('emp-payroll-profile').value = this.getEmployeePayrollProfile(e);
+        document.getElementById('emp-pay-half-hours').value = parseFloat(e.pay_base_hours_semimonth) || '';
         document.getElementById('emp-pay-overtime-rate').value = parseFloat(e.pay_overtime_hour_rate) || 0;
         document.getElementById('emp-pay-weekend-rate').value = parseFloat(e.pay_weekend_hour_rate) || 0;
         document.getElementById('emp-pay-holiday-rate').value = parseFloat(e.pay_holiday_hour_rate) || 0;
@@ -499,6 +664,10 @@ const Settings = {
         // Fired date
         const firedEl = document.getElementById('emp-fired-date');
         if (firedEl) firedEl.value = e.fired_date || '';
+        const statusEl = document.getElementById('emp-status');
+        if (statusEl) statusEl.value = this.getEmployeeEmploymentStatus(e);
+        this.onEmployeeStatusChange();
+        this.onPayrollProfileChange();
 
         document.getElementById('employee-form').style.display = '';
         document.getElementById('emp-delete-btn').style.display = '';
@@ -506,6 +675,7 @@ const Settings = {
         // Hide salary section from non-admin
         const paySection = document.getElementById('emp-pay-section');
         if (paySection) paySection.style.display = App.isAdmin() ? '' : 'none';
+        this.renderEmployeeAuthSummary(e);
 
     },
 
@@ -519,20 +689,80 @@ const Settings = {
         document.getElementById('emp-reminder-min').value = 30;
         document.getElementById('emp-tz-offset').value = 3;
         document.getElementById('emp-tasks-required').checked = false;
+        document.getElementById('emp-status').value = 'active';
+        document.getElementById('emp-fired-date').value = '';
         document.getElementById('emp-pay-white').value = '';
         document.getElementById('emp-pay-black').value = '';
         document.getElementById('emp-pay-base-hours').value = 176;
+        document.getElementById('emp-payroll-profile').value = 'hourly';
+        document.getElementById('emp-pay-half-hours').value = '';
         document.getElementById('emp-pay-overtime-rate').value = '';
         document.getElementById('emp-pay-weekend-rate').value = '';
         document.getElementById('emp-pay-holiday-rate').value = '';
         document.getElementById('emp-tax-ndfl').value = '';
         document.getElementById('emp-tax-social').value = '';
         document.getElementById('emp-total-cost').value = '';
+        const noteEl = document.getElementById('emp-status-note');
+        if (noteEl) noteEl.textContent = '';
     },
 
     cancelEmployee() {
         document.getElementById('employee-form').style.display = 'none';
         this.editingEmployeeId = null;
+    },
+
+    openEmployeeAuthAccount(employeeId = null) {
+        const targetEmployeeId = employeeId || this.editingEmployeeId;
+        if (!targetEmployeeId) {
+            App.toast('Сначала сохраните сотрудника');
+            return;
+        }
+        const account = this.getEmployeeAuthAccount(targetEmployeeId);
+        if (!account) {
+            this.openNewAuthAccountForEmployee(targetEmployeeId);
+            return;
+        }
+        this.switchTab('logins');
+        this.editAuthAccount(account.id);
+    },
+
+    openNewAuthAccountForEmployee(employeeId = null) {
+        const targetEmployeeId = employeeId || this.editingEmployeeId;
+        if (!targetEmployeeId) {
+            App.toast('Сначала сохраните сотрудника');
+            return;
+        }
+        this.switchTab('logins');
+        this.showAddAuthAccount();
+        const select = document.getElementById('auth-account-employee');
+        if (select) {
+            select.value = String(targetEmployeeId);
+            this._renderAuthPageCheckboxes(targetEmployeeId);
+        }
+        this.prefillSuggestedAuthCredentials(targetEmployeeId);
+    },
+
+    async syncAuthAccountWithEmployee(employee) {
+        if (!employee || !employee.id) return;
+        const account = this.getEmployeeAuthAccount(employee.id);
+        if (!account) return;
+        let changed = false;
+        if ((account.employee_name || '') !== (employee.name || '')) {
+            account.employee_name = employee.name || '';
+            changed = true;
+        }
+        if ((account.role || '') !== (employee.role || 'employee')) {
+            account.role = employee.role || 'employee';
+            changed = true;
+        }
+        if (employee.is_active === false && account.is_active !== false) {
+            account.is_active = false;
+            changed = true;
+        }
+        if (!changed) return;
+        account.updated_at = new Date().toISOString();
+        await saveAuthAccounts(this.authAccountsData);
+        await App.refreshAuthUsers();
     },
 
     // Page access checkboxes
@@ -550,6 +780,12 @@ const Settings = {
         const name = document.getElementById('emp-name').value.trim();
         if (!name) { App.toast('Введите имя сотрудника'); return; }
         const isNewEmployee = !this.editingEmployeeId;
+        const employmentStatus = document.getElementById('emp-status')?.value || 'active';
+        const firedDateInput = document.getElementById('emp-fired-date')?.value || '';
+        const firedDate = employmentStatus === 'fired'
+            ? (firedDateInput || new Date().toISOString().split('T')[0])
+            : null;
+        const isActive = employmentStatus === 'active';
 
         const employee = {
             id: this.editingEmployeeId || undefined,
@@ -560,13 +796,15 @@ const Settings = {
             reminder_hour: parseInt(document.getElementById('emp-reminder-hour').value) || 17,
             reminder_minute: parseInt(document.getElementById('emp-reminder-min').value) || 30,
             timezone_offset: parseInt(document.getElementById('emp-tz-offset').value) ?? 3,
-            is_active: !document.getElementById('emp-fired-date')?.value, // active = no fired date
-            fired_date: document.getElementById('emp-fired-date')?.value || null,
+            is_active: isActive,
+            fired_date: firedDate,
             tasks_required: document.getElementById('emp-tasks-required').checked,
             pay_white_salary: parseFloat(document.getElementById('emp-pay-white').value) || 0,
             pay_black_salary: parseFloat(document.getElementById('emp-pay-black').value) || 0,
             pay_base_salary_month: (parseFloat(document.getElementById('emp-pay-white').value) || 0) + (parseFloat(document.getElementById('emp-pay-black').value) || 0),
             pay_base_hours_month: parseFloat(document.getElementById('emp-pay-base-hours').value) || 176,
+            payroll_profile: document.getElementById('emp-payroll-profile').value || 'hourly',
+            pay_base_hours_semimonth: parseFloat(document.getElementById('emp-pay-half-hours').value) || 0,
             pay_overtime_hour_rate: parseFloat(document.getElementById('emp-pay-overtime-rate').value) || 0,
             pay_weekend_hour_rate: parseFloat(document.getElementById('emp-pay-weekend-rate').value) || 0,
             pay_holiday_hour_rate: parseFloat(document.getElementById('emp-pay-holiday-rate').value) || 0,
@@ -586,6 +824,8 @@ const Settings = {
             return;
         }
 
+        employee.id = savedId;
+        await this.syncAuthAccountWithEmployee(employee);
         if (isNewEmployee) {
             await this.ensureLoginForNewEmployee({ ...employee, id: savedId });
         }
@@ -991,7 +1231,7 @@ const Settings = {
         const tbody = document.getElementById('auth-accounts-table-body');
         if (!tbody) return;
         if (!this.authAccountsData || this.authAccountsData.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">Нет логинов</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">Нет логинов</td></tr>';
             return;
         }
 
@@ -1001,6 +1241,10 @@ const Settings = {
                 const status = a.is_active === false
                     ? '<span class="badge">Отключен</span>'
                     : '<span class="badge badge-green">Активен</span>';
+                const employee = (this.employeesData || []).find(e => String(e.id || '') === String(a.employee_id || ''));
+                const employeeStatus = employee
+                    ? this.getEmployeeStatusMeta(employee)
+                    : { label: 'Сотрудник не найден', badgeClass: 'badge', hint: 'Привязка сотрудника потеряна' };
                 const security = this.describeAuthAccountSecurity(a);
                 const last = a.last_login_at
                     ? new Date(a.last_login_at).toLocaleString('ru-RU')
@@ -1008,6 +1252,7 @@ const Settings = {
                 return `<tr>
                     <td style="font-weight:600;">${this.escHtml(a.employee_name || '—')}</td>
                     <td>${this.escHtml(a.username || '')}</td>
+                    <td><span class="${employeeStatus.badgeClass}" title="${this.escHtml(employeeStatus.hint)}">${this.escHtml(employeeStatus.label)}</span></td>
                     <td><code>${this.escHtml(security.title)}</code><div style="margin-top:4px;font-size:11px;color:${security.color};">${this.escHtml(security.label)} · нажмите «Сбросить», чтобы выдать новый пароль</div></td>
                     <td style="text-align:center;">${status}</td>
                     <td>${this.escHtml(last)}</td>
