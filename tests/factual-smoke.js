@@ -32,6 +32,9 @@ function createContext() {
         JSON,
         Intl,
         document,
+        __imports: [],
+        __warehouseHistory: [],
+        __warehouseItems: [],
         round2(value) {
             const num = parseFloat(value) || 0;
             return Math.round(num * 100) / 100;
@@ -42,7 +45,26 @@ function createContext() {
         },
         setTimeout(fn) { fn(); return 1; },
         clearTimeout() {},
+        calculateItemCost(item) {
+            return {
+                hoursPlastic: Math.round(((Number(item.quantity) || 0) / ((Number(item.pieces_per_hour) || 1))) * 100) / 100,
+                hoursCutting: 0,
+            };
+        },
+        calculateHardwareCost(hw, params) {
+            const speed = Number(hw.assembly_speed) || 60;
+            const waste = Number(params?.wasteFactor) || 1.1;
+            return { hoursHardware: Math.round(((Number(hw.qty) || 0) / speed * waste) * 100) / 100 };
+        },
+        calculatePackagingCost(pkg, params) {
+            const speed = Number(pkg.assembly_speed) || 60;
+            const waste = Number(params?.wasteFactor) || 1.1;
+            return { hoursPackaging: Math.round(((Number(pkg.qty) || 0) / speed * waste) * 100) / 100 };
+        },
     };
+    context.loadFintabloImports = async () => context.__imports;
+    context.loadWarehouseHistory = async () => context.__warehouseHistory;
+    context.loadWarehouseItems = async () => context.__warehouseItems;
     context.window = context;
     return vm.createContext(context);
 }
@@ -120,13 +142,131 @@ function smokeSavedPlanTotalWins(context) {
     assert.ok(html.includes('Пересчитанные статьи дают 250 ₽, но сохраненный план заказа равен 150 ₽.'), 'drift note should explain why total uses saved plan');
 }
 
-function main() {
+function smokeBuildPlanUsesTaxFormulaAndSavedAssemblyHours(context) {
+    const result = vm.runInContext(`(() => {
+        return Factual._buildPlan(
+            {
+                total_revenue_plan: 1000,
+                total_cost_plan: 900,
+                production_hours_hardware: 1.46,
+                production_hours_packaging: 0,
+            },
+            [
+                {
+                    item_type: 'hardware',
+                    product_name: 'Миланский шнур',
+                    quantity: 2600,
+                    hardware_price_per_unit: 1,
+                    hardware_delivery_per_unit: 0,
+                }
+            ],
+            {
+                fotPerHour: 550,
+                taxRate: 0.06,
+                vatRate: 0.05,
+                indirectPerHour: 0,
+                wasteFactor: 1.1,
+            }
+        );
+    })()`, context);
+
+    assert.equal(result.planData.taxes, 110, 'plan taxes should follow calculator formula 5% + 6%');
+    assert.equal(result.planHours.hoursHardware, 1.46, 'saved order assembly hours should win over raw default recalc');
+    assert.equal(result.planData.salaryAssembly, 803, 'assembly salary should use saved order hours');
+}
+
+async function smokeLegacyStageDistributionAndMaterials(context) {
+    context.__imports = [
+        {
+            import_date: '2026-03-17T15:38:28.277Z',
+            fact_materials: 351,
+            fact_revenue: 0,
+            fact_printing: 0,
+            fact_hardware: 0,
+            fact_packaging: 0,
+            fact_taxes: 0,
+            fact_other: 0,
+            fact_delivery: 0,
+            fact_molds: 0,
+        },
+    ];
+
+    await vm.runInContext(`(async () => {
+        Factual._employees = [
+            {
+                id: 1,
+                name: 'Тая',
+                pay_base_salary_month: 70000,
+                pay_base_hours_month: 120,
+                pay_overtime_hour_rate: 500,
+            },
+            {
+                id: 2,
+                name: 'Женя Г',
+                pay_base_salary_month: 0,
+                pay_base_hours_month: 0,
+                pay_overtime_hour_rate: 500,
+            },
+        ];
+        Factual._entries = [
+            {
+                order_id: 77,
+                worker_name: 'Тая',
+                employee_id: 1,
+                hours: 12,
+                description: '[meta]{"stage":"other","project":"Legacy Order"}[/meta] Автоматически перенесено из legacy Google-таблицы',
+            },
+            {
+                order_id: 77,
+                worker_name: 'Женя',
+                employee_id: 2,
+                hours: 6,
+                description: '[meta]{"stage":"other","project":"Legacy Order"}[/meta] Автоматически перенесено из legacy Google-таблицы',
+            },
+            {
+                order_id: 77,
+                worker_name: 'Женя',
+                employee_id: 2,
+                hours: 1,
+                description: '[meta]{"stage":"assembly","project":"Legacy Order"}[/meta]',
+            },
+        ];
+
+        const factData = {};
+        const planHours = { hoursPlastic: 20, hoursTrim: 5, hoursHardware: 5, hoursPackaging: 0 };
+        const planData = { plastic: 3553, hardwareTotal: 0, packagingTotal: 0 };
+        const params = { fotPerHour: 550, indirectPerHour: 100 };
+
+        Factual._applyHoursFromEntries(factData, 77, planHours, params);
+        await Factual._applyDerivedFacts(factData, planData, planHours, params, 77, 'Legacy Order');
+        globalThis.__legacyFact = factData;
+    })()`, context);
+
+    const fact = context.__legacyFact;
+    assert.equal(fact.fact_hours_production, 12, 'legacy other hours should fill casting by plan ratio');
+    assert.equal(fact.fact_hours_trim, 3, 'legacy other hours should fill trim by plan ratio');
+    assert.equal(fact.fact_hours_assembly, 4, 'legacy other hours plus explicit assembly should fill assembly');
+    assert.equal(fact._legacy_stage_estimate, true, 'legacy distribution marker should be present');
+    assert.ok(Math.abs(fact.fact_salary_production - 6666.67) < 0.05, 'casting salary should use employee rates and legacy split');
+    assert.ok(Math.abs(fact.fact_salary_trim - 1666.67) < 0.05, 'trim salary should use employee rates and legacy split');
+    assert.ok(Math.abs(fact.fact_salary_assembly - 2166.67) < 0.05, 'assembly salary should include explicit hourly entry with employee_id alias match');
+    assert.equal(fact.fact_indirect_production, 1900, 'indirect should use full distributed hours total');
+    assert.equal(fact.fact_plastic, 3904, 'materials import should augment planned plastic cost instead of replacing it');
+    assert.equal(fact._source_hints.fact_plastic, 'план + ФинТабло');
+}
+
+async function main() {
     const context = createContext();
     runScript(context, 'js/factual.js');
     smokeHiddenSalaryTotals(context);
     smokeSavedPlanTotalWins(context);
     smokeRevenueManualOverride(context);
+    smokeBuildPlanUsesTaxFormulaAndSavedAssemblyHours(context);
+    await smokeLegacyStageDistributionAndMaterials(context);
     console.log('factual smoke checks passed');
 }
 
-main();
+main().catch(err => {
+    console.error(err);
+    process.exit(1);
+});

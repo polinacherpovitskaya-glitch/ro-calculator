@@ -40,10 +40,10 @@ const Factual = {
         { key: 'hardware_total',      label: 'Фурнитура+NFC',    planField: 'hardwareTotal',    hint: 'склад или план' },
         { key: 'packaging_total',     label: 'Упаковка',         planField: 'packagingTotal',   hint: 'склад или план' },
         { key: 'design_printing',     label: 'Нанесение',        planField: 'designPrinting',   hint: 'FinTablo / вруч.' },
-        { key: 'plastic',             label: 'Пластик / материалы', planField: 'plastic',       hint: 'FinTablo / вруч.' },
+        { key: 'plastic',             label: 'Пластик / материалы', planField: 'plastic',       hint: 'план + ФинТабло / вруч.' },
         { key: 'molds',               label: 'Молды',            planField: 'molds',            hint: 'FinTablo / вруч.' },
         { key: 'delivery_client',     label: 'Доставка',         planField: 'delivery',         hint: 'вручную' },
-        { key: 'taxes',               label: 'Налоги',           planField: 'taxes',            hint: 'балансом' },
+        { key: 'taxes',               label: 'Налоги',           planField: 'taxes',            hint: 'калькулятор / ФинТабло' },
         { key: 'other',               label: 'Прочее',           planField: 'other',            hint: 'FinTablo / вруч.' },
     ],
 
@@ -61,6 +61,83 @@ const Factual = {
     ]),
 
     _num(v) { const n = parseFloat(v); return Number.isFinite(n) ? n : 0; },
+    _getSourceHints(factData) {
+        const raw = factData && factData._source_hints;
+        return (raw && typeof raw === 'object') ? raw : {};
+    },
+    _setSourceHint(factData, key, hint) {
+        if (!factData || !key || !hint) return;
+        const hints = this._getSourceHints(factData);
+        hints[key] = hint;
+        factData._source_hints = hints;
+    },
+    _getRowSourceHint(factData, factKey, fallback) {
+        return this._getSourceHints(factData)[factKey]
+            || (factData?._auto_fintablo?.[factKey] ? 'ФинТабло' : fallback);
+    },
+    _splitWeightedValue(total, weights, stageKeys) {
+        const out = { casting: 0, trim: 0, assembly: 0, packaging: 0 };
+        const activeKeys = (stageKeys || []).filter(stage => this._num(weights?.[stage]) > 0);
+        if (!activeKeys.length) return out;
+        let allocated = 0;
+        activeKeys.forEach((stage, idx) => {
+            const part = idx === activeKeys.length - 1
+                ? round2(total - allocated)
+                : round2(total * this._num(weights[stage]));
+            out[stage] = part;
+            allocated += part;
+        });
+        return out;
+    },
+    _isLegacyImportedEntry(entry) {
+        const desc = String(entry?.description || entry?.task_description || '');
+        return /legacy google-таблиц/i.test(desc) || /Импорт часов 1[–-]15 марта/i.test(desc);
+    },
+    _collectStageActuals(orderId, planHours = {}, params = {}) {
+        const stageKeys = ['casting', 'trim', 'assembly', 'packaging'];
+        const entries = (this._entries || []).filter(e => Number(e.order_id) === Number(orderId));
+        const stageHours = { casting: 0, trim: 0, assembly: 0, packaging: 0 };
+        const stageSalary = { casting: 0, trim: 0, assembly: 0, packaging: 0 };
+        const planStageHours = {
+            casting: this._num(planHours.hoursPlastic),
+            trim: this._num(planHours.hoursTrim),
+            assembly: this._num(planHours.hoursHardware),
+            packaging: this._num(planHours.hoursPackaging),
+        };
+        const planTotal = stageKeys.reduce((sum, stage) => sum + planStageHours[stage], 0);
+        const weights = planTotal > 0
+            ? stageKeys.reduce((acc, stage) => ({ ...acc, [stage]: planStageHours[stage] / planTotal }), {})
+            : null;
+        let usedLegacyDistribution = false;
+
+        entries.forEach(entry => {
+            const stage = this._stageKey(entry);
+            const hours = this._num(entry.hours);
+            if (hours <= 0) return;
+            const rate = this._employeeRateByName(entry.worker_name, params, entry);
+            if (stageHours[stage] !== undefined) {
+                stageHours[stage] += hours;
+                stageSalary[stage] += hours * rate;
+                return;
+            }
+            if (!weights || !this._isLegacyImportedEntry(entry)) return;
+            const distributed = this._splitWeightedValue(hours, weights, stageKeys);
+            stageKeys.forEach(stageKey => {
+                const splitHours = this._num(distributed[stageKey]);
+                if (splitHours <= 0) return;
+                stageHours[stageKey] += splitHours;
+                stageSalary[stageKey] += splitHours * rate;
+            });
+            usedLegacyDistribution = true;
+        });
+
+        stageKeys.forEach(stage => {
+            stageHours[stage] = round2(stageHours[stage]);
+            stageSalary[stage] = round2(stageSalary[stage]);
+        });
+
+        return { hours: stageHours, salary: stageSalary, usedLegacyDistribution };
+    },
 
     // ==========================================
     // Load
@@ -503,19 +580,51 @@ async _loadFactSummaries() {
                     builtin_hw_name: ri.builtin_hw_name || '', builtin_hw_price: ri.builtin_hw_price || 0,
                     builtin_hw_delivery_total: ri.builtin_hw_delivery_total || 0, builtin_hw_speed: ri.builtin_hw_speed || 0,
                 };
-                item.result = calculateItemCost(item, params);
+                const savedProductResult = (ri.result && typeof ri.result === 'object')
+                    ? {
+                        hoursPlastic: this._num(ri.result.hoursPlastic),
+                        hoursCutting: this._num(ri.result.hoursCutting),
+                    }
+                    : null;
+                const rawHoursPlastic = this._num(ri.hours_plastic);
+                const rawHoursCutting = this._num(ri.hours_cutting);
+                if (savedProductResult && (savedProductResult.hoursPlastic > 0 || savedProductResult.hoursCutting > 0)) {
+                    item.result = savedProductResult;
+                } else if (rawHoursPlastic > 0 || rawHoursCutting > 0) {
+                    item.result = { hoursPlastic: round2(rawHoursPlastic), hoursCutting: round2(rawHoursCutting) };
+                } else {
+                    item.result = calculateItemCost(item, params);
+                }
                 calcItems.push(item);
             } else if (ri.item_type === 'hardware') {
-                const hw = { name: ri.product_name, qty: ri.quantity, assembly_speed: ri.hardware_assembly_speed || 60,
-                    price: ri.hardware_price_per_unit || 0, delivery_price: ri.hardware_delivery_per_unit || 0,
-                    delivery_total: ri.hardware_delivery_total || 0, sell_price: ri.sell_price_hardware || 0 };
-                hw.result = calculateHardwareCost(hw, params);
+                const savedHardwareHours = this._num(ri.result?.hoursHardware || ri.hours_hardware);
+                const hw = {
+                    name: ri.product_name,
+                    qty: ri.quantity,
+                    assembly_speed: ri.hardware_assembly_speed || ri.assembly_speed || 60,
+                    price: ri.hardware_price_per_unit || 0,
+                    delivery_price: ri.hardware_delivery_per_unit || 0,
+                    delivery_total: ri.hardware_delivery_total || 0,
+                    sell_price: ri.sell_price_hardware || 0,
+                };
+                hw.result = savedHardwareHours > 0
+                    ? { hoursHardware: round2(savedHardwareHours) }
+                    : calculateHardwareCost(hw, params);
                 calcHw.push(hw);
             } else if (ri.item_type === 'packaging') {
-                const pkg = { name: ri.product_name, qty: ri.quantity, assembly_speed: ri.packaging_assembly_speed || 60,
-                    price: ri.packaging_price_per_unit || 0, delivery_price: ri.packaging_delivery_per_unit || 0,
-                    delivery_total: ri.packaging_delivery_total || 0, sell_price: ri.sell_price_packaging || 0 };
-                pkg.result = calculatePackagingCost(pkg, params);
+                const savedPackagingHours = this._num(ri.result?.hoursPackaging || ri.hours_packaging);
+                const pkg = {
+                    name: ri.product_name,
+                    qty: ri.quantity,
+                    assembly_speed: ri.packaging_assembly_speed || ri.assembly_speed || 60,
+                    price: ri.packaging_price_per_unit || 0,
+                    delivery_price: ri.packaging_delivery_per_unit || 0,
+                    delivery_total: ri.packaging_delivery_total || 0,
+                    sell_price: ri.sell_price_packaging || 0,
+                };
+                pkg.result = savedPackagingHours > 0
+                    ? { hoursPackaging: round2(savedPackagingHours) }
+                    : calculatePackagingCost(pkg, params);
                 calcPkg.push(pkg);
             }
         });
@@ -529,6 +638,11 @@ async _loadFactSummaries() {
         });
         calcHw.forEach(hw => { if (hw.result) planHoursAssembly += hw.result.hoursHardware || 0; });
         calcPkg.forEach(pkg => { if (pkg.result) planHoursPackaging += pkg.result.hoursPackaging || 0; });
+
+        const savedAssemblyHours = this._num(order.production_hours_hardware);
+        if (savedAssemblyHours > 0) planHoursAssembly = savedAssemblyHours;
+        const savedPackagingHours = this._num(order.production_hours_packaging);
+        if (savedPackagingHours > 0) planHoursPackaging = savedPackagingHours;
 
         const salaryProduction = round2(planHoursPlastic * (params.fotPerHour || 0));
         const salaryTrim = round2(planHoursTrim * (params.fotPerHour || 0));
@@ -567,7 +681,10 @@ async _loadFactSummaries() {
             round2(hardwarePurchase) + round2(hardwareDelivery) + round2(packagingPurchase) + round2(packagingDelivery) +
             round2(designPrinting) + round2(plastic) + round2(molds) + round2(delivery)
         );
-        const taxes = round2(Math.max(0, orderCosts > 0 ? (orderCosts - rowsWithoutTaxes) : 0));
+        const taxesByFormula = round2(orderRevenue * (this._num(params.taxRate) + this._num(params.vatRate)));
+        const taxesByBalance = round2(Math.max(0, orderCosts > 0 ? (orderCosts - rowsWithoutTaxes) : 0));
+        const taxes = taxesByFormula > 0 ? taxesByFormula : taxesByBalance;
+        const computedTotalCosts = round2(rowsWithoutTaxes + taxes);
 
         return {
             planData: {
@@ -578,7 +695,7 @@ async _loadFactSummaries() {
                 packagingTotal: round2(packagingPurchase + packagingDelivery),
                 designPrinting: round2(designPrinting), plastic: round2(plastic),
                 molds: round2(molds), delivery: round2(delivery), taxes: round2(taxes), other: 0,
-                totalCosts: orderCosts > 0 ? round2(orderCosts) : round2(rowsWithoutTaxes + taxes),
+                totalCosts: orderCosts > 0 ? round2(orderCosts) : computedTotalCosts,
                 revenue: orderRevenue > 0 ? round2(orderRevenue) : 0,
                 planMarginPercent: this._num(order.margin_percent_plan),
                 planEarned: this._num(order.total_margin_plan),
@@ -592,6 +709,7 @@ async _loadFactSummaries() {
 
     // ==========================================
     // Auto-fact sources (same logic as before)
+
     // ==========================================
 
     _getManualOverrides(factData) {
@@ -631,8 +749,8 @@ async _loadFactSummaries() {
         const { planData, planHours } = this._buildPlan(order, rawItems || [], params);
         const factData = { ...(await loadFactual(orderId) || {}) };
 
-        this._applyHoursFromEntries(factData, orderId);
-        await this._applyDerivedFacts(factData, planData, params, orderId, order.order_name || '');
+        this._applyHoursFromEntries(factData, orderId, planHours, params);
+        await this._applyDerivedFacts(factData, planData, planHours, params, orderId, order.order_name || '');
 
         const computed = {
             ...(cached || {}),
@@ -646,28 +764,42 @@ async _loadFactSummaries() {
         return computed;
     },
 
-    _applyHoursFromEntries(factData, orderId) {
-        const entries = (this._entries || []).filter(e => Number(e.order_id) === Number(orderId));
-        let casting = 0, trim = 0, assembly = 0, packaging = 0;
-        entries.forEach(e => {
-            const stage = this._stageKey(e);
-            const h = parseFloat(e.hours) || 0;
-            if (stage === 'casting') casting += h;
-            else if (stage === 'trim') trim += h;
-            else if (stage === 'assembly') assembly += h;
-            else if (stage === 'packaging') packaging += h;
-        });
-        factData.fact_hours_production = round2(casting);
-        factData.fact_hours_trim = round2(trim);
-        factData.fact_hours_assembly = round2(assembly);
-        factData.fact_hours_packaging = round2(packaging);
-        factData._hours_source = 'timetrack';
+    _applyHoursFromEntries(factData, orderId, planHours = {}, params = {}) {
+        const stageActuals = this._collectStageActuals(orderId, planHours, params);
+        factData.fact_hours_production = round2(stageActuals.hours.casting);
+        factData.fact_hours_trim = round2(stageActuals.hours.trim);
+        factData.fact_hours_assembly = round2(stageActuals.hours.assembly);
+        factData.fact_hours_packaging = round2(stageActuals.hours.packaging);
+        factData._auto_stage_salary = stageActuals.salary;
+        factData._hours_source = stageActuals.usedLegacyDistribution ? 'timetrack+legacy-stage-estimate' : 'timetrack';
+        factData._legacy_stage_estimate = stageActuals.usedLegacyDistribution;
+        if (stageActuals.usedLegacyDistribution) {
+            this._setSourceHint(factData, 'fact_salary_production', 'часы × ставка, legacy по плану');
+            this._setSourceHint(factData, 'fact_salary_trim', 'часы × ставка, legacy по плану');
+            this._setSourceHint(factData, 'fact_salary_assembly', 'часы × ставка, legacy по плану');
+            this._setSourceHint(factData, 'fact_salary_packaging', 'часы × ставка, legacy по плану');
+            this._setSourceHint(factData, 'fact_indirect_production', 'часы × косв./ч, legacy по плану');
+        }
     },
 
-    _employeeRateByName(name, params) {
+    _employeeRateByName(name, params, entry = null) {
         const fallback = params?.fotPerHour || 0;
-        if (!name) return fallback;
-        const emp = (this._employees || []).find(e => String(e.name || '').trim() === String(name || '').trim());
+        const employees = this._employees || [];
+        let emp = null;
+        const entryEmployeeId = Number(entry?.employee_id);
+        if (Number.isFinite(entryEmployeeId) && entryEmployeeId > 0) {
+            emp = employees.find(candidate => Number(candidate.id) === entryEmployeeId) || null;
+        }
+        if (!emp && name) {
+            const needle = String(name || '').trim().toLowerCase();
+            emp = employees.find(candidate => String(candidate.name || '').trim().toLowerCase() === needle) || null;
+            if (!emp && needle) {
+                emp = employees.find(candidate => {
+                    const candidateName = String(candidate.name || '').trim().toLowerCase();
+                    return candidateName.startsWith(needle) || needle.startsWith(candidateName);
+                }) || null;
+            }
+        }
         if (!emp) return fallback;
         const baseSalary = this._num(emp.pay_base_salary_month);
         const baseHours = this._num(emp.pay_base_hours_month);
@@ -678,28 +810,29 @@ async _loadFactSummaries() {
         return rate > 0 ? rate : fallback;
     },
 
-    _sumStageSalary(orderId, stage, params) {
-        const entries = (this._entries || []).filter(e => Number(e.order_id) === Number(orderId) && this._stageKey(e) === stage);
-        let total = 0;
-        entries.forEach(e => {
-            const hours = parseFloat(e.hours) || 0;
-            if (hours > 0) total += hours * this._employeeRateByName(e.worker_name, params);
-        });
-        return round2(total);
+    _sumStageSalary(orderId, stage, params, planHours = {}) {
+        const stageActuals = this._collectStageActuals(orderId, planHours, params);
+        return round2(stageActuals.salary[stage] || 0);
     },
 
-    async _applyDerivedFacts(factData, planData, params, orderId, orderName) {
+    async _applyDerivedFacts(factData, planData, planHours, params, orderId, orderName) {
         const hProd = parseFloat(factData.fact_hours_production) || 0;
         const hTrim = parseFloat(factData.fact_hours_trim) || 0;
         const hAsm = parseFloat(factData.fact_hours_assembly) || 0;
         const hPkg = parseFloat(factData.fact_hours_packaging) || 0;
         const totalHours = hProd + hTrim + hAsm + hPkg;
+        const stageSalary = factData._auto_stage_salary || {
+            casting: this._sumStageSalary(orderId, 'casting', params, planHours),
+            trim: this._sumStageSalary(orderId, 'trim', params, planHours),
+            assembly: this._sumStageSalary(orderId, 'assembly', params, planHours),
+            packaging: this._sumStageSalary(orderId, 'packaging', params, planHours),
+        };
 
         // 1. Salaries from time entries (per-stage)
-        this._applyAutoFactValue(factData, 'fact_salary_production', this._sumStageSalary(orderId, 'casting', params));
-        this._applyAutoFactValue(factData, 'fact_salary_trim', this._sumStageSalary(orderId, 'trim', params));
-        this._applyAutoFactValue(factData, 'fact_salary_assembly', this._sumStageSalary(orderId, 'assembly', params));
-        this._applyAutoFactValue(factData, 'fact_salary_packaging', this._sumStageSalary(orderId, 'packaging', params));
+        this._applyAutoFactValue(factData, 'fact_salary_production', stageSalary.casting);
+        this._applyAutoFactValue(factData, 'fact_salary_trim', stageSalary.trim);
+        this._applyAutoFactValue(factData, 'fact_salary_assembly', stageSalary.assembly);
+        this._applyAutoFactValue(factData, 'fact_salary_packaging', stageSalary.packaging);
 
         // 2. Indirect costs from hours
         this._applyAutoFactValue(factData, 'fact_indirect_production', totalHours * (params?.indirectPerHour || 0));
@@ -710,15 +843,8 @@ async _loadFactSummaries() {
         if (imports.length > 0) {
             const latest = [...imports].sort((a, b) => new Date(b.import_date || 0) - new Date(a.import_date || 0))[0];
 
-            // Fintablo → Plan-fact mapping:
-            // fact_hardware → fact_hardware_total (Фурнитура+NFC)
-            // fact_printing → fact_design_printing (Нанесение)
-            // fact_delivery → fact_delivery_client (Доставка)
-            // fact_taxes → fact_taxes (Налоги)
-            // fact_revenue → fact_revenue (Выручка)
             const ftMap = {
                 fact_hardware: 'fact_hardware_total',
-                fact_materials: 'fact_plastic',
                 fact_printing: 'fact_design_printing',
                 fact_molds: 'fact_molds',
                 fact_delivery: 'fact_delivery_client',
@@ -734,14 +860,20 @@ async _loadFactSummaries() {
                 }
             }
 
-            // Revenue from fintablo (actual money received)
+            const ftMaterials = this._num(latest.fact_materials);
+            if (ftMaterials > 0) {
+                const plasticBase = this._num(planData?.plastic);
+                this._applyAutoFactValue(factData, 'fact_plastic', plasticBase + ftMaterials);
+                factData._auto_fintablo.fact_plastic = true;
+                this._setSourceHint(factData, 'fact_plastic', plasticBase > 0 ? 'план + ФинТабло' : 'ФинТабло');
+            }
+
             const ftRevenue = this._num(latest.fact_revenue);
             if (ftRevenue > 0) {
                 this._applyAutoFactValue(factData, 'fact_revenue', ftRevenue);
                 factData._auto_fintablo.fact_revenue = true;
             }
 
-            // Packaging from fintablo (if separate field exists, otherwise fall through to warehouse)
             const ftPackaging = this._num(latest.fact_packaging);
             if (ftPackaging > 0) {
                 this._applyAutoFactValue(factData, 'fact_packaging_total', ftPackaging);
@@ -749,19 +881,27 @@ async _loadFactSummaries() {
             }
         }
 
+        if (!this._isManualOverride(factData, 'fact_plastic') && !factData._auto_fintablo.fact_plastic && this._num(planData?.plastic) > 0) {
+            this._applyAutoFactValue(factData, 'fact_plastic', planData.plastic);
+            this._setSourceHint(factData, 'fact_plastic', 'план');
+        }
+
         // 4. Warehouse fallback for hardware/packaging (only if fintablo didn't provide them)
         if (!factData._auto_fintablo.fact_hardware_total || !factData._auto_fintablo.fact_packaging_total) {
             const whActual = await this._deriveMaterialFacts(orderId, orderName);
             if (!factData._auto_fintablo.fact_hardware_total) {
                 this._applyAutoFactValue(factData, 'fact_hardware_total', whActual.found ? whActual.hardware : (planData?.hardwareTotal || 0));
+                this._setSourceHint(factData, 'fact_hardware_total', whActual.found ? 'склад' : 'план');
             }
             if (!factData._auto_fintablo.fact_packaging_total) {
                 this._applyAutoFactValue(factData, 'fact_packaging_total', whActual.found ? whActual.packaging : (planData?.packagingTotal || 0));
+                this._setSourceHint(factData, 'fact_packaging_total', whActual.found ? 'склад' : 'план');
             }
         }
     },
 
-    async _deriveMaterialFacts(orderId, orderName) {
+    async _deriveMaterialFacts
+(orderId, orderName) {
         const history = (await loadWarehouseHistory()) || [];
         if (history.length === 0) return { found: false, hardware: 0, packaging: 0 };
         const items = (await loadWarehouseItems()) || [];
@@ -831,6 +971,11 @@ async _loadFactSummaries() {
         <div class="fact-mini-stat"><span class="text-muted" style="font-size:11px">План прибыль</span><div style="margin-top:6px">${this._renderCompactResult(planResult)}</div></div>
         <div class="fact-mini-stat"><span class="text-muted" style="font-size:11px">Факт прибыль</span><div style="margin-top:6px">${this._renderCompactResult(factResult)}</div></div>
     </div>`;
+    if (fact._legacy_stage_estimate) {
+        html += `<div style="margin:-2px 0 10px;padding:8px 10px;border:1px solid var(--border);border-radius:10px;background:var(--bg-muted);font-size:11px;color:var(--text-muted)">
+            Legacy-часы без этапа распределены по плановым стадиям заказа, чтобы выливание/срезание/сборка отражали реальную загрузку до ручной детализации.
+        </div>`;
+    }
 
     html += '<div style="overflow-x:auto"><table class="data-table" style="width:100%;font-size:12px">';
     html += '<thead><tr><th style="text-align:left;width:35%">Статья расходов</th><th class="text-right" style="width:20%">План</th><th class="text-right" style="width:25%">Факт</th><th class="text-right" style="width:20%">Δ</th></tr></thead><tbody>';
@@ -851,8 +996,7 @@ async _loadFactSummaries() {
         const pct = planVal > 0 ? ((delta / planVal) * 100) : 0;
         const alarm = this.getAlarm(factVal, planVal);
 
-        const ftSourced = fact._auto_fintablo && fact._auto_fintablo[factKey];
-        const sourceHint = ftSourced && !manualOverride ? 'ФинТабло' : row.hint;
+        const sourceHint = manualOverride ? 'вручную' : this._getRowSourceHint(fact, factKey, row.hint);
 
         if (isSalaryRow && !_isAdmin) {
             return;
