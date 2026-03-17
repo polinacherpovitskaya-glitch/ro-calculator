@@ -18,6 +18,7 @@ const FinTablo = {
         'зарплата': 'fact_salary', 'зп': 'fact_salary', 'фот': 'fact_salary',
         'материал': 'fact_materials', 'пластик': 'fact_materials', 'сырье': 'fact_materials',
         'фурнитура': 'fact_hardware',
+        'упаков': 'fact_packaging',
         'доставка': 'fact_delivery', 'логистика': 'fact_delivery',
         'печат': 'fact_printing', 'нанесение': 'fact_printing',
         'молд': 'fact_molds', 'форма': 'fact_molds',
@@ -29,6 +30,7 @@ const FinTablo = {
         fact_salary: 'Зарплата',
         fact_materials: 'Материалы',
         fact_hardware: 'Фурнитура',
+        fact_packaging: 'Упаковка',
         fact_delivery: 'Доставка',
         fact_printing: 'Нанесение',
         fact_molds: 'Молды',
@@ -257,6 +259,11 @@ const FinTablo = {
                         ? `<span style="color:var(--danger)">${formatRub(outcome)}</span>` : '<span class="text-muted">0</span>';
                     if (incEl) incEl.innerHTML = income > 0
                         ? `<span style="color:var(--success)">${formatRub(income)}</span>` : '<span class="text-muted">0</span>';
+
+                    const matchedOrder = this._matchMap[d.id];
+                    if (matchedOrder) {
+                        await this._syncDealImport(d, matchedOrder, txns, { silent: true });
+                    }
                 } catch (e) {
                     console.warn('Failed to load totals for deal', d.id, e);
                 }
@@ -396,7 +403,7 @@ const FinTablo = {
     _mapToFactFields(outcomes) {
         const result = {
             fact_salary: 0, fact_materials: 0, fact_hardware: 0,
-            fact_delivery: 0, fact_printing: 0, fact_molds: 0,
+            fact_packaging: 0, fact_delivery: 0, fact_printing: 0, fact_molds: 0,
             fact_taxes: 0, fact_other: 0, fact_revenue: 0,
         };
 
@@ -423,6 +430,50 @@ const FinTablo = {
         return result;
     },
 
+    _buildImportData(order, deal, txns) {
+        const outcomes = txns.filter(t => t.group === 'outcome');
+        const incomes = txns.filter(t => t.group === 'income');
+        const factSums = this._mapToFactFields(outcomes);
+        const totalIncome = incomes.reduce((s, t) => s + (t.value || 0), 0);
+        const totalOutcome = outcomes.reduce((s, t) => s + (t.value || 0), 0);
+
+        return {
+            order_id: order.id,
+            period_start: null,
+            period_end: null,
+            fact_salary: factSums.fact_salary,
+            fact_materials: factSums.fact_materials,
+            fact_hardware: factSums.fact_hardware,
+            fact_packaging: factSums.fact_packaging,
+            fact_delivery: factSums.fact_delivery,
+            fact_printing: factSums.fact_printing,
+            fact_molds: factSums.fact_molds,
+            fact_taxes: factSums.fact_taxes,
+            fact_other: factSums.fact_other,
+            fact_total: totalOutcome,
+            fact_revenue: totalIncome,
+            raw_data: { source: 'fintablo_api', dealId: deal.id, dealName: deal.name, txnCount: txns.length },
+            source: 'api',
+        };
+    },
+
+    async _syncDealImport(deal, order, txns, opts = {}) {
+        if (!deal || !order) return null;
+        const importData = this._buildImportData(order, deal, txns);
+        const hasAnyMoney = [
+            importData.fact_salary, importData.fact_materials, importData.fact_hardware, importData.fact_packaging,
+            importData.fact_delivery, importData.fact_printing, importData.fact_molds, importData.fact_taxes,
+            importData.fact_other, importData.fact_revenue,
+        ].some(v => (parseFloat(v) || 0) > 0);
+        if (!hasAnyMoney) return null;
+
+        const id = await saveFintabloImport(importData);
+        if (id && !opts.silent) {
+            App.toast('Данные применены к заказу "' + order.order_name + '"');
+        }
+        return id;
+    },
+
     // =============================================
     // Apply data to order (save to fintablo_imports)
     // =============================================
@@ -440,37 +491,11 @@ const FinTablo = {
                 dealId: dealId, pageSize: 1000
             });
             const txns = data.items || [];
-            const outcomes = txns.filter(t => t.group === 'outcome');
-            const incomes = txns.filter(t => t.group === 'income');
-
-            const factSums = this._mapToFactFields(outcomes);
-            const totalIncome = incomes.reduce((s, t) => s + (t.value || 0), 0);
-            const totalOutcome = outcomes.reduce((s, t) => s + (t.value || 0), 0);
-
-            const importData = {
-                order_id: order.id,
-                period_start: null,
-                period_end: null,
-                fact_salary: factSums.fact_salary,
-                fact_materials: factSums.fact_materials,
-                fact_hardware: factSums.fact_hardware,
-                fact_delivery: factSums.fact_delivery,
-                fact_printing: factSums.fact_printing,
-                fact_molds: factSums.fact_molds,
-                fact_taxes: factSums.fact_taxes,
-                fact_other: factSums.fact_other,
-                fact_total: totalOutcome,
-                fact_revenue: totalIncome,
-                raw_data: { source: 'fintablo_api', dealId: deal.id, dealName: deal.name, txnCount: txns.length },
-                source: 'api',
-            };
-
-            const id = await saveFintabloImport(importData);
+            const id = await this._syncDealImport(deal, order, txns);
             if (id) {
-                App.toast('Данные применены к заказу "' + order.order_name + '"');
-            } else {
-                App.toast('Ошибка сохранения');
+                return;
             }
+            App.toast('Нет данных для сохранения');
         } catch (err) {
             App.toast('Ошибка: ' + err.message);
             console.error('applyToOrder error:', err);

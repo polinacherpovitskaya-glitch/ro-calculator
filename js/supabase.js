@@ -1158,14 +1158,69 @@ async function saveFintabloImport(importData) {
         import_date: importData.import_date || new Date().toISOString(),
         updated_at: new Date().toISOString(),
     };
+    const shouldReplaceExisting = record.source === 'api' && !!record.raw_data?.dealId;
+    const matchesExistingImport = (row) => {
+        if (!shouldReplaceExisting || !row) return false;
+        const merged = _mergePayloadRow(row, 'import_data');
+        return Number(merged.order_id) === Number(record.order_id)
+            && String(merged.source || '') === String(record.source || '')
+            && String(merged.raw_data?.dealId || '') === String(record.raw_data?.dealId || '');
+    };
+    const applyLocalRecord = () => {
+        const imports = getLocal(LOCAL_KEYS.imports) || [];
+        const idx = shouldReplaceExisting ? imports.findIndex(matchesExistingImport) : -1;
+        if (idx >= 0) imports[idx] = { ...imports[idx], ...record };
+        else imports.push(record);
+        setLocal(LOCAL_KEYS.imports, imports);
+    };
     if (isSupabaseReady()) {
         try {
+            let existingRaw = null;
+            if (shouldReplaceExisting) {
+                const existingResp = await supabaseClient
+                    .from('fintablo_imports')
+                    .select('*')
+                    .eq('order_id', record.order_id)
+                    .order('import_date', { ascending: false });
+                if (!existingResp.error) {
+                    existingRaw = (existingResp.data || []).find(matchesExistingImport) || null;
+                }
+            }
+
+            if (existingRaw) {
+                let updateError = null;
+                if (Object.prototype.hasOwnProperty.call(existingRaw, 'import_data')) {
+                    ({ error: updateError } = await supabaseClient
+                        .from('fintablo_imports')
+                        .update({
+                            import_data: record,
+                            period_from: record.period_from || record.period_start || null,
+                            period_to: record.period_to || record.period_end || null,
+                            import_date: record.import_date,
+                            updated_at: record.updated_at,
+                        })
+                        .eq('id', existingRaw.id));
+                } else {
+                    ({ error: updateError } = await supabaseClient
+                        .from('fintablo_imports')
+                        .update(record)
+                        .eq('id', existingRaw.id));
+                }
+                if (!updateError) {
+                    applyLocalRecord();
+                    return existingRaw.id;
+                }
+            }
+
             const { data, error } = await supabaseClient
                 .from('fintablo_imports')
                 .insert(record)
                 .select('id')
                 .single();
-            if (!error && data) return data.id;
+            if (!error && data) {
+                applyLocalRecord();
+                return data.id;
+            }
             const fallbackPayload = {
                 id: record.id,
                 order_id: record.order_id,
@@ -1181,15 +1236,16 @@ async function saveFintabloImport(importData) {
                 .insert(fallbackPayload)
                 .select('id')
                 .single();
-            if (!fallback.error && fallback.data) return fallback.data.id;
+            if (!fallback.error && fallback.data) {
+                applyLocalRecord();
+                return fallback.data.id;
+            }
             console.warn('saveFintabloImport Supabase error, falling back to localStorage:', fallback.error || error);
         } catch (e) {
             console.warn('saveFintabloImport Supabase exception, falling back to localStorage:', e);
         }
     }
-    const imports = getLocal(LOCAL_KEYS.imports) || [];
-    imports.push(record);
-    setLocal(LOCAL_KEYS.imports, imports);
+    applyLocalRecord();
     return record.id;
 }
 

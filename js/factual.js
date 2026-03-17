@@ -40,10 +40,11 @@ const Factual = {
         { key: 'hardware_total',      label: 'Фурнитура+NFC',    planField: 'hardwareTotal',    hint: 'склад или план' },
         { key: 'packaging_total',     label: 'Упаковка',         planField: 'packagingTotal',   hint: 'склад или план' },
         { key: 'design_printing',     label: 'Нанесение',        planField: 'designPrinting',   hint: 'FinTablo / вруч.' },
-        { key: 'plastic',             label: 'Пластик',          planField: 'plastic',          hint: 'вручную' },
-        { key: 'molds',               label: 'Молды',            planField: 'molds',            hint: 'вручную' },
+        { key: 'plastic',             label: 'Пластик / материалы', planField: 'plastic',       hint: 'FinTablo / вруч.' },
+        { key: 'molds',               label: 'Молды',            planField: 'molds',            hint: 'FinTablo / вруч.' },
         { key: 'delivery_client',     label: 'Доставка',         planField: 'delivery',         hint: 'вручную' },
         { key: 'taxes',               label: 'Налоги',           planField: 'taxes',            hint: 'балансом' },
+        { key: 'other',               label: 'Прочее',           planField: 'other',            hint: 'FinTablo / вруч.' },
     ],
 
     HOUR_ROWS: [
@@ -56,7 +57,7 @@ const Factual = {
     AUTO_FACT_KEYS: new Set([
         'salary_production', 'salary_trim', 'salary_assembly', 'salary_packaging',
         'indirect_production', 'hardware_total', 'packaging_total',
-        'design_printing', 'delivery_client', 'taxes',
+        'design_printing', 'plastic', 'molds', 'delivery_client', 'taxes', 'other',
     ]),
 
     _num(v) { const n = parseFloat(v); return Number.isFinite(n) ? n : 0; },
@@ -66,6 +67,7 @@ const Factual = {
     // ==========================================
 
     async load() {
+        this._orderCache = {};
         const allOrders = await loadOrders();
         this._allOrders = (allOrders || []).filter(o => this.VISIBLE_STATUSES.includes(o.status));
         this._allOrders.sort((a, b) => (this.STATUS_ORDER[a.status] || 99) - (this.STATUS_ORDER[b.status] || 99));
@@ -195,13 +197,13 @@ const Factual = {
         }
 
         // Fact totals (load factuals for all orders with facts)
-        const factuals = await Promise.all(orders.map(o => loadFactual(o.id)));
+        const computedOrders = await Promise.all(orders.map(o => this._ensureComputedOrder(o)));
         let factRevTotal = 0, factCostTotal = 0;
         let factMargins = [];
         let earnedDelta = 0, revDelta = 0, costDelta = 0;
 
         orders.forEach((o, idx) => {
-            const f = factuals[idx];
+            const f = computedOrders[idx]?.factData;
             if (!f) return;
             const planRevenue = this._num(o.total_revenue_plan);
             const planCosts = this._num(o.total_cost_plan);
@@ -368,9 +370,10 @@ const Factual = {
     },
 
     async _loadFactSummaries() {
-        for (const o of this._filteredOrders) {
-            const f = await loadFactual(o.id);
-            if (!f) continue;
+        const computedOrders = await Promise.all(this._filteredOrders.map(o => this._ensureComputedOrder(o)));
+        this._filteredOrders.forEach((o, idx) => {
+            const f = computedOrders[idx]?.factData;
+            if (!f) return;
 
             const factRevenue = parseFloat(f.fact_revenue) || 0;
             let factCosts = 0;
@@ -389,7 +392,7 @@ const Factual = {
                 const mc = factMargin >= 30 ? 'var(--green)' : factMargin >= 20 ? 'var(--yellow)' : 'var(--red)';
                 marginEl.innerHTML = `<span style="color:${mc};font-weight:600">${factMargin}%</span>`;
             }
-        }
+        });
     },
 
     // ==========================================
@@ -431,24 +434,12 @@ const Factual = {
         if (!container) return;
         container.innerHTML = '<p class="text-muted text-center">⏳ Загрузка...</p>';
 
-        const orderData = await loadOrder(orderId);
-        if (!orderData) {
+        const computed = await this._ensureComputedOrder(orderId);
+        if (!computed) {
             container.innerHTML = '<p class="text-muted">Заказ не найден</p>';
             return;
         }
-
-        const { order, items: rawItems } = orderData;
-        const params = App.params || {};
-        const { planData, planHours } = this._buildPlan(order, rawItems, params);
-        const factData = await loadFactual(orderId) || {};
-
-        // Apply auto facts
-        this._applyHoursFromEntries(factData, orderId);
-        await this._applyDerivedFacts(factData, planData, params, orderId, order.order_name || '');
-
-        // Cache for save
-        this._orderCache[orderId] = { order, planData, planHours, factData };
-
+        const { order, planData, planHours, factData } = computed;
         this._renderDetail(orderId, container, planData, planHours, factData, order);
     },
 
@@ -546,7 +537,7 @@ const Factual = {
                 hardwareTotal: round2(hardwarePurchase + hardwareDelivery),
                 packagingTotal: round2(packagingPurchase + packagingDelivery),
                 designPrinting: round2(designPrinting), plastic: round2(plastic),
-                molds: round2(molds), delivery: round2(delivery), taxes: round2(taxes),
+                molds: round2(molds), delivery: round2(delivery), taxes: round2(taxes), other: 0,
                 totalCosts: orderCosts > 0 ? round2(orderCosts) : round2(rowsWithoutTaxes + taxes),
                 revenue: orderRevenue > 0 ? round2(orderRevenue) : 0,
                 planMarginPercent: this._num(order.margin_percent_plan),
@@ -583,6 +574,36 @@ const Factual = {
         // Revenue is auto if sourced from fintablo
         if (key === 'revenue' && factData?._auto_fintablo?.fact_revenue) return true;
         return false;
+    },
+
+    async _ensureComputedOrder(orderRef) {
+        const orderId = typeof orderRef === 'object' ? Number(orderRef?.id) : Number(orderRef);
+        if (!Number.isFinite(orderId)) return null;
+
+        const cached = this._orderCache[orderId];
+        if (cached?.computed) return cached;
+
+        const orderData = await loadOrder(orderId);
+        if (!orderData?.order) return null;
+
+        const params = App.params || {};
+        const { order, items: rawItems } = orderData;
+        const { planData, planHours } = this._buildPlan(order, rawItems || [], params);
+        const factData = { ...(await loadFactual(orderId) || {}) };
+
+        this._applyHoursFromEntries(factData, orderId);
+        await this._applyDerivedFacts(factData, planData, params, orderId, order.order_name || '');
+
+        const computed = {
+            ...(cached || {}),
+            order,
+            planData,
+            planHours,
+            factData,
+            computed: true,
+        };
+        this._orderCache[orderId] = computed;
+        return computed;
     },
 
     _applyHoursFromEntries(factData, orderId) {
@@ -657,9 +678,12 @@ const Factual = {
             // fact_revenue → fact_revenue (Выручка)
             const ftMap = {
                 fact_hardware: 'fact_hardware_total',
+                fact_materials: 'fact_plastic',
                 fact_printing: 'fact_design_printing',
+                fact_molds: 'fact_molds',
                 fact_delivery: 'fact_delivery_client',
                 fact_taxes: 'fact_taxes',
+                fact_other: 'fact_other',
             };
 
             for (const [ftKey, ourKey] of Object.entries(ftMap)) {
@@ -898,6 +922,7 @@ const Factual = {
         await saveFactual(orderId, cached.factData);
         App.toast('Сохранено: ' + (cached.order.order_name || ''));
 
+        await this._renderGlobalStats();
         // Update summary in table
         this._loadFactSummaries();
     },
