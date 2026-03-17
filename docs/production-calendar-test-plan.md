@@ -130,6 +130,7 @@
 - [x] Старые `План производства` и `Календарь` больше не создают conflicting truths в меню и routing.
 - [x] Настроенные `production_holidays` исключаются из расписания и не съезжают на день из-за timezone drift.
 - [x] Заказ с кастомной позицией без молда на складе уходит в отдельный blocked-блок и не планируется как ready.
+- [x] Календарь берет мощность из `planning_workers_count`, а не из pricing `workers_count`.
 
 ## Command Matrix
 ```sh

@@ -507,6 +507,8 @@ function getDefaultSettings() {
         nfc_write_speed: 350,
         workers_count: 3.5,
         hours_per_worker: 168,
+        planning_workers_count: 2,
+        planning_hours_per_day: 8,
         work_load_ratio: 0.8,
         plastic_injection_ratio: 0.7,
         packaging_ratio: 0.3,

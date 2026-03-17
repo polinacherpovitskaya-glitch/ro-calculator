@@ -713,6 +713,21 @@ function isProductionNonWorkingDate(date, holidaySet) {
     return holidaySet.has(formatIsoDateLocal(date));
 }
 
+function getProductionPlanningCapacity(settings) {
+    const pricingWorkers = Number(settings && settings.workers_count);
+    const explicitPlanningWorkers = Number(settings && settings.planning_workers_count);
+    const explicitPlanningHoursPerDay = Number(settings && settings.planning_hours_per_day);
+    const workersCount = explicitPlanningWorkers > 0
+        ? explicitPlanningWorkers
+        : (pricingWorkers > 0 ? Math.min(pricingWorkers, 2) : 2);
+    const hoursPerDay = explicitPlanningHoursPerDay > 0 ? explicitPlanningHoursPerDay : 8;
+    return {
+        workersCount: round2(workersCount),
+        hoursPerDay: round2(hoursPerDay),
+        dailyCapacity: round2(workersCount * hoursPerDay),
+    };
+}
+
 /**
  * Build production schedule — day-by-day resource allocation
  * Each order has 3 sequential phases: литьё → упаковка → сборка (hardware)
@@ -723,9 +738,7 @@ function isProductionNonWorkingDate(date, holidaySet) {
  * @returns {{ queue: Array, dailyCapacity: number, days: Array }}
  */
 function buildProductionSchedule(orders, settings) {
-    const workersCount = (settings && settings.workers_count) || 3.5;
-    const hoursPerDay = 8;
-    const dailyCapacity = round2(workersCount * hoursPerDay);
+    const { dailyCapacity } = getProductionPlanningCapacity(settings);
     const holidaySet = parseProductionHolidaySet(settings);
 
     // Filter schedulable orders: only past-draft statuses (sample, production, delivery)

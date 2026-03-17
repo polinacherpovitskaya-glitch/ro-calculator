@@ -19,6 +19,8 @@ assert.match(indexHtml, /id="gantt-queue"/, 'Gantt page must include queue conta
 assert.match(indexHtml, /data-zoom="week"/, 'Week zoom button missing');
 assert.match(indexHtml, /data-zoom="month"/, 'Month zoom button missing');
 assert.doesNotMatch(indexHtml, /data-zoom="day"/, 'Day zoom must be removed');
+assert.match(indexHtml, /set-planning_workers_count/, 'Settings must expose planning worker count');
+assert.match(indexHtml, /set-planning_hours_per_day/, 'Settings must expose planning hours per day');
 assert.match(ganttJs, /moveUp\(orderId\)/, 'Gantt queue reorder helpers missing');
 assert.match(ganttJs, /renderQueue\(queue, blockedQueue = \[\]\)/, 'Gantt queue renderer must support blocked queue section');
 assert.match(ganttJs, /zoom: 'week'/, 'Default gantt zoom must stay week');
@@ -26,6 +28,7 @@ assert.doesNotMatch(ganttJs, /'day' \| 'week'/, 'Legacy day zoom comment should 
 assert.match(appJs, /normalizePageAlias\(page\)/, 'Page alias normalizer missing in app');
 assert.match(appJs, /production-plan' \|\| page === 'calendar'/, 'Legacy production aliases must redirect to gantt');
 assert.match(settingsJs, /Производственный календарь/, 'Settings label must show production calendar');
+assert.match(settingsJs, /set-planning-capacity-summary/, 'Settings hints must explain planning capacity');
 assert.match(workflow, /node tests\/production-calendar-smoke\.js/, 'CI must run production calendar smoke');
 assert.match(ganttJs, /production_holidays/, 'Gantt UI must read configured production holidays');
 assert.match(ganttJs, /loadOrderItemsByOrderIds\(/, 'Gantt must inspect order item snapshots to derive readiness');
@@ -79,7 +82,9 @@ const schedule = vm.runInContext(`
             production_hours_packaging: 0,
         }
     ], {
-        workers_count: 1,
+        workers_count: 3.5,
+        planning_workers_count: 1,
+        planning_hours_per_day: 8,
         production_holidays: '2026-03-17'
     })
 `, context);
@@ -96,6 +101,11 @@ assert.deepEqual(
     allocationDays,
     ['2026-03-16', '2026-03-18', '2026-03-19'],
     'Order allocations must not land on holiday dates'
+);
+assert.equal(
+    schedule.dailyCapacity,
+    8,
+    'Scheduler must use planning worker capacity instead of pricing worker count'
 );
 
 const ganttContext = vm.createContext({

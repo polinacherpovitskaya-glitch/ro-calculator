@@ -35,7 +35,7 @@
     <aside class="sidebar">
         <div class="sidebar-brand">
             <h2>Recycle Object</h2>
-            <span>Калькулятор <span id="app-version">v107</span></span>
+            <span>Калькулятор <span id="app-version">v108</span></span>
         </div>
         <nav class="sidebar-nav">
             <a href="#tasks" data-page="tasks">
@@ -2401,6 +2401,22 @@
                     </div>
                     <div class="form-row">
                         <div class="form-group">
+                            <label>Сотрудников для календаря</label>
+                            <input type="number" step="0.5" id="set-planning_workers_count" data-key="planning_workers_count" oninput="Settings.updateProductionHints()">
+                            <span class="form-hint" id="set-planning-workers-hint">консервативная мощность цеха, не влияет на цены</span>
+                        </div>
+                        <div class="form-group">
+                            <label>Часов в смене для календаря</label>
+                            <input type="number" step="0.5" id="set-planning_hours_per_day" data-key="planning_hours_per_day" oninput="Settings.updateProductionHints()">
+                            <span class="form-hint" id="set-planning-hours-hint">8 ч/день для планирования</span>
+                        </div>
+                        <div class="form-group">
+                            <label>Что это дает</label>
+                            <div class="form-hint" id="set-planning-capacity-summary" style="min-height:40px;display:flex;align-items:center;">Календарь считает реальную мощность отдельно от ценообразования.</div>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
                             <label>Доля литья пластика</label>
                             <input type="number" step="0.05" id="set-plastic_injection_ratio" data-key="plastic_injection_ratio" oninput="Settings.updateProductionHints()">
                             <span class="form-hint" id="set-plastic-ratio-hint">0.7 = 70%</span>
@@ -2430,7 +2446,7 @@
                     </div>
                     <div class="form-row">
                         <div class="form-group" style="flex:1;">
-                            <label>Праздничные даты (для «Часы»)</label>
+                            <label>Праздничные даты (для «Часы» и календаря)</label>
                             <input type="text" id="set-production_holidays" data-key-text="production_holidays" placeholder="2026-01-01, 2026-01-07, 2026-02-23">
                             <span class="form-hint">Даты через запятую в формате YYYY-MM-DD</span>
                             <div style="display:flex;gap:8px;align-items:end;margin-top:8px;flex-wrap:wrap;">
