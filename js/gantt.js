@@ -88,7 +88,7 @@ const Gantt = {
                     actual_hours_assembly: actuals.assembly,
                     actual_hours_packaging: actuals.packaging,
                     actual_hours_other: actuals.other,
-                    actual_hours_total: actuals.total,
+                    actual_hours_total: actualTotalForPlan,
                     actual_hours_employee_count: actuals.employeeCount,
                     actual_hours_entry_count: actuals.entryCount,
                     actual_hours_resolved_by_name: actuals.resolvedByNameCount,
@@ -583,6 +583,9 @@ const Gantt = {
         const progressLabel = progress.overrun > 0
             ? `Факт ${this.formatHours(progress.actual)} из ${this.formatHours(progress.planned)} · перерасход +${this.formatHours(progress.overrun)}`
             : `Факт ${this.formatHours(progress.actual)} из ${this.formatHours(progress.planned)} · осталось ${this.formatHours(progress.remaining)}`;
+        const otherHoursLabel = item.actualOtherHours || item.actual_hours_other
+            ? ` · прочее ${this.formatHours(item.actualOtherHours || item.actual_hours_other)}`
+            : '';
 
         return `
             <article class="gantt-queue-card ${deadlineRisk ? 'risk' : ''} ${blocked ? 'blocked' : ''} ${review ? 'review' : ''}" onclick="App.navigate('order-detail', true, ${item.orderId || item.id})">
@@ -603,7 +606,7 @@ const Gantt = {
                     <strong>Дедлайн:</strong> ${deadlineLabel}
                     ${manualStart ? `<span> · </span><strong>Не раньше:</strong> ${this.formatDateStr(manualStart)}` : ''}
                 </div>
-                <div class="gantt-queue-progress">${progressLabel}${item.actual_hours_employee_count ? ` · ${item.actual_hours_employee_count} сотр.` : ''}</div>
+                <div class="gantt-queue-progress">${progressLabel}${otherHoursLabel}${item.actual_hours_employee_count ? ` · ${item.actual_hours_employee_count} сотр.` : ''}</div>
                 <div class="gantt-queue-phases">${phasePills || '<span class="text-muted">Нет производственных часов</span>'}</div>
                 <div class="gantt-queue-footer">
                     <span class="gantt-queue-badge ${blocked ? 'blocked' : review ? 'review' : (deadlineRisk ? 'risk' : 'ok')}">${blocked || review ? this.esc(item.production_blocked_reason || (review ? 'Требует проверки' : 'Ждет молд')) : (deadlineRisk ? 'Риск дедлайна' : 'Вмещается в план')}</span>

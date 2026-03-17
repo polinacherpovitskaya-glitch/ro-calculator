@@ -126,6 +126,7 @@ const constrainedSchedule = vm.runInContext(`
             actual_hours_molding: 8,
             actual_hours_assembly: 0,
             actual_hours_packaging: 0,
+            actual_hours_other: 4,
             production_not_before: '2026-03-18'
         }
     ], {
@@ -140,7 +141,8 @@ assert.deepEqual(
     'Scheduler must start no earlier than the manual not-before date and plan only remaining hours'
 );
 assert.equal(constrainedSchedule.queue[0].plannedTotalHours, 24, 'Queue must keep the full planned total');
-assert.equal(constrainedSchedule.queue[0].actualTotalHours, 8, 'Queue must retain already logged actual hours');
+assert.equal(constrainedSchedule.queue[0].actualTotalHours, 8, 'Queue progress must use only stage-linked actual hours');
+assert.equal(constrainedSchedule.queue[0].actualOtherHours, 4, 'Queue must keep non-stage hours separate for UI hints');
 assert.equal(constrainedSchedule.queue[0].remainingTotalHours, 16, 'Queue must schedule only the remaining hours');
 
 const ganttContext = vm.createContext({

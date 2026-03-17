@@ -109,6 +109,7 @@
 - Pricing worker count `3.5` must not automatically become planning capacity if operational capacity is set lower.
 - Actual hours overlay must not use bubble-plan hours when time entries are absent.
 - Already logged order hours must not be re-planned as if nothing was done.
+- `other` hours on an order must not reduce production remaining hours or inflate production completion percent.
 - Manual drag override must not be lost on reload.
 - Legacy orders without perfect mold linkage must surface a clear `needs review` state rather than fake precision.
 

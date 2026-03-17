@@ -1,7 +1,7 @@
 # Production Calendar Status
 
 ## Snapshot
-- Current phase: C6 actual-vs-remaining shipped, next up richer drag/replan layer
+- Current phase: C6 actual-vs-remaining stabilized, next up richer drag/replan layer
 - Plan file: `/private/tmp/ro-codex-push-sync.v100/docs/production-calendar-plan.md`
 - Status: yellow
 - Last updated: 2026-03-17
@@ -77,6 +77,9 @@
   - очередь и sidebar показывают `факт / план / осталось`, а не только абстрактный полный объем из калькулятора;
   - ручное ограничение `не раньше этой даты` стало реальным scheduler constraint, а не просто UI-пометкой;
   - safe unique-name fallback помогает подтянуть legacy production hours даже до полной ручной разметки `order_id`.
+- Реализован follow-up slice `v112`:
+  - `прочее` больше не надувает production progress и не уменьшает remaining hours;
+  - queue progress теперь считает только stage-linked часы (`литье/сборка/упаковка`), а `прочее` показывает отдельно как hint.
 - Добавлен и подключен новый regression smoke:
   - `/private/tmp/ro-codex-push-sync.v100/tests/production-calendar-smoke.js`
   - `.github/workflows/deploy-pages.yml`
@@ -99,6 +102,8 @@
   - уже сданные часы уменьшают `remaining` в scheduler;
   - `production_not_before` реально сдвигает старт заказа;
   - order actuals собираются по linked `order_id` и по safe unique-name fallback.
+- `production-calendar-smoke` теперь дополнительно страхует:
+  - `other` hours не искажают stage progress и не уменьшают remaining.
 
 ## In Progress
 - C7: richer drag/replan persistence.
@@ -145,6 +150,7 @@
 | 2026-03-17 | China waiting / review states | `js/gantt.js`, `css/style.css`, `tests/production-calendar-smoke.js` | blocked custom orders now distinguish pending China vs received-but-unreconciled states | continue into drag persistence + factual overlay |
 | 2026-03-17 | Monthly factual overlay | `js/gantt.js`, `tests/production-calendar-smoke.js` | calendar now shows planned vs actual production hours for the current month using TimeTrack data | continue into drag/persist layer |
 | 2026-03-17 | Actual vs remaining hours | `js/gantt.js`, `js/calculator.js`, `tests/production-calendar-smoke.js` | factual order hours now reduce remaining scheduled work and manual `not before` dates actually delay start | continue into richer manual reschedule UX |
+| 2026-03-17 | Progress math stabilization | `js/gantt.js`, `js/calculator.js`, `tests/production-calendar-smoke.js` | non-stage `other` hours are separated from production progress and no longer distort remaining work | continue into richer manual reschedule UX |
 
 ## Smoke / Demo Checklist
 - [x] В меню слева остается один понятный `Производственный календарь`.

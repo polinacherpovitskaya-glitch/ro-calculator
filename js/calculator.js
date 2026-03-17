@@ -771,7 +771,8 @@ function buildProductionSchedule(orders, settings) {
         const remainingAssembly = round2(Math.max(plannedAssembly - actualAssembly, 0));
         const remainingPackaging = round2(Math.max(plannedPackaging - actualPackaging, 0));
         const plannedTotalHours = round2(plannedMolding + plannedAssembly + plannedPackaging);
-        const actualTotalHours = round2(actualMolding + actualAssembly + actualPackaging + (o.actual_hours_other || 0));
+        const actualTotalHours = round2(actualMolding + actualAssembly + actualPackaging);
+        const actualOtherHours = round2(o.actual_hours_other || 0);
         const remainingTotalHours = round2(remainingMolding + remainingAssembly + remainingPackaging);
 
         return {
@@ -791,6 +792,7 @@ function buildProductionSchedule(orders, settings) {
         totalHours: remainingTotalHours,
         plannedTotalHours,
         actualTotalHours,
+        actualOtherHours,
         remainingTotalHours,
         done: false,
         };
