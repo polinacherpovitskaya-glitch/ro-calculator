@@ -12,7 +12,7 @@ const TT_STAGE_LABELS = {
 };
 
 const TT_STAGE_ORDER = ['casting', 'trim', 'assembly', 'packaging', 'other'];
-const TT_PRODUCTION_STATUSES = ['production_casting', 'production_hardware', 'production_packaging', 'in_production'];
+const TT_PRODUCTION_STATUSES = ['sample', 'production_casting', 'production_printing', 'production_hardware', 'production_packaging', 'in_production', 'delivery'];
 const TT_LEGACY_IMPORT_MARKER = 'ro_tt_legacy_import_2026_03_first_half_v1';
 const TT_LEGACY_FIRST_HALF_IMPORT = [
     { employee: 'Тая', date: '2026-03-02', project_name: 'московская неделя моды', hours: 4 },

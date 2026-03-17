@@ -306,6 +306,27 @@ async function smokeEditEntry(context) {
     assert.equal(vm.runInContext(`TimeTrack.editingEntryId`, context), null);
 }
 
+async function smokeProjectSelectIncludesSamplesAndProduction(context) {
+    context.loadOrders = async () => [
+        { id: 101, order_name: 'ЭндоСтарс', client_name: 'Алина', status: 'production_printing' },
+        { id: 102, order_name: 'Образец A', client_name: 'Клиент', status: 'sample' },
+        { id: 103, order_name: 'Черновик B', client_name: 'Клиент', status: 'draft' },
+    ];
+
+    await vm.runInContext(`TimeTrack.populateProjectSelect()`, context);
+
+    const options = vm.runInContext(`
+        Array.from(document.getElementById('tt-project-select').options).map(option => ({
+            value: String(option.value),
+            textContent: String(option.textContent)
+        }))
+    `, context);
+
+    assert.equal(options.some(option => option.value === '101' && /ЭндоСтарс/.test(option.textContent)), true);
+    assert.equal(options.some(option => option.value === '102' && /Образец A/.test(option.textContent)), true);
+    assert.equal(options.some(option => option.value === '103'), false);
+}
+
 async function main() {
     const context = createContext();
     runScript(context, 'js/timetrack.js');
@@ -313,6 +334,7 @@ async function main() {
     smokeDailyStatusAndCanonicalGrouping(context);
     await smokeLegacyFirstHalfImport(context);
     await smokeEditEntry(context);
+    await smokeProjectSelectIncludesSamplesAndProduction(context);
     console.log('payroll half-month smoke checks passed');
 }
 
