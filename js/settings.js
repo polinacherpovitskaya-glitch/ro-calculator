@@ -13,6 +13,8 @@ const Settings = {
     authAccountsData: [],
     authActivityData: [],
     authSessionsData: [],
+    timeEntriesData: [],
+    employeeAuthAudit: null,
     editingAuthAccountId: null,
     lastIssuedAuthCredentials: null,
     // Tabs that require admin access
@@ -548,6 +550,262 @@ const Settings = {
         };
     },
 
+    normalizePersonName(name) {
+        return String(name || '')
+            .trim()
+            .toLowerCase()
+            .replace(/ё/g, 'е')
+            .replace(/[._-]+/g, ' ')
+            .replace(/\s+/g, ' ')
+            .replace(/[^\p{L}\p{N}\s]/gu, '')
+            .trim();
+    },
+
+    getPersonShortKey(name) {
+        const normalized = this.normalizePersonName(name);
+        return normalized.split(' ').filter(Boolean)[0] || '';
+    },
+
+    suggestEmployeeForName(name, options = {}) {
+        const normalized = this.normalizePersonName(name);
+        if (!normalized) return null;
+        const excludeIds = new Set((options.excludeIds || []).map(v => String(v)));
+        const exact = (this.employeesData || []).filter(e =>
+            !excludeIds.has(String(e.id)) &&
+            this.normalizePersonName(e.name) === normalized
+        );
+        if (exact.length === 1) {
+            return { employee: exact[0], confidence: 'exact' };
+        }
+        const shortKey = this.getPersonShortKey(name);
+        const shortMatches = shortKey
+            ? (this.employeesData || []).filter(e =>
+                !excludeIds.has(String(e.id)) &&
+                this.getPersonShortKey(e.name) === shortKey
+            )
+            : [];
+        if (shortMatches.length === 1) {
+            return { employee: shortMatches[0], confidence: 'short' };
+        }
+        return null;
+    },
+
+    buildEmployeeAuthAudit() {
+        const employees = Array.isArray(this.employeesData) ? this.employeesData : [];
+        const accounts = Array.isArray(this.authAccountsData) ? this.authAccountsData : [];
+        const entries = Array.isArray(this.timeEntriesData) ? this.timeEntriesData : [];
+        const employeesById = new Map(employees.map(e => [String(e.id), e]));
+        const accountsByEmployeeId = new Map();
+        accounts.forEach(account => {
+            const key = String(account.employee_id || '');
+            if (!key) return;
+            const list = accountsByEmployeeId.get(key) || [];
+            list.push(account);
+            accountsByEmployeeId.set(key, list);
+        });
+
+        const issues = [];
+        const pushIssue = (issue) => {
+            issues.push({
+                severity: issue.severity || 'warn',
+                kind: issue.kind || 'generic',
+                title: issue.title || '',
+                detail: issue.detail || '',
+                accountId: issue.accountId ?? null,
+                employeeId: issue.employeeId ?? null,
+                entryId: issue.entryId ?? null,
+                suggestedEmployeeId: issue.suggestedEmployeeId ?? null,
+                canAutoRelink: !!issue.canAutoRelink,
+            });
+        };
+
+        accounts.forEach(account => {
+            const employeeId = account.employee_id != null ? String(account.employee_id) : '';
+            const linkedEmployee = employeeId ? employeesById.get(employeeId) : null;
+            const suggested = !linkedEmployee ? this.suggestEmployeeForName(account.employee_name || account.username || '') : null;
+
+            if (!linkedEmployee) {
+                pushIssue({
+                    severity: suggested && suggested.confidence === 'exact' ? 'warn' : 'error',
+                    kind: 'account_missing_employee',
+                    title: `Логин "${account.username || '—'}" не связан с сотрудником`,
+                    detail: suggested
+                        ? `Похоже на сотрудника "${suggested.employee.name}" (${suggested.confidence === 'exact' ? 'точное совпадение' : 'совпадение по короткому имени'}).`
+                        : 'Нужна ручная проверка привязки логина к сотруднику.',
+                    accountId: account.id,
+                    suggestedEmployeeId: suggested?.employee?.id || null,
+                    canAutoRelink: suggested?.confidence === 'exact',
+                });
+                return;
+            }
+
+            if (this.normalizePersonName(account.employee_name || '') !== this.normalizePersonName(linkedEmployee.name || '')) {
+                pushIssue({
+                    severity: 'warn',
+                    kind: 'account_name_mismatch',
+                    title: `Имя в логине расходится с карточкой сотрудника`,
+                    detail: `Логин хранит "${account.employee_name || '—'}", а сотрудник называется "${linkedEmployee.name || '—'}".`,
+                    accountId: account.id,
+                    employeeId: linkedEmployee.id,
+                });
+            }
+
+            if ((linkedEmployee.is_active === false || linkedEmployee.fired_date) && account.is_active !== false) {
+                pushIssue({
+                    severity: 'warn',
+                    kind: 'account_active_on_inactive_employee',
+                    title: `Активный логин у неактивного сотрудника`,
+                    detail: `Сотрудник "${linkedEmployee.name}" помечен как ${linkedEmployee.fired_date ? 'уволен' : 'неактивен'}, но логин еще включен.`,
+                    accountId: account.id,
+                    employeeId: linkedEmployee.id,
+                });
+            }
+        });
+
+        employees.forEach(employee => {
+            const linkedAccounts = accountsByEmployeeId.get(String(employee.id)) || [];
+            if (employee.is_active !== false && !employee.fired_date && linkedAccounts.length === 0) {
+                pushIssue({
+                    severity: 'info',
+                    kind: 'employee_without_login',
+                    title: `У активного сотрудника "${employee.name}" нет логина`,
+                    detail: 'Если сотруднику нужен доступ в систему, логин можно выдать прямо из карточки сотрудника.',
+                    employeeId: employee.id,
+                });
+            }
+            if (linkedAccounts.length > 1) {
+                pushIssue({
+                    severity: 'error',
+                    kind: 'employee_multiple_accounts',
+                    title: `У сотрудника "${employee.name}" несколько логинов`,
+                    detail: 'Нужна ручная чистка: у одного сотрудника должно быть не больше одного активного логина.',
+                    employeeId: employee.id,
+                });
+            }
+        });
+
+        entries.forEach(entry => {
+            const workerName = String(entry.worker_name || '').trim();
+            const entryEmployee = entry.employee_id != null ? employeesById.get(String(entry.employee_id)) : null;
+            if (entry.employee_id != null && !entryEmployee) {
+                pushIssue({
+                    severity: 'error',
+                    kind: 'time_entry_missing_employee',
+                    title: `Часы ссылаются на отсутствующего сотрудника`,
+                    detail: `Запись "${workerName || 'без имени'}" содержит employee_id ${entry.employee_id}, которого нет в справочнике сотрудников.`,
+                    entryId: entry.id || null,
+                });
+                return;
+            }
+
+            if (entryEmployee && workerName && this.normalizePersonName(workerName) !== this.normalizePersonName(entryEmployee.name || '')) {
+                pushIssue({
+                    severity: 'warn',
+                    kind: 'time_entry_name_snapshot_mismatch',
+                    title: `Имя в часах не совпадает с карточкой сотрудника`,
+                    detail: `В часах сохранено "${workerName}", а текущая карточка сотрудника называется "${entryEmployee.name}".`,
+                    employeeId: entryEmployee.id,
+                    entryId: entry.id || null,
+                });
+                return;
+            }
+
+            if (entry.employee_id == null && workerName) {
+                const suggested = this.suggestEmployeeForName(workerName);
+                pushIssue({
+                    severity: suggested && suggested.confidence === 'exact' ? 'warn' : 'error',
+                    kind: 'time_entry_unlinked',
+                    title: `Часы "${workerName}" не имеют employee_id`,
+                    detail: suggested
+                        ? `Похоже на сотрудника "${suggested.employee.name}" (${suggested.confidence === 'exact' ? 'точное совпадение' : 'совпадение по короткому имени'}), но запись пока не связана канонически.`
+                        : 'Нужна ручная проверка historical hours, чтобы не потерять привязку при миграции.',
+                    entryId: entry.id || null,
+                    suggestedEmployeeId: suggested?.employee?.id || null,
+                });
+            }
+        });
+
+        const severityWeight = { error: 3, warn: 2, info: 1 };
+        issues.sort((a, b) => (severityWeight[b.severity] || 0) - (severityWeight[a.severity] || 0));
+
+        return {
+            generatedAt: new Date().toISOString(),
+            employeesCount: employees.length,
+            accountsCount: accounts.length,
+            timeEntriesCount: entries.length,
+            summary: {
+                error: issues.filter(i => i.severity === 'error').length,
+                warn: issues.filter(i => i.severity === 'warn').length,
+                info: issues.filter(i => i.severity === 'info').length,
+            },
+            issues,
+        };
+    },
+
+    renderEmployeeAuthAudit() {
+        const container = document.getElementById('auth-linkage-audit');
+        if (!container) return;
+        const audit = this.employeeAuthAudit || this.buildEmployeeAuthAudit();
+        this.employeeAuthAudit = audit;
+        const issues = audit.issues || [];
+        if (!issues.length) {
+            container.style.display = '';
+            container.innerHTML = `
+                <div style="padding:12px 14px;border:1px solid rgba(34,197,94,.25);background:#f0fdf4;border-radius:10px;">
+                    <div style="font-weight:700;color:#166534;">Связка сотрудник ↔ логин ↔ часы чистая</div>
+                    <div style="margin-top:6px;font-size:12px;color:#166534;">Проблемных конфликтов не найдено. Исторические часы и логины выглядят согласованными.</div>
+                </div>
+            `;
+            return;
+        }
+
+        const badge = (count, label, bg, color) => `<span style="display:inline-flex;align-items:center;gap:6px;padding:4px 8px;border-radius:999px;background:${bg};color:${color};font-size:12px;font-weight:600;">${count} ${label}</span>`;
+        const topIssues = issues.slice(0, 12).map(issue => {
+            const colors = {
+                error: { border: 'rgba(239,68,68,.25)', bg: '#fef2f2', title: '#991b1b' },
+                warn: { border: 'rgba(245,158,11,.25)', bg: '#fffbeb', title: '#92400e' },
+                info: { border: 'rgba(59,130,246,.25)', bg: '#eff6ff', title: '#1d4ed8' },
+            };
+            const palette = colors[issue.severity] || colors.warn;
+            const relinkBtn = issue.canAutoRelink && issue.accountId && issue.suggestedEmployeeId
+                ? `<button class="btn btn-sm btn-outline" type="button" onclick="Settings.relinkAuthAccountToEmployee('${this.escHtml(String(issue.accountId))}','${this.escHtml(String(issue.suggestedEmployeeId))}')">Привязать автоматически</button>`
+                : '';
+            return `
+                <div style="padding:10px 12px;border:1px solid ${palette.border};background:${palette.bg};border-radius:10px;">
+                    <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start;flex-wrap:wrap;">
+                        <div>
+                            <div style="font-weight:700;color:${palette.title};">${this.escHtml(issue.title)}</div>
+                            <div style="margin-top:4px;font-size:12px;color:var(--text-muted);">${this.escHtml(issue.detail)}</div>
+                        </div>
+                        ${relinkBtn}
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        container.style.display = '';
+        container.innerHTML = `
+            <div style="padding:12px 14px;border:1px solid var(--border);background:#fff;border-radius:10px;">
+                <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;">
+                    <div>
+                        <div style="font-weight:700;">Audit связки сотрудников, логинов и часов</div>
+                        <div style="margin-top:6px;font-size:12px;color:var(--text-muted);">Ниже только безопасная диагностика: спорные случаи не склеиваются автоматически. Для точных совпадений доступна аккуратная перепривязка логина.</div>
+                    </div>
+                    <button class="btn btn-sm btn-outline" type="button" onclick="Settings.downloadEmployeeAuthAudit()">Экспорт audit</button>
+                </div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">
+                    ${badge(audit.summary.error, 'ошибок', '#fef2f2', '#991b1b')}
+                    ${badge(audit.summary.warn, 'предупр.', '#fffbeb', '#92400e')}
+                    ${badge(audit.summary.info, 'подсказок', '#eff6ff', '#1d4ed8')}
+                </div>
+                <div style="display:grid;gap:8px;margin-top:12px;">
+                    ${topIssues}
+                </div>
+                ${issues.length > 12 ? `<div style="margin-top:8px;font-size:12px;color:var(--text-muted);">Показаны первые 12 проблем из ${issues.length}. Полный список доступен в export audit.</div>` : ''}
+            </div>
+        `;
+    },
+
     renderEmployeeAuthSummary(employee) {
         const box = document.getElementById('emp-auth-summary');
         const openBtn = document.getElementById('emp-auth-open-btn');
@@ -855,8 +1113,11 @@ const Settings = {
     async loadLoginsTab() {
         this.employeesData = await loadEmployees();
         this.authAccountsData = await loadAuthAccounts();
+        this.timeEntriesData = typeof loadTimeEntries === 'function' ? ((await loadTimeEntries()) || []) : [];
         await this.ensureAutoLoginsForEmployees();
         this.authActivityData = await loadAuthActivity();
+        this.employeeAuthAudit = this.buildEmployeeAuthAudit();
+        this.renderEmployeeAuthAudit();
         this.renderAuthAccountsTable();
         this.renderAuthActivityTable();
         this.renderIssuedAuthCredentials();
@@ -1227,6 +1488,38 @@ const Settings = {
         await App.refreshAuthUsers();
     },
 
+    async relinkAuthAccountToEmployee(accountId, employeeId) {
+        const account = (this.authAccountsData || []).find(a => String(a.id) === String(accountId));
+        const employee = (this.employeesData || []).find(e => String(e.id) === String(employeeId));
+        if (!account || !employee) {
+            App.toast('Не удалось найти логин или сотрудника');
+            return;
+        }
+        const existingForEmployee = this.getExistingAuthAccountByEmployeeId(employee.id, account.id);
+        if (existingForEmployee) {
+            App.toast('У этого сотрудника уже есть другой логин. Нужна ручная проверка.');
+            return;
+        }
+        if (!confirm(`Привязать логин "${account.username || '—'}" к сотруднику "${employee.name}"?`)) return;
+
+        account.employee_id = employee.id;
+        account.employee_name = employee.name || '';
+        account.role = employee.role || account.role || 'employee';
+        if (employee.is_active === false || employee.fired_date) {
+            account.is_active = false;
+        }
+        account.updated_at = new Date().toISOString();
+        await saveAuthAccounts(this.authAccountsData);
+        await appendAuthActivity({
+            type: 'account_relink',
+            actor: App.getCurrentEmployeeName(),
+            target_user: account.employee_name || account.username,
+        });
+        App.toast('Логин перепривязан к сотруднику');
+        await this.loadLoginsTab();
+        await App.refreshAuthUsers();
+    },
+
     renderAuthAccountsTable() {
         const tbody = document.getElementById('auth-accounts-table-body');
         if (!tbody) return;
@@ -1234,6 +1527,14 @@ const Settings = {
             tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">Нет логинов</td></tr>';
             return;
         }
+        const issuesByAccountId = new Map();
+        (this.employeeAuthAudit?.issues || []).forEach(issue => {
+            if (issue.accountId == null) return;
+            const key = String(issue.accountId);
+            const list = issuesByAccountId.get(key) || [];
+            list.push(issue);
+            issuesByAccountId.set(key, list);
+        });
 
         const rows = [...this.authAccountsData]
             .sort((a, b) => String(a.employee_name || '').localeCompare(String(b.employee_name || ''), 'ru'))
@@ -1249,8 +1550,12 @@ const Settings = {
                 const last = a.last_login_at
                     ? new Date(a.last_login_at).toLocaleString('ru-RU')
                     : '—';
+                const rowIssues = issuesByAccountId.get(String(a.id)) || [];
+                const issueNote = rowIssues.length
+                    ? `<div style="margin-top:6px;font-size:11px;color:${rowIssues.some(issue => issue.severity === 'error') ? 'var(--danger)' : 'var(--orange)'};">${this.escHtml(rowIssues[0].detail)}</div>`
+                    : '';
                 return `<tr>
-                    <td style="font-weight:600;">${this.escHtml(a.employee_name || '—')}</td>
+                    <td style="font-weight:600;">${this.escHtml(a.employee_name || '—')}${issueNote}</td>
                     <td>${this.escHtml(a.username || '')}</td>
                     <td><span class="${employeeStatus.badgeClass}" title="${this.escHtml(employeeStatus.hint)}">${this.escHtml(employeeStatus.label)}</span></td>
                     <td><code>${this.escHtml(security.title)}</code><div style="margin-top:4px;font-size:11px;color:${security.color};">${this.escHtml(security.label)} · нажмите «Сбросить», чтобы выдать новый пароль</div></td>
@@ -1399,6 +1704,30 @@ const Settings = {
         }
         App.toast(`Auth backup скачан (${accountCount} аккаунтов)`);
         return backup;
+    },
+
+    async downloadEmployeeAuthAudit() {
+        const audit = this.employeeAuthAudit || this.buildEmployeeAuthAudit();
+        const payload = {
+            _meta: {
+                app: 'RecycleObject',
+                type: 'employee-auth-audit',
+                version: typeof APP_VERSION !== 'undefined' ? APP_VERSION : 'unknown',
+                date: new Date().toISOString(),
+            },
+            audit,
+        };
+        const json = JSON.stringify(payload, null, 2);
+        const blob = new Blob([json], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+        a.href = url;
+        a.download = `RO_employee_auth_audit_${dateStr}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+        App.toast(`Employee/auth audit скачан (${audit.issues.length} проблем)`);
+        return payload;
     },
 
     renderAuthActivityTable() {

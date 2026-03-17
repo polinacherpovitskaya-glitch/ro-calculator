@@ -1,7 +1,7 @@
 # Employee Auth Payroll Status
 
 ## Snapshot
-- Current phase: P1/P2/P4/P5 partial implementation landed, identity migration map still open
+- Current phase: P1/P2/P4/P5 partial implementation landed, identity audit panel added, migration map still open
 - Plan file: `/private/tmp/ro-codex-push-sync.U4fKIO/docs/employee-auth-payroll-plan.md`
 - Status: yellow
 - Last updated: 2026-03-17
@@ -47,14 +47,17 @@
   - `node tests/employee-auth-payroll-smoke.js`
   - `node tests/payroll-half-month-smoke.js`
 - Новый smoke включен в GitHub Pages verify job.
+- Во вкладке `Логины` появился audit-блок по связке `сотрудник ↔ логин ↔ часы` с безопасной диагностикой конфликтов.
+- Для точных совпадений добавлена safe relink кнопка, которая аккуратно привязывает orphan login к каноническому `employee_id`, не склеивая спорные случаи автоматически.
+- Добавлен export `employee-auth-audit` JSON для ручной exception map и cleanup без потери historical hours.
 
 ## In Progress
-- P1: manual exception list и canonical merge map для конфликтных людей еще не собраны.
+- P1: manual exception list и canonical merge map для конфликтных людей еще не собраны, но audit/export слой уже дает список проблем и safe relink для точных кейсов.
 - P3: физическая миграция auth ownership и cleanup orphan logins еще впереди.
 - P5: order-level allocation часов Лёши в конкретные заказы/хозработы еще не завершен; пока закрыт только month-level indirect share.
 
 ## Next
-- P1/P3: собрать explicit migration map по конфликтам `employee <-> login <-> historical time entries`, начиная с кейсов `Женя Г` / `Женя`.
+- P1/P3: собрать explicit migration map по конфликтам `employee <-> login <-> historical time entries`, начиная с кейсов `Женя Г` / `Женя`, и затем пройти ручную cleanup-очередь из audit export.
 
 ## Risks
 - Автоматический merge по имени может ошибочно склеить разных людей.
@@ -89,10 +92,12 @@ python3 -m http.server 4173
 | 2026-03-17 | Employee card UX | `js/settings.js`, `index.html` | fixed | status/login/payroll profile now visible in one employee card |
 | 2026-03-17 | Semimonth payroll | `js/timetrack.js`, `tests/payroll-half-month-smoke.js` | fixed | keep extending payout UX and negative cases |
 | 2026-03-17 | Dynamic indirect share | `js/indirect_costs.js`, `tests/employee-auth-payroll-smoke.js` | fixed | move from month-level share to order-level allocation later |
+| 2026-03-17 | Identity audit | `js/settings.js`, `tests/employee-auth-payroll-smoke.js` | fixed | login tab now surfaces employee/login/time mismatches and offers safe relink only for exact matches |
 
 ## Smoke / Demo Checklist
 - [x] Один экран сотрудника показывает статус, доступ и payroll profile без перехода между двумя отдельными справочниками.
 - [ ] Неактивный/уволенный сотрудник остается видимым в истории часов.
+- [x] В `Логинах` видно, где связь `employee ↔ auth ↔ hours` сломана, без silent auto-merge.
 - [ ] Новый сотрудник получает логин и пароль из карточки сотрудника без ручного конструирования.
 - [x] Тая считается по `60 + 60`, а не по общему месячному bucket.
 - [x] Лёша переносит стоимость в производство только по реальным часам на month-level share.

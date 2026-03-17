@@ -69,6 +69,8 @@
   - conflict employee detected;
   - manual exception preserved;
   - no silent overwrite of another login.
+  - audit panel highlights orphan logins, orphan historical hours and employee/login mismatches;
+  - safe relink appears only for exact matches and refuses to attach if employee already has another login.
 - `TimeTrack -> Payroll`:
   - first-half payout for Taya after 59, 60, 61 regular hours;
   - second-half payout resets threshold and repeats logic;
@@ -99,6 +101,7 @@
 - Two employees with similar names must not be auto-merged if `employee_id` evidence conflicts.
 - Disabling login must not delete or hide historical hours.
 - Re-activating an employee must not create a duplicate auth account.
+- Safe relink must not bind a login to an employee who already has another account.
 - A fired employee must stay visible in historical reports.
 - Taya's overtime must not wait until `121st` hour of the whole month; it must start after `60th` regular hour in the current half.
 - Weekend and holiday hours must not consume the regular `60-hour` bucket incorrectly, unless product rules explicitly say so.
@@ -110,6 +113,7 @@
 - [x] `node tests/auth-hardening-smoke.js`
 - [x] `node tests/employee-auth-payroll-smoke.js`
 - [x] `node tests/payroll-half-month-smoke.js`
+- [x] `employee-auth-payroll-smoke` covers audit export and safe relink for exact-match orphan login
 - [ ] `python3 -m http.server 4173`
 - [ ] Manual smoke: `settings -> employee card -> access -> timetrack -> payroll`
 - [ ] Regression smoke for `План-факт` / indirect costs if Lyosha allocation touches those modules
@@ -119,6 +123,7 @@
 - [ ] Historical hours remain visible after migration.
 - [ ] New employee onboarding does not require manual username/password invention.
 - [ ] `Женя Г`-type conflict is explainable from data, not hidden in separate lists.
+- [x] `Логины` показывают audit summary и дают export для manual migration map.
 - [x] Taya semimonth payroll can be shown for first and second salary payout separately.
 - [x] Lyosha indirect-vs-production split is driven by real hours, not a magic localStorage percentage.
 - [ ] Existing hourly payroll is unchanged for employees outside the redesign.

@@ -69,6 +69,17 @@ function createContext() {
         document,
         window: null,
         navigator: { clipboard: { writeText() {} } },
+        confirm: () => true,
+        Blob: class FakeBlob {
+            constructor(parts, options = {}) {
+                this.parts = parts;
+                this.type = options.type || '';
+            }
+        },
+        URL: {
+            createObjectURL() { return 'blob:smoke'; },
+            revokeObjectURL() {},
+        },
         localStorage: {
             getItem() { return null; },
             setItem() {},
@@ -184,11 +195,55 @@ async function smokeDynamicIndirectShare(context) {
     assert.equal(indirectTotal, 135000);
 }
 
+async function smokeAuditAndRelink(context) {
+    context.__timeEntriesSource = [
+        { id: 900, employee_id: null, worker_name: 'Женя Г', date: '2026-03-01', hours: 4 },
+    ];
+    await vm.runInContext(`(() => {
+        Settings.employeesData = [
+            { id: 42, name: 'Женя Г', role: 'production', is_active: false, fired_date: '2026-03-17' },
+            { id: 43, name: 'Тая', role: 'production', is_active: true, fired_date: null }
+        ];
+        Settings.authAccountsData = [
+            {
+                id: 10,
+                employee_id: null,
+                employee_name: 'Женя Г',
+                username: 'jenya_ro',
+                role: 'office',
+                is_active: true,
+                updated_at: '2026-03-17T00:00:00.000Z',
+            }
+        ];
+        Settings.timeEntriesData = ${JSON.stringify(context.__timeEntriesSource)};
+    })()`, context);
+
+    const audit = clone(vm.runInContext(`Settings.buildEmployeeAuthAudit()`, context));
+    assert.equal(audit.summary.warn >= 1, true);
+    assert.equal(audit.issues.some(issue => issue.kind === 'account_missing_employee' && issue.canAutoRelink === true), true);
+    assert.equal(audit.issues.some(issue => issue.kind === 'time_entry_unlinked'), true);
+
+    await vm.runInContext(`(async () => {
+        Settings.employeeAuthAudit = Settings.buildEmployeeAuthAudit();
+        await Settings.relinkAuthAccountToEmployee(10, 42);
+    })()`, context);
+
+    const saved = clone(context.__savedAuthAccounts);
+    assert.equal(saved[0].employee_id, 42);
+    assert.equal(saved[0].employee_name, 'Женя Г');
+    assert.equal(saved[0].is_active, false);
+
+    const exported = clone(await vm.runInContext(`Settings.downloadEmployeeAuthAudit()`, context));
+    assert.equal(exported._meta.type, 'employee-auth-audit');
+    assert.ok(Array.isArray(exported.audit.issues));
+}
+
 async function main() {
     const context = createContext();
     runScript(context, 'js/settings.js');
     runScript(context, 'js/indirect_costs.js');
     await smokeEmployeeStatusAndAuthSync(context);
+    await smokeAuditAndRelink(context);
     await smokeDynamicIndirectShare(context);
     console.log('employee auth payroll smoke checks passed');
 }
