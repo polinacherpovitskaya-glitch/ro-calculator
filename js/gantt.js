@@ -384,6 +384,21 @@ const Gantt = {
         await this.load();
     },
 
+    async shiftManualStart(orderId, direction) {
+        if (!Number.isFinite(Number(direction)) || Number(direction) === 0) return;
+        const order = (this.orders || []).find(item => Number(item.id || item.orderId) === Number(orderId));
+        const state = this.normalizePlanState(this.planState);
+        const current = state.manual_start_dates[String(orderId)]
+            || order?.production_not_before
+            || order?.schedule?.[0]?.date
+            || this.formatIsoDateLocal(new Date());
+        const nextDate = this.shiftWorkingDate(current, Number(direction), this.getHolidaySet());
+        state.manual_start_dates[String(orderId)] = nextDate;
+        await saveProductionPlanState(state);
+        this.planState = state;
+        await this.load();
+    },
+
     setZoom(z) {
         if (!['week', 'month'].includes(z)) return;
         this.zoom = z;
@@ -433,8 +448,8 @@ const Gantt = {
             return;
         }
 
-        const firstDate = new Date(days[0].date);
-        const lastDate = new Date(days[days.length - 1].date);
+        const firstDate = this.parseLocalDate(days[0].date);
+        const lastDate = this.parseLocalDate(days[days.length - 1].date);
         firstDate.setHours(0, 0, 0, 0);
         lastDate.setHours(0, 0, 0, 0);
 
@@ -595,7 +610,9 @@ const Gantt = {
                         <div class="gantt-queue-meta">${this.esc(this.getStatusLabel(item.status))} · ${this.esc(item.clientName || item.client_name || 'Без клиента')} · осталось ${this.formatHours(progress.remaining)}</div>
                     </div>
                     <div class="gantt-queue-controls">
+                        <button class="btn btn-sm btn-outline" onclick="event.stopPropagation(); Gantt.shiftManualStart(${item.orderId || item.id}, -1)" title="Сдвинуть старт на 1 рабочий день раньше">&#8592;</button>
                         <button class="btn btn-sm btn-outline" onclick="event.stopPropagation(); Gantt.promptManualStart(${item.orderId || item.id})" title="${manualStart ? 'Изменить дату «не раньше»' : 'Задать дату «не раньше»'}">&#128197;</button>
+                        <button class="btn btn-sm btn-outline" onclick="event.stopPropagation(); Gantt.shiftManualStart(${item.orderId || item.id}, 1)" title="Сдвинуть старт на 1 рабочий день позже">&#8594;</button>
                         <button class="btn btn-sm btn-outline" onclick="event.stopPropagation(); Gantt.moveUp(${item.orderId || item.id})" title="Поднять в очереди">&#8593;</button>
                         <button class="btn btn-sm btn-outline" onclick="event.stopPropagation(); Gantt.moveDown(${item.orderId || item.id})" title="Опустить в очереди">&#8595;</button>
                     </div>
@@ -706,8 +723,8 @@ const Gantt = {
         const phaseLabels = { molding: 'Литьё', assembly: 'Сборка', packaging: 'Упаковка' };
 
         const barsHtml = bars.map(bar => {
-            const startOffset = this.daysBetween(minDate, new Date(bar.startDate));
-            const endOffset = this.daysBetween(minDate, new Date(bar.endDate));
+            const startOffset = this.daysBetween(minDate, this.parseLocalDate(bar.startDate));
+            const endOffset = this.daysBetween(minDate, this.parseLocalDate(bar.endDate));
             const left = startOffset * cellWidth;
             const width = Math.max(cellWidth, (endOffset - startOffset + 1) * cellWidth);
             const color = phaseColors[bar.phase] || '#6b7280';
@@ -720,7 +737,7 @@ const Gantt = {
 
         let deadlineHtml = '';
         if (item.deadlineEnd) {
-            const deadlineDate = new Date(item.deadlineEnd);
+            const deadlineDate = this.parseLocalDate(item.deadlineEnd);
             deadlineDate.setHours(0, 0, 0, 0);
             const deadlineOffset = this.daysBetween(minDate, deadlineDate);
             if (deadlineOffset >= 0 && deadlineOffset < totalDays) {
@@ -921,7 +938,7 @@ const Gantt = {
     formatDateStr(dateStr) {
         if (!dateStr) return '—';
         try {
-            const date = new Date(dateStr);
+            const date = this.parseLocalDate(dateStr);
             return date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }).replace('.', '');
         } catch (e) {
             return dateStr;
@@ -942,6 +959,37 @@ const Gantt = {
                 .map(value => value.trim())
                 .filter(value => /^\d{4}-\d{2}-\d{2}$/.test(value))
         );
+    },
+
+    isNonWorkingDate(date, holidaySet = new Set()) {
+        const value = this.parseLocalDate(date);
+        const weekday = value.getDay();
+        if (weekday === 0 || weekday === 6) return true;
+        return holidaySet.has(this.formatIsoDateLocal(value));
+    },
+
+    shiftWorkingDate(dateStr, delta, holidaySet = new Set()) {
+        const step = delta >= 0 ? 1 : -1;
+        let remaining = Math.abs(Number(delta) || 0);
+        const date = this.parseLocalDate(dateStr || new Date());
+        date.setHours(0, 0, 0, 0);
+        while (remaining > 0) {
+            date.setDate(date.getDate() + step);
+            if (!this.isNonWorkingDate(date, holidaySet)) {
+                remaining -= 1;
+            }
+        }
+        return this.formatIsoDateLocal(date);
+    },
+
+    parseLocalDate(value) {
+        if (value instanceof Date) return new Date(value.getTime());
+        const raw = String(value || '').trim();
+        const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (match) {
+            return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+        }
+        return new Date(value);
     },
 
     formatIsoDateLocal(date) {

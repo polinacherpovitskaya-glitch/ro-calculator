@@ -100,6 +100,7 @@
 - Open queue cards and confirm:
   - each active order shows `факт / план / осталось`;
   - if manual start is set, the first real allocation does not begin earlier.
+  - quick shift buttons move the start by working days, not calendar days.
 
 ## Negative Cases
 - Order without `deadline_end` must not vanish; it should fall back to explicit no-deadline presentation.
@@ -110,6 +111,7 @@
 - Actual hours overlay must not use bubble-plan hours when time entries are absent.
 - Already logged order hours must not be re-planned as if nothing was done.
 - `other` hours on an order must not reduce production remaining hours or inflate production completion percent.
+- Quick manual shift must not land on weekend/holiday or drift by one day because of UTC parsing.
 - Manual drag override must not be lost on reload.
 - Legacy orders without perfect mold linkage must surface a clear `needs review` state rather than fake precision.
 

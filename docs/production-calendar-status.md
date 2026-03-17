@@ -1,7 +1,7 @@
 # Production Calendar Status
 
 ## Snapshot
-- Current phase: C6 actual-vs-remaining stabilized, next up richer drag/replan layer
+- Current phase: C7 quick manual replan shipped, next up richer drag/replan layer
 - Plan file: `/private/tmp/ro-codex-push-sync.v100/docs/production-calendar-plan.md`
 - Status: yellow
 - Last updated: 2026-03-17
@@ -80,6 +80,10 @@
 - Реализован follow-up slice `v112`:
   - `прочее` больше не надувает production progress и не уменьшает remaining hours;
   - queue progress теперь считает только stage-linked часы (`литье/сборка/упаковка`), а `прочее` показывает отдельно как hint.
+- Реализован следующий slice `v113`:
+  - на карточках очереди появились быстрые кнопки сдвига старта на рабочий день раньше/позже;
+  - shift logic пропускает выходные и `production_holidays`;
+  - local ISO date parsing в calendar UI стабилизирован, чтобы ручные сдвиги и подписи дат не уезжали на день из-за UTC drift.
 - Добавлен и подключен новый regression smoke:
   - `/private/tmp/ro-codex-push-sync.v100/tests/production-calendar-smoke.js`
   - `.github/workflows/deploy-pages.yml`
@@ -104,12 +108,14 @@
   - order actuals собираются по linked `order_id` и по safe unique-name fallback.
 - `production-calendar-smoke` теперь дополнительно страхует:
   - `other` hours не искажают stage progress и не уменьшают remaining.
+- `production-calendar-smoke` теперь также страхует:
+  - quick working-day shift skip weekends and production holidays.
 
 ## In Progress
-- C7: richer drag/replan persistence.
+- C8: richer drag/replan persistence.
 
 ## Next
-- C7: добавить более удобный manual reschedule UX поверх канонического calendar model, без зависимости от legacy screen.
+- C8: добавить еще более наглядный drag/replan UX поверх уже работающего слоя quick shifts, без зависимости от legacy screen.
 
 ## Risks
 - Пока не разведен pricing capacity и planning capacity, календарь все еще может красиво врать по доступным часам.
@@ -151,6 +157,7 @@
 | 2026-03-17 | Monthly factual overlay | `js/gantt.js`, `tests/production-calendar-smoke.js` | calendar now shows planned vs actual production hours for the current month using TimeTrack data | continue into drag/persist layer |
 | 2026-03-17 | Actual vs remaining hours | `js/gantt.js`, `js/calculator.js`, `tests/production-calendar-smoke.js` | factual order hours now reduce remaining scheduled work and manual `not before` dates actually delay start | continue into richer manual reschedule UX |
 | 2026-03-17 | Progress math stabilization | `js/gantt.js`, `js/calculator.js`, `tests/production-calendar-smoke.js` | non-stage `other` hours are separated from production progress and no longer distort remaining work | continue into richer manual reschedule UX |
+| 2026-03-17 | Quick working-day shifts | `js/gantt.js`, `tests/production-calendar-smoke.js` | production queue cards can now move manual start earlier/later by working days, with local-date-safe parsing | continue into richer drag/replan UX |
 
 ## Smoke / Demo Checklist
 - [x] В меню слева остается один понятный `Производственный календарь`.
@@ -163,6 +170,7 @@
 - [x] Фактические часы месяца видны отдельно от плановых.
 - [x] Уже сданные часы уменьшают остаток заказа прямо в календаре.
 - [x] На карточке заказа видно `факт / план / осталось`.
+- [x] Начальник производства может быстро подвинуть старт заказа на рабочий день раньше/позже.
 - [ ] Mold-limited заказ не выглядит фальшиво распараллеленным.
 - [ ] При перегрузе до дедлайна экран явно показывает risk.
 - [ ] Заказ можно передвинуть bubble-ом и увидеть последствия.

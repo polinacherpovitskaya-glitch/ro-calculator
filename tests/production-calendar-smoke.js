@@ -35,6 +35,7 @@ assert.match(ganttJs, /loadOrderItemsByOrderIds\(/, 'Gantt must inspect order it
 assert.match(ganttJs, /loadTimeEntries\(\)/, 'Gantt must load time entries for actual-hours overlay');
 assert.match(ganttJs, /loadEmployees\(\)/, 'Gantt must load employees for actual-hours overlay');
 assert.match(ganttJs, /buildOrderActuals\(/, 'Gantt must aggregate actual order hours');
+assert.match(ganttJs, /shiftManualStart\(orderId, direction\)/, 'Gantt must expose quick working-day shifting for manual starts');
 assert.match(calculatorJs, /notBeforeDate/, 'Scheduler must respect manual not-before dates');
 
 function createFixedDate(isoTimestamp) {
@@ -241,5 +242,10 @@ const actualBucketMap = new Map(actualBuckets);
 assert.equal(actualBucketMap.get(42).assembly, 5, 'Order actuals must aggregate linked production hours by phase');
 assert.equal(actualBucketMap.get(42).employeeCount, 1, 'Management hours must not affect production order progress');
 assert.equal(actualBucketMap.get(77).molding, 3, 'Order actuals should resolve unique legacy project names when there is no direct order id');
+
+const shiftedWorkingDate = vm.runInContext(`
+    Gantt.shiftWorkingDate('2026-03-20', 1, new Set(['2026-03-23']))
+`, ganttContext);
+assert.equal(shiftedWorkingDate, '2026-03-24', 'Quick manual shifts must skip weekends and configured production holidays');
 
 console.log('production calendar smoke checks passed');
