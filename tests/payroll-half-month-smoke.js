@@ -74,8 +74,24 @@ function createDocument() {
     };
 }
 
+function createStorage() {
+    const store = new Map();
+    return {
+        getItem(key) {
+            return store.has(key) ? store.get(key) : null;
+        },
+        setItem(key, value) {
+            store.set(key, String(value));
+        },
+        removeItem(key) {
+            store.delete(key);
+        },
+    };
+}
+
 function createContext() {
     const document = createDocument();
+    const localStorage = createStorage();
     const context = {
         console,
         Math,
@@ -90,10 +106,12 @@ function createContext() {
         RegExp,
         Promise,
         document,
+        localStorage,
         App: {
             settings: { fot_per_hour: 0, production_holidays: '' },
             isAdmin() { return true; },
             toast() {},
+            formatDate(value) { return value; },
         },
         confirm: () => true,
         loadTimeEntries: async () => [],
@@ -101,12 +119,14 @@ function createContext() {
         loadOrders: async () => [],
         saveTimeEntry: async (entry) => {
             context.__savedEntry = JSON.parse(JSON.stringify(entry));
+            context.__savedEntries.push(JSON.parse(JSON.stringify(entry)));
             return entry.id || 1;
         },
         deleteTimeEntry: async () => {},
     };
     context.window = context;
     context.__savedEntry = null;
+    context.__savedEntries = [];
     return vm.createContext(context);
 }
 
@@ -188,6 +208,49 @@ function smokeSemimonthPayroll(context) {
     assert.equal(Math.round(jenyaSecond.totalPay), 0);
 }
 
+function smokeDailyStatusAndCanonicalGrouping(context) {
+    const today = new Date().toISOString().split('T')[0];
+    vm.runInContext(`
+        TimeTrack.entries = [
+            { id: 1, employee_id: 10, worker_name: 'Тая', project_name: 'Проект А', date: '${today}', hours: 3, description: '' },
+            { id: 2, employee_id: 11, worker_name: 'Женя', project_name: 'Проект Б', date: '${today}', hours: 4, description: '' },
+            { id: 3, employee_id: 12, worker_name: 'Леша', project_name: 'Проект В', date: '${today}', hours: 2, description: '' },
+        ];
+        TimeTrack.employees = [
+            { id: 10, name: 'Тая', role: 'production', is_active: true, daily_hours: 8, payroll_profile: 'salary_semimonth_threshold' },
+            { id: 11, name: 'Женя Г', role: 'production', is_active: true, daily_hours: 8, payroll_profile: 'hourly' },
+            { id: 12, name: 'Леша', role: 'management', is_active: true, daily_hours: 8, payroll_profile: 'management_salary_with_production_allocation' },
+        ];
+        TimeTrack.renderDailyStatus();
+    `, context);
+    const html = vm.runInContext(`document.getElementById('tt-daily-status-content').innerHTML`, context);
+    assert.match(html, /Тая/);
+    assert.match(html, /Женя Г/);
+    assert.doesNotMatch(html, /Леша/);
+}
+
+async function smokeLegacyFirstHalfImport(context) {
+    vm.runInContext(`
+        TimeTrack.entries = [
+            { id: 500, employee_id: 11, worker_name: 'Женя', project_name: 'Уже внесено', date: '2026-03-10', hours: 1, description: '' }
+        ];
+        TimeTrack.employees = [
+            { id: 10, name: 'Тая', role: 'production', is_active: true, payroll_profile: 'salary_semimonth_threshold' },
+            { id: 11, name: 'Женя Г', role: 'production', is_active: true, payroll_profile: 'hourly' },
+            { id: 12, name: 'Леша', role: 'management', is_active: true, payroll_profile: 'management_salary_with_production_allocation' }
+        ];
+    `, context);
+
+    const imported = await vm.runInContext(`TimeTrack.backfillLegacyFirstHalfEntries()`, context);
+    assert.equal(imported, 16);
+    assert.equal(context.__savedEntries.length, 16);
+    assert.equal(context.localStorage.getItem('ro_tt_legacy_import_2026_03_first_half_v1'), '1');
+    assert.equal(context.__savedEntries.some(entry => entry.worker_name === 'Леша'), false);
+    assert.equal(context.__savedEntries.some(entry => entry.worker_name === 'Женя Г'), true);
+    assert.equal(context.__savedEntries.some(entry => entry.worker_name === 'Тая' && entry.date === '2026-03-10' && entry.project_name === 'мтс воркшоп'), true);
+    assert.equal(context.__savedEntries.some(entry => entry.worker_name === 'Тая' && entry.date === '2026-03-10' && entry.project_name === 'броши пушкинкий'), true);
+}
+
 async function smokeEditEntry(context) {
     vm.runInContext(`
         TimeTrack.entries = [{
@@ -247,6 +310,8 @@ async function main() {
     const context = createContext();
     runScript(context, 'js/timetrack.js');
     smokeSemimonthPayroll(context);
+    smokeDailyStatusAndCanonicalGrouping(context);
+    await smokeLegacyFirstHalfImport(context);
     await smokeEditEntry(context);
     console.log('payroll half-month smoke checks passed');
 }

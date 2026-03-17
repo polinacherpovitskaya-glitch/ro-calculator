@@ -13,6 +13,28 @@ const TT_STAGE_LABELS = {
 
 const TT_STAGE_ORDER = ['casting', 'trim', 'assembly', 'packaging', 'other'];
 const TT_PRODUCTION_STATUSES = ['production_casting', 'production_hardware', 'production_packaging', 'in_production'];
+const TT_LEGACY_IMPORT_MARKER = 'ro_tt_legacy_import_2026_03_first_half_v1';
+const TT_LEGACY_FIRST_HALF_IMPORT = [
+    { employee: 'Тая', date: '2026-03-02', project_name: 'московская неделя моды', hours: 4 },
+    { employee: 'Тая', date: '2026-03-03', project_name: 'мтс воркшоп', hours: 14 },
+    { employee: 'Тая', date: '2026-03-05', project_name: 'мтс воркшоп', hours: 13 },
+    { employee: 'Тая', date: '2026-03-06', project_name: 'мтс воркшоп', hours: 2 },
+    { employee: 'Тая', date: '2026-03-10', project_name: 'мтс воркшоп', hours: 2 },
+    { employee: 'Тая', date: '2026-03-10', project_name: 'броши пушкинкий', hours: 8 },
+    { employee: 'Тая', date: '2026-03-11', project_name: 'броши пушкинкий', hours: 3 },
+    { employee: 'Тая', date: '2026-03-12', project_name: 'броши пушкинкий', hours: 3 },
+    { employee: 'Тая', date: '2026-03-12', project_name: 'эндостар', hours: 10 },
+    { employee: 'Тая', date: '2026-03-13', project_name: 'броши пушкинкий', hours: 2 },
+    { employee: 'Женя Г', date: '2026-03-02', project_name: 'московская неделя моды', hours: 4 },
+    { employee: 'Женя Г', date: '2026-03-02', project_name: 'мтс воркшоп', hours: 5 },
+    { employee: 'Женя Г', date: '2026-03-03', project_name: 'мтс воркшоп', hours: 9 },
+    { employee: 'Женя Г', date: '2026-03-04', project_name: 'мтс воркшоп', hours: 9 },
+    { employee: 'Женя Г', date: '2026-03-05', project_name: 'мтс воркшоп', hours: 9 },
+    { employee: 'Женя Г', date: '2026-03-06', project_name: 'мтс воркшоп', hours: 8 },
+];
+const TT_LEGACY_IMPORT_SKIP_DATES = {
+    'Женя Г': new Set(['2026-03-10', '2026-03-12', '2026-03-13']),
+};
 
 const TimeTrack = {
     entries: [],
@@ -22,6 +44,10 @@ const TimeTrack = {
     async load() {
         this.entries = (await loadTimeEntries()) || [];
         this.employees = (await loadEmployees()) || [];
+        const importedLegacy = await this.backfillLegacyFirstHalfEntries();
+        if (importedLegacy > 0) {
+            this.entries = (await loadTimeEntries()) || [];
+        }
         this.populateWorkerSelect();
         this.populateFilters();
         await this.populateProjectSelect();
@@ -176,14 +202,16 @@ const TimeTrack = {
 
     // === Populate selects ===
 
-    /** Production employees + anyone with existing time entries */
+    /** Active production employees + recent production people from time entries */
     _getProductionEmployees() {
-        const active = this.employees.filter(e => e.is_active !== false);
-        const productionEmp = active.filter(e => e.role === 'production');
-        // Also include non-production employees who have time entries (e.g. Леша)
-        const entryWorkers = new Set(this.entries.map(e => e.worker_name).filter(Boolean));
-        const nonProdWithEntries = active.filter(e => e.role !== 'production' && entryWorkers.has(e.name));
-        return [...productionEmp, ...nonProdWithEntries];
+        const recentProductionIds = new Set((this.entries || [])
+            .map(entry => this.findEmployeeForEntry(entry))
+            .filter(emp => emp && emp.role === 'production')
+            .map(emp => String(emp.id)));
+        return (this.employees || [])
+            .filter(emp => emp.role === 'production')
+            .filter(emp => emp.is_active !== false || recentProductionIds.has(String(emp.id)))
+            .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'ru'));
     },
 
     populateWorkerSelect() {
@@ -235,14 +263,17 @@ const TimeTrack = {
         const todayEntries = this.entries.filter(e => e.date === today);
         const byWorker = {};
         todayEntries.forEach(e => {
-            if (!byWorker[e.worker_name]) byWorker[e.worker_name] = [];
-            byWorker[e.worker_name].push(e);
+            const employee = this.findEmployeeForEntry(e);
+            if (!employee || employee.role !== 'production') return;
+            const key = String(employee.id);
+            if (!byWorker[key]) byWorker[key] = [];
+            byWorker[key].push({ ...e, worker_name: employee.name || e.worker_name });
         });
 
         const roleLabels = { production: 'Пр', office: 'Оф', management: 'Рук' };
 
         const rows = activeEmployees.map(emp => {
-            const entries = byWorker[emp.name] || [];
+            const entries = byWorker[String(emp.id)] || [];
             const totalHours = entries.reduce((s, e) => s + (parseFloat(e.hours) || 0), 0);
             const totalPct = emp.daily_hours > 0 ? Math.round(totalHours / emp.daily_hours * 100) : 0;
 
@@ -384,6 +415,10 @@ const TimeTrack = {
             .trim();
     },
 
+    getPersonShortKey(name) {
+        return this.normalizePersonName(name).split(' ').filter(Boolean)[0] || '';
+    },
+
     findEmployeeForEntry(entry) {
         if (!entry) return null;
         const employeeId = entry.employee_id != null ? String(entry.employee_id) : '';
@@ -395,7 +430,102 @@ const TimeTrack = {
         if (!normalizedWorker) return null;
         const exactMatches = (this.employees || []).filter(emp => this.normalizePersonName(emp.name) === normalizedWorker);
         if (exactMatches.length === 1) return exactMatches[0];
+        const shortKey = this.getPersonShortKey(entry.worker_name || entry.employee_name || '');
+        if (shortKey) {
+            const shortMatches = (this.employees || []).filter(emp =>
+                emp.role === 'production' &&
+                this.getPersonShortKey(emp.name) === shortKey
+            );
+            if (shortMatches.length === 1) return shortMatches[0];
+        }
         return null;
+    },
+
+    findEmployeeByName(name, options = {}) {
+        const normalizedName = this.normalizePersonName(name);
+        if (!normalizedName) return null;
+        const source = (this.employees || []).filter(emp => !options.productionOnly || emp.role === 'production');
+        const exactMatches = source.filter(emp => this.normalizePersonName(emp.name) === normalizedName);
+        if (exactMatches.length === 1) return exactMatches[0];
+        const shortKey = this.getPersonShortKey(name);
+        if (!shortKey) return null;
+        const shortMatches = source.filter(emp => this.getPersonShortKey(emp.name) === shortKey);
+        if (shortMatches.length === 1) return shortMatches[0];
+        return null;
+    },
+
+    entryBelongsToEmployee(entry, employee) {
+        if (!entry || !employee) return false;
+        if (entry.employee_id != null && String(entry.employee_id) === String(employee.id)) return true;
+        const resolved = this.findEmployeeForEntry(entry);
+        if (resolved && String(resolved.id) === String(employee.id)) return true;
+        return false;
+    },
+
+    async backfillLegacyFirstHalfEntries() {
+        if (typeof localStorage !== 'undefined' && localStorage.getItem(TT_LEGACY_IMPORT_MARKER) === '1') {
+            return 0;
+        }
+
+        const existingEntries = Array.isArray(this.entries) ? [...this.entries] : [];
+        const originalDayKeys = new Set(existingEntries.map(entry => {
+            const employee = this.findEmployeeForEntry(entry);
+            if (!employee || !entry?.date) return '';
+            return `${employee.id}|${entry.date}`;
+        }).filter(Boolean));
+        let imported = 0;
+        let unresolved = 0;
+
+        for (const seed of TT_LEGACY_FIRST_HALF_IMPORT) {
+            const employee = this.findEmployeeByName(seed.employee, { productionOnly: true });
+            if (!employee) {
+                unresolved += 1;
+                continue;
+            }
+
+            const skipDates = TT_LEGACY_IMPORT_SKIP_DATES[employee.name] || new Set();
+            if (skipDates.has(seed.date)) continue;
+
+            const sameDayExists = originalDayKeys.has(`${employee.id}|${seed.date}`);
+            if (sameDayExists) continue;
+
+            const description = this.buildDescriptionWithMeta(
+                'other',
+                'Импорт часов 1–15 марта',
+                'Автоматически перенесено из legacy Google-таблицы',
+                seed.project_name,
+            );
+
+            const id = await saveTimeEntry({
+                employee_id: employee.id,
+                worker_name: employee.name,
+                project_name: seed.project_name,
+                order_id: null,
+                hours: seed.hours,
+                date: seed.date,
+                description,
+                notes: 'legacy_google_sheet_import_2026_03_first_half',
+            });
+            existingEntries.push({
+                id: id || `legacy-${employee.id}-${seed.date}-${seed.project_name}`,
+                employee_id: employee.id,
+                worker_name: employee.name,
+                project_name: seed.project_name,
+                order_id: null,
+                hours: seed.hours,
+                date: seed.date,
+                description,
+            });
+            imported += 1;
+        }
+
+        if (typeof localStorage !== 'undefined' && unresolved === 0) {
+            localStorage.setItem(TT_LEGACY_IMPORT_MARKER, '1');
+        }
+        if (imported > 0 && App.toast) {
+            App.toast(`Перенесены legacy-часы за 1–15 марта: ${imported} записей`);
+        }
+        return imported;
     },
 
     getHalfMonthBucket(dateStr) {
@@ -445,7 +575,14 @@ const TimeTrack = {
         const now = new Date();
         const monthPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-`;
         const holidaySet = this.parseHolidaySet();
-        const stats = new Map();
+        const payrollEmployees = this._getProductionEmployees()
+            .filter(emp => this.getPayrollProfile(emp) !== 'management_salary_with_production_allocation');
+        const stats = new Map(payrollEmployees.map(emp => [String(emp.id), {
+            employee: emp,
+            regularByHalf: { first: 0, second: 0 },
+            weekendByHalf: { first: 0, second: 0 },
+            holidayByHalf: { first: 0, second: 0 },
+        }]));
         (this.entries || []).forEach(entry => {
             const workerName = String(entry.worker_name || '').trim();
             if (!workerName) return;
@@ -459,15 +596,16 @@ const TimeTrack = {
             const isHoliday = holidaySet.has(entry.date);
             const isWeekend = this.isWeekend(entry.date);
 
-            if (!stats.has(workerName)) {
-                stats.set(workerName, {
+            const statKey = String(emp.id);
+            if (!stats.has(statKey)) {
+                stats.set(statKey, {
                     employee: emp,
                     regularByHalf: { first: 0, second: 0 },
                     weekendByHalf: { first: 0, second: 0 },
                     holidayByHalf: { first: 0, second: 0 },
                 });
             }
-            const row = stats.get(workerName);
+            const row = stats.get(statKey);
             const halfKey = this.getHalfMonthBucket(entry.date);
             if (isHoliday) row.holidayByHalf[halfKey] += hours;
             else if (isWeekend) row.weekendByHalf[halfKey] += hours;
@@ -485,7 +623,6 @@ const TimeTrack = {
                 (row.weekendByHalf[halfKey] || 0) +
                 (row.holidayByHalf[halfKey] || 0)
             ), 0);
-            if (monthHours <= 0 && cfg.payrollProfile === 'hourly') return [];
 
             const baseHoursPerHalf = cfg.hasSalary
                 ? (cfg.baseHoursSemimonth || Math.max(1, Math.round(cfg.baseHours / 2)))

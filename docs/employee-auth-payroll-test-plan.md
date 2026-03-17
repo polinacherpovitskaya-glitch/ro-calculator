@@ -77,6 +77,12 @@
   - second-half payout resets threshold and repeats logic;
   - fixed salary itself does not appear in the hours payout table; only overtime/weekend/holiday extras do;
   - weekend/holiday rows pay correctly.
+- `TimeTrack -> Daily status`:
+  - only production employees appear in `Отчеты за сегодня`;
+  - management users with time entries do not appear there.
+- `TimeTrack -> Legacy import`:
+  - first-half March 2026 legacy rows are imported automatically once;
+  - `Женя Г` dates already entered manually are skipped to avoid duplicates.
 - `TimeTrack -> Existing entry edit`:
   - open existing row;
   - change project/date/stage/hours;
