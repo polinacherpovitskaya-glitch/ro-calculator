@@ -11,6 +11,7 @@ const Gantt = {
     orderSequence: [],
     actualMonthSummary: { actualHours: 0, employeeCount: 0 },
     planState: { order_ids: [], manual_start_dates: {} },
+    draggedOrderId: null,
     zoom: 'week',
     LOADABLE_STATUSES: ['sample', 'production_casting', 'production_printing', 'production_hardware', 'production_packaging', 'delivery', 'in_production'],
     STATUS_LABELS: {
@@ -357,6 +358,20 @@ const Gantt = {
         await this.load();
     },
 
+    reorderOrderSequence(orderIds = [], draggedOrderId, targetOrderId) {
+        const draggedId = Number(draggedOrderId);
+        const targetId = Number(targetOrderId);
+        const normalized = (orderIds || []).map(id => Number(id)).filter(Number.isFinite);
+        const currentIndex = normalized.indexOf(draggedId);
+        const targetIndex = normalized.indexOf(targetId);
+        if (currentIndex < 0 || targetIndex < 0 || draggedId === targetId) return normalized;
+        const next = [...normalized];
+        next.splice(currentIndex, 1);
+        const insertIndex = next.indexOf(targetId);
+        next.splice(insertIndex, 0, draggedId);
+        return next;
+    },
+
     async moveUp(orderId) {
         await this.moveOrder(orderId, -1);
     },
@@ -396,6 +411,52 @@ const Gantt = {
         state.manual_start_dates[String(orderId)] = nextDate;
         await saveProductionPlanState(state);
         this.planState = state;
+        await this.load();
+    },
+
+    onQueueDragStart(event, orderId) {
+        this.draggedOrderId = Number(orderId);
+        if (event?.dataTransfer) {
+            event.dataTransfer.effectAllowed = 'move';
+            event.dataTransfer.setData('text/plain', String(orderId));
+        }
+        event?.currentTarget?.classList.add('dragging');
+    },
+
+    onQueueDragOver(event) {
+        event.preventDefault();
+        if (event?.dataTransfer) event.dataTransfer.dropEffect = 'move';
+        event?.currentTarget?.classList.add('drag-over');
+    },
+
+    onQueueDragLeave(event) {
+        event?.currentTarget?.classList.remove('drag-over');
+    },
+
+    onQueueDragEnd(event) {
+        this.draggedOrderId = null;
+        event?.currentTarget?.classList.remove('dragging');
+        document.querySelectorAll('.gantt-queue-card.drag-over').forEach(node => node.classList.remove('drag-over'));
+    },
+
+    async onQueueDrop(event, targetOrderId) {
+        event.preventDefault();
+        event?.currentTarget?.classList.remove('drag-over');
+        const draggedOrderId = Number(
+            event?.dataTransfer?.getData('text/plain')
+            || this.draggedOrderId
+            || 0
+        );
+        if (!draggedOrderId || draggedOrderId === Number(targetOrderId)) {
+            this.draggedOrderId = null;
+            return;
+        }
+        const nextOrderIds = this.reorderOrderSequence(this.orderSequence, draggedOrderId, targetOrderId);
+        const nextState = this.normalizePlanState(this.planState);
+        nextState.order_ids = nextOrderIds;
+        await saveProductionPlanState(nextState);
+        this.planState = nextState;
+        this.draggedOrderId = null;
         await this.load();
     },
 
@@ -603,7 +664,7 @@ const Gantt = {
             : '';
 
         return `
-            <article class="gantt-queue-card ${deadlineRisk ? 'risk' : ''} ${blocked ? 'blocked' : ''} ${review ? 'review' : ''}" onclick="App.navigate('order-detail', true, ${item.orderId || item.id})">
+            <article class="gantt-queue-card ${deadlineRisk ? 'risk' : ''} ${blocked ? 'blocked' : ''} ${review ? 'review' : ''}" draggable="true" ondragstart="Gantt.onQueueDragStart(event, ${item.orderId || item.id})" ondragover="Gantt.onQueueDragOver(event)" ondragleave="Gantt.onQueueDragLeave(event)" ondragend="Gantt.onQueueDragEnd(event)" ondrop="Gantt.onQueueDrop(event, ${item.orderId || item.id})" onclick="App.navigate('order-detail', true, ${item.orderId || item.id})">
                 <div class="gantt-queue-card-top">
                     <div>
                         <div class="gantt-queue-title">${this.esc(item.orderName || item.order_name)}</div>

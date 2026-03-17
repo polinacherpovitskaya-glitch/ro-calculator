@@ -3250,6 +3250,20 @@ table .text-center { text-align: center; }
     box-shadow: 0 14px 26px rgba(15, 23, 42, 0.08);
 }
 
+.gantt-queue-card[draggable="true"] {
+    cursor: grab;
+}
+
+.gantt-queue-card.dragging {
+    opacity: 0.45;
+}
+
+.gantt-queue-card.drag-over {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 24%, transparent);
+    background: color-mix(in srgb, var(--accent) 6%, white);
+}
+
 .gantt-queue-card.risk {
     border-color: #fecaca;
     background: #fff8f8;

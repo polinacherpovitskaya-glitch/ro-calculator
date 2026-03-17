@@ -36,6 +36,7 @@ assert.match(ganttJs, /loadTimeEntries\(\)/, 'Gantt must load time entries for a
 assert.match(ganttJs, /loadEmployees\(\)/, 'Gantt must load employees for actual-hours overlay');
 assert.match(ganttJs, /buildOrderActuals\(/, 'Gantt must aggregate actual order hours');
 assert.match(ganttJs, /shiftManualStart\(orderId, direction\)/, 'Gantt must expose quick working-day shifting for manual starts');
+assert.match(ganttJs, /reorderOrderSequence\(orderIds = \[\], draggedOrderId, targetOrderId\)/, 'Gantt must expose queue reorder helper');
 assert.match(calculatorJs, /notBeforeDate/, 'Scheduler must respect manual not-before dates');
 
 function createFixedDate(isoTimestamp) {
@@ -247,5 +248,10 @@ const shiftedWorkingDate = vm.runInContext(`
     Gantt.shiftWorkingDate('2026-03-20', 1, new Set(['2026-03-23']))
 `, ganttContext);
 assert.equal(shiftedWorkingDate, '2026-03-24', 'Quick manual shifts must skip weekends and configured production holidays');
+
+const reorderedQueue = JSON.parse(JSON.stringify(vm.runInContext(`
+    Gantt.reorderOrderSequence([11, 22, 33, 44], 44, 22)
+`, ganttContext)));
+assert.deepEqual(reorderedQueue, [11, 44, 22, 33], 'Queue reorder helper must move dragged order before the drop target');
 
 console.log('production calendar smoke checks passed');
