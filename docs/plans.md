@@ -116,6 +116,7 @@ python3 -m http.server 4173
 - [x] Проверить `Orders.onStatusChange` и `_syncWarehouseByStatus` на переходах `sample`, production-like statuses, `delivery`, `completed` и обратных откатах.
 - [ ] Проверить резерв, частичный резерв, возврат и списание для warehouse hardware и packaging, включая сценарии с нехваткой остатка.
 - [~] Проверить резерв, частичный резерв, возврат и списание для warehouse hardware и packaging, включая сценарии с нехваткой остатка.
+- [x] Закрыть over-return после clamped packaging deduction: rollback должен опираться на фактический history delta, а `draft -> sample` должен сигнализировать о partial reserve.
 - [x] Пройти China flows: создание закупки из `order-detail`, консолидация, приход на склад, связь с warehouse items и order meta badges.
 - [x] Проверить `Warehouse.moveOrderToReadyGoods`, ручные складские корректировки и историю движений по completed orders.
 - [x] Дофиксить найденные рассинхроны и добавить воспроизводимые checks там, где логику можно изолировать без тяжелого e2e.

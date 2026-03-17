@@ -958,6 +958,46 @@ const Orders = {
         return demand;
     },
 
+    async _collectWarehouseReturnDemand(orderId, demand) {
+        const history = typeof loadWarehouseHistory === 'function'
+            ? await loadWarehouseHistory()
+            : [];
+        const seenItems = new Set();
+        const netDeltaByItem = new Map();
+
+        (history || []).forEach(entry => {
+            if (Number(entry.order_id || 0) !== Number(orderId || 0)) return;
+            const itemId = Number(entry.item_id || 0);
+            if (!itemId) return;
+            const note = String(entry.notes || '');
+            const type = String(entry.type || '').toLowerCase();
+            if (!/при смене статуса/i.test(note)) return;
+            if (type !== 'deduction' && type !== 'addition') return;
+            const delta = parseFloat(entry.qty_change || 0) || 0;
+            if (!delta) return;
+            seenItems.add(itemId);
+            netDeltaByItem.set(itemId, (netDeltaByItem.get(itemId) || 0) + delta);
+        });
+
+        const returnDemand = new Map();
+        demand.forEach((qty, itemId) => {
+            const normalizedItemId = Number(itemId || 0);
+            const normalizedQty = parseFloat(qty) || 0;
+            if (!normalizedItemId || normalizedQty <= 0) return;
+            if (!seenItems.has(normalizedItemId)) {
+                returnDemand.set(normalizedItemId, normalizedQty);
+                return;
+            }
+            const netDelta = parseFloat(netDeltaByItem.get(normalizedItemId) || 0) || 0;
+            const consumedQty = Math.max(0, -netDelta);
+            const returnQty = Math.min(normalizedQty, consumedQty);
+            if (returnQty > 0) {
+                returnDemand.set(normalizedItemId, returnQty);
+            }
+        });
+        return returnDemand;
+    },
+
     async _syncWarehouseByStatus(orderId, oldStatus, newStatus, orderName, managerName) {
         if (oldStatus === newStatus) return;
         const data = await loadOrder(orderId);
@@ -991,7 +1031,8 @@ const Orders = {
         await saveWarehouseReservations(reservations);
 
         if (wasConsumed && !nowConsumed) {
-            for (const [itemId, qty] of demand.entries()) {
+            const returnDemand = await this._collectWarehouseReturnDemand(orderId, demand);
+            for (const [itemId, qty] of returnDemand.entries()) {
                 await Warehouse.adjustStock(
                     itemId,
                     qty,
@@ -1008,6 +1049,7 @@ const Orders = {
             const freshReservations = await loadWarehouseReservations();
             const items = await loadWarehouseItems();
             const activeReservedByItem = new Map();
+            let hadShortage = false;
 
             freshReservations.forEach(reservation => {
                 if (reservation.status !== 'active') return;
@@ -1035,10 +1077,16 @@ const Orders = {
                         created_by: managerName || '',
                     });
                 }
+                if (reserveQty < qty) {
+                    hadShortage = true;
+                }
             });
 
             if (toInsert.length > 0) {
                 await saveWarehouseReservations([...freshReservations, ...toInsert]);
+            }
+            if (hadShortage) {
+                App.toast('Часть упаковки не встала в полный резерв: недостаточно остатка');
             }
             return;
         }

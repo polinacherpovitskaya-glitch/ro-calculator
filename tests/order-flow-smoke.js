@@ -733,12 +733,17 @@ async function smokeOrderStatusWarehouseSync(context) {
     context.__savedReservations = [];
     context.__reservations = [];
     context.__warehouseItems = [{ id: 501, qty: 10, unit: 'шт' }];
+    context.__warehouseHistory = [];
     context.loadWarehouseReservations = async () => clone(context.__reservations);
     context.saveWarehouseReservations = async (reservations) => {
         context.__savedReservations = clone(reservations);
         context.__reservations = clone(reservations);
     };
     context.loadWarehouseItems = async () => clone(context.__warehouseItems);
+    context.loadWarehouseHistory = async () => clone(context.__warehouseHistory);
+    context.saveWarehouseHistory = async (history) => {
+        context.__warehouseHistory = clone(history);
+    };
 
     context.__originalWarehouseAdjustStock = vm.runInContext('Warehouse.adjustStock', context);
     context.__originalSyncProjectHardwareOrderState = vm.runInContext('Warehouse.syncProjectHardwareOrderState', context);
@@ -752,6 +757,13 @@ async function smokeOrderStatusWarehouseSync(context) {
                 const qtyAfter = Math.max(0, qtyBefore + (Number(delta) || 0));
                 const appliedQtyChange = qtyAfter - qtyBefore;
                 if (stockRow) stockRow.qty = qtyAfter;
+                globalThis.__warehouseHistory.push({
+                    item_id: Number(itemId) || 0,
+                    order_id: extra && extra.order_id ? Number(extra.order_id) : null,
+                    type: String(type || ''),
+                    notes: String(note || ''),
+                    qty_change: appliedQtyChange,
+                });
                 return {
                     ok: true,
                     requestedQtyChange: Number(delta) || 0,
@@ -835,6 +847,21 @@ async function smokeOrderStatusWarehouseSync(context) {
 
         context.__adjustStockCalls = [];
         context.__projectHardwareCalls = [];
+        context.__reservations = [];
+        context.__savedReservations = [];
+        context.__warehouseItems = [{ id: 501, qty: 2, unit: 'шт' }];
+        context.__toasts = [];
+        vm.runInContext(`App.toast = (message) => { globalThis.__toasts.push(String(message || '')); };`, context);
+        await vm.runInContext(`Orders._syncWarehouseByStatus(42, 'draft', 'sample', 'Sync Order', 'Smoke')`, context);
+
+        assert.equal(context.__projectHardwareCalls.length, 1);
+        assert.equal(context.__projectHardwareCalls[0].status, 'sample');
+        const partialReservation = context.__savedReservations.find(item => item.order_id === 42);
+        assert.equal(partialReservation.qty, 2);
+        assert.ok(context.__toasts.some(message => /полный резерв/i.test(message)));
+
+        context.__adjustStockCalls = [];
+        context.__projectHardwareCalls = [];
         context.__savedReservations = [];
         context.__warehouseItems = [{ id: 501, qty: 2, unit: 'шт' }];
         context.__toasts = [];
@@ -855,6 +882,23 @@ async function smokeOrderStatusWarehouseSync(context) {
         const releasedReservation = context.__savedReservations.find(item => item.order_id === 42);
         assert.equal(releasedReservation.status, 'released');
         assert.ok(context.__toasts.some(message => /не полностью/i.test(message)));
+
+        context.__adjustStockCalls = [];
+        context.__projectHardwareCalls = [];
+        context.__savedReservations = [];
+        await vm.runInContext(`Orders._syncWarehouseByStatus(42, 'delivery', 'draft', 'Sync Order', 'Smoke')`, context);
+
+        assert.equal(context.__projectHardwareCalls.length, 1);
+        assert.equal(context.__projectHardwareCalls[0].status, 'draft');
+        assert.deepEqual(clone(context.__adjustStockCalls), [{
+            itemId: 501,
+            delta: 2,
+            type: 'addition',
+            refName: 'Sync Order',
+            note: 'Возврат на склад при смене статуса: delivery → draft',
+            employee: 'Smoke',
+            extra: { order_id: 42 },
+        }]);
     } finally {
         vm.runInContext(`
             Warehouse.adjustStock = globalThis.__originalWarehouseAdjustStock;
