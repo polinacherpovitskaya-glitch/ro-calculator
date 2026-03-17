@@ -22,7 +22,7 @@ assert.doesNotMatch(indexHtml, /data-zoom="day"/, 'Day zoom must be removed');
 assert.match(indexHtml, /set-planning_workers_count/, 'Settings must expose planning worker count');
 assert.match(indexHtml, /set-planning_hours_per_day/, 'Settings must expose planning hours per day');
 assert.match(ganttJs, /moveUp\(orderId\)/, 'Gantt queue reorder helpers missing');
-assert.match(ganttJs, /renderQueue\(queue, blockedQueue = \[\]\)/, 'Gantt queue renderer must support blocked queue section');
+assert.match(ganttJs, /renderQueue\(queue, blockedQueue = \[\], reviewQueue = \[\]\)/, 'Gantt queue renderer must support blocked and review queue sections');
 assert.match(ganttJs, /zoom: 'week'/, 'Default gantt zoom must stay week');
 assert.doesNotMatch(ganttJs, /'day' \| 'week'/, 'Legacy day zoom comment should be removed');
 assert.match(appJs, /normalizePageAlias\(page\)/, 'Page alias normalizer missing in app');
@@ -142,5 +142,25 @@ const readyState = JSON.parse(JSON.stringify(vm.runInContext(`
     )
 `, ganttContext)));
 assert.equal(readyState.production_ready_state, 'ready', 'Custom order with mold in stock must stay ready');
+
+const chinaBlockedState = JSON.parse(JSON.stringify(vm.runInContext(`
+    Gantt.getOrderReadiness(
+        { id: 3, order_name: 'China blocked order' },
+        [{ item_type: 'product', product_name: 'Space NFC', is_blank_mold: false, base_mold_in_stock: false }],
+        [{ order_id: 3, purchase_name: 'Молд Space NFC', status: 'in_transit' }]
+    )
+`, ganttContext)));
+assert.equal(chinaBlockedState.production_ready_state, 'blocked', 'Pending China purchase must keep custom order blocked');
+assert.match(chinaBlockedState.production_blocked_reason, /Ждет Китай/, 'Blocked state should explain pending China dependency');
+
+const needsReviewState = JSON.parse(JSON.stringify(vm.runInContext(`
+    Gantt.getOrderReadiness(
+        { id: 4, order_name: 'Needs review order' },
+        [{ item_type: 'product', product_name: 'Space NFC', is_blank_mold: false, base_mold_in_stock: false }],
+        [{ order_id: 4, purchase_name: 'Молд Space NFC', status: 'received' }]
+    )
+`, ganttContext)));
+assert.equal(needsReviewState.production_ready_state, 'needs_review', 'Received China purchase with no in-stock mold flag should surface review state');
+assert.match(needsReviewState.production_blocked_reason, /Проверьте молд/, 'Review state should explain data mismatch after China receipt');
 
 console.log('production calendar smoke checks passed');

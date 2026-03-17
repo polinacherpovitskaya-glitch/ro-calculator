@@ -6,6 +6,7 @@
 const Gantt = {
     orders: [],
     blockedOrders: [],
+    reviewOrders: [],
     schedule: null,
     orderSequence: [],
     zoom: 'week',
@@ -22,9 +23,10 @@ const Gantt = {
 
     async load() {
         try {
-            const [allOrders, planState] = await Promise.all([
+            const [allOrders, planState, allChinaPurchases] = await Promise.all([
                 loadOrders({}),
                 loadProductionPlanState().catch(() => ({ order_ids: [] })),
+                loadChinaPurchases({}).catch(() => []),
             ]);
 
             const priorityIds = Array.isArray(planState?.order_ids)
@@ -49,15 +51,27 @@ const Gantt = {
                 if (!itemsByOrderId.has(key)) itemsByOrderId.set(key, []);
                 itemsByOrderId.get(key).push(item);
             });
+            const chinaPurchasesByOrderId = new Map();
+            (allChinaPurchases || []).forEach(purchase => {
+                const key = Number(purchase.order_id);
+                if (!Number.isFinite(key) || key <= 0) return;
+                if (!chinaPurchasesByOrderId.has(key)) chinaPurchasesByOrderId.set(key, []);
+                chinaPurchasesByOrderId.get(key).push(purchase);
+            });
 
             this.orders = orderedOrders.map(order => ({
                 ...order,
-                ...this.getOrderReadiness(order, itemsByOrderId.get(Number(order.id)) || []),
+                ...this.getOrderReadiness(
+                    order,
+                    itemsByOrderId.get(Number(order.id)) || [],
+                    chinaPurchasesByOrderId.get(Number(order.id)) || []
+                ),
             }));
             this.blockedOrders = this.orders.filter(order => order.production_ready_state === 'blocked');
+            this.reviewOrders = this.orders.filter(order => order.production_ready_state === 'needs_review');
             this.orderSequence = this.orders.map(order => Number(order.id));
             this.schedule = buildProductionSchedule(
-                this.orders.filter(order => order.production_ready_state !== 'blocked'),
+                this.orders.filter(order => order.production_ready_state === 'ready'),
                 App.settings || {}
             );
             this.render();
@@ -79,11 +93,27 @@ const Gantt = {
         );
     },
 
-    getOrderReadiness(order, items = []) {
+    getOrderReadiness(order, items = [], chinaPurchases = []) {
         const productItems = (items || []).filter(item => String(item?.item_type || 'product') === 'product');
         const customMoldItems = productItems.filter(item => item && item.is_blank_mold === false);
         const blockedItems = customMoldItems.filter(item => !this.isTrueLike(item.base_mold_in_stock));
         if (blockedItems.length > 0) {
+            const pendingChinaPurchases = (chinaPurchases || []).filter(purchase => !this.isChinaPurchaseReceived(purchase));
+            if (pendingChinaPurchases.length > 0) {
+                return {
+                    production_ready_state: 'blocked',
+                    production_blocked_reason: this.describeChinaBlocked(pendingChinaPurchases),
+                    production_blocked_items: blockedItems.length,
+                };
+            }
+            const receivedChinaPurchases = (chinaPurchases || []).filter(purchase => this.isChinaPurchaseReceived(purchase));
+            if (receivedChinaPurchases.length > 0) {
+                return {
+                    production_ready_state: 'needs_review',
+                    production_blocked_reason: this.describeReviewAfterChinaReceipt(receivedChinaPurchases),
+                    production_blocked_items: blockedItems.length,
+                };
+            }
             return {
                 production_ready_state: 'blocked',
                 production_blocked_reason: this.describeBlockedByMold(blockedItems),
@@ -112,6 +142,33 @@ const Gantt = {
             return `Ждет молды для ${names.length} позиций`;
         }
         return 'Ждет молд';
+    },
+
+    isChinaPurchaseReceived(purchase) {
+        return String(purchase?.status || '').trim().toLowerCase() === 'received';
+    },
+
+    describeChinaBlocked(purchases = []) {
+        const names = Array.from(new Set((purchases || [])
+            .map(purchase => String(purchase?.purchase_name || '').trim())
+            .filter(Boolean)));
+        if (names.length === 1) {
+            return `Ждет Китай: ${names[0]}`;
+        }
+        if (names.length > 1) {
+            return `Ждет Китай: ${names.length} закупки`;
+        }
+        return 'Ждет Китай / молд';
+    },
+
+    describeReviewAfterChinaReceipt(purchases = []) {
+        const names = Array.from(new Set((purchases || [])
+            .map(purchase => String(purchase?.purchase_name || '').trim())
+            .filter(Boolean)));
+        if (names.length === 1) {
+            return `Проверьте молд: Китай уже принят (${names[0]})`;
+        }
+        return 'Проверьте молд: Китай уже принят';
     },
 
     async moveOrder(orderId, direction) {
@@ -150,7 +207,8 @@ const Gantt = {
         if (!container) return;
 
         const blockedQueue = this.blockedOrders || [];
-        if (!this.schedule || (this.schedule.queue.length === 0 && blockedQueue.length === 0)) {
+        const reviewQueue = this.reviewOrders || [];
+        if (!this.schedule || (this.schedule.queue.length === 0 && blockedQueue.length === 0 && reviewQueue.length === 0)) {
             if (capContainer) capContainer.innerHTML = '';
             if (queueContainer) queueContainer.innerHTML = '';
             container.innerHTML = `
@@ -167,15 +225,15 @@ const Gantt = {
 
         const { queue, dailyCapacity, days } = this.schedule;
         const activeQueue = queue.filter(item => item.schedule.length > 0);
-        this.renderQueue(activeQueue, blockedQueue);
+        this.renderQueue(activeQueue, blockedQueue, reviewQueue);
 
         if (!days.length || !activeQueue.length) {
             if (capContainer) capContainer.innerHTML = '';
             container.innerHTML = `
                 <div class="card">
                     <p class="text-muted text-center">
-                        ${blockedQueue.length
-                            ? 'Сейчас нет готовых к запуску заказов: активный план пуст, а заблокированные заказы вынесены выше в отдельный блок.'
+                        ${(blockedQueue.length || reviewQueue.length)
+                            ? 'Сейчас нет готовых к запуску заказов: активный план пуст, а ожидающие/требующие проверки заказы вынесены выше в отдельные блоки.'
                             : 'Нет данных для отображения'}
                     </p>
                 </div>`;
@@ -253,10 +311,10 @@ const Gantt = {
         this.renderStats();
     },
 
-    renderQueue(queue, blockedQueue = []) {
+    renderQueue(queue, blockedQueue = [], reviewQueue = []) {
         const queueEl = document.getElementById('gantt-queue');
         if (!queueEl) return;
-        if (!queue.length && !blockedQueue.length) {
+        if (!queue.length && !blockedQueue.length && !reviewQueue.length) {
             queueEl.innerHTML = '';
             return;
         }
@@ -264,8 +322,10 @@ const Gantt = {
         const totalHours = round2(queue.reduce((sum, item) => sum + (item.totalHours || 0), 0));
         const riskCount = queue.filter(item => item.deadlineEnd && item.schedule[item.schedule.length - 1]?.date > item.deadlineEnd).length;
         const blockedCount = blockedQueue.length;
+        const reviewCount = reviewQueue.length;
         const cardsHtml = queue.map(item => this.renderQueueCard(item)).join('');
         const blockedHtml = blockedQueue.map(item => this.renderQueueCard(item, { blocked: true })).join('');
+        const reviewHtml = reviewQueue.map(item => this.renderQueueCard(item, { review: true })).join('');
 
         queueEl.innerHTML = `
             <div class="gantt-queue-card-wrap">
@@ -275,7 +335,7 @@ const Gantt = {
                         <p>Порядок сверху задает, что начальник производства запускает раньше. Его можно быстро подвигать кнопками на карточках.</p>
                     </div>
                     <div class="gantt-queue-summary">
-                        <strong>${queue.length}</strong> готово к плану · <strong>${this.formatHours(totalHours)}</strong>${riskCount ? ` · <span class="text-red">${riskCount} с риском дедлайна</span>` : ''}${blockedCount ? ` · <span class="text-orange">${blockedCount} ждут молд</span>` : ''}
+                        <strong>${queue.length}</strong> готово к плану · <strong>${this.formatHours(totalHours)}</strong>${riskCount ? ` · <span class="text-red">${riskCount} с риском дедлайна</span>` : ''}${blockedCount ? ` · <span class="text-orange">${blockedCount} ждут молд/Китай</span>` : ''}${reviewCount ? ` · <span class="text-muted">${reviewCount} требуют проверки</span>` : ''}
                     </div>
                 </div>
                 ${queue.length ? `
@@ -294,14 +354,26 @@ const Gantt = {
                             ${blockedHtml}
                         </div>
                     </div>` : ''}
+                ${reviewCount ? `
+                    <div class="gantt-queue-section gantt-queue-section-review">
+                        <div class="gantt-queue-subhead">
+                            <h4>Требуют проверки</h4>
+                            <p>По этим заказам календарь видит конфликт в данных: Китай уже принят или связка неполная, но молд все еще не отмечен как доступный. Они не попадают в active timeline, пока их не проверят.</p>
+                        </div>
+                        <div class="gantt-queue-grid">
+                            ${reviewHtml}
+                        </div>
+                    </div>` : ''}
             </div>`;
     },
 
     renderQueueCard(item, options = {}) {
         const blocked = !!options.blocked;
-        const startDate = blocked ? null : (item.schedule[0]?.date || null);
-        const finishDate = blocked ? null : (item.schedule[item.schedule.length - 1]?.date || null);
-        const deadlineRisk = !blocked && item.deadlineEnd && finishDate && finishDate > item.deadlineEnd;
+        const review = !!options.review;
+        const paused = blocked || review;
+        const startDate = paused ? null : (item.schedule[0]?.date || null);
+        const finishDate = paused ? null : (item.schedule[item.schedule.length - 1]?.date || null);
+        const deadlineRisk = !paused && item.deadlineEnd && finishDate && finishDate > item.deadlineEnd;
         const deadlineLabel = item.deadlineEnd ? this.formatDateStr(item.deadlineEnd) : 'без дедлайна';
         const phasePills = [
             { label: 'Литьё', hours: this.getPhaseHours(item, 'molding'), color: '#f59e0b' },
@@ -311,7 +383,7 @@ const Gantt = {
             <span class="gantt-queue-phase-pill" style="--phase-color:${phase.color}">${phase.label}: ${this.formatHours(phase.hours)}</span>`).join('');
 
         return `
-            <article class="gantt-queue-card ${deadlineRisk ? 'risk' : ''} ${blocked ? 'blocked' : ''}" onclick="App.navigate('order-detail', true, ${item.orderId || item.id})">
+            <article class="gantt-queue-card ${deadlineRisk ? 'risk' : ''} ${blocked ? 'blocked' : ''} ${review ? 'review' : ''}" onclick="App.navigate('order-detail', true, ${item.orderId || item.id})">
                 <div class="gantt-queue-card-top">
                     <div>
                         <div class="gantt-queue-title">${this.esc(item.orderName || item.order_name)}</div>
@@ -323,13 +395,13 @@ const Gantt = {
                     </div>
                 </div>
                 <div class="gantt-queue-dates">
-                    <strong>${blocked ? 'Старт:' : 'План:'}</strong> ${blocked ? 'ждет готовности' : this.formatDateRange(startDate, finishDate)}
+                    <strong>${paused ? 'Старт:' : 'План:'}</strong> ${paused ? 'ждет готовности' : this.formatDateRange(startDate, finishDate)}
                     <span> · </span>
                     <strong>Дедлайн:</strong> ${deadlineLabel}
                 </div>
                 <div class="gantt-queue-phases">${phasePills || '<span class="text-muted">Нет производственных часов</span>'}</div>
                 <div class="gantt-queue-footer">
-                    <span class="gantt-queue-badge ${blocked ? 'blocked' : (deadlineRisk ? 'risk' : 'ok')}">${blocked ? this.esc(item.production_blocked_reason || 'Ждет молд') : (deadlineRisk ? 'Риск дедлайна' : 'Вмещается в план')}</span>
+                    <span class="gantt-queue-badge ${blocked ? 'blocked' : review ? 'review' : (deadlineRisk ? 'risk' : 'ok')}">${blocked || review ? this.esc(item.production_blocked_reason || (review ? 'Требует проверки' : 'Ждет молд')) : (deadlineRisk ? 'Риск дедлайна' : 'Вмещается в план')}</span>
                     <span class="gantt-queue-open">Открыть заказ</span>
                 </div>
             </article>`;
@@ -465,6 +537,7 @@ const Gantt = {
         const { queue, dailyCapacity, days } = this.schedule;
         const totalOrders = queue.filter(item => item.schedule.length > 0).length;
         const blockedCount = (this.blockedOrders || []).length;
+        const reviewCount = (this.reviewOrders || []).length;
         const today = new Date().toISOString().slice(0, 10);
         const nextWorkDays = days.filter(day => day.date >= today).slice(0, 5);
         const weekUsed = round2(nextWorkDays.reduce((sum, day) => sum + day.totalUsed, 0));
@@ -475,8 +548,8 @@ const Gantt = {
 
         statsEl.innerHTML = `
             <div class="stat-card">
-                <div class="stat-value">${totalOrders}${blockedCount ? ` <span style="font-size:12px;color:var(--orange)">+${blockedCount}</span>` : ''}</div>
-                <div class="stat-label">${blockedCount ? 'В плане + ждут молд' : 'Заказов в плане'}</div>
+                <div class="stat-value">${totalOrders}${blockedCount ? ` <span style="font-size:12px;color:var(--orange)">+${blockedCount}</span>` : ''}${reviewCount ? ` <span style="font-size:12px;color:var(--text-muted)">+${reviewCount}</span>` : ''}</div>
+                <div class="stat-label">${blockedCount || reviewCount ? 'В плане + ожидание/проверка' : 'Заказов в плане'}</div>
             </div>
             <div class="stat-card">
                 <div class="stat-value">${this.formatHours(weekUsed)} <span style="font-size:12px;color:var(--text-muted)">/ ${this.formatHours(weekCapacity)}</span></div>

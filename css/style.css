@@ -3260,6 +3260,11 @@ table .text-center { text-align: center; }
     background: #fffaf3;
 }
 
+.gantt-queue-card.review {
+    border-color: #dbeafe;
+    background: #f8fbff;
+}
+
 .gantt-queue-card-top,
 .gantt-queue-footer {
     display: flex;
@@ -3327,6 +3332,11 @@ table .text-center { text-align: center; }
 .gantt-queue-badge.blocked {
     background: #ffedd5;
     color: #c2410c;
+}
+
+.gantt-queue-badge.review {
+    background: #dbeafe;
+    color: #1d4ed8;
 }
 
 .gantt-queue-open {

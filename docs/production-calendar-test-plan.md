@@ -131,6 +131,7 @@
 - [x] Настроенные `production_holidays` исключаются из расписания и не съезжают на день из-за timezone drift.
 - [x] Заказ с кастомной позицией без молда на складе уходит в отдельный blocked-блок и не планируется как ready.
 - [x] Календарь берет мощность из `planning_workers_count`, а не из pricing `workers_count`.
+- [x] China-linked blocked orders различаются как `Ждет Китай` и `Требует проверки` после receipt.
 
 ## Command Matrix
 ```sh

@@ -1,7 +1,7 @@
 # Production Calendar Status
 
 ## Snapshot
-- Current phase: C3 planning capacity separated from pricing, China waiting layer next
+- Current phase: C4 China waiting + needs-review readiness shipped, next up drag/factual overlay
 - Plan file: `/private/tmp/ro-codex-push-sync.v100/docs/production-calendar-plan.md`
 - Status: yellow
 - Last updated: 2026-03-17
@@ -64,6 +64,10 @@
   - scheduler берет `planning_workers_count × planning_hours_per_day`, а не `workers_count` из калькулятора;
   - если planning settings еще не трогали, календарь использует консервативный baseline `2 сотрудника × 8ч`, а не pricing `3.5`;
   - в `Настройки -> Производство` появились отдельные поля для реальной мощности календаря.
+- Реализован пятый usable slice `v109`:
+  - readiness model стала трехсостоячной: `ready`, `blocked`, `needs review`;
+  - если у blocked кастомного заказа есть незавершенная China purchase по `order_id`, календарь показывает `Ждет Китай: ...`, а не общий `Ждет молд`;
+  - если China purchase уже `received`, но mold все еще не отмечен как доступный, заказ уходит в отдельный блок `Требуют проверки`, а не остается бесконечно заблокированным без объяснения.
 - Добавлен и подключен новый regression smoke:
   - `/private/tmp/ro-codex-push-sync.v100/tests/production-calendar-smoke.js`
   - `.github/workflows/deploy-pages.yml`
@@ -76,12 +80,14 @@
 - `production-calendar-smoke` теперь также проверяет:
   - наличие planning capacity fields в settings UI;
   - использование `planning_workers_count` в scheduler.
+- `production-calendar-smoke` теперь страхует и China-ready ветку:
+  - `pending China purchase => blocked`;
+  - `received China purchase + no in-stock mold flag => needs_review`.
 
 ## In Progress
-- C4: China waiting + needs-review readiness layer.
+- C5: manual drag/replan persistence + factual overlay.
 
 ## Next
-- C4: ввести `blocked / needs review / ready-to-plan` слой для China waiting кейсов.
 - C5: добавить честный reorder/drag state и persist уже внутри канонического calendar model, без зависимости от legacy screen.
 - C6: подключить factual overlay месяца из `TimeTrack` в сам production calendar.
 
@@ -121,6 +127,7 @@
 | 2026-03-17 | Holidays + local date drift | `js/calculator.js`, `js/gantt.js`, `tests/production-calendar-smoke.js` | scheduler now skips configured holidays and keeps local calendar dates stable across timezones | continue into blocker/readiness model |
 | 2026-03-17 | Mold blocker readiness | `js/gantt.js`, `css/style.css`, `tests/production-calendar-smoke.js` | custom orders without mold in stock are separated from active planning into blocked queue | continue into China waiting + capacity model |
 | 2026-03-17 | Planning capacity split | `js/calculator.js`, `js/settings.js`, `index.html`, `tests/production-calendar-smoke.js` | calendar capacity is separated from pricing worker count and gets dedicated settings | continue into China waiting readiness |
+| 2026-03-17 | China waiting / review states | `js/gantt.js`, `css/style.css`, `tests/production-calendar-smoke.js` | blocked custom orders now distinguish pending China vs received-but-unreconciled states | continue into drag persistence + factual overlay |
 
 ## Smoke / Demo Checklist
 - [x] В меню слева остается один понятный `Производственный календарь`.
@@ -128,7 +135,8 @@
 - [x] Начальник производства может менять порядок очереди без похода в отдельный screen.
 - [x] Заказ без молда на складе не попадает в active plan и виден отдельно как `Ждет молд`.
 - [x] Календарь считает реальную мощность отдельно от pricing `3.5 сотрудника`.
-- [ ] Заказ, который ждет mold из Китая, явно виден как blocked и не планируется раньше receipt.
+- [x] Заказ, который ждет mold из Китая, явно виден как blocked и не планируется раньше receipt.
+- [x] Заказ с конфликтом `Китай уже принят, но mold не reconciled` уходит в `Требуют проверки`.
 - [ ] Mold-limited заказ не выглядит фальшиво распараллеленным.
 - [ ] При перегрузе до дедлайна экран явно показывает risk.
 - [ ] Заказ можно передвинуть bubble-ом и увидеть последствия.
