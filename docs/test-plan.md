@@ -8,7 +8,7 @@
   - `/Users/krollipolli/Documents/Github/RO calculator/docs/improvement-backlog.md`
   - `/Users/krollipolli/Documents/Github/RO calculator/docs/auth-remediation-plan.md`
 - Repo context: vanilla JS SPA с модулями `app`, `orders`, `order-detail`, `china`, `warehouse`, `colors`, `supabase` и отдельным `corporate-gift/`.
-- Last updated: 2026-03-16
+- Last updated: 2026-03-17
 
 ## Validation Scope
 - In scope: calculator order create/save/load/edit/clone, order list/detail/status changes, color reference и color persistence в item data, warehouse reservations/deductions/returns/ready goods, China purchase/consolidation/receipt flows, `corporate-gift` form/render/submit boundary, order-related tasks/projects widgets как regression perimeter.
@@ -21,7 +21,7 @@
 - Setup assumptions: локальный запуск через `python3 -m http.server 4173`; browser audit через headed Playwright flow или эквивалентный живой браузер; если live auth недоступен, локальный/fallback coverage все равно обязателен и live gap фиксируется в `docs/status.md`.
 - Build/deploy assumptions: публичный релиз приходит только из `origin/main` через GitHub Pages workflow; локальный `http.server` или `python3 -m http.server` служит только для smoke и не подтверждает сам по себе, что сайт уже обновился наружу.
 - Regression artifact expectation: findings log в `docs/status.md`, плюс lightweight smoke scripts в `tests/`, если чистую бизнес-логику удастся изолировать в M1.
-- Current reproducible harness: `node tests/order-flow-smoke.js` покрывает `Calculator` persistence (`china hardware/pkg + pendant + colors`), legacy pendant restore, ready-goods rollback sync, `ready goods sales/writeoff/manual add`, warehouse manual stock adjustment + history trail, clamped partial-deduction behavior и shortage toast при `sample -> delivery`, сохранение China shipment metadata, `Orders._syncWarehouseByStatus` и `order-detail` rendering для `colors[] / color_solution_attachment`; `node tests/auth-hardening-smoke.js` отдельно проверяет versioned auth hash path, legacy verifier compatibility, `password_hash_version/password_rotated_at`, security rendering и auth-backup export; `node tests/supabase-fallback-smoke.js` проверяет missing-table fallback для `sales_records` и aggressive local-cache cleanup path в `initSupabase`.
+- Current reproducible harness: `node tests/order-flow-smoke.js` покрывает `Calculator` persistence (`china hardware/pkg + pendant + colors`), legacy pendant restore, ready-goods rollback sync, `ready goods sales/writeoff/manual add`, warehouse manual stock adjustment + history trail, clamped partial-deduction behavior и shortage toast при `sample -> delivery`, сохранение China shipment metadata, `Orders._syncWarehouseByStatus` и `order-detail` rendering для `colors[] / color_solution_attachment`; `node tests/auth-hardening-smoke.js` отдельно проверяет versioned auth hash path, legacy verifier compatibility, `password_hash_version/password_rotated_at`, security rendering и auth-backup export; `node tests/supabase-fallback-smoke.js` проверяет missing-table fallback для `sales_records` и aggressive local-cache cleanup path в `initSupabase`; `node tests/factual-smoke.js` держит regression на `План-факт` totals, чтобы скрытые salary/indirect строки non-admin не удваивали `ИТОГО`.
 
 ## Test Levels
 
@@ -38,6 +38,7 @@
 - Проверить, что warehouse adjustments, ready-goods history loops и reservations остаются консистентными после edit, status rollback и completed orders.
 - Проверить, что `order-detail` после фиксов продолжает показывать связанные tasks/projects/china meta без регрессии.
 - Проверить, что `corporate-gift` submit payload содержит нормализованные данные букв/цветов и изображение подвеса, если preview доступен.
+- Проверить, что `План-факт` после sync с `FinTablo` не ломает скрытие salary/indirect строк и не искажает totals для non-admin.
 
 ### End-to-End / Smoke
 - Открыть root app и пройти маршруты `orders`, `colors`, `warehouse`, `china`, затем создать заказ из калькулятора с mix `product + hardware + packaging + pendant`.
@@ -64,6 +65,7 @@
 - [x] `node tests/order-flow-smoke.js`
 - [x] Эквивалентный warehouse/ready-goods reproducible harness внутри `node tests/order-flow-smoke.js`
 - [x] `node tests/auth-hardening-smoke.js`
+- [x] `node tests/factual-smoke.js`
 - [x] `node tests/supabase-fallback-smoke.js`
 - [ ] Headed browser smoke для root app order flow
 - [ ] Headed browser smoke для `corporate-gift/`
@@ -82,6 +84,7 @@
 - [x] `corporate-gift` demoable и на valid, и на invalid path
 - [x] Новые и reset-auth credentials сохраняются через versioned hash path, а legacy accounts подсвечиваются до forced reset
 - [x] Перед auth migration можно снять отдельный sanitized auth backup без выгрузки `password_plain`
+- [x] `План-факт` не удваивает totals для non-admin при скрытых salary/indirect строках
 - [ ] В audited scope не осталось blocker-level known issue
 - [x] Improvement backlog приоритизирован после фиксов
 - [x] Auth/data-security remediation path документирован отдельно
@@ -92,6 +95,7 @@ for f in js/*.js corporate-gift/*.js; do node --check "$f"; done
 python3 -m http.server 4173
 node tests/order-flow-smoke.js
 node tests/auth-hardening-smoke.js
+node tests/factual-smoke.js
 node tests/supabase-fallback-smoke.js
 curl -s 'https://api.github.com/repos/polinacherpovitskaya-glitch/ro-calculator/actions/runs?per_page=1'
 curl -s 'https://polinacherpovitskaya-glitch.github.io/ro-calculator/' | rg 'js/supabase.js|js/app.js|js/order-detail.js|js/warehouse.js'

@@ -4,7 +4,7 @@
 - Current phase: M3/M4 - build-source sanity locked, continuing warehouse shortage + auth remediation
 - Plan file: `/Users/krollipolli/Documents/Github/RO calculator/docs/plans.md`
 - Status: yellow
-- Last updated: 2026-03-16
+- Last updated: 2026-03-17
 
 ## Build / Deploy Source Of Truth
 - Public deploy source: `origin/main` -> `.github/workflows/deploy-pages.yml` -> GitHub Pages.
@@ -55,6 +55,7 @@
 - Усилен credential path для новых и reset-паролей: `App.hashUserPassword` переведен на versioned `v2` verifier для новых записей, при этом legacy-логины продолжают проверяться через совместимый fallback.
 - Settings `Логины` теперь явно показывает security-state аккаунта (`Legacy hash v1` / `Hash v2`) и умеет снимать отдельный sanitized `auth backup` перед forced reset или storage migration.
 - Добавлен reproducible auth smoke [`tests/auth-hardening-smoke.js`](/Users/krollipolli/Documents/Github/RO%20calculator/tests/auth-hardening-smoke.js), который проверяет versioned hash verification, сохранение `password_hash_version/password_rotated_at`, security rendering и auth-backup export.
+- Закрыт `План-факт` totals regression после sync с `FinTablo`: скрытые salary/indirect строки для non-admin больше не удваивают `ИТОГО` в деталке, а новый [`tests/factual-smoke.js`](/Users/krollipolli/Documents/Github/RO%20calculator/tests/factual-smoke.js) ловит этот сценарий воспроизводимо.
 
 ## In Progress
 - Продолжение Phase 0/1 для auth: forced reset/storage migration path, live verification и оставшиеся warehouse edge cases с нехваткой/partial reserve.
@@ -84,6 +85,7 @@
 for f in js/*.js corporate-gift/*.js; do node --check "$f"; done
 node tests/order-flow-smoke.js
 node tests/auth-hardening-smoke.js
+node tests/factual-smoke.js
 node tests/supabase-fallback-smoke.js
 python3 -m http.server 4173
 curl -s 'https://api.github.com/repos/polinacherpovitskaya-glitch/ro-calculator/actions/runs?per_page=1'
@@ -95,6 +97,7 @@ curl -s 'https://polinacherpovitskaya-glitch.github.io/ro-calculator/' | rg 'js/
 - `corporate-gift` submit path использует `mode: 'no-cors'`, поэтому endpoint-level success/failure без mock или intercept наблюдается ограниченно.
 - Auth risk снижен, но не снят: login/session model все еще client-side, а legacy remote payload с `password_plain` остается опасным, пока не пройдет полноценный scrub/migration path.
 - Автосоздание логинов временно отключено; для новых сотрудников логины сейчас нужно заводить вручную до следующей фазы remediation.
+- `factual/import` еще не прогнаны отдельным полным live loop на публичном билде после sync с `FinTablo`; сейчас закрыт подтвержденный totals-bug и добавлен узкий regression smoke.
 
 ## Audit Log
 | Date | Milestone | Files | Commands | Result | Next |
@@ -122,6 +125,7 @@ curl -s 'https://polinacherpovitskaya-glitch.github.io/ro-calculator/' | rg 'js/
 | 2026-03-16 | Build source sanity | `.github/workflows/deploy-pages.yml`, `docs/*` | GitHub Actions API check + public site fetch | pass | Вернуться к M3 partial reserve / shortage flows |
 | 2026-03-16 | Warehouse shortage integrity | `js/warehouse.js`, `js/orders.js`, `tests/order-flow-smoke.js` | `node --check js/warehouse.js && node --check js/orders.js && node --check tests/order-flow-smoke.js && node tests/order-flow-smoke.js` | fail -> fixed | Продолжить live warehouse edge cases и auth migration |
 | 2026-03-16 | Auth hardening prep | `js/app.js`, `js/settings.js`, `index.html`, `tests/auth-hardening-smoke.js`, `.github/workflows/deploy-pages.yml` | `node --check js/app.js && node --check js/settings.js && node --check tests/auth-hardening-smoke.js && node tests/auth-hardening-smoke.js` | pass | Продолжить forced reset/storage migration без ночного lockout |
+| 2026-03-17 | Factual totals integrity | `js/factual.js`, `tests/factual-smoke.js`, `index.html`, `.github/workflows/deploy-pages.yml` | `node --check js/factual.js && node --check tests/factual-smoke.js && node tests/factual-smoke.js` | fail -> fixed | Прогнать полный gate set и перепроверить public deploy |
 
 ## Smoke / Demo Checklist
 - [x] Root app стабильно грузится локально и дает пройти навигацию `orders -> colors -> warehouse -> china` без blocker-level runtime errors.

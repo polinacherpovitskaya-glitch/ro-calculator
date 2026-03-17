@@ -4,7 +4,7 @@
 - Task: провести сквозной аудит сайта Recycle Object: проверить логику создания и изменения каждого заказа, сценарии цветов и комплектации, прохождение заказа через Китай, склад и готовую продукцию, пофиксить найденные проблемы и подготовить список улучшений.
 - Canonical input: пользовательский запрос в чате от 2026-03-16 ("пройти по всему сайту, проверить логику создания каждого заказа, цветов, как это кладется на сайт, на склад, заберется со склада; выявить проблемы, пофиксить их и предложить улучшения").
 - Repo context: vanilla JS SPA (`index.html` + `js/*`) с dual-write паттерном `Supabase + localStorage`, ключевыми модулями `app`, `orders`, `order-detail`, `china`, `warehouse`, `colors`, `supabase`, плюс отдельный `corporate-gift/` конструктор с отправкой в Google Sheets.
-- Last updated: 2026-03-16
+- Last updated: 2026-03-17
 
 ## Historical Context
 - План мигрирован из предыдущего трека `work-management MVP`, потому что старый `docs/plans.md` перестал быть каноном под новый продуктовый запрос.
@@ -28,7 +28,7 @@
 
 ## Assumptions
 - Главный бизнес-периметр первой волны: `calculator -> orders -> order-detail -> china -> warehouse -> ready goods`, плюс справочник цветов и отдельный вход заказа через `corporate-gift/`.
-- Маркетплейсы, аналитика, тайм-трек, импорт и бот не входят в первую волну, если только audit не покажет прямую регрессию от order flow.
+- Маркетплейсы, аналитика, тайм-трек, импорт и бот не входят в первую волну, если только audit не покажет прямую регрессию от order flow; `План-факт` и `FinTablo` входят в regression perimeter только после их прямого влияния на order economics screens.
 - Фиксы делаются поверх текущего стека и текущего data-access слоя; без rewrite на новый framework и без смены роутинга.
 - Для части финальных проверок понадобится действующая авторизованная сессия и реальные данные Supabase; если это недоступно, локальный/fallback прогон все равно обязателен, а live gaps фиксируются как blockers.
 - `corporate-gift/` считается отдельной воронкой входа заказа, даже если сейчас он пишет не в основную `orders`, а во внешний Google Sheets endpoint.
@@ -37,6 +37,7 @@
 - В корневом `package.json` нет готовых `lint/test/build` scripts, поэтому базовыми техническими gates считаются syntax-check JS, локальный HTTP server и browser-driven smoke.
 - В `tests/` пока нет покрытий для order/warehouse/china flows; первая итерация должна добавить минимальный smoke harness или другой воспроизводимый механизм проверки, чтобы audit не был одноразовым ручным прогоном.
 - Browser-аудит будет опираться на headed flow через Playwright tooling или эквивалентный живой браузер, а не на несуществующий сейчас e2e suite.
+- По мере появления узких cross-module дефектов допускается добавлять точечные smoke scripts вне чистого order flow, если они закрывают подтвержденный regression и не требуют нового test framework.
 
 ## Milestone Order
 | ID | Title | Depends on | Status |
@@ -150,6 +151,7 @@ python3 -m http.server 4173
 - [x] Подготовить отдельный remediation plan для high-severity auth/data-security риска.
 - [x] Обновить `docs/status.md` и `docs/test-plan.md` по реальным находкам, остаточным рискам и подтвержденным validation gates.
 - [x] Усиливать Phase 0 auth path безопасными шагами без ночного lockout: versioned hashes для новых/reset credentials, visible legacy-risk state и отдельный auth backup перед migration.
+- [x] Закрывать подтвержденные cross-module regressions точечными smoke-guard'ами, если live audit уходит в `План-факт`/`FinTablo` perimeter.
 
 ### Definition of Done
 - Blocker/high issues в audited scope либо устранены, либо имеют явный blocker owner и понятную причину.
@@ -161,6 +163,7 @@ for f in js/*.js corporate-gift/*.js; do node --check "$f"; done
 python3 -m http.server 4173
 # После M1: node tests/order-flow-smoke.js
 # После auth-hardening: node tests/auth-hardening-smoke.js
+# После factual regression: node tests/factual-smoke.js
 ```
 
 ### Known Risks

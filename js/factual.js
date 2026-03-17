@@ -809,7 +809,6 @@ const Factual = {
             const sourceHint = ftSourced && !manualOverride ? 'ФинТабло' : row.hint;
 
             if (isSalaryRow && !_isAdmin) {
-                planTotal += planVal; factTotal += factVal;
                 return; // skip rendering salary rows for non-admin
             }
             html += `<tr style="${alarm.bgStyle}">
