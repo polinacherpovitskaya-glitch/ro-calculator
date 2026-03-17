@@ -1356,6 +1356,12 @@ const Warehouse = {
         return !!checks[this._projectHardwareKey(orderId, itemId)];
     },
 
+    _projectSupplyKindLabel(kind) {
+        return String(kind || '').toLowerCase() === 'packaging'
+            ? 'Упаковка'
+            : 'Фурнитура';
+    },
+
     async toggleProjectHardwareReady(orderId, itemId, checked) {
         const normalizedOrderId = Number(orderId || 0);
         const normalizedItemId = Number(itemId || 0);
@@ -1395,7 +1401,7 @@ const Warehouse = {
                     -missingQty,
                     'deduction',
                     order.order_name || 'Заказ',
-                    `Списание собранной фурнитуры: ${missingQty} шт`,
+                    `Списание собранной позиции со склада: ${missingQty} шт`,
                     managerName,
                     { order_id: normalizedOrderId }
                 );
@@ -1407,7 +1413,7 @@ const Warehouse = {
                             appliedQty,
                             'addition',
                             order.order_name || 'Заказ',
-                            `Откат неполного списания собранной фурнитуры: ${appliedQty} шт`,
+                            `Откат неполного списания собранной позиции со склада: ${appliedQty} шт`,
                             managerName,
                             { order_id: normalizedOrderId }
                         );
@@ -1427,7 +1433,7 @@ const Warehouse = {
             });
 
             this.projectHardwareState.checks[key] = true;
-            App.toast(missingQty > 0 ? 'Фурнитура списана со склада' : 'Фурнитура уже была списана со склада');
+            App.toast(missingQty > 0 ? 'Позиция со склада списана' : 'Позиция уже была списана');
         } else {
             delete this.projectHardwareState.checks[key];
             const returnQty = this._getProjectHardwareConsumedQty(normalizedOrderId, normalizedItemId, historyDeltaMap);
@@ -1438,7 +1444,7 @@ const Warehouse = {
                     returnQty,
                     'addition',
                     order.order_name || 'Заказ',
-                    `Возврат собранной фурнитуры: ${returnQty} шт`,
+                    `Возврат собранной позиции на склад: ${returnQty} шт`,
                     managerName,
                     { order_id: normalizedOrderId }
                 );
@@ -1473,12 +1479,12 @@ const Warehouse = {
                     });
                 }
                 if (reserveQty < qty) {
-                    App.toast('Фурнитура возвращена не в полный резерв: недостаточно остатка');
+                    App.toast('Позиция возвращена не в полный резерв: недостаточно остатка');
                 } else {
-                    App.toast('Фурнитура возвращена в резерв');
+                    App.toast('Позиция возвращена в резерв');
                 }
             } else if (returnQty > 0) {
-                App.toast('Фурнитура возвращена на склад');
+                App.toast('Позиция возвращена на склад');
             } else {
                 App.toast('Флаг сборки снят');
             }
@@ -1499,29 +1505,42 @@ const Warehouse = {
     _collectWarehouseDemandFromOrderItems(items) {
         const grouped = new Map();
         (items || []).forEach(item => {
-            const itemType = item.item_type || '';
-            if (itemType !== 'hardware') return;
+            const itemType = String(item.item_type || '').toLowerCase();
+            const isHardware = itemType === 'hardware';
+            const isPackaging = itemType === 'packaging';
+            if (!isHardware && !isPackaging) return;
 
-            const src = (item.source || item.hardware_source || '').toLowerCase();
+            const src = String(
+                item.source
+                || (isHardware ? item.hardware_source : item.packaging_source)
+                || ''
+            ).toLowerCase();
             if (src !== 'warehouse') return;
 
-            const itemId = Number(item.warehouse_item_id || item.hardware_warehouse_item_id || 0);
+            const itemId = Number(
+                item.warehouse_item_id
+                || (isHardware ? item.hardware_warehouse_item_id : item.packaging_warehouse_item_id)
+                || 0
+            );
             const qty = parseFloat(item.quantity || item.qty || 0) || 0;
             if (!itemId || qty <= 0) return;
 
             const key = String(itemId);
             const prev = grouped.get(key);
             const name = item.product_name || item.name || '';
+            const materialType = isPackaging ? 'packaging' : 'hardware';
             if (!prev) {
                 grouped.set(key, {
                     warehouse_item_id: itemId,
                     qty,
                     names: name ? [name] : [],
+                    material_type: materialType,
                 });
                 return;
             }
             prev.qty += qty;
             if (name && !prev.names.includes(name)) prev.names.push(name);
+            if (prev.material_type !== materialType) prev.material_type = 'mixed';
             grouped.set(key, prev);
         });
         return Array.from(grouped.values());
@@ -1577,7 +1596,7 @@ const Warehouse = {
             && Number(entry.item_id || 0) === Number(itemId || 0)
             && String(entry.type || '').toLowerCase() === 'deduction'
             && !!entry.clamped
-            && /списание собранной фурнитуры/i.test(String(entry.notes || ''))
+            && /списание собранной/i.test(String(entry.notes || ''))
         );
     },
 
@@ -1634,8 +1653,11 @@ const Warehouse = {
         trackedOrders.forEach(order => {
             const detail = detailByOrderId.get(Number(order.id));
             if (!detail) return;
-            const demand = this._getProjectHardwareDemandMap(detail.items || []);
-            demand.forEach((qty, itemId) => {
+            const demandRowsForOrder = this._collectWarehouseDemandFromOrderItems(detail.items || []);
+            demandRowsForOrder.forEach(row => {
+                const itemId = Number(row.warehouse_item_id || 0);
+                const qty = parseFloat(row.qty) || 0;
+                if (!itemId || qty <= 0) return;
                 const key = this._projectHardwareKey(order.id, itemId);
                 trackedKeys.add(key);
                 const isReady = this._computeProjectHardwareReadyState(order.id, itemId, qty, history, historyDeltaMap);
@@ -1649,8 +1671,9 @@ const Warehouse = {
                     status: order.status || '',
                     created_at: order.created_at || '',
                     item_id: Number(itemId),
-                    qty: parseFloat(qty) || 0,
+                    qty,
                     ready: isReady,
+                    material_type: row.material_type || 'hardware',
                 });
             });
         });
@@ -1887,7 +1910,7 @@ const Warehouse = {
         }
 
         if (shortage) {
-            App.toast('Часть фурнитуры не встала в полный резерв: недостаточно остатка');
+            App.toast('Часть позиций со склада не встала в полный резерв: недостаточно остатка');
         }
     },
 
@@ -1939,6 +1962,7 @@ const Warehouse = {
                 item_id: Number(r.item_id),
                 item_name: (item && item.name) || r.item_name || 'Фурнитура',
                 item_sku: (item && item.sku) || '',
+                item_kind: this._projectSupplyKindLabel((item && item.category) || 'hardware'),
                 qty: 0,
             };
             current.qty += parseFloat(r.qty) || 0;
@@ -1963,6 +1987,7 @@ const Warehouse = {
                     item_id: Number(d.warehouse_item_id),
                     item_name: (item && item.name) || d.names.join(', ') || 'Фурнитура',
                     item_sku: (item && item.sku) || '',
+                    item_kind: this._projectSupplyKindLabel(d.material_type || (item && item.category) || 'hardware'),
                     qty: parseFloat(d.qty) || 0,
                     ready,
                 });
@@ -2012,12 +2037,13 @@ const Warehouse = {
                     <div class="table-wrap">
                         <table>
                             <thead>
-                                <tr><th>Фурнитура</th><th class="text-right">Резерв</th></tr>
+                                <tr><th>Комплектующая</th><th class="text-right">Резерв</th></tr>
                             </thead>
                             <tbody>
                                 ${o.items.map(r => `<tr>
                                     <td>
                                         <div>${this.esc(r.item_name)}</div>
+                                        <div style="font-size:11px;color:var(--text-muted);">${this.esc(r.item_kind || 'Фурнитура')}</div>
                                         ${r.item_sku ? `<div style="font-size:11px;color:var(--text-muted);">${this.esc(r.item_sku)}</div>` : ''}
                                     </td>
                                     <td class="text-right" style="font-weight:700;">${r.qty}</td>
@@ -2092,12 +2118,13 @@ const Warehouse = {
                     <div class="table-wrap">
                         <table>
                             <thead>
-                                <tr><th>Фурнитура</th><th class="text-right">Нужно</th><th>Собрано</th></tr>
+                                <tr><th>Комплектующая</th><th class="text-right">Нужно</th><th>Собрано</th></tr>
                             </thead>
                             <tbody>
                                 ${o.items.map(r => `<tr>
                                     <td>
                                         <div>${this.esc(r.item_name)}</div>
+                                        <div style="font-size:11px;color:var(--text-muted);">${this.esc(r.item_kind || 'Фурнитура')}</div>
                                         ${r.item_sku ? `<div style="font-size:11px;color:var(--text-muted);">${this.esc(r.item_sku)}</div>` : ''}
                                     </td>
                                     <td class="text-right" style="font-weight:700;">${r.qty}</td>
@@ -2115,7 +2142,7 @@ const Warehouse = {
             }).join('')}</div>`
             : (mode === 'collected'
                 ? '<p class="text-muted">Пока нет полностью собранных заказов.</p>'
-                : '<p class="text-muted">Нет фурнитуры со склада для заказов, которые нужно собрать.</p>');
+                : '<p class="text-muted">Нет позиций со склада для заказов, которые нужно собрать.</p>');
 
         const activeProductionHtml = renderProjectHardwareOrders(activeProductionOrders, 'active');
         const collectedProductionHtml = renderProjectHardwareOrders(collectedProductionOrders, 'collected');
@@ -2133,7 +2160,7 @@ const Warehouse = {
             </div>
             <div class="card" style="margin-top:12px;">
                 <div class="card-header">
-                    <h3>Фурнитура для проектов (к сборке)</h3>
+                    <h3>Фурнитура и упаковка для проектов (к сборке)</h3>
                 </div>
                 ${activeProductionHtml}
             </div>
@@ -3567,7 +3594,7 @@ const Warehouse = {
                 const photoHtml = item.photo_thumbnail
                     ? `<img src="${item.photo_thumbnail}" style="width:48px;height:48px;object-fit:cover;border-radius:6px;flex-shrink:0;border:1px solid var(--border);">`
                     : `<span style="width:48px;height:48px;display:flex;align-items:center;justify-content:center;background:${catObj.color};border-radius:6px;font-size:20px;flex-shrink:0;">${catObj.icon}</span>`;
-                const isSelected = item.id === selectedId ? 'background:rgba(59,130,246,0.1);' : '';
+                const isSelected = Number(item.id) === Number(selectedId) ? 'background:rgba(59,130,246,0.1);' : '';
                 itemsHtml += `<div class="wh-picker-item" data-id="${item.id}" style="display:flex;align-items:center;gap:10px;padding:8px 10px;cursor:pointer;border-bottom:1px solid var(--border);${isSelected}" onclick="${onSelectFn}(${idxStr}, '${item.id}')">
                     ${photoHtml}
                     <div style="flex:1;min-width:0;">
@@ -3592,7 +3619,7 @@ const Warehouse = {
 
     _findInGrouped(grouped, id) {
         for (const catKey of Object.keys(grouped)) {
-            const found = grouped[catKey].items.find(i => i.id === id);
+            const found = grouped[catKey].items.find(i => Number(i.id) === Number(id));
             if (found) return found;
         }
         return null;

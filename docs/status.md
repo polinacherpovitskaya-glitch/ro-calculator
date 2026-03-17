@@ -61,6 +61,7 @@
 - Закрыт warehouse rollback drift для packaging: после clamped-списания при нехватке остатка rollback теперь возвращает на склад только фактически списанное количество, а не полный спрос заказа; одновременно `draft -> sample` снова предупреждает о частичном резерве упаковки.
 - Починен `project_hardware` reload drift: галочки по собранной фурнитуре больше не сбрасываются на следующей загрузке; собранные, но еще не завершенные заказы уходят в блок `Собрано`, а `completed + собрано` скрывается со складской доски автоматически.
 - Закрыт `project_hardware` shortage bug: галочка `собрано` больше не ставится ложно при нехватке остатка, stale clamped-state самоснимается при reconcile, а снятие галочки возвращает только фактически списанное количество вместо полного спроса.
+- Закрыт packaging warehouse sync gap: упаковка со склада теперь идет в тот же `project_hardware` цикл, что и фурнитура, поэтому на обычном `save` она реально ставится в резерв, попадает в блок `Фурнитура и упаковка для проектов`, не списывается раньше времени и не теряет визуальный selected-state из-за string/number id drift в picker.
 
 ## In Progress
 - Продолжение Phase 0/1 для auth: forced reset/storage migration path, live verification и оставшиеся warehouse edge cases после shortage-safe toggle fix.
@@ -143,6 +144,7 @@ curl -s 'https://polinacherpovitskaya-glitch.github.io/ro-calculator/' | rg 'js/
 | 2026-03-17 | Auth restore boundary | `js/app.js`, `tests/auth-hardening-smoke.js`, `index.html` | `node --check js/app.js && node tests/auth-hardening-smoke.js` + browser runtime auth sanity on local server | fail -> fixed | Прогнать полный gate set, public deploy и идти в forced reset/storage migration |
 | 2026-03-17 | Project hardware sticky checks | `js/warehouse.js`, `tests/order-flow-smoke.js`, `index.html` | `node --check js/warehouse.js && node tests/order-flow-smoke.js` + browser runtime warehouse sanity on local server | fail -> fixed | Перепроверить live project hardware data после auto-hide правила для `completed + собрано` |
 | 2026-03-17 | Project hardware shortage toggle | `js/warehouse.js`, `tests/order-flow-smoke.js`, `index.html` | `node --check js/warehouse.js && node tests/order-flow-smoke.js` + full smoke gate set | fail -> fixed | Пушнуть публичный билд и проверить `warehouse.js?v=95` |
+| 2026-03-17 | Packaging reserve + warehouse collection parity | `js/app.js`, `js/orders.js`, `js/warehouse.js`, `tests/order-flow-smoke.js`, `index.html` | `node --check js/app.js && node --check js/orders.js && node --check js/warehouse.js && node --check tests/order-flow-smoke.js && node tests/order-flow-smoke.js && node tests/work-management-smoke.js && node tests/auth-hardening-smoke.js && node tests/factual-smoke.js && node tests/supabase-fallback-smoke.js` | fail -> fixed | Пушнуть публичный билд и проверить `app.js?v=110`, `orders.js?v=61`, `warehouse.js?v=96` |
 
 ## Smoke / Demo Checklist
 - [x] Root app стабильно грузится локально и дает пройти навигацию `orders -> colors -> warehouse -> china` без blocker-level runtime errors.

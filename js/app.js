@@ -2391,6 +2391,11 @@ const Calculator = {
         await this._ensureBlanksCatalog(true);
         const linkedBlank = this._findPkgBlankByWarehouseItemId(whItem.id);
         if (linkedBlank) {
+            const speed = parseFloat(linkedBlank.assembly_speed) || 0;
+            if (speed > 0) {
+                pkg.assembly_speed = round2(speed);
+                pkg.assembly_minutes = round2(speed / 60);
+            }
             const fixedSellPrice = parseFloat(linkedBlank.sell_price) || 0;
             if (fixedSellPrice > 0) {
                 pkg.sell_price = fixedSellPrice;
@@ -4068,7 +4073,8 @@ const Calculator = {
             }
 
             // === Warehouse sync ===
-            // Hardware from warehouse: reserve by order status, списание только по галочке "собрано" на складе.
+            // Warehouse project sync now covers both hardware and packaging from stock:
+            // reserve by order status, actual write-off only after warehouse marks the row as collected.
             if (typeof Warehouse !== 'undefined' && Warehouse.syncProjectHardwareOrderState) {
                 await Warehouse.syncProjectHardwareOrderState({
                     orderId,
@@ -4078,16 +4084,16 @@ const Calculator = {
                     currentItems: items,
                     previousItems: (oldData && oldData.items) || [],
                 });
+            } else {
+                // Legacy fallback if project warehouse sync is unavailable.
+                await this._syncWarehouseReservationsOnSave(
+                    orderId,
+                    order.order_name,
+                    actorName,
+                    order.status === 'sample',
+                    { hardware: false, packaging: true }
+                );
             }
-
-            // Packaging keeps the old flow: reserve only in sample, release otherwise.
-            await this._syncWarehouseReservationsOnSave(
-                orderId,
-                order.order_name,
-                actorName,
-                order.status === 'sample',
-                { hardware: false, packaging: true }
-            );
 
             App.toast('Заказ сохранен');
         } else {

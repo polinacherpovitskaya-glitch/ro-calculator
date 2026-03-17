@@ -1011,6 +1011,7 @@ const Orders = {
                 currentItems: data.items || [],
                 previousItems: data.items || [],
             });
+            return;
         }
 
         const demand = this._collectWarehouseDemand(data.items, { hardware: false, packaging: true });

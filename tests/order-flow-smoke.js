@@ -253,6 +253,19 @@ async function buildCollectedItems(context) {
             price_cny: 1.8,
             weight_grams: 4.2,
             result: { costPerUnit: 14, hoursPackaging: 0.75 },
+        }), Object.assign(Calculator.getEmptyPackaging(null), {
+            source: 'warehouse',
+            name: 'Warehouse Envelope',
+            qty: 100,
+            assembly_speed: 300,
+            assembly_minutes: 5,
+            price: 15.48,
+            delivery_total: 0,
+            delivery_price: 0,
+            sell_price: 18,
+            warehouse_item_id: 701,
+            warehouse_sku: 'ENV-150x90-EGG',
+            result: { costPerUnit: 16.1, hoursPackaging: 0.5 },
         })];
 
         Calculator.extraCosts = [];
@@ -279,7 +292,9 @@ async function smokeCalculatorPersistence(context) {
     const items = await buildCollectedItems(context);
     const productRow = items.find(item => item.item_type === 'product');
     const hardwareRow = items.find(item => item.item_type === 'hardware');
-    const packagingRow = items.find(item => item.item_type === 'packaging');
+    const packagingRows = items.filter(item => item.item_type === 'packaging');
+    const packagingRow = packagingRows.find(item => item.packaging_source === 'china');
+    const warehousePackagingRow = packagingRows.find(item => item.packaging_source === 'warehouse');
     const pendantRow = items.find(item => item.item_type === 'pendant');
 
     assert.equal(productRow.color_id, 12);
@@ -299,6 +314,9 @@ async function smokeCalculatorPersistence(context) {
     assert.equal(packagingRow.china_delivery_method, 'avia_fast');
     assert.equal(packagingRow.price_cny, 1.8);
     assert.equal(packagingRow.weight_grams, 4.2);
+    assert.equal(warehousePackagingRow.packaging_warehouse_item_id, 701);
+    assert.equal(warehousePackagingRow.packaging_warehouse_sku, 'ENV-150x90-EGG');
+    assert.equal(warehousePackagingRow.packaging_assembly_speed, 300);
 
     assert.equal(pendantRow.name, 'ABC');
     assert.equal(pendantRow._totalSellPerUnit, 99);
@@ -334,7 +352,8 @@ async function smokeCalculatorPersistence(context) {
     const restored = clone(await vm.runInContext(`({
         product: Calculator.items[0],
         hardware: Calculator.hardwareItems[0],
-        packaging: Calculator.packagingItems[0],
+        packagingChina: Calculator.packagingItems.find(pkg => pkg.source === 'china'),
+        packagingWarehouse: Calculator.packagingItems.find(pkg => pkg.source === 'warehouse'),
         pendant: Calculator.pendants[0],
     })`, context));
 
@@ -350,16 +369,67 @@ async function smokeCalculatorPersistence(context) {
     assert.equal(restored.hardware.price_cny, 2.7);
     assert.equal(restored.hardware.weight_grams, 6.5);
 
-    assert.equal(restored.packaging.china_item_id, 601);
-    assert.equal(restored.packaging.china_delivery_method, 'avia_fast');
-    assert.equal(restored.packaging.price_cny, 1.8);
-    assert.equal(restored.packaging.weight_grams, 4.2);
+    assert.equal(restored.packagingChina.china_item_id, 601);
+    assert.equal(restored.packagingChina.china_delivery_method, 'avia_fast');
+    assert.equal(restored.packagingChina.price_cny, 1.8);
+    assert.equal(restored.packagingChina.weight_grams, 4.2);
+    assert.equal(restored.packagingWarehouse.warehouse_item_id, 701);
+    assert.equal(restored.packagingWarehouse.warehouse_sku, 'ENV-150x90-EGG');
+    assert.equal(restored.packagingWarehouse.assembly_speed, 300);
+    assert.equal(restored.packagingWarehouse.assembly_minutes, 5);
 
     assert.equal(restored.pendant.name, 'ABC');
     assert.equal(restored.pendant._totalSellPerUnit, 99);
     assert.equal(restored.pendant.cord.name, 'Smoke Cord');
     assert.equal(restored.pendant.carabiner.name, 'Smoke Carabiner');
     assert.equal(restored.pendant.elements.length, 3);
+
+    const selectedWarehouseItem = clone(vm.runInContext(`
+        Warehouse._findInGrouped({
+            packaging: { items: [{ id: 701, name: 'Warehouse Envelope', available_qty: 20, unit: 'шт', price_per_unit: 15.48 }] }
+        }, '701')
+    `, context));
+    assert.equal(selectedWarehouseItem.id, 701);
+}
+
+async function smokePackagingWarehousePickerDefaults(context) {
+    context.__warehouseItems = [{
+        id: 701,
+        name: 'Warehouse Envelope',
+        sku: 'ENV-150x90-EGG',
+        size: '15x9см',
+        color: 'калька',
+        available_qty: 565,
+        qty: 565,
+        unit: 'шт',
+        price_per_unit: 15.48,
+        photo_thumbnail: '',
+        category: 'packaging',
+    }];
+    vm.runInContext(`
+        Calculator.packagingItems = [Calculator.getEmptyPackaging(null)];
+        Calculator.packagingItems[0].source = 'warehouse';
+        Calculator._findWhItem = (itemId) => (globalThis.__warehouseItems || []).find(item => Number(item.id) === Number(itemId)) || null;
+        Calculator._ensureBlanksCatalog = async () => {};
+        Calculator._pkgBlanksCatalog = [{
+            warehouse_item_id: 701,
+            assembly_speed: 300,
+            sell_price: 19,
+            updated_at: '2026-03-17T12:00:00.000Z',
+        }];
+        Calculator._rerenderPkgItem = () => {};
+        Calculator.recalculate = () => {};
+        Calculator.scheduleAutosave = () => {};
+    `, context);
+
+    await vm.runInContext(`Calculator.onPkgWarehouseSelect(0, '701')`, context);
+
+    const pkg = clone(await vm.runInContext(`Calculator.packagingItems[0]`, context));
+    assert.equal(pkg.warehouse_item_id, 701);
+    assert.equal(pkg.warehouse_sku, 'ENV-150x90-EGG');
+    assert.equal(pkg.assembly_speed, 300);
+    assert.equal(pkg.assembly_minutes, 5);
+    assert.equal(pkg.sell_price, 19);
 }
 
 async function smokeLegacyPendantRestore(context) {
@@ -733,12 +803,72 @@ async function smokeOrderStatusWarehouseSync(context) {
     };
 
     context.loadOrder = async () => clone(orderData);
-    context.__adjustStockCalls = [];
     context.__projectHardwareCalls = [];
+    context.__savedReservations = null;
+    context.__savedHistory = null;
+    context.saveWarehouseReservations = async (reservations) => {
+        context.__savedReservations = clone(reservations);
+    };
+    context.saveWarehouseHistory = async (history) => {
+        context.__savedHistory = clone(history);
+    };
+    context.__originalSyncProjectHardwareOrderState = vm.runInContext('Warehouse.syncProjectHardwareOrderState', context);
+
+    try {
+        vm.runInContext(`
+            Warehouse.syncProjectHardwareOrderState = async (payload) => {
+                globalThis.__projectHardwareCalls.push(payload);
+            };
+        `, context);
+
+        await vm.runInContext(`Orders._syncWarehouseByStatus(42, 'sample', 'delivery', 'Sync Order', 'Smoke')`, context);
+
+        assert.equal(context.__projectHardwareCalls.length, 1);
+        const payload = clone(context.__projectHardwareCalls[0]);
+        assert.equal(payload.status, 'delivery');
+        assert.equal(payload.orderId, 42);
+        assert.equal(payload.currentItems.length, 2);
+        assert.equal(payload.currentItems.find(item => item.item_type === 'packaging').packaging_warehouse_item_id, 501);
+        assert.equal(payload.currentItems.find(item => item.item_type === 'hardware').hardware_warehouse_item_id, 601);
+        assert.equal(payload.previousItems.length, 2);
+        assert.equal(context.__savedReservations, null);
+        assert.equal(context.__savedHistory, null);
+    } finally {
+        vm.runInContext(`
+            Warehouse.syncProjectHardwareOrderState = globalThis.__originalSyncProjectHardwareOrderState;
+        `, context);
+    }
+}
+
+async function smokePackagingWarehouseSaveSync(context) {
+    const currentItems = [{
+        item_type: 'packaging',
+        product_name: 'Warehouse Envelope',
+        quantity: 100,
+        packaging_source: 'warehouse',
+        packaging_warehouse_item_id: 501,
+        packaging_warehouse_sku: 'ENV-150x90-EGG',
+        packaging_assembly_speed: 300,
+    }];
+    context.__projectHardwareState = { checks: {} };
+    context.__savedProjectHardwareState = null;
     context.__savedReservations = [];
     context.__reservations = [];
-    context.__warehouseItems = [{ id: 501, qty: 10, unit: 'шт' }];
+    context.__warehouseItems = [{
+        id: 501,
+        name: 'Warehouse Envelope',
+        sku: 'ENV-150x90-EGG',
+        category: 'packaging',
+        qty: 120,
+        unit: 'шт',
+    }];
     context.__warehouseHistory = [];
+    context.__toasts = [];
+    context.loadProjectHardwareState = async () => clone(context.__projectHardwareState);
+    context.saveProjectHardwareState = async (state) => {
+        context.__savedProjectHardwareState = clone(state);
+        context.__projectHardwareState = clone(state);
+    };
     context.loadWarehouseReservations = async () => clone(context.__reservations);
     context.saveWarehouseReservations = async (reservations) => {
         context.__savedReservations = clone(reservations);
@@ -750,165 +880,58 @@ async function smokeOrderStatusWarehouseSync(context) {
         context.__warehouseHistory = clone(history);
     };
 
-    context.__originalWarehouseAdjustStock = vm.runInContext('Warehouse.adjustStock', context);
-    context.__originalSyncProjectHardwareOrderState = vm.runInContext('Warehouse.syncProjectHardwareOrderState', context);
-
     try {
+        context.__currentPackagingItems = clone(currentItems);
         vm.runInContext(`
-            Warehouse.adjustStock = async (itemId, delta, type, refName, note, employee, extra) => {
-                globalThis.__adjustStockCalls.push({ itemId, delta, type, refName, note, employee, extra });
-                const stockRow = (globalThis.__warehouseItems || []).find(item => Number(item.id) === Number(itemId)) || null;
-                const qtyBefore = Number(stockRow && stockRow.qty) || 0;
-                const qtyAfter = Math.max(0, qtyBefore + (Number(delta) || 0));
-                const appliedQtyChange = qtyAfter - qtyBefore;
-                if (stockRow) stockRow.qty = qtyAfter;
-                globalThis.__warehouseHistory.push({
-                    item_id: Number(itemId) || 0,
-                    order_id: extra && extra.order_id ? Number(extra.order_id) : null,
-                    type: String(type || ''),
-                    notes: String(note || ''),
-                    qty_change: appliedQtyChange,
-                });
-                return {
-                    ok: true,
-                    requestedQtyChange: Number(delta) || 0,
-                    appliedQtyChange,
-                    qtyBefore,
-                    qtyAfter,
-                    clamped: Math.abs(appliedQtyChange - (Number(delta) || 0)) > 1e-9,
-                };
-            };
-            Warehouse.syncProjectHardwareOrderState = async (payload) => {
-                globalThis.__projectHardwareCalls.push(payload);
-            };
+            Warehouse.projectHardwareState = null;
+            App.toast = (message) => { globalThis.__toasts.push(String(message || '')); };
         `, context);
 
-        context.__reservations = [{
-            id: 1,
-            item_id: 501,
-            order_id: 42,
-            order_name: 'Sync Order',
-            qty: 4,
-            status: 'active',
-            source: 'order_calc',
-        }];
-        await vm.runInContext(`Orders._syncWarehouseByStatus(42, 'sample', 'delivery', 'Sync Order', 'Smoke')`, context);
+        await vm.runInContext(`Warehouse.syncProjectHardwareOrderState({
+            orderId: 42,
+            orderName: 'Packaging Save Sync',
+            managerName: 'Smoke',
+            status: 'production_packaging',
+            currentItems: globalThis.__currentPackagingItems,
+            previousItems: []
+        })`, context);
 
-        assert.equal(context.__projectHardwareCalls.length, 1);
-        assert.equal(context.__projectHardwareCalls[0].status, 'delivery');
-        assert.equal(context.__projectHardwareCalls[0].orderId, 42);
-        assert.equal(context.__savedReservations[0].status, 'released');
-        assert.deepEqual(clone(context.__adjustStockCalls), [{
-            itemId: 501,
-            delta: -4,
-            type: 'deduction',
-            refName: 'Sync Order',
-            note: 'Списание при смене статуса: sample → delivery',
-            employee: 'Smoke',
-            extra: { order_id: 42 },
-        }]);
+        const activeReservation = context.__savedReservations.find(item => item.order_id === 42);
+        assert.equal(activeReservation.item_id, 501);
+        assert.equal(activeReservation.qty, 100);
+        assert.equal(activeReservation.status, 'active');
+        assert.equal(activeReservation.source, 'project_hardware');
+        assert.equal(context.__warehouseItems[0].qty, 120);
+        assert.equal(context.__warehouseHistory.length, 0);
+        assert.equal(Boolean(context.__projectHardwareState.checks['42:501']), false);
 
-        context.__adjustStockCalls = [];
-        context.__projectHardwareCalls = [];
+        context.__savedReservations = [];
         context.__reservations = [];
-        context.__savedReservations = [];
-        await vm.runInContext(`Orders._syncWarehouseByStatus(42, 'delivery', 'draft', 'Sync Order', 'Smoke')`, context);
-
-        assert.equal(context.__projectHardwareCalls.length, 1);
-        assert.equal(context.__projectHardwareCalls[0].status, 'draft');
-        assert.deepEqual(clone(context.__adjustStockCalls), [{
-            itemId: 501,
-            delta: 4,
-            type: 'addition',
-            refName: 'Sync Order',
-            note: 'Возврат на склад при смене статуса: delivery → draft',
-            employee: 'Smoke',
-            extra: { order_id: 42 },
-        }]);
-
-        context.__adjustStockCalls = [];
-        context.__projectHardwareCalls = [];
-        context.__reservations = [{
-            id: 2,
-            item_id: 501,
-            order_id: 77,
-            order_name: 'Other Order',
-            qty: 1,
-            status: 'active',
-            source: 'order_calc',
-        }];
-        context.__savedReservations = [];
-        await vm.runInContext(`Orders._syncWarehouseByStatus(42, 'draft', 'sample', 'Sync Order', 'Smoke')`, context);
-
-        assert.equal(context.__projectHardwareCalls.length, 1);
-        assert.equal(context.__projectHardwareCalls[0].status, 'sample');
-        assert.deepEqual(clone(context.__adjustStockCalls), []);
-        assert.equal(context.__savedReservations.length, 2);
-        const newReservation = context.__savedReservations.find(item => item.order_id === 42);
-        assert.equal(newReservation.item_id, 501);
-        assert.equal(newReservation.qty, 4);
-        assert.equal(newReservation.status, 'active');
-        assert.equal(newReservation.source, 'order_calc');
-
-        context.__adjustStockCalls = [];
-        context.__projectHardwareCalls = [];
-        context.__reservations = [];
-        context.__savedReservations = [];
-        context.__warehouseItems = [{ id: 501, qty: 2, unit: 'шт' }];
+        context.__warehouseItems = [{ id: 501, qty: 80, unit: 'шт' }];
+        context.__warehouseHistory = [];
         context.__toasts = [];
-        vm.runInContext(`App.toast = (message) => { globalThis.__toasts.push(String(message || '')); };`, context);
-        await vm.runInContext(`Orders._syncWarehouseByStatus(42, 'draft', 'sample', 'Sync Order', 'Smoke')`, context);
+        context.__samplePackagingItems = clone(currentItems);
+        await vm.runInContext(`Warehouse.syncProjectHardwareOrderState({
+            orderId: 42,
+            orderName: 'Packaging Sample Save',
+            managerName: 'Smoke',
+            status: 'production_packaging',
+            currentItems: globalThis.__samplePackagingItems,
+            previousItems: []
+        })`, context);
 
-        assert.equal(context.__projectHardwareCalls.length, 1);
-        assert.equal(context.__projectHardwareCalls[0].status, 'sample');
-        const partialReservation = context.__savedReservations.find(item => item.order_id === 42);
-        assert.equal(partialReservation.qty, 2);
-        assert.ok(context.__toasts.some(message => /полный резерв/i.test(message)));
-
-        context.__adjustStockCalls = [];
-        context.__projectHardwareCalls = [];
-        context.__savedReservations = [];
-        context.__warehouseItems = [{ id: 501, qty: 2, unit: 'шт' }];
-        context.__toasts = [];
-        vm.runInContext(`App.toast = (message) => { globalThis.__toasts.push(String(message || '')); };`, context);
-        await vm.runInContext(`Orders._syncWarehouseByStatus(42, 'sample', 'delivery', 'Sync Order', 'Smoke')`, context);
-
-        assert.equal(context.__projectHardwareCalls.length, 1);
-        assert.equal(context.__projectHardwareCalls[0].status, 'delivery');
-        assert.deepEqual(clone(context.__adjustStockCalls), [{
-            itemId: 501,
-            delta: -4,
-            type: 'deduction',
-            refName: 'Sync Order',
-            note: 'Списание при смене статуса: sample → delivery',
-            employee: 'Smoke',
-            extra: { order_id: 42 },
-        }]);
-        const releasedReservation = context.__savedReservations.find(item => item.order_id === 42);
-        assert.equal(releasedReservation.status, 'released');
-        assert.ok(context.__toasts.some(message => /не полностью/i.test(message)));
-
-        context.__adjustStockCalls = [];
-        context.__projectHardwareCalls = [];
-        context.__savedReservations = [];
-        await vm.runInContext(`Orders._syncWarehouseByStatus(42, 'delivery', 'draft', 'Sync Order', 'Smoke')`, context);
-
-        assert.equal(context.__projectHardwareCalls.length, 1);
-        assert.equal(context.__projectHardwareCalls[0].status, 'draft');
-        assert.deepEqual(clone(context.__adjustStockCalls), [{
-            itemId: 501,
-            delta: 2,
-            type: 'addition',
-            refName: 'Sync Order',
-            note: 'Возврат на склад при смене статуса: delivery → draft',
-            employee: 'Smoke',
-            extra: { order_id: 42 },
-        }]);
+        const sampleReservation = context.__savedReservations.find(item => item.order_id === 42);
+        assert.equal(sampleReservation.item_id, 501);
+        assert.equal(sampleReservation.qty, 80);
+        assert.equal(sampleReservation.source, 'project_hardware');
+        assert.ok(context.__toasts.some(message => /позиций со склада.*полный резерв/i.test(message)));
     } finally {
         vm.runInContext(`
-            Warehouse.adjustStock = globalThis.__originalWarehouseAdjustStock;
-            Warehouse.syncProjectHardwareOrderState = globalThis.__originalSyncProjectHardwareOrderState;
+            delete globalThis.__currentPackagingItems;
+            delete globalThis.__samplePackagingItems;
         `, context);
+        delete context.__currentPackagingItems;
+        delete context.__samplePackagingItems;
     }
 }
 
@@ -977,6 +1000,7 @@ async function smokeProjectHardwarePersistenceAndBuckets(context) {
         { id: 502, name: 'Active Hardware', sku: 'ACT-1', qty: 10 },
         { id: 503, name: 'Sample Hardware', sku: 'SMP-1', qty: 5 },
         { id: 504, name: 'Delivery Hardware', sku: 'DLV-1', qty: 0 },
+        { id: 505, name: 'Active Envelope', sku: 'ENV-1', category: 'packaging', qty: 40 },
     ];
     context.__orders = [
         { id: 100, order_name: 'Active Hardware Order', manager_name: 'Маша', status: 'production_hardware', created_at: '2026-03-17T10:00:00.000Z' },
@@ -987,13 +1011,22 @@ async function smokeProjectHardwarePersistenceAndBuckets(context) {
     context.__orderDetails = {
         100: {
             order: clone(context.__orders[0]),
-            items: [{
-                item_type: 'hardware',
-                product_name: 'Active product',
-                quantity: 3,
-                hardware_source: 'warehouse',
-                hardware_warehouse_item_id: 502,
-            }],
+            items: [
+                {
+                    item_type: 'hardware',
+                    product_name: 'Active product',
+                    quantity: 3,
+                    hardware_source: 'warehouse',
+                    hardware_warehouse_item_id: 502,
+                },
+                {
+                    item_type: 'packaging',
+                    product_name: 'Active envelope',
+                    quantity: 2,
+                    packaging_source: 'warehouse',
+                    packaging_warehouse_item_id: 505,
+                },
+            ],
         },
         200: {
             order: clone(context.__orders[1]),
@@ -1076,7 +1109,7 @@ async function smokeProjectHardwarePersistenceAndBuckets(context) {
 
     await vm.runInContext(`Warehouse.renderProjectHardwareView(77)`, context);
     const html = String(context.document.getElementById('wh-content').innerHTML || '');
-    assert.match(html, /Фурнитура для проектов \(к сборке\)/);
+    assert.match(html, /Фурнитура и упаковка для проектов \(к сборке\)/);
     assert.match(html, /Собрано/);
     assert.equal((html.match(/Collected Hardware Order/g) || []).length, 0);
     assert.equal((html.match(/Collected Delivery Order/g) || []).length, 1);
@@ -1085,8 +1118,10 @@ async function smokeProjectHardwarePersistenceAndBuckets(context) {
     assert.match(html, /Завершенные заказы скрыты автоматически: 1/);
     assert.match(html, /Delivery Hardware/);
     assert.match(html, /Active Hardware/);
+    assert.match(html, /Active Envelope/);
+    assert.match(html, /Упаковка/);
     assert.match(html, /Собрано 1 из 1/);
-    assert.match(html, /Собрано 0 из 1/);
+    assert.match(html, /Собрано 0 из 2/);
 }
 
 async function smokeProjectHardwareToggleShortageGuard(context) {
@@ -1204,7 +1239,7 @@ async function smokeProjectHardwareToggleShortageGuard(context) {
         assert.equal(context.__warehouseHistory.length, 2);
         assert.equal(context.__warehouseHistory[1].qty_change, 2);
         assert.equal(context.__warehouseHistory[1].requested_qty_change, 2);
-        assert.match(context.__warehouseHistory[1].notes, /Возврат собранной фурнитуры: 2 шт/);
+        assert.match(context.__warehouseHistory[1].notes, /Возврат собранной позиции на склад: 2 шт/);
         const restoredReservation = context.__reservations.find(item => item.order_id === 42 && item.status === 'active');
         assert.equal(restoredReservation.qty, 2);
         assert.ok(context.__toasts.some(message => /не в полный резерв/i.test(message)));
@@ -1311,12 +1346,14 @@ async function main() {
     stubRuntime(context);
 
     await smokeCalculatorPersistence(context);
+    await smokePackagingWarehousePickerDefaults(context);
     await smokeLegacyPendantRestore(context);
     await smokeReadyGoodsRollback(context);
     await smokeReadyGoodsSalesAndManualAdd(context);
     await smokeChinaShipmentMetadata(context);
     await smokeChinaReceiptStatusLinkage(context);
     await smokeOrderStatusWarehouseSync(context);
+    await smokePackagingWarehouseSaveSync(context);
     await smokeWarehouseManualAdjustment(context);
     await smokeProjectHardwarePersistenceAndBuckets(context);
     await smokeProjectHardwareToggleShortageGuard(context);
