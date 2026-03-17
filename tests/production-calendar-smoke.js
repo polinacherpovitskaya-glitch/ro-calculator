@@ -32,6 +32,8 @@ assert.match(settingsJs, /set-planning-capacity-summary/, 'Settings hints must e
 assert.match(workflow, /node tests\/production-calendar-smoke\.js/, 'CI must run production calendar smoke');
 assert.match(ganttJs, /production_holidays/, 'Gantt UI must read configured production holidays');
 assert.match(ganttJs, /loadOrderItemsByOrderIds\(/, 'Gantt must inspect order item snapshots to derive readiness');
+assert.match(ganttJs, /loadTimeEntries\(\)/, 'Gantt must load time entries for actual-hours overlay');
+assert.match(ganttJs, /loadEmployees\(\)/, 'Gantt must load employees for actual-hours overlay');
 
 function createFixedDate(isoTimestamp) {
     const RealDate = Date;
@@ -162,5 +164,24 @@ const needsReviewState = JSON.parse(JSON.stringify(vm.runInContext(`
 `, ganttContext)));
 assert.equal(needsReviewState.production_ready_state, 'needs_review', 'Received China purchase with no in-stock mold flag should surface review state');
 assert.match(needsReviewState.production_blocked_reason, /Проверьте молд/, 'Review state should explain data mismatch after China receipt');
+
+const actualMonthSummary = JSON.parse(JSON.stringify(vm.runInContext(`
+    Gantt.buildActualMonthSummary(
+        [
+            { employee_id: 10, worker_name: 'Тая', date: '2026-03-02', hours: 5 },
+            { employee_id: 11, worker_name: 'Леша', date: '2026-03-03', hours: 8 },
+            { worker_name: 'Женя Г', date: '2026-03-04', hours: 6 },
+            { employee_id: 10, worker_name: 'Тая', date: '2026-02-28', hours: 4 }
+        ],
+        [
+            { id: 10, name: 'Тая', role: 'production' },
+            { id: 11, name: 'Леша', role: 'management' },
+            { id: 12, name: 'Женя Г', role: 'production' }
+        ],
+        new Date('2026-03-20T12:00:00Z')
+    )
+`, ganttContext)));
+assert.equal(actualMonthSummary.actualHours, 11, 'Actual month summary must include only current-month production hours');
+assert.equal(actualMonthSummary.employeeCount, 2, 'Actual month summary must count only production employees with submitted hours');
 
 console.log('production calendar smoke checks passed');

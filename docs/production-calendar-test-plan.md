@@ -132,6 +132,7 @@
 - [x] Заказ с кастомной позицией без молда на складе уходит в отдельный blocked-блок и не планируется как ready.
 - [x] Календарь берет мощность из `planning_workers_count`, а не из pricing `workers_count`.
 - [x] China-linked blocked orders различаются как `Ждет Китай` и `Требует проверки` после receipt.
+- [x] Календарь показывает отдельные monthly cards для planned vs actual production hours.
 
 ## Command Matrix
 ```sh

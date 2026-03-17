@@ -9,6 +9,7 @@ const Gantt = {
     reviewOrders: [],
     schedule: null,
     orderSequence: [],
+    actualMonthSummary: { actualHours: 0, employeeCount: 0 },
     zoom: 'week',
     LOADABLE_STATUSES: ['sample', 'production_casting', 'production_printing', 'production_hardware', 'production_packaging', 'delivery', 'in_production'],
     STATUS_LABELS: {
@@ -23,10 +24,12 @@ const Gantt = {
 
     async load() {
         try {
-            const [allOrders, planState, allChinaPurchases] = await Promise.all([
+            const [allOrders, planState, allChinaPurchases, timeEntries, employees] = await Promise.all([
                 loadOrders({}),
                 loadProductionPlanState().catch(() => ({ order_ids: [] })),
                 loadChinaPurchases({}).catch(() => []),
+                loadTimeEntries().catch(() => []),
+                loadEmployees().catch(() => []),
             ]);
 
             const priorityIds = Array.isArray(planState?.order_ids)
@@ -70,6 +73,7 @@ const Gantt = {
             this.blockedOrders = this.orders.filter(order => order.production_ready_state === 'blocked');
             this.reviewOrders = this.orders.filter(order => order.production_ready_state === 'needs_review');
             this.orderSequence = this.orders.map(order => Number(order.id));
+            this.actualMonthSummary = this.buildActualMonthSummary(timeEntries, employees);
             this.schedule = buildProductionSchedule(
                 this.orders.filter(order => order.production_ready_state === 'ready'),
                 App.settings || {}
@@ -545,6 +549,12 @@ const Gantt = {
         const freeHours = round2(weekCapacity - weekUsed);
         const overloadDays = days.filter(day => day.totalUsed > dailyCapacity).length;
         const riskyOrders = queue.filter(item => item.deadlineEnd && item.schedule[item.schedule.length - 1]?.date > item.deadlineEnd).length;
+        const monthPrefix = this.getMonthPrefix(today);
+        const plannedMonthHours = round2(days
+            .filter(day => String(day.date || '').startsWith(monthPrefix))
+            .reduce((sum, day) => sum + (day.totalUsed || 0), 0));
+        const actualMonthHours = round2(this.actualMonthSummary?.actualHours || 0);
+        const actualMonthEmployees = Number(this.actualMonthSummary?.employeeCount || 0);
 
         statsEl.innerHTML = `
             <div class="stat-card">
@@ -562,6 +572,14 @@ const Gantt = {
             <div class="stat-card">
                 <div class="stat-value ${(overloadDays || riskyOrders) ? 'text-red' : 'text-green'}">${overloadDays ? `${overloadDays} дн.` : riskyOrders ? `${riskyOrders} зак.` : 'OK'}</div>
                 <div class="stat-label">${overloadDays ? 'Перегруз в днях' : riskyOrders ? 'Риск дедлайна' : 'Риски не найдены'}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">${this.formatHours(plannedMonthHours)}</div>
+                <div class="stat-label">План часов в этом месяце</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">${this.formatHours(actualMonthHours)}</div>
+                <div class="stat-label">Факт часов в этом месяце${actualMonthEmployees ? ` · ${actualMonthEmployees} сотр.` : ''}</div>
             </div>`;
     },
 
@@ -595,6 +613,65 @@ const Gantt = {
 
     getPhaseHours(item, phaseName) {
         return round2((item.phases || []).find(phase => phase.name === phaseName)?.total || 0);
+    },
+
+    buildActualMonthSummary(entries = [], employees = [], referenceDate = new Date()) {
+        const monthPrefix = this.getMonthPrefix(referenceDate);
+        const actualWorkers = new Set();
+        let actualHours = 0;
+        (entries || []).forEach(entry => {
+            if (!String(entry?.date || '').startsWith(monthPrefix)) return;
+            const employee = this.findProductionEmployeeForEntry(entry, employees);
+            if (!employee) return;
+            const hours = parseFloat(entry.hours) || 0;
+            if (hours <= 0) return;
+            actualHours += hours;
+            actualWorkers.add(String(employee.id || employee.name || entry.worker_name || ''));
+        });
+        return {
+            actualHours: round2(actualHours),
+            employeeCount: actualWorkers.size,
+        };
+    },
+
+    getMonthPrefix(date) {
+        const value = date instanceof Date ? date : new Date(date);
+        return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-`;
+    },
+
+    findProductionEmployeeForEntry(entry, employees = []) {
+        if (!entry) return null;
+        const employeeId = entry.employee_id != null ? String(entry.employee_id) : '';
+        if (employeeId) {
+            const byId = (employees || []).find(emp => String(emp.id) === employeeId && emp.role === 'production');
+            if (byId) return byId;
+        }
+        const normalizedWorker = this.normalizePersonName(entry.worker_name || entry.employee_name || '');
+        if (!normalizedWorker) return null;
+        const exactMatches = (employees || []).filter(emp =>
+            emp.role === 'production' && this.normalizePersonName(emp.name) === normalizedWorker
+        );
+        if (exactMatches.length === 1) return exactMatches[0];
+        const shortKey = this.getPersonShortKey(entry.worker_name || entry.employee_name || '');
+        if (!shortKey) return null;
+        const shortMatches = (employees || []).filter(emp =>
+            emp.role === 'production' && this.getPersonShortKey(emp.name) === shortKey
+        );
+        return shortMatches.length === 1 ? shortMatches[0] : null;
+    },
+
+    normalizePersonName(name) {
+        return String(name || '')
+            .trim()
+            .toLowerCase()
+            .replace(/ё/g, 'е')
+            .replace(/\s+/g, ' ')
+            .replace(/[^\p{L}\p{N}\s]/gu, '')
+            .trim();
+    },
+
+    getPersonShortKey(name) {
+        return this.normalizePersonName(name).split(' ').filter(Boolean)[0] || '';
     },
 
     formatDateRange(startDate, endDate) {
