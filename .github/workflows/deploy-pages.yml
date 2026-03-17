@@ -33,6 +33,7 @@ jobs:
           for f in js/*.js corporate-gift/*.js; do
             node --check "$f"
           done
+          node tests/version-smoke.js
           node tests/work-management-smoke.js
           node tests/order-flow-smoke.js
           node tests/auth-hardening-smoke.js
