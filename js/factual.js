@@ -826,15 +826,25 @@ const Factual = {
         });
 
         // Total
-        const tDelta = factTotal - planTotal;
-        const tPct = planTotal > 0 ? (tDelta / planTotal) * 100 : 0;
-        const tAlarm = this.getAlarm(factTotal, planTotal);
+        const planTotalRows = round2(planTotal);
+        const planTotalBase = round2(plan.totalCosts || planTotalRows);
+        const hasPlanDrift = Math.abs(planTotalRows - planTotalBase) > 0.01;
+        const tDelta = factTotal - planTotalBase;
+        const tPct = planTotalBase > 0 ? (tDelta / planTotalBase) * 100 : 0;
+        const tAlarm = this.getAlarm(factTotal, planTotalBase);
         html += `<tr style="border-top:2px solid var(--border);font-weight:700;background:var(--bg-muted)">
             <td style="padding:8px">ИТОГО</td>
-            <td class="text-right" style="padding:8px">${this.fmtRub(planTotal)}</td>
+            <td class="text-right" style="padding:8px">${this.fmtRub(planTotalBase)}</td>
             <td class="text-right" style="padding:8px">${factTotal > 0 ? this.fmtRub(factTotal) : '—'}</td>
             <td class="text-right" style="padding:8px;color:${tAlarm.color}">${factTotal > 0 ? tAlarm.icon + ' ' + this.fmtDelta(tDelta, tPct) : '—'}</td>
         </tr>`;
+        if (hasPlanDrift) {
+            html += `<tr style="background:var(--bg)">
+                <td colspan="4" style="padding:6px 8px;font-size:11px;color:var(--text-muted)">
+                    Пересчитанные статьи дают ${this.fmtRub(planTotalRows)}, но сохраненный план заказа равен ${this.fmtRub(planTotalBase)}. ИТОГО использует сохраненный план заказа.
+                </td>
+            </tr>`;
+        }
 
         // Revenue
         const planRevenue = plan.revenue || 0;

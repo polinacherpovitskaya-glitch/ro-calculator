@@ -75,10 +75,36 @@ function smokeHiddenSalaryTotals(context) {
     assert.ok(!html.includes('250 ₽'), 'total should not double count hidden salary rows');
 }
 
+function smokeSavedPlanTotalWins(context) {
+    const container = context.document.getElementById('fact-detail-2');
+    vm.runInContext(`(() => {
+        const plan = {
+            salaryProduction: 100,
+            hardwareTotal: 50,
+            indirectProduction: 100,
+            totalCosts: 150,
+            revenue: 300,
+        };
+        const planHours = {};
+        const fact = {
+            fact_salary_production: 100,
+            fact_hardware_total: 50,
+            fact_indirect_production: 100,
+            fact_revenue: 300,
+        };
+        Factual._renderDetail(2, document.getElementById('fact-detail-2'), plan, planHours, fact, { order_name: 'Drift Order' });
+    })()`, context);
+
+    const html = container.innerHTML;
+    assert.match(html, /ИТОГО[\s\S]*?>150 ₽<\/td>[\s\S]*?>250 ₽<\/td>/);
+    assert.ok(html.includes('Пересчитанные статьи дают 250 ₽, но сохраненный план заказа равен 150 ₽.'), 'drift note should explain why total uses saved plan');
+}
+
 function main() {
     const context = createContext();
     runScript(context, 'js/factual.js');
     smokeHiddenSalaryTotals(context);
+    smokeSavedPlanTotalWins(context);
     console.log('factual smoke checks passed');
 }
 
