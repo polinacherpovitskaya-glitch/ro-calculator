@@ -1327,6 +1327,10 @@ const Warehouse = {
         return ['production_casting', 'production_printing', 'production_hardware', 'production_packaging', 'in_production', 'delivery', 'completed'].includes(status);
     },
 
+    _isProjectHardwareTrackedStatus(status) {
+        return this._isProjectHardwareReserveStatus(status) || this._isProjectHardwareActionStatus(status);
+    },
+
     _isProjectHardwareReservationSource(source) {
         return source === 'project_hardware' || source === 'order_calc';
     },
@@ -1549,12 +1553,13 @@ const Warehouse = {
 
         const activeOrders = (orders || []).filter(o => o.status !== 'deleted');
         const reserveOrders = activeOrders.filter(o => this._isProjectHardwareReserveStatus(o.status));
+        const trackedOrders = activeOrders.filter(o => this._isProjectHardwareTrackedStatus(o.status));
         if (activeOrders.length === 0) {
             this.allReservations = reservations || [];
             return { reservationsChanged: false, stateChanged: false, shortage: false };
         }
 
-        const details = await Promise.all(reserveOrders.map(o => loadOrder(o.id).catch(() => null)));
+        const details = await Promise.all(trackedOrders.map(o => loadOrder(o.id).catch(() => null)));
         const detailByOrderId = new Map();
         details.filter(Boolean).forEach(detail => {
             const order = detail.order || {};
@@ -1566,14 +1571,15 @@ const Warehouse = {
         const demandRows = [];
         let stateChanged = false;
 
-        reserveOrders.forEach(order => {
+        trackedOrders.forEach(order => {
             const detail = detailByOrderId.get(Number(order.id));
             if (!detail) return;
             const demand = this._getProjectHardwareDemandMap(detail.items || []);
             demand.forEach((qty, itemId) => {
                 const key = this._projectHardwareKey(order.id, itemId);
                 trackedKeys.add(key);
-                const isReady = this._isProjectHardwareHistoricallyReady(order.id, itemId, qty, historyDeltaMap);
+                const isReady = this._isProjectHardwareReady(order.id, itemId)
+                    || this._isProjectHardwareHistoricallyReady(order.id, itemId, qty, historyDeltaMap);
                 if (this._setProjectHardwareReadyFlag(order.id, itemId, isReady)) {
                     stateChanged = true;
                 }
@@ -1640,7 +1646,7 @@ const Warehouse = {
 
         const warehouseById = new Map((this.allItems || []).map(item => [Number(item.id), item]));
         demandRows.forEach(row => {
-            if (row.ready || row.qty <= 0) return;
+            if (row.ready || row.qty <= 0 || !this._isProjectHardwareReserveStatus(row.status)) return;
             const whItem = warehouseById.get(Number(row.item_id));
             if (!whItem) return;
 
@@ -1740,7 +1746,8 @@ const Warehouse = {
             const currentQty = currentDemand.get(itemId) || 0;
             const previousQty = previousDemand.get(itemId) || 0;
             const isReady = currentQty > 0
-                ? this._isProjectHardwareHistoricallyReady(normalizedOrderId, itemId, currentQty, historyDeltaMap)
+                ? (this._isProjectHardwareReady(normalizedOrderId, itemId)
+                    || this._isProjectHardwareHistoricallyReady(normalizedOrderId, itemId, currentQty, historyDeltaMap))
                 : false;
 
             if (this._setProjectHardwareReadyFlag(normalizedOrderId, itemId, currentQty > 0 && isReady)) {
@@ -1986,20 +1993,35 @@ const Warehouse = {
             o.items.sort((a, b) => String(a.item_name).localeCompare(String(b.item_name), 'ru'));
         });
 
-        const productionHtml = productionOrdersGrouped.length
-            ? `<div style="display:grid;gap:10px;">${productionOrdersGrouped.map(o => {
+        const activeProductionOrders = [];
+        const collectedProductionOrders = [];
+        productionOrdersGrouped.forEach(order => {
+            const progress = orderProgress.get(order.order_id) || { total: 0, ready: 0 };
+            const done = progress.total > 0 && progress.ready === progress.total;
+            if (done) {
+                collectedProductionOrders.push(order);
+            } else {
+                activeProductionOrders.push(order);
+            }
+        });
+
+        const renderProjectHardwareOrders = (ordersList, mode = 'active') => ordersList.length
+            ? `<div style="display:grid;gap:10px;">${ordersList.map(o => {
                 const p = orderProgress.get(o.order_id) || { total: 0, ready: 0 };
                 const done = p.total > 0 && p.ready === p.total;
                 const badge = done
                     ? '<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;background:#dcfce7;color:#166534;">готово</span>'
                     : '<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;background:#fee2e2;color:#991b1b;">не готово</span>';
+                const progressText = done
+                    ? `Собрано ${p.ready} из ${p.total}`
+                    : `Собрано ${p.ready} из ${p.total}`;
                 return `
                 <div style="border:1px solid var(--border);border-radius:10px;overflow:hidden;background:#fff;">
                     <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px 12px;background:var(--bg);border-bottom:1px solid var(--border);">
                         <div>
                             <div style="font-weight:700;">${this.esc(o.order_name)}</div>
                             <div style="font-size:12px;color:var(--text-secondary);">
-                                ${this.esc(App.statusLabel(o.status))} · ${badge} · Менеджер: ${this.esc(o.manager || '—')} · Позиций: ${o.items.length}
+                                ${this.esc(App.statusLabel(o.status))} · ${badge} · ${this.esc(progressText)} · Менеджер: ${this.esc(o.manager || '—')}
                             </div>
                         </div>
                         <button class="btn btn-sm btn-outline" onclick="App.navigate('order-detail', true, ${o.order_id})">Открыть</button>
@@ -2028,7 +2050,12 @@ const Warehouse = {
                     </div>
                 </div>`;
             }).join('')}</div>`
-            : '<p class="text-muted">Нет фурнитуры со склада для заказов в производстве.</p>';
+            : (mode === 'collected'
+                ? '<p class="text-muted">Пока нет полностью собранных заказов.</p>'
+                : '<p class="text-muted">Нет фурнитуры со склада для заказов, которые нужно собрать.</p>');
+
+        const activeProductionHtml = renderProjectHardwareOrders(activeProductionOrders, 'active');
+        const collectedProductionHtml = renderProjectHardwareOrders(collectedProductionOrders, 'collected');
 
         if (token !== this._viewToken || this.currentView !== 'project-hardware') return;
         container.innerHTML = `
@@ -2040,9 +2067,15 @@ const Warehouse = {
             </div>
             <div class="card" style="margin-top:12px;">
                 <div class="card-header">
-                    <h3>Фурнитура для проектов (производство, доставка, готово)</h3>
+                    <h3>Фурнитура для проектов (к сборке)</h3>
                 </div>
-                ${productionHtml}
+                ${activeProductionHtml}
+            </div>
+            <div class="card" style="margin-top:12px;">
+                <div class="card-header">
+                    <h3>Собрано</h3>
+                </div>
+                ${collectedProductionHtml}
             </div>
         `;
     },

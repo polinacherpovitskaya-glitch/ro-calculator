@@ -59,6 +59,7 @@
 - Закрыт `План-факт` totals regression после sync с `FinTablo`: скрытые salary/indirect строки для non-admin больше не удваивают `ИТОГО` в деталке, а новый [`tests/factual-smoke.js`](/Users/krollipolli/Documents/Github/RO%20calculator/tests/factual-smoke.js) ловит этот сценарий воспроизводимо.
 - Закрыт второй `План-факт` drift: когда пересчитанные статьи расходились с сохраненным `total_cost_plan`, деталка больше не показывала ложный `ИТОГО`; теперь total опирается на сохраненный план заказа и честно помечает расхождение пересчета.
 - Закрыт warehouse rollback drift для packaging: после clamped-списания при нехватке остатка rollback теперь возвращает на склад только фактически списанное количество, а не полный спрос заказа; одновременно `draft -> sample` снова предупреждает о частичном резерве упаковки.
+- Починен `project_hardware` reload drift: галочки по собранной фурнитуре больше не сбрасываются на следующей загрузке, а полностью собранные заказы уходят из активного списка в отдельный блок `Собрано`.
 
 ## In Progress
 - Продолжение Phase 0/1 для auth: forced reset/storage migration path, live verification и оставшиеся warehouse edge cases с нехваткой/partial reserve.
@@ -66,6 +67,7 @@
 - Повторная live/browser проверка `План-факт/FinTablo` perimeter после sync-fix и factual drift hotfix.
 - Повторная live/browser проверка `warehouse/orders` perimeter после hardening partial reserve / rollback logic.
 - Продолжение auth migration после закрытия restore/permissions gap: forced reset/storage move и clean login/logout flow уже на более реалистичном fixture path.
+- Повторная near-live проверка `project_hardware` уже на реальных складских данных после sticky-check fix и нового блока `Собрано`.
 
 ## Next
 - Закрыть первый незавершенный пункт M3: partial reserve, возврат и списание при нехватке warehouse hardware/packaging.
@@ -73,6 +75,7 @@
 - Перепроверить live browser perimeter для `warehouse/ready goods` на реальных кликах после расширения smoke coverage.
 - Перепроверить tasks/projects regression perimeter и собрать финальный handoff по live gaps.
 - Добить clean login/logout browser path уже без bootstrap existing-user session.
+- Решить правило архивации для блока `Собрано`: по статусу, по дате или по явному подтверждению от склада.
 
 ## Decisions Made
 - Старый план заменен как source of truth, потому что пользовательский запрос сменил продуктовый фокус с задач/проектов на сквозной аудит order lifecycle.
@@ -136,6 +139,7 @@ curl -s 'https://polinacherpovitskaya-glitch.github.io/ro-calculator/' | rg 'js/
 | 2026-03-17 | Factual plan drift clarity | `js/factual.js`, `tests/factual-smoke.js`, `index.html` | live `#factual` audit + `node --check js/factual.js && node tests/factual-smoke.js` | fail -> fixed | Дождаться public deploy и повторить public factual pass |
 | 2026-03-17 | Packaging rollback integrity | `js/orders.js`, `tests/order-flow-smoke.js`, `index.html` | `node --check js/orders.js && node --check tests/order-flow-smoke.js && node tests/order-flow-smoke.js` | fail -> fixed | Прогнать полный gate set и перепроверить local/public warehouse perimeter |
 | 2026-03-17 | Auth restore boundary | `js/app.js`, `tests/auth-hardening-smoke.js`, `index.html` | `node --check js/app.js && node tests/auth-hardening-smoke.js` + browser runtime auth sanity on local server | fail -> fixed | Прогнать полный gate set, public deploy и идти в forced reset/storage migration |
+| 2026-03-17 | Project hardware sticky checks | `js/warehouse.js`, `tests/order-flow-smoke.js`, `index.html` | `node --check js/warehouse.js && node tests/order-flow-smoke.js` + browser runtime warehouse sanity on local server | fail -> fixed | Перепроверить live project hardware data и определить правило архивации для `Собрано` |
 
 ## Smoke / Demo Checklist
 - [x] Root app стабильно грузится локально и дает пройти навигацию `orders -> colors -> warehouse -> china` без blocker-level runtime errors.
