@@ -40,6 +40,8 @@ function createContext() {
             isAdmin() { return false; },
             toast() {},
         },
+        setTimeout(fn) { fn(); return 1; },
+        clearTimeout() {},
     };
     context.window = context;
     return vm.createContext(context);
@@ -70,9 +72,27 @@ function smokeHiddenSalaryTotals(context) {
     })()`, context);
 
     const html = container.innerHTML;
+    assert.ok(html.includes('План прибыль'), 'detail should show plan profit summary');
+    assert.ok(html.includes('Факт прибыль'), 'detail should show fact profit summary');
+    assert.ok(html.includes('Выручка и деньги по сделке'), 'detail should separate revenue from expense table');
     assert.ok(!html.includes('ЗП выливание'), 'salary row should stay hidden for non-admin');
     assert.match(html, /ИТОГО[\s\S]*?>150 ₽<\/td>[\s\S]*?>150 ₽<\/td>/);
     assert.ok(!html.includes('250 ₽'), 'total should not double count hidden salary rows');
+}
+
+function smokeRevenueManualOverride(context) {
+    vm.runInContext(`(() => {
+        Factual._orderCache[5] = {
+            planData: { revenue: 500, totalCosts: 200 },
+            planHours: {},
+            factData: { fact_revenue: 300, _auto_fintablo: { fact_revenue: true } },
+            order: { order_name: 'Revenue Order' },
+        };
+        Factual.onFactInput(5, 'revenue', '450');
+    })()`, context);
+
+    assert.equal(vm.runInContext(`Factual._orderCache[5].factData.fact_revenue`, context), 450);
+    assert.equal(vm.runInContext(`!!Factual._orderCache[5].factData._manual_overrides.fact_revenue`, context), true);
 }
 
 function smokeSavedPlanTotalWins(context) {
@@ -105,6 +125,7 @@ function main() {
     runScript(context, 'js/factual.js');
     smokeHiddenSalaryTotals(context);
     smokeSavedPlanTotalWins(context);
+    smokeRevenueManualOverride(context);
     console.log('factual smoke checks passed');
 }
 

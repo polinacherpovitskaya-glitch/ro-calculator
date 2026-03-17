@@ -35,7 +35,7 @@
     <aside class="sidebar">
         <div class="sidebar-brand">
             <h2>Recycle Object</h2>
-            <span>Калькулятор <span id="app-version">v102</span></span>
+            <span>Калькулятор <span id="app-version">v103</span></span>
         </div>
         <nav class="sidebar-nav">
             <a href="#tasks" data-page="tasks">
@@ -517,15 +517,18 @@
                 </div>
                 <div class="stat-card">
                     <div class="stat-label">План выручка</div>
+                    <div class="stat-hint">из калькулятора</div>
                     <div class="stat-value" id="fact-stat-plan-revenue">—</div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-label">План расходы</div>
+                    <div class="stat-hint">из калькулятора</div>
                     <div class="stat-value" id="fact-stat-plan-costs">—</div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-label">План маржа (ср.)</div>
+                    <div class="stat-label">План прибыль</div>
                     <div class="stat-value" id="fact-stat-plan-margin">—</div>
+                    <div class="stat-hint" id="fact-stat-plan-margin-hint"></div>
                 </div>
             </div>
             <!-- Global stats row 2 -->
@@ -537,15 +540,18 @@
                 </div>
                 <div class="stat-card">
                     <div class="stat-label">Факт выручка</div>
+                    <div class="stat-hint">получено денег</div>
                     <div class="stat-value" id="fact-stat-fact-revenue">—</div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-label">Факт расходы</div>
+                    <div class="stat-hint">часы + склад + ФинТабло</div>
                     <div class="stat-value" id="fact-stat-fact-costs">—</div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-label">Факт маржа (ср.)</div>
+                    <div class="stat-label">Факт прибыль</div>
                     <div class="stat-value" id="fact-stat-fact-margin">—</div>
+                    <div class="stat-hint" id="fact-stat-fact-margin-hint"></div>
                 </div>
             </div>
             <!-- Global stats row 3 — delta -->
@@ -579,9 +585,10 @@
                                 <th>Статус</th>
                                 <th class="text-right">План расх.</th>
                                 <th class="text-right">Факт расх.</th>
-                                <th class="text-right">Выручка</th>
-                                <th class="text-right">М план</th>
-                                <th class="text-right">М факт</th>
+                                <th class="text-right">План выр.</th>
+                                <th class="text-right">Факт выр.</th>
+                                <th class="text-right">План прибыль</th>
+                                <th class="text-right">Факт прибыль</th>
                                 <th style="width:30px"></th>
                             </tr>
                         </thead>
@@ -3167,7 +3174,7 @@
 <script src="js/supabase.js?v=113"></script>
 <script src="js/task-events.js?v=1"></script>
 <script src="js/calculator.js?v=65"></script>
-<script src="js/app.js?v=121"></script>
+<script src="js/app.js?v=122"></script>
 <script src="js/order-detail.js?v=58"></script>
 <script src="js/orders.js?v=61"></script>
 <script src="js/production_plan.js?v=75"></script>
@@ -3181,7 +3188,7 @@
 <script src="js/gantt.js?v=47"></script>
 <script src="js/fintablo.js?v=2"></script>
 <script src="js/indirect_costs.js?v=8"></script>
-<script src="js/factual.js?v=85"></script>
+<script src="js/factual.js?v=86"></script>
 <script src="js/china.js?v=46o"></script>
 <script src="js/warehouse_photos.js?v=48"></script>
 <script src="js/china_catalog.js?v=46k"></script>
