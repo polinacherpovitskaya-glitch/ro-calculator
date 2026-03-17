@@ -44,6 +44,7 @@ function createContext() {
         document: {},
         location: { href: 'http://localhost' },
         __remoteCalls: [],
+        __RO_REMOTE_LOAD_TIMEOUT_MS: 10,
     };
 
     context.window = context;
@@ -51,25 +52,33 @@ function createContext() {
         createClient() {
             return {
                 from(table) {
+                    const state = { eqValue: null };
                     return {
                         select() {
                             return {
-                                eq() {
+                                eq(_column, value) {
+                                    state.eqValue = value;
                                     return {
-                                        async maybeSingle() {
+                                        maybeSingle() {
                                             context.__remoteCalls.push({ table, action: 'maybeSingle' });
+                                            if (table === 'settings' && state.eqValue === 'auth_accounts_json') {
+                                                return new Promise(() => {});
+                                            }
                                             if (table === 'sales_records') {
-                                                return {
+                                                return Promise.resolve({
                                                     data: null,
                                                     error: {
                                                         code: 'PGRST205',
                                                         message: "Could not find the table 'public.sales_records' in the schema cache",
                                                     },
-                                                };
+                                                });
                                             }
-                                            return { data: null, error: null };
+                                            return Promise.resolve({ data: null, error: null });
                                         },
                                     };
+                                },
+                                order() {
+                                    return Promise.resolve({ data: [], error: null });
                                 },
                             };
                         },
@@ -108,6 +117,7 @@ async function main() {
         setLocal(LOCAL_KEYS.readyGoods, [{ id: 99, payload: 'x'.repeat(20000) }]);
         initSupabase();
         setLocal(LOCAL_KEYS.salesRecords, [{ id: 1, product_name: 'Smoke Sale', qty: 2 }]);
+        setLocal(LOCAL_KEYS.authAccounts, [{ id: 10, username: 'fallback_user', employee_name: 'Fallback' }]);
     `, context);
 
     const movedReadyGoods = JSON.parse(JSON.stringify(vm.runInContext('getLocal(LOCAL_KEYS.readyGoods)', context)));
@@ -126,6 +136,10 @@ async function main() {
     const secondLoad = JSON.parse(JSON.stringify(await vm.runInContext('loadSalesRecords()', context)));
     assert.equal(secondLoad.length, 1);
     assert.equal(context.__remoteCalls.filter(call => call.table === 'sales_records' && call.action === 'maybeSingle').length, 1);
+
+    const authAccounts = JSON.parse(JSON.stringify(await vm.runInContext('loadAuthAccounts()', context)));
+    assert.equal(authAccounts.length, 1);
+    assert.equal(authAccounts[0].username, 'fallback_user');
 
     await vm.runInContext(`
         saveSalesRecords([{ id: 2, product_name: 'Saved Locally', qty: 5 }]);

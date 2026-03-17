@@ -1422,30 +1422,60 @@ function _timeEntryToDb(entry) {
 }
 
 async function loadTimeEntries() {
+    const fallback = getLocal(LOCAL_KEYS.timeEntries) || [];
     if (isSupabaseReady()) {
-        const { data, error } = await supabaseClient
-            .from('time_entries')
-            .select('*')
-            .order('date', { ascending: false });
-        if (error) { console.error('loadTimeEntries error:', error); return []; }
-        return (data || []).map(_timeEntryFromDb);
+        try {
+            const timeoutMs = Number(window.__RO_REMOTE_LOAD_TIMEOUT_MS) > 0 ? Number(window.__RO_REMOTE_LOAD_TIMEOUT_MS) : 5000;
+            const result = await Promise.race([
+                supabaseClient
+                    .from('time_entries')
+                    .select('*')
+                    .order('date', { ascending: false }),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), timeoutMs)),
+            ]);
+            const { data, error } = result || {};
+            if (error) {
+                console.error('loadTimeEntries error:', error);
+                return fallback;
+            }
+            return (data || []).map(_timeEntryFromDb);
+        } catch (err) {
+            console.warn('loadTimeEntries timeout/error, using local:', err);
+        }
     }
-    return getLocal(LOCAL_KEYS.timeEntries) || [];
+    return fallback;
 }
 
 async function saveTimeEntry(entry) {
     if (isSupabaseReady()) {
         const dbRow = _timeEntryToDb(entry);
-        const { data, error } = await supabaseClient
-            .from('time_entries')
-            .insert(dbRow)
-            .select('id')
-            .single();
+        const { id: dbId, ...updateRow } = dbRow;
+        const query = entry && entry.id
+            ? supabaseClient
+                .from('time_entries')
+                .update(updateRow)
+                .eq('id', entry.id)
+                .select('id')
+                .single()
+            : supabaseClient
+                .from('time_entries')
+                .insert(dbRow)
+                .select('id')
+                .single();
+        const { data, error } = await query;
         if (error) { console.error('saveTimeEntry error:', error); return null; }
         return data.id;
     }
     const entries = getLocal(LOCAL_KEYS.timeEntries) || [];
-    const id = Date.now();
+    if (entry && entry.id) {
+        const idx = entries.findIndex(e => String(e.id) === String(entry.id));
+        if (idx >= 0) {
+            entries[idx] = { ...entries[idx], ...entry, updated_at: new Date().toISOString() };
+            setLocal(LOCAL_KEYS.timeEntries, entries);
+            return entry.id;
+        }
+    }
+    const id = entry?.id || Date.now();
     entries.push({ ...entry, id, created_at: new Date().toISOString() });
     setLocal(LOCAL_KEYS.timeEntries, entries);
     return id;
@@ -1941,18 +1971,23 @@ async function loadAuthAccounts() {
     const fallback = (getLocal(LOCAL_KEYS.authAccounts) || []).map(sanitizeAuthAccount);
     if (isSupabaseReady()) {
         try {
-            const { data, error } = await supabaseClient
-                .from('settings')
-                .select('value')
-                .eq('key', 'auth_accounts_json')
-                .maybeSingle();
+            const timeoutMs = Number(window.__RO_REMOTE_LOAD_TIMEOUT_MS) > 0 ? Number(window.__RO_REMOTE_LOAD_TIMEOUT_MS) : 5000;
+            const result = await Promise.race([
+                supabaseClient
+                    .from('settings')
+                    .select('value')
+                    .eq('key', 'auth_accounts_json')
+                    .maybeSingle(),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), timeoutMs)),
+            ]);
+            const { data, error } = result || {};
             if (!error && data && data.value) {
                 const parsed = (JSON.parse(data.value) || []).map(sanitizeAuthAccount);
                 setLocal(LOCAL_KEYS.authAccounts, parsed);
                 return parsed;
             }
         } catch (e) {
-            console.error('loadAuthAccounts error:', e);
+            console.warn('loadAuthAccounts timeout/error, using local:', e);
         }
     }
     return fallback;

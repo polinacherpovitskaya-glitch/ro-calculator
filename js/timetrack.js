@@ -17,6 +17,7 @@ const TT_PRODUCTION_STATUSES = ['production_casting', 'production_hardware', 'pr
 const TimeTrack = {
     entries: [],
     employees: [],
+    editingEntryId: null,
 
     async load() {
         this.entries = (await loadTimeEntries()) || [];
@@ -48,11 +49,45 @@ const TimeTrack = {
 
     showManualEntry() {
         document.getElementById('tt-manual-form').style.display = '';
+        this.syncManualEntryFormState();
         this.onStageChange();
     },
 
     hideManualEntry() {
+        this.resetManualEntryForm();
         document.getElementById('tt-manual-form').style.display = 'none';
+    },
+
+    syncManualEntryFormState() {
+        const titleEl = document.getElementById('tt-manual-title');
+        const saveBtn = document.getElementById('tt-save-entry-btn');
+        const cancelBtn = document.getElementById('tt-cancel-entry-btn');
+        const isEditing = this.editingEntryId != null;
+        if (titleEl) titleEl.textContent = isEditing ? 'Редактировать запись' : 'Добавить запись вручную';
+        if (saveBtn) saveBtn.textContent = isEditing ? 'Сохранить изменения' : 'Сохранить';
+        if (cancelBtn) cancelBtn.textContent = isEditing ? 'Отмена' : 'Закрыть';
+    },
+
+    resetManualEntryForm() {
+        this.editingEntryId = null;
+        const workerEl = document.getElementById('tt-worker-name');
+        const projectEl = document.getElementById('tt-project-select');
+        const hoursEl = document.getElementById('tt-hours');
+        const dateEl = document.getElementById('tt-date');
+        const descEl = document.getElementById('tt-description');
+        const stageEl = document.getElementById('tt-stage');
+        const stageOtherEl = document.getElementById('tt-stage-other');
+        if (workerEl) workerEl.value = '';
+        if (projectEl) projectEl.value = '';
+        if (hoursEl) hoursEl.value = '';
+        if (descEl) descEl.value = '';
+        if (stageEl) stageEl.value = 'casting';
+        if (stageOtherEl) stageOtherEl.value = '';
+        if (dateEl && !dateEl.value) {
+            dateEl.value = new Date().toISOString().split('T')[0];
+        }
+        this.syncManualEntryFormState();
+        this.onStageChange();
     },
 
     onStageChange() {
@@ -339,6 +374,30 @@ const TimeTrack = {
         return 'hourly';
     },
 
+    normalizePersonName(name) {
+        return String(name || '')
+            .trim()
+            .toLowerCase()
+            .replace(/ё/g, 'е')
+            .replace(/\s+/g, ' ')
+            .replace(/[^\p{L}\p{N}\s]/gu, '')
+            .trim();
+    },
+
+    findEmployeeForEntry(entry) {
+        if (!entry) return null;
+        const employeeId = entry.employee_id != null ? String(entry.employee_id) : '';
+        if (employeeId) {
+            const byId = (this.employees || []).find(emp => String(emp.id) === employeeId);
+            if (byId) return byId;
+        }
+        const normalizedWorker = this.normalizePersonName(entry.worker_name || entry.employee_name || '');
+        if (!normalizedWorker) return null;
+        const exactMatches = (this.employees || []).filter(emp => this.normalizePersonName(emp.name) === normalizedWorker);
+        if (exactMatches.length === 1) return exactMatches[0];
+        return null;
+    },
+
     getHalfMonthBucket(dateStr) {
         const day = parseInt(String(dateStr || '').slice(8, 10), 10);
         return Number.isFinite(day) && day >= 16 ? 'second' : 'first';
@@ -386,16 +445,14 @@ const TimeTrack = {
         const now = new Date();
         const monthPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-`;
         const holidaySet = this.parseHolidaySet();
-        const employeeByName = new Map((this.employees || []).map(e => [String(e.name || '').trim(), e]));
-
         const stats = new Map();
         (this.entries || []).forEach(entry => {
             const workerName = String(entry.worker_name || '').trim();
             if (!workerName) return;
             if (!String(entry.date || '').startsWith(monthPrefix)) return;
 
-            const emp = employeeByName.get(workerName);
-            if (!emp || emp.role !== 'production' || emp.is_active === false) return;
+            const emp = this.findEmployeeForEntry(entry);
+            if (!emp || emp.role !== 'production') return;
             const hours = parseFloat(entry.hours) || 0;
             if (hours <= 0) return;
 
@@ -422,11 +479,11 @@ const TimeTrack = {
 
         const rows = Array.from(stats.values()).map(row => {
             const cfg = this.normalizePayrollConfig(row.employee);
+            if (cfg.payrollProfile === 'management_salary_with_production_allocation') return null;
             let inBaseHours, overtimeHours, payBase, payOvertime;
             let halfBreakdown = [];
 
             if (cfg.payrollProfile === 'salary_semimonth_threshold' && cfg.hasSalary) {
-                const halfSalary = cfg.baseSalary / 2;
                 const baseHoursPerHalf = cfg.baseHoursSemimonth || Math.max(1, Math.round(cfg.baseHours / 2));
                 const firstRegular = row.regularByHalf.first || 0;
                 const secondRegular = row.regularByHalf.second || 0;
@@ -441,7 +498,7 @@ const TimeTrack = {
                 halfBreakdown = halves.map(half => {
                     const baseHoursUsed = Math.min(half.regularHours, baseHoursPerHalf);
                     const overtimeHalfHours = Math.max(0, half.regularHours - baseHoursPerHalf);
-                    const payBaseHalf = baseHoursPerHalf > 0 ? halfSalary * (baseHoursUsed / baseHoursPerHalf) : 0;
+                    const payBaseHalf = 0;
                     const payOvertimeHalf = overtimeHalfHours * cfg.overtimeRate;
                     inBaseHours += baseHoursUsed;
                     overtimeHours += overtimeHalfHours;
@@ -457,10 +514,10 @@ const TimeTrack = {
                     };
                 });
             } else if (cfg.hasSalary) {
-                // Salaried: base salary covers first N hours, then overtime rate
+                // Salaried employees get fixed pay outside this table; here we only show extras.
                 inBaseHours = Math.min(row.regularHours, cfg.baseHours);
                 overtimeHours = Math.max(0, row.regularHours - cfg.baseHours);
-                payBase = cfg.baseSalary * (inBaseHours / cfg.baseHours);
+                payBase = 0;
                 payOvertime = overtimeHours * cfg.overtimeRate;
             } else {
                 // Purely hourly: all regular hours at overtime rate
@@ -486,7 +543,7 @@ const TimeTrack = {
                 halfBreakdown,
                 totalPay,
             };
-        }).sort((a, b) => b.totalPay - a.totalPay);
+        }).filter(Boolean).sort((a, b) => b.totalPay - a.totalPay);
 
         const total = rows.reduce((s, r) => s + r.totalPay, 0);
         return { rows, total };
@@ -521,7 +578,7 @@ const TimeTrack = {
                 <td style="font-weight:600;">
                     ${this.esc(r.employeeName)}
                     ${Array.isArray(r.halfBreakdown) && r.halfBreakdown.length
-            ? `<div style="margin-top:4px;font-size:11px;color:var(--text-muted);">${r.halfBreakdown.map(half => `${this.esc(half.label)}: ${this.formatMoney(half.totalPay)}`).join(' · ')}</div>`
+            ? `<div style="margin-top:4px;font-size:11px;color:var(--text-muted);">${r.halfBreakdown.map(half => `${this.esc(half.label)}: ${this.formatMoney(half.totalPay)} сверх`).join(' · ')}</div>`
             : ''}
                 </td>
                 <td class="text-right">${r.regularHours.toFixed(2)}</td>
@@ -553,7 +610,10 @@ const TimeTrack = {
                 <td>${this.esc(this.stageLabel(e))}</td>
                 <td class="text-right"><b>${parseFloat(e.hours) || 0}</b> ч${pctLabel}</td>
                 <td class="text-muted">${this.esc(this.stripMetaPrefix(e.description || ''))}</td>
-                <td><button class="btn btn-sm btn-outline" onclick="TimeTrack.deleteEntry(${e.id})">&#10005;</button></td>
+                <td style="display:flex;gap:6px;justify-content:flex-end;">
+                    <button class="btn btn-sm btn-outline" onclick="TimeTrack.editEntry(${e.id})">&#9998;</button>
+                    <button class="btn btn-sm btn-outline" onclick="TimeTrack.deleteEntry(${e.id})">&#10005;</button>
+                </td>
             </tr>`;
         }).join('');
     },
@@ -685,6 +745,9 @@ const TimeTrack = {
     async saveEntry() {
         const workerName = document.getElementById('tt-worker-name').value.trim();
         const projectSelect = document.getElementById('tt-project-select');
+        const currentEntry = this.editingEntryId != null
+            ? (this.entries || []).find(e => String(e.id) === String(this.editingEntryId))
+            : null;
         const hours = parseFloat(document.getElementById('tt-hours').value) || 0;
         const date = document.getElementById('tt-date').value;
         const comment = document.getElementById('tt-description').value.trim();
@@ -715,7 +778,8 @@ const TimeTrack = {
         // Find employee_id by name
         const matchedEmp = (this.employees || []).find(e => e.name === workerName);
         const entry = {
-            employee_id: matchedEmp ? matchedEmp.id : null,
+            id: this.editingEntryId || undefined,
+            employee_id: matchedEmp ? matchedEmp.id : (currentEntry?.employee_id ?? null),
             worker_name: workerName,
             project_name: projectName,
             order_id: orderId,
@@ -725,14 +789,11 @@ const TimeTrack = {
         };
 
         await saveTimeEntry(entry);
-        App.toast('Запись добавлена');
+        App.toast(this.editingEntryId ? 'Запись обновлена' : 'Запись добавлена');
 
-        document.getElementById('tt-hours').value = '';
-        document.getElementById('tt-description').value = '';
-        const stageOtherEl = document.getElementById('tt-stage-other');
-        if (stageOtherEl) stageOtherEl.value = '';
-
-        this.load();
+        this.resetManualEntryForm();
+        await this.load();
+        document.getElementById('tt-manual-form').style.display = 'none';
     },
 
     async deleteEntry(id) {
@@ -740,6 +801,52 @@ const TimeTrack = {
         await deleteTimeEntry(id);
         App.toast('Запись удалена');
         this.load();
+    },
+
+    ensureSelectOption(select, value, label) {
+        if (!select || value == null || value === '') return;
+        const exists = Array.from(select.options || []).some(opt => String(opt.value) === String(value));
+        if (exists) return;
+        const opt = document.createElement('option');
+        opt.value = String(value);
+        opt.textContent = label || String(value);
+        select.appendChild(opt);
+    },
+
+    editEntry(id) {
+        const entry = (this.entries || []).find(e => String(e.id) === String(id));
+        if (!entry) {
+            App.toast('Не удалось найти запись');
+            return;
+        }
+        this.editingEntryId = entry.id;
+        const workerEl = document.getElementById('tt-worker-name');
+        const projectEl = document.getElementById('tt-project-select');
+        const hoursEl = document.getElementById('tt-hours');
+        const dateEl = document.getElementById('tt-date');
+        const descEl = document.getElementById('tt-description');
+        const stageEl = document.getElementById('tt-stage');
+        const stageOtherEl = document.getElementById('tt-stage-other');
+        const meta = this.parseMeta(entry);
+        const stage = meta.stage || 'casting';
+
+        this.showManualEntry();
+        this.ensureSelectOption(workerEl, entry.worker_name || '', entry.worker_name || 'Без имени');
+        if (entry.order_id) {
+            this.ensureSelectOption(projectEl, entry.order_id, entry.project_name || `Заказ #${entry.order_id}`);
+        } else if (entry.project_name) {
+            this.ensureSelectOption(projectEl, '__general', entry.project_name);
+        }
+
+        if (workerEl) workerEl.value = entry.worker_name || '';
+        if (projectEl) projectEl.value = entry.order_id ? String(entry.order_id) : '__general';
+        if (hoursEl) hoursEl.value = parseFloat(entry.hours) || '';
+        if (dateEl) dateEl.value = entry.date || '';
+        if (descEl) descEl.value = this.stripMetaPrefix(entry.description || '');
+        if (stageEl) stageEl.value = TT_STAGE_ORDER.includes(stage) ? stage : 'other';
+        if (stageOtherEl) stageOtherEl.value = stageEl && stageEl.value === 'other' ? (meta.stage_label || '') : '';
+        this.syncManualEntryFormState();
+        this.onStageChange();
     },
 
     esc(str) {

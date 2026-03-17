@@ -35,7 +35,7 @@
     <aside class="sidebar">
         <div class="sidebar-brand">
             <h2>Recycle Object</h2>
-            <span>Калькулятор <span id="app-version">v98</span></span>
+            <span>Калькулятор <span id="app-version">v99</span></span>
         </div>
         <nav class="sidebar-nav">
             <a href="#tasks" data-page="tasks">
@@ -1209,8 +1209,8 @@
             <!-- Manual entry form -->
             <div class="card" id="tt-manual-form" style="display:none">
                 <div class="card-header">
-                    <h3>Добавить запись вручную</h3>
-                    <button class="btn btn-sm btn-outline" onclick="TimeTrack.hideManualEntry()">Закрыть</button>
+                    <h3 id="tt-manual-title">Добавить запись вручную</h3>
+                    <button class="btn btn-sm btn-outline" id="tt-cancel-entry-btn" onclick="TimeTrack.hideManualEntry()">Закрыть</button>
                 </div>
                 <div class="form-row">
                     <div class="form-group">
@@ -1255,7 +1255,7 @@
                     <label>Комментарий (необязательно)</label>
                     <input type="text" id="tt-description" placeholder="Что делали">
                 </div>
-                <button class="btn btn-success" onclick="TimeTrack.saveEntry()">Сохранить</button>
+                <button class="btn btn-success" id="tt-save-entry-btn" onclick="TimeTrack.saveEntry()">Сохранить</button>
             </div>
 
             <!-- Summary stats -->
@@ -1277,7 +1277,7 @@
                     <div class="stat-value" id="tt-projects-count">0</div>
                 </div>
                 <div class="stat-card" id="tt-pay-stat-card">
-                    <div class="stat-label">Оплата производства / месяц</div>
+                    <div class="stat-label">Почасовая оплата / месяц</div>
                     <div class="stat-value" id="tt-month-pay">0 ₽</div>
                 </div>
             </div>
@@ -1382,7 +1382,7 @@
             </div>
 
             <div class="card" id="tt-payroll-card">
-                <div class="card-header"><h3>Оплата производства (текущий месяц)</h3></div>
+                <div class="card-header"><h3>Почасовая оплата и переработки (текущий месяц)</h3></div>
                 <div class="table-wrap">
                     <table>
                         <thead>
@@ -1393,7 +1393,7 @@
                                 <th class="text-right">Сверх (ч)</th>
                                 <th class="text-right">Выходные (ч)</th>
                                 <th class="text-right">Праздники (ч)</th>
-                                <th class="text-right">Оплата (₽)</th>
+                                <th class="text-right">К выплате (₽)</th>
                             </tr>
                         </thead>
                         <tbody id="tt-payroll-body">
@@ -3163,10 +3163,10 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="js/work-management-core.js?v=1"></script>
-<script src="js/supabase.js?v=112"></script>
+<script src="js/supabase.js?v=113"></script>
 <script src="js/task-events.js?v=1"></script>
 <script src="js/calculator.js?v=65"></script>
-<script src="js/app.js?v=117"></script>
+<script src="js/app.js?v=118"></script>
 <script src="js/order-detail.js?v=58"></script>
 <script src="js/orders.js?v=61"></script>
 <script src="js/production_plan.js?v=75"></script>
@@ -3174,7 +3174,7 @@
 <script src="js/molds.js?v=68"></script>
 <script src="js/colors.js?v=46g"></script>
 <script src="js/kp.js?v=46g"></script>
-<script src="js/timetrack.js?v=58"></script>
+<script src="js/timetrack.js?v=59"></script>
 <script src="js/projects.js?v=2"></script>
 <script src="js/tasks.js?v=49"></script>
 <script src="js/gantt.js?v=47"></script>
@@ -3186,7 +3186,7 @@
 <script src="js/china_catalog.js?v=46k"></script>
 <script src="js/marketplaces.js?v=72"></script>
 <script src="js/warehouse.js?v=97"></script>
-<script src="js/settings.js?v=76"></script>
+<script src="js/settings.js?v=77"></script>
 <script src="js/pendant.js?v=3"></script>
 </body>
 </html>

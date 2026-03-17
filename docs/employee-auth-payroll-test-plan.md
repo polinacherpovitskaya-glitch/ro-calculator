@@ -74,7 +74,13 @@
 - `TimeTrack -> Payroll`:
   - first-half payout for Taya after 59, 60, 61 regular hours;
   - second-half payout resets threshold and repeats logic;
+  - fixed salary itself does not appear in the hours payout table; only overtime/weekend/holiday extras do;
   - weekend/holiday rows pay correctly.
+- `TimeTrack -> Existing entry edit`:
+  - open existing row;
+  - change project/date/stage/hours;
+  - save without deleting the row first;
+  - confirm updated payload keeps the same `id`.
 - `Indirect costs / plan-fact`:
   - Lyosha with zero production hours remains fully indirect;
   - Lyosha with production hours moves proportional cost to production buckets;
@@ -104,6 +110,7 @@
 - Safe relink must not bind a login to an employee who already has another account.
 - A fired employee must stay visible in historical reports.
 - Taya's overtime must not wait until `121st` hour of the whole month; it must start after `60th` regular hour in the current half.
+- Taya's fixed semimonth salary must not be double-counted in the hours payout table.
 - Weekend and holiday hours must not consume the regular `60-hour` bucket incorrectly, unless product rules explicitly say so.
 - Lyosha's cost must not remain stuck at static `50%` after hours-based allocation is introduced.
 - Existing hourly employees must not suddenly acquire salary-covered hours because of shared defaults.

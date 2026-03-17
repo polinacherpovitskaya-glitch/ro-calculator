@@ -42,7 +42,10 @@
 - Сохранение сотрудника теперь синхронизирует связанные auth-данные по `employee_id` и автоматически выключает логин, если сотрудник больше не активен.
 - В модель сотрудника добавлены payroll profiles `hourly`, `salary_monthly`, `salary_semimonth_threshold`, `management_salary_with_production_allocation`.
 - Для `Тая` зафиксированы defaults `120 часов/месяц` и `60 часов/полумесяц`, а `TimeTrack` теперь считает payroll по схеме `60 + 60` с breakdown `1-15` и `16-конец`.
+- В `Часах` fixed salary больше не попадает в нижнюю payroll-таблицу: для `Тая` и других окладных сотрудников там считается только доплата за сверхурочные/выходные/праздники.
 - Для `Лёша` и аналогичных профилей `IndirectCosts` теперь считает `% производство` по фактически записанным часам месяца, а не по статическому `50%`.
+- В `Часах` появилась правка существующей записи без удаления: можно открыть строку, поправить проект/этап/дату/часы и сохранить изменения.
+- Вкладка `Сотрудники` больше не должна зависать на `Загрузка...`, если auth-справочник отвечает медленно: таблица сотрудников рендерится сразу, а auth-статусы подтягиваются отдельно.
 - Добавлены regression smokes:
   - `node tests/employee-auth-payroll-smoke.js`
   - `node tests/payroll-half-month-smoke.js`
@@ -91,8 +94,10 @@ python3 -m http.server 4173
 | 2026-03-17 | Lyosha allocation | `ro_production_shares` seeds `50%` override | confirmed mismatch with hour-based allocation | replace static share with actual hours in P5 |
 | 2026-03-17 | Employee card UX | `js/settings.js`, `index.html` | fixed | status/login/payroll profile now visible in one employee card |
 | 2026-03-17 | Semimonth payroll | `js/timetrack.js`, `tests/payroll-half-month-smoke.js` | fixed | keep extending payout UX and negative cases |
+| 2026-03-17 | Payroll payout semantics | `js/timetrack.js`, `tests/payroll-half-month-smoke.js` | fixed | fixed salary is excluded from hours payout table; only extras remain |
 | 2026-03-17 | Dynamic indirect share | `js/indirect_costs.js`, `tests/employee-auth-payroll-smoke.js` | fixed | move from month-level share to order-level allocation later |
 | 2026-03-17 | Identity audit | `js/settings.js`, `tests/employee-auth-payroll-smoke.js` | fixed | login tab now surfaces employee/login/time mismatches and offers safe relink only for exact matches |
+| 2026-03-17 | Time entry editing | `js/timetrack.js`, `tests/payroll-half-month-smoke.js` | fixed | manual correction of project/date/stage/hours works without deleting entry |
 
 ## Smoke / Demo Checklist
 - [x] Один экран сотрудника показывает статус, доступ и payroll profile без перехода между двумя отдельными справочниками.

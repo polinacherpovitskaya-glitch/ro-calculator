@@ -378,13 +378,22 @@ const Settings = {
     async loadEmployeesTab() {
         try {
             this.employeesData = await loadEmployees();
-            this.authAccountsData = await loadAuthAccounts();
         } catch (err) {
             console.error('loadEmployeesTab error:', err);
             this.employeesData = [];
         }
         if (!this.employeesData || !Array.isArray(this.employeesData)) {
             this.employeesData = [];
+        }
+        this.renderEmployeesTable();
+        try {
+            this.authAccountsData = await loadAuthAccounts();
+        } catch (err) {
+            console.error('loadEmployeesTab auth load error:', err);
+            this.authAccountsData = [];
+        }
+        if (!Array.isArray(this.authAccountsData)) {
+            this.authAccountsData = [];
         }
         this.renderEmployeesTable();
     },
