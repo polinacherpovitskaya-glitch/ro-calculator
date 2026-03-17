@@ -432,6 +432,93 @@ async function smokePackagingWarehousePickerDefaults(context) {
     assert.equal(pkg.sell_price, 19);
 }
 
+async function smokePendantWarehousePickerRichUI() {
+    const pendantContext = createContext();
+    stubRuntime(pendantContext);
+    ['js/calculator.js', 'js/app.js', 'js/warehouse.js'].forEach(file => runScript(pendantContext, file));
+    vm.runInContext('delete globalThis.Pendant;', pendantContext);
+    runScript(pendantContext, 'js/pendant.js');
+
+    pendantContext.__pendantWhData = {
+        cords: {
+            label: 'Шнуры',
+            icon: '🧵',
+            items: [{
+                id: 701,
+                category: 'cords',
+                name: 'Шнур с силик. наконечником',
+                sku: 'SLS-800-BL-NN',
+                size: '80 см',
+                color: 'синий',
+                qty: 1232,
+                available_qty: 732,
+                price_per_unit: 23,
+                unit: 'шт',
+                photo_thumbnail: 'https://example.com/cord-thumb.png',
+            }],
+        },
+        carabiners: {
+            label: 'Карабины',
+            icon: '🔗',
+            items: [{
+                id: 801,
+                category: 'carabiners',
+                name: 'Карабин с ушком',
+                sku: 'CR-STD-SV-H',
+                size: '2,3 см',
+                color: 'серебряный',
+                qty: 850,
+                available_qty: 820,
+                price_per_unit: 10,
+                unit: 'шт',
+                photo_thumbnail: 'https://example.com/carabiner-thumb.png',
+            }],
+        },
+    };
+
+    vm.runInContext(`
+        Calculator._whPickerData = globalThis.__pendantWhData;
+        Calculator._findHwBlankByWarehouseItemId = () => null;
+        Pendant._wizardData = Pendant.getEmpty();
+        Pendant._wizardData.cord = {
+            source: 'warehouse',
+            warehouse_item_id: 701,
+            warehouse_sku: 'SLS-800-BL-NN',
+            photo_thumbnail: 'https://example.com/cord-thumb.png',
+            name: 'Шнур с силик. наконечником синий 80 см',
+            price_per_unit: 23,
+            delivery_price: 0,
+            unit: 'шт',
+        };
+        Pendant._wizardData.carabiner = {
+            source: 'warehouse',
+            warehouse_item_id: null,
+            warehouse_sku: '',
+            photo_thumbnail: '',
+            name: '',
+            price_per_unit: 0,
+            delivery_price: 0,
+            unit: 'шт',
+        };
+    `, pendantContext);
+
+    const cordHtml = String(vm.runInContext(`Pendant._renderWhDropdown('cord', Pendant._wizardData.cord, Calculator._whPickerData)`, pendantContext));
+    assert.match(cordHtml, /Поиск по названию или артикулу/);
+    assert.match(cordHtml, /SLS-800-BL-NN/);
+    assert.match(cordHtml, /cord-thumb\.png/);
+    assert.match(cordHtml, /img src=/);
+
+    await vm.runInContext(`Pendant._onWhSelect('carabiner', '801')`, pendantContext);
+    const carabiner = clone(await vm.runInContext(`Pendant._wizardData.carabiner`, pendantContext));
+    assert.equal(carabiner.warehouse_item_id, 801);
+    assert.equal(carabiner.warehouse_sku, 'CR-STD-SV-H');
+    assert.equal(carabiner.photo_thumbnail, 'https://example.com/carabiner-thumb.png');
+
+    const carabinerHtml = String(vm.runInContext(`Pendant._renderWhDropdown('carabiner', Pendant._wizardData.carabiner, Calculator._whPickerData)`, pendantContext));
+    assert.match(carabinerHtml, /CR-STD-SV-H/);
+    assert.match(carabinerHtml, /carabiner-thumb\.png/);
+}
+
 async function smokeLegacyPendantRestore(context) {
     const legacyNestedPendant = {
         item_type: 'pendant',
@@ -1347,6 +1434,7 @@ async function main() {
 
     await smokeCalculatorPersistence(context);
     await smokePackagingWarehousePickerDefaults(context);
+    await smokePendantWarehousePickerRichUI();
     await smokeLegacyPendantRestore(context);
     await smokeReadyGoodsRollback(context);
     await smokeReadyGoodsSalesAndManualAdd(context);
