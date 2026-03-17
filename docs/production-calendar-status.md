@@ -1,7 +1,7 @@
 # Production Calendar Status
 
 ## Snapshot
-- Current phase: C1 first usable slice implemented
+- Current phase: C2 holiday-aware scheduling shipped, blocker/capacity layer continues
 - Plan file: `/private/tmp/ro-codex-push-sync.v100/docs/production-calendar-plan.md`
 - Status: yellow
 - Last updated: 2026-03-17
@@ -50,11 +50,19 @@
   - над timeline появился блок `Очередь к запуску`;
   - порядок заказов теперь можно менять кнопками `вверх/вниз` прямо в очереди;
   - ручной приоритет очереди влияет на `buildProductionSchedule()`.
+- Реализован второй usable slice `v106`:
+  - scheduler теперь исключает не только выходные, но и `production_holidays` из настроек;
+  - schedule dates больше не строятся через `toISOString()`, поэтому локальная дата не съезжает в браузерах с положительным UTC offset;
+  - заголовок календаря визуально помечает праздничные дни так же, как другие non-working days.
 - Добавлен и подключен новый regression smoke:
   - `/private/tmp/ro-codex-push-sync.v100/tests/production-calendar-smoke.js`
   - `.github/workflows/deploy-pages.yml`
+- `production-calendar-smoke` расширен и теперь исполняет `buildProductionSchedule()` в vm:
+  - проверяет, что holidays реально исключаются из расписания;
+  - страхует от регресса со сдвигом local date.
 
 ## In Progress
+- C2: readiness/blocker layer для mold/China waiting и отделение operational capacity от pricing-capacity.
 - C2: readiness/blocker layer для mold/China waiting и отделение operational capacity от pricing-capacity.
 
 ## Next
@@ -81,6 +89,7 @@
 - [x] `node tests/employee-auth-payroll-smoke.js`
 - [x] `node tests/payroll-half-month-smoke.js`
 - [x] `node tests/production-calendar-smoke.js`
+- [x] `node tests/production-calendar-smoke.js`
 - [x] `node tests/factual-smoke.js`
 - [x] `node tests/supabase-fallback-smoke.js`
 - [ ] headed browser smoke on local calendar page
@@ -96,6 +105,7 @@
 | 2026-03-17 | Mold constraints | `app.js`, `molds.js` | confirmed mold metadata exists but is not used in scheduling | integrate mold-aware planning |
 | 2026-03-17 | China blocker | `china.js` | confirmed shipment/purchase statuses exist but do not block schedule | derive blocked states from China receipt |
 | 2026-03-17 | C1 usable slice | `js/app.js`, `js/gantt.js`, `index.html`, `css/style.css` | canonical route + larger week/month UI + queue reorder delivered | move to blocker/capacity model |
+| 2026-03-17 | Holidays + local date drift | `js/calculator.js`, `js/gantt.js`, `tests/production-calendar-smoke.js` | scheduler now skips configured holidays and keeps local calendar dates stable across timezones | continue into blocker/readiness model |
 
 ## Smoke / Demo Checklist
 - [x] В меню слева остается один понятный `Производственный календарь`.

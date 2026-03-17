@@ -1,6 +1,6 @@
 // =============================================
 // Recycle Object — Production Calendar
-// v48: canonical week/month production calendar with queue + capacity
+// v49: canonical week/month production calendar with queue + capacity
 // =============================================
 
 const Gantt = {
@@ -137,7 +137,7 @@ const Gantt = {
             dayMap[day.date] = day;
         });
 
-        const headerHtml = this.renderTimeAxis(minDate, totalDays, cellWidth);
+        const headerHtml = this.renderTimeAxis(minDate, totalDays, cellWidth, this.getHolidaySet());
         const rowsHtml = activeQueue.map(item => this.renderOrderRow(item, minDate, totalDays, cellWidth)).join('');
         const sidebarRows = activeQueue.map(item => {
             const statusDot = item.deadlineEnd && item.schedule[item.schedule.length - 1]?.date > item.deadlineEnd
@@ -409,12 +409,14 @@ const Gantt = {
             </div>`;
     },
 
-    renderTimeAxis(minDate, totalDays, cellWidth) {
+    renderTimeAxis(minDate, totalDays, cellWidth, holidaySet = new Set()) {
         let html = '';
         for (let index = 0; index < totalDays; index++) {
             const date = new Date(minDate);
             date.setDate(date.getDate() + index);
             const isWeekend = date.getDay() === 0 || date.getDay() === 6;
+            const isHoliday = holidaySet.has(this.formatIsoDateLocal(date));
+            const isNonWorking = isWeekend || isHoliday;
             const isMonthBreak = index === 0 || date.getDate() === 1;
             const weekday = date.toLocaleDateString('ru-RU', { weekday: 'short' }).replace('.', '');
             const month = date.toLocaleDateString('ru-RU', { month: 'short' }).replace('.', '');
@@ -422,7 +424,7 @@ const Gantt = {
             const secondary = this.zoom === 'week' ? String(date.getDate()) : (isMonthBreak ? month : '&nbsp;');
             const tertiary = this.zoom === 'week' && isMonthBreak ? month : '';
             html += `
-                <div class="gantt-header-cell ${isWeekend ? 'gantt-weekend' : ''} ${isMonthBreak ? 'gantt-month-break' : ''}" style="left:${index * cellWidth}px;width:${cellWidth}px">
+                <div class="gantt-header-cell ${isNonWorking ? 'gantt-weekend' : ''} ${isMonthBreak ? 'gantt-month-break' : ''}" style="left:${index * cellWidth}px;width:${cellWidth}px">
                     <span class="gantt-header-primary">${primary}</span>
                     <span class="gantt-header-secondary">${secondary}</span>
                     ${tertiary ? `<span class="gantt-header-tertiary">${tertiary}</span>` : ''}
@@ -469,6 +471,22 @@ const Gantt = {
     shortName(name) {
         if (!name) return '';
         return name.length > 34 ? `${name.substring(0, 32)}..` : name;
+    },
+
+    getHolidaySet() {
+        const raw = String((App.settings && App.settings.production_holidays) || '').trim();
+        if (!raw) return new Set();
+        return new Set(
+            raw
+                .split(/[\s,;]+/)
+                .map(value => value.trim())
+                .filter(value => /^\d{4}-\d{2}-\d{2}$/.test(value))
+        );
+    },
+
+    formatIsoDateLocal(date) {
+        const value = date instanceof Date ? date : new Date(date);
+        return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
     },
 
     esc(str) {

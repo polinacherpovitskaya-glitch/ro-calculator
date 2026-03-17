@@ -687,6 +687,32 @@ function formatHours(n) {
     return new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 }).format(n) + ' ч';
 }
 
+function padIsoDatePart(value) {
+    return String(value).padStart(2, '0');
+}
+
+function formatIsoDateLocal(date) {
+    if (!(date instanceof Date)) date = new Date(date);
+    return `${date.getFullYear()}-${padIsoDatePart(date.getMonth() + 1)}-${padIsoDatePart(date.getDate())}`;
+}
+
+function parseProductionHolidaySet(settings) {
+    const raw = String((settings && settings.production_holidays) || '').trim();
+    if (!raw) return new Set();
+    return new Set(
+        raw
+            .split(/[\s,;]+/)
+            .map(value => value.trim())
+            .filter(value => /^\d{4}-\d{2}-\d{2}$/.test(value))
+    );
+}
+
+function isProductionNonWorkingDate(date, holidaySet) {
+    const weekday = date.getDay();
+    if (weekday === 0 || weekday === 6) return true;
+    return holidaySet.has(formatIsoDateLocal(date));
+}
+
 /**
  * Build production schedule — day-by-day resource allocation
  * Each order has 3 sequential phases: литьё → упаковка → сборка (hardware)
@@ -700,6 +726,7 @@ function buildProductionSchedule(orders, settings) {
     const workersCount = (settings && settings.workers_count) || 3.5;
     const hoursPerDay = 8;
     const dailyCapacity = round2(workersCount * hoursPerDay);
+    const holidaySet = parseProductionHolidaySet(settings);
 
     // Filter schedulable orders: only past-draft statuses (sample, production, delivery)
     const SCHEDULE_STATUSES = ['sample','production_casting','production_printing','production_hardware','production_packaging','delivery','in_production'];
@@ -755,11 +782,9 @@ function buildProductionSchedule(orders, settings) {
         const date = new Date(today);
         date.setDate(date.getDate() + d);
 
-        // Skip weekends (Sat=6, Sun=0)
-        const dow = date.getDay();
-        if (dow === 0 || dow === 6) continue;
+        if (isProductionNonWorkingDate(date, holidaySet)) continue;
 
-        const dateStr = date.toISOString().slice(0, 10);
+        const dateStr = formatIsoDateLocal(date);
         let remainingCapacity = dailyCapacity;
         const dayAllocations = [];
 
