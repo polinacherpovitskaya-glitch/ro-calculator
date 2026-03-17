@@ -462,88 +462,67 @@ const TimeTrack = {
             if (!stats.has(workerName)) {
                 stats.set(workerName, {
                     employee: emp,
-                    regularHours: 0,
-                    weekendHours: 0,
-                    holidayHours: 0,
                     regularByHalf: { first: 0, second: 0 },
+                    weekendByHalf: { first: 0, second: 0 },
+                    holidayByHalf: { first: 0, second: 0 },
                 });
             }
             const row = stats.get(workerName);
-            if (isHoliday) row.holidayHours += hours;
-            else if (isWeekend) row.weekendHours += hours;
+            const halfKey = this.getHalfMonthBucket(entry.date);
+            if (isHoliday) row.holidayByHalf[halfKey] += hours;
+            else if (isWeekend) row.weekendByHalf[halfKey] += hours;
             else {
-                row.regularHours += hours;
-                row.regularByHalf[this.getHalfMonthBucket(entry.date)] += hours;
+                row.regularByHalf[halfKey] += hours;
             }
         });
 
-        const rows = Array.from(stats.values()).map(row => {
+        const rows = Array.from(stats.values()).flatMap(row => {
             const cfg = this.normalizePayrollConfig(row.employee);
-            if (cfg.payrollProfile === 'management_salary_with_production_allocation') return null;
-            let inBaseHours, overtimeHours, payBase, payOvertime;
-            let halfBreakdown = [];
+            if (cfg.payrollProfile === 'management_salary_with_production_allocation') return [];
+            const monthHours = ['first', 'second'].reduce((sum, halfKey) => (
+                sum +
+                (row.regularByHalf[halfKey] || 0) +
+                (row.weekendByHalf[halfKey] || 0) +
+                (row.holidayByHalf[halfKey] || 0)
+            ), 0);
+            if (monthHours <= 0 && cfg.payrollProfile === 'hourly') return [];
 
-            if (cfg.payrollProfile === 'salary_semimonth_threshold' && cfg.hasSalary) {
-                const baseHoursPerHalf = cfg.baseHoursSemimonth || Math.max(1, Math.round(cfg.baseHours / 2));
-                const firstRegular = row.regularByHalf.first || 0;
-                const secondRegular = row.regularByHalf.second || 0;
-                const halves = [
-                    { key: 'first', label: '1–15', regularHours: firstRegular },
-                    { key: 'second', label: '16–конец', regularHours: secondRegular },
-                ];
-                inBaseHours = 0;
-                overtimeHours = 0;
-                payBase = 0;
-                payOvertime = 0;
-                halfBreakdown = halves.map(half => {
-                    const baseHoursUsed = Math.min(half.regularHours, baseHoursPerHalf);
-                    const overtimeHalfHours = Math.max(0, half.regularHours - baseHoursPerHalf);
-                    const payBaseHalf = 0;
-                    const payOvertimeHalf = overtimeHalfHours * cfg.overtimeRate;
-                    inBaseHours += baseHoursUsed;
-                    overtimeHours += overtimeHalfHours;
-                    payBase += payBaseHalf;
-                    payOvertime += payOvertimeHalf;
-                    return {
-                        key: half.key,
-                        label: half.label,
-                        regularHours: half.regularHours,
-                        inBaseHours: baseHoursUsed,
-                        overtimeHours: overtimeHalfHours,
-                        totalPay: payBaseHalf + payOvertimeHalf,
-                    };
-                });
-            } else if (cfg.hasSalary) {
-                // Salaried employees get fixed pay outside this table; here we only show extras.
-                inBaseHours = Math.min(row.regularHours, cfg.baseHours);
-                overtimeHours = Math.max(0, row.regularHours - cfg.baseHours);
-                payBase = 0;
-                payOvertime = overtimeHours * cfg.overtimeRate;
-            } else {
-                // Purely hourly: all regular hours at overtime rate
-                inBaseHours = 0;
-                overtimeHours = row.regularHours;
-                payBase = 0;
-                payOvertime = row.regularHours * cfg.overtimeRate;
-            }
+            const baseHoursPerHalf = cfg.hasSalary
+                ? (cfg.baseHoursSemimonth || Math.max(1, Math.round(cfg.baseHours / 2)))
+                : 0;
+            const halves = [
+                { key: 'first', label: '1–15' },
+                { key: 'second', label: '16–конец' },
+            ];
 
-            const payWeekend = row.weekendHours * cfg.weekendRate;
-            const payHoliday = row.holidayHours * cfg.holidayRate;
-            const totalPay = payBase + payOvertime + payWeekend + payHoliday;
-
-            return {
-                employeeName: row.employee.name || 'Сотрудник',
-                payrollProfile: cfg.payrollProfile,
-                hasSalary: cfg.hasSalary,
-                regularHours: row.regularHours,
-                inBaseHours,
-                overtimeHours,
-                weekendHours: row.weekendHours,
-                holidayHours: row.holidayHours,
-                halfBreakdown,
-                totalPay,
-            };
-        }).filter(Boolean).sort((a, b) => b.totalPay - a.totalPay);
+            return halves.map(half => {
+                const regularHours = row.regularByHalf[half.key] || 0;
+                const weekendHours = row.weekendByHalf[half.key] || 0;
+                const holidayHours = row.holidayByHalf[half.key] || 0;
+                const inBaseHours = cfg.hasSalary ? Math.min(regularHours, baseHoursPerHalf) : 0;
+                const overtimeHours = cfg.hasSalary ? Math.max(0, regularHours - baseHoursPerHalf) : regularHours;
+                const payOvertime = overtimeHours * cfg.overtimeRate;
+                const payWeekend = weekendHours * cfg.weekendRate;
+                const payHoliday = holidayHours * cfg.holidayRate;
+                return {
+                    employeeName: row.employee.name || 'Сотрудник',
+                    periodKey: half.key,
+                    periodLabel: half.label,
+                    payrollProfile: cfg.payrollProfile,
+                    hasSalary: cfg.hasSalary,
+                    regularHours,
+                    inBaseHours,
+                    overtimeHours,
+                    weekendHours,
+                    holidayHours,
+                    totalPay: payOvertime + payWeekend + payHoliday,
+                };
+            });
+        }).sort((a, b) => {
+            const byName = String(a.employeeName || '').localeCompare(String(b.employeeName || ''), 'ru');
+            if (byName !== 0) return byName;
+            return a.periodKey === b.periodKey ? 0 : (a.periodKey === 'first' ? -1 : 1);
+        });
 
         const total = rows.reduce((s, r) => s + r.totalPay, 0);
         return { rows, total };
@@ -569,18 +548,14 @@ const TimeTrack = {
         if (totalEl) totalEl.textContent = this.formatMoney(total);
 
         if (!rows.length) {
-            tableBody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">Нет данных по производству за текущий месяц</td></tr>';
+            tableBody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">Нет данных по производству за текущий месяц</td></tr>';
             return;
         }
 
         tableBody.innerHTML = rows.map(r => `
             <tr>
-                <td style="font-weight:600;">
-                    ${this.esc(r.employeeName)}
-                    ${Array.isArray(r.halfBreakdown) && r.halfBreakdown.length
-            ? `<div style="margin-top:4px;font-size:11px;color:var(--text-muted);">${r.halfBreakdown.map(half => `${this.esc(half.label)}: ${this.formatMoney(half.totalPay)} сверх`).join(' · ')}</div>`
-            : ''}
-                </td>
+                <td style="font-weight:600;">${this.esc(r.employeeName)}</td>
+                <td>${this.esc(r.periodLabel)}</td>
                 <td class="text-right">${r.regularHours.toFixed(2)}</td>
                 <td class="text-right">${r.inBaseHours.toFixed(2)}</td>
                 <td class="text-right">${r.overtimeHours.toFixed(2)}</td>
@@ -847,6 +822,14 @@ const TimeTrack = {
         if (stageOtherEl) stageOtherEl.value = stageEl && stageEl.value === 'other' ? (meta.stage_label || '') : '';
         this.syncManualEntryFormState();
         this.onStageChange();
+        const formEl = document.getElementById('tt-manual-form');
+        if (formEl && typeof formEl.scrollIntoView === 'function') {
+            formEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+        if (projectEl && typeof projectEl.focus === 'function') {
+            projectEl.focus();
+        }
+        App.toast('Запись открыта для редактирования');
     },
 
     esc(str) {

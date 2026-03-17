@@ -72,6 +72,7 @@
   - audit panel highlights orphan logins, orphan historical hours and employee/login mismatches;
   - safe relink appears only for exact matches and refuses to attach if employee already has another login.
 - `TimeTrack -> Payroll`:
+  - each employee is grouped into fixed semimonth rows `1-15` and `16-конец`;
   - first-half payout for Taya after 59, 60, 61 regular hours;
   - second-half payout resets threshold and repeats logic;
   - fixed salary itself does not appear in the hours payout table; only overtime/weekend/holiday extras do;

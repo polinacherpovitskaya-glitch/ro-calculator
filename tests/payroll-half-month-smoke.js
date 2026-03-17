@@ -18,6 +18,8 @@ function createElement(id = '') {
             toggle() {},
             contains() { return false; },
         },
+        focus() {},
+        scrollIntoView() {},
         appendChild(child) {
             this.children.push(child);
             if (child && Object.prototype.hasOwnProperty.call(child, 'value')) {
@@ -159,21 +161,31 @@ function smokeSemimonthPayroll(context) {
     `, context);
 
     const result = vm.runInContext(`TimeTrack.calculateProductionPayrollForCurrentMonth()`, context);
-    const taya = result.rows.find(row => row.employeeName === 'Тая');
-    const jenya = result.rows.find(row => row.employeeName === 'Женя');
+    const tayaFirst = result.rows.find(row => row.employeeName === 'Тая' && row.periodKey === 'first');
+    const tayaSecond = result.rows.find(row => row.employeeName === 'Тая' && row.periodKey === 'second');
+    const jenyaFirst = result.rows.find(row => row.employeeName === 'Женя' && row.periodKey === 'first');
+    const jenyaSecond = result.rows.find(row => row.employeeName === 'Женя' && row.periodKey === 'second');
 
-    assert.ok(taya, 'Тая row should exist');
-    assert.equal(taya.inBaseHours, 120);
-    assert.equal(taya.overtimeHours, 6);
-    assert.equal(Math.round(taya.totalPay), 3000);
-    assert.equal(taya.halfBreakdown.length, 2);
-    assert.equal(Math.round(taya.halfBreakdown[0].totalPay), 500);
-    assert.equal(Math.round(taya.halfBreakdown[1].totalPay), 2500);
+    assert.equal(result.rows.length, 4);
 
-    assert.ok(jenya, 'Женя row should exist');
-    assert.equal(jenya.inBaseHours, 0);
-    assert.equal(jenya.overtimeHours, 10);
-    assert.equal(Math.round(jenya.totalPay), 5000);
+    assert.ok(tayaFirst, 'Тая first-half row should exist');
+    assert.equal(tayaFirst.inBaseHours, 60);
+    assert.equal(tayaFirst.overtimeHours, 1);
+    assert.equal(Math.round(tayaFirst.totalPay), 500);
+
+    assert.ok(tayaSecond, 'Тая second-half row should exist');
+    assert.equal(tayaSecond.inBaseHours, 60);
+    assert.equal(tayaSecond.overtimeHours, 5);
+    assert.equal(Math.round(tayaSecond.totalPay), 2500);
+
+    assert.ok(jenyaFirst, 'Женя first-half row should exist');
+    assert.equal(jenyaFirst.inBaseHours, 0);
+    assert.equal(jenyaFirst.overtimeHours, 10);
+    assert.equal(Math.round(jenyaFirst.totalPay), 5000);
+
+    assert.ok(jenyaSecond, 'Женя second-half row should exist');
+    assert.equal(jenyaSecond.overtimeHours, 0);
+    assert.equal(Math.round(jenyaSecond.totalPay), 0);
 }
 
 async function smokeEditEntry(context) {
