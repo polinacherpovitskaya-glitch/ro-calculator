@@ -52,6 +52,8 @@
 - Settings UI больше не показывает сохраненный пароль и переводит reset в one-time disclosure flow.
 - Cached-user restore при недоступном auth source отключен: без подтвержденного account session не восстанавливается.
 - Автосоздание логинов временно отключено как осознанный security tradeoff, пока не появится безопасный onboarding/reset path.
+- Новые и reset credentials теперь сохраняются через versioned `v2` hash path; legacy accounts продолжают логиниться только через compatibility fallback и теперь явно помечаются в UI как `Legacy hash v1`.
+- В settings появился отдельный sanitized `auth backup` export для forced reset / storage migration rehearsal без выгрузки `password_plain`.
 
 ### Tasks
 - Перестать писать `password_plain` при создании, редактировании и reset логинов.
@@ -68,6 +70,7 @@
 ### Validation
 ```sh
 rg -n "password_plain" js/app.js js/settings.js js/supabase.js
+node tests/auth-hardening-smoke.js
 ```
 - Manual smoke: create account, edit account, reset password, clean login, refresh, logout, disabled-account login, missing-auth-data behavior.
 

@@ -1044,8 +1044,9 @@ const Orders = {
         }
 
         if (!wasConsumed && nowConsumed) {
+            let hadShortage = false;
             for (const [itemId, qty] of demand.entries()) {
-                await Warehouse.adjustStock(
+                const result = await Warehouse.adjustStock(
                     itemId,
                     -qty,
                     'deduction',
@@ -1054,6 +1055,12 @@ const Orders = {
                     managerName || '',
                     { order_id: orderId }
                 );
+                if (result && result.clamped && (result.requestedQtyChange || 0) < 0) {
+                    hadShortage = true;
+                }
+            }
+            if (hadShortage) {
+                App.toast('Часть упаковки списана не полностью: недостаточно остатка');
             }
         }
     },

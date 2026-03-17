@@ -120,6 +120,8 @@ const App = {
     _sessionStartedAt: null,
     _sessionId: null,
     _sessionHeartbeatTimer: null,
+    AUTH_PASSWORD_HASH_VERSION: 2,
+    AUTH_PASSWORD_HASH_ROUNDS: 2048,
 
     async init() {
         initSupabase();
@@ -164,8 +166,7 @@ const App = {
         if (!account) {
             errorText = 'Пользователь не найден';
         } else {
-            const hash = this.hashUserPassword(account.username || '', pwd);
-            if (hash === account.password_hash) {
+            if (this.verifyUserPassword(account, pwd)) {
                 localStorage.setItem('ro_calc_auth_method', 'user');
                 localStorage.setItem('ro_calc_auth_ts', nowTs);
                 localStorage.setItem('ro_calc_auth_user_id', String(account.id));
@@ -286,8 +287,39 @@ const App = {
         return hash === this.simpleHash('recycle2026') || hash === this.simpleHash('demo');
     },
 
-    hashUserPassword(username, password) {
+    legacyHashUserPassword(username, password) {
         return this.simpleHash(`ro:${String(username || '').trim().toLowerCase()}::${String(password || '')}`);
+    },
+
+    getAccountPasswordHashVersion(account) {
+        const explicit = parseInt(account?.password_hash_version, 10);
+        if (Number.isFinite(explicit) && explicit > 0) return explicit;
+        const hash = String(account?.password_hash || '');
+        const prefixMatch = hash.match(/^v(\d+):/);
+        if (prefixMatch) return parseInt(prefixMatch[1], 10) || 1;
+        return 1;
+    },
+
+    hashUserPassword(username, password, version = null) {
+        const normalizedUsername = String(username || '').trim().toLowerCase();
+        const normalizedPassword = String(password || '');
+        const targetVersion = Number(version) || this.AUTH_PASSWORD_HASH_VERSION;
+        if (targetVersion <= 1) {
+            return this.legacyHashUserPassword(normalizedUsername, normalizedPassword);
+        }
+
+        let digest = `ro:v${targetVersion}:${normalizedUsername}::${normalizedPassword}`;
+        const rounds = Math.max(32, Number(this.AUTH_PASSWORD_HASH_ROUNDS) || 2048);
+        for (let i = 0; i < rounds; i++) {
+            digest = this.simpleHash(`${targetVersion}|${i}|${digest}|recycle-object`);
+        }
+        return `v${targetVersion}:${digest}`;
+    },
+
+    verifyUserPassword(account, password) {
+        if (!account || !account.password_hash) return false;
+        const version = this.getAccountPasswordHashVersion(account);
+        return this.hashUserPassword(account.username || '', password, version) === account.password_hash;
     },
 
     async prepareAuthUI() {

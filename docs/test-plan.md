@@ -19,8 +19,9 @@
 - Data fixtures: минимум один product order, один order с warehouse hardware, один order с warehouse packaging, один order с pendant data, один sample order, один completed order, одна China purchase, непустой warehouse seed, рабочий `corporate-gift/config.json`.
 - External dependencies: Supabase/localStorage data layer, браузер, при наличии реальная auth session, Google Apps Script endpoint или mock/intercept для `corporate-gift`.
 - Setup assumptions: локальный запуск через `python3 -m http.server 4173`; browser audit через headed Playwright flow или эквивалентный живой браузер; если live auth недоступен, локальный/fallback coverage все равно обязателен и live gap фиксируется в `docs/status.md`.
+- Build/deploy assumptions: публичный релиз приходит только из `origin/main` через GitHub Pages workflow; локальный `http.server` или `python3 -m http.server` служит только для smoke и не подтверждает сам по себе, что сайт уже обновился наружу.
 - Regression artifact expectation: findings log в `docs/status.md`, плюс lightweight smoke scripts в `tests/`, если чистую бизнес-логику удастся изолировать в M1.
-- Current reproducible harness: `node tests/order-flow-smoke.js` покрывает `Calculator` persistence (`china hardware/pkg + pendant + colors`), legacy pendant restore, ready-goods rollback sync, `ready goods sales/writeoff/manual add`, warehouse manual stock adjustment + history trail, сохранение China shipment metadata, `Orders._syncWarehouseByStatus` и `order-detail` rendering для `colors[] / color_solution_attachment`; `node tests/supabase-fallback-smoke.js` отдельно проверяет missing-table fallback для `sales_records` и aggressive local-cache cleanup path в `initSupabase`.
+- Current reproducible harness: `node tests/order-flow-smoke.js` покрывает `Calculator` persistence (`china hardware/pkg + pendant + colors`), legacy pendant restore, ready-goods rollback sync, `ready goods sales/writeoff/manual add`, warehouse manual stock adjustment + history trail, clamped partial-deduction behavior и shortage toast при `sample -> delivery`, сохранение China shipment metadata, `Orders._syncWarehouseByStatus` и `order-detail` rendering для `colors[] / color_solution_attachment`; `node tests/auth-hardening-smoke.js` отдельно проверяет versioned auth hash path, legacy verifier compatibility, `password_hash_version/password_rotated_at`, security rendering и auth-backup export; `node tests/supabase-fallback-smoke.js` проверяет missing-table fallback для `sales_records` и aggressive local-cache cleanup path в `initSupabase`.
 
 ## Test Levels
 
@@ -50,6 +51,7 @@
 - Пустое имя заказа должно авто-сгенерироваться без потери остальных полей.
 - Edit заказа с заменой warehouse item или сменой qty не должен давать double deduction и не должен забывать вернуть старый остаток.
 - Частичный резерв при нехватке остатка должен быть прозрачен в UI и не ломать дальнейшие списания.
+- История склада при нехватке остатка должна писать фактически примененное списание, а не полный запрошенный delta.
 - Legacy orders/items без `hardware_source`, `packaging_source`, `item_data` или color photo должны оставаться читаемыми.
 - Duplicate `order_items` rows должны repair-иться безопасно на load без silent data loss.
 - Откат статуса из consumed back в non-consumed должен возвращать stock ровно один раз.
@@ -61,10 +63,12 @@
 - [ ] `python3 -m http.server 4173`
 - [x] `node tests/order-flow-smoke.js`
 - [x] Эквивалентный warehouse/ready-goods reproducible harness внутри `node tests/order-flow-smoke.js`
+- [x] `node tests/auth-hardening-smoke.js`
 - [x] `node tests/supabase-fallback-smoke.js`
 - [ ] Headed browser smoke для root app order flow
 - [ ] Headed browser smoke для `corporate-gift/`
 - [ ] Live-session verification для `orders/china/warehouse/ready goods` или явный blocker, зафиксированный в `docs/status.md`
+- [ ] Public deploy verification: latest GitHub Pages workflow run на `main` green и публичный `index.html` отдает ожидаемые cache-bust версии audited scripts
 
 ## Release / Demo Readiness
 - [x] Main order creation/edit/reload/clone path работает end to end
@@ -76,6 +80,8 @@
 - [x] Missing-table fallback для `sales_records` воспроизводимо проверяется отдельно и не спамит повторными remote calls после деградации
 - [x] Cold-boot cleanup path в `supabase.js` не падает на missing helper и переносит крупный cache в volatile memory
 - [x] `corporate-gift` demoable и на valid, и на invalid path
+- [x] Новые и reset-auth credentials сохраняются через versioned hash path, а legacy accounts подсвечиваются до forced reset
+- [x] Перед auth migration можно снять отдельный sanitized auth backup без выгрузки `password_plain`
 - [ ] В audited scope не осталось blocker-level known issue
 - [x] Improvement backlog приоритизирован после фиксов
 - [x] Auth/data-security remediation path документирован отдельно
@@ -85,7 +91,10 @@
 for f in js/*.js corporate-gift/*.js; do node --check "$f"; done
 python3 -m http.server 4173
 node tests/order-flow-smoke.js
+node tests/auth-hardening-smoke.js
 node tests/supabase-fallback-smoke.js
+curl -s 'https://api.github.com/repos/polinacherpovitskaya-glitch/ro-calculator/actions/runs?per_page=1'
+curl -s 'https://polinacherpovitskaya-glitch.github.io/ro-calculator/' | rg 'js/supabase.js|js/app.js|js/order-detail.js|js/warehouse.js'
 ```
 
 ## Open Risks

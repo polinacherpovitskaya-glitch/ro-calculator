@@ -747,6 +747,19 @@ async function smokeOrderStatusWarehouseSync(context) {
         vm.runInContext(`
             Warehouse.adjustStock = async (itemId, delta, type, refName, note, employee, extra) => {
                 globalThis.__adjustStockCalls.push({ itemId, delta, type, refName, note, employee, extra });
+                const stockRow = (globalThis.__warehouseItems || []).find(item => Number(item.id) === Number(itemId)) || null;
+                const qtyBefore = Number(stockRow && stockRow.qty) || 0;
+                const qtyAfter = Math.max(0, qtyBefore + (Number(delta) || 0));
+                const appliedQtyChange = qtyAfter - qtyBefore;
+                if (stockRow) stockRow.qty = qtyAfter;
+                return {
+                    ok: true,
+                    requestedQtyChange: Number(delta) || 0,
+                    appliedQtyChange,
+                    qtyBefore,
+                    qtyAfter,
+                    clamped: Math.abs(appliedQtyChange - (Number(delta) || 0)) > 1e-9,
+                };
             };
             Warehouse.syncProjectHardwareOrderState = async (payload) => {
                 globalThis.__projectHardwareCalls.push(payload);
@@ -819,6 +832,29 @@ async function smokeOrderStatusWarehouseSync(context) {
         assert.equal(newReservation.qty, 4);
         assert.equal(newReservation.status, 'active');
         assert.equal(newReservation.source, 'order_calc');
+
+        context.__adjustStockCalls = [];
+        context.__projectHardwareCalls = [];
+        context.__savedReservations = [];
+        context.__warehouseItems = [{ id: 501, qty: 2, unit: 'шт' }];
+        context.__toasts = [];
+        vm.runInContext(`App.toast = (message) => { globalThis.__toasts.push(String(message || '')); };`, context);
+        await vm.runInContext(`Orders._syncWarehouseByStatus(42, 'sample', 'delivery', 'Sync Order', 'Smoke')`, context);
+
+        assert.equal(context.__projectHardwareCalls.length, 1);
+        assert.equal(context.__projectHardwareCalls[0].status, 'delivery');
+        assert.deepEqual(clone(context.__adjustStockCalls), [{
+            itemId: 501,
+            delta: -4,
+            type: 'deduction',
+            refName: 'Sync Order',
+            note: 'Списание при смене статуса: sample → delivery',
+            employee: 'Smoke',
+            extra: { order_id: 42 },
+        }]);
+        const releasedReservation = context.__savedReservations.find(item => item.order_id === 42);
+        assert.equal(releasedReservation.status, 'released');
+        assert.ok(context.__toasts.some(message => /не полностью/i.test(message)));
     } finally {
         vm.runInContext(`
             Warehouse.adjustStock = globalThis.__originalWarehouseAdjustStock;
@@ -858,6 +894,23 @@ async function smokeWarehouseManualAdjustment(context) {
     assert.equal(context.__warehouseHistory[0].qty_before, 10);
     assert.equal(context.__warehouseHistory[0].qty_after, 14);
     assert.match(context.__warehouseHistory[0].notes, /Ручная правка/);
+
+    const clampResult = clone(await vm.runInContext(`Warehouse.adjustStock(501, -20, 'deduction', 'Clamp Order', 'Проверка частичного списания', 'Smoke')`, context));
+
+    assert.equal(clampResult.ok, true);
+    assert.equal(clampResult.requestedQtyChange, -20);
+    assert.equal(clampResult.appliedQtyChange, -14);
+    assert.equal(clampResult.qtyBefore, 14);
+    assert.equal(clampResult.qtyAfter, 0);
+    assert.equal(clampResult.clamped, true);
+    assert.equal(context.__warehouseItems[0].qty, 0);
+    assert.equal(context.__warehouseHistory.length, 2);
+    assert.equal(context.__warehouseHistory[1].qty_change, -14);
+    assert.equal(context.__warehouseHistory[1].requested_qty_change, -20);
+    assert.equal(context.__warehouseHistory[1].qty_before, 14);
+    assert.equal(context.__warehouseHistory[1].qty_after, 0);
+    assert.equal(context.__warehouseHistory[1].clamped, true);
+    assert.match(context.__warehouseHistory[1].notes, /Проверка частичного списания/);
 }
 
 async function smokeOrderDetailColorRendering(context) {

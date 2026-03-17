@@ -813,6 +813,8 @@ const Settings = {
 
         if (password) {
             account.password_hash = App.hashUserPassword(username, password);
+            account.password_hash_version = App.AUTH_PASSWORD_HASH_VERSION || 2;
+            account.password_rotated_at = new Date().toISOString();
             delete account.password_plain;
         } else if (this.editingAuthAccountId && prevUsername && prevUsername !== username) {
             App.toast('При смене логина укажите новый пароль');
@@ -841,6 +843,28 @@ const Settings = {
         this.cancelAuthAccount();
         await this.loadLoginsTab();
         await App.refreshAuthUsers();
+    },
+
+    describeAuthAccountSecurity(account) {
+        const currentVersion = Number(App.AUTH_PASSWORD_HASH_VERSION) || 2;
+        const accountVersion = App.getAccountPasswordHashVersion
+            ? App.getAccountPasswordHashVersion(account)
+            : (parseInt(account?.password_hash_version, 10) || 1);
+        const rotatedAt = account?.password_rotated_at
+            ? new Date(account.password_rotated_at).toLocaleDateString('ru-RU')
+            : '';
+
+        if (accountVersion < currentVersion) {
+            return {
+                label: `Legacy hash v${accountVersion}`,
+                color: 'var(--yellow)',
+            };
+        }
+
+        return {
+            label: rotatedAt ? `Hash v${accountVersion} · ${rotatedAt}` : `Hash v${accountVersion}`,
+            color: 'var(--green)',
+        };
     },
 
     async deleteAuthAccount() {
@@ -876,13 +900,14 @@ const Settings = {
                 const status = a.is_active === false
                     ? '<span class="badge">Отключен</span>'
                     : '<span class="badge badge-green">Активен</span>';
+                const security = this.describeAuthAccountSecurity(a);
                 const last = a.last_login_at
                     ? new Date(a.last_login_at).toLocaleString('ru-RU')
                     : '—';
                 return `<tr>
                     <td style="font-weight:600;">${this.escHtml(a.employee_name || '—')}</td>
                     <td>${this.escHtml(a.username || '')}</td>
-                    <td><code>не хранится</code></td>
+                    <td><code>не хранится</code><div style="margin-top:4px;font-size:11px;color:${security.color};">${this.escHtml(security.label)}</div></td>
                     <td style="text-align:center;">${status}</td>
                     <td>${this.escHtml(last)}</td>
                     <td style="white-space:nowrap;">
@@ -906,6 +931,8 @@ const Settings = {
             return;
         }
         account.password_hash = App.hashUserPassword(account.username, pass);
+        account.password_hash_version = App.AUTH_PASSWORD_HASH_VERSION || 2;
+        account.password_rotated_at = new Date().toISOString();
         delete account.password_plain;
         account.updated_at = new Date().toISOString();
         await saveAuthAccounts(this.authAccountsData);
@@ -916,6 +943,45 @@ const Settings = {
         });
         this.renderAuthAccountsTable();
         App.toast('Пароль обновлён. Сохраните его у сотрудника: система больше не хранит его в открытом виде.');
+    },
+
+    async downloadAuthBackup() {
+        const backup = {
+            _meta: {
+                app: 'RecycleObject',
+                type: 'auth-backup',
+                version: typeof APP_VERSION !== 'undefined' ? APP_VERSION : 'unknown',
+                date: new Date().toISOString(),
+                source: 'sanitized-loaders',
+                note: 'password_plain is intentionally excluded from backup exports',
+            },
+            auth_accounts: (await loadAuthAccounts()).map(account => ({
+                ...account,
+                pages: App.normalizePageList(account.pages),
+            })),
+            auth_activity: await loadAuthActivity(),
+            auth_sessions: await loadAuthSessions(),
+            employee_pages: JSON.parse(localStorage.getItem('ro_employee_pages') || '{}'),
+        };
+
+        const json = JSON.stringify(backup, null, 2);
+        const blob = new Blob([json], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+        a.href = url;
+        a.download = `RO_auth_backup_${dateStr}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+
+        const infoEl = document.getElementById('auth-backup-info');
+        const accountCount = Array.isArray(backup.auth_accounts) ? backup.auth_accounts.length : 0;
+        const sizeKb = Math.round(json.length / 1024);
+        if (infoEl) {
+            infoEl.innerHTML = `<span style="color:var(--green)">Auth backup скачан: ${sizeKb} КБ, ${accountCount} аккаунтов</span>`;
+        }
+        App.toast(`Auth backup скачан (${accountCount} аккаунтов)`);
+        return backup;
     },
 
     renderAuthActivityTable() {

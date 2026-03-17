@@ -1,10 +1,16 @@
 # Status
 
 ## Snapshot
-- Current phase: M4 - backlog improvements + auth/data-security remediation handoff
+- Current phase: M3/M4 - build-source sanity locked, continuing warehouse shortage + auth remediation
 - Plan file: `/Users/krollipolli/Documents/Github/RO calculator/docs/plans.md`
 - Status: yellow
 - Last updated: 2026-03-16
+
+## Build / Deploy Source Of Truth
+- Public deploy source: `origin/main` -> `.github/workflows/deploy-pages.yml` -> GitHub Pages.
+- Workflow behavior: checkout `main`, run repo-local verify gates, upload repository root as Pages artifact, deploy artifact to GitHub Pages.
+- Local smoke source of truth: server must be started from `/Users/krollipolli/Documents/Github/RO calculator`; earlier confusion came from a stale server running out of `.codex/worktrees/...`.
+- Latest verified public release: workflow run `#138` for commit `98562ed` completed successfully, and the public site served `js/supabase.js?v=110`, `js/app.js?v=107`, `js/order-detail.js?v=57`, `js/warehouse.js?v=92`.
 
 ## Done
 - Execution docs мигрированы с узкого `work-management rollout` на новый канонический поток: сквозной аудит заказов, цветов, Китая, склада и готовой продукции.
@@ -41,14 +47,23 @@
 - Закрыт live-console gap на вкладке `Готовая продукция`: `sales_records` теперь использует тот же missing-table fallback, что и `ready_goods`, и после первого `PGRST205` переходит в local mode без повторных remote hits в рамках сессии.
 - Добавлен узкий fallback smoke [`tests/supabase-fallback-smoke.js`](/Users/krollipolli/Documents/Github/RO%20calculator/tests/supabase-fallback-smoke.js), который проверяет `sales_records` missing-table path, session cache и отсутствие повторных remote вызовов после деградации в local fallback.
 - Исправлен cold-boot warning в `initSupabase`: aggressive cleanup снова умеет переносить крупные local cache keys во `volatile` memory вместо падения на отсутствующем `_moveLocalStorageKeyToVolatileCache`.
+- Проверен и зафиксирован канонический build path: публичный сайт уходит из `origin/main` через GitHub Pages workflow, а не из локального dev server; источник прошлой путаницы был в старом server cwd из другого worktree.
+- Подтвержден public deploy после push: run `#138` зеленый, а публичный `index.html` отдает свежие cache-bust версии audit-fixed скриптов.
+- Исправлен shortage/history drift в складе: `Warehouse.adjustStock` теперь пишет в history реально примененное изменение, помечает clamped-списания и не притворяется, что со склада ушло больше, чем там было.
+- Исправлен status-sync gap для упаковки: при переходе заказа в consumed-статус теперь показывается явный toast, если упаковка списалась только частично из-за нехватки остатка.
+- Smoke harness расширен на partial-deduction сценарий: `tests/order-flow-smoke.js` теперь ловит clamped warehouse history и shortage toast при `sample -> delivery`.
+- Усилен credential path для новых и reset-паролей: `App.hashUserPassword` переведен на versioned `v2` verifier для новых записей, при этом legacy-логины продолжают проверяться через совместимый fallback.
+- Settings `Логины` теперь явно показывает security-state аккаунта (`Legacy hash v1` / `Hash v2`) и умеет снимать отдельный sanitized `auth backup` перед forced reset или storage migration.
+- Добавлен reproducible auth smoke [`tests/auth-hardening-smoke.js`](/Users/krollipolli/Documents/Github/RO%20calculator/tests/auth-hardening-smoke.js), который проверяет versioned hash verification, сохранение `password_hash_version/password_rotated_at`, security rendering и auth-backup export.
 
 ## In Progress
 - Продолжение Phase 0/1 для auth: forced reset/storage migration path, live verification и оставшиеся warehouse edge cases с нехваткой/partial reserve.
+- Повторная live/browser проверка складских edge cases уже с зафиксированным deploy source, чтобы локальный smoke и публичный релиз больше не путались между собой.
 
 ## Next
+- Закрыть первый незавершенный пункт M3: partial reserve, возврат и списание при нехватке warehouse hardware/packaging.
 - Дойти от частичного Phase 0 до forced reset/storage migration path из `/Users/krollipolli/Documents/Github/RO calculator/docs/auth-remediation-plan.md`.
 - Перепроверить live browser perimeter для `warehouse/ready goods` на реальных кликах после расширения smoke coverage.
-- Добить edge cases по `partial reserve / нехватке остатка`, которые пока подтверждены не полностью.
 - Перепроверить tasks/projects regression perimeter и собрать финальный handoff по live gaps.
 
 ## Decisions Made
@@ -68,7 +83,11 @@
 ```sh
 for f in js/*.js corporate-gift/*.js; do node --check "$f"; done
 node tests/order-flow-smoke.js
+node tests/auth-hardening-smoke.js
+node tests/supabase-fallback-smoke.js
 python3 -m http.server 4173
+curl -s 'https://api.github.com/repos/polinacherpovitskaya-glitch/ro-calculator/actions/runs?per_page=1'
+curl -s 'https://polinacherpovitskaya-glitch.github.io/ro-calculator/' | rg 'js/supabase.js|js/app.js|js/order-detail.js|js/warehouse.js'
 ```
 
 ## Current Blockers
@@ -100,6 +119,9 @@ python3 -m http.server 4173
 | 2026-03-16 | Warehouse harness depth | `tests/order-flow-smoke.js` | `node --check tests/order-flow-smoke.js && node tests/order-flow-smoke.js` | pass | Идти в live warehouse/ready-goods verification и remaining shortage edge cases |
 | 2026-03-16 | Ready goods sales fallback | `js/supabase.js`, `index.html`, `tests/supabase-fallback-smoke.js` | `node --check js/supabase.js && node tests/supabase-fallback-smoke.js && node tests/order-flow-smoke.js` + local browser repro на `warehouse -> ready goods` | fail -> fixed | Идти в partial reserve live edges и auth migration |
 | 2026-03-16 | Supabase cleanup cold boot | `js/supabase.js`, `index.html`, `tests/supabase-fallback-smoke.js` | browser cold boot на `?cb=cleanupfix` + `node tests/supabase-fallback-smoke.js` | fail -> fixed | Держать live perimeter и auth migration в следующем цикле |
+| 2026-03-16 | Build source sanity | `.github/workflows/deploy-pages.yml`, `docs/*` | GitHub Actions API check + public site fetch | pass | Вернуться к M3 partial reserve / shortage flows |
+| 2026-03-16 | Warehouse shortage integrity | `js/warehouse.js`, `js/orders.js`, `tests/order-flow-smoke.js` | `node --check js/warehouse.js && node --check js/orders.js && node --check tests/order-flow-smoke.js && node tests/order-flow-smoke.js` | fail -> fixed | Продолжить live warehouse edge cases и auth migration |
+| 2026-03-16 | Auth hardening prep | `js/app.js`, `js/settings.js`, `index.html`, `tests/auth-hardening-smoke.js`, `.github/workflows/deploy-pages.yml` | `node --check js/app.js && node --check js/settings.js && node --check tests/auth-hardening-smoke.js && node tests/auth-hardening-smoke.js` | pass | Продолжить forced reset/storage migration без ночного lockout |
 
 ## Smoke / Demo Checklist
 - [x] Root app стабильно грузится локально и дает пройти навигацию `orders -> colors -> warehouse -> china` без blocker-level runtime errors.

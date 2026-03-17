@@ -35,6 +35,7 @@ jobs:
           done
           node tests/work-management-smoke.js
           node tests/order-flow-smoke.js
+          node tests/auth-hardening-smoke.js
           node tests/supabase-fallback-smoke.js
 
   deploy:

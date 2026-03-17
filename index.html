@@ -2809,7 +2809,13 @@
                 <div class="card">
                     <div class="card-header">
                         <h3>Доступы в систему</h3>
-                        <button class="btn btn-sm btn-primary" onclick="Settings.showAddAuthAccount()">+ Добавить логин</button>
+                        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                            <button class="btn btn-sm btn-outline" onclick="Settings.downloadAuthBackup()">Экспорт auth backup</button>
+                            <button class="btn btn-sm btn-primary" onclick="Settings.showAddAuthAccount()">+ Добавить логин</button>
+                        </div>
+                    </div>
+                    <div id="auth-backup-info" style="margin:-4px 0 12px;font-size:11px;color:var(--text-muted);">
+                        Для forced reset / migration сначала снимайте отдельный auth backup из текущих данных.
                     </div>
 
                     <div id="auth-account-form" style="display:none; margin-bottom:16px; padding:16px; background:var(--bg); border-radius:8px;">
@@ -3121,7 +3127,7 @@
 <script src="js/supabase.js?v=111"></script>
 <script src="js/task-events.js?v=1"></script>
 <script src="js/calculator.js?v=65"></script>
-<script src="js/app.js?v=107"></script>
+<script src="js/app.js?v=108"></script>
 <script src="js/order-detail.js?v=57"></script>
 <script src="js/orders.js?v=59"></script>
 <script src="js/production_plan.js?v=75"></script>
@@ -3141,7 +3147,7 @@
 <script src="js/china_catalog.js?v=46k"></script>
 <script src="js/marketplaces.js?v=72"></script>
 <script src="js/warehouse.js?v=92"></script>
-<script src="js/settings.js?v=72"></script>
+<script src="js/settings.js?v=73"></script>
 <script src="js/pendant.js?v=1"></script>
 </body>
 </html>

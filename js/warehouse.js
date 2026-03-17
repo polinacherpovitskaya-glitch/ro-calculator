@@ -699,11 +699,24 @@ const Warehouse = {
     async adjustStock(itemId, qtyChange, reason, orderName, notes, manager, meta) {
         const items = await loadWarehouseItems();
         const idx = items.findIndex(i => i.id === itemId);
-        if (idx < 0) return false;
+        if (idx < 0) {
+            return {
+                ok: false,
+                requestedQtyChange: parseFloat(qtyChange) || 0,
+                appliedQtyChange: 0,
+                qtyBefore: null,
+                qtyAfter: null,
+                clamped: false,
+            };
+        }
 
         const item = items[idx];
-        const qtyBefore = item.qty || 0;
-        item.qty = Math.max(0, qtyBefore + qtyChange);
+        const requestedQtyChange = parseFloat(qtyChange) || 0;
+        const qtyBefore = parseFloat(item.qty) || 0;
+        const qtyAfter = Math.max(0, qtyBefore + requestedQtyChange);
+        const appliedQtyChange = qtyAfter - qtyBefore;
+        const clamped = Math.abs(appliedQtyChange - requestedQtyChange) > 1e-9;
+        item.qty = qtyAfter;
         item.updated_at = new Date().toISOString();
         items[idx] = item;
         await saveWarehouseItems(items);
@@ -717,19 +730,28 @@ const Warehouse = {
             item_sku: item.sku || '',
             item_category: item.category || '',
             type: reason || 'adjustment',
-            qty_change: qtyChange,
+            qty_change: appliedQtyChange,
+            requested_qty_change: requestedQtyChange,
             qty_before: qtyBefore,
             qty_after: item.qty,
             unit_price: parseFloat(item.price_per_unit) || 0,
-            total_cost_change: round2(Math.abs(qtyChange) * (parseFloat(item.price_per_unit) || 0)),
+            total_cost_change: round2(Math.abs(appliedQtyChange) * (parseFloat(item.price_per_unit) || 0)),
             order_id: meta && meta.order_id ? meta.order_id : null,
             order_name: orderName || '',
             notes: notes || '',
+            clamped,
             created_at: new Date().toISOString(),
             created_by: manager || '',
         });
         await saveWarehouseHistory(history);
-        return true;
+        return {
+            ok: true,
+            requestedQtyChange,
+            appliedQtyChange,
+            qtyBefore,
+            qtyAfter: item.qty,
+            clamped,
+        };
     },
 
     async quickAdjust(itemId, delta) {

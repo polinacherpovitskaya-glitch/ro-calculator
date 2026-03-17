@@ -14,6 +14,18 @@
 - Improvement backlog: `/Users/krollipolli/Documents/Github/RO calculator/docs/improvement-backlog.md`
 - Auth/data-security remediation track: `/Users/krollipolli/Documents/Github/RO calculator/docs/auth-remediation-plan.md`
 
+## Execution Analysis
+- Декомпозиция текущего ночного прогона: сначала убрать путаницу с источником билда и зафиксировать канонический deploy path, затем продолжать repair loop по незакрытым warehouse/auth edge cases.
+- Главный риск не в сборке как таковой, а в том, что локальный smoke легко уехать в другой worktree или старый server cwd; поэтому public deploy и local audit должны проверяться разными, явными командами.
+- Порядок milestone не меняется: build/deploy sanity считается опорной частью M5 handoff, а не отдельным продуктовым треком, чтобы не размазывать основной order lifecycle audit.
+- Валидация теперь обязана различать три слоя: repo-local syntax/smoke, live browser smoke из текущего cwd и public GitHub Pages verification после push.
+
+## Build / Deploy Source Of Truth
+- Публичный сайт деплоится из `origin/main` через `.github/workflows/deploy-pages.yml`.
+- GitHub Pages workflow сначала гоняет repo-local проверки (`node --check`, `tests/work-management-smoke.js`, `tests/order-flow-smoke.js`, `tests/supabase-fallback-smoke.js`), затем публикует корень репозитория как Pages artifact.
+- Локальный browser smoke не считается подтверждением публичного релиза, если сервер поднят не из текущего cwd репозитория.
+- Каноническая manual проверка после push: убедиться, что последний workflow run на `main` зеленый и что публичный `index.html` отдает ожидаемые cache-bust версии скриптов.
+
 ## Assumptions
 - Главный бизнес-периметр первой волны: `calculator -> orders -> order-detail -> china -> warehouse -> ready goods`, плюс справочник цветов и отдельный вход заказа через `corporate-gift/`.
 - Маркетплейсы, аналитика, тайм-трек, импорт и бот не входят в первую волну, если только audit не покажет прямую регрессию от order flow.
@@ -53,6 +65,8 @@
 ```sh
 for f in js/*.js corporate-gift/*.js; do node --check "$f"; done
 python3 -m http.server 4173
+curl -s 'https://api.github.com/repos/polinacherpovitskaya-glitch/ro-calculator/actions/runs?per_page=1'
+curl -s 'https://polinacherpovitskaya-glitch.github.io/ro-calculator/' | rg 'js/supabase.js|js/app.js|js/order-detail.js|js/warehouse.js'
 ```
 
 ### Known Risks
@@ -100,9 +114,11 @@ python3 -m http.server 4173
 ### Tasks
 - [x] Проверить `Orders.onStatusChange` и `_syncWarehouseByStatus` на переходах `sample`, production-like statuses, `delivery`, `completed` и обратных откатах.
 - [ ] Проверить резерв, частичный резерв, возврат и списание для warehouse hardware и packaging, включая сценарии с нехваткой остатка.
+- [~] Проверить резерв, частичный резерв, возврат и списание для warehouse hardware и packaging, включая сценарии с нехваткой остатка.
 - [x] Пройти China flows: создание закупки из `order-detail`, консолидация, приход на склад, связь с warehouse items и order meta badges.
 - [x] Проверить `Warehouse.moveOrderToReadyGoods`, ручные складские корректировки и историю движений по completed orders.
 - [x] Дофиксить найденные рассинхроны и добавить воспроизводимые checks там, где логику можно изолировать без тяжелого e2e.
+- [x] Починить integrity gap для clamped warehouse deductions: история движений должна отражать фактически примененный delta, а shortage на статусных переходах должен сигнализироваться явно.
 
 ### Definition of Done
 - Нет очевидных double reserve, double deduction или пропавших движений на audited flows.
@@ -133,6 +149,7 @@ python3 -m http.server 4173
 - [x] Подготовить backlog улучшений с приоритетом, ожидаемым эффектом, сложностью и отмеченными зависимостями.
 - [x] Подготовить отдельный remediation plan для high-severity auth/data-security риска.
 - [x] Обновить `docs/status.md` и `docs/test-plan.md` по реальным находкам, остаточным рискам и подтвержденным validation gates.
+- [x] Усиливать Phase 0 auth path безопасными шагами без ночного lockout: versioned hashes для новых/reset credentials, visible legacy-risk state и отдельный auth backup перед migration.
 
 ### Definition of Done
 - Blocker/high issues в audited scope либо устранены, либо имеют явный blocker owner и понятную причину.
@@ -143,6 +160,7 @@ python3 -m http.server 4173
 for f in js/*.js corporate-gift/*.js; do node --check "$f"; done
 python3 -m http.server 4173
 # После M1: node tests/order-flow-smoke.js
+# После auth-hardening: node tests/auth-hardening-smoke.js
 ```
 
 ### Known Risks
