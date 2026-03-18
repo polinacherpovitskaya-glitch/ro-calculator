@@ -4,6 +4,7 @@ const Wiki = {
     selectedArticleId: null,
     searchQuery: '',
     importOpen: false,
+    editMode: false,
     SOURCE_URL: 'https://recycle-object.notion.site/775cbbbf4d224ea0ad565ea90feb9d3b?v=79ea9890039443acadb90e43a5cfae70&pvs=73',
     SOURCE_BASE_URL: 'https://recycle-object.notion.site',
 
@@ -52,14 +53,15 @@ const Wiki = {
         const now = this._nowIso();
         const sections = [
             { id: 'quick-start', title: 'Быстрый старт', description: 'Как пользоваться внутренней базой знаний и как переносить материалы из Notion.', sort_index: 10 },
-            { id: 'notion_home_onboarding', title: 'Онбординг', description: 'База входа в процессы, производство, маркетплейсы, калькуляторы и ведение проекта.', sort_index: 20 },
-            { id: 'notion_home_general', title: 'Общая информация', description: 'Документы, контакты, пароли, скрипты, фото и базовые справки.', sort_index: 30 },
-            { id: 'notion_home_china', title: 'Китай', description: 'Крипта, переводы, Alipay и закупки в Китае.', sort_index: 40 },
-            { id: 'notion_home_wholesale', title: 'Опт', description: 'Оптовые и партнерские направления.', sort_index: 50 },
-            { id: 'notion_home_faq', title: 'FAQ', description: 'Быстрые ответы по материалам, литью и производственным кейсам.', sort_index: 60 },
-            { id: 'notion_home_hiring', title: 'Поиск сотрудников', description: 'Вакансии и материалы по найму.', sort_index: 70 },
-            { id: 'notion_home_illustration', title: 'Иллюстрации', description: 'Материалы для работы с иллюстраторами и ТЗ.', sort_index: 80 },
-            { id: 'drafts', title: 'Черновики переноса', description: 'Временное место для сырого текста из Notion перед разбором.', sort_index: 90 },
+            { id: 'company-core', title: 'Компания и старт', description: 'Что такое RO, базовый онбординг и общая картина процессов.', sort_index: 20 },
+            { id: 'sales-clients', title: 'Продажи, клиенты и CRM', description: 'Маркетплейсы, интернет-магазин, ведение проекта, коммуникация и amoCRM.', sort_index: 30 },
+            { id: 'production-ops', title: 'Производство и операции', description: 'Производство, калькуляторы, инвентаризация, гайды и производственные FAQ.', sort_index: 40 },
+            { id: 'finance-docs', title: 'Финансы и документы', description: 'ФинТабло, оплаты, документы и финансовые справки.', sort_index: 50 },
+            { id: 'china-purchasing', title: 'Китай и закупки', description: 'Крипта, переводы, Alipay и закупки в Китае.', sort_index: 60 },
+            { id: 'people-hr', title: 'Команда и HR', description: 'Отпуска, вакансии, телефоны, дни рождения и внутренние HR-материалы.', sort_index: 70 },
+            { id: 'tools-access', title: 'Инструменты и доступы', description: 'Пароли, скрипты, бот и служебные внутренние инструменты.', sort_index: 80 },
+            { id: 'content-brand', title: 'Контент и визуал', description: 'Фото, иллюстрации и материалы для визуального контента.', sort_index: 90 },
+            { id: 'drafts', title: 'Черновики переноса', description: 'Временное место для сырого текста из Notion перед разбором.', sort_index: 100 },
         ];
         const articles = [
             {
@@ -128,47 +130,60 @@ const Wiki = {
     _getPublicNotionSiteMap() {
         return [
             {
-                id: 'onboarding',
-                section_id: 'notion_home_onboarding',
-                title: 'Онбординг',
-                description: 'База входа в процессы, производство, маркетплейсы, калькуляторы и ведение проекта.',
+                id: 'company_core',
+                section_id: 'company-core',
+                title: 'Компания и старт',
+                description: 'Что такое RO, базовый онбординг и общая картина процессов.',
                 links: [
                     ['🧩 О Recycle Object', '/Recycle-Object-c6357e76fd7d4c049879064c575e7016?pvs=25'],
-                    ['🔧 Производство (общая инфа, полезные ссылки, контакты поставщиков и подрядчиков)', '/adff3c8f7cb441d7a62b66a58261da4b?pvs=25'],
-                    ['🏖️ Отпуск и больничный', '/125dff96d7444a9f82ba598515af1e6b?pvs=25'],
-                    ['💻 Работа с ИМ и МП', '/4bfa8b46ec004d6f8d60dc3058550ebf?pvs=25'],
-                    ['🛒 Маркетплейсы', '/a3ab7ed0995d43e1bc3a03495f81cf95?pvs=25'],
-                    ['🧮 Калькуляторы, прайсы, инвентаризация', '/1ad3e666a1eb80f8b40fe38ba0e91562?pvs=25'],
-                    ['ℹ️ Гайды', '/b8350468caa0486c9b3bf989584aba81?pvs=25'],
-                    ['🤪 Ведение проекта', '/2093e666a1eb803c9155d1ba912ef87c?pvs=25'],
-                    ['💸 Финансы: Финтабло и Точка', '/5cca97efb6fc4bd5970865075681132e?pvs=25'],
-                    ['📊 Работа в amoCRM', '/amoCRM-1f53e666a1eb80f79fc7f3152e8cd00a?pvs=25'],
-                    ['🤑 Инструкция по заполнению Юнит-экономики', '/2023e666a1eb80dc86f7cc262c2a287c?pvs=25'],
                 ],
             },
             {
-                id: 'general',
-                section_id: 'notion_home_general',
-                title: 'Общая информация',
-                description: 'Документы, контакты, пароли, скрипты, фото и базовые справки.',
+                id: 'sales_clients',
+                section_id: 'sales-clients',
+                title: 'Продажи, клиенты и CRM',
+                description: 'Маркетплейсы, интернет-магазин, ведение проекта, коммуникация и amoCRM.',
                 links: [
-                    ['📄 Документы Полина', '/b10f6528052d406285451e53211ddb5f?pvs=25'],
-                    ['🤖 Бот RO', '/RO-ae30db333237459ebc779fe5e69482a9?pvs=25'],
-                    ['📄 Документы Никита', '/ce00a9838a09431a92bfc71cb6ee296b?pvs=25'],
-                    ['🔐 Пароли', '/ef027345e13f4bc8a33af6f82cb765bf?pvs=25'],
-                    ['💌 Скрипты', '/94034de2740c474b8cd1cc579f85b401?pvs=25'],
+                    ['💻 Работа с ИМ и МП', '/4bfa8b46ec004d6f8d60dc3058550ebf?pvs=25'],
+                    ['🛒 Маркетплейсы', '/a3ab7ed0995d43e1bc3a03495f81cf95?pvs=25'],
+                    ['🤪 Ведение проекта', '/2093e666a1eb803c9155d1ba912ef87c?pvs=25'],
+                    ['📊 Работа в amoCRM', '/amoCRM-1f53e666a1eb80f79fc7f3152e8cd00a?pvs=25'],
+                    ['🤑 Инструкция по заполнению Юнит-экономики', '/2023e666a1eb80dc86f7cc262c2a287c?pvs=25'],
                     ['💬 Скрипт для общения с клиентом', '/21f3e666a1eb80759f85db7cd585785f?pvs=25'],
                     ['☎️ Список контактов клиентов', '/0473cddc59e449d2bc492f5fa49fcc26?pvs=25'],
-                    ['📞 Телефоны сотрудников', '/3f7cdf24579849248ff0a4a45f856756?pvs=25'],
-                    ['📸 Ссылки на фото', '/f84c01568654450bb55d3ce0731eae01?pvs=25'],
-                    ['🎂 Дни рождения', '/73b14634d6cd463b82aa3d3266b2084c?pvs=25'],
+                    ['🏛️ Музеи', '/8c4a1ff29dd84161a3ba3fc352ac7a69?pvs=25'],
+                ],
+            },
+            {
+                id: 'production_ops',
+                section_id: 'production-ops',
+                title: 'Производство и операции',
+                description: 'Производство, калькуляторы, инвентаризация, гайды и производственные FAQ.',
+                links: [
+                    ['🔧 Производство (общая инфа, полезные ссылки, контакты поставщиков и подрядчиков)', '/adff3c8f7cb441d7a62b66a58261da4b?pvs=25'],
+                    ['🧮 Калькуляторы, прайсы, инвентаризация', '/1ad3e666a1eb80f8b40fe38ba0e91562?pvs=25'],
+                    ['ℹ️ Гайды', '/b8350468caa0486c9b3bf989584aba81?pvs=25'],
+                    ['❓ FAQ Изделия из АБС', '/FAQ-79128817511a455bb679912863573f0c?pvs=25'],
+                    ['❓ FAQ Литье', '/FAQ-be9a41c4df214c009ab824946881f1de?pvs=25'],
+                    ['❓ FAQ Дмитров', '/FAQ-5b0dce1bde9a4f5dbd40a05aaa82ee93?pvs=25'],
+                ],
+            },
+            {
+                id: 'finance_docs',
+                section_id: 'finance-docs',
+                title: 'Финансы и документы',
+                description: 'ФинТабло, оплаты, документы и финансовые справки.',
+                links: [
+                    ['💸 Финансы: Финтабло и Точка', '/5cca97efb6fc4bd5970865075681132e?pvs=25'],
+                    ['📄 Документы Полина', '/b10f6528052d406285451e53211ddb5f?pvs=25'],
+                    ['📄 Документы Никита', '/ce00a9838a09431a92bfc71cb6ee296b?pvs=25'],
                     ['💵 Оплата', '/dfe635b5a8124df0b0e735f05ef46b50?pvs=25'],
                 ],
             },
             {
-                id: 'china',
-                section_id: 'notion_home_china',
-                title: 'Китай',
+                id: 'china_purchasing',
+                section_id: 'china-purchasing',
+                title: 'Китай и закупки',
                 description: 'Крипта, переводы, Alipay и закупки в Китае.',
                 links: [
                     ['🤑 Покупка криптовалюты в BINACE', '/BINACE-1e3a5d5294ad408da2c5003347afbc10?pvs=25'],
@@ -179,41 +194,35 @@ const Wiki = {
                 ],
             },
             {
-                id: 'wholesale',
-                section_id: 'notion_home_wholesale',
-                title: 'Опт',
-                description: 'Оптовые и партнерские направления.',
+                id: 'people_hr',
+                section_id: 'people-hr',
+                title: 'Команда и HR',
+                description: 'Отпуска, вакансии, телефоны, дни рождения и внутренние HR-материалы.',
                 links: [
-                    ['🏛️ Музеи', '/8c4a1ff29dd84161a3ba3fc352ac7a69?pvs=25'],
-                ],
-            },
-            {
-                id: 'faq',
-                section_id: 'notion_home_faq',
-                title: 'FAQ',
-                description: 'Быстрые ответы по материалам, литью и производственным кейсам.',
-                links: [
-                    ['❓ FAQ Изделия из АБС', '/FAQ-79128817511a455bb679912863573f0c?pvs=25'],
-                    ['❓ FAQ Литье', '/FAQ-be9a41c4df214c009ab824946881f1de?pvs=25'],
-                    ['❓ FAQ Дмитров', '/FAQ-5b0dce1bde9a4f5dbd40a05aaa82ee93?pvs=25'],
-                ],
-            },
-            {
-                id: 'hiring',
-                section_id: 'notion_home_hiring',
-                title: 'Поиск сотрудников',
-                description: 'Вакансии и материалы по найму.',
-                links: [
+                    ['🏖️ Отпуск и больничный', '/125dff96d7444a9f82ba598515af1e6b?pvs=25'],
+                    ['📞 Телефоны сотрудников', '/3f7cdf24579849248ff0a4a45f856756?pvs=25'],
+                    ['🎂 Дни рождения', '/73b14634d6cd463b82aa3d3266b2084c?pvs=25'],
                     ['🏗️ Актуальные вакансии в RO', '/RO-1e03e666a1eb80009138eb52bb6db7d3?pvs=25'],
-                    ['AmoCRM', '/AmoCRM-1dd3e666a1eb8074be37dfe3ebe49f7c?pvs=25'],
                 ],
             },
             {
-                id: 'illustration',
-                section_id: 'notion_home_illustration',
-                title: 'Иллюстрации',
-                description: 'Материалы для работы с иллюстраторами и ТЗ.',
+                id: 'tools_access',
+                section_id: 'tools-access',
+                title: 'Инструменты и доступы',
+                description: 'Пароли, скрипты, бот и служебные внутренние инструменты.',
                 links: [
+                    ['🤖 Бот RO', '/RO-ae30db333237459ebc779fe5e69482a9?pvs=25'],
+                    ['🔐 Пароли', '/ef027345e13f4bc8a33af6f82cb765bf?pvs=25'],
+                    ['💌 Скрипты', '/94034de2740c474b8cd1cc579f85b401?pvs=25'],
+                ],
+            },
+            {
+                id: 'content_brand',
+                section_id: 'content-brand',
+                title: 'Контент и визуал',
+                description: 'Фото, иллюстрации и материалы для визуального контента.',
+                links: [
+                    ['📸 Ссылки на фото', '/f84c01568654450bb55d3ce0731eae01?pvs=25'],
                     ['ТЗ для иллюстратора', '/1e33e666a1eb8060a0a1e57a71d7538f?pvs=25'],
                 ],
             },
@@ -272,7 +281,7 @@ const Wiki = {
     },
 
     _isStarterState(state) {
-        const starterSectionIds = ['quick-start', 'notion_home_onboarding', 'notion_home_general', 'notion_home_china', 'notion_home_wholesale', 'notion_home_faq', 'notion_home_hiring', 'notion_home_illustration', 'drafts'];
+        const starterSectionIds = ['quick-start', 'company-core', 'sales-clients', 'production-ops', 'finance-docs', 'china-purchasing', 'people-hr', 'tools-access', 'content-brand', 'drafts'];
         const currentSectionIds = (state.sections || []).map(section => section.id).sort();
         const starterArticles = ['wiki_start', 'wiki_notion_sync', 'notion_migration_draft'];
         const currentArticleIds = (state.articles || []).map(article => article.id);
@@ -362,11 +371,18 @@ const Wiki = {
         const validSectionIds = new Set(state.sections.map(section => section.id));
         const fallbackSectionId = state.sections[0] ? state.sections[0].id : 'drafts';
         const legacySectionAliases = {
-            'orders-sales': 'notion_home_onboarding',
-            production: 'notion_home_onboarding',
-            warehouse: 'notion_home_general',
-            finance: 'notion_home_general',
-            reference: 'notion_home_general',
+            'orders-sales': 'sales-clients',
+            production: 'production-ops',
+            warehouse: 'production-ops',
+            finance: 'finance-docs',
+            reference: 'tools-access',
+            'notion_home_onboarding': 'sales-clients',
+            'notion_home_general': 'finance-docs',
+            'notion_home_china': 'china-purchasing',
+            'notion_home_wholesale': 'sales-clients',
+            'notion_home_faq': 'production-ops',
+            'notion_home_hiring': 'people-hr',
+            'notion_home_illustration': 'content-brand',
         };
         state.articles = state.articles
             .map((article, index) => ({
@@ -564,6 +580,8 @@ const Wiki = {
         const visible = this._getVisibleArticles();
         if (this.selectedArticleId && visible.some(article => article.id === this.selectedArticleId)) return;
         this.selectedArticleId = visible[0] ? visible[0].id : ((this.state.articles || [])[0] || {}).id || null;
+        const selectedArticle = this._getArticle(this.selectedArticleId);
+        if (selectedArticle) this.selectedSectionId = selectedArticle.section_id;
     },
 
     render() {
@@ -579,7 +597,7 @@ const Wiki = {
             <div class="page-header">
                 <div>
                     <h1>База знаний</h1>
-                    <div class="wiki-page-subtitle">Внутренняя wiki вместо разбросанных заметок. Здесь можно системно хранить процессы, договоренности и рабочие инструкции.</div>
+                    <div class="wiki-page-subtitle">Внутренняя wiki в более понятной структуре: ищем по процессам, читаем как документ, дополняем как в рабочем блокноте, а не как в хаосе из карточек.</div>
                 </div>
                 <div class="flex gap-8" style="flex-wrap:wrap;">
                     <button class="btn btn-outline" onclick="Wiki.toggleImportPanel()">${this.importOpen ? 'Скрыть импорт' : 'Импорт текста'}</button>
@@ -588,111 +606,97 @@ const Wiki = {
                 </div>
             </div>
 
-            <div class="card wiki-source-card">
-                <div>
-                    <div class="wiki-source-title">Источник знаний</div>
-                    <div class="wiki-source-note">Notion-страница сейчас закрыта логином в workspace, поэтому автоматический перенос не сработал. Каркас wiki уже готов: можно переносить контент сюда частями и дальше вести все внутри системы.</div>
-                </div>
-                <a class="btn btn-outline btn-sm" href="${this._esc(this.state.source_url || this.SOURCE_URL)}" target="_blank" rel="noopener noreferrer">Открыть Notion</a>
-            </div>
-
-            <div class="card wiki-toolbar">
-                <div class="wiki-toolbar-search">
-                    <input type="text" id="wiki-search-input" placeholder="Поиск по статьям, разделам и тегам" value="${this._esc(this.searchQuery)}" oninput="Wiki.setSearch(this.value)">
-                </div>
-                <div class="wiki-toolbar-meta">
-                    <span class="wiki-meta-pill">${visibleArticles.length} статей</span>
-                    <span class="wiki-meta-pill">${this.state.sections.length} разделов</span>
-                    <span class="wiki-meta-pill">обновлено ${this._esc(App.formatDate ? App.formatDate(this.state.updated_at) : this.state.updated_at)}</span>
-                </div>
-            </div>
-
-            <div id="wiki-import-panel" class="card wiki-import-panel" style="${this.importOpen ? '' : 'display:none;'}">
-                <div class="card-header">
-                    <h3>Импорт черновика из Notion</h3>
-                    <button class="btn btn-sm btn-outline" onclick="Wiki.toggleImportPanel()">Закрыть</button>
-                </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label>Название статьи</label>
-                        <input type="text" id="wiki-import-title" placeholder="Например: Регламент по складу">
+            <div class="wiki-shell">
+                <aside class="wiki-nav-panel">
+                    <div class="wiki-nav-top">
+                        <div class="wiki-source-title">Навигация по процессам</div>
+                        <div class="wiki-source-note">Слева дерево как в Notion, но разделы уже пересобраны по смыслу, а не по старой мешанине.</div>
+                        <div class="wiki-toolbar-search">
+                            <input type="text" id="wiki-search-input" placeholder="Поиск по статьям, тегам и тексту" value="${this._esc(this.searchQuery)}" oninput="Wiki.setSearch(this.value)">
+                        </div>
+                        <div class="wiki-toolbar-meta">
+                            <span class="wiki-meta-pill">${visibleArticles.length} найдено</span>
+                            <span class="wiki-meta-pill">${this.state.sections.length} разделов</span>
+                        </div>
                     </div>
-                    <div class="form-group">
-                        <label>Раздел</label>
-                        <select id="wiki-import-section">
-                            ${this._renderSectionOptions('drafts')}
-                        </select>
-                    </div>
-                </div>
-                <div class="form-group">
-                    <label>Текст для переноса</label>
-                    <textarea id="wiki-import-body" rows="10" placeholder="Вставьте сюда сырой текст из Notion. Потом его можно спокойно отредактировать и разложить по разделам."></textarea>
-                </div>
-                <div class="flex gap-8">
-                    <button class="btn btn-success" onclick="Wiki.applyImportText(false)">Добавить как одну статью</button>
-                    <button class="btn btn-outline" onclick="Wiki.applyImportText(true)">Разбить по # заголовкам</button>
-                </div>
-            </div>
-
-            <div class="wiki-layout">
-                <aside class="card wiki-sections-card">
-                    <div class="card-header">
-                        <h3>Разделы</h3>
-                        <button class="btn btn-sm btn-outline" onclick="Wiki.createSection()">+ Раздел</button>
-                    </div>
-                    <div class="wiki-section-list">
-                        <button class="wiki-section-item ${this.selectedSectionId === 'all' ? 'active' : ''}" onclick="Wiki.selectSection('all')">
-                            <div>
-                                <div class="wiki-section-item-title">Все статьи</div>
-                                <div class="wiki-section-item-desc">Общий обзор базы знаний</div>
-                            </div>
-                            <span class="wiki-section-count">${this.state.articles.length}</span>
+                    <div class="wiki-nav-tree">
+                        <button class="wiki-nav-home ${this.selectedSectionId === 'all' ? 'active' : ''}" onclick="Wiki.selectSection('all')">
+                            <span>Все материалы</span>
+                            <span class="wiki-section-count">${visibleArticles.length}</span>
                         </button>
-                        ${this.state.sections.map(section => `
-                            <div class="wiki-section-row">
-                                <button class="wiki-section-item ${this.selectedSectionId === section.id ? 'active' : ''}" onclick="Wiki.selectSection('${this._esc(section.id)}')">
-                                    <div>
-                                        <div class="wiki-section-item-title">${this._esc(section.title)}</div>
-                                        <div class="wiki-section-item-desc">${this._esc(section.description || 'Без описания')}</div>
-                                    </div>
-                                    <span class="wiki-section-count">${counts.get(section.id) || 0}</span>
-                                </button>
-                                <div class="wiki-section-actions">
-                                    <button class="btn btn-sm btn-outline" onclick="Wiki.renameSection('${this._esc(section.id)}')" title="Переименовать">✎</button>
-                                    <button class="btn btn-sm btn-outline" onclick="Wiki.deleteSection('${this._esc(section.id)}')" title="Удалить">✕</button>
-                                </div>
-                            </div>
-                        `).join('')}
+                        ${this.state.sections.map(section => this._renderSectionTree(section, counts)).join('')}
                     </div>
                 </aside>
 
-                <section class="wiki-main">
-                    <div class="card wiki-list-card">
-                        <div class="card-header">
-                            <div>
-                                <h3>${this._esc(selectedSection ? selectedSection.title : 'Все статьи')}</h3>
-                                <div class="wiki-list-subtitle">${this._esc(selectedSection ? (selectedSection.description || 'Раздел без описания') : 'Быстрый обзор по всем разделам базы знаний')}</div>
+                <section class="wiki-document-panel">
+                    <div class="wiki-document-topbar">
+                        <div>
+                            <div class="wiki-breadcrumbs">
+                                <span>База знаний</span>
+                                ${selectedSection ? `<span>/</span><span>${this._esc(selectedSection.title)}</span>` : ''}
+                                ${selectedArticle ? `<span>/</span><span>${this._esc(selectedArticle.title)}</span>` : ''}
                             </div>
+                            <div class="wiki-list-subtitle">${this._esc(selectedSection ? (selectedSection.description || 'Раздел без описания') : 'Внутренняя база знаний по процессам Recycle Object')}</div>
                         </div>
-                        <div class="wiki-article-list">
-                            ${visibleArticles.length ? visibleArticles.map(article => this._renderArticleCard(article)).join('') : `
-                                <div class="wiki-empty-state">
-                                    <div class="wiki-empty-title">Ничего не найдено</div>
-                                    <div class="wiki-empty-note">Попробуйте убрать фильтр или создайте новую статью в выбранном разделе.</div>
-                                </div>
-                            `}
+                        <div class="flex gap-8" style="flex-wrap:wrap;">
+                            <a class="btn btn-outline btn-sm" href="${this._esc(this.state.source_url || this.SOURCE_URL)}" target="_blank" rel="noopener noreferrer">Открыть Notion</a>
+                            ${selectedArticle && !this.editMode ? '<button class="btn btn-outline btn-sm" onclick="Wiki.toggleEditMode(true)">Редактировать</button>' : ''}
+                            ${selectedArticle && this.editMode ? '<button class="btn btn-outline btn-sm" onclick="Wiki.toggleEditMode(false)">Закрыть редактирование</button>' : ''}
                         </div>
                     </div>
 
-                    <div class="card wiki-editor-card">
-                        ${selectedArticle ? this._renderEditor(selectedArticle) : `
-                            <div class="wiki-empty-state">
-                                <div class="wiki-empty-title">Статья не выбрана</div>
-                                <div class="wiki-empty-note">Создайте новую статью или выберите существующую слева.</div>
+                    <div id="wiki-import-panel" class="wiki-inline-panel" style="${this.importOpen ? '' : 'display:none;'}">
+                        <div class="card-header">
+                            <h3>Импорт черновика из Notion</h3>
+                            <button class="btn btn-sm btn-outline" onclick="Wiki.toggleImportPanel()">Закрыть</button>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Название статьи</label>
+                                <input type="text" id="wiki-import-title" placeholder="Например: Регламент по складу">
                             </div>
-                        `}
+                            <div class="form-group">
+                                <label>Раздел</label>
+                                <select id="wiki-import-section">
+                                    ${this._renderSectionOptions('drafts')}
+                                </select>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>Текст для переноса</label>
+                            <textarea id="wiki-import-body" rows="10" placeholder="Вставьте сюда сырой текст из Notion. Потом его можно спокойно отредактировать и разложить по разделам."></textarea>
+                        </div>
+                        <div class="flex gap-8">
+                            <button class="btn btn-success" onclick="Wiki.applyImportText(false)">Добавить как одну статью</button>
+                            <button class="btn btn-outline" onclick="Wiki.applyImportText(true)">Разбить по # заголовкам</button>
+                        </div>
                     </div>
+
+                    ${selectedArticle ? (this.editMode ? this._renderEditor(selectedArticle) : this._renderArticleView(selectedArticle)) : this._renderSectionOverview(selectedSection, visibleArticles)}
                 </section>
+            </div>
+        `;
+    },
+
+    _renderSectionTree(section, counts) {
+        const sectionArticles = (this.state.articles || []).filter(article => article.section_id === section.id && this._matchesSearch(article));
+        if (!sectionArticles.length && this.searchQuery) return '';
+        return `
+            <div class="wiki-tree-section ${this.selectedSectionId === section.id ? 'active' : ''}">
+                <button class="wiki-tree-section-button" onclick="Wiki.selectSection('${this._esc(section.id)}')">
+                    <div>
+                        <div class="wiki-tree-section-title">${this._esc(section.title)}</div>
+                        <div class="wiki-tree-section-desc">${this._esc(section.description || '')}</div>
+                    </div>
+                    <span class="wiki-section-count">${sectionArticles.length || counts.get(section.id) || 0}</span>
+                </button>
+                <div class="wiki-tree-pages">
+                    ${sectionArticles.map(article => `
+                        <button class="wiki-tree-page ${article.id === this.selectedArticleId ? 'active' : ''}" onclick="Wiki.selectArticle('${this._esc(article.id)}')">
+                            <span class="wiki-tree-page-title">${this._esc(article.title)}</span>
+                        </button>
+                    `).join('') || '<div class="wiki-tree-empty">Нет статей в этом фильтре</div>'}
+                </div>
             </div>
         `;
     },
@@ -718,6 +722,57 @@ const Wiki = {
         `;
     },
 
+    _renderSectionOverview(section, visibleArticles) {
+        return `
+            <div class="wiki-document">
+                <div class="wiki-document-meta">
+                    <span class="wiki-article-section">${this._esc(section ? section.title : 'Все материалы')}</span>
+                    <span class="wiki-preview-meta-note">${visibleArticles.length} материалов в текущем фильтре</span>
+                </div>
+                <h2 class="wiki-document-title">${this._esc(section ? section.title : 'База знаний')}</h2>
+                <div class="wiki-document-summary">${this._esc(section ? (section.description || 'Раздел без описания') : 'Выберите статью слева, чтобы открыть ее как обычную страницу, почти как в Notion.')}</div>
+                <div class="wiki-document-index">
+                    ${visibleArticles.map(article => `
+                        <button class="wiki-document-index-item" onclick="Wiki.selectArticle('${this._esc(article.id)}')">
+                            <div class="wiki-document-index-title">${this._esc(article.title)}</div>
+                            <div class="wiki-document-index-note">${this._esc(article.summary || this._excerpt(article.body, 140))}</div>
+                        </button>
+                    `).join('') || `
+                        <div class="wiki-empty-state">
+                            <div class="wiki-empty-title">Ничего не найдено</div>
+                            <div class="wiki-empty-note">Попробуйте убрать фильтр или создать новую статью.</div>
+                        </div>
+                    `}
+                </div>
+            </div>
+        `;
+    },
+
+    _renderArticleView(article) {
+        const section = this._getSection(article.section_id);
+        return `
+            <div class="wiki-document">
+                <div class="wiki-document-meta">
+                    <span class="wiki-article-section">${this._esc((section && section.title) || 'Без раздела')}</span>
+                    <span class="wiki-preview-meta-note">обновлено ${this._esc(App.formatDate ? App.formatDate(article.updated_at) : article.updated_at)} · ${this._esc(article.updated_by || '—')}</span>
+                </div>
+                <h2 class="wiki-document-title">${this._esc(article.title)}</h2>
+                <div class="wiki-document-summary">${this._esc(article.summary || 'Без краткого описания')}</div>
+                <div class="wiki-article-tags wiki-preview-tags">${this._formatTags(article.tags)}</div>
+                ${article.source_url ? `
+                    <div class="wiki-source-inline">
+                        <div>
+                            <div class="wiki-source-title">Исходная страница</div>
+                            <div class="wiki-source-note">Если нужно свериться с оригиналом, откройте страницу в публичном Notion.</div>
+                        </div>
+                        <a class="btn btn-outline btn-sm" href="${this._esc(article.source_url)}" target="_blank" rel="noopener noreferrer">Открыть источник</a>
+                    </div>
+                ` : ''}
+                <div class="wiki-document-body">${this._renderBodyPreview(article.body || '')}</div>
+            </div>
+        `;
+    },
+
     _renderEditor(article) {
         const section = this._getSection(article.section_id);
         const draft = {
@@ -728,9 +783,10 @@ const Wiki = {
             body: article.body || '',
         };
         return `
+            <div class="wiki-document wiki-document-edit">
                 <div class="card-header">
                 <div>
-                    <h3>Редактор статьи</h3>
+                    <h3>Редактирование статьи</h3>
                     <div class="wiki-list-subtitle">Последнее обновление: ${this._esc(App.formatDate ? App.formatDate(article.updated_at) : article.updated_at)} · ${this._esc(article.updated_by || '—')}</div>
                 </div>
                 <div class="flex gap-8" style="flex-wrap:wrap;">
@@ -741,42 +797,42 @@ const Wiki = {
                     <button class="btn btn-danger btn-sm" onclick="Wiki.deleteSelectedArticle()">Удалить</button>
                 </div>
             </div>
-            <div class="wiki-editor-layout">
-                <div>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label>Заголовок</label>
-                            <input type="text" id="wiki-article-title" value="${this._esc(article.title)}" placeholder="Название статьи" oninput="Wiki.handleEditorInput()">
-                        </div>
-                        <div class="form-group">
-                            <label>Раздел</label>
-                            <select id="wiki-article-section" onchange="Wiki.handleEditorInput()">${this._renderSectionOptions(section ? section.id : '')}</select>
-                        </div>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label>Кратко</label>
-                            <textarea id="wiki-article-summary" rows="3" placeholder="Короткое описание: что здесь можно узнать." oninput="Wiki.handleEditorInput()">${this._esc(article.summary || '')}</textarea>
-                        </div>
-                        <div class="form-group">
-                            <label>Теги</label>
-                            <input type="text" id="wiki-article-tags" value="${this._esc((article.tags || []).join(', '))}" placeholder="склад, резерв, логистика" oninput="Wiki.handleEditorInput()">
-                            <span class="form-hint">Через запятую. Помогают поиску.</span>
-                        </div>
+            <div class="wiki-editor-stack">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Заголовок</label>
+                        <input type="text" id="wiki-article-title" value="${this._esc(article.title)}" placeholder="Название статьи" oninput="Wiki.handleEditorInput()">
                     </div>
                     <div class="form-group">
-                        <label>Текст статьи</label>
-                        <textarea id="wiki-article-body" rows="18" placeholder="Основной текст статьи." oninput="Wiki.handleEditorInput()">${this._esc(article.body || '')}</textarea>
-                        <span class="form-hint">Поддерживаются простые заголовки <code>#</code>, <code>##</code>, маркированные и нумерованные списки для предпросмотра.</span>
-                    </div>
-                    <div class="flex gap-8">
-                        <button class="btn btn-success" onclick="Wiki.saveSelectedArticle()">Сохранить статью</button>
-                        <button class="btn btn-outline" onclick="Wiki.createArticle('${this._esc(article.section_id)}')">+ Еще статья в этом разделе</button>
+                        <label>Раздел</label>
+                        <select id="wiki-article-section" onchange="Wiki.handleEditorInput()">${this._renderSectionOptions(section ? section.id : '')}</select>
                     </div>
                 </div>
-                <div class="wiki-preview-card">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Кратко</label>
+                        <textarea id="wiki-article-summary" rows="3" placeholder="Короткое описание: что здесь можно узнать." oninput="Wiki.handleEditorInput()">${this._esc(article.summary || '')}</textarea>
+                    </div>
+                    <div class="form-group">
+                        <label>Теги</label>
+                        <input type="text" id="wiki-article-tags" value="${this._esc((article.tags || []).join(', '))}" placeholder="склад, резерв, логистика" oninput="Wiki.handleEditorInput()">
+                        <span class="form-hint">Через запятую. Помогают поиску.</span>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Текст статьи</label>
+                    <textarea id="wiki-article-body" rows="18" placeholder="Основной текст статьи." oninput="Wiki.handleEditorInput()">${this._esc(article.body || '')}</textarea>
+                    <span class="form-hint">Поддерживаются простые заголовки <code>#</code>, <code>##</code>, маркированные и нумерованные списки для предпросмотра.</span>
+                </div>
+                <div class="flex gap-8">
+                    <button class="btn btn-success" onclick="Wiki.saveSelectedArticle()">Сохранить статью</button>
+                    <button class="btn btn-outline" onclick="Wiki.toggleEditMode(false)">Отмена</button>
+                    <button class="btn btn-outline" onclick="Wiki.createArticle('${this._esc(article.section_id)}')">+ Еще статья в этом разделе</button>
+                </div>
+                <div class="wiki-preview-card wiki-preview-card-inline">
                     ${this._renderPreviewCard(draft)}
                 </div>
+            </div>
             </div>
         `;
     },
@@ -788,11 +844,22 @@ const Wiki = {
 
     selectSection(sectionId) {
         this.selectedSectionId = sectionId || 'all';
+        this.editMode = false;
+        const first = this._getVisibleArticles().find(article => this.selectedSectionId === 'all' || article.section_id === this.selectedSectionId) || null;
+        this.selectedArticleId = first ? first.id : null;
         this.render();
     },
 
     selectArticle(articleId) {
         this.selectedArticleId = articleId || null;
+        this.editMode = false;
+        const article = this._getArticle(this.selectedArticleId);
+        if (article) this.selectedSectionId = article.section_id;
+        this.render();
+    },
+
+    toggleEditMode(force) {
+        this.editMode = typeof force === 'boolean' ? force : !this.editMode;
         this.render();
     },
 
@@ -877,6 +944,8 @@ const Wiki = {
         };
         this.state.articles.unshift(article);
         this.selectedArticleId = article.id;
+        this.selectedSectionId = article.section_id;
+        this.editMode = true;
         await this.persist();
         this.render();
         App.toast('Создана новая статья');
@@ -898,6 +967,7 @@ const Wiki = {
         article.updated_at = this._nowIso();
         article.updated_by = this._currentAuthor();
         await this.persist();
+        this.editMode = false;
         this.render();
         App.toast('Статья сохранена');
     },
@@ -926,6 +996,8 @@ const Wiki = {
         };
         this.state.articles.unshift(duplicate);
         this.selectedArticleId = duplicate.id;
+        this.selectedSectionId = duplicate.section_id;
+        this.editMode = true;
         await this.persist();
         this.render();
         App.toast('Создана копия статьи');

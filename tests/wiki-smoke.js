@@ -113,7 +113,8 @@ async function main() {
     const rootHtml = String(context.document.getElementById('wiki-root').innerHTML || '');
     assert.match(rootHtml, /База знаний/);
     assert.match(rootHtml, /Быстрый старт/);
-    assert.match(rootHtml, /Онбординг/);
+    assert.match(rootHtml, /Продажи, клиенты и CRM/);
+    assert.match(rootHtml, /Производство и операции/);
     assert.match(rootHtml, /Черновики переноса/);
     assert.match(rootHtml, /Пароли/);
     assert.match(rootHtml, /Разбить по # заголовкам/);
@@ -121,16 +122,16 @@ async function main() {
     assert.equal(Array.isArray(context.__savedWiki.articles), true);
     assert.ok(context.__savedWiki.articles.some(article => article.source_url && /notion\.site/.test(article.source_url)));
 
-    await vm.runInContext('Wiki.createArticle("notion_home_general")', context);
+    await vm.runInContext('Wiki.createArticle("production-ops")', context);
     context.document.getElementById('wiki-article-title').value = 'Регламент склада';
     context.document.getElementById('wiki-article-summary').value = 'Как вести резерв и списание';
-    context.document.getElementById('wiki-article-section').value = 'notion_home_general';
+    context.document.getElementById('wiki-article-section').value = 'production-ops';
     context.document.getElementById('wiki-article-tags').value = 'склад, резерв';
     context.document.getElementById('wiki-article-body').value = 'Первый абзац\nВторой абзац';
     await vm.runInContext('Wiki.saveSelectedArticle()', context);
 
     const savedArticle = context.__savedWiki.articles.find(article => article.title === 'Регламент склада');
-    assert.equal(savedArticle.section_id, 'notion_home_general');
+    assert.equal(savedArticle.section_id, 'production-ops');
     assert.deepEqual(savedArticle.tags, ['склад', 'резерв']);
     assert.match(savedArticle.body, /Второй абзац/);
 
@@ -140,14 +141,14 @@ async function main() {
     context.document.getElementById('wiki-preview-tags');
     context.document.getElementById('wiki-preview-body');
     context.document.getElementById('wiki-article-title').value = 'Обновленный регламент';
-    context.document.getElementById('wiki-article-section').value = 'notion_home_onboarding';
+    context.document.getElementById('wiki-article-section').value = 'production-ops';
     context.document.getElementById('wiki-article-summary').value = 'Короткий summary';
     context.document.getElementById('wiki-article-tags').value = 'литейка, молды';
     context.document.getElementById('wiki-article-body').value = '# Литье\n- Шаг 1\n- Шаг 2';
     vm.runInContext('Wiki.handleEditorInput()', context);
 
     assert.match(context.document.getElementById('wiki-preview-title').textContent, /Обновленный регламент/);
-    assert.match(context.document.getElementById('wiki-preview-section').textContent, /Онбординг/);
+    assert.match(context.document.getElementById('wiki-preview-section').textContent, /Производство и операции/);
     assert.match(context.document.getElementById('wiki-preview-summary').textContent, /Короткий summary/);
     assert.match(context.document.getElementById('wiki-preview-tags').innerHTML, /молды/);
     assert.match(context.document.getElementById('wiki-preview-body').innerHTML, /<h3>Литье<\/h3>/);
