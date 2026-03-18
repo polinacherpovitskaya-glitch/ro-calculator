@@ -6,7 +6,6 @@
 
 const IndirectCosts = {
     employees: [],
-    timeEntries: [],
     monthsData: {},   // { "2026-03": { rent: ..., utilities: ..., total_override: ..., ... } }
     currentMonth: '',
 
@@ -39,7 +38,6 @@ const IndirectCosts = {
 
     async load() {
         this.employees = (await loadEmployees()) || [];
-        this.timeEntries = (await loadTimeEntries()) || [];
         // Load from Supabase first, fallback to localStorage
         await this._loadFromSupabase();
         this.currentMonth = this._todayMonth();
@@ -178,50 +176,12 @@ const IndirectCosts = {
         return white + black + taxes;
     },
 
-    _getEmployeePayrollProfile(employee) {
-        const explicit = String(employee?.payroll_profile || '').trim();
-        if (explicit) return explicit;
-        const baseSalary = parseFloat(employee?.pay_base_salary_month) || 0;
-        if (String(employee?.role || '') === 'management' && baseSalary > 0) {
-            return 'management_salary_with_production_allocation';
-        }
-        if (baseSalary > 0) return 'salary_monthly';
-        return 'hourly';
-    },
-
-    _getEmployeeProductionHoursForCurrentMonth(employee) {
-        if (!employee) return 0;
-        const prefix = `${this.currentMonth}-`;
-        return (this.timeEntries || []).reduce((sum, entry) => {
-            if (!String(entry.date || '').startsWith(prefix)) return sum;
-            const sameEmployeeId = entry.employee_id != null && String(entry.employee_id) === String(employee.id);
-            const sameName = String(entry.worker_name || '').trim() === String(employee.name || '').trim();
-            if (!sameEmployeeId && !sameName) return sum;
-            return sum + (parseFloat(entry.hours) || 0);
-        }, 0);
-    },
-
-    _getEffectiveProductionShare(employee) {
-        const payrollProfile = this._getEmployeePayrollProfile(employee);
-        if (payrollProfile === 'management_salary_with_production_allocation') {
-            const baseHours = parseFloat(employee?.pay_base_hours_month) || 176;
-            if (baseHours <= 0) return 0;
-            const productionHours = this._getEmployeeProductionHoursForCurrentMonth(employee);
-            return Math.max(0, Math.min(100, Math.round((productionHours / baseHours) * 1000) / 10));
-        }
-        const key = String(employee?.id || '');
-        if (this._shareOverrides && this._shareOverrides[key] !== undefined) {
-            return this._shareOverrides[key];
-        }
-        return employee?.production_share ?? (this.ROLE_DEFAULT_SHARE[employee?.role] ?? 0);
-    },
-
     calcEmployeeIndirectTotal() {
         return this.employees
             .filter(e => e.is_active !== false)
             .reduce((sum, e) => {
                 const totalCost = this._calcEmployeeTotalCost(e);
-                const share = this._getEffectiveProductionShare(e);
+                const share = e.production_share ?? 0;
                 return sum + totalCost * (100 - share) / 100;
             }, 0);
     },
@@ -290,7 +250,7 @@ const IndirectCosts = {
         // Only show employees who contribute to indirect costs (production_share < 100)
         const activeEmps = this.employees.filter(e => {
             if (e.is_active === false) return false;
-            const share = this._getEffectiveProductionShare(e);
+            const share = e.production_share ?? (this.ROLE_DEFAULT_SHARE[e.role] ?? 0);
             return share < 100; // hide 100% production workers
         });
 
@@ -305,27 +265,22 @@ const IndirectCosts = {
             const white = e.pay_white_salary || 0;
             const black = e.pay_black_salary || 0;
             const taxes = totalCost - white - black;
-            const share = this._getEffectiveProductionShare(e);
+            const share = e.production_share ?? 0;
             const indirect = totalCost * (100 - share) / 100;
-            const payrollProfile = this._getEmployeePayrollProfile(e);
-            const dynamicHours = payrollProfile === 'management_salary_with_production_allocation'
-                ? this._getEmployeeProductionHoursForCurrentMonth(e)
-                : 0;
             const badge = `<span class="badge ${roleBadges[e.role] || ''}">${roleLabels[e.role] || e.role || '—'}</span>`;
             const costHint = taxes > 0
                 ? `<span class="text-muted" style="font-size:10px">б:${formatRub(white)} ч:${formatRub(black)} нал:${formatRub(taxes)}</span>`
                 : `<span class="text-muted" style="font-size:10px">${white > 0 ? 'б:' + formatRub(white) : ''}${black > 0 ? ' ч:' + formatRub(black) : ''}</span>`;
-            const shareCell = payrollProfile === 'management_salary_with_production_allocation'
-                ? `<div class="text-right" style="font-weight:600;">${share.toFixed(1)}%</div><div class="text-muted" style="font-size:10px">по часам: ${dynamicHours.toFixed(1)}ч / ${(parseFloat(e.pay_base_hours_month) || 176)}ч</div>`
-                : `<input type="number" min="0" max="100" value="${share}"
-                        class="ic-inline-input" style="width:60px;text-align:right"
-                        onchange="IndirectCosts.updateShare(${e.id}, this.value)">%`;
 
             return `<tr>
                 <td style="font-weight:600">${this._esc(e.name)}</td>
                 <td>${badge}</td>
                 <td class="text-right">${formatRub(totalCost)}<br>${costHint}</td>
-                <td class="text-right">${shareCell}</td>
+                <td class="text-right">
+                    <input type="number" min="0" max="100" value="${share}"
+                        class="ic-inline-input" style="width:60px;text-align:right"
+                        onchange="IndirectCosts.updateShare(${e.id}, this.value)">%
+                </td>
                 <td class="text-right" style="${indirect > 0 ? 'color:var(--danger)' : 'color:var(--text-muted)'}">
                     ${formatRub(indirect)}
                 </td>
@@ -430,10 +385,6 @@ const IndirectCosts = {
         const share = Math.max(0, Math.min(100, parseInt(value) || 0));
         const emp = this.employees.find(e => e.id === employeeId);
         if (emp) {
-            if (this._getEmployeePayrollProfile(emp) === 'management_salary_with_production_allocation') {
-                this.render();
-                return;
-            }
             emp.production_share = share;
             if (!this._shareOverrides) this._shareOverrides = {};
             this._shareOverrides[String(employeeId)] = share;

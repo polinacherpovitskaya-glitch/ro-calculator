@@ -31,7 +31,7 @@ const Marketplaces = {
                 loadWarehouseItems(),
                 loadColors(),
             ]);
-            this.allSets = (sets || []).map(s => this._normalizeMarketplaceSet(s));
+            this.allSets = sets;
             this._plasticBlanks = plasticBlanks.filter(m => m.status === 'active');
             this._hwCatalog = hwCatalog;
             this._pkgCatalog = pkgCatalog;
@@ -180,24 +180,23 @@ const Marketplaces = {
     editSet(id) {
         const s = this.allSets.find(x => x.id === id);
         if (!s) return;
-        const normalizedSet = this._normalizeMarketplaceSet(s);
         this.editingSetId = id;
-        this._pendingPhoto = normalizedSet.photo_url || '';
-        document.getElementById('mp-form-title').textContent = 'Редактировать: ' + (normalizedSet.name || '');
-        document.getElementById('mp-set-name').value = normalizedSet.name || '';
-        document.getElementById('mp-set-commission').value = normalizedSet.commission || 46;
-        document.getElementById('mp-set-vat').value = normalizedSet.vat || 5;
-        document.getElementById('mp-set-osn').value = normalizedSet.osn || 6;
-        document.getElementById('mp-set-commercial').value = normalizedSet.commercial || 6.5;
-        document.getElementById('mp-set-acquiring').value = normalizedSet.acquiring || 4;
-        document.getElementById('mp-set-shop-multiplier').value = normalizedSet.shop_multiplier || 3;
-        document.getElementById('mp-set-margin').value = normalizedSet.target_margin || 40;
-        document.getElementById('mp-set-price-manual').value = normalizedSet.mp_actual_price || normalizedSet.selling_price || '';
-        document.getElementById('mp-set-shop-price-manual').value = normalizedSet.shop_actual_price || normalizedSet.shop_suggested_price || '';
-        this._plasticItems = (normalizedSet.plastic_items || []).map(i => ({ ...i, colors: Array.isArray(i.colors) ? i.colors : [] }));
-        this._hwItems = (normalizedSet.hw_items || []).map(i => ({ ...i }));
-        this._pkgItems = (normalizedSet.pkg_items || []).map(i => ({ ...i }));
-        this._colorVariants = (normalizedSet.color_variants || []).map(v => ({ ...v, assignments: Array.isArray(v.assignments) ? v.assignments.map(a => ({...a})) : [] }));
+        this._pendingPhoto = s.photo_url || '';
+        document.getElementById('mp-form-title').textContent = 'Редактировать: ' + (s.name || '');
+        document.getElementById('mp-set-name').value = s.name || '';
+        document.getElementById('mp-set-commission').value = s.commission || 46;
+        document.getElementById('mp-set-vat').value = s.vat || 5;
+        document.getElementById('mp-set-osn').value = s.osn || 6;
+        document.getElementById('mp-set-commercial').value = s.commercial || 6.5;
+        document.getElementById('mp-set-acquiring').value = s.acquiring || 4;
+        document.getElementById('mp-set-shop-multiplier').value = s.shop_multiplier || 3;
+        document.getElementById('mp-set-margin').value = s.target_margin || 40;
+        document.getElementById('mp-set-price-manual').value = s.mp_actual_price || s.selling_price || '';
+        document.getElementById('mp-set-shop-price-manual').value = s.shop_actual_price || s.shop_suggested_price || '';
+        this._plasticItems = (s.plastic_items || []).map(i => ({ ...i, colors: Array.isArray(i.colors) ? i.colors : [] }));
+        this._hwItems = (s.hw_items || []).map(i => ({ ...i }));
+        this._pkgItems = (s.pkg_items || []).map(i => ({ ...i }));
+        this._colorVariants = (s.color_variants || []).map(v => ({ ...v, assignments: Array.isArray(v.assignments) ? v.assignments.map(a => ({...a})) : [] }));
         // Auto-migrate: if no variants but plastic items have old-style colors, create variant from them
         if (!this._colorVariants.length && this._plasticItems.some(pi => Array.isArray(pi.colors) && pi.colors.length > 0)) {
             const assignments = this._plasticItems.map(pi => {
@@ -212,7 +211,7 @@ const Marketplaces = {
                 assignments,
             }];
         }
-        this._updatePhotoPreview(normalizedSet.photo_url || '');
+        this._updatePhotoPreview(s.photo_url || '');
         document.getElementById('mp-photo-file').value = '';
         document.getElementById('mp-delete-btn').style.display = '';
         document.getElementById('mp-set-form').style.display = '';
@@ -233,14 +232,20 @@ const Marketplaces = {
     onPhotoFileChange(input) {
         if (!input.files || !input.files[0]) return;
         const file = input.files[0];
+        input.value = '';
         if (file.size > 2 * 1024 * 1024) { App.toast('Макс 2MB'); return; }
         const reader = new FileReader();
         reader.onload = (e) => {
             this._resizeImage(e.target.result, 200, (thumb) => {
+                if (!thumb) {
+                    App.toast('Не удалось обработать фото');
+                    return;
+                }
                 this._pendingPhoto = thumb;
                 this._updatePhotoPreview(thumb);
             });
         };
+        reader.onerror = () => App.toast('Не удалось прочитать фото');
         reader.readAsDataURL(file);
     },
 
@@ -257,6 +262,7 @@ const Marketplaces = {
             canvas.getContext('2d').drawImage(img, 0, 0, w, h);
             callback(canvas.toDataURL('image/jpeg', 0.7));
         };
+        img.onerror = () => callback('');
         img.src = dataUrl;
     },
 
@@ -280,12 +286,32 @@ const Marketplaces = {
     },
 
     addHwItem() {
-        this._hwItems.push({ source: 'catalog', blank_id: null, wh_id: null, warehouse_sku: '', photo_thumbnail: '', qty: 1, unit: 'шт', name: '', cost_per_unit: 0, assembly_speed: 0 });
+        this._hwItems.push({
+            source: 'catalog',
+            blank_id: null,
+            wh_id: null,
+            qty: 1,
+            name: '',
+            cost_per_unit: 0,
+            assembly_speed: 0,
+            warehouse_sku: '',
+            photo_thumbnail: '',
+        });
         this.renderFormItems();
     },
 
     addPkgItem() {
-        this._pkgItems.push({ source: 'catalog', blank_id: null, wh_id: null, warehouse_sku: '', photo_thumbnail: '', qty: 1, unit: 'шт', name: '', cost_per_unit: 0, assembly_speed: 0 });
+        this._pkgItems.push({
+            source: 'catalog',
+            blank_id: null,
+            wh_id: null,
+            qty: 1,
+            name: '',
+            cost_per_unit: 0,
+            assembly_speed: 0,
+            warehouse_sku: '',
+            photo_thumbnail: '',
+        });
         this.renderFormItems();
     },
 
@@ -328,6 +354,89 @@ const Marketplaces = {
             </div>`;
     },
 
+    _buildPickerMetaLine(sku, parts) {
+        const bits = [];
+        if (sku) bits.push(sku);
+        (parts || []).filter(Boolean).forEach(part => bits.push(part));
+        return bits.join(' · ');
+    },
+
+    _buildMarketplacePickerData(type) {
+        const isPackaging = type === 'pkg';
+        const catalog = isPackaging ? this._pkgCatalog : this._hwCatalog;
+        const warehouse = isPackaging ? this._allWarehousePkg : this._allWarehouseHw;
+        const linkedWarehouseById = new Map((warehouse || []).map(item => [Number(item.id), item]));
+        const catalogLabel = isPackaging ? 'Из каталога упаковки' : 'Из каталога фурнитуры';
+        const warehouseLabel = isPackaging ? 'Со склада' : 'Со склада';
+
+        const catalogItems = (catalog || []).map(blank => {
+            const linkedWarehouse = linkedWarehouseById.get(Number(blank.warehouse_item_id || 0)) || null;
+            const purchaseCost = isPackaging
+                ? round2((parseFloat(blank.price_per_unit) || 0) + (parseFloat(blank.delivery_per_unit) || 0))
+                : round2((parseFloat(blank.price_rub) || 0) || ((parseFloat(blank.price_cny) || 0) * (ChinaCatalog._cnyRate || 12.5) + (parseFloat(blank.delivery_per_unit) || 0)));
+            return {
+                id: `catalog:${blank.id}`,
+                name: blank.name || 'Без названия',
+                sku: linkedWarehouse?.sku || '',
+                price_per_unit: purchaseCost,
+                photo_thumbnail: linkedWarehouse?.photo_thumbnail || linkedWarehouse?.photo_url || blank.photo_url || '',
+                photo_url: blank.photo_url || '',
+                metaText: this._buildPickerMetaLine(linkedWarehouse?.sku || '', [
+                    purchaseCost > 0 ? `${formatRub(purchaseCost)} себес` : '',
+                    linkedWarehouse ? 'каталог + склад' : 'каталог',
+                ]),
+                kind: isPackaging ? 'packaging' : 'hardware',
+                category: linkedWarehouse?.category || (isPackaging ? 'packaging' : 'other'),
+            };
+        });
+
+        const warehouseItems = (warehouse || []).map(item => ({
+            id: `warehouse:${item.id}`,
+            name: item.name || 'Без названия',
+            size: item.size || '',
+            color: item.color || '',
+            sku: item.sku || '',
+            available_qty: item.available_qty ?? item.qty ?? 0,
+            unit: item.unit || 'шт',
+            price_per_unit: parseFloat(item.price_per_unit) || 0,
+            photo_thumbnail: item.photo_thumbnail || item.photo_url || '',
+            photo_url: item.photo_url || '',
+            metaText: this._buildPickerMetaLine(item.sku || '', [
+                `${item.available_qty ?? item.qty ?? 0} ${item.unit || 'шт'}`,
+                (parseFloat(item.price_per_unit) || 0) > 0 ? `${formatRub(item.price_per_unit || 0)}` : '',
+                'склад',
+            ]),
+            kind: isPackaging ? 'packaging' : 'hardware',
+            category: item.category || (isPackaging ? 'packaging' : 'other'),
+        }));
+
+        return {
+            catalog: {
+                label: catalogLabel,
+                icon: '📚',
+                color: '#eef2ff',
+                textColor: '#4338ca',
+                kind: isPackaging ? 'packaging' : 'hardware',
+                items: catalogItems,
+            },
+            warehouse: {
+                label: warehouseLabel,
+                icon: isPackaging ? '📦' : '🔩',
+                color: isPackaging ? '#f3e8ff' : '#eef2ff',
+                textColor: isPackaging ? '#7c3aed' : '#4338ca',
+                kind: isPackaging ? 'packaging' : 'hardware',
+                items: warehouseItems,
+            },
+        };
+    },
+
+    _getMarketplacePickerSelectedId(item) {
+        if (!item) return null;
+        if (item.source === 'warehouse' && item.wh_id) return `warehouse:${item.wh_id}`;
+        if (item.blank_id) return `catalog:${item.blank_id}`;
+        return null;
+    },
+
     _openDropdown(uid) {
         const dd = document.getElementById(uid + '_dd');
         if (dd) { dd.style.display = ''; this._filterDropdown(uid); }
@@ -359,234 +468,11 @@ const Marketplaces = {
         });
     },
 
-    _buildPickerMetaLine(sku, parts) {
-        const normalizedSku = String(sku || '').trim() || 'без артикула';
-        return [normalizedSku, ...(parts || []).filter(Boolean)].join(' · ');
-    },
-
-    _getPartUnitLabel(item) {
-        if (typeof Warehouse !== 'undefined' && Warehouse && typeof Warehouse.getPickerUnitLabel === 'function') {
-            return Warehouse.getPickerUnitLabel(item);
-        }
-        return String(item?.unit || '').trim() || 'шт';
-    },
-
-    _getPartUnitPrice(item) {
-        if (typeof Warehouse !== 'undefined' && Warehouse && typeof Warehouse.getPickerEffectivePrice === 'function') {
-            return Warehouse.getPickerEffectivePrice(item);
-        }
-        return round2(parseFloat(item?.price_per_unit) || 0);
-    },
-
-    _getPartPriceHint(item) {
-        const unitPrice = round2(parseFloat(item?.cost_per_unit) || 0);
-        if (!(unitPrice > 0)) return '';
-        return `${formatRub(unitPrice)}/${this._getPartUnitLabel(item)}`;
-    },
-
-    _buildMarketplacePickerData(type) {
-        const isPackaging = type === 'pkg';
-        const catalog = isPackaging ? this._pkgCatalog : this._hwCatalog;
-        const warehouseItems = isPackaging ? this._allWarehousePkg : this._allWarehouseHw;
-        const defaultCategory = isPackaging ? 'packaging' : 'other';
-        const linkedWarehouse = new Map(
-            warehouseItems
-                .filter(item => Number(item.id) > 0)
-                .map(item => [Number(item.id), item])
-        );
-
-        const grouped = {
-            catalog: {
-                label: 'Каталог',
-                icon: '📘',
-                color: 'rgba(59, 130, 246, 0.12)',
-                textColor: '#1d4ed8',
-                items: [],
-            },
-            warehouse: {
-                label: 'Склад',
-                icon: '📦',
-                color: 'rgba(16, 185, 129, 0.16)',
-                textColor: '#047857',
-                items: [],
-            },
-        };
-
-        catalog.forEach(blank => {
-            const linked = linkedWarehouse.get(Number(blank.warehouse_item_id || 0)) || null;
-            const sellPrice = parseFloat(blank.sell_price) || 0;
-            const cnyRate = typeof ChinaCatalog !== 'undefined' && ChinaCatalog && ChinaCatalog._cnyRate
-                ? ChinaCatalog._cnyRate
-                : 12.5;
-            const baseCost = isPackaging
-                ? (parseFloat(blank.price_per_unit) || 0) + (parseFloat(blank.delivery_per_unit) || 0)
-                : ((parseFloat(blank.price_rub) || 0) > 0
-                    ? (parseFloat(blank.price_rub) || 0)
-                    : round2((parseFloat(blank.price_cny) || 0) * cnyRate + (parseFloat(blank.delivery_per_unit) || 0)));
-            const stockQty = linked ? (linked.available_qty ?? linked.qty ?? null) : null;
-            const stockText = stockQty == null ? '' : (stockQty > 0 ? `${stockQty} ${this._getPartUnitLabel(linked || blank)} на складе` : 'нет на складе');
-            const priceText = sellPrice > 0
-                ? `прайс ${formatRub(sellPrice)}`
-                : `${formatRub(baseCost)} себес`;
-            grouped.catalog.items.push({
-                id: `catalog:${blank.id}`,
-                category: linked?.category || defaultCategory,
-                name: blank.name || '',
-                sku: linked?.sku || blank.sku || blank.warehouse_sku || '',
-                size: linked?.size || blank.size || '',
-                color: linked?.color || blank.color || '',
-                qty: linked?.qty || 0,
-                available_qty: stockQty,
-                price_per_unit: baseCost || 0,
-                unit: this._getPartUnitLabel(linked || blank),
-                photo_thumbnail: linked?.photo_thumbnail || linked?.photo_url || blank.photo_url || blank._whPhoto || '',
-                photo_url: linked?.photo_url || blank.photo_url || '',
-                meta_line: this._buildPickerMetaLine(linked?.sku || blank.sku || blank.warehouse_sku || '', [stockText, priceText, 'каталог']),
-            });
-        });
-
-        warehouseItems.forEach(item => {
-            const stockQty = item.available_qty ?? item.qty ?? 0;
-            grouped.warehouse.items.push({
-                id: `warehouse:${item.id}`,
-                category: item.category || defaultCategory,
-                name: item.name || '',
-                sku: item.sku || '',
-                size: item.size || '',
-                color: item.color || '',
-                qty: item.qty || 0,
-                available_qty: stockQty,
-                price_per_unit: this._getPartUnitPrice(item),
-                unit: this._getPartUnitLabel(item),
-                photo_thumbnail: item.photo_thumbnail || item.photo_url || '',
-                photo_url: item.photo_url || '',
-                meta_line: this._buildPickerMetaLine(item.sku || '', [
-                    stockQty > 0 ? `${stockQty} ${this._getPartUnitLabel(item)}` : 'нет',
-                    this._getPartUnitPrice(item) > 0 ? `${formatRub(this._getPartUnitPrice(item))}/${this._getPartUnitLabel(item)}` : '',
-                    'склад',
-                ]),
-            });
-        });
-
-        Object.keys(grouped).forEach(key => {
-            if (!grouped[key].items.length) delete grouped[key];
-        });
-        return grouped;
-    },
-
-    _getMarketplacePickerSelectedId(item) {
-        const normalized = this._normalizeMarketplacePart(item, 'hw');
-        if (!normalized) return null;
-        if (normalized.source === 'warehouse' && normalized.wh_id) return `warehouse:${normalized.wh_id}`;
-        if (normalized.wh_id && !normalized.blank_id) return `warehouse:${normalized.wh_id}`;
-        if (normalized.blank_id) return `catalog:${normalized.blank_id}`;
-        return null;
-    },
-
-    _normalizeMarketplacePart(rawItem, kind) {
-        if (!rawItem) return null;
-        const isPackaging = kind === 'pkg';
-        const catalog = isPackaging ? (this._pkgCatalog || []) : (this._hwCatalog || []);
-        const warehouseItems = isPackaging ? (this._allWarehousePkg || []) : (this._allWarehouseHw || []);
-        const item = {
-            source: 'catalog',
-            blank_id: null,
-            wh_id: null,
-            warehouse_sku: '',
-            photo_thumbnail: '',
-            qty: 1,
-            unit: 'шт',
-            name: '',
-            cost_per_unit: 0,
-            assembly_speed: 0,
-            ...rawItem,
-        };
-
-        const hasBlankId = Number(item.blank_id || 0) > 0;
-        const hasWhId = Number(item.wh_id || 0) > 0;
-
-        if (item.source === 'custom') {
-            return item;
-        }
-
-        if (item.source === 'warehouse' || (!item.source && hasWhId && !hasBlankId) || (hasWhId && !hasBlankId)) {
-            item.source = 'warehouse';
-        } else if (hasBlankId) {
-            item.source = 'catalog';
-        } else if (hasWhId) {
-            item.source = 'warehouse';
-        } else {
-            item.source = 'catalog';
-        }
-
-        const blank = hasBlankId
-            ? catalog.find(entry => Number(entry.id) === Number(item.blank_id || 0)) || null
-            : null;
-        const linkedWarehouseId = Number(blank?.warehouse_item_id || 0);
-        const warehouseItem = hasWhId
-            ? warehouseItems.find(entry => Number(entry.id) === Number(item.wh_id || 0)) || null
-            : (linkedWarehouseId
-                ? warehouseItems.find(entry => Number(entry.id) === linkedWarehouseId) || null
-                : null);
-
-        if (item.source === 'warehouse' && hasWhId) {
-            const normalizedWarehouseCost = this._getPartUnitPrice(warehouseItem || item);
-            item.warehouse_sku = item.warehouse_sku || warehouseItem?.sku || blank?.sku || '';
-            item.photo_thumbnail = item.photo_thumbnail || warehouseItem?.photo_thumbnail || warehouseItem?.photo_url || blank?.photo_url || blank?._whPhoto || '';
-            item.unit = this._getPartUnitLabel(warehouseItem || item);
-            item.name = item.name || [
-                warehouseItem?.name || blank?.name || '',
-                warehouseItem?.size || '',
-                warehouseItem?.color || '',
-            ].filter(Boolean).join(' ');
-            item.cost_per_unit = normalizedWarehouseCost;
-            if (!(parseFloat(item.assembly_speed) > 0)) {
-                item.assembly_speed = parseFloat(blank?.assembly_speed) || 0;
-            }
-            return item;
-        }
-
-        if (blank) {
-            item.warehouse_sku = item.warehouse_sku || warehouseItem?.sku || blank.sku || '';
-            item.photo_thumbnail = item.photo_thumbnail || warehouseItem?.photo_thumbnail || warehouseItem?.photo_url || blank.photo_url || blank._whPhoto || '';
-            item.unit = this._getPartUnitLabel(warehouseItem || item);
-            item.name = item.name || blank.name || '';
-            if (!(parseFloat(item.assembly_speed) > 0)) {
-                item.assembly_speed = parseFloat(blank.assembly_speed) || 0;
-            }
-            if (isPackaging && !(parseFloat(item.cost_per_unit) > 0)) {
-                item.cost_per_unit = round2((parseFloat(blank.price_per_unit) || 0) + (parseFloat(blank.delivery_per_unit) || 0));
-            }
-        }
-
-        return item;
-    },
-
-    _normalizeHwItem(item) {
-        return this._normalizeMarketplacePart(item, 'hw');
-    },
-
-    _normalizePkgItem(item) {
-        return this._normalizeMarketplacePart(item, 'pkg');
-    },
-
-    _normalizeMarketplaceSet(set) {
-        if (!set) return set;
-        return {
-            ...set,
-            hw_items: (set.hw_items || []).map(item => this._normalizeHwItem(item)),
-            pkg_items: (set.pkg_items || []).map(item => this._normalizePkgItem(item)),
-        };
-    },
-
     // ==========================================
     // RENDER FORM ITEMS
     // ==========================================
 
     renderFormItems() {
-        this._hwItems = (this._hwItems || []).map(item => this._normalizeHwItem(item));
-        this._pkgItems = (this._pkgItems || []).map(item => this._normalizePkgItem(item));
-
         // Plastic — searchable dropdown from molds
         const plasticList = this._plasticBlanks.map(b => ({
             id: b.id,
@@ -607,21 +493,18 @@ const Marketplaces = {
             </div>
         `).join('');
 
-        // Hardware — all warehouse hw + catalog + custom option
         const hwPickerData = this._buildMarketplacePickerData('hw');
 
         document.getElementById('mp-hw-items').innerHTML = this._hwItems.map((item, i) => {
             const isCustom = item.source === 'custom';
             const speedMin = item.assembly_speed > 0 ? round2(item.assembly_speed / 60) : '';
-            const qtyUnit = this._getPartUnitLabel(item);
-            const priceHint = this._getPartPriceHint(item);
             return `
             <div style="margin-bottom:6px;padding:6px;background:var(--bg);border-radius:6px;">
                 <div class="form-row" style="margin-bottom:2px;align-items:end;gap:6px;">
                     <div class="form-group" style="flex:2;margin:0">
                         ${isCustom
                             ? `<input type="text" value="${this._esc(item.name)}" placeholder="Название" oninput="Marketplaces._hwItems[${i}].name=this.value; Marketplaces.recalcSet()">`
-                            : Warehouse.buildImagePicker(`mphw-picker-${i}`, hwPickerData, this._getMarketplacePickerSelectedId(item), 'Marketplaces._selectHw', null, { searchPlaceholder: 'Поиск по названию или артикулу...' })
+                            : Warehouse.buildImagePicker(`mp-hw-picker-${i}`, hwPickerData, this._getMarketplacePickerSelectedId(item), 'Marketplaces._selectHw', null, { searchPlaceholder: 'Поиск фурнитуры по названию или артикулу...' })
                         }
                     </div>
                     ${isCustom ? `
@@ -629,37 +512,33 @@ const Marketplaces = {
                         <input type="number" min="0" step="0.1" value="${item.cost_per_unit || ''}" placeholder="₽/шт" oninput="Marketplaces._hwItems[${i}].cost_per_unit=parseFloat(this.value)||0; Marketplaces.recalcSet()">
                     </div>` : ''}
                     <div class="form-group" style="flex:0 0 88px;margin:0">
-                        <input type="number" min="0" step="0.1" value="${speedMin}" placeholder="сборка/мин" title="Скорость сборки, ед/мин"
+                        <input type="number" min="0" step="0.1" value="${speedMin}" placeholder="шт/мин" title="Сборка, шт/мин"
                             oninput="Marketplaces._hwItems[${i}].assembly_speed=round2((parseFloat(this.value)||0)*60); Marketplaces.recalcSet()">
                     </div>
                     <div class="form-group" style="flex:0 0 55px;margin:0">
-                        <input type="number" min="1" value="${item.qty || 1}" oninput="Marketplaces._onQtyChange('hw',${i},this.value)" style="text-align:center;" title="Кол-во (${this._esc(qtyUnit)})" placeholder="${this._esc(qtyUnit)}">
+                        <input type="number" min="1" value="${item.qty || 1}" oninput="Marketplaces._onQtyChange('hw',${i},this.value)" style="text-align:center;" title="Кол-во">
                     </div>
                     <button class="btn-remove" style="margin-bottom:6px;" onclick="Marketplaces.removeHwItem(${i})">&#10005;</button>
                 </div>
                 <div style="display:flex;gap:6px;font-size:10px;">
                     <label style="cursor:pointer;color:${!isCustom ? 'var(--accent)' : 'var(--text-muted)'};" onclick="Marketplaces._setHwSource(${i},'catalog')">Каталог/Склад</label>
                     <label style="cursor:pointer;color:${isCustom ? 'var(--accent)' : 'var(--text-muted)'};" onclick="Marketplaces._setHwSource(${i},'custom')">Кастомная</label>
-                    ${priceHint ? `<span style="margin-left:auto;color:var(--text-muted);">${this._esc(priceHint)}</span>` : ''}
                 </div>
             </div>`;
         }).join('');
 
-        // Packaging — all warehouse pkg + catalog + custom
         const pkgPickerData = this._buildMarketplacePickerData('pkg');
 
         document.getElementById('mp-pkg-items').innerHTML = this._pkgItems.map((item, i) => {
             const isCustom = item.source === 'custom';
             const speedMin = item.assembly_speed > 0 ? round2(item.assembly_speed / 60) : '';
-            const qtyUnit = this._getPartUnitLabel(item);
-            const priceHint = this._getPartPriceHint(item);
             return `
             <div style="margin-bottom:6px;padding:6px;background:var(--bg);border-radius:6px;">
                 <div class="form-row" style="margin-bottom:2px;align-items:end;gap:6px;">
                     <div class="form-group" style="flex:2;margin:0">
                         ${isCustom
                             ? `<input type="text" value="${this._esc(item.name)}" placeholder="Название" oninput="Marketplaces._pkgItems[${i}].name=this.value; Marketplaces.recalcSet()">`
-                            : Warehouse.buildImagePicker(`mppkg-picker-${i}`, pkgPickerData, this._getMarketplacePickerSelectedId(item), 'Marketplaces._selectPkg', null, { searchPlaceholder: 'Поиск по названию или артикулу...' })
+                            : Warehouse.buildImagePicker(`mp-pkg-picker-${i}`, pkgPickerData, this._getMarketplacePickerSelectedId(item), 'Marketplaces._selectPkg', null, { searchPlaceholder: 'Поиск упаковки по названию или артикулу...' })
                         }
                     </div>
                     ${isCustom ? `
@@ -667,18 +546,17 @@ const Marketplaces = {
                         <input type="number" min="0" step="0.1" value="${item.cost_per_unit || ''}" placeholder="₽/шт" oninput="Marketplaces._pkgItems[${i}].cost_per_unit=parseFloat(this.value)||0; Marketplaces.recalcSet()">
                     </div>` : ''}
                     <div class="form-group" style="flex:0 0 88px;margin:0">
-                        <input type="number" min="0" step="0.1" value="${speedMin}" placeholder="сборка/мин" title="Скорость сборки, ед/мин"
+                        <input type="number" min="0" step="0.1" value="${speedMin}" placeholder="шт/мин" title="Сборка, шт/мин"
                             oninput="Marketplaces._pkgItems[${i}].assembly_speed=round2((parseFloat(this.value)||0)*60); Marketplaces.recalcSet()">
                     </div>
                     <div class="form-group" style="flex:0 0 55px;margin:0">
-                        <input type="number" min="1" value="${item.qty || 1}" oninput="Marketplaces._onQtyChange('pkg',${i},this.value)" style="text-align:center;" title="Кол-во (${this._esc(qtyUnit)})" placeholder="${this._esc(qtyUnit)}">
+                        <input type="number" min="1" value="${item.qty || 1}" oninput="Marketplaces._onQtyChange('pkg',${i},this.value)" style="text-align:center;" title="Кол-во">
                     </div>
                     <button class="btn-remove" style="margin-bottom:6px;" onclick="Marketplaces.removePkgItem(${i})">&#10005;</button>
                 </div>
                 <div style="display:flex;gap:6px;font-size:10px;">
                     <label style="cursor:pointer;color:${!isCustom ? 'var(--accent)' : 'var(--text-muted)'};" onclick="Marketplaces._setPkgSource(${i},'catalog')">Каталог/Склад</label>
                     <label style="cursor:pointer;color:${isCustom ? 'var(--accent)' : 'var(--text-muted)'};" onclick="Marketplaces._setPkgSource(${i},'custom')">Кастомная</label>
-                    ${priceHint ? `<span style="margin-left:auto;color:var(--text-muted);">${this._esc(priceHint)}</span>` : ''}
                 </div>
             </div>`;
         }).join('');
@@ -700,38 +578,36 @@ const Marketplaces = {
 
     _selectHw(idx, listId) {
         const item = this._hwItems[idx];
-        const rawId = String(listId || '');
-        if (rawId.startsWith('warehouse:')) {
-            // Warehouse item
-            const whId = Number(rawId.split(':')[1] || 0);
+        const selection = String(listId || '');
+        if (selection.startsWith('warehouse:')) {
+            const whId = Number(selection.split(':')[1] || 0);
             const wh = this._allWarehouseHw.find(w => Number(w.id) === whId);
             if (wh) {
                 item.source = 'warehouse';
                 item.wh_id = wh.id;
                 item.blank_id = null;
+                item.name = wh.name + (wh.size ? ' ' + wh.size : '') + (wh.color ? ' ' + wh.color : '');
+                item.cost_per_unit = wh.price_per_unit || 0;
                 item.warehouse_sku = wh.sku || '';
                 item.photo_thumbnail = wh.photo_thumbnail || wh.photo_url || '';
-                item.unit = this._getPartUnitLabel(wh);
-                item.name = wh.name + (wh.size ? ' ' + wh.size : '') + (wh.color ? ' ' + wh.color : '');
-                item.cost_per_unit = this._getPartUnitPrice(wh);
                 const linkedBlank = this._hwCatalog.find(b => Number(b.warehouse_item_id) === Number(wh.id));
                 item.assembly_speed = linkedBlank?.assembly_speed || 0;
             }
         } else {
-            // Catalog item
-            const blankId = rawId.startsWith('catalog:') ? Number(rawId.split(':')[1] || 0) : Number(rawId);
-            const hw = this._hwCatalog.find(b => Number(b.id) === blankId);
+            const numericId = selection.startsWith('catalog:')
+                ? Number(selection.split(':')[1] || 0)
+                : Number(selection);
+            const hw = this._hwCatalog.find(b => Number(b.id) === numericId);
             if (hw) {
                 item.source = 'catalog';
                 item.blank_id = hw.id;
-                item.wh_id = null;
                 const linkedWarehouse = this._allWarehouseHw.find(w => Number(w.id) === Number(hw.warehouse_item_id || 0));
-                item.warehouse_sku = linkedWarehouse?.sku || hw.sku || '';
-                item.photo_thumbnail = linkedWarehouse?.photo_thumbnail || linkedWarehouse?.photo_url || hw.photo_url || hw._whPhoto || '';
-                item.unit = this._getPartUnitLabel(linkedWarehouse || item);
+                item.wh_id = linkedWarehouse?.id || null;
                 item.name = hw.name;
                 item.cost_per_unit = 0; // will be calculated
                 item.assembly_speed = hw.assembly_speed || 0;
+                item.warehouse_sku = linkedWarehouse?.sku || '';
+                item.photo_thumbnail = linkedWarehouse?.photo_thumbnail || linkedWarehouse?.photo_url || hw.photo_url || '';
             }
         }
         this.renderFormItems();
@@ -740,36 +616,36 @@ const Marketplaces = {
 
     _selectPkg(idx, listId) {
         const item = this._pkgItems[idx];
-        const rawId = String(listId || '');
-        if (rawId.startsWith('warehouse:')) {
-            const whId = Number(rawId.split(':')[1] || 0);
+        const selection = String(listId || '');
+        if (selection.startsWith('warehouse:')) {
+            const whId = Number(selection.split(':')[1] || 0);
             const wh = this._allWarehousePkg.find(w => Number(w.id) === whId);
             if (wh) {
                 item.source = 'warehouse';
                 item.wh_id = wh.id;
                 item.blank_id = null;
+                item.name = wh.name + (wh.size ? ' ' + wh.size : '');
+                item.cost_per_unit = wh.price_per_unit || 0;
                 item.warehouse_sku = wh.sku || '';
                 item.photo_thumbnail = wh.photo_thumbnail || wh.photo_url || '';
-                item.unit = this._getPartUnitLabel(wh);
-                item.name = wh.name + (wh.size ? ' ' + wh.size : '');
-                item.cost_per_unit = this._getPartUnitPrice(wh);
                 const linkedBlank = this._pkgCatalog.find(b => Number(b.warehouse_item_id) === Number(wh.id));
                 item.assembly_speed = linkedBlank?.assembly_speed || 0;
             }
         } else {
-            const blankId = rawId.startsWith('catalog:') ? Number(rawId.split(':')[1] || 0) : Number(rawId);
-            const pkg = this._pkgCatalog.find(b => Number(b.id) === blankId);
+            const numericId = selection.startsWith('catalog:')
+                ? Number(selection.split(':')[1] || 0)
+                : Number(selection);
+            const pkg = this._pkgCatalog.find(b => Number(b.id) === numericId);
             if (pkg) {
                 item.source = 'catalog';
                 item.blank_id = pkg.id;
-                item.wh_id = null;
                 const linkedWarehouse = this._allWarehousePkg.find(w => Number(w.id) === Number(pkg.warehouse_item_id || 0));
-                item.warehouse_sku = linkedWarehouse?.sku || pkg.sku || '';
-                item.photo_thumbnail = linkedWarehouse?.photo_thumbnail || linkedWarehouse?.photo_url || pkg.photo_url || '';
-                item.unit = this._getPartUnitLabel(linkedWarehouse || item);
+                item.wh_id = linkedWarehouse?.id || null;
                 item.name = pkg.name;
                 item.cost_per_unit = (pkg.price_per_unit || 0) + (pkg.delivery_per_unit || 0);
                 item.assembly_speed = pkg.assembly_speed || 0;
+                item.warehouse_sku = linkedWarehouse?.sku || '';
+                item.photo_thumbnail = linkedWarehouse?.photo_thumbnail || linkedWarehouse?.photo_url || pkg.photo_url || '';
             }
         }
         this.renderFormItems();
@@ -783,7 +659,6 @@ const Marketplaces = {
             this._hwItems[idx].wh_id = null;
             this._hwItems[idx].warehouse_sku = '';
             this._hwItems[idx].photo_thumbnail = '';
-            this._hwItems[idx].unit = 'шт';
         }
         this.renderFormItems();
     },
@@ -795,7 +670,6 @@ const Marketplaces = {
             this._pkgItems[idx].wh_id = null;
             this._pkgItems[idx].warehouse_sku = '';
             this._pkgItems[idx].photo_thumbnail = '';
-            this._pkgItems[idx].unit = 'шт';
         }
         this.renderFormItems();
     },
@@ -815,7 +689,6 @@ const Marketplaces = {
     },
 
     _calcHwUnitComponents(item, params) {
-        item = this._normalizeHwItem(item);
         const cnyRate = params.cnyRate || 12.5;
         const fotPerHour = params.fotPerHour || 400;
         const indirectPerHour = params.indirectPerHour || 0;
@@ -860,7 +733,6 @@ const Marketplaces = {
     },
 
     _calcPkgUnitComponents(item, params) {
-        item = this._normalizePkgItem(item);
         const fotPerHour = params.fotPerHour || 400;
         const indirectPerHour = params.indirectPerHour || 0;
         const wasteFactor = params.wasteFactor || 1.1;
@@ -1024,12 +896,6 @@ const Marketplaces = {
         if (!name) { App.toast('Введите название набора'); return; }
 
         this.recalcSet();
-        const normalizedHwItems = this._hwItems
-            .map(item => this._normalizeHwItem(item))
-            .filter(item => item.blank_id || item.wh_id || (item.source === 'custom' && item.name));
-        const normalizedPkgItems = this._pkgItems
-            .map(item => this._normalizePkgItem(item))
-            .filter(item => item.blank_id || item.wh_id || (item.source === 'custom' && item.name));
 
         const mset = {
             id: this.editingSetId || undefined,
@@ -1043,8 +909,8 @@ const Marketplaces = {
             shop_multiplier: parseFloat(document.getElementById('mp-set-shop-multiplier').value) || 3,
             target_margin: parseFloat(document.getElementById('mp-set-margin').value) || 40,
             plastic_items: this._plasticItems.filter(i => i.blank_id),
-            hw_items: normalizedHwItems,
-            pkg_items: normalizedPkgItems,
+            hw_items: this._hwItems.filter(i => i.blank_id || i.wh_id || (i.source === 'custom' && i.name)),
+            pkg_items: this._pkgItems.filter(i => i.blank_id || i.wh_id || (i.source === 'custom' && i.name)),
             color_variants: this._colorVariants.filter(v => v.name || (v.assignments && v.assignments.some(a => a.color_id))),
             total_cost: this._lastCalc?.totalCost || 0,
             selling_price: this._lastCalc?.mpActualPrice || this._lastCalc?.suggestedMpPrice || 0,
@@ -1245,62 +1111,48 @@ const Marketplaces = {
     },
 
     _resolveHwWarehouseLink(hw) {
-        hw = this._normalizeHwItem(hw);
-        if (!hw) return { source: 'custom', whId: null, sku: '' };
-        const directWhId = Number(hw.wh_id || 0);
-        if (hw.source === 'warehouse' && directWhId > 0) {
-            const warehouseItem = this._allWarehouseHw.find(w => Number(w.id) === directWhId);
+        if (hw && hw.source === 'warehouse' && hw.wh_id) {
             return {
                 source: 'warehouse',
-                whId: directWhId,
-                sku: warehouseItem?.sku || hw.warehouse_sku || '',
+                whId: Number(hw.wh_id) || null,
+                sku: hw.warehouse_sku || '',
             };
         }
-
-        const blankId = Number(hw.blank_id || 0);
-        if (blankId > 0) {
-            const blank = this._hwCatalog.find(b => Number(b.id) === blankId);
-            const linkedWhId = Number(blank?.warehouse_item_id || 0);
-            if (linkedWhId > 0) {
-                const warehouseItem = this._allWarehouseHw.find(w => Number(w.id) === linkedWhId);
+        if (hw && hw.blank_id) {
+            const linkedBlank = this._hwCatalog.find(b => Number(b.id) === Number(hw.blank_id));
+            const whId = Number(hw.wh_id || linkedBlank?.warehouse_item_id || 0) || null;
+            if (whId) {
+                const whItem = this._allWarehouseHw.find(w => Number(w.id) === whId);
                 return {
                     source: 'warehouse',
-                    whId: linkedWhId,
-                    sku: warehouseItem?.sku || hw.warehouse_sku || blank?.sku || '',
+                    whId,
+                    sku: hw.warehouse_sku || whItem?.sku || '',
                 };
             }
         }
-
         return { source: 'custom', whId: null, sku: '' };
     },
 
     _resolvePkgWarehouseLink(pkg) {
-        pkg = this._normalizePkgItem(pkg);
-        if (!pkg) return { source: 'custom', whId: null, sku: '' };
-        const directWhId = Number(pkg.wh_id || 0);
-        if (pkg.source === 'warehouse' && directWhId > 0) {
-            const warehouseItem = this._allWarehousePkg.find(w => Number(w.id) === directWhId);
+        if (pkg && pkg.source === 'warehouse' && pkg.wh_id) {
             return {
                 source: 'warehouse',
-                whId: directWhId,
-                sku: warehouseItem?.sku || pkg.warehouse_sku || '',
+                whId: Number(pkg.wh_id) || null,
+                sku: pkg.warehouse_sku || '',
             };
         }
-
-        const blankId = Number(pkg.blank_id || 0);
-        if (blankId > 0) {
-            const blank = this._pkgCatalog.find(b => Number(b.id) === blankId);
-            const linkedWhId = Number(blank?.warehouse_item_id || 0);
-            if (linkedWhId > 0) {
-                const warehouseItem = this._allWarehousePkg.find(w => Number(w.id) === linkedWhId);
+        if (pkg && pkg.blank_id) {
+            const linkedBlank = this._pkgCatalog.find(b => Number(b.id) === Number(pkg.blank_id));
+            const whId = Number(pkg.wh_id || linkedBlank?.warehouse_item_id || 0) || null;
+            if (whId) {
+                const whItem = this._allWarehousePkg.find(w => Number(w.id) === whId);
                 return {
                     source: 'warehouse',
-                    whId: linkedWhId,
-                    sku: warehouseItem?.sku || pkg.warehouse_sku || blank?.sku || '',
+                    whId,
+                    sku: pkg.warehouse_sku || whItem?.sku || '',
                 };
             }
         }
-
         return { source: 'custom', whId: null, sku: '' };
     },
 
@@ -1440,7 +1292,6 @@ const Marketplaces = {
                 const qty = setQty * (parseFloat(hw.qty) || 1);
                 if (qty <= 0) return;
                 const base = this._calcHwUnitComponents(hw, params);
-                const hwWarehouseLink = this._resolveHwWarehouseLink(hw);
                 const hwItem = {
                     name: hw.name || `Фурнитура ${i + 1}`,
                     qty,
@@ -1451,6 +1302,7 @@ const Marketplaces = {
                     sell_price: 0,
                 };
                 const res = calculateHardwareCost(hwItem, params);
+                const hwWarehouseLink = this._resolveHwWarehouseLink(hw);
                 items.push({
                     item_number: itemNumber++,
                     item_type: 'hardware',
@@ -1481,7 +1333,6 @@ const Marketplaces = {
                 const qty = setQty * (parseFloat(pkg.qty) || 1);
                 if (qty <= 0) return;
                 const base = this._calcPkgUnitComponents(pkg, params);
-                const pkgWarehouseLink = this._resolvePkgWarehouseLink(pkg);
                 const pkgItem = {
                     name: pkg.name || `Упаковка ${i + 1}`,
                     qty,
@@ -1492,6 +1343,7 @@ const Marketplaces = {
                     sell_price: 0,
                 };
                 const res = calculatePackagingCost(pkgItem, params);
+                const pkgWarehouseLink = this._resolvePkgWarehouseLink(pkg);
                 items.push({
                     item_number: itemNumber++,
                     item_type: 'packaging',
@@ -1601,16 +1453,22 @@ const Marketplaces = {
     onVariantPhotoFile(idx, input) {
         if (!input.files || !input.files[0]) return;
         const file = input.files[0];
+        input.value = '';
         if (file.size > 2 * 1024 * 1024) { App.toast('Макс 2MB'); return; }
         const reader = new FileReader();
         reader.onload = (e) => {
             this._resizeImage(e.target.result, 200, (thumb) => {
+                if (!thumb) {
+                    App.toast('Не удалось обработать фото');
+                    return;
+                }
                 if (this._colorVariants[idx]) {
                     this._colorVariants[idx].photo_url = thumb;
                     this.renderColorVariants();
                 }
             });
         };
+        reader.onerror = () => App.toast('Не удалось прочитать фото');
         reader.readAsDataURL(file);
     },
 
@@ -1701,10 +1559,10 @@ const Marketplaces = {
             html += ''
                 + '<div style="margin-bottom:8px;padding:10px;background:var(--bg);border-radius:8px;border:1px solid var(--border);">'
                 + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">'
-                + '<div style="width:48px;height:48px;border-radius:6px;border:1px solid var(--border);background:var(--card-bg);display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0;cursor:pointer;" onclick="document.getElementById(\'mp-var-photo-' + varIdx + '\').click()" title="Загрузить фото варианта">'
+                + '<label for="mp-var-photo-' + varIdx + '" style="width:48px;height:48px;border-radius:6px;border:1px solid var(--border);background:var(--card-bg);display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0;cursor:pointer;" title="Загрузить фото варианта">'
                 + photoHtml + photoPlaceholder
-                + '</div>'
-                + '<input type="file" id="mp-var-photo-' + varIdx + '" accept="image/*" style="display:none" onchange="Marketplaces.onVariantPhotoFile(' + varIdx + ', this)">'
+                + '</label>'
+                + '<input type="file" id="mp-var-photo-' + varIdx + '" class="file-input-visually-hidden" accept="image/*" onchange="Marketplaces.onVariantPhotoFile(' + varIdx + ', this)">'
                 + '<input type="text" value="' + this._esc(v.name || '') + '" placeholder="Название (напр. Красно-белый)" style="flex:1;padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;" oninput="Marketplaces._onVariantNameChange(' + varIdx + ', this.value)">'
                 + '<button class="btn-remove" onclick="Marketplaces.removeColorVariant(' + varIdx + ')">&#10005;</button>'
                 + '</div>'

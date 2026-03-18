@@ -353,6 +353,18 @@ body {
     margin-top: 2px;
 }
 
+.file-input-visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
 /* Mold type toggle (Blank/Custom) */
 .mold-type-toggle {
     display: flex;
@@ -1257,91 +1269,6 @@ table .text-center { text-align: center; }
 .task-drawer-content .card-header h3 {
     font-size: 15px;
 }
-.task-template-overlay {
-    z-index: 1010;
-}
-.task-template-panel {
-    width: 760px;
-    max-width: 96vw;
-}
-.task-template-layout {
-    display: grid;
-    grid-template-columns: 220px minmax(0, 1fr);
-    gap: 16px;
-}
-.task-template-list {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-.task-template-list-item {
-    width: 100%;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    text-align: left;
-    padding: 12px;
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    background: var(--bg);
-    cursor: pointer;
-}
-.task-template-list-item span {
-    font-size: 12px;
-    color: var(--text-muted);
-}
-.task-template-list-item.active {
-    border-color: var(--accent);
-    background: var(--accent-light);
-}
-.task-template-form {
-    min-width: 0;
-}
-.task-draft-banner {
-    margin-bottom: 16px;
-    padding: 12px 14px;
-    border-radius: 12px;
-    background: #eff6ff;
-    border: 1px solid #bfdbfe;
-    color: #1d4ed8;
-    font-size: 13px;
-}
-.task-template-picker-row,
-.task-context-select-row {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-}
-.task-template-picker-row select,
-.task-context-select-row select {
-    flex: 1;
-}
-.task-context-toggles {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-}
-.task-context-toggle {
-    border: 1px solid var(--border);
-    background: var(--bg);
-    color: var(--text-secondary);
-    border-radius: 999px;
-    padding: 7px 12px;
-    cursor: pointer;
-    font-size: 12px;
-    font-weight: 600;
-}
-.task-context-toggle.active {
-    border-color: var(--accent);
-    background: var(--accent-light);
-    color: var(--accent);
-}
-.task-context-grid {
-    align-items: flex-start;
-}
-.task-context-field.is-hidden {
-    display: none;
-}
 
 /* Tasks page header */
 .tasks-page-header { margin-bottom: 20px; }
@@ -1949,7 +1876,6 @@ table .text-center { text-align: center; }
 @media (max-width: 1100px) {
     .tasks-stats { grid-template-columns: repeat(3, 1fr); }
     .tasks-header-controls { flex-direction: column; align-items: flex-start; gap: 8px; }
-    .task-template-layout { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 768px) {
@@ -1958,12 +1884,219 @@ table .text-center { text-align: center; }
     .tasks-stats { grid-template-columns: repeat(2, 1fr); }
     .tasks-toolbar { flex-direction: column; }
     .tasks-header-top { flex-direction: column; gap: 12px; }
-    .task-template-picker-row,
-    .task-context-select-row { flex-direction: column; align-items: stretch; }
     .tasks-feed-header,
     .tasks-completed-toggle {
         flex-direction: column;
         align-items: flex-start;
+    }
+}
+
+/* =============================================
+   BUG REPORTS
+   ============================================= */
+
+.quick-bug-report-btn {
+    position: fixed;
+    right: 24px;
+    bottom: 24px;
+    z-index: 980;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 16px;
+    border: none;
+    border-radius: 999px;
+    background: #111827;
+    color: #fff;
+    box-shadow: 0 12px 28px rgba(17, 24, 39, 0.22);
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.quick-bug-report-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 18px 32px rgba(17, 24, 39, 0.26);
+}
+
+.bug-page-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 20px;
+}
+
+.bug-page-subtitle {
+    margin-top: 4px;
+    font-size: 13px;
+    color: var(--text-muted);
+    max-width: 780px;
+}
+
+.bug-page-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.bug-layout {
+    display: grid;
+    grid-template-columns: minmax(340px, 0.95fr) minmax(420px, 1.25fr);
+    gap: 16px;
+    align-items: start;
+}
+
+.bug-form-card {
+    position: sticky;
+    top: 24px;
+}
+
+.bug-form-card-compact {
+    position: static;
+}
+
+.bug-file-summary {
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--text-muted);
+    word-break: break-word;
+}
+
+.bug-form-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-top: 14px;
+}
+
+.bug-report-feed {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.bug-report-card {
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 16px;
+    background: var(--bg-card);
+}
+
+.bug-report-card.is-closed {
+    opacity: 0.72;
+}
+
+.bug-report-card-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 10px;
+}
+
+.bug-report-card h4 {
+    margin: 0;
+    font-size: 15px;
+    line-height: 1.35;
+}
+
+.bug-report-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 4px;
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.bug-report-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    justify-content: flex-end;
+}
+
+.bug-report-description {
+    margin: 0 0 12px;
+    color: var(--text);
+    white-space: pre-wrap;
+}
+
+.bug-report-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 12px;
+}
+
+.bug-report-footer-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.bug-report-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.bug-report-prompt-box {
+    margin-top: 12px;
+    border-top: 1px solid var(--border);
+    padding-top: 12px;
+}
+
+.bug-report-prompt-box summary {
+    cursor: pointer;
+    font-weight: 600;
+    color: var(--accent);
+}
+
+.bug-report-prompt-box pre {
+    margin-top: 10px;
+    padding: 12px;
+    border-radius: 10px;
+    background: #0f172a;
+    color: #e2e8f0;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-size: 12px;
+    line-height: 1.55;
+    max-height: 320px;
+    overflow: auto;
+}
+
+.bug-overlay .task-drawer-panel {
+    width: 560px;
+}
+
+@media (max-width: 1100px) {
+    .bug-layout {
+        grid-template-columns: 1fr;
+    }
+
+    .bug-form-card {
+        position: static;
+    }
+}
+
+@media (max-width: 768px) {
+    .bug-page-header,
+    .bug-report-card-top,
+    .bug-report-footer {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .quick-bug-report-btn {
+        right: 16px;
+        bottom: 16px;
     }
 }
 
@@ -2495,10 +2628,6 @@ table .text-center { text-align: center; }
 .gantt-deadline-marker.overdue {
     color: var(--red);
     animation: pulse-red 1.5s infinite;
-}
-
-.gantt-deadline-marker.tight {
-    color: #f59e0b;
 }
 @keyframes pulse-red {
     0%, 100% { opacity: 1; }
@@ -3140,12 +3269,6 @@ table .text-center { text-align: center; }
     z-index: 10000;
 }
 
-.pendant-wizard-overlay {
-    align-items: flex-start;
-    overflow-y: auto;
-    padding: 24px 12px;
-}
-
 .pendant-card {
     border-left: 3px solid var(--accent);
 }
@@ -3155,12 +3278,9 @@ table .text-center { text-align: center; }
     border-radius: 12px;
     max-width: 700px;
     width: 95vw;
-    max-height: calc(100vh - 48px);
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
+    max-height: 90vh;
+    overflow-y: auto;
     box-shadow: 0 8px 30px rgba(0,0,0,0.2);
-    margin: 0 auto;
 }
 
 .pendant-wizard-header {
@@ -3214,22 +3334,6 @@ table .text-center { text-align: center; }
 .pendant-wizard-body {
     padding: 20px;
     min-height: 200px;
-    flex: 1 1 auto;
-    overflow-y: auto;
-    overflow-x: visible;
-}
-
-.pendant-wizard-step-4 {
-    overflow: visible;
-}
-
-.pendant-wizard-step-4 .pendant-wizard-body {
-    overflow: visible;
-    padding-bottom: 32px;
-}
-
-.pendant-wizard-step-4 .pendant-wh-picker:focus-within {
-    margin-bottom: 280px;
 }
 
 .pendant-wizard-footer {
@@ -3330,938 +3434,4 @@ table .text-center { text-align: center; }
 
 .pendant-wh-item:hover {
     background: var(--accent-light);
-}
-
-
-/* =============================================
-   PRODUCTION CALENDAR (v105)
-   ============================================= */
-
-.gantt-header-note {
-    margin-top: 4px;
-    font-size: 13px;
-    max-width: 700px;
-}
-
-.gantt-intro-card {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 14px;
-    margin-bottom: 16px;
-    padding: 16px 18px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    background: linear-gradient(135deg, #f8fbff 0%, #ffffff 55%, #f8fafc 100%);
-    box-shadow: var(--shadow);
-}
-
-.gantt-intro-card > div {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    font-size: 13px;
-    color: var(--text-muted);
-}
-
-.gantt-intro-card strong {
-    color: var(--text);
-    font-size: 14px;
-}
-
-#gantt-queue {
-    margin-bottom: 16px;
-}
-
-.gantt-queue-card-wrap {
-    padding: 16px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    background: var(--card-bg);
-    box-shadow: var(--shadow);
-}
-
-.gantt-queue-head {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 16px;
-    flex-wrap: wrap;
-    margin-bottom: 14px;
-}
-
-.gantt-queue-head h3 {
-    margin: 0 0 4px;
-    font-size: 20px;
-}
-
-.gantt-queue-head p {
-    margin: 0;
-    font-size: 13px;
-    color: var(--text-muted);
-    max-width: 720px;
-}
-
-.gantt-queue-summary {
-    font-size: 13px;
-    color: var(--text-muted);
-    white-space: nowrap;
-}
-
-.gantt-queue-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-    gap: 12px;
-}
-
-.gantt-queue-section + .gantt-queue-section {
-    margin-top: 18px;
-}
-
-.gantt-queue-subhead {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 16px;
-    flex-wrap: wrap;
-    margin-bottom: 12px;
-}
-
-.gantt-queue-subhead h4 {
-    margin: 0 0 4px;
-    font-size: 16px;
-}
-
-.gantt-queue-subhead p {
-    margin: 0;
-    font-size: 12px;
-    color: var(--text-muted);
-    max-width: 720px;
-}
-
-.gantt-queue-card {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    padding: 14px;
-    border: 1px solid var(--border);
-    border-radius: 16px;
-    background: var(--bg);
-    cursor: pointer;
-    transition: transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease;
-}
-
-.gantt-queue-card:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 14px 26px rgba(15, 23, 42, 0.08);
-}
-
-.gantt-queue-card[draggable="true"] {
-    cursor: grab;
-}
-
-.gantt-queue-card.dragging {
-    opacity: 0.45;
-}
-
-.gantt-queue-card.drag-over {
-    border-color: var(--accent);
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 24%, transparent);
-    background: color-mix(in srgb, var(--accent) 6%, white);
-}
-
-.gantt-queue-card.risk {
-    border-color: #fecaca;
-    background: #fff8f8;
-}
-
-.gantt-queue-card.tight {
-    border-color: #fde68a;
-    background: #fffdf5;
-}
-
-.gantt-queue-card.blocked {
-    border-color: #fed7aa;
-    background: #fffaf3;
-}
-
-.gantt-queue-card.review {
-    border-color: #dbeafe;
-    background: #f8fbff;
-}
-
-.gantt-queue-card-top,
-.gantt-queue-footer {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 10px;
-}
-
-.gantt-queue-title {
-    font-size: 18px;
-    font-weight: 700;
-    line-height: 1.2;
-    color: var(--text);
-}
-
-.gantt-queue-meta,
-.gantt-queue-dates {
-    font-size: 12px;
-    color: var(--text-muted);
-    line-height: 1.45;
-}
-
-.gantt-queue-progress {
-    font-size: 12px;
-    color: var(--text);
-    line-height: 1.45;
-    font-weight: 600;
-}
-
-.gantt-queue-risk-line {
-    font-size: 12px;
-    line-height: 1.45;
-    color: #166534;
-}
-
-.gantt-queue-risk-line.tight {
-    color: #a16207;
-}
-
-.gantt-queue-risk-line.risk {
-    color: #b91c1c;
-}
-
-.gantt-queue-controls {
-    display: flex;
-    gap: 6px;
-}
-
-.gantt-queue-phases {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-}
-
-.gantt-queue-phase-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 5px 10px;
-    border-radius: 999px;
-    background: color-mix(in srgb, var(--phase-color) 14%, white);
-    color: var(--text);
-    font-size: 12px;
-    font-weight: 600;
-}
-
-.gantt-queue-badge {
-    display: inline-flex;
-    align-items: center;
-    padding: 5px 10px;
-    border-radius: 999px;
-    font-size: 12px;
-    font-weight: 700;
-}
-
-.gantt-queue-badge.ok {
-    background: #dcfce7;
-    color: #166534;
-}
-
-.gantt-queue-badge.risk {
-    background: #fee2e2;
-    color: #b91c1c;
-}
-
-.gantt-queue-badge.tight {
-    background: #fef3c7;
-    color: #a16207;
-}
-
-.gantt-queue-badge.blocked {
-    background: #ffedd5;
-    color: #c2410c;
-}
-
-.gantt-queue-badge.review {
-    background: #dbeafe;
-    color: #1d4ed8;
-}
-
-.gantt-queue-open {
-    font-size: 12px;
-    font-weight: 700;
-    color: var(--accent);
-}
-
-#gantt-capacity-chart {
-    margin-bottom: 14px;
-    margin-left: 240px;
-    border-radius: 8px;
-    overflow-x: auto;
-    overflow-y: hidden;
-    scrollbar-width: none;
-}
-
-#gantt-capacity-chart::-webkit-scrollbar {
-    display: none;
-}
-
-.gantt-cap-wrap {
-    display: flex;
-    align-items: flex-end;
-    gap: 12px;
-}
-
-.gantt-cap-label {
-    min-width: 72px;
-    padding-bottom: 8px;
-    font-size: 11px;
-    font-weight: 700;
-    color: var(--text-muted);
-}
-
-.gantt-sidebar {
-    min-width: 240px;
-    max-width: 240px;
-}
-
-.gantt-sidebar-header {
-    height: 48px;
-    padding: 0 16px;
-    font-size: 12px;
-}
-
-.gantt-sidebar-row {
-    height: 56px;
-    padding: 0 14px;
-}
-
-.gantt-order-name {
-    font-size: 13px;
-}
-
-.gantt-order-meta {
-    font-size: 11px;
-}
-
-.gantt-header {
-    height: 48px;
-}
-
-.gantt-header-cell {
-    height: 48px;
-    flex-direction: column;
-    gap: 2px;
-    padding-top: 6px;
-}
-
-.gantt-header-primary {
-    font-size: 12px;
-    font-weight: 700;
-    line-height: 1;
-    text-transform: capitalize;
-    color: var(--text);
-}
-
-.gantt-header-secondary {
-    font-size: 11px;
-    line-height: 1;
-    color: var(--text-muted);
-}
-
-.gantt-header-tertiary {
-    font-size: 10px;
-    line-height: 1;
-    color: var(--accent);
-    text-transform: lowercase;
-}
-
-.gantt-month-break {
-    box-shadow: inset 2px 0 0 #dbeafe;
-}
-
-.gantt-row {
-    height: 56px;
-}
-
-.gantt-phase-bar {
-    top: 10px;
-    height: 36px;
-    padding: 0 10px;
-    border-radius: 10px;
-}
-
-.gantt-bar-text {
-    font-size: 11px;
-}
-
-.gantt-deadline-marker {
-    top: 7px;
-    font-size: 16px;
-}
-
-.gantt-today-line::before {
-    top: -20px;
-    left: -14px;
-    padding: 2px 5px;
-    border-radius: 999px;
-    background: var(--card-bg);
-    font-size: 10px;
-}
-
-@media (max-width: 1024px) {
-    .gantt-intro-card {
-        grid-template-columns: 1fr;
-    }
-
-    .gantt-queue-grid {
-        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-    }
-}
-
-@media (max-width: 768px) {
-    .gantt-sidebar {
-        min-width: 180px;
-        max-width: 180px;
-    }
-
-    #gantt-capacity-chart {
-        margin-left: 180px;
-    }
-
-    .gantt-queue-card-top,
-    .gantt-queue-footer {
-        flex-direction: column;
-        align-items: flex-start;
-    }
-
-    .gantt-queue-summary {
-        white-space: normal;
-    }
-}
-
-.wiki-page-subtitle {
-    margin-top: 6px;
-    color: var(--text-muted);
-    font-size: 14px;
-    line-height: 1.65;
-    max-width: 920px;
-}
-
-.wiki-source-title {
-    font-size: 12px;
-    font-weight: 700;
-    margin-bottom: 4px;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-}
-
-.wiki-source-note,
-.wiki-list-subtitle {
-    color: var(--text-muted);
-    font-size: 12px;
-    line-height: 1.5;
-}
-
-.wiki-shell {
-    display: grid;
-    grid-template-columns: 320px minmax(0, 1fr);
-    gap: 22px;
-    align-items: start;
-}
-
-.wiki-nav-panel {
-    position: sticky;
-    top: 12px;
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-    padding: 18px 16px;
-    border: 1px solid rgba(15, 23, 42, 0.08);
-    border-radius: 20px;
-    background: #fbfbfa;
-    box-shadow: 0 14px 40px rgba(15, 23, 42, 0.05);
-}
-
-.wiki-nav-top {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-}
-
-.wiki-toolbar-meta {
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-}
-
-.wiki-toolbar-search {
-    flex: 1;
-    min-width: 260px;
-}
-
-.wiki-toolbar-search input {
-    width: 100%;
-    border-radius: 12px;
-    background: white;
-    border: 1px solid rgba(15, 23, 42, 0.1);
-}
-
-.wiki-meta-pill {
-    padding: 6px 10px;
-    border: 1px solid rgba(15, 23, 42, 0.08);
-    border-radius: 999px;
-    background: rgba(255, 255, 255, 0.9);
-    color: var(--text-muted);
-    font-size: 11px;
-    font-weight: 600;
-}
-
-.wiki-nav-tree {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    max-height: calc(100vh - 220px);
-    overflow: auto;
-    padding-right: 4px;
-}
-
-.wiki-nav-home,
-.wiki-tree-section-button,
-.wiki-tree-page {
-    width: 100%;
-    text-align: left;
-    background: transparent;
-    border: none;
-    cursor: pointer;
-    transition: background 0.15s ease, color 0.15s ease;
-}
-
-.wiki-nav-home {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 10px 12px;
-    border-radius: 12px;
-    font-size: 14px;
-    font-weight: 700;
-    color: var(--text);
-}
-
-.wiki-nav-home:hover,
-.wiki-nav-home.active {
-    background: rgba(15, 23, 42, 0.06);
-}
-
-.wiki-tree-section {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    padding: 4px 0;
-}
-
-.wiki-tree-section-button {
-    display: flex;
-    justify-content: space-between;
-    gap: 12px;
-    align-items: flex-start;
-    padding: 8px 12px;
-    border-radius: 12px;
-    color: var(--text);
-}
-
-.wiki-tree-section-button:hover,
-.wiki-tree-section.active .wiki-tree-section-button {
-    background: rgba(15, 23, 42, 0.06);
-}
-
-.wiki-tree-section-title {
-    font-size: 13px;
-    font-weight: 700;
-    line-height: 1.35;
-    color: var(--text);
-}
-
-.wiki-tree-section-desc {
-    margin-top: 4px;
-    color: var(--text-muted);
-    font-size: 11px;
-    line-height: 1.45;
-}
-
-.wiki-tree-pages {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    margin-left: 10px;
-    padding-left: 10px;
-    border-left: 1px solid rgba(15, 23, 42, 0.08);
-}
-
-.wiki-tree-page {
-    padding: 7px 10px;
-    border-radius: 10px;
-    font-size: 13px;
-    color: var(--text-muted);
-}
-
-.wiki-tree-page:hover,
-.wiki-tree-page.active {
-    background: rgba(15, 23, 42, 0.06);
-    color: var(--text);
-}
-
-.wiki-tree-page-title {
-    display: block;
-    line-height: 1.4;
-}
-
-.wiki-tree-empty {
-    padding: 8px 10px;
-    font-size: 12px;
-    color: var(--text-muted);
-}
-
-.wiki-section-count {
-    min-width: 30px;
-    padding: 6px 8px;
-    border-radius: 999px;
-    background: rgba(255, 255, 255, 0.92);
-    color: var(--text);
-    text-align: center;
-    font-size: 11px;
-    font-weight: 700;
-}
-
-.wiki-document-panel {
-    min-height: 70vh;
-    padding: 20px 22px 28px;
-    border: 1px solid rgba(15, 23, 42, 0.08);
-    border-radius: 24px;
-    background: #ffffff;
-    box-shadow: 0 18px 48px rgba(15, 23, 42, 0.05);
-}
-
-.wiki-document-topbar {
-    display: flex;
-    justify-content: space-between;
-    gap: 16px;
-    align-items: flex-start;
-    flex-wrap: wrap;
-    margin-bottom: 18px;
-}
-
-.wiki-breadcrumbs {
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-    font-size: 12px;
-    color: var(--text-muted);
-    margin-bottom: 6px;
-}
-
-.wiki-inline-panel {
-    margin-bottom: 18px;
-    padding: 18px;
-    border: 1px solid rgba(15, 23, 42, 0.08);
-    border-radius: 18px;
-    background: #fafaf8;
-}
-
-.wiki-document {
-    max-width: 860px;
-}
-
-.wiki-document-meta {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    flex-wrap: wrap;
-    margin-bottom: 18px;
-}
-
-.wiki-article-section {
-    display: inline-flex;
-    align-items: center;
-    padding: 4px 8px;
-    border-radius: 999px;
-    background: rgba(15, 23, 42, 0.06);
-    color: var(--text);
-    font-size: 11px;
-    font-weight: 700;
-}
-
-.wiki-document-title {
-    font-size: 42px;
-    line-height: 1.08;
-    font-weight: 800;
-    letter-spacing: -0.03em;
-    color: var(--text);
-}
-
-.wiki-document-summary {
-    margin-top: 12px;
-    color: var(--text-muted);
-    font-size: 16px;
-    line-height: 1.7;
-    max-width: 760px;
-}
-
-.wiki-article-tags {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    margin-top: 14px;
-}
-
-.wiki-tag {
-    display: inline-flex;
-    align-items: center;
-    padding: 4px 8px;
-    border-radius: 999px;
-    background: rgba(15, 23, 42, 0.05);
-    color: var(--text-muted);
-    font-size: 11px;
-    font-weight: 600;
-}
-
-.wiki-source-inline {
-    display: flex;
-    justify-content: space-between;
-    gap: 16px;
-    align-items: center;
-    flex-wrap: wrap;
-    margin-top: 16px;
-    padding: 14px 16px;
-    border: 1px solid rgba(15, 23, 42, 0.08);
-    border-radius: 16px;
-    background: #fafaf8;
-}
-
-.wiki-document-body {
-    margin-top: 22px;
-    color: var(--text);
-}
-
-.wiki-document-body h3,
-.wiki-document-body h4,
-.wiki-document-body p,
-.wiki-document-body ul,
-.wiki-document-body ol {
-    margin: 0 0 14px;
-}
-
-.wiki-document-body h3 {
-    font-size: 26px;
-    font-weight: 800;
-    line-height: 1.2;
-    margin-top: 30px;
-}
-
-.wiki-document-body h4 {
-    font-size: 20px;
-    font-weight: 700;
-    line-height: 1.3;
-    margin-top: 24px;
-}
-
-.wiki-document-body p,
-.wiki-document-body li {
-    font-size: 15px;
-    line-height: 1.8;
-}
-
-.wiki-document-body ul,
-.wiki-document-body ol {
-    padding-left: 24px;
-}
-
-.wiki-document-index {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    margin-top: 22px;
-}
-
-.wiki-document-index-item {
-    width: 100%;
-    text-align: left;
-    border: 1px solid rgba(15, 23, 42, 0.08);
-    border-radius: 16px;
-    background: #fafaf8;
-    padding: 14px 16px;
-    cursor: pointer;
-    transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
-}
-
-.wiki-document-index-item:hover {
-    background: #f4f4f1;
-    border-color: rgba(15, 23, 42, 0.14);
-    transform: translateY(-1px);
-}
-
-.wiki-document-index-title {
-    font-size: 15px;
-    font-weight: 700;
-    color: var(--text);
-}
-
-.wiki-document-index-note {
-    margin-top: 6px;
-    color: var(--text-muted);
-    font-size: 13px;
-    line-height: 1.6;
-}
-
-.wiki-empty-state {
-    padding: 24px;
-    border: 1px dashed var(--border);
-    border-radius: 16px;
-    background: linear-gradient(180deg, rgba(248, 250, 252, 0.9), rgba(255, 255, 255, 0.95));
-}
-
-.wiki-empty-title {
-    font-size: 15px;
-    font-weight: 700;
-    margin-bottom: 6px;
-}
-
-.wiki-empty-note {
-    color: var(--text-muted);
-    font-size: 12px;
-    line-height: 1.5;
-}
-
-.wiki-document-edit .card-header {
-    margin-bottom: 18px;
-}
-
-.wiki-editor-stack {
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-}
-
-.wiki-preview-card {
-    border: 1px solid rgba(15, 23, 42, 0.08);
-    border-radius: 18px;
-    background: #fafaf8;
-    padding: 18px;
-}
-
-.wiki-preview-card-inline {
-    margin-top: 8px;
-}
-
-.wiki-preview-header {
-    font-size: 12px;
-    font-weight: 800;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    color: var(--text-muted);
-    margin-bottom: 12px;
-}
-
-.wiki-preview-meta {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    flex-wrap: wrap;
-    margin-bottom: 14px;
-}
-
-.wiki-preview-meta-note {
-    font-size: 12px;
-    color: var(--text-muted);
-}
-
-.wiki-preview-title {
-    font-size: 28px;
-    font-weight: 800;
-    line-height: 1.15;
-    color: var(--text);
-}
-
-.wiki-preview-summary {
-    margin-top: 10px;
-    color: var(--text-muted);
-    font-size: 14px;
-    line-height: 1.6;
-}
-
-.wiki-preview-tags {
-    margin-top: 12px;
-}
-
-.wiki-preview-body {
-    margin-top: 18px;
-    padding-top: 18px;
-    border-top: 1px solid rgba(15, 23, 42, 0.08);
-    color: var(--text);
-}
-
-.wiki-preview-body h3,
-.wiki-preview-body h4,
-.wiki-preview-body p,
-.wiki-preview-body ul,
-.wiki-preview-body ol {
-    margin: 0 0 12px;
-}
-
-.wiki-preview-body h3 {
-    font-size: 19px;
-    font-weight: 800;
-    line-height: 1.3;
-}
-
-.wiki-preview-body h4 {
-    font-size: 16px;
-    font-weight: 700;
-    line-height: 1.35;
-}
-
-.wiki-preview-body p,
-.wiki-preview-body li {
-    font-size: 14px;
-    line-height: 1.7;
-}
-
-.wiki-preview-body ul,
-.wiki-preview-body ol {
-    padding-left: 22px;
-}
-
-.wiki-preview-body li + li {
-    margin-top: 6px;
-}
-
-@media (max-width: 1280px) {
-    .wiki-shell {
-        grid-template-columns: 1fr;
-    }
-
-    .wiki-nav-panel {
-        position: static;
-    }
-}
-
-@media (max-width: 1100px) {
-    .wiki-document-panel {
-        padding: 16px;
-        border-radius: 18px;
-    }
-
-    .wiki-document-title {
-        font-size: 30px;
-    }
-
-    .wiki-document-meta,
-    .wiki-source-inline,
-    .wiki-document-topbar {
-        align-items: flex-start;
-    }
 }

@@ -34,7 +34,7 @@
     ];
 
     const TASK_STATUS_OPTIONS = [
-        { value: 'incoming', label: 'Новая' },
+        { value: 'incoming', label: 'Входящие' },
         { value: 'planned', label: 'Запланировано' },
         { value: 'in_progress', label: 'В работе' },
         { value: 'review', label: 'На согласовании' },

@@ -139,10 +139,9 @@ function createContext() {
         saveWarehouseItems: async () => {},
         loadWarehouseHistory: async () => [],
         saveWarehouseHistory: async () => {},
-        loadProjectHardwareState: async () => ({ checks: {} }),
+        loadProjectHardwareState: async () => ({ checks: {}, legacy_status_neutralized: {} }),
         saveProjectHardwareState: async () => {},
         loadOrders: async () => [],
-        loadOrder: async () => ({ order: {}, items: [] }),
         updateOrderStatus: async () => {},
         updateOrderFields: async () => {},
         saveOrder: async () => 1,
@@ -253,19 +252,6 @@ async function buildCollectedItems(context) {
             price_cny: 1.8,
             weight_grams: 4.2,
             result: { costPerUnit: 14, hoursPackaging: 0.75 },
-        }), Object.assign(Calculator.getEmptyPackaging(null), {
-            source: 'warehouse',
-            name: 'Warehouse Envelope',
-            qty: 100,
-            assembly_speed: 300,
-            assembly_minutes: 5,
-            price: 15.48,
-            delivery_total: 0,
-            delivery_price: 0,
-            sell_price: 18,
-            warehouse_item_id: 701,
-            warehouse_sku: 'ENV-150x90-EGG',
-            result: { costPerUnit: 16.1, hoursPackaging: 0.5 },
         })];
 
         Calculator.extraCosts = [];
@@ -292,9 +278,7 @@ async function smokeCalculatorPersistence(context) {
     const items = await buildCollectedItems(context);
     const productRow = items.find(item => item.item_type === 'product');
     const hardwareRow = items.find(item => item.item_type === 'hardware');
-    const packagingRows = items.filter(item => item.item_type === 'packaging');
-    const packagingRow = packagingRows.find(item => item.packaging_source === 'china');
-    const warehousePackagingRow = packagingRows.find(item => item.packaging_source === 'warehouse');
+    const packagingRow = items.find(item => item.item_type === 'packaging');
     const pendantRow = items.find(item => item.item_type === 'pendant');
 
     assert.equal(productRow.color_id, 12);
@@ -314,9 +298,6 @@ async function smokeCalculatorPersistence(context) {
     assert.equal(packagingRow.china_delivery_method, 'avia_fast');
     assert.equal(packagingRow.price_cny, 1.8);
     assert.equal(packagingRow.weight_grams, 4.2);
-    assert.equal(warehousePackagingRow.packaging_warehouse_item_id, 701);
-    assert.equal(warehousePackagingRow.packaging_warehouse_sku, 'ENV-150x90-EGG');
-    assert.equal(warehousePackagingRow.packaging_assembly_speed, 300);
 
     assert.equal(pendantRow.name, 'ABC');
     assert.equal(pendantRow._totalSellPerUnit, 99);
@@ -352,8 +333,7 @@ async function smokeCalculatorPersistence(context) {
     const restored = clone(await vm.runInContext(`({
         product: Calculator.items[0],
         hardware: Calculator.hardwareItems[0],
-        packagingChina: Calculator.packagingItems.find(pkg => pkg.source === 'china'),
-        packagingWarehouse: Calculator.packagingItems.find(pkg => pkg.source === 'warehouse'),
+        packaging: Calculator.packagingItems[0],
         pendant: Calculator.pendants[0],
     })`, context));
 
@@ -369,193 +349,16 @@ async function smokeCalculatorPersistence(context) {
     assert.equal(restored.hardware.price_cny, 2.7);
     assert.equal(restored.hardware.weight_grams, 6.5);
 
-    assert.equal(restored.packagingChina.china_item_id, 601);
-    assert.equal(restored.packagingChina.china_delivery_method, 'avia_fast');
-    assert.equal(restored.packagingChina.price_cny, 1.8);
-    assert.equal(restored.packagingChina.weight_grams, 4.2);
-    assert.equal(restored.packagingWarehouse.warehouse_item_id, 701);
-    assert.equal(restored.packagingWarehouse.warehouse_sku, 'ENV-150x90-EGG');
-    assert.equal(restored.packagingWarehouse.assembly_speed, 300);
-    assert.equal(restored.packagingWarehouse.assembly_minutes, 5);
+    assert.equal(restored.packaging.china_item_id, 601);
+    assert.equal(restored.packaging.china_delivery_method, 'avia_fast');
+    assert.equal(restored.packaging.price_cny, 1.8);
+    assert.equal(restored.packaging.weight_grams, 4.2);
 
     assert.equal(restored.pendant.name, 'ABC');
     assert.equal(restored.pendant._totalSellPerUnit, 99);
     assert.equal(restored.pendant.cord.name, 'Smoke Cord');
     assert.equal(restored.pendant.carabiner.name, 'Smoke Carabiner');
     assert.equal(restored.pendant.elements.length, 3);
-
-    const selectedWarehouseItem = clone(vm.runInContext(`
-        Warehouse._findInGrouped({
-            packaging: { items: [{ id: 701, name: 'Warehouse Envelope', available_qty: 20, unit: 'шт', price_per_unit: 15.48 }] }
-        }, '701')
-    `, context));
-    assert.equal(selectedWarehouseItem.id, 701);
-}
-
-async function smokeHardwareOnlyAutosave(context) {
-    await vm.runInContext(`(async () => {
-        window.__savedDraftPayload = null;
-        saveOrder = async (order, items) => {
-            window.__savedDraftPayload = { order, items };
-            return 555;
-        };
-
-        Calculator.resetForm();
-        document.getElementById('calc-order-name').value = 'Hardware only draft';
-        document.getElementById('calc-manager-name').value = 'Smoke';
-        document.getElementById('calc-autosave-status');
-
-        Calculator.hardwareItems = [Object.assign(Calculator.getEmptyHardware(null), {
-            source: 'warehouse',
-            name: 'Smoke Warehouse Hardware',
-            qty: 8,
-            warehouse_item_id: 777,
-            warehouse_sku: 'HW-777',
-            assembly_speed: 120,
-            result: { costPerUnit: 15, hoursHardware: 0.4 },
-        })];
-
-        await Calculator._doAutosave();
-    })()`, context);
-
-    const saved = clone(await vm.runInContext(`window.__savedDraftPayload`, context));
-    assert.ok(saved, 'hardware-only draft triggers autosave');
-    assert.equal(saved.order.order_name, 'Hardware only draft');
-    assert.equal(saved.items.length, 1);
-    assert.equal(saved.items[0].item_type, 'hardware');
-    assert.equal(saved.items[0].hardware_warehouse_item_id, 777);
-    assert.equal(context.localStorage.getItem('ro_calc_editing_order_id'), '555');
-}
-
-async function smokePackagingWarehousePickerDefaults(context) {
-    context.__warehouseItems = [{
-        id: 701,
-        name: 'Warehouse Envelope',
-        sku: 'ENV-150x90-EGG',
-        size: '15x9см',
-        color: 'калька',
-        available_qty: 565,
-        qty: 565,
-        unit: 'шт',
-        price_per_unit: 15.48,
-        photo_thumbnail: '',
-        category: 'packaging',
-    }];
-    vm.runInContext(`
-        Calculator.packagingItems = [Calculator.getEmptyPackaging(null)];
-        Calculator.packagingItems[0].source = 'warehouse';
-        Calculator._findWhItem = (itemId) => (globalThis.__warehouseItems || []).find(item => Number(item.id) === Number(itemId)) || null;
-        Calculator._ensureBlanksCatalog = async () => {};
-        Calculator._pkgBlanksCatalog = [{
-            warehouse_item_id: 701,
-            assembly_speed: 300,
-            sell_price: 19,
-            updated_at: '2026-03-17T12:00:00.000Z',
-        }];
-        Calculator._rerenderPkgItem = () => {};
-        Calculator.recalculate = () => {};
-        Calculator.scheduleAutosave = () => {};
-    `, context);
-
-    await vm.runInContext(`Calculator.onPkgWarehouseSelect(0, '701')`, context);
-
-    const pkg = clone(await vm.runInContext(`Calculator.packagingItems[0]`, context));
-    assert.equal(pkg.warehouse_item_id, 701);
-    assert.equal(pkg.warehouse_sku, 'ENV-150x90-EGG');
-    assert.equal(pkg.assembly_speed, 300);
-    assert.equal(pkg.assembly_minutes, 5);
-    assert.equal(pkg.sell_price, 19);
-}
-
-async function smokePendantWarehousePickerRichUI() {
-    const pendantContext = createContext();
-    stubRuntime(pendantContext);
-    ['js/calculator.js', 'js/app.js', 'js/warehouse.js'].forEach(file => runScript(pendantContext, file));
-    vm.runInContext('delete globalThis.Pendant;', pendantContext);
-    runScript(pendantContext, 'js/pendant.js');
-
-    pendantContext.__pendantWhData = {
-        cords: {
-            label: 'Шнуры',
-            icon: '🧵',
-            items: [{
-                id: 701,
-                category: 'cords',
-                name: 'Шнур с силик. наконечником',
-                sku: 'SLS-800-BL-NN',
-                size: '80 см',
-                color: 'синий',
-                qty: 1232,
-                available_qty: 732,
-                price_per_unit: 23,
-                unit: 'шт',
-                photo_thumbnail: 'https://example.com/cord-thumb.png',
-            }],
-        },
-        carabiners: {
-            label: 'Карабины',
-            icon: '🔗',
-            items: [{
-                id: 801,
-                category: 'carabiners',
-                name: 'Карабин с ушком',
-                sku: 'CR-STD-SV-H',
-                size: '2,3 см',
-                color: 'серебряный',
-                qty: 850,
-                available_qty: 820,
-                price_per_unit: 10,
-                unit: 'шт',
-                photo_thumbnail: 'https://example.com/carabiner-thumb.png',
-            }],
-        },
-    };
-
-    vm.runInContext(`
-        Calculator._whPickerData = globalThis.__pendantWhData;
-        Calculator._findHwBlankByWarehouseItemId = () => null;
-        Pendant._wizardData = Pendant.getEmpty();
-        Pendant._wizardData.cord = {
-            source: 'warehouse',
-            warehouse_item_id: 701,
-            warehouse_sku: 'SLS-800-BL-NN',
-            photo_thumbnail: 'https://example.com/cord-thumb.png',
-            name: 'Шнур с силик. наконечником синий 80 см',
-            price_per_unit: 23,
-            delivery_price: 0,
-            unit: 'шт',
-        };
-        Pendant._wizardData.carabiner = {
-            source: 'warehouse',
-            warehouse_item_id: null,
-            warehouse_sku: '',
-            photo_thumbnail: '',
-            name: '',
-            price_per_unit: 0,
-            delivery_price: 0,
-            unit: 'шт',
-        };
-    `, pendantContext);
-
-    const cordHtml = String(vm.runInContext(`Pendant._renderWhDropdown('cord', Pendant._wizardData.cord, Calculator._whPickerData)`, pendantContext));
-    assert.match(cordHtml, /Поиск по названию или артикулу/);
-    assert.match(cordHtml, /SLS-800-BL-NN/);
-    assert.match(cordHtml, /cord-thumb\.png/);
-    assert.match(cordHtml, /img src=/);
-
-    vm.runInContext(`Pendant._wizardStep = 4`, pendantContext);
-    const wizardClassName = String(vm.runInContext(`Pendant._wizardClassName()`, pendantContext));
-    assert.match(wizardClassName, /pendant-wizard-step-4/);
-
-    await vm.runInContext(`Pendant._onWhSelect('carabiner', '801')`, pendantContext);
-    const carabiner = clone(await vm.runInContext(`Pendant._wizardData.carabiner`, pendantContext));
-    assert.equal(carabiner.warehouse_item_id, 801);
-    assert.equal(carabiner.warehouse_sku, 'CR-STD-SV-H');
-    assert.equal(carabiner.photo_thumbnail, 'https://example.com/carabiner-thumb.png');
-
-    const carabinerHtml = String(vm.runInContext(`Pendant._renderWhDropdown('carabiner', Pendant._wizardData.carabiner, Calculator._whPickerData)`, pendantContext));
-    assert.match(carabinerHtml, /CR-STD-SV-H/);
-    assert.match(carabinerHtml, /carabiner-thumb\.png/);
 }
 
 async function smokeLegacyPendantRestore(context) {
@@ -929,19 +732,31 @@ async function smokeOrderStatusWarehouseSync(context) {
     };
 
     context.loadOrder = async () => clone(orderData);
+    context.__adjustStockCalls = [];
     context.__projectHardwareCalls = [];
-    context.__savedReservations = null;
-    context.__savedHistory = null;
-    context.saveWarehouseReservations = async (reservations) => {
-        context.__savedReservations = clone(reservations);
-    };
-    context.saveWarehouseHistory = async (history) => {
-        context.__savedHistory = clone(history);
-    };
+    context.__savedReservations = [];
+
+    context.__originalWarehouseAdjustStock = vm.runInContext('Warehouse.adjustStock', context);
     context.__originalSyncProjectHardwareOrderState = vm.runInContext('Warehouse.syncProjectHardwareOrderState', context);
 
     try {
         vm.runInContext(`
+            Warehouse.adjustStock = async (itemId, delta, type, refName, note, employee, extra) => {
+                globalThis.__adjustStockCalls.push({ itemId, delta, type, refName, note, employee, extra });
+                const stockRow = (globalThis.__warehouseItems || []).find(item => Number(item.id) === Number(itemId)) || null;
+                const qtyBefore = Number(stockRow && stockRow.qty) || 0;
+                const qtyAfter = Math.max(0, qtyBefore + (Number(delta) || 0));
+                const appliedQtyChange = qtyAfter - qtyBefore;
+                if (stockRow) stockRow.qty = qtyAfter;
+                return {
+                    ok: true,
+                    requestedQtyChange: Number(delta) || 0,
+                    appliedQtyChange,
+                    qtyBefore,
+                    qtyAfter,
+                    clamped: Math.abs(appliedQtyChange - (Number(delta) || 0)) > 1e-9,
+                };
+            };
             Warehouse.syncProjectHardwareOrderState = async (payload) => {
                 globalThis.__projectHardwareCalls.push(payload);
             };
@@ -950,114 +765,167 @@ async function smokeOrderStatusWarehouseSync(context) {
         await vm.runInContext(`Orders._syncWarehouseByStatus(42, 'sample', 'delivery', 'Sync Order', 'Smoke')`, context);
 
         assert.equal(context.__projectHardwareCalls.length, 1);
-        const payload = clone(context.__projectHardwareCalls[0]);
-        assert.equal(payload.status, 'delivery');
-        assert.equal(payload.orderId, 42);
-        assert.equal(payload.currentItems.length, 2);
-        assert.equal(payload.currentItems.find(item => item.item_type === 'packaging').packaging_warehouse_item_id, 501);
-        assert.equal(payload.currentItems.find(item => item.item_type === 'hardware').hardware_warehouse_item_id, 601);
-        assert.equal(payload.previousItems.length, 2);
-        assert.equal(context.__savedReservations, null);
-        assert.equal(context.__savedHistory, null);
+        assert.equal(context.__projectHardwareCalls[0].status, 'delivery');
+        assert.equal(context.__projectHardwareCalls[0].orderId, 42);
+        assert.deepEqual(clone(context.__projectHardwareCalls[0].currentItems), clone(orderData.items));
+        assert.deepEqual(clone(context.__adjustStockCalls), []);
+
+        context.__adjustStockCalls = [];
+        context.__projectHardwareCalls = [];
+        await vm.runInContext(`Orders._syncWarehouseByStatus(42, 'delivery', 'draft', 'Sync Order', 'Smoke')`, context);
+
+        assert.equal(context.__projectHardwareCalls.length, 1);
+        assert.equal(context.__projectHardwareCalls[0].status, 'draft');
+        assert.deepEqual(clone(context.__adjustStockCalls), []);
+
+        context.__adjustStockCalls = [];
+        context.__projectHardwareCalls = [];
+        await vm.runInContext(`Orders._syncWarehouseByStatus(42, 'draft', 'sample', 'Sync Order', 'Smoke')`, context);
+
+        assert.equal(context.__projectHardwareCalls.length, 1);
+        assert.equal(context.__projectHardwareCalls[0].status, 'sample');
+        assert.deepEqual(clone(context.__adjustStockCalls), []);
     } finally {
         vm.runInContext(`
+            Warehouse.adjustStock = globalThis.__originalWarehouseAdjustStock;
             Warehouse.syncProjectHardwareOrderState = globalThis.__originalSyncProjectHardwareOrderState;
         `, context);
     }
 }
 
-async function smokePackagingWarehouseSaveSync(context) {
-    const currentItems = [{
-        item_type: 'packaging',
-        product_name: 'Warehouse Envelope',
-        quantity: 100,
-        packaging_source: 'warehouse',
-        packaging_warehouse_item_id: 501,
-        packaging_warehouse_sku: 'ENV-150x90-EGG',
-        packaging_assembly_speed: 300,
-    }];
-    context.__projectHardwareState = { checks: {} };
-    context.__savedProjectHardwareState = null;
-    context.__savedReservations = [];
-    context.__reservations = [];
-    context.__warehouseItems = [{
-        id: 501,
-        name: 'Warehouse Envelope',
-        sku: 'ENV-150x90-EGG',
-        category: 'packaging',
-        qty: 120,
-        unit: 'шт',
-    }];
-    context.__warehouseHistory = [];
-    context.__toasts = [];
-    context.loadProjectHardwareState = async () => clone(context.__projectHardwareState);
-    context.saveProjectHardwareState = async (state) => {
-        context.__savedProjectHardwareState = clone(state);
-        context.__projectHardwareState = clone(state);
+async function smokeProjectWarehouseLifecycle(context) {
+    const orderData = {
+        order: { id: 51, order_name: 'Warehouse Flow', status: 'sample', manager_name: 'Smoke' },
+        items: [
+            {
+                item_type: 'packaging',
+                product_name: 'Warehouse Packaging',
+                quantity: 4,
+                packaging_source: 'warehouse',
+                packaging_warehouse_item_id: 501,
+            },
+            {
+                item_type: 'hardware',
+                product_name: 'Warehouse Hardware',
+                quantity: 2,
+                hardware_source: 'warehouse',
+                hardware_warehouse_item_id: 601,
+            },
+        ],
     };
+
+    context.__reservations = [];
+    context.__savedReservations = [];
+    context.__warehouseItems = [
+        { id: 501, qty: 10, unit: 'шт', category: 'packaging', name: 'Warehouse Packaging', sku: 'ENV-501' },
+        { id: 601, qty: 5, unit: 'шт', category: 'carabiners', name: 'Warehouse Hardware', sku: 'HW-601' },
+    ];
+    context.__warehouseHistory = [];
+    context.__savedProjectHardwareState = null;
+    context.__projectHardwareState = { checks: {}, legacy_status_neutralized: {} };
+    context.loadOrder = async () => clone(orderData);
     context.loadWarehouseReservations = async () => clone(context.__reservations);
     context.saveWarehouseReservations = async (reservations) => {
         context.__savedReservations = clone(reservations);
         context.__reservations = clone(reservations);
     };
     context.loadWarehouseItems = async () => clone(context.__warehouseItems);
+    context.saveWarehouseItems = async (items) => {
+        context.__warehouseItems = clone(items);
+    };
     context.loadWarehouseHistory = async () => clone(context.__warehouseHistory);
     context.saveWarehouseHistory = async (history) => {
         context.__warehouseHistory = clone(history);
     };
+    context.loadProjectHardwareState = async () => clone(context.__projectHardwareState);
+    context.saveProjectHardwareState = async (state) => {
+        context.__savedProjectHardwareState = clone(state);
+        context.__projectHardwareState = clone(state);
+    };
+    context.__adjustStockCalls = [];
+    context.__toasts = [];
 
+    context.__originalWarehouseAdjustStock = vm.runInContext('Warehouse.adjustStock', context);
     try {
-        context.__currentPackagingItems = clone(currentItems);
         vm.runInContext(`
-            Warehouse.projectHardwareState = null;
             App.toast = (message) => { globalThis.__toasts.push(String(message || '')); };
+            Warehouse.adjustStock = async (itemId, delta, type, refName, note, employee, extra) => {
+                globalThis.__adjustStockCalls.push({ itemId, delta, type, refName, note, employee, extra });
+                const stockRow = (globalThis.__warehouseItems || []).find(item => Number(item.id) === Number(itemId)) || null;
+                const qtyBefore = Number(stockRow && stockRow.qty) || 0;
+                const qtyAfter = Math.max(0, qtyBefore + (Number(delta) || 0));
+                const appliedQtyChange = qtyAfter - qtyBefore;
+                if (stockRow) stockRow.qty = qtyAfter;
+                const history = globalThis.__warehouseHistory || [];
+                history.push({
+                    id: Date.now(),
+                    item_id: Number(itemId),
+                    order_id: extra && extra.order_id ? Number(extra.order_id) : null,
+                    qty_change: appliedQtyChange,
+                    notes: note || '',
+                });
+                globalThis.__warehouseHistory = history;
+                return {
+                    ok: true,
+                    requestedQtyChange: Number(delta) || 0,
+                    appliedQtyChange,
+                    qtyBefore,
+                    qtyAfter,
+                    clamped: Math.abs(appliedQtyChange - (Number(delta) || 0)) > 1e-9,
+                };
+            };
         `, context);
 
         await vm.runInContext(`Warehouse.syncProjectHardwareOrderState({
-            orderId: 42,
-            orderName: 'Packaging Save Sync',
+            orderId: 51,
+            orderName: 'Warehouse Flow',
             managerName: 'Smoke',
-            status: 'production_packaging',
-            currentItems: globalThis.__currentPackagingItems,
+            status: 'sample',
+            currentItems: ${JSON.stringify(orderData.items)},
             previousItems: []
         })`, context);
 
-        const activeReservation = context.__savedReservations.find(item => item.order_id === 42);
-        assert.equal(activeReservation.item_id, 501);
-        assert.equal(activeReservation.qty, 100);
-        assert.equal(activeReservation.status, 'active');
-        assert.equal(activeReservation.source, 'project_hardware');
-        assert.equal(context.__warehouseItems[0].qty, 120);
-        assert.equal(context.__warehouseHistory.length, 0);
-        assert.equal(Boolean(context.__projectHardwareState.checks['42:501']), false);
+        assert.equal(context.__savedReservations.length, 2);
+        const pkgReservation = context.__savedReservations.find(item => Number(item.item_id) === 501 && item.status === 'active');
+        const hwReservation = context.__savedReservations.find(item => Number(item.item_id) === 601 && item.status === 'active');
+        assert.equal(pkgReservation.qty, 4);
+        assert.equal(pkgReservation.source, 'project_hardware');
+        assert.equal(hwReservation.qty, 2);
+        assert.equal(hwReservation.source, 'project_hardware');
 
-        context.__savedReservations = [];
-        context.__reservations = [];
-        context.__warehouseItems = [{ id: 501, qty: 80, unit: 'шт' }];
-        context.__warehouseHistory = [];
-        context.__toasts = [];
-        context.__samplePackagingItems = clone(currentItems);
-        await vm.runInContext(`Warehouse.syncProjectHardwareOrderState({
-            orderId: 42,
-            orderName: 'Packaging Sample Save',
-            managerName: 'Smoke',
-            status: 'production_packaging',
-            currentItems: globalThis.__samplePackagingItems,
-            previousItems: []
-        })`, context);
+        context.__adjustStockCalls = [];
+        await vm.runInContext(`Warehouse.toggleProjectHardwareReady(51, 501, true)`, context);
 
-        const sampleReservation = context.__savedReservations.find(item => item.order_id === 42);
-        assert.equal(sampleReservation.item_id, 501);
-        assert.equal(sampleReservation.qty, 80);
-        assert.equal(sampleReservation.source, 'project_hardware');
-        assert.ok(context.__toasts.some(message => /позиций со склада.*полный резерв/i.test(message)));
+        assert.deepEqual(clone(context.__adjustStockCalls), [{
+            itemId: 501,
+            delta: -4,
+            type: 'deduction',
+            refName: 'Warehouse Flow',
+            note: 'Списание собранной позиции: 4 шт',
+            employee: 'Smoke',
+            extra: { order_id: 51 },
+        }]);
+        assert.equal(context.__projectHardwareState.checks['51:501'], true);
+        assert.ok(context.__reservations.find(item => Number(item.item_id) === 501 && item.status === 'released'));
+
+        context.__adjustStockCalls = [];
+        await vm.runInContext(`Warehouse.toggleProjectHardwareReady(51, 501, false)`, context);
+
+        assert.deepEqual(clone(context.__adjustStockCalls), [{
+            itemId: 501,
+            delta: 4,
+            type: 'addition',
+            refName: 'Warehouse Flow',
+            note: 'Возврат собранной позиции: 4 шт',
+            employee: 'Smoke',
+            extra: { order_id: 51 },
+        }]);
+        assert.equal(context.__projectHardwareState.checks['51:501'], undefined);
+        assert.ok(context.__reservations.find(item => Number(item.item_id) === 501 && item.status === 'active'));
     } finally {
         vm.runInContext(`
-            delete globalThis.__currentPackagingItems;
-            delete globalThis.__samplePackagingItems;
+            Warehouse.adjustStock = globalThis.__originalWarehouseAdjustStock;
         `, context);
-        delete context.__currentPackagingItems;
-        delete context.__samplePackagingItems;
     }
 }
 
@@ -1111,516 +979,6 @@ async function smokeWarehouseManualAdjustment(context) {
     assert.match(context.__warehouseHistory[1].notes, /Проверка частичного списания/);
 }
 
-async function smokeProjectHardwarePersistenceAndBuckets(context) {
-    context.__projectHardwareState = {
-        checks: {
-            '200:504': true,
-            '300:501': true,
-            '999:999': true,
-        },
-    };
-    context.__savedProjectHardwareState = null;
-    context.__savedReservations = null;
-    context.__warehouseItems = [
-        { id: 501, name: 'Collected Hardware', sku: 'COL-1', qty: 0 },
-        { id: 502, name: 'Active Hardware', sku: 'ACT-1', qty: 10 },
-        { id: 503, name: 'Sample Hardware', sku: 'SMP-1', qty: 5 },
-        { id: 504, name: 'Delivery Hardware', sku: 'DLV-1', qty: 0 },
-        { id: 505, name: 'Active Envelope', sku: 'ENV-1', category: 'packaging', qty: 40 },
-    ];
-    context.__orders = [
-        { id: 100, order_name: 'Active Hardware Order', manager_name: 'Маша', status: 'production_hardware', created_at: '2026-03-17T10:00:00.000Z' },
-        { id: 200, order_name: 'Collected Delivery Order', manager_name: 'Оля', status: 'delivery', created_at: '2026-03-17T09:30:00.000Z' },
-        { id: 300, order_name: 'Collected Hardware Order', manager_name: 'Склад', status: 'completed', created_at: '2026-03-17T09:00:00.000Z' },
-        { id: 400, order_name: 'Sample Hardware Order', manager_name: 'Лена', status: 'sample', created_at: '2026-03-17T08:00:00.000Z' },
-    ];
-    context.__orderDetails = {
-        100: {
-            order: clone(context.__orders[0]),
-            items: [
-                {
-                    item_type: 'hardware',
-                    product_name: 'Active product',
-                    quantity: 3,
-                    hardware_source: 'warehouse',
-                    hardware_warehouse_item_id: 502,
-                },
-                {
-                    item_type: 'packaging',
-                    product_name: 'Active envelope',
-                    quantity: 2,
-                    packaging_source: 'warehouse',
-                    packaging_warehouse_item_id: 505,
-                },
-            ],
-        },
-        200: {
-            order: clone(context.__orders[1]),
-            items: [{
-                item_type: 'hardware',
-                product_name: 'Collected delivery product',
-                quantity: 1,
-                hardware_source: 'warehouse',
-                hardware_warehouse_item_id: 504,
-            }],
-        },
-        300: {
-            order: clone(context.__orders[2]),
-            items: [{
-                item_type: 'hardware',
-                product_name: 'Collected product',
-                quantity: 2,
-                hardware_source: 'warehouse',
-                hardware_warehouse_item_id: 501,
-            }],
-        },
-        400: {
-            order: clone(context.__orders[3]),
-            items: [{
-                item_type: 'hardware',
-                product_name: 'Sample product',
-                quantity: 1,
-                hardware_source: 'warehouse',
-                hardware_warehouse_item_id: 503,
-            }],
-        },
-    };
-    context.__reservations = [{
-        id: 1,
-        item_id: 503,
-        order_id: 400,
-        order_name: 'Sample Hardware Order',
-        qty: 1,
-        status: 'active',
-        source: 'project_hardware',
-        created_at: '2026-03-17T08:00:00.000Z',
-    }];
-    context.__warehouseHistory = [];
-    context.loadProjectHardwareState = async () => clone(context.__projectHardwareState);
-    context.saveProjectHardwareState = async (state) => {
-        context.__savedProjectHardwareState = clone(state);
-        context.__projectHardwareState = clone(state);
-    };
-    context.loadOrders = async () => clone(context.__orders);
-    context.loadOrder = async (orderId) => clone(context.__orderDetails[Number(orderId)] || null);
-    context.loadWarehouseReservations = async () => clone(context.__reservations);
-    context.saveWarehouseReservations = async (reservations) => {
-        context.__savedReservations = clone(reservations);
-        context.__reservations = clone(reservations);
-    };
-    context.loadWarehouseHistory = async () => clone(context.__warehouseHistory);
-    context.loadWarehouseItems = async () => clone(context.__warehouseItems);
-
-    vm.runInContext(`
-        Warehouse.projectHardwareState = null;
-        Warehouse.allItems = globalThis.__warehouseItems;
-        Warehouse.currentView = 'project-hardware';
-        Warehouse._viewToken = 77;
-    `, context);
-
-    const reconcileResult = clone(await vm.runInContext(`Warehouse.reconcileProjectHardwareReservations()`, context));
-    assert.equal(reconcileResult.stateChanged, true);
-    assert.equal(vm.runInContext(`Warehouse._isProjectHardwareReady(200, 504)`, context), true);
-    assert.equal(vm.runInContext(`Warehouse._isProjectHardwareReady(300, 501)`, context), true);
-    assert.equal(vm.runInContext(`Warehouse._isProjectHardwareReady(100, 502)`, context), false);
-    assert.equal(Boolean(context.__projectHardwareState.checks['999:999']), false);
-    assert.equal(Boolean(context.__projectHardwareState.checks['200:504']), true);
-    assert.equal(Boolean(context.__projectHardwareState.checks['300:501']), true);
-
-    context.__warehouseHistory = [];
-    const stickyReconcile = clone(await vm.runInContext(`Warehouse.reconcileProjectHardwareReservations()`, context));
-    assert.equal(stickyReconcile.stateChanged, false);
-    assert.equal(vm.runInContext(`Warehouse._isProjectHardwareReady(200, 504)`, context), true);
-    assert.equal(vm.runInContext(`Warehouse._isProjectHardwareReady(300, 501)`, context), true);
-
-    await vm.runInContext(`Warehouse.renderProjectHardwareView(77)`, context);
-    const html = String(context.document.getElementById('wh-content').innerHTML || '');
-    assert.match(html, /Фурнитура и упаковка для проектов \(к сборке\)/);
-    assert.match(html, /Уже собрано/);
-    assert.match(html, /1 заказ · скрыто из активного списка/);
-    assert.match(html, /<details class="card" style="margin-top:12px;">/);
-    assert.equal((html.match(/Collected Hardware Order/g) || []).length, 0);
-    assert.equal((html.match(/Collected Delivery Order/g) || []).length, 1);
-    assert.equal((html.match(/Active Hardware Order/g) || []).length, 1);
-    assert.equal((html.match(/Sample Hardware Order/g) || []).length, 1);
-    assert.match(html, /Завершенные заказы скрыты автоматически: 1/);
-    assert.match(html, /Delivery Hardware/);
-    assert.match(html, /Active Hardware/);
-    assert.match(html, /Active Envelope/);
-    assert.match(html, /Упаковка/);
-    assert.match(html, /Собрано 1 из 1/);
-    assert.match(html, /Собрано 0 из 2/);
-}
-
-async function smokeProjectHardwareToggleShortageGuard(context) {
-    const originalWarehouseLoad = vm.runInContext('Warehouse.load', context);
-    context.__originalWarehouseLoad = originalWarehouseLoad;
-    const baseOrder = {
-        id: 42,
-        order_name: 'Shortage Project Order',
-        manager_name: 'Smoke',
-        status: 'production_hardware',
-        created_at: '2026-03-17T11:00:00.000Z',
-    };
-    const baseDetail = {
-        order: clone(baseOrder),
-        items: [{
-            item_type: 'hardware',
-            product_name: 'Shortage Hardware Product',
-            quantity: 5,
-            hardware_source: 'warehouse',
-            hardware_warehouse_item_id: 501,
-        }],
-    };
-
-    context.__projectHardwareState = { checks: {} };
-    context.__reservations = [{
-        id: 1,
-        item_id: 501,
-        order_id: 42,
-        order_name: 'Shortage Project Order',
-        qty: 2,
-        status: 'active',
-        source: 'project_hardware',
-        created_at: '2026-03-17T11:00:00.000Z',
-    }];
-    context.__warehouseItems = [{
-        id: 501,
-        name: 'Shortage Hardware',
-        sku: 'SH-1',
-        category: 'hardware',
-        qty: 2,
-        price_per_unit: 10,
-    }];
-    context.__warehouseHistory = [];
-    context.__orderDetails = { 42: baseDetail };
-    context.loadProjectHardwareState = async () => clone(context.__projectHardwareState);
-    context.saveProjectHardwareState = async (state) => {
-        context.__projectHardwareState = clone(state);
-    };
-    context.loadWarehouseReservations = async () => clone(context.__reservations);
-    context.saveWarehouseReservations = async (reservations) => {
-        context.__reservations = clone(reservations);
-    };
-    context.loadWarehouseItems = async () => clone(context.__warehouseItems);
-    context.saveWarehouseItems = async (items) => {
-        context.__warehouseItems = clone(items);
-    };
-    context.loadWarehouseHistory = async () => clone(context.__warehouseHistory);
-    context.saveWarehouseHistory = async (history) => {
-        context.__warehouseHistory = clone(history);
-    };
-    context.loadOrder = async (orderId) => clone(context.__orderDetails[Number(orderId)] || null);
-    context.__toasts = [];
-    vm.runInContext(`App.toast = (message) => { globalThis.__toasts.push(String(message || '')); };`, context);
-    vm.runInContext(`
-        Warehouse.projectHardwareState = null;
-        Warehouse.load = async () => {};
-    `, context);
-
-    try {
-        await vm.runInContext(`Warehouse.toggleProjectHardwareReady(42, 501, true)`, context);
-
-        assert.equal(Boolean(context.__projectHardwareState.checks['42:501']), false);
-        assert.equal(context.__warehouseItems[0].qty, 2);
-        assert.equal(context.__warehouseHistory.length, 0);
-        assert.equal(context.__reservations[0].status, 'active');
-        assert.ok(context.__toasts.some(message => /не удалось отметить как собрано/i.test(message)));
-
-        context.__projectHardwareState = { checks: { '42:501': true } };
-        context.__reservations = [];
-        context.__warehouseItems = [{
-            id: 501,
-            name: 'Shortage Hardware',
-            sku: 'SH-1',
-            category: 'hardware',
-            qty: 0,
-            price_per_unit: 10,
-        }];
-        context.__warehouseHistory = [{
-            id: 11,
-            item_id: 501,
-            item_name: 'Shortage Hardware',
-            item_sku: 'SH-1',
-            item_category: 'hardware',
-            type: 'deduction',
-            qty_change: -2,
-            requested_qty_change: -5,
-            qty_before: 2,
-            qty_after: 0,
-            unit_price: 10,
-            total_cost_change: 20,
-            order_id: 42,
-            order_name: 'Shortage Project Order',
-            notes: 'Списание собранной фурнитуры: 5 шт',
-            clamped: true,
-            created_at: '2026-03-17T11:05:00.000Z',
-            created_by: 'Smoke',
-        }];
-        context.__toasts = [];
-        vm.runInContext(`Warehouse.projectHardwareState = null;`, context);
-
-        await vm.runInContext(`Warehouse.toggleProjectHardwareReady(42, 501, false)`, context);
-
-        assert.equal(Boolean(context.__projectHardwareState.checks['42:501']), false);
-        assert.equal(context.__warehouseItems[0].qty, 2);
-        assert.equal(context.__warehouseHistory.length, 2);
-        assert.equal(context.__warehouseHistory[1].qty_change, 2);
-        assert.equal(context.__warehouseHistory[1].requested_qty_change, 2);
-        assert.match(context.__warehouseHistory[1].notes, /Возврат собранной позиции на склад: 2 шт/);
-        const restoredReservation = context.__reservations.find(item => item.order_id === 42 && item.status === 'active');
-        assert.equal(restoredReservation.qty, 2);
-        assert.ok(context.__toasts.some(message => /не в полный резерв/i.test(message)));
-
-        context.__projectHardwareState = { checks: { '42:501': true } };
-        context.__reservations = [];
-        context.__warehouseItems = [{
-            id: 501,
-            name: 'Shortage Hardware',
-            sku: 'SH-1',
-            category: 'hardware',
-            qty: 0,
-        }];
-        context.__warehouseHistory = [{
-            id: 12,
-            item_id: 501,
-            item_name: 'Shortage Hardware',
-            item_sku: 'SH-1',
-            item_category: 'hardware',
-            type: 'deduction',
-            qty_change: -2,
-            requested_qty_change: -5,
-            qty_before: 2,
-            qty_after: 0,
-            unit_price: 10,
-            total_cost_change: 20,
-            order_id: 42,
-            order_name: 'Shortage Project Order',
-            notes: 'Списание собранной фурнитуры: 5 шт',
-            clamped: true,
-            created_at: '2026-03-17T11:05:00.000Z',
-            created_by: 'Smoke',
-        }];
-        context.__orders = [clone(baseOrder)];
-        context.__orderDetails = { 42: clone(baseDetail) };
-        context.loadOrders = async () => clone(context.__orders);
-        context.loadOrder = async (orderId) => clone(context.__orderDetails[Number(orderId)] || null);
-        vm.runInContext(`
-            Warehouse.projectHardwareState = null;
-            Warehouse.allItems = globalThis.__warehouseItems;
-        `, context);
-
-        const reconcileResult = clone(await vm.runInContext(`Warehouse.reconcileProjectHardwareReservations()`, context));
-
-        assert.equal(reconcileResult.stateChanged, true);
-        assert.equal(vm.runInContext(`Warehouse._isProjectHardwareReady(42, 501)`, context), false);
-    } finally {
-        context.__toasts = [];
-        vm.runInContext(`
-            Warehouse.load = globalThis.__originalWarehouseLoad;
-            delete globalThis.__originalWarehouseLoad;
-        `, context);
-    }
-}
-
-async function smokeProjectHardwareLegacyStatusRepair(context) {
-    const order = {
-        id: 77,
-        order_name: 'Legacy Envelope Order',
-        manager_name: 'Склад',
-        status: 'production_packaging',
-        created_at: '2026-03-17T11:00:00.000Z',
-    };
-    const detail = {
-        order: clone(order),
-        items: [{
-            item_type: 'packaging',
-            product_name: 'Legacy Envelope',
-            quantity: 100,
-            packaging_source: 'warehouse',
-            packaging_warehouse_item_id: 501,
-        }],
-    };
-
-    context.__projectHardwareState = { checks: { '77:501': true } };
-    context.__reservations = [];
-    context.__warehouseItems = [{
-        id: 501,
-        name: 'Legacy Envelope',
-        sku: 'ENV-LEG',
-        category: 'packaging',
-        qty: 465,
-        price_per_unit: 5,
-    }];
-    context.__warehouseHistory = [{
-        id: 1,
-        item_id: 501,
-        item_name: 'Legacy Envelope',
-        item_sku: 'ENV-LEG',
-        item_category: 'packaging',
-        type: 'deduction',
-        qty_change: -100,
-        requested_qty_change: -100,
-        qty_before: 565,
-        qty_after: 465,
-        unit_price: 5,
-        total_cost_change: 500,
-        order_id: 77,
-        order_name: 'Legacy Envelope Order',
-        notes: 'Списание при смене статуса: Черновик → Производство: Упаковка',
-        clamped: false,
-        created_at: '2026-03-17T11:02:00.000Z',
-        created_by: 'Smoke',
-    }];
-    context.__orders = [clone(order)];
-    context.__orderDetails = { 77: clone(detail) };
-    context.loadProjectHardwareState = async () => clone(context.__projectHardwareState);
-    context.saveProjectHardwareState = async (state) => {
-        context.__projectHardwareState = clone(state);
-    };
-    context.loadOrders = async () => clone(context.__orders);
-    context.loadOrder = async (orderId) => clone(context.__orderDetails[Number(orderId)] || null);
-    context.loadWarehouseReservations = async () => clone(context.__reservations);
-    context.saveWarehouseReservations = async (reservations) => {
-        context.__reservations = clone(reservations);
-    };
-    context.loadWarehouseItems = async () => clone(context.__warehouseItems);
-    context.saveWarehouseItems = async (items) => {
-        context.__warehouseItems = clone(items);
-    };
-    context.loadWarehouseHistory = async () => clone(context.__warehouseHistory);
-    context.saveWarehouseHistory = async (history) => {
-        context.__warehouseHistory = clone(history);
-    };
-
-    vm.runInContext(`
-        Warehouse.projectHardwareState = null;
-        Warehouse.allItems = globalThis.__warehouseItems;
-    `, context);
-
-    const reconcileResult = clone(await vm.runInContext(`Warehouse.reconcileProjectHardwareReservations()`, context));
-
-    assert.equal(reconcileResult.stateChanged, true);
-    assert.equal(context.__warehouseItems[0].qty, 565);
-    assert.equal(vm.runInContext(`Warehouse._isProjectHardwareReady(77, 501)`, context), false);
-    assert.equal(Boolean(context.__projectHardwareState.checks['77:501']), false);
-    assert.equal(context.__warehouseHistory.length, 2);
-    assert.match(context.__warehouseHistory[1].notes, /Автоисправление legacy-списания проектной позиции: \+100 шт/);
-    assert.equal(context.__warehouseHistory[1].project_hardware_flow, 'legacy_status_repair');
-    const reservation = context.__reservations.find(item => item.order_id === 77 && item.status === 'active');
-    assert.equal(reservation.item_id, 501);
-    assert.equal(reservation.qty, 100);
-  }
-
-async function smokeProjectHardwareLegacyAndCollectedNetting(context) {
-    const order = {
-        id: 88,
-        order_name: 'Collected Cord Order',
-        manager_name: 'Склад',
-        status: 'delivery',
-        created_at: '2026-03-17T11:00:00.000Z',
-    };
-    const detail = {
-        order: clone(order),
-        items: [{
-            item_type: 'hardware',
-            product_name: 'Collected Cord',
-            quantity: 100,
-            hardware_source: 'warehouse',
-            hardware_warehouse_item_id: 601,
-        }],
-    };
-
-    context.__projectHardwareState = { checks: { '88:601': true } };
-    context.__reservations = [];
-    context.__warehouseItems = [{
-        id: 601,
-        name: 'Collected Cord',
-        sku: 'CORD-1',
-        category: 'hardware',
-        qty: 343,
-        price_per_unit: 30,
-    }];
-    context.__warehouseHistory = [
-        {
-            id: 1,
-            item_id: 601,
-            item_name: 'Collected Cord',
-            item_sku: 'CORD-1',
-            item_category: 'hardware',
-            type: 'deduction',
-            qty_change: -100,
-            requested_qty_change: -100,
-            qty_before: 543,
-            qty_after: 443,
-            unit_price: 30,
-            total_cost_change: 3000,
-            order_id: 88,
-            order_name: 'Collected Cord Order',
-            notes: 'Списание при смене статуса: Черновик → Производство: Выливание',
-            clamped: false,
-            created_at: '2026-03-17T10:02:00.000Z',
-            created_by: 'Smoke',
-        },
-        {
-            id: 2,
-            item_id: 601,
-            item_name: 'Collected Cord',
-            item_sku: 'CORD-1',
-            item_category: 'hardware',
-            type: 'deduction',
-            qty_change: -100,
-            requested_qty_change: -100,
-            qty_before: 443,
-            qty_after: 343,
-            unit_price: 30,
-            total_cost_change: 3000,
-            order_id: 88,
-            order_name: 'Collected Cord Order',
-            notes: 'Списание собранной позиции со склада: 100 шт',
-            clamped: false,
-            created_at: '2026-03-17T10:15:00.000Z',
-            created_by: 'Smoke',
-        },
-    ];
-    context.__orders = [clone(order)];
-    context.__orderDetails = { 88: clone(detail) };
-    context.loadProjectHardwareState = async () => clone(context.__projectHardwareState);
-    context.saveProjectHardwareState = async (state) => {
-        context.__projectHardwareState = clone(state);
-    };
-    context.loadOrders = async () => clone(context.__orders);
-    context.loadOrder = async (orderId) => clone(context.__orderDetails[Number(orderId)] || null);
-    context.loadWarehouseReservations = async () => clone(context.__reservations);
-    context.saveWarehouseReservations = async (reservations) => {
-        context.__reservations = clone(reservations);
-    };
-    context.loadWarehouseItems = async () => clone(context.__warehouseItems);
-    context.saveWarehouseItems = async (items) => {
-        context.__warehouseItems = clone(items);
-    };
-    context.loadWarehouseHistory = async () => clone(context.__warehouseHistory);
-    context.saveWarehouseHistory = async (history) => {
-        context.__warehouseHistory = clone(history);
-    };
-
-    vm.runInContext(`
-        Warehouse.projectHardwareState = null;
-        Warehouse.allItems = globalThis.__warehouseItems;
-    `, context);
-
-    const reconcileResult = clone(await vm.runInContext(`Warehouse.reconcileProjectHardwareReservations()`, context));
-
-    assert.equal(reconcileResult.stateChanged, false);
-    assert.equal(context.__warehouseItems[0].qty, 443);
-    assert.equal(vm.runInContext(`Warehouse._isProjectHardwareReady(88, 601)`, context), true);
-    assert.equal(Boolean(context.__projectHardwareState.checks['88:601']), true);
-    assert.equal(context.__warehouseHistory.length, 3);
-    assert.match(context.__warehouseHistory[2].notes, /Автоисправление legacy-списания проектной позиции: \+100 шт/);
-    assert.equal(context.__warehouseHistory[2].project_hardware_flow, 'legacy_status_repair');
-    assert.equal(context.__reservations.length, 0);
-}
-
 async function smokeOrderDetailColorRendering(context) {
     const rendered = String(await vm.runInContext(`(() => {
         const rawProduct = {
@@ -1672,21 +1030,14 @@ async function main() {
     stubRuntime(context);
 
     await smokeCalculatorPersistence(context);
-    await smokeHardwareOnlyAutosave(context);
-    await smokePackagingWarehousePickerDefaults(context);
-    await smokePendantWarehousePickerRichUI();
     await smokeLegacyPendantRestore(context);
     await smokeReadyGoodsRollback(context);
     await smokeReadyGoodsSalesAndManualAdd(context);
     await smokeChinaShipmentMetadata(context);
     await smokeChinaReceiptStatusLinkage(context);
     await smokeOrderStatusWarehouseSync(context);
-    await smokePackagingWarehouseSaveSync(context);
+    await smokeProjectWarehouseLifecycle(context);
     await smokeWarehouseManualAdjustment(context);
-    await smokeProjectHardwarePersistenceAndBuckets(context);
-    await smokeProjectHardwareToggleShortageGuard(context);
-    await smokeProjectHardwareLegacyStatusRepair(context);
-    await smokeProjectHardwareLegacyAndCollectedNetting(context);
     await smokeOrderDetailColorRendering(context);
 
     console.log('order-flow smoke checks passed');

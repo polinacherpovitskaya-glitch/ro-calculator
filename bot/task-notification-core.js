@@ -1,5 +1,5 @@
 const TASK_STATUS_LABELS = {
-    incoming: 'Новая',
+    incoming: 'Входящие',
     planned: 'Запланировано',
     in_progress: 'В работе',
     review: 'На согласовании',
@@ -33,11 +33,7 @@ function getTaskNotificationRecipientIds(event, task) {
     if (event?.event_type === 'task_assigned') {
         push(payload.assignee_id || task?.assignee_id);
     } else if (event?.event_type === 'task_sent_to_review') {
-        const watcherIds = Array.isArray(payload.watcher_user_ids) ? payload.watcher_user_ids : [];
-        watcherIds.forEach(push);
-        if (watcherIds.length === 0) {
-            push(payload.reviewer_id || task?.reviewer_id);
-        }
+        push(payload.reviewer_id || task?.reviewer_id);
     } else if (event?.event_type === 'task_due_soon') {
         push(task?.assignee_id);
     } else if (event?.event_type === 'task_overdue_state_changed') {

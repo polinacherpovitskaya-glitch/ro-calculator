@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v134';
+const APP_VERSION = 'v93';
 
 const App = {
     currentPage: 'orders',
@@ -13,7 +13,6 @@ const App = {
     _updateCheckTimer: null,
     _updateCheckMs: 120000,
     _onWindowFocus: null,
-    _toastTimer: null,
     employees: [],
     authAccounts: [],
     currentEmployeeId: null,
@@ -21,31 +20,25 @@ const App = {
 
     // All pages in the app
     ALL_PAGES: [
-        'calculator', 'orders', 'factual',
-        'analytics', 'molds', 'colors', 'timetrack', 'tasks', 'projects', 'wiki', 'gantt',
+        'calculator', 'orders', 'production-plan', 'factual',
+        'analytics', 'molds', 'colors', 'timetrack', 'tasks', 'bugs', 'projects', 'gantt',
         'import', 'warehouse', 'marketplaces', 'china', 'settings',
     ],
 
     // Pages visible to everyone by default (if no custom config)
-    DEFAULT_PAGES: ['orders', 'timetrack', 'tasks', 'projects', 'wiki'],
-
-    normalizePageAlias(page) {
-        if (page === 'dashboard') return 'orders';
-        if (page === 'production-plan' || page === 'calendar') return 'gantt';
-        return page;
-    },
+    DEFAULT_PAGES: ['orders', 'timetrack', 'tasks', 'bugs', 'projects'],
 
     // Check if current user has access to a specific page
     canAccess(page) {
         if (!this.currentUser) return false;
-        page = this.normalizePageAlias(page);
-        if (page === 'wiki') return true;
+        if (page === 'bugs') return true;
+        if (page === 'dashboard') page = 'orders';
         // order-detail is part of orders
         if (page === 'order-detail') page = 'orders';
-        if ((this.currentUser.id === '__admin' || this.currentUser.role === 'admin') && this.currentUser.employee_id == null) {
-            return true;
-        }
-        const allowed = this.getCurrentAllowedPages();
+        const empId = this.currentUser.employee_id;
+        if (!empId) return true; // fallback: allow all
+        const perms = JSON.parse(localStorage.getItem('ro_employee_pages') || '{}');
+        const allowed = perms[String(empId)];
         if (!allowed) return this.DEFAULT_PAGES.includes(page);
         if (allowed.includes(page)) return true;
         if (page === 'orders' && allowed.includes('dashboard')) return true;
@@ -71,20 +64,10 @@ const App = {
         localStorage.setItem('ro_employee_pages', JSON.stringify(perms));
     },
 
-    getCurrentAllowedPages() {
-        if (!this.currentUser) return null;
-        const currentPages = this.normalizePageList(this.currentUser.pages);
-        if (Array.isArray(currentPages)) return currentPages;
-        const empId = this.currentUser.employee_id;
-        if (empId == null || empId === '') return null;
-        const perms = JSON.parse(localStorage.getItem('ro_employee_pages') || '{}');
-        return this.normalizePageList(perms[String(empId)] || null);
-    },
-
     normalizePageList(pages) {
         if (!Array.isArray(pages)) return pages;
         const mapped = pages
-            .map(page => this.normalizePageAlias(page))
+            .map(page => page === 'dashboard' ? 'orders' : page)
             .filter(page => this.ALL_PAGES.includes(page));
         return [...new Set(mapped)];
     },
@@ -150,9 +133,7 @@ const App = {
         // Check auth
         if (this.isAuthenticated()) {
             await this.restoreAuthenticatedUser();
-            if (this.currentUser) {
-                await this.showApp();
-            }
+            this.showApp();
         }
 
         // Bind enter on password
@@ -180,7 +161,6 @@ const App = {
         const nowTs = Date.now().toString();
         let ok = false;
         let errorText = 'Неверный пароль';
-        let upgradedLegacyHash = false;
 
         // Employee login only (no admin mode)
         const account = this.authAccounts.find(a => String(a.id) === String(selectedUserId) && a.is_active !== false);
@@ -188,24 +168,22 @@ const App = {
             errorText = 'Пользователь не найден';
         } else {
             if (this.verifyUserPassword(account, pwd)) {
-                const currentVersion = Number(this.AUTH_PASSWORD_HASH_VERSION) || 2;
-                if (this.getAccountPasswordHashVersion(account) < currentVersion) {
-                    account.password_hash = this.hashUserPassword(account.username || '', pwd, currentVersion);
-                    account.password_hash_version = currentVersion;
-                    account.password_rotated_at = new Date().toISOString();
-                    delete account.password_plain;
-                    upgradedLegacyHash = true;
-                }
                 localStorage.setItem('ro_calc_auth_method', 'user');
                 localStorage.setItem('ro_calc_auth_ts', nowTs);
                 localStorage.setItem('ro_calc_auth_user_id', String(account.id));
                 localStorage.setItem('ro_calc_last_user_id', String(account.id));
                 localStorage.setItem('ro_calc_last_user_name', account.employee_name || account.username || 'Сотрудник');
                 localStorage.removeItem('ro_calc_auth');
-                this.currentUser = this.buildCurrentUserFromAccount(account);
+                this.currentUser = {
+                    id: account.id,
+                    employee_id: account.employee_id ?? null,
+                    username: account.username || '',
+                    name: account.employee_name || account.username || 'Сотрудник',
+                    role: 'employee',
+                };
                 ok = true;
                 // Sync page permissions from auth account to localStorage
-                if (account.employee_id != null && account.pages && Array.isArray(account.pages)) {
+                if (account.pages && Array.isArray(account.pages)) {
                     this.setEmployeePages(account.employee_id, account.pages);
                 }
                 account.last_login_at = new Date().toISOString();
@@ -216,14 +194,6 @@ const App = {
                     actor_user_id: this.currentUser.id,
                     method: 'user',
                 });
-                if (upgradedLegacyHash) {
-                    appendAuthActivity({
-                        type: 'password_hash_upgrade',
-                        actor: this.currentUser.name,
-                        actor_user_id: this.currentUser.id,
-                        method: 'user',
-                    });
-                }
             }
         }
 
@@ -252,13 +222,19 @@ const App = {
             pages: this.normalizePageList(account.pages),
         }));
         const userId = localStorage.getItem('ro_calc_auth_user_id');
-        const account = this.authAccounts.find(a => String(a.id) === String(userId) && a.is_active !== false);
+        const account = this.authAccounts.find(a => String(a.id) === String(userId));
         if (account) {
-            this.currentUser = this.buildCurrentUserFromAccount(account);
+            this.currentUser = {
+                id: account.id,
+                employee_id: account.employee_id ?? null,
+                username: account.username || '',
+                name: account.employee_name || account.username || 'Сотрудник',
+                role: 'employee',
+            };
             // Refresh session timestamp on active usage (extends 30-day window)
             localStorage.setItem('ro_calc_auth_ts', Date.now().toString());
             // Sync page permissions from auth account to localStorage
-            if (account.employee_id != null && account.pages && Array.isArray(account.pages)) {
+            if (account.pages && Array.isArray(account.pages)) {
                 this.setEmployeePages(account.employee_id, account.pages);
             }
             return;
@@ -268,7 +244,7 @@ const App = {
             console.warn('Auth restore failed: account not found or auth accounts unavailable');
             const err = document.getElementById('auth-error');
             if (err) {
-                err.textContent = 'Не удалось подтвердить вход: логин отключен или данные обновились. Войдите заново.';
+                err.textContent = 'Не удалось подтвердить вход. Войдите заново.';
                 err.style.display = 'block';
             }
         }
@@ -283,22 +259,14 @@ const App = {
         localStorage.removeItem('ro_calc_auth_ts');
         localStorage.removeItem('ro_calc_auth_method');
         localStorage.removeItem('ro_calc_auth_user_id');
-        localStorage.removeItem('ro_calc_editing_order_id');
         this.currentUser = null;
-        this.currentPage = 'orders';
         this._sessionStartedAt = null;
         this._sessionId = null;
-        this.clearToast();
-        if (typeof Calculator !== 'undefined' && Calculator._autosaveTimer) {
-            clearTimeout(Calculator._autosaveTimer);
-            Calculator._autosaveTimer = null;
-        }
-        document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-        document.querySelectorAll('.sidebar-nav a').forEach(a => a.classList.remove('active'));
         document.getElementById('auth-screen').style.display = 'flex';
         document.getElementById('app-layout').classList.remove('active');
-        const userInfo = document.getElementById('sidebar-user-info');
-        if (userInfo) userInfo.textContent = '';
+        if (window.BugReports && typeof window.BugReports.syncQuickButton === 'function') {
+            window.BugReports.syncQuickButton();
+        }
         this.hideUpdateBanner();
         if (this._updateCheckTimer) {
             clearInterval(this._updateCheckTimer);
@@ -307,13 +275,6 @@ const App = {
         if (this._onWindowFocus) {
             window.removeEventListener('focus', this._onWindowFocus);
             this._onWindowFocus = null;
-        }
-        const pathname = window.location?.pathname || '';
-        const search = window.location?.search || '';
-        if (window.history && typeof window.history.replaceState === 'function') {
-            window.history.replaceState(null, '', `${pathname}${search}`);
-        } else if (window.location) {
-            window.location.hash = '';
         }
     },
 
@@ -363,17 +324,6 @@ const App = {
         if (!account || !account.password_hash) return false;
         const version = this.getAccountPasswordHashVersion(account);
         return this.hashUserPassword(account.username || '', password, version) === account.password_hash;
-    },
-
-    buildCurrentUserFromAccount(account) {
-        return {
-            id: account.id,
-            employee_id: account.employee_id ?? null,
-            username: account.username || '',
-            name: account.employee_name || account.username || 'Сотрудник',
-            role: account.role || 'employee',
-            pages: this.normalizePageList(account.pages),
-        };
     },
 
     async prepareAuthUI() {
@@ -462,6 +412,9 @@ const App = {
         this.applyNavVisibility();
         this.handleRoute();
         this.startUpdateChecker();
+        if (window.BugReports && typeof window.BugReports.syncQuickButton === 'function') {
+            window.BugReports.syncQuickButton();
+        }
     },
 
     // Hide sidebar links for pages the user has no access to
@@ -642,13 +595,13 @@ const App = {
     handleRoute() {
         const hash = window.location.hash.replace('#', '') || 'orders';
         const parts = hash.split('/');
-        const page = this.normalizePageAlias(parts[0]);
+        const page = parts[0] === 'dashboard' ? 'orders' : parts[0];
         const subId = parts[1] || null;
         this.navigate(page, false, subId);
     },
 
     navigate(page, pushHash = true, subId = null) {
-        page = this.normalizePageAlias(page);
+        if (page === 'dashboard') page = 'orders';
 
         // Access control: redirect to orders if not allowed
         if (!this.canAccess(page)) {
@@ -687,8 +640,7 @@ const App = {
         switch (page) {
             case 'calculator': Calculator.init(); break;
             case 'orders': Orders.loadList(); break;
-            case 'production-plan':
-            case 'gantt': Gantt.load(); break;
+            case 'production-plan': ProductionPlan.load(); break;
             case 'order-detail': if (subId) OrderDetail.load(parseInt(subId)); break;
             case 'factual': Factual.load(); break;
             case 'analytics': Analytics.load(); break;
@@ -696,8 +648,9 @@ const App = {
             case 'colors': Colors.load(); break;
             case 'timetrack': TimeTrack.load(); break;
             case 'tasks': Tasks.load(subId ? parseInt(subId, 10) : null); break;
+            case 'bugs': BugReports.load(); break;
             case 'projects': Projects.load(subId ? parseInt(subId, 10) : null); break;
-            case 'wiki': Wiki.load(); break;
+            case 'gantt': Gantt.load(); break;
             case 'import': FinTablo.load(); break;
             case 'indirect-costs': App.navigate('settings'); setTimeout(() => Settings.switchTab('indirect'), 100); break;
             case 'warehouse': Warehouse.load(); break;
@@ -711,29 +664,9 @@ const App = {
 
     toast(message, duration = 3000) {
         const el = document.getElementById('toast');
-        if (!el) return;
-        if (this._toastTimer) {
-            clearTimeout(this._toastTimer);
-            this._toastTimer = null;
-        }
         el.textContent = message;
         el.classList.add('show');
-        this._toastTimer = setTimeout(() => {
-            el.classList.remove('show');
-            el.textContent = '';
-            this._toastTimer = null;
-        }, duration);
-    },
-
-    clearToast() {
-        const el = document.getElementById('toast');
-        if (!el) return;
-        if (this._toastTimer) {
-            clearTimeout(this._toastTimer);
-            this._toastTimer = null;
-        }
-        el.classList.remove('show');
-        el.textContent = '';
+        setTimeout(() => el.classList.remove('show'), duration);
     },
 
     // === UPDATE CHECKER ===
@@ -2440,11 +2373,6 @@ const Calculator = {
         await this._ensureBlanksCatalog(true);
         const linkedBlank = this._findPkgBlankByWarehouseItemId(whItem.id);
         if (linkedBlank) {
-            const speed = parseFloat(linkedBlank.assembly_speed) || 0;
-            if (speed > 0) {
-                pkg.assembly_speed = round2(speed);
-                pkg.assembly_minutes = round2(speed / 60);
-            }
             const fixedSellPrice = parseFloat(linkedBlank.sell_price) || 0;
             if (fixedSellPrice > 0) {
                 pkg.sell_price = fixedSellPrice;
@@ -3788,13 +3716,8 @@ const Calculator = {
 
     async _doAutosave() {
         if (this._autosaving) return;
-        // Don't autosave if the draft is completely empty.
-        const hasAnyData = this.items.some(i => i.product_name || i.quantity > 0 || i.template_id)
-            || this.hardwareItems.some(hw => hw._from_template || hw.name || hw.warehouse_item_id || hw.china_item_id || (parseFloat(hw.qty) || 0) > 0)
-            || this.packagingItems.some(pkg => pkg.name || pkg.warehouse_item_id || pkg.china_item_id || (parseFloat(pkg.qty) || 0) > 0)
-            || this.pendants.some(pnd => pnd.name || pnd.template_id || (parseFloat(pnd.quantity) || 0) > 0)
-            || (this.extraCosts || []).some(ec => ec.name || (parseFloat(ec.amount) || 0) > 0)
-            || !!App.editingOrderId;
+        // Don't autosave if no items or all items are empty
+        const hasAnyData = this.items.some(i => i.product_name || i.quantity > 0 || i.template_id);
         if (!hasAnyData) return;
 
         this._autosaving = true;
@@ -4127,8 +4050,7 @@ const Calculator = {
             }
 
             // === Warehouse sync ===
-            // Warehouse project sync now covers both hardware and packaging from stock:
-            // reserve by order status, actual write-off only after warehouse marks the row as collected.
+            // Hardware from warehouse: reserve by order status, списание только по галочке "собрано" на складе.
             if (typeof Warehouse !== 'undefined' && Warehouse.syncProjectHardwareOrderState) {
                 await Warehouse.syncProjectHardwareOrderState({
                     orderId,
@@ -4138,8 +4060,9 @@ const Calculator = {
                     currentItems: items,
                     previousItems: (oldData && oldData.items) || [],
                 });
-            } else {
-                // Legacy fallback if project warehouse sync is unavailable.
+            }
+
+            if (!(typeof Warehouse !== 'undefined' && Warehouse.syncProjectHardwareOrderState)) {
                 await this._syncWarehouseReservationsOnSave(
                     orderId,
                     order.order_name,

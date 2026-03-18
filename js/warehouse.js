@@ -335,6 +335,9 @@ const Warehouse = {
         if (!this.projectHardwareState.checks || typeof this.projectHardwareState.checks !== 'object') {
             this.projectHardwareState.checks = {};
         }
+        if (!this.projectHardwareState.legacy_status_neutralized || typeof this.projectHardwareState.legacy_status_neutralized !== 'object') {
+            this.projectHardwareState.legacy_status_neutralized = {};
+        }
         await this.reconcileProjectHardwareReservations();
         this.recalcReservations();
         this.populateCategoryFilter();
@@ -723,11 +726,6 @@ const Warehouse = {
 
         // Record in history
         const history = await loadWarehouseHistory();
-        const extraMeta = meta && typeof meta === 'object' ? { ...meta } : {};
-        const historyOrderId = extraMeta && extraMeta.order_id ? extraMeta.order_id : null;
-        if (extraMeta && Object.prototype.hasOwnProperty.call(extraMeta, 'order_id')) {
-            delete extraMeta.order_id;
-        }
         history.push({
             id: Date.now(),
             item_id: itemId,
@@ -741,13 +739,12 @@ const Warehouse = {
             qty_after: item.qty,
             unit_price: parseFloat(item.price_per_unit) || 0,
             total_cost_change: round2(Math.abs(appliedQtyChange) * (parseFloat(item.price_per_unit) || 0)),
-            order_id: historyOrderId,
+            order_id: meta && meta.order_id ? meta.order_id : null,
             order_name: orderName || '',
             notes: notes || '',
             clamped,
             created_at: new Date().toISOString(),
             created_by: manager || '',
-            ...extraMeta,
         });
         await saveWarehouseHistory(history);
         return {
@@ -1333,10 +1330,6 @@ const Warehouse = {
         return ['production_casting', 'production_printing', 'production_hardware', 'production_packaging', 'in_production', 'delivery', 'completed'].includes(status);
     },
 
-    _isProjectHardwareTrackedStatus(status) {
-        return this._isProjectHardwareReserveStatus(status) || this._isProjectHardwareActionStatus(status);
-    },
-
     _isProjectHardwareReservationSource(source) {
         return source === 'project_hardware' || source === 'order_calc';
     },
@@ -1355,17 +1348,14 @@ const Warehouse = {
         if (!this.projectHardwareState.checks || typeof this.projectHardwareState.checks !== 'object') {
             this.projectHardwareState.checks = {};
         }
+        if (!this.projectHardwareState.legacy_status_neutralized || typeof this.projectHardwareState.legacy_status_neutralized !== 'object') {
+            this.projectHardwareState.legacy_status_neutralized = {};
+        }
     },
 
     _isProjectHardwareReady(orderId, itemId) {
         const checks = (this.projectHardwareState && this.projectHardwareState.checks) || {};
         return !!checks[this._projectHardwareKey(orderId, itemId)];
-    },
-
-    _projectSupplyKindLabel(kind) {
-        return String(kind || '').toLowerCase() === 'packaging'
-            ? 'Упаковка'
-            : 'Фурнитура';
     },
 
     async toggleProjectHardwareReady(orderId, itemId, checked) {
@@ -1387,54 +1377,8 @@ const Warehouse = {
         const managerName = App.getCurrentEmployeeName() || order.manager_name || '';
         const nowIso = new Date().toISOString();
         let reservations = await loadWarehouseReservations();
-        const history = await loadWarehouseHistory();
-        const historyDeltaMap = this._buildProjectHardwareHistoryDeltaMap(history);
 
         if (checked) {
-            const consumedQty = this._getProjectHardwareConsumedQty(normalizedOrderId, normalizedItemId, historyDeltaMap);
-            const missingQty = Math.max(0, qty - consumedQty);
-            if (missingQty > 0) {
-                const items = await loadWarehouseItems();
-                const whItem = (items || []).find(i => Number(i.id) === normalizedItemId) || null;
-                const stockQty = parseFloat(whItem && whItem.qty) || 0;
-                if (stockQty + 0.000001 < missingQty) {
-                    App.toast('Не удалось отметить как собрано: недостаточно остатка');
-                    return;
-                }
-
-                const result = await this.adjustStock(
-                    normalizedItemId,
-                    -missingQty,
-                    'deduction',
-                    order.order_name || 'Заказ',
-                    `Списание собранной позиции со склада: ${missingQty} шт`,
-                    managerName,
-                    {
-                        order_id: normalizedOrderId,
-                        project_hardware_flow: 'ready_toggle',
-                    }
-                );
-                const appliedQty = Math.max(0, -(parseFloat(result && result.appliedQtyChange) || 0));
-                if (!result || result.ok === false || appliedQty + 0.000001 < missingQty) {
-                    if (appliedQty > 0) {
-                        await this.adjustStock(
-                            normalizedItemId,
-                            appliedQty,
-                            'addition',
-                            order.order_name || 'Заказ',
-                            `Откат неполного списания собранной позиции со склада: ${appliedQty} шт`,
-                            managerName,
-                            {
-                                order_id: normalizedOrderId,
-                                project_hardware_flow: 'ready_adjustment',
-                            }
-                        );
-                    }
-                    App.toast('Не удалось отметить как собрано: недостаточно остатка');
-                    return;
-                }
-            }
-
             reservations.forEach(r => {
                 if (r.status !== 'active') return;
                 if (Number(r.order_id) !== normalizedOrderId) return;
@@ -1444,62 +1388,70 @@ const Warehouse = {
                 r.released_at = nowIso;
             });
 
-            this.projectHardwareState.checks[key] = true;
-            App.toast(missingQty > 0 ? 'Позиция со склада списана' : 'Позиция уже была списана');
-        } else {
-            delete this.projectHardwareState.checks[key];
-            const returnQty = this._getProjectHardwareConsumedQty(normalizedOrderId, normalizedItemId, historyDeltaMap);
-
-            if (returnQty > 0) {
+            if (qty > 0) {
                 await this.adjustStock(
                     normalizedItemId,
-                    returnQty,
-                    'addition',
+                    -qty,
+                    'deduction',
                     order.order_name || 'Заказ',
-                    `Возврат собранной позиции на склад: ${returnQty} шт`,
+                    `Списание собранной позиции: ${qty} шт`,
                     managerName,
-                    {
-                        order_id: normalizedOrderId,
-                        project_hardware_flow: 'ready_toggle',
-                    }
+                    { order_id: normalizedOrderId }
                 );
             }
 
-            if (qty > 0 && this._isProjectHardwareReserveStatus(order.status)) {
-                const items = await loadWarehouseItems();
-                const activeByItem = new Map();
-                reservations.forEach(r => {
-                    if (r.status !== 'active') return;
-                    const resItemId = Number(r.item_id || 0);
-                    if (!resItemId) return;
-                    activeByItem.set(resItemId, (activeByItem.get(resItemId) || 0) + (parseFloat(r.qty) || 0));
-                });
+            this.projectHardwareState.checks[key] = true;
+            App.toast('Позиция списана со склада');
+        } else {
+            delete this.projectHardwareState.checks[key];
 
-                const whItem = items.find(i => Number(i.id) === normalizedItemId);
-                const stockQty = parseFloat(whItem && whItem.qty) || 0;
-                const alreadyReserved = activeByItem.get(normalizedItemId) || 0;
-                const available = Math.max(0, stockQty - alreadyReserved);
-                const reserveQty = Math.min(qty, available);
-                if (reserveQty > 0) {
-                    reservations.push({
-                        id: Date.now() + Math.floor(Math.random() * 1000),
-                        item_id: normalizedItemId,
-                        order_id: normalizedOrderId,
-                        order_name: order.order_name || 'Заказ',
-                        qty: reserveQty,
-                        status: 'active',
-                        source: 'project_hardware',
-                        created_at: nowIso,
-                        created_by: managerName || '',
+            if (qty > 0) {
+                await this.adjustStock(
+                    normalizedItemId,
+                    qty,
+                    'addition',
+                    order.order_name || 'Заказ',
+                    `Возврат собранной позиции: ${qty} шт`,
+                    managerName,
+                    { order_id: normalizedOrderId }
+                );
+
+                if (this._isProjectHardwareReserveStatus(order.status)) {
+                    const items = await loadWarehouseItems();
+                    const activeByItem = new Map();
+                    reservations.forEach(r => {
+                        if (r.status !== 'active') return;
+                        const resItemId = Number(r.item_id || 0);
+                        if (!resItemId) return;
+                        activeByItem.set(resItemId, (activeByItem.get(resItemId) || 0) + (parseFloat(r.qty) || 0));
                     });
-                }
-                if (reserveQty < qty) {
-                    App.toast('Позиция возвращена не в полный резерв: недостаточно остатка');
+
+                    const whItem = items.find(i => Number(i.id) === normalizedItemId);
+                    const stockQty = parseFloat(whItem && whItem.qty) || 0;
+                    const alreadyReserved = activeByItem.get(normalizedItemId) || 0;
+                    const available = Math.max(0, stockQty - alreadyReserved);
+                    const reserveQty = Math.min(qty, available);
+                    if (reserveQty > 0) {
+                        reservations.push({
+                            id: Date.now() + Math.floor(Math.random() * 1000),
+                            item_id: normalizedItemId,
+                            order_id: normalizedOrderId,
+                            order_name: order.order_name || 'Заказ',
+                            qty: reserveQty,
+                            status: 'active',
+                            source: 'project_hardware',
+                            created_at: nowIso,
+                            created_by: managerName || '',
+                        });
+                    }
+                    if (reserveQty < qty) {
+                        App.toast('Позиция возвращена не в полный резерв: недостаточно остатка');
+                    } else {
+                        App.toast('Позиция возвращена в резерв');
+                    }
                 } else {
-                    App.toast('Позиция возвращена в резерв');
+                    App.toast('Позиция возвращена на склад');
                 }
-            } else if (returnQty > 0) {
-                App.toast('Позиция возвращена на склад');
             } else {
                 App.toast('Флаг сборки снят');
             }
@@ -1520,21 +1472,16 @@ const Warehouse = {
     _collectWarehouseDemandFromOrderItems(items) {
         const grouped = new Map();
         (items || []).forEach(item => {
-            const itemType = String(item.item_type || '').toLowerCase();
-            const isHardware = itemType === 'hardware';
-            const isPackaging = itemType === 'packaging';
-            if (!isHardware && !isPackaging) return;
+            const itemType = item.item_type || '';
+            if (itemType !== 'hardware' && itemType !== 'packaging') return;
 
-            const src = String(
-                item.source
-                || (isHardware ? item.hardware_source : item.packaging_source)
-                || ''
-            ).toLowerCase();
+            const src = (item.source || item.hardware_source || item.packaging_source || '').toLowerCase();
             if (src !== 'warehouse') return;
 
             const itemId = Number(
                 item.warehouse_item_id
-                || (isHardware ? item.hardware_warehouse_item_id : item.packaging_warehouse_item_id)
+                || item.hardware_warehouse_item_id
+                || item.packaging_warehouse_item_id
                 || 0
             );
             const qty = parseFloat(item.quantity || item.qty || 0) || 0;
@@ -1543,19 +1490,18 @@ const Warehouse = {
             const key = String(itemId);
             const prev = grouped.get(key);
             const name = item.product_name || item.name || '';
-            const materialType = isPackaging ? 'packaging' : 'hardware';
             if (!prev) {
                 grouped.set(key, {
                     warehouse_item_id: itemId,
                     qty,
                     names: name ? [name] : [],
-                    material_type: materialType,
+                    item_type: itemType,
                 });
                 return;
             }
             prev.qty += qty;
+            if (prev.item_type !== itemType) prev.item_type = 'mixed';
             if (name && !prev.names.includes(name)) prev.names.push(name);
-            if (prev.material_type !== materialType) prev.material_type = 'mixed';
             grouped.set(key, prev);
         });
         return Array.from(grouped.values());
@@ -1572,38 +1518,11 @@ const Warehouse = {
         return demand;
     },
 
-    _getProjectHardwareHistoryFlow(entry) {
-        const explicitFlow = String(entry && entry.project_hardware_flow || '').trim().toLowerCase();
-        if (explicitFlow) return explicitFlow;
-
-        const notes = String(entry && entry.notes || '').trim();
-        if (!notes) return '';
-        if (/^(Списание|Возврат на склад) при смене статуса:/i.test(notes)) return 'legacy_status';
-        if (/^Автоисправление legacy-(?:списания|возврата) проектной позиции:/i.test(notes)) return 'legacy_status_repair';
-        if (/^Откат неполного списания собранной позиции со склада:/i.test(notes)) return 'ready_adjustment';
-        if (/^Корректировка собранной (?:фурнитуры|позиции):/i.test(notes)) return 'ready_delta';
-        if (/^(Списание|Возврат(?: собранной)?(?: позиции| фурнитуры)?|Возврат собранной фурнитуры|Списание собранной фурнитуры)/i.test(notes)) {
-            if (/собранн/i.test(notes)) return 'ready_toggle';
-        }
-        return '';
-    },
-
-    _isProjectHardwareStockHistoryFlow(flow) {
-        return flow === 'ready_toggle'
-            || flow === 'ready_delta'
-            || flow === 'ready_adjustment';
-    },
-
-    _isProjectHardwareLegacyHistoryFlow(flow) {
-        return flow === 'legacy_status'
-            || flow === 'legacy_status_repair';
-    },
-
     _buildProjectHardwareHistoryDeltaMap(history) {
         const deltaByKey = new Map();
         (history || []).forEach(entry => {
-            const flow = this._getProjectHardwareHistoryFlow(entry);
-            if (!this._isProjectHardwareStockHistoryFlow(flow)) return;
+            const notes = String(entry.notes || '');
+            if (/смене статуса/i.test(notes) || /Компенсация legacy-движения по смене статуса/i.test(notes)) return;
             const orderId = Number(entry.order_id || 0);
             const itemId = Number(entry.item_id || 0);
             const qtyChange = parseFloat(entry.qty_change || 0) || 0;
@@ -1614,134 +1533,27 @@ const Warehouse = {
         return deltaByKey;
     },
 
-    _getProjectHardwareHistoryNetDelta(orderId, itemId, historyDeltaMap) {
-        const key = this._projectHardwareKey(orderId, itemId);
-        return historyDeltaMap instanceof Map ? (parseFloat(historyDeltaMap.get(key)) || 0) : 0;
-    },
-
-    _getProjectHardwareConsumedQty(orderId, itemId, historyDeltaMap) {
-        return Math.max(0, -this._getProjectHardwareHistoryNetDelta(orderId, itemId, historyDeltaMap));
-    },
-
-    _getProjectHardwareLegacyResidualDelta(orderId, itemId, history) {
-        return (history || []).reduce((acc, entry) => {
-            if (Number(entry.order_id || 0) !== Number(orderId || 0)) return acc;
-            if (Number(entry.item_id || 0) !== Number(itemId || 0)) return acc;
-            const flow = this._getProjectHardwareHistoryFlow(entry);
-            if (!this._isProjectHardwareLegacyHistoryFlow(flow)) return acc;
-            return acc + (parseFloat(entry.qty_change || 0) || 0);
-        }, 0);
-    },
-
-    _hasProjectHardwareReadyEvidence(orderId, itemId, history) {
-        return (history || []).some(entry => {
-            if (Number(entry.order_id || 0) !== Number(orderId || 0)) return false;
-            if (Number(entry.item_id || 0) !== Number(itemId || 0)) return false;
-            const flow = this._getProjectHardwareHistoryFlow(entry);
-            return this._isProjectHardwareStockHistoryFlow(flow);
-        });
-    },
-
-    _hasProjectHardwareLegacyOnlyEvidence(orderId, itemId, history) {
-        let hasLegacy = false;
-        let hasValid = false;
+    _buildLegacyProjectWarehouseStatusDeltaMap(history) {
+        const deltaByKey = new Map();
         (history || []).forEach(entry => {
-            if (Number(entry.order_id || 0) !== Number(orderId || 0)) return;
-            if (Number(entry.item_id || 0) !== Number(itemId || 0)) return;
-            const flow = this._getProjectHardwareHistoryFlow(entry);
-            if (this._isProjectHardwareLegacyHistoryFlow(flow)) hasLegacy = true;
-            if (this._isProjectHardwareStockHistoryFlow(flow)) hasValid = true;
+            const notes = String(entry.notes || '');
+            if (!/смене статуса/i.test(notes)) return;
+            const orderId = Number(entry.order_id || 0);
+            const itemId = Number(entry.item_id || 0);
+            const qtyChange = parseFloat(entry.qty_change || 0) || 0;
+            if (!orderId || !itemId || qtyChange === 0) return;
+            const key = this._projectHardwareKey(orderId, itemId);
+            deltaByKey.set(key, (deltaByKey.get(key) || 0) + qtyChange);
         });
-        return hasLegacy && !hasValid;
+        return deltaByKey;
     },
 
     _isProjectHardwareHistoricallyReady(orderId, itemId, requiredQty, historyDeltaMap) {
         const qty = parseFloat(requiredQty || 0) || 0;
         if (!qty) return false;
-        return this._getProjectHardwareConsumedQty(orderId, itemId, historyDeltaMap) >= (qty - 0.000001);
-    },
-
-    _hasProjectHardwareClampedShortfall(orderId, itemId, requiredQty, history, historyDeltaMap) {
-        const qty = parseFloat(requiredQty || 0) || 0;
-        if (!qty) return false;
-        if (this._getProjectHardwareConsumedQty(orderId, itemId, historyDeltaMap) >= (qty - 0.000001)) {
-            return false;
-        }
-        return (history || []).some(entry =>
-            Number(entry.order_id || 0) === Number(orderId || 0)
-            && Number(entry.item_id || 0) === Number(itemId || 0)
-            && String(entry.type || '').toLowerCase() === 'deduction'
-            && !!entry.clamped
-            && /списание собранной/i.test(String(entry.notes || ''))
-        );
-    },
-
-    _computeProjectHardwareReadyState(orderId, itemId, requiredQty, history, historyDeltaMap) {
-        const savedReady = this._isProjectHardwareReady(orderId, itemId);
-        const historicalReady = this._isProjectHardwareHistoricallyReady(orderId, itemId, requiredQty, historyDeltaMap);
-        if (savedReady && this._hasProjectHardwareClampedShortfall(orderId, itemId, requiredQty, history, historyDeltaMap)) {
-            return false;
-        }
-        if (savedReady && !historicalReady && this._hasProjectHardwareLegacyOnlyEvidence(orderId, itemId, history)) {
-            return false;
-        }
-        return savedReady || historicalReady;
-    },
-
-    async _repairLegacyProjectHardwareMovements(rows, history, fallbackManagerName) {
-        const uniqueRows = [];
-        const seenKeys = new Set();
-        (rows || []).forEach(row => {
-            const orderId = Number(row && row.order_id || 0);
-            const itemId = Number(row && row.item_id || 0);
-            if (!orderId || !itemId) return;
-            const key = this._projectHardwareKey(orderId, itemId);
-            if (seenKeys.has(key)) return;
-            seenKeys.add(key);
-            uniqueRows.push({
-                order_id: orderId,
-                item_id: itemId,
-                order_name: row.order_name || 'Заказ',
-                manager_name: row.manager_name || fallbackManagerName || '',
-            });
-        });
-
-        if (uniqueRows.length === 0) {
-            return { repaired: false, history, warehouseItems: this.allItems || [] };
-        }
-
-        let repairedCount = 0;
-        for (const row of uniqueRows) {
-            const residualDelta = this._getProjectHardwareLegacyResidualDelta(row.order_id, row.item_id, history);
-            if (Math.abs(residualDelta) <= 0.000001) continue;
-            const repairDelta = -residualDelta;
-            await this.adjustStock(
-                row.item_id,
-                repairDelta,
-                repairDelta > 0 ? 'addition' : 'deduction',
-                row.order_name || 'Заказ',
-                repairDelta > 0
-                    ? `Автоисправление legacy-списания проектной позиции: +${Math.abs(repairDelta)} шт`
-                    : `Автоисправление legacy-возврата проектной позиции: -${Math.abs(repairDelta)} шт`,
-                row.manager_name || fallbackManagerName || 'Система',
-                {
-                    order_id: row.order_id,
-                    project_hardware_flow: 'legacy_status_repair',
-                }
-            );
-            repairedCount += 1;
-        }
-
-        if (repairedCount === 0) {
-            return { repaired: false, history, warehouseItems: this.allItems || [] };
-        }
-
-        return {
-            repaired: true,
-            repairedCount,
-            history: await loadWarehouseHistory(),
-            warehouseItems: await loadWarehouseItems(),
-        };
+        const key = this._projectHardwareKey(orderId, itemId);
+        const netDelta = historyDeltaMap instanceof Map ? (parseFloat(historyDeltaMap.get(key)) || 0) : 0;
+        return netDelta <= (-qty + 0.000001);
     },
 
     _setProjectHardwareReadyFlag(orderId, itemId, isReady) {
@@ -1767,28 +1579,35 @@ const Warehouse = {
 
         const activeOrders = (orders || []).filter(o => o.status !== 'deleted');
         const reserveOrders = activeOrders.filter(o => this._isProjectHardwareReserveStatus(o.status));
-        const trackedOrders = activeOrders.filter(o => this._isProjectHardwareTrackedStatus(o.status));
         if (activeOrders.length === 0) {
             this.allReservations = reservations || [];
             return { reservationsChanged: false, stateChanged: false, shortage: false };
         }
 
-        const details = await Promise.all(trackedOrders.map(o => loadOrder(o.id).catch(() => null)));
+        const details = await Promise.all(reserveOrders.map(o => loadOrder(o.id).catch(() => null)));
         const detailByOrderId = new Map();
         details.filter(Boolean).forEach(detail => {
             const order = detail.order || {};
             detailByOrderId.set(Number(order.id), detail);
         });
 
+        const historyDeltaMap = this._buildProjectHardwareHistoryDeltaMap(history);
+        const legacyStatusDeltaMap = this._buildLegacyProjectWarehouseStatusDeltaMap(history);
+        const trackedKeys = new Set();
         const demandRows = [];
-        trackedOrders.forEach(order => {
+        let stateChanged = false;
+
+        reserveOrders.forEach(order => {
             const detail = detailByOrderId.get(Number(order.id));
             if (!detail) return;
-            const demandRowsForOrder = this._collectWarehouseDemandFromOrderItems(detail.items || []);
-            demandRowsForOrder.forEach(row => {
-                const itemId = Number(row.warehouse_item_id || 0);
-                const qty = parseFloat(row.qty) || 0;
-                if (!itemId || qty <= 0) return;
+            const demand = this._getProjectHardwareDemandMap(detail.items || []);
+            demand.forEach((qty, itemId) => {
+                const key = this._projectHardwareKey(order.id, itemId);
+                trackedKeys.add(key);
+                const isReady = this._isProjectHardwareHistoricallyReady(order.id, itemId, qty, historyDeltaMap);
+                if (this._setProjectHardwareReadyFlag(order.id, itemId, isReady)) {
+                    stateChanged = true;
+                }
                 demandRows.push({
                     order_id: Number(order.id),
                     order_name: order.order_name || 'Заказ',
@@ -1796,32 +1615,35 @@ const Warehouse = {
                     status: order.status || '',
                     created_at: order.created_at || '',
                     item_id: Number(itemId),
-                    qty,
-                    ready: false,
-                    material_type: row.material_type || 'hardware',
+                    qty: parseFloat(qty) || 0,
+                    ready: isReady,
                 });
             });
         });
 
-        const repairResult = await this._repairLegacyProjectHardwareMovements(demandRows, history, App.getCurrentEmployeeName() || 'Система');
-        const effectiveHistory = repairResult.repaired ? repairResult.history : history;
-        if (repairResult.repaired && Array.isArray(repairResult.warehouseItems) && repairResult.warehouseItems.length > 0) {
-            this.allItems = repairResult.warehouseItems;
+        if (!this.projectHardwareState.legacy_status_neutralized || typeof this.projectHardwareState.legacy_status_neutralized !== 'object') {
+            this.projectHardwareState.legacy_status_neutralized = {};
         }
 
-        const historyDeltaMap = this._buildProjectHardwareHistoryDeltaMap(effectiveHistory);
-        const trackedKeys = new Set();
-        let stateChanged = false;
-
-        demandRows.forEach(row => {
+        for (const row of demandRows) {
             const key = this._projectHardwareKey(row.order_id, row.item_id);
-            trackedKeys.add(key);
-            const isReady = this._computeProjectHardwareReadyState(row.order_id, row.item_id, row.qty, effectiveHistory, historyDeltaMap);
-            row.ready = isReady;
-            if (this._setProjectHardwareReadyFlag(row.order_id, row.item_id, isReady)) {
-                stateChanged = true;
-            }
-        });
+            const currentLegacyDelta = parseFloat(legacyStatusDeltaMap.get(key)) || 0;
+            const neutralizedLegacyDelta = parseFloat(this.projectHardwareState.legacy_status_neutralized[key]) || 0;
+            const deltaToNeutralize = currentLegacyDelta - neutralizedLegacyDelta;
+            if (Math.abs(deltaToNeutralize) < 0.000001) continue;
+
+            await this.adjustStock(
+                Number(row.item_id),
+                -deltaToNeutralize,
+                deltaToNeutralize < 0 ? 'addition' : 'deduction',
+                row.order_name || 'Заказ',
+                'Компенсация legacy-движения по смене статуса',
+                App.getCurrentEmployeeName() || 'Система',
+                { order_id: Number(row.order_id) }
+            );
+            this.projectHardwareState.legacy_status_neutralized[key] = currentLegacyDelta;
+            stateChanged = true;
+        }
 
         Object.keys(this.projectHardwareState.checks || {}).forEach(key => {
             if (trackedKeys.has(key)) return;
@@ -1871,9 +1693,11 @@ const Warehouse = {
             return a.item_id - b.item_id;
         });
 
+        const warehouseItems = await loadWarehouseItems();
+        this.allItems = warehouseItems || [];
         const warehouseById = new Map((this.allItems || []).map(item => [Number(item.id), item]));
         demandRows.forEach(row => {
-            if (row.ready || row.qty <= 0 || !this._isProjectHardwareReserveStatus(row.status)) return;
+            if (row.ready || row.qty <= 0) return;
             const whItem = warehouseById.get(Number(row.item_id));
             if (!whItem) return;
 
@@ -1943,18 +1767,7 @@ const Warehouse = {
             loadWarehouseReservations(),
             loadWarehouseHistory(),
         ]);
-        const repairRows = itemIds.map(itemId => ({
-            order_id: normalizedOrderId,
-            item_id: itemId,
-            order_name: orderName || 'Заказ',
-            manager_name: managerName || '',
-        }));
-        const repairResult = await this._repairLegacyProjectHardwareMovements(repairRows, history, managerName || '');
-        const effectiveHistory = repairResult.repaired ? repairResult.history : history;
-        if (repairResult.repaired && Array.isArray(repairResult.warehouseItems) && repairResult.warehouseItems.length > 0) {
-            this.allItems = repairResult.warehouseItems;
-        }
-        const historyDeltaMap = this._buildProjectHardwareHistoryDeltaMap(effectiveHistory);
+        const historyDeltaMap = this._buildProjectHardwareHistoryDeltaMap(history);
         let reservationsChanged = false;
         let shortage = false;
         let stateChanged = false;
@@ -1984,7 +1797,7 @@ const Warehouse = {
             const currentQty = currentDemand.get(itemId) || 0;
             const previousQty = previousDemand.get(itemId) || 0;
             const isReady = currentQty > 0
-                ? this._computeProjectHardwareReadyState(normalizedOrderId, itemId, currentQty, effectiveHistory, historyDeltaMap)
+                ? this._isProjectHardwareHistoricallyReady(normalizedOrderId, itemId, currentQty, historyDeltaMap)
                 : false;
 
             if (this._setProjectHardwareReadyFlag(normalizedOrderId, itemId, currentQty > 0 && isReady)) {
@@ -2003,10 +1816,7 @@ const Warehouse = {
                             ? `Корректировка собранной фурнитуры: +${delta} шт`
                             : `Корректировка собранной фурнитуры: -${Math.abs(delta)} шт`,
                         managerName || '',
-                        {
-                            order_id: normalizedOrderId,
-                            project_hardware_flow: 'ready_delta',
-                        }
+                        { order_id: normalizedOrderId }
                     );
                 }
                 continue;
@@ -2069,7 +1879,7 @@ const Warehouse = {
         }
 
         if (shortage) {
-            App.toast('Часть позиций со склада не встала в полный резерв: недостаточно остатка');
+            App.toast('Часть фурнитуры не встала в полный резерв: недостаточно остатка');
         }
     },
 
@@ -2121,7 +1931,6 @@ const Warehouse = {
                 item_id: Number(r.item_id),
                 item_name: (item && item.name) || r.item_name || 'Фурнитура',
                 item_sku: (item && item.sku) || '',
-                item_kind: this._projectSupplyKindLabel((item && item.category) || 'hardware'),
                 qty: 0,
             };
             current.qty += parseFloat(r.qty) || 0;
@@ -2146,7 +1955,6 @@ const Warehouse = {
                     item_id: Number(d.warehouse_item_id),
                     item_name: (item && item.name) || d.names.join(', ') || 'Фурнитура',
                     item_sku: (item && item.sku) || '',
-                    item_kind: this._projectSupplyKindLabel(d.material_type || (item && item.category) || 'hardware'),
                     qty: parseFloat(d.qty) || 0,
                     ready,
                 });
@@ -2196,13 +2004,12 @@ const Warehouse = {
                     <div class="table-wrap">
                         <table>
                             <thead>
-                                <tr><th>Комплектующая</th><th class="text-right">Резерв</th></tr>
+                                <tr><th>Позиция</th><th class="text-right">Резерв</th></tr>
                             </thead>
                             <tbody>
                                 ${o.items.map(r => `<tr>
                                     <td>
                                         <div>${this.esc(r.item_name)}</div>
-                                        <div style="font-size:11px;color:var(--text-muted);">${this.esc(r.item_kind || 'Фурнитура')}</div>
                                         ${r.item_sku ? `<div style="font-size:11px;color:var(--text-muted);">${this.esc(r.item_sku)}</div>` : ''}
                                     </td>
                                     <td class="text-right" style="font-weight:700;">${r.qty}</td>
@@ -2236,40 +2043,20 @@ const Warehouse = {
             o.items.sort((a, b) => String(a.item_name).localeCompare(String(b.item_name), 'ru'));
         });
 
-        const activeProductionOrders = [];
-        const collectedProductionOrders = [];
-        const archivedCollectedOrders = [];
-        productionOrdersGrouped.forEach(order => {
-            const progress = orderProgress.get(order.order_id) || { total: 0, ready: 0 };
-            const done = progress.total > 0 && progress.ready === progress.total;
-            if (done) {
-                if (order.status === 'completed') {
-                    archivedCollectedOrders.push(order);
-                } else {
-                    collectedProductionOrders.push(order);
-                }
-            } else {
-                activeProductionOrders.push(order);
-            }
-        });
-
-        const renderProjectHardwareOrders = (ordersList, mode = 'active') => ordersList.length
-            ? `<div style="display:grid;gap:10px;">${ordersList.map(o => {
+        const productionHtml = productionOrdersGrouped.length
+            ? `<div style="display:grid;gap:10px;">${productionOrdersGrouped.map(o => {
                 const p = orderProgress.get(o.order_id) || { total: 0, ready: 0 };
                 const done = p.total > 0 && p.ready === p.total;
                 const badge = done
                     ? '<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;background:#dcfce7;color:#166534;">готово</span>'
                     : '<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;background:#fee2e2;color:#991b1b;">не готово</span>';
-                const progressText = done
-                    ? `Собрано ${p.ready} из ${p.total}`
-                    : `Собрано ${p.ready} из ${p.total}`;
                 return `
                 <div style="border:1px solid var(--border);border-radius:10px;overflow:hidden;background:#fff;">
                     <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px 12px;background:var(--bg);border-bottom:1px solid var(--border);">
                         <div>
                             <div style="font-weight:700;">${this.esc(o.order_name)}</div>
                             <div style="font-size:12px;color:var(--text-secondary);">
-                                ${this.esc(App.statusLabel(o.status))} · ${badge} · ${this.esc(progressText)} · Менеджер: ${this.esc(o.manager || '—')}
+                                ${this.esc(App.statusLabel(o.status))} · ${badge} · Менеджер: ${this.esc(o.manager || '—')} · Позиций: ${o.items.length}
                             </div>
                         </div>
                         <button class="btn btn-sm btn-outline" onclick="App.navigate('order-detail', true, ${o.order_id})">Открыть</button>
@@ -2277,13 +2064,12 @@ const Warehouse = {
                     <div class="table-wrap">
                         <table>
                             <thead>
-                                <tr><th>Комплектующая</th><th class="text-right">Нужно</th><th>Собрано</th></tr>
+                                <tr><th>Позиция</th><th class="text-right">Нужно</th><th>Собрано</th></tr>
                             </thead>
                             <tbody>
                                 ${o.items.map(r => `<tr>
                                     <td>
                                         <div>${this.esc(r.item_name)}</div>
-                                        <div style="font-size:11px;color:var(--text-muted);">${this.esc(r.item_kind || 'Фурнитура')}</div>
                                         ${r.item_sku ? `<div style="font-size:11px;color:var(--text-muted);">${this.esc(r.item_sku)}</div>` : ''}
                                     </td>
                                     <td class="text-right" style="font-weight:700;">${r.qty}</td>
@@ -2299,34 +2085,7 @@ const Warehouse = {
                     </div>
                 </div>`;
             }).join('')}</div>`
-            : (mode === 'collected'
-                ? '<p class="text-muted">Пока нет полностью собранных заказов.</p>'
-                : '<p class="text-muted">Нет позиций со склада для заказов, которые нужно собрать.</p>');
-
-        const activeProductionHtml = renderProjectHardwareOrders(activeProductionOrders, 'active');
-        const collectedProductionHtml = renderProjectHardwareOrders(collectedProductionOrders, 'collected');
-        const archivedCollectedNote = archivedCollectedOrders.length > 0
-            ? `<div style="font-size:12px;color:var(--text-secondary);">Завершенные заказы скрыты автоматически: ${archivedCollectedOrders.length}</div>`
-            : '';
-        const collectedSummary = collectedProductionOrders.length === 1
-            ? '1 заказ'
-            : `${collectedProductionOrders.length} заказ${collectedProductionOrders.length >= 2 && collectedProductionOrders.length <= 4 ? 'а' : 'ов'}`;
-        const collectedSectionHtml = collectedProductionOrders.length > 0
-            ? `
-            <details class="card" style="margin-top:12px;">
-                <summary style="display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 16px;cursor:pointer;list-style:none;">
-                    <div>
-                        <h3 style="margin:0;">Уже собрано</h3>
-                        <div style="font-size:12px;color:var(--text-secondary);margin-top:4px;">${this.esc(collectedSummary)} · скрыто из активного списка</div>
-                        ${archivedCollectedNote}
-                    </div>
-                    <span style="font-size:12px;color:var(--text-muted);white-space:nowrap;">Показать</span>
-                </summary>
-                <div style="padding:0 0 12px;">
-                    ${collectedProductionHtml}
-                </div>
-            </details>`
-            : '';
+            : '<p class="text-muted">Нет фурнитуры со склада для заказов в производстве.</p>';
 
         if (token !== this._viewToken || this.currentView !== 'project-hardware') return;
         container.innerHTML = `
@@ -2338,11 +2097,10 @@ const Warehouse = {
             </div>
             <div class="card" style="margin-top:12px;">
                 <div class="card-header">
-                    <h3>Фурнитура и упаковка для проектов (к сборке)</h3>
+                    <h3>Фурнитура и упаковка для проектов (производство, доставка, готово)</h3>
                 </div>
-                ${activeProductionHtml}
+                ${productionHtml}
             </div>
-            ${collectedSectionHtml}
         `;
     },
 
@@ -3678,8 +3436,8 @@ const Warehouse = {
                         color: i.color || '',
                         qty: i.qty || 0,
                         available_qty: i.available_qty || 0,
-                        price_per_unit: this.getPickerEffectivePrice(i),
-                        unit: this.getPickerUnitLabel(i),
+                        price_per_unit: i.price_per_unit || 0,
+                        unit: i.unit || 'шт',
                         photo_thumbnail: i.photo_thumbnail || '',
                     })),
                 };
@@ -3699,7 +3457,7 @@ const Warehouse = {
                 if (item.size) parts.push(item.size);
                 if (item.color) parts.push(item.color);
                 const label = parts.join(' · ');
-                const stock = item.available_qty > 0 ? `(${item.available_qty} ${this.getPickerUnitLabel(item)})` : '(нет)';
+                const stock = item.available_qty > 0 ? `(${item.available_qty} ${item.unit})` : '(нет)';
                 const sel = String(item.id) === String(selectedId) ? ' selected' : '';
                 html += `<option value="${item.id}"${sel}>${label} ${stock}</option>`;
             });
@@ -3708,70 +3466,50 @@ const Warehouse = {
         return html;
     },
 
-    _pickerIdsEqual(left, right) {
-        return String(left ?? '') === String(right ?? '');
-    },
-
-    getPickerUnitLabel(item) {
-        const unit = String(item?.unit || '').trim();
-        return unit || 'шт';
-    },
-
-    getPickerEffectivePrice(item) {
-        const rawPrice = parseFloat(item?.price_per_unit) || 0;
-        const unit = this._normStr(item?.unit || '');
-        const category = this._normStr(item?.category || '');
-        const sku = this._normStr(item?.sku || '');
-
-        // Some legacy warehouse cord rows were saved as RUB/m while qty is tracked in cm.
-        // In pickers and downstream calculations we want the real per-cm price.
-        if (unit === 'см' && rawPrice >= 10 && (category === 'cords' || sku.startsWith('msn-'))) {
-            return Math.round((rawPrice / 100) * 100) / 100;
-        }
-
-        return Math.round(rawPrice * 100) / 100;
-    },
-
-    getPickerPriceLabel(item) {
-        const effectivePrice = this.getPickerEffectivePrice(item);
-        if (!(effectivePrice > 0)) return '';
-        const formatted = new Intl.NumberFormat('ru-RU').format(effectivePrice);
-        return `${formatted} ₽/${this.getPickerUnitLabel(item)}`;
-    },
-
-    _pickerMetaText(item) {
-        if (!item) return '';
-        if (item.meta_line) return String(item.meta_line);
-        const stock = item.available_qty == null
-            ? ''
-            : (item.available_qty > 0 ? `${item.available_qty} ${this.getPickerUnitLabel(item)}` : 'нет');
-        const priceStr = this.getPickerPriceLabel(item);
-        return [item.sku || '', stock, priceStr].filter(Boolean).join(' · ');
-    },
-
-    // Custom image-based picker for calculator and other warehouse-linked pickers.
+    // Custom image-based picker for calculator
     // onSelectFn: string like "Calculator.onHwWarehouseSelect" or "Calculator.onPkgWarehouseSelect"
     // categoryFilter: null = all, 'hardware' = exclude packaging, 'packaging' = only packaging
+    _pickerMetaText(item) {
+        if (item && item.metaText) return String(item.metaText);
+        const stockParts = [];
+        if (item && item.available_qty !== undefined && item.available_qty !== null && item.unit) {
+            stockParts.push(`${item.available_qty} ${item.unit}`);
+        }
+        if (item && item.price_per_unit > 0) {
+            stockParts.push(`${new Intl.NumberFormat('ru-RU').format(item.price_per_unit)} ₽`);
+        }
+        const prefix = item && item.sku ? `${item.sku}${stockParts.length ? ' · ' : ''}` : '';
+        return `${prefix}${stockParts.join(' · ')}`;
+    },
+
     buildImagePicker(containerId, grouped, selectedId, onSelectFn, categoryFilter, options = {}) {
         const cat = WAREHOUSE_CATEGORIES;
         if (!onSelectFn) onSelectFn = 'Calculator.onHwWarehouseSelect';
-        const idxStr = containerId.replace(/^[a-z]+-picker-/, '');
+        const idxMatch = String(containerId || '').match(/(\d+)(?!.*\d)/);
+        const idxStr = idxMatch ? String(Number(idxMatch[1])) : '0';
+        const selectedKey = selectedId === null || selectedId === undefined ? null : String(selectedId);
         const searchPlaceholder = options.searchPlaceholder || 'Поиск по названию или артикулу...';
 
         // Filter categories
         const packagingKeys = ['packaging'];
-        const hardwareKeys = Object.keys(grouped).filter(k => !packagingKeys.includes(k));
+        const hardwareKeys = Object.keys(grouped).filter(k => {
+            const group = grouped[k] || {};
+            return !packagingKeys.includes(k) && group.kind !== 'packaging';
+        });
 
         let visibleKeys;
         if (categoryFilter === 'packaging') {
-            visibleKeys = Object.keys(grouped).filter(k => packagingKeys.includes(k));
+            visibleKeys = Object.keys(grouped).filter(k => {
+                const group = grouped[k] || {};
+                return packagingKeys.includes(k) || group.kind === 'packaging';
+            });
         } else if (categoryFilter === 'hardware') {
             visibleKeys = hardwareKeys;
         } else {
             visibleKeys = Object.keys(grouped);
         }
 
-        const selectedItem = selectedId ? this._findInGrouped(grouped, selectedId) : null;
+        const selectedItem = selectedKey ? this._findInGrouped(grouped, selectedKey) : null;
 
         // Selected display
         let selectedHtml = '';
@@ -3804,25 +3542,25 @@ const Warehouse = {
                 color: g.color || 'var(--accent-light)',
                 textColor: g.textColor || 'var(--text)',
             };
-            itemsHtml += `<div class="wh-picker-cat-header" data-group-key="${this.esc(catKey)}" style="padding:6px 10px;font-size:11px;font-weight:700;color:${catObj.textColor};background:${catObj.color};">${g.icon || catObj.icon} ${g.label || catKey}</div>`;
+            itemsHtml += `<div class="wh-picker-cat-header" style="padding:6px 10px;font-size:11px;font-weight:700;color:${g.textColor || catObj.textColor};background:${g.color || catObj.color};position:sticky;top:0;z-index:1;">${g.icon || catObj.icon} ${g.label}</div>`;
             g.items.forEach(item => {
                 const parts = [item.name];
                 if (item.size) parts.push(item.size);
                 if (item.color) parts.push(item.color);
                 const label = parts.join(' · ');
-                const metaText = this._pickerMetaText(item);
                 const photoSrc = item.photo_thumbnail || item.photo_url || '';
                 const photoHtml = photoSrc
                     ? `<img src="${photoSrc}" style="width:48px;height:48px;object-fit:cover;border-radius:6px;flex-shrink:0;border:1px solid var(--border);">`
                     : `<span style="width:48px;height:48px;display:flex;align-items:center;justify-content:center;background:${catObj.color};border-radius:6px;font-size:20px;flex-shrink:0;">${catObj.icon}</span>`;
-                const background = this._pickerIdsEqual(item.id, selectedId) ? 'rgba(59,130,246,0.1)' : 'transparent';
-                itemsHtml += `<button type="button" class="wh-picker-item" data-id="${this.esc(item.id)}" data-group-key="${this.esc(catKey)}" data-picker-container="${this.esc(containerId)}" data-select-fn="${this.esc(onSelectFn)}" data-select-idx="${this.esc(idxStr)}" data-pick-value="${this.esc(item.id)}" style="display:flex;align-items:center;gap:10px;width:100%;padding:8px 10px;cursor:pointer;border:0;border-bottom:1px solid var(--border);background:${background};text-align:left;" onmousedown="event.preventDefault()" onclick="Warehouse.handlePickerSelect(this)">
+                const itemKey = String(item.id);
+                const isSelected = itemKey === selectedKey ? 'background:rgba(59,130,246,0.1);' : '';
+                itemsHtml += `<div class="wh-picker-item" data-id="${itemKey}" style="display:flex;align-items:center;gap:10px;padding:8px 10px;cursor:pointer;border-bottom:1px solid var(--border);${isSelected}" onclick="${onSelectFn}(${idxStr}, ${JSON.stringify(itemKey)})">
                     ${photoHtml}
                     <div style="flex:1;min-width:0;">
                         <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${label}</div>
-                        <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">${metaText}</div>
+                        <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">${this._pickerMetaText(item)}</div>
                     </div>
-                </button>`;
+                </div>`;
             });
         }
 
@@ -3840,7 +3578,7 @@ const Warehouse = {
 
     _findInGrouped(grouped, id) {
         for (const catKey of Object.keys(grouped)) {
-            const found = grouped[catKey].items.find(i => this._pickerIdsEqual(i.id, id));
+            const found = grouped[catKey].items.find(i => String(i.id) === String(id));
             if (found) return { ...found, __groupKey: catKey };
         }
         return null;
@@ -3859,7 +3597,7 @@ const Warehouse = {
             if (searchInput) { searchInput.value = ''; searchInput.focus(); }
             // Show all items
             dd.querySelectorAll('.wh-picker-item').forEach(i => i.style.display = '');
-            this._syncPickerHeaders(el);
+            dd.querySelectorAll('.wh-picker-item').forEach(i => i.previousElementSibling && i.previousElementSibling.classList && (i.previousElementSibling.style.display = ''));
         }
     },
 
@@ -3872,35 +3610,6 @@ const Warehouse = {
             const text = item.textContent.toLowerCase();
             item.style.display = q === '' || text.includes(q) ? '' : 'none';
         });
-        this._syncPickerHeaders(el);
-    },
-
-    _syncPickerHeaders(el) {
-        if (!el) return;
-        const items = Array.from(el.querySelectorAll('.wh-picker-item'));
-        const headers = Array.from(el.querySelectorAll('.wh-picker-cat-header'));
-        headers.forEach(header => {
-            const groupKey = header.dataset?.groupKey || '';
-            const hasVisibleItems = items.some(item => (item.dataset?.groupKey || '') === groupKey && item.style.display !== 'none');
-            header.style.display = hasVisibleItems ? '' : 'none';
-        });
-    },
-
-    handlePickerSelect(buttonEl) {
-        const dataset = buttonEl?.dataset || {};
-        const fnName = dataset.selectFn || '';
-        const pickValue = dataset.pickValue || '';
-        const idxRaw = dataset.selectIdx || '';
-
-        document.querySelectorAll('.wh-picker-dropdown').forEach(d => d.style.display = 'none');
-
-        const targetFn = String(fnName)
-            .split('.')
-            .reduce((acc, key) => (acc && acc[key] ? acc[key] : null), globalThis);
-        if (typeof targetFn !== 'function') return;
-
-        const numericIdx = Number(idxRaw);
-        targetFn(Number.isNaN(numericIdx) ? idxRaw : numericIdx, pickValue);
     },
 };
 

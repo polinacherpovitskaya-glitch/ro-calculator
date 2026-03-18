@@ -68,6 +68,34 @@ CREATE TABLE IF NOT EXISTS tasks (
     )
 );
 
+CREATE TABLE IF NOT EXISTS bug_reports (
+    id BIGINT PRIMARY KEY,
+    task_id BIGINT NOT NULL UNIQUE REFERENCES tasks(id) ON DELETE CASCADE,
+    title TEXT DEFAULT '',
+    section_key TEXT DEFAULT '',
+    section_name TEXT DEFAULT '',
+    subsection_key TEXT DEFAULT '',
+    subsection_name TEXT DEFAULT '',
+    page_route TEXT DEFAULT '',
+    page_url TEXT DEFAULT '',
+    app_version TEXT DEFAULT '',
+    browser TEXT DEFAULT '',
+    os TEXT DEFAULT '',
+    viewport TEXT DEFAULT '',
+    steps_to_reproduce TEXT DEFAULT '',
+    expected_result TEXT DEFAULT '',
+    actual_result TEXT DEFAULT '',
+    severity TEXT DEFAULT 'medium',
+    codex_prompt TEXT DEFAULT '',
+    codex_status TEXT DEFAULT 'pending',
+    codex_result TEXT DEFAULT '',
+    codex_error TEXT DEFAULT '',
+    submitted_by BIGINT REFERENCES employees(id) ON DELETE SET NULL,
+    submitted_by_name TEXT DEFAULT '',
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS task_comments (
     id BIGINT PRIMARY KEY,
     task_id BIGINT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
@@ -162,6 +190,9 @@ CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_assignee ON tasks(assignee_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_tasks_due_date ON tasks(due_date);
+CREATE INDEX IF NOT EXISTS idx_bug_reports_task_id ON bug_reports(task_id);
+CREATE INDEX IF NOT EXISTS idx_bug_reports_created_at ON bug_reports(created_at);
+CREATE INDEX IF NOT EXISTS idx_bug_reports_severity ON bug_reports(severity);
 CREATE INDEX IF NOT EXISTS idx_task_comments_task ON task_comments(task_id);
 CREATE INDEX IF NOT EXISTS idx_work_assets_task ON work_assets(task_id);
 CREATE INDEX IF NOT EXISTS idx_work_assets_project ON work_assets(project_id);
@@ -209,6 +240,7 @@ SET kind = EXCLUDED.kind,
 ALTER TABLE areas ENABLE ROW LEVEL SECURITY;
 ALTER TABLE projects ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tasks ENABLE ROW LEVEL SECURITY;
+ALTER TABLE bug_reports ENABLE ROW LEVEL SECURITY;
 ALTER TABLE task_comments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE work_assets ENABLE ROW LEVEL SECURITY;
 ALTER TABLE task_checklist_items ENABLE ROW LEVEL SECURITY;
@@ -229,6 +261,11 @@ END $$;
 
 DO $$ BEGIN
 CREATE POLICY "anon_all_tasks_v2" ON tasks FOR ALL USING (true) WITH CHECK (true);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+CREATE POLICY "anon_all_bug_reports" ON bug_reports FOR ALL USING (true) WITH CHECK (true);
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
