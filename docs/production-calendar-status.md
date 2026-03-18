@@ -1,7 +1,7 @@
 # Production Calendar Status
 
 ## Snapshot
-- Current phase: C8 queue drag/reorder shipped, next up richer timeline drag/replan layer
+- Current phase: C8.5 local-date/calendar drift cleanup shipped locally, next up richer timeline drag/replan layer
 - Plan file: `/private/tmp/ro-codex-push-sync.v100/docs/production-calendar-plan.md`
 - Status: yellow
 - Last updated: 2026-03-17
@@ -88,6 +88,10 @@
   - очередь заказов теперь можно перетаскивать drag-and-drop, а не только тыкать стрелками;
   - drag reorder сохраняется в том же `production plan state`, так что порядок не теряется после reload;
   - визуально добавлены `dragging / drag-over` состояния, чтобы было понятно, куда встанет заказ.
+- Реализован cleanup slice `v115`:
+  - в `Gantt` убраны последние `toISOString().slice(0, 10)` пути для capacity chart и today-based stats;
+  - calendar stats и capacity overlay теперь используют один и тот же local-date-safe helper;
+  - smoke дополнительно страхует отсутствие drift-prone date slicing в `js/gantt.js`.
 - Добавлен и подключен новый regression smoke:
   - `/private/tmp/ro-codex-push-sync.v100/tests/production-calendar-smoke.js`
   - `.github/workflows/deploy-pages.yml`
@@ -165,6 +169,7 @@
 | 2026-03-17 | Progress math stabilization | `js/gantt.js`, `js/calculator.js`, `tests/production-calendar-smoke.js` | non-stage `other` hours are separated from production progress and no longer distort remaining work | continue into richer manual reschedule UX |
 | 2026-03-17 | Quick working-day shifts | `js/gantt.js`, `tests/production-calendar-smoke.js` | production queue cards can now move manual start earlier/later by working days, with local-date-safe parsing | continue into richer drag/replan UX |
 | 2026-03-17 | Queue drag reorder | `js/gantt.js`, `css/style.css`, `tests/production-calendar-smoke.js` | production manager can reorder queue cards by drag-and-drop with persisted sequence state | continue into richer timeline drag/replan UX |
+| 2026-03-17 | Local-date drift cleanup | `js/gantt.js`, `tests/production-calendar-smoke.js` | capacity chart and calendar stats now use local-date-safe helpers instead of `toISOString().slice(0,10)` paths | continue into richer timeline drag/replan UX |
 
 ## Smoke / Demo Checklist
 - [x] В меню слева остается один понятный `Производственный календарь`.

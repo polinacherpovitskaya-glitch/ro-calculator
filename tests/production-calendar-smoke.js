@@ -37,6 +37,7 @@ assert.match(ganttJs, /loadEmployees\(\)/, 'Gantt must load employees for actual
 assert.match(ganttJs, /buildOrderActuals\(/, 'Gantt must aggregate actual order hours');
 assert.match(ganttJs, /shiftManualStart\(orderId, direction\)/, 'Gantt must expose quick working-day shifting for manual starts');
 assert.match(ganttJs, /reorderOrderSequence\(orderIds = \[\], draggedOrderId, targetOrderId\)/, 'Gantt must expose queue reorder helper');
+assert.doesNotMatch(ganttJs, /toISOString\(\)\.slice\(0,\s*10\)/, 'Gantt must not derive calendar dates through timezone-drifting toISOString paths');
 assert.match(calculatorJs, /notBeforeDate/, 'Scheduler must respect manual not-before dates');
 
 function createFixedDate(isoTimestamp) {

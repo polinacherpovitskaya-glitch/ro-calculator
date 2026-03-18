@@ -696,15 +696,15 @@ const Gantt = {
     renderCapacityChart(el, minDate, totalDays, cellWidth, totalWidth, dayMap, dailyCapacity) {
         const chartH = 84;
         const maxH = Math.max(dailyCapacity * 1.3, 1);
+        const holidaySet = this.getHolidaySet();
         let barsHtml = '';
 
         for (let i = 0; i < totalDays; i++) {
             const date = new Date(minDate);
             date.setDate(date.getDate() + i);
-            const dateStr = date.toISOString().slice(0, 10);
+            const dateStr = this.formatIsoDateLocal(date);
             const dayData = dayMap[dateStr];
-            const isWeekend = date.getDay() === 0 || date.getDay() === 6;
-            if (!dayData || isWeekend) continue;
+            if (!dayData || this.isNonWorkingDate(date, holidaySet)) continue;
 
             let moldingHours = 0;
             let assemblyHours = 0;
@@ -824,7 +824,7 @@ const Gantt = {
         const totalOrders = queue.filter(item => item.schedule.length > 0).length;
         const blockedCount = (this.blockedOrders || []).length;
         const reviewCount = (this.reviewOrders || []).length;
-        const today = new Date().toISOString().slice(0, 10);
+        const today = this.formatIsoDateLocal(new Date());
         const nextWorkDays = days.filter(day => day.date >= today).slice(0, 5);
         const weekUsed = round2(nextWorkDays.reduce((sum, day) => sum + day.totalUsed, 0));
         const weekCapacity = round2(dailyCapacity * 5);
