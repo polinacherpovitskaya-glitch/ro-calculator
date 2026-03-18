@@ -1102,6 +1102,64 @@ const Marketplaces = {
         return mold?.pph_actual || pAvg || 1;
     },
 
+    _resolveHwWarehouseLink(hw) {
+        if (!hw) return { source: 'custom', whId: null, sku: '' };
+        const directWhId = Number(hw.wh_id || 0);
+        if (hw.source === 'warehouse' && directWhId > 0) {
+            const warehouseItem = this._allWarehouseHw.find(w => Number(w.id) === directWhId);
+            return {
+                source: 'warehouse',
+                whId: directWhId,
+                sku: warehouseItem?.sku || hw.warehouse_sku || '',
+            };
+        }
+
+        const blankId = Number(hw.blank_id || 0);
+        if (blankId > 0) {
+            const blank = this._hwCatalog.find(b => Number(b.id) === blankId);
+            const linkedWhId = Number(blank?.warehouse_item_id || 0);
+            if (linkedWhId > 0) {
+                const warehouseItem = this._allWarehouseHw.find(w => Number(w.id) === linkedWhId);
+                return {
+                    source: 'warehouse',
+                    whId: linkedWhId,
+                    sku: warehouseItem?.sku || hw.warehouse_sku || blank?.sku || '',
+                };
+            }
+        }
+
+        return { source: 'custom', whId: null, sku: '' };
+    },
+
+    _resolvePkgWarehouseLink(pkg) {
+        if (!pkg) return { source: 'custom', whId: null, sku: '' };
+        const directWhId = Number(pkg.wh_id || 0);
+        if (pkg.source === 'warehouse' && directWhId > 0) {
+            const warehouseItem = this._allWarehousePkg.find(w => Number(w.id) === directWhId);
+            return {
+                source: 'warehouse',
+                whId: directWhId,
+                sku: warehouseItem?.sku || pkg.warehouse_sku || '',
+            };
+        }
+
+        const blankId = Number(pkg.blank_id || 0);
+        if (blankId > 0) {
+            const blank = this._pkgCatalog.find(b => Number(b.id) === blankId);
+            const linkedWhId = Number(blank?.warehouse_item_id || 0);
+            if (linkedWhId > 0) {
+                const warehouseItem = this._allWarehousePkg.find(w => Number(w.id) === linkedWhId);
+                return {
+                    source: 'warehouse',
+                    whId: linkedWhId,
+                    sku: warehouseItem?.sku || pkg.warehouse_sku || blank?.sku || '',
+                };
+            }
+        }
+
+        return { source: 'custom', whId: null, sku: '' };
+    },
+
     async _createProductionOrderFromSets(selectedRows, orderName, deadlineEnd) {
         const selectedSets = selectedRows.map(r => {
             const set = this.allSets.find(s => Number(s.id) === Number(r.id));
@@ -1238,6 +1296,7 @@ const Marketplaces = {
                 const qty = setQty * (parseFloat(hw.qty) || 1);
                 if (qty <= 0) return;
                 const base = this._calcHwUnitComponents(hw, params);
+                const hwWarehouseLink = this._resolveHwWarehouseLink(hw);
                 const hwItem = {
                     name: hw.name || `Фурнитура ${i + 1}`,
                     qty,
@@ -1261,10 +1320,10 @@ const Marketplaces = {
                     target_price_hardware: 0,
                     cost_total: res.costPerUnit,
                     hours_hardware: res.hoursHardware,
-                    hardware_source: hw.source === 'warehouse' ? 'warehouse' : 'custom',
+                    hardware_source: hwWarehouseLink.source,
                     custom_country: hw.custom_country || 'china',
-                    hardware_warehouse_item_id: hw.source === 'warehouse' ? (hw.wh_id || null) : null,
-                    hardware_warehouse_sku: hw.warehouse_sku || '',
+                    hardware_warehouse_item_id: hwWarehouseLink.whId,
+                    hardware_warehouse_sku: hwWarehouseLink.sku,
                     hardware_parent_item_index: null,
                     hardware_from_template: false,
                     marketplace_set_name: s.set_name || s.name || '',
@@ -1278,6 +1337,7 @@ const Marketplaces = {
                 const qty = setQty * (parseFloat(pkg.qty) || 1);
                 if (qty <= 0) return;
                 const base = this._calcPkgUnitComponents(pkg, params);
+                const pkgWarehouseLink = this._resolvePkgWarehouseLink(pkg);
                 const pkgItem = {
                     name: pkg.name || `Упаковка ${i + 1}`,
                     qty,
@@ -1301,10 +1361,10 @@ const Marketplaces = {
                     target_price_packaging: 0,
                     cost_total: res.costPerUnit,
                     hours_packaging: res.hoursPackaging,
-                    packaging_source: pkg.source === 'warehouse' ? 'warehouse' : 'custom',
+                    packaging_source: pkgWarehouseLink.source,
                     custom_country: pkg.custom_country || 'china',
-                    packaging_warehouse_item_id: pkg.source === 'warehouse' ? (pkg.wh_id || null) : null,
-                    packaging_warehouse_sku: pkg.warehouse_sku || '',
+                    packaging_warehouse_item_id: pkgWarehouseLink.whId,
+                    packaging_warehouse_sku: pkgWarehouseLink.sku,
                     packaging_parent_item_index: null,
                     marketplace_set_name: s.set_name || s.name || '',
                 });

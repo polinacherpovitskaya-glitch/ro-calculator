@@ -92,6 +92,10 @@ function createContext() {
         App: {
             toast() {},
             escHtml(value) { return String(value || ''); },
+            getCurrentEmployeeName() { return 'Тест'; },
+            navigate() {},
+            params: {},
+            settings: {},
         },
         loadMarketplaceSets: async () => [],
         loadMolds: async () => [],
@@ -220,6 +224,105 @@ async function main() {
     assert.equal(pkgItem.source, 'catalog');
     assert.equal(pkgItem.blank_id, 201);
     assert.equal(pkgItem.warehouse_sku, 'ENV-150x90');
+
+    vm.runInContext(`
+        let savedOrderPayload = null;
+        let savedItemsPayload = null;
+        let syncedWarehouse = null;
+        saveOrder = async (order, items) => {
+            savedOrderPayload = JSON.parse(JSON.stringify(order));
+            savedItemsPayload = JSON.parse(JSON.stringify(items));
+            return 777;
+        };
+        Orders = {
+            async _syncWarehouseByStatus(orderId, oldStatus, newStatus, orderName, managerName) {
+                syncedWarehouse = { orderId, oldStatus, newStatus, orderName, managerName };
+            },
+        };
+        getProductionParams = () => ({
+            cnyRate: 12.5,
+            fotPerHour: 400,
+            indirectPerHour: 100,
+            wasteFactor: 1.1,
+            indirectCostMode: 'all',
+        });
+        calculateItemCost = () => ({
+            costFot: 0,
+            costIndirect: 0,
+            costPlastic: 0,
+            costMoldAmortization: 0,
+            costCutting: 0,
+            costCuttingIndirect: 0,
+            costNfcTag: 0,
+            costNfcProgramming: 0,
+            costNfcIndirect: 0,
+            costTotal: 3,
+            hoursPlastic: 0.5,
+            hoursCutting: 0,
+            hoursNfc: 0,
+        });
+        calculateHardwareCost = () => ({
+            costPerUnit: 12,
+            hoursHardware: 0.25,
+        });
+        calculatePackagingCost = () => ({
+            costPerUnit: 8,
+            hoursPackaging: 0.1,
+        });
+        Marketplaces.hideProductionBuilder = () => {};
+        Marketplaces.allSets = [{
+            id: 1,
+            name: 'Набор B2C',
+            set_name: 'Набор B2C',
+            mp_actual_price: 399,
+            plastic_items: [],
+            color_variants: [],
+            hw_items: [{
+                source: 'catalog',
+                blank_id: 101,
+                wh_id: null,
+                warehouse_sku: 'CRB-501',
+                qty: 1,
+                name: 'Карабин каталог',
+                assembly_speed: 120,
+            }],
+            pkg_items: [{
+                source: 'catalog',
+                blank_id: 201,
+                wh_id: null,
+                warehouse_sku: 'ENV-150x90',
+                qty: 1,
+                name: 'Конверт каталог',
+                assembly_speed: 90,
+            }],
+        }];
+    `, context);
+
+    await vm.runInContext(`Marketplaces._createProductionOrderFromSets([{ id: 1, qty: 2 }], 'B2C тест', '2026-03-31')`, context);
+
+    const createdOrder = JSON.parse(vm.runInContext(`JSON.stringify(savedOrderPayload)`, context));
+    const createdItems = JSON.parse(vm.runInContext(`JSON.stringify(savedItemsPayload)`, context));
+    const warehouseSync = JSON.parse(vm.runInContext(`JSON.stringify(syncedWarehouse)`, context));
+    const createdHardware = createdItems.find(item => item.item_type === 'hardware');
+    const createdPackaging = createdItems.find(item => item.item_type === 'packaging');
+
+    assert.equal(createdOrder.order_name, 'B2C тест');
+    assert.equal(createdOrder.status, 'production_casting');
+    assert.ok(createdHardware, 'expected hardware line in created B2C order');
+    assert.ok(createdPackaging, 'expected packaging line in created B2C order');
+    assert.equal(createdHardware.hardware_source, 'warehouse');
+    assert.equal(createdHardware.hardware_warehouse_item_id, 501);
+    assert.equal(createdHardware.hardware_warehouse_sku, 'CRB-501');
+    assert.equal(createdPackaging.packaging_source, 'warehouse');
+    assert.equal(createdPackaging.packaging_warehouse_item_id, 601);
+    assert.equal(createdPackaging.packaging_warehouse_sku, 'ENV-150x90');
+    assert.deepEqual(warehouseSync, {
+        orderId: 777,
+        oldStatus: 'draft',
+        newStatus: 'production_casting',
+        orderName: 'B2C тест',
+        managerName: 'Тест',
+    });
 
     const pickerHost = context.document.getElementById('picker-filter-host');
     const filteredItems = [
