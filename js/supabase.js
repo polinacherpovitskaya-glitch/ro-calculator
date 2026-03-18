@@ -144,8 +144,97 @@ const _volatileLocalCache = new Map();
 
 // Data version — increment to trigger NON-DESTRUCTIVE migration
 // NEVER delete user data! Only add missing fields to existing molds
-const MOLDS_DATA_VERSION = 9; // v9: буквы (id 30,31) — добавлены hw_name/hw_price/hw_speed
+const MOLDS_DATA_VERSION = 10; // v10: восстановление historical custom_prices для бланков из экспорта 2026-02-26
 const MOLDS_VERSION_KEY = 'ro_calc_molds_version';
+
+// Historical manual sell prices from the exported blanks catalog before the reset.
+// Source: /Users/krollipolli/Downloads/molds_2026-02-26.csv
+const HISTORICAL_BLANK_PRICE_BASELINE = Object.freeze({
+    'NFC Звезда': Object.freeze({ 50: 990, 100: 825, 300: 620, 500: 495, 1000: 450, 3000: 415 }),
+    'NFC Камушек': Object.freeze({ 50: 990, 100: 825, 300: 620, 500: 495, 1000: 450, 3000: 415 }),
+    'NFC Квадрат': Object.freeze({ 50: 990, 100: 825, 300: 620, 500: 495, 1000: 450, 3000: 415 }),
+    'NFC Сердце': Object.freeze({ 50: 990, 100: 825, 300: 620, 500: 495, 1000: 450, 3000: 415 }),
+    'Беговые кроссовки': Object.freeze({ 50: 790, 100: 660, 300: 495, 500: 395, 1000: 360, 3000: 330 }),
+    'Бланк квадрат': Object.freeze({ 50: 465, 100: 385, 300: 290, 500: 235, 1000: 210, 3000: 195 }),
+    'Бланк конверт': Object.freeze({ 50: 790, 100: 660, 300: 495, 500: 395, 1000: 360, 3000: 330 }),
+    'Бланк круг': Object.freeze({ 50: 475, 100: 400, 300: 300, 500: 240, 1000: 220, 3000: 200 }),
+    'Бланк прямоугольник': Object.freeze({ 50: 475, 100: 400, 300: 300, 500: 240, 1000: 220, 3000: 200 }),
+    'Бланк сердце': Object.freeze({ 50: 475, 100: 400, 300: 300, 500: 240, 1000: 220, 3000: 200 }),
+    'Бланк треугольник': Object.freeze({ 50: 465, 100: 385, 300: 290, 500: 235, 1000: 210, 3000: 195 }),
+    'Бланк тэг Recycle object': Object.freeze({ 50: 60, 100: 60, 300: 60, 500: 60, 1000: 60, 3000: 60 }),
+    'Бланк тэг без надписи': Object.freeze({ 50: 185, 100: 155, 300: 120, 500: 95, 1000: 85, 3000: 80 }),
+    'Бланк цветок': Object.freeze({ 50: 465, 100: 385, 300: 290, 500: 235, 1000: 210, 3000: 195 }),
+    'Большой дракон': Object.freeze({ 50: 1500, 100: 1250, 300: 940, 500: 750, 1000: 685, 3000: 625 }),
+    'Большой конь': Object.freeze({ 50: 1500, 100: 1250, 300: 940, 500: 750, 1000: 685, 3000: 625 }),
+    'Буква из алфавита (кир.)': Object.freeze({ 50: 340, 100: 285, 300: 215, 500: 170, 1000: 155, 3000: 145 }),
+    'Буква из алфавита (лат.)': Object.freeze({ 50: 340, 100: 285, 300: 215, 500: 170, 1000: 155, 3000: 145 }),
+    'Бусины большие': Object.freeze({ 50: 295, 100: 245, 300: 185, 500: 150, 1000: 135, 3000: 125 }),
+    'Бусины маленькие': Object.freeze({ 50: 340, 100: 285, 300: 215, 500: 170, 1000: 155, 3000: 145 }),
+    'Велосипед': Object.freeze({ 50: 805, 100: 670, 300: 505, 500: 405, 1000: 365, 3000: 335 }),
+    'Гребень': Object.freeze({ 50: 1485, 100: 1235, 300: 930, 500: 745, 1000: 675, 3000: 620 }),
+    'Карабин': Object.freeze({ 50: 560, 100: 465, 300: 350, 500: 280, 1000: 255, 3000: 235 }),
+    'Картхолдер нью': Object.freeze({ 50: 1130, 100: 945, 300: 710, 500: 565, 1000: 515, 3000: 475 }),
+    'Ласты для плавания': Object.freeze({ 50: 940, 100: 785, 300: 590, 500: 470, 1000: 430, 3000: 395 }),
+    'Маленькая елочка': Object.freeze({ 50: 555, 100: 460, 300: 345, 500: 280, 1000: 255, 3000: 230 }),
+    'Маленькая снежинка': Object.freeze({ 50: 465, 100: 385, 300: 290, 500: 235, 1000: 210, 3000: 195 }),
+    'Маленький конь': Object.freeze({ 50: 610, 100: 510, 300: 385, 500: 305, 1000: 280, 3000: 255 }),
+    'Маленький цветочек': Object.freeze({ 50: 465, 100: 385, 300: 290, 500: 235, 1000: 210, 3000: 195 }),
+    'Маленькое сердечко': Object.freeze({ 50: 465, 100: 385, 300: 290, 500: 235, 1000: 210, 3000: 195 }),
+    'Медаль': Object.freeze({ 50: 630, 100: 525, 300: 395, 500: 315, 1000: 290, 3000: 265 }),
+    'Мыльница': Object.freeze({ 50: 1490, 100: 1240, 300: 930, 500: 745, 1000: 680, 3000: 620 }),
+    'Отельный': Object.freeze({ 50: 630, 100: 525, 300: 395, 500: 315, 1000: 290, 3000: 265 }),
+    'Открывашка': Object.freeze({ 50: 1005, 100: 835, 300: 630, 500: 505, 1000: 460, 3000: 420 }),
+    'Падл ракетка': Object.freeze({ 50: 845, 100: 705, 300: 530, 500: 425, 1000: 385, 3000: 355 }),
+    'Подставка под телефон': Object.freeze({ 50: 1275, 100: 1060, 300: 795, 500: 640, 1000: 580, 3000: 530 }),
+    'Ракетка для тенниса': Object.freeze({ 50: 795, 100: 665, 300: 500, 500: 400, 1000: 365, 3000: 335 }),
+    'Смотка': Object.freeze({ 50: 840, 100: 700, 300: 525, 500: 420, 1000: 380, 3000: 350 }),
+    'Чехол для зажигалки': Object.freeze({ 50: 1250, 100: 1040, 300: 780, 500: 625, 1000: 570, 3000: 520 }),
+});
+
+const HISTORICAL_BLANK_PRICE_ALIASES = Object.freeze({
+    'Бланк тэг': 'Бланк тэг без надписи',
+    'Новый кардхолдер': 'Картхолдер нью',
+});
+
+function _cloneHistoricalBlankPrices(prices) {
+    const out = {};
+    Object.entries(prices || {}).forEach(([qty, value]) => {
+        const num = Number(value);
+        if (Number.isFinite(num) && num > 0) out[String(qty)] = num;
+    });
+    return out;
+}
+
+function _getHistoricalBlankCustomPrices(name) {
+    const key = HISTORICAL_BLANK_PRICE_ALIASES[name] || name;
+    return _cloneHistoricalBlankPrices(HISTORICAL_BLANK_PRICE_BASELINE[key]);
+}
+
+function _mergeHistoricalBlankCustomPrices(currentPrices, name) {
+    const merged = _cloneHistoricalBlankPrices(currentPrices);
+    const historical = _getHistoricalBlankCustomPrices(name);
+    Object.entries(historical).forEach(([qty, value]) => {
+        const existing = Number(merged[qty]);
+        if (!(Number.isFinite(existing) && existing > 0)) {
+            merged[qty] = value;
+        }
+    });
+    return merged;
+}
+
+function _withHistoricalBlankPriceRecovery(mold) {
+    if (!mold || typeof mold !== 'object') {
+        return { mold, changed: false };
+    }
+    const before = _cloneHistoricalBlankPrices(mold.custom_prices);
+    const after = _mergeHistoricalBlankCustomPrices(before, mold.name);
+    const changed = JSON.stringify(before) !== JSON.stringify(after);
+    if (!changed) return { mold, changed: false };
+    return {
+        mold: { ...mold, custom_prices: after },
+        changed: true,
+    };
+}
 
 function checkMoldsVersion() {
     const stored = parseInt(localStorage.getItem(MOLDS_VERSION_KEY)) || 0;
@@ -189,6 +278,7 @@ function checkMoldsVersion() {
                 if (m.custom_margins === undefined) m.custom_margins = {};
                 // Ensure custom_prices field exists (added in v8)
                 if (m.custom_prices === undefined) m.custom_prices = {};
+                m.custom_prices = _mergeHistoricalBlankCustomPrices(m.custom_prices, m.name);
                 // v9: Update letter blanks (id 30, 31) with hw_* fields
                 if ((m.id === 30 || m.id === 31) && !m.hw_name) {
                     m.hw_name = 'Фурнитура';
@@ -1540,13 +1630,38 @@ async function loadMolds() {
                 }
             }
 
-            const supabaseMolds = (data || [])
+            const rawSupabaseMolds = (data || [])
                 .map(_parseMoldRow)
                 .filter(mold => !deletedIds.has(Number(mold.id)));
 
+            const repairedSupabaseMolds = [];
+            rawSupabaseMolds.forEach(mold => {
+                const recovered = _withHistoricalBlankPriceRecovery(mold);
+                if (recovered.changed) repairedSupabaseMolds.push(recovered.mold);
+            });
+            const supabaseMolds = rawSupabaseMolds.map(mold => _withHistoricalBlankPriceRecovery(mold).mold);
+            if (repairedSupabaseMolds.length > 0) {
+                try {
+                    await supabaseClient.from('molds').upsert(
+                        repairedSupabaseMolds.map(mold => ({
+                            id: mold.id,
+                            name: mold.name || '',
+                            mold_data: JSON.stringify(mold),
+                            created_at: mold.created_at || new Date().toISOString(),
+                            updated_at: new Date().toISOString(),
+                        })),
+                        { onConflict: 'id' }
+                    );
+                    console.log('[Molds] Restored historical custom_prices for', repairedSupabaseMolds.length, 'records');
+                } catch (e) {
+                    console.warn('Historical mold price repair error:', e);
+                }
+            }
+
             // Smart merge: push local records that are newer or missing in Supabase
             const localMolds = (getLocal(LOCAL_KEYS.molds) || [])
-                .filter(mold => !deletedIds.has(Number(mold.id)));
+                .filter(mold => !deletedIds.has(Number(mold.id)))
+                .map(mold => _withHistoricalBlankPriceRecovery(mold).mold);
             if (localMolds.length > 0) {
                 const sbMap = new Map(supabaseMolds.map(m => [m.id, m]));
                 const sbUpdatedMap = new Map((data || []).map(r => [r.id, r.updated_at]));
@@ -1602,12 +1717,14 @@ async function loadMolds() {
             console.error('loadMolds exception:', e);
             if (_isSupabaseAccessError(e)) _markSupabaseAccessProblem(e);
             const localMolds = (getLocal(LOCAL_KEYS.molds) || getDefaultMolds())
-                .filter(mold => !deletedIds.has(Number(mold.id)));
+                .filter(mold => !deletedIds.has(Number(mold.id)))
+                .map(mold => _withHistoricalBlankPriceRecovery(mold).mold);
             return localMolds;
         }
     }
     return (getLocal(LOCAL_KEYS.molds) || getDefaultMolds())
-        .filter(mold => !deletedIds.has(Number(mold.id)));
+        .filter(mold => !deletedIds.has(Number(mold.id)))
+        .map(mold => _withHistoricalBlankPriceRecovery(mold).mold);
 }
 
 async function saveMold(mold) {
@@ -1661,7 +1778,7 @@ function getDefaultMolds() {
         hw_delivery_total: opts.hw_delivery || 0, hw_speed: opts.hw_speed || null,
         client: opts.client || '', notes: opts.notes || '',
         total_orders: opts.orders || 0, total_units_produced: opts.produced || 0,
-        custom_margins: {}, custom_prices: {},
+        custom_margins: {}, custom_prices: _getHistoricalBlankCustomPrices(name),
     });
 
     return [
