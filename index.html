@@ -35,7 +35,7 @@
     <aside class="sidebar">
         <div class="sidebar-brand">
             <h2>Recycle Object</h2>
-            <span>Калькулятор <span id="app-version">v128</span></span>
+            <span>Калькулятор <span id="app-version">v129</span></span>
         </div>
         <nav class="sidebar-nav">
             <a href="#tasks" data-page="tasks">
@@ -1034,6 +1034,26 @@
                         <h3 id="pkg-form-title">Новая упаковка</h3>
                         <button class="btn btn-sm btn-outline" onclick="Molds.hidePkgForm()">Закрыть</button>
                     </div>
+                    <div class="form-row">
+                        <div class="form-group" style="flex:3;">
+                            <label>Позиция со склада</label>
+                            <div id="mold-pkg-warehouse-picker-host"></div>
+                            <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Можно выбрать упаковку со склада по названию или артикулу, либо оставить пустым и заполнить поля вручную.</div>
+                        </div>
+                        <div class="form-group" style="flex:0 0 auto;align-self:end;">
+                            <button class="btn btn-sm btn-outline" type="button" onclick="Molds.clearPkgWarehouseSelection()">Отвязать от склада</button>
+                        </div>
+                    </div>
+                    <div id="pkg-blank-selected" style="display:none;margin-bottom:12px;padding:10px;background:var(--bg);border-radius:8px;">
+                        <div style="display:flex;gap:12px;align-items:center;">
+                            <img id="pkg-blank-photo-preview" src="" style="width:48px;height:48px;object-fit:cover;border-radius:6px;border:1px solid var(--border);display:none;">
+                            <div>
+                                <div id="pkg-blank-selected-name" style="font-weight:700;font-size:13px;"></div>
+                                <div id="pkg-blank-selected-info" style="font-size:11px;color:var(--text-muted);"></div>
+                            </div>
+                        </div>
+                    </div>
+                    <input type="hidden" id="pkg-blank-wh-id" value="">
                     <div class="form-row">
                         <div class="form-group" style="flex:2"><label>Название</label><input type="text" id="pkg-blank-name"></div>
                         <div class="form-group"><label>Стоимость (&#8381;/шт)</label><input type="number" min="0" step="0.1" id="pkg-blank-price" oninput="Molds.recalcPkgCost()"></div>
@@ -3209,7 +3229,7 @@
 <script src="js/orders.js?v=61"></script>
 <script src="js/production_plan.js?v=75"></script>
 <script src="js/analytics.js?v=46g"></script>
-<script src="js/molds.js?v=70"></script>
+    <script src="js/molds.js?v=71"></script>
 <script src="js/colors.js?v=46g"></script>
 <script src="js/kp.js?v=46g"></script>
 <script src="js/timetrack.js?v=62"></script>

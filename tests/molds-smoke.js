@@ -83,6 +83,38 @@ function createContext() {
         refreshTemplatesFromMolds() {},
     };
     context.Warehouse = {
+        async getItemsForPicker() {
+            return {
+                packaging: {
+                    label: 'Упаковка',
+                    icon: '📦',
+                    items: [{
+                        id: 601,
+                        name: 'Коробка',
+                        sku: 'ENV-150',
+                        size: '15x9',
+                        color: 'калька',
+                        available_qty: 42,
+                        price_per_unit: 12,
+                        photo_thumbnail: 'https://example.com/pkg.jpg',
+                    }],
+                },
+                chains: {
+                    label: 'Карабины',
+                    icon: '🔗',
+                    items: [{
+                        id: 501,
+                        name: 'Карабин',
+                        sku: 'CRB-501',
+                        size: '5 см',
+                        color: 'черный',
+                        available_qty: 12,
+                        price_per_unit: 10,
+                        photo_thumbnail: 'https://example.com/hw.jpg',
+                    }],
+                },
+            };
+        },
         buildImagePicker(containerId, grouped, selectedId) {
             context.__pickerArgs = {
                 containerId,
@@ -120,10 +152,24 @@ async function main() {
         'hw-blank-selected-info',
         'hw-blank-photo-preview',
         'mold-hw-warehouse-picker-host',
+        'pkg-blank-wh-id',
+        'pkg-blank-name',
+        'pkg-blank-price',
+        'pkg-blank-delivery',
+        'pkg-blank-speed',
+        'pkg-blank-sell',
+        'pkg-blank-notes',
+        'pkg-blank-photo',
+        'pkg-blank-selected',
+        'pkg-blank-selected-name',
+        'pkg-blank-selected-info',
+        'pkg-blank-photo-preview',
+        'mold-pkg-warehouse-picker-host',
     ].forEach(id => context.document.getElementById(id));
 
     vm.runInContext(`
         Molds.recalcHwCost = () => {};
+        Molds.recalcPkgCost = () => {};
         Molds._warehouseHwItems = [{
             id: 501,
             name: 'Карабин',
@@ -133,6 +179,16 @@ async function main() {
             category: 'chains',
             price_per_unit: 10,
             photo_thumbnail: 'https://example.com/hw.jpg',
+        }];
+        Molds._warehousePkgItems = [{
+            id: 601,
+            name: 'Конверт',
+            sku: 'ENV-150',
+            size: '15x9',
+            color: 'калька',
+            category: 'packaging',
+            price_per_unit: 12,
+            photo_thumbnail: 'https://example.com/pkg.jpg',
         }];
         document.getElementById('hw-blank-wh-search').value = 'CRB-501';
     `, context);
@@ -161,6 +217,26 @@ async function main() {
     assert.match(String(context.document.getElementById('hw-blank-selected-info').textContent || ''), /Артикул: CRB-501/);
     assert.match(String(context.document.getElementById('hw-blank-selected-info').textContent || ''), /10 ₽/);
     assert.equal(String(context.document.getElementById('hw-blank-notes').value || ''), '');
+
+    const pkgSkuOnlySnapshot = JSON.parse(vm.runInContext(`JSON.stringify(Molds._getWarehousePkgSnapshot(601, 'ENV-150'))`, context));
+    assert.equal(pkgSkuOnlySnapshot.notes, '');
+    const pkgPrefixedNotesSnapshot = JSON.parse(vm.runInContext(`JSON.stringify(Molds._getWarehousePkgSnapshot(601, 'ENV-150 + подарочный'))`, context));
+    assert.equal(pkgPrefixedNotesSnapshot.notes, 'подарочный');
+
+    await vm.runInContext(`Molds.renderWarehousePkgPicker()`, context);
+    const pkgPickerHtml = String(context.document.getElementById('mold-pkg-warehouse-picker-host').innerHTML || '');
+    const pkgPickerArgs = context.__pickerArgs;
+    assert.match(pkgPickerHtml, /wh-img-picker/);
+    assert.match(pkgPickerHtml, /Поиск по названию или артикулу/);
+    assert.equal(pkgPickerArgs.containerId, 'moldpkg-picker-0');
+
+    vm.runInContext(`Molds.selectPkgWarehouseItem(0, 601)`, context);
+    assert.equal(context.document.getElementById('pkg-blank-wh-id').value, 601);
+    assert.equal(String(context.document.getElementById('pkg-blank-name').value || ''), 'Конверт · 15x9 · калька');
+    assert.equal(String(context.document.getElementById('pkg-blank-price').value || ''), '12');
+    assert.equal(Number(context.document.getElementById('pkg-blank-delivery').value || 0), 0);
+    assert.match(String(context.document.getElementById('pkg-blank-selected-info').textContent || ''), /Артикул: ENV-150/);
+    assert.equal(String(context.document.getElementById('pkg-blank-notes').value || ''), '');
 
     console.log('molds smoke checks passed');
 }
