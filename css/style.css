@@ -4265,3 +4265,197 @@ table .text-center { text-align: center; }
         align-items: flex-start;
     }
 }
+
+.quick-bug-report-btn {
+    position: fixed;
+    right: 24px;
+    bottom: 24px;
+    z-index: 1200;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 16px;
+    border: 0;
+    border-radius: 999px;
+    background: #111827;
+    color: #fff;
+    font-weight: 700;
+    box-shadow: 0 14px 28px rgba(17, 24, 39, 0.24);
+    cursor: pointer;
+    transition: transform .16s ease, box-shadow .16s ease;
+}
+
+.quick-bug-report-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 18px 32px rgba(17, 24, 39, 0.26);
+}
+
+.bug-page-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 20px;
+}
+
+.bug-page-subtitle {
+    margin-top: 4px;
+    font-size: 13px;
+    color: var(--text-muted);
+}
+
+.bug-page-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.bug-layout {
+    display: grid;
+    grid-template-columns: minmax(340px, 0.95fr) minmax(420px, 1.25fr);
+    gap: 16px;
+}
+
+.bug-form-card {
+    position: sticky;
+    top: 24px;
+}
+
+.bug-form-card-compact {
+    position: static;
+}
+
+.bug-file-summary {
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.bug-form-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.bug-report-feed {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.bug-report-card {
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: #fff;
+    padding: 16px;
+}
+
+.bug-report-card.is-closed {
+    opacity: 0.72;
+}
+
+.bug-report-card-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 10px;
+}
+
+.bug-report-card h4 {
+    margin: 0;
+    font-size: 15px;
+}
+
+.bug-report-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-top: 4px;
+}
+
+.bug-report-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.bug-report-description {
+    margin: 0 0 12px;
+    color: var(--text);
+    white-space: pre-wrap;
+}
+
+.bug-report-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.bug-report-footer-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    color: var(--text-muted);
+    font-size: 12px;
+}
+
+.bug-report-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.bug-report-prompt-box {
+    margin-top: 12px;
+    border-top: 1px solid var(--border);
+    padding-top: 12px;
+}
+
+.bug-report-prompt-box summary {
+    cursor: pointer;
+    font-weight: 600;
+}
+
+.bug-report-prompt-box pre {
+    margin-top: 10px;
+    padding: 12px;
+    border-radius: 12px;
+    background: #111827;
+    color: #e5e7eb;
+    overflow: auto;
+    font-size: 12px;
+    line-height: 1.45;
+    white-space: pre-wrap;
+}
+
+.bug-overlay .task-drawer-panel {
+    width: 560px;
+}
+
+@media (max-width: 1100px) {
+    .bug-layout {
+        grid-template-columns: 1fr;
+    }
+
+    .bug-form-card {
+        position: static;
+    }
+}
+
+@media (max-width: 768px) {
+    .bug-page-header,
+    .bug-report-card-top,
+    .bug-report-footer {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .quick-bug-report-btn {
+        right: 16px;
+        bottom: 16px;
+    }
+}

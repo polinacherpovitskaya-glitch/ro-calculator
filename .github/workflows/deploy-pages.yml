@@ -39,6 +39,7 @@ jobs:
           node tests/work-management-smoke.js
           node tests/tasks-smoke.js
           node tests/task-notification-smoke.js
+          node tests/bug-reports-smoke.js
           node tests/order-flow-smoke.js
           node tests/marketplaces-smoke.js
           node tests/molds-smoke.js

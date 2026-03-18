@@ -82,6 +82,7 @@ const LOCAL_KEYS = {
     workAreas: 'ro_calc_work_areas',
     workProjects: 'ro_calc_work_projects',
     workTasks: 'ro_calc_work_tasks_v2',
+    bugReports: 'ro_calc_bug_reports',
     taskComments: 'ro_calc_task_comments',
     workAssets: 'ro_calc_work_assets',
     taskChecklistItems: 'ro_calc_task_checklist_items',
@@ -105,6 +106,7 @@ const NON_CRITICAL_LOCAL_CACHE_KEYS = new Set([
     LOCAL_KEYS.salesRecords,
     LOCAL_KEYS.workProjects,
     LOCAL_KEYS.workTasks,
+    LOCAL_KEYS.bugReports,
     LOCAL_KEYS.taskComments,
     LOCAL_KEYS.workAssets,
     LOCAL_KEYS.taskChecklistItems,
@@ -118,6 +120,7 @@ const WORK_SETTINGS_KEYS = {
     areas: 'work_areas_json',
     projects: 'work_projects_json',
     tasks: 'work_tasks_json',
+    bug_reports: 'bug_reports_json',
     task_comments: 'work_task_comments_json',
     work_assets: 'work_assets_json',
     task_checklist_items: 'work_task_checklist_items_json',
@@ -130,6 +133,12 @@ const WORK_SETTINGS_KEYS = {
 const WORK_TABLE_ON_CONFLICT = {
     task_watchers: 'task_id,user_id',
 };
+
+const OPTIONAL_WORK_MODULE_TABLES = new Set([
+    'bug_reports',
+]);
+
+const _missingOptionalWorkTables = new Set();
 
 const _volatileLocalCache = new Map();
 
@@ -3667,6 +3676,22 @@ function _workOnConflictKey(table) {
     return WORK_TABLE_ON_CONFLICT[table] || 'id';
 }
 
+function _isOptionalWorkModuleTable(table) {
+    return OPTIONAL_WORK_MODULE_TABLES.has(table);
+}
+
+function _rememberOptionalWorkTableMissing(table) {
+    if (_isOptionalWorkModuleTable(table)) _missingOptionalWorkTables.add(table);
+}
+
+function _clearOptionalWorkTableMissing(table) {
+    if (_isOptionalWorkModuleTable(table)) _missingOptionalWorkTables.delete(table);
+}
+
+function _shouldSkipOptionalWorkTableRemote(table) {
+    return _isOptionalWorkModuleTable(table) && _missingOptionalWorkTables.has(table);
+}
+
 function _isWorkModuleMissingTableError(error) {
     return _isSupabaseMissingTableError(error);
 }
@@ -3723,13 +3748,15 @@ async function _saveJsonSetting(settingKey, value) {
 
 async function _loadWorkTableRows(table, localKey, orderBy, ascending) {
     const settingsKey = _workSettingsKey(table);
-    if (_canUseWorkModuleRemote()) {
+    let remoteTableMissing = _shouldSkipOptionalWorkTableRemote(table);
+    if (_canUseWorkModuleRemote() && !remoteTableMissing) {
         try {
             let query = supabaseClient.from(table).select('*');
             if (orderBy) query = query.order(orderBy, { ascending: !!ascending });
             const { data, error } = await query;
             if (!error && Array.isArray(data)) {
                 _workModuleRemoteAvailable = true;
+                _clearOptionalWorkTableMissing(table);
                 if (data.length === 0 && settingsKey) {
                     const stagedRows = await _loadJsonSetting(settingsKey, []);
                     if (Array.isArray(stagedRows) && stagedRows.length > 0) {
@@ -3743,8 +3770,13 @@ async function _loadWorkTableRows(table, localKey, orderBy, ascending) {
                 return data;
             }
             if (error) {
-                _markWorkModuleRemoteUnavailable(error);
-                if (!_isWorkModuleMissingTableError(error)) console.error(`load ${table} error:`, error);
+                if (_isWorkModuleMissingTableError(error) && _isOptionalWorkModuleTable(table)) {
+                    remoteTableMissing = true;
+                    _rememberOptionalWorkTableMissing(table);
+                } else {
+                    _markWorkModuleRemoteUnavailable(error);
+                    if (!_isWorkModuleMissingTableError(error)) console.error(`load ${table} error:`, error);
+                }
             }
         } catch (e) {
             console.error(`load ${table} exception:`, e);
@@ -3761,7 +3793,7 @@ async function _loadWorkTableRows(table, localKey, orderBy, ascending) {
             setLocal(localKey, remoteFallback);
             return orderBy ? _sortRows(remoteFallback, orderBy, ascending) : remoteFallback;
         }
-        if (local.length > 0) {
+        if (local.length > 0 || remoteTableMissing) {
             await _saveJsonSetting(settingsKey, local);
         }
     }
@@ -3773,16 +3805,23 @@ async function _upsertWorkTableRows(table, localKey, rows, onConflict) {
     if (payload.length === 0) return [];
     const conflictKey = onConflict || _workOnConflictKey(table);
     const settingsKey = _workSettingsKey(table);
-    if (_canUseWorkModuleRemote()) {
+    let remoteTableMissing = _shouldSkipOptionalWorkTableRemote(table);
+    if (_canUseWorkModuleRemote() && !remoteTableMissing) {
         try {
             const { error } = await supabaseClient
                 .from(table)
                 .upsert(payload, { onConflict: conflictKey });
             if (error) {
-                _markWorkModuleRemoteUnavailable(error);
-                if (!_isWorkModuleMissingTableError(error)) console.error(`upsert ${table} error:`, error);
+                if (_isWorkModuleMissingTableError(error) && _isOptionalWorkModuleTable(table)) {
+                    remoteTableMissing = true;
+                    _rememberOptionalWorkTableMissing(table);
+                } else {
+                    _markWorkModuleRemoteUnavailable(error);
+                    if (!_isWorkModuleMissingTableError(error)) console.error(`upsert ${table} error:`, error);
+                }
             } else {
                 _workModuleRemoteAvailable = true;
+                _clearOptionalWorkTableMissing(table);
             }
         } catch (e) {
             console.error(`upsert ${table} exception:`, e);
@@ -3967,6 +4006,11 @@ async function loadWorkProject(projectId) {
 async function loadWorkTasks() {
     await ensureWorkManagementBootstrap();
     return _loadWorkTableRows('tasks', LOCAL_KEYS.workTasks, 'updated_at', false);
+}
+
+async function loadBugReports() {
+    await ensureWorkManagementBootstrap();
+    return _loadWorkTableRows('bug_reports', LOCAL_KEYS.bugReports, 'updated_at', false);
 }
 
 async function loadTaskComments() {
@@ -4172,6 +4216,73 @@ async function saveWorkAsset(asset) {
 
 async function deleteWorkAsset(assetId) {
     await _deleteWorkTableRow('work_assets', LOCAL_KEYS.workAssets, assetId);
+}
+
+async function saveBugReport(report, options = {}) {
+    await ensureWorkManagementBootstrap();
+    const existing = (getLocal(LOCAL_KEYS.bugReports) || []).find(item =>
+        String(item.task_id || '') === String(report?.task_id || '')
+    );
+    const row = {
+        id: _toNumberOrNull(report.id) || existing?.id || Date.now() + Math.floor(Math.random() * 1000),
+        task_id: _toNumberOrNull(report.task_id),
+        title: String(report.title || existing?.title || '').trim(),
+        section_key: String(report.section_key || existing?.section_key || '').trim(),
+        section_name: String(report.section_name || existing?.section_name || '').trim(),
+        subsection_key: String(report.subsection_key || existing?.subsection_key || '').trim(),
+        subsection_name: String(report.subsection_name || existing?.subsection_name || '').trim(),
+        page_route: String(report.page_route || existing?.page_route || '').trim(),
+        page_url: String(report.page_url || existing?.page_url || '').trim(),
+        app_version: String(report.app_version || existing?.app_version || '').trim(),
+        browser: String(report.browser || existing?.browser || '').trim(),
+        os: String(report.os || existing?.os || '').trim(),
+        viewport: String(report.viewport || existing?.viewport || '').trim(),
+        steps_to_reproduce: String(report.steps_to_reproduce || existing?.steps_to_reproduce || '').trim(),
+        expected_result: String(report.expected_result || existing?.expected_result || '').trim(),
+        actual_result: String(report.actual_result || existing?.actual_result || '').trim(),
+        severity: String(report.severity || existing?.severity || 'medium').trim() || 'medium',
+        codex_prompt: String(report.codex_prompt ?? existing?.codex_prompt ?? ''),
+        codex_status: String(report.codex_status || existing?.codex_status || 'pending'),
+        codex_result: String(report.codex_result ?? existing?.codex_result ?? ''),
+        codex_error: String(report.codex_error ?? existing?.codex_error ?? ''),
+        submitted_by: _toNumberOrNull(report.submitted_by ?? existing?.submitted_by),
+        submitted_by_name: String(report.submitted_by_name || existing?.submitted_by_name || '').trim(),
+        created_at: existing?.created_at || report.created_at || new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+    };
+    if (!row.task_id) throw new Error('Bug report must be linked to task_id');
+
+    await _upsertWorkTableRows('bug_reports', LOCAL_KEYS.bugReports, row, 'id');
+
+    if (!options.skipActivity) {
+        const authorId = options.actor_id ?? App?.currentEmployeeId ?? row.submitted_by;
+        const authorName = options.actor_name || App?.getCurrentEmployeeName?.() || row.submitted_by_name || 'Система';
+        if (!existing) {
+            await appendWorkActivity({
+                task_id: row.task_id,
+                project_id: null,
+                order_id: null,
+                author_id: authorId,
+                author_name: authorName,
+                activity_type: 'bug_report_created',
+                message: 'Создан баг-репорт.',
+                metadata: { bug_report_id: row.id, severity: row.severity },
+            });
+        } else if (existing.codex_status !== row.codex_status && row.codex_status) {
+            await appendWorkActivity({
+                task_id: row.task_id,
+                project_id: null,
+                order_id: null,
+                author_id: authorId,
+                author_name: authorName,
+                activity_type: 'bug_codex_status_changed',
+                message: `Статус Codex обновлён: ${existing.codex_status || '—'} → ${row.codex_status}.`,
+                metadata: { bug_report_id: row.id, codex_status: row.codex_status },
+            });
+        }
+    }
+
+    return row;
 }
 
 async function saveTaskChecklistItem(item) {
@@ -4391,16 +4502,24 @@ async function deleteWorkTask(taskId) {
     for (const child of childTasks) {
         await deleteWorkTask(child.id);
     }
+    let bugReportsTableMissing = false;
     if (_canUseWorkModuleRemote()) {
         try {
             const responses = await Promise.all([
+                supabaseClient.from('bug_reports').delete().eq('task_id', targetId),
                 supabaseClient.from('task_comments').delete().eq('task_id', targetId),
                 supabaseClient.from('work_assets').delete().eq('task_id', targetId),
                 supabaseClient.from('task_checklist_items').delete().eq('task_id', targetId),
                 supabaseClient.from('task_watchers').delete().eq('task_id', targetId),
                 supabaseClient.from('work_activity').delete().eq('task_id', targetId),
             ]);
-            const firstError = responses.map(item => item?.error).find(Boolean);
+            const firstError = responses
+                .map(item => item?.error)
+                .find(error => error && !(_isWorkModuleMissingTableError(error) && String(error?.message || '').includes('bug_reports')));
+            const optionalBugError = responses
+                .map(item => item?.error)
+                .find(error => error && _isWorkModuleMissingTableError(error) && String(error?.message || '').includes('bug_reports'));
+            if (optionalBugError) bugReportsTableMissing = true;
             if (firstError) {
                 _markWorkModuleRemoteUnavailable(firstError);
                 if (!_isWorkModuleMissingTableError(firstError)) console.error('deleteWorkTask cascade error:', firstError);
@@ -4411,11 +4530,15 @@ async function deleteWorkTask(taskId) {
             console.error('deleteWorkTask cascade exception:', e);
         }
     }
+    _removeLocalEntityRow(LOCAL_KEYS.bugReports, item => String(item.task_id) === String(targetId));
     _removeLocalEntityRow(LOCAL_KEYS.taskComments, item => String(item.task_id) === String(targetId));
     _removeLocalEntityRow(LOCAL_KEYS.workAssets, item => String(item.task_id) === String(targetId));
     _removeLocalEntityRow(LOCAL_KEYS.taskChecklistItems, item => String(item.task_id) === String(targetId));
     _removeLocalEntityRow(LOCAL_KEYS.taskWatchers, item => String(item.task_id) === String(targetId));
     _removeLocalEntityRow(LOCAL_KEYS.workActivity, item => String(item.task_id) === String(targetId));
+    if (!_canUseWorkModuleRemote() || bugReportsTableMissing) {
+        await _saveJsonSetting(_workSettingsKey('bug_reports'), getLocal(LOCAL_KEYS.bugReports) || []);
+    }
     if (!_canUseWorkModuleRemote()) {
         await _saveJsonSetting(_workSettingsKey('task_comments'), getLocal(LOCAL_KEYS.taskComments) || []);
         await _saveJsonSetting(_workSettingsKey('work_assets'), getLocal(LOCAL_KEYS.workAssets) || []);
@@ -4564,6 +4687,7 @@ async function loadWorkBundle() {
         areas,
         projects,
         tasks,
+        bugReports,
         comments,
         assets,
         checklistItems,
@@ -4574,6 +4698,7 @@ async function loadWorkBundle() {
         loadWorkAreas(),
         loadWorkProjects(),
         _loadWorkTableRows('tasks', LOCAL_KEYS.workTasks, 'updated_at', false),
+        _loadWorkTableRows('bug_reports', LOCAL_KEYS.bugReports, 'updated_at', false),
         _loadWorkTableRows('task_comments', LOCAL_KEYS.taskComments, 'created_at', true),
         _loadWorkTableRows('work_assets', LOCAL_KEYS.workAssets, 'created_at', true),
         _loadWorkTableRows('task_checklist_items', LOCAL_KEYS.taskChecklistItems, 'sort_index', true),
@@ -4581,5 +4706,5 @@ async function loadWorkBundle() {
         _loadWorkTableRows('work_activity', LOCAL_KEYS.workActivity, 'created_at', false),
         loadWorkTemplatesV2(),
     ]);
-    return { areas, projects, tasks, comments, assets, checklistItems, watchers, activity, templates };
+    return { areas, projects, tasks, bugReports, comments, assets, checklistItems, watchers, activity, templates };
 }

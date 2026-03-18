@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v135';
+const APP_VERSION = 'v136';
 
 const App = {
     currentPage: 'orders',
@@ -22,12 +22,12 @@ const App = {
     // All pages in the app
     ALL_PAGES: [
         'calculator', 'orders', 'factual',
-        'analytics', 'molds', 'colors', 'timetrack', 'tasks', 'projects', 'wiki', 'gantt',
+        'analytics', 'molds', 'colors', 'timetrack', 'tasks', 'bugs', 'projects', 'wiki', 'gantt',
         'import', 'warehouse', 'marketplaces', 'china', 'settings',
     ],
 
     // Pages visible to everyone by default (if no custom config)
-    DEFAULT_PAGES: ['orders', 'timetrack', 'tasks', 'projects', 'wiki'],
+    DEFAULT_PAGES: ['orders', 'timetrack', 'tasks', 'bugs', 'projects', 'wiki'],
 
     normalizePageAlias(page) {
         if (page === 'dashboard') return 'orders';
@@ -39,6 +39,7 @@ const App = {
     canAccess(page) {
         if (!this.currentUser) return false;
         page = this.normalizePageAlias(page);
+        if (page === 'bugs') return true;
         if (page === 'wiki') return true;
         // order-detail is part of orders
         if (page === 'order-detail') page = 'orders';
@@ -299,6 +300,9 @@ const App = {
         document.getElementById('app-layout').classList.remove('active');
         const userInfo = document.getElementById('sidebar-user-info');
         if (userInfo) userInfo.textContent = '';
+        if (window.BugReports && typeof window.BugReports.syncQuickButton === 'function') {
+            window.BugReports.syncQuickButton();
+        }
         this.hideUpdateBanner();
         if (this._updateCheckTimer) {
             clearInterval(this._updateCheckTimer);
@@ -472,6 +476,9 @@ const App = {
         this.applyNavVisibility();
         this.handleRoute();
         this.startUpdateChecker();
+        if (window.BugReports && typeof window.BugReports.syncQuickButton === 'function') {
+            window.BugReports.syncQuickButton();
+        }
     },
 
     // Hide sidebar links for pages the user has no access to
@@ -706,6 +713,7 @@ const App = {
             case 'colors': Colors.load(); break;
             case 'timetrack': TimeTrack.load(); break;
             case 'tasks': Tasks.load(subId ? parseInt(subId, 10) : null); break;
+            case 'bugs': BugReports.load(); break;
             case 'projects': Projects.load(subId ? parseInt(subId, 10) : null); break;
             case 'wiki': Wiki.load(); break;
             case 'import': FinTablo.load(); break;
