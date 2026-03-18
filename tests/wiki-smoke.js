@@ -114,6 +114,7 @@ async function main() {
     assert.match(rootHtml, /База знаний/);
     assert.match(rootHtml, /Быстрый старт/);
     assert.match(rootHtml, /Черновики переноса/);
+    assert.match(rootHtml, /Разбить по # заголовкам/);
     assert.equal(Array.isArray(context.__savedWiki.sections), true);
     assert.equal(Array.isArray(context.__savedWiki.articles), true);
 
@@ -130,6 +131,25 @@ async function main() {
     assert.deepEqual(savedArticle.tags, ['склад', 'резерв']);
     assert.match(savedArticle.body, /Второй абзац/);
 
+    context.document.getElementById('wiki-preview-title');
+    context.document.getElementById('wiki-preview-section');
+    context.document.getElementById('wiki-preview-summary');
+    context.document.getElementById('wiki-preview-tags');
+    context.document.getElementById('wiki-preview-body');
+    context.document.getElementById('wiki-article-title').value = 'Обновленный регламент';
+    context.document.getElementById('wiki-article-section').value = 'production';
+    context.document.getElementById('wiki-article-summary').value = 'Короткий summary';
+    context.document.getElementById('wiki-article-tags').value = 'литейка, молды';
+    context.document.getElementById('wiki-article-body').value = '# Литье\n- Шаг 1\n- Шаг 2';
+    vm.runInContext('Wiki.handleEditorInput()', context);
+
+    assert.match(context.document.getElementById('wiki-preview-title').textContent, /Обновленный регламент/);
+    assert.match(context.document.getElementById('wiki-preview-section').textContent, /Производство/);
+    assert.match(context.document.getElementById('wiki-preview-summary').textContent, /Короткий summary/);
+    assert.match(context.document.getElementById('wiki-preview-tags').innerHTML, /молды/);
+    assert.match(context.document.getElementById('wiki-preview-body').innerHTML, /<h3>Литье<\/h3>/);
+    assert.match(context.document.getElementById('wiki-preview-body').innerHTML, /<li>Шаг 1<\/li>/);
+
     context.document.getElementById('wiki-import-title').value = 'Импортированный черновик';
     context.document.getElementById('wiki-import-section').value = 'drafts';
     context.document.getElementById('wiki-import-body').value = 'Сырой текст из Notion';
@@ -138,6 +158,23 @@ async function main() {
     const imported = context.__savedWiki.articles.find(article => article.title === 'Импортированный черновик');
     assert.equal(imported.section_id, 'drafts');
     assert.match(imported.body, /Notion/);
+
+    context.document.getElementById('wiki-import-title').value = 'Перенос регламента';
+    context.document.getElementById('wiki-import-section').value = 'drafts';
+    context.document.getElementById('wiki-import-body').value = [
+        '# Заказы',
+        'Как заводить новый заказ',
+        '## Склад',
+        'Как ставить товар в резерв',
+    ].join('\n');
+    await vm.runInContext('Wiki.applyImportText(true)', context);
+
+    const splitArticles = context.__savedWiki.articles.filter(article => article.title.startsWith('Перенос регламента'));
+    assert.equal(splitArticles.length, 2);
+    assert.equal(splitArticles.every(article => article.section_id === 'drafts'), true);
+    assert.equal(splitArticles.every(article => article.tags.includes('импорт')), true);
+    assert.ok(splitArticles.some(article => /Заказы/.test(article.title)));
+    assert.ok(splitArticles.some(article => /Склад/.test(article.title)));
 
     console.log('wiki smoke checks passed');
 }

@@ -229,6 +229,127 @@ const Wiki = {
         return `${clean.slice(0, max).trim()}…`;
     },
 
+    _renderBodyPreview(text) {
+        const lines = String(text || '').replace(/\r/g, '').split('\n');
+        const html = [];
+        let listType = '';
+        let listItems = [];
+        const flushList = () => {
+            if (!listItems.length) return;
+            const tag = listType === 'ol' ? 'ol' : 'ul';
+            html.push(`<${tag}>${listItems.join('')}</${tag}>`);
+            listItems = [];
+            listType = '';
+        };
+
+        lines.forEach(rawLine => {
+            const line = String(rawLine || '').trim();
+            if (!line) {
+                flushList();
+                return;
+            }
+
+            const heading1 = line.match(/^#\s+(.+)$/);
+            const heading2 = line.match(/^##\s+(.+)$/);
+            const ordered = line.match(/^\d+[.)]\s+(.+)$/);
+            const bullet = line.match(/^[-*•]\s+(.+)$/);
+
+            if (heading1) {
+                flushList();
+                html.push(`<h3>${this._esc(heading1[1])}</h3>`);
+                return;
+            }
+            if (heading2) {
+                flushList();
+                html.push(`<h4>${this._esc(heading2[1])}</h4>`);
+                return;
+            }
+            if (ordered) {
+                if (listType && listType !== 'ol') flushList();
+                listType = 'ol';
+                listItems.push(`<li>${this._esc(ordered[1])}</li>`);
+                return;
+            }
+            if (bullet) {
+                if (listType && listType !== 'ul') flushList();
+                listType = 'ul';
+                listItems.push(`<li>${this._esc(bullet[1])}</li>`);
+                return;
+            }
+
+            flushList();
+            html.push(`<p>${this._esc(line)}</p>`);
+        });
+        flushList();
+        return html.join('') || '<p>Пока пусто. Здесь появится читаемый предпросмотр статьи.</p>';
+    },
+
+    _getEditorDraft(article = null) {
+        const fallback = article || this._getArticle(this.selectedArticleId) || {};
+        const titleInput = document.getElementById('wiki-article-title');
+        const sectionSelect = document.getElementById('wiki-article-section');
+        const summaryInput = document.getElementById('wiki-article-summary');
+        const tagsInput = document.getElementById('wiki-article-tags');
+        const bodyInput = document.getElementById('wiki-article-body');
+        const tags = String(tagsInput ? tagsInput.value : ((fallback.tags || []).join(', ')))
+            .split(',')
+            .map(tag => tag.trim())
+            .filter(Boolean);
+        return {
+            title: String(titleInput ? titleInput.value : (fallback.title || '')).trim(),
+            section_id: String(sectionSelect ? sectionSelect.value : (fallback.section_id || '')).trim(),
+            summary: String(summaryInput ? summaryInput.value : (fallback.summary || '')).trim(),
+            tags,
+            body: String(bodyInput ? bodyInput.value : (fallback.body || '')).trim(),
+        };
+    },
+
+    _renderPreviewCard(draft) {
+        const section = this._getSection(draft.section_id);
+        return `
+            <div class="wiki-preview-header">Предпросмотр</div>
+            <div class="wiki-preview-meta">
+                <span class="wiki-article-section" id="wiki-preview-section">${this._esc((section && section.title) || 'Без раздела')}</span>
+                <span class="wiki-preview-meta-note">Как статья будет выглядеть после сохранения</span>
+            </div>
+            <div class="wiki-preview-title" id="wiki-preview-title">${this._esc(draft.title || 'Новая статья')}</div>
+            <div class="wiki-preview-summary" id="wiki-preview-summary">${this._esc(draft.summary || 'Добавьте короткое описание, чтобы статья лучше находилась через поиск.')}</div>
+            <div class="wiki-article-tags wiki-preview-tags" id="wiki-preview-tags">${this._formatTags(draft.tags)}</div>
+            <div class="wiki-preview-body" id="wiki-preview-body">${this._renderBodyPreview(draft.body || '')}</div>
+        `;
+    },
+
+    _splitImportIntoArticles(rawTitle, rawBody, sectionId) {
+        const titlePrefix = String(rawTitle || '').trim();
+        const body = String(rawBody || '').replace(/\r/g, '');
+        const matches = [...body.matchAll(/^#{1,2}\s+(.+)$/gm)];
+        if (!matches.length) return [];
+
+        const segments = matches.map((match, index) => {
+            const heading = String(match[1] || '').trim();
+            const start = match.index + match[0].length;
+            const end = index < matches.length - 1 ? matches[index + 1].index : body.length;
+            const content = body.slice(start, end).trim();
+            return {
+                title: titlePrefix ? `${titlePrefix} — ${heading}` : heading,
+                body: content,
+                section_id: sectionId,
+            };
+        }).filter(segment => segment.title && segment.body);
+
+        return segments.map((segment, index) => ({
+            id: this._uid('article'),
+            section_id: segment.section_id || this._ensureDraftsSection(),
+            title: segment.title,
+            summary: this._excerpt(segment.body, 160),
+            body: segment.body,
+            tags: ['notion', 'импорт'],
+            sort_index: ((this.state.articles || []).reduce((acc, item) => Math.max(acc, Number(item.sort_index) || 0), 0) || 0) + ((index + 1) * 10),
+            updated_at: this._nowIso(),
+            updated_by: this._currentAuthor(),
+        }));
+    },
+
     _formatTags(tags) {
         return (tags || []).map(tag => `<span class="wiki-tag">#${this._esc(tag)}</span>`).join('');
     },
@@ -302,7 +423,8 @@ const Wiki = {
                     <textarea id="wiki-import-body" rows="10" placeholder="Вставьте сюда сырой текст из Notion. Потом его можно спокойно отредактировать и разложить по разделам."></textarea>
                 </div>
                 <div class="flex gap-8">
-                    <button class="btn btn-success" onclick="Wiki.applyImportText()">Добавить в базу знаний</button>
+                    <button class="btn btn-success" onclick="Wiki.applyImportText(false)">Добавить как одну статью</button>
+                    <button class="btn btn-outline" onclick="Wiki.applyImportText(true)">Разбить по # заголовкам</button>
                 </div>
             </div>
 
@@ -392,6 +514,13 @@ const Wiki = {
 
     _renderEditor(article) {
         const section = this._getSection(article.section_id);
+        const draft = {
+            title: article.title || '',
+            section_id: section ? section.id : article.section_id,
+            summary: article.summary || '',
+            tags: article.tags || [],
+            body: article.body || '',
+        };
         return `
             <div class="card-header">
                 <div>
@@ -405,34 +534,42 @@ const Wiki = {
                     <button class="btn btn-danger btn-sm" onclick="Wiki.deleteSelectedArticle()">Удалить</button>
                 </div>
             </div>
-            <div class="form-row">
-                <div class="form-group">
-                    <label>Заголовок</label>
-                    <input type="text" id="wiki-article-title" value="${this._esc(article.title)}" placeholder="Название статьи">
+            <div class="wiki-editor-layout">
+                <div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Заголовок</label>
+                            <input type="text" id="wiki-article-title" value="${this._esc(article.title)}" placeholder="Название статьи" oninput="Wiki.handleEditorInput()">
+                        </div>
+                        <div class="form-group">
+                            <label>Раздел</label>
+                            <select id="wiki-article-section" onchange="Wiki.handleEditorInput()">${this._renderSectionOptions(section ? section.id : '')}</select>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Кратко</label>
+                            <textarea id="wiki-article-summary" rows="3" placeholder="Короткое описание: что здесь можно узнать." oninput="Wiki.handleEditorInput()">${this._esc(article.summary || '')}</textarea>
+                        </div>
+                        <div class="form-group">
+                            <label>Теги</label>
+                            <input type="text" id="wiki-article-tags" value="${this._esc((article.tags || []).join(', '))}" placeholder="склад, резерв, логистика" oninput="Wiki.handleEditorInput()">
+                            <span class="form-hint">Через запятую. Помогают поиску.</span>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Текст статьи</label>
+                        <textarea id="wiki-article-body" rows="18" placeholder="Основной текст статьи." oninput="Wiki.handleEditorInput()">${this._esc(article.body || '')}</textarea>
+                        <span class="form-hint">Поддерживаются простые заголовки <code>#</code>, <code>##</code>, маркированные и нумерованные списки для предпросмотра.</span>
+                    </div>
+                    <div class="flex gap-8">
+                        <button class="btn btn-success" onclick="Wiki.saveSelectedArticle()">Сохранить статью</button>
+                        <button class="btn btn-outline" onclick="Wiki.createArticle('${this._esc(article.section_id)}')">+ Еще статья в этом разделе</button>
+                    </div>
                 </div>
-                <div class="form-group">
-                    <label>Раздел</label>
-                    <select id="wiki-article-section">${this._renderSectionOptions(section ? section.id : '')}</select>
+                <div class="wiki-preview-card">
+                    ${this._renderPreviewCard(draft)}
                 </div>
-            </div>
-            <div class="form-row">
-                <div class="form-group">
-                    <label>Кратко</label>
-                    <textarea id="wiki-article-summary" rows="3" placeholder="Короткое описание: что здесь можно узнать.">${this._esc(article.summary || '')}</textarea>
-                </div>
-                <div class="form-group">
-                    <label>Теги</label>
-                    <input type="text" id="wiki-article-tags" value="${this._esc((article.tags || []).join(', '))}" placeholder="склад, резерв, логистика">
-                    <span class="form-hint">Через запятую. Помогают поиску.</span>
-                </div>
-            </div>
-            <div class="form-group">
-                <label>Текст статьи</label>
-                <textarea id="wiki-article-body" rows="18" placeholder="Основной текст статьи.">${this._esc(article.body || '')}</textarea>
-            </div>
-            <div class="flex gap-8">
-                <button class="btn btn-success" onclick="Wiki.saveSelectedArticle()">Сохранить статью</button>
-                <button class="btn btn-outline" onclick="Wiki.createArticle('${this._esc(article.section_id)}')">+ Еще статья в этом разделе</button>
             </div>
         `;
     },
@@ -541,19 +678,16 @@ const Wiki = {
     async saveSelectedArticle() {
         const article = this._getArticle(this.selectedArticleId);
         if (!article) return;
-        const title = (document.getElementById('wiki-article-title') || {}).value || '';
-        if (!title.trim()) {
+        const draft = this._getEditorDraft(article);
+        if (!draft.title.trim()) {
             App.toast('Укажите заголовок статьи');
             return;
         }
-        article.title = title.trim();
-        article.section_id = ((document.getElementById('wiki-article-section') || {}).value || article.section_id);
-        article.summary = (((document.getElementById('wiki-article-summary') || {}).value) || '').trim();
-        article.body = (((document.getElementById('wiki-article-body') || {}).value) || '').trim();
-        article.tags = String(((document.getElementById('wiki-article-tags') || {}).value) || '')
-            .split(',')
-            .map(tag => tag.trim())
-            .filter(Boolean);
+        article.title = draft.title;
+        article.section_id = draft.section_id || article.section_id;
+        article.summary = draft.summary;
+        article.body = draft.body;
+        article.tags = draft.tags;
         article.updated_at = this._nowIso();
         article.updated_by = this._currentAuthor();
         await this.persist();
@@ -609,13 +743,25 @@ const Wiki = {
         this.render();
     },
 
-    async applyImportText() {
+    async applyImportText(splitByHeadings = false) {
         const title = (((document.getElementById('wiki-import-title') || {}).value) || '').trim();
         const body = (((document.getElementById('wiki-import-body') || {}).value) || '').trim();
         const sectionId = (((document.getElementById('wiki-import-section') || {}).value) || 'drafts').trim();
         if (!body) {
             App.toast('Вставьте текст для переноса');
             return;
+        }
+        if (splitByHeadings) {
+            const articles = this._splitImportIntoArticles(title, body, sectionId);
+            if (articles.length >= 2) {
+                this.state.articles.unshift(...articles);
+                this.selectedArticleId = articles[0].id;
+                this.importOpen = false;
+                await this.persist();
+                this.render();
+                App.toast(`Импортировано ${articles.length} статей по заголовкам`);
+                return;
+            }
         }
         const article = {
             id: this._uid('article'),
@@ -634,6 +780,24 @@ const Wiki = {
         await this.persist();
         this.render();
         App.toast('Черновик добавлен в базу знаний');
+    },
+
+    handleEditorInput() {
+        const draft = this._getEditorDraft();
+        const titleEl = document.getElementById('wiki-preview-title');
+        const summaryEl = document.getElementById('wiki-preview-summary');
+        const tagsEl = document.getElementById('wiki-preview-tags');
+        const bodyEl = document.getElementById('wiki-preview-body');
+        const sectionEl = document.getElementById('wiki-preview-section');
+        const section = this._getSection(draft.section_id);
+
+        if (titleEl) titleEl.textContent = draft.title || 'Новая статья';
+        if (summaryEl) {
+            summaryEl.textContent = draft.summary || 'Добавьте короткое описание, чтобы статья лучше находилась через поиск.';
+        }
+        if (tagsEl) tagsEl.innerHTML = this._formatTags(draft.tags);
+        if (bodyEl) bodyEl.innerHTML = this._renderBodyPreview(draft.body || '');
+        if (sectionEl) sectionEl.textContent = (section && section.title) || 'Без раздела';
     },
 
     exportJson() {
