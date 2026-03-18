@@ -279,12 +279,12 @@ const Marketplaces = {
     },
 
     addHwItem() {
-        this._hwItems.push({ source: 'catalog', blank_id: null, wh_id: null, qty: 1, name: '', cost_per_unit: 0, assembly_speed: 0 });
+        this._hwItems.push({ source: 'catalog', blank_id: null, wh_id: null, warehouse_sku: '', photo_thumbnail: '', qty: 1, name: '', cost_per_unit: 0, assembly_speed: 0 });
         this.renderFormItems();
     },
 
     addPkgItem() {
-        this._pkgItems.push({ source: 'catalog', blank_id: null, wh_id: null, qty: 1, name: '', cost_per_unit: 0, assembly_speed: 0 });
+        this._pkgItems.push({ source: 'catalog', blank_id: null, wh_id: null, warehouse_sku: '', photo_thumbnail: '', qty: 1, name: '', cost_per_unit: 0, assembly_speed: 0 });
         this.renderFormItems();
     },
 
@@ -358,6 +358,108 @@ const Marketplaces = {
         });
     },
 
+    _buildPickerMetaLine(sku, parts) {
+        const normalizedSku = String(sku || '').trim() || 'без артикула';
+        return [normalizedSku, ...(parts || []).filter(Boolean)].join(' · ');
+    },
+
+    _buildMarketplacePickerData(type) {
+        const isPackaging = type === 'pkg';
+        const catalog = isPackaging ? this._pkgCatalog : this._hwCatalog;
+        const warehouseItems = isPackaging ? this._allWarehousePkg : this._allWarehouseHw;
+        const defaultCategory = isPackaging ? 'packaging' : 'other';
+        const linkedWarehouse = new Map(
+            warehouseItems
+                .filter(item => Number(item.id) > 0)
+                .map(item => [Number(item.id), item])
+        );
+
+        const grouped = {
+            catalog: {
+                label: 'Каталог',
+                icon: '📘',
+                color: 'rgba(59, 130, 246, 0.12)',
+                textColor: '#1d4ed8',
+                items: [],
+            },
+            warehouse: {
+                label: 'Склад',
+                icon: '📦',
+                color: 'rgba(16, 185, 129, 0.16)',
+                textColor: '#047857',
+                items: [],
+            },
+        };
+
+        catalog.forEach(blank => {
+            const linked = linkedWarehouse.get(Number(blank.warehouse_item_id || 0)) || null;
+            const sellPrice = parseFloat(blank.sell_price) || 0;
+            const cnyRate = typeof ChinaCatalog !== 'undefined' && ChinaCatalog && ChinaCatalog._cnyRate
+                ? ChinaCatalog._cnyRate
+                : 12.5;
+            const baseCost = isPackaging
+                ? (parseFloat(blank.price_per_unit) || 0) + (parseFloat(blank.delivery_per_unit) || 0)
+                : ((parseFloat(blank.price_rub) || 0) > 0
+                    ? (parseFloat(blank.price_rub) || 0)
+                    : round2((parseFloat(blank.price_cny) || 0) * cnyRate + (parseFloat(blank.delivery_per_unit) || 0)));
+            const stockQty = linked ? (linked.available_qty ?? linked.qty ?? null) : null;
+            const stockText = stockQty == null ? '' : (stockQty > 0 ? `${stockQty} ${linked?.unit || 'шт'} на складе` : 'нет на складе');
+            const priceText = sellPrice > 0
+                ? `прайс ${formatRub(sellPrice)}`
+                : `${formatRub(baseCost)} себес`;
+            grouped.catalog.items.push({
+                id: `catalog:${blank.id}`,
+                category: linked?.category || defaultCategory,
+                name: blank.name || '',
+                sku: linked?.sku || blank.sku || blank.warehouse_sku || '',
+                size: linked?.size || blank.size || '',
+                color: linked?.color || blank.color || '',
+                qty: linked?.qty || 0,
+                available_qty: stockQty,
+                price_per_unit: baseCost || 0,
+                unit: linked?.unit || 'шт',
+                photo_thumbnail: linked?.photo_thumbnail || linked?.photo_url || blank.photo_url || blank._whPhoto || '',
+                photo_url: linked?.photo_url || blank.photo_url || '',
+                meta_line: this._buildPickerMetaLine(linked?.sku || blank.sku || blank.warehouse_sku || '', [stockText, priceText, 'каталог']),
+            });
+        });
+
+        warehouseItems.forEach(item => {
+            const stockQty = item.available_qty ?? item.qty ?? 0;
+            grouped.warehouse.items.push({
+                id: `warehouse:${item.id}`,
+                category: item.category || defaultCategory,
+                name: item.name || '',
+                sku: item.sku || '',
+                size: item.size || '',
+                color: item.color || '',
+                qty: item.qty || 0,
+                available_qty: stockQty,
+                price_per_unit: item.price_per_unit || 0,
+                unit: item.unit || 'шт',
+                photo_thumbnail: item.photo_thumbnail || item.photo_url || '',
+                photo_url: item.photo_url || '',
+                meta_line: this._buildPickerMetaLine(item.sku || '', [
+                    stockQty > 0 ? `${stockQty} ${item.unit || 'шт'}` : 'нет',
+                    item.price_per_unit > 0 ? `${formatRub(item.price_per_unit)}/шт` : '',
+                    'склад',
+                ]),
+            });
+        });
+
+        Object.keys(grouped).forEach(key => {
+            if (!grouped[key].items.length) delete grouped[key];
+        });
+        return grouped;
+    },
+
+    _getMarketplacePickerSelectedId(item) {
+        if (!item) return null;
+        if (item.source === 'warehouse' && item.wh_id) return `warehouse:${item.wh_id}`;
+        if (item.blank_id) return `catalog:${item.blank_id}`;
+        return null;
+    },
+
     // ==========================================
     // RENDER FORM ITEMS
     // ==========================================
@@ -384,17 +486,7 @@ const Marketplaces = {
         `).join('');
 
         // Hardware — all warehouse hw + catalog + custom option
-        const hwList = [];
-        // Catalog items
-        this._hwCatalog.forEach(b => {
-            const sell = parseFloat(b.sell_price) || 0;
-            const detail = sell > 0
-                ? `прайс ${formatRub(sell)} · каталог`
-                : `${formatRub(b.price_rub || 0)} себес · каталог`;
-            hwList.push({ id: b.id, name: b.name, detail, photo: b.photo_url || b._whPhoto || '', _type: 'catalog' });
-        });
-        // Warehouse items
-        this._allWarehouseHw.forEach(w => hwList.push({ id: 10000 + w.id, name: w.name + (w.size ? ' ' + w.size : '') + (w.color ? ' ' + w.color : ''), detail: formatRub(w.price_per_unit || 0) + '/шт · склад', photo: w.photo_thumbnail || w.photo_url || '', _type: 'warehouse', _whId: w.id }));
+        const hwPickerData = this._buildMarketplacePickerData('hw');
 
         document.getElementById('mp-hw-items').innerHTML = this._hwItems.map((item, i) => {
             const isCustom = item.source === 'custom';
@@ -405,7 +497,7 @@ const Marketplaces = {
                     <div class="form-group" style="flex:2;margin:0">
                         ${isCustom
                             ? `<input type="text" value="${this._esc(item.name)}" placeholder="Название" oninput="Marketplaces._hwItems[${i}].name=this.value; Marketplaces.recalcSet()">`
-                            : this._renderSearchableSelect('mp-hw-'+i, hwList, item.source === 'warehouse' ? 10000 + (item.wh_id||0) : item.blank_id, 'Поиск фурнитуры...', 'Marketplaces._selectHw('+i+',')
+                            : Warehouse.buildImagePicker(`mphw-picker-${i}`, hwPickerData, this._getMarketplacePickerSelectedId(item), 'Marketplaces._selectHw', null, { searchPlaceholder: 'Поиск по названию или артикулу...' })
                         }
                     </div>
                     ${isCustom ? `
@@ -429,15 +521,7 @@ const Marketplaces = {
         }).join('');
 
         // Packaging — all warehouse pkg + catalog + custom
-        const pkgList = [];
-        this._pkgCatalog.forEach(b => {
-            const sell = parseFloat(b.sell_price) || 0;
-            const detail = sell > 0
-                ? `прайс ${formatRub(sell)} · каталог`
-                : `${formatRub((b.price_per_unit || 0) + (b.delivery_per_unit || 0))} себес · каталог`;
-            pkgList.push({ id: b.id, name: b.name, detail, photo: b.photo_url || '', _type: 'catalog' });
-        });
-        this._allWarehousePkg.forEach(w => pkgList.push({ id: 10000 + w.id, name: w.name + (w.size ? ' ' + w.size : ''), detail: formatRub(w.price_per_unit || 0) + '/шт · склад', photo: w.photo_thumbnail || w.photo_url || '', _type: 'warehouse', _whId: w.id }));
+        const pkgPickerData = this._buildMarketplacePickerData('pkg');
 
         document.getElementById('mp-pkg-items').innerHTML = this._pkgItems.map((item, i) => {
             const isCustom = item.source === 'custom';
@@ -448,7 +532,7 @@ const Marketplaces = {
                     <div class="form-group" style="flex:2;margin:0">
                         ${isCustom
                             ? `<input type="text" value="${this._esc(item.name)}" placeholder="Название" oninput="Marketplaces._pkgItems[${i}].name=this.value; Marketplaces.recalcSet()">`
-                            : this._renderSearchableSelect('mp-pkg-'+i, pkgList, item.source === 'warehouse' ? 10000 + (item.wh_id||0) : item.blank_id, 'Поиск упаковки...', 'Marketplaces._selectPkg('+i+',')
+                            : Warehouse.buildImagePicker(`mppkg-picker-${i}`, pkgPickerData, this._getMarketplacePickerSelectedId(item), 'Marketplaces._selectPkg', null, { searchPlaceholder: 'Поиск по названию или артикулу...' })
                         }
                     </div>
                     ${isCustom ? `
@@ -488,15 +572,17 @@ const Marketplaces = {
 
     _selectHw(idx, listId) {
         const item = this._hwItems[idx];
-        const numericId = Number(listId);
-        if (numericId >= 10000) {
+        const rawId = String(listId || '');
+        if (rawId.startsWith('warehouse:')) {
             // Warehouse item
-            const whId = numericId - 10000;
+            const whId = Number(rawId.split(':')[1] || 0);
             const wh = this._allWarehouseHw.find(w => Number(w.id) === whId);
             if (wh) {
                 item.source = 'warehouse';
                 item.wh_id = wh.id;
                 item.blank_id = null;
+                item.warehouse_sku = wh.sku || '';
+                item.photo_thumbnail = wh.photo_thumbnail || wh.photo_url || '';
                 item.name = wh.name + (wh.size ? ' ' + wh.size : '') + (wh.color ? ' ' + wh.color : '');
                 item.cost_per_unit = wh.price_per_unit || 0;
                 const linkedBlank = this._hwCatalog.find(b => Number(b.warehouse_item_id) === Number(wh.id));
@@ -504,11 +590,15 @@ const Marketplaces = {
             }
         } else {
             // Catalog item
-            const hw = this._hwCatalog.find(b => Number(b.id) === numericId);
+            const blankId = rawId.startsWith('catalog:') ? Number(rawId.split(':')[1] || 0) : Number(rawId);
+            const hw = this._hwCatalog.find(b => Number(b.id) === blankId);
             if (hw) {
                 item.source = 'catalog';
                 item.blank_id = hw.id;
                 item.wh_id = null;
+                const linkedWarehouse = this._allWarehouseHw.find(w => Number(w.id) === Number(hw.warehouse_item_id || 0));
+                item.warehouse_sku = linkedWarehouse?.sku || hw.sku || '';
+                item.photo_thumbnail = linkedWarehouse?.photo_thumbnail || linkedWarehouse?.photo_url || hw.photo_url || hw._whPhoto || '';
                 item.name = hw.name;
                 item.cost_per_unit = 0; // will be calculated
                 item.assembly_speed = hw.assembly_speed || 0;
@@ -520,25 +610,31 @@ const Marketplaces = {
 
     _selectPkg(idx, listId) {
         const item = this._pkgItems[idx];
-        const numericId = Number(listId);
-        if (numericId >= 10000) {
-            const whId = numericId - 10000;
+        const rawId = String(listId || '');
+        if (rawId.startsWith('warehouse:')) {
+            const whId = Number(rawId.split(':')[1] || 0);
             const wh = this._allWarehousePkg.find(w => Number(w.id) === whId);
             if (wh) {
                 item.source = 'warehouse';
                 item.wh_id = wh.id;
                 item.blank_id = null;
+                item.warehouse_sku = wh.sku || '';
+                item.photo_thumbnail = wh.photo_thumbnail || wh.photo_url || '';
                 item.name = wh.name + (wh.size ? ' ' + wh.size : '');
                 item.cost_per_unit = wh.price_per_unit || 0;
                 const linkedBlank = this._pkgCatalog.find(b => Number(b.warehouse_item_id) === Number(wh.id));
                 item.assembly_speed = linkedBlank?.assembly_speed || 0;
             }
         } else {
-            const pkg = this._pkgCatalog.find(b => Number(b.id) === numericId);
+            const blankId = rawId.startsWith('catalog:') ? Number(rawId.split(':')[1] || 0) : Number(rawId);
+            const pkg = this._pkgCatalog.find(b => Number(b.id) === blankId);
             if (pkg) {
                 item.source = 'catalog';
                 item.blank_id = pkg.id;
                 item.wh_id = null;
+                const linkedWarehouse = this._allWarehousePkg.find(w => Number(w.id) === Number(pkg.warehouse_item_id || 0));
+                item.warehouse_sku = linkedWarehouse?.sku || pkg.sku || '';
+                item.photo_thumbnail = linkedWarehouse?.photo_thumbnail || linkedWarehouse?.photo_url || pkg.photo_url || '';
                 item.name = pkg.name;
                 item.cost_per_unit = (pkg.price_per_unit || 0) + (pkg.delivery_per_unit || 0);
                 item.assembly_speed = pkg.assembly_speed || 0;
@@ -550,13 +646,23 @@ const Marketplaces = {
 
     _setHwSource(idx, source) {
         this._hwItems[idx].source = source;
-        if (source === 'custom') { this._hwItems[idx].blank_id = null; this._hwItems[idx].wh_id = null; }
+        if (source === 'custom') {
+            this._hwItems[idx].blank_id = null;
+            this._hwItems[idx].wh_id = null;
+            this._hwItems[idx].warehouse_sku = '';
+            this._hwItems[idx].photo_thumbnail = '';
+        }
         this.renderFormItems();
     },
 
     _setPkgSource(idx, source) {
         this._pkgItems[idx].source = source;
-        if (source === 'custom') { this._pkgItems[idx].blank_id = null; this._pkgItems[idx].wh_id = null; }
+        if (source === 'custom') {
+            this._pkgItems[idx].blank_id = null;
+            this._pkgItems[idx].wh_id = null;
+            this._pkgItems[idx].warehouse_sku = '';
+            this._pkgItems[idx].photo_thumbnail = '';
+        }
         this.renderFormItems();
     },
 

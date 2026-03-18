@@ -3708,13 +3708,30 @@ const Warehouse = {
         return html;
     },
 
-    // Custom image-based picker for calculator
+    _pickerIdsEqual(left, right) {
+        return String(left ?? '') === String(right ?? '');
+    },
+
+    _pickerMetaText(item) {
+        if (!item) return '';
+        if (item.meta_line) return String(item.meta_line);
+        const stock = item.available_qty == null
+            ? ''
+            : (item.available_qty > 0 ? `${item.available_qty} ${item.unit || 'шт'}` : 'нет');
+        const priceStr = item.price_per_unit > 0
+            ? `${new Intl.NumberFormat('ru-RU').format(item.price_per_unit)} \u20BD`
+            : '';
+        return [item.sku || '', stock, priceStr].filter(Boolean).join(' · ');
+    },
+
+    // Custom image-based picker for calculator and other warehouse-linked pickers.
     // onSelectFn: string like "Calculator.onHwWarehouseSelect" or "Calculator.onPkgWarehouseSelect"
     // categoryFilter: null = all, 'hardware' = exclude packaging, 'packaging' = only packaging
-    buildImagePicker(containerId, grouped, selectedId, onSelectFn, categoryFilter) {
+    buildImagePicker(containerId, grouped, selectedId, onSelectFn, categoryFilter, options = {}) {
         const cat = WAREHOUSE_CATEGORIES;
         if (!onSelectFn) onSelectFn = 'Calculator.onHwWarehouseSelect';
         const idxStr = containerId.replace(/^[a-z]+-picker-/, '');
+        const searchPlaceholder = options.searchPlaceholder || 'Поиск по названию или артикулу...';
 
         // Filter categories
         const packagingKeys = ['packaging'];
@@ -3737,12 +3754,17 @@ const Warehouse = {
             const parts = [selectedItem.name];
             if (selectedItem.size) parts.push(selectedItem.size);
             if (selectedItem.color) parts.push(selectedItem.color);
-            const catObj = cat.find(c => c.key === selectedItem.category) || cat[6];
-            const priceStr = selectedItem.price_per_unit > 0 ? (' · ' + new Intl.NumberFormat('ru-RU').format(selectedItem.price_per_unit) + ' \u20BD') : '';
-            const photoHtml = selectedItem.photo_thumbnail
-                ? `<img src="${selectedItem.photo_thumbnail}" style="width:40px;height:40px;object-fit:cover;border-radius:6px;flex-shrink:0;border:1px solid var(--border);">`
+            const selectedGroup = grouped[selectedItem.__groupKey] || {};
+            const catObj = cat.find(c => c.key === selectedItem.category) || {
+                icon: selectedGroup.icon || '📦',
+                color: selectedGroup.color || 'var(--accent-light)',
+                textColor: selectedGroup.textColor || 'var(--text)',
+            };
+            const photoSrc = selectedItem.photo_thumbnail || selectedItem.photo_url || '';
+            const photoHtml = photoSrc
+                ? `<img src="${photoSrc}" style="width:40px;height:40px;object-fit:cover;border-radius:6px;flex-shrink:0;border:1px solid var(--border);">`
                 : `<span style="width:40px;height:40px;display:flex;align-items:center;justify-content:center;background:${catObj.color};border-radius:6px;font-size:18px;flex-shrink:0;">${catObj.icon}</span>`;
-            selectedHtml = `${photoHtml}<span style="flex:1;min-width:0;"><b style="display:block;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${parts.join(' · ')}</b><span style="font-size:11px;color:var(--text-muted);">${selectedItem.sku || ''}${selectedItem.sku ? ' · ' : ''}${selectedItem.available_qty} ${selectedItem.unit}${priceStr}</span></span>`;
+            selectedHtml = `${photoHtml}<span style="flex:1;min-width:0;"><b style="display:block;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${parts.join(' · ')}</b><span style="font-size:11px;color:var(--text-muted);">${this._pickerMetaText(selectedItem)}</span></span>`;
         } else {
             selectedHtml = '<span style="color:var(--text-muted);font-size:13px;">— Выберите позицию —</span>';
         }
@@ -3752,24 +3774,28 @@ const Warehouse = {
         for (const catKey of visibleKeys) {
             const g = grouped[catKey];
             if (!g) continue;
-            const catObj = cat.find(c => c.key === catKey) || cat[6];
-            itemsHtml += `<div class="wh-picker-cat-header" style="padding:6px 10px;font-size:11px;font-weight:700;color:${catObj.textColor};background:${catObj.color};position:sticky;top:0;z-index:1;">${catObj.icon} ${g.label}</div>`;
+            const catObj = cat.find(c => c.key === catKey) || {
+                icon: g.icon || '📦',
+                color: g.color || 'var(--accent-light)',
+                textColor: g.textColor || 'var(--text)',
+            };
+            itemsHtml += `<div class="wh-picker-cat-header" style="padding:6px 10px;font-size:11px;font-weight:700;color:${catObj.textColor};background:${catObj.color};position:sticky;top:0;z-index:1;">${g.icon || catObj.icon} ${g.label || catKey}</div>`;
             g.items.forEach(item => {
                 const parts = [item.name];
                 if (item.size) parts.push(item.size);
                 if (item.color) parts.push(item.color);
                 const label = parts.join(' · ');
-                const stock = item.available_qty > 0 ? `${item.available_qty} ${item.unit}` : '<span style="color:var(--red);">нет</span>';
-                const priceStr = item.price_per_unit > 0 ? (' · ' + new Intl.NumberFormat('ru-RU').format(item.price_per_unit) + ' \u20BD') : '';
-                const photoHtml = item.photo_thumbnail
-                    ? `<img src="${item.photo_thumbnail}" style="width:48px;height:48px;object-fit:cover;border-radius:6px;flex-shrink:0;border:1px solid var(--border);">`
+                const metaText = this._pickerMetaText(item);
+                const photoSrc = item.photo_thumbnail || item.photo_url || '';
+                const photoHtml = photoSrc
+                    ? `<img src="${photoSrc}" style="width:48px;height:48px;object-fit:cover;border-radius:6px;flex-shrink:0;border:1px solid var(--border);">`
                     : `<span style="width:48px;height:48px;display:flex;align-items:center;justify-content:center;background:${catObj.color};border-radius:6px;font-size:20px;flex-shrink:0;">${catObj.icon}</span>`;
-                const isSelected = Number(item.id) === Number(selectedId) ? 'background:rgba(59,130,246,0.1);' : '';
+                const isSelected = this._pickerIdsEqual(item.id, selectedId) ? 'background:rgba(59,130,246,0.1);' : '';
                 itemsHtml += `<div class="wh-picker-item" data-id="${item.id}" style="display:flex;align-items:center;gap:10px;padding:8px 10px;cursor:pointer;border-bottom:1px solid var(--border);${isSelected}" onclick="${onSelectFn}(${idxStr}, '${item.id}')">
                     ${photoHtml}
                     <div style="flex:1;min-width:0;">
                         <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${label}</div>
-                        <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">${item.sku || ''}${item.sku ? ' · ' : ''}${stock}${priceStr}</div>
+                        <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">${metaText}</div>
                     </div>
                 </div>`;
             });
@@ -3781,7 +3807,7 @@ const Warehouse = {
                 <span style="flex-shrink:0;color:var(--text-muted);font-size:10px;">&#9662;</span>
             </div>
             <div class="wh-picker-dropdown" style="display:none;">
-                <div style="padding:6px 8px;border-bottom:1px solid var(--border);"><input type="text" class="wh-picker-search" placeholder="Поиск..." oninput="Warehouse.filterPicker('${containerId}', this.value)" style="width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:4px;font-size:13px;"></div>
+                <div style="padding:6px 8px;border-bottom:1px solid var(--border);"><input type="text" class="wh-picker-search" placeholder="${searchPlaceholder}" oninput="Warehouse.filterPicker('${containerId}', this.value)" style="width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:4px;font-size:13px;"></div>
                 <div class="wh-picker-list">${itemsHtml}</div>
             </div>
         </div>`;
@@ -3789,8 +3815,8 @@ const Warehouse = {
 
     _findInGrouped(grouped, id) {
         for (const catKey of Object.keys(grouped)) {
-            const found = grouped[catKey].items.find(i => Number(i.id) === Number(id));
-            if (found) return found;
+            const found = grouped[catKey].items.find(i => this._pickerIdsEqual(i.id, id));
+            if (found) return { ...found, __groupKey: catKey };
         }
         return null;
     },
