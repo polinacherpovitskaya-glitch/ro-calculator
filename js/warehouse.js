@@ -3678,8 +3678,8 @@ const Warehouse = {
                         color: i.color || '',
                         qty: i.qty || 0,
                         available_qty: i.available_qty || 0,
-                        price_per_unit: i.price_per_unit || 0,
-                        unit: i.unit || 'шт',
+                        price_per_unit: this.getPickerEffectivePrice(i),
+                        unit: this.getPickerUnitLabel(i),
                         photo_thumbnail: i.photo_thumbnail || '',
                     })),
                 };
@@ -3699,7 +3699,7 @@ const Warehouse = {
                 if (item.size) parts.push(item.size);
                 if (item.color) parts.push(item.color);
                 const label = parts.join(' · ');
-                const stock = item.available_qty > 0 ? `(${item.available_qty} ${item.unit})` : '(нет)';
+                const stock = item.available_qty > 0 ? `(${item.available_qty} ${this.getPickerUnitLabel(item)})` : '(нет)';
                 const sel = String(item.id) === String(selectedId) ? ' selected' : '';
                 html += `<option value="${item.id}"${sel}>${label} ${stock}</option>`;
             });
@@ -3712,15 +3712,40 @@ const Warehouse = {
         return String(left ?? '') === String(right ?? '');
     },
 
+    getPickerUnitLabel(item) {
+        const unit = String(item?.unit || '').trim();
+        return unit || 'шт';
+    },
+
+    getPickerEffectivePrice(item) {
+        const rawPrice = parseFloat(item?.price_per_unit) || 0;
+        const unit = this._normStr(item?.unit || '');
+        const category = this._normStr(item?.category || '');
+        const sku = this._normStr(item?.sku || '');
+
+        // Some legacy warehouse cord rows were saved as RUB/m while qty is tracked in cm.
+        // In pickers and downstream calculations we want the real per-cm price.
+        if (unit === 'см' && rawPrice >= 10 && (category === 'cords' || sku.startsWith('msn-'))) {
+            return Math.round((rawPrice / 100) * 100) / 100;
+        }
+
+        return Math.round(rawPrice * 100) / 100;
+    },
+
+    getPickerPriceLabel(item) {
+        const effectivePrice = this.getPickerEffectivePrice(item);
+        if (!(effectivePrice > 0)) return '';
+        const formatted = new Intl.NumberFormat('ru-RU').format(effectivePrice);
+        return `${formatted} ₽/${this.getPickerUnitLabel(item)}`;
+    },
+
     _pickerMetaText(item) {
         if (!item) return '';
         if (item.meta_line) return String(item.meta_line);
         const stock = item.available_qty == null
             ? ''
-            : (item.available_qty > 0 ? `${item.available_qty} ${item.unit || 'шт'}` : 'нет');
-        const priceStr = item.price_per_unit > 0
-            ? `${new Intl.NumberFormat('ru-RU').format(item.price_per_unit)} \u20BD`
-            : '';
+            : (item.available_qty > 0 ? `${item.available_qty} ${this.getPickerUnitLabel(item)}` : 'нет');
+        const priceStr = this.getPickerPriceLabel(item);
         return [item.sku || '', stock, priceStr].filter(Boolean).join(' · ');
     },
 
@@ -3779,7 +3804,7 @@ const Warehouse = {
                 color: g.color || 'var(--accent-light)',
                 textColor: g.textColor || 'var(--text)',
             };
-            itemsHtml += `<div class="wh-picker-cat-header" style="padding:6px 10px;font-size:11px;font-weight:700;color:${catObj.textColor};background:${catObj.color};position:sticky;top:0;z-index:1;">${g.icon || catObj.icon} ${g.label || catKey}</div>`;
+            itemsHtml += `<div class="wh-picker-cat-header" data-group-key="${this.esc(catKey)}" style="padding:6px 10px;font-size:11px;font-weight:700;color:${catObj.textColor};background:${catObj.color};">${g.icon || catObj.icon} ${g.label || catKey}</div>`;
             g.items.forEach(item => {
                 const parts = [item.name];
                 if (item.size) parts.push(item.size);
@@ -3790,14 +3815,14 @@ const Warehouse = {
                 const photoHtml = photoSrc
                     ? `<img src="${photoSrc}" style="width:48px;height:48px;object-fit:cover;border-radius:6px;flex-shrink:0;border:1px solid var(--border);">`
                     : `<span style="width:48px;height:48px;display:flex;align-items:center;justify-content:center;background:${catObj.color};border-radius:6px;font-size:20px;flex-shrink:0;">${catObj.icon}</span>`;
-                const isSelected = this._pickerIdsEqual(item.id, selectedId) ? 'background:rgba(59,130,246,0.1);' : '';
-                itemsHtml += `<div class="wh-picker-item" data-id="${item.id}" style="display:flex;align-items:center;gap:10px;padding:8px 10px;cursor:pointer;border-bottom:1px solid var(--border);${isSelected}" onclick="${onSelectFn}(${idxStr}, '${item.id}')">
+                const background = this._pickerIdsEqual(item.id, selectedId) ? 'rgba(59,130,246,0.1)' : 'transparent';
+                itemsHtml += `<button type="button" class="wh-picker-item" data-id="${this.esc(item.id)}" data-group-key="${this.esc(catKey)}" data-picker-container="${this.esc(containerId)}" data-select-fn="${this.esc(onSelectFn)}" data-select-idx="${this.esc(idxStr)}" data-pick-value="${this.esc(item.id)}" style="display:flex;align-items:center;gap:10px;width:100%;padding:8px 10px;cursor:pointer;border:0;border-bottom:1px solid var(--border);background:${background};text-align:left;" onmousedown="event.preventDefault()" onclick="Warehouse.handlePickerSelect(this)">
                     ${photoHtml}
                     <div style="flex:1;min-width:0;">
                         <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${label}</div>
                         <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">${metaText}</div>
                     </div>
-                </div>`;
+                </button>`;
             });
         }
 
@@ -3834,7 +3859,7 @@ const Warehouse = {
             if (searchInput) { searchInput.value = ''; searchInput.focus(); }
             // Show all items
             dd.querySelectorAll('.wh-picker-item').forEach(i => i.style.display = '');
-            dd.querySelectorAll('.wh-picker-item').forEach(i => i.previousElementSibling && i.previousElementSibling.classList && (i.previousElementSibling.style.display = ''));
+            this._syncPickerHeaders(el);
         }
     },
 
@@ -3847,6 +3872,35 @@ const Warehouse = {
             const text = item.textContent.toLowerCase();
             item.style.display = q === '' || text.includes(q) ? '' : 'none';
         });
+        this._syncPickerHeaders(el);
+    },
+
+    _syncPickerHeaders(el) {
+        if (!el) return;
+        const items = Array.from(el.querySelectorAll('.wh-picker-item'));
+        const headers = Array.from(el.querySelectorAll('.wh-picker-cat-header'));
+        headers.forEach(header => {
+            const groupKey = header.dataset?.groupKey || '';
+            const hasVisibleItems = items.some(item => (item.dataset?.groupKey || '') === groupKey && item.style.display !== 'none');
+            header.style.display = hasVisibleItems ? '' : 'none';
+        });
+    },
+
+    handlePickerSelect(buttonEl) {
+        const dataset = buttonEl?.dataset || {};
+        const fnName = dataset.selectFn || '';
+        const pickValue = dataset.pickValue || '';
+        const idxRaw = dataset.selectIdx || '';
+
+        document.querySelectorAll('.wh-picker-dropdown').forEach(d => d.style.display = 'none');
+
+        const targetFn = String(fnName)
+            .split('.')
+            .reduce((acc, key) => (acc && acc[key] ? acc[key] : null), globalThis);
+        if (typeof targetFn !== 'function') return;
+
+        const numericIdx = Number(idxRaw);
+        targetFn(Number.isNaN(numericIdx) ? idxRaw : numericIdx, pickValue);
     },
 };
 

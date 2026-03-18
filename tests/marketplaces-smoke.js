@@ -503,13 +503,82 @@ async function main() {
 
     const pickerHost = context.document.getElementById('picker-filter-host');
     const filteredItems = [
-        { textContent: 'Карабин черный 5 см CRB-501 склад', style: {} },
-        { textContent: 'Цепочка белая 10 см CHN-100 склад', style: {} },
+        { textContent: 'Карабин черный 5 см CRB-501 склад', style: {}, dataset: { groupKey: 'warehouse' } },
+        { textContent: 'Цепочка белая 10 см CHN-100 склад', style: {}, dataset: { groupKey: 'warehouse' } },
     ];
-    pickerHost.querySelectorAll = (selector) => selector === '.wh-picker-item' ? filteredItems : [];
+    const filteredHeaders = [
+        { style: {}, dataset: { groupKey: 'catalog' } },
+        { style: {}, dataset: { groupKey: 'warehouse' } },
+    ];
+    pickerHost.querySelectorAll = (selector) => {
+        if (selector === '.wh-picker-item') return filteredItems;
+        if (selector === '.wh-picker-cat-header') return filteredHeaders;
+        return [];
+    };
     vm.runInContext(`Warehouse.filterPicker('picker-filter-host', 'CRB-501')`, context);
     assert.equal(filteredItems[0].style.display, '');
     assert.equal(filteredItems[1].style.display, 'none');
+    assert.equal(filteredHeaders[0].style.display, 'none');
+    assert.equal(filteredHeaders[1].style.display, '');
+
+    vm.runInContext(`
+        __selectedPickerValue = null;
+        TestPicker = {
+            select(idx, value) {
+                __selectedPickerValue = { idx, value };
+            }
+        };
+    `, context);
+    context.__pickerButton = {
+        dataset: {
+            pickerContainer: 'picker-filter-host',
+            selectFn: 'TestPicker.select',
+            selectIdx: '4',
+            pickValue: 'warehouse:900',
+        },
+    };
+    vm.runInContext(`Warehouse.handlePickerSelect(__pickerButton)`, context);
+    const selectedPickerValue = JSON.parse(vm.runInContext(`JSON.stringify(__selectedPickerValue)`, context));
+    assert.deepEqual(selectedPickerValue, { idx: 4, value: 'warehouse:900' });
+
+    vm.runInContext(`
+        Marketplaces._allWarehouseHw = [{
+            id: 900,
+            category: 'cords',
+            name: 'Миланский шнур',
+            sku: 'MSN-LV',
+            color: 'фиолетовый',
+            qty: 3800,
+            available_qty: 3800,
+            unit: 'см',
+            price_per_unit: 70,
+            photo_thumbnail: 'https://example.com/cord.jpg',
+        }];
+        Marketplaces._hwCatalog = [];
+        Marketplaces._hwItems = [{
+            source: 'warehouse',
+            wh_id: 900,
+            warehouse_sku: 'MSN-LV',
+            qty: 40,
+            unit: 'см',
+            name: '',
+            cost_per_unit: 70,
+            assembly_speed: 0,
+        }];
+        Marketplaces._pkgItems = [];
+        Marketplaces.renderColorVariants = () => {};
+        Marketplaces.recalcSet = () => {};
+        Marketplaces.renderFormItems();
+    `, context);
+
+    const cordState = JSON.parse(vm.runInContext(`JSON.stringify(Marketplaces._hwItems[0])`, context));
+    const cordHtml = String(context.document.getElementById('mp-hw-items').innerHTML || '');
+    assert.equal(cordState.unit, 'см');
+    assert.equal(cordState.cost_per_unit, 0.7);
+    assert.match(cordHtml, /MSN-LV/);
+    assert.match(cordHtml, /0,7 ₽\/см/);
+    assert.match(cordHtml, /Кол-во \(см\)/);
+    assert.doesNotMatch(cordHtml, /70 ₽\/шт/);
 
     console.log('marketplaces smoke checks passed');
 }

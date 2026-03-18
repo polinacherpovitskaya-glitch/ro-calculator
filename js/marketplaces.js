@@ -280,12 +280,12 @@ const Marketplaces = {
     },
 
     addHwItem() {
-        this._hwItems.push({ source: 'catalog', blank_id: null, wh_id: null, warehouse_sku: '', photo_thumbnail: '', qty: 1, name: '', cost_per_unit: 0, assembly_speed: 0 });
+        this._hwItems.push({ source: 'catalog', blank_id: null, wh_id: null, warehouse_sku: '', photo_thumbnail: '', qty: 1, unit: 'шт', name: '', cost_per_unit: 0, assembly_speed: 0 });
         this.renderFormItems();
     },
 
     addPkgItem() {
-        this._pkgItems.push({ source: 'catalog', blank_id: null, wh_id: null, warehouse_sku: '', photo_thumbnail: '', qty: 1, name: '', cost_per_unit: 0, assembly_speed: 0 });
+        this._pkgItems.push({ source: 'catalog', blank_id: null, wh_id: null, warehouse_sku: '', photo_thumbnail: '', qty: 1, unit: 'шт', name: '', cost_per_unit: 0, assembly_speed: 0 });
         this.renderFormItems();
     },
 
@@ -364,6 +364,26 @@ const Marketplaces = {
         return [normalizedSku, ...(parts || []).filter(Boolean)].join(' · ');
     },
 
+    _getPartUnitLabel(item) {
+        if (typeof Warehouse !== 'undefined' && Warehouse && typeof Warehouse.getPickerUnitLabel === 'function') {
+            return Warehouse.getPickerUnitLabel(item);
+        }
+        return String(item?.unit || '').trim() || 'шт';
+    },
+
+    _getPartUnitPrice(item) {
+        if (typeof Warehouse !== 'undefined' && Warehouse && typeof Warehouse.getPickerEffectivePrice === 'function') {
+            return Warehouse.getPickerEffectivePrice(item);
+        }
+        return round2(parseFloat(item?.price_per_unit) || 0);
+    },
+
+    _getPartPriceHint(item) {
+        const unitPrice = round2(parseFloat(item?.cost_per_unit) || 0);
+        if (!(unitPrice > 0)) return '';
+        return `${formatRub(unitPrice)}/${this._getPartUnitLabel(item)}`;
+    },
+
     _buildMarketplacePickerData(type) {
         const isPackaging = type === 'pkg';
         const catalog = isPackaging ? this._pkgCatalog : this._hwCatalog;
@@ -404,7 +424,7 @@ const Marketplaces = {
                     ? (parseFloat(blank.price_rub) || 0)
                     : round2((parseFloat(blank.price_cny) || 0) * cnyRate + (parseFloat(blank.delivery_per_unit) || 0)));
             const stockQty = linked ? (linked.available_qty ?? linked.qty ?? null) : null;
-            const stockText = stockQty == null ? '' : (stockQty > 0 ? `${stockQty} ${linked?.unit || 'шт'} на складе` : 'нет на складе');
+            const stockText = stockQty == null ? '' : (stockQty > 0 ? `${stockQty} ${this._getPartUnitLabel(linked || blank)} на складе` : 'нет на складе');
             const priceText = sellPrice > 0
                 ? `прайс ${formatRub(sellPrice)}`
                 : `${formatRub(baseCost)} себес`;
@@ -418,7 +438,7 @@ const Marketplaces = {
                 qty: linked?.qty || 0,
                 available_qty: stockQty,
                 price_per_unit: baseCost || 0,
-                unit: linked?.unit || 'шт',
+                unit: this._getPartUnitLabel(linked || blank),
                 photo_thumbnail: linked?.photo_thumbnail || linked?.photo_url || blank.photo_url || blank._whPhoto || '',
                 photo_url: linked?.photo_url || blank.photo_url || '',
                 meta_line: this._buildPickerMetaLine(linked?.sku || blank.sku || blank.warehouse_sku || '', [stockText, priceText, 'каталог']),
@@ -436,13 +456,13 @@ const Marketplaces = {
                 color: item.color || '',
                 qty: item.qty || 0,
                 available_qty: stockQty,
-                price_per_unit: item.price_per_unit || 0,
-                unit: item.unit || 'шт',
+                price_per_unit: this._getPartUnitPrice(item),
+                unit: this._getPartUnitLabel(item),
                 photo_thumbnail: item.photo_thumbnail || item.photo_url || '',
                 photo_url: item.photo_url || '',
                 meta_line: this._buildPickerMetaLine(item.sku || '', [
-                    stockQty > 0 ? `${stockQty} ${item.unit || 'шт'}` : 'нет',
-                    item.price_per_unit > 0 ? `${formatRub(item.price_per_unit)}/шт` : '',
+                    stockQty > 0 ? `${stockQty} ${this._getPartUnitLabel(item)}` : 'нет',
+                    this._getPartUnitPrice(item) > 0 ? `${formatRub(this._getPartUnitPrice(item))}/${this._getPartUnitLabel(item)}` : '',
                     'склад',
                 ]),
             });
@@ -475,6 +495,7 @@ const Marketplaces = {
             warehouse_sku: '',
             photo_thumbnail: '',
             qty: 1,
+            unit: 'шт',
             name: '',
             cost_per_unit: 0,
             assembly_speed: 0,
@@ -509,16 +530,16 @@ const Marketplaces = {
                 : null);
 
         if (item.source === 'warehouse' && hasWhId) {
+            const normalizedWarehouseCost = this._getPartUnitPrice(warehouseItem || item);
             item.warehouse_sku = item.warehouse_sku || warehouseItem?.sku || blank?.sku || '';
             item.photo_thumbnail = item.photo_thumbnail || warehouseItem?.photo_thumbnail || warehouseItem?.photo_url || blank?.photo_url || blank?._whPhoto || '';
+            item.unit = this._getPartUnitLabel(warehouseItem || item);
             item.name = item.name || [
                 warehouseItem?.name || blank?.name || '',
                 warehouseItem?.size || '',
                 warehouseItem?.color || '',
             ].filter(Boolean).join(' ');
-            if (!(parseFloat(item.cost_per_unit) > 0)) {
-                item.cost_per_unit = parseFloat(warehouseItem?.price_per_unit) || 0;
-            }
+            item.cost_per_unit = normalizedWarehouseCost;
             if (!(parseFloat(item.assembly_speed) > 0)) {
                 item.assembly_speed = parseFloat(blank?.assembly_speed) || 0;
             }
@@ -528,6 +549,7 @@ const Marketplaces = {
         if (blank) {
             item.warehouse_sku = item.warehouse_sku || warehouseItem?.sku || blank.sku || '';
             item.photo_thumbnail = item.photo_thumbnail || warehouseItem?.photo_thumbnail || warehouseItem?.photo_url || blank.photo_url || blank._whPhoto || '';
+            item.unit = this._getPartUnitLabel(warehouseItem || item);
             item.name = item.name || blank.name || '';
             if (!(parseFloat(item.assembly_speed) > 0)) {
                 item.assembly_speed = parseFloat(blank.assembly_speed) || 0;
@@ -591,6 +613,8 @@ const Marketplaces = {
         document.getElementById('mp-hw-items').innerHTML = this._hwItems.map((item, i) => {
             const isCustom = item.source === 'custom';
             const speedMin = item.assembly_speed > 0 ? round2(item.assembly_speed / 60) : '';
+            const qtyUnit = this._getPartUnitLabel(item);
+            const priceHint = this._getPartPriceHint(item);
             return `
             <div style="margin-bottom:6px;padding:6px;background:var(--bg);border-radius:6px;">
                 <div class="form-row" style="margin-bottom:2px;align-items:end;gap:6px;">
@@ -605,17 +629,18 @@ const Marketplaces = {
                         <input type="number" min="0" step="0.1" value="${item.cost_per_unit || ''}" placeholder="₽/шт" oninput="Marketplaces._hwItems[${i}].cost_per_unit=parseFloat(this.value)||0; Marketplaces.recalcSet()">
                     </div>` : ''}
                     <div class="form-group" style="flex:0 0 88px;margin:0">
-                        <input type="number" min="0" step="0.1" value="${speedMin}" placeholder="шт/мин" title="Сборка, шт/мин"
+                        <input type="number" min="0" step="0.1" value="${speedMin}" placeholder="сборка/мин" title="Скорость сборки, ед/мин"
                             oninput="Marketplaces._hwItems[${i}].assembly_speed=round2((parseFloat(this.value)||0)*60); Marketplaces.recalcSet()">
                     </div>
                     <div class="form-group" style="flex:0 0 55px;margin:0">
-                        <input type="number" min="1" value="${item.qty || 1}" oninput="Marketplaces._onQtyChange('hw',${i},this.value)" style="text-align:center;" title="Кол-во">
+                        <input type="number" min="1" value="${item.qty || 1}" oninput="Marketplaces._onQtyChange('hw',${i},this.value)" style="text-align:center;" title="Кол-во (${this._esc(qtyUnit)})" placeholder="${this._esc(qtyUnit)}">
                     </div>
                     <button class="btn-remove" style="margin-bottom:6px;" onclick="Marketplaces.removeHwItem(${i})">&#10005;</button>
                 </div>
                 <div style="display:flex;gap:6px;font-size:10px;">
                     <label style="cursor:pointer;color:${!isCustom ? 'var(--accent)' : 'var(--text-muted)'};" onclick="Marketplaces._setHwSource(${i},'catalog')">Каталог/Склад</label>
                     <label style="cursor:pointer;color:${isCustom ? 'var(--accent)' : 'var(--text-muted)'};" onclick="Marketplaces._setHwSource(${i},'custom')">Кастомная</label>
+                    ${priceHint ? `<span style="margin-left:auto;color:var(--text-muted);">${this._esc(priceHint)}</span>` : ''}
                 </div>
             </div>`;
         }).join('');
@@ -626,6 +651,8 @@ const Marketplaces = {
         document.getElementById('mp-pkg-items').innerHTML = this._pkgItems.map((item, i) => {
             const isCustom = item.source === 'custom';
             const speedMin = item.assembly_speed > 0 ? round2(item.assembly_speed / 60) : '';
+            const qtyUnit = this._getPartUnitLabel(item);
+            const priceHint = this._getPartPriceHint(item);
             return `
             <div style="margin-bottom:6px;padding:6px;background:var(--bg);border-radius:6px;">
                 <div class="form-row" style="margin-bottom:2px;align-items:end;gap:6px;">
@@ -640,17 +667,18 @@ const Marketplaces = {
                         <input type="number" min="0" step="0.1" value="${item.cost_per_unit || ''}" placeholder="₽/шт" oninput="Marketplaces._pkgItems[${i}].cost_per_unit=parseFloat(this.value)||0; Marketplaces.recalcSet()">
                     </div>` : ''}
                     <div class="form-group" style="flex:0 0 88px;margin:0">
-                        <input type="number" min="0" step="0.1" value="${speedMin}" placeholder="шт/мин" title="Сборка, шт/мин"
+                        <input type="number" min="0" step="0.1" value="${speedMin}" placeholder="сборка/мин" title="Скорость сборки, ед/мин"
                             oninput="Marketplaces._pkgItems[${i}].assembly_speed=round2((parseFloat(this.value)||0)*60); Marketplaces.recalcSet()">
                     </div>
                     <div class="form-group" style="flex:0 0 55px;margin:0">
-                        <input type="number" min="1" value="${item.qty || 1}" oninput="Marketplaces._onQtyChange('pkg',${i},this.value)" style="text-align:center;" title="Кол-во">
+                        <input type="number" min="1" value="${item.qty || 1}" oninput="Marketplaces._onQtyChange('pkg',${i},this.value)" style="text-align:center;" title="Кол-во (${this._esc(qtyUnit)})" placeholder="${this._esc(qtyUnit)}">
                     </div>
                     <button class="btn-remove" style="margin-bottom:6px;" onclick="Marketplaces.removePkgItem(${i})">&#10005;</button>
                 </div>
                 <div style="display:flex;gap:6px;font-size:10px;">
                     <label style="cursor:pointer;color:${!isCustom ? 'var(--accent)' : 'var(--text-muted)'};" onclick="Marketplaces._setPkgSource(${i},'catalog')">Каталог/Склад</label>
                     <label style="cursor:pointer;color:${isCustom ? 'var(--accent)' : 'var(--text-muted)'};" onclick="Marketplaces._setPkgSource(${i},'custom')">Кастомная</label>
+                    ${priceHint ? `<span style="margin-left:auto;color:var(--text-muted);">${this._esc(priceHint)}</span>` : ''}
                 </div>
             </div>`;
         }).join('');
@@ -683,8 +711,9 @@ const Marketplaces = {
                 item.blank_id = null;
                 item.warehouse_sku = wh.sku || '';
                 item.photo_thumbnail = wh.photo_thumbnail || wh.photo_url || '';
+                item.unit = this._getPartUnitLabel(wh);
                 item.name = wh.name + (wh.size ? ' ' + wh.size : '') + (wh.color ? ' ' + wh.color : '');
-                item.cost_per_unit = wh.price_per_unit || 0;
+                item.cost_per_unit = this._getPartUnitPrice(wh);
                 const linkedBlank = this._hwCatalog.find(b => Number(b.warehouse_item_id) === Number(wh.id));
                 item.assembly_speed = linkedBlank?.assembly_speed || 0;
             }
@@ -699,6 +728,7 @@ const Marketplaces = {
                 const linkedWarehouse = this._allWarehouseHw.find(w => Number(w.id) === Number(hw.warehouse_item_id || 0));
                 item.warehouse_sku = linkedWarehouse?.sku || hw.sku || '';
                 item.photo_thumbnail = linkedWarehouse?.photo_thumbnail || linkedWarehouse?.photo_url || hw.photo_url || hw._whPhoto || '';
+                item.unit = this._getPartUnitLabel(linkedWarehouse || item);
                 item.name = hw.name;
                 item.cost_per_unit = 0; // will be calculated
                 item.assembly_speed = hw.assembly_speed || 0;
@@ -720,8 +750,9 @@ const Marketplaces = {
                 item.blank_id = null;
                 item.warehouse_sku = wh.sku || '';
                 item.photo_thumbnail = wh.photo_thumbnail || wh.photo_url || '';
+                item.unit = this._getPartUnitLabel(wh);
                 item.name = wh.name + (wh.size ? ' ' + wh.size : '');
-                item.cost_per_unit = wh.price_per_unit || 0;
+                item.cost_per_unit = this._getPartUnitPrice(wh);
                 const linkedBlank = this._pkgCatalog.find(b => Number(b.warehouse_item_id) === Number(wh.id));
                 item.assembly_speed = linkedBlank?.assembly_speed || 0;
             }
@@ -735,6 +766,7 @@ const Marketplaces = {
                 const linkedWarehouse = this._allWarehousePkg.find(w => Number(w.id) === Number(pkg.warehouse_item_id || 0));
                 item.warehouse_sku = linkedWarehouse?.sku || pkg.sku || '';
                 item.photo_thumbnail = linkedWarehouse?.photo_thumbnail || linkedWarehouse?.photo_url || pkg.photo_url || '';
+                item.unit = this._getPartUnitLabel(linkedWarehouse || item);
                 item.name = pkg.name;
                 item.cost_per_unit = (pkg.price_per_unit || 0) + (pkg.delivery_per_unit || 0);
                 item.assembly_speed = pkg.assembly_speed || 0;
@@ -751,6 +783,7 @@ const Marketplaces = {
             this._hwItems[idx].wh_id = null;
             this._hwItems[idx].warehouse_sku = '';
             this._hwItems[idx].photo_thumbnail = '';
+            this._hwItems[idx].unit = 'шт';
         }
         this.renderFormItems();
     },
@@ -762,6 +795,7 @@ const Marketplaces = {
             this._pkgItems[idx].wh_id = null;
             this._pkgItems[idx].warehouse_sku = '';
             this._pkgItems[idx].photo_thumbnail = '';
+            this._pkgItems[idx].unit = 'шт';
         }
         this.renderFormItems();
     },
