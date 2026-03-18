@@ -4,7 +4,8 @@ const Wiki = {
     selectedArticleId: null,
     searchQuery: '',
     importOpen: false,
-    SOURCE_URL: 'https://www.notion.so/recycle-object/775cbbbf4d224ea0ad565ea90feb9d3b?v=79ea9890039443acadb90e43a5cfae70&source=copy_link',
+    SOURCE_URL: 'https://recycle-object.notion.site/775cbbbf4d224ea0ad565ea90feb9d3b?v=79ea9890039443acadb90e43a5cfae70&pvs=73',
+    SOURCE_BASE_URL: 'https://recycle-object.notion.site',
 
     async load() {
         const root = document.getElementById('wiki-root');
@@ -12,7 +13,11 @@ const Wiki = {
         if (!this.state) {
             const raw = await loadWikiState();
             this.state = this._normalizeState(raw);
-            if (!raw) {
+            const migration = this._mergeImportedNotionMap(this.state, !raw);
+            if (migration.changed) {
+                this.state = migration.state;
+            }
+            if (!raw || migration.changed) {
                 await saveWikiState(this.state);
             }
         }
@@ -46,13 +51,15 @@ const Wiki = {
     _defaultState() {
         const now = this._nowIso();
         const sections = [
-            { id: 'quick-start', title: 'Быстрый старт', description: 'Как быстро понять, где что лежит и с чего начать.', sort_index: 10 },
-            { id: 'orders-sales', title: 'Заказы и продажи', description: 'Работа с заказом, коммерцией и коммуникацией с клиентом.', sort_index: 20 },
-            { id: 'production', title: 'Производство', description: 'Литьё, срезка, сборка, упаковка и дедлайны.', sort_index: 30 },
-            { id: 'warehouse', title: 'Склад и логистика', description: 'Резервы, списания, готовая продукция, Китай и поставки.', sort_index: 40 },
-            { id: 'finance', title: 'Финансы и документы', description: 'План-факт, ФинТабло, налоги, оплаты и документы.', sort_index: 50 },
-            { id: 'reference', title: 'Справочники и контакты', description: 'Реквизиты, шаблоны, ссылки и постоянные справки.', sort_index: 60 },
-            { id: 'drafts', title: 'Черновики переноса', description: 'Временное место для сырого текста из Notion перед разбором.', sort_index: 70 },
+            { id: 'quick-start', title: 'Быстрый старт', description: 'Как пользоваться внутренней базой знаний и как переносить материалы из Notion.', sort_index: 10 },
+            { id: 'notion_home_onboarding', title: 'Онбординг', description: 'База входа в процессы, производство, маркетплейсы, калькуляторы и ведение проекта.', sort_index: 20 },
+            { id: 'notion_home_general', title: 'Общая информация', description: 'Документы, контакты, пароли, скрипты, фото и базовые справки.', sort_index: 30 },
+            { id: 'notion_home_china', title: 'Китай', description: 'Крипта, переводы, Alipay и закупки в Китае.', sort_index: 40 },
+            { id: 'notion_home_wholesale', title: 'Опт', description: 'Оптовые и партнерские направления.', sort_index: 50 },
+            { id: 'notion_home_faq', title: 'FAQ', description: 'Быстрые ответы по материалам, литью и производственным кейсам.', sort_index: 60 },
+            { id: 'notion_home_hiring', title: 'Поиск сотрудников', description: 'Вакансии и материалы по найму.', sort_index: 70 },
+            { id: 'notion_home_illustration', title: 'Иллюстрации', description: 'Материалы для работы с иллюстраторами и ТЗ.', sort_index: 80 },
+            { id: 'drafts', title: 'Черновики переноса', description: 'Временное место для сырого текста из Notion перед разбором.', sort_index: 90 },
         ];
         const articles = [
             {
@@ -65,7 +72,8 @@ const Wiki = {
                     '2. Сверху используйте поиск по словам, тегам и тексту статьи.',
                     '3. Справа открывайте статью и редактируйте заголовок, краткое описание, теги и основной текст.',
                     '4. Для переноса из Notion используйте кнопку «Импорт текста» и сначала складывайте сырой текст в раздел «Черновики переноса».',
-                    '5. Потом разбирайте черновик на отдельные понятные статьи по разделам.',
+                    '5. Если текст уже размечен заголовками, используйте «Разбить по # заголовкам».',
+                    '6. Потом разбирайте черновик на отдельные понятные статьи по разделам.',
                 ].join('\n'),
                 tags: ['wiki', 'поиск', 'редактирование'],
                 sort_index: 10,
@@ -73,40 +81,20 @@ const Wiki = {
                 updated_by: 'Система',
             },
             {
-                id: 'orders_template',
-                section_id: 'orders-sales',
-                title: 'Шаблон статьи по работе с заказом',
-                summary: 'Каркас для переноса из Notion: от расчета до дедлайна и оплаты.',
+                id: 'wiki_notion_sync',
+                section_id: 'quick-start',
+                title: 'Как перенести публичный Notion в систему',
+                summary: 'Скелет разделов и карточек из домашней страницы Notion уже импортирован. Дальше можно дополнять статьи постепенно.',
                 body: [
-                    'Что здесь стоит хранить:',
+                    'Что уже сделано:',
                     '',
-                    '- Как создается заказ и какие поля обязательны.',
-                    '- Какой статус что означает.',
-                    '- Когда заказ уходит в производство.',
-                    '- Как проверять дедлайн, оплату и связку с задачами.',
-                    '- Где смотреть изменения и кто за что отвечает.',
+                    `- Источник: ${this.SOURCE_URL}`,
+                    '- Разделы и карточки верхнего уровня перенесены в Базу знаний.',
+                    '- У каждой импортированной статьи есть ссылка на исходную страницу Notion.',
+                    '- Теперь можно спокойно разносить внутрь регламенты, чеклисты, контакты и ссылки без хаоса.',
                 ].join('\n'),
-                tags: ['заказы', 'продажи', 'статусы'],
+                tags: ['notion', 'перенос', 'структура'],
                 sort_index: 20,
-                updated_at: now,
-                updated_by: 'Система',
-            },
-            {
-                id: 'warehouse_template',
-                section_id: 'warehouse',
-                title: 'Шаблон статьи по складу',
-                summary: 'Каркас для описания резервов, сборки, списаний и возвратов.',
-                body: [
-                    'Что здесь стоит хранить:',
-                    '',
-                    '- Когда позиция встает в резерв.',
-                    '- Что означает отметка «собрано».',
-                    '- В какой момент происходит реальное списание.',
-                    '- Как работает возврат на склад.',
-                    '- Какие отчеты и сверки нужно смотреть.',
-                ].join('\n'),
-                tags: ['склад', 'резерв', 'списание'],
-                sort_index: 30,
                 updated_at: now,
                 updated_by: 'Система',
             },
@@ -137,6 +125,214 @@ const Wiki = {
         };
     },
 
+    _getPublicNotionSiteMap() {
+        return [
+            {
+                id: 'onboarding',
+                section_id: 'notion_home_onboarding',
+                title: 'Онбординг',
+                description: 'База входа в процессы, производство, маркетплейсы, калькуляторы и ведение проекта.',
+                links: [
+                    ['🧩 О Recycle Object', '/Recycle-Object-c6357e76fd7d4c049879064c575e7016?pvs=25'],
+                    ['🔧 Производство (общая инфа, полезные ссылки, контакты поставщиков и подрядчиков)', '/adff3c8f7cb441d7a62b66a58261da4b?pvs=25'],
+                    ['🏖️ Отпуск и больничный', '/125dff96d7444a9f82ba598515af1e6b?pvs=25'],
+                    ['💻 Работа с ИМ и МП', '/4bfa8b46ec004d6f8d60dc3058550ebf?pvs=25'],
+                    ['🛒 Маркетплейсы', '/a3ab7ed0995d43e1bc3a03495f81cf95?pvs=25'],
+                    ['🧮 Калькуляторы, прайсы, инвентаризация', '/1ad3e666a1eb80f8b40fe38ba0e91562?pvs=25'],
+                    ['ℹ️ Гайды', '/b8350468caa0486c9b3bf989584aba81?pvs=25'],
+                    ['🤪 Ведение проекта', '/2093e666a1eb803c9155d1ba912ef87c?pvs=25'],
+                    ['💸 Финансы: Финтабло и Точка', '/5cca97efb6fc4bd5970865075681132e?pvs=25'],
+                    ['📊 Работа в amoCRM', '/amoCRM-1f53e666a1eb80f79fc7f3152e8cd00a?pvs=25'],
+                    ['🤑 Инструкция по заполнению Юнит-экономики', '/2023e666a1eb80dc86f7cc262c2a287c?pvs=25'],
+                ],
+            },
+            {
+                id: 'general',
+                section_id: 'notion_home_general',
+                title: 'Общая информация',
+                description: 'Документы, контакты, пароли, скрипты, фото и базовые справки.',
+                links: [
+                    ['📄 Документы Полина', '/b10f6528052d406285451e53211ddb5f?pvs=25'],
+                    ['🤖 Бот RO', '/RO-ae30db333237459ebc779fe5e69482a9?pvs=25'],
+                    ['📄 Документы Никита', '/ce00a9838a09431a92bfc71cb6ee296b?pvs=25'],
+                    ['🔐 Пароли', '/ef027345e13f4bc8a33af6f82cb765bf?pvs=25'],
+                    ['💌 Скрипты', '/94034de2740c474b8cd1cc579f85b401?pvs=25'],
+                    ['💬 Скрипт для общения с клиентом', '/21f3e666a1eb80759f85db7cd585785f?pvs=25'],
+                    ['☎️ Список контактов клиентов', '/0473cddc59e449d2bc492f5fa49fcc26?pvs=25'],
+                    ['📞 Телефоны сотрудников', '/3f7cdf24579849248ff0a4a45f856756?pvs=25'],
+                    ['📸 Ссылки на фото', '/f84c01568654450bb55d3ce0731eae01?pvs=25'],
+                    ['🎂 Дни рождения', '/73b14634d6cd463b82aa3d3266b2084c?pvs=25'],
+                    ['💵 Оплата', '/dfe635b5a8124df0b0e735f05ef46b50?pvs=25'],
+                ],
+            },
+            {
+                id: 'china',
+                section_id: 'notion_home_china',
+                title: 'Китай',
+                description: 'Крипта, переводы, Alipay и закупки в Китае.',
+                links: [
+                    ['🤑 Покупка криптовалюты в BINACE', '/BINACE-1e3a5d5294ad408da2c5003347afbc10?pvs=25'],
+                    ['💸 Перевод криптовалюты c BINANCE в BYBIT', '/c-BINANCE-BYBIT-87e3238910cd45358777a0eeb7ff6522?pvs=25'],
+                    ['💱 Перевод с BYBIT на ALIPAY', '/BYBIT-ALIPAY-c80bf40bbd5c4321ad8c36395787b27d?pvs=25'],
+                    ['🈲 Alipay', '/Alipay-0be4f1a8c9ae443aa9ceb83486ccade6?pvs=25'],
+                    ['🧰 Закупки в Китае', '/22c3e666a1eb807bb68aece6bf52ca20?pvs=25'],
+                ],
+            },
+            {
+                id: 'wholesale',
+                section_id: 'notion_home_wholesale',
+                title: 'Опт',
+                description: 'Оптовые и партнерские направления.',
+                links: [
+                    ['🏛️ Музеи', '/8c4a1ff29dd84161a3ba3fc352ac7a69?pvs=25'],
+                ],
+            },
+            {
+                id: 'faq',
+                section_id: 'notion_home_faq',
+                title: 'FAQ',
+                description: 'Быстрые ответы по материалам, литью и производственным кейсам.',
+                links: [
+                    ['❓ FAQ Изделия из АБС', '/FAQ-79128817511a455bb679912863573f0c?pvs=25'],
+                    ['❓ FAQ Литье', '/FAQ-be9a41c4df214c009ab824946881f1de?pvs=25'],
+                    ['❓ FAQ Дмитров', '/FAQ-5b0dce1bde9a4f5dbd40a05aaa82ee93?pvs=25'],
+                ],
+            },
+            {
+                id: 'hiring',
+                section_id: 'notion_home_hiring',
+                title: 'Поиск сотрудников',
+                description: 'Вакансии и материалы по найму.',
+                links: [
+                    ['🏗️ Актуальные вакансии в RO', '/RO-1e03e666a1eb80009138eb52bb6db7d3?pvs=25'],
+                    ['AmoCRM', '/AmoCRM-1dd3e666a1eb8074be37dfe3ebe49f7c?pvs=25'],
+                ],
+            },
+            {
+                id: 'illustration',
+                section_id: 'notion_home_illustration',
+                title: 'Иллюстрации',
+                description: 'Материалы для работы с иллюстраторами и ТЗ.',
+                links: [
+                    ['ТЗ для иллюстратора', '/1e33e666a1eb8060a0a1e57a71d7538f?pvs=25'],
+                ],
+            },
+        ];
+    },
+
+    _stripEmoji(value) {
+        return String(value || '')
+            .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, '')
+            .replace(/\s+/g, ' ')
+            .trim();
+    },
+
+    _slug(value) {
+        return this._stripEmoji(value)
+            .toLowerCase()
+            .replace(/[^a-zа-яё0-9]+/giu, '_')
+            .replace(/^_+|_+$/g, '') || 'item';
+    },
+
+    _buildNotionUrl(path) {
+        if (!path) return this.SOURCE_URL;
+        if (/^https?:\/\//i.test(path)) return path;
+        return `${this.SOURCE_BASE_URL}${path}`;
+    },
+
+    _buildImportedArticle(sectionConfig, linkTitle, href, index) {
+        const cleanTitle = this._stripEmoji(linkTitle);
+        const sourceUrl = this._buildNotionUrl(href);
+        const now = this._nowIso();
+        return {
+            id: `notion_article_${sectionConfig.id}_${this._slug(cleanTitle)}`,
+            section_id: sectionConfig.section_id,
+            title: cleanTitle,
+            summary: `Импортировано из публичной карты Notion. Откройте источник и перенесите сюда нормальную структурированную инструкцию.`,
+            body: [
+                `# ${cleanTitle}`,
+                '',
+                'Импортировано из публичной wiki Notion как стартовая карточка.',
+                '',
+                '## Источник',
+                sourceUrl,
+                '',
+                '## Что стоит перенести сюда',
+                '- пошаговый процесс',
+                '- важные ссылки и доступы',
+                '- частые ошибки и проверки',
+                '- ответственных и обновления',
+            ].join('\n'),
+            tags: ['notion', 'импорт', this._slug(sectionConfig.title)],
+            sort_index: (index + 1) * 10,
+            updated_at: now,
+            updated_by: 'Система',
+            source_url: sourceUrl,
+        };
+    },
+
+    _isStarterState(state) {
+        const starterSectionIds = ['quick-start', 'notion_home_onboarding', 'notion_home_general', 'notion_home_china', 'notion_home_wholesale', 'notion_home_faq', 'notion_home_hiring', 'notion_home_illustration', 'drafts'];
+        const currentSectionIds = (state.sections || []).map(section => section.id).sort();
+        const starterArticles = ['wiki_start', 'wiki_notion_sync', 'notion_migration_draft'];
+        const currentArticleIds = (state.articles || []).map(article => article.id);
+        return starterSectionIds.every(id => currentSectionIds.includes(id))
+            && starterArticles.every(id => currentArticleIds.includes(id))
+            && !currentArticleIds.some(id => String(id).startsWith('notion_article_'));
+    },
+
+    _mergeImportedNotionMap(state, forceReplace = false) {
+        const next = this._clone(state);
+        const notionMap = this._getPublicNotionSiteMap();
+        let changed = false;
+        const shouldReplaceStarter = forceReplace || this._isStarterState(next);
+
+        if (shouldReplaceStarter) {
+            const keepArticles = (next.articles || []).filter(article => ['wiki_start', 'wiki_notion_sync', 'notion_migration_draft'].includes(article.id));
+            next.sections = this._defaultState().sections;
+            next.articles = keepArticles;
+            changed = true;
+        }
+
+        const sectionIds = new Set((next.sections || []).map(section => section.id));
+        notionMap.forEach((sectionConfig, sectionIndex) => {
+            if (!sectionIds.has(sectionConfig.section_id)) {
+                next.sections.push({
+                    id: sectionConfig.section_id,
+                    title: sectionConfig.title,
+                    description: sectionConfig.description,
+                    sort_index: 20 + (sectionIndex * 10),
+                });
+                sectionIds.add(sectionConfig.section_id);
+                changed = true;
+            }
+        });
+
+        const articleIds = new Set((next.articles || []).map(article => article.id));
+        notionMap.forEach(sectionConfig => {
+            sectionConfig.links.forEach((linkEntry, index) => {
+                const [title, href] = linkEntry;
+                const article = this._buildImportedArticle(sectionConfig, title, href, index);
+                if (!articleIds.has(article.id)) {
+                    next.articles.push(article);
+                    articleIds.add(article.id);
+                    changed = true;
+                }
+            });
+        });
+
+        if (changed) {
+            next.source_url = this.SOURCE_URL;
+            next.articles.sort((a, b) => {
+                if (a.section_id !== b.section_id) return String(a.section_id).localeCompare(String(b.section_id), 'ru');
+                return (Number(a.sort_index) - Number(b.sort_index)) || String(a.title).localeCompare(String(b.title), 'ru');
+            });
+            next.sections.sort((a, b) => (Number(a.sort_index) - Number(b.sort_index)) || String(a.title).localeCompare(String(b.title), 'ru'));
+        }
+
+        return { state: next, changed };
+    },
+
     _normalizeState(raw) {
         const base = raw && typeof raw === 'object' ? this._clone(raw) : this._defaultState();
         const state = {
@@ -165,13 +361,23 @@ const Wiki = {
 
         const validSectionIds = new Set(state.sections.map(section => section.id));
         const fallbackSectionId = state.sections[0] ? state.sections[0].id : 'drafts';
+        const legacySectionAliases = {
+            'orders-sales': 'notion_home_onboarding',
+            production: 'notion_home_onboarding',
+            warehouse: 'notion_home_general',
+            finance: 'notion_home_general',
+            reference: 'notion_home_general',
+        };
         state.articles = state.articles
             .map((article, index) => ({
                 id: article.id || this._uid('article'),
-                section_id: validSectionIds.has(article.section_id) ? article.section_id : fallbackSectionId,
+                section_id: validSectionIds.has(article.section_id)
+                    ? article.section_id
+                    : (validSectionIds.has(legacySectionAliases[article.section_id]) ? legacySectionAliases[article.section_id] : fallbackSectionId),
                 title: article.title || `Статья ${index + 1}`,
                 summary: article.summary || '',
                 body: article.body || '',
+                source_url: article.source_url || '',
                 tags: Array.isArray(article.tags)
                     ? article.tags.map(tag => String(tag || '').trim()).filter(Boolean)
                     : String(article.tags || '').split(',').map(tag => tag.trim()).filter(Boolean),
@@ -522,12 +728,13 @@ const Wiki = {
             body: article.body || '',
         };
         return `
-            <div class="card-header">
+                <div class="card-header">
                 <div>
                     <h3>Редактор статьи</h3>
                     <div class="wiki-list-subtitle">Последнее обновление: ${this._esc(App.formatDate ? App.formatDate(article.updated_at) : article.updated_at)} · ${this._esc(article.updated_by || '—')}</div>
                 </div>
                 <div class="flex gap-8" style="flex-wrap:wrap;">
+                    ${article.source_url ? `<a class="btn btn-outline btn-sm" href="${this._esc(article.source_url)}" target="_blank" rel="noopener noreferrer">Источник</a>` : ''}
                     <button class="btn btn-outline btn-sm" onclick="Wiki.duplicateSelectedArticle()">Дубль</button>
                     <button class="btn btn-outline btn-sm" onclick="Wiki.moveSelectedArticle(-10)">↑ Выше</button>
                     <button class="btn btn-outline btn-sm" onclick="Wiki.moveSelectedArticle(10)">↓ Ниже</button>
