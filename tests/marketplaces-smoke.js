@@ -129,7 +129,23 @@ async function main() {
     context.document.getElementById('mp-pkg-items');
 
     vm.runInContext(`
-        Marketplaces._plasticItems = [];
+        __plasticRecalcCalls = 0;
+        Marketplaces._plasticBlanks = [{
+            id: 15,
+            name: 'Новый кардхолдер',
+            collection: 'Аксессуары',
+            weight_grams: 20,
+            photo_url: 'https://example.com/card-holder.jpg',
+            status: 'active',
+        }];
+        Marketplaces._plasticItems = [{
+            blank_id: null,
+            qty: 1,
+            name: '',
+            cost: 0,
+            color_notes: '',
+            colors: [],
+        }];
         Marketplaces._hwCatalog = [{
             id: 101,
             name: 'Карабин каталог',
@@ -196,13 +212,15 @@ async function main() {
             assembly_speed: 90,
         }];
         Marketplaces.renderColorVariants = () => {};
-        Marketplaces.recalcSet = () => {};
+        Marketplaces.recalcSet = () => { __plasticRecalcCalls += 1; };
         Marketplaces.renderFormItems();
     `, context);
 
+    const plasticHtml = String(context.document.getElementById('mp-plastic-items').innerHTML || '');
     const hwHtml = String(context.document.getElementById('mp-hw-items').innerHTML || '');
     const pkgHtml = String(context.document.getElementById('mp-pkg-items').innerHTML || '');
 
+    assert.match(plasticHtml, /card holder/i);
     assert.match(hwHtml, /wh-img-picker/);
     assert.match(hwHtml, /CRB-501/);
     assert.match(hwHtml, /Каталог/);
@@ -211,6 +229,15 @@ async function main() {
     assert.match(pkgHtml, /ENV-150x90/);
     assert.match(pkgHtml, /каталог/);
     assert.match(pkgHtml, /склад/);
+
+    vm.runInContext(`Marketplaces._selectPlastic(0, 15)`, context);
+    const plasticState = JSON.parse(vm.runInContext(`JSON.stringify(Marketplaces._plasticItems[0])`, context));
+    const plasticHtmlAfterSelect = String(context.document.getElementById('mp-plastic-items').innerHTML || '');
+    const plasticRecalcCalls = vm.runInContext(`__plasticRecalcCalls`, context);
+    assert.equal(plasticState.blank_id, 15);
+    assert.equal(plasticState.name, 'Новый кардхолдер');
+    assert.match(plasticHtmlAfterSelect, /Новый кардхолдер/);
+    assert.ok(plasticRecalcCalls > 0);
 
     vm.runInContext(`Marketplaces._selectHw(0, 'warehouse:501')`, context);
     const hwState = vm.runInContext(`JSON.stringify(Marketplaces._hwItems[0])`, context);
@@ -520,6 +547,18 @@ async function main() {
     assert.equal(filteredItems[1].style.display, 'none');
     assert.equal(filteredHeaders[0].style.display, 'none');
     assert.equal(filteredHeaders[1].style.display, '');
+
+    const plasticSearchInput = context.document.getElementById('mp-plastic-search-test');
+    const plasticSearchDropdown = context.document.getElementById('mp-plastic-search-test_dd');
+    const plasticSearchRows = [
+        { dataset: { name: 'Новый кардхолдер', search: 'новый кардхолдер card holder cardholder аксессуары 20г' }, style: {} },
+        { dataset: { name: 'Бланк тэг', search: 'бланк тэг tag blank' }, style: {} },
+    ];
+    plasticSearchInput.value = 'Card Holder';
+    plasticSearchDropdown.querySelectorAll = (selector) => selector === '.mp-dd-item' ? plasticSearchRows : [];
+    vm.runInContext(`Marketplaces._filterDropdown('mp-plastic-search-test')`, context);
+    assert.equal(plasticSearchRows[0].style.display, '');
+    assert.equal(plasticSearchRows[1].style.display, 'none');
 
     vm.runInContext(`
         __selectedPickerValue = null;

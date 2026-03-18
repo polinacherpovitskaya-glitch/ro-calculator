@@ -297,10 +297,38 @@ const Marketplaces = {
     // SEARCHABLE DROPDOWNS
     // ==========================================
 
+    _normalizeSearchText(value) {
+        return String(value || '')
+            .toLowerCase()
+            .replace(/ё/g, 'е')
+            .replace(/[^a-z0-9а-я]+/gi, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+    },
+
+    _getPlasticSearchAliases(blank) {
+        const normalizedName = this._normalizeSearchText(blank?.name || '');
+        const aliases = [];
+        if (/кардхолдер|картхолдер/.test(normalizedName)) {
+            aliases.push('card holder', 'cardholder');
+        }
+        if (/\bтег\b|тэг/.test(normalizedName)) {
+            aliases.push('tag');
+        }
+        if (/брелок/.test(normalizedName)) {
+            aliases.push('keychain', 'key holder');
+        }
+        return aliases;
+    },
+
+    _buildSearchText(parts) {
+        return this._normalizeSearchText((parts || []).filter(Boolean).join(' '));
+    },
+
     _renderSearchableSelect(containerId, items, selectedId, placeholder, onSelectFn) {
         // items = [{id, name, detail, photo?}]
         const uid = containerId + '_' + Math.random().toString(36).slice(2, 6);
-        const selected = items.find(i => i.id === selectedId);
+        const selected = items.find(i => String(i.id) === String(selectedId));
         return `
             <div class="mp-searchable" style="position:relative;">
                 <input type="text" class="mp-search-input" id="${uid}"
@@ -310,10 +338,11 @@ const Marketplaces = {
                     oninput="Marketplaces._filterDropdown('${uid}')">
                 <div class="mp-dropdown" id="${uid}_dd" style="display:none;position:absolute;top:100%;left:0;right:0;max-height:260px;overflow-y:auto;background:var(--card-bg);border:1px solid var(--border);border-radius:8px;z-index:100;box-shadow:0 4px 12px rgba(0,0,0,0.15);">
                     ${items.map(i => {
+                        const searchText = this._buildSearchText([i.searchText, i.name, i.detail]);
                         const photoHtml = i.photo
                             ? `<img src="${this._esc(i.photo)}" style="width:36px;height:36px;object-fit:cover;border-radius:4px;flex-shrink:0;border:1px solid var(--border);" onerror="this.style.display='none'">`
                             : `<span style="width:36px;height:36px;display:flex;align-items:center;justify-content:center;background:var(--accent-light);border-radius:4px;flex-shrink:0;font-size:12px;color:var(--text-muted);">?</span>`;
-                        return `<div class="mp-dd-item" data-id="${i.id}" data-name="${this._esc(i.name)}"
+                        return `<div class="mp-dd-item" data-id="${i.id}" data-name="${this._esc(i.name)}" data-search="${this._esc(searchText)}"
                         onmousedown="event.preventDefault(); event.stopPropagation(); ${onSelectFn}${i.id}); Marketplaces._closeDropdown('${uid}')"
                         style="padding:6px 10px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;"
                         onmouseover="this.style.background='var(--accent-light)'" onmouseout="this.style.background=''">
@@ -352,9 +381,9 @@ const Marketplaces = {
         const input = document.getElementById(uid);
         const dd = document.getElementById(uid + '_dd');
         if (!input || !dd) return;
-        const search = input.value.toLowerCase().trim();
+        const search = this._normalizeSearchText(input.value);
         dd.querySelectorAll('.mp-dd-item').forEach(el => {
-            const name = (el.dataset.name || '').toLowerCase();
+            const name = this._normalizeSearchText(el.dataset.search || el.dataset.name || '');
             el.style.display = (!search || name.includes(search)) ? '' : 'none';
         });
     },
@@ -593,6 +622,12 @@ const Marketplaces = {
             name: b.name,
             detail: b.collection ? b.collection + ' · ' + (b.weight_grams || 0) + 'г' : (b.weight_grams || 0) + 'г',
             photo: b.photo_url || '',
+            searchText: this._buildSearchText([
+                b.name,
+                b.collection,
+                b.weight_grams ? `${b.weight_grams}г` : '',
+                ...this._getPlasticSearchAliases(b),
+            ]),
         }));
 
         document.getElementById('mp-plastic-items').innerHTML = this._plasticItems.map((item, i) => `
@@ -693,6 +728,7 @@ const Marketplaces = {
         this._plasticItems[idx].blank_id = Number(blankId);
         this._plasticItems[idx].name = b ? b.name : '';
         if (!Array.isArray(this._plasticItems[idx].colors)) this._plasticItems[idx].colors = [];
+        this.renderFormItems();
         this.recalcSet();
     },
 
