@@ -31,7 +31,7 @@ const Marketplaces = {
                 loadWarehouseItems(),
                 loadColors(),
             ]);
-            this.allSets = sets;
+            this.allSets = (sets || []).map(s => this._normalizeMarketplaceSet(s));
             this._plasticBlanks = plasticBlanks.filter(m => m.status === 'active');
             this._hwCatalog = hwCatalog;
             this._pkgCatalog = pkgCatalog;
@@ -180,23 +180,24 @@ const Marketplaces = {
     editSet(id) {
         const s = this.allSets.find(x => x.id === id);
         if (!s) return;
+        const normalizedSet = this._normalizeMarketplaceSet(s);
         this.editingSetId = id;
-        this._pendingPhoto = s.photo_url || '';
-        document.getElementById('mp-form-title').textContent = 'Редактировать: ' + (s.name || '');
-        document.getElementById('mp-set-name').value = s.name || '';
-        document.getElementById('mp-set-commission').value = s.commission || 46;
-        document.getElementById('mp-set-vat').value = s.vat || 5;
-        document.getElementById('mp-set-osn').value = s.osn || 6;
-        document.getElementById('mp-set-commercial').value = s.commercial || 6.5;
-        document.getElementById('mp-set-acquiring').value = s.acquiring || 4;
-        document.getElementById('mp-set-shop-multiplier').value = s.shop_multiplier || 3;
-        document.getElementById('mp-set-margin').value = s.target_margin || 40;
-        document.getElementById('mp-set-price-manual').value = s.mp_actual_price || s.selling_price || '';
-        document.getElementById('mp-set-shop-price-manual').value = s.shop_actual_price || s.shop_suggested_price || '';
-        this._plasticItems = (s.plastic_items || []).map(i => ({ ...i, colors: Array.isArray(i.colors) ? i.colors : [] }));
-        this._hwItems = (s.hw_items || []).map(i => ({ ...i }));
-        this._pkgItems = (s.pkg_items || []).map(i => ({ ...i }));
-        this._colorVariants = (s.color_variants || []).map(v => ({ ...v, assignments: Array.isArray(v.assignments) ? v.assignments.map(a => ({...a})) : [] }));
+        this._pendingPhoto = normalizedSet.photo_url || '';
+        document.getElementById('mp-form-title').textContent = 'Редактировать: ' + (normalizedSet.name || '');
+        document.getElementById('mp-set-name').value = normalizedSet.name || '';
+        document.getElementById('mp-set-commission').value = normalizedSet.commission || 46;
+        document.getElementById('mp-set-vat').value = normalizedSet.vat || 5;
+        document.getElementById('mp-set-osn').value = normalizedSet.osn || 6;
+        document.getElementById('mp-set-commercial').value = normalizedSet.commercial || 6.5;
+        document.getElementById('mp-set-acquiring').value = normalizedSet.acquiring || 4;
+        document.getElementById('mp-set-shop-multiplier').value = normalizedSet.shop_multiplier || 3;
+        document.getElementById('mp-set-margin').value = normalizedSet.target_margin || 40;
+        document.getElementById('mp-set-price-manual').value = normalizedSet.mp_actual_price || normalizedSet.selling_price || '';
+        document.getElementById('mp-set-shop-price-manual').value = normalizedSet.shop_actual_price || normalizedSet.shop_suggested_price || '';
+        this._plasticItems = (normalizedSet.plastic_items || []).map(i => ({ ...i, colors: Array.isArray(i.colors) ? i.colors : [] }));
+        this._hwItems = (normalizedSet.hw_items || []).map(i => ({ ...i }));
+        this._pkgItems = (normalizedSet.pkg_items || []).map(i => ({ ...i }));
+        this._colorVariants = (normalizedSet.color_variants || []).map(v => ({ ...v, assignments: Array.isArray(v.assignments) ? v.assignments.map(a => ({...a})) : [] }));
         // Auto-migrate: if no variants but plastic items have old-style colors, create variant from them
         if (!this._colorVariants.length && this._plasticItems.some(pi => Array.isArray(pi.colors) && pi.colors.length > 0)) {
             const assignments = this._plasticItems.map(pi => {
@@ -211,7 +212,7 @@ const Marketplaces = {
                 assignments,
             }];
         }
-        this._updatePhotoPreview(s.photo_url || '');
+        this._updatePhotoPreview(normalizedSet.photo_url || '');
         document.getElementById('mp-photo-file').value = '';
         document.getElementById('mp-delete-btn').style.display = '';
         document.getElementById('mp-set-form').style.display = '';
@@ -454,10 +455,106 @@ const Marketplaces = {
     },
 
     _getMarketplacePickerSelectedId(item) {
-        if (!item) return null;
-        if (item.source === 'warehouse' && item.wh_id) return `warehouse:${item.wh_id}`;
-        if (item.blank_id) return `catalog:${item.blank_id}`;
+        const normalized = this._normalizeMarketplacePart(item, 'hw');
+        if (!normalized) return null;
+        if (normalized.source === 'warehouse' && normalized.wh_id) return `warehouse:${normalized.wh_id}`;
+        if (normalized.wh_id && !normalized.blank_id) return `warehouse:${normalized.wh_id}`;
+        if (normalized.blank_id) return `catalog:${normalized.blank_id}`;
         return null;
+    },
+
+    _normalizeMarketplacePart(rawItem, kind) {
+        if (!rawItem) return null;
+        const isPackaging = kind === 'pkg';
+        const catalog = isPackaging ? (this._pkgCatalog || []) : (this._hwCatalog || []);
+        const warehouseItems = isPackaging ? (this._allWarehousePkg || []) : (this._allWarehouseHw || []);
+        const item = {
+            source: 'catalog',
+            blank_id: null,
+            wh_id: null,
+            warehouse_sku: '',
+            photo_thumbnail: '',
+            qty: 1,
+            name: '',
+            cost_per_unit: 0,
+            assembly_speed: 0,
+            ...rawItem,
+        };
+
+        const hasBlankId = Number(item.blank_id || 0) > 0;
+        const hasWhId = Number(item.wh_id || 0) > 0;
+
+        if (item.source === 'custom') {
+            return item;
+        }
+
+        if (item.source === 'warehouse' || (!item.source && hasWhId && !hasBlankId) || (hasWhId && !hasBlankId)) {
+            item.source = 'warehouse';
+        } else if (hasBlankId) {
+            item.source = 'catalog';
+        } else if (hasWhId) {
+            item.source = 'warehouse';
+        } else {
+            item.source = 'catalog';
+        }
+
+        const blank = hasBlankId
+            ? catalog.find(entry => Number(entry.id) === Number(item.blank_id || 0)) || null
+            : null;
+        const linkedWarehouseId = Number(blank?.warehouse_item_id || 0);
+        const warehouseItem = hasWhId
+            ? warehouseItems.find(entry => Number(entry.id) === Number(item.wh_id || 0)) || null
+            : (linkedWarehouseId
+                ? warehouseItems.find(entry => Number(entry.id) === linkedWarehouseId) || null
+                : null);
+
+        if (item.source === 'warehouse' && hasWhId) {
+            item.warehouse_sku = item.warehouse_sku || warehouseItem?.sku || blank?.sku || '';
+            item.photo_thumbnail = item.photo_thumbnail || warehouseItem?.photo_thumbnail || warehouseItem?.photo_url || blank?.photo_url || blank?._whPhoto || '';
+            item.name = item.name || [
+                warehouseItem?.name || blank?.name || '',
+                warehouseItem?.size || '',
+                warehouseItem?.color || '',
+            ].filter(Boolean).join(' ');
+            if (!(parseFloat(item.cost_per_unit) > 0)) {
+                item.cost_per_unit = parseFloat(warehouseItem?.price_per_unit) || 0;
+            }
+            if (!(parseFloat(item.assembly_speed) > 0)) {
+                item.assembly_speed = parseFloat(blank?.assembly_speed) || 0;
+            }
+            return item;
+        }
+
+        if (blank) {
+            item.warehouse_sku = item.warehouse_sku || warehouseItem?.sku || blank.sku || '';
+            item.photo_thumbnail = item.photo_thumbnail || warehouseItem?.photo_thumbnail || warehouseItem?.photo_url || blank.photo_url || blank._whPhoto || '';
+            item.name = item.name || blank.name || '';
+            if (!(parseFloat(item.assembly_speed) > 0)) {
+                item.assembly_speed = parseFloat(blank.assembly_speed) || 0;
+            }
+            if (isPackaging && !(parseFloat(item.cost_per_unit) > 0)) {
+                item.cost_per_unit = round2((parseFloat(blank.price_per_unit) || 0) + (parseFloat(blank.delivery_per_unit) || 0));
+            }
+        }
+
+        return item;
+    },
+
+    _normalizeHwItem(item) {
+        return this._normalizeMarketplacePart(item, 'hw');
+    },
+
+    _normalizePkgItem(item) {
+        return this._normalizeMarketplacePart(item, 'pkg');
+    },
+
+    _normalizeMarketplaceSet(set) {
+        if (!set) return set;
+        return {
+            ...set,
+            hw_items: (set.hw_items || []).map(item => this._normalizeHwItem(item)),
+            pkg_items: (set.pkg_items || []).map(item => this._normalizePkgItem(item)),
+        };
     },
 
     // ==========================================
@@ -465,6 +562,9 @@ const Marketplaces = {
     // ==========================================
 
     renderFormItems() {
+        this._hwItems = (this._hwItems || []).map(item => this._normalizeHwItem(item));
+        this._pkgItems = (this._pkgItems || []).map(item => this._normalizePkgItem(item));
+
         // Plastic — searchable dropdown from molds
         const plasticList = this._plasticBlanks.map(b => ({
             id: b.id,
@@ -681,6 +781,7 @@ const Marketplaces = {
     },
 
     _calcHwUnitComponents(item, params) {
+        item = this._normalizeHwItem(item);
         const cnyRate = params.cnyRate || 12.5;
         const fotPerHour = params.fotPerHour || 400;
         const indirectPerHour = params.indirectPerHour || 0;
@@ -725,6 +826,7 @@ const Marketplaces = {
     },
 
     _calcPkgUnitComponents(item, params) {
+        item = this._normalizePkgItem(item);
         const fotPerHour = params.fotPerHour || 400;
         const indirectPerHour = params.indirectPerHour || 0;
         const wasteFactor = params.wasteFactor || 1.1;
@@ -888,6 +990,12 @@ const Marketplaces = {
         if (!name) { App.toast('Введите название набора'); return; }
 
         this.recalcSet();
+        const normalizedHwItems = this._hwItems
+            .map(item => this._normalizeHwItem(item))
+            .filter(item => item.blank_id || item.wh_id || (item.source === 'custom' && item.name));
+        const normalizedPkgItems = this._pkgItems
+            .map(item => this._normalizePkgItem(item))
+            .filter(item => item.blank_id || item.wh_id || (item.source === 'custom' && item.name));
 
         const mset = {
             id: this.editingSetId || undefined,
@@ -901,8 +1009,8 @@ const Marketplaces = {
             shop_multiplier: parseFloat(document.getElementById('mp-set-shop-multiplier').value) || 3,
             target_margin: parseFloat(document.getElementById('mp-set-margin').value) || 40,
             plastic_items: this._plasticItems.filter(i => i.blank_id),
-            hw_items: this._hwItems.filter(i => i.blank_id || i.wh_id || (i.source === 'custom' && i.name)),
-            pkg_items: this._pkgItems.filter(i => i.blank_id || i.wh_id || (i.source === 'custom' && i.name)),
+            hw_items: normalizedHwItems,
+            pkg_items: normalizedPkgItems,
             color_variants: this._colorVariants.filter(v => v.name || (v.assignments && v.assignments.some(a => a.color_id))),
             total_cost: this._lastCalc?.totalCost || 0,
             selling_price: this._lastCalc?.mpActualPrice || this._lastCalc?.suggestedMpPrice || 0,
@@ -1103,6 +1211,7 @@ const Marketplaces = {
     },
 
     _resolveHwWarehouseLink(hw) {
+        hw = this._normalizeHwItem(hw);
         if (!hw) return { source: 'custom', whId: null, sku: '' };
         const directWhId = Number(hw.wh_id || 0);
         if (hw.source === 'warehouse' && directWhId > 0) {
@@ -1132,6 +1241,7 @@ const Marketplaces = {
     },
 
     _resolvePkgWarehouseLink(pkg) {
+        pkg = this._normalizePkgItem(pkg);
         if (!pkg) return { source: 'custom', whId: null, sku: '' };
         const directWhId = Number(pkg.wh_id || 0);
         if (pkg.source === 'warehouse' && directWhId > 0) {

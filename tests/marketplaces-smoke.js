@@ -32,6 +32,7 @@ function createElement(id = '') {
         querySelector() { return null; },
         querySelectorAll() { return []; },
         insertAdjacentHTML() {},
+        scrollIntoView() {},
     };
 }
 
@@ -226,6 +227,46 @@ async function main() {
     assert.equal(pkgItem.warehouse_sku, 'ENV-150x90');
 
     vm.runInContext(`
+        Marketplaces.allSets = [{
+            id: 2,
+            name: 'Legacy Set',
+            photo_url: '',
+            hw_items: [{
+                wh_id: 501,
+                warehouse_sku: 'CRB-501',
+                qty: 1,
+                name: '',
+                assembly_speed: 0,
+            }],
+            pkg_items: [{
+                wh_id: 601,
+                warehouse_sku: 'ENV-150x90',
+                qty: 1,
+                name: '',
+                assembly_speed: 0,
+            }],
+            plastic_items: [],
+            color_variants: [],
+        }];
+        Marketplaces.editSet(2);
+    `, context);
+
+    const legacyHwState = JSON.parse(vm.runInContext(`JSON.stringify(Marketplaces._hwItems[0])`, context));
+    const legacyPkgState = JSON.parse(vm.runInContext(`JSON.stringify(Marketplaces._pkgItems[0])`, context));
+    const legacyHwHtml = String(context.document.getElementById('mp-hw-items').innerHTML || '');
+    const legacyPkgHtml = String(context.document.getElementById('mp-pkg-items').innerHTML || '');
+    assert.equal(legacyHwState.source, 'warehouse');
+    assert.equal(legacyHwState.wh_id, 501);
+    assert.equal(legacyHwState.warehouse_sku, 'CRB-501');
+    assert.equal(legacyPkgState.source, 'warehouse');
+    assert.equal(legacyPkgState.wh_id, 601);
+    assert.equal(legacyPkgState.warehouse_sku, 'ENV-150x90');
+    assert.match(legacyHwHtml, /CRB-501/);
+    assert.match(legacyHwHtml, /Карабин черный/);
+    assert.match(legacyPkgHtml, /ENV-150x90/);
+    assert.match(legacyPkgHtml, /Конверт/);
+
+    vm.runInContext(`
         let savedOrderPayload = null;
         let savedItemsPayload = null;
         let syncedWarehouse = null;
@@ -303,6 +344,7 @@ async function main() {
     const createdOrder = JSON.parse(vm.runInContext(`JSON.stringify(savedOrderPayload)`, context));
     const createdItems = JSON.parse(vm.runInContext(`JSON.stringify(savedItemsPayload)`, context));
     const warehouseSync = JSON.parse(vm.runInContext(`JSON.stringify(syncedWarehouse)`, context));
+    const originalB2CItemsJson = vm.runInContext(`JSON.stringify(savedItemsPayload)`, context);
     const createdHardware = createdItems.find(item => item.item_type === 'hardware');
     const createdPackaging = createdItems.find(item => item.item_type === 'packaging');
 
@@ -323,6 +365,40 @@ async function main() {
         orderName: 'B2C тест',
         managerName: 'Тест',
     });
+
+    vm.runInContext(`
+        Marketplaces.allSets = [{
+            id: 3,
+            name: 'Legacy Warehouse Set',
+            set_name: 'Legacy Warehouse Set',
+            mp_actual_price: 399,
+            plastic_items: [],
+            color_variants: [],
+            hw_items: [{
+                wh_id: 501,
+                warehouse_sku: 'CRB-501',
+                qty: 1,
+                name: '',
+                assembly_speed: 0,
+            }],
+            pkg_items: [{
+                wh_id: 601,
+                warehouse_sku: 'ENV-150x90',
+                qty: 1,
+                name: '',
+                assembly_speed: 0,
+            }],
+        }];
+    `, context);
+
+    await vm.runInContext(`Marketplaces._createProductionOrderFromSets([{ id: 3, qty: 1 }], 'Legacy B2C', '2026-03-31')`, context);
+    const legacyCreatedItems = JSON.parse(vm.runInContext(`JSON.stringify(savedItemsPayload)`, context));
+    const legacyCreatedHardware = legacyCreatedItems.find(item => item.item_type === 'hardware');
+    const legacyCreatedPackaging = legacyCreatedItems.find(item => item.item_type === 'packaging');
+    assert.equal(legacyCreatedHardware.hardware_source, 'warehouse');
+    assert.equal(legacyCreatedHardware.hardware_warehouse_item_id, 501);
+    assert.equal(legacyCreatedPackaging.packaging_source, 'warehouse');
+    assert.equal(legacyCreatedPackaging.packaging_warehouse_item_id, 601);
 
     vm.runInContext(`
         __projectHardwareState = { checks: {} };
@@ -356,7 +432,7 @@ async function main() {
                     manager_name: 'Тест',
                     status: 'production_casting',
                 },
-                items: savedItemsPayload,
+                items: JSON.parse(${JSON.stringify(originalB2CItemsJson)}),
             },
         };
         loadProjectHardwareState = async () => JSON.parse(JSON.stringify(__projectHardwareState));
@@ -385,7 +461,7 @@ async function main() {
         orderName: 'B2C тест',
         managerName: 'Тест',
         status: 'production_casting',
-        currentItems: savedItemsPayload,
+        currentItems: JSON.parse(${JSON.stringify(originalB2CItemsJson)}),
         previousItems: []
     })`, context);
 
