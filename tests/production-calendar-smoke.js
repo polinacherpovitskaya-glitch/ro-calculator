@@ -238,6 +238,21 @@ assert.equal(monthTrackingSummary.plannedMonthHours, 20, 'Month tracking must su
 assert.equal(monthTrackingSummary.plannedToDateHours, 12, 'Month tracking must separate the plan up to the current date');
 assert.equal(monthTrackingSummary.gapToDate, -3, 'Month tracking must expose the factual gap versus plan to date');
 
+const capacityRiskSummary = JSON.parse(JSON.stringify(vm.runInContext(`
+    Gantt.buildCapacityRiskSummary(
+        [
+            { date: '2026-03-19', totalUsed: 8 },
+            { date: '2026-03-20', totalUsed: 10 },
+            { date: '2026-03-24', totalUsed: 11 }
+        ],
+        8,
+        new Date('2026-03-20T12:00:00Z')
+    )
+`, ganttContext)));
+assert.equal(capacityRiskSummary.overloadDays, 2, 'Capacity risk summary must count all future overload days');
+assert.equal(capacityRiskSummary.firstOverloadDate, '2026-03-20', 'Capacity risk summary must expose the first future overload date');
+assert.equal(capacityRiskSummary.firstOverloadHours, 2, 'Capacity risk summary must expose the overload amount for the first future overload');
+
 const actualBuckets = JSON.parse(JSON.stringify(vm.runInContext(`
     Array.from(Gantt.buildOrderActuals(
         [

@@ -1,7 +1,7 @@
 # Production Calendar Status
 
 ## Snapshot
-- Current phase: C9.5 factual-vs-plan month tracking shipped locally, next up timeline-level replan UX
+- Current phase: C9.6 capacity-overload visibility shipped locally, next up timeline-level replan UX
 - Plan file: `/private/tmp/ro-codex-push-sync.v100/docs/production-calendar-plan.md`
 - Status: yellow
 - Last updated: 2026-03-17
@@ -101,6 +101,10 @@
   - stats теперь показывают `факт / план к сегодня`, а не только голый факт за месяц;
   - календарь считает отдельный `plannedToDate`, чтобы было видно, отстаем ли мы от собственного плана уже сейчас;
   - smoke страхует current-month tracking summary и gap-to-date.
+- Реализован следующий slice `v118`:
+  - queue summary и risk-card теперь показывают первый будущий день перегруза, а не только количество проблемных дней;
+  - calendar считает `firstOverloadDate` и `firstOverloadHours`, чтобы начальнику производства было понятно, куда смотреть первым;
+  - smoke страхует future overload summary.
 - Добавлен и подключен новый regression smoke:
   - `/private/tmp/ro-codex-push-sync.v100/tests/production-calendar-smoke.js`
   - `.github/workflows/deploy-pages.yml`
@@ -181,6 +185,7 @@
 | 2026-03-17 | Local-date drift cleanup | `js/gantt.js`, `tests/production-calendar-smoke.js` | capacity chart and calendar stats now use local-date-safe helpers instead of `toISOString().slice(0,10)` paths | continue into richer timeline drag/replan UX |
 | 2026-03-17 | Deadline buffer readability | `js/gantt.js`, `css/style.css`, `tests/production-calendar-smoke.js` | queue, sidebar and markers now show working-day buffer vs overdue state instead of only binary deadline risk | continue into timeline-level replan UX |
 | 2026-03-17 | Month tracking to-date | `js/gantt.js`, `tests/production-calendar-smoke.js` | stats now compare factual submitted hours against the scheduled plan up to today, not only against the full month | continue into timeline-level replan UX |
+| 2026-03-17 | First overload visibility | `js/gantt.js`, `tests/production-calendar-smoke.js` | queue summary and risk stats now expose the first future overload day and its overload hours | continue into timeline-level replan UX |
 
 ## Smoke / Demo Checklist
 - [x] В меню слева остается один понятный `Производственный календарь`.

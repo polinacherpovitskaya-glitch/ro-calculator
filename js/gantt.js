@@ -599,6 +599,7 @@ const Gantt = {
         const tightCount = riskSummaries.filter(risk => risk.status === 'critical' || risk.status === 'tight').length;
         const blockedCount = blockedQueue.length;
         const reviewCount = reviewQueue.length;
+        const overloadSummary = this.buildCapacityRiskSummary(this.schedule?.days || [], this.schedule?.dailyCapacity || 0, new Date());
         const cardsHtml = queue.map(item => this.renderQueueCard(item)).join('');
         const blockedHtml = blockedQueue.map(item => this.renderQueueCard(item, { blocked: true })).join('');
         const reviewHtml = reviewQueue.map(item => this.renderQueueCard(item, { review: true })).join('');
@@ -611,7 +612,7 @@ const Gantt = {
                         <p>Порядок сверху задает, что начальник производства запускает раньше. Фактические часы уменьшают остаток автоматически, так что календарь показывает то, что реально еще нужно сделать.</p>
                     </div>
                     <div class="gantt-queue-summary">
-                        <strong>${queue.length}</strong> готово к плану · <strong>${this.formatHours(totalHours)}</strong> осталось · <strong>${this.formatHours(actualHours)}</strong> уже сдано${lateCount ? ` · <span class="text-red">${lateCount} опаздывают</span>` : ''}${tightCount ? ` · <span class="text-orange">${tightCount} впритык к дедлайну</span>` : ''}${blockedCount ? ` · <span class="text-orange">${blockedCount} ждут молд/Китай</span>` : ''}${reviewCount ? ` · <span class="text-muted">${reviewCount} требуют проверки</span>` : ''}
+                        <strong>${queue.length}</strong> готово к плану · <strong>${this.formatHours(totalHours)}</strong> осталось · <strong>${this.formatHours(actualHours)}</strong> уже сдано${lateCount ? ` · <span class="text-red">${lateCount} опаздывают</span>` : ''}${tightCount ? ` · <span class="text-orange">${tightCount} впритык к дедлайну</span>` : ''}${overloadSummary.firstOverloadDate ? ` · <span class="text-red">первый перегруз ${this.formatDateStr(overloadSummary.firstOverloadDate)} (+${this.formatHours(overloadSummary.firstOverloadHours)})</span>` : ''}${blockedCount ? ` · <span class="text-orange">${blockedCount} ждут молд/Китай</span>` : ''}${reviewCount ? ` · <span class="text-muted">${reviewCount} требуют проверки</span>` : ''}
                     </div>
                 </div>
                 ${queue.length ? `
@@ -847,6 +848,7 @@ const Gantt = {
         const riskSummaries = queue.map(item => this.getDeadlineRiskSummary(item));
         const lateOrders = riskSummaries.filter(risk => risk.status === 'late').length;
         const tightOrders = riskSummaries.filter(risk => risk.status === 'critical' || risk.status === 'tight').length;
+        const overloadSummary = this.buildCapacityRiskSummary(days, dailyCapacity, new Date());
         const monthTracking = this.buildCurrentMonthTrackingSummary(days, this.actualMonthSummary, new Date());
         const plannedMonthHours = monthTracking.plannedMonthHours;
         const plannedToDateHours = monthTracking.plannedToDateHours;
@@ -870,8 +872,8 @@ const Gantt = {
                 <div class="stat-label">Свободных часов</div>
             </div>
             <div class="stat-card">
-                <div class="stat-value ${(overloadDays || lateOrders || tightOrders) ? 'text-red' : 'text-green'}">${lateOrders ? `${lateOrders} зак.` : tightOrders ? `${tightOrders} зак.` : overloadDays ? `${overloadDays} дн.` : 'OK'}</div>
-                <div class="stat-label">${lateOrders ? 'Опаздывают к дедлайну' : tightOrders ? 'Впритык к дедлайну' : overloadDays ? 'Перегруз в днях' : 'Риски не найдены'}</div>
+                <div class="stat-value ${(overloadDays || lateOrders || tightOrders) ? 'text-red' : 'text-green'}">${lateOrders ? `${lateOrders} зак.` : tightOrders ? `${tightOrders} зак.` : overloadSummary.firstOverloadDate ? this.formatDateStr(overloadSummary.firstOverloadDate) : 'OK'}</div>
+                <div class="stat-label">${lateOrders ? 'Опаздывают к дедлайну' : tightOrders ? 'Впритык к дедлайну' : overloadSummary.firstOverloadDate ? `Первый перегруз · +${this.formatHours(overloadSummary.firstOverloadHours)}` : 'Риски не найдены'}</div>
             </div>
             <div class="stat-card">
                 <div class="stat-value">${this.formatHours(plannedMonthHours)}</div>
@@ -1012,6 +1014,19 @@ const Gantt = {
             actualMonthHours,
             gapToDate: round2(actualMonthHours - plannedToDateHours),
             employeeCount: Number(actualMonthSummary?.employeeCount || 0),
+        };
+    },
+
+    buildCapacityRiskSummary(days = [], dailyCapacity = 0, referenceDate = new Date()) {
+        const point = referenceDate instanceof Date ? referenceDate : this.parseLocalDate(referenceDate);
+        const today = this.formatIsoDateLocal(point);
+        const futureDays = (days || []).filter(day => String(day?.date || '') >= today);
+        const overloadedDays = futureDays.filter(day => Number(day?.totalUsed || 0) > Number(dailyCapacity || 0));
+        const firstOverload = overloadedDays[0] || null;
+        return {
+            overloadDays: overloadedDays.length,
+            firstOverloadDate: firstOverload?.date || '',
+            firstOverloadHours: firstOverload ? round2((firstOverload.totalUsed || 0) - Number(dailyCapacity || 0)) : 0,
         };
     },
 
