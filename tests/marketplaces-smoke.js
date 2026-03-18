@@ -324,6 +324,107 @@ async function main() {
         managerName: 'Тест',
     });
 
+    vm.runInContext(`
+        __projectHardwareState = { checks: {} };
+        __reservations = [];
+        __warehouseHistory = [];
+        __warehouseItems = [
+            {
+                id: 501,
+                name: 'Карабин черный',
+                sku: 'CRB-501',
+                category: 'chains',
+                qty: 12,
+                price_per_unit: 10,
+                unit: 'шт',
+            },
+            {
+                id: 601,
+                name: 'Конверт',
+                sku: 'ENV-150x90',
+                category: 'packaging',
+                qty: 30,
+                price_per_unit: 5,
+                unit: 'шт',
+            },
+        ];
+        __orderDetails = {
+            777: {
+                order: {
+                    id: 777,
+                    order_name: 'B2C тест',
+                    manager_name: 'Тест',
+                    status: 'production_casting',
+                },
+                items: savedItemsPayload,
+            },
+        };
+        loadProjectHardwareState = async () => JSON.parse(JSON.stringify(__projectHardwareState));
+        saveProjectHardwareState = async (state) => {
+            __projectHardwareState = JSON.parse(JSON.stringify(state));
+        };
+        loadWarehouseReservations = async () => JSON.parse(JSON.stringify(__reservations));
+        saveWarehouseReservations = async (reservations) => {
+            __reservations = JSON.parse(JSON.stringify(reservations));
+        };
+        loadWarehouseItems = async () => JSON.parse(JSON.stringify(__warehouseItems));
+        saveWarehouseItems = async (items) => {
+            __warehouseItems = JSON.parse(JSON.stringify(items));
+        };
+        loadWarehouseHistory = async () => JSON.parse(JSON.stringify(__warehouseHistory));
+        saveWarehouseHistory = async (history) => {
+            __warehouseHistory = JSON.parse(JSON.stringify(history));
+        };
+        loadOrder = async (orderId) => JSON.parse(JSON.stringify(__orderDetails[Number(orderId)] || null));
+        Warehouse.projectHardwareState = null;
+        Warehouse.allItems = __warehouseItems;
+    `, context);
+
+    await vm.runInContext(`Warehouse.syncProjectHardwareOrderState({
+        orderId: 777,
+        orderName: 'B2C тест',
+        managerName: 'Тест',
+        status: 'production_casting',
+        currentItems: savedItemsPayload,
+        previousItems: []
+    })`, context);
+
+    const activeReservations = JSON.parse(vm.runInContext(`JSON.stringify(__reservations)`, context));
+    assert.equal(activeReservations.length, 2);
+    const hwReservation = activeReservations.find(item => Number(item.item_id) === 501);
+    const pkgReservation = activeReservations.find(item => Number(item.item_id) === 601);
+    assert.equal(hwReservation.qty, 2);
+    assert.equal(pkgReservation.qty, 2);
+    assert.equal(hwReservation.status, 'active');
+    assert.equal(pkgReservation.status, 'active');
+
+    vm.runInContext(`
+        __originalWarehouseLoad = Warehouse.load;
+        Warehouse.load = async () => {};
+    `, context);
+    try {
+        await vm.runInContext(`Warehouse.toggleProjectHardwareReady(777, 501, true)`, context);
+        await vm.runInContext(`Warehouse.toggleProjectHardwareReady(777, 601, true)`, context);
+    } finally {
+        vm.runInContext(`
+            Warehouse.load = __originalWarehouseLoad;
+            delete __originalWarehouseLoad;
+        `, context);
+    }
+
+    const warehouseItemsAfterReady = JSON.parse(vm.runInContext(`JSON.stringify(__warehouseItems)`, context));
+    const reservationsAfterReady = JSON.parse(vm.runInContext(`JSON.stringify(__reservations)`, context));
+    const historyAfterReady = JSON.parse(vm.runInContext(`JSON.stringify(__warehouseHistory)`, context));
+    const projectHardwareState = JSON.parse(vm.runInContext(`JSON.stringify(__projectHardwareState)`, context));
+    assert.equal(warehouseItemsAfterReady.find(item => Number(item.id) === 501).qty, 10);
+    assert.equal(warehouseItemsAfterReady.find(item => Number(item.id) === 601).qty, 28);
+    assert.equal(reservationsAfterReady.filter(item => item.status === 'active').length, 0);
+    assert.equal(reservationsAfterReady.filter(item => item.status === 'released').length, 2);
+    assert.equal(historyAfterReady.length, 2);
+    assert.ok(historyAfterReady.every(entry => /Списание собранной позиции со склада: 2 шт/.test(entry.notes)));
+    assert.equal(Boolean(projectHardwareState.checks['777:501']), true);
+    assert.equal(Boolean(projectHardwareState.checks['777:601']), true);
+
     const pickerHost = context.document.getElementById('picker-filter-host');
     const filteredItems = [
         { textContent: 'Карабин черный 5 см CRB-501 склад', style: {} },

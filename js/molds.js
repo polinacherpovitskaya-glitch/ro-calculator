@@ -819,25 +819,22 @@ const Molds = {
     },
 
     renderWarehouseHwPicker() {
-        const container = document.getElementById('mold-hw-warehouse-list');
+        const container = document.getElementById('mold-hw-warehouse-picker-host');
         if (!container) return;
-        if (this._warehouseItems.length === 0) {
+        if (!this._warehouseHwItems.length) {
             container.innerHTML = '<p class="text-muted" style="font-size:12px">Нет фурнитуры на складе</p>';
             return;
         }
-        container.innerHTML = this._warehouseItems.map(item => {
-            const photo = item.photo_thumbnail
-                ? `<img src="${item.photo_thumbnail}" style="width:36px;height:36px;object-fit:cover;border-radius:4px;border:1px solid var(--border)">`
-                : `<span style="width:36px;height:36px;display:flex;align-items:center;justify-content:center;background:var(--accent-light);border-radius:4px;font-size:14px;">&#128295;</span>`;
-            const selected = this._hwWarehouseItemId === item.id ? 'border-color:var(--accent);background:var(--accent-light)' : '';
-            return `<div onclick="Molds.selectWarehouseHw(${item.id})" style="display:flex;gap:8px;align-items:center;padding:6px 8px;cursor:pointer;border:1px solid var(--border);border-radius:6px;${selected}">
-                ${photo}
-                <div style="flex:1;min-width:0">
-                    <div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${this.esc(item.name)}</div>
-                    <div style="font-size:10px;color:var(--text-muted)">${formatRub(item.price_per_unit || 0)}/шт</div>
-                </div>
-            </div>`;
-        }).join('');
+        const grouped = this._buildWarehouseHwPickerData();
+        const selectedId = document.getElementById('hw-blank-wh-id')?.value || '';
+        container.innerHTML = Warehouse.buildImagePicker(
+            'moldhw-picker-0',
+            grouped,
+            selectedId,
+            'Molds.selectWarehouseHwPicker',
+            'hardware',
+            { searchPlaceholder: 'Поиск по названию или артикулу...' }
+        );
     },
 
     selectWarehouseHw(itemId) {
@@ -851,6 +848,10 @@ const Molds = {
         document.getElementById('mold-hw-delivery-total').value = 0;
         this.renderWarehouseHwPicker(); // re-render to show selected
         App.toast('Фурнитура выбрана: ' + (item.name || ''));
+    },
+
+    selectWarehouseHwPicker(_idx, itemId) {
+        this.selectHwWarehouseItem(itemId);
     },
 
     esc(str) {
@@ -964,10 +965,12 @@ const Molds = {
 
             if (warehouseSnapshot) {
                 b._warehouseName = warehouseSnapshot.name;
+                b._warehouseSku = warehouseSnapshot.sku;
                 b._displayNotes = warehouseSnapshot.notes;
                 b._whPhoto = warehouseSnapshot.photoUrl;
             } else {
                 b._warehouseName = '';
+                b._warehouseSku = '';
                 b._displayNotes = b.notes || '';
                 b._whPhoto = '';
                 if (!b.photo_url && b.warehouse_item_id) {
@@ -1006,6 +1009,7 @@ const Molds = {
             const priceRub = b._priceRubCalc || b.price_rub || 0;
             const displayName = b._warehouseName || b.name;
             const displayNotes = b._displayNotes || b.notes || '';
+            const displaySku = b._warehouseSku || '';
             const photoSrc = src === 'warehouse'
                 ? (b._whPhoto || b.photo_url || '')
                 : (b.photo_url || b._whPhoto || '');
@@ -1017,18 +1021,21 @@ const Molds = {
             const speedLabel = speedPcsMin > 0 ? (speedPcsMin + ' шт/мин') : '—';
             const srcBadge = b._srcBadge || '📦';
             // Extra info line for china/custom
-            let extraInfo = '';
+            const detailBits = [speedLabel];
+            if (src === 'warehouse' && displaySku) detailBits.push(displaySku);
             if (src === 'china' || src === 'custom_cny') {
                 const methodInfo = ChinaCatalog.DELIVERY_METHODS[b.delivery_method];
                 const deliveryLabel = methodInfo ? methodInfo.label : (b.delivery_method || '');
-                extraInfo = ` · ${b.price_cny || 0}¥ · ${deliveryLabel}`;
+                detailBits.push(`${b.price_cny || 0}¥`);
+                if (deliveryLabel) detailBits.push(deliveryLabel);
             }
+            if (displayNotes) detailBits.push(displayNotes);
 
             html += `<tr style="border-bottom:1px solid var(--border);">
                 <td style="padding:6px;">${photo}</td>
                 <td style="padding:6px 8px;">
                     <div style="font-weight:700;font-size:13px;">${srcBadge} ${this.esc(displayName)}</div>
-                    <div style="font-size:10px;color:var(--text-muted);margin-top:2px;">${speedLabel}${extraInfo}${displayNotes ? ' · ' + this.esc(displayNotes) : ''}</div>
+                    <div style="font-size:10px;color:var(--text-muted);margin-top:2px;">${this.esc(detailBits.filter(Boolean).join(' · '))}</div>
                 </td>
                 <td style="padding:6px 8px;text-align:right;font-size:12px;color:var(--text-secondary);">${formatRub(priceRub)}</td>
                 <td style="padding:6px 8px;text-align:right;font-size:12px;color:var(--text-secondary);">${formatRub(b._assemblyCost)}</td>
@@ -1071,6 +1078,9 @@ const Molds = {
         if (src === 'china' && ChinaCatalog._items.length === 0) {
             ChinaCatalog._loadItems().then(items => { ChinaCatalog._items = items; });
         }
+        if (src === 'warehouse') {
+            this.renderWarehouseHwPicker();
+        }
         // Reset selection
         document.getElementById('hw-blank-selected').style.display = 'none';
         this.recalcHwCost();
@@ -1100,13 +1110,14 @@ const Molds = {
     _normalizeHwNotesForWarehouseItem(item, notes) {
         const sku = String(item?.sku || '').trim();
         const raw = String(notes || '').trim();
-        if (!sku) return raw;
-        if (!raw) return sku;
-        const parts = raw.split(' + ');
-        const prefix = String(parts[0] || '').trim();
-        if (prefix === sku) return raw;
+        if (!sku || !raw) return raw;
+        if (raw === sku) return '';
+        const parts = raw.split(' + ').map(part => String(part || '').trim()).filter(Boolean);
+        if (!parts.length) return '';
+        const prefix = parts[0];
+        if (prefix === sku) return parts.slice(1).join(' + ').trim();
         if (this._looksLikeWarehouseSku(prefix)) {
-            return [sku].concat(parts.slice(1).filter(Boolean)).join(' + ');
+            return parts.slice(1).join(' + ').trim();
         }
         return raw;
     },
@@ -1135,11 +1146,53 @@ const Molds = {
         return parts.join(' · ');
     },
 
+    _getWarehouseCategoryMeta(catKey) {
+        if (typeof WAREHOUSE_CATEGORIES !== 'undefined' && Array.isArray(WAREHOUSE_CATEGORIES)) {
+            return WAREHOUSE_CATEGORIES.find(cat => cat.key === catKey) || null;
+        }
+        return null;
+    },
+
+    _buildWarehouseHwPickerData() {
+        const grouped = {};
+        const sortedItems = [...(this._warehouseHwItems || [])].sort((a, b) =>
+            String(a.name || '').localeCompare(String(b.name || ''), 'ru')
+        );
+
+        sortedItems.forEach(item => {
+            const catKey = String(item.category || 'other');
+            if (!grouped[catKey]) {
+                const meta = this._getWarehouseCategoryMeta(catKey);
+                grouped[catKey] = {
+                    label: meta?.label || catKey,
+                    icon: meta?.icon || '📦',
+                    items: [],
+                };
+            }
+
+            grouped[catKey].items.push({
+                id: item.id,
+                category: item.category || catKey,
+                name: item.name || '',
+                sku: item.sku || '',
+                size: item.size || '',
+                color: item.color || '',
+                qty: item.qty || 0,
+                available_qty: item.available_qty ?? item.qty ?? 0,
+                price_per_unit: item.price_per_unit || 0,
+                unit: item.unit || 'шт',
+                photo_thumbnail: item.photo_thumbnail || item.photo_url || '',
+                photo_url: item.photo_url || item.photo_thumbnail || '',
+            });
+        });
+
+        return grouped;
+    },
+
     showHwForm() {
         this._editingHwId = null;
         this._hwFormSource = 'warehouse';
         document.getElementById('hw-form-title').textContent = 'Новая фурнитура';
-        document.getElementById('hw-blank-wh-search').value = '';
         document.getElementById('hw-blank-speed').value = '';
         document.getElementById('hw-blank-notes').value = '';
         document.getElementById('hw-blank-name').value = '';
@@ -1149,7 +1202,6 @@ const Molds = {
         document.getElementById('hw-blank-wh-id').value = '';
         document.getElementById('hw-blank-china-id').value = '';
         document.getElementById('hw-blank-selected').style.display = 'none';
-        document.getElementById('hw-blank-wh-dropdown').style.display = 'none';
         document.getElementById('hw-delete-btn').style.display = 'none';
         // Reset custom fields
         const customName = document.getElementById('hw-custom-name');
@@ -1198,9 +1250,7 @@ const Molds = {
 
         this.setHwFormSource(src);
 
-        if (src === 'warehouse') {
-            document.getElementById('hw-blank-wh-search').value = warehouseSnapshot?.name || b.name || '';
-        } else if (src === 'china') {
+        if (src === 'china') {
             const chinaSearch = document.getElementById('hw-china-search');
             if (chinaSearch) chinaSearch.value = b.name || '';
             // Set delivery method
@@ -1405,15 +1455,14 @@ const Molds = {
         const snapshot = this._getWarehouseHwSnapshot(whId, document.getElementById('hw-blank-notes').value);
         if (!snapshot) return;
 
-        document.getElementById('hw-blank-wh-search').value = snapshot.name;
         document.getElementById('hw-blank-name').value = snapshot.name;
         document.getElementById('hw-blank-price-rub').value = snapshot.priceRub;
         document.getElementById('hw-blank-photo').value = '';
         document.getElementById('hw-blank-wh-id').value = whId;
         document.getElementById('hw-blank-china-id').value = '';
         document.getElementById('hw-blank-notes').value = snapshot.notes;
-        document.getElementById('hw-blank-wh-dropdown').style.display = 'none';
 
+        this.renderWarehouseHwPicker();
         this._showHwSelectedItem(snapshot.name, snapshot.priceRub, snapshot.photoUrl, this._formatWarehouseHwInfo(snapshot));
         this.recalcHwCost();
     },
@@ -1531,7 +1580,8 @@ const Molds = {
 
     hideHwForm() {
         document.getElementById('hw-edit-form').style.display = 'none';
-        document.getElementById('hw-blank-wh-dropdown').style.display = 'none';
+        const pickerHost = document.getElementById('mold-hw-warehouse-picker-host');
+        if (pickerHost) pickerHost.innerHTML = '';
         this._editingHwId = null;
     },
 

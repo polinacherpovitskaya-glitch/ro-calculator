@@ -82,6 +82,16 @@ function createContext() {
         loadMolds: async () => [],
         refreshTemplatesFromMolds() {},
     };
+    context.Warehouse = {
+        buildImagePicker(containerId, grouped, selectedId) {
+            context.__pickerArgs = {
+                containerId,
+                selectedId,
+                groupedKeys: Object.keys(grouped || {}),
+            };
+            return `<div class="wh-img-picker" data-container="${containerId}"><input class="wh-picker-search" placeholder="Поиск по названию или артикулу..."></div>`;
+        },
+    };
     context.window = context;
     return vm.createContext(context);
 }
@@ -109,6 +119,7 @@ async function main() {
         'hw-blank-selected-name',
         'hw-blank-selected-info',
         'hw-blank-photo-preview',
+        'mold-hw-warehouse-picker-host',
     ].forEach(id => context.document.getElementById(id));
 
     vm.runInContext(`
@@ -132,10 +143,24 @@ async function main() {
     assert.match(dropdownHtml, /Карабин/);
     assert.match(dropdownHtml, /5 см/);
 
+    const skuOnlySnapshot = JSON.parse(vm.runInContext(`JSON.stringify(Molds._getWarehouseHwSnapshot(501, 'CRB-501'))`, context));
+    assert.equal(skuOnlySnapshot.notes, '');
+    const prefixedNotesSnapshot = JSON.parse(vm.runInContext(`JSON.stringify(Molds._getWarehouseHwSnapshot(501, 'CRB-501 + полная сборка'))`, context));
+    assert.equal(prefixedNotesSnapshot.notes, 'полная сборка');
+
+    vm.runInContext(`document.getElementById('hw-blank-wh-id').value = '501'; Molds.renderWarehouseHwPicker();`, context);
+    const pickerHtml = String(context.document.getElementById('mold-hw-warehouse-picker-host').innerHTML || '');
+    const pickerArgs = context.__pickerArgs;
+    assert.match(pickerHtml, /wh-img-picker/);
+    assert.match(pickerHtml, /Поиск по названию или артикулу/);
+    assert.equal(pickerArgs.containerId, 'moldhw-picker-0');
+    assert.equal(pickerArgs.selectedId, '501');
+
     vm.runInContext(`Molds.selectHwWarehouseItem(501)`, context);
     assert.equal(context.document.getElementById('hw-blank-wh-id').value, 501);
     assert.match(String(context.document.getElementById('hw-blank-selected-info').textContent || ''), /Артикул: CRB-501/);
     assert.match(String(context.document.getElementById('hw-blank-selected-info').textContent || ''), /10 ₽/);
+    assert.equal(String(context.document.getElementById('hw-blank-notes').value || ''), '');
 
     console.log('molds smoke checks passed');
 }
