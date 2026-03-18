@@ -1119,11 +1119,20 @@ const Molds = {
         return {
             item,
             name: this._formatWarehouseHwName(item),
+            sku: String(item.sku || '').trim(),
             priceRub: round2(item.price_per_unit || 0),
             photoUrl: item.photo_thumbnail || item.photo_url || '',
             warehouseItemId: item.id,
             notes: this._normalizeHwNotesForWarehouseItem(item, notes),
         };
+    },
+
+    _formatWarehouseHwInfo(snapshot) {
+        if (!snapshot) return '';
+        const parts = [];
+        if (snapshot.sku) parts.push(`Артикул: ${snapshot.sku}`);
+        parts.push(`Цена: ${formatRub(snapshot.priceRub)} (доставка включена)`);
+        return parts.join(' · ');
     },
 
     showHwForm() {
@@ -1214,7 +1223,12 @@ const Molds = {
         const photoSrc = src === 'warehouse'
             ? (warehouseSnapshot?.photoUrl || b._whPhoto || b.photo_url || '')
             : (b.photo_url || b._whPhoto || '');
-        this._showHwSelectedItem(previewName, previewPrice, photoSrc);
+        this._showHwSelectedItem(
+            previewName,
+            previewPrice,
+            photoSrc,
+            src === 'warehouse' ? this._formatWarehouseHwInfo(warehouseSnapshot) : ''
+        );
 
         document.getElementById('hw-delete-btn').style.display = '';
         document.getElementById('hw-edit-form').style.display = '';
@@ -1222,14 +1236,14 @@ const Molds = {
         document.getElementById('hw-edit-form').scrollIntoView({ behavior: 'smooth' });
     },
 
-    _showHwSelectedItem(name, priceRub, photoUrl) {
+    _showHwSelectedItem(name, priceRub, photoUrl, infoText = '') {
         const block = document.getElementById('hw-blank-selected');
         const nameEl = document.getElementById('hw-blank-selected-name');
         const infoEl = document.getElementById('hw-blank-selected-info');
         const photoEl = document.getElementById('hw-blank-photo-preview');
 
         nameEl.textContent = name || '';
-        infoEl.textContent = `Цена: ${formatRub(priceRub)} (доставка включена)`;
+        infoEl.textContent = infoText || `Цена: ${formatRub(priceRub)} (доставка включена)`;
 
         if (photoUrl) {
             photoEl.src = photoUrl;
@@ -1267,7 +1281,12 @@ const Molds = {
                 ? `<img src="${photoSrc.startsWith('data:') ? photoSrc : this.esc(photoSrc)}" style="width:32px;height:32px;object-fit:cover;border-radius:4px;">`
                 : `<span style="width:32px;height:32px;display:flex;align-items:center;justify-content:center;background:var(--accent-light);border-radius:4px;font-size:12px;">🔩</span>`;
             const price = item.price_per_unit || 0;
-            const details = [item.size, item.color].filter(Boolean).join(' · ');
+            const details = [
+                String(item.sku || '').trim() || 'без артикула',
+                item.size,
+                item.color,
+                formatRub(price),
+            ].filter(Boolean).join(' · ');
 
             html += `<div style="display:flex;gap:8px;align-items:center;padding:8px 10px;cursor:pointer;border-bottom:1px solid var(--border);"
                       onmouseover="this.style.background='var(--bg)'" onmouseout="this.style.background=''"
@@ -1275,7 +1294,7 @@ const Molds = {
                 ${photo}
                 <div style="flex:1;min-width:0;">
                     <div style="font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${this.esc(item.name)}</div>
-                    <div style="font-size:10px;color:var(--text-muted);">${details ? details + ' · ' : ''}${formatRub(price)}</div>
+                    <div style="font-size:10px;color:var(--text-muted);">${details}</div>
                 </div>
             </div>`;
         });
@@ -1395,7 +1414,7 @@ const Molds = {
         document.getElementById('hw-blank-notes').value = snapshot.notes;
         document.getElementById('hw-blank-wh-dropdown').style.display = 'none';
 
-        this._showHwSelectedItem(snapshot.name, snapshot.priceRub, snapshot.photoUrl);
+        this._showHwSelectedItem(snapshot.name, snapshot.priceRub, snapshot.photoUrl, this._formatWarehouseHwInfo(snapshot));
         this.recalcHwCost();
     },
 
