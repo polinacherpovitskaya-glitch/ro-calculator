@@ -6,6 +6,12 @@ const Tasks = {
     warehouseItems: [],
     currentTaskId: null,
     createDraft: null,
+    templateDraft: null,
+    templateManagerOpen: false,
+    editorUi: {
+        visibleContexts: { order: false, project: false, china: false, warehouse: false },
+        restoredDraft: false,
+    },
     view: 'list',
     scope: 'my',
     myMode: 'assigned',
@@ -27,6 +33,7 @@ const Tasks = {
     },
     sort: 'manual',
     _completedOpen: Object.create(null),
+    _draftSaveTimer: null,
 
     async load(taskId) {
         if (!this.scope) this.scope = App.currentEmployeeId ? 'my' : 'all';
@@ -102,6 +109,136 @@ const Tasks = {
         return (this.employees || []).find(item => String(item.id) === String(id))?.name || fallback || '—';
     },
 
+    chinaPurchaseById(id) {
+        return (this.chinaPurchases || []).find(item => String(item.id) === String(id)) || null;
+    },
+
+    warehouseItemById(id) {
+        return (this.warehouseItems || []).find(item => String(item.id) === String(id)) || null;
+    },
+
+    areaBySlug(slug) {
+        const normalized = WorkManagementCore.normalizeText(slug);
+        return (this.bundle?.areas || []).find(item => WorkManagementCore.normalizeText(item.slug || item.name || '') === normalized) || null;
+    },
+
+    visibleContextsForTask(task) {
+        const fallback = {
+            order: !!task?.order_id,
+            project: !!task?.project_id,
+            china: !!task?.china_purchase_id,
+            warehouse: !!task?.warehouse_item_id,
+        };
+        return {
+            order: !!(this.editorUi?.visibleContexts?.order || fallback.order),
+            project: !!(this.editorUi?.visibleContexts?.project || fallback.project),
+            china: !!(this.editorUi?.visibleContexts?.china || fallback.china),
+            warehouse: !!(this.editorUi?.visibleContexts?.warehouse || fallback.warehouse),
+        };
+    },
+
+    syncEditorUiForTask(task) {
+        this.editorUi = {
+            ...(this.editorUi || {}),
+            visibleContexts: {
+                order: !!task?.order_id,
+                project: !!task?.project_id,
+                china: !!task?.china_purchase_id,
+                warehouse: !!task?.warehouse_item_id,
+            },
+            restoredDraft: false,
+        };
+    },
+
+    inferHiddenAreaId(taskLike = {}) {
+        if (taskLike.area_id) return Number(taskLike.area_id) || taskLike.area_id;
+        if (taskLike.project_id) {
+            const project = this.projectById(taskLike.project_id);
+            if (project?.area_id) return project.area_id;
+        }
+        if (taskLike.china_purchase_id) return this.areaBySlug('china')?.id || '';
+        if (taskLike.warehouse_item_id) return this.areaBySlug('warehouse')?.id || '';
+        return this.areaBySlug('general')?.id || '';
+    },
+
+    inferPrimaryContextKind(taskLike = {}) {
+        if (taskLike.project_id) return 'project';
+        if (taskLike.order_id) return 'order';
+        return 'area';
+    },
+
+    meaningfulDraft(taskLike = {}) {
+        return !!(
+            String(taskLike.title || '').trim()
+            || String(taskLike.description || '').trim()
+            || String(taskLike.waiting_for_text || '').trim()
+            || String(taskLike.template_id || '').trim()
+            || String(taskLike.assignee_id || '').trim()
+            || String(taskLike.due_date || '').trim()
+            || String(taskLike.order_id || '').trim()
+            || String(taskLike.project_id || '').trim()
+            || String(taskLike.china_purchase_id || '').trim()
+            || String(taskLike.warehouse_item_id || '').trim()
+            || (Array.isArray(taskLike.watcher_ids) && taskLike.watcher_ids.length > 0)
+        );
+    },
+
+    draftStorageKey() {
+        return `ro_task_editor_draft_v3:${App.currentEmployeeId || 'guest'}`;
+    },
+
+    draftTtlMs() {
+        return 30 * 60 * 1000;
+    },
+
+    loadStoredDraft() {
+        try {
+            const raw = localStorage.getItem(this.draftStorageKey());
+            if (!raw) return null;
+            const parsed = JSON.parse(raw);
+            if (!parsed || typeof parsed !== 'object') return null;
+            if (!parsed.saved_at || (Date.now() - Number(parsed.saved_at)) > this.draftTtlMs()) {
+                localStorage.removeItem(this.draftStorageKey());
+                return null;
+            }
+            return parsed.draft || null;
+        } catch (error) {
+            return null;
+        }
+    },
+
+    persistStoredDraft(draft) {
+        try {
+            if (!draft || !this.meaningfulDraft(draft)) {
+                localStorage.removeItem(this.draftStorageKey());
+                return;
+            }
+            localStorage.setItem(this.draftStorageKey(), JSON.stringify({
+                saved_at: Date.now(),
+                draft,
+            }));
+        } catch (error) {
+            // Ignore storage issues in the browser.
+        }
+    },
+
+    clearStoredDraft() {
+        try {
+            localStorage.removeItem(this.draftStorageKey());
+        } catch (error) {
+            // Ignore storage issues in the browser.
+        }
+    },
+
+    maybeRestoreCreateDraft(preset = {}, templateId = null) {
+        const hasPreset = Object.keys(preset || {}).some(key => {
+            const value = preset[key];
+            return value !== null && value !== undefined && String(value) !== '';
+        });
+        if (templateId || hasPreset) return null;
+        return this.loadStoredDraft();
+    },
+
     formatDate(value) {
         if (!value) return '—';
         try {
@@ -138,12 +275,22 @@ const Tasks = {
     contextLabel(task) {
         const project = task.project_id ? this.projectById(task.project_id) : null;
         const order = task.order_id ? this.orderById(task.order_id) : (project?.linked_order_id ? this.orderById(project.linked_order_id) : null);
-        const area = task.area_id ? this.areaById(task.area_id) : (project?.area_id ? this.areaById(project.area_id) : null);
         const chunks = [];
         if (order) chunks.push(`Заказ: ${order.order_name}`);
         if (project) chunks.push(`Проект: ${project.title}`);
-        if (area) chunks.push(`Направление: ${area.name}`);
-        return chunks.join(' · ') || 'Без контекста';
+        if (task.china_purchase_id) {
+            const china = this.chinaPurchaseById(task.china_purchase_id);
+            if (china) chunks.push(`China: ${china.purchase_name || `Закупка #${china.id}`}`);
+        }
+        if (task.warehouse_item_id) {
+            const warehouse = this.warehouseItemById(task.warehouse_item_id);
+            if (warehouse) chunks.push(`Склад: ${warehouse.name || warehouse.sku || `Позиция #${warehouse.id}`}`);
+        }
+        const area = task.area_id ? this.areaById(task.area_id) : (project?.area_id ? this.areaById(project.area_id) : null);
+        if (!chunks.length && area && WorkManagementCore.normalizeText(area.slug || area.name || '') !== 'general') {
+            chunks.push(`Направление: ${area.name}`);
+        }
+        return chunks.join(' · ') || 'Без привязки';
     },
 
     commentsForTask(taskId) {
@@ -196,8 +343,11 @@ const Tasks = {
     },
 
     openTask(taskId) {
+        this.templateManagerOpen = false;
+        this.templateDraft = null;
         this.createDraft = null;
         this.currentTaskId = Number(taskId);
+        this.syncEditorUiForTask(this.taskById(taskId));
         if (App.currentPage !== 'tasks') {
             App.navigate('tasks', true, taskId);
             return;
@@ -206,35 +356,54 @@ const Tasks = {
     },
 
     showAddForm(orderId, _orderName) {
-        this.openCreate(orderId ? { order_id: orderId, primary_context_kind: 'order' } : {});
+        this.openCreate(orderId ? { order_id: orderId } : {});
     },
 
     openCreate(preset = {}, templateId = null) {
+        this.templateManagerOpen = false;
+        this.templateDraft = null;
         const template = templateId
             ? (this.bundle?.templates || []).find(item => String(item.id) === String(templateId))
             : null;
         const project = preset.project_id ? this.projectById(preset.project_id) : null;
+        const restored = this.maybeRestoreCreateDraft(preset, templateId);
+        const baseDraft = restored || {};
         this.createDraft = {
             id: '',
-            template_id: template?.id || '',
-            title: preset.title || template?.title || '',
-            description: preset.description || template?.description || '',
-            status: preset.status || 'incoming',
-            priority: preset.priority || template?.default_priority || 'normal',
-            reporter_id: preset.reporter_id || App.currentEmployeeId || '',
-            assignee_id: preset.assignee_id || '',
-            reviewer_id: preset.reviewer_id || '',
-            area_id: preset.area_id || project?.area_id || template?.suggested_area_id || '',
-            order_id: preset.order_id || project?.linked_order_id || '',
-            project_id: preset.project_id || '',
-            china_purchase_id: preset.china_purchase_id || '',
-            warehouse_item_id: preset.warehouse_item_id || '',
-            primary_context_kind: preset.primary_context_kind || (preset.project_id ? 'project' : (preset.order_id ? 'order' : 'area')),
-            due_date: preset.due_date || '',
-            due_time: preset.due_time || '',
-            waiting_for_text: preset.waiting_for_text || '',
-            parent_task_id: preset.parent_task_id || '',
-            watcher_ids: preset.watcher_ids || [],
+            template_id: preset.template_id || template?.id || baseDraft.template_id || '',
+            title: preset.title || template?.title || baseDraft.title || '',
+            description: preset.description || template?.description || baseDraft.description || '',
+            status: preset.status || baseDraft.status || 'incoming',
+            priority: preset.priority || template?.default_priority || baseDraft.priority || 'normal',
+            reporter_id: preset.reporter_id || baseDraft.reporter_id || App.currentEmployeeId || '',
+            assignee_id: preset.assignee_id || baseDraft.assignee_id || '',
+            reviewer_id: '',
+            area_id: preset.area_id || baseDraft.area_id || project?.area_id || template?.suggested_area_id || '',
+            order_id: preset.order_id || baseDraft.order_id || project?.linked_order_id || '',
+            project_id: preset.project_id || baseDraft.project_id || '',
+            china_purchase_id: preset.china_purchase_id || baseDraft.china_purchase_id || '',
+            warehouse_item_id: preset.warehouse_item_id || baseDraft.warehouse_item_id || '',
+            primary_context_kind: this.inferPrimaryContextKind({
+                ...baseDraft,
+                ...preset,
+                project_id: preset.project_id || baseDraft.project_id || '',
+                order_id: preset.order_id || baseDraft.order_id || project?.linked_order_id || '',
+            }),
+            due_date: preset.due_date || baseDraft.due_date || '',
+            due_time: preset.due_time || baseDraft.due_time || '',
+            waiting_for_text: preset.waiting_for_text || baseDraft.waiting_for_text || '',
+            parent_task_id: preset.parent_task_id || baseDraft.parent_task_id || '',
+            watcher_ids: preset.watcher_ids || baseDraft.watcher_ids || [],
+        };
+        this.editorUi = {
+            ...this.editorUi,
+            visibleContexts: {
+                order: !!(preset.order_id || baseDraft.order_id || project?.linked_order_id),
+                project: !!(preset.project_id || baseDraft.project_id),
+                china: !!(preset.china_purchase_id || baseDraft.china_purchase_id),
+                warehouse: !!(preset.warehouse_item_id || baseDraft.warehouse_item_id),
+            },
+            restoredDraft: !!restored,
         };
         this.currentTaskId = null;
         if (App.currentPage !== 'tasks') {
@@ -245,8 +414,25 @@ const Tasks = {
     },
 
     cancelEditor() {
+        if (this.createDraft) {
+            const draft = this.readEditorForm();
+            if (this.meaningfulDraft(draft)) {
+                this.persistStoredDraft({
+                    ...this.createDraft,
+                    ...draft,
+                });
+                App.toast('Черновик задачи сохранен локально');
+            } else {
+                this.clearStoredDraft();
+            }
+        }
         this.createDraft = null;
         this.currentTaskId = null;
+        this.editorUi = {
+            ...this.editorUi,
+            visibleContexts: { order: false, project: false, china: false, warehouse: false },
+            restoredDraft: false,
+        };
         const drawer = document.getElementById('task-drawer-overlay');
         if (drawer) {
             drawer.classList.remove('is-open');
@@ -356,8 +542,9 @@ const Tasks = {
         return (this.bundle?.tasks || []).filter(task => {
             const assigneeId = String(task.assignee_id || '');
             const reporterId = String(task.reporter_id || '');
+            const watcherMatch = this.watcherIdsForTask(task.id).some(id => String(id) === currentEmployeeId);
             if (mode === 'outgoing') return reporterId === currentEmployeeId;
-            if (mode === 'all') return assigneeId === currentEmployeeId || reporterId === currentEmployeeId;
+            if (mode === 'all') return assigneeId === currentEmployeeId || reporterId === currentEmployeeId || watcherMatch;
             return assigneeId === currentEmployeeId;
         });
     },
@@ -467,6 +654,8 @@ const Tasks = {
             list = list.filter(task => {
                 const project = task.project_id ? this.projectById(task.project_id) : null;
                 const order = task.order_id ? this.orderById(task.order_id) : (project?.linked_order_id ? this.orderById(project.linked_order_id) : null);
+                const china = task.china_purchase_id ? this.chinaPurchaseById(task.china_purchase_id) : null;
+                const warehouse = task.warehouse_item_id ? this.warehouseItemById(task.warehouse_item_id) : null;
                 const haystack = WorkManagementCore.normalizeText([
                     task.title,
                     task.description,
@@ -475,6 +664,9 @@ const Tasks = {
                     task.waiting_for_text,
                     project?.title,
                     order?.order_name,
+                    china?.purchase_name,
+                    warehouse?.name,
+                    warehouse?.sku,
                     ...(commentsByTask.get(String(task.id)) || []),
                 ].join(' '));
                 return haystack.includes(search);
@@ -822,12 +1014,59 @@ const Tasks = {
 
     editorWatcherIds(task) {
         if (!task) return [];
-        if (this.createDraft) return this.createDraft.watcher_ids || [];
-        return this.watcherIdsForTask(task.id);
+        const ids = new Set(this.createDraft ? (this.createDraft.watcher_ids || []) : this.watcherIdsForTask(task.id));
+        if (task.reviewer_id) ids.add(Number(task.reviewer_id));
+        return Array.from(ids).filter(Boolean);
     },
 
     editorTitle(task) {
         return this.createDraft ? 'Новая задача' : 'Карточка задачи';
+    },
+
+    resetTemplateDraft(template = null) {
+        this.templateDraft = template
+            ? {
+                id: template.id,
+                kind: 'task',
+                name: template.name || '',
+                title: template.title || '',
+                description: template.description || '',
+                default_priority: template.default_priority || 'normal',
+                checklist_items: Array.isArray(template.checklist_items) ? template.checklist_items.join('\n') : '',
+                suggested_subtasks: Array.isArray(template.suggested_subtasks) ? template.suggested_subtasks.join('\n') : '',
+            }
+            : {
+                id: '',
+                kind: 'task',
+                name: '',
+                title: '',
+                description: '',
+                default_priority: 'normal',
+                checklist_items: '',
+                suggested_subtasks: '',
+            };
+        if (this.templateManagerOpen) this.renderTemplateManager();
+    },
+
+    openTemplateManager(templateId = null) {
+        const selectedId = templateId
+            || document.getElementById('task-editor-template')?.value
+            || this.createDraft?.template_id
+            || this.defaultTaskTemplateId();
+        const template = (this.bundle?.templates || []).find(item => item.kind === 'task' && String(item.id) === String(selectedId));
+        this.templateManagerOpen = true;
+        this.resetTemplateDraft(template || null);
+        this.renderTemplateManager();
+    },
+
+    closeTemplateManager() {
+        this.templateManagerOpen = false;
+        this.templateDraft = null;
+        const drawer = document.getElementById('task-template-overlay');
+        if (drawer) {
+            drawer.classList.remove('is-open');
+            setTimeout(() => { drawer.remove(); }, 250);
+        }
     },
 
     taskTemplateOptionsHtml(selectedTemplateId) {
@@ -887,6 +1126,40 @@ const Tasks = {
             .join('');
     },
 
+    contextToggleButtonsHtml(task) {
+        const visible = this.visibleContextsForTask(task);
+        const items = [
+            { key: 'order', label: 'Заказ', active: visible.order },
+            { key: 'project', label: 'Проект', active: visible.project },
+            { key: 'china', label: 'China', active: visible.china },
+            { key: 'warehouse', label: 'Склад', active: visible.warehouse },
+        ];
+        return `
+            <div class="task-context-toggles">
+                ${items.map(item => `
+                    <button type="button" class="task-context-toggle ${item.active ? 'active' : ''}" data-context-key="${item.key}" onclick="Tasks.toggleContextBinding('${item.key}')">
+                        ${item.active ? '✓ ' : '+ '}${this.esc(item.label)}
+                    </button>
+                `).join('')}
+            </div>
+        `;
+    },
+
+    contextSelectHtml(config) {
+        return `
+            <div class="form-group task-context-field ${config.visible ? '' : 'is-hidden'}" data-context-key="${this.esc(config.key)}">
+                <label>${this.esc(config.label)}</label>
+                <div class="task-context-select-row">
+                    <select id="${this.esc(config.id)}">
+                        <option value="">—</option>
+                        ${config.optionsHtml}
+                    </select>
+                    <button type="button" class="btn btn-sm btn-outline" onclick="Tasks.toggleContextBinding('${this.esc(config.key)}')">Убрать</button>
+                </div>
+            </div>
+        `;
+    },
+
     renderChecklistSection(task) {
         if (!task?.id) {
             return '<div class="card"><div class="text-muted">Сначала сохраните задачу, затем добавьте чек-лист, комментарии и файлы.</div></div>';
@@ -924,7 +1197,7 @@ const Tasks = {
             <div class="card">
                 <div class="card-header">
                     <h3>Подзадачи</h3>
-                    <button class="btn btn-sm btn-outline" onclick="Tasks.openCreate({ parent_task_id: ${task.id}, project_id: ${task.project_id || 'null'}, order_id: ${task.order_id || 'null'}, area_id: ${task.area_id || 'null'}, primary_context_kind: '${task.primary_context_kind || 'project'}', due_date: '${task.due_date || ''}' })">+ Подзадача</button>
+                    <button class="btn btn-sm btn-outline" onclick="Tasks.openCreate({ parent_task_id: ${task.id}, project_id: ${task.project_id || 'null'}, order_id: ${task.order_id || 'null'}, china_purchase_id: ${task.china_purchase_id || 'null'}, warehouse_item_id: ${task.warehouse_item_id || 'null'}, due_date: '${task.due_date || ''}' })">+ Подзадача</button>
                 </div>
                 <div class="wm-subtasks-list">
                     ${subtasks.length === 0
@@ -1056,23 +1329,34 @@ const Tasks = {
         if (!task) return '';
         const isNew = !task.id;
         const watcherIds = this.editorWatcherIds(task);
+        const visibleContexts = this.visibleContextsForTask(task);
+        const restoredDraftNotice = this.createDraft && this.editorUi?.restoredDraft;
         return `
             <div class="card">
                 <div class="card-header">
                     <h3>${this.esc(this.editorTitle(task))}</h3>
                     <div class="flex gap-8">
+                        ${this.createDraft ? `<button class="btn btn-sm btn-outline" onclick="Tasks.discardStoredDraft()">Сбросить черновик</button>` : ''}
                         ${!isNew ? `<button class="btn btn-sm btn-outline" onclick="Tasks.deleteTask(${task.id})">Удалить</button>` : ''}
                         <button class="btn btn-sm btn-outline" onclick="Tasks.cancelEditor()">Закрыть</button>
                     </div>
                 </div>
                 <input type="hidden" id="task-editor-id" value="${this.esc(task.id || '')}">
+                ${restoredDraftNotice ? `
+                    <div class="task-draft-banner">
+                        <strong>Черновик восстановлен.</strong> Эта версия хранится только локально в вашем браузере и скоро истечет сама.
+                    </div>
+                ` : ''}
                 <div class="form-row">
                     <div class="form-group" style="flex:2">
                         <label>Шаблон</label>
-                        <select id="task-editor-template" onchange="Tasks.onTemplateChange(this.value)">
-                            <option value="">Без шаблона</option>
-                            ${this.taskTemplateOptionsHtml(task.template_id)}
-                        </select>
+                        <div class="task-template-picker-row">
+                            <select id="task-editor-template" onchange="Tasks.onTemplateChange(this.value)">
+                                <option value="">Без шаблона</option>
+                                ${this.taskTemplateOptionsHtml(task.template_id)}
+                            </select>
+                            <button type="button" class="btn btn-sm btn-outline" onclick="Tasks.openTemplateManager()">Шаблоны</button>
+                        </div>
                     </div>
                     <div class="form-group" style="flex:4">
                         <label>Название</label>
@@ -1112,57 +1396,48 @@ const Tasks = {
                             ${this.employeeOptionsHtml(task.assignee_id)}
                         </select>
                     </div>
-                    <div class="form-group">
-                        <label>Проверяющий</label>
-                        <select id="task-editor-reviewer">
-                            <option value="">—</option>
-                            ${this.employeeOptionsHtml(task.reviewer_id)}
-                        </select>
+                </div>
+                <div class="form-group">
+                    <label>Привязки</label>
+                    ${this.contextToggleButtonsHtml(task)}
+                    <div class="text-muted" style="font-size:12px;margin-top:8px;">
+                        Можно оставить задачу без привязки или прикрепить сразу к нескольким сущностям.
                     </div>
+                </div>
+                <div class="form-row task-context-grid">
+                    ${this.contextSelectHtml({
+                        key: 'order',
+                        label: 'Заказ',
+                        id: 'task-editor-order',
+                        optionsHtml: this.orderOptionsHtml(task.order_id),
+                        visible: visibleContexts.order,
+                    })}
+                    ${this.contextSelectHtml({
+                        key: 'project',
+                        label: 'Проект',
+                        id: 'task-editor-project',
+                        optionsHtml: this.projectOptionsHtml(task.project_id),
+                        visible: visibleContexts.project,
+                    })}
+                    ${this.contextSelectHtml({
+                        key: 'china',
+                        label: 'China',
+                        id: 'task-editor-china',
+                        optionsHtml: this.chinaOptionsHtml(task.china_purchase_id),
+                        visible: visibleContexts.china,
+                    })}
+                    ${this.contextSelectHtml({
+                        key: 'warehouse',
+                        label: 'Склад',
+                        id: 'task-editor-warehouse',
+                        optionsHtml: this.warehouseOptionsHtml(task.warehouse_item_id),
+                        visible: visibleContexts.warehouse,
+                    })}
                 </div>
                 <div class="form-row">
                     <div class="form-group">
-                        <label>Основной контекст</label>
-                        <select id="task-editor-context">
-                            ${WorkManagementCore.TASK_CONTEXT_OPTIONS.map(item => `<option value="${item.value}" ${item.value === (task.primary_context_kind || 'area') ? 'selected' : ''}>${this.esc(item.label)}</option>`).join('')}
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label>Заказ</label>
-                        <select id="task-editor-order">
-                            <option value="">—</option>
-                            ${this.orderOptionsHtml(task.order_id)}
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label>Проект</label>
-                        <select id="task-editor-project">
-                            <option value="">—</option>
-                            ${this.projectOptionsHtml(task.project_id)}
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label>Направление</label>
-                        <select id="task-editor-area">
-                            <option value="">—</option>
-                            ${this.areaOptionsHtml(task.area_id)}
-                        </select>
-                    </div>
-                </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label>China</label>
-                        <select id="task-editor-china">
-                            <option value="">—</option>
-                            ${this.chinaOptionsHtml(task.china_purchase_id)}
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label>Склад</label>
-                        <select id="task-editor-warehouse">
-                            <option value="">—</option>
-                            ${this.warehouseOptionsHtml(task.warehouse_item_id)}
-                        </select>
+                        <label>Ждём от кого / что ждём</label>
+                        <input id="task-editor-waiting" type="text" value="${this.esc(task.waiting_for_text || '')}">
                     </div>
                 </div>
                 <div class="form-group">
@@ -1170,11 +1445,8 @@ const Tasks = {
                     <textarea id="task-editor-description" rows="4">${this.esc(task.description || '')}</textarea>
                 </div>
                 <div class="form-group">
-                    <label>Ждём от кого / что ждём</label>
-                    <input id="task-editor-waiting" type="text" value="${this.esc(task.waiting_for_text || '')}">
-                </div>
-                <div class="form-group">
                     <label>Наблюдатели</label>
+                    <div class="text-muted" style="font-size:12px;margin-bottom:8px;">Наблюдатели тоже видят задачу и получают уведомления о согласовании.</div>
                     <div class="wm-watchers-grid">
                         ${(this.employees || []).filter(item => item.is_active !== false).map(item => `
                             <label class="wm-watcher-chip">
@@ -1234,9 +1506,10 @@ const Tasks = {
                 <div class="tasks-header-top">
                     <div>
                         <h1>Задачи</h1>
-                        <p class="tasks-page-subtitle">Очереди исполнителей, задачи по заказам и проектам</p>
+                        <p class="tasks-page-subtitle">Очереди исполнителей, задачи по заказам и живая база шаблонов</p>
                     </div>
                     <div class="tasks-header-actions">
+                        <button class="btn btn-outline" onclick="Tasks.openTemplateManager()">Шаблоны</button>
                         <button class="btn btn-outline" onclick="Tasks.openCreate()">+ Задача</button>
                         <button class="btn btn-success" onclick="Tasks.openCreate({}, ${this.defaultTaskTemplateId() || "''"})">Из шаблона</button>
                     </div>
@@ -1264,6 +1537,7 @@ const Tasks = {
             ${this.renderMainContent(tasks)}
         `;
         this.renderDrawer(activeTask);
+        this.renderTemplateManager();
     },
 
     renderDrawer(task) {
@@ -1302,6 +1576,205 @@ const Tasks = {
         const content = drawer.querySelector('.task-drawer-content');
         if (content) {
             content.innerHTML = this.renderEditor(task);
+            this.bindEditorListeners(content);
+        }
+    },
+
+    bindEditorListeners(container) {
+        if (!container || !this.createDraft) return;
+        const fields = container.querySelectorAll('input, textarea, select');
+        fields.forEach(field => {
+            const handler = () => this.captureLocalDraftFromEditor();
+            field.addEventListener('input', handler);
+            field.addEventListener('change', handler);
+        });
+    },
+
+    captureLocalDraftFromEditor() {
+        if (!this.createDraft) return;
+        clearTimeout(this._draftSaveTimer);
+        this._draftSaveTimer = setTimeout(() => {
+            const draft = this.readEditorForm();
+            this.createDraft = {
+                ...this.createDraft,
+                ...draft,
+            };
+            this.persistStoredDraft(this.createDraft);
+        }, 250);
+    },
+
+    toggleContextBinding(kind) {
+        if (!this.editorUi?.visibleContexts) {
+            this.editorUi = {
+                ...(this.editorUi || {}),
+                visibleContexts: { order: false, project: false, china: false, warehouse: false },
+            };
+        }
+        const nextVisible = !this.editorUi.visibleContexts[kind];
+        this.editorUi.visibleContexts[kind] = nextVisible;
+        const button = document.querySelector(`.task-context-toggle[data-context-key="${kind}"]`);
+        if (button) {
+            button.classList.toggle('active', nextVisible);
+            button.textContent = `${nextVisible ? '✓ ' : '+ '}${button.textContent.replace(/^(\+|✓)\s*/, '')}`;
+        }
+        const fieldWrapper = document.querySelector(`.task-context-field[data-context-key="${kind}"]`);
+        if (fieldWrapper) fieldWrapper.classList.toggle('is-hidden', !nextVisible);
+        const fieldMap = {
+            order: 'task-editor-order',
+            project: 'task-editor-project',
+            china: 'task-editor-china',
+            warehouse: 'task-editor-warehouse',
+        };
+        const draftFieldMap = {
+            order: 'order_id',
+            project: 'project_id',
+            china: 'china_purchase_id',
+            warehouse: 'warehouse_item_id',
+        };
+        if (!nextVisible) {
+            const input = document.getElementById(fieldMap[kind]);
+            if (input) input.value = '';
+            if (this.createDraft) this.createDraft[draftFieldMap[kind]] = '';
+        }
+        this.captureLocalDraftFromEditor();
+    },
+
+    renderTemplateManager() {
+        let drawer = document.getElementById('task-template-overlay');
+        if (!this.templateManagerOpen) {
+            if (drawer) {
+                drawer.classList.remove('is-open');
+                setTimeout(() => drawer.remove(), 250);
+            }
+            return;
+        }
+        if (!drawer) {
+            drawer = document.createElement('div');
+            drawer.id = 'task-template-overlay';
+            drawer.className = 'task-drawer-overlay task-template-overlay';
+            drawer.innerHTML = `
+                <div class="task-drawer-backdrop" onclick="Tasks.closeTemplateManager()"></div>
+                <div class="task-drawer-panel task-template-panel">
+                    <div class="task-drawer-content"></div>
+                </div>
+            `;
+            document.body.appendChild(drawer);
+            requestAnimationFrame(() => drawer.classList.add('is-open'));
+        } else if (!drawer.classList.contains('is-open')) {
+            requestAnimationFrame(() => drawer.classList.add('is-open'));
+        }
+        const content = drawer.querySelector('.task-drawer-content');
+        const templates = (this.bundle?.templates || []).filter(item => item.kind === 'task');
+        if (content) {
+            content.innerHTML = `
+                <div class="card">
+                    <div class="card-header">
+                        <h3>Шаблоны задач</h3>
+                        <div class="flex gap-8">
+                            <button class="btn btn-sm btn-outline" onclick="Tasks.resetTemplateDraft()">+ Новый шаблон</button>
+                            <button class="btn btn-sm btn-outline" onclick="Tasks.closeTemplateManager()">Закрыть</button>
+                        </div>
+                    </div>
+                    <div class="task-template-layout">
+                        <div class="task-template-list">
+                            ${templates.map(item => `
+                                <button type="button" class="task-template-list-item ${String(item.id) === String(this.templateDraft?.id || '') ? 'active' : ''}" onclick="Tasks.selectTemplateDraft(${item.id})">
+                                    <strong>${this.esc(item.name)}</strong>
+                                    <span>${this.esc(item.title || 'Без названия')}</span>
+                                </button>
+                            `).join('') || '<div class="text-muted">Шаблонов пока нет</div>'}
+                        </div>
+                        <div class="task-template-form">
+                            <div class="form-group">
+                                <label>Название шаблона</label>
+                                <input id="task-template-name" type="text" value="${this.esc(this.templateDraft?.name || '')}" placeholder="Например, Поставка на склад">
+                            </div>
+                            <div class="form-group">
+                                <label>Название задачи</label>
+                                <input id="task-template-title" type="text" value="${this.esc(this.templateDraft?.title || '')}" placeholder="Как будет называться новая задача">
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label>Приоритет по умолчанию</label>
+                                    <select id="task-template-priority">${this.priorityOptionsHtml(this.templateDraft?.default_priority || 'normal')}</select>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label>Описание</label>
+                                <textarea id="task-template-description" rows="5">${this.esc(this.templateDraft?.description || '')}</textarea>
+                            </div>
+                            <div class="form-group">
+                                <label>Чек-лист</label>
+                                <textarea id="task-template-checklist" rows="5" placeholder="Один пункт на строку">${this.esc(this.templateDraft?.checklist_items || '')}</textarea>
+                            </div>
+                            <div class="form-group">
+                                <label>Подзадачи</label>
+                                <textarea id="task-template-subtasks" rows="4" placeholder="Одна подзадача на строку">${this.esc(this.templateDraft?.suggested_subtasks || '')}</textarea>
+                            </div>
+                            <div class="flex gap-8" style="flex-wrap:wrap;">
+                                <button class="btn btn-success" type="button" onclick="Tasks.saveTemplate()">Сохранить шаблон</button>
+                                ${this.templateDraft?.id ? `<button class="btn btn-outline" type="button" onclick="Tasks.deleteTemplate(${this.templateDraft.id})">Удалить</button>` : ''}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+    },
+
+    selectTemplateDraft(templateId) {
+        const template = (this.bundle?.templates || []).find(item => item.kind === 'task' && String(item.id) === String(templateId));
+        this.resetTemplateDraft(template || null);
+        this.renderTemplateManager();
+    },
+
+    readTemplateForm() {
+        return {
+            id: this.templateDraft?.id || '',
+            name: document.getElementById('task-template-name')?.value.trim() || '',
+            title: document.getElementById('task-template-title')?.value.trim() || '',
+            description: document.getElementById('task-template-description')?.value.trim() || '',
+            default_priority: document.getElementById('task-template-priority')?.value || 'normal',
+            checklist_items: document.getElementById('task-template-checklist')?.value || '',
+            suggested_subtasks: document.getElementById('task-template-subtasks')?.value || '',
+        };
+    },
+
+    async saveTemplate() {
+        const draft = this.readTemplateForm();
+        const saved = await saveWorkTemplate(draft);
+        await this.refreshData();
+        this.resetTemplateDraft(saved);
+        if (this.createDraft) {
+            this.createDraft.template_id = saved.id;
+            this.editorUi.restoredDraft = false;
+        }
+        App.toast(draft.id ? 'Шаблон обновлен' : 'Шаблон создан');
+        this.render();
+    },
+
+    async deleteTemplate(templateId) {
+        if (!confirm('Удалить шаблон задачи?')) return;
+        await deleteWorkTemplate(templateId);
+        await this.refreshData();
+        this.resetTemplateDraft(null);
+        if (this.createDraft && String(this.createDraft.template_id || '') === String(templateId)) {
+            this.createDraft.template_id = '';
+        }
+        App.toast('Шаблон удален');
+        this.render();
+    },
+
+    discardStoredDraft() {
+        this.clearStoredDraft();
+        this.editorUi.restoredDraft = false;
+        if (this.createDraft) {
+            const preserved = {
+                reporter_id: App.currentEmployeeId || '',
+                status: 'incoming',
+                priority: this.createDraft.priority || 'normal',
+            };
+            this.openCreate(preserved, this.createDraft.template_id || null);
         }
     },
 
@@ -1318,6 +1791,18 @@ const Tasks = {
 
     readEditorForm() {
         const watcherIds = Array.from(document.querySelectorAll('.wm-watcher-chip input:checked')).map(input => Number(input.value));
+        const existing = this.currentTaskId ? this.taskById(this.currentTaskId) : null;
+        const orderId = document.getElementById('task-editor-order')?.value || '';
+        const projectId = document.getElementById('task-editor-project')?.value || '';
+        const chinaPurchaseId = document.getElementById('task-editor-china')?.value || '';
+        const warehouseItemId = document.getElementById('task-editor-warehouse')?.value || '';
+        const areaId = this.inferHiddenAreaId({
+            ...(this.createDraft || existing || {}),
+            order_id: orderId,
+            project_id: projectId,
+            china_purchase_id: chinaPurchaseId,
+            warehouse_item_id: warehouseItemId,
+        });
         return {
             id: document.getElementById('task-editor-id')?.value || '',
             template_id: document.getElementById('task-editor-template')?.value || '',
@@ -1328,13 +1813,16 @@ const Tasks = {
             due_time: document.getElementById('task-editor-due-time')?.value || '',
             reporter_id: document.getElementById('task-editor-reporter')?.value || '',
             assignee_id: document.getElementById('task-editor-assignee')?.value || '',
-            reviewer_id: document.getElementById('task-editor-reviewer')?.value || '',
-            primary_context_kind: document.getElementById('task-editor-context')?.value || 'area',
-            order_id: document.getElementById('task-editor-order')?.value || '',
-            project_id: document.getElementById('task-editor-project')?.value || '',
-            area_id: document.getElementById('task-editor-area')?.value || '',
-            china_purchase_id: document.getElementById('task-editor-china')?.value || '',
-            warehouse_item_id: document.getElementById('task-editor-warehouse')?.value || '',
+            reviewer_id: watcherIds[0] || '',
+            primary_context_kind: this.inferPrimaryContextKind({
+                order_id: orderId,
+                project_id: projectId,
+            }),
+            order_id: orderId,
+            project_id: projectId,
+            area_id: areaId || '',
+            china_purchase_id: chinaPurchaseId,
+            warehouse_item_id: warehouseItemId,
             description: document.getElementById('task-editor-description')?.value.trim() || '',
             waiting_for_text: document.getElementById('task-editor-waiting')?.value.trim() || '',
             watcher_ids: watcherIds,
@@ -1357,10 +1845,6 @@ const Tasks = {
             App.toast('Укажите дедлайн');
             return;
         }
-        if (!draft.order_id && !draft.project_id && !draft.area_id && !existing?.order_id && !existing?.project_id && !existing?.area_id) {
-            App.toast('Выберите контекст задачи');
-            return;
-        }
 
         const previousOverdue = existing ? this.isOverdue(existing) : false;
         const saved = await saveWorkTask(draft, {
@@ -1376,15 +1860,17 @@ const Tasks = {
             await this.applyTaskTemplateArtifacts(saved, template);
         }
 
-        await this.emitTaskEvents(saved, existing, previousOverdue);
+        await this.emitTaskEvents(saved, existing, previousOverdue, { watcherUserIds: draft.watcher_ids });
         await this.refreshData();
         this.createDraft = null;
+        this.clearStoredDraft();
+        this.editorUi.restoredDraft = false;
         this.currentTaskId = saved.id;
         App.toast(existing ? 'Задача обновлена' : 'Задача создана');
         this.render();
     },
 
-    async emitTaskEvents(saved, existing, previousOverdue) {
+    async emitTaskEvents(saved, existing, previousOverdue, options = {}) {
         if (!existing || String(existing.assignee_id || '') !== String(saved.assignee_id || '')) {
             if (saved.assignee_id) {
                 await TaskEvents.emit('task_assigned', {
@@ -1400,6 +1886,7 @@ const Tasks = {
                 task_id: saved.id,
                 project_id: saved.project_id || null,
                 reviewer_id: saved.reviewer_id || null,
+                watcher_user_ids: Array.isArray(options.watcherUserIds) ? options.watcherUserIds : this.watcherIdsForTask(saved.id),
             });
         }
 
@@ -1446,7 +1933,7 @@ const Tasks = {
                 assignee_name: task.assignee_name || App.getCurrentEmployeeName(),
                 reviewer_id: task.reviewer_id || null,
                 reviewer_name: task.reviewer_name || '',
-                area_id: task.area_id || template.suggested_area_id || null,
+                area_id: task.area_id || template.suggested_area_id || this.inferHiddenAreaId(task) || null,
                 order_id: task.order_id || null,
                 project_id: task.project_id || null,
                 primary_context_kind: task.primary_context_kind || 'area',
@@ -1574,7 +2061,7 @@ const Tasks = {
         this.render();
     },
 
-    async changeStatus(taskId, status) {
+    async changeStatus(taskId, status, options = {}) {
         const task = this.taskById(taskId);
         if (!task) return;
         const previousOverdue = this.isOverdue(task);
@@ -1582,7 +2069,7 @@ const Tasks = {
             actor_id: App.currentEmployeeId,
             actor_name: App.getCurrentEmployeeName(),
         });
-        await this.emitTaskEvents(saved, task, previousOverdue);
+        await this.emitTaskEvents(saved, task, previousOverdue, options);
         await this.refreshData();
         this.currentTaskId = Number(taskId);
         this.render();
@@ -1591,11 +2078,17 @@ const Tasks = {
     async sendToReview(taskId) {
         const task = this.taskById(taskId);
         if (!task) return;
-        if (!task.reviewer_id && !document.getElementById('task-editor-reviewer')?.value) {
-            App.toast('Сначала укажите проверяющего');
+        const watcherIds = this.currentTaskId === Number(taskId)
+            ? Array.from(document.querySelectorAll('.wm-watcher-chip input:checked')).map(input => Number(input.value))
+            : this.watcherIdsForTask(taskId);
+        if (!watcherIds.length) {
+            App.toast('Добавьте наблюдателя перед согласованием');
             return;
         }
-        await this.changeStatus(taskId, 'review');
+        if (this.currentTaskId === Number(taskId)) {
+            await saveTaskWatchers(taskId, watcherIds);
+        }
+        await this.changeStatus(taskId, 'review', { watcherUserIds: watcherIds });
     },
 
     async returnToWork(taskId) {
@@ -1650,6 +2143,7 @@ const Tasks = {
             priority: template.default_priority || this.createDraft.priority,
             area_id: template.suggested_area_id || this.createDraft.area_id,
         };
+        this.persistStoredDraft(this.createDraft);
         this.render();
     },
 

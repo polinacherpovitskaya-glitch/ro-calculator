@@ -1257,6 +1257,91 @@ table .text-center { text-align: center; }
 .task-drawer-content .card-header h3 {
     font-size: 15px;
 }
+.task-template-overlay {
+    z-index: 1010;
+}
+.task-template-panel {
+    width: 760px;
+    max-width: 96vw;
+}
+.task-template-layout {
+    display: grid;
+    grid-template-columns: 220px minmax(0, 1fr);
+    gap: 16px;
+}
+.task-template-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.task-template-list-item {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    text-align: left;
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg);
+    cursor: pointer;
+}
+.task-template-list-item span {
+    font-size: 12px;
+    color: var(--text-muted);
+}
+.task-template-list-item.active {
+    border-color: var(--accent);
+    background: var(--accent-light);
+}
+.task-template-form {
+    min-width: 0;
+}
+.task-draft-banner {
+    margin-bottom: 16px;
+    padding: 12px 14px;
+    border-radius: 12px;
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    color: #1d4ed8;
+    font-size: 13px;
+}
+.task-template-picker-row,
+.task-context-select-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+.task-template-picker-row select,
+.task-context-select-row select {
+    flex: 1;
+}
+.task-context-toggles {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+.task-context-toggle {
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text-secondary);
+    border-radius: 999px;
+    padding: 7px 12px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+}
+.task-context-toggle.active {
+    border-color: var(--accent);
+    background: var(--accent-light);
+    color: var(--accent);
+}
+.task-context-grid {
+    align-items: flex-start;
+}
+.task-context-field.is-hidden {
+    display: none;
+}
 
 /* Tasks page header */
 .tasks-page-header { margin-bottom: 20px; }
@@ -1864,6 +1949,7 @@ table .text-center { text-align: center; }
 @media (max-width: 1100px) {
     .tasks-stats { grid-template-columns: repeat(3, 1fr); }
     .tasks-header-controls { flex-direction: column; align-items: flex-start; gap: 8px; }
+    .task-template-layout { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 768px) {
@@ -1872,6 +1958,8 @@ table .text-center { text-align: center; }
     .tasks-stats { grid-template-columns: repeat(2, 1fr); }
     .tasks-toolbar { flex-direction: column; }
     .tasks-header-top { flex-direction: column; gap: 12px; }
+    .task-template-picker-row,
+    .task-context-select-row { flex-direction: column; align-items: stretch; }
     .tasks-feed-header,
     .tasks-completed-toggle {
         flex-direction: column;

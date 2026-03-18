@@ -3912,6 +3912,49 @@ async function loadWorkTemplatesV2() {
     return templates;
 }
 
+async function saveWorkTemplate(template) {
+    const core = _workCore();
+    const nowIso = new Date().toISOString();
+    const existing = template?.id
+        ? (await _loadWorkTableRows('work_templates', LOCAL_KEYS.workTemplatesV2, 'name', true))
+            .find(item => String(item.id) === String(template.id))
+        : null;
+    const checklistItems = Array.isArray(template?.checklist_items)
+        ? template.checklist_items
+        : String(template?.checklist_items || '')
+            .split('\n')
+            .map(item => String(item || '').trim())
+            .filter(Boolean);
+    const suggestedSubtasks = Array.isArray(template?.suggested_subtasks)
+        ? template.suggested_subtasks
+        : String(template?.suggested_subtasks || '')
+            .split('\n')
+            .map(item => String(item || '').trim())
+            .filter(Boolean);
+    const row = {
+        id: template?.id || core.generateEntityId(),
+        kind: 'task',
+        name: String(template?.name || existing?.name || '').trim(),
+        title: String(template?.title || existing?.title || '').trim(),
+        project_type: null,
+        description: String(template?.description || existing?.description || '').trim(),
+        default_priority: template?.default_priority || existing?.default_priority || 'normal',
+        suggested_area_id: _toNumberOrNull(template?.suggested_area_id ?? existing?.suggested_area_id),
+        checklist_items: checklistItems,
+        suggested_subtasks: suggestedSubtasks,
+        created_at: existing?.created_at || nowIso,
+        updated_at: nowIso,
+    };
+    if (!row.name) throw new Error('Укажите название шаблона');
+    if (!row.title) throw new Error('Укажите название задачи в шаблоне');
+    await _upsertWorkTableRows('work_templates', LOCAL_KEYS.workTemplatesV2, row, 'id');
+    return row;
+}
+
+async function deleteWorkTemplate(templateId) {
+    await _deleteWorkTableRow('work_templates', LOCAL_KEYS.workTemplatesV2, templateId);
+}
+
 async function loadWorkProjects() {
     return _loadWorkTableRows('projects', LOCAL_KEYS.workProjects, 'updated_at', false);
 }
@@ -4258,9 +4301,6 @@ async function saveWorkTask(task, options = {}) {
 
     row.order_name = _taskOrderName(row, orders, projects);
     row.primary_context_kind = core.ensurePrimaryContextKind(row, project);
-    if (!row.order_id && !row.project_id && !row.area_id) {
-        throw new Error('У задачи должен быть хотя бы один контекст');
-    }
     if (row.status === 'done') {
         row.completed_at = existing?.completed_at || nowIso;
         row.cancelled_at = null;
