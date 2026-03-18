@@ -1423,6 +1423,204 @@ async function smokeProjectHardwareToggleShortageGuard(context) {
     }
 }
 
+async function smokeProjectHardwareLegacyStatusRepair(context) {
+    const order = {
+        id: 77,
+        order_name: 'Legacy Envelope Order',
+        manager_name: 'Склад',
+        status: 'production_packaging',
+        created_at: '2026-03-17T11:00:00.000Z',
+    };
+    const detail = {
+        order: clone(order),
+        items: [{
+            item_type: 'packaging',
+            product_name: 'Legacy Envelope',
+            quantity: 100,
+            packaging_source: 'warehouse',
+            packaging_warehouse_item_id: 501,
+        }],
+    };
+
+    context.__projectHardwareState = { checks: { '77:501': true } };
+    context.__reservations = [];
+    context.__warehouseItems = [{
+        id: 501,
+        name: 'Legacy Envelope',
+        sku: 'ENV-LEG',
+        category: 'packaging',
+        qty: 465,
+        price_per_unit: 5,
+    }];
+    context.__warehouseHistory = [{
+        id: 1,
+        item_id: 501,
+        item_name: 'Legacy Envelope',
+        item_sku: 'ENV-LEG',
+        item_category: 'packaging',
+        type: 'deduction',
+        qty_change: -100,
+        requested_qty_change: -100,
+        qty_before: 565,
+        qty_after: 465,
+        unit_price: 5,
+        total_cost_change: 500,
+        order_id: 77,
+        order_name: 'Legacy Envelope Order',
+        notes: 'Списание при смене статуса: Черновик → Производство: Упаковка',
+        clamped: false,
+        created_at: '2026-03-17T11:02:00.000Z',
+        created_by: 'Smoke',
+    }];
+    context.__orders = [clone(order)];
+    context.__orderDetails = { 77: clone(detail) };
+    context.loadProjectHardwareState = async () => clone(context.__projectHardwareState);
+    context.saveProjectHardwareState = async (state) => {
+        context.__projectHardwareState = clone(state);
+    };
+    context.loadOrders = async () => clone(context.__orders);
+    context.loadOrder = async (orderId) => clone(context.__orderDetails[Number(orderId)] || null);
+    context.loadWarehouseReservations = async () => clone(context.__reservations);
+    context.saveWarehouseReservations = async (reservations) => {
+        context.__reservations = clone(reservations);
+    };
+    context.loadWarehouseItems = async () => clone(context.__warehouseItems);
+    context.saveWarehouseItems = async (items) => {
+        context.__warehouseItems = clone(items);
+    };
+    context.loadWarehouseHistory = async () => clone(context.__warehouseHistory);
+    context.saveWarehouseHistory = async (history) => {
+        context.__warehouseHistory = clone(history);
+    };
+
+    vm.runInContext(`
+        Warehouse.projectHardwareState = null;
+        Warehouse.allItems = globalThis.__warehouseItems;
+    `, context);
+
+    const reconcileResult = clone(await vm.runInContext(`Warehouse.reconcileProjectHardwareReservations()`, context));
+
+    assert.equal(reconcileResult.stateChanged, true);
+    assert.equal(context.__warehouseItems[0].qty, 565);
+    assert.equal(vm.runInContext(`Warehouse._isProjectHardwareReady(77, 501)`, context), false);
+    assert.equal(Boolean(context.__projectHardwareState.checks['77:501']), false);
+    assert.equal(context.__warehouseHistory.length, 2);
+    assert.match(context.__warehouseHistory[1].notes, /Автоисправление legacy-списания проектной позиции: \+100 шт/);
+    assert.equal(context.__warehouseHistory[1].project_hardware_flow, 'legacy_status_repair');
+    const reservation = context.__reservations.find(item => item.order_id === 77 && item.status === 'active');
+    assert.equal(reservation.item_id, 501);
+    assert.equal(reservation.qty, 100);
+  }
+
+async function smokeProjectHardwareLegacyAndCollectedNetting(context) {
+    const order = {
+        id: 88,
+        order_name: 'Collected Cord Order',
+        manager_name: 'Склад',
+        status: 'delivery',
+        created_at: '2026-03-17T11:00:00.000Z',
+    };
+    const detail = {
+        order: clone(order),
+        items: [{
+            item_type: 'hardware',
+            product_name: 'Collected Cord',
+            quantity: 100,
+            hardware_source: 'warehouse',
+            hardware_warehouse_item_id: 601,
+        }],
+    };
+
+    context.__projectHardwareState = { checks: { '88:601': true } };
+    context.__reservations = [];
+    context.__warehouseItems = [{
+        id: 601,
+        name: 'Collected Cord',
+        sku: 'CORD-1',
+        category: 'hardware',
+        qty: 343,
+        price_per_unit: 30,
+    }];
+    context.__warehouseHistory = [
+        {
+            id: 1,
+            item_id: 601,
+            item_name: 'Collected Cord',
+            item_sku: 'CORD-1',
+            item_category: 'hardware',
+            type: 'deduction',
+            qty_change: -100,
+            requested_qty_change: -100,
+            qty_before: 543,
+            qty_after: 443,
+            unit_price: 30,
+            total_cost_change: 3000,
+            order_id: 88,
+            order_name: 'Collected Cord Order',
+            notes: 'Списание при смене статуса: Черновик → Производство: Выливание',
+            clamped: false,
+            created_at: '2026-03-17T10:02:00.000Z',
+            created_by: 'Smoke',
+        },
+        {
+            id: 2,
+            item_id: 601,
+            item_name: 'Collected Cord',
+            item_sku: 'CORD-1',
+            item_category: 'hardware',
+            type: 'deduction',
+            qty_change: -100,
+            requested_qty_change: -100,
+            qty_before: 443,
+            qty_after: 343,
+            unit_price: 30,
+            total_cost_change: 3000,
+            order_id: 88,
+            order_name: 'Collected Cord Order',
+            notes: 'Списание собранной позиции со склада: 100 шт',
+            clamped: false,
+            created_at: '2026-03-17T10:15:00.000Z',
+            created_by: 'Smoke',
+        },
+    ];
+    context.__orders = [clone(order)];
+    context.__orderDetails = { 88: clone(detail) };
+    context.loadProjectHardwareState = async () => clone(context.__projectHardwareState);
+    context.saveProjectHardwareState = async (state) => {
+        context.__projectHardwareState = clone(state);
+    };
+    context.loadOrders = async () => clone(context.__orders);
+    context.loadOrder = async (orderId) => clone(context.__orderDetails[Number(orderId)] || null);
+    context.loadWarehouseReservations = async () => clone(context.__reservations);
+    context.saveWarehouseReservations = async (reservations) => {
+        context.__reservations = clone(reservations);
+    };
+    context.loadWarehouseItems = async () => clone(context.__warehouseItems);
+    context.saveWarehouseItems = async (items) => {
+        context.__warehouseItems = clone(items);
+    };
+    context.loadWarehouseHistory = async () => clone(context.__warehouseHistory);
+    context.saveWarehouseHistory = async (history) => {
+        context.__warehouseHistory = clone(history);
+    };
+
+    vm.runInContext(`
+        Warehouse.projectHardwareState = null;
+        Warehouse.allItems = globalThis.__warehouseItems;
+    `, context);
+
+    const reconcileResult = clone(await vm.runInContext(`Warehouse.reconcileProjectHardwareReservations()`, context));
+
+    assert.equal(reconcileResult.stateChanged, false);
+    assert.equal(context.__warehouseItems[0].qty, 443);
+    assert.equal(vm.runInContext(`Warehouse._isProjectHardwareReady(88, 601)`, context), true);
+    assert.equal(Boolean(context.__projectHardwareState.checks['88:601']), true);
+    assert.equal(context.__warehouseHistory.length, 3);
+    assert.match(context.__warehouseHistory[2].notes, /Автоисправление legacy-списания проектной позиции: \+100 шт/);
+    assert.equal(context.__warehouseHistory[2].project_hardware_flow, 'legacy_status_repair');
+    assert.equal(context.__reservations.length, 0);
+}
+
 async function smokeOrderDetailColorRendering(context) {
     const rendered = String(await vm.runInContext(`(() => {
         const rawProduct = {
@@ -1487,6 +1685,8 @@ async function main() {
     await smokeWarehouseManualAdjustment(context);
     await smokeProjectHardwarePersistenceAndBuckets(context);
     await smokeProjectHardwareToggleShortageGuard(context);
+    await smokeProjectHardwareLegacyStatusRepair(context);
+    await smokeProjectHardwareLegacyAndCollectedNetting(context);
     await smokeOrderDetailColorRendering(context);
 
     console.log('order-flow smoke checks passed');

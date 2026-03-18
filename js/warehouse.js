@@ -723,6 +723,11 @@ const Warehouse = {
 
         // Record in history
         const history = await loadWarehouseHistory();
+        const extraMeta = meta && typeof meta === 'object' ? { ...meta } : {};
+        const historyOrderId = extraMeta && extraMeta.order_id ? extraMeta.order_id : null;
+        if (extraMeta && Object.prototype.hasOwnProperty.call(extraMeta, 'order_id')) {
+            delete extraMeta.order_id;
+        }
         history.push({
             id: Date.now(),
             item_id: itemId,
@@ -736,12 +741,13 @@ const Warehouse = {
             qty_after: item.qty,
             unit_price: parseFloat(item.price_per_unit) || 0,
             total_cost_change: round2(Math.abs(appliedQtyChange) * (parseFloat(item.price_per_unit) || 0)),
-            order_id: meta && meta.order_id ? meta.order_id : null,
+            order_id: historyOrderId,
             order_name: orderName || '',
             notes: notes || '',
             clamped,
             created_at: new Date().toISOString(),
             created_by: manager || '',
+            ...extraMeta,
         });
         await saveWarehouseHistory(history);
         return {
@@ -1403,7 +1409,10 @@ const Warehouse = {
                     order.order_name || 'Заказ',
                     `Списание собранной позиции со склада: ${missingQty} шт`,
                     managerName,
-                    { order_id: normalizedOrderId }
+                    {
+                        order_id: normalizedOrderId,
+                        project_hardware_flow: 'ready_toggle',
+                    }
                 );
                 const appliedQty = Math.max(0, -(parseFloat(result && result.appliedQtyChange) || 0));
                 if (!result || result.ok === false || appliedQty + 0.000001 < missingQty) {
@@ -1415,7 +1424,10 @@ const Warehouse = {
                             order.order_name || 'Заказ',
                             `Откат неполного списания собранной позиции со склада: ${appliedQty} шт`,
                             managerName,
-                            { order_id: normalizedOrderId }
+                            {
+                                order_id: normalizedOrderId,
+                                project_hardware_flow: 'ready_adjustment',
+                            }
                         );
                     }
                     App.toast('Не удалось отметить как собрано: недостаточно остатка');
@@ -1446,7 +1458,10 @@ const Warehouse = {
                     order.order_name || 'Заказ',
                     `Возврат собранной позиции на склад: ${returnQty} шт`,
                     managerName,
-                    { order_id: normalizedOrderId }
+                    {
+                        order_id: normalizedOrderId,
+                        project_hardware_flow: 'ready_toggle',
+                    }
                 );
             }
 
@@ -1557,9 +1572,38 @@ const Warehouse = {
         return demand;
     },
 
+    _getProjectHardwareHistoryFlow(entry) {
+        const explicitFlow = String(entry && entry.project_hardware_flow || '').trim().toLowerCase();
+        if (explicitFlow) return explicitFlow;
+
+        const notes = String(entry && entry.notes || '').trim();
+        if (!notes) return '';
+        if (/^(Списание|Возврат на склад) при смене статуса:/i.test(notes)) return 'legacy_status';
+        if (/^Автоисправление legacy-(?:списания|возврата) проектной позиции:/i.test(notes)) return 'legacy_status_repair';
+        if (/^Откат неполного списания собранной позиции со склада:/i.test(notes)) return 'ready_adjustment';
+        if (/^Корректировка собранной (?:фурнитуры|позиции):/i.test(notes)) return 'ready_delta';
+        if (/^(Списание|Возврат(?: собранной)?(?: позиции| фурнитуры)?|Возврат собранной фурнитуры|Списание собранной фурнитуры)/i.test(notes)) {
+            if (/собранн/i.test(notes)) return 'ready_toggle';
+        }
+        return '';
+    },
+
+    _isProjectHardwareStockHistoryFlow(flow) {
+        return flow === 'ready_toggle'
+            || flow === 'ready_delta'
+            || flow === 'ready_adjustment';
+    },
+
+    _isProjectHardwareLegacyHistoryFlow(flow) {
+        return flow === 'legacy_status'
+            || flow === 'legacy_status_repair';
+    },
+
     _buildProjectHardwareHistoryDeltaMap(history) {
         const deltaByKey = new Map();
         (history || []).forEach(entry => {
+            const flow = this._getProjectHardwareHistoryFlow(entry);
+            if (!this._isProjectHardwareStockHistoryFlow(flow)) return;
             const orderId = Number(entry.order_id || 0);
             const itemId = Number(entry.item_id || 0);
             const qtyChange = parseFloat(entry.qty_change || 0) || 0;
@@ -1577,6 +1621,38 @@ const Warehouse = {
 
     _getProjectHardwareConsumedQty(orderId, itemId, historyDeltaMap) {
         return Math.max(0, -this._getProjectHardwareHistoryNetDelta(orderId, itemId, historyDeltaMap));
+    },
+
+    _getProjectHardwareLegacyResidualDelta(orderId, itemId, history) {
+        return (history || []).reduce((acc, entry) => {
+            if (Number(entry.order_id || 0) !== Number(orderId || 0)) return acc;
+            if (Number(entry.item_id || 0) !== Number(itemId || 0)) return acc;
+            const flow = this._getProjectHardwareHistoryFlow(entry);
+            if (!this._isProjectHardwareLegacyHistoryFlow(flow)) return acc;
+            return acc + (parseFloat(entry.qty_change || 0) || 0);
+        }, 0);
+    },
+
+    _hasProjectHardwareReadyEvidence(orderId, itemId, history) {
+        return (history || []).some(entry => {
+            if (Number(entry.order_id || 0) !== Number(orderId || 0)) return false;
+            if (Number(entry.item_id || 0) !== Number(itemId || 0)) return false;
+            const flow = this._getProjectHardwareHistoryFlow(entry);
+            return this._isProjectHardwareStockHistoryFlow(flow);
+        });
+    },
+
+    _hasProjectHardwareLegacyOnlyEvidence(orderId, itemId, history) {
+        let hasLegacy = false;
+        let hasValid = false;
+        (history || []).forEach(entry => {
+            if (Number(entry.order_id || 0) !== Number(orderId || 0)) return;
+            if (Number(entry.item_id || 0) !== Number(itemId || 0)) return;
+            const flow = this._getProjectHardwareHistoryFlow(entry);
+            if (this._isProjectHardwareLegacyHistoryFlow(flow)) hasLegacy = true;
+            if (this._isProjectHardwareStockHistoryFlow(flow)) hasValid = true;
+        });
+        return hasLegacy && !hasValid;
     },
 
     _isProjectHardwareHistoricallyReady(orderId, itemId, requiredQty, historyDeltaMap) {
@@ -1606,7 +1682,66 @@ const Warehouse = {
         if (savedReady && this._hasProjectHardwareClampedShortfall(orderId, itemId, requiredQty, history, historyDeltaMap)) {
             return false;
         }
+        if (savedReady && !historicalReady && this._hasProjectHardwareLegacyOnlyEvidence(orderId, itemId, history)) {
+            return false;
+        }
         return savedReady || historicalReady;
+    },
+
+    async _repairLegacyProjectHardwareMovements(rows, history, fallbackManagerName) {
+        const uniqueRows = [];
+        const seenKeys = new Set();
+        (rows || []).forEach(row => {
+            const orderId = Number(row && row.order_id || 0);
+            const itemId = Number(row && row.item_id || 0);
+            if (!orderId || !itemId) return;
+            const key = this._projectHardwareKey(orderId, itemId);
+            if (seenKeys.has(key)) return;
+            seenKeys.add(key);
+            uniqueRows.push({
+                order_id: orderId,
+                item_id: itemId,
+                order_name: row.order_name || 'Заказ',
+                manager_name: row.manager_name || fallbackManagerName || '',
+            });
+        });
+
+        if (uniqueRows.length === 0) {
+            return { repaired: false, history, warehouseItems: this.allItems || [] };
+        }
+
+        let repairedCount = 0;
+        for (const row of uniqueRows) {
+            const residualDelta = this._getProjectHardwareLegacyResidualDelta(row.order_id, row.item_id, history);
+            if (Math.abs(residualDelta) <= 0.000001) continue;
+            const repairDelta = -residualDelta;
+            await this.adjustStock(
+                row.item_id,
+                repairDelta,
+                repairDelta > 0 ? 'addition' : 'deduction',
+                row.order_name || 'Заказ',
+                repairDelta > 0
+                    ? `Автоисправление legacy-списания проектной позиции: +${Math.abs(repairDelta)} шт`
+                    : `Автоисправление legacy-возврата проектной позиции: -${Math.abs(repairDelta)} шт`,
+                row.manager_name || fallbackManagerName || 'Система',
+                {
+                    order_id: row.order_id,
+                    project_hardware_flow: 'legacy_status_repair',
+                }
+            );
+            repairedCount += 1;
+        }
+
+        if (repairedCount === 0) {
+            return { repaired: false, history, warehouseItems: this.allItems || [] };
+        }
+
+        return {
+            repaired: true,
+            repairedCount,
+            history: await loadWarehouseHistory(),
+            warehouseItems: await loadWarehouseItems(),
+        };
     },
 
     _setProjectHardwareReadyFlag(orderId, itemId, isReady) {
@@ -1645,11 +1780,7 @@ const Warehouse = {
             detailByOrderId.set(Number(order.id), detail);
         });
 
-        const historyDeltaMap = this._buildProjectHardwareHistoryDeltaMap(history);
-        const trackedKeys = new Set();
         const demandRows = [];
-        let stateChanged = false;
-
         trackedOrders.forEach(order => {
             const detail = detailByOrderId.get(Number(order.id));
             if (!detail) return;
@@ -1658,12 +1789,6 @@ const Warehouse = {
                 const itemId = Number(row.warehouse_item_id || 0);
                 const qty = parseFloat(row.qty) || 0;
                 if (!itemId || qty <= 0) return;
-                const key = this._projectHardwareKey(order.id, itemId);
-                trackedKeys.add(key);
-                const isReady = this._computeProjectHardwareReadyState(order.id, itemId, qty, history, historyDeltaMap);
-                if (this._setProjectHardwareReadyFlag(order.id, itemId, isReady)) {
-                    stateChanged = true;
-                }
                 demandRows.push({
                     order_id: Number(order.id),
                     order_name: order.order_name || 'Заказ',
@@ -1672,10 +1797,30 @@ const Warehouse = {
                     created_at: order.created_at || '',
                     item_id: Number(itemId),
                     qty,
-                    ready: isReady,
+                    ready: false,
                     material_type: row.material_type || 'hardware',
                 });
             });
+        });
+
+        const repairResult = await this._repairLegacyProjectHardwareMovements(demandRows, history, App.getCurrentEmployeeName() || 'Система');
+        const effectiveHistory = repairResult.repaired ? repairResult.history : history;
+        if (repairResult.repaired && Array.isArray(repairResult.warehouseItems) && repairResult.warehouseItems.length > 0) {
+            this.allItems = repairResult.warehouseItems;
+        }
+
+        const historyDeltaMap = this._buildProjectHardwareHistoryDeltaMap(effectiveHistory);
+        const trackedKeys = new Set();
+        let stateChanged = false;
+
+        demandRows.forEach(row => {
+            const key = this._projectHardwareKey(row.order_id, row.item_id);
+            trackedKeys.add(key);
+            const isReady = this._computeProjectHardwareReadyState(row.order_id, row.item_id, row.qty, effectiveHistory, historyDeltaMap);
+            row.ready = isReady;
+            if (this._setProjectHardwareReadyFlag(row.order_id, row.item_id, isReady)) {
+                stateChanged = true;
+            }
         });
 
         Object.keys(this.projectHardwareState.checks || {}).forEach(key => {
@@ -1798,7 +1943,18 @@ const Warehouse = {
             loadWarehouseReservations(),
             loadWarehouseHistory(),
         ]);
-        const historyDeltaMap = this._buildProjectHardwareHistoryDeltaMap(history);
+        const repairRows = itemIds.map(itemId => ({
+            order_id: normalizedOrderId,
+            item_id: itemId,
+            order_name: orderName || 'Заказ',
+            manager_name: managerName || '',
+        }));
+        const repairResult = await this._repairLegacyProjectHardwareMovements(repairRows, history, managerName || '');
+        const effectiveHistory = repairResult.repaired ? repairResult.history : history;
+        if (repairResult.repaired && Array.isArray(repairResult.warehouseItems) && repairResult.warehouseItems.length > 0) {
+            this.allItems = repairResult.warehouseItems;
+        }
+        const historyDeltaMap = this._buildProjectHardwareHistoryDeltaMap(effectiveHistory);
         let reservationsChanged = false;
         let shortage = false;
         let stateChanged = false;
@@ -1828,7 +1984,7 @@ const Warehouse = {
             const currentQty = currentDemand.get(itemId) || 0;
             const previousQty = previousDemand.get(itemId) || 0;
             const isReady = currentQty > 0
-                ? this._computeProjectHardwareReadyState(normalizedOrderId, itemId, currentQty, history, historyDeltaMap)
+                ? this._computeProjectHardwareReadyState(normalizedOrderId, itemId, currentQty, effectiveHistory, historyDeltaMap)
                 : false;
 
             if (this._setProjectHardwareReadyFlag(normalizedOrderId, itemId, currentQty > 0 && isReady)) {
@@ -1847,7 +2003,10 @@ const Warehouse = {
                             ? `Корректировка собранной фурнитуры: +${delta} шт`
                             : `Корректировка собранной фурнитуры: -${Math.abs(delta)} шт`,
                         managerName || '',
-                        { order_id: normalizedOrderId }
+                        {
+                            order_id: normalizedOrderId,
+                            project_hardware_flow: 'ready_delta',
+                        }
                     );
                 }
                 continue;
