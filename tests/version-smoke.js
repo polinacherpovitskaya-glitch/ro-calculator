@@ -17,6 +17,7 @@ const sidebarVersion = sidebarMatch[1];
 
 assert.equal(versionJson.version, appVersion, 'js/version.json must match APP_VERSION');
 assert.equal(sidebarVersion, appVersion, 'index.html app-version placeholder must match APP_VERSION');
+assert.ok(appJs.includes('ro_calc_max_seen_version'), 'App should remember the newest seen version to warn about stale tabs');
 
 const sidebarNav = indexHtml.match(/<nav class="sidebar-nav">([\s\S]*?)<\/nav>/);
 assert.ok(sidebarNav, 'Sidebar nav not found in index.html');

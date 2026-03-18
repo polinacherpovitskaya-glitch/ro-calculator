@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v134';
+const APP_VERSION = 'v135';
 
 const App = {
     currentPage: 'orders',
@@ -436,13 +436,23 @@ const App = {
         const verEl = document.getElementById('app-version');
         if (verEl) verEl.textContent = APP_VERSION;
 
-        // Auto-backup on version change
+        // Auto-backup only when this build is actually newer than the previous one.
         const lastVersion = localStorage.getItem('ro_calc_last_version');
-        if (lastVersion && lastVersion !== APP_VERSION) {
+        const maxSeenVersion = this.getMaxSeenVersion();
+        if (lastVersion && this.isRemoteVersionNewer(APP_VERSION, lastVersion)) {
             try {
                 Settings.autoBackup('upgrade-' + lastVersion + '-to-' + APP_VERSION);
                 console.log('Auto-backup created before upgrade from', lastVersion, 'to', APP_VERSION);
             } catch (e) { console.warn('Auto-backup failed:', e); }
+        }
+        if (maxSeenVersion && this.isRemoteVersionNewer(maxSeenVersion, APP_VERSION)) {
+            this.showUpdateBanner(maxSeenVersion, 'stale');
+            setTimeout(() => {
+                this.toast(`Эта вкладка устарела: здесь ${APP_VERSION}, а вы уже открывали ${maxSeenVersion}. Обновите страницу.`);
+            }, 250);
+        }
+        if (!maxSeenVersion || this.isRemoteVersionNewer(APP_VERSION, maxSeenVersion)) {
+            localStorage.setItem('ro_calc_max_seen_version', APP_VERSION);
         }
         localStorage.setItem('ro_calc_last_version', APP_VERSION);
 
@@ -756,8 +766,18 @@ const App = {
             const remoteVersion = payload && payload.version ? String(payload.version) : null;
             if (!remoteVersion) return;
 
-            if (this.isRemoteVersionNewer(remoteVersion, APP_VERSION)) this.showUpdateBanner(remoteVersion);
-            else this.hideUpdateBanner();
+            if (this.isRemoteVersionNewer(remoteVersion, APP_VERSION)) {
+                this.showUpdateBanner(remoteVersion, 'update');
+                return;
+            }
+
+            const maxSeenVersion = this.getMaxSeenVersion();
+            if (maxSeenVersion && this.isRemoteVersionNewer(maxSeenVersion, APP_VERSION)) {
+                this.showUpdateBanner(maxSeenVersion, 'stale');
+                return;
+            }
+
+            this.hideUpdateBanner();
         } catch (e) {
             // Silently ignore: no internet or temporary network issues.
         }
@@ -786,16 +806,26 @@ const App = {
         return false;
     },
 
-    showUpdateBanner(remoteVersion) {
+    getMaxSeenVersion() {
+        const remembered = localStorage.getItem('ro_calc_max_seen_version') || localStorage.getItem('ro_calc_last_version') || '';
+        return remembered ? String(remembered) : null;
+    },
+
+    showUpdateBanner(remoteVersion, mode = 'update') {
         const banner = document.getElementById('update-banner');
         if (!banner) return;
-        banner.textContent = '⟳ Обновление ' + remoteVersion;
+        if (mode === 'stale') {
+            banner.textContent = `⟳ Эта вкладка устарела (${APP_VERSION} → ${remoteVersion})`;
+        } else {
+            banner.textContent = '⟳ Обновление ' + remoteVersion;
+        }
         banner.style.display = 'inline-flex';
     },
 
     hideUpdateBanner() {
         const banner = document.getElementById('update-banner');
         if (!banner) return;
+        banner.textContent = '⟳ Доступно обновление';
         banner.style.display = 'none';
     },
 
