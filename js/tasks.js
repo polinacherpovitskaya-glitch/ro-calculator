@@ -1137,7 +1137,7 @@ const Tasks = {
         return `
             <div class="task-context-toggles">
                 ${items.map(item => `
-                    <button type="button" class="task-context-toggle ${item.active ? 'active' : ''}" data-context-key="${item.key}" onclick="Tasks.toggleContextBinding('${item.key}')">
+                    <button type="button" class="task-context-toggle ${item.active ? 'active' : ''}" data-context-key="${item.key}" data-label="${this.esc(item.label)}" onclick="Tasks.toggleContextBinding('${item.key}')">
                         ${item.active ? '✓ ' : '+ '}${this.esc(item.label)}
                     </button>
                 `).join('')}
@@ -1614,8 +1614,9 @@ const Tasks = {
         this.editorUi.visibleContexts[kind] = nextVisible;
         const button = document.querySelector(`.task-context-toggle[data-context-key="${kind}"]`);
         if (button) {
+            const baseLabel = button.getAttribute('data-label') || button.textContent.replace(/^(\+|✓)\s*/, '');
             button.classList.toggle('active', nextVisible);
-            button.textContent = `${nextVisible ? '✓ ' : '+ '}${button.textContent.replace(/^(\+|✓)\s*/, '')}`;
+            button.textContent = `${nextVisible ? '✓ ' : '+ '}${baseLabel}`;
         }
         const fieldWrapper = document.querySelector(`.task-context-field[data-context-key="${kind}"]`);
         if (fieldWrapper) fieldWrapper.classList.toggle('is-hidden', !nextVisible);

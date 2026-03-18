@@ -88,6 +88,7 @@ Tasks.scope = 'all';
 Tasks.myMode = 'assigned';
 assert.match(Tasks.renderCompletedSection(groups.completed), /Готовые и отмененные задачи/);
 assert.equal(Tasks.contextLabel({}), 'Без привязки');
+assert.match(Tasks.contextToggleButtonsHtml({ project_id: 1 }), /✓ Проект/);
 
 Tasks.bundle.watchers = [{ task_id: 2, user_id: 9 }, { task_id: 5, user_id: 7 }];
 Tasks.myMode = 'all';
