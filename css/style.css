@@ -4268,13 +4268,13 @@ table .text-center { text-align: center; }
 
 .quick-bug-report-btn {
     position: fixed;
-    right: 24px;
-    bottom: 24px;
-    z-index: 1200;
+    right: max(20px, env(safe-area-inset-right, 0px) + 20px);
+    bottom: max(20px, env(safe-area-inset-bottom, 0px) + 20px);
+    z-index: 1450;
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    padding: 12px 16px;
+    padding: 12px 14px;
     border: 0;
     border-radius: 999px;
     background: #111827;
@@ -4288,6 +4288,21 @@ table .text-center { text-align: center; }
 .quick-bug-report-btn:hover {
     transform: translateY(-1px);
     box-shadow: 0 18px 32px rgba(17, 24, 39, 0.26);
+}
+
+.quick-bug-report-btn__icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    font-size: 16px;
+    line-height: 1;
+}
+
+.quick-bug-report-btn__label {
+    font-size: 13px;
+    line-height: 1;
 }
 
 .bug-page-header {
@@ -4455,7 +4470,8 @@ table .text-center { text-align: center; }
     }
 
     .quick-bug-report-btn {
-        right: 16px;
-        bottom: 16px;
+        right: max(16px, env(safe-area-inset-right, 0px) + 16px);
+        bottom: max(16px, env(safe-area-inset-bottom, 0px) + 16px);
+        padding: 10px 12px;
     }
 }

@@ -495,10 +495,6 @@ const BugReports = {
     },
 
     openQuickReport(preset = {}) {
-        if (App?.currentPage === 'bugs' && !preset.forceOverlay) {
-            window.scrollTo({ top: 0, behavior: 'smooth' });
-            return;
-        }
         this.quickDraft = this.currentContextDraft(preset);
         this.renderQuickReport();
     },

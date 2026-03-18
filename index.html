@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=94">
+    <link rel="stylesheet" href="css/style.css?v=95">
 </head>
 <body>
 
@@ -35,7 +35,7 @@
     <aside class="sidebar">
         <div class="sidebar-brand">
             <h2>Recycle Object</h2>
-            <span>Калькулятор <span id="app-version">v138</span></span>
+            <span>Калькулятор <span id="app-version">v139</span></span>
         </div>
         <nav class="sidebar-nav">
             <a href="#tasks" data-page="tasks">
@@ -3220,8 +3220,9 @@
 <button id="update-banner" class="update-banner" onclick="App.reloadForUpdate()" style="display:none;">
     &#10227; Доступно обновление
 </button>
-<button id="quick-bug-report-btn" class="quick-bug-report-btn" onclick="BugReports.openQuickReport()" style="display:none;">
-    &#128027; Сообщить о баге
+<button id="quick-bug-report-btn" class="quick-bug-report-btn" onclick="BugReports.openQuickReport()" style="display:none;" title="Быстро сообщить о баге">
+    <span class="quick-bug-report-btn__icon">&#128027;</span>
+    <span class="quick-bug-report-btn__label">Баг</span>
 </button>
 
 <!-- Scripts -->
@@ -3233,7 +3234,7 @@
 <script src="js/supabase.js?v=117"></script>
 <script src="js/task-events.js?v=1"></script>
 <script src="js/calculator.js?v=67"></script>
-<script src="js/app.js?v=140"></script>
+<script src="js/app.js?v=141"></script>
 <script src="js/wiki.js?v=4"></script>
 <script src="js/order-detail.js?v=58"></script>
 <script src="js/orders.js?v=61"></script>
@@ -3245,7 +3246,7 @@
 <script src="js/timetrack.js?v=62"></script>
 <script src="js/projects.js?v=2"></script>
 <script src="js/tasks.js?v=52"></script>
-<script src="js/bugs.js?v=2"></script>
+<script src="js/bugs.js?v=3"></script>
 <script src="js/gantt.js?v=56"></script>
 <script src="js/fintablo.js?v=2"></script>
 <script src="js/indirect_costs.js?v=8"></script>

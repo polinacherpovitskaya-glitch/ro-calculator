@@ -1,4 +1,5 @@
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
 const path = require('node:path');
 
 const BugReportCore = require(path.join(__dirname, '..', 'js', 'bug-report-core.js'));
@@ -46,5 +47,13 @@ assert.match(prompt, /Серьезность: Высокий/);
 assert.match(prompt, /Маршрут \/ hash: #order-detail\/145/);
 assert.match(prompt, /Вложения:/);
 assert.match(prompt, /screenshot-1\.png/);
+
+const indexHtml = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+assert.match(indexHtml, /id="quick-bug-report-btn"/);
+assert.match(indexHtml, /quick-bug-report-btn__label">Баг</);
+
+const bugsJs = fs.readFileSync(path.join(__dirname, '..', 'js', 'bugs.js'), 'utf8');
+assert.doesNotMatch(bugsJs, /App\?\.\s*currentPage === 'bugs'/);
+assert.match(bugsJs, /openQuickReport\(preset = \{\}\)/);
 
 console.log('bug report smoke checks passed');
