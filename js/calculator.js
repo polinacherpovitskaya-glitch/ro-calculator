@@ -687,6 +687,47 @@ function formatHours(n) {
     return new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 }).format(n) + ' ч';
 }
 
+function padIsoDatePart(value) {
+    return String(value).padStart(2, '0');
+}
+
+function formatIsoDateLocal(date) {
+    if (!(date instanceof Date)) date = new Date(date);
+    return `${date.getFullYear()}-${padIsoDatePart(date.getMonth() + 1)}-${padIsoDatePart(date.getDate())}`;
+}
+
+function parseProductionHolidaySet(settings) {
+    const raw = String((settings && settings.production_holidays) || '').trim();
+    if (!raw) return new Set();
+    return new Set(
+        raw
+            .split(/[\s,;]+/)
+            .map(value => value.trim())
+            .filter(value => /^\d{4}-\d{2}-\d{2}$/.test(value))
+    );
+}
+
+function isProductionNonWorkingDate(date, holidaySet) {
+    const weekday = date.getDay();
+    if (weekday === 0 || weekday === 6) return true;
+    return holidaySet.has(formatIsoDateLocal(date));
+}
+
+function getProductionPlanningCapacity(settings) {
+    const pricingWorkers = Number(settings && settings.workers_count);
+    const explicitPlanningWorkers = Number(settings && settings.planning_workers_count);
+    const explicitPlanningHoursPerDay = Number(settings && settings.planning_hours_per_day);
+    const workersCount = explicitPlanningWorkers > 0
+        ? explicitPlanningWorkers
+        : (pricingWorkers > 0 ? Math.min(pricingWorkers, 2) : 2);
+    const hoursPerDay = explicitPlanningHoursPerDay > 0 ? explicitPlanningHoursPerDay : 8;
+    return {
+        workersCount: round2(workersCount),
+        hoursPerDay: round2(hoursPerDay),
+        dailyCapacity: round2(workersCount * hoursPerDay),
+    };
+}
+
 /**
  * Build production schedule — day-by-day resource allocation
  * Each order has 3 sequential phases: литьё → упаковка → сборка (hardware)
@@ -697,17 +738,19 @@ function formatHours(n) {
  * @returns {{ queue: Array, dailyCapacity: number, days: Array }}
  */
 function buildProductionSchedule(orders, settings) {
-    const workersCount = (settings && settings.workers_count) || 3.5;
-    const hoursPerDay = 8;
-    const dailyCapacity = round2(workersCount * hoursPerDay);
+    const { dailyCapacity } = getProductionPlanningCapacity(settings);
+    const holidaySet = parseProductionHolidaySet(settings);
 
     // Filter schedulable orders: only past-draft statuses (sample, production, delivery)
     const SCHEDULE_STATUSES = ['sample','production_casting','production_printing','production_hardware','production_packaging','delivery','in_production'];
     const schedulable = orders.filter(o => SCHEDULE_STATUSES.includes(o.status));
 
-    // Priority: production > delivery > sample, then by deadline_end ASC
+    // Priority: explicit queue order > production status > deadline_end ASC
     const statusPriority = { production_casting: 0, production_printing: 0, production_hardware: 0, production_packaging: 0, in_production: 0, delivery: 1, sample: 2 };
     schedulable.sort((a, b) => {
+        const qa = Number.isFinite(Number(a.production_priority)) ? Number(a.production_priority) : 999999;
+        const qb = Number.isFinite(Number(b.production_priority)) ? Number(b.production_priority) : 999999;
+        if (qa !== qb) return qa - qb;
         const pa = statusPriority[a.status] ?? 3;
         const pb = statusPriority[b.status] ?? 3;
         if (pa !== pb) return pa - pb;
@@ -717,22 +760,43 @@ function buildProductionSchedule(orders, settings) {
     });
 
     // Build order queues with remaining hours per phase
-    const queue = schedulable.map(o => ({
+    const queue = schedulable.map(o => {
+        const plannedMolding = round2(o.production_hours_plastic || 0);
+        const plannedAssembly = round2(o.production_hours_hardware || 0);
+        const plannedPackaging = round2(o.production_hours_packaging || 0);
+        const actualMolding = round2(o.actual_hours_molding || 0);
+        const actualAssembly = round2(o.actual_hours_assembly || 0);
+        const actualPackaging = round2(o.actual_hours_packaging || 0);
+        const remainingMolding = round2(Math.max(plannedMolding - actualMolding, 0));
+        const remainingAssembly = round2(Math.max(plannedAssembly - actualAssembly, 0));
+        const remainingPackaging = round2(Math.max(plannedPackaging - actualPackaging, 0));
+        const plannedTotalHours = round2(plannedMolding + plannedAssembly + plannedPackaging);
+        const actualTotalHours = round2(actualMolding + actualAssembly + actualPackaging);
+        const actualOtherHours = round2(o.actual_hours_other || 0);
+        const remainingTotalHours = round2(remainingMolding + remainingAssembly + remainingPackaging);
+
+        return {
         orderId: o.id,
         orderName: o.order_name || 'Без названия',
         clientName: o.client_name || '',
         status: o.status,
         deadlineEnd: o.deadline_end || null,
+        notBeforeDate: o.production_not_before || '',
         phases: [
-            { name: 'molding', label: 'Литьё', remaining: o.production_hours_plastic || 0, total: o.production_hours_plastic || 0, color: '#f59e0b' },
-            { name: 'assembly', label: 'Сборка', remaining: o.production_hours_hardware || 0, total: o.production_hours_hardware || 0, color: '#06b6d4' },
-            { name: 'packaging', label: 'Упаковка', remaining: o.production_hours_packaging || 0, total: o.production_hours_packaging || 0, color: '#8b5cf6' },
+            { name: 'molding', label: 'Литьё', remaining: remainingMolding, total: plannedMolding, actual: actualMolding, color: '#f59e0b' },
+            { name: 'assembly', label: 'Сборка', remaining: remainingAssembly, total: plannedAssembly, actual: actualAssembly, color: '#06b6d4' },
+            { name: 'packaging', label: 'Упаковка', remaining: remainingPackaging, total: plannedPackaging, actual: actualPackaging, color: '#8b5cf6' },
         ],
         currentPhaseIdx: 0,
         schedule: [], // [{ date, phase, hours }]
-        totalHours: round2((o.production_hours_plastic || 0) + (o.production_hours_packaging || 0) + (o.production_hours_hardware || 0)),
+        totalHours: remainingTotalHours,
+        plannedTotalHours,
+        actualTotalHours,
+        actualOtherHours,
+        remainingTotalHours,
         done: false,
-    }));
+        };
+    });
 
     // Skip phases with 0 hours at the start
     queue.forEach(q => {
@@ -752,17 +816,16 @@ function buildProductionSchedule(orders, settings) {
         const date = new Date(today);
         date.setDate(date.getDate() + d);
 
-        // Skip weekends (Sat=6, Sun=0)
-        const dow = date.getDay();
-        if (dow === 0 || dow === 6) continue;
+        if (isProductionNonWorkingDate(date, holidaySet)) continue;
 
-        const dateStr = date.toISOString().slice(0, 10);
+        const dateStr = formatIsoDateLocal(date);
         let remainingCapacity = dailyCapacity;
         const dayAllocations = [];
 
         // Allocate hours to orders in priority order
         for (const q of queue) {
             if (q.done || remainingCapacity <= 0) continue;
+            if (q.notBeforeDate && dateStr < q.notBeforeDate) continue;
 
             const phase = q.phases[q.currentPhaseIdx];
             if (!phase || phase.remaining <= 0) continue;

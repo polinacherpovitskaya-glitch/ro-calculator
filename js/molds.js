@@ -819,25 +819,22 @@ const Molds = {
     },
 
     renderWarehouseHwPicker() {
-        const container = document.getElementById('mold-hw-warehouse-list');
+        const container = document.getElementById('mold-hw-warehouse-picker-host');
         if (!container) return;
-        if (this._warehouseItems.length === 0) {
+        if (!this._warehouseHwItems.length) {
             container.innerHTML = '<p class="text-muted" style="font-size:12px">Нет фурнитуры на складе</p>';
             return;
         }
-        container.innerHTML = this._warehouseItems.map(item => {
-            const photo = item.photo_thumbnail
-                ? `<img src="${item.photo_thumbnail}" style="width:36px;height:36px;object-fit:cover;border-radius:4px;border:1px solid var(--border)">`
-                : `<span style="width:36px;height:36px;display:flex;align-items:center;justify-content:center;background:var(--accent-light);border-radius:4px;font-size:14px;">&#128295;</span>`;
-            const selected = this._hwWarehouseItemId === item.id ? 'border-color:var(--accent);background:var(--accent-light)' : '';
-            return `<div onclick="Molds.selectWarehouseHw(${item.id})" style="display:flex;gap:8px;align-items:center;padding:6px 8px;cursor:pointer;border:1px solid var(--border);border-radius:6px;${selected}">
-                ${photo}
-                <div style="flex:1;min-width:0">
-                    <div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${this.esc(item.name)}</div>
-                    <div style="font-size:10px;color:var(--text-muted)">${formatRub(item.price_per_unit || 0)}/шт</div>
-                </div>
-            </div>`;
-        }).join('');
+        const grouped = this._buildWarehouseHwPickerData();
+        const selectedId = document.getElementById('hw-blank-wh-id')?.value || '';
+        container.innerHTML = Warehouse.buildImagePicker(
+            'moldhw-picker-0',
+            grouped,
+            selectedId,
+            'Molds.selectWarehouseHwPicker',
+            'hardware',
+            { searchPlaceholder: 'Поиск по названию или артикулу...' }
+        );
     },
 
     selectWarehouseHw(itemId) {
@@ -851,6 +848,10 @@ const Molds = {
         document.getElementById('mold-hw-delivery-total').value = 0;
         this.renderWarehouseHwPicker(); // re-render to show selected
         App.toast('Фурнитура выбрана: ' + (item.name || ''));
+    },
+
+    selectWarehouseHwPicker(_idx, itemId) {
+        this.selectHwWarehouseItem(itemId);
     },
 
     esc(str) {
@@ -964,10 +965,12 @@ const Molds = {
 
             if (warehouseSnapshot) {
                 b._warehouseName = warehouseSnapshot.name;
+                b._warehouseSku = warehouseSnapshot.sku;
                 b._displayNotes = warehouseSnapshot.notes;
                 b._whPhoto = warehouseSnapshot.photoUrl;
             } else {
                 b._warehouseName = '';
+                b._warehouseSku = '';
                 b._displayNotes = b.notes || '';
                 b._whPhoto = '';
                 if (!b.photo_url && b.warehouse_item_id) {
@@ -1006,6 +1009,7 @@ const Molds = {
             const priceRub = b._priceRubCalc || b.price_rub || 0;
             const displayName = b._warehouseName || b.name;
             const displayNotes = b._displayNotes || b.notes || '';
+            const displaySku = b._warehouseSku || '';
             const photoSrc = src === 'warehouse'
                 ? (b._whPhoto || b.photo_url || '')
                 : (b.photo_url || b._whPhoto || '');
@@ -1017,18 +1021,21 @@ const Molds = {
             const speedLabel = speedPcsMin > 0 ? (speedPcsMin + ' шт/мин') : '—';
             const srcBadge = b._srcBadge || '📦';
             // Extra info line for china/custom
-            let extraInfo = '';
+            const detailBits = [speedLabel];
+            if (src === 'warehouse' && displaySku) detailBits.push(displaySku);
             if (src === 'china' || src === 'custom_cny') {
                 const methodInfo = ChinaCatalog.DELIVERY_METHODS[b.delivery_method];
                 const deliveryLabel = methodInfo ? methodInfo.label : (b.delivery_method || '');
-                extraInfo = ` · ${b.price_cny || 0}¥ · ${deliveryLabel}`;
+                detailBits.push(`${b.price_cny || 0}¥`);
+                if (deliveryLabel) detailBits.push(deliveryLabel);
             }
+            if (displayNotes) detailBits.push(displayNotes);
 
             html += `<tr style="border-bottom:1px solid var(--border);">
                 <td style="padding:6px;">${photo}</td>
                 <td style="padding:6px 8px;">
                     <div style="font-weight:700;font-size:13px;">${srcBadge} ${this.esc(displayName)}</div>
-                    <div style="font-size:10px;color:var(--text-muted);margin-top:2px;">${speedLabel}${extraInfo}${displayNotes ? ' · ' + this.esc(displayNotes) : ''}</div>
+                    <div style="font-size:10px;color:var(--text-muted);margin-top:2px;">${this.esc(detailBits.filter(Boolean).join(' · '))}</div>
                 </td>
                 <td style="padding:6px 8px;text-align:right;font-size:12px;color:var(--text-secondary);">${formatRub(priceRub)}</td>
                 <td style="padding:6px 8px;text-align:right;font-size:12px;color:var(--text-secondary);">${formatRub(b._assemblyCost)}</td>
@@ -1071,6 +1078,9 @@ const Molds = {
         if (src === 'china' && ChinaCatalog._items.length === 0) {
             ChinaCatalog._loadItems().then(items => { ChinaCatalog._items = items; });
         }
+        if (src === 'warehouse') {
+            this.renderWarehouseHwPicker();
+        }
         // Reset selection
         document.getElementById('hw-blank-selected').style.display = 'none';
         this.recalcHwCost();
@@ -1100,13 +1110,14 @@ const Molds = {
     _normalizeHwNotesForWarehouseItem(item, notes) {
         const sku = String(item?.sku || '').trim();
         const raw = String(notes || '').trim();
-        if (!sku) return raw;
-        if (!raw) return sku;
-        const parts = raw.split(' + ');
-        const prefix = String(parts[0] || '').trim();
-        if (prefix === sku) return raw;
+        if (!sku || !raw) return raw;
+        if (raw === sku) return '';
+        const parts = raw.split(' + ').map(part => String(part || '').trim()).filter(Boolean);
+        if (!parts.length) return '';
+        const prefix = parts[0];
+        if (prefix === sku) return parts.slice(1).join(' + ').trim();
         if (this._looksLikeWarehouseSku(prefix)) {
-            return [sku].concat(parts.slice(1).filter(Boolean)).join(' + ');
+            return parts.slice(1).join(' + ').trim();
         }
         return raw;
     },
@@ -1119,6 +1130,7 @@ const Molds = {
         return {
             item,
             name: this._formatWarehouseHwName(item),
+            sku: String(item.sku || '').trim(),
             priceRub: round2(item.price_per_unit || 0),
             photoUrl: item.photo_thumbnail || item.photo_url || '',
             warehouseItemId: item.id,
@@ -1126,11 +1138,61 @@ const Molds = {
         };
     },
 
+    _formatWarehouseHwInfo(snapshot) {
+        if (!snapshot) return '';
+        const parts = [];
+        if (snapshot.sku) parts.push(`Артикул: ${snapshot.sku}`);
+        parts.push(`Цена: ${formatRub(snapshot.priceRub)} (доставка включена)`);
+        return parts.join(' · ');
+    },
+
+    _getWarehouseCategoryMeta(catKey) {
+        if (typeof WAREHOUSE_CATEGORIES !== 'undefined' && Array.isArray(WAREHOUSE_CATEGORIES)) {
+            return WAREHOUSE_CATEGORIES.find(cat => cat.key === catKey) || null;
+        }
+        return null;
+    },
+
+    _buildWarehouseHwPickerData() {
+        const grouped = {};
+        const sortedItems = [...(this._warehouseHwItems || [])].sort((a, b) =>
+            String(a.name || '').localeCompare(String(b.name || ''), 'ru')
+        );
+
+        sortedItems.forEach(item => {
+            const catKey = String(item.category || 'other');
+            if (!grouped[catKey]) {
+                const meta = this._getWarehouseCategoryMeta(catKey);
+                grouped[catKey] = {
+                    label: meta?.label || catKey,
+                    icon: meta?.icon || '📦',
+                    items: [],
+                };
+            }
+
+            grouped[catKey].items.push({
+                id: item.id,
+                category: item.category || catKey,
+                name: item.name || '',
+                sku: item.sku || '',
+                size: item.size || '',
+                color: item.color || '',
+                qty: item.qty || 0,
+                available_qty: item.available_qty ?? item.qty ?? 0,
+                price_per_unit: item.price_per_unit || 0,
+                unit: item.unit || 'шт',
+                photo_thumbnail: item.photo_thumbnail || item.photo_url || '',
+                photo_url: item.photo_url || item.photo_thumbnail || '',
+            });
+        });
+
+        return grouped;
+    },
+
     showHwForm() {
         this._editingHwId = null;
         this._hwFormSource = 'warehouse';
         document.getElementById('hw-form-title').textContent = 'Новая фурнитура';
-        document.getElementById('hw-blank-wh-search').value = '';
         document.getElementById('hw-blank-speed').value = '';
         document.getElementById('hw-blank-notes').value = '';
         document.getElementById('hw-blank-name').value = '';
@@ -1140,7 +1202,6 @@ const Molds = {
         document.getElementById('hw-blank-wh-id').value = '';
         document.getElementById('hw-blank-china-id').value = '';
         document.getElementById('hw-blank-selected').style.display = 'none';
-        document.getElementById('hw-blank-wh-dropdown').style.display = 'none';
         document.getElementById('hw-delete-btn').style.display = 'none';
         // Reset custom fields
         const customName = document.getElementById('hw-custom-name');
@@ -1189,9 +1250,7 @@ const Molds = {
 
         this.setHwFormSource(src);
 
-        if (src === 'warehouse') {
-            document.getElementById('hw-blank-wh-search').value = warehouseSnapshot?.name || b.name || '';
-        } else if (src === 'china') {
+        if (src === 'china') {
             const chinaSearch = document.getElementById('hw-china-search');
             if (chinaSearch) chinaSearch.value = b.name || '';
             // Set delivery method
@@ -1214,7 +1273,12 @@ const Molds = {
         const photoSrc = src === 'warehouse'
             ? (warehouseSnapshot?.photoUrl || b._whPhoto || b.photo_url || '')
             : (b.photo_url || b._whPhoto || '');
-        this._showHwSelectedItem(previewName, previewPrice, photoSrc);
+        this._showHwSelectedItem(
+            previewName,
+            previewPrice,
+            photoSrc,
+            src === 'warehouse' ? this._formatWarehouseHwInfo(warehouseSnapshot) : ''
+        );
 
         document.getElementById('hw-delete-btn').style.display = '';
         document.getElementById('hw-edit-form').style.display = '';
@@ -1222,14 +1286,14 @@ const Molds = {
         document.getElementById('hw-edit-form').scrollIntoView({ behavior: 'smooth' });
     },
 
-    _showHwSelectedItem(name, priceRub, photoUrl) {
+    _showHwSelectedItem(name, priceRub, photoUrl, infoText = '') {
         const block = document.getElementById('hw-blank-selected');
         const nameEl = document.getElementById('hw-blank-selected-name');
         const infoEl = document.getElementById('hw-blank-selected-info');
         const photoEl = document.getElementById('hw-blank-photo-preview');
 
         nameEl.textContent = name || '';
-        infoEl.textContent = `Цена: ${formatRub(priceRub)} (доставка включена)`;
+        infoEl.textContent = infoText || `Цена: ${formatRub(priceRub)} (доставка включена)`;
 
         if (photoUrl) {
             photoEl.src = photoUrl;
@@ -1267,7 +1331,12 @@ const Molds = {
                 ? `<img src="${photoSrc.startsWith('data:') ? photoSrc : this.esc(photoSrc)}" style="width:32px;height:32px;object-fit:cover;border-radius:4px;">`
                 : `<span style="width:32px;height:32px;display:flex;align-items:center;justify-content:center;background:var(--accent-light);border-radius:4px;font-size:12px;">🔩</span>`;
             const price = item.price_per_unit || 0;
-            const details = [item.size, item.color].filter(Boolean).join(' · ');
+            const details = [
+                String(item.sku || '').trim() || 'без артикула',
+                item.size,
+                item.color,
+                formatRub(price),
+            ].filter(Boolean).join(' · ');
 
             html += `<div style="display:flex;gap:8px;align-items:center;padding:8px 10px;cursor:pointer;border-bottom:1px solid var(--border);"
                       onmouseover="this.style.background='var(--bg)'" onmouseout="this.style.background=''"
@@ -1275,7 +1344,7 @@ const Molds = {
                 ${photo}
                 <div style="flex:1;min-width:0;">
                     <div style="font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${this.esc(item.name)}</div>
-                    <div style="font-size:10px;color:var(--text-muted);">${details ? details + ' · ' : ''}${formatRub(price)}</div>
+                    <div style="font-size:10px;color:var(--text-muted);">${details}</div>
                 </div>
             </div>`;
         });
@@ -1386,16 +1455,15 @@ const Molds = {
         const snapshot = this._getWarehouseHwSnapshot(whId, document.getElementById('hw-blank-notes').value);
         if (!snapshot) return;
 
-        document.getElementById('hw-blank-wh-search').value = snapshot.name;
         document.getElementById('hw-blank-name').value = snapshot.name;
         document.getElementById('hw-blank-price-rub').value = snapshot.priceRub;
         document.getElementById('hw-blank-photo').value = '';
         document.getElementById('hw-blank-wh-id').value = whId;
         document.getElementById('hw-blank-china-id').value = '';
         document.getElementById('hw-blank-notes').value = snapshot.notes;
-        document.getElementById('hw-blank-wh-dropdown').style.display = 'none';
 
-        this._showHwSelectedItem(snapshot.name, snapshot.priceRub, snapshot.photoUrl);
+        this.renderWarehouseHwPicker();
+        this._showHwSelectedItem(snapshot.name, snapshot.priceRub, snapshot.photoUrl, this._formatWarehouseHwInfo(snapshot));
         this.recalcHwCost();
     },
 
@@ -1512,7 +1580,8 @@ const Molds = {
 
     hideHwForm() {
         document.getElementById('hw-edit-form').style.display = 'none';
-        document.getElementById('hw-blank-wh-dropdown').style.display = 'none';
+        const pickerHost = document.getElementById('mold-hw-warehouse-picker-host');
+        if (pickerHost) pickerHost.innerHTML = '';
         this._editingHwId = null;
     },
 
@@ -1608,6 +1677,8 @@ const Molds = {
     async loadPkgTab() {
         try {
             this._pkgBlanks = await loadPkgBlanks();
+            const whItems = await loadWarehouseItems();
+            this._warehousePkgItems = (whItems || []).filter(i => i.category === 'packaging');
             this.enrichPkgBlanks();
             this.renderPkgTable();
         } catch(e) {
@@ -1622,14 +1693,32 @@ const Molds = {
         const indirectPerHour = params.indirectPerHour || 0;
 
         this._pkgBlanks.forEach(b => {
+            const warehouseSnapshot = b.warehouse_item_id
+                ? this._getWarehousePkgSnapshot(b.warehouse_item_id, b.notes || '')
+                : null;
+            const price = warehouseSnapshot ? warehouseSnapshot.priceRub : (b.price_per_unit || 0);
+            const delivery = warehouseSnapshot ? 0 : (b.delivery_per_unit || 0);
             const speed = b.assembly_speed || 0;
             const assemblyCost = speed > 0 ? round2((fotPerHour + indirectPerHour) / speed) : 0;
-            const totalCost = round2((b.price_per_unit || 0) + (b.delivery_per_unit || 0) + assemblyCost);
+            const totalCost = round2(price + delivery + assemblyCost);
             b._assemblyCost = assemblyCost;
             b._cost = totalCost;
             // Fixed sell price from blank form (fallback to old 40% formula for legacy records).
             const fixedSell = parseFloat(b.sell_price) || 0;
             b._sellPrice = fixedSell > 0 ? fixedSell : (totalCost > 0 ? Math.ceil(totalCost / (1 - 0.40)) : 0);
+            b._priceCalc = round2(price);
+            b._deliveryCalc = round2(delivery);
+            if (warehouseSnapshot) {
+                b._warehouseName = warehouseSnapshot.name;
+                b._warehouseSku = warehouseSnapshot.sku;
+                b._displayNotes = warehouseSnapshot.notes;
+                b._whPhoto = warehouseSnapshot.photoUrl;
+            } else {
+                b._warehouseName = '';
+                b._warehouseSku = '';
+                b._displayNotes = b.notes || '';
+                b._whPhoto = b.photo_url || '';
+            }
         });
     },
 
@@ -1643,6 +1732,7 @@ const Molds = {
         let html = `<div class="card" style="padding:12px;overflow-x:auto;">
             <table style="font-size:12px;white-space:nowrap;border-collapse:collapse;width:100%;">
             <thead><tr>
+                <th style="width:48px;padding:6px;"></th>
                 <th style="min-width:180px;padding:6px 8px;text-align:left;">Упаковка</th>
                 <th style="padding:6px 8px;text-align:right;">Цена</th>
                 <th style="padding:6px 8px;text-align:right;">Доставка</th>
@@ -1653,15 +1743,26 @@ const Molds = {
             </tr></thead><tbody>`;
 
         this._pkgBlanks.forEach(b => {
-            const price = b.price_per_unit || 0;
-            const delivery = b.delivery_per_unit || 0;
+            const price = b._priceCalc != null ? b._priceCalc : (b.price_per_unit || 0);
+            const delivery = b._deliveryCalc != null ? b._deliveryCalc : (b.delivery_per_unit || 0);
             const speedPcsMin = b.assembly_speed ? round2(b.assembly_speed / 60) : 0;
             const speedLabel = speedPcsMin > 0 ? (speedPcsMin + ' шт/мин') : '—';
+            const displayName = b._warehouseName || b.name;
+            const displayNotes = b._displayNotes || b.notes || '';
+            const displaySku = b._warehouseSku || '';
+            const photoSrc = b._whPhoto || b.photo_url || '';
+            const photo = photoSrc
+                ? `<img src="${photoSrc.startsWith('data:') ? photoSrc : this.esc(photoSrc)}" style="width:44px;height:44px;object-fit:cover;border-radius:6px;border:1px solid var(--border);" onerror="this.style.display='none'">`
+                : `<span style="width:44px;height:44px;display:flex;align-items:center;justify-content:center;background:var(--accent-light);border-radius:6px;font-size:16px;">📦</span>`;
+            const detailBits = [speedLabel];
+            if (displaySku) detailBits.push(displaySku);
+            if (displayNotes) detailBits.push(displayNotes);
 
             html += `<tr style="border-bottom:1px solid var(--border);">
+                <td style="padding:6px;">${photo}</td>
                 <td style="padding:6px 8px;">
-                    <div style="font-weight:700;font-size:13px;">${this.esc(b.name)}</div>
-                    <div style="font-size:10px;color:var(--text-muted);font-style:italic;">${speedLabel}${b.notes ? ' · ' + this.esc(b.notes) : ''}</div>
+                    <div style="font-weight:700;font-size:13px;">📦 ${this.esc(displayName)}</div>
+                    <div style="font-size:10px;color:var(--text-muted);font-style:italic;">${this.esc(detailBits.filter(Boolean).join(' · '))}</div>
                 </td>
                 <td style="padding:6px 8px;text-align:right;font-size:12px;color:var(--text-secondary);">${formatRub(price)}</td>
                 <td style="padding:6px 8px;text-align:right;font-size:12px;color:var(--text-secondary);">${formatRub(delivery)}</td>
@@ -1689,9 +1790,14 @@ const Molds = {
     showPkgForm() {
         this._editingPkgId = null;
         document.getElementById('pkg-form-title').textContent = 'Новая упаковка';
-        ['pkg-blank-name','pkg-blank-price','pkg-blank-delivery','pkg-blank-speed','pkg-blank-sell','pkg-blank-notes','pkg-blank-photo'].forEach(id => {
+        ['pkg-blank-name','pkg-blank-price','pkg-blank-delivery','pkg-blank-speed','pkg-blank-sell','pkg-blank-notes','pkg-blank-photo','pkg-blank-wh-id'].forEach(id => {
             document.getElementById(id).value = '';
         });
+        document.getElementById('pkg-blank-selected').style.display = 'none';
+        document.getElementById('pkg-blank-selected-name').textContent = '';
+        document.getElementById('pkg-blank-selected-info').textContent = '';
+        document.getElementById('pkg-blank-photo-preview').style.display = 'none';
+        this.renderWarehousePkgPicker();
         document.getElementById('pkg-delete-btn').style.display = 'none';
         document.getElementById('pkg-edit-form').style.display = '';
         this.recalcPkgCost();
@@ -1703,13 +1809,32 @@ const Molds = {
         if (!b) return;
         this._editingPkgId = id;
         document.getElementById('pkg-form-title').textContent = 'Редактировать: ' + (b.name || '');
-        document.getElementById('pkg-blank-name').value = b.name || '';
-        document.getElementById('pkg-blank-price').value = b.price_per_unit || '';
-        document.getElementById('pkg-blank-delivery').value = b.delivery_per_unit || '';
+        const warehouseSnapshot = b.warehouse_item_id
+            ? this._getWarehousePkgSnapshot(b.warehouse_item_id, b.notes || '')
+            : null;
+        document.getElementById('pkg-blank-name').value = warehouseSnapshot?.name || b.name || '';
+        document.getElementById('pkg-blank-price').value = warehouseSnapshot ? warehouseSnapshot.priceRub : (b.price_per_unit || '');
+        document.getElementById('pkg-blank-delivery').value = warehouseSnapshot ? 0 : (b.delivery_per_unit || '');
         document.getElementById('pkg-blank-speed').value = b.assembly_speed ? round2(b.assembly_speed / 60) : '';
         document.getElementById('pkg-blank-sell').value = b.sell_price || '';
-        document.getElementById('pkg-blank-notes').value = b.notes || '';
-        document.getElementById('pkg-blank-photo').value = b.photo_url || '';
+        document.getElementById('pkg-blank-notes').value = warehouseSnapshot?.notes || b.notes || '';
+        document.getElementById('pkg-blank-photo').value = warehouseSnapshot?.photoUrl || b.photo_url || '';
+        document.getElementById('pkg-blank-wh-id').value = warehouseSnapshot?.warehouseItemId || b.warehouse_item_id || '';
+        this.renderWarehousePkgPicker();
+        if (warehouseSnapshot) {
+            document.getElementById('pkg-blank-selected-name').textContent = warehouseSnapshot.name;
+            document.getElementById('pkg-blank-selected-info').textContent = this._formatWarehousePkgInfo(warehouseSnapshot);
+            const preview = document.getElementById('pkg-blank-photo-preview');
+            if (warehouseSnapshot.photoUrl) {
+                preview.src = warehouseSnapshot.photoUrl;
+                preview.style.display = '';
+            } else {
+                preview.style.display = 'none';
+            }
+            document.getElementById('pkg-blank-selected').style.display = '';
+        } else {
+            this.clearPkgWarehouseSelection();
+        }
         document.getElementById('pkg-delete-btn').style.display = '';
         document.getElementById('pkg-edit-form').style.display = '';
         this.recalcPkgCost();
@@ -1758,6 +1883,8 @@ const Molds = {
 
     hidePkgForm() {
         document.getElementById('pkg-edit-form').style.display = 'none';
+        const host = document.getElementById('mold-pkg-warehouse-picker-host');
+        if (host) host.innerHTML = '';
         this._editingPkgId = null;
     },
 
@@ -1774,12 +1901,113 @@ const Molds = {
             sell_price: parseFloat(document.getElementById('pkg-blank-sell').value) || 0,
             notes: document.getElementById('pkg-blank-notes').value.trim(),
             photo_url: document.getElementById('pkg-blank-photo').value.trim(),
+            warehouse_item_id: parseInt(document.getElementById('pkg-blank-wh-id').value) || null,
         };
 
         await savePkgBlank(blank);
         App.toast('Упаковка сохранена');
         this.hidePkgForm();
         await this.loadPkgTab();
+    },
+
+    _formatWarehousePkgName(item) {
+        if (!item) return '';
+        return [item.name, item.size, item.color].filter(Boolean).join(' · ').trim();
+    },
+
+    _normalizePkgNotesForWarehouseItem(item, notes) {
+        const sku = String(item?.sku || '').trim();
+        const raw = String(notes || '').trim();
+        if (!sku || !raw) return raw;
+        if (raw === sku) return '';
+        const parts = raw.split(' + ').map(part => String(part || '').trim()).filter(Boolean);
+        if (!parts.length) return '';
+        const prefix = parts[0];
+        if (prefix === sku) return parts.slice(1).join(' + ').trim();
+        if (this._looksLikeWarehouseSku(prefix)) return parts.slice(1).join(' + ').trim();
+        return raw;
+    },
+
+    _getWarehousePkgSnapshot(warehouseItemId, notes) {
+        const itemId = Number(warehouseItemId || 0);
+        if (!itemId) return null;
+        const item = (this._warehousePkgItems || []).find(w => Number(w.id) === itemId);
+        if (!item) return null;
+        return {
+            item,
+            name: this._formatWarehousePkgName(item),
+            sku: String(item.sku || '').trim(),
+            priceRub: round2(item.price_per_unit || 0),
+            photoUrl: item.photo_thumbnail || item.photo_url || '',
+            warehouseItemId: item.id,
+            notes: this._normalizePkgNotesForWarehouseItem(item, notes),
+        };
+    },
+
+    _formatWarehousePkgInfo(snapshot) {
+        if (!snapshot) return '';
+        const parts = [];
+        if (snapshot.sku) parts.push(`Артикул: ${snapshot.sku}`);
+        parts.push(`Цена: ${formatRub(snapshot.priceRub)} (доставка включена)`);
+        return parts.join(' · ');
+    },
+
+    async renderWarehousePkgPicker() {
+        const container = document.getElementById('mold-pkg-warehouse-picker-host');
+        if (!container || typeof Warehouse === 'undefined' || !Warehouse || typeof Warehouse.buildImagePicker !== 'function') return;
+        const grouped = await Warehouse.getItemsForPicker();
+        const selectedId = document.getElementById('pkg-blank-wh-id')?.value || '';
+        container.innerHTML = Warehouse.buildImagePicker(
+            'moldpkg-picker-0',
+            grouped,
+            selectedId,
+            'Molds.selectPkgWarehouseItem',
+            'packaging',
+            { searchPlaceholder: 'Поиск по названию или артикулу...' }
+        );
+    },
+
+    selectPkgWarehouseItem(_idx, itemId) {
+        const normalizedId = Number(itemId || 0);
+        if (!normalizedId) return;
+        const snapshot = this._getWarehousePkgSnapshot(normalizedId, document.getElementById('pkg-blank-notes').value);
+        if (!snapshot) return;
+        document.getElementById('pkg-blank-wh-id').value = snapshot.warehouseItemId;
+        document.getElementById('pkg-blank-name').value = snapshot.name;
+        document.getElementById('pkg-blank-price').value = snapshot.priceRub;
+        document.getElementById('pkg-blank-delivery').value = 0;
+        document.getElementById('pkg-blank-photo').value = snapshot.photoUrl || '';
+        document.getElementById('pkg-blank-notes').value = snapshot.notes;
+        document.getElementById('pkg-blank-selected-name').textContent = snapshot.name;
+        document.getElementById('pkg-blank-selected-info').textContent = this._formatWarehousePkgInfo(snapshot);
+        const preview = document.getElementById('pkg-blank-photo-preview');
+        if (snapshot.photoUrl) {
+            preview.src = snapshot.photoUrl;
+            preview.style.display = '';
+        } else {
+            preview.style.display = 'none';
+        }
+        document.getElementById('pkg-blank-selected').style.display = '';
+        this.renderWarehousePkgPicker();
+        this.recalcPkgCost();
+    },
+
+    clearPkgWarehouseSelection() {
+        const hidden = document.getElementById('pkg-blank-wh-id');
+        if (hidden) hidden.value = '';
+        const selected = document.getElementById('pkg-blank-selected');
+        if (selected) selected.style.display = 'none';
+        const preview = document.getElementById('pkg-blank-photo-preview');
+        if (preview) {
+            preview.src = '';
+            preview.style.display = 'none';
+        }
+        const info = document.getElementById('pkg-blank-selected-info');
+        if (info) info.textContent = '';
+        const name = document.getElementById('pkg-blank-selected-name');
+        if (name) name.textContent = '';
+        this.renderWarehousePkgPicker();
+        this.recalcPkgCost();
     },
 
     async deletePkgBlank() {

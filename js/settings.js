@@ -13,9 +13,18 @@ const Settings = {
     authAccountsData: [],
     authActivityData: [],
     authSessionsData: [],
+    timeEntriesData: [],
+    employeeAuthAudit: null,
     editingAuthAccountId: null,
+    lastIssuedAuthCredentials: null,
     // Tabs that require admin access
     ADMIN_TABS: new Set(['indirect', 'costs', 'logins', 'sessions', 'backup']),
+    PAYROLL_PROFILE_LABELS: {
+        hourly: 'Почасовая',
+        salary_monthly: 'Оклад за месяц',
+        salary_semimonth_threshold: 'Оклад 60 + 60',
+        management_salary_with_production_allocation: 'Оклад + факт. часы в производство',
+    },
 
     async load() {
         this._applyAdminVisibility();
@@ -203,17 +212,22 @@ const Settings = {
 
         const hoursPerWorker = readNum('set-hours_per_worker', 168);
         const workLoad = readNum('set-work_load_ratio', 0.8);
+        const planningWorkers = readNum('set-planning_workers_count', 2);
+        const planningHoursPerDay = readNum('set-planning_hours_per_day', 8);
         const plasticRatio = readNum('set-plastic_injection_ratio', 0.7);
         const packagingRatio = readNum('set-packaging_ratio', 0.3);
         const wasteFactor = readNum('set-waste_factor', 1.1);
 
         setHint('set-hours-per-worker-hint', `ч/мес (сейчас: ${hoursPerWorker})`);
         setHint('set-work-load-hint', `${workLoad} = ${pct(workLoad)}`);
+        setHint('set-planning-workers-hint', `${planningWorkers} чел для реального плана, отдельно от pricing`);
+        setHint('set-planning-hours-hint', `${planningHoursPerDay} ч/день в календаре`);
         setHint('set-plastic-ratio-hint', `${plasticRatio} = ${pct(plasticRatio)}`);
         setHint('set-packaging-ratio-hint', `${packagingRatio} = ${pct(packagingRatio)}`);
         const wastePct = Math.round((wasteFactor - 1) * 1000) / 10;
         const wasteSign = wastePct >= 0 ? '+' : '';
         setHint('set-waste-factor-hint', `${wasteFactor} = ${wasteSign}${wastePct}% к времени/себестоимости`);
+        setHint('set-planning-capacity-summary', `Календарь считает ${planningWorkers * planningHoursPerDay} ч/день как реальную мощность цеха. Цены и калькулятор остаются на своих pricing-параметрах.`);
     },
 
     async saveAll() {
@@ -377,6 +391,16 @@ const Settings = {
             this.employeesData = [];
         }
         this.renderEmployeesTable();
+        try {
+            this.authAccountsData = await loadAuthAccounts();
+        } catch (err) {
+            console.error('loadEmployeesTab auth load error:', err);
+            this.authAccountsData = [];
+        }
+        if (!Array.isArray(this.authAccountsData)) {
+            this.authAccountsData = [];
+        }
+        this.renderEmployeesTable();
     },
 
     renderEmployeesTable() {
@@ -384,7 +408,7 @@ const Settings = {
         if (!tbody) return;
 
         if (!this.employeesData || this.employeesData.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="8" class="text-muted text-center">Нет сотрудников</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="10" class="text-muted text-center">Нет сотрудников</td></tr>';
             return;
         }
 
@@ -398,12 +422,11 @@ const Settings = {
                 : `<span style="color:var(--text-muted);" title="Не привязан">—</span>`;
             const reminderTime = `${String(e.reminder_hour || 17).padStart(2, '0')}:${String(e.reminder_minute || 30).padStart(2, '0')} UTC+${e.timezone_offset || 3}`;
             const tasksIcon = e.tasks_required ? '<span style="color:var(--orange);" title="Обязательное описание задач">&#9998;</span>' : '';
-            const isFired = !!e.fired_date;
-            const statusBadge = isFired
-                ? `<span class="badge" title="Уволен ${e.fired_date}">Уволен ${e.fired_date}</span>`
-                : (e.is_active !== false
-                    ? '<span class="badge badge-green">Активен</span>'
-                    : '<span class="badge">Неактивен</span>');
+            const statusMeta = this.getEmployeeStatusMeta(e);
+            const statusBadge = `<span class="${statusMeta.badgeClass}" title="${this.escHtml(statusMeta.hint)}">${this.escHtml(statusMeta.label)}</span>`;
+            const authMeta = this.getEmployeeAuthMeta(e);
+            const payrollLabel = this.getEmployeePayrollProfileLabel(e);
+            const isFired = statusMeta.key === 'fired';
             const rowStyle = isFired ? 'opacity:0.5' : '';
             return `
             <tr style="${rowStyle}">
@@ -413,6 +436,13 @@ const Settings = {
                 <td style="text-align:center;">${tgStatus}</td>
                 <td style="text-align:center;font-size:11px;">${reminderTime}</td>
                 <td style="text-align:center;">${tasksIcon}</td>
+                <td style="font-size:12px;">
+                    <div>${authMeta.badge}</div>
+                    <div class="text-muted" style="font-size:11px;margin-top:4px;">${authMeta.details}</div>
+                </td>
+                <td style="font-size:12px;">
+                    <span class="badge badge-blue">${this.escHtml(payrollLabel)}</span>
+                </td>
                 <td style="text-align:center;">${statusBadge}</td>
                 <td>
                     <button class="btn btn-sm btn-outline" style="padding:2px 6px;font-size:10px;" onclick="Settings.editEmployee('${e.id}')">&#9998;</button>
@@ -429,6 +459,14 @@ const Settings = {
         // Hide salary section from non-admin
         const paySection = document.getElementById('emp-pay-section');
         if (paySection) paySection.style.display = App.isAdmin() ? '' : 'none';
+        this.onEmployeeStatusChange();
+        this.onPayrollProfileChange();
+        this.renderEmployeeAuthSummary({
+            id: null,
+            is_active: true,
+            fired_date: null,
+            payroll_profile: document.getElementById('emp-payroll-profile')?.value || 'hourly',
+        });
         document.getElementById('emp-name').focus();
     },
 
@@ -449,6 +487,404 @@ const Settings = {
     calcEmployeeTotalCost(whiteNet, black) {
         const { totalTaxes } = this.calcEmployeeTaxes(whiteNet);
         return (whiteNet || 0) + (black || 0) + totalTaxes;
+    },
+
+    getEmployeeEmploymentStatus(employee) {
+        if (!employee) return 'active';
+        if (employee.fired_date) return 'fired';
+        if (employee.is_active === false) return 'inactive';
+        return 'active';
+    },
+
+    getEmployeeStatusMeta(employee) {
+        const status = this.getEmployeeEmploymentStatus(employee);
+        if (status === 'fired') {
+            return {
+                key: 'fired',
+                label: employee?.fired_date ? `Уволен ${employee.fired_date}` : 'Уволен',
+                hint: 'Сотрудник уволен: история часов сохранится, но логин и новые назначения должны быть отключены.',
+                badgeClass: 'badge',
+            };
+        }
+        if (status === 'inactive') {
+            return {
+                key: 'inactive',
+                label: 'Пауза / неактивен',
+                hint: 'Сотрудник временно не работает: логин можно держать выключенным, история часов остается.',
+                badgeClass: 'badge',
+            };
+        }
+        return {
+            key: 'active',
+            label: 'Активен',
+            hint: 'Сотрудник работает сейчас и может сдавать часы и заходить в систему.',
+            badgeClass: 'badge badge-green',
+        };
+    },
+
+    getEmployeePayrollProfile(employee) {
+        const explicit = String(employee?.payroll_profile || '').trim();
+        if (explicit) return explicit;
+        const baseSalary = (parseFloat(employee?.pay_white_salary) || 0) + (parseFloat(employee?.pay_black_salary) || 0);
+        if (String(employee?.role || '') === 'management' && baseSalary > 0) return 'management_salary_with_production_allocation';
+        if (baseSalary > 0) return 'salary_monthly';
+        return 'hourly';
+    },
+
+    getEmployeePayrollProfileLabel(employee) {
+        const key = this.getEmployeePayrollProfile(employee);
+        return this.PAYROLL_PROFILE_LABELS[key] || key || '—';
+    },
+
+    getEmployeeAuthAccount(employeeId) {
+        return (this.authAccountsData || []).find(a => String(a.employee_id || '') === String(employeeId || '')) || null;
+    },
+
+    getEmployeeAuthMeta(employee) {
+        const account = this.getEmployeeAuthAccount(employee?.id);
+        if (!account) {
+            return {
+                state: 'missing',
+                badge: '<span class="badge">Нет логина</span>',
+                details: 'Логин еще не выдан',
+                account: null,
+            };
+        }
+        const stateBadge = account.is_active === false
+            ? '<span class="badge">Логин выключен</span>'
+            : '<span class="badge badge-green">Логин активен</span>';
+        const lastLogin = account.last_login_at
+            ? new Date(account.last_login_at).toLocaleString('ru-RU')
+            : 'не заходил';
+        return {
+            state: account.is_active === false ? 'disabled' : 'active',
+            badge: stateBadge,
+            details: `${this.escHtml(account.username || '—')} · ${this.escHtml(lastLogin)}`,
+            account,
+        };
+    },
+
+    normalizePersonName(name) {
+        return String(name || '')
+            .trim()
+            .toLowerCase()
+            .replace(/ё/g, 'е')
+            .replace(/[._-]+/g, ' ')
+            .replace(/\s+/g, ' ')
+            .replace(/[^\p{L}\p{N}\s]/gu, '')
+            .trim();
+    },
+
+    getPersonShortKey(name) {
+        const normalized = this.normalizePersonName(name);
+        return normalized.split(' ').filter(Boolean)[0] || '';
+    },
+
+    suggestEmployeeForName(name, options = {}) {
+        const normalized = this.normalizePersonName(name);
+        if (!normalized) return null;
+        const excludeIds = new Set((options.excludeIds || []).map(v => String(v)));
+        const exact = (this.employeesData || []).filter(e =>
+            !excludeIds.has(String(e.id)) &&
+            this.normalizePersonName(e.name) === normalized
+        );
+        if (exact.length === 1) {
+            return { employee: exact[0], confidence: 'exact' };
+        }
+        const shortKey = this.getPersonShortKey(name);
+        const shortMatches = shortKey
+            ? (this.employeesData || []).filter(e =>
+                !excludeIds.has(String(e.id)) &&
+                this.getPersonShortKey(e.name) === shortKey
+            )
+            : [];
+        if (shortMatches.length === 1) {
+            return { employee: shortMatches[0], confidence: 'short' };
+        }
+        return null;
+    },
+
+    buildEmployeeAuthAudit() {
+        const employees = Array.isArray(this.employeesData) ? this.employeesData : [];
+        const accounts = Array.isArray(this.authAccountsData) ? this.authAccountsData : [];
+        const entries = Array.isArray(this.timeEntriesData) ? this.timeEntriesData : [];
+        const employeesById = new Map(employees.map(e => [String(e.id), e]));
+        const accountsByEmployeeId = new Map();
+        accounts.forEach(account => {
+            const key = String(account.employee_id || '');
+            if (!key) return;
+            const list = accountsByEmployeeId.get(key) || [];
+            list.push(account);
+            accountsByEmployeeId.set(key, list);
+        });
+
+        const issues = [];
+        const pushIssue = (issue) => {
+            issues.push({
+                severity: issue.severity || 'warn',
+                kind: issue.kind || 'generic',
+                title: issue.title || '',
+                detail: issue.detail || '',
+                accountId: issue.accountId ?? null,
+                employeeId: issue.employeeId ?? null,
+                entryId: issue.entryId ?? null,
+                suggestedEmployeeId: issue.suggestedEmployeeId ?? null,
+                canAutoRelink: !!issue.canAutoRelink,
+            });
+        };
+
+        accounts.forEach(account => {
+            const employeeId = account.employee_id != null ? String(account.employee_id) : '';
+            const linkedEmployee = employeeId ? employeesById.get(employeeId) : null;
+            const suggested = !linkedEmployee ? this.suggestEmployeeForName(account.employee_name || account.username || '') : null;
+
+            if (!linkedEmployee) {
+                pushIssue({
+                    severity: suggested && suggested.confidence === 'exact' ? 'warn' : 'error',
+                    kind: 'account_missing_employee',
+                    title: `Логин "${account.username || '—'}" не связан с сотрудником`,
+                    detail: suggested
+                        ? `Похоже на сотрудника "${suggested.employee.name}" (${suggested.confidence === 'exact' ? 'точное совпадение' : 'совпадение по короткому имени'}).`
+                        : 'Нужна ручная проверка привязки логина к сотруднику.',
+                    accountId: account.id,
+                    suggestedEmployeeId: suggested?.employee?.id || null,
+                    canAutoRelink: suggested?.confidence === 'exact',
+                });
+                return;
+            }
+
+            if (this.normalizePersonName(account.employee_name || '') !== this.normalizePersonName(linkedEmployee.name || '')) {
+                pushIssue({
+                    severity: 'warn',
+                    kind: 'account_name_mismatch',
+                    title: `Имя в логине расходится с карточкой сотрудника`,
+                    detail: `Логин хранит "${account.employee_name || '—'}", а сотрудник называется "${linkedEmployee.name || '—'}".`,
+                    accountId: account.id,
+                    employeeId: linkedEmployee.id,
+                });
+            }
+
+            if ((linkedEmployee.is_active === false || linkedEmployee.fired_date) && account.is_active !== false) {
+                pushIssue({
+                    severity: 'warn',
+                    kind: 'account_active_on_inactive_employee',
+                    title: `Активный логин у неактивного сотрудника`,
+                    detail: `Сотрудник "${linkedEmployee.name}" помечен как ${linkedEmployee.fired_date ? 'уволен' : 'неактивен'}, но логин еще включен.`,
+                    accountId: account.id,
+                    employeeId: linkedEmployee.id,
+                });
+            }
+        });
+
+        employees.forEach(employee => {
+            const linkedAccounts = accountsByEmployeeId.get(String(employee.id)) || [];
+            if (employee.is_active !== false && !employee.fired_date && linkedAccounts.length === 0) {
+                pushIssue({
+                    severity: 'info',
+                    kind: 'employee_without_login',
+                    title: `У активного сотрудника "${employee.name}" нет логина`,
+                    detail: 'Если сотруднику нужен доступ в систему, логин можно выдать прямо из карточки сотрудника.',
+                    employeeId: employee.id,
+                });
+            }
+            if (linkedAccounts.length > 1) {
+                pushIssue({
+                    severity: 'error',
+                    kind: 'employee_multiple_accounts',
+                    title: `У сотрудника "${employee.name}" несколько логинов`,
+                    detail: 'Нужна ручная чистка: у одного сотрудника должно быть не больше одного активного логина.',
+                    employeeId: employee.id,
+                });
+            }
+        });
+
+        entries.forEach(entry => {
+            const workerName = String(entry.worker_name || '').trim();
+            const entryEmployee = entry.employee_id != null ? employeesById.get(String(entry.employee_id)) : null;
+            if (entry.employee_id != null && !entryEmployee) {
+                pushIssue({
+                    severity: 'error',
+                    kind: 'time_entry_missing_employee',
+                    title: `Часы ссылаются на отсутствующего сотрудника`,
+                    detail: `Запись "${workerName || 'без имени'}" содержит employee_id ${entry.employee_id}, которого нет в справочнике сотрудников.`,
+                    entryId: entry.id || null,
+                });
+                return;
+            }
+
+            if (entryEmployee && workerName && this.normalizePersonName(workerName) !== this.normalizePersonName(entryEmployee.name || '')) {
+                pushIssue({
+                    severity: 'warn',
+                    kind: 'time_entry_name_snapshot_mismatch',
+                    title: `Имя в часах не совпадает с карточкой сотрудника`,
+                    detail: `В часах сохранено "${workerName}", а текущая карточка сотрудника называется "${entryEmployee.name}".`,
+                    employeeId: entryEmployee.id,
+                    entryId: entry.id || null,
+                });
+                return;
+            }
+
+            if (entry.employee_id == null && workerName) {
+                const suggested = this.suggestEmployeeForName(workerName);
+                pushIssue({
+                    severity: suggested && suggested.confidence === 'exact' ? 'warn' : 'error',
+                    kind: 'time_entry_unlinked',
+                    title: `Часы "${workerName}" не имеют employee_id`,
+                    detail: suggested
+                        ? `Похоже на сотрудника "${suggested.employee.name}" (${suggested.confidence === 'exact' ? 'точное совпадение' : 'совпадение по короткому имени'}), но запись пока не связана канонически.`
+                        : 'Нужна ручная проверка historical hours, чтобы не потерять привязку при миграции.',
+                    entryId: entry.id || null,
+                    suggestedEmployeeId: suggested?.employee?.id || null,
+                });
+            }
+        });
+
+        const severityWeight = { error: 3, warn: 2, info: 1 };
+        issues.sort((a, b) => (severityWeight[b.severity] || 0) - (severityWeight[a.severity] || 0));
+
+        return {
+            generatedAt: new Date().toISOString(),
+            employeesCount: employees.length,
+            accountsCount: accounts.length,
+            timeEntriesCount: entries.length,
+            summary: {
+                error: issues.filter(i => i.severity === 'error').length,
+                warn: issues.filter(i => i.severity === 'warn').length,
+                info: issues.filter(i => i.severity === 'info').length,
+            },
+            issues,
+        };
+    },
+
+    renderEmployeeAuthAudit() {
+        const container = document.getElementById('auth-linkage-audit');
+        if (!container) return;
+        const audit = this.employeeAuthAudit || this.buildEmployeeAuthAudit();
+        this.employeeAuthAudit = audit;
+        const issues = audit.issues || [];
+        if (!issues.length) {
+            container.style.display = '';
+            container.innerHTML = `
+                <div style="padding:12px 14px;border:1px solid rgba(34,197,94,.25);background:#f0fdf4;border-radius:10px;">
+                    <div style="font-weight:700;color:#166534;">Связка сотрудник ↔ логин ↔ часы чистая</div>
+                    <div style="margin-top:6px;font-size:12px;color:#166534;">Проблемных конфликтов не найдено. Исторические часы и логины выглядят согласованными.</div>
+                </div>
+            `;
+            return;
+        }
+
+        const badge = (count, label, bg, color) => `<span style="display:inline-flex;align-items:center;gap:6px;padding:4px 8px;border-radius:999px;background:${bg};color:${color};font-size:12px;font-weight:600;">${count} ${label}</span>`;
+        const topIssues = issues.slice(0, 12).map(issue => {
+            const colors = {
+                error: { border: 'rgba(239,68,68,.25)', bg: '#fef2f2', title: '#991b1b' },
+                warn: { border: 'rgba(245,158,11,.25)', bg: '#fffbeb', title: '#92400e' },
+                info: { border: 'rgba(59,130,246,.25)', bg: '#eff6ff', title: '#1d4ed8' },
+            };
+            const palette = colors[issue.severity] || colors.warn;
+            const relinkBtn = issue.canAutoRelink && issue.accountId && issue.suggestedEmployeeId
+                ? `<button class="btn btn-sm btn-outline" type="button" onclick="Settings.relinkAuthAccountToEmployee('${this.escHtml(String(issue.accountId))}','${this.escHtml(String(issue.suggestedEmployeeId))}')">Привязать автоматически</button>`
+                : '';
+            return `
+                <div style="padding:10px 12px;border:1px solid ${palette.border};background:${palette.bg};border-radius:10px;">
+                    <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start;flex-wrap:wrap;">
+                        <div>
+                            <div style="font-weight:700;color:${palette.title};">${this.escHtml(issue.title)}</div>
+                            <div style="margin-top:4px;font-size:12px;color:var(--text-muted);">${this.escHtml(issue.detail)}</div>
+                        </div>
+                        ${relinkBtn}
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        container.style.display = '';
+        container.innerHTML = `
+            <div style="padding:12px 14px;border:1px solid var(--border);background:#fff;border-radius:10px;">
+                <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;">
+                    <div>
+                        <div style="font-weight:700;">Audit связки сотрудников, логинов и часов</div>
+                        <div style="margin-top:6px;font-size:12px;color:var(--text-muted);">Ниже только безопасная диагностика: спорные случаи не склеиваются автоматически. Для точных совпадений доступна аккуратная перепривязка логина.</div>
+                    </div>
+                    <button class="btn btn-sm btn-outline" type="button" onclick="Settings.downloadEmployeeAuthAudit()">Экспорт audit</button>
+                </div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">
+                    ${badge(audit.summary.error, 'ошибок', '#fef2f2', '#991b1b')}
+                    ${badge(audit.summary.warn, 'предупр.', '#fffbeb', '#92400e')}
+                    ${badge(audit.summary.info, 'подсказок', '#eff6ff', '#1d4ed8')}
+                </div>
+                <div style="display:grid;gap:8px;margin-top:12px;">
+                    ${topIssues}
+                </div>
+                ${issues.length > 12 ? `<div style="margin-top:8px;font-size:12px;color:var(--text-muted);">Показаны первые 12 проблем из ${issues.length}. Полный список доступен в export audit.</div>` : ''}
+            </div>
+        `;
+    },
+
+    renderEmployeeAuthSummary(employee) {
+        const box = document.getElementById('emp-auth-summary');
+        const openBtn = document.getElementById('emp-auth-open-btn');
+        const createBtn = document.getElementById('emp-auth-create-btn');
+        if (!box || !openBtn || !createBtn) return;
+
+        const authMeta = this.getEmployeeAuthMeta(employee);
+        const payrollLabel = this.getEmployeePayrollProfileLabel(employee);
+        const statusMeta = this.getEmployeeStatusMeta(employee);
+        box.innerHTML = `
+            <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;">
+                <div>
+                    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                        ${authMeta.badge}
+                        <span class="${statusMeta.badgeClass}">${this.escHtml(statusMeta.label)}</span>
+                    </div>
+                    <div style="margin-top:6px;font-size:12px;color:var(--text-muted);">${authMeta.details}</div>
+                    <div style="margin-top:6px;font-size:12px;color:var(--text-muted);">Схема оплаты: ${this.escHtml(payrollLabel)}</div>
+                </div>
+            </div>
+        `;
+
+        openBtn.style.display = authMeta.account ? '' : 'none';
+        createBtn.style.display = authMeta.account ? 'none' : '';
+    },
+
+    onEmployeeStatusChange() {
+        const status = document.getElementById('emp-status')?.value || 'active';
+        const firedWrap = document.getElementById('emp-fired-wrap');
+        const firedEl = document.getElementById('emp-fired-date');
+        const noteEl = document.getElementById('emp-status-note');
+        if (firedWrap) firedWrap.style.display = status === 'fired' ? '' : 'none';
+        if (status !== 'fired' && firedEl) firedEl.value = '';
+        if (status === 'fired' && firedEl && !firedEl.value) {
+            firedEl.value = new Date().toISOString().split('T')[0];
+        }
+        if (noteEl) {
+            const meta = this.getEmployeeStatusMeta({
+                is_active: status === 'active',
+                fired_date: status === 'fired' ? (firedEl?.value || null) : null,
+            });
+            noteEl.textContent = meta.hint;
+        }
+    },
+
+    onPayrollProfileChange() {
+        const profile = document.getElementById('emp-payroll-profile')?.value || 'hourly';
+        const halfWrap = document.getElementById('emp-pay-half-hours-wrap');
+        const baseHoursEl = document.getElementById('emp-pay-base-hours');
+        const hintEl = document.getElementById('emp-pay-profile-hint');
+        if (halfWrap) halfWrap.style.display = profile === 'salary_semimonth_threshold' ? '' : 'none';
+        if (baseHoursEl) {
+            if (profile === 'hourly') baseHoursEl.placeholder = 'Не используется для почасовой схемы';
+            else if (profile === 'salary_semimonth_threshold') baseHoursEl.placeholder = 'Например 120';
+            else baseHoursEl.placeholder = 'Например 176';
+        }
+        if (hintEl) {
+            const hints = {
+                hourly: 'Почасовая схема: окладные часы не используются, оплата считается по ставкам за часы.',
+                salary_monthly: 'Оклад за месяц: включенные часы считаются одним месячным bucket, как сейчас.',
+                salary_semimonth_threshold: 'Оклад 60 + 60: первая и вторая половина месяца считаются отдельными bucket для доп. часов.',
+                management_salary_with_production_allocation: 'Оклад идет в косвенные, а фактические производственные часы постепенно вытаскивают часть стоимости в производство.',
+            };
+            hintEl.textContent = hints[profile] || '';
+        }
     },
 
     recalcEmployeeCost() {
@@ -490,6 +926,8 @@ const Settings = {
         document.getElementById('emp-pay-white').value = white;
         document.getElementById('emp-pay-black').value = black;
         document.getElementById('emp-pay-base-hours').value = parseFloat(e.pay_base_hours_month) || 176;
+        document.getElementById('emp-payroll-profile').value = this.getEmployeePayrollProfile(e);
+        document.getElementById('emp-pay-half-hours').value = parseFloat(e.pay_base_hours_semimonth) || '';
         document.getElementById('emp-pay-overtime-rate').value = parseFloat(e.pay_overtime_hour_rate) || 0;
         document.getElementById('emp-pay-weekend-rate').value = parseFloat(e.pay_weekend_hour_rate) || 0;
         document.getElementById('emp-pay-holiday-rate').value = parseFloat(e.pay_holiday_hour_rate) || 0;
@@ -498,6 +936,10 @@ const Settings = {
         // Fired date
         const firedEl = document.getElementById('emp-fired-date');
         if (firedEl) firedEl.value = e.fired_date || '';
+        const statusEl = document.getElementById('emp-status');
+        if (statusEl) statusEl.value = this.getEmployeeEmploymentStatus(e);
+        this.onEmployeeStatusChange();
+        this.onPayrollProfileChange();
 
         document.getElementById('employee-form').style.display = '';
         document.getElementById('emp-delete-btn').style.display = '';
@@ -505,6 +947,7 @@ const Settings = {
         // Hide salary section from non-admin
         const paySection = document.getElementById('emp-pay-section');
         if (paySection) paySection.style.display = App.isAdmin() ? '' : 'none';
+        this.renderEmployeeAuthSummary(e);
 
     },
 
@@ -518,15 +961,21 @@ const Settings = {
         document.getElementById('emp-reminder-min').value = 30;
         document.getElementById('emp-tz-offset').value = 3;
         document.getElementById('emp-tasks-required').checked = false;
+        document.getElementById('emp-status').value = 'active';
+        document.getElementById('emp-fired-date').value = '';
         document.getElementById('emp-pay-white').value = '';
         document.getElementById('emp-pay-black').value = '';
         document.getElementById('emp-pay-base-hours').value = 176;
+        document.getElementById('emp-payroll-profile').value = 'hourly';
+        document.getElementById('emp-pay-half-hours').value = '';
         document.getElementById('emp-pay-overtime-rate').value = '';
         document.getElementById('emp-pay-weekend-rate').value = '';
         document.getElementById('emp-pay-holiday-rate').value = '';
         document.getElementById('emp-tax-ndfl').value = '';
         document.getElementById('emp-tax-social').value = '';
         document.getElementById('emp-total-cost').value = '';
+        const noteEl = document.getElementById('emp-status-note');
+        if (noteEl) noteEl.textContent = '';
     },
 
     cancelEmployee() {
@@ -534,12 +983,66 @@ const Settings = {
         this.editingEmployeeId = null;
     },
 
+    openEmployeeAuthAccount(employeeId = null) {
+        const targetEmployeeId = employeeId || this.editingEmployeeId;
+        if (!targetEmployeeId) {
+            App.toast('Сначала сохраните сотрудника');
+            return;
+        }
+        const account = this.getEmployeeAuthAccount(targetEmployeeId);
+        if (!account) {
+            this.openNewAuthAccountForEmployee(targetEmployeeId);
+            return;
+        }
+        this.switchTab('logins');
+        this.editAuthAccount(account.id);
+    },
+
+    openNewAuthAccountForEmployee(employeeId = null) {
+        const targetEmployeeId = employeeId || this.editingEmployeeId;
+        if (!targetEmployeeId) {
+            App.toast('Сначала сохраните сотрудника');
+            return;
+        }
+        this.switchTab('logins');
+        this.showAddAuthAccount();
+        const select = document.getElementById('auth-account-employee');
+        if (select) {
+            select.value = String(targetEmployeeId);
+            this._renderAuthPageCheckboxes(targetEmployeeId);
+        }
+        this.prefillSuggestedAuthCredentials(targetEmployeeId);
+    },
+
+    async syncAuthAccountWithEmployee(employee) {
+        if (!employee || !employee.id) return;
+        const account = this.getEmployeeAuthAccount(employee.id);
+        if (!account) return;
+        let changed = false;
+        if ((account.employee_name || '') !== (employee.name || '')) {
+            account.employee_name = employee.name || '';
+            changed = true;
+        }
+        if ((account.role || '') !== (employee.role || 'employee')) {
+            account.role = employee.role || 'employee';
+            changed = true;
+        }
+        if (employee.is_active === false && account.is_active !== false) {
+            account.is_active = false;
+            changed = true;
+        }
+        if (!changed) return;
+        account.updated_at = new Date().toISOString();
+        await saveAuthAccounts(this.authAccountsData);
+        await App.refreshAuthUsers();
+    },
+
     // Page access checkboxes
     PAGE_LABELS: {
         calculator: 'Калькулятор', orders: 'Заказы',
-        'production-plan': 'Производство', factual: 'План-Факт', analytics: 'Аналитика',
+        factual: 'План-Факт', analytics: 'Аналитика',
         molds: 'Молды', colors: 'Цвета', timetrack: 'Учёт времени',
-        tasks: 'Задачи', projects: 'Проекты', gantt: 'Гант', import: 'Импорт',
+        tasks: 'Задачи', projects: 'Проекты', wiki: 'База знаний', gantt: 'Производственный календарь', import: 'Импорт',
         warehouse: 'Склад', marketplaces: 'Маркетплейсы', china: 'Китай',
         settings: 'Настройки',
     },
@@ -549,6 +1052,12 @@ const Settings = {
         const name = document.getElementById('emp-name').value.trim();
         if (!name) { App.toast('Введите имя сотрудника'); return; }
         const isNewEmployee = !this.editingEmployeeId;
+        const employmentStatus = document.getElementById('emp-status')?.value || 'active';
+        const firedDateInput = document.getElementById('emp-fired-date')?.value || '';
+        const firedDate = employmentStatus === 'fired'
+            ? (firedDateInput || new Date().toISOString().split('T')[0])
+            : null;
+        const isActive = employmentStatus === 'active';
 
         const employee = {
             id: this.editingEmployeeId || undefined,
@@ -559,13 +1068,15 @@ const Settings = {
             reminder_hour: parseInt(document.getElementById('emp-reminder-hour').value) || 17,
             reminder_minute: parseInt(document.getElementById('emp-reminder-min').value) || 30,
             timezone_offset: parseInt(document.getElementById('emp-tz-offset').value) ?? 3,
-            is_active: !document.getElementById('emp-fired-date')?.value, // active = no fired date
-            fired_date: document.getElementById('emp-fired-date')?.value || null,
+            is_active: isActive,
+            fired_date: firedDate,
             tasks_required: document.getElementById('emp-tasks-required').checked,
             pay_white_salary: parseFloat(document.getElementById('emp-pay-white').value) || 0,
             pay_black_salary: parseFloat(document.getElementById('emp-pay-black').value) || 0,
             pay_base_salary_month: (parseFloat(document.getElementById('emp-pay-white').value) || 0) + (parseFloat(document.getElementById('emp-pay-black').value) || 0),
             pay_base_hours_month: parseFloat(document.getElementById('emp-pay-base-hours').value) || 176,
+            payroll_profile: document.getElementById('emp-payroll-profile').value || 'hourly',
+            pay_base_hours_semimonth: parseFloat(document.getElementById('emp-pay-half-hours').value) || 0,
             pay_overtime_hour_rate: parseFloat(document.getElementById('emp-pay-overtime-rate').value) || 0,
             pay_weekend_hour_rate: parseFloat(document.getElementById('emp-pay-weekend-rate').value) || 0,
             pay_holiday_hour_rate: parseFloat(document.getElementById('emp-pay-holiday-rate').value) || 0,
@@ -585,6 +1096,8 @@ const Settings = {
             return;
         }
 
+        employee.id = savedId;
+        await this.syncAuthAccountWithEmployee(employee);
         if (isNewEmployee) {
             await this.ensureLoginForNewEmployee({ ...employee, id: savedId });
         }
@@ -614,10 +1127,14 @@ const Settings = {
     async loadLoginsTab() {
         this.employeesData = await loadEmployees();
         this.authAccountsData = await loadAuthAccounts();
+        this.timeEntriesData = typeof loadTimeEntries === 'function' ? ((await loadTimeEntries()) || []) : [];
         await this.ensureAutoLoginsForEmployees();
         this.authActivityData = await loadAuthActivity();
+        this.employeeAuthAudit = this.buildEmployeeAuthAudit();
+        this.renderEmployeeAuthAudit();
         this.renderAuthAccountsTable();
         this.renderAuthActivityTable();
+        this.renderIssuedAuthCredentials();
     },
 
     normalizeNameForLogin(name) {
@@ -636,12 +1153,27 @@ const Settings = {
         return `${stem}_ro`;
     },
 
-    getUniqueAutoUsername(baseUsername) {
-        const used = new Set((this.authAccountsData || []).map(a => String(a.username || '').toLowerCase()).filter(Boolean));
+    getUniqueAutoUsername(baseUsername, excludeAccountId = null) {
+        const used = new Set((this.authAccountsData || [])
+            .filter(a => String(a.id) !== String(excludeAccountId || ''))
+            .map(a => String(a.username || '').toLowerCase())
+            .filter(Boolean));
         if (!used.has(baseUsername.toLowerCase())) return baseUsername.toLowerCase();
         let i = 1;
         while (used.has(`${baseUsername.toLowerCase()}_${i}`)) i++;
         return `${baseUsername.toLowerCase()}_${i}`;
+    },
+
+    getExistingAuthAccountByEmployeeId(employeeId, excludeAccountId = null) {
+        return (this.authAccountsData || []).find(a =>
+            String(a.employee_id || '') === String(employeeId || '') &&
+            String(a.id) !== String(excludeAccountId || '')
+        ) || null;
+    },
+
+    getSuggestedUsernameForEmployee(employee, excludeAccountId = null) {
+        if (!employee) return '';
+        return this.getUniqueAutoUsername(this.getAutoLoginBase(employee.name), excludeAccountId);
     },
 
     generateStrongPassword(length = 12) {
@@ -689,23 +1221,36 @@ const Settings = {
     showAddAuthAccount() {
         this.editingAuthAccountId = null;
         this.clearAuthAccountForm();
-        this.populateAuthEmployeeSelect();
+        this.populateAuthEmployeeSelect(true);
         document.getElementById('auth-account-form').style.display = '';
         document.getElementById('auth-account-delete-btn').style.display = 'none';
+        const select = document.getElementById('auth-account-employee');
+        if (select && select.value) {
+            this._renderAuthPageCheckboxes(select.value);
+            this.prefillSuggestedAuthCredentials(select.value);
+        }
     },
 
-    populateAuthEmployeeSelect() {
+    populateAuthEmployeeSelect(preferEmployeesWithoutAccount = false) {
         const select = document.getElementById('auth-account-employee');
         if (!select) return;
-        // When employee changes, update page checkboxes
+        const active = (this.employeesData || []).filter(e => e.is_active !== false);
+        const employeesWithoutAccount = active.filter(e => !this.getExistingAuthAccountByEmployeeId(e.id, this.editingAuthAccountId));
+        const source = preferEmployeesWithoutAccount && employeesWithoutAccount.length ? employeesWithoutAccount : active;
+        const placeholder = source.length ? '-- Выберите сотрудника --' : '-- Нет сотрудников без логина --';
+
         select.onchange = () => {
             const empId = select.value;
-            if (empId) this._renderAuthPageCheckboxes(empId);
+            if (!empId) return;
+            this._renderAuthPageCheckboxes(empId);
+            if (!this.editingAuthAccountId) this.prefillSuggestedAuthCredentials(empId);
         };
-        const active = (this.employeesData || []).filter(e => e.is_active !== false);
-        let html = '<option value="">-- Выберите сотрудника --</option>';
-        html += active.map(e => `<option value="${this.escHtml(String(e.id))}">${this.escHtml(e.name || '')}</option>`).join('');
+        let html = `<option value="">${placeholder}</option>`;
+        html += source.map(e => `<option value="${this.escHtml(String(e.id))}">${this.escHtml(e.name || '')}</option>`).join('');
         select.innerHTML = html;
+        if (!this.editingAuthAccountId && source.length === 1) {
+            select.value = String(source[0].id);
+        }
     },
 
     clearAuthAccountForm() {
@@ -719,6 +1264,36 @@ const Settings = {
         if (passEl) passEl.value = '';
         const activeEl = document.getElementById('auth-account-active');
         if (activeEl) activeEl.value = '1';
+    },
+
+    prefillSuggestedAuthCredentials(employeeId) {
+        const employee = (this.employeesData || []).find(e => String(e.id) === String(employeeId || ''));
+        if (!employee) return;
+
+        const userEl = document.getElementById('auth-account-username');
+        const passEl = document.getElementById('auth-account-password');
+        if (userEl) userEl.value = this.getSuggestedUsernameForEmployee(employee, this.editingAuthAccountId);
+        if (passEl) passEl.value = this.generateStrongPassword(12);
+    },
+
+    generateSuggestedAuthUsername() {
+        const employeeId = document.getElementById('auth-account-employee')?.value || '';
+        if (!employeeId) {
+            App.toast('Сначала выберите сотрудника');
+            return;
+        }
+        const employee = (this.employeesData || []).find(e => String(e.id) === String(employeeId));
+        if (!employee) {
+            App.toast('Сотрудник не найден');
+            return;
+        }
+        const userEl = document.getElementById('auth-account-username');
+        if (userEl) userEl.value = this.getSuggestedUsernameForEmployee(employee, this.editingAuthAccountId);
+    },
+
+    generateSuggestedAuthPassword() {
+        const passEl = document.getElementById('auth-account-password');
+        if (passEl) passEl.value = this.generateStrongPassword(12);
     },
 
     cancelAuthAccount() {
@@ -774,20 +1349,43 @@ const Settings = {
 
     async saveAuthAccount() {
         const employeeId = parseInt(document.getElementById('auth-account-employee').value, 10);
-        const username = (document.getElementById('auth-account-username').value || '').trim().toLowerCase();
-        const password = document.getElementById('auth-account-password').value || '';
+        const rawUsername = (document.getElementById('auth-account-username').value || '').trim().toLowerCase();
+        const typedPassword = String(document.getElementById('auth-account-password').value || '').trim();
         const isActive = document.getElementById('auth-account-active').value === '1';
 
         if (!employeeId) { App.toast('Выберите сотрудника'); return; }
-        if (!username) { App.toast('Введите логин'); return; }
 
         const employee = (this.employeesData || []).find(e => Number(e.id) === employeeId);
         if (!employee) { App.toast('Сотрудник не найден'); return; }
 
+        if (!this.editingAuthAccountId) {
+            const existingForEmployee = this.getExistingAuthAccountByEmployeeId(employeeId);
+            if (existingForEmployee) {
+                this.editAuthAccount(existingForEmployee.id);
+                App.toast('У этого сотрудника уже есть логин — открыла его для редактирования');
+                return;
+            }
+        }
+
+        let resolvedUsername = rawUsername || this.getSuggestedUsernameForEmployee(employee, this.editingAuthAccountId);
+        if (!resolvedUsername) { App.toast('Не удалось подобрать логин'); return; }
+
         const duplicate = (this.authAccountsData || []).find(a =>
-            (a.username || '').toLowerCase() === username && String(a.id) !== String(this.editingAuthAccountId)
+            (a.username || '').toLowerCase() === resolvedUsername && String(a.id) !== String(this.editingAuthAccountId)
         );
-        if (duplicate) { App.toast('Логин уже занят'); return; }
+        if (duplicate) {
+            const fallbackUsername = this.getUniqueAutoUsername(resolvedUsername, this.editingAuthAccountId);
+            if (!fallbackUsername) {
+                App.toast('Логин уже занят');
+                return;
+            }
+            if (fallbackUsername !== resolvedUsername) {
+                resolvedUsername = fallbackUsername;
+                const userEl = document.getElementById('auth-account-username');
+                if (userEl) userEl.value = resolvedUsername;
+                App.toast(`Логин был занят, подставила свободный: ${resolvedUsername}`);
+            }
+        }
 
         let account = null;
         let prevUsername = '';
@@ -807,20 +1405,24 @@ const Settings = {
         account.employee_id = employeeId;
         account.employee_name = employee.name || '';
         account.role = employee.role || 'employee';
-        account.username = username;
+        account.username = resolvedUsername;
         account.is_active = isActive;
         account.updated_at = new Date().toISOString();
 
-        if (password) {
-            account.password_hash = App.hashUserPassword(username, password);
+        let issuedPassword = typedPassword;
+        if (!issuedPassword && (!this.editingAuthAccountId || !account.password_hash || (prevUsername && prevUsername !== resolvedUsername))) {
+            issuedPassword = this.generateStrongPassword(12);
+            const passEl = document.getElementById('auth-account-password');
+            if (passEl) passEl.value = issuedPassword;
+        }
+
+        if (issuedPassword) {
+            account.password_hash = App.hashUserPassword(resolvedUsername, issuedPassword);
             account.password_hash_version = App.AUTH_PASSWORD_HASH_VERSION || 2;
             account.password_rotated_at = new Date().toISOString();
             delete account.password_plain;
-        } else if (this.editingAuthAccountId && prevUsername && prevUsername !== username) {
-            App.toast('При смене логина укажите новый пароль');
-            return;
         } else if (!account.password_hash) {
-            App.toast('Укажите пароль');
+            App.toast('Не удалось сгенерировать пароль');
             return;
         }
 
@@ -839,6 +1441,18 @@ const Settings = {
             actor: App.getCurrentEmployeeName(),
             target_user: account.employee_name || account.username,
         });
+
+        if (issuedPassword) {
+            this.lastIssuedAuthCredentials = {
+                accountId: account.id,
+                employeeName: account.employee_name || account.username || '',
+                username: resolvedUsername,
+                password: issuedPassword,
+                mode: this.editingAuthAccountId ? 'update' : 'create',
+            };
+            this.renderIssuedAuthCredentials();
+        }
+
         App.toast('Логин сохранён');
         this.cancelAuthAccount();
         await this.loadLoginsTab();
@@ -856,13 +1470,15 @@ const Settings = {
 
         if (accountVersion < currentVersion) {
             return {
+                title: 'выдать новый',
                 label: `Legacy hash v${accountVersion}`,
                 color: 'var(--yellow)',
             };
         }
 
         return {
-            label: rotatedAt ? `Hash v${accountVersion} · ${rotatedAt}` : `Hash v${accountVersion}`,
+            title: 'скрыт',
+            label: rotatedAt ? `Hash v${accountVersion} · обновлён ${rotatedAt}` : `Hash v${accountVersion}`,
             color: 'var(--green)',
         };
     },
@@ -886,13 +1502,53 @@ const Settings = {
         await App.refreshAuthUsers();
     },
 
+    async relinkAuthAccountToEmployee(accountId, employeeId) {
+        const account = (this.authAccountsData || []).find(a => String(a.id) === String(accountId));
+        const employee = (this.employeesData || []).find(e => String(e.id) === String(employeeId));
+        if (!account || !employee) {
+            App.toast('Не удалось найти логин или сотрудника');
+            return;
+        }
+        const existingForEmployee = this.getExistingAuthAccountByEmployeeId(employee.id, account.id);
+        if (existingForEmployee) {
+            App.toast('У этого сотрудника уже есть другой логин. Нужна ручная проверка.');
+            return;
+        }
+        if (!confirm(`Привязать логин "${account.username || '—'}" к сотруднику "${employee.name}"?`)) return;
+
+        account.employee_id = employee.id;
+        account.employee_name = employee.name || '';
+        account.role = employee.role || account.role || 'employee';
+        if (employee.is_active === false || employee.fired_date) {
+            account.is_active = false;
+        }
+        account.updated_at = new Date().toISOString();
+        await saveAuthAccounts(this.authAccountsData);
+        await appendAuthActivity({
+            type: 'account_relink',
+            actor: App.getCurrentEmployeeName(),
+            target_user: account.employee_name || account.username,
+        });
+        App.toast('Логин перепривязан к сотруднику');
+        await this.loadLoginsTab();
+        await App.refreshAuthUsers();
+    },
+
     renderAuthAccountsTable() {
         const tbody = document.getElementById('auth-accounts-table-body');
         if (!tbody) return;
         if (!this.authAccountsData || this.authAccountsData.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">Нет логинов</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">Нет логинов</td></tr>';
             return;
         }
+        const issuesByAccountId = new Map();
+        (this.employeeAuthAudit?.issues || []).forEach(issue => {
+            if (issue.accountId == null) return;
+            const key = String(issue.accountId);
+            const list = issuesByAccountId.get(key) || [];
+            list.push(issue);
+            issuesByAccountId.set(key, list);
+        });
 
         const rows = [...this.authAccountsData]
             .sort((a, b) => String(a.employee_name || '').localeCompare(String(b.employee_name || ''), 'ru'))
@@ -900,14 +1556,23 @@ const Settings = {
                 const status = a.is_active === false
                     ? '<span class="badge">Отключен</span>'
                     : '<span class="badge badge-green">Активен</span>';
+                const employee = (this.employeesData || []).find(e => String(e.id || '') === String(a.employee_id || ''));
+                const employeeStatus = employee
+                    ? this.getEmployeeStatusMeta(employee)
+                    : { label: 'Сотрудник не найден', badgeClass: 'badge', hint: 'Привязка сотрудника потеряна' };
                 const security = this.describeAuthAccountSecurity(a);
                 const last = a.last_login_at
                     ? new Date(a.last_login_at).toLocaleString('ru-RU')
                     : '—';
+                const rowIssues = issuesByAccountId.get(String(a.id)) || [];
+                const issueNote = rowIssues.length
+                    ? `<div style="margin-top:6px;font-size:11px;color:${rowIssues.some(issue => issue.severity === 'error') ? 'var(--danger)' : 'var(--orange)'};">${this.escHtml(rowIssues[0].detail)}</div>`
+                    : '';
                 return `<tr>
-                    <td style="font-weight:600;">${this.escHtml(a.employee_name || '—')}</td>
+                    <td style="font-weight:600;">${this.escHtml(a.employee_name || '—')}${issueNote}</td>
                     <td>${this.escHtml(a.username || '')}</td>
-                    <td><code>не хранится</code><div style="margin-top:4px;font-size:11px;color:${security.color};">${this.escHtml(security.label)}</div></td>
+                    <td><span class="${employeeStatus.badgeClass}" title="${this.escHtml(employeeStatus.hint)}">${this.escHtml(employeeStatus.label)}</span></td>
+                    <td><code>${this.escHtml(security.title)}</code><div style="margin-top:4px;font-size:11px;color:${security.color};">${this.escHtml(security.label)} · нажмите «Сбросить», чтобы выдать новый пароль</div></td>
                     <td style="text-align:center;">${status}</td>
                     <td>${this.escHtml(last)}</td>
                     <td style="white-space:nowrap;">
@@ -922,12 +1587,10 @@ const Settings = {
     async resetAuthPassword(id) {
         const account = (this.authAccountsData || []).find(a => String(a.id) === String(id));
         if (!account) return;
-        const generated = this.generateStrongPassword(12);
-        const nextPassword = prompt(`Новый пароль для "${account.employee_name || account.username}". Сохраните его сейчас: система больше не покажет его после подтверждения.`, generated);
-        if (nextPassword === null) return;
-        const pass = String(nextPassword || '').trim();
+        if (!confirm(`Сгенерировать новый пароль для "${account.employee_name || account.username}"?`)) return;
+        const pass = this.generateStrongPassword(12);
         if (!pass) {
-            App.toast('Пароль не может быть пустым');
+            App.toast('Не удалось сгенерировать пароль');
             return;
         }
         account.password_hash = App.hashUserPassword(account.username, pass);
@@ -941,8 +1604,81 @@ const Settings = {
             actor: App.getCurrentEmployeeName(),
             target_user: account.employee_name || account.username,
         });
+        this.lastIssuedAuthCredentials = {
+            accountId: account.id,
+            employeeName: account.employee_name || account.username || '',
+            username: account.username || '',
+            password: pass,
+            mode: 'reset',
+        };
+        this.renderIssuedAuthCredentials();
         this.renderAuthAccountsTable();
-        App.toast('Пароль обновлён. Сохраните его у сотрудника: система больше не хранит его в открытом виде.');
+        App.toast('Новый пароль сгенерирован и показан выше — скопируйте его для сотрудника.');
+    },
+
+    renderIssuedAuthCredentials() {
+        const container = document.getElementById('auth-issued-credentials');
+        if (!container) return;
+        const creds = this.lastIssuedAuthCredentials;
+        if (!creds || !creds.username || !creds.password) {
+            container.style.display = 'none';
+            container.innerHTML = '';
+            return;
+        }
+
+        const modeLabel = creds.mode === 'reset'
+            ? 'Новый пароль готов'
+            : creds.mode === 'update'
+                ? 'Логин обновлён'
+                : 'Новый логин создан';
+
+        container.style.display = '';
+        container.innerHTML = `
+            <div style="margin:0 0 12px;padding:12px 14px;border:1px solid rgba(34,197,94,.25);background:#f0fdf4;border-radius:10px;">
+                <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;">
+                    <div style="min-width:240px;">
+                        <div style="font-weight:700;color:#166534;">${this.escHtml(modeLabel)}</div>
+                        <div style="font-size:12px;color:#166534;margin-top:4px;">Сотрудник: ${this.escHtml(creds.employeeName || '—')}</div>
+                        <div style="font-size:12px;color:var(--text-muted);margin-top:6px;">Система не хранит пароль открытым, поэтому передайте эти данные сейчас.</div>
+                    </div>
+                    <button class="btn btn-sm btn-outline" type="button" onclick="Settings.dismissIssuedAuthCredentials()">Скрыть</button>
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;margin-top:10px;">
+                    <div style="padding:10px;border-radius:8px;background:#fff;border:1px solid var(--border);">
+                        <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">Логин</div>
+                        <div style="display:flex;gap:8px;align-items:center;justify-content:space-between;">
+                            <code style="font-size:14px;">${this.escHtml(creds.username)}</code>
+                            <button class="btn btn-sm btn-outline" type="button" onclick="Settings.copyIssuedAuthCredentials('username')">Копировать</button>
+                        </div>
+                    </div>
+                    <div style="padding:10px;border-radius:8px;background:#fff;border:1px solid var(--border);">
+                        <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">Пароль</div>
+                        <div style="display:flex;gap:8px;align-items:center;justify-content:space-between;">
+                            <code style="font-size:14px;">${this.escHtml(creds.password)}</code>
+                            <button class="btn btn-sm btn-outline" type="button" onclick="Settings.copyIssuedAuthCredentials('password')">Копировать</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    },
+
+    dismissIssuedAuthCredentials() {
+        this.lastIssuedAuthCredentials = null;
+        this.renderIssuedAuthCredentials();
+    },
+
+    async copyIssuedAuthCredentials(kind) {
+        const creds = this.lastIssuedAuthCredentials;
+        if (!creds) return;
+        const value = kind === 'password' ? creds.password : creds.username;
+        if (!value) return;
+        try {
+            await navigator.clipboard.writeText(value);
+            App.toast(kind === 'password' ? 'Пароль скопирован' : 'Логин скопирован');
+        } catch (e) {
+            App.toast('Не удалось скопировать');
+        }
     },
 
     async downloadAuthBackup() {
@@ -982,6 +1718,30 @@ const Settings = {
         }
         App.toast(`Auth backup скачан (${accountCount} аккаунтов)`);
         return backup;
+    },
+
+    async downloadEmployeeAuthAudit() {
+        const audit = this.employeeAuthAudit || this.buildEmployeeAuthAudit();
+        const payload = {
+            _meta: {
+                app: 'RecycleObject',
+                type: 'employee-auth-audit',
+                version: typeof APP_VERSION !== 'undefined' ? APP_VERSION : 'unknown',
+                date: new Date().toISOString(),
+            },
+            audit,
+        };
+        const json = JSON.stringify(payload, null, 2);
+        const blob = new Blob([json], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+        a.href = url;
+        a.download = `RO_employee_auth_audit_${dateStr}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+        App.toast(`Employee/auth audit скачан (${audit.issues.length} проблем)`);
+        return payload;
     },
 
     renderAuthActivityTable() {

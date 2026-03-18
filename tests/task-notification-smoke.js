@@ -32,6 +32,10 @@ assert.deepEqual(
     [7],
 );
 assert.deepEqual(
+    getTaskNotificationRecipientIds({ event_type: 'task_sent_to_review', payload: { watcher_user_ids: [9, 7, 9] } }, task),
+    [9, 7],
+);
+assert.deepEqual(
     getTaskNotificationRecipientIds({ event_type: 'task_sent_to_review', payload: { reviewer_id: 9 } }, task),
     [9],
 );
@@ -45,7 +49,7 @@ assert.match(assignedText, /Новая задача для тебя/);
 assert.match(assignedText, /Проверить макет МТС/);
 assert.match(assignedText, /Полина/);
 
-const reviewText = buildTaskNotificationText({ event_type: 'task_sent_to_review', task_id: 1001, payload: { reviewer_id: 9 } }, task, employeesById);
+const reviewText = buildTaskNotificationText({ event_type: 'task_sent_to_review', task_id: 1001, payload: { watcher_user_ids: [9] } }, task, employeesById);
 assert.match(reviewText, /ждёт согласования/);
 assert.match(reviewText, /Женя Г/);
 

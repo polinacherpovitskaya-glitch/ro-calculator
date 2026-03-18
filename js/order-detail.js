@@ -4,6 +4,7 @@
 
 const PAYMENT_STATUSES = [
     { key: 'not_sent',      label: 'Не передано в оплату', color: 'gray' },
+    { key: 'sent_to_payment', label: 'Передано в оплату',  color: 'blue' },
     { key: 'paid_50',       label: 'Оплачено 50%',        color: 'orange' },
     { key: 'paid_100',      label: 'Оплачено 100%',       color: 'green' },
     { key: 'postpay_100',   label: 'Постоплата 100%',     color: 'green' },

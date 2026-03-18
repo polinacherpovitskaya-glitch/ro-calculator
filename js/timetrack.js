@@ -12,15 +12,42 @@ const TT_STAGE_LABELS = {
 };
 
 const TT_STAGE_ORDER = ['casting', 'trim', 'assembly', 'packaging', 'other'];
-const TT_PRODUCTION_STATUSES = ['production_casting', 'production_hardware', 'production_packaging', 'in_production'];
+const TT_PRODUCTION_STATUSES = ['sample', 'production_casting', 'production_printing', 'production_hardware', 'production_packaging', 'in_production', 'delivery'];
+const TT_LEGACY_IMPORT_MARKER = 'ro_tt_legacy_import_2026_03_first_half_v1';
+const TT_LEGACY_FIRST_HALF_IMPORT = [
+    { employee: 'Тая', date: '2026-03-02', project_name: 'московская неделя моды', hours: 4 },
+    { employee: 'Тая', date: '2026-03-03', project_name: 'мтс воркшоп', hours: 14 },
+    { employee: 'Тая', date: '2026-03-05', project_name: 'мтс воркшоп', hours: 13 },
+    { employee: 'Тая', date: '2026-03-06', project_name: 'мтс воркшоп', hours: 2 },
+    { employee: 'Тая', date: '2026-03-10', project_name: 'мтс воркшоп', hours: 2 },
+    { employee: 'Тая', date: '2026-03-10', project_name: 'броши пушкинкий', hours: 8 },
+    { employee: 'Тая', date: '2026-03-11', project_name: 'броши пушкинкий', hours: 3 },
+    { employee: 'Тая', date: '2026-03-12', project_name: 'броши пушкинкий', hours: 3 },
+    { employee: 'Тая', date: '2026-03-12', project_name: 'эндостар', hours: 10 },
+    { employee: 'Тая', date: '2026-03-13', project_name: 'броши пушкинкий', hours: 2 },
+    { employee: 'Женя Г', date: '2026-03-02', project_name: 'московская неделя моды', hours: 4 },
+    { employee: 'Женя Г', date: '2026-03-02', project_name: 'мтс воркшоп', hours: 5 },
+    { employee: 'Женя Г', date: '2026-03-03', project_name: 'мтс воркшоп', hours: 9 },
+    { employee: 'Женя Г', date: '2026-03-04', project_name: 'мтс воркшоп', hours: 9 },
+    { employee: 'Женя Г', date: '2026-03-05', project_name: 'мтс воркшоп', hours: 9 },
+    { employee: 'Женя Г', date: '2026-03-06', project_name: 'мтс воркшоп', hours: 8 },
+];
+const TT_LEGACY_IMPORT_SKIP_DATES = {
+    'Женя Г': new Set(['2026-03-10', '2026-03-12', '2026-03-13']),
+};
 
 const TimeTrack = {
     entries: [],
     employees: [],
+    editingEntryId: null,
 
     async load() {
         this.entries = (await loadTimeEntries()) || [];
         this.employees = (await loadEmployees()) || [];
+        const importedLegacy = await this.backfillLegacyFirstHalfEntries();
+        if (importedLegacy > 0) {
+            this.entries = (await loadTimeEntries()) || [];
+        }
         this.populateWorkerSelect();
         this.populateFilters();
         await this.populateProjectSelect();
@@ -48,11 +75,45 @@ const TimeTrack = {
 
     showManualEntry() {
         document.getElementById('tt-manual-form').style.display = '';
+        this.syncManualEntryFormState();
         this.onStageChange();
     },
 
     hideManualEntry() {
+        this.resetManualEntryForm();
         document.getElementById('tt-manual-form').style.display = 'none';
+    },
+
+    syncManualEntryFormState() {
+        const titleEl = document.getElementById('tt-manual-title');
+        const saveBtn = document.getElementById('tt-save-entry-btn');
+        const cancelBtn = document.getElementById('tt-cancel-entry-btn');
+        const isEditing = this.editingEntryId != null;
+        if (titleEl) titleEl.textContent = isEditing ? 'Редактировать запись' : 'Добавить запись вручную';
+        if (saveBtn) saveBtn.textContent = isEditing ? 'Сохранить изменения' : 'Сохранить';
+        if (cancelBtn) cancelBtn.textContent = isEditing ? 'Отмена' : 'Закрыть';
+    },
+
+    resetManualEntryForm() {
+        this.editingEntryId = null;
+        const workerEl = document.getElementById('tt-worker-name');
+        const projectEl = document.getElementById('tt-project-select');
+        const hoursEl = document.getElementById('tt-hours');
+        const dateEl = document.getElementById('tt-date');
+        const descEl = document.getElementById('tt-description');
+        const stageEl = document.getElementById('tt-stage');
+        const stageOtherEl = document.getElementById('tt-stage-other');
+        if (workerEl) workerEl.value = '';
+        if (projectEl) projectEl.value = '';
+        if (hoursEl) hoursEl.value = '';
+        if (descEl) descEl.value = '';
+        if (stageEl) stageEl.value = 'casting';
+        if (stageOtherEl) stageOtherEl.value = '';
+        if (dateEl && !dateEl.value) {
+            dateEl.value = new Date().toISOString().split('T')[0];
+        }
+        this.syncManualEntryFormState();
+        this.onStageChange();
     },
 
     onStageChange() {
@@ -141,14 +202,16 @@ const TimeTrack = {
 
     // === Populate selects ===
 
-    /** Production employees + anyone with existing time entries */
+    /** Active production employees + recent production people from time entries */
     _getProductionEmployees() {
-        const active = this.employees.filter(e => e.is_active !== false);
-        const productionEmp = active.filter(e => e.role === 'production');
-        // Also include non-production employees who have time entries (e.g. Леша)
-        const entryWorkers = new Set(this.entries.map(e => e.worker_name).filter(Boolean));
-        const nonProdWithEntries = active.filter(e => e.role !== 'production' && entryWorkers.has(e.name));
-        return [...productionEmp, ...nonProdWithEntries];
+        const recentProductionIds = new Set((this.entries || [])
+            .map(entry => this.findEmployeeForEntry(entry))
+            .filter(emp => emp && emp.role === 'production')
+            .map(emp => String(emp.id)));
+        return (this.employees || [])
+            .filter(emp => emp.role === 'production')
+            .filter(emp => emp.is_active !== false || recentProductionIds.has(String(emp.id)))
+            .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'ru'));
     },
 
     populateWorkerSelect() {
@@ -200,14 +263,17 @@ const TimeTrack = {
         const todayEntries = this.entries.filter(e => e.date === today);
         const byWorker = {};
         todayEntries.forEach(e => {
-            if (!byWorker[e.worker_name]) byWorker[e.worker_name] = [];
-            byWorker[e.worker_name].push(e);
+            const employee = this.findEmployeeForEntry(e);
+            if (!employee || employee.role !== 'production') return;
+            const key = String(employee.id);
+            if (!byWorker[key]) byWorker[key] = [];
+            byWorker[key].push({ ...e, worker_name: employee.name || e.worker_name });
         });
 
         const roleLabels = { production: 'Пр', office: 'Оф', management: 'Рук' };
 
         const rows = activeEmployees.map(emp => {
-            const entries = byWorker[emp.name] || [];
+            const entries = byWorker[String(emp.id)] || [];
             const totalHours = entries.reduce((s, e) => s + (parseFloat(e.hours) || 0), 0);
             const totalPct = emp.daily_hours > 0 ? Math.round(totalHours / emp.daily_hours * 100) : 0;
 
@@ -328,26 +394,172 @@ const TimeTrack = {
         return day === 0 || day === 6;
     },
 
+    getPayrollProfile(emp) {
+        const explicit = String(emp?.payroll_profile || '').trim();
+        if (explicit) return explicit;
+        const baseSalary = parseFloat(emp?.pay_base_salary_month) || 0;
+        if (String(emp?.role || '') === 'management' && baseSalary > 0) {
+            return 'management_salary_with_production_allocation';
+        }
+        if (baseSalary > 0) return 'salary_monthly';
+        return 'hourly';
+    },
+
+    normalizePersonName(name) {
+        return String(name || '')
+            .trim()
+            .toLowerCase()
+            .replace(/ё/g, 'е')
+            .replace(/\s+/g, ' ')
+            .replace(/[^\p{L}\p{N}\s]/gu, '')
+            .trim();
+    },
+
+    getPersonShortKey(name) {
+        return this.normalizePersonName(name).split(' ').filter(Boolean)[0] || '';
+    },
+
+    findEmployeeForEntry(entry) {
+        if (!entry) return null;
+        const employeeId = entry.employee_id != null ? String(entry.employee_id) : '';
+        if (employeeId) {
+            const byId = (this.employees || []).find(emp => String(emp.id) === employeeId);
+            if (byId) return byId;
+        }
+        const normalizedWorker = this.normalizePersonName(entry.worker_name || entry.employee_name || '');
+        if (!normalizedWorker) return null;
+        const exactMatches = (this.employees || []).filter(emp => this.normalizePersonName(emp.name) === normalizedWorker);
+        if (exactMatches.length === 1) return exactMatches[0];
+        const shortKey = this.getPersonShortKey(entry.worker_name || entry.employee_name || '');
+        if (shortKey) {
+            const shortMatches = (this.employees || []).filter(emp =>
+                emp.role === 'production' &&
+                this.getPersonShortKey(emp.name) === shortKey
+            );
+            if (shortMatches.length === 1) return shortMatches[0];
+        }
+        return null;
+    },
+
+    findEmployeeByName(name, options = {}) {
+        const normalizedName = this.normalizePersonName(name);
+        if (!normalizedName) return null;
+        const source = (this.employees || []).filter(emp => !options.productionOnly || emp.role === 'production');
+        const exactMatches = source.filter(emp => this.normalizePersonName(emp.name) === normalizedName);
+        if (exactMatches.length === 1) return exactMatches[0];
+        const shortKey = this.getPersonShortKey(name);
+        if (!shortKey) return null;
+        const shortMatches = source.filter(emp => this.getPersonShortKey(emp.name) === shortKey);
+        if (shortMatches.length === 1) return shortMatches[0];
+        return null;
+    },
+
+    entryBelongsToEmployee(entry, employee) {
+        if (!entry || !employee) return false;
+        if (entry.employee_id != null && String(entry.employee_id) === String(employee.id)) return true;
+        const resolved = this.findEmployeeForEntry(entry);
+        if (resolved && String(resolved.id) === String(employee.id)) return true;
+        return false;
+    },
+
+    async backfillLegacyFirstHalfEntries() {
+        if (typeof localStorage !== 'undefined' && localStorage.getItem(TT_LEGACY_IMPORT_MARKER) === '1') {
+            return 0;
+        }
+
+        const existingEntries = Array.isArray(this.entries) ? [...this.entries] : [];
+        const originalDayKeys = new Set(existingEntries.map(entry => {
+            const employee = this.findEmployeeForEntry(entry);
+            if (!employee || !entry?.date) return '';
+            return `${employee.id}|${entry.date}`;
+        }).filter(Boolean));
+        let imported = 0;
+        let unresolved = 0;
+
+        for (const seed of TT_LEGACY_FIRST_HALF_IMPORT) {
+            const employee = this.findEmployeeByName(seed.employee, { productionOnly: true });
+            if (!employee) {
+                unresolved += 1;
+                continue;
+            }
+
+            const skipDates = TT_LEGACY_IMPORT_SKIP_DATES[employee.name] || new Set();
+            if (skipDates.has(seed.date)) continue;
+
+            const sameDayExists = originalDayKeys.has(`${employee.id}|${seed.date}`);
+            if (sameDayExists) continue;
+
+            const description = this.buildDescriptionWithMeta(
+                'other',
+                'Импорт часов 1–15 марта',
+                'Автоматически перенесено из legacy Google-таблицы',
+                seed.project_name,
+            );
+
+            const id = await saveTimeEntry({
+                employee_id: employee.id,
+                worker_name: employee.name,
+                project_name: seed.project_name,
+                order_id: null,
+                hours: seed.hours,
+                date: seed.date,
+                description,
+                notes: 'legacy_google_sheet_import_2026_03_first_half',
+            });
+            existingEntries.push({
+                id: id || `legacy-${employee.id}-${seed.date}-${seed.project_name}`,
+                employee_id: employee.id,
+                worker_name: employee.name,
+                project_name: seed.project_name,
+                order_id: null,
+                hours: seed.hours,
+                date: seed.date,
+                description,
+            });
+            imported += 1;
+        }
+
+        if (typeof localStorage !== 'undefined' && unresolved === 0) {
+            localStorage.setItem(TT_LEGACY_IMPORT_MARKER, '1');
+        }
+        if (imported > 0 && App.toast) {
+            App.toast(`Перенесены legacy-часы за 1–15 марта: ${imported} записей`);
+        }
+        return imported;
+    },
+
+    getHalfMonthBucket(dateStr) {
+        const day = parseInt(String(dateStr || '').slice(8, 10), 10);
+        return Number.isFinite(day) && day >= 16 ? 'second' : 'first';
+    },
+
     normalizePayrollConfig(emp) {
         const fallbackRate = parseFloat(App.settings?.fot_per_hour) || 0;
         const baseHoursRaw = parseFloat(emp?.pay_base_hours_month);
+        const baseHoursSemimonthRaw = parseFloat(emp?.pay_base_hours_semimonth);
         const baseSalary = parseFloat(emp?.pay_base_salary_month) || 0;
         const overtimeRateRaw = parseFloat(emp?.pay_overtime_hour_rate);
         const weekendRateRaw = parseFloat(emp?.pay_weekend_hour_rate);
         const holidayRateRaw = parseFloat(emp?.pay_holiday_hour_rate);
+        const payrollProfile = this.getPayrollProfile(emp);
 
         // If no base salary — purely hourly employee, baseHours = 0
-        const hasSalary = baseSalary > 0;
+        const hasSalary = baseSalary > 0 && payrollProfile !== 'hourly';
         const safeBaseHours = hasSalary ? (baseHoursRaw > 0 ? baseHoursRaw : 176) : 0;
+        const safeBaseHoursSemimonth = payrollProfile === 'salary_semimonth_threshold'
+            ? (baseHoursSemimonthRaw > 0 ? baseHoursSemimonthRaw : Math.max(1, Math.round(safeBaseHours / 2)))
+            : 0;
         const baseRateFromSalary = (hasSalary && safeBaseHours > 0) ? (baseSalary / safeBaseHours) : 0;
         const overtimeRate = overtimeRateRaw > 0 ? overtimeRateRaw : (baseRateFromSalary || fallbackRate);
         const weekendRate = weekendRateRaw > 0 ? weekendRateRaw : overtimeRate;
         const holidayRate = holidayRateRaw > 0 ? holidayRateRaw : weekendRate;
 
         return {
+            payrollProfile,
             hasSalary,
             baseSalary,
             baseHours: safeBaseHours,
+            baseHoursSemimonth: safeBaseHoursSemimonth,
             baseRate: hasSalary ? (baseRateFromSalary || overtimeRate || fallbackRate) : 0,
             overtimeRate: overtimeRate || fallbackRate,
             weekendRate: weekendRate || fallbackRate,
@@ -363,64 +575,91 @@ const TimeTrack = {
         const now = new Date();
         const monthPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-`;
         const holidaySet = this.parseHolidaySet();
-        const employeeByName = new Map((this.employees || []).map(e => [String(e.name || '').trim(), e]));
-
-        const stats = new Map();
+        const payrollEmployees = this._getProductionEmployees()
+            .filter(emp => this.getPayrollProfile(emp) !== 'management_salary_with_production_allocation');
+        const stats = new Map(payrollEmployees.map(emp => [String(emp.id), {
+            employee: emp,
+            regularByHalf: { first: 0, second: 0 },
+            weekendByHalf: { first: 0, second: 0 },
+            holidayByHalf: { first: 0, second: 0 },
+        }]));
         (this.entries || []).forEach(entry => {
             const workerName = String(entry.worker_name || '').trim();
             if (!workerName) return;
             if (!String(entry.date || '').startsWith(monthPrefix)) return;
 
-            const emp = employeeByName.get(workerName);
-            if (!emp || emp.role !== 'production' || emp.is_active === false) return;
+            const emp = this.findEmployeeForEntry(entry);
+            if (!emp || emp.role !== 'production') return;
             const hours = parseFloat(entry.hours) || 0;
             if (hours <= 0) return;
 
             const isHoliday = holidaySet.has(entry.date);
             const isWeekend = this.isWeekend(entry.date);
 
-            if (!stats.has(workerName)) {
-                stats.set(workerName, { employee: emp, regularHours: 0, weekendHours: 0, holidayHours: 0 });
+            const statKey = String(emp.id);
+            if (!stats.has(statKey)) {
+                stats.set(statKey, {
+                    employee: emp,
+                    regularByHalf: { first: 0, second: 0 },
+                    weekendByHalf: { first: 0, second: 0 },
+                    holidayByHalf: { first: 0, second: 0 },
+                });
             }
-            const row = stats.get(workerName);
-            if (isHoliday) row.holidayHours += hours;
-            else if (isWeekend) row.weekendHours += hours;
-            else row.regularHours += hours;
+            const row = stats.get(statKey);
+            const halfKey = this.getHalfMonthBucket(entry.date);
+            if (isHoliday) row.holidayByHalf[halfKey] += hours;
+            else if (isWeekend) row.weekendByHalf[halfKey] += hours;
+            else {
+                row.regularByHalf[halfKey] += hours;
+            }
         });
 
-        const rows = Array.from(stats.values()).map(row => {
+        const rows = Array.from(stats.values()).flatMap(row => {
             const cfg = this.normalizePayrollConfig(row.employee);
-            let inBaseHours, overtimeHours, payBase, payOvertime;
+            if (cfg.payrollProfile === 'management_salary_with_production_allocation') return [];
+            const monthHours = ['first', 'second'].reduce((sum, halfKey) => (
+                sum +
+                (row.regularByHalf[halfKey] || 0) +
+                (row.weekendByHalf[halfKey] || 0) +
+                (row.holidayByHalf[halfKey] || 0)
+            ), 0);
 
-            if (cfg.hasSalary) {
-                // Salaried: base salary covers first N hours, then overtime rate
-                inBaseHours = Math.min(row.regularHours, cfg.baseHours);
-                overtimeHours = Math.max(0, row.regularHours - cfg.baseHours);
-                payBase = cfg.baseSalary * (inBaseHours / cfg.baseHours);
-                payOvertime = overtimeHours * cfg.overtimeRate;
-            } else {
-                // Purely hourly: all regular hours at overtime rate
-                inBaseHours = 0;
-                overtimeHours = row.regularHours;
-                payBase = 0;
-                payOvertime = row.regularHours * cfg.overtimeRate;
-            }
+            const baseHoursPerHalf = cfg.hasSalary
+                ? (cfg.baseHoursSemimonth || Math.max(1, Math.round(cfg.baseHours / 2)))
+                : 0;
+            const halves = [
+                { key: 'first', label: '1–15' },
+                { key: 'second', label: '16–конец' },
+            ];
 
-            const payWeekend = row.weekendHours * cfg.weekendRate;
-            const payHoliday = row.holidayHours * cfg.holidayRate;
-            const totalPay = payBase + payOvertime + payWeekend + payHoliday;
-
-            return {
-                employeeName: row.employee.name || 'Сотрудник',
-                hasSalary: cfg.hasSalary,
-                regularHours: row.regularHours,
-                inBaseHours,
-                overtimeHours,
-                weekendHours: row.weekendHours,
-                holidayHours: row.holidayHours,
-                totalPay,
-            };
-        }).sort((a, b) => b.totalPay - a.totalPay);
+            return halves.map(half => {
+                const regularHours = row.regularByHalf[half.key] || 0;
+                const weekendHours = row.weekendByHalf[half.key] || 0;
+                const holidayHours = row.holidayByHalf[half.key] || 0;
+                const inBaseHours = cfg.hasSalary ? Math.min(regularHours, baseHoursPerHalf) : 0;
+                const overtimeHours = cfg.hasSalary ? Math.max(0, regularHours - baseHoursPerHalf) : regularHours;
+                const payOvertime = overtimeHours * cfg.overtimeRate;
+                const payWeekend = weekendHours * cfg.weekendRate;
+                const payHoliday = holidayHours * cfg.holidayRate;
+                return {
+                    employeeName: row.employee.name || 'Сотрудник',
+                    periodKey: half.key,
+                    periodLabel: half.label,
+                    payrollProfile: cfg.payrollProfile,
+                    hasSalary: cfg.hasSalary,
+                    regularHours,
+                    inBaseHours,
+                    overtimeHours,
+                    weekendHours,
+                    holidayHours,
+                    totalPay: payOvertime + payWeekend + payHoliday,
+                };
+            });
+        }).sort((a, b) => {
+            const byName = String(a.employeeName || '').localeCompare(String(b.employeeName || ''), 'ru');
+            if (byName !== 0) return byName;
+            return a.periodKey === b.periodKey ? 0 : (a.periodKey === 'first' ? -1 : 1);
+        });
 
         const total = rows.reduce((s, r) => s + r.totalPay, 0);
         return { rows, total };
@@ -446,13 +685,14 @@ const TimeTrack = {
         if (totalEl) totalEl.textContent = this.formatMoney(total);
 
         if (!rows.length) {
-            tableBody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">Нет данных по производству за текущий месяц</td></tr>';
+            tableBody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">Нет данных по производству за текущий месяц</td></tr>';
             return;
         }
 
         tableBody.innerHTML = rows.map(r => `
             <tr>
                 <td style="font-weight:600;">${this.esc(r.employeeName)}</td>
+                <td>${this.esc(r.periodLabel)}</td>
                 <td class="text-right">${r.regularHours.toFixed(2)}</td>
                 <td class="text-right">${r.inBaseHours.toFixed(2)}</td>
                 <td class="text-right">${r.overtimeHours.toFixed(2)}</td>
@@ -482,7 +722,10 @@ const TimeTrack = {
                 <td>${this.esc(this.stageLabel(e))}</td>
                 <td class="text-right"><b>${parseFloat(e.hours) || 0}</b> ч${pctLabel}</td>
                 <td class="text-muted">${this.esc(this.stripMetaPrefix(e.description || ''))}</td>
-                <td><button class="btn btn-sm btn-outline" onclick="TimeTrack.deleteEntry(${e.id})">&#10005;</button></td>
+                <td style="display:flex;gap:6px;justify-content:flex-end;">
+                    <button class="btn btn-sm btn-outline" onclick="TimeTrack.editEntry(${e.id})">&#9998;</button>
+                    <button class="btn btn-sm btn-outline" onclick="TimeTrack.deleteEntry(${e.id})">&#10005;</button>
+                </td>
             </tr>`;
         }).join('');
     },
@@ -614,6 +857,9 @@ const TimeTrack = {
     async saveEntry() {
         const workerName = document.getElementById('tt-worker-name').value.trim();
         const projectSelect = document.getElementById('tt-project-select');
+        const currentEntry = this.editingEntryId != null
+            ? (this.entries || []).find(e => String(e.id) === String(this.editingEntryId))
+            : null;
         const hours = parseFloat(document.getElementById('tt-hours').value) || 0;
         const date = document.getElementById('tt-date').value;
         const comment = document.getElementById('tt-description').value.trim();
@@ -644,7 +890,8 @@ const TimeTrack = {
         // Find employee_id by name
         const matchedEmp = (this.employees || []).find(e => e.name === workerName);
         const entry = {
-            employee_id: matchedEmp ? matchedEmp.id : null,
+            id: this.editingEntryId || undefined,
+            employee_id: matchedEmp ? matchedEmp.id : (currentEntry?.employee_id ?? null),
             worker_name: workerName,
             project_name: projectName,
             order_id: orderId,
@@ -654,14 +901,11 @@ const TimeTrack = {
         };
 
         await saveTimeEntry(entry);
-        App.toast('Запись добавлена');
+        App.toast(this.editingEntryId ? 'Запись обновлена' : 'Запись добавлена');
 
-        document.getElementById('tt-hours').value = '';
-        document.getElementById('tt-description').value = '';
-        const stageOtherEl = document.getElementById('tt-stage-other');
-        if (stageOtherEl) stageOtherEl.value = '';
-
-        this.load();
+        this.resetManualEntryForm();
+        await this.load();
+        document.getElementById('tt-manual-form').style.display = 'none';
     },
 
     async deleteEntry(id) {
@@ -669,6 +913,60 @@ const TimeTrack = {
         await deleteTimeEntry(id);
         App.toast('Запись удалена');
         this.load();
+    },
+
+    ensureSelectOption(select, value, label) {
+        if (!select || value == null || value === '') return;
+        const exists = Array.from(select.options || []).some(opt => String(opt.value) === String(value));
+        if (exists) return;
+        const opt = document.createElement('option');
+        opt.value = String(value);
+        opt.textContent = label || String(value);
+        select.appendChild(opt);
+    },
+
+    editEntry(id) {
+        const entry = (this.entries || []).find(e => String(e.id) === String(id));
+        if (!entry) {
+            App.toast('Не удалось найти запись');
+            return;
+        }
+        this.editingEntryId = entry.id;
+        const workerEl = document.getElementById('tt-worker-name');
+        const projectEl = document.getElementById('tt-project-select');
+        const hoursEl = document.getElementById('tt-hours');
+        const dateEl = document.getElementById('tt-date');
+        const descEl = document.getElementById('tt-description');
+        const stageEl = document.getElementById('tt-stage');
+        const stageOtherEl = document.getElementById('tt-stage-other');
+        const meta = this.parseMeta(entry);
+        const stage = meta.stage || 'casting';
+
+        this.showManualEntry();
+        this.ensureSelectOption(workerEl, entry.worker_name || '', entry.worker_name || 'Без имени');
+        if (entry.order_id) {
+            this.ensureSelectOption(projectEl, entry.order_id, entry.project_name || `Заказ #${entry.order_id}`);
+        } else if (entry.project_name) {
+            this.ensureSelectOption(projectEl, '__general', entry.project_name);
+        }
+
+        if (workerEl) workerEl.value = entry.worker_name || '';
+        if (projectEl) projectEl.value = entry.order_id ? String(entry.order_id) : '__general';
+        if (hoursEl) hoursEl.value = parseFloat(entry.hours) || '';
+        if (dateEl) dateEl.value = entry.date || '';
+        if (descEl) descEl.value = this.stripMetaPrefix(entry.description || '');
+        if (stageEl) stageEl.value = TT_STAGE_ORDER.includes(stage) ? stage : 'other';
+        if (stageOtherEl) stageOtherEl.value = stageEl && stageEl.value === 'other' ? (meta.stage_label || '') : '';
+        this.syncManualEntryFormState();
+        this.onStageChange();
+        const formEl = document.getElementById('tt-manual-form');
+        if (formEl && typeof formEl.scrollIntoView === 'function') {
+            formEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+        if (projectEl && typeof projectEl.focus === 'function') {
+            projectEl.focus();
+        }
+        App.toast('Запись открыта для редактирования');
     },
 
     esc(str) {

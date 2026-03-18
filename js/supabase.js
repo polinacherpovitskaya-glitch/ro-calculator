@@ -77,11 +77,11 @@ const LOCAL_KEYS = {
     readyGoods: 'ro_calc_ready_goods_stock',
     readyGoodsHistory: 'ro_calc_ready_goods_history',
     salesRecords: 'ro_calc_sales_records',
+    wikiState: 'ro_calc_wiki_state',
     indirectCosts: 'ro_calc_indirect_costs',
     workAreas: 'ro_calc_work_areas',
     workProjects: 'ro_calc_work_projects',
     workTasks: 'ro_calc_work_tasks_v2',
-    bugReports: 'ro_calc_bug_reports',
     taskComments: 'ro_calc_task_comments',
     workAssets: 'ro_calc_work_assets',
     taskChecklistItems: 'ro_calc_task_checklist_items',
@@ -105,7 +105,6 @@ const NON_CRITICAL_LOCAL_CACHE_KEYS = new Set([
     LOCAL_KEYS.salesRecords,
     LOCAL_KEYS.workProjects,
     LOCAL_KEYS.workTasks,
-    LOCAL_KEYS.bugReports,
     LOCAL_KEYS.taskComments,
     LOCAL_KEYS.workAssets,
     LOCAL_KEYS.taskChecklistItems,
@@ -119,7 +118,6 @@ const WORK_SETTINGS_KEYS = {
     areas: 'work_areas_json',
     projects: 'work_projects_json',
     tasks: 'work_tasks_json',
-    bug_reports: 'bug_reports_json',
     task_comments: 'work_task_comments_json',
     work_assets: 'work_assets_json',
     task_checklist_items: 'work_task_checklist_items_json',
@@ -132,10 +130,6 @@ const WORK_SETTINGS_KEYS = {
 const WORK_TABLE_ON_CONFLICT = {
     task_watchers: 'task_id,user_id',
 };
-
-const OPTIONAL_WORK_MODULE_TABLES = new Set([
-    'bug_reports',
-]);
 
 const _volatileLocalCache = new Map();
 
@@ -330,7 +324,6 @@ function _cleanupLocalStorage(options = {}) {
                 'ro_calc_auto_backups',
                 LOCAL_KEYS.workActivity,
                 LOCAL_KEYS.taskNotificationEvents,
-                LOCAL_KEYS.bugReports,
                 LOCAL_KEYS.workAssets,
                 LOCAL_KEYS.taskComments,
                 LOCAL_KEYS.taskChecklistItems,
@@ -515,6 +508,8 @@ function getDefaultSettings() {
         nfc_write_speed: 350,
         workers_count: 3.5,
         hours_per_worker: 168,
+        planning_workers_count: 2,
+        planning_hours_per_day: 8,
         work_load_ratio: 0.8,
         plastic_injection_ratio: 0.7,
         packaging_ratio: 0.3,
@@ -1166,7 +1161,6 @@ async function saveFintabloImport(importData) {
         import_date: importData.import_date || new Date().toISOString(),
         updated_at: new Date().toISOString(),
     };
-
     const shouldReplaceExisting = record.source === 'api' && !!record.raw_data?.dealId;
     const matchesExistingImport = (row) => {
         if (!shouldReplaceExisting || !row) return false;
@@ -1175,7 +1169,6 @@ async function saveFintabloImport(importData) {
             && String(merged.source || '') === String(record.source || '')
             && String(merged.raw_data?.dealId || '') === String(record.raw_data?.dealId || '');
     };
-
     const applyLocalRecord = () => {
         const imports = getLocal(LOCAL_KEYS.imports) || [];
         const idx = shouldReplaceExisting ? imports.findIndex(matchesExistingImport) : -1;
@@ -1183,7 +1176,6 @@ async function saveFintabloImport(importData) {
         else imports.push(record);
         setLocal(LOCAL_KEYS.imports, imports);
     };
-
     if (isSupabaseReady()) {
         try {
             let existingRaw = null;
@@ -1433,30 +1425,60 @@ function _timeEntryToDb(entry) {
 }
 
 async function loadTimeEntries() {
+    const fallback = getLocal(LOCAL_KEYS.timeEntries) || [];
     if (isSupabaseReady()) {
-        const { data, error } = await supabaseClient
-            .from('time_entries')
-            .select('*')
-            .order('date', { ascending: false });
-        if (error) { console.error('loadTimeEntries error:', error); return []; }
-        return (data || []).map(_timeEntryFromDb);
+        try {
+            const timeoutMs = Number(window.__RO_REMOTE_LOAD_TIMEOUT_MS) > 0 ? Number(window.__RO_REMOTE_LOAD_TIMEOUT_MS) : 5000;
+            const result = await Promise.race([
+                supabaseClient
+                    .from('time_entries')
+                    .select('*')
+                    .order('date', { ascending: false }),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), timeoutMs)),
+            ]);
+            const { data, error } = result || {};
+            if (error) {
+                console.error('loadTimeEntries error:', error);
+                return fallback;
+            }
+            return (data || []).map(_timeEntryFromDb);
+        } catch (err) {
+            console.warn('loadTimeEntries timeout/error, using local:', err);
+        }
     }
-    return getLocal(LOCAL_KEYS.timeEntries) || [];
+    return fallback;
 }
 
 async function saveTimeEntry(entry) {
     if (isSupabaseReady()) {
         const dbRow = _timeEntryToDb(entry);
-        const { data, error } = await supabaseClient
-            .from('time_entries')
-            .insert(dbRow)
-            .select('id')
-            .single();
+        const { id: dbId, ...updateRow } = dbRow;
+        const query = entry && entry.id
+            ? supabaseClient
+                .from('time_entries')
+                .update(updateRow)
+                .eq('id', entry.id)
+                .select('id')
+                .single()
+            : supabaseClient
+                .from('time_entries')
+                .insert(dbRow)
+                .select('id')
+                .single();
+        const { data, error } = await query;
         if (error) { console.error('saveTimeEntry error:', error); return null; }
         return data.id;
     }
     const entries = getLocal(LOCAL_KEYS.timeEntries) || [];
-    const id = Date.now();
+    if (entry && entry.id) {
+        const idx = entries.findIndex(e => String(e.id) === String(entry.id));
+        if (idx >= 0) {
+            entries[idx] = { ...entries[idx], ...entry, updated_at: new Date().toISOString() };
+            setLocal(LOCAL_KEYS.timeEntries, entries);
+            return entry.id;
+        }
+    }
+    const id = entry?.id || Date.now();
     entries.push({ ...entry, id, created_at: new Date().toISOString() });
     setLocal(LOCAL_KEYS.timeEntries, entries);
     return id;
@@ -1789,6 +1811,13 @@ function _mergeEmpExtra(employees) {
         emp.pay_white_salary = (ex && ex.pay_white_salary !== undefined) ? ex.pay_white_salary : (emp.pay_white_salary ?? (def ? def.pay_white_salary : 0));
         emp.pay_black_salary = (ex && ex.pay_black_salary !== undefined) ? ex.pay_black_salary : (emp.pay_black_salary ?? (def ? def.pay_black_salary : 0));
         emp.fired_date = (ex && ex.fired_date) ? ex.fired_date : (emp.fired_date || null);
+        emp.payroll_profile = (ex && ex.payroll_profile) ? ex.payroll_profile : (emp.payroll_profile || (def ? def.payroll_profile : null));
+        emp.pay_base_hours_semimonth = (ex && ex.pay_base_hours_semimonth !== undefined)
+            ? ex.pay_base_hours_semimonth
+            : (emp.pay_base_hours_semimonth ?? (def ? def.pay_base_hours_semimonth : 0));
+        if (def && String(emp.id) === '1772800698338' && Number(emp.pay_base_hours_month) === 176) {
+            emp.pay_base_hours_month = def.pay_base_hours_month;
+        }
         // Recalc base salary
         emp.pay_base_salary_month = (emp.pay_white_salary || 0) + (emp.pay_black_salary || 0);
     });
@@ -1816,7 +1845,7 @@ const FIRED_DATES = {
 
 // Seed default extra data — re-seed on version change
 function _seedDefaultEmpExtra() {
-    const SEED_KEY = 'ro_emp_extra_seeded_v4'; // bump to re-seed
+    const SEED_KEY = 'ro_emp_extra_seeded_v5'; // bump to re-seed payroll profile defaults
     if (localStorage.getItem(SEED_KEY)) return;
     const defaults = getDefaultEmployees();
     const extra = _getEmpExtra();
@@ -1827,6 +1856,8 @@ function _seedDefaultEmpExtra() {
             pay_white_salary: d.pay_white_salary || 0,
             pay_black_salary: d.pay_black_salary || 0,
             fired_date: FIRED_DATES[key] || null,
+            payroll_profile: d.payroll_profile || null,
+            pay_base_hours_semimonth: d.pay_base_hours_semimonth || 0,
         };
     });
     _setEmpExtra(extra);
@@ -1879,6 +1910,8 @@ async function saveEmployee(employee) {
         pay_white_salary: employee.pay_white_salary || 0,
         pay_black_salary: employee.pay_black_salary || 0,
         fired_date: employee.fired_date || null,
+        payroll_profile: employee.payroll_profile || null,
+        pay_base_hours_semimonth: employee.pay_base_hours_semimonth || 0,
     });
 
     if (isSupabaseReady()) {
@@ -1941,18 +1974,23 @@ async function loadAuthAccounts() {
     const fallback = (getLocal(LOCAL_KEYS.authAccounts) || []).map(sanitizeAuthAccount);
     if (isSupabaseReady()) {
         try {
-            const { data, error } = await supabaseClient
-                .from('settings')
-                .select('value')
-                .eq('key', 'auth_accounts_json')
-                .maybeSingle();
+            const timeoutMs = Number(window.__RO_REMOTE_LOAD_TIMEOUT_MS) > 0 ? Number(window.__RO_REMOTE_LOAD_TIMEOUT_MS) : 5000;
+            const result = await Promise.race([
+                supabaseClient
+                    .from('settings')
+                    .select('value')
+                    .eq('key', 'auth_accounts_json')
+                    .maybeSingle(),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), timeoutMs)),
+            ]);
+            const { data, error } = result || {};
             if (!error && data && data.value) {
                 const parsed = (JSON.parse(data.value) || []).map(sanitizeAuthAccount);
                 setLocal(LOCAL_KEYS.authAccounts, parsed);
                 return parsed;
             }
         } catch (e) {
-            console.error('loadAuthAccounts error:', e);
+            console.warn('loadAuthAccounts timeout/error, using local:', e);
         }
     }
     return fallback;
@@ -2145,6 +2183,48 @@ async function saveProjectHardwareState(state) {
     }
 }
 
+// =============================================
+// KNOWLEDGE BASE / INTERNAL WIKI
+// =============================================
+
+async function loadWikiState() {
+    const fallback = getLocal(LOCAL_KEYS.wikiState) || null;
+    if (isSupabaseReady()) {
+        try {
+            const { data, error } = await supabaseClient
+                .from('settings')
+                .select('value')
+                .eq('key', 'knowledge_wiki_json')
+                .maybeSingle();
+            if (!error && data && data.value) {
+                const parsed = JSON.parse(data.value) || null;
+                if (parsed) setLocal(LOCAL_KEYS.wikiState, parsed);
+                return parsed;
+            }
+        } catch (e) {
+            console.error('loadWikiState error:', e);
+        }
+    }
+    return fallback;
+}
+
+async function saveWikiState(state) {
+    const payload = state && typeof state === 'object' ? state : null;
+    if (!payload) return null;
+    setLocal(LOCAL_KEYS.wikiState, payload);
+    if (isSupabaseReady()) {
+        const { error } = await supabaseClient
+            .from('settings')
+            .upsert({
+                key: 'knowledge_wiki_json',
+                value: JSON.stringify(payload),
+                updated_at: new Date().toISOString(),
+            }, { onConflict: 'key' });
+        if (error) console.error('saveWikiState error:', error);
+    }
+    return payload;
+}
+
 async function appendAuthSession(session) {
     const list = await loadAuthSessions();
     list.unshift(session);
@@ -2169,7 +2249,10 @@ function getDefaultEmployees() {
         pay_white_salary: opts.w || 0,
         pay_black_salary: opts.b || 0,
         pay_base_salary_month: (opts.w || 0) + (opts.b || 0),
-        pay_base_hours_month: 176, pay_overtime_hour_rate: opts.ot || 0,
+        pay_base_hours_month: opts.baseHours || 176,
+        payroll_profile: opts.payroll || (((opts.w || 0) + (opts.b || 0)) > 0 ? 'salary_monthly' : 'hourly'),
+        pay_base_hours_semimonth: opts.halfHours || 0,
+        pay_overtime_hour_rate: opts.ot || 0,
         pay_weekend_hour_rate: opts.we || 0, pay_holiday_hour_rate: opts.ho || 0,
     });
     // ЗП из FinTablo справочника сотрудников (Mar 2026).
@@ -2178,16 +2261,16 @@ function getDefaultEmployees() {
     // Итого FinTablo: Фикс 1 544 945₽, Взносы 77 172₽, НДФЛ 50 806₽, Итого 1 672 923₽
     return [
         // Производство
-        e(1772800698338, 'Тая', 'production', { w: 40000, b: 30000, hours: 6, ot: 500, we: 750, ho: 750 }),
+        e(1772800698338, 'Тая', 'production', { w: 40000, b: 30000, hours: 6, baseHours: 120, halfHours: 60, payroll: 'salary_semimonth_threshold', ot: 500, we: 750, ho: 750 }),
         // Панкина Таисия — Оператор лазерного станка. Фикс 70к, белая 40к + чёрная 30к
-        e(1772801066913, 'Женя Г', 'production', { w: 0, b: 0, ot: 500, we: 750, ho: 750, active: false }),
+        e(1772801066913, 'Женя Г', 'production', { w: 0, b: 0, payroll: 'hourly', ot: 500, we: 750, ho: 750, active: false }),
         // Голубенкова Евгения — Сотрудник производства. Уволена 15.03.2026
-        e(1741700001000, 'Сергей М', 'production', { ot: 500, we: 750, ho: 750, active: false }),
+        e(1741700001000, 'Сергей М', 'production', { payroll: 'hourly', ot: 500, we: 750, ho: 750, active: false }),
 
         // Управление
         e(5, 'Полина', 'management', { w: 0, b: 350000, tasks: true }),
         // Черповицкая Полина — Директор. Фикс 350к, весь чёрный
-        e(1772827635013, 'Леша', 'management', { w: 0, b: 180000 }),
+        e(1772827635013, 'Леша', 'management', { w: 0, b: 180000, payroll: 'management_salary_with_production_allocation' }),
         // Маркелов Алексей — Начальник производства. 180к чёрный. 50% производство
 
         // Офис / Коммерция
@@ -3584,10 +3667,6 @@ function _workOnConflictKey(table) {
     return WORK_TABLE_ON_CONFLICT[table] || 'id';
 }
 
-function _isOptionalWorkModuleTable(table) {
-    return OPTIONAL_WORK_MODULE_TABLES.has(table);
-}
-
 function _isWorkModuleMissingTableError(error) {
     return _isSupabaseMissingTableError(error);
 }
@@ -3644,7 +3723,6 @@ async function _saveJsonSetting(settingKey, value) {
 
 async function _loadWorkTableRows(table, localKey, orderBy, ascending) {
     const settingsKey = _workSettingsKey(table);
-    let remoteTableMissing = false;
     if (_canUseWorkModuleRemote()) {
         try {
             let query = supabaseClient.from(table).select('*');
@@ -3665,12 +3743,8 @@ async function _loadWorkTableRows(table, localKey, orderBy, ascending) {
                 return data;
             }
             if (error) {
-                if (_isWorkModuleMissingTableError(error) && _isOptionalWorkModuleTable(table)) {
-                    remoteTableMissing = true;
-                } else {
-                    _markWorkModuleRemoteUnavailable(error);
-                    if (!_isWorkModuleMissingTableError(error)) console.error(`load ${table} error:`, error);
-                }
+                _markWorkModuleRemoteUnavailable(error);
+                if (!_isWorkModuleMissingTableError(error)) console.error(`load ${table} error:`, error);
             }
         } catch (e) {
             console.error(`load ${table} exception:`, e);
@@ -3687,7 +3761,7 @@ async function _loadWorkTableRows(table, localKey, orderBy, ascending) {
             setLocal(localKey, remoteFallback);
             return orderBy ? _sortRows(remoteFallback, orderBy, ascending) : remoteFallback;
         }
-        if (local.length > 0 || remoteTableMissing) {
+        if (local.length > 0) {
             await _saveJsonSetting(settingsKey, local);
         }
     }
@@ -3699,19 +3773,14 @@ async function _upsertWorkTableRows(table, localKey, rows, onConflict) {
     if (payload.length === 0) return [];
     const conflictKey = onConflict || _workOnConflictKey(table);
     const settingsKey = _workSettingsKey(table);
-    let remoteTableMissing = false;
     if (_canUseWorkModuleRemote()) {
         try {
             const { error } = await supabaseClient
                 .from(table)
                 .upsert(payload, { onConflict: conflictKey });
             if (error) {
-                if (_isWorkModuleMissingTableError(error) && _isOptionalWorkModuleTable(table)) {
-                    remoteTableMissing = true;
-                } else {
-                    _markWorkModuleRemoteUnavailable(error);
-                    if (!_isWorkModuleMissingTableError(error)) console.error(`upsert ${table} error:`, error);
-                }
+                _markWorkModuleRemoteUnavailable(error);
+                if (!_isWorkModuleMissingTableError(error)) console.error(`upsert ${table} error:`, error);
             } else {
                 _workModuleRemoteAvailable = true;
             }
@@ -3729,27 +3798,22 @@ async function _upsertWorkTableRows(table, localKey, rows, onConflict) {
             else next.push(row);
         });
         setLocal(localKey, next);
-        if ((!_canUseWorkModuleRemote() || remoteTableMissing) && settingsKey) await _saveJsonSetting(settingsKey, next);
+        if (!_canUseWorkModuleRemote() && settingsKey) await _saveJsonSetting(settingsKey, next);
         return payload;
     }
     const merged = _bulkMergeLocalEntityRows(localKey, payload, 'id');
-    if ((!_canUseWorkModuleRemote() || remoteTableMissing) && settingsKey) await _saveJsonSetting(settingsKey, merged);
+    if (!_canUseWorkModuleRemote() && settingsKey) await _saveJsonSetting(settingsKey, merged);
     return payload;
 }
 
 async function _deleteWorkTableRow(table, localKey, rowId) {
     const settingsKey = _workSettingsKey(table);
-    let remoteTableMissing = false;
     if (_canUseWorkModuleRemote()) {
         try {
             const { error } = await supabaseClient.from(table).delete().eq('id', rowId);
             if (error) {
-                if (_isWorkModuleMissingTableError(error) && _isOptionalWorkModuleTable(table)) {
-                    remoteTableMissing = true;
-                } else {
-                    _markWorkModuleRemoteUnavailable(error);
-                    if (!_isWorkModuleMissingTableError(error)) console.error(`delete ${table} error:`, error);
-                }
+                _markWorkModuleRemoteUnavailable(error);
+                if (!_isWorkModuleMissingTableError(error)) console.error(`delete ${table} error:`, error);
             } else {
                 _workModuleRemoteAvailable = true;
             }
@@ -3758,7 +3822,7 @@ async function _deleteWorkTableRow(table, localKey, rowId) {
         }
     }
     const next = _removeLocalEntityRow(localKey, item => String(item?.id) === String(rowId));
-    if ((!_canUseWorkModuleRemote() || remoteTableMissing) && settingsKey) await _saveJsonSetting(settingsKey, next);
+    if (!_canUseWorkModuleRemote() && settingsKey) await _saveJsonSetting(settingsKey, next);
 }
 
 function _buildEmployeeMaps(employees, authAccounts) {
@@ -3848,6 +3912,49 @@ async function loadWorkTemplatesV2() {
     return templates;
 }
 
+async function saveWorkTemplate(template) {
+    const core = _workCore();
+    const nowIso = new Date().toISOString();
+    const existing = template?.id
+        ? (await _loadWorkTableRows('work_templates', LOCAL_KEYS.workTemplatesV2, 'name', true))
+            .find(item => String(item.id) === String(template.id))
+        : null;
+    const checklistItems = Array.isArray(template?.checklist_items)
+        ? template.checklist_items
+        : String(template?.checklist_items || '')
+            .split('\n')
+            .map(item => String(item || '').trim())
+            .filter(Boolean);
+    const suggestedSubtasks = Array.isArray(template?.suggested_subtasks)
+        ? template.suggested_subtasks
+        : String(template?.suggested_subtasks || '')
+            .split('\n')
+            .map(item => String(item || '').trim())
+            .filter(Boolean);
+    const row = {
+        id: template?.id || core.generateEntityId(),
+        kind: 'task',
+        name: String(template?.name || existing?.name || '').trim(),
+        title: String(template?.title || existing?.title || '').trim(),
+        project_type: null,
+        description: String(template?.description || existing?.description || '').trim(),
+        default_priority: template?.default_priority || existing?.default_priority || 'normal',
+        suggested_area_id: _toNumberOrNull(template?.suggested_area_id ?? existing?.suggested_area_id),
+        checklist_items: checklistItems,
+        suggested_subtasks: suggestedSubtasks,
+        created_at: existing?.created_at || nowIso,
+        updated_at: nowIso,
+    };
+    if (!row.name) throw new Error('Укажите название шаблона');
+    if (!row.title) throw new Error('Укажите название задачи в шаблоне');
+    await _upsertWorkTableRows('work_templates', LOCAL_KEYS.workTemplatesV2, row, 'id');
+    return row;
+}
+
+async function deleteWorkTemplate(templateId) {
+    await _deleteWorkTableRow('work_templates', LOCAL_KEYS.workTemplatesV2, templateId);
+}
+
 async function loadWorkProjects() {
     return _loadWorkTableRows('projects', LOCAL_KEYS.workProjects, 'updated_at', false);
 }
@@ -3860,11 +3967,6 @@ async function loadWorkProject(projectId) {
 async function loadWorkTasks() {
     await ensureWorkManagementBootstrap();
     return _loadWorkTableRows('tasks', LOCAL_KEYS.workTasks, 'updated_at', false);
-}
-
-async function loadBugReports() {
-    await ensureWorkManagementBootstrap();
-    return _loadWorkTableRows('bug_reports', LOCAL_KEYS.bugReports, 'updated_at', false);
 }
 
 async function loadTaskComments() {
@@ -3928,73 +4030,6 @@ async function appendTaskNotificationEvent(event) {
         processed_at: event.processed_at || null,
     };
     await _upsertWorkTableRows('task_notification_events', LOCAL_KEYS.taskNotificationEvents, row, 'id');
-    return row;
-}
-
-async function saveBugReport(report, options = {}) {
-    const core = _workCore();
-    const nowIso = new Date().toISOString();
-    const existingList = getLocal(LOCAL_KEYS.bugReports) || [];
-    const existing = report?.id
-        ? existingList.find(item => String(item.id) === String(report.id))
-        : existingList.find(item => String(item.task_id || '') === String(report.task_id || ''));
-    const employees = await loadEmployees();
-    const employeesById = new Map((employees || []).map(emp => [String(emp.id), emp]));
-    const submittedById = _toNumberOrNull(report.submitted_by ?? existing?.submitted_by ?? App?.currentEmployeeId);
-    const row = {
-        id: report.id || existing?.id || core.generateEntityId(),
-        task_id: _toNumberOrNull(report.task_id ?? existing?.task_id),
-        title: String(report.title || existing?.title || '').trim(),
-        section_key: String(report.section_key || existing?.section_key || '').trim(),
-        section_name: String(report.section_name || existing?.section_name || '').trim(),
-        subsection_key: String(report.subsection_key || existing?.subsection_key || '').trim(),
-        subsection_name: String(report.subsection_name || existing?.subsection_name || '').trim(),
-        page_route: report.page_route || existing?.page_route || '',
-        page_url: report.page_url || existing?.page_url || '',
-        app_version: report.app_version || existing?.app_version || '',
-        browser: report.browser || existing?.browser || '',
-        os: report.os || existing?.os || '',
-        viewport: report.viewport || existing?.viewport || '',
-        steps_to_reproduce: report.steps_to_reproduce || existing?.steps_to_reproduce || '',
-        expected_result: report.expected_result || existing?.expected_result || '',
-        actual_result: report.actual_result || existing?.actual_result || '',
-        severity: report.severity || existing?.severity || 'medium',
-        codex_prompt: report.codex_prompt || existing?.codex_prompt || '',
-        codex_status: report.codex_status || existing?.codex_status || 'pending',
-        codex_result: report.codex_result || existing?.codex_result || '',
-        codex_error: report.codex_error || existing?.codex_error || '',
-        submitted_by: submittedById,
-        submitted_by_name: _resolvePersonFromPayload(submittedById, report.submitted_by_name || existing?.submitted_by_name || App?.getCurrentEmployeeName?.() || '', employeesById),
-        created_at: existing?.created_at || report.created_at || nowIso,
-        updated_at: nowIso,
-    };
-    if (!row.task_id) {
-        throw new Error('Bug report must be linked to task_id');
-    }
-    await _upsertWorkTableRows('bug_reports', LOCAL_KEYS.bugReports, row, 'id');
-
-    if (!options.skipActivity) {
-        if (!existing) {
-            await appendWorkActivity({
-                task_id: row.task_id,
-                author_id: options.actor_id ?? App?.currentEmployeeId ?? row.submitted_by,
-                author_name: options.actor_name || App?.getCurrentEmployeeName?.() || row.submitted_by_name || 'Система',
-                activity_type: 'bug_report_created',
-                message: 'Создан баг-репорт.',
-                metadata: { bug_report_id: row.id, severity: row.severity },
-            });
-        } else if (existing.codex_status !== row.codex_status && row.codex_status) {
-            await appendWorkActivity({
-                task_id: row.task_id,
-                author_id: options.actor_id ?? App?.currentEmployeeId ?? row.submitted_by,
-                author_name: options.actor_name || App?.getCurrentEmployeeName?.() || row.submitted_by_name || 'Система',
-                activity_type: 'bug_codex_status_changed',
-                message: `Статус Codex обновлён: ${existing.codex_status || '—'} → ${row.codex_status}.`,
-                metadata: { bug_report_id: row.id, codex_status: row.codex_status },
-            });
-        }
-    }
-
     return row;
 }
 
@@ -4266,9 +4301,6 @@ async function saveWorkTask(task, options = {}) {
 
     row.order_name = _taskOrderName(row, orders, projects);
     row.primary_context_kind = core.ensurePrimaryContextKind(row, project);
-    if (!row.order_id && !row.project_id && !row.area_id) {
-        throw new Error('У задачи должен быть хотя бы один контекст');
-    }
     if (row.status === 'done') {
         row.completed_at = existing?.completed_at || nowIso;
         row.cancelled_at = null;
@@ -4359,24 +4391,16 @@ async function deleteWorkTask(taskId) {
     for (const child of childTasks) {
         await deleteWorkTask(child.id);
     }
-    let bugReportsTableMissing = false;
     if (_canUseWorkModuleRemote()) {
         try {
             const responses = await Promise.all([
-                supabaseClient.from('bug_reports').delete().eq('task_id', targetId),
                 supabaseClient.from('task_comments').delete().eq('task_id', targetId),
                 supabaseClient.from('work_assets').delete().eq('task_id', targetId),
                 supabaseClient.from('task_checklist_items').delete().eq('task_id', targetId),
                 supabaseClient.from('task_watchers').delete().eq('task_id', targetId),
                 supabaseClient.from('work_activity').delete().eq('task_id', targetId),
             ]);
-            const firstError = responses
-                .map(item => item?.error)
-                .find(error => error && !(_isWorkModuleMissingTableError(error) && String(error?.message || '').includes('bug_reports')));
-            const optionalBugError = responses
-                .map(item => item?.error)
-                .find(error => error && _isWorkModuleMissingTableError(error) && String(error?.message || '').includes('bug_reports'));
-            if (optionalBugError) bugReportsTableMissing = true;
+            const firstError = responses.map(item => item?.error).find(Boolean);
             if (firstError) {
                 _markWorkModuleRemoteUnavailable(firstError);
                 if (!_isWorkModuleMissingTableError(firstError)) console.error('deleteWorkTask cascade error:', firstError);
@@ -4392,10 +4416,6 @@ async function deleteWorkTask(taskId) {
     _removeLocalEntityRow(LOCAL_KEYS.taskChecklistItems, item => String(item.task_id) === String(targetId));
     _removeLocalEntityRow(LOCAL_KEYS.taskWatchers, item => String(item.task_id) === String(targetId));
     _removeLocalEntityRow(LOCAL_KEYS.workActivity, item => String(item.task_id) === String(targetId));
-    _removeLocalEntityRow(LOCAL_KEYS.bugReports, item => String(item.task_id) === String(targetId));
-    if (!_canUseWorkModuleRemote() || bugReportsTableMissing) {
-        await _saveJsonSetting(_workSettingsKey('bug_reports'), getLocal(LOCAL_KEYS.bugReports) || []);
-    }
     if (!_canUseWorkModuleRemote()) {
         await _saveJsonSetting(_workSettingsKey('task_comments'), getLocal(LOCAL_KEYS.taskComments) || []);
         await _saveJsonSetting(_workSettingsKey('work_assets'), getLocal(LOCAL_KEYS.workAssets) || []);
@@ -4544,7 +4564,6 @@ async function loadWorkBundle() {
         areas,
         projects,
         tasks,
-        bugReports,
         comments,
         assets,
         checklistItems,
@@ -4555,7 +4574,6 @@ async function loadWorkBundle() {
         loadWorkAreas(),
         loadWorkProjects(),
         _loadWorkTableRows('tasks', LOCAL_KEYS.workTasks, 'updated_at', false),
-        _loadWorkTableRows('bug_reports', LOCAL_KEYS.bugReports, 'updated_at', false),
         _loadWorkTableRows('task_comments', LOCAL_KEYS.taskComments, 'created_at', true),
         _loadWorkTableRows('work_assets', LOCAL_KEYS.workAssets, 'created_at', true),
         _loadWorkTableRows('task_checklist_items', LOCAL_KEYS.taskChecklistItems, 'sort_index', true),
@@ -4563,5 +4581,5 @@ async function loadWorkBundle() {
         _loadWorkTableRows('work_activity', LOCAL_KEYS.workActivity, 'created_at', false),
         loadWorkTemplatesV2(),
     ]);
-    return { areas, projects, tasks, bugReports, comments, assets, checklistItems, watchers, activity, templates };
+    return { areas, projects, tasks, comments, assets, checklistItems, watchers, activity, templates };
 }

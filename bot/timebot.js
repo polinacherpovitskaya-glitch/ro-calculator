@@ -7,15 +7,10 @@ require('dotenv').config();
 const TelegramBot = require('node-telegram-bot-api');
 const { createClient } = require('@supabase/supabase-js');
 const { buildTaskNotificationText, getTaskNotificationRecipientIds } = require('./task-notification-core');
-const BugReportCore = require('../js/bug-report-core.js');
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_KEY;
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
-const OPENAI_BUG_MODEL = process.env.OPENAI_BUG_MODEL || 'gpt-5-codex';
-const BUG_REPORT_REPO_PATH = process.env.BUG_REPORT_REPO_PATH || '';
-const BUG_REPORT_AUTOTRIAGE = /^(1|true|yes)$/i.test(process.env.BUG_REPORT_AUTOTRIAGE || '');
 
 if (!BOT_TOKEN || !SUPABASE_URL || !SUPABASE_KEY) {
     console.error('Missing env vars: BOT_TOKEN, SUPABASE_URL, SUPABASE_KEY');
@@ -33,9 +28,6 @@ const bot = new TelegramBot(BOT_TOKEN, {
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 const WORK_SETTINGS_KEYS = {
     tasks: 'work_tasks_json',
-    bugReports: 'bug_reports_json',
-    workAssets: 'work_assets_json',
-    taskComments: 'work_task_comments_json',
     taskNotificationEvents: 'work_task_notification_events_json',
 };
 
@@ -1052,210 +1044,17 @@ async function loadWorkTasksSnapshot() {
     return Array.isArray(staged) ? staged : [];
 }
 
-async function loadBugReportsSnapshot() {
-    try {
-        const { data, error } = await supabase.from('bug_reports').select('*');
-        if (!error && Array.isArray(data)) return data;
-    } catch (error) {
-        console.warn('Bug automation: remote bug_reports table unavailable, using settings fallback.');
-    }
-    const staged = await loadJsonSetting(WORK_SETTINGS_KEYS.bugReports, []);
-    return Array.isArray(staged) ? staged : [];
-}
-
-async function loadWorkAssetsSnapshot() {
-    try {
-        const { data, error } = await supabase.from('work_assets').select('*');
-        if (!error && Array.isArray(data)) return data;
-    } catch (error) {
-        console.warn('Bug automation: remote work_assets table unavailable, using settings fallback.');
-    }
-    const staged = await loadJsonSetting(WORK_SETTINGS_KEYS.workAssets, []);
-    return Array.isArray(staged) ? staged : [];
-}
-
 function buildEmployeeMap(list) {
     return new Map((list || []).map(item => [String(item.id), item]));
-}
-
-function groupAssetsByTask(assets) {
-    const map = new Map();
-    (assets || []).forEach(asset => {
-        const key = String(asset?.task_id || '');
-        if (!key) return;
-        const bucket = map.get(key) || [];
-        bucket.push(asset);
-        map.set(key, bucket);
-    });
-    return map;
-}
-
-async function updateBugReport(reportId, patch) {
-    if (!reportId || !patch || Object.keys(patch).length === 0) return;
-    const payload = {
-        ...patch,
-        updated_at: new Date().toISOString(),
-    };
-    try {
-        const { error } = await supabase
-            .from('bug_reports')
-            .update(payload)
-            .eq('id', reportId);
-        if (!error) return;
-    } catch (error) {
-        console.warn('Bug automation: failed to update bug report remotely, falling back to settings.');
-    }
-
-    const staged = await loadJsonSetting(WORK_SETTINGS_KEYS.bugReports, []);
-    if (!Array.isArray(staged)) return;
-    const next = staged.map(item => String(item?.id) === String(reportId)
-        ? { ...item, ...payload }
-        : item);
-    await saveJsonSetting(WORK_SETTINGS_KEYS.bugReports, next);
-}
-
-async function appendTaskCommentFromBot(taskId, body) {
-    const trimmed = String(body || '').trim();
-    if (!taskId || !trimmed) return;
-    const row = {
-        id: Date.now() + Math.floor(Math.random() * 100000),
-        task_id: Number(taskId),
-        author_id: null,
-        author_name: 'Codex automation',
-        body: trimmed,
-        mentions: [],
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-    };
-    try {
-        const { error } = await supabase
-            .from('task_comments')
-            .upsert(row, { onConflict: 'id' });
-        if (!error) return;
-    } catch (error) {
-        console.warn('Bug automation: failed to save task comment remotely, falling back to settings.');
-    }
-    const staged = await loadJsonSetting(WORK_SETTINGS_KEYS.taskComments, []);
-    const next = Array.isArray(staged) ? staged.filter(item => String(item?.id) !== String(row.id)) : [];
-    next.push(row);
-    await saveJsonSetting(WORK_SETTINGS_KEYS.taskComments, next);
-}
-
-function extractResponseText(payload) {
-    if (typeof payload?.output_text === 'string' && payload.output_text.trim()) return payload.output_text.trim();
-    const chunks = [];
-    (payload?.output || []).forEach(item => {
-        (item?.content || []).forEach(content => {
-            if (typeof content?.text === 'string' && content.text.trim()) chunks.push(content.text.trim());
-        });
-    });
-    return chunks.join('\n\n').trim();
-}
-
-async function requestBugTriage(prompt) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 45000);
-    try {
-        const response = await fetch('https://api.openai.com/v1/responses', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${OPENAI_API_KEY}`,
-            },
-            body: JSON.stringify({
-                model: OPENAI_BUG_MODEL,
-                input: [
-                    {
-                        role: 'system',
-                        content: [
-                            {
-                                type: 'input_text',
-                                text: 'Ты технический triage-ассистент. Ответь по-русски. Дай короткую структурированную записку: вероятная причина, где искать в коде, план первого фикса, риски регрессии. Без воды.',
-                            },
-                        ],
-                    },
-                    {
-                        role: 'user',
-                        content: [
-                            {
-                                type: 'input_text',
-                                text: prompt,
-                            },
-                        ],
-                    },
-                ],
-            }),
-            signal: controller.signal,
-        });
-        if (!response.ok) {
-            const text = await response.text();
-            throw new Error(`OpenAI ${response.status}: ${text}`);
-        }
-        const payload = await response.json();
-        const text = extractResponseText(payload);
-        if (!text) throw new Error('OpenAI returned empty text');
-        return {
-            responseId: payload?.id || '',
-            text,
-        };
-    } finally {
-        clearTimeout(timer);
-    }
-}
-
-async function processBugReportEvent(event, task, bugReportsById, assetsByTaskId) {
-    const payload = event?.payload || {};
-    const report = bugReportsById.get(String(payload.bug_report_id || ''))
-        || Array.from(bugReportsById.values()).find(item => String(item?.task_id || '') === String(event?.task_id || ''))
-        || null;
-    if (!report || !task) return;
-
-    const assets = assetsByTaskId.get(String(task.id)) || [];
-    const codexPrompt = report.codex_prompt || BugReportCore.buildCodexPrompt({
-        task,
-        report,
-        assets,
-        repoPath: BUG_REPORT_REPO_PATH,
-    });
-
-    const patch = {};
-    if (!report.codex_prompt || report.codex_prompt !== codexPrompt) {
-        patch.codex_prompt = codexPrompt;
-        patch.codex_status = report.codex_status === 'pending' ? 'prompt_ready' : (report.codex_status || 'prompt_ready');
-        patch.codex_error = '';
-    }
-
-    if (!BUG_REPORT_AUTOTRIAGE || !OPENAI_API_KEY) {
-        await updateBugReport(report.id, patch);
-        return;
-    }
-
-    try {
-        const triage = await requestBugTriage(codexPrompt);
-        patch.codex_prompt = codexPrompt;
-        patch.codex_status = 'triaged';
-        patch.codex_result = triage.text;
-        patch.codex_error = '';
-        await updateBugReport(report.id, patch);
-        await appendTaskCommentFromBot(task.id, `Codex auto-triage\n\n${triage.text}`);
-    } catch (error) {
-        patch.codex_prompt = codexPrompt;
-        patch.codex_status = 'failed';
-        patch.codex_error = error?.message || String(error);
-        await updateBugReport(report.id, patch);
-        console.error('Bug automation triage error:', error?.message || error);
-    }
 }
 
 async function processTaskNotifications() {
     const events = await loadPendingTaskNotificationEvents();
     if (!events || events.length === 0) return;
 
-    const [employeesResp, tasks, bugReports, assets] = await Promise.all([
+    const [employeesResp, tasks] = await Promise.all([
         supabase.from('employees').select('*').eq('is_active', true),
         loadWorkTasksSnapshot(),
-        loadBugReportsSnapshot(),
-        loadWorkAssetsSnapshot(),
     ]);
 
     if (employeesResp.error) {
@@ -1266,16 +1065,9 @@ async function processTaskNotifications() {
     const employees = employeesResp.data || [];
     const employeesById = buildEmployeeMap(employees);
     const tasksById = new Map((tasks || []).map(task => [String(task.id), task]));
-    const bugReportsById = new Map((bugReports || []).map(report => [String(report.id), report]));
-    const assetsByTaskId = groupAssetsByTask(assets);
 
     for (const event of events) {
         const task = event?.task_id ? tasksById.get(String(event.task_id)) || null : null;
-        if (event?.event_type === 'bug_report_submitted') {
-            await processBugReportEvent(event, task, bugReportsById, assetsByTaskId);
-            await markTaskNotificationProcessed(event.id);
-            continue;
-        }
         const recipientIds = getTaskNotificationRecipientIds(event, task);
         const text = buildTaskNotificationText(event, task, employeesById);
 

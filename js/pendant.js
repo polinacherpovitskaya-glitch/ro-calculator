@@ -18,9 +18,9 @@ const Pendant = {
             name: '',
             quantity: 0,
             elements: [],
-            cord: { source: 'warehouse', warehouse_item_id: null, name: '', price_per_unit: 0, delivery_price: 0 },
+            cord: { source: 'warehouse', warehouse_item_id: null, warehouse_sku: '', photo_thumbnail: '', name: '', price_per_unit: 0, delivery_price: 0 },
             cord_length_cm: 0,
-            carabiner: { source: 'warehouse', warehouse_item_id: null, name: '', price_per_unit: 0, delivery_price: 0 },
+            carabiner: { source: 'warehouse', warehouse_item_id: null, warehouse_sku: '', photo_thumbnail: '', name: '', price_per_unit: 0, delivery_price: 0 },
             packaging: null,
             element_price_per_unit: null,
             sell_price_override: null,
@@ -117,9 +117,9 @@ const Pendant = {
 
         modal = document.createElement('div');
         modal.id = 'pendant-wizard-modal';
-        modal.className = 'modal-overlay';
+        modal.className = 'modal-overlay pendant-wizard-overlay';
         modal.innerHTML = `
-            <div class="pendant-wizard" onclick="event.stopPropagation()">
+            <div class="${this._wizardClassName()}" onclick="event.stopPropagation()">
                 <div class="pendant-wizard-header">
                     <h2>${this._editingIndex !== null ? 'Редактировать подвес' : 'Новый подвес из букв'}</h2>
                     <button class="btn btn-sm" onclick="Pendant._closeWizard()" style="font-size:18px;line-height:1;">&times;</button>
@@ -139,6 +139,10 @@ const Pendant = {
         document.body.appendChild(modal);
         modal.addEventListener('click', (e) => { if (e.target === modal) Pendant._closeWizard(); });
         this._renderStep();
+    },
+
+    _wizardClassName() {
+        return `pendant-wizard pendant-wizard-step-${this._wizardStep}`;
     },
 
     _stepLabel(n) {
@@ -462,22 +466,84 @@ const Pendant = {
             return this._renderManualPicker(type, data);
         }
         const selectedId = data?.warehouse_item_id || null;
+        const selectedItem = selectedId
+            ? catItems.find(item => String(item.id) === String(selectedId)) || null
+            : null;
+        const selectedPreview = selectedItem || (data?.warehouse_item_id ? {
+            id: data.warehouse_item_id,
+            name: data.name || '',
+            sku: data.warehouse_sku || '',
+            photo_thumbnail: data.photo_thumbnail || '',
+            available_qty: this._getSelectedStock(type, data, whData) || 0,
+            unit: data.unit || 'шт',
+            price_per_unit: data.price_per_unit || 0,
+            size: '',
+            color: '',
+        } : null);
+        const ui = type === 'cord'
+            ? { icon: '🧵', color: '#fce7f3', textColor: '#9d174d', label: 'шнур' }
+            : { icon: '🔗', color: '#dbeafe', textColor: '#1d4ed8', label: 'карабин' };
+        const selectedHtml = selectedPreview
+            ? (() => {
+                const parts = [selectedPreview.name];
+                if (selectedPreview.size) parts.push(selectedPreview.size);
+                if (selectedPreview.color) parts.push(selectedPreview.color);
+                const title = parts.filter(Boolean).join(' · ') || 'Позиция со склада';
+                const priceStr = selectedPreview.price_per_unit > 0 ? (' · ' + formatRub(selectedPreview.price_per_unit)) : '';
+                const photoHtml = selectedPreview.photo_thumbnail
+                    ? `<img src="${selectedPreview.photo_thumbnail}" style="width:40px;height:40px;object-fit:cover;border-radius:6px;flex-shrink:0;border:1px solid var(--border);">`
+                    : `<span style="width:40px;height:40px;display:flex;align-items:center;justify-content:center;background:${ui.color};border-radius:6px;font-size:18px;flex-shrink:0;">${ui.icon}</span>`;
+                return `${photoHtml}<span style="flex:1;min-width:0;"><b style="display:block;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${App.escHtml(title)}</b><span style="font-size:11px;color:var(--text-muted);">${App.escHtml(selectedPreview.sku || '')}${selectedPreview.sku ? ' · ' : ''}${selectedPreview.available_qty} ${App.escHtml(selectedPreview.unit || 'шт')}${priceStr}</span></span>`;
+            })()
+            : `<span style="display:flex;align-items:center;gap:8px;color:var(--text-muted);font-size:13px;"><span style="width:32px;height:32px;display:flex;align-items:center;justify-content:center;background:${ui.color};border-radius:6px;">${ui.icon}</span><span>— Выберите ${ui.label} —</span></span>`;
+
         return `
             <div class="pendant-field-group">
-                <select class="input" id="pw-wh-${type}" onchange="Pendant._onWhSelect('${type}', this.value)" style="width:100%;">
-                    <option value="">— Выберите ${type === 'cord' ? 'шнур' : 'карабин'} —</option>
-                    ${catItems.map(item => {
-                        const parts = [item.name];
-                        if (item.size) parts.push(item.size);
-                        if (item.color) parts.push(item.color);
-                        const label = parts.join(' · ');
-                        const stock = item.available_qty > 0 ? `(${item.available_qty} ${item.unit})` : '(нет)';
-                        const price = item.price_per_unit > 0 ? ' · ' + formatRub(item.price_per_unit) : '';
-                        const sel = String(item.id) === String(selectedId) ? ' selected' : '';
-                        return `<option value="${item.id}"${sel}>${label} ${stock}${price}</option>`;
-                    }).join('')}
-                    <option value="__custom__">✏️ Ввести вручную...</option>
-                </select>
+                <div id="pw-wh-${type}" class="wh-img-picker pendant-wh-picker">
+                    <div class="wh-picker-selected" onclick="Warehouse.togglePicker('pw-wh-${type}')">
+                        ${selectedHtml}
+                        <span style="flex-shrink:0;color:var(--text-muted);font-size:10px;">&#9662;</span>
+                    </div>
+                    <div class="wh-picker-dropdown" style="display:none;">
+                        <div style="padding:6px 8px;border-bottom:1px solid var(--border);">
+                            <input
+                                type="text"
+                                class="wh-picker-search"
+                                placeholder="Поиск по названию или артикулу..."
+                                oninput="Warehouse.filterPicker('pw-wh-${type}', this.value)"
+                                style="width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:4px;font-size:13px;"
+                            >
+                        </div>
+                        <div class="wh-picker-list">
+                            ${catItems.map(item => {
+                                const parts = [item.name];
+                                if (item.size) parts.push(item.size);
+                                if (item.color) parts.push(item.color);
+                                const label = parts.join(' · ');
+                                const stock = item.available_qty > 0 ? `${item.available_qty} ${item.unit}` : '<span style="color:var(--red);">нет</span>';
+                                const priceStr = item.price_per_unit > 0 ? (' · ' + formatRub(item.price_per_unit)) : '';
+                                const photoHtml = item.photo_thumbnail
+                                    ? `<img src="${item.photo_thumbnail}" style="width:48px;height:48px;object-fit:cover;border-radius:6px;flex-shrink:0;border:1px solid var(--border);">`
+                                    : `<span style="width:48px;height:48px;display:flex;align-items:center;justify-content:center;background:${ui.color};border-radius:6px;font-size:20px;flex-shrink:0;">${ui.icon}</span>`;
+                                const isSelected = Number(item.id) === Number(selectedId) ? 'background:rgba(59,130,246,0.1);' : '';
+                                return `<div class="wh-picker-item" data-id="${item.id}" style="display:flex;align-items:center;gap:10px;padding:8px 10px;cursor:pointer;border-bottom:1px solid var(--border);${isSelected}" onclick="Pendant._onWhSelect('${type}', '${item.id}')">
+                                    ${photoHtml}
+                                    <div style="flex:1;min-width:0;">
+                                        <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${App.escHtml(label)}</div>
+                                        <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">${App.escHtml(item.sku || '')}${item.sku ? ' · ' : ''}${stock}${priceStr}</div>
+                                    </div>
+                                </div>`;
+                            }).join('')}
+                            <div class="wh-picker-item" style="display:flex;align-items:center;gap:10px;padding:10px;cursor:pointer;" onclick="Pendant._onWhSelect('${type}', '__custom__')">
+                                <span style="width:48px;height:48px;display:flex;align-items:center;justify-content:center;background:#fff7ed;border-radius:6px;font-size:20px;flex-shrink:0;border:1px solid var(--border);">✏️</span>
+                                <div style="flex:1;min-width:0;">
+                                    <div style="font-size:13px;font-weight:600;">Ввести вручную</div>
+                                    <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">Если нужной позиции нет в списке</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
         `;
     },
@@ -504,7 +570,16 @@ const Pendant = {
     _onWhSelect(type, value) {
         if (value === '__custom__') {
             // Switch to custom mode
-            this._wizardData[type] = { source: 'custom', warehouse_item_id: null, name: '', price_per_unit: 0, delivery_price: 0, assembly_speed: type === 'cord' ? 20 : 0 };
+            this._wizardData[type] = {
+                source: 'custom',
+                warehouse_item_id: null,
+                warehouse_sku: '',
+                photo_thumbnail: '',
+                name: '',
+                price_per_unit: 0,
+                delivery_price: 0,
+                assembly_speed: type === 'cord' ? 20 : 0,
+            };
             this._renderStep();
             return;
         }
@@ -516,6 +591,8 @@ const Pendant = {
         const data = this._wizardData[type];
         data.source = 'warehouse';
         data.warehouse_item_id = item.id;
+        data.warehouse_sku = item.sku || '';
+        data.photo_thumbnail = item.photo_thumbnail || '';
         data.name = [item.name, item.color, item.size].filter(Boolean).join(' ');
         data.price_per_unit = item.price_per_unit || 0;
         data.delivery_price = 0;
