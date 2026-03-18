@@ -2295,6 +2295,10 @@ table .text-center { text-align: center; }
     color: var(--red);
     animation: pulse-red 1.5s infinite;
 }
+
+.gantt-deadline-marker.tight {
+    color: #f59e0b;
+}
 @keyframes pulse-red {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.4; }
@@ -3269,6 +3273,11 @@ table .text-center { text-align: center; }
     background: #fff8f8;
 }
 
+.gantt-queue-card.tight {
+    border-color: #fde68a;
+    background: #fffdf5;
+}
+
 .gantt-queue-card.blocked {
     border-color: #fed7aa;
     background: #fffaf3;
@@ -3306,6 +3315,20 @@ table .text-center { text-align: center; }
     color: var(--text);
     line-height: 1.45;
     font-weight: 600;
+}
+
+.gantt-queue-risk-line {
+    font-size: 12px;
+    line-height: 1.45;
+    color: #166534;
+}
+
+.gantt-queue-risk-line.tight {
+    color: #a16207;
+}
+
+.gantt-queue-risk-line.risk {
+    color: #b91c1c;
 }
 
 .gantt-queue-controls {
@@ -3348,6 +3371,11 @@ table .text-center { text-align: center; }
 .gantt-queue-badge.risk {
     background: #fee2e2;
     color: #b91c1c;
+}
+
+.gantt-queue-badge.tight {
+    background: #fef3c7;
+    color: #a16207;
 }
 
 .gantt-queue-badge.blocked {

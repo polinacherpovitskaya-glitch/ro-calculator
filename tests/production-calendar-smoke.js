@@ -255,4 +255,27 @@ const reorderedQueue = JSON.parse(JSON.stringify(vm.runInContext(`
 `, ganttContext)));
 assert.deepEqual(reorderedQueue, [11, 44, 22, 33], 'Queue reorder helper must move dragged order before the drop target');
 
+const workingBuffer = vm.runInContext(`
+    Gantt.countWorkingDaysBetween('2026-03-20', '2026-03-24', new Set(['2026-03-23']))
+`, ganttContext);
+assert.equal(workingBuffer, 1, 'Working-day buffer must ignore weekends and configured holidays');
+
+const tightRisk = JSON.parse(JSON.stringify(vm.runInContext(`
+    Gantt.getDeadlineRiskSummary({
+        deadlineEnd: '2026-03-24',
+        schedule: [{ date: '2026-03-20' }]
+    }, new Set(['2026-03-23']))
+`, ganttContext)));
+assert.equal(tightRisk.status, 'tight', 'Risk summary must surface tight deadline buffers');
+assert.match(tightRisk.label, /Буфер 1 раб\.дн\./, 'Tight deadline label should use working-day buffer');
+
+const lateRisk = JSON.parse(JSON.stringify(vm.runInContext(`
+    Gantt.getDeadlineRiskSummary({
+        deadlineEnd: '2026-03-24',
+        schedule: [{ date: '2026-03-25' }]
+    })
+`, ganttContext)));
+assert.equal(lateRisk.status, 'late', 'Risk summary must surface overdue orders');
+assert.match(lateRisk.label, /Опаздывает/, 'Late deadline label should explain overdue state');
+
 console.log('production calendar smoke checks passed');

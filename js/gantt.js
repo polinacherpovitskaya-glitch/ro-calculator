@@ -528,17 +528,21 @@ const Gantt = {
             dayMap[day.date] = day;
         });
 
-        const headerHtml = this.renderTimeAxis(minDate, totalDays, cellWidth, this.getHolidaySet());
+        const holidaySet = this.getHolidaySet();
+        const headerHtml = this.renderTimeAxis(minDate, totalDays, cellWidth, holidaySet);
         const rowsHtml = activeQueue.map(item => this.renderOrderRow(item, minDate, totalDays, cellWidth)).join('');
         const sidebarRows = activeQueue.map(item => {
-            const statusDot = item.deadlineEnd && item.schedule[item.schedule.length - 1]?.date > item.deadlineEnd
+            const risk = this.getDeadlineRiskSummary(item, holidaySet);
+            const statusDot = risk.status === 'late'
                 ? '<span style="color:#e11d48">&#9679;</span>'
-                : '<span style="color:#16a34a">&#9679;</span>';
+                : (risk.status === 'critical' || risk.status === 'tight')
+                    ? '<span style="color:#f59e0b">&#9679;</span>'
+                    : '<span style="color:#16a34a">&#9679;</span>';
             const progress = this.getOrderProgress(item);
             return `
                 <div class="gantt-sidebar-row" title="${this.esc(item.orderName)}" onclick="App.navigate('order-detail', true, ${item.orderId})" style="cursor:pointer">
                     <div class="gantt-order-name">${statusDot} ${this.esc(this.shortName(item.orderName))}</div>
-                    <div class="gantt-order-meta">${this.esc(item.clientName || 'Без клиента')} · осталось ${this.formatHours(progress.remaining)} · факт ${this.formatHours(progress.actual)}</div>
+                    <div class="gantt-order-meta">${this.esc(item.clientName || 'Без клиента')} · осталось ${this.formatHours(progress.remaining)} · ${this.esc(risk.label)}</div>
                 </div>`;
         }).join('');
 
@@ -590,7 +594,9 @@ const Gantt = {
 
         const totalHours = round2(queue.reduce((sum, item) => sum + (item.remainingTotalHours || item.totalHours || 0), 0));
         const actualHours = round2(queue.reduce((sum, item) => sum + (item.actualTotalHours || 0), 0));
-        const riskCount = queue.filter(item => item.deadlineEnd && item.schedule[item.schedule.length - 1]?.date > item.deadlineEnd).length;
+        const riskSummaries = queue.map(item => this.getDeadlineRiskSummary(item));
+        const lateCount = riskSummaries.filter(risk => risk.status === 'late').length;
+        const tightCount = riskSummaries.filter(risk => risk.status === 'critical' || risk.status === 'tight').length;
         const blockedCount = blockedQueue.length;
         const reviewCount = reviewQueue.length;
         const cardsHtml = queue.map(item => this.renderQueueCard(item)).join('');
@@ -605,7 +611,7 @@ const Gantt = {
                         <p>Порядок сверху задает, что начальник производства запускает раньше. Фактические часы уменьшают остаток автоматически, так что календарь показывает то, что реально еще нужно сделать.</p>
                     </div>
                     <div class="gantt-queue-summary">
-                        <strong>${queue.length}</strong> готово к плану · <strong>${this.formatHours(totalHours)}</strong> осталось · <strong>${this.formatHours(actualHours)}</strong> уже сдано${riskCount ? ` · <span class="text-red">${riskCount} с риском дедлайна</span>` : ''}${blockedCount ? ` · <span class="text-orange">${blockedCount} ждут молд/Китай</span>` : ''}${reviewCount ? ` · <span class="text-muted">${reviewCount} требуют проверки</span>` : ''}
+                        <strong>${queue.length}</strong> готово к плану · <strong>${this.formatHours(totalHours)}</strong> осталось · <strong>${this.formatHours(actualHours)}</strong> уже сдано${lateCount ? ` · <span class="text-red">${lateCount} опаздывают</span>` : ''}${tightCount ? ` · <span class="text-orange">${tightCount} впритык к дедлайну</span>` : ''}${blockedCount ? ` · <span class="text-orange">${blockedCount} ждут молд/Китай</span>` : ''}${reviewCount ? ` · <span class="text-muted">${reviewCount} требуют проверки</span>` : ''}
                     </div>
                 </div>
                 ${queue.length ? `
@@ -643,7 +649,7 @@ const Gantt = {
         const paused = blocked || review;
         const startDate = paused ? null : (item.schedule[0]?.date || null);
         const finishDate = paused ? null : (item.schedule[item.schedule.length - 1]?.date || null);
-        const deadlineRisk = !paused && item.deadlineEnd && finishDate && finishDate > item.deadlineEnd;
+        const deadlineRisk = this.getDeadlineRiskSummary(item);
         const deadlineLabel = item.deadlineEnd ? this.formatDateStr(item.deadlineEnd) : 'без дедлайна';
         const phasePills = [
             { label: 'Литьё', key: 'molding', color: '#f59e0b' },
@@ -662,9 +668,12 @@ const Gantt = {
         const otherHoursLabel = item.actualOtherHours || item.actual_hours_other
             ? ` · прочее ${this.formatHours(item.actualOtherHours || item.actual_hours_other)}`
             : '';
+        const riskClass = deadlineRisk.status === 'late'
+            ? 'risk'
+            : ((deadlineRisk.status === 'critical' || deadlineRisk.status === 'tight') ? 'tight' : '');
 
         return `
-            <article class="gantt-queue-card ${deadlineRisk ? 'risk' : ''} ${blocked ? 'blocked' : ''} ${review ? 'review' : ''}" draggable="true" ondragstart="Gantt.onQueueDragStart(event, ${item.orderId || item.id})" ondragover="Gantt.onQueueDragOver(event)" ondragleave="Gantt.onQueueDragLeave(event)" ondragend="Gantt.onQueueDragEnd(event)" ondrop="Gantt.onQueueDrop(event, ${item.orderId || item.id})" onclick="App.navigate('order-detail', true, ${item.orderId || item.id})">
+            <article class="gantt-queue-card ${riskClass} ${blocked ? 'blocked' : ''} ${review ? 'review' : ''}" draggable="true" ondragstart="Gantt.onQueueDragStart(event, ${item.orderId || item.id})" ondragover="Gantt.onQueueDragOver(event)" ondragleave="Gantt.onQueueDragLeave(event)" ondragend="Gantt.onQueueDragEnd(event)" ondrop="Gantt.onQueueDrop(event, ${item.orderId || item.id})" onclick="App.navigate('order-detail', true, ${item.orderId || item.id})">
                 <div class="gantt-queue-card-top">
                     <div>
                         <div class="gantt-queue-title">${this.esc(item.orderName || item.order_name)}</div>
@@ -684,10 +693,13 @@ const Gantt = {
                     <strong>Дедлайн:</strong> ${deadlineLabel}
                     ${manualStart ? `<span> · </span><strong>Не раньше:</strong> ${this.formatDateStr(manualStart)}` : ''}
                 </div>
+                ${!paused && deadlineRisk.status !== 'no_deadline' && deadlineRisk.status !== 'unplanned'
+                    ? `<div class="gantt-queue-risk-line ${riskClass}"><strong>${this.esc(deadlineRisk.label)}</strong>${deadlineRisk.finishDate ? ` · плановый финиш ${this.formatDateStr(deadlineRisk.finishDate)}` : ''}</div>`
+                    : ''}
                 <div class="gantt-queue-progress">${progressLabel}${otherHoursLabel}${item.actual_hours_employee_count ? ` · ${item.actual_hours_employee_count} сотр.` : ''}</div>
                 <div class="gantt-queue-phases">${phasePills || '<span class="text-muted">Нет производственных часов</span>'}</div>
                 <div class="gantt-queue-footer">
-                    <span class="gantt-queue-badge ${blocked ? 'blocked' : review ? 'review' : (deadlineRisk ? 'risk' : 'ok')}">${blocked || review ? this.esc(item.production_blocked_reason || (review ? 'Требует проверки' : 'Ждет молд')) : (deadlineRisk ? 'Риск дедлайна' : 'Вмещается в план')}</span>
+                    <span class="gantt-queue-badge ${blocked ? 'blocked' : review ? 'review' : (riskClass || 'ok')}">${blocked || review ? this.esc(item.production_blocked_reason || (review ? 'Требует проверки' : 'Ждет молд')) : this.esc(deadlineRisk.label)}</span>
                     <span class="gantt-queue-open">Открыть заказ</span>
                 </div>
             </article>`;
@@ -803,9 +815,11 @@ const Gantt = {
             const deadlineOffset = this.daysBetween(minDate, deadlineDate);
             if (deadlineOffset >= 0 && deadlineOffset < totalDays) {
                 const deadlineLeft = deadlineOffset * cellWidth;
-                const lastScheduleDate = item.schedule[item.schedule.length - 1]?.date || null;
-                const isOverdue = lastScheduleDate && lastScheduleDate > item.deadlineEnd;
-                deadlineHtml = `<div class="gantt-deadline-marker ${isOverdue ? 'overdue' : ''}" style="left:${deadlineLeft}px" title="Дедлайн: ${this.formatDateStr(item.deadlineEnd)}${isOverdue ? ' (опаздывает)' : ''}">&#9670;</div>`;
+                const risk = this.getDeadlineRiskSummary(item);
+                const markerClass = risk.status === 'late'
+                    ? 'overdue'
+                    : ((risk.status === 'critical' || risk.status === 'tight') ? 'tight' : '');
+                deadlineHtml = `<div class="gantt-deadline-marker ${markerClass}" style="left:${deadlineLeft}px" title="Дедлайн: ${this.formatDateStr(item.deadlineEnd)} · ${this.esc(risk.label)}">&#9670;</div>`;
             }
         }
 
@@ -830,7 +844,9 @@ const Gantt = {
         const weekCapacity = round2(dailyCapacity * 5);
         const freeHours = round2(weekCapacity - weekUsed);
         const overloadDays = days.filter(day => day.totalUsed > dailyCapacity).length;
-        const riskyOrders = queue.filter(item => item.deadlineEnd && item.schedule[item.schedule.length - 1]?.date > item.deadlineEnd).length;
+        const riskSummaries = queue.map(item => this.getDeadlineRiskSummary(item));
+        const lateOrders = riskSummaries.filter(risk => risk.status === 'late').length;
+        const tightOrders = riskSummaries.filter(risk => risk.status === 'critical' || risk.status === 'tight').length;
         const monthPrefix = this.getMonthPrefix(today);
         const plannedMonthHours = round2(days
             .filter(day => String(day.date || '').startsWith(monthPrefix))
@@ -854,8 +870,8 @@ const Gantt = {
                 <div class="stat-label">Свободных часов</div>
             </div>
             <div class="stat-card">
-                <div class="stat-value ${(overloadDays || riskyOrders) ? 'text-red' : 'text-green'}">${overloadDays ? `${overloadDays} дн.` : riskyOrders ? `${riskyOrders} зак.` : 'OK'}</div>
-                <div class="stat-label">${overloadDays ? 'Перегруз в днях' : riskyOrders ? 'Риск дедлайна' : 'Риски не найдены'}</div>
+                <div class="stat-value ${(overloadDays || lateOrders || tightOrders) ? 'text-red' : 'text-green'}">${lateOrders ? `${lateOrders} зак.` : tightOrders ? `${tightOrders} зак.` : overloadDays ? `${overloadDays} дн.` : 'OK'}</div>
+                <div class="stat-label">${lateOrders ? 'Опаздывают к дедлайну' : tightOrders ? 'Впритык к дедлайну' : overloadDays ? 'Перегруз в днях' : 'Риски не найдены'}</div>
             </div>
             <div class="stat-card">
                 <div class="stat-value">${this.formatHours(plannedMonthHours)}</div>
@@ -918,6 +934,49 @@ const Gantt = {
         const remaining = round2(item.remainingTotalHours != null ? item.remainingTotalHours : Math.max(planned - actual, 0));
         const overrun = round2(Math.max(actual - planned, 0));
         return { planned, actual, remaining, overrun };
+    },
+
+    countWorkingDaysBetween(startDate, endDate, holidaySet = this.getHolidaySet()) {
+        const start = this.parseLocalDate(startDate);
+        const end = this.parseLocalDate(endDate);
+        start.setHours(0, 0, 0, 0);
+        end.setHours(0, 0, 0, 0);
+        if (start.getTime() === end.getTime()) return 0;
+        const step = start < end ? 1 : -1;
+        let count = 0;
+        const cursor = new Date(start.getTime());
+        while ((step > 0 && cursor < end) || (step < 0 && cursor > end)) {
+            cursor.setDate(cursor.getDate() + step);
+            if (!this.isNonWorkingDate(cursor, holidaySet)) count += 1;
+        }
+        return count;
+    },
+
+    getDeadlineRiskSummary(item, holidaySet = this.getHolidaySet()) {
+        const deadlineEnd = item?.deadlineEnd || item?.deadline_end || '';
+        const finishDate = item?.schedule?.[item.schedule.length - 1]?.date || null;
+        if (!deadlineEnd) {
+            return { status: 'no_deadline', label: 'Без дедлайна', finishDate };
+        }
+        if (!finishDate) {
+            return { status: 'unplanned', label: 'Пока без даты финиша', finishDate };
+        }
+        if (finishDate > deadlineEnd) {
+            const lateDays = this.countWorkingDaysBetween(deadlineEnd, finishDate, holidaySet);
+            return {
+                status: 'late',
+                label: `Опаздывает на ${Math.max(lateDays, 1)} раб.дн.`,
+                finishDate,
+            };
+        }
+        const bufferDays = this.countWorkingDaysBetween(finishDate, deadlineEnd, holidaySet);
+        if (bufferDays === 0) {
+            return { status: 'critical', label: 'Впритык к дедлайну', finishDate };
+        }
+        if (bufferDays <= 2) {
+            return { status: 'tight', label: `Буфер ${bufferDays} раб.дн.`, finishDate };
+        }
+        return { status: 'ok', label: `Буфер ${bufferDays} раб.дн.`, finishDate };
     },
 
     buildActualMonthSummary(entries = [], employees = [], referenceDate = new Date()) {
