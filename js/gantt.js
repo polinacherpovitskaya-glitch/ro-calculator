@@ -847,12 +847,12 @@ const Gantt = {
         const riskSummaries = queue.map(item => this.getDeadlineRiskSummary(item));
         const lateOrders = riskSummaries.filter(risk => risk.status === 'late').length;
         const tightOrders = riskSummaries.filter(risk => risk.status === 'critical' || risk.status === 'tight').length;
-        const monthPrefix = this.getMonthPrefix(today);
-        const plannedMonthHours = round2(days
-            .filter(day => String(day.date || '').startsWith(monthPrefix))
-            .reduce((sum, day) => sum + (day.totalUsed || 0), 0));
-        const actualMonthHours = round2(this.actualMonthSummary?.actualHours || 0);
-        const actualMonthEmployees = Number(this.actualMonthSummary?.employeeCount || 0);
+        const monthTracking = this.buildCurrentMonthTrackingSummary(days, this.actualMonthSummary, new Date());
+        const plannedMonthHours = monthTracking.plannedMonthHours;
+        const plannedToDateHours = monthTracking.plannedToDateHours;
+        const actualMonthHours = monthTracking.actualMonthHours;
+        const actualMonthEmployees = monthTracking.employeeCount;
+        const gapToDate = monthTracking.gapToDate;
         const activeActualHours = round2(queue.reduce((sum, item) => sum + (item.actualTotalHours || 0), 0));
         const activeRemainingHours = round2(queue.reduce((sum, item) => sum + (item.remainingTotalHours || item.totalHours || 0), 0));
 
@@ -878,8 +878,8 @@ const Gantt = {
                 <div class="stat-label">План часов в этом месяце</div>
             </div>
             <div class="stat-card">
-                <div class="stat-value">${this.formatHours(actualMonthHours)}</div>
-                <div class="stat-label">Факт часов в этом месяце${actualMonthEmployees ? ` · ${actualMonthEmployees} сотр.` : ''}</div>
+                <div class="stat-value ${gapToDate < 0 ? 'text-red' : 'text-green'}">${this.formatHours(actualMonthHours)} <span style="font-size:12px;color:var(--text-muted)">/ ${this.formatHours(plannedToDateHours)}</span></div>
+                <div class="stat-label">Факт / план к сегодня${actualMonthEmployees ? ` · ${actualMonthEmployees} сотр.` : ''}${gapToDate ? ` · <span style="color:${gapToDate < 0 ? '#dc2626' : '#16a34a'}">${gapToDate > 0 ? '+' : ''}${this.formatHours(gapToDate)}</span>` : ''}</div>
             </div>
             <div class="stat-card">
                 <div class="stat-value">${this.formatHours(activeRemainingHours)}</div>
@@ -995,6 +995,23 @@ const Gantt = {
         return {
             actualHours: round2(actualHours),
             employeeCount: actualWorkers.size,
+        };
+    },
+
+    buildCurrentMonthTrackingSummary(days = [], actualMonthSummary = {}, referenceDate = new Date()) {
+        const point = referenceDate instanceof Date ? referenceDate : this.parseLocalDate(referenceDate);
+        const today = this.formatIsoDateLocal(point);
+        const monthPrefix = this.getMonthPrefix(point);
+        const relevantDays = (days || []).filter(day => String(day?.date || '').startsWith(monthPrefix));
+        const plannedMonthHours = round2(relevantDays.reduce((sum, day) => sum + (day.totalUsed || 0), 0));
+        const plannedToDateHours = round2(relevantDays.filter(day => day.date <= today).reduce((sum, day) => sum + (day.totalUsed || 0), 0));
+        const actualMonthHours = round2(actualMonthSummary?.actualHours || 0);
+        return {
+            plannedMonthHours,
+            plannedToDateHours,
+            actualMonthHours,
+            gapToDate: round2(actualMonthHours - plannedToDateHours),
+            employeeCount: Number(actualMonthSummary?.employeeCount || 0),
         };
     },
 

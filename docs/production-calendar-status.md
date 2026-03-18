@@ -1,7 +1,7 @@
 # Production Calendar Status
 
 ## Snapshot
-- Current phase: C9 richer deadline-risk readability shipped locally, next up timeline-level replan UX
+- Current phase: C9.5 factual-vs-plan month tracking shipped locally, next up timeline-level replan UX
 - Plan file: `/private/tmp/ro-codex-push-sync.v100/docs/production-calendar-plan.md`
 - Status: yellow
 - Last updated: 2026-03-17
@@ -97,6 +97,10 @@
   - queue cards и sidebar показывают `Опаздывает`, `Впритык к дедлайну` или `Буфер N раб.дн.`;
   - deadline markers и queue badges различают `late` и `tight`, чтобы критические заказы читались быстрее;
   - smoke страхует working-day buffer и overdue/tight risk summaries.
+- Реализован следующий slice `v117`:
+  - stats теперь показывают `факт / план к сегодня`, а не только голый факт за месяц;
+  - календарь считает отдельный `plannedToDate`, чтобы было видно, отстаем ли мы от собственного плана уже сейчас;
+  - smoke страхует current-month tracking summary и gap-to-date.
 - Добавлен и подключен новый regression smoke:
   - `/private/tmp/ro-codex-push-sync.v100/tests/production-calendar-smoke.js`
   - `.github/workflows/deploy-pages.yml`
@@ -176,6 +180,7 @@
 | 2026-03-17 | Queue drag reorder | `js/gantt.js`, `css/style.css`, `tests/production-calendar-smoke.js` | production manager can reorder queue cards by drag-and-drop with persisted sequence state | continue into richer timeline drag/replan UX |
 | 2026-03-17 | Local-date drift cleanup | `js/gantt.js`, `tests/production-calendar-smoke.js` | capacity chart and calendar stats now use local-date-safe helpers instead of `toISOString().slice(0,10)` paths | continue into richer timeline drag/replan UX |
 | 2026-03-17 | Deadline buffer readability | `js/gantt.js`, `css/style.css`, `tests/production-calendar-smoke.js` | queue, sidebar and markers now show working-day buffer vs overdue state instead of only binary deadline risk | continue into timeline-level replan UX |
+| 2026-03-17 | Month tracking to-date | `js/gantt.js`, `tests/production-calendar-smoke.js` | stats now compare factual submitted hours against the scheduled plan up to today, not only against the full month | continue into timeline-level replan UX |
 
 ## Smoke / Demo Checklist
 - [x] В меню слева остается один понятный `Производственный календарь`.

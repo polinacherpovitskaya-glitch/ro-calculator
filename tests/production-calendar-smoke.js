@@ -222,6 +222,22 @@ const actualMonthSummary = JSON.parse(JSON.stringify(vm.runInContext(`
 assert.equal(actualMonthSummary.actualHours, 11, 'Actual month summary must include only current-month production hours');
 assert.equal(actualMonthSummary.employeeCount, 2, 'Actual month summary must count only production employees with submitted hours');
 
+const monthTrackingSummary = JSON.parse(JSON.stringify(vm.runInContext(`
+    Gantt.buildCurrentMonthTrackingSummary(
+        [
+            { date: '2026-03-02', totalUsed: 5 },
+            { date: '2026-03-20', totalUsed: 7 },
+            { date: '2026-03-25', totalUsed: 8 },
+            { date: '2026-04-01', totalUsed: 4 }
+        ],
+        { actualHours: 9, employeeCount: 2 },
+        new Date('2026-03-20T12:00:00Z')
+    )
+`, ganttContext)));
+assert.equal(monthTrackingSummary.plannedMonthHours, 20, 'Month tracking must sum all scheduled hours inside the current month');
+assert.equal(monthTrackingSummary.plannedToDateHours, 12, 'Month tracking must separate the plan up to the current date');
+assert.equal(monthTrackingSummary.gapToDate, -3, 'Month tracking must expose the factual gap versus plan to date');
+
 const actualBuckets = JSON.parse(JSON.stringify(vm.runInContext(`
     Array.from(Gantt.buildOrderActuals(
         [
