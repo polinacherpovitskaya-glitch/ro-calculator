@@ -392,6 +392,41 @@ async function smokeCalculatorPersistence(context) {
     assert.equal(selectedWarehouseItem.id, 701);
 }
 
+async function smokeHardwareOnlyAutosave(context) {
+    await vm.runInContext(`(async () => {
+        window.__savedDraftPayload = null;
+        saveOrder = async (order, items) => {
+            window.__savedDraftPayload = { order, items };
+            return 555;
+        };
+
+        Calculator.resetForm();
+        document.getElementById('calc-order-name').value = 'Hardware only draft';
+        document.getElementById('calc-manager-name').value = 'Smoke';
+        document.getElementById('calc-autosave-status');
+
+        Calculator.hardwareItems = [Object.assign(Calculator.getEmptyHardware(null), {
+            source: 'warehouse',
+            name: 'Smoke Warehouse Hardware',
+            qty: 8,
+            warehouse_item_id: 777,
+            warehouse_sku: 'HW-777',
+            assembly_speed: 120,
+            result: { costPerUnit: 15, hoursHardware: 0.4 },
+        })];
+
+        await Calculator._doAutosave();
+    })()`, context);
+
+    const saved = clone(await vm.runInContext(`window.__savedDraftPayload`, context));
+    assert.ok(saved, 'hardware-only draft triggers autosave');
+    assert.equal(saved.order.order_name, 'Hardware only draft');
+    assert.equal(saved.items.length, 1);
+    assert.equal(saved.items[0].item_type, 'hardware');
+    assert.equal(saved.items[0].hardware_warehouse_item_id, 777);
+    assert.equal(context.localStorage.getItem('ro_calc_editing_order_id'), '555');
+}
+
 async function smokePackagingWarehousePickerDefaults(context) {
     context.__warehouseItems = [{
         id: 701,
@@ -1439,6 +1474,7 @@ async function main() {
     stubRuntime(context);
 
     await smokeCalculatorPersistence(context);
+    await smokeHardwareOnlyAutosave(context);
     await smokePackagingWarehousePickerDefaults(context);
     await smokePendantWarehousePickerRichUI();
     await smokeLegacyPendantRestore(context);

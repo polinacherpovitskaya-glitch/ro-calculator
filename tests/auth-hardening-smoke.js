@@ -106,7 +106,12 @@ function createContext() {
             userAgent: 'Smoke Browser',
             clipboard: { writeText() {} },
         },
-        location: { reload() {} },
+        location: {
+            pathname: '/ro-calculator/',
+            search: '',
+            hash: '#calculator',
+            reload() {},
+        },
         fetch: async () => ({ ok: true, json: async () => [] }),
         confirm: () => true,
         prompt: () => 'Reset#123',
@@ -146,13 +151,19 @@ function createContext() {
     context.__appendedAuthActivity = [];
 
     context.window = context;
+    context.window.addEventListener = () => {};
+    context.window.removeEventListener = () => {};
     context.window.crypto = {
         getRandomValues(buffer) {
             for (let i = 0; i < buffer.length; i++) buffer[i] = i + 1;
             return buffer;
         },
     };
-    context.history = { replaceState() {} };
+    context.history = {
+        replaceState(_state, _title, url) {
+            context.__lastHistoryUrl = url;
+        },
+    };
     context.window.history = context.history;
 
     return vm.createContext(context);
@@ -372,6 +383,51 @@ async function smokePasswordResetDisclosure(context) {
     assert.match(String(context.document.getElementById('auth-issued-credentials').innerHTML || ''), /Пароль/);
 }
 
+async function smokeLogoutCleanup(context) {
+    context.localStorage.setItem('ro_calc_auth_user_id', '11');
+    context.localStorage.setItem('ro_calc_auth_ts', String(Date.now()));
+    context.localStorage.setItem('ro_calc_auth_method', 'user');
+    context.localStorage.setItem('ro_calc_editing_order_id', '123');
+    context.document.getElementById('toast').textContent = 'Заказ сохранен';
+    context.document.getElementById('auth-screen');
+    context.document.getElementById('app-layout');
+    context.document.getElementById('sidebar-user-info').textContent = 'Полина';
+
+    await vm.runInContext(`(() => {
+        App.endSessionTracking = () => {};
+        App.trackAuthEvent = () => {};
+        App.currentUser = { id: '11', name: 'Полина', role: 'admin' };
+        App.logout();
+    })()`, context);
+
+    assert.equal(context.localStorage.getItem('ro_calc_auth_user_id'), null);
+    assert.equal(context.localStorage.getItem('ro_calc_auth_ts'), null);
+    assert.equal(context.localStorage.getItem('ro_calc_auth_method'), null);
+    assert.equal(context.localStorage.getItem('ro_calc_editing_order_id'), null);
+    assert.equal(context.document.getElementById('auth-screen').style.display, 'flex');
+    assert.equal(context.document.getElementById('toast').textContent, '');
+    assert.equal(context.document.getElementById('sidebar-user-info').textContent, '');
+    assert.equal(context.__lastHistoryUrl, '/ro-calculator/');
+}
+
+async function smokeInitSkipsShowAppWithoutRestoredUser(context) {
+    context.__showAppCalled = false;
+    await vm.runInContext(`(async () => {
+        App.prepareAuthUI = async () => {};
+        App._migratePagePermsToAuthAccounts = async () => {};
+        App.isAuthenticated = () => true;
+        App.restoreAuthenticatedUser = async () => {
+            App.currentUser = null;
+        };
+        App.showApp = async () => {
+            window.__showAppCalled = true;
+        };
+        await App.init();
+    })()`, context);
+
+    assert.equal(context.__showAppCalled, false);
+}
+
 async function main() {
     const context = createContext();
     runScript(context, 'js/app.js');
@@ -386,6 +442,8 @@ async function main() {
     await smokePermissionFallback(context);
     await smokeAutoUsernameDedup(context);
     await smokePasswordResetDisclosure(context);
+    await smokeLogoutCleanup(context);
+    await smokeInitSkipsShowAppWithoutRestoredUser(context);
 
     console.log('auth hardening smoke checks passed');
 }

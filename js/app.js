@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v118';
+const APP_VERSION = 'v119';
 
 const App = {
     currentPage: 'orders',
@@ -13,6 +13,7 @@ const App = {
     _updateCheckTimer: null,
     _updateCheckMs: 120000,
     _onWindowFocus: null,
+    _toastTimer: null,
     employees: [],
     authAccounts: [],
     currentEmployeeId: null,
@@ -148,7 +149,9 @@ const App = {
         // Check auth
         if (this.isAuthenticated()) {
             await this.restoreAuthenticatedUser();
-            this.showApp();
+            if (this.currentUser) {
+                await this.showApp();
+            }
         }
 
         // Bind enter on password
@@ -279,11 +282,22 @@ const App = {
         localStorage.removeItem('ro_calc_auth_ts');
         localStorage.removeItem('ro_calc_auth_method');
         localStorage.removeItem('ro_calc_auth_user_id');
+        localStorage.removeItem('ro_calc_editing_order_id');
         this.currentUser = null;
+        this.currentPage = 'orders';
         this._sessionStartedAt = null;
         this._sessionId = null;
+        this.clearToast();
+        if (typeof Calculator !== 'undefined' && Calculator._autosaveTimer) {
+            clearTimeout(Calculator._autosaveTimer);
+            Calculator._autosaveTimer = null;
+        }
+        document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+        document.querySelectorAll('.sidebar-nav a').forEach(a => a.classList.remove('active'));
         document.getElementById('auth-screen').style.display = 'flex';
         document.getElementById('app-layout').classList.remove('active');
+        const userInfo = document.getElementById('sidebar-user-info');
+        if (userInfo) userInfo.textContent = '';
         this.hideUpdateBanner();
         if (this._updateCheckTimer) {
             clearInterval(this._updateCheckTimer);
@@ -292,6 +306,13 @@ const App = {
         if (this._onWindowFocus) {
             window.removeEventListener('focus', this._onWindowFocus);
             this._onWindowFocus = null;
+        }
+        const pathname = window.location?.pathname || '';
+        const search = window.location?.search || '';
+        if (window.history && typeof window.history.replaceState === 'function') {
+            window.history.replaceState(null, '', `${pathname}${search}`);
+        } else if (window.location) {
+            window.location.hash = '';
         }
     },
 
@@ -688,9 +709,29 @@ const App = {
 
     toast(message, duration = 3000) {
         const el = document.getElementById('toast');
+        if (!el) return;
+        if (this._toastTimer) {
+            clearTimeout(this._toastTimer);
+            this._toastTimer = null;
+        }
         el.textContent = message;
         el.classList.add('show');
-        setTimeout(() => el.classList.remove('show'), duration);
+        this._toastTimer = setTimeout(() => {
+            el.classList.remove('show');
+            el.textContent = '';
+            this._toastTimer = null;
+        }, duration);
+    },
+
+    clearToast() {
+        const el = document.getElementById('toast');
+        if (!el) return;
+        if (this._toastTimer) {
+            clearTimeout(this._toastTimer);
+            this._toastTimer = null;
+        }
+        el.classList.remove('show');
+        el.textContent = '';
     },
 
     // === UPDATE CHECKER ===
@@ -3745,8 +3786,13 @@ const Calculator = {
 
     async _doAutosave() {
         if (this._autosaving) return;
-        // Don't autosave if no items or all items are empty
-        const hasAnyData = this.items.some(i => i.product_name || i.quantity > 0 || i.template_id);
+        // Don't autosave if the draft is completely empty.
+        const hasAnyData = this.items.some(i => i.product_name || i.quantity > 0 || i.template_id)
+            || this.hardwareItems.some(hw => hw._from_template || hw.name || hw.warehouse_item_id || hw.china_item_id || (parseFloat(hw.qty) || 0) > 0)
+            || this.packagingItems.some(pkg => pkg.name || pkg.warehouse_item_id || pkg.china_item_id || (parseFloat(pkg.qty) || 0) > 0)
+            || this.pendants.some(pnd => pnd.name || pnd.template_id || (parseFloat(pnd.quantity) || 0) > 0)
+            || (this.extraCosts || []).some(ec => ec.name || (parseFloat(ec.amount) || 0) > 0)
+            || !!App.editingOrderId;
         if (!hasAnyData) return;
 
         this._autosaving = true;
