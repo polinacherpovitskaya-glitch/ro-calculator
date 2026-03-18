@@ -6,6 +6,7 @@
 require('dotenv').config();
 const TelegramBot = require('node-telegram-bot-api');
 const { createClient } = require('@supabase/supabase-js');
+const { buildTaskNotificationText, getTaskNotificationRecipientIds } = require('./task-notification-core');
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -25,6 +26,10 @@ const bot = new TelegramBot(BOT_TOKEN, {
 });
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+const WORK_SETTINGS_KEYS = {
+    tasks: 'work_tasks_json',
+    taskNotificationEvents: 'work_task_notification_events_json',
+};
 
 // =============================================
 // Polling error handler — KEY for stability
@@ -886,6 +891,19 @@ setInterval(async () => {
     }
 }, 60000);
 
+let taskNotificationRunning = false;
+setInterval(async () => {
+    if (taskNotificationRunning) return;
+    taskNotificationRunning = true;
+    try {
+        await processTaskNotifications();
+    } catch (e) {
+        console.error('Task notification check error:', e);
+    } finally {
+        taskNotificationRunning = false;
+    }
+}, 60000);
+
 async function checkReminders() {
     const now = new Date();
     const utcHour = now.getUTCHours();
@@ -947,6 +965,124 @@ async function checkReminders() {
                 );
             }
         }
+    }
+}
+
+async function loadJsonSetting(settingKey, fallbackValue = null) {
+    try {
+        const { data, error } = await supabase
+            .from('settings')
+            .select('value')
+            .eq('key', settingKey)
+            .maybeSingle();
+        if (error || !data?.value) return fallbackValue;
+        return JSON.parse(data.value);
+    } catch (error) {
+        return fallbackValue;
+    }
+}
+
+async function saveJsonSetting(settingKey, value) {
+    try {
+        await supabase
+            .from('settings')
+            .upsert({
+                key: settingKey,
+                value: JSON.stringify(value),
+                updated_at: new Date().toISOString(),
+            }, { onConflict: 'key' });
+    } catch (error) {
+        console.error(`Task notifications: failed to save ${settingKey}:`, error?.message || error);
+    }
+}
+
+async function loadPendingTaskNotificationEvents() {
+    try {
+        const { data, error } = await supabase
+            .from('task_notification_events')
+            .select('*')
+            .is('processed_at', null)
+            .order('created_at', { ascending: true })
+            .limit(50);
+        if (!error && Array.isArray(data)) return data;
+    } catch (error) {
+        console.warn('Task notifications: remote event table unavailable, using settings fallback.');
+    }
+    const staged = await loadJsonSetting(WORK_SETTINGS_KEYS.taskNotificationEvents, []);
+    return (Array.isArray(staged) ? staged : [])
+        .filter(item => !item?.processed_at)
+        .sort((a, b) => String(a?.created_at || '').localeCompare(String(b?.created_at || '')));
+}
+
+async function markTaskNotificationProcessed(eventId) {
+    const processedAt = new Date().toISOString();
+    try {
+        const { error } = await supabase
+            .from('task_notification_events')
+            .update({ processed_at: processedAt })
+            .eq('id', eventId);
+        if (!error) return;
+    } catch (error) {
+        // Fall through to settings-backed update below.
+    }
+    const staged = await loadJsonSetting(WORK_SETTINGS_KEYS.taskNotificationEvents, []);
+    if (!Array.isArray(staged)) return;
+    const next = staged.map(item => String(item?.id) === String(eventId)
+        ? { ...item, processed_at: processedAt }
+        : item);
+    await saveJsonSetting(WORK_SETTINGS_KEYS.taskNotificationEvents, next);
+}
+
+async function loadWorkTasksSnapshot() {
+    try {
+        const { data, error } = await supabase.from('tasks').select('*');
+        if (!error && Array.isArray(data)) return data;
+    } catch (error) {
+        console.warn('Task notifications: remote tasks table unavailable, using settings fallback.');
+    }
+    const staged = await loadJsonSetting(WORK_SETTINGS_KEYS.tasks, []);
+    return Array.isArray(staged) ? staged : [];
+}
+
+function buildEmployeeMap(list) {
+    return new Map((list || []).map(item => [String(item.id), item]));
+}
+
+async function processTaskNotifications() {
+    const events = await loadPendingTaskNotificationEvents();
+    if (!events || events.length === 0) return;
+
+    const [employeesResp, tasks] = await Promise.all([
+        supabase.from('employees').select('*').eq('is_active', true),
+        loadWorkTasksSnapshot(),
+    ]);
+
+    if (employeesResp.error) {
+        console.error('Task notifications: failed to load employees:', employeesResp.error.message);
+        return;
+    }
+
+    const employees = employeesResp.data || [];
+    const employeesById = buildEmployeeMap(employees);
+    const tasksById = new Map((tasks || []).map(task => [String(task.id), task]));
+
+    for (const event of events) {
+        const task = event?.task_id ? tasksById.get(String(event.task_id)) || null : null;
+        const recipientIds = getTaskNotificationRecipientIds(event, task);
+        const text = buildTaskNotificationText(event, task, employeesById);
+
+        if (!text || recipientIds.length === 0) {
+            await markTaskNotificationProcessed(event.id);
+            continue;
+        }
+
+        for (const recipientId of recipientIds) {
+            const employee = employeesById.get(String(recipientId));
+            if (!employee?.telegram_id) continue;
+            await send(employee.telegram_id, text, MAIN_KEYBOARD);
+        }
+
+        await markTaskNotificationProcessed(event.id);
     }
 }
 

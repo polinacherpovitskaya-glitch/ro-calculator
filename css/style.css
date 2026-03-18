@@ -1282,6 +1282,12 @@ table .text-center { text-align: center; }
     justify-content: space-between;
     gap: 12px;
 }
+.tasks-header-scope-stack {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+}
 
 /* Scope tabs (Мои задачи / Все / Просроченные) */
 .tasks-scope-tabs {
@@ -1322,6 +1328,31 @@ table .text-center { text-align: center; }
     font-weight: 700;
     margin-left: 4px;
 }
+.tasks-subscope-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+.tasks-subscope-btn {
+    padding: 6px 12px;
+    border: 1px solid var(--border);
+    background: var(--bg-card);
+    border-radius: 999px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    transition: all 0.15s;
+}
+.tasks-subscope-btn:hover {
+    border-color: var(--accent);
+    color: var(--text);
+}
+.tasks-subscope-btn.active {
+    border-color: var(--accent);
+    background: var(--accent-light);
+    color: var(--accent);
+}
 
 /* View toggle (Список / Канбан / Календарь) */
 .tasks-view-toggle {
@@ -1335,7 +1366,7 @@ table .text-center { text-align: center; }
 /* Stats row */
 .tasks-stats {
     display: grid;
-    grid-template-columns: repeat(5, 1fr);
+    grid-template-columns: repeat(6, minmax(0, 1fr));
     gap: 10px;
     margin-bottom: 16px;
 }
@@ -1439,6 +1470,83 @@ table .text-center { text-align: center; }
     color: var(--text-secondary);
 }
 .tasks-checkbox-label:hover { color: var(--text); }
+
+.tasks-feed-section,
+.tasks-completed-section {
+    margin-bottom: 16px;
+}
+
+.tasks-feed-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 10px;
+}
+
+.tasks-feed-header h3,
+.tasks-completed-title {
+    margin: 0;
+    font-size: 18px;
+    line-height: 1.2;
+}
+
+.tasks-feed-header p,
+.tasks-completed-subtitle {
+    margin: 4px 0 0;
+    color: var(--text-muted);
+    font-size: 13px;
+}
+
+.tasks-feed-badge,
+.tasks-completed-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 34px;
+    height: 34px;
+    padding: 0 12px;
+    border-radius: 999px;
+    background: var(--accent-light);
+    color: var(--accent);
+    font-weight: 700;
+    font-size: 14px;
+    flex-shrink: 0;
+}
+
+.tasks-completed-toggle {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 14px 16px;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: var(--bg-card);
+    cursor: pointer;
+    text-align: left;
+}
+
+.tasks-completed-toggle.is-open {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(37,99,235,0.08);
+}
+
+.tasks-completed-meta {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.tasks-completed-chevron {
+    color: var(--text-muted);
+    font-size: 12px;
+}
+
+.tasks-completed-body {
+    margin-top: 10px;
+}
 
 .kanban-board {
     display: grid;
@@ -1764,6 +1872,11 @@ table .text-center { text-align: center; }
     .tasks-stats { grid-template-columns: repeat(2, 1fr); }
     .tasks-toolbar { flex-direction: column; }
     .tasks-header-top { flex-direction: column; gap: 12px; }
+    .tasks-feed-header,
+    .tasks-completed-toggle {
+        flex-direction: column;
+        align-items: flex-start;
+    }
 }
 
 /* =============================================

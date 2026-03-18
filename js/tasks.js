@@ -8,6 +8,7 @@ const Tasks = {
     createDraft: null,
     view: 'list',
     scope: 'my',
+    myMode: 'assigned',
     isLoading: false,
     calendarMonth: new Date().toISOString().slice(0, 7),
     filters: {
@@ -25,6 +26,7 @@ const Tasks = {
         waiting_only: false,
     },
     sort: 'manual',
+    _completedOpen: Object.create(null),
 
     async load(taskId) {
         if (!this.scope) this.scope = App.currentEmployeeId ? 'my' : 'all';
@@ -263,6 +265,11 @@ const Tasks = {
         this.render();
     },
 
+    setMyMode(mode) {
+        this.myMode = mode || 'assigned';
+        this.render();
+    },
+
     setSort(value) {
         this.sort = value || 'manual';
         this.render();
@@ -309,21 +316,100 @@ const Tasks = {
 
     scopeTabsHtml() {
         const currentEmployee = this.currentEmployee();
-        const myCount = this.myTasks().length;
+        const myCount = this.activeTasksCount(this.myTasks('assigned'));
+        const allCount = this.activeTasksCount(this.bundle?.tasks || []);
+        const overdueCount = this.activeTasksCount((this.bundle?.tasks || []).filter(task => this.isOverdue(task)));
         return `
             <div class="tasks-scope-tabs">
                 <button class="tasks-scope-btn ${this.scope === 'my' ? 'active' : ''}" onclick="Tasks.setScope('my')">
                     Мои задачи${currentEmployee ? ` <span class="tasks-scope-count">${myCount}</span>` : ''}
                 </button>
-                <button class="tasks-scope-btn ${this.scope === 'all' ? 'active' : ''}" onclick="Tasks.setScope('all')">Все задачи</button>
-                <button class="tasks-scope-btn ${this.scope === 'overdue' ? 'active' : ''}" onclick="Tasks.setScope('overdue')">Просроченные</button>
+                <button class="tasks-scope-btn ${this.scope === 'all' ? 'active' : ''}" onclick="Tasks.setScope('all')">Все задачи <span class="tasks-scope-count">${allCount}</span></button>
+                <button class="tasks-scope-btn ${this.scope === 'overdue' ? 'active' : ''}" onclick="Tasks.setScope('overdue')">Просроченные <span class="tasks-scope-count">${overdueCount}</span></button>
             </div>
         `;
     },
 
-    myTasks() {
+    myModeTabsHtml() {
+        if (this.scope !== 'my' || !App.currentEmployeeId) return '';
+        const assignedCount = this.activeTasksCount(this.myTasks('assigned'));
+        const outgoingCount = this.activeTasksCount(this.myTasks('outgoing'));
+        const allMyCount = this.activeTasksCount(this.myTasks('all'));
+        return `
+            <div class="tasks-subscope-tabs">
+                <button class="tasks-subscope-btn ${this.myMode === 'assigned' ? 'active' : ''}" onclick="Tasks.setMyMode('assigned')">
+                    Мне поставили <span class="tasks-scope-count">${assignedCount}</span>
+                </button>
+                <button class="tasks-subscope-btn ${this.myMode === 'outgoing' ? 'active' : ''}" onclick="Tasks.setMyMode('outgoing')">
+                    Поставил я <span class="tasks-scope-count">${outgoingCount}</span>
+                </button>
+                <button class="tasks-subscope-btn ${this.myMode === 'all' ? 'active' : ''}" onclick="Tasks.setMyMode('all')">
+                    Всё моё <span class="tasks-scope-count">${allMyCount}</span>
+                </button>
+            </div>
+        `;
+    },
+
+    myTasks(mode = 'assigned') {
         const currentEmployeeId = String(App.currentEmployeeId || '');
-        return (this.bundle?.tasks || []).filter(task => String(task.assignee_id || '') === currentEmployeeId);
+        if (!currentEmployeeId) return [];
+        return (this.bundle?.tasks || []).filter(task => {
+            const assigneeId = String(task.assignee_id || '');
+            const reporterId = String(task.reporter_id || '');
+            if (mode === 'outgoing') return reporterId === currentEmployeeId;
+            if (mode === 'all') return assigneeId === currentEmployeeId || reporterId === currentEmployeeId;
+            return assigneeId === currentEmployeeId;
+        });
+    },
+
+    isTaskFinished(task) {
+        return WorkManagementCore.isTaskFinished(task);
+    },
+
+    activeTasksCount(list) {
+        return (list || []).filter(task => !this.isTaskFinished(task)).length;
+    },
+
+    completedTasksCount(list) {
+        return (list || []).filter(task => this.isTaskFinished(task)).length;
+    },
+
+    splitTasksByCompletion(list) {
+        return (list || []).reduce((acc, task) => {
+            if (this.isTaskFinished(task)) acc.completed.push(task);
+            else acc.active.push(task);
+            return acc;
+        }, { active: [], completed: [] });
+    },
+
+    activeFeedTitle() {
+        if (this.scope === 'overdue') return 'Просроченные задачи';
+        if (this.scope === 'all') return 'Актуальные задачи';
+        if (this.myMode === 'outgoing') return 'Исходящие задачи';
+        if (this.myMode === 'all') return 'Мои активные задачи';
+        return 'Задачи, поставленные мне';
+    },
+
+    activeFeedSubtitle() {
+        if (this.scope === 'overdue') return 'То, что уже требует внимания прямо сейчас.';
+        if (this.scope === 'all') return 'Здесь только то, что еще в работе. Готовые задачи убраны ниже.';
+        if (this.myMode === 'outgoing') return 'Задачи, которые вы поставили другим сотрудникам, чтобы быстро проверять статус.';
+        if (this.myMode === 'all') return 'Все мои входящие и исходящие задачи без завершенных.';
+        return 'То, что сейчас нужно делать вам. Готовые задачи убраны в скрытый блок ниже.';
+    },
+
+    completedPanelKey() {
+        return `${this.scope}:${this.myMode}:${this.filters.search}:${this.view}`;
+    },
+
+    isCompletedPanelOpen() {
+        return !!this._completedOpen[this.completedPanelKey()];
+    },
+
+    toggleCompletedPanel() {
+        const key = this.completedPanelKey();
+        this._completedOpen[key] = !this._completedOpen[key];
+        this.render();
     },
 
     filteredTasks() {
@@ -338,7 +424,7 @@ const Tasks = {
         let list = (this.bundle?.tasks || []).slice();
 
         if (this.scope === 'my' && App.currentEmployeeId) {
-            list = list.filter(task => String(task.assignee_id || '') === String(App.currentEmployeeId));
+            list = this.myTasks(this.myMode);
         }
         if (this.scope === 'overdue') {
             list = list.filter(task => this.isOverdue(task));
@@ -424,19 +510,23 @@ const Tasks = {
             <div class="tasks-stats">
                 <div class="task-stat-card task-stat-total">
                     <div class="task-stat-icon">&#128203;</div>
-                    <div class="task-stat-info"><div class="stat-value">${all.length}</div><div class="stat-label">Всего задач</div></div>
+                    <div class="task-stat-info"><div class="stat-value">${this.activeTasksCount(all)}</div><div class="stat-label">Активные задачи</div></div>
                 </div>
                 <div class="task-stat-card task-stat-mine">
                     <div class="task-stat-icon">&#128100;</div>
-                    <div class="task-stat-info"><div class="stat-value">${this.myTasks().length}</div><div class="stat-label">Мои</div></div>
+                    <div class="task-stat-info"><div class="stat-value">${this.activeTasksCount(this.myTasks('assigned'))}</div><div class="stat-label">Поставили мне</div></div>
                 </div>
                 <div class="task-stat-card task-stat-review">
                     <div class="task-stat-icon">&#128172;</div>
-                    <div class="task-stat-info"><div class="stat-value">${review}</div><div class="stat-label">На согласовании</div></div>
+                    <div class="task-stat-info"><div class="stat-value">${this.activeTasksCount(this.myTasks('outgoing'))}</div><div class="stat-label">Поставил я</div></div>
                 </div>
                 <div class="task-stat-card ${overdue > 0 ? 'task-stat-overdue-active' : 'task-stat-overdue'}">
                     <div class="task-stat-icon">${overdue > 0 ? '&#9888;' : '&#9989;'}</div>
                     <div class="task-stat-info"><div class="stat-value">${overdue}</div><div class="stat-label">Просрочено</div></div>
+                </div>
+                <div class="task-stat-card task-stat-review">
+                    <div class="task-stat-icon">&#128172;</div>
+                    <div class="task-stat-info"><div class="stat-value">${review}</div><div class="stat-label">На согласовании</div></div>
                 </div>
                 <div class="task-stat-card task-stat-waiting">
                     <div class="task-stat-icon">&#9203;</div>
@@ -552,7 +642,8 @@ const Tasks = {
         `;
     },
 
-    renderListView(tasks) {
+    renderListView(tasks, options = {}) {
+        const showManualMoves = this.sort === 'manual' && !options.disableManualMoves;
         const rows = tasks.map(task => `
             <tr onclick="Tasks.openTask(${task.id})" style="cursor:pointer">
                 <td>
@@ -565,7 +656,7 @@ const Tasks = {
                 <td>${this.esc(task.reporter_name || this.employeeNameById(task.reporter_id, '—'))}</td>
                 <td class="${this.isOverdue(task) ? 'text-red' : ''}">${this.esc(this.formatTaskDue(task))}</td>
                 <td>
-                    ${this.sort === 'manual' ? `
+                    ${showManualMoves ? `
                         <div class="flex gap-4">
                             <button class="btn btn-sm btn-outline" onclick="event.stopPropagation(); Tasks.moveTask(${task.id}, -1)">↑</button>
                             <button class="btn btn-sm btn-outline" onclick="event.stopPropagation(); Tasks.moveTask(${task.id}, 1)">↓</button>
@@ -594,6 +685,28 @@ const Tasks = {
                             ${rows || '<tr><td colspan="7" class="text-center text-muted">Нет задач</td></tr>'}
                         </tbody>
                     </table>
+                </div>
+            </div>
+        `;
+    },
+
+    renderCompletedSection(tasks) {
+        if (!tasks.length) return '';
+        const isOpen = this.isCompletedPanelOpen();
+        return `
+            <div class="tasks-completed-section">
+                <button class="tasks-completed-toggle ${isOpen ? 'is-open' : ''}" onclick="Tasks.toggleCompletedPanel()">
+                    <div>
+                        <div class="tasks-completed-title">Готовые и отмененные задачи</div>
+                        <div class="tasks-completed-subtitle">Скрыты, чтобы не мешать актуальной работе, но всегда доступны для проверки.</div>
+                    </div>
+                    <div class="tasks-completed-meta">
+                        <span class="tasks-completed-count">${tasks.length}</span>
+                        <span class="tasks-completed-chevron">${isOpen ? '&#9650;' : '&#9660;'}</span>
+                    </div>
+                </button>
+                <div class="tasks-completed-body" style="display:${isOpen ? '' : 'none'}">
+                    ${this.renderListView(tasks, { disableManualMoves: true })}
                 </div>
             </div>
         `;
@@ -674,9 +787,33 @@ const Tasks = {
     },
 
     renderMainContent(tasks) {
-        if (this.view === 'kanban') return this.renderKanbanView(tasks);
-        if (this.view === 'calendar') return this.renderCalendarView(tasks);
-        return this.renderListView(tasks);
+        const groups = this.splitTasksByCompletion(tasks);
+        const activeMarkup = this.view === 'kanban'
+            ? this.renderKanbanView(groups.active)
+            : this.view === 'calendar'
+                ? this.renderCalendarView(groups.active)
+                : this.renderListView(groups.active);
+        const emptyMarkup = `
+            <div class="card">
+                <div class="empty-state">
+                    <div class="empty-icon">&#9989;</div>
+                    <p>Здесь нет актуальных задач.</p>
+                </div>
+            </div>
+        `;
+        return `
+            <div class="tasks-feed-section">
+                <div class="tasks-feed-header">
+                    <div>
+                        <h3>${this.esc(this.activeFeedTitle())}</h3>
+                        <p>${this.esc(this.activeFeedSubtitle())}</p>
+                    </div>
+                    <div class="tasks-feed-badge">${groups.active.length}</div>
+                </div>
+                ${groups.active.length ? activeMarkup : emptyMarkup}
+            </div>
+            ${this.renderCompletedSection(groups.completed)}
+        `;
     },
 
     editorTask() {
@@ -1105,7 +1242,10 @@ const Tasks = {
                     </div>
                 </div>
                 <div class="tasks-header-controls">
-                    ${this.scopeTabsHtml()}
+                    <div class="tasks-header-scope-stack">
+                        ${this.scopeTabsHtml()}
+                        ${this.myModeTabsHtml()}
+                    </div>
                     ${this.viewTabsHtml()}
                 </div>
             </div>
