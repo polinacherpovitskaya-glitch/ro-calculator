@@ -1042,7 +1042,7 @@ const Settings = {
         calculator: 'Калькулятор', orders: 'Заказы',
         factual: 'План-Факт', analytics: 'Аналитика',
         molds: 'Молды', colors: 'Цвета', timetrack: 'Учёт времени',
-        tasks: 'Задачи', projects: 'Проекты', gantt: 'Производственный календарь', import: 'Импорт',
+        tasks: 'Задачи', projects: 'Проекты', wiki: 'База знаний', gantt: 'Производственный календарь', import: 'Импорт',
         warehouse: 'Склад', marketplaces: 'Маркетплейсы', china: 'Китай',
         settings: 'Настройки',
     },

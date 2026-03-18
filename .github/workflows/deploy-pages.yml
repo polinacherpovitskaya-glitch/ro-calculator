@@ -36,6 +36,7 @@ jobs:
           node tests/version-smoke.js
           node tests/work-management-smoke.js
           node tests/order-flow-smoke.js
+          node tests/wiki-smoke.js
           node tests/auth-hardening-smoke.js
           node tests/employee-auth-payroll-smoke.js
           node tests/payroll-half-month-smoke.js

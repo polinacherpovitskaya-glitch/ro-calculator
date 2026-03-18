@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=86">
+    <link rel="stylesheet" href="css/style.css?v=87">
 </head>
 <body>
 
@@ -35,7 +35,7 @@
     <aside class="sidebar">
         <div class="sidebar-brand">
             <h2>Recycle Object</h2>
-            <span>Калькулятор <span id="app-version">v120</span></span>
+            <span>Калькулятор <span id="app-version">v121</span></span>
         </div>
         <nav class="sidebar-nav">
             <a href="#tasks" data-page="tasks">
@@ -77,6 +77,10 @@
             <a href="#projects" data-page="projects">
                 <span class="nav-icon">&#128193;</span>
                 <span>Проекты</span>
+            </a>
+            <a href="#wiki" data-page="wiki">
+                <span class="nav-icon">&#128218;</span>
+                <span>База знаний</span>
             </a>
             <a href="#import" data-page="import">
                 <span class="nav-icon">&#128176;</span>
@@ -2358,6 +2362,10 @@
         </div>
 
         <!-- ========== SETTINGS ========== -->
+        <div id="page-wiki" class="page">
+            <div id="wiki-root"></div>
+        </div>
+
         <div id="page-settings" class="page">
             <div class="page-header">
                 <h1>Настройки</h1>
@@ -3193,10 +3201,11 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="js/work-management-core.js?v=1"></script>
-<script src="js/supabase.js?v=113"></script>
+<script src="js/supabase.js?v=114"></script>
 <script src="js/task-events.js?v=1"></script>
 <script src="js/calculator.js?v=67"></script>
-<script src="js/app.js?v=126"></script>
+<script src="js/app.js?v=127"></script>
+<script src="js/wiki.js?v=1"></script>
 <script src="js/order-detail.js?v=58"></script>
 <script src="js/orders.js?v=61"></script>
 <script src="js/production_plan.js?v=75"></script>
@@ -3216,7 +3225,7 @@
 <script src="js/china_catalog.js?v=46k"></script>
 <script src="js/marketplaces.js?v=72"></script>
 <script src="js/warehouse.js?v=98"></script>
-<script src="js/settings.js?v=78"></script>
+<script src="js/settings.js?v=79"></script>
 <script src="js/pendant.js?v=3"></script>
 </body>
 </html>

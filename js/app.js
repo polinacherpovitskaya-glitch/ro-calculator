@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v120';
+const APP_VERSION = 'v121';
 
 const App = {
     currentPage: 'orders',
@@ -22,12 +22,12 @@ const App = {
     // All pages in the app
     ALL_PAGES: [
         'calculator', 'orders', 'factual',
-        'analytics', 'molds', 'colors', 'timetrack', 'tasks', 'projects', 'gantt',
+        'analytics', 'molds', 'colors', 'timetrack', 'tasks', 'projects', 'wiki', 'gantt',
         'import', 'warehouse', 'marketplaces', 'china', 'settings',
     ],
 
     // Pages visible to everyone by default (if no custom config)
-    DEFAULT_PAGES: ['orders', 'timetrack', 'tasks', 'projects'],
+    DEFAULT_PAGES: ['orders', 'timetrack', 'tasks', 'projects', 'wiki'],
 
     normalizePageAlias(page) {
         if (page === 'dashboard') return 'orders';
@@ -39,6 +39,7 @@ const App = {
     canAccess(page) {
         if (!this.currentUser) return false;
         page = this.normalizePageAlias(page);
+        if (page === 'wiki') return true;
         // order-detail is part of orders
         if (page === 'order-detail') page = 'orders';
         if ((this.currentUser.id === '__admin' || this.currentUser.role === 'admin') && this.currentUser.employee_id == null) {
@@ -696,6 +697,7 @@ const App = {
             case 'timetrack': TimeTrack.load(); break;
             case 'tasks': Tasks.load(subId ? parseInt(subId, 10) : null); break;
             case 'projects': Projects.load(subId ? parseInt(subId, 10) : null); break;
+            case 'wiki': Wiki.load(); break;
             case 'import': FinTablo.load(); break;
             case 'indirect-costs': App.navigate('settings'); setTimeout(() => Settings.switchTab('indirect'), 100); break;
             case 'warehouse': Warehouse.load(); break;
