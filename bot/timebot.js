@@ -11,6 +11,7 @@ const { buildTaskNotificationText, getTaskNotificationRecipientIds } = require('
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_KEY;
+const ENABLE_TASK_NOTIFICATION_WORKER = String(process.env.ENABLE_TASK_NOTIFICATION_WORKER || 'false').toLowerCase() === 'true';
 
 if (!BOT_TOKEN || !SUPABASE_URL || !SUPABASE_KEY) {
     console.error('Missing env vars: BOT_TOKEN, SUPABASE_URL, SUPABASE_KEY');
@@ -892,17 +893,19 @@ setInterval(async () => {
 }, 60000);
 
 let taskNotificationRunning = false;
-setInterval(async () => {
-    if (taskNotificationRunning) return;
-    taskNotificationRunning = true;
-    try {
-        await processTaskNotifications();
-    } catch (e) {
-        console.error('Task notification check error:', e);
-    } finally {
-        taskNotificationRunning = false;
-    }
-}, 60000);
+if (ENABLE_TASK_NOTIFICATION_WORKER) {
+    setInterval(async () => {
+        if (taskNotificationRunning) return;
+        taskNotificationRunning = true;
+        try {
+            await processTaskNotifications();
+        } catch (e) {
+            console.error('Task notification check error:', e);
+        } finally {
+            taskNotificationRunning = false;
+        }
+    }, 60000);
+}
 
 async function checkReminders() {
     const now = new Date();
@@ -1093,4 +1096,5 @@ async function processTaskNotifications() {
 console.log('=== Recycle Object TimeBot v7 ===');
 console.log('Improvements: error handling, polling recovery, graceful shutdown, state cleanup');
 console.log('Commands: /start, /report, /today, /week, /status, /clear, /help');
+console.log(`Task notifications inside TimeBot: ${ENABLE_TASK_NOTIFICATION_WORKER ? 'enabled' : 'disabled'}`);
 console.log(`Polling started at ${new Date().toISOString()}`);

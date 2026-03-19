@@ -2149,6 +2149,10 @@ const Tasks = {
     },
 
     async emitTaskEvents(saved, existing, previousOverdue, options = {}) {
+        const watcherUserIds = Array.isArray(options.watcherUserIds)
+            ? options.watcherUserIds
+            : this.watcherIdsForTask(saved.id);
+
         if (!existing || String(existing.assignee_id || '') !== String(saved.assignee_id || '')) {
             if (saved.assignee_id) {
                 await TaskEvents.emit('task_assigned', {
@@ -2159,12 +2163,22 @@ const Tasks = {
             }
         }
 
+        if (existing && existing.status !== saved.status) {
+            await TaskEvents.emit('task_status_changed', {
+                task_id: saved.id,
+                project_id: saved.project_id || null,
+                old_status: existing.status || '',
+                new_status: saved.status || '',
+                watcher_user_ids: watcherUserIds,
+            });
+        }
+
         if (saved.status === 'review' && existing?.status !== 'review') {
             await TaskEvents.emit('task_sent_to_review', {
                 task_id: saved.id,
                 project_id: saved.project_id || null,
                 reviewer_id: saved.reviewer_id || null,
-                watcher_user_ids: Array.isArray(options.watcherUserIds) ? options.watcherUserIds : this.watcherIdsForTask(saved.id),
+                watcher_user_ids: saved.reviewer_id ? [] : watcherUserIds,
             });
         }
 

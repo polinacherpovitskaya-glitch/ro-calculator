@@ -40,6 +40,10 @@ function getTaskNotificationRecipientIds(event, task) {
         }
     } else if (event?.event_type === 'task_due_soon') {
         push(task?.assignee_id);
+    } else if (event?.event_type === 'task_status_changed') {
+        push(task?.assignee_id);
+        const watcherIds = Array.isArray(payload.watcher_user_ids) ? payload.watcher_user_ids : [];
+        watcherIds.forEach(push);
     } else if (event?.event_type === 'task_overdue_state_changed') {
         if (payload.is_overdue) {
             push(task?.assignee_id);
@@ -73,6 +77,11 @@ function buildTaskNotificationText(event, task, employeesById = new Map()) {
         return `Задача ждёт согласования\n${taskTitle}${dueLine}${contextBlock}\nИсполнитель: ${assigneeName}`;
     case 'task_due_soon':
         return `Скоро дедлайн по задаче\n${taskTitle}${dueLine}${contextBlock}\nСтатус: ${statusLabel}`;
+    case 'task_status_changed': {
+        const oldStatusLabel = TASK_STATUS_LABELS[payload.old_status] || payload.old_status || '—';
+        const newStatusLabel = TASK_STATUS_LABELS[payload.new_status] || payload.new_status || statusLabel;
+        return `Статус задачи изменён\n${taskTitle}${dueLine}${contextBlock}\nБыло: ${oldStatusLabel}\nСтало: ${newStatusLabel}`;
+    }
     case 'task_overdue_state_changed':
         if (!payload.is_overdue) return '';
         return `Задача просрочена\n${taskTitle}${dueLine}${contextBlock}\nСтатус: ${statusLabel}`;

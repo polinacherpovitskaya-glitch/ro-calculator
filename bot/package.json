@@ -2,10 +2,12 @@
   "name": "ro-timebot",
   "version": "1.0.0",
   "private": true,
-  "description": "Recycle Object Telegram bot for time tracking",
+  "description": "Recycle Object Telegram bots for time tracking and task notifications",
   "main": "timebot.js",
   "scripts": {
-    "start": "node timebot.js"
+    "start": "node timebot.js",
+    "start:time": "node timebot.js",
+    "start:task": "node taskbot.js"
   },
   "engines": {
     "node": ">=20"
