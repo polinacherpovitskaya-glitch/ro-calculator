@@ -124,6 +124,9 @@ async function main() {
     runScript(context, 'js/warehouse.js');
     runScript(context, 'js/marketplaces.js');
 
+    assert.equal(vm.runInContext(`typeof Marketplaces`, context), 'object');
+    assert.equal(vm.runInContext(`typeof Warehouse`, context), 'object');
+
     context.document.getElementById('mp-plastic-items');
     context.document.getElementById('mp-hw-items');
     context.document.getElementById('mp-pkg-items');
@@ -252,6 +255,87 @@ async function main() {
     assert.equal(pkgItem.source, 'catalog');
     assert.equal(pkgItem.blank_id, 201);
     assert.equal(pkgItem.warehouse_sku, 'ENV-150x90');
+
+    vm.runInContext(`
+        __pickerSelections = [];
+        const __originalSelectHw = Marketplaces._selectHw;
+        const __originalSelectPkg = Marketplaces._selectPkg;
+        Marketplaces._selectHw = (idx, value) => __pickerSelections.push({ type: 'hw', idx, value });
+        Marketplaces._selectPkg = (idx, value) => __pickerSelections.push({ type: 'pkg', idx, value });
+        Warehouse.handlePickerSelect({
+            dataset: {
+                selectFn: 'Marketplaces._selectHw',
+                selectIdx: '3',
+                pickValue: 'warehouse:501',
+            },
+        });
+        Warehouse.handlePickerSelect({
+            dataset: {
+                selectFn: 'Marketplaces._selectPkg',
+                selectIdx: '4',
+                pickValue: 'catalog:201',
+            },
+        });
+        Marketplaces._selectHw = __originalSelectHw;
+        Marketplaces._selectPkg = __originalSelectPkg;
+    `, context);
+    const pickerSelections = JSON.parse(vm.runInContext(`JSON.stringify(__pickerSelections)`, context));
+    assert.deepEqual(pickerSelections, [
+        { type: 'hw', idx: 3, value: 'warehouse:501' },
+        { type: 'pkg', idx: 4, value: 'catalog:201' },
+    ]);
+
+    vm.runInContext(`
+        Marketplaces._allWarehouseHw.push({
+            id: 777,
+            category: 'cords',
+            name: 'Миланский шнур',
+            sku: 'MSN-GR',
+            size: '',
+            color: 'зеленый',
+            qty: 30900,
+            available_qty: 30900,
+            unit: 'см',
+            price_per_unit: 70,
+            photo_thumbnail: 'https://example.com/cord.jpg',
+        });
+        Marketplaces._hwCatalog.push({
+            id: 7777,
+            name: 'Миланский шнур зеленый',
+            warehouse_item_id: 777,
+            assembly_speed: 0,
+            sell_price: 0,
+            photo_url: '',
+        });
+        Marketplaces._hwItems = [{
+            source: 'catalog',
+            blank_id: null,
+            wh_id: null,
+            warehouse_sku: '',
+            photo_thumbnail: '',
+            qty: 40,
+            unit: 'шт',
+            name: '',
+            cost_per_unit: 0,
+            assembly_speed: 0,
+        }];
+        Marketplaces._selectHw(0, 'warehouse:777');
+        __cordState = JSON.stringify(Marketplaces._hwItems[0]);
+        __cordTotal = Marketplaces._calcHwUnitCost(Marketplaces._hwItems[0], {
+            cnyRate: 12.5,
+            fotPerHour: 400,
+            indirectPerHour: 0,
+            wasteFactor: 1.1,
+            indirectCostMode: 'all',
+        }) * Marketplaces._hwItems[0].qty;
+    `, context);
+    const cordSelectionState = JSON.parse(vm.runInContext(`__cordState`, context));
+    const cordTotal = vm.runInContext(`__cordTotal`, context);
+    assert.equal(cordSelectionState.source, 'warehouse');
+    assert.equal(cordSelectionState.wh_id, 777);
+    assert.equal(cordSelectionState.unit, 'см');
+    assert.equal(cordSelectionState.cost_per_unit, 0.7);
+    assert.equal(cordTotal, 28);
 
     vm.runInContext(`
         Marketplaces.allSets = [{

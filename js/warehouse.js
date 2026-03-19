@@ -3886,6 +3886,29 @@ const Warehouse = {
         });
     },
 
+    _resolvePickerCallback(fnName) {
+        const parts = String(fnName || '')
+            .split('.')
+            .map(part => String(part || '').trim())
+            .filter(Boolean);
+        if (!parts.length) return null;
+        const isSafePath = parts.every(part => /^[A-Za-z_$][\w$]*$/.test(part));
+        if (!isSafePath) return null;
+
+        let target = globalThis[parts[0]] || null;
+        if (!target) {
+            try {
+                target = Function(`return (typeof ${parts[0]} !== 'undefined' ? ${parts[0]} : null);`)();
+            } catch (_) {
+                target = null;
+            }
+        }
+        for (let i = 1; target && i < parts.length; i += 1) {
+            target = target[parts[i]];
+        }
+        return typeof target === 'function' ? target : null;
+    },
+
     handlePickerSelect(buttonEl) {
         const dataset = buttonEl?.dataset || {};
         const fnName = dataset.selectFn || '';
@@ -3894,10 +3917,11 @@ const Warehouse = {
 
         document.querySelectorAll('.wh-picker-dropdown').forEach(d => d.style.display = 'none');
 
-        const targetFn = String(fnName)
-            .split('.')
-            .reduce((acc, key) => (acc && acc[key] ? acc[key] : null), globalThis);
-        if (typeof targetFn !== 'function') return;
+        const targetFn = this._resolvePickerCallback(fnName);
+        if (typeof targetFn !== 'function') {
+            console.warn('[Warehouse.handlePickerSelect] callback not found:', fnName);
+            return;
+        }
 
         const numericIdx = Number(idxRaw);
         targetFn(Number.isNaN(numericIdx) ? idxRaw : numericIdx, pickValue);
