@@ -10,7 +10,7 @@ const Gantt = {
     schedule: null,
     orderSequence: [],
     actualMonthSummary: { actualHours: 0, employeeCount: 0 },
-    planState: { order_ids: [], manual_start_dates: {} },
+    planState: { order_ids: [], manual_start_dates: {}, active_workers_count: null, parallel_workers: {} },
     draggedOrderId: null,
     zoom: 'week',
     isLoading: false,
@@ -61,6 +61,7 @@ const Gantt = {
 
     applyLoadedData({ allOrders = [], planState = { order_ids: [] }, allChinaPurchases = [], timeEntries = [], employees = [], orderItems = [] }) {
         this.planState = this.normalizePlanState(planState);
+        const effectivePlanningSettings = this.getEffectivePlanningSettings(App.settings || {});
         const orderedOrders = this.buildOrderedOrders(allOrders, this.planState);
 
         const itemsByOrderId = new Map();
@@ -98,6 +99,7 @@ const Gantt = {
             return {
                 ...order,
                 production_not_before: this.planState.manual_start_dates[String(order.id)] || '',
+                production_parallel_workers: this.getOrderParallelWorkers(Number(order.id)),
                 actual_hours_molding: actuals.molding,
                 actual_hours_assembly: actuals.assembly,
                 actual_hours_packaging: actuals.packaging,
@@ -122,7 +124,7 @@ const Gantt = {
         this.actualMonthSummary = this.buildActualMonthSummary(timeEntries, employees);
         this.schedule = buildProductionSchedule(
             this.orders.filter(order => order.production_ready_state === 'ready'),
-            App.settings || {}
+            effectivePlanningSettings
         );
     },
 
@@ -321,16 +323,61 @@ const Gantt = {
     normalizePlanState(state) {
         const raw = state && typeof state === 'object' ? state : {};
         const manualStartDates = {};
+        const parallelWorkers = {};
         Object.entries(raw.manual_start_dates || {}).forEach(([orderId, value]) => {
             const normalized = String(value || '').trim();
             if (/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
                 manualStartDates[String(orderId)] = normalized;
             }
         });
+        Object.entries(raw.parallel_workers || {}).forEach(([orderId, value]) => {
+            const normalized = Math.round(Number(value) || 0);
+            if (normalized >= 1) {
+                parallelWorkers[String(orderId)] = normalized;
+            }
+        });
+        const activeWorkersCountRaw = Number(raw.active_workers_count);
         return {
             order_ids: Array.isArray(raw.order_ids) ? raw.order_ids : [],
             manual_start_dates: manualStartDates,
+            active_workers_count: activeWorkersCountRaw > 0 ? round2(activeWorkersCountRaw) : null,
+            parallel_workers: parallelWorkers,
         };
+    },
+
+    getEffectivePlanningSettings(baseSettings = App.settings || {}) {
+        const next = { ...(baseSettings || {}) };
+        const overrideWorkers = Number(this.planState?.active_workers_count || 0);
+        if (overrideWorkers > 0) {
+            next.planning_workers_count = overrideWorkers;
+        }
+        return next;
+    },
+
+    getEffectivePlanningCapacity(baseSettings = App.settings || {}) {
+        if (typeof getProductionPlanningCapacity === 'function') {
+            return getProductionPlanningCapacity(this.getEffectivePlanningSettings(baseSettings));
+        }
+        const workersCount = Number(this.planState?.active_workers_count || baseSettings?.planning_workers_count || 2) || 2;
+        const hoursPerDay = Number(baseSettings?.planning_hours_per_day || 8) || 8;
+        return {
+            workersCount: round2(workersCount),
+            hoursPerDay: round2(hoursPerDay),
+            dailyCapacity: round2(workersCount * hoursPerDay),
+        };
+    },
+
+    getWorkerSlotCount(capacity = this.getEffectivePlanningCapacity()) {
+        const workers = Math.max(Number(capacity?.workersCount || 0), 0);
+        const fullSlots = Math.floor(workers);
+        const fractional = round2(workers - fullSlots);
+        return fullSlots + (fractional > 0.001 ? 1 : 0);
+    },
+
+    getOrderParallelWorkers(orderId) {
+        const normalizedId = String(Number(orderId) || 0);
+        const stored = Math.round(Number(this.planState?.parallel_workers?.[normalizedId] || 0));
+        return stored >= 1 ? stored : 1;
     },
 
     getOrderReadiness(order, items = [], chinaPurchases = []) {
@@ -483,6 +530,86 @@ const Gantt = {
         await this.load();
     },
 
+    async setActiveWorkersCount(value) {
+        const normalized = round2(Number(value) || 0);
+        if (!(normalized > 0)) {
+            App.toast('Укажите количество сотрудников больше нуля');
+            return;
+        }
+        const state = this.normalizePlanState(this.planState);
+        state.active_workers_count = normalized;
+        await saveProductionPlanState(state);
+        this.planState = state;
+        await this.load();
+    },
+
+    async adjustActiveWorkersCount(delta) {
+        const capacity = this.getEffectivePlanningCapacity();
+        const current = Number(this.planState?.active_workers_count || capacity.workersCount || 2) || 2;
+        const next = Math.max(0.5, round2(current + Number(delta || 0)));
+        await this.setActiveWorkersCount(next);
+    },
+
+    async resetActiveWorkersCount() {
+        const state = this.normalizePlanState(this.planState);
+        state.active_workers_count = null;
+        await saveProductionPlanState(state);
+        this.planState = state;
+        await this.load();
+    },
+
+    async setOrderParallelWorkers(orderId, value) {
+        const normalizedOrderId = String(Number(orderId) || 0);
+        if (!normalizedOrderId || normalizedOrderId === '0') return;
+        const slotLimit = Math.max(1, this.getWorkerSlotCount());
+        const normalized = Math.max(1, Math.min(slotLimit, Math.round(Number(value) || 1)));
+        const state = this.normalizePlanState(this.planState);
+        state.parallel_workers[normalizedOrderId] = normalized;
+        await saveProductionPlanState(state);
+        this.planState = state;
+        await this.load();
+    },
+
+    async adjustParallelWorkers(orderId, delta) {
+        const current = this.getOrderParallelWorkers(orderId);
+        await this.setOrderParallelWorkers(orderId, current + Number(delta || 0));
+    },
+
+    renderToolbar() {
+        const toolbarEl = document.getElementById('gantt-toolbar');
+        if (!toolbarEl) return;
+        const capacity = this.getEffectivePlanningCapacity();
+        const configuredWorkers = Number(App.settings?.planning_workers_count || 0) || 2;
+        const currentWorkers = Number(this.planState?.active_workers_count || capacity.workersCount || configuredWorkers || 2);
+        const slotCount = Math.max(1, this.getWorkerSlotCount(capacity));
+        const hoursPerDay = round2(Number(capacity.hoursPerDay || App.settings?.planning_hours_per_day || 8) || 8);
+        const holidayCount = this.getHolidaySet().size;
+        const isOverride = Number(this.planState?.active_workers_count || 0) > 0;
+
+        toolbarEl.innerHTML = `
+            <div class="gantt-toolbar-card">
+                <div class="gantt-toolbar-block">
+                    <div class="gantt-toolbar-label">Сейчас в цехе</div>
+                    <div class="gantt-toolbar-inline">
+                        <button class="btn btn-sm btn-outline" onclick="Gantt.adjustActiveWorkersCount(-1)" title="Минус 1 сотрудник">&#8722;</button>
+                        <input class="gantt-toolbar-input" type="number" min="0.5" step="0.5" value="${currentWorkers}" onchange="Gantt.setActiveWorkersCount(this.value)" />
+                        <button class="btn btn-sm btn-outline" onclick="Gantt.adjustActiveWorkersCount(1)" title="Плюс 1 сотрудник">+</button>
+                        <button class="btn btn-sm btn-outline" onclick="Gantt.resetActiveWorkersCount()" ${isOverride ? '' : 'disabled'} title="Вернуть значение из настроек">Сбросить</button>
+                    </div>
+                    <div class="gantt-toolbar-hint">Календарь автоматически пропускает субботу, воскресенье и праздничные даты${holidayCount ? ` (${holidayCount} дат в справочнике)` : ''}.</div>
+                </div>
+                <div class="gantt-toolbar-block">
+                    <div class="gantt-toolbar-label">Текущая мощность</div>
+                    <div class="gantt-toolbar-metrics">
+                        <span><strong>${this.formatHours(capacity.dailyCapacity)}</strong> в день</span>
+                        <span>· ${slotCount} одноврем. слота</span>
+                        <span>· ${this.formatHours(hoursPerDay)} на сотрудника</span>
+                    </div>
+                    <div class="gantt-toolbar-hint">По умолчанию каждый заказ занимает 1 слот. Если заказ срочный, увеличь число сотрудников прямо на карточке заказа.</div>
+                </div>
+            </div>`;
+    },
+
     onQueueDragStart(event, orderId) {
         this.draggedOrderId = Number(orderId);
         if (event?.dataTransfer) {
@@ -542,6 +669,7 @@ const Gantt = {
         const capContainer = document.getElementById('gantt-capacity-chart');
         const queueContainer = document.getElementById('gantt-queue');
         if (!container) return;
+        this.renderToolbar();
 
         if (this.isLoading && !this.schedule && !(this.orders || []).length) {
             if (capContainer) capContainer.innerHTML = '';
@@ -683,6 +811,7 @@ const Gantt = {
         const blockedCount = blockedQueue.length;
         const reviewCount = reviewQueue.length;
         const overloadSummary = this.buildCapacityRiskSummary(this.schedule?.days || [], this.schedule?.dailyCapacity || 0, new Date());
+        const slotCount = Math.max(1, this.getWorkerSlotCount());
         const cardsHtml = queue.map(item => this.renderQueueCard(item)).join('');
         const blockedHtml = blockedQueue.map(item => this.renderQueueCard(item, { blocked: true })).join('');
         const reviewHtml = reviewQueue.map(item => this.renderQueueCard(item, { review: true })).join('');
@@ -692,10 +821,10 @@ const Gantt = {
                 <div class="gantt-queue-head">
                     <div>
                         <h3>Очередь к запуску</h3>
-                        <p>Порядок сверху задает, что начальник производства запускает раньше. Фактические часы уменьшают остаток автоматически, так что календарь показывает то, что реально еще нужно сделать.</p>
+                        <p>Порядок сверху задает, что начальник производства запускает раньше. Фактические часы уменьшают остаток автоматически, а календарь учитывает лимит одновременных сотрудников, чтобы не планировать больше заказов, чем реально можно вести параллельно.</p>
                     </div>
                     <div class="gantt-queue-summary">
-                        <strong>${queue.length}</strong> готово к плану · <strong>${this.formatHours(totalHours)}</strong> осталось · <strong>${this.formatHours(actualHours)}</strong> уже сдано${lateCount ? ` · <span class="text-red">${lateCount} опаздывают</span>` : ''}${tightCount ? ` · <span class="text-orange">${tightCount} впритык к дедлайну</span>` : ''}${overloadSummary.firstOverloadDate ? ` · <span class="text-red">первый перегруз ${this.formatDateStr(overloadSummary.firstOverloadDate)} (+${this.formatHours(overloadSummary.firstOverloadHours)})</span>` : ''}${blockedCount ? ` · <span class="text-orange">${blockedCount} ждут молд/Китай</span>` : ''}${reviewCount ? ` · <span class="text-muted">${reviewCount} требуют проверки</span>` : ''}
+                        <strong>${queue.length}</strong> готово к плану · <strong>${this.formatHours(totalHours)}</strong> осталось · <strong>${slotCount}</strong> слота в день${lateCount ? ` · <span class="text-red">${lateCount} опаздывают</span>` : ''}${tightCount ? ` · <span class="text-orange">${tightCount} впритык к дедлайну</span>` : ''}${overloadSummary.firstOverloadDate ? ` · <span class="text-red">первый перегруз ${this.formatDateStr(overloadSummary.firstOverloadDate)} (+${this.formatHours(overloadSummary.firstOverloadHours)})</span>` : ''}${blockedCount ? ` · <span class="text-orange">${blockedCount} ждут молд/Китай</span>` : ''}${reviewCount ? ` · <span class="text-muted">${reviewCount} требуют проверки</span>` : ''}
                     </div>
                 </div>
                 ${queue.length ? `
@@ -746,6 +875,8 @@ const Gantt = {
         }).filter(Boolean).join('');
         const manualStart = item.notBeforeDate || item.production_not_before || '';
         const progress = this.getOrderProgress(item);
+        const workerTarget = Math.max(1, Number(item.production_parallel_workers || 1));
+        const slotLimit = Math.max(1, this.getWorkerSlotCount());
         const progressLabel = progress.overrun > 0
             ? `Факт ${this.formatHours(progress.actual)} из ${this.formatHours(progress.planned)} · перерасход +${this.formatHours(progress.overrun)}`
             : `Факт ${this.formatHours(progress.actual)} из ${this.formatHours(progress.planned)} · осталось ${this.formatHours(progress.remaining)}`;
@@ -764,6 +895,11 @@ const Gantt = {
                         <div class="gantt-queue-meta">${this.esc(this.getStatusLabel(item.status))} · ${this.esc(item.clientName || item.client_name || 'Без клиента')} · осталось ${this.formatHours(progress.remaining)}</div>
                     </div>
                     <div class="gantt-queue-controls">
+                        <span class="gantt-worker-stepper" onclick="event.stopPropagation()">
+                            <button class="btn btn-sm btn-outline" onclick="event.stopPropagation(); Gantt.adjustParallelWorkers(${item.orderId || item.id}, -1)" title="Уменьшить число сотрудников на заказ">&#8722;</button>
+                            <button class="btn btn-sm btn-outline gantt-worker-stepper-label" title="Сколько сотрудников можно ставить на этот заказ одновременно">👥 ${workerTarget}/${slotLimit}</button>
+                            <button class="btn btn-sm btn-outline" onclick="event.stopPropagation(); Gantt.adjustParallelWorkers(${item.orderId || item.id}, 1)" title="Увеличить число сотрудников на заказ">+</button>
+                        </span>
                         <button class="btn btn-sm btn-outline" onclick="event.stopPropagation(); Gantt.shiftManualStart(${item.orderId || item.id}, -1)" title="Сдвинуть старт на 1 рабочий день раньше">&#8592;</button>
                         <button class="btn btn-sm btn-outline" onclick="event.stopPropagation(); Gantt.promptManualStart(${item.orderId || item.id})" title="${manualStart ? 'Изменить дату «не раньше»' : 'Задать дату «не раньше»'}">&#128197;</button>
                         <button class="btn btn-sm btn-outline" onclick="event.stopPropagation(); Gantt.shiftManualStart(${item.orderId || item.id}, 1)" title="Сдвинуть старт на 1 рабочий день позже">&#8594;</button>
@@ -780,7 +916,7 @@ const Gantt = {
                 ${!paused && deadlineRisk.status !== 'no_deadline' && deadlineRisk.status !== 'unplanned'
                     ? `<div class="gantt-queue-risk-line ${riskClass}"><strong>${this.esc(deadlineRisk.label)}</strong>${deadlineRisk.finishDate ? ` · плановый финиш ${this.formatDateStr(deadlineRisk.finishDate)}` : ''}</div>`
                     : ''}
-                <div class="gantt-queue-progress">${progressLabel}${otherHoursLabel}${item.actual_hours_employee_count ? ` · ${item.actual_hours_employee_count} сотр.` : ''}</div>
+                <div class="gantt-queue-progress">${progressLabel}${otherHoursLabel} · в плане ${workerTarget} сотр.${item.actual_hours_employee_count ? ` · факт ${item.actual_hours_employee_count} сотр.` : ''}</div>
                 <div class="gantt-queue-phases">${phasePills || '<span class="text-muted">Нет производственных часов</span>'}</div>
                 <div class="gantt-queue-footer">
                     <span class="gantt-queue-badge ${blocked ? 'blocked' : review ? 'review' : (riskClass || 'ok')}">${blocked || review ? this.esc(item.production_blocked_reason || (review ? 'Требует проверки' : 'Ждет молд')) : this.esc(deadlineRisk.label)}</span>

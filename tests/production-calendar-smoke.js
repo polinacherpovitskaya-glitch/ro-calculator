@@ -19,9 +19,13 @@ assert.match(indexHtml, /id="gantt-queue"/, 'Gantt page must include queue conta
 assert.match(indexHtml, /data-zoom="week"/, 'Week zoom button missing');
 assert.match(indexHtml, /data-zoom="month"/, 'Month zoom button missing');
 assert.doesNotMatch(indexHtml, /data-zoom="day"/, 'Day zoom must be removed');
+assert.match(indexHtml, /id="gantt-toolbar"/, 'Gantt page must expose a quick planning toolbar');
 assert.match(indexHtml, /set-planning_workers_count/, 'Settings must expose planning worker count');
 assert.match(indexHtml, /set-planning_hours_per_day/, 'Settings must expose planning hours per day');
 assert.match(ganttJs, /moveUp\(orderId\)/, 'Gantt queue reorder helpers missing');
+assert.match(ganttJs, /adjustActiveWorkersCount\(delta\)/, 'Gantt must expose quick active-worker controls');
+assert.match(ganttJs, /adjustParallelWorkers\(orderId, delta\)/, 'Gantt must expose per-order worker targeting');
+assert.match(ganttJs, /parallel_workers/, 'Gantt plan state must persist per-order worker targets');
 assert.match(ganttJs, /renderQueue\(queue, blockedQueue = \[\], reviewQueue = \[\]\)/, 'Gantt queue renderer must support blocked and review queue sections');
 assert.match(ganttJs, /zoom: 'week'/, 'Default gantt zoom must stay week');
 assert.doesNotMatch(ganttJs, /'day' \| 'week'/, 'Legacy day zoom comment should be removed');
@@ -113,6 +117,88 @@ assert.equal(
     schedule.dailyCapacity,
     8,
     'Scheduler must use planning worker capacity instead of pricing worker count'
+);
+
+const parallelSchedule = vm.runInContext(`
+    buildProductionSchedule([
+        {
+            id: 11,
+            order_name: 'Order A',
+            client_name: 'QA',
+            status: 'production_casting',
+            deadline_end: '2026-03-25',
+            production_hours_plastic: 8,
+            production_hours_hardware: 0,
+            production_hours_packaging: 0
+        },
+        {
+            id: 12,
+            order_name: 'Order B',
+            client_name: 'QA',
+            status: 'production_casting',
+            deadline_end: '2026-03-25',
+            production_hours_plastic: 8,
+            production_hours_hardware: 0,
+            production_hours_packaging: 0
+        },
+        {
+            id: 13,
+            order_name: 'Order C',
+            client_name: 'QA',
+            status: 'production_casting',
+            deadline_end: '2026-03-25',
+            production_hours_plastic: 8,
+            production_hours_hardware: 0,
+            production_hours_packaging: 0
+        }
+    ], {
+        planning_workers_count: 2,
+        planning_hours_per_day: 8
+    })
+`, context);
+assert.deepEqual(
+    JSON.parse(JSON.stringify(parallelSchedule.queue.map(item => item.schedule[0]?.date || null))),
+    ['2026-03-16', '2026-03-16', '2026-03-17'],
+    'Scheduler must not launch more concurrent orders than available worker slots'
+);
+
+const rushSchedule = vm.runInContext(`
+    buildProductionSchedule([
+        {
+            id: 21,
+            order_name: 'Rush order',
+            client_name: 'QA',
+            status: 'production_casting',
+            deadline_end: '2026-03-25',
+            production_hours_plastic: 16,
+            production_hours_hardware: 0,
+            production_hours_packaging: 0,
+            production_parallel_workers: 2
+        },
+        {
+            id: 22,
+            order_name: 'Queued order',
+            client_name: 'QA',
+            status: 'production_casting',
+            deadline_end: '2026-03-25',
+            production_hours_plastic: 8,
+            production_hours_hardware: 0,
+            production_hours_packaging: 0
+        }
+    ], {
+        planning_workers_count: 2,
+        planning_hours_per_day: 8
+    })
+`, context);
+assert.equal(
+    JSON.parse(JSON.stringify(rushSchedule.queue[0].schedule.filter(segment => segment.date === '2026-03-16').reduce((sum, segment) => sum + segment.hours, 0))),
+    16,
+    'Priority orders must be able to consume multiple worker slots on the same day'
+);
+assert.equal(
+    JSON.parse(JSON.stringify(rushSchedule.queue[1].schedule[0]?.date || null)),
+    '2026-03-17',
+    'Secondary orders must wait when a rush order takes all available worker slots'
 );
 
 const constrainedSchedule = vm.runInContext(`

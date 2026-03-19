@@ -742,6 +742,24 @@ function getProductionPlanningCapacity(settings) {
     };
 }
 
+function buildProductionWorkerSlots(settings) {
+    const { workersCount, hoursPerDay, dailyCapacity } = getProductionPlanningCapacity(settings);
+    const slots = [];
+    let remainingCapacity = round2(dailyCapacity);
+    while (remainingCapacity > 0.001) {
+        const slotHours = round2(Math.min(hoursPerDay, remainingCapacity));
+        if (slotHours <= 0) break;
+        slots.push(slotHours);
+        remainingCapacity = round2(remainingCapacity - slotHours);
+    }
+    return {
+        workersCount,
+        hoursPerDay,
+        dailyCapacity,
+        slotHours: slots,
+    };
+}
+
 /**
  * Build production schedule — day-by-day resource allocation
  * Each order has 3 sequential phases: литьё → упаковка → сборка (hardware)
@@ -752,7 +770,7 @@ function getProductionPlanningCapacity(settings) {
  * @returns {{ queue: Array, dailyCapacity: number, days: Array }}
  */
 function buildProductionSchedule(orders, settings) {
-    const { dailyCapacity } = getProductionPlanningCapacity(settings);
+    const { workersCount, hoursPerDay, dailyCapacity, slotHours } = buildProductionWorkerSlots(settings);
     const holidaySet = parseProductionHolidaySet(settings);
 
     // Filter schedulable orders: only past-draft statuses (sample, production, delivery)
@@ -796,6 +814,7 @@ function buildProductionSchedule(orders, settings) {
         status: o.status,
         deadlineEnd: o.deadline_end || null,
         notBeforeDate: o.production_not_before || '',
+        parallelWorkersTarget: Math.max(1, Math.round(Number(o.production_parallel_workers) || 1)),
         phases: [
             { name: 'molding', label: 'Литьё', remaining: remainingMolding, total: plannedMolding, actual: actualMolding, color: '#f59e0b' },
             { name: 'assembly', label: 'Сборка', remaining: remainingAssembly, total: plannedAssembly, actual: actualAssembly, color: '#06b6d4' },
@@ -833,42 +852,81 @@ function buildProductionSchedule(orders, settings) {
         if (isProductionNonWorkingDate(date, holidaySet)) continue;
 
         const dateStr = formatIsoDateLocal(date);
-        let remainingCapacity = dailyCapacity;
         const dayAllocations = [];
+        const orderSlotsUsed = new Map();
 
-        // Allocate hours to orders in priority order
-        for (const q of queue) {
-            if (q.done || remainingCapacity <= 0) continue;
-            if (q.notBeforeDate && dateStr < q.notBeforeDate) continue;
+        slotHours.forEach((slotCapacityOriginal, slotIndex) => {
+            let slotCapacity = round2(slotCapacityOriginal);
+            while (slotCapacity > 0.001) {
+                const nextOrder = queue.find(q => {
+                    if (q.done) return false;
+                    if (q.notBeforeDate && dateStr < q.notBeforeDate) return false;
+                    const phase = q.phases[q.currentPhaseIdx];
+                    if (!phase || phase.remaining <= 0) return false;
+                    const usedSlots = orderSlotsUsed.get(q.orderId) || new Set();
+                    if (usedSlots.has(slotIndex)) return true;
+                    const maxWorkersForOrder = Math.max(
+                        1,
+                        Math.min(
+                            q.parallelWorkersTarget || 1,
+                            slotHours.length || 1,
+                            Math.max(1, Math.ceil(workersCount || 1))
+                        )
+                    );
+                    return usedSlots.size < maxWorkersForOrder;
+                });
 
-            const phase = q.phases[q.currentPhaseIdx];
-            if (!phase || phase.remaining <= 0) continue;
+                if (!nextOrder) break;
 
-            // Give this order up to remainingCapacity hours (or whatever's left in phase)
-            const give = Math.min(remainingCapacity, phase.remaining);
-            phase.remaining = round2(phase.remaining - give);
-            remainingCapacity = round2(remainingCapacity - give);
-
-            q.schedule.push({ date: dateStr, phase: phase.name, hours: round2(give) });
-            dayAllocations.push({ orderId: q.orderId, phase: phase.name, hours: round2(give) });
-
-            // If phase done, advance to next
-            if (phase.remaining <= 0) {
-                q.currentPhaseIdx++;
-                // Skip empty phases
-                while (q.currentPhaseIdx < q.phases.length && q.phases[q.currentPhaseIdx].remaining <= 0) {
-                    q.currentPhaseIdx++;
+                const phase = nextOrder.phases[nextOrder.currentPhaseIdx];
+                if (!phase || phase.remaining <= 0) {
+                    nextOrder.currentPhaseIdx += 1;
+                    continue;
                 }
-                if (q.currentPhaseIdx >= q.phases.length) {
-                    q.done = true;
+
+                if (!orderSlotsUsed.has(nextOrder.orderId)) {
+                    orderSlotsUsed.set(nextOrder.orderId, new Set());
+                }
+                orderSlotsUsed.get(nextOrder.orderId).add(slotIndex);
+
+                const give = round2(Math.min(slotCapacity, phase.remaining));
+                if (give <= 0) break;
+
+                phase.remaining = round2(phase.remaining - give);
+                slotCapacity = round2(slotCapacity - give);
+
+                nextOrder.schedule.push({
+                    date: dateStr,
+                    phase: phase.name,
+                    hours: give,
+                    workerSlot: slotIndex + 1,
+                });
+                dayAllocations.push({
+                    orderId: nextOrder.orderId,
+                    phase: phase.name,
+                    hours: give,
+                    workerSlot: slotIndex + 1,
+                });
+
+                if (phase.remaining <= 0.001) {
+                    nextOrder.currentPhaseIdx++;
+                    while (
+                        nextOrder.currentPhaseIdx < nextOrder.phases.length
+                        && nextOrder.phases[nextOrder.currentPhaseIdx].remaining <= 0
+                    ) {
+                        nextOrder.currentPhaseIdx++;
+                    }
+                    if (nextOrder.currentPhaseIdx >= nextOrder.phases.length) {
+                        nextOrder.done = true;
+                    }
                 }
             }
-        }
+        });
 
         days.push({
             date: dateStr,
             allocations: dayAllocations,
-            totalUsed: round2(dailyCapacity - remainingCapacity),
+            totalUsed: round2(dayAllocations.reduce((sum, allocation) => sum + (allocation.hours || 0), 0)),
         });
 
         // Stop if all orders are done
