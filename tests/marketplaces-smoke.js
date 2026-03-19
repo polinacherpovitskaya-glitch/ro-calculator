@@ -257,33 +257,53 @@ async function main() {
     assert.equal(pkgItem.warehouse_sku, 'ENV-150x90');
 
     vm.runInContext(`
-        __pickerSelections = [];
-        const __originalSelectHw = Marketplaces._selectHw;
-        const __originalSelectPkg = Marketplaces._selectPkg;
-        Marketplaces._selectHw = (idx, value) => __pickerSelections.push({ type: 'hw', idx, value });
-        Marketplaces._selectPkg = (idx, value) => __pickerSelections.push({ type: 'pkg', idx, value });
+        Marketplaces._hwItems = [{
+            source: 'catalog',
+            blank_id: null,
+            wh_id: null,
+            warehouse_sku: '',
+            photo_thumbnail: '',
+            qty: 1,
+            name: '',
+            cost_per_unit: 0,
+            assembly_speed: 0,
+        }];
+        Marketplaces._pkgItems = [{
+            source: 'catalog',
+            blank_id: null,
+            wh_id: null,
+            warehouse_sku: '',
+            photo_thumbnail: '',
+            qty: 1,
+            name: '',
+            cost_per_unit: 0,
+            assembly_speed: 0,
+        }];
         Warehouse.handlePickerSelect({
             dataset: {
                 selectFn: 'Marketplaces._selectHw',
-                selectIdx: '3',
+                selectIdx: '0',
                 pickValue: 'warehouse:501',
             },
         });
         Warehouse.handlePickerSelect({
             dataset: {
                 selectFn: 'Marketplaces._selectPkg',
-                selectIdx: '4',
+                selectIdx: '0',
                 pickValue: 'catalog:201',
             },
         });
-        Marketplaces._selectHw = __originalSelectHw;
-        Marketplaces._selectPkg = __originalSelectPkg;
+        __pickerHwState = JSON.stringify(Marketplaces._hwItems[0]);
+        __pickerPkgState = JSON.stringify(Marketplaces._pkgItems[0]);
     `, context);
-    const pickerSelections = JSON.parse(vm.runInContext(`JSON.stringify(__pickerSelections)`, context));
-    assert.deepEqual(pickerSelections, [
-        { type: 'hw', idx: 3, value: 'warehouse:501' },
-        { type: 'pkg', idx: 4, value: 'catalog:201' },
-    ]);
+    const pickerHwState = JSON.parse(vm.runInContext(`__pickerHwState`, context));
+    const pickerPkgState = JSON.parse(vm.runInContext(`__pickerPkgState`, context));
+    assert.equal(pickerHwState.source, 'warehouse');
+    assert.equal(pickerHwState.wh_id, 501);
+    assert.equal(pickerHwState.warehouse_sku, 'CRB-501');
+    assert.equal(pickerPkgState.source, 'catalog');
+    assert.equal(pickerPkgState.blank_id, 201);
+    assert.equal(pickerPkgState.warehouse_sku, 'ENV-150x90');
 
     vm.runInContext(`
         Marketplaces._allWarehouseHw.push({

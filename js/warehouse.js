@@ -3896,6 +3896,7 @@ const Warehouse = {
         if (!isSafePath) return null;
 
         let target = globalThis[parts[0]] || null;
+        let owner = null;
         if (!target) {
             try {
                 target = Function(`return (typeof ${parts[0]} !== 'undefined' ? ${parts[0]} : null);`)();
@@ -3903,10 +3904,14 @@ const Warehouse = {
                 target = null;
             }
         }
+        owner = target;
         for (let i = 1; target && i < parts.length; i += 1) {
+            owner = target;
             target = target[parts[i]];
         }
-        return typeof target === 'function' ? target : null;
+        return typeof target === 'function'
+            ? { fn: target, owner }
+            : null;
     },
 
     handlePickerSelect(buttonEl) {
@@ -3917,14 +3922,18 @@ const Warehouse = {
 
         document.querySelectorAll('.wh-picker-dropdown').forEach(d => d.style.display = 'none');
 
-        const targetFn = this._resolvePickerCallback(fnName);
-        if (typeof targetFn !== 'function') {
+        const resolved = this._resolvePickerCallback(fnName);
+        if (!resolved || typeof resolved.fn !== 'function') {
             console.warn('[Warehouse.handlePickerSelect] callback not found:', fnName);
             return;
         }
 
         const numericIdx = Number(idxRaw);
-        targetFn(Number.isNaN(numericIdx) ? idxRaw : numericIdx, pickValue);
+        resolved.fn.call(
+            resolved.owner || null,
+            Number.isNaN(numericIdx) ? idxRaw : numericIdx,
+            pickValue
+        );
     },
 };
 
