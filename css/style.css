@@ -2686,6 +2686,12 @@ table .text-center { text-align: center; }
 .inline-status-select.status-production_packaging,
 .inline-status-select.status-in_production,
 .inline-status-select.status-delivery { color: #f59e0b; font-weight: 700; }
+.inline-status-select.status-incoming,
+.inline-status-select.status-planned { color: #6b7280; }
+.inline-status-select.status-in_progress { color: #2563eb; font-weight: 700; }
+.inline-status-select.status-review { color: #0f766e; font-weight: 700; }
+.inline-status-select.status-waiting { color: #f59e0b; font-weight: 700; }
+.inline-status-select.status-done { color: #22c55e; font-weight: 700; }
 .inline-status-select.status-completed { color: #22c55e; font-weight: 700; }
 .inline-status-select.status-cancelled { color: #ef4444; }
 

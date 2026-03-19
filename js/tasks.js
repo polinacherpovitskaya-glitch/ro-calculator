@@ -272,6 +272,34 @@ const Tasks = {
         return 'badge-blue';
     },
 
+    bugSeverityLabel(severity) {
+        if (severity === 'critical') return 'Критичный';
+        if (severity === 'high') return 'Высокий';
+        if (severity === 'low') return 'Низкий';
+        return 'Средний';
+    },
+
+    bugSeverityBadgeClass(severity) {
+        if (severity === 'critical') return 'badge-red';
+        if (severity === 'high') return 'badge-yellow';
+        if (severity === 'low') return 'badge-gray';
+        return 'badge-blue';
+    },
+
+    bugPromptStatusLabel(status, hasPrompt) {
+        if (status === 'failed') return 'Ошибка prompt';
+        if (status === 'prompt_ready' || hasPrompt) return 'Prompt готов';
+        if (status === 'pending') return 'Prompt в очереди';
+        return status || 'Без prompt';
+    },
+
+    bugPromptBadgeClass(status, hasPrompt) {
+        if (status === 'failed') return 'badge-red';
+        if (status === 'prompt_ready' || hasPrompt) return 'badge-green';
+        if (status === 'pending') return 'badge-yellow';
+        return 'badge-gray';
+    },
+
     contextLabel(task) {
         const project = task.project_id ? this.projectById(task.project_id) : null;
         const order = task.order_id ? this.orderById(task.order_id) : (project?.linked_order_id ? this.orderById(project.linked_order_id) : null);
@@ -315,6 +343,12 @@ const Tasks = {
         return (this.bundle?.watchers || [])
             .filter(item => String(item.task_id) === String(taskId))
             .map(item => Number(item.user_id));
+    },
+
+    bugReportForTask(taskId) {
+        return (this.bundle?.bugReports || [])
+            .filter(item => String(item.task_id || '') === String(taskId))
+            .sort((a, b) => String(b.updated_at || b.created_at || '').localeCompare(String(a.updated_at || a.created_at || '')))[0] || null;
     },
 
     activityForTask(taskId) {
@@ -834,6 +868,30 @@ const Tasks = {
         `;
     },
 
+    inlineStatusSelectHtml(task) {
+        return `
+            <select
+                class="inline-status-select status-${this.esc(task.status || 'incoming')}"
+                onclick="event.stopPropagation()"
+                onchange="event.stopPropagation(); this.className='inline-status-select status-' + this.value; Tasks.changeStatus(${task.id}, this.value, { preserveSelection: ${this.currentTaskId === Number(task.id)} })"
+            >
+                ${this.statusOptionsHtml(task.status || 'incoming')}
+            </select>
+        `;
+    },
+
+    renderRowActions(task, { showManualMoves = false } = {}) {
+        return `
+            <div class="flex gap-4" style="flex-wrap:wrap; justify-content:flex-end;">
+                ${showManualMoves ? `
+                    <button class="btn btn-sm btn-outline" onclick="event.stopPropagation(); Tasks.moveTask(${task.id}, -1)">↑</button>
+                    <button class="btn btn-sm btn-outline" onclick="event.stopPropagation(); Tasks.moveTask(${task.id}, 1)">↓</button>
+                ` : ''}
+                <button class="btn btn-sm btn-outline" onclick="event.stopPropagation(); Tasks.deleteTask(${task.id})">Удалить</button>
+            </div>
+        `;
+    },
+
     renderListView(tasks, options = {}) {
         const showManualMoves = this.sort === 'manual' && !options.disableManualMoves;
         const rows = tasks.map(task => `
@@ -842,19 +900,12 @@ const Tasks = {
                     <div style="font-weight:600">${this.esc(task.title)}</div>
                     <div class="text-muted" style="font-size:12px">${this.esc(this.contextLabel(task))}</div>
                 </td>
-                <td><span class="badge ${task.status === 'done' ? 'badge-green' : task.status === 'cancelled' ? 'badge-red' : task.status === 'review' ? 'badge-blue' : task.status === 'waiting' ? 'badge-yellow' : 'badge-gray'}">${this.esc(this.statusLabel(task.status))}</span></td>
+                <td>${this.inlineStatusSelectHtml(task)}</td>
                 <td><span class="badge ${this.priorityBadgeClass(task.priority)}">${this.esc(this.priorityLabel(task.priority))}</span></td>
                 <td>${this.esc(task.assignee_name || this.employeeNameById(task.assignee_id, '—'))}</td>
                 <td>${this.esc(task.reporter_name || this.employeeNameById(task.reporter_id, '—'))}</td>
                 <td class="${this.isOverdue(task) ? 'text-red' : ''}">${this.esc(this.formatTaskDue(task))}</td>
-                <td>
-                    ${showManualMoves ? `
-                        <div class="flex gap-4">
-                            <button class="btn btn-sm btn-outline" onclick="event.stopPropagation(); Tasks.moveTask(${task.id}, -1)">↑</button>
-                            <button class="btn btn-sm btn-outline" onclick="event.stopPropagation(); Tasks.moveTask(${task.id}, 1)">↓</button>
-                        </div>
-                    ` : ''}
-                </td>
+                <td>${this.renderRowActions(task, { showManualMoves })}</td>
             </tr>
         `).join('');
 
@@ -870,7 +921,7 @@ const Tasks = {
                                 <th>Исполнитель</th>
                                 <th>Постановщик</th>
                                 <th>Дедлайн</th>
-                                <th></th>
+                                <th>Действия</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -1325,6 +1376,74 @@ const Tasks = {
         `;
     },
 
+    renderBugReportSection(task) {
+        if (!task?.id) return '';
+        const report = this.bugReportForTask(task.id);
+        if (!report) return '';
+        const prompt = String(report.codex_prompt || '').trim();
+        const route = report.page_route || report.page_url || '—';
+        return `
+            <div class="card">
+                <div class="card-header">
+                    <h3>Связанный баг</h3>
+                    <div class="bug-report-actions">
+                        ${report.page_url ? `<a class="btn btn-sm btn-outline" href="${this.esc(report.page_url)}" target="_blank" rel="noopener">Открыть страницу</a>` : ''}
+                        <button class="btn btn-sm btn-outline" onclick="Tasks.copyBugPrompt(${task.id})"${prompt ? '' : ' disabled'}>Скопировать prompt</button>
+                    </div>
+                </div>
+                <div class="bug-report-card">
+                    <div class="bug-report-card-top">
+                        <div>
+                            <h4>${this.esc(report.title || task.title || 'Баг-репорт')}</h4>
+                            <div class="bug-report-meta">
+                                <span>${this.esc(report.section_name || 'Без раздела')}</span>
+                                <span>•</span>
+                                <span>${this.esc(report.subsection_name || 'Без подраздела')}</span>
+                                <span>•</span>
+                                <span>${this.esc(route)}</span>
+                            </div>
+                        </div>
+                        <div class="bug-report-badges">
+                            <span class="badge ${this.bugSeverityBadgeClass(report.severity)}">${this.esc(this.bugSeverityLabel(report.severity))}</span>
+                            <span class="badge ${this.bugPromptBadgeClass(report.codex_status, !!prompt)}">${this.esc(this.bugPromptStatusLabel(report.codex_status, !!prompt))}</span>
+                        </div>
+                    </div>
+                    <div class="form-group" style="margin-bottom:12px;">
+                        <label>Что не работает</label>
+                        <p class="bug-report-description">${this.esc(report.actual_result || 'Не указано')}</p>
+                    </div>
+                    ${report.expected_result ? `
+                        <div class="form-group" style="margin-bottom:12px;">
+                            <label>Что ожидалось</label>
+                            <p class="bug-report-description">${this.esc(report.expected_result)}</p>
+                        </div>
+                    ` : ''}
+                    ${report.steps_to_reproduce ? `
+                        <div class="form-group" style="margin-bottom:12px;">
+                            <label>Шаги</label>
+                            <p class="bug-report-description">${this.esc(report.steps_to_reproduce)}</p>
+                        </div>
+                    ` : ''}
+                    <div class="bug-report-prompt-box">
+                        <div class="bug-report-footer">
+                            <div class="bug-report-footer-meta">
+                                <span>Prompt для Codex</span>
+                                <span>•</span>
+                                <span>${this.esc(report.app_version || 'Версия не указана')}</span>
+                            </div>
+                            <div class="bug-report-actions">
+                                <button class="btn btn-sm btn-outline" onclick="Tasks.copyBugPrompt(${task.id})"${prompt ? '' : ' disabled'}>Скопировать prompt</button>
+                            </div>
+                        </div>
+                        ${prompt
+                            ? `<pre>${this.esc(prompt)}</pre>`
+                            : '<div class="text-muted" style="margin-top:10px;">Prompt ещё не сгенерировался.</div>'}
+                    </div>
+                </div>
+            </div>
+        `;
+    },
+
     renderEditor(task) {
         if (!task) return '';
         const isNew = !task.id;
@@ -1464,6 +1583,7 @@ const Tasks = {
                     ${!isNew ? `<button class="btn btn-outline" onclick="Tasks.changeStatus(${task.id}, 'cancelled')">Отменить</button>` : ''}
                 </div>
             </div>
+            ${this.renderBugReportSection(task)}
             ${this.renderChecklistSection(task)}
             ${this.renderSubtasksSection(task)}
             ${this.renderCommentsSection(task)}
@@ -2066,13 +2186,17 @@ const Tasks = {
         const task = this.taskById(taskId);
         if (!task) return;
         const previousOverdue = this.isOverdue(task);
+        const preserveSelection = options.preserveSelection ?? (this.currentTaskId === Number(taskId));
+        const nextCurrentTaskId = preserveSelection
+            ? Number(taskId)
+            : (this.currentTaskId === Number(taskId) ? null : this.currentTaskId);
         const saved = await saveWorkTask({ ...task, status }, {
             actor_id: App.currentEmployeeId,
             actor_name: App.getCurrentEmployeeName(),
         });
         await this.emitTaskEvents(saved, task, previousOverdue, options);
         await this.refreshData();
-        this.currentTaskId = Number(taskId);
+        this.currentTaskId = nextCurrentTaskId;
         this.render();
     },
 
@@ -2106,6 +2230,21 @@ const Tasks = {
         await this.refreshData();
         this.currentTaskId = null;
         this.render();
+    },
+
+    copyBugPrompt(taskId) {
+        const report = this.bugReportForTask(taskId);
+        if (!report?.codex_prompt) {
+            App.toast('Prompt пока не готов');
+            return;
+        }
+        if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) {
+            App.toast('Не удалось скопировать prompt');
+            return;
+        }
+        navigator.clipboard.writeText(report.codex_prompt)
+            .then(() => App.toast('Prompt скопирован'))
+            .catch(() => App.toast('Не удалось скопировать prompt'));
     },
 
     async moveTask(taskId, direction) {

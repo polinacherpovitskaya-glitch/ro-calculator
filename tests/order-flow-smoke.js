@@ -558,6 +558,92 @@ async function smokePendantWarehousePickerRichUI() {
     assert.match(carabinerHtml, /carabiner-thumb\.png/);
 }
 
+async function smokePendantIgnoresSpaces() {
+    const pendantContext = createContext();
+    stubRuntime(pendantContext);
+    ['js/calculator.js', 'js/app.js'].forEach(file => runScript(pendantContext, file));
+    vm.runInContext('delete globalThis.Pendant;', pendantContext);
+    runScript(pendantContext, 'js/pendant.js');
+
+    await vm.runInContext(`(() => {
+        Pendant._wizardData = Pendant.getEmpty();
+        Pendant._wizardStep = 1;
+        document.getElementById('pw-qty').value = '10';
+        document.getElementById('pw-name').value = 'A ❤️ 😊';
+        Pendant._readCurrentStep();
+    })()`, pendantContext);
+
+    const pendantState = clone(await vm.runInContext(`({
+        name: Pendant._wizardData.name,
+        chars: Pendant._wizardData.elements.map(el => el.char),
+        previewHtml: Pendant._renderBeads('A ❤️ 😊', []),
+    })`, pendantContext));
+
+    assert.equal(pendantState.name, 'A❤️😊');
+    assert.deepEqual(pendantState.chars, ['A', '❤️', '😊']);
+    assert.equal((pendantState.previewHtml.match(/pendant-bead-char/g) || []).length, 3);
+
+    const pendantCost = clone(await vm.runInContext(`calculatePendantCost({
+        quantity: 2,
+        elements: [
+            { char: 'A', has_print: false, print_price: 0 },
+            { char: ' ', has_print: false, print_price: 0 },
+            { char: '😊', has_print: true, print_price: 4 }
+        ],
+        element_price_per_unit: 3,
+        cord: { price_per_unit: 1, delivery_price: 0, unit: 'шт' },
+        carabiner: { price_per_unit: 2, delivery_price: 0 },
+        _totalSellPerUnit: 20
+    }, App.params)`, pendantContext));
+
+    assert.equal(pendantCost.costPerUnit, 13);
+
+    const legacyPendantCost = clone(await vm.runInContext(`calculatePendantCost({
+        quantity: 1,
+        elements: [
+            { char: 'А', has_print: false, print_price: 0 },
+            { char: 'Л', has_print: false, print_price: 0 },
+            { char: 'А', has_print: false, print_price: 0 },
+            { char: '❤', has_print: false, print_price: 0 },
+            { char: '️', has_print: false, print_price: 0 },
+            { char: '😊', has_print: false, print_price: 0 }
+        ],
+        element_price_per_unit: 3,
+        cord: { price_per_unit: 0, delivery_price: 0, unit: 'шт' },
+        carabiner: { price_per_unit: 0, delivery_price: 0 },
+        _totalSellPerUnit: 20
+    }, App.params)`, pendantContext));
+
+    assert.equal(legacyPendantCost.costPerUnit, 15);
+
+    const fallbackContext = createContext();
+    stubRuntime(fallbackContext);
+    ['js/calculator.js', 'js/app.js'].forEach(file => runScript(fallbackContext, file));
+    vm.runInContext('delete globalThis.Pendant; globalThis.Intl = undefined;', fallbackContext);
+    runScript(fallbackContext, 'js/pendant.js');
+
+    const fallbackState = clone(await vm.runInContext(`(() => {
+        Pendant._wizardData = Pendant.getEmpty();
+        Pendant._wizardData.elements = [
+            { char: 'А', color: 'red', has_print: false, print_price: 0 },
+            { char: '❤', color: 'pink', has_print: false, print_price: 0 },
+            { char: '️', color: 'ghost', has_print: false, print_price: 0 },
+            { char: '😊', color: 'yellow', has_print: false, print_price: 0 }
+        ];
+        const chars = Pendant._nameChars('А❤️😊');
+        Pendant._syncElements(chars);
+        return {
+            chars,
+            elements: Pendant._wizardData.elements
+        };
+    })()`, fallbackContext));
+
+    assert.deepEqual(fallbackState.chars, ['А', '❤️', '😊']);
+    assert.deepEqual(fallbackState.elements.map(el => el.char), ['А', '❤️', '😊']);
+    assert.equal(fallbackState.elements[1].color, 'pink');
+    assert.equal(fallbackState.elements[2].color, 'yellow');
+}
+
 async function smokeLegacyPendantRestore(context) {
     const legacyNestedPendant = {
         item_type: 'pendant',
@@ -1675,6 +1761,7 @@ async function main() {
     await smokeHardwareOnlyAutosave(context);
     await smokePackagingWarehousePickerDefaults(context);
     await smokePendantWarehousePickerRichUI();
+    await smokePendantIgnoresSpaces();
     await smokeLegacyPendantRestore(context);
     await smokeReadyGoodsRollback(context);
     await smokeReadyGoodsSalesAndManualAdd(context);

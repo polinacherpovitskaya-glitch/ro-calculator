@@ -272,11 +272,25 @@ function calculatePackagingCost(pkg, params) {
  * @param {Object} params - production params from getProductionParams
  * @returns {Object} cost breakdown
  */
+function stripPendantTechnicalCharParts(char) {
+    return String(char || '').replace(/[\u200D\uFE00-\uFE0F\u{E0100}-\u{E01EF}\p{Mark}\u{1F3FB}-\u{1F3FF}]/gu, '');
+}
+
+function isCountablePendantChar(char) {
+    const raw = String(char || '');
+    if (!raw || !/\S/u.test(raw)) return false;
+    return stripPendantTechnicalCharParts(raw).length > 0;
+}
+
+function getCountablePendantElements(pendant) {
+    return (pendant?.elements || []).filter(el => isCountablePendantChar(el?.char));
+}
+
 function calculatePendantCost(pendant, params) {
     const qty = pendant.quantity || 0;
     if (qty === 0) return { costPerUnit: 0, sellPerUnit: 0, totalCost: 0, totalRevenue: 0, assemblyHours: 0, packagingHours: 0 };
 
-    const elements = pendant.elements || [];
+    const elements = getCountablePendantElements(pendant);
 
     // Element cost (production/purchase cost per element)
     const elemCostPerUnit = pendant.element_price_per_unit || 0;
@@ -541,7 +555,7 @@ function calculateFinDirectorData(items, hardwareItems, packagingItems, params, 
         // Assembly salary
         totalSalary += (r.assemblyHours + r.packagingHours) * params.fotPerHour;
         // Cord + carabiner → hardware purchases
-        const elements = pnd.elements || [];
+        const elements = getCountablePendantElements(pnd);
         totalHardwarePurchase += qty * ((pnd.cord?.price_per_unit || 0) + (pnd.carabiner?.price_per_unit || 0));
         totalHardwareDelivery += qty * ((pnd.cord?.delivery_price || 0) + (pnd.carabiner?.delivery_price || 0));
         // Elements → hardware purchase

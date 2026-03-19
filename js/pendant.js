@@ -46,8 +46,9 @@ const Pendant = {
             container.appendChild(card);
         }
 
-        const elemCount = (pnd.elements || []).length;
-        const printCount = (pnd.elements || []).filter(e => e.has_print).length;
+        const elements = this._countableElements(pnd.elements);
+        const elemCount = elements.length;
+        const printCount = elements.filter(e => e.has_print).length;
         const r = pnd.result || {};
         const costStr = r.costPerUnit ? formatRub(r.costPerUnit) : '—';
         const totalStr = r.totalRevenue ? formatRub(r.totalRevenue) : '—';
@@ -105,6 +106,8 @@ const Pendant = {
             ? JSON.parse(JSON.stringify(Calculator.pendants[this._editingIndex]))
             : this.getEmpty();
         this._wizardData = pnd;
+        this._wizardData.name = this._normalizeName(this._wizardData.name);
+        this._syncElements(this._nameChars(this._wizardData.name));
         this._wizardStep = 1;
         this._selectedBeads = new Set();
         this._showWizardModal();
@@ -206,6 +209,8 @@ const Pendant = {
 
     _renderStep1() {
         const pnd = this._wizardData;
+        const normalizedName = this._normalizeName(pnd.name);
+        const elementCount = this._nameChars(normalizedName).length;
         return `
             <div class="pendant-field-group">
                 <label>Количество подвесов</label>
@@ -214,16 +219,16 @@ const Pendant = {
             <div class="pendant-field-group">
                 <label>Надпись</label>
                 <div style="display:flex;gap:8px;align-items:center;">
-                    <input type="text" id="pw-name" value="${App.escHtml(pnd.name || '')}" placeholder="КЭШШШ" class="input" style="flex:1;font-size:18px;letter-spacing:2px;text-transform:uppercase;">
+                    <input type="text" id="pw-name" value="${App.escHtml(normalizedName)}" placeholder="КЭШШШ" class="input" style="flex:1;font-size:18px;letter-spacing:2px;text-transform:uppercase;">
                     <button class="btn btn-sm btn-outline" onclick="Pendant._insertSpecial('❤️')" title="Сердечко">❤️</button>
                     <button class="btn btn-sm btn-outline" onclick="Pendant._insertSpecial('😊')" title="Смайлик">😊</button>
                 </div>
-                ${pnd.name && pnd.name.length > 20 ? '<div style="color:var(--orange);font-size:12px;margin-top:4px;">⚠️ Больше 20 элементов — проверьте, поместятся ли на шнур</div>' : ''}
+                ${elementCount > 20 ? '<div style="color:var(--orange);font-size:12px;margin-top:4px;">⚠️ Больше 20 элементов — проверьте, поместятся ли на шнур</div>' : ''}
             </div>
             <div style="margin-top:16px;">
                 <label class="text-muted" style="font-size:12px;">Превью</label>
                 <div id="pw-beads-preview" class="pendant-beads-row">
-                    ${this._renderBeads(pnd.name || '', pnd.elements)}
+                    ${this._renderBeads(normalizedName, pnd.elements)}
                 </div>
             </div>
         `;
@@ -233,8 +238,14 @@ const Pendant = {
         const nameInput = document.getElementById('pw-name');
         if (nameInput) {
             nameInput.addEventListener('input', () => {
+                const normalized = this._normalizeName(nameInput.value);
+                if (nameInput.value !== normalized) {
+                    const caretPos = nameInput.selectionStart || normalized.length;
+                    nameInput.value = normalized;
+                    nameInput.setSelectionRange(caretPos, caretPos);
+                }
                 const preview = document.getElementById('pw-beads-preview');
-                if (preview) preview.innerHTML = this._renderBeads(nameInput.value.toUpperCase(), []);
+                if (preview) preview.innerHTML = this._renderBeads(normalized, []);
             });
         }
     },
@@ -249,8 +260,8 @@ const Pendant = {
     },
 
     _renderBeads(text, elements) {
-        if (!text) return '<span class="text-muted" style="font-size:13px;">Введите надпись выше</span>';
-        const chars = [...text];  // proper unicode split
+        const chars = this._nameChars(text);
+        if (chars.length === 0) return '<span class="text-muted" style="font-size:13px;">Введите надпись выше</span>';
         return chars.map((ch, i) => {
             const el = elements && elements[i];
             const color = el ? el.color : null;
@@ -262,11 +273,72 @@ const Pendant = {
         }).join('');
     },
 
+    _normalizeName(name) {
+        return String(name || '')
+            .toUpperCase()
+            .replace(/\s+/gu, '');
+    },
+
+    _stripTechnicalCharParts(char) {
+        return String(char || '').replace(/[\u200D\uFE00-\uFE0F\u{E0100}-\u{E01EF}\p{Mark}\u{1F3FB}-\u{1F3FF}]/gu, '');
+    },
+
+    _isGraphemeExtender(char) {
+        return /[\u200D\uFE00-\uFE0F\u{E0100}-\u{E01EF}\p{Mark}\u{1F3FB}-\u{1F3FF}]/u.test(String(char || ''));
+    },
+
+    _isCountableChar(char) {
+        const raw = String(char || '');
+        if (!raw || !/\S/u.test(raw)) return false;
+        return this._stripTechnicalCharParts(raw).length > 0;
+    },
+
+    _charsEquivalent(a, b) {
+        const left = String(a || '');
+        const right = String(b || '');
+        return left === right || this._stripTechnicalCharParts(left) === this._stripTechnicalCharParts(right);
+    },
+
+    _splitGraphemes(name) {
+        const parts = Array.from(String(name || ''));
+        if (parts.length === 0) return [];
+        const graphemes = [];
+        parts.forEach(ch => {
+            if (graphemes.length === 0) {
+                graphemes.push(ch);
+                return;
+            }
+            const prev = graphemes[graphemes.length - 1];
+            if (ch === '\u200D' || this._isGraphemeExtender(ch) || prev.endsWith('\u200D')) {
+                graphemes[graphemes.length - 1] += ch;
+                return;
+            }
+            graphemes.push(ch);
+        });
+        return graphemes.filter(ch => this._isCountableChar(ch));
+    },
+
+    _nameChars(name) {
+        const normalized = this._normalizeName(name);
+        if (!normalized) return [];
+        if (typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function') {
+            return Array.from(
+                new Intl.Segmenter('ru', { granularity: 'grapheme' }).segment(normalized),
+                part => part.segment
+            ).filter(ch => this._isCountableChar(ch));
+        }
+        return this._splitGraphemes(normalized);
+    },
+
+    _countableElements(elements) {
+        return (elements || []).filter(el => this._isCountableChar(el?.char));
+    },
+
     // --- STEP 2: Colors ---
 
     _renderStep2() {
         const pnd = this._wizardData;
-        const chars = [...(pnd.name || '')];
+        const chars = this._nameChars(pnd.name);
         // Ensure elements array matches chars
         this._syncElements(chars);
         const elements = pnd.elements;
@@ -295,10 +367,20 @@ const Pendant = {
 
     _syncElements(chars) {
         const pnd = this._wizardData;
-        const old = pnd.elements || [];
+        const old = (pnd.elements || []).filter(el => this._isCountableChar(el?.char));
         pnd.elements = chars.map((ch, i) => {
-            if (old[i] && old[i].char === ch) return old[i];
-            return { char: ch, color: old[i]?.color || '', has_print: old[i]?.has_print || false, print_price: old[i]?.print_price || 0 };
+            const oldEl = old[i];
+            if (oldEl && this._charsEquivalent(oldEl.char, ch)) {
+                return { ...oldEl, char: ch };
+            }
+            return {
+                char: ch,
+                color: oldEl?.color || '',
+                has_print: oldEl?.has_print || false,
+                print_price: oldEl?.print_price || 0,
+                sell_price: oldEl?.sell_price || 0,
+                sell_print: oldEl?.sell_print || 0,
+            };
         });
     },
 
@@ -728,13 +810,13 @@ const Pendant = {
     },
 
     _calcElementCost(pnd) {
-        const totalElements = (pnd.elements || []).length * (pnd.quantity || 0);
+        const totalElements = this._countableElements(pnd.elements).length * (pnd.quantity || 0);
         const tier = this._getLetterBlankTier(totalElements);
         return tier ? tier.cost : 3; // fallback ~3₽
     },
 
     _calcAutoElementPrice(pnd) {
-        const totalElements = (pnd.elements || []).length * (pnd.quantity || 0);
+        const totalElements = this._countableElements(pnd.elements).length * (pnd.quantity || 0);
         const tier = this._getLetterBlankTier(totalElements);
         return tier ? tier.sellPrice : null;
     },
@@ -743,7 +825,8 @@ const Pendant = {
         const pnd = this._wizardData;
         this._readCurrentStep();
 
-        const elemCount = (pnd.elements || []).length;
+        const elements = this._countableElements(pnd.elements);
+        const elemCount = elements.length;
         const qty = pnd.quantity || 0;
         const totalElements = elemCount * qty;
 
@@ -753,7 +836,7 @@ const Pendant = {
         const autoElemSell = tier ? tier.sellPrice : null;
 
         // Initialize per-element sell_price if not set
-        (pnd.elements || []).forEach(el => {
+        elements.forEach(el => {
             if (el.sell_price === undefined || el.sell_price === null) {
                 el.sell_price = autoElemSell || 0;
             }
@@ -761,7 +844,7 @@ const Pendant = {
 
         // Group elements by color
         const groups = {};
-        (pnd.elements || []).forEach((el, i) => {
+        elements.forEach((el, i) => {
             const key = el.color || 'без цвета';
             if (!groups[key]) groups[key] = { chars: [], indices: [], sell: el.sell_price || 0 };
             groups[key].chars.push(el.char);
@@ -796,7 +879,7 @@ const Pendant = {
         // Print — sell price via 40% net margin, editable per-element
         let printCostPerUnit = 0;
         let printSellPerUnit = 0;
-        (pnd.elements || []).forEach(el => {
+        elements.forEach(el => {
             if (el.has_print && el.print_price) {
                 printCostPerUnit += el.print_price;
                 // Use stored sell_print if set, otherwise auto-calculate rounded
@@ -809,7 +892,7 @@ const Pendant = {
 
         // Totals
         let totalElemSell = 0;
-        (pnd.elements || []).forEach(el => { totalElemSell += (el.sell_price || 0); });
+        elements.forEach(el => { totalElemSell += (el.sell_price || 0); });
         const totalCostPerUnit = round2(elemCount * elemCostPerUnit + cordCostPer + carabCostPer + printCostPerUnit);
         const totalSellPerUnit = round2(totalElemSell + cordSellPer + carabSellPer + printSellPerUnit);
         const totalCostAll = round2(totalCostPerUnit * qty);
@@ -876,7 +959,7 @@ const Pendant = {
                         <td>${formatRub(qty * carabSellPer)}</td>
                     </tr>
                     ${printCostPerUnit > 0 ? `<tr>
-                        <td>🖨 Печать (${(pnd.elements || []).filter(e => e.has_print).map(e => e.char).join(', ')})</td>
+                        <td>🖨 Печать (${elements.filter(e => e.has_print).map(e => e.char).join(', ')})</td>
                         <td>${qty}</td>
                         <td>${formatRub(printCostPerUnit)}${marginPct(printCostPerUnit, printSellPerUnit)}</td>
                         <td><input type="number" class="input" style="${inputStyle}" value="${printSellPerUnit || ''}" placeholder="0" onchange="Pendant._setPrintSellPrice(parseFloat(this.value)||0)"></td>
@@ -946,10 +1029,10 @@ const Pendant = {
         if (this._wizardStep === 1) {
             pnd.quantity = parseInt(document.getElementById('pw-qty')?.value) || 0;
             const rawName = document.getElementById('pw-name')?.value || '';
-            const newName = rawName.toUpperCase();
+            const newName = this._normalizeName(rawName);
             if (newName !== pnd.name) {
                 pnd.name = newName;
-                this._syncElements([...newName]);
+                this._syncElements(this._nameChars(newName));
             }
         }
     },

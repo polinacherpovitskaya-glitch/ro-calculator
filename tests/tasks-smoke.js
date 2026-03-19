@@ -11,6 +11,8 @@ const context = {
     App: {
         currentEmployeeId: 7,
         currentPage: 'tasks',
+        getCurrentEmployeeName() { return 'Женя Г'; },
+        toast() {},
     },
     window: {},
     document: {},
@@ -38,10 +40,30 @@ Tasks.bundle = {
         { id: 4, title: 'Отмененная исходящая', assignee_id: 5, reporter_id: 7, status: 'cancelled', priority: 'normal', due_date: '2026-03-18', sort_index: 400 },
         { id: 5, title: 'Только наблюдаю', assignee_id: 5, reporter_id: 9, status: 'in_progress', priority: 'normal', due_date: '2026-03-21', sort_index: 500 },
     ],
+    bugReports: [
+        {
+            id: 11,
+            task_id: 1,
+            title: 'Баг по задаче',
+            severity: 'high',
+            section_name: 'Задачи',
+            subsection_name: 'Другое',
+            page_route: '#tasks',
+            actual_result: 'Статус нельзя менять из списка',
+            expected_result: 'Статус меняется прямо в строке',
+            steps_to_reproduce: '1. Открыть список\n2. Попробовать изменить статус',
+            codex_status: 'prompt_ready',
+            codex_prompt: 'Исправь inline-статус в задачах',
+            app_version: 'v142',
+            created_at: '2026-03-19T10:00:00.000Z',
+            updated_at: '2026-03-19T10:05:00.000Z',
+        },
+    ],
     comments: [],
     projects: [],
     areas: [],
     watchers: [],
+    templates: [],
 };
 Tasks.orders = [];
 Tasks.employees = [
@@ -89,6 +111,11 @@ Tasks.myMode = 'assigned';
 assert.match(Tasks.renderCompletedSection(groups.completed), /Готовые и отмененные задачи/);
 assert.equal(Tasks.contextLabel({}), 'Без привязки');
 assert.match(Tasks.contextToggleButtonsHtml({ project_id: 1 }), /✓ Проект/);
+assert.match(Tasks.renderListView([Tasks.bundle.tasks[0]]), /inline-status-select status-in_progress/);
+assert.match(Tasks.renderListView([Tasks.bundle.tasks[0]]), /Удалить/);
+assert.match(Tasks.renderEditor(Tasks.taskById(1)), /Связанный баг/);
+assert.match(Tasks.renderEditor(Tasks.taskById(1)), /Prompt для Codex/);
+assert.match(Tasks.renderEditor(Tasks.taskById(1)), /Исправь inline-статус в задачах/);
 
 Tasks.bundle.watchers = [{ task_id: 2, user_id: 9 }, { task_id: 5, user_id: 7 }];
 Tasks.myMode = 'all';
@@ -104,4 +131,22 @@ assert.equal(Tasks.loadStoredDraft().title, 'Случайно закрыла ф�
 Tasks.clearStoredDraft();
 assert.equal(Tasks.loadStoredDraft(), null);
 
-console.log('tasks smoke checks passed');
+(async () => {
+    context.saveWorkTask = async (task) => task;
+    Tasks.emitTaskEvents = async () => {};
+    Tasks.refreshData = async () => {};
+    Tasks.render = () => {};
+
+    Tasks.currentTaskId = null;
+    await Tasks.changeStatus(1, 'review', { preserveSelection: false });
+    assert.equal(Tasks.currentTaskId, null);
+
+    Tasks.currentTaskId = 1;
+    await Tasks.changeStatus(1, 'done');
+    assert.equal(Tasks.currentTaskId, 1);
+
+    console.log('tasks smoke checks passed');
+})().catch((error) => {
+    console.error(error);
+    process.exit(1);
+});
