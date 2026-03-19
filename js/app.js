@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v148';
+const APP_VERSION = 'v149';
 
 const App = {
     currentPage: 'orders',
@@ -18,6 +18,13 @@ const App = {
     authAccounts: [],
     currentEmployeeId: null,
     currentUser: null,
+
+    syncQuickBugButton() {
+        const api = (typeof BugReports !== 'undefined' ? BugReports : null) || (typeof window !== 'undefined' ? window.BugReports : null);
+        if (api && typeof api.syncQuickButton === 'function') {
+            api.syncQuickButton();
+        }
+    },
 
     // All pages in the app
     ALL_PAGES: [
@@ -300,9 +307,7 @@ const App = {
         document.getElementById('app-layout').classList.remove('active');
         const userInfo = document.getElementById('sidebar-user-info');
         if (userInfo) userInfo.textContent = '';
-        if (window.BugReports && typeof window.BugReports.syncQuickButton === 'function') {
-            window.BugReports.syncQuickButton();
-        }
+        this.syncQuickBugButton();
         this.hideUpdateBanner();
         if (this._updateCheckTimer) {
             clearInterval(this._updateCheckTimer);
@@ -476,9 +481,7 @@ const App = {
         this.applyNavVisibility();
         this.handleRoute();
         this.startUpdateChecker();
-        if (window.BugReports && typeof window.BugReports.syncQuickButton === 'function') {
-            window.BugReports.syncQuickButton();
-        }
+        this.syncQuickBugButton();
     },
 
     // Hide sidebar links for pages the user has no access to
@@ -696,6 +699,7 @@ const App = {
             window.location.hash = subId ? this.currentPage + '/' + subId : this.currentPage;
         }
 
+        this.syncQuickBugButton();
         this.onPageEnter(this.currentPage, subId);
         this.trackAuthEvent('navigate', { to_page: this.currentPage });
     },

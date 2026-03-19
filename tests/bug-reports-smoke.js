@@ -59,5 +59,10 @@ assert.match(bugsJs, /submittingPrefixes:\s*new Set\(\)/);
 assert.match(bugsJs, /id="\$\{prefix\}-submit"/);
 assert.match(bugsJs, /if \(this\.submittingPrefixes\.has\(prefix\)\) return;/);
 assert.match(bugsJs, /button\.textContent = isSubmitting \? 'Отправляем…' : 'Отправить баг'/);
+assert.match(bugsJs, /draftStorageKey\(\)/);
+assert.match(bugsJs, /draftTtlMs\(\)/);
+assert.match(bugsJs, /localStorage\.setItem\(this\.draftStorageKey\(\)/);
+assert.match(bugsJs, /closeQuickReport\(options = \{\}\)/);
+assert.match(bugsJs, /window\.BugReports = BugReports/);
 
 console.log('bug report smoke checks passed');

@@ -11,6 +11,8 @@ const BugReports = {
     quickDraft: null,
     _overlayOpen: false,
     submittingPrefixes: new Set(),
+    _draftSaveTimer: null,
+    _draftRestored: false,
 
     async load() {
         this.isLoading = true;
@@ -54,30 +56,93 @@ const BugReports = {
         }
     },
 
+    draftStorageKey() {
+        return `ro_bug_report_draft_v1:${App?.currentEmployeeId || 'guest'}`;
+    },
+
+    draftTtlMs() {
+        return 6 * 60 * 60 * 1000;
+    },
+
+    meaningfulDraft(draft) {
+        if (!draft || typeof draft !== 'object') return false;
+        return [
+            draft.title,
+            draft.actual_result,
+            draft.expected_result,
+            draft.steps_to_reproduce,
+            draft.extra_link,
+        ].some(value => String(value || '').trim());
+    },
+
+    readStoredDraft() {
+        try {
+            const raw = localStorage.getItem(this.draftStorageKey());
+            if (!raw) return null;
+            const parsed = JSON.parse(raw);
+            if (!parsed?.saved_at || (Date.now() - Number(parsed.saved_at)) > this.draftTtlMs()) {
+                localStorage.removeItem(this.draftStorageKey());
+                return null;
+            }
+            return parsed.draft || null;
+        } catch (error) {
+            return null;
+        }
+    },
+
+    persistStoredDraft(draft) {
+        try {
+            if (!this.meaningfulDraft(draft)) {
+                localStorage.removeItem(this.draftStorageKey());
+                return;
+            }
+            localStorage.setItem(this.draftStorageKey(), JSON.stringify({
+                saved_at: Date.now(),
+                draft,
+            }));
+        } catch (error) {
+            console.warn('[BugReports] draft persist failed:', error);
+        }
+    },
+
+    clearStoredDraft() {
+        clearTimeout(this._draftSaveTimer);
+        this._draftSaveTimer = null;
+        this._draftRestored = false;
+        try {
+            localStorage.removeItem(this.draftStorageKey());
+        } catch (error) {
+            console.warn('[BugReports] draft clear failed:', error);
+        }
+    },
+
     currentContextDraft(preset = {}) {
-        const route = preset.page_route != null ? preset.page_route : this.currentRoute();
+        const storedDraft = Object.keys(preset || {}).length === 0 ? this.readStoredDraft() : null;
+        this._draftRestored = !!storedDraft;
+        const baseDraft = storedDraft || {};
+        const route = preset.page_route != null ? preset.page_route : (baseDraft.page_route || this.currentRoute());
         const inferredSection = preset.section_key
             ? BugReportCore.getSectionByKey(preset.section_key)
             : BugReportCore.inferSectionFromRoute(route);
-        const sectionKey = preset.section_key || inferredSection?.key || 'general';
-        const subsectionKey = preset.subsection_key || BugReportCore.inferSubsectionKey(sectionKey, route);
+        const sectionKey = preset.section_key || baseDraft.section_key || inferredSection?.key || 'general';
+        const subsectionKey = preset.subsection_key || baseDraft.subsection_key || BugReportCore.inferSubsectionKey(sectionKey, route);
         return {
-            title: preset.title || '',
+            title: preset.title || baseDraft.title || '',
             section_key: sectionKey,
-            section_name: preset.section_name || BugReportCore.getSectionByKey(sectionKey)?.label || '',
+            section_name: preset.section_name || baseDraft.section_name || BugReportCore.getSectionByKey(sectionKey)?.label || '',
             subsection_key: subsectionKey,
-            subsection_name: preset.subsection_name || BugReportCore.getSubsectionByKey(sectionKey, subsectionKey)?.label || '',
+            subsection_name: preset.subsection_name || baseDraft.subsection_name || BugReportCore.getSubsectionByKey(sectionKey, subsectionKey)?.label || '',
             page_route: route,
-            page_url: preset.page_url || this.currentPageUrl(),
-            browser: preset.browser || BugReportCore.summarizeBrowser(navigator.userAgent),
-            os: preset.os || BugReportCore.summarizeOs(navigator.userAgent),
-            viewport: preset.viewport || `${window.innerWidth || 0}x${window.innerHeight || 0}`,
-            app_version: preset.app_version || (typeof APP_VERSION !== 'undefined' ? APP_VERSION : ''),
-            severity: preset.severity || 'medium',
-            actual_result: preset.actual_result || '',
-            expected_result: preset.expected_result || '',
-            steps_to_reproduce: preset.steps_to_reproduce || '',
-            extra_link: preset.extra_link || '',
+            page_url: preset.page_url || baseDraft.page_url || this.currentPageUrl(),
+            browser: preset.browser || baseDraft.browser || BugReportCore.summarizeBrowser(navigator.userAgent),
+            os: preset.os || baseDraft.os || BugReportCore.summarizeOs(navigator.userAgent),
+            viewport: preset.viewport || baseDraft.viewport || `${window.innerWidth || 0}x${window.innerHeight || 0}`,
+            app_version: preset.app_version || baseDraft.app_version || (typeof APP_VERSION !== 'undefined' ? APP_VERSION : ''),
+            severity: preset.severity || baseDraft.severity || 'medium',
+            actual_result: preset.actual_result || baseDraft.actual_result || '',
+            expected_result: preset.expected_result || baseDraft.expected_result || '',
+            steps_to_reproduce: preset.steps_to_reproduce || baseDraft.steps_to_reproduce || '',
+            extra_link: preset.extra_link || baseDraft.extra_link || '',
         };
     },
 
@@ -242,11 +307,16 @@ const BugReports = {
     renderForm(scope, draft, compact) {
         const prefix = scope === 'overlay' ? 'bug-overlay' : 'bug-page';
         return `
-            <div class="card bug-form-card ${compact ? 'bug-form-card-compact' : ''}">
+            <div class="card bug-form-card ${compact ? 'bug-form-card-compact' : ''}" oninput="BugReports.onDraftFieldChange('${prefix}')" onchange="BugReports.onDraftFieldChange('${prefix}')">
                 <div class="card-header">
                     <h3>${compact ? 'Сообщить о баге' : 'Новый баг-репорт'}</h3>
                     ${compact ? '<button class="btn btn-sm btn-outline" onclick="BugReports.closeQuickReport()">Закрыть</button>' : ''}
                 </div>
+                ${this._draftRestored ? `
+                    <div class="task-draft-banner">
+                        <strong>Черновик восстановлен.</strong> Он хранится локально в этом браузере и удалится автоматически через 6 часов.
+                    </div>
+                ` : ''}
                 <div class="form-group">
                     <label>Короткий заголовок *</label>
                     <input type="text" id="${prefix}-title" value="${this.esc(draft.title)}" placeholder="Например: не сохраняется дедлайн в карточке заказа">
@@ -485,7 +555,22 @@ const BugReports = {
     },
 
     resetPageForm() {
+        this.clearStoredDraft();
         this.render();
+    },
+
+    onDraftFieldChange(prefix) {
+        clearTimeout(this._draftSaveTimer);
+        this._draftSaveTimer = setTimeout(() => {
+            const draft = this.collectForm(prefix);
+            this.persistStoredDraft({
+                ...draft,
+                files: [],
+                app_version: typeof APP_VERSION !== 'undefined' ? APP_VERSION : '',
+                page_route: draft.page_route || this.currentRoute(),
+                page_url: draft.page_url || this.currentPageUrl(),
+            });
+        }, 180);
     },
 
     setSubmitState(prefix, isSubmitting) {
@@ -537,7 +622,9 @@ const BugReports = {
         this._overlayOpen = true;
     },
 
-    closeQuickReport() {
+    closeQuickReport(options = {}) {
+        const { preserveDraft = true } = options;
+        if (preserveDraft) this.onDraftFieldChange('bug-overlay');
         const overlay = document.getElementById('bug-report-overlay');
         if (overlay) {
             overlay.classList.remove('is-open');
@@ -688,8 +775,9 @@ const BugReports = {
 
             await this.refreshData();
             this.render();
+            this.clearStoredDraft();
             if (prefix === 'bug-overlay') {
-                this.closeQuickReport();
+                this.closeQuickReport({ preserveDraft: false });
             }
             App.toast('Баг отправлен. Prompt для Codex готов.');
         } catch (error) {
@@ -794,3 +882,7 @@ const BugReports = {
         App.navigate('tasks', true, taskId);
     },
 };
+
+if (typeof window !== 'undefined') {
+    window.BugReports = BugReports;
+}
