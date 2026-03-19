@@ -23,5 +23,14 @@ const sidebarNav = indexHtml.match(/<nav class="sidebar-nav">([\s\S]*?)<\/nav>/)
 assert.ok(sidebarNav, 'Sidebar nav not found in index.html');
 const calculatorLinks = [...sidebarNav[1].matchAll(/data-page="calculator"/g)];
 assert.equal(calculatorLinks.length, 1, 'Sidebar must contain exactly one calculator link');
+const sidebarPages = [...sidebarNav[1].matchAll(/data-page="([^"]+)"/g)].map(match => match[1]);
+const chinaIndex = sidebarPages.indexOf('china');
+const bugsIndex = sidebarPages.indexOf('bugs');
+const settingsIndex = sidebarPages.indexOf('settings');
+assert.notEqual(chinaIndex, -1, 'Sidebar must contain china link');
+assert.notEqual(bugsIndex, -1, 'Sidebar must contain bugs link');
+assert.notEqual(settingsIndex, -1, 'Sidebar must contain settings link');
+assert.ok(chinaIndex < bugsIndex, 'Sidebar bugs link must be below china');
+assert.ok(bugsIndex < settingsIndex, 'Sidebar bugs link must be above settings');
 
 console.log(`version smoke checks passed (${appVersion})`);
