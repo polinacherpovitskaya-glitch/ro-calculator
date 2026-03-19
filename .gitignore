@@ -1,0 +1,10 @@
+.DS_Store
+.claude/
+.playwright-cli/
+.superpowers/
+node_modules/
+bot/node_modules/
+bot/.env
+bot/timebot*.log
+PLAN.md
+docs/superpowers/
