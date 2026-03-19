@@ -112,7 +112,7 @@ assert.match(Tasks.renderCompletedSection(groups.completed), /Готовые и 
 assert.equal(Tasks.contextLabel({}), 'Без привязки');
 assert.match(Tasks.contextToggleButtonsHtml({ project_id: 1 }), /✓ Проект/);
 assert.match(Tasks.renderListView([Tasks.bundle.tasks[0]]), /inline-status-select status-in_progress/);
-assert.match(Tasks.renderListView([Tasks.bundle.tasks[0]]), /Удалить/);
+assert.match(Tasks.renderListView([Tasks.bundle.tasks[0]]), /Tasks\.onDeleteTaskClick\(event, 1\)/);
 assert.match(Tasks.renderEditor(Tasks.taskById(1)), /Связанный баг/);
 assert.match(Tasks.renderEditor(Tasks.taskById(1)), /Prompt для Codex/);
 assert.match(Tasks.renderEditor(Tasks.taskById(1)), /Исправь inline-статус в задачах/);
@@ -136,6 +136,8 @@ assert.equal(Tasks.loadStoredDraft(), null);
     Tasks.emitTaskEvents = async () => {};
     Tasks.refreshData = async () => {};
     Tasks.render = () => {};
+    context.confirm = () => true;
+    context.deleteWorkTask = async () => {};
 
     Tasks.currentTaskId = null;
     await Tasks.changeStatus(1, 'review', { preserveSelection: false });
@@ -144,6 +146,33 @@ assert.equal(Tasks.loadStoredDraft(), null);
     Tasks.currentTaskId = 1;
     await Tasks.changeStatus(1, 'done');
     assert.equal(Tasks.currentTaskId, 1);
+
+    const eventLog = [];
+    const inlineEvent = {
+        stopPropagation() { eventLog.push('inline-stop'); },
+        currentTarget: { className: '' },
+    };
+    let changedTo = null;
+    const originalChangeStatus = Tasks.changeStatus.bind(Tasks);
+    Tasks.changeStatus = async (_taskId, status) => { changedTo = status; };
+    await Tasks.onInlineStatusChange(inlineEvent, 1, 'review');
+    assert.equal(changedTo, 'review');
+    assert.equal(inlineEvent.currentTarget.className, 'inline-status-select status-review');
+    assert.deepEqual(eventLog, ['inline-stop']);
+    Tasks.changeStatus = originalChangeStatus;
+
+    const deleteClicks = [];
+    const originalDeleteTask = Tasks.deleteTask.bind(Tasks);
+    Tasks.deleteTask = async (taskId) => { deleteClicks.push(taskId); };
+    const deleteEvent = {
+        preventDefault() { deleteClicks.push('prevent'); },
+        stopPropagation() { deleteClicks.push('stop'); },
+    };
+    const deleteReturn = Tasks.onDeleteTaskClick(deleteEvent, 1);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(deleteReturn, false);
+    assert.deepEqual(deleteClicks, ['prevent', 'stop', 1]);
+    Tasks.deleteTask = originalDeleteTask;
 
     console.log('tasks smoke checks passed');
 })().catch((error) => {

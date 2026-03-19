@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v143';
+const APP_VERSION = 'v144';
 
 const App = {
     currentPage: 'orders',
@@ -823,9 +823,9 @@ const App = {
         const banner = document.getElementById('update-banner');
         if (!banner) return;
         if (mode === 'stale') {
-            banner.textContent = `⟳ Эта вкладка устарела (${APP_VERSION} → ${remoteVersion})`;
+            banner.textContent = `⟳ Обновиться до ${remoteVersion} (сейчас ${APP_VERSION})`;
         } else {
-            banner.textContent = '⟳ Обновление ' + remoteVersion;
+            banner.textContent = '⟳ Обновиться до ' + remoteVersion;
         }
         banner.style.display = 'inline-flex';
     },
@@ -838,7 +838,14 @@ const App = {
     },
 
     reloadForUpdate() {
-        window.location.reload();
+        try {
+            const url = new URL(window.location.href);
+            url.searchParams.set('reload', Date.now().toString());
+            url.searchParams.set('targetVersion', this.getMaxSeenVersion() || APP_VERSION);
+            window.location.replace(url.toString());
+        } catch (e) {
+            window.location.reload();
+        }
     },
 
     // === UTILS ===

@@ -872,8 +872,8 @@ const Tasks = {
         return `
             <select
                 class="inline-status-select status-${this.esc(task.status || 'incoming')}"
-                onclick="event.stopPropagation()"
-                onchange="event.stopPropagation(); this.className='inline-status-select status-' + this.value; Tasks.changeStatus(${task.id}, this.value, { preserveSelection: ${this.currentTaskId === Number(task.id)} })"
+                onclick="Tasks.onInlineStatusClick(event)"
+                onchange="Tasks.onInlineStatusChange(event, ${task.id}, this.value)"
             >
                 ${this.statusOptionsHtml(task.status || 'incoming')}
             </select>
@@ -884,10 +884,10 @@ const Tasks = {
         return `
             <div class="flex gap-4" style="flex-wrap:wrap; justify-content:flex-end;">
                 ${showManualMoves ? `
-                    <button class="btn btn-sm btn-outline" onclick="event.stopPropagation(); Tasks.moveTask(${task.id}, -1)">↑</button>
-                    <button class="btn btn-sm btn-outline" onclick="event.stopPropagation(); Tasks.moveTask(${task.id}, 1)">↓</button>
+                    <button class="btn btn-sm btn-outline" type="button" onclick="return Tasks.onMoveTaskClick(event, ${task.id}, -1)">↑</button>
+                    <button class="btn btn-sm btn-outline" type="button" onclick="return Tasks.onMoveTaskClick(event, ${task.id}, 1)">↓</button>
                 ` : ''}
-                <button class="btn btn-sm btn-outline" onclick="event.stopPropagation(); Tasks.deleteTask(${task.id})">Удалить</button>
+                <button class="btn btn-sm btn-outline" type="button" onclick="return Tasks.onDeleteTaskClick(event, ${task.id})">Удалить</button>
             </div>
         `;
     },
@@ -2222,6 +2222,34 @@ const Tasks = {
 
     async approveTask(taskId) {
         await this.changeStatus(taskId, 'done');
+    },
+
+    onInlineStatusClick(event) {
+        event?.stopPropagation?.();
+        return false;
+    },
+
+    onInlineStatusChange(event, taskId, value) {
+        event?.stopPropagation?.();
+        const select = event?.currentTarget || event?.target;
+        if (select && value) {
+            select.className = 'inline-status-select status-' + value;
+        }
+        return this.changeStatus(taskId, value, { preserveSelection: this.currentTaskId === Number(taskId) });
+    },
+
+    onDeleteTaskClick(event, taskId) {
+        event?.preventDefault?.();
+        event?.stopPropagation?.();
+        void this.deleteTask(taskId);
+        return false;
+    },
+
+    onMoveTaskClick(event, taskId, direction) {
+        event?.preventDefault?.();
+        event?.stopPropagation?.();
+        void this.moveTask(taskId, direction);
+        return false;
     },
 
     async deleteTask(taskId) {
