@@ -36,6 +36,7 @@ const Tasks = {
     _completedOpen: Object.create(null),
     _draftSaveTimer: null,
     _deletingTaskIds: Object.create(null),
+    _saveState: null,
 
     emptyBundle() {
         return {
@@ -505,6 +506,7 @@ const Tasks = {
         this.templateManagerOpen = false;
         this.templateDraft = null;
         this.createDraft = null;
+        this._saveState = null;
         this.currentTaskId = Number(taskId);
         this.syncEditorUiForTask(this.taskById(taskId));
         if (App.currentPage !== 'tasks') {
@@ -521,6 +523,7 @@ const Tasks = {
     openCreate(preset = {}, templateId = null) {
         this.templateManagerOpen = false;
         this.templateDraft = null;
+        this._saveState = null;
         const template = templateId
             ? (this.bundle?.templates || []).find(item => String(item.id) === String(templateId))
             : null;
@@ -573,6 +576,10 @@ const Tasks = {
     },
 
     cancelEditor() {
+        if (this._saveState?.active) {
+            App.toast('Подожди, задача ещё сохраняется');
+            return;
+        }
         if (this.createDraft) {
             const draft = this.readEditorForm();
             if (this.meaningfulDraft(draft)) {
@@ -587,6 +594,7 @@ const Tasks = {
         }
         this.createDraft = null;
         this.currentTaskId = null;
+        this._saveState = null;
         this.editorUi = {
             ...this.editorUi,
             visibleContexts: { order: false, project: false, china: false, warehouse: false },
@@ -1607,14 +1615,17 @@ const Tasks = {
         const watcherIds = this.editorWatcherIds(task);
         const visibleContexts = this.visibleContextsForTask(task);
         const restoredDraftNotice = this.createDraft && this.editorUi?.restoredDraft;
+        const saveState = this._saveState || {};
+        const saveActive = !!saveState.active;
+        const saveProgress = Number.isFinite(saveState.progress) ? Math.max(0, Math.min(100, saveState.progress)) : 0;
         return `
             <div class="card">
                 <div class="card-header">
                     <h3>${this.esc(this.editorTitle(task))}</h3>
                     <div class="flex gap-8">
                         ${this.createDraft ? `<button class="btn btn-sm btn-outline" onclick="Tasks.discardStoredDraft()">Сбросить черновик</button>` : ''}
-                        ${!isNew ? `<button class="btn btn-sm btn-outline" onclick="Tasks.deleteTask(${task.id})">Удалить</button>` : ''}
-                        <button class="btn btn-sm btn-outline" onclick="Tasks.cancelEditor()">Закрыть</button>
+                        ${!isNew ? `<button class="btn btn-sm btn-outline" onclick="Tasks.deleteTask(${task.id})"${saveActive ? ' disabled' : ''}>Удалить</button>` : ''}
+                        <button class="btn btn-sm btn-outline" onclick="Tasks.cancelEditor()"${saveActive ? ' disabled' : ''}>Закрыть</button>
                     </div>
                 </div>
                 <input type="hidden" id="task-editor-id" value="${this.esc(task.id || '')}">
@@ -1623,6 +1634,15 @@ const Tasks = {
                         <strong>Черновик восстановлен.</strong> Эта версия хранится только локально в вашем браузере и скоро истечет сама.
                     </div>
                 ` : ''}
+                <div id="task-save-progress" class="task-editor-save-progress${saveActive ? ' is-active' : ''}" aria-live="polite">
+                    <div class="task-editor-save-progress-row">
+                        <strong>${this.esc(saveState.message || 'Сохраняем задачу…')}</strong>
+                        <span>${saveProgress}%</span>
+                    </div>
+                    <div class="task-editor-save-progress-bar">
+                        <span style="width:${saveProgress}%"></span>
+                    </div>
+                </div>
                 <div class="form-row">
                     <div class="form-group" style="flex:2">
                         <label>Шаблон</label>
@@ -1732,12 +1752,12 @@ const Tasks = {
                         `).join('')}
                     </div>
                 </div>
-                <div class="flex gap-8" style="flex-wrap:wrap;">
-                    <button class="btn btn-success" onclick="Tasks.saveTask()">Сохранить</button>
-                    ${!isNew ? `<button class="btn btn-outline" onclick="Tasks.sendToReview(${task.id})">На согласование</button>` : ''}
-                    ${!isNew ? `<button class="btn btn-outline" onclick="Tasks.returnToWork(${task.id})">Вернуть в работу</button>` : ''}
-                    ${!isNew ? `<button class="btn btn-outline" onclick="Tasks.approveTask(${task.id})">Готово</button>` : ''}
-                    ${!isNew ? `<button class="btn btn-outline" onclick="Tasks.changeStatus(${task.id}, 'cancelled')">Отменить</button>` : ''}
+                <div class="flex gap-8 task-editor-actions" style="flex-wrap:wrap;">
+                    <button id="task-save-button" class="btn btn-success" onclick="Tasks.saveTask()"${saveActive ? ' disabled' : ''}>${saveActive ? 'Сохраняем…' : 'Сохранить'}</button>
+                    ${!isNew ? `<button class="btn btn-outline" onclick="Tasks.sendToReview(${task.id})"${saveActive ? ' disabled' : ''}>На согласование</button>` : ''}
+                    ${!isNew ? `<button class="btn btn-outline" onclick="Tasks.returnToWork(${task.id})"${saveActive ? ' disabled' : ''}>Вернуть в работу</button>` : ''}
+                    ${!isNew ? `<button class="btn btn-outline" onclick="Tasks.approveTask(${task.id})"${saveActive ? ' disabled' : ''}>Готово</button>` : ''}
+                    ${!isNew ? `<button class="btn btn-outline" onclick="Tasks.changeStatus(${task.id}, 'cancelled')"${saveActive ? ' disabled' : ''}>Отменить</button>` : ''}
                 </div>
             </div>
             ${this.renderBugReportSection(task)}
@@ -2108,7 +2128,55 @@ const Tasks = {
         };
     },
 
+    async paintSaveState() {
+        await new Promise(resolve => setTimeout(resolve, 0));
+        const drawer = document.getElementById('task-drawer-overlay');
+        if (!drawer) return;
+        const saveState = this._saveState || {};
+        const saveActive = !!saveState.active;
+        drawer.classList.toggle('is-saving', saveActive);
+
+        const progressBox = drawer.querySelector('#task-save-progress');
+        if (progressBox) {
+            progressBox.classList.toggle('is-active', saveActive);
+            const strong = progressBox.querySelector('strong');
+            const percent = progressBox.querySelector('.task-editor-save-progress-row span');
+            const fill = progressBox.querySelector('.task-editor-save-progress-bar span');
+            const value = Number.isFinite(saveState.progress) ? Math.max(0, Math.min(100, saveState.progress)) : 0;
+            if (strong) strong.textContent = saveState.message || 'Сохраняем задачу…';
+            if (percent) percent.textContent = `${value}%`;
+            if (fill) fill.style.width = `${value}%`;
+        }
+
+        const saveButton = drawer.querySelector('#task-save-button');
+        if (saveButton) {
+            saveButton.disabled = saveActive;
+            saveButton.textContent = saveActive ? 'Сохраняем…' : 'Сохранить';
+        }
+
+        drawer.querySelectorAll('.task-editor-actions .btn, .card-header .btn').forEach(button => {
+            if (!button) return;
+            if (button.id === 'task-save-button') return;
+            button.disabled = saveActive;
+        });
+    },
+
+    async updateSaveState(message, progress) {
+        this._saveState = {
+            active: true,
+            message: message || 'Сохраняем задачу…',
+            progress: Number.isFinite(progress) ? progress : 0,
+        };
+        await this.paintSaveState();
+    },
+
+    async clearSaveState() {
+        this._saveState = null;
+        await this.paintSaveState();
+    },
+
     async saveTask() {
+        if (this._saveState?.active) return;
         const draft = this.readEditorForm();
         const existing = draft.id ? this.taskById(draft.id) : null;
         if (!draft.title) {
@@ -2123,29 +2191,42 @@ const Tasks = {
             App.toast('Укажите дедлайн');
             return;
         }
+        try {
+            await this.updateSaveState('Сохраняем задачу…', 15);
+            const previousOverdue = existing ? this.isOverdue(existing) : false;
+            const saved = await saveWorkTask(draft, {
+                actor_id: App.currentEmployeeId,
+                actor_name: App.getCurrentEmployeeName(),
+            });
 
-        const previousOverdue = existing ? this.isOverdue(existing) : false;
-        const saved = await saveWorkTask(draft, {
-            actor_id: App.currentEmployeeId,
-            actor_name: App.getCurrentEmployeeName(),
-        });
-        await saveTaskWatchers(saved.id, draft.watcher_ids);
+            await this.updateSaveState('Сохраняем наблюдателей…', 40);
+            await saveTaskWatchers(saved.id, draft.watcher_ids);
 
-        const template = draft.template_id
-            ? (this.bundle?.templates || []).find(item => String(item.id) === String(draft.template_id))
-            : null;
-        if (!existing && template) {
-            await this.applyTaskTemplateArtifacts(saved, template);
+            const template = draft.template_id
+                ? (this.bundle?.templates || []).find(item => String(item.id) === String(draft.template_id))
+                : null;
+            if (!existing && template) {
+                await this.updateSaveState('Добавляем элементы шаблона…', 60);
+                await this.applyTaskTemplateArtifacts(saved, template);
+            }
+
+            await this.updateSaveState('Отправляем уведомления…', 80);
+            await this.emitTaskEvents(saved, existing, previousOverdue, { watcherUserIds: draft.watcher_ids });
+
+            await this.updateSaveState('Обновляем список задач…', 95);
+            await this.refreshData();
+            this.createDraft = null;
+            this.clearStoredDraft();
+            this.editorUi.restoredDraft = false;
+            this.currentTaskId = saved.id;
+            await this.clearSaveState();
+            App.toast(existing ? 'Задача обновлена' : 'Задача создана');
+            this.render();
+        } catch (error) {
+            console.error('Tasks save error:', error);
+            await this.clearSaveState();
+            App.toast('Не получилось сохранить задачу');
         }
-
-        await this.emitTaskEvents(saved, existing, previousOverdue, { watcherUserIds: draft.watcher_ids });
-        await this.refreshData();
-        this.createDraft = null;
-        this.clearStoredDraft();
-        this.editorUi.restoredDraft = false;
-        this.currentTaskId = saved.id;
-        App.toast(existing ? 'Задача обновлена' : 'Задача создана');
-        this.render();
     },
 
     async emitTaskEvents(saved, existing, previousOverdue, options = {}) {

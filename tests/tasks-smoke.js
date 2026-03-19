@@ -117,6 +117,13 @@ assert.match(Tasks.renderEditor(Tasks.taskById(1)), /Связанный баг/)
 assert.match(Tasks.renderEditor(Tasks.taskById(1)), /Prompt для Codex/);
 assert.match(Tasks.renderEditor(Tasks.taskById(1)), /Исправь inline-статус в задачах/);
 
+Tasks._saveState = { active: true, message: 'Сохраняем наблюдателей…', progress: 40 };
+const savingEditorHtml = Tasks.renderEditor(Tasks.taskById(1));
+assert.match(savingEditorHtml, /task-editor-save-progress is-active/);
+assert.match(savingEditorHtml, /Сохраняем наблюдателей/);
+assert.match(savingEditorHtml, /Сохраняем…/);
+Tasks._saveState = null;
+
 Tasks.bundle.watchers = [{ task_id: 2, user_id: 9 }, { task_id: 5, user_id: 7 }];
 Tasks.myMode = 'all';
 assert.deepEqual(ids(Tasks.myTasks('all')), [1, 2, 3, 4, 5]);
