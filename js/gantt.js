@@ -13,6 +13,8 @@ const Gantt = {
     planState: { order_ids: [], manual_start_dates: {} },
     draggedOrderId: null,
     zoom: 'week',
+    isLoading: false,
+    _loadSeq: 0,
     LOADABLE_STATUSES: ['sample', 'production_casting', 'production_printing', 'production_hardware', 'production_packaging', 'delivery', 'in_production'],
     STATUS_LABELS: {
         sample: 'Образец',
@@ -24,96 +26,163 @@ const Gantt = {
         delivery: 'Отгрузка',
     },
 
+    hydrateFromCache() {
+        if (typeof getLocal !== 'function' || typeof LOCAL_KEYS === 'undefined') return false;
+        const cachedOrders = getLocal(LOCAL_KEYS.orders) || [];
+        if (!Array.isArray(cachedOrders) || cachedOrders.length === 0) return false;
+        const planState = getLocal(LOCAL_KEYS.productionPlan) || { order_ids: [] };
+        const orderIds = this.buildOrderedOrders(cachedOrders, planState).map(order => Number(order.id));
+        const orderIdSet = new Set(orderIds);
+        const orderItems = (getLocal(LOCAL_KEYS.orderItems) || []).filter(item => orderIdSet.has(Number(item.order_id)));
+        const allChinaPurchases = getLocal(LOCAL_KEYS.chinaPurchases) || [];
+        const timeEntries = getLocal(LOCAL_KEYS.timeEntries) || [];
+        const employees = getLocal(LOCAL_KEYS.employees) || [];
+        this.applyLoadedData({ allOrders: cachedOrders, planState, allChinaPurchases, timeEntries, employees, orderItems });
+        return this.orders.length > 0 || this.blockedOrders.length > 0 || this.reviewOrders.length > 0;
+    },
+
+    buildOrderedOrders(allOrders = [], planState = { order_ids: [] }) {
+        const normalizedState = this.normalizePlanState(planState);
+        const priorityIds = Array.isArray(normalizedState.order_ids)
+            ? normalizedState.order_ids.map(x => Number(x)).filter(Number.isFinite)
+            : [];
+        const priorityPos = new Map(priorityIds.map((id, index) => [id, index]));
+
+        return (allOrders || [])
+            .filter(order => this.isSchedulableOrder(order))
+            .map((order, index) => ({
+                ...order,
+                production_priority: priorityPos.has(Number(order.id))
+                    ? priorityPos.get(Number(order.id))
+                    : 1000 + index,
+            }))
+            .sort((a, b) => Number(a.production_priority || 0) - Number(b.production_priority || 0));
+    },
+
+    applyLoadedData({ allOrders = [], planState = { order_ids: [] }, allChinaPurchases = [], timeEntries = [], employees = [], orderItems = [] }) {
+        this.planState = this.normalizePlanState(planState);
+        const orderedOrders = this.buildOrderedOrders(allOrders, this.planState);
+
+        const itemsByOrderId = new Map();
+        (orderItems || []).forEach(item => {
+            const key = Number(item.order_id);
+            if (!itemsByOrderId.has(key)) itemsByOrderId.set(key, []);
+            itemsByOrderId.get(key).push(item);
+        });
+
+        const chinaPurchasesByOrderId = new Map();
+        (allChinaPurchases || []).forEach(purchase => {
+            const key = Number(purchase.order_id);
+            if (!Number.isFinite(key) || key <= 0) return;
+            if (!chinaPurchasesByOrderId.has(key)) chinaPurchasesByOrderId.set(key, []);
+            chinaPurchasesByOrderId.get(key).push(purchase);
+        });
+
+        const orderActuals = this.buildOrderActuals(timeEntries, employees, orderedOrders);
+        this.orders = orderedOrders.map(order => {
+            const actuals = orderActuals.get(Number(order.id)) || this.getEmptyOrderActuals();
+            const plannedMolding = round2(order.production_hours_plastic || 0);
+            const plannedAssembly = round2(order.production_hours_hardware || 0);
+            const plannedPackaging = round2(order.production_hours_packaging || 0);
+            const plannedTotal = round2(plannedMolding + plannedAssembly + plannedPackaging);
+            const remainingTotal = round2(
+                Math.max(plannedMolding - actuals.molding, 0)
+                + Math.max(plannedAssembly - actuals.assembly, 0)
+                + Math.max(plannedPackaging - actuals.packaging, 0)
+            );
+            const actualTotalForPlan = round2(actuals.molding + actuals.assembly + actuals.packaging);
+            const progressPercent = plannedTotal > 0
+                ? round2(Math.min((actualTotalForPlan / plannedTotal) * 100, 999))
+                : 0;
+
+            return {
+                ...order,
+                production_not_before: this.planState.manual_start_dates[String(order.id)] || '',
+                actual_hours_molding: actuals.molding,
+                actual_hours_assembly: actuals.assembly,
+                actual_hours_packaging: actuals.packaging,
+                actual_hours_other: actuals.other,
+                actual_hours_total: actualTotalForPlan,
+                actual_hours_employee_count: actuals.employeeCount,
+                actual_hours_entry_count: actuals.entryCount,
+                actual_hours_resolved_by_name: actuals.resolvedByNameCount,
+                planned_hours_total: plannedTotal,
+                remaining_hours_total: remainingTotal,
+                progress_percent: progressPercent,
+                ...this.getOrderReadiness(
+                    order,
+                    itemsByOrderId.get(Number(order.id)) || [],
+                    chinaPurchasesByOrderId.get(Number(order.id)) || []
+                ),
+            };
+        });
+        this.blockedOrders = this.orders.filter(order => order.production_ready_state === 'blocked');
+        this.reviewOrders = this.orders.filter(order => order.production_ready_state === 'needs_review');
+        this.orderSequence = this.orders.map(order => Number(order.id));
+        this.actualMonthSummary = this.buildActualMonthSummary(timeEntries, employees);
+        this.schedule = buildProductionSchedule(
+            this.orders.filter(order => order.production_ready_state === 'ready'),
+            App.settings || {}
+        );
+    },
+
     async load() {
+        const loadSeq = ++this._loadSeq;
+        const hydrated = (this.orders || []).length > 0 || this.hydrateFromCache();
+        this.isLoading = !hydrated;
+        this.render();
         try {
-            const [allOrders, planState, allChinaPurchases, timeEntries, employees] = await Promise.all([
+            const [allOrders, planState] = await Promise.all([
                 loadOrders({}),
                 loadProductionPlanState().catch(() => ({ order_ids: [] })),
-                loadChinaPurchases({}).catch(() => []),
+            ]);
+            if (this._loadSeq !== loadSeq) return;
+
+            const orderedOrders = this.buildOrderedOrders(allOrders, planState);
+            const orderedIds = orderedOrders.map(order => Number(order.id)).filter(Number.isFinite);
+            const orderItemsPromise = loadOrderItemsByOrderIds(orderedIds).catch(() => []);
+            const chinaPromise = loadChinaPurchases({}).catch(() => []);
+            const actualsPromise = Promise.all([
                 loadTimeEntries().catch(() => []),
                 loadEmployees().catch(() => []),
             ]);
 
-            this.planState = this.normalizePlanState(planState);
-            const priorityIds = Array.isArray(this.planState.order_ids)
-                ? this.planState.order_ids.map(x => Number(x)).filter(Number.isFinite)
-                : [];
-            const priorityPos = new Map(priorityIds.map((id, index) => [id, index]));
+            const [orderItems, allChinaPurchases] = await Promise.all([orderItemsPromise, chinaPromise]);
+            if (this._loadSeq !== loadSeq) return;
 
-            const orderedOrders = (allOrders || [])
-                .filter(order => this.isSchedulableOrder(order))
-                .map((order, index) => ({
-                    ...order,
-                    production_priority: priorityPos.has(Number(order.id))
-                        ? priorityPos.get(Number(order.id))
-                        : 1000 + index,
-                }))
-                .sort((a, b) => Number(a.production_priority || 0) - Number(b.production_priority || 0));
-
-            const orderItems = await loadOrderItemsByOrderIds(orderedOrders.map(order => order.id)).catch(() => []);
-            const itemsByOrderId = new Map();
-            (orderItems || []).forEach(item => {
-                const key = Number(item.order_id);
-                if (!itemsByOrderId.has(key)) itemsByOrderId.set(key, []);
-                itemsByOrderId.get(key).push(item);
+            this.applyLoadedData({
+                allOrders,
+                planState,
+                allChinaPurchases,
+                timeEntries: [],
+                employees: [],
+                orderItems,
             });
-            const chinaPurchasesByOrderId = new Map();
-            (allChinaPurchases || []).forEach(purchase => {
-                const key = Number(purchase.order_id);
-                if (!Number.isFinite(key) || key <= 0) return;
-                if (!chinaPurchasesByOrderId.has(key)) chinaPurchasesByOrderId.set(key, []);
-                chinaPurchasesByOrderId.get(key).push(purchase);
-            });
-
-            const orderActuals = this.buildOrderActuals(timeEntries, employees, orderedOrders);
-            this.orders = orderedOrders.map(order => {
-                const actuals = orderActuals.get(Number(order.id)) || this.getEmptyOrderActuals();
-                const plannedMolding = round2(order.production_hours_plastic || 0);
-                const plannedAssembly = round2(order.production_hours_hardware || 0);
-                const plannedPackaging = round2(order.production_hours_packaging || 0);
-                const plannedTotal = round2(plannedMolding + plannedAssembly + plannedPackaging);
-                const remainingTotal = round2(
-                    Math.max(plannedMolding - actuals.molding, 0)
-                    + Math.max(plannedAssembly - actuals.assembly, 0)
-                    + Math.max(plannedPackaging - actuals.packaging, 0)
-                );
-                const actualTotalForPlan = round2(actuals.molding + actuals.assembly + actuals.packaging);
-                const progressPercent = plannedTotal > 0
-                    ? round2(Math.min((actualTotalForPlan / plannedTotal) * 100, 999))
-                    : 0;
-
-                return {
-                    ...order,
-                    production_not_before: this.planState.manual_start_dates[String(order.id)] || '',
-                    actual_hours_molding: actuals.molding,
-                    actual_hours_assembly: actuals.assembly,
-                    actual_hours_packaging: actuals.packaging,
-                    actual_hours_other: actuals.other,
-                    actual_hours_total: actualTotalForPlan,
-                    actual_hours_employee_count: actuals.employeeCount,
-                    actual_hours_entry_count: actuals.entryCount,
-                    actual_hours_resolved_by_name: actuals.resolvedByNameCount,
-                    planned_hours_total: plannedTotal,
-                    remaining_hours_total: remainingTotal,
-                    progress_percent: progressPercent,
-                    ...this.getOrderReadiness(
-                        order,
-                        itemsByOrderId.get(Number(order.id)) || [],
-                        chinaPurchasesByOrderId.get(Number(order.id)) || []
-                    ),
-                };
-            });
-            this.blockedOrders = this.orders.filter(order => order.production_ready_state === 'blocked');
-            this.reviewOrders = this.orders.filter(order => order.production_ready_state === 'needs_review');
-            this.orderSequence = this.orders.map(order => Number(order.id));
-            this.actualMonthSummary = this.buildActualMonthSummary(timeEntries, employees);
-            this.schedule = buildProductionSchedule(
-                this.orders.filter(order => order.production_ready_state === 'ready'),
-                App.settings || {}
-            );
+            this.isLoading = false;
             this.render();
+
+            actualsPromise
+                .then(([timeEntries, employees]) => {
+                    if (this._loadSeq !== loadSeq) return;
+                    this.applyLoadedData({
+                        allOrders,
+                        planState,
+                        allChinaPurchases,
+                        timeEntries,
+                        employees,
+                        orderItems,
+                    });
+                    this.render();
+                })
+                .catch(error => {
+                    console.warn('Gantt actuals load error:', error);
+                });
         } catch (e) {
             console.error('Gantt load error:', e);
+            if (this._loadSeq === loadSeq) {
+                this.isLoading = false;
+                this.render();
+            }
         }
     },
 
@@ -473,6 +542,20 @@ const Gantt = {
         const capContainer = document.getElementById('gantt-capacity-chart');
         const queueContainer = document.getElementById('gantt-queue');
         if (!container) return;
+
+        if (this.isLoading && !this.schedule && !(this.orders || []).length) {
+            if (capContainer) capContainer.innerHTML = '';
+            if (queueContainer) queueContainer.innerHTML = '';
+            container.innerHTML = `
+                <div class="card">
+                    <div class="empty-state">
+                        <div class="empty-icon">&#128197;</div>
+                        <p>Загружаем производственный календарь…</p>
+                    </div>
+                </div>`;
+            this.renderStats();
+            return;
+        }
 
         const blockedQueue = this.blockedOrders || [];
         const reviewQueue = this.reviewOrders || [];

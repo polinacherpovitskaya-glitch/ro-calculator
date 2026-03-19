@@ -4,6 +4,7 @@ const Tasks = {
     orders: [],
     chinaPurchases: [],
     warehouseItems: [],
+    _loadSeq: 0,
     currentTaskId: null,
     createDraft: null,
     templateDraft: null,
@@ -35,41 +36,164 @@ const Tasks = {
     _completedOpen: Object.create(null),
     _draftSaveTimer: null,
 
+    emptyBundle() {
+        return {
+            areas: [],
+            projects: [],
+            tasks: [],
+            bugReports: [],
+            comments: [],
+            assets: [],
+            checklistItems: [],
+            watchers: [],
+            activity: [],
+            templates: [],
+        };
+    },
+
+    normalizeBundle(bundle = {}) {
+        return {
+            ...this.emptyBundle(),
+            ...(bundle || {}),
+        };
+    },
+
+    hydrateFromCache() {
+        if (typeof getLocal !== 'function' || typeof LOCAL_KEYS === 'undefined') return false;
+
+        const cachedBundle = this.normalizeBundle({
+            areas: getLocal(LOCAL_KEYS.workAreas) || [],
+            projects: getLocal(LOCAL_KEYS.workProjects) || [],
+            tasks: getLocal(LOCAL_KEYS.workTasks) || [],
+            bugReports: getLocal(LOCAL_KEYS.bugReports) || [],
+            comments: getLocal(LOCAL_KEYS.taskComments) || [],
+            assets: getLocal(LOCAL_KEYS.workAssets) || [],
+            checklistItems: getLocal(LOCAL_KEYS.taskChecklistItems) || [],
+            watchers: getLocal(LOCAL_KEYS.taskWatchers) || [],
+            activity: getLocal(LOCAL_KEYS.workActivity) || [],
+            templates: getLocal(LOCAL_KEYS.workTemplatesV2) || [],
+        });
+        const hasBundleData = Object.values(cachedBundle).some(value => Array.isArray(value) && value.length > 0);
+        if (hasBundleData) {
+            this.bundle = cachedBundle;
+        }
+
+        const cachedEmployees = getLocal(LOCAL_KEYS.employees) || [];
+        if (cachedEmployees.length > 0) this.employees = cachedEmployees;
+
+        const cachedOrders = (getLocal(LOCAL_KEYS.orders) || []).filter(item => item.status !== 'deleted');
+        if (cachedOrders.length > 0) this.orders = cachedOrders;
+
+        const cachedChina = getLocal(LOCAL_KEYS.chinaPurchases) || [];
+        if (cachedChina.length > 0) this.chinaPurchases = cachedChina;
+
+        const cachedWarehouse = getLocal(LOCAL_KEYS.warehouseItems) || [];
+        if (cachedWarehouse.length > 0) this.warehouseItems = cachedWarehouse;
+
+        return hasBundleData;
+    },
+
     async load(taskId) {
         if (!this.scope) this.scope = App.currentEmployeeId ? 'my' : 'all';
         if (taskId) {
             this.currentTaskId = Number(taskId);
             this.createDraft = null;
         }
-        this.isLoading = true;
+        const loadSeq = ++this._loadSeq;
+        const hasCachedBundle = !!this.bundle || this.hydrateFromCache();
+        this.isLoading = !hasCachedBundle;
         this.render();
+
+        const secondaryPromise = this.refreshSecondaryData()
+            .then(() => {
+                if (this._loadSeq !== loadSeq) return;
+                this.render();
+            })
+            .catch(error => {
+                console.warn('Tasks secondary load error:', error);
+            });
+
         try {
-            await this.refreshData();
-        } finally {
+            await this.refreshPrimaryData();
+            if (this._loadSeq !== loadSeq) return;
             this.isLoading = false;
             this.render();
+        } catch (error) {
+            console.error('Tasks load error:', error);
+            if (this._loadSeq === loadSeq) {
+                this.isLoading = false;
+                this.render();
+            }
         }
+
+        secondaryPromise.catch(() => {});
     },
 
-    async refreshData() {
+    async refreshPrimaryData() {
         const [
-            bundle,
+            areas,
+            projects,
+            tasks,
+            templates,
             employees,
+        ] = await Promise.all([
+            loadWorkAreas(),
+            loadWorkProjects(),
+            loadWorkTasks(),
+            loadWorkTemplatesV2(),
+            loadEmployees(),
+        ]);
+        this.bundle = this.normalizeBundle({
+            ...(this.bundle || {}),
+            areas,
+            projects,
+            tasks,
+            templates,
+        });
+        this.employees = employees;
+    },
+
+    async refreshSecondaryData() {
+        const [
+            bugReports,
+            comments,
+            assets,
+            checklistItems,
+            watchers,
+            activity,
             orders,
             chinaPurchases,
             warehouseItems,
         ] = await Promise.all([
-            loadWorkBundle(),
-            loadEmployees(),
+            loadBugReports(),
+            loadTaskComments(),
+            loadWorkAssets(),
+            loadTaskChecklistItems(),
+            loadTaskWatchers(),
+            loadWorkActivity(),
             loadOrders({}),
             loadChinaPurchases({}),
             loadWarehouseItems(),
         ]);
-        this.bundle = bundle;
-        this.employees = employees;
+        this.bundle = this.normalizeBundle({
+            ...(this.bundle || {}),
+            bugReports,
+            comments,
+            assets,
+            checklistItems,
+            watchers,
+            activity,
+        });
         this.orders = orders;
         this.chinaPurchases = chinaPurchases;
         this.warehouseItems = warehouseItems;
+    },
+
+    async refreshData() {
+        await Promise.all([
+            this.refreshPrimaryData(),
+            this.refreshSecondaryData(),
+        ]);
     },
 
     esc(value) {

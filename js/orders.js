@@ -84,6 +84,19 @@ const Orders = {
     metaByOrderId: {},
     mode: 'active',
     collapsedSections: {},
+    isLoading: false,
+    isMetaLoading: false,
+    _loadSeq: 0,
+
+    hydrateFromCache() {
+        if (typeof getLocal !== 'function' || typeof LOCAL_KEYS === 'undefined') return false;
+        const cachedOrders = getLocal(LOCAL_KEYS.orders) || [];
+        if (!Array.isArray(cachedOrders) || cachedOrders.length === 0) return false;
+        this.allOrders = this.mode === 'basket'
+            ? cachedOrders.filter(order => order.status === 'deleted')
+            : cachedOrders.filter(order => order.status !== 'deleted');
+        return this.allOrders.length > 0;
+    },
 
     setMode(mode) {
         if (!mode) return;
@@ -106,14 +119,33 @@ const Orders = {
     },
 
     async loadList() {
+        const loadSeq = ++this._loadSeq;
         try {
             this.updateModeControls();
+            const hydrated = this.hydrateFromCache();
+            this.isLoading = !hydrated && this.allOrders.length === 0;
+            this.isMetaLoading = hydrated && this.mode !== 'basket';
+            this.render();
             const filters = this.mode === 'basket' ? { status: 'deleted' } : {};
             this.allOrders = await loadOrders(filters);
+            if (this._loadSeq !== loadSeq) return;
+            this.isLoading = false;
+            if (this.mode === 'basket' || !this.allOrders.length) {
+                this.metaByOrderId = {};
+                this.isMetaLoading = false;
+                this.render();
+                return;
+            }
+            this.isMetaLoading = true;
+            this.render();
             await this.buildMeta(this.allOrders);
+            if (this._loadSeq !== loadSeq) return;
+            this.isMetaLoading = false;
             this.render();
         } catch (e) {
             console.error('Orders load error:', e);
+            this.isLoading = false;
+            this.isMetaLoading = false;
             const container = document.getElementById('orders-table-view');
             if (container) {
                 container.innerHTML = this.renderEmptyState('Не удалось загрузить заказы');
@@ -489,6 +521,13 @@ const Orders = {
         const container = document.getElementById('orders-table-view');
         const board = document.getElementById('orders-board-view');
         if (!container) return;
+
+        if (this.isLoading && !this.allOrders.length) {
+            container.style.display = '';
+            if (board) board.style.display = 'none';
+            container.innerHTML = this.renderEmptyState('Загружаем заказы…');
+            return;
+        }
 
         const visibleOrders = this.getVisibleOrders();
         if (this.mode === 'board') {
