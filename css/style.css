@@ -2712,6 +2712,13 @@ table .text-center { text-align: center; }
     line-height: 1;
     font-size: 16px;
 }
+.task-row-icon-btn:disabled {
+    opacity: 0.6;
+    cursor: wait;
+}
+.task-row-delete-btn.is-busy {
+    color: var(--text-muted);
+}
 .task-row-delete-btn {
     color: #ef4444;
 }

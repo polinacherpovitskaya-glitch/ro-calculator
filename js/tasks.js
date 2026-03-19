@@ -35,6 +35,7 @@ const Tasks = {
     sort: 'manual',
     _completedOpen: Object.create(null),
     _draftSaveTimer: null,
+    _deletingTaskIds: Object.create(null),
 
     emptyBundle() {
         return {
@@ -757,6 +758,36 @@ const Tasks = {
         this.render();
     },
 
+    collectTaskTreeIds(rootTaskId) {
+        const rootId = Number(rootTaskId);
+        if (!rootId) return [];
+        const byParent = new Map();
+        (this.bundle?.tasks || []).forEach(task => {
+            const parentKey = String(task.parent_task_id || '');
+            const bucket = byParent.get(parentKey) || [];
+            bucket.push(Number(task.id));
+            byParent.set(parentKey, bucket);
+        });
+        const result = [];
+        const queue = [rootId];
+        const seen = new Set();
+        while (queue.length > 0) {
+            const current = Number(queue.shift());
+            if (!current || seen.has(current)) continue;
+            seen.add(current);
+            result.push(current);
+            const children = byParent.get(String(current)) || [];
+            children.forEach(childId => {
+                if (!seen.has(childId)) queue.push(childId);
+            });
+        }
+        return result;
+    },
+
+    isTaskDeleting(taskId) {
+        return !!this._deletingTaskIds[String(taskId)];
+    },
+
     filteredTasks() {
         const search = WorkManagementCore.normalizeText(this.filters.search);
         const commentsByTask = new Map();
@@ -766,7 +797,8 @@ const Tasks = {
             commentsByTask.set(String(comment.task_id), bucket);
         });
 
-        let list = (this.bundle?.tasks || []).slice();
+        let list = (this.bundle?.tasks || []).slice()
+            .filter(task => !this.isTaskDeleting(task.id));
 
         if (this.scope === 'my' && App.currentEmployeeId) {
             list = this.myTasks(this.myMode);
@@ -1005,13 +1037,14 @@ const Tasks = {
     },
 
     renderRowActions(task, { showManualMoves = false } = {}) {
+        const isDeleting = this.isTaskDeleting(task.id);
         return `
             <div class="task-row-actions">
                 ${showManualMoves ? `
-                    <button class="btn btn-sm btn-outline task-row-icon-btn" type="button" title="Поднять выше" aria-label="Поднять задачу выше" onclick="return Tasks.onMoveTaskClick(event, ${task.id}, -1)">↑</button>
-                    <button class="btn btn-sm btn-outline task-row-icon-btn" type="button" title="Опустить ниже" aria-label="Опустить задачу ниже" onclick="return Tasks.onMoveTaskClick(event, ${task.id}, 1)">↓</button>
+                    <button class="btn btn-sm btn-outline task-row-icon-btn" type="button" title="Поднять выше" aria-label="Поднять задачу выше" onclick="return Tasks.onMoveTaskClick(event, ${task.id}, -1)" ${isDeleting ? 'disabled' : ''}>↑</button>
+                    <button class="btn btn-sm btn-outline task-row-icon-btn" type="button" title="Опустить ниже" aria-label="Опустить задачу ниже" onclick="return Tasks.onMoveTaskClick(event, ${task.id}, 1)" ${isDeleting ? 'disabled' : ''}>↓</button>
                 ` : ''}
-                <button class="btn btn-sm btn-outline task-row-icon-btn task-row-delete-btn" type="button" title="Удалить задачу" aria-label="Удалить задачу" onclick="return Tasks.onDeleteTaskClick(event, ${task.id})">&times;</button>
+                <button class="btn btn-sm btn-outline task-row-icon-btn task-row-delete-btn ${isDeleting ? 'is-busy' : ''}" type="button" title="${isDeleting ? 'Удаляем задачу...' : 'Удалить задачу'}" aria-label="${isDeleting ? 'Удаляем задачу' : 'Удалить задачу'}" onclick="return Tasks.onDeleteTaskClick(event, ${task.id})" ${isDeleting ? 'disabled' : ''}>${isDeleting ? '…' : '&times;'}</button>
             </div>
         `;
     },
@@ -2378,10 +2411,26 @@ const Tasks = {
 
     async deleteTask(taskId) {
         if (!confirm('Удалить задачу со всеми комментариями и файлами?')) return;
-        await deleteWorkTask(taskId);
-        await this.refreshData();
-        this.currentTaskId = null;
+        const deletingIds = this.collectTaskTreeIds(taskId);
+        deletingIds.forEach(id => {
+            this._deletingTaskIds[String(id)] = true;
+        });
+        if (deletingIds.includes(Number(this.currentTaskId))) {
+            this.currentTaskId = null;
+        }
         this.render();
+        try {
+            await deleteWorkTask(taskId);
+            this.hydrateFromCache();
+        } catch (error) {
+            console.error('deleteTask error:', error);
+            App.toast('Не удалось удалить задачу');
+        } finally {
+            deletingIds.forEach(id => {
+                delete this._deletingTaskIds[String(id)];
+            });
+            this.render();
+        }
     },
 
     copyBugPrompt(taskId) {
