@@ -45,11 +45,28 @@ function createContext() {
         location: { href: 'http://localhost' },
         __remoteCalls: [],
         __RO_REMOTE_LOAD_TIMEOUT_MS: 10,
+        __invalidTables: new Set(),
+        __missingTables: new Set(),
+        __settingsStore: new Map(),
     };
 
     context.window = context;
     context.supabase = {
         createClient() {
+            function remoteError(table) {
+                if (!context.__invalidTables.has(table)) return null;
+                return {
+                    code: '401',
+                    message: 'Invalid API key',
+                };
+            }
+            function missingTableError(table) {
+                if (!context.__missingTables.has(table) && table !== 'sales_records') return null;
+                return {
+                    code: 'PGRST205',
+                    message: `Could not find the table 'public.${table}' in the schema cache`,
+                };
+            }
             return {
                 from(table) {
                     const state = { eqValue: null };
@@ -61,16 +78,19 @@ function createContext() {
                                     return {
                                         maybeSingle() {
                                             context.__remoteCalls.push({ table, action: 'maybeSingle' });
+                                            if (remoteError(table)) {
+                                                return Promise.resolve({ data: null, error: remoteError(table) });
+                                            }
+                                            if (missingTableError(table)) {
+                                                return Promise.resolve({ data: null, error: missingTableError(table) });
+                                            }
                                             if (table === 'settings' && state.eqValue === 'auth_accounts_json') {
                                                 return new Promise(() => {});
                                             }
-                                            if (table === 'sales_records') {
+                                            if (table === 'settings' && context.__settingsStore.has(state.eqValue)) {
                                                 return Promise.resolve({
-                                                    data: null,
-                                                    error: {
-                                                        code: 'PGRST205',
-                                                        message: "Could not find the table 'public.sales_records' in the schema cache",
-                                                    },
+                                                    data: { value: context.__settingsStore.get(state.eqValue) },
+                                                    error: null,
                                                 });
                                             }
                                             return Promise.resolve({ data: null, error: null });
@@ -78,19 +98,27 @@ function createContext() {
                                     };
                                 },
                                 order() {
+                                    context.__remoteCalls.push({ table, action: 'order' });
+                                    if (remoteError(table)) {
+                                        return Promise.resolve({ data: null, error: remoteError(table) });
+                                    }
+                                    if (missingTableError(table)) {
+                                        return Promise.resolve({ data: null, error: missingTableError(table) });
+                                    }
                                     return Promise.resolve({ data: [], error: null });
                                 },
                             };
                         },
                         async upsert(payload) {
                             context.__remoteCalls.push({ table, action: 'upsert', payload });
-                            if (table === 'sales_records') {
-                                return {
-                                    error: {
-                                        code: 'PGRST205',
-                                        message: "Could not find the table 'public.sales_records' in the schema cache",
-                                    },
-                                };
+                            if (remoteError(table)) {
+                                return { error: remoteError(table) };
+                            }
+                            if (missingTableError(table)) {
+                                return { error: missingTableError(table) };
+                            }
+                            if (table === 'settings' && payload && payload.key) {
+                                context.__settingsStore.set(payload.key, payload.value);
                             }
                             return { error: null };
                         },
@@ -110,45 +138,112 @@ function runScript(context, relativePath) {
 }
 
 async function main() {
-    const context = createContext();
-    runScript(context, 'js/supabase.js');
+    {
+        const context = createContext();
+        runScript(context, 'js/supabase.js');
 
-    vm.runInContext(`
-        setLocal(LOCAL_KEYS.readyGoods, [{ id: 99, payload: 'x'.repeat(20000) }]);
-        initSupabase();
-        setLocal(LOCAL_KEYS.salesRecords, [{ id: 1, product_name: 'Smoke Sale', qty: 2 }]);
-        setLocal(LOCAL_KEYS.authAccounts, [{ id: 10, username: 'fallback_user', employee_name: 'Fallback' }]);
-    `, context);
+        vm.runInContext(`
+            setLocal(LOCAL_KEYS.readyGoods, [{ id: 99, payload: 'x'.repeat(20000) }]);
+            initSupabase();
+            setLocal(LOCAL_KEYS.salesRecords, [{ id: 1, product_name: 'Smoke Sale', qty: 2 }]);
+            setLocal(LOCAL_KEYS.authAccounts, [{ id: 10, username: 'fallback_user', employee_name: 'Fallback' }]);
+        `, context);
 
-    const movedReadyGoods = JSON.parse(JSON.stringify(vm.runInContext('getLocal(LOCAL_KEYS.readyGoods)', context)));
-    assert.equal(movedReadyGoods.length, 1);
-    assert.equal(movedReadyGoods[0].id, 99);
-    assert.equal(context.localStorage.getItem('ro_calc_ready_goods_stock'), null);
+        const movedReadyGoods = JSON.parse(JSON.stringify(vm.runInContext('getLocal(LOCAL_KEYS.readyGoods)', context)));
+        assert.equal(movedReadyGoods.length, 1);
+        assert.equal(movedReadyGoods[0].id, 99);
+        assert.equal(context.localStorage.getItem('ro_calc_ready_goods_stock'), null);
 
-    const firstLoad = JSON.parse(JSON.stringify(await vm.runInContext('loadSalesRecords()', context)));
-    assert.equal(firstLoad.length, 1);
-    assert.equal(firstLoad[0].product_name, 'Smoke Sale');
-    assert.equal(context.__remoteCalls.filter(call => call.table === 'sales_records' && call.action === 'maybeSingle').length, 1);
+        const firstLoad = JSON.parse(JSON.stringify(await vm.runInContext('loadSalesRecords()', context)));
+        assert.equal(firstLoad.length, 1);
+        assert.equal(firstLoad[0].product_name, 'Smoke Sale');
+        assert.equal(context.__remoteCalls.filter(call => call.table === 'sales_records' && call.action === 'maybeSingle').length, 1);
 
-    const cache = JSON.parse(context.sessionStorage.getItem('ro_calc_ready_goods_remote_cache') || '{}');
-    assert.equal(cache.sales_records.state, false);
+        const cache = JSON.parse(context.sessionStorage.getItem('ro_calc_ready_goods_remote_cache') || '{}');
+        assert.equal(cache.sales_records.state, false);
 
-    const secondLoad = JSON.parse(JSON.stringify(await vm.runInContext('loadSalesRecords()', context)));
-    assert.equal(secondLoad.length, 1);
-    assert.equal(context.__remoteCalls.filter(call => call.table === 'sales_records' && call.action === 'maybeSingle').length, 1);
+        const secondLoad = JSON.parse(JSON.stringify(await vm.runInContext('loadSalesRecords()', context)));
+        assert.equal(secondLoad.length, 1);
+        assert.equal(context.__remoteCalls.filter(call => call.table === 'sales_records' && call.action === 'maybeSingle').length, 1);
 
-    const authAccounts = JSON.parse(JSON.stringify(await vm.runInContext('loadAuthAccounts()', context)));
-    assert.equal(authAccounts.length, 1);
-    assert.equal(authAccounts[0].username, 'fallback_user');
+        const authAccounts = JSON.parse(JSON.stringify(await vm.runInContext('loadAuthAccounts()', context)));
+        assert.equal(authAccounts.length, 1);
+        assert.equal(authAccounts[0].username, 'fallback_user');
 
-    await vm.runInContext(`
-        saveSalesRecords([{ id: 2, product_name: 'Saved Locally', qty: 5 }]);
-    `, context);
+        await vm.runInContext(`
+            saveSalesRecords([{ id: 2, product_name: 'Saved Locally', qty: 5 }]);
+        `, context);
 
-    const savedLocal = JSON.parse(context.localStorage.getItem('ro_calc_sales_records') || '[]');
-    assert.equal(savedLocal.length, 1);
-    assert.equal(savedLocal[0].product_name, 'Saved Locally');
-    assert.equal(context.__remoteCalls.filter(call => call.table === 'sales_records' && call.action === 'upsert').length, 0);
+        const savedLocal = JSON.parse(context.localStorage.getItem('ro_calc_sales_records') || '[]');
+        assert.equal(savedLocal.length, 1);
+        assert.equal(savedLocal[0].product_name, 'Saved Locally');
+        assert.equal(context.__remoteCalls.filter(call => call.table === 'sales_records' && call.action === 'upsert').length, 0);
+    }
+
+    {
+        const context = createContext();
+        context.__invalidTables = new Set(['tasks', 'bug_reports', 'settings']);
+        runScript(context, 'js/supabase.js');
+        vm.runInContext('initSupabase()', context);
+
+        await vm.runInContext(`
+            _upsertWorkTableRows('bug_reports', LOCAL_KEYS.bugReports, [{
+                id: 101,
+                task_id: 501,
+                title: 'Smoke bug',
+                actual_result: 'Nothing renders',
+                updated_at: '2026-03-19T09:30:00.000Z'
+            }], 'id')
+        `, context);
+
+        const savedBugReports = JSON.parse(JSON.stringify(vm.runInContext('getLocal(LOCAL_KEYS.bugReports)', context)));
+        assert.equal(savedBugReports.length, 1);
+        assert.equal(savedBugReports[0].task_id, 501);
+        assert.equal(vm.runInContext('_canUseWorkModuleRemote()', context), false);
+        assert.equal(vm.runInContext('_hasSupabaseAccessProblem()', context), true);
+
+        const loadedBugReports = JSON.parse(JSON.stringify(await vm.runInContext(`
+            _loadWorkTableRows('bug_reports', LOCAL_KEYS.bugReports, 'updated_at', false)
+        `, context)));
+        assert.equal(loadedBugReports.length, 1);
+        assert.equal(loadedBugReports[0].title, 'Smoke bug');
+        assert.equal(context.__remoteCalls.filter(call => call.table === 'bug_reports' && call.action === 'order').length, 0);
+    }
+
+    {
+        const context = createContext();
+        context.__missingTables = new Set(['bug_reports']);
+        context.__settingsStore.set('bug_reports_json', JSON.stringify([
+            {
+                id: 1,
+                task_id: 10,
+                title: 'Old remote fallback bug',
+                updated_at: '2026-03-18T09:00:00.000Z',
+            },
+        ]));
+        runScript(context, 'js/supabase.js');
+        vm.runInContext('initSupabase()', context);
+
+        await vm.runInContext(`
+            _upsertWorkTableRows('bug_reports', LOCAL_KEYS.bugReports, [{
+                id: 2,
+                task_id: 20,
+                title: 'Fresh local bug',
+                updated_at: '2026-03-19T09:00:00.000Z'
+            }], 'id')
+        `, context);
+
+        const loadedBugReports = JSON.parse(JSON.stringify(await vm.runInContext(`
+            _loadWorkTableRows('bug_reports', LOCAL_KEYS.bugReports, 'updated_at', false)
+        `, context)));
+        assert.equal(loadedBugReports.length, 2);
+        assert.equal(loadedBugReports[0].title, 'Fresh local bug');
+        assert.equal(loadedBugReports[1].title, 'Old remote fallback bug');
+
+        const persistedFallback = JSON.parse(context.__settingsStore.get('bug_reports_json') || '[]');
+        assert.equal(persistedFallback.length, 2);
+        assert.equal(persistedFallback.some(item => item.title === 'Fresh local bug'), true);
+    }
 
     console.log('supabase fallback smoke checks passed');
 }

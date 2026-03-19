@@ -18,6 +18,12 @@ function _isSupabaseAccessError(error) {
         || code === '401';
 }
 
+function _hasSupabaseAccessProblem() {
+    if (supabaseAccessWarningShown) return true;
+    if (typeof window !== 'undefined') return !!window.__roSupabaseAccessProblem;
+    return false;
+}
+
 function _markSupabaseAccessProblem(error) {
     if (supabaseAccessWarningShown) return;
     supabaseAccessWarningShown = true;
@@ -341,7 +347,8 @@ function setLocal(key, data) {
                 _volatileLocalCache.delete(key);
             } catch (e2) {
                 console.error('[setLocal] Still no space after cleanup for key:', key);
-                if (isSupabaseReady() && NON_CRITICAL_LOCAL_CACHE_KEYS.has(key)) {
+                _volatileLocalCache.set(key, data);
+                if (isSupabaseReady() && !_hasSupabaseAccessProblem() && NON_CRITICAL_LOCAL_CACHE_KEYS.has(key)) {
                     console.warn('[setLocal] Skipping non-critical local cache because Supabase is available:', key);
                     return;
                 }
@@ -3783,6 +3790,28 @@ function _sortRows(rows, field, ascending) {
     });
 }
 
+function _mergeWorkRows(existingRows, incomingRows, conflictKey) {
+    const keys = String(conflictKey || 'id')
+        .split(',')
+        .map(part => part.trim())
+        .filter(Boolean);
+    const next = Array.isArray(existingRows) ? existingRows.slice() : [];
+    (incomingRows || []).forEach(row => {
+        const idx = next.findIndex(item => keys.every(key => String(item?.[key]) === String(row?.[key])));
+        if (idx < 0) {
+            next.push(row);
+            return;
+        }
+        const current = next[idx] || {};
+        const currentUpdatedAt = Date.parse(String(current.updated_at || current.created_at || '')) || 0;
+        const incomingUpdatedAt = Date.parse(String(row?.updated_at || row?.created_at || '')) || 0;
+        next[idx] = incomingUpdatedAt >= currentUpdatedAt
+            ? { ...current, ...row }
+            : { ...row, ...current };
+    });
+    return next;
+}
+
 let _workModuleRemoteAvailable = null;
 
 function _workSettingsKey(table) {
@@ -3815,6 +3844,12 @@ function _isWorkModuleMissingTableError(error) {
 
 function _markWorkModuleRemoteUnavailable(error) {
     if (_workModuleRemoteAvailable === false) return;
+    if (_isSupabaseAccessError(error)) {
+        _workModuleRemoteAvailable = false;
+        _markSupabaseAccessProblem(error);
+        console.warn('Work management remote is unavailable because Supabase access failed. Using local fallback for this module.');
+        return;
+    }
     if (_isWorkModuleMissingTableError(error)) {
         _workModuleRemoteAvailable = false;
         console.warn('Work management tables are not available in Supabase yet. Using local fallback for this module.');
@@ -3822,7 +3857,7 @@ function _markWorkModuleRemoteUnavailable(error) {
 }
 
 function _canUseWorkModuleRemote() {
-    return isSupabaseReady() && _workModuleRemoteAvailable !== false;
+    return isSupabaseReady() && !_hasSupabaseAccessProblem() && _workModuleRemoteAvailable !== false;
 }
 
 async function _loadJsonSetting(settingKey, fallbackValue) {
@@ -3836,12 +3871,14 @@ async function _loadJsonSetting(settingKey, fallbackValue) {
             .maybeSingle();
         if (error) {
             console.error(`load setting ${settingKey} error:`, error);
+            if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
             return fallback;
         }
         if (!data || !data.value) return fallback;
         return JSON.parse(data.value);
     } catch (error) {
         console.error(`load setting ${settingKey} exception:`, error);
+        if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
         return fallback;
     }
 }
@@ -3856,15 +3893,20 @@ async function _saveJsonSetting(settingKey, value) {
                 value: JSON.stringify(value),
                 updated_at: new Date().toISOString(),
             }, { onConflict: 'key' });
-        if (error) console.error(`save setting ${settingKey} error:`, error);
+        if (error) {
+            console.error(`save setting ${settingKey} error:`, error);
+            if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
+        }
     } catch (error) {
         console.error(`save setting ${settingKey} exception:`, error);
+        if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
     }
     return value;
 }
 
 async function _loadWorkTableRows(table, localKey, orderBy, ascending) {
     const settingsKey = _workSettingsKey(table);
+    const conflictKey = _workOnConflictKey(table);
     let remoteTableMissing = _shouldSkipOptionalWorkTableRemote(table);
     if (_canUseWorkModuleRemote() && !remoteTableMissing) {
         try {
@@ -3907,8 +3949,14 @@ async function _loadWorkTableRows(table, localKey, orderBy, ascending) {
                 await _saveJsonSetting(settingsKey, local);
                 return orderBy ? _sortRows(local, orderBy, ascending) : local;
             }
-            setLocal(localKey, remoteFallback);
-            return orderBy ? _sortRows(remoteFallback, orderBy, ascending) : remoteFallback;
+            const mergedFallback = local.length > 0
+                ? _mergeWorkRows(remoteFallback, local, conflictKey)
+                : remoteFallback;
+            if (local.length > 0 && remoteTableMissing) {
+                await _saveJsonSetting(settingsKey, mergedFallback);
+            }
+            setLocal(localKey, mergedFallback);
+            return orderBy ? _sortRows(mergedFallback, orderBy, ascending) : mergedFallback;
         }
         if (local.length > 0 || remoteTableMissing) {
             await _saveJsonSetting(settingsKey, local);
@@ -3954,11 +4002,19 @@ async function _upsertWorkTableRows(table, localKey, rows, onConflict) {
             else next.push(row);
         });
         setLocal(localKey, next);
-        if (!_canUseWorkModuleRemote() && settingsKey) await _saveJsonSetting(settingsKey, next);
+        if ((!_canUseWorkModuleRemote() || remoteTableMissing) && settingsKey) {
+            const staged = await _loadJsonSetting(settingsKey, []);
+            const mergedFallback = Array.isArray(staged) ? _mergeWorkRows(staged, next, conflictKey) : next;
+            await _saveJsonSetting(settingsKey, mergedFallback);
+        }
         return payload;
     }
     const merged = _bulkMergeLocalEntityRows(localKey, payload, 'id');
-    if (!_canUseWorkModuleRemote() && settingsKey) await _saveJsonSetting(settingsKey, merged);
+    if ((!_canUseWorkModuleRemote() || remoteTableMissing) && settingsKey) {
+        const staged = await _loadJsonSetting(settingsKey, []);
+        const mergedFallback = Array.isArray(staged) ? _mergeWorkRows(staged, merged, conflictKey) : merged;
+        await _saveJsonSetting(settingsKey, mergedFallback);
+    }
     return payload;
 }
 
