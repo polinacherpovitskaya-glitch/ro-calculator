@@ -10,6 +10,7 @@ const BugReports = {
     },
     quickDraft: null,
     _overlayOpen: false,
+    submittingPrefixes: new Set(),
 
     async load() {
         this.isLoading = true;
@@ -317,7 +318,7 @@ const BugReports = {
                     <input type="url" id="${prefix}-link" value="${this.esc(draft.extra_link)}" placeholder="Ссылка на Loom / документ / чат">
                 </div>
                 <div class="bug-form-actions">
-                    <button class="btn btn-success" onclick="BugReports.submit('${prefix}')">Отправить баг</button>
+                    <button class="btn btn-success" type="button" id="${prefix}-submit" onclick="BugReports.submit('${prefix}')">Отправить баг</button>
                     ${compact ? '<button class="btn btn-outline" onclick="BugReports.closeQuickReport()">Отмена</button>' : '<button class="btn btn-outline" onclick="BugReports.resetPageForm()">Сбросить</button>'}
                 </div>
             </div>
@@ -487,6 +488,18 @@ const BugReports = {
         this.render();
     },
 
+    setSubmitState(prefix, isSubmitting) {
+        if (isSubmitting) this.submittingPrefixes.add(prefix);
+        else this.submittingPrefixes.delete(prefix);
+
+        const button = document.getElementById(`${prefix}-submit`);
+        if (!button) return;
+        button.disabled = !!isSubmitting;
+        button.textContent = isSubmitting ? 'Отправляем…' : 'Отправить баг';
+        button.style.opacity = isSubmitting ? '0.75' : '';
+        button.style.cursor = isSubmitting ? 'progress' : '';
+    },
+
     syncQuickButton() {
         const button = document.getElementById('quick-bug-report-btn');
         if (!button) return;
@@ -559,6 +572,8 @@ const BugReports = {
     },
 
     async submit(prefix) {
+        if (this.submittingPrefixes.has(prefix)) return;
+        this.setSubmitState(prefix, true);
         try {
             const payload = this.collectForm(prefix);
             if (!payload.title) {
@@ -680,6 +695,8 @@ const BugReports = {
         } catch (error) {
             console.error('[BugReports] submit failed:', error);
             App.toast(`Не удалось отправить баг: ${error.message || error}`);
+        } finally {
+            this.setSubmitState(prefix, false);
         }
     },
 

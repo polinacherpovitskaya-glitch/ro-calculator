@@ -55,5 +55,9 @@ assert.match(indexHtml, /quick-bug-report-btn__label">Баг</);
 const bugsJs = fs.readFileSync(path.join(__dirname, '..', 'js', 'bugs.js'), 'utf8');
 assert.doesNotMatch(bugsJs, /App\?\.\s*currentPage === 'bugs'/);
 assert.match(bugsJs, /openQuickReport\(preset = \{\}\)/);
+assert.match(bugsJs, /submittingPrefixes:\s*new Set\(\)/);
+assert.match(bugsJs, /id="\$\{prefix\}-submit"/);
+assert.match(bugsJs, /if \(this\.submittingPrefixes\.has\(prefix\)\) return;/);
+assert.match(bugsJs, /button\.textContent = isSubmitting \? 'Отправляем…' : 'Отправить баг'/);
 
 console.log('bug report smoke checks passed');
