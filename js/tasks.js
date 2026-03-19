@@ -1006,12 +1006,12 @@ const Tasks = {
 
     renderRowActions(task, { showManualMoves = false } = {}) {
         return `
-            <div class="flex gap-4" style="flex-wrap:wrap; justify-content:flex-end;">
+            <div class="task-row-actions">
                 ${showManualMoves ? `
-                    <button class="btn btn-sm btn-outline" type="button" onclick="return Tasks.onMoveTaskClick(event, ${task.id}, -1)">↑</button>
-                    <button class="btn btn-sm btn-outline" type="button" onclick="return Tasks.onMoveTaskClick(event, ${task.id}, 1)">↓</button>
+                    <button class="btn btn-sm btn-outline task-row-icon-btn" type="button" title="Поднять выше" aria-label="Поднять задачу выше" onclick="return Tasks.onMoveTaskClick(event, ${task.id}, -1)">↑</button>
+                    <button class="btn btn-sm btn-outline task-row-icon-btn" type="button" title="Опустить ниже" aria-label="Опустить задачу ниже" onclick="return Tasks.onMoveTaskClick(event, ${task.id}, 1)">↓</button>
                 ` : ''}
-                <button class="btn btn-sm btn-outline" type="button" onclick="return Tasks.onDeleteTaskClick(event, ${task.id})">Удалить</button>
+                <button class="btn btn-sm btn-outline task-row-icon-btn task-row-delete-btn" type="button" title="Удалить задачу" aria-label="Удалить задачу" onclick="return Tasks.onDeleteTaskClick(event, ${task.id})">&times;</button>
             </div>
         `;
     },

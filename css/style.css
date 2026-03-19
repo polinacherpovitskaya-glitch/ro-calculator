@@ -2694,6 +2694,31 @@ table .text-center { text-align: center; }
 .inline-status-select.status-done { color: #22c55e; font-weight: 700; }
 .inline-status-select.status-completed { color: #22c55e; font-weight: 700; }
 .inline-status-select.status-cancelled { color: #ef4444; }
+.task-row-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 4px;
+    flex-wrap: nowrap;
+}
+.task-row-icon-btn {
+    width: 32px;
+    min-width: 32px;
+    height: 32px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+    font-size: 16px;
+}
+.task-row-delete-btn {
+    color: #ef4444;
+}
+.task-row-delete-btn:hover {
+    border-color: #ef4444;
+    background: rgba(239, 68, 68, 0.08);
+}
 
 @media (max-width: 1280px) {
     .orders-board { grid-template-columns: repeat(3, 1fr); }
