@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v153';
+const APP_VERSION = 'v154';
 
 const App = {
     currentPage: 'orders',
@@ -826,10 +826,16 @@ const App = {
     showUpdateBanner(remoteVersion, mode = 'update') {
         const banner = document.getElementById('update-banner');
         if (!banner) return;
+        const resolvedVersion = String(remoteVersion || '').trim() || APP_VERSION;
+        banner.dataset.targetVersion = resolvedVersion;
         if (mode === 'stale') {
-            banner.textContent = `⟳ Обновиться до ${remoteVersion} (сейчас ${APP_VERSION})`;
+            banner.textContent = `⟳ Обновиться до ${resolvedVersion} (сейчас ${APP_VERSION})`;
         } else {
-            banner.textContent = '⟳ Обновиться до ' + remoteVersion;
+            banner.textContent = '⟳ Обновиться до ' + resolvedVersion;
+        }
+        const maxSeenVersion = this.getMaxSeenVersion();
+        if (!maxSeenVersion || this.isRemoteVersionNewer(resolvedVersion, maxSeenVersion)) {
+            localStorage.setItem('ro_calc_max_seen_version', resolvedVersion);
         }
         banner.style.display = 'inline-flex';
     },
@@ -838,14 +844,17 @@ const App = {
         const banner = document.getElementById('update-banner');
         if (!banner) return;
         banner.textContent = '⟳ Доступно обновление';
+        delete banner.dataset.targetVersion;
         banner.style.display = 'none';
     },
 
     reloadForUpdate() {
         try {
+            const banner = document.getElementById('update-banner');
+            const targetVersion = (banner && banner.dataset && banner.dataset.targetVersion) || this.getMaxSeenVersion() || APP_VERSION;
             const url = new URL(window.location.href);
             url.searchParams.set('reload', Date.now().toString());
-            url.searchParams.set('targetVersion', this.getMaxSeenVersion() || APP_VERSION);
+            url.searchParams.set('targetVersion', String(targetVersion));
             window.location.replace(url.toString());
         } catch (e) {
             window.location.reload();

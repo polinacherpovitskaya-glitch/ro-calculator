@@ -20,6 +20,11 @@ assert.equal(sidebarVersion, appVersion, 'index.html app-version placeholder mus
 assert.ok(appJs.includes('ro_calc_max_seen_version'), 'App should remember the newest seen version to warn about stale tabs');
 assert.match(appJs, /window\.location\.replace\(/, 'Update action should hard-navigate to bypass stale cached HTML');
 assert.match(appJs, /searchParams\.set\('reload'/, 'Update action should add a cache-busting reload token');
+assert.match(appJs, /dataset\.targetVersion/, 'Update banner should remember the exact remote version shown to the user');
+
+const appScriptMatch = indexHtml.match(/<script src="js\/app\.js\?v=(\d+)"><\/script>/);
+assert.ok(appScriptMatch, 'index.html must include a versioned js/app.js asset');
+assert.equal(appScriptMatch[1], appVersion.replace(/^v/, ''), 'index.html js/app.js asset version must match APP_VERSION number');
 
 const sidebarNav = indexHtml.match(/<nav class="sidebar-nav">([\s\S]*?)<\/nav>/);
 assert.ok(sidebarNav, 'Sidebar nav not found in index.html');
