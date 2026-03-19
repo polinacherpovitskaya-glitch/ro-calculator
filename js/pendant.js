@@ -736,6 +736,19 @@ const Pendant = {
         if (!totalElements || totalElements <= 0) return null;
         const LETTER_BLANK_IDS = [30, 31];
         const TIERS = [50, 100, 300, 500, 1000, 3000];
+        const resolveDefaultBlankMargin = (qty) => {
+            if (typeof getBlankMargin === 'function') return getBlankMargin(qty);
+            if (qty < 75) return 0.75;
+            if (qty < 200) return 0.70;
+            if (qty < 400) return 0.60;
+            if (qty < 750) return 0.50;
+            if (qty < 2500) return 0.45;
+            return 0.40;
+        };
+        const roundPriceTo5 = (value) => {
+            if (typeof roundTo5 === 'function') return roundTo5(value);
+            return Math.ceil(value / 5) * 5;
+        };
 
         // Find closest tier (round up to next tier)
         let tierQty = TIERS[TIERS.length - 1];
@@ -755,13 +768,15 @@ const Pendant = {
         // Fallback: use App.templates (always available after login)
         const tpl = (App.templates || []).find(t => LETTER_BLANK_IDS.includes(Number(t.id)));
         if (!tpl) return null;
-
-        // Sell price from custom_prices (user-defined per tier)
-        const sellPrice = tpl.custom_prices?.[tierQty] || 0;
+        const customPrice = Number(tpl.custom_prices?.[tierQty]);
 
         // Compute cost like enrichMolds: calculateItemCost + mold amortization + hw
         const params = App.params;
-        if (!params) return sellPrice > 0 ? { cost: 0, sellPrice, margin: 0, tierQty } : null;
+        if (!params) {
+            return Number.isFinite(customPrice) && customPrice > 0
+                ? { cost: 0, sellPrice: customPrice, margin: 0, tierQty }
+                : null;
+        }
 
         const pph = tpl.pieces_per_hour_avg || tpl.pieces_per_hour_min || 100;
         const weight = tpl.weight_grams || 5;
@@ -805,8 +820,22 @@ const Pendant = {
         }
         cost = round2(cost);
 
-        const keepNetRate = 1 - (params.taxRate || 0.06) - 0.065;
-        const margin = sellPrice > 0 ? round2(((sellPrice * keepNetRate) - cost) / sellPrice) : 0;
+        let sellPrice = Number.isFinite(customPrice) && customPrice > 0 ? customPrice : 0;
+        let targetMargin = 0;
+
+        if (sellPrice <= 0 && cost > 0) {
+            const customMargin = Number(tpl.custom_margins?.[tierQty]);
+            targetMargin = Number.isFinite(customMargin) ? customMargin : resolveDefaultBlankMargin(tierQty);
+            const keepNetRate = 1 - (Number.isFinite(params.taxRate) ? params.taxRate : 0.06) - 0.05;
+            if (keepNetRate > 0 && targetMargin < 1) {
+                sellPrice = roundPriceTo5(round2(cost / (1 - targetMargin) / keepNetRate));
+            }
+        }
+
+        const keepNetRate = 1 - (Number.isFinite(params.taxRate) ? params.taxRate : 0.06) - 0.05;
+        const margin = sellPrice > 0
+            ? round2(((sellPrice * keepNetRate) - cost) / sellPrice)
+            : targetMargin;
 
         return { cost, sellPrice, margin, tierQty };
     },

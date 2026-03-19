@@ -192,6 +192,12 @@ function stubRuntime(context) {
             packagingHours: 8,
             plasticHours: 8,
             hardwareHours: 8,
+            plasticCostPerKg: 2500,
+            moldBaseCost: 18000,
+            designCost: 0,
+            cuttingSpeed: 1000,
+            nfcTagCost: 0,
+            nfcWriteSpeed: 1000,
         };
     `, context);
 }
@@ -710,6 +716,83 @@ async function smokePendantAutoPriceFromBlanks() {
 
     assert.deepEqual(restoredAutoState.sells, [17, 17, 17, 17, 17]);
     assert.deepEqual(restoredAutoState.autoFlags, [true, true, true, true, true]);
+
+    const marginFallbackState = clone(await vm.runInContext(`(() => {
+        App.params = {
+            wasteFactor: 1.1,
+            fotPerHour: 100,
+            indirectCostMode: 'none',
+            indirectPerHour: 0,
+            taxRate: 0.06,
+            packagingHours: 8,
+            plasticHours: 8,
+            hardwareHours: 8,
+            plasticCostPerKg: 2500,
+            moldBaseCost: 18000,
+            designCost: 0,
+            cuttingSpeed: 1000,
+            nfcTagCost: 0,
+            nfcWriteSpeed: 1000,
+        };
+        App.templates = [{
+            id: 30,
+            category: 'blank',
+            custom_prices: {},
+            custom_margins: { 500: 0.30 },
+            pieces_per_hour_avg: 100,
+            pieces_per_hour_min: 100,
+            weight_grams: 5,
+            mold_count: 1,
+            cost_cny: 800,
+            cny_rate: 12.5,
+            delivery_cost: 8000,
+            hw_name: '',
+            hw_price_per_unit: 0,
+            hw_speed: 0,
+        }];
+        Pendant._wizardData = Pendant.getEmpty();
+        Pendant._wizardData.name = 'ВВВ❤️❤️';
+        Pendant._wizardData.quantity = 100;
+        Pendant._syncElements(Pendant._nameChars(Pendant._wizardData.name));
+
+        const tierQty = 500;
+        const singleMoldCost = (800 * 12.5) + 8000;
+        const moldAmortPerUnit = singleMoldCost / 4500;
+        const item = {
+            quantity: tierQty,
+            pieces_per_hour: 100,
+            weight_grams: 5,
+            extra_molds: 0,
+            complex_design: false,
+            is_nfc: false,
+            nfc_programming: false,
+            hardware_qty: 0,
+            packaging_qty: 0,
+            printing_qty: 0,
+            delivery_included: false,
+        };
+        const result = calculateItemCost(item, App.params);
+        const cost = round2(result.costTotal - result.costMoldAmortization + moldAmortPerUnit);
+        const expectedSellPrice = Math.ceil((round2(cost / (1 - 0.30) / (1 - 0.06 - 0.05))) / 5) * 5;
+
+        const html = Pendant._renderStep5();
+        return {
+            sells: Pendant._wizardData.elements.map(el => el.sell_price),
+            autoFlags: Pendant._wizardData.elements.map(el => el.sell_price_auto),
+            expectedSellPrice,
+            html
+        };
+    })()`, pendantContext));
+
+    assert.deepEqual(
+        marginFallbackState.sells,
+        Array(5).fill(marginFallbackState.expectedSellPrice)
+    );
+    assert.deepEqual(marginFallbackState.autoFlags, [true, true, true, true, true]);
+    assert.match(
+        marginFallbackState.html,
+        new RegExp(`value="${marginFallbackState.expectedSellPrice}"`)
+    );
 }
 
 async function smokeLegacyPendantRestore(context) {
