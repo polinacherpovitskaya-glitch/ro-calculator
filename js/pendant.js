@@ -373,12 +373,14 @@ const Pendant = {
             if (oldEl && this._charsEquivalent(oldEl.char, ch)) {
                 return { ...oldEl, char: ch };
             }
+            const hasLegacySellPrice = oldEl && Object.prototype.hasOwnProperty.call(oldEl, 'sell_price');
             return {
                 char: ch,
                 color: oldEl?.color || '',
                 has_print: oldEl?.has_print || false,
                 print_price: oldEl?.print_price || 0,
-                sell_price: oldEl?.sell_price || 0,
+                sell_price: hasLegacySellPrice ? oldEl.sell_price : null,
+                sell_price_auto: oldEl?.sell_price_auto ?? (!(parseFloat(oldEl?.sell_price) > 0)),
                 sell_print: oldEl?.sell_print || 0,
             };
         });
@@ -837,8 +839,13 @@ const Pendant = {
 
         // Initialize per-element sell_price if not set
         elements.forEach(el => {
-            if (el.sell_price === undefined || el.sell_price === null) {
-                el.sell_price = autoElemSell || 0;
+            const currentSell = parseFloat(el.sell_price);
+            const shouldAutoFill = el.sell_price_auto !== false && (autoElemSell || 0) > 0;
+            if (shouldAutoFill) {
+                el.sell_price = autoElemSell;
+                el.sell_price_auto = true;
+            } else if (!Number.isFinite(currentSell)) {
+                el.sell_price = 0;
             }
         });
 
@@ -1005,6 +1012,7 @@ const Pendant = {
         if (key && groups[key]) {
             groups[key].forEach(i => {
                 pnd.elements[i].sell_price = price;
+                pnd.elements[i].sell_price_auto = !(price > 0);
             });
         }
         this._renderStep();

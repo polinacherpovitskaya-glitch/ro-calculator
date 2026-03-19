@@ -644,6 +644,74 @@ async function smokePendantIgnoresSpaces() {
     assert.equal(fallbackState.elements[2].color, 'yellow');
 }
 
+async function smokePendantAutoPriceFromBlanks() {
+    const pendantContext = createContext();
+    stubRuntime(pendantContext);
+    ['js/calculator.js', 'js/app.js'].forEach(file => runScript(pendantContext, file));
+    vm.runInContext('delete globalThis.Pendant;', pendantContext);
+    runScript(pendantContext, 'js/pendant.js');
+
+    await vm.runInContext(`(() => {
+        App.templates = [{
+            id: 30,
+            category: 'blank',
+            custom_prices: { 500: 17 },
+            custom_margins: {},
+            pieces_per_hour_avg: 100,
+            pieces_per_hour_min: 100,
+            weight_grams: 5,
+            mold_count: 1,
+            cost_cny: 800,
+            cny_rate: 12.5,
+            delivery_cost: 8000,
+            hw_name: '',
+            hw_price_per_unit: 0,
+            hw_speed: 0,
+        }];
+        Pendant._wizardData = Pendant.getEmpty();
+        Pendant._wizardData.name = 'ВВВ❤️❤️';
+        Pendant._wizardData.quantity = 100;
+        Pendant._syncElements(Pendant._nameChars(Pendant._wizardData.name));
+    })()`, pendantContext);
+
+    const autoState = clone(await vm.runInContext(`(() => {
+        const html = Pendant._renderStep5();
+        return {
+            sells: Pendant._wizardData.elements.map(el => el.sell_price),
+            autoFlags: Pendant._wizardData.elements.map(el => el.sell_price_auto),
+            html
+        };
+    })()`, pendantContext));
+
+    assert.deepEqual(autoState.sells, [17, 17, 17, 17, 17]);
+    assert.deepEqual(autoState.autoFlags, [true, true, true, true, true]);
+    assert.match(autoState.html, /value="17"/);
+
+    const manualState = clone(await vm.runInContext(`(() => {
+        Pendant._setGroupSellPrice(0, 25);
+        Pendant._renderStep5();
+        return {
+            sells: Pendant._wizardData.elements.map(el => el.sell_price),
+            autoFlags: Pendant._wizardData.elements.map(el => el.sell_price_auto)
+        };
+    })()`, pendantContext));
+
+    assert.deepEqual(manualState.sells, [25, 25, 25, 25, 25]);
+    assert.deepEqual(manualState.autoFlags, [false, false, false, false, false]);
+
+    const restoredAutoState = clone(await vm.runInContext(`(() => {
+        Pendant._setGroupSellPrice(0, 0);
+        Pendant._renderStep5();
+        return {
+            sells: Pendant._wizardData.elements.map(el => el.sell_price),
+            autoFlags: Pendant._wizardData.elements.map(el => el.sell_price_auto)
+        };
+    })()`, pendantContext));
+
+    assert.deepEqual(restoredAutoState.sells, [17, 17, 17, 17, 17]);
+    assert.deepEqual(restoredAutoState.autoFlags, [true, true, true, true, true]);
+}
+
 async function smokeLegacyPendantRestore(context) {
     const legacyNestedPendant = {
         item_type: 'pendant',
@@ -1762,6 +1830,7 @@ async function main() {
     await smokePackagingWarehousePickerDefaults(context);
     await smokePendantWarehousePickerRichUI();
     await smokePendantIgnoresSpaces();
+    await smokePendantAutoPriceFromBlanks();
     await smokeLegacyPendantRestore(context);
     await smokeReadyGoodsRollback(context);
     await smokeReadyGoodsSalesAndManualAdd(context);
