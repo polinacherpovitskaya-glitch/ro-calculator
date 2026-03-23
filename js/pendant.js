@@ -37,6 +37,7 @@ const Pendant = {
         if (!pnd) return;
         const container = document.getElementById('calc-pendants-container');
         if (!container) return;
+        const displayName = this._normalizeName(pnd.name || '') || '...';
 
         let card = document.getElementById('pendant-card-' + idx);
         if (!card) {
@@ -60,7 +61,7 @@ const Pendant = {
                 <div style="flex:1;min-width:0;">
                     <h3 style="margin:0;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
                         <span style="font-size:16px;">🔤</span>
-                        Подвес "${App.escHtml(pnd.name || '...')}"
+                        Подвес "${App.escHtml(displayName)}"
                         <span class="text-muted" style="font-size:13px;font-weight:400;">× ${pnd.quantity || 0} шт</span>
                     </h3>
                     <div style="font-size:12px;color:var(--text-muted);margin-top:4px;">
@@ -106,14 +107,14 @@ const Pendant = {
             ? JSON.parse(JSON.stringify(Calculator.pendants[this._editingIndex]))
             : this.getEmpty();
         this._wizardData = pnd;
-        this._wizardData.name = this._normalizeName(this._wizardData.name);
-        this._syncElements(this._nameChars(this._wizardData.name));
+        this._commitName(this._wizardData.name);
         this._wizardStep = 1;
         this._selectedBeads = new Set();
         this._showWizardModal();
     },
 
     _showWizardModal() {
+        if (!(this._selectedBeads instanceof Set)) this._selectedBeads = new Set();
         // Remove existing modal if any
         let modal = document.getElementById('pendant-wizard-modal');
         if (modal) modal.remove();
@@ -159,6 +160,7 @@ const Pendant = {
     },
 
     _goToStep(n) {
+        this._readCurrentStep();
         if (n === 1 || this._wizardData.name) {
             this._wizardStep = n;
             this._showWizardModal();
@@ -238,14 +240,19 @@ const Pendant = {
         const nameInput = document.getElementById('pw-name');
         if (nameInput) {
             nameInput.addEventListener('input', () => {
-                const normalized = this._normalizeName(nameInput.value);
-                if (nameInput.value !== normalized) {
-                    const caretPos = nameInput.selectionStart || normalized.length;
+                const rawValue = nameInput.value;
+                const caretPos = nameInput.selectionStart ?? rawValue.length;
+                const normalized = this._commitName(rawValue);
+                if (rawValue !== normalized) {
+                    const normalizedCaret = this._normalizeName(rawValue.slice(0, caretPos)).length;
                     nameInput.value = normalized;
-                    nameInput.setSelectionRange(caretPos, caretPos);
+                    if (typeof nameInput.setSelectionRange === 'function') {
+                        nameInput.setSelectionRange(normalizedCaret, normalizedCaret);
+                    }
                 }
                 const preview = document.getElementById('pw-beads-preview');
-                if (preview) preview.innerHTML = this._renderBeads(normalized, []);
+                if (preview) preview.innerHTML = this._renderBeads(normalized, this._wizardData.elements);
+                this._updateStepAvailability();
             });
         }
     },
@@ -277,6 +284,21 @@ const Pendant = {
         return String(name || '')
             .toUpperCase()
             .replace(/\s+/gu, '');
+    },
+
+    _commitName(name) {
+        const normalized = this._normalizeName(name);
+        this._wizardData.name = normalized;
+        this._syncElements(this._nameChars(normalized));
+        return normalized;
+    },
+
+    _updateStepAvailability() {
+        const buttons = document.querySelectorAll('.pendant-step-btn');
+        if (!buttons || !buttons.length) return;
+        buttons.forEach((btn, idx) => {
+            if (idx > 0) btn.disabled = !this._wizardData.name;
+        });
     },
 
     _stripTechnicalCharParts(char) {
@@ -338,9 +360,7 @@ const Pendant = {
 
     _renderStep2() {
         const pnd = this._wizardData;
-        const chars = this._nameChars(pnd.name);
-        // Ensure elements array matches chars
-        this._syncElements(chars);
+        this._commitName(pnd.name);
         const elements = pnd.elements;
 
         return `
@@ -855,6 +875,7 @@ const Pendant = {
     _renderStep5() {
         const pnd = this._wizardData;
         this._readCurrentStep();
+        this._commitName(pnd.name);
 
         const elements = this._countableElements(pnd.elements);
         const elemCount = elements.length;
@@ -1066,17 +1087,14 @@ const Pendant = {
         if (this._wizardStep === 1) {
             pnd.quantity = parseInt(document.getElementById('pw-qty')?.value) || 0;
             const rawName = document.getElementById('pw-name')?.value || '';
-            const newName = this._normalizeName(rawName);
-            if (newName !== pnd.name) {
-                pnd.name = newName;
-                this._syncElements(this._nameChars(newName));
-            }
+            this._commitName(rawName);
         }
     },
 
     _savePendant() {
         this._readCurrentStep();
         const pnd = this._wizardData;
+        this._commitName(pnd.name);
 
         if (!pnd.name) { App.toast('Введите надпись'); return; }
         if (!pnd.quantity || pnd.quantity <= 0) { App.toast('Введите количество'); return; }

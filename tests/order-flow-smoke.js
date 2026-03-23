@@ -650,6 +650,55 @@ async function smokePendantIgnoresSpaces() {
     assert.equal(fallbackState.elements[2].color, 'yellow');
 }
 
+async function smokePendantStepNavigationSync() {
+    const pendantContext = createContext();
+    stubRuntime(pendantContext);
+    ['js/calculator.js', 'js/app.js'].forEach(file => runScript(pendantContext, file));
+    vm.runInContext('delete globalThis.Pendant;', pendantContext);
+    runScript(pendantContext, 'js/pendant.js');
+
+    const navState = clone(await vm.runInContext(`(() => {
+        Pendant._wizardData = Pendant.getEmpty();
+        Pendant._wizardData.name = 'OLD';
+        Pendant._wizardData.elements = [{ char: 'O', color: 'blue', has_print: false, print_price: 0 }];
+        Pendant._wizardStep = 1;
+        document.getElementById('pw-qty').value = '10';
+        document.getElementById('pw-name').value = 'A ❤️ 😊';
+        Pendant._goToStep(2);
+        return {
+            step: Pendant._wizardStep,
+            name: Pendant._wizardData.name,
+            chars: Pendant._wizardData.elements.map(el => el.char)
+        };
+    })()`, pendantContext));
+
+    assert.equal(navState.step, 2);
+    assert.equal(navState.name, 'A❤️😊');
+    assert.deepEqual(navState.chars, ['A', '❤️', '😊']);
+
+    const staleState = clone(await vm.runInContext(`(() => {
+        Pendant._wizardData = Pendant.getEmpty();
+        Pendant._wizardData.name = 'A❤️😊';
+        Pendant._wizardData.elements = [
+            { char: 'A', color: 'red', has_print: false, print_price: 0 },
+            { char: ' ', color: 'ghost', has_print: false, print_price: 0 },
+            { char: '❤️', color: 'pink', has_print: false, print_price: 0 },
+            { char: '😊', color: 'yellow', has_print: false, print_price: 0 }
+        ];
+        Pendant._wizardStep = 1;
+        document.getElementById('pw-qty').value = '10';
+        document.getElementById('pw-name').value = 'A❤️😊';
+        Pendant._readCurrentStep();
+        return {
+            chars: Pendant._wizardData.elements.map(el => el.char),
+            colors: Pendant._wizardData.elements.map(el => el.color)
+        };
+    })()`, pendantContext));
+
+    assert.deepEqual(staleState.chars, ['A', '❤️', '😊']);
+    assert.deepEqual(staleState.colors, ['red', 'pink', 'yellow']);
+}
+
 async function smokePendantAutoPriceFromBlanks() {
     const pendantContext = createContext();
     stubRuntime(pendantContext);
@@ -1913,6 +1962,7 @@ async function main() {
     await smokePackagingWarehousePickerDefaults(context);
     await smokePendantWarehousePickerRichUI();
     await smokePendantIgnoresSpaces();
+    await smokePendantStepNavigationSync();
     await smokePendantAutoPriceFromBlanks();
     await smokeLegacyPendantRestore(context);
     await smokeReadyGoodsRollback(context);
