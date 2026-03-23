@@ -217,6 +217,11 @@ const DEFAULT_MOLD_CAPACITY_BY_TYPE = {
     customer: 1000,
     blank: 5000,
 };
+const MOLD_USAGE_ALERT_STEP = 1000;
+const MOLD_USAGE_ALERT_ASSIGNEE_FALLBACKS = {
+    lesha: 1772827635013,
+    anastasia: 1741700002000,
+};
 
 const Warehouse = {
     allItems: [],
@@ -512,6 +517,229 @@ const Warehouse = {
 
     _defaultMoldCapacityTotal(moldType) {
         return DEFAULT_MOLD_CAPACITY_BY_TYPE[this._normalizeMoldType(moldType)] || 0;
+    },
+
+    _normalizeSimpleText(value) {
+        return String(value || '')
+            .trim()
+            .toLowerCase()
+            .replace(/\s+/g, ' ');
+    },
+
+    _parseMoldAlertedThresholds(item) {
+        const raw = item && item.mold_alerted_thresholds;
+        let values = [];
+        if (Array.isArray(raw)) {
+            values = raw;
+        } else if (typeof raw === 'string') {
+            const trimmed = raw.trim();
+            if (trimmed) {
+                try {
+                    const parsed = JSON.parse(trimmed);
+                    values = Array.isArray(parsed) ? parsed : trimmed.split(',');
+                } catch (e) {
+                    values = trimmed.split(',');
+                }
+            }
+        }
+        return Array.from(new Set(
+            (values || [])
+                .map(value => parseInt(value, 10))
+                .filter(value => Number.isFinite(value) && value > 0)
+        )).sort((a, b) => a - b);
+    },
+
+    _getCrossedMoldUsageThresholds(beforeUsed, afterUsed, alreadyAlerted) {
+        const safeBefore = Math.max(0, parseFloat(beforeUsed) || 0);
+        const safeAfter = Math.max(0, parseFloat(afterUsed) || 0);
+        if (safeAfter <= safeBefore) return [];
+        const alerted = new Set((alreadyAlerted || []).map(value => parseInt(value, 10)).filter(Boolean));
+        const thresholds = [];
+        const startStep = Math.floor(safeBefore / MOLD_USAGE_ALERT_STEP) + 1;
+        const endStep = Math.floor(safeAfter / MOLD_USAGE_ALERT_STEP);
+        for (let step = startStep; step <= endStep; step += 1) {
+            const threshold = step * MOLD_USAGE_ALERT_STEP;
+            if (!alerted.has(threshold)) thresholds.push(threshold);
+        }
+        return thresholds;
+    },
+
+    _findEmployeeByNames(employees, variants) {
+        const normalizedVariants = (variants || []).map(value => this._normalizeSimpleText(value)).filter(Boolean);
+        return (employees || []).find(employee => {
+            const name = this._normalizeSimpleText(employee && employee.name);
+            return normalizedVariants.some(variant => name.includes(variant));
+        }) || null;
+    },
+
+    _resolveMoldUsageAlertPeople(employees) {
+        const lesha = this._findEmployeeByNames(employees, ['леша', 'алеша', 'алексей'])
+            || { id: MOLD_USAGE_ALERT_ASSIGNEE_FALLBACKS.lesha, name: 'Леша' };
+        const anastasia = this._findEmployeeByNames(employees, ['анастасия'])
+            || { id: MOLD_USAGE_ALERT_ASSIGNEE_FALLBACKS.anastasia, name: 'Анастасия' };
+        return { lesha, anastasia };
+    },
+
+    _findAreaIdBySlug(areas, slug) {
+        const normalizedSlug = this._normalizeSimpleText(slug);
+        const area = (areas || []).find(entry => this._normalizeSimpleText(entry && entry.slug) === normalizedSlug);
+        return Number(area && area.id || 0) || null;
+    },
+
+    _buildMoldUsageAlertContext(whItem, threshold, options = {}) {
+        const moldName = String(whItem && whItem.name || 'Без названия').trim();
+        const sku = String(whItem && whItem.sku || '').trim();
+        const moldType = this._normalizeMoldType(whItem && whItem.mold_type);
+        const total = parseFloat(whItem && whItem.mold_capacity_total) || 0;
+        const used = parseFloat(whItem && whItem.mold_capacity_used) || 0;
+        const remaining = total > 0 ? Math.max(0, total - used) : null;
+        const linkedOrderId = Number(whItem && whItem.linked_order_id || 0) || null;
+        const linkedOrderName = String(whItem && whItem.linked_order_name || '').trim() || this._getOrderNameById(linkedOrderId);
+        const triggerOrderId = Number(options.orderId || 0) || null;
+        const triggerOrderName = String(options.orderName || '').trim();
+        const typeLabel = moldType === 'blank' ? 'Бланк / stock' : 'Клиентский';
+        const thresholdText = Number(threshold || 0).toLocaleString('ru-RU');
+        const totalText = total > 0 ? total.toLocaleString('ru-RU') : '—';
+        const usedText = used.toLocaleString('ru-RU');
+        const remainingText = remaining != null ? remaining.toLocaleString('ru-RU') : '—';
+        const orderText = linkedOrderId ? `#${linkedOrderId}${linkedOrderName ? ` — ${linkedOrderName}` : ''}` : 'не привязан';
+        const triggerOrderText = triggerOrderId
+            ? `#${triggerOrderId}${triggerOrderName ? ` — ${triggerOrderName}` : ''}`
+            : '';
+
+        return {
+            moldName,
+            sku,
+            moldType,
+            typeLabel,
+            total,
+            used,
+            remaining,
+            linkedOrderId,
+            linkedOrderName,
+            thresholdText,
+            totalText,
+            usedText,
+            remainingText,
+            orderText,
+            triggerOrderId,
+            triggerOrderName,
+            triggerOrderText,
+        };
+    },
+
+    _buildMoldUsageAlertTaskDrafts(whItem, threshold, context, people, areaIds) {
+        const commonLines = [
+            `Молд: ${context.moldName}`,
+            `Тип: ${context.typeLabel}`,
+            context.sku ? `SKU: ${context.sku}` : '',
+            `Использовано: ${context.usedText} / ${context.totalText}`,
+            context.remaining != null ? `Осталось ресурса: ${context.remainingText}` : '',
+            `Пересечён порог: ${context.thresholdText}`,
+            `Связанный заказ: ${context.orderText}`,
+            context.triggerOrderText ? `Триггерный заказ: ${context.triggerOrderText}` : '',
+        ].filter(Boolean);
+        const warehouseItemId = Number(whItem && whItem.id || 0) || null;
+        const reporterId = Number(App && App.currentEmployeeId || 0) || null;
+        const reporterName = (App && typeof App.getCurrentEmployeeName === 'function'
+            ? App.getCurrentEmployeeName()
+            : '') || 'Система';
+        const orderId = context.linkedOrderId || context.triggerOrderId || null;
+        const primaryContextKind = orderId ? 'order' : 'area';
+
+        return [
+            {
+                title: `Проверить пригодность молда «${context.moldName}» · ${context.thresholdText}/${context.totalText}`,
+                description: [
+                    'Проверь, подходит ли mold_type для дальнейшего производства после очередного порога использования.',
+                    ...commonLines,
+                ].join('\n'),
+                status: 'incoming',
+                priority: 'high',
+                reporter_id: reporterId,
+                reporter_name: reporterName,
+                assignee_id: Number(people && people.lesha && people.lesha.id || 0) || null,
+                assignee_name: String(people && people.lesha && people.lesha.name || 'Леша'),
+                reviewer_id: null,
+                reviewer_name: '',
+                area_id: areaIds.warehouse || areaIds.general || null,
+                order_id: orderId,
+                project_id: null,
+                china_purchase_id: null,
+                warehouse_item_id: warehouseItemId,
+                primary_context_kind: primaryContextKind,
+                due_date: this._todayYMD(),
+                due_time: null,
+                waiting_for_text: '',
+            },
+            {
+                title: `Согласовать повтор молда «${context.moldName}» · ${context.thresholdText}/${context.totalText}`,
+                description: [
+                    'Согласуй с Лешей необходимость повтора молда и запусти заказ на новый mold, если текущий ресурс подходит к лимиту.',
+                    ...commonLines,
+                ].join('\n'),
+                status: 'incoming',
+                priority: 'high',
+                reporter_id: reporterId,
+                reporter_name: reporterName,
+                assignee_id: Number(people && people.anastasia && people.anastasia.id || 0) || null,
+                assignee_name: String(people && people.anastasia && people.anastasia.name || 'Анастасия'),
+                reviewer_id: Number(people && people.lesha && people.lesha.id || 0) || null,
+                reviewer_name: String(people && people.lesha && people.lesha.name || 'Леша'),
+                area_id: areaIds.china || areaIds.general || null,
+                order_id: orderId,
+                project_id: null,
+                china_purchase_id: null,
+                warehouse_item_id: warehouseItemId,
+                primary_context_kind: primaryContextKind,
+                due_date: this._todayYMD(),
+                due_time: null,
+                waiting_for_text: '',
+            },
+        ];
+    },
+
+    async _createMoldUsageAlertTasks(alerts) {
+        if (!Array.isArray(alerts) || alerts.length === 0) return [];
+        if (typeof saveWorkTask !== 'function') return [];
+
+        const [employees, areas] = await Promise.all([
+            typeof loadEmployees === 'function' ? loadEmployees().catch(() => []) : [],
+            typeof loadWorkAreas === 'function' ? loadWorkAreas().catch(() => []) : [],
+        ]);
+        const people = this._resolveMoldUsageAlertPeople(employees);
+        const areaIds = {
+            warehouse: this._findAreaIdBySlug(areas, 'warehouse'),
+            china: this._findAreaIdBySlug(areas, 'china'),
+            general: this._findAreaIdBySlug(areas, 'general'),
+        };
+        const createdTasks = [];
+
+        for (const alert of alerts) {
+            const context = this._buildMoldUsageAlertContext(alert.item, alert.threshold, {
+                orderId: alert.orderId,
+                orderName: alert.orderName,
+            });
+            const drafts = this._buildMoldUsageAlertTaskDrafts(alert.item, alert.threshold, context, people, areaIds);
+            for (const draft of drafts) {
+                const saved = await saveWorkTask(draft, {
+                    actor_id: App && App.currentEmployeeId || null,
+                    actor_name: (App && typeof App.getCurrentEmployeeName === 'function'
+                        ? App.getCurrentEmployeeName()
+                        : '') || 'Система',
+                });
+                createdTasks.push(saved);
+                if (saved && saved.assignee_id && typeof TaskEvents !== 'undefined' && TaskEvents && typeof TaskEvents.emit === 'function') {
+                    await TaskEvents.emit('task_assigned', {
+                        task_id: saved.id,
+                        project_id: saved.project_id || null,
+                        assignee_id: saved.assignee_id,
+                    });
+                }
+            }
+        }
+
+        return createdTasks;
     },
 
     _normalizeMoldLookupText(value) {
@@ -2149,6 +2377,7 @@ const Warehouse = {
         const updatedItems = Array.isArray(warehouseItems) ? [...warehouseItems] : [];
         const itemIndexById = new Map(updatedItems.map((item, index) => [Number(item.id || 0), index]));
         const newHistoryEntries = [];
+        const usageAlerts = [];
         const nowIso = new Date().toISOString();
 
         moldIds.forEach(itemId => {
@@ -2159,46 +2388,77 @@ const Warehouse = {
             const target = Math.max(0, parseFloat(targetUsage.get(itemId) || 0) || 0);
             const current = Math.max(0, this._getMoldUsageNetDelta(normalizedOrderId, itemId, historyDeltaMap));
             const delta = target - current;
-            if (Math.abs(delta) <= 0.000001) return;
-
             const afterUsed = Math.max(0, beforeUsed + delta);
-            whItem.mold_capacity_used = afterUsed;
-            whItem.updated_at = nowIso;
-            updatedItems[idx] = whItem;
-            changed = true;
+            let alertsChanged = false;
 
-            newHistoryEntries.push({
-                id: Date.now() + Math.floor(Math.random() * 1000) + newHistoryEntries.length,
-                item_id: Number(itemId || 0),
-                item_name: whItem.name || '',
-                item_sku: whItem.sku || '',
-                item_category: whItem.category || '',
-                type: 'mold_usage',
-                qty_change: 0,
-                requested_qty_change: 0,
-                qty_before: parseFloat(whItem.qty) || 0,
-                qty_after: parseFloat(whItem.qty) || 0,
-                unit_price: parseFloat(whItem.price_per_unit) || 0,
-                total_cost_change: 0,
-                order_id: normalizedOrderId,
-                order_name: orderName || 'Заказ',
-                notes: delta > 0
-                    ? `Списание ресурса молда: +${delta} шт`
-                    : `Возврат ресурса молда: -${Math.abs(delta)} шт`,
-                clamped: false,
-                created_at: nowIso,
-                created_by: managerName || '',
-                mold_flow: 'usage_completed',
-                mold_usage_change: delta,
-                mold_usage_before: beforeUsed,
-                mold_usage_after: afterUsed,
-            });
+            if (delta > 0) {
+                const alertedThresholds = this._parseMoldAlertedThresholds(whItem);
+                const crossedThresholds = this._getCrossedMoldUsageThresholds(beforeUsed, afterUsed, alertedThresholds);
+                if (crossedThresholds.length > 0) {
+                    whItem.mold_alerted_thresholds = Array.from(new Set([
+                        ...alertedThresholds,
+                        ...crossedThresholds,
+                    ])).sort((a, b) => a - b);
+                    alertsChanged = true;
+                    crossedThresholds.forEach(threshold => {
+                        usageAlerts.push({
+                            item: { ...whItem, mold_capacity_used: afterUsed },
+                            threshold,
+                            orderId: normalizedOrderId,
+                            orderName: orderName || '',
+                        });
+                    });
+                }
+            }
+
+            if (Math.abs(delta) > 0.000001) {
+                whItem.mold_capacity_used = afterUsed;
+                whItem.updated_at = nowIso;
+                newHistoryEntries.push({
+                    id: Date.now() + Math.floor(Math.random() * 1000) + newHistoryEntries.length,
+                    item_id: Number(itemId || 0),
+                    item_name: whItem.name || '',
+                    item_sku: whItem.sku || '',
+                    item_category: whItem.category || '',
+                    type: 'mold_usage',
+                    qty_change: 0,
+                    requested_qty_change: 0,
+                    qty_before: parseFloat(whItem.qty) || 0,
+                    qty_after: parseFloat(whItem.qty) || 0,
+                    unit_price: parseFloat(whItem.price_per_unit) || 0,
+                    total_cost_change: 0,
+                    order_id: normalizedOrderId,
+                    order_name: orderName || 'Заказ',
+                    notes: delta > 0
+                        ? `Списание ресурса молда: +${delta} шт`
+                        : `Возврат ресурса молда: -${Math.abs(delta)} шт`,
+                    clamped: false,
+                    created_at: nowIso,
+                    created_by: managerName || '',
+                    mold_flow: 'usage_completed',
+                    mold_usage_change: delta,
+                    mold_usage_before: beforeUsed,
+                    mold_usage_after: afterUsed,
+                });
+            }
+
+            if (Math.abs(delta) > 0.000001 || alertsChanged) {
+                updatedItems[idx] = whItem;
+                changed = true;
+            }
         });
 
         if (!changed) return;
 
         await saveWarehouseItems(updatedItems);
         await saveWarehouseHistory([...(history || []), ...newHistoryEntries]);
+        if (usageAlerts.length > 0) {
+            try {
+                await this._createMoldUsageAlertTasks(usageAlerts);
+            } catch (error) {
+                console.error('[Warehouse] mold usage alert task creation failed:', error);
+            }
+        }
         this.allItems = updatedItems;
     },
 

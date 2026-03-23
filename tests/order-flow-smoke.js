@@ -2078,6 +2078,125 @@ async function smokeCompletedOrderConsumesBlankMoldCapacity(context) {
     vm.runInContext('delete globalThis.__completedMoldItems', context);
 }
 
+async function smokeMoldUsageThresholdCreatesTasksWithoutDuplicates(context) {
+    const orderItems = [{
+        item_type: 'product',
+        product_name: 'Петушок',
+        quantity: 600,
+        is_blank_mold: true,
+        template_id: 'tmpl-petushok',
+    }];
+
+    vm.runInContext(`
+        App.currentEmployeeId = 9001;
+        App.getCurrentEmployeeName = () => 'Smoke';
+        App.templates = [{
+            id: 'tmpl-petushok',
+            name: 'Петушок',
+            category: 'blank',
+        }];
+    `, context);
+
+    context.__projectHardwareState = { checks: {} };
+    context.__reservations = [];
+    context.__warehouseItems = [{
+        id: 911,
+        name: 'Петушок',
+        sku: 'MOLD-BLANK-PETUSHOK',
+        category: 'molds',
+        mold_type: 'blank',
+        template_id: '',
+        mold_capacity_total: 5000,
+        mold_capacity_used: 3900,
+        qty: 1,
+        price_per_unit: 0,
+        updated_at: '2026-03-20T00:00:00.000Z',
+    }];
+    context.__warehouseHistory = [];
+    context.__savedTasks = [];
+    context.__taskEvents = [];
+    context.loadProjectHardwareState = async () => clone(context.__projectHardwareState);
+    context.saveProjectHardwareState = async (state) => {
+        context.__projectHardwareState = clone(state);
+    };
+    context.loadWarehouseReservations = async () => clone(context.__reservations);
+    context.saveWarehouseReservations = async (reservations) => {
+        context.__reservations = clone(reservations);
+    };
+    context.loadWarehouseItems = async () => clone(context.__warehouseItems);
+    context.saveWarehouseItems = async (items) => {
+        context.__warehouseItems = clone(items);
+    };
+    context.loadWarehouseHistory = async () => clone(context.__warehouseHistory);
+    context.saveWarehouseHistory = async (history) => {
+        context.__warehouseHistory = clone(history);
+    };
+    context.loadEmployees = async () => ([
+        { id: 1772827635013, name: 'Леша' },
+        { id: 1741700002000, name: 'Анастасия' },
+    ]);
+    context.loadWorkAreas = async () => ([
+        { id: 9103, slug: 'warehouse', name: 'Склад' },
+        { id: 9104, slug: 'china', name: 'China' },
+        { id: 9107, slug: 'general', name: 'Общее' },
+    ]);
+    context.saveWorkTask = async (task) => {
+        const saved = {
+            id: context.__savedTasks.length + 1,
+            ...clone(task),
+        };
+        context.__savedTasks.push(saved);
+        return saved;
+    };
+    context.TaskEvents = {
+        emit: async (eventType, payload) => {
+            context.__taskEvents.push({ eventType, payload: clone(payload) });
+            return { id: context.__taskEvents.length };
+        },
+    };
+
+    vm.runInContext(`
+        Warehouse.projectHardwareState = null;
+        Warehouse.load = async () => {};
+        globalThis.__thresholdMoldItems = ${JSON.stringify(orderItems)};
+    `, context);
+
+    await vm.runInContext(`Warehouse.syncProjectHardwareOrderState({
+        orderId: 778,
+        orderName: 'Threshold Mold Order',
+        managerName: 'Smoke',
+        status: 'completed',
+        currentItems: globalThis.__thresholdMoldItems,
+        previousItems: globalThis.__thresholdMoldItems
+    })`, context);
+
+    assert.equal(context.__warehouseItems[0].mold_capacity_used, 4500);
+    assert.deepEqual(context.__warehouseItems[0].mold_alerted_thresholds, [4000]);
+    assert.equal(context.__savedTasks.length, 2);
+    assert.match(context.__savedTasks[0].title, /Проверить пригодность молда/);
+    assert.match(context.__savedTasks[1].title, /Согласовать повтор молда/);
+    assert.equal(context.__savedTasks[0].assignee_id, 1772827635013);
+    assert.equal(context.__savedTasks[1].assignee_id, 1741700002000);
+    assert.equal(context.__savedTasks[1].reviewer_id, 1772827635013);
+    assert.equal(context.__savedTasks[0].warehouse_item_id, 911);
+    assert.equal(context.__savedTasks[0].order_id, 778);
+    assert.equal(context.__taskEvents.length, 2);
+
+    await vm.runInContext(`Warehouse.syncProjectHardwareOrderState({
+        orderId: 778,
+        orderName: 'Threshold Mold Order',
+        managerName: 'Smoke',
+        status: 'completed',
+        currentItems: globalThis.__thresholdMoldItems,
+        previousItems: globalThis.__thresholdMoldItems
+    })`, context);
+
+    assert.equal(context.__savedTasks.length, 2);
+    assert.equal(context.__taskEvents.length, 2);
+
+    vm.runInContext('delete globalThis.__thresholdMoldItems', context);
+}
+
 async function smokeProjectHardwareLegacyStatusRepair(context) {
     const order = {
         id: 77,
@@ -2347,6 +2466,7 @@ async function main() {
     await smokeProjectHardwareToggleShortageGuard(context);
     await smokeProjectHardwareLegacyQtyAndStringIdDeduction(context);
     await smokeCompletedOrderConsumesBlankMoldCapacity(context);
+    await smokeMoldUsageThresholdCreatesTasksWithoutDuplicates(context);
     await smokeProjectHardwareLegacyStatusRepair(context);
     await smokeProjectHardwareLegacyAndCollectedNetting(context);
     await smokeOrderDetailColorRendering(context);
