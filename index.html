@@ -35,7 +35,7 @@
     <aside class="sidebar">
         <div class="sidebar-brand">
             <h2>Recycle Object</h2>
-            <span>Калькулятор <span id="app-version">v157</span></span>
+            <span>Калькулятор <span id="app-version">v161</span></span>
         </div>
         <nav class="sidebar-nav">
             <a href="#tasks" data-page="tasks">
@@ -1680,13 +1680,14 @@
                 <div class="form-row">
                     <div class="form-group">
                         <label>Категория</label>
-                        <select id="wh-f-category">
+                        <select id="wh-f-category" onchange="Warehouse.onCategoryChange(this.value)">
                             <option value="carabiners">&#128279; Карабины</option>
                             <option value="cables">&#9881; Тросы</option>
                             <option value="rings">&#11093; Кольца</option>
                             <option value="chains">&#9939; Цепочки</option>
                             <option value="cords">&#129525; Шнуры</option>
                             <option value="packaging">&#128230; Упаковка</option>
+                            <option value="molds">&#129518; Молды</option>
                             <option value="other">&#128313; Разное</option>
                         </select>
                     </div>
@@ -1755,6 +1756,45 @@
                     </div>
                 </div>
 
+                <div id="wh-mold-fields" style="display:none; margin-top:12px; padding:12px; border:1px solid var(--border); border-radius:10px; background:var(--bg);">
+                    <div style="font-weight:600; margin-bottom:10px;">Параметры молда</div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Тип молда</label>
+                            <select id="wh-f-mold-type" onchange="Warehouse.onCategoryChange('molds')">
+                                <option value="customer">Клиентский</option>
+                                <option value="blank">Бланк / stock</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>ID заказа</label>
+                            <input type="number" id="wh-f-mold-linked-order-id" min="0" placeholder="1773994702607">
+                        </div>
+                        <div class="form-group">
+                            <label>ID шаблона</label>
+                            <input type="text" id="wh-f-mold-template-id" placeholder="template_id">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Ресурс всего</label>
+                            <input type="number" id="wh-f-mold-capacity-total" min="0" step="1" placeholder="1000">
+                        </div>
+                        <div class="form-group">
+                            <label>Использовано</label>
+                            <input type="number" id="wh-f-mold-capacity-used" min="0" step="1" value="0">
+                        </div>
+                        <div class="form-group">
+                            <label>Дата прихода</label>
+                            <input type="date" id="wh-f-mold-arrived-at">
+                        </div>
+                        <div class="form-group">
+                            <label>Хранить до</label>
+                            <input type="date" id="wh-f-mold-storage-until">
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Reservations for this item (when editing) -->
                 <div id="wh-reservations-section" style="margin-top:12px; padding-top:12px; border-top:1px solid var(--border);"></div>
 
@@ -1784,6 +1824,7 @@
                             <option value="chains">Цепочки</option>
                             <option value="cords">Шнуры</option>
                             <option value="packaging">Упаковка</option>
+                            <option value="molds">Молды</option>
                             <option value="other">Разное</option>
                         </select>
                     </div>
@@ -3236,7 +3277,7 @@
 <script src="js/supabase.js?v=156"></script>
 <script src="js/task-events.js?v=1"></script>
 <script src="js/calculator.js?v=69"></script>
-<script src="js/app.js?v=157"></script>
+<script src="js/app.js?v=161"></script>
 <script src="js/wiki.js?v=4"></script>
 <script src="js/order-detail.js?v=58"></script>
 <script src="js/orders.js?v=62"></script>
@@ -3257,7 +3298,7 @@
 <script src="js/warehouse_photos.js?v=48"></script>
 <script src="js/china_catalog.js?v=46k"></script>
 <script src="js/marketplaces.js?v=77"></script>
-<script src="js/warehouse.js?v=156"></script>
+<script src="js/warehouse.js?v=157"></script>
 <script src="js/settings.js?v=79"></script>
 <script src="js/pendant.js?v=5"></script>
 </body>

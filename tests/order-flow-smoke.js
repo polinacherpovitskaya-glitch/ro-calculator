@@ -1193,6 +1193,174 @@ async function smokeChinaReceiptStatusLinkage(context) {
     }
 }
 
+async function smokeChinaReceiptCreatesMoldAndPromotesOrder(context) {
+    const fieldValues = {
+        'wh-sh-name': 'Mold Receipt Shipment',
+        'wh-sh-date': '2026-03-20',
+        'wh-sh-supplier': 'China Mold Supplier',
+        'wh-sh-cny-rate': '12.5',
+        'wh-sh-fee-cashout': '5',
+        'wh-sh-fee-crypto': '2',
+        'wh-sh-fee-1688': '1',
+        'wh-sh-delivery-china': '2500',
+        'wh-sh-delivery-moscow': '500',
+        'wh-sh-total-delivery': '3000',
+        'wh-sh-pricing-mode': 'weighted_avg',
+        'wh-sh-notes': 'Customer mold arrived',
+    };
+    Object.entries(fieldValues).forEach(([id, value]) => {
+        context.document.getElementById(id).value = value;
+    });
+
+    context.__savedShipment = null;
+    context.__savedPurchase = null;
+    context.__savedOrder = null;
+    context.__savedOrderItems = null;
+    context.__statusUpdates = [];
+    context.__orderChangeCalls = [];
+    context.__warehouseItems = [];
+    context.__warehouseHistory = [];
+    context.__chinaPurchases = {
+        701: {
+            id: 701,
+            purchase_name: 'Customer Mold Purchase',
+            order_id: 555,
+            status: 'in_transit',
+            delivery_type: 'air',
+            tracking_number: 'MOLD-TRACK',
+            estimated_days: 12,
+            status_history: [],
+        },
+    };
+    context.__orderDetails = {
+        555: {
+            order: {
+                id: 555,
+                order_name: 'Waiting Mold Order',
+                manager_name: 'Smoke',
+                status: 'sample',
+                created_at: '2026-03-19T10:00:00.000Z',
+            },
+            items: [{
+                item_type: 'product',
+                product_name: 'Custom Tag',
+                quantity: 120,
+                is_blank_mold: false,
+                base_mold_in_stock: false,
+            }],
+        },
+    };
+
+    context.confirm = () => true;
+    context.saveShipment = async (shipment) => {
+        shipment.id = shipment.id || 188;
+        context.__savedShipment = clone(shipment);
+        return shipment.id;
+    };
+    context.loadWarehouseItems = async () => clone(context.__warehouseItems);
+    context.saveWarehouseItems = async (items) => {
+        context.__warehouseItems = clone(items);
+    };
+    context.saveWarehouseItem = async (item) => {
+        const id = 1201 + context.__warehouseItems.length;
+        context.__warehouseItems.push({ ...clone(item), id });
+        return id;
+    };
+    context.loadWarehouseHistory = async () => clone(context.__warehouseHistory);
+    context.saveWarehouseHistory = async (history) => {
+        context.__warehouseHistory = clone(history);
+    };
+    context.loadChinaPurchase = async (id) => clone(context.__chinaPurchases[id] || null);
+    context.saveChinaPurchase = async (purchase) => {
+        context.__savedPurchase = clone(purchase);
+        context.__chinaPurchases[purchase.id] = clone(purchase);
+        return purchase.id;
+    };
+    context.loadOrder = async (orderId) => clone(context.__orderDetails[Number(orderId)] || null);
+    context.saveOrder = async (order, items) => {
+        context.__savedOrder = clone(order);
+        context.__savedOrderItems = clone(items);
+        context.__orderDetails[Number(order.id)] = {
+            order: clone(order),
+            items: clone(items),
+        };
+        return order.id;
+    };
+    context.updateOrderStatus = async (orderId, status) => {
+        context.__statusUpdates.push({ orderId: Number(orderId), status });
+        if (context.__orderDetails[Number(orderId)]) {
+            context.__orderDetails[Number(orderId)].order.status = status;
+        }
+    };
+
+    context.__originalHideShipmentForm = vm.runInContext('Warehouse.hideShipmentForm', context);
+    context.__originalWarehouseLoad = vm.runInContext('Warehouse.load', context);
+    context.__originalWarehouseSetView = vm.runInContext('Warehouse.setView', context);
+    context.__originalOrdersAddChangeRecord = vm.runInContext('Orders.addChangeRecord', context);
+
+    try {
+        vm.runInContext(`
+            Warehouse.hideShipmentForm = () => {};
+            Warehouse.load = async () => {};
+            Warehouse.setView = () => {};
+            Orders.addChangeRecord = async (orderId, payload) => {
+                globalThis.__orderChangeCalls.push({ orderId, payload });
+            };
+            Warehouse.editingShipmentId = null;
+            Warehouse.allShipments = [];
+            Warehouse.shipmentItems = [{
+                source: 'new',
+                category: 'molds',
+                mold_type: 'customer',
+                name: 'Mold for Waiting Order',
+                sku: 'MOLD-555',
+                unit: 'шт',
+                qty_received: 1,
+                weight_grams: 320,
+                purchase_price_cny: 120,
+                purchase_price_rub: 0,
+                delivery_allocated: 0,
+                total_cost_per_unit: 0,
+                china_purchase_id: 701,
+            }];
+        `, context);
+
+        await vm.runInContext('Warehouse.confirmShipment()', context);
+
+        const moldItem = context.__warehouseItems.find(item => String(item.category) === 'molds');
+        assert.ok(moldItem, 'mold warehouse item created');
+        assert.equal(context.__savedShipment.status, 'received');
+        assert.equal(context.__savedShipment.id, 188);
+        assert.equal(moldItem.qty, 1);
+        assert.equal(moldItem.mold_type, 'customer');
+        assert.equal(moldItem.linked_order_id, 555);
+        assert.equal(moldItem.linked_order_name, 'Waiting Mold Order');
+        assert.equal(moldItem.mold_capacity_total, 1000);
+        assert.equal(moldItem.mold_capacity_used, 0);
+        assert.equal(moldItem.mold_arrived_at, '2026-03-20');
+        assert.ok(String(moldItem.mold_storage_until || '').startsWith('2027-03-'));
+
+        assert.equal(context.__savedPurchase.id, 701);
+        assert.equal(context.__savedPurchase.shipment_id, 188);
+        assert.equal(context.__savedPurchase.status, 'received');
+
+        assert.equal(context.__savedOrder.id, 555);
+        assert.equal(context.__savedOrderItems[0].base_mold_in_stock, true);
+        assert.equal(context.__savedOrderItems[0].warehouse_mold_item_id, moldItem.id);
+        assert.deepEqual(clone(context.__statusUpdates), [{ orderId: 555, status: 'production_casting' }]);
+        assert.equal(context.__orderChangeCalls.length, 1);
+        assert.equal(context.__orderChangeCalls[0].payload.old_value, 'sample');
+        assert.equal(context.__orderChangeCalls[0].payload.new_value, 'production_casting');
+    } finally {
+        vm.runInContext(`
+            Warehouse.hideShipmentForm = globalThis.__originalHideShipmentForm;
+            Warehouse.load = globalThis.__originalWarehouseLoad;
+            Warehouse.setView = globalThis.__originalWarehouseSetView;
+            Orders.addChangeRecord = globalThis.__originalOrdersAddChangeRecord;
+        `, context);
+    }
+}
+
 async function smokeOrderStatusWarehouseSync(context) {
     const orderData = {
         order: { id: 42, order_name: 'Sync Order', status: 'sample' },
@@ -1709,6 +1877,167 @@ async function smokeProjectHardwareToggleShortageGuard(context) {
     }
 }
 
+async function smokeProjectHardwareLegacyQtyAndStringIdDeduction(context) {
+    const order = {
+        id: 91,
+        order_name: 'Legacy Hardware Qty Order',
+        manager_name: 'Склад',
+        status: 'production_hardware',
+        created_at: '2026-03-18T11:00:00.000Z',
+    };
+    const detail = {
+        order: clone(order),
+        items: [{
+            item_type: 'hardware',
+            product_name: 'Legacy Hardware Qty',
+            hardware_qty: 3,
+            hardware_source: 'warehouse',
+            hardware_warehouse_item_id: '501',
+        }],
+    };
+
+    context.__projectHardwareState = { checks: {} };
+    context.__reservations = [];
+    context.__warehouseItems = [{
+        id: '501',
+        name: 'Legacy Hardware Qty',
+        sku: 'LHQ-1',
+        category: 'hardware',
+        qty: 10,
+        price_per_unit: 15,
+    }];
+    context.__warehouseHistory = [];
+    context.__orderDetails = { 91: clone(detail) };
+    context.loadProjectHardwareState = async () => clone(context.__projectHardwareState);
+    context.saveProjectHardwareState = async (state) => {
+        context.__projectHardwareState = clone(state);
+    };
+    context.loadWarehouseReservations = async () => clone(context.__reservations);
+    context.saveWarehouseReservations = async (reservations) => {
+        context.__reservations = clone(reservations);
+    };
+    context.loadWarehouseItems = async () => clone(context.__warehouseItems);
+    context.saveWarehouseItems = async (items) => {
+        context.__warehouseItems = clone(items);
+    };
+    context.loadWarehouseHistory = async () => clone(context.__warehouseHistory);
+    context.saveWarehouseHistory = async (history) => {
+        context.__warehouseHistory = clone(history);
+    };
+    context.loadOrder = async (orderId) => clone(context.__orderDetails[Number(orderId)] || null);
+
+    vm.runInContext(`
+        Warehouse.projectHardwareState = null;
+        Warehouse.load = async () => {};
+    `, context);
+
+    await vm.runInContext(`Warehouse.syncProjectHardwareOrderState({
+        orderId: 91,
+        orderName: 'Legacy Hardware Qty Order',
+        managerName: 'Склад',
+        status: 'production_hardware',
+        currentItems: JSON.parse(${JSON.stringify(JSON.stringify(detail.items))}),
+        previousItems: []
+    })`, context);
+
+    assert.equal(context.__reservations.length, 1);
+    assert.equal(Number(context.__reservations[0].item_id), 501);
+    assert.equal(context.__reservations[0].qty, 3);
+    assert.equal(context.__reservations[0].status, 'active');
+
+    await vm.runInContext(`Warehouse.toggleProjectHardwareReady(91, 501, true)`, context);
+
+    assert.equal(Boolean(context.__projectHardwareState.checks['91:501']), true);
+    assert.equal(context.__warehouseItems[0].qty, 7);
+    assert.equal(context.__warehouseHistory.length, 1);
+    assert.equal(context.__warehouseHistory[0].qty_change, -3);
+    assert.equal(context.__warehouseHistory[0].requested_qty_change, -3);
+    assert.equal(context.__warehouseHistory[0].project_hardware_flow, 'ready_toggle');
+    assert.match(context.__warehouseHistory[0].notes, /Списание собранной позиции со склада: 3 шт/);
+    assert.equal(context.__reservations[0].status, 'released');
+}
+
+async function smokeCompletedOrderConsumesBlankMoldCapacity(context) {
+    const orderItems = [{
+        item_type: 'product',
+        product_name: 'Blank Mold Product',
+        quantity: 600,
+        is_blank_mold: true,
+        template_id: 'tmpl-blank-1',
+    }];
+
+    context.__projectHardwareState = { checks: {} };
+    context.__reservations = [];
+    context.__warehouseItems = [{
+        id: 910,
+        name: 'Blank Mold',
+        sku: 'MOLD-BLANK-1',
+        category: 'molds',
+        mold_type: 'blank',
+        template_id: 'tmpl-blank-1',
+        mold_capacity_total: 5000,
+        mold_capacity_used: 100,
+        qty: 1,
+        price_per_unit: 0,
+        updated_at: '2026-03-20T00:00:00.000Z',
+    }];
+    context.__warehouseHistory = [];
+    context.loadProjectHardwareState = async () => clone(context.__projectHardwareState);
+    context.saveProjectHardwareState = async (state) => {
+        context.__projectHardwareState = clone(state);
+    };
+    context.loadWarehouseReservations = async () => clone(context.__reservations);
+    context.saveWarehouseReservations = async (reservations) => {
+        context.__reservations = clone(reservations);
+    };
+    context.loadWarehouseItems = async () => clone(context.__warehouseItems);
+    context.saveWarehouseItems = async (items) => {
+        context.__warehouseItems = clone(items);
+    };
+    context.loadWarehouseHistory = async () => clone(context.__warehouseHistory);
+    context.saveWarehouseHistory = async (history) => {
+        context.__warehouseHistory = clone(history);
+    };
+
+    vm.runInContext(`
+        Warehouse.projectHardwareState = null;
+        Warehouse.load = async () => {};
+        globalThis.__completedMoldItems = ${JSON.stringify(orderItems)};
+    `, context);
+
+    await vm.runInContext(`Warehouse.syncProjectHardwareOrderState({
+        orderId: 777,
+        orderName: 'Blank Mold Completed',
+        managerName: 'Smoke',
+        status: 'completed',
+        currentItems: globalThis.__completedMoldItems,
+        previousItems: globalThis.__completedMoldItems
+    })`, context);
+
+    assert.equal(context.__warehouseItems[0].mold_capacity_used, 700);
+    assert.equal(context.__warehouseHistory.length, 1);
+    assert.equal(context.__warehouseHistory[0].mold_flow, 'usage_completed');
+    assert.equal(context.__warehouseHistory[0].mold_usage_change, 600);
+    assert.match(context.__warehouseHistory[0].notes, /Списание ресурса молда/);
+
+    await vm.runInContext(`Warehouse.syncProjectHardwareOrderState({
+        orderId: 777,
+        orderName: 'Blank Mold Completed',
+        managerName: 'Smoke',
+        status: 'production_casting',
+        currentItems: globalThis.__completedMoldItems,
+        previousItems: globalThis.__completedMoldItems
+    })`, context);
+
+    assert.equal(context.__warehouseItems[0].mold_capacity_used, 100);
+    assert.equal(context.__warehouseHistory.length, 2);
+    assert.equal(context.__warehouseHistory[1].mold_flow, 'usage_completed');
+    assert.equal(context.__warehouseHistory[1].mold_usage_change, -600);
+    assert.match(context.__warehouseHistory[1].notes, /Возврат ресурса молда/);
+
+    vm.runInContext('delete globalThis.__completedMoldItems', context);
+}
+
 async function smokeProjectHardwareLegacyStatusRepair(context) {
     const order = {
         id: 77,
@@ -1969,11 +2298,14 @@ async function main() {
     await smokeReadyGoodsSalesAndManualAdd(context);
     await smokeChinaShipmentMetadata(context);
     await smokeChinaReceiptStatusLinkage(context);
+    await smokeChinaReceiptCreatesMoldAndPromotesOrder(context);
     await smokeOrderStatusWarehouseSync(context);
     await smokePackagingWarehouseSaveSync(context);
     await smokeWarehouseManualAdjustment(context);
     await smokeProjectHardwarePersistenceAndBuckets(context);
     await smokeProjectHardwareToggleShortageGuard(context);
+    await smokeProjectHardwareLegacyQtyAndStringIdDeduction(context);
+    await smokeCompletedOrderConsumesBlankMoldCapacity(context);
     await smokeProjectHardwareLegacyStatusRepair(context);
     await smokeProjectHardwareLegacyAndCollectedNetting(context);
     await smokeOrderDetailColorRendering(context);

@@ -209,8 +209,14 @@ const WAREHOUSE_CATEGORIES = [
     { key: 'chains',     label: 'Цепочки',   icon: '⛓',  color: '#e0e7ff', textColor: '#4338ca' },
     { key: 'cords',      label: 'Шнуры',     icon: '🧵', color: '#fce7f3', textColor: '#9d174d' },
     { key: 'packaging',  label: 'Упаковка',  icon: '📦', color: '#f3e8ff', textColor: '#7c3aed' },
+    { key: 'molds',      label: 'Молды',     icon: '🧲', color: '#fef2f2', textColor: '#b91c1c' },
     { key: 'other',      label: 'Разное',    icon: '🔹', color: '#f1f5f9', textColor: '#475569' },
 ];
+
+const DEFAULT_MOLD_CAPACITY_BY_TYPE = {
+    customer: 1000,
+    blank: 5000,
+};
 
 const Warehouse = {
     allItems: [],
@@ -495,6 +501,112 @@ const Warehouse = {
         return [...colors].sort((a, b) => a.localeCompare(b, 'ru'));
     },
 
+    _isMoldCategory(category) {
+        return String(category || '').toLowerCase() === 'molds';
+    },
+
+    _normalizeMoldType(value) {
+        return String(value || '').toLowerCase() === 'blank' ? 'blank' : 'customer';
+    },
+
+    _defaultMoldCapacityTotal(moldType) {
+        return DEFAULT_MOLD_CAPACITY_BY_TYPE[this._normalizeMoldType(moldType)] || 0;
+    },
+
+    _todayYMD() {
+        if (typeof App !== 'undefined' && App && typeof App.todayLocalYMD === 'function') {
+            return App.todayLocalYMD();
+        }
+        return new Date().toISOString().slice(0, 10);
+    },
+
+    _plusDaysYMD(baseYmd, days) {
+        const base = String(baseYmd || this._todayYMD());
+        const parsed = new Date(`${base}T12:00:00`);
+        if (Number.isNaN(parsed.getTime())) return '';
+        parsed.setDate(parsed.getDate() + (parseInt(days, 10) || 0));
+        return parsed.toISOString().slice(0, 10);
+    },
+
+    _formatDateCompact(value) {
+        if (!value) return '—';
+        try {
+            return new Intl.DateTimeFormat('ru-RU').format(new Date(`${String(value).slice(0, 10)}T12:00:00`));
+        } catch (e) {
+            return String(value || '—');
+        }
+    },
+
+    _buildMoldMeta(item, options) {
+        const opts = options && typeof options === 'object' ? options : {};
+        const isMold = this._isMoldCategory(item && item.category);
+        if (!isMold) return null;
+
+        const moldType = this._normalizeMoldType(opts.mold_type ?? item.mold_type);
+        const linkedOrderId = Number(opts.linked_order_id ?? item.linked_order_id ?? 0) || null;
+        const templateIdRaw = opts.template_id ?? item.template_id ?? '';
+        const templateId = String(templateIdRaw || '').trim();
+        const arrivedAt = String(opts.mold_arrived_at ?? item.mold_arrived_at ?? opts.receiptDate ?? this._todayYMD()).trim();
+        const capacityTotalRaw = parseFloat(opts.mold_capacity_total ?? item.mold_capacity_total);
+        const capacityUsedRaw = parseFloat(opts.mold_capacity_used ?? item.mold_capacity_used);
+        const capacityTotal = capacityTotalRaw > 0 ? capacityTotalRaw : this._defaultMoldCapacityTotal(moldType);
+        const capacityUsed = Math.max(0, capacityUsedRaw || 0);
+        const storageUntilFallback = moldType === 'customer'
+            ? this._plusDaysYMD(arrivedAt, 365)
+            : '';
+        const storageUntil = String(opts.mold_storage_until ?? item.mold_storage_until ?? storageUntilFallback).trim();
+
+        return {
+            mold_type: moldType,
+            linked_order_id: linkedOrderId,
+            linked_order_name: String(opts.linked_order_name ?? item.linked_order_name ?? '').trim(),
+            template_id: templateId,
+            mold_capacity_total: capacityTotal,
+            mold_capacity_used: capacityUsed,
+            mold_arrived_at: arrivedAt,
+            mold_storage_until: storageUntil,
+        };
+    },
+
+    _renderMoldMeta(item) {
+        const meta = this._buildMoldMeta(item);
+        if (!meta) return '';
+
+        const typeLabel = meta.mold_type === 'blank' ? 'Бланк / stock' : 'Клиентский';
+        const total = parseFloat(meta.mold_capacity_total) || 0;
+        const used = parseFloat(meta.mold_capacity_used) || 0;
+        const percent = total > 0 ? Math.min(100, Math.round((used / total) * 100)) : 0;
+        const remaining = total > 0 ? total - used : null;
+        const progressColor = total > 0 && used >= total
+            ? '#dc2626'
+            : (percent >= 75 ? '#f59e0b' : '#10b981');
+        const linkedBits = [];
+        linkedBits.push(`<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 6px;border-radius:999px;background:#fff;color:#7f1d1d;border:1px solid #fecaca;">${typeLabel}</span>`);
+        if (meta.linked_order_id) {
+            linkedBits.push(`<span>Заказ #${meta.linked_order_id}</span>`);
+        }
+        if (meta.template_id) {
+            linkedBits.push(`<span>Шаблон: ${this.esc(meta.template_id)}</span>`);
+        }
+        if (meta.mold_storage_until) {
+            linkedBits.push(`<span>Хранить до: ${this._formatDateCompact(meta.mold_storage_until)}</span>`);
+        }
+
+        const capacityHtml = total > 0
+            ? `<div style="margin-top:6px;">
+                <div style="display:flex;justify-content:space-between;gap:8px;font-size:10px;color:var(--text-muted);">
+                    <span>Ресурс</span>
+                    <span>${used.toLocaleString('ru-RU')} / ${total.toLocaleString('ru-RU')}${remaining != null ? ` · остаток ${Math.max(0, remaining).toLocaleString('ru-RU')}` : ''}</span>
+                </div>
+                <div style="height:6px;border-radius:999px;background:#fee2e2;overflow:hidden;margin-top:4px;">
+                    <div style="width:${Math.max(0, Math.min(100, percent))}%;height:100%;background:${progressColor};"></div>
+                </div>
+            </div>`
+            : '';
+
+        return `<div style="margin-top:6px;font-size:10px;color:var(--text-muted);display:flex;flex-wrap:wrap;gap:6px;">${linkedBits.join('')}</div>${capacityHtml}`;
+    },
+
     renderTable(items) {
         const container = document.getElementById('wh-content');
         if (!container) return;
@@ -511,9 +623,10 @@ const Warehouse = {
         const uniqueColors = this._getUniqueColors();
 
         const rows = items.map(item => {
-            const cat = WAREHOUSE_CATEGORIES.find(c => c.key === item.category) || WAREHOUSE_CATEGORIES[6];
+            const cat = WAREHOUSE_CATEGORIES.find(c => c.key === item.category) || WAREHOUSE_CATEGORIES[WAREHOUSE_CATEGORIES.length - 1];
             const isLow = item.min_qty > 0 && item.qty < item.min_qty;
             const isOut = item.qty <= 0;
+            const moldMetaHtml = this._renderMoldMeta(item);
 
             // Photo or placeholder
             const photoSrc = item.photo_thumbnail || item.photo_url;
@@ -542,6 +655,7 @@ const Warehouse = {
                 <td>
                     <div style="font-weight:600;">${this.esc(item.name)}</div>
                     <div style="font-size:11px;color:var(--text-muted);">${this.esc(item.sku || '')}</div>
+                    ${moldMetaHtml}
                 </td>
                 <td>${catBadge}</td>
                 <td>${this.esc(item.size || '—')}</td>
@@ -594,12 +708,36 @@ const Warehouse = {
     // ADD / EDIT FORM
     // ==========================================
 
+    onCategoryChange(categoryValue) {
+        this._syncMoldFieldsVisibility(categoryValue);
+    },
+
+    _syncMoldFieldsVisibility(categoryValue) {
+        const wrapper = document.getElementById('wh-mold-fields');
+        if (!wrapper) return;
+        const isMold = this._isMoldCategory(categoryValue);
+        wrapper.style.display = isMold ? '' : 'none';
+
+        if (!isMold) return;
+        const typeEl = document.getElementById('wh-f-mold-type');
+        const arrivedEl = document.getElementById('wh-f-mold-arrived-at');
+        const storageEl = document.getElementById('wh-f-mold-storage-until');
+        const totalEl = document.getElementById('wh-f-mold-capacity-total');
+        if (typeEl && !typeEl.value) typeEl.value = 'customer';
+        if (arrivedEl && !arrivedEl.value) arrivedEl.value = this._todayYMD();
+        if (totalEl && !parseFloat(totalEl.value || 0)) totalEl.value = String(this._defaultMoldCapacityTotal(typeEl && typeEl.value));
+        if (storageEl && !storageEl.value && typeEl && typeEl.value === 'customer') {
+            storageEl.value = this._plusDaysYMD(arrivedEl && arrivedEl.value, 365);
+        }
+    },
+
     showAddForm() {
         this.editingId = null;
         this.clearForm();
         document.getElementById('wh-form-title').textContent = 'Новая позиция';
         document.getElementById('wh-delete-btn').style.display = 'none';
         document.getElementById('wh-reservations-section').innerHTML = '';
+        this._syncMoldFieldsVisibility(document.getElementById('wh-f-category').value);
         document.getElementById('wh-edit-form').style.display = '';
         document.getElementById('wh-edit-form').scrollIntoView({ behavior: 'smooth' });
     },
@@ -621,6 +759,13 @@ const Warehouse = {
         document.getElementById('wh-f-min-qty').value = item.min_qty || 0;
         document.getElementById('wh-f-price').value = item.price_per_unit || 0;
         document.getElementById('wh-f-notes').value = item.notes || '';
+        document.getElementById('wh-f-mold-type').value = this._normalizeMoldType(item.mold_type);
+        document.getElementById('wh-f-mold-linked-order-id').value = item.linked_order_id || '';
+        document.getElementById('wh-f-mold-template-id').value = item.template_id || '';
+        document.getElementById('wh-f-mold-capacity-total').value = item.mold_capacity_total || '';
+        document.getElementById('wh-f-mold-capacity-used').value = item.mold_capacity_used || 0;
+        document.getElementById('wh-f-mold-arrived-at').value = item.mold_arrived_at || '';
+        document.getElementById('wh-f-mold-storage-until').value = item.mold_storage_until || '';
 
         // Photo preview
         this._pendingThumbnail = item.photo_thumbnail || null;
@@ -630,6 +775,7 @@ const Warehouse = {
 
         document.getElementById('wh-delete-btn').style.display = '';
         this.renderItemReservations(id);
+        this._syncMoldFieldsVisibility(item.category || 'other');
         document.getElementById('wh-edit-form').style.display = '';
         document.getElementById('wh-edit-form').scrollIntoView({ behavior: 'smooth' });
     },
@@ -648,12 +794,20 @@ const Warehouse = {
         document.getElementById('wh-f-qty').value = 0;
         document.getElementById('wh-f-min-qty').value = 0;
         document.getElementById('wh-f-price').value = 0;
+        document.getElementById('wh-f-mold-type').value = 'customer';
+        document.getElementById('wh-f-mold-linked-order-id').value = '';
+        document.getElementById('wh-f-mold-template-id').value = '';
+        document.getElementById('wh-f-mold-capacity-total').value = '';
+        document.getElementById('wh-f-mold-capacity-used').value = 0;
+        document.getElementById('wh-f-mold-arrived-at').value = this._todayYMD();
+        document.getElementById('wh-f-mold-storage-until').value = this._plusDaysYMD(this._todayYMD(), 365);
         // Reset photo
         this._pendingThumbnail = null;
         const photoFileInput = document.getElementById('wh-f-photo-file');
         if (photoFileInput) photoFileInput.value = '';
         const preview = document.getElementById('wh-f-photo-preview');
         if (preview) preview.innerHTML = '<span style="font-size:24px;color:var(--text-muted);">📷</span>';
+        this._syncMoldFieldsVisibility('carabiners');
     },
 
     async saveItem() {
@@ -675,6 +829,19 @@ const Warehouse = {
             price_per_unit: parseFloat(document.getElementById('wh-f-price').value) || 0,
             notes: document.getElementById('wh-f-notes').value.trim(),
         };
+
+        if (this._isMoldCategory(item.category)) {
+            const moldMeta = this._buildMoldMeta(item, {
+                mold_type: document.getElementById('wh-f-mold-type').value,
+                linked_order_id: document.getElementById('wh-f-mold-linked-order-id').value,
+                template_id: document.getElementById('wh-f-mold-template-id').value,
+                mold_capacity_total: document.getElementById('wh-f-mold-capacity-total').value,
+                mold_capacity_used: document.getElementById('wh-f-mold-capacity-used').value,
+                mold_arrived_at: document.getElementById('wh-f-mold-arrived-at').value,
+                mold_storage_until: document.getElementById('wh-f-mold-storage-until').value,
+            });
+            Object.assign(item, moldMeta);
+        }
 
         await saveWarehouseItem(item);
         App.toast(this.editingId ? 'Позиция обновлена' : 'Позиция добавлена');
@@ -698,7 +865,8 @@ const Warehouse = {
 
     async adjustStock(itemId, qtyChange, reason, orderName, notes, manager, meta) {
         const items = await loadWarehouseItems();
-        const idx = items.findIndex(i => i.id === itemId);
+        const normalizedItemId = Number(itemId || 0);
+        const idx = items.findIndex(i => Number(i && i.id || 0) === normalizedItemId);
         if (idx < 0) {
             return {
                 ok: false,
@@ -766,7 +934,8 @@ const Warehouse = {
     },
 
     async promptAdjust(itemId) {
-        const item = this.allItems.find(i => i.id === itemId);
+        const normalizedItemId = Number(itemId || 0);
+        const item = this.allItems.find(i => Number(i && i.id || 0) === normalizedItemId);
         if (!item) return;
         const input = prompt(`Корректировка "${item.name}" (текущее: ${item.qty})\nВведите изменение (+10 или -5):`);
         if (input === null) return;
@@ -821,7 +990,8 @@ const Warehouse = {
     },
 
     async inlinePrice(itemId, newValueStr) {
-        const item = this.allItems.find(i => i.id === itemId);
+        const normalizedItemId = Number(itemId || 0);
+        const item = this.allItems.find(i => Number(i && i.id || 0) === normalizedItemId);
         if (!item) return;
         const newPrice = Math.max(0, parseFloat(newValueStr) || 0);
         if (newPrice === (item.price_per_unit || 0)) return;
@@ -835,7 +1005,8 @@ const Warehouse = {
     },
 
     async inlineColor(itemId, newColor) {
-        const item = this.allItems.find(i => i.id === itemId);
+        const normalizedItemId = Number(itemId || 0);
+        const item = this.allItems.find(i => Number(i && i.id || 0) === normalizedItemId);
         if (!item) return;
         if (newColor === (item.color || '')) return;
 
@@ -848,7 +1019,8 @@ const Warehouse = {
     },
 
     async inlineReserve(itemId, newValueStr, oldReserved) {
-        const item = this.allItems.find(i => i.id === itemId);
+        const normalizedItemId = Number(itemId || 0);
+        const item = this.allItems.find(i => Number(i && i.id || 0) === normalizedItemId);
         if (!item) return;
 
         const newReserved = Math.max(0, parseInt(newValueStr) || 0);
@@ -864,7 +1036,7 @@ const Warehouse = {
             // Add a manual reservation
             reservations.push({
                 id: Date.now(),
-                item_id: itemId,
+                item_id: normalizedItemId,
                 order_name: 'Ручной резерв',
                 qty: diff,
                 status: 'active',
@@ -875,7 +1047,7 @@ const Warehouse = {
             let toRelease = Math.abs(diff);
             // Sort: manual first, then by date descending
             const itemRes = reservations
-                .filter(r => r.item_id === itemId && r.status === 'active')
+                .filter(r => Number(r.item_id || 0) === normalizedItemId && r.status === 'active')
                 .sort((a, b) => {
                     if (a.order_name === 'Ручной резерв' && b.order_name !== 'Ручной резерв') return -1;
                     if (b.order_name === 'Ручной резерв' && a.order_name !== 'Ручной резерв') return 1;
@@ -907,7 +1079,8 @@ const Warehouse = {
     // ==========================================
 
     async addReservation(itemId) {
-        const item = this.allItems.find(i => i.id === itemId);
+        const normalizedItemId = Number(itemId || 0);
+        const item = this.allItems.find(i => Number(i && i.id || 0) === normalizedItemId);
         if (!item) return;
 
         const available = this.getAvailableQty(item);
@@ -922,7 +1095,7 @@ const Warehouse = {
         const reservations = await loadWarehouseReservations();
         reservations.push({
             id: Date.now(),
-            item_id: itemId,
+            item_id: normalizedItemId,
             order_name: orderName,
             qty: qty,
             status: 'active',
@@ -947,8 +1120,9 @@ const Warehouse = {
     },
 
     getAvailableQty(item) {
+        const normalizedItemId = Number(item && item.id || 0);
         const activeRes = this.allReservations.filter(
-            r => r.item_id === item.id && r.status === 'active'
+            r => Number(r.item_id || 0) === normalizedItemId && r.status === 'active'
         );
         const reserved = activeRes.reduce((s, r) => s + (r.qty || 0), 0);
         return Math.max(0, (item.qty || 0) - reserved);
@@ -957,7 +1131,8 @@ const Warehouse = {
     renderItemReservations(itemId) {
         const container = document.getElementById('wh-reservations-section');
         if (!container) return;
-        const activeRes = this.allReservations.filter(r => r.item_id === itemId && r.status === 'active');
+        const normalizedItemId = Number(itemId || 0);
+        const activeRes = this.allReservations.filter(r => Number(r.item_id || 0) === normalizedItemId && r.status === 'active');
         if (activeRes.length === 0) {
             container.innerHTML = '<p style="color:var(--text-muted);font-size:12px;">Нет активных резервов</p>';
             return;
@@ -1533,11 +1708,18 @@ const Warehouse = {
             if (src !== 'warehouse') return;
 
             const itemId = Number(
-                item.warehouse_item_id
-                || (isHardware ? item.hardware_warehouse_item_id : item.packaging_warehouse_item_id)
-                || 0
+                (
+                    item.warehouse_item_id
+                    ?? (isHardware ? item.hardware_warehouse_item_id : item.packaging_warehouse_item_id)
+                    ?? 0
+                )
             );
-            const qty = parseFloat(item.quantity || item.qty || 0) || 0;
+            const qty = parseFloat(
+                item.quantity
+                ?? (isHardware ? item.hardware_qty : item.packaging_qty)
+                ?? item.qty
+                ?? 0
+            ) || 0;
             if (!itemId || qty <= 0) return;
 
             const key = String(itemId);
@@ -1686,6 +1868,224 @@ const Warehouse = {
             return false;
         }
         return savedReady || historicalReady;
+    },
+
+    _buildMoldUsageHistoryDeltaMap(history) {
+        const deltaByKey = new Map();
+        (history || []).forEach(entry => {
+            if (String(entry && entry.mold_flow || '') !== 'usage_completed') return;
+            const orderId = Number(entry.order_id || 0);
+            const itemId = Number(entry.item_id || 0);
+            const usageChange = parseFloat(entry.mold_usage_change || 0) || 0;
+            if (!orderId || !itemId || usageChange === 0) return;
+            const key = this._projectHardwareKey(orderId, itemId);
+            deltaByKey.set(key, (deltaByKey.get(key) || 0) + usageChange);
+        });
+        return deltaByKey;
+    },
+
+    _getMoldUsageNetDelta(orderId, itemId, historyDeltaMap) {
+        const key = this._projectHardwareKey(orderId, itemId);
+        return historyDeltaMap instanceof Map ? (parseFloat(historyDeltaMap.get(key)) || 0) : 0;
+    },
+
+    _getOrderMoldCandidates(orderId, orderItem, warehouseItems) {
+        const items = Array.isArray(warehouseItems) ? warehouseItems : [];
+        const templateId = String(orderItem && orderItem.template_id || '').trim();
+        const isBlank = !!(orderItem && orderItem.is_blank_mold);
+        return items
+            .filter(item => {
+                if (!this._isMoldCategory(item && item.category)) return false;
+                if ((parseFloat(item.qty) || 0) <= 0) return false;
+                const moldType = this._normalizeMoldType(item.mold_type);
+                if (!isBlank) {
+                    return moldType === 'customer' && Number(item.linked_order_id || 0) === Number(orderId || 0);
+                }
+                return moldType === 'blank' && templateId && String(item.template_id || '').trim() === templateId;
+            })
+            .sort((a, b) => Number(a.id || 0) - Number(b.id || 0));
+    },
+
+    _allocateOrderMoldUsage(orderId, orderItems, warehouseItems) {
+        const allocations = new Map();
+        (orderItems || []).forEach(item => {
+            if (String(item && item.item_type || '').toLowerCase() !== 'product') return;
+            const qty = parseFloat(item.quantity) || 0;
+            if (qty <= 0) return;
+            const candidates = this._getOrderMoldCandidates(orderId, item, warehouseItems);
+            if (candidates.length === 0) return;
+
+            let remainingDemand = qty;
+            candidates.forEach(candidate => {
+                if (remainingDemand <= 0) return;
+                const itemId = Number(candidate.id || 0);
+                if (!itemId) return;
+                const total = parseFloat(candidate.mold_capacity_total) || 0;
+                const used = parseFloat(candidate.mold_capacity_used) || 0;
+                const alreadyAllocated = allocations.get(itemId) || 0;
+                const remainingCapacity = total > 0 ? Math.max(0, total - used - alreadyAllocated) : remainingDemand;
+                const chunk = total > 0 ? Math.min(remainingDemand, remainingCapacity) : remainingDemand;
+                if (chunk <= 0) return;
+                allocations.set(itemId, alreadyAllocated + chunk);
+                remainingDemand -= chunk;
+            });
+
+            if (remainingDemand > 0) {
+                const fallbackId = Number(candidates[0] && candidates[0].id || 0);
+                if (fallbackId) {
+                    allocations.set(fallbackId, (allocations.get(fallbackId) || 0) + remainingDemand);
+                }
+            }
+        });
+        return allocations;
+    },
+
+    async _syncOrderMoldUsageState({ orderId, orderName, managerName, status, currentItems }) {
+        const normalizedOrderId = Number(orderId || 0);
+        if (!normalizedOrderId) return;
+
+        const [warehouseItems, history] = await Promise.all([
+            loadWarehouseItems(),
+            loadWarehouseHistory(),
+        ]);
+        const targetUsage = status === 'completed'
+            ? this._allocateOrderMoldUsage(normalizedOrderId, currentItems || [], warehouseItems || [])
+            : new Map();
+        const historyDeltaMap = this._buildMoldUsageHistoryDeltaMap(history);
+        const moldIds = new Set([
+            ...Array.from(targetUsage.keys()),
+            ...(history || [])
+                .filter(entry => String(entry && entry.mold_flow || '') === 'usage_completed' && Number(entry.order_id || 0) === normalizedOrderId)
+                .map(entry => Number(entry.item_id || 0))
+                .filter(Boolean),
+        ]);
+        if (moldIds.size === 0) return;
+
+        let changed = false;
+        const updatedItems = Array.isArray(warehouseItems) ? [...warehouseItems] : [];
+        const itemIndexById = new Map(updatedItems.map((item, index) => [Number(item.id || 0), index]));
+        const newHistoryEntries = [];
+        const nowIso = new Date().toISOString();
+
+        moldIds.forEach(itemId => {
+            const idx = itemIndexById.get(Number(itemId || 0));
+            if (idx == null) return;
+            const whItem = { ...updatedItems[idx] };
+            const beforeUsed = Math.max(0, parseFloat(whItem.mold_capacity_used) || 0);
+            const target = Math.max(0, parseFloat(targetUsage.get(itemId) || 0) || 0);
+            const current = Math.max(0, this._getMoldUsageNetDelta(normalizedOrderId, itemId, historyDeltaMap));
+            const delta = target - current;
+            if (Math.abs(delta) <= 0.000001) return;
+
+            const afterUsed = Math.max(0, beforeUsed + delta);
+            whItem.mold_capacity_used = afterUsed;
+            whItem.updated_at = nowIso;
+            updatedItems[idx] = whItem;
+            changed = true;
+
+            newHistoryEntries.push({
+                id: Date.now() + Math.floor(Math.random() * 1000) + newHistoryEntries.length,
+                item_id: Number(itemId || 0),
+                item_name: whItem.name || '',
+                item_sku: whItem.sku || '',
+                item_category: whItem.category || '',
+                type: 'mold_usage',
+                qty_change: 0,
+                requested_qty_change: 0,
+                qty_before: parseFloat(whItem.qty) || 0,
+                qty_after: parseFloat(whItem.qty) || 0,
+                unit_price: parseFloat(whItem.price_per_unit) || 0,
+                total_cost_change: 0,
+                order_id: normalizedOrderId,
+                order_name: orderName || 'Заказ',
+                notes: delta > 0
+                    ? `Списание ресурса молда: +${delta} шт`
+                    : `Возврат ресурса молда: -${Math.abs(delta)} шт`,
+                clamped: false,
+                created_at: nowIso,
+                created_by: managerName || '',
+                mold_flow: 'usage_completed',
+                mold_usage_change: delta,
+                mold_usage_before: beforeUsed,
+                mold_usage_after: afterUsed,
+            });
+        });
+
+        if (!changed) return;
+
+        await saveWarehouseItems(updatedItems);
+        await saveWarehouseHistory([...(history || []), ...newHistoryEntries]);
+        this.allItems = updatedItems;
+    },
+
+    async _promoteOrdersForReceivedMolds(receivedItems, shipment) {
+        const moldRows = (receivedItems || []).filter(item => this._isMoldCategory(item && item.category));
+        if (moldRows.length === 0) return { changedOrders: 0, promotedOrders: 0 };
+
+        const purchaseCache = new Map();
+        const orderCache = new Map();
+        let changedOrders = 0;
+        let promotedOrders = 0;
+
+        for (const row of moldRows) {
+            const meta = await this._resolveShipmentMoldMeta(row, {
+                purchaseCache,
+                orderCache,
+                receiptDate: shipment && (shipment.date || shipment.received_at || '') || '',
+            });
+            const linkedOrderId = Number(meta && meta.linked_order_id || 0);
+            if (!linkedOrderId) continue;
+
+            const detail = await this._getOrderCached(linkedOrderId, orderCache);
+            if (!detail || !detail.order) continue;
+
+            const updatedItems = (detail.items || []).map(item => {
+                if (String(item && item.item_type || '').toLowerCase() !== 'product') return { ...item };
+                if (item.is_blank_mold === true) return { ...item };
+                if (item.base_mold_in_stock === true) return { ...item, warehouse_mold_item_id: row.warehouse_item_id || item.warehouse_mold_item_id || null };
+                return {
+                    ...item,
+                    base_mold_in_stock: true,
+                    warehouse_mold_item_id: row.warehouse_item_id || null,
+                };
+            });
+
+            const hadChanges = JSON.stringify(updatedItems) !== JSON.stringify(detail.items || []);
+            if (hadChanges) {
+                await saveOrder(detail.order, updatedItems);
+                detail.items = updatedItems;
+                orderCache.set(linkedOrderId, detail);
+                changedOrders += 1;
+            }
+
+            if (detail.order.status === 'sample') {
+                await updateOrderStatus(linkedOrderId, 'production_casting');
+                if (typeof Orders !== 'undefined' && Orders && typeof Orders.addChangeRecord === 'function') {
+                    await Orders.addChangeRecord(linkedOrderId, {
+                        field: 'status',
+                        old_value: 'sample',
+                        new_value: 'production_casting',
+                        manager: App.getCurrentEmployeeName() || detail.order.manager_name || '',
+                        description: 'Молд принят на склад, заказ переведён в продакшен',
+                    });
+                }
+                if (typeof this.syncProjectHardwareOrderState === 'function') {
+                    await this.syncProjectHardwareOrderState({
+                        orderId: linkedOrderId,
+                        orderName: detail.order.order_name || 'Заказ',
+                        managerName: App.getCurrentEmployeeName() || detail.order.manager_name || '',
+                        status: 'production_casting',
+                        currentItems: updatedItems,
+                        previousItems: updatedItems,
+                    });
+                }
+                detail.order.status = 'production_casting';
+                orderCache.set(linkedOrderId, detail);
+                promotedOrders += 1;
+            }
+        }
+
+        return { changedOrders, promotedOrders };
     },
 
     async _repairLegacyProjectHardwareMovements(rows, history, fallbackManagerName) {
@@ -1935,7 +2335,16 @@ const Warehouse = {
             ...Array.from(previousDemand.keys()),
         ]));
 
-        if (itemIds.length === 0) return;
+        if (itemIds.length === 0) {
+            await this._syncOrderMoldUsageState({
+                orderId: normalizedOrderId,
+                orderName,
+                managerName,
+                status,
+                currentItems,
+            });
+            return;
+        }
 
         const shouldReserve = this._isProjectHardwareReserveStatus(status);
         const nowIso = new Date().toISOString();
@@ -2071,6 +2480,14 @@ const Warehouse = {
         if (shortage) {
             App.toast('Часть позиций со склада не встала в полный резерв: недостаточно остатка');
         }
+
+        await this._syncOrderMoldUsageState({
+            orderId: normalizedOrderId,
+            orderName,
+            managerName,
+            status,
+            currentItems,
+        });
     },
 
     async renderProjectHardwareView(viewToken) {
@@ -2634,6 +3051,18 @@ const Warehouse = {
                 ? `<img src="${this.esc(photoSrc)}" style="width:36px;height:36px;object-fit:cover;border-radius:6px;border:1px solid var(--border);" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';"><span style="width:36px;height:36px;display:none;align-items:center;justify-content:center;background:var(--bg);border-radius:6px;font-size:14px;">📷</span>`
                 : `<span style="width:36px;height:36px;display:flex;align-items:center;justify-content:center;background:var(--bg);border-radius:6px;font-size:14px;">📷</span>`;
 
+            const moldFieldsHtml = item.source === 'new' && this._isMoldCategory(item.category)
+                ? `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:6px;margin-top:6px;padding:8px;border:1px solid var(--border);border-radius:8px;background:rgba(239,68,68,0.04);">
+                    <select onchange="Warehouse.onShipmentItemField(${idx}, 'mold_type', this.value)" style="padding:4px;border:1px solid var(--border);border-radius:4px;font-size:12px;">
+                        <option value="customer"${this._normalizeMoldType(item.mold_type) === 'customer' ? ' selected' : ''}>Клиентский</option>
+                        <option value="blank"${this._normalizeMoldType(item.mold_type) === 'blank' ? ' selected' : ''}>Бланк / stock</option>
+                    </select>
+                    <input type="number" value="${item.linked_order_id || ''}" min="0" placeholder="ID заказа" oninput="Warehouse.onShipmentItemField(${idx}, 'linked_order_id', this.value)" style="padding:4px 6px;border:1px solid var(--border);border-radius:4px;font-size:12px;">
+                    <input type="text" value="${this.esc(item.template_id || '')}" placeholder="template_id" oninput="Warehouse.onShipmentItemField(${idx}, 'template_id', this.value)" style="padding:4px 6px;border:1px solid var(--border);border-radius:4px;font-size:12px;">
+                    <input type="number" value="${item.mold_capacity_total || this._defaultMoldCapacityTotal(item.mold_type)}" min="0" step="1" placeholder="Ресурс всего" oninput="Warehouse.onShipmentItemField(${idx}, 'mold_capacity_total', this.value)" style="padding:4px 6px;border:1px solid var(--border);border-radius:4px;font-size:12px;">
+                </div>`
+                : '';
+
             const itemSourceCell = item.source === 'new'
                 ? `<div>
                     <div style="display:flex;gap:6px;margin-bottom:6px;">
@@ -2658,6 +3087,7 @@ const Warehouse = {
                             <input type="file" accept="image/*" style="display:none" onchange="Warehouse.onShipmentItemPhotoFile(${idx}, this)">
                         </label>
                     </div>
+                    ${moldFieldsHtml}
                 </div>`
                 : `<div>
                     <div style="display:flex;gap:6px;margin-bottom:6px;">
@@ -2708,6 +3138,12 @@ const Warehouse = {
             item.warehouse_item_id = null;
             if (!item.category) item.category = 'other';
             if (!item.unit) item.unit = 'шт';
+            if (this._isMoldCategory(item.category)) {
+                item.mold_type = this._normalizeMoldType(item.mold_type);
+                if (!parseFloat(item.mold_capacity_total || 0)) {
+                    item.mold_capacity_total = this._defaultMoldCapacityTotal(item.mold_type);
+                }
+            }
         }
         this.renderShipmentItemsTable();
         this.recalcShipmentValues();
@@ -2720,7 +3156,7 @@ const Warehouse = {
             shItem.warehouse_item_id = null;
             shItem.name = ''; shItem.sku = ''; shItem.category = '';
         } else {
-            const whItem = this.allItems.find(i => i.id === itemId);
+            const whItem = this.allItems.find(i => Number(i && i.id || 0) === itemId);
             if (whItem) {
                 shItem.source = 'existing';
                 shItem.warehouse_item_id = whItem.id;
@@ -2732,6 +3168,14 @@ const Warehouse = {
                 shItem.unit = whItem.unit || 'шт';
                 shItem.photo_url = whItem.photo_url || '';
                 shItem.photo_thumbnail = whItem.photo_thumbnail || '';
+                shItem.mold_type = whItem.mold_type || '';
+                shItem.linked_order_id = whItem.linked_order_id || '';
+                shItem.linked_order_name = whItem.linked_order_name || '';
+                shItem.template_id = whItem.template_id || '';
+                shItem.mold_capacity_total = whItem.mold_capacity_total || 0;
+                shItem.mold_capacity_used = whItem.mold_capacity_used || 0;
+                shItem.mold_arrived_at = whItem.mold_arrived_at || '';
+                shItem.mold_storage_until = whItem.mold_storage_until || '';
             }
         }
         this.recalcShipmentValues();
@@ -2740,7 +3184,20 @@ const Warehouse = {
     onShipmentItemField(idx, field, value) {
         const numericFields = new Set(['qty_received', 'weight_grams', 'purchase_price_cny', 'purchase_price_rub', 'delivery_allocated', 'total_cost_per_unit']);
         this.shipmentItems[idx][field] = numericFields.has(field) ? (parseFloat(value) || 0) : String(value || '');
+        const row = this.shipmentItems[idx];
+        if (field === 'category' && this._isMoldCategory(value)) {
+            row.mold_type = this._normalizeMoldType(row.mold_type);
+            if (!parseFloat(row.mold_capacity_total || 0)) {
+                row.mold_capacity_total = this._defaultMoldCapacityTotal(row.mold_type);
+            }
+        }
+        if (field === 'mold_type' && this._isMoldCategory(row.category) && !parseFloat(row.mold_capacity_total || 0)) {
+            row.mold_capacity_total = this._defaultMoldCapacityTotal(value);
+        }
         this.recalcShipmentValues();
+        if (field === 'category' || field === 'mold_type') {
+            this.renderShipmentItemsTable();
+        }
     },
 
     onShipmentItemPhotoUrl(idx, value) {
@@ -2926,10 +3383,20 @@ const Warehouse = {
             qty: i.qty || 0,
             price: i.price_per_unit || 0,
         }]));
+        const purchaseCache = new Map();
+        const orderCache = new Map();
 
         // Ensure all "new" items are matched with existing stock or created once.
         for (const shItem of validItemsRaw) {
             if (shItem.warehouse_item_id) continue;
+            if (this._isMoldCategory(shItem.category)) {
+                const moldMeta = await this._resolveShipmentMoldMeta(shItem, {
+                    purchaseCache,
+                    orderCache,
+                    receiptDate: data.date || data.received_at || '',
+                });
+                if (moldMeta) Object.assign(shItem, moldMeta);
+            }
             const matched = this._findExistingItemForShipment(shItem, itemsBefore);
             if (matched) {
                 shItem.warehouse_item_id = matched.id;
@@ -2947,8 +3414,13 @@ const Warehouse = {
                 qty: 0,
                 min_qty: 0,
                 price_per_unit: Math.round((shItem.total_cost_per_unit || 0) * 100) / 100,
-                notes: 'Создано автоматически из приёмки Китая',
+                notes: this._isMoldCategory(shItem.category)
+                    ? 'Молд создан автоматически из приёмки Китая'
+                    : 'Создано автоматически из приёмки Китая',
             };
+            if (this._isMoldCategory(shItem.category)) {
+                Object.assign(newItem, this._mergeMoldMetaIntoItem(newItem, shItem));
+            }
             const newId = await saveWarehouseItem(newItem);
             shItem.warehouse_item_id = newId;
             beforeById.set(newId, { qty: 0, price: newItem.price_per_unit || 0 });
@@ -3025,7 +3497,11 @@ const Warehouse = {
             const idx = itemsAfter.findIndex(i => i.id === shItem.warehouse_item_id);
             if (idx < 0) return;
 
-            const after = itemsAfter[idx];
+            let after = itemsAfter[idx];
+            if (this._isMoldCategory(after.category) || this._isMoldCategory(shItem.category)) {
+                after = this._mergeMoldMetaIntoItem(after, shItem);
+                itemsAfter[idx] = after;
+            }
             const before = beforeById.get(shItem.warehouse_item_id) || { qty: 0, price: after.price_per_unit || 0 };
             const prevQty = prevQtyById.get(shItem.warehouse_item_id) || 0;
             const nextQty = newQtyById.get(shItem.warehouse_item_id) || 0;
@@ -3055,9 +3531,14 @@ const Warehouse = {
         });
         await saveWarehouseItems(itemsAfter);
 
+        const moldResult = await this._promoteOrdersForReceivedMolds(validItems, data);
+
         App.toast(isRepost
             ? `Приёмка перепроведена: ${validItems.length} позиций обновлено`
             : `Приёмка завершена: ${validItems.length} позиций на складе`);
+        if (moldResult && moldResult.promotedOrders > 0) {
+            App.toast(`Молды приняты: ${moldResult.promotedOrders} заказ(а) переведены в продакшен`);
+        }
         this.hideShipmentForm();
         await this.load();
         this.setView('shipments');
@@ -3583,6 +4064,20 @@ const Warehouse = {
     },
 
     _findExistingItemForShipment(shItem, warehouseItems) {
+        if (this._isMoldCategory(shItem.category)) {
+            const moldType = this._normalizeMoldType(shItem.mold_type);
+            const linkedOrderId = Number(shItem.linked_order_id || 0) || 0;
+            const templateId = this._normStr(shItem.template_id || '');
+            const byMoldKey = warehouseItems.find(i =>
+                this._isMoldCategory(i.category)
+                && this._normalizeMoldType(i.mold_type) === moldType
+                && (
+                    (linkedOrderId && Number(i.linked_order_id || 0) === linkedOrderId)
+                    || (templateId && this._normStr(i.template_id || '') === templateId)
+                )
+            );
+            if (byMoldKey) return byMoldKey;
+        }
         const sku = this._normStr(shItem.sku);
         const category = this._normStr(shItem.category);
         if (sku) {
@@ -3594,6 +4089,82 @@ const Warehouse = {
         }
         const key = this._itemIdentityKey(shItem);
         return warehouseItems.find(i => this._itemIdentityKey(i) === key) || null;
+    },
+
+    async _getChinaPurchaseCached(purchaseId, cache) {
+        const normalizedId = Number(purchaseId || 0);
+        if (!normalizedId) return null;
+        if (cache.has(normalizedId)) return cache.get(normalizedId);
+        const purchase = typeof loadChinaPurchase === 'function'
+            ? await loadChinaPurchase(normalizedId).catch(() => null)
+            : null;
+        cache.set(normalizedId, purchase || null);
+        return purchase || null;
+    },
+
+    async _getOrderCached(orderId, cache) {
+        const normalizedId = Number(orderId || 0);
+        if (!normalizedId) return null;
+        if (cache.has(normalizedId)) return cache.get(normalizedId);
+        const detail = typeof loadOrder === 'function'
+            ? await loadOrder(normalizedId).catch(() => null)
+            : null;
+        cache.set(normalizedId, detail || null);
+        return detail || null;
+    },
+
+    async _resolveShipmentMoldMeta(shItem, context) {
+        if (!this._isMoldCategory(shItem && shItem.category)) return null;
+        const ctx = context && typeof context === 'object' ? context : {};
+        const purchaseCache = ctx.purchaseCache instanceof Map ? ctx.purchaseCache : new Map();
+        const orderCache = ctx.orderCache instanceof Map ? ctx.orderCache : new Map();
+
+        let linkedOrderId = Number(shItem.linked_order_id || 0) || 0;
+        let linkedOrderName = String(shItem.linked_order_name || '').trim();
+        let purchase = null;
+        if (!linkedOrderId && shItem.china_purchase_id) {
+            purchase = await this._getChinaPurchaseCached(shItem.china_purchase_id, purchaseCache);
+            linkedOrderId = Number(purchase && purchase.order_id || 0) || 0;
+            if (!linkedOrderName) {
+                linkedOrderName = String(purchase && (purchase.order_name || purchase.order_label) || '').trim();
+            }
+        }
+
+        if (linkedOrderId && !linkedOrderName) {
+            const detail = await this._getOrderCached(linkedOrderId, orderCache);
+            linkedOrderName = String(detail && detail.order && detail.order.order_name || '').trim();
+        }
+
+        const moldMeta = this._buildMoldMeta(shItem, {
+            mold_type: shItem.mold_type || (linkedOrderId ? 'customer' : 'blank'),
+            linked_order_id: linkedOrderId,
+            linked_order_name: linkedOrderName,
+            template_id: shItem.template_id || '',
+            mold_capacity_total: shItem.mold_capacity_total,
+            mold_capacity_used: shItem.mold_capacity_used,
+            mold_arrived_at: shItem.mold_arrived_at || ctx.receiptDate || '',
+            mold_storage_until: shItem.mold_storage_until || '',
+            receiptDate: ctx.receiptDate || '',
+        });
+
+        if (!moldMeta) return null;
+        return {
+            ...moldMeta,
+            china_purchase_id: Number(shItem.china_purchase_id || 0) || null,
+        };
+    },
+
+    _mergeMoldMetaIntoItem(item, moldMeta) {
+        if (!item || !moldMeta) return item;
+        const merged = { ...item, ...moldMeta };
+        if (!merged.mold_capacity_total) {
+            merged.mold_capacity_total = this._defaultMoldCapacityTotal(merged.mold_type);
+        }
+        if (!merged.mold_arrived_at) merged.mold_arrived_at = this._todayYMD();
+        if (this._normalizeMoldType(merged.mold_type) === 'customer' && !merged.mold_storage_until) {
+            merged.mold_storage_until = this._plusDaysYMD(merged.mold_arrived_at, 365);
+        }
+        return merged;
     },
 
     _mergeShipmentItemsByWarehouseId(items) {
