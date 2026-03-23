@@ -3726,6 +3726,12 @@ function _isWorkModuleMissingTableError(error) {
 
 function _markWorkModuleRemoteUnavailable(error) {
     if (_workModuleRemoteAvailable === false) return;
+    const message = String(error?.message || error || '').toLowerCase();
+    if (message.includes('timeout')) {
+        _workModuleRemoteAvailable = false;
+        console.warn('Work management remote timed out. Using local fallback for this module.', error);
+        return;
+    }
     if (_isSupabaseAccessError(error)) {
         _workModuleRemoteAvailable = false;
         _markSupabaseAccessProblem(error);
@@ -3742,15 +3748,41 @@ function _canUseWorkModuleRemote() {
     return isSupabaseReady() && !_hasSupabaseAccessProblem() && _workModuleRemoteAvailable !== false;
 }
 
+function _remoteTimeoutMs(kind = 'load') {
+    const fallback = kind === 'write' ? 5000 : 5000;
+    const key = kind === 'write' ? '__RO_REMOTE_WRITE_TIMEOUT_MS' : '__RO_REMOTE_LOAD_TIMEOUT_MS';
+    if (typeof window !== 'undefined') {
+        const value = Number(window[key]);
+        if (Number.isFinite(value) && value > 0) return value;
+    }
+    return fallback;
+}
+
+function _remoteTimeoutError(label, timeoutMs) {
+    const error = new Error(`timeout (${label}, ${timeoutMs}ms)`);
+    error.code = 'timeout';
+    error.timeoutMs = timeoutMs;
+    error.operation = label;
+    return error;
+}
+
+async function _withRemoteTimeout(kind, label, executor) {
+    const timeoutMs = _remoteTimeoutMs(kind);
+    return Promise.race([
+        Promise.resolve().then(executor),
+        new Promise((_, reject) => setTimeout(() => reject(_remoteTimeoutError(label, timeoutMs)), timeoutMs)),
+    ]);
+}
+
 async function _loadJsonSetting(settingKey, fallbackValue) {
     const fallback = fallbackValue === undefined ? null : fallbackValue;
     if (!isSupabaseReady() || !settingKey) return fallback;
     try {
-        const { data, error } = await supabaseClient
+        const { data, error } = await _withRemoteTimeout('load', `load setting ${settingKey}`, () => supabaseClient
             .from('settings')
             .select('value')
             .eq('key', settingKey)
-            .maybeSingle();
+            .maybeSingle());
         if (error) {
             console.error(`load setting ${settingKey} error:`, error);
             if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
@@ -3768,13 +3800,13 @@ async function _loadJsonSetting(settingKey, fallbackValue) {
 async function _saveJsonSetting(settingKey, value) {
     if (!isSupabaseReady() || !settingKey) return value;
     try {
-        const { error } = await supabaseClient
+        const { error } = await _withRemoteTimeout('write', `save setting ${settingKey}`, () => supabaseClient
             .from('settings')
             .upsert({
                 key: settingKey,
                 value: JSON.stringify(value),
                 updated_at: new Date().toISOString(),
-            }, { onConflict: 'key' });
+            }, { onConflict: 'key' }));
         if (error) {
             console.error(`save setting ${settingKey} error:`, error);
             if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
@@ -3855,9 +3887,9 @@ async function _upsertWorkTableRows(table, localKey, rows, onConflict) {
     let remoteTableMissing = _shouldSkipOptionalWorkTableRemote(table);
     if (_canUseWorkModuleRemote() && !remoteTableMissing) {
         try {
-            const { error } = await supabaseClient
+            const { error } = await _withRemoteTimeout('write', `upsert ${table}`, () => supabaseClient
                 .from(table)
-                .upsert(payload, { onConflict: conflictKey });
+                .upsert(payload, { onConflict: conflictKey }));
             if (error) {
                 if (_isWorkModuleMissingTableError(error) && _isOptionalWorkModuleTable(table)) {
                     remoteTableMissing = true;
@@ -3870,9 +3902,10 @@ async function _upsertWorkTableRows(table, localKey, rows, onConflict) {
                 _workModuleRemoteAvailable = true;
                 _clearOptionalWorkTableMissing(table);
             }
-        } catch (e) {
-            console.error(`upsert ${table} exception:`, e);
-        }
+    } catch (e) {
+        console.error(`upsert ${table} exception:`, e);
+        _markWorkModuleRemoteUnavailable(e);
+    }
     }
     if (conflictKey && conflictKey !== 'id') {
         const keys = conflictKey.split(',').map(part => part.trim()).filter(Boolean);
@@ -3904,7 +3937,7 @@ async function _deleteWorkTableRow(table, localKey, rowId) {
     const settingsKey = _workSettingsKey(table);
     if (_canUseWorkModuleRemote()) {
         try {
-            const { error } = await supabaseClient.from(table).delete().eq('id', rowId);
+            const { error } = await _withRemoteTimeout('write', `delete ${table}`, () => supabaseClient.from(table).delete().eq('id', rowId));
             if (error) {
                 _markWorkModuleRemoteUnavailable(error);
                 if (!_isWorkModuleMissingTableError(error)) console.error(`delete ${table} error:`, error);
@@ -3913,6 +3946,7 @@ async function _deleteWorkTableRow(table, localKey, rowId) {
             }
         } catch (e) {
             console.error(`delete ${table} exception:`, e);
+            _markWorkModuleRemoteUnavailable(e);
         }
     }
     const next = _removeLocalEntityRow(localKey, item => String(item?.id) === String(rowId));

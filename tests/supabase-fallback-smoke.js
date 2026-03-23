@@ -45,8 +45,10 @@ function createContext() {
         location: { href: 'http://localhost' },
         __remoteCalls: [],
         __RO_REMOTE_LOAD_TIMEOUT_MS: 10,
+        __RO_REMOTE_WRITE_TIMEOUT_MS: 10,
         __invalidTables: new Set(),
         __missingTables: new Set(),
+        __hangingTables: new Set(),
         __settingsStore: new Map(),
     };
 
@@ -78,6 +80,9 @@ function createContext() {
                                     return {
                                         maybeSingle() {
                                             context.__remoteCalls.push({ table, action: 'maybeSingle' });
+                                            if (context.__hangingTables.has(table)) {
+                                                return new Promise(() => {});
+                                            }
                                             if (remoteError(table)) {
                                                 return Promise.resolve({ data: null, error: remoteError(table) });
                                             }
@@ -111,6 +116,9 @@ function createContext() {
                         },
                         async upsert(payload) {
                             context.__remoteCalls.push({ table, action: 'upsert', payload });
+                            if (context.__hangingTables.has(table)) {
+                                return new Promise(() => {});
+                            }
                             if (remoteError(table)) {
                                 return { error: remoteError(table) };
                             }
@@ -288,6 +296,29 @@ async function main() {
         const persistedFallback = JSON.parse(context.__settingsStore.get('bug_reports_json') || '[]');
         assert.equal(persistedFallback.length, 2);
         assert.equal(persistedFallback.some(item => item.title === 'Fresh local bug'), true);
+    }
+
+    {
+        const context = createContext();
+        context.__hangingTables = new Set(['tasks', 'settings']);
+        runScript(context, 'js/supabase.js');
+        vm.runInContext('initSupabase()', context);
+
+        await vm.runInContext(`
+            _upsertWorkTableRows('tasks', LOCAL_KEYS.workTasks, [{
+                id: 303,
+                title: 'Timeout fallback task',
+                updated_at: '2026-03-23T10:00:00.000Z'
+            }], 'id')
+        `, context);
+
+        const savedTasks = JSON.parse(JSON.stringify(vm.runInContext('getLocal(LOCAL_KEYS.workTasks)', context)));
+        assert.equal(savedTasks.length, 1);
+        assert.equal(savedTasks[0].title, 'Timeout fallback task');
+        assert.equal(vm.runInContext('_canUseWorkModuleRemote()', context), false);
+        assert.equal(context.__remoteCalls.some(call => call.table === 'tasks' && call.action === 'upsert'), true);
+        assert.equal(context.__remoteCalls.some(call => call.table === 'settings' && call.action === 'maybeSingle'), true);
+        assert.equal(context.__remoteCalls.some(call => call.table === 'settings' && call.action === 'upsert'), true);
     }
 
     console.log('supabase fallback smoke checks passed');
