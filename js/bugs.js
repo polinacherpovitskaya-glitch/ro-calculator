@@ -199,12 +199,22 @@ const BugReports = {
             total: reports.length,
             open: reports.filter(entry => !this.isTaskClosed(entry.task)).length,
             high: reports.filter(entry => ['high', 'critical'].includes(entry.report?.severity)).length,
-            promptReady: reports.filter(entry => entry.report?.codex_prompt).length,
+            promptReady: reports.filter(entry => this.promptText(entry.report)).length,
         };
     },
 
     statusLabel(task) {
         return task ? WorkManagementCore.getTaskStatusLabel(task.status) : 'Без задачи';
+    },
+
+    promptText(report) {
+        if (!report) return '';
+        return String(
+            report.codex_prompt
+            || report.prompt
+            || report.codex_result
+            || ''
+        ).trim();
     },
 
     priorityFromSeverity(severity) {
@@ -228,6 +238,8 @@ const BugReports = {
     defaultBugAssigneeId() {
         const configured = Number(App?.settings?.bug_report_default_assignee_id || 0);
         if (Number.isFinite(configured) && configured > 0) return configured;
+        const currentEmployeeId = Number(App?.currentEmployeeId || 0);
+        if (Number.isFinite(currentEmployeeId) && currentEmployeeId > 0) return currentEmployeeId;
         const polina = (this.employees || []).find(item => Number(item.id) === 5);
         if (polina) return polina.id;
         return App.currentEmployeeId || null;
@@ -446,6 +458,7 @@ const BugReports = {
         const task = entry.task || {};
         const assets = entry.assets || [];
         const isClosed = this.isTaskClosed(task);
+        const prompt = this.promptText(report);
         const severityClass = report.severity === 'critical'
             ? 'badge-red'
             : report.severity === 'high'
@@ -455,7 +468,7 @@ const BugReports = {
                     : 'badge-blue';
         const codexBadgeClass = report.codex_status === 'failed'
             ? 'badge-red'
-            : report.codex_prompt
+            : prompt
                 ? 'badge-green'
                 : 'badge-gray';
         return `
@@ -486,14 +499,23 @@ const BugReports = {
                         <span>${assets.length} влож.</span>
                     </div>
                     <div class="bug-report-actions">
+                        ${task?.id && !isClosed ? `
+                            <button
+                                class="btn btn-sm btn-outline bug-report-close-btn"
+                                type="button"
+                                title="Закрыть задачу как готовую"
+                                aria-label="Закрыть задачу как готовую"
+                                onclick="BugReports.closeTask(${Number(task.id)})"
+                            >&times;</button>
+                        ` : ''}
                         <button class="btn btn-sm btn-outline" onclick="BugReports.openTask(${Number(report.task_id)})">Открыть задачу</button>
-                        <button class="btn btn-sm btn-outline" onclick="BugReports.copyPrompt(${Number(report.id)})"${report.codex_prompt ? '' : ' disabled'}>Скопировать prompt</button>
+                        <button class="btn btn-sm btn-outline" onclick="BugReports.copyPrompt(${Number(report.id)})"${prompt ? '' : ' disabled'}>Скопировать prompt</button>
                     </div>
                 </div>
-                ${report.codex_prompt ? `
+                ${prompt ? `
                     <details class="bug-report-prompt-box">
                         <summary>Показать prompt для Codex</summary>
-                        <pre>${this.esc(report.codex_prompt)}</pre>
+                        <pre>${this.esc(prompt)}</pre>
                     </details>
                 ` : ''}
             </article>
@@ -869,13 +891,47 @@ const BugReports = {
 
     copyPrompt(reportId) {
         const report = (this.bundle?.bugReports || []).find(item => String(item.id) === String(reportId));
-        if (!report?.codex_prompt) {
+        const prompt = this.promptText(report);
+        if (!prompt) {
             App.toast('Prompt пока не готов');
             return;
         }
-        navigator.clipboard.writeText(report.codex_prompt)
+        navigator.clipboard.writeText(prompt)
             .then(() => App.toast('Prompt скопирован'))
             .catch(() => App.toast('Не удалось скопировать prompt'));
+    },
+
+    async closeTask(taskId) {
+        const normalizedTaskId = Number(taskId || 0);
+        if (!normalizedTaskId) return;
+        const task = (this.bundle?.tasks || []).find(item => Number(item.id) === normalizedTaskId);
+        if (!task) {
+            App.toast('Связанная задача не найдена');
+            return;
+        }
+        if (this.isTaskClosed(task)) {
+            App.toast('Задача уже закрыта');
+            return;
+        }
+        try {
+            if (typeof Tasks !== 'undefined' && Tasks && typeof Tasks.changeStatus === 'function') {
+                await Tasks.changeStatus(normalizedTaskId, 'done', { preserveSelection: false });
+            } else {
+                await saveWorkTask({
+                    ...task,
+                    status: 'done',
+                }, {
+                    actor_id: App.currentEmployeeId,
+                    actor_name: App.getCurrentEmployeeName(),
+                });
+            }
+            await this.refreshData();
+            this.render();
+            App.toast('Задача закрыта');
+        } catch (error) {
+            console.error('[BugReports] closeTask failed:', error);
+            App.toast(`Не удалось закрыть задачу: ${error.message || error}`);
+        }
     },
 
     openTask(taskId) {

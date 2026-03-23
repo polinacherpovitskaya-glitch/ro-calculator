@@ -1,8 +1,10 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const vm = require('node:vm');
 
 const BugReportCore = require(path.join(__dirname, '..', 'js', 'bug-report-core.js'));
+const WorkManagementCore = require(path.join(__dirname, '..', 'js', 'work-management-core.js'));
 
 const inferred = BugReportCore.inferSectionFromRoute('#order-detail/145');
 assert.equal(inferred.key, 'orders');
@@ -56,6 +58,7 @@ const bugsJs = fs.readFileSync(path.join(__dirname, '..', 'js', 'bugs.js'), 'utf
 assert.doesNotMatch(bugsJs, /App\?\.\s*currentPage === 'bugs'/);
 assert.match(bugsJs, /openQuickReport\(preset = \{\}\)/);
 assert.match(bugsJs, /submittingPrefixes:\s*new Set\(\)/);
+assert.match(bugsJs, /promptReady:\s*reports\.filter\(entry => this\.promptText\(entry\.report\)\)\.length/);
 assert.match(bugsJs, /id="\$\{prefix\}-submit"/);
 assert.match(bugsJs, /if \(this\.submittingPrefixes\.has\(prefix\)\) return;/);
 assert.match(bugsJs, /button\.textContent = isSubmitting \? 'Отправляем…' : 'Отправить баг'/);
@@ -63,6 +66,129 @@ assert.match(bugsJs, /draftStorageKey\(\)/);
 assert.match(bugsJs, /draftTtlMs\(\)/);
 assert.match(bugsJs, /localStorage\.setItem\(this\.draftStorageKey\(\)/);
 assert.match(bugsJs, /closeQuickReport\(options = \{\}\)/);
+assert.match(bugsJs, /closeTask\(taskId\)/);
 assert.match(bugsJs, /window\.BugReports = BugReports/);
 
-console.log('bug report smoke checks passed');
+const context = {
+    console,
+    BugReportCore,
+    WorkManagementCore,
+    loadWorkBundle: async () => ({}),
+    loadEmployees: async () => ([]),
+    saveWorkTask: async (task) => task,
+    saveBugReport: async (row) => row,
+    saveWorkAsset: async (row) => row,
+    isSupabaseReady: () => false,
+    supabaseClient: {},
+    TaskEvents: { emit: async () => {} },
+    App: {
+        currentEmployeeId: 7,
+        currentUser: { id: 'user-7', role: 'admin' },
+        settings: {},
+        getCurrentEmployeeName() { return 'Женя Г'; },
+        toast(message) { context.__lastToast = message; },
+        navigate(...args) { context.__navigateArgs = args; },
+    },
+    window: {
+        location: {
+            hash: '#bugs',
+            href: 'https://example.com/#bugs',
+        },
+    },
+    document: {
+        getElementById() { return null; },
+    },
+    localStorage: {
+        _store: new Map(),
+        getItem(key) { return this._store.has(key) ? this._store.get(key) : null; },
+        setItem(key, value) { this._store.set(key, String(value)); },
+        removeItem(key) { this._store.delete(key); },
+    },
+    navigator: {
+        userAgent: 'Chrome',
+        clipboard: { writeText: () => Promise.resolve() },
+    },
+    FileReader: function FileReader() {},
+    setTimeout,
+    clearTimeout,
+};
+context.window.BugReports = null;
+vm.createContext(context);
+vm.runInContext(`${bugsJs}\nthis.BugReports = BugReports;`, context);
+
+const BugReports = context.BugReports;
+BugReports.employees = [
+    { id: 5, name: 'Полина' },
+    { id: 7, name: 'Женя Г' },
+];
+
+assert.equal(BugReports.defaultBugAssigneeId(), 7);
+context.App.settings = { bug_report_default_assignee_id: 5 };
+assert.equal(BugReports.defaultBugAssigneeId(), 5);
+context.App.settings = {};
+
+const openReport = {
+    id: 11,
+    task_id: 101,
+    title: 'Пропадают задачи из багов',
+    severity: 'medium',
+    section_name: 'Задачи',
+    subsection_name: 'Другое',
+    page_route: '#tasks',
+    actual_result: 'Баговая задача не видна в моих задачах.',
+    submitted_by_name: 'Полина',
+    created_at: '2026-03-23T10:00:00.000Z',
+    codex_status: 'prompt_ready',
+    codex_prompt: 'Исправь связку багов и задач',
+};
+const openTask = {
+    id: 101,
+    title: '[Баг] Задачи / Другое — пропадают задачи из багов',
+    status: 'incoming',
+};
+
+const openCardHtml = BugReports.reportCardHtml({ report: openReport, task: openTask, assets: [] });
+assert.match(openCardHtml, /BugReports\.closeTask\(101\)/);
+assert.match(openCardHtml, /BugReports\.openTask\(101\)/);
+assert.match(openCardHtml, /Скопировать prompt/);
+
+const closedCardHtml = BugReports.reportCardHtml({
+    report: openReport,
+    task: { ...openTask, status: 'done' },
+    assets: [],
+});
+assert.doesNotMatch(closedCardHtml, /BugReports\.closeTask\(101\)/);
+
+BugReports.bundle = {
+    tasks: [openTask],
+    bugReports: [openReport],
+    assets: [],
+};
+let closeStatus = null;
+context.Tasks = {
+    changeStatus: async (taskId, status) => {
+        closeStatus = { taskId, status };
+    },
+};
+BugReports.refreshData = async () => {
+    closeStatus.refreshed = true;
+};
+BugReports.render = () => {
+    closeStatus.rendered = true;
+};
+
+(async () => {
+    await BugReports.closeTask(101);
+    assert.deepEqual(closeStatus, {
+        taskId: 101,
+        status: 'done',
+        refreshed: true,
+        rendered: true,
+    });
+    assert.equal(context.__lastToast, 'Задача закрыта');
+
+    console.log('bug report smoke checks passed');
+})().catch((error) => {
+    console.error(error);
+    process.exit(1);
+});
