@@ -149,6 +149,7 @@ const openTask = {
 
 const openCardHtml = BugReports.reportCardHtml({ report: openReport, task: openTask, assets: [] });
 assert.match(openCardHtml, /BugReports\.closeTask\(101\)/);
+assert.match(openCardHtml, />Готово</);
 assert.match(openCardHtml, /BugReports\.openTask\(101\)/);
 assert.match(openCardHtml, /Скопировать prompt/);
 

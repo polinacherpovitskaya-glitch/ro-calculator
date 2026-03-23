@@ -501,12 +501,12 @@ const BugReports = {
                     <div class="bug-report-actions">
                         ${task?.id && !isClosed ? `
                             <button
-                                class="btn btn-sm btn-outline bug-report-close-btn"
+                                class="btn btn-sm bug-report-done-btn"
                                 type="button"
                                 title="Закрыть задачу как готовую"
                                 aria-label="Закрыть задачу как готовую"
                                 onclick="BugReports.closeTask(${Number(task.id)})"
-                            >&times;</button>
+                            >Готово</button>
                         ` : ''}
                         <button class="btn btn-sm btn-outline" onclick="BugReports.openTask(${Number(report.task_id)})">Открыть задачу</button>
                         <button class="btn btn-sm btn-outline" onclick="BugReports.copyPrompt(${Number(report.id)})"${prompt ? '' : ' disabled'}>Скопировать prompt</button>
