@@ -2544,6 +2544,22 @@ async function saveVacations(vacations) {
 // =============================================
 
 async function loadWarehouseItems() {
+    const normalizeWarehouseItem = (item) => {
+        if (!item || typeof item !== 'object') return item;
+        const normalized = { ...item };
+        const numericId = Number(normalized.id || 0);
+        if (Number.isFinite(numericId) && numericId > 0) {
+            normalized.id = numericId;
+        }
+        const linkedOrderId = Number(normalized.linked_order_id || 0);
+        if (Number.isFinite(linkedOrderId) && linkedOrderId > 0) {
+            normalized.linked_order_id = linkedOrderId;
+        } else if (String(normalized.linked_order_id || '').trim() === '') {
+            normalized.linked_order_id = '';
+        }
+        return normalized;
+    };
+
     if (isSupabaseReady()) {
         try {
             const { data, error } = await supabaseClient
@@ -2556,10 +2572,10 @@ async function loadWarehouseItems() {
                     if (row.item_data) {
                         try {
                             const parsed = typeof row.item_data === 'string' ? JSON.parse(row.item_data) : row.item_data;
-                            return { ...parsed, id: row.id };
+                            return normalizeWarehouseItem({ ...parsed, id: row.id });
                         } catch(e) { /* fallthrough */ }
                     }
-                    return row;
+                    return normalizeWarehouseItem(row);
                 });
                 // Update localStorage backup
                 setLocal(LOCAL_KEYS.warehouseItems, items);
@@ -2571,27 +2587,28 @@ async function loadWarehouseItems() {
             if (local.length > 0) {
                 console.log('Migrating', local.length, 'warehouse items to Supabase...');
                 for (const item of local) {
+                    const normalizedItem = normalizeWarehouseItem(item);
                     try {
                         await supabaseClient.from('warehouse_items').upsert({
-                            id: item.id || Date.now(),
-                            name: item.name || '',
-                            sku: item.sku || '',
-                            category: item.category || '',
-                            item_data: JSON.stringify(item),
-                            created_at: item.created_at || new Date().toISOString(),
-                            updated_at: item.updated_at || new Date().toISOString(),
+                            id: normalizedItem.id || Date.now(),
+                            name: normalizedItem.name || '',
+                            sku: normalizedItem.sku || '',
+                            category: normalizedItem.category || '',
+                            item_data: JSON.stringify(normalizedItem),
+                            created_at: normalizedItem.created_at || new Date().toISOString(),
+                            updated_at: normalizedItem.updated_at || new Date().toISOString(),
                         }, { onConflict: 'id' });
                     } catch(e) { console.warn('WH item migration error:', e); }
                 }
-                return local;
+                return local.map(normalizeWarehouseItem);
             }
             return [];
         } catch(e) {
             console.error('loadWarehouseItems exception:', e);
-            return getLocal(LOCAL_KEYS.warehouseItems) || [];
+            return (getLocal(LOCAL_KEYS.warehouseItems) || []).map(normalizeWarehouseItem);
         }
     }
-    return getLocal(LOCAL_KEYS.warehouseItems) || [];
+    return (getLocal(LOCAL_KEYS.warehouseItems) || []).map(normalizeWarehouseItem);
 }
 
 async function saveWarehouseItem(item) {
@@ -2620,7 +2637,18 @@ async function saveWarehouseItem(item) {
 
     // localStorage backup
     const items = getLocal(LOCAL_KEYS.warehouseItems) || [];
-    const idx = items.findIndex(i => i.id === item.id);
+    const normalizedItemId = String(item.id || '').trim();
+    const normalizedItemIdNum = Number(item.id || 0);
+    const idx = items.findIndex(i => {
+        const currentId = String(i && i.id || '').trim();
+        if (currentId && currentId === normalizedItemId) return true;
+        const currentIdNum = Number(i && i.id || 0);
+        return Number.isFinite(currentIdNum)
+            && Number.isFinite(normalizedItemIdNum)
+            && currentIdNum > 0
+            && normalizedItemIdNum > 0
+            && currentIdNum === normalizedItemIdNum;
+    });
     if (idx >= 0) items[idx] = item; else items.push(item);
     setLocal(LOCAL_KEYS.warehouseItems, items);
 
@@ -2655,7 +2683,23 @@ async function deleteWarehouseItem(itemId) {
             if (error) console.error('deleteWarehouseItem error:', error);
         } catch(e) { console.error('deleteWarehouseItem exception:', e); }
     }
-    const items = (getLocal(LOCAL_KEYS.warehouseItems) || []).filter(i => i.id !== itemId);
+    const normalizedItemId = String(itemId || '').trim();
+    const normalizedItemIdNum = Number(itemId || 0);
+    const items = (getLocal(LOCAL_KEYS.warehouseItems) || []).filter(i => {
+        const currentId = String(i && i.id || '').trim();
+        if (currentId && currentId === normalizedItemId) return false;
+        const currentIdNum = Number(i && i.id || 0);
+        if (
+            Number.isFinite(currentIdNum)
+            && Number.isFinite(normalizedItemIdNum)
+            && currentIdNum > 0
+            && normalizedItemIdNum > 0
+            && currentIdNum === normalizedItemIdNum
+        ) {
+            return false;
+        }
+        return true;
+    });
     setLocal(LOCAL_KEYS.warehouseItems, items);
 }
 

@@ -218,6 +218,51 @@ async function main() {
 
     {
         const context = createContext();
+        runScript(context, 'js/supabase.js');
+
+        vm.runInContext(`
+            setLocal(LOCAL_KEYS.warehouseItems, [{
+                id: '501',
+                name: 'Молд Петушок',
+                sku: 'MOLD-CUSTOM-777',
+                category: 'molds',
+                mold_type: 'customer',
+                linked_order_id: '777',
+                linked_order_name: 'Заказ #777',
+                mold_capacity_total: 1000,
+                mold_capacity_used: 150,
+            }]);
+        `, context);
+
+        await vm.runInContext(`
+            saveWarehouseItem({
+                id: 501,
+                name: 'Молд Петушок',
+                sku: 'MOLD-BLANK-ПЕТУШОК',
+                category: 'molds',
+                mold_type: 'blank',
+                linked_order_id: '',
+                linked_order_name: '',
+                mold_capacity_total: 5000,
+                mold_capacity_used: 150,
+            });
+        `, context);
+
+        const updatedWarehouse = JSON.parse(JSON.stringify(await vm.runInContext('loadWarehouseItems()', context)));
+        assert.equal(updatedWarehouse.length, 1, 'warehouse item save should overwrite string-id fallback row instead of duplicating');
+        assert.equal(updatedWarehouse[0].id, 501);
+        assert.equal(updatedWarehouse[0].mold_type, 'blank');
+        assert.equal(updatedWarehouse[0].sku, 'MOLD-BLANK-ПЕТУШОК');
+        assert.equal(updatedWarehouse[0].linked_order_id, '');
+        assert.equal(updatedWarehouse[0].mold_capacity_total, 5000);
+
+        await vm.runInContext('deleteWarehouseItem(501)', context);
+        const afterDelete = JSON.parse(JSON.stringify(vm.runInContext('getLocal(LOCAL_KEYS.warehouseItems)', context)));
+        assert.equal(afterDelete.length, 0, 'warehouse delete should also remove string-id fallback row');
+    }
+
+    {
+        const context = createContext();
         context.__invalidTables = new Set(['settings']);
         runScript(context, 'js/supabase.js');
 
