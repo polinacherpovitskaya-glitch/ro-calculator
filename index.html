@@ -35,7 +35,7 @@
     <aside class="sidebar">
         <div class="sidebar-brand">
             <h2>Recycle Object</h2>
-            <span>Калькулятор <span id="app-version">v162</span></span>
+            <span>Калькулятор <span id="app-version">v163</span></span>
         </div>
         <nav class="sidebar-nav">
             <a href="#tasks" data-page="tasks">
@@ -1693,7 +1693,7 @@
                     </div>
                     <div class="form-group">
                         <label>Название *</label>
-                        <input type="text" id="wh-f-name" placeholder="Карабин-кольцо">
+                        <input type="text" id="wh-f-name" placeholder="Карабин-кольцо" oninput="Warehouse.onCategoryChange(document.getElementById('wh-f-category').value)">
                     </div>
                     <div class="form-group">
                         <label>Артикул (SKU)</label>
@@ -1762,23 +1762,21 @@
                         <div class="form-group">
                             <label>Тип молда</label>
                             <select id="wh-f-mold-type" onchange="Warehouse.onCategoryChange('molds')">
-                                <option value="customer">Клиентский</option>
                                 <option value="blank">Бланк / stock</option>
+                                <option value="customer">Клиентский</option>
                             </select>
                         </div>
-                        <div class="form-group">
-                            <label>ID заказа</label>
-                            <input type="number" id="wh-f-mold-linked-order-id" min="0" placeholder="1773994702607">
-                        </div>
-                        <div class="form-group">
-                            <label>ID шаблона</label>
-                            <input type="text" id="wh-f-mold-template-id" placeholder="template_id">
+                        <div class="form-group" id="wh-f-mold-linked-order-wrap">
+                            <label>Заказ клиента</label>
+                            <select id="wh-f-mold-linked-order-id" onchange="Warehouse.onCategoryChange('molds')">
+                                <option value="">Выберите заказ</option>
+                            </select>
                         </div>
                     </div>
                     <div class="form-row">
                         <div class="form-group">
                             <label>Ресурс всего</label>
-                            <input type="number" id="wh-f-mold-capacity-total" min="0" step="1" placeholder="1000">
+                            <input type="number" id="wh-f-mold-capacity-total" min="0" step="1" placeholder="5000">
                         </div>
                         <div class="form-group">
                             <label>Использовано</label>
@@ -1788,7 +1786,7 @@
                             <label>Дата прихода</label>
                             <input type="date" id="wh-f-mold-arrived-at">
                         </div>
-                        <div class="form-group">
+                        <div class="form-group" id="wh-f-mold-storage-until-wrap">
                             <label>Хранить до</label>
                             <input type="date" id="wh-f-mold-storage-until">
                         </div>
@@ -3277,7 +3275,7 @@
 <script src="js/supabase.js?v=157"></script>
 <script src="js/task-events.js?v=1"></script>
 <script src="js/calculator.js?v=69"></script>
-<script src="js/app.js?v=162"></script>
+<script src="js/app.js?v=163"></script>
 <script src="js/wiki.js?v=4"></script>
 <script src="js/order-detail.js?v=58"></script>
 <script src="js/orders.js?v=62"></script>
@@ -3294,11 +3292,11 @@
 <script src="js/fintablo.js?v=2"></script>
 <script src="js/indirect_costs.js?v=8"></script>
 <script src="js/factual.js?v=87"></script>
-<script src="js/china.js?v=46o"></script>
+<script src="js/china.js?v=163"></script>
 <script src="js/warehouse_photos.js?v=48"></script>
 <script src="js/china_catalog.js?v=46k"></script>
 <script src="js/marketplaces.js?v=77"></script>
-<script src="js/warehouse.js?v=157"></script>
+<script src="js/warehouse.js?v=163"></script>
 <script src="js/settings.js?v=79"></script>
 <script src="js/pendant.js?v=5"></script>
 </body>

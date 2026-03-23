@@ -241,6 +241,7 @@ const Warehouse = {
 
     async load() {
         this.allItems = await loadWarehouseItems();
+        await this._loadMoldOrders();
 
         // Auto-seed on first visit if warehouse is empty
         if (this.allItems.length === 0 && WAREHOUSE_SEED_DATA.length > 0) {
@@ -513,6 +514,144 @@ const Warehouse = {
         return DEFAULT_MOLD_CAPACITY_BY_TYPE[this._normalizeMoldType(moldType)] || 0;
     },
 
+    _normalizeMoldLookupText(value) {
+        return String(value || '')
+            .toLowerCase()
+            .trim()
+            .replace(/[_-]+/g, ' ')
+            .replace(/\s+/g, ' ');
+    },
+
+    _buildAutoMoldSku(name, moldType, linkedOrderId) {
+        const normalizedType = this._normalizeMoldType(moldType);
+        const normalizedOrderId = Number(linkedOrderId || 0) || 0;
+        if (normalizedType === 'customer' && normalizedOrderId) {
+            return `MOLD-CUSTOM-${normalizedOrderId}`;
+        }
+        const slug = String(name || '')
+            .trim()
+            .toUpperCase()
+            .replace(/\s+/g, '-')
+            .replace(/[^\p{L}\p{N}-]+/gu, '')
+            .replace(/-+/g, '-')
+            .replace(/^-|-$/g, '');
+        const prefix = normalizedType === 'blank' ? 'MOLD-BLANK' : 'MOLD-CUSTOM';
+        return slug ? `${prefix}-${slug}` : prefix;
+    },
+
+    _applyAutoMoldSku(item) {
+        if (!item || !this._isMoldCategory(item.category)) return item;
+        const currentSku = String(item.sku || '').trim();
+        const isAutoSku = /^MOLD-(BLANK|CUSTOM)(-|$)/i.test(currentSku);
+        if (currentSku && !isAutoSku) return item;
+        item.sku = this._buildAutoMoldSku(item.name || '', item.mold_type, item.linked_order_id);
+        return item;
+    },
+
+    _syncWarehouseFormMoldDerivedFields() {
+        const categoryEl = document.getElementById('wh-f-category');
+        const skuEl = document.getElementById('wh-f-sku');
+        const nameEl = document.getElementById('wh-f-name');
+        const typeEl = document.getElementById('wh-f-mold-type');
+        const orderEl = document.getElementById('wh-f-mold-linked-order-id');
+        if (!categoryEl || !skuEl) return;
+
+        const isMold = this._isMoldCategory(categoryEl.value);
+        skuEl.readOnly = isMold;
+        skuEl.placeholder = isMold ? 'SKU назначится автоматически' : 'CR-RNG-030-VT';
+        skuEl.title = isMold ? 'Для молдов SKU формируется автоматически' : '';
+
+        if (!isMold) return;
+
+        const normalizedType = this._normalizeMoldType(typeEl && typeEl.value);
+        const linkedOrderId = normalizedType === 'customer'
+            ? String(orderEl && orderEl.value || '').trim()
+            : '';
+        skuEl.value = this._buildAutoMoldSku(nameEl && nameEl.value || '', normalizedType, linkedOrderId);
+    },
+
+    _findBlankTemplateByMold(item) {
+        const templates = Array.isArray(App && App.templates) ? App.templates : [];
+        const explicitId = String(item && item.template_id || '').trim();
+        if (explicitId) {
+            const byId = templates.find(t => String(t && t.id || '') === explicitId);
+            if (byId) return byId;
+        }
+        const normalizedName = this._normalizeMoldLookupText(item && item.name);
+        if (!normalizedName) return null;
+        return templates.find(t =>
+            String(t && t.category || '').toLowerCase() === 'blank'
+            && this._normalizeMoldLookupText(t && t.name) === normalizedName
+        ) || null;
+    },
+
+    _resolveBlankMoldTemplateId(item) {
+        const match = this._findBlankTemplateByMold(item);
+        return match ? String(match.id) : '';
+    },
+
+    async _loadMoldOrders() {
+        const orders = typeof loadOrders === 'function'
+            ? await loadOrders({}).catch(() => [])
+            : [];
+        this.moldOrders = (orders || [])
+            .filter(order => order && String(order.status || '') !== 'deleted')
+            .sort((a, b) => Number(b && b.id || 0) - Number(a && a.id || 0));
+        return this.moldOrders;
+    },
+
+    _getMoldOrders() {
+        return Array.isArray(this.moldOrders) ? this.moldOrders : [];
+    },
+
+    _getOrderNameById(orderId) {
+        const normalizedId = Number(orderId || 0) || 0;
+        if (!normalizedId) return '';
+        const order = this._getMoldOrders().find(entry => Number(entry && entry.id || 0) === normalizedId);
+        return String(order && order.order_name || '').trim();
+    },
+
+    _buildMoldOrderOptionsHtml(selectedId) {
+        const normalizedSelected = Number(selectedId || 0) || 0;
+        const options = ['<option value="">Выберите заказ</option>'];
+        let selectedPresent = false;
+        this._getMoldOrders().forEach(order => {
+            const id = Number(order && order.id || 0) || 0;
+            if (!id) return;
+            const label = `#${id} — ${this.esc(order.order_name || 'Без названия')}`;
+            if (id === normalizedSelected) selectedPresent = true;
+            options.push(`<option value="${id}"${id === normalizedSelected ? ' selected' : ''}>${label}</option>`);
+        });
+        if (normalizedSelected && !selectedPresent) {
+            options.push(`<option value="${normalizedSelected}" selected>#${normalizedSelected}</option>`);
+        }
+        return options.join('');
+    },
+
+    _syncShipmentMoldDerivedFields(row) {
+        if (!row || !this._isMoldCategory(row.category)) return row;
+        row.mold_type = String(row.mold_type || '').trim()
+            ? this._normalizeMoldType(row.mold_type)
+            : (Number(row.linked_order_id || 0) ? 'customer' : 'blank');
+        const currentTotal = parseFloat(row.mold_capacity_total || 0) || 0;
+        const shouldResetToBlank = row.mold_type === 'blank' && currentTotal === this._defaultMoldCapacityTotal('customer');
+        if (!currentTotal || shouldResetToBlank) {
+            row.mold_capacity_total = this._defaultMoldCapacityTotal(row.mold_type);
+        }
+        if (row.mold_type === 'blank') {
+            row.linked_order_id = '';
+            row.linked_order_name = '';
+            row.template_id = this._resolveBlankMoldTemplateId(row);
+        } else if (row.linked_order_id) {
+            row.linked_order_name = this._getOrderNameById(row.linked_order_id) || row.linked_order_name || '';
+            row.template_id = '';
+        } else {
+            row.template_id = '';
+        }
+        this._applyAutoMoldSku(row);
+        return row;
+    },
+
     _todayYMD() {
         if (typeof App !== 'undefined' && App && typeof App.todayLocalYMD === 'function') {
             return App.todayLocalYMD();
@@ -542,10 +681,13 @@ const Warehouse = {
         const isMold = this._isMoldCategory(item && item.category);
         if (!isMold) return null;
 
-        const moldType = this._normalizeMoldType(opts.mold_type ?? item.mold_type);
-        const linkedOrderId = Number(opts.linked_order_id ?? item.linked_order_id ?? 0) || null;
-        const templateIdRaw = opts.template_id ?? item.template_id ?? '';
-        const templateId = String(templateIdRaw || '').trim();
+        const moldTypeRaw = opts.mold_type ?? item.mold_type;
+        const moldType = String(moldTypeRaw || '').trim()
+            ? this._normalizeMoldType(moldTypeRaw)
+            : (Number(opts.linked_order_id ?? item.linked_order_id ?? 0) ? 'customer' : 'blank');
+        const linkedOrderId = moldType === 'customer'
+            ? (Number(opts.linked_order_id ?? item.linked_order_id ?? 0) || null)
+            : null;
         const arrivedAt = String(opts.mold_arrived_at ?? item.mold_arrived_at ?? opts.receiptDate ?? this._todayYMD()).trim();
         const capacityTotalRaw = parseFloat(opts.mold_capacity_total ?? item.mold_capacity_total);
         const capacityUsedRaw = parseFloat(opts.mold_capacity_used ?? item.mold_capacity_used);
@@ -555,11 +697,19 @@ const Warehouse = {
             ? this._plusDaysYMD(arrivedAt, 365)
             : '';
         const storageUntil = String(opts.mold_storage_until ?? item.mold_storage_until ?? storageUntilFallback).trim();
+        const linkedOrderNameSource = opts.linked_order_name
+            ?? item.linked_order_name
+            ?? this._getOrderNameById(linkedOrderId)
+            ?? '';
+        const linkedOrderName = linkedOrderId ? String(linkedOrderNameSource).trim() : '';
+        const templateId = moldType === 'blank'
+            ? this._resolveBlankMoldTemplateId({ ...item, ...opts, mold_type: moldType })
+            : '';
 
         return {
             mold_type: moldType,
             linked_order_id: linkedOrderId,
-            linked_order_name: String(opts.linked_order_name ?? item.linked_order_name ?? '').trim(),
+            linked_order_name: linkedOrderName,
             template_id: templateId,
             mold_capacity_total: capacityTotal,
             mold_capacity_used: capacityUsed,
@@ -584,9 +734,6 @@ const Warehouse = {
         linkedBits.push(`<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 6px;border-radius:999px;background:#fff;color:#7f1d1d;border:1px solid #fecaca;">${typeLabel}</span>`);
         if (meta.linked_order_id) {
             linkedBits.push(`<span>Заказ #${meta.linked_order_id}</span>`);
-        }
-        if (meta.template_id) {
-            linkedBits.push(`<span>Шаблон: ${this.esc(meta.template_id)}</span>`);
         }
         if (meta.mold_storage_until) {
             linkedBits.push(`<span>Хранить до: ${this._formatDateCompact(meta.mold_storage_until)}</span>`);
@@ -710,6 +857,7 @@ const Warehouse = {
 
     onCategoryChange(categoryValue) {
         this._syncMoldFieldsVisibility(categoryValue);
+        this._syncWarehouseFormMoldDerivedFields();
     },
 
     _syncMoldFieldsVisibility(categoryValue) {
@@ -720,31 +868,52 @@ const Warehouse = {
 
         if (!isMold) return;
         const typeEl = document.getElementById('wh-f-mold-type');
+        const orderWrap = document.getElementById('wh-f-mold-linked-order-wrap');
         const arrivedEl = document.getElementById('wh-f-mold-arrived-at');
         const storageEl = document.getElementById('wh-f-mold-storage-until');
+        const storageWrap = document.getElementById('wh-f-mold-storage-until-wrap');
         const totalEl = document.getElementById('wh-f-mold-capacity-total');
-        if (typeEl && !typeEl.value) typeEl.value = 'customer';
+        if (typeEl && !typeEl.value) typeEl.value = 'blank';
+        const normalizedType = this._normalizeMoldType(typeEl && typeEl.value);
         if (arrivedEl && !arrivedEl.value) arrivedEl.value = this._todayYMD();
-        if (totalEl && !parseFloat(totalEl.value || 0)) totalEl.value = String(this._defaultMoldCapacityTotal(typeEl && typeEl.value));
-        if (storageEl && !storageEl.value && typeEl && typeEl.value === 'customer') {
+        if (orderWrap) orderWrap.style.display = normalizedType === 'customer' ? '' : 'none';
+        if (storageWrap) storageWrap.style.display = normalizedType === 'customer' ? '' : 'none';
+        if (totalEl) {
+            const currentTotal = parseFloat(totalEl.value || 0) || 0;
+            const customerDefault = this._defaultMoldCapacityTotal('customer');
+            const shouldResetToBlank = normalizedType === 'blank' && (!currentTotal || currentTotal === customerDefault);
+            if (!currentTotal || shouldResetToBlank) {
+                totalEl.value = String(this._defaultMoldCapacityTotal(normalizedType));
+            }
+        }
+        if (storageEl && !storageEl.value && normalizedType === 'customer') {
             storageEl.value = this._plusDaysYMD(arrivedEl && arrivedEl.value, 365);
         }
+        if (storageEl && normalizedType !== 'customer') {
+            storageEl.value = '';
+        }
+        this._syncWarehouseFormMoldDerivedFields();
     },
 
-    showAddForm() {
+    async showAddForm() {
         this.editingId = null;
         this.clearForm();
+        await this._loadMoldOrders();
+        const orderSelect = document.getElementById('wh-f-mold-linked-order-id');
+        if (orderSelect) orderSelect.innerHTML = this._buildMoldOrderOptionsHtml('');
         document.getElementById('wh-form-title').textContent = 'Новая позиция';
         document.getElementById('wh-delete-btn').style.display = 'none';
         document.getElementById('wh-reservations-section').innerHTML = '';
         this._syncMoldFieldsVisibility(document.getElementById('wh-f-category').value);
+        this._syncWarehouseFormMoldDerivedFields();
         document.getElementById('wh-edit-form').style.display = '';
         document.getElementById('wh-edit-form').scrollIntoView({ behavior: 'smooth' });
     },
 
-    editItem(id) {
+    async editItem(id) {
         const item = this.allItems.find(i => i.id === id);
         if (!item) return;
+        await this._loadMoldOrders();
         this.editingId = id;
         document.getElementById('wh-form-title').textContent = 'Редактирование';
 
@@ -760,8 +929,11 @@ const Warehouse = {
         document.getElementById('wh-f-price').value = item.price_per_unit || 0;
         document.getElementById('wh-f-notes').value = item.notes || '';
         document.getElementById('wh-f-mold-type').value = this._normalizeMoldType(item.mold_type);
-        document.getElementById('wh-f-mold-linked-order-id').value = item.linked_order_id || '';
-        document.getElementById('wh-f-mold-template-id').value = item.template_id || '';
+        const orderSelect = document.getElementById('wh-f-mold-linked-order-id');
+        if (orderSelect) {
+            orderSelect.innerHTML = this._buildMoldOrderOptionsHtml(item.linked_order_id || '');
+            orderSelect.value = item.linked_order_id || '';
+        }
         document.getElementById('wh-f-mold-capacity-total').value = item.mold_capacity_total || '';
         document.getElementById('wh-f-mold-capacity-used').value = item.mold_capacity_used || 0;
         document.getElementById('wh-f-mold-arrived-at').value = item.mold_arrived_at || '';
@@ -776,6 +948,7 @@ const Warehouse = {
         document.getElementById('wh-delete-btn').style.display = '';
         this.renderItemReservations(id);
         this._syncMoldFieldsVisibility(item.category || 'other');
+        this._syncWarehouseFormMoldDerivedFields();
         document.getElementById('wh-edit-form').style.display = '';
         document.getElementById('wh-edit-form').scrollIntoView({ behavior: 'smooth' });
     },
@@ -794,13 +967,16 @@ const Warehouse = {
         document.getElementById('wh-f-qty').value = 0;
         document.getElementById('wh-f-min-qty').value = 0;
         document.getElementById('wh-f-price').value = 0;
-        document.getElementById('wh-f-mold-type').value = 'customer';
-        document.getElementById('wh-f-mold-linked-order-id').value = '';
-        document.getElementById('wh-f-mold-template-id').value = '';
+        document.getElementById('wh-f-mold-type').value = 'blank';
+        const orderSelect = document.getElementById('wh-f-mold-linked-order-id');
+        if (orderSelect) {
+            orderSelect.innerHTML = this._buildMoldOrderOptionsHtml('');
+            orderSelect.value = '';
+        }
         document.getElementById('wh-f-mold-capacity-total').value = '';
         document.getElementById('wh-f-mold-capacity-used').value = 0;
         document.getElementById('wh-f-mold-arrived-at').value = this._todayYMD();
-        document.getElementById('wh-f-mold-storage-until').value = this._plusDaysYMD(this._todayYMD(), 365);
+        document.getElementById('wh-f-mold-storage-until').value = '';
         // Reset photo
         this._pendingThumbnail = null;
         const photoFileInput = document.getElementById('wh-f-photo-file');
@@ -808,6 +984,7 @@ const Warehouse = {
         const preview = document.getElementById('wh-f-photo-preview');
         if (preview) preview.innerHTML = '<span style="font-size:24px;color:var(--text-muted);">📷</span>';
         this._syncMoldFieldsVisibility('carabiners');
+        this._syncWarehouseFormMoldDerivedFields();
     },
 
     async saveItem() {
@@ -834,13 +1011,13 @@ const Warehouse = {
             const moldMeta = this._buildMoldMeta(item, {
                 mold_type: document.getElementById('wh-f-mold-type').value,
                 linked_order_id: document.getElementById('wh-f-mold-linked-order-id').value,
-                template_id: document.getElementById('wh-f-mold-template-id').value,
                 mold_capacity_total: document.getElementById('wh-f-mold-capacity-total').value,
                 mold_capacity_used: document.getElementById('wh-f-mold-capacity-used').value,
                 mold_arrived_at: document.getElementById('wh-f-mold-arrived-at').value,
                 mold_storage_until: document.getElementById('wh-f-mold-storage-until').value,
             });
             Object.assign(item, moldMeta);
+            this._applyAutoMoldSku(item);
         }
 
         await saveWarehouseItem(item);
@@ -1893,6 +2070,11 @@ const Warehouse = {
         const items = Array.isArray(warehouseItems) ? warehouseItems : [];
         const templateId = String(orderItem && orderItem.template_id || '').trim();
         const isBlank = !!(orderItem && orderItem.is_blank_mold);
+        const templateName = this._normalizeMoldLookupText(
+            isBlank && templateId && Array.isArray(App && App.templates)
+                ? ((App.templates.find(t => String(t && t.id || '') === templateId) || {}).name || '')
+                : ''
+        );
         return items
             .filter(item => {
                 if (!this._isMoldCategory(item && item.category)) return false;
@@ -1901,7 +2083,9 @@ const Warehouse = {
                 if (!isBlank) {
                     return moldType === 'customer' && Number(item.linked_order_id || 0) === Number(orderId || 0);
                 }
-                return moldType === 'blank' && templateId && String(item.template_id || '').trim() === templateId;
+                if (moldType !== 'blank') return false;
+                if (templateId && String(item.template_id || '').trim() === templateId) return true;
+                return !!templateName && this._normalizeMoldLookupText(item && item.name) === templateName;
             })
             .sort((a, b) => Number(a.id || 0) - Number(b.id || 0));
     },
@@ -3037,11 +3221,13 @@ const Warehouse = {
         if (!container) return;
 
         const grouped = await this.getItemsForPicker();
+        await this._loadMoldOrders();
         const categoryOptions = WAREHOUSE_CATEGORIES.map(c =>
             `<option value="${c.key}">${c.icon} ${c.label}</option>`
         ).join('');
 
         const rows = this.shipmentItems.map((item, idx) => {
+            this._syncShipmentMoldDerivedFields(item);
             const selectOptions = this.buildPickerOptions(grouped, item.warehouse_item_id, true);
             const simpleSelectHtml = `<select onchange="Warehouse.onShipmentItemSelect(${idx}, this.value)" style="width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;font-size:12px;">
                 ${selectOptions}
@@ -3052,16 +3238,23 @@ const Warehouse = {
                 : `<span style="width:36px;height:36px;display:flex;align-items:center;justify-content:center;background:var(--bg);border-radius:6px;font-size:14px;">📷</span>`;
 
             const moldFieldsHtml = item.source === 'new' && this._isMoldCategory(item.category)
-                ? `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:6px;margin-top:6px;padding:8px;border:1px solid var(--border);border-radius:8px;background:rgba(239,68,68,0.04);">
+                ? `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:6px;margin-top:6px;padding:8px;border:1px solid var(--border);border-radius:8px;background:rgba(239,68,68,0.04);">
                     <select onchange="Warehouse.onShipmentItemField(${idx}, 'mold_type', this.value)" style="padding:4px;border:1px solid var(--border);border-radius:4px;font-size:12px;">
-                        <option value="customer"${this._normalizeMoldType(item.mold_type) === 'customer' ? ' selected' : ''}>Клиентский</option>
                         <option value="blank"${this._normalizeMoldType(item.mold_type) === 'blank' ? ' selected' : ''}>Бланк / stock</option>
+                        <option value="customer"${this._normalizeMoldType(item.mold_type) === 'customer' ? ' selected' : ''}>Клиентский</option>
                     </select>
-                    <input type="number" value="${item.linked_order_id || ''}" min="0" placeholder="ID заказа" oninput="Warehouse.onShipmentItemField(${idx}, 'linked_order_id', this.value)" style="padding:4px 6px;border:1px solid var(--border);border-radius:4px;font-size:12px;">
-                    <input type="text" value="${this.esc(item.template_id || '')}" placeholder="template_id" oninput="Warehouse.onShipmentItemField(${idx}, 'template_id', this.value)" style="padding:4px 6px;border:1px solid var(--border);border-radius:4px;font-size:12px;">
+                    ${this._normalizeMoldType(item.mold_type) === 'customer'
+                        ? `<select onchange="Warehouse.onShipmentItemField(${idx}, 'linked_order_id', this.value)" style="padding:4px;border:1px solid var(--border);border-radius:4px;font-size:12px;">
+                            ${this._buildMoldOrderOptionsHtml(item.linked_order_id || '')}
+                        </select>`
+                        : '<div style="display:flex;align-items:center;padding:4px 6px;border:1px dashed var(--border);border-radius:4px;font-size:12px;color:var(--text-muted);">SKU назначится автоматически</div>'
+                    }
                     <input type="number" value="${item.mold_capacity_total || this._defaultMoldCapacityTotal(item.mold_type)}" min="0" step="1" placeholder="Ресурс всего" oninput="Warehouse.onShipmentItemField(${idx}, 'mold_capacity_total', this.value)" style="padding:4px 6px;border:1px solid var(--border);border-radius:4px;font-size:12px;">
                 </div>`
                 : '';
+            const skuCellHtml = item.source === 'new' && this._isMoldCategory(item.category)
+                ? `<div style="display:flex;align-items:center;padding:4px 6px;border:1px dashed var(--border);border-radius:4px;font-size:12px;color:var(--text-muted);background:#fff;">${this.esc(item.sku || this._buildAutoMoldSku(item.name || '', item.mold_type, item.linked_order_id))}</div>`
+                : `<input type="text" value="${this.esc(item.sku || '')}" placeholder="SKU" oninput="Warehouse.onShipmentItemField(${idx}, 'sku', this.value)" style="padding:4px 6px;border:1px solid var(--border);border-radius:4px;font-size:12px;">`;
 
             const itemSourceCell = item.source === 'new'
                 ? `<div>
@@ -3071,7 +3264,7 @@ const Warehouse = {
                     </div>
                     <div style="display:grid;grid-template-columns:minmax(200px,1fr) 120px;gap:6px;">
                         <input type="text" value="${this.esc(item.name || '')}" placeholder="Название позиции" oninput="Warehouse.onShipmentItemField(${idx}, 'name', this.value)" style="padding:4px 6px;border:1px solid var(--border);border-radius:4px;font-size:12px;">
-                        <input type="text" value="${this.esc(item.sku || '')}" placeholder="SKU" oninput="Warehouse.onShipmentItemField(${idx}, 'sku', this.value)" style="padding:4px 6px;border:1px solid var(--border);border-radius:4px;font-size:12px;">
+                        ${skuCellHtml}
                         <select onchange="Warehouse.onShipmentItemField(${idx}, 'category', this.value)" style="padding:4px;border:1px solid var(--border);border-radius:4px;font-size:12px;">
                             ${categoryOptions.replace(`value="${item.category}"`, `value="${item.category}" selected`)}
                         </select>
@@ -3138,12 +3331,7 @@ const Warehouse = {
             item.warehouse_item_id = null;
             if (!item.category) item.category = 'other';
             if (!item.unit) item.unit = 'шт';
-            if (this._isMoldCategory(item.category)) {
-                item.mold_type = this._normalizeMoldType(item.mold_type);
-                if (!parseFloat(item.mold_capacity_total || 0)) {
-                    item.mold_capacity_total = this._defaultMoldCapacityTotal(item.mold_type);
-                }
-            }
+            this._syncShipmentMoldDerivedFields(item);
         }
         this.renderShipmentItemsTable();
         this.recalcShipmentValues();
@@ -3155,6 +3343,14 @@ const Warehouse = {
         if (!itemId) {
             shItem.warehouse_item_id = null;
             shItem.name = ''; shItem.sku = ''; shItem.category = '';
+            shItem.mold_type = '';
+            shItem.linked_order_id = '';
+            shItem.linked_order_name = '';
+            shItem.template_id = '';
+            shItem.mold_capacity_total = 0;
+            shItem.mold_capacity_used = 0;
+            shItem.mold_arrived_at = '';
+            shItem.mold_storage_until = '';
         } else {
             const whItem = this.allItems.find(i => Number(i && i.id || 0) === itemId);
             if (whItem) {
@@ -3178,6 +3374,7 @@ const Warehouse = {
                 shItem.mold_storage_until = whItem.mold_storage_until || '';
             }
         }
+        this._syncShipmentMoldDerivedFields(shItem);
         this.recalcShipmentValues();
     },
 
@@ -3185,17 +3382,12 @@ const Warehouse = {
         const numericFields = new Set(['qty_received', 'weight_grams', 'purchase_price_cny', 'purchase_price_rub', 'delivery_allocated', 'total_cost_per_unit']);
         this.shipmentItems[idx][field] = numericFields.has(field) ? (parseFloat(value) || 0) : String(value || '');
         const row = this.shipmentItems[idx];
-        if (field === 'category' && this._isMoldCategory(value)) {
-            row.mold_type = this._normalizeMoldType(row.mold_type);
-            if (!parseFloat(row.mold_capacity_total || 0)) {
-                row.mold_capacity_total = this._defaultMoldCapacityTotal(row.mold_type);
-            }
+        if (field === 'linked_order_id') {
+            row.linked_order_name = this._getOrderNameById(value) || '';
         }
-        if (field === 'mold_type' && this._isMoldCategory(row.category) && !parseFloat(row.mold_capacity_total || 0)) {
-            row.mold_capacity_total = this._defaultMoldCapacityTotal(value);
-        }
+        this._syncShipmentMoldDerivedFields(row);
         this.recalcShipmentValues();
-        if (field === 'category' || field === 'mold_type') {
+        if (field === 'category' || field === 'mold_type' || field === 'linked_order_id' || field === 'name') {
             this.renderShipmentItemsTable();
         }
     },
@@ -3395,7 +3587,10 @@ const Warehouse = {
                     orderCache,
                     receiptDate: data.date || data.received_at || '',
                 });
-                if (moldMeta) Object.assign(shItem, moldMeta);
+                if (moldMeta) {
+                    Object.assign(shItem, moldMeta);
+                    this._applyAutoMoldSku(shItem);
+                }
             }
             const matched = this._findExistingItemForShipment(shItem, itemsBefore);
             if (matched) {
@@ -4068,12 +4263,14 @@ const Warehouse = {
             const moldType = this._normalizeMoldType(shItem.mold_type);
             const linkedOrderId = Number(shItem.linked_order_id || 0) || 0;
             const templateId = this._normStr(shItem.template_id || '');
+            const moldName = this._normStr(shItem.name || '');
             const byMoldKey = warehouseItems.find(i =>
                 this._isMoldCategory(i.category)
                 && this._normalizeMoldType(i.mold_type) === moldType
                 && (
                     (linkedOrderId && Number(i.linked_order_id || 0) === linkedOrderId)
                     || (templateId && this._normStr(i.template_id || '') === templateId)
+                    || (moldType === 'blank' && moldName && this._normStr(i.name || '') === moldName)
                 )
             );
             if (byMoldKey) return byMoldKey;
@@ -4139,7 +4336,6 @@ const Warehouse = {
             mold_type: shItem.mold_type || (linkedOrderId ? 'customer' : 'blank'),
             linked_order_id: linkedOrderId,
             linked_order_name: linkedOrderName,
-            template_id: shItem.template_id || '',
             mold_capacity_total: shItem.mold_capacity_total,
             mold_capacity_used: shItem.mold_capacity_used,
             mold_arrived_at: shItem.mold_arrived_at || ctx.receiptDate || '',
@@ -4163,6 +4359,9 @@ const Warehouse = {
         if (!merged.mold_arrived_at) merged.mold_arrived_at = this._todayYMD();
         if (this._normalizeMoldType(merged.mold_type) === 'customer' && !merged.mold_storage_until) {
             merged.mold_storage_until = this._plusDaysYMD(merged.mold_arrived_at, 365);
+        }
+        if (this._normalizeMoldType(merged.mold_type) !== 'customer') {
+            merged.mold_storage_until = '';
         }
         return merged;
     },

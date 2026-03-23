@@ -219,6 +219,8 @@ const ChinaPurchases = {
                     total_cost_per_unit: 0,
                     china_purchase_id: purchase.id,
                     china_purchase_name: purchase.purchase_name || '',
+                    linked_order_id: purchase.order_id || '',
+                    linked_order_name: purchase.order_name || purchase.order_label || '',
                     notes: purchase.purchase_name ? `Закупка: ${purchase.purchase_name}` : '',
                 });
             });

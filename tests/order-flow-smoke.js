@@ -1313,7 +1313,7 @@ async function smokeChinaReceiptCreatesMoldAndPromotesOrder(context) {
                 category: 'molds',
                 mold_type: 'customer',
                 name: 'Mold for Waiting Order',
-                sku: 'MOLD-555',
+                sku: '',
                 unit: 'шт',
                 qty_received: 1,
                 weight_grams: 320,
@@ -1333,6 +1333,7 @@ async function smokeChinaReceiptCreatesMoldAndPromotesOrder(context) {
         assert.equal(context.__savedShipment.id, 188);
         assert.equal(moldItem.qty, 1);
         assert.equal(moldItem.mold_type, 'customer');
+        assert.equal(moldItem.sku, 'MOLD-CUSTOM-555');
         assert.equal(moldItem.linked_order_id, 555);
         assert.equal(moldItem.linked_order_name, 'Waiting Mold Order');
         assert.equal(moldItem.mold_capacity_total, 1000);
@@ -1359,6 +1360,37 @@ async function smokeChinaReceiptCreatesMoldAndPromotesOrder(context) {
             Orders.addChangeRecord = globalThis.__originalOrdersAddChangeRecord;
         `, context);
     }
+}
+
+async function smokeBlankMoldAutoFieldsWithoutVisibleTemplate(context) {
+    context.loadOrders = async () => ([
+        { id: 901, order_name: 'Order 901', status: 'sample' },
+    ]);
+    vm.runInContext(`
+        App.templates = [{
+            id: 'tmpl-petushok',
+            name: 'Петушок',
+            category: 'blank',
+        }];
+        Warehouse.moldOrders = [];
+        Warehouse.shipmentItems = [{
+            source: 'new',
+            category: 'molds',
+            mold_type: 'blank',
+            name: 'Петушок',
+            sku: '',
+            linked_order_id: '',
+            mold_capacity_total: 0,
+            unit: 'шт',
+        }];
+        Warehouse._syncShipmentMoldDerivedFields(Warehouse.shipmentItems[0]);
+    `, context);
+
+    const row = clone(vm.runInContext('Warehouse.shipmentItems[0]', context));
+    assert.equal(row.sku, 'MOLD-BLANK-ПЕТУШОК');
+    assert.equal(row.mold_capacity_total, 5000);
+    assert.equal(row.linked_order_id, '');
+    assert.equal(row.template_id, 'tmpl-petushok');
 }
 
 async function smokeOrderStatusWarehouseSync(context) {
@@ -1960,21 +1992,29 @@ async function smokeProjectHardwareLegacyQtyAndStringIdDeduction(context) {
 async function smokeCompletedOrderConsumesBlankMoldCapacity(context) {
     const orderItems = [{
         item_type: 'product',
-        product_name: 'Blank Mold Product',
+        product_name: 'Петушок',
         quantity: 600,
         is_blank_mold: true,
-        template_id: 'tmpl-blank-1',
+        template_id: 'tmpl-petushok',
     }];
+
+    vm.runInContext(`
+        App.templates = [{
+            id: 'tmpl-petushok',
+            name: 'Петушок',
+            category: 'blank',
+        }];
+    `, context);
 
     context.__projectHardwareState = { checks: {} };
     context.__reservations = [];
     context.__warehouseItems = [{
         id: 910,
-        name: 'Blank Mold',
+        name: 'Петушок',
         sku: 'MOLD-BLANK-1',
         category: 'molds',
         mold_type: 'blank',
-        template_id: 'tmpl-blank-1',
+        template_id: '',
         mold_capacity_total: 5000,
         mold_capacity_used: 100,
         qty: 1,
@@ -2299,6 +2339,7 @@ async function main() {
     await smokeChinaShipmentMetadata(context);
     await smokeChinaReceiptStatusLinkage(context);
     await smokeChinaReceiptCreatesMoldAndPromotesOrder(context);
+    await smokeBlankMoldAutoFieldsWithoutVisibleTemplate(context);
     await smokeOrderStatusWarehouseSync(context);
     await smokePackagingWarehouseSaveSync(context);
     await smokeWarehouseManualAdjustment(context);
