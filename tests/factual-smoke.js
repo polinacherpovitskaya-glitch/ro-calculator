@@ -175,6 +175,88 @@ function smokeBuildPlanUsesTaxFormulaAndSavedAssemblyHours(context) {
     assert.equal(result.planData.salaryAssembly, 803, 'assembly salary should use saved order hours');
 }
 
+function smokeBuildPlanUsesHourBasedIndirectAndAssemblyHints(context) {
+    const result = vm.runInContext(`(() => {
+        const built = Factual._buildPlan(
+            {
+                total_revenue_plan: 1000,
+                total_cost_plan: 0,
+                production_hours_hardware: 1.46,
+                production_hours_packaging: 0,
+            },
+            [
+                {
+                    item_type: 'product',
+                    quantity: 10,
+                    cost_indirect: 999,
+                    cost_cutting_indirect: 0,
+                    cost_nfc_indirect: 0,
+                    cost_plastic: 0,
+                    cost_design: 0,
+                    cost_printing: 0,
+                    cost_delivery: 0,
+                    cost_nfc_tag: 0,
+                    is_blank_mold: true,
+                    pieces_per_hour: 10,
+                    result: { hoursPlastic: 2, hoursCutting: 1 }
+                },
+                {
+                    item_type: 'hardware',
+                    product_name: 'Буква',
+                    quantity: 2600,
+                    hardware_price_per_unit: 1,
+                    hardware_delivery_per_unit: 0,
+                    hardware_assembly_speed: 300,
+                }
+            ],
+            {
+                fotPerHour: 550,
+                taxRate: 0,
+                vatRate: 0,
+                indirectPerHour: 100,
+                wasteFactor: 1.1,
+            }
+        );
+        globalThis.__planForHints = built;
+        return built;
+    })()`, context);
+
+    assert.equal(result.planHours.hoursPlastic, 2);
+    assert.equal(result.planHours.hoursTrim, 1);
+    assert.equal(result.planHours.hoursHardware, 1.46);
+    assert.equal(result.planData.indirectProduction, 446, 'indirect should always be recomputed from total planned hours');
+    assert.equal(result.planMeta.salary_assembly.source, 'saved_order');
+    assert.ok(Math.abs(result.planMeta.salary_assembly.derivedHours - 9.53) < 0.01, 'derived assembly hours should keep current line norm for diagnostics');
+
+    context.App.isAdmin = () => true;
+    const container = context.document.getElementById('fact-detail-3');
+    vm.runInContext(`(() => {
+        Factual._renderDetail(
+            3,
+            document.getElementById('fact-detail-3'),
+            globalThis.__planForHints.planData,
+            globalThis.__planForHints.planHours,
+            {
+                fact_salary_assembly: 20000,
+                fact_indirect_production: 7700,
+                fact_hours_assembly: 5.4,
+                fact_hours_production: 40,
+                fact_hours_trim: 20,
+                fact_hours_packaging: 11.6,
+                fact_revenue: 0,
+            },
+            { order_name: 'Hints Order' },
+            globalThis.__planForHints.planMeta
+        );
+    })()`, context);
+
+    const html = container.innerHTML;
+    assert.ok(html.includes('сохранено в заказе'), 'assembly row should explain that planned hours come from saved order field');
+    assert.ok(html.includes('по текущим строкам: 9,53ч'), 'assembly row should show derived current line hours for diagnostics');
+    assert.ok(html.includes('4,46ч × 100 ₽/ч'), 'indirect row should show hours formula for plan');
+    assert.ok(html.includes('77ч × 100 ₽/ч'), 'indirect row should show actual hours formula for fact');
+}
+
 async function smokeLegacyStageDistributionAndMaterials(context) {
     context.__imports = [
         {
@@ -262,6 +344,7 @@ async function main() {
     smokeSavedPlanTotalWins(context);
     smokeRevenueManualOverride(context);
     smokeBuildPlanUsesTaxFormulaAndSavedAssemblyHours(context);
+    smokeBuildPlanUsesHourBasedIndirectAndAssemblyHints(context);
     await smokeLegacyStageDistributionAndMaterials(context);
     console.log('factual smoke checks passed');
 }

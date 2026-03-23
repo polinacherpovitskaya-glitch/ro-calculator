@@ -556,8 +556,8 @@ async _loadFactSummaries() {
             container.innerHTML = '<p class="text-muted">Заказ не найден</p>';
             return;
         }
-        const { order, planData, planHours, factData } = computed;
-        this._renderDetail(orderId, container, planData, planHours, factData, order);
+        const { order, planData, planHours, factData, planMeta } = computed;
+        this._renderDetail(orderId, container, planData, planHours, factData, order, planMeta || {});
     },
 
     _buildPlan(order, rawItems, params) {
@@ -639,6 +639,8 @@ async _loadFactSummaries() {
         calcHw.forEach(hw => { if (hw.result) planHoursAssembly += hw.result.hoursHardware || 0; });
         calcPkg.forEach(pkg => { if (pkg.result) planHoursPackaging += pkg.result.hoursPackaging || 0; });
 
+        const derivedAssemblyHours = round2(planHoursAssembly);
+        const derivedPackagingHours = round2(planHoursPackaging);
         const savedAssemblyHours = this._num(order.production_hours_hardware);
         if (savedAssemblyHours > 0) planHoursAssembly = savedAssemblyHours;
         const savedPackagingHours = this._num(order.production_hours_packaging);
@@ -650,13 +652,12 @@ async _loadFactSummaries() {
         const salaryPackaging = round2(planHoursPackaging * (params.fotPerHour || 0));
 
         let hardwarePurchase = 0, hardwareDelivery = 0, packagingPurchase = 0, packagingDelivery = 0;
-        let designPrinting = 0, plastic = 0, molds = 0, delivery = 0, prodIndirect = 0;
+        let designPrinting = 0, plastic = 0, molds = 0, delivery = 0;
 
         rawItems.forEach(ri => {
             const qty = this._num(ri.quantity);
             if (qty <= 0) return;
             if (ri.item_type === 'product') {
-                prodIndirect += qty * (this._num(ri.cost_indirect) + this._num(ri.cost_cutting_indirect) + this._num(ri.cost_nfc_indirect));
                 plastic += qty * this._num(ri.cost_plastic);
                 if (!ri.is_blank_mold) molds += qty * this._num(ri.cost_mold_amortization);
                 designPrinting += qty * (this._num(ri.cost_design) + this._num(ri.cost_printing));
@@ -672,7 +673,7 @@ async _loadFactSummaries() {
         });
 
         const plannedHoursTotal = planHoursPlastic + planHoursTrim + planHoursAssembly + planHoursPackaging;
-        if (prodIndirect <= 0) prodIndirect = round2(plannedHoursTotal * (params.indirectPerHour || 0));
+        const prodIndirect = round2(plannedHoursTotal * (params.indirectPerHour || 0));
 
         const orderRevenue = this._num(order.total_revenue_plan);
         const orderCosts = this._num(order.total_cost_plan);
@@ -703,6 +704,34 @@ async _loadFactSummaries() {
             planHours: {
                 hoursPlastic: round2(planHoursPlastic), hoursTrim: round2(planHoursTrim),
                 hoursHardware: round2(planHoursAssembly), hoursPackaging: round2(planHoursPackaging),
+            },
+            planMeta: {
+                salary_production: {
+                    planHours: round2(planHoursPlastic),
+                    source: 'derived_items',
+                },
+                salary_trim: {
+                    planHours: round2(planHoursTrim),
+                    source: 'derived_items',
+                },
+                salary_assembly: {
+                    planHours: round2(planHoursAssembly),
+                    source: savedAssemblyHours > 0 ? 'saved_order' : 'derived_items',
+                    savedHours: round2(savedAssemblyHours),
+                    derivedHours: round2(derivedAssemblyHours),
+                },
+                salary_packaging: {
+                    planHours: round2(planHoursPackaging),
+                    source: savedPackagingHours > 0 ? 'saved_order' : 'derived_items',
+                    savedHours: round2(savedPackagingHours),
+                    derivedHours: round2(derivedPackagingHours),
+                },
+                indirect_production: {
+                    planHours: round2(plannedHoursTotal),
+                    perHour: this._num(params.indirectPerHour),
+                    source: 'hours_formula',
+                    formula: 'общие плановые часы × косв./ч',
+                },
             },
         };
     },
@@ -746,7 +775,7 @@ async _loadFactSummaries() {
 
         const params = App.params || {};
         const { order, items: rawItems } = orderData;
-        const { planData, planHours } = this._buildPlan(order, rawItems || [], params);
+        const { planData, planHours, planMeta } = this._buildPlan(order, rawItems || [], params);
         const factData = { ...(await loadFactual(orderId) || {}) };
 
         this._applyHoursFromEntries(factData, orderId, planHours, params);
@@ -757,6 +786,7 @@ async _loadFactSummaries() {
             order,
             planData,
             planHours,
+            planMeta,
             factData,
             computed: true,
         };
@@ -945,7 +975,7 @@ async _loadFactSummaries() {
     // Render detail accordion
     // ==========================================
 
-    _renderDetail(orderId, container, plan, planHours, fact, order) {
+    _renderDetail(orderId, container, plan, planHours, fact, order, planMeta = {}) {
     let html = '';
 
     const planRev = plan.revenue || 0;
@@ -977,6 +1007,19 @@ async _loadFactSummaries() {
         </div>`;
     }
 
+    const factHoursByRow = {
+        salary_production: this._num(fact.fact_hours_production),
+        salary_trim: this._num(fact.fact_hours_trim),
+        salary_assembly: this._num(fact.fact_hours_assembly),
+        salary_packaging: this._num(fact.fact_hours_packaging),
+        indirect_production: round2(
+            this._num(fact.fact_hours_production) +
+            this._num(fact.fact_hours_trim) +
+            this._num(fact.fact_hours_assembly) +
+            this._num(fact.fact_hours_packaging)
+        ),
+    };
+
     html += '<div style="overflow-x:auto"><table class="data-table" style="width:100%;font-size:12px">';
     html += '<thead><tr><th style="text-align:left;width:35%">Статья расходов</th><th class="text-right" style="width:20%">План</th><th class="text-right" style="width:25%">Факт</th><th class="text-right" style="width:20%">Δ</th></tr></thead><tbody>';
 
@@ -997,17 +1040,23 @@ async _loadFactSummaries() {
         const alarm = this.getAlarm(factVal, planVal);
 
         const sourceHint = manualOverride ? 'вручную' : this._getRowSourceHint(fact, factKey, row.hint);
+        const planDetail = this._renderPlanRowDetail(row.key, planMeta);
+        const factDetail = this._renderFactRowDetail(row.key, factHoursByRow, planMeta);
 
         if (isSalaryRow && !_isAdmin) {
             return;
         }
         html += `<tr style="${alarm.bgStyle}">
             <td style="padding:6px 8px;font-weight:500">${row.label} <span class="text-muted" style="font-size:10px">${sourceHint}</span></td>
-            <td class="text-right" style="padding:6px 8px;color:var(--text-muted)">${this.fmtRub(planVal)}</td>
+            <td class="text-right" style="padding:6px 8px;color:var(--text-muted)">
+                <div>${this.fmtRub(planVal)}</div>
+                ${planDetail ? `<div class="text-muted" style="font-size:11px;margin-top:2px;line-height:1.35">${planDetail}</div>` : ''}
+            </td>
             <td class="text-right" style="padding:6px 4px">
                 <input type="text" inputmode="decimal" value="${factVal || ''}"
                     class="fact-input ${isAuto && !manualOverride ? 'fact-input-auto' : ''}"
                     oninput="Factual.onFactInput(${orderId}, '${row.key}', this.value)">
+                ${factDetail ? `<div class="text-muted" style="font-size:11px;margin-top:2px;line-height:1.35;text-align:right;padding-right:4px">${factDetail}</div>` : ''}
             </td>
             <td class="text-right" style="padding:6px 8px;font-weight:600;color:${alarm.color}">
                 ${factVal > 0 ? alarm.icon + ' ' + this.fmtDelta(delta, pct) : '<span class="text-muted">—</span>'}
@@ -1096,7 +1145,7 @@ async _loadFactSummaries() {
         this._renderTimer = setTimeout(() => {
             const container = document.getElementById('fact-detail-' + orderId);
             if (container && cached) {
-                this._renderDetail(orderId, container, cached.planData, cached.planHours, cached.factData, cached.order);
+                this._renderDetail(orderId, container, cached.planData, cached.planHours, cached.factData, cached.order, cached.planMeta || {});
             }
         }, 500);
     },
@@ -1145,6 +1194,40 @@ async _loadFactSummaries() {
         const sign = delta >= 0 ? '+' : '';
         return sign + new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 }).format(Math.round(delta)) +
             ' \u20BD (' + sign + pct.toFixed(0) + '%)';
+    },
+    fmtHours(n) {
+        const num = this._num(n);
+        if (Math.abs(num) < 0.005) return '0ч';
+        const fractionDigits = Number.isInteger(num) ? 0 : (Math.abs(num * 10 - Math.round(num * 10)) < 0.001 ? 1 : 2);
+        return new Intl.NumberFormat('ru-RU', {
+            minimumFractionDigits: 0,
+            maximumFractionDigits: fractionDigits,
+        }).format(round2(num)) + 'ч';
+    },
+    _renderPlanRowDetail(rowKey, planMeta = {}) {
+        const meta = planMeta?.[rowKey];
+        if (!meta) return '';
+        if (rowKey === 'indirect_production') {
+            return `${this.fmtHours(meta.planHours)} × ${this.fmtRub(meta.perHour || 0)}/ч`;
+        }
+        if (!rowKey.startsWith('salary_')) return '';
+        let detail = this.fmtHours(meta.planHours);
+        if (meta.source === 'saved_order') {
+            detail += ' • сохранено в заказе';
+            if (Math.abs(this._num(meta.derivedHours) - this._num(meta.planHours)) > 0.05) {
+                detail += `<br>по текущим строкам: ${this.fmtHours(meta.derivedHours)}`;
+            }
+        }
+        return detail;
+    },
+    _renderFactRowDetail(rowKey, factHoursByRow = {}, planMeta = {}) {
+        const factHours = this._num(factHoursByRow?.[rowKey]);
+        if (factHours <= 0) return '';
+        if (rowKey === 'indirect_production') {
+            return `${this.fmtHours(factHours)} × ${this.fmtRub(planMeta?.indirect_production?.perHour || 0)}/ч`;
+        }
+        if (!rowKey.startsWith('salary_')) return '';
+        return this.fmtHours(factHours);
     },
 
     _esc(str) {
