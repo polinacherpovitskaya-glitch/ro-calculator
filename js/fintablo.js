@@ -310,16 +310,17 @@ const FinTablo = {
     _renderDetail(deal, txns) {
         const content = document.getElementById('ft-detail-content');
         const order = this._matchMap[deal.id];
+        const scopedTxns = this._scopeTransactionsToOrder(txns, order);
 
         // Split by group
-        const outcomes = txns.filter(t => t.group === 'outcome');
-        const incomes = txns.filter(t => t.group === 'income');
-        const transfers = txns.filter(t => t.group === 'transfer');
+        const outcomes = scopedTxns.filter(t => t.group === 'outcome');
+        const incomes = scopedTxns.filter(t => t.group === 'income');
+        const transfers = scopedTxns.filter(t => t.group === 'transfer');
 
         // Map expenses to our fact fields
         const factSums = this._mapToFactFields(outcomes);
-        const totalIncome = incomes.reduce((s, t) => s + (t.value || 0), 0);
-        const totalOutcome = outcomes.reduce((s, t) => s + (t.value || 0), 0);
+        const totalIncome = incomes.reduce((s, t) => s + this._effectiveTransactionValue(t), 0);
+        const totalOutcome = outcomes.reduce((s, t) => s + this._effectiveTransactionValue(t), 0);
 
         let html = '';
 
@@ -373,7 +374,7 @@ const FinTablo = {
             </tr></thead><tbody>`;
 
             // Sort by date desc
-            const sorted = [...txns].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+            const sorted = [...scopedTxns].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
             sorted.forEach(t => {
                 const cat = this._categories[t.categoryId];
                 const catName = cat ? cat.name : '';
@@ -382,12 +383,20 @@ const FinTablo = {
                     : '<span class="text-muted">Перевод</span>';
                 const valueColor = t.group === 'income' ? 'color:var(--success)' :
                     t.group === 'outcome' ? 'color:var(--danger)' : '';
+                const effectiveValue = this._effectiveTransactionValue(t);
+                const originalValue = this._num(t.value);
+                let valueHtml = formatRub(effectiveValue);
+                if (order && t._scoped_mode === 'split' && Math.abs(effectiveValue - originalValue) > 0.001) {
+                    valueHtml = `${formatRub(effectiveValue)}<div class="text-muted" style="font-size:11px">из ${formatRub(originalValue)}</div>`;
+                } else if (order && t._scoped_mode === 'split_zero') {
+                    valueHtml = `<span class="text-muted">не относится</span><div class="text-muted" style="font-size:11px">из ${formatRub(originalValue)}</div>`;
+                }
 
                 html += `<tr>
                     <td style="white-space:nowrap">${t.date || ''}</td>
                     <td>${this._esc(t.description || '')}</td>
                     <td><span class="text-muted" style="font-size:12px">${this._esc(catName)}</span></td>
-                    <td class="text-right" style="${valueColor}">${formatRub(t.value || 0)}</td>
+                    <td class="text-right" style="${valueColor}">${valueHtml}</td>
                     <td>${typeLabel}</td>
                 </tr>`;
             });
@@ -408,6 +417,8 @@ const FinTablo = {
         };
 
         outcomes.forEach(t => {
+            const amount = this._effectiveTransactionValue(t);
+            if (amount <= 0) return;
             const cat = this._categories[t.categoryId];
             const catName = (cat ? cat.name : '').toLowerCase();
             // Also check parent category name
@@ -417,13 +428,13 @@ const FinTablo = {
             let matched = false;
             for (const [keyword, field] of Object.entries(this.CATEGORY_KEYWORDS)) {
                 if (catName.includes(keyword) || parentName.includes(keyword)) {
-                    result[field] += (t.value || 0);
+                    result[field] += amount;
                     matched = true;
                     break;
                 }
             }
             if (!matched) {
-                result.fact_other += (t.value || 0);
+                result.fact_other += amount;
             }
         });
 
@@ -431,11 +442,13 @@ const FinTablo = {
     },
 
     _buildImportData(order, deal, txns) {
-        const outcomes = txns.filter(t => t.group === 'outcome');
-        const incomes = txns.filter(t => t.group === 'income');
+        const scopedTxns = this._scopeTransactionsToOrder(txns, order);
+        const outcomes = scopedTxns.filter(t => t.group === 'outcome');
+        const incomes = scopedTxns.filter(t => t.group === 'income');
         const factSums = this._mapToFactFields(outcomes);
-        const totalIncome = incomes.reduce((s, t) => s + (t.value || 0), 0);
-        const totalOutcome = outcomes.reduce((s, t) => s + (t.value || 0), 0);
+        const totalIncome = incomes.reduce((s, t) => s + this._effectiveTransactionValue(t), 0);
+        const totalOutcome = outcomes.reduce((s, t) => s + this._effectiveTransactionValue(t), 0);
+        const splitApplied = scopedTxns.some(t => t._scoped_mode === 'split' || t._scoped_mode === 'split_zero');
 
         return {
             order_id: order.id,
@@ -452,9 +465,142 @@ const FinTablo = {
             fact_other: factSums.fact_other,
             fact_total: totalOutcome,
             fact_revenue: totalIncome,
-            raw_data: { source: 'fintablo_api', dealId: deal.id, dealName: deal.name, txnCount: txns.length },
+            raw_data: {
+                source: 'fintablo_api',
+                dealId: deal.id,
+                dealName: deal.name,
+                txnCount: txns.length,
+                splitApplied,
+            },
             source: 'api',
         };
+    },
+
+    _scopeTransactionsToOrder(txns, order) {
+        return (txns || []).map(txn => {
+            const scoped = this._resolveTransactionScope(txn, order);
+            return {
+                ...txn,
+                _scoped_value: scoped.value,
+                _scoped_mode: scoped.mode,
+                _scoped_original_value: scoped.originalValue,
+                _scoped_label: scoped.label || '',
+            };
+        });
+    },
+
+    _resolveTransactionScope(txn, order) {
+        const originalValue = this._num(txn && txn.value);
+        if (!order || originalValue <= 0) {
+            return { value: originalValue, mode: 'full', originalValue };
+        }
+
+        const allocations = this._extractSplitAllocations(txn && txn.description);
+        if (!allocations.length) {
+            return { value: originalValue, mode: 'full', originalValue };
+        }
+
+        const matched = this._findAllocationForOrder(order.order_name, allocations);
+        if (matched) {
+            return {
+                value: matched.amount,
+                mode: 'split',
+                originalValue,
+                label: matched.label,
+            };
+        }
+
+        return { value: 0, mode: 'split_zero', originalValue };
+    },
+
+    _extractSplitAllocations(description) {
+        const text = String(description || '');
+        const regex = /(\d[\d\s]*(?:[.,]\d+)?)\s*(?:\([^)]*\))?\s*[-–—]\s*(.*?)(?=(?:\s+\d[\d\s]*(?:[.,]\d+)?\s*(?:\([^)]*\))?\s*[-–—])|$)/g;
+        const allocations = [];
+        let match;
+        while ((match = regex.exec(text)) !== null) {
+            const amount = this._parseMoney(match[1]);
+            const label = String(match[2] || '').trim();
+            if (amount > 0 && label) {
+                allocations.push({ amount, label });
+            }
+        }
+        return allocations.length >= 2 ? allocations : [];
+    },
+
+    _findAllocationForOrder(orderName, allocations) {
+        const orderTokens = this._tokenizeMatchText(orderName);
+        const orderNorm = this._normalizeMatchText(orderName);
+        if (!orderTokens.length || !orderNorm) return null;
+
+        let best = null;
+        allocations.forEach(allocation => {
+            const labelNorm = this._normalizeMatchText(allocation.label);
+            const labelTokens = this._tokenizeMatchText(allocation.label);
+            if (!labelNorm || !labelTokens.length) return;
+
+            let overlap = 0;
+            orderTokens.forEach(orderToken => {
+                const hasToken = labelTokens.some(labelToken =>
+                    labelToken === orderToken
+                    || labelToken.startsWith(orderToken)
+                    || orderToken.startsWith(labelToken)
+                );
+                if (hasToken) overlap += 1;
+            });
+
+            const phraseMatch = labelNorm.includes(orderNorm) || orderNorm.includes(labelNorm);
+            const minOverlap = orderTokens.length >= 2 ? 2 : 1;
+            if (!phraseMatch && overlap < minOverlap) return;
+
+            const score = overlap + (phraseMatch ? 1 : 0);
+            if (!best || score > best.score || (score === best.score && allocation.amount > best.amount)) {
+                best = { ...allocation, score };
+            }
+        });
+
+        return best;
+    },
+
+    _normalizeMatchText(value) {
+        return String(value || '')
+            .toLowerCase()
+            .replace(/ё/g, 'е')
+            .replace(/[^a-zа-я0-9]+/gi, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+    },
+
+    _tokenizeMatchText(value) {
+        const stopWords = new Set(['и', 'в', 'во', 'на', 'по', 'для', 'без', 'от', 'из', 'с', 'со', 'над', 'под']);
+        const tokens = this._normalizeMatchText(value)
+            .split(' ')
+            .map(token => this._stemMatchToken(token))
+            .filter(token => token && token.length >= 2 && !stopWords.has(token));
+        return Array.from(new Set(tokens));
+    },
+
+    _stemMatchToken(token) {
+        let stem = String(token || '');
+        const suffixes = ['иями', 'ями', 'ами', 'ов', 'ев', 'ей', 'ий', 'ый', 'ой', 'ам', 'ям', 'ах', 'ях', 'ом', 'ем', 'ы', 'и', 'а', 'я', 'о', 'е', 'у', 'ю'];
+        for (const suffix of suffixes) {
+            if (stem.length > suffix.length + 2 && stem.endsWith(suffix)) {
+                stem = stem.slice(0, -suffix.length);
+                break;
+            }
+        }
+        return stem;
+    },
+
+    _parseMoney(value) {
+        return parseFloat(String(value || '').replace(/\s+/g, '').replace(',', '.')) || 0;
+    },
+
+    _effectiveTransactionValue(txn) {
+        if (txn && Object.prototype.hasOwnProperty.call(txn, '_scoped_value')) {
+            return this._num(txn._scoped_value);
+        }
+        return this._num(txn && txn.value);
     },
 
     async _syncDealImport(deal, order, txns, opts = {}) {
@@ -511,5 +657,10 @@ const FinTablo = {
             .replace(/</g, '&lt;')
             .replace(/>/g, '&gt;')
             .replace(/"/g, '&quot;');
+    },
+
+    _num(value) {
+        const num = Number(value);
+        return Number.isFinite(num) ? num : 0;
     },
 };
