@@ -269,9 +269,34 @@ async function smokeMoscowDateAndLegacyRepair(context) {
         vm.runInContext(`TimeTrack.getLegacyBuggyTodayYMD(new Date('2026-03-20T20:30:00Z'), 3)`, context),
         '2026-03-21'
     );
+    assert.equal(
+        vm.runInContext(`TimeTrack.getLegacyBuggyTodayYMDWithHostOffset(new Date('2026-03-20T18:30:00Z'), 3, 180)`, context),
+        '2026-03-21'
+    );
+    assert.equal(
+        vm.runInContext(`Array.from(TimeTrack.getLegacyBuggyDateCandidates(new Date('2026-03-20T18:30:00Z'), 3)).sort().join(',')`, context),
+        '2026-03-20,2026-03-21'
+    );
 
     const repaired = await vm.runInContext(`TimeTrack.repairLegacyTimezoneShiftedEntries()`, context);
     assert.equal(repaired, 1);
+    assert.equal(context.__savedEntries.at(-1).date, '2026-03-20');
+
+    context.__savedEntries = [];
+    vm.runInContext(`
+        TimeTrack.entries = [{
+            id: 502,
+            employee_id: 10,
+            worker_name: 'Тая',
+            project_name: 'Проект Б',
+            date: '2026-03-21',
+            created_at: '2026-03-20T18:30:00Z',
+            hours: 2,
+            description: ''
+        }];
+    `, context);
+    const repairedBotShift = await vm.runInContext(`TimeTrack.repairLegacyTimezoneShiftedEntries()`, context);
+    assert.equal(repairedBotShift, 1);
     assert.equal(context.__savedEntries.at(-1).date, '2026-03-20');
 }
 

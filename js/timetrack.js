@@ -468,6 +468,27 @@ const TimeTrack = {
         return this.formatUtcYMD(new Date(utcMs + safeOffset * 3600000));
     },
 
+    getLegacyBuggyTodayYMDWithHostOffset(baseDate = new Date(), timezoneOffset = null, hostTimezoneOffsetMinutes = 0) {
+        const safeOffset = Number.isFinite(Number(timezoneOffset))
+            ? Number(timezoneOffset)
+            : this.getTrackingTimezoneOffset();
+        const safeHostOffset = Number.isFinite(Number(hostTimezoneOffsetMinutes))
+            ? Number(hostTimezoneOffsetMinutes)
+            : 0;
+        const utcMs = baseDate.getTime() + safeHostOffset * 60000;
+        return this.formatUtcYMD(new Date(utcMs + safeOffset * 3600000));
+    },
+
+    getLegacyBuggyDateCandidates(baseDate = new Date(), timezoneOffset = null) {
+        const candidates = new Set();
+        candidates.add(this.getLegacyBuggyTodayYMD(baseDate, timezoneOffset));
+        // Legacy bot/runtime could run in UTC or UTC-3; both produced bad day shifts.
+        [0, 180].forEach(hostOffset => {
+            candidates.add(this.getLegacyBuggyTodayYMDWithHostOffset(baseDate, timezoneOffset, hostOffset));
+        });
+        return candidates;
+    },
+
     getEntryTimezoneOffset(entry) {
         const emp = this.findEmployeeForEntry(entry);
         const explicit = parseInt(emp?.timezone_offset, 10);
@@ -623,8 +644,8 @@ const TimeTrack = {
             if (!rawDate || Number.isNaN(createdAt.getTime())) return false;
             const timezoneOffset = this.getEntryTimezoneOffset(entry);
             const correctedDate = this.getTodayYMD(createdAt, timezoneOffset);
-            const buggyDate = this.getLegacyBuggyTodayYMD(createdAt, timezoneOffset);
-            return rawDate === buggyDate && correctedDate && correctedDate !== rawDate;
+            const buggyDates = this.getLegacyBuggyDateCandidates(createdAt, timezoneOffset);
+            return correctedDate && correctedDate !== rawDate && buggyDates.has(rawDate);
         });
         let repaired = 0;
         for (const entry of candidates) {
