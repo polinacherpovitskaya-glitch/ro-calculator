@@ -2147,6 +2147,83 @@ table .text-center { text-align: center; }
     outline: none;
 }
 
+.wh-audit-modal {
+    position: fixed;
+    inset: 24px;
+    z-index: 1200;
+    margin-top: 0 !important;
+    box-shadow: 0 20px 60px rgba(15, 23, 42, 0.22);
+}
+
+.wh-audit-dialog {
+    display: flex;
+    flex-direction: column;
+    max-height: calc(100vh - 48px);
+}
+
+.wh-audit-summary-bar {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+}
+
+.wh-audit-draft-status,
+.wh-audit-summary {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-radius: 12px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--text);
+}
+
+.wh-audit-summary {
+    font-weight: 600;
+}
+
+.wh-audit-table-wrap {
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: calc(100vh - 280px);
+    overflow: auto;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+}
+
+.wh-audit-photo {
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    object-fit: cover;
+    border: 1px solid var(--border);
+    display: block;
+}
+
+.wh-audit-photo-placeholder {
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--border);
+    font-size: 16px;
+}
+
+.wh-audit-actions {
+    margin-top: 12px;
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+}
+
 /* Warehouse tabs */
 #wh-tabs .tab {
     transition: all 0.15s;

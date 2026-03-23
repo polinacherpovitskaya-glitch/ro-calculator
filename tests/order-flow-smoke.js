@@ -2550,6 +2550,74 @@ async function smokeOrderDetailColorRendering(context) {
     assert.match(legacyRendered, /Лайм/);
 }
 
+async function smokeWarehouseInventoryAuditDraftAndFinalize(context) {
+    context.__warehouseItems = [
+        {
+            id: 701,
+            name: 'Инвентаризационный трос',
+            sku: 'AUD-701',
+            category: 'cables',
+            qty: 120,
+            price_per_unit: 12,
+            photo_thumbnail: 'https://example.com/audit-701.jpg',
+        },
+        {
+            id: 702,
+            name: 'Инвентаризационная упаковка',
+            sku: 'AUD-702',
+            category: 'packaging',
+            qty: 10,
+            price_per_unit: 5,
+        },
+    ];
+    context.__warehouseHistory = [];
+    context.loadWarehouseItems = async () => clone(context.__warehouseItems);
+    context.saveWarehouseItems = async (items) => {
+        context.__warehouseItems = clone(items);
+    };
+    context.loadWarehouseHistory = async () => clone(context.__warehouseHistory);
+    context.saveWarehouseHistory = async (history) => {
+        context.__warehouseHistory = clone(history);
+    };
+
+    vm.runInContext(`
+        Warehouse.allItems = globalThis.__warehouseItems.map(item => ({ ...item }));
+        Warehouse.auditDraft = null;
+        Warehouse.load = async function () {
+            this.allItems = await loadWarehouseItems();
+        };
+    `, context);
+
+    await vm.runInContext(`Warehouse.showAudit()`, context);
+
+    assert.equal(vm.runInContext(`document.getElementById('wh-audit-form').style.display`, context), '');
+    const renderedTable = String(vm.runInContext(`document.getElementById('wh-audit-table').innerHTML`, context));
+    assert.match(renderedTable, /audit-701\.jpg/);
+    assert.match(renderedTable, /Инвентаризационный трос/);
+
+    vm.runInContext(`
+        Warehouse.onAuditInput({
+            dataset: { id: '701', system: '120' },
+            value: '100'
+        });
+    `, context);
+
+    const draftRaw = context.localStorage.getItem('ro_wh_audit_draft_v2');
+    assert.ok(draftRaw, 'audit draft should autosave');
+    assert.equal(JSON.parse(draftRaw).values['701'], '100');
+    const summaryText = String(vm.runInContext(`document.getElementById('wh-audit-summary').textContent`, context));
+    assert.match(summaryText, /Недостача:/);
+    assert.match(summaryText, /240/);
+
+    await vm.runInContext(`Warehouse.saveAuditResults()`, context);
+
+    assert.equal(context.__warehouseItems.find(item => item.id === 701).qty, 100);
+    assert.equal(context.localStorage.getItem('ro_wh_audit_draft_v2'), null);
+    assert.equal(vm.runInContext(`document.getElementById('wh-audit-form').style.display`, context), 'none');
+    assert.ok(context.__warehouseHistory.some(entry => entry.type === 'adjustment' && /Инвентаризация/.test(entry.notes || '')));
+    assert.ok(context.__warehouseHistory.some(entry => entry.type === 'inventory_audit' && /недостача/i.test(entry.notes || '')));
+}
+
 async function main() {
     const context = createContext();
     ['js/calculator.js', 'js/app.js', 'js/orders.js', 'js/warehouse.js', 'js/order-detail.js'].forEach(file => runScript(context, file));
@@ -2580,6 +2648,7 @@ async function main() {
     await smokeBlankHardwareFilterAndLowStockAlerts(context);
     await smokeProjectHardwareLegacyStatusRepair(context);
     await smokeProjectHardwareLegacyAndCollectedNetting(context);
+    await smokeWarehouseInventoryAuditDraftAndFinalize(context);
     await smokeOrderDetailColorRendering(context);
 
     console.log('order-flow smoke checks passed');

@@ -242,6 +242,7 @@ const Warehouse = {
     shipmentItems: [],
     projectHardwareState: { checks: {} },
     _blankHardwareWarehouseItemIds: new Set(),
+    auditDraft: null,
 
     // ==========================================
     // LIFECYCLE
@@ -420,6 +421,273 @@ const Warehouse = {
                 `<option value="${c.key}">${c.icon} ${c.label}</option>`
             ).join('') +
             `<option value="${BLANK_HARDWARE_FILTER_KEY}">⭐ Бланковая фурнитура</option>`;
+    },
+
+    _auditDraftStorageKey() {
+        return 'ro_wh_audit_draft_v2';
+    },
+
+    _defaultAuditDraft() {
+        return {
+            category: '',
+            search: '',
+            values: {},
+            saved_at: '',
+        };
+    },
+
+    _ensureAuditDraft() {
+        if (!this.auditDraft || typeof this.auditDraft !== 'object') {
+            this.auditDraft = this._defaultAuditDraft();
+        }
+        if (!this.auditDraft.values || typeof this.auditDraft.values !== 'object') {
+            this.auditDraft.values = {};
+        }
+        return this.auditDraft;
+    },
+
+    _loadAuditDraft() {
+        try {
+            const raw = localStorage.getItem(this._auditDraftStorageKey());
+            if (!raw) return this._defaultAuditDraft();
+            const parsed = JSON.parse(raw);
+            return {
+                ...this._defaultAuditDraft(),
+                ...(parsed && typeof parsed === 'object' ? parsed : {}),
+                values: parsed && typeof parsed.values === 'object' && parsed.values ? parsed.values : {},
+            };
+        } catch (_) {
+            return this._defaultAuditDraft();
+        }
+    },
+
+    _persistAuditDraft() {
+        const draft = this._ensureAuditDraft();
+        draft.saved_at = new Date().toISOString();
+        localStorage.setItem(this._auditDraftStorageKey(), JSON.stringify(draft));
+        this._updateAuditDraftStatus();
+        this._updateAuditSummary();
+    },
+
+    saveAuditDraft(showToast = false) {
+        this._persistAuditDraft();
+        if (showToast) App.toast('Черновик инвентаризации сохранён');
+    },
+
+    clearAuditDraft() {
+        const hasEntries = Object.keys((this.auditDraft && this.auditDraft.values) || {}).length > 0 || !!(this.auditDraft && this.auditDraft.search);
+        if (hasEntries && !confirm('Очистить черновик инвентаризации? Введённые фактические остатки будут сброшены.')) return;
+        this.auditDraft = this._defaultAuditDraft();
+        localStorage.removeItem(this._auditDraftStorageKey());
+        const categoryEl = document.getElementById('wh-audit-category');
+        if (categoryEl) categoryEl.value = '';
+        const searchEl = document.getElementById('wh-audit-search');
+        if (searchEl) searchEl.value = '';
+        this.renderAuditTable('');
+        this._updateAuditDraftStatus();
+        this._updateAuditSummary();
+        App.toast('Черновик инвентаризации очищен');
+    },
+
+    _populateAuditCategoryFilter() {
+        const sel = document.getElementById('wh-audit-category');
+        if (!sel) return;
+        const counts = new Map();
+        (this.allItems || []).forEach(item => {
+            const key = String(item && item.category || '');
+            counts.set(key, (counts.get(key) || 0) + 1);
+        });
+        const blankCount = (this.allItems || []).filter(item => this._isBlankHardwareWarehouseItem(item)).length;
+        const options = ['<option value="">Все категории</option>'];
+        WAREHOUSE_CATEGORIES.forEach(cat => {
+            const count = counts.get(cat.key) || 0;
+            options.push(`<option value="${cat.key}">${cat.icon} ${cat.label}${count ? ` (${count})` : ''}</option>`);
+        });
+        options.push(`<option value="${BLANK_HARDWARE_FILTER_KEY}">⭐ Бланковая фурнитура${blankCount ? ` (${blankCount})` : ''}</option>`);
+        sel.innerHTML = options.join('');
+        sel.value = (this.auditDraft && this.auditDraft.category) || '';
+        if (sel.value !== ((this.auditDraft && this.auditDraft.category) || '')) {
+            sel.value = '';
+        }
+    },
+
+    _getAuditFilteredItems(category, search) {
+        let items = [...(this.allItems || [])];
+        if (category) {
+            if (category === BLANK_HARDWARE_FILTER_KEY) {
+                items = items.filter(item => this._isBlankHardwareWarehouseItem(item));
+            } else {
+                items = items.filter(item => String(item.category || '') === category);
+            }
+        }
+
+        const query = String(search || '').trim().toLowerCase();
+        if (query) {
+            items = items.filter(item =>
+                String(item.name || '').toLowerCase().includes(query)
+                || String(item.sku || '').toLowerCase().includes(query)
+                || String(item.color || '').toLowerCase().includes(query)
+            );
+        }
+
+        items.sort((a, b) => {
+            const catA = String(a && a.category || '');
+            const catB = String(b && b.category || '');
+            if (catA !== catB) return catA.localeCompare(catB, 'ru');
+            return String(a && a.name || '').localeCompare(String(b && b.name || ''), 'ru');
+        });
+        return items;
+    },
+
+    _getAuditStoredValue(itemId) {
+        const draft = this._ensureAuditDraft();
+        const key = String(Number(itemId || 0) || itemId || '');
+        return Object.prototype.hasOwnProperty.call(draft.values, key) ? String(draft.values[key]) : '';
+    },
+
+    _getAuditDiffMeta(item, actualValue) {
+        const systemQty = parseFloat(item && item.qty) || 0;
+        const actualQty = actualValue === '' || actualValue == null ? NaN : parseFloat(actualValue);
+        if (!Number.isFinite(actualQty)) {
+            return {
+                systemQty,
+                actualQty: null,
+                diff: null,
+                valueDiff: null,
+            };
+        }
+        const diff = actualQty - systemQty;
+        const unitPrice = Math.max(0, parseFloat(item && item.price_per_unit) || 0);
+        return {
+            systemQty,
+            actualQty,
+            diff,
+            valueDiff: diff * unitPrice,
+        };
+    },
+
+    _renderAuditDiffMarkup(item, actualValue) {
+        const meta = this._getAuditDiffMeta(item, actualValue);
+        if (meta.diff == null) {
+            return {
+                qty: '—',
+                qtyClass: 'text-right audit-diff',
+                money: '—',
+                moneyClass: 'text-right audit-diff',
+            };
+        }
+        if (Math.abs(meta.diff) < 0.000001) {
+            return {
+                qty: '0',
+                qtyClass: 'text-right audit-diff audit-zero',
+                money: this._formatMoney(0),
+                moneyClass: 'text-right audit-diff audit-zero',
+            };
+        }
+        if (meta.diff > 0) {
+            return {
+                qty: `+${meta.diff}`,
+                qtyClass: 'text-right audit-diff audit-positive',
+                money: `+${this._formatMoney(meta.valueDiff)}`,
+                moneyClass: 'text-right audit-diff audit-positive',
+            };
+        }
+        return {
+            qty: String(meta.diff),
+            qtyClass: 'text-right audit-diff audit-negative',
+            money: `−${this._formatMoney(Math.abs(meta.valueDiff))}`,
+            moneyClass: 'text-right audit-diff audit-negative',
+        };
+    },
+
+    _updateAuditRowDiff(itemId) {
+        const numericId = Number(itemId || 0);
+        const item = (this.allItems || []).find(entry => Number(entry && entry.id || 0) === numericId);
+        if (!item) return;
+        const rendered = this._renderAuditDiffMarkup(item, this._getAuditStoredValue(numericId));
+        const diffEl = document.getElementById(`audit-diff-${numericId}`);
+        if (diffEl) {
+            diffEl.textContent = rendered.qty;
+            diffEl.className = rendered.qtyClass;
+        }
+        const moneyEl = document.getElementById(`audit-money-${numericId}`);
+        if (moneyEl) {
+            moneyEl.textContent = rendered.money;
+            moneyEl.className = rendered.moneyClass;
+        }
+    },
+
+    _getAuditSummaryStats() {
+        const draft = this._ensureAuditDraft();
+        const stats = {
+            enteredPositions: 0,
+            changedPositions: 0,
+            shortageQty: 0,
+            shortageValue: 0,
+            surplusQty: 0,
+            surplusValue: 0,
+            netQty: 0,
+            netValue: 0,
+        };
+
+        Object.entries(draft.values || {}).forEach(([rawId, rawValue]) => {
+            if (rawValue === '' || rawValue == null) return;
+            const itemId = Number(rawId || 0);
+            const item = (this.allItems || []).find(entry => Number(entry && entry.id || 0) === itemId);
+            if (!item) return;
+            stats.enteredPositions += 1;
+            const meta = this._getAuditDiffMeta(item, rawValue);
+            if (meta.diff == null || Math.abs(meta.diff) < 0.000001) return;
+            stats.changedPositions += 1;
+            stats.netQty += meta.diff;
+            stats.netValue += meta.valueDiff || 0;
+            if (meta.diff < 0) {
+                stats.shortageQty += Math.abs(meta.diff);
+                stats.shortageValue += Math.abs(meta.valueDiff || 0);
+            } else {
+                stats.surplusQty += meta.diff;
+                stats.surplusValue += Math.abs(meta.valueDiff || 0);
+            }
+        });
+
+        stats.shortageValue = Math.round(stats.shortageValue * 100) / 100;
+        stats.surplusValue = Math.round(stats.surplusValue * 100) / 100;
+        stats.netValue = Math.round(stats.netValue * 100) / 100;
+        return stats;
+    },
+
+    _updateAuditDraftStatus() {
+        const el = document.getElementById('wh-audit-draft-status');
+        if (!el) return;
+        const draft = this._ensureAuditDraft();
+        const count = Object.values(draft.values || {}).filter(value => String(value || '') !== '').length;
+        if (!draft.saved_at) {
+            el.textContent = count > 0
+                ? `Черновик готов к автосохранению · ${count} поз.`
+                : 'Черновик будет сохраняться автоматически';
+            return;
+        }
+        const stamp = new Date(draft.saved_at);
+        const safeStamp = Number.isNaN(stamp.getTime()) ? String(draft.saved_at) : stamp.toLocaleString('ru-RU');
+        el.textContent = `Черновик автосохранён · ${safeStamp} · ${count} поз.`;
+    },
+
+    _updateAuditSummary() {
+        const el = document.getElementById('wh-audit-summary');
+        if (!el) return;
+        const stats = this._getAuditSummaryStats();
+        if (stats.changedPositions === 0) {
+            el.textContent = stats.enteredPositions > 0
+                ? `Проверено ${stats.enteredPositions} поз. · Расхождений пока нет`
+                : 'Изменений пока нет';
+            return;
+        }
+        el.textContent = [
+            `Позиции с расхождением: ${stats.changedPositions}`,
+            `Недостача: ${this._formatMoney(stats.shortageValue)}`,
+            `Излишек: ${this._formatMoney(stats.surplusValue)}`,
+            `Нетто: ${stats.netValue >= 0 ? '+' : '−'}${this._formatMoney(Math.abs(stats.netValue))}`,
+        ].join(' · ');
     },
 
     // ==========================================
@@ -1921,102 +2189,189 @@ const Warehouse = {
     // INVENTORY AUDIT (Инвентаризация)
     // ==========================================
 
-    showAudit() {
-        document.getElementById('wh-audit-form').style.display = '';
-        this.renderAuditTable('');
-        document.getElementById('wh-audit-form').scrollIntoView({ behavior: 'smooth' });
+    async showAudit() {
+        await this._refreshBlankHardwareWarehouseItemIds();
+        this.auditDraft = this._loadAuditDraft();
+        this._populateAuditCategoryFilter();
+        const searchEl = document.getElementById('wh-audit-search');
+        if (searchEl) searchEl.value = this.auditDraft.search || '';
+        const form = document.getElementById('wh-audit-form');
+        if (form) form.style.display = '';
+        this.renderAuditTable(this.auditDraft.category || '');
+        this._updateAuditDraftStatus();
+        this._updateAuditSummary();
     },
 
     hideAudit() {
-        document.getElementById('wh-audit-form').style.display = 'none';
+        const form = document.getElementById('wh-audit-form');
+        if (form) form.style.display = 'none';
+    },
+
+    onAuditCategoryChange(category) {
+        const draft = this._ensureAuditDraft();
+        draft.category = String(category || '');
+        this.saveAuditDraft(false);
+        this.renderAuditTable(draft.category);
+    },
+
+    onAuditSearchChange(search) {
+        const draft = this._ensureAuditDraft();
+        draft.search = String(search || '');
+        this.saveAuditDraft(false);
+        this.renderAuditTable(draft.category || '');
     },
 
     renderAuditTable(category) {
-        let items = [...this.allItems];
-        if (category) items = items.filter(i => i.category === category);
-
-        // Sort by category then name
-        items.sort((a, b) => {
-            if (a.category !== b.category) return (a.category || '').localeCompare(b.category || '');
-            return (a.name || '').localeCompare(b.name || '', 'ru');
-        });
+        const draft = this._ensureAuditDraft();
+        if (typeof category === 'string') {
+            draft.category = category;
+        }
+        const selectedCategory = draft.category || '';
+        const search = draft.search || '';
+        const items = this._getAuditFilteredItems(selectedCategory, search);
 
         const container = document.getElementById('wh-audit-table');
         if (!container) return;
 
-        container.innerHTML = `<div class="table-wrap" style="max-height:500px;overflow-y:auto;">
+        if (items.length === 0) {
+            container.innerHTML = '<div class="card" style="margin:0;"><p class="text-center text-muted">Нет позиций для инвентаризации по текущему фильтру</p></div>';
+            this._updateAuditSummary();
+            return;
+        }
+
+        container.innerHTML = `<div class="table-wrap wh-audit-table-wrap">
             <table>
                 <thead><tr>
+                    <th style="width:64px;">Фото</th>
                     <th>Категория</th>
                     <th>Название</th>
                     <th>Артикул</th>
                     <th class="text-right">В системе</th>
                     <th style="width:100px;">Факт</th>
                     <th class="text-right">Разница</th>
+                    <th class="text-right">Расхождение ₽</th>
                 </tr></thead>
                 <tbody>${items.map(item => {
                     const cat = WAREHOUSE_CATEGORIES.find(c => c.key === item.category);
+                    const actualValue = this._getAuditStoredValue(item.id);
+                    const rendered = this._renderAuditDiffMarkup(item, actualValue);
+                    const photoSrc = item.photo_thumbnail || item.photo_url || '';
+                    const safePhotoSrc = photoSrc ? (photoSrc.startsWith('data:') ? photoSrc : this.esc(photoSrc)) : '';
                     return `<tr>
+                        <td>
+                            ${safePhotoSrc
+                                ? `<img src="${safePhotoSrc}" class="wh-audit-photo" alt="${this.esc(item.name || '')}" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';"><div class="wh-audit-photo-placeholder" style="display:none;background:${cat?.color || '#f1f5f9'};color:${cat?.textColor || '#475569'};">${cat?.icon || '📦'}</div>`
+                                : `<div class="wh-audit-photo-placeholder" style="background:${cat?.color || '#f1f5f9'};color:${cat?.textColor || '#475569'};">${cat?.icon || '📦'}</div>`}
+                        </td>
                         <td><span class="wh-cat-badge" style="background:${cat?.color || '#f1f5f9'};color:${cat?.textColor || '#475569'};">${cat?.label || '?'}</span></td>
                         <td style="font-weight:600;">${this.esc(item.name)}</td>
                         <td style="color:var(--text-muted);font-size:11px;">${this.esc(item.sku || '')}</td>
                         <td class="text-right" style="font-weight:600;">${item.qty || 0}</td>
-                        <td><input type="number" class="audit-input" data-id="${item.id}" data-system="${item.qty || 0}" value="" placeholder="${item.qty || 0}" style="width:80px;padding:4px;text-align:right;" oninput="Warehouse.onAuditInput(this)"></td>
-                        <td class="text-right audit-diff" id="audit-diff-${item.id}">—</td>
+                        <td><input type="number" class="audit-input" data-id="${item.id}" data-system="${item.qty || 0}" value="${this.esc(actualValue)}" placeholder="${item.qty || 0}" style="width:88px;padding:4px;text-align:right;" oninput="Warehouse.onAuditInput(this)"></td>
+                        <td class="${rendered.qtyClass}" id="audit-diff-${item.id}">${rendered.qty}</td>
+                        <td class="${rendered.moneyClass}" id="audit-money-${item.id}">${rendered.money}</td>
                     </tr>`;
                 }).join('')}</tbody>
             </table>
         </div>`;
+        this._updateAuditSummary();
     },
 
     onAuditInput(el) {
-        const systemQty = parseInt(el.dataset.system) || 0;
-        const actualQty = parseInt(el.value);
-        const diffEl = document.getElementById('audit-diff-' + el.dataset.id);
-        if (!diffEl) return;
-
-        if (isNaN(actualQty) || el.value === '') {
-            diffEl.textContent = '—';
-            diffEl.className = 'text-right audit-diff';
-            return;
-        }
-
-        const diff = actualQty - systemQty;
-        if (diff === 0) {
-            diffEl.textContent = '0';
-            diffEl.className = 'text-right audit-diff audit-zero';
-        } else if (diff > 0) {
-            diffEl.textContent = '+' + diff;
-            diffEl.className = 'text-right audit-diff audit-positive';
+        const draft = this._ensureAuditDraft();
+        const key = String(Number(el && el.dataset && el.dataset.id || 0) || (el && el.dataset && el.dataset.id) || '');
+        if (!key) return;
+        const rawValue = String(el && typeof el.value !== 'undefined' ? el.value : '').trim();
+        if (rawValue === '') {
+            delete draft.values[key];
         } else {
-            diffEl.textContent = String(diff);
-            diffEl.className = 'text-right audit-diff audit-negative';
+            draft.values[key] = rawValue;
         }
+        this._persistAuditDraft();
+        this._updateAuditRowDiff(key);
     },
 
     async saveAuditResults() {
-        const inputs = document.querySelectorAll('.audit-input');
-        let adjusted = 0;
+        const draft = this._ensureAuditDraft();
+        const changes = [];
 
-        for (const input of inputs) {
-            if (input.value === '') continue;
-            const itemId = parseInt(input.dataset.id);
-            const systemQty = parseInt(input.dataset.system) || 0;
-            const actualQty = parseInt(input.value);
-            const diff = actualQty - systemQty;
+        Object.entries(draft.values || {}).forEach(([rawId, rawValue]) => {
+            if (rawValue === '' || rawValue == null) return;
+            const itemId = Number(rawId || 0);
+            const item = (this.allItems || []).find(entry => Number(entry && entry.id || 0) === itemId);
+            if (!item) return;
+            const meta = this._getAuditDiffMeta(item, rawValue);
+            if (meta.diff == null || Math.abs(meta.diff) < 0.000001) return;
+            changes.push({
+                item,
+                actualQty: meta.actualQty,
+                diff: meta.diff,
+                valueDiff: meta.valueDiff || 0,
+            });
+        });
 
-            if (diff === 0 || isNaN(diff)) continue;
-
-            await this.adjustStock(itemId, diff, 'adjustment', '', 'Инвентаризация', '');
-            adjusted++;
-        }
-
-        if (adjusted === 0) {
+        if (changes.length === 0) {
             App.toast('Нет изменений для сохранения');
             return;
         }
 
-        App.toast(`Инвентаризация: скорректировано ${adjusted} позиций`);
+        const stats = this._getAuditSummaryStats();
+        const confirmText = [
+            `Принять инвентаризацию?`,
+            `Позиции с расхождением: ${stats.changedPositions}`,
+            `Недостача: ${this._formatMoney(stats.shortageValue)}`,
+            `Излишек: ${this._formatMoney(stats.surplusValue)}`,
+            `Нетто: ${stats.netValue >= 0 ? '+' : '−'}${this._formatMoney(Math.abs(stats.netValue))}`,
+        ].join('\n');
+        if (!confirm(confirmText)) return;
+
+        const createdBy = App.getCurrentEmployeeName ? App.getCurrentEmployeeName() : '';
+        const details = [];
+        for (const change of changes) {
+            await this.adjustStock(
+                change.item.id,
+                change.diff,
+                'adjustment',
+                '',
+                `Инвентаризация: факт ${change.actualQty}, было ${parseFloat(change.item.qty) || 0}`,
+                createdBy,
+                { inventory_audit: true }
+            );
+            details.push(`${change.item.name}: ${change.diff > 0 ? '+' : ''}${change.diff} шт (${change.valueDiff >= 0 ? '+' : '−'}${this._formatMoney(Math.abs(change.valueDiff))})`);
+        }
+
+        const history = await loadWarehouseHistory();
+        history.push({
+            id: Date.now(),
+            item_id: 0,
+            item_name: 'Инвентаризация склада',
+            item_sku: '',
+            item_category: '',
+            type: 'inventory_audit',
+            qty_change: Math.round(stats.netQty * 100) / 100,
+            requested_qty_change: Math.round(stats.netQty * 100) / 100,
+            qty_before: 0,
+            qty_after: 0,
+            unit_price: 0,
+            total_cost_change: Math.round(stats.shortageValue * 100) / 100,
+            order_id: null,
+            order_name: '',
+            notes: `Скорректировано ${stats.changedPositions} поз.; недостача ${this._formatMoney(stats.shortageValue)}, излишек ${this._formatMoney(stats.surplusValue)}, нетто ${stats.netValue >= 0 ? '+' : '−'}${this._formatMoney(Math.abs(stats.netValue))}. Детали: ${details.slice(0, 12).join('; ')}`,
+            clamped: false,
+            created_at: new Date().toISOString(),
+            created_by: createdBy || '',
+            inventory_shortage_value: Math.round(stats.shortageValue * 100) / 100,
+            inventory_surplus_value: Math.round(stats.surplusValue * 100) / 100,
+            inventory_net_value: Math.round(stats.netValue * 100) / 100,
+            inventory_positions_changed: stats.changedPositions,
+        });
+        await saveWarehouseHistory(history);
+
+        localStorage.removeItem(this._auditDraftStorageKey());
+        this.auditDraft = this._defaultAuditDraft();
+        this._updateAuditDraftStatus();
+        this._updateAuditSummary();
+        App.toast(`Инвентаризация принята: ${stats.changedPositions} поз., недостача ${this._formatMoney(stats.shortageValue)}`);
         this.hideAudit();
         await this.load();
     },
