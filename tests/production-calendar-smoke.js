@@ -377,6 +377,34 @@ const workingBuffer = vm.runInContext(`
 `, ganttContext);
 assert.equal(workingBuffer, 1, 'Working-day buffer must ignore weekends and configured holidays');
 
+const splitWeekendBars = vm.runInContext(`
+    Gantt.renderOrderRow({
+        schedule: [
+            { date: '2026-03-20', phase: 'molding', hours: 8 },
+            { date: '2026-03-23', phase: 'molding', hours: 8 }
+        ]
+    }, new Date(2026, 2, 20), 6, 40)
+`, ganttContext);
+assert.equal(
+    (splitWeekendBars.match(/gantt-phase-bar/g) || []).length,
+    2,
+    'Same-phase work split by weekend must render as separate bars instead of spanning non-working days'
+);
+
+const mergedAdjacentBars = vm.runInContext(`
+    Gantt.renderOrderRow({
+        schedule: [
+            { date: '2026-03-24', phase: 'assembly', hours: 4 },
+            { date: '2026-03-25', phase: 'assembly', hours: 4 }
+        ]
+    }, new Date(2026, 2, 24), 3, 40)
+`, ganttContext);
+assert.equal(
+    (mergedAdjacentBars.match(/gantt-phase-bar/g) || []).length,
+    1,
+    'Consecutive working days in the same phase should stay merged into one bar'
+);
+
 const tightRisk = JSON.parse(JSON.stringify(vm.runInContext(`
     Gantt.getDeadlineRiskSummary({
         deadlineEnd: '2026-03-24',

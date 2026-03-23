@@ -997,7 +997,11 @@ const Gantt = {
         let currentBar = null;
 
         item.schedule.forEach(segment => {
-            if (currentBar && currentBar.phase === segment.phase) {
+            const previousEndDate = currentBar ? this.parseLocalDate(currentBar.endDate) : null;
+            const segmentDate = this.parseLocalDate(segment.date);
+            const dayGap = previousEndDate ? this.daysBetween(previousEndDate, segmentDate) : null;
+
+            if (currentBar && currentBar.phase === segment.phase && dayGap === 1) {
                 currentBar.endDate = segment.date;
                 currentBar.hours += segment.hours;
             } else {
