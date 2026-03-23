@@ -223,9 +223,9 @@ function smokeBuildPlanUsesHourBasedIndirectAndAssemblyHints(context) {
 
     assert.equal(result.planHours.hoursPlastic, 2);
     assert.equal(result.planHours.hoursTrim, 1);
-    assert.ok(Math.abs(result.planHours.hoursHardware - 9.53) < 0.01, 'blank orders should use current blank assembly norms instead of saved order hours');
-    assert.equal(result.planData.indirectProduction, 1253, 'indirect should always be recomputed from full total planned hours');
-    assert.equal(result.planMeta.salary_assembly.source, 'blank_norms');
+    assert.ok(Math.abs(result.planHours.hoursHardware - 10.99) < 0.01, 'blank orders should sum current blank assembly norms and manual saved assembly hours');
+    assert.equal(result.planData.indirectProduction, 1399, 'indirect should always be recomputed from full total planned hours');
+    assert.equal(result.planMeta.salary_assembly.source, 'blank_norms_plus_manual');
     assert.ok(Math.abs(result.planMeta.salary_assembly.derivedHours - 9.53) < 0.01, 'derived assembly hours should keep current line norm for diagnostics');
     assert.equal(result.planMeta.salary_assembly.savedHours, 1.46);
 
@@ -252,9 +252,10 @@ function smokeBuildPlanUsesHourBasedIndirectAndAssemblyHints(context) {
     })()`, context);
 
     const html = container.innerHTML;
-    assert.ok(html.includes('по текущим бланкам'), 'assembly row should explain that blank orders use current blank norms');
-    assert.ok(html.includes('в заказе было: 1,46ч'), 'assembly row should preserve old saved order hours for comparison');
-    assert.ok(html.includes('12,53ч × 100 ₽/ч'), 'indirect row should show hours formula for plan');
+    assert.ok(html.includes('бланки + вручную'), 'assembly row should explain that blank order assembly combines blank norms and manual manager hours');
+    assert.ok(html.includes('по текущим бланкам: 9,53ч'), 'assembly row should show current blank norm contribution');
+    assert.ok(html.includes('вручную добавлено: 1,46ч'), 'assembly row should show manual manager contribution');
+    assert.ok(html.includes('13,99ч × 100 ₽/ч'), 'indirect row should show hours formula for plan');
     assert.ok(html.includes('77ч × 100 ₽/ч'), 'indirect row should show actual hours formula for fact');
 }
 

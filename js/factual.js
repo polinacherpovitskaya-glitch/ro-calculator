@@ -646,7 +646,11 @@ async _loadFactSummaries() {
             (ri.item_type === 'hardware' && !!ri.hardware_from_template)
         );
         const savedAssemblyHours = this._num(order.production_hours_hardware);
-        if (savedAssemblyHours > 0 && !hasBlankAssemblyDriver) planHoursAssembly = savedAssemblyHours;
+        if (hasBlankAssemblyDriver) {
+            planHoursAssembly = derivedAssemblyHours + (savedAssemblyHours > 0 ? savedAssemblyHours : 0);
+        } else if (savedAssemblyHours > 0) {
+            planHoursAssembly = savedAssemblyHours;
+        }
         const savedPackagingHours = this._num(order.production_hours_packaging);
         if (savedPackagingHours > 0) planHoursPackaging = savedPackagingHours;
 
@@ -720,7 +724,9 @@ async _loadFactSummaries() {
                 },
                 salary_assembly: {
                     planHours: round2(planHoursAssembly),
-                    source: hasBlankAssemblyDriver ? 'blank_norms' : (savedAssemblyHours > 0 ? 'saved_order' : 'derived_items'),
+                    source: hasBlankAssemblyDriver
+                        ? (savedAssemblyHours > 0 ? 'blank_norms_plus_manual' : 'blank_norms')
+                        : (savedAssemblyHours > 0 ? 'saved_order' : 'derived_items'),
                     savedHours: round2(savedAssemblyHours),
                     derivedHours: round2(derivedAssemblyHours),
                 },
@@ -1216,6 +1222,12 @@ async _loadFactSummaries() {
         }
         if (!rowKey.startsWith('salary_')) return '';
         let detail = this.fmtHours(meta.planHours);
+        if (meta.source === 'blank_norms_plus_manual') {
+            detail += ' • бланки + вручную';
+            detail += `<br>по текущим бланкам: ${this.fmtHours(meta.derivedHours)}`;
+            detail += `<br>вручную добавлено: ${this.fmtHours(meta.savedHours)}`;
+            return detail;
+        }
         if (meta.source === 'blank_norms') {
             detail += ' • по текущим бланкам';
             if (this._num(meta.savedHours) > 0 && Math.abs(this._num(meta.savedHours) - this._num(meta.planHours)) > 0.05) {
