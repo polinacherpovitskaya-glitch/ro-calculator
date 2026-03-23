@@ -217,6 +217,8 @@ const DEFAULT_MOLD_CAPACITY_BY_TYPE = {
     customer: 1000,
     blank: 5000,
 };
+const BLANK_HARDWARE_FILTER_KEY = 'blank_hardware';
+const BLANK_HARDWARE_LOW_STOCK_THRESHOLD = 1000;
 const MOLD_USAGE_ALERT_STEP = 1000;
 const MOLD_USAGE_ALERT_ASSIGNEE_FALLBACKS = {
     lesha: 1772827635013,
@@ -239,6 +241,7 @@ const Warehouse = {
     editingShipmentId: null,
     shipmentItems: [],
     projectHardwareState: { checks: {} },
+    _blankHardwareWarehouseItemIds: new Set(),
 
     // ==========================================
     // LIFECYCLE
@@ -247,6 +250,7 @@ const Warehouse = {
     async load() {
         this.allItems = await loadWarehouseItems();
         await this._loadMoldOrders();
+        await this._refreshBlankHardwareWarehouseItemIds();
 
         // Auto-seed on first visit if warehouse is empty
         if (this.allItems.length === 0 && WAREHOUSE_SEED_DATA.length > 0) {
@@ -348,6 +352,7 @@ const Warehouse = {
             this.projectHardwareState.checks = {};
         }
         await this.reconcileProjectHardwareReservations();
+        await this._reconcileBlankHardwareLowStockAlerts();
         this.recalcReservations();
         this.populateCategoryFilter();
         this.renderStats();
@@ -413,7 +418,8 @@ const Warehouse = {
         sel.innerHTML = '<option value="">Все категории</option>' +
             WAREHOUSE_CATEGORIES.map(c =>
                 `<option value="${c.key}">${c.icon} ${c.label}</option>`
-            ).join('');
+            ).join('') +
+            `<option value="${BLANK_HARDWARE_FILTER_KEY}">⭐ Бланковая фурнитура</option>`;
     },
 
     // ==========================================
@@ -460,7 +466,11 @@ const Warehouse = {
         // Category filter
         const cat = document.getElementById('wh-filter-category');
         if (cat && cat.value) {
-            items = items.filter(i => i.category === cat.value);
+            if (cat.value === BLANK_HARDWARE_FILTER_KEY) {
+                items = items.filter(i => this._isBlankHardwareWarehouseItem(i));
+            } else {
+                items = items.filter(i => i.category === cat.value);
+            }
         }
 
         // Stock filter
@@ -524,6 +534,167 @@ const Warehouse = {
             .trim()
             .toLowerCase()
             .replace(/\s+/g, ' ');
+    },
+
+    _isWarehouseBackedHwBlank(blank) {
+        if (!blank || typeof blank !== 'object') return false;
+        if (blank.hw_form_source) return String(blank.hw_form_source) === 'warehouse';
+        return Number(blank.warehouse_item_id || 0) > 0;
+    },
+
+    async _refreshBlankHardwareWarehouseItemIds() {
+        if (typeof loadHwBlanks !== 'function') {
+            this._blankHardwareWarehouseItemIds = new Set();
+            return this._blankHardwareWarehouseItemIds;
+        }
+        try {
+            const blanks = await loadHwBlanks();
+            const ids = new Set(
+                (Array.isArray(blanks) ? blanks : [])
+                    .filter(blank => this._isWarehouseBackedHwBlank(blank))
+                    .map(blank => Number(blank.warehouse_item_id || 0))
+                    .filter(id => Number.isFinite(id) && id > 0)
+            );
+            this._blankHardwareWarehouseItemIds = ids;
+            return ids;
+        } catch (error) {
+            console.warn('[Warehouse] Failed to load blank hardware ids', error);
+            this._blankHardwareWarehouseItemIds = new Set();
+            return this._blankHardwareWarehouseItemIds;
+        }
+    },
+
+    _isBlankHardwareWarehouseItem(item) {
+        const itemId = Number(item && item.id || 0);
+        return Number.isFinite(itemId)
+            && itemId > 0
+            && this._blankHardwareWarehouseItemIds instanceof Set
+            && this._blankHardwareWarehouseItemIds.has(itemId);
+    },
+
+    _buildBlankHardwareLowStockTaskDraft(item, people, areaIds) {
+        const qty = Math.max(0, parseFloat(item && item.qty) || 0);
+        const unit = String(item && item.unit || 'шт').trim() || 'шт';
+        const category = WAREHOUSE_CATEGORIES.find(entry => entry.key === item.category);
+        const categoryLabel = category ? category.label : 'Склад';
+        const reporterId = Number(App && App.currentEmployeeId || 0) || null;
+        const reporterName = (App && typeof App.getCurrentEmployeeName === 'function'
+            ? App.getCurrentEmployeeName()
+            : '') || 'Система';
+
+        return {
+            title: `Заказать бланковую фурнитуру «${String(item && item.name || 'Без названия').trim()}»`,
+            description: [
+                'На складе осталось меньше 1000 шт бланковой фурнитуры. Нужно оформить повторный заказ.',
+                `Позиция: ${String(item && item.name || 'Без названия').trim()}`,
+                item && item.sku ? `SKU: ${String(item.sku).trim()}` : '',
+                `Категория: ${categoryLabel}`,
+                `Текущий остаток: ${qty.toLocaleString('ru-RU')} ${unit}`,
+                `Порог: ${BLANK_HARDWARE_LOW_STOCK_THRESHOLD.toLocaleString('ru-RU')} ${unit}`,
+            ].filter(Boolean).join('\n'),
+            status: 'incoming',
+            priority: 'high',
+            reporter_id: reporterId,
+            reporter_name: reporterName,
+            assignee_id: Number(people && people.anastasia && people.anastasia.id || 0) || null,
+            assignee_name: String(people && people.anastasia && people.anastasia.name || 'Анастасия'),
+            reviewer_id: null,
+            reviewer_name: '',
+            area_id: areaIds.warehouse || areaIds.general || null,
+            order_id: null,
+            project_id: null,
+            china_purchase_id: null,
+            warehouse_item_id: Number(item && item.id || 0) || null,
+            primary_context_kind: 'area',
+            due_date: this._todayYMD(),
+            due_time: null,
+            waiting_for_text: '',
+        };
+    },
+
+    async _createBlankHardwareLowStockTasks(items) {
+        if (!Array.isArray(items) || items.length === 0) return [];
+        if (typeof saveWorkTask !== 'function') return [];
+
+        const [employees, areas] = await Promise.all([
+            typeof loadEmployees === 'function' ? loadEmployees().catch(() => []) : [],
+            typeof loadWorkAreas === 'function' ? loadWorkAreas().catch(() => []) : [],
+        ]);
+        const people = this._resolveMoldUsageAlertPeople(employees);
+        const areaIds = {
+            warehouse: this._findAreaIdBySlug(areas, 'warehouse'),
+            general: this._findAreaIdBySlug(areas, 'general'),
+        };
+        const createdTasks = [];
+
+        for (const item of items) {
+            const draft = this._buildBlankHardwareLowStockTaskDraft(item, people, areaIds);
+            const saved = await saveWorkTask(draft, {
+                actor_id: App && App.currentEmployeeId || null,
+                actor_name: (App && typeof App.getCurrentEmployeeName === 'function'
+                    ? App.getCurrentEmployeeName()
+                    : '') || 'Система',
+            });
+            createdTasks.push(saved);
+            if (saved && saved.assignee_id && typeof TaskEvents !== 'undefined' && TaskEvents && typeof TaskEvents.emit === 'function') {
+                await TaskEvents.emit('task_assigned', {
+                    task_id: saved.id,
+                    project_id: saved.project_id || null,
+                    assignee_id: saved.assignee_id,
+                });
+            }
+        }
+
+        return createdTasks;
+    },
+
+    async _reconcileBlankHardwareLowStockAlerts() {
+        if (!Array.isArray(this.allItems) || this.allItems.length === 0) {
+            return { changed: false, alertsCreated: 0 };
+        }
+
+        const itemsToAlert = [];
+        let changed = false;
+        this.allItems = this.allItems.map(rawItem => {
+            if (!rawItem || typeof rawItem !== 'object') return rawItem;
+            const item = { ...rawItem };
+            const isBlankHardware = this._isBlankHardwareWarehouseItem(item);
+            const qty = Math.max(0, parseFloat(item.qty) || 0);
+            const isLow = isBlankHardware && qty < BLANK_HARDWARE_LOW_STOCK_THRESHOLD;
+            const alreadyAlerted = item.blank_hardware_low_stock_alerted === true;
+
+            if (isLow && !alreadyAlerted) {
+                item.blank_hardware_low_stock_alerted = true;
+                item.blank_hardware_low_stock_alert_qty = qty;
+                item.blank_hardware_low_stock_alerted_at = new Date().toISOString();
+                itemsToAlert.push(item);
+                changed = true;
+                return item;
+            }
+
+            if (!isLow && (
+                alreadyAlerted
+                || item.blank_hardware_low_stock_alert_qty != null
+                || item.blank_hardware_low_stock_alerted_at
+            )) {
+                delete item.blank_hardware_low_stock_alerted;
+                delete item.blank_hardware_low_stock_alert_qty;
+                delete item.blank_hardware_low_stock_alerted_at;
+                changed = true;
+            }
+
+            return item;
+        });
+
+        const createdTasks = await this._createBlankHardwareLowStockTasks(itemsToAlert);
+        if (changed) {
+            await saveWarehouseItems(this.allItems);
+        }
+
+        return {
+            changed,
+            alertsCreated: createdTasks.length,
+        };
     },
 
     _parseMoldAlertedThresholds(item) {

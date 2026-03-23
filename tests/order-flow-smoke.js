@@ -2197,6 +2197,116 @@ async function smokeMoldUsageThresholdCreatesTasksWithoutDuplicates(context) {
     vm.runInContext('delete globalThis.__thresholdMoldItems', context);
 }
 
+async function smokeBlankHardwareFilterAndLowStockAlerts(context) {
+    context.__savedTasks = [];
+    context.__taskEvents = [];
+    context.__warehouseItems = [
+        {
+            id: 501,
+            name: 'Кольцо 25 мм',
+            sku: 'RING-25',
+            category: 'rings',
+            unit: 'шт',
+            qty: 900,
+            price_per_unit: 12,
+        },
+        {
+            id: 601,
+            name: 'Обычный карабин',
+            sku: 'KAR-01',
+            category: 'carabiners',
+            unit: 'шт',
+            qty: 500,
+            price_per_unit: 25,
+        },
+    ];
+    context.__warehouseReservations = [];
+    context.__warehouseHistory = [];
+    context.loadWarehouseItems = async () => clone(context.__warehouseItems);
+    context.saveWarehouseItems = async (items) => {
+        context.__warehouseItems = clone(items);
+    };
+    context.loadWarehouseReservations = async () => clone(context.__warehouseReservations);
+    context.saveWarehouseReservations = async (reservations) => {
+        context.__warehouseReservations = clone(reservations);
+    };
+    context.loadWarehouseHistory = async () => clone(context.__warehouseHistory);
+    context.saveWarehouseHistory = async (history) => {
+        context.__warehouseHistory = clone(history);
+    };
+    context.loadHwBlanks = async () => ([
+        {
+            id: 7001,
+            name: 'Blank ring binding',
+            warehouse_item_id: 501,
+            hw_form_source: 'warehouse',
+        },
+    ]);
+    context.loadEmployees = async () => ([
+        { id: 1772827635013, name: 'Леша' },
+        { id: 1741700002000, name: 'Анастасия' },
+    ]);
+    context.loadWorkAreas = async () => ([
+        { id: 9103, slug: 'warehouse', name: 'Склад' },
+        { id: 9107, slug: 'general', name: 'Общее' },
+    ]);
+    context.saveWorkTask = async (task) => {
+        const saved = {
+            id: context.__savedTasks.length + 1,
+            ...clone(task),
+        };
+        context.__savedTasks.push(saved);
+        return saved;
+    };
+    context.TaskEvents = {
+        emit: async (eventType, payload) => {
+            context.__taskEvents.push({ eventType, payload: clone(payload) });
+            return { id: context.__taskEvents.length };
+        },
+    };
+
+    vm.runInContext(`
+        Warehouse.allItems = ${JSON.stringify(context.__warehouseItems)};
+        Warehouse._blankHardwareWarehouseItemIds = new Set();
+        Warehouse.renderTable = (items) => {
+            globalThis.__blankHardwareRenderedIds = items.map(item => Number(item.id));
+        };
+        document.getElementById('wh-filter-category').value = 'blank_hardware';
+        document.getElementById('wh-filter-stock').value = '';
+        document.getElementById('wh-search').value = '';
+        document.getElementById('wh-sort').value = 'name';
+    `, context);
+
+    await vm.runInContext(`Warehouse._refreshBlankHardwareWarehouseItemIds()`, context);
+    vm.runInContext(`Warehouse.filterAndRender()`, context);
+
+    assert.deepEqual(clone(vm.runInContext(`globalThis.__blankHardwareRenderedIds`, context)), [501]);
+
+    await vm.runInContext(`Warehouse._reconcileBlankHardwareLowStockAlerts()`, context);
+
+    assert.equal(context.__warehouseItems[0].blank_hardware_low_stock_alerted, true);
+    assert.equal(context.__savedTasks.length, 1);
+    assert.match(context.__savedTasks[0].title, /Заказать бланковую фурнитуру/);
+    assert.equal(context.__savedTasks[0].assignee_id, 1741700002000);
+    assert.equal(context.__savedTasks[0].warehouse_item_id, 501);
+    assert.equal(context.__taskEvents.length, 1);
+
+    await vm.runInContext(`Warehouse._reconcileBlankHardwareLowStockAlerts()`, context);
+    assert.equal(context.__savedTasks.length, 1);
+
+    context.__warehouseItems[0].qty = 1200;
+    vm.runInContext(`Warehouse.allItems = ${JSON.stringify(context.__warehouseItems)}`, context);
+    await vm.runInContext(`Warehouse._reconcileBlankHardwareLowStockAlerts()`, context);
+    assert.equal(Boolean(context.__warehouseItems[0].blank_hardware_low_stock_alerted), false);
+
+    context.__warehouseItems[0].qty = 800;
+    vm.runInContext(`Warehouse.allItems = ${JSON.stringify(context.__warehouseItems)}`, context);
+    await vm.runInContext(`Warehouse._reconcileBlankHardwareLowStockAlerts()`, context);
+    assert.equal(context.__savedTasks.length, 2);
+
+    vm.runInContext(`delete globalThis.__blankHardwareRenderedIds`, context);
+}
+
 async function smokeProjectHardwareLegacyStatusRepair(context) {
     const order = {
         id: 77,
@@ -2467,6 +2577,7 @@ async function main() {
     await smokeProjectHardwareLegacyQtyAndStringIdDeduction(context);
     await smokeCompletedOrderConsumesBlankMoldCapacity(context);
     await smokeMoldUsageThresholdCreatesTasksWithoutDuplicates(context);
+    await smokeBlankHardwareFilterAndLowStockAlerts(context);
     await smokeProjectHardwareLegacyStatusRepair(context);
     await smokeProjectHardwareLegacyAndCollectedNetting(context);
     await smokeOrderDetailColorRendering(context);
