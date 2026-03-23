@@ -4565,6 +4565,46 @@ const Warehouse = {
         return `${rounded.toLocaleString('ru-RU')} ₽`;
     },
 
+    _normalizeReadyGoodsLocation(value) {
+        return String(value || '').trim().toLowerCase() === 'partner' ? 'partner' : 'our';
+    },
+
+    _readyGoodsLocationLabel(value) {
+        return this._normalizeReadyGoodsLocation(value) === 'partner' ? 'Склад партнёра' : 'Наш склад';
+    },
+
+    _readyGoodsLocationEmoji(value) {
+        return this._normalizeReadyGoodsLocation(value) === 'partner' ? '🤝' : '🏠';
+    },
+
+    _normalizeReadyGoodsItem(item) {
+        if (!item || typeof item !== 'object') return item;
+        return {
+            ...item,
+            location_type: this._normalizeReadyGoodsLocation(item.location_type),
+        };
+    },
+
+    _normalizeSalesRecord(record) {
+        if (!record || typeof record !== 'object') return record;
+        return {
+            ...record,
+            location_type: this._normalizeReadyGoodsLocation(record.location_type),
+        };
+    },
+
+    _resolveReadyGoodsLocation(orderData = null) {
+        const candidates = [
+            orderData?.order?.ready_goods_location,
+            orderData?.order?.warehouse_location,
+            orderData?.order?.stock_location,
+            orderData?.order?.delivery_stock_location,
+            orderData?.order?.partner_stock ? 'partner' : '',
+        ];
+        const found = candidates.find(value => String(value || '').trim());
+        return this._normalizeReadyGoodsLocation(found);
+    },
+
     async _getReadyGoodsFrozenAmount() {
         const rg = await loadReadyGoods();
         return rg.reduce((sum, row) => {
@@ -4584,8 +4624,8 @@ const Warehouse = {
         const filtersCard = document.getElementById('wh-filters-card');
         if (filtersCard) filtersCard.style.display = 'none';
 
-        const rg = await loadReadyGoods();
-        const salesRecords = await loadSalesRecords();
+        const rg = (await loadReadyGoods()).map(item => this._normalizeReadyGoodsItem(item));
+        const salesRecords = (await loadSalesRecords()).map(item => this._normalizeSalesRecord(item));
         const sourceStatus = typeof getReadyGoodsSourceStatus === 'function' ? getReadyGoodsSourceStatus() : null;
         const sourceItems = sourceStatus ? [sourceStatus.ready_goods, sourceStatus.ready_goods_history, sourceStatus.sales_records].filter(Boolean) : [];
         const usesSharedSource = sourceItems.length > 0 && sourceItems.every(item => item.source === 'shared-settings');
@@ -4602,8 +4642,15 @@ const Warehouse = {
             : '';
 
         // Stats
-        const totalQty = rg.reduce((s, i) => s + (parseFloat(i.qty) || 0), 0);
-        const totalValue = rg.reduce((s, i) => s + (parseFloat(i.qty) || 0) * (parseFloat(i.cost_per_unit) || 0), 0);
+        const positiveRg = rg.filter(i => (parseFloat(i.qty) || 0) > 0);
+        const ourItems = positiveRg.filter(item => this._normalizeReadyGoodsLocation(item.location_type) === 'our');
+        const partnerItems = positiveRg.filter(item => this._normalizeReadyGoodsLocation(item.location_type) === 'partner');
+        const totalQty = positiveRg.reduce((s, i) => s + (parseFloat(i.qty) || 0), 0);
+        const totalValue = positiveRg.reduce((s, i) => s + (parseFloat(i.qty) || 0) * (parseFloat(i.cost_per_unit) || 0), 0);
+        const ourQty = ourItems.reduce((s, i) => s + (parseFloat(i.qty) || 0), 0);
+        const ourValue = ourItems.reduce((s, i) => s + (parseFloat(i.qty) || 0) * (parseFloat(i.cost_per_unit) || 0), 0);
+        const partnerQty = partnerItems.reduce((s, i) => s + (parseFloat(i.qty) || 0), 0);
+        const partnerValue = partnerItems.reduce((s, i) => s + (parseFloat(i.qty) || 0) * (parseFloat(i.cost_per_unit) || 0), 0);
         const totalSalesRevenue = salesRecords.reduce((s, r) => s + (parseFloat(r.revenue) || 0), 0);
         const totalSalesCost = salesRecords.reduce((s, r) => s + (parseFloat(r.qty) || 0) * (parseFloat(r.cost_per_unit) || 0), 0);
         const totalProfit = totalSalesRevenue - totalSalesCost;
@@ -4612,12 +4659,20 @@ const Warehouse = {
         ${sourceHtml}
         <div class="stats-grid" style="margin-bottom:16px;">
             <div class="stat-card">
-                <div class="stat-label">На складе (шт)</div>
-                <div class="stat-value">${totalQty}</div>
+                <div class="stat-label">Наш склад (шт)</div>
+                <div class="stat-value">${ourQty}</div>
             </div>
             <div class="stat-card">
-                <div class="stat-label">Стоимость на складе</div>
-                <div class="stat-value">${this._formatMoney(totalValue)}</div>
+                <div class="stat-label">Стоимость на нашем складе</div>
+                <div class="stat-value">${this._formatMoney(ourValue)}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Склад партнёра (шт)</div>
+                <div class="stat-value">${partnerQty}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Стоимость у партнёра</div>
+                <div class="stat-value">${this._formatMoney(partnerValue)}</div>
             </div>
             <div class="stat-card">
                 <div class="stat-label">Выручка продаж</div>
@@ -4628,6 +4683,9 @@ const Warehouse = {
                 <div class="stat-value" style="color:${totalProfit >= 0 ? 'var(--green)' : 'var(--red)'}">${this._formatMoney(totalProfit)}</div>
             </div>
         </div>
+        <div style="font-size:12px;color:var(--text-muted);margin:-4px 0 16px;">
+            Всего готовой продукции: <strong>${totalQty} шт</strong> · общая стоимость <strong>${this._formatMoney(totalValue)}</strong>
+        </div>
 
         <div style="display:flex;gap:8px;margin-bottom:12px;">
             <button class="btn btn-primary" onclick="Warehouse.showWriteOffDialog()" ${readyGoodsAvailable ? '' : 'disabled title="Нужна общая база готовой продукции"'}>📤 Списать продажу</button>
@@ -4636,49 +4694,79 @@ const Warehouse = {
         `;
 
         // Ready goods table
-        if (rg.length === 0) {
+        if (positiveRg.length === 0) {
             html += `<div class="card"><div class="empty-state">
                 <div class="empty-icon">📦</div>
                 <p>Нет готовой продукции на складе</p>
                 <p style="font-size:12px;color:var(--text-muted);">${readyGoodsAvailable ? 'Товары появятся здесь после ручной приёмки B2C / партнёрского стока.' : 'Как только восстановится shared-база, здесь снова появится live-остаток готовой продукции.'}</p>
             </div></div>`;
         } else {
-            const rows = rg.filter(i => (parseFloat(i.qty) || 0) > 0).map(item => {
-                const cost = parseFloat(item.cost_per_unit) || 0;
-                const qty = parseFloat(item.qty) || 0;
-                return `<tr>
-                    <td style="font-weight:600;">${this.esc(item.product_name || '—')}</td>
-                    <td style="font-size:12px;color:var(--text-muted);">${this.esc(item.order_name || '—')}</td>
-                    <td style="font-size:12px;">${this.esc(item.marketplace_set || '—')}</td>
-                    <td class="text-right">${qty}</td>
-                    <td class="text-right">${this._formatMoney(cost)}</td>
-                    <td class="text-right">${this._formatMoney(qty * cost)}</td>
-                    <td style="font-size:11px;color:var(--text-muted);">${item.added_at ? new Date(item.added_at).toLocaleDateString('ru-RU') : '—'}</td>
-                </tr>`;
-            }).join('');
+            const renderLocationSection = (locationType, title) => {
+                const items = positiveRg.filter(item => this._normalizeReadyGoodsLocation(item.location_type) === locationType);
+                const sectionQty = items.reduce((sum, item) => sum + (parseFloat(item.qty) || 0), 0);
+                const sectionValue = items.reduce((sum, item) => sum + (parseFloat(item.qty) || 0) * (parseFloat(item.cost_per_unit) || 0), 0);
+                if (items.length === 0) {
+                    return `
+                        <div class="card" style="margin-bottom:16px;">
+                            <div style="padding:16px 18px 12px;">
+                                <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+                                    <h3 style="margin:0;">${title}</h3>
+                                    <div style="font-size:12px;color:var(--text-muted);">0 шт · ${this._formatMoney(0)}</div>
+                                </div>
+                                <div style="font-size:13px;color:var(--text-muted);margin-top:10px;">Здесь пока нет остатков.</div>
+                            </div>
+                        </div>
+                    `;
+                }
+                const rows = items.map(item => {
+                    const cost = parseFloat(item.cost_per_unit) || 0;
+                    const qty = parseFloat(item.qty) || 0;
+                    return `<tr>
+                        <td style="font-weight:600;">${this.esc(item.product_name || '—')}</td>
+                        <td style="font-size:12px;color:var(--text-muted);">${this.esc(item.order_name || '—')}</td>
+                        <td style="font-size:12px;">${this.esc(item.marketplace_set || '—')}</td>
+                        <td class="text-right">${qty}</td>
+                        <td class="text-right">${this._formatMoney(cost)}</td>
+                        <td class="text-right">${this._formatMoney(qty * cost)}</td>
+                        <td style="font-size:11px;color:var(--text-muted);">${item.added_at ? new Date(item.added_at).toLocaleDateString('ru-RU') : '—'}</td>
+                    </tr>`;
+                }).join('');
+                return `
+                    <div class="card" style="margin-bottom:16px;">
+                        <div style="padding:16px 18px 6px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+                            <h3 style="margin:0;">${title}</h3>
+                            <div style="font-size:12px;color:var(--text-muted);">${sectionQty} шт · ${this._formatMoney(sectionValue)}</div>
+                        </div>
+                        <div class="table-wrap"><table>
+                            <thead><tr>
+                                <th>Товар</th>
+                                <th>Из заказа</th>
+                                <th>Набор</th>
+                                <th class="text-right">Кол-во</th>
+                                <th class="text-right">Себестоимость/шт</th>
+                                <th class="text-right">Сумма</th>
+                                <th>Дата</th>
+                            </tr></thead>
+                            <tbody>${rows}</tbody>
+                        </table></div>
+                    </div>
+                `;
+            };
 
-            html += `<div class="card" style="margin-bottom:16px;"><div class="table-wrap"><table>
-                <thead><tr>
-                    <th>Товар</th>
-                    <th>Из заказа</th>
-                    <th>Набор</th>
-                    <th class="text-right">Кол-во</th>
-                    <th class="text-right">Себестоимость/шт</th>
-                    <th class="text-right">Сумма</th>
-                    <th>Дата</th>
-                </tr></thead>
-                <tbody>${rows}</tbody>
-            </table></div></div>`;
+            html += renderLocationSection('our', `${this._readyGoodsLocationEmoji('our')} Наш склад`);
+            html += renderLocationSection('partner', `${this._readyGoodsLocationEmoji('partner')} Склад партнёра`);
         }
 
         // Sales history
         if (salesRecords.length > 0) {
             const salesRows = [...salesRecords].sort((a, b) => new Date(b.date) - new Date(a.date)).map(r => {
+                const locationLabel = this._readyGoodsLocationLabel(r.location_type);
                 const channel = r.channel === 'marketplace' ? '🏪 Маркетплейс' : (r.channel === 'website' ? '🌐 Сайт' : '📋 Другое');
                 const profit = (parseFloat(r.revenue) || 0) - (parseFloat(r.qty) || 0) * (parseFloat(r.cost_per_unit) || 0);
                 return `<tr>
                     <td style="font-size:12px;">${r.date ? new Date(r.date).toLocaleDateString('ru-RU') : '—'}</td>
                     <td style="font-weight:600;">${this.esc(r.product_name || '—')}</td>
+                    <td style="font-size:12px;">${this.esc(locationLabel)}</td>
                     <td>${channel}</td>
                     <td class="text-right">${r.qty || 0}</td>
                     <td class="text-right">${this._formatMoney(r.revenue || 0)}</td>
@@ -4693,6 +4781,7 @@ const Warehouse = {
                 <thead><tr>
                     <th>Дата</th>
                     <th>Товар</th>
+                    <th>Со склада</th>
                     <th>Канал</th>
                     <th class="text-right">Кол-во</th>
                     <th class="text-right">Выручка</th>
@@ -4712,7 +4801,9 @@ const Warehouse = {
             App.toast('Готовая продукция недоступна без общей базы');
             return;
         }
-        const rg = (await loadReadyGoods()).filter(i => (parseFloat(i.qty) || 0) > 0);
+        const rg = (await loadReadyGoods())
+            .map(item => this._normalizeReadyGoodsItem(item))
+            .filter(i => (parseFloat(i.qty) || 0) > 0);
         if (rg.length === 0) {
             App.toast('Нет товаров для списания');
             return;
@@ -4722,7 +4813,7 @@ const Warehouse = {
         if (existing) existing.remove();
 
         const opts = rg.map((item, i) => {
-            const label = `${item.product_name} (${item.qty} шт, себест. ${this._formatMoney(item.cost_per_unit || 0)})`;
+            const label = `${item.product_name} · ${this._readyGoodsLocationLabel(item.location_type)} (${item.qty} шт, себест. ${this._formatMoney(item.cost_per_unit || 0)})`;
             return `<option value="${i}">${this.esc(label)}</option>`;
         }).join('');
 
@@ -4782,7 +4873,9 @@ const Warehouse = {
             App.toast('Готовая продукция недоступна без общей базы');
             return;
         }
-        const rg = (await loadReadyGoods()).filter(i => (parseFloat(i.qty) || 0) > 0);
+        const rg = (await loadReadyGoods())
+            .map(item => this._normalizeReadyGoodsItem(item))
+            .filter(i => (parseFloat(i.qty) || 0) > 0);
         const idx = parseInt(document.getElementById('rg-wo-product').value);
         const item = rg[idx];
         if (!item) { App.toast('Товар не найден'); return; }
@@ -4797,8 +4890,8 @@ const Warehouse = {
         const notes = (document.getElementById('rg-wo-notes').value || '').trim();
 
         // Deduct from ready goods
-        const allRg = await loadReadyGoods();
-        const rgItem = allRg.find(i => i.id === item.id);
+        const allRg = (await loadReadyGoods()).map(entry => this._normalizeReadyGoodsItem(entry));
+        const rgItem = allRg.find(i => Number(i.id) === Number(item.id));
         if (rgItem) {
             rgItem.qty = Math.max(0, (rgItem.qty || 0) - qty);
         }
@@ -4813,6 +4906,7 @@ const Warehouse = {
             order_name: item.order_name || '',
             marketplace_set: item.marketplace_set || '',
             channel,
+            location_type: this._normalizeReadyGoodsLocation(item.location_type),
             qty,
             cost_per_unit: item.cost_per_unit || 0,
             revenue,
@@ -4829,6 +4923,7 @@ const Warehouse = {
             id: Date.now(),
             type: 'writeoff',
             product_name: item.product_name,
+            location_type: this._normalizeReadyGoodsLocation(item.location_type),
             qty: -qty,
             channel,
             revenue,
@@ -4880,6 +4975,13 @@ const Warehouse = {
                     <input id="rg-add-cost" type="number" class="calc-input" value="0" min="0" step="0.01" style="width:100%;">
                 </div>
             </div>
+            <div style="margin-bottom:12px;">
+                <label style="display:block;font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:4px;">Куда принимаем</label>
+                <select id="rg-add-location" class="calc-input" style="width:100%;">
+                    <option value="our">🏠 Наш склад</option>
+                    <option value="partner">🤝 Склад партнёра</option>
+                </select>
+            </div>
             <div style="margin-bottom:16px;">
                 <label style="display:block;font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:4px;">Набор / Заметка</label>
                 <input id="rg-add-set" type="text" class="calc-input" placeholder="Название набора" style="width:100%;">
@@ -4902,15 +5004,17 @@ const Warehouse = {
         const qty = parseInt(document.getElementById('rg-add-qty').value) || 0;
         if (qty <= 0) { App.toast('Укажите количество'); return; }
         const cost = parseFloat(document.getElementById('rg-add-cost').value) || 0;
+        const locationType = this._normalizeReadyGoodsLocation(document.getElementById('rg-add-location').value);
         const setName = (document.getElementById('rg-add-set').value || '').trim();
 
-        const rg = await loadReadyGoods();
+        const rg = (await loadReadyGoods()).map(item => this._normalizeReadyGoodsItem(item));
         rg.push({
             id: Date.now(),
             product_name: name,
             order_name: 'Ручное добавление',
             order_id: null,
             marketplace_set: setName,
+            location_type: locationType,
             qty,
             cost_per_unit: cost,
             added_at: new Date().toISOString(),
@@ -4923,8 +5027,9 @@ const Warehouse = {
             id: Date.now(),
             type: 'manual_add',
             product_name: name,
+            location_type: locationType,
             qty,
-            notes: `Ручное добавление: ${name} × ${qty}`,
+            notes: `Ручное добавление (${this._readyGoodsLocationLabel(locationType)}): ${name} × ${qty}`,
             date: new Date().toISOString(),
             created_by: App.getCurrentEmployeeName() || '',
         });
@@ -4942,6 +5047,7 @@ const Warehouse = {
         const data = await loadOrder(orderId);
         if (!data || !data.items) return;
         if ((data.order?.client_name || '').toUpperCase() !== 'B2C') return 0;
+        const locationType = this._resolveReadyGoodsLocation(data);
 
         await Promise.all([
             loadReadyGoods(),
@@ -4950,7 +5056,7 @@ const Warehouse = {
         ]);
         if (!this._isReadyGoodsSharedAvailable()) return 0;
 
-        const rg = await loadReadyGoods();
+        const rg = (await loadReadyGoods()).map(item => this._normalizeReadyGoodsItem(item));
         const history = await loadReadyGoodsHistory();
         const nowIso = new Date().toISOString();
         const employee = App.getCurrentEmployeeName() || '';
@@ -4971,6 +5077,7 @@ const Warehouse = {
                 order_name: orderName || 'Заказ',
                 order_id: orderId,
                 marketplace_set: item.marketplace_set_name || '',
+                location_type: locationType,
                 qty,
                 cost_per_unit: costPerUnit,
                 added_at: nowIso,
@@ -4982,9 +5089,10 @@ const Warehouse = {
                 type: 'from_order',
                 product_name: item.product_name || 'Товар',
                 order_name: orderName,
+                location_type: locationType,
                 qty,
                 cost_per_unit: costPerUnit,
-                notes: `Из заказа «${orderName}»: ${item.product_name} × ${qty}`,
+                notes: `Из заказа «${orderName}» → ${this._readyGoodsLocationLabel(locationType)}: ${item.product_name} × ${qty}`,
                 date: nowIso,
                 created_by: employee,
             });
@@ -5000,7 +5108,7 @@ const Warehouse = {
     },
 
     async removeOrderFromReadyGoods(orderId, orderName, nextStatus) {
-        const readyGoods = await loadReadyGoods();
+        const readyGoods = (await loadReadyGoods()).map(item => this._normalizeReadyGoodsItem(item));
         const history = await loadReadyGoodsHistory();
         const nowIso = new Date().toISOString();
         const employee = App.getCurrentEmployeeName() || '';
@@ -5014,9 +5122,10 @@ const Warehouse = {
                     type: 'return_to_order',
                     product_name: item.product_name || 'Товар',
                     order_name: item.order_name || orderName || 'Заказ',
+                    location_type: this._normalizeReadyGoodsLocation(item.location_type),
                     qty: -(parseFloat(item.qty) || 0),
                     cost_per_unit: parseFloat(item.cost_per_unit) || 0,
-                    notes: `Возврат из готовой продукции: ${App.statusLabel('completed')} → ${App.statusLabel(nextStatus)}`,
+                    notes: `Возврат из ${this._readyGoodsLocationLabel(item.location_type)}: ${App.statusLabel('completed')} → ${App.statusLabel(nextStatus)}`,
                     date: nowIso,
                     created_by: employee,
                 });

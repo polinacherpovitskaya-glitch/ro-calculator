@@ -964,6 +964,7 @@ async function smokeReadyGoodsSalesAndManualAdd(context) {
             order_name: 'Smoke Order',
             order_id: 42,
             marketplace_set: 'Smoke Set',
+            location_type: 'partner',
             qty: 7,
             cost_per_unit: 19,
             added_at: '2026-03-15T00:00:00.000Z',
@@ -991,17 +992,20 @@ async function smokeReadyGoodsSalesAndManualAdd(context) {
     assert.equal(context.__salesRecords.length, 1);
     assert.equal(context.__salesRecords[0].ready_goods_id, 11);
     assert.equal(context.__salesRecords[0].channel, 'marketplace');
+    assert.equal(context.__salesRecords[0].location_type, 'partner');
     assert.equal(context.__salesRecords[0].qty, 3);
     assert.equal(context.__salesRecords[0].revenue, 1500);
     assert.equal(context.__salesRecords[0].payout, 1200);
     assert.equal(context.__readyGoodsHistory.length, 1);
     assert.equal(context.__readyGoodsHistory[0].type, 'writeoff');
+    assert.equal(context.__readyGoodsHistory[0].location_type, 'partner');
     assert.equal(context.__readyGoodsHistory[0].qty, -3);
     assert.match(context.__readyGoodsHistory[0].notes, /WB test/);
 
     context.document.getElementById('rg-add-name').value = 'Manual Smoke Product';
     context.document.getElementById('rg-add-qty').value = '5';
     context.document.getElementById('rg-add-cost').value = '22.5';
+    context.document.getElementById('rg-add-location').value = 'our';
     context.document.getElementById('rg-add-set').value = 'Manual Set';
 
     await vm.runInContext('Warehouse.doAddReadyGoods()', context);
@@ -1011,10 +1015,18 @@ async function smokeReadyGoodsSalesAndManualAdd(context) {
     assert.equal(manualItem.qty, 5);
     assert.equal(manualItem.cost_per_unit, 22.5);
     assert.equal(manualItem.marketplace_set, 'Manual Set');
+    assert.equal(manualItem.location_type, 'our');
     assert.equal(context.__readyGoodsHistory.length, 2);
     assert.equal(context.__readyGoodsHistory[1].type, 'manual_add');
+    assert.equal(context.__readyGoodsHistory[1].location_type, 'our');
     assert.equal(context.__readyGoodsHistory[1].qty, 5);
     assert.match(context.__readyGoodsHistory[1].notes, /Ручное добавление/);
+
+    await vm.runInContext('Warehouse.renderReadyGoodsView()', context);
+    const readyGoodsHtml = String(context.document.getElementById('wh-content').innerHTML || '');
+    assert.match(readyGoodsHtml, /Наш склад/);
+    assert.match(readyGoodsHtml, /Склад партнёра/);
+    assert.match(readyGoodsHtml, /Со склада/);
 }
 
 async function smokeChinaShipmentMetadata(context) {
