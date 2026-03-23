@@ -896,6 +896,11 @@ async function smokeLegacyPendantRestore(context) {
 }
 
 async function smokeReadyGoodsRollback(context) {
+    context.getReadyGoodsSourceStatus = () => ({
+        ready_goods: { source: 'shared-settings' },
+        ready_goods_history: { source: 'shared-settings' },
+        sales_records: { source: 'shared-settings' },
+    });
     context.__readyGoods = [
         { id: 1, order_id: 42, order_name: 'Smoke Order', product_name: 'Ready Item', qty: 10, cost_per_unit: 15 },
         { id: 2, order_id: 77, order_name: 'Another Order', product_name: 'Keep Item', qty: 3, cost_per_unit: 9 },
@@ -932,10 +937,11 @@ async function smokeReadyGoodsRollback(context) {
             };
         `, context);
 
-        await vm.runInContext(`Orders._syncReadyGoodsByStatus(42, { order_name: 'Smoke Order' }, 'delivery', 'completed')`, context);
+        await vm.runInContext(`Orders._syncReadyGoodsByStatus(42, { order_name: 'Smoke Order', client_name: 'Acme' }, 'delivery', 'completed')`, context);
+        await vm.runInContext(`Orders._syncReadyGoodsByStatus(77, { order_name: 'B2C Stock', client_name: 'B2C' }, 'delivery', 'completed')`, context);
         await vm.runInContext(`Orders._syncReadyGoodsByStatus(42, { order_name: 'Smoke Order' }, 'completed', 'delivery')`, context);
 
-        assert.deepEqual(clone(context.__moveCalls), [{ orderId: 42, orderName: 'Smoke Order' }]);
+        assert.deepEqual(clone(context.__moveCalls), [{ orderId: 77, orderName: 'B2C Stock' }]);
         assert.deepEqual(clone(context.__removeCalls), [{ orderId: 42, orderName: 'Smoke Order', nextStatus: 'delivery' }]);
     } finally {
         vm.runInContext(`
@@ -946,6 +952,11 @@ async function smokeReadyGoodsRollback(context) {
 }
 
 async function smokeReadyGoodsSalesAndManualAdd(context) {
+    context.getReadyGoodsSourceStatus = () => ({
+        ready_goods: { source: 'shared-settings' },
+        ready_goods_history: { source: 'shared-settings' },
+        sales_records: { source: 'shared-settings' },
+    });
     context.__readyGoods = [
         {
             id: 11,

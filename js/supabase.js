@@ -3541,11 +3541,12 @@ const READY_GOODS_SETTINGS_KEYS = Object.freeze({
 
 const READY_GOODS_SOURCE_SHARED = 'shared-settings';
 const READY_GOODS_SOURCE_LOCAL = 'local-cache';
+const READY_GOODS_SOURCE_UNAVAILABLE = 'shared-unavailable';
 
 const _readyGoodsSourceStatus = {
-    ready_goods: { source: READY_GOODS_SOURCE_LOCAL, detail: 'bootstrap', updated_at: null },
-    ready_goods_history: { source: READY_GOODS_SOURCE_LOCAL, detail: 'bootstrap', updated_at: null },
-    sales_records: { source: READY_GOODS_SOURCE_LOCAL, detail: 'bootstrap', updated_at: null },
+    ready_goods: { source: READY_GOODS_SOURCE_UNAVAILABLE, detail: 'bootstrap', updated_at: null },
+    ready_goods_history: { source: READY_GOODS_SOURCE_UNAVAILABLE, detail: 'bootstrap', updated_at: null },
+    sales_records: { source: READY_GOODS_SOURCE_UNAVAILABLE, detail: 'bootstrap', updated_at: null },
 };
 
 function _cloneReadyGoodsPayload(value) {
@@ -3579,8 +3580,6 @@ function getReadyGoodsSourceStatus() {
 
 async function _loadReadyGoodsStore(storeKey, localKey, fallbackValue = []) {
     const safeFallback = _cloneReadyGoodsPayload(fallbackValue);
-    const local = _normalizeReadyGoodsPayload(getLocal(localKey), safeFallback);
-
     if (isSupabaseReady() && !_hasSupabaseAccessProblem()) {
         const remote = await _loadJsonSetting(READY_GOODS_SETTINGS_KEYS[storeKey], null);
         if (remote !== null) {
@@ -3590,34 +3589,38 @@ async function _loadReadyGoodsStore(storeKey, localKey, fallbackValue = []) {
             return normalized;
         }
 
-        const seedPayload = _cloneReadyGoodsPayload(local);
+        const seedPayload = _cloneReadyGoodsPayload(safeFallback);
         await _saveJsonSetting(READY_GOODS_SETTINGS_KEYS[storeKey], seedPayload);
         if (!_hasSupabaseAccessProblem()) {
-            _setReadyGoodsSourceStatus(storeKey, READY_GOODS_SOURCE_SHARED, Array.isArray(local) && local.length > 0 ? 'seeded-from-local' : 'seeded-empty');
+            _setReadyGoodsSourceStatus(storeKey, READY_GOODS_SOURCE_SHARED, 'seeded-empty');
+            setLocal(localKey, seedPayload);
+            return seedPayload;
         } else {
-            _setReadyGoodsSourceStatus(storeKey, READY_GOODS_SOURCE_LOCAL, 'shared-unavailable');
+            _setReadyGoodsSourceStatus(storeKey, READY_GOODS_SOURCE_UNAVAILABLE, 'shared-unavailable');
+            return _cloneReadyGoodsPayload(safeFallback);
         }
-        setLocal(localKey, seedPayload);
-        return seedPayload;
     }
 
-    _setReadyGoodsSourceStatus(storeKey, READY_GOODS_SOURCE_LOCAL, isSupabaseReady() ? 'shared-unavailable' : 'local-only');
-    return local;
+    _setReadyGoodsSourceStatus(storeKey, READY_GOODS_SOURCE_UNAVAILABLE, isSupabaseReady() ? 'shared-unavailable' : 'shared-required');
+    return _cloneReadyGoodsPayload(safeFallback);
 }
 
 async function _saveReadyGoodsStore(storeKey, localKey, payload, fallbackValue = []) {
     const normalized = _normalizeReadyGoodsPayload(payload, fallbackValue);
-    setLocal(localKey, normalized);
-
     if (isSupabaseReady() && !_hasSupabaseAccessProblem()) {
         await _saveJsonSetting(READY_GOODS_SETTINGS_KEYS[storeKey], normalized);
-        if (!_hasSupabaseAccessProblem()) _setReadyGoodsSourceStatus(storeKey, READY_GOODS_SOURCE_SHARED, 'remote');
-        else _setReadyGoodsSourceStatus(storeKey, READY_GOODS_SOURCE_LOCAL, 'shared-unavailable');
+        if (!_hasSupabaseAccessProblem()) {
+            setLocal(localKey, normalized);
+            _setReadyGoodsSourceStatus(storeKey, READY_GOODS_SOURCE_SHARED, 'remote');
+        } else {
+            _setReadyGoodsSourceStatus(storeKey, READY_GOODS_SOURCE_UNAVAILABLE, 'shared-unavailable');
+            throw new Error('READY_GOODS_SHARED_UNAVAILABLE');
+        }
         return normalized;
     }
 
-    _setReadyGoodsSourceStatus(storeKey, READY_GOODS_SOURCE_LOCAL, isSupabaseReady() ? 'shared-unavailable' : 'local-only');
-    return normalized;
+    _setReadyGoodsSourceStatus(storeKey, READY_GOODS_SOURCE_UNAVAILABLE, isSupabaseReady() ? 'shared-unavailable' : 'shared-required');
+    throw new Error('READY_GOODS_SHARED_UNAVAILABLE');
 }
 
 async function loadReadyGoods() {

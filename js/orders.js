@@ -1166,8 +1166,12 @@ const Orders = {
         }
     },
 
+    _shouldSyncOrderToReadyGoods(order) {
+        return (order?.client_name || '').toUpperCase() === 'B2C';
+    },
+
     async _syncReadyGoodsByStatus(orderId, order, oldStatus, newStatus) {
-        if (oldStatus !== 'completed' && newStatus === 'completed') {
+        if (oldStatus !== 'completed' && newStatus === 'completed' && this._shouldSyncOrderToReadyGoods(order)) {
             await this._moveToReadyGoods(orderId, order);
             return;
         }

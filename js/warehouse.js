@@ -4589,13 +4589,14 @@ const Warehouse = {
         const sourceStatus = typeof getReadyGoodsSourceStatus === 'function' ? getReadyGoodsSourceStatus() : null;
         const sourceItems = sourceStatus ? [sourceStatus.ready_goods, sourceStatus.ready_goods_history, sourceStatus.sales_records].filter(Boolean) : [];
         const usesSharedSource = sourceItems.length > 0 && sourceItems.every(item => item.source === 'shared-settings');
+        const readyGoodsAvailable = usesSharedSource;
         const sourceHtml = sourceItems.length > 0
-            ? `<div style="margin-bottom:12px;padding:12px 14px;border-radius:12px;border:1px solid ${usesSharedSource ? 'rgba(16,185,129,.25)' : 'rgba(245,158,11,.35)'};background:${usesSharedSource ? 'rgba(16,185,129,.08)' : 'rgba(245,158,11,.10)'};">
-                <div style="font-weight:700;margin-bottom:4px;">${usesSharedSource ? 'Источник готовой продукции: общая база' : 'Источник готовой продукции: локальный кэш браузера'}</div>
+            ? `<div style="margin-bottom:12px;padding:12px 14px;border-radius:12px;border:1px solid ${usesSharedSource ? 'rgba(16,185,129,.25)' : 'rgba(239,68,68,.25)'};background:${usesSharedSource ? 'rgba(16,185,129,.08)' : 'rgba(239,68,68,.08)'};">
+                <div style="font-weight:700;margin-bottom:4px;">${usesSharedSource ? 'Источник готовой продукции: общая база' : 'Готовая продукция временно недоступна'}</div>
                 <div style="font-size:12px;color:var(--text-muted);line-height:1.45;">
                     ${usesSharedSource
                         ? 'Остатки, история готовой продукции и продажи читаются из канонического shared-хранилища Supabase settings.'
-                        : 'Shared-база сейчас недоступна или ещё не синхронизирована. Показанные остатки и нули могут не совпадать с live-состоянием других сотрудников, пока не восстановится синхронизация.'}
+                        : 'Локальный кэш для готовой продукции больше не используется. Раздел доступен только при live-синхронизации через shared Supabase settings, чтобы у всех сотрудников были одни и те же остатки.'}
                 </div>
             </div>`
             : '';
@@ -4629,8 +4630,8 @@ const Warehouse = {
         </div>
 
         <div style="display:flex;gap:8px;margin-bottom:12px;">
-            <button class="btn btn-primary" onclick="Warehouse.showWriteOffDialog()">📤 Списать продажу</button>
-            <button class="btn btn-outline" onclick="Warehouse.showAddReadyGoodsDialog()">+ Добавить вручную</button>
+            <button class="btn btn-primary" onclick="Warehouse.showWriteOffDialog()" ${readyGoodsAvailable ? '' : 'disabled title="Нужна общая база готовой продукции"'}>📤 Списать продажу</button>
+            <button class="btn btn-outline" onclick="Warehouse.showAddReadyGoodsDialog()" ${readyGoodsAvailable ? '' : 'disabled title="Нужна общая база готовой продукции"'}>+ Добавить вручную</button>
         </div>
         `;
 
@@ -4639,7 +4640,7 @@ const Warehouse = {
             html += `<div class="card"><div class="empty-state">
                 <div class="empty-icon">📦</div>
                 <p>Нет готовой продукции на складе</p>
-                <p style="font-size:12px;color:var(--text-muted);">Товары появятся здесь когда заказы перейдут в статус «Готово»</p>
+                <p style="font-size:12px;color:var(--text-muted);">${readyGoodsAvailable ? 'Товары появятся здесь после ручной приёмки B2C / партнёрского стока.' : 'Как только восстановится shared-база, здесь снова появится live-остаток готовой продукции.'}</p>
             </div></div>`;
         } else {
             const rows = rg.filter(i => (parseFloat(i.qty) || 0) > 0).map(item => {
@@ -4707,6 +4708,10 @@ const Warehouse = {
     },
 
     async showWriteOffDialog() {
+        if (!this._isReadyGoodsSharedAvailable()) {
+            App.toast('Готовая продукция недоступна без общей базы');
+            return;
+        }
         const rg = (await loadReadyGoods()).filter(i => (parseFloat(i.qty) || 0) > 0);
         if (rg.length === 0) {
             App.toast('Нет товаров для списания');
@@ -4773,6 +4778,10 @@ const Warehouse = {
     },
 
     async doWriteOff() {
+        if (!this._isReadyGoodsSharedAvailable()) {
+            App.toast('Готовая продукция недоступна без общей базы');
+            return;
+        }
         const rg = (await loadReadyGoods()).filter(i => (parseFloat(i.qty) || 0) > 0);
         const idx = parseInt(document.getElementById('rg-wo-product').value);
         const item = rg[idx];
@@ -4839,6 +4848,10 @@ const Warehouse = {
     },
 
     showAddReadyGoodsDialog() {
+        if (!this._isReadyGoodsSharedAvailable()) {
+            App.toast('Готовая продукция недоступна без общей базы');
+            return;
+        }
         const existing = document.getElementById('rg-add-dialog');
         if (existing) existing.remove();
 
@@ -4880,6 +4893,10 @@ const Warehouse = {
     },
 
     async doAddReadyGoods() {
+        if (!this._isReadyGoodsSharedAvailable()) {
+            App.toast('Готовая продукция недоступна без общей базы');
+            return;
+        }
         const name = (document.getElementById('rg-add-name').value || '').trim();
         if (!name) { App.toast('Укажите название'); return; }
         const qty = parseInt(document.getElementById('rg-add-qty').value) || 0;
@@ -4924,6 +4941,14 @@ const Warehouse = {
     async moveOrderToReadyGoods(orderId, orderName) {
         const data = await loadOrder(orderId);
         if (!data || !data.items) return;
+        if ((data.order?.client_name || '').toUpperCase() !== 'B2C') return 0;
+
+        await Promise.all([
+            loadReadyGoods(),
+            loadReadyGoodsHistory(),
+            loadSalesRecords(),
+        ]);
+        if (!this._isReadyGoodsSharedAvailable()) return 0;
 
         const rg = await loadReadyGoods();
         const history = await loadReadyGoodsHistory();
@@ -5006,6 +5031,12 @@ const Warehouse = {
             await saveReadyGoodsHistory(history);
         }
         return removedCount;
+    },
+
+    _isReadyGoodsSharedAvailable() {
+        const sourceStatus = typeof getReadyGoodsSourceStatus === 'function' ? getReadyGoodsSourceStatus() : null;
+        const sourceItems = sourceStatus ? [sourceStatus.ready_goods, sourceStatus.ready_goods_history, sourceStatus.sales_records].filter(Boolean) : [];
+        return sourceItems.length > 0 && sourceItems.every(item => item.source === 'shared-settings');
     },
 
     _getSeedPhotoMapBySku() {
