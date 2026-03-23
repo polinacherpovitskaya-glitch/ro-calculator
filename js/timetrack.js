@@ -48,6 +48,10 @@ const TimeTrack = {
         if (importedLegacy > 0) {
             this.entries = (await loadTimeEntries()) || [];
         }
+        const repairedDates = await this.repairLegacyTimezoneShiftedEntries();
+        if (repairedDates > 0) {
+            this.entries = (await loadTimeEntries()) || [];
+        }
         this.populateWorkerSelect();
         this.populateFilters();
         await this.populateProjectSelect();
@@ -59,7 +63,7 @@ const TimeTrack = {
 
         const dateInput = document.getElementById('tt-date');
         if (dateInput && !dateInput.value) {
-            dateInput.value = new Date().toISOString().split('T')[0];
+            dateInput.value = this.getCurrentReportDate();
         }
     },
 
@@ -110,7 +114,7 @@ const TimeTrack = {
         if (stageEl) stageEl.value = 'casting';
         if (stageOtherEl) stageOtherEl.value = '';
         if (dateEl && !dateEl.value) {
-            dateEl.value = new Date().toISOString().split('T')[0];
+            dateEl.value = this.getCurrentReportDate();
         }
         this.syncManualEntryFormState();
         this.onStageChange();
@@ -251,7 +255,7 @@ const TimeTrack = {
         const dateEl = document.getElementById('tt-daily-date');
         if (!container) return;
 
-        const today = new Date().toISOString().split('T')[0];
+        const today = this.getCurrentReportDate();
         if (dateEl) dateEl.textContent = today;
 
         const activeEmployees = this._getProductionEmployees();
@@ -354,21 +358,26 @@ const TimeTrack = {
 
         let filtered = [...this.entries];
 
-        const now = new Date();
+        const today = this.getCurrentReportDate();
         if (period === 'week') {
-            const weekAgo = new Date(now);
-            weekAgo.setDate(weekAgo.getDate() - 7);
-            filtered = filtered.filter(e => new Date(e.date) >= weekAgo);
+            const weekAgo = this.shiftYMD(today, -7);
+            filtered = filtered.filter(e => {
+                const rawDate = String(e?.date || '').trim();
+                return rawDate && rawDate >= weekAgo;
+            });
         } else if (period === 'month') {
-            const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-            filtered = filtered.filter(e => new Date(e.date) >= monthStart);
+            const monthStart = `${today.slice(0, 7)}-01`;
+            filtered = filtered.filter(e => {
+                const rawDate = String(e?.date || '').trim();
+                return rawDate && rawDate >= monthStart;
+            });
         }
 
         if (worker) filtered = filtered.filter(e => e.worker_name === worker);
         if (project) filtered = filtered.filter(e => e.project_name === project);
         if (stage) filtered = filtered.filter(e => this.stageKey(e) === stage);
 
-        filtered.sort((a, b) => new Date(b.date) - new Date(a.date));
+        filtered.sort((a, b) => String(b?.date || '').localeCompare(String(a?.date || '')));
 
         this.renderTable(filtered);
         this.renderProjectSummary(filtered);
@@ -387,10 +396,88 @@ const TimeTrack = {
         return set;
     },
 
+    getTrackingTimezoneOffset() {
+        const explicit = parseInt(App?.settings?.production_timezone_offset, 10);
+        if (Number.isFinite(explicit)) return explicit;
+        const offsets = (this.employees || [])
+            .map(emp => parseInt(emp?.timezone_offset, 10))
+            .filter(Number.isFinite);
+        if (offsets.length > 0) {
+            const counts = new Map();
+            offsets.forEach(offset => counts.set(offset, (counts.get(offset) || 0) + 1));
+            return [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
+        }
+        return 3;
+    },
+
+    formatUtcYMD(date) {
+        if (!(date instanceof Date) || Number.isNaN(date.getTime())) return '';
+        const year = date.getUTCFullYear();
+        const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+        const day = String(date.getUTCDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    },
+
+    parseYMD(dateStr) {
+        const raw = String(dateStr || '').trim();
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return null;
+        const date = new Date(`${raw}T00:00:00Z`);
+        return Number.isNaN(date.getTime()) ? null : date;
+    },
+
+    shiftYMD(dateStr, deltaDays) {
+        const date = this.parseYMD(dateStr);
+        if (!date) return String(dateStr || '').trim();
+        date.setUTCDate(date.getUTCDate() + Number(deltaDays || 0));
+        return this.formatUtcYMD(date);
+    },
+
+    getTodayYMD(baseDate = new Date(), timezoneOffset = null) {
+        const safeOffset = Number.isFinite(Number(timezoneOffset))
+            ? Number(timezoneOffset)
+            : this.getTrackingTimezoneOffset();
+        return this.formatUtcYMD(new Date(baseDate.getTime() + safeOffset * 3600000));
+    },
+
+    normalizeWorkDate(dateStr, holidaySet = null) {
+        let current = String(dateStr || '').trim();
+        if (!current) return current;
+        const holidays = holidaySet instanceof Set ? holidaySet : this.parseHolidaySet();
+        let guard = 0;
+        while (current && (this.isWeekend(current) || holidays.has(current))) {
+            current = this.shiftYMD(current, -1);
+            guard += 1;
+            if (guard > 31) break;
+        }
+        return current;
+    },
+
+    getCurrentReportDate(baseDate = new Date()) {
+        return this.getTodayYMD(baseDate);
+    },
+
+    getCurrentWorkDate(baseDate = new Date()) {
+        return this.getCurrentReportDate(baseDate);
+    },
+
+    getLegacyBuggyTodayYMD(baseDate = new Date(), timezoneOffset = null) {
+        const safeOffset = Number.isFinite(Number(timezoneOffset))
+            ? Number(timezoneOffset)
+            : this.getTrackingTimezoneOffset();
+        const utcMs = baseDate.getTime() + baseDate.getTimezoneOffset() * 60000;
+        return this.formatUtcYMD(new Date(utcMs + safeOffset * 3600000));
+    },
+
+    getEntryTimezoneOffset(entry) {
+        const emp = this.findEmployeeForEntry(entry);
+        const explicit = parseInt(emp?.timezone_offset, 10);
+        return Number.isFinite(explicit) ? explicit : this.getTrackingTimezoneOffset();
+    },
+
     isWeekend(dateStr) {
-        if (!dateStr) return false;
-        const d = new Date(`${dateStr}T00:00:00`);
-        const day = d.getDay();
+        const d = this.parseYMD(dateStr);
+        if (!d) return false;
+        const day = d.getUTCDay();
         return day === 0 || day === 6;
     },
 
@@ -528,6 +615,31 @@ const TimeTrack = {
         return imported;
     },
 
+    async repairLegacyTimezoneShiftedEntries() {
+        const entries = Array.isArray(this.entries) ? this.entries : [];
+        const candidates = entries.filter(entry => {
+            const rawDate = String(entry?.date || '').trim();
+            const createdAt = new Date(entry?.created_at || '');
+            if (!rawDate || Number.isNaN(createdAt.getTime())) return false;
+            const timezoneOffset = this.getEntryTimezoneOffset(entry);
+            const correctedDate = this.getTodayYMD(createdAt, timezoneOffset);
+            const buggyDate = this.getLegacyBuggyTodayYMD(createdAt, timezoneOffset);
+            return rawDate === buggyDate && correctedDate && correctedDate !== rawDate;
+        });
+        let repaired = 0;
+        for (const entry of candidates) {
+            const createdAt = new Date(entry.created_at);
+            const correctedDate = this.getTodayYMD(createdAt, this.getEntryTimezoneOffset(entry));
+            if (!correctedDate || correctedDate === entry.date) continue;
+            await saveTimeEntry({ ...entry, date: correctedDate });
+            repaired += 1;
+        }
+        if (repaired > 0 && App.toast) {
+            App.toast(`Скорректированы даты часов по московскому времени: ${repaired}`);
+        }
+        return repaired;
+    },
+
     getHalfMonthBucket(dateStr) {
         const day = parseInt(String(dateStr || '').slice(8, 10), 10);
         return Number.isFinite(day) && day >= 16 ? 'second' : 'first';
@@ -572,8 +684,7 @@ const TimeTrack = {
     },
 
     calculateProductionPayrollForCurrentMonth() {
-        const now = new Date();
-        const monthPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-`;
+        const monthPrefix = `${this.getCurrentReportDate().slice(0, 7)}-`;
         const holidaySet = this.parseHolidaySet();
         const payrollEmployees = this._getProductionEmployees()
             .filter(emp => this.getPayrollProfile(emp) !== 'management_salary_with_production_allocation');
@@ -829,17 +940,22 @@ const TimeTrack = {
     },
 
     updateStats() {
-        const now = new Date();
-        const weekAgo = new Date(now);
-        weekAgo.setDate(weekAgo.getDate() - 7);
-        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+        const today = this.getCurrentReportDate();
+        const weekAgo = this.shiftYMD(today, -7);
+        const monthStart = `${today.slice(0, 7)}-01`;
 
         const weekHours = this.entries
-            .filter(e => new Date(e.date) >= weekAgo)
+            .filter(e => {
+                const rawDate = String(e?.date || '').trim();
+                return rawDate && rawDate >= weekAgo;
+            })
             .reduce((s, e) => s + (parseFloat(e.hours) || 0), 0);
 
         const monthHours = this.entries
-            .filter(e => new Date(e.date) >= monthStart)
+            .filter(e => {
+                const rawDate = String(e?.date || '').trim();
+                return rawDate && rawDate >= monthStart;
+            })
             .reduce((s, e) => s + (parseFloat(e.hours) || 0), 0);
 
         const workers = new Set(this.entries.map(e => e.worker_name)).size;

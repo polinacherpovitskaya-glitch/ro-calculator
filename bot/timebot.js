@@ -7,6 +7,7 @@ require('dotenv').config();
 const TelegramBot = require('node-telegram-bot-api');
 const { createClient } = require('@supabase/supabase-js');
 const { buildTaskNotificationText, getTaskNotificationRecipientIds } = require('./task-notification-core');
+const { getLocalDate, shiftYmd, isWeekendYmd, normalizeWorkDate } = require('./timebot-date-utils');
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -31,6 +32,7 @@ const WORK_SETTINGS_KEYS = {
     tasks: 'work_tasks_json',
     taskNotificationEvents: 'work_task_notification_events_json',
 };
+let productionHolidayCache = { loadedAt: 0, set: new Set() };
 
 // =============================================
 // Polling error handler — KEY for stability
@@ -267,7 +269,7 @@ bot.onText(/\/clear/, async (msg) => {
             return;
         }
 
-        const today = getLocalDate(emp.timezone_offset);
+        const today = await getReportDate(emp.timezone_offset);
         const { error } = await supabase
             .from('time_entries')
             .delete()
@@ -380,7 +382,7 @@ bot.on('callback_query', async (query) => {
 
         // --- More entries / finish ---
         if (data === 'more_entries') {
-            await showProjectPicker(chatId, telegramId, state.employee, state.existing_hours, state.entries);
+            await showProjectPicker(chatId, telegramId, state.employee, state.existing_hours, state.entries, state.report_date || null);
             return;
         }
 
@@ -508,15 +510,15 @@ async function startReport(chatId, telegramId) {
             return;
         }
 
-        const today = getLocalDate(emp.timezone_offset);
+        const reportDate = await getReportDate(emp.timezone_offset);
         const { data: todayEntries } = await supabase
             .from('time_entries')
             .select('hours')
             .eq('employee_id', emp.id)
-            .eq('date', today);
+            .eq('date', reportDate);
 
         const existingHours = round2((todayEntries || []).reduce((s, e) => s + (parseFloat(e.hours) || 0), 0));
-        await showProjectPicker(chatId, telegramId, emp, existingHours, []);
+        await showProjectPicker(chatId, telegramId, emp, existingHours, [], reportDate);
     } catch (err) {
         console.error('startReport error:', err);
         send(chatId, 'Ошибка загрузки. Попробуй ещё раз.', MAIN_KEYBOARD);
@@ -551,7 +553,7 @@ function handleHoursEntry(chatId, telegramId, state, hours) {
     );
 }
 
-async function showProjectPicker(chatId, telegramId, emp, existingHours, entries) {
+async function showProjectPicker(chatId, telegramId, emp, existingHours, entries, reportDate = null) {
     let projects = [];
     try {
         const { data } = await supabase
@@ -576,6 +578,7 @@ async function showProjectPicker(chatId, telegramId, emp, existingHours, entries
     setState(telegramId, {
         step: 'choose_project',
         employee: emp,
+        report_date: reportDate || null,
         projects,
         existing_hours: existingHours || 0,
         entries: Array.isArray(entries) ? entries : [],
@@ -584,9 +587,10 @@ async function showProjectPicker(chatId, telegramId, emp, existingHours, entries
     const sessionHours = round2((entries || []).reduce((s, e) => s + (e.hours || 0), 0));
     const totalHours = round2((existingHours || 0) + sessionHours);
 
+    const dateNote = reportDate ? `\nОтчёт за: ${reportDate}` : '';
     const intro = totalHours > 0
-        ? `${emp.name}, выбери проект.\nСегодня уже: ${totalHours}ч`
-        : `${emp.name}, выбери проект:`;
+        ? `${emp.name}, выбери проект.${dateNote}\nУже записано: ${totalHours}ч`
+        : `${emp.name}, выбери проект.${dateNote}`;
 
     send(chatId, intro, {
         reply_markup: { inline_keyboard: keyboard },
@@ -706,7 +710,7 @@ function parseMeta(taskDescription) {
 }
 
 async function saveAllEntries(chatId, telegramId, state, comment) {
-    const today = getLocalDate(state.employee.timezone_offset);
+    const reportDate = state.report_date || await getReportDate(state.employee.timezone_offset);
 
     if (!state.entries || state.entries.length === 0) {
         send(chatId, 'Нет записей для сохранения.', MAIN_KEYBOARD);
@@ -727,7 +731,7 @@ async function saveAllEntries(chatId, telegramId, state, comment) {
                 employee_name: state.employee.name,
                 order_id: entry.order_id || null,
                 hours: entry.hours,
-                date: today,
+                date: reportDate,
                 task_description: buildMetaDescription(entry.stage, entry.stage_label, entry.project_name, comment),
                 notes: comment || null,
             };
@@ -748,7 +752,7 @@ async function saveAllEntries(chatId, telegramId, state, comment) {
         send(chatId,
             `${emoji} Супер, ${state.employee.name}! Записано!\n\n` +
             `${summary}\n\n` +
-            `Сегодня ты поработал(а): *${dayTotal}ч*\n\n` +
+            `Отчёт за *${reportDate}*: *${dayTotal}ч*\n\n` +
             `Отличная работа! До завтра 🙌`,
             { parse_mode: 'Markdown', ...MAIN_KEYBOARD }
         );
@@ -772,7 +776,7 @@ async function showToday(chatId, telegramId) {
             return;
         }
 
-        const today = getLocalDate(emp.timezone_offset);
+        const today = await getReportDate(emp.timezone_offset);
         const { data } = await supabase
             .from('time_entries')
             .select('*')
@@ -811,9 +815,8 @@ async function showWeek(chatId, telegramId) {
             return;
         }
 
-        const weekAgo = new Date();
-        weekAgo.setDate(weekAgo.getDate() - 7);
-        const weekAgoStr = weekAgo.toISOString().split('T')[0];
+        const reportDate = await getReportDate(emp.timezone_offset);
+        const weekAgoStr = shiftYmd(reportDate, -7);
 
         const { data } = await supabase
             .from('time_entries')
@@ -861,11 +864,32 @@ async function showWeek(chatId, telegramId) {
 // utility
 // =============================================
 
-function getLocalDate(timezoneOffset) {
-    const now = new Date();
-    const utcMs = now.getTime() + now.getTimezoneOffset() * 60000;
-    const localMs = utcMs + (timezoneOffset || 3) * 3600000;
-    return new Date(localMs).toISOString().split('T')[0];
+function parseHolidaySet(raw) {
+    const value = String(raw || '').trim();
+    if (!value) return new Set();
+    return new Set(
+        value
+            .split(/[,\n;]/)
+            .map(item => item.trim())
+            .filter(item => /^\d{4}-\d{2}-\d{2}$/.test(item))
+    );
+}
+
+async function getProductionHolidaySet() {
+    const now = Date.now();
+    if ((now - productionHolidayCache.loadedAt) < 5 * 60 * 1000) {
+        return productionHolidayCache.set;
+    }
+    const raw = await loadJsonSetting('production_holidays', '');
+    productionHolidayCache = {
+        loadedAt: now,
+        set: parseHolidaySet(raw),
+    };
+    return productionHolidayCache.set;
+}
+
+async function getReportDate(timezoneOffset, baseDate = new Date()) {
+    return getLocalDate(timezoneOffset, baseDate);
 }
 
 function round2(n) { return Math.round((parseFloat(n) || 0) * 100) / 100; }
@@ -911,6 +935,7 @@ async function checkReminders() {
     const now = new Date();
     const utcHour = now.getUTCHours();
     const utcMinute = now.getUTCMinutes();
+    const holidaySet = await getProductionHolidaySet();
 
     const { data: employees, error } = await supabase
         .from('employees')
@@ -927,10 +952,12 @@ async function checkReminders() {
     for (const emp of employees) {
         const localHour = (utcHour + (emp.timezone_offset || 3) + 24) % 24;
         const localMinute = utcMinute;
+        const todayLocal = getLocalDate(emp.timezone_offset, now);
+        const isTodayWorkday = !isWeekendYmd(todayLocal) && !holidaySet.has(todayLocal);
 
         // Evening reminder — if no entries today
-        if (localHour === (emp.reminder_hour || 17) && localMinute === (emp.reminder_minute || 30)) {
-            const today = getLocalDate(emp.timezone_offset);
+        if (isTodayWorkday && localHour === (emp.reminder_hour || 17) && localMinute === (emp.reminder_minute || 30)) {
+            const today = todayLocal;
             const { data: todayEntries } = await supabase
                 .from('time_entries')
                 .select('id')
@@ -946,24 +973,20 @@ async function checkReminders() {
             }
         }
 
-        // Morning reminder — if yesterday (workday) was not filled
-        if (localHour === 9 && localMinute === 0) {
-            const yesterday = new Date(now);
-            yesterday.setDate(yesterday.getDate() - 1);
-            const dayOfWeek = yesterday.getDay();
-            if (dayOfWeek === 0 || dayOfWeek === 6) continue;
-
-            const yesterdayStr = yesterday.toISOString().split('T')[0];
+        // Morning reminder — if previous workday was not filled
+        if (isTodayWorkday && localHour === 9 && localMinute === 0) {
+            const previousWorkday = normalizeWorkDate(shiftYmd(todayLocal, -1), holidaySet);
+            if (!previousWorkday || previousWorkday === todayLocal) continue;
             const { data: yesterdayEntries } = await supabase
                 .from('time_entries')
                 .select('id')
                 .eq('employee_id', emp.id)
-                .eq('date', yesterdayStr)
+                .eq('date', previousWorkday)
                 .limit(1);
 
             if (!yesterdayEntries || yesterdayEntries.length === 0) {
                 send(emp.telegram_id,
-                    `Доброе утро, ${emp.name}! Вчера (${yesterdayStr}) отчёт не заполнен.\nЗаполни часы 👇`,
+                    `Доброе утро, ${emp.name}! За прошлый рабочий день (${previousWorkday}) отчёт не заполнен.\nЗаполни часы 👇`,
                     MAIN_KEYBOARD
                 );
             }

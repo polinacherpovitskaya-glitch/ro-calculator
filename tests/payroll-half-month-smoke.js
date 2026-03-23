@@ -209,8 +209,9 @@ function smokeSemimonthPayroll(context) {
 }
 
 function smokeDailyStatusAndCanonicalGrouping(context) {
-    const today = new Date().toISOString().split('T')[0];
+    const today = '2026-03-20';
     vm.runInContext(`
+        TimeTrack.getCurrentReportDate = () => '${today}';
         TimeTrack.entries = [
             { id: 1, employee_id: 10, worker_name: 'Тая', project_name: 'Проект А', date: '${today}', hours: 3, description: '' },
             { id: 2, employee_id: 11, worker_name: 'Женя', project_name: 'Проект Б', date: '${today}', hours: 4, description: '' },
@@ -229,7 +230,54 @@ function smokeDailyStatusAndCanonicalGrouping(context) {
     assert.doesNotMatch(html, /Леша/);
 }
 
+async function smokeMoscowDateAndLegacyRepair(context) {
+    vm.runInContext(`
+        App.settings.production_holidays = '2026-03-23';
+        TimeTrack.getCurrentReportDate = function(baseDate = new Date()) {
+            return this.getTodayYMD(baseDate);
+        };
+        TimeTrack.entries = [{
+            id: 501,
+            employee_id: 10,
+            worker_name: 'Тая',
+            project_name: 'Проект А',
+            date: '2026-03-21',
+            created_at: '2026-03-20T20:30:00Z',
+            hours: 8,
+            description: ''
+        }];
+        TimeTrack.employees = [{
+            id: 10,
+            name: 'Тая',
+            role: 'production',
+            is_active: true,
+            timezone_offset: 3,
+            daily_hours: 8,
+            payroll_profile: 'hourly'
+        }];
+    `, context);
+
+    assert.equal(
+        vm.runInContext(`TimeTrack.getTodayYMD(new Date('2026-03-20T22:30:00Z'), 3)`, context),
+        '2026-03-21'
+    );
+    assert.equal(
+        vm.runInContext(`TimeTrack.getCurrentReportDate(new Date('2026-03-21T10:00:00Z'))`, context),
+        '2026-03-21'
+    );
+    assert.equal(
+        vm.runInContext(`TimeTrack.getLegacyBuggyTodayYMD(new Date('2026-03-20T20:30:00Z'), 3)`, context),
+        '2026-03-21'
+    );
+
+    const repaired = await vm.runInContext(`TimeTrack.repairLegacyTimezoneShiftedEntries()`, context);
+    assert.equal(repaired, 1);
+    assert.equal(context.__savedEntries.at(-1).date, '2026-03-20');
+}
+
 async function smokeLegacyFirstHalfImport(context) {
+    context.__savedEntry = null;
+    context.__savedEntries = [];
     vm.runInContext(`
         TimeTrack.entries = [
             { id: 500, employee_id: 11, worker_name: 'Женя', project_name: 'Уже внесено', date: '2026-03-10', hours: 1, description: '' }
@@ -306,6 +354,43 @@ async function smokeEditEntry(context) {
     assert.equal(vm.runInContext(`TimeTrack.editingEntryId`, context), null);
 }
 
+async function smokeWeekendManualSaveKeepsDate(context) {
+    context.__savedEntry = null;
+    context.__savedEntries = [];
+    context.loadOrders = async () => [];
+
+    vm.runInContext(`
+        App.settings.production_holidays = '';
+        TimeTrack.entries = [];
+        TimeTrack.employees = [{
+            id: 9,
+            name: 'Тая',
+            role: 'production',
+            is_active: true,
+            payroll_profile: 'hourly',
+            pay_overtime_hour_rate: 500,
+        }];
+        document.getElementById('tt-worker-name').value = 'Тая';
+        document.getElementById('tt-project-select').value = '__general';
+        document.getElementById('tt-project-select').options = [
+            { value: '', textContent: '-- Выберите проект --' },
+            { value: '__general', textContent: 'Общие работы (сайка, МП, интернет-магазин)' }
+        ];
+        document.getElementById('tt-hours').value = '8';
+        document.getElementById('tt-date').value = '2026-03-21';
+        document.getElementById('tt-stage').value = 'casting';
+        document.getElementById('tt-description').value = 'Отчёт, отправленный в субботу';
+        TimeTrack.editingEntryId = null;
+        TimeTrack.load = async () => {};
+    `, context);
+
+    await vm.runInContext(`TimeTrack.saveEntry()`, context);
+    assert.ok(context.__savedEntry, 'saveTimeEntry should be called');
+    assert.equal(context.__savedEntry.date, '2026-03-21');
+    assert.equal(context.__savedEntry.worker_name, 'Тая');
+    assert.equal(context.__savedEntry.hours, 8);
+}
+
 async function smokeProjectSelectIncludesSamplesAndProduction(context) {
     context.loadOrders = async () => [
         { id: 101, order_name: 'ЭндоСтарс', client_name: 'Алина', status: 'production_printing' },
@@ -332,8 +417,10 @@ async function main() {
     runScript(context, 'js/timetrack.js');
     smokeSemimonthPayroll(context);
     smokeDailyStatusAndCanonicalGrouping(context);
+    await smokeMoscowDateAndLegacyRepair(context);
     await smokeLegacyFirstHalfImport(context);
     await smokeEditEntry(context);
+    await smokeWeekendManualSaveKeepsDate(context);
     await smokeProjectSelectIncludesSamplesAndProduction(context);
     console.log('payroll half-month smoke checks passed');
 }
