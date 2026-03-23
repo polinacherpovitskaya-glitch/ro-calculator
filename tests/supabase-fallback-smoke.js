@@ -144,6 +144,7 @@ async function main() {
 
         vm.runInContext(`
             setLocal(LOCAL_KEYS.readyGoods, [{ id: 99, payload: 'x'.repeat(20000) }]);
+            setLocal(LOCAL_KEYS.readyGoodsHistory, [{ id: 50, type: 'manual_add', qty: 3 }]);
             initSupabase();
             setLocal(LOCAL_KEYS.salesRecords, [{ id: 1, product_name: 'Smoke Sale', qty: 2 }]);
             setLocal(LOCAL_KEYS.authAccounts, [{ id: 10, username: 'fallback_user', employee_name: 'Fallback' }]);
@@ -154,17 +155,41 @@ async function main() {
         assert.equal(movedReadyGoods[0].id, 99);
         assert.equal(context.localStorage.getItem('ro_calc_ready_goods_stock'), null);
 
+        const firstReadyGoods = JSON.parse(JSON.stringify(await vm.runInContext('loadReadyGoods()', context)));
+        assert.equal(firstReadyGoods.length, 1);
+        assert.equal(firstReadyGoods[0].id, 99);
+
+        const readyGoodsHistory = JSON.parse(JSON.stringify(await vm.runInContext('loadReadyGoodsHistory()', context)));
+        assert.equal(readyGoodsHistory.length, 1);
+        assert.equal(readyGoodsHistory[0].type, 'manual_add');
+
         const firstLoad = JSON.parse(JSON.stringify(await vm.runInContext('loadSalesRecords()', context)));
         assert.equal(firstLoad.length, 1);
         assert.equal(firstLoad[0].product_name, 'Smoke Sale');
-        assert.equal(context.__remoteCalls.filter(call => call.table === 'sales_records' && call.action === 'maybeSingle').length, 1);
+        assert.equal(context.__remoteCalls.filter(call => call.table === 'sales_records').length, 0);
+        assert.equal(context.__remoteCalls.filter(call => call.table === 'ready_goods').length, 0);
+        assert.equal(context.__remoteCalls.filter(call => call.table === 'ready_goods_history').length, 0);
 
-        const cache = JSON.parse(context.sessionStorage.getItem('ro_calc_ready_goods_remote_cache') || '{}');
-        assert.equal(cache.sales_records.state, false);
+        const readyGoodsRemote = JSON.parse(context.__settingsStore.get('ready_goods_stock_json') || '[]');
+        assert.equal(readyGoodsRemote.length, 1);
+        assert.equal(readyGoodsRemote[0].id, 99);
+
+        const readyGoodsHistoryRemote = JSON.parse(context.__settingsStore.get('ready_goods_history_json') || '[]');
+        assert.equal(readyGoodsHistoryRemote.length, 1);
+        assert.equal(readyGoodsHistoryRemote[0].type, 'manual_add');
+
+        const salesRecordsRemote = JSON.parse(context.__settingsStore.get('ready_goods_sales_records_json') || '[]');
+        assert.equal(salesRecordsRemote.length, 1);
+        assert.equal(salesRecordsRemote[0].product_name, 'Smoke Sale');
+
+        const sourceStatus = JSON.parse(JSON.stringify(vm.runInContext('getReadyGoodsSourceStatus()', context)));
+        assert.equal(sourceStatus.ready_goods.source, 'shared-settings');
+        assert.equal(sourceStatus.ready_goods_history.source, 'shared-settings');
+        assert.equal(sourceStatus.sales_records.source, 'shared-settings');
 
         const secondLoad = JSON.parse(JSON.stringify(await vm.runInContext('loadSalesRecords()', context)));
         assert.equal(secondLoad.length, 1);
-        assert.equal(context.__remoteCalls.filter(call => call.table === 'sales_records' && call.action === 'maybeSingle').length, 1);
+        assert.equal(context.__remoteCalls.filter(call => call.table === 'sales_records').length, 0);
 
         const authAccounts = JSON.parse(JSON.stringify(await vm.runInContext('loadAuthAccounts()', context)));
         assert.equal(authAccounts.length, 1);
@@ -177,7 +202,27 @@ async function main() {
         const savedLocal = JSON.parse(context.localStorage.getItem('ro_calc_sales_records') || '[]');
         assert.equal(savedLocal.length, 1);
         assert.equal(savedLocal[0].product_name, 'Saved Locally');
-        assert.equal(context.__remoteCalls.filter(call => call.table === 'sales_records' && call.action === 'upsert').length, 0);
+        const updatedRemoteSales = JSON.parse(context.__settingsStore.get('ready_goods_sales_records_json') || '[]');
+        assert.equal(updatedRemoteSales.length, 1);
+        assert.equal(updatedRemoteSales[0].product_name, 'Saved Locally');
+        assert.equal(context.__remoteCalls.filter(call => call.table === 'settings' && call.action === 'upsert').length >= 3, true);
+    }
+
+    {
+        const context = createContext();
+        context.__invalidTables = new Set(['settings']);
+        runScript(context, 'js/supabase.js');
+
+        vm.runInContext(`
+            initSupabase();
+            setLocal(LOCAL_KEYS.readyGoods, [{ id: 7, product_name: 'Local only ready good', qty: 4 }]);
+        `, context);
+
+        const readyGoods = JSON.parse(JSON.stringify(await vm.runInContext('loadReadyGoods()', context)));
+        assert.equal(readyGoods.length, 1);
+        assert.equal(readyGoods[0].product_name, 'Local only ready good');
+        const sourceStatus = JSON.parse(JSON.stringify(vm.runInContext('getReadyGoodsSourceStatus()', context)));
+        assert.equal(sourceStatus.ready_goods.source, 'local-cache');
     }
 
     {

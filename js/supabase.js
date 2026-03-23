@@ -3482,52 +3482,6 @@ async function deleteMarketplaceSet(setId) {
 // READY GOODS (Готовая продукция)
 // =============================================
 
-const READY_GOODS_REMOTE_CACHE_KEY = 'ro_calc_ready_goods_remote_cache';
-const READY_GOODS_REMOTE_CACHE_TTL_MS = 60 * 60 * 1000;
-
-function _readReadyGoodsRemoteCache() {
-    try {
-        const raw = sessionStorage.getItem(READY_GOODS_REMOTE_CACHE_KEY);
-        const parsed = raw ? JSON.parse(raw) : {};
-        return parsed && typeof parsed === 'object' ? parsed : {};
-    } catch (e) {
-        return {};
-    }
-}
-
-function _writeReadyGoodsRemoteCache(cache) {
-    try {
-        sessionStorage.setItem(READY_GOODS_REMOTE_CACHE_KEY, JSON.stringify(cache || {}));
-    } catch (e) {
-        // Ignore cache write errors; ready goods can still work via in-memory fallback.
-    }
-}
-
-function _getCachedReadyGoodsRemoteAvailability(table) {
-    const cache = _readReadyGoodsRemoteCache();
-    const entry = cache?.[table];
-    if (!entry || entry.state !== false || !entry.ts) return null;
-    if ((Date.now() - entry.ts) > READY_GOODS_REMOTE_CACHE_TTL_MS) {
-        delete cache[table];
-        _writeReadyGoodsRemoteCache(cache);
-        return null;
-    }
-    return false;
-}
-
-function _setCachedReadyGoodsRemoteAvailability(table, isAvailable) {
-    const cache = _readReadyGoodsRemoteCache();
-    if (isAvailable === false) cache[table] = { state: false, ts: Date.now() };
-    else delete cache[table];
-    _writeReadyGoodsRemoteCache(cache);
-}
-
-const _readyGoodsRemoteAvailability = {
-    ready_goods: _getCachedReadyGoodsRemoteAvailability('ready_goods'),
-    ready_goods_history: _getCachedReadyGoodsRemoteAvailability('ready_goods_history'),
-    sales_records: _getCachedReadyGoodsRemoteAvailability('sales_records'),
-};
-
 function _isSupabaseMissingTableError(error) {
     const code = String(error?.code || '');
     const message = String(error?.message || '');
@@ -3535,133 +3489,107 @@ function _isSupabaseMissingTableError(error) {
         || message.includes("Could not find the table 'public.");
 }
 
-function _markReadyGoodsRemoteUnavailable(table, error) {
-    if (_readyGoodsRemoteAvailability[table] === false) return;
-    if (_isSupabaseMissingTableError(error)) {
-        _readyGoodsRemoteAvailability[table] = false;
-        _setCachedReadyGoodsRemoteAvailability(table, false);
-        console.warn(`Supabase table ${table} is not available yet. Using local fallback.`);
-    }
+const READY_GOODS_SETTINGS_KEYS = Object.freeze({
+    ready_goods: 'ready_goods_stock_json',
+    ready_goods_history: 'ready_goods_history_json',
+    sales_records: 'ready_goods_sales_records_json',
+});
+
+const READY_GOODS_SOURCE_SHARED = 'shared-settings';
+const READY_GOODS_SOURCE_LOCAL = 'local-cache';
+
+const _readyGoodsSourceStatus = {
+    ready_goods: { source: READY_GOODS_SOURCE_LOCAL, detail: 'bootstrap', updated_at: null },
+    ready_goods_history: { source: READY_GOODS_SOURCE_LOCAL, detail: 'bootstrap', updated_at: null },
+    sales_records: { source: READY_GOODS_SOURCE_LOCAL, detail: 'bootstrap', updated_at: null },
+};
+
+function _cloneReadyGoodsPayload(value) {
+    if (Array.isArray(value)) return value.map(item => (item && typeof item === 'object') ? { ...item } : item);
+    if (value && typeof value === 'object') return { ...value };
+    return value;
 }
 
-function _markReadyGoodsRemoteAvailable(table) {
-    if (Object.prototype.hasOwnProperty.call(_readyGoodsRemoteAvailability, table)) {
-        _readyGoodsRemoteAvailability[table] = true;
-        _setCachedReadyGoodsRemoteAvailability(table, true);
-    }
+function _normalizeReadyGoodsPayload(value, fallbackValue = []) {
+    if (Array.isArray(fallbackValue)) return Array.isArray(value) ? value : _cloneReadyGoodsPayload(fallbackValue);
+    if (fallbackValue && typeof fallbackValue === 'object') return (value && typeof value === 'object') ? value : _cloneReadyGoodsPayload(fallbackValue);
+    return value == null ? fallbackValue : value;
 }
 
-function _canUseReadyGoodsRemote(table) {
-    return isSupabaseReady() && _readyGoodsRemoteAvailability[table] !== false;
+function _setReadyGoodsSourceStatus(storeKey, source, detail) {
+    if (!storeKey) return;
+    _readyGoodsSourceStatus[storeKey] = {
+        source: source || READY_GOODS_SOURCE_LOCAL,
+        detail: detail || '',
+        updated_at: new Date().toISOString(),
+    };
+}
+
+function getReadyGoodsSourceStatus() {
+    return {
+        ready_goods: { ..._readyGoodsSourceStatus.ready_goods },
+        ready_goods_history: { ..._readyGoodsSourceStatus.ready_goods_history },
+        sales_records: { ..._readyGoodsSourceStatus.sales_records },
+    };
+}
+
+async function _loadReadyGoodsStore(storeKey, localKey, fallbackValue = []) {
+    const safeFallback = _cloneReadyGoodsPayload(fallbackValue);
+    const local = _normalizeReadyGoodsPayload(getLocal(localKey), safeFallback);
+
+    if (isSupabaseReady() && !_hasSupabaseAccessProblem()) {
+        const remote = await _loadJsonSetting(READY_GOODS_SETTINGS_KEYS[storeKey], null);
+        if (remote !== null) {
+            const normalized = _normalizeReadyGoodsPayload(remote, safeFallback);
+            setLocal(localKey, normalized);
+            _setReadyGoodsSourceStatus(storeKey, READY_GOODS_SOURCE_SHARED, 'remote');
+            return normalized;
+        }
+
+        const seedPayload = _cloneReadyGoodsPayload(local);
+        await _saveJsonSetting(READY_GOODS_SETTINGS_KEYS[storeKey], seedPayload);
+        if (!_hasSupabaseAccessProblem()) {
+            _setReadyGoodsSourceStatus(storeKey, READY_GOODS_SOURCE_SHARED, Array.isArray(local) && local.length > 0 ? 'seeded-from-local' : 'seeded-empty');
+        } else {
+            _setReadyGoodsSourceStatus(storeKey, READY_GOODS_SOURCE_LOCAL, 'shared-unavailable');
+        }
+        setLocal(localKey, seedPayload);
+        return seedPayload;
+    }
+
+    _setReadyGoodsSourceStatus(storeKey, READY_GOODS_SOURCE_LOCAL, isSupabaseReady() ? 'shared-unavailable' : 'local-only');
+    return local;
+}
+
+async function _saveReadyGoodsStore(storeKey, localKey, payload, fallbackValue = []) {
+    const normalized = _normalizeReadyGoodsPayload(payload, fallbackValue);
+    setLocal(localKey, normalized);
+
+    if (isSupabaseReady() && !_hasSupabaseAccessProblem()) {
+        await _saveJsonSetting(READY_GOODS_SETTINGS_KEYS[storeKey], normalized);
+        if (!_hasSupabaseAccessProblem()) _setReadyGoodsSourceStatus(storeKey, READY_GOODS_SOURCE_SHARED, 'remote');
+        else _setReadyGoodsSourceStatus(storeKey, READY_GOODS_SOURCE_LOCAL, 'shared-unavailable');
+        return normalized;
+    }
+
+    _setReadyGoodsSourceStatus(storeKey, READY_GOODS_SOURCE_LOCAL, isSupabaseReady() ? 'shared-unavailable' : 'local-only');
+    return normalized;
 }
 
 async function loadReadyGoods() {
-    if (_canUseReadyGoodsRemote('ready_goods')) {
-        try {
-            const { data, error } = await supabaseClient.from('ready_goods').select('*').eq('id', 1).maybeSingle();
-            if (error) {
-                _markReadyGoodsRemoteUnavailable('ready_goods', error);
-                if (!_isSupabaseMissingTableError(error)) console.error('loadReadyGoods error:', error);
-                return getLocal(LOCAL_KEYS.readyGoods) || [];
-            }
-            _markReadyGoodsRemoteAvailable('ready_goods');
-            if (data && data.goods_data) {
-                const parsed = typeof data.goods_data === 'string' ? JSON.parse(data.goods_data) : data.goods_data;
-                setLocal(LOCAL_KEYS.readyGoods, parsed);
-                return parsed;
-            }
-            // Migration from localStorage
-            const local = getLocal(LOCAL_KEYS.readyGoods) || [];
-            if (local.length > 0) {
-                console.log('Migrating', local.length, 'ready goods to Supabase...');
-                const { error: upsertError } = await supabaseClient
-                    .from('ready_goods')
-                    .upsert({ id: 1, goods_data: JSON.stringify(local), updated_at: new Date().toISOString() }, { onConflict: 'id' });
-                if (upsertError) {
-                    _markReadyGoodsRemoteUnavailable('ready_goods', upsertError);
-                    if (!_isSupabaseMissingTableError(upsertError)) console.error('loadReadyGoods migration error:', upsertError);
-                }
-            }
-            return local;
-        } catch(e) {
-            _markReadyGoodsRemoteUnavailable('ready_goods', e);
-            if (!_isSupabaseMissingTableError(e)) console.error('loadReadyGoods exception:', e);
-            return getLocal(LOCAL_KEYS.readyGoods) || [];
-        }
-    }
-    return getLocal(LOCAL_KEYS.readyGoods) || [];
+    return _loadReadyGoodsStore('ready_goods', LOCAL_KEYS.readyGoods, []);
 }
 
 async function saveReadyGoods(items) {
-    if (_canUseReadyGoodsRemote('ready_goods')) {
-        try {
-            const { error } = await supabaseClient.from('ready_goods').upsert({ id: 1, goods_data: JSON.stringify(items), updated_at: new Date().toISOString() }, { onConflict: 'id' });
-            if (error) {
-                _markReadyGoodsRemoteUnavailable('ready_goods', error);
-                if (!_isSupabaseMissingTableError(error)) console.error('saveReadyGoods error:', error);
-            } else {
-                _markReadyGoodsRemoteAvailable('ready_goods');
-            }
-        } catch(e) {
-            _markReadyGoodsRemoteUnavailable('ready_goods', e);
-            if (!_isSupabaseMissingTableError(e)) console.error('saveReadyGoods exception:', e);
-        }
-    }
-    setLocal(LOCAL_KEYS.readyGoods, items);
+    await _saveReadyGoodsStore('ready_goods', LOCAL_KEYS.readyGoods, items, []);
 }
 
 async function loadReadyGoodsHistory() {
-    if (_canUseReadyGoodsRemote('ready_goods_history')) {
-        try {
-            const { data, error } = await supabaseClient.from('ready_goods_history').select('*').eq('id', 1).maybeSingle();
-            if (error) {
-                _markReadyGoodsRemoteUnavailable('ready_goods_history', error);
-                if (!_isSupabaseMissingTableError(error)) console.error('loadReadyGoodsHistory error:', error);
-                return getLocal(LOCAL_KEYS.readyGoodsHistory) || [];
-            }
-            _markReadyGoodsRemoteAvailable('ready_goods_history');
-            if (data && data.history_data) {
-                const parsed = typeof data.history_data === 'string' ? JSON.parse(data.history_data) : data.history_data;
-                setLocal(LOCAL_KEYS.readyGoodsHistory, parsed);
-                return parsed;
-            }
-            const local = getLocal(LOCAL_KEYS.readyGoodsHistory) || [];
-            if (local.length > 0) {
-                console.log('Migrating ready goods history to Supabase...');
-                const { error: upsertError } = await supabaseClient
-                    .from('ready_goods_history')
-                    .upsert({ id: 1, history_data: JSON.stringify(local), updated_at: new Date().toISOString() }, { onConflict: 'id' });
-                if (upsertError) {
-                    _markReadyGoodsRemoteUnavailable('ready_goods_history', upsertError);
-                    if (!_isSupabaseMissingTableError(upsertError)) console.error('loadReadyGoodsHistory migration error:', upsertError);
-                }
-            }
-            return local;
-        } catch(e) {
-            _markReadyGoodsRemoteUnavailable('ready_goods_history', e);
-            if (!_isSupabaseMissingTableError(e)) console.error('loadReadyGoodsHistory exception:', e);
-            return getLocal(LOCAL_KEYS.readyGoodsHistory) || [];
-        }
-    }
-    return getLocal(LOCAL_KEYS.readyGoodsHistory) || [];
+    return _loadReadyGoodsStore('ready_goods_history', LOCAL_KEYS.readyGoodsHistory, []);
 }
 
 async function saveReadyGoodsHistory(history) {
-    if (_canUseReadyGoodsRemote('ready_goods_history')) {
-        try {
-            const { error } = await supabaseClient.from('ready_goods_history').upsert({ id: 1, history_data: JSON.stringify(history), updated_at: new Date().toISOString() }, { onConflict: 'id' });
-            if (error) {
-                _markReadyGoodsRemoteUnavailable('ready_goods_history', error);
-                if (!_isSupabaseMissingTableError(error)) console.error('saveReadyGoodsHistory error:', error);
-            } else {
-                _markReadyGoodsRemoteAvailable('ready_goods_history');
-            }
-        } catch(e) {
-            _markReadyGoodsRemoteUnavailable('ready_goods_history', e);
-            if (!_isSupabaseMissingTableError(e)) console.error('saveReadyGoodsHistory exception:', e);
-        }
-    }
-    setLocal(LOCAL_KEYS.readyGoodsHistory, history);
+    await _saveReadyGoodsStore('ready_goods_history', LOCAL_KEYS.readyGoodsHistory, history, []);
 }
 
 // =============================================
@@ -3669,57 +3597,11 @@ async function saveReadyGoodsHistory(history) {
 // =============================================
 
 async function loadSalesRecords() {
-    if (_canUseReadyGoodsRemote('sales_records')) {
-        try {
-            const { data, error } = await supabaseClient.from('sales_records').select('*').eq('id', 1).maybeSingle();
-            if (error) {
-                _markReadyGoodsRemoteUnavailable('sales_records', error);
-                if (!_isSupabaseMissingTableError(error)) console.error('loadSalesRecords error:', error);
-                return getLocal(LOCAL_KEYS.salesRecords) || [];
-            }
-            _markReadyGoodsRemoteAvailable('sales_records');
-            if (data && data.records_data) {
-                const parsed = typeof data.records_data === 'string' ? JSON.parse(data.records_data) : data.records_data;
-                setLocal(LOCAL_KEYS.salesRecords, parsed);
-                return parsed;
-            }
-            const local = getLocal(LOCAL_KEYS.salesRecords) || [];
-            if (local.length > 0) {
-                console.log('Migrating sales records to Supabase...');
-                const { error: upsertError } = await supabaseClient
-                    .from('sales_records')
-                    .upsert({ id: 1, records_data: JSON.stringify(local), updated_at: new Date().toISOString() }, { onConflict: 'id' });
-                if (upsertError) {
-                    _markReadyGoodsRemoteUnavailable('sales_records', upsertError);
-                    if (!_isSupabaseMissingTableError(upsertError)) console.error('loadSalesRecords migration error:', upsertError);
-                }
-            }
-            return local;
-        } catch(e) {
-            _markReadyGoodsRemoteUnavailable('sales_records', e);
-            if (!_isSupabaseMissingTableError(e)) console.error('loadSalesRecords exception:', e);
-            return getLocal(LOCAL_KEYS.salesRecords) || [];
-        }
-    }
-    return getLocal(LOCAL_KEYS.salesRecords) || [];
+    return _loadReadyGoodsStore('sales_records', LOCAL_KEYS.salesRecords, []);
 }
 
 async function saveSalesRecords(records) {
-    if (_canUseReadyGoodsRemote('sales_records')) {
-        try {
-            const { error } = await supabaseClient.from('sales_records').upsert({ id: 1, records_data: JSON.stringify(records), updated_at: new Date().toISOString() }, { onConflict: 'id' });
-            if (error) {
-                _markReadyGoodsRemoteUnavailable('sales_records', error);
-                if (!_isSupabaseMissingTableError(error)) console.error('saveSalesRecords error:', error);
-            } else {
-                _markReadyGoodsRemoteAvailable('sales_records');
-            }
-        } catch(e) {
-            _markReadyGoodsRemoteUnavailable('sales_records', e);
-            if (!_isSupabaseMissingTableError(e)) console.error('saveSalesRecords exception:', e);
-        }
-    }
-    setLocal(LOCAL_KEYS.salesRecords, records);
+    await _saveReadyGoodsStore('sales_records', LOCAL_KEYS.salesRecords, records, []);
 }
 
 // =============================================

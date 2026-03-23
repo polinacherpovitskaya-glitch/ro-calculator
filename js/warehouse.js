@@ -3124,6 +3124,19 @@ const Warehouse = {
 
         const rg = await loadReadyGoods();
         const salesRecords = await loadSalesRecords();
+        const sourceStatus = typeof getReadyGoodsSourceStatus === 'function' ? getReadyGoodsSourceStatus() : null;
+        const sourceItems = sourceStatus ? [sourceStatus.ready_goods, sourceStatus.ready_goods_history, sourceStatus.sales_records].filter(Boolean) : [];
+        const usesSharedSource = sourceItems.length > 0 && sourceItems.every(item => item.source === 'shared-settings');
+        const sourceHtml = sourceItems.length > 0
+            ? `<div style="margin-bottom:12px;padding:12px 14px;border-radius:12px;border:1px solid ${usesSharedSource ? 'rgba(16,185,129,.25)' : 'rgba(245,158,11,.35)'};background:${usesSharedSource ? 'rgba(16,185,129,.08)' : 'rgba(245,158,11,.10)'};">
+                <div style="font-weight:700;margin-bottom:4px;">${usesSharedSource ? 'Источник готовой продукции: общая база' : 'Источник готовой продукции: локальный кэш браузера'}</div>
+                <div style="font-size:12px;color:var(--text-muted);line-height:1.45;">
+                    ${usesSharedSource
+                        ? 'Остатки, история готовой продукции и продажи читаются из канонического shared-хранилища Supabase settings.'
+                        : 'Shared-база сейчас недоступна или ещё не синхронизирована. Показанные остатки и нули могут не совпадать с live-состоянием других сотрудников, пока не восстановится синхронизация.'}
+                </div>
+            </div>`
+            : '';
 
         // Stats
         const totalQty = rg.reduce((s, i) => s + (parseFloat(i.qty) || 0), 0);
@@ -3133,6 +3146,7 @@ const Warehouse = {
         const totalProfit = totalSalesRevenue - totalSalesCost;
 
         let html = `
+        ${sourceHtml}
         <div class="stats-grid" style="margin-bottom:16px;">
             <div class="stat-card">
                 <div class="stat-label">На складе (шт)</div>
