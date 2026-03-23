@@ -641,8 +641,12 @@ async _loadFactSummaries() {
 
         const derivedAssemblyHours = round2(planHoursAssembly);
         const derivedPackagingHours = round2(planHoursPackaging);
+        const hasBlankAssemblyDriver = rawItems.some(ri =>
+            (ri.item_type === 'product' && !!ri.is_blank_mold) ||
+            (ri.item_type === 'hardware' && !!ri.hardware_from_template)
+        );
         const savedAssemblyHours = this._num(order.production_hours_hardware);
-        if (savedAssemblyHours > 0) planHoursAssembly = savedAssemblyHours;
+        if (savedAssemblyHours > 0 && !hasBlankAssemblyDriver) planHoursAssembly = savedAssemblyHours;
         const savedPackagingHours = this._num(order.production_hours_packaging);
         if (savedPackagingHours > 0) planHoursPackaging = savedPackagingHours;
 
@@ -716,7 +720,7 @@ async _loadFactSummaries() {
                 },
                 salary_assembly: {
                     planHours: round2(planHoursAssembly),
-                    source: savedAssemblyHours > 0 ? 'saved_order' : 'derived_items',
+                    source: hasBlankAssemblyDriver ? 'blank_norms' : (savedAssemblyHours > 0 ? 'saved_order' : 'derived_items'),
                     savedHours: round2(savedAssemblyHours),
                     derivedHours: round2(derivedAssemblyHours),
                 },
@@ -1212,6 +1216,13 @@ async _loadFactSummaries() {
         }
         if (!rowKey.startsWith('salary_')) return '';
         let detail = this.fmtHours(meta.planHours);
+        if (meta.source === 'blank_norms') {
+            detail += ' • по текущим бланкам';
+            if (this._num(meta.savedHours) > 0 && Math.abs(this._num(meta.savedHours) - this._num(meta.planHours)) > 0.05) {
+                detail += `<br>в заказе было: ${this.fmtHours(meta.savedHours)}`;
+            }
+            return detail;
+        }
         if (meta.source === 'saved_order') {
             detail += ' • сохранено в заказе';
             if (Math.abs(this._num(meta.derivedHours) - this._num(meta.planHours)) > 0.05) {
