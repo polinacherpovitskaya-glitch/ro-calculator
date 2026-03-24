@@ -787,6 +787,92 @@ function _buildStableOrderItemId(orderId, item, index = 0) {
     return (numericOrderId * 1000) + safeItemNumber;
 }
 
+function _normalizeOrderId(orderId) {
+    if (typeof orderId === 'string' && /^\d+$/.test(orderId)) return Number(orderId);
+    return orderId;
+}
+
+function _mergeOrderRecord(existingOrder, incomingOrder, options = {}) {
+    const merged = { ...(existingOrder || {}) };
+    Object.entries(incomingOrder || {}).forEach(([key, value]) => {
+        if (value !== undefined) merged[key] = value;
+    });
+    if (existingOrder?.status === 'deleted' && !options.allowDeletedOverride) {
+        merged.status = 'deleted';
+        merged.deleted_at = existingOrder.deleted_at || merged.deleted_at || new Date().toISOString();
+    }
+    merged.updated_at = new Date().toISOString();
+    return merged;
+}
+
+function _upsertOrderLocally(order, options = {}) {
+    const normalizedId = _normalizeOrderId(order?.id);
+    if (!normalizedId) return null;
+
+    const orders = getLocal(LOCAL_KEYS.orders) || [];
+    const idx = orders.findIndex(existing => String(existing.id) === String(normalizedId));
+    const nowIso = new Date().toISOString();
+    const incoming = { ...(order || {}), id: normalizedId };
+
+    if (idx >= 0) {
+        orders[idx] = _mergeOrderRecord(orders[idx], incoming, options);
+    } else {
+        orders.push({
+            ...incoming,
+            created_at: incoming.created_at || nowIso,
+            updated_at: nowIso,
+        });
+    }
+
+    setLocal(LOCAL_KEYS.orders, orders);
+    return idx >= 0 ? orders[idx] : orders[orders.length - 1];
+}
+
+function _removeOrderLocally(orderId) {
+    const normalizedId = _normalizeOrderId(orderId);
+    const orders = (getLocal(LOCAL_KEYS.orders) || []).filter(order => String(order.id) !== String(normalizedId));
+    setLocal(LOCAL_KEYS.orders, orders);
+
+    const items = (getLocal(LOCAL_KEYS.orderItems) || []).filter(item => String(item.order_id) !== String(normalizedId));
+    setLocal(LOCAL_KEYS.orderItems, items);
+}
+
+function _clearEditingOrderReference(orderId) {
+    const normalizedId = _normalizeOrderId(orderId);
+    if (!normalizedId) return;
+
+    let currentEditingId = null;
+    if (typeof App !== 'undefined' && App && App.editingOrderId != null) {
+        currentEditingId = _normalizeOrderId(App.editingOrderId);
+    } else {
+        try {
+            currentEditingId = _normalizeOrderId(localStorage.getItem('ro_calc_editing_order_id'));
+        } catch (e) {
+            currentEditingId = null;
+        }
+    }
+
+    if (String(currentEditingId) !== String(normalizedId)) return;
+
+    if (typeof Calculator !== 'undefined' && Calculator && typeof Calculator.resetForm === 'function') {
+        Calculator.resetForm();
+        return;
+    }
+
+    if (typeof Calculator !== 'undefined' && Calculator) {
+        clearTimeout(Calculator._autosaveTimer);
+        Calculator._isDirty = false;
+        Calculator._autosaving = false;
+        Calculator._currentOrderStatus = 'draft';
+    }
+    if (typeof App !== 'undefined' && App) {
+        App.editingOrderId = null;
+    }
+    try {
+        localStorage.removeItem('ro_calc_editing_order_id');
+    } catch (e) { /* ignore */ }
+}
+
 function _getOrderItemDedupKey(item) {
     const type = item && item.item_type ? item.item_type : 'product';
     const itemNumber = Number(item?.item_number) || 0;
@@ -818,6 +904,7 @@ function _dedupeOrderItems(items, orderId = null) {
 }
 
 async function _rewriteOrderItems(orderId, items) {
+    orderId = _normalizeOrderId(orderId);
     const nowIso = new Date().toISOString();
     const normalized = (items || []).map((item, index) => ({
         ...item,
@@ -857,7 +944,7 @@ async function _rewriteOrderItems(orderId, items) {
     }
 
     const localItems = getLocal(LOCAL_KEYS.orderItems) || [];
-    const filtered = localItems.filter(item => item.order_id !== orderId);
+    const filtered = localItems.filter(item => String(item.order_id) !== String(orderId));
     setLocal(LOCAL_KEYS.orderItems, [...filtered, ...normalized]);
     return true;
 }
@@ -865,7 +952,7 @@ async function _rewriteOrderItems(orderId, items) {
 async function saveOrder(order, items) {
     if (isSupabaseReady()) {
         // Generate ID for new orders (Supabase BIGINT PK has no auto-increment)
-        let orderId = order.id;
+        let orderId = _normalizeOrderId(order.id);
         if (!orderId) {
             orderId = Date.now();
             order.id = orderId;
@@ -876,10 +963,21 @@ async function saveOrder(order, items) {
         orderData.updated_at = new Date().toISOString();
 
         // Try update first if order exists, otherwise insert
-        const { data: existing } = await supabaseClient
-            .from('orders').select('id').eq('id', orderId).maybeSingle();
+        const { data: existing, error: existingError } = await supabaseClient
+            .from('orders').select('id,status,deleted_at').eq('id', orderId).maybeSingle();
+        if (existingError && existingError.code !== 'PGRST116') {
+            console.error('saveOrder lookup error:', existingError);
+        }
+
+        const localBackupOrder = { ...order, id: orderId };
 
         if (existing) {
+            if (existing.status === 'deleted') {
+                orderData.status = 'deleted';
+                orderData.deleted_at = existing.deleted_at || orderData.deleted_at || new Date().toISOString();
+                localBackupOrder.status = 'deleted';
+                localBackupOrder.deleted_at = existing.deleted_at || localBackupOrder.deleted_at || orderData.deleted_at;
+            }
             // Update existing order
             const { id: _id, ...updateFields } = orderData;
             const { error } = await supabaseClient
@@ -923,33 +1021,21 @@ async function saveOrder(order, items) {
         }
 
         // Also save to localStorage as backup (full data, no filtering)
-        _saveOrderLocally({ ...order, id: orderId }, items);
+        _saveOrderLocally(localBackupOrder, items);
 
         return orderId;
     } else {
         // Local storage
-        const orders = getLocal(LOCAL_KEYS.orders) || [];
-        let orderId = order.id;
+        let orderId = _normalizeOrderId(order.id);
         if (orderId) {
-            const idx = orders.findIndex(o => o.id === orderId);
-            if (idx >= 0) {
-                // Merge: keep existing fields, overwrite with new values (skip undefined)
-                const existing = orders[idx];
-                const merged = { ...existing };
-                for (const [key, val] of Object.entries(order)) {
-                    if (val !== undefined) merged[key] = val;
-                }
-                merged.updated_at = new Date().toISOString();
-                orders[idx] = merged;
-            }
+            _upsertOrderLocally({ ...order, id: orderId });
         } else {
             orderId = Date.now();
-            orders.push({ ...order, id: orderId, created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
+            _upsertOrderLocally({ ...order, id: orderId });
         }
-        setLocal(LOCAL_KEYS.orders, orders);
 
         const allItems = getLocal(LOCAL_KEYS.orderItems) || [];
-        const filtered = allItems.filter(i => i.order_id !== orderId);
+        const filtered = allItems.filter(i => String(i.order_id) !== String(orderId));
         const nowIso = new Date().toISOString();
         const newItems = items.map((item, idx) => ({
             ...item,
@@ -967,28 +1053,16 @@ async function saveOrder(order, items) {
 /** Save order to localStorage (used as backup when Supabase is primary) */
 function _saveOrderLocally(order, items) {
     try {
-        const orders = getLocal(LOCAL_KEYS.orders) || [];
-        const idx = orders.findIndex(o => o.id === order.id);
-        if (idx >= 0) {
-            const existing = orders[idx];
-            const merged = { ...existing };
-            for (const [key, val] of Object.entries(order)) {
-                if (val !== undefined) merged[key] = val;
-            }
-            merged.updated_at = new Date().toISOString();
-            orders[idx] = merged;
-        } else {
-            orders.push({ ...order, created_at: order.created_at || new Date().toISOString(), updated_at: new Date().toISOString() });
-        }
-        setLocal(LOCAL_KEYS.orders, orders);
+        const normalizedOrderId = _normalizeOrderId(order?.id);
+        _upsertOrderLocally({ ...order, id: normalizedOrderId });
 
         const allItems = getLocal(LOCAL_KEYS.orderItems) || [];
-        const filtered = allItems.filter(i => i.order_id !== order.id);
+        const filtered = allItems.filter(i => String(i.order_id) !== String(normalizedOrderId));
         const nowIso = new Date().toISOString();
         const newItems = items.map((item, i) => ({
             ...item,
-            id: item.id || _buildStableOrderItemId(order.id, item, i + 1),
-            order_id: order.id,
+            id: item.id || _buildStableOrderItemId(normalizedOrderId, item, i + 1),
+            order_id: normalizedOrderId,
             created_at: item.created_at || nowIso,
             updated_at: nowIso,
         }));
@@ -1205,55 +1279,77 @@ async function updateOrderFields(orderId, updates) {
 }
 
 async function deleteOrder(orderId) {
+    orderId = _normalizeOrderId(orderId);
+    const nowIso = new Date().toISOString();
     // Soft delete — mark as deleted, keep data for recovery
     if (isSupabaseReady()) {
         const { error } = await supabaseClient
             .from('orders')
-            .update({ status: 'deleted', deleted_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+            .update({ status: 'deleted', deleted_at: nowIso, updated_at: nowIso })
             .eq('id', orderId);
-        if (error) console.error('deleteOrder error:', error);
+        if (error) {
+            console.error('deleteOrder error:', error);
+            return;
+        }
     } else {
         const orders = getLocal(LOCAL_KEYS.orders) || [];
         const idx = orders.findIndex(o => o.id === orderId);
         if (idx >= 0) {
             orders[idx].status = 'deleted';
-            orders[idx].deleted_at = new Date().toISOString();
-            orders[idx].updated_at = new Date().toISOString();
+            orders[idx].deleted_at = nowIso;
+            orders[idx].updated_at = nowIso;
             setLocal(LOCAL_KEYS.orders, orders);
         }
     }
+    _upsertOrderLocally({ id: orderId, status: 'deleted', deleted_at: nowIso }, { allowDeletedOverride: true });
+    _clearEditingOrderReference(orderId);
 }
 
 async function restoreOrder(orderId) {
+    orderId = _normalizeOrderId(orderId);
+    const nowIso = new Date().toISOString();
     if (isSupabaseReady()) {
         const { error } = await supabaseClient
             .from('orders')
-            .update({ status: 'draft', deleted_at: null, updated_at: new Date().toISOString() })
+            .update({ status: 'draft', deleted_at: null, updated_at: nowIso })
             .eq('id', orderId);
-        if (error) console.error('restoreOrder error:', error);
+        if (error) {
+            console.error('restoreOrder error:', error);
+            return;
+        }
     } else {
         const orders = getLocal(LOCAL_KEYS.orders) || [];
         const idx = orders.findIndex(o => o.id === orderId);
         if (idx >= 0) {
             orders[idx].status = 'draft';
             orders[idx].deleted_at = null;
-            orders[idx].updated_at = new Date().toISOString();
+            orders[idx].updated_at = nowIso;
             setLocal(LOCAL_KEYS.orders, orders);
         }
     }
+    _upsertOrderLocally({ id: orderId, status: 'draft', deleted_at: null }, { allowDeletedOverride: true });
 }
 
 async function permanentDeleteOrder(orderId) {
+    orderId = _normalizeOrderId(orderId);
     if (isSupabaseReady()) {
-        await supabaseClient.from('order_items').delete().eq('order_id', orderId);
+        const { error: itemsError } = await supabaseClient.from('order_items').delete().eq('order_id', orderId);
+        if (itemsError) {
+            console.error('permanentDeleteOrder items error:', itemsError);
+            return;
+        }
         const { error } = await supabaseClient.from('orders').delete().eq('id', orderId);
-        if (error) console.error('permanentDeleteOrder error:', error);
+        if (error) {
+            console.error('permanentDeleteOrder error:', error);
+            return;
+        }
     } else {
-        const orders = (getLocal(LOCAL_KEYS.orders) || []).filter(o => o.id !== orderId);
-        setLocal(LOCAL_KEYS.orders, orders);
-        const items = (getLocal(LOCAL_KEYS.orderItems) || []).filter(i => i.order_id !== orderId);
-        setLocal(LOCAL_KEYS.orderItems, items);
+        _removeOrderLocally(orderId);
+        _clearEditingOrderReference(orderId);
+        return;
     }
+    _removeOrderLocally(orderId);
+    _clearEditingOrderReference(orderId);
 }
 
 // =============================================
