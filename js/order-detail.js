@@ -357,6 +357,42 @@ const OrderDetail = {
         const qty = pnd.quantity || 0;
         const elements = pnd.elements || [];
         const elemPrice = pnd.element_price_per_unit || 0;
+        const normalizeAttachments = (type) => {
+            const collectionKey = type === 'cord' ? 'cords' : 'carabiners';
+            const legacyKey = type === 'cord' ? 'cord' : 'carabiner';
+            const fallbackLengthCm = type === 'cord' ? (parseFloat(pnd.cord_length_cm) || 0) : 0;
+            let entries = Array.isArray(pnd[collectionKey]) ? pnd[collectionKey] : [];
+            if ((!entries || entries.length === 0) && pnd[legacyKey]) {
+                entries = [pnd[legacyKey]];
+            }
+            return (entries || [])
+                .map((entry, index) => {
+                    const normalized = { ...(entry || {}) };
+                    const qtyPerPendant = parseFloat(normalized.qty_per_pendant);
+                    const lengthCm = parseFloat(normalized.length_cm);
+                    normalized.qty_per_pendant = qtyPerPendant > 0 ? qtyPerPendant : 1;
+                    normalized.length_cm = Number.isFinite(lengthCm) ? lengthCm : (type === 'cord' && index === 0 ? fallbackLengthCm : 0);
+                    normalized.unit = normalized.unit || 'шт';
+                    return normalized;
+                })
+                .filter(entry => entry && (
+                    entry.name
+                    || entry.warehouse_item_id
+                    || entry.warehouse_sku
+                    || (parseFloat(entry.price_per_unit) || 0) > 0
+                    || (parseFloat(entry.delivery_price) || 0) > 0
+                    || (parseFloat(entry.sell_price) || 0) > 0
+                    || entry.source === 'custom'
+                ));
+        };
+        const attachmentCostPerPendant = (type, entry) => {
+            if (type === 'cord' && (entry.unit === 'м' || entry.unit === 'см')) {
+                return round2(((entry.price_per_unit || 0) * (entry.length_cm || 0) / 100) + (entry.delivery_price || 0));
+            }
+            return round2(((entry.price_per_unit || 0) + (entry.delivery_price || 0)) * (entry.qty_per_pendant || 1));
+        };
+        const cords = normalizeAttachments('cord');
+        const carabiners = normalizeAttachments('carabiner');
 
         // Group elements by color
         const groups = {};
@@ -367,14 +403,18 @@ const OrderDetail = {
         });
 
         let rows = '';
-        // Cord
-        if (pnd.cord?.name) {
-            rows += `<tr><td style="padding-left:24px;">&#129525; ${this._esc(pnd.cord.name)}</td><td>${qty}</td><td>${formatRub(pnd.cord.price_per_unit)}</td><td>${formatRub(qty * (pnd.cord.price_per_unit || 0))}</td></tr>`;
-        }
-        // Carabiner
-        if (pnd.carabiner?.name) {
-            rows += `<tr><td style="padding-left:24px;">&#128279; ${this._esc(pnd.carabiner.name)}</td><td>${qty}</td><td>${formatRub(pnd.carabiner.price_per_unit)}</td><td>${formatRub(qty * (pnd.carabiner.price_per_unit || 0))}</td></tr>`;
-        }
+        cords.forEach(cord => {
+            const isMetric = cord.unit === 'м' || cord.unit === 'см';
+            const totalQtyLabel = isMetric ? `${round2((cord.length_cm || 0) * qty / 100)} м` : `${qty * (cord.qty_per_pendant || 1)}`;
+            const titleSuffix = isMetric && cord.length_cm > 0 ? ` (${cord.length_cm} см)` : ((cord.qty_per_pendant || 1) > 1 ? ` × ${cord.qty_per_pendant}` : '');
+            const pricePerPendant = attachmentCostPerPendant('cord', cord);
+            rows += `<tr><td style="padding-left:24px;">&#129525; ${this._esc(cord.name || 'Шнур')}${titleSuffix}</td><td>${totalQtyLabel}</td><td>${formatRub(pricePerPendant)}</td><td>${formatRub(qty * pricePerPendant)}</td></tr>`;
+        });
+        carabiners.forEach(carabiner => {
+            const titleSuffix = (carabiner.qty_per_pendant || 1) > 1 ? ` × ${carabiner.qty_per_pendant}` : '';
+            const pricePerPendant = attachmentCostPerPendant('carabiner', carabiner);
+            rows += `<tr><td style="padding-left:24px;">&#128279; ${this._esc(carabiner.name || 'Фурнитура')}${titleSuffix}</td><td>${qty * (carabiner.qty_per_pendant || 1)}</td><td>${formatRub(pricePerPendant)}</td><td>${formatRub(qty * pricePerPendant)}</td></tr>`;
+        });
         // Element groups by color
         Object.entries(groups).forEach(([color, els]) => {
             const chars = els.map(e => e.char).join(', ');

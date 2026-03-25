@@ -12,20 +12,125 @@ const Pendant = {
     // ==========================================
 
     getEmpty() {
+        const cords = [this._createEmptyAttachment('cord')];
+        const carabiners = [this._createEmptyAttachment('carabiner')];
         return {
             item_type: 'pendant',
             pendant_id: 'pnd_' + Date.now(),
             name: '',
             quantity: 0,
             elements: [],
-            cord: { source: 'warehouse', warehouse_item_id: null, warehouse_sku: '', photo_thumbnail: '', name: '', price_per_unit: 0, delivery_price: 0 },
+            cords,
+            carabiners,
+            cord: { ...cords[0] },
             cord_length_cm: 0,
-            carabiner: { source: 'warehouse', warehouse_item_id: null, warehouse_sku: '', photo_thumbnail: '', name: '', price_per_unit: 0, delivery_price: 0 },
+            carabiner: { ...carabiners[0] },
             packaging: null,
             element_price_per_unit: null,
             sell_price_override: null,
             result: null,
         };
+    },
+
+    _getAttachmentCollectionKey(type) {
+        return type === 'cord' ? 'cords' : 'carabiners';
+    },
+
+    _getAttachmentLegacyKey(type) {
+        return type === 'cord' ? 'cord' : 'carabiner';
+    },
+
+    _createEmptyAttachment(type) {
+        return {
+            source: 'warehouse',
+            warehouse_item_id: null,
+            warehouse_sku: '',
+            photo_thumbnail: '',
+            name: '',
+            price_per_unit: 0,
+            delivery_price: 0,
+            sell_price: 0,
+            assembly_speed: type === 'cord' ? 20 : 0,
+            unit: 'шт',
+            qty_per_pendant: 1,
+            length_cm: 0,
+        };
+    },
+
+    _normalizeAttachment(type, data, fallbackLengthCm = 0) {
+        const normalized = {
+            ...this._createEmptyAttachment(type),
+            ...(data || {}),
+        };
+        const qtyPerPendant = parseFloat(normalized.qty_per_pendant);
+        normalized.qty_per_pendant = qtyPerPendant > 0 ? qtyPerPendant : 1;
+        const lengthCm = parseFloat(normalized.length_cm);
+        normalized.length_cm = Number.isFinite(lengthCm) ? lengthCm : (type === 'cord' ? (parseFloat(fallbackLengthCm) || 0) : 0);
+        normalized.unit = normalized.unit || 'шт';
+        return normalized;
+    },
+
+    _hasAttachmentData(entry) {
+        return !!(entry && (
+            entry.name
+            || entry.warehouse_item_id
+            || entry.warehouse_sku
+            || (parseFloat(entry.price_per_unit) || 0) > 0
+            || (parseFloat(entry.delivery_price) || 0) > 0
+            || (parseFloat(entry.sell_price) || 0) > 0
+            || entry.source === 'custom'
+        ));
+    },
+
+    _ensureAttachmentCollections(pnd = this._wizardData) {
+        if (!pnd) return pnd;
+
+        ['cord', 'carabiner'].forEach(type => {
+            const collectionKey = this._getAttachmentCollectionKey(type);
+            const legacyKey = this._getAttachmentLegacyKey(type);
+            const fallbackLengthCm = type === 'cord' ? (parseFloat(pnd.cord_length_cm) || 0) : 0;
+
+            let entries = Array.isArray(pnd[collectionKey]) ? pnd[collectionKey] : [];
+            if (!entries.length && this._hasAttachmentData(pnd[legacyKey])) {
+                entries = [pnd[legacyKey]];
+            }
+
+            const normalized = entries
+                .map((entry, index) => this._normalizeAttachment(type, entry, index === 0 ? fallbackLengthCm : 0))
+                .filter(entry => this._hasAttachmentData(entry));
+
+            pnd[collectionKey] = normalized.length > 0
+                ? normalized
+                : [this._normalizeAttachment(type, null, fallbackLengthCm)];
+        });
+
+        this._syncLegacyAttachments(pnd);
+        return pnd;
+    },
+
+    _syncLegacyAttachments(pnd = this._wizardData) {
+        if (!pnd) return;
+        const cords = Array.isArray(pnd.cords) && pnd.cords.length ? pnd.cords : [this._createEmptyAttachment('cord')];
+        const carabiners = Array.isArray(pnd.carabiners) && pnd.carabiners.length ? pnd.carabiners : [this._createEmptyAttachment('carabiner')];
+        pnd.cord = { ...cords[0] };
+        pnd.cord_length_cm = parseFloat(cords[0]?.length_cm) || 0;
+        pnd.carabiner = { ...carabiners[0] };
+    },
+
+    _getAttachments(pnd, type, options = {}) {
+        this._ensureAttachmentCollections(pnd);
+        const collectionKey = this._getAttachmentCollectionKey(type);
+        const entries = Array.isArray(pnd?.[collectionKey]) ? pnd[collectionKey] : [];
+        if (options.includeEmpty) return entries;
+        return entries.filter(entry => this._hasAttachmentData(entry));
+    },
+
+    _describeAttachmentList(entries, emptyLabel) {
+        const names = (entries || []).map(entry => entry?.name).filter(Boolean);
+        if (names.length === 0) return emptyLabel;
+        if (names.length === 1) return names[0];
+        if (names.length === 2) return names.join(', ');
+        return `${names[0]}, ${names[1]} и ещё ${names.length - 2}`;
     },
 
     // ==========================================
@@ -35,9 +140,12 @@ const Pendant = {
     renderCard(idx) {
         const pnd = Calculator.pendants[idx];
         if (!pnd) return;
+        this._ensureAttachmentCollections(pnd);
         const container = document.getElementById('calc-pendants-container');
         if (!container) return;
         const displayName = this._normalizeName(pnd.name || '') || '...';
+        const cords = this._getAttachments(pnd, 'cord');
+        const carabiners = this._getAttachments(pnd, 'carabiner');
 
         let card = document.getElementById('pendant-card-' + idx);
         if (!card) {
@@ -65,7 +173,7 @@ const Pendant = {
                         <span class="text-muted" style="font-size:13px;font-weight:400;">× ${pnd.quantity || 0} шт</span>
                     </h3>
                     <div style="font-size:12px;color:var(--text-muted);margin-top:4px;">
-                        ${App.escHtml(pnd.cord?.name || 'Шнур не выбран')} + ${App.escHtml(pnd.carabiner?.name || 'Карабин не выбран')}
+                        ${App.escHtml(this._describeAttachmentList(cords, 'Шнур не выбран'))} + ${App.escHtml(this._describeAttachmentList(carabiners, 'Карабин не выбран'))}
                         · ${elemCount} элем.${printCount > 0 ? ', ' + printCount + ' с печатью' : ''}
                     </div>
                 </div>
@@ -106,6 +214,7 @@ const Pendant = {
         const pnd = this._editingIndex !== null
             ? JSON.parse(JSON.stringify(Calculator.pendants[this._editingIndex]))
             : this.getEmpty();
+        this._ensureAttachmentCollections(pnd);
         this._wizardData = pnd;
         this._commitName(this._wizardData.name);
         this._wizardStep = 1;
@@ -499,75 +608,100 @@ const Pendant = {
 
     _renderStep4() {
         const pnd = this._wizardData;
+        this._ensureAttachmentCollections(pnd);
         const whData = Calculator._whPickerData || {};
-        // Build warehouse pickers for cords and carabiners using existing Warehouse component
-        const cordPickerHtml = this._renderWhDropdown('cord', pnd.cord, whData);
-        const carabinerPickerHtml = this._renderWhDropdown('carabiner', pnd.carabiner, whData);
         const qty = pnd.quantity || 0;
-        const cordUnit = pnd.cord?.unit || 'шт';
-        const cordIsMetric = (cordUnit === 'м' || cordUnit === 'см');
-        const cordLenCm = pnd.cord_length_cm || 0;
-
-        // Cord stock check depends on unit type
-        const cordStock = this._getSelectedStock('cord', pnd.cord, whData);
-        let cordNeedDisplay = '';
-        let cordWarn = false;
-        let cordCostPerPendant = 0;
-
-        if (cordIsMetric) {
-            // Metric: need length per pendant, stock in м or см
-            const cordNeedMeters = round2(cordLenCm * qty / 100);
-            const stockInMeters = cordUnit === 'см' && cordStock !== null ? round2(cordStock / 100) : cordStock;
-            cordCostPerPendant = pnd.cord?.price_per_unit ? round2(pnd.cord.price_per_unit * cordLenCm / 100) : 0;
-            if (cordLenCm > 0 && qty > 0) {
-                cordNeedDisplay = `Нужно: <b>${cordNeedMeters} м</b> · Цена за подвес: <b>${formatRub(cordCostPerPendant)}</b>`;
-            }
-            cordWarn = stockInMeters !== null && cordNeedMeters > stockInMeters;
-        } else {
-            // Pieces: 1 cord = 1 pendant, no length input needed
-            cordCostPerPendant = pnd.cord?.price_per_unit || 0;
-            cordWarn = cordStock !== null && qty > cordStock;
-        }
-
-        // Carabiner: always pieces
-        const carabinerStock = this._getSelectedStock('carabiner', pnd.carabiner, whData);
-        const carabinerWarn = carabinerStock !== null && qty > carabinerStock;
-
-        const cordUnitLabel = cordIsMetric ? '/' + cordUnit : '/шт';
 
         return `
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
-                <div>
-                    <h4 style="margin:0 0 8px;">🧵 Шнур</h4>
-                    ${cordPickerHtml}
-                    ${pnd.cord?.name ? `<div style="margin-top:8px;font-size:12px;color:var(--text-muted);">
-                        ${App.escHtml(pnd.cord.name)} · ${formatRub(pnd.cord.price_per_unit || 0)}${cordUnitLabel}
-                    </div>` : ''}
-                    ${cordIsMetric ? `<div class="pendant-field-group" style="margin-top:8px;">
-                        <label>Длина шнура на 1 подвес (см)</label>
-                        <input type="number" class="input" value="${cordLenCm || ''}" placeholder="50" style="max-width:150px;" onchange="Pendant._wizardData.cord_length_cm = parseFloat(this.value)||0; Pendant._renderStep();">
-                    </div>` : ''}
-                    ${cordNeedDisplay ? `<div style="font-size:12px;color:var(--text-muted);">${cordNeedDisplay}</div>` : ''}
-                    ${cordWarn ? `<div style="margin-top:4px;font-size:12px;color:var(--red);font-weight:600;">⚠️ Нужно ${cordIsMetric ? round2(cordLenCm * qty / 100) + ' м' : qty + ' шт'}, на складе ${cordStock} ${cordUnit}!</div>` : ''}
+                ${this._renderAttachmentSection('cord', this._getAttachments(pnd, 'cord', { includeEmpty: true }), whData, qty)}
+                ${this._renderAttachmentSection('carabiner', this._getAttachments(pnd, 'carabiner', { includeEmpty: true }), whData, qty)}
+            </div>
+        `;
+    },
+
+    _renderAttachmentSection(type, entries, whData, qty) {
+        const isCord = type === 'cord';
+        const title = isCord ? '🧵 Шнур' : '🔗 Фурнитура';
+        const addLabel = isCord ? '+ Добавить шнур' : '+ Добавить фурнитуру';
+
+        return `
+            <div>
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0 0 8px;">
+                    <h4 style="margin:0;">${title}</h4>
+                    <button class="btn btn-sm btn-outline" onclick="Pendant._addAttachment('${type}')">${addLabel}</button>
                 </div>
-                <div>
-                    <h4 style="margin:0 0 8px;">🔗 Карабин</h4>
-                    ${carabinerPickerHtml}
-                    ${pnd.carabiner?.name ? `<div style="margin-top:8px;font-size:12px;color:var(--text-muted);">
-                        ${App.escHtml(pnd.carabiner.name)} · ${formatRub(pnd.carabiner.price_per_unit || 0)}/шт
-                    </div>` : ''}
-                    ${carabinerWarn ? `<div style="margin-top:4px;font-size:12px;color:var(--red);font-weight:600;">⚠️ Нужно ${qty} шт, на складе ${carabinerStock} шт!</div>` : ''}
+                <div style="display:flex;flex-direction:column;gap:12px;">
+                    ${entries.map((entry, index) => this._renderAttachmentRow(type, entry, whData, qty, index, entries.length)).join('')}
                 </div>
             </div>
         `;
     },
 
-    _renderWhDropdown(type, data, whData) {
+    _renderAttachmentRow(type, data, whData, qty, index, totalEntries) {
+        const isCord = type === 'cord';
+        const isMetric = isCord && (data?.unit === 'м' || data?.unit === 'см');
+        const selectedStock = this._getSelectedStock(type, data, whData);
+        const qtyPerPendant = parseFloat(data?.qty_per_pendant) || 1;
+        const lengthCm = parseFloat(data?.length_cm) || 0;
+        const unitLabel = isMetric ? '/' + (data?.unit || 'м') : '/шт';
+
+        let helperText = '';
+        let warnText = '';
+        let costPerPendant = 0;
+
+        if (isMetric) {
+            const needMeters = round2(lengthCm * qty / 100);
+            const stockMeters = data?.unit === 'см' && selectedStock !== null ? round2(selectedStock / 100) : selectedStock;
+            costPerPendant = data?.price_per_unit ? round2((data.price_per_unit * lengthCm / 100) + (data.delivery_price || 0)) : 0;
+            if (lengthCm > 0 && qty > 0) {
+                helperText = `Нужно: <b>${needMeters} м</b> · Цена за подвес: <b>${formatRub(costPerPendant)}</b>`;
+            }
+            if (stockMeters !== null && needMeters > stockMeters) {
+                warnText = `⚠️ Нужно ${needMeters} м, на складе ${stockMeters} м!`;
+            }
+        } else {
+            const totalNeed = qty * qtyPerPendant;
+            costPerPendant = round2(((data?.price_per_unit || 0) + (data?.delivery_price || 0)) * qtyPerPendant);
+            if ((data?.price_per_unit || 0) > 0 || qty > 0) {
+                helperText = `Нужно: <b>${totalNeed} шт</b>${qtyPerPendant > 1 ? ` · На подвес: <b>${qtyPerPendant} шт</b>` : ''}${costPerPendant > 0 ? ` · Цена за подвес: <b>${formatRub(costPerPendant)}</b>` : ''}`;
+            }
+            if (selectedStock !== null && totalNeed > selectedStock) {
+                warnText = `⚠️ Нужно ${totalNeed} шт, на складе ${selectedStock} шт!`;
+            }
+        }
+
+        const summaryText = this._hasAttachmentData(data)
+            ? `${App.escHtml(data.name || (isCord ? 'Шнур' : 'Фурнитура'))} · ${formatRub(data.price_per_unit || 0)}${unitLabel}${!isMetric && qtyPerPendant > 1 ? ` · ${qtyPerPendant} шт/подвес` : ''}`
+            : '';
+
+        return `
+            <div style="border:1px solid var(--border);border-radius:10px;padding:12px;background:#fff;">
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;">
+                    <div style="font-size:12px;font-weight:600;color:var(--text-muted);">${isCord ? 'Шнур' : 'Фурнитура'} ${index + 1}</div>
+                    ${totalEntries > 1 ? `<button class="btn btn-sm btn-outline" onclick="Pendant._removeAttachment('${type}', ${index})" style="color:var(--red);">Удалить</button>` : ''}
+                </div>
+                ${this._renderWhDropdown(type, data, whData, index)}
+                ${summaryText ? `<div style="margin-top:8px;font-size:12px;color:var(--text-muted);">${summaryText}</div>` : ''}
+                ${isMetric ? `<div class="pendant-field-group" style="margin-top:8px;">
+                    <label>Длина на 1 подвес (см)</label>
+                    <input type="number" class="input" value="${lengthCm || ''}" placeholder="50" style="max-width:170px;" onchange="Pendant._updateAttachmentField('${type}', ${index}, 'length_cm', parseFloat(this.value)||0)">
+                </div>` : `<div class="pendant-field-group" style="margin-top:8px;">
+                    <label>Кол-во на 1 подвес</label>
+                    <input type="number" class="input" value="${qtyPerPendant || 1}" min="1" placeholder="1" style="max-width:170px;" onchange="Pendant._updateAttachmentField('${type}', ${index}, 'qty_per_pendant', Math.max(1, parseFloat(this.value)||1))">
+                </div>`}
+                ${helperText ? `<div style="font-size:12px;color:var(--text-muted);">${helperText}</div>` : ''}
+                ${warnText ? `<div style="margin-top:4px;font-size:12px;color:var(--red);font-weight:600;">${warnText}</div>` : ''}
+            </div>
+        `;
+    },
+
+    _renderWhDropdown(type, data, whData, index = 0) {
         const catKey = type === 'cord' ? 'cords' : 'carabiners';
         const catItems = whData[catKey]?.items || [];
-        if (catItems.length === 0) {
+        if (data?.source === 'custom' || catItems.length === 0) {
             // Fallback to manual input if no warehouse data
-            return this._renderManualPicker(type, data);
+            return this._renderManualPicker(type, data, index, catItems.length > 0);
         }
         const selectedId = data?.warehouse_item_id || null;
         const selectedItem = selectedId
@@ -603,8 +737,8 @@ const Pendant = {
 
         return `
             <div class="pendant-field-group">
-                <div id="pw-wh-${type}" class="wh-img-picker pendant-wh-picker">
-                    <div class="wh-picker-selected" onclick="Warehouse.togglePicker('pw-wh-${type}')">
+                <div id="pw-wh-${type}-${index}" class="wh-img-picker pendant-wh-picker">
+                    <div class="wh-picker-selected" onclick="Warehouse.togglePicker('pw-wh-${type}-${index}')">
                         ${selectedHtml}
                         <span style="flex-shrink:0;color:var(--text-muted);font-size:10px;">&#9662;</span>
                     </div>
@@ -614,7 +748,7 @@ const Pendant = {
                                 type="text"
                                 class="wh-picker-search"
                                 placeholder="Поиск по названию или артикулу..."
-                                oninput="Warehouse.filterPicker('pw-wh-${type}', this.value)"
+                                oninput="Warehouse.filterPicker('pw-wh-${type}-${index}', this.value)"
                                 style="width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:4px;font-size:13px;"
                             >
                         </div>
@@ -630,7 +764,7 @@ const Pendant = {
                                     ? `<img src="${item.photo_thumbnail}" style="width:48px;height:48px;object-fit:cover;border-radius:6px;flex-shrink:0;border:1px solid var(--border);">`
                                     : `<span style="width:48px;height:48px;display:flex;align-items:center;justify-content:center;background:${ui.color};border-radius:6px;font-size:20px;flex-shrink:0;">${ui.icon}</span>`;
                                 const isSelected = Number(item.id) === Number(selectedId) ? 'background:rgba(59,130,246,0.1);' : '';
-                                return `<div class="wh-picker-item" data-id="${item.id}" style="display:flex;align-items:center;gap:10px;padding:8px 10px;cursor:pointer;border-bottom:1px solid var(--border);${isSelected}" onclick="Pendant._onWhSelect('${type}', '${item.id}')">
+                                return `<div class="wh-picker-item" data-id="${item.id}" style="display:flex;align-items:center;gap:10px;padding:8px 10px;cursor:pointer;border-bottom:1px solid var(--border);${isSelected}" onclick="Pendant._onWhSelect('${type}', ${index}, '${item.id}')">
                                     ${photoHtml}
                                     <div style="flex:1;min-width:0;">
                                         <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${App.escHtml(label)}</div>
@@ -638,7 +772,7 @@ const Pendant = {
                                     </div>
                                 </div>`;
                             }).join('')}
-                            <div class="wh-picker-item" style="display:flex;align-items:center;gap:10px;padding:10px;cursor:pointer;" onclick="Pendant._onWhSelect('${type}', '__custom__')">
+                            <div class="wh-picker-item" style="display:flex;align-items:center;gap:10px;padding:10px;cursor:pointer;" onclick="Pendant._onWhSelect('${type}', ${index}, '__custom__')">
                                 <span style="width:48px;height:48px;display:flex;align-items:center;justify-content:center;background:#fff7ed;border-radius:6px;font-size:20px;flex-shrink:0;border:1px solid var(--border);">✏️</span>
                                 <div style="flex:1;min-width:0;">
                                     <div style="font-size:13px;font-weight:600;">Ввести вручную</div>
@@ -652,39 +786,72 @@ const Pendant = {
         `;
     },
 
-    _renderManualPicker(type, data) {
+    _renderManualPicker(type, data, index = 0, canSwitchToWarehouse = false) {
         return `
+            ${canSwitchToWarehouse ? `<div style="display:flex;justify-content:flex-end;margin-bottom:8px;">
+                <button class="btn btn-sm btn-outline" onclick="Pendant._setAttachmentSource('${type}', ${index}, 'warehouse')">Выбрать со склада</button>
+            </div>` : ''}
             <div class="pendant-field-group">
                 <label>Название</label>
-                <input type="text" class="input" id="pw-${type}-name" value="${App.escHtml(data?.name || '')}" placeholder="${type === 'cord' ? 'Шнур с силик. наконечником' : 'Круглый карабин 2.3 см'}" onchange="Pendant._updateField('${type}', 'name', this.value)">
+                <input type="text" class="input" id="pw-${type}-name-${index}" value="${App.escHtml(data?.name || '')}" placeholder="${type === 'cord' ? 'Шнур с силик. наконечником' : 'Круглый карабин 2.3 см'}" onchange="Pendant._updateAttachmentField('${type}', ${index}, 'name', this.value)">
             </div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
                 <div class="pendant-field-group">
                     <label>Цена ₽/шт</label>
-                    <input type="number" class="input" value="${data?.price_per_unit || ''}" placeholder="0" onchange="Pendant._updateField('${type}', 'price_per_unit', parseFloat(this.value)||0)">
+                    <input type="number" class="input" value="${data?.price_per_unit || ''}" placeholder="0" onchange="Pendant._updateAttachmentField('${type}', ${index}, 'price_per_unit', parseFloat(this.value)||0)">
                 </div>
                 <div class="pendant-field-group">
                     <label>Доставка ₽/шт</label>
-                    <input type="number" class="input" value="${data?.delivery_price || ''}" placeholder="0" onchange="Pendant._updateField('${type}', 'delivery_price', parseFloat(this.value)||0)">
+                    <input type="number" class="input" value="${data?.delivery_price || ''}" placeholder="0" onchange="Pendant._updateAttachmentField('${type}', ${index}, 'delivery_price', parseFloat(this.value)||0)">
                 </div>
             </div>
         `;
     },
 
-    _onWhSelect(type, value) {
+    _addAttachment(type) {
+        const items = this._getAttachments(this._wizardData, type, { includeEmpty: true });
+        items.push(this._createEmptyAttachment(type));
+        this._syncLegacyAttachments(this._wizardData);
+        this._renderStep();
+    },
+
+    _removeAttachment(type, index) {
+        const collectionKey = this._getAttachmentCollectionKey(type);
+        const items = this._getAttachments(this._wizardData, type, { includeEmpty: true });
+        items.splice(index, 1);
+        this._wizardData[collectionKey] = items.length > 0 ? items : [this._createEmptyAttachment(type)];
+        this._syncLegacyAttachments(this._wizardData);
+        this._renderStep();
+    },
+
+    _setAttachmentSource(type, index, source) {
+        const items = this._getAttachments(this._wizardData, type, { includeEmpty: true });
+        items[index] = {
+            ...this._createEmptyAttachment(type),
+            source,
+        };
+        this._syncLegacyAttachments(this._wizardData);
+        this._renderStep();
+    },
+
+    _updateAttachmentField(type, index, field, value) {
+        const items = this._getAttachments(this._wizardData, type, { includeEmpty: true });
+        if (!items[index]) items[index] = this._createEmptyAttachment(type);
+        items[index][field] = value;
+        if (field === 'qty_per_pendant') {
+            const qtyPerPendant = parseFloat(items[index][field]);
+            items[index][field] = qtyPerPendant > 0 ? qtyPerPendant : 1;
+        }
+        if (field === 'length_cm') {
+            items[index][field] = parseFloat(items[index][field]) || 0;
+        }
+        this._syncLegacyAttachments(this._wizardData);
+        this._renderStep();
+    },
+
+    _onWhSelect(type, index, value) {
         if (value === '__custom__') {
-            // Switch to custom mode
-            this._wizardData[type] = {
-                source: 'custom',
-                warehouse_item_id: null,
-                warehouse_sku: '',
-                photo_thumbnail: '',
-                name: '',
-                price_per_unit: 0,
-                delivery_price: 0,
-                assembly_speed: type === 'cord' ? 20 : 0,
-            };
-            this._renderStep();
+            this._setAttachmentSource(type, index, 'custom');
             return;
         }
         if (!value) return;
@@ -692,7 +859,8 @@ const Pendant = {
         const catKey = type === 'cord' ? 'cords' : 'carabiners';
         const item = (whData[catKey]?.items || []).find(i => String(i.id) === String(value));
         if (!item) return;
-        const data = this._wizardData[type];
+        const items = this._getAttachments(this._wizardData, type, { includeEmpty: true });
+        const data = items[index] || this._createEmptyAttachment(type);
         data.source = 'warehouse';
         data.warehouse_item_id = item.id;
         data.warehouse_sku = item.sku || '';
@@ -714,6 +882,8 @@ const Pendant = {
             data.sell_price = calcSellByNetMargin40(data.price_per_unit, App.params);
         }
 
+        items[index] = data;
+        this._syncLegacyAttachments(this._wizardData);
         this._renderStep();
     },
 
@@ -722,6 +892,60 @@ const Pendant = {
         const catKey = type === 'cord' ? 'cords' : 'carabiners';
         const item = (whData[catKey]?.items || []).find(i => String(i.id) === String(data.warehouse_item_id));
         return item ? (item.available_qty || 0) : null;
+    },
+
+    _isMetricAttachment(type, entry) {
+        return type === 'cord' && (entry?.unit === 'м' || entry?.unit === 'см');
+    },
+
+    _getAttachmentCostPerPendant(type, entry) {
+        if (!entry) return 0;
+        if (this._isMetricAttachment(type, entry)) {
+            const lengthCm = parseFloat(entry.length_cm) || 0;
+            return round2(((entry.price_per_unit || 0) * lengthCm / 100) + (entry.delivery_price || 0));
+        }
+        const qtyPerPendant = parseFloat(entry.qty_per_pendant) || 1;
+        return round2(((entry.price_per_unit || 0) + (entry.delivery_price || 0)) * qtyPerPendant);
+    },
+
+    _getAttachmentSellPerPendant(type, entry) {
+        if (!entry) return 0;
+        if (this._isMetricAttachment(type, entry)) {
+            const lengthCm = parseFloat(entry.length_cm) || 0;
+            return round2((entry.sell_price || 0) * lengthCm / 100);
+        }
+        const qtyPerPendant = parseFloat(entry.qty_per_pendant) || 1;
+        return round2((entry.sell_price || 0) * qtyPerPendant);
+    },
+
+    _ensureAttachmentSellPrice(type, entry) {
+        if (!entry || (parseFloat(entry.sell_price) || 0) > 0 || typeof calcSellByNetMargin40 !== 'function') return;
+        const rowCost = this._getAttachmentCostPerPendant(type, entry);
+        if (!(rowCost > 0)) return;
+        const recommendedRowSell = Math.round(calcSellByNetMargin40(rowCost, App.params));
+        if (this._isMetricAttachment(type, entry)) {
+            const factor = (parseFloat(entry.length_cm) || 0) / 100;
+            entry.sell_price = factor > 0 ? round2(recommendedRowSell / factor) : recommendedRowSell;
+        } else {
+            const qtyPerPendant = parseFloat(entry.qty_per_pendant) || 1;
+            entry.sell_price = qtyPerPendant > 0 ? round2(recommendedRowSell / qtyPerPendant) : recommendedRowSell;
+        }
+    },
+
+    _setAttachmentSellPrice(type, index, rowSellPrice) {
+        const items = this._getAttachments(this._wizardData, type, { includeEmpty: true });
+        const entry = items[index];
+        if (!entry) return;
+        const rowSell = round2(parseFloat(rowSellPrice) || 0);
+        if (this._isMetricAttachment(type, entry)) {
+            const factor = (parseFloat(entry.length_cm) || 0) / 100;
+            entry.sell_price = factor > 0 ? round2(rowSell / factor) : rowSell;
+        } else {
+            const qtyPerPendant = parseFloat(entry.qty_per_pendant) || 1;
+            entry.sell_price = qtyPerPendant > 0 ? round2(rowSell / qtyPerPendant) : rowSell;
+        }
+        this._syncLegacyAttachments(this._wizardData);
+        this._renderStep();
     },
 
     _renderSourcePicker(type, data) {
@@ -909,29 +1133,46 @@ const Pendant = {
             groups[key].sell = el.sell_price || 0;
         });
 
-        // Cord calculations — depends on unit
-        const cordUnit = pnd.cord?.unit || 'шт';
-        const cordIsMetric = (cordUnit === 'м' || cordUnit === 'см');
-        const cordLenCm = pnd.cord_length_cm || 0;
-        let cordCostPer, cordSellPer;
-        if (cordIsMetric) {
-            cordCostPer = pnd.cord?.price_per_unit ? round2(pnd.cord.price_per_unit * cordLenCm / 100) : 0;
-            cordSellPer = pnd.cord?.sell_price ? round2(pnd.cord.sell_price * cordLenCm / 100) : 0;
-        } else {
-            cordCostPer = pnd.cord?.price_per_unit || 0;
-            cordSellPer = pnd.cord?.sell_price || 0;
-        }
-        // Auto-fill cord sell if missing (round to whole rubles)
-        if (!cordSellPer && cordCostPer > 0 && typeof calcSellByNetMargin40 === 'function') {
-            cordSellPer = Math.round(calcSellByNetMargin40(cordCostPer, App.params));
-        }
+        const cords = this._getAttachments(pnd, 'cord');
+        const carabiners = this._getAttachments(pnd, 'carabiner');
 
-        // Carabiner
-        const carabCostPer = pnd.carabiner?.price_per_unit || 0;
-        let carabSellPer = pnd.carabiner?.sell_price || 0;
-        if (!carabSellPer && carabCostPer > 0 && typeof calcSellByNetMargin40 === 'function') {
-            carabSellPer = Math.round(calcSellByNetMargin40(carabCostPer, App.params));
-        }
+        cords.forEach(entry => this._ensureAttachmentSellPrice('cord', entry));
+        carabiners.forEach(entry => this._ensureAttachmentSellPrice('carabiner', entry));
+
+        const cordRows = cords.map((entry, index) => {
+            const isMetric = this._isMetricAttachment('cord', entry);
+            const lengthCm = parseFloat(entry.length_cm) || 0;
+            const qtyPerPendant = parseFloat(entry.qty_per_pendant) || 1;
+            const costPer = this._getAttachmentCostPerPendant('cord', entry);
+            const sellPer = this._getAttachmentSellPerPendant('cord', entry);
+            const totalQtyLabel = isMetric ? `${round2(lengthCm * qty / 100)} м` : `${qty * qtyPerPendant}`;
+            const titleSuffix = isMetric && lengthCm > 0
+                ? ` (${lengthCm} см)`
+                : (!isMetric && qtyPerPendant > 1 ? ` × ${qtyPerPendant}` : '');
+            return {
+                index,
+                title: `🧵 ${App.escHtml(entry.name || 'Шнур')}${titleSuffix}`,
+                qtyLabel: totalQtyLabel,
+                costPer,
+                sellPer,
+                totalSell: formatRub(qty * sellPer),
+            };
+        });
+
+        const carabinerRows = carabiners.map((entry, index) => {
+            const qtyPerPendant = parseFloat(entry.qty_per_pendant) || 1;
+            const costPer = this._getAttachmentCostPerPendant('carabiner', entry);
+            const sellPer = this._getAttachmentSellPerPendant('carabiner', entry);
+            const titleSuffix = qtyPerPendant > 1 ? ` × ${qtyPerPendant}` : '';
+            return {
+                index,
+                title: `🔗 ${App.escHtml(entry.name || 'Фурнитура')}${titleSuffix}`,
+                qtyLabel: `${qty * qtyPerPendant}`,
+                costPer,
+                sellPer,
+                totalSell: formatRub(qty * sellPer),
+            };
+        });
 
         // Print — sell price via 40% net margin, editable per-element
         let printCostPerUnit = 0;
@@ -950,8 +1191,12 @@ const Pendant = {
         // Totals
         let totalElemSell = 0;
         elements.forEach(el => { totalElemSell += (el.sell_price || 0); });
-        const totalCostPerUnit = round2(elemCount * elemCostPerUnit + cordCostPer + carabCostPer + printCostPerUnit);
-        const totalSellPerUnit = round2(totalElemSell + cordSellPer + carabSellPer + printSellPerUnit);
+        const totalCordCostPerUnit = round2(cordRows.reduce((sum, row) => sum + row.costPer, 0));
+        const totalCordSellPerUnit = round2(cordRows.reduce((sum, row) => sum + row.sellPer, 0));
+        const totalCarabinerCostPerUnit = round2(carabinerRows.reduce((sum, row) => sum + row.costPer, 0));
+        const totalCarabinerSellPerUnit = round2(carabinerRows.reduce((sum, row) => sum + row.sellPer, 0));
+        const totalCostPerUnit = round2(elemCount * elemCostPerUnit + totalCordCostPerUnit + totalCarabinerCostPerUnit + printCostPerUnit);
+        const totalSellPerUnit = round2(totalElemSell + totalCordSellPerUnit + totalCarabinerSellPerUnit + printSellPerUnit);
         const totalCostAll = round2(totalCostPerUnit * qty);
         const totalSellAll = round2(totalSellPerUnit * qty);
         const vatRate = Number.isFinite(App?.params?.vatRate) ? App.params.vatRate : 0.05;
@@ -973,6 +1218,7 @@ const Pendant = {
         pnd._totalSellPerUnit = totalSellPerUnit;
         pnd.sell_price_override = null;
         pnd.packaging = null;
+        this._syncLegacyAttachments(pnd);
 
         // Helper: margin % between cost and sell
         const marginPct = (cost, sell) => {
@@ -1001,20 +1247,20 @@ const Pendant = {
                             <td>${formatRub(gSellTotal)}</td>
                         </tr>`;
                     }).join('')}
-                    <tr>
-                        <td>🧵 ${App.escHtml(pnd.cord?.name || 'Шнур')}${cordLenCm > 0 ? ' (' + cordLenCm + ' см)' : ''}</td>
-                        <td>${qty}</td>
-                        <td>${formatRub(cordCostPer)}${marginPct(cordCostPer, cordSellPer)}</td>
-                        <td><input type="number" class="input" style="${inputStyle}" value="${cordSellPer || ''}" placeholder="0" onchange="Pendant._wizardData.cord.sell_price = round2(parseFloat(this.value)||0); Pendant._renderStep();"></td>
-                        <td>${formatRub(qty * cordSellPer)}</td>
-                    </tr>
-                    <tr>
-                        <td>🔗 ${App.escHtml(pnd.carabiner?.name || 'Карабин')}</td>
-                        <td>${qty}</td>
-                        <td>${formatRub(carabCostPer)}${marginPct(carabCostPer, carabSellPer)}</td>
-                        <td><input type="number" class="input" style="${inputStyle}" value="${carabSellPer || ''}" placeholder="0" onchange="Pendant._wizardData.carabiner.sell_price = round2(parseFloat(this.value)||0); Pendant._renderStep();"></td>
-                        <td>${formatRub(qty * carabSellPer)}</td>
-                    </tr>
+                    ${cordRows.map(row => `<tr>
+                        <td>${row.title}</td>
+                        <td>${row.qtyLabel}</td>
+                        <td>${formatRub(row.costPer)}${marginPct(row.costPer, row.sellPer)}</td>
+                        <td><input type="number" class="input" style="${inputStyle}" value="${row.sellPer || ''}" placeholder="0" onchange="Pendant._setAttachmentSellPrice('cord', ${row.index}, parseFloat(this.value)||0)"></td>
+                        <td>${row.totalSell}</td>
+                    </tr>`).join('')}
+                    ${carabinerRows.map(row => `<tr>
+                        <td>${row.title}</td>
+                        <td>${row.qtyLabel}</td>
+                        <td>${formatRub(row.costPer)}${marginPct(row.costPer, row.sellPer)}</td>
+                        <td><input type="number" class="input" style="${inputStyle}" value="${row.sellPer || ''}" placeholder="0" onchange="Pendant._setAttachmentSellPrice('carabiner', ${row.index}, parseFloat(this.value)||0)"></td>
+                        <td>${row.totalSell}</td>
+                    </tr>`).join('')}
                     ${printCostPerUnit > 0 ? `<tr>
                         <td>🖨 Печать (${elements.filter(e => e.has_print).map(e => e.char).join(', ')})</td>
                         <td>${qty}</td>
@@ -1095,6 +1341,7 @@ const Pendant = {
         this._readCurrentStep();
         const pnd = this._wizardData;
         this._commitName(pnd.name);
+        this._ensureAttachmentCollections(pnd);
 
         if (!pnd.name) { App.toast('Введите надпись'); return; }
         if (!pnd.quantity || pnd.quantity <= 0) { App.toast('Введите количество'); return; }
@@ -1102,6 +1349,9 @@ const Pendant = {
         // sell_price_override and packaging are no longer used
         pnd.sell_price_override = null;
         pnd.packaging = null;
+        pnd.cords = this._getAttachments(pnd, 'cord');
+        pnd.carabiners = this._getAttachments(pnd, 'carabiner');
+        this._syncLegacyAttachments(pnd);
 
         if (this._editingIndex !== null) {
             Calculator.pendants[this._editingIndex] = pnd;

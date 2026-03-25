@@ -426,6 +426,16 @@ const Tasks = {
         return 'badge-gray';
     },
 
+    bugPromptText(report) {
+        if (!report) return '';
+        return String(
+            report.codex_prompt
+            || report.prompt
+            || report.codex_result
+            || ''
+        ).trim();
+    },
+
     contextLabel(task) {
         const project = task.project_id ? this.projectById(task.project_id) : null;
         const order = task.order_id ? this.orderById(task.order_id) : (project?.linked_order_id ? this.orderById(project.linked_order_id) : null);
@@ -1036,6 +1046,7 @@ const Tasks = {
         return `
             <select
                 class="inline-status-select status-${this.esc(task.status || 'incoming')}"
+                data-task-row-ignore="true"
                 onclick="Tasks.onInlineStatusClick(event)"
                 onchange="Tasks.onInlineStatusChange(event, ${task.id}, this.value)"
             >
@@ -1047,12 +1058,12 @@ const Tasks = {
     renderRowActions(task, { showManualMoves = false } = {}) {
         const isDeleting = this.isTaskDeleting(task.id);
         return `
-            <div class="task-row-actions">
+            <div class="task-row-actions" data-task-row-ignore="true">
                 ${showManualMoves ? `
                     <button class="btn btn-sm btn-outline task-row-icon-btn" type="button" title="Поднять выше" aria-label="Поднять задачу выше" onclick="return Tasks.onMoveTaskClick(event, ${task.id}, -1)" ${isDeleting ? 'disabled' : ''}>↑</button>
                     <button class="btn btn-sm btn-outline task-row-icon-btn" type="button" title="Опустить ниже" aria-label="Опустить задачу ниже" onclick="return Tasks.onMoveTaskClick(event, ${task.id}, 1)" ${isDeleting ? 'disabled' : ''}>↓</button>
                 ` : ''}
-                <button class="btn btn-sm btn-outline task-row-icon-btn task-row-delete-btn ${isDeleting ? 'is-busy' : ''}" type="button" title="${isDeleting ? 'Удаляем задачу...' : 'Удалить задачу'}" aria-label="${isDeleting ? 'Удаляем задачу' : 'Удалить задачу'}" onclick="return Tasks.onDeleteTaskClick(event, ${task.id})" ${isDeleting ? 'disabled' : ''}>${isDeleting ? '…' : '&times;'}</button>
+                <button class="btn btn-sm btn-outline task-row-delete-btn ${isDeleting ? 'is-busy' : ''}" type="button" title="${isDeleting ? 'Удаляем задачу...' : 'Удалить задачу'}" aria-label="${isDeleting ? 'Удаляем задачу' : 'Удалить задачу'}" onclick="return Tasks.onDeleteTaskClick(event, ${task.id})" ${isDeleting ? 'disabled' : ''}>${isDeleting ? 'Удаляем…' : 'Удалить'}</button>
             </div>
         `;
     },
@@ -1060,7 +1071,7 @@ const Tasks = {
     renderListView(tasks, options = {}) {
         const showManualMoves = this.sort === 'manual' && !options.disableManualMoves;
         const rows = tasks.map(task => `
-            <tr onclick="Tasks.openTask(${task.id})" style="cursor:pointer">
+            <tr onclick="Tasks.onTaskRowClick(event, ${task.id})" style="cursor:pointer">
                 <td>
                     <div style="font-weight:600">${this.esc(task.title)}</div>
                     <div class="text-muted" style="font-size:12px">${this.esc(this.contextLabel(task))}</div>
@@ -1545,7 +1556,7 @@ const Tasks = {
         if (!task?.id) return '';
         const report = this.bugReportForTask(task.id);
         if (!report) return '';
-        const prompt = String(report.codex_prompt || '').trim();
+        const prompt = this.bugPromptText(report);
         const route = report.page_route || report.page_url || '—';
         return `
             <div class="card">
@@ -2481,6 +2492,18 @@ const Tasks = {
         return false;
     },
 
+    onTaskRowClick(event, taskId) {
+        const target = event?.target;
+        if (target && typeof target.closest === 'function') {
+            const interactiveSelector = '[data-task-row-ignore], button, select, input, textarea, a, label, summary, details';
+            if (target.closest(interactiveSelector)) {
+                return false;
+            }
+        }
+        this.openTask(taskId);
+        return true;
+    },
+
     onInlineStatusChange(event, taskId, value) {
         event?.stopPropagation?.();
         const select = event?.currentTarget || event?.target;
@@ -2530,7 +2553,8 @@ const Tasks = {
 
     copyBugPrompt(taskId) {
         const report = this.bugReportForTask(taskId);
-        if (!report?.codex_prompt) {
+        const prompt = this.bugPromptText(report);
+        if (!prompt) {
             App.toast('Prompt пока не готов');
             return;
         }
@@ -2538,7 +2562,7 @@ const Tasks = {
             App.toast('Не удалось скопировать prompt');
             return;
         }
-        navigator.clipboard.writeText(report.codex_prompt)
+        navigator.clipboard.writeText(prompt)
             .then(() => App.toast('Prompt скопирован'))
             .catch(() => App.toast('Не удалось скопировать prompt'));
     },

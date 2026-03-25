@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v179';
+const APP_VERSION = 'v180';
 
 const App = {
     currentPage: 'orders',
@@ -3316,22 +3316,23 @@ const Calculator = {
             return;
         }
 
-        // Collect all priced entities (with NaN/Infinity guard)
+        // Collect all billable entities (with NaN/Infinity guard).
+        // Zero-cost hardware/packaging still needs a pricing row so managers can set a sell price.
         const pricedItems = this.items.filter(it => it.result && isFinite(it.result.costTotal) && it.result.costTotal > 0);
-        const pricedHw = this.hardwareItems.filter(hw => hw.result && isFinite(hw.result.costPerUnit) && hw.result.costPerUnit > 0);
-        const pricedPkg = this.packagingItems.filter(pkg => pkg.result && isFinite(pkg.result.costPerUnit) && pkg.result.costPerUnit > 0);
+        const pricingHw = this.hardwareItems.filter(hw => this._isPricingLineVisible(hw));
+        const pricingPkg = this.packagingItems.filter(pkg => this._isPricingLineVisible(pkg));
 
         // Debug: log what's being filtered
         console.log('[renderPricingCard]', {
             items: this.items.length, pricedItems: pricedItems.length,
-            hw: this.hardwareItems.length, pricedHw: pricedHw.length,
-            pkg: this.packagingItems.length, pricedPkg: pricedPkg.length,
+            hw: this.hardwareItems.length, pricingHw: pricingHw.length,
+            pkg: this.packagingItems.length, pricingPkg: pricingPkg.length,
             itemCosts: this.items.map(i => i.result ? i.result.costTotal : 'no result'),
         });
 
         const pricedPendants = this.pendants.filter(pnd => pnd.result && pnd.result.sellPerUnit > 0);
 
-        if (pricedItems.length === 0 && pricedHw.length === 0 && pricedPkg.length === 0 && pricedPendants.length === 0) {
+        if (pricedItems.length === 0 && pricingHw.length === 0 && pricingPkg.length === 0 && pricedPendants.length === 0) {
             pricingEl.style.display = 'none';
             return;
         }
@@ -3422,7 +3423,7 @@ const Calculator = {
             });
         });
 
-        pricedHw.forEach((hw, i) => {
+        pricingHw.forEach((hw, i) => {
             const cost = hw.result.costPerUnit;
             const globalIdx = this.hardwareItems.indexOf(hw);
             const parentIdx = hw.parent_item_index;
@@ -3443,7 +3444,7 @@ const Calculator = {
             });
         });
 
-        pricedPkg.forEach((pkg, i) => {
+        pricingPkg.forEach((pkg, i) => {
             const cost = pkg.result.costPerUnit;
             const globalIdx = this.packagingItems.indexOf(pkg);
             const parentIdx = pkg.parent_item_index;
@@ -3801,6 +3802,16 @@ const Calculator = {
     },
 
     _sellPriceTimer: null,
+
+    _isPricingLineVisible(entry) {
+        if (!entry) return false;
+        const qty = parseFloat(entry.qty) || 0;
+        if (!(qty > 0)) return false;
+        const hasIdentity = !!(entry.name || entry.warehouse_item_id || entry.china_item_id);
+        if (!hasIdentity) return false;
+        const cost = Number(entry.result?.costPerUnit);
+        return Number.isFinite(cost) && cost >= 0;
+    },
 
     onPricingSellChange(type, globalIdx, value, printingIdx) {
         const price = parseFloat(value) || 0;

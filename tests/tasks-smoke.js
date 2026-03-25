@@ -113,9 +113,13 @@ assert.equal(Tasks.contextLabel({}), 'Без привязки');
 assert.match(Tasks.contextToggleButtonsHtml({ project_id: 1 }), /✓ Проект/);
 assert.match(Tasks.renderListView([Tasks.bundle.tasks[0]]), /inline-status-select status-in_progress/);
 assert.match(Tasks.renderListView([Tasks.bundle.tasks[0]]), /Tasks\.onDeleteTaskClick\(event, 1\)/);
+assert.match(Tasks.renderListView([Tasks.bundle.tasks[0]]), /Tasks\.onTaskRowClick\(event, 1\)/);
+assert.match(Tasks.renderListView([Tasks.bundle.tasks[0]]), />Удалить</);
 assert.match(Tasks.renderEditor(Tasks.taskById(1)), /Связанный баг/);
 assert.match(Tasks.renderEditor(Tasks.taskById(1)), /Prompt для Codex/);
 assert.match(Tasks.renderEditor(Tasks.taskById(1)), /Исправь inline-статус в задачах/);
+assert.equal(Tasks.bugPromptText({ codex_prompt: '', prompt: 'legacy prompt' }), 'legacy prompt');
+assert.equal(Tasks.bugPromptText({ codex_prompt: '', codex_result: 'backup prompt' }), 'backup prompt');
 
 Tasks._saveState = { active: true, message: 'Сохраняем наблюдателей…', progress: 40 };
 const savingEditorHtml = Tasks.renderEditor(Tasks.taskById(1));
@@ -180,6 +184,15 @@ assert.equal(Tasks.loadStoredDraft(), null);
     assert.equal(deleteReturn, false);
     assert.deepEqual(deleteClicks, ['prevent', 'stop', 1]);
     Tasks.deleteTask = originalDeleteTask;
+
+    const rowClicks = [];
+    const originalOpenTask = Tasks.openTask.bind(Tasks);
+    Tasks.openTask = (taskId) => { rowClicks.push(taskId); };
+    assert.equal(Tasks.onTaskRowClick({ target: { closest: () => ({}) } }, 1), false);
+    assert.deepEqual(rowClicks, []);
+    assert.equal(Tasks.onTaskRowClick({ target: { closest: () => null } }, 1), true);
+    assert.deepEqual(rowClicks, [1]);
+    Tasks.openTask = originalOpenTask;
 
     console.log('tasks smoke checks passed');
 })().catch((error) => {

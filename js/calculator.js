@@ -286,6 +286,67 @@ function getCountablePendantElements(pendant) {
     return (pendant?.elements || []).filter(el => isCountablePendantChar(el?.char));
 }
 
+function getPendantAttachmentEntries(pendant, type) {
+    const collectionKey = type === 'cord' ? 'cords' : 'carabiners';
+    const legacyKey = type === 'cord' ? 'cord' : 'carabiner';
+    const fallbackLengthCm = type === 'cord' ? (parseFloat(pendant?.cord_length_cm) || 0) : 0;
+
+    let entries = Array.isArray(pendant?.[collectionKey]) ? pendant[collectionKey] : [];
+    if ((!entries || entries.length === 0) && pendant?.[legacyKey]) {
+        entries = [pendant[legacyKey]];
+    }
+
+    return (entries || [])
+        .map((entry, index) => {
+            const normalized = { ...(entry || {}) };
+            const qtyPerPendant = parseFloat(normalized.qty_per_pendant);
+            const lengthCm = parseFloat(normalized.length_cm);
+            normalized.qty_per_pendant = qtyPerPendant > 0 ? qtyPerPendant : 1;
+            normalized.length_cm = Number.isFinite(lengthCm) ? lengthCm : (type === 'cord' && index === 0 ? fallbackLengthCm : 0);
+            normalized.unit = normalized.unit || 'шт';
+            return normalized;
+        })
+        .filter(entry => entry && (
+            entry.name
+            || entry.warehouse_item_id
+            || entry.warehouse_sku
+            || (parseFloat(entry.price_per_unit) || 0) > 0
+            || (parseFloat(entry.delivery_price) || 0) > 0
+            || (parseFloat(entry.sell_price) || 0) > 0
+            || entry.source === 'custom'
+        ));
+}
+
+function isPendantMetricAttachment(type, entry) {
+    return type === 'cord' && (entry?.unit === 'м' || entry?.unit === 'см');
+}
+
+function getPendantAttachmentPurchasePerUnit(type, entry) {
+    if (!entry) return 0;
+    if (isPendantMetricAttachment(type, entry)) {
+        const lengthCm = parseFloat(entry.length_cm) || 0;
+        return round2((entry.price_per_unit || 0) * lengthCm / 100);
+    }
+    const qtyPerPendant = parseFloat(entry.qty_per_pendant) || 1;
+    return round2((entry.price_per_unit || 0) * qtyPerPendant);
+}
+
+function getPendantAttachmentDeliveryPerUnit(type, entry) {
+    if (!entry) return 0;
+    if (isPendantMetricAttachment(type, entry)) {
+        return round2(entry.delivery_price || 0);
+    }
+    const qtyPerPendant = parseFloat(entry.qty_per_pendant) || 1;
+    return round2((entry.delivery_price || 0) * qtyPerPendant);
+}
+
+function getPendantAttachmentCostPerUnit(type, entry) {
+    return round2(
+        getPendantAttachmentPurchasePerUnit(type, entry)
+        + getPendantAttachmentDeliveryPerUnit(type, entry)
+    );
+}
+
 function calculatePendantCost(pendant, params) {
     const qty = pendant.quantity || 0;
     if (qty === 0) return { costPerUnit: 0, sellPerUnit: 0, totalCost: 0, totalRevenue: 0, assemblyHours: 0, packagingHours: 0 };
@@ -296,15 +357,10 @@ function calculatePendantCost(pendant, params) {
     const elemCostPerUnit = pendant.element_price_per_unit || 0;
     const elemCostTotal = elements.length * elemCostPerUnit;
 
-    // Hardware costs (purchase prices)
-    // Cord: depends on unit — metric (м/см) uses cord_length_cm, pieces (шт) = price_per_unit directly
-    const cordUnit = pendant.cord?.unit || 'шт';
-    const cordIsMetric = (cordUnit === 'м' || cordUnit === 'см');
-    const cordLenCm = pendant.cord_length_cm || 0;
-    const cordCost = cordIsMetric
-        ? round2((pendant.cord?.price_per_unit || 0) * cordLenCm / 100) + (pendant.cord?.delivery_price || 0)
-        : (pendant.cord?.price_per_unit || 0) + (pendant.cord?.delivery_price || 0);
-    const carabinerCost = (pendant.carabiner?.price_per_unit || 0) + (pendant.carabiner?.delivery_price || 0);
+    const cords = getPendantAttachmentEntries(pendant, 'cord');
+    const carabiners = getPendantAttachmentEntries(pendant, 'carabiner');
+    const cordCost = cords.reduce((sum, entry) => sum + getPendantAttachmentCostPerUnit('cord', entry), 0);
+    const carabinerCost = carabiners.reduce((sum, entry) => sum + getPendantAttachmentCostPerUnit('carabiner', entry), 0);
 
     let printCost = 0;
     elements.forEach(el => {
@@ -324,8 +380,16 @@ function calculatePendantCost(pendant, params) {
     }
 
     // Assembly hours
-    const cordSpeed = pendant.cord?.assembly_speed || 0;
-    const assemblyHours = cordSpeed > 0 ? round2(qty / cordSpeed * (params.wasteFactor || 1.1)) : 0;
+    const attachmentAssemblyHours = [...cords.map(entry => ({ entry, type: 'cord' })), ...carabiners.map(entry => ({ entry, type: 'carabiner' }))]
+        .reduce((sum, item) => {
+            const speed = parseFloat(item.entry?.assembly_speed) || 0;
+            if (!(speed > 0)) return sum;
+            const opsPerPendant = isPendantMetricAttachment(item.type, item.entry)
+                ? 1
+                : (parseFloat(item.entry?.qty_per_pendant) || 1);
+            return sum + ((qty * opsPerPendant / speed) * (params.wasteFactor || 1.1));
+        }, 0);
+    const assemblyHours = round2(attachmentAssemblyHours);
     const packagingHours = 0;
 
     return {
@@ -552,12 +616,16 @@ function calculateFinDirectorData(items, hardwareItems, packagingItems, params, 
         if (!pnd.result) return;
         const qty = pnd.quantity || 0;
         const r = pnd.result;
+        const cords = getPendantAttachmentEntries(pnd, 'cord');
+        const carabiners = getPendantAttachmentEntries(pnd, 'carabiner');
         // Assembly salary
         totalSalary += (r.assemblyHours + r.packagingHours) * params.fotPerHour;
         // Cord + carabiner → hardware purchases
         const elements = getCountablePendantElements(pnd);
-        totalHardwarePurchase += qty * ((pnd.cord?.price_per_unit || 0) + (pnd.carabiner?.price_per_unit || 0));
-        totalHardwareDelivery += qty * ((pnd.cord?.delivery_price || 0) + (pnd.carabiner?.delivery_price || 0));
+        totalHardwarePurchase += qty * cords.reduce((sum, entry) => sum + getPendantAttachmentPurchasePerUnit('cord', entry), 0);
+        totalHardwarePurchase += qty * carabiners.reduce((sum, entry) => sum + getPendantAttachmentPurchasePerUnit('carabiner', entry), 0);
+        totalHardwareDelivery += qty * cords.reduce((sum, entry) => sum + getPendantAttachmentDeliveryPerUnit('cord', entry), 0);
+        totalHardwareDelivery += qty * carabiners.reduce((sum, entry) => sum + getPendantAttachmentDeliveryPerUnit('carabiner', entry), 0);
         // Elements → hardware purchase
         totalHardwarePurchase += qty * elements.length * (pnd.element_price_per_unit || 0);
         // Printing
