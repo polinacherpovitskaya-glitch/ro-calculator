@@ -689,8 +689,20 @@ async function smokePendantWarehousePickerRichUI() {
 
     await vm.runInContext(`Pendant._onWhSelect('carabiner', 0, '801')`, pendantContext);
     await vm.runInContext(`Pendant._addAttachment('cord')`, pendantContext);
+    const emptyCordState = clone(await vm.runInContext(`({
+        cords: Pendant._wizardData.cords,
+        html: Pendant._renderStep4()
+    })`, pendantContext));
+    assert.equal(emptyCordState.cords.length, 2);
+    assert.match(emptyCordState.html, /Шнур 2/);
     await vm.runInContext(`Pendant._onWhSelect('cord', 1, '702')`, pendantContext);
     await vm.runInContext(`Pendant._addAttachment('carabiner')`, pendantContext);
+    const emptyCarabinerState = clone(await vm.runInContext(`({
+        carabiners: Pendant._wizardData.carabiners,
+        html: Pendant._renderStep4()
+    })`, pendantContext));
+    assert.equal(emptyCarabinerState.carabiners.length, 2);
+    assert.match(emptyCarabinerState.html, /Фурнитура 2/);
     await vm.runInContext(`Pendant._onWhSelect('carabiner', 1, '802')`, pendantContext);
     await vm.runInContext(`Pendant._updateAttachmentField('carabiner', 1, 'qty_per_pendant', 2)`, pendantContext);
 

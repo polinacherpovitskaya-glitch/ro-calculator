@@ -82,25 +82,29 @@ const Pendant = {
         ));
     },
 
-    _ensureAttachmentCollections(pnd = this._wizardData) {
+    _ensureAttachmentCollections(pnd = this._wizardData, options = {}) {
         if (!pnd) return pnd;
+        const preserveEmpty = !!options.preserveEmpty;
 
         ['cord', 'carabiner'].forEach(type => {
             const collectionKey = this._getAttachmentCollectionKey(type);
             const legacyKey = this._getAttachmentLegacyKey(type);
             const fallbackLengthCm = type === 'cord' ? (parseFloat(pnd.cord_length_cm) || 0) : 0;
 
-            let entries = Array.isArray(pnd[collectionKey]) ? pnd[collectionKey] : [];
+            let entries = Array.isArray(pnd[collectionKey]) ? pnd[collectionKey].filter(Boolean) : [];
             if (!entries.length && this._hasAttachmentData(pnd[legacyKey])) {
                 entries = [pnd[legacyKey]];
             }
 
             const normalized = entries
-                .map((entry, index) => this._normalizeAttachment(type, entry, index === 0 ? fallbackLengthCm : 0))
-                .filter(entry => this._hasAttachmentData(entry));
+                .map((entry, index) => this._normalizeAttachment(type, entry, index === 0 ? fallbackLengthCm : 0));
 
-            pnd[collectionKey] = normalized.length > 0
+            const prepared = preserveEmpty
                 ? normalized
+                : normalized.filter(entry => this._hasAttachmentData(entry));
+
+            pnd[collectionKey] = prepared.length > 0
+                ? prepared
                 : [this._normalizeAttachment(type, null, fallbackLengthCm)];
         });
 
@@ -118,7 +122,7 @@ const Pendant = {
     },
 
     _getAttachments(pnd, type, options = {}) {
-        this._ensureAttachmentCollections(pnd);
+        this._ensureAttachmentCollections(pnd, { preserveEmpty: !!options.includeEmpty });
         const collectionKey = this._getAttachmentCollectionKey(type);
         const entries = Array.isArray(pnd?.[collectionKey]) ? pnd[collectionKey] : [];
         if (options.includeEmpty) return entries;
@@ -608,7 +612,7 @@ const Pendant = {
 
     _renderStep4() {
         const pnd = this._wizardData;
-        this._ensureAttachmentCollections(pnd);
+        this._ensureAttachmentCollections(pnd, { preserveEmpty: true });
         const whData = Calculator._whPickerData || {};
         const qty = pnd.quantity || 0;
 
