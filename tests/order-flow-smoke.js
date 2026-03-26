@@ -136,6 +136,7 @@ function createContext() {
         loadWarehouseReservations: async () => [],
         saveWarehouseReservations: async () => {},
         loadWarehouseItems: async () => [],
+        saveWarehouseItem: async () => {},
         saveWarehouseItems: async () => {},
         loadWarehouseHistory: async () => [],
         saveWarehouseHistory: async () => {},
@@ -1450,8 +1451,14 @@ async function smokeChinaReceiptCreatesMoldAndPromotesOrder(context) {
         context.__warehouseItems = clone(items);
     };
     context.saveWarehouseItem = async (item) => {
-        const id = 1201 + context.__warehouseItems.length;
-        context.__warehouseItems.push({ ...clone(item), id });
+        const normalized = clone(item);
+        const existingIdx = context.__warehouseItems.findIndex(entry => Number(entry.id) === Number(normalized.id));
+        if (existingIdx >= 0) {
+            context.__warehouseItems[existingIdx] = normalized;
+            return normalized.id;
+        }
+        const id = normalized.id || (1201 + context.__warehouseItems.length);
+        context.__warehouseItems.push({ ...normalized, id });
         return id;
     };
     context.loadWarehouseHistory = async () => clone(context.__warehouseHistory);
@@ -1783,6 +1790,42 @@ async function smokeWarehouseManualAdjustment(context) {
     assert.equal(context.__warehouseHistory[1].qty_after, 0);
     assert.equal(context.__warehouseHistory[1].clamped, true);
     assert.match(context.__warehouseHistory[1].notes, /Проверка частичного списания/);
+}
+
+async function smokeWarehouseAdjustmentPersistsWithoutBulkSave(context) {
+    context.__warehouseItems = [
+        {
+            id: 801,
+            name: 'Fallback Persist Item',
+            sku: 'ADJ-801',
+            category: 'other',
+            qty: 10,
+            price_per_unit: 9,
+            updated_at: '2026-03-15T00:00:00.000Z',
+        },
+    ];
+    context.__warehouseHistory = [];
+    context.loadWarehouseItems = async () => clone(context.__warehouseItems);
+    context.saveWarehouseItems = async () => {};
+    context.saveWarehouseItem = async (item) => {
+        const normalized = clone(item);
+        const idx = context.__warehouseItems.findIndex(entry => Number(entry.id) === Number(normalized.id));
+        if (idx >= 0) context.__warehouseItems[idx] = normalized;
+        else context.__warehouseItems.push(normalized);
+        return normalized.id;
+    };
+    context.loadWarehouseHistory = async () => clone(context.__warehouseHistory);
+    context.saveWarehouseHistory = async (history) => {
+        context.__warehouseHistory = clone(history);
+    };
+
+    await vm.runInContext(`Warehouse.adjustStock(801, -3, 'deduction', '', 'Проверка без batch-save', 'Smoke')`, context);
+
+    assert.equal(context.__warehouseItems[0].qty, 7);
+    assert.equal(context.__warehouseHistory.length, 1);
+    assert.equal(context.__warehouseHistory[0].qty_before, 10);
+    assert.equal(context.__warehouseHistory[0].qty_after, 7);
+    assert.match(context.__warehouseHistory[0].notes, /batch-save/);
 }
 
 async function smokeProjectHardwarePersistenceAndBuckets(context) {
@@ -2830,6 +2873,7 @@ async function main() {
     await smokeOrderStatusWarehouseSync(context);
     await smokePackagingWarehouseSaveSync(context);
     await smokeWarehouseManualAdjustment(context);
+    await smokeWarehouseAdjustmentPersistsWithoutBulkSave(context);
     await smokeProjectHardwarePersistenceAndBuckets(context);
     await smokeProjectHardwareToggleShortageGuard(context);
     await smokeProjectHardwareLegacyQtyAndStringIdDeduction(context);

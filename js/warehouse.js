@@ -1731,7 +1731,11 @@ const Warehouse = {
         item.qty = qtyAfter;
         item.updated_at = new Date().toISOString();
         items[idx] = item;
-        await saveWarehouseItems(items);
+        await saveWarehouseItem(item);
+        if (Array.isArray(this.allItems)) {
+            const loadedIdx = this.allItems.findIndex(i => Number(i && i.id || 0) === normalizedItemId);
+            if (loadedIdx >= 0) this.allItems[loadedIdx] = { ...this.allItems[loadedIdx], ...item };
+        }
 
         // Record in history
         const history = await loadWarehouseHistory();
