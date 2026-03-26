@@ -3122,6 +3122,75 @@ async function smokeWarehouseInventoryAuditDraftAndFinalize(context) {
     assert.equal(vm.runInContext(`document.getElementById('wh-audit-form').style.display`, context), 'none');
     assert.ok(context.__warehouseHistory.some(entry => entry.type === 'adjustment' && /Инвентаризация/.test(entry.notes || '')));
     assert.ok(context.__warehouseHistory.some(entry => entry.type === 'inventory_audit' && /недостача/i.test(entry.notes || '')));
+
+    const auditEntry = context.__warehouseHistory.find(entry => entry.type === 'inventory_audit');
+    assert.equal(auditEntry.inventory_entered_positions, 1);
+    assert.equal(auditEntry.inventory_positions_changed, 1);
+    assert.equal(auditEntry.inventory_positions_unchanged, 0);
+    assert.equal(auditEntry.inventory_positions_omitted, 1);
+    assert.equal(auditEntry.inventory_total_positions, 2);
+    assert.equal(auditEntry.inventory_details.length, 1);
+    assert.equal(auditEntry.inventory_details[0].item_id, 701);
+    assert.equal(auditEntry.inventory_details[0].actual_qty, 100);
+    assert.equal(auditEntry.inventory_details[0].diff, -20);
+
+    vm.runInContext(`Warehouse.currentView = 'inventory';`, context);
+    await vm.runInContext(`Warehouse.renderInventoryView()`, context);
+
+    const inventoryHtml = String(vm.runInContext(`document.getElementById('wh-content').innerHTML`, context));
+    assert.match(inventoryHtml, /Инвентаризация от/);
+    assert.match(inventoryHtml, /Вписано/);
+    assert.match(inventoryHtml, /AUD-701/);
+    assert.match(inventoryHtml, /Совпадает/);
+
+    context.__warehouseItems = context.__warehouseItems.map(item => item.id === 702 ? { ...item, qty: 8 } : item);
+    context.__warehouseHistory.push({
+        id: 8001,
+        item_id: 702,
+        item_name: 'Инвентаризационная упаковка',
+        item_sku: 'AUD-702',
+        item_category: 'packaging',
+        type: 'adjustment',
+        qty_change: -2,
+        requested_qty_change: -2,
+        qty_before: 10,
+        qty_after: 8,
+        unit_price: 5,
+        total_cost_change: 10,
+        notes: 'Инвентаризация: факт 8, было 10',
+        created_at: '2026-03-10T10:00:00.000Z',
+        created_by: 'Smoke',
+    });
+    context.__warehouseHistory.push({
+        id: 8002,
+        item_id: 0,
+        item_name: 'Инвентаризация склада',
+        item_sku: '',
+        item_category: '',
+        type: 'inventory_audit',
+        qty_change: -2,
+        requested_qty_change: -2,
+        qty_before: 0,
+        qty_after: 0,
+        unit_price: 0,
+        total_cost_change: 10,
+        notes: 'Legacy inventory audit',
+        created_at: '2026-03-10T10:00:05.000Z',
+        created_by: 'Smoke',
+        inventory_shortage_value: 10,
+        inventory_surplus_value: 0,
+        inventory_net_value: -10,
+        inventory_positions_changed: 1,
+    });
+    vm.runInContext(`
+        Warehouse.allItems = globalThis.__warehouseItems.map(item => ({ ...item }));
+    `, context);
+
+    await vm.runInContext(`Warehouse.renderInventoryView()`, context);
+
+    const legacyHtml = String(vm.runInContext(`document.getElementById('wh-content').innerHTML`, context));
+    assert.match(legacyHtml, /восстановлены из истории корректировок/i);
+    assert.match(legacyHtml, /Инвентаризационная упаковка/);
 }
 
 async function main() {

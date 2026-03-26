@@ -2224,6 +2224,129 @@ table .text-center { text-align: center; }
     flex-wrap: wrap;
 }
 
+.wh-inventory-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.wh-inventory-card {
+    padding: 16px 20px;
+}
+
+.wh-inventory-card-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.wh-inventory-card-title-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.wh-inventory-card-title {
+    margin: 0;
+    font-size: 18px;
+}
+
+.wh-inventory-card-subtitle {
+    margin-top: 4px;
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.wh-inventory-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: rgba(34, 197, 94, 0.12);
+    color: #166534;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.wh-inventory-chip-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.wh-inventory-chip {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--bg);
+}
+
+.wh-inventory-chip-label {
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.wh-inventory-note {
+    margin-top: 8px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--text);
+}
+
+.wh-inventory-details {
+    margin-top: 12px;
+}
+
+.wh-inventory-details summary {
+    cursor: pointer;
+    color: var(--accent);
+    font-weight: 600;
+}
+
+.wh-inventory-table-wrap {
+    margin-top: 10px;
+    max-height: 420px;
+    overflow: auto;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+}
+
+.wh-inventory-status {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-top: 4px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.wh-inventory-status-ok {
+    background: rgba(34, 197, 94, 0.12);
+    color: #166534;
+}
+
+.wh-inventory-status-warn {
+    background: rgba(245, 158, 11, 0.14);
+    color: #92400e;
+}
+
+.wh-inventory-status-muted {
+    background: rgba(148, 163, 184, 0.16);
+    color: #475569;
+}
+
 /* Warehouse tabs */
 #wh-tabs .tab {
     transition: all 0.15s;

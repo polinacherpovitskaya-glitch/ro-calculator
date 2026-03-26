@@ -357,7 +357,7 @@ const Warehouse = {
         this.recalcReservations();
         this.populateCategoryFilter();
         this.renderStats();
-        this.setView(this.currentView || 'table');
+        this.setView(this.currentView || 'table', { force: true });
     },
 
     async _seedInitialData() {
@@ -705,6 +705,290 @@ const Warehouse = {
             `Излишек: ${this._formatMoney(stats.surplusValue)}`,
             `Нетто: ${stats.netValue >= 0 ? '+' : '−'}${this._formatMoney(Math.abs(stats.netValue))}`,
         ].join(' · ');
+    },
+
+    _roundInventoryNumber(value) {
+        return Math.round((parseFloat(value) || 0) * 100) / 100;
+    },
+
+    _formatInventoryQty(value, unit) {
+        const rounded = this._roundInventoryNumber(value);
+        const normalizedUnit = String(unit || 'шт').trim();
+        return normalizedUnit
+            ? `${rounded.toLocaleString('ru-RU')} ${this.esc(normalizedUnit)}`
+            : rounded.toLocaleString('ru-RU');
+    },
+
+    _formatInventoryDateTime(value) {
+        if (!value) return '—';
+        try {
+            return new Intl.DateTimeFormat('ru-RU', {
+                dateStyle: 'medium',
+                timeStyle: 'short',
+            }).format(new Date(value));
+        } catch (e) {
+            return String(value || '—');
+        }
+    },
+
+    _normalizeInventoryAuditCount(value) {
+        const numeric = Number(value);
+        return Number.isFinite(numeric) ? Math.max(0, Math.round(numeric)) : null;
+    },
+
+    _normalizeInventoryAuditDetail(detail, currentItemsById) {
+        const raw = detail && typeof detail === 'object' ? detail : {};
+        const itemId = Number(raw.item_id || raw.id || 0);
+        const currentItem = itemId ? currentItemsById.get(itemId) || null : null;
+        const systemQtyRaw = raw.system_qty_before ?? raw.qty_before ?? raw.system_qty ?? raw.before_qty;
+        const actualQtyRaw = raw.actual_qty ?? raw.qty_after ?? raw.fact_qty ?? raw.actual;
+        const explicitDiff = raw.diff;
+        const unitPriceRaw = raw.price_per_unit ?? raw.unit_price ?? (currentItem && currentItem.price_per_unit);
+        const valueDiffRaw = raw.value_diff ?? raw.total_cost_change;
+
+        const systemQty = this._roundInventoryNumber(systemQtyRaw);
+        const actualQtyParsed = actualQtyRaw === '' || actualQtyRaw == null ? null : parseFloat(actualQtyRaw);
+        const actualQty = Number.isFinite(actualQtyParsed) ? this._roundInventoryNumber(actualQtyParsed) : null;
+        const parsedDiff = explicitDiff === '' || explicitDiff == null ? NaN : parseFloat(explicitDiff);
+        const diff = Number.isFinite(parsedDiff)
+            ? this._roundInventoryNumber(parsedDiff)
+            : (actualQty == null ? 0 : this._roundInventoryNumber(actualQty - systemQty));
+        const unitPrice = this._roundInventoryNumber(unitPriceRaw);
+        const parsedValueDiff = valueDiffRaw === '' || valueDiffRaw == null ? NaN : parseFloat(valueDiffRaw);
+        const valueDiff = Number.isFinite(parsedValueDiff)
+            ? this._roundInventoryNumber(parsedValueDiff)
+            : this._roundInventoryNumber(diff * unitPrice);
+        const currentQty = currentItem ? this._roundInventoryNumber(currentItem.qty) : null;
+        const matchesCurrent = actualQty != null && currentQty != null
+            ? Math.abs(currentQty - actualQty) < 0.000001
+            : null;
+
+        return {
+            item_id: itemId || null,
+            item_name: String(raw.item_name || raw.name || (currentItem && currentItem.name) || ''),
+            item_sku: String(raw.item_sku || raw.sku || (currentItem && currentItem.sku) || ''),
+            item_category: String(raw.item_category || raw.category || (currentItem && currentItem.category) || ''),
+            unit: String(raw.unit || (currentItem && currentItem.unit) || 'шт'),
+            system_qty_before: systemQty,
+            actual_qty: actualQty,
+            diff,
+            value_diff: valueDiff,
+            price_per_unit: unitPrice,
+            current_qty: currentQty,
+            matches_current: matchesCurrent,
+            is_changed: Math.abs(diff) >= 0.000001,
+        };
+    },
+
+    _getInventoryAuditAdjustments(auditEntry, history) {
+        const auditId = Number(auditEntry && auditEntry.id || 0);
+        const auditTime = new Date(auditEntry && auditEntry.created_at || 0).getTime();
+        const auditManager = String(auditEntry && auditEntry.created_by || '').trim();
+
+        return (history || []).filter(entry => {
+            if (!entry || entry.type !== 'adjustment') return false;
+            if (auditId && Number(entry.inventory_audit_id || 0) === auditId) return true;
+            if (!/Инвентаризация:/i.test(String(entry.notes || ''))) return false;
+            const entryTime = new Date(entry.created_at || 0).getTime();
+            if (!Number.isFinite(auditTime) || !Number.isFinite(entryTime) || Math.abs(entryTime - auditTime) > 5 * 60 * 1000) {
+                return false;
+            }
+            if (auditManager) {
+                const entryManager = String(entry.created_by || '').trim();
+                if (entryManager && entryManager !== auditManager) return false;
+            }
+            return true;
+        }).sort((a, b) => {
+            const catA = String(a && a.item_category || '');
+            const catB = String(b && b.item_category || '');
+            if (catA !== catB) return catA.localeCompare(catB, 'ru');
+            const nameA = String(a && a.item_name || '');
+            const nameB = String(b && b.item_name || '');
+            if (nameA !== nameB) return nameA.localeCompare(nameB, 'ru');
+            return Number(a && a.item_id || 0) - Number(b && b.item_id || 0);
+        });
+    },
+
+    _buildLegacyInventoryAuditDetails(auditEntry, history, currentItemsById) {
+        return this._getInventoryAuditAdjustments(auditEntry, history).map(entry => this._normalizeInventoryAuditDetail({
+            item_id: entry.item_id,
+            item_name: entry.item_name,
+            item_sku: entry.item_sku,
+            item_category: entry.item_category,
+            unit: (currentItemsById.get(Number(entry.item_id || 0)) || {}).unit || 'шт',
+            system_qty_before: entry.qty_before,
+            actual_qty: entry.qty_after,
+            diff: entry.qty_change,
+            price_per_unit: entry.unit_price,
+            value_diff: (parseFloat(entry.qty_change) || 0) * (parseFloat(entry.unit_price) || 0),
+        }, currentItemsById));
+    },
+
+    _getInventoryAuditEntries(history) {
+        const currentItemsById = new Map((this.allItems || []).map(item => [Number(item.id || 0), item]));
+
+        return (history || [])
+            .filter(entry => entry && entry.type === 'inventory_audit')
+            .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+            .map(entry => {
+                const storedDetails = Array.isArray(entry.inventory_details) ? entry.inventory_details : [];
+                const detailSource = storedDetails.length > 0 ? 'stored' : 'derived';
+                const details = (storedDetails.length > 0
+                    ? storedDetails.map(detail => this._normalizeInventoryAuditDetail(detail, currentItemsById))
+                    : this._buildLegacyInventoryAuditDetails(entry, history, currentItemsById))
+                    .filter(Boolean);
+                const comparableDetails = details.filter(detail => detail.actual_qty != null && detail.current_qty != null);
+                const matchedCurrentCount = comparableDetails.filter(detail => detail.matches_current).length;
+
+                const changedPositions = this._normalizeInventoryAuditCount(entry.inventory_positions_changed)
+                    ?? details.filter(detail => detail.is_changed).length;
+                const enteredPositions = this._normalizeInventoryAuditCount(entry.inventory_entered_positions)
+                    ?? (storedDetails.length > 0 ? details.length : null);
+                const totalPositions = this._normalizeInventoryAuditCount(entry.inventory_total_positions);
+                const unchangedPositions = this._normalizeInventoryAuditCount(entry.inventory_positions_unchanged)
+                    ?? (enteredPositions != null ? Math.max(0, enteredPositions - changedPositions) : null);
+                const omittedPositions = this._normalizeInventoryAuditCount(entry.inventory_positions_omitted)
+                    ?? (enteredPositions != null && totalPositions != null ? Math.max(0, totalPositions - enteredPositions) : null);
+
+                return {
+                    ...entry,
+                    details,
+                    detailSource,
+                    changedPositions,
+                    enteredPositions,
+                    totalPositions,
+                    unchangedPositions,
+                    omittedPositions,
+                    shortageValue: this._roundInventoryNumber(entry.inventory_shortage_value),
+                    surplusValue: this._roundInventoryNumber(entry.inventory_surplus_value),
+                    netValue: this._roundInventoryNumber(entry.inventory_net_value),
+                    currentCheckCount: comparableDetails.length,
+                    currentMatchCount: matchedCurrentCount,
+                };
+            });
+    },
+
+    _renderInventoryAuditCard(audit, isLatest) {
+        const chips = [
+            `<div class="wh-inventory-chip"><span class="wh-inventory-chip-label">С расхождением</span><strong>${audit.changedPositions}</strong></div>`,
+            audit.enteredPositions != null
+                ? `<div class="wh-inventory-chip"><span class="wh-inventory-chip-label">Вписано</span><strong>${audit.enteredPositions}</strong></div>`
+                : '',
+            audit.unchangedPositions != null
+                ? `<div class="wh-inventory-chip"><span class="wh-inventory-chip-label">Совпало</span><strong>${audit.unchangedPositions}</strong></div>`
+                : '',
+            audit.omittedPositions != null
+                ? `<div class="wh-inventory-chip"><span class="wh-inventory-chip-label">Не вписали</span><strong>${audit.omittedPositions}</strong></div>`
+                : '',
+            `<div class="wh-inventory-chip"><span class="wh-inventory-chip-label">Недостача</span><strong>${this._formatMoney(audit.shortageValue)}</strong></div>`,
+            `<div class="wh-inventory-chip"><span class="wh-inventory-chip-label">Излишек</span><strong>${this._formatMoney(audit.surplusValue)}</strong></div>`,
+            `<div class="wh-inventory-chip"><span class="wh-inventory-chip-label">Нетто</span><strong>${audit.netValue >= 0 ? '+' : '−'}${this._formatMoney(Math.abs(audit.netValue))}</strong></div>`,
+        ].filter(Boolean).join('');
+
+        const noteLines = [];
+        if (audit.detailSource === 'derived') {
+            noteLines.push('Подробные строки восстановлены из истории корректировок. В первой версии инвентаризации система сохраняла только позиции с расхождением, без строк "совпало" и без списка невнесённых позиций.');
+        }
+        if (audit.currentCheckCount > 0) {
+            noteLines.push(`Проверка сейчас: совпадает ${audit.currentMatchCount} из ${audit.currentCheckCount} детализированных строк.`);
+        }
+        if (!noteLines.length && audit.notes) {
+            noteLines.push(String(audit.notes));
+        }
+
+        const detailsRows = audit.details.map(detail => {
+            const cat = WAREHOUSE_CATEGORIES.find(entry => entry.key === detail.item_category);
+            const diffClass = detail.diff > 0
+                ? 'audit-positive'
+                : (detail.diff < 0 ? 'audit-negative' : 'audit-zero');
+            const diffText = detail.diff > 0
+                ? `+${this._formatInventoryQty(detail.diff, detail.unit)}`
+                : (detail.diff < 0
+                    ? `−${this._formatInventoryQty(Math.abs(detail.diff), detail.unit)}`
+                    : this._formatInventoryQty(0, detail.unit));
+            const valueText = detail.value_diff > 0
+                ? `+${this._formatMoney(detail.value_diff)}`
+                : (detail.value_diff < 0
+                    ? `−${this._formatMoney(Math.abs(detail.value_diff))}`
+                    : this._formatMoney(0));
+            const verifyClass = detail.matches_current == null
+                ? 'wh-inventory-status-muted'
+                : (detail.matches_current ? 'wh-inventory-status-ok' : 'wh-inventory-status-warn');
+            const verifyLabel = detail.matches_current == null
+                ? 'Нет данных'
+                : (detail.matches_current ? 'Совпадает' : 'Изменилось');
+            return `<tr>
+                <td><span class="wh-cat-badge" style="background:${cat?.color || '#f1f5f9'};color:${cat?.textColor || '#475569'};">${cat?.label || '—'}</span></td>
+                <td>
+                    <div style="font-weight:600;">${this.esc(detail.item_name || '—')}</div>
+                    ${detail.item_sku ? `<div style="font-size:11px;color:var(--text-muted);">${this.esc(detail.item_sku)}</div>` : ''}
+                </td>
+                <td class="text-right">${this._formatInventoryQty(detail.system_qty_before, detail.unit)}</td>
+                <td class="text-right">${detail.actual_qty == null ? '—' : this._formatInventoryQty(detail.actual_qty, detail.unit)}</td>
+                <td class="text-right ${diffClass}" style="font-weight:700;">${diffText}</td>
+                <td class="text-right ${diffClass}" style="font-weight:700;">${valueText}</td>
+                <td class="text-right">
+                    ${detail.current_qty == null ? '—' : this._formatInventoryQty(detail.current_qty, detail.unit)}
+                    <div class="wh-inventory-status ${verifyClass}">${verifyLabel}</div>
+                </td>
+            </tr>`;
+        }).join('');
+
+        return `<div class="card wh-inventory-card">
+            <div class="wh-inventory-card-head">
+                <div>
+                    <div class="wh-inventory-card-title-row">
+                        <h3 class="wh-inventory-card-title">Инвентаризация от ${this._formatInventoryDateTime(audit.created_at)}</h3>
+                        ${isLatest ? '<span class="wh-inventory-badge">Последняя</span>' : ''}
+                    </div>
+                    <div class="wh-inventory-card-subtitle">
+                        Провёл: <strong>${this.esc(audit.created_by || '—')}</strong>
+                        ${audit.totalPositions != null ? ` · Всего позиций на складе: ${audit.totalPositions}` : ''}
+                    </div>
+                </div>
+            </div>
+            <div class="wh-inventory-chip-grid">${chips}</div>
+            ${noteLines.map(line => `<div class="wh-inventory-note">${this.esc(line)}</div>`).join('')}
+            ${audit.details.length > 0 ? `<details class="wh-inventory-details" ${isLatest ? 'open' : ''}>
+                <summary>Показать детали (${audit.details.length})</summary>
+                <div class="table-wrap wh-inventory-table-wrap">
+                    <table>
+                        <thead><tr>
+                            <th>Категория</th>
+                            <th>Позиция</th>
+                            <th class="text-right">Было</th>
+                            <th class="text-right">Вписали</th>
+                            <th class="text-right">Разница</th>
+                            <th class="text-right">Расхождение ₽</th>
+                            <th class="text-right">Сейчас на складе</th>
+                        </tr></thead>
+                        <tbody>${detailsRows}</tbody>
+                    </table>
+                </div>
+            </details>` : `<div class="wh-inventory-note">Для этой инвентаризации в истории нет детализированных строк.</div>`}
+        </div>`;
+    },
+
+    async renderInventoryView() {
+        const container = document.getElementById('wh-content');
+        if (!container) return;
+
+        const history = await loadWarehouseHistory();
+        const audits = this._getInventoryAuditEntries(history);
+
+        if (audits.length === 0) {
+            container.innerHTML = `<div class="card">
+                <p class="text-center text-muted">Инвентаризаций пока нет</p>
+                <div style="display:flex;justify-content:center;">
+                    <button class="btn btn-outline" onclick="Warehouse.showAudit()">☑ Провести первую инвентаризацию</button>
+                </div>
+            </div>`;
+            return;
+        }
+
+        container.innerHTML = `<div class="wh-inventory-list">
+            ${audits.map((audit, index) => this._renderInventoryAuditCard(audit, index === 0)).join('')}
+        </div>`;
     },
 
     // ==========================================
@@ -2124,7 +2408,7 @@ const Warehouse = {
             return;
         }
         await saveWarehouseItems(this.allItems);
-        this.setView(this.currentView || 'table');
+        this.setView(this.currentView || 'table', { force: true });
         App.toast(`Фото очищены: ${changed}`);
     },
 
@@ -2149,7 +2433,7 @@ const Warehouse = {
             return;
         }
         await saveWarehouseItems(this.allItems);
-        this.setView(this.currentView || 'table');
+        this.setView(this.currentView || 'table', { force: true });
         App.toast(`Фото восстановлены по SKU: ${restored}`);
     },
 
@@ -2319,6 +2603,7 @@ const Warehouse = {
 
     async saveAuditResults() {
         const draft = this._ensureAuditDraft();
+        const enteredRows = [];
         const changes = [];
 
         Object.entries(draft.values || {}).forEach(([rawId, rawValue]) => {
@@ -2327,7 +2612,20 @@ const Warehouse = {
             const item = (this.allItems || []).find(entry => Number(entry && entry.id || 0) === itemId);
             if (!item) return;
             const meta = this._getAuditDiffMeta(item, rawValue);
-            if (meta.diff == null || Math.abs(meta.diff) < 0.000001) return;
+            if (meta.diff == null) return;
+            enteredRows.push({
+                item_id: item.id,
+                item_name: item.name || '',
+                item_sku: item.sku || '',
+                item_category: item.category || '',
+                unit: item.unit || 'шт',
+                system_qty_before: this._roundInventoryNumber(meta.systemQty),
+                actual_qty: this._roundInventoryNumber(meta.actualQty),
+                diff: this._roundInventoryNumber(meta.diff),
+                value_diff: this._roundInventoryNumber(meta.valueDiff || 0),
+                price_per_unit: this._roundInventoryNumber(item.price_per_unit),
+            });
+            if (Math.abs(meta.diff) < 0.000001) return;
             changes.push({
                 item,
                 actualQty: meta.actualQty,
@@ -2352,6 +2650,8 @@ const Warehouse = {
         if (!confirm(confirmText)) return;
 
         const createdBy = App.getCurrentEmployeeName ? App.getCurrentEmployeeName() : '';
+        const auditId = Date.now() + Math.floor(Math.random() * 1000);
+        const auditCreatedAt = new Date().toISOString();
         const details = [];
         for (const change of changes) {
             await this.adjustStock(
@@ -2361,14 +2661,17 @@ const Warehouse = {
                 '',
                 `Инвентаризация: факт ${change.actualQty}, было ${parseFloat(change.item.qty) || 0}`,
                 createdBy,
-                { inventory_audit: true }
+                {
+                    inventory_audit: true,
+                    inventory_audit_id: auditId,
+                }
             );
             details.push(`${change.item.name}: ${change.diff > 0 ? '+' : ''}${change.diff} шт (${change.valueDiff >= 0 ? '+' : '−'}${this._formatMoney(Math.abs(change.valueDiff))})`);
         }
 
         const history = await loadWarehouseHistory();
         history.push({
-            id: Date.now(),
+            id: auditId,
             item_id: 0,
             item_name: 'Инвентаризация склада',
             item_sku: '',
@@ -2384,12 +2687,17 @@ const Warehouse = {
             order_name: '',
             notes: `Скорректировано ${stats.changedPositions} поз.; недостача ${this._formatMoney(stats.shortageValue)}, излишек ${this._formatMoney(stats.surplusValue)}, нетто ${stats.netValue >= 0 ? '+' : '−'}${this._formatMoney(Math.abs(stats.netValue))}. Детали: ${details.slice(0, 12).join('; ')}`,
             clamped: false,
-            created_at: new Date().toISOString(),
+            created_at: auditCreatedAt,
             created_by: createdBy || '',
             inventory_shortage_value: Math.round(stats.shortageValue * 100) / 100,
             inventory_surplus_value: Math.round(stats.surplusValue * 100) / 100,
             inventory_net_value: Math.round(stats.netValue * 100) / 100,
             inventory_positions_changed: stats.changedPositions,
+            inventory_entered_positions: stats.enteredPositions,
+            inventory_positions_unchanged: Math.max(0, stats.enteredPositions - stats.changedPositions),
+            inventory_total_positions: (this.allItems || []).length,
+            inventory_positions_omitted: Math.max(0, (this.allItems || []).length - stats.enteredPositions),
+            inventory_details: enteredRows,
         });
         await saveWarehouseHistory(history);
 
@@ -3790,9 +4098,10 @@ const Warehouse = {
         });
     },
 
-    setView(view) {
+    setView(view, options) {
+        const force = !!(options && options.force);
         if (!view) view = 'table';
-        if (this._viewInitialized && this.currentView === view && view !== 'shipments') return;
+        if (!force && this._viewInitialized && this.currentView === view && view !== 'shipments') return;
         this._viewInitialized = true;
         this.currentView = view;
         this._viewToken += 1;
@@ -3820,6 +4129,8 @@ const Warehouse = {
             if (shipmentsContent) shipmentsContent.style.display = 'none';
             if (view === 'history') {
                 this.renderHistory();
+            } else if (view === 'inventory') {
+                this.renderInventoryView();
             } else if (view === 'project-hardware') {
                 this.renderProjectHardwareView(token);
             } else if (view === 'ready-goods') {

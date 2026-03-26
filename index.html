@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=100">
+    <link rel="stylesheet" href="css/style.css?v=101">
 </head>
 <body>
 
@@ -35,7 +35,7 @@
     <aside class="sidebar">
         <div class="sidebar-brand">
             <h2>Recycle Object</h2>
-            <span>Калькулятор <span id="app-version">v186</span></span>
+            <span>Калькулятор <span id="app-version">v187</span></span>
         </div>
         <nav class="sidebar-nav">
             <a href="#tasks" data-page="tasks">
@@ -1583,7 +1583,7 @@
                 <div class="flex gap-8">
                     <button class="btn btn-outline" onclick="Warehouse.setView('shipments')" style="background:rgba(251,191,36,0.1);border-color:rgba(251,191,36,0.5);color:#92400e;font-weight:600;">&#128230; Приёмка из Китая</button>
                     <button class="btn btn-outline" onclick="Warehouse.showImport()">&#8645; Импорт CSV</button>
-                    <button class="btn btn-outline" onclick="Warehouse.showAudit()">&#9745; Инвентаризация</button>
+                    <button class="btn btn-outline" onclick="Warehouse.showAudit()">&#9745; Провести инвентаризацию</button>
                     <button class="btn btn-primary" onclick="Warehouse.showAddForm()">+ Новая позиция</button>
                 </div>
             </div>
@@ -1625,11 +1625,12 @@
             </div>
 
             <!-- Tabs -->
-            <div id="wh-tabs" style="display:flex; gap:0; margin-bottom:12px; border-bottom:2px solid var(--border);">
+            <div id="wh-tabs" style="display:flex; flex-wrap:wrap; gap:0; margin-bottom:12px; border-bottom:2px solid var(--border);">
                 <div class="tab active" data-tab="table" onclick="Warehouse.setView('table')" style="padding:8px 16px; cursor:pointer; font-weight:600; font-size:13px; border-bottom:2px solid var(--accent); margin-bottom:-2px;">Таблица</div>
                 <div class="tab" data-tab="project-hardware" onclick="Warehouse.setView('project-hardware')" style="padding:8px 16px; cursor:pointer; font-size:13px; color:var(--text-muted); border-bottom:2px solid transparent; margin-bottom:-2px;">Фурнитура для проектов</div>
                 <div class="tab" data-tab="shipments" onclick="Warehouse.setView('shipments')" style="padding:8px 16px; cursor:pointer; font-size:13px; color:var(--text-muted); border-bottom:2px solid transparent; margin-bottom:-2px;">Приёмки из Китая</div>
                 <div class="tab" data-tab="ready-goods" onclick="Warehouse.setView('ready-goods')" style="padding:8px 16px; cursor:pointer; font-size:13px; color:var(--text-muted); border-bottom:2px solid transparent; margin-bottom:-2px;">📦 Готовая продукция</div>
+                <div class="tab" data-tab="inventory" onclick="Warehouse.setView('inventory')" style="padding:8px 16px; cursor:pointer; font-size:13px; color:var(--text-muted); border-bottom:2px solid transparent; margin-bottom:-2px;">☑ Инвентаризация</div>
                 <div class="tab" data-tab="history" onclick="Warehouse.setView('history')" style="padding:8px 16px; cursor:pointer; font-size:13px; color:var(--text-muted); border-bottom:2px solid transparent; margin-bottom:-2px;">История движений</div>
             </div>
 
@@ -3280,7 +3281,7 @@
 <script src="js/supabase.js?v=160"></script>
 <script src="js/task-events.js?v=1"></script>
 <script src="js/calculator.js?v=72"></script>
-<script src="js/app.js?v=186"></script>
+<script src="js/app.js?v=187"></script>
 <script src="js/wiki.js?v=4"></script>
 <script src="js/order-detail.js?v=61"></script>
 <script src="js/orders.js?v=64"></script>
@@ -3301,7 +3302,7 @@
 <script src="js/warehouse_photos.js?v=48"></script>
 <script src="js/china_catalog.js?v=46k"></script>
 <script src="js/marketplaces.js?v=77"></script>
-<script src="js/warehouse.js?v=172"></script>
+<script src="js/warehouse.js?v=173"></script>
 <script src="js/settings.js?v=79"></script>
 <script src="js/pendant.js?v=11"></script>
 </body>
