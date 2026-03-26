@@ -1000,6 +1000,50 @@ async function smokePendantStepNavigationSync() {
     assert.deepEqual(staleState.colors, ['red', 'pink', 'yellow']);
 }
 
+async function smokePendantOverlayDoesNotCloseWizard() {
+    const pendantContext = createContext();
+    stubRuntime(pendantContext);
+    ['js/calculator.js', 'js/app.js'].forEach(file => runScript(pendantContext, file));
+    vm.runInContext('delete globalThis.Pendant;', pendantContext);
+    runScript(pendantContext, 'js/pendant.js');
+
+    const modalState = clone(await vm.runInContext(`(() => {
+        const originalCreateElement = document.createElement.bind(document);
+        const originalGetElementById = document.getElementById.bind(document);
+        document.createElement = (tag) => {
+            const el = originalCreateElement(tag);
+            el._listeners = {};
+            el.addEventListener = function(name, handler) {
+                this._listeners[name] = handler;
+            };
+            return el;
+        };
+        document.body.appendChild = (el) => {
+            globalThis.__lastPendantModal = el;
+        };
+        document.getElementById = (id) => {
+            if (id === 'pendant-wizard-modal') return globalThis.__lastPendantModal || null;
+            return originalGetElementById(id);
+        };
+
+        Pendant._wizardData = Pendant.getEmpty();
+        Pendant._wizardData.quantity = 10;
+        Pendant._commitName('AB');
+        Pendant._wizardStep = 1;
+        Pendant._showWizardModal();
+
+        const modal = globalThis.__lastPendantModal;
+        return {
+            hasOverlayClickHandler: !!modal?._listeners?.click,
+            html: modal?.innerHTML || ''
+        };
+    })()`, pendantContext));
+
+    assert.equal(modalState.hasOverlayClickHandler, false);
+    assert.match(modalState.html, /Pendant\._closeWizard\(\)/);
+    assert.match(modalState.html, /&times;/);
+}
+
 async function smokePendantAutoPriceFromBlanks() {
     const pendantContext = createContext();
     stubRuntime(pendantContext);
@@ -3093,6 +3137,7 @@ async function main() {
     await smokePendantSplitAllocationUsesAllocatedQty();
     await smokePendantIgnoresSpaces();
     await smokePendantStepNavigationSync();
+    await smokePendantOverlayDoesNotCloseWizard();
     await smokePendantAutoPriceFromBlanks();
     await smokeLegacyPendantRestore(context);
     await smokeReadyGoodsRollback(context);
