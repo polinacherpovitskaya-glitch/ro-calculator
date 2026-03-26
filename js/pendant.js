@@ -657,7 +657,7 @@ const Pendant = {
         if (isMetric) {
             const needMeters = round2(lengthCm * qty / 100);
             const stockMeters = data?.unit === 'см' && selectedStock !== null ? round2(selectedStock / 100) : selectedStock;
-            costPerPendant = data?.price_per_unit ? round2((data.price_per_unit * lengthCm / 100) + (data.delivery_price || 0)) : 0;
+            costPerPendant = data?.price_per_unit ? round2((data.price_per_unit * this._getMetricAttachmentRateFactor(data)) + (data.delivery_price || 0)) : 0;
             if (lengthCm > 0 && qty > 0) {
                 helperText = `Нужно: <b>${needMeters} м</b> · Цена за подвес: <b>${formatRub(costPerPendant)}</b>`;
             }
@@ -902,11 +902,19 @@ const Pendant = {
         return type === 'cord' && (entry?.unit === 'м' || entry?.unit === 'см');
     },
 
+    _getMetricAttachmentRateFactor(entry) {
+        if (typeof getPendantMetricRateFactor === 'function') {
+            return getPendantMetricRateFactor(entry);
+        }
+        const lengthCm = parseFloat(entry?.length_cm) || 0;
+        if (!(lengthCm > 0)) return 0;
+        return entry?.unit === 'см' ? lengthCm : (lengthCm / 100);
+    },
+
     _getAttachmentCostPerPendant(type, entry) {
         if (!entry) return 0;
         if (this._isMetricAttachment(type, entry)) {
-            const lengthCm = parseFloat(entry.length_cm) || 0;
-            return round2(((entry.price_per_unit || 0) * lengthCm / 100) + (entry.delivery_price || 0));
+            return round2(((entry.price_per_unit || 0) * this._getMetricAttachmentRateFactor(entry)) + (entry.delivery_price || 0));
         }
         const qtyPerPendant = parseFloat(entry.qty_per_pendant) || 1;
         return round2(((entry.price_per_unit || 0) + (entry.delivery_price || 0)) * qtyPerPendant);
@@ -915,8 +923,7 @@ const Pendant = {
     _getAttachmentSellPerPendant(type, entry) {
         if (!entry) return 0;
         if (this._isMetricAttachment(type, entry)) {
-            const lengthCm = parseFloat(entry.length_cm) || 0;
-            return round2((entry.sell_price || 0) * lengthCm / 100);
+            return round2((entry.sell_price || 0) * this._getMetricAttachmentRateFactor(entry));
         }
         const qtyPerPendant = parseFloat(entry.qty_per_pendant) || 1;
         return round2((entry.sell_price || 0) * qtyPerPendant);
@@ -928,7 +935,7 @@ const Pendant = {
         if (!(rowCost > 0)) return;
         const recommendedRowSell = Math.round(calcSellByNetMargin40(rowCost, App.params));
         if (this._isMetricAttachment(type, entry)) {
-            const factor = (parseFloat(entry.length_cm) || 0) / 100;
+            const factor = this._getMetricAttachmentRateFactor(entry);
             entry.sell_price = factor > 0 ? round2(recommendedRowSell / factor) : recommendedRowSell;
         } else {
             const qtyPerPendant = parseFloat(entry.qty_per_pendant) || 1;
@@ -942,7 +949,7 @@ const Pendant = {
         if (!entry) return;
         const rowSell = round2(parseFloat(rowSellPrice) || 0);
         if (this._isMetricAttachment(type, entry)) {
-            const factor = (parseFloat(entry.length_cm) || 0) / 100;
+            const factor = this._getMetricAttachmentRateFactor(entry);
             entry.sell_price = factor > 0 ? round2(rowSell / factor) : rowSell;
         } else {
             const qtyPerPendant = parseFloat(entry.qty_per_pendant) || 1;

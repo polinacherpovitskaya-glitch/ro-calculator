@@ -408,9 +408,26 @@ const Warehouse = {
             const activeRes = this.allReservations.filter(
                 r => r.item_id === item.id && r.status === 'active'
             );
-            item.reserved_qty = activeRes.reduce((s, r) => s + (r.qty || 0), 0);
-            item.available_qty = Math.max(0, (item.qty || 0) - item.reserved_qty);
+            item.reserved_qty = activeRes.reduce((s, r) => s + this._parseWarehouseQty(r.qty), 0);
+            item.available_qty = Math.max(0, this._parseWarehouseQty(item.qty) - item.reserved_qty);
         });
+    },
+
+    _parseWarehouseQty(value) {
+        const parsed = parseFloat(value);
+        return Number.isFinite(parsed) ? parsed : 0;
+    },
+
+    _supportsFractionalWarehouseQty(unitOrItem) {
+        const rawUnit = typeof unitOrItem === 'object' && unitOrItem !== null
+            ? unitOrItem.unit
+            : unitOrItem;
+        const unit = this._normStr(rawUnit || '');
+        return unit === 'м' || unit === 'см';
+    },
+
+    _warehouseQtyInputStep(unitOrItem) {
+        return this._supportsFractionalWarehouseQty(unitOrItem) ? 'any' : '1';
     },
 
     populateCategoryFilter() {
@@ -697,8 +714,8 @@ const Warehouse = {
     async renderStats() {
         const items = this.allItems;
         const totalItems = items.length;
-        const totalQty = items.reduce((s, i) => s + (i.qty || 0), 0);
-        const totalReserved = items.reduce((s, i) => s + (i.reserved_qty || 0), 0);
+        const totalQty = items.reduce((s, i) => s + this._parseWarehouseQty(i.qty), 0);
+        const totalReserved = items.reduce((s, i) => s + this._parseWarehouseQty(i.reserved_qty), 0);
         const lowStock = items.filter(i => i.min_qty > 0 && i.qty < i.min_qty).length;
         const frozenHardware = items.reduce((s, i) => {
             const qty = Math.max(0, parseFloat(i.qty) || 0);
@@ -1458,6 +1475,7 @@ const Warehouse = {
             const availInfo = item.reserved_qty > 0
                 ? `<span style="font-weight:600;">${item.available_qty}</span>`
                 : `<span style="color:var(--text-muted);">—</span>`;
+            const qtyStep = this._warehouseQtyInputStep(item);
 
             // Color dropdown options
             const colorOpts = uniqueColors.map(c =>
@@ -1484,11 +1502,11 @@ const Warehouse = {
                         onchange="Warehouse.inlinePrice(${item.id}, this.value)">
                 </td>
                 <td>
-                    <input type="number" class="wh-inline-input text-right ${qtyClass}" value="${item.qty || 0}" min="0"
+                    <input type="number" class="wh-inline-input text-right ${qtyClass}" value="${item.qty || 0}" min="0" step="${qtyStep}"
                         onchange="Warehouse.inlineQty(${item.id}, this.value, ${item.qty || 0})">
                 </td>
                 <td>
-                    <input type="number" class="wh-inline-input text-right" value="${item.reserved_qty || 0}" min="0" max="${item.qty || 0}"
+                    <input type="number" class="wh-inline-input text-right" value="${item.reserved_qty || 0}" min="0" max="${item.qty || 0}" step="${qtyStep}"
                         style="${item.reserved_qty > 0 ? 'color:var(--yellow);font-weight:600;' : ''}"
                         onchange="Warehouse.inlineReserve(${item.id}, this.value, ${item.reserved_qty || 0})">
                 </td>
@@ -1791,7 +1809,7 @@ const Warehouse = {
         if (!item) return;
         const input = prompt(`Корректировка "${item.name}" (текущее: ${item.qty})\nВведите изменение (+10 или -5):`);
         if (input === null) return;
-        const delta = parseInt(input);
+        const delta = parseFloat(input);
         if (isNaN(delta) || delta === 0) { App.toast('Неверное значение'); return; }
 
         const reason = prompt('Причина корректировки:') || '';
@@ -1831,7 +1849,7 @@ const Warehouse = {
     },
 
     async inlineQty(itemId, newValueStr, oldQty) {
-        const newQty = Math.max(0, parseInt(newValueStr) || 0);
+        const newQty = Math.max(0, this._parseWarehouseQty(newValueStr));
         const delta = newQty - (oldQty || 0);
         if (delta === 0) return;
 
@@ -1875,8 +1893,8 @@ const Warehouse = {
         const item = this.allItems.find(i => Number(i && i.id || 0) === normalizedItemId);
         if (!item) return;
 
-        const newReserved = Math.max(0, parseInt(newValueStr) || 0);
-        const maxReserve = item.qty || 0;
+        const newReserved = Math.max(0, this._parseWarehouseQty(newValueStr));
+        const maxReserve = this._parseWarehouseQty(item.qty);
         const clampedReserve = Math.min(newReserved, maxReserve);
         const diff = clampedReserve - (oldReserved || 0);
         if (diff === 0) return;
@@ -1940,7 +1958,7 @@ const Warehouse = {
         if (!orderName) return;
 
         const qtyStr = prompt(`Количество для резерва (макс: ${available}):`);
-        const qty = parseInt(qtyStr);
+        const qty = this._parseWarehouseQty(qtyStr);
         if (!qty || qty <= 0) { App.toast('Неверное количество'); return; }
         if (qty > available) { App.toast(`Недостаточно! Доступно: ${available}`); return; }
 
@@ -1976,8 +1994,8 @@ const Warehouse = {
         const activeRes = this.allReservations.filter(
             r => Number(r.item_id || 0) === normalizedItemId && r.status === 'active'
         );
-        const reserved = activeRes.reduce((s, r) => s + (r.qty || 0), 0);
-        return Math.max(0, (item.qty || 0) - reserved);
+        const reserved = activeRes.reduce((s, r) => s + this._parseWarehouseQty(r.qty), 0);
+        return Math.max(0, this._parseWarehouseQty(item.qty) - reserved);
     },
 
     renderItemReservations(itemId) {
@@ -2178,7 +2196,7 @@ const Warehouse = {
             item_name: `Импорт (${items.length} позиций)`,
             item_sku: '',
             type: 'import',
-            qty_change: items.reduce((s, i) => s + (i.qty || 0), 0),
+            qty_change: items.reduce((s, i) => s + this._parseWarehouseQty(i.qty), 0),
             qty_before: 0,
             qty_after: 0,
             order_name: '',
@@ -2633,8 +2651,39 @@ const Warehouse = {
 
     _collectWarehouseDemandFromOrderItems(items) {
         const grouped = new Map();
+        const addDemandRow = (itemId, qty, name, materialType = 'hardware') => {
+            const normalizedItemId = Number(itemId || 0);
+            const normalizedQty = parseFloat(qty) || 0;
+            if (!normalizedItemId || normalizedQty <= 0) return;
+
+            const key = String(normalizedItemId);
+            const prev = grouped.get(key);
+            const normalizedName = name || '';
+            if (!prev) {
+                grouped.set(key, {
+                    warehouse_item_id: normalizedItemId,
+                    qty: normalizedQty,
+                    names: normalizedName ? [normalizedName] : [],
+                    material_type: materialType,
+                });
+                return;
+            }
+
+            prev.qty += normalizedQty;
+            if (normalizedName && !prev.names.includes(normalizedName)) prev.names.push(normalizedName);
+            if (prev.material_type !== materialType) prev.material_type = 'mixed';
+            grouped.set(key, prev);
+        };
+
         (items || []).forEach(item => {
             const itemType = String(item.item_type || '').toLowerCase();
+            if (itemType === 'pendant' && typeof getPendantWarehouseDemandRows === 'function') {
+                getPendantWarehouseDemandRows(item).forEach(row => {
+                    addDemandRow(row.warehouse_item_id, row.qty, row.name, row.material_type || 'hardware');
+                });
+                return;
+            }
+
             const isHardware = itemType === 'hardware';
             const isPackaging = itemType === 'packaging';
             if (!isHardware && !isPackaging) return;
@@ -2659,25 +2708,9 @@ const Warehouse = {
                 ?? item.qty
                 ?? 0
             ) || 0;
-            if (!itemId || qty <= 0) return;
-
-            const key = String(itemId);
-            const prev = grouped.get(key);
             const name = item.product_name || item.name || '';
             const materialType = isPackaging ? 'packaging' : 'hardware';
-            if (!prev) {
-                grouped.set(key, {
-                    warehouse_item_id: itemId,
-                    qty,
-                    names: name ? [name] : [],
-                    material_type: materialType,
-                });
-                return;
-            }
-            prev.qty += qty;
-            if (name && !prev.names.includes(name)) prev.names.push(name);
-            if (prev.material_type !== materialType) prev.material_type = 'mixed';
-            grouped.set(key, prev);
+            addDemandRow(itemId, qty, name, materialType);
         });
         return Array.from(grouped.values());
     },
@@ -5374,8 +5407,8 @@ const Warehouse = {
 
         items.forEach(item => {
             const activeRes = reservations.filter(r => r.item_id === item.id && r.status === 'active');
-            const reservedQty = activeRes.reduce((s, r) => s + (r.qty || 0), 0);
-            item.available_qty = Math.max(0, (item.qty || 0) - reservedQty);
+            const reservedQty = activeRes.reduce((s, r) => s + this._parseWarehouseQty(r.qty), 0);
+            item.available_qty = Math.max(0, this._parseWarehouseQty(item.qty) - reservedQty);
         });
 
         const grouped = {};

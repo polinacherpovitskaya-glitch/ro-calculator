@@ -365,7 +365,22 @@ const Orders = {
 
     buildHardwareMeta(items) {
         const hardwareItems = (items || []).filter(item => item.item_type === 'hardware');
-        if (hardwareItems.length === 0) {
+        const pendantAttachments = [];
+        if (typeof getPendantAttachmentEntries === 'function') {
+            (items || []).filter(item => item.item_type === 'pendant').forEach(pendant => {
+                ['cord', 'carabiner'].forEach(type => {
+                    getPendantAttachmentEntries(pendant, type).forEach(entry => {
+                        pendantAttachments.push({
+                            hardware_source: entry.source || 'warehouse',
+                            source: entry.source || 'warehouse',
+                            custom_country: entry.custom_country || 'china',
+                        });
+                    });
+                });
+            });
+        }
+        const demandItems = [...hardwareItems, ...pendantAttachments];
+        if (demandItems.length === 0) {
             return {
                 label: 'Фурнитура не нужна',
                 className: 'badge-red',
@@ -373,7 +388,7 @@ const Orders = {
             };
         }
 
-        const sourceKinds = new Set(hardwareItems.map(item => {
+        const sourceKinds = new Set(demandItems.map(item => {
             const source = String(item.hardware_source || item.source || 'custom').toLowerCase();
             const country = String(item.custom_country || 'china').toLowerCase();
             if (source === 'warehouse') return 'warehouse';
@@ -992,6 +1007,11 @@ const Orders = {
             }
             if (includePackaging && item.item_type === 'packaging' && item.packaging_source === 'warehouse' && item.packaging_warehouse_item_id) {
                 add(item.packaging_warehouse_item_id, qty);
+            }
+            if (includeHardware && item.item_type === 'pendant' && typeof getPendantWarehouseDemandRows === 'function') {
+                getPendantWarehouseDemandRows(item).forEach(row => {
+                    add(row.warehouse_item_id, parseFloat(row.qty) || 0);
+                });
             }
         });
         return demand;

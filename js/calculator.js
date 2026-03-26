@@ -321,11 +321,57 @@ function isPendantMetricAttachment(type, entry) {
     return type === 'cord' && (entry?.unit === 'м' || entry?.unit === 'см');
 }
 
+function getPendantMetricRateFactor(entry) {
+    const lengthCm = parseFloat(entry?.length_cm) || 0;
+    if (!(lengthCm > 0)) return 0;
+    return entry?.unit === 'см' ? lengthCm : (lengthCm / 100);
+}
+
+function getPendantAttachmentRequiredQty(pendant, type, entry) {
+    const qty = parseFloat(pendant?.quantity) || 0;
+    if (!(qty > 0) || !entry) return 0;
+    if (isPendantMetricAttachment(type, entry)) {
+        return round2(qty * getPendantMetricRateFactor(entry));
+    }
+    const qtyPerPendant = parseFloat(entry.qty_per_pendant) || 1;
+    return round2(qty * qtyPerPendant);
+}
+
+function getPendantWarehouseDemandRows(pendant) {
+    const qty = parseFloat(pendant?.quantity) || 0;
+    if (!(qty > 0)) return [];
+
+    const parentName = String(pendant?.name || '').trim();
+    const parentLabel = parentName ? `Подвес "${parentName}"` : 'Подвес';
+    const rows = [];
+
+    ['cord', 'carabiner'].forEach(type => {
+        getPendantAttachmentEntries(pendant, type).forEach(entry => {
+            const source = String(entry?.source || 'warehouse').trim().toLowerCase();
+            const warehouseItemId = Number(entry?.warehouse_item_id || 0);
+            const demandQty = getPendantAttachmentRequiredQty(pendant, type, entry);
+            if (source !== 'warehouse' || !warehouseItemId || !(demandQty > 0)) return;
+
+            const attachmentName = String(entry?.name || (type === 'cord' ? 'Шнур' : 'Фурнитура')).trim();
+            rows.push({
+                warehouse_item_id: warehouseItemId,
+                qty: demandQty,
+                material_type: 'hardware',
+                attachment_type: type,
+                name: `${parentLabel} · ${attachmentName}`,
+                warehouse_sku: entry?.warehouse_sku || '',
+                unit: entry?.unit || 'шт',
+            });
+        });
+    });
+
+    return rows;
+}
+
 function getPendantAttachmentPurchasePerUnit(type, entry) {
     if (!entry) return 0;
     if (isPendantMetricAttachment(type, entry)) {
-        const lengthCm = parseFloat(entry.length_cm) || 0;
-        return round2((entry.price_per_unit || 0) * lengthCm / 100);
+        return round2((entry.price_per_unit || 0) * getPendantMetricRateFactor(entry));
     }
     const qtyPerPendant = parseFloat(entry.qty_per_pendant) || 1;
     return round2((entry.price_per_unit || 0) * qtyPerPendant);

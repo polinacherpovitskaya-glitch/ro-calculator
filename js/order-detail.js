@@ -387,7 +387,10 @@ const OrderDetail = {
         };
         const attachmentCostPerPendant = (type, entry) => {
             if (type === 'cord' && (entry.unit === 'м' || entry.unit === 'см')) {
-                return round2(((entry.price_per_unit || 0) * (entry.length_cm || 0) / 100) + (entry.delivery_price || 0));
+                const metricFactor = typeof getPendantMetricRateFactor === 'function'
+                    ? getPendantMetricRateFactor(entry)
+                    : ((entry.unit === 'см') ? (parseFloat(entry.length_cm) || 0) : ((parseFloat(entry.length_cm) || 0) / 100));
+                return round2(((entry.price_per_unit || 0) * metricFactor) + (entry.delivery_price || 0));
             }
             return round2(((entry.price_per_unit || 0) + (entry.delivery_price || 0)) * (entry.qty_per_pendant || 1));
         };

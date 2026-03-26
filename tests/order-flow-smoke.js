@@ -730,6 +730,52 @@ async function smokePendantWarehousePickerRichUI() {
     assert.match(step5Html, /× 2/);
 }
 
+async function smokePendantCentimeterCordPricing() {
+    const pendantContext = createContext();
+    stubRuntime(pendantContext);
+    ['js/calculator.js', 'js/app.js'].forEach(file => runScript(pendantContext, file));
+    vm.runInContext('delete globalThis.Pendant;', pendantContext);
+    runScript(pendantContext, 'js/pendant.js');
+
+    const state = clone(await vm.runInContext(`(() => {
+        Pendant._wizardData = Pendant.getEmpty();
+        Pendant._wizardData.name = 'CM';
+        Pendant._wizardData.quantity = 300;
+        Pendant._wizardData.cords = [{
+            source: 'warehouse',
+            warehouse_item_id: 701,
+            warehouse_sku: 'MSN-LV',
+            name: 'Миланский шнур фиолетовый',
+            price_per_unit: 0.7,
+            delivery_price: 0,
+            sell_price: 1.4,
+            unit: 'см',
+            length_cm: 50,
+            qty_per_pendant: 1,
+        }];
+        Pendant._wizardData.carabiners = [];
+        Pendant._syncLegacyAttachments(Pendant._wizardData);
+        return {
+            costPerPendant: Pendant._getAttachmentCostPerPendant('cord', Pendant._wizardData.cords[0]),
+            sellPerPendant: Pendant._getAttachmentSellPerPendant('cord', Pendant._wizardData.cords[0]),
+            step4Html: Pendant._renderStep4(),
+            calcResult: calculatePendantCost({
+                quantity: 300,
+                elements: [],
+                cords: Pendant._wizardData.cords,
+                carabiners: [],
+                _totalSellPerUnit: 0
+            }, { wasteFactor: 1.1, fotPerHour: 100 }),
+        };
+    })()`, pendantContext));
+
+    assert.equal(state.costPerPendant, 35);
+    assert.equal(state.sellPerPendant, 70);
+    assert.equal(state.calcResult.costPerUnit, 35);
+    assert.match(state.step4Html, /Нужно: <b>150 м<\/b>/);
+    assert.match(state.step4Html, /Цена за подвес: <b>35 ₽<\/b>/);
+}
+
 async function smokePendantIgnoresSpaces() {
     const pendantContext = createContext();
     stubRuntime(pendantContext);
@@ -1645,6 +1691,85 @@ async function smokeOrderStatusWarehouseSync(context) {
             Warehouse.syncProjectHardwareOrderState = globalThis.__originalSyncProjectHardwareOrderState;
         `, context);
     }
+}
+
+async function smokePendantWarehouseDemandSync(context) {
+    context.__smokePendantDemandItems = [{
+        item_type: 'pendant',
+        name: 'AB',
+        product_name: 'Подвес "AB"',
+        quantity: 300,
+        cords: [{
+            source: 'warehouse',
+            warehouse_item_id: 701,
+            warehouse_sku: 'MSN-LV',
+            name: 'Миланский шнур фиолетовый',
+            unit: 'см',
+            length_cm: 50,
+            qty_per_pendant: 1,
+            price_per_unit: 0.7,
+        }],
+        carabiners: [{
+            source: 'warehouse',
+            warehouse_item_id: 801,
+            warehouse_sku: 'CR-STD-050-RD+',
+            name: 'Карабин 5 см красный',
+            unit: 'шт',
+            qty_per_pendant: 1,
+            price_per_unit: 10,
+        }, {
+            source: 'warehouse',
+            warehouse_item_id: 802,
+            warehouse_sku: 'CR-STD-050-VT+',
+            name: 'Карабин 5 см фиолетовый',
+            unit: 'шт',
+            qty_per_pendant: 2,
+            price_per_unit: 10,
+        }],
+    }];
+
+    const demandRows = clone(await vm.runInContext(`(() => {
+        return Warehouse._collectWarehouseDemandFromOrderItems(globalThis.__smokePendantDemandItems);
+    })()`, context));
+    demandRows.sort((a, b) => Number(a.warehouse_item_id) - Number(b.warehouse_item_id));
+
+    assert.equal(demandRows.length, 3);
+    assert.equal(demandRows[0].warehouse_item_id, 701);
+    assert.equal(demandRows[0].qty, 15000);
+    assert.equal(demandRows[0].material_type, 'hardware');
+    assert.match(demandRows[0].names[0], /Подвес "AB" · Миланский шнур фиолетовый/);
+    assert.equal(demandRows[1].warehouse_item_id, 801);
+    assert.equal(demandRows[1].qty, 300);
+    assert.equal(demandRows[2].warehouse_item_id, 802);
+    assert.equal(demandRows[2].qty, 600);
+
+    const orderDemand = clone(await vm.runInContext(`(() => {
+        return Array.from(Orders._collectWarehouseDemand(globalThis.__smokePendantDemandItems, { hardware: true, packaging: false }).entries());
+    })()`, context));
+    orderDemand.sort((a, b) => Number(a[0]) - Number(b[0]));
+
+    assert.deepEqual(orderDemand, [
+        [701, 15000],
+        [801, 300],
+        [802, 600],
+    ]);
+
+    const meta = clone(await vm.runInContext(`Orders.buildHardwareMeta(globalThis.__smokePendantDemandItems)`, context));
+    assert.equal(meta.label, 'Фурнитура из наличия');
+
+    const calcDemand = clone(await vm.runInContext(`(() => {
+        Calculator.hardwareItems = [];
+        Calculator.packagingItems = [];
+        Calculator.pendants = globalThis.__smokePendantDemandItems;
+        return Array.from(Calculator._collectWarehouseReservationDemand({ hardware: true, packaging: false }).entries());
+    })()`, context));
+    calcDemand.sort((a, b) => Number(a[0]) - Number(b[0]));
+
+    assert.deepEqual(calcDemand, [
+        [701, 15000],
+        [801, 300],
+        [802, 600],
+    ]);
 }
 
 async function smokePackagingWarehouseSaveSync(context) {
@@ -2860,6 +2985,7 @@ async function main() {
     await smokeFinDirectorPendantsUseAllAttachments(context);
     await smokePackagingWarehousePickerDefaults(context);
     await smokePendantWarehousePickerRichUI();
+    await smokePendantCentimeterCordPricing();
     await smokePendantIgnoresSpaces();
     await smokePendantStepNavigationSync();
     await smokePendantAutoPriceFromBlanks();
@@ -2871,6 +2997,7 @@ async function main() {
     await smokeChinaReceiptCreatesMoldAndPromotesOrder(context);
     await smokeBlankMoldAutoFieldsWithoutVisibleTemplate(context);
     await smokeOrderStatusWarehouseSync(context);
+    await smokePendantWarehouseDemandSync(context);
     await smokePackagingWarehouseSaveSync(context);
     await smokeWarehouseManualAdjustment(context);
     await smokeWarehouseAdjustmentPersistsWithoutBulkSave(context);

@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v182';
+const APP_VERSION = 'v183';
 
 const App = {
     currentPage: 'orders',
@@ -4245,6 +4245,13 @@ const Calculator = {
                 if (pkg.source === 'warehouse' && pkg.warehouse_item_id) {
                     addQty(pkg.warehouse_item_id, parseFloat(pkg.qty) || 0);
                 }
+            });
+        }
+        if (includeHardware && typeof getPendantWarehouseDemandRows === 'function') {
+            (this.pendants || []).forEach(pnd => {
+                getPendantWarehouseDemandRows(pnd).forEach(row => {
+                    addQty(row.warehouse_item_id, parseFloat(row.qty) || 0);
+                });
             });
         }
 
