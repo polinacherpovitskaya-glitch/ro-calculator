@@ -732,6 +732,7 @@ async function smokePendantWarehousePickerRichUI() {
     const step4Html = String(vm.runInContext(`Pendant._renderStep4()`, pendantContext));
     assert.match(step4Html, /FLC-550-BK/);
     assert.match(step4Html, /CR-RING-BK/);
+    assert.match(step4Html, /pendant-step4-layout/);
     assert.match(step4Html, /Сколько подвесов с этой позицией/);
     assert.match(step4Html, /Кол-во на 1 подвес/);
     assert.match(step4Html, /Распределено <b>12<\/b> из <b>12<\/b> шт/);
@@ -741,6 +742,7 @@ async function smokePendantWarehousePickerRichUI() {
     assert.match(step5Html, /Шнур плоский/);
     assert.match(step5Html, /Кольцо-карабин/);
     assert.match(step5Html, /× 2/);
+    assert.match(step5Html, /pendant-summary-table-wrap/);
 }
 
 async function smokePendantCentimeterCordPricing() {

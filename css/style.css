@@ -3317,14 +3317,19 @@ table .text-center { text-align: center; }
 .pendant-wizard {
     background: var(--bg);
     border-radius: 12px;
-    max-width: 700px;
-    width: 95vw;
-    max-height: calc(100vh - 48px);
+    width: min(840px, calc(100vw - 24px));
+    max-width: calc(100vw - 24px);
+    max-height: calc(100vh - 24px);
     display: flex;
     flex-direction: column;
     overflow: hidden;
     box-shadow: 0 8px 30px rgba(0,0,0,0.2);
     margin: 0 auto;
+}
+
+.pendant-wizard-step-4,
+.pendant-wizard-step-5 {
+    width: min(1240px, calc(100vw - 24px));
 }
 
 .pendant-wizard-header {
@@ -3376,24 +3381,19 @@ table .text-center { text-align: center; }
 }
 
 .pendant-wizard-body {
-    padding: 20px;
+    padding: 24px;
     min-height: 200px;
     flex: 1 1 auto;
     overflow-y: auto;
-    overflow-x: visible;
-}
-
-.pendant-wizard-step-4 {
-    overflow: visible;
+    overflow-x: hidden;
 }
 
 .pendant-wizard-step-4 .pendant-wizard-body {
-    overflow: visible;
-    padding-bottom: 32px;
+    padding-bottom: 120px;
 }
 
 .pendant-wizard-step-4 .pendant-wh-picker:focus-within {
-    margin-bottom: 280px;
+    margin-bottom: 320px;
 }
 
 .pendant-wizard-footer {
@@ -3405,6 +3405,100 @@ table .text-center { text-align: center; }
 
 .pendant-field-group {
     margin-bottom: 12px;
+}
+
+.pendant-step4-layout {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr));
+    gap: 24px;
+    align-items: start;
+}
+
+.pendant-attachment-section {
+    min-width: 0;
+}
+
+.pendant-attachment-section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin: 0 0 8px;
+    flex-wrap: wrap;
+}
+
+.pendant-attachment-section-header h4 {
+    margin: 0;
+    font-size: 20px;
+}
+
+.pendant-allocation-summary {
+    margin: 0 0 12px;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.pendant-attachment-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    min-width: 0;
+}
+
+.pendant-attachment-row {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px;
+    background: #fff;
+    min-width: 0;
+}
+
+.pendant-attachment-row-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 10px;
+    flex-wrap: wrap;
+}
+
+.pendant-attachment-row-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted);
+}
+
+.pendant-attachment-row-summary {
+    margin-top: 10px;
+    font-size: 12px;
+    color: var(--text-muted);
+    line-height: 1.45;
+    word-break: break-word;
+}
+
+.pendant-attachment-field {
+    margin-top: 10px;
+}
+
+.pendant-attachment-field .input {
+    width: min(100%, 220px);
+    max-width: 100%;
+}
+
+.pendant-attachment-helper {
+    font-size: 12px;
+    color: var(--text-muted);
+    line-height: 1.45;
+    word-break: break-word;
+}
+
+.pendant-attachment-warning {
+    margin-top: 6px;
+    font-size: 12px;
+    color: var(--red);
+    font-weight: 600;
+    line-height: 1.45;
+    word-break: break-word;
 }
 
 .pendant-field-group label {
@@ -3473,6 +3567,11 @@ table .text-center { text-align: center; }
     width: 100%;
     border-collapse: collapse;
     font-size: 13px;
+    min-width: 860px;
+}
+
+.pendant-summary-table-wrap {
+    overflow-x: auto;
 }
 
 .pendant-summary-table td {
@@ -3490,6 +3589,30 @@ table .text-center { text-align: center; }
 .pendant-summary-table .pendant-summary-total td {
     border-top: 2px solid var(--text);
     border-bottom: none;
+}
+
+@media (max-width: 900px) {
+    .pendant-wizard {
+        width: calc(100vw - 16px);
+        max-width: calc(100vw - 16px);
+        max-height: calc(100vh - 16px);
+    }
+
+    .pendant-wizard-body {
+        padding: 16px;
+    }
+
+    .pendant-wizard-footer,
+    .pendant-wizard-header,
+    .pendant-wizard-steps {
+        padding-left: 16px;
+        padding-right: 16px;
+    }
+
+    .pendant-step4-layout {
+        grid-template-columns: 1fr;
+        gap: 18px;
+    }
 }
 
 .pendant-wh-item:hover {

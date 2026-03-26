@@ -653,7 +653,7 @@ const Pendant = {
         const qty = pnd.quantity || 0;
 
         return `
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+            <div class="pendant-step4-layout">
                 ${this._renderAttachmentSection('cord', this._getAttachments(pnd, 'cord', { includeEmpty: true }), whData, qty)}
                 ${this._renderAttachmentSection('carabiner', this._getAttachments(pnd, 'carabiner', { includeEmpty: true }), whData, qty)}
             </div>
@@ -680,16 +680,16 @@ const Pendant = {
             : 'Сначала укажите количество подвесов';
 
         return `
-            <div>
-                <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0 0 8px;">
-                    <h4 style="margin:0;">${title}</h4>
+            <section class="pendant-attachment-section">
+                <div class="pendant-attachment-section-header">
+                    <h4>${title}</h4>
                     <button class="btn btn-sm btn-outline" onclick="Pendant._addAttachment('${type}')">${addLabel}</button>
                 </div>
-                <div style="margin:0 0 10px;font-size:12px;color:${allocationColor};">${allocationText}</div>
-                <div style="display:flex;flex-direction:column;gap:12px;">
+                <div class="pendant-allocation-summary" style="color:${allocationColor};">${allocationText}</div>
+                <div class="pendant-attachment-rows">
                     ${entries.map((entry, index) => this._renderAttachmentRow(type, entry, whData, qty, index, entries.length)).join('')}
                 </div>
-            </div>
+            </section>
         `;
     },
 
@@ -732,26 +732,26 @@ const Pendant = {
             : '';
 
         return `
-            <div style="border:1px solid var(--border);border-radius:10px;padding:12px;background:#fff;">
-                <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;">
-                    <div style="font-size:12px;font-weight:600;color:var(--text-muted);">${isCord ? 'Шнур' : 'Фурнитура'} ${index + 1}</div>
+            <div class="pendant-attachment-row">
+                <div class="pendant-attachment-row-header">
+                    <div class="pendant-attachment-row-title">${isCord ? 'Шнур' : 'Фурнитура'} ${index + 1}</div>
                     ${totalEntries > 1 ? `<button class="btn btn-sm btn-outline" onclick="Pendant._removeAttachment('${type}', ${index})" style="color:var(--red);">Удалить</button>` : ''}
                 </div>
                 ${this._renderWhDropdown(type, data, whData, index)}
-                ${summaryText ? `<div style="margin-top:8px;font-size:12px;color:var(--text-muted);">${summaryText}</div>` : ''}
-                <div class="pendant-field-group" style="margin-top:8px;">
+                ${summaryText ? `<div class="pendant-attachment-row-summary">${summaryText}</div>` : ''}
+                <div class="pendant-field-group pendant-attachment-field">
                     <label>Сколько подвесов с этой позицией</label>
-                    <input type="number" class="input" value="${allocatedQty || ''}" min="0" placeholder="${qty || 0}" style="max-width:170px;" onchange="Pendant._updateAttachmentField('${type}', ${index}, 'allocated_qty', Math.max(0, Math.round(parseFloat(this.value)||0)))">
+                    <input type="number" class="input" value="${allocatedQty || ''}" min="0" placeholder="${qty || 0}" onchange="Pendant._updateAttachmentField('${type}', ${index}, 'allocated_qty', Math.max(0, Math.round(parseFloat(this.value)||0)))">
                 </div>
-                ${isMetric ? `<div class="pendant-field-group" style="margin-top:8px;">
+                ${isMetric ? `<div class="pendant-field-group pendant-attachment-field">
                     <label>Длина на 1 подвес (см)</label>
-                    <input type="number" class="input" value="${lengthCm || ''}" placeholder="50" style="max-width:170px;" onchange="Pendant._updateAttachmentField('${type}', ${index}, 'length_cm', parseFloat(this.value)||0)">
-                </div>` : `<div class="pendant-field-group" style="margin-top:8px;">
+                    <input type="number" class="input" value="${lengthCm || ''}" placeholder="50" onchange="Pendant._updateAttachmentField('${type}', ${index}, 'length_cm', parseFloat(this.value)||0)">
+                </div>` : `<div class="pendant-field-group pendant-attachment-field">
                     <label>Кол-во на 1 подвес</label>
-                    <input type="number" class="input" value="${qtyPerPendant || 1}" min="1" placeholder="1" style="max-width:170px;" onchange="Pendant._updateAttachmentField('${type}', ${index}, 'qty_per_pendant', Math.max(1, parseFloat(this.value)||1))">
+                    <input type="number" class="input" value="${qtyPerPendant || 1}" min="1" placeholder="1" onchange="Pendant._updateAttachmentField('${type}', ${index}, 'qty_per_pendant', Math.max(1, parseFloat(this.value)||1))">
                 </div>`}
-                ${helperText ? `<div style="font-size:12px;color:var(--text-muted);">${helperText}</div>` : ''}
-                ${warnText ? `<div style="margin-top:4px;font-size:12px;color:var(--red);font-weight:600;">${warnText}</div>` : ''}
+                ${helperText ? `<div class="pendant-attachment-helper">${helperText}</div>` : ''}
+                ${warnText ? `<div class="pendant-attachment-warning">${warnText}</div>` : ''}
             </div>
         `;
     },
@@ -1324,6 +1324,7 @@ const Pendant = {
         return `
             <div class="pendant-summary">
                 <h4 style="margin:0 0 12px;">Подвес "${App.escHtml(pnd.name)}" × ${qty} шт</h4>
+                <div class="pendant-summary-table-wrap">
                 <table class="pendant-summary-table">
                     <tr class="pendant-summary-header"><td>Позиция</td><td>Кол-во</td><td>Себест.</td><td>Продажа</td><td>Итого</td></tr>
                     ${groupEntries.map(([color, g], gi) => {
@@ -1382,6 +1383,7 @@ const Pendant = {
                         <td style="color:${finalMarginPercent >= 30 ? 'var(--green)' : finalMarginPercent >= 0 ? 'var(--orange)' : 'var(--red)'};font-weight:600;">${finalMarginPercent}%</td>
                     </tr>
                 </table>
+                </div>
             </div>
         `;
     },
