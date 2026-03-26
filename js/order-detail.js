@@ -357,6 +357,14 @@ const OrderDetail = {
         const qty = pnd.quantity || 0;
         const elements = pnd.elements || [];
         const elemPrice = pnd.element_price_per_unit || 0;
+        const getAttachmentAllocatedQty = (entry) => {
+            if (typeof getPendantAttachmentAllocatedQty === 'function') {
+                return getPendantAttachmentAllocatedQty(pnd, entry);
+            }
+            const allocatedQty = parseFloat(entry?.allocated_qty);
+            if (Number.isFinite(allocatedQty) && allocatedQty >= 0) return allocatedQty;
+            return qty > 0 ? qty : 0;
+        };
         const normalizeAttachments = (type) => {
             const collectionKey = type === 'cord' ? 'cords' : 'carabiners';
             const legacyKey = type === 'cord' ? 'cord' : 'carabiner';
@@ -370,9 +378,22 @@ const OrderDetail = {
                     const normalized = { ...(entry || {}) };
                     const qtyPerPendant = parseFloat(normalized.qty_per_pendant);
                     const lengthCm = parseFloat(normalized.length_cm);
+                    const allocatedQty = parseFloat(normalized.allocated_qty);
+                    const hasExplicitAllocatedQty = normalized.allocated_qty !== undefined && normalized.allocated_qty !== null && normalized.allocated_qty !== '';
                     normalized.qty_per_pendant = qtyPerPendant > 0 ? qtyPerPendant : 1;
                     normalized.length_cm = Number.isFinite(lengthCm) ? lengthCm : (type === 'cord' && index === 0 ? fallbackLengthCm : 0);
                     normalized.unit = normalized.unit || 'шт';
+                    normalized.allocated_qty = Number.isFinite(allocatedQty)
+                        ? Math.max(0, Math.round(allocatedQty))
+                        : ((
+                            normalized.name
+                            || normalized.warehouse_item_id
+                            || normalized.warehouse_sku
+                            || (parseFloat(normalized.price_per_unit) || 0) > 0
+                            || (parseFloat(normalized.delivery_price) || 0) > 0
+                            || (parseFloat(normalized.sell_price) || 0) > 0
+                            || normalized.source === 'custom'
+                        ) && !hasExplicitAllocatedQty && qty > 0 ? qty : 0);
                     return normalized;
                 })
                 .filter(entry => entry && (
@@ -408,15 +429,19 @@ const OrderDetail = {
         let rows = '';
         cords.forEach(cord => {
             const isMetric = cord.unit === 'м' || cord.unit === 'см';
-            const totalQtyLabel = isMetric ? `${round2((cord.length_cm || 0) * qty / 100)} м` : `${qty * (cord.qty_per_pendant || 1)}`;
-            const titleSuffix = isMetric && cord.length_cm > 0 ? ` (${cord.length_cm} см)` : ((cord.qty_per_pendant || 1) > 1 ? ` × ${cord.qty_per_pendant}` : '');
+            const allocatedQty = getAttachmentAllocatedQty(cord);
+            const totalQtyLabel = isMetric
+                ? `${round2((cord.length_cm || 0) * allocatedQty / 100)} м${allocatedQty > 0 ? ` · ${allocatedQty} подв.` : ''}`
+                : `${round2(allocatedQty * (cord.qty_per_pendant || 1))} шт${allocatedQty > 0 ? ` · ${allocatedQty} подв.` : ''}`;
+            const titleSuffix = isMetric && cord.length_cm > 0 ? ` (${cord.length_cm} см/подвес)` : ((cord.qty_per_pendant || 1) > 1 ? ` × ${cord.qty_per_pendant}` : '');
             const pricePerPendant = attachmentCostPerPendant('cord', cord);
-            rows += `<tr><td style="padding-left:24px;">&#129525; ${this._esc(cord.name || 'Шнур')}${titleSuffix}</td><td>${totalQtyLabel}</td><td>${formatRub(pricePerPendant)}</td><td>${formatRub(qty * pricePerPendant)}</td></tr>`;
+            rows += `<tr><td style="padding-left:24px;">&#129525; ${this._esc(cord.name || 'Шнур')}${titleSuffix}</td><td>${totalQtyLabel}</td><td>${formatRub(pricePerPendant)}</td><td>${formatRub(allocatedQty * pricePerPendant)}</td></tr>`;
         });
         carabiners.forEach(carabiner => {
+            const allocatedQty = getAttachmentAllocatedQty(carabiner);
             const titleSuffix = (carabiner.qty_per_pendant || 1) > 1 ? ` × ${carabiner.qty_per_pendant}` : '';
             const pricePerPendant = attachmentCostPerPendant('carabiner', carabiner);
-            rows += `<tr><td style="padding-left:24px;">&#128279; ${this._esc(carabiner.name || 'Фурнитура')}${titleSuffix}</td><td>${qty * (carabiner.qty_per_pendant || 1)}</td><td>${formatRub(pricePerPendant)}</td><td>${formatRub(qty * pricePerPendant)}</td></tr>`;
+            rows += `<tr><td style="padding-left:24px;">&#128279; ${this._esc(carabiner.name || 'Фурнитура')}${titleSuffix}</td><td>${round2(allocatedQty * (carabiner.qty_per_pendant || 1))} шт${allocatedQty > 0 ? ` · ${allocatedQty} подв.` : ''}</td><td>${formatRub(pricePerPendant)}</td><td>${formatRub(allocatedQty * pricePerPendant)}</td></tr>`;
         });
         // Element groups by color
         Object.entries(groups).forEach(([color, els]) => {

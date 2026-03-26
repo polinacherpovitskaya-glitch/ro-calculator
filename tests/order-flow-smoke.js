@@ -286,16 +286,16 @@ async function buildCollectedItems(context) {
                 { char: 'C', color: 'Green' },
             ],
             cords: [
-                { name: 'Smoke Cord', unit: 'м', length_cm: 80, price_per_unit: 12, delivery_price: 1, assembly_speed: 60, qty_per_pendant: 1 },
-                { name: 'Smoke Cord 2', unit: 'шт', price_per_unit: 4, delivery_price: 0, assembly_speed: 0, qty_per_pendant: 2 },
+                { name: 'Smoke Cord', unit: 'м', length_cm: 80, price_per_unit: 12, delivery_price: 1, assembly_speed: 60, qty_per_pendant: 1, allocated_qty: 2 },
+                { name: 'Smoke Cord 2', unit: 'шт', price_per_unit: 4, delivery_price: 0, assembly_speed: 0, qty_per_pendant: 2, allocated_qty: 3 },
             ],
             carabiners: [
-                { name: 'Smoke Carabiner', price_per_unit: 2, delivery_price: 0.5, assembly_speed: 120, qty_per_pendant: 1 },
-                { name: 'Smoke Carabiner 2', price_per_unit: 3, delivery_price: 0.5, assembly_speed: 0, qty_per_pendant: 2 },
+                { name: 'Smoke Carabiner', price_per_unit: 2, delivery_price: 0.5, assembly_speed: 120, qty_per_pendant: 1, allocated_qty: 2 },
+                { name: 'Smoke Carabiner 2', price_per_unit: 3, delivery_price: 0.5, assembly_speed: 0, qty_per_pendant: 2, allocated_qty: 3 },
             ],
-            cord: { name: 'Smoke Cord', unit: 'м', length_cm: 80, price_per_unit: 12, delivery_price: 1, assembly_speed: 60, qty_per_pendant: 1 },
+            cord: { name: 'Smoke Cord', unit: 'м', length_cm: 80, price_per_unit: 12, delivery_price: 1, assembly_speed: 60, qty_per_pendant: 1, allocated_qty: 2 },
             cord_length_cm: 80,
-            carabiner: { name: 'Smoke Carabiner', price_per_unit: 2, delivery_price: 0.5, assembly_speed: 120, qty_per_pendant: 1 },
+            carabiner: { name: 'Smoke Carabiner', price_per_unit: 2, delivery_price: 0.5, assembly_speed: 120, qty_per_pendant: 1, allocated_qty: 2 },
             _totalSellPerUnit: 99,
             result: { costPerUnit: 17, sellPerUnit: 99 },
         }];
@@ -400,7 +400,10 @@ async function smokeCalculatorPersistence(context) {
     assert.equal(restored.pendant.carabiner.name, 'Smoke Carabiner');
     assert.equal(restored.pendant.cords.length, 2);
     assert.equal(restored.pendant.carabiners.length, 2);
+    assert.equal(restored.pendant.cords[0].allocated_qty, 2);
     assert.equal(restored.pendant.cords[1].qty_per_pendant, 2);
+    assert.equal(restored.pendant.cords[1].allocated_qty, 3);
+    assert.equal(restored.pendant.carabiners[1].allocated_qty, 3);
     assert.equal(restored.pendant.elements.length, 3);
 
     const selectedWarehouseItem = clone(vm.runInContext(`
@@ -696,7 +699,9 @@ async function smokePendantWarehousePickerRichUI() {
     })`, pendantContext));
     assert.equal(emptyCordState.cords.length, 2);
     assert.match(emptyCordState.html, /Шнур 2/);
+    await vm.runInContext(`Pendant._updateAttachmentField('cord', 0, 'allocated_qty', 5)`, pendantContext);
     await vm.runInContext(`Pendant._onWhSelect('cord', 1, '702')`, pendantContext);
+    await vm.runInContext(`Pendant._updateAttachmentField('cord', 1, 'allocated_qty', 7)`, pendantContext);
     await vm.runInContext(`Pendant._addAttachment('carabiner')`, pendantContext);
     const emptyCarabinerState = clone(await vm.runInContext(`({
         carabiners: Pendant._wizardData.carabiners,
@@ -704,7 +709,9 @@ async function smokePendantWarehousePickerRichUI() {
     })`, pendantContext));
     assert.equal(emptyCarabinerState.carabiners.length, 2);
     assert.match(emptyCarabinerState.html, /Фурнитура 2/);
+    await vm.runInContext(`Pendant._updateAttachmentField('carabiner', 0, 'allocated_qty', 4)`, pendantContext);
     await vm.runInContext(`Pendant._onWhSelect('carabiner', 1, '802')`, pendantContext);
+    await vm.runInContext(`Pendant._updateAttachmentField('carabiner', 1, 'allocated_qty', 8)`, pendantContext);
     await vm.runInContext(`Pendant._updateAttachmentField('carabiner', 1, 'qty_per_pendant', 2)`, pendantContext);
 
     const attachmentState = clone(await vm.runInContext(`({
@@ -717,11 +724,17 @@ async function smokePendantWarehousePickerRichUI() {
     assert.equal(attachmentState.carabiners.length, 2);
     assert.equal(attachmentState.cord.warehouse_item_id, 701);
     assert.equal(attachmentState.carabiner.warehouse_item_id, 801);
+    assert.equal(attachmentState.cords[0].allocated_qty, 5);
+    assert.equal(attachmentState.cords[1].allocated_qty, 7);
+    assert.equal(attachmentState.carabiners[0].allocated_qty, 4);
+    assert.equal(attachmentState.carabiners[1].allocated_qty, 8);
 
     const step4Html = String(vm.runInContext(`Pendant._renderStep4()`, pendantContext));
     assert.match(step4Html, /FLC-550-BK/);
     assert.match(step4Html, /CR-RING-BK/);
+    assert.match(step4Html, /Сколько подвесов с этой позицией/);
     assert.match(step4Html, /Кол-во на 1 подвес/);
+    assert.match(step4Html, /Распределено <b>12<\/b> из <b>12<\/b> шт/);
 
     const step5Html = String(vm.runInContext(`Pendant._renderStep5()`, pendantContext));
     assert.match(step5Html, /Шнур с силик\. наконечником синий 80 см/);
@@ -774,6 +787,82 @@ async function smokePendantCentimeterCordPricing() {
     assert.equal(state.calcResult.costPerUnit, 35);
     assert.match(state.step4Html, /Нужно: <b>150 м<\/b>/);
     assert.match(state.step4Html, /Цена за подвес: <b>35 ₽<\/b>/);
+}
+
+async function smokePendantSplitAllocationUsesAllocatedQty() {
+    const pendantContext = createContext();
+    stubRuntime(pendantContext);
+    ['js/calculator.js', 'js/app.js'].forEach(file => runScript(pendantContext, file));
+    vm.runInContext('delete globalThis.Pendant;', pendantContext);
+    runScript(pendantContext, 'js/pendant.js');
+
+    const state = clone(await vm.runInContext(`(() => {
+        Pendant._wizardData = Pendant.getEmpty();
+        Pendant._wizardData.name = 'SPLIT';
+        Pendant._wizardData.quantity = 300;
+        Pendant._wizardData.cords = [{
+            source: 'warehouse',
+            warehouse_item_id: 701,
+            warehouse_sku: 'SLS-800-HNY-NN',
+            name: 'Шнур 80 см медовый',
+            price_per_unit: 23,
+            delivery_price: 0,
+            unit: 'шт',
+            qty_per_pendant: 1,
+            allocated_qty: 100,
+        }, {
+            source: 'warehouse',
+            warehouse_item_id: 702,
+            warehouse_sku: 'SLS-800-SLD-NN',
+            name: 'Шнур 80 см салатовый',
+            price_per_unit: 25,
+            delivery_price: 0,
+            unit: 'шт',
+            qty_per_pendant: 1,
+            allocated_qty: 200,
+        }];
+        Pendant._wizardData.carabiners = [{
+            source: 'warehouse',
+            warehouse_item_id: 801,
+            warehouse_sku: 'CR-STD-050-RD+',
+            name: 'Карабин 5 см красный',
+            price_per_unit: 10,
+            delivery_price: 0,
+            unit: 'шт',
+            qty_per_pendant: 1,
+            allocated_qty: 100,
+        }, {
+            source: 'warehouse',
+            warehouse_item_id: 802,
+            warehouse_sku: 'CR-STD-050-VT+',
+            name: 'Карабин 5 см фиолетовый',
+            price_per_unit: 12,
+            delivery_price: 0,
+            unit: 'шт',
+            qty_per_pendant: 1,
+            allocated_qty: 200,
+        }];
+        Pendant._syncLegacyAttachments(Pendant._wizardData);
+        return {
+            step4Html: Pendant._renderStep4(),
+            step5Html: Pendant._renderStep5(),
+            calcResult: calculatePendantCost({
+                quantity: 300,
+                elements: [],
+                cords: Pendant._wizardData.cords,
+                carabiners: Pendant._wizardData.carabiners,
+                _totalSellPerUnit: 0
+            }, { ...App.params, wasteFactor: 1.1, fotPerHour: 100 }),
+        };
+    })()`, pendantContext));
+
+    assert.match(state.step4Html, /Нужно: <b>100 шт<\/b> · Подвесов: <b>100 шт<\/b>/);
+    assert.match(state.step4Html, /Нужно: <b>200 шт<\/b> · Подвесов: <b>200 шт<\/b>/);
+    assert.doesNotMatch(state.step4Html, /30000/);
+    assert.match(state.step5Html, /100 шт · 100 подв\./);
+    assert.match(state.step5Html, /200 шт · 200 подв\./);
+    assert.equal(state.calcResult.costPerUnit, 35.67);
+    assert.equal(state.calcResult.totalCost, 10700);
 }
 
 async function smokePendantIgnoresSpaces() {
@@ -1702,12 +1791,21 @@ async function smokePendantWarehouseDemandSync(context) {
         cords: [{
             source: 'warehouse',
             warehouse_item_id: 701,
-            warehouse_sku: 'MSN-LV',
-            name: 'Миланский шнур фиолетовый',
-            unit: 'см',
-            length_cm: 50,
+            warehouse_sku: 'SLS-800-HNY-NN',
+            name: 'Шнур 80 см медовый',
+            unit: 'шт',
             qty_per_pendant: 1,
-            price_per_unit: 0.7,
+            allocated_qty: 100,
+            price_per_unit: 23,
+        }, {
+            source: 'warehouse',
+            warehouse_item_id: 702,
+            warehouse_sku: 'SLS-800-SLD-NN',
+            name: 'Шнур 80 см салатовый',
+            unit: 'шт',
+            allocated_qty: 200,
+            qty_per_pendant: 1,
+            price_per_unit: 23,
         }],
         carabiners: [{
             source: 'warehouse',
@@ -1715,6 +1813,7 @@ async function smokePendantWarehouseDemandSync(context) {
             warehouse_sku: 'CR-STD-050-RD+',
             name: 'Карабин 5 см красный',
             unit: 'шт',
+            allocated_qty: 100,
             qty_per_pendant: 1,
             price_per_unit: 10,
         }, {
@@ -1723,7 +1822,8 @@ async function smokePendantWarehouseDemandSync(context) {
             warehouse_sku: 'CR-STD-050-VT+',
             name: 'Карабин 5 см фиолетовый',
             unit: 'шт',
-            qty_per_pendant: 2,
+            allocated_qty: 200,
+            qty_per_pendant: 1,
             price_per_unit: 10,
         }],
     }];
@@ -1733,15 +1833,17 @@ async function smokePendantWarehouseDemandSync(context) {
     })()`, context));
     demandRows.sort((a, b) => Number(a.warehouse_item_id) - Number(b.warehouse_item_id));
 
-    assert.equal(demandRows.length, 3);
+    assert.equal(demandRows.length, 4);
     assert.equal(demandRows[0].warehouse_item_id, 701);
-    assert.equal(demandRows[0].qty, 15000);
+    assert.equal(demandRows[0].qty, 100);
     assert.equal(demandRows[0].material_type, 'hardware');
-    assert.match(demandRows[0].names[0], /Подвес "AB" · Миланский шнур фиолетовый/);
-    assert.equal(demandRows[1].warehouse_item_id, 801);
-    assert.equal(demandRows[1].qty, 300);
-    assert.equal(demandRows[2].warehouse_item_id, 802);
-    assert.equal(demandRows[2].qty, 600);
+    assert.match(demandRows[0].names[0], /Подвес "AB" · Шнур 80 см медовый/);
+    assert.equal(demandRows[1].warehouse_item_id, 702);
+    assert.equal(demandRows[1].qty, 200);
+    assert.equal(demandRows[2].warehouse_item_id, 801);
+    assert.equal(demandRows[2].qty, 100);
+    assert.equal(demandRows[3].warehouse_item_id, 802);
+    assert.equal(demandRows[3].qty, 200);
 
     const orderDemand = clone(await vm.runInContext(`(() => {
         return Array.from(Orders._collectWarehouseDemand(globalThis.__smokePendantDemandItems, { hardware: true, packaging: false }).entries());
@@ -1749,9 +1851,10 @@ async function smokePendantWarehouseDemandSync(context) {
     orderDemand.sort((a, b) => Number(a[0]) - Number(b[0]));
 
     assert.deepEqual(orderDemand, [
-        [701, 15000],
-        [801, 300],
-        [802, 600],
+        [701, 100],
+        [702, 200],
+        [801, 100],
+        [802, 200],
     ]);
 
     const meta = clone(await vm.runInContext(`Orders.buildHardwareMeta(globalThis.__smokePendantDemandItems)`, context));
@@ -1766,9 +1869,10 @@ async function smokePendantWarehouseDemandSync(context) {
     calcDemand.sort((a, b) => Number(a[0]) - Number(b[0]));
 
     assert.deepEqual(calcDemand, [
-        [701, 15000],
-        [801, 300],
-        [802, 600],
+        [701, 100],
+        [702, 200],
+        [801, 100],
+        [802, 200],
     ]);
 }
 
@@ -2986,6 +3090,7 @@ async function main() {
     await smokePackagingWarehousePickerDefaults(context);
     await smokePendantWarehousePickerRichUI();
     await smokePendantCentimeterCordPricing();
+    await smokePendantSplitAllocationUsesAllocatedQty();
     await smokePendantIgnoresSpaces();
     await smokePendantStepNavigationSync();
     await smokePendantAutoPriceFromBlanks();

@@ -52,18 +52,25 @@ const Pendant = {
             sell_price: 0,
             assembly_speed: type === 'cord' ? 20 : 0,
             unit: 'шт',
+            allocated_qty: 0,
             qty_per_pendant: 1,
             length_cm: 0,
         };
     },
 
-    _normalizeAttachment(type, data, fallbackLengthCm = 0) {
+    _normalizeAttachment(type, data, fallbackLengthCm = 0, totalQty = 0) {
+        const sourceData = data || {};
         const normalized = {
             ...this._createEmptyAttachment(type),
-            ...(data || {}),
+            ...sourceData,
         };
         const qtyPerPendant = parseFloat(normalized.qty_per_pendant);
+        const hasExplicitAllocatedQty = sourceData.allocated_qty !== undefined && sourceData.allocated_qty !== null && sourceData.allocated_qty !== '';
+        const allocatedQty = hasExplicitAllocatedQty ? parseFloat(sourceData.allocated_qty) : NaN;
         normalized.qty_per_pendant = qtyPerPendant > 0 ? qtyPerPendant : 1;
+        normalized.allocated_qty = Number.isFinite(allocatedQty)
+            ? Math.max(0, Math.round(allocatedQty))
+            : (this._hasAttachmentData(sourceData) && !hasExplicitAllocatedQty && totalQty > 0 ? totalQty : 0);
         const lengthCm = parseFloat(normalized.length_cm);
         normalized.length_cm = Number.isFinite(lengthCm) ? lengthCm : (type === 'cord' ? (parseFloat(fallbackLengthCm) || 0) : 0);
         normalized.unit = normalized.unit || 'шт';
@@ -90,6 +97,7 @@ const Pendant = {
             const collectionKey = this._getAttachmentCollectionKey(type);
             const legacyKey = this._getAttachmentLegacyKey(type);
             const fallbackLengthCm = type === 'cord' ? (parseFloat(pnd.cord_length_cm) || 0) : 0;
+            const totalQty = parseInt(pnd.quantity, 10) || 0;
 
             let entries = Array.isArray(pnd[collectionKey]) ? pnd[collectionKey].filter(Boolean) : [];
             if (!entries.length && this._hasAttachmentData(pnd[legacyKey])) {
@@ -97,7 +105,7 @@ const Pendant = {
             }
 
             const normalized = entries
-                .map((entry, index) => this._normalizeAttachment(type, entry, index === 0 ? fallbackLengthCm : 0));
+                .map((entry, index) => this._normalizeAttachment(type, entry, index === 0 ? fallbackLengthCm : 0, totalQty));
 
             const prepared = preserveEmpty
                 ? normalized
@@ -127,6 +135,32 @@ const Pendant = {
         const entries = Array.isArray(pnd?.[collectionKey]) ? pnd[collectionKey] : [];
         if (options.includeEmpty) return entries;
         return entries.filter(entry => this._hasAttachmentData(entry));
+    },
+
+    _getAttachmentAllocatedQty(entry, pnd = this._wizardData) {
+        if (typeof getPendantAttachmentAllocatedQty === 'function') {
+            return getPendantAttachmentAllocatedQty(pnd, entry);
+        }
+        const totalQty = parseFloat(pnd?.quantity) || 0;
+        if (!entry) return 0;
+        const allocatedQty = parseFloat(entry.allocated_qty);
+        if (Number.isFinite(allocatedQty) && allocatedQty >= 0) return allocatedQty;
+        return this._hasAttachmentData(entry) && totalQty > 0 ? totalQty : 0;
+    },
+
+    _getAttachmentAllocatedTotal(type, pnd = this._wizardData, options = {}) {
+        const entries = Array.isArray(options.entries)
+            ? options.entries
+            : this._getAttachments(pnd, type, { includeEmpty: !!options.includeEmpty });
+        return round2(entries.reduce((sum, entry, index) => {
+            if (index === options.excludeIndex) return sum;
+            return sum + this._getAttachmentAllocatedQty(entry, pnd);
+        }, 0));
+    },
+
+    _getAttachmentRemainingQty(type, pnd = this._wizardData, options = {}) {
+        const totalQty = parseFloat(pnd?.quantity) || 0;
+        return Math.max(0, round2(totalQty - this._getAttachmentAllocatedTotal(type, pnd, options)));
     },
 
     _describeAttachmentList(entries, emptyLabel) {
@@ -291,6 +325,9 @@ const Pendant = {
         this._readCurrentStep();
         if (this._wizardStep === 1 && !this._wizardData.name) {
             App.toast('Введите надпись');
+            return;
+        }
+        if (this._wizardStep === 4 && !this._validateAttachmentDistributions()) {
             return;
         }
         if (this._wizardStep < 5) {
@@ -628,6 +665,20 @@ const Pendant = {
         const isCord = type === 'cord';
         const title = isCord ? '🧵 Шнур' : '🔗 Фурнитура';
         const addLabel = isCord ? '+ Добавить шнур' : '+ Добавить фурнитуру';
+        const allocatedQty = this._getAttachmentAllocatedTotal(type, this._wizardData, { entries, includeEmpty: true });
+        const remainingQty = Math.max(0, round2((qty || 0) - allocatedQty));
+        const overflowQty = Math.max(0, round2(allocatedQty - (qty || 0)));
+        const allocationColor = overflowQty > 0
+            ? 'var(--red)'
+            : remainingQty > 0
+                ? 'var(--orange)'
+                : 'var(--green)';
+        const allocationText = qty > 0
+            ? `Распределено <b>${allocatedQty}</b> из <b>${qty}</b> шт`
+                + (overflowQty > 0
+                    ? ` · лишних <b>${overflowQty}</b> шт`
+                    : ` · осталось <b>${remainingQty}</b> шт`)
+            : 'Сначала укажите количество подвесов';
 
         return `
             <div>
@@ -635,6 +686,7 @@ const Pendant = {
                     <h4 style="margin:0;">${title}</h4>
                     <button class="btn btn-sm btn-outline" onclick="Pendant._addAttachment('${type}')">${addLabel}</button>
                 </div>
+                <div style="margin:0 0 10px;font-size:12px;color:${allocationColor};">${allocationText}</div>
                 <div style="display:flex;flex-direction:column;gap:12px;">
                     ${entries.map((entry, index) => this._renderAttachmentRow(type, entry, whData, qty, index, entries.length)).join('')}
                 </div>
@@ -646,6 +698,7 @@ const Pendant = {
         const isCord = type === 'cord';
         const isMetric = isCord && (data?.unit === 'м' || data?.unit === 'см');
         const selectedStock = this._getSelectedStock(type, data, whData);
+        const allocatedQty = this._getAttachmentAllocatedQty(data, this._wizardData);
         const qtyPerPendant = parseFloat(data?.qty_per_pendant) || 1;
         const lengthCm = parseFloat(data?.length_cm) || 0;
         const unitLabel = isMetric ? '/' + (data?.unit || 'м') : '/шт';
@@ -655,20 +708,20 @@ const Pendant = {
         let costPerPendant = 0;
 
         if (isMetric) {
-            const needMeters = round2(lengthCm * qty / 100);
+            const needMeters = round2(lengthCm * allocatedQty / 100);
             const stockMeters = data?.unit === 'см' && selectedStock !== null ? round2(selectedStock / 100) : selectedStock;
             costPerPendant = data?.price_per_unit ? round2((data.price_per_unit * this._getMetricAttachmentRateFactor(data)) + (data.delivery_price || 0)) : 0;
-            if (lengthCm > 0 && qty > 0) {
-                helperText = `Нужно: <b>${needMeters} м</b> · Цена за подвес: <b>${formatRub(costPerPendant)}</b>`;
+            if (lengthCm > 0 && allocatedQty > 0) {
+                helperText = `Нужно: <b>${needMeters} м</b> · Подвесов: <b>${allocatedQty} шт</b>${costPerPendant > 0 ? ` · Цена за подвес: <b>${formatRub(costPerPendant)}</b>` : ''}`;
             }
             if (stockMeters !== null && needMeters > stockMeters) {
                 warnText = `⚠️ Нужно ${needMeters} м, на складе ${stockMeters} м!`;
             }
         } else {
-            const totalNeed = qty * qtyPerPendant;
+            const totalNeed = allocatedQty * qtyPerPendant;
             costPerPendant = round2(((data?.price_per_unit || 0) + (data?.delivery_price || 0)) * qtyPerPendant);
-            if ((data?.price_per_unit || 0) > 0 || qty > 0) {
-                helperText = `Нужно: <b>${totalNeed} шт</b>${qtyPerPendant > 1 ? ` · На подвес: <b>${qtyPerPendant} шт</b>` : ''}${costPerPendant > 0 ? ` · Цена за подвес: <b>${formatRub(costPerPendant)}</b>` : ''}`;
+            if ((data?.price_per_unit || 0) > 0 || allocatedQty > 0) {
+                helperText = `Нужно: <b>${totalNeed} шт</b>${allocatedQty > 0 ? ` · Подвесов: <b>${allocatedQty} шт</b>` : ''}${qtyPerPendant > 1 ? ` · На подвес: <b>${qtyPerPendant} шт</b>` : ''}${costPerPendant > 0 ? ` · Цена за подвес: <b>${formatRub(costPerPendant)}</b>` : ''}`;
             }
             if (selectedStock !== null && totalNeed > selectedStock) {
                 warnText = `⚠️ Нужно ${totalNeed} шт, на складе ${selectedStock} шт!`;
@@ -676,7 +729,7 @@ const Pendant = {
         }
 
         const summaryText = this._hasAttachmentData(data)
-            ? `${App.escHtml(data.name || (isCord ? 'Шнур' : 'Фурнитура'))} · ${formatRub(data.price_per_unit || 0)}${unitLabel}${!isMetric && qtyPerPendant > 1 ? ` · ${qtyPerPendant} шт/подвес` : ''}`
+            ? `${App.escHtml(data.name || (isCord ? 'Шнур' : 'Фурнитура'))} · ${formatRub(data.price_per_unit || 0)}${unitLabel}${allocatedQty > 0 ? ` · ${allocatedQty} подв.` : ''}${!isMetric && qtyPerPendant > 1 ? ` · ${qtyPerPendant} шт/подвес` : ''}`
             : '';
 
         return `
@@ -687,6 +740,10 @@ const Pendant = {
                 </div>
                 ${this._renderWhDropdown(type, data, whData, index)}
                 ${summaryText ? `<div style="margin-top:8px;font-size:12px;color:var(--text-muted);">${summaryText}</div>` : ''}
+                <div class="pendant-field-group" style="margin-top:8px;">
+                    <label>Сколько подвесов с этой позицией</label>
+                    <input type="number" class="input" value="${allocatedQty || ''}" min="0" placeholder="${qty || 0}" style="max-width:170px;" onchange="Pendant._updateAttachmentField('${type}', ${index}, 'allocated_qty', Math.max(0, Math.round(parseFloat(this.value)||0)))">
+                </div>
                 ${isMetric ? `<div class="pendant-field-group" style="margin-top:8px;">
                     <label>Длина на 1 подвес (см)</label>
                     <input type="number" class="input" value="${lengthCm || ''}" placeholder="50" style="max-width:170px;" onchange="Pendant._updateAttachmentField('${type}', ${index}, 'length_cm', parseFloat(this.value)||0)">
@@ -814,7 +871,9 @@ const Pendant = {
 
     _addAttachment(type) {
         const items = this._getAttachments(this._wizardData, type, { includeEmpty: true });
-        items.push(this._createEmptyAttachment(type));
+        const newItem = this._createEmptyAttachment(type);
+        newItem.allocated_qty = this._getAttachmentRemainingQty(type, this._wizardData, { entries: items, includeEmpty: true });
+        items.push(newItem);
         this._syncLegacyAttachments(this._wizardData);
         this._renderStep();
     },
@@ -830,9 +889,13 @@ const Pendant = {
 
     _setAttachmentSource(type, index, source) {
         const items = this._getAttachments(this._wizardData, type, { includeEmpty: true });
+        const previous = items[index] || this._createEmptyAttachment(type);
         items[index] = {
             ...this._createEmptyAttachment(type),
             source,
+            allocated_qty: this._getAttachmentAllocatedQty(previous, this._wizardData),
+            qty_per_pendant: parseFloat(previous.qty_per_pendant) > 0 ? parseFloat(previous.qty_per_pendant) : 1,
+            length_cm: parseFloat(previous.length_cm) || 0,
         };
         this._syncLegacyAttachments(this._wizardData);
         this._renderStep();
@@ -845,6 +908,9 @@ const Pendant = {
         if (field === 'qty_per_pendant') {
             const qtyPerPendant = parseFloat(items[index][field]);
             items[index][field] = qtyPerPendant > 0 ? qtyPerPendant : 1;
+        }
+        if (field === 'allocated_qty') {
+            items[index][field] = Math.max(0, Math.round(parseFloat(items[index][field]) || 0));
         }
         if (field === 'length_cm') {
             items[index][field] = parseFloat(items[index][field]) || 0;
@@ -887,6 +953,13 @@ const Pendant = {
         }
 
         items[index] = data;
+        if (!(parseFloat(items[index].allocated_qty) > 0)) {
+            items[index].allocated_qty = this._getAttachmentRemainingQty(type, this._wizardData, {
+                entries: items,
+                includeEmpty: true,
+                excludeIndex: index,
+            });
+        }
         this._syncLegacyAttachments(this._wizardData);
         this._renderStep();
     },
@@ -1152,13 +1225,16 @@ const Pendant = {
 
         const cordRows = cords.map((entry, index) => {
             const isMetric = this._isMetricAttachment('cord', entry);
+            const allocatedQty = this._getAttachmentAllocatedQty(entry, pnd);
             const lengthCm = parseFloat(entry.length_cm) || 0;
             const qtyPerPendant = parseFloat(entry.qty_per_pendant) || 1;
             const costPer = this._getAttachmentCostPerPendant('cord', entry);
             const sellPer = this._getAttachmentSellPerPendant('cord', entry);
-            const totalQtyLabel = isMetric ? `${round2(lengthCm * qty / 100)} м` : `${qty * qtyPerPendant}`;
+            const totalQtyLabel = isMetric
+                ? `${round2(lengthCm * allocatedQty / 100)} м${allocatedQty > 0 ? ` · ${allocatedQty} подв.` : ''}`
+                : `${round2(allocatedQty * qtyPerPendant)} шт${allocatedQty > 0 ? ` · ${allocatedQty} подв.` : ''}`;
             const titleSuffix = isMetric && lengthCm > 0
-                ? ` (${lengthCm} см)`
+                ? ` (${lengthCm} см/подвес)`
                 : (!isMetric && qtyPerPendant > 1 ? ` × ${qtyPerPendant}` : '');
             return {
                 index,
@@ -1166,11 +1242,14 @@ const Pendant = {
                 qtyLabel: totalQtyLabel,
                 costPer,
                 sellPer,
-                totalSell: formatRub(qty * sellPer),
+                totalCostValue: round2(allocatedQty * costPer),
+                totalSellValue: round2(allocatedQty * sellPer),
+                totalSell: formatRub(round2(allocatedQty * sellPer)),
             };
         });
 
         const carabinerRows = carabiners.map((entry, index) => {
+            const allocatedQty = this._getAttachmentAllocatedQty(entry, pnd);
             const qtyPerPendant = parseFloat(entry.qty_per_pendant) || 1;
             const costPer = this._getAttachmentCostPerPendant('carabiner', entry);
             const sellPer = this._getAttachmentSellPerPendant('carabiner', entry);
@@ -1178,10 +1257,12 @@ const Pendant = {
             return {
                 index,
                 title: `🔗 ${App.escHtml(entry.name || 'Фурнитура')}${titleSuffix}`,
-                qtyLabel: `${qty * qtyPerPendant}`,
+                qtyLabel: `${round2(allocatedQty * qtyPerPendant)} шт${allocatedQty > 0 ? ` · ${allocatedQty} подв.` : ''}`,
                 costPer,
                 sellPer,
-                totalSell: formatRub(qty * sellPer),
+                totalCostValue: round2(allocatedQty * costPer),
+                totalSellValue: round2(allocatedQty * sellPer),
+                totalSell: formatRub(round2(allocatedQty * sellPer)),
             };
         });
 
@@ -1202,14 +1283,14 @@ const Pendant = {
         // Totals
         let totalElemSell = 0;
         elements.forEach(el => { totalElemSell += (el.sell_price || 0); });
-        const totalCordCostPerUnit = round2(cordRows.reduce((sum, row) => sum + row.costPer, 0));
-        const totalCordSellPerUnit = round2(cordRows.reduce((sum, row) => sum + row.sellPer, 0));
-        const totalCarabinerCostPerUnit = round2(carabinerRows.reduce((sum, row) => sum + row.costPer, 0));
-        const totalCarabinerSellPerUnit = round2(carabinerRows.reduce((sum, row) => sum + row.sellPer, 0));
-        const totalCostPerUnit = round2(elemCount * elemCostPerUnit + totalCordCostPerUnit + totalCarabinerCostPerUnit + printCostPerUnit);
-        const totalSellPerUnit = round2(totalElemSell + totalCordSellPerUnit + totalCarabinerSellPerUnit + printSellPerUnit);
-        const totalCostAll = round2(totalCostPerUnit * qty);
-        const totalSellAll = round2(totalSellPerUnit * qty);
+        const totalCordCostAll = round2(cordRows.reduce((sum, row) => sum + row.totalCostValue, 0));
+        const totalCordSellAll = round2(cordRows.reduce((sum, row) => sum + row.totalSellValue, 0));
+        const totalCarabinerCostAll = round2(carabinerRows.reduce((sum, row) => sum + row.totalCostValue, 0));
+        const totalCarabinerSellAll = round2(carabinerRows.reduce((sum, row) => sum + row.totalSellValue, 0));
+        const totalCostAll = round2((qty * elemCount * elemCostPerUnit) + totalCordCostAll + totalCarabinerCostAll + (printCostPerUnit * qty));
+        const totalSellAll = round2((qty * totalElemSell) + totalCordSellAll + totalCarabinerSellAll + (printSellPerUnit * qty));
+        const totalCostPerUnit = qty > 0 ? round2(totalCostAll / qty) : 0;
+        const totalSellPerUnit = qty > 0 ? round2(totalSellAll / qty) : 0;
         const vatRate = Number.isFinite(App?.params?.vatRate) ? App.params.vatRate : 0.05;
         const vatAmount = round2(totalSellAll * vatRate);
         const totalSellWithVat = round2(totalSellAll + vatAmount);
@@ -1339,6 +1420,33 @@ const Pendant = {
     // READ + SAVE
     // ==========================================
 
+    _validateAttachmentDistributions() {
+        const pnd = this._wizardData;
+        const totalQty = parseInt(pnd?.quantity, 10) || 0;
+        if (!(totalQty > 0)) return true;
+
+        const checks = [
+            { type: 'cord', label: 'Шнур' },
+            { type: 'carabiner', label: 'Фурнитура' },
+        ];
+
+        for (const check of checks) {
+            const entries = this._getAttachments(pnd, check.type);
+            if (entries.length === 0) continue;
+            const allocatedQty = this._getAttachmentAllocatedTotal(check.type, pnd, { entries });
+            if (allocatedQty > totalQty) {
+                App.toast(`${check.label}: распределено на ${allocatedQty - totalQty} шт больше тиража`);
+                return false;
+            }
+            if (allocatedQty < totalQty) {
+                App.toast(`${check.label}: распределите ещё ${totalQty - allocatedQty} шт`);
+                return false;
+            }
+        }
+
+        return true;
+    },
+
     _readCurrentStep() {
         const pnd = this._wizardData;
         if (this._wizardStep === 1) {
@@ -1356,6 +1464,7 @@ const Pendant = {
 
         if (!pnd.name) { App.toast('Введите надпись'); return; }
         if (!pnd.quantity || pnd.quantity <= 0) { App.toast('Введите количество'); return; }
+        if (!this._validateAttachmentDistributions()) return;
 
         // sell_price_override and packaging are no longer used
         pnd.sell_price_override = null;

@@ -290,6 +290,7 @@ function getPendantAttachmentEntries(pendant, type) {
     const collectionKey = type === 'cord' ? 'cords' : 'carabiners';
     const legacyKey = type === 'cord' ? 'cord' : 'carabiner';
     const fallbackLengthCm = type === 'cord' ? (parseFloat(pendant?.cord_length_cm) || 0) : 0;
+    const totalQty = parseFloat(pendant?.quantity) || 0;
 
     let entries = Array.isArray(pendant?.[collectionKey]) ? pendant[collectionKey] : [];
     if ((!entries || entries.length === 0) && pendant?.[legacyKey]) {
@@ -301,9 +302,22 @@ function getPendantAttachmentEntries(pendant, type) {
             const normalized = { ...(entry || {}) };
             const qtyPerPendant = parseFloat(normalized.qty_per_pendant);
             const lengthCm = parseFloat(normalized.length_cm);
+            const allocatedQty = parseFloat(normalized.allocated_qty);
+            const hasExplicitAllocatedQty = normalized.allocated_qty !== undefined && normalized.allocated_qty !== null && normalized.allocated_qty !== '';
             normalized.qty_per_pendant = qtyPerPendant > 0 ? qtyPerPendant : 1;
             normalized.length_cm = Number.isFinite(lengthCm) ? lengthCm : (type === 'cord' && index === 0 ? fallbackLengthCm : 0);
             normalized.unit = normalized.unit || 'шт';
+            normalized.allocated_qty = Number.isFinite(allocatedQty) && allocatedQty >= 0
+                ? allocatedQty
+                : ((
+                    normalized.name
+                    || normalized.warehouse_item_id
+                    || normalized.warehouse_sku
+                    || (parseFloat(normalized.price_per_unit) || 0) > 0
+                    || (parseFloat(normalized.delivery_price) || 0) > 0
+                    || (parseFloat(normalized.sell_price) || 0) > 0
+                    || normalized.source === 'custom'
+                ) && !hasExplicitAllocatedQty && totalQty > 0 ? totalQty : 0);
             return normalized;
         })
         .filter(entry => entry && (
@@ -327,14 +341,42 @@ function getPendantMetricRateFactor(entry) {
     return entry?.unit === 'см' ? lengthCm : (lengthCm / 100);
 }
 
+function getPendantAttachmentAllocatedQty(pendant, entry) {
+    const totalQty = parseFloat(pendant?.quantity) || 0;
+    if (!entry) return 0;
+    const allocatedQty = parseFloat(entry.allocated_qty);
+    if (Number.isFinite(allocatedQty) && allocatedQty >= 0) return allocatedQty;
+    return totalQty > 0 ? totalQty : 0;
+}
+
 function getPendantAttachmentRequiredQty(pendant, type, entry) {
-    const qty = parseFloat(pendant?.quantity) || 0;
-    if (!(qty > 0) || !entry) return 0;
+    const allocatedQty = getPendantAttachmentAllocatedQty(pendant, entry);
+    if (!(allocatedQty > 0) || !entry) return 0;
     if (isPendantMetricAttachment(type, entry)) {
-        return round2(qty * getPendantMetricRateFactor(entry));
+        return round2(allocatedQty * getPendantMetricRateFactor(entry));
     }
     const qtyPerPendant = parseFloat(entry.qty_per_pendant) || 1;
-    return round2(qty * qtyPerPendant);
+    return round2(allocatedQty * qtyPerPendant);
+}
+
+function getPendantAttachmentTotalCost(pendant, type, entry) {
+    const allocatedQty = getPendantAttachmentAllocatedQty(pendant, entry);
+    if (!(allocatedQty > 0)) return 0;
+    return round2(allocatedQty * getPendantAttachmentCostPerUnit(type, entry));
+}
+
+function getPendantAttachmentTotalSell(pendant, type, entry) {
+    const allocatedQty = getPendantAttachmentAllocatedQty(pendant, entry);
+    if (!(allocatedQty > 0)) return 0;
+    return round2(allocatedQty * (
+        type === 'cord' || type === 'carabiner'
+            ? (
+                isPendantMetricAttachment(type, entry)
+                    ? round2((entry?.sell_price || 0) * getPendantMetricRateFactor(entry))
+                    : round2((entry?.sell_price || 0) * (parseFloat(entry?.qty_per_pendant) || 1))
+            )
+            : 0
+    ));
 }
 
 function getPendantWarehouseDemandRows(pendant) {
@@ -401,20 +443,20 @@ function calculatePendantCost(pendant, params) {
 
     // Element cost (production/purchase cost per element)
     const elemCostPerUnit = pendant.element_price_per_unit || 0;
-    const elemCostTotal = elements.length * elemCostPerUnit;
+    const elemCostTotal = qty * elements.length * elemCostPerUnit;
 
     const cords = getPendantAttachmentEntries(pendant, 'cord');
     const carabiners = getPendantAttachmentEntries(pendant, 'carabiner');
-    const cordCost = cords.reduce((sum, entry) => sum + getPendantAttachmentCostPerUnit('cord', entry), 0);
-    const carabinerCost = carabiners.reduce((sum, entry) => sum + getPendantAttachmentCostPerUnit('carabiner', entry), 0);
+    const cordCostTotal = cords.reduce((sum, entry) => sum + getPendantAttachmentTotalCost(pendant, 'cord', entry), 0);
+    const carabinerCostTotal = carabiners.reduce((sum, entry) => sum + getPendantAttachmentTotalCost(pendant, 'carabiner', entry), 0);
 
-    let printCost = 0;
+    let printCostTotal = 0;
     elements.forEach(el => {
-        if (el.has_print && el.print_price) printCost += el.print_price;
+        if (el.has_print && el.print_price) printCostTotal += qty * el.print_price;
     });
 
-    // Total cost per pendant = elements + cord + carabiner + print
-    const costPerUnit = round2(elemCostTotal + cordCost + carabinerCost + printCost);
+    const totalCost = round2(elemCostTotal + cordCostTotal + carabinerCostTotal + printCostTotal);
+    const costPerUnit = qty > 0 ? round2(totalCost / qty) : 0;
 
     // Sell price: use pre-calculated total from Step 5 UI
     let sellPerUnit;
@@ -430,10 +472,12 @@ function calculatePendantCost(pendant, params) {
         .reduce((sum, item) => {
             const speed = parseFloat(item.entry?.assembly_speed) || 0;
             if (!(speed > 0)) return sum;
+            const allocatedQty = getPendantAttachmentAllocatedQty(pendant, item.entry);
+            if (!(allocatedQty > 0)) return sum;
             const opsPerPendant = isPendantMetricAttachment(item.type, item.entry)
                 ? 1
                 : (parseFloat(item.entry?.qty_per_pendant) || 1);
-            return sum + ((qty * opsPerPendant / speed) * (params.wasteFactor || 1.1));
+            return sum + ((allocatedQty * opsPerPendant / speed) * (params.wasteFactor || 1.1));
         }, 0);
     const assemblyHours = round2(attachmentAssemblyHours);
     const packagingHours = 0;
@@ -441,7 +485,7 @@ function calculatePendantCost(pendant, params) {
     return {
         costPerUnit,
         sellPerUnit: round2(sellPerUnit),
-        totalCost: round2(costPerUnit * qty),
+        totalCost: totalCost,
         totalRevenue: round2(sellPerUnit * qty),
         assemblyHours,
         packagingHours,
@@ -668,10 +712,10 @@ function calculateFinDirectorData(items, hardwareItems, packagingItems, params, 
         totalSalary += (r.assemblyHours + r.packagingHours) * params.fotPerHour;
         // Cord + carabiner → hardware purchases
         const elements = getCountablePendantElements(pnd);
-        totalHardwarePurchase += qty * cords.reduce((sum, entry) => sum + getPendantAttachmentPurchasePerUnit('cord', entry), 0);
-        totalHardwarePurchase += qty * carabiners.reduce((sum, entry) => sum + getPendantAttachmentPurchasePerUnit('carabiner', entry), 0);
-        totalHardwareDelivery += qty * cords.reduce((sum, entry) => sum + getPendantAttachmentDeliveryPerUnit('cord', entry), 0);
-        totalHardwareDelivery += qty * carabiners.reduce((sum, entry) => sum + getPendantAttachmentDeliveryPerUnit('carabiner', entry), 0);
+        totalHardwarePurchase += cords.reduce((sum, entry) => sum + (getPendantAttachmentAllocatedQty(pnd, entry) * getPendantAttachmentPurchasePerUnit('cord', entry)), 0);
+        totalHardwarePurchase += carabiners.reduce((sum, entry) => sum + (getPendantAttachmentAllocatedQty(pnd, entry) * getPendantAttachmentPurchasePerUnit('carabiner', entry)), 0);
+        totalHardwareDelivery += cords.reduce((sum, entry) => sum + (getPendantAttachmentAllocatedQty(pnd, entry) * getPendantAttachmentDeliveryPerUnit('cord', entry)), 0);
+        totalHardwareDelivery += carabiners.reduce((sum, entry) => sum + (getPendantAttachmentAllocatedQty(pnd, entry) * getPendantAttachmentDeliveryPerUnit('carabiner', entry)), 0);
         // Elements → hardware purchase
         totalHardwarePurchase += qty * elements.length * (pnd.element_price_per_unit || 0);
         // Printing
