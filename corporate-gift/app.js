@@ -276,6 +276,8 @@ document.getElementById('orderForm').addEventListener('submit', async function(e
 
   const fullName = document.getElementById('fullName').value.trim();
   const phone = document.getElementById('phone').value.trim();
+  const contactInfo = document.getElementById('contactInfo').value.trim();
+  const company = document.getElementById('company').value.trim();
   const city = document.getElementById('city').value.trim();
   const address = document.getElementById('address').value.trim();
   const comment = document.getElementById('comment').value.trim();
@@ -288,10 +290,12 @@ document.getElementById('orderForm').addEventListener('submit', async function(e
   }
 
   // Validate required fields
-  if (!fullName || !phone || !city || !address) {
+  if (!fullName || !phone || !contactInfo || !company || !city || !address) {
     const fields = [
       { el: 'fullName', val: fullName },
       { el: 'phone', val: phone },
+      { el: 'contactInfo', val: contactInfo },
+      { el: 'company', val: company },
       { el: 'city', val: city },
       { el: 'address', val: address }
     ];
@@ -309,6 +313,19 @@ document.getElementById('orderForm').addEventListener('submit', async function(e
   const btn = document.getElementById('submitBtn');
   btn.disabled = true;
   btn.textContent = 'Отправляем...';
+
+  function buildSubmissionComment(contactValue, companyValue, commentValue) {
+    const parts = [
+      `Контакт: ${contactValue}`,
+      `Компания: ${companyValue}`
+    ];
+
+    if (commentValue) {
+      parts.push(`Комментарий: ${commentValue}`);
+    }
+
+    return parts.join(' | ');
+  }
 
   // Find color names for readable sheet data
   function findColorName(hex, palette) {
@@ -342,9 +359,14 @@ document.getElementById('orderForm').addEventListener('submit', async function(e
     letterCount: state.letters.length,
     fullName,
     phone,
+    contactInfo,
+    company,
     city,
     address,
-    comment: comment || '—',
+    // Keep the extra contact data in the legacy comment field so the current
+    // deployed Apps Script still captures it even before its own code is updated.
+    comment: buildSubmissionComment(contactInfo, company, comment),
+    userComment: comment || '—',
     pendantImage
   };
 

@@ -15,20 +15,26 @@
 function doPost(e) {
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
   var data = JSON.parse(e.postData.contents);
+  var headers = [
+    'Дата', 'Слово', 'Буквы и цвета', 'Rainbow?',
+    'Цвет шнура', 'Цвет карабина', 'Кол-во букв',
+    'ФИО', 'Телефон', 'Город', 'Адрес', 'Комментарий',
+    'Превью подвеса', 'Почта / Telegram', 'Компания'
+  ];
 
-  // Add header row if sheet is empty
+  // Add or normalize header row. New columns are appended to preserve legacy data alignment.
   if (sheet.getLastRow() === 0) {
-    var headers = [
-      'Дата', 'Слово', 'Буквы и цвета', 'Rainbow?',
-      'Цвет шнура', 'Цвет карабина', 'Кол-во букв',
-      'ФИО', 'Телефон', 'Город', 'Адрес', 'Комментарий',
-      'Превью подвеса'
-    ];
     sheet.appendRow(headers);
     sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold');
-    // Set column widths for readability
-    sheet.setColumnWidth(13, 300); // Preview column wider
+  } else {
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold');
   }
+
+  // Set column widths for readability
+  sheet.setColumnWidth(13, 300); // Preview column wider
+  sheet.setColumnWidth(14, 180);
+  sheet.setColumnWidth(15, 180);
 
   // Save pendant image to Google Drive if provided
   var imageUrl = '';
@@ -62,8 +68,10 @@ function doPost(e) {
     data.phone,
     data.city,
     data.address,
-    data.comment || '—',
-    imageUrl
+    data.userComment || data.comment || '—',
+    imageUrl,
+    data.contactInfo || '—',
+    data.company || '—'
   ]);
 
   return ContentService
