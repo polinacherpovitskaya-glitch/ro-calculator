@@ -310,9 +310,12 @@ document.getElementById('orderForm').addEventListener('submit', async function(e
     return;
   }
 
-  const btn = document.getElementById('submitBtn');
-  btn.disabled = true;
-  btn.textContent = 'Отправляем...';
+  setSubmittingState(true, {
+    buttonLabel: 'Готовим превью...',
+    title: 'Собираем подвес',
+    message: 'Подготавливаем картинку и данные заказа перед отправкой.'
+  });
+  await waitForNextPaint();
 
   function buildSubmissionComment(contactValue, companyValue, commentValue) {
     const parts = [
@@ -339,6 +342,12 @@ document.getElementById('orderForm').addEventListener('submit', async function(e
   // Generate pendant image as base64 PNG
   let pendantImage = '';
   try {
+    setSubmittingState(true, {
+      buttonLabel: 'Отправляем заявку...',
+      title: 'Отправляем заявку',
+      message: 'Сохраняем данные и превью подвеса. Обычно это занимает пару секунд.'
+    });
+    await waitForNextPaint();
     pendantImage = await svgToPngBase64();
   } catch (err) {
     console.warn('Could not generate pendant image:', err);
@@ -372,6 +381,12 @@ document.getElementById('orderForm').addEventListener('submit', async function(e
 
   try {
     if (state.config.googleScriptUrl) {
+      setSubmittingState(true, {
+        buttonLabel: 'Отправляем заявку...',
+        title: 'Связываемся с таблицей',
+        message: 'Загружаем заявку в Google Sheets. Не закрывай страницу, пока идёт отправка.'
+      });
+      await waitForNextPaint();
       await fetch(state.config.googleScriptUrl, {
         method: 'POST',
         mode: 'no-cors',
@@ -391,8 +406,10 @@ document.getElementById('orderForm').addEventListener('submit', async function(e
 
   } catch (err) {
     console.error('Submission error:', err);
-    btn.disabled = false;
-    btn.textContent = 'Попробовать ещё раз';
+    setSubmittingState(false, {
+      buttonLabel: 'Попробовать ещё раз'
+    });
+    showToast('Не удалось отправить заявку. Проверь интернет и попробуй ещё раз.');
   }
 });
 
@@ -482,6 +499,47 @@ function showToast(message) {
 function shakeElement(el) {
   el.classList.add('shake');
   el.addEventListener('animationend', () => el.classList.remove('shake'), { once: true });
+}
+
+function setSubmittingState(isSubmitting, options = {}) {
+  const form = document.getElementById('orderForm');
+  const btn = document.getElementById('submitBtn');
+  const btnLabel = btn ? btn.querySelector('.submit-btn__label') : null;
+  const feedback = document.getElementById('submitFeedback');
+  const feedbackTitle = document.getElementById('submitFeedbackTitle');
+  const feedbackMessage = document.getElementById('submitFeedbackMessage');
+
+  if (form) {
+    form.classList.toggle('order-form--submitting', isSubmitting);
+    form.setAttribute('aria-busy', isSubmitting ? 'true' : 'false');
+  }
+
+  if (btn) {
+    btn.disabled = isSubmitting;
+  }
+
+  if (btnLabel) {
+    btnLabel.textContent = options.buttonLabel || 'Отправить заказ';
+  }
+
+  if (feedback) {
+    feedback.classList.toggle('hidden', !isSubmitting);
+  }
+
+  if (isSubmitting) {
+    if (feedbackTitle) feedbackTitle.textContent = options.title || 'Отправляем заявку';
+    if (feedbackMessage) {
+      feedbackMessage.textContent = options.message || 'Сохраняем данные и отправляем заявку. Обычно это занимает пару секунд.';
+    }
+  }
+}
+
+function waitForNextPaint() {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(resolve);
+    });
+  });
 }
 
 // === Init ===

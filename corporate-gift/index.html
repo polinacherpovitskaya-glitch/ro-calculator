@@ -108,7 +108,17 @@
             <label for="comment">Комментарий <span class="label-optional">(необязательно)</span></label>
             <textarea id="comment" rows="3" placeholder="Код домофона, удобное время доставки и т.д."></textarea>
           </div>
-          <button type="submit" class="submit-btn" id="submitBtn">Отправить заказ</button>
+          <button type="submit" class="submit-btn" id="submitBtn">
+            <span class="submit-btn__spinner" aria-hidden="true"></span>
+            <span class="submit-btn__label">Отправить заказ</span>
+          </button>
+          <div class="submit-feedback hidden" id="submitFeedback" aria-live="polite" aria-atomic="true">
+            <div class="submit-feedback__pulse" aria-hidden="true"></div>
+            <div class="submit-feedback__text">
+              <strong class="submit-feedback__title" id="submitFeedbackTitle">Отправляем заявку</strong>
+              <span class="submit-feedback__message" id="submitFeedbackMessage">Сохраняем данные и превью подвеса. Обычно это занимает пару секунд.</span>
+            </div>
+          </div>
         </form>
       </section>
     </main>

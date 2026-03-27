@@ -418,7 +418,10 @@ body {
 
 /* === Submit Button === */
 .submit-btn {
-  display: block;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
   width: 100%;
   padding: 14px 24px;
   margin-top: 20px;
@@ -431,6 +434,8 @@ body {
   border-radius: var(--radius-sm);
   cursor: pointer;
   transition: all var(--transition);
+  position: relative;
+  overflow: hidden;
 }
 
 .submit-btn:hover {
@@ -444,10 +449,82 @@ body {
 }
 
 .submit-btn:disabled {
-  background: #CCC;
-  cursor: not-allowed;
+  background: linear-gradient(135deg, rgba(252, 68, 0, 0.82), rgba(252, 68, 0, 0.65));
+  color: rgba(255, 255, 255, 0.98);
+  cursor: progress;
   transform: none;
-  box-shadow: none;
+  box-shadow: 0 10px 24px rgba(252, 68, 0, 0.18);
+}
+
+.submit-btn__spinner {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.28);
+  border-top-color: #FFF;
+  animation: spin 0.75s linear infinite;
+  display: none;
+  flex-shrink: 0;
+}
+
+.submit-btn__label {
+  position: relative;
+}
+
+.submit-btn:disabled .submit-btn__spinner {
+  display: inline-block;
+}
+
+.submit-btn:disabled .submit-btn__label {
+  animation: submitPulse 1.4s ease-in-out infinite;
+}
+
+.submit-feedback {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(252, 68, 0, 0.08), rgba(252, 68, 0, 0.03));
+  border: 1px solid rgba(252, 68, 0, 0.12);
+  color: var(--text);
+}
+
+.submit-feedback__pulse {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  background: var(--brand);
+  box-shadow: 0 0 0 0 rgba(252, 68, 0, 0.35);
+  animation: signalPulse 1.5s ease-out infinite;
+  flex-shrink: 0;
+}
+
+.submit-feedback__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.submit-feedback__title {
+  font-size: 0.93rem;
+  font-weight: 700;
+}
+
+.submit-feedback__message {
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.order-form--submitting .form-group input,
+.order-form--submitting .form-group textarea {
+  background: rgba(255, 255, 255, 0.8);
+}
+
+.order-form--submitting .form-group label {
+  color: rgba(26, 26, 26, 0.72);
 }
 
 /* === Thank You === */
@@ -511,6 +588,30 @@ body {
 
 .shake {
   animation: shake 0.4s ease;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes submitPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.75; }
+}
+
+@keyframes signalPulse {
+  0% {
+    transform: scale(0.92);
+    box-shadow: 0 0 0 0 rgba(252, 68, 0, 0.35);
+  }
+  70% {
+    transform: scale(1.05);
+    box-shadow: 0 0 0 10px rgba(252, 68, 0, 0);
+  }
+  100% {
+    transform: scale(0.92);
+    box-shadow: 0 0 0 0 rgba(252, 68, 0, 0);
+  }
 }
 
 /* === Utility === */
