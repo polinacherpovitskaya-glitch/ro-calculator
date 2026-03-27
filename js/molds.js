@@ -705,17 +705,31 @@ const Molds = {
     onPhotoFileChange(input) {
         if (!input.files || !input.files[0]) return;
         const file = input.files[0];
-        if (file.size > 2 * 1024 * 1024) {
-            App.toast('Файл слишком большой (макс 2MB)');
+        if (file.size > 10 * 1024 * 1024) {
+            App.toast('Файл слишком большой (макс 10MB)');
             return;
         }
         const reader = new FileReader();
         reader.onload = (e) => {
-            // Resize to thumbnail
-            this.resizeImage(e.target.result, 200, (thumb) => {
-                this._pendingPhoto = thumb;
-                this.updatePhotoPreview(thumb);
+            // Resize to 800px max and upload to Supabase Storage
+            this.resizeImageToBlob(e.target.result, 800, async (blob) => {
+                // Show local preview immediately
+                const localPreview = URL.createObjectURL(blob);
+                this.updatePhotoPreview(localPreview);
                 document.getElementById('mold-photo-url').value = '';
+
+                // Upload to Supabase Storage
+                const url = await this.uploadPhotoToStorage(blob);
+                if (url) {
+                    this._pendingPhoto = url;
+                    this.updatePhotoPreview(url);
+                    App.toast('Фото загружено', 'success');
+                } else {
+                    // Fallback to data URI if upload fails
+                    this._pendingPhoto = e.target.result;
+                    App.toast('Не удалось загрузить в облако, сохранено локально', 'warning');
+                }
+                URL.revokeObjectURL(localPreview);
             });
         };
         reader.readAsDataURL(file);
@@ -743,9 +757,51 @@ const Molds = {
             canvas.width = w;
             canvas.height = h;
             canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-            callback(canvas.toDataURL('image/jpeg', 0.7));
+            callback(canvas.toDataURL('image/jpeg', 0.85));
         };
         img.src = dataUrl;
+    },
+
+    resizeImageToBlob(dataUrl, maxSize, callback) {
+        const img = new Image();
+        img.onload = () => {
+            const canvas = document.createElement('canvas');
+            let w = img.width, h = img.height;
+            if (w > maxSize || h > maxSize) {
+                if (w > h) { h = Math.round(h * maxSize / w); w = maxSize; }
+                else { w = Math.round(w * maxSize / h); h = maxSize; }
+            }
+            canvas.width = w;
+            canvas.height = h;
+            canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+            canvas.toBlob((blob) => callback(blob), 'image/jpeg', 0.85);
+        };
+        img.src = dataUrl;
+    },
+
+    async uploadPhotoToStorage(blob) {
+        if (!isSupabaseReady()) return null;
+        try {
+            const fileName = `mold_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.jpg`;
+            const { data, error } = await supabaseClient.storage
+                .from('mold-photos')
+                .upload(fileName, blob, {
+                    contentType: 'image/jpeg',
+                    upsert: false,
+                });
+            if (error) {
+                console.error('[Molds] Storage upload error:', error);
+                return null;
+            }
+            // Build public URL
+            const { data: urlData } = supabaseClient.storage
+                .from('mold-photos')
+                .getPublicUrl(data.path);
+            return urlData?.publicUrl || null;
+        } catch (err) {
+            console.error('[Molds] Storage upload failed:', err);
+            return null;
+        }
     },
 
     updatePhotoPreview(url) {
