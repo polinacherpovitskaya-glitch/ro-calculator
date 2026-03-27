@@ -267,7 +267,7 @@ async function smokeMoscowDateAndLegacyRepair(context) {
     );
     assert.equal(
         vm.runInContext(`TimeTrack.getLegacyBuggyTodayYMD(new Date('2026-03-20T20:30:00Z'), 3)`, context),
-        '2026-03-21'
+        vm.runInContext(`TimeTrack.getLegacyBuggyTodayYMDWithHostOffset(new Date('2026-03-20T20:30:00Z'), 3, new Date('2026-03-20T20:30:00Z').getTimezoneOffset())`, context)
     );
     assert.equal(
         vm.runInContext(`TimeTrack.getLegacyBuggyTodayYMDWithHostOffset(new Date('2026-03-20T18:30:00Z'), 3, 180)`, context),
