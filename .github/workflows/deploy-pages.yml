@@ -53,6 +53,7 @@ jobs:
           node tests/supabase-fallback-smoke.js
           node --check tests/live-site-smoke.mjs
           node --check tests/warehouse-stress-smoke.mjs
+          node --check .github/scripts/send-telegram-alert.mjs
 
   deploy:
     needs: verify
