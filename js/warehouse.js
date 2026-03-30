@@ -4248,8 +4248,25 @@ const Warehouse = {
         const container = document.getElementById('wh-shipments-list');
         if (!container) return;
 
+        const getShipmentDateValue = (sh) => {
+            const raw = sh?.date || sh?.received_at || sh?.created_at;
+            if (!raw) return 0;
+
+            if (typeof raw === 'string') {
+                const match = raw.match(/^(\d{2})\.(\d{2})\.(\d{4})/);
+                if (match) {
+                    const iso = `${match[3]}-${match[2]}-${match[1]}`;
+                    const ts = Date.parse(iso);
+                    if (!Number.isNaN(ts)) return ts;
+                }
+            }
+
+            const ts = Date.parse(raw);
+            return Number.isNaN(ts) ? 0 : ts;
+        };
+
         const sorted = [...this.allShipments].sort((a, b) =>
-            new Date(b.created_at || 0) - new Date(a.created_at || 0)
+            getShipmentDateValue(b) - getShipmentDateValue(a)
         );
 
         if (sorted.length === 0) {
@@ -4276,7 +4293,7 @@ const Warehouse = {
                     <th class="text-right">Доставка</th><th>Статус</th><th style="width:60px;"></th>
                 </tr></thead>
                 <tbody>${sorted.map(sh => `<tr style="cursor:pointer;" onclick="Warehouse.editShipment(${sh.id})">
-                    <td style="font-size:12px;">${App.formatDate(sh.date || sh.created_at)}</td>
+                    <td style="font-size:12px;">${App.formatDate(sh.date || sh.received_at || sh.created_at)}</td>
                     <td style="font-weight:600;">${this.esc(sh.shipment_name || '')}</td>
                     <td>${this.esc(sh.supplier || '—')}</td>
                     <td class="text-right">${(sh.items || []).length}</td>
