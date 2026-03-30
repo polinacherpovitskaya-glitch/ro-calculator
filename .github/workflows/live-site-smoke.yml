@@ -49,7 +49,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: Notify Telegram on failure
-        if: ${{ failure() && (secrets.TELEGRAM_BOT_TOKEN != '' || secrets.TASK_BOT_TOKEN != '' || secrets.BOT_TOKEN != '') && (secrets.TELEGRAM_ALERT_CHAT_ID != '' || secrets.TELEGRAM_SMOKE_CHAT_ID != '' || secrets.TELEGRAM_CHAT_ID != '') }}
+        if: ${{ failure() }}
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TASK_BOT_TOKEN: ${{ secrets.TASK_BOT_TOKEN }}
