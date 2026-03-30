@@ -51,6 +51,7 @@ jobs:
           node tests/production-calendar-smoke.js
           node tests/factual-smoke.js
           node tests/supabase-fallback-smoke.js
+          node --check tests/live-site-smoke.mjs
 
   deploy:
     needs: verify

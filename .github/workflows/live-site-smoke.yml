@@ -1,0 +1,49 @@
+name: Live site smoke
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 */4 * * *'
+  workflow_run:
+    workflows:
+      - Deploy GitHub Pages
+    types:
+      - completed
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Install Playwright
+        run: |
+          set -euo pipefail
+          npm install --no-save playwright@1.54.2
+          npx playwright install --with-deps chromium
+
+      - name: Run live smoke
+        env:
+          RO_LIVE_URL: https://polinacherpovitskaya-glitch.github.io/ro-calculator/
+          RO_SMOKE_USER_ID: 1772715209137
+        run: node tests/live-site-smoke.mjs
+
+      - name: Upload Playwright artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-site-smoke-artifacts
+          path: output/playwright/live-site-smoke
+          if-no-files-found: ignore
