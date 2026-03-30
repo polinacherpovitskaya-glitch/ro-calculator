@@ -1,10 +1,10 @@
 # Status
 
 ## Snapshot
-- Current phase: M3/M4 - build-source sanity locked, continuing warehouse shortage hardening + auth remediation
+- Current phase: M3 -> M3b - warehouse end-to-end audit requested (add/writeoff/inventory/receiving across all windows)
 - Plan file: `/Users/krollipolli/Documents/Github/RO calculator/docs/plans.md`
 - Status: yellow
-- Last updated: 2026-03-17
+- Last updated: 2026-03-30
 
 ## Build / Deploy Source Of Truth
 - Public deploy source: `origin/main` -> `.github/workflows/deploy-pages.yml` -> GitHub Pages.
@@ -68,11 +68,13 @@
 - Повторная live/browser проверка складских edge cases уже с зафиксированным deploy source, чтобы локальный smoke и публичный релиз больше не путались между собой.
 - Повторная live/browser проверка `План-факт/FinTablo` perimeter после sync-fix и factual drift hotfix.
 - Повторная live/browser проверка `warehouse/orders` perimeter после hardening partial reserve / rollback logic.
+- Запуск warehouse end‑to‑end прогона: добавление, списание, инвентаризация, приемка во всех окнах (orders, order‑detail, warehouse, china, ready goods).
 - Продолжение auth migration после закрытия restore/permissions gap: forced reset/storage move и clean login/logout flow уже на более реалистичном fixture path.
 - Повторная near-live проверка `project_hardware` уже на реальных складских данных после sticky-check fix, shortage-safe toggle, блока `Собрано` и auto-hide для завершенных заказов.
 
 ## Next
 - Закрыть первый незавершенный пункт M3: partial reserve, возврат и списание при нехватке warehouse hardware/packaging уже на live-click path.
+- Выполнить M3b warehouse E2E audit и зафиксировать фактические расхождения (если есть).
 - Дойти от частичного Phase 0 до forced reset/storage migration path из `/Users/krollipolli/Documents/Github/RO calculator/docs/auth-remediation-plan.md`.
 - Перепроверить live browser perimeter для `warehouse/ready goods` на реальных кликах после расширения smoke coverage.
 - Перепроверить tasks/projects regression perimeter и собрать финальный handoff по live gaps.

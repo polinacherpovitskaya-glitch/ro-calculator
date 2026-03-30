@@ -8,10 +8,10 @@
   - `/Users/krollipolli/Documents/Github/RO calculator/docs/improvement-backlog.md`
   - `/Users/krollipolli/Documents/Github/RO calculator/docs/auth-remediation-plan.md`
 - Repo context: vanilla JS SPA с модулями `app`, `orders`, `order-detail`, `china`, `warehouse`, `colors`, `supabase` и отдельным `corporate-gift/`.
-- Last updated: 2026-03-17
+- Last updated: 2026-03-30
 
 ## Validation Scope
-- In scope: calculator order create/save/load/edit/clone, order list/detail/status changes, color reference и color persistence в item data, warehouse reservations/deductions/returns/ready goods, China purchase/consolidation/receipt flows, `corporate-gift` form/render/submit boundary, order-related tasks/projects widgets как regression perimeter.
+- In scope: calculator order create/save/load/edit/clone, order list/detail/status changes, color reference и color persistence в item data, **полный складской цикл (добавление/списание/инвентаризация/приемка)** во всех окнах, warehouse reservations/deductions/returns/ready goods, China purchase/consolidation/receipt flows, `corporate-gift` form/render/submit boundary, order-related tasks/projects widgets как regression perimeter.
 - Out of scope: bot/Telegram, analytics accuracy вне order regression paths, marketplaces sync, полноценное performance/load testing.
 - Auth/data-security remediation теперь ведется отдельным execution track в `docs/auth-remediation-plan.md`; до его реализации audited scope нельзя считать полностью release-safe.
 
@@ -45,6 +45,7 @@
 - Сохранить order, перезагрузить, отредактировать, клонировать и проверить `order-detail`, историю изменений и meta badges.
 - Перевести order через `sample -> in_production -> completed` или ближайшие реальные статусы и проверить резервы, списания, возвраты и ready goods effects.
 - Создать закупку из `order-detail`, пройти консолидацию/приход на склад и проверить связанный остаток и историю.
+- Пройти полный складской цикл: ручное добавление позиции, списание, инвентаризация (сверка/сохранение), приемка (включая China), и проверить, что количество отражается одинаково во всех окнах.
 - Открыть `corporate-gift/`, собрать подвес, пройти обязательную валидацию и проверить submit boundary / success fallback.
 - После каждой пачки фиксов повторять короткий regression loop по order create, status change, warehouse view, china view и ready goods.
 
@@ -54,6 +55,8 @@
 - Частичный резерв при нехватке остатка должен быть прозрачен в UI и не ломать дальнейшие списания.
 - История склада при нехватке остатка должна писать фактически примененное списание, а не полный запрошенный delta.
 - Rollback после clamped-списания должен возвращать только фактически списанное количество, а не полный спрос заказа.
+- Инвентаризация должна показывать системное количество, а сохранение фактического должно менять склад без «невидимых» расхождений.
+- Приемка должна менять количество на складе сразу после подтверждения и писать корректную историю.
 - Legacy orders/items без `hardware_source`, `packaging_source`, `item_data` или color photo должны оставаться читаемыми.
 - Duplicate `order_items` rows должны repair-иться безопасно на load без silent data loss.
 - Откат статуса из consumed back в non-consumed должен возвращать stock ровно один раз.

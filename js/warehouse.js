@@ -1968,6 +1968,12 @@ const Warehouse = {
         const name = document.getElementById('wh-f-name').value.trim();
         if (!name) { App.toast('Укажите название'); return; }
 
+        const existingItem = this.editingId ? this.allItems.find(i => i.id === this.editingId) : null;
+        const previousQty = this._parseWarehouseQty(existingItem ? existingItem.qty : 0);
+        const newQty = this._parseWarehouseQty(document.getElementById('wh-f-qty').value);
+        const qtyDelta = newQty - previousQty;
+        const qtyChanged = this.editingId && existingItem && Math.abs(qtyDelta) > 1e-9;
+
         const item = {
             id: this.editingId || undefined,
             category: document.getElementById('wh-f-category').value,
@@ -1978,7 +1984,7 @@ const Warehouse = {
             unit: document.getElementById('wh-f-unit').value || 'шт',
             photo_url: document.getElementById('wh-f-photo-url').value.trim(),
             photo_thumbnail: this._pendingThumbnail || (this.editingId ? (this.allItems.find(i => i.id === this.editingId) || {}).photo_thumbnail : '') || '',
-            qty: parseFloat(document.getElementById('wh-f-qty').value) || 0,
+            qty: newQty,
             min_qty: parseFloat(document.getElementById('wh-f-min-qty').value) || 0,
             price_per_unit: parseFloat(document.getElementById('wh-f-price').value) || 0,
             notes: document.getElementById('wh-f-notes').value.trim(),
@@ -1995,6 +2001,17 @@ const Warehouse = {
             });
             Object.assign(item, moldMeta);
             this._applyAutoMoldSku(item);
+        }
+
+        if (qtyChanged) {
+            await this.adjustStock(
+                this.editingId,
+                qtyDelta,
+                qtyDelta > 0 ? 'addition' : 'deduction',
+                '',
+                'Ручная правка',
+                App.getCurrentEmployeeName ? App.getCurrentEmployeeName() : ''
+            );
         }
 
         await saveWarehouseItem(item);
