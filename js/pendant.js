@@ -696,7 +696,7 @@ const Pendant = {
     _renderAttachmentRow(type, data, whData, qty, index, totalEntries) {
         const isCord = type === 'cord';
         const isMetric = isCord && (data?.unit === 'м' || data?.unit === 'см');
-        const selectedStock = this._getSelectedStock(type, data, whData);
+        const selectedStock = this._getSelectedStock(type, data, whData, index);
         const allocatedQty = this._getAttachmentAllocatedQty(data, this._wizardData);
         const qtyPerPendant = parseFloat(data?.qty_per_pendant) || 1;
         const lengthCm = parseFloat(data?.length_cm) || 0;
@@ -756,31 +756,157 @@ const Pendant = {
         `;
     },
 
+    _getWarehouseCategoryMeta(catKey) {
+        if (typeof WAREHOUSE_CATEGORIES !== 'undefined' && Array.isArray(WAREHOUSE_CATEGORIES)) {
+            return WAREHOUSE_CATEGORIES.find(cat => cat.key === catKey) || null;
+        }
+        return null;
+    },
+
+    _getWarehouseAttachmentCategoryKeys(type) {
+        return type === 'cord' ? ['cords'] : ['carabiners', 'rings'];
+    },
+
+    _getWarehouseAttachmentGroups(type, whData) {
+        return this._getWarehouseAttachmentCategoryKeys(type)
+            .map(catKey => {
+                const group = whData?.[catKey];
+                const items = Array.isArray(group?.items) ? group.items : [];
+                if (!items.length) return null;
+                const meta = this._getWarehouseCategoryMeta(catKey);
+                return {
+                    key: catKey,
+                    label: group?.label || meta?.label || catKey,
+                    icon: group?.icon || meta?.icon || '📦',
+                    color: meta?.color || 'var(--accent-light)',
+                    textColor: meta?.textColor || 'var(--text)',
+                    items,
+                };
+            })
+            .filter(Boolean);
+    },
+
+    _findWarehouseAttachmentItem(type, whData, value) {
+        if (!value) return null;
+        const needle = String(value);
+        for (const group of this._getWarehouseAttachmentGroups(type, whData)) {
+            const item = group.items.find(entry => String(entry.id) === needle);
+            if (item) {
+                return { ...item, __categoryKey: group.key };
+            }
+        }
+        return null;
+    },
+
+    _getCurrentOrderDraftDemand(itemId, exclude = null) {
+        const targetId = Number(itemId) || 0;
+        if (!targetId) return 0;
+
+        let demand = 0;
+        const shouldSkipWizardRow = (row, useWizardState) => {
+            if (!useWizardState || !exclude) return false;
+            return String(row?.attachment_type || '') === String(exclude.type || '')
+                && Number(row?.attachment_index) === Number(exclude.index);
+        };
+        const addPendantDemand = (pendant, useWizardState = false) => {
+            if (!pendant || typeof getPendantWarehouseDemandRows !== 'function') return;
+            getPendantWarehouseDemandRows(pendant).forEach(row => {
+                if (Number(row?.warehouse_item_id) !== targetId) return;
+                if (shouldSkipWizardRow(row, useWizardState)) return;
+                demand += parseFloat(row?.qty) || 0;
+            });
+        };
+
+        (Calculator.hardwareItems || []).forEach(hw => {
+            if (hw?.source !== 'warehouse') return;
+            if (Number(hw?.warehouse_item_id) !== targetId) return;
+            demand += parseFloat(hw?.qty) || 0;
+        });
+
+        (Calculator.packagingItems || []).forEach(pkg => {
+            if (pkg?.source !== 'warehouse') return;
+            if (Number(pkg?.warehouse_item_id) !== targetId) return;
+            demand += parseFloat(pkg?.qty) || 0;
+        });
+
+        const hasWizardPendant = !!this._wizardData;
+        const editingIndex = Number.isInteger(this._editingIndex) ? this._editingIndex : null;
+        let wizardMergedIntoOrder = false;
+        (Calculator.pendants || []).forEach((pnd, idx) => {
+            if (editingIndex !== null && idx === editingIndex && hasWizardPendant) {
+                addPendantDemand(this._wizardData, true);
+                wizardMergedIntoOrder = true;
+                return;
+            }
+            addPendantDemand(pnd, false);
+        });
+        if ((editingIndex === null || !wizardMergedIntoOrder) && hasWizardPendant) {
+            addPendantDemand(this._wizardData, true);
+        }
+
+        return demand;
+    },
+
+    _getEffectiveWarehouseAvailableQty(itemId, exclude = null, fallbackAvailable = 0) {
+        const targetId = Number(itemId) || 0;
+        if (!targetId) return 0;
+        const whItem = typeof Calculator._findWhItem === 'function'
+            ? Calculator._findWhItem(targetId)
+            : null;
+        const baseAvailable = parseFloat(whItem?.available_qty);
+        const ownReserved = typeof Calculator._getCurrentOrderReservedQty === 'function'
+            ? (parseFloat(Calculator._getCurrentOrderReservedQty(targetId)) || 0)
+            : 0;
+        const otherDraftDemand = this._getCurrentOrderDraftDemand(targetId, exclude);
+        const normalizedBase = Number.isFinite(baseAvailable)
+            ? baseAvailable
+            : (parseFloat(fallbackAvailable) || 0);
+        const effective = normalizedBase + ownReserved - otherDraftDemand;
+        return typeof round2 === 'function'
+            ? Math.max(0, round2(effective))
+            : Math.max(0, effective);
+    },
+
+    _getEffectiveWarehouseAttachmentItem(type, index, itemId, whData) {
+        const item = this._findWarehouseAttachmentItem(type, whData, itemId);
+        if (!item) return null;
+        return {
+            ...item,
+            available_qty: this._getEffectiveWarehouseAvailableQty(
+                item.id,
+                { type, index },
+                item.available_qty
+            ),
+        };
+    },
+
     _renderWhDropdown(type, data, whData, index = 0) {
-        const catKey = type === 'cord' ? 'cords' : 'carabiners';
-        const catItems = whData[catKey]?.items || [];
+        const groups = this._getWarehouseAttachmentGroups(type, whData);
+        const catItems = groups.flatMap(group => group.items.map(item => ({ ...item, __categoryKey: group.key })));
         if (data?.source === 'custom' || catItems.length === 0) {
             // Fallback to manual input if no warehouse data
             return this._renderManualPicker(type, data, index, catItems.length > 0);
         }
         const selectedId = data?.warehouse_item_id || null;
-        const selectedItem = selectedId
-            ? catItems.find(item => String(item.id) === String(selectedId)) || null
-            : null;
+        const selectedItem = this._getEffectiveWarehouseAttachmentItem(type, index, selectedId, whData);
         const selectedPreview = selectedItem || (data?.warehouse_item_id ? {
             id: data.warehouse_item_id,
             name: data.name || '',
             sku: data.warehouse_sku || '',
             photo_thumbnail: data.photo_thumbnail || '',
-            available_qty: this._getSelectedStock(type, data, whData) || 0,
+            available_qty: this._getSelectedStock(type, data, whData, index) || 0,
             unit: data.unit || 'шт',
             price_per_unit: data.price_per_unit || 0,
             size: '',
             color: '',
+            category: type === 'cord' ? 'cords' : 'carabiners',
         } : null);
-        const ui = type === 'cord'
+        const uiDefault = type === 'cord'
             ? { icon: '🧵', color: '#fce7f3', textColor: '#9d174d', label: 'шнур' }
-            : { icon: '🔗', color: '#dbeafe', textColor: '#1d4ed8', label: 'карабин' };
+            : { icon: '🔗', color: '#dbeafe', textColor: '#1d4ed8', label: 'фурнитуру' };
+        const selectedMeta = selectedPreview
+            ? (this._getWarehouseCategoryMeta(selectedPreview.category || selectedPreview.__categoryKey) || uiDefault)
+            : uiDefault;
         const selectedHtml = selectedPreview
             ? (() => {
                 const parts = [selectedPreview.name];
@@ -790,10 +916,10 @@ const Pendant = {
                 const priceStr = selectedPreview.price_per_unit > 0 ? (' · ' + formatRub(selectedPreview.price_per_unit)) : '';
                 const photoHtml = selectedPreview.photo_thumbnail
                     ? `<img src="${selectedPreview.photo_thumbnail}" style="width:40px;height:40px;object-fit:cover;border-radius:6px;flex-shrink:0;border:1px solid var(--border);">`
-                    : `<span style="width:40px;height:40px;display:flex;align-items:center;justify-content:center;background:${ui.color};border-radius:6px;font-size:18px;flex-shrink:0;">${ui.icon}</span>`;
+                    : `<span style="width:40px;height:40px;display:flex;align-items:center;justify-content:center;background:${selectedMeta.color};border-radius:6px;font-size:18px;flex-shrink:0;">${selectedMeta.icon}</span>`;
                 return `${photoHtml}<span style="flex:1;min-width:0;"><b style="display:block;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${App.escHtml(title)}</b><span style="font-size:11px;color:var(--text-muted);">${App.escHtml(selectedPreview.sku || '')}${selectedPreview.sku ? ' · ' : ''}${selectedPreview.available_qty} ${App.escHtml(selectedPreview.unit || 'шт')}${priceStr}</span></span>`;
             })()
-            : `<span style="display:flex;align-items:center;gap:8px;color:var(--text-muted);font-size:13px;"><span style="width:32px;height:32px;display:flex;align-items:center;justify-content:center;background:${ui.color};border-radius:6px;">${ui.icon}</span><span>— Выберите ${ui.label} —</span></span>`;
+            : `<span style="display:flex;align-items:center;gap:8px;color:var(--text-muted);font-size:13px;"><span style="width:32px;height:32px;display:flex;align-items:center;justify-content:center;background:${uiDefault.color};border-radius:6px;">${uiDefault.icon}</span><span>— Выберите ${uiDefault.label} —</span></span>`;
 
         return `
             <div class="pendant-field-group">
@@ -813,24 +939,30 @@ const Pendant = {
                             >
                         </div>
                         <div class="wh-picker-list">
-                            ${catItems.map(item => {
-                                const parts = [item.name];
-                                if (item.size) parts.push(item.size);
-                                if (item.color) parts.push(item.color);
-                                const label = parts.join(' · ');
-                                const stock = item.available_qty > 0 ? `${item.available_qty} ${item.unit}` : '<span style="color:var(--red);">нет</span>';
-                                const priceStr = item.price_per_unit > 0 ? (' · ' + formatRub(item.price_per_unit)) : '';
-                                const photoHtml = item.photo_thumbnail
-                                    ? `<img src="${item.photo_thumbnail}" style="width:48px;height:48px;object-fit:cover;border-radius:6px;flex-shrink:0;border:1px solid var(--border);">`
-                                    : `<span style="width:48px;height:48px;display:flex;align-items:center;justify-content:center;background:${ui.color};border-radius:6px;font-size:20px;flex-shrink:0;">${ui.icon}</span>`;
-                                const isSelected = Number(item.id) === Number(selectedId) ? 'background:rgba(59,130,246,0.1);' : '';
-                                return `<div class="wh-picker-item" data-id="${item.id}" style="display:flex;align-items:center;gap:10px;padding:8px 10px;cursor:pointer;border-bottom:1px solid var(--border);${isSelected}" onclick="Pendant._onWhSelect('${type}', ${index}, '${item.id}')">
-                                    ${photoHtml}
-                                    <div style="flex:1;min-width:0;">
-                                        <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${App.escHtml(label)}</div>
-                                        <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">${App.escHtml(item.sku || '')}${item.sku ? ' · ' : ''}${stock}${priceStr}</div>
-                                    </div>
-                                </div>`;
+                            ${groups.map(group => {
+                                return `
+                                    <div class="wh-picker-cat-header" data-group-key="${App.escHtml(group.key)}" style="padding:6px 10px;font-size:11px;font-weight:700;color:${group.textColor};background:${group.color};">${group.icon} ${App.escHtml(group.label)}</div>
+                                    ${group.items.map(item => {
+                                        const effectiveItem = this._getEffectiveWarehouseAttachmentItem(type, index, item.id, whData) || item;
+                                        const parts = [effectiveItem.name];
+                                        if (effectiveItem.size) parts.push(effectiveItem.size);
+                                        if (effectiveItem.color) parts.push(effectiveItem.color);
+                                        const label = parts.join(' · ');
+                                        const stock = effectiveItem.available_qty > 0 ? `${effectiveItem.available_qty} ${effectiveItem.unit}` : '<span style="color:var(--red);">нет</span>';
+                                        const priceStr = effectiveItem.price_per_unit > 0 ? (' · ' + formatRub(effectiveItem.price_per_unit)) : '';
+                                        const photoHtml = effectiveItem.photo_thumbnail
+                                            ? `<img src="${effectiveItem.photo_thumbnail}" style="width:48px;height:48px;object-fit:cover;border-radius:6px;flex-shrink:0;border:1px solid var(--border);">`
+                                            : `<span style="width:48px;height:48px;display:flex;align-items:center;justify-content:center;background:${group.color};border-radius:6px;font-size:20px;flex-shrink:0;">${group.icon}</span>`;
+                                        const isSelected = Number(effectiveItem.id) === Number(selectedId) ? 'background:rgba(59,130,246,0.1);' : '';
+                                        return `<div class="wh-picker-item" data-id="${effectiveItem.id}" data-group-key="${App.escHtml(group.key)}" style="display:flex;align-items:center;gap:10px;padding:8px 10px;cursor:pointer;border-bottom:1px solid var(--border);${isSelected}" onclick="Pendant._onWhSelect('${type}', ${index}, '${effectiveItem.id}')">
+                                            ${photoHtml}
+                                            <div style="flex:1;min-width:0;">
+                                                <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${App.escHtml(label)}</div>
+                                                <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">${App.escHtml(effectiveItem.sku || '')}${effectiveItem.sku ? ' · ' : ''}${stock}${priceStr}</div>
+                                            </div>
+                                        </div>`;
+                                    }).join('')}
+                                `;
                             }).join('')}
                             <div class="wh-picker-item" style="display:flex;align-items:center;gap:10px;padding:10px;cursor:pointer;" onclick="Pendant._onWhSelect('${type}', ${index}, '__custom__')">
                                 <span style="width:48px;height:48px;display:flex;align-items:center;justify-content:center;background:#fff7ed;border-radius:6px;font-size:20px;flex-shrink:0;border:1px solid var(--border);">✏️</span>
@@ -925,8 +1057,7 @@ const Pendant = {
         }
         if (!value) return;
         const whData = Calculator._whPickerData || {};
-        const catKey = type === 'cord' ? 'cords' : 'carabiners';
-        const item = (whData[catKey]?.items || []).find(i => String(i.id) === String(value));
+        const item = this._findWarehouseAttachmentItem(type, whData, value);
         if (!item) return;
         const items = this._getAttachments(this._wizardData, type, { includeEmpty: true });
         const data = items[index] || this._createEmptyAttachment(type);
@@ -963,10 +1094,9 @@ const Pendant = {
         this._renderStep();
     },
 
-    _getSelectedStock(type, data, whData) {
+    _getSelectedStock(type, data, whData, index = 0) {
         if (!data?.warehouse_item_id) return null;
-        const catKey = type === 'cord' ? 'cords' : 'carabiners';
-        const item = (whData[catKey]?.items || []).find(i => String(i.id) === String(data.warehouse_item_id));
+        const item = this._getEffectiveWarehouseAttachmentItem(type, index, data.warehouse_item_id, whData);
         return item ? (item.available_qty || 0) : null;
     },
 

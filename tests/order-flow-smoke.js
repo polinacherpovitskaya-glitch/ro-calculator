@@ -582,6 +582,301 @@ async function smokePackagingWarehousePickerDefaults(context) {
     assert.equal(pkg.sell_price, 19);
 }
 
+async function smokeCurrentOrderReservationRestoresWarehouseQuota() {
+    const context = createContext();
+    ['js/calculator.js', 'js/app.js', 'js/warehouse.js'].forEach(file => runScript(context, file));
+    stubRuntime(context);
+    vm.runInContext(`
+        globalThis.ChinaCatalog = {
+            DELIVERY_METHODS: {
+                avia: { label: 'Авиа', rate_usd: 33 },
+                auto: { label: 'Авто', rate_usd: 4.8 },
+                avia_fast: { label: 'Авиа быстрая', rate_usd: 38 },
+            },
+        };
+    `, context);
+
+    context.__reservations = [
+        {
+            id: 1,
+            item_id: 901,
+            order_id: 88,
+            qty: 60,
+            status: 'active',
+            source: 'project_hardware',
+        },
+        {
+            id: 2,
+            item_id: 901,
+            order_id: 99,
+            qty: 20,
+            status: 'active',
+            source: 'project_hardware',
+        },
+        {
+            id: 3,
+            item_id: 902,
+            order_id: 88,
+            qty: 70,
+            status: 'active',
+            source: 'project_hardware',
+        },
+    ];
+    context.loadWarehouseReservations = async () => clone(context.__reservations);
+
+    vm.runInContext(`
+        App.editingOrderId = 88;
+        globalThis.__lastToast = '';
+        globalThis.__lastHwHtml = '';
+        globalThis.__lastPkgHtml = '';
+        App.toast = (message) => { globalThis.__lastToast = String(message || ''); };
+
+        Calculator._whPickerData = {
+            hardware: {
+                label: 'Фурнитура',
+                icon: '🔩',
+                items: [{
+                    id: 901,
+                    category: 'hardware',
+                    name: 'Трос',
+                    sku: 'TR-050-WH',
+                    size: '50 см',
+                    color: 'белый',
+                    qty: 120,
+                    available_qty: 40,
+                    unit: 'шт',
+                    price_per_unit: 12,
+                    photo_thumbnail: '',
+                }],
+            },
+            packaging: {
+                label: 'Упаковка',
+                icon: '📦',
+                items: [{
+                    id: 902,
+                    category: 'packaging',
+                    name: 'Коробка',
+                    sku: 'BOX-010',
+                    size: '10x10',
+                    color: 'крафт',
+                    qty: 100,
+                    available_qty: 30,
+                    unit: 'шт',
+                    price_per_unit: 8,
+                    photo_thumbnail: '',
+                }],
+            },
+        };
+        Calculator._whCurrentOrderReservationMap = null;
+        Calculator._whReservationOrderId = null;
+        Calculator._whReservationLoading = false;
+        Calculator._findWhItem = function(itemId) {
+            if (!this._whPickerData) return null;
+            for (const catKey of Object.keys(this._whPickerData)) {
+                const found = (this._whPickerData[catKey].items || []).find(item => Number(item.id) === Number(itemId));
+                if (found) return found;
+            }
+            return null;
+        };
+        Calculator.hardwareItems = [
+            Object.assign(Calculator.getEmptyHardware(null), {
+                source: 'warehouse',
+                warehouse_item_id: 901,
+                warehouse_sku: 'TR-050-WH',
+                name: 'Трос · 50 см · белый',
+                qty: 60,
+            }),
+            Object.assign(Calculator.getEmptyHardware(null), {
+                source: 'warehouse',
+                warehouse_item_id: 901,
+                warehouse_sku: 'TR-050-WH',
+                name: 'Трос · 50 см · белый',
+                qty: 0,
+            }),
+        ];
+        Calculator.packagingItems = [
+            Object.assign(Calculator.getEmptyPackaging(null), {
+                source: 'warehouse',
+                warehouse_item_id: 902,
+                warehouse_sku: 'BOX-010',
+                name: 'Коробка · крафт',
+                qty: 0,
+            }),
+        ];
+        Calculator.pendants = [];
+        Calculator.recalculate = () => {};
+        Calculator.scheduleAutosave = () => {};
+        Calculator._ensureBlanksCatalog = async () => {};
+        Calculator._hwBlanksCatalog = [];
+        Calculator._pkgBlanksCatalog = [];
+        document.getElementById('calc-hardware-list').insertAdjacentHTML = (position, html) => {
+            globalThis.__lastHwHtml = html;
+        };
+        document.getElementById('calc-packaging-list').insertAdjacentHTML = (position, html) => {
+            globalThis.__lastPkgHtml = html;
+        };
+    `, context);
+
+    await vm.runInContext(`Calculator._ensureWhReservationContext(true)`, context);
+
+    const pickerData = clone(vm.runInContext(`Calculator._getWhPickerDataForCurrentOrder()`, context));
+    assert.equal(pickerData.hardware.items[0].available_qty, 100);
+    assert.equal(pickerData.packaging.items[0].available_qty, 100);
+
+    assert.equal(vm.runInContext(`Calculator._getWhEffectiveAvailableQty(901, { kind: 'hardware', idx: 0 })`, context), 100);
+    assert.equal(vm.runInContext(`Calculator._getWhEffectiveAvailableQty(901, { kind: 'hardware', idx: 1 })`, context), 40);
+    assert.equal(vm.runInContext(`Calculator._getWhEffectiveAvailableQty(902, { kind: 'packaging', idx: 0 })`, context), 100);
+
+    vm.runInContext(`Calculator.renderHardwareRow(0)`, context);
+    const hwHtml = String(vm.runInContext(`globalThis.__lastHwHtml`, context));
+    assert.match(hwHtml, /макс:\s*100/i);
+    assert.match(hwHtml, /TR-050-WH/);
+
+    vm.runInContext(`
+        globalThis.__lastToast = '';
+        Calculator.onHwNum(0, 'qty', '101');
+    `, context);
+    assert.equal(vm.runInContext(`Calculator.hardwareItems[0].qty`, context), 100);
+    assert.match(String(vm.runInContext(`globalThis.__lastToast`, context)), /Максимум на складе:\s*100/i);
+
+    vm.runInContext(`
+        Calculator.hardwareItems[0].qty = 60;
+        globalThis.__lastToast = '';
+        Calculator.onHwNum(1, 'qty', '41');
+    `, context);
+    assert.equal(vm.runInContext(`Calculator.hardwareItems[1].qty`, context), 40);
+    assert.match(String(vm.runInContext(`globalThis.__lastToast`, context)), /Максимум на складе:\s*40/i);
+
+    vm.runInContext(`Calculator.renderPackagingRow(0)`, context);
+    const pkgHtml = String(vm.runInContext(`globalThis.__lastPkgHtml`, context));
+    assert.match(pkgHtml, /макс:\s*100/i);
+    assert.match(pkgHtml, /BOX-010/);
+
+    vm.runInContext(`
+        globalThis.__lastToast = '';
+        Calculator.onPkgNum(0, 'qty', '101');
+    `, context);
+    assert.equal(vm.runInContext(`Calculator.packagingItems[0].qty`, context), 100);
+    assert.match(String(vm.runInContext(`globalThis.__lastToast`, context)), /Максимум на складе:\s*100/i);
+}
+
+async function smokePendantWarehousePickerRestoresCurrentOrderQuota() {
+    const context = createContext();
+    ['js/calculator.js', 'js/app.js'].forEach(file => runScript(context, file));
+    stubRuntime(context);
+    vm.runInContext('delete globalThis.Pendant;', context);
+    runScript(context, 'js/pendant.js');
+
+    context.__reservations = [
+        {
+            id: 1,
+            item_id: 701,
+            order_id: 88,
+            qty: 100,
+            status: 'active',
+            source: 'project_hardware',
+        },
+    ];
+    context.loadWarehouseReservations = async () => clone(context.__reservations);
+
+    vm.runInContext(`
+        App.editingOrderId = 88;
+        Calculator._whPickerData = {
+            cords: {
+                label: 'Шнуры',
+                icon: '🧵',
+                items: [{
+                    id: 701,
+                    category: 'cords',
+                    name: 'Шнур с лазерной гравировкой',
+                    sku: 'SLS-800-LZR-NN',
+                    size: '80 см',
+                    color: 'черный',
+                    qty: 138,
+                    available_qty: 38,
+                    unit: 'шт',
+                    price_per_unit: 25,
+                    photo_thumbnail: '',
+                }],
+            },
+            carabiners: {
+                label: 'Карабины',
+                icon: '🔗',
+                items: [],
+            },
+            rings: {
+                label: 'Кольца',
+                icon: '⭕',
+                items: [],
+            },
+        };
+        Calculator._whCurrentOrderReservationMap = null;
+        Calculator._whReservationOrderId = null;
+        Calculator._whReservationLoading = false;
+        Calculator._findWhItem = function(itemId) {
+            if (!this._whPickerData) return null;
+            for (const catKey of Object.keys(this._whPickerData)) {
+                const found = (this._whPickerData[catKey].items || []).find(item => Number(item.id) === Number(itemId));
+                if (found) return found;
+            }
+            return null;
+        };
+        Calculator.hardwareItems = [];
+        Calculator.packagingItems = [];
+        Calculator.pendants = [{
+            ...Pendant.getEmpty(),
+            name: 'Обвеcы Озон банк КЕШШШ',
+            quantity: 100,
+            cords: [{
+                source: 'warehouse',
+                warehouse_item_id: 701,
+                warehouse_sku: 'SLS-800-LZR-NN',
+                name: 'Шнур с лазерной гравировкой',
+                price_per_unit: 25,
+                delivery_price: 0,
+                unit: 'шт',
+                qty_per_pendant: 1,
+                allocated_qty: 100,
+            }],
+            carabiners: [],
+        }];
+        Pendant._editingIndex = 0;
+        Pendant._wizardData = JSON.parse(JSON.stringify(Calculator.pendants[0]));
+        Pendant._ensureAttachmentCollections(Pendant._wizardData, { preserveEmpty: true });
+    `, context);
+
+    await vm.runInContext(`Calculator._ensureWhReservationContext(true)`, context);
+
+    assert.equal(
+        vm.runInContext(`Pendant._getSelectedStock('cord', Pendant._wizardData.cords[0], Calculator._whPickerData, 0)`, context),
+        138
+    );
+
+    const currentRowHtml = String(vm.runInContext(`Pendant._renderWhDropdown('cord', Pendant._wizardData.cords[0], Calculator._whPickerData, 0)`, context));
+    assert.match(currentRowHtml, /SLS-800-LZR-NN/);
+    assert.match(currentRowHtml, /138 шт/);
+
+    vm.runInContext(`
+        Pendant._wizardData.cords.push({
+            source: 'warehouse',
+            warehouse_item_id: 701,
+            warehouse_sku: 'SLS-800-LZR-NN',
+            name: 'Шнур с лазерной гравировкой',
+            price_per_unit: 25,
+            delivery_price: 0,
+            unit: 'шт',
+            qty_per_pendant: 1,
+            allocated_qty: 0,
+        });
+        Pendant._syncLegacyAttachments(Pendant._wizardData);
+    `, context);
+
+    assert.equal(
+        vm.runInContext(`Pendant._getSelectedStock('cord', Pendant._wizardData.cords[1], Calculator._whPickerData, 1)`, context),
+        38
+    );
+}
+
 async function smokePendantWarehousePickerRichUI() {
     const pendantContext = createContext();
     stubRuntime(pendantContext);
@@ -648,6 +943,23 @@ async function smokePendantWarehousePickerRichUI() {
                 photo_thumbnail: 'https://example.com/carabiner-ring.png',
             }],
         },
+        rings: {
+            label: 'Кольца',
+            icon: '⭕',
+            items: [{
+                id: 803,
+                category: 'rings',
+                name: 'Кольцо плоское',
+                sku: 'RNG-FLAT-25-SV',
+                size: '2,5 см',
+                color: 'серебряное',
+                qty: 950,
+                available_qty: 910,
+                price_per_unit: 2,
+                unit: 'шт',
+                photo_thumbnail: 'https://example.com/ring-flat.png',
+            }],
+        },
     };
 
     vm.runInContext(`
@@ -686,6 +998,10 @@ async function smokePendantWarehousePickerRichUI() {
     assert.match(cordHtml, /SLS-800-BL-NN/);
     assert.match(cordHtml, /cord-thumb\.png/);
     assert.match(cordHtml, /img src=/);
+    const carabinerHtml = String(vm.runInContext(`Pendant._renderWhDropdown('carabiner', Pendant._wizardData.carabiners[0], Calculator._whPickerData, 0)`, pendantContext));
+    assert.match(carabinerHtml, /Карабины/);
+    assert.match(carabinerHtml, /Кольца/);
+    assert.match(carabinerHtml, /RNG-FLAT-25-SV/);
 
     vm.runInContext(`Pendant._wizardStep = 4`, pendantContext);
     const wizardClassName = String(vm.runInContext(`Pendant._wizardClassName()`, pendantContext));
@@ -710,7 +1026,7 @@ async function smokePendantWarehousePickerRichUI() {
     assert.equal(emptyCarabinerState.carabiners.length, 2);
     assert.match(emptyCarabinerState.html, /Фурнитура 2/);
     await vm.runInContext(`Pendant._updateAttachmentField('carabiner', 0, 'allocated_qty', 4)`, pendantContext);
-    await vm.runInContext(`Pendant._onWhSelect('carabiner', 1, '802')`, pendantContext);
+    await vm.runInContext(`Pendant._onWhSelect('carabiner', 1, '803')`, pendantContext);
     await vm.runInContext(`Pendant._updateAttachmentField('carabiner', 1, 'allocated_qty', 8)`, pendantContext);
     await vm.runInContext(`Pendant._updateAttachmentField('carabiner', 1, 'qty_per_pendant', 2)`, pendantContext);
 
@@ -724,6 +1040,7 @@ async function smokePendantWarehousePickerRichUI() {
     assert.equal(attachmentState.carabiners.length, 2);
     assert.equal(attachmentState.cord.warehouse_item_id, 701);
     assert.equal(attachmentState.carabiner.warehouse_item_id, 801);
+    assert.equal(attachmentState.carabiners[1].warehouse_item_id, 803);
     assert.equal(attachmentState.cords[0].allocated_qty, 5);
     assert.equal(attachmentState.cords[1].allocated_qty, 7);
     assert.equal(attachmentState.carabiners[0].allocated_qty, 4);
@@ -731,7 +1048,7 @@ async function smokePendantWarehousePickerRichUI() {
 
     const step4Html = String(vm.runInContext(`Pendant._renderStep4()`, pendantContext));
     assert.match(step4Html, /FLC-550-BK/);
-    assert.match(step4Html, /CR-RING-BK/);
+    assert.match(step4Html, /RNG-FLAT-25-SV/);
     assert.match(step4Html, /pendant-step4-layout/);
     assert.match(step4Html, /Сколько подвесов с этой позицией/);
     assert.match(step4Html, /Кол-во на 1 подвес/);
@@ -740,9 +1057,50 @@ async function smokePendantWarehousePickerRichUI() {
     const step5Html = String(vm.runInContext(`Pendant._renderStep5()`, pendantContext));
     assert.match(step5Html, /Шнур с силик\. наконечником синий 80 см/);
     assert.match(step5Html, /Шнур плоский/);
-    assert.match(step5Html, /Кольцо-карабин/);
+    assert.match(step5Html, /Кольцо плоское/);
     assert.match(step5Html, /× 2/);
     assert.match(step5Html, /pendant-summary-table-wrap/);
+}
+
+async function smokePendantPickerRepairsMissingRequiredSku() {
+    const warehouseContext = createContext();
+    stubRuntime(warehouseContext);
+    runScript(warehouseContext, 'js/warehouse.js');
+
+    warehouseContext.__warehouseItems = [{
+        id: 501,
+        category: 'carabiners',
+        name: 'Круглый карабин',
+        sku: 'CR-RNG-023-SV',
+        size: '2,3 см',
+        color: 'серебряный',
+        unit: 'шт',
+        qty: 0,
+        min_qty: 10,
+        price_per_unit: 5,
+        notes: '',
+        created_at: '2026-03-01T00:00:00.000Z',
+        updated_at: '2026-03-01T00:00:00.000Z',
+    }];
+    warehouseContext.__savedWarehouseItems = null;
+    warehouseContext.loadWarehouseItems = async () => clone(warehouseContext.__warehouseItems);
+    warehouseContext.saveWarehouseItems = async (items) => {
+        warehouseContext.__savedWarehouseItems = clone(items);
+        warehouseContext.__warehouseItems = clone(items);
+    };
+    warehouseContext.loadWarehouseReservations = async () => [];
+
+    const grouped = clone(await vm.runInContext(`Warehouse.getItemsForPicker()`, warehouseContext));
+    assert.ok(grouped.carabiners, 'picker should expose carabiners group');
+    assert.ok(
+        grouped.carabiners.items.some(item => item.sku === 'CR-RNG-025-SV'),
+        'picker should repair and expose the missing required pendant hardware SKU'
+    );
+    assert.ok(
+        Array.isArray(warehouseContext.__savedWarehouseItems)
+        && warehouseContext.__savedWarehouseItems.some(item => item.sku === 'CR-RNG-025-SV'),
+        'required SKU repair should persist the inserted warehouse row'
+    );
 }
 
 async function smokePendantCentimeterCordPricing() {
@@ -1240,6 +1598,197 @@ async function smokeLegacyPendantRestore(context) {
     assert.equal(restored.cord.name, 'Legacy Cord');
     assert.equal(restored.carabiner.name, 'Legacy Carabiner');
     assert.equal(restored.elements.length, 2);
+}
+
+async function smokeCloneOrderRestoresLegacySnapshotItems(context) {
+    context.__savedClonePayload = null;
+    context.__loadedCloneOrderId = null;
+    context.__loadOrderData = {
+        order: {
+            id: 9003,
+            order_name: 'Legacy Snapshot Order',
+            status: 'production_hardware',
+            items_snapshot: JSON.stringify([{
+                item_type: 'product',
+                item_number: 1,
+                product_name: 'Legacy Product',
+                quantity: 50,
+                pieces_per_hour: 120,
+                printings: [{ name: 'Лого', qty: 1, price: 5 }],
+                colors: [{ id: 12, name: 'Белый' }],
+                color_solution_attachment: { name: 'legacy.pdf' },
+            }]),
+            hardware_snapshot: JSON.stringify([{
+                name: 'Legacy Hook',
+                qty: 50,
+                assembly_minutes: 1,
+                price: 3,
+                delivery_total: 15,
+                delivery_price: 0.3,
+                sell_price: 5,
+                source: 'warehouse',
+                warehouse_item_id: 501,
+                warehouse_sku: 'HK-501',
+            }]),
+            packaging_snapshot: JSON.stringify([{
+                name: 'Legacy Pouch',
+                qty: 50,
+                assembly_speed: 120,
+                price: 2,
+                delivery_total: 10,
+                delivery_price: 0.2,
+                sell_price: 4,
+                source: 'china',
+                china_item_id: 601,
+                china_delivery_method: 'avia_fast',
+                price_cny: 0.5,
+                weight_grams: 3.2,
+            }]),
+            calculator_data: JSON.stringify({
+                extraCosts: [
+                    { name: 'Монтаж', amount: 250 },
+                ],
+                pendants: [
+                    {
+                        name: 'LEGACY',
+                        quantity: 2,
+                        elements: [{ char: 'L' }],
+                        result: { costPerUnit: 11, sellPerUnit: 44 },
+                    },
+                ],
+            }),
+        },
+        items: [],
+        repaired_duplicates: false,
+    };
+    context.loadOrder = async () => clone(context.__loadOrderData);
+    context.saveOrder = async (order, items) => {
+        context.__savedClonePayload = {
+            order: clone(order),
+            items: clone(items),
+        };
+        return 9103;
+    };
+
+    vm.runInContext(`
+        Calculator.loadOrder = (id) => {
+            globalThis.__loadedCloneOrderId = id;
+        };
+    `, context);
+
+    await vm.runInContext(`Orders.cloneOrder(9003)`, context);
+
+    const saved = clone(context.__savedClonePayload);
+    assert.ok(saved, 'clone fallback should save rebuilt order payload');
+    assert.equal(saved.order.order_name, 'Legacy Snapshot Order (копия)');
+    assert.equal(saved.order.status, 'draft');
+    assert.equal(saved.items.length, 5);
+
+    const product = saved.items.find(item => item.item_type === 'product');
+    const hardware = saved.items.find(item => item.item_type === 'hardware');
+    const packaging = saved.items.find(item => item.item_type === 'packaging');
+    const extraCost = saved.items.find(item => item.item_type === 'extra_cost');
+    const pendant = saved.items.find(item => item.item_type === 'pendant');
+
+    assert.equal(product.product_name, 'Legacy Product');
+    assert.equal(product.quantity, 50);
+    assert.equal(JSON.parse(product.printings)[0].name, 'Лого');
+    assert.equal(JSON.parse(product.colors)[0].name, 'Белый');
+    assert.equal(JSON.parse(product.color_solution_attachment).name, 'legacy.pdf');
+
+    assert.equal(hardware.product_name, 'Legacy Hook');
+    assert.equal(hardware.quantity, 50);
+    assert.equal(hardware.hardware_assembly_speed, 60);
+    assert.equal(hardware.hardware_price_per_unit, 3);
+    assert.equal(hardware.hardware_warehouse_item_id, 501);
+    assert.equal(hardware.hardware_warehouse_sku, 'HK-501');
+
+    assert.equal(packaging.product_name, 'Legacy Pouch');
+    assert.equal(packaging.quantity, 50);
+    assert.equal(packaging.packaging_assembly_speed, 120);
+    assert.equal(packaging.packaging_source, 'china');
+    assert.equal(packaging.china_item_id, 601);
+    assert.equal(packaging.china_delivery_method, 'avia_fast');
+
+    assert.equal(extraCost.product_name, 'Монтаж');
+    assert.equal(extraCost.cost_total, 250);
+    assert.equal(extraCost.sell_price_item, 250);
+
+    assert.equal(pendant.product_name, 'Подвес "LEGACY"');
+    assert.equal(pendant.quantity, 2);
+    assert.equal(pendant.cost_total, 11);
+    assert.equal(pendant.sell_price_item, 44);
+
+    assert.equal(context.__loadedCloneOrderId, 9103);
+}
+
+async function smokeCloneOrderPrefersNormalizedItems(context) {
+    context.__savedClonePayload = null;
+    context.__loadedCloneOrderId = null;
+    context.__loadOrderData = {
+        order: {
+            id: 9010,
+            order_name: 'Normalized Source Order',
+            status: 'completed',
+            items_snapshot: JSON.stringify([
+                { item_number: 1, item_type: 'product', product_name: 'Stale Snapshot Product', quantity: 1 },
+            ]),
+            calculator_data: JSON.stringify({
+                extraCosts: [
+                    { name: 'Stale Extra', amount: 999 },
+                ],
+            }),
+        },
+        items: [
+            {
+                id: 7001,
+                order_id: 9010,
+                item_number: 1,
+                item_type: 'product',
+                product_name: 'Normalized Product',
+                quantity: 10,
+                cost_total: 100,
+                sell_price_item: 150,
+            },
+            {
+                id: 7002,
+                order_id: 9010,
+                item_number: 2,
+                item_type: 'hardware',
+                product_name: 'Normalized Hardware',
+                quantity: 10,
+                hardware_price_per_unit: 5,
+            },
+        ],
+        repaired_duplicates: false,
+    };
+    context.loadOrder = async () => clone(context.__loadOrderData);
+    context.saveOrder = async (order, items) => {
+        context.__savedClonePayload = {
+            order: clone(order),
+            items: clone(items),
+        };
+        return 9110;
+    };
+
+    vm.runInContext(`
+        Calculator.loadOrder = (id) => {
+            globalThis.__loadedCloneOrderId = id;
+        };
+    `, context);
+
+    await vm.runInContext(`Orders.cloneOrder(9010)`, context);
+
+    const saved = clone(context.__savedClonePayload);
+    assert.ok(saved, 'normalized clone should save payload');
+    assert.equal(saved.order.order_name, 'Normalized Source Order (копия)');
+    assert.equal(saved.order.status, 'draft');
+    assert.equal(saved.items.length, 2);
+    assert.deepEqual(saved.items.map(item => item.product_name), ['Normalized Product', 'Normalized Hardware']);
+    assert.equal(saved.items[0].id, undefined);
+    assert.equal(saved.items[0].order_id, undefined);
+    assert.equal(saved.items[1].item_type, 'hardware');
+    assert.equal(context.__loadedCloneOrderId, 9110);
 }
 
 async function smokeReadyGoodsRollback(context) {
@@ -3203,7 +3752,10 @@ async function main() {
     await smokeZeroCostWarehouseHardwareStillShowsInPricing(context);
     await smokeFinDirectorPendantsUseAllAttachments(context);
     await smokePackagingWarehousePickerDefaults(context);
+    await smokeCurrentOrderReservationRestoresWarehouseQuota(context);
+    await smokePendantWarehousePickerRestoresCurrentOrderQuota();
     await smokePendantWarehousePickerRichUI();
+    await smokePendantPickerRepairsMissingRequiredSku();
     await smokePendantCentimeterCordPricing();
     await smokePendantSplitAllocationUsesAllocatedQty();
     await smokePendantIgnoresSpaces();
@@ -3211,6 +3763,8 @@ async function main() {
     await smokePendantOverlayDoesNotCloseWizard();
     await smokePendantAutoPriceFromBlanks();
     await smokeLegacyPendantRestore(context);
+    await smokeCloneOrderRestoresLegacySnapshotItems(context);
+    await smokeCloneOrderPrefersNormalizedItems(context);
     await smokeReadyGoodsRollback(context);
     await smokeReadyGoodsSalesAndManualAdd(context);
     await smokeChinaShipmentMetadata(context);

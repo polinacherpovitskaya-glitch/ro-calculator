@@ -1213,6 +1213,273 @@ const Orders = {
         App.navigate('order-detail', true, orderId);
     },
 
+    _cloneDeep(value) {
+        if (value == null) return value;
+        try {
+            return JSON.parse(JSON.stringify(value));
+        } catch (e) {
+            return Array.isArray(value) ? value.slice() : { ...value };
+        }
+    },
+
+    _parseClonePayload(value) {
+        if (!value) return null;
+        if (typeof value === 'string') {
+            try {
+                return JSON.parse(value);
+            } catch (e) {
+                return null;
+            }
+        }
+        return value;
+    },
+
+    _asCloneArray(value) {
+        const parsed = this._parseClonePayload(value);
+        return Array.isArray(parsed) ? parsed.filter(Boolean) : [];
+    },
+
+    _pickFirstCloneArray(candidates) {
+        for (const candidate of candidates || []) {
+            const arr = this._asCloneArray(candidate);
+            if (arr.length) return arr;
+        }
+        return [];
+    },
+
+    _looksLikeFlattenedCloneItems(items) {
+        return Array.isArray(items) && items.some(item =>
+            item && typeof item === 'object' && (
+                item.item_type != null
+                || item.order_id != null
+                || item.product_name != null
+                || item.cost_total != null
+            )
+        );
+    },
+
+    _extractSnapshotItems(snapshot) {
+        const parsed = this._parseClonePayload(snapshot);
+        if (Array.isArray(parsed)) return parsed;
+        if (!parsed || typeof parsed !== 'object') return [];
+        return this._pickFirstCloneArray([
+            parsed.items,
+            parsed.order_items,
+            parsed.product_items,
+            parsed.products,
+        ]);
+    },
+
+    _prepareClonedOrderItem(item) {
+        const cloned = this._cloneDeep(item) || {};
+        delete cloned.id;
+        delete cloned.order_id;
+        delete cloned.created_at;
+        delete cloned.updated_at;
+        return cloned;
+    },
+
+    _minutesToCloneSpeedPerHour(value) {
+        const minutes = Number(value);
+        if (!(minutes > 0)) return 0;
+        return Math.round(minutes * 60 * 100) / 100;
+    },
+
+    _restoreCloneItemsFromOrderPayload(order) {
+        if (!order || typeof order !== 'object') return [];
+
+        const calculatorData = this._parseClonePayload(order.calculator_data) || {};
+        const itemsSnapshot = this._parseClonePayload(order.items_snapshot);
+        const hardwareSnapshot = this._parseClonePayload(order.hardware_snapshot);
+        const packagingSnapshot = this._parseClonePayload(order.packaging_snapshot);
+
+        const directOrderItems = this._asCloneArray(order.items);
+        if (this._looksLikeFlattenedCloneItems(directOrderItems)
+            && !directOrderItems.some(item => item && typeof item === 'object' && (item.item_type === 'hardware' || item.item_type === 'packaging' || item.item_type === 'pendant' || item.item_type === 'extra_cost'))) {
+            // Treat plain `order.items` without explicit item types as calculator product rows.
+        } else if (this._looksLikeFlattenedCloneItems(directOrderItems)) {
+            return directOrderItems.map(item => this._prepareClonedOrderItem(item));
+        }
+
+        const snapshotItems = this._extractSnapshotItems(itemsSnapshot);
+        const snapshotHasItemTypes = this._looksLikeFlattenedCloneItems(snapshotItems)
+            && snapshotItems.some(item => item && typeof item === 'object' && item.item_type);
+        const snapshotHasNonProductTypes = snapshotHasItemTypes
+            && snapshotItems.some(item => item && typeof item === 'object' && item.item_type && item.item_type !== 'product');
+
+        if (snapshotHasNonProductTypes) {
+            return snapshotItems.map(item => this._prepareClonedOrderItem(item));
+        }
+
+        const snapshotProductItems = snapshotHasItemTypes
+            ? snapshotItems.filter(item => !item?.item_type || item.item_type === 'product')
+            : snapshotItems;
+        const snapshotHardwareItems = snapshotHasItemTypes
+            ? snapshotItems.filter(item => item?.item_type === 'hardware')
+            : [];
+        const snapshotPackagingItems = snapshotHasItemTypes
+            ? snapshotItems.filter(item => item?.item_type === 'packaging')
+            : [];
+        const snapshotExtraCosts = snapshotHasItemTypes
+            ? snapshotItems.filter(item => item?.item_type === 'extra_cost')
+            : [];
+        const snapshotPendants = snapshotHasItemTypes
+            ? snapshotItems.filter(item => item?.item_type === 'pendant')
+            : [];
+
+        const productItems = this._pickFirstCloneArray([
+            directOrderItems,
+            order.productItems,
+            order.product_items,
+            order.calculator_items,
+            calculatorData.items,
+            calculatorData.productItems,
+            calculatorData.product_items,
+            calculatorData.calculator_items,
+            snapshotProductItems,
+        ]);
+
+        const hardwareItems = this._pickFirstCloneArray([
+            order.hardwareItems,
+            order.hardware_items,
+            calculatorData.hardwareItems,
+            calculatorData.hardware_items,
+            hardwareSnapshot,
+            hardwareSnapshot && hardwareSnapshot.items,
+            snapshotHardwareItems,
+        ]);
+
+        const packagingItems = this._pickFirstCloneArray([
+            order.packagingItems,
+            order.packaging_items,
+            calculatorData.packagingItems,
+            calculatorData.packaging_items,
+            packagingSnapshot,
+            packagingSnapshot && packagingSnapshot.items,
+            snapshotPackagingItems,
+        ]);
+
+        const extraCosts = this._pickFirstCloneArray([
+            order.extraCosts,
+            order.extra_costs,
+            calculatorData.extraCosts,
+            calculatorData.extra_costs,
+            snapshotExtraCosts,
+        ]);
+
+        const pendants = this._pickFirstCloneArray([
+            order.pendants,
+            order.pendant_items,
+            calculatorData.pendants,
+            calculatorData.pendant_items,
+            snapshotPendants,
+        ]);
+
+        const restored = [];
+
+        productItems.forEach((item, index) => {
+            const cloned = this._prepareClonedOrderItem(item);
+            cloned.item_number = Number.isFinite(Number(cloned.item_number)) ? Number(cloned.item_number) : index + 1;
+            cloned.item_type = cloned.item_type || 'product';
+            if (Array.isArray(cloned.printings)) cloned.printings = JSON.stringify(cloned.printings);
+            if (Array.isArray(cloned.colors)) cloned.colors = JSON.stringify(cloned.colors);
+            if (cloned.color_solution_attachment && typeof cloned.color_solution_attachment === 'object') {
+                cloned.color_solution_attachment = JSON.stringify(cloned.color_solution_attachment);
+            }
+            restored.push(cloned);
+        });
+
+        hardwareItems.forEach((hw, index) => {
+            const cloned = this._prepareClonedOrderItem(hw);
+            const qty = cloned.quantity ?? cloned.qty ?? 0;
+            const speedPerHour = cloned.hardware_assembly_speed
+                ?? cloned.assembly_speed
+                ?? this._minutesToCloneSpeedPerHour(cloned.assembly_minutes);
+            restored.push({
+                ...cloned,
+                item_number: Number.isFinite(Number(cloned.item_number)) ? Number(cloned.item_number) : 100 + index,
+                item_type: 'hardware',
+                product_name: cloned.product_name || cloned.name || '',
+                quantity: qty,
+                hardware_assembly_speed: speedPerHour,
+                hardware_price_per_unit: cloned.hardware_price_per_unit ?? cloned.price ?? 0,
+                hardware_delivery_per_unit: cloned.hardware_delivery_per_unit ?? cloned.delivery_price ?? 0,
+                hardware_delivery_total: cloned.hardware_delivery_total ?? cloned.delivery_total ?? 0,
+                sell_price_hardware: cloned.sell_price_hardware ?? cloned.sell_price ?? 0,
+                target_price_hardware: cloned.target_price_hardware ?? cloned.target_price ?? 0,
+                hardware_source: cloned.hardware_source || cloned.source || 'custom',
+                custom_country: cloned.custom_country || 'china',
+                hardware_warehouse_item_id: cloned.hardware_warehouse_item_id ?? cloned.warehouse_item_id ?? null,
+                hardware_warehouse_sku: cloned.hardware_warehouse_sku ?? cloned.warehouse_sku ?? '',
+                china_item_id: cloned.china_item_id ?? null,
+                china_delivery_method: cloned.china_delivery_method || 'avia',
+                price_cny: cloned.price_cny ?? 0,
+                weight_grams: cloned.weight_grams ?? 0,
+                hardware_parent_item_index: cloned.hardware_parent_item_index ?? cloned.parent_item_index ?? null,
+                hardware_from_template: cloned.hardware_from_template ?? cloned._from_template ?? false,
+            });
+        });
+
+        packagingItems.forEach((pkg, index) => {
+            const cloned = this._prepareClonedOrderItem(pkg);
+            const qty = cloned.quantity ?? cloned.qty ?? 0;
+            const speedPerHour = cloned.packaging_assembly_speed
+                ?? cloned.assembly_speed
+                ?? this._minutesToCloneSpeedPerHour(cloned.assembly_minutes);
+            restored.push({
+                ...cloned,
+                item_number: Number.isFinite(Number(cloned.item_number)) ? Number(cloned.item_number) : 200 + index,
+                item_type: 'packaging',
+                product_name: cloned.product_name || cloned.name || '',
+                quantity: qty,
+                packaging_assembly_speed: speedPerHour,
+                packaging_price_per_unit: cloned.packaging_price_per_unit ?? cloned.price ?? 0,
+                packaging_delivery_per_unit: cloned.packaging_delivery_per_unit ?? cloned.delivery_price ?? 0,
+                packaging_delivery_total: cloned.packaging_delivery_total ?? cloned.delivery_total ?? 0,
+                sell_price_packaging: cloned.sell_price_packaging ?? cloned.sell_price ?? 0,
+                target_price_packaging: cloned.target_price_packaging ?? cloned.target_price ?? 0,
+                packaging_source: cloned.packaging_source || cloned.source || 'custom',
+                custom_country: cloned.custom_country || 'china',
+                packaging_warehouse_item_id: cloned.packaging_warehouse_item_id ?? cloned.warehouse_item_id ?? null,
+                packaging_warehouse_sku: cloned.packaging_warehouse_sku ?? cloned.warehouse_sku ?? '',
+                china_item_id: cloned.china_item_id ?? null,
+                china_delivery_method: cloned.china_delivery_method || 'avia',
+                price_cny: cloned.price_cny ?? 0,
+                weight_grams: cloned.weight_grams ?? 0,
+                packaging_parent_item_index: cloned.packaging_parent_item_index ?? cloned.parent_item_index ?? null,
+            });
+        });
+
+        extraCosts.forEach((extraCost, index) => {
+            const cloned = this._prepareClonedOrderItem(extraCost);
+            const amount = cloned.amount ?? cloned.cost_total ?? cloned.sell_price_item ?? 0;
+            restored.push({
+                ...cloned,
+                item_number: Number.isFinite(Number(cloned.item_number)) ? Number(cloned.item_number) : 300 + index,
+                item_type: 'extra_cost',
+                product_name: cloned.product_name || cloned.name || 'Доп. доход',
+                quantity: cloned.quantity || 1,
+                cost_total: amount,
+                sell_price_item: cloned.sell_price_item ?? amount,
+            });
+        });
+
+        pendants.forEach((pendant, index) => {
+            const cloned = this._prepareClonedOrderItem(pendant);
+            restored.push({
+                ...cloned,
+                item_number: Number.isFinite(Number(cloned.item_number)) ? Number(cloned.item_number) : 400 + index,
+                item_type: 'pendant',
+                product_name: cloned.product_name || ('Подвес "' + (cloned.name || '') + '"'),
+                quantity: cloned.quantity || 0,
+                cost_total: cloned.cost_total ?? cloned.result?.costPerUnit ?? 0,
+                sell_price_item: cloned.sell_price_item ?? cloned.result?.sellPerUnit ?? cloned._totalSellPerUnit ?? 0,
+            });
+        });
+
+        return restored;
+    },
+
     async cloneOrder(orderId) {
         App.toast('Копирование заказа...');
         try {
@@ -1229,12 +1496,10 @@ const Orders = {
             delete clonedOrder.created_at;
             delete clonedOrder.updated_at;
 
-            const clonedItems = (data.items || []).map(item => {
-                const cloned = { ...item };
-                delete cloned.id;
-                delete cloned.order_id;
-                return cloned;
-            });
+            const sourceItems = Array.isArray(data.items) && data.items.length
+                ? data.items
+                : this._restoreCloneItemsFromOrderPayload(data.order);
+            const clonedItems = (sourceItems || []).map(item => this._prepareClonedOrderItem(item));
 
             const newId = await saveOrder(clonedOrder, clonedItems);
             if (newId) {

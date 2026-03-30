@@ -388,7 +388,7 @@ function getPendantWarehouseDemandRows(pendant) {
     const rows = [];
 
     ['cord', 'carabiner'].forEach(type => {
-        getPendantAttachmentEntries(pendant, type).forEach(entry => {
+        getPendantAttachmentEntries(pendant, type).forEach((entry, index) => {
             const source = String(entry?.source || 'warehouse').trim().toLowerCase();
             const warehouseItemId = Number(entry?.warehouse_item_id || 0);
             const demandQty = getPendantAttachmentRequiredQty(pendant, type, entry);
@@ -400,6 +400,7 @@ function getPendantWarehouseDemandRows(pendant) {
                 qty: demandQty,
                 material_type: 'hardware',
                 attachment_type: type,
+                attachment_index: index,
                 name: `${parentLabel} · ${attachmentName}`,
                 warehouse_sku: entry?.warehouse_sku || '',
                 unit: entry?.unit || 'шт',

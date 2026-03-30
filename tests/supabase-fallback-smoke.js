@@ -257,6 +257,33 @@ async function main() {
 
     {
         const context = createContext();
+        runScript(context, 'js/supabase.js');
+
+        vm.runInContext(`
+            setLocal(LOCAL_KEYS.orders, [{
+                id: 9001,
+                order_name: 'Legacy Local Order',
+                status: 'draft',
+            }]);
+            setLocal(LOCAL_KEYS.orderItems, [{
+                id: 1,
+                order_id: '9001',
+                item_number: 1,
+                item_type: 'product',
+                product_name: 'Legacy local item',
+                quantity: 3,
+            }]);
+        `, context);
+
+        const loaded = JSON.parse(JSON.stringify(await vm.runInContext('loadOrder(9001)', context)));
+        assert.equal(loaded.order.order_name, 'Legacy Local Order');
+        assert.equal(loaded.items.length, 1, 'loadOrder should match local rows even when order_id was saved as string');
+        assert.equal(loaded.items[0].product_name, 'Legacy local item');
+        assert.equal(loaded.items[0].order_id, '9001');
+    }
+
+    {
+        const context = createContext();
         context.__invalidTables = new Set(['settings']);
         runScript(context, 'js/supabase.js');
 

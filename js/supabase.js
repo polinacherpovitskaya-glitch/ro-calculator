@@ -1190,16 +1190,18 @@ async function loadOrder(orderId) {
 
         return { order: fullOrder, items, repaired_duplicates: repairedDuplicates };
     }
+    const normalizedOrderId = _normalizeOrderId(orderId);
     const orders = getLocal(LOCAL_KEYS.orders) || [];
-    const order = orders.find(o => o.id === orderId);
+    const order = orders.find(o => String(_normalizeOrderId(o.id)) === String(normalizedOrderId));
     const allItems = getLocal(LOCAL_KEYS.orderItems) || [];
+    const orderItems = allItems.filter(i => String(_normalizeOrderId(i.order_id)) === String(normalizedOrderId));
     const dedupedItems = _dedupeOrderItems(
-        allItems.filter(i => i.order_id === orderId),
-        orderId
+        orderItems,
+        normalizedOrderId
     );
     let repairedDuplicates = false;
-    if (order && dedupedItems.length !== allItems.filter(i => i.order_id === orderId).length) {
-        repairedDuplicates = await _rewriteOrderItems(orderId, dedupedItems);
+    if (order && dedupedItems.length !== orderItems.length) {
+        repairedDuplicates = await _rewriteOrderItems(normalizedOrderId, dedupedItems);
     }
     return order ? { order, items: dedupedItems, repaired_duplicates: repairedDuplicates } : null;
 }

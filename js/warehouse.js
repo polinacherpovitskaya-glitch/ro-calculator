@@ -50,6 +50,7 @@ const WAREHOUSE_SEED_DATA = [
     {"category":"carabiners","name":"Карабин с защелкой","sku":"CR-STD-BLCK+","color":"черный","qty":75,"price_per_unit":10.0},
     {"category":"carabiners","name":"Круглый карабин","sku":"CR-RNG-020-SV","size":"2 см","color":"серебряный","qty":90,"price_per_unit":5.0},
     {"category":"carabiners","name":"Круглый карабин","sku":"CR-RNG-023-SV","size":"2,3 см","color":"серебряный","price_per_unit":5},
+    {"category":"carabiners","name":"Круглый карабин","sku":"CR-RNG-025-SV","size":"2,5 см","color":"серебряный","price_per_unit":5},
     {"category":"carabiners","name":"Круглый карабин","sku":"CR-RNG-032-SV","size":"3,2 см","color":"серебряный","qty":25,"price_per_unit":5.0},
     {"category":"carabiners","name":"Круглый карабин","sku":"CR-RNG-039-SV","size":"3,9 см","color":"серебряный","qty":450,"price_per_unit":5.0},
     {"category":"carabiners","name":"Круглый карабин с ушком","sku":"CR-RNG-SV-H","size":"2,3 см","color":"серебряный","qty":880,"price_per_unit":10.0},
@@ -213,6 +214,10 @@ const WAREHOUSE_CATEGORIES = [
     { key: 'other',      label: 'Разное',    icon: '🔹', color: '#f1f5f9', textColor: '#475569' },
 ];
 
+const WAREHOUSE_REQUIRED_SEED_SKUS = [
+    'CR-RNG-025-SV',
+];
+
 const DEFAULT_MOLD_CAPACITY_BY_TYPE = {
     customer: 1000,
     blank: 5000,
@@ -250,6 +255,7 @@ const Warehouse = {
 
     async load() {
         this.allItems = await loadWarehouseItems();
+        this.allItems = await this._ensureRequiredSeedItems(this.allItems);
         await this._loadMoldOrders();
         await this._refreshBlankHardwareWarehouseItemIds();
 
@@ -358,6 +364,48 @@ const Warehouse = {
         this.populateCategoryFilter();
         this.renderStats();
         this.setView(this.currentView || 'table', { force: true });
+    },
+
+    _createRequiredSeedWarehouseItem(raw, id, nowIso = new Date().toISOString()) {
+        return {
+            id,
+            category: raw.category || 'other',
+            name: raw.name || '',
+            sku: raw.sku || '',
+            size: raw.size || '',
+            color: raw.color || '',
+            unit: raw.unit || 'шт',
+            photo_url: '',
+            photo_thumbnail: (typeof WAREHOUSE_SEED_PHOTOS_BY_SKU !== 'undefined' && WAREHOUSE_SEED_PHOTOS_BY_SKU[raw.sku]) ? WAREHOUSE_SEED_PHOTOS_BY_SKU[raw.sku] : '',
+            qty: raw.qty || 0,
+            min_qty: 10,
+            price_per_unit: raw.price_per_unit || 0,
+            notes: '',
+            created_at: nowIso,
+            updated_at: nowIso,
+        };
+    },
+
+    async _ensureRequiredSeedItems(items) {
+        const currentItems = Array.isArray(items) ? [...items] : [];
+        if (!currentItems.length || !WAREHOUSE_REQUIRED_SEED_SKUS.length) return currentItems;
+
+        const requiredSkuSet = new Set(WAREHOUSE_REQUIRED_SEED_SKUS.map(sku => this._normStr(sku)));
+        const existingSkuSet = new Set(currentItems.map(item => this._normStr(item?.sku)));
+        const missingSeeds = WAREHOUSE_SEED_DATA.filter(seed =>
+            requiredSkuSet.has(this._normStr(seed?.sku))
+            && !existingSkuSet.has(this._normStr(seed?.sku))
+        );
+
+        if (!missingSeeds.length) return currentItems;
+
+        const nowIso = new Date().toISOString();
+        const baseId = Date.now();
+        const addedItems = missingSeeds.map((raw, index) => this._createRequiredSeedWarehouseItem(raw, baseId + index, nowIso));
+        const updatedItems = [...currentItems, ...addedItems];
+        await saveWarehouseItems(updatedItems);
+        console.log(`[Warehouse] Added ${addedItems.length} required seed items: ${addedItems.map(item => item.sku).join(', ')}`);
+        return updatedItems;
     },
 
     async _seedInitialData() {
@@ -5757,7 +5805,7 @@ const Warehouse = {
     // ==========================================
 
     async getItemsForPicker() {
-        const items = await loadWarehouseItems();
+        const items = await this._ensureRequiredSeedItems(await loadWarehouseItems());
         const reservations = await loadWarehouseReservations();
 
         items.forEach(item => {

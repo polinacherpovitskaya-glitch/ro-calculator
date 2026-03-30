@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v187';
+const APP_VERSION = 'v188';
 
 const App = {
     currentPage: 'orders',
@@ -990,6 +990,7 @@ const Calculator = {
         clearTimeout(this._autosaveTimer);
         this._isDirty = false;
         this._autosaving = false;
+        this._invalidateWhPickerContext();
 
         App.editingOrderId = null;
         this._currentOrderStatus = 'draft';
@@ -1499,8 +1500,53 @@ const Calculator = {
     // Cached warehouse items for picker (loaded once per session)
     _whPickerData: null,
     _whPickerLoading: false,
+    _whCurrentOrderReservationMap: null,
+    _whReservationOrderId: null,
+    _whReservationLoading: false,
+
+    _invalidateWhPickerContext() {
+        this._whPickerData = null;
+        this._whPickerLoading = false;
+        this._whCurrentOrderReservationMap = null;
+        this._whReservationOrderId = null;
+        this._whReservationLoading = false;
+    },
+
+    async _ensureWhReservationContext(force = false) {
+        const orderId = App.editingOrderId || null;
+        if (!force && this._whCurrentOrderReservationMap && this._whReservationOrderId === orderId) {
+            return this._whCurrentOrderReservationMap;
+        }
+        if (this._whReservationLoading) {
+            while (this._whReservationLoading) await new Promise(r => setTimeout(r, 50));
+            return this._whCurrentOrderReservationMap || new Map();
+        }
+
+        this._whReservationLoading = true;
+        try {
+            const reservations = await loadWarehouseReservations();
+            const reservationMap = new Map();
+            reservations.forEach(r => {
+                if (r.status !== 'active') return;
+                if (Number(r.order_id || 0) !== Number(orderId || 0)) return;
+                const itemId = Number(r.item_id) || 0;
+                const qty = parseFloat(r.qty) || 0;
+                if (!itemId || qty <= 0) return;
+                reservationMap.set(itemId, (reservationMap.get(itemId) || 0) + qty);
+            });
+            this._whCurrentOrderReservationMap = reservationMap;
+            this._whReservationOrderId = orderId;
+        } catch (e) {
+            console.error('[Calculator] Failed to load warehouse reservations:', e);
+            this._whCurrentOrderReservationMap = new Map();
+            this._whReservationOrderId = orderId;
+        }
+        this._whReservationLoading = false;
+        return this._whCurrentOrderReservationMap;
+    },
 
     async _ensureWhPickerData() {
+        await this._ensureWhReservationContext();
         if (this._whPickerData) return this._whPickerData;
         if (this._whPickerLoading) {
             // Wait for loading to finish
@@ -1526,6 +1572,80 @@ const Calculator = {
             if (found) return found;
         }
         return null;
+    },
+
+    _getCurrentOrderReservedQty(itemId) {
+        if (!this._whCurrentOrderReservationMap) return 0;
+        return this._whCurrentOrderReservationMap.get(Number(itemId) || 0) || 0;
+    },
+
+    _getCurrentWarehouseDraftDemand(itemId, exclude = null) {
+        const targetId = Number(itemId) || 0;
+        if (!targetId) return 0;
+
+        const shouldSkip = (kind, idx) => exclude && exclude.kind === kind && Number(exclude.idx) === Number(idx);
+        let demand = 0;
+
+        (this.hardwareItems || []).forEach((hw, idx) => {
+            if (shouldSkip('hardware', idx)) return;
+            if (hw.source !== 'warehouse') return;
+            if (Number(hw.warehouse_item_id) !== targetId) return;
+            demand += parseFloat(hw.qty) || 0;
+        });
+
+        (this.packagingItems || []).forEach((pkg, idx) => {
+            if (shouldSkip('packaging', idx)) return;
+            if (pkg.source !== 'warehouse') return;
+            if (Number(pkg.warehouse_item_id) !== targetId) return;
+            demand += parseFloat(pkg.qty) || 0;
+        });
+
+        if (typeof getPendantWarehouseDemandRows === 'function') {
+            (this.pendants || []).forEach(pnd => {
+                getPendantWarehouseDemandRows(pnd).forEach(row => {
+                    if (Number(row.warehouse_item_id) !== targetId) return;
+                    demand += parseFloat(row.qty) || 0;
+                });
+            });
+        }
+
+        return demand;
+    },
+
+    _getWhEffectiveAvailableQty(itemId, exclude = null) {
+        const whItem = this._findWhItem(itemId);
+        if (!whItem) return 0;
+        const baseAvailable = parseFloat(whItem.available_qty) || 0;
+        const ownReserved = this._getCurrentOrderReservedQty(itemId);
+        const otherDraftDemand = this._getCurrentWarehouseDraftDemand(itemId, exclude);
+        return Math.max(0, baseAvailable + ownReserved - otherDraftDemand);
+    },
+
+    _getWhItemForCurrentOrder(itemId, exclude = null) {
+        const whItem = this._findWhItem(itemId);
+        if (!whItem) return null;
+        return {
+            ...whItem,
+            available_qty: this._getWhEffectiveAvailableQty(itemId, exclude),
+        };
+    },
+
+    _getWhPickerDataForCurrentOrder() {
+        if (!this._whPickerData) return null;
+        if (!this._whCurrentOrderReservationMap || this._whCurrentOrderReservationMap.size === 0) return this._whPickerData;
+
+        const grouped = {};
+        Object.keys(this._whPickerData).forEach(catKey => {
+            const group = this._whPickerData[catKey];
+            grouped[catKey] = {
+                ...group,
+                items: (group.items || []).map(item => ({
+                    ...item,
+                    available_qty: Math.max(0, (parseFloat(item.available_qty) || 0) + this._getCurrentOrderReservedQty(item.id)),
+                })),
+            };
+        });
+        return grouped;
     },
 
     async _ensureBlanksCatalog(force = false) {
@@ -1599,13 +1719,16 @@ const Calculator = {
         const list = document.getElementById(targetListId || 'calc-hardware-list');
 
         // Build warehouse picker (hardware only — exclude packaging)
+        const pickerData = this._getWhPickerDataForCurrentOrder();
         let pickerHtml = '';
-        if (this._whPickerData) {
-            pickerHtml = Warehouse.buildImagePicker(`hw-picker-${idx}`, this._whPickerData, hw.warehouse_item_id, 'Calculator.onHwWarehouseSelect', 'hardware');
+        if (pickerData) {
+            pickerHtml = Warehouse.buildImagePicker(`hw-picker-${idx}`, pickerData, hw.warehouse_item_id, 'Calculator.onHwWarehouseSelect', 'hardware');
         }
 
-        // Max qty from warehouse
-        const whItem = (isWarehouse && hw.warehouse_item_id) ? this._findWhItem(hw.warehouse_item_id) : null;
+        // Max qty from warehouse, including current order reservation and excluding sibling rows
+        const whItem = (isWarehouse && hw.warehouse_item_id)
+            ? this._getWhItemForCurrentOrder(hw.warehouse_item_id, { kind: 'hardware', idx })
+            : null;
         const maxQty = whItem ? whItem.available_qty : '';
         const maxAttr = whItem ? ` max="${whItem.available_qty}"` : '';
 
@@ -1856,7 +1979,7 @@ const Calculator = {
             return;
         }
 
-        const whItem = this._findWhItem(itemId);
+        const whItem = this._getWhItemForCurrentOrder(itemId, { kind: 'hardware', idx });
         if (!whItem) return;
         if ((whItem.available_qty || 0) <= 0) {
             App.toast(`На складе нет "${whItem.name}". Закажите из Китая.`);
@@ -1903,7 +2026,7 @@ const Calculator = {
         const hw = this.hardwareItems[idx];
         // Enforce max qty for warehouse items
         if (field === 'qty' && hw.source === 'warehouse' && hw.warehouse_item_id) {
-            const whItem = this._findWhItem(hw.warehouse_item_id);
+            const whItem = this._getWhItemForCurrentOrder(hw.warehouse_item_id, { kind: 'hardware', idx });
             if (whItem && hw.qty > whItem.available_qty) {
                 hw.qty = whItem.available_qty;
                 App.toast(`Максимум на складе: ${whItem.available_qty} ${whItem.unit}. Остальное — из Китая.`);
@@ -2235,12 +2358,15 @@ const Calculator = {
         const isCustomRussia = isCustom && (pkg.custom_country || 'china') === 'russia';
         const list = document.getElementById(targetListId || 'calc-packaging-list');
 
+        const pickerData = this._getWhPickerDataForCurrentOrder();
         let pickerHtml = '';
-        if (this._whPickerData) {
-            pickerHtml = Warehouse.buildImagePicker(`pkg-picker-${idx}`, this._whPickerData, pkg.warehouse_item_id, 'Calculator.onPkgWarehouseSelect', 'packaging');
+        if (pickerData) {
+            pickerHtml = Warehouse.buildImagePicker(`pkg-picker-${idx}`, pickerData, pkg.warehouse_item_id, 'Calculator.onPkgWarehouseSelect', 'packaging');
         }
 
-        const whItem = (isWarehouse && pkg.warehouse_item_id) ? this._findWhItem(pkg.warehouse_item_id) : null;
+        const whItem = (isWarehouse && pkg.warehouse_item_id)
+            ? this._getWhItemForCurrentOrder(pkg.warehouse_item_id, { kind: 'packaging', idx })
+            : null;
         const maxQty = whItem ? whItem.available_qty : '';
         const maxAttr = whItem ? ` max="${whItem.available_qty}"` : '';
 
@@ -2479,7 +2605,7 @@ const Calculator = {
             this.recalculate();
             return;
         }
-        const whItem = this._findWhItem(itemId);
+        const whItem = this._getWhItemForCurrentOrder(itemId, { kind: 'packaging', idx });
         if (!whItem) return;
         if ((whItem.available_qty || 0) <= 0) {
             App.toast(`На складе нет "${whItem.name}". Закажите из Китая.`);
@@ -2523,7 +2649,7 @@ const Calculator = {
         this.packagingItems[idx][field] = parseFloat(value) || 0;
         const pkg = this.packagingItems[idx];
         if (field === 'qty' && pkg.source === 'warehouse' && pkg.warehouse_item_id) {
-            const whItem = this._findWhItem(pkg.warehouse_item_id);
+            const whItem = this._getWhItemForCurrentOrder(pkg.warehouse_item_id, { kind: 'packaging', idx });
             if (whItem && pkg.qty > whItem.available_qty) {
                 pkg.qty = whItem.available_qty;
                 App.toast(`Максимум на складе: ${whItem.available_qty} ${whItem.unit}. Остальное — из Китая.`);
@@ -4217,6 +4343,7 @@ const Calculator = {
                     { hardware: false, packaging: true }
                 );
             }
+            this._invalidateWhPickerContext();
 
             App.toast('Заказ сохранен');
         } else {
@@ -4318,6 +4445,7 @@ const Calculator = {
         }
 
         await saveWarehouseReservations(reservations);
+        this._invalidateWhPickerContext();
     },
 
     /**
@@ -4388,7 +4516,7 @@ const Calculator = {
         }
 
         // Invalidate picker cache so next add sees updated stock
-        this._whPickerData = null;
+        this._invalidateWhPickerContext();
     },
 
     async loadOrder(orderId) {
