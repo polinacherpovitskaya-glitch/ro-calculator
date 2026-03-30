@@ -1830,10 +1830,50 @@ async function loadMolds() {
         .map(mold => _withHistoricalBlankPriceRecovery(mold).mold);
 }
 
+// Upload base64 mold photo to Supabase Storage, return public URL
+async function uploadMoldPhoto(moldId, base64DataUrl) {
+    if (!isSupabaseReady() || !base64DataUrl || !base64DataUrl.startsWith('data:')) return base64DataUrl;
+    try {
+        // Convert base64 to Blob
+        const [header, b64] = base64DataUrl.split(',');
+        const mime = header.match(/:(.*?);/)?.[1] || 'image/jpeg';
+        const bytes = atob(b64);
+        const arr = new Uint8Array(bytes.length);
+        for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+        const blob = new Blob([arr], { type: mime });
+
+        const ext = mime === 'image/png' ? 'png' : 'jpg';
+        const path = `molds/${moldId}.${ext}`;
+
+        // Upload (upsert to overwrite existing)
+        const { error } = await supabaseClient.storage
+            .from('product-images')
+            .upload(path, blob, { contentType: mime, upsert: true });
+
+        if (error) {
+            console.error('uploadMoldPhoto error:', error);
+            return base64DataUrl; // fallback to base64
+        }
+
+        // Get public URL
+        const { data } = supabaseClient.storage.from('product-images').getPublicUrl(path);
+        return data?.publicUrl || base64DataUrl;
+    } catch (e) {
+        console.error('uploadMoldPhoto exception:', e);
+        return base64DataUrl;
+    }
+}
+
 async function saveMold(mold) {
     if (!mold.id) { mold.id = Date.now(); mold.created_at = new Date().toISOString(); }
     mold.updated_at = new Date().toISOString();
     _clearDeletedMold(mold.id);
+
+    // Upload photo to Storage if it's base64 (instead of storing huge data URI in JSON)
+    if (mold.photo_url && mold.photo_url.startsWith('data:')) {
+        mold.photo_url = await uploadMoldPhoto(mold.id, mold.photo_url);
+    }
+
     if (isSupabaseReady()) {
         try {
             const { error } = await supabaseClient.from('molds').upsert({

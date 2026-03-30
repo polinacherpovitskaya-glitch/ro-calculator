@@ -414,6 +414,14 @@ const Warehouse = {
     },
 
     _parseWarehouseQty(value) {
+        if (value == null) return 0;
+        if (typeof value === 'string') {
+            const cleaned = value
+                .replace(/[\s\u00A0]/g, '')
+                .replace(',', '.');
+            const parsed = parseFloat(cleaned);
+            return Number.isFinite(parsed) ? parsed : 0;
+        }
         const parsed = parseFloat(value);
         return Number.isFinite(parsed) ? parsed : 0;
     },
@@ -563,8 +571,8 @@ const Warehouse = {
     },
 
     _getAuditDiffMeta(item, actualValue) {
-        const systemQty = parseFloat(item && item.qty) || 0;
-        const actualQty = actualValue === '' || actualValue == null ? NaN : parseFloat(actualValue);
+        const systemQty = this._parseWarehouseQty(item && item.qty);
+        const actualQty = actualValue === '' || actualValue == null ? NaN : this._parseWarehouseQty(actualValue);
         if (!Number.isFinite(actualQty)) {
             return {
                 systemQty,
@@ -2025,8 +2033,8 @@ const Warehouse = {
         }
 
         const item = items[idx];
-        const requestedQtyChange = parseFloat(qtyChange) || 0;
-        const qtyBefore = parseFloat(item.qty) || 0;
+        const requestedQtyChange = this._parseWarehouseQty(qtyChange);
+        const qtyBefore = this._parseWarehouseQty(item.qty);
         const qtyAfter = Math.max(0, qtyBefore + requestedQtyChange);
         const appliedQtyChange = qtyAfter - qtyBefore;
         const clamped = Math.abs(appliedQtyChange - requestedQtyChange) > 1e-9;
@@ -2565,6 +2573,8 @@ const Warehouse = {
                     const cat = WAREHOUSE_CATEGORIES.find(c => c.key === item.category);
                     const actualValue = this._getAuditStoredValue(item.id);
                     const rendered = this._renderAuditDiffMarkup(item, actualValue);
+                    const systemQty = this._parseWarehouseQty(item.qty);
+                    const systemQtyLabel = this._formatInventoryQty(systemQty, item.unit);
                     const photoSrc = item.photo_thumbnail || item.photo_url || '';
                     const safePhotoSrc = photoSrc ? (photoSrc.startsWith('data:') ? photoSrc : this.esc(photoSrc)) : '';
                     return `<tr>
@@ -2576,8 +2586,8 @@ const Warehouse = {
                         <td><span class="wh-cat-badge" style="background:${cat?.color || '#f1f5f9'};color:${cat?.textColor || '#475569'};">${cat?.label || '?'}</span></td>
                         <td style="font-weight:600;">${this.esc(item.name)}</td>
                         <td style="color:var(--text-muted);font-size:11px;">${this.esc(item.sku || '')}</td>
-                        <td class="text-right" style="font-weight:600;">${item.qty || 0}</td>
-                        <td><input type="number" class="audit-input" data-id="${item.id}" data-system="${item.qty || 0}" value="${this.esc(actualValue)}" placeholder="${item.qty || 0}" style="width:88px;padding:4px;text-align:right;" oninput="Warehouse.onAuditInput(this)"></td>
+                        <td class="text-right" style="font-weight:600;">${systemQtyLabel}</td>
+                        <td><input type="number" class="audit-input" data-id="${item.id}" data-system="${systemQty}" value="${this.esc(actualValue)}" placeholder="${systemQty}" style="width:88px;padding:4px;text-align:right;" oninput="Warehouse.onAuditInput(this)"></td>
                         <td class="${rendered.qtyClass}" id="audit-diff-${item.id}">${rendered.qty}</td>
                         <td class="${rendered.moneyClass}" id="audit-money-${item.id}">${rendered.money}</td>
                     </tr>`;

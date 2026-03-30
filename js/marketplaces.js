@@ -236,7 +236,7 @@ const Marketplaces = {
         if (file.size > 2 * 1024 * 1024) { App.toast('Макс 2MB'); return; }
         const reader = new FileReader();
         reader.onload = (e) => {
-            this._resizeImage(e.target.result, 200, (thumb) => {
+            this._resizeImage(e.target.result, 800, (thumb) => {
                 this._pendingPhoto = thumb;
                 this._updatePhotoPreview(thumb);
             });
@@ -255,7 +255,7 @@ const Marketplaces = {
             }
             canvas.width = w; canvas.height = h;
             canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-            callback(canvas.toDataURL('image/jpeg', 0.7));
+            callback(canvas.toDataURL('image/jpeg', 0.85));
         };
         img.src = dataUrl;
     },
@@ -1640,7 +1640,7 @@ const Marketplaces = {
         if (file.size > 2 * 1024 * 1024) { App.toast('Макс 2MB'); return; }
         const reader = new FileReader();
         reader.onload = (e) => {
-            this._resizeImage(e.target.result, 200, (thumb) => {
+            this._resizeImage(e.target.result, 800, (thumb) => {
                 if (this._colorVariants[idx]) {
                     this._colorVariants[idx].photo_url = thumb;
                     this.renderColorVariants();
