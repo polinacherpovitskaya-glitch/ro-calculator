@@ -97,6 +97,9 @@ const Tasks = {
 
     async load(taskId) {
         if (!this.scope) this.scope = App.currentEmployeeId ? 'my' : 'all';
+        if (this.scope === 'my' && !App.currentEmployeeId) {
+            this.scope = 'all';
+        }
         if (taskId) {
             this.currentTaskId = Number(taskId);
             this.createDraft = null;
@@ -818,7 +821,8 @@ const Tasks = {
         let list = (this.bundle?.tasks || []).slice()
             .filter(task => !this.isTaskDeleting(task.id));
 
-        if (this.scope === 'my' && App.currentEmployeeId) {
+        if (this.scope === 'my') {
+            if (!App.currentEmployeeId) return list;
             list = this.myTasks(this.myMode);
         }
         if (this.scope === 'overdue') {
