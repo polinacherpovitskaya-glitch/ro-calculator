@@ -166,10 +166,16 @@ BugReports.bundle = {
     assets: [],
 };
 let closeStatus = null;
+let savedTask = null;
 context.Tasks = {
+    taskById: () => openTask,
     changeStatus: async (taskId, status) => {
         closeStatus = { taskId, status };
     },
+};
+context.saveWorkTask = async (task) => {
+    savedTask = { ...task };
+    return task;
 };
 BugReports.refreshData = async () => {
     closeStatus.refreshed = true;
@@ -183,6 +189,47 @@ BugReports.render = () => {
     assert.deepEqual(closeStatus, {
         taskId: 101,
         status: 'done',
+        refreshed: true,
+        rendered: true,
+    });
+    assert.equal(context.__lastToast, 'Задача закрыта');
+
+    closeStatus = null;
+    savedTask = null;
+    BugReports.bundle = {
+        tasks: [openTask],
+        bugReports: [openReport],
+        assets: [],
+    };
+    context.Tasks = {
+        taskById: () => null,
+        changeStatus: async () => {
+            throw new Error('fallback path should not call Tasks.changeStatus');
+        },
+        isOverdue: () => false,
+        emitTaskEvents: async (saved, existing, previousOverdue, options) => {
+            closeStatus = {
+                savedStatus: saved.status,
+                existingId: existing.id,
+                previousOverdue,
+                preserveSelection: options.preserveSelection,
+            };
+        },
+    };
+    BugReports.refreshData = async () => {
+        closeStatus.refreshed = true;
+    };
+    BugReports.render = () => {
+        closeStatus.rendered = true;
+    };
+
+    await BugReports.closeTask(101);
+    assert.equal(savedTask.status, 'done');
+    assert.deepEqual(closeStatus, {
+        savedStatus: 'done',
+        existingId: 101,
+        previousOverdue: false,
+        preserveSelection: false,
         refreshed: true,
         rendered: true,
     });

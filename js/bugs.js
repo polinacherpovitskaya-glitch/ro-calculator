@@ -914,16 +914,27 @@ const BugReports = {
             return;
         }
         try {
-            if (typeof Tasks !== 'undefined' && Tasks && typeof Tasks.changeStatus === 'function') {
+            const taskFromTasksModule = typeof Tasks !== 'undefined'
+                && Tasks
+                && typeof Tasks.taskById === 'function'
+                ? Tasks.taskById(normalizedTaskId)
+                : null;
+            if (taskFromTasksModule && typeof Tasks.changeStatus === 'function') {
                 await Tasks.changeStatus(normalizedTaskId, 'done', { preserveSelection: false });
             } else {
-                await saveWorkTask({
+                const saved = await saveWorkTask({
                     ...task,
                     status: 'done',
                 }, {
                     actor_id: App.currentEmployeeId,
                     actor_name: App.getCurrentEmployeeName(),
                 });
+                if (typeof Tasks !== 'undefined' && Tasks && typeof Tasks.emitTaskEvents === 'function') {
+                    const previousOverdue = typeof Tasks.isOverdue === 'function'
+                        ? Tasks.isOverdue(task)
+                        : false;
+                    await Tasks.emitTaskEvents(saved, task, previousOverdue, { preserveSelection: false });
+                }
             }
             await this.refreshData();
             this.render();
