@@ -52,6 +52,7 @@ jobs:
           node tests/factual-smoke.js
           node tests/supabase-fallback-smoke.js
           node --check tests/live-site-smoke.mjs
+          node --check tests/warehouse-stress-smoke.mjs
 
   deploy:
     needs: verify

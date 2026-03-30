@@ -1,0 +1,31 @@
+name: Warehouse stress smoke
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '41 */4 * * *'
+  workflow_run:
+    workflows: ['Deploy GitHub Pages']
+    types: [completed]
+
+permissions:
+  contents: read
+
+jobs:
+  stress:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Run warehouse stress smoke
+        env:
+          RO_STRESS_ITERATIONS: '5'
+        run: node tests/warehouse-stress-smoke.mjs
