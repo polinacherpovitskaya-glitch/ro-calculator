@@ -59,7 +59,7 @@ jobs:
           TELEGRAM_SMOKE_CHAT_ID: ${{ secrets.TELEGRAM_SMOKE_CHAT_ID }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           ALERT_WORKFLOW: Live site smoke
-          ALERT_SCOPE: bugs done fallback + warehouse live load
+          ALERT_SCOPE: bugs done fallback + warehouse live load + monitoring dashboard
           ALERT_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           ALERT_SOURCE_WORKFLOW: ${{ github.event.workflow_run.name }}
         run: node .github/scripts/send-telegram-alert.mjs
@@ -70,7 +70,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           ALERT_WORKFLOW: Live site smoke
-          ALERT_SCOPE: bugs done fallback + warehouse live load
+          ALERT_SCOPE: bugs done fallback + warehouse live load + monitoring dashboard
           ALERT_STATUS: ${{ job.status }}
           ALERT_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           ALERT_SOURCE_WORKFLOW: ${{ github.event.workflow_run.name }}

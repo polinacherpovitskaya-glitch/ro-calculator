@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v189';
+const APP_VERSION = 'v190';
 
 const App = {
     currentPage: 'orders',
@@ -30,7 +30,7 @@ const App = {
     ALL_PAGES: [
         'calculator', 'orders', 'factual',
         'analytics', 'molds', 'colors', 'timetrack', 'tasks', 'bugs', 'projects', 'wiki', 'gantt',
-        'import', 'warehouse', 'marketplaces', 'china', 'settings',
+        'import', 'warehouse', 'marketplaces', 'china', 'monitoring', 'settings',
     ],
 
     // Pages visible to everyone by default (if no custom config)
@@ -48,6 +48,7 @@ const App = {
         page = this.normalizePageAlias(page);
         if (page === 'bugs') return true;
         if (page === 'wiki') return true;
+        if (page === 'monitoring') return true;
         // order-detail is part of orders
         if (page === 'order-detail') page = 'orders';
         if ((this.currentUser.id === '__admin' || this.currentUser.role === 'admin') && this.currentUser.employee_id == null) {
@@ -130,10 +131,8 @@ const App = {
         Object.keys(perms).forEach(empId => {
             perms[empId] = this.normalizePageList(perms[empId]);
         });
-        // Полина (id=5) always gets all pages — ensure settings access exists
-        if (!perms['5'] || !perms['5'].includes('settings')) {
-            perms['5'] = [...this.ALL_PAGES];
-        }
+        // Полина (id=5) always gets all pages, including newly added screens.
+        perms['5'] = [...this.ALL_PAGES];
         localStorage.setItem('ro_employee_pages', JSON.stringify(perms));
         // Default production shares for employees with non-standard split
         const shares = JSON.parse(localStorage.getItem('ro_production_shares') || '{}');
@@ -725,6 +724,7 @@ const App = {
             case 'warehouse': Warehouse.load(); break;
             case 'marketplaces': Marketplaces.load(); break;
             case 'china': ChinaPurchases.load(); break;
+            case 'monitoring': Monitoring.load(); break;
             case 'settings': Settings.load(); break;
         }
     },

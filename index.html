@@ -35,7 +35,7 @@
     <aside class="sidebar">
         <div class="sidebar-brand">
             <h2>Recycle Object</h2>
-            <span>Калькулятор <span id="app-version">v189</span></span>
+            <span>Калькулятор <span id="app-version">v190</span></span>
         </div>
         <nav class="sidebar-nav">
             <a href="#tasks" data-page="tasks">
@@ -101,6 +101,10 @@
             <a href="#bugs" data-page="bugs">
                 <span class="nav-icon">&#128027;</span>
                 <span>Баги</span>
+            </a>
+            <a href="#monitoring" data-page="monitoring">
+                <span class="nav-icon">&#128200;</span>
+                <span>Мониторинг</span>
             </a>
             <a href="#settings" data-page="settings">
                 <span class="nav-icon">&#9881;</span>
@@ -1460,6 +1464,27 @@
         <div id="page-bugs" class="page"></div>
 
         <div id="page-projects" class="page"></div>
+
+        <div id="page-monitoring" class="page">
+            <div class="page-header">
+                <div>
+                    <h1>Мониторинг</h1>
+                    <div class="text-muted" style="font-size:13px;">Собираем статусы деплоя и smoke-проверок…</div>
+                </div>
+            </div>
+            <div class="stats-grid">
+                <div class="stat-card"><div class="stat-label">Общий статус</div><div class="stat-value">…</div></div>
+                <div class="stat-card"><div class="stat-label">Deploy</div><div class="stat-value">…</div></div>
+                <div class="stat-card"><div class="stat-label">Live smoke</div><div class="stat-value">…</div></div>
+                <div class="stat-card"><div class="stat-label">Warehouse stress</div><div class="stat-value">…</div></div>
+            </div>
+            <div class="card">
+                <div class="empty-state">
+                    <div class="empty-icon">&#128200;</div>
+                    <p>Открываем панель спокойствия…</p>
+                </div>
+            </div>
+        </div>
 
         <!-- ========== GANTT CALENDAR ========== -->
         <div id="page-gantt" class="page">
@@ -3281,7 +3306,7 @@
 <script src="js/supabase.js?v=160"></script>
 <script src="js/task-events.js?v=1"></script>
 <script src="js/calculator.js?v=72"></script>
-<script src="js/app.js?v=189"></script>
+<script src="js/app.js?v=190"></script>
 <script src="js/wiki.js?v=4"></script>
 <script src="js/order-detail.js?v=61"></script>
 <script src="js/orders.js?v=64"></script>
@@ -3303,7 +3328,8 @@
 <script src="js/china_catalog.js?v=46k"></script>
 <script src="js/marketplaces.js?v=77"></script>
 <script src="js/warehouse.js?v=174"></script>
-<script src="js/settings.js?v=79"></script>
+<script src="js/monitoring.js?v=1"></script>
+<script src="js/settings.js?v=80"></script>
 <script src="js/pendant.js?v=11"></script>
 </body>
 </html>

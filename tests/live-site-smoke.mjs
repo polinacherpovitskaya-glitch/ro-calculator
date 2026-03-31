@@ -276,12 +276,55 @@ async function smokeWarehouseLoads(page) {
   });
 }
 
+async function smokeMonitoringLoads(page) {
+  await openAuthedHash(page, '#monitoring');
+
+  await page.waitForFunction(() => {
+    return typeof Monitoring !== 'undefined'
+      && Array.isArray(Monitoring?.state?.workflows)
+      && Monitoring.state.workflows.length >= 3
+      && document.body.innerText.includes('Панель спокойствия')
+      && document.body.innerText.includes('Deploy')
+      && document.body.innerText.includes('Live smoke')
+      && document.body.innerText.includes('Warehouse stress');
+  }, null, { timeout: 60_000 });
+
+  const monitoringState = await page.evaluate(() => ({
+    version: typeof APP_VERSION !== 'undefined' ? APP_VERSION : null,
+    workflows: (Monitoring?.state?.workflows || []).map((item) => ({
+      name: item.name,
+      shortLabel: item.shortLabel,
+      found: item.found,
+      statusKey: item.statusKey,
+      htmlUrl: item.htmlUrl
+    })),
+    hasTitle: document.body.innerText.includes('Панель спокойствия')
+  }));
+
+  assert.equal(monitoringState.version, expectedVersion, `Expected monitoring page on ${expectedVersion}, got ${monitoringState.version}`);
+  assert.equal(monitoringState.hasTitle, true, 'Monitoring page must render title on live site');
+  assert.equal(monitoringState.workflows.length >= 3, true, `Expected at least 3 monitoring workflows, got ${monitoringState.workflows.length}`);
+
+  const requiredNames = ['Deploy GitHub Pages', 'Live site smoke', 'Warehouse stress smoke'];
+  requiredNames.forEach((name) => {
+    const workflow = monitoringState.workflows.find((item) => item.name === name);
+    assert.ok(workflow, `Expected monitoring workflow ${name} on live site`);
+    assert.ok(['success', 'running', 'warning', 'failure', 'neutral', 'missing'].includes(workflow.statusKey), `Unexpected status key for ${name}: ${workflow.statusKey}`);
+  });
+
+  await page.screenshot({
+    path: path.join(outputDir, 'monitoring.png'),
+    fullPage: true
+  });
+}
+
 const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 
 try {
   await smokeBugDoneFallback(page);
   await smokeWarehouseLoads(page);
+  await smokeMonitoringLoads(page);
   console.log(`live site smoke checks passed (${expectedVersion})`);
 } catch (error) {
   try {
