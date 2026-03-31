@@ -502,6 +502,9 @@ const Warehouse = {
 
     _defaultAuditDraft() {
         return {
+            mode: 'new',
+            audit_id: null,
+            baseline: {},
             category: '',
             search: '',
             values: {},
@@ -516,6 +519,13 @@ const Warehouse = {
         if (!this.auditDraft.values || typeof this.auditDraft.values !== 'object') {
             this.auditDraft.values = {};
         }
+        if (!this.auditDraft.baseline || typeof this.auditDraft.baseline !== 'object') {
+            this.auditDraft.baseline = {};
+        }
+        if (this.auditDraft.mode !== 'edit') {
+            this.auditDraft.mode = 'new';
+            this.auditDraft.audit_id = null;
+        }
         return this.auditDraft;
     },
 
@@ -528,9 +538,45 @@ const Warehouse = {
                 ...this._defaultAuditDraft(),
                 ...(parsed && typeof parsed === 'object' ? parsed : {}),
                 values: parsed && typeof parsed.values === 'object' && parsed.values ? parsed.values : {},
+                baseline: parsed && typeof parsed.baseline === 'object' && parsed.baseline ? parsed.baseline : {},
+                mode: parsed && parsed.mode === 'edit' ? 'edit' : 'new',
+                audit_id: parsed && parsed.mode === 'edit' ? Number(parsed.audit_id || 0) || null : null,
             };
         } catch (_) {
             return this._defaultAuditDraft();
+        }
+    },
+
+    _isAuditEditMode(draft = null) {
+        const current = draft && typeof draft === 'object' ? draft : this._ensureAuditDraft();
+        return current.mode === 'edit' && Number(current.audit_id || 0) > 0;
+    },
+
+    _getAuditBaselineQty(itemId, fallbackQty) {
+        const draft = this._ensureAuditDraft();
+        const key = String(Number(itemId || 0) || itemId || '');
+        if (this._isAuditEditMode(draft) && key && Object.prototype.hasOwnProperty.call(draft.baseline || {}, key)) {
+            return this._parseWarehouseQty(draft.baseline[key]);
+        }
+        return this._parseWarehouseQty(fallbackQty);
+    },
+
+    _updateAuditFormMode() {
+        const titleEl = document.getElementById('wh-audit-title');
+        const descriptionEl = document.getElementById('wh-audit-description');
+        const submitEl = document.getElementById('wh-audit-submit-btn');
+        const isEdit = this._isAuditEditMode();
+
+        if (titleEl) {
+            titleEl.textContent = isEdit ? 'Редактирование инвентаризации' : 'Инвентаризация';
+        }
+        if (descriptionEl) {
+            descriptionEl.textContent = isEdit
+                ? 'Исправьте фактические остатки и сохраните — система пересчитает расхождения, перепишет эту инвентаризацию и обновит текущие остатки на складе.'
+                : 'Вводите фактические остатки с автосохранением в черновик. В конце подтвердите приёмку инвентаризации — система скорректирует остатки и запишет сумму расхождений.';
+        }
+        if (submitEl) {
+            submitEl.textContent = isEdit ? 'Сохранить изменения' : 'Принять инвентаризацию';
         }
     },
 
@@ -556,6 +602,7 @@ const Warehouse = {
         if (categoryEl) categoryEl.value = '';
         const searchEl = document.getElementById('wh-audit-search');
         if (searchEl) searchEl.value = '';
+        this._updateAuditFormMode();
         this.renderAuditTable('');
         this._updateAuditDraftStatus();
         this._updateAuditSummary();
@@ -619,7 +666,7 @@ const Warehouse = {
     },
 
     _getAuditDiffMeta(item, actualValue) {
-        const systemQty = this._parseWarehouseQty(item && item.qty);
+        const systemQty = this._getAuditBaselineQty(item && item.id, item && item.qty);
         const actualQty = actualValue === '' || actualValue == null ? NaN : this._parseWarehouseQty(actualValue);
         if (!Number.isFinite(actualQty)) {
             return {
@@ -734,15 +781,16 @@ const Warehouse = {
         if (!el) return;
         const draft = this._ensureAuditDraft();
         const count = Object.values(draft.values || {}).filter(value => String(value || '') !== '').length;
+        const draftLabel = this._isAuditEditMode(draft) ? 'Черновик правок' : 'Черновик';
         if (!draft.saved_at) {
             el.textContent = count > 0
-                ? `Черновик готов к автосохранению · ${count} поз.`
-                : 'Черновик будет сохраняться автоматически';
+                ? `${draftLabel} готов к автосохранению · ${count} поз.`
+                : `${draftLabel} будет сохраняться автоматически`;
             return;
         }
         const stamp = new Date(draft.saved_at);
         const safeStamp = Number.isNaN(stamp.getTime()) ? String(draft.saved_at) : stamp.toLocaleString('ru-RU');
-        el.textContent = `Черновик автосохранён · ${safeStamp} · ${count} поз.`;
+        el.textContent = `${draftLabel} автосохранён · ${safeStamp} · ${count} поз.`;
     },
 
     _updateAuditSummary() {
@@ -924,7 +972,117 @@ const Warehouse = {
             });
     },
 
-    _renderInventoryAuditCard(audit, isLatest) {
+    _findInventoryAuditSummaryEntry(history, auditId) {
+        const numericAuditId = Number(auditId || 0);
+        if (!numericAuditId) return null;
+        return (history || []).find(entry =>
+            entry
+            && entry.type === 'inventory_audit'
+            && Number(entry.id || 0) === numericAuditId
+        ) || null;
+    },
+
+    _getInventoryAuditMutationContext(auditId, history, audits = null) {
+        const auditEntry = this._findInventoryAuditSummaryEntry(history, auditId);
+        if (!auditEntry) return null;
+
+        const auditList = Array.isArray(audits) ? audits : this._getInventoryAuditEntries(history);
+        const audit = auditList.find(entry => Number(entry && entry.id || 0) === Number(auditId || 0)) || null;
+        const adjustments = this._getInventoryAuditAdjustments(auditEntry, history);
+        const relatedEntries = [auditEntry, ...adjustments];
+        const relatedEntrySet = new Set(relatedEntries);
+        const relatedIndexes = new Set();
+        let lastRelatedIndex = -1;
+
+        (history || []).forEach((entry, index) => {
+            if (relatedEntrySet.has(entry)) {
+                relatedIndexes.add(index);
+                lastRelatedIndex = index;
+            }
+        });
+
+        const laterEntries = lastRelatedIndex >= 0
+            ? (history || []).slice(lastRelatedIndex + 1).filter(Boolean)
+            : [];
+        const canMutate = laterEntries.length === 0;
+
+        return {
+            auditEntry,
+            audit,
+            adjustments,
+            relatedEntries,
+            relatedIndexes,
+            laterEntries,
+            canMutate,
+            blockedReason: canMutate
+                ? ''
+                : 'Эту инвентаризацию уже нельзя безопасно менять: после неё были другие движения по складу.',
+        };
+    },
+
+    _buildInventoryAuditDraftFromAudit(audit) {
+        const draft = this._defaultAuditDraft();
+        draft.mode = 'edit';
+        draft.audit_id = Number(audit && audit.id || 0) || null;
+        draft.values = {};
+        draft.baseline = {};
+        (audit && Array.isArray(audit.details) ? audit.details : []).forEach(detail => {
+            const itemId = Number(detail && detail.item_id || 0);
+            if (!itemId) return;
+            draft.baseline[String(itemId)] = String(this._roundInventoryNumber(detail.system_qty_before));
+            if (detail.actual_qty != null) {
+                draft.values[String(itemId)] = String(this._roundInventoryNumber(detail.actual_qty));
+            }
+        });
+        return draft;
+    },
+
+    _inventoryAuditDetailsChanged(originalDetails, nextDetails) {
+        const normalize = (details) => (Array.isArray(details) ? details : [])
+            .map(detail => ({
+                item_id: Number(detail && detail.item_id || 0),
+                system_qty_before: this._roundInventoryNumber(detail && detail.system_qty_before),
+                actual_qty: detail && detail.actual_qty == null ? null : this._roundInventoryNumber(detail.actual_qty),
+            }))
+            .filter(detail => detail.item_id > 0 && detail.actual_qty != null)
+            .sort((a, b) => a.item_id - b.item_id);
+        return JSON.stringify(normalize(originalDetails)) !== JSON.stringify(normalize(nextDetails));
+    },
+
+    _buildInventoryAuditSummaryEntry(auditId, createdAt, createdBy, stats, enteredRows, detailLines) {
+        return {
+            id: auditId,
+            item_id: 0,
+            item_name: 'Инвентаризация склада',
+            item_sku: '',
+            item_category: '',
+            type: 'inventory_audit',
+            qty_change: Math.round(stats.netQty * 100) / 100,
+            requested_qty_change: Math.round(stats.netQty * 100) / 100,
+            qty_before: 0,
+            qty_after: 0,
+            unit_price: 0,
+            total_cost_change: Math.round(stats.shortageValue * 100) / 100,
+            order_id: null,
+            order_name: '',
+            notes: `Скорректировано ${stats.changedPositions} поз.; недостача ${this._formatMoney(stats.shortageValue)}, излишек ${this._formatMoney(stats.surplusValue)}, нетто ${stats.netValue >= 0 ? '+' : '−'}${this._formatMoney(Math.abs(stats.netValue))}. Детали: ${detailLines.length ? detailLines.slice(0, 12).join('; ') : 'без расхождений'}`,
+            clamped: false,
+            created_at: createdAt,
+            created_by: createdBy || '',
+            updated_at: new Date().toISOString(),
+            inventory_shortage_value: Math.round(stats.shortageValue * 100) / 100,
+            inventory_surplus_value: Math.round(stats.surplusValue * 100) / 100,
+            inventory_net_value: Math.round(stats.netValue * 100) / 100,
+            inventory_positions_changed: stats.changedPositions,
+            inventory_entered_positions: stats.enteredPositions,
+            inventory_positions_unchanged: Math.max(0, stats.enteredPositions - stats.changedPositions),
+            inventory_total_positions: (this.allItems || []).length,
+            inventory_positions_omitted: Math.max(0, (this.allItems || []).length - stats.enteredPositions),
+            inventory_details: enteredRows,
+        };
+    },
+
+    _renderInventoryAuditCard(audit, isLatest, mutationContext = null) {
         const chips = [
             `<div class="wh-inventory-chip"><span class="wh-inventory-chip-label">С расхождением</span><strong>${audit.changedPositions}</strong></div>`,
             audit.enteredPositions != null
@@ -951,6 +1109,16 @@ const Warehouse = {
         if (!noteLines.length && audit.notes) {
             noteLines.push(String(audit.notes));
         }
+        if (mutationContext && !mutationContext.canMutate && mutationContext.blockedReason) {
+            noteLines.push(mutationContext.blockedReason);
+        }
+
+        const actionButtons = mutationContext && mutationContext.canMutate
+            ? `<div style="display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end;">
+                <button class="btn btn-sm btn-outline" onclick="Warehouse.editInventoryAudit(${audit.id})">Редактировать</button>
+                <button class="btn btn-sm btn-danger" onclick="Warehouse.deleteInventoryAudit(${audit.id})">Удалить</button>
+            </div>`
+            : '';
 
         const detailsRows = audit.details.map(detail => {
             const cat = WAREHOUSE_CATEGORIES.find(entry => entry.key === detail.item_category);
@@ -1002,6 +1170,7 @@ const Warehouse = {
                         ${audit.totalPositions != null ? ` · Всего позиций на складе: ${audit.totalPositions}` : ''}
                     </div>
                 </div>
+                ${actionButtons}
             </div>
             <div class="wh-inventory-chip-grid">${chips}</div>
             ${noteLines.map(line => `<div class="wh-inventory-note">${this.esc(line)}</div>`).join('')}
@@ -1031,6 +1200,10 @@ const Warehouse = {
 
         const history = await loadWarehouseHistory();
         const audits = this._getInventoryAuditEntries(history);
+        const mutationContexts = new Map(audits.map(audit => [
+            Number(audit && audit.id || 0),
+            this._getInventoryAuditMutationContext(audit && audit.id, history, audits),
+        ]));
 
         if (audits.length === 0) {
             container.innerHTML = `<div class="card">
@@ -1043,7 +1216,11 @@ const Warehouse = {
         }
 
         container.innerHTML = `<div class="wh-inventory-list">
-            ${audits.map((audit, index) => this._renderInventoryAuditCard(audit, index === 0)).join('')}
+            ${audits.map((audit, index) => this._renderInventoryAuditCard(
+                audit,
+                index === 0,
+                mutationContexts.get(Number(audit && audit.id || 0)) || null
+            )).join('')}
         </div>`;
     },
 
@@ -2580,6 +2757,7 @@ const Warehouse = {
         if (searchEl) searchEl.value = this.auditDraft.search || '';
         const form = document.getElementById('wh-audit-form');
         if (form) form.style.display = '';
+        this._updateAuditFormMode();
         this.renderAuditTable(this.auditDraft.category || '');
         this._updateAuditDraftStatus();
         this._updateAuditSummary();
@@ -2638,7 +2816,7 @@ const Warehouse = {
                     const cat = WAREHOUSE_CATEGORIES.find(c => c.key === item.category);
                     const actualValue = this._getAuditStoredValue(item.id);
                     const rendered = this._renderAuditDiffMarkup(item, actualValue);
-                    const systemQty = this._parseWarehouseQty(item.qty);
+                    const systemQty = this._getAuditBaselineQty(item.id, item.qty);
                     const systemQtyLabel = this._formatInventoryQty(systemQty, item.unit);
                     const photoSrc = item.photo_thumbnail || item.photo_url || '';
                     const safePhotoSrc = photoSrc ? (photoSrc.startsWith('data:') ? photoSrc : this.esc(photoSrc)) : '';
@@ -2676,8 +2854,86 @@ const Warehouse = {
         this._updateAuditRowDiff(key);
     },
 
+    async editInventoryAudit(auditId) {
+        const numericAuditId = Number(auditId || 0);
+        if (!numericAuditId) return;
+
+        const history = await loadWarehouseHistory();
+        const audits = this._getInventoryAuditEntries(history);
+        const mutationContext = this._getInventoryAuditMutationContext(numericAuditId, history, audits);
+        if (!mutationContext || !mutationContext.audit) {
+            App.toast('Инвентаризация не найдена');
+            return;
+        }
+        if (!mutationContext.canMutate) {
+            App.toast(mutationContext.blockedReason || 'Эту инвентаризацию уже нельзя безопасно менять');
+            return;
+        }
+
+        this.allItems = await loadWarehouseItems();
+        await this._refreshBlankHardwareWarehouseItemIds();
+        this.auditDraft = this._buildInventoryAuditDraftFromAudit(mutationContext.audit);
+        this._persistAuditDraft();
+        await this.showAudit();
+        App.toast('Инвентаризация открыта для редактирования');
+    },
+
+    async deleteInventoryAudit(auditId) {
+        const numericAuditId = Number(auditId || 0);
+        if (!numericAuditId) return;
+
+        const history = await loadWarehouseHistory();
+        const audits = this._getInventoryAuditEntries(history);
+        const mutationContext = this._getInventoryAuditMutationContext(numericAuditId, history, audits);
+        if (!mutationContext || !mutationContext.audit) {
+            App.toast('Инвентаризация не найдена');
+            return;
+        }
+        if (!mutationContext.canMutate) {
+            App.toast(mutationContext.blockedReason || 'Эту инвентаризацию уже нельзя безопасно менять');
+            return;
+        }
+
+        const confirmText = [
+            'Удалить инвентаризацию?',
+            'Все её изменения будут отменены, а остатки вернутся к состоянию "было" на момент этой инвентаризации.',
+        ].join('\n');
+        if (!confirm(confirmText)) return;
+
+        const items = await loadWarehouseItems();
+        const itemsById = new Map((items || []).map(item => [Number(item && item.id || 0), { ...item }]));
+        (mutationContext.audit.details || []).forEach(detail => {
+            const itemId = Number(detail && detail.item_id || 0);
+            if (!itemId) return;
+            const item = itemsById.get(itemId);
+            if (!item) return;
+            item.qty = this._roundInventoryNumber(detail.system_qty_before);
+            item.updated_at = new Date().toISOString();
+            itemsById.set(itemId, item);
+        });
+        const nextItems = (items || []).map(item => itemsById.get(Number(item && item.id || 0)) || item);
+        await saveWarehouseItems(nextItems);
+        this.allItems = nextItems.map(item => ({ ...item }));
+
+        const nextHistory = (history || []).filter((_, index) => !mutationContext.relatedIndexes.has(index));
+        await saveWarehouseHistory(nextHistory);
+
+        if (this._isAuditEditMode() && Number(this.auditDraft && this.auditDraft.audit_id || 0) === numericAuditId) {
+            this.auditDraft = this._defaultAuditDraft();
+            localStorage.removeItem(this._auditDraftStorageKey());
+            this._updateAuditFormMode();
+            this._updateAuditDraftStatus();
+            this._updateAuditSummary();
+            this.hideAudit();
+        }
+
+        App.toast('Инвентаризация удалена, остатки откатились к прежним значениям');
+        await this.load();
+    },
+
     async saveAuditResults() {
         const draft = this._ensureAuditDraft();
+        const isEditMode = this._isAuditEditMode(draft);
         const enteredRows = [];
         const changes = [];
 
@@ -2709,14 +2965,21 @@ const Warehouse = {
             });
         });
 
-        if (changes.length === 0) {
+        if (!isEditMode && changes.length === 0) {
             App.toast('Нет изменений для сохранения');
             return;
         }
 
         const stats = this._getAuditSummaryStats();
+        if (isEditMode && enteredRows.length === 0) {
+            App.toast('Для пустой инвентаризации используйте удаление');
+            return;
+        }
+
+        let auditId = Date.now() + Math.floor(Math.random() * 1000);
+        let auditCreatedAt = new Date().toISOString();
         const confirmText = [
-            `Принять инвентаризацию?`,
+            isEditMode ? 'Сохранить изменения инвентаризации?' : 'Принять инвентаризацию?',
             `Позиции с расхождением: ${stats.changedPositions}`,
             `Недостача: ${this._formatMoney(stats.shortageValue)}`,
             `Излишек: ${this._formatMoney(stats.surplusValue)}`,
@@ -2725,62 +2988,132 @@ const Warehouse = {
         if (!confirm(confirmText)) return;
 
         const createdBy = App.getCurrentEmployeeName ? App.getCurrentEmployeeName() : '';
-        const auditId = Date.now() + Math.floor(Math.random() * 1000);
-        const auditCreatedAt = new Date().toISOString();
-        const details = [];
-        for (const change of changes) {
-            await this.adjustStock(
-                change.item.id,
-                change.diff,
-                'adjustment',
-                '',
-                `Инвентаризация: факт ${change.actualQty}, было ${parseFloat(change.item.qty) || 0}`,
-                createdBy,
-                {
+        const history = await loadWarehouseHistory();
+        const detailLines = changes.map(change =>
+            `${change.item.name}: ${change.diff > 0 ? '+' : ''}${change.diff} ${change.item.unit || 'шт'} (${change.valueDiff >= 0 ? '+' : '−'}${this._formatMoney(Math.abs(change.valueDiff))})`
+        );
+
+        if (isEditMode) {
+            const mutationContext = this._getInventoryAuditMutationContext(draft.audit_id, history);
+            if (!mutationContext || !mutationContext.audit) {
+                App.toast('Инвентаризация не найдена');
+                return;
+            }
+            if (!mutationContext.canMutate) {
+                App.toast(mutationContext.blockedReason || 'Эту инвентаризацию уже нельзя безопасно менять');
+                return;
+            }
+
+            auditId = Number(mutationContext.auditEntry && mutationContext.auditEntry.id || 0) || auditId;
+            auditCreatedAt = mutationContext.auditEntry && mutationContext.auditEntry.created_at
+                ? mutationContext.auditEntry.created_at
+                : auditCreatedAt;
+
+            const originalDetails = Array.isArray(mutationContext.audit.details) ? mutationContext.audit.details : [];
+            const originalById = new Map(originalDetails.map(detail => [Number(detail && detail.item_id || 0), detail]));
+            const nextById = new Map(enteredRows.map(detail => [Number(detail && detail.item_id || 0), detail]));
+            const items = await loadWarehouseItems();
+            const itemsById = new Map((items || []).map(item => [Number(item && item.id || 0), { ...item }]));
+            const targetItemIds = new Set([...originalById.keys(), ...nextById.keys()]);
+            let stockChanged = false;
+
+            targetItemIds.forEach(itemId => {
+                if (!itemId) return;
+                const item = itemsById.get(itemId);
+                if (!item) return;
+                const nextDetail = nextById.get(itemId) || null;
+                const originalDetail = originalById.get(itemId) || null;
+                const desiredQty = nextDetail
+                    ? this._roundInventoryNumber(nextDetail.actual_qty)
+                    : this._roundInventoryNumber(originalDetail && originalDetail.system_qty_before);
+                if (Math.abs(this._parseWarehouseQty(item.qty) - desiredQty) >= 0.000001) {
+                    stockChanged = true;
+                }
+                item.qty = desiredQty;
+                item.updated_at = new Date().toISOString();
+                itemsById.set(itemId, item);
+            });
+
+            const detailsChanged = this._inventoryAuditDetailsChanged(originalDetails, enteredRows);
+            if (!stockChanged && !detailsChanged) {
+                App.toast('Изменений для сохранения нет');
+                return;
+            }
+
+            const nextItems = (items || []).map(item => itemsById.get(Number(item && item.id || 0)) || item);
+            await saveWarehouseItems(nextItems);
+            this.allItems = nextItems.map(item => ({ ...item }));
+
+            const nextHistory = (history || []).filter((_, index) => !mutationContext.relatedIndexes.has(index));
+            changes.forEach(change => {
+                nextHistory.push({
+                    id: Date.now() + Math.floor(Math.random() * 1000),
+                    item_id: change.item.id,
+                    item_name: change.item.name || '',
+                    item_sku: change.item.sku || '',
+                    item_category: change.item.category || '',
+                    type: 'adjustment',
+                    qty_change: this._roundInventoryNumber(change.diff),
+                    requested_qty_change: this._roundInventoryNumber(change.diff),
+                    qty_before: this._roundInventoryNumber(this._getAuditBaselineQty(change.item.id, change.item.qty)),
+                    qty_after: this._roundInventoryNumber(change.actualQty),
+                    unit_price: this._roundInventoryNumber(change.item.price_per_unit),
+                    total_cost_change: this._roundInventoryNumber(Math.abs(change.diff) * (parseFloat(change.item.price_per_unit) || 0)),
+                    order_id: null,
+                    order_name: '',
+                    notes: `Инвентаризация: факт ${change.actualQty}, было ${this._roundInventoryNumber(this._getAuditBaselineQty(change.item.id, change.item.qty))}`,
+                    clamped: false,
+                    created_at: auditCreatedAt,
+                    created_by: createdBy || '',
                     inventory_audit: true,
                     inventory_audit_id: auditId,
-                }
-            );
-            details.push(`${change.item.name}: ${change.diff > 0 ? '+' : ''}${change.diff} шт (${change.valueDiff >= 0 ? '+' : '−'}${this._formatMoney(Math.abs(change.valueDiff))})`);
-        }
+                });
+            });
+            nextHistory.push(this._buildInventoryAuditSummaryEntry(
+                auditId,
+                auditCreatedAt,
+                createdBy || (mutationContext.auditEntry && mutationContext.auditEntry.created_by) || '',
+                stats,
+                enteredRows,
+                detailLines
+            ));
+            await saveWarehouseHistory(nextHistory);
+        } else {
+            for (const change of changes) {
+                await this.adjustStock(
+                    change.item.id,
+                    change.diff,
+                    'adjustment',
+                    '',
+                    `Инвентаризация: факт ${change.actualQty}, было ${this._roundInventoryNumber(this._getAuditBaselineQty(change.item.id, change.item.qty))}`,
+                    createdBy,
+                    {
+                        inventory_audit: true,
+                        inventory_audit_id: auditId,
+                    }
+                );
+            }
 
-        const history = await loadWarehouseHistory();
-        history.push({
-            id: auditId,
-            item_id: 0,
-            item_name: 'Инвентаризация склада',
-            item_sku: '',
-            item_category: '',
-            type: 'inventory_audit',
-            qty_change: Math.round(stats.netQty * 100) / 100,
-            requested_qty_change: Math.round(stats.netQty * 100) / 100,
-            qty_before: 0,
-            qty_after: 0,
-            unit_price: 0,
-            total_cost_change: Math.round(stats.shortageValue * 100) / 100,
-            order_id: null,
-            order_name: '',
-            notes: `Скорректировано ${stats.changedPositions} поз.; недостача ${this._formatMoney(stats.shortageValue)}, излишек ${this._formatMoney(stats.surplusValue)}, нетто ${stats.netValue >= 0 ? '+' : '−'}${this._formatMoney(Math.abs(stats.netValue))}. Детали: ${details.slice(0, 12).join('; ')}`,
-            clamped: false,
-            created_at: auditCreatedAt,
-            created_by: createdBy || '',
-            inventory_shortage_value: Math.round(stats.shortageValue * 100) / 100,
-            inventory_surplus_value: Math.round(stats.surplusValue * 100) / 100,
-            inventory_net_value: Math.round(stats.netValue * 100) / 100,
-            inventory_positions_changed: stats.changedPositions,
-            inventory_entered_positions: stats.enteredPositions,
-            inventory_positions_unchanged: Math.max(0, stats.enteredPositions - stats.changedPositions),
-            inventory_total_positions: (this.allItems || []).length,
-            inventory_positions_omitted: Math.max(0, (this.allItems || []).length - stats.enteredPositions),
-            inventory_details: enteredRows,
-        });
-        await saveWarehouseHistory(history);
+            const nextHistory = await loadWarehouseHistory();
+            nextHistory.push(this._buildInventoryAuditSummaryEntry(
+                auditId,
+                auditCreatedAt,
+                createdBy,
+                stats,
+                enteredRows,
+                detailLines
+            ));
+            await saveWarehouseHistory(nextHistory);
+        }
 
         localStorage.removeItem(this._auditDraftStorageKey());
         this.auditDraft = this._defaultAuditDraft();
+        this._updateAuditFormMode();
         this._updateAuditDraftStatus();
         this._updateAuditSummary();
-        App.toast(`Инвентаризация принята: ${stats.changedPositions} поз., недостача ${this._formatMoney(stats.shortageValue)}`);
+        App.toast(isEditMode
+            ? `Инвентаризация обновлена: ${stats.changedPositions} поз., недостача ${this._formatMoney(stats.shortageValue)}`
+            : `Инвентаризация принята: ${stats.changedPositions} поз., недостача ${this._formatMoney(stats.shortageValue)}`);
         this.hideAudit();
         await this.load();
     },

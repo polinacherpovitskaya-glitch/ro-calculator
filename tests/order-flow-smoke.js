@@ -4317,6 +4317,506 @@ async function smokeWarehouseInventoryAuditDraftAndFinalize(context) {
     assert.match(legacyHtml, /Инвентаризационная упаковка/);
 }
 
+async function smokeWarehouseInventoryAuditSurplusAndDiffMath(context) {
+    context.__warehouseItems = [
+        {
+            id: 801,
+            name: 'Складской трос',
+            sku: 'AUD-801',
+            category: 'cables',
+            qty: 10,
+            price_per_unit: 5,
+            unit: 'шт',
+        },
+        {
+            id: 802,
+            name: 'Складская коробка',
+            sku: 'AUD-802',
+            category: 'packaging',
+            qty: 20,
+            price_per_unit: 7,
+            unit: 'шт',
+        },
+    ];
+    context.__warehouseHistory = [];
+    context.loadWarehouseItems = async () => clone(context.__warehouseItems);
+    context.saveWarehouseItems = async (items) => {
+        context.__warehouseItems = clone(items);
+    };
+    context.loadWarehouseHistory = async () => clone(context.__warehouseHistory);
+    context.saveWarehouseHistory = async (history) => {
+        context.__warehouseHistory = clone(history);
+    };
+
+    vm.runInContext(`
+        globalThis.__toasts = [];
+        App.toast = (message) => { globalThis.__toasts.push(String(message || '')); };
+        Warehouse.allItems = globalThis.__warehouseItems.map(item => ({ ...item }));
+        Warehouse.auditDraft = null;
+        Warehouse.load = async function () {
+            this.allItems = await loadWarehouseItems();
+        };
+    `, context);
+
+    await vm.runInContext(`Warehouse.showAudit()`, context);
+    vm.runInContext(`
+        Warehouse.onAuditInput({ dataset: { id: '801', system: '10' }, value: '8' });
+        Warehouse.onAuditInput({ dataset: { id: '802', system: '20' }, value: '25' });
+    `, context);
+    await vm.runInContext(`Warehouse.saveAuditResults()`, context);
+
+    assert.equal(context.__warehouseItems.find(item => item.id === 801).qty, 8);
+    assert.equal(context.__warehouseItems.find(item => item.id === 802).qty, 25);
+
+    const auditEntry = context.__warehouseHistory.find(entry => entry.type === 'inventory_audit');
+    assert.ok(auditEntry, 'inventory summary should be saved');
+    assert.equal(auditEntry.inventory_shortage_value, 10);
+    assert.equal(auditEntry.inventory_surplus_value, 35);
+    assert.equal(auditEntry.inventory_net_value, 25);
+    assert.equal(auditEntry.inventory_positions_changed, 2);
+
+    const detail801 = auditEntry.inventory_details.find(detail => detail.item_id === 801);
+    const detail802 = auditEntry.inventory_details.find(detail => detail.item_id === 802);
+    assert.equal(detail801.diff, -2);
+    assert.equal(detail801.value_diff, -10);
+    assert.equal(detail802.diff, 5);
+    assert.equal(detail802.value_diff, 35);
+
+    const auditAdjustments = context.__warehouseHistory.filter(entry => entry.type === 'adjustment' && entry.inventory_audit_id === auditEntry.id);
+    assert.equal(auditAdjustments.length, 2);
+    assert.ok(auditAdjustments.some(entry => entry.item_id === 801 && entry.qty_change === -2));
+    assert.ok(auditAdjustments.some(entry => entry.item_id === 802 && entry.qty_change === 5));
+}
+
+async function smokeWarehouseInventoryAuditEditRewritesAudit(context) {
+    context.__warehouseItems = [
+        {
+            id: 701,
+            name: 'Инвентаризационный трос',
+            sku: 'AUD-701',
+            category: 'cables',
+            qty: 100,
+            price_per_unit: 12,
+            unit: 'шт',
+        },
+        {
+            id: 702,
+            name: 'Инвентаризационная упаковка',
+            sku: 'AUD-702',
+            category: 'packaging',
+            qty: 10,
+            price_per_unit: 5,
+            unit: 'шт',
+        },
+    ];
+    context.__warehouseHistory = [
+        {
+            id: 91001,
+            item_id: 701,
+            item_name: 'Инвентаризационный трос',
+            item_sku: 'AUD-701',
+            item_category: 'cables',
+            type: 'adjustment',
+            qty_change: -20,
+            requested_qty_change: -20,
+            qty_before: 120,
+            qty_after: 100,
+            unit_price: 12,
+            total_cost_change: 240,
+            order_id: null,
+            order_name: '',
+            notes: 'Инвентаризация: факт 100, было 120',
+            clamped: false,
+            created_at: '2026-03-20T10:00:00.000Z',
+            created_by: 'Smoke',
+            inventory_audit: true,
+            inventory_audit_id: 9100,
+        },
+        {
+            id: 9100,
+            item_id: 0,
+            item_name: 'Инвентаризация склада',
+            item_sku: '',
+            item_category: '',
+            type: 'inventory_audit',
+            qty_change: -20,
+            requested_qty_change: -20,
+            qty_before: 0,
+            qty_after: 0,
+            unit_price: 0,
+            total_cost_change: 240,
+            order_id: null,
+            order_name: '',
+            notes: 'Скорректировано 1 поз.',
+            clamped: false,
+            created_at: '2026-03-20T10:00:05.000Z',
+            created_by: 'Smoke',
+            inventory_shortage_value: 240,
+            inventory_surplus_value: 0,
+            inventory_net_value: -240,
+            inventory_positions_changed: 1,
+            inventory_entered_positions: 1,
+            inventory_positions_unchanged: 0,
+            inventory_total_positions: 2,
+            inventory_positions_omitted: 1,
+            inventory_details: [
+                {
+                    item_id: 701,
+                    item_name: 'Инвентаризационный трос',
+                    item_sku: 'AUD-701',
+                    item_category: 'cables',
+                    unit: 'шт',
+                    system_qty_before: 120,
+                    actual_qty: 100,
+                    diff: -20,
+                    value_diff: -240,
+                    price_per_unit: 12,
+                },
+            ],
+        },
+    ];
+    context.loadWarehouseItems = async () => clone(context.__warehouseItems);
+    context.saveWarehouseItems = async (items) => {
+        context.__warehouseItems = clone(items);
+    };
+    context.loadWarehouseHistory = async () => clone(context.__warehouseHistory);
+    context.saveWarehouseHistory = async (history) => {
+        context.__warehouseHistory = clone(history);
+    };
+
+    vm.runInContext(`
+        globalThis.__toasts = [];
+        App.toast = (message) => { globalThis.__toasts.push(String(message || '')); };
+        Warehouse.allItems = globalThis.__warehouseItems.map(item => ({ ...item }));
+        Warehouse.auditDraft = null;
+        Warehouse.load = async function () {
+            this.allItems = await loadWarehouseItems();
+        };
+    `, context);
+
+    await vm.runInContext(`Warehouse.renderInventoryView()`, context);
+    const inventoryHtmlBeforeEdit = String(vm.runInContext(`document.getElementById('wh-content').innerHTML`, context));
+    assert.match(inventoryHtmlBeforeEdit, /Редактировать/);
+    assert.match(inventoryHtmlBeforeEdit, /Удалить/);
+
+    await vm.runInContext(`Warehouse.editInventoryAudit(9100)`, context);
+
+    assert.equal(vm.runInContext(`Warehouse.auditDraft.mode`, context), 'edit');
+    assert.equal(vm.runInContext(`Warehouse.auditDraft.audit_id`, context), 9100);
+    assert.equal(vm.runInContext(`Warehouse.auditDraft.baseline["701"]`, context), '120');
+    assert.equal(vm.runInContext(`Warehouse.auditDraft.values["701"]`, context), '100');
+    assert.match(String(vm.runInContext(`document.getElementById('wh-audit-title').textContent`, context)), /Редактирование инвентаризации/);
+    assert.match(String(vm.runInContext(`document.getElementById('wh-audit-table').innerHTML`, context)), /120 шт/);
+
+    vm.runInContext(`
+        Warehouse.onAuditInput({ dataset: { id: '701', system: '120' }, value: '90' });
+        Warehouse.onAuditInput({ dataset: { id: '702', system: '10' }, value: '8' });
+    `, context);
+    await vm.runInContext(`Warehouse.saveAuditResults()`, context);
+
+    assert.equal(context.__warehouseItems.find(item => item.id === 701).qty, 90);
+    assert.equal(context.__warehouseItems.find(item => item.id === 702).qty, 8);
+
+    const summaryEntries = context.__warehouseHistory.filter(entry => entry.type === 'inventory_audit' && entry.id === 9100);
+    assert.equal(summaryEntries.length, 1, 'edited audit summary should be rewritten in place');
+    const auditEntry = summaryEntries[0];
+    assert.equal(auditEntry.created_at, '2026-03-20T10:00:05.000Z');
+    assert.equal(auditEntry.inventory_positions_changed, 2);
+
+    const detail701 = auditEntry.inventory_details.find(detail => detail.item_id === 701);
+    const detail702 = auditEntry.inventory_details.find(detail => detail.item_id === 702);
+    assert.equal(detail701.system_qty_before, 120);
+    assert.equal(detail701.actual_qty, 90);
+    assert.equal(detail701.diff, -30);
+    assert.equal(detail702.system_qty_before, 10);
+    assert.equal(detail702.actual_qty, 8);
+    assert.equal(detail702.diff, -2);
+
+    const auditAdjustments = context.__warehouseHistory.filter(entry => entry.type === 'adjustment' && entry.inventory_audit_id === 9100);
+    assert.equal(auditAdjustments.length, 2);
+    assert.ok(auditAdjustments.some(entry => entry.item_id === 701 && entry.qty_change === -30 && entry.qty_before === 120 && entry.qty_after === 90));
+    assert.ok(auditAdjustments.some(entry => entry.item_id === 702 && entry.qty_change === -2 && entry.qty_before === 10 && entry.qty_after === 8));
+}
+
+async function smokeWarehouseInventoryAuditDeleteRollsBackStock(context) {
+    context.__warehouseItems = [
+        {
+            id: 701,
+            name: 'Инвентаризационный трос',
+            sku: 'AUD-701',
+            category: 'cables',
+            qty: 90,
+            price_per_unit: 12,
+            unit: 'шт',
+        },
+        {
+            id: 702,
+            name: 'Инвентаризационная упаковка',
+            sku: 'AUD-702',
+            category: 'packaging',
+            qty: 8,
+            price_per_unit: 5,
+            unit: 'шт',
+        },
+    ];
+    context.__warehouseHistory = [
+        {
+            id: 92001,
+            item_id: 701,
+            item_name: 'Инвентаризационный трос',
+            item_sku: 'AUD-701',
+            item_category: 'cables',
+            type: 'adjustment',
+            qty_change: -30,
+            requested_qty_change: -30,
+            qty_before: 120,
+            qty_after: 90,
+            unit_price: 12,
+            total_cost_change: 360,
+            order_id: null,
+            order_name: '',
+            notes: 'Инвентаризация: факт 90, было 120',
+            clamped: false,
+            created_at: '2026-03-21T10:00:00.000Z',
+            created_by: 'Smoke',
+            inventory_audit: true,
+            inventory_audit_id: 9200,
+        },
+        {
+            id: 92002,
+            item_id: 702,
+            item_name: 'Инвентаризационная упаковка',
+            item_sku: 'AUD-702',
+            item_category: 'packaging',
+            type: 'adjustment',
+            qty_change: -2,
+            requested_qty_change: -2,
+            qty_before: 10,
+            qty_after: 8,
+            unit_price: 5,
+            total_cost_change: 10,
+            order_id: null,
+            order_name: '',
+            notes: 'Инвентаризация: факт 8, было 10',
+            clamped: false,
+            created_at: '2026-03-21T10:00:00.000Z',
+            created_by: 'Smoke',
+            inventory_audit: true,
+            inventory_audit_id: 9200,
+        },
+        {
+            id: 9200,
+            item_id: 0,
+            item_name: 'Инвентаризация склада',
+            item_sku: '',
+            item_category: '',
+            type: 'inventory_audit',
+            qty_change: -32,
+            requested_qty_change: -32,
+            qty_before: 0,
+            qty_after: 0,
+            unit_price: 0,
+            total_cost_change: 370,
+            order_id: null,
+            order_name: '',
+            notes: 'Скорректировано 2 поз.',
+            clamped: false,
+            created_at: '2026-03-21T10:00:05.000Z',
+            created_by: 'Smoke',
+            inventory_shortage_value: 370,
+            inventory_surplus_value: 0,
+            inventory_net_value: -370,
+            inventory_positions_changed: 2,
+            inventory_entered_positions: 2,
+            inventory_positions_unchanged: 0,
+            inventory_total_positions: 2,
+            inventory_positions_omitted: 0,
+            inventory_details: [
+                {
+                    item_id: 701,
+                    item_name: 'Инвентаризационный трос',
+                    item_sku: 'AUD-701',
+                    item_category: 'cables',
+                    unit: 'шт',
+                    system_qty_before: 120,
+                    actual_qty: 90,
+                    diff: -30,
+                    value_diff: -360,
+                    price_per_unit: 12,
+                },
+                {
+                    item_id: 702,
+                    item_name: 'Инвентаризационная упаковка',
+                    item_sku: 'AUD-702',
+                    item_category: 'packaging',
+                    unit: 'шт',
+                    system_qty_before: 10,
+                    actual_qty: 8,
+                    diff: -2,
+                    value_diff: -10,
+                    price_per_unit: 5,
+                },
+            ],
+        },
+    ];
+    context.loadWarehouseItems = async () => clone(context.__warehouseItems);
+    context.saveWarehouseItems = async (items) => {
+        context.__warehouseItems = clone(items);
+    };
+    context.loadWarehouseHistory = async () => clone(context.__warehouseHistory);
+    context.saveWarehouseHistory = async (history) => {
+        context.__warehouseHistory = clone(history);
+    };
+
+    vm.runInContext(`
+        globalThis.__toasts = [];
+        App.toast = (message) => { globalThis.__toasts.push(String(message || '')); };
+        Warehouse.allItems = globalThis.__warehouseItems.map(item => ({ ...item }));
+        Warehouse.auditDraft = null;
+        Warehouse.load = async function () {
+            this.allItems = await loadWarehouseItems();
+        };
+    `, context);
+
+    await vm.runInContext(`Warehouse.deleteInventoryAudit(9200)`, context);
+
+    assert.equal(context.__warehouseItems.find(item => item.id === 701).qty, 120);
+    assert.equal(context.__warehouseItems.find(item => item.id === 702).qty, 10);
+    assert.equal(context.__warehouseHistory.filter(entry => entry.inventory_audit_id === 9200 || entry.id === 9200).length, 0);
+    assert.match(String(context.__toasts.join('\n')), /Инвентаризация удалена/i);
+}
+
+async function smokeWarehouseInventoryAuditMutationBlockedAfterLaterMovement(context) {
+    context.__warehouseItems = [
+        {
+            id: 701,
+            name: 'Инвентаризационный трос',
+            sku: 'AUD-701',
+            category: 'cables',
+            qty: 95,
+            price_per_unit: 12,
+            unit: 'шт',
+        },
+    ];
+    context.__warehouseHistory = [
+        {
+            id: 93001,
+            item_id: 701,
+            item_name: 'Инвентаризационный трос',
+            item_sku: 'AUD-701',
+            item_category: 'cables',
+            type: 'adjustment',
+            qty_change: -25,
+            requested_qty_change: -25,
+            qty_before: 120,
+            qty_after: 95,
+            unit_price: 12,
+            total_cost_change: 300,
+            order_id: null,
+            order_name: '',
+            notes: 'Инвентаризация: факт 95, было 120',
+            clamped: false,
+            created_at: '2026-03-22T10:00:00.000Z',
+            created_by: 'Smoke',
+            inventory_audit: true,
+            inventory_audit_id: 9300,
+        },
+        {
+            id: 9300,
+            item_id: 0,
+            item_name: 'Инвентаризация склада',
+            item_sku: '',
+            item_category: '',
+            type: 'inventory_audit',
+            qty_change: -25,
+            requested_qty_change: -25,
+            qty_before: 0,
+            qty_after: 0,
+            unit_price: 0,
+            total_cost_change: 300,
+            order_id: null,
+            order_name: '',
+            notes: 'Скорректировано 1 поз.',
+            clamped: false,
+            created_at: '2026-03-22T10:00:05.000Z',
+            created_by: 'Smoke',
+            inventory_shortage_value: 300,
+            inventory_surplus_value: 0,
+            inventory_net_value: -300,
+            inventory_positions_changed: 1,
+            inventory_entered_positions: 1,
+            inventory_positions_unchanged: 0,
+            inventory_total_positions: 1,
+            inventory_positions_omitted: 0,
+            inventory_details: [
+                {
+                    item_id: 701,
+                    item_name: 'Инвентаризационный трос',
+                    item_sku: 'AUD-701',
+                    item_category: 'cables',
+                    unit: 'шт',
+                    system_qty_before: 120,
+                    actual_qty: 95,
+                    diff: -25,
+                    value_diff: -300,
+                    price_per_unit: 12,
+                },
+            ],
+        },
+        {
+            id: 93002,
+            item_id: 701,
+            item_name: 'Инвентаризационный трос',
+            item_sku: 'AUD-701',
+            item_category: 'cables',
+            type: 'addition',
+            qty_change: 5,
+            requested_qty_change: 5,
+            qty_before: 95,
+            qty_after: 100,
+            unit_price: 12,
+            total_cost_change: 60,
+            order_id: null,
+            order_name: '',
+            notes: 'Позже пришла поставка',
+            clamped: false,
+            created_at: '2026-03-22T11:00:00.000Z',
+            created_by: 'Smoke',
+        },
+    ];
+    context.loadWarehouseItems = async () => clone(context.__warehouseItems);
+    context.saveWarehouseItems = async (items) => {
+        context.__warehouseItems = clone(items);
+    };
+    context.loadWarehouseHistory = async () => clone(context.__warehouseHistory);
+    context.saveWarehouseHistory = async (history) => {
+        context.__warehouseHistory = clone(history);
+    };
+
+    vm.runInContext(`
+        globalThis.__toasts = [];
+        App.toast = (message) => { globalThis.__toasts.push(String(message || '')); };
+        Warehouse.allItems = globalThis.__warehouseItems.map(item => ({ ...item }));
+        Warehouse.auditDraft = null;
+        Warehouse.load = async function () {
+            this.allItems = await loadWarehouseItems();
+        };
+    `, context);
+
+    const historyBefore = clone(context.__warehouseHistory);
+    const itemsBefore = clone(context.__warehouseItems);
+
+    await vm.runInContext(`Warehouse.editInventoryAudit(9300)`, context);
+    await vm.runInContext(`Warehouse.deleteInventoryAudit(9300)`, context);
+    await vm.runInContext(`Warehouse.renderInventoryView()`, context);
+
+    assert.deepEqual(context.__warehouseItems, itemsBefore);
+    assert.deepEqual(context.__warehouseHistory, historyBefore);
+    assert.match(String(context.__toasts.join('\n')), /нельзя безопасно менять/i);
+    const inventoryHtml = String(vm.runInContext(`document.getElementById('wh-content').innerHTML`, context));
+    assert.match(inventoryHtml, /нельзя безопасно менять/i);
+}
+
 async function main() {
     const context = createContext();
     ['js/calculator.js', 'js/app.js', 'js/orders.js', 'js/warehouse.js', 'js/order-detail.js'].forEach(file => runScript(context, file));
@@ -4366,6 +4866,10 @@ async function main() {
     await smokeProjectHardwareLegacyStatusRepair(context);
     await smokeProjectHardwareLegacyAndCollectedNetting(context);
     await smokeWarehouseInventoryAuditDraftAndFinalize(context);
+    await smokeWarehouseInventoryAuditSurplusAndDiffMath(context);
+    await smokeWarehouseInventoryAuditEditRewritesAudit(context);
+    await smokeWarehouseInventoryAuditDeleteRollsBackStock(context);
+    await smokeWarehouseInventoryAuditMutationBlockedAfterLaterMovement(context);
     await smokeOrderDetailColorRendering(context);
 
     console.log('order-flow smoke checks passed');

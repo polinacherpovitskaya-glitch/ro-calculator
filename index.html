@@ -35,7 +35,7 @@
     <aside class="sidebar">
         <div class="sidebar-brand">
             <h2>Recycle Object</h2>
-            <span>Калькулятор <span id="app-version">v192</span></span>
+            <span>Калькулятор <span id="app-version">v193</span></span>
         </div>
         <nav class="sidebar-nav">
             <a href="#tasks" data-page="tasks">
@@ -1868,8 +1868,8 @@
                 <div class="wh-audit-dialog">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
                         <div>
-                            <h3 style="margin:0;">Инвентаризация</h3>
-                            <p style="font-size:12px; color:var(--text-muted); margin:6px 0 0;">
+                            <h3 id="wh-audit-title" style="margin:0;">Инвентаризация</h3>
+                            <p id="wh-audit-description" style="font-size:12px; color:var(--text-muted); margin:6px 0 0;">
                                 Вводите фактические остатки с автосохранением в черновик. В конце подтвердите приёмку инвентаризации — система скорректирует остатки и запишет сумму расхождений.
                             </p>
                         </div>
@@ -1893,7 +1893,7 @@
                     <div class="wh-audit-actions">
                         <button class="btn btn-outline" onclick="Warehouse.saveAuditDraft(true)">Сохранить черновик</button>
                         <button class="btn btn-outline" onclick="Warehouse.clearAuditDraft()">Очистить черновик</button>
-                        <button class="btn btn-success" onclick="Warehouse.saveAuditResults()">Принять инвентаризацию</button>
+                        <button class="btn btn-success" id="wh-audit-submit-btn" onclick="Warehouse.saveAuditResults()">Принять инвентаризацию</button>
                         <button class="btn btn-outline" onclick="Warehouse.hideAudit()">Закрыть</button>
                     </div>
                 </div>
@@ -3306,7 +3306,7 @@
 <script src="js/supabase.js?v=160"></script>
 <script src="js/task-events.js?v=1"></script>
 <script src="js/calculator.js?v=72"></script>
-    <script src="js/app.js?v=192"></script>
+    <script src="js/app.js?v=193"></script>
 <script src="js/wiki.js?v=4"></script>
 <script src="js/order-detail.js?v=61"></script>
 <script src="js/orders.js?v=64"></script>
