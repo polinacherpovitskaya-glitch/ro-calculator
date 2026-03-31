@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: read
+  issues: write
 
 jobs:
   stress:
@@ -44,3 +45,15 @@ jobs:
           ALERT_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           ALERT_SOURCE_WORKFLOW: ${{ github.event.workflow_run.name }}
         run: node .github/scripts/send-telegram-alert.mjs
+
+      - name: Sync GitHub issue
+        if: ${{ always() }}
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ALERT_WORKFLOW: Warehouse stress smoke
+          ALERT_SCOPE: warehouse reservations + pendant + clone + fallback stress
+          ALERT_STATUS: ${{ job.status }}
+          ALERT_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          ALERT_SOURCE_WORKFLOW: ${{ github.event.workflow_run.name }}
+        run: node .github/scripts/sync-smoke-issue.mjs

@@ -54,6 +54,7 @@ jobs:
           node --check tests/live-site-smoke.mjs
           node --check tests/warehouse-stress-smoke.mjs
           node --check .github/scripts/send-telegram-alert.mjs
+          node --check .github/scripts/sync-smoke-issue.mjs
 
   deploy:
     needs: verify

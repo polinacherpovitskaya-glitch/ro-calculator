@@ -12,6 +12,7 @@ on:
 
 permissions:
   contents: read
+  issues: write
 
 jobs:
   smoke:
@@ -62,3 +63,15 @@ jobs:
           ALERT_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           ALERT_SOURCE_WORKFLOW: ${{ github.event.workflow_run.name }}
         run: node .github/scripts/send-telegram-alert.mjs
+
+      - name: Sync GitHub issue
+        if: ${{ always() }}
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ALERT_WORKFLOW: Live site smoke
+          ALERT_SCOPE: bugs done fallback + warehouse live load
+          ALERT_STATUS: ${{ job.status }}
+          ALERT_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          ALERT_SOURCE_WORKFLOW: ${{ github.event.workflow_run.name }}
+        run: node .github/scripts/sync-smoke-issue.mjs
