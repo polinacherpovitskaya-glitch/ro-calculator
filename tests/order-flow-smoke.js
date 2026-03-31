@@ -4509,33 +4509,45 @@ async function smokeWarehouseInventoryAuditEditRewritesAudit(context) {
     assert.match(String(vm.runInContext(`document.getElementById('wh-audit-table').innerHTML`, context)), /120 шт/);
 
     vm.runInContext(`
-        Warehouse.onAuditInput({ dataset: { id: '701', system: '120' }, value: '90' });
+        Warehouse.onAuditInput({ dataset: { id: '701', system: '120' }, value: '120' });
         Warehouse.onAuditInput({ dataset: { id: '702', system: '10' }, value: '8' });
     `, context);
     await vm.runInContext(`Warehouse.saveAuditResults()`, context);
 
-    assert.equal(context.__warehouseItems.find(item => item.id === 701).qty, 90);
+    assert.equal(context.__warehouseItems.find(item => item.id === 701).qty, 120);
     assert.equal(context.__warehouseItems.find(item => item.id === 702).qty, 8);
 
     const summaryEntries = context.__warehouseHistory.filter(entry => entry.type === 'inventory_audit' && entry.id === 9100);
     assert.equal(summaryEntries.length, 1, 'edited audit summary should be rewritten in place');
     const auditEntry = summaryEntries[0];
     assert.equal(auditEntry.created_at, '2026-03-20T10:00:05.000Z');
-    assert.equal(auditEntry.inventory_positions_changed, 2);
+    assert.equal(auditEntry.inventory_positions_changed, 1);
 
     const detail701 = auditEntry.inventory_details.find(detail => detail.item_id === 701);
     const detail702 = auditEntry.inventory_details.find(detail => detail.item_id === 702);
     assert.equal(detail701.system_qty_before, 120);
-    assert.equal(detail701.actual_qty, 90);
-    assert.equal(detail701.diff, -30);
+    assert.equal(detail701.actual_qty, 120);
+    assert.equal(detail701.diff, 0);
     assert.equal(detail702.system_qty_before, 10);
     assert.equal(detail702.actual_qty, 8);
     assert.equal(detail702.diff, -2);
 
     const auditAdjustments = context.__warehouseHistory.filter(entry => entry.type === 'adjustment' && entry.inventory_audit_id === 9100);
-    assert.equal(auditAdjustments.length, 2);
-    assert.ok(auditAdjustments.some(entry => entry.item_id === 701 && entry.qty_change === -30 && entry.qty_before === 120 && entry.qty_after === 90));
+    assert.equal(auditAdjustments.length, 1);
     assert.ok(auditAdjustments.some(entry => entry.item_id === 702 && entry.qty_change === -2 && entry.qty_before === 10 && entry.qty_after === 8));
+
+    await vm.runInContext(`Warehouse.renderInventoryView()`, context);
+    const inventoryHtmlAfterEdit = String(vm.runInContext(`document.getElementById('wh-content').innerHTML`, context));
+    assert.match(inventoryHtmlAfterEdit, /С расхождением в инвентаризации/);
+    assert.match(inventoryHtmlAfterEdit, /Совпало в инвентаризации/);
+    assert.match(inventoryHtmlAfterEdit, /Проверка сейчас на складе: совпадает 2 из 2 детализированных строк\./);
+    assert.match(inventoryHtmlAfterEdit, /Было в системе/);
+    assert.match(inventoryHtmlAfterEdit, /Факт в инвентаризации/);
+    assert.match(inventoryHtmlAfterEdit, /Разница в инвентаризации/);
+    assert.ok(
+        inventoryHtmlAfterEdit.indexOf('Инвентаризационная упаковка') < inventoryHtmlAfterEdit.indexOf('Инвентаризационный трос'),
+        'changed inventory rows should be rendered before unchanged rows'
+    );
 }
 
 async function smokeWarehouseInventoryAuditDeleteRollsBackStock(context) {

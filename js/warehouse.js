@@ -1084,15 +1084,15 @@ const Warehouse = {
 
     _renderInventoryAuditCard(audit, isLatest, mutationContext = null) {
         const chips = [
-            `<div class="wh-inventory-chip"><span class="wh-inventory-chip-label">С расхождением</span><strong>${audit.changedPositions}</strong></div>`,
+            `<div class="wh-inventory-chip"><span class="wh-inventory-chip-label">С расхождением в инвентаризации</span><strong>${audit.changedPositions}</strong></div>`,
             audit.enteredPositions != null
                 ? `<div class="wh-inventory-chip"><span class="wh-inventory-chip-label">Вписано</span><strong>${audit.enteredPositions}</strong></div>`
                 : '',
             audit.unchangedPositions != null
-                ? `<div class="wh-inventory-chip"><span class="wh-inventory-chip-label">Совпало</span><strong>${audit.unchangedPositions}</strong></div>`
+                ? `<div class="wh-inventory-chip"><span class="wh-inventory-chip-label">Совпало в инвентаризации</span><strong>${audit.unchangedPositions}</strong></div>`
                 : '',
             audit.omittedPositions != null
-                ? `<div class="wh-inventory-chip"><span class="wh-inventory-chip-label">Не вписали</span><strong>${audit.omittedPositions}</strong></div>`
+                ? `<div class="wh-inventory-chip"><span class="wh-inventory-chip-label">Не вписали в инвентаризации</span><strong>${audit.omittedPositions}</strong></div>`
                 : '',
             `<div class="wh-inventory-chip"><span class="wh-inventory-chip-label">Недостача</span><strong>${this._formatMoney(audit.shortageValue)}</strong></div>`,
             `<div class="wh-inventory-chip"><span class="wh-inventory-chip-label">Излишек</span><strong>${this._formatMoney(audit.surplusValue)}</strong></div>`,
@@ -1100,11 +1100,12 @@ const Warehouse = {
         ].filter(Boolean).join('');
 
         const noteLines = [];
+        noteLines.push('Верхние цифры показывают состояние на момент инвентаризации. Колонка "Сейчас на складе" и проверка ниже показывают уже текущее состояние после применённых корректировок.');
         if (audit.detailSource === 'derived') {
             noteLines.push('Подробные строки восстановлены из истории корректировок. В первой версии инвентаризации система сохраняла только позиции с расхождением, без строк "совпало" и без списка невнесённых позиций.');
         }
         if (audit.currentCheckCount > 0) {
-            noteLines.push(`Проверка сейчас: совпадает ${audit.currentMatchCount} из ${audit.currentCheckCount} детализированных строк.`);
+            noteLines.push(`Проверка сейчас на складе: совпадает ${audit.currentMatchCount} из ${audit.currentCheckCount} детализированных строк.`);
         }
         if (!noteLines.length && audit.notes) {
             noteLines.push(String(audit.notes));
@@ -1120,7 +1121,19 @@ const Warehouse = {
             </div>`
             : '';
 
-        const detailsRows = audit.details.map(detail => {
+        const orderedDetails = [...audit.details].sort((a, b) => {
+            const changedDiff = Number(Boolean(b && b.is_changed)) - Number(Boolean(a && a.is_changed));
+            if (changedDiff !== 0) return changedDiff;
+            const currentMismatchDiff = Number(b && b.matches_current === false) - Number(a && a.matches_current === false);
+            if (currentMismatchDiff !== 0) return currentMismatchDiff;
+            const categoryDiff = String(a && a.item_category || '').localeCompare(String(b && b.item_category || ''), 'ru');
+            if (categoryDiff !== 0) return categoryDiff;
+            const nameDiff = String(a && a.item_name || '').localeCompare(String(b && b.item_name || ''), 'ru');
+            if (nameDiff !== 0) return nameDiff;
+            return Number(a && a.item_id || 0) - Number(b && b.item_id || 0);
+        });
+
+        const detailsRows = orderedDetails.map(detail => {
             const cat = WAREHOUSE_CATEGORIES.find(entry => entry.key === detail.item_category);
             const diffClass = detail.diff > 0
                 ? 'audit-positive'
@@ -1181,9 +1194,9 @@ const Warehouse = {
                         <thead><tr>
                             <th>Категория</th>
                             <th>Позиция</th>
-                            <th class="text-right">Было</th>
-                            <th class="text-right">Вписали</th>
-                            <th class="text-right">Разница</th>
+                            <th class="text-right">Было в системе</th>
+                            <th class="text-right">Факт в инвентаризации</th>
+                            <th class="text-right">Разница в инвентаризации</th>
                             <th class="text-right">Расхождение ₽</th>
                             <th class="text-right">Сейчас на складе</th>
                         </tr></thead>
