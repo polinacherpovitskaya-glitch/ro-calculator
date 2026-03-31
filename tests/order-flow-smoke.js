@@ -2747,6 +2747,211 @@ async function smokeOrderStatusWarehouseSync(context) {
     }
 }
 
+async function smokeCompletedStatusGuardBlocksUntilAllCollected(context) {
+    context.__projectHardwareState = { checks: { '42:501': true } };
+    context.__warehouseHistory = [];
+    context.__orderDetails = {
+        42: {
+            order: { id: 42, order_name: 'Guarded Order', status: 'delivery' },
+            items: [
+                {
+                    item_type: 'hardware',
+                    product_name: 'Collected hardware',
+                    quantity: 2,
+                    hardware_source: 'warehouse',
+                    hardware_warehouse_item_id: 501,
+                },
+                {
+                    item_type: 'packaging',
+                    product_name: 'Pending packaging',
+                    quantity: 1,
+                    packaging_source: 'warehouse',
+                    packaging_warehouse_item_id: 601,
+                },
+            ],
+        },
+    };
+    context.loadProjectHardwareState = async () => clone(context.__projectHardwareState);
+    context.loadWarehouseHistory = async () => clone(context.__warehouseHistory);
+    context.loadOrder = async (orderId) => clone(context.__orderDetails[Number(orderId)] || null);
+    context.__ordersUpdateCalls = [];
+    context.updateOrderStatus = async (orderId, status) => {
+        context.__ordersUpdateCalls.push({ orderId: Number(orderId), status: String(status) });
+    };
+    context.__toasts = [];
+
+    vm.runInContext(`
+        Warehouse.projectHardwareState = null;
+        globalThis.__syncWarehouseCalls = [];
+        globalThis.__readyGoodsCalls = [];
+        globalThis.__changeRecordCalls = [];
+        globalThis.__renderCount = 0;
+        globalThis.__loadListCount = 0;
+        globalThis.__toasts = [];
+        App.toast = (message) => { globalThis.__toasts.push(String(message || '')); };
+        Orders.allOrders = [{ id: 42, order_name: 'Guarded Order', status: 'delivery' }];
+        Orders.render = () => { globalThis.__renderCount += 1; };
+        Orders.loadList = () => { globalThis.__loadListCount += 1; };
+        Orders._syncWarehouseByStatus = async (...args) => { globalThis.__syncWarehouseCalls.push(args); };
+        Orders._syncReadyGoodsByStatus = async (...args) => { globalThis.__readyGoodsCalls.push(args); };
+        Orders.addChangeRecord = async (...args) => { globalThis.__changeRecordCalls.push(args); };
+    `, context);
+
+    const blocked = clone(await vm.runInContext(`Orders._ensureStatusTransitionAllowed(42, 'completed')`, context));
+    assert.equal(blocked.ok, false);
+    assert.equal(blocked.summary.totalRows, 2);
+    assert.equal(blocked.summary.readyRows, 1);
+    assert.equal(blocked.summary.pendingRows, 1);
+    assert.ok(context.__toasts.some(message => /нельзя перевести заказ в «готово»/i.test(message)));
+    assert.ok(context.__toasts.some(message => /собрано 1 из 2/i.test(message)));
+
+    context.__toasts = [];
+    vm.runInContext(`globalThis.__toasts = [];`, context);
+    await vm.runInContext(`Orders.onStatusChange(42, 'completed', 'delivery')`, context);
+
+    assert.equal(context.__ordersUpdateCalls.length, 0);
+    assert.deepEqual(clone(context.__syncWarehouseCalls || []), []);
+    assert.deepEqual(clone(context.__readyGoodsCalls || []), []);
+    assert.deepEqual(clone(context.__changeRecordCalls || []), []);
+    assert.equal(vm.runInContext(`globalThis.__renderCount`, context), 1);
+    assert.equal(vm.runInContext(`globalThis.__loadListCount`, context), 0);
+
+    context.__projectHardwareState = { checks: { '42:501': true, '42:601': true } };
+    context.__toasts = [];
+    vm.runInContext(`
+        Warehouse.projectHardwareState = null;
+        globalThis.__toasts = [];
+        globalThis.__renderCount = 0;
+        globalThis.__loadListCount = 0;
+    `, context);
+    context.__ordersUpdateCalls = [];
+    vm.runInContext(`
+        globalThis.__syncWarehouseCalls = [];
+        globalThis.__readyGoodsCalls = [];
+        globalThis.__changeRecordCalls = [];
+    `, context);
+
+    await vm.runInContext(`Orders.onStatusChange(42, 'completed', 'delivery')`, context);
+
+    assert.deepEqual(clone(context.__ordersUpdateCalls), [{ orderId: 42, status: 'completed' }]);
+    assert.equal((clone(context.__syncWarehouseCalls) || []).length, 1);
+    assert.equal((clone(context.__readyGoodsCalls) || []).length, 1);
+    assert.equal((clone(context.__changeRecordCalls) || []).length, 1);
+    assert.equal(vm.runInContext(`globalThis.__loadListCount`, context), 1);
+}
+
+async function smokeOrderDetailCompletedGuard(context) {
+    context.__projectHardwareState = { checks: {} };
+    context.__warehouseHistory = [];
+    context.__orderDetails = {
+        77: {
+            order: { id: 77, order_name: 'Order Detail Guard', status: 'delivery' },
+            items: [{
+                item_type: 'hardware',
+                product_name: 'Detail hardware',
+                quantity: 1,
+                hardware_source: 'warehouse',
+                hardware_warehouse_item_id: 701,
+            }],
+        },
+    };
+    context.loadProjectHardwareState = async () => clone(context.__projectHardwareState);
+    context.loadWarehouseHistory = async () => clone(context.__warehouseHistory);
+    context.loadOrder = async (orderId) => clone(context.__orderDetails[Number(orderId)] || null);
+    context.__ordersUpdateCalls = [];
+    context.updateOrderStatus = async (orderId, status) => {
+        context.__ordersUpdateCalls.push({ orderId: Number(orderId), status: String(status) });
+    };
+    context.__toasts = [];
+    context.__promptQueue = ['7', 'Smoke'];
+    context.prompt = () => context.__promptQueue.shift() || '';
+
+    vm.runInContext(`
+        Warehouse.projectHardwareState = null;
+        globalThis.__toasts = [];
+        App.toast = (message) => { globalThis.__toasts.push(String(message || '')); };
+        Orders._syncWarehouseByStatus = async () => { throw new Error('status sync should not run when completed is blocked'); };
+        Orders._syncReadyGoodsByStatus = async () => { throw new Error('ready goods sync should not run when completed is blocked'); };
+        Orders.addChangeRecord = async () => { throw new Error('change record should not run when completed is blocked'); };
+        OrderDetail.currentOrder = { id: 77, order_name: 'Order Detail Guard', status: 'delivery' };
+        OrderDetail.currentItems = [];
+    `, context);
+
+    await vm.runInContext(`OrderDetail.changeStatus()`, context);
+
+    assert.equal(context.__ordersUpdateCalls.length, 0);
+    assert.ok((clone(context.__toasts) || []).some(message => /нельзя перевести заказ в «готово»/i.test(message)));
+}
+
+async function smokeProductionPlanCompletedGuard(context) {
+    if (!vm.runInContext(`typeof ProductionPlan !== 'undefined'`, context)) {
+        runScript(context, 'js/production_plan.js');
+    }
+
+    context.__projectHardwareState = { checks: {} };
+    context.__warehouseHistory = [];
+    context.__orderDetails = {
+        91: {
+            order: { id: 91, order_name: 'Plan Guard', status: 'delivery' },
+            items: [{
+                item_type: 'hardware',
+                product_name: 'Plan hardware',
+                quantity: 1,
+                hardware_source: 'warehouse',
+                hardware_warehouse_item_id: 801,
+            }],
+        },
+    };
+    context.loadProjectHardwareState = async () => clone(context.__projectHardwareState);
+    context.loadWarehouseHistory = async () => clone(context.__warehouseHistory);
+    context.loadOrder = async (orderId) => clone(context.__orderDetails[Number(orderId)] || null);
+    context.__ordersUpdateCalls = [];
+    context.updateOrderStatus = async (orderId, status) => {
+        context.__ordersUpdateCalls.push({ orderId: Number(orderId), status: String(status) });
+    };
+    context.__toasts = [];
+
+    vm.runInContext(`
+        Warehouse.projectHardwareState = null;
+        globalThis.__toasts = [];
+        globalThis.__planLoadCount = 0;
+        App.toast = (message) => { globalThis.__toasts.push(String(message || '')); };
+        Orders._syncWarehouseByStatus = async () => { throw new Error('status sync should not run when production plan completed is blocked'); };
+        Orders.addChangeRecord = async () => { throw new Error('change record should not run when production plan completed is blocked'); };
+        ProductionPlan.load = async () => { globalThis.__planLoadCount += 1; };
+        ProductionPlan.allRows = [{ id: 91, status: 'delivery', orderName: 'Plan Guard' }];
+    `, context);
+
+    await vm.runInContext(`ProductionPlan.goNextStage(91)`, context);
+
+    assert.equal(context.__ordersUpdateCalls.length, 0);
+    assert.equal(vm.runInContext(`ProductionPlan.allRows[0].status`, context), 'delivery');
+    assert.equal(vm.runInContext(`globalThis.__planLoadCount`, context), 0);
+    assert.ok((clone(context.__toasts) || []).some(message => /нельзя перевести заказ в «готово»/i.test(message)));
+
+    context.__projectHardwareState = { checks: { '91:801': true } };
+    context.__ordersUpdateCalls = [];
+    context.__toasts = [];
+    vm.runInContext(`
+        Warehouse.projectHardwareState = null;
+        globalThis.__toasts = [];
+        globalThis.__planLoadCount = 0;
+        globalThis.__warehouseSyncCalls = [];
+        globalThis.__changeRecordCalls = [];
+        Orders._syncWarehouseByStatus = async (...args) => { globalThis.__warehouseSyncCalls.push(args); };
+        Orders.addChangeRecord = async (...args) => { globalThis.__changeRecordCalls.push(args); };
+        ProductionPlan.allRows = [{ id: 91, status: 'delivery', orderName: 'Plan Guard' }];
+    `, context);
+
+    await vm.runInContext(`ProductionPlan.goNextStage(91)`, context);
+
+    assert.deepEqual(clone(context.__ordersUpdateCalls), [{ orderId: 91, status: 'completed' }]);
+    assert.equal(vm.runInContext(`ProductionPlan.allRows[0].status`, context), 'completed');
+    assert.equal(vm.runInContext(`globalThis.__planLoadCount`, context), 1);
+    assert.equal((clone(vm.runInContext(`globalThis.__warehouseSyncCalls`, context)) || []).length, 1);
+    assert.equal((clone(vm.runInContext(`globalThis.__changeRecordCalls`, context)) || []).length, 1);
+}
+
 async function smokePendantWarehouseDemandSync(context) {
     context.__smokePendantDemandItems = [{
         item_type: 'pendant',
@@ -4145,6 +4350,9 @@ async function main() {
     await smokeChinaReceiptCreatesMoldAndPromotesOrder(context);
     await smokeBlankMoldAutoFieldsWithoutVisibleTemplate(context);
     await smokeOrderStatusWarehouseSync(context);
+    await smokeCompletedStatusGuardBlocksUntilAllCollected(context);
+    await smokeOrderDetailCompletedGuard(context);
+    await smokeProductionPlanCompletedGuard(context);
     await smokePendantWarehouseDemandSync(context);
     await smokePackagingWarehouseSaveSync(context);
     await smokeWarehouseManualAdjustment(context);

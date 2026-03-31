@@ -753,6 +753,10 @@ const OrderDetail = {
         }
 
         const newStatus = opts[idx].value;
+        if (typeof Orders !== 'undefined' && Orders && typeof Orders._ensureStatusTransitionAllowed === 'function') {
+            const guard = await Orders._ensureStatusTransitionAllowed(this.currentOrder.id, newStatus);
+            if (!guard.ok) return;
+        }
         const managerName = prompt('Имя менеджера (для истории):') || 'Неизвестный';
 
         await updateOrderStatus(this.currentOrder.id, newStatus);

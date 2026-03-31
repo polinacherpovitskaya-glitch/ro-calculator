@@ -531,6 +531,11 @@ const ProductionPlan = {
         const orderId = Number(row.id);
         const managerName = App.getCurrentEmployeeName() || 'Неизвестный';
 
+        if (typeof Orders !== 'undefined' && Orders && typeof Orders._ensureStatusTransitionAllowed === 'function') {
+            const guard = await Orders._ensureStatusTransitionAllowed(orderId, newStatus);
+            if (!guard.ok) return false;
+        }
+
         await updateOrderStatus(orderId, newStatus);
 
         if (typeof Orders !== 'undefined' && Orders && typeof Orders._syncWarehouseByStatus === 'function') {
@@ -557,6 +562,7 @@ const ProductionPlan = {
         row.status = newStatus;
         App.toast(`Статус: ${App.statusLabel(newStatus)}`);
         await this.load();
+        return true;
     },
 
     _extractColorNames(item) {

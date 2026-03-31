@@ -3225,6 +3225,105 @@ const Warehouse = {
         return savedReady || historicalReady;
     },
 
+    async getOrderProjectHardwareCompletion(orderId, detail) {
+        const normalizedOrderId = Number(orderId || 0);
+        if (!normalizedOrderId) {
+            return {
+                canComplete: true,
+                totalRows: 0,
+                readyRows: 0,
+                pendingRows: 0,
+                rows: [],
+                pendingLabels: [],
+            };
+        }
+
+        await this._ensureProjectHardwareStateLoaded();
+
+        let orderDetail = detail && Array.isArray(detail.items) ? detail : null;
+        if (!orderDetail) {
+            try {
+                orderDetail = await loadOrder(normalizedOrderId);
+            } catch (error) {
+                console.error('Warehouse.getOrderProjectHardwareCompletion loadOrder failed:', error);
+                orderDetail = null;
+            }
+        }
+
+        if (!orderDetail || !Array.isArray(orderDetail.items)) {
+            return {
+                canComplete: false,
+                totalRows: 0,
+                readyRows: 0,
+                pendingRows: 0,
+                rows: [],
+                pendingLabels: [],
+                error: 'load_failed',
+            };
+        }
+
+        const demandRows = this._collectWarehouseDemandFromOrderItems(orderDetail.items || [])
+            .map(row => ({
+                warehouse_item_id: Number(row.warehouse_item_id || 0),
+                qty: parseFloat(row.qty) || 0,
+                names: Array.isArray(row.names) ? row.names.filter(Boolean) : [],
+                material_type: row.material_type || 'hardware',
+            }))
+            .filter(row => row.warehouse_item_id && row.qty > 0);
+
+        if (demandRows.length === 0) {
+            return {
+                canComplete: true,
+                totalRows: 0,
+                readyRows: 0,
+                pendingRows: 0,
+                rows: [],
+                pendingLabels: [],
+            };
+        }
+
+        let history = [];
+        try {
+            history = await loadWarehouseHistory();
+        } catch (error) {
+            console.error('Warehouse.getOrderProjectHardwareCompletion loadWarehouseHistory failed:', error);
+            return {
+                canComplete: false,
+                totalRows: demandRows.length,
+                readyRows: 0,
+                pendingRows: demandRows.length,
+                rows: [],
+                pendingLabels: [],
+                error: 'history_failed',
+            };
+        }
+
+        const historyDeltaMap = this._buildProjectHardwareHistoryDeltaMap(history || []);
+        const rows = demandRows.map(row => {
+            const ready = this._computeProjectHardwareReadyState(
+                normalizedOrderId,
+                row.warehouse_item_id,
+                row.qty,
+                history || [],
+                historyDeltaMap
+            );
+            const label = row.names[0]
+                || `${this._projectSupplyKindLabel(row.material_type)} #${row.warehouse_item_id}`;
+            return { ...row, ready, label };
+        });
+
+        const readyRows = rows.filter(row => row.ready).length;
+        const pendingRows = rows.filter(row => !row.ready);
+        return {
+            canComplete: pendingRows.length === 0,
+            totalRows: rows.length,
+            readyRows,
+            pendingRows: pendingRows.length,
+            rows,
+            pendingLabels: pendingRows.map(row => row.label),
+        };
+    },
+
     _buildMoldUsageHistoryDeltaMap(history) {
         const deltaByKey = new Map();
         (history || []).forEach(entry => {

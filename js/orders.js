@@ -781,6 +781,12 @@ const Orders = {
         const actualStatus = newStatus === 'production' ? 'production_casting' : newStatus;
         if (order.status === actualStatus) return;
 
+        const guard = await this._ensureStatusTransitionAllowed(orderId, actualStatus);
+        if (!guard.ok) {
+            this.render();
+            return;
+        }
+
         const oldStatus = order.status;
         const managerName = App.getCurrentEmployeeName();
 
@@ -926,6 +932,48 @@ const Orders = {
         </div></div>`;
     },
 
+    _formatCompletedStatusBlockMessage(summary) {
+        if (!summary || summary.error) {
+            return 'Нельзя перевести заказ в «Готово»: не удалось проверить, все ли позиции со склада отмечены как «собрано».';
+        }
+        return `Нельзя перевести заказ в «Готово»: не все позиции со склада отмечены как «собрано». Собрано ${summary.readyRows || 0} из ${summary.totalRows || 0}.`;
+    },
+
+    async _ensureStatusTransitionAllowed(orderId, newStatus, options = {}) {
+        if (newStatus !== 'completed') {
+            return { ok: true };
+        }
+
+        if (typeof Warehouse === 'undefined'
+            || !Warehouse
+            || typeof Warehouse.getOrderProjectHardwareCompletion !== 'function') {
+            return { ok: true };
+        }
+
+        let summary = null;
+        try {
+            summary = await Warehouse.getOrderProjectHardwareCompletion(orderId, options.orderDetail || null);
+        } catch (error) {
+            console.error('Orders._ensureStatusTransitionAllowed failed:', error);
+            summary = { error: 'exception', totalRows: 0, readyRows: 0, pendingRows: 0 };
+        }
+
+        if (summary && summary.canComplete) {
+            return { ok: true, summary };
+        }
+
+        const message = this._formatCompletedStatusBlockMessage(summary);
+        if (options.toast !== false && typeof App !== 'undefined' && App && typeof App.toast === 'function') {
+            App.toast(message);
+        }
+        return {
+            ok: false,
+            reason: summary && summary.error ? 'project_hardware_check_failed' : 'project_hardware_incomplete',
+            message,
+            summary,
+        };
+    },
+
     formatOrderDeadline(order) {
         const start = order.deadline_start || '';
         const end = order.deadline_end || order.deadline || '';
@@ -961,6 +1009,12 @@ const Orders = {
 
     async onStatusChange(orderId, newStatus, oldStatus) {
         if (newStatus === oldStatus) return;
+
+        const guard = await this._ensureStatusTransitionAllowed(orderId, newStatus);
+        if (!guard.ok) {
+            this.render();
+            return;
+        }
 
         const managerName = App.getCurrentEmployeeName();
 
