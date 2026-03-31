@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v190';
+const APP_VERSION = 'v191';
 
 const App = {
     currentPage: 'orders',
@@ -991,6 +991,7 @@ const Calculator = {
         this._isDirty = false;
         this._autosaving = false;
         this._invalidateWhPickerContext();
+        this._clearCommittedWhDemandSnapshot();
 
         App.editingOrderId = null;
         this._currentOrderStatus = 'draft';
@@ -1503,6 +1504,8 @@ const Calculator = {
     _whCurrentOrderReservationMap: null,
     _whReservationOrderId: null,
     _whReservationLoading: false,
+    _whCommittedOrderDemandMap: null,
+    _whCommittedDemandOrderId: null,
 
     _invalidateWhPickerContext() {
         this._whPickerData = null;
@@ -1510,6 +1513,32 @@ const Calculator = {
         this._whCurrentOrderReservationMap = null;
         this._whReservationOrderId = null;
         this._whReservationLoading = false;
+    },
+
+    _clearCommittedWhDemandSnapshot() {
+        this._whCommittedOrderDemandMap = null;
+        this._whCommittedDemandOrderId = null;
+    },
+
+    _captureCommittedWhDemandSnapshot(orderId = App.editingOrderId || null) {
+        const normalizedOrderId = Number(orderId || 0) || null;
+        if (!normalizedOrderId) {
+            this._clearCommittedWhDemandSnapshot();
+            return new Map();
+        }
+
+        const snapshot = this._collectWarehouseReservationDemand({ hardware: true, packaging: true });
+        this._whCommittedOrderDemandMap = new Map(snapshot);
+        this._whCommittedDemandOrderId = normalizedOrderId;
+        return this._whCommittedOrderDemandMap;
+    },
+
+    _getCommittedOrderWarehouseDemandQty(itemId) {
+        const normalizedOrderId = Number(App.editingOrderId || 0) || null;
+        if (!normalizedOrderId) return 0;
+        if (!this._whCommittedOrderDemandMap) return 0;
+        if (Number(this._whCommittedDemandOrderId || 0) !== normalizedOrderId) return 0;
+        return this._whCommittedOrderDemandMap.get(Number(itemId) || 0) || 0;
     },
 
     async _ensureWhReservationContext(force = false) {
@@ -1575,8 +1604,13 @@ const Calculator = {
     },
 
     _getCurrentOrderReservedQty(itemId) {
-        if (!this._whCurrentOrderReservationMap) return 0;
-        return this._whCurrentOrderReservationMap.get(Number(itemId) || 0) || 0;
+        const targetId = Number(itemId) || 0;
+        if (!targetId) return 0;
+        const activeReserved = this._whCurrentOrderReservationMap
+            ? (this._whCurrentOrderReservationMap.get(targetId) || 0)
+            : 0;
+        if (activeReserved > 0) return activeReserved;
+        return this._getCommittedOrderWarehouseDemandQty(targetId);
     },
 
     _getCurrentWarehouseDraftDemand(itemId, exclude = null) {
@@ -1632,7 +1666,13 @@ const Calculator = {
 
     _getWhPickerDataForCurrentOrder() {
         if (!this._whPickerData) return null;
-        if (!this._whCurrentOrderReservationMap || this._whCurrentOrderReservationMap.size === 0) return this._whPickerData;
+        const hasActiveReservations = !!(this._whCurrentOrderReservationMap && this._whCurrentOrderReservationMap.size > 0);
+        const hasCommittedDemand = !!(
+            this._whCommittedOrderDemandMap
+            && this._whCommittedOrderDemandMap.size > 0
+            && Number(this._whCommittedDemandOrderId || 0) === Number(App.editingOrderId || 0)
+        );
+        if (!hasActiveReservations && !hasCommittedDemand) return this._whPickerData;
 
         const grouped = {};
         Object.keys(this._whPickerData).forEach(catKey => {
@@ -4344,6 +4384,7 @@ const Calculator = {
                 );
             }
             this._invalidateWhPickerContext();
+            this._captureCommittedWhDemandSnapshot(orderId);
 
             App.toast('Заказ сохранен');
         } else {
@@ -4699,6 +4740,9 @@ const Calculator = {
                 this.pendants.push(pnd);
             }
         });
+        this._captureCommittedWhDemandSnapshot(orderId);
+        this.rerenderAllHardware();
+        this.rerenderAllPackaging();
         // Render pendant cards (Pendant module handles this)
         if (typeof Pendant !== 'undefined') {
             Pendant.renderAllCards();

@@ -760,6 +760,147 @@ async function smokeCurrentOrderReservationRestoresWarehouseQuota() {
     assert.match(String(vm.runInContext(`globalThis.__lastToast`, context)), /Максимум на складе:\s*100/i);
 }
 
+async function smokeCommittedOrderDemandRestoresWarehouseQuotaWithoutActiveReservation() {
+    const context = createContext();
+    ['js/calculator.js', 'js/app.js', 'js/warehouse.js'].forEach(file => runScript(context, file));
+    stubRuntime(context);
+    vm.runInContext(`
+        globalThis.ChinaCatalog = {
+            DELIVERY_METHODS: {
+                avia: { label: 'Авиа', rate_usd: 33 },
+                auto: { label: 'Авто', rate_usd: 4.8 },
+                avia_fast: { label: 'Авиа быстрая', rate_usd: 38 },
+            },
+        };
+    `, context);
+
+    context.__reservations = [];
+    context.loadWarehouseReservations = async () => clone(context.__reservations);
+
+    vm.runInContext(`
+        App.editingOrderId = 88;
+        globalThis.__lastToast = '';
+        globalThis.__lastHwHtml = '';
+        globalThis.__lastPkgHtml = '';
+        App.toast = (message) => { globalThis.__lastToast = String(message || ''); };
+
+        Calculator._whPickerData = {
+            hardware: {
+                label: 'Фурнитура',
+                icon: '🔩',
+                items: [{
+                    id: 901,
+                    category: 'hardware',
+                    name: 'Трос',
+                    sku: 'TR-050-WH',
+                    size: '50 см',
+                    color: 'белый',
+                    qty: 120,
+                    available_qty: 40,
+                    unit: 'шт',
+                    price_per_unit: 12,
+                    photo_thumbnail: '',
+                }],
+            },
+            packaging: {
+                label: 'Упаковка',
+                icon: '📦',
+                items: [{
+                    id: 902,
+                    category: 'packaging',
+                    name: 'Коробка',
+                    sku: 'BOX-010',
+                    size: '10x10',
+                    color: 'крафт',
+                    qty: 100,
+                    available_qty: 30,
+                    unit: 'шт',
+                    price_per_unit: 8,
+                    photo_thumbnail: '',
+                }],
+            },
+        };
+        Calculator._whCurrentOrderReservationMap = null;
+        Calculator._whReservationOrderId = null;
+        Calculator._whReservationLoading = false;
+        Calculator._whCommittedOrderDemandMap = null;
+        Calculator._whCommittedDemandOrderId = null;
+        Calculator._findWhItem = function(itemId) {
+            if (!this._whPickerData) return null;
+            for (const catKey of Object.keys(this._whPickerData)) {
+                const found = (this._whPickerData[catKey].items || []).find(item => Number(item.id) === Number(itemId));
+                if (found) return found;
+            }
+            return null;
+        };
+        Calculator.hardwareItems = [
+            Object.assign(Calculator.getEmptyHardware(null), {
+                source: 'warehouse',
+                warehouse_item_id: 901,
+                warehouse_sku: 'TR-050-WH',
+                name: 'Трос · 50 см · белый',
+                qty: 60,
+            }),
+            Object.assign(Calculator.getEmptyHardware(null), {
+                source: 'warehouse',
+                warehouse_item_id: 901,
+                warehouse_sku: 'TR-050-WH',
+                name: 'Трос · 50 см · белый',
+                qty: 0,
+            }),
+        ];
+        Calculator.packagingItems = [
+            Object.assign(Calculator.getEmptyPackaging(null), {
+                source: 'warehouse',
+                warehouse_item_id: 902,
+                warehouse_sku: 'BOX-010',
+                name: 'Коробка · крафт',
+                qty: 70,
+            }),
+        ];
+        Calculator.pendants = [];
+        Calculator.recalculate = () => {};
+        Calculator.scheduleAutosave = () => {};
+        Calculator._ensureBlanksCatalog = async () => {};
+        Calculator._hwBlanksCatalog = [];
+        Calculator._pkgBlanksCatalog = [];
+        document.getElementById('calc-hardware-list').insertAdjacentHTML = (position, html) => {
+            globalThis.__lastHwHtml = html;
+        };
+        document.getElementById('calc-packaging-list').insertAdjacentHTML = (position, html) => {
+            globalThis.__lastPkgHtml = html;
+        };
+        Calculator._captureCommittedWhDemandSnapshot(88);
+    `, context);
+
+    await vm.runInContext(`Calculator._ensureWhReservationContext(true)`, context);
+
+    const pickerData = clone(vm.runInContext(`Calculator._getWhPickerDataForCurrentOrder()`, context));
+    assert.equal(pickerData.hardware.items[0].available_qty, 100);
+    assert.equal(pickerData.packaging.items[0].available_qty, 100);
+
+    assert.equal(vm.runInContext(`Calculator._getWhEffectiveAvailableQty(901, { kind: 'hardware', idx: 0 })`, context), 100);
+    assert.equal(vm.runInContext(`Calculator._getWhEffectiveAvailableQty(901, { kind: 'hardware', idx: 1 })`, context), 40);
+    assert.equal(vm.runInContext(`Calculator._getWhEffectiveAvailableQty(902, { kind: 'packaging', idx: 0 })`, context), 100);
+
+    vm.runInContext(`Calculator.renderHardwareRow(0)`, context);
+    const hwHtml = String(vm.runInContext(`globalThis.__lastHwHtml`, context));
+    assert.match(hwHtml, /макс:\s*100/i);
+
+    vm.runInContext(`Calculator.renderPackagingRow(0)`, context);
+    const pkgHtml = String(vm.runInContext(`globalThis.__lastPkgHtml`, context));
+    assert.match(pkgHtml, /макс:\s*100/i);
+
+    vm.runInContext(`
+        Calculator.hardwareItems[0].qty = 50;
+        globalThis.__lastToast = '';
+        Calculator.onHwNum(1, 'qty', '51');
+    `, context);
+    assert.equal(vm.runInContext(`Calculator._getWhEffectiveAvailableQty(901, { kind: 'hardware', idx: 0 })`, context), 50);
+    assert.equal(vm.runInContext(`Calculator.hardwareItems[1].qty`, context), 50);
+    assert.match(String(vm.runInContext(`globalThis.__lastToast`, context)), /Максимум на складе:\s*50/i);
+}
+
 async function smokePendantWarehousePickerRestoresCurrentOrderQuota() {
     const context = createContext();
     ['js/calculator.js', 'js/app.js'].forEach(file => runScript(context, file));
@@ -874,6 +1015,235 @@ async function smokePendantWarehousePickerRestoresCurrentOrderQuota() {
     assert.equal(
         vm.runInContext(`Pendant._getSelectedStock('cord', Pendant._wizardData.cords[1], Calculator._whPickerData, 1)`, context),
         38
+    );
+}
+
+async function smokePendantCommittedDemandRestoresQuotaWithoutActiveReservation() {
+    const context = createContext();
+    ['js/calculator.js', 'js/app.js'].forEach(file => runScript(context, file));
+    stubRuntime(context);
+    vm.runInContext('delete globalThis.Pendant;', context);
+    runScript(context, 'js/pendant.js');
+
+    context.__reservations = [];
+    context.loadWarehouseReservations = async () => clone(context.__reservations);
+
+    vm.runInContext(`
+        App.editingOrderId = 88;
+        Calculator._whPickerData = {
+            cords: {
+                label: 'Шнуры',
+                icon: '🧵',
+                items: [{
+                    id: 701,
+                    category: 'cords',
+                    name: 'Шнур с лазерной гравировкой',
+                    sku: 'SLS-800-LZR-NN',
+                    size: '80 см',
+                    color: 'черный',
+                    qty: 138,
+                    available_qty: 38,
+                    unit: 'шт',
+                    price_per_unit: 25,
+                    photo_thumbnail: '',
+                }],
+            },
+            carabiners: {
+                label: 'Карабины',
+                icon: '🔗',
+                items: [],
+            },
+            rings: {
+                label: 'Кольца',
+                icon: '⭕',
+                items: [],
+            },
+        };
+        Calculator._whCurrentOrderReservationMap = null;
+        Calculator._whReservationOrderId = null;
+        Calculator._whReservationLoading = false;
+        Calculator._whCommittedOrderDemandMap = null;
+        Calculator._whCommittedDemandOrderId = null;
+        Calculator._findWhItem = function(itemId) {
+            if (!this._whPickerData) return null;
+            for (const catKey of Object.keys(this._whPickerData)) {
+                const found = (this._whPickerData[catKey].items || []).find(item => Number(item.id) === Number(itemId));
+                if (found) return found;
+            }
+            return null;
+        };
+        Calculator.hardwareItems = [];
+        Calculator.packagingItems = [];
+        Calculator.pendants = [{
+            ...Pendant.getEmpty(),
+            name: 'Обвеcы Озон банк КЕШШШ',
+            quantity: 100,
+            cords: [{
+                source: 'warehouse',
+                warehouse_item_id: 701,
+                warehouse_sku: 'SLS-800-LZR-NN',
+                name: 'Шнур с лазерной гравировкой',
+                price_per_unit: 25,
+                delivery_price: 0,
+                unit: 'шт',
+                qty_per_pendant: 1,
+                allocated_qty: 100,
+            }],
+            carabiners: [],
+        }];
+        Pendant._editingIndex = 0;
+        Pendant._wizardData = JSON.parse(JSON.stringify(Calculator.pendants[0]));
+        Pendant._ensureAttachmentCollections(Pendant._wizardData, { preserveEmpty: true });
+        Calculator._captureCommittedWhDemandSnapshot(88);
+    `, context);
+
+    await vm.runInContext(`Calculator._ensureWhReservationContext(true)`, context);
+
+    assert.equal(
+        vm.runInContext(`Pendant._getSelectedStock('cord', Pendant._wizardData.cords[0], Calculator._whPickerData, 0)`, context),
+        138
+    );
+
+    const currentRowHtml = String(vm.runInContext(`Pendant._renderWhDropdown('cord', Pendant._wizardData.cords[0], Calculator._whPickerData, 0)`, context));
+    assert.match(currentRowHtml, /138 шт/);
+
+    vm.runInContext(`
+        Pendant._wizardData.cords.push({
+            source: 'warehouse',
+            warehouse_item_id: 701,
+            warehouse_sku: 'SLS-800-LZR-NN',
+            name: 'Шнур с лазерной гравировкой',
+            price_per_unit: 25,
+            delivery_price: 0,
+            unit: 'шт',
+            qty_per_pendant: 1,
+            allocated_qty: 0,
+        });
+        Pendant._syncLegacyAttachments(Pendant._wizardData);
+    `, context);
+
+    assert.equal(
+        vm.runInContext(`Pendant._getSelectedStock('cord', Pendant._wizardData.cords[1], Calculator._whPickerData, 1)`, context),
+        38
+    );
+
+    vm.runInContext(`
+        Pendant._wizardData.cords[0].allocated_qty = 90;
+        Pendant._syncLegacyAttachments(Pendant._wizardData);
+    `, context);
+
+    assert.equal(
+        vm.runInContext(`Pendant._getSelectedStock('cord', Pendant._wizardData.cords[0], Calculator._whPickerData, 0)`, context),
+        138
+    );
+    assert.equal(
+        vm.runInContext(`Pendant._getSelectedStock('cord', Pendant._wizardData.cords[1], Calculator._whPickerData, 1)`, context),
+        48
+    );
+}
+
+async function smokeLoadOrderRestoresCommittedPendantQuotaWithoutActiveReservation() {
+    const context = createContext();
+    ['js/calculator.js', 'js/app.js'].forEach(file => runScript(context, file));
+    stubRuntime(context);
+    vm.runInContext('delete globalThis.Pendant;', context);
+    runScript(context, 'js/pendant.js');
+
+    context.__reservations = [];
+    context.loadWarehouseReservations = async () => clone(context.__reservations);
+    context.__pendantPickerData = {
+        cords: {
+            label: 'Шнуры',
+            icon: '🧵',
+            items: [{
+                id: 701,
+                category: 'cords',
+                name: 'Шнур с лазерной гравировкой',
+                sku: 'SLS-800-LZR-NN',
+                size: '80 см',
+                color: 'черный',
+                qty: 138,
+                available_qty: 38,
+                unit: 'шт',
+                price_per_unit: 25,
+                photo_thumbnail: '',
+            }],
+        },
+        carabiners: {
+            label: 'Карабины',
+            icon: '🔗',
+            items: [],
+        },
+        rings: {
+            label: 'Кольца',
+            icon: '⭕',
+            items: [],
+        },
+    };
+    context.__loadOrderData = {
+        order: {
+            id: 9008,
+            order_name: 'Обвеcы Озон банк КЕШШШ',
+            client_name: 'Smoke Client',
+            manager_name: 'Smoke',
+            status: 'production',
+        },
+        items: [{
+            item_type: 'pendant',
+            item_number: 1,
+            product_name: 'Обвеcы Озон банк КЕШШШ',
+            quantity: 100,
+            item_data: JSON.stringify({
+                name: 'Обвеcы Озон банк КЕШШШ',
+                quantity: 100,
+                cords: [{
+                    source: 'warehouse',
+                    warehouse_item_id: 701,
+                    warehouse_sku: 'SLS-800-LZR-NN',
+                    name: 'Шнур с лазерной гравировкой',
+                    price_per_unit: 25,
+                    delivery_price: 0,
+                    unit: 'шт',
+                    qty_per_pendant: 1,
+                    allocated_qty: 100,
+                }],
+                carabiners: [],
+            }),
+        }],
+        repaired_duplicates: false,
+    };
+    context.loadOrder = async () => clone(context.__loadOrderData);
+
+    vm.runInContext(`
+        Calculator.renderItemBlock = () => {};
+        Calculator.renderHardwareRow = () => {};
+        Calculator.renderPackagingRow = () => {};
+        Calculator.renderExtraCosts = () => {};
+        Calculator._renderPerItemHwPkg = () => {};
+        Calculator.recalculate = () => {};
+        Calculator.showOrderHistory = () => {};
+        Calculator._ensureWhPickerData = async () => ({});
+    `, context);
+
+    await vm.runInContext(`Calculator.loadOrder(9008)`, context);
+
+    vm.runInContext(`
+        Calculator._whPickerData = globalThis.__pendantPickerData;
+        Calculator._findWhItem = function(itemId) {
+            if (!this._whPickerData) return null;
+            for (const catKey of Object.keys(this._whPickerData)) {
+                const found = (this._whPickerData[catKey].items || []).find(item => Number(item.id) === Number(itemId));
+                if (found) return found;
+            }
+            return null;
+        };
+        Pendant.openWizard(0);
+    `, context);
+
+    assert.equal(vm.runInContext(`Calculator._getCommittedOrderWarehouseDemandQty(701)`, context), 100);
+    assert.equal(
+        vm.runInContext(`Pendant._getSelectedStock('cord', Pendant._wizardData.cords[0], Calculator._whPickerData, 0)`, context),
+        138
     );
 }
 
@@ -3753,7 +4123,10 @@ async function main() {
     await smokeFinDirectorPendantsUseAllAttachments(context);
     await smokePackagingWarehousePickerDefaults(context);
     await smokeCurrentOrderReservationRestoresWarehouseQuota(context);
+    await smokeCommittedOrderDemandRestoresWarehouseQuotaWithoutActiveReservation();
     await smokePendantWarehousePickerRestoresCurrentOrderQuota();
+    await smokePendantCommittedDemandRestoresQuotaWithoutActiveReservation();
+    await smokeLoadOrderRestoresCommittedPendantQuotaWithoutActiveReservation();
     await smokePendantWarehousePickerRichUI();
     await smokePendantPickerRepairsMissingRequiredSku();
     await smokePendantCentimeterCordPricing();
