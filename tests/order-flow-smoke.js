@@ -4556,6 +4556,28 @@ async function smokeWarehouseInventoryAuditEditRewritesAudit(context) {
     assert.match(filteredInventoryHtml, /Инвентаризационная упаковка/);
     assert.doesNotMatch(filteredInventoryHtml, /Инвентаризационный трос/);
     assert.equal(vm.runInContext(`Boolean(Warehouse.inventoryAuditDetailFilters["9100"])`, context), true);
+
+    await vm.runInContext(`Warehouse.toggleInventoryAuditOnlyChanged(9100, false)`, context);
+    vm.runInContext(`
+        globalThis.__warehouseItems = globalThis.__warehouseItems.map(item => {
+            if (Number(item.id) === 701) {
+                return { ...item, qty: 118 };
+            }
+            return { ...item };
+        });
+        Warehouse.allItems = globalThis.__warehouseItems.map(item => ({ ...item }));
+    `, context);
+    await vm.runInContext(`Warehouse.renderInventoryView()`, context);
+    const inventoryHtmlWithCurrentMismatch = String(vm.runInContext(`document.getElementById('wh-content').innerHTML`, context));
+    assert.match(inventoryHtmlWithCurrentMismatch, /Только несовпадающие сейчас \(1\)/);
+    assert.match(inventoryHtmlWithCurrentMismatch, /Проверка сейчас на складе: совпадает 1 из 2 детализированных строк\./);
+
+    await vm.runInContext(`Warehouse.toggleInventoryAuditOnlyCurrentMismatch(9100, true)`, context);
+    const currentMismatchOnlyHtml = String(vm.runInContext(`document.getElementById('wh-content').innerHTML`, context));
+    assert.match(currentMismatchOnlyHtml, /Только несовпадающие сейчас \(1\)/);
+    assert.match(currentMismatchOnlyHtml, /Инвентаризационный трос/);
+    assert.doesNotMatch(currentMismatchOnlyHtml, /Инвентаризационная упаковка/);
+    assert.equal(vm.runInContext(`Warehouse.inventoryAuditDetailFilters["9100"].onlyCurrentMismatch === true`, context), true);
 }
 
 async function smokeWarehouseInventoryAuditDeleteRollsBackStock(context) {

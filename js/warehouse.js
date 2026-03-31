@@ -1083,21 +1083,65 @@ const Warehouse = {
         };
     },
 
-    _isInventoryAuditOnlyChanged(auditId) {
-        return Boolean(this.inventoryAuditDetailFilters && this.inventoryAuditDetailFilters[String(Number(auditId || 0))]);
+    _getInventoryAuditDetailFilterState(auditId) {
+        const numericAuditId = Number(auditId || 0);
+        if (!numericAuditId) {
+            return {
+                onlyChanged: false,
+                onlyCurrentMismatch: false,
+            };
+        }
+        const rawState = this.inventoryAuditDetailFilters && this.inventoryAuditDetailFilters[String(numericAuditId)];
+        if (rawState && typeof rawState === 'object') {
+            return {
+                onlyChanged: Boolean(rawState.onlyChanged),
+                onlyCurrentMismatch: Boolean(rawState.onlyCurrentMismatch),
+            };
+        }
+        return {
+            onlyChanged: Boolean(rawState),
+            onlyCurrentMismatch: false,
+        };
     },
 
-    async toggleInventoryAuditOnlyChanged(auditId, enabled) {
+    _setInventoryAuditDetailFilterState(auditId, patch) {
         const numericAuditId = Number(auditId || 0);
         if (!numericAuditId) return;
         if (!this.inventoryAuditDetailFilters || typeof this.inventoryAuditDetailFilters !== 'object') {
             this.inventoryAuditDetailFilters = {};
         }
-        if (enabled) {
-            this.inventoryAuditDetailFilters[String(numericAuditId)] = true;
-        } else {
+        const nextState = {
+            ...this._getInventoryAuditDetailFilterState(numericAuditId),
+            ...(patch || {}),
+        };
+        if (!nextState.onlyChanged && !nextState.onlyCurrentMismatch) {
             delete this.inventoryAuditDetailFilters[String(numericAuditId)];
+            return;
         }
+        this.inventoryAuditDetailFilters[String(numericAuditId)] = nextState;
+    },
+
+    _isInventoryAuditOnlyChanged(auditId) {
+        return this._getInventoryAuditDetailFilterState(auditId).onlyChanged;
+    },
+
+    _isInventoryAuditOnlyCurrentMismatch(auditId) {
+        return this._getInventoryAuditDetailFilterState(auditId).onlyCurrentMismatch;
+    },
+
+    async toggleInventoryAuditOnlyChanged(auditId, enabled) {
+        const numericAuditId = Number(auditId || 0);
+        if (!numericAuditId) return;
+        this._setInventoryAuditDetailFilterState(numericAuditId, { onlyChanged: Boolean(enabled) });
+        await this.renderInventoryView();
+        const detailsEl = document.getElementById(`wh-inventory-details-${numericAuditId}`);
+        if (detailsEl) detailsEl.open = true;
+    },
+
+    async toggleInventoryAuditOnlyCurrentMismatch(auditId, enabled) {
+        const numericAuditId = Number(auditId || 0);
+        if (!numericAuditId) return;
+        this._setInventoryAuditDetailFilterState(numericAuditId, { onlyCurrentMismatch: Boolean(enabled) });
         await this.renderInventoryView();
         const detailsEl = document.getElementById(`wh-inventory-details-${numericAuditId}`);
         if (detailsEl) detailsEl.open = true;
@@ -1155,9 +1199,13 @@ const Warehouse = {
         });
 
         const onlyChanged = this._isInventoryAuditOnlyChanged(audit.id);
-        const visibleDetails = onlyChanged
-            ? orderedDetails.filter(detail => Boolean(detail && detail.is_changed))
-            : orderedDetails;
+        const onlyCurrentMismatch = this._isInventoryAuditOnlyCurrentMismatch(audit.id);
+        const currentMismatchCount = orderedDetails.filter(detail => detail && detail.matches_current === false).length;
+        const visibleDetails = orderedDetails.filter(detail => {
+            if (onlyChanged && !(detail && detail.is_changed)) return false;
+            if (onlyCurrentMismatch && !(detail && detail.matches_current === false)) return false;
+            return true;
+        });
 
         const detailsRows = visibleDetails.map(detail => {
             const cat = WAREHOUSE_CATEGORIES.find(entry => entry.key === detail.item_category);
@@ -1198,7 +1246,7 @@ const Warehouse = {
         }).join('');
 
         const filterControls = audit.details.length > 0
-            ? `<div style="display:flex;justify-content:flex-end;align-items:center;gap:8px;margin:8px 0 12px;">
+            ? `<div style="display:flex;justify-content:flex-end;align-items:center;gap:12px;flex-wrap:wrap;margin:8px 0 12px;">
                 <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-secondary);cursor:pointer;">
                     <input
                         type="checkbox"
@@ -1206,6 +1254,14 @@ const Warehouse = {
                         onchange="Warehouse.toggleInventoryAuditOnlyChanged(${audit.id}, this.checked)"
                     >
                     Только расхождения (${audit.changedPositions})
+                </label>
+                <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-secondary);cursor:pointer;">
+                    <input
+                        type="checkbox"
+                        ${onlyCurrentMismatch ? 'checked' : ''}
+                        onchange="Warehouse.toggleInventoryAuditOnlyCurrentMismatch(${audit.id}, this.checked)"
+                    >
+                    Только несовпадающие сейчас (${currentMismatchCount})
                 </label>
             </div>`
             : '';
