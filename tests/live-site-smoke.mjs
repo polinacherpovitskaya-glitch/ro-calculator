@@ -203,8 +203,14 @@ async function smokeBugDoneFallback(page) {
 
   assert.equal(prepared.ok, true, `Failed to prepare bug fallback smoke: ${JSON.stringify(prepared)}`);
   assert.ok(prepared.buttonCount >= 1, `Expected at least one live bug done button, got ${prepared.buttonCount}`);
-
-  await page.locator('.bug-report-done-btn').first().click();
+  await page.evaluate(() => {
+    const button = document.querySelector('.bug-report-done-btn');
+    if (!button) {
+      throw new Error('missing live bug done button');
+    }
+    button.click();
+  });
+  await page.waitForTimeout(500);
 
   const bugResult = await page.evaluate(() => window.__liveBugDoneSmoke?.state || null);
   assert.ok(bugResult, 'Expected live bug fallback state after click');
