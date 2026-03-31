@@ -4544,10 +4544,18 @@ async function smokeWarehouseInventoryAuditEditRewritesAudit(context) {
     assert.match(inventoryHtmlAfterEdit, /Было в системе/);
     assert.match(inventoryHtmlAfterEdit, /Факт в инвентаризации/);
     assert.match(inventoryHtmlAfterEdit, /Разница в инвентаризации/);
+    assert.match(inventoryHtmlAfterEdit, /Только расхождения \(1\)/);
     assert.ok(
         inventoryHtmlAfterEdit.indexOf('Инвентаризационная упаковка') < inventoryHtmlAfterEdit.indexOf('Инвентаризационный трос'),
         'changed inventory rows should be rendered before unchanged rows'
     );
+
+    await vm.runInContext(`Warehouse.toggleInventoryAuditOnlyChanged(9100, true)`, context);
+    const filteredInventoryHtml = String(vm.runInContext(`document.getElementById('wh-content').innerHTML`, context));
+    assert.match(filteredInventoryHtml, /Только расхождения \(1\)/);
+    assert.match(filteredInventoryHtml, /Инвентаризационная упаковка/);
+    assert.doesNotMatch(filteredInventoryHtml, /Инвентаризационный трос/);
+    assert.equal(vm.runInContext(`Boolean(Warehouse.inventoryAuditDetailFilters["9100"])`, context), true);
 }
 
 async function smokeWarehouseInventoryAuditDeleteRollsBackStock(context) {

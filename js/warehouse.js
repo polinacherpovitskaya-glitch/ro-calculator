@@ -248,6 +248,7 @@ const Warehouse = {
     projectHardwareState: { checks: {} },
     _blankHardwareWarehouseItemIds: new Set(),
     auditDraft: null,
+    inventoryAuditDetailFilters: {},
 
     // ==========================================
     // LIFECYCLE
@@ -1082,6 +1083,26 @@ const Warehouse = {
         };
     },
 
+    _isInventoryAuditOnlyChanged(auditId) {
+        return Boolean(this.inventoryAuditDetailFilters && this.inventoryAuditDetailFilters[String(Number(auditId || 0))]);
+    },
+
+    async toggleInventoryAuditOnlyChanged(auditId, enabled) {
+        const numericAuditId = Number(auditId || 0);
+        if (!numericAuditId) return;
+        if (!this.inventoryAuditDetailFilters || typeof this.inventoryAuditDetailFilters !== 'object') {
+            this.inventoryAuditDetailFilters = {};
+        }
+        if (enabled) {
+            this.inventoryAuditDetailFilters[String(numericAuditId)] = true;
+        } else {
+            delete this.inventoryAuditDetailFilters[String(numericAuditId)];
+        }
+        await this.renderInventoryView();
+        const detailsEl = document.getElementById(`wh-inventory-details-${numericAuditId}`);
+        if (detailsEl) detailsEl.open = true;
+    },
+
     _renderInventoryAuditCard(audit, isLatest, mutationContext = null) {
         const chips = [
             `<div class="wh-inventory-chip"><span class="wh-inventory-chip-label">С расхождением в инвентаризации</span><strong>${audit.changedPositions}</strong></div>`,
@@ -1133,7 +1154,12 @@ const Warehouse = {
             return Number(a && a.item_id || 0) - Number(b && b.item_id || 0);
         });
 
-        const detailsRows = orderedDetails.map(detail => {
+        const onlyChanged = this._isInventoryAuditOnlyChanged(audit.id);
+        const visibleDetails = onlyChanged
+            ? orderedDetails.filter(detail => Boolean(detail && detail.is_changed))
+            : orderedDetails;
+
+        const detailsRows = visibleDetails.map(detail => {
             const cat = WAREHOUSE_CATEGORIES.find(entry => entry.key === detail.item_category);
             const diffClass = detail.diff > 0
                 ? 'audit-positive'
@@ -1171,6 +1197,19 @@ const Warehouse = {
             </tr>`;
         }).join('');
 
+        const filterControls = audit.details.length > 0
+            ? `<div style="display:flex;justify-content:flex-end;align-items:center;gap:8px;margin:8px 0 12px;">
+                <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-secondary);cursor:pointer;">
+                    <input
+                        type="checkbox"
+                        ${onlyChanged ? 'checked' : ''}
+                        onchange="Warehouse.toggleInventoryAuditOnlyChanged(${audit.id}, this.checked)"
+                    >
+                    Только расхождения (${audit.changedPositions})
+                </label>
+            </div>`
+            : '';
+
         return `<div class="card wh-inventory-card">
             <div class="wh-inventory-card-head">
                 <div>
@@ -1187,8 +1226,9 @@ const Warehouse = {
             </div>
             <div class="wh-inventory-chip-grid">${chips}</div>
             ${noteLines.map(line => `<div class="wh-inventory-note">${this.esc(line)}</div>`).join('')}
-            ${audit.details.length > 0 ? `<details class="wh-inventory-details" ${isLatest ? 'open' : ''}>
+            ${audit.details.length > 0 ? `<details id="wh-inventory-details-${audit.id}" class="wh-inventory-details" ${isLatest ? 'open' : ''}>
                 <summary>Показать детали (${audit.details.length})</summary>
+                ${filterControls}
                 <div class="table-wrap wh-inventory-table-wrap">
                     <table>
                         <thead><tr>
@@ -1200,7 +1240,7 @@ const Warehouse = {
                             <th class="text-right">Расхождение ₽</th>
                             <th class="text-right">Сейчас на складе</th>
                         </tr></thead>
-                        <tbody>${detailsRows}</tbody>
+                        <tbody>${detailsRows || `<tr><td colspan="7" class="text-center text-muted" style="padding:18px;">В этой инвентаризации нет строк с расхождением.</td></tr>`}</tbody>
                     </table>
                 </div>
             </details>` : `<div class="wh-inventory-note">Для этой инвентаризации в истории нет детализированных строк.</div>`}
