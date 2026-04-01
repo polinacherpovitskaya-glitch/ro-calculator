@@ -469,22 +469,88 @@ async function smokeLegacyStageDistributionAndMaterials(context) {
         const planData = { plastic: 3553, hardwareTotal: 0, packagingTotal: 0 };
         const params = { fotPerHour: 550, indirectPerHour: 100 };
 
-        Factual._applyHoursFromEntries(factData, 77, planHours, params);
+        Factual._applyHoursFromEntries(factData, 77, planHours, params, { order_name: 'Legacy Order' });
         await Factual._applyDerivedFacts(factData, planData, planHours, params, 77, 'Legacy Order');
         globalThis.__legacyFact = factData;
     })()`, context);
 
     const fact = context.__legacyFact;
-    assert.equal(fact.fact_hours_production, 14.4, 'legacy other hours should fill casting by plastic/trim ratio only');
-    assert.equal(fact.fact_hours_trim, 3.6, 'legacy other hours should fill trim by plastic/trim ratio only');
-    assert.equal(fact.fact_hours_assembly, 1, 'assembly should only include explicit stage hours');
+    assert.equal(fact.fact_hours_production, 12, 'legacy other hours should fill casting by plan ratio');
+    assert.equal(fact.fact_hours_trim, 3, 'legacy other hours should fill trim by plan ratio');
+    assert.equal(fact.fact_hours_assembly, 4, 'legacy other hours plus explicit assembly should fill assembly');
     assert.equal(fact._legacy_stage_estimate, true, 'legacy distribution marker should be present');
-    assert.ok(Math.abs(fact.fact_salary_production - 8000) < 0.05, 'casting salary should use employee rates and legacy split');
-    assert.ok(Math.abs(fact.fact_salary_trim - 2000) < 0.05, 'trim salary should use employee rates and legacy split');
-    assert.ok(Math.abs(fact.fact_salary_assembly - 500) < 0.05, 'assembly salary should include only explicit hourly entry with employee_id alias match');
+    assert.ok(Math.abs(fact.fact_salary_production - 6666.67) < 0.05, 'casting salary should use employee rates and legacy split');
+    assert.ok(Math.abs(fact.fact_salary_trim - 1666.67) < 0.05, 'trim salary should use employee rates and legacy split');
+    assert.ok(Math.abs(fact.fact_salary_assembly - 2166.67) < 0.05, 'assembly salary should include explicit hourly entry with employee_id alias match');
     assert.equal(fact.fact_indirect_production, 1900, 'indirect should use full distributed hours total');
     assert.equal(fact.fact_plastic, 3904, 'materials import should augment planned plastic cost instead of replacing it');
     assert.equal(fact._source_hints.fact_plastic, 'план + ФинТабло');
+    assert.equal(fact._source_hints.fact_indirect_production, 'часы × косв./ч, legacy по плану');
+}
+
+async function smokeWorkshopLegacyLeavesAssemblyExplicit(context) {
+    context.__imports = [];
+
+    await vm.runInContext(`(async () => {
+        Factual._employees = [
+            {
+                id: 1,
+                name: 'Тая',
+                pay_base_salary_month: 70000,
+                pay_base_hours_month: 120,
+                pay_overtime_hour_rate: 500,
+            },
+            {
+                id: 2,
+                name: 'Женя Г',
+                pay_base_salary_month: 0,
+                pay_base_hours_month: 0,
+                pay_overtime_hour_rate: 500,
+            },
+        ];
+        Factual._entries = [
+            {
+                order_id: 78,
+                worker_name: 'Тая',
+                employee_id: 1,
+                hours: 12,
+                description: '[meta]{"stage":"other","project":"МТС 3 воркшопа"}[/meta] Автоматически перенесено из legacy Google-таблицы',
+            },
+            {
+                order_id: 78,
+                worker_name: 'Женя',
+                employee_id: 2,
+                hours: 6,
+                description: '[meta]{"stage":"other","project":"МТС 3 воркшопа"}[/meta] Автоматически перенесено из legacy Google-таблицы',
+            },
+            {
+                order_id: 78,
+                worker_name: 'Женя',
+                employee_id: 2,
+                hours: 1,
+                description: '[meta]{"stage":"assembly","project":"МТС 3 воркшопа"}[/meta]',
+            },
+        ];
+
+        const factData = {};
+        const planHours = { hoursPlastic: 20, hoursTrim: 5, hoursHardware: 5, hoursPackaging: 0 };
+        const planData = { plastic: 0, hardwareTotal: 0, packagingTotal: 0 };
+        const params = { fotPerHour: 550, indirectPerHour: 100 };
+
+        Factual._applyHoursFromEntries(factData, 78, planHours, params, { order_name: 'МТС 3 воркшопа' });
+        await Factual._applyDerivedFacts(factData, planData, planHours, params, 78, 'МТС 3 воркшопа');
+        globalThis.__workshopLegacyFact = factData;
+    })()`, context);
+
+    const fact = context.__workshopLegacyFact;
+    assert.equal(fact.fact_hours_production, 14.4, 'workshop legacy other hours should fill casting by plastic/trim ratio only');
+    assert.equal(fact.fact_hours_trim, 3.6, 'workshop legacy other hours should fill trim by plastic/trim ratio only');
+    assert.equal(fact.fact_hours_assembly, 1, 'workshop assembly should only include explicit stage hours');
+    assert.ok(Math.abs(fact.fact_salary_production - 8000) < 0.05, 'workshop casting salary should use employee rates and legacy split');
+    assert.ok(Math.abs(fact.fact_salary_trim - 2000) < 0.05, 'workshop trim salary should use employee rates and legacy split');
+    assert.ok(Math.abs(fact.fact_salary_assembly - 500) < 0.05, 'workshop assembly salary should include only explicit assembly entry');
+    assert.equal(fact.fact_indirect_production, 1900, 'workshop indirect should still use total real hours');
+    assert.equal(fact._legacy_stage_scope, 'production_only');
     assert.equal(fact._source_hints.fact_indirect_production, 'часы × косв./ч, legacy в выливание/срезание');
 }
 
@@ -524,6 +590,7 @@ async function main() {
     smokeBuildPlanRendersSavedSnapshotHints(context);
     await smokeTaxesIncludeCharity(context);
     await smokeLegacyStageDistributionAndMaterials(context);
+    await smokeWorkshopLegacyLeavesAssemblyExplicit(context);
     await smokeFactualRequestsFinTabloAutoSync(context);
     console.log('factual smoke checks passed');
 }

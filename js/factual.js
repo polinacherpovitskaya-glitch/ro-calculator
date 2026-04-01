@@ -145,7 +145,13 @@ const Factual = {
         const desc = String(entry?.description || entry?.task_description || '');
         return /legacy google-таблиц/i.test(desc) || /Импорт часов 1[–-]15 марта/i.test(desc);
     },
-    _collectStageActuals(orderId, planHours = {}, params = {}) {
+    _isWorkshopOrder(orderRef = null) {
+        const value = typeof orderRef === 'string'
+            ? orderRef
+            : (orderRef?.order_name || orderRef?.project_name || orderRef?.name || '');
+        return /воркшоп|workshop/i.test(String(value || ''));
+    },
+    _collectStageActuals(orderId, planHours = {}, params = {}, orderRef = null) {
         const stageKeys = ['casting', 'trim', 'assembly', 'packaging'];
         const entries = (this._entries || []).filter(e => Number(e.order_id) === Number(orderId));
         const stageHours = { casting: 0, trim: 0, assembly: 0, packaging: 0 };
@@ -156,7 +162,9 @@ const Factual = {
             assembly: this._num(planHours.hoursHardware),
             packaging: this._num(planHours.hoursPackaging),
         };
-        const legacyStageKeys = ['casting', 'trim'].filter(stage => this._num(planStageHours[stage]) > 0);
+        const isWorkshopOrder = this._isWorkshopOrder(orderRef);
+        const legacyEligibleStages = isWorkshopOrder ? ['casting', 'trim'] : stageKeys;
+        const legacyStageKeys = legacyEligibleStages.filter(stage => this._num(planStageHours[stage]) > 0);
         const legacyPlanTotal = legacyStageKeys.reduce((sum, stage) => sum + planStageHours[stage], 0);
         const legacyWeights = legacyPlanTotal > 0
             ? legacyStageKeys.reduce((acc, stage) => ({ ...acc, [stage]: planStageHours[stage] / legacyPlanTotal }), {})
@@ -189,7 +197,12 @@ const Factual = {
             stageSalary[stage] = round2(stageSalary[stage]);
         });
 
-        return { hours: stageHours, salary: stageSalary, usedLegacyDistribution };
+        return {
+            hours: stageHours,
+            salary: stageSalary,
+            usedLegacyDistribution,
+            legacyScope: isWorkshopOrder ? 'production_only' : 'all_planned',
+        };
     },
 
     // ==========================================
@@ -828,7 +841,7 @@ async _loadFactSummaries() {
         const planData = cached.planData || {};
         const planHours = cached.planHours || {};
         const orderId = Number(cached.order?.id || cached.orderId || 0);
-        await this._applyHoursFromEntries(factData, orderId, planHours, App.params || {});
+        await this._applyHoursFromEntries(factData, orderId, planHours, App.params || {}, cached.order || null);
         await this._applyDerivedFacts(factData, planData, planHours, App.params || {}, orderId, cached.order?.order_name || '');
         let factTotal = 0;
         this.ROWS.forEach(row => { factTotal += parseFloat(factData['fact_' + row.key]) || 0; });
@@ -855,7 +868,7 @@ async _loadFactSummaries() {
         const { planData, planHours, planMeta } = this._buildPlan(order, rawItems || [], params);
         const factData = { ...(await loadFactual(orderId) || {}) };
 
-        this._applyHoursFromEntries(factData, orderId, planHours, params);
+        this._applyHoursFromEntries(factData, orderId, planHours, params, order);
         await this._applyDerivedFacts(factData, planData, planHours, params, orderId, order.order_name || '');
 
         const computed = {
@@ -871,8 +884,8 @@ async _loadFactSummaries() {
         return computed;
     },
 
-    _applyHoursFromEntries(factData, orderId, planHours = {}, params = {}) {
-        const stageActuals = this._collectStageActuals(orderId, planHours, params);
+    _applyHoursFromEntries(factData, orderId, planHours = {}, params = {}, orderRef = null) {
+        const stageActuals = this._collectStageActuals(orderId, planHours, params, orderRef);
         factData.fact_hours_production = round2(stageActuals.hours.casting);
         factData.fact_hours_trim = round2(stageActuals.hours.trim);
         factData.fact_hours_assembly = round2(stageActuals.hours.assembly);
@@ -880,10 +893,17 @@ async _loadFactSummaries() {
         factData._auto_stage_salary = stageActuals.salary;
         factData._hours_source = stageActuals.usedLegacyDistribution ? 'timetrack+legacy-stage-estimate' : 'timetrack';
         factData._legacy_stage_estimate = stageActuals.usedLegacyDistribution;
+        factData._legacy_stage_scope = stageActuals.legacyScope || 'all_planned';
         if (stageActuals.usedLegacyDistribution) {
             this._setSourceHint(factData, 'fact_salary_production', 'часы × ставка, legacy по плану');
             this._setSourceHint(factData, 'fact_salary_trim', 'часы × ставка, legacy по плану');
-            this._setSourceHint(factData, 'fact_indirect_production', 'часы × косв./ч, legacy в выливание/срезание');
+            if (stageActuals.legacyScope !== 'production_only') {
+                this._setSourceHint(factData, 'fact_salary_assembly', 'часы × ставка, legacy по плану');
+                this._setSourceHint(factData, 'fact_salary_packaging', 'часы × ставка, legacy по плану');
+                this._setSourceHint(factData, 'fact_indirect_production', 'часы × косв./ч, legacy по плану');
+            } else {
+                this._setSourceHint(factData, 'fact_indirect_production', 'часы × косв./ч, legacy в выливание/срезание');
+            }
         }
     },
 
@@ -915,8 +935,8 @@ async _loadFactSummaries() {
         return rate > 0 ? rate : fallback;
     },
 
-    _sumStageSalary(orderId, stage, params, planHours = {}) {
-        const stageActuals = this._collectStageActuals(orderId, planHours, params);
+    _sumStageSalary(orderId, stage, params, planHours = {}, orderRef = null) {
+        const stageActuals = this._collectStageActuals(orderId, planHours, params, orderRef);
         return round2(stageActuals.salary[stage] || 0);
     },
 
@@ -927,10 +947,10 @@ async _loadFactSummaries() {
         const hPkg = parseFloat(factData.fact_hours_packaging) || 0;
         const totalHours = hProd + hTrim + hAsm + hPkg;
         const stageSalary = factData._auto_stage_salary || {
-            casting: this._sumStageSalary(orderId, 'casting', params, planHours),
-            trim: this._sumStageSalary(orderId, 'trim', params, planHours),
-            assembly: this._sumStageSalary(orderId, 'assembly', params, planHours),
-            packaging: this._sumStageSalary(orderId, 'packaging', params, planHours),
+            casting: this._sumStageSalary(orderId, 'casting', params, planHours, orderName),
+            trim: this._sumStageSalary(orderId, 'trim', params, planHours, orderName),
+            assembly: this._sumStageSalary(orderId, 'assembly', params, planHours, orderName),
+            packaging: this._sumStageSalary(orderId, 'packaging', params, planHours, orderName),
         };
 
         // 1. Salaries from time entries (per-stage)
@@ -1107,7 +1127,9 @@ async _loadFactSummaries() {
     </div>`;
     if (fact._legacy_stage_estimate) {
         html += `<div style="margin:-2px 0 10px;padding:8px 10px;border:1px solid var(--border);border-radius:10px;background:var(--bg-muted);font-size:11px;color:var(--text-muted)">
-            Legacy-часы без этапа распределены только в выливание/срезание по плановым стадиям заказа. Сборка и упаковка считаются только по явно указанным этапам.
+            ${fact._legacy_stage_scope === 'production_only'
+                ? 'Legacy-часы без этапа распределены только в выливание/срезание по плановым стадиям заказа. Сборка и упаковка считаются только по явно указанным этапам.'
+                : 'Legacy-часы без этапа распределены по плановым стадиям заказа, чтобы выливание/срезание/сборка отражали реальную загрузку до ручной детализации.'}
         </div>`;
     }
     if (hasPlanDrift) {
