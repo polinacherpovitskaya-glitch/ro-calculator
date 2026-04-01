@@ -182,26 +182,54 @@ function smokeSavedPlanTotalWins(context) {
     assert.ok(html.includes('Пересчитанные статьи дают 250 ₽, но сохраненный план заказа равен 150 ₽.'), 'drift note should explain why total uses saved plan');
 }
 
-function smokeBuildPlanUsesTaxFormulaAndSavedAssemblyHours(context) {
+function smokeBuildPlanUsesSavedSnapshotCostsAndDedupedHardware(context) {
     const result = vm.runInContext(`(() => {
         return Factual._buildPlan(
             {
-                total_revenue_plan: 1000,
-                total_cost_plan: 900,
-                production_hours_hardware: 1.46,
+                total_revenue_plan: 200,
+                total_cost_plan: 180,
+                production_hours_hardware: 1,
                 production_hours_packaging: 0,
             },
             [
                 {
+                    item_type: 'product',
+                    quantity: 10,
+                    cost_fot: 2,
+                    cost_cutting: 1,
+                    cost_indirect: 3,
+                    cost_cutting_indirect: 1,
+                    cost_plastic: 4,
+                    cost_mold_amortization: 0,
+                    cost_design: 0,
+                    cost_printing: 0,
+                    cost_delivery: 0,
+                    cost_nfc_tag: 0,
+                    hours_plastic: 2,
+                    hours_cutting: 1,
+                    is_blank_mold: true,
+                },
+                {
                     item_type: 'hardware',
-                    product_name: 'Миланский шнур',
-                    quantity: 2600,
-                    hardware_price_per_unit: 1,
+                    product_name: 'Карабин',
+                    quantity: 10,
+                    hardware_price_per_unit: 5,
                     hardware_delivery_per_unit: 0,
-                }
+                    hardware_warehouse_sku: 'CAR-1',
+                    hardware_source: 'warehouse',
+                },
+                {
+                    item_type: 'hardware',
+                    product_name: 'Карабин',
+                    quantity: 10,
+                    hardware_price_per_unit: 5,
+                    hardware_delivery_per_unit: 0,
+                    hardware_warehouse_sku: 'CAR-1',
+                    hardware_source: 'warehouse',
+                },
             ],
             {
-                fotPerHour: 550,
+                fotPerHour: 10,
                 taxRate: 0.06,
                 vatRate: 0.05,
                 indirectPerHour: 0,
@@ -210,17 +238,39 @@ function smokeBuildPlanUsesTaxFormulaAndSavedAssemblyHours(context) {
         );
     })()`, context);
 
-    assert.equal(result.planData.taxes, 110, 'plan taxes should follow calculator formula 5% + 6%');
-    assert.equal(result.planHours.hoursHardware, 1.46, 'saved order assembly hours should win over raw default recalc');
-    assert.equal(result.planData.salaryAssembly, 803, 'assembly salary should use saved order hours');
+    assert.equal(result.planData.salaryProduction, 20, 'plan should reuse saved FOT from item snapshot');
+    assert.equal(result.planData.salaryTrim, 10, 'plan should reuse saved cutting cost from item snapshot');
+    assert.equal(result.planData.indirectProduction, 40, 'plan should reuse saved indirect costs from item snapshot');
+    assert.equal(result.planData.hardwareTotal, 50, 'duplicate hardware rows should be collapsed in plan costs');
+    assert.equal(result.planHours.hoursHardware, 1, 'saved order assembly hours should win over duplicated hardware norm noise');
+    assert.equal(result.planData.salaryAssembly, 10, 'assembly salary should follow saved order hours');
+    assert.equal(result.planData.taxes, 10, 'balance remainder should land in taxes when saved total is authoritative');
+    assert.equal(result.planData.other, 0, 'no corrective residue should remain for consistent snapshot');
+    assert.equal(
+        result.planData.totalCosts,
+        result.planData.salaryProduction +
+            result.planData.salaryTrim +
+            result.planData.salaryAssembly +
+            result.planData.salaryPackaging +
+            result.planData.indirectProduction +
+            result.planData.hardwareTotal +
+            result.planData.packagingTotal +
+            result.planData.designPrinting +
+            result.planData.plastic +
+            result.planData.molds +
+            result.planData.delivery +
+            result.planData.taxes +
+            result.planData.other,
+        'plan rows should add up to saved total cost'
+    );
 }
 
-function smokeBuildPlanUsesHourBasedIndirectAndAssemblyHints(context) {
+function smokeBuildPlanRendersSavedSnapshotHints(context) {
     const result = vm.runInContext(`(() => {
         const built = Factual._buildPlan(
             {
-                total_revenue_plan: 1000,
-                total_cost_plan: 0,
+                total_revenue_plan: 200,
+                total_cost_plan: 180,
                 production_hours_hardware: 1.46,
                 production_hours_packaging: 0,
             },
@@ -228,29 +278,31 @@ function smokeBuildPlanUsesHourBasedIndirectAndAssemblyHints(context) {
                 {
                     item_type: 'product',
                     quantity: 10,
-                    cost_indirect: 999,
-                    cost_cutting_indirect: 0,
-                    cost_nfc_indirect: 0,
+                    cost_fot: 2,
+                    cost_cutting: 1,
+                    cost_indirect: 3,
+                    cost_cutting_indirect: 1,
                     cost_plastic: 0,
                     cost_design: 0,
                     cost_printing: 0,
                     cost_delivery: 0,
                     cost_nfc_tag: 0,
                     is_blank_mold: true,
-                    pieces_per_hour: 10,
-                    result: { hoursPlastic: 2, hoursCutting: 1 }
+                    hours_plastic: 2,
+                    hours_cutting: 1,
                 },
                 {
                     item_type: 'hardware',
-                    product_name: 'Буква',
-                    quantity: 2600,
-                    hardware_price_per_unit: 1,
+                    product_name: 'Карабин',
+                    quantity: 10,
+                    hardware_price_per_unit: 5,
                     hardware_delivery_per_unit: 0,
-                    hardware_assembly_speed: 300,
+                    hardware_warehouse_sku: 'CAR-1',
+                    hardware_source: 'warehouse',
                 }
             ],
             {
-                fotPerHour: 550,
+                fotPerHour: 10,
                 taxRate: 0,
                 vatRate: 0,
                 indirectPerHour: 100,
@@ -263,11 +315,12 @@ function smokeBuildPlanUsesHourBasedIndirectAndAssemblyHints(context) {
 
     assert.equal(result.planHours.hoursPlastic, 2);
     assert.equal(result.planHours.hoursTrim, 1);
-    assert.ok(Math.abs(result.planHours.hoursHardware - 10.99) < 0.01, 'blank orders should sum current blank assembly norms and manual saved assembly hours');
-    assert.equal(result.planData.indirectProduction, 1399, 'indirect should always be recomputed from full total planned hours');
-    assert.equal(result.planMeta.salary_assembly.source, 'blank_norms_plus_manual');
-    assert.ok(Math.abs(result.planMeta.salary_assembly.derivedHours - 9.53) < 0.01, 'derived assembly hours should keep current line norm for diagnostics');
+    assert.equal(result.planHours.hoursHardware, 1.46);
+    assert.equal(result.planData.indirectProduction, 40, 'indirect should come from saved row snapshot, not current hour rate formula');
+    assert.equal(result.planMeta.salary_assembly.source, 'saved_order');
+    assert.equal(result.planMeta.salary_assembly.derivedHours, 0, 'no phantom derived assembly hours should be injected from hardware rows');
     assert.equal(result.planMeta.salary_assembly.savedHours, 1.46);
+    assert.equal(result.planMeta.indirect_production.source, 'saved_items');
 
     context.App.isAdmin = () => true;
     const container = context.document.getElementById('fact-detail-3');
@@ -292,10 +345,8 @@ function smokeBuildPlanUsesHourBasedIndirectAndAssemblyHints(context) {
     })()`, context);
 
     const html = container.innerHTML;
-    assert.ok(html.includes('бланки + вручную'), 'assembly row should explain that blank order assembly combines blank norms and manual manager hours');
-    assert.ok(html.includes('по текущим бланкам: 9,53ч'), 'assembly row should show current blank norm contribution');
-    assert.ok(html.includes('вручную добавлено: 1,46ч'), 'assembly row should show manual manager contribution');
-    assert.ok(html.includes('13,99ч × 100 ₽/ч'), 'indirect row should show hours formula for plan');
+    assert.ok(html.includes('сохранено в заказе'), 'assembly row should show that plan assembly comes from saved order snapshot');
+    assert.ok(html.includes('сохранённые косвенные из строк заказа'), 'indirect row should explain that historical row snapshot is used');
     assert.ok(html.includes('77ч × 100 ₽/ч'), 'indirect row should show actual hours formula for fact');
 }
 
@@ -411,8 +462,8 @@ async function main() {
     smokeSavedPlanTotalWins(context);
     smokeRevenueManualOverride(context);
     await smokeResetAutoFactInput(context);
-    smokeBuildPlanUsesTaxFormulaAndSavedAssemblyHours(context);
-    smokeBuildPlanUsesHourBasedIndirectAndAssemblyHints(context);
+    smokeBuildPlanUsesSavedSnapshotCostsAndDedupedHardware(context);
+    smokeBuildPlanRendersSavedSnapshotHints(context);
     await smokeLegacyStageDistributionAndMaterials(context);
     await smokeFactualRequestsFinTabloAutoSync(context);
     console.log('factual smoke checks passed');

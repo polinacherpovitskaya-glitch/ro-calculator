@@ -61,6 +61,58 @@ const Factual = {
     ]),
 
     _num(v) { const n = parseFloat(v); return Number.isFinite(n) ? n : 0; },
+    _planItemCost(item, ...keys) {
+        for (const key of keys) {
+            const value = this._num(item?.[key]);
+            if (value !== 0) return value;
+        }
+        return 0;
+    },
+    _planItemHours(item, ...keys) {
+        for (const key of keys) {
+            const value = this._num(item?.[key]);
+            if (value > 0) return value;
+        }
+        return 0;
+    },
+    _makePlanDedupKey(item) {
+        if (!item || !item.item_type) return null;
+        if (item.item_type === 'hardware') {
+            return [
+                'hardware',
+                item.product_name || '',
+                this._num(item.quantity),
+                this._num(item.hardware_price_per_unit),
+                this._num(item.hardware_delivery_per_unit),
+                item.hardware_warehouse_sku || '',
+                item.hardware_source || '',
+                item.hardware_parent_item_index ?? '',
+            ].join('|');
+        }
+        if (item.item_type === 'packaging') {
+            return [
+                'packaging',
+                item.product_name || '',
+                this._num(item.quantity),
+                this._num(item.packaging_price_per_unit),
+                this._num(item.packaging_delivery_per_unit),
+                item.packaging_warehouse_sku || '',
+                item.packaging_source || '',
+                item.packaging_parent_item_index ?? '',
+            ].join('|');
+        }
+        return null;
+    },
+    _dedupePlanItems(rawItems = []) {
+        const seen = new Set();
+        return (rawItems || []).filter(item => {
+            const key = this._makePlanDedupKey(item);
+            if (!key) return true;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
+    },
     _getSourceHints(factData) {
         const raw = factData && factData._source_hints;
         return (raw && typeof raw === 'object') ? raw : {};
@@ -576,127 +628,104 @@ async _loadFactSummaries() {
     },
 
     _buildPlan(order, rawItems, params) {
-        const calcItems = [];
-        const calcHw = [];
-        const calcPkg = [];
-
-        rawItems.forEach(ri => {
-            if (ri.item_type === 'product') {
-                const item = {
-                    quantity: ri.quantity, pieces_per_hour: ri.pieces_per_hour,
-                    weight_grams: ri.weight_grams, extra_molds: ri.extra_molds || 0,
-                    base_mold_in_stock: ri.base_mold_in_stock || false,
-                    complex_design: ri.complex_design || false, is_blank_mold: ri.is_blank_mold || false,
-                    is_nfc: ri.is_nfc || false, nfc_programming: ri.nfc_programming || false,
-                    delivery_included: ri.delivery_included || false,
-                    printings: ri.printings ? (typeof ri.printings === 'string' ? JSON.parse(ri.printings) : ri.printings) : [],
-                    sell_price_item: ri.sell_price_item || 0, sell_price_printing: ri.sell_price_printing || 0,
-                    product_name: ri.product_name, template_id: ri.template_id || null,
-                    builtin_hw_name: ri.builtin_hw_name || '', builtin_hw_price: ri.builtin_hw_price || 0,
-                    builtin_hw_delivery_total: ri.builtin_hw_delivery_total || 0, builtin_hw_speed: ri.builtin_hw_speed || 0,
-                };
-                const savedProductResult = (ri.result && typeof ri.result === 'object')
-                    ? {
-                        hoursPlastic: this._num(ri.result.hoursPlastic),
-                        hoursCutting: this._num(ri.result.hoursCutting),
-                    }
-                    : null;
-                const rawHoursPlastic = this._num(ri.hours_plastic);
-                const rawHoursCutting = this._num(ri.hours_cutting);
-                if (savedProductResult && (savedProductResult.hoursPlastic > 0 || savedProductResult.hoursCutting > 0)) {
-                    item.result = savedProductResult;
-                } else if (rawHoursPlastic > 0 || rawHoursCutting > 0) {
-                    item.result = { hoursPlastic: round2(rawHoursPlastic), hoursCutting: round2(rawHoursCutting) };
-                } else {
-                    item.result = calculateItemCost(item, params);
-                }
-                calcItems.push(item);
-            } else if (ri.item_type === 'hardware') {
-                const savedHardwareHours = this._num(ri.result?.hoursHardware || ri.hours_hardware);
-                const hw = {
-                    name: ri.product_name,
-                    qty: ri.quantity,
-                    assembly_speed: ri.hardware_assembly_speed || ri.assembly_speed || 60,
-                    price: ri.hardware_price_per_unit || 0,
-                    delivery_price: ri.hardware_delivery_per_unit || 0,
-                    delivery_total: ri.hardware_delivery_total || 0,
-                    sell_price: ri.sell_price_hardware || 0,
-                };
-                hw.result = savedHardwareHours > 0
-                    ? { hoursHardware: round2(savedHardwareHours) }
-                    : calculateHardwareCost(hw, params);
-                calcHw.push(hw);
-            } else if (ri.item_type === 'packaging') {
-                const savedPackagingHours = this._num(ri.result?.hoursPackaging || ri.hours_packaging);
-                const pkg = {
-                    name: ri.product_name,
-                    qty: ri.quantity,
-                    assembly_speed: ri.packaging_assembly_speed || ri.assembly_speed || 60,
-                    price: ri.packaging_price_per_unit || 0,
-                    delivery_price: ri.packaging_delivery_per_unit || 0,
-                    delivery_total: ri.packaging_delivery_total || 0,
-                    sell_price: ri.sell_price_packaging || 0,
-                };
-                pkg.result = savedPackagingHours > 0
-                    ? { hoursPackaging: round2(savedPackagingHours) }
-                    : calculatePackagingCost(pkg, params);
-                calcPkg.push(pkg);
-            }
-        });
-
+        const planItems = this._dedupePlanItems(rawItems || []);
         let planHoursPlastic = 0, planHoursTrim = 0, planHoursAssembly = 0, planHoursPackaging = 0;
-        calcItems.forEach(item => {
-            if (item.result) {
-                planHoursPlastic += item.result.hoursPlastic || 0;
-                planHoursTrim += item.result.hoursCutting || 0;
+        let hardwarePurchase = 0, hardwareDelivery = 0, packagingPurchase = 0, packagingDelivery = 0;
+        let designPrinting = 0, plastic = 0, molds = 0, delivery = 0;
+        let savedIndirect = 0;
+        let hasSavedSnapshot = false;
+        let usedDuplicateCollapse = planItems.length !== (rawItems || []).length;
+
+        planItems.forEach(ri => {
+            const qty = this._num(ri.quantity);
+            if (qty <= 0) return;
+
+            if (ri.item_type === 'product') {
+                const snapshotHoursPlastic = this._num(ri.hours_plastic) || this._num(ri.result?.hoursPlastic);
+                const snapshotHoursTrim = this._num(ri.hours_cutting) || this._num(ri.result?.hoursCutting);
+                const calcFallback = (!snapshotHoursPlastic && !snapshotHoursTrim)
+                    ? calculateItemCost({
+                        quantity: ri.quantity,
+                        pieces_per_hour: ri.pieces_per_hour,
+                        weight_grams: ri.weight_grams,
+                        extra_molds: ri.extra_molds || 0,
+                        base_mold_in_stock: ri.base_mold_in_stock || false,
+                        complex_design: ri.complex_design || false,
+                        is_blank_mold: ri.is_blank_mold || false,
+                        is_nfc: ri.is_nfc || false,
+                        nfc_programming: ri.nfc_programming || false,
+                        delivery_included: ri.delivery_included || false,
+                        printings: ri.printings ? (typeof ri.printings === 'string' ? JSON.parse(ri.printings) : ri.printings) : [],
+                        sell_price_item: ri.sell_price_item || 0,
+                        sell_price_printing: ri.sell_price_printing || 0,
+                        product_name: ri.product_name,
+                        template_id: ri.template_id || null,
+                        builtin_hw_name: ri.builtin_hw_name || '',
+                        builtin_hw_price: ri.builtin_hw_price || 0,
+                        builtin_hw_delivery_total: ri.builtin_hw_delivery_total || 0,
+                        builtin_hw_speed: ri.builtin_hw_speed || 0,
+                    }, params)
+                    : null;
+                planHoursPlastic += snapshotHoursPlastic > 0 ? snapshotHoursPlastic : this._num(calcFallback?.hoursPlastic);
+                planHoursTrim += snapshotHoursTrim > 0 ? snapshotHoursTrim : this._num(calcFallback?.hoursCutting);
+
+                const productFot = this._planItemCost(ri, 'cost_fot');
+                const productCutting = this._planItemCost(ri, 'cost_cutting');
+                const productIndirect = this._planItemCost(ri, 'cost_indirect');
+                const cuttingIndirect = this._planItemCost(ri, 'cost_cutting_indirect');
+                const productPlastic = this._planItemCost(ri, 'cost_plastic');
+                const productMold = this._planItemCost(ri, 'cost_mold_amortization');
+                const productDesign = this._planItemCost(ri, 'cost_design');
+                const productPrinting = this._planItemCost(ri, 'cost_printing');
+                const productDelivery = this._planItemCost(ri, 'cost_delivery');
+                const productNfc = this._planItemCost(ri, 'cost_nfc_tag');
+                if (productFot || productCutting || productIndirect || cuttingIndirect || productPlastic || productMold || productDesign || productPrinting || productDelivery || productNfc) {
+                    hasSavedSnapshot = true;
+                }
+
+                plastic += qty * productPlastic;
+                if (!ri.is_blank_mold) molds += qty * productMold;
+                designPrinting += qty * (productDesign + productPrinting);
+                delivery += qty * productDelivery;
+                hardwarePurchase += qty * productNfc;
+                savedIndirect += qty * (productIndirect + cuttingIndirect);
+            } else if (ri.item_type === 'hardware') {
+                const savedHardwareHours = this._num(ri.hours_hardware) || this._num(ri.result?.hoursHardware);
+                planHoursAssembly += savedHardwareHours;
+                hardwarePurchase += qty * this._planItemCost(ri, 'hardware_price_per_unit');
+                hardwareDelivery += qty * this._planItemCost(ri, 'hardware_delivery_per_unit');
+                if (savedHardwareHours > 0 || this._planItemCost(ri, 'hardware_price_per_unit', 'hardware_delivery_per_unit') > 0) {
+                    hasSavedSnapshot = true;
+                }
+            } else if (ri.item_type === 'packaging') {
+                const savedPackagingHours = this._num(ri.hours_packaging) || this._num(ri.result?.hoursPackaging);
+                planHoursPackaging += savedPackagingHours;
+                packagingPurchase += qty * this._planItemCost(ri, 'packaging_price_per_unit');
+                packagingDelivery += qty * this._planItemCost(ri, 'packaging_delivery_per_unit');
+                if (savedPackagingHours > 0 || this._planItemCost(ri, 'packaging_price_per_unit', 'packaging_delivery_per_unit') > 0) {
+                    hasSavedSnapshot = true;
+                }
             }
         });
-        calcHw.forEach(hw => { if (hw.result) planHoursAssembly += hw.result.hoursHardware || 0; });
-        calcPkg.forEach(pkg => { if (pkg.result) planHoursPackaging += pkg.result.hoursPackaging || 0; });
 
         const derivedAssemblyHours = round2(planHoursAssembly);
         const derivedPackagingHours = round2(planHoursPackaging);
-        const hasBlankAssemblyDriver = rawItems.some(ri =>
-            (ri.item_type === 'product' && !!ri.is_blank_mold) ||
-            (ri.item_type === 'hardware' && !!ri.hardware_from_template)
-        );
         const savedAssemblyHours = this._num(order.production_hours_hardware);
-        if (hasBlankAssemblyDriver) {
-            planHoursAssembly = derivedAssemblyHours + (savedAssemblyHours > 0 ? savedAssemblyHours : 0);
-        } else if (savedAssemblyHours > 0) {
-            planHoursAssembly = savedAssemblyHours;
-        }
+        if (savedAssemblyHours > 0) planHoursAssembly = savedAssemblyHours;
         const savedPackagingHours = this._num(order.production_hours_packaging);
         if (savedPackagingHours > 0) planHoursPackaging = savedPackagingHours;
 
-        const salaryProduction = round2(planHoursPlastic * (params.fotPerHour || 0));
-        const salaryTrim = round2(planHoursTrim * (params.fotPerHour || 0));
+        const salaryProduction = round2(hasSavedSnapshot
+            ? planItems.reduce((sum, ri) => ri.item_type === 'product' ? sum + (this._num(ri.quantity) * this._planItemCost(ri, 'cost_fot')) : sum, 0)
+            : (planHoursPlastic * (params.fotPerHour || 0)));
+        const salaryTrim = round2(hasSavedSnapshot
+            ? planItems.reduce((sum, ri) => ri.item_type === 'product' ? sum + (this._num(ri.quantity) * this._planItemCost(ri, 'cost_cutting')) : sum, 0)
+            : (planHoursTrim * (params.fotPerHour || 0)));
         const salaryAssembly = round2(planHoursAssembly * (params.fotPerHour || 0));
         const salaryPackaging = round2(planHoursPackaging * (params.fotPerHour || 0));
 
-        let hardwarePurchase = 0, hardwareDelivery = 0, packagingPurchase = 0, packagingDelivery = 0;
-        let designPrinting = 0, plastic = 0, molds = 0, delivery = 0;
-
-        rawItems.forEach(ri => {
-            const qty = this._num(ri.quantity);
-            if (qty <= 0) return;
-            if (ri.item_type === 'product') {
-                plastic += qty * this._num(ri.cost_plastic);
-                if (!ri.is_blank_mold) molds += qty * this._num(ri.cost_mold_amortization);
-                designPrinting += qty * (this._num(ri.cost_design) + this._num(ri.cost_printing));
-                delivery += qty * this._num(ri.cost_delivery);
-                hardwarePurchase += qty * this._num(ri.cost_nfc_tag);
-            } else if (ri.item_type === 'hardware') {
-                hardwarePurchase += qty * this._num(ri.hardware_price_per_unit);
-                hardwareDelivery += qty * this._num(ri.hardware_delivery_per_unit);
-            } else if (ri.item_type === 'packaging') {
-                packagingPurchase += qty * this._num(ri.packaging_price_per_unit);
-                packagingDelivery += qty * this._num(ri.packaging_delivery_per_unit);
-            }
-        });
-
         const plannedHoursTotal = planHoursPlastic + planHoursTrim + planHoursAssembly + planHoursPackaging;
-        const prodIndirect = round2(plannedHoursTotal * (params.indirectPerHour || 0));
+        const prodIndirect = round2(hasSavedSnapshot ? savedIndirect : (plannedHoursTotal * (params.indirectPerHour || 0)));
 
         const orderRevenue = this._num(order.total_revenue_plan);
         const orderCosts = this._num(order.total_cost_plan);
@@ -706,9 +735,10 @@ async _loadFactSummaries() {
             round2(designPrinting) + round2(plastic) + round2(molds) + round2(delivery)
         );
         const taxesByFormula = round2(orderRevenue * (this._num(params.taxRate) + this._num(params.vatRate)));
-        const taxesByBalance = round2(Math.max(0, orderCosts > 0 ? (orderCosts - rowsWithoutTaxes) : 0));
-        const taxes = taxesByFormula > 0 ? taxesByFormula : taxesByBalance;
-        const computedTotalCosts = round2(rowsWithoutTaxes + taxes);
+        const taxesByBalance = round2(orderCosts > 0 ? (orderCosts - rowsWithoutTaxes) : 0);
+        const taxes = orderCosts > 0 ? Math.max(0, taxesByBalance) : taxesByFormula;
+        const otherBalance = orderCosts > 0 ? round2(orderCosts - rowsWithoutTaxes - taxes) : 0;
+        const computedTotalCosts = round2(rowsWithoutTaxes + taxes + otherBalance);
 
         return {
             planData: {
@@ -718,7 +748,7 @@ async _loadFactSummaries() {
                 hardwareTotal: round2(hardwarePurchase + hardwareDelivery),
                 packagingTotal: round2(packagingPurchase + packagingDelivery),
                 designPrinting: round2(designPrinting), plastic: round2(plastic),
-                molds: round2(molds), delivery: round2(delivery), taxes: round2(taxes), other: 0,
+                molds: round2(molds), delivery: round2(delivery), taxes: round2(taxes), other: round2(otherBalance),
                 totalCosts: orderCosts > 0 ? round2(orderCosts) : computedTotalCosts,
                 revenue: orderRevenue > 0 ? round2(orderRevenue) : 0,
                 planMarginPercent: this._num(order.margin_percent_plan),
@@ -731,31 +761,34 @@ async _loadFactSummaries() {
             planMeta: {
                 salary_production: {
                     planHours: round2(planHoursPlastic),
-                    source: 'derived_items',
+                    source: hasSavedSnapshot ? 'saved_items' : 'derived_items',
                 },
                 salary_trim: {
                     planHours: round2(planHoursTrim),
-                    source: 'derived_items',
+                    source: hasSavedSnapshot ? 'saved_items' : 'derived_items',
                 },
                 salary_assembly: {
                     planHours: round2(planHoursAssembly),
-                    source: hasBlankAssemblyDriver
-                        ? (savedAssemblyHours > 0 ? 'blank_norms_plus_manual' : 'blank_norms')
-                        : (savedAssemblyHours > 0 ? 'saved_order' : 'derived_items'),
+                    source: savedAssemblyHours > 0
+                        ? 'saved_order'
+                        : (derivedAssemblyHours > 0 ? 'saved_items' : 'derived_items'),
                     savedHours: round2(savedAssemblyHours),
                     derivedHours: round2(derivedAssemblyHours),
                 },
                 salary_packaging: {
                     planHours: round2(planHoursPackaging),
-                    source: savedPackagingHours > 0 ? 'saved_order' : 'derived_items',
+                    source: savedPackagingHours > 0 ? 'saved_order' : (derivedPackagingHours > 0 ? 'saved_items' : 'derived_items'),
                     savedHours: round2(savedPackagingHours),
                     derivedHours: round2(derivedPackagingHours),
                 },
                 indirect_production: {
                     planHours: round2(plannedHoursTotal),
                     perHour: this._num(params.indirectPerHour),
-                    source: 'hours_formula',
-                    formula: 'общие плановые часы × косв./ч',
+                    source: hasSavedSnapshot ? 'saved_items' : 'hours_formula',
+                    detailHtml: hasSavedSnapshot
+                        ? `сохранённые косвенные из строк заказа${usedDuplicateCollapse ? '<br>дубли фурнитуры схлопнуты' : ''}`
+                        : undefined,
+                    formula: hasSavedSnapshot ? 'сохранённые cost_indirect из строк заказа' : 'общие плановые часы × косв./ч',
                 },
             },
         };
@@ -1288,6 +1321,7 @@ async _loadFactSummaries() {
     _renderPlanRowDetail(rowKey, planMeta = {}) {
         const meta = planMeta?.[rowKey];
         if (!meta) return '';
+        if (meta.detailHtml) return meta.detailHtml;
         if (rowKey === 'indirect_production') {
             return `${this.fmtHours(meta.planHours)} × ${this.fmtRub(meta.perHour || 0)}/ч`;
         }
@@ -1303,6 +1337,13 @@ async _loadFactSummaries() {
             detail += ' • по текущим бланкам';
             if (this._num(meta.savedHours) > 0 && Math.abs(this._num(meta.savedHours) - this._num(meta.planHours)) > 0.05) {
                 detail += `<br>в заказе было: ${this.fmtHours(meta.savedHours)}`;
+            }
+            return detail;
+        }
+        if (meta.source === 'saved_items') {
+            detail += ' • из сохранённых строк заказа';
+            if (Math.abs(this._num(meta.derivedHours) - this._num(meta.planHours)) > 0.05) {
+                detail += `<br>по сохранённым строкам: ${this.fmtHours(meta.derivedHours)}`;
             }
             return detail;
         }
