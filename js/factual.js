@@ -156,9 +156,10 @@ const Factual = {
             assembly: this._num(planHours.hoursHardware),
             packaging: this._num(planHours.hoursPackaging),
         };
-        const planTotal = stageKeys.reduce((sum, stage) => sum + planStageHours[stage], 0);
-        const weights = planTotal > 0
-            ? stageKeys.reduce((acc, stage) => ({ ...acc, [stage]: planStageHours[stage] / planTotal }), {})
+        const legacyStageKeys = ['casting', 'trim'].filter(stage => this._num(planStageHours[stage]) > 0);
+        const legacyPlanTotal = legacyStageKeys.reduce((sum, stage) => sum + planStageHours[stage], 0);
+        const legacyWeights = legacyPlanTotal > 0
+            ? legacyStageKeys.reduce((acc, stage) => ({ ...acc, [stage]: planStageHours[stage] / legacyPlanTotal }), {})
             : null;
         let usedLegacyDistribution = false;
 
@@ -172,9 +173,9 @@ const Factual = {
                 stageSalary[stage] += hours * rate;
                 return;
             }
-            if (!weights || !this._isLegacyImportedEntry(entry)) return;
-            const distributed = this._splitWeightedValue(hours, weights, stageKeys);
-            stageKeys.forEach(stageKey => {
+            if (!legacyWeights || !this._isLegacyImportedEntry(entry)) return;
+            const distributed = this._splitWeightedValue(hours, legacyWeights, legacyStageKeys);
+            legacyStageKeys.forEach(stageKey => {
                 const splitHours = this._num(distributed[stageKey]);
                 if (splitHours <= 0) return;
                 stageHours[stageKey] += splitHours;
@@ -882,9 +883,7 @@ async _loadFactSummaries() {
         if (stageActuals.usedLegacyDistribution) {
             this._setSourceHint(factData, 'fact_salary_production', 'часы × ставка, legacy по плану');
             this._setSourceHint(factData, 'fact_salary_trim', 'часы × ставка, legacy по плану');
-            this._setSourceHint(factData, 'fact_salary_assembly', 'часы × ставка, legacy по плану');
-            this._setSourceHint(factData, 'fact_salary_packaging', 'часы × ставка, legacy по плану');
-            this._setSourceHint(factData, 'fact_indirect_production', 'часы × косв./ч, legacy по плану');
+            this._setSourceHint(factData, 'fact_indirect_production', 'часы × косв./ч, legacy в выливание/срезание');
         }
     },
 
@@ -1108,7 +1107,7 @@ async _loadFactSummaries() {
     </div>`;
     if (fact._legacy_stage_estimate) {
         html += `<div style="margin:-2px 0 10px;padding:8px 10px;border:1px solid var(--border);border-radius:10px;background:var(--bg-muted);font-size:11px;color:var(--text-muted)">
-            Legacy-часы без этапа распределены по плановым стадиям заказа, чтобы выливание/срезание/сборка отражали реальную загрузку до ручной детализации.
+            Legacy-часы без этапа распределены только в выливание/срезание по плановым стадиям заказа. Сборка и упаковка считаются только по явно указанным этапам.
         </div>`;
     }
     if (hasPlanDrift) {

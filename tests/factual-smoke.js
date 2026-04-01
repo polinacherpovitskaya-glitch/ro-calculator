@@ -475,16 +475,17 @@ async function smokeLegacyStageDistributionAndMaterials(context) {
     })()`, context);
 
     const fact = context.__legacyFact;
-    assert.equal(fact.fact_hours_production, 12, 'legacy other hours should fill casting by plan ratio');
-    assert.equal(fact.fact_hours_trim, 3, 'legacy other hours should fill trim by plan ratio');
-    assert.equal(fact.fact_hours_assembly, 4, 'legacy other hours plus explicit assembly should fill assembly');
+    assert.equal(fact.fact_hours_production, 14.4, 'legacy other hours should fill casting by plastic/trim ratio only');
+    assert.equal(fact.fact_hours_trim, 3.6, 'legacy other hours should fill trim by plastic/trim ratio only');
+    assert.equal(fact.fact_hours_assembly, 1, 'assembly should only include explicit stage hours');
     assert.equal(fact._legacy_stage_estimate, true, 'legacy distribution marker should be present');
-    assert.ok(Math.abs(fact.fact_salary_production - 6666.67) < 0.05, 'casting salary should use employee rates and legacy split');
-    assert.ok(Math.abs(fact.fact_salary_trim - 1666.67) < 0.05, 'trim salary should use employee rates and legacy split');
-    assert.ok(Math.abs(fact.fact_salary_assembly - 2166.67) < 0.05, 'assembly salary should include explicit hourly entry with employee_id alias match');
+    assert.ok(Math.abs(fact.fact_salary_production - 8000) < 0.05, 'casting salary should use employee rates and legacy split');
+    assert.ok(Math.abs(fact.fact_salary_trim - 2000) < 0.05, 'trim salary should use employee rates and legacy split');
+    assert.ok(Math.abs(fact.fact_salary_assembly - 500) < 0.05, 'assembly salary should include only explicit hourly entry with employee_id alias match');
     assert.equal(fact.fact_indirect_production, 1900, 'indirect should use full distributed hours total');
     assert.equal(fact.fact_plastic, 3904, 'materials import should augment planned plastic cost instead of replacing it');
     assert.equal(fact._source_hints.fact_plastic, 'план + ФинТабло');
+    assert.equal(fact._source_hints.fact_indirect_production, 'часы × косв./ч, legacy в выливание/срезание');
 }
 
 async function smokeFactualRequestsFinTabloAutoSync(context) {
