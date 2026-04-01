@@ -787,7 +787,7 @@ async _loadFactSummaries() {
                     perHour: this._num(params.indirectPerHour),
                     source: hasSavedSnapshot ? 'saved_items' : 'hours_formula',
                     detailHtml: hasSavedSnapshot
-                        ? `сохранённые косвенные из строк заказа${usedDuplicateCollapse ? '<br>дубли фурнитуры схлопнуты' : ''}`
+                        ? `косвенные сохранены в строках заказа${usedDuplicateCollapse ? '<br>одинаковые складские позиции объединены, чтобы не считать фурнитуру дважды' : ''}`
                         : undefined,
                     formula: hasSavedSnapshot ? 'сохранённые cost_indirect из строк заказа' : 'общие плановые часы × косв./ч',
                 },

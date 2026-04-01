@@ -346,7 +346,7 @@ function smokeBuildPlanRendersSavedSnapshotHints(context) {
 
     const html = container.innerHTML;
     assert.ok(html.includes('сохранено в заказе'), 'assembly row should show that plan assembly comes from saved order snapshot');
-    assert.ok(html.includes('сохранённые косвенные из строк заказа'), 'indirect row should explain that historical row snapshot is used');
+    assert.ok(html.includes('косвенные сохранены в строках заказа'), 'indirect row should explain that historical row snapshot is used');
     assert.ok(html.includes('77ч × 100 ₽/ч'), 'indirect row should show actual hours formula for fact');
 }
 

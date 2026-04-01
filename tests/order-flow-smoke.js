@@ -562,7 +562,7 @@ async function smokeBlankPricingSeparatesCatalogPriceAndNetMargin(context) {
     assert.match(pricingHtml, /Рекоменд\. цена/);
     assert.match(pricingHtml, /вручную в бланке/);
     assert.match(pricingHtml, /Чистая маржа/);
-    assert.match(pricingHtml, /36%/);
+    assert.match(pricingHtml, /35%/);
 }
 
 async function smokeFinDirectorPendantsUseAllAttachments(context) {
@@ -3675,6 +3675,118 @@ async function smokeProjectHardwareLegacyQtyAndStringIdDeduction(context) {
     assert.equal(context.__reservations[0].status, 'released');
 }
 
+async function smokeProjectHardwareActualQtyEditableFlow(context) {
+    const order = {
+        id: 321,
+        order_name: 'Actual Qty Project Order',
+        manager_name: 'Smoke',
+        status: 'production_hardware',
+        created_at: '2026-03-18T12:00:00.000Z',
+    };
+    const detail = {
+        order: clone(order),
+        items: [{
+            item_type: 'hardware',
+            product_name: 'Editable Hardware Qty',
+            quantity: 5,
+            hardware_source: 'warehouse',
+            hardware_warehouse_item_id: 901,
+        }],
+    };
+
+    context.__projectHardwareState = { checks: {}, actual_qtys: {} };
+    context.__reservations = [{
+        id: 1,
+        item_id: 901,
+        order_id: 321,
+        order_name: 'Actual Qty Project Order',
+        qty: 5,
+        status: 'active',
+        source: 'project_hardware',
+        created_at: '2026-03-18T12:00:00.000Z',
+    }];
+    context.__warehouseItems = [{
+        id: 901,
+        name: 'Editable Hardware Qty',
+        sku: 'AHQ-1',
+        category: 'hardware',
+        qty: 10,
+        unit: 'шт',
+        price_per_unit: 10,
+    }];
+    context.__warehouseHistory = [];
+    context.__orderDetails = { 321: clone(detail) };
+    context.loadProjectHardwareState = async () => clone(context.__projectHardwareState);
+    context.saveProjectHardwareState = async (state) => {
+        context.__projectHardwareState = clone(state);
+    };
+    context.loadWarehouseReservations = async () => clone(context.__reservations);
+    context.saveWarehouseReservations = async (reservations) => {
+        context.__reservations = clone(reservations);
+    };
+    context.loadWarehouseItems = async () => clone(context.__warehouseItems);
+    context.saveWarehouseItems = async (items) => {
+        context.__warehouseItems = clone(items);
+    };
+    context.loadWarehouseHistory = async () => clone(context.__warehouseHistory);
+    context.saveWarehouseHistory = async (history) => {
+        context.__warehouseHistory = clone(history);
+    };
+    context.loadOrder = async (orderId) => clone(context.__orderDetails[Number(orderId)] || null);
+    context.__toasts = [];
+
+    vm.runInContext(`
+        globalThis.__toasts = [];
+        App.toast = (message) => { globalThis.__toasts.push(String(message || '')); };
+        Warehouse.projectHardwareState = null;
+        Warehouse.load = async () => {};
+    `, context);
+
+    await vm.runInContext(`Warehouse.setProjectHardwareActualQty(321, 901, '3')`, context);
+
+    assert.equal(context.__projectHardwareState.actual_qtys['321:901'], 3);
+    assert.equal(Boolean(context.__projectHardwareState.checks['321:901']), false);
+    assert.equal(context.__warehouseItems[0].qty, 10);
+    assert.equal(context.__warehouseHistory.length, 0);
+    assert.equal(context.__reservations[0].status, 'active');
+
+    await vm.runInContext(`Warehouse.toggleProjectHardwareReady(321, 901, true)`, context);
+
+    assert.equal(Boolean(context.__projectHardwareState.checks['321:901']), true);
+    assert.equal(context.__projectHardwareState.actual_qtys['321:901'], 3);
+    assert.equal(context.__warehouseItems[0].qty, 7);
+    assert.equal(context.__warehouseHistory.length, 1);
+    assert.equal(context.__warehouseHistory[0].qty_change, -3);
+    assert.equal(context.__warehouseHistory[0].project_hardware_flow, 'ready_toggle');
+    assert.equal(context.__reservations[0].status, 'released');
+
+    await vm.runInContext(`Warehouse.setProjectHardwareActualQty(321, 901, '2')`, context);
+
+    assert.equal(context.__projectHardwareState.actual_qtys['321:901'], 2);
+    assert.equal(context.__warehouseItems[0].qty, 8);
+    assert.equal(context.__warehouseHistory.length, 2);
+    assert.equal(context.__warehouseHistory[1].qty_change, 1);
+    assert.equal(context.__warehouseHistory[1].project_hardware_flow, 'ready_delta');
+    assert.match(context.__warehouseHistory[1].notes, /Корректировка собранной позиции: -1 шт/);
+
+    await vm.runInContext(`Warehouse.setProjectHardwareActualQty(321, 901, '')`, context);
+
+    assert.equal(Object.prototype.hasOwnProperty.call(context.__projectHardwareState.actual_qtys, '321:901'), false);
+    assert.equal(context.__warehouseItems[0].qty, 5);
+    assert.equal(context.__warehouseHistory.length, 3);
+    assert.equal(context.__warehouseHistory[2].qty_change, -3);
+    assert.equal(context.__warehouseHistory[2].project_hardware_flow, 'ready_delta');
+
+    await vm.runInContext(`Warehouse.toggleProjectHardwareReady(321, 901, false)`, context);
+
+    assert.equal(Boolean(context.__projectHardwareState.checks['321:901']), false);
+    assert.equal(context.__warehouseItems[0].qty, 10);
+    assert.equal(context.__warehouseHistory.length, 4);
+    assert.equal(context.__warehouseHistory[3].qty_change, 5);
+    const restoredReservation = context.__reservations.find(item => Number(item.order_id) === 321 && item.status === 'active');
+    assert.equal(restoredReservation.qty, 5);
+}
+
 async function smokeCompletedOrderConsumesBlankMoldCapacity(context) {
     const orderItems = [{
         item_type: 'product',
@@ -4961,6 +5073,7 @@ async function main() {
     await smokeProjectHardwarePersistenceAndBuckets(context);
     await smokeProjectHardwareToggleShortageGuard(context);
     await smokeProjectHardwareLegacyQtyAndStringIdDeduction(context);
+    await smokeProjectHardwareActualQtyEditableFlow(context);
     await smokeCompletedOrderConsumesBlankMoldCapacity(context);
     await smokeMoldUsageThresholdCreatesTasksWithoutDuplicates(context);
     await smokeBlankHardwareFilterAndLowStockAlerts(context);

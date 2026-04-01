@@ -2517,7 +2517,7 @@ async function saveProductionPlanState(state) {
 // =============================================
 
 async function loadProjectHardwareState() {
-    const fallback = getLocal(LOCAL_KEYS.projectHardwareState) || { checks: {} };
+    const fallback = getLocal(LOCAL_KEYS.projectHardwareState) || { checks: {}, actual_qtys: {} };
     if (isSupabaseReady()) {
         try {
             const { data, error } = await supabaseClient
@@ -2526,7 +2526,9 @@ async function loadProjectHardwareState() {
                 .eq('key', 'project_hardware_state_json')
                 .maybeSingle();
             if (!error && data && data.value) {
-                const parsed = JSON.parse(data.value) || { checks: {} };
+                const parsed = JSON.parse(data.value) || { checks: {}, actual_qtys: {} };
+                if (!parsed.checks || typeof parsed.checks !== 'object') parsed.checks = {};
+                if (!parsed.actual_qtys || typeof parsed.actual_qtys !== 'object') parsed.actual_qtys = {};
                 setLocal(LOCAL_KEYS.projectHardwareState, parsed);
                 return parsed;
             }
@@ -2534,12 +2536,15 @@ async function loadProjectHardwareState() {
             console.error('loadProjectHardwareState error:', e);
         }
     }
+    if (!fallback.checks || typeof fallback.checks !== 'object') fallback.checks = {};
+    if (!fallback.actual_qtys || typeof fallback.actual_qtys !== 'object') fallback.actual_qtys = {};
     return fallback;
 }
 
 async function saveProjectHardwareState(state) {
-    const payload = state && typeof state === 'object' ? state : { checks: {} };
+    const payload = state && typeof state === 'object' ? state : { checks: {}, actual_qtys: {} };
     if (!payload.checks || typeof payload.checks !== 'object') payload.checks = {};
+    if (!payload.actual_qtys || typeof payload.actual_qtys !== 'object') payload.actual_qtys = {};
     setLocal(LOCAL_KEYS.projectHardwareState, payload);
     if (isSupabaseReady()) {
         const { error } = await supabaseClient
