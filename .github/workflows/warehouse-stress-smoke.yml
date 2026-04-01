@@ -31,9 +31,10 @@ jobs:
           RO_STRESS_ITERATIONS: '5'
         run: node tests/warehouse-stress-smoke.mjs
 
-      - name: Notify Telegram on failure
-        if: ${{ failure() }}
+      - name: Notify Telegram
+        if: ${{ always() }}
         env:
+          GITHUB_TOKEN: ${{ github.token }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TASK_BOT_TOKEN: ${{ secrets.TASK_BOT_TOKEN }}
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
@@ -42,6 +43,7 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           ALERT_WORKFLOW: Warehouse stress smoke
           ALERT_SCOPE: warehouse reservations + pendant + clone + fallback stress
+          ALERT_STATUS: ${{ job.status }}
           ALERT_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           ALERT_SOURCE_WORKFLOW: ${{ github.event.workflow_run.name }}
         run: node .github/scripts/send-telegram-alert.mjs
