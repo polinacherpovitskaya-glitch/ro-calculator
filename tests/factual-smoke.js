@@ -350,6 +350,63 @@ function smokeBuildPlanRendersSavedSnapshotHints(context) {
     assert.ok(html.includes('77ч × 100 ₽/ч'), 'indirect row should show actual hours formula for fact');
 }
 
+async function smokeTaxesIncludeCharity(context) {
+    const planTaxes = vm.runInContext(`(() => {
+        const built = Factual._buildPlan(
+            {
+                total_revenue_plan: 1000,
+                total_cost_plan: 0,
+                production_hours_hardware: 0,
+                production_hours_packaging: 0,
+            },
+            [],
+            {
+                fotPerHour: 0,
+                taxRate: 0.06,
+                vatRate: 0.05,
+                charityRate: 0.01,
+                indirectPerHour: 0,
+                wasteFactor: 1.1,
+            }
+        );
+        return built.planData.taxes;
+    })()`, context);
+    assert.equal(planTaxes, 120, 'plan taxes should include VAT 5%, tax 6% and charity 1%');
+
+    context.__imports = [
+        {
+            import_date: '2026-04-01T12:00:00.000Z',
+            fact_materials: 0,
+            fact_revenue: 1000,
+            fact_printing: 0,
+            fact_hardware: 0,
+            fact_packaging: 0,
+            fact_taxes: 110,
+            fact_other: 0,
+            fact_delivery: 0,
+            fact_molds: 0,
+        },
+    ];
+
+    await vm.runInContext(`(async () => {
+        const factData = {};
+        await Factual._applyDerivedFacts(
+            factData,
+            { plastic: 0, hardwareTotal: 0, packagingTotal: 0 },
+            { hoursPlastic: 0, hoursTrim: 0, hoursHardware: 0, hoursPackaging: 0 },
+            { taxRate: 0.06, vatRate: 0.05, charityRate: 0.01, indirectPerHour: 0 },
+            101,
+            'Charity Order'
+        );
+        globalThis.__charityFact = factData;
+    })()`, context);
+
+    const fact = context.__charityFact;
+    assert.equal(fact.fact_revenue, 1000, 'fact revenue should still come from FinTablo import');
+    assert.equal(fact.fact_taxes, 120, 'fact taxes should add 1% charity on top of imported 11% taxes');
+    assert.equal(fact._source_hints.fact_taxes, 'ФинТабло + 1% благотворительность');
+}
+
 async function smokeLegacyStageDistributionAndMaterials(context) {
     context.__imports = [
         {
@@ -464,6 +521,7 @@ async function main() {
     await smokeResetAutoFactInput(context);
     smokeBuildPlanUsesSavedSnapshotCostsAndDedupedHardware(context);
     smokeBuildPlanRendersSavedSnapshotHints(context);
+    await smokeTaxesIncludeCharity(context);
     await smokeLegacyStageDistributionAndMaterials(context);
     await smokeFactualRequestsFinTabloAutoSync(context);
     console.log('factual smoke checks passed');

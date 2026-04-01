@@ -1424,7 +1424,8 @@ const Pendant = {
         const vatAmount = round2(totalSellAll * vatRate);
         const totalSellWithVat = round2(totalSellAll + vatAmount);
         const _taxRate = App.params?.taxRate || 0.06;
-        const _keepNetRate = 1 - _taxRate - 0.065;
+        const _charityRate = Number.isFinite(App?.params?.charityRate) ? App.params.charityRate : 0.01;
+        const _keepNetRate = 1 - _taxRate - _charityRate - 0.065;
         const finalMargin = typeof calculateActualMargin === 'function'
             ? calculateActualMargin(totalSellAll, totalCostAll)
             : {

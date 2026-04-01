@@ -723,6 +723,7 @@ function getDefaultSettings() {
         nfc_tag_cost: 10,
         vat_rate: 0.05,
         tax_rate: 0.06,
+        charity_rate: 0.01,
         margin_target: 0.40,
         delivery_cost_moscow: 2000,
         printing_delivery_cost: 1500,

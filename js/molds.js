@@ -6,7 +6,7 @@
 // Pricing formula for blanks page:
 // 1. Себестоимость рассчитывается как для любых изделий (молд / 4500)
 // 2. Маржа зависит от тиража: чем больше заказ, тем ниже маржа
-// 3. Цена без НДС = себест / (1 - ОСН - коммерч. - целевая чистая маржа)
+// 3. Цена без НДС = себест / (1 - ОСН - благотворительность - коммерч. - целевая чистая маржа)
 // 4. НДС добавляется отдельно сверху
 
 // Молд НЕ делим на тираж заказа — делим на макс. производительность молда
@@ -53,29 +53,31 @@ function getBlankMultiplier(qty) {
  * Маржа — «в сухом остатке» после вычета налогов:
  *   50=75%, 100=70%, 300=60%, 500=50%, 1K=45%, 3K=40%
  *
- * ОСН 6% + коммерческий 6.5% удерживаются из цены.
+ * ОСН 6% + благотворительность 1% + коммерческий 6.5% удерживаются из цены.
  */
 function calcBlankTargetPrice(cost, qty, params) {
     if (cost <= 0 || qty <= 0) return 0;
     const margin = getBlankMargin(qty);
     const taxRate = Number.isFinite(params?.taxRate) ? params.taxRate : 0.06;
+    const charityRate = Number.isFinite(params?.charityRate) ? params.charityRate : 0.01;
     const commercialRate = 0.065;
-    const keepRate = 1 - taxRate - commercialRate - margin;
+    const keepRate = 1 - taxRate - charityRate - commercialRate - margin;
     if (keepRate <= 0) return 0;
     return round2(cost / keepRate);
 }
 
 /**
  * Цена продажи при целевой чистой марже:
- * цена без НДС = себестоимость / (1 - ОСН - коммерч. - 40%)
+ * цена без НДС = себестоимость / (1 - ОСН - благотворительность - коммерч. - 40%)
  * НДС добавляется отдельно сверху.
  */
 function calcSellByNetMargin40(cost, params) {
     if (!Number.isFinite(cost) || cost <= 0) return 0;
     const taxRate = Number.isFinite(params?.taxRate) ? params.taxRate : 0.06;
+    const charityRate = Number.isFinite(params?.charityRate) ? params.charityRate : 0.01;
     const commercialRate = 0.065;
     const margin = 0.40;
-    const keepRate = 1 - taxRate - commercialRate - margin;
+    const keepRate = 1 - taxRate - charityRate - commercialRate - margin;
     if (keepRate <= 0) return 0;
     return round2(cost / keepRate);
 }
@@ -229,7 +231,7 @@ const Molds = {
                     isCustom = true;
                 } else if (customMargin !== null && customMargin !== undefined) {
                     // Custom margin percentage override
-                    const keepRate = 1 - (params.taxRate || 0.06) - 0.065 - margin;
+                    const keepRate = 1 - (params.taxRate || 0.06) - (Number.isFinite(params?.charityRate) ? params.charityRate : 0.01) - 0.065 - margin;
                     targetPrice = keepRate > 0 ? round2(adjustedCost / keepRate) : 0;
                     sellPrice = roundTo5(targetPrice);
                     isCustom = true;
@@ -240,7 +242,7 @@ const Molds = {
                 }
 
                 // Calculate actual net margin after OSN + commercial, VAT excluded.
-                const keepNetRate = 1 - (params.taxRate || 0.06) - 0.065;
+                const keepNetRate = 1 - (params.taxRate || 0.06) - (Number.isFinite(params?.charityRate) ? params.charityRate : 0.01) - 0.065;
                 const actualMargin = sellPrice > 0
                     ? round2(((sellPrice * keepNetRate) - adjustedCost) / sellPrice)
                     : margin;
@@ -1631,7 +1633,7 @@ const Molds = {
             html += `Сборка: <span style="color:var(--text-muted)">укажите скорость (шт/мин)</span>`;
         }
         if (formulaSellPrice > 0) {
-            html += `<br><span style="color:var(--green);font-weight:700;">Цена продажи по формуле (40% чистой маржи, −6% ОСН, −6,5% коммерч., +НДС сверху): ${formatRub(formulaSellPrice)}</span>`;
+            html += `<br><span style="color:var(--green);font-weight:700;">Цена продажи по формуле (40% чистой маржи, −6% ОСН, −1% благотворительность, −6,5% коммерч., +НДС сверху): ${formatRub(formulaSellPrice)}</span>`;
         }
         if (fixedSellPrice > 0) {
             html += `<br><span style="color:var(--text-muted);">Ручная цена в поле: ${formatRub(fixedSellPrice)}</span>`;
@@ -1934,7 +1936,7 @@ const Molds = {
         }
         html += `Итого себестоимость: <b>${formatRub(totalCost)}</b>`;
         if (formulaSellPrice > 0) {
-            html += `<br><span style="color:var(--green);font-weight:700;">Цена продажи по формуле (40% чистой маржи, −6% ОСН, −6,5% коммерч., +НДС сверху): ${formatRub(formulaSellPrice)}</span>`;
+            html += `<br><span style="color:var(--green);font-weight:700;">Цена продажи по формуле (40% чистой маржи, −6% ОСН, −1% благотворительность, −6,5% коммерч., +НДС сверху): ${formatRub(formulaSellPrice)}</span>`;
         }
         if (fixedSellPrice > 0) {
             html += `<br><span style="color:var(--text-muted);">Ручная цена в поле: ${formatRub(fixedSellPrice)}</span>`;

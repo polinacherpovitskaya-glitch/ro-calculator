@@ -43,7 +43,7 @@ const Factual = {
         { key: 'plastic',             label: 'Пластик / материалы', planField: 'plastic',       hint: 'план + ФинТабло / вруч.' },
         { key: 'molds',               label: 'Молды',            planField: 'molds',            hint: 'FinTablo / вруч.' },
         { key: 'delivery_client',     label: 'Доставка',         planField: 'delivery',         hint: 'вручную' },
-        { key: 'taxes',               label: 'Налоги',           planField: 'taxes',            hint: 'калькулятор / ФинТабло' },
+        { key: 'taxes',               label: 'Налоги + благотворительность', planField: 'taxes', hint: 'калькулятор / ФинТабло + 1%' },
         { key: 'other',               label: 'Прочее',           planField: 'other',            hint: 'FinTablo / вруч.' },
     ],
 
@@ -734,7 +734,8 @@ async _loadFactSummaries() {
             round2(hardwarePurchase) + round2(hardwareDelivery) + round2(packagingPurchase) + round2(packagingDelivery) +
             round2(designPrinting) + round2(plastic) + round2(molds) + round2(delivery)
         );
-        const taxesByFormula = round2(orderRevenue * (this._num(params.taxRate) + this._num(params.vatRate)));
+        const charityRate = this._num(params.charityRate) || 0.01;
+        const taxesByFormula = round2(orderRevenue * (this._num(params.taxRate) + this._num(params.vatRate) + charityRate));
         const taxesByBalance = round2(orderCosts > 0 ? (orderCosts - rowsWithoutTaxes) : 0);
         const taxes = orderCosts > 0 ? Math.max(0, taxesByBalance) : taxesByFormula;
         const otherBalance = orderCosts > 0 ? round2(orderCosts - rowsWithoutTaxes - taxes) : 0;
@@ -953,7 +954,6 @@ async _loadFactSummaries() {
                 fact_printing: 'fact_design_printing',
                 fact_molds: 'fact_molds',
                 fact_delivery: 'fact_delivery_client',
-                fact_taxes: 'fact_taxes',
                 fact_other: 'fact_other',
             };
 
@@ -977,6 +977,23 @@ async _loadFactSummaries() {
             if (ftRevenue > 0) {
                 this._applyAutoFactValue(factData, 'fact_revenue', ftRevenue);
                 factData._auto_fintablo.fact_revenue = true;
+            }
+
+            const importedTaxes = this._num(latest.fact_taxes);
+            const currentFactRevenue = this._num(factData.fact_revenue);
+            const charityRate = this._num(params?.charityRate) || 0.01;
+            const charityByRevenue = currentFactRevenue > 0 ? round2(currentFactRevenue * charityRate) : 0;
+            const taxesWithCharity = round2(importedTaxes + charityByRevenue);
+            if (taxesWithCharity > 0) {
+                this._applyAutoFactValue(factData, 'fact_taxes', taxesWithCharity);
+                factData._auto_fintablo.fact_taxes = importedTaxes > 0;
+                if (importedTaxes > 0 && charityByRevenue > 0) {
+                    this._setSourceHint(factData, 'fact_taxes', 'ФинТабло + 1% благотворительность');
+                } else if (importedTaxes > 0) {
+                    this._setSourceHint(factData, 'fact_taxes', 'ФинТабло');
+                } else if (charityByRevenue > 0) {
+                    this._setSourceHint(factData, 'fact_taxes', '1% благотворительность от факта выручки');
+                }
             }
 
             const ftPackaging = this._num(latest.fact_packaging);

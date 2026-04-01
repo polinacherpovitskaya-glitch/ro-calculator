@@ -35,7 +35,7 @@
     <aside class="sidebar">
         <div class="sidebar-brand">
             <h2>Recycle Object</h2>
-            <span>Калькулятор <span id="app-version">v204</span></span>
+            <span>Калькулятор <span id="app-version">v205</span></span>
         </div>
         <nav class="sidebar-nav">
             <a href="#tasks" data-page="tasks">
@@ -330,7 +330,7 @@
                     <div class="cost-row"><span class="cost-label">Пластик</span><span class="cost-value" id="fin-plastic">0 &#8381;</span></div>
                     <div class="cost-row"><span class="cost-label">Молды</span><span class="cost-value" id="fin-molds">0 &#8381;</span></div>
                     <div class="cost-row"><span class="cost-label">Доставка клиенту</span><span class="cost-value" id="fin-delivery">0 &#8381;</span></div>
-                    <div class="cost-row"><span class="cost-label">Налоги (НДС + налог)</span><span class="cost-value" id="fin-taxes">0 &#8381;</span></div>
+                    <div class="cost-row"><span class="cost-label">Налоги + благотворительность (НДС 5% + налог 6% + 1%)</span><span class="cost-value" id="fin-taxes">0 &#8381;</span></div>
                     <div class="cost-row cost-total"><span class="cost-label">ИТОГО расходы</span><span class="cost-value" id="fin-total-costs">0 &#8381;</span></div>
                     <div class="cost-row" style="margin-top:8px"><span class="cost-label">Выручка</span><span class="cost-value text-green" id="fin-revenue">0 &#8381;</span></div>
                 </div>
@@ -2048,7 +2048,7 @@
             </div>
 
             <div class="card" style="padding:12px 20px;margin-bottom:12px;">
-                <p class="text-muted" style="font-size:12px;margin:0;">База знаний B2C: соберите набор (пластик + фурнитура + упаковка), получите цену для маркетплейса (целевая чистая маржа 40%) и цену для интернет-магазина с учетом НДС, ОСН, коммерческого отдела и эквайринга.</p>
+                <p class="text-muted" style="font-size:12px;margin:0;">База знаний B2C: соберите набор (пластик + фурнитура + упаковка), получите цену для маркетплейса (целевая чистая маржа 40%) и цену для интернет-магазина с учетом НДС, ОСН, 1% благотворительности, коммерческого отдела и эквайринга.</p>
             </div>
 
             <!-- Sets list -->
@@ -2089,6 +2089,7 @@
                     <div class="form-group"><label>Комиссия МП (%)</label><input type="number" min="0" max="100" step="1" id="mp-set-commission" value="46" oninput="Marketplaces.recalcSet()"></div>
                     <div class="form-group"><label>НДС (%)</label><input type="number" min="0" max="100" step="0.1" id="mp-set-vat" value="5" oninput="Marketplaces.recalcSet()"></div>
                     <div class="form-group"><label>ОСН (%)</label><input type="number" min="0" max="100" step="0.1" id="mp-set-osn" value="6" oninput="Marketplaces.recalcSet()"></div>
+                    <div class="form-group"><label>Благотворительность (%)</label><input type="number" min="0" max="100" step="0.1" id="mp-set-charity" value="1" oninput="Marketplaces.recalcSet()"></div>
                     <div class="form-group"><label>Коммерч. (%)</label><input type="number" min="0" max="100" step="0.1" id="mp-set-commercial" value="6.5" oninput="Marketplaces.recalcSet()"></div>
                     <div class="form-group"><label>Эквайринг ИМ (%)</label><input type="number" min="0" max="100" step="0.1" id="mp-set-acquiring" value="4" oninput="Marketplaces.recalcSet()"></div>
                     <div class="form-group"><label>Множитель ИМ (x)</label><input type="number" min="0.1" step="0.1" id="mp-set-shop-multiplier" value="3" oninput="Marketplaces.recalcSet()"></div>
@@ -2779,6 +2780,11 @@
                             <input type="number" step="0.01" id="set-tax_rate" data-key="tax_rate">
                             <span class="form-hint">0.06 = 6%</span>
                         </div>
+                        <div class="form-group">
+                            <label>Благотворительность</label>
+                            <input type="number" step="0.01" id="set-charity_rate" data-key="charity_rate">
+                            <span class="form-hint">0.01 = 1%</span>
+                        </div>
                     </div>
                     <h3 style="margin: 20px 0 16px;">Маркетплейс</h3>
                     <div class="form-row">
@@ -3311,16 +3317,16 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="js/work-management-core.js?v=1"></script>
 <script src="js/bug-report-core.js?v=2"></script>
-<script src="js/supabase.js?v=160"></script>
+<script src="js/supabase.js?v=161"></script>
 <script src="js/task-events.js?v=1"></script>
-<script src="js/calculator.js?v=72"></script>
-  <script src="js/app.js?v=204"></script>
+<script src="js/calculator.js?v=73"></script>
+  <script src="js/app.js?v=205"></script>
 <script src="js/wiki.js?v=4"></script>
 <script src="js/order-detail.js?v=61"></script>
 <script src="js/orders.js?v=64"></script>
 <script src="js/production_plan.js?v=75"></script>
 <script src="js/analytics.js?v=46g"></script>
-    <script src="js/molds.js?v=71"></script>
+    <script src="js/molds.js?v=72"></script>
 <script src="js/colors.js?v=46g"></script>
 <script src="js/kp.js?v=46g"></script>
 <script src="js/timetrack.js?v=63"></script>
@@ -3330,14 +3336,14 @@
 <script src="js/gantt.js?v=59"></script>
 <script src="js/fintablo.js?v=2"></script>
 <script src="js/indirect_costs.js?v=8"></script>
-<script src="js/factual.js?v=90"></script>
+<script src="js/factual.js?v=91"></script>
 <script src="js/china.js?v=163"></script>
 <script src="js/warehouse_photos.js?v=48"></script>
 <script src="js/china_catalog.js?v=46k"></script>
-<script src="js/marketplaces.js?v=77"></script>
+<script src="js/marketplaces.js?v=78"></script>
 <script src="js/warehouse.js?v=174"></script>
 <script src="js/monitoring.js?v=1"></script>
 <script src="js/settings.js?v=80"></script>
-<script src="js/pendant.js?v=11"></script>
+<script src="js/pendant.js?v=12"></script>
 </body>
 </html>

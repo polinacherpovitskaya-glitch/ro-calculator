@@ -157,6 +157,7 @@ const Marketplaces = {
         document.getElementById('mp-set-commission').value = 46;
         document.getElementById('mp-set-vat').value = 5;
         document.getElementById('mp-set-osn').value = 6;
+        document.getElementById('mp-set-charity').value = 1;
         document.getElementById('mp-set-commercial').value = 6.5;
         document.getElementById('mp-set-acquiring').value = 4;
         document.getElementById('mp-set-shop-multiplier').value = 3;
@@ -188,6 +189,7 @@ const Marketplaces = {
         document.getElementById('mp-set-commission').value = normalizedSet.commission || 46;
         document.getElementById('mp-set-vat').value = normalizedSet.vat || 5;
         document.getElementById('mp-set-osn').value = normalizedSet.osn || 6;
+        document.getElementById('mp-set-charity').value = Number.isFinite(parseFloat(normalizedSet.charity)) ? normalizedSet.charity : 1;
         document.getElementById('mp-set-commercial').value = normalizedSet.commercial || 6.5;
         document.getElementById('mp-set-acquiring').value = normalizedSet.acquiring || 4;
         document.getElementById('mp-set-shop-multiplier').value = normalizedSet.shop_multiplier || 3;
@@ -603,6 +605,7 @@ const Marketplaces = {
         if (!set) return set;
         return {
             ...set,
+            charity: Number.isFinite(parseFloat(set.charity)) ? parseFloat(set.charity) : 1,
             hw_items: (set.hw_items || []).map(item => this._normalizeHwItem(item)),
             pkg_items: (set.pkg_items || []).map(item => this._normalizePkgItem(item)),
         };
@@ -945,6 +948,8 @@ const Marketplaces = {
         const commissionPct = parseFloat(document.getElementById('mp-set-commission')?.value) || 46;
         const vatPct = parseFloat(document.getElementById('mp-set-vat')?.value) || 5;
         const osnPct = parseFloat(document.getElementById('mp-set-osn')?.value) || 6;
+        const charityPctRaw = parseFloat(document.getElementById('mp-set-charity')?.value);
+        const charityPct = Number.isFinite(charityPctRaw) ? charityPctRaw : 1;
         const commercialPct = parseFloat(document.getElementById('mp-set-commercial')?.value) || 6.5;
         const acquiringPct = parseFloat(document.getElementById('mp-set-acquiring')?.value) || 4;
         const shopMultiplier = parseFloat(document.getElementById('mp-set-shop-multiplier')?.value) || 3;
@@ -975,7 +980,7 @@ const Marketplaces = {
         totalCost = round2(totalCost);
 
         // MP suggested price by target net margin.
-        const keepFactorMp = (1 - commissionPct/100) * (1 - vatPct/100) * (1 - osnPct/100) * (1 - commercialPct/100) * (1 - targetMarginPct/100);
+        const keepFactorMp = (1 - commissionPct/100) * (1 - vatPct/100) * (1 - osnPct/100) * (1 - charityPct/100) * (1 - commercialPct/100) * (1 - targetMarginPct/100);
         const suggestedMpPrice = keepFactorMp > 0 ? Math.ceil(totalCost / keepFactorMp) : 0;
         const suggestedShopPrice = totalCost > 0 ? Math.round(totalCost * Math.max(shopMultiplier, 0)) : 0;
 
@@ -995,12 +1000,12 @@ const Marketplaces = {
             const mpActualPrice = parseFloat(mpManualEl?.value) || suggestedMpPrice || 0;
             const shopActualPrice = parseFloat(shopManualEl?.value) || suggestedShopPrice || 0;
 
-            const mpNetFactor = (1 - commissionPct/100) * (1 - vatPct/100) * (1 - osnPct/100) * (1 - commercialPct/100);
+            const mpNetFactor = (1 - commissionPct/100) * (1 - vatPct/100) * (1 - osnPct/100) * (1 - charityPct/100) * (1 - commercialPct/100);
             const mpNet = round2(mpActualPrice * Math.max(mpNetFactor, 0));
             const mpProfit = round2(mpNet - totalCost);
             const mpMargin = mpNet > 0 ? round2(mpProfit * 100 / mpNet) : 0;
 
-            const shopNetFactor = (1 - vatPct/100) * (1 - osnPct/100) * (1 - commercialPct/100) * (1 - acquiringPct/100);
+            const shopNetFactor = (1 - vatPct/100) * (1 - osnPct/100) * (1 - charityPct/100) * (1 - commercialPct/100) * (1 - acquiringPct/100);
             const shopNet = round2(shopActualPrice * Math.max(shopNetFactor, 0));
             const shopProfit = round2(shopNet - totalCost);
             const shopMargin = shopNet > 0 ? round2(shopProfit * 100 / shopNet) : 0;
@@ -1031,8 +1036,8 @@ const Marketplaces = {
 
             document.getElementById('mp-calc-details').innerHTML = `
                 ${stageParts.length ? `<div style="margin-bottom:6px;line-height:1.5;">${stageParts.join('<br>')}</div>` : ''}
-                МП (факт ${formatRub(mpActualPrice)}): −комиссия ${commissionPct}% · −НДС ${vatPct}% · −ОСН ${osnPct}% · −коммерч. ${commercialPct}% → чистый вход ${formatRub(mpNet)}<br>
-                ИМ (факт ${formatRub(shopActualPrice)}): −НДС ${vatPct}% · −ОСН ${osnPct}% · −коммерч. ${commercialPct}% · −эквайринг ${acquiringPct}% → чистый вход ${formatRub(shopNet)}
+                МП (факт ${formatRub(mpActualPrice)}): −комиссия ${commissionPct}% · −НДС ${vatPct}% · −ОСН ${osnPct}% · −благотв. ${charityPct}% · −коммерч. ${commercialPct}% → чистый вход ${formatRub(mpNet)}<br>
+                ИМ (факт ${formatRub(shopActualPrice)}): −НДС ${vatPct}% · −ОСН ${osnPct}% · −благотв. ${charityPct}% · −коммерч. ${commercialPct}% · −эквайринг ${acquiringPct}% → чистый вход ${formatRub(shopNet)}
             `;
 
             this._lastCalc = {
@@ -1074,6 +1079,10 @@ const Marketplaces = {
             commission: parseFloat(document.getElementById('mp-set-commission').value) || 46,
             vat: parseFloat(document.getElementById('mp-set-vat').value) || 5,
             osn: parseFloat(document.getElementById('mp-set-osn').value) || 6,
+            charity: (() => {
+                const value = parseFloat(document.getElementById('mp-set-charity').value);
+                return Number.isFinite(value) ? value : 1;
+            })(),
             commercial: parseFloat(document.getElementById('mp-set-commercial').value) || 6.5,
             acquiring: parseFloat(document.getElementById('mp-set-acquiring').value) || 4,
             shop_multiplier: parseFloat(document.getElementById('mp-set-shop-multiplier').value) || 3,

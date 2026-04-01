@@ -396,6 +396,58 @@ async function main() {
     assert.match(legacyHwHtml, /Карабин черный/);
     assert.match(legacyPkgHtml, /ENV-150x90/);
     assert.match(legacyPkgHtml, /Конверт/);
+    assert.equal(String(context.document.getElementById('mp-set-charity').value), '1');
+
+    vm.runInContext(`
+        __savedMarketplaceSet = null;
+        saveMarketplaceSet = async (set) => {
+            __savedMarketplaceSet = JSON.parse(JSON.stringify(set));
+        };
+        Marketplaces._lastCalc = {
+            totalCost: 100,
+            mpActualPrice: 200,
+            suggestedMpPrice: 210,
+            suggestedShopPrice: 300,
+            shopActualPrice: 290,
+            mpMargin: 25,
+            shopMargin: 30,
+            actualMargin: 28,
+        };
+        document.getElementById('mp-set-name').value = 'Charity set';
+        document.getElementById('mp-set-commission').value = '46';
+        document.getElementById('mp-set-vat').value = '5';
+        document.getElementById('mp-set-osn').value = '6';
+        document.getElementById('mp-set-charity').value = '1.5';
+        document.getElementById('mp-set-commercial').value = '6.5';
+        document.getElementById('mp-set-acquiring').value = '4';
+        document.getElementById('mp-set-shop-multiplier').value = '3';
+        document.getElementById('mp-set-margin').value = '40';
+        __originalMarketplacesLoad = Marketplaces.load;
+        Marketplaces.load = async () => {};
+    `, context);
+
+    await vm.runInContext(`Marketplaces.saveSet()`, context);
+    const savedMarketplaceSet = JSON.parse(vm.runInContext(`JSON.stringify(__savedMarketplaceSet)`, context));
+    assert.equal(savedMarketplaceSet.charity, 1.5, 'saved B2C set should persist charity percentage');
+    vm.runInContext(`
+        Marketplaces.load = __originalMarketplacesLoad;
+        delete __originalMarketplacesLoad;
+    `, context);
+
+    vm.runInContext(`
+        Marketplaces.allSets = [{
+            id: 4,
+            name: 'Saved charity set',
+            photo_url: '',
+            charity: 2.25,
+            hw_items: [],
+            pkg_items: [],
+            plastic_items: [],
+            color_variants: [],
+        }];
+        Marketplaces.editSet(4);
+    `, context);
+    assert.equal(String(context.document.getElementById('mp-set-charity').value), '2.25');
 
     vm.runInContext(`
         let savedOrderPayload = null;

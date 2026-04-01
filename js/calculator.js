@@ -35,6 +35,7 @@ function getProductionParams(settings) {
         nfcTagCost: s('nfc_tag_cost'),
         vatRate: s('vat_rate'),
         taxRate: s('tax_rate'),
+        charityRate: Number.isFinite(settings?.charity_rate) ? settings.charity_rate : 0.01,
         marginTarget: s('margin_target'),
         deliveryCostMoscow: s('delivery_cost_moscow'),
         printingDeliveryCost: s('printing_delivery_cost'),
@@ -520,15 +521,16 @@ function getMultiplierForQty(qty) {
 /**
  * Рассчитать таргет-цену для фурнитуры/упаковки/кастома
  * Формула:
- * цена без НДС = себестоимость / (1 - ОСН - коммерч. - целевая чистая маржа)
+ * цена без НДС = себестоимость / (1 - ОСН - благотворительность - коммерч. - целевая чистая маржа)
  * НДС добавляется отдельно сверху в КП/счёте и в эту цену не входит.
  */
 function calculateTargetPrice(cost, params, qty) {
     if (cost === 0) return 0;
     const margin = qty ? getMarginForQty(qty) : (params.marginTarget || 0.55);
     const taxRate = Number.isFinite(params?.taxRate) ? params.taxRate : 0.06;
+    const charityRate = Number.isFinite(params?.charityRate) ? params.charityRate : 0.01;
     const commercialRate = 0.065;
-    const keepRate = 1 - taxRate - commercialRate - margin;
+    const keepRate = 1 - taxRate - charityRate - commercialRate - margin;
     if (keepRate <= 0) return 0;
     return round2(cost / keepRate);
 }
@@ -555,8 +557,9 @@ function calculateActualMargin(sellPrice, costPerUnit) {
         };
     }
     const taxRate = Number.isFinite(App?.params?.taxRate) ? App.params.taxRate : 0.06;
+    const charityRate = Number.isFinite(App?.params?.charityRate) ? App.params.charityRate : 0.01;
     const commercialRate = 0.065;
-    const netBeforeCost = sellPrice * (1 - taxRate - commercialRate);
+    const netBeforeCost = sellPrice * (1 - taxRate - charityRate - commercialRate);
     const earned = netBeforeCost - (costPerUnit || 0);
     return {
         earned: round2(earned),
@@ -732,7 +735,8 @@ function calculateFinDirectorData(items, hardwareItems, packagingItems, params, 
         totalRevenue += r.totalRevenue;
     });
 
-    const totalTaxes = totalRevenue * (params.taxRate + params.vatRate);
+    const charityRate = Number.isFinite(params?.charityRate) ? params.charityRate : 0.01;
+    const totalTaxes = totalRevenue * (params.taxRate + params.vatRate + charityRate);
 
     return {
         salary: round2(totalSalary),
@@ -803,12 +807,13 @@ function calculateOrderSummary(items, hardwareItems, packagingItems, extraCosts,
 
     // Extra income — full amount goes to revenue, and net (after taxes/commission) goes to earned.
     const taxRate = Number.isFinite(params.taxRate) ? params.taxRate : 0.06;
+    const charityRate = Number.isFinite(params.charityRate) ? params.charityRate : 0.01;
     const commercialRate = 0.065;
     (extraCosts || []).forEach(ec => {
         const amt = ec.amount || 0;
         if (amt > 0) {
             totalRevenue += amt;
-            totalEarned += amt * (1 - taxRate - commercialRate);
+            totalEarned += amt * (1 - taxRate - charityRate - commercialRate);
         }
     });
 

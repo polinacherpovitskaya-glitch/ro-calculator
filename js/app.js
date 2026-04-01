@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v204';
+const APP_VERSION = 'v205';
 
 const App = {
     currentPage: 'orders',
@@ -3247,7 +3247,7 @@ const Calculator = {
                 const costItemOnly = round2(result.costTotal - (result.costPrinting || 0));
                 const calcTarget = (marginPct) => {
                     if (costItemOnly === 0) return 0;
-                    const keepRate = 1 - (params.taxRate || 0.06) - 0.065 - marginPct;
+                    const keepRate = 1 - (params.taxRate || 0.06) - (Number.isFinite(params?.charityRate) ? params.charityRate : 0.01) - 0.065 - marginPct;
                     if (keepRate <= 0) return 0;
                     return round2(costItemOnly / keepRate);
                 };
@@ -3506,7 +3506,7 @@ const Calculator = {
 
         const calcTarget = (cost, marginPct) => {
             if (cost === 0) return 0;
-            const keepRate = 1 - (params.taxRate || 0.06) - 0.065 - marginPct;
+            const keepRate = 1 - (params.taxRate || 0.06) - (Number.isFinite(params?.charityRate) ? params.charityRate : 0.01) - 0.065 - marginPct;
             if (keepRate <= 0) return 0;
             return round2(cost / keepRate);
         };
@@ -3544,8 +3544,9 @@ const Calculator = {
             }
 
             const taxRate = Number.isFinite(params?.taxRate) ? params.taxRate : 0.06;
+            const charityRate = Number.isFinite(params?.charityRate) ? params.charityRate : 0.01;
             const commercialRate = 0.065;
-            const keepRate = 1 - taxRate - commercialRate - margin;
+            const keepRate = 1 - taxRate - charityRate - commercialRate - margin;
             if (keepRate <= 0) {
                 return { price: 0, note: 'прайс бланков', source: 'empty' };
             }
@@ -5010,7 +5011,7 @@ const Calculator = {
         const params = App.params || {};
         const calcTarget = (cost, marginPct) => {
             if (cost === 0) return 0;
-            const keepRate = 1 - (params.taxRate || 0.06) - 0.065 - marginPct;
+            const keepRate = 1 - (params.taxRate || 0.06) - (Number.isFinite(params?.charityRate) ? params.charityRate : 0.01) - 0.065 - marginPct;
             if (keepRate <= 0) return 0;
             return round2(cost / keepRate);
         };
