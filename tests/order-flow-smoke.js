@@ -509,6 +509,62 @@ async function smokeZeroCostWarehouseHardwareStillShowsInPricing(context) {
     assert.match(pricingHtml, /sell-pkg-0/);
 }
 
+async function smokeBlankPricingSeparatesCatalogPriceAndNetMargin(context) {
+    vm.runInContext(`
+        App.getItemOriginLabel = (item) => item?.is_blank_mold ? 'бланк' : 'кастом';
+        App.templates = [{
+            id: 'blank-price-smoke',
+            name: 'Blank Smoke',
+            custom_prices: { 500: 210 },
+            custom_margins: {},
+        }];
+        Calculator.resetForm();
+        Calculator._calcBlankBaseCostFromTemplate = () => 108.25;
+
+        Calculator.items = [Calculator.getEmptyItem(1), Calculator.getEmptyItem(2)];
+
+        Calculator.items[0].product_name = 'Blank Smoke Product';
+        Calculator.items[0].quantity = 500;
+        Calculator.items[0].template_id = 'blank-price-smoke';
+        Calculator.items[0].is_blank_mold = true;
+        Calculator.items[0].sell_price_item = 210;
+        Calculator.items[0].result = {
+            costTotal: 108.25,
+            costPrinting: 0,
+            costPrintingDetails: [],
+        };
+
+        Calculator.items[1].product_name = 'Custom Smoke Product';
+        Calculator.items[1].quantity = 500;
+        Calculator.items[1].template_id = '';
+        Calculator.items[1].is_blank_mold = false;
+        Calculator.items[1].sell_price_item = 0;
+        Calculator.items[1].result = {
+            costTotal: 100,
+            costPrinting: 0,
+            costPrintingDetails: [],
+        };
+
+        Calculator.hardwareItems = [];
+        Calculator.packagingItems = [];
+        Calculator.extraCosts = [];
+        Calculator.pendants = [];
+
+        document.getElementById('calc-pricing').style.display = 'none';
+        document.getElementById('calc-pricing-content').innerHTML = '';
+
+        Calculator.renderPricingCard(App.params);
+    `, context);
+
+    const pricingHtml = String(vm.runInContext(`document.getElementById('calc-pricing-content').innerHTML`, context));
+
+    assert.match(pricingHtml, /Маржа 40%/);
+    assert.match(pricingHtml, /Рекоменд\. цена/);
+    assert.match(pricingHtml, /вручную в бланке/);
+    assert.match(pricingHtml, /Чистая маржа/);
+    assert.match(pricingHtml, /36%/);
+}
+
 async function smokeFinDirectorPendantsUseAllAttachments(context) {
     const fin = clone(await vm.runInContext(`(() => {
         const pendant = {
@@ -4867,6 +4923,7 @@ async function main() {
     await smokeCalculatorPersistence(context);
     await smokeHardwareOnlyAutosave(context);
     await smokeZeroCostWarehouseHardwareStillShowsInPricing(context);
+    await smokeBlankPricingSeparatesCatalogPriceAndNetMargin(context);
     await smokeFinDirectorPendantsUseAllAttachments(context);
     await smokePackagingWarehousePickerDefaults(context);
     await smokeCurrentOrderReservationRestoresWarehouseQuota(context);

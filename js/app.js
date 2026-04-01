@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v198';
+const APP_VERSION = 'v199';
 
 const App = {
     currentPage: 'orders',
@@ -3511,6 +3511,51 @@ const Calculator = {
             return round2(cost / keepRate);
         };
 
+        const roundTo5Safe = (value) => {
+            if (!Number.isFinite(value) || value <= 0) return 0;
+            if (typeof roundTo5 === 'function') return roundTo5(value);
+            return Math.ceil(value / 5) * 5;
+        };
+
+        const getBlankTierMarginLocal = (qty) => {
+            const normalizedQty = Number(qty) || 0;
+            if (normalizedQty < 75) return 0.75;
+            if (normalizedQty < 200) return 0.70;
+            if (normalizedQty < 400) return 0.60;
+            if (normalizedQty < 750) return 0.50;
+            if (normalizedQty < 2500) return 0.45;
+            return 0.40;
+        };
+
+        const getBlankCatalogPricing = (cost, qty, tpl) => {
+            if (!Number.isFinite(cost) || cost <= 0) {
+                return { price: 0, note: 'прайс бланков', source: 'empty' };
+            }
+            const customPrice = Number(tpl?.custom_prices?.[qty]);
+            if (Number.isFinite(customPrice) && customPrice > 0) {
+                return { price: customPrice, note: 'вручную в бланке', source: 'custom_price' };
+            }
+
+            const customMarginRaw = tpl?.custom_margins?.[qty];
+            const hasCustomMargin = customMarginRaw !== null && customMarginRaw !== undefined && customMarginRaw !== '';
+            const margin = hasCustomMargin ? Number(customMarginRaw) : getBlankTierMarginLocal(qty);
+            if (!Number.isFinite(margin)) {
+                return { price: 0, note: 'прайс бланков', source: 'empty' };
+            }
+
+            const taxRate = Number.isFinite(params?.taxRate) ? params.taxRate : 0.06;
+            const commercialRate = 0.065;
+            const keepRate = 1 - taxRate - commercialRate - margin;
+            if (keepRate <= 0) {
+                return { price: 0, note: 'прайс бланков', source: 'empty' };
+            }
+            return {
+                price: roundTo5Safe(round2(cost / keepRate)),
+                note: hasCustomMargin ? `маржа ${Math.round(margin * 100)}% в бланке` : 'тиражный прайс бланков',
+                source: hasCustomMargin ? 'custom_margin' : 'tier',
+            };
+        };
+
         // Build columns: item, printing (per item), hw, pkg
         const columns = [];
 
@@ -3529,16 +3574,7 @@ const Calculator = {
             if (item.is_blank_mold) {
                 // Blank mold: show recommended price from blanks table
                 const tpl = App.templates.find(t => t.id == item.template_id);
-                // Check custom_prices first, then custom_margins, then standard formula
-                const customPrice = tpl?.custom_prices?.[item.quantity];
-                let blankSellPrice;
-                if (customPrice > 0) {
-                    blankSellPrice = customPrice;
-                } else {
-                    const customMargin = tpl?.custom_margins?.[item.quantity];
-                    const blankMargin = (customMargin !== null && customMargin !== undefined) ? customMargin : getBlankMargin(item.quantity || 500);
-                    blankSellPrice = roundTo5(round2(costItemOnlySafe / (1 - blankMargin) / (1 - 0.06 - 0.05)));
-                }
+                const blankPricing = getBlankCatalogPricing(costItemOnlySafe, item.quantity || 0, tpl);
                 // Do NOT auto-fill sell_price_item — manager enters manually
                 columns.push({
                     label: (item.product_name || 'Изделие ' + (i + 1)) + ` (${App.getItemOriginLabel(item)})`,
@@ -3546,7 +3582,8 @@ const Calculator = {
                     globalIdx,
                     isBlank: true,
                     cost: costItemOnlySafe,
-                    blankPrice: blankSellPrice,
+                    blankPrice: blankPricing.price,
+                    blankPriceNote: blankPricing.note,
                     sellPrice: item.sell_price_item || 0,
                 });
             } else {
@@ -3666,6 +3703,8 @@ const Calculator = {
 
         // Check if any column needs target spread (non-blank)
         const hasCustom = columns.some(c => !c.isBlank && !c.isPendant);
+        const hasBlank = columns.some(c => c.isBlank);
+        const hasPendant = columns.some(c => c.isPendant);
 
         if (hasCustom) {
             // Target rows for custom items
@@ -3680,24 +3719,27 @@ const Calculator = {
                 html += `<div style="padding:4px 8px;border-right:1px solid var(--border);${cellBorder}font-size:11px;${t.style}">${t.label}${t.suffix ? `<span style="font-size:9px;font-weight:400">${t.suffix}</span>` : ''}</div>`;
                 columns.forEach(col => {
                     if (col.isPendant) {
-                        // Pendant: show sell price from wizard in the 40% row
-                        if (t.pct === 40) {
-                            html += `<div style="padding:4px 8px;text-align:center;${cellBorder}font-size:11px;color:var(--green);font-weight:700;">${formatRub(col.sellPrice)}<div style="font-size:9px;font-weight:400;color:var(--text-muted)">из подвеса</div></div>`;
-                        } else {
-                            html += `<div style="padding:4px 8px;text-align:center;${cellBorder}font-size:11px;color:var(--text-muted);">—</div>`;
-                        }
+                        html += `<div style="padding:4px 8px;text-align:center;${cellBorder}font-size:11px;color:var(--text-muted);">—</div>`;
                     } else if (col.isBlank) {
-                        // Blank: show fixed price from blanks page formula in the 40% row
-                        if (t.pct === 40) {
-                            html += `<div style="padding:4px 8px;text-align:center;${cellBorder}font-size:11px;color:var(--green);font-weight:700;">${formatRub(col.blankPrice)}<div style="font-size:9px;font-weight:400;color:var(--text-muted)">прайс бланков</div></div>`;
-                        } else {
-                            html += `<div style="padding:4px 8px;text-align:center;${cellBorder}font-size:11px;color:var(--text-muted);">—</div>`;
-                        }
+                        html += `<div style="padding:4px 8px;text-align:center;${cellBorder}font-size:11px;color:var(--text-muted);">—</div>`;
                     } else {
                         html += `<div style="padding:4px 8px;text-align:center;${cellBorder}font-size:11px;${t.style}">${formatRub(col[t.key])}</div>`;
                     }
                 });
             });
+
+            if (hasBlank || hasPendant) {
+                html += `<div style="padding:4px 8px;border-right:1px solid var(--border);${cellBorder}font-size:11px;color:var(--green);font-weight:700;">Рекоменд. цена<span style="font-size:9px;font-weight:400;color:var(--text-muted)"> бланки / подвесы</span></div>`;
+                columns.forEach(col => {
+                    if (col.isPendant) {
+                        html += `<div style="padding:4px 8px;text-align:center;${cellBorder}font-size:11px;color:var(--green);font-weight:700;">${formatRub(col.sellPrice)}<div style="font-size:9px;font-weight:400;color:var(--text-muted)">из подвеса</div></div>`;
+                    } else if (col.isBlank) {
+                        html += `<div style="padding:4px 8px;text-align:center;${cellBorder}font-size:11px;color:var(--green);font-weight:700;">${formatRub(col.blankPrice)}<div style="font-size:9px;font-weight:400;color:var(--text-muted)">${App.escHtml(col.blankPriceNote || 'прайс бланков')}</div></div>`;
+                    } else {
+                        html += `<div style="padding:4px 8px;text-align:center;${cellBorder}font-size:11px;color:var(--text-muted);">—</div>`;
+                    }
+                });
+            }
         } else {
             // All blanks — show just the fixed price row
             html += `<div style="padding:4px 8px;border-right:1px solid var(--border);${cellBorder}font-size:11px;color:var(--green);font-weight:700;">Прайс бланков</div>`;
@@ -3705,7 +3747,7 @@ const Calculator = {
                 if (col.isPendant) {
                     html += `<div style="padding:4px 8px;text-align:center;${cellBorder}font-size:11px;color:var(--green);font-weight:700;">${formatRub(col.sellPrice)}<div style="font-size:9px;font-weight:400;color:var(--text-muted)">из подвеса</div></div>`;
                 } else if (col.isBlank) {
-                    html += `<div style="padding:4px 8px;text-align:center;${cellBorder}font-size:11px;color:var(--green);font-weight:700;">${formatRub(col.blankPrice)}</div>`;
+                    html += `<div style="padding:4px 8px;text-align:center;${cellBorder}font-size:11px;color:var(--green);font-weight:700;">${formatRub(col.blankPrice)}<div style="font-size:9px;font-weight:400;color:var(--text-muted)">${App.escHtml(col.blankPriceNote || 'прайс бланков')}</div></div>`;
                 } else {
                     html += `<div style="padding:4px 8px;text-align:center;${cellBorder}font-size:11px;">${formatRub(col.t40 || 0)}</div>`;
                 }
@@ -3733,7 +3775,7 @@ const Calculator = {
         });
 
         // Margin row (% only)
-        html += `<div style="padding:6px 8px;border-right:1px solid var(--border);font-weight:600;">Маржа</div>`;
+        html += `<div style="padding:6px 8px;border-right:1px solid var(--border);font-weight:600;">Чистая маржа<div style="font-size:9px;color:var(--text-muted);font-weight:400;">после ОСН и коммерч.</div></div>`;
         columns.forEach(col => {
             let marginHtml = '—';
             let warnHtml = '';
