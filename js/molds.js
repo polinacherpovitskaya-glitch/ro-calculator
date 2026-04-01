@@ -637,13 +637,21 @@ const Molds = {
             total_units_produced: 0,
             custom_margins: {},
             custom_prices: this._collectCustomPrices(),
+            disable_historical_blank_price_recovery: false,
         };
+
+        if (!Object.keys(mold.custom_prices).length) {
+            mold.disable_historical_blank_price_recovery = true;
+        }
 
         if (this.editingId) {
             const existing = this.allMolds.find(m => m.id === this.editingId);
             if (existing) {
                 mold.total_orders = existing.total_orders || 0;
                 mold.total_units_produced = existing.total_units_produced || 0;
+                if (existing.disable_historical_blank_price_recovery && Object.keys(mold.custom_prices).length) {
+                    mold.disable_historical_blank_price_recovery = false;
+                }
             }
         }
 

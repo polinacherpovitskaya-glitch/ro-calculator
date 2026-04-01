@@ -1,16 +1,18 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const vm = require('node:vm');
 
 const root = path.join(__dirname, '..');
 const supabaseJs = fs.readFileSync(path.join(root, 'js', 'supabase.js'), 'utf8');
+const moldsJs = fs.readFileSync(path.join(root, 'js', 'molds.js'), 'utf8');
 
 const latestBaselineSection = supabaseJs.split('const LEGACY_HISTORICAL_BLANK_PRICE_BASELINES')[0];
 
 assert.match(
     supabaseJs,
-    /const MOLDS_DATA_VERSION = 11;/,
-    'MOLDS_DATA_VERSION should be bumped for the blank-price recovery patch',
+    /const MOLDS_DATA_VERSION = 12;/,
+    'MOLDS_DATA_VERSION should be bumped for the manual blank-price deletion fix',
 );
 
 assert.match(
@@ -41,6 +43,73 @@ assert.match(
     supabaseJs,
     /if \(!sbExists\) \{/,
     'Local mold merge must only upsert records that are absent in Supabase',
+);
+
+assert.match(
+    moldsJs,
+    /disable_historical_blank_price_recovery: false/,
+    'Mold editor should persist the manual blank-price recovery flag',
+);
+
+assert.match(
+    moldsJs,
+    /if \(!Object\.keys\(mold\.custom_prices\)\.length\) \{\s*mold\.disable_historical_blank_price_recovery = true;\s*\}/,
+    'Saving a blank with all prices cleared should mark historical recovery as disabled',
+);
+
+const context = vm.createContext({
+    console,
+    Math,
+    Date,
+    JSON,
+    Array,
+    Object,
+    String,
+    Number,
+    Boolean,
+    RegExp,
+    Promise,
+    setTimeout,
+    clearTimeout,
+    localStorage: {
+        getItem() { return null; },
+        setItem() {},
+        removeItem() {},
+        clear() {},
+        key() { return null; },
+        get length() { return 0; },
+    },
+    window: {},
+    document: {},
+    supabase: { createClient() { return {}; } },
+    Blob: function Blob() {},
+    atob(value) { return Buffer.from(value, 'base64').toString('binary'); },
+    App: { toast() {} },
+});
+context.window = context;
+
+vm.runInContext(supabaseJs, context, { filename: 'js/supabase.js' });
+
+const recovered = vm.runInContext(`_withHistoricalBlankPriceRecovery({
+    name: 'Шар',
+    custom_prices: {},
+    disable_historical_blank_price_recovery: false,
+})`, context);
+assert.deepEqual(
+    JSON.parse(JSON.stringify(recovered.mold.custom_prices)),
+    { 50: 2365, 100: 2030, 300: 1760, 500: 1600, 1000: 1450, 3000: 1075 },
+    'Historical recovery should still restore baseline prices when no manual opt-out is set',
+);
+
+const preservedEmpty = vm.runInContext(`_withHistoricalBlankPriceRecovery({
+    name: 'Шар',
+    custom_prices: {},
+    disable_historical_blank_price_recovery: true,
+})`, context);
+assert.deepEqual(
+    JSON.parse(JSON.stringify(preservedEmpty.mold.custom_prices)),
+    {},
+    'Historical recovery must not re-add prices that the user manually cleared',
 );
 
 console.log('molds price recovery smoke passed');

@@ -150,7 +150,7 @@ const _volatileLocalCache = new Map();
 
 // Data version — increment to trigger NON-DESTRUCTIVE migration
 // NEVER delete user data! Only add missing fields to existing molds
-const MOLDS_DATA_VERSION = 11; // v11: восстановление custom_prices бланков из экспорта 2026-03-26 + защита от перезаписи Supabase локальным кэшем
+const MOLDS_DATA_VERSION = 12; // v12: уважать ручное удаление custom_prices у бланков и не восстанавливать их обратно автоматически
 const MOLDS_VERSION_KEY = 'ro_calc_molds_version';
 
 // Latest known manual sell prices from the exported blanks catalog.
@@ -317,8 +317,15 @@ function _mergeHistoricalBlankCustomPrices(currentPrices, name) {
     return merged;
 }
 
+function _isHistoricalBlankPriceRecoveryDisabled(mold) {
+    return !!(mold && mold.disable_historical_blank_price_recovery);
+}
+
 function _withHistoricalBlankPriceRecovery(mold) {
     if (!mold || typeof mold !== 'object') {
+        return { mold, changed: false };
+    }
+    if (_isHistoricalBlankPriceRecoveryDisabled(mold)) {
         return { mold, changed: false };
     }
     const before = _cloneHistoricalBlankPrices(mold.custom_prices);
@@ -373,6 +380,9 @@ function checkMoldsVersion() {
                 if (m.custom_margins === undefined) m.custom_margins = {};
                 // Ensure custom_prices field exists (added in v8)
                 if (m.custom_prices === undefined) m.custom_prices = {};
+                if (m.disable_historical_blank_price_recovery === undefined) {
+                    m.disable_historical_blank_price_recovery = false;
+                }
                 m.custom_prices = _mergeHistoricalBlankCustomPrices(m.custom_prices, m.name);
                 // v9: Update letter blanks (id 30, 31) with hw_* fields
                 if ((m.id === 30 || m.id === 31) && !m.hw_name) {
