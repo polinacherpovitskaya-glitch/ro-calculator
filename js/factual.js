@@ -787,6 +787,23 @@ async _loadFactSummaries() {
         if (key === 'revenue' && factData?._auto_fintablo?.fact_revenue) return true;
         return false;
     },
+    async _recomputeCachedFact(cached) {
+        if (!cached) return;
+        const factData = cached.factData || {};
+        const planData = cached.planData || {};
+        const planHours = cached.planHours || {};
+        const orderId = Number(cached.order?.id || cached.orderId || 0);
+        await this._applyHoursFromEntries(factData, orderId, planHours, App.params || {});
+        await this._applyDerivedFacts(factData, planData, planHours, App.params || {}, orderId, cached.order?.order_name || '');
+        let factTotal = 0;
+        this.ROWS.forEach(row => { factTotal += parseFloat(factData['fact_' + row.key]) || 0; });
+        factData.fact_total = round2(factTotal);
+    },
+    _renderAutoResetControl(orderId, key, isAuto, manualOverride) {
+        if (!isAuto || !manualOverride) return '';
+        return `<button type="button" class="btn btn-outline" style="padding:2px 6px;font-size:10px;line-height:1.2;margin-left:6px"
+                    onclick="event.stopPropagation();Factual.resetFactInput(${orderId}, '${key}')">↺ авто</button>`;
+    },
 
     async _ensureComputedOrder(orderRef) {
         const orderId = typeof orderRef === 'object' ? Number(orderRef?.id) : Number(orderRef);
@@ -1014,9 +1031,22 @@ async _loadFactSummaries() {
     const revIsAuto = this._isAutoFactRow(fact, 'revenue');
     const revManual = this._isManualOverride(fact, 'fact_revenue');
     const revAutoClass = revIsAuto && !revManual ? 'fact-input-auto' : '';
+    const revenueResetControl = this._renderAutoResetControl(orderId, 'revenue', revIsAuto, revManual);
     const factRevenueHint = fact._auto_fintablo?.fact_revenue
         ? (factRev > 0 && planRev > factRev ? 'получено из ФинТабло, оплата пока частичная' : 'получено из ФинТабло')
         : (revManual ? 'внесено вручную' : 'пока не внесена');
+    const _isAdmin = App.isAdmin();
+    const planTotalRowsVisible = round2(this.ROWS.reduce((sum, row) => {
+        const planVal = plan[row.planField] || 0;
+        const factKey = 'fact_' + row.key;
+        const factVal = parseFloat(fact[factKey]) || 0;
+        if (row.key === 'molds' && planVal === 0 && factVal === 0) return sum;
+        const isSalaryRow = row.key.startsWith('salary_') || row.key === 'indirect_production';
+        if (isSalaryRow && !_isAdmin) return sum;
+        return sum + planVal;
+    }, 0));
+    const planTotalBase = round2(plan.totalCosts || planTotalRowsVisible);
+    const hasPlanDrift = Math.abs(planTotalRowsVisible - planTotalBase) > 0.01;
 
     html += `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;margin-bottom:12px">
         <div class="fact-mini-stat"><span class="text-muted" style="font-size:11px">План расходы</span><br><b>${this.fmtRub(planCost)}</b><div class="text-muted" style="font-size:11px">из калькулятора</div></div>
@@ -1029,6 +1059,11 @@ async _loadFactSummaries() {
     if (fact._legacy_stage_estimate) {
         html += `<div style="margin:-2px 0 10px;padding:8px 10px;border:1px solid var(--border);border-radius:10px;background:var(--bg-muted);font-size:11px;color:var(--text-muted)">
             Legacy-часы без этапа распределены по плановым стадиям заказа, чтобы выливание/срезание/сборка отражали реальную загрузку до ручной детализации.
+        </div>`;
+    }
+    if (hasPlanDrift) {
+        html += `<div style="margin:-2px 0 10px;padding:8px 10px;border:1px solid #f59e0b;border-radius:10px;background:#fff7ed;font-size:11px;color:#92400e">
+            Важно: видимые плановые строки сейчас пересчитаны по текущим строкам заказа и дают ${this.fmtRub(planTotalRowsVisible)}, но сохраненный план заказа в калькуляторе равен ${this.fmtRub(planTotalBase)}. Верхний ИТОГО использует сохраненный план заказа.
         </div>`;
     }
 
@@ -1049,7 +1084,6 @@ async _loadFactSummaries() {
     html += '<thead><tr><th style="text-align:left;width:35%">Статья расходов</th><th class="text-right" style="width:20%">План</th><th class="text-right" style="width:25%">Факт</th><th class="text-right" style="width:20%">Δ</th></tr></thead><tbody>';
 
     let planTotal = 0, factTotal = 0;
-    const _isAdmin = App.isAdmin();
     this.ROWS.forEach(row => {
         const planVal = plan[row.planField] || 0;
         const factKey = 'fact_' + row.key;
@@ -1065,6 +1099,7 @@ async _loadFactSummaries() {
         const alarm = this.getAlarm(factVal, planVal);
 
         const sourceHint = manualOverride ? 'вручную' : this._getRowSourceHint(fact, factKey, row.hint);
+        const resetControl = this._renderAutoResetControl(orderId, row.key, isAuto, manualOverride);
         const planDetail = this._renderPlanRowDetail(row.key, planMeta);
         const factDetail = this._renderFactRowDetail(row.key, factHoursByRow, planMeta);
 
@@ -1072,7 +1107,7 @@ async _loadFactSummaries() {
             return;
         }
         html += `<tr style="${alarm.bgStyle}">
-            <td style="padding:6px 8px;font-weight:500">${row.label} <span class="text-muted" style="font-size:10px">${sourceHint}</span></td>
+            <td style="padding:6px 8px;font-weight:500">${row.label} <span class="text-muted" style="font-size:10px">${sourceHint}</span>${resetControl}</td>
             <td class="text-right" style="padding:6px 8px;color:var(--text-muted)">
                 <div>${this.fmtRub(planVal)}</div>
                 ${planDetail ? `<div class="text-muted" style="font-size:11px;margin-top:2px;line-height:1.35">${planDetail}</div>` : ''}
@@ -1090,8 +1125,6 @@ async _loadFactSummaries() {
     });
 
     const planTotalRows = round2(planTotal);
-    const planTotalBase = round2(plan.totalCosts || planTotalRows);
-    const hasPlanDrift = Math.abs(planTotalRows - planTotalBase) > 0.01;
     const tDelta = factTotal - planTotalBase;
     const tPct = planTotalBase > 0 ? (tDelta / planTotalBase) * 100 : 0;
     const tAlarm = this.getAlarm(factTotal, planTotalBase);
@@ -1118,6 +1151,7 @@ async _loadFactSummaries() {
                 <input type="text" inputmode="decimal" value="${factRev || ''}"
                     class="fact-input ${revAutoClass}" style="max-width:220px;font-weight:600"
                     oninput="Factual.onFactInput(${orderId}, 'revenue', this.value)">
+                ${revenueResetControl}
             </div>
             <div class="text-muted" style="font-size:11px;line-height:1.5">
                 Факт выручка = деньги, которые реально пришли по этой сделке. ${fact._auto_fintablo?.fact_revenue ? 'Сейчас значение приходит из ФинТабло.' : 'Сейчас значение можно ввести вручную.'}
@@ -1173,6 +1207,28 @@ async _loadFactSummaries() {
                 this._renderDetail(orderId, container, cached.planData, cached.planHours, cached.factData, cached.order, cached.planMeta || {});
             }
         }, 500);
+    },
+
+    async resetFactInput(orderId, key) {
+        const cached = this._orderCache[orderId] || await this._ensureComputedOrder(orderId);
+        if (!cached) return;
+        if (!this._isAutoFactRow(cached.factData, key)) return;
+
+        if (key === 'revenue') {
+            delete cached.factData.fact_revenue;
+            this._setManualOverride(cached.factData, 'fact_revenue', false);
+        } else {
+            delete cached.factData['fact_' + key];
+            this._setManualOverride(cached.factData, 'fact_' + key, false);
+        }
+
+        await this._recomputeCachedFact(cached);
+        const container = document.getElementById('fact-detail-' + orderId);
+        if (container) {
+            this._renderDetail(orderId, container, cached.planData, cached.planHours, cached.factData, cached.order, cached.planMeta || {});
+        }
+        await this._renderGlobalStats();
+        await this._loadFactSummaries();
     },
 
     onNotesChange(orderId, value) {

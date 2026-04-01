@@ -2409,6 +2409,11 @@ const Warehouse = {
         if (extraMeta && Object.prototype.hasOwnProperty.call(extraMeta, 'order_id')) {
             delete extraMeta.order_id;
         }
+        const historyUnitPrice = parseFloat(extraMeta && extraMeta.history_unit_price) || 0;
+        if (extraMeta && Object.prototype.hasOwnProperty.call(extraMeta, 'history_unit_price')) {
+            delete extraMeta.history_unit_price;
+        }
+        const effectiveUnitPrice = historyUnitPrice > 0 ? historyUnitPrice : (parseFloat(item.price_per_unit) || 0);
         history.push({
             id: Date.now(),
             item_id: itemId,
@@ -2420,8 +2425,8 @@ const Warehouse = {
             requested_qty_change: requestedQtyChange,
             qty_before: qtyBefore,
             qty_after: item.qty,
-            unit_price: parseFloat(item.price_per_unit) || 0,
-            total_cost_change: round2(Math.abs(appliedQtyChange) * (parseFloat(item.price_per_unit) || 0)),
+            unit_price: effectiveUnitPrice,
+            total_cost_change: round2(Math.abs(appliedQtyChange) * effectiveUnitPrice),
             order_id: historyOrderId,
             order_name: orderName || '',
             notes: notes || '',
@@ -3612,6 +3617,27 @@ const Warehouse = {
         }, 0);
     },
 
+    _getProjectHardwareLegacyResidualCost(orderId, itemId, history) {
+        return round2((history || []).reduce((acc, entry) => {
+            if (Number(entry.order_id || 0) !== Number(orderId || 0)) return acc;
+            if (Number(entry.item_id || 0) !== Number(itemId || 0)) return acc;
+            const flow = this._getProjectHardwareHistoryFlow(entry);
+            if (!this._isProjectHardwareLegacyHistoryFlow(flow)) return acc;
+            const qtyChange = parseFloat(entry.qty_change || 0) || 0;
+            if (Math.abs(qtyChange) <= 0.000001) return acc;
+            const unitPrice = parseFloat(entry.unit_price || 0) || 0;
+            return acc + round2(-qtyChange * unitPrice);
+        }, 0));
+    },
+
+    _getProjectHardwareLegacyResidualUnitPrice(orderId, itemId, history) {
+        const residualDelta = this._getProjectHardwareLegacyResidualDelta(orderId, itemId, history);
+        const residualCost = this._getProjectHardwareLegacyResidualCost(orderId, itemId, history);
+        if (Math.abs(residualDelta) <= 0.000001) return 0;
+        if (Math.abs(residualCost) <= 0.000001) return 0;
+        return round2(Math.abs(residualCost) / Math.abs(residualDelta));
+    },
+
     _hasProjectHardwareReadyEvidence(orderId, itemId, history) {
         return (history || []).some(entry => {
             if (Number(entry.order_id || 0) !== Number(orderId || 0)) return false;
@@ -4050,6 +4076,7 @@ const Warehouse = {
             const residualDelta = this._getProjectHardwareLegacyResidualDelta(row.order_id, row.item_id, history);
             if (Math.abs(residualDelta) <= 0.000001) continue;
             const repairDelta = -residualDelta;
+            const historyUnitPrice = this._getProjectHardwareLegacyResidualUnitPrice(row.order_id, row.item_id, history);
             await this.adjustStock(
                 row.item_id,
                 repairDelta,
@@ -4062,6 +4089,7 @@ const Warehouse = {
                 {
                     order_id: row.order_id,
                     project_hardware_flow: 'legacy_status_repair',
+                    history_unit_price: historyUnitPrice,
                 }
             );
             repairedCount += 1;

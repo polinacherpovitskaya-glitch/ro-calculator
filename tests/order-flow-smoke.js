@@ -4109,7 +4109,7 @@ async function smokeProjectHardwareLegacyAndCollectedNetting(context) {
         sku: 'CORD-1',
         category: 'hardware',
         qty: 343,
-        price_per_unit: 30,
+        price_per_unit: 0.7,
     }];
     context.__warehouseHistory = [
         {
@@ -4188,6 +4188,8 @@ async function smokeProjectHardwareLegacyAndCollectedNetting(context) {
     assert.equal(context.__warehouseHistory.length, 3);
     assert.match(context.__warehouseHistory[2].notes, /Автоисправление legacy-списания проектной позиции: \+100 шт/);
     assert.equal(context.__warehouseHistory[2].project_hardware_flow, 'legacy_status_repair');
+    assert.equal(context.__warehouseHistory[2].unit_price, 30, 'legacy repair should preserve original legacy movement price instead of current item price');
+    assert.equal(context.__warehouseHistory[2].total_cost_change, 3000);
     assert.equal(context.__reservations.length, 0);
 }
 

@@ -117,6 +117,46 @@ function smokeRevenueManualOverride(context) {
     assert.equal(vm.runInContext(`!!Factual._orderCache[5].factData._manual_overrides.fact_revenue`, context), true);
 }
 
+async function smokeResetAutoFactInput(context) {
+    await vm.runInContext(`(async () => {
+        Factual._employees = [
+            {
+                id: 2,
+                name: 'Женя',
+                pay_base_salary_month: 0,
+                pay_base_hours_month: 0,
+                pay_overtime_hour_rate: 500,
+            },
+        ];
+        Factual._entries = [
+            {
+                order_id: 9,
+                worker_name: 'Женя',
+                employee_id: 2,
+                hours: 1,
+                description: '[meta]{"stage":"assembly","project":"Reset Order"}[/meta]',
+            },
+        ];
+        Factual._orderCache[9] = {
+            planData: { revenue: 0, totalCosts: 0, plastic: 0, hardwareTotal: 0, packagingTotal: 0 },
+            planHours: { hoursPlastic: 0, hoursTrim: 0, hoursHardware: 1, hoursPackaging: 0 },
+            planMeta: {},
+            factData: {
+                fact_salary_assembly: 1,
+                fact_hours_assembly: 0,
+                _manual_overrides: { fact_salary_assembly: true },
+            },
+            order: { id: 9, order_name: 'Reset Order' },
+        };
+        Factual._renderGlobalStats = async () => {};
+        await Factual.resetFactInput(9, 'salary_assembly');
+    })()`, context);
+
+    assert.equal(vm.runInContext(`Factual._orderCache[9].factData.fact_salary_assembly`, context), 500);
+    assert.equal(vm.runInContext(`Factual._orderCache[9].factData.fact_hours_assembly`, context), 1);
+    assert.equal(vm.runInContext(`!!(Factual._orderCache[9].factData._manual_overrides || {}).fact_salary_assembly`, context), false);
+}
+
 function smokeSavedPlanTotalWins(context) {
     const container = context.document.getElementById('fact-detail-2');
     vm.runInContext(`(() => {
@@ -370,6 +410,7 @@ async function main() {
     smokeHiddenSalaryTotals(context);
     smokeSavedPlanTotalWins(context);
     smokeRevenueManualOverride(context);
+    await smokeResetAutoFactInput(context);
     smokeBuildPlanUsesTaxFormulaAndSavedAssemblyHours(context);
     smokeBuildPlanUsesHourBasedIndirectAndAssemblyHints(context);
     await smokeLegacyStageDistributionAndMaterials(context);
