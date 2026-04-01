@@ -150,54 +150,115 @@ const _volatileLocalCache = new Map();
 
 // Data version — increment to trigger NON-DESTRUCTIVE migration
 // NEVER delete user data! Only add missing fields to existing molds
-const MOLDS_DATA_VERSION = 10; // v10: восстановление historical custom_prices для бланков из экспорта 2026-02-26
+const MOLDS_DATA_VERSION = 11; // v11: восстановление custom_prices бланков из экспорта 2026-03-26 + защита от перезаписи Supabase локальным кэшем
 const MOLDS_VERSION_KEY = 'ro_calc_molds_version';
 
-// Historical manual sell prices from the exported blanks catalog before the reset.
-// Source: /Users/krollipolli/Downloads/molds_2026-02-26.csv
+// Latest known manual sell prices from the exported blanks catalog.
+// Source: /Users/krollipolli/Downloads/molds_2026-03-26.csv
 const HISTORICAL_BLANK_PRICE_BASELINE = Object.freeze({
-    'NFC Звезда': Object.freeze({ 50: 990, 100: 825, 300: 620, 500: 495, 1000: 450, 3000: 415 }),
-    'NFC Камушек': Object.freeze({ 50: 990, 100: 825, 300: 620, 500: 495, 1000: 450, 3000: 415 }),
-    'NFC Квадрат': Object.freeze({ 50: 990, 100: 825, 300: 620, 500: 495, 1000: 450, 3000: 415 }),
-    'NFC Сердце': Object.freeze({ 50: 990, 100: 825, 300: 620, 500: 495, 1000: 450, 3000: 415 }),
-    'Беговые кроссовки': Object.freeze({ 50: 790, 100: 660, 300: 495, 500: 395, 1000: 360, 3000: 330 }),
-    'Бланк квадрат': Object.freeze({ 50: 465, 100: 385, 300: 290, 500: 235, 1000: 210, 3000: 195 }),
-    'Бланк конверт': Object.freeze({ 50: 790, 100: 660, 300: 495, 500: 395, 1000: 360, 3000: 330 }),
-    'Бланк круг': Object.freeze({ 50: 475, 100: 400, 300: 300, 500: 240, 1000: 220, 3000: 200 }),
-    'Бланк прямоугольник': Object.freeze({ 50: 475, 100: 400, 300: 300, 500: 240, 1000: 220, 3000: 200 }),
-    'Бланк сердце': Object.freeze({ 50: 475, 100: 400, 300: 300, 500: 240, 1000: 220, 3000: 200 }),
-    'Бланк треугольник': Object.freeze({ 50: 465, 100: 385, 300: 290, 500: 235, 1000: 210, 3000: 195 }),
+    'NFC Звезда': Object.freeze({ 50: 1250, 100: 890, 300: 880, 500: 645, 1000: 570, 3000: 510 }),
+    'NFC Камушек': Object.freeze({ 50: 1250, 100: 890, 300: 880, 500: 645, 1000: 570, 3000: 510 }),
+    'NFC Квадрат': Object.freeze({ 50: 1250, 100: 890, 300: 880, 500: 645, 1000: 570, 3000: 510 }),
+    'NFC Сердце': Object.freeze({ 50: 1250, 100: 890, 300: 880, 500: 645, 1000: 570, 3000: 510 }),
+    'Беговые кроссовки': Object.freeze({ 50: 890, 100: 630, 300: 550, 500: 515, 1000: 455, 3000: 410 }),
+    'Бирка': Object.freeze({ 50: 770, 100: 640, 300: 550, 500: 500, 1000: 450, 3000: 380 }),
+    'Бланк квадрат': Object.freeze({ 50: 550, 100: 550, 300: 390, 500: 320, 1000: 290, 3000: 245 }),
+    'Бланк конверт': Object.freeze({ 50: 890, 100: 630, 300: 630, 500: 515, 1000: 455, 3000: 410 }),
+    'Бланк круг': Object.freeze({ 50: 550, 100: 550, 300: 390, 500: 320, 1000: 290, 3000: 245 }),
+    'Бланк прямоугольник': Object.freeze({ 50: 550, 100: 550, 300: 390, 500: 320, 1000: 290, 3000: 245 }),
+    'Бланк сердце': Object.freeze({ 50: 550, 100: 550, 300: 390, 500: 320, 1000: 290, 3000: 245 }),
+    'Бланк треугольник': Object.freeze({ 50: 550, 100: 550, 300: 390, 500: 320, 1000: 290, 3000: 245 }),
+    'Бланк тэг': Object.freeze({ 50: 150, 100: 150, 300: 60, 500: 60, 1000: 60, 3000: 60 }),
     'Бланк тэг Recycle object': Object.freeze({ 50: 60, 100: 60, 300: 60, 500: 60, 1000: 60, 3000: 60 }),
-    'Бланк тэг без надписи': Object.freeze({ 50: 185, 100: 155, 300: 120, 500: 95, 1000: 85, 3000: 80 }),
-    'Бланк цветок': Object.freeze({ 50: 465, 100: 385, 300: 290, 500: 235, 1000: 210, 3000: 195 }),
-    'Большой дракон': Object.freeze({ 50: 1500, 100: 1250, 300: 940, 500: 750, 1000: 685, 3000: 625 }),
-    'Большой конь': Object.freeze({ 50: 1500, 100: 1250, 300: 940, 500: 750, 1000: 685, 3000: 625 }),
-    'Буква из алфавита (кир.)': Object.freeze({ 50: 340, 100: 285, 300: 215, 500: 170, 1000: 155, 3000: 145 }),
-    'Буква из алфавита (лат.)': Object.freeze({ 50: 340, 100: 285, 300: 215, 500: 170, 1000: 155, 3000: 145 }),
+    'Бланк цветок': Object.freeze({ 50: 550, 100: 550, 300: 390, 500: 320, 1000: 290, 3000: 245 }),
+    'Большой дракон': Object.freeze({ 50: 1350, 100: 1120, 300: 970, 500: 880, 1000: 800, 3000: 780 }),
+    'Большой конь': Object.freeze({ 50: 1350, 100: 1120, 300: 970, 500: 880, 1000: 800, 3000: 780 }),
+    'Буква из алфавита / смайлы': Object.freeze({ 50: 250, 100: 250, 300: 250, 500: 180, 1000: 180, 3000: 160 }),
     'Бусины большие': Object.freeze({ 50: 295, 100: 245, 300: 185, 500: 150, 1000: 135, 3000: 125 }),
     'Бусины маленькие': Object.freeze({ 50: 340, 100: 285, 300: 215, 500: 170, 1000: 155, 3000: 145 }),
-    'Велосипед': Object.freeze({ 50: 805, 100: 670, 300: 505, 500: 405, 1000: 365, 3000: 335 }),
-    'Гребень': Object.freeze({ 50: 1485, 100: 1235, 300: 930, 500: 745, 1000: 675, 3000: 620 }),
-    'Карабин': Object.freeze({ 50: 560, 100: 465, 300: 350, 500: 280, 1000: 255, 3000: 235 }),
-    'Картхолдер нью': Object.freeze({ 50: 1130, 100: 945, 300: 710, 500: 565, 1000: 515, 3000: 475 }),
-    'Ласты для плавания': Object.freeze({ 50: 940, 100: 785, 300: 590, 500: 470, 1000: 430, 3000: 395 }),
+    'Велосипед': Object.freeze({ 50: 890, 100: 630, 300: 630, 500: 525, 1000: 465, 3000: 415 }),
+    'Волчок': Object.freeze({ 50: 1705, 100: 1220, 300: 775, 500: 570, 1000: 505, 3000: 450 }),
+    'Гребень': Object.freeze({ 50: 1160, 100: 960, 300: 860, 500: 860, 1000: 860, 3000: 770 }),
+    'Зеркало-клякса': Object.freeze({ 50: 3625, 100: 2590, 300: 1650, 500: 1210, 1000: 1070, 3000: 955 }),
+    'Змея': Object.freeze({ 50: 2130, 100: 1525, 300: 970, 500: 710, 1000: 630, 3000: 565 }),
+    'Карабин': Object.freeze({ 50: 690, 100: 570, 300: 470, 500: 390, 1000: 350, 3000: 290 }),
+    'Картхолдер': Object.freeze({ 50: 1060, 100: 880, 300: 760, 500: 690, 1000: 620, 3000: 585 }),
+    'Ключ': Object.freeze({ 50: 470, 100: 390, 300: 325, 500: 290, 1000: 240, 3000: 200 }),
+    'Ласты для плавания': Object.freeze({ 50: 890, 100: 630, 300: 630, 500: 630, 1000: 545, 3000: 485 }),
+    'Лошадь большая': Object.freeze({ 50: 2130, 100: 1520, 300: 970, 500: 710, 1000: 630, 3000: 560 }),
     'Маленькая елочка': Object.freeze({ 50: 555, 100: 460, 300: 345, 500: 280, 1000: 255, 3000: 230 }),
     'Маленькая снежинка': Object.freeze({ 50: 465, 100: 385, 300: 290, 500: 235, 1000: 210, 3000: 195 }),
     'Маленький конь': Object.freeze({ 50: 610, 100: 510, 300: 385, 500: 305, 1000: 280, 3000: 255 }),
     'Маленький цветочек': Object.freeze({ 50: 465, 100: 385, 300: 290, 500: 235, 1000: 210, 3000: 195 }),
     'Маленькое сердечко': Object.freeze({ 50: 465, 100: 385, 300: 290, 500: 235, 1000: 210, 3000: 195 }),
-    'Медаль': Object.freeze({ 50: 630, 100: 525, 300: 395, 500: 315, 1000: 290, 3000: 265 }),
+    'Медаль': Object.freeze({ 50: 1040, 100: 860, 300: 710, 500: 590, 1000: 530, 3000: 325 }),
     'Мыльница': Object.freeze({ 50: 1490, 100: 1240, 300: 930, 500: 745, 1000: 680, 3000: 620 }),
-    'Отельный': Object.freeze({ 50: 630, 100: 525, 300: 395, 500: 315, 1000: 290, 3000: 265 }),
-    'Открывашка': Object.freeze({ 50: 1005, 100: 835, 300: 630, 500: 505, 1000: 460, 3000: 420 }),
-    'Падл ракетка': Object.freeze({ 50: 845, 100: 705, 300: 530, 500: 425, 1000: 385, 3000: 355 }),
-    'Подставка под телефон': Object.freeze({ 50: 1275, 100: 1060, 300: 795, 500: 640, 1000: 580, 3000: 530 }),
-    'Ракетка для тенниса': Object.freeze({ 50: 795, 100: 665, 300: 500, 500: 400, 1000: 365, 3000: 335 }),
-    'Смотка': Object.freeze({ 50: 840, 100: 700, 300: 525, 500: 420, 1000: 380, 3000: 350 }),
-    'Чехол для зажигалки': Object.freeze({ 50: 1250, 100: 1040, 300: 780, 500: 625, 1000: 570, 3000: 520 }),
+    'Новый кардхолдер': Object.freeze({ 50: 1060, 100: 880, 300: 760, 500: 690, 1000: 620, 3000: 585 }),
+    'Отельный': Object.freeze({ 50: 960, 100: 680, 300: 520, 500: 430, 1000: 390, 3000: 325 }),
+    'Открывашка': Object.freeze({ 50: 1070, 100: 890, 300: 770, 500: 700, 1000: 630, 3000: 520 }),
+    'Падл ракетка': Object.freeze({ 50: 1030, 100: 730, 300: 560, 500: 555, 1000: 460, 3000: 410 }),
+    'Подставка под телефон': Object.freeze({ 50: 1120, 100: 1120, 300: 970, 500: 880, 1000: 800, 3000: 660 }),
+    'Ракетка для тенниса': Object.freeze({ 50: 1030, 100: 730, 300: 560, 500: 520, 1000: 460, 3000: 410 }),
+    'Смайл': Object.freeze({ 50: 2975, 100: 2125, 300: 1355, 500: 995, 1000: 875, 3000: 785 }),
+    'Смотка': Object.freeze({ 50: 750, 100: 750, 300: 750, 500: 550, 1000: 485, 3000: 435 }),
+    'Тюльпан': Object.freeze({ 50: 1715, 100: 1225, 300: 780, 500: 575, 1000: 505, 3000: 455 }),
+    'Чехол для зажигалки': Object.freeze({ 50: 890, 100: 890, 300: 890, 500: 820, 1000: 725, 3000: 645 }),
+    'Шар': Object.freeze({ 50: 2365, 100: 2030, 300: 1760, 500: 1600, 1000: 1450, 3000: 1075 }),
 });
 
+// Legacy prices from the earlier export that should be upgraded in-place.
+const LEGACY_HISTORICAL_BLANK_PRICE_BASELINES = Object.freeze([
+    Object.freeze({
+        'NFC Звезда': Object.freeze({ 50: 990, 100: 825, 300: 620, 500: 495, 1000: 450, 3000: 415 }),
+        'NFC Камушек': Object.freeze({ 50: 990, 100: 825, 300: 620, 500: 495, 1000: 450, 3000: 415 }),
+        'NFC Квадрат': Object.freeze({ 50: 990, 100: 825, 300: 620, 500: 495, 1000: 450, 3000: 415 }),
+        'NFC Сердце': Object.freeze({ 50: 990, 100: 825, 300: 620, 500: 495, 1000: 450, 3000: 415 }),
+        'Беговые кроссовки': Object.freeze({ 50: 790, 100: 660, 300: 495, 500: 395, 1000: 360, 3000: 330 }),
+        'Бланк квадрат': Object.freeze({ 50: 465, 100: 385, 300: 290, 500: 235, 1000: 210, 3000: 195 }),
+        'Бланк конверт': Object.freeze({ 50: 790, 100: 660, 300: 495, 500: 395, 1000: 360, 3000: 330 }),
+        'Бланк круг': Object.freeze({ 50: 475, 100: 400, 300: 300, 500: 240, 1000: 220, 3000: 200 }),
+        'Бланк прямоугольник': Object.freeze({ 50: 475, 100: 400, 300: 300, 500: 240, 1000: 220, 3000: 200 }),
+        'Бланк сердце': Object.freeze({ 50: 475, 100: 400, 300: 300, 500: 240, 1000: 220, 3000: 200 }),
+        'Бланк треугольник': Object.freeze({ 50: 465, 100: 385, 300: 290, 500: 235, 1000: 210, 3000: 195 }),
+        'Бланк тэг Recycle object': Object.freeze({ 50: 60, 100: 60, 300: 60, 500: 60, 1000: 60, 3000: 60 }),
+        'Бланк тэг без надписи': Object.freeze({ 50: 185, 100: 155, 300: 120, 500: 95, 1000: 85, 3000: 80 }),
+        'Бланк цветок': Object.freeze({ 50: 465, 100: 385, 300: 290, 500: 235, 1000: 210, 3000: 195 }),
+        'Большой дракон': Object.freeze({ 50: 1500, 100: 1250, 300: 940, 500: 750, 1000: 685, 3000: 625 }),
+        'Большой конь': Object.freeze({ 50: 1500, 100: 1250, 300: 940, 500: 750, 1000: 685, 3000: 625 }),
+        'Буква из алфавита (кир.)': Object.freeze({ 50: 340, 100: 285, 300: 215, 500: 170, 1000: 155, 3000: 145 }),
+        'Буква из алфавита (лат.)': Object.freeze({ 50: 340, 100: 285, 300: 215, 500: 170, 1000: 155, 3000: 145 }),
+        'Бусины большие': Object.freeze({ 50: 295, 100: 245, 300: 185, 500: 150, 1000: 135, 3000: 125 }),
+        'Бусины маленькие': Object.freeze({ 50: 340, 100: 285, 300: 215, 500: 170, 1000: 155, 3000: 145 }),
+        'Велосипед': Object.freeze({ 50: 805, 100: 670, 300: 505, 500: 405, 1000: 365, 3000: 335 }),
+        'Гребень': Object.freeze({ 50: 1485, 100: 1235, 300: 930, 500: 745, 1000: 675, 3000: 620 }),
+        'Карабин': Object.freeze({ 50: 560, 100: 465, 300: 350, 500: 280, 1000: 255, 3000: 235 }),
+        'Картхолдер нью': Object.freeze({ 50: 1130, 100: 945, 300: 710, 500: 565, 1000: 515, 3000: 475 }),
+        'Ласты для плавания': Object.freeze({ 50: 940, 100: 785, 300: 590, 500: 470, 1000: 430, 3000: 395 }),
+        'Маленькая елочка': Object.freeze({ 50: 555, 100: 460, 300: 345, 500: 280, 1000: 255, 3000: 230 }),
+        'Маленькая снежинка': Object.freeze({ 50: 465, 100: 385, 300: 290, 500: 235, 1000: 210, 3000: 195 }),
+        'Маленький конь': Object.freeze({ 50: 610, 100: 510, 300: 385, 500: 305, 1000: 280, 3000: 255 }),
+        'Маленький цветочек': Object.freeze({ 50: 465, 100: 385, 300: 290, 500: 235, 1000: 210, 3000: 195 }),
+        'Маленькое сердечко': Object.freeze({ 50: 465, 100: 385, 300: 290, 500: 235, 1000: 210, 3000: 195 }),
+        'Медаль': Object.freeze({ 50: 630, 100: 525, 300: 395, 500: 315, 1000: 290, 3000: 265 }),
+        'Мыльница': Object.freeze({ 50: 1490, 100: 1240, 300: 930, 500: 745, 1000: 680, 3000: 620 }),
+        'Отельный': Object.freeze({ 50: 630, 100: 525, 300: 395, 500: 315, 1000: 290, 3000: 265 }),
+        'Открывашка': Object.freeze({ 50: 1005, 100: 835, 300: 630, 500: 505, 1000: 460, 3000: 420 }),
+        'Падл ракетка': Object.freeze({ 50: 845, 100: 705, 300: 530, 500: 425, 1000: 385, 3000: 355 }),
+        'Подставка под телефон': Object.freeze({ 50: 1275, 100: 1060, 300: 795, 500: 640, 1000: 580, 3000: 530 }),
+        'Ракетка для тенниса': Object.freeze({ 50: 795, 100: 665, 300: 500, 500: 400, 1000: 365, 3000: 335 }),
+        'Смотка': Object.freeze({ 50: 840, 100: 700, 300: 525, 500: 420, 1000: 380, 3000: 350 }),
+        'Чехол для зажигалки': Object.freeze({ 50: 1250, 100: 1040, 300: 780, 500: 625, 1000: 570, 3000: 520 }),
+    }),
+]);
+
 const HISTORICAL_BLANK_PRICE_ALIASES = Object.freeze({
+    'Бланк тэг без надписи': 'Бланк тэг',
+    'Картхолдер нью': 'Новый кардхолдер',
+    'Буква из алфавита (кир.)': 'Буква из алфавита / смайлы',
+    'Буква из алфавита (лат.)': 'Буква из алфавита / смайлы',
+});
+
+const LEGACY_HISTORICAL_BLANK_PRICE_ALIASES = Object.freeze({
     'Бланк тэг': 'Бланк тэг без надписи',
     'Новый кардхолдер': 'Картхолдер нью',
 });
@@ -216,14 +277,42 @@ function _getHistoricalBlankCustomPrices(name) {
     return _cloneHistoricalBlankPrices(HISTORICAL_BLANK_PRICE_BASELINE[key]);
 }
 
+function _getLegacyHistoricalBlankCustomPrices(name) {
+    const key = LEGACY_HISTORICAL_BLANK_PRICE_ALIASES[name] || name;
+    return LEGACY_HISTORICAL_BLANK_PRICE_BASELINES.map((baseline) => _cloneHistoricalBlankPrices(baseline[key]));
+}
+
+function _isExactHistoricalPriceMatch(left, right) {
+    const leftMap = _cloneHistoricalBlankPrices(left);
+    const rightMap = _cloneHistoricalBlankPrices(right);
+    const keys = ['50', '100', '300', '500', '1000', '3000'];
+    return keys.every((qty) => (Number(leftMap[qty]) || 0) === (Number(rightMap[qty]) || 0));
+}
+
+function _isSubsetHistoricalPriceMatch(currentPrices, baselinePrices) {
+    const current = _cloneHistoricalBlankPrices(currentPrices);
+    const baseline = _cloneHistoricalBlankPrices(baselinePrices);
+    const entries = Object.entries(current);
+    if (entries.length === 0) return false;
+    return entries.every(([qty, value]) => (Number(baseline[qty]) || 0) === (Number(value) || 0));
+}
+
 function _mergeHistoricalBlankCustomPrices(currentPrices, name) {
-    const merged = _cloneHistoricalBlankPrices(currentPrices);
     const historical = _getHistoricalBlankCustomPrices(name);
+    const current = _cloneHistoricalBlankPrices(currentPrices);
+    if (!Object.keys(historical).length) return current;
+    if (!Object.keys(current).length) return historical;
+
+    const legacyMatches = _getLegacyHistoricalBlankCustomPrices(name).some((legacy) => (
+        Object.keys(legacy).length > 0
+        && (_isExactHistoricalPriceMatch(current, legacy) || _isSubsetHistoricalPriceMatch(current, legacy))
+    ));
+    if (legacyMatches) return historical;
+
+    const merged = { ...current };
     Object.entries(historical).forEach(([qty, value]) => {
         const existing = Number(merged[qty]);
-        if (!(Number.isFinite(existing) && existing > 0)) {
-            merged[qty] = value;
-        }
+        if (!(Number.isFinite(existing) && existing > 0)) merged[qty] = value;
     });
     return merged;
 }
@@ -1763,20 +1852,19 @@ async function loadMolds() {
                 }
             }
 
-            // Smart merge: push local records that are newer or missing in Supabase
+            // Smart merge: only push local records that are missing in Supabase.
+            // Existing Supabase molds stay authoritative, because browser-local
+            // caches previously overwrote shared manual pricing for blanks.
             const localMolds = (getLocal(LOCAL_KEYS.molds) || [])
                 .filter(mold => !deletedIds.has(Number(mold.id)))
                 .map(mold => _withHistoricalBlankPriceRecovery(mold).mold);
             if (localMolds.length > 0) {
                 const sbMap = new Map(supabaseMolds.map(m => [m.id, m]));
-                const sbUpdatedMap = new Map((data || []).map(r => [r.id, r.updated_at]));
                 let pushed = 0;
                 for (const local of localMolds) {
                     if (!local.id) continue;
                     const sbExists = sbMap.has(local.id);
-                    const sbTime = sbUpdatedMap.get(local.id);
-                    const localNewer = local.updated_at && sbTime && new Date(local.updated_at) > new Date(sbTime);
-                    if (!sbExists || localNewer) {
+                    if (!sbExists) {
                         try {
                             await supabaseClient.from('molds').upsert({
                                 id: local.id, name: local.name || '', mold_data: JSON.stringify(local),
