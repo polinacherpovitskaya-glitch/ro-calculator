@@ -141,6 +141,17 @@ function currentMonthDate(day) {
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
+function previousMonthPrefix() {
+    const now = new Date();
+    const year = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear();
+    const month = now.getMonth() === 0 ? 12 : now.getMonth();
+    return `${year}-${String(month).padStart(2, '0')}`;
+}
+
+function previousMonthDate(day) {
+    return `${previousMonthPrefix()}-${String(day).padStart(2, '0')}`;
+}
+
 function smokeSemimonthPayroll(context) {
     vm.runInContext(`
         TimeTrack.entries = [
@@ -206,6 +217,63 @@ function smokeSemimonthPayroll(context) {
     assert.ok(jenyaSecond, 'Женя second-half row should exist');
     assert.equal(jenyaSecond.overtimeHours, 0);
     assert.equal(Math.round(jenyaSecond.totalPay), 0);
+}
+
+function smokePreviousMonthPayrollSelection(context) {
+    const prevMonth = previousMonthPrefix();
+    vm.runInContext(`
+        TimeTrack.entries = [
+            { worker_name: 'Тая', employee_id: 1, date: '${previousMonthDate(18)}', hours: 12 },
+            { worker_name: 'Женя Г', employee_id: 2, date: '${previousMonthDate(20)}', hours: 8 },
+        ];
+        TimeTrack.employees = [
+            {
+                id: 1,
+                name: 'Тая',
+                role: 'production',
+                is_active: true,
+                payroll_profile: 'salary_semimonth_threshold',
+                pay_base_salary_month: 70000,
+                pay_base_hours_month: 120,
+                pay_base_hours_semimonth: 60,
+                pay_overtime_hour_rate: 500,
+                pay_weekend_hour_rate: 750,
+                pay_holiday_hour_rate: 750,
+            },
+            {
+                id: 2,
+                name: 'Женя Г',
+                role: 'production',
+                is_active: true,
+                payroll_profile: 'hourly',
+                pay_base_salary_month: 0,
+                pay_overtime_hour_rate: 500,
+                pay_weekend_hour_rate: 750,
+                pay_holiday_hour_rate: 750,
+            }
+        ];
+        TimeTrack.isWeekend = () => false;
+        TimeTrack.parseHolidaySet = () => new Set();
+        TimeTrack.getCurrentReportDate = () => '${currentMonthDate(1)}';
+        TimeTrack.populatePayrollMonthSelect();
+    `, context);
+
+    const selectedMonth = vm.runInContext(`document.getElementById('tt-payroll-month').value`, context);
+    assert.equal(selectedMonth, prevMonth);
+
+    const result = vm.runInContext(`TimeTrack.calculateProductionPayrollForMonth('${prevMonth}')`, context);
+    const tayaSecond = result.rows.find(row => row.employeeName === 'Тая' && row.periodKey === 'second');
+    const jenyaSecond = result.rows.find(row => row.employeeName === 'Женя Г' && row.periodKey === 'second');
+
+    assert.ok(tayaSecond, 'Тая previous-month second-half row should exist');
+    assert.equal(tayaSecond.regularHours, 12);
+    assert.equal(tayaSecond.inBaseHours, 12);
+    assert.equal(tayaSecond.overtimeHours, 0);
+
+    assert.ok(jenyaSecond, 'Женя previous-month second-half row should exist');
+    assert.equal(jenyaSecond.regularHours, 8);
+    assert.equal(jenyaSecond.overtimeHours, 8);
+    assert.equal(Math.round(jenyaSecond.totalPay), 4000);
 }
 
 function smokeDailyStatusAndCanonicalGrouping(context) {
@@ -440,8 +508,9 @@ async function smokeProjectSelectIncludesSamplesAndProduction(context) {
 async function main() {
     const context = createContext();
     runScript(context, 'js/timetrack.js');
-    smokeSemimonthPayroll(context);
-    smokeDailyStatusAndCanonicalGrouping(context);
+smokeSemimonthPayroll(context);
+smokePreviousMonthPayrollSelection(context);
+smokeDailyStatusAndCanonicalGrouping(context);
     await smokeMoscowDateAndLegacyRepair(context);
     await smokeLegacyFirstHalfImport(context);
     await smokeEditEntry(context);

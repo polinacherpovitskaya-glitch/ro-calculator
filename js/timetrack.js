@@ -55,6 +55,7 @@ const TimeTrack = {
         }
         this.populateWorkerSelect();
         this.populateFilters();
+        this.populatePayrollMonthSelect();
         await this.populateProjectSelect();
         this.ensureSensibleDefaultPeriod();
         this.filterAndRender();
@@ -350,6 +351,73 @@ const TimeTrack = {
             opt.textContent = p;
             pSelect.appendChild(opt);
         });
+    },
+
+    getCurrentMonthPrefix() {
+        return String(this.getCurrentReportDate() || '').slice(0, 7);
+    },
+
+    formatPayrollMonthLabel(monthPrefix) {
+        const match = String(monthPrefix || '').match(/^(\d{4})-(\d{2})$/);
+        if (!match) return String(monthPrefix || '');
+        const [, year, month] = match;
+        const monthIndex = parseInt(month, 10) - 1;
+        const monthNames = [
+            'январь', 'февраль', 'март', 'апрель', 'май', 'июнь',
+            'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь',
+        ];
+        return `${monthNames[monthIndex] || month} ${year}`;
+    },
+
+    getAvailablePayrollMonths() {
+        const monthSet = new Set();
+        (this.entries || []).forEach(entry => {
+            const rawDate = String(entry?.date || '').trim();
+            if (/^\d{4}-\d{2}-\d{2}$/.test(rawDate)) {
+                monthSet.add(rawDate.slice(0, 7));
+            }
+        });
+        monthSet.add(this.getCurrentMonthPrefix());
+        return [...monthSet].sort((a, b) => b.localeCompare(a));
+    },
+
+    populatePayrollMonthSelect() {
+        const select = document.getElementById('tt-payroll-month');
+        if (!select) return;
+
+        const previousValue = String(select.value || '');
+        const currentMonth = this.getCurrentMonthPrefix();
+        const months = this.getAvailablePayrollMonths();
+
+        select.innerHTML = '';
+        months.forEach(monthPrefix => {
+            const opt = document.createElement('option');
+            opt.value = monthPrefix;
+            opt.textContent = this.formatPayrollMonthLabel(monthPrefix);
+            select.appendChild(opt);
+        });
+
+        const hasCurrentMonthHours = (this.entries || []).some(entry => String(entry?.date || '').startsWith(`${currentMonth}-`));
+
+        if (previousValue && months.includes(previousValue)) {
+            select.value = previousValue;
+            return;
+        }
+
+        if (hasCurrentMonthHours) {
+            select.value = currentMonth;
+            return;
+        }
+
+        const latestWithHours = months.find(monthPrefix => monthPrefix !== currentMonth) || currentMonth;
+        select.value = latestWithHours;
+    },
+
+    getSelectedPayrollMonthPrefix() {
+        const select = document.getElementById('tt-payroll-month');
+        const selected = String(select?.value || '').trim();
+        if (/^\d{4}-\d{2}$/.test(selected)) return selected;
+        return this.getCurrentMonthPrefix();
     },
 
     getEntriesForPeriod(period) {
@@ -765,8 +833,9 @@ const TimeTrack = {
         return `${(parseFloat(v) || 0).toLocaleString('ru-RU')} ₽`;
     },
 
-    calculateProductionPayrollForCurrentMonth() {
-        const monthPrefix = `${this.getCurrentReportDate().slice(0, 7)}-`;
+    calculateProductionPayrollForMonth(monthPrefixInput) {
+        const rawPrefix = String(monthPrefixInput || this.getCurrentMonthPrefix()).trim();
+        const monthPrefix = rawPrefix.length === 7 ? `${rawPrefix}-` : `${this.getCurrentMonthPrefix()}-`;
         const holidaySet = this.parseHolidaySet();
         const payrollEmployees = this._getProductionEmployees()
             .filter(emp => this.getPayrollProfile(emp) !== 'management_salary_with_production_allocation');
@@ -858,10 +927,15 @@ const TimeTrack = {
         return { rows, total };
     },
 
+    calculateProductionPayrollForCurrentMonth() {
+        return this.calculateProductionPayrollForMonth(this.getCurrentMonthPrefix());
+    },
+
     renderPayrollSummary() {
         const tableBody = document.getElementById('tt-payroll-body');
         const totalEl = document.getElementById('tt-month-pay');
         const payrollCard = document.getElementById('tt-payroll-card');
+        const noteEl = document.getElementById('tt-payroll-note');
         if (!tableBody) return;
 
         // Hide entire payroll section from non-admin
@@ -871,10 +945,12 @@ const TimeTrack = {
         if (payStatCard) payStatCard.style.display = admin ? '' : 'none';
         if (!admin) {
             if (totalEl) totalEl.textContent = '—';
+            if (noteEl) noteEl.style.display = 'none';
             return;
         }
 
-        const { rows, total } = this.calculateProductionPayrollForCurrentMonth();
+        const selectedMonth = this.getSelectedPayrollMonthPrefix();
+        const { rows, total } = this.calculateProductionPayrollForMonth(selectedMonth);
         const nonZeroRows = rows.filter(r => (
             (r.regularHours || 0) > 0 ||
             (r.weekendHours || 0) > 0 ||
@@ -884,8 +960,18 @@ const TimeTrack = {
         const visibleTotal = nonZeroRows.reduce((sum, row) => sum + (row.totalPay || 0), 0);
         if (totalEl) totalEl.textContent = this.formatMoney(nonZeroRows.length ? visibleTotal : total);
 
+        let payrollNote = `Расчёт показан за ${this.formatPayrollMonthLabel(selectedMonth)}.`;
+        const hasCurrentMonthHours = (this.entries || []).some(entry => String(entry?.date || '').startsWith(`${this.getCurrentMonthPrefix()}-`));
+        if (selectedMonth !== this.getCurrentMonthPrefix() && !hasCurrentMonthHours && (this.entries || []).length > 0) {
+            payrollNote += ' За текущий месяц часов пока нет, поэтому открыт последний месяц с записями.';
+        }
+        if (noteEl) {
+            noteEl.textContent = payrollNote;
+            noteEl.style.display = payrollNote ? '' : 'none';
+        }
+
         if (!nonZeroRows.length) {
-            tableBody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">За текущий месяц часов ещё нет</td></tr>';
+            tableBody.innerHTML = `<tr><td colspan="8" class="text-center text-muted">За ${this.formatPayrollMonthLabel(selectedMonth)} часов ещё нет</td></tr>`;
             return;
         }
 

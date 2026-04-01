@@ -35,7 +35,7 @@
     <aside class="sidebar">
         <div class="sidebar-brand">
             <h2>Recycle Object</h2>
-            <span>Калькулятор <span id="app-version">v197</span></span>
+            <span>Калькулятор <span id="app-version">v198</span></span>
         </div>
         <nav class="sidebar-nav">
             <a href="#tasks" data-page="tasks">
@@ -1417,7 +1417,14 @@
             </div>
 
             <div class="card" id="tt-payroll-card">
-                <div class="card-header"><h3>Почасовая оплата и переработки (текущий месяц)</h3></div>
+                <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+                    <h3>Почасовая оплата и переработки</h3>
+                    <div style="display:flex;align-items:center;gap:8px;">
+                        <span class="text-muted" style="font-size:12px;">Месяц расчёта</span>
+                        <select id="tt-payroll-month" onchange="TimeTrack.renderPayrollSummary()" style="min-width:160px;"></select>
+                    </div>
+                </div>
+                <div id="tt-payroll-note" class="text-muted" style="display:none; padding:0 18px 10px; font-size:12px;"></div>
                 <div class="table-wrap">
                     <table>
                         <thead>
@@ -3307,7 +3314,7 @@
 <script src="js/supabase.js?v=160"></script>
 <script src="js/task-events.js?v=1"></script>
 <script src="js/calculator.js?v=72"></script>
-    <script src="js/app.js?v=197"></script>
+    <script src="js/app.js?v=198"></script>
 <script src="js/wiki.js?v=4"></script>
 <script src="js/order-detail.js?v=61"></script>
 <script src="js/orders.js?v=64"></script>
