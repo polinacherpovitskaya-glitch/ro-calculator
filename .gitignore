@@ -6,5 +6,8 @@ node_modules/
 bot/node_modules/
 bot/.env
 bot/timebot*.log
+bot/timebot.state.json
+bot/timebot.pending.json
+bot/timebot.inbox.jsonl
 PLAN.md
 docs/superpowers/

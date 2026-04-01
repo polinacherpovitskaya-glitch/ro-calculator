@@ -3,6 +3,7 @@
 // v7: reliability fixes — error handling, polling recovery, graceful shutdown
 // =============================================
 
+const fs = require('node:fs');
 const path = require('node:path');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 const TelegramBot = require('node-telegram-bot-api');
@@ -34,6 +35,9 @@ const WORK_SETTINGS_KEYS = {
     tasks: 'work_tasks_json',
     taskNotificationEvents: 'work_task_notification_events_json',
 };
+const STATE_FILE = path.join(__dirname, 'timebot.state.json');
+const PENDING_FILE = path.join(__dirname, 'timebot.pending.json');
+const INBOX_FILE = path.join(__dirname, 'timebot.inbox.jsonl');
 let productionHolidayCache = { loadedAt: 0, set: new Set() };
 
 // =============================================
@@ -63,6 +67,7 @@ bot.on('error', (err) => {
 // =============================================
 function shutdown(signal) {
     console.log(`\n${signal} received. Stopping bot...`);
+    persistStates();
     bot.stopPolling().then(() => {
         console.log('Polling stopped. Exiting.');
         process.exit(0);
@@ -84,6 +89,85 @@ process.on('unhandledRejection', (reason) => {
 // =============================================
 const userStates = {};
 const STATE_TTL = 30 * 60 * 1000; // 30 minutes
+let stateFlushTimer = null;
+let pendingRetryRunning = false;
+
+function safeReadJson(filePath, fallback) {
+    try {
+        if (!fs.existsSync(filePath)) return fallback;
+        return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    } catch (error) {
+        console.error(`Failed to read JSON file ${filePath}:`, error);
+        return fallback;
+    }
+}
+
+function safeWriteJson(filePath, value) {
+    try {
+        fs.writeFileSync(filePath, JSON.stringify(value, null, 2));
+    } catch (error) {
+        console.error(`Failed to write JSON file ${filePath}:`, error);
+    }
+}
+
+function loadPersistedStates() {
+    const persisted = safeReadJson(STATE_FILE, {});
+    const now = Date.now();
+    Object.entries(persisted || {}).forEach(([key, state]) => {
+        if (!state || typeof state !== 'object') return;
+        if (now - (state._ts || 0) > STATE_TTL) return;
+        userStates[key] = state;
+    });
+}
+
+function persistStates() {
+    safeWriteJson(STATE_FILE, userStates);
+}
+
+function scheduleStateFlush() {
+    if (stateFlushTimer) return;
+    stateFlushTimer = setTimeout(() => {
+        stateFlushTimer = null;
+        persistStates();
+    }, 50);
+}
+
+function appendInboxEvent(payload) {
+    try {
+        fs.appendFileSync(INBOX_FILE, `${JSON.stringify({ ts: new Date().toISOString(), ...payload })}\n`);
+    } catch (error) {
+        console.error('Failed to append timebot inbox event:', error);
+    }
+}
+
+function loadPendingReports() {
+    const items = safeReadJson(PENDING_FILE, []);
+    return Array.isArray(items) ? items : [];
+}
+
+function savePendingReports(items) {
+    safeWriteJson(PENDING_FILE, Array.isArray(items) ? items : []);
+}
+
+function queuePendingReport(report) {
+    const pending = loadPendingReports();
+    pending.push({
+        id: Date.now() + Math.floor(Math.random() * 1000),
+        created_at: new Date().toISOString(),
+        ...report,
+    });
+    savePendingReports(pending);
+}
+
+function ensureRuntimeFiles() {
+    persistStates();
+    savePendingReports(loadPendingReports());
+    try {
+        if (!fs.existsSync(INBOX_FILE)) fs.writeFileSync(INBOX_FILE, '');
+    } catch (error) {
+        console.error('Failed to initialize timebot runtime files:', error);
+    }
+}
 
 function cleanStaleStates() {
     const now = Date.now();
@@ -92,20 +176,33 @@ function cleanStaleStates() {
             delete userStates[key];
         }
     }
+    scheduleStateFlush();
 }
 setInterval(cleanStaleStates, 5 * 60 * 1000); // every 5 min
 
 function setState(telegramId, data) {
     userStates[telegramId] = { ...data, _ts: Date.now() };
+    scheduleStateFlush();
 }
 function getState(telegramId) {
     const s = userStates[telegramId];
-    if (s) s._ts = Date.now(); // refresh TTL on access
+    if (s) {
+        s._ts = Date.now(); // refresh TTL on access
+        scheduleStateFlush();
+    }
     return s;
 }
 function clearState(telegramId) {
     delete userStates[telegramId];
+    scheduleStateFlush();
 }
+
+loadPersistedStates();
+ensureRuntimeFiles();
+retryPendingReports().catch((error) => {
+    console.error('Initial pending time report retry error:', error);
+});
+setInterval(retryPendingReports, 60 * 1000);
 
 // =============================================
 // Safe message sender (catches errors, retries once)
@@ -127,6 +224,55 @@ async function send(chatId, text, opts) {
         }
         console.error(`sendMessage error (${code}):`, err?.message || err);
         return null;
+    }
+}
+
+async function retryPendingReports() {
+    if (pendingRetryRunning) return;
+    pendingRetryRunning = true;
+    try {
+        const pending = loadPendingReports();
+        if (!pending.length) return;
+
+        const remaining = [];
+        for (const item of pending) {
+            const payloads = Array.isArray(item?.payloads) ? item.payloads : [];
+            let failed = false;
+            const stillPending = [];
+            for (const payload of payloads) {
+                const { error } = await supabase.from('time_entries').insert(payload);
+                if (error && String(error.code || '') !== '23505') {
+                    failed = true;
+                    stillPending.push(payload);
+                    continue;
+                }
+            }
+
+            if (failed && stillPending.length) {
+                remaining.push({ ...item, payloads: stillPending, last_error_at: new Date().toISOString() });
+                continue;
+            }
+
+            if (item.chatId && item.employeeName && payloads.length) {
+                const summary = payloads.map((payload) => {
+                    const parsed = parseMeta(payload.task_description);
+                    const project = parsed.project || 'Без проекта';
+                    const stage = parsed.stage_label || STAGE_LABELS[parsed.stage] || 'Другое';
+                    return `${payload.date}: ${project} / ${stage} — ${payload.hours}ч`;
+                }).join('\n');
+                await send(
+                    item.chatId,
+                    `✅ ${item.employeeName}, восстановил и дозаписал часы из резервной очереди:\n\n${summary}`,
+                    MAIN_KEYBOARD
+                );
+            }
+        }
+
+        savePendingReports(remaining);
+    } catch (error) {
+        console.error('Pending time report retry error:', error);
+    } finally {
+        pendingRetryRunning = false;
     }
 }
 
@@ -296,6 +442,14 @@ bot.on('callback_query', async (query) => {
     const data = query.data;
     const state = getState(telegramId);
 
+    appendInboxEvent({
+        kind: 'callback',
+        telegram_id: telegramId,
+        chat_id: chatId,
+        username: query.from.username || '',
+        data,
+    });
+
     bot.answerCallbackQuery(query.id).catch(() => {});
 
     try {
@@ -413,6 +567,14 @@ bot.on('message', async (msg) => {
     const telegramId = msg.from.id;
     const chatId = msg.chat.id;
     const text = (msg.text || '').trim();
+
+    appendInboxEvent({
+        kind: 'message',
+        telegram_id: telegramId,
+        chat_id: chatId,
+        username: msg.from.username || '',
+        text,
+    });
 
     if (text.startsWith('/')) return;
 
@@ -816,6 +978,8 @@ async function tryHandleFreeformBatchReport(chatId, telegramId, employee, text) 
         return false;
     }
 
+    let pendingPayloads = [];
+    let insertedCount = 0;
     try {
         const [orders, existingResp] = await Promise.all([
             loadOrdersForFreeformMatching(),
@@ -848,6 +1012,7 @@ async function tryHandleFreeformBatchReport(chatId, telegramId, employee, text) 
         const inserted = [];
         const skipped = [];
         const existingEntries = Array.isArray(existingResp) ? existingResp.slice() : [];
+        pendingPayloads = [];
 
         for (const [index, entry] of prepared.entries()) {
             const duplicate = existingEntries.find(existing => isSameFreeformEntry(existing, entry));
@@ -867,10 +1032,16 @@ async function tryHandleFreeformBatchReport(chatId, telegramId, employee, text) 
                 notes: null,
             };
 
+            pendingPayloads.push({ entry, payload });
+        }
+
+        for (const item of pendingPayloads) {
+            const { entry, payload } = item;
             const { error } = await supabase.from('time_entries').insert(payload);
             if (error) throw error;
             inserted.push(entry);
             existingEntries.push(payload);
+            insertedCount += 1;
             await new Promise(resolve => setTimeout(resolve, 5));
         }
 
@@ -900,7 +1071,18 @@ async function tryHandleFreeformBatchReport(chatId, telegramId, employee, text) 
         }
     } catch (error) {
         console.error('Freeform batch restore error:', error);
-        await send(chatId, 'Не получилось восстановить часы из сообщения. Попробуй ещё раз или напиши администратору.', MAIN_KEYBOARD);
+        const remainingPayloads = pendingPayloads.slice(insertedCount).map((item) => item.payload);
+        if (employee && remainingPayloads.length) {
+            queuePendingReport({
+                type: 'freeform_batch',
+                employeeName: employee.name,
+                chatId,
+                telegramId,
+                sourceText: text,
+                payloads: remainingPayloads,
+            });
+        }
+        await send(chatId, 'Не получилось сразу записать часы в базу, но я сохранил их в резервную очередь и попробую дозаписать автоматически.', MAIN_KEYBOARD);
         clearState(telegramId);
         return true;
     }
@@ -922,21 +1104,23 @@ async function saveAllEntries(chatId, telegramId, state, comment) {
         return;
     }
 
-    try {
-        for (const entry of state.entries) {
-            const payload = {
-                id: Date.now() + Math.floor(Math.random() * 1000),
-                employee_id: state.employee.id,
-                employee_name: state.employee.name,
-                order_id: entry.order_id || null,
-                hours: entry.hours,
-                date: reportDate,
-                task_description: buildMetaDescription(entry.stage, entry.stage_label, entry.project_name, comment),
-                notes: comment || null,
-            };
+    const payloads = state.entries.map((entry, index) => ({
+        id: Date.now() + index + Math.floor(Math.random() * 1000),
+        employee_id: state.employee.id,
+        employee_name: state.employee.name,
+        order_id: entry.order_id || null,
+        hours: entry.hours,
+        date: reportDate,
+        task_description: buildMetaDescription(entry.stage, entry.stage_label, entry.project_name, comment),
+        notes: comment || null,
+    }));
 
+    let insertedCount = 0;
+    try {
+        for (const payload of payloads) {
             const { error } = await supabase.from('time_entries').insert(payload);
             if (error) throw error;
+            insertedCount += 1;
             await new Promise(r => setTimeout(r, 5));
         }
 
@@ -957,7 +1141,21 @@ async function saveAllEntries(chatId, telegramId, state, comment) {
         );
     } catch (e) {
         console.error('Save error:', e);
-        send(chatId, 'Ошибка сохранения. Попробуй ещё раз.', MAIN_KEYBOARD);
+        const remainingPayloads = payloads.slice(insertedCount);
+        if (remainingPayloads.length) {
+            queuePendingReport({
+                type: 'interactive_report',
+                employeeName: state.employee.name,
+                chatId,
+                telegramId,
+                reportDate,
+                comment: comment || '',
+                payloads: remainingPayloads,
+            });
+            send(chatId, 'Не получилось сразу записать часы в базу, но я сохранил их в резервную очередь и попробую дозаписать автоматически.', MAIN_KEYBOARD);
+        } else {
+            send(chatId, 'Ошибка сохранения. Попробуй ещё раз.', MAIN_KEYBOARD);
+        }
     }
 
     clearState(telegramId);
