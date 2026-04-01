@@ -40,6 +40,7 @@ const TimeTrack = {
     entries: [],
     employees: [],
     editingEntryId: null,
+    _periodNote: '',
 
     async load() {
         this.entries = (await loadTimeEntries()) || [];
@@ -55,6 +56,7 @@ const TimeTrack = {
         this.populateWorkerSelect();
         this.populateFilters();
         await this.populateProjectSelect();
+        this.ensureSensibleDefaultPeriod();
         this.filterAndRender();
         this.updateStats();
         this.renderDailyStatus();
@@ -350,6 +352,64 @@ const TimeTrack = {
         });
     },
 
+    getEntriesForPeriod(period) {
+        const today = this.getCurrentReportDate();
+        if (period === 'week') {
+            const weekAgo = this.shiftYMD(today, -7);
+            return (this.entries || []).filter(e => {
+                const rawDate = String(e?.date || '').trim();
+                return rawDate && rawDate >= weekAgo;
+            });
+        }
+        if (period === 'month') {
+            const monthStart = `${today.slice(0, 7)}-01`;
+            return (this.entries || []).filter(e => {
+                const rawDate = String(e?.date || '').trim();
+                return rawDate && rawDate >= monthStart;
+            });
+        }
+        return [...(this.entries || [])];
+    },
+
+    ensureSensibleDefaultPeriod() {
+        const periodEl = document.getElementById('tt-filter-period');
+        if (!periodEl) return;
+
+        this._periodNote = '';
+        const currentValue = String(periodEl.value || 'month');
+        if (currentValue !== 'month') return;
+
+        const monthEntries = this.getEntriesForPeriod('month');
+        if (monthEntries.length > 0) return;
+
+        const weekEntries = this.getEntriesForPeriod('week');
+        if (weekEntries.length > 0) {
+            periodEl.value = 'week';
+            this._periodNote = 'За текущий месяц записей пока нет, поэтому я показываю эту неделю, чтобы последние часы были сразу видны.';
+            return;
+        }
+
+        if ((this.entries || []).length > 0) {
+            periodEl.value = 'all';
+            this._periodNote = 'За текущий месяц записей пока нет, поэтому я показываю все записи.';
+        }
+    },
+
+    renderFilterNote(period, filtered) {
+        const noteEl = document.getElementById('tt-filter-note');
+        if (!noteEl) return;
+
+        let note = '';
+        if (this._periodNote && period !== 'month') {
+            note = this._periodNote;
+        } else if (period === 'month' && filtered.length === 0 && (this.entries || []).length > 0) {
+            note = 'За текущий месяц записей пока нет. Мартовские часы можно увидеть через «Эта неделя» или «Все записи».';
+        }
+
+        noteEl.textContent = note;
+        noteEl.style.display = note ? '' : 'none';
+    },
+
     filterAndRender() {
         const period = document.getElementById('tt-filter-period').value;
         const worker = document.getElementById('tt-filter-worker').value;
@@ -378,6 +438,7 @@ const TimeTrack = {
         if (stage) filtered = filtered.filter(e => this.stageKey(e) === stage);
 
         filtered.sort((a, b) => String(b?.date || '').localeCompare(String(a?.date || '')));
+        this.renderFilterNote(period, filtered);
 
         this.renderTable(filtered);
         this.renderProjectSummary(filtered);
@@ -814,14 +875,21 @@ const TimeTrack = {
         }
 
         const { rows, total } = this.calculateProductionPayrollForCurrentMonth();
-        if (totalEl) totalEl.textContent = this.formatMoney(total);
+        const nonZeroRows = rows.filter(r => (
+            (r.regularHours || 0) > 0 ||
+            (r.weekendHours || 0) > 0 ||
+            (r.holidayHours || 0) > 0 ||
+            (r.totalPay || 0) > 0
+        ));
+        const visibleTotal = nonZeroRows.reduce((sum, row) => sum + (row.totalPay || 0), 0);
+        if (totalEl) totalEl.textContent = this.formatMoney(nonZeroRows.length ? visibleTotal : total);
 
-        if (!rows.length) {
-            tableBody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">Нет данных по производству за текущий месяц</td></tr>';
+        if (!nonZeroRows.length) {
+            tableBody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">За текущий месяц часов ещё нет</td></tr>';
             return;
         }
 
-        tableBody.innerHTML = rows.map(r => `
+        tableBody.innerHTML = nonZeroRows.map(r => `
             <tr>
                 <td style="font-weight:600;">${this.esc(r.employeeName)}</td>
                 <td>${this.esc(r.periodLabel)}</td>
