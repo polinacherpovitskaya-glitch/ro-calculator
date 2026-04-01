@@ -35,7 +35,7 @@
     <aside class="sidebar">
         <div class="sidebar-brand">
             <h2>Recycle Object</h2>
-            <span>Калькулятор <span id="app-version">v208</span></span>
+            <span>Калькулятор <span id="app-version">v209</span></span>
         </div>
         <nav class="sidebar-nav">
             <a href="#tasks" data-page="tasks">
@@ -56,10 +56,6 @@
             </a>
             <a href="#factual" data-page="factual">
                 <span class="nav-icon">&#9646;</span>
-                <span>План-факт</span>
-            </a>
-            <a href="#analytics" data-page="analytics">
-                <span class="nav-icon">&#9673;</span>
                 <span>Аналитика</span>
             </a>
             <a href="#molds" data-page="molds">
@@ -500,37 +496,70 @@
         <!-- ========== FACTUAL (Plan vs Fact) ========== -->
         <div id="page-factual" class="page">
             <div class="page-header">
-                <h1>План-факт</h1>
+                <div>
+                    <h1>Аналитика</h1>
+                    <div style="font-size:12px;color:var(--text-muted);margin-top:4px">
+                        Сверху — срез по выбранному периоду, ниже — детализация план-факта по заказам этого периода.
+                    </div>
+                </div>
             </div>
 
-            <!-- Period filter -->
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
-                <button class="btn btn-sm fact-filter-btn" data-range="1m" onclick="Factual.setFilter('1m')">Месяц</button>
-                <button class="btn btn-sm fact-filter-btn" data-range="3m" onclick="Factual.setFilter('3m')">3 мес</button>
-                <button class="btn btn-sm fact-filter-btn" data-range="6m" onclick="Factual.setFilter('6m')">6 мес</button>
-                <button class="btn btn-sm fact-filter-btn" data-range="1y" onclick="Factual.setFilter('1y')">Год</button>
-                <button class="btn btn-sm fact-filter-btn active" data-range="all" onclick="Factual.setFilter('all')">Все</button>
+                <button class="btn btn-sm fact-period-btn active" data-period="month" onclick="Factual.setPeriodKind('month')">Месяц</button>
+                <button class="btn btn-sm fact-period-btn" data-period="quarter" onclick="Factual.setPeriodKind('quarter')">Квартал</button>
+                <button class="btn btn-sm fact-period-btn" data-period="halfyear" onclick="Factual.setPeriodKind('halfyear')">Полугодие</button>
+                <button class="btn btn-sm fact-period-btn" data-period="year" onclick="Factual.setPeriodKind('year')">Год</button>
                 <span style="margin-left:8px;color:var(--text-muted)">|</span>
-                <input type="date" id="fact-date-from" class="form-control" style="width:auto;font-size:12px" onchange="Factual.setCustomRange()">
-                <span class="text-muted">—</span>
-                <input type="date" id="fact-date-to" class="form-control" style="width:auto;font-size:12px" onchange="Factual.setCustomRange()">
+                <button class="btn btn-sm btn-outline" onclick="Factual.shiftPeriod(-1)">←</button>
+                <input type="month" id="fact-period-anchor" class="form-control" style="width:auto;font-size:12px" onchange="Factual.setPeriodAnchor()">
+                <button class="btn btn-sm btn-outline" onclick="Factual.shiftPeriod(1)">→</button>
             </div>
 
-            <!-- Global stats row 1 -->
+            <div class="card" style="padding:12px 14px;margin-bottom:12px">
+                <div style="font-size:12px;color:var(--text-muted);line-height:1.5">
+                    Плановые выручка, расходы и загрузка считаются по заказам выбранного отчётного периода.
+                    Фактическая загрузка считается по табелю сотрудников за календарный период.
+                    Фактические деньги и расходы внизу по заказам остаются привязаны к самим заказам.
+                </div>
+            </div>
+
             <div class="stats-grid" style="margin-bottom:8px">
                 <div class="stat-card">
-                    <div class="stat-label">Заказов</div>
+                    <div class="stat-label">Отчётный период</div>
+                    <div class="stat-value" id="fact-stat-period">—</div>
+                    <div class="stat-hint" id="fact-stat-period-hint"></div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Заказов в периоде</div>
                     <div class="stat-value" id="fact-stat-orders">0</div>
                     <div class="stat-hint" id="fact-stat-orders-hint"></div>
                 </div>
                 <div class="stat-card">
+                    <div class="stat-label">План загрузка произв.</div>
+                    <div class="stat-value" id="fact-stat-plan-load">—</div>
+                    <div class="stat-hint" id="fact-stat-plan-load-hint"></div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Факт загрузка произв.</div>
+                    <div class="stat-value" id="fact-stat-fact-load">—</div>
+                    <div class="stat-hint" id="fact-stat-fact-load-hint"></div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Косвенные / мес</div>
+                    <div class="stat-value" id="fact-stat-indirect">—</div>
+                    <div class="stat-hint" id="fact-stat-indirect-hint"></div>
+                </div>
+            </div>
+
+            <div class="stats-grid" style="margin-bottom:8px">
+                <div class="stat-card">
                     <div class="stat-label">План выручка</div>
-                    <div class="stat-hint">из калькулятора</div>
+                    <div class="stat-hint">по заказам периода</div>
                     <div class="stat-value" id="fact-stat-plan-revenue">—</div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-label">План расходы</div>
-                    <div class="stat-hint">из калькулятора</div>
+                    <div class="stat-hint">по заказам периода</div>
                     <div class="stat-value" id="fact-stat-plan-costs">—</div>
                 </div>
                 <div class="stat-card">
@@ -538,17 +567,9 @@
                     <div class="stat-value" id="fact-stat-plan-margin">—</div>
                     <div class="stat-hint" id="fact-stat-plan-margin-hint"></div>
                 </div>
-            </div>
-            <!-- Global stats row 2 -->
-            <div class="stats-grid" style="margin-bottom:8px">
-                <div class="stat-card">
-                    <div class="stat-label">Загрузка произв.</div>
-                    <div class="stat-value" id="fact-stat-load">—</div>
-                    <div class="stat-hint" id="fact-stat-load-hint"></div>
-                </div>
                 <div class="stat-card">
                     <div class="stat-label">Факт выручка</div>
-                    <div class="stat-hint">получено денег</div>
+                    <div class="stat-hint">по тем же заказам</div>
                     <div class="stat-value" id="fact-stat-fact-revenue">—</div>
                 </div>
                 <div class="stat-card">
@@ -562,13 +583,8 @@
                     <div class="stat-hint" id="fact-stat-fact-margin-hint"></div>
                 </div>
             </div>
-            <!-- Global stats row 3 — delta -->
+
             <div class="stats-grid" style="margin-bottom:16px">
-                <div class="stat-card">
-                    <div class="stat-label">Косвенные / мес</div>
-                    <div class="stat-value" id="fact-stat-indirect">—</div>
-                    <div class="stat-hint" id="fact-stat-indirect-hint"></div>
-                </div>
                 <div class="stat-card">
                     <div class="stat-label">Δ выручки</div>
                     <div class="stat-value" id="fact-stat-rev-delta">—</div>
@@ -581,10 +597,18 @@
                     <div class="stat-label">Δ прибыли</div>
                     <div class="stat-value" id="fact-stat-earned-delta">—</div>
                 </div>
+                <div class="stat-card">
+                    <div class="stat-label">Комментарий</div>
+                    <div class="stat-value" id="fact-stat-summary-note">—</div>
+                    <div class="stat-hint" id="fact-stat-summary-note-hint"></div>
+                </div>
             </div>
 
-            <!-- Orders table -->
             <div class="card">
+                <div class="card-header">
+                    <h3 id="fact-orders-title">План-факт по заказам периода</h3>
+                    <div class="text-muted" id="fact-orders-hint"></div>
+                </div>
                 <div class="table-wrap">
                     <table style="width:100%;font-size:13px">
                         <thead>
@@ -3320,7 +3344,7 @@
 <script src="js/supabase.js?v=161"></script>
 <script src="js/task-events.js?v=1"></script>
 <script src="js/calculator.js?v=73"></script>
-  <script src="js/app.js?v=208"></script>
+  <script src="js/app.js?v=209"></script>
 <script src="js/wiki.js?v=4"></script>
 <script src="js/order-detail.js?v=61"></script>
 <script src="js/orders.js?v=64"></script>
@@ -3336,7 +3360,7 @@
 <script src="js/gantt.js?v=59"></script>
 <script src="js/fintablo.js?v=2"></script>
 <script src="js/indirect_costs.js?v=8"></script>
-<script src="js/factual.js?v=91"></script>
+<script src="js/factual.js?v=92"></script>
 <script src="js/china.js?v=163"></script>
 <script src="js/warehouse_photos.js?v=48"></script>
 <script src="js/china_catalog.js?v=46k"></script>

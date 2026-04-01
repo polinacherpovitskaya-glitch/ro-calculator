@@ -10,9 +10,8 @@ const Factual = {
     _employees: [],
     _orderCache: {},  // orderId → { plan, fact, hours, order, items }
     _openOrderId: null,
-    _filterRange: 'all',
-    _filterFrom: null,
-    _filterTo: null,
+    _periodKind: 'month',
+    _periodAnchor: null,
     _renderTimer: null,
 
     VISIBLE_STATUSES: ['sample', 'production_casting', 'production_printing', 'production_hardware', 'production_packaging', 'in_production', 'delivery', 'completed'],
@@ -218,26 +217,74 @@ const Factual = {
         this._entries = await loadTimeEntries();
         this._employees = (await loadEmployees()) || [];
 
+        this._ensurePeriodState();
+        this._syncPeriodControls();
         this._applyFilter();
         await this._renderAll();
     },
 
     // ==========================================
-    // Filter
+    // Period filter
     // ==========================================
 
-    setFilter(range) {
-        this._filterRange = range;
-        // Update active button
-        document.querySelectorAll('.fact-filter-btn').forEach(btn => {
-            btn.classList.toggle('active', btn.dataset.range === range);
-        });
-        if (range !== 'custom') {
-            this._filterFrom = null;
-            this._filterTo = null;
+    _currentMonthValue() {
+        const now = new Date();
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        return `${now.getFullYear()}-${month}`;
+    },
+
+    _ensurePeriodState() {
+        if (!this._periodAnchor) this._periodAnchor = this._currentMonthValue();
+        if (!this._periodKind) this._periodKind = 'month';
+    },
+
+    _syncPeriodControls() {
+        this._ensurePeriodState();
+        const periodInput = document.getElementById('fact-period-anchor');
+        if (periodInput && periodInput.value !== this._periodAnchor) {
+            periodInput.value = this._periodAnchor;
         }
+        if (typeof document.querySelectorAll === 'function') {
+            document.querySelectorAll('.fact-period-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.period === this._periodKind);
+            });
+        }
+    },
+
+    setPeriodKind(kind) {
+        if (!kind) return;
+        this._periodKind = kind;
+        this._syncPeriodControls();
         this._applyFilter();
         this._renderAll();
+    },
+
+    setPeriodAnchor(value = null) {
+        const nextValue = value || document.getElementById('fact-period-anchor')?.value || this._currentMonthValue();
+        this._periodAnchor = nextValue;
+        this._syncPeriodControls();
+        this._applyFilter();
+        this._renderAll();
+    },
+
+    shiftPeriod(direction) {
+        this._ensurePeriodState();
+        const [yearRaw, monthRaw] = String(this._periodAnchor || this._currentMonthValue()).split('-');
+        const year = Number(yearRaw) || new Date().getFullYear();
+        const monthIndex = (Number(monthRaw) || 1) - 1;
+        const stepMonths = this._periodKind === 'quarter' ? 3
+            : this._periodKind === 'halfyear' ? 6
+            : this._periodKind === 'year' ? 12
+            : 1;
+        const anchor = new Date(year, monthIndex + stepMonths * Number(direction || 0), 1);
+        const nextMonth = String(anchor.getMonth() + 1).padStart(2, '0');
+        this.setPeriodAnchor(`${anchor.getFullYear()}-${nextMonth}`);
+    },
+
+    // Backward compatibility with old rolling buttons
+    setFilter(range) {
+        const map = { '1m': 'month', '3m': 'quarter', '6m': 'halfyear', '1y': 'year' };
+        this.setPeriodKind(map[range] || 'month');
     },
 
     async _syncFinTabloImportsIfNeeded() {
@@ -255,37 +302,16 @@ const Factual = {
     },
 
     setCustomRange() {
-        const from = document.getElementById('fact-date-from')?.value;
-        const to = document.getElementById('fact-date-to')?.value;
-        this._filterRange = 'custom';
-        this._filterFrom = from || null;
-        this._filterTo = to || null;
-        document.querySelectorAll('.fact-filter-btn').forEach(btn => btn.classList.remove('active'));
         this._applyFilter();
         this._renderAll();
     },
 
     _applyFilter() {
-        if (this._filterRange === 'all') {
-            this._filteredOrders = [...this._allOrders];
-            return;
-        }
-
-        let from, to;
-        const now = new Date();
-        to = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
-
-        if (this._filterRange === 'custom') {
-            from = this._filterFrom ? new Date(this._filterFrom) : new Date(2020, 0, 1);
-            to = this._filterTo ? new Date(this._filterTo + 'T23:59:59') : to;
-        } else {
-            const months = { '1m': 1, '3m': 3, '6m': 6, '1y': 12 }[this._filterRange] || 0;
-            from = new Date(now.getFullYear(), now.getMonth() - months, 1);
-        }
-
-        this._filteredOrders = this._allOrders.filter(o => {
-            const d = new Date(o.created_at || o.updated_at || 0);
-            return d >= from && d <= to;
+        const range = this._getPeriodRange();
+        this._filteredOrders = this._allOrders.filter(order => {
+            const orderDate = this._getOrderPeriodDate(order);
+            if (!orderDate) return false;
+            return orderDate >= range.from && orderDate <= range.to;
         });
     },
 
@@ -299,98 +325,128 @@ const Factual = {
     },
 
     async _renderGlobalStats() {
-    const orders = this._filteredOrders;
-    const $ = id => document.getElementById(id);
-    if (!$('fact-stat-orders')) return;
+        const orders = this._filteredOrders;
+        const $ = id => document.getElementById(id);
+        if (!$('fact-stat-orders')) return;
 
-    // Counts
-    const inProd = orders.filter(o => this.SECTION_PRODUCTION.has(o.status));
-    const completed = orders.filter(o => o.status === 'completed');
-    const samples = orders.filter(o => o.status === 'sample');
-    $('fact-stat-orders').textContent = String(orders.length);
-    $('fact-stat-orders-hint').textContent = `произв: ${inProd.length} · готово: ${completed.length} · образцы: ${samples.length}`;
+        const period = this._getPeriodRange();
+        const computedOrders = await Promise.all(orders.map(o => this._ensureComputedOrder(o)));
 
-    // Plan totals
-    let planRevTotal = 0, planCostTotal = 0, planHoursTotal = 0;
-    orders.forEach(o => {
-        planRevTotal += this._num(o.total_revenue_plan);
-        planCostTotal += this._num(o.total_cost_plan);
-        planHoursTotal += this._num(o.production_hours_plastic) + this._num(o.production_hours_packaging) + this._num(o.production_hours_hardware);
-    });
-    const planProfit = this._calcProfitability(planRevTotal, planCostTotal);
-    $('fact-stat-plan-revenue').textContent = this.fmtRub(planRevTotal);
-    $('fact-stat-plan-costs').textContent = this.fmtRub(planCostTotal);
-    $('fact-stat-plan-margin').textContent = this.fmtRub(planProfit.profit);
-    $('fact-stat-plan-margin').style.color = planProfit.color;
-    if ($('fact-stat-plan-margin-hint')) {
-        $('fact-stat-plan-margin-hint').textContent = planRevTotal > 0 ? `${planProfit.margin}% рентаб.` : '—';
-    }
+        const inProd = orders.filter(o => this.SECTION_PRODUCTION.has(o.status));
+        const completed = orders.filter(o => o.status === 'completed');
+        const samples = orders.filter(o => o.status === 'sample');
+        $('fact-stat-period').textContent = period.label;
+        $('fact-stat-period-hint').textContent = period.caption;
+        $('fact-stat-orders').textContent = String(orders.length);
+        $('fact-stat-orders-hint').textContent = `произв: ${inProd.length} · готово: ${completed.length} · образцы: ${samples.length}`;
 
-    // Production load
-    const params = App.params || {};
-    const workloadPerMonth = this._num(params.workLoadHours);
-    if (workloadPerMonth > 0) {
-        const months = this._getFilterMonths();
-        const capacity = workloadPerMonth * months;
-        const loadPct = capacity > 0 ? round2(planHoursTotal * 100 / capacity) : 0;
-        const loadColor = loadPct >= 90 ? 'var(--red)' : loadPct >= 70 ? 'var(--yellow)' : 'var(--green)';
-        $('fact-stat-load').innerHTML = `<span style="color:${loadColor}">${loadPct}%</span>`;
-        $('fact-stat-load-hint').textContent = `${round2(planHoursTotal)}ч / ${round2(capacity)}ч (${months} мес)`;
-    } else {
-        $('fact-stat-load').textContent = '—';
-        $('fact-stat-load-hint').textContent = '';
-    }
+        let planRevTotal = 0;
+        let planCostTotal = 0;
+        let planHoursTotal = 0;
+        let factRevTotal = 0;
+        let factCostTotal = 0;
+        let hasFactData = false;
 
-    // Indirect costs per month
-    const indirectMonthly = this._num(App.settings?.indirect_costs_monthly);
-    if (indirectMonthly > 0) {
-        $('fact-stat-indirect').textContent = this.fmtRub(indirectMonthly);
-        const perHour = this._num(params.indirectPerHour);
-        $('fact-stat-indirect-hint').textContent = perHour > 0 ? `${this.fmtRub(perHour)}/ч` : '';
-    } else {
-        $('fact-stat-indirect').textContent = '—';
-        $('fact-stat-indirect-hint').textContent = '';
-    }
+        computedOrders.forEach((computed, idx) => {
+            const order = orders[idx];
+            const plan = computed?.planData || {};
+            const planHours = computed?.planHours || {};
+            const fact = computed?.factData || {};
 
-    // Fact totals
-    const computedOrders = await Promise.all(orders.map(o => this._ensureComputedOrder(o)));
-    let factRevTotal = 0, factCostTotal = 0;
-    let hasFactData = false;
+            planRevTotal += this._num(plan.revenue ?? order?.total_revenue_plan);
+            planCostTotal += this._num(plan.totalCosts ?? order?.total_cost_plan);
+            planHoursTotal += this._num(planHours.hoursPlastic)
+                + this._num(planHours.hoursTrim)
+                + this._num(planHours.hoursHardware)
+                + this._num(planHours.hoursPackaging);
 
-    orders.forEach((o, idx) => {
-        const f = computedOrders[idx]?.factData;
-        if (!f) return;
-        const factRevenue = this._num(f.fact_revenue);
-        let factCosts = 0;
-        this.ROWS.forEach(r => { factCosts += this._num(f['fact_' + r.key]); });
+            const factRevenue = this._num(fact.fact_revenue);
+            let factCosts = 0;
+            this.ROWS.forEach(r => { factCosts += this._num(fact['fact_' + r.key]); });
+            if (factRevenue > 0 || factCosts > 0) {
+                factRevTotal += factRevenue;
+                factCostTotal += factCosts;
+                hasFactData = true;
+            }
+        });
 
-        if (factRevenue > 0 || factCosts > 0) {
-            factRevTotal += factRevenue;
-            factCostTotal += factCosts;
-            hasFactData = true;
+        const planProfit = this._calcProfitability(planRevTotal, planCostTotal);
+        $('fact-stat-plan-revenue').textContent = this.fmtRub(planRevTotal);
+        $('fact-stat-plan-costs').textContent = this.fmtRub(planCostTotal);
+        $('fact-stat-plan-margin').textContent = this.fmtRub(planProfit.profit);
+        $('fact-stat-plan-margin').style.color = planProfit.color;
+        if ($('fact-stat-plan-margin-hint')) {
+            $('fact-stat-plan-margin-hint').textContent = planRevTotal > 0 ? `${planProfit.margin}% рентаб.` : '—';
         }
-    });
 
-    const factProfit = this._calcProfitability(factRevTotal, factCostTotal);
-    $('fact-stat-fact-revenue').textContent = hasFactData ? this.fmtRub(factRevTotal) : '—';
-    $('fact-stat-fact-costs').textContent = hasFactData ? this.fmtRub(factCostTotal) : '—';
+        const params = App.params || {};
+        const workloadPerMonth = this._num(params.workLoadHours);
+        const capacity = workloadPerMonth > 0 ? workloadPerMonth * period.months : 0;
+        const planLoadPct = capacity > 0 ? round2(planHoursTotal * 100 / capacity) : 0;
+        const factLoadHours = this._getFactLoadHoursForPeriod(period.from, period.to);
+        const factLoadPct = capacity > 0 ? round2(factLoadHours * 100 / capacity) : 0;
+        this._renderLoadCard($('fact-stat-plan-load'), $('fact-stat-plan-load-hint'), planLoadPct, planHoursTotal, capacity, `план по заказам периода · ${period.months} мес`);
+        this._renderLoadCard($('fact-stat-fact-load'), $('fact-stat-fact-load-hint'), factLoadPct, factLoadHours, capacity, `табель сотрудников · ${period.months} мес`);
 
-    const factProfitEl = $('fact-stat-fact-margin');
-    factProfitEl.textContent = hasFactData ? this.fmtRub(factProfit.profit) : '—';
-    factProfitEl.style.color = hasFactData ? factProfit.color : '';
-    if ($('fact-stat-fact-margin-hint')) {
-        $('fact-stat-fact-margin-hint').textContent = !hasFactData
-            ? '—'
-            : (factProfit.margin != null ? `${factProfit.margin}% по полученным деньгам` : 'выручка еще не поступила');
-    }
+        const indirectMonthly = this._num(App.settings?.indirect_costs_monthly);
+        if (indirectMonthly > 0) {
+            $('fact-stat-indirect').textContent = this.fmtRub(indirectMonthly);
+            const perHour = this._num(params.indirectPerHour);
+            $('fact-stat-indirect-hint').textContent = perHour > 0 ? `${this.fmtRub(perHour)}/ч` : 'фикс на месяц';
+        } else {
+            $('fact-stat-indirect').textContent = '—';
+            $('fact-stat-indirect-hint').textContent = '';
+        }
 
-    const revDelta = factRevTotal - planRevTotal;
-    const costDelta = factCostTotal - planCostTotal;
-    const profitDelta = factProfit.profit - planProfit.profit;
-    this._renderDelta($('fact-stat-rev-delta'), revDelta, hasFactData);
-    this._renderDelta($('fact-stat-cost-delta'), costDelta, hasFactData, true);
-    this._renderDelta($('fact-stat-earned-delta'), profitDelta, hasFactData);
-},
+        const factProfit = this._calcProfitability(factRevTotal, factCostTotal);
+        $('fact-stat-fact-revenue').textContent = hasFactData ? this.fmtRub(factRevTotal) : '—';
+        $('fact-stat-fact-costs').textContent = hasFactData ? this.fmtRub(factCostTotal) : '—';
+
+        const factProfitEl = $('fact-stat-fact-margin');
+        factProfitEl.textContent = hasFactData ? this.fmtRub(factProfit.profit) : '—';
+        factProfitEl.style.color = hasFactData ? factProfit.color : '';
+        if ($('fact-stat-fact-margin-hint')) {
+            $('fact-stat-fact-margin-hint').textContent = !hasFactData
+                ? '—'
+                : (factProfit.margin != null ? `${factProfit.margin}% по полученным деньгам` : 'выручка ещё не поступила');
+        }
+
+        const revDelta = factRevTotal - planRevTotal;
+        const costDelta = factCostTotal - planCostTotal;
+        const profitDelta = factProfit.profit - planProfit.profit;
+        this._renderDelta($('fact-stat-rev-delta'), revDelta, hasFactData);
+        this._renderDelta($('fact-stat-cost-delta'), costDelta, hasFactData, true);
+        this._renderDelta($('fact-stat-earned-delta'), profitDelta, hasFactData);
+
+        const summaryNote = $('fact-stat-summary-note');
+        const summaryHint = $('fact-stat-summary-note-hint');
+        if (summaryNote) {
+            if (!orders.length) {
+                summaryNote.textContent = 'Нет заказов';
+                summaryNote.style.color = 'var(--text-muted)';
+                if (summaryHint) summaryHint.textContent = 'Попробуй переключить период';
+            } else if (!hasFactData) {
+                summaryNote.textContent = 'Факт ещё копится';
+                summaryNote.style.color = 'var(--text-muted)';
+                if (summaryHint) summaryHint.textContent = 'Пока есть только план';
+            } else if (profitDelta >= 0) {
+                summaryNote.textContent = 'Идём лучше плана';
+                summaryNote.style.color = 'var(--green)';
+                if (summaryHint) summaryHint.textContent = 'Факт прибыли не хуже плана';
+            } else {
+                summaryNote.textContent = 'Факт хуже плана';
+                summaryNote.style.color = 'var(--red)';
+                if (summaryHint) summaryHint.textContent = 'Проверь выручку, фурнитуру и часы';
+            }
+        }
+
+        const ordersTitle = $('fact-orders-title');
+        const ordersHint = $('fact-orders-hint');
+        if (ordersTitle) ordersTitle.textContent = `План-факт по заказам · ${period.label}`;
+        if (ordersHint) {
+            ordersHint.textContent = 'Верхние карточки — периодный срез, строки ниже — детализация по каждому заказу.';
+        }
+    },
 
 _renderDelta(el, delta, hasData, invertColor = false) {
     if (!el) return;
@@ -433,26 +489,103 @@ _renderCompactResult(result, options = {}) {
     return `<div style="font-weight:600;color:${result.color}">${this.fmtRub(result.profit)}</div><div style="font-size:11px;color:${hintColor}">${hint}</div>`;
 },
 
-_getFilterMonths() {
-
-        if (this._filterRange === '1m') return 1;
-        if (this._filterRange === '3m') return 3;
-        if (this._filterRange === '6m') return 6;
-        if (this._filterRange === '1y') return 12;
-        if (this._filterRange === 'custom' && this._filterFrom && this._filterTo) {
-            const from = new Date(this._filterFrom);
-            const to = new Date(this._filterTo);
-            const diffMs = to - from;
-            return Math.max(1, Math.round(diffMs / (30.4 * 24 * 60 * 60 * 1000)));
+    _renderLoadCard(valueEl, hintEl, percent, hours, capacity, suffix = '') {
+        if (!valueEl) return;
+        if (!(capacity > 0)) {
+            valueEl.textContent = '—';
+            if (hintEl) hintEl.textContent = '';
+            return;
         }
-        // 'all' — count from earliest order
-        if (this._allOrders.length === 0) return 1;
-        const earliest = this._allOrders.reduce((min, o) => {
-            const d = new Date(o.created_at || 0);
-            return d < min ? d : min;
-        }, new Date());
-        const diffMs = Date.now() - earliest.getTime();
-        return Math.max(1, Math.round(diffMs / (30.4 * 24 * 60 * 60 * 1000)));
+        const loadColor = percent >= 100 ? 'var(--red)' : percent >= 80 ? 'var(--yellow)' : 'var(--green)';
+        valueEl.innerHTML = `<span style="color:${loadColor}">${percent}%</span>`;
+        if (hintEl) {
+            hintEl.textContent = `${round2(hours)}ч / ${round2(capacity)}ч${suffix ? ` · ${suffix}` : ''}`;
+        }
+    },
+
+    _parseDateValue(rawValue) {
+        if (!rawValue) return null;
+        if (rawValue instanceof Date) return Number.isFinite(rawValue.getTime()) ? rawValue : null;
+        const raw = String(rawValue).trim();
+        if (!raw) return null;
+        const normalized = /^\d{4}-\d{2}-\d{2}$/.test(raw)
+            ? new Date(`${raw}T12:00:00`)
+            : new Date(raw);
+        return Number.isFinite(normalized.getTime()) ? normalized : null;
+    },
+
+    _monthLabel(date) {
+        return new Intl.DateTimeFormat('ru-RU', { month: 'long', year: 'numeric' }).format(date);
+    },
+
+    _formatDateLabel(date) {
+        return new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' }).format(date);
+    },
+
+    _getPeriodRange() {
+        this._ensurePeriodState();
+        const [yearRaw, monthRaw] = String(this._periodAnchor || this._currentMonthValue()).split('-');
+        const year = Number(yearRaw) || new Date().getFullYear();
+        const monthIndex = Math.max(0, (Number(monthRaw) || 1) - 1);
+        let startMonth = monthIndex;
+        let months = 1;
+        let label = this._monthLabel(new Date(year, monthIndex, 1));
+
+        if (this._periodKind === 'quarter') {
+            startMonth = Math.floor(monthIndex / 3) * 3;
+            months = 3;
+            label = `${Math.floor(startMonth / 3) + 1} квартал ${year}`;
+        } else if (this._periodKind === 'halfyear') {
+            startMonth = monthIndex < 6 ? 0 : 6;
+            months = 6;
+            label = `${startMonth === 0 ? 'I' : 'II'} полугодие ${year}`;
+        } else if (this._periodKind === 'year') {
+            startMonth = 0;
+            months = 12;
+            label = String(year);
+        }
+
+        const from = new Date(year, startMonth, 1, 0, 0, 0, 0);
+        const to = new Date(year, startMonth + months, 0, 23, 59, 59, 999);
+        return {
+            from,
+            to,
+            months,
+            label,
+            caption: `${this._formatDateLabel(from)} — ${this._formatDateLabel(to)}`,
+        };
+    },
+
+    _getOrderPeriodDate(order) {
+        return this._parseDateValue(
+            order?.deadline_end
+            || order?.deadline
+            || order?.deadline_start
+            || order?.created_at
+            || order?.updated_at
+        );
+    },
+
+    _getEntryPeriodDate(entry) {
+        return this._parseDateValue(entry?.date || entry?.work_date || entry?.created_at || entry?.updated_at);
+    },
+
+    _isProductionLoadEntry(entry) {
+        const stage = this._stageKey(entry);
+        return stage === 'casting'
+            || stage === 'trim'
+            || stage === 'assembly'
+            || stage === 'packaging'
+            || this._isLegacyImportedEntry(entry);
+    },
+
+    _getFactLoadHoursForPeriod(from, to) {
+        return round2((this._entries || []).reduce((sum, entry) => {
+            const date = this._getEntryPeriodDate(entry);
+            if (!date || date < from || date > to) return sum;
+            if (!this._isProductionLoadEntry(entry)) return sum;
+            return sum + this._num(entry.hours);
+        }, 0));
     },
 
     SECTION_PRODUCTION: new Set(['production_casting', 'production_printing', 'production_hardware', 'production_packaging', 'in_production', 'delivery']),
@@ -527,8 +660,9 @@ _getFilterMonths() {
     },
 
     _renderOrderRow(o) {
-    const planRevenue = this._num(o.total_revenue_plan);
-    const planCost = this._num(o.total_cost_plan);
+    const computed = this._orderCache[o.id] || {};
+    const planRevenue = this._num(computed.planData?.revenue ?? o.total_revenue_plan);
+    const planCost = this._num(computed.planData?.totalCosts ?? o.total_cost_plan);
     const planResult = this._calcProfitability(planRevenue, planCost);
     const status = this.STATUS_LABELS[o.status] || o.status;
     const isOpen = this._openOrderId === o.id;

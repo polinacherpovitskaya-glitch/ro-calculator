@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v208';
+const APP_VERSION = 'v209';
 
 const App = {
     currentPage: 'orders',
@@ -711,7 +711,7 @@ const App = {
             case 'gantt': Gantt.load(); break;
             case 'order-detail': if (subId) OrderDetail.load(parseInt(subId)); break;
             case 'factual': Factual.load(); break;
-            case 'analytics': Analytics.load(); break;
+            case 'analytics': this.navigate('factual'); break;
             case 'molds': Molds.load(); break;
             case 'colors': Colors.load(); break;
             case 'timetrack': TimeTrack.load(); break;

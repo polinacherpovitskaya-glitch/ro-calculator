@@ -20,6 +20,9 @@ function createDocument() {
             if (!elements.has(id)) elements.set(id, createElement(id));
             return elements.get(id);
         },
+        querySelectorAll() {
+            return [];
+        },
     };
 }
 
@@ -569,6 +572,8 @@ async function smokeFactualRequestsFinTabloAutoSync(context) {
         },
     };
     const factual = vm.runInContext('Factual', context);
+    const originalApplyFilter = factual._applyFilter;
+    const originalRenderAll = factual._renderAll;
     factual._applyFilter = () => {};
     factual._renderAll = async () => {};
 
@@ -577,6 +582,49 @@ async function smokeFactualRequestsFinTabloAutoSync(context) {
     assert.equal(context.__autoSyncCalls.length, 1, 'plan-fact should request one FinTablo auto-sync');
     const orderIds = JSON.parse(JSON.stringify(context.__autoSyncCalls[0].orderIds)).sort((a, b) => a - b);
     assert.deepEqual(orderIds, [11, 12], 'plan-fact should auto-sync all visible orders');
+
+    factual._applyFilter = originalApplyFilter;
+    factual._renderAll = originalRenderAll;
+}
+
+function smokePeriodFilterUsesDeadlineAndFactLoad(context) {
+    vm.runInContext(`(() => {
+        Factual._allOrders = [
+            {
+                id: 201,
+                order_name: 'March Deadline',
+                status: 'completed',
+                created_at: '2026-01-10T12:00:00.000Z',
+                deadline_end: '2026-03-25',
+            },
+            {
+                id: 202,
+                order_name: 'April Deadline',
+                status: 'completed',
+                created_at: '2026-03-05T12:00:00.000Z',
+                deadline_end: '2026-04-02',
+            },
+        ];
+        Factual._periodKind = 'month';
+        Factual._periodAnchor = '2026-03';
+        Factual._applyFilter();
+
+        Factual._entries = [
+            { date: '2026-03-01', hours: 5, description: '[meta]{"stage":"casting"}[/meta]' },
+            { date: '2026-03-02', hours: 4, description: '[meta]{"stage":"other"}[/meta] Автоматически перенесено из legacy Google-таблицы' },
+            { date: '2026-03-03', hours: 7, description: '[meta]{"stage":"other"}[/meta] Неэтапная запись' },
+            { date: '2026-04-01', hours: 9, description: '[meta]{"stage":"assembly"}[/meta]' },
+        ];
+
+        const period = Factual._getPeriodRange();
+        globalThis.__periodLabel = period.label;
+        globalThis.__periodFilteredOrderIds = Factual._filteredOrders.map(o => o.id);
+        globalThis.__periodFactLoad = Factual._getFactLoadHoursForPeriod(period.from, period.to);
+    })()`, context);
+
+    assert.equal(context.__periodLabel, 'март 2026 г.', 'month period should be fixed to the anchor month');
+    assert.deepEqual(Array.from(context.__periodFilteredOrderIds), [201], 'orders should be filtered by deadline month, not creation month');
+    assert.equal(context.__periodFactLoad, 9, 'fact load should include only in-period production or legacy production hours');
 }
 
 async function main() {
@@ -592,6 +640,7 @@ async function main() {
     await smokeLegacyStageDistributionAndMaterials(context);
     await smokeWorkshopLegacyLeavesAssemblyExplicit(context);
     await smokeFactualRequestsFinTabloAutoSync(context);
+    smokePeriodFilterUsesDeadlineAndFactLoad(context);
     console.log('factual smoke checks passed');
 }
 
