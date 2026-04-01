@@ -3787,6 +3787,101 @@ async function smokeProjectHardwareActualQtyEditableFlow(context) {
     assert.equal(restoredReservation.qty, 5);
 }
 
+async function smokeProjectHardwareReadySyncDoesNotAutoReturnConsumedStock(context) {
+    const order = {
+        id: 654,
+        order_name: 'Sticky Collected Hardware Order',
+        manager_name: 'Smoke',
+        status: 'production_hardware',
+        created_at: '2026-03-18T13:00:00.000Z',
+    };
+    const initialItems = [{
+        item_type: 'hardware',
+        product_name: 'Sticky Hardware Qty',
+        quantity: 5,
+        hardware_source: 'warehouse',
+        hardware_warehouse_item_id: 902,
+    }];
+    const reducedItems = [{
+        item_type: 'hardware',
+        product_name: 'Sticky Hardware Qty',
+        quantity: 3,
+        hardware_source: 'warehouse',
+        hardware_warehouse_item_id: 902,
+    }];
+
+    context.__projectHardwareState = { checks: {}, actual_qtys: {} };
+    context.__reservations = [];
+    context.__warehouseItems = [{
+        id: 902,
+        name: 'Sticky Hardware Qty',
+        sku: 'SHQ-1',
+        category: 'hardware',
+        qty: 10,
+        unit: 'шт',
+        price_per_unit: 10,
+    }];
+    context.__warehouseHistory = [];
+    context.__orderDetails = {
+        654: {
+            order: clone(order),
+            items: clone(initialItems),
+        },
+    };
+    context.loadProjectHardwareState = async () => clone(context.__projectHardwareState);
+    context.saveProjectHardwareState = async (state) => {
+        context.__projectHardwareState = clone(state);
+    };
+    context.loadWarehouseReservations = async () => clone(context.__reservations);
+    context.saveWarehouseReservations = async (reservations) => {
+        context.__reservations = clone(reservations);
+    };
+    context.loadWarehouseItems = async () => clone(context.__warehouseItems);
+    context.saveWarehouseItems = async (items) => {
+        context.__warehouseItems = clone(items);
+    };
+    context.loadWarehouseHistory = async () => clone(context.__warehouseHistory);
+    context.saveWarehouseHistory = async (history) => {
+        context.__warehouseHistory = clone(history);
+    };
+    context.loadOrder = async (orderId) => clone(context.__orderDetails[Number(orderId)] || null);
+
+    vm.runInContext(`
+        Warehouse.projectHardwareState = null;
+        Warehouse.load = async () => {};
+    `, context);
+
+    await vm.runInContext(`Warehouse.syncProjectHardwareOrderState({
+        orderId: 654,
+        orderName: 'Sticky Collected Hardware Order',
+        managerName: 'Smoke',
+        status: 'production_hardware',
+        currentItems: JSON.parse(${JSON.stringify(JSON.stringify(initialItems))}),
+        previousItems: []
+    })`, context);
+
+    await vm.runInContext(`Warehouse.toggleProjectHardwareReady(654, 902, true)`, context);
+
+    assert.equal(Boolean(context.__projectHardwareState.checks['654:902']), true);
+    assert.equal(context.__warehouseItems[0].qty, 5);
+    assert.equal(context.__warehouseHistory.length, 1);
+    assert.equal(context.__warehouseHistory[0].qty_change, -5);
+
+    await vm.runInContext(`Warehouse.syncProjectHardwareOrderState({
+        orderId: 654,
+        orderName: 'Sticky Collected Hardware Order',
+        managerName: 'Smoke',
+        status: 'production_hardware',
+        currentItems: JSON.parse(${JSON.stringify(JSON.stringify(reducedItems))}),
+        previousItems: JSON.parse(${JSON.stringify(JSON.stringify(initialItems))})
+    })`, context);
+
+    assert.equal(Boolean(context.__projectHardwareState.checks['654:902']), true);
+    assert.equal(context.__warehouseItems[0].qty, 5);
+    assert.equal(context.__warehouseHistory.length, 1);
+    assert.equal(context.__reservations.filter(item => Number(item.order_id) === 654 && item.status === 'active').length, 0);
+}
+
 async function smokeCompletedOrderConsumesBlankMoldCapacity(context) {
     const orderItems = [{
         item_type: 'product',
@@ -5074,6 +5169,7 @@ async function main() {
     await smokeProjectHardwareToggleShortageGuard(context);
     await smokeProjectHardwareLegacyQtyAndStringIdDeduction(context);
     await smokeProjectHardwareActualQtyEditableFlow(context);
+    await smokeProjectHardwareReadySyncDoesNotAutoReturnConsumedStock(context);
     await smokeCompletedOrderConsumesBlankMoldCapacity(context);
     await smokeMoldUsageThresholdCreatesTasksWithoutDuplicates(context);
     await smokeBlankHardwareFilterAndLowStockAlerts(context);

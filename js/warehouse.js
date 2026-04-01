@@ -4557,9 +4557,11 @@ const Warehouse = {
             }
 
             if (isReady) {
-                const targetQty = this._hasProjectHardwareActualQty(normalizedOrderId, itemId)
-                    ? (this._getProjectHardwareActualQty(normalizedOrderId, itemId) || 0)
-                    : currentQty;
+                const explicitActual = this._getProjectHardwareActualQty(normalizedOrderId, itemId);
+                const consumedQty = this._getProjectHardwareConsumedQty(normalizedOrderId, itemId, historyDeltaMap);
+                const targetQty = explicitActual !== null
+                    ? explicitActual
+                    : (consumedQty > 0 ? consumedQty : currentQty);
                 const syncResult = await this._syncProjectHardwareConsumedQty({
                     orderId: normalizedOrderId,
                     itemId,

@@ -127,6 +127,31 @@ context.App.settings = { bug_report_default_assignee_id: 5 };
 assert.equal(BugReports.defaultBugAssigneeId(), 5);
 context.App.settings = {};
 
+context.loadWorkBundle = async () => ({
+    tasks: [{
+        id: 202,
+        area_id: 9105,
+        title: '[Баг] Склад / Инвентаризация — не видно новый баг в ленте',
+        status: 'incoming',
+        description: 'Проблема: новый баг не попадает в ленту багов.\n\nОжидалось: баг должен сразу отображаться.\n\nМаршрут / hash: #bugs',
+        created_at: '2026-04-01T09:00:00.000Z',
+        updated_at: '2026-04-01T09:00:00.000Z',
+        priority: 'high',
+        created_by_name: 'Полина',
+    }],
+    bugReports: [],
+    assets: [],
+});
+
+(async () => {
+    await BugReports.refreshData();
+    assert.equal(BugReports.bundle.bugReports.length, 1);
+    assert.equal(BugReports.bundle.bugReports[0].task_id, 202);
+    assert.equal(BugReports.bundle.bugReports[0].section_key, 'warehouse');
+    assert.equal(BugReports.bundle.bugReports[0].subsection_key, 'audit');
+    assert.equal(BugReports.bundle.bugReports[0].severity, 'high');
+})();
+
 const openReport = {
     id: 11,
     task_id: 101,

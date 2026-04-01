@@ -30,8 +30,156 @@ const BugReports = {
             loadWorkBundle(),
             loadEmployees(),
         ]);
-        this.bundle = bundle;
+        this.bundle = this._hydrateBundle(bundle);
         this.employees = employees || [];
+    },
+
+    _hydrateBundle(bundle) {
+        const next = bundle && typeof bundle === 'object' ? { ...bundle } : {};
+        next.tasks = Array.isArray(next.tasks) ? next.tasks.slice() : [];
+        const reports = Array.isArray(next.bugReports) ? next.bugReports.map(report => ({ ...report })) : [];
+        const reportTaskIds = new Set(
+            reports
+                .map(report => String(report?.task_id || '').trim())
+                .filter(Boolean)
+        );
+
+        next.tasks.forEach(task => {
+            if (!this._isBugLikeTask(task)) return;
+            const taskId = String(task?.id || '').trim();
+            if (!taskId || reportTaskIds.has(taskId)) return;
+            const synthetic = this._buildSyntheticBugReport(task);
+            if (!synthetic) return;
+            reports.push(synthetic);
+            reportTaskIds.add(taskId);
+        });
+
+        next.bugReports = reports.sort((a, b) => String(b?.created_at || '').localeCompare(String(a?.created_at || '')));
+        return next;
+    },
+
+    _isBugLikeTask(task) {
+        const title = String(task?.title || '').trim();
+        if (/^\[баг\]/i.test(title)) return true;
+        return String(task?.type || '').trim().toLowerCase() === 'bug';
+    },
+
+    _extractBugTaskDescriptionFields(description) {
+        const fields = {
+            actual_result: '',
+            expected_result: '',
+            steps_to_reproduce: '',
+            page_route: '',
+            page_url: '',
+            browser: '',
+            os: '',
+            viewport: '',
+            severity: '',
+            submitted_by_name: '',
+        };
+        String(description || '')
+            .split(/\n\s*\n/)
+            .map(block => String(block || '').trim())
+            .filter(Boolean)
+            .forEach(block => {
+                if (/^проблема:/i.test(block)) fields.actual_result = block.replace(/^проблема:\s*/i, '').trim();
+                else if (/^ожидалось:/i.test(block)) fields.expected_result = block.replace(/^ожидалось:\s*/i, '').trim();
+                else if (/^шаги:/i.test(block)) fields.steps_to_reproduce = block.replace(/^шаги:\s*/i, '').trim();
+                else if (/^маршрут\s*\/\s*hash:/i.test(block)) fields.page_route = block.replace(/^маршрут\s*\/\s*hash:\s*/i, '').trim();
+                else if (/^url:/i.test(block)) fields.page_url = block.replace(/^url:\s*/i, '').trim();
+                else if (/^браузер:/i.test(block)) fields.browser = block.replace(/^браузер:\s*/i, '').trim();
+                else if (/^ос:/i.test(block)) fields.os = block.replace(/^ос:\s*/i, '').trim();
+                else if (/^viewport:/i.test(block)) fields.viewport = block.replace(/^viewport:\s*/i, '').trim();
+                else if (/^серьезность:/i.test(block)) fields.severity = block.replace(/^серьезность:\s*/i, '').trim().toLowerCase();
+                else if (/^сообщил:/i.test(block)) fields.submitted_by_name = block.replace(/^сообщил:\s*/i, '').trim();
+            });
+        return fields;
+    },
+
+    _findSectionByLabel(label) {
+        const normalized = BugReportCore.normalizeText(label);
+        if (!normalized) return null;
+        return (BugReportCore.getSectionCatalog() || []).find(section =>
+            BugReportCore.normalizeText(section?.label) === normalized
+        ) || null;
+    },
+
+    _findSubsectionByLabel(sectionKey, label) {
+        const normalized = BugReportCore.normalizeText(label);
+        if (!normalized) return null;
+        const section = BugReportCore.getSectionByKey(sectionKey);
+        return (section?.subsections || []).find(item =>
+            BugReportCore.normalizeText(item?.label) === normalized
+        ) || null;
+    },
+
+    _parseBugTaskTitle(task) {
+        const rawTitle = String(task?.title || '').trim();
+        const stripped = rawTitle.replace(/^\[баг\]\s*/i, '').trim();
+        const match = stripped.match(/^(.+?)\s+—\s+(.+)$/);
+        const context = match ? String(match[1] || '').trim() : '';
+        const title = match ? String(match[2] || '').trim() : stripped;
+        const contextParts = context
+            ? context.split(/\s*\/\s*/).map(part => String(part || '').trim()).filter(Boolean)
+            : [];
+        const section = contextParts.length > 0 ? this._findSectionByLabel(contextParts[0]) : null;
+        const subsection = section && contextParts.length > 1
+            ? this._findSubsectionByLabel(section.key, contextParts[1])
+            : null;
+        return {
+            title: title || stripped || rawTitle,
+            section,
+            subsection,
+        };
+    },
+
+    _severityFromTask(task, parsedSeverity) {
+        const explicit = String(parsedSeverity || '').trim().toLowerCase();
+        if (['low', 'medium', 'high', 'critical'].includes(explicit)) return explicit;
+        const priority = String(task?.priority || '').trim().toLowerCase();
+        if (priority === 'urgent') return 'critical';
+        if (priority === 'high') return 'high';
+        if (priority === 'low') return 'low';
+        return 'medium';
+    },
+
+    _buildSyntheticBugReport(task) {
+        if (!task || !task.id) return null;
+        const parsedTitle = this._parseBugTaskTitle(task);
+        const parsedDescription = this._extractBugTaskDescriptionFields(task.description);
+        const inferredSection = parsedTitle.section || BugReportCore.inferSectionFromRoute(parsedDescription.page_route);
+        const section = inferredSection || BugReportCore.getSectionByKey('general');
+        const subsection = parsedTitle.subsection
+            || BugReportCore.getSubsectionByKey(section?.key, BugReportCore.inferSubsectionKey(section?.key, parsedDescription.page_route))
+            || BugReportCore.getSubsectionByKey(section?.key, 'other');
+        return {
+            id: `task:${task.id}`,
+            task_id: Number(task.id),
+            title: parsedTitle.title,
+            section_key: section?.key || 'general',
+            section_name: section?.label || 'Другое',
+            subsection_key: subsection?.key || 'other',
+            subsection_name: subsection?.label || 'Другое',
+            page_route: parsedDescription.page_route || '',
+            page_url: parsedDescription.page_url || '',
+            app_version: '',
+            browser: parsedDescription.browser || '',
+            os: parsedDescription.os || '',
+            viewport: parsedDescription.viewport || '',
+            steps_to_reproduce: parsedDescription.steps_to_reproduce || '',
+            expected_result: parsedDescription.expected_result || '',
+            actual_result: parsedDescription.actual_result || String(task.description || '').trim(),
+            severity: this._severityFromTask(task, parsedDescription.severity),
+            codex_prompt: '',
+            codex_status: '',
+            codex_result: '',
+            codex_error: '',
+            submitted_by: task.created_by || null,
+            submitted_by_name: parsedDescription.submitted_by_name || task.created_by_name || task.author_name || '',
+            created_at: task.created_at || new Date().toISOString(),
+            updated_at: task.updated_at || task.created_at || new Date().toISOString(),
+            synthetic: true,
+        };
     },
 
     esc(value) {
