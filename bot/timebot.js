@@ -3,11 +3,13 @@
 // v7: reliability fixes — error handling, polling recovery, graceful shutdown
 // =============================================
 
-require('dotenv').config();
+const path = require('node:path');
+require('dotenv').config({ path: path.join(__dirname, '.env') });
 const TelegramBot = require('node-telegram-bot-api');
 const { createClient } = require('@supabase/supabase-js');
 const { buildTaskNotificationText, getTaskNotificationRecipientIds } = require('./task-notification-core');
 const { getLocalDate, shiftYmd, isWeekendYmd, normalizeWorkDate } = require('./timebot-date-utils');
+const { parseFreeformBatchReport, looksLikeFreeformBatchReport, normalizeText } = require('./timebot-freeform-parser');
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -15,7 +17,7 @@ const SUPABASE_KEY = process.env.SUPABASE_KEY;
 const ENABLE_TASK_NOTIFICATION_WORKER = String(process.env.ENABLE_TASK_NOTIFICATION_WORKER || 'false').toLowerCase() === 'true';
 
 if (!BOT_TOKEN || !SUPABASE_URL || !SUPABASE_KEY) {
-    console.error('Missing env vars: BOT_TOKEN, SUPABASE_URL, SUPABASE_KEY');
+    console.error(`Missing env vars for timebot (.env at ${path.join(__dirname, '.env')}): BOT_TOKEN, SUPABASE_URL, SUPABASE_KEY`);
     process.exit(1);
 }
 
@@ -433,6 +435,14 @@ bot.on('message', async (msg) => {
 
         // --- State-based text input ---
         const state = getState(telegramId);
+        if (looksLikeFreeformBatchReport(text) && (!state || state.step === 'choose_project')) {
+            const employee = state?.employee || await getEmployee(telegramId);
+            if (employee) {
+                const handled = await tryHandleFreeformBatchReport(chatId, telegramId, employee, text);
+                if (handled) return;
+            }
+        }
+
         if (!state) return;
 
         if (state.step === 'enter_custom_project') {
@@ -707,6 +717,195 @@ function parseMeta(taskDescription) {
         if (stageMatch) result.stage_label = stageMatch[1].trim();
     }
     return result;
+}
+
+function normalizeLookupText(value) {
+    return normalizeText(value).replace(/[«»"'()]/g, '').trim();
+}
+
+function buildOrderCandidateLabels(order) {
+    const labels = [];
+    if (order?.order_name) labels.push(String(order.order_name));
+    if (order?.order_name && order?.client_name) labels.push(`${order.order_name} (${order.client_name})`);
+    return labels;
+}
+
+function matchOrderForFreeformProject(projectName, orders) {
+    const normalizedProject = normalizeLookupText(projectName);
+    if (!normalizedProject) return null;
+
+    const exact = [];
+    const prefix = [];
+    const contains = [];
+
+    (orders || []).forEach(order => {
+        buildOrderCandidateLabels(order).forEach(label => {
+            const normalizedLabel = normalizeLookupText(label);
+            if (!normalizedLabel) return;
+            if (normalizedLabel === normalizedProject) {
+                exact.push(order);
+                return;
+            }
+            if (normalizedLabel.startsWith(normalizedProject) || normalizedProject.startsWith(normalizedLabel)) {
+                prefix.push(order);
+                return;
+            }
+            if (normalizedLabel.includes(normalizedProject) || normalizedProject.includes(normalizedLabel)) {
+                contains.push(order);
+            }
+        });
+    });
+
+    const uniqueById = list => {
+        const seen = new Map();
+        (list || []).forEach(order => {
+            if (!order?.id) return;
+            if (!seen.has(String(order.id))) seen.set(String(order.id), order);
+        });
+        return [...seen.values()];
+    };
+
+    const exactUnique = uniqueById(exact);
+    if (exactUnique.length === 1) return exactUnique[0];
+
+    const prefixUnique = uniqueById(prefix);
+    if (prefixUnique.length === 1) return prefixUnique[0];
+
+    const containsUnique = uniqueById(contains);
+    if (containsUnique.length === 1) return containsUnique[0];
+
+    return exactUnique[0] || prefixUnique[0] || containsUnique[0] || null;
+}
+
+function isSameFreeformEntry(existing, candidate) {
+    if (!existing || !candidate) return false;
+    if (String(existing.date || '') !== String(candidate.date || '')) return false;
+
+    const existingHours = round2(existing.hours);
+    const candidateHours = round2(candidate.hours);
+    if (existingHours !== candidateHours) return false;
+
+    const existingMeta = parseMeta(existing.task_description);
+    const existingStage = normalizeLookupText(existingMeta.stage_label || '');
+    const candidateStage = normalizeLookupText(candidate.stage_label || '');
+    if (existingStage !== candidateStage) return false;
+
+    const existingOrderId = Number(existing.order_id || 0);
+    const candidateOrderId = Number(candidate.order_id || 0);
+    if (existingOrderId && candidateOrderId) {
+        return existingOrderId === candidateOrderId;
+    }
+
+    const existingProject = normalizeLookupText(existingMeta.project || '');
+    const candidateProject = normalizeLookupText(candidate.project_name || '');
+    return existingProject === candidateProject;
+}
+
+async function loadOrdersForFreeformMatching() {
+    const { data, error } = await supabase
+        .from('orders')
+        .select('id, order_name, client_name, status, updated_at')
+        .order('updated_at', { ascending: false });
+    if (error) throw error;
+    return Array.isArray(data) ? data : [];
+}
+
+async function tryHandleFreeformBatchReport(chatId, telegramId, employee, text) {
+    const parsed = parseFreeformBatchReport(text, { stageLabels: STAGE_LABELS, now: new Date() });
+    if (!parsed.entries.length || parsed.errors.length) {
+        return false;
+    }
+
+    try {
+        const [orders, existingResp] = await Promise.all([
+            loadOrdersForFreeformMatching(),
+            (async () => {
+                const dates = parsed.entries.map(item => item.date).sort();
+                const minDate = dates[0];
+                const maxDate = dates[dates.length - 1];
+                const { data, error } = await supabase
+                    .from('time_entries')
+                    .select('*')
+                    .eq('employee_id', employee.id)
+                    .gte('date', minDate)
+                    .lte('date', maxDate)
+                    .order('date', { ascending: true });
+                if (error) throw error;
+                return data || [];
+            })(),
+        ]);
+
+        const prepared = parsed.entries.map((entry, index) => {
+            const matchedOrder = matchOrderForFreeformProject(entry.project_name, orders);
+            return {
+                ...entry,
+                order_id: matchedOrder?.id || null,
+                project_name: matchedOrder?.order_name || entry.project_name,
+                _sortIndex: index,
+            };
+        });
+
+        const inserted = [];
+        const skipped = [];
+        const existingEntries = Array.isArray(existingResp) ? existingResp.slice() : [];
+
+        for (const [index, entry] of prepared.entries()) {
+            const duplicate = existingEntries.find(existing => isSameFreeformEntry(existing, entry));
+            if (duplicate) {
+                skipped.push(entry);
+                continue;
+            }
+
+            const payload = {
+                id: Date.now() + index + Math.floor(Math.random() * 1000),
+                employee_id: employee.id,
+                employee_name: employee.name,
+                order_id: entry.order_id || null,
+                hours: entry.hours,
+                date: entry.date,
+                task_description: buildMetaDescription(entry.stage, entry.stage_label, entry.project_name, ''),
+                notes: null,
+            };
+
+            const { error } = await supabase.from('time_entries').insert(payload);
+            if (error) throw error;
+            inserted.push(entry);
+            existingEntries.push(payload);
+            await new Promise(resolve => setTimeout(resolve, 5));
+        }
+
+        clearState(telegramId);
+
+        if (inserted.length === 0 && skipped.length > 0) {
+            const summary = skipped.map(entry => `${entry.date}: ${entry.project_name} / ${entry.stage_label} — ${entry.hours}ч`).join('\n');
+            await send(
+                chatId,
+                `Я нашёл отчёт по строкам, но такие записи уже были в системе, поэтому ничего не задвоил:\n\n${summary}`,
+                MAIN_KEYBOARD
+            );
+            return true;
+        }
+
+        if (inserted.length > 0) {
+            const summary = inserted.map(entry => `${entry.date}: ${entry.project_name} / ${entry.stage_label} — ${entry.hours}ч`).join('\n');
+            const skippedText = skipped.length
+                ? `\n\nПропустил как дубликаты: ${skipped.length}.`
+                : '';
+            await send(
+                chatId,
+                `✅ ${employee.name}, восстановил отчёт из сообщения и записал часы:\n\n${summary}${skippedText}`,
+                MAIN_KEYBOARD
+            );
+            return true;
+        }
+    } catch (error) {
+        console.error('Freeform batch restore error:', error);
+        await send(chatId, 'Не получилось восстановить часы из сообщения. Попробуй ещё раз или напиши администратору.', MAIN_KEYBOARD);
+        clearState(telegramId);
+        return true;
+    }
+
+    return false;
 }
 
 async function saveAllEntries(chatId, telegramId, state, comment) {
