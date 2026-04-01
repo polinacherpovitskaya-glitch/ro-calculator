@@ -4,6 +4,8 @@
 
 const FinTablo = {
     API_BASE: 'https://api.fintablo.ru',
+    AUTO_SYNC_STORAGE_KEY: 'ro_fintablo_last_auto_sync_at',
+    AUTO_SYNC_INTERVAL_MS: 24 * 60 * 60 * 1000,
     _deals: [],
     _orders: [],
     _categories: {},   // id → { name, parentId, group }
@@ -93,6 +95,7 @@ const FinTablo = {
         const key = document.getElementById('ft-api-key').value.trim();
         if (!key) { App.toast('Введите API-ключ'); return; }
         localStorage.setItem('ro_fintablo_api_key', key);
+        localStorage.removeItem(this.AUTO_SYNC_STORAGE_KEY);
         App.toast('Ключ сохранен');
         this.load();
     },
@@ -165,19 +168,98 @@ const FinTablo = {
     // Match deals to orders by name
     // =============================================
     _matchDeals() {
-        this._matchMap = {};
+        this._matchMap = this._buildMatchMap(this._deals, this._orders);
+    },
+
+    _buildMatchMap(deals, orders) {
+        const matchMap = {};
         const ordersByName = {};
-        this._orders.forEach(o => {
+        (orders || []).forEach(o => {
             const name = (o.order_name || '').trim().toLowerCase();
             if (name) ordersByName[name] = o;
         });
 
-        this._deals.forEach(d => {
+        (deals || []).forEach(d => {
             const dealName = (d.name || '').trim().toLowerCase();
             if (ordersByName[dealName]) {
-                this._matchMap[d.id] = ordersByName[dealName];
+                matchMap[d.id] = ordersByName[dealName];
             }
         });
+        return matchMap;
+    },
+
+    _getLastAutoSyncAt() {
+        const ts = parseInt(localStorage.getItem(this.AUTO_SYNC_STORAGE_KEY) || '0', 10);
+        return Number.isFinite(ts) ? ts : 0;
+    },
+
+    async autoSyncMatchedImports(opts = {}) {
+        const key = this._getApiKey();
+        if (!key) return { synced: 0, skipped: 'no_key' };
+
+        const force = !!opts.force;
+        const lastSyncAt = this._getLastAutoSyncAt();
+        if (!force && lastSyncAt > 0 && (Date.now() - lastSyncAt) < this.AUTO_SYNC_INTERVAL_MS) {
+            return { synced: 0, skipped: 'fresh' };
+        }
+
+        const targetOrderIds = Array.isArray(opts.orderIds)
+            ? new Set(opts.orderIds.map(id => Number(id)).filter(Number.isFinite))
+            : null;
+
+        try {
+            const [deals, categories, orders] = await Promise.all([
+                this._loadAllDeals(),
+                this._loadCategories(),
+                Array.isArray(opts.orders) ? Promise.resolve(opts.orders) : loadOrders({}),
+            ]);
+
+            const categoriesMap = {};
+            (categories || []).forEach(c => {
+                categoriesMap[c.id] = c;
+            });
+            const matchMap = this._buildMatchMap(deals, orders || []);
+            const matchedDeals = (deals || []).filter(deal => {
+                const matchedOrder = matchMap[deal.id];
+                if (!matchedOrder) return false;
+                return !targetOrderIds || targetOrderIds.has(Number(matchedOrder.id));
+            });
+            if (!matchedDeals.length) {
+                localStorage.setItem(this.AUTO_SYNC_STORAGE_KEY, String(Date.now()));
+                return { synced: 0, matched: 0 };
+            }
+
+            this._deals = deals || [];
+            this._orders = orders || [];
+            this._categories = categoriesMap;
+            this._matchMap = matchMap;
+
+            const BATCH = 5;
+            let synced = 0;
+            for (let i = 0; i < matchedDeals.length; i += BATCH) {
+                const batch = matchedDeals.slice(i, i + BATCH);
+                const results = await Promise.all(batch.map(async deal => {
+                    const matchedOrder = matchMap[deal.id];
+                    if (!matchedOrder) return false;
+                    const data = await this._apiGet('/v1/transaction', {
+                        dealId: deal.id, pageSize: 1000,
+                    });
+                    const txns = data.items || [];
+                    const id = await this._syncDealImport(deal, matchedOrder, txns, { silent: true });
+                    return !!id;
+                }));
+                synced += results.filter(Boolean).length;
+            }
+
+            localStorage.setItem(this.AUTO_SYNC_STORAGE_KEY, String(Date.now()));
+            return { synced, matched: matchedDeals.length };
+        } catch (err) {
+            console.error('FinTablo autoSyncMatchedImports error:', err);
+            if (!opts.silent && typeof App?.toast === 'function') {
+                App.toast('Не удалось обновить ФинТабло: ' + err.message);
+            }
+            return { synced: 0, error: err.message };
+        }
     },
 
     // =============================================
@@ -492,6 +574,13 @@ const FinTablo = {
     _resolveTransactionScope(txn, order) {
         const originalValue = this._num(txn && txn.value);
         if (!order || originalValue <= 0) {
+            return { value: originalValue, mode: 'full', originalValue };
+        }
+
+        // Income belongs to the attached deal as a whole. Split parsing is only
+        // reliable for shared expenses; applying it to income can zero out the
+        // deal revenue even when the money is attached correctly in FinTablo.
+        if (String(txn?.group || '') === 'income') {
             return { value: originalValue, mode: 'full', originalValue };
         }
 

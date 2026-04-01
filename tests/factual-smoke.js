@@ -339,6 +339,31 @@ async function smokeLegacyStageDistributionAndMaterials(context) {
     assert.equal(fact._source_hints.fact_plastic, 'план + ФинТабло');
 }
 
+async function smokeFactualRequestsFinTabloAutoSync(context) {
+    context.__autoSyncCalls = [];
+    context.loadOrders = async () => [
+        { id: 11, order_name: 'Карабины ту-ту', status: 'completed' },
+        { id: 12, order_name: 'Тестовый заказ', status: 'sample' },
+    ];
+    context.loadTimeEntries = async () => [];
+    context.loadEmployees = async () => [];
+    context.window.FinTablo = {
+        autoSyncMatchedImports: async (opts) => {
+            context.__autoSyncCalls.push(opts);
+            return { synced: 1 };
+        },
+    };
+    const factual = vm.runInContext('Factual', context);
+    factual._applyFilter = () => {};
+    factual._renderAll = async () => {};
+
+    await factual.load();
+
+    assert.equal(context.__autoSyncCalls.length, 1, 'plan-fact should request one FinTablo auto-sync');
+    const orderIds = JSON.parse(JSON.stringify(context.__autoSyncCalls[0].orderIds)).sort((a, b) => a - b);
+    assert.deepEqual(orderIds, [11, 12], 'plan-fact should auto-sync all visible orders');
+}
+
 async function main() {
     const context = createContext();
     runScript(context, 'js/factual.js');
@@ -348,6 +373,7 @@ async function main() {
     smokeBuildPlanUsesTaxFormulaAndSavedAssemblyHours(context);
     smokeBuildPlanUsesHourBasedIndirectAndAssemblyHints(context);
     await smokeLegacyStageDistributionAndMaterials(context);
+    await smokeFactualRequestsFinTabloAutoSync(context);
     console.log('factual smoke checks passed');
 }
 

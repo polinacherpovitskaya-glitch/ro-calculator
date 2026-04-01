@@ -47,11 +47,21 @@ function createContext() {
         Date,
         JSON,
         Intl,
+        URL,
         document,
         localStorage: createStorage(),
-        fetch: async () => ({ ok: true, status: 200, json: async () => ({ status: 200, items: [] }) }),
+        __savedImports: [],
+        __fetchHandlers: [],
+        fetch: async (url) => {
+            const next = context.__fetchHandlers.shift();
+            if (typeof next === 'function') return next(url);
+            return { ok: true, status: 200, json: async () => ({ status: 200, items: [] }) };
+        },
         loadOrders: async () => [],
-        saveFintabloImport: async () => 1,
+        saveFintabloImport: async (payload) => {
+            context.__savedImports.push(payload);
+            return 1;
+        },
         formatRub(value) {
             const num = Number(value) || 0;
             return `${num.toLocaleString('ru-RU')} ₽`;
@@ -116,6 +126,27 @@ function smokeBuildImportUsesOnlyOrderSplit(context) {
     assert.equal(result.raw_data.splitApplied, true);
   }
 
+function smokeBuildImportKeepsFullIncomeForAttachedDeal(context) {
+    const result = vm.runInContext(`(() => {
+        FinTablo._categories = {};
+        return FinTablo._buildImportData(
+            { id: 501, order_name: 'Карабины ту-ту' },
+            { id: 77, name: 'Карабины ту-ту' },
+            [
+                {
+                    group: 'income',
+                    value: 75600,
+                    description: 'Оплата по сделке, деньги пришли и прикреплены к этой сделке',
+                    categoryId: 0,
+                }
+            ]
+        );
+    })()`, context);
+
+    assert.equal(result.fact_revenue, 75600);
+    assert.equal(result.fact_total, 0);
+}
+
 function smokeRenderDetailShowsAllocatedValue(context) {
     vm.runInContext(`(() => {
         FinTablo._categories = {};
@@ -143,15 +174,45 @@ function smokeRenderDetailShowsAllocatedValue(context) {
     assert.ok(html.includes('953 ₽</span></div>') || html.includes('953 ₽'), 'summary total should use allocated amount');
 }
 
-function main() {
+async function smokeAutoSyncMatchedImports(context) {
+    context.localStorage.setItem('ro_fintablo_api_key', 'test-key');
+    context.__fetchHandlers = [
+        async () => ({ ok: true, status: 200, json: async () => ({ status: 200, items: [{ id: 77, name: 'Карабины ту-ту', amount: 75600 }] }) }),
+        async () => ({ ok: true, status: 200, json: async () => ({ status: 200, items: [] }) }),
+        async () => ({ ok: true, status: 200, json: async () => ({ status: 200, items: [] }) }),
+        async () => ({ ok: true, status: 200, json: async () => ({
+            status: 200,
+            items: [
+                { group: 'income', value: 75600, description: 'Поступление по сделке', categoryId: 0 },
+            ],
+        }) }),
+    ];
+
+    context.loadOrders = async () => [
+        { id: 501, order_name: 'Карабины ту-ту' },
+    ];
+
+    const result = await vm.runInContext(`FinTablo.autoSyncMatchedImports({ force: true, silent: true })`, context);
+
+    assert.equal(result.synced, 1);
+    assert.equal(context.__savedImports.length, 1);
+    assert.equal(context.__savedImports[0].fact_revenue, 75600);
+}
+
+async function main() {
     const context = createContext();
     runScript(context, 'js/fintablo.js');
 
     smokeExtractSplitAllocations(context);
     smokeBuildImportUsesOnlyOrderSplit(context);
+    smokeBuildImportKeepsFullIncomeForAttachedDeal(context);
     smokeRenderDetailShowsAllocatedValue(context);
+    await smokeAutoSyncMatchedImports(context);
 
     console.log('fintablo-smoke: ok');
 }
 
-main();
+main().catch(err => {
+    console.error(err);
+    process.exit(1);
+});
