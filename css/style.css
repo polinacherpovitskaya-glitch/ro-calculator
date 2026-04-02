@@ -3747,6 +3747,178 @@ table .text-center { text-align: center; }
    PRODUCTION CALENDAR (v105)
    ============================================= */
 
+/* =============================================
+   CALCULATOR SECTIONS — UX redesign 2026-04
+   ============================================= */
+
+.calc-section {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    margin-bottom: 16px;
+    overflow: hidden;
+}
+
+.calc-section-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+}
+
+.calc-section-number {
+    background: var(--accent);
+    color: #fff;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 12px;
+    flex-shrink: 0;
+}
+
+.calc-section-title {
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--text);
+    flex: 1;
+}
+
+.calc-section-body {
+    padding: 16px;
+}
+
+/* Section 2 (Изделия) gets a blue border — it's the main action */
+.calc-section-main {
+    border: 2px solid var(--accent);
+}
+
+.calc-section-main .calc-section-header {
+    background: #eff6ff;
+    border-bottom-color: #dbeafe;
+}
+
+.calc-section-main .calc-section-title {
+    color: #1e40af;
+}
+
+/* Empty state shown when no items added yet */
+.calc-empty-state {
+    text-align: center;
+    padding: 32px 16px;
+    color: var(--text-muted);
+}
+
+.calc-empty-state-icon {
+    font-size: 32px;
+    margin-bottom: 8px;
+}
+
+.calc-empty-state p {
+    font-size: 13px;
+    margin: 0 0 14px;
+}
+
+/* Item card collapse support */
+.item-body {
+    /* content is always block; toggled to none when collapsed */
+}
+
+.item-block.is-collapsed .item-body {
+    display: none;
+}
+
+/* Summary row: visible only when collapsed */
+.item-card-summary {
+    display: none;
+    padding: 8px 0 4px;
+    gap: 16px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.item-block.is-collapsed .item-card-summary {
+    display: flex;
+}
+
+.item-summary-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
+.item-summary-label {
+    font-size: 10px;
+    color: var(--text-muted);
+}
+
+.item-summary-value {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+}
+
+/* Collapse toggle button in item header */
+.item-collapse-btn {
+    font-size: 11px !important;
+    padding: 3px 8px !important;
+    margin-right: 4px;
+    flex-shrink: 0;
+}
+
+/* Delete button in item header — make it clearly destructive */
+.item-block-header .btn-danger-sm {
+    font-size: 12px;
+    padding: 4px 8px;
+    background: none;
+    border: 1px solid var(--red);
+    color: var(--red);
+    border-radius: var(--radius);
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: var(--transition);
+}
+
+.item-block-header .btn-danger-sm:hover {
+    background: var(--red-light);
+}
+
+/* "Дополнительно" collapsible inside item card */
+.item-advanced-details {
+    border-top: 1px dashed var(--border);
+    margin-top: 12px;
+    padding-top: 4px;
+}
+
+.item-advanced-summary {
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-muted);
+    padding: 6px 0;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    user-select: none;
+}
+
+.item-advanced-summary::before {
+    content: '▸';
+    font-size: 10px;
+    transition: transform 0.15s;
+}
+
+.item-advanced-details[open] .item-advanced-summary::before {
+    transform: rotate(90deg);
+}
+
 .gantt-header-note {
     margin-top: 4px;
     font-size: 13px;
