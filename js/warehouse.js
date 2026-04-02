@@ -3671,6 +3671,7 @@ const Warehouse = {
 
     _collectWarehouseDemandFromOrderItems(items) {
         const grouped = new Map();
+        const explicitHardwareWarehouseIds = new Set();
         const addDemandRow = (itemId, qty, name, materialType = 'hardware') => {
             const normalizedItemId = Number(itemId || 0);
             const normalizedQty = parseFloat(qty) || 0;
@@ -3697,8 +3698,27 @@ const Warehouse = {
 
         (items || []).forEach(item => {
             const itemType = String(item.item_type || '').toLowerCase();
+            if (itemType !== 'hardware') return;
+            const src = String(item.source || item.hardware_source || '').toLowerCase();
+            const itemId = Number(item.warehouse_item_id ?? item.hardware_warehouse_item_id ?? 0);
+            const qty = parseFloat(item.quantity ?? item.hardware_qty ?? item.qty ?? 0) || 0;
+            if (src === 'warehouse' && itemId && qty > 0) {
+                explicitHardwareWarehouseIds.add(itemId);
+            }
+        });
+
+        (items || []).forEach(item => {
+            const itemType = String(item.item_type || '').toLowerCase();
             if (itemType === 'pendant' && typeof getPendantWarehouseDemandRows === 'function') {
                 getPendantWarehouseDemandRows(item).forEach(row => {
+                    addDemandRow(row.warehouse_item_id, row.qty, row.name, row.material_type || 'hardware');
+                });
+                return;
+            }
+
+            if (itemType === 'product' && typeof getProductWarehouseDemandRows === 'function') {
+                getProductWarehouseDemandRows(item, this.allItems || []).forEach(row => {
+                    if (explicitHardwareWarehouseIds.has(Number(row.warehouse_item_id || 0))) return;
                     addDemandRow(row.warehouse_item_id, row.qty, row.name, row.material_type || 'hardware');
                 });
                 return;

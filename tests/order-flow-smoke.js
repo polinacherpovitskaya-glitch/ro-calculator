@@ -3102,6 +3102,92 @@ async function smokePendantWarehouseDemandSync(context) {
     ]);
 }
 
+async function smokeProductNfcWarehouseDemandSync(context) {
+    context.__smokeNfcWarehouseItems = [{
+        id: 197,
+        name: 'NFC',
+        sku: 'NFC',
+        category: 'other',
+        qty: 160,
+        unit: 'шт',
+        price_per_unit: 8,
+    }];
+    context.__smokeNfcDemandItems = [{
+        item_type: 'product',
+        product_name: 'Кастомная бирка',
+        quantity: 12,
+        is_nfc: true,
+        nfc_programming: false,
+        nfc_warehouse_item_id: 197,
+    }];
+
+    const demandRows = clone(await vm.runInContext(`(() => {
+        Warehouse.allItems = globalThis.__smokeNfcWarehouseItems;
+        return Warehouse._collectWarehouseDemandFromOrderItems(globalThis.__smokeNfcDemandItems);
+    })()`, context));
+    assert.equal(demandRows.length, 1);
+    assert.equal(demandRows[0].warehouse_item_id, 197);
+    assert.equal(demandRows[0].qty, 12);
+    assert.equal(demandRows[0].material_type, 'hardware');
+    assert.match(demandRows[0].names[0], /Кастомная бирка · NFC/);
+
+    const orderDemand = clone(await vm.runInContext(`(() => {
+        return Array.from(Orders._collectWarehouseDemand(globalThis.__smokeNfcDemandItems, { hardware: true, packaging: false }).entries());
+    })()`, context));
+    assert.deepEqual(orderDemand, [[197, 12]]);
+
+    const meta = clone(await vm.runInContext(`Orders.buildHardwareMeta(globalThis.__smokeNfcDemandItems)`, context));
+    assert.equal(meta.label, 'Фурнитура из наличия');
+
+    const calcDemand = clone(await vm.runInContext(`(() => {
+        Calculator._whPickerData = { other: { items: globalThis.__smokeNfcWarehouseItems } };
+        Calculator.items = globalThis.__smokeNfcDemandItems;
+        Calculator.hardwareItems = [];
+        Calculator.packagingItems = [];
+        Calculator.pendants = [];
+        return Array.from(Calculator._collectWarehouseReservationDemand({ hardware: true, packaging: false }).entries());
+    })()`, context));
+    assert.deepEqual(calcDemand, [[197, 12]]);
+
+    context.__smokeNfcDemandItemsWithManualDuplicate = [
+        ...context.__smokeNfcDemandItems,
+        {
+            item_type: 'hardware',
+            product_name: 'NFC',
+            quantity: 12,
+            hardware_source: 'warehouse',
+            hardware_warehouse_item_id: 197,
+        },
+    ];
+
+    const dedupedWarehouseDemand = clone(await vm.runInContext(`(() => {
+        Warehouse.allItems = globalThis.__smokeNfcWarehouseItems;
+        return Warehouse._collectWarehouseDemandFromOrderItems(globalThis.__smokeNfcDemandItemsWithManualDuplicate);
+    })()`, context));
+    assert.equal(dedupedWarehouseDemand.length, 1);
+    assert.equal(dedupedWarehouseDemand[0].warehouse_item_id, 197);
+    assert.equal(dedupedWarehouseDemand[0].qty, 12);
+
+    const dedupedOrderDemand = clone(await vm.runInContext(`(() => {
+        return Array.from(Orders._collectWarehouseDemand(globalThis.__smokeNfcDemandItemsWithManualDuplicate, { hardware: true, packaging: false }).entries());
+    })()`, context));
+    assert.deepEqual(dedupedOrderDemand, [[197, 12]]);
+
+    const dedupedCalcDemand = clone(await vm.runInContext(`(() => {
+        Calculator._whPickerData = { other: { items: globalThis.__smokeNfcWarehouseItems } };
+        Calculator.items = globalThis.__smokeNfcDemandItemsWithManualDuplicate.filter(item => item.item_type === 'product');
+        Calculator.hardwareItems = [{
+            source: 'warehouse',
+            warehouse_item_id: 197,
+            qty: 12,
+        }];
+        Calculator.packagingItems = [];
+        Calculator.pendants = [];
+        return Array.from(Calculator._collectWarehouseReservationDemand({ hardware: true, packaging: false }).entries());
+    })()`, context));
+    assert.deepEqual(dedupedCalcDemand, [[197, 12]]);
+}
+
 async function smokePackagingWarehouseSaveSync(context) {
     const currentItems = [{
         item_type: 'packaging',
@@ -5259,6 +5345,7 @@ async function main() {
     await smokeOrderDetailCompletedGuard(context);
     await smokeProductionPlanCompletedGuard(context);
     await smokePendantWarehouseDemandSync(context);
+    await smokeProductNfcWarehouseDemandSync(context);
     await smokePackagingWarehouseSaveSync(context);
     await smokeWarehouseManualAdjustment(context);
     await smokeWarehouseAdjustmentPersistsWithoutBulkSave(context);

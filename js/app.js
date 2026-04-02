@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v211';
+const APP_VERSION = 'v212';
 
 const App = {
     currentPage: 'orders',
@@ -1070,6 +1070,7 @@ const Calculator = {
             is_blank_mold: false,
             is_nfc: false,
             nfc_programming: false,
+            nfc_warehouse_item_id: null,
             delivery_included: false,
             // Multiple printings
             printings: [],
@@ -1603,6 +1604,11 @@ const Calculator = {
         return null;
     },
 
+    _getWhPickerItemsFlat() {
+        if (!this._whPickerData) return [];
+        return Object.values(this._whPickerData).flatMap(group => Array.isArray(group?.items) ? group.items : []);
+    },
+
     _getCurrentOrderReservedQty(itemId) {
         const targetId = Number(itemId) || 0;
         if (!targetId) return 0;
@@ -1618,6 +1624,12 @@ const Calculator = {
         if (!targetId) return 0;
 
         const shouldSkip = (kind, idx) => exclude && exclude.kind === kind && Number(exclude.idx) === Number(idx);
+        const hasExplicitHardwareDemand = (this.hardwareItems || []).some((hw, idx) =>
+            !shouldSkip('hardware', idx)
+            && hw.source === 'warehouse'
+            && Number(hw.warehouse_item_id) === targetId
+            && (parseFloat(hw.qty) || 0) > 0
+        );
         let demand = 0;
 
         (this.hardwareItems || []).forEach((hw, idx) => {
@@ -1638,6 +1650,18 @@ const Calculator = {
             (this.pendants || []).forEach(pnd => {
                 getPendantWarehouseDemandRows(pnd).forEach(row => {
                     if (Number(row.warehouse_item_id) !== targetId) return;
+                    demand += parseFloat(row.qty) || 0;
+                });
+            });
+        }
+
+        if (typeof getProductWarehouseDemandRows === 'function') {
+            const pickerItems = this._getWhPickerItemsFlat();
+            (this.items || []).forEach((item, idx) => {
+                if (shouldSkip('product', idx)) return;
+                getProductWarehouseDemandRows(item, pickerItems).forEach(row => {
+                    if (Number(row.warehouse_item_id) !== targetId) return;
+                    if (hasExplicitHardwareDemand) return;
                     demand += parseFloat(row.qty) || 0;
                 });
             });
@@ -4152,6 +4176,9 @@ const Calculator = {
         // Product items
         this.items.forEach(item => {
             const r = item.result || getEmptyCostResult();
+            const nfcWarehouseItemId = item.is_nfc && typeof getProductWarehouseDemandRows === 'function'
+                ? Number((getProductWarehouseDemandRows(item, this._getWhPickerItemsFlat())[0] || {}).warehouse_item_id || 0) || null
+                : null;
             items.push({
                 item_number: item.item_number,
                 item_type: 'product',
@@ -4165,6 +4192,7 @@ const Calculator = {
                 is_blank_mold: item.is_blank_mold,
                 is_nfc: item.is_nfc,
                 nfc_programming: item.nfc_programming,
+                nfc_warehouse_item_id: nfcWarehouseItemId,
                 delivery_included: item.delivery_included,
                 printings: JSON.stringify(item.printings || []),
                 cost_fot: r.costFot,
@@ -4445,11 +4473,22 @@ const Calculator = {
         };
 
         if (includeHardware) {
+            const explicitHardwareIds = new Set();
             (this.hardwareItems || []).forEach(hw => {
                 if (hw.source === 'warehouse' && hw.warehouse_item_id) {
                     addQty(hw.warehouse_item_id, parseFloat(hw.qty) || 0);
+                    if ((parseFloat(hw.qty) || 0) > 0) explicitHardwareIds.add(Number(hw.warehouse_item_id));
                 }
             });
+            if (typeof getProductWarehouseDemandRows === 'function') {
+                const pickerItems = this._getWhPickerItemsFlat();
+                (this.items || []).forEach(item => {
+                    getProductWarehouseDemandRows(item, pickerItems).forEach(row => {
+                        if (explicitHardwareIds.has(Number(row.warehouse_item_id || 0))) return;
+                        addQty(row.warehouse_item_id, parseFloat(row.qty) || 0);
+                    });
+                });
+            }
         }
         if (includePackaging) {
             (this.packagingItems || []).forEach(pkg => {

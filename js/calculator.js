@@ -380,6 +380,38 @@ function getPendantAttachmentTotalSell(pendant, type, entry) {
     ));
 }
 
+function findNfcWarehouseItem(warehouseItems) {
+    const items = Array.isArray(warehouseItems) ? warehouseItems : [];
+    return items.find(item => {
+        const sku = String(item?.sku || '').trim().toUpperCase();
+        const name = String(item?.name || '').trim().toLowerCase();
+        return sku === 'NFC' || name === 'nfc';
+    }) || null;
+}
+
+function getProductWarehouseDemandRows(item, warehouseItems) {
+    const itemType = String(item?.item_type || 'product').toLowerCase();
+    const qty = parseFloat(item?.quantity) || 0;
+    if (itemType !== 'product' || !item?.is_nfc || !(qty > 0)) return [];
+
+    const resolvedItem = Number(item?.nfc_warehouse_item_id || 0)
+        ? { id: Number(item?.nfc_warehouse_item_id || 0), name: 'NFC', sku: 'NFC', unit: 'шт' }
+        : findNfcWarehouseItem(warehouseItems);
+    const warehouseItemId = Number(resolvedItem?.id || 0);
+    if (!warehouseItemId) return [];
+
+    const productName = String(item?.product_name || '').trim();
+    return [{
+        warehouse_item_id: warehouseItemId,
+        qty,
+        material_type: 'hardware',
+        attachment_type: 'nfc',
+        name: productName ? `${productName} · NFC` : 'NFC',
+        warehouse_sku: String(resolvedItem?.sku || 'NFC').trim(),
+        unit: String(resolvedItem?.unit || 'шт').trim() || 'шт',
+    }];
+}
+
 function getPendantWarehouseDemandRows(pendant) {
     const qty = parseFloat(pendant?.quantity) || 0;
     if (!(qty > 0)) return [];

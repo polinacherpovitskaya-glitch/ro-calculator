@@ -366,6 +366,7 @@ const Orders = {
     buildHardwareMeta(items) {
         const hardwareItems = (items || []).filter(item => item.item_type === 'hardware');
         const pendantAttachments = [];
+        const productNfcAttachments = [];
         if (typeof getPendantAttachmentEntries === 'function') {
             (items || []).filter(item => item.item_type === 'pendant').forEach(pendant => {
                 ['cord', 'carabiner'].forEach(type => {
@@ -379,7 +380,18 @@ const Orders = {
                 });
             });
         }
-        const demandItems = [...hardwareItems, ...pendantAttachments];
+        if (typeof getProductWarehouseDemandRows === 'function') {
+            (items || []).forEach(item => {
+                getProductWarehouseDemandRows(item).forEach(() => {
+                    productNfcAttachments.push({
+                        hardware_source: 'warehouse',
+                        source: 'warehouse',
+                        custom_country: 'warehouse',
+                    });
+                });
+            });
+        }
+        const demandItems = [...hardwareItems, ...pendantAttachments, ...productNfcAttachments];
         if (demandItems.length === 0) {
             return {
                 label: 'Фурнитура не нужна',
@@ -1043,10 +1055,24 @@ const Orders = {
         const includeHardware = !options || options.hardware !== false;
         const includePackaging = !options || options.packaging !== false;
         const demand = new Map();
+        const explicitHardwareIds = new Set();
         const add = (itemId, qty) => {
             if (!itemId || qty <= 0) return;
             demand.set(itemId, (demand.get(itemId) || 0) + qty);
         };
+
+        (items || []).forEach(item => {
+            const qty = parseFloat(
+                item.quantity
+                ?? item.hardware_qty
+                ?? item.packaging_qty
+                ?? item.qty
+            ) || 0;
+            if (qty <= 0) return;
+            if (includeHardware && item.item_type === 'hardware' && item.hardware_source === 'warehouse' && item.hardware_warehouse_item_id) {
+                explicitHardwareIds.add(Number(item.hardware_warehouse_item_id || 0));
+            }
+        });
 
         (items || []).forEach(item => {
             const qty = parseFloat(
@@ -1064,6 +1090,12 @@ const Orders = {
             }
             if (includeHardware && item.item_type === 'pendant' && typeof getPendantWarehouseDemandRows === 'function') {
                 getPendantWarehouseDemandRows(item).forEach(row => {
+                    add(row.warehouse_item_id, parseFloat(row.qty) || 0);
+                });
+            }
+            if (includeHardware && item.item_type === 'product' && typeof getProductWarehouseDemandRows === 'function') {
+                getProductWarehouseDemandRows(item).forEach(row => {
+                    if (explicitHardwareIds.has(Number(row.warehouse_item_id || 0))) return;
                     add(row.warehouse_item_id, parseFloat(row.qty) || 0);
                 });
             }
