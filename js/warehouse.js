@@ -3534,6 +3534,43 @@ const Warehouse = {
         return true;
     },
 
+    async _persistProjectHardwareRowState(orderId, itemId, { actualQty = undefined, ready = undefined, updatedAt = '', updatedBy = '' } = {}) {
+        const normalizedOrderId = Number(orderId || 0);
+        const normalizedItemId = Number(itemId || 0);
+        if (!normalizedOrderId || !normalizedItemId) return;
+        const key = this._projectHardwareKey(normalizedOrderId, normalizedItemId);
+        let latest = null;
+        try {
+            latest = await loadProjectHardwareState();
+        } catch (error) {
+            console.warn('Warehouse._persistProjectHardwareRowState loadProjectHardwareState failed:', error);
+            latest = null;
+        }
+
+        const merged = latest && typeof latest === 'object'
+            ? {
+                ...latest,
+                checks: { ...((latest && latest.checks) || {}) },
+                actual_qtys: { ...((latest && latest.actual_qtys) || {}) },
+            }
+            : { checks: {}, actual_qtys: {} };
+
+        if (ready !== undefined) {
+            if (ready) merged.checks[key] = true;
+            else delete merged.checks[key];
+        }
+
+        if (actualQty !== undefined) {
+            if (actualQty === null || actualQty === '' || actualQty === undefined) delete merged.actual_qtys[key];
+            else merged.actual_qtys[key] = round2(Math.max(0, parseFloat(actualQty) || 0));
+        }
+
+        merged.updated_at = updatedAt || new Date().toISOString();
+        merged.updated_by = updatedBy || '';
+        this.projectHardwareState = merged;
+        await saveProjectHardwareState(merged);
+    },
+
     _getProjectHardwareDisplayActualQty(orderId, itemId, plannedQty, historyDeltaMap, history) {
         const explicit = this._getProjectHardwareActualQty(orderId, itemId);
         if (explicit !== null) return explicit;
@@ -3794,7 +3831,11 @@ const Warehouse = {
 
         this.projectHardwareState.updated_at = nowIso;
         this.projectHardwareState.updated_by = managerName;
-        await saveProjectHardwareState(this.projectHardwareState);
+        await this._persistProjectHardwareRowState(normalizedOrderId, normalizedItemId, {
+            ready: !!this.projectHardwareState.checks[key],
+            updatedAt: nowIso,
+            updatedBy: managerName,
+        });
         await saveWarehouseReservations(reservations);
 
         if (typeof Calculator !== 'undefined') {
@@ -3873,9 +3914,12 @@ const Warehouse = {
         }
 
         if (stateChanged) {
-            this.projectHardwareState.updated_at = nowIso;
-            this.projectHardwareState.updated_by = managerName;
-            await saveProjectHardwareState(this.projectHardwareState);
+            await this._persistProjectHardwareRowState(normalizedOrderId, normalizedItemId, {
+                actualQty: nextActual,
+                ready: this._isProjectHardwareReady(normalizedOrderId, normalizedItemId) ? true : undefined,
+                updatedAt: nowIso,
+                updatedBy: managerName,
+            });
         }
         if (reservationsChanged) {
             await saveWarehouseReservations(reservations);

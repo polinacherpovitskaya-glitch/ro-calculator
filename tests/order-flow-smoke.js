@@ -4294,6 +4294,94 @@ async function smokeProjectHardwareActualQtyEditableFlow(context) {
     assert.equal(restoredReservation.qty, 5);
 }
 
+async function smokeProjectHardwareZeroActualCanStayReady(context) {
+    const order = {
+        id: 322,
+        order_name: 'Zero Actual Hardware Order',
+        manager_name: 'Smoke',
+        status: 'production_hardware',
+        created_at: '2026-03-18T12:00:00.000Z',
+    };
+    const detail = {
+        order: clone(order),
+        items: [{
+            item_type: 'hardware',
+            product_name: 'Zero Actual Hardware',
+            quantity: 5,
+            hardware_source: 'warehouse',
+            hardware_warehouse_item_id: 9021,
+        }],
+    };
+
+    context.__projectHardwareState = { checks: {}, actual_qtys: {} };
+    context.__reservations = [{
+        id: 1,
+        item_id: 9021,
+        order_id: 322,
+        order_name: 'Zero Actual Hardware Order',
+        qty: 5,
+        status: 'active',
+        source: 'project_hardware',
+        created_at: '2026-03-18T12:00:00.000Z',
+    }];
+    context.__warehouseItems = [{
+        id: 9021,
+        name: 'Zero Actual Hardware',
+        sku: 'ZAH-1',
+        category: 'hardware',
+        qty: 10,
+        unit: 'шт',
+        price_per_unit: 10,
+    }];
+    context.__warehouseHistory = [];
+    context.__orderDetails = { 322: clone(detail) };
+    context.loadProjectHardwareState = async () => clone(context.__projectHardwareState);
+    context.saveProjectHardwareState = async (state) => {
+        context.__projectHardwareState = clone(state);
+    };
+    context.loadWarehouseReservations = async () => clone(context.__reservations);
+    context.saveWarehouseReservations = async (reservations) => {
+        context.__reservations = clone(reservations);
+    };
+    context.loadWarehouseItems = async () => clone(context.__warehouseItems);
+    context.saveWarehouseItems = async (items) => {
+        context.__warehouseItems = clone(items);
+    };
+    context.loadWarehouseHistory = async () => clone(context.__warehouseHistory);
+    context.saveWarehouseHistory = async (history) => {
+        context.__warehouseHistory = clone(history);
+    };
+    context.loadOrder = async (orderId) => clone(context.__orderDetails[Number(orderId)] || null);
+
+    vm.runInContext(`
+        Warehouse.projectHardwareState = null;
+        Warehouse.load = async () => {};
+    `, context);
+
+    await vm.runInContext(`Warehouse.setProjectHardwareActualQty(322, 9021, '0')`, context);
+    await vm.runInContext(`Warehouse.toggleProjectHardwareReady(322, 9021, true)`, context);
+
+    assert.equal(context.__projectHardwareState.actual_qtys['322:9021'], 0);
+    assert.equal(Boolean(context.__projectHardwareState.checks['322:9021']), true);
+    assert.equal(context.__warehouseItems[0].qty, 10);
+    assert.equal(context.__warehouseHistory.length, 0);
+    assert.equal(context.__reservations.filter(item => Number(item.order_id) === 322 && item.status === 'active').length, 0);
+
+    await vm.runInContext(`Warehouse.syncProjectHardwareOrderState({
+        orderId: 322,
+        orderName: 'Zero Actual Hardware Order',
+        managerName: 'Smoke',
+        status: 'production_hardware',
+        currentItems: JSON.parse(${JSON.stringify(JSON.stringify(detail.items))}),
+        previousItems: JSON.parse(${JSON.stringify(JSON.stringify(detail.items))})
+    })`, context);
+
+    assert.equal(Boolean(context.__projectHardwareState.checks['322:9021']), true);
+    const completion = clone(await vm.runInContext(`Warehouse.getOrderProjectHardwareCompletion(322, JSON.parse(${JSON.stringify(JSON.stringify(detail))}))`, context));
+    assert.equal(completion.canComplete, true);
+    assert.equal(completion.readyRows, 1);
+}
+
 async function smokeOrderDetailHardwareTabShowsAndEditsProjectHardware(context) {
     const order = {
         id: 777,
@@ -5973,6 +6061,7 @@ async function main() {
     await smokeProjectHardwareToggleShortageGuard(context);
     await smokeProjectHardwareLegacyQtyAndStringIdDeduction(context);
     await smokeProjectHardwareActualQtyEditableFlow(context);
+    await smokeProjectHardwareZeroActualCanStayReady(context);
     await smokeOrderDetailHardwareTabShowsAndEditsProjectHardware(context);
     await smokeProjectHardwareReadySyncDoesNotAutoReturnConsumedStock(context);
     await smokeProjectHardwareCollectedStateSurvivesStateLoss(context);
