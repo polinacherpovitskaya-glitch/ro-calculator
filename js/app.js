@@ -1324,7 +1324,7 @@ const Calculator = {
                 <div class="item-title" id="item-title-${idx}">${item.product_name || 'Изделие ' + num}</div>
                 <button class="btn btn-sm btn-outline item-collapse-btn" onclick="Calculator.toggleItemCollapse(${idx})">${wasCollapsed ? '▼ Показать' : '▲ Свернуть'}</button>
                 <button class="btn btn-sm btn-outline" onclick="Calculator.cloneItem(${idx})">Клонировать</button>
-                <button class="item-block-header btn-danger-sm" onclick="Calculator.removeItem(${idx})">✕</button>
+                <button class="btn-danger-sm" onclick="Calculator.removeItem(${idx})">✕</button>
             </div>
             <div class="item-card-summary">
                 <div class="item-summary-stat">
