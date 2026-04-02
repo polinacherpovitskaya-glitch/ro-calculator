@@ -2105,6 +2105,9 @@ const Warehouse = {
                 ? `<span style="font-weight:600;">${item.available_qty}</span>`
                 : `<span style="color:var(--text-muted);">—</span>`;
             const qtyStep = this._warehouseQtyInputStep(item);
+            const reservePillsHtml = item.reserved_qty > 0
+                ? this._renderReservationPills(item.id, { compact: true, limit: 2 })
+                : '';
 
             // Color dropdown options
             const colorOpts = uniqueColors.map(c =>
@@ -2138,6 +2141,7 @@ const Warehouse = {
                     <input type="number" class="wh-inline-input text-right" value="${item.reserved_qty || 0}" min="0" max="${item.qty || 0}" step="${qtyStep}"
                         style="${item.reserved_qty > 0 ? 'color:var(--yellow);font-weight:600;' : ''}"
                         onchange="Warehouse.inlineReserve(${item.id}, this.value, ${item.reserved_qty || 0})">
+                    ${reservePillsHtml}
                 </td>
                 <td class="text-right">${availInfo}</td>
                 <td>
@@ -2559,6 +2563,7 @@ const Warehouse = {
                 id: Date.now(),
                 item_id: normalizedItemId,
                 order_name: 'Ручной резерв',
+                source: 'manual',
                 qty: diff,
                 status: 'active',
                 created_at: new Date().toISOString(),
@@ -2570,8 +2575,10 @@ const Warehouse = {
             const itemRes = reservations
                 .filter(r => Number(r.item_id || 0) === normalizedItemId && r.status === 'active')
                 .sort((a, b) => {
-                    if (a.order_name === 'Ручной резерв' && b.order_name !== 'Ручной резерв') return -1;
-                    if (b.order_name === 'Ручной резерв' && a.order_name !== 'Ручной резерв') return 1;
+                    const aManual = Warehouse._isManualReservationRecord(a);
+                    const bManual = Warehouse._isManualReservationRecord(b);
+                    if (aManual && !bManual) return -1;
+                    if (bManual && !aManual) return 1;
                     return new Date(b.created_at) - new Date(a.created_at);
                 });
 
@@ -2618,6 +2625,7 @@ const Warehouse = {
             id: Date.now(),
             item_id: normalizedItemId,
             order_name: orderName,
+            source: 'manual',
             qty: qty,
             status: 'active',
             created_at: new Date().toISOString(),
@@ -2653,18 +2661,29 @@ const Warehouse = {
         const container = document.getElementById('wh-reservations-section');
         if (!container) return;
         const normalizedItemId = Number(itemId || 0);
-        const activeRes = this.allReservations.filter(r => Number(r.item_id || 0) === normalizedItemId && r.status === 'active');
+        const activeRes = this._getActiveReservationsForItem(normalizedItemId);
         if (activeRes.length === 0) {
             container.innerHTML = '<p style="color:var(--text-muted);font-size:12px;">Нет активных резервов</p>';
             return;
         }
         container.innerHTML = '<h4 style="margin:0 0 8px;font-size:13px;">Активные резервы:</h4>' +
-            activeRes.map(r => `<div style="display:flex;gap:8px;align-items:center;padding:4px 0;border-bottom:1px solid var(--border);font-size:12px;">
-                <span style="font-weight:600;">${this.esc(r.order_name)}</span>
-                <span>${r.qty} шт</span>
-                <span style="color:var(--text-muted);">${App.formatDate(r.created_at)}</span>
-                <button class="btn btn-sm btn-outline" onclick="Warehouse.cancelReservation(${r.id})" style="margin-left:auto;font-size:10px;padding:1px 6px;">Отменить</button>
-            </div>`).join('');
+            activeRes.map(r => {
+                const meta = this._getReservationDisplayMeta(r);
+                const openButton = meta.orderId > 0
+                    ? `<button class="btn btn-sm btn-outline" onclick="App.navigate('order-detail', true, ${meta.orderId})" style="font-size:10px;padding:1px 6px;">Открыть</button>`
+                    : '';
+                const authorText = r.created_by ? ` · ${this.esc(r.created_by)}` : '';
+                return `<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px;">
+                    <span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border:1px solid var(--border);border-radius:999px;background:#fff;color:var(--text-muted);font-size:11px;">${this.esc(meta.sourceLabel)}</span>
+                    <span style="font-weight:600;">${this.esc(meta.primaryLabel)}</span>
+                    <span>${meta.qty.toLocaleString('ru-RU')} шт</span>
+                    <span style="color:var(--text-muted);">${App.formatDate(r.created_at)}${authorText}</span>
+                    <div style="margin-left:auto;display:flex;gap:6px;align-items:center;">
+                        ${openButton}
+                        <button class="btn btn-sm btn-outline" onclick="Warehouse.cancelReservation(${r.id})" style="font-size:10px;padding:1px 6px;">Отменить</button>
+                    </div>
+                </div>`;
+            }).join('');
     },
 
     // ==========================================
@@ -3304,6 +3323,95 @@ const Warehouse = {
 
     _isProjectHardwareReservationSource(source) {
         return source === 'project_hardware' || source === 'order_calc';
+    },
+
+    _isManualReservationSource(source) {
+        const normalized = this._normStr(source || '');
+        return normalized === 'manual' || normalized === 'manual_reserve';
+    },
+
+    _isManualReservationRecord(reservation) {
+        if (!reservation || typeof reservation !== 'object') return false;
+        if (this._isManualReservationSource(reservation.source)) return true;
+        if (String(reservation.order_name || '').trim() === 'Ручной резерв') return true;
+        const hasLinkedOrder = Number(reservation.order_id || 0) > 0;
+        return !hasLinkedOrder && !this._isProjectHardwareReservationSource(reservation.source);
+    },
+
+    _getActiveReservationsForItem(itemId) {
+        const normalizedItemId = Number(itemId || 0);
+        return (this.allReservations || []).filter(r =>
+            Number(r && r.item_id || 0) === normalizedItemId && String(r && r.status || '') === 'active'
+        );
+    },
+
+    _getReservationDisplayMeta(reservation) {
+        const orderName = String(reservation && reservation.order_name || '').trim();
+        const orderId = Number(reservation && reservation.order_id || 0);
+        const qty = this._parseWarehouseQty(reservation && reservation.qty);
+        const isProject = this._isProjectHardwareReservationSource(reservation && reservation.source) || orderId > 0;
+        const isManual = this._isManualReservationRecord(reservation);
+        const sourceLabel = isProject ? 'проект' : (isManual ? 'вручную' : 'резерв');
+        const primaryLabel = orderName && orderName !== 'Ручной резерв'
+            ? orderName
+            : (isProject
+                ? (orderId > 0 ? `Заказ #${orderId}` : 'Связанный заказ')
+                : 'Ручной резерв');
+        const titleParts = [primaryLabel, `${sourceLabel}, ${qty.toLocaleString('ru-RU')} шт`];
+        if (reservation && reservation.created_by) titleParts.push(`создал ${reservation.created_by}`);
+        return {
+            qty,
+            orderId,
+            isProject,
+            isManual,
+            sourceLabel,
+            primaryLabel,
+            title: titleParts.join(' · '),
+        };
+    },
+
+    _renderReservationPills(itemId, { compact = false, limit = 2 } = {}) {
+        const activeReservations = this._getActiveReservationsForItem(itemId);
+        if (!activeReservations.length) return '';
+        const shownReservations = activeReservations.slice(0, Math.max(0, limit));
+        const pillStyle = [
+            'display:inline-flex',
+            'align-items:center',
+            'gap:4px',
+            'max-width:100%',
+            'padding:2px 8px',
+            'border:1px solid var(--border)',
+            'border-radius:999px',
+            'background:#fff',
+            'font-size:11px',
+            'line-height:1.2',
+            compact ? 'justify-content:flex-end' : '',
+        ].filter(Boolean).join(';');
+        const wrapStyle = compact
+            ? 'display:flex;flex-wrap:wrap;gap:4px;justify-content:flex-end;margin-top:6px;'
+            : 'display:flex;flex-wrap:wrap;gap:6px;';
+
+        const pills = shownReservations.map(reservation => {
+            const meta = this._getReservationDisplayMeta(reservation);
+            const content = `
+                <span style="font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${this.esc(meta.primaryLabel)}</span>
+                <span style="color:var(--text-muted);white-space:nowrap;">${this.esc(meta.sourceLabel)} · ${meta.qty.toLocaleString('ru-RU')} шт</span>
+            `;
+            if (meta.orderId > 0) {
+                return `<button type="button"
+                    title="${this.esc(meta.title)}"
+                    onclick="App.navigate('order-detail', true, ${meta.orderId})"
+                    style="${pillStyle};cursor:pointer;color:inherit;">
+                    ${content}
+                </button>`;
+            }
+            return `<span title="${this.esc(meta.title)}" style="${pillStyle};">${content}</span>`;
+        });
+        const hiddenCount = activeReservations.length - shownReservations.length;
+        if (hiddenCount > 0) {
+            pills.push(`<span style="${pillStyle};color:var(--text-muted);">+${hiddenCount}</span>`);
+        }
+        return `<div style="${wrapStyle}">${pills.join('')}</div>`;
     },
 
     _projectHardwareKey(orderId, itemId) {

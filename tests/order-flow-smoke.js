@@ -3530,6 +3530,63 @@ async function smokeWarehouseAdjustmentPersistsWithoutBulkSave(context) {
     assert.match(context.__warehouseHistory[0].notes, /batch-save/);
 }
 
+async function smokeWarehouseReserveLabelsShowSource(context) {
+    context.__warehouseItems = [
+        {
+            id: 811,
+            name: 'Reserve Label Item',
+            sku: 'RSV-811',
+            category: 'other',
+            qty: 20,
+            reserved_qty: 7,
+            available_qty: 13,
+            price_per_unit: 9,
+        },
+    ];
+    context.__warehouseReservations = [
+        {
+            id: 81101,
+            item_id: 811,
+            order_id: 42,
+            order_name: 'ФНТР 1 партия',
+            source: 'project_hardware',
+            qty: 5,
+            status: 'active',
+            created_at: '2026-04-02T08:00:00.000Z',
+            created_by: 'Smoke',
+        },
+        {
+            id: 81102,
+            item_id: 811,
+            order_name: 'Цеховой запас',
+            qty: 2,
+            status: 'active',
+            created_at: '2026-04-02T09:00:00.000Z',
+            created_by: 'Smoke',
+        },
+    ];
+
+    vm.runInContext(`
+        globalThis.__lastNavigation = null;
+        App.navigate = (page, pushHash, subId) => { globalThis.__lastNavigation = { page, pushHash, subId }; };
+        Warehouse.allItems = globalThis.__warehouseItems.map(item => ({ ...item }));
+        Warehouse.allReservations = globalThis.__warehouseReservations.map(item => ({ ...item }));
+    `, context);
+
+    await vm.runInContext(`Warehouse.renderTable(Warehouse.allItems)`, context);
+    const tableHtml = String(vm.runInContext(`document.getElementById('wh-content').innerHTML`, context));
+    assert.match(tableHtml, /ФНТР 1 партия/);
+    assert.match(tableHtml, /проект · 5 шт/);
+    assert.match(tableHtml, /Цеховой запас/);
+    assert.match(tableHtml, /вручную · 2 шт/);
+
+    await vm.runInContext(`Warehouse.renderItemReservations(811)`, context);
+    const detailHtml = String(vm.runInContext(`document.getElementById('wh-reservations-section').innerHTML`, context));
+    assert.match(detailHtml, /проект/);
+    assert.match(detailHtml, /вручную/);
+    assert.match(detailHtml, /Открыть/);
+}
+
 async function smokeProjectHardwarePersistenceAndBuckets(context) {
     context.__projectHardwareState = {
         checks: {
@@ -5514,6 +5571,7 @@ async function main() {
     await smokePackagingWarehouseSaveSync(context);
     await smokeWarehouseManualAdjustment(context);
     await smokeWarehouseAdjustmentPersistsWithoutBulkSave(context);
+    await smokeWarehouseReserveLabelsShowSource(context);
     await smokeProjectHardwarePersistenceAndBuckets(context);
     await smokeProjectHardwareToggleShortageGuard(context);
     await smokeProjectHardwareLegacyQtyAndStringIdDeduction(context);
