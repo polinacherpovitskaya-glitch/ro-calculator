@@ -5091,6 +5091,110 @@ async function smokeProjectHardwareLegacyAndCollectedNetting(context) {
     assert.equal(context.__reservations.length, 0);
 }
 
+async function smokeProjectHardwareExplicitActualReadySurvivesLegacyOnlyHistory(context) {
+    const order = {
+        id: 89,
+        order_name: 'Legacy Actual Qty Order',
+        manager_name: 'Склад',
+        status: 'production_hardware',
+        created_at: '2026-03-18T11:00:00.000Z',
+    };
+    const items = [{
+        item_type: 'hardware',
+        product_name: 'Legacy Actual Qty Hardware',
+        quantity: 5,
+        hardware_source: 'warehouse',
+        hardware_warehouse_item_id: 602,
+    }];
+
+    context.__projectHardwareState = { checks: { '89:602': true }, actual_qtys: { '89:602': 3 } };
+    context.__reservations = [{
+        id: 1,
+        item_id: 602,
+        order_id: 89,
+        order_name: 'Legacy Actual Qty Order',
+        qty: 5,
+        status: 'active',
+        source: 'project_hardware',
+        created_at: '2026-03-18T11:05:00.000Z',
+    }];
+    context.__warehouseItems = [{
+        id: 602,
+        name: 'Legacy Actual Qty Hardware',
+        sku: 'LAQ-1',
+        category: 'hardware',
+        qty: 17,
+        price_per_unit: 10,
+    }];
+    context.__warehouseHistory = [{
+        id: 1,
+        item_id: 602,
+        item_name: 'Legacy Actual Qty Hardware',
+        item_sku: 'LAQ-1',
+        item_category: 'hardware',
+        type: 'deduction',
+        qty_change: -5,
+        requested_qty_change: -5,
+        qty_before: 22,
+        qty_after: 17,
+        unit_price: 10,
+        total_cost_change: 50,
+        order_id: 89,
+        order_name: 'Legacy Actual Qty Order',
+        notes: 'Списание при смене статуса: Черновик → Производство: Фурнитура',
+        clamped: false,
+        created_at: '2026-03-18T11:06:00.000Z',
+        created_by: 'Smoke',
+    }];
+    context.__orderDetails = {
+        89: {
+            order: clone(order),
+            items: clone(items),
+        },
+    };
+    context.loadProjectHardwareState = async () => clone(context.__projectHardwareState);
+    context.saveProjectHardwareState = async (state) => {
+        context.__projectHardwareState = clone(state);
+    };
+    context.loadWarehouseReservations = async () => clone(context.__reservations);
+    context.saveWarehouseReservations = async (reservations) => {
+        context.__reservations = clone(reservations);
+    };
+    context.loadWarehouseItems = async () => clone(context.__warehouseItems);
+    context.saveWarehouseItems = async (itemsArg) => {
+        context.__warehouseItems = clone(itemsArg);
+    };
+    context.loadWarehouseHistory = async () => clone(context.__warehouseHistory);
+    context.saveWarehouseHistory = async (history) => {
+        context.__warehouseHistory = clone(history);
+    };
+    context.loadOrder = async (orderId) => clone(context.__orderDetails[Number(orderId)] || null);
+
+    vm.runInContext(`
+        Warehouse.projectHardwareState = null;
+        Warehouse.load = async () => {};
+    `, context);
+
+    await vm.runInContext(`Warehouse.syncProjectHardwareOrderState({
+        orderId: 89,
+        orderName: 'Legacy Actual Qty Order',
+        managerName: 'Smoke',
+        status: 'production_hardware',
+        currentItems: JSON.parse(${JSON.stringify(JSON.stringify(items))}),
+        previousItems: JSON.parse(${JSON.stringify(JSON.stringify(items))})
+    })`, context);
+
+    assert.equal(Boolean(context.__projectHardwareState.checks['89:602']), true);
+    assert.equal(context.__projectHardwareState.actual_qtys['89:602'], 3);
+    assert.equal(context.__warehouseItems[0].qty, 19);
+    assert.equal(context.__warehouseHistory.length, 3);
+    assert.equal(context.__warehouseHistory[1].project_hardware_flow, 'legacy_status_repair');
+    assert.equal(context.__warehouseHistory[1].qty_change, 5);
+    assert.equal(context.__warehouseHistory[2].project_hardware_flow, 'ready_delta');
+    assert.equal(context.__warehouseHistory[2].qty_change, -3);
+    assert.equal(context.__reservations.filter(item => Number(item.order_id) === 89 && item.status === 'active').length, 0);
+}
+
 async function smokeOrderDetailColorRendering(context) {
     const rendered = String(await vm.runInContext(`(() => {
         const rawProduct = {
@@ -5877,6 +5981,7 @@ async function main() {
     await smokeBlankHardwareFilterAndLowStockAlerts(context);
     await smokeProjectHardwareLegacyStatusRepair(context);
     await smokeProjectHardwareLegacyAndCollectedNetting(context);
+    await smokeProjectHardwareExplicitActualReadySurvivesLegacyOnlyHistory(context);
     await smokeWarehouseInventoryAuditDraftAndFinalize(context);
     await smokeWarehouseInventoryAuditSurplusAndDiffMath(context);
     await smokeWarehouseInventoryAuditEditRewritesAudit(context);

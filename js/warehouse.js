@@ -4159,6 +4159,7 @@ const Warehouse = {
 
     _computeProjectHardwareReadyState(orderId, itemId, requiredQty, history, historyDeltaMap) {
         const savedReady = this._isProjectHardwareReady(orderId, itemId);
+        const explicitActual = this._getProjectHardwareActualQty(orderId, itemId);
         const historicalTarget = this._getProjectHardwareHistoricalTargetQty(orderId, itemId, history, historyDeltaMap);
         const effectiveQty = historicalTarget !== null
             ? historicalTarget
@@ -4167,7 +4168,7 @@ const Warehouse = {
         if ((savedReady || historicalReady) && this._hasProjectHardwareClampedShortfall(orderId, itemId, effectiveQty, history, historyDeltaMap)) {
             return false;
         }
-        if (savedReady && !historicalReady && this._hasProjectHardwareLegacyOnlyEvidence(orderId, itemId, history)) {
+        if (savedReady && explicitActual === null && !historicalReady && this._hasProjectHardwareLegacyOnlyEvidence(orderId, itemId, history)) {
             return false;
         }
         return savedReady || historicalReady;
