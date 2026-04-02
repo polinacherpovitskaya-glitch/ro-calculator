@@ -16,6 +16,7 @@ const {
     pickAnyLinkedEmployee,
     buildInactiveBindingMessage,
 } = require('./timebot-employee-access');
+const { getStateTtlMs } = require('./timebot-state-utils');
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -93,7 +94,6 @@ process.on('unhandledRejection', (reason) => {
 // User state management (with auto-cleanup)
 // =============================================
 const userStates = {};
-const STATE_TTL = 30 * 60 * 1000; // 30 minutes
 let stateFlushTimer = null;
 let pendingRetryRunning = false;
 
@@ -120,7 +120,7 @@ function loadPersistedStates() {
     const now = Date.now();
     Object.entries(persisted || {}).forEach(([key, state]) => {
         if (!state || typeof state !== 'object') return;
-        if (now - (state._ts || 0) > STATE_TTL) return;
+        if (now - (state._ts || 0) > getStateTtlMs(state)) return;
         userStates[key] = state;
     });
 }
@@ -177,7 +177,7 @@ function ensureRuntimeFiles() {
 function cleanStaleStates() {
     const now = Date.now();
     for (const [key, state] of Object.entries(userStates)) {
-        if (now - (state._ts || 0) > STATE_TTL) {
+        if (now - (state._ts || 0) > getStateTtlMs(state)) {
             delete userStates[key];
         }
     }
@@ -737,6 +737,7 @@ function handleHoursEntry(chatId, telegramId, state, hours) {
         stage_label: state.current_stage_label,
         hours: cleanHours,
     });
+    scheduleStateFlush();
 
     const sessionHours = round2(state.entries.reduce((s, e) => s + e.hours, 0));
     const dayTotal = round2(state.existing_hours + sessionHours);
@@ -860,6 +861,7 @@ function askHours(chatId, state) {
 
 async function askDescription(chatId, state) {
     state.step = 'enter_description';
+    persistStates();
 
     const summary = state.entries
         .map(e => `${e.project_name} / ${e.stage_label} — ${e.hours}ч`)
