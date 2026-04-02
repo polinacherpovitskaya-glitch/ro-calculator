@@ -129,8 +129,13 @@
                 </div>
             </div>
 
-            <!-- Order info -->
-            <div class="card">
+            <!-- SECTION 1: О заказе -->
+            <div class="calc-section">
+                <div class="calc-section-header">
+                    <div class="calc-section-number">1</div>
+                    <span class="calc-section-title">О заказе</span>
+                </div>
+                <div class="calc-section-body">
                 <div class="form-row">
                     <div class="form-group">
                         <label>Название заказа</label>
@@ -217,40 +222,65 @@
                         </div>
                     </div>
                 </details>
-            </div>
+                </div><!-- /.calc-section-body -->
+            </div><!-- /.calc-section (1) -->
 
-            <!-- Item blocks container -->
-            <div id="calc-items-container"></div>
-
-            <div style="text-align:center; margin: 12px 0;">
-                <button class="btn btn-outline" id="calc-add-item-btn" onclick="Calculator.addItem()">+ Добавить изделие</button>
-            </div>
-
-            <!-- Pendant items -->
-            <div id="calc-pendants-container"></div>
-            <div style="text-align:center; margin: 8px 0;">
-                <button class="btn btn-outline" onclick="Pendant.openWizard()">+ Подвес из букв</button>
-            </div>
-
-            <!-- Hardware section (order-level, shared) -->
-            <div class="card">
-                <div class="card-header">
-                    <h3>🔩 Общая фурнитура</h3>
-                    <button class="btn btn-sm btn-outline" onclick="Calculator.addHardware()">+ Добавить</button>
+            <!-- SECTION 2: Изделия -->
+            <div class="calc-section calc-section-main">
+                <div class="calc-section-header">
+                    <div class="calc-section-number">2</div>
+                    <span class="calc-section-title">Изделия</span>
                 </div>
-                <p class="text-muted" style="font-size:12px; margin-bottom:8px">Фурнитура на весь заказ (не привязана к конкретному изделию)</p>
-                <div id="calc-hardware-list"></div>
-            </div>
 
-            <!-- Packaging section (order-level, shared) -->
-            <div class="card">
-                <div class="card-header">
-                    <h3>📦 Общая упаковка</h3>
-                    <button class="btn btn-sm btn-outline" onclick="Calculator.addPackaging()">+ Добавить</button>
+                <!-- Empty state (JS hides this when items exist) -->
+                <div id="calc-items-empty" class="calc-empty-state">
+                    <div class="calc-empty-state-icon">📦</div>
+                    <p>Добавьте изделие чтобы начать расчёт</p>
+                    <button class="btn btn-primary" onclick="Calculator.addItem()">+ Добавить изделие</button>
+                    <div style="margin-top:8px">
+                        <button class="btn btn-outline btn-sm" onclick="Pendant.openWizard()">или подвес из букв</button>
+                    </div>
                 </div>
-                <p class="text-muted" style="font-size:12px; margin-bottom:8px">Упаковка на весь заказ (общая коробка и т.д.)</p>
-                <div id="calc-packaging-list"></div>
-            </div>
+
+                <!-- Items container -->
+                <div id="calc-items-container" style="padding:0 16px"></div>
+
+                <!-- Pendant items -->
+                <div id="calc-pendants-container" style="padding:0 16px"></div>
+
+                <!-- Add button row (JS hides this when no items) -->
+                <div id="calc-items-add-row" style="padding:0 16px 16px;display:none">
+                    <button class="btn btn-outline" id="calc-add-item-btn" onclick="Calculator.addItem()" style="width:100%">+ Добавить изделие</button>
+                    <div style="text-align:center;margin-top:8px">
+                        <button class="btn btn-outline btn-sm" onclick="Pendant.openWizard()">+ Подвес из букв</button>
+                    </div>
+                </div>
+            </div><!-- /.calc-section (2) -->
+
+            <!-- SECTION 3: Фурнитура и упаковка -->
+            <div class="calc-section">
+                <div class="calc-section-header">
+                    <div class="calc-section-number">3</div>
+                    <span class="calc-section-title">Фурнитура и упаковка</span>
+                </div>
+                <div class="calc-section-body">
+
+                    <div class="card-header" style="margin-bottom:8px">
+                        <h3>🔩 Общая фурнитура</h3>
+                        <button class="btn btn-sm btn-outline" onclick="Calculator.addHardware()">+ Добавить</button>
+                    </div>
+                    <p class="text-muted" style="font-size:12px; margin-bottom:8px">Фурнитура на весь заказ (не привязана к конкретному изделию)</p>
+                    <div id="calc-hardware-list"></div>
+
+                    <div class="card-header" style="margin-top:20px;margin-bottom:8px">
+                        <h3>📦 Общая упаковка</h3>
+                        <button class="btn btn-sm btn-outline" onclick="Calculator.addPackaging()">+ Добавить</button>
+                    </div>
+                    <p class="text-muted" style="font-size:12px; margin-bottom:8px">Упаковка на весь заказ (общая коробка и т.д.)</p>
+                    <div id="calc-packaging-list"></div>
+
+                </div><!-- /.calc-section-body -->
+            </div><!-- /.calc-section (3) -->
 
             <!-- Extra income -->
             <div class="card" id="calc-extra-costs">
