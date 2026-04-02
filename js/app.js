@@ -1034,6 +1034,7 @@ const Calculator = {
         const pricingEl = document.getElementById('calc-pricing');
         if (pricingEl) pricingEl.style.display = 'none';
         document.getElementById('calc-add-item-btn').style.display = '';
+        this._updateItemsEmptyState();
         const historyEl = document.getElementById('calc-history');
         if (historyEl) historyEl.style.display = 'none';
         // Clear save indicator
@@ -3193,7 +3194,7 @@ const Calculator = {
     _updateItemsEmptyState() {
         const emptyEl = document.getElementById('calc-items-empty');
         const addRowEl = document.getElementById('calc-items-add-row');
-        const hasItems = this.items.length > 0 || (this.pendantItems && this.pendantItems.length > 0);
+        const hasItems = this.items.length > 0 || (this.pendants && this.pendants.length > 0);
         if (emptyEl) emptyEl.style.display = hasItems ? 'none' : '';
         if (addRowEl) addRowEl.style.display = hasItems ? '' : 'none';
     },
