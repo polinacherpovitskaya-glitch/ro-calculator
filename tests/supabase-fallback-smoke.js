@@ -260,6 +260,37 @@ async function main() {
         runScript(context, 'js/supabase.js');
 
         vm.runInContext(`
+            setLocal(LOCAL_KEYS.warehouseItems, [{
+                id: 7001,
+                name: 'Карабин',
+                sku: 'CR-SMOKE',
+                category: 'carabiners',
+                qty: 75,
+                reserved_qty: 0,
+                available_qty: 200,
+            }]);
+            setLocal(LOCAL_KEYS.warehouseReservations, [{
+                id: 1,
+                item_id: 7001,
+                order_id: 9001,
+                qty: 15,
+                status: 'active',
+                source: 'project_hardware',
+            }]);
+        `, context);
+
+        const hydratedWarehouse = JSON.parse(JSON.stringify(await vm.runInContext('loadWarehouseItems()', context)));
+        assert.equal(hydratedWarehouse.length, 1);
+        assert.equal(hydratedWarehouse[0].qty, 75);
+        assert.equal(hydratedWarehouse[0].reserved_qty, 15, 'warehouse load should rebuild reserved qty from live reservations');
+        assert.equal(hydratedWarehouse[0].available_qty, 60, 'warehouse load should not trust stale available qty from cached item_data');
+    }
+
+    {
+        const context = createContext();
+        runScript(context, 'js/supabase.js');
+
+        vm.runInContext(`
             setLocal(LOCAL_KEYS.orders, [{
                 id: 9001,
                 order_name: 'Legacy Local Order',

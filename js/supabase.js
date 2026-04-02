@@ -2801,6 +2801,35 @@ async function loadWarehouseItems() {
         }
         return normalized;
     };
+    const applyReservationSnapshot = async (items) => {
+        const normalizedItems = (Array.isArray(items) ? items : []).map(normalizeWarehouseItem);
+        let reservations = [];
+        try {
+            reservations = await loadWarehouseReservations();
+        } catch (error) {
+            console.warn('loadWarehouseItems: failed to load reservations snapshot', error);
+            reservations = [];
+        }
+        const activeReservedByItem = new Map();
+        (reservations || []).forEach(reservation => {
+            if (!reservation || reservation.status !== 'active') return;
+            const itemId = Number(reservation.item_id || 0);
+            if (!itemId) return;
+            activeReservedByItem.set(
+                itemId,
+                (activeReservedByItem.get(itemId) || 0) + (parseFloat(reservation.qty) || 0)
+            );
+        });
+        return normalizedItems.map(item => {
+            const qty = parseFloat(item && item.qty) || 0;
+            const reservedQty = activeReservedByItem.get(Number(item && item.id || 0)) || 0;
+            return {
+                ...item,
+                reserved_qty: reservedQty,
+                available_qty: Math.max(0, qty - reservedQty),
+            };
+        });
+    };
 
     if (isSupabaseReady()) {
         try {
@@ -2819,9 +2848,10 @@ async function loadWarehouseItems() {
                     }
                     return normalizeWarehouseItem(row);
                 });
+                const hydratedItems = await applyReservationSnapshot(items);
                 // Update localStorage backup
-                setLocal(LOCAL_KEYS.warehouseItems, items);
-                return items;
+                setLocal(LOCAL_KEYS.warehouseItems, hydratedItems);
+                return hydratedItems;
             }
 
             // One-time migration: localStorage → Supabase
@@ -2842,15 +2872,15 @@ async function loadWarehouseItems() {
                         }, { onConflict: 'id' });
                     } catch(e) { console.warn('WH item migration error:', e); }
                 }
-                return local.map(normalizeWarehouseItem);
+                return await applyReservationSnapshot(local);
             }
             return [];
         } catch(e) {
             console.error('loadWarehouseItems exception:', e);
-            return (getLocal(LOCAL_KEYS.warehouseItems) || []).map(normalizeWarehouseItem);
+            return await applyReservationSnapshot(getLocal(LOCAL_KEYS.warehouseItems) || []);
         }
     }
-    return (getLocal(LOCAL_KEYS.warehouseItems) || []).map(normalizeWarehouseItem);
+    return await applyReservationSnapshot(getLocal(LOCAL_KEYS.warehouseItems) || []);
 }
 
 async function saveWarehouseItem(item) {
