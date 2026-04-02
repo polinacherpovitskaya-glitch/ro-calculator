@@ -1037,6 +1037,100 @@ async _loadFactSummaries() {
         };
     },
 
+    async _applyCurrentPlanMaterialTotals(planBuild, rawItems = []) {
+        if (!planBuild || !planBuild.planData) return planBuild;
+
+        let warehouseItems = [];
+        try {
+            warehouseItems = (await loadWarehouseItems()) || [];
+        } catch (error) {
+            console.warn('Factual: failed to load warehouse items for current plan materials', error);
+            warehouseItems = [];
+        }
+        if (!warehouseItems.length) return planBuild;
+
+        const planItems = this._dedupePlanItems(rawItems || []);
+        if (!planItems.length) return planBuild;
+
+        const itemMap = new Map((warehouseItems || []).map(item => [Number(item.id || 0), item]));
+        const demandRows = this._collectWarehouseDemandRows(planItems, warehouseItems);
+        let hardwareWarehouseTotal = 0;
+        let packagingWarehouseTotal = 0;
+        let usedCurrentWarehouse = false;
+
+        (demandRows || []).forEach(row => {
+            const itemId = Number(row.warehouse_item_id || 0);
+            const qty = this._num(row.qty);
+            if (!itemId || qty <= 0) return;
+            const warehouseItem = itemMap.get(itemId) || null;
+            const unitPrice = this._num(warehouseItem?.price_per_unit);
+            const rowTotal = round2(qty * unitPrice);
+            const category = String(row.material_type || warehouseItem?.category || '').toLowerCase();
+            if (category === 'packaging') packagingWarehouseTotal += rowTotal;
+            else hardwareWarehouseTotal += rowTotal;
+            usedCurrentWarehouse = true;
+        });
+
+        let hardwareManualTotal = 0;
+        let packagingManualTotal = 0;
+        planItems.forEach(item => {
+            const type = String(item?.item_type || '').toLowerCase();
+            if (type !== 'hardware' && type !== 'packaging') return;
+            const source = String(item?.source || (type === 'hardware' ? item?.hardware_source : item?.packaging_source) || '').toLowerCase();
+            if (source === 'warehouse') return;
+            const qty = this._num(item?.quantity ?? item?.qty);
+            if (qty <= 0) return;
+            const unitPrice = type === 'hardware'
+                ? this._planItemCost(item, 'hardware_price_per_unit')
+                : this._planItemCost(item, 'packaging_price_per_unit');
+            const unitDelivery = type === 'hardware'
+                ? this._planItemCost(item, 'hardware_delivery_per_unit')
+                : this._planItemCost(item, 'packaging_delivery_per_unit');
+            const rowTotal = round2(qty * (unitPrice + unitDelivery));
+            if (type === 'packaging') packagingManualTotal += rowTotal;
+            else hardwareManualTotal += rowTotal;
+        });
+
+        if (!usedCurrentWarehouse && !hardwareManualTotal && !packagingManualTotal) return planBuild;
+
+        const planData = planBuild.planData;
+        const nextHardwareTotal = round2(hardwareWarehouseTotal + hardwareManualTotal);
+        const nextPackagingTotal = round2(packagingWarehouseTotal + packagingManualTotal);
+        planData.hardwareTotal = nextHardwareTotal;
+        planData.packagingTotal = nextPackagingTotal;
+
+        const recomputedTotalCosts = round2(
+            this._num(planData.salaryProduction) +
+            this._num(planData.salaryTrim) +
+            this._num(planData.salaryAssembly) +
+            this._num(planData.salaryPackaging) +
+            this._num(planData.indirectProduction) +
+            this._num(planData.hardwareTotal) +
+            this._num(planData.packagingTotal) +
+            this._num(planData.designPrinting) +
+            this._num(planData.plastic) +
+            this._num(planData.molds) +
+            this._num(planData.delivery) +
+            this._num(planData.taxes) +
+            this._num(planData.other)
+        );
+        planData.totalCosts = recomputedTotalCosts;
+        planData.planMarginPercent = planData.revenue > 0
+            ? round2(((this._num(planData.revenue) - recomputedTotalCosts) / this._num(planData.revenue)) * 100)
+            : 0;
+        planData.planEarned = round2(this._num(planData.revenue) - recomputedTotalCosts);
+
+        const planMeta = planBuild.planMeta || {};
+        planMeta.hardware_total = {
+            source: usedCurrentWarehouse ? 'current_warehouse' : 'manual_items',
+        };
+        planMeta.packaging_total = {
+            source: usedCurrentWarehouse ? 'current_warehouse' : 'manual_items',
+        };
+        planBuild.planMeta = planMeta;
+        return planBuild;
+    },
+
     // ==========================================
     // Auto-fact sources (same logic as before)
 
@@ -1093,7 +1187,9 @@ async _loadFactSummaries() {
 
         const params = App.params || {};
         const { order, items: rawItems } = orderData;
-        const { planData, planHours, planMeta } = this._buildPlan(order, rawItems || [], params);
+        const planBuild = this._buildPlan(order, rawItems || [], params);
+        await this._applyCurrentPlanMaterialTotals(planBuild, rawItems || []);
+        const { planData, planHours, planMeta } = planBuild;
         const factData = { ...(await loadFactual(orderId) || {}) };
 
         this._applyHoursFromEntries(factData, orderId, planHours, params, order);
@@ -1214,11 +1310,10 @@ async _loadFactSummaries() {
             }
 
             const ftMaterials = this._num(latest.fact_materials);
-            if (ftMaterials > 0) {
-                const plasticBase = this._num(planData?.plastic);
-                this._applyAutoFactValue(factData, 'fact_plastic', plasticBase + ftMaterials);
+            if (ftMaterials > 0 && this._num(planData?.plastic) <= 0) {
+                this._applyAutoFactValue(factData, 'fact_plastic', ftMaterials);
                 factData._auto_fintablo.fact_plastic = true;
-                this._setSourceHint(factData, 'fact_plastic', plasticBase > 0 ? 'план + ФинТабло' : 'ФинТабло');
+                this._setSourceHint(factData, 'fact_plastic', 'ФинТабло');
             }
 
             const ftRevenue = this._num(latest.fact_revenue);

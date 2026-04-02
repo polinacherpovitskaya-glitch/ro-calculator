@@ -68,6 +68,8 @@ function createContext() {
     context.loadFintabloImports = async () => context.__imports;
     context.loadWarehouseHistory = async () => context.__warehouseHistory;
     context.loadWarehouseItems = async () => context.__warehouseItems;
+    context.loadFactual = async () => ({});
+    context.loadOrder = async () => null;
     context.loadProjectHardwareState = async () => ({ checks: {}, actual_qtys: {} });
     context.window = context;
     return vm.createContext(context);
@@ -527,9 +529,71 @@ async function smokeLegacyStageDistributionAndMaterials(context) {
     assert.ok(Math.abs(fact.fact_salary_trim - 1666.67) < 0.05, 'trim salary should use employee rates and legacy split');
     assert.ok(Math.abs(fact.fact_salary_assembly - 2166.67) < 0.05, 'assembly salary should include explicit hourly entry with employee_id alias match');
     assert.equal(fact.fact_indirect_production, 1900, 'indirect should use full distributed hours total');
-    assert.equal(fact.fact_plastic, 3904, 'materials import should augment planned plastic cost instead of replacing it');
-    assert.equal(fact._source_hints.fact_plastic, 'план + ФинТабло');
+    assert.equal(fact.fact_plastic, 3553, 'planned plastic should stay intact when FinTablo materials should not overwrite it');
+    assert.equal(fact._source_hints.fact_plastic, 'план');
     assert.equal(fact._source_hints.fact_indirect_production, 'часы × косв./ч, legacy по плану');
+}
+
+async function smokeEnsureComputedOrderUsesCurrentWarehousePlanMaterials(context) {
+    context.__imports = [];
+    context.__warehouseItems = [
+        { id: 501, price_per_unit: 0.7, category: 'hardware' },
+        { id: 601, price_per_unit: 8, category: 'other' },
+    ];
+    context.App.params = {
+        fotPerHour: 10,
+        taxRate: 0.06,
+        vatRate: 0.05,
+        charityRate: 0.01,
+        indirectPerHour: 0,
+        wasteFactor: 1.1,
+    };
+    context.loadOrder = async () => ({
+        order: {
+            id: 91,
+            order_name: 'Current Price Order',
+            total_revenue_plan: 1000,
+            production_hours_hardware: 0,
+            production_hours_packaging: 0,
+        },
+        items: [
+            {
+                item_type: 'product',
+                quantity: 10,
+                cost_fot: 0,
+                cost_cutting: 0,
+                cost_indirect: 0,
+                cost_cutting_indirect: 0,
+                cost_plastic: 10,
+                cost_mold_amortization: 0,
+                cost_design: 0,
+                cost_printing: 0,
+                cost_delivery: 0,
+                cost_nfc_tag: 80,
+                is_blank_mold: true,
+                is_nfc: true,
+                nfc_warehouse_item_id: 601,
+            },
+            {
+                item_type: 'hardware',
+                product_name: 'Миланский шнур',
+                quantity: 10,
+                warehouse_item_id: 501,
+                hardware_source: 'warehouse',
+                hardware_price_per_unit: 70,
+                hardware_delivery_per_unit: 0,
+            },
+        ],
+    });
+    context.getProductWarehouseDemandRows = (item) => {
+        if (!item || !item.is_nfc) return [];
+        return [{ warehouse_item_id: 601, qty: Number(item.quantity) || 0, name: 'NFC', material_type: 'hardware' }];
+    };
+
+    const computed = await vm.runInContext(`(async () => Factual._ensureComputedOrder(91))()`, context);
+    assert.equal(computed.planData.hardwareTotal, 87, 'plan hardware should use current warehouse prices, not stale item snapshot prices');
+    assert.equal(computed.planData.totalCosts, 307, 'total plan cost should be recomputed after current material totals');
+    assert.equal(computed.planData.planEarned, 693, 'plan profit should follow recomputed current rows');
 }
 
 async function smokeWorkshopLegacyLeavesAssemblyExplicit(context) {
@@ -681,6 +745,7 @@ async function main() {
     await smokeLegacyStageDistributionAndMaterials(context);
     await smokeWorkshopLegacyLeavesAssemblyExplicit(context);
     await smokeWorkshopHardwareFactUsesProjectState(context);
+    await smokeEnsureComputedOrderUsesCurrentWarehousePlanMaterials(context);
     await smokeFactualRequestsFinTabloAutoSync(context);
     smokePeriodFilterUsesDeadlineAndFactLoad(context);
     console.log('factual smoke checks passed');
