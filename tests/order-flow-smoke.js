@@ -3188,6 +3188,70 @@ async function smokeProductNfcWarehouseDemandSync(context) {
     assert.deepEqual(dedupedCalcDemand, [[197, 12]]);
 }
 
+async function smokeProjectHardwareShortageDetailsForHiddenNfc(context) {
+    const order = {
+        id: 656,
+        order_name: 'NFC Shortage Order',
+        manager_name: 'Smoke',
+        status: 'production_hardware',
+        created_at: '2026-04-02T09:00:00.000Z',
+    };
+    const items = [{
+        item_type: 'product',
+        product_name: 'Карточка с NFC',
+        quantity: 12,
+        is_nfc: true,
+        nfc_programming: false,
+        nfc_warehouse_item_id: 197,
+    }];
+
+    context.__projectHardwareState = { checks: {}, actual_qtys: {} };
+    context.__reservations = [];
+    context.__warehouseItems = [{
+        id: 197,
+        name: 'NFC',
+        sku: 'NFC',
+        category: 'other',
+        qty: 5,
+        unit: 'шт',
+        price_per_unit: 8,
+    }];
+    context.__warehouseHistory = [];
+    context.__toasts = [];
+    context.loadProjectHardwareState = async () => clone(context.__projectHardwareState);
+    context.saveProjectHardwareState = async (state) => { context.__projectHardwareState = clone(state); };
+    context.loadWarehouseReservations = async () => clone(context.__reservations);
+    context.saveWarehouseReservations = async (reservations) => { context.__reservations = clone(reservations); };
+    context.loadWarehouseItems = async () => clone(context.__warehouseItems);
+    context.saveWarehouseItems = async (itemsArg) => { context.__warehouseItems = clone(itemsArg); };
+    context.loadWarehouseHistory = async () => clone(context.__warehouseHistory);
+    context.saveWarehouseHistory = async (history) => { context.__warehouseHistory = clone(history); };
+    context.loadOrder = async (orderId) => clone({ order: clone(order), items: clone(items) });
+
+    vm.runInContext(`
+        Warehouse.projectHardwareState = null;
+        Warehouse.load = async () => {};
+        App.toast = (msg) => { globalThis.__toasts.push(String(msg)); };
+    `, context);
+
+    const result = clone(await vm.runInContext(`Warehouse.syncProjectHardwareOrderState({
+        orderId: 656,
+        orderName: 'NFC Shortage Order',
+        managerName: 'Smoke',
+        status: 'production_hardware',
+        currentItems: JSON.parse(${JSON.stringify(JSON.stringify(items))}),
+        previousItems: []
+    })`, context));
+
+    assert.equal(result.shortage, true);
+    assert.equal(result.shortageRows.length, 1);
+    assert.equal(result.shortageRows[0].itemId, 197);
+    assert.match(result.shortageRows[0].name, /Карточка с NFC · NFC/);
+    assert.equal(result.shortageRows[0].requestedQty, 12);
+    assert.equal(result.shortageRows[0].availableQty, 5);
+    assert.match(String(context.__toasts[context.__toasts.length - 1] || ''), /Карточка с NFC · NFC/);
+}
+
 async function smokePackagingWarehouseSaveSync(context) {
     const currentItems = [{
         item_type: 'packaging',
@@ -3272,7 +3336,7 @@ async function smokePackagingWarehouseSaveSync(context) {
         assert.equal(sampleReservation.item_id, 501);
         assert.equal(sampleReservation.qty, 80);
         assert.equal(sampleReservation.source, 'project_hardware');
-        assert.ok(context.__toasts.some(message => /позиций со склада.*полный резерв/i.test(message)));
+        assert.ok(context.__toasts.some(message => /позиций со склада.*не встала.*80/i.test(message)));
     } finally {
         vm.runInContext(`
             delete globalThis.__currentPackagingItems;
@@ -5346,6 +5410,7 @@ async function main() {
     await smokeProductionPlanCompletedGuard(context);
     await smokePendantWarehouseDemandSync(context);
     await smokeProductNfcWarehouseDemandSync(context);
+    await smokeProjectHardwareShortageDetailsForHiddenNfc(context);
     await smokePackagingWarehouseSaveSync(context);
     await smokeWarehouseManualAdjustment(context);
     await smokeWarehouseAdjustmentPersistsWithoutBulkSave(context);

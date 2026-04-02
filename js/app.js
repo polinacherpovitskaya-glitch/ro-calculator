@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v212';
+const APP_VERSION = 'v213';
 
 const App = {
     currentPage: 'orders',
@@ -4435,29 +4435,41 @@ const Calculator = {
             // === Warehouse sync ===
             // Warehouse project sync now covers both hardware and packaging from stock:
             // reserve by order status, actual write-off only after warehouse marks the row as collected.
-            if (typeof Warehouse !== 'undefined' && Warehouse.syncProjectHardwareOrderState) {
-                await Warehouse.syncProjectHardwareOrderState({
-                    orderId,
-                    orderName: order.order_name,
-                    managerName: actorName,
-                    status: order.status,
-                    currentItems: items,
-                    previousItems: (oldData && oldData.items) || [],
-                });
-            } else {
-                // Legacy fallback if project warehouse sync is unavailable.
-                await this._syncWarehouseReservationsOnSave(
-                    orderId,
-                    order.order_name,
-                    actorName,
-                    order.status === 'sample',
-                    { hardware: false, packaging: true }
-                );
+            let warehouseSyncResult = null;
+            let warehouseSyncError = null;
+            try {
+                if (typeof Warehouse !== 'undefined' && Warehouse.syncProjectHardwareOrderState) {
+                    warehouseSyncResult = await Warehouse.syncProjectHardwareOrderState({
+                        orderId,
+                        orderName: order.order_name,
+                        managerName: actorName,
+                        status: order.status,
+                        currentItems: items,
+                        previousItems: (oldData && oldData.items) || [],
+                    });
+                } else {
+                    // Legacy fallback if project warehouse sync is unavailable.
+                    await this._syncWarehouseReservationsOnSave(
+                        orderId,
+                        order.order_name,
+                        actorName,
+                        order.status === 'sample',
+                        { hardware: false, packaging: true }
+                    );
+                }
+            } catch (error) {
+                warehouseSyncError = error;
+                console.error('[Calculator.saveOrder] warehouse sync failed:', error);
             }
+
             this._invalidateWhPickerContext();
             this._captureCommittedWhDemandSnapshot(orderId);
 
-            App.toast('Заказ сохранен');
+            if (warehouseSyncError) {
+                App.toast('Заказ сохранён, но склад не синхронизировался');
+            } else if (!warehouseSyncResult || !warehouseSyncResult.shortage) {
+                App.toast('Заказ сохранен');
+            }
         } else {
             App.toast('Ошибка сохранения');
         }

@@ -4552,12 +4552,21 @@ const Warehouse = {
 
     async syncProjectHardwareOrderState({ orderId, orderName, managerName, status, currentItems, previousItems }) {
         const normalizedOrderId = Number(orderId || 0);
-        if (!normalizedOrderId) return;
+        if (!normalizedOrderId) return { shortage: false, shortageRows: [], reservationsChanged: false, stateChanged: false };
 
         await this._ensureProjectHardwareStateLoaded();
 
+        const currentDemandRows = this._collectWarehouseDemandFromOrderItems(currentItems || []);
         const currentDemand = this._getProjectHardwareDemandMap(currentItems || []);
         const previousDemand = this._getProjectHardwareDemandMap(previousItems || []);
+        const currentDemandMeta = new Map(currentDemandRows.map(row => [
+            Number(row.warehouse_item_id || 0),
+            {
+                name: (Array.isArray(row.names) ? row.names.find(Boolean) : '') || 'Позиция со склада',
+                materialType: row.material_type || 'hardware',
+                plannedQty: parseFloat(row.qty) || 0,
+            },
+        ]));
         const itemIds = Array.from(new Set([
             ...Array.from(currentDemand.keys()),
             ...Array.from(previousDemand.keys()),
@@ -4571,7 +4580,7 @@ const Warehouse = {
                 status,
                 currentItems,
             });
-            return;
+            return { shortage: false, shortageRows: [], reservationsChanged: false, stateChanged: false };
         }
 
         const shouldReserve = this._isProjectHardwareReserveStatus(status);
@@ -4594,6 +4603,7 @@ const Warehouse = {
         const historyDeltaMap = this._buildProjectHardwareHistoryDeltaMap(effectiveHistory);
         let reservationsChanged = false;
         let shortage = false;
+        const shortageRows = [];
         let stateChanged = false;
 
         reservations.forEach(r => {
@@ -4649,6 +4659,16 @@ const Warehouse = {
                 });
                 if (!syncResult.ok) {
                     shortage = true;
+                    const whItem = warehouseById.get(itemId);
+                    const meta = currentDemandMeta.get(itemId) || {};
+                    shortageRows.push({
+                        itemId,
+                        name: meta.name || String(whItem?.name || 'Позиция со склада'),
+                        materialType: meta.materialType || 'hardware',
+                        requestedQty: round2(Math.max(0, targetQty - consumedQty)),
+                        availableQty: round2(Math.max(0, parseFloat(whItem?.qty || 0) || 0)),
+                        mode: 'consume',
+                    });
                 }
                 continue;
             }
@@ -4681,6 +4701,15 @@ const Warehouse = {
 
             if (reserveQty < currentQty) {
                 shortage = true;
+                const meta = currentDemandMeta.get(itemId) || {};
+                shortageRows.push({
+                    itemId,
+                    name: meta.name || String(whItem?.name || 'Позиция со склада'),
+                    materialType: meta.materialType || 'hardware',
+                    requestedQty: round2(currentQty),
+                    availableQty: round2(available),
+                    mode: 'reserve',
+                });
             }
         }
 
@@ -4718,7 +4747,12 @@ const Warehouse = {
         }
 
         if (shortage) {
-            App.toast('Часть позиций со склада не встала в полный резерв: недостаточно остатка');
+            const labels = shortageRows.slice(0, 3).map(row => {
+                const requested = row.requestedQty > 0 ? `нужно ${row.requestedQty}` : 'нужно > 0';
+                return `${row.name} (${requested}, доступно ${row.availableQty})`;
+            });
+            const suffix = shortageRows.length > 3 ? ` и ещё ${shortageRows.length - 3}` : '';
+            App.toast(`Часть позиций со склада не встала полностью: ${labels.join('; ')}${suffix}`);
         }
 
         await this._syncOrderMoldUsageState({
@@ -4728,6 +4762,7 @@ const Warehouse = {
             status,
             currentItems,
         });
+        return { shortage, shortageRows, reservationsChanged, stateChanged };
     },
 
     async renderProjectHardwareView(viewToken) {
