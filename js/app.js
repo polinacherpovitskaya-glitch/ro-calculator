@@ -1383,6 +1383,8 @@ const Calculator = {
                 </div>
             </div>
 
+            <details class="item-advanced-details" ${(item.base_mold_in_stock || item.complex_design || item.is_nfc || item.nfc_programming || item.delivery_included || !item.is_blank_mold) ? 'open' : ''}>
+                <summary class="item-advanced-summary">Дополнительно</summary>
             ${showCustomOnly ? `
             <div class="toggle-row">
                 <input type="checkbox" class="toggle" id="item-stock-mold-${idx}" ${item.base_mold_in_stock ? 'checked' : ''} onchange="Calculator.onToggle(${idx}, 'base_mold_in_stock', this.checked)">
@@ -1414,6 +1416,7 @@ const Calculator = {
                 <input type="checkbox" class="toggle" id="item-delivery-${idx}" ${item.delivery_included ? 'checked' : ''} onchange="Calculator.onToggle(${idx}, 'delivery_included', this.checked)">
                 <label for="item-delivery-${idx}">Доставка за наш счет (+${formatRub(App.settings.delivery_cost_moscow)})</label>
             </div>
+            </details>
 
             <!-- Нанесение (multiple) -->
             <div class="section-title">Нанесение</div>
