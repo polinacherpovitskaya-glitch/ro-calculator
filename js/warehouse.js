@@ -3365,9 +3365,11 @@ const Warehouse = {
         return true;
     },
 
-    _getProjectHardwareDisplayActualQty(orderId, itemId, plannedQty, historyDeltaMap) {
+    _getProjectHardwareDisplayActualQty(orderId, itemId, plannedQty, historyDeltaMap, history) {
         const explicit = this._getProjectHardwareActualQty(orderId, itemId);
         if (explicit !== null) return explicit;
+        const historicalTarget = this._getProjectHardwareHistoricalTargetQty(orderId, itemId, history, historyDeltaMap);
+        if (historicalTarget !== null) return historicalTarget;
         const consumedQty = this._getProjectHardwareConsumedQty(orderId, itemId, historyDeltaMap);
         if (consumedQty > 0) return round2(consumedQty);
         if (this._isProjectHardwareReady(orderId, itemId)) return round2(Math.max(0, parseFloat(plannedQty) || 0));
@@ -3429,6 +3431,7 @@ const Warehouse = {
                 {
                     order_id: Number(orderId || 0),
                     project_hardware_flow: flow,
+                    project_hardware_target_qty: normalizedTarget,
                 }
             );
             const appliedQty = Math.max(0, -(parseFloat(result && result.appliedQtyChange) || 0));
@@ -3444,6 +3447,7 @@ const Warehouse = {
                         {
                             order_id: Number(orderId || 0),
                             project_hardware_flow: 'ready_adjustment',
+                            project_hardware_target_qty: consumedQty,
                         }
                     );
                 }
@@ -3465,6 +3469,7 @@ const Warehouse = {
             {
                 order_id: Number(orderId || 0),
                 project_hardware_flow: flow,
+                project_hardware_target_qty: normalizedTarget,
             }
         );
         return { ok: true, changed: true, targetQty: normalizedTarget };
@@ -3533,6 +3538,7 @@ const Warehouse = {
                     {
                         order_id: normalizedOrderId,
                         project_hardware_flow: 'ready_toggle',
+                        project_hardware_target_qty: 0,
                     }
                 );
             }
@@ -3787,6 +3793,49 @@ const Warehouse = {
         return historyDeltaMap instanceof Map ? (parseFloat(historyDeltaMap.get(key)) || 0) : 0;
     },
 
+    _getProjectHardwareHistoricalTargetQty(orderId, itemId, history, historyDeltaMap) {
+        let latestEntry = null;
+        let latestStockEntry = null;
+        (history || []).forEach(entry => {
+            if (Number(entry.order_id || 0) !== Number(orderId || 0)) return;
+            if (Number(entry.item_id || 0) !== Number(itemId || 0)) return;
+            const flow = this._getProjectHardwareHistoryFlow(entry);
+            if (!this._isProjectHardwareStockHistoryFlow(flow)) return;
+            if (!latestStockEntry) {
+                latestStockEntry = entry;
+            } else {
+                const prevStockTs = new Date(latestStockEntry.created_at || 0).getTime();
+                const nextStockTs = new Date(entry.created_at || 0).getTime();
+                if (nextStockTs >= prevStockTs) latestStockEntry = entry;
+            }
+            if (!Object.prototype.hasOwnProperty.call(entry || {}, 'project_hardware_target_qty')) return;
+            if (!latestEntry) {
+                latestEntry = entry;
+                return;
+            }
+            const prevTs = new Date(latestEntry.created_at || 0).getTime();
+            const nextTs = new Date(entry.created_at || 0).getTime();
+            if (nextTs >= prevTs) latestEntry = entry;
+        });
+        if (latestEntry) {
+            const value = round2(Math.max(0, parseFloat(latestEntry.project_hardware_target_qty) || 0));
+            return Number.isFinite(value) ? value : null;
+        }
+
+        const consumedQty = this._getProjectHardwareConsumedQty(orderId, itemId, historyDeltaMap);
+        if (latestStockEntry && latestStockEntry.clamped) {
+            const applied = Math.abs(parseFloat(latestStockEntry.qty_change || 0) || 0);
+            const requested = Math.abs(parseFloat(latestStockEntry.requested_qty_change || 0) || 0);
+            if (requested > applied) {
+                return round2(consumedQty + (requested - applied));
+            }
+        }
+
+        // Backward compatibility for older collected rows: before explicit target metadata
+        // existed, the only durable signal was the net consumed stock history itself.
+        return consumedQty > 0 ? round2(consumedQty) : null;
+    },
+
     _getProjectHardwareConsumedQty(orderId, itemId, historyDeltaMap) {
         return Math.max(0, -this._getProjectHardwareHistoryNetDelta(orderId, itemId, historyDeltaMap));
     },
@@ -3844,8 +3893,11 @@ const Warehouse = {
         return hasLegacy && !hasValid;
     },
 
-    _isProjectHardwareHistoricallyReady(orderId, itemId, requiredQty, historyDeltaMap) {
-        const qty = parseFloat(requiredQty || 0) || 0;
+    _isProjectHardwareHistoricallyReady(orderId, itemId, requiredQty, historyDeltaMap, history) {
+        const historicalTarget = this._getProjectHardwareHistoricalTargetQty(orderId, itemId, history, historyDeltaMap);
+        const qty = historicalTarget !== null
+            ? historicalTarget
+            : (parseFloat(requiredQty || 0) || 0);
         if (!qty) return false;
         return this._getProjectHardwareConsumedQty(orderId, itemId, historyDeltaMap) >= (qty - 0.000001);
     },
@@ -3867,8 +3919,12 @@ const Warehouse = {
 
     _computeProjectHardwareReadyState(orderId, itemId, requiredQty, history, historyDeltaMap) {
         const savedReady = this._isProjectHardwareReady(orderId, itemId);
-        const historicalReady = this._isProjectHardwareHistoricallyReady(orderId, itemId, requiredQty, historyDeltaMap);
-        if (savedReady && this._hasProjectHardwareClampedShortfall(orderId, itemId, requiredQty, history, historyDeltaMap)) {
+        const historicalTarget = this._getProjectHardwareHistoricalTargetQty(orderId, itemId, history, historyDeltaMap);
+        const effectiveQty = historicalTarget !== null
+            ? historicalTarget
+            : (parseFloat(requiredQty || 0) || 0);
+        const historicalReady = this._isProjectHardwareHistoricallyReady(orderId, itemId, requiredQty, historyDeltaMap, history);
+        if ((savedReady || historicalReady) && this._hasProjectHardwareClampedShortfall(orderId, itemId, effectiveQty, history, historyDeltaMap)) {
             return false;
         }
         if (savedReady && !historicalReady && this._hasProjectHardwareLegacyOnlyEvidence(orderId, itemId, history)) {
@@ -4732,7 +4788,8 @@ const Warehouse = {
                     order.id,
                     d.warehouse_item_id,
                     plannedQty,
-                    historyDeltaMap
+                    historyDeltaMap,
+                    history || []
                 );
                 productionRows.push({
                     order_id: Number(order.id),

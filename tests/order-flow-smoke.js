@@ -3882,6 +3882,103 @@ async function smokeProjectHardwareReadySyncDoesNotAutoReturnConsumedStock(conte
     assert.equal(context.__reservations.filter(item => Number(item.order_id) === 654 && item.status === 'active').length, 0);
 }
 
+async function smokeProjectHardwareCollectedStateSurvivesStateLoss(context) {
+    const order = {
+        id: 655,
+        order_name: 'Collected State Recovery Order',
+        manager_name: 'Smoke',
+        status: 'production_hardware',
+        created_at: '2026-03-18T13:30:00.000Z',
+    };
+    const items = [{
+        item_type: 'hardware',
+        product_name: 'Recovered Hardware Qty',
+        quantity: 5,
+        hardware_source: 'warehouse',
+        hardware_warehouse_item_id: 903,
+    }];
+
+    context.__projectHardwareState = { checks: {}, actual_qtys: {} };
+    context.__reservations = [];
+    context.__warehouseItems = [{
+        id: 903,
+        name: 'Recovered Hardware Qty',
+        sku: 'RHQ-1',
+        category: 'hardware',
+        qty: 7,
+        unit: 'шт',
+        price_per_unit: 10,
+    }];
+    context.__warehouseHistory = [{
+        id: 1,
+        item_id: 903,
+        item_name: 'Recovered Hardware Qty',
+        item_sku: 'RHQ-1',
+        item_category: 'hardware',
+        type: 'deduction',
+        qty_change: -3,
+        requested_qty_change: -3,
+        qty_before: 10,
+        qty_after: 7,
+        unit_price: 10,
+        total_cost_change: 30,
+        order_id: 655,
+        order_name: 'Collected State Recovery Order',
+        notes: 'Списание собранной позиции со склада: 3 шт',
+        clamped: false,
+        created_at: '2026-03-18T13:35:00.000Z',
+        created_by: 'Smoke',
+    }];
+    context.__orderDetails = {
+        655: {
+            order: clone(order),
+            items: clone(items),
+        },
+    };
+    context.loadProjectHardwareState = async () => clone(context.__projectHardwareState);
+    context.saveProjectHardwareState = async (state) => {
+        context.__projectHardwareState = clone(state);
+    };
+    context.loadWarehouseReservations = async () => clone(context.__reservations);
+    context.saveWarehouseReservations = async (reservations) => {
+        context.__reservations = clone(reservations);
+    };
+    context.loadWarehouseItems = async () => clone(context.__warehouseItems);
+    context.saveWarehouseItems = async (itemsArg) => {
+        context.__warehouseItems = clone(itemsArg);
+    };
+    context.loadWarehouseHistory = async () => clone(context.__warehouseHistory);
+    context.saveWarehouseHistory = async (history) => {
+        context.__warehouseHistory = clone(history);
+    };
+    context.loadOrder = async (orderId) => clone(context.__orderDetails[Number(orderId)] || null);
+
+    vm.runInContext(`
+        Warehouse.projectHardwareState = null;
+        Warehouse.load = async () => {};
+    `, context);
+
+    await vm.runInContext(`Warehouse.syncProjectHardwareOrderState({
+        orderId: 655,
+        orderName: 'Collected State Recovery Order',
+        managerName: 'Smoke',
+        status: 'production_hardware',
+        currentItems: JSON.parse(${JSON.stringify(JSON.stringify(items))}),
+        previousItems: JSON.parse(${JSON.stringify(JSON.stringify(items))})
+    })`, context);
+
+    assert.equal(Boolean(context.__projectHardwareState.checks['655:903']), true);
+    assert.equal(context.__warehouseItems[0].qty, 7);
+    assert.equal(context.__warehouseHistory.length, 1);
+    assert.equal(context.__reservations.filter(item => Number(item.order_id) === 655 && item.status === 'active').length, 0);
+
+    const displayActual = vm.runInContext(`(() => {
+        const history = Warehouse._buildProjectHardwareHistoryDeltaMap(globalThis.__warehouseHistory);
+        return Warehouse._getProjectHardwareDisplayActualQty(655, 903, 5, history, globalThis.__warehouseHistory);
+    })()`, context);
+    assert.equal(displayActual, 3);
+}
+
 async function smokeCompletedOrderConsumesBlankMoldCapacity(context) {
     const orderItems = [{
         item_type: 'product',
@@ -5170,6 +5267,7 @@ async function main() {
     await smokeProjectHardwareLegacyQtyAndStringIdDeduction(context);
     await smokeProjectHardwareActualQtyEditableFlow(context);
     await smokeProjectHardwareReadySyncDoesNotAutoReturnConsumedStock(context);
+    await smokeProjectHardwareCollectedStateSurvivesStateLoss(context);
     await smokeCompletedOrderConsumesBlankMoldCapacity(context);
     await smokeMoldUsageThresholdCreatesTasksWithoutDuplicates(context);
     await smokeBlankHardwareFilterAndLowStockAlerts(context);
