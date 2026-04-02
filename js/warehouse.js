@@ -3551,6 +3551,17 @@ const Warehouse = {
         return round2(Math.max(0, parseFloat(plannedQty) || 0));
     },
 
+    _getProjectHardwareReservedQtyForOrderItem(reservations, orderId, itemId) {
+        return round2((reservations || [])
+            .filter(r =>
+                String(r && r.status || '') === 'active'
+                && Number(r && r.order_id || 0) === Number(orderId || 0)
+                && Number(r && r.item_id || 0) === Number(itemId || 0)
+                && this._isProjectHardwareReservationSource(r && r.source)
+            )
+            .reduce((sum, r) => sum + (parseFloat(r.qty) || 0), 0));
+    },
+
     _releaseProjectHardwareReservationsForRow(reservations, orderId, itemId, nowIso) {
         let changed = false;
         (reservations || []).forEach(r => {
@@ -3819,6 +3830,17 @@ const Warehouse = {
                 normalizedItemId,
                 nowIso
             ) || reservationsChanged;
+        } else if (this._isProjectHardwareReserveStatus(order.status) && plannedQty > 0) {
+            const syncResult = await this.syncProjectHardwareOrderState({
+                orderId: normalizedOrderId,
+                orderName: order.order_name || 'Заказ',
+                managerName,
+                status: order.status || '',
+                currentItems: data.items || [],
+                previousItems: data.items || [],
+            });
+            reservations = await loadWarehouseReservations();
+            reservationsChanged = reservationsChanged || !!syncResult.reservationsChanged;
         }
 
         if (stateChanged) {
@@ -4608,6 +4630,12 @@ const Warehouse = {
         demandRows.forEach(row => {
             const key = this._projectHardwareKey(row.order_id, row.item_id);
             trackedKeys.add(key);
+            row.target_qty = this._buildProjectHardwareTargetQty(
+                row.order_id,
+                row.item_id,
+                row.qty,
+                historyDeltaMap
+            );
             const isReady = this._computeProjectHardwareReadyState(row.order_id, row.item_id, row.qty, effectiveHistory, historyDeltaMap);
             row.ready = isReady;
             if (this._setProjectHardwareReadyFlag(row.order_id, row.item_id, isReady)) {
@@ -4670,14 +4698,16 @@ const Warehouse = {
 
         const warehouseById = new Map((this.allItems || []).map(item => [Number(item.id), item]));
         demandRows.forEach(row => {
-            if (row.ready || row.qty <= 0 || !this._isProjectHardwareReserveStatus(row.status)) return;
+            const plannedQty = round2(Math.max(0, parseFloat(row.qty) || 0));
+            const targetQty = round2(Math.max(0, parseFloat(row.target_qty ?? row.qty) || 0));
+            if (row.ready || plannedQty <= 0 || !this._isProjectHardwareReserveStatus(row.status)) return;
             const whItem = warehouseById.get(Number(row.item_id));
             if (!whItem) return;
 
             const stockQty = parseFloat(whItem.qty) || 0;
             const alreadyReserved = activeByItem.get(Number(row.item_id)) || 0;
             const available = Math.max(0, stockQty - alreadyReserved);
-            const reserveQty = Math.min(row.qty, available);
+            const reserveQty = Math.min(targetQty, available);
 
             if (reserveQty > 0) {
                 reservations.push({
@@ -4695,7 +4725,7 @@ const Warehouse = {
                 reservationsChanged = true;
             }
 
-            if (reserveQty < row.qty) {
+            if (reserveQty < targetQty) {
                 shortage = true;
             }
         });
@@ -4799,6 +4829,9 @@ const Warehouse = {
         for (const itemId of itemIds) {
             const currentQty = currentDemand.get(itemId) || 0;
             const previousQty = previousDemand.get(itemId) || 0;
+            const targetQty = currentQty > 0
+                ? this._buildProjectHardwareTargetQty(normalizedOrderId, itemId, currentQty, historyDeltaMap)
+                : 0;
             const isReady = currentQty > 0
                 ? this._computeProjectHardwareReadyState(normalizedOrderId, itemId, currentQty, effectiveHistory, historyDeltaMap)
                 : false;
@@ -4814,13 +4847,13 @@ const Warehouse = {
             if (isReady) {
                 const explicitActual = this._getProjectHardwareActualQty(normalizedOrderId, itemId);
                 const consumedQty = this._getProjectHardwareConsumedQty(normalizedOrderId, itemId, historyDeltaMap);
-                const targetQty = explicitActual !== null
+                const readyTargetQty = explicitActual !== null
                     ? explicitActual
                     : (consumedQty > 0 ? consumedQty : currentQty);
                 const syncResult = await this._syncProjectHardwareConsumedQty({
                     orderId: normalizedOrderId,
                     itemId,
-                    targetQty,
+                    targetQty: readyTargetQty,
                     orderName: orderName || 'Заказ',
                     managerName: managerName || '',
                     historyDeltaMap,
@@ -4834,7 +4867,7 @@ const Warehouse = {
                         itemId,
                         name: meta.name || String(whItem?.name || 'Позиция со склада'),
                         materialType: meta.materialType || 'hardware',
-                        requestedQty: round2(Math.max(0, targetQty - consumedQty)),
+                        requestedQty: round2(Math.max(0, readyTargetQty - consumedQty)),
                         availableQty: round2(Math.max(0, parseFloat(whItem?.qty || 0) || 0)),
                         mode: 'consume',
                     });
@@ -4850,7 +4883,7 @@ const Warehouse = {
             const stockQty = parseFloat(whItem.qty) || 0;
             const alreadyReserved = activeByItem.get(itemId) || 0;
             const available = Math.max(0, stockQty - alreadyReserved);
-            const reserveQty = Math.min(currentQty, available);
+            const reserveQty = Math.min(targetQty, available);
 
             if (reserveQty > 0) {
                 reservations.push({
@@ -4868,14 +4901,14 @@ const Warehouse = {
                 reservationsChanged = true;
             }
 
-            if (reserveQty < currentQty) {
+            if (reserveQty < targetQty) {
                 shortage = true;
                 const meta = currentDemandMeta.get(itemId) || {};
                 shortageRows.push({
                     itemId,
                     name: meta.name || String(whItem?.name || 'Позиция со склада'),
                     materialType: meta.materialType || 'hardware',
-                    requestedQty: round2(currentQty),
+                    requestedQty: round2(targetQty),
                     availableQty: round2(available),
                     mode: 'reserve',
                 });

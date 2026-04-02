@@ -51,6 +51,7 @@ const OrderDetail = {
         this.renderProductionTab();
         this.renderFilesTab();
         this.renderItemsTab();
+        await this.renderHardwareTab();
         await this.renderTasksTab();
         this.renderChinaTab();
 
@@ -73,6 +74,9 @@ const OrderDetail = {
         document.querySelectorAll('.od-tab-content').forEach(c => {
             c.style.display = c.id === 'od-tab-' + tab ? '' : 'none';
         });
+        if (tab === 'hardware') {
+            void this.renderHardwareTab();
+        }
     },
 
     // ==========================================
@@ -351,6 +355,197 @@ const OrderDetail = {
         }
 
         container.innerHTML = html;
+    },
+
+    async renderHardwareTab() {
+        const container = document.getElementById('od-tab-hardware');
+        if (!container || !this.currentOrder) return;
+
+        const orderId = Number(this.currentOrder.id || 0);
+        if (!orderId) {
+            container.innerHTML = '<div class="empty-state"><p>Заказ не найден</p></div>';
+            return;
+        }
+
+        container.innerHTML = `<div class="card"><p class="text-muted" style="padding:16px">Загружаем фурнитуру заказа…</p></div>`;
+
+        try {
+            await Warehouse._ensureProjectHardwareStateLoaded();
+            const [warehouseItems, reservations, history] = await Promise.all([
+                loadWarehouseItems(),
+                loadWarehouseReservations(),
+                loadWarehouseHistory(),
+            ]);
+
+            Warehouse.allItems = Array.isArray(warehouseItems) ? warehouseItems : [];
+            Warehouse.allReservations = Array.isArray(reservations) ? reservations : [];
+
+            const byItemId = new Map((warehouseItems || []).map(item => [Number(item.id), item]));
+            const historyDeltaMap = Warehouse._buildProjectHardwareHistoryDeltaMap(history || []);
+            const demandRows = Warehouse._collectWarehouseDemandFromOrderItems(this.currentItems || []);
+            const activeReservations = reservations || [];
+
+            if (!demandRows.length) {
+                container.innerHTML = `
+                    <div class="card">
+                        <div class="empty-state">
+                            <div class="empty-icon">&#128295;</div>
+                            <p>В заказе пока нет складской фурнитуры или упаковки.</p>
+                            <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;">
+                                <button class="btn btn-outline btn-sm" onclick="OrderDetail.openInCalculator()">Открыть в калькуляторе</button>
+                                <button class="btn btn-outline btn-sm" onclick="Warehouse.setView('project-hardware'); App.navigate('warehouse')">Открыть фурнитуру для проектов</button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                return;
+            }
+
+            const rows = demandRows
+                .map(row => {
+                    const itemId = Number(row.warehouse_item_id || 0);
+                    const whItem = byItemId.get(itemId) || {};
+                    const plannedQty = round2(Math.max(0, parseFloat(row.qty) || 0));
+                    const targetQty = Warehouse._buildProjectHardwareTargetQty(orderId, itemId, plannedQty, historyDeltaMap);
+                    const actualQty = Warehouse._getProjectHardwareDisplayActualQty(orderId, itemId, plannedQty, historyDeltaMap, history || []);
+                    const ready = Warehouse._computeProjectHardwareReadyState(orderId, itemId, plannedQty, history || [], historyDeltaMap);
+                    const currentReserveQty = Warehouse._getProjectHardwareReservedQtyForOrderItem(activeReservations, orderId, itemId);
+                    const totalReservedQty = round2(Warehouse._getActiveReservationsForItem(itemId)
+                        .reduce((sum, reservation) => sum + (parseFloat(reservation.qty) || 0), 0));
+                    const stockQty = round2(parseFloat(whItem.qty || 0) || 0);
+                    const availableQty = Math.max(0, round2(stockQty - totalReservedQty));
+                    const reserveHint = ready
+                        ? 'Уже собрано'
+                        : (Math.abs(currentReserveQty - targetQty) <= 0.000001
+                            ? 'Резерв совпадает'
+                            : (currentReserveQty < targetQty ? 'Резерв неполный' : 'Резерв скорректирован'));
+                    return {
+                        itemId,
+                        itemName: whItem.name || (Array.isArray(row.names) ? row.names.find(Boolean) : '') || 'Позиция со склада',
+                        itemSku: whItem.sku || '',
+                        itemKind: Warehouse._projectSupplyKindLabel(row.material_type || whItem.category || 'hardware'),
+                        plannedQty,
+                        targetQty,
+                        actualQty,
+                        ready,
+                        currentReserveQty,
+                        availableQty,
+                        reserveHint,
+                    };
+                })
+                .sort((a, b) => String(a.itemName).localeCompare(String(b.itemName), 'ru'));
+
+            const totalPlanned = round2(rows.reduce((sum, row) => sum + row.plannedQty, 0));
+            const totalTarget = round2(rows.reduce((sum, row) => sum + row.targetQty, 0));
+            const totalReserved = round2(rows.reduce((sum, row) => sum + row.currentReserveQty, 0));
+            const totalReady = rows.filter(row => row.ready).length;
+
+            container.innerHTML = `
+                <div class="card" style="margin-bottom:12px;">
+                    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;">
+                        <div>
+                            <h3 style="margin:0 0 6px;">Фурнитура и упаковка заказа</h3>
+                            <div class="text-muted" style="font-size:13px;">
+                                Меняйте здесь фактическое количество и сборку по заказу. Резерв на складе пересчитается автоматически.
+                            </div>
+                        </div>
+                        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                            <button class="btn btn-outline btn-sm" onclick="OrderDetail.openInCalculator()">Открыть в калькуляторе</button>
+                            <button class="btn btn-outline btn-sm" onclick="Warehouse.setView('project-hardware'); App.navigate('warehouse')">Открыть на складе</button>
+                        </div>
+                    </div>
+                    <div class="stats-grid" style="margin-top:12px;">
+                        <div class="stat-card"><div class="stat-label">Позиций</div><div class="stat-value">${rows.length}</div></div>
+                        <div class="stat-card"><div class="stat-label">План</div><div class="stat-value">${totalPlanned} шт</div></div>
+                        <div class="stat-card"><div class="stat-label">Факт / цель</div><div class="stat-value">${totalTarget} шт</div></div>
+                        <div class="stat-card"><div class="stat-label">В резерве</div><div class="stat-value">${totalReserved} шт</div></div>
+                        <div class="stat-card"><div class="stat-label">Собрано</div><div class="stat-value">${totalReady} / ${rows.length}</div></div>
+                    </div>
+                </div>
+
+                <div class="card" style="padding:0;">
+                    <div class="table-wrap">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Комплектующая</th>
+                                    <th class="text-right">План</th>
+                                    <th class="text-right">Резерв</th>
+                                    <th class="text-right">Факт</th>
+                                    <th class="text-right">Доступно сейчас</th>
+                                    <th>Собрано</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${rows.map(row => `
+                                    <tr>
+                                        <td>
+                                            <div style="font-weight:600;">${this._esc(row.itemName)}</div>
+                                            <div style="font-size:11px;color:var(--text-muted);">${this._esc(row.itemKind)}</div>
+                                            ${row.itemSku ? `<div style="font-size:11px;color:var(--text-muted);">${this._esc(row.itemSku)}</div>` : ''}
+                                        </td>
+                                        <td class="text-right" style="font-weight:700;">${row.plannedQty}</td>
+                                        <td class="text-right">
+                                            <div style="font-weight:700;">${row.currentReserveQty}</div>
+                                            <div style="font-size:11px;color:var(--text-muted);">${this._esc(row.reserveHint)}</div>
+                                        </td>
+                                        <td class="text-right">
+                                            <input
+                                                type="number"
+                                                min="0"
+                                                step="0.01"
+                                                value="${row.actualQty === null || row.actualQty === undefined ? '' : row.actualQty}"
+                                                placeholder="${row.plannedQty}"
+                                                style="width:96px;text-align:right;"
+                                                onblur="OrderDetail.setProjectHardwareActualQty(${row.itemId}, this.value)"
+                                                onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}"
+                                            >
+                                            <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">если пусто — по плану</div>
+                                        </td>
+                                        <td class="text-right" style="font-weight:700;">${row.availableQty}</td>
+                                        <td>
+                                            <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;">
+                                                <input type="checkbox" ${row.ready ? 'checked' : ''} onchange="OrderDetail.toggleProjectHardwareReady(${row.itemId}, this.checked)">
+                                                <span style="font-size:12px;color:var(--text-secondary);">собрано</span>
+                                            </label>
+                                        </td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+        } catch (error) {
+            console.error('renderHardwareTab error', error);
+            container.innerHTML = `
+                <div class="card">
+                    <p class="text-muted" style="padding:16px;">Не удалось загрузить фурнитуру заказа.</p>
+                </div>
+            `;
+        }
+    },
+
+    async setProjectHardwareActualQty(itemId, rawValue) {
+        if (!this.currentOrder) return;
+        await Warehouse.setProjectHardwareActualQty(this.currentOrder.id, itemId, rawValue);
+        const data = await loadOrder(this.currentOrder.id);
+        if (data && data.order) {
+            this.currentOrder = data.order;
+            this.currentItems = data.items || [];
+        }
+        await this.renderHardwareTab();
+    },
+
+    async toggleProjectHardwareReady(itemId, checked) {
+        if (!this.currentOrder) return;
+        await Warehouse.toggleProjectHardwareReady(this.currentOrder.id, itemId, checked);
+        const data = await loadOrder(this.currentOrder.id);
+        if (data && data.order) {
+            this.currentOrder = data.order;
+            this.currentItems = data.items || [];
+        }
+        await this.renderHardwareTab();
     },
 
     _renderPendantDetail(pnd, dbItem) {
@@ -809,6 +1004,7 @@ const OrderDetail = {
             info: () => this.renderInfoTab(),
             production: () => this.renderProductionTab(),
             files: () => this.renderFilesTab(),
+            hardware: () => this.renderHardwareTab(),
         };
         if (tabRenderers[this.currentTab]) tabRenderers[this.currentTab]();
         if (['payment_status'].includes(field)) this.renderStats();
@@ -839,6 +1035,7 @@ const OrderDetail = {
                 info: () => this.renderInfoTab(),
                 production: () => this.renderProductionTab(),
                 files: () => this.renderFilesTab(),
+                hardware: () => this.renderHardwareTab(),
             };
             if (tabRenderers[this.currentTab]) tabRenderers[this.currentTab]();
         }

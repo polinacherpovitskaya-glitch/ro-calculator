@@ -4179,7 +4179,8 @@ async function smokeProjectHardwareActualQtyEditableFlow(context) {
     assert.equal(Boolean(context.__projectHardwareState.checks['321:901']), false);
     assert.equal(context.__warehouseItems[0].qty, 10);
     assert.equal(context.__warehouseHistory.length, 0);
-    assert.equal(context.__reservations[0].status, 'active');
+    const adjustedReservation = context.__reservations.find(item => Number(item.order_id) === 321 && item.status === 'active');
+    assert.equal(adjustedReservation.qty, 3);
 
     await vm.runInContext(`Warehouse.toggleProjectHardwareReady(321, 901, true)`, context);
 
@@ -4216,6 +4217,93 @@ async function smokeProjectHardwareActualQtyEditableFlow(context) {
     assert.equal(context.__warehouseHistory[3].qty_change, 5);
     const restoredReservation = context.__reservations.find(item => Number(item.order_id) === 321 && item.status === 'active');
     assert.equal(restoredReservation.qty, 5);
+}
+
+async function smokeOrderDetailHardwareTabShowsAndEditsProjectHardware(context) {
+    const order = {
+        id: 777,
+        order_name: 'Order Detail Hardware',
+        manager_name: 'Smoke',
+        status: 'production_hardware',
+        created_at: '2026-03-18T12:00:00.000Z',
+        total_revenue_plan: 0,
+        margin_percent_plan: 0,
+        total_hours_plan: 0,
+        payment_status: 'not_sent',
+    };
+    const detail = {
+        order: clone(order),
+        items: [{
+            item_type: 'hardware',
+            product_name: 'Card Hardware',
+            quantity: 5,
+            hardware_source: 'warehouse',
+            hardware_warehouse_item_id: 915,
+        }],
+    };
+
+    context.__projectHardwareState = { checks: {}, actual_qtys: { '777:915': 3 } };
+    context.__reservations = [{
+        id: 1,
+        item_id: 915,
+        order_id: 777,
+        order_name: 'Order Detail Hardware',
+        qty: 3,
+        status: 'active',
+        source: 'project_hardware',
+        created_at: '2026-03-18T12:00:00.000Z',
+    }];
+    context.__warehouseItems = [{
+        id: 915,
+        name: 'Трос',
+        sku: 'TR-050-WH',
+        category: 'hardware',
+        qty: 10,
+        unit: 'шт',
+        price_per_unit: 5,
+    }];
+    context.__warehouseHistory = [];
+    context.__orderDetails = { 777: clone(detail) };
+    context.loadProjectHardwareState = async () => clone(context.__projectHardwareState);
+    context.saveProjectHardwareState = async (state) => {
+        context.__projectHardwareState = clone(state);
+    };
+    context.loadWarehouseReservations = async () => clone(context.__reservations);
+    context.saveWarehouseReservations = async (reservations) => {
+        context.__reservations = clone(reservations);
+    };
+    context.loadWarehouseItems = async () => clone(context.__warehouseItems);
+    context.saveWarehouseItems = async (items) => {
+        context.__warehouseItems = clone(items);
+    };
+    context.loadWarehouseHistory = async () => clone(context.__warehouseHistory);
+    context.saveWarehouseHistory = async (history) => {
+        context.__warehouseHistory = clone(history);
+    };
+    context.loadOrder = async (orderId) => clone(context.__orderDetails[Number(orderId)] || null);
+
+    vm.runInContext(`
+        App.toast = () => {};
+        Warehouse.projectHardwareState = null;
+        Warehouse.load = async () => {};
+        OrderDetail.currentOrder = ${JSON.stringify(order)};
+        OrderDetail.currentItems = ${JSON.stringify(detail.items)};
+    `, context);
+
+    await vm.runInContext(`OrderDetail.renderHardwareTab()`, context);
+
+    const html = String(vm.runInContext(`document.getElementById('od-tab-hardware').innerHTML`, context));
+    assert.match(html, /Фурнитура и упаковка заказа/i);
+    assert.match(html, /Трос/);
+    assert.match(html, /TR-050-WH/);
+    assert.match(html, /Резерв совпадает/);
+    assert.match(html, /value="3"/);
+
+    await vm.runInContext(`OrderDetail.setProjectHardwareActualQty(915, '4')`, context);
+
+    assert.equal(context.__projectHardwareState.actual_qtys['777:915'], 4);
+    const activeReservation = context.__reservations.find(item => Number(item.order_id) === 777 && item.status === 'active');
+    assert.equal(activeReservation.qty, 4);
 }
 
 async function smokeProjectHardwareReadySyncDoesNotAutoReturnConsumedStock(context) {
@@ -5705,6 +5793,7 @@ async function main() {
     await smokeProjectHardwareToggleShortageGuard(context);
     await smokeProjectHardwareLegacyQtyAndStringIdDeduction(context);
     await smokeProjectHardwareActualQtyEditableFlow(context);
+    await smokeOrderDetailHardwareTabShowsAndEditsProjectHardware(context);
     await smokeProjectHardwareReadySyncDoesNotAutoReturnConsumedStock(context);
     await smokeProjectHardwareCollectedStateSurvivesStateLoss(context);
     await smokeCompletedOrderConsumesBlankMoldCapacity(context);
