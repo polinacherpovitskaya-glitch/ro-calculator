@@ -3562,6 +3562,35 @@ const Warehouse = {
             .reduce((sum, r) => sum + (parseFloat(r.qty) || 0), 0));
     },
 
+    _getProjectHardwareBlockingReservations(reservations, currentOrderId, itemId) {
+        const grouped = new Map();
+        (reservations || []).forEach(r => {
+            if (String(r && r.status || '') !== 'active') return;
+            if (!this._isProjectHardwareReservationSource(r && r.source)) return;
+            if (Number(r && r.item_id || 0) !== Number(itemId || 0)) return;
+            if (Number(r && r.order_id || 0) === Number(currentOrderId || 0)) return;
+            const key = String(r.order_id || '') || `manual:${r.id || ''}`;
+            const current = grouped.get(key) || {
+                orderId: Number(r.order_id || 0) || null,
+                orderName: String(r.order_name || '').trim() || 'другой заказ',
+                qty: 0,
+            };
+            current.qty += parseFloat(r.qty) || 0;
+            grouped.set(key, current);
+        });
+        return Array.from(grouped.values())
+            .map(entry => ({ ...entry, qty: round2(entry.qty) }))
+            .sort((a, b) => (b.qty || 0) - (a.qty || 0));
+    },
+
+    _formatProjectHardwareBlockers(blockers) {
+        const list = Array.isArray(blockers) ? blockers.filter(Boolean) : [];
+        if (!list.length) return '';
+        const head = list.slice(0, 2).map(entry => `${entry.orderName} — ${entry.qty} шт`);
+        const suffix = list.length > 2 ? `; +ещё ${list.length - 2}` : '';
+        return `; занято: ${head.join('; ')}${suffix}`;
+    },
+
     _releaseProjectHardwareReservationsForRow(reservations, orderId, itemId, nowIso) {
         let changed = false;
         (reservations || []).forEach(r => {
@@ -4863,6 +4892,7 @@ const Warehouse = {
                     shortage = true;
                     const whItem = warehouseById.get(itemId);
                     const meta = currentDemandMeta.get(itemId) || {};
+                    const blockers = this._getProjectHardwareBlockingReservations(reservations, normalizedOrderId, itemId);
                     shortageRows.push({
                         itemId,
                         name: meta.name || String(whItem?.name || 'Позиция со склада'),
@@ -4870,6 +4900,7 @@ const Warehouse = {
                         requestedQty: round2(Math.max(0, readyTargetQty - consumedQty)),
                         availableQty: round2(Math.max(0, parseFloat(whItem?.qty || 0) || 0)),
                         mode: 'consume',
+                        blockers,
                     });
                 }
                 continue;
@@ -4904,6 +4935,7 @@ const Warehouse = {
             if (reserveQty < targetQty) {
                 shortage = true;
                 const meta = currentDemandMeta.get(itemId) || {};
+                const blockers = this._getProjectHardwareBlockingReservations(reservations, normalizedOrderId, itemId);
                 shortageRows.push({
                     itemId,
                     name: meta.name || String(whItem?.name || 'Позиция со склада'),
@@ -4911,6 +4943,7 @@ const Warehouse = {
                     requestedQty: round2(targetQty),
                     availableQty: round2(available),
                     mode: 'reserve',
+                    blockers,
                 });
             }
         }
@@ -4951,7 +4984,7 @@ const Warehouse = {
         if (shortage) {
             const labels = shortageRows.slice(0, 3).map(row => {
                 const requested = row.requestedQty > 0 ? `нужно ${row.requestedQty}` : 'нужно > 0';
-                return `${row.name} (${requested}, доступно ${row.availableQty})`;
+                return `${row.name} (${requested}, доступно ${row.availableQty}${this._formatProjectHardwareBlockers(row.blockers)})`;
             });
             const suffix = shortageRows.length > 3 ? ` и ещё ${shortageRows.length - 3}` : '';
             App.toast(`Часть позиций со склада не встала полностью: ${labels.join('; ')}${suffix}`);

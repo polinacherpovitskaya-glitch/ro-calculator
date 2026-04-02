@@ -3349,6 +3349,81 @@ async function smokeProjectHardwareShortageDetailsForHiddenNfc(context) {
     assert.match(String(context.__toasts[context.__toasts.length - 1] || ''), /Карточка с NFC · NFC/);
 }
 
+async function smokeProjectHardwareShortageDetailsShowBlockingOrders(context) {
+    const order = {
+        id: 777,
+        order_name: 'Workshop MTS',
+        manager_name: 'Smoke',
+        status: 'production_hardware',
+        created_at: '2026-04-02T09:00:00.000Z',
+    };
+    const items = [{
+        item_type: 'hardware',
+        product_name: 'Тросы · 5 см · белые',
+        quantity: 100,
+        hardware_source: 'warehouse',
+        hardware_warehouse_item_id: 197,
+        hardware_warehouse_sku: 'TR-050-WH',
+    }];
+
+    context.__projectHardwareState = { checks: {}, actual_qtys: { '777:197': 100 } };
+    context.__reservations = [{
+        id: 1,
+        item_id: 197,
+        order_id: 888,
+        order_name: 'брелки Лемана Про',
+        qty: 40,
+        status: 'active',
+        source: 'project_hardware',
+        created_at: '2026-04-02T10:00:00.000Z',
+        created_by: 'Smoke',
+    }];
+    context.__warehouseItems = [{
+        id: 197,
+        name: 'Тросы',
+        sku: 'TR-050-WH',
+        category: 'cables',
+        qty: 100,
+        unit: 'шт',
+        price_per_unit: 5,
+    }];
+    context.__warehouseHistory = [];
+    context.__toasts = [];
+    context.loadProjectHardwareState = async () => clone(context.__projectHardwareState);
+    context.saveProjectHardwareState = async (state) => { context.__projectHardwareState = clone(state); };
+    context.loadWarehouseReservations = async () => clone(context.__reservations);
+    context.saveWarehouseReservations = async (reservations) => { context.__reservations = clone(reservations); };
+    context.loadWarehouseItems = async () => clone(context.__warehouseItems);
+    context.saveWarehouseItems = async (itemsArg) => { context.__warehouseItems = clone(itemsArg); };
+    context.loadWarehouseHistory = async () => clone(context.__warehouseHistory);
+    context.saveWarehouseHistory = async (history) => { context.__warehouseHistory = clone(history); };
+    context.loadOrder = async () => clone({ order: clone(order), items: clone(items) });
+
+    vm.runInContext(`
+        Warehouse.projectHardwareState = null;
+        Warehouse.load = async () => {};
+        App.toast = (msg) => { globalThis.__toasts.push(String(msg)); };
+    `, context);
+
+    const result = clone(await vm.runInContext(`Warehouse.syncProjectHardwareOrderState({
+        orderId: 777,
+        orderName: 'Workshop MTS',
+        managerName: 'Smoke',
+        status: 'production_hardware',
+        currentItems: JSON.parse(${JSON.stringify(JSON.stringify(items))}),
+        previousItems: []
+    })`, context));
+
+    assert.equal(result.shortage, true);
+    assert.equal(result.shortageRows.length, 1);
+    assert.equal(result.shortageRows[0].itemId, 197);
+    assert.equal(result.shortageRows[0].requestedQty, 100);
+    assert.equal(result.shortageRows[0].availableQty, 60);
+    assert.equal(result.shortageRows[0].blockers[0].orderName, 'брелки Лемана Про');
+    assert.equal(result.shortageRows[0].blockers[0].qty, 40);
+    assert.match(String(context.__toasts[context.__toasts.length - 1] || ''), /брелки Лемана Про/);
+}
+
 async function smokePackagingWarehouseSaveSync(context) {
     const currentItems = [{
         item_type: 'packaging',
@@ -5783,6 +5858,7 @@ async function main() {
     await smokePendantWarehouseDemandSync(context);
     await smokeProductNfcWarehouseDemandSync(context);
     await smokeProjectHardwareShortageDetailsForHiddenNfc(context);
+    await smokeProjectHardwareShortageDetailsShowBlockingOrders(context);
     await smokePackagingWarehouseSaveSync(context);
     await smokeWarehouseManualAdjustment(context);
     await smokeWarehouseAdjustmentPersistsWithoutBulkSave(context);
