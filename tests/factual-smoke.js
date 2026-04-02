@@ -68,6 +68,7 @@ function createContext() {
     context.loadFintabloImports = async () => context.__imports;
     context.loadWarehouseHistory = async () => context.__warehouseHistory;
     context.loadWarehouseItems = async () => context.__warehouseItems;
+    context.loadProjectHardwareState = async () => ({ checks: {}, actual_qtys: {} });
     context.window = context;
     return vm.createContext(context);
 }
@@ -247,7 +248,7 @@ function smokeBuildPlanUsesSavedSnapshotCostsAndDedupedHardware(context) {
     assert.equal(result.planData.hardwareTotal, 50, 'duplicate hardware rows should be collapsed in plan costs');
     assert.equal(result.planHours.hoursHardware, 1, 'saved order assembly hours should win over duplicated hardware norm noise');
     assert.equal(result.planData.salaryAssembly, 10, 'assembly salary should follow saved order hours');
-    assert.equal(result.planData.taxes, 10, 'balance remainder should land in taxes when saved total is authoritative');
+    assert.equal(result.planData.taxes, 24, 'taxes should be recomputed from current revenue settings');
     assert.equal(result.planData.other, 0, 'no corrective residue should remain for consistent snapshot');
     assert.equal(
         result.planData.totalCosts,
@@ -264,8 +265,9 @@ function smokeBuildPlanUsesSavedSnapshotCostsAndDedupedHardware(context) {
             result.planData.delivery +
             result.planData.taxes +
             result.planData.other,
-        'plan rows should add up to saved total cost'
+        'plan rows should add up to current computed total cost'
     );
+    assert.equal(result.planData.planEarned, 6, 'plan profit should be recomputed from current plan rows');
 }
 
 function smokeBuildPlanRendersSavedSnapshotHints(context) {
@@ -348,9 +350,48 @@ function smokeBuildPlanRendersSavedSnapshotHints(context) {
     })()`, context);
 
     const html = container.innerHTML;
-    assert.ok(html.includes('сохранено в заказе'), 'assembly row should show that plan assembly comes from saved order snapshot');
-    assert.ok(html.includes('косвенные сохранены в строках заказа'), 'indirect row should explain that historical row snapshot is used');
+    assert.ok(html.includes('текущее значение заказа'), 'assembly row should show that plan assembly comes from current order value');
+    assert.ok(html.includes('косвенные из текущих строк заказа'), 'indirect row should explain that current order rows are used');
     assert.ok(html.includes('77ч × 100 ₽/ч'), 'indirect row should show actual hours formula for fact');
+}
+
+async function smokeWorkshopHardwareFactUsesProjectState(context) {
+    context.__imports = [];
+    context.__warehouseItems = [
+        { id: 501, price_per_unit: 5, category: 'hardware' },
+        { id: 502, price_per_unit: 2, category: 'hardware' },
+        { id: 503, price_per_unit: 9, category: 'hardware' },
+    ];
+    context.__warehouseHistory = [
+        { order_id: 88, order_name: 'МТС 3 воркшопа', type: 'deduction', item_id: 501, qty_change: -999, unit_price: 5, item_category: 'hardware' },
+    ];
+    context.loadProjectHardwareState = async () => ({
+        checks: { '88:501': true, '88:502': true },
+        actual_qtys: { '88:501': 30, '88:502': 0 },
+    });
+
+    await vm.runInContext(`(async () => {
+        const factData = {};
+        await Factual._applyDerivedFacts(
+            factData,
+            { plastic: 0, hardwareTotal: 0, packagingTotal: 0 },
+            { hoursPlastic: 0, hoursTrim: 0, hoursHardware: 0, hoursPackaging: 0 },
+            { fotPerHour: 0, indirectPerHour: 0 },
+            88,
+            'МТС 3 воркшопа',
+            { id: 88, order_name: 'МТС 3 воркшопа' },
+            [
+                { item_type: 'hardware', product_name: 'A', quantity: 20, warehouse_item_id: 501, hardware_source: 'warehouse' },
+                { item_type: 'hardware', product_name: 'B', quantity: 10, warehouse_item_id: 502, hardware_source: 'warehouse' },
+                { item_type: 'hardware', product_name: 'C', quantity: 50, warehouse_item_id: 503, hardware_source: 'warehouse' }
+            ]
+        );
+        globalThis.__workshopHardwareFact = factData;
+    })()`, context);
+
+    const fact = context.__workshopHardwareFact;
+    assert.equal(fact.fact_hardware_total, 150, 'workshop hardware fact should follow current checked project hardware quantities');
+    assert.equal(fact._source_hints.fact_hardware_total, 'фурнитура проекта');
 }
 
 async function smokeTaxesIncludeCharity(context) {
@@ -639,6 +680,7 @@ async function main() {
     await smokeTaxesIncludeCharity(context);
     await smokeLegacyStageDistributionAndMaterials(context);
     await smokeWorkshopLegacyLeavesAssemblyExplicit(context);
+    await smokeWorkshopHardwareFactUsesProjectState(context);
     await smokeFactualRequestsFinTabloAutoSync(context);
     smokePeriodFilterUsesDeadlineAndFactLoad(context);
     console.log('factual smoke checks passed');

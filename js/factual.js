@@ -112,6 +112,100 @@ const Factual = {
             return true;
         });
     },
+    _collectWarehouseDemandRows(items = [], allItems = []) {
+        if (window.Warehouse && typeof window.Warehouse._collectWarehouseDemandFromOrderItems === 'function') {
+            const previousItems = window.Warehouse.allItems;
+            try {
+                if ((!window.Warehouse.allItems || !window.Warehouse.allItems.length) && Array.isArray(allItems) && allItems.length) {
+                    window.Warehouse.allItems = allItems;
+                }
+                const rows = window.Warehouse._collectWarehouseDemandFromOrderItems(items || []) || [];
+                return Array.isArray(rows) ? rows : [];
+            } finally {
+                if (previousItems !== undefined) window.Warehouse.allItems = previousItems;
+            }
+        }
+
+        const grouped = new Map();
+        const explicitHardwareWarehouseIds = new Set();
+        const addDemandRow = (itemId, qty, name, materialType = 'hardware') => {
+            const normalizedItemId = Number(itemId || 0);
+            const normalizedQty = parseFloat(qty) || 0;
+            if (!normalizedItemId || normalizedQty <= 0) return;
+
+            const key = String(normalizedItemId);
+            const prev = grouped.get(key);
+            const normalizedName = name || '';
+            if (!prev) {
+                grouped.set(key, {
+                    warehouse_item_id: normalizedItemId,
+                    qty: normalizedQty,
+                    names: normalizedName ? [normalizedName] : [],
+                    material_type: materialType,
+                });
+                return;
+            }
+
+            prev.qty += normalizedQty;
+            if (normalizedName && !prev.names.includes(normalizedName)) prev.names.push(normalizedName);
+            if (prev.material_type !== materialType) prev.material_type = 'mixed';
+            grouped.set(key, prev);
+        };
+
+        (items || []).forEach(item => {
+            const itemType = String(item.item_type || '').toLowerCase();
+            if (itemType !== 'hardware') return;
+            const src = String(item.source || item.hardware_source || '').toLowerCase();
+            const itemId = Number(item.warehouse_item_id ?? item.hardware_warehouse_item_id ?? 0);
+            const qty = parseFloat(item.quantity ?? item.hardware_qty ?? item.qty ?? 0) || 0;
+            if (src === 'warehouse' && itemId && qty > 0) explicitHardwareWarehouseIds.add(itemId);
+        });
+
+        (items || []).forEach(item => {
+            const itemType = String(item.item_type || '').toLowerCase();
+            if (itemType === 'pendant' && typeof getPendantWarehouseDemandRows === 'function') {
+                (getPendantWarehouseDemandRows(item) || []).forEach(row => {
+                    addDemandRow(row.warehouse_item_id, row.qty, row.name, row.material_type || 'hardware');
+                });
+                return;
+            }
+
+            if (itemType === 'product' && typeof getProductWarehouseDemandRows === 'function') {
+                (getProductWarehouseDemandRows(item, allItems || []) || []).forEach(row => {
+                    if (explicitHardwareWarehouseIds.has(Number(row.warehouse_item_id || 0))) return;
+                    addDemandRow(row.warehouse_item_id, row.qty, row.name, row.material_type || 'hardware');
+                });
+                return;
+            }
+
+            const isHardware = itemType === 'hardware';
+            const isPackaging = itemType === 'packaging';
+            if (!isHardware && !isPackaging) return;
+
+            const src = String(
+                item.source
+                || (isHardware ? item.hardware_source : item.packaging_source)
+                || ''
+            ).toLowerCase();
+            if (src !== 'warehouse') return;
+
+            const itemId = Number(
+                item.warehouse_item_id
+                ?? (isHardware ? item.hardware_warehouse_item_id : item.packaging_warehouse_item_id)
+                ?? 0
+            );
+            const qty = parseFloat(
+                item.quantity
+                ?? (isHardware ? item.hardware_qty : item.packaging_qty)
+                ?? item.qty
+                ?? 0
+            ) || 0;
+            const name = item.product_name || item.name || '';
+            addDemandRow(itemId, qty, name, isPackaging ? 'packaging' : 'hardware');
+        });
+
+        return Array.from(grouped.values());
+    },
     _getSourceHints(factData) {
         const raw = factData && factData._source_hints;
         return (raw && typeof raw === 'object') ? raw : {};
@@ -703,7 +797,7 @@ async _loadFactSummaries() {
 
         if (costEl) {
             if (hasFactData) {
-                const planCost = this._num(o.total_cost_plan);
+                const planCost = this._num(computedOrders[idx]?.planData?.totalCosts ?? o.total_cost_plan);
                 const alarm = this.getAlarm(factCosts, planCost);
                 costEl.innerHTML = `<span style="color:${alarm.color};font-weight:500">${this.fmtRub(factCosts)}</span>`;
             } else {
@@ -876,7 +970,6 @@ async _loadFactSummaries() {
         const prodIndirect = round2(hasSavedSnapshot ? savedIndirect : (plannedHoursTotal * (params.indirectPerHour || 0)));
 
         const orderRevenue = this._num(order.total_revenue_plan);
-        const orderCosts = this._num(order.total_cost_plan);
         const rowsWithoutTaxes = round2(
             round2(salaryProduction) + round2(salaryTrim) + round2(salaryAssembly) + round2(salaryPackaging) + round2(prodIndirect) +
             round2(hardwarePurchase) + round2(hardwareDelivery) + round2(packagingPurchase) + round2(packagingDelivery) +
@@ -884,10 +977,11 @@ async _loadFactSummaries() {
         );
         const charityRate = this._num(params.charityRate) || 0.01;
         const taxesByFormula = round2(orderRevenue * (this._num(params.taxRate) + this._num(params.vatRate) + charityRate));
-        const taxesByBalance = round2(orderCosts > 0 ? (orderCosts - rowsWithoutTaxes) : 0);
-        const taxes = orderCosts > 0 ? Math.max(0, taxesByBalance) : taxesByFormula;
-        const otherBalance = orderCosts > 0 ? round2(orderCosts - rowsWithoutTaxes - taxes) : 0;
+        const taxes = taxesByFormula;
+        const otherBalance = 0;
         const computedTotalCosts = round2(rowsWithoutTaxes + taxes + otherBalance);
+        const computedMarginPercent = orderRevenue > 0 ? round2(((orderRevenue - computedTotalCosts) / orderRevenue) * 100) : 0;
+        const computedEarned = round2(orderRevenue - computedTotalCosts);
 
         return {
             planData: {
@@ -898,10 +992,10 @@ async _loadFactSummaries() {
                 packagingTotal: round2(packagingPurchase + packagingDelivery),
                 designPrinting: round2(designPrinting), plastic: round2(plastic),
                 molds: round2(molds), delivery: round2(delivery), taxes: round2(taxes), other: round2(otherBalance),
-                totalCosts: orderCosts > 0 ? round2(orderCosts) : computedTotalCosts,
+                totalCosts: computedTotalCosts,
                 revenue: orderRevenue > 0 ? round2(orderRevenue) : 0,
-                planMarginPercent: this._num(order.margin_percent_plan),
-                planEarned: this._num(order.total_margin_plan),
+                planMarginPercent: computedMarginPercent,
+                planEarned: computedEarned,
             },
             planHours: {
                 hoursPlastic: round2(planHoursPlastic), hoursTrim: round2(planHoursTrim),
@@ -935,9 +1029,9 @@ async _loadFactSummaries() {
                     perHour: this._num(params.indirectPerHour),
                     source: hasSavedSnapshot ? 'saved_items' : 'hours_formula',
                     detailHtml: hasSavedSnapshot
-                        ? `косвенные сохранены в строках заказа${usedDuplicateCollapse ? '<br>одинаковые складские позиции объединены, чтобы не считать фурнитуру дважды' : ''}`
+                        ? `косвенные из текущих строк заказа${usedDuplicateCollapse ? '<br>одинаковые складские позиции объединены, чтобы не считать фурнитуру дважды' : ''}`
                         : undefined,
-                    formula: hasSavedSnapshot ? 'сохранённые cost_indirect из строк заказа' : 'общие плановые часы × косв./ч',
+                    formula: hasSavedSnapshot ? 'текущие cost_indirect из строк заказа' : 'общие плановые часы × косв./ч',
                 },
             },
         };
@@ -976,7 +1070,7 @@ async _loadFactSummaries() {
         const planHours = cached.planHours || {};
         const orderId = Number(cached.order?.id || cached.orderId || 0);
         await this._applyHoursFromEntries(factData, orderId, planHours, App.params || {}, cached.order || null);
-        await this._applyDerivedFacts(factData, planData, planHours, App.params || {}, orderId, cached.order?.order_name || '');
+        await this._applyDerivedFacts(factData, planData, planHours, App.params || {}, orderId, cached.order?.order_name || '', cached.order || null, cached.items || []);
         let factTotal = 0;
         this.ROWS.forEach(row => { factTotal += parseFloat(factData['fact_' + row.key]) || 0; });
         factData.fact_total = round2(factTotal);
@@ -1003,11 +1097,12 @@ async _loadFactSummaries() {
         const factData = { ...(await loadFactual(orderId) || {}) };
 
         this._applyHoursFromEntries(factData, orderId, planHours, params, order);
-        await this._applyDerivedFacts(factData, planData, planHours, params, orderId, order.order_name || '');
+        await this._applyDerivedFacts(factData, planData, planHours, params, orderId, order.order_name || '', order, rawItems || []);
 
         const computed = {
             ...(cached || {}),
             order,
+            items: rawItems || [],
             planData,
             planHours,
             planMeta,
@@ -1074,7 +1169,7 @@ async _loadFactSummaries() {
         return round2(stageActuals.salary[stage] || 0);
     },
 
-    async _applyDerivedFacts(factData, planData, planHours, params, orderId, orderName) {
+    async _applyDerivedFacts(factData, planData, planHours, params, orderId, orderName, orderRef = null, orderItems = []) {
         const hProd = parseFloat(factData.fact_hours_production) || 0;
         const hTrim = parseFloat(factData.fact_hours_trim) || 0;
         const hAsm = parseFloat(factData.fact_hours_assembly) || 0;
@@ -1163,16 +1258,62 @@ async _loadFactSummaries() {
 
         // 4. Warehouse fallback for hardware/packaging (only if fintablo didn't provide them)
         if (!factData._auto_fintablo.fact_hardware_total || !factData._auto_fintablo.fact_packaging_total) {
-            const whActual = await this._deriveMaterialFacts(orderId, orderName);
+            const whActual = this._isWorkshopOrder(orderRef || orderName)
+                ? await this._deriveWorkshopMaterialFacts(orderId, orderRef || { order_name: orderName }, orderItems || [])
+                : await this._deriveMaterialFacts(orderId, orderName);
             if (!factData._auto_fintablo.fact_hardware_total) {
                 this._applyAutoFactValue(factData, 'fact_hardware_total', whActual.found ? whActual.hardware : (planData?.hardwareTotal || 0));
-                this._setSourceHint(factData, 'fact_hardware_total', whActual.found ? 'склад' : 'план');
+                this._setSourceHint(factData, 'fact_hardware_total', whActual.found ? (whActual.sourceHint || 'склад') : 'план');
             }
             if (!factData._auto_fintablo.fact_packaging_total) {
                 this._applyAutoFactValue(factData, 'fact_packaging_total', whActual.found ? whActual.packaging : (planData?.packagingTotal || 0));
-                this._setSourceHint(factData, 'fact_packaging_total', whActual.found ? 'склад' : 'план');
+                this._setSourceHint(factData, 'fact_packaging_total', whActual.found ? (whActual.packagingSourceHint || whActual.sourceHint || 'склад') : 'план');
             }
         }
+    },
+
+    async _deriveWorkshopMaterialFacts(orderId, orderRef = null, orderItems = []) {
+        const projectState = (typeof loadProjectHardwareState === 'function'
+            ? (await loadProjectHardwareState())
+            : { checks: {}, actual_qtys: {} }) || { checks: {}, actual_qtys: {} };
+        const checks = (projectState && projectState.checks && typeof projectState.checks === 'object') ? projectState.checks : {};
+        const actuals = (projectState && projectState.actual_qtys && typeof projectState.actual_qtys === 'object') ? projectState.actual_qtys : {};
+        const items = (await loadWarehouseItems()) || [];
+        const itemMap = new Map(items.map(i => [Number(i.id), i]));
+        const demandRows = this._collectWarehouseDemandRows(orderItems || [], items || []);
+
+        if (!demandRows.length) return { found: false, hardware: 0, packaging: 0 };
+
+        let hardware = 0;
+        let packaging = 0;
+        let found = false;
+        const normalizedOrderId = Number(typeof orderRef === 'object' ? orderRef?.id ?? orderId : orderId) || Number(orderId) || 0;
+
+        demandRows.forEach(row => {
+            const itemId = Number(row.warehouse_item_id || 0);
+            if (!itemId) return;
+            const key = `${normalizedOrderId}:${itemId}`;
+            const ready = !!checks[key];
+            if (!ready) return;
+
+            const plannedQty = this._num(row.qty);
+            const hasActual = Object.prototype.hasOwnProperty.call(actuals, key);
+            const consumedQty = hasActual ? Math.max(0, this._num(actuals[key])) : plannedQty;
+            const unitPrice = this._num((itemMap.get(itemId) || {}).price_per_unit);
+            const deltaCost = round2(consumedQty * unitPrice);
+            const category = String(row.material_type || (itemMap.get(itemId) || {}).category || '').toLowerCase();
+            if (category === 'packaging') packaging += deltaCost;
+            else hardware += deltaCost;
+            found = true;
+        });
+
+        return {
+            found,
+            hardware: round2(hardware),
+            packaging: round2(packaging),
+            sourceHint: found ? 'фурнитура проекта' : 'склад',
+            packagingSourceHint: found ? 'фурнитура проекта' : 'склад',
+        };
     },
 
     async _deriveMaterialFacts
@@ -1513,14 +1654,14 @@ async _loadFactSummaries() {
             return detail;
         }
         if (meta.source === 'saved_items') {
-            detail += ' • из сохранённых строк заказа';
+            detail += ' • из текущих строк заказа';
             if (Math.abs(this._num(meta.derivedHours) - this._num(meta.planHours)) > 0.05) {
-                detail += `<br>по сохранённым строкам: ${this.fmtHours(meta.derivedHours)}`;
+                detail += `<br>по текущим строкам: ${this.fmtHours(meta.derivedHours)}`;
             }
             return detail;
         }
         if (meta.source === 'saved_order') {
-            detail += ' • сохранено в заказе';
+            detail += ' • текущее значение заказа';
             if (Math.abs(this._num(meta.derivedHours) - this._num(meta.planHours)) > 0.05) {
                 detail += `<br>по текущим строкам: ${this.fmtHours(meta.derivedHours)}`;
             }
