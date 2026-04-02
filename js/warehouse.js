@@ -240,6 +240,8 @@ const Warehouse = {
     _viewToken: 0,
     _shipmentsLoadedAt: 0,
     _viewInitialized: false,
+    _backgroundSyncPromise: null,
+    _backgroundSyncScheduled: false,
 
     // Shipment state
     allShipments: [],
@@ -259,6 +261,8 @@ const Warehouse = {
         this.allItems = await this._ensureRequiredSeedItems(this.allItems);
         await this._loadMoldOrders();
         await this._refreshBlankHardwareWarehouseItemIds();
+        const initialView = this.currentView || 'table';
+        const shouldDeferHeavySync = initialView !== 'project-hardware';
 
         // Auto-seed on first visit if warehouse is empty
         if (this.allItems.length === 0 && WAREHOUSE_SEED_DATA.length > 0) {
@@ -362,12 +366,52 @@ const Warehouse = {
         if (!this.projectHardwareState.actual_qtys || typeof this.projectHardwareState.actual_qtys !== 'object') {
             this.projectHardwareState.actual_qtys = {};
         }
-        await this.reconcileProjectHardwareReservations();
-        await this._reconcileBlankHardwareLowStockAlerts();
+
+        if (!shouldDeferHeavySync) {
+            await this.reconcileProjectHardwareReservations();
+            await this._reconcileBlankHardwareLowStockAlerts();
+        }
+
         this.recalcReservations();
         this.populateCategoryFilter();
         this.renderStats();
-        this.setView(this.currentView || 'table', { force: true });
+        this.setView(initialView, { force: true });
+
+        if (shouldDeferHeavySync) {
+            this._scheduleBackgroundSync();
+        }
+    },
+
+    _scheduleBackgroundSync() {
+        if (this._backgroundSyncPromise || this._backgroundSyncScheduled) return;
+        this._backgroundSyncScheduled = true;
+        setTimeout(() => {
+            this._backgroundSyncScheduled = false;
+            void this._runBackgroundSync();
+        }, 0);
+    },
+
+    async _runBackgroundSync() {
+        if (this._backgroundSyncPromise) return this._backgroundSyncPromise;
+        this._backgroundSyncPromise = (async () => {
+            try {
+                await this.reconcileProjectHardwareReservations();
+                await this._reconcileBlankHardwareLowStockAlerts();
+                this.recalcReservations();
+                this.populateCategoryFilter();
+                this.renderStats();
+                if (this.currentView === 'table') {
+                    this.filterAndRender();
+                } else if (this.currentView === 'project-hardware') {
+                    this.renderProjectHardwareView(this._viewToken);
+                }
+            } catch (error) {
+                console.warn('[Warehouse] Background sync failed', error);
+            } finally {
+                this._backgroundSyncPromise = null;
+            }
+        })();
+        return this._backgroundSyncPromise;
     },
 
     _createRequiredSeedWarehouseItem(raw, id, nowIso = new Date().toISOString()) {

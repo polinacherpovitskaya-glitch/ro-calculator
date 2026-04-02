@@ -3642,6 +3642,78 @@ async function smokeWarehouseProjectReserveCannotBeEditedInline(context) {
     assert.match(String(context.__toasts.join('\\n')), /создан из заказа/i);
 }
 
+async function smokeWarehouseLoadRendersBeforeBackgroundSync() {
+    const warehouseContext = createContext();
+    ['js/calculator.js', 'js/app.js', 'js/orders.js', 'js/warehouse.js', 'js/order-detail.js'].forEach(file => runScript(warehouseContext, file));
+    stubRuntime(warehouseContext);
+
+    warehouseContext.__warehouseItems = [
+        {
+            id: 813,
+            name: 'Fast Load Item',
+            sku: 'FAST-813',
+            category: 'other',
+            qty: 12,
+            price_per_unit: 3,
+            created_at: '2026-04-02T10:00:00.000Z',
+            updated_at: '2026-04-02T10:00:00.000Z',
+        },
+    ];
+    warehouseContext.loadWarehouseItems = async () => clone(warehouseContext.__warehouseItems);
+    warehouseContext.loadWarehouseReservations = async () => [];
+    warehouseContext.loadProjectHardwareState = async () => ({ checks: {}, actual_qtys: {} });
+
+    vm.runInContext(`
+        localStorage.setItem('wh_photo_fix_v3', '1');
+        localStorage.setItem('wh_photo_fix_v4', '1');
+        globalThis.__events = [];
+        Warehouse._ensureRequiredSeedItems = async (items) => items;
+        Warehouse._loadMoldOrders = async () => {};
+        Warehouse._refreshBlankHardwareWarehouseItemIds = async () => {};
+        Warehouse._cleanupZeroDuplicateItems = () => false;
+        Warehouse.applyTabStyles = () => {};
+        Warehouse.reconcileProjectHardwareReservations = async function () {
+            await new Promise(resolve => setTimeout(resolve, 25));
+            globalThis.__events.push('reconcile');
+            return { reservationsChanged: false, stateChanged: false, shortage: false };
+        };
+        Warehouse._reconcileBlankHardwareLowStockAlerts = async function () {
+            globalThis.__events.push('blank-alerts');
+            return { changed: false, alertsCreated: 0 };
+        };
+        Warehouse.recalcReservations = function () { globalThis.__events.push('recalc'); };
+        Warehouse.populateCategoryFilter = function () { globalThis.__events.push('populate'); };
+        Warehouse.renderStats = function () { globalThis.__events.push('stats'); };
+        Warehouse.filterAndRender = function () { globalThis.__events.push('table-render'); };
+        Warehouse.currentView = 'table';
+        Warehouse._viewInitialized = false;
+        Warehouse._viewToken = 0;
+        Warehouse._backgroundSyncPromise = null;
+        Warehouse._backgroundSyncScheduled = false;
+    `, warehouseContext);
+
+    await vm.runInContext(`Warehouse.load()`, warehouseContext);
+
+    const immediateEvents = clone(vm.runInContext(`globalThis.__events.slice()`, warehouseContext));
+    assert.deepEqual(immediateEvents, ['recalc', 'populate', 'stats', 'table-render']);
+
+    await new Promise(resolve => setTimeout(resolve, 60));
+
+    const finalEvents = clone(vm.runInContext(`globalThis.__events.slice()`, warehouseContext));
+    assert.deepEqual(finalEvents, [
+        'recalc',
+        'populate',
+        'stats',
+        'table-render',
+        'reconcile',
+        'blank-alerts',
+        'recalc',
+        'populate',
+        'stats',
+        'table-render',
+    ]);
+}
+
 async function smokeProjectHardwarePersistenceAndBuckets(context) {
     context.__projectHardwareState = {
         checks: {
@@ -5628,6 +5700,7 @@ async function main() {
     await smokeWarehouseAdjustmentPersistsWithoutBulkSave(context);
     await smokeWarehouseReserveLabelsShowSource(context);
     await smokeWarehouseProjectReserveCannotBeEditedInline(context);
+    await smokeWarehouseLoadRendersBeforeBackgroundSync();
     await smokeProjectHardwarePersistenceAndBuckets(context);
     await smokeProjectHardwareToggleShortageGuard(context);
     await smokeProjectHardwareLegacyQtyAndStringIdDeduction(context);
