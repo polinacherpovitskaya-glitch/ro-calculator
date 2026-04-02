@@ -1305,14 +1305,46 @@ const Calculator = {
             }
         } catch (e) { console.error('[renderItemBlock] attachment block error:', e); }
 
+        // Preserve collapse state when re-rendering an existing card
+        const existingBlock = document.getElementById('item-block-' + idx);
+        const wasCollapsed = existingBlock ? existingBlock.classList.contains('is-collapsed') : false;
+
+        // Build summary values for collapsed view
+        const summaryQty = item.quantity ? item.quantity.toLocaleString('ru') + ' шт' : '—';
+        const firstColor = (item.colors && item.colors[0]) ? item.colors[0].name : '';
+        const summaryColor = firstColor || '—';
+        const summaryPrintQty = (item.printings || []).reduce((s, p) => s + (p.qty || 0), 0);
+        const summaryPrint = summaryPrintQty > 0 ? summaryPrintQty.toLocaleString('ru') + ' шт' : '';
+        const summaryPrice = item.sell_price_item > 0 ? item.sell_price_item + ' ₽/шт' : '';
+
         const html = `
-        <div class="item-block" id="item-block-${idx}">
+        <div class="item-block${wasCollapsed ? ' is-collapsed' : ''}" id="item-block-${idx}">
             <div class="item-block-header">
                 <div class="item-num">${num}</div>
                 <div class="item-title" id="item-title-${idx}">${item.product_name || 'Изделие ' + num}</div>
+                <button class="btn btn-sm btn-outline item-collapse-btn" onclick="Calculator.toggleItemCollapse(${idx})">${wasCollapsed ? '▼ Показать' : '▲ Свернуть'}</button>
                 <button class="btn btn-sm btn-outline" onclick="Calculator.cloneItem(${idx})">Клонировать</button>
-                <button class="btn btn-sm btn-outline" onclick="Calculator.removeItem(${idx})">Удалить</button>
+                <button class="item-block-header btn-danger-sm" onclick="Calculator.removeItem(${idx})">✕</button>
             </div>
+            <div class="item-card-summary">
+                <div class="item-summary-stat">
+                    <span class="item-summary-label">Кол-во</span>
+                    <span class="item-summary-value">${summaryQty}</span>
+                </div>
+                <div class="item-summary-stat">
+                    <span class="item-summary-label">Цвет</span>
+                    <span class="item-summary-value">${summaryColor}</span>
+                </div>
+                ${summaryPrint ? `<div class="item-summary-stat">
+                    <span class="item-summary-label">Печать</span>
+                    <span class="item-summary-value">${summaryPrint}</span>
+                </div>` : ''}
+                ${summaryPrice ? `<div class="item-summary-stat">
+                    <span class="item-summary-label">Цена/шт</span>
+                    <span class="item-summary-value" style="color:var(--green)">${summaryPrice}</span>
+                </div>` : ''}
+            </div>
+            <div class="item-body">
 
             <!-- Step 1: Тип формы -->
             <div class="form-group">
@@ -1424,10 +1456,10 @@ const Calculator = {
                 <div class="cost-row cost-total"><span class="cost-label">ИТОГО с фурнитурой/упаковкой</span><span class="cost-value" id="c-${idx}-total">0</span></div>
             </div>
 
+            </div><!-- /.item-body -->
         </div>`;
 
         // Replace existing block if re-rendering, otherwise append
-        const existingBlock = document.getElementById('item-block-' + idx);
         if (existingBlock) {
             existingBlock.outerHTML = html;
         } else {
