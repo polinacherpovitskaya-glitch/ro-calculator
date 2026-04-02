@@ -2072,6 +2072,71 @@ async function smokePendantAutoPriceFromBlanks() {
     );
 }
 
+async function smokePendantLettersContributePlasticLoad() {
+    const pendantContext = createContext();
+    stubRuntime(pendantContext);
+    ['js/calculator.js', 'js/app.js'].forEach(file => runScript(pendantContext, file));
+    vm.runInContext('delete globalThis.Pendant;', pendantContext);
+    runScript(pendantContext, 'js/pendant.js');
+
+    const state = clone(await vm.runInContext(`(() => {
+        const params = {
+            wasteFactor: 1.1,
+            fotPerHour: 100,
+            indirectCostMode: 'all',
+            indirectPerHour: 50,
+            taxRate: 0.06,
+            packagingHours: 8,
+            plasticHours: 8,
+            hardwareHours: 8,
+            plasticCostPerKg: 2500,
+            moldBaseCost: 18000,
+            designCost: 0,
+            cuttingSpeed: 1000,
+            nfcTagCost: 0,
+            nfcWriteSpeed: 1000,
+        };
+        App.params = params;
+        App.templates = [{
+            id: 30,
+            category: 'blank',
+            custom_prices: { 3000: 17 },
+            custom_margins: {},
+            pieces_per_hour_avg: 100,
+            pieces_per_hour_min: 100,
+            weight_grams: 5,
+            mold_count: 1,
+            cost_cny: 800,
+            cny_rate: 12.5,
+            delivery_cost: 8000,
+            hw_name: 'Фурнитура',
+            hw_price_per_unit: 1,
+            hw_speed: 60,
+        }];
+
+        const pendant = {
+            item_type: 'pendant',
+            name: 'CCCC',
+            quantity: 300,
+            elements: [{ char: 'C' }, { char: 'C' }, { char: 'C' }, { char: 'C' }],
+            cords: [],
+            carabiners: [],
+            element_price_per_unit: 3,
+            _totalSellPerUnit: 99,
+        };
+        pendant.result = calculatePendantCost(pendant, params);
+        const load = calculateProductionLoad([], [], [], params, [pendant]);
+        return { result: pendant.result, load };
+    })()`, pendantContext));
+
+    assert.ok(state.result.hoursPlasticZone > 0, 'letter pendant should contribute casting/trim load');
+    assert.ok(state.result.hoursPlastic > 0, 'letter pendant should contribute casting hours');
+    assert.ok(state.result.hoursCutting > 0, 'letter pendant should contribute trimming hours');
+    assert.ok(state.result.hoursBuiltinHw > 0, 'letter pendant should include built-in blank hardware time');
+    assert.equal(state.load.hoursPlasticTotal, state.result.hoursPlasticZone);
+    assert.equal(state.load.hoursHardwareTotal, 0);
+}
+
 async function smokeLegacyPendantRestore(context) {
     const legacyNestedPendant = {
         item_type: 'pendant',
@@ -6035,6 +6100,7 @@ async function main() {
     await smokePendantStepNavigationSync();
     await smokePendantOverlayDoesNotCloseWizard();
     await smokePendantAutoPriceFromBlanks();
+    await smokePendantLettersContributePlasticLoad();
     await smokeLegacyPendantRestore(context);
     await smokeCloneOrderRestoresLegacySnapshotItems(context);
     await smokeCloneOrderPrefersNormalizedItems(context);

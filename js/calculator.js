@@ -469,11 +469,138 @@ function getPendantAttachmentCostPerUnit(type, entry) {
     );
 }
 
+const PENDANT_LETTER_BLANK_IDS = [30, 31];
+const PENDANT_LETTER_TIERS = [50, 100, 300, 500, 1000, 3000];
+
+function getPendantLetterBlankTierQty(totalElements) {
+    if (!(totalElements > 0)) return null;
+    let tierQty = PENDANT_LETTER_TIERS[PENDANT_LETTER_TIERS.length - 1];
+    for (const tier of PENDANT_LETTER_TIERS) {
+        if (totalElements <= tier) {
+            tierQty = tier;
+            break;
+        }
+    }
+    return tierQty;
+}
+
+function getPendantLetterBlankSource() {
+    if (typeof Molds !== 'undefined' && Array.isArray(Molds?.allMolds) && Molds.allMolds.length) {
+        const mold = Molds.allMolds.find(item => PENDANT_LETTER_BLANK_IDS.includes(Number(item?.id)));
+        if (mold) return mold;
+    }
+    if (typeof App !== 'undefined' && Array.isArray(App?.templates) && App.templates.length) {
+        const tpl = App.templates.find(item => PENDANT_LETTER_BLANK_IDS.includes(Number(item?.id)));
+        if (tpl) return tpl;
+    }
+    return null;
+}
+
+function getPendantLetterBlankMetrics(totalElements, params) {
+    if (!(totalElements > 0)) return null;
+    const tierQty = getPendantLetterBlankTierQty(totalElements);
+    if (!(tierQty > 0)) return null;
+
+    const source = getPendantLetterBlankSource();
+    if (!source) return null;
+
+    const pph = Number(source?.pieces_per_hour_avg || source?.pieces_per_hour_min || source?.pieces_per_hour || 0);
+    const weight = Number(source?.weight_grams || 0);
+    if (!(pph > 0) || !(weight > 0) || !params) return null;
+
+    const wasteFactor = Number.isFinite(params?.wasteFactor) ? params.wasteFactor : 1.1;
+    const singleMoldCost = (Number(source?.cost_cny || 800) * Number(source?.cny_rate || 12.5)) + Number(source?.delivery_cost || 8000);
+    const moldTotalCost = singleMoldCost * Number(source?.mold_count || 1 || 1);
+    const moldAmortPerUnit = moldTotalCost / 4500;
+
+    const result = calculateItemCost({
+        quantity: tierQty,
+        pieces_per_hour: pph,
+        weight_grams: weight,
+        extra_molds: 0,
+        complex_design: false,
+        is_nfc: false,
+        nfc_programming: false,
+        delivery_included: false,
+        is_blank_mold: true,
+        base_mold_in_stock: false,
+        builtin_hw_name: source?.hw_name || '',
+        builtin_hw_price: Number(source?.hw_price_per_unit || source?.hw_price || 0),
+        builtin_hw_delivery_total: Number(source?.hw_delivery_total || 0),
+        builtin_hw_speed: Number(source?.hw_speed || 0),
+    }, params);
+
+    const cost = round2((result?.costTotal || 0) - (result?.costMoldAmortization || 0) + moldAmortPerUnit);
+
+    const customPrice = Number(source?.custom_prices?.[tierQty]);
+    let sellPrice = Number.isFinite(customPrice) && customPrice > 0 ? customPrice : 0;
+    let targetMargin = 0;
+    if (!(sellPrice > 0) && cost > 0) {
+        const customMargin = Number(source?.custom_margins?.[tierQty]);
+        if (Number.isFinite(customMargin)) {
+            targetMargin = customMargin;
+        } else if (typeof getBlankMargin === 'function') {
+            targetMargin = getBlankMargin(tierQty);
+        } else if (tierQty < 75) {
+            targetMargin = 0.75;
+        } else if (tierQty < 200) {
+            targetMargin = 0.70;
+        } else if (tierQty < 400) {
+            targetMargin = 0.60;
+        } else if (tierQty < 750) {
+            targetMargin = 0.50;
+        } else if (tierQty < 2500) {
+            targetMargin = 0.45;
+        } else {
+            targetMargin = 0.40;
+        }
+        const keepNetRate = 1 - (Number.isFinite(params?.taxRate) ? params.taxRate : 0.06) - 0.05;
+        if (keepNetRate > 0 && targetMargin < 1) {
+            const rawSellPrice = round2(cost / (1 - targetMargin) / keepNetRate);
+            sellPrice = typeof roundTo5 === 'function'
+                ? roundTo5(rawSellPrice)
+                : Math.ceil(rawSellPrice / 5) * 5;
+        }
+    }
+
+    const keepNetRate = 1 - (Number.isFinite(params?.taxRate) ? params.taxRate : 0.06) - 0.05;
+    const margin = sellPrice > 0
+        ? round2(((sellPrice * keepNetRate) - cost) / sellPrice)
+        : targetMargin;
+
+    const scale = tierQty > 0 ? (totalElements / tierQty) : 0;
+    return {
+        tierQty,
+        cost,
+        sellPrice,
+        margin,
+        hoursPlastic: round2((result?.hoursPlastic || 0) * scale),
+        hoursCutting: round2((result?.hoursCutting || 0) * scale),
+        hoursBuiltinHw: round2((result?.hoursBuiltinHw || 0) * scale),
+        hoursPlasticZone: round2((result?.hoursPlasticZone || 0) * scale),
+    };
+}
+
 function calculatePendantCost(pendant, params) {
     const qty = pendant.quantity || 0;
-    if (qty === 0) return { costPerUnit: 0, sellPerUnit: 0, totalCost: 0, totalRevenue: 0, assemblyHours: 0, packagingHours: 0 };
+    if (qty === 0) {
+        return {
+            costPerUnit: 0,
+            sellPerUnit: 0,
+            totalCost: 0,
+            totalRevenue: 0,
+            assemblyHours: 0,
+            packagingHours: 0,
+            hoursPlastic: 0,
+            hoursCutting: 0,
+            hoursBuiltinHw: 0,
+            hoursPlasticZone: 0,
+        };
+    }
 
     const elements = getCountablePendantElements(pendant);
+    const totalElements = qty * elements.length;
+    const letterMetrics = getPendantLetterBlankMetrics(totalElements, params);
 
     // Element cost (production/purchase cost per element)
     const elemCostPerUnit = pendant.element_price_per_unit || 0;
@@ -523,6 +650,10 @@ function calculatePendantCost(pendant, params) {
         totalRevenue: round2(sellPerUnit * qty),
         assemblyHours,
         packagingHours,
+        hoursPlastic: round2(letterMetrics?.hoursPlastic || 0),
+        hoursCutting: round2(letterMetrics?.hoursCutting || 0),
+        hoursBuiltinHw: round2(letterMetrics?.hoursBuiltinHw || 0),
+        hoursPlasticZone: round2(letterMetrics?.hoursPlasticZone || 0),
         margin: calculateActualMargin(sellPerUnit, costPerUnit),
     };
 }
@@ -668,6 +799,7 @@ function calculateProductionLoad(items, hardwareItems, packagingItems, params, p
 
     (pendantItems || []).forEach(pnd => {
         if (pnd.result) {
+            hoursPlasticTotal += pnd.result.hoursPlasticZone || 0;
             hoursHardwareTotal += pnd.result.assemblyHours || 0;
             hoursPackagingTotal += pnd.result.packagingHours || 0;
         }

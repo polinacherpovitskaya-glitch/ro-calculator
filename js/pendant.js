@@ -1190,6 +1190,17 @@ const Pendant = {
 
     // Find letter blank pricing from enriched Molds or App.templates
     _getLetterBlankTier(totalElements) {
+        if (typeof getPendantLetterBlankMetrics === 'function') {
+            const metrics = getPendantLetterBlankMetrics(totalElements, App.params);
+            if (metrics) {
+                return {
+                    cost: metrics.cost || 0,
+                    sellPrice: metrics.sellPrice || 0,
+                    margin: metrics.margin || 0,
+                    tierQty: metrics.tierQty,
+                };
+            }
+        }
         if (!totalElements || totalElements <= 0) return null;
         const LETTER_BLANK_IDS = [30, 31];
         const TIERS = [50, 100, 300, 500, 1000, 3000];
