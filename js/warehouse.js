@@ -2108,6 +2108,10 @@ const Warehouse = {
             const reservePillsHtml = item.reserved_qty > 0
                 ? this._renderReservationPills(item.id, { compact: true, limit: 2 })
                 : '';
+            const reserveLocked = this._hasLockedProjectReservations(item.id);
+            const reserveHint = reserveLocked
+                ? `<div style="margin-top:6px;font-size:11px;color:var(--text-muted);text-align:right;">через заказ</div>`
+                : '';
 
             // Color dropdown options
             const colorOpts = uniqueColors.map(c =>
@@ -2139,9 +2143,11 @@ const Warehouse = {
                 </td>
                 <td>
                     <input type="number" class="wh-inline-input text-right" value="${item.reserved_qty || 0}" min="0" max="${item.qty || 0}" step="${qtyStep}"
-                        style="${item.reserved_qty > 0 ? 'color:var(--yellow);font-weight:600;' : ''}"
+                        style="${item.reserved_qty > 0 ? 'color:var(--yellow);font-weight:600;' : ''}${reserveLocked ? ';opacity:0.65;cursor:not-allowed;' : ''}"
+                        ${reserveLocked ? 'disabled title="Этот резерв создан из заказа. Меняйте его в карточке заказа или во вкладке «Фурнитура для проектов»."' : ''}
                         onchange="Warehouse.inlineReserve(${item.id}, this.value, ${item.reserved_qty || 0})">
                     ${reservePillsHtml}
+                    ${reserveHint}
                 </td>
                 <td class="text-right">${availInfo}</td>
                 <td>
@@ -2547,6 +2553,11 @@ const Warehouse = {
         const normalizedItemId = Number(itemId || 0);
         const item = this.allItems.find(i => Number(i && i.id || 0) === normalizedItemId);
         if (!item) return;
+        if (this._hasLockedProjectReservations(normalizedItemId)) {
+            App.toast('Этот резерв создан из заказа. Меняйте его в карточке заказа или во вкладке «Фурнитура для проектов».');
+            await this.load();
+            return;
+        }
 
         const newReserved = Math.max(0, this._parseWarehouseQty(newValueStr));
         const maxReserve = this._parseWarehouseQty(item.qty);
@@ -3342,6 +3353,12 @@ const Warehouse = {
         const normalizedItemId = Number(itemId || 0);
         return (this.allReservations || []).filter(r =>
             Number(r && r.item_id || 0) === normalizedItemId && String(r && r.status || '') === 'active'
+        );
+    },
+
+    _hasLockedProjectReservations(itemId) {
+        return this._getActiveReservationsForItem(itemId).some(r =>
+            this._isProjectHardwareReservationSource(r && r.source) || Number(r && r.order_id || 0) > 0
         );
     },
 

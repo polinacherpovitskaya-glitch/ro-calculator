@@ -3587,6 +3587,61 @@ async function smokeWarehouseReserveLabelsShowSource(context) {
     assert.match(detailHtml, /Открыть/);
 }
 
+async function smokeWarehouseProjectReserveCannotBeEditedInline(context) {
+    context.__warehouseItems = [
+        {
+            id: 812,
+            name: 'Locked Reserve Item',
+            sku: 'RSV-812',
+            category: 'other',
+            qty: 100,
+            reserved_qty: 60,
+            available_qty: 40,
+            price_per_unit: 5,
+        },
+    ];
+    context.__reservations = [
+        {
+            id: 81201,
+            item_id: 812,
+            order_id: 77,
+            order_name: 'ФНТР 1 партия',
+            source: 'project_hardware',
+            qty: 60,
+            status: 'active',
+            created_at: '2026-04-02T08:00:00.000Z',
+            created_by: 'Smoke',
+        },
+    ];
+    context.loadWarehouseItems = async () => clone(context.__warehouseItems);
+    context.loadWarehouseReservations = async () => clone(context.__reservations);
+    context.saveWarehouseReservations = async (reservations) => {
+        context.__reservations = clone(reservations);
+    };
+    context.__toasts = [];
+
+    vm.runInContext(`
+        globalThis.__toasts = [];
+        App.toast = (message) => { globalThis.__toasts.push(String(message || '')); };
+        Warehouse.allItems = globalThis.__warehouseItems.map(item => ({ ...item }));
+        Warehouse.allReservations = globalThis.__reservations.map(item => ({ ...item }));
+        Warehouse.load = async function () {
+            this.allItems = await loadWarehouseItems();
+            this.allReservations = await loadWarehouseReservations();
+            this.recalcReservations();
+        };
+    `, context);
+
+    await vm.runInContext(`Warehouse.renderTable(Warehouse.allItems)`, context);
+    const html = String(vm.runInContext(`document.getElementById('wh-content').innerHTML`, context));
+    assert.match(html, /через заказ/);
+    assert.match(html, /disabled/);
+
+    await vm.runInContext(`Warehouse.inlineReserve(812, '0', 60)`, context);
+    assert.equal(context.__reservations[0].status, 'active');
+    assert.match(String(context.__toasts.join('\\n')), /создан из заказа/i);
+}
+
 async function smokeProjectHardwarePersistenceAndBuckets(context) {
     context.__projectHardwareState = {
         checks: {
@@ -5572,6 +5627,7 @@ async function main() {
     await smokeWarehouseManualAdjustment(context);
     await smokeWarehouseAdjustmentPersistsWithoutBulkSave(context);
     await smokeWarehouseReserveLabelsShowSource(context);
+    await smokeWarehouseProjectReserveCannotBeEditedInline(context);
     await smokeProjectHardwarePersistenceAndBuckets(context);
     await smokeProjectHardwareToggleShortageGuard(context);
     await smokeProjectHardwareLegacyQtyAndStringIdDeduction(context);
