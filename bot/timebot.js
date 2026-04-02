@@ -11,6 +11,11 @@ const { createClient } = require('@supabase/supabase-js');
 const { buildTaskNotificationText, getTaskNotificationRecipientIds } = require('./task-notification-core');
 const { getLocalDate, shiftYmd, isWeekendYmd, normalizeWorkDate } = require('./timebot-date-utils');
 const { parseFreeformBatchReport, looksLikeFreeformBatchReport, normalizeText } = require('./timebot-freeform-parser');
+const {
+    pickActiveLinkedEmployee,
+    pickAnyLinkedEmployee,
+    buildInactiveBindingMessage,
+} = require('./timebot-employee-access');
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -310,14 +315,16 @@ bot.onText(/\/start/, async (msg) => {
     const telegramId = msg.from.id;
 
     try {
-        const { data: existing } = await supabase
-            .from('employees')
-            .select('*')
-            .eq('telegram_id', telegramId)
-            .single();
+        const existing = await getEmployee(telegramId);
 
         if (existing) {
             send(chatId, `Привет, ${existing.name}! 👋`, MAIN_KEYBOARD);
+            return;
+        }
+
+        const linked = await getAnyLinkedEmployee(telegramId);
+        if (linked && !linked.is_active) {
+            send(chatId, buildInactiveBindingMessage(linked), MAIN_KEYBOARD);
             return;
         }
 
@@ -374,11 +381,8 @@ bot.onText(/\/help/, (msg) => {
 
 bot.onText(/\/status/, async (msg) => {
     try {
-        const emp = await getEmployee(msg.from.id);
-        if (!emp) {
-            send(msg.chat.id, 'Ты не подключён. Нажми /start');
-            return;
-        }
+        const emp = await resolveEmployeeOrNotify(msg.chat.id, msg.from.id);
+        if (!emp) return;
 
         const payInfo = emp.role === 'production'
             ? `\nОплата: оклад ${fmtMoney(emp.pay_base_salary_month)}/мес, база ${num(emp.pay_base_hours_month, 176)}ч, сверх ${fmtMoney(emp.pay_overtime_hour_rate)}/ч`
@@ -411,11 +415,8 @@ bot.onText(/\/report/, async (msg) => {
 
 bot.onText(/\/clear/, async (msg) => {
     try {
-        const emp = await getEmployee(msg.from.id);
-        if (!emp) {
-            send(msg.chat.id, 'Ты не подключён. Нажми /start');
-            return;
-        }
+        const emp = await resolveEmployeeOrNotify(msg.chat.id, msg.from.id);
+        if (!emp) return;
 
         const today = await getReportDate(emp.timezone_offset);
         const { error } = await supabase
@@ -602,6 +603,12 @@ bot.on('message', async (msg) => {
             if (employee) {
                 const handled = await tryHandleFreeformBatchReport(chatId, telegramId, employee, text);
                 if (handled) return;
+            } else if (!state) {
+                const linked = await getAnyLinkedEmployee(telegramId);
+                if (linked && !linked.is_active) {
+                    await send(chatId, buildInactiveBindingMessage(linked), MAIN_KEYBOARD);
+                    return;
+                }
             }
         }
 
@@ -669,18 +676,42 @@ async function getEmployee(telegramId) {
         .from('employees')
         .select('*')
         .eq('telegram_id', telegramId)
-        .single();
-    if (error) console.error('getEmployee error:', error.message);
-    return data;
+        .eq('is_active', true);
+    if (error) {
+        console.error('getEmployee error:', error.message);
+        return null;
+    }
+    return pickActiveLinkedEmployee(data);
+}
+
+async function getAnyLinkedEmployee(telegramId) {
+    const { data, error } = await supabase
+        .from('employees')
+        .select('*')
+        .eq('telegram_id', telegramId);
+    if (error) {
+        console.error('getAnyLinkedEmployee error:', error.message);
+        return null;
+    }
+    return pickAnyLinkedEmployee(data);
+}
+
+async function resolveEmployeeOrNotify(chatId, telegramId) {
+    const emp = await getEmployee(telegramId);
+    if (emp) return emp;
+    const linked = await getAnyLinkedEmployee(telegramId);
+    if (linked && !linked.is_active) {
+        await send(chatId, buildInactiveBindingMessage(linked), MAIN_KEYBOARD);
+        return null;
+    }
+    await send(chatId, 'Ты не подключён. Нажми /start', MAIN_KEYBOARD);
+    return null;
 }
 
 async function startReport(chatId, telegramId) {
     try {
-        const emp = await getEmployee(telegramId);
-        if (!emp) {
-            send(chatId, 'Ты не подключён. Нажми /start');
-            return;
-        }
+        const emp = await resolveEmployeeOrNotify(chatId, telegramId);
+        if (!emp) return;
 
         const reportDate = await getReportDate(emp.timezone_offset);
         const { data: todayEntries } = await supabase
@@ -1167,11 +1198,8 @@ async function saveAllEntries(chatId, telegramId, state, comment) {
 
 async function showToday(chatId, telegramId) {
     try {
-        const emp = await getEmployee(telegramId);
-        if (!emp) {
-            send(chatId, 'Ты не подключён. Нажми /start');
-            return;
-        }
+        const emp = await resolveEmployeeOrNotify(chatId, telegramId);
+        if (!emp) return;
 
         const today = await getReportDate(emp.timezone_offset);
         const { data } = await supabase
@@ -1206,11 +1234,8 @@ async function showToday(chatId, telegramId) {
 
 async function showWeek(chatId, telegramId) {
     try {
-        const emp = await getEmployee(telegramId);
-        if (!emp) {
-            send(chatId, 'Ты не подключён. Нажми /start');
-            return;
-        }
+        const emp = await resolveEmployeeOrNotify(chatId, telegramId);
+        if (!emp) return;
 
         const reportDate = await getReportDate(emp.timezone_offset);
         const weekAgoStr = shiftYmd(reportDate, -7);
