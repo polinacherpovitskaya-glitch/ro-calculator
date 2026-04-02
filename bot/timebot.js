@@ -708,6 +708,42 @@ async function resolveEmployeeOrNotify(chatId, telegramId) {
     return null;
 }
 
+async function resolveLiveEmployeeForSave(chatId, telegramId, stateEmployee = null) {
+    const liveEmployee = await getEmployee(telegramId);
+    if (liveEmployee) {
+        if (stateEmployee && String(stateEmployee.id) !== String(liveEmployee.id)) {
+            console.warn(
+                'Timebot employee mismatch on save:',
+                JSON.stringify({
+                    telegramId,
+                    stateEmployeeId: stateEmployee.id,
+                    stateEmployeeName: stateEmployee.name,
+                    liveEmployeeId: liveEmployee.id,
+                    liveEmployeeName: liveEmployee.name,
+                })
+            );
+        }
+        return liveEmployee;
+    }
+
+    const linked = await getAnyLinkedEmployee(telegramId);
+    if (linked && !linked.is_active) {
+        await send(
+            chatId,
+            `Не удалось сохранить часы: Telegram сейчас привязан к неактивному профилю.\n\n${buildInactiveBindingMessage(linked)}`,
+            MAIN_KEYBOARD
+        );
+        return null;
+    }
+
+    await send(
+        chatId,
+        'Не удалось сохранить часы: бот не смог подтвердить, к какому сотруднику привязан этот Telegram. Ничего не записал. Напиши Полине или переподключи профиль через /start.',
+        MAIN_KEYBOARD
+    );
+    return null;
+}
+
 async function startReport(chatId, telegramId) {
     try {
         const emp = await resolveEmployeeOrNotify(chatId, telegramId);
@@ -1124,7 +1160,12 @@ async function tryHandleFreeformBatchReport(chatId, telegramId, employee, text) 
 }
 
 async function saveAllEntries(chatId, telegramId, state, comment) {
-    const reportDate = state.report_date || await getReportDate(state.employee.timezone_offset);
+    const liveEmployee = await resolveLiveEmployeeForSave(chatId, telegramId, state.employee);
+    if (!liveEmployee) {
+        return;
+    }
+    state.employee = liveEmployee;
+    const reportDate = state.report_date || await getReportDate(liveEmployee.timezone_offset);
 
     if (!state.entries || state.entries.length === 0) {
         send(chatId, 'Нет записей для сохранения.', MAIN_KEYBOARD);
@@ -1137,10 +1178,26 @@ async function saveAllEntries(chatId, telegramId, state, comment) {
         return;
     }
 
+    const { data: todayEntries, error: todayEntriesError } = await supabase
+        .from('time_entries')
+        .select('hours')
+        .eq('employee_id', liveEmployee.id)
+        .eq('date', reportDate);
+    if (todayEntriesError) {
+        console.error('Failed to load current day totals before save:', todayEntriesError);
+        await send(
+            chatId,
+            'Не удалось проверить текущие записи перед сохранением. Ничего не записал. Попробуй ещё раз или напиши Полине.',
+            MAIN_KEYBOARD
+        );
+        return;
+    }
+    state.existing_hours = round2((todayEntries || []).reduce((sum, entry) => sum + (parseFloat(entry.hours) || 0), 0));
+
     const payloads = state.entries.map((entry, index) => ({
         id: Date.now() + index + Math.floor(Math.random() * 1000),
-        employee_id: state.employee.id,
-        employee_name: state.employee.name,
+        employee_id: liveEmployee.id,
+        employee_name: liveEmployee.name,
         order_id: entry.order_id || null,
         hours: entry.hours,
         date: reportDate,
@@ -1166,7 +1223,7 @@ async function saveAllEntries(chatId, telegramId, state, comment) {
 
         const emoji = dayTotal >= 8 ? '💪' : dayTotal >= 4 ? '👍' : '✅';
         send(chatId,
-            `${emoji} Супер, ${state.employee.name}! Записано!\n\n` +
+            `${emoji} Супер, ${liveEmployee.name}! Записано!\n\n` +
             `${summary}\n\n` +
             `Отчёт за *${reportDate}*: *${dayTotal}ч*\n\n` +
             `Отличная работа! До завтра 🙌`,
@@ -1178,7 +1235,7 @@ async function saveAllEntries(chatId, telegramId, state, comment) {
         if (remainingPayloads.length) {
             queuePendingReport({
                 type: 'interactive_report',
-                employeeName: state.employee.name,
+                employeeName: liveEmployee.name,
                 chatId,
                 telegramId,
                 reportDate,
