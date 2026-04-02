@@ -3915,14 +3915,15 @@ async function smokeProjectHardwarePersistenceAndBuckets(context) {
     const html = String(context.document.getElementById('wh-content').innerHTML || '');
     assert.match(html, /Фурнитура и упаковка для проектов \(к сборке\)/);
     assert.match(html, /Уже собрано/);
-    assert.match(html, /1 заказ · скрыто из активного списка/);
+    assert.match(html, /2 заказа · активные заказы выше, собранные и завершённые — здесь/);
     assert.match(html, /<details class="card" style="margin-top:12px;">/);
-    assert.equal((html.match(/Collected Hardware Order/g) || []).length, 0);
+    assert.equal((html.match(/Collected Hardware Order/g) || []).length, 1);
     assert.equal((html.match(/Collected Delivery Order/g) || []).length, 1);
     assert.equal((html.match(/Active Hardware Order/g) || []).length, 1);
     assert.equal((html.match(/Sample Hardware Order/g) || []).length, 1);
-    assert.match(html, /Завершенные заказы скрыты автоматически: 1/);
+    assert.match(html, /Включая завершённые заказы: 1/);
     assert.match(html, /Delivery Hardware/);
+    assert.match(html, /Collected Hardware/);
     assert.match(html, /Active Hardware/);
     assert.match(html, /Active Envelope/);
     assert.match(html, /Упаковка/);

@@ -5306,20 +5306,22 @@ const Warehouse = {
                 : '<p class="text-muted">Нет позиций со склада для заказов, которые нужно собрать.</p>');
 
         const activeProductionHtml = renderProjectHardwareOrders(activeProductionOrders, 'active');
-        const collectedProductionHtml = renderProjectHardwareOrders(collectedProductionOrders, 'collected');
+        const collectedVisibleOrders = [...collectedProductionOrders, ...archivedCollectedOrders];
+        const collectedProductionHtml = renderProjectHardwareOrders(collectedVisibleOrders, 'collected');
         const archivedCollectedNote = archivedCollectedOrders.length > 0
-            ? `<div style="font-size:12px;color:var(--text-secondary);">Завершенные заказы скрыты автоматически: ${archivedCollectedOrders.length}</div>`
+            ? `<div style="font-size:12px;color:var(--text-secondary);">Включая завершённые заказы: ${archivedCollectedOrders.length}</div>`
             : '';
-        const collectedSummary = collectedProductionOrders.length === 1
+        const collectedCount = collectedVisibleOrders.length;
+        const collectedSummary = collectedCount === 1
             ? '1 заказ'
-            : `${collectedProductionOrders.length} заказ${collectedProductionOrders.length >= 2 && collectedProductionOrders.length <= 4 ? 'а' : 'ов'}`;
-        const collectedSectionHtml = collectedProductionOrders.length > 0
+            : `${collectedCount} заказ${collectedCount >= 2 && collectedCount <= 4 ? 'а' : 'ов'}`;
+        const collectedSectionHtml = collectedVisibleOrders.length > 0
             ? `
             <details class="card" style="margin-top:12px;">
                 <summary style="display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 16px;cursor:pointer;list-style:none;">
                     <div>
                         <h3 style="margin:0;">Уже собрано</h3>
-                        <div style="font-size:12px;color:var(--text-secondary);margin-top:4px;">${this.esc(collectedSummary)} · скрыто из активного списка</div>
+                        <div style="font-size:12px;color:var(--text-secondary);margin-top:4px;">${this.esc(collectedSummary)} · активные заказы выше, собранные и завершённые — здесь</div>
                         ${archivedCollectedNote}
                     </div>
                     <span style="font-size:12px;color:var(--text-muted);white-space:nowrap;">Показать</span>
