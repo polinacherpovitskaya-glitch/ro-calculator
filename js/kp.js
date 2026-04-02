@@ -119,8 +119,9 @@ const KPGenerator = {
      * @param {Array} items - Array of {type, name, qty, price}
      * @param {Object} clientLegal - Client legal details {name, inn, address, bank, account, bik}
      * @param {Object} companyLegal - Company legal details {name, inn, ogrn, address, bank, account, bik, corr, phone, email}
+     * @param {Object} options - Extra options { discount, params }
      */
-    async generate(orderName, clientName, items, clientLegal, companyLegal) {
+    async generate(orderName, clientName, items, clientLegal, companyLegal, options = {}) {
         // Load font first
         await this.loadFont();
 
@@ -351,9 +352,36 @@ const KPGenerator = {
         doc.setLineWidth(0.25);
         doc.line(marginL, y, pageW - marginR, y);
 
+        const discount = typeof calculateOrderDiscount === 'function'
+            ? calculateOrderDiscount(grandTotal, options.discount || {}, options.params || {})
+            : { amount: 0, percent: 0, revenueAfterDiscount: grandTotal };
+        const discountAmount = round2(discount.amount || 0);
+        const discountedSubtotal = round2(discount.revenueAfterDiscount || grandTotal);
+        const discountPerUnit = allSameQty && mainQty > 0 ? round2(discountAmount / mainQty) : 0;
+        if (discountAmount > 0) {
+            const discountLabel = discount.percent > 0
+                ? `Скидка ${discount.percent}%`
+                : 'Скидка';
+            y += rowH;
+
+            doc.setFont(fn, 'normal');
+            doc.setFontSize(9.5);
+            doc.setTextColor(...DARK);
+            doc.text(discountLabel, col1X, y);
+            if (allSameQty) {
+                doc.text('−' + this.fmtRub(discountPerUnit), col2X, y, { align: 'right' });
+            }
+            doc.text('−' + this.fmtRub(discountAmount), col3X, y, { align: 'right' });
+
+            y += 3;
+            doc.setDrawColor(...BORDER);
+            doc.setLineWidth(0.25);
+            doc.line(marginL, y, pageW - marginR, y);
+        }
+
         // ── VAT 5% ──
-        const vatAmount = Math.ceil(grandTotal * 0.05);
-        const vatPerUnit = allSameQty ? Math.ceil(perUnitSubtotal * 0.05) : 0;
+        const vatAmount = Math.ceil(discountedSubtotal * 0.05);
+        const vatPerUnit = allSameQty ? Math.ceil((perUnitSubtotal - discountPerUnit) * 0.05) : 0;
         y += rowH;
 
         doc.setFont(fn, 'normal');
@@ -366,8 +394,8 @@ const KPGenerator = {
         doc.text(this.fmtRub(vatAmount), col3X, y, { align: 'right' });
 
         // ── Total with VAT ──
-        const totalWithVat = grandTotal + vatAmount;
-        const totalPerUnitWithVat = perUnitSubtotal + vatPerUnit;
+        const totalWithVat = discountedSubtotal + vatAmount;
+        const totalPerUnitWithVat = allSameQty ? round2((perUnitSubtotal - discountPerUnit) + vatPerUnit) : 0;
 
         y += 2;
         doc.setDrawColor(...BLACK);
@@ -412,7 +440,7 @@ const KPGenerator = {
             bigSubtitle = this.fmtNum(mainQty) + ' шт \u00D7 ' +
                 this.fmtRub(totalPerUnitWithVat) + '/шт (вкл. НДС 5%)';
         } else {
-            bigSubtitle = items.length + ' позиций, вкл. НДС 5%';
+            bigSubtitle = items.length + ' позиций, вкл. НДС 5%' + (discountAmount > 0 ? ' и скидку' : '');
         }
         doc.text(bigSubtitle, marginL + 12, y + 22);
 

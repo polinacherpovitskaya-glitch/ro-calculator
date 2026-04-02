@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v214';
+const APP_VERSION = 'v215';
 
 const App = {
     currentPage: 'orders',
@@ -934,6 +934,8 @@ const Calculator = {
     packagingItems: [], // Packaging items (unlimited)
     pendants: [],       // Pendant items (unlimited)
     extraCosts: [],     // Extra costs [{name, amount}]
+    discountMode: 'none',
+    discountValue: 0,
     maxItems: 6,
     _autosaveTimer: null,
     _isDirty: false,
@@ -1018,6 +1020,8 @@ const Calculator = {
         this.packagingItems = [];
         this.extraCosts = [];
         this.pendants = [];
+        this.discountMode = 'none';
+        this.discountValue = 0;
         document.getElementById('calc-items-container').innerHTML = '';
         document.getElementById('calc-hardware-list').innerHTML = '';
         document.getElementById('calc-packaging-list').innerHTML = '';
@@ -1035,6 +1039,62 @@ const Calculator = {
         // Clear save indicator
         const statusEl = document.getElementById('calc-autosave-status');
         if (statusEl) statusEl.textContent = '';
+        this._syncDiscountUi();
+    },
+
+    _parseDiscountValue(value) {
+        if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+        const normalized = String(value || '')
+            .replace(/\s+/g, '')
+            .replace(',', '.')
+            .replace(/[^0-9.-]/g, '');
+        const parsed = parseFloat(normalized);
+        return Number.isFinite(parsed) ? parsed : 0;
+    },
+
+    getOrderAdjustments() {
+        return normalizeOrderDiscount(this.discountMode, this.discountValue);
+    },
+
+    onDiscountModeChange(mode) {
+        this.discountMode = (mode === 'amount' || mode === 'percent') ? mode : 'none';
+        this._syncDiscountUi();
+        this.recalculate();
+        this.scheduleAutosave();
+    },
+
+    onDiscountValueChange(value) {
+        this.discountValue = this._parseDiscountValue(value);
+        this._syncDiscountUi();
+        this.recalculate();
+        this.scheduleAutosave();
+    },
+
+    _syncDiscountUi(summary = null) {
+        const modeEl = document.getElementById('calc-discount-mode');
+        const valueEl = document.getElementById('calc-discount-value');
+        const summaryEl = document.getElementById('calc-discount-summary');
+        const adjustments = this.getOrderAdjustments();
+
+        if (modeEl) modeEl.value = adjustments.mode;
+        if (valueEl) {
+            valueEl.disabled = adjustments.mode === 'none';
+            valueEl.placeholder = adjustments.mode === 'percent' ? '10' : '0';
+            valueEl.value = adjustments.mode === 'none'
+                ? ''
+                : (this.discountValue > 0 ? String(this.discountValue) : '');
+        }
+
+        if (!summaryEl) return;
+        if (adjustments.mode === 'none' || !(summary && summary.discountAmount > 0)) {
+            summaryEl.innerHTML = 'Без скидки';
+            return;
+        }
+
+        const modeLabel = adjustments.mode === 'percent'
+            ? `Скидка ${formatPercent(summary.discountPercent)}`
+            : `Скидка ${formatRub(summary.discountAmount)}`;
+        summaryEl.innerHTML = `${modeLabel} · выручка после скидки <strong>${formatRub(summary.totalRevenue)}</strong><div style="font-size:11px;color:var(--text-muted);margin-top:2px;">Скидка применяется к сумме без НДС и влияет на маржу</div>`;
     },
 
     // ==========================================
@@ -3343,6 +3403,7 @@ const Calculator = {
             loadEl.style.display = '';
             finEl.style.display = '';
             sumEl.style.display = '';
+            const orderAdjustments = this.getOrderAdjustments();
 
             const load = calculateProductionLoad(this.items, this.hardwareItems, this.packagingItems, params, this.pendants);
             this.setText('calc-hours-plastic', formatHours(load.hoursPlasticTotal));
@@ -3358,8 +3419,9 @@ const Calculator = {
             this.setLoadBar('calc-load-packaging-bar', load.packagingLoadPercent);
 
             // FinDirector
-            const fin = calculateFinDirectorData(this.items, this.hardwareItems, this.packagingItems, params, this.pendants);
+            const fin = calculateFinDirectorData(this.items, this.hardwareItems, this.packagingItems, params, this.pendants, orderAdjustments);
             const finSalaryRow = document.getElementById('fin-salary')?.closest('.cost-row');
+            const finDiscountRow = document.getElementById('fin-discount-row');
             if (App.isAdmin()) {
                 this.setText('fin-salary', formatRub(fin.salary));
                 if (finSalaryRow) finSalaryRow.style.display = '';
@@ -3378,13 +3440,16 @@ const Calculator = {
             this.setText('fin-taxes', formatRub(fin.taxes));
             this.setText('fin-total-costs', formatRub(fin.totalCosts));
             this.setText('fin-revenue', formatRub(fin.revenue));
+            this.setText('fin-discount', '−' + formatRub(fin.discountAmount || 0));
+            if (finDiscountRow) finDiscountRow.style.display = (fin.discountAmount || 0) > 0 ? '' : 'none';
 
             // Summary footer
-            const summary = calculateOrderSummary(this.items, this.hardwareItems, this.packagingItems, this.extraCosts, params, this.pendants);
+            const summary = calculateOrderSummary(this.items, this.hardwareItems, this.packagingItems, this.extraCosts, params, this.pendants, orderAdjustments);
             this.setText('sum-revenue', formatRub(summary.totalRevenue));
             this.setText('sum-earned', formatRub(summary.totalEarned));
             this.setText('sum-margin', formatPercent(summary.marginPercent));
             this.setText('sum-hours', formatHours(load.totalHours));
+            this._syncDiscountUi(summary);
 
             // Re-render pendant cards with updated results
             if (typeof Pendant !== 'undefined') {
@@ -3394,6 +3459,7 @@ const Calculator = {
             loadEl.style.display = 'none';
             finEl.style.display = 'none';
             sumEl.style.display = 'none';
+            this._syncDiscountUi();
             // Debug: why no data?
             if (this.items.some(i => i.quantity > 0)) {
                 console.warn('[recalculate] hasData=false but items have qty>0. Params:', JSON.stringify({
@@ -3932,8 +3998,13 @@ const Calculator = {
         let invoiceHtml = '';
         if (invoiceRows.length > 0) {
             const subtotal = invoiceRows.reduce((s, r) => s + r.total, 0);
-            const vat = round2(subtotal * 0.05);
-            const grandTotal = round2(subtotal + vat);
+            const discount = calculateOrderDiscount(subtotal, this.getOrderAdjustments(), params);
+            const discountedSubtotal = round2(discount.revenueAfterDiscount);
+            const vat = round2(discountedSubtotal * 0.05);
+            const grandTotal = round2(discountedSubtotal + vat);
+            const discountLabel = discount.percent > 0
+                ? `Скидка ${formatPercent(discount.percent)}`
+                : 'Скидка';
 
             invoiceHtml = `
             <div style="margin-top:16px; border:1px solid var(--border); border-radius:8px; overflow:hidden; font-size:12px;">
@@ -3968,6 +4039,15 @@ const Calculator = {
                             <td colspan="3" style="text-align:right;padding:6px 8px;color:var(--text-secondary);">Итого без НДС</td>
                             <td style="text-align:right;padding:6px 12px;font-weight:600;">${formatRub(subtotal)}</td>
                         </tr>
+                        ${discount.amount > 0 ? `
+                        <tr>
+                            <td colspan="3" style="text-align:right;padding:4px 8px;color:var(--text-secondary);font-size:11px;">${discountLabel}</td>
+                            <td style="text-align:right;padding:4px 12px;font-size:11px;color:var(--red);">−${formatRub(discount.amount)}</td>
+                        </tr>
+                        <tr>
+                            <td colspan="3" style="text-align:right;padding:4px 8px;color:var(--text-secondary);font-size:11px;">Итого после скидки</td>
+                            <td style="text-align:right;padding:4px 12px;font-size:11px;font-weight:600;">${formatRub(discountedSubtotal)}</td>
+                        </tr>` : ''}
                         <tr>
                             <td colspan="3" style="text-align:right;padding:4px 8px;color:var(--text-secondary);font-size:11px;">НДС 5%</td>
                             <td style="text-align:right;padding:4px 12px;font-size:11px;color:var(--text-muted);">${formatRub(vat)}</td>
@@ -4109,7 +4189,8 @@ const Calculator = {
             try { this._doRecalculate(App.params); } catch (e) { /* ignore */ }
 
             const load = calculateProductionLoad(this.items, this.hardwareItems, this.packagingItems, App.params, this.pendants);
-            const summary = calculateOrderSummary(this.items, this.hardwareItems, this.packagingItems, this.extraCosts, App.params || {}, this.pendants);
+            const orderAdjustments = this.getOrderAdjustments();
+            const summary = calculateOrderSummary(this.items, this.hardwareItems, this.packagingItems, this.extraCosts, App.params || {}, this.pendants, orderAdjustments);
 
             const order = {
                 id: App.editingOrderId || undefined,
@@ -4133,10 +4214,16 @@ const Calculator = {
                 plastic_type: 'PP',
                 print_type: null,
                 status: 'draft', // autosave always writes 'draft' for new; existing orders get their status preserved below
+                discount_mode: orderAdjustments.mode,
+                discount_value: orderAdjustments.value,
+                gross_revenue_plan: summary.grossRevenue,
+                discount_amount_plan: summary.discountAmount,
+                discount_percent_plan: summary.discountPercent,
                 total_revenue_plan: summary.totalRevenue,
                 total_cost_plan: summary.totalRevenue - summary.totalEarned,
                 total_margin_plan: summary.totalEarned,
                 margin_percent_plan: summary.marginPercent,
+                total_with_vat_plan: summary.totalWithVat,
                 total_hours_plan: load.totalHours,
                 production_hours_plastic: load.hoursPlasticTotal,
                 production_hours_packaging: load.hoursPackagingTotal,
@@ -4321,7 +4408,8 @@ const Calculator = {
         }
 
         const load = calculateProductionLoad(this.items, this.hardwareItems, this.packagingItems, App.params, this.pendants);
-        const summary = calculateOrderSummary(this.items, this.hardwareItems, this.packagingItems, this.extraCosts, App.params || {}, this.pendants);
+        const orderAdjustments = this.getOrderAdjustments();
+        const summary = calculateOrderSummary(this.items, this.hardwareItems, this.packagingItems, this.extraCosts, App.params || {}, this.pendants, orderAdjustments);
 
         const order = {
             id: App.editingOrderId || undefined,
@@ -4345,10 +4433,16 @@ const Calculator = {
             plastic_type: 'PP', // always PP
             print_type: null, // determined at printing level
             status: 'draft',
+            discount_mode: orderAdjustments.mode,
+            discount_value: orderAdjustments.value,
+            gross_revenue_plan: summary.grossRevenue,
+            discount_amount_plan: summary.discountAmount,
+            discount_percent_plan: summary.discountPercent,
             total_revenue_plan: summary.totalRevenue,
             total_cost_plan: summary.totalRevenue - summary.totalEarned,
             total_margin_plan: summary.totalEarned,
             margin_percent_plan: summary.marginPercent,
+            total_with_vat_plan: summary.totalWithVat,
             total_hours_plan: load.totalHours,
             production_hours_plastic: load.hoursPlasticTotal,
             production_hours_packaging: load.hoursPackagingTotal,
@@ -4683,6 +4777,9 @@ const Calculator = {
         document.getElementById('calc-client-bank-name').value = order.client_bank_name || '';
         document.getElementById('calc-client-bank-account').value = order.client_bank_account || '';
         document.getElementById('calc-client-bank-bik').value = order.client_bank_bik || '';
+        this.discountMode = (order.discount_mode === 'amount' || order.discount_mode === 'percent') ? order.discount_mode : 'none';
+        this.discountValue = this._parseDiscountValue(order.discount_value || 0);
+        this._syncDiscountUi();
 
         // Restore product items
         const productItems = dbItems.filter(i => !i.item_type || i.item_type === 'product');
@@ -5214,7 +5311,10 @@ const Calculator = {
 
         try {
             App.toast('Генерация КП...');
-            await KPGenerator.generate(orderName, clientName, kpItems, clientLegal, companyLegal);
+            await KPGenerator.generate(orderName, clientName, kpItems, clientLegal, companyLegal, {
+                discount: this.getOrderAdjustments(),
+                params,
+            });
         } catch (err) {
             console.error('KP generation error:', err);
             App.toast('Ошибка генерации КП: ' + err.message);

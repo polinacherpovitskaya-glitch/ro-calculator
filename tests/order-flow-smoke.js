@@ -347,6 +347,8 @@ async function smokeCalculatorPersistence(context) {
             client_name: 'Smoke Client',
             manager_name: 'Smoke',
             status: 'draft',
+            discount_mode: 'percent',
+            discount_value: 10,
         },
         items: clone(items),
         repaired_duplicates: false,
@@ -371,6 +373,8 @@ async function smokeCalculatorPersistence(context) {
         packagingChina: Calculator.packagingItems.find(pkg => pkg.source === 'china'),
         packagingWarehouse: Calculator.packagingItems.find(pkg => pkg.source === 'warehouse'),
         pendant: Calculator.pendants[0],
+        discountMode: Calculator.discountMode,
+        discountValue: Calculator.discountValue,
     })`, context));
 
     assert.equal(restored.product.color_id, 12);
@@ -405,6 +409,8 @@ async function smokeCalculatorPersistence(context) {
     assert.equal(restored.pendant.cords[1].allocated_qty, 3);
     assert.equal(restored.pendant.carabiners[1].allocated_qty, 3);
     assert.equal(restored.pendant.elements.length, 3);
+    assert.equal(restored.discountMode, 'percent');
+    assert.equal(restored.discountValue, 10);
 
     const selectedWarehouseItem = clone(vm.runInContext(`
         Warehouse._findInGrouped({
@@ -412,6 +418,97 @@ async function smokeCalculatorPersistence(context) {
         }, '701')
     `, context));
     assert.equal(selectedWarehouseItem.id, 701);
+}
+
+async function smokeOrderDiscountAffectsSummaryAndFinDirector(context) {
+    const data = clone(await vm.runInContext(`(() => {
+        const params = { ...App.params, taxRate: 0.06, vatRate: 0.05, charityRate: 0.01 };
+        const items = [{
+            quantity: 1,
+            sell_price_item: 100,
+            sell_price_printing: 0,
+            result: { costTotal: 50 },
+            printings: [],
+        }];
+        return {
+            amountSummary: calculateOrderSummary(items, [], [], [], params, [], { mode: 'amount', value: 10 }),
+            percentSummary: calculateOrderSummary(items, [], [], [], params, [], { mode: 'percent', value: 10 }),
+            fin: calculateFinDirectorData(items, [], [], params, [], { mode: 'amount', value: 10 }),
+        };
+    })()`, context));
+
+    assert.equal(data.amountSummary.grossRevenue, 100);
+    assert.equal(data.amountSummary.discountAmount, 10);
+    assert.equal(data.amountSummary.discountPercent, 10);
+    assert.equal(data.amountSummary.totalRevenue, 90);
+    assert.equal(data.amountSummary.vatOnRevenue, 4.5);
+    assert.equal(data.amountSummary.totalWithVat, 94.5);
+    assert.equal(data.amountSummary.totalEarned, 27.85);
+
+    assert.equal(data.percentSummary.discountAmount, 10);
+    assert.equal(data.percentSummary.totalRevenue, 90);
+
+    assert.equal(data.fin.grossRevenue, 100);
+    assert.equal(data.fin.discountAmount, 10);
+    assert.equal(data.fin.revenue, 90);
+    assert.equal(data.fin.taxes, 10.8);
+}
+
+async function smokeDiscountShownInCustomerInvoice(context) {
+    await vm.runInContext(`(() => {
+        Calculator.resetForm();
+        Calculator.discountMode = 'amount';
+        Calculator.discountValue = 30;
+        Calculator.items = [Calculator.getEmptyItem(1)];
+        Calculator.items[0].product_name = 'Smoke Product';
+        Calculator.items[0].quantity = 2;
+        Calculator.items[0].sell_price_item = 100;
+        Calculator.items[0].result = {
+            costTotal: 50,
+            costPrinting: 0,
+            costPrintingDetails: [],
+        };
+        Calculator.hardwareItems = [];
+        Calculator.packagingItems = [];
+        Calculator.extraCosts = [];
+        Calculator.pendants = [];
+        Calculator.renderOrderInvoice(App.params, '', document.getElementById('calc-pricing-content'));
+    })()`, context);
+
+    const invoiceHtml = String(vm.runInContext(`document.getElementById('calc-pricing-content').innerHTML`, context));
+    assert.match(invoiceHtml, /Скидка/i);
+    assert.match(invoiceHtml, /Итого после скидки/i);
+}
+
+async function smokeGenerateKPPassesDiscount(context) {
+    await vm.runInContext(`(async () => {
+        globalThis.__kpArgs = null;
+        KPGenerator.generate = async (...args) => { globalThis.__kpArgs = args; };
+        Calculator.resetForm();
+        document.getElementById('calc-order-name').value = 'КП со скидкой';
+        document.getElementById('calc-client-name').value = 'Smoke Client';
+        Calculator.discountMode = 'percent';
+        Calculator.discountValue = 10;
+        Calculator.items = [Calculator.getEmptyItem(1)];
+        Calculator.items[0].product_name = 'Smoke Product';
+        Calculator.items[0].quantity = 2;
+        Calculator.items[0].sell_price_item = 100;
+        Calculator.items[0].result = {
+            costTotal: 50,
+            costPrinting: 0,
+            costPrintingDetails: [],
+        };
+        Calculator.hardwareItems = [];
+        Calculator.packagingItems = [];
+        Calculator.extraCosts = [];
+        Calculator.pendants = [];
+        await Calculator.generateKP();
+    })()`, context);
+
+    const kpArgs = clone(await vm.runInContext(`globalThis.__kpArgs`, context));
+    assert.equal(kpArgs.length, 6);
+    assert.equal(kpArgs[5].discount.mode, 'percent');
+    assert.equal(kpArgs[5].discount.value, 10);
 }
 
 async function smokeHardwareOnlyAutosave(context) {
@@ -5380,6 +5477,9 @@ async function main() {
     await smokeHardwareOnlyAutosave(context);
     await smokeZeroCostWarehouseHardwareStillShowsInPricing(context);
     await smokeBlankPricingSeparatesCatalogPriceAndNetMargin(context);
+    await smokeOrderDiscountAffectsSummaryAndFinDirector(context);
+    await smokeDiscountShownInCustomerInvoice(context);
+    await smokeGenerateKPPassesDiscount(context);
     await smokeFinDirectorPendantsUseAllAttachments(context);
     await smokePackagingWarehousePickerDefaults(context);
     await smokeCurrentOrderReservationRestoresWarehouseQuota(context);

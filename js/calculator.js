@@ -599,6 +599,44 @@ function calculateActualMargin(sellPrice, costPerUnit) {
     };
 }
 
+function normalizeOrderDiscount(mode, value) {
+    const normalizedMode = ['amount', 'percent'].includes(String(mode || '').trim()) ? String(mode).trim() : 'none';
+    const numericValue = Number.isFinite(Number(value)) ? Number(value) : 0;
+    return {
+        mode: normalizedMode,
+        value: numericValue > 0 ? round2(numericValue) : 0,
+    };
+}
+
+function calculateOrderDiscount(baseRevenue, discount = {}, params = {}) {
+    const safeBase = Math.max(0, Number(baseRevenue) || 0);
+    const normalized = normalizeOrderDiscount(discount?.mode, discount?.value);
+    let discountAmount = 0;
+    let discountPercent = 0;
+
+    if (normalized.mode === 'amount') {
+        discountAmount = Math.min(safeBase, normalized.value);
+        discountPercent = safeBase > 0 ? round2((discountAmount * 100) / safeBase) : 0;
+    } else if (normalized.mode === 'percent') {
+        discountPercent = Math.min(100, normalized.value);
+        discountAmount = round2((safeBase * discountPercent) / 100);
+    }
+
+    const taxRate = Number.isFinite(params?.taxRate) ? params.taxRate : 0.06;
+    const charityRate = Number.isFinite(params?.charityRate) ? params.charityRate : 0.01;
+    const commercialRate = 0.065;
+    const keepRate = Math.max(0, 1 - taxRate - charityRate - commercialRate);
+
+    return {
+        mode: normalized.mode,
+        inputValue: normalized.value,
+        amount: round2(discountAmount),
+        percent: round2(discountPercent),
+        revenueAfterDiscount: round2(Math.max(0, safeBase - discountAmount)),
+        earnedImpact: round2(discountAmount * keepRate),
+    };
+}
+
 /**
  * Рассчитать загрузку производства
  * Обновлено: фурнитура и упаковка теперь отдельные массивы
@@ -663,7 +701,7 @@ function calculateProductionLoad(items, hardwareItems, packagingItems, params, p
  * Рассчитать данные для финансового директора
  * Обновлено: фурнитура и упаковка — отдельные массивы
  */
-function calculateFinDirectorData(items, hardwareItems, packagingItems, params, pendantItems = []) {
+function calculateFinDirectorData(items, hardwareItems, packagingItems, params, pendantItems = [], orderAdjustments = {}) {
     let totalSalary = 0;
     let totalHardwarePurchase = 0;
     let totalHardwareDelivery = 0;
@@ -767,8 +805,10 @@ function calculateFinDirectorData(items, hardwareItems, packagingItems, params, 
         totalRevenue += r.totalRevenue;
     });
 
+    const discount = calculateOrderDiscount(totalRevenue, orderAdjustments, params);
+    const discountedRevenue = discount.revenueAfterDiscount;
     const charityRate = Number.isFinite(params?.charityRate) ? params.charityRate : 0.01;
-    const totalTaxes = totalRevenue * (params.taxRate + params.vatRate + charityRate);
+    const totalTaxes = discountedRevenue * (params.taxRate + params.vatRate + charityRate);
 
     return {
         salary: round2(totalSalary),
@@ -782,7 +822,10 @@ function calculateFinDirectorData(items, hardwareItems, packagingItems, params, 
         molds: round2(totalMolds),
         delivery: round2(totalDelivery),
         taxes: round2(totalTaxes),
-        revenue: round2(totalRevenue),
+        grossRevenue: round2(totalRevenue),
+        discountAmount: discount.amount,
+        discountPercent: discount.percent,
+        revenue: round2(discountedRevenue),
         totalCosts: round2(totalSalary + totalHardwarePurchase + totalHardwareDelivery
             + totalPackagingPurchase + totalPackagingDelivery
             + totalDesign + totalPrinting + totalPlastic + totalMolds + totalDelivery + totalTaxes),
@@ -793,7 +836,7 @@ function calculateFinDirectorData(items, hardwareItems, packagingItems, params, 
  * Рассчитать итоговую смету заказа
  * Обновлено: фурнитура и упаковка — отдельные массивы
  */
-function calculateOrderSummary(items, hardwareItems, packagingItems, extraCosts, params = {}, pendantItems = []) {
+function calculateOrderSummary(items, hardwareItems, packagingItems, extraCosts, params = {}, pendantItems = [], orderAdjustments = {}) {
     let totalRevenue = 0;
     let totalEarned = 0;
 
@@ -849,16 +892,22 @@ function calculateOrderSummary(items, hardwareItems, packagingItems, extraCosts,
         }
     });
 
+    const discount = calculateOrderDiscount(totalRevenue, orderAdjustments, params);
+    const finalRevenue = discount.revenueAfterDiscount;
+    const finalEarned = round2(totalEarned - discount.earnedImpact);
     const vatRate = Number.isFinite(params.vatRate) ? params.vatRate : 0.05;
-    const vatOnRevenue = totalRevenue * vatRate;
-    const totalWithVat = totalRevenue + vatOnRevenue;
-    const marginPercent = totalRevenue > 0 ? round2(totalEarned * 100 / totalRevenue) : 0;
+    const vatOnRevenue = finalRevenue * vatRate;
+    const totalWithVat = finalRevenue + vatOnRevenue;
+    const marginPercent = finalRevenue > 0 ? round2(finalEarned * 100 / finalRevenue) : 0;
 
     return {
-        totalRevenue: round2(totalRevenue),
+        grossRevenue: round2(totalRevenue),
+        discountAmount: discount.amount,
+        discountPercent: discount.percent,
+        totalRevenue: round2(finalRevenue),
         vatOnRevenue: round2(vatOnRevenue),
         totalWithVat: round2(totalWithVat),
-        totalEarned: round2(totalEarned),
+        totalEarned: round2(finalEarned),
         marginPercent,
     };
 }

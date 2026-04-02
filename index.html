@@ -35,7 +35,7 @@
     <aside class="sidebar">
         <div class="sidebar-brand">
             <h2>Recycle Object</h2>
-            <span>Калькулятор <span id="app-version">v214</span></span>
+            <span>Калькулятор <span id="app-version">v215</span></span>
         </div>
         <nav class="sidebar-nav">
             <a href="#tasks" data-page="tasks">
@@ -328,6 +328,7 @@
                     <div class="cost-row"><span class="cost-label">Доставка клиенту</span><span class="cost-value" id="fin-delivery">0 &#8381;</span></div>
                     <div class="cost-row"><span class="cost-label">Налоги + благотворительность (НДС 5% + налог 6% + 1%)</span><span class="cost-value" id="fin-taxes">0 &#8381;</span></div>
                     <div class="cost-row cost-total"><span class="cost-label">ИТОГО расходы</span><span class="cost-value" id="fin-total-costs">0 &#8381;</span></div>
+                    <div class="cost-row" id="fin-discount-row" style="display:none"><span class="cost-label">Скидка по заказу</span><span class="cost-value" id="fin-discount">0 &#8381;</span></div>
                     <div class="cost-row" style="margin-top:8px"><span class="cost-label">Выручка</span><span class="cost-value text-green" id="fin-revenue">0 &#8381;</span></div>
                 </div>
             </div>
@@ -350,6 +351,23 @@
                     <div class="summary-stat-item">
                         <div class="label">Часы</div>
                         <div class="value" id="sum-hours">0 ч</div>
+                    </div>
+                </div>
+                <div id="calc-discount-panel" style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-top:12px;padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--bg);">
+                    <div style="min-width:180px;flex:0 0 180px;">
+                        <div style="font-size:12px;color:var(--text-secondary);margin-bottom:6px;">Скидка по заказу</div>
+                        <select id="calc-discount-mode" class="input" onchange="Calculator.onDiscountModeChange(this.value)">
+                            <option value="none">Без скидки</option>
+                            <option value="amount">Сумма</option>
+                            <option value="percent">Процент</option>
+                        </select>
+                    </div>
+                    <div style="min-width:180px;flex:0 0 180px;">
+                        <div style="font-size:12px;color:var(--text-secondary);margin-bottom:6px;">Значение</div>
+                        <input id="calc-discount-value" class="input" type="text" inputmode="decimal" placeholder="0" disabled oninput="Calculator.onDiscountValueChange(this.value)">
+                    </div>
+                    <div id="calc-discount-summary" style="flex:1;min-width:240px;font-size:12px;color:var(--text-secondary);padding-bottom:2px;">
+                        Без скидки
                     </div>
                 </div>
                 <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px;">
@@ -3343,8 +3361,8 @@
 <script src="js/bug-report-core.js?v=2"></script>
 <script src="js/supabase.js?v=161"></script>
 <script src="js/task-events.js?v=1"></script>
-<script src="js/calculator.js?v=73"></script>
-  <script src="js/app.js?v=214"></script>
+<script src="js/calculator.js?v=74"></script>
+  <script src="js/app.js?v=215"></script>
 <script src="js/wiki.js?v=4"></script>
 <script src="js/order-detail.js?v=61"></script>
 <script src="js/orders.js?v=64"></script>
@@ -3352,7 +3370,7 @@
 <script src="js/analytics.js?v=46g"></script>
     <script src="js/molds.js?v=72"></script>
 <script src="js/colors.js?v=46g"></script>
-<script src="js/kp.js?v=46g"></script>
+<script src="js/kp.js?v=47"></script>
 <script src="js/timetrack.js?v=63"></script>
 <script src="js/projects.js?v=2"></script>
 <script src="js/tasks.js?v=57"></script>
