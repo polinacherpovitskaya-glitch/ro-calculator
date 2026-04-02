@@ -1110,6 +1110,7 @@ const Calculator = {
         const idx = this.items.length;
         this.items.push(this.getEmptyItem(idx + 1));
         this.renderItemBlock(idx);
+        this._updateItemsEmptyState();
 
         if (this.items.length >= this.maxItems) {
             document.getElementById('calc-add-item-btn').style.display = 'none';
@@ -3177,6 +3178,23 @@ const Calculator = {
         }
     },
 
+    toggleItemCollapse(idx) {
+        const block = document.getElementById('item-block-' + idx);
+        if (!block) return;
+        const isNowCollapsed = !block.classList.contains('is-collapsed');
+        block.classList.toggle('is-collapsed', isNowCollapsed);
+        const btn = block.querySelector('.item-collapse-btn');
+        if (btn) btn.textContent = isNowCollapsed ? '▼ Показать' : '▲ Свернуть';
+    },
+
+    _updateItemsEmptyState() {
+        const emptyEl = document.getElementById('calc-items-empty');
+        const addRowEl = document.getElementById('calc-items-add-row');
+        const hasItems = this.items.length > 0 || (this.pendantItems && this.pendantItems.length > 0);
+        if (emptyEl) emptyEl.style.display = hasItems ? 'none' : '';
+        if (addRowEl) addRowEl.style.display = hasItems ? '' : 'none';
+    },
+
     removeItem(idx) {
         // Cascade: remove all per-item hw/pkg for this item
         this.hardwareItems = this.hardwareItems.filter(hw => hw.parent_item_index !== idx);
@@ -3204,6 +3222,7 @@ const Calculator = {
         this.rerenderAllPackaging();
         this.recalculate();
         this.scheduleAutosave();
+        this._updateItemsEmptyState();
     },
 
     cloneItem(idx) {
@@ -3253,6 +3272,7 @@ const Calculator = {
         this.rerenderAllHardware();
         this.rerenderAllPackaging();
         this.recalculate();
+        this._updateItemsEmptyState();
         this.scheduleAutosave();
     },
 
@@ -4858,6 +4878,7 @@ const Calculator = {
             this.items.push(item);
             this.renderItemBlock(i);
         });
+        this._updateItemsEmptyState();
 
         // Restore hardware items (load picker data first for warehouse mode)
         const hwItems = dbItems.filter(i => i.item_type === 'hardware');
