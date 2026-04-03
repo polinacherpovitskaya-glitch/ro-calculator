@@ -3875,6 +3875,34 @@ async function smokeWarehouseLoadRendersBeforeBackgroundSync() {
     ]);
 }
 
+async function smokeWarehouseThumbnailGetsWhiteBackground(context) {
+    vm.runInContext(`
+        globalThis.__drawOps = [];
+        const ctx = {
+            _fillStyle: '',
+            set fillStyle(value) {
+                this._fillStyle = value;
+                globalThis.__drawOps.push(['fillStyle', value]);
+            },
+            get fillStyle() { return this._fillStyle; },
+            save() { globalThis.__drawOps.push(['save']); },
+            restore() { globalThis.__drawOps.push(['restore']); },
+            fillRect(x, y, w, h) { globalThis.__drawOps.push(['fillRect', x, y, w, h, this._fillStyle]); },
+            drawImage(img, x, y, w, h) { globalThis.__drawOps.push(['drawImage', x, y, w, h]); },
+        };
+        Warehouse._drawThumbnailOnWhiteBackground(ctx, { width: 40, height: 30 }, 40, 30);
+    `, context);
+
+    const ops = clone(vm.runInContext(`globalThis.__drawOps`, context));
+    assert.deepEqual(ops, [
+        ['save'],
+        ['fillStyle', '#ffffff'],
+        ['fillRect', 0, 0, 40, 30, '#ffffff'],
+        ['drawImage', 0, 0, 40, 30],
+        ['restore'],
+    ]);
+}
+
 async function smokeProjectHardwarePersistenceAndBuckets(context) {
     context.__projectHardwareState = {
         checks: {
@@ -6225,6 +6253,7 @@ async function main() {
     await smokeWarehouseReserveLabelsShowSource(context);
     await smokeWarehouseProjectReserveCannotBeEditedInline(context);
     await smokeWarehouseLoadRendersBeforeBackgroundSync();
+    await smokeWarehouseThumbnailGetsWhiteBackground(context);
     await smokeProjectHardwarePersistenceAndBuckets(context);
     await smokeProjectHardwareToggleShortageGuard(context);
     await smokeProjectHardwareLegacyQtyAndStringIdDeduction(context);

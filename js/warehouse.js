@@ -5454,6 +5454,17 @@ const Warehouse = {
     // PHOTO UPLOAD
     // ==========================================
 
+    _drawThumbnailOnWhiteBackground(ctx, img, width, height) {
+        if (!ctx || !img) return;
+        const w = Math.max(1, Math.round(parseFloat(width) || 0));
+        const h = Math.max(1, Math.round(parseFloat(height) || 0));
+        if (typeof ctx.save === 'function') ctx.save();
+        if ('fillStyle' in ctx) ctx.fillStyle = '#ffffff';
+        if (typeof ctx.fillRect === 'function') ctx.fillRect(0, 0, w, h);
+        if (typeof ctx.drawImage === 'function') ctx.drawImage(img, 0, 0, w, h);
+        if (typeof ctx.restore === 'function') ctx.restore();
+    },
+
     async compressImageToThumbnail(file, maxW, maxH, quality) {
         maxW = maxW || 200; maxH = maxH || 200; quality = quality || 0.7;
         return new Promise((resolve) => {
@@ -5469,7 +5480,8 @@ const Warehouse = {
                         h = Math.round(h * ratio);
                     }
                     canvas.width = w; canvas.height = h;
-                    canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+                    const ctx = canvas.getContext('2d');
+                    this._drawThumbnailOnWhiteBackground(ctx, img, w, h);
                     resolve(canvas.toDataURL('image/jpeg', quality));
                 };
                 img.onerror = () => resolve(null);
