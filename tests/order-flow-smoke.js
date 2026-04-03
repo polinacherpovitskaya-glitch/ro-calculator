@@ -420,6 +420,27 @@ async function smokeCalculatorPersistence(context) {
     assert.equal(selectedWarehouseItem.id, 701);
 }
 
+async function smokeEmptyPlaceholderProductIsNotSaved(context) {
+    const items = clone(await vm.runInContext(`(async () => {
+        Calculator.items = [Calculator.getEmptyItem(1)];
+        Calculator.hardwareItems = [Object.assign(Calculator.getEmptyHardware(null), {
+            source: 'warehouse',
+            warehouse_item_id: 901,
+            warehouse_sku: 'TR-050-WH',
+            name: 'Трос · 50 см · белый',
+            qty: 60,
+            result: { costPerUnit: 5, hoursHardware: 0.5 },
+        })];
+        Calculator.packagingItems = [];
+        Calculator.extraCosts = [];
+        Calculator.pendants = [];
+        return Calculator._collectItemsForSave();
+    })()`, context));
+
+    assert.equal(items.some(item => item.item_type === 'product'), false);
+    assert.equal(items.filter(item => item.item_type === 'hardware').length, 1);
+}
+
 async function smokeOrderDiscountAffectsSummaryAndFinDirector(context) {
     const data = clone(await vm.runInContext(`(() => {
         const params = { ...App.params, taxRate: 0.06, vatRate: 0.05, charityRate: 0.01 };
@@ -6079,6 +6100,7 @@ async function main() {
     stubRuntime(context);
 
     await smokeCalculatorPersistence(context);
+    await smokeEmptyPlaceholderProductIsNotSaved(context);
     await smokeHardwareOnlyAutosave(context);
     await smokeZeroCostWarehouseHardwareStillShowsInPricing(context);
     await smokeBlankPricingSeparatesCatalogPriceAndNetMargin(context);

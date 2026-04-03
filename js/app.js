@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v226';
+const APP_VERSION = 'v227';
 
 const App = {
     currentPage: 'orders',
@@ -1152,6 +1152,44 @@ const Calculator = {
             result: null,
             template_id: null,
         };
+    },
+
+    _isMeaningfulProductItem(item) {
+        if (!item || typeof item !== 'object') return false;
+
+        const hasPrintings = Array.isArray(item.printings) && item.printings.some(pr => {
+            if (!pr || typeof pr !== 'object') return false;
+            return !!String(pr.name || '').trim()
+                || (parseFloat(pr.qty) || 0) > 0
+                || (parseFloat(pr.price) || 0) > 0
+                || (parseFloat(pr.sell_price) || 0) > 0
+                || (parseFloat(pr.delivery_total) || 0) > 0;
+        });
+        const hasColors = Array.isArray(item.colors) && item.colors.length > 0;
+
+        return !!String(item.product_name || '').trim()
+            || (parseFloat(item.quantity) || 0) > 0
+            || (parseFloat(item.pieces_per_hour) || 0) > 0
+            || (parseFloat(item.weight_grams) || 0) > 0
+            || (parseFloat(item.extra_molds) || 0) > 0
+            || !!item.base_mold_in_stock
+            || !!item.complex_design
+            || !!item.is_blank_mold
+            || !!item.is_nfc
+            || !!item.nfc_programming
+            || !!item.nfc_warehouse_item_id
+            || !!item.delivery_included
+            || !!item.template_id
+            || !!item.color_id
+            || hasColors
+            || !!(item.color_solution_attachment && (item.color_solution_attachment.data_url || item.color_solution_attachment.name))
+            || hasPrintings
+            || (parseFloat(item.sell_price_item) || 0) > 0
+            || (parseFloat(item.sell_price_printing) || 0) > 0
+            || !!String(item.builtin_hw_name || '').trim()
+            || (parseFloat(item.builtin_hw_price) || 0) > 0
+            || (parseFloat(item.builtin_hw_delivery_total) || 0) > 0
+            || (parseFloat(item.builtin_hw_speed) || 0) > 0;
     },
 
     renderItemBlock(idx) {
@@ -4318,6 +4356,7 @@ const Calculator = {
 
         // Product items
         this.items.forEach(item => {
+            if (!this._isMeaningfulProductItem(item)) return;
             const r = item.result || getEmptyCostResult();
             const nfcWarehouseItemId = item.is_nfc && typeof getProductWarehouseDemandRows === 'function'
                 ? Number((getProductWarehouseDemandRows(item, this._getWhPickerItemsFlat())[0] || {}).warehouse_item_id || 0) || null
