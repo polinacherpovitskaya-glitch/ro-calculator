@@ -627,6 +627,65 @@ async function smokeZeroCostWarehouseHardwareStillShowsInPricing(context) {
     assert.match(pricingHtml, /sell-pkg-0/);
 }
 
+async function smokeLoadOrderHydratesZeroWarehousePriceFromCurrentStock(context) {
+    context.__loadOrderData = {
+        order: {
+            id: 9011,
+            order_name: 'Warehouse Price Recovery Order',
+            client_name: 'Smoke Client',
+            manager_name: 'Smoke',
+            status: 'completed',
+        },
+        items: [{
+            item_type: 'hardware',
+            product_name: 'Карабины · 5 см · красный',
+            quantity: 35,
+            hardware_source: 'warehouse',
+            hardware_price_per_unit: 0,
+            hardware_delivery_total: 0,
+            hardware_assembly_speed: 0,
+            hardware_warehouse_item_id: 501,
+            hardware_warehouse_sku: '',
+        }],
+        repaired_duplicates: false,
+    };
+    context.loadOrder = async () => clone(context.__loadOrderData);
+
+    vm.runInContext(`
+        Calculator.renderItemBlock = () => {};
+        Calculator.renderHardwareRow = () => {};
+        Calculator.renderPackagingRow = () => {};
+        Calculator.renderExtraCosts = () => {};
+        Calculator._renderPerItemHwPkg = () => {};
+        Calculator.recalculate = () => {};
+        Calculator.showOrderHistory = () => {};
+        Calculator._ensureWhPickerData = async function () {
+            this._whPickerData = {
+                carabiners: {
+                    label: 'Карабины',
+                    items: [{
+                        id: 501,
+                        name: 'Карабины',
+                        sku: 'CR-STD-050-RD',
+                        size: '5 см',
+                        color: 'красный',
+                        price_per_unit: 10,
+                        available_qty: 355,
+                    }],
+                },
+            };
+            return this._whPickerData;
+        };
+    `, context);
+
+    await vm.runInContext('Calculator.loadOrder(9011)', context);
+    const restored = clone(await vm.runInContext('Calculator.hardwareItems[0]', context));
+
+    assert.equal(restored.price, 10);
+    assert.equal(restored.warehouse_sku, 'CR-STD-050-RD');
+    assert.equal(restored.name, 'Карабины · 5 см · красный');
+}
+
 async function smokeBlankPricingSeparatesCatalogPriceAndNetMargin(context) {
     vm.runInContext(`
         App.getItemOriginLabel = (item) => item?.is_blank_mold ? 'бланк' : 'кастом';
@@ -6210,6 +6269,7 @@ async function main() {
     await smokeEmptyPlaceholderProductIsNotSaved(context);
     await smokeHardwareOnlyAutosave(context);
     await smokeZeroCostWarehouseHardwareStillShowsInPricing(context);
+    await smokeLoadOrderHydratesZeroWarehousePriceFromCurrentStock(context);
     await smokeBlankPricingSeparatesCatalogPriceAndNetMargin(context);
     await smokeOrderDiscountAffectsSummaryAndFinDirector(context);
     await smokeDiscountShownInCustomerInvoice(context);

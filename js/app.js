@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v229';
+const APP_VERSION = 'v230';
 
 const App = {
     currentPage: 'orders',
@@ -1823,6 +1823,32 @@ const Calculator = {
         };
     },
 
+    _hydrateWarehouseBackedLineFromCurrentWarehouse(line) {
+        if (!line || line.source !== 'warehouse' || !line.warehouse_item_id) return line;
+        const whItem = this._findWhItem(line.warehouse_item_id);
+        if (!whItem) return line;
+
+        if (!(parseFloat(line.price) > 0)) {
+            const warehousePrice = parseFloat(whItem.price_per_unit) || 0;
+            if (warehousePrice > 0) {
+                line.price = warehousePrice;
+            }
+        }
+
+        if (!String(line.warehouse_sku || '').trim() && whItem.sku) {
+            line.warehouse_sku = whItem.sku;
+        }
+
+        if (!String(line.name || '').trim()) {
+            const parts = [whItem.name];
+            if (whItem.size) parts.push(whItem.size);
+            if (whItem.color) parts.push(whItem.color);
+            line.name = parts.filter(Boolean).join(' · ');
+        }
+
+        return line;
+    },
+
     _getWhPickerDataForCurrentOrder() {
         if (!this._whPickerData) return null;
         const hasActiveReservations = !!(this._whCurrentOrderReservationMap && this._whCurrentOrderReservationMap.size > 0);
@@ -3340,9 +3366,11 @@ const Calculator = {
 
         // === Pre-calculate hw/pkg results (needed for per-item cost aggregation) ===
         this.hardwareItems.forEach(hw => {
+            this._hydrateWarehouseBackedLineFromCurrentWarehouse(hw);
             hw.result = calculateHardwareCost(hw, params);
         });
         this.packagingItems.forEach(pkg => {
+            this._hydrateWarehouseBackedLineFromCurrentWarehouse(pkg);
             pkg.result = calculatePackagingCost(pkg, params);
         });
 
@@ -4952,6 +4980,7 @@ const Calculator = {
             hw.weight_grams = dbHw.weight_grams || 0;
             hw.parent_item_index = dbHw.hardware_parent_item_index ?? null;
             hw._from_template = dbHw.hardware_from_template || false;
+            this._hydrateWarehouseBackedLineFromCurrentWarehouse(hw);
             // Save originals for diff on next save
             hw._original_qty = hw.qty;
             hw._original_warehouse_item_id = hw.warehouse_item_id;
@@ -4989,6 +5018,7 @@ const Calculator = {
             pkg.delivery_total = dbPkg.packaging_delivery_total || (perUnit * pkg.qty);
             pkg.delivery_price = pkg.qty > 0 ? round2(pkg.delivery_total / pkg.qty) : perUnit;
             pkg.sell_price = dbPkg.sell_price_packaging || 0;
+            this._hydrateWarehouseBackedLineFromCurrentWarehouse(pkg);
             this.packagingItems.push(pkg);
             const pkgIdx = this.packagingItems.length - 1;
             if (pkg.parent_item_index === null || pkg.parent_item_index === undefined) {
