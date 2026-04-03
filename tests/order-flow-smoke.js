@@ -4469,6 +4469,85 @@ async function smokeProjectHardwareZeroActualCanStayReady(context) {
     assert.equal(completion.readyRows, 1);
 }
 
+async function smokeProjectHardwareConcurrentMutationsStayConsistent(context) {
+    const order = {
+        id: 323,
+        order_name: 'Concurrent Hardware Order',
+        manager_name: 'Smoke',
+        status: 'production_hardware',
+        created_at: '2026-03-18T12:00:00.000Z',
+    };
+    const detail = {
+        order: clone(order),
+        items: [{
+            item_type: 'hardware',
+            product_name: 'Concurrent Hardware',
+            quantity: 5,
+            hardware_source: 'warehouse',
+            hardware_warehouse_item_id: 9022,
+        }],
+    };
+
+    context.__projectHardwareState = { checks: {}, actual_qtys: {} };
+    context.__reservations = [{
+        id: 1,
+        item_id: 9022,
+        order_id: 323,
+        order_name: 'Concurrent Hardware Order',
+        qty: 5,
+        status: 'active',
+        source: 'project_hardware',
+        created_at: '2026-03-18T12:00:00.000Z',
+    }];
+    context.__warehouseItems = [{
+        id: 9022,
+        name: 'Concurrent Hardware',
+        sku: 'CH-1',
+        category: 'hardware',
+        qty: 10,
+        unit: 'шт',
+        price_per_unit: 10,
+    }];
+    context.__warehouseHistory = [];
+    context.__orderDetails = { 323: clone(detail) };
+    context.loadProjectHardwareState = async () => clone(context.__projectHardwareState);
+    context.saveProjectHardwareState = async (state) => {
+        const snapshot = clone(state);
+        const hasReady = Boolean(snapshot?.checks?.['323:9022']);
+        await new Promise(resolve => setTimeout(resolve, hasReady ? 10 : 30));
+        context.__projectHardwareState = snapshot;
+    };
+    context.loadWarehouseReservations = async () => clone(context.__reservations);
+    context.saveWarehouseReservations = async (reservations) => {
+        context.__reservations = clone(reservations);
+    };
+    context.loadWarehouseItems = async () => clone(context.__warehouseItems);
+    context.saveWarehouseItems = async (items) => {
+        context.__warehouseItems = clone(items);
+    };
+    context.loadWarehouseHistory = async () => clone(context.__warehouseHistory);
+    context.saveWarehouseHistory = async (history) => {
+        context.__warehouseHistory = clone(history);
+    };
+    context.loadOrder = async (orderId) => clone(context.__orderDetails[Number(orderId)] || null);
+
+    vm.runInContext(`
+        Warehouse.projectHardwareState = null;
+        Warehouse.load = async () => {};
+    `, context);
+
+    await vm.runInContext(`Promise.all([
+        Warehouse.setProjectHardwareActualQty(323, 9022, '0'),
+        Warehouse.toggleProjectHardwareReady(323, 9022, true)
+    ])`, context);
+
+    assert.equal(context.__projectHardwareState.actual_qtys['323:9022'], 0);
+    assert.equal(Boolean(context.__projectHardwareState.checks['323:9022']), true);
+    assert.equal(context.__warehouseItems[0].qty, 10);
+    assert.equal(context.__warehouseHistory.length, 0);
+    assert.equal(context.__reservations.filter(item => Number(item.order_id) === 323 && item.status === 'active').length, 0);
+}
+
 async function smokeOrderDetailHardwareTabShowsAndEditsProjectHardware(context) {
     const order = {
         id: 777,
@@ -6151,6 +6230,7 @@ async function main() {
     await smokeProjectHardwareLegacyQtyAndStringIdDeduction(context);
     await smokeProjectHardwareActualQtyEditableFlow(context);
     await smokeProjectHardwareZeroActualCanStayReady(context);
+    await smokeProjectHardwareConcurrentMutationsStayConsistent(context);
     await smokeOrderDetailHardwareTabShowsAndEditsProjectHardware(context);
     await smokeProjectHardwareReadySyncDoesNotAutoReturnConsumedStock(context);
     await smokeProjectHardwareCollectedStateSurvivesStateLoss(context);

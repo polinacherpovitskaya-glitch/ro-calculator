@@ -242,6 +242,8 @@ const Warehouse = {
     _viewInitialized: false,
     _backgroundSyncPromise: null,
     _backgroundSyncScheduled: false,
+    _projectHardwareMutationQueue: Promise.resolve(),
+    _projectHardwareMutationDepth: 0,
 
     // Shipment state
     allShipments: [],
@@ -257,6 +259,7 @@ const Warehouse = {
     // ==========================================
 
     async load() {
+        await this._waitForProjectHardwareMutations();
         this.allItems = await loadWarehouseItems();
         this.allItems = await this._ensureRequiredSeedItems(this.allItems);
         await this._loadMoldOrders();
@@ -3479,6 +3482,36 @@ const Warehouse = {
         return `${Number(orderId) || 0}:${Number(itemId) || 0}`;
     },
 
+    async _waitForProjectHardwareMutations() {
+        const pending = this._projectHardwareMutationQueue;
+        if (!pending || typeof pending.then !== 'function') return;
+        await pending;
+    },
+
+    async _runProjectHardwareMutation(task) {
+        if (this._projectHardwareMutationDepth > 0) {
+            return await task();
+        }
+
+        const previous = this._projectHardwareMutationQueue || Promise.resolve();
+        const next = previous
+            .catch(() => undefined)
+            .then(async () => {
+                this._projectHardwareMutationDepth += 1;
+                try {
+                    return await task();
+                } finally {
+                    this._projectHardwareMutationDepth = Math.max(0, this._projectHardwareMutationDepth - 1);
+                }
+            });
+
+        this._projectHardwareMutationQueue = next.then(
+            () => undefined,
+            () => undefined
+        );
+        return await next;
+    },
+
     async _ensureProjectHardwareStateLoaded() {
         if (!this.projectHardwareState || typeof this.projectHardwareState !== 'object') {
             this.projectHardwareState = await loadProjectHardwareState();
@@ -3722,6 +3755,7 @@ const Warehouse = {
     },
 
     async toggleProjectHardwareReady(orderId, itemId, checked) {
+        return await this._runProjectHardwareMutation(async () => {
         const normalizedOrderId = Number(orderId || 0);
         const normalizedItemId = Number(itemId || 0);
         if (!normalizedOrderId || !normalizedItemId) return;
@@ -3843,9 +3877,11 @@ const Warehouse = {
         }
 
         await this.load();
+        });
     },
 
     async setProjectHardwareActualQty(orderId, itemId, rawValue) {
+        return await this._runProjectHardwareMutation(async () => {
         const normalizedOrderId = Number(orderId || 0);
         const normalizedItemId = Number(itemId || 0);
         if (!normalizedOrderId || !normalizedItemId) return;
@@ -3931,6 +3967,7 @@ const Warehouse = {
 
         App.toast(nextActual === null ? 'Фактическое количество сброшено к плановому' : 'Фактическое количество сохранено');
         await this.load();
+        });
     },
 
     _collectWarehouseDemandFromOrderItems(items) {
@@ -4645,6 +4682,7 @@ const Warehouse = {
     },
 
     async reconcileProjectHardwareReservations() {
+        return await this._runProjectHardwareMutation(async () => {
         await this._ensureProjectHardwareStateLoaded();
 
         const [orders, reservations, history] = await Promise.all([
@@ -4821,9 +4859,11 @@ const Warehouse = {
         }
 
         return { reservationsChanged, stateChanged, shortage };
+        });
     },
 
     async syncProjectHardwareOrderState({ orderId, orderName, managerName, status, currentItems, previousItems }) {
+        return await this._runProjectHardwareMutation(async () => {
         const normalizedOrderId = Number(orderId || 0);
         if (!normalizedOrderId) return { shortage: false, shortageRows: [], reservationsChanged: false, stateChanged: false };
 
@@ -5043,6 +5083,7 @@ const Warehouse = {
             currentItems,
         });
         return { shortage, shortageRows, reservationsChanged, stateChanged };
+        });
     },
 
     async renderProjectHardwareView(viewToken) {
