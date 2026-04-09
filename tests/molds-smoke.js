@@ -248,6 +248,50 @@ async function main() {
     assert.match(String(context.document.getElementById('pkg-blank-selected-info').textContent || ''), /Артикул: ENV-150/);
     assert.equal(String(context.document.getElementById('pkg-blank-notes').value || ''), '');
 
+    context.App.params.nfcTagCost = 39;
+    context.__savedInlineMold = null;
+    context.__reloadedInlineMolds = false;
+    context.saveMold = async (mold) => {
+        context.__savedInlineMold = JSON.parse(JSON.stringify(mold));
+        return mold.id;
+    };
+    vm.runInContext(`
+        Molds.allMolds = [{
+            id: 77,
+            name: 'Тестовый бланк',
+            status: 'active',
+            pph_min: 80,
+            pph_max: 100,
+            pph_actual: null,
+            weight_grams: 5,
+            complexity: 'simple',
+            mold_count: 1,
+            hw_name: '',
+            hw_price_per_unit: 0,
+            hw_delivery_total: 0,
+            hw_speed: null,
+            custom_prices: { 50: 500 },
+            custom_margins: {},
+            total_orders: 0,
+            total_units_produced: 0
+        }];
+        Molds.load = async () => { __reloadedInlineMolds = true; };
+    `, context);
+    context.document.getElementById('mold-inline-pph-77').value = '120';
+    context.document.getElementById('mold-inline-weight-77').value = '7.5';
+    context.document.getElementById('mold-inline-complexity-77').value = 'complex';
+    context.document.getElementById('mold-inline-count-77').value = '3';
+    context.document.getElementById('mold-inline-nfc-77').checked = true;
+
+    await vm.runInContext(`Molds.saveInlineMold(77)`, context);
+    assert.equal(context.__savedInlineMold.pph_actual, 120);
+    assert.equal(context.__savedInlineMold.weight_grams, 7.5);
+    assert.equal(context.__savedInlineMold.complexity, 'complex');
+    assert.equal(context.__savedInlineMold.mold_count, 3);
+    assert.equal(context.__savedInlineMold.hw_name, 'NFC метка');
+    assert.equal(context.__savedInlineMold.hw_price_per_unit, 39);
+    assert.equal(context.__reloadedInlineMolds, true);
+
     console.log('molds smoke checks passed');
 }
 

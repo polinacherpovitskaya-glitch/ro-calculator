@@ -404,6 +404,13 @@ const Molds = {
                     <td style="font-size:9px;color:var(--green);font-weight:600;padding:3px 4px;white-space:nowrap;">цена</td>
                     ${sellCells}
                 </tr>`;
+
+            html += `
+                <tr style="border-bottom:2px solid var(--border);background:rgba(0,0,0,.015);">
+                    <td colspan="${MOLD_TIERS.length + 3}" style="padding:8px 8px 10px;">
+                        ${this._renderInlineControls(m)}
+                    </td>
+                </tr>`;
         });
 
         html += '</tbody></table>';
@@ -425,6 +432,108 @@ const Molds = {
         </div>`;
 
         container.innerHTML = html;
+    },
+
+    _renderInlineControls(mold) {
+        const inlinePph = Number(mold.pph_actual || mold.pph_max || mold.pph_min || 0) || '';
+        const inlineWeight = Number(mold.weight_grams || 0) || '';
+        const inlineCount = Number(mold.mold_count || 1) || 1;
+        const inlineComplexity = String(mold.complexity || 'simple');
+        const nfcChecked = this._hasInlineNfcChip(mold);
+        const nfcCost = Number(App?.params?.nfcTagCost || App?.settings?.nfc_tag_cost || 0) || 0;
+        const hwHint = mold.hw_name && !nfcChecked ? `Текущая встроенная: ${this.esc(mold.hw_name)}` : 'Если нужен встроенный чип, проставь здесь';
+
+        return `
+            <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;">
+                <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text-secondary);min-width:92px;">
+                    <span>Шт/ч</span>
+                    <input id="mold-inline-pph-${mold.id}" type="number" min="0" step="1" class="input" style="width:92px;" value="${inlinePph}">
+                </label>
+                <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text-secondary);min-width:92px;">
+                    <span>Вес, г</span>
+                    <input id="mold-inline-weight-${mold.id}" type="number" min="0" step="0.01" class="input" style="width:92px;" value="${inlineWeight}">
+                </label>
+                <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text-secondary);min-width:170px;">
+                    <span>Тип молда</span>
+                    <select id="mold-inline-complexity-${mold.id}" class="input" style="width:170px;">
+                        <option value="simple" ${inlineComplexity === 'simple' ? 'selected' : ''}>Простой · 2ч · 800¥</option>
+                        <option value="complex" ${inlineComplexity === 'complex' ? 'selected' : ''}>Сложный · 2ч · 1000¥</option>
+                        <option value="nfc_triple" ${inlineComplexity === 'nfc_triple' ? 'selected' : ''}>Сложный 3 части · 3ч · 1200¥</option>
+                    </select>
+                </label>
+                <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text-secondary);min-width:92px;">
+                    <span>Кол-во частей</span>
+                    <input id="mold-inline-count-${mold.id}" type="number" min="1" max="5" step="1" class="input" style="width:92px;" value="${inlineCount}">
+                </label>
+                <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text-secondary);min-width:200px;">
+                    <span>NFC</span>
+                    <label style="display:flex;align-items:center;gap:6px;height:40px;padding:0 10px;border:1px solid var(--border);border-radius:10px;background:#fff;">
+                        <input id="mold-inline-nfc-${mold.id}" type="checkbox" ${nfcChecked ? 'checked' : ''}>
+                        <span style="font-size:12px;color:var(--text);">Встроить чип ${nfcCost > 0 ? `(+${formatRub(nfcCost)})` : ''}</span>
+                    </label>
+                </label>
+                <div style="display:flex;flex-direction:column;gap:4px;min-width:220px;">
+                    <span style="font-size:11px;color:var(--text-secondary);">Подсказка</span>
+                    <div style="height:40px;display:flex;align-items:center;font-size:11px;color:var(--text-muted);">${hwHint}</div>
+                </div>
+                <div style="display:flex;gap:6px;align-items:center;margin-left:auto;">
+                    <button class="btn btn-sm btn-primary" onclick="Molds.saveInlineMold(${mold.id})">Сохранить строку</button>
+                    <button class="btn btn-sm btn-outline" onclick="Molds.editMold(${mold.id})">Полная карточка</button>
+                </div>
+            </div>`;
+    },
+
+    _hasInlineNfcChip(mold) {
+        const name = String(mold?.hw_name || '').trim().toLowerCase();
+        return name === 'nfc метка' || name === 'nfc метка / чип' || name === 'nfc chip' || name === 'nfc';
+    },
+
+    async saveInlineMold(id) {
+        const mold = this.allMolds.find(x => x.id === id);
+        if (!mold) return;
+
+        const pphRaw = document.getElementById(`mold-inline-pph-${id}`)?.value;
+        const weightRaw = document.getElementById(`mold-inline-weight-${id}`)?.value;
+        const complexity = document.getElementById(`mold-inline-complexity-${id}`)?.value || mold.complexity || 'simple';
+        const countRaw = document.getElementById(`mold-inline-count-${id}`)?.value;
+        const wantsNfc = !!document.getElementById(`mold-inline-nfc-${id}`)?.checked;
+        const hadNfc = this._hasInlineNfcChip(mold);
+        const nfcCost = Number(App?.params?.nfcTagCost || App?.settings?.nfc_tag_cost || 0) || 0;
+
+        const next = {
+            ...mold,
+            pph_actual: (() => {
+                const value = Number(pphRaw);
+                return Number.isFinite(value) && value > 0 ? value : null;
+            })(),
+            weight_grams: (() => {
+                const value = Number(weightRaw);
+                return Number.isFinite(value) && value > 0 ? value : 0;
+            })(),
+            complexity,
+            mold_count: Math.max(1, Number.parseInt(countRaw, 10) || 1),
+        };
+
+        if (wantsNfc) {
+            next.hw_source = 'custom';
+            next.hw_name = 'NFC метка';
+            next.hw_price_per_unit = nfcCost;
+            next.hw_delivery_total = 0;
+            next.hw_speed = null;
+            next.hw_warehouse_item_id = null;
+            next.hw_warehouse_sku = '';
+        } else if (hadNfc) {
+            next.hw_name = '';
+            next.hw_price_per_unit = 0;
+            next.hw_delivery_total = 0;
+            next.hw_speed = null;
+            next.hw_warehouse_item_id = null;
+            next.hw_warehouse_sku = '';
+        }
+
+        await saveMold(next);
+        App.toast('Бланк обновлён');
+        await this.load();
     },
 
     // === Form logic ===
