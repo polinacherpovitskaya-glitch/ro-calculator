@@ -10,7 +10,7 @@
     <link rel="stylesheet" href="css/style.css?v=101">
     <script>
         (function () {
-            const CURRENT_HTML_VERSION = 'v236';
+            const CURRENT_HTML_VERSION = 'v237';
             const ATTEMPT_KEY = 'ro_calc_force_update_attempts';
 
             function parseVersion(version) {
@@ -81,7 +81,7 @@
     <aside class="sidebar">
         <div class="sidebar-brand">
             <h2>Recycle Object</h2>
-            <span>Калькулятор <span id="app-version">v236</span></span>
+            <span>Калькулятор <span id="app-version">v237</span></span>
         </div>
         <nav class="sidebar-nav">
             <a href="#tasks" data-page="tasks">
@@ -429,27 +429,19 @@
                         <div class="value" id="sum-hours">0 ч</div>
                     </div>
                 </div>
-                <div id="calc-discount-panel" style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-top:12px;padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--bg);">
-                    <div style="min-width:180px;flex:0 0 180px;">
-                        <div style="font-size:12px;color:var(--text-secondary);margin-bottom:6px;">Скидка по заказу</div>
-                        <select id="calc-discount-mode" class="input" onchange="Calculator.onDiscountModeChange(this.value)">
-                            <option value="none">Без скидки</option>
-                            <option value="amount">Сумма</option>
-                            <option value="percent">Процент</option>
-                        </select>
-                    </div>
-                    <div style="min-width:180px;flex:0 0 180px;">
-                        <div style="font-size:12px;color:var(--text-secondary);margin-bottom:6px;">Значение</div>
-                        <input id="calc-discount-value" class="input" type="text" inputmode="decimal" placeholder="0" disabled oninput="Calculator.onDiscountValueChange(this.value)">
-                    </div>
-                    <div id="calc-discount-summary" style="flex:1;min-width:240px;font-size:12px;color:var(--text-secondary);padding-bottom:2px;">
-                        Без скидки
-                    </div>
+                <div id="calc-discount-panel" style="display:flex;align-items:center;gap:8px;">
+                    <span style="font-size:12px;color:var(--text-secondary);white-space:nowrap">Скидка:</span>
+                    <select id="calc-discount-mode" class="input" style="width:130px" onchange="Calculator.onDiscountModeChange(this.value)">
+                        <option value="none">Без скидки</option>
+                        <option value="amount">Сумма</option>
+                        <option value="percent">Процент</option>
+                    </select>
+                    <input id="calc-discount-value" class="input" type="text" inputmode="decimal" placeholder="0" disabled style="width:90px" oninput="Calculator.onDiscountValueChange(this.value)">
+                    <span id="calc-discount-summary" style="font-size:12px;color:var(--text-secondary);white-space:nowrap">Без скидки</span>
                 </div>
-                <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px;">
-                    <button class="btn btn-success btn-lg" style="flex:1;min-width:200px;font-size:16px;padding:14px 24px;" onclick="Calculator.saveOrder()">Сохранить</button>
-                    <button class="btn btn-outline btn-lg" onclick="Calculator.resetForm()">Сброс</button>
-                    <button class="btn btn-outline btn-lg" onclick="Calculator.generateKP()">&#128196; Скачать КП</button>
+                <div style="display:flex;gap:8px;align-items:center">
+                    <button class="btn btn-outline" onclick="Calculator.generateKP()">&#128196; Скачать КП</button>
+                    <button class="btn btn-success" style="padding:10px 20px;font-weight:700" onclick="Calculator.saveOrder()">&#128190; Сохранить</button>
                 </div>
             </div>
 
@@ -459,12 +451,6 @@
                 <div id="calc-history-list" style="font-size:12px;"></div>
             </div>
 
-            <button
-                id="calc-save-fab"
-                class="btn btn-success"
-                onclick="Calculator.saveOrder()"
-                style="position:fixed;right:24px;bottom:84px;z-index:120;box-shadow:0 10px 25px rgba(0,0,0,.18);padding:14px 18px;border-radius:999px;font-weight:700;"
-            >Сохранить</button>
         </div>
 
         <!-- ========== ORDERS ========== -->
@@ -3439,7 +3425,7 @@
 <script src="js/supabase.js?v=163"></script>
 <script src="js/task-events.js?v=1"></script>
 <script src="js/calculator.js?v=75"></script>
-    <script src="js/app.js?v=236"></script>
+    <script src="js/app.js?v=237"></script>
 <script src="js/wiki.js?v=4"></script>
 <script src="js/order-detail.js?v=62"></script>
 <script src="js/orders.js?v=64"></script>
@@ -3462,7 +3448,7 @@
 <script src="js/marketplaces.js?v=78"></script>
 <script src="js/warehouse.js?v=179"></script>
 <script src="js/monitoring.js?v=1"></script>
-<script src="js/settings.js?v=80"></script>
+<script src="js/settings.js?v=81"></script>
 <script src="js/pendant.js?v=12"></script>
 </body>
 </html>
