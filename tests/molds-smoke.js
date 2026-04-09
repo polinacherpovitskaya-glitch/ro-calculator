@@ -138,6 +138,16 @@ async function main() {
     const context = createContext();
     runScript(context, 'js/molds.js');
 
+    assert.equal(vm.runInContext('getBlankMargin(10)', context), 0.65);
+    assert.equal(vm.runInContext('getBlankMargin(50)', context), 0.60);
+    assert.equal(vm.runInContext('getBlankMargin(100)', context), 0.55);
+    assert.equal(vm.runInContext('getBlankMargin(300)', context), 0.50);
+    assert.equal(vm.runInContext('getBlankMargin(500)', context), 0.45);
+    assert.equal(vm.runInContext('getBlankMargin(1000)', context), 0.40);
+    assert.equal(vm.runInContext('getBlankMargin(3000)', context), 0.35);
+    assert.equal(vm.runInContext('roundTo5(1162)', context), 1160);
+    assert.equal(vm.runInContext('roundTo5(1163)', context), 1165);
+
     [
         'hw-blank-wh-search',
         'hw-blank-wh-dropdown',

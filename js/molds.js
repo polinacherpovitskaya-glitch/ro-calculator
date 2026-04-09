@@ -13,55 +13,59 @@
 // Макс. производительность = 5000 шт * 0.9 = 4500 шт
 const MOLD_MAX_LIFETIME = 4500; // максимальный ресурс молда (шт)
 
-const MOLD_TIERS = [50, 100, 300, 500, 1000, 3000];
+const MOLD_TIERS = [10, 50, 100, 300, 500, 1000, 3000];
 
 // Тиражные маржи бланков
 // margin — наценка на себестоимость, mult = 1.00 (маржа уже включает всё)
 // Совпадают с CALC_TIER_MARGINS из calculator.js для единообразия
 // Округление до 5₽ (roundTo5)
 const BLANKS_TIER_MARGINS = [
-    { min: 0,    max: 75,       margin: 0.75, mult: 1.00 },  // 50 шт  → 75%
-    { min: 75,   max: 200,      margin: 0.70, mult: 1.00 },  // 100 шт → 70%
-    { min: 200,  max: 400,      margin: 0.60, mult: 1.00 },  // 300 шт → 60%
-    { min: 400,  max: 750,      margin: 0.50, mult: 1.00 },  // 500 шт → 50%
-    { min: 750,  max: 2500,     margin: 0.45, mult: 1.00 },  // 1K шт  → 45%
-    { min: 2500, max: Infinity, margin: 0.40, mult: 1.00 },  // 3K шт  → 40%
+    { max: 10, margin: 0.65, mult: 1.00 },
+    { max: 50, margin: 0.60, mult: 1.00 },
+    { max: 100, margin: 0.55, mult: 1.00 },
+    { max: 300, margin: 0.50, mult: 1.00 },
+    { max: 500, margin: 0.45, mult: 1.00 },
+    { max: 1000, margin: 0.40, mult: 1.00 },
+    { max: Infinity, margin: 0.35, mult: 1.00 },
 ];
 
 /**
- * Округление цены вверх до ближайшего кратного 5₽
- * 517₽ → 520₽, 531₽ → 535₽, 100₽ → 100₽
+ * Округление цены до ближайшего кратного 5₽
+ * 1162₽ → 1160₽, 1163₽ → 1165₽, 100₽ → 100₽
  */
 function roundTo5(n) {
-    return Math.ceil(n / 5) * 5;
+    return Math.round(n / 5) * 5;
 }
 
 function getBlankMargin(qty) {
-    const tier = BLANKS_TIER_MARGINS.find(t => qty >= t.min && qty < t.max);
-    return tier ? tier.margin : 0.40;
+    const normalizedQty = Number(qty) || 0;
+    const tier = BLANKS_TIER_MARGINS.find(t => normalizedQty <= t.max);
+    return tier ? tier.margin : 0.35;
 }
 
 function getBlankMultiplier(qty) {
-    const tier = BLANKS_TIER_MARGINS.find(t => qty >= t.min && qty < t.max);
+    const normalizedQty = Number(qty) || 0;
+    const tier = BLANKS_TIER_MARGINS.find(t => normalizedQty <= t.max);
     return tier ? tier.mult : 1.00;
 }
 
 /**
  * Таргет цена бланка
- * Формула: себест / (1 - ОСН - коммерч. - чистая маржа)
+ * Формула: себест / (1 - НДС - ОСН - благотворительность - коммерч. - чистая маржа)
  *
  * Маржа — «в сухом остатке» после вычета налогов:
  *   50=75%, 100=70%, 300=60%, 500=50%, 1K=45%, 3K=40%
  *
- * ОСН 6% + благотворительность 1% + коммерческий 6.5% удерживаются из цены.
+ * НДС 5% + ОСН 6% + благотворительность 1% + коммерческий 6.5% удерживаются из цены.
  */
 function calcBlankTargetPrice(cost, qty, params) {
     if (cost <= 0 || qty <= 0) return 0;
     const margin = getBlankMargin(qty);
     const taxRate = Number.isFinite(params?.taxRate) ? params.taxRate : 0.06;
+    const vatRate = Number.isFinite(params?.vatRate) ? params.vatRate : 0.05;
     const charityRate = Number.isFinite(params?.charityRate) ? params.charityRate : 0.01;
     const commercialRate = 0.065;
-    const keepRate = 1 - taxRate - charityRate - commercialRate - margin;
+    const keepRate = 1 - vatRate - taxRate - charityRate - commercialRate - margin;
     if (keepRate <= 0) return 0;
     return round2(cost / keepRate);
 }
@@ -74,10 +78,11 @@ function calcBlankTargetPrice(cost, qty, params) {
 function calcSellByNetMargin40(cost, params) {
     if (!Number.isFinite(cost) || cost <= 0) return 0;
     const taxRate = Number.isFinite(params?.taxRate) ? params.taxRate : 0.06;
+    const vatRate = Number.isFinite(params?.vatRate) ? params.vatRate : 0.05;
     const charityRate = Number.isFinite(params?.charityRate) ? params.charityRate : 0.01;
     const commercialRate = 0.065;
     const margin = 0.40;
-    const keepRate = 1 - taxRate - charityRate - commercialRate - margin;
+    const keepRate = 1 - vatRate - taxRate - charityRate - commercialRate - margin;
     if (keepRate <= 0) return 0;
     return round2(cost / keepRate);
 }
@@ -180,41 +185,42 @@ const Molds = {
             // Амортизация молда = стоимость / макс. ресурс (4500 шт), одинаковая для всех тиражей
             const moldAmortPerUnit = m.cost_rub_calc / MOLD_MAX_LIFETIME;
 
+            // Себестоимость для всех тиражей привязана к модели 50 шт.
+            const baseQtyForCost = 50;
+            const baseItem = {
+                quantity: baseQtyForCost,
+                pieces_per_hour: pph,
+                weight_grams: weight,
+                extra_molds: 0,
+                complex_design: false,
+                is_nfc: m.category === 'nfc',
+                nfc_programming: m.category === 'nfc',
+                hardware_qty: 0,
+                packaging_qty: 0,
+                printing_qty: 0,
+                delivery_included: false,
+            };
+
+            const baseResult = calculateItemCost(baseItem, params);
+            let baseAdjustedCost = baseResult.costTotal - baseResult.costMoldAmortization + moldAmortPerUnit;
+            let baseHwCostPerUnit = 0;
+            if (m.hw_name && (m.hw_price_per_unit > 0 || m.hw_speed > 0)) {
+                baseHwCostPerUnit = m.hw_price_per_unit + (m.hw_delivery_total ? m.hw_delivery_total / baseQtyForCost : 0);
+                if (m.hw_speed > 0) {
+                    const hwHours = baseQtyForCost / m.hw_speed * (params.wasteFactor || 1.1);
+                    baseHwCostPerUnit += hwHours * params.fotPerHour / baseQtyForCost;
+                    if (params.indirectCostMode === 'all') {
+                        baseHwCostPerUnit += params.indirectPerHour * hwHours / baseQtyForCost;
+                    }
+                }
+                baseAdjustedCost += baseHwCostPerUnit;
+            }
+
             // Calculate cost per unit at each tier
             m.tiers = {};
             MOLD_TIERS.forEach(qty => {
-                const item = {
-                    quantity: qty,
-                    pieces_per_hour: pph,
-                    weight_grams: weight,
-                    extra_molds: 0,
-                    complex_design: false,
-                    is_nfc: m.category === 'nfc',
-                    nfc_programming: m.category === 'nfc',
-                    hardware_qty: 0,
-                    packaging_qty: 0,
-                    printing_qty: 0,
-                    delivery_included: false,
-                };
-
-                const result = calculateItemCost(item, params);
-                // Replace default mold amortization with real cost / MOLD_MAX_LIFETIME
-                let adjustedCost = result.costTotal - result.costMoldAmortization + moldAmortPerUnit;
-
-                // Add built-in hardware cost if present
-                let hwCostPerUnit = 0;
-                if (m.hw_name && (m.hw_price_per_unit > 0 || m.hw_speed > 0)) {
-                    hwCostPerUnit = m.hw_price_per_unit + (m.hw_delivery_total ? m.hw_delivery_total / qty : 0);
-                    // Add assembly labor if hw_speed is set
-                    if (m.hw_speed > 0) {
-                        const hwHours = qty / m.hw_speed * (params.wasteFactor || 1.1);
-                        hwCostPerUnit += hwHours * params.fotPerHour / qty;
-                        if (params.indirectCostMode === 'all') {
-                            hwCostPerUnit += params.indirectPerHour * hwHours / qty;
-                        }
-                    }
-                    adjustedCost += hwCostPerUnit;
-                }
+                const adjustedCost = round2(baseAdjustedCost);
+                const hwCostPerUnit = round2(baseHwCostPerUnit);
 
                 // Таргет = формула 70/30 с тиражной маржой (65%@50 → 35%@3K)
                 // Check for custom price override first, then custom margin, then standard
@@ -231,7 +237,12 @@ const Molds = {
                     isCustom = true;
                 } else if (customMargin !== null && customMargin !== undefined) {
                     // Custom margin percentage override
-                    const keepRate = 1 - (params.taxRate || 0.06) - (Number.isFinite(params?.charityRate) ? params.charityRate : 0.01) - 0.065 - margin;
+                    const keepRate = 1
+                        - (Number.isFinite(params?.vatRate) ? params.vatRate : 0.05)
+                        - (params.taxRate || 0.06)
+                        - (Number.isFinite(params?.charityRate) ? params.charityRate : 0.01)
+                        - 0.065
+                        - margin;
                     targetPrice = keepRate > 0 ? round2(adjustedCost / keepRate) : 0;
                     sellPrice = roundTo5(targetPrice);
                     isCustom = true;
@@ -242,7 +253,11 @@ const Molds = {
                 }
 
                 // Calculate actual net margin after OSN + commercial, VAT excluded.
-                const keepNetRate = 1 - (params.taxRate || 0.06) - (Number.isFinite(params?.charityRate) ? params.charityRate : 0.01) - 0.065;
+                const keepNetRate = 1
+                    - (Number.isFinite(params?.vatRate) ? params.vatRate : 0.05)
+                    - (params.taxRate || 0.06)
+                    - (Number.isFinite(params?.charityRate) ? params.charityRate : 0.01)
+                    - 0.065;
                 const actualMargin = sellPrice > 0
                     ? round2(((sellPrice * keepNetRate) - adjustedCost) / sellPrice)
                     : margin;

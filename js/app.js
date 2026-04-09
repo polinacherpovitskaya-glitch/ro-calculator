@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v230';
+const APP_VERSION = 'v231';
 
 const App = {
     currentPage: 'orders',
@@ -3642,8 +3642,9 @@ const Calculator = {
         const weight = Number(tpl.weight_grams || item.weight_grams || 0);
         if (!pph || pph <= 0) return 0;
 
+        const baseQtyForCost = 50;
         const calcItem = {
-            quantity: qty,
+            quantity: baseQtyForCost,
             pieces_per_hour: pph,
             weight_grams: weight,
             extra_molds: 0,
@@ -3667,13 +3668,13 @@ const Calculator = {
         let adjusted = Number(base.costTotal || 0) - Number(base.costMoldAmortization || 0) + moldAmortPerUnit;
 
         if (tpl.hw_name && (Number(tpl.hw_price_per_unit || 0) > 0 || Number(tpl.hw_speed || 0) > 0)) {
-            let hwCost = Number(tpl.hw_price_per_unit || 0) + (Number(tpl.hw_delivery_total || 0) > 0 ? Number(tpl.hw_delivery_total || 0) / qty : 0);
+            let hwCost = Number(tpl.hw_price_per_unit || 0) + (Number(tpl.hw_delivery_total || 0) > 0 ? Number(tpl.hw_delivery_total || 0) / baseQtyForCost : 0);
             const hwSpeed = Number(tpl.hw_speed || 0);
             if (hwSpeed > 0) {
-                const hwHours = qty / hwSpeed * (params.wasteFactor || 1.1);
-                hwCost += hwHours * params.fotPerHour / qty;
+                const hwHours = baseQtyForCost / hwSpeed * (params.wasteFactor || 1.1);
+                hwCost += hwHours * params.fotPerHour / baseQtyForCost;
                 if (params.indirectCostMode === 'all') {
-                    hwCost += params.indirectPerHour * hwHours / qty;
+                    hwCost += params.indirectPerHour * hwHours / baseQtyForCost;
                 }
             }
             adjusted += hwCost;
@@ -3718,7 +3719,12 @@ const Calculator = {
 
         const calcTarget = (cost, marginPct) => {
             if (cost === 0) return 0;
-            const keepRate = 1 - (params.taxRate || 0.06) - (Number.isFinite(params?.charityRate) ? params.charityRate : 0.01) - 0.065 - marginPct;
+            const keepRate = 1
+                - (Number.isFinite(params?.vatRate) ? params.vatRate : 0.05)
+                - (params.taxRate || 0.06)
+                - (Number.isFinite(params?.charityRate) ? params.charityRate : 0.01)
+                - 0.065
+                - marginPct;
             if (keepRate <= 0) return 0;
             return round2(cost / keepRate);
         };
@@ -3726,17 +3732,18 @@ const Calculator = {
         const roundTo5Safe = (value) => {
             if (!Number.isFinite(value) || value <= 0) return 0;
             if (typeof roundTo5 === 'function') return roundTo5(value);
-            return Math.ceil(value / 5) * 5;
+            return Math.round(value / 5) * 5;
         };
 
         const getBlankTierMarginLocal = (qty) => {
             const normalizedQty = Number(qty) || 0;
-            if (normalizedQty < 75) return 0.75;
-            if (normalizedQty < 200) return 0.70;
-            if (normalizedQty < 400) return 0.60;
-            if (normalizedQty < 750) return 0.50;
-            if (normalizedQty < 2500) return 0.45;
-            return 0.40;
+            if (normalizedQty <= 10) return 0.65;
+            if (normalizedQty <= 50) return 0.60;
+            if (normalizedQty <= 100) return 0.55;
+            if (normalizedQty <= 300) return 0.50;
+            if (normalizedQty <= 500) return 0.45;
+            if (normalizedQty <= 1000) return 0.40;
+            return 0.35;
         };
 
         const getBlankCatalogPricing = (cost, qty, tpl) => {
@@ -3756,9 +3763,10 @@ const Calculator = {
             }
 
             const taxRate = Number.isFinite(params?.taxRate) ? params.taxRate : 0.06;
+            const vatRate = Number.isFinite(params?.vatRate) ? params.vatRate : 0.05;
             const charityRate = Number.isFinite(params?.charityRate) ? params.charityRate : 0.01;
             const commercialRate = 0.065;
-            const keepRate = 1 - taxRate - charityRate - commercialRate - margin;
+            const keepRate = 1 - vatRate - taxRate - charityRate - commercialRate - margin;
             if (keepRate <= 0) {
                 return { price: 0, note: 'прайс бланков', source: 'empty' };
             }

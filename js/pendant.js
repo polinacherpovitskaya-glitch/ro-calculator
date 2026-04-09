@@ -1203,19 +1203,20 @@ const Pendant = {
         }
         if (!totalElements || totalElements <= 0) return null;
         const LETTER_BLANK_IDS = [30, 31];
-        const TIERS = [50, 100, 300, 500, 1000, 3000];
+        const TIERS = [10, 50, 100, 300, 500, 1000, 3000];
         const resolveDefaultBlankMargin = (qty) => {
             if (typeof getBlankMargin === 'function') return getBlankMargin(qty);
-            if (qty < 75) return 0.75;
-            if (qty < 200) return 0.70;
-            if (qty < 400) return 0.60;
-            if (qty < 750) return 0.50;
-            if (qty < 2500) return 0.45;
-            return 0.40;
+            if (qty <= 10) return 0.65;
+            if (qty <= 50) return 0.60;
+            if (qty <= 100) return 0.55;
+            if (qty <= 300) return 0.50;
+            if (qty <= 500) return 0.45;
+            if (qty <= 1000) return 0.40;
+            return 0.35;
         };
         const roundPriceTo5 = (value) => {
             if (typeof roundTo5 === 'function') return roundTo5(value);
-            return Math.ceil(value / 5) * 5;
+            return Math.round(value / 5) * 5;
         };
 
         // Find closest tier (round up to next tier)
@@ -1255,8 +1256,9 @@ const Pendant = {
         const moldAmortPerUnit = moldTotalCost / MOLD_MAX_LIFETIME;
 
         // Simplified item cost calc (plastic + labor + indirect + mold amort)
+        const baseQtyForCost = 50;
         const item = {
-            quantity: tierQty,
+            quantity: baseQtyForCost,
             pieces_per_hour: pph,
             weight_grams: weight,
             extra_molds: 0,
@@ -1276,12 +1278,12 @@ const Pendant = {
 
         // Add built-in hw cost (assembly)
         if (tpl.hw_name && (tpl.hw_price_per_unit > 0 || tpl.hw_speed > 0)) {
-            let hwCost = tpl.hw_price_per_unit + (tpl.hw_delivery_total ? tpl.hw_delivery_total / tierQty : 0);
+            let hwCost = tpl.hw_price_per_unit + (tpl.hw_delivery_total ? tpl.hw_delivery_total / baseQtyForCost : 0);
             if (tpl.hw_speed > 0) {
-                const hwHours = tierQty / tpl.hw_speed * (params.wasteFactor || 1.1);
-                hwCost += hwHours * params.fotPerHour / tierQty;
+                const hwHours = baseQtyForCost / tpl.hw_speed * (params.wasteFactor || 1.1);
+                hwCost += hwHours * params.fotPerHour / baseQtyForCost;
                 if (params.indirectCostMode === 'all') {
-                    hwCost += params.indirectPerHour * hwHours / tierQty;
+                    hwCost += params.indirectPerHour * hwHours / baseQtyForCost;
                 }
             }
             cost += hwCost;
@@ -1294,13 +1296,21 @@ const Pendant = {
         if (sellPrice <= 0 && cost > 0) {
             const customMargin = Number(tpl.custom_margins?.[tierQty]);
             targetMargin = Number.isFinite(customMargin) ? customMargin : resolveDefaultBlankMargin(tierQty);
-            const keepNetRate = 1 - (Number.isFinite(params.taxRate) ? params.taxRate : 0.06) - 0.05;
+            const keepNetRate = 1
+                - (Number.isFinite(params.vatRate) ? params.vatRate : 0.05)
+                - (Number.isFinite(params.taxRate) ? params.taxRate : 0.06)
+                - (Number.isFinite(params.charityRate) ? params.charityRate : 0.01)
+                - 0.065;
             if (keepNetRate > 0 && targetMargin < 1) {
                 sellPrice = roundPriceTo5(round2(cost / (1 - targetMargin) / keepNetRate));
             }
         }
 
-        const keepNetRate = 1 - (Number.isFinite(params.taxRate) ? params.taxRate : 0.06) - 0.05;
+        const keepNetRate = 1
+            - (Number.isFinite(params.vatRate) ? params.vatRate : 0.05)
+            - (Number.isFinite(params.taxRate) ? params.taxRate : 0.06)
+            - (Number.isFinite(params.charityRate) ? params.charityRate : 0.01)
+            - 0.065;
         const margin = sellPrice > 0
             ? round2(((sellPrice * keepNetRate) - cost) / sellPrice)
             : targetMargin;

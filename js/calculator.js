@@ -541,29 +541,39 @@ function getPendantLetterBlankMetrics(totalElements, params) {
             targetMargin = customMargin;
         } else if (typeof getBlankMargin === 'function') {
             targetMargin = getBlankMargin(tierQty);
-        } else if (tierQty < 75) {
-            targetMargin = 0.75;
-        } else if (tierQty < 200) {
-            targetMargin = 0.70;
-        } else if (tierQty < 400) {
+        } else if (tierQty <= 10) {
+            targetMargin = 0.65;
+        } else if (tierQty <= 50) {
             targetMargin = 0.60;
-        } else if (tierQty < 750) {
+        } else if (tierQty <= 100) {
+            targetMargin = 0.55;
+        } else if (tierQty <= 300) {
             targetMargin = 0.50;
-        } else if (tierQty < 2500) {
+        } else if (tierQty <= 500) {
             targetMargin = 0.45;
-        } else {
+        } else if (tierQty <= 1000) {
             targetMargin = 0.40;
+        } else {
+            targetMargin = 0.35;
         }
-        const keepNetRate = 1 - (Number.isFinite(params?.taxRate) ? params.taxRate : 0.06) - 0.05;
+        const keepNetRate = 1
+            - (Number.isFinite(params?.vatRate) ? params.vatRate : 0.05)
+            - (Number.isFinite(params?.taxRate) ? params.taxRate : 0.06)
+            - (Number.isFinite(params?.charityRate) ? params.charityRate : 0.01)
+            - 0.065;
         if (keepNetRate > 0 && targetMargin < 1) {
             const rawSellPrice = round2(cost / (1 - targetMargin) / keepNetRate);
             sellPrice = typeof roundTo5 === 'function'
                 ? roundTo5(rawSellPrice)
-                : Math.ceil(rawSellPrice / 5) * 5;
+                : Math.round(rawSellPrice / 5) * 5;
         }
     }
 
-    const keepNetRate = 1 - (Number.isFinite(params?.taxRate) ? params.taxRate : 0.06) - 0.05;
+    const keepNetRate = 1
+        - (Number.isFinite(params?.vatRate) ? params.vatRate : 0.05)
+        - (Number.isFinite(params?.taxRate) ? params.taxRate : 0.06)
+        - (Number.isFinite(params?.charityRate) ? params.charityRate : 0.01)
+        - 0.065;
     const margin = sellPrice > 0
         ? round2(((sellPrice * keepNetRate) - cost) / sellPrice)
         : targetMargin;
@@ -663,21 +673,24 @@ function calculatePendantCost(pendant, params) {
  * Множитель = 1.00 (маржа уже включает всё), округление до 5₽
  */
 const CALC_TIER_MARGINS = [
-    { min: 0, max: 75, margin: 0.75, mult: 1.00 },       // 50 шт  → 75%
-    { min: 75, max: 200, margin: 0.70, mult: 1.00 },      // 100 шт → 70%
-    { min: 200, max: 400, margin: 0.60, mult: 1.00 },     // 300 шт → 60%
-    { min: 400, max: 750, margin: 0.50, mult: 1.00 },     // 500 шт → 50%
-    { min: 750, max: 2500, margin: 0.45, mult: 1.00 },    // 1K шт  → 45%
-    { min: 2500, max: Infinity, margin: 0.40, mult: 1.00 },// 3K шт  → 40%
+    { max: 10, margin: 0.65, mult: 1.00 },
+    { max: 50, margin: 0.60, mult: 1.00 },
+    { max: 100, margin: 0.55, mult: 1.00 },
+    { max: 300, margin: 0.50, mult: 1.00 },
+    { max: 500, margin: 0.45, mult: 1.00 },
+    { max: 1000, margin: 0.40, mult: 1.00 },
+    { max: Infinity, margin: 0.35, mult: 1.00 },
 ];
 
 function getMarginForQty(qty) {
-    const tier = CALC_TIER_MARGINS.find(t => qty >= t.min && qty < t.max);
-    return tier ? tier.margin : 0.40;
+    const normalizedQty = Number(qty) || 0;
+    const tier = CALC_TIER_MARGINS.find(t => normalizedQty <= t.max);
+    return tier ? tier.margin : 0.35;
 }
 
 function getMultiplierForQty(qty) {
-    const tier = CALC_TIER_MARGINS.find(t => qty >= t.min && qty < t.max);
+    const normalizedQty = Number(qty) || 0;
+    const tier = CALC_TIER_MARGINS.find(t => normalizedQty <= t.max);
     return tier ? tier.mult : 1.00;
 }
 
