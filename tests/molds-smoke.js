@@ -282,20 +282,21 @@ async function main() {
     context.document.getElementById('mold-inline-pph-77').value = '120';
     context.document.getElementById('mold-inline-weight-77').value = '7.5';
     context.document.getElementById('mold-inline-complexity-77').value = 'complex';
-    context.document.getElementById('mold-inline-count-77').value = '3';
     context.document.getElementById('mold-inline-nfc-77').checked = true;
 
     await vm.runInContext(`Molds.saveInlineMold(77)`, context);
     assert.equal(context.__savedInlineMold.pph_actual, 120);
     assert.equal(context.__savedInlineMold.weight_grams, 7.5);
     assert.equal(context.__savedInlineMold.complexity, 'complex');
-    assert.equal(context.__savedInlineMold.mold_count, 3);
+    assert.equal(context.__savedInlineMold.mold_count, 1);
     assert.equal(context.__savedInlineMold.hw_name, 'NFC метка');
     assert.equal(context.__savedInlineMold.hw_price_per_unit, 39);
     assert.equal(context.__savedInlineMold.use_manual_prices, false);
     assert.deepEqual(context.__savedInlineMold.custom_prices, {});
     assert.deepEqual(context.__savedInlineMold.custom_margins, {});
     assert.equal(context.__reloadedInlineMolds, true);
+    const inlineHtml = String(vm.runInContext(`Molds._renderInlineControls(Molds.allMolds[0])`, context));
+    assert.doesNotMatch(inlineHtml, /Кол-во частей/);
 
     vm.runInContext(`
         Molds.allMolds = [{
