@@ -60,6 +60,7 @@ const Import = {
             fact_printing: 0,
             fact_molds: 0,
             fact_taxes: 0,
+            fact_charity: 0,
             fact_other: 0,
             fact_total: 0,
             fact_revenue: 0,
@@ -81,6 +82,8 @@ const Import = {
             'нанесение': 'fact_printing',
             'молд': 'fact_molds',
             'форма': 'fact_molds',
+            'благотвор': 'fact_charity',
+            'благотв': 'fact_charity',
             'налог': 'fact_taxes',
             'ндс': 'fact_taxes',
             'выручка': 'fact_revenue',
@@ -110,7 +113,7 @@ const Import = {
 
         result.fact_total = result.fact_salary + result.fact_materials + result.fact_hardware
             + result.fact_delivery + result.fact_printing + result.fact_molds
-            + result.fact_taxes + result.fact_other;
+            + result.fact_taxes + result.fact_charity + result.fact_other;
 
         return result;
     },
@@ -128,6 +131,7 @@ const Import = {
             <div class="cost-row"><span class="cost-label">Нанесение</span><span class="cost-value">${formatRub(d.fact_printing)}</span></div>
             <div class="cost-row"><span class="cost-label">Молды</span><span class="cost-value">${formatRub(d.fact_molds)}</span></div>
             <div class="cost-row"><span class="cost-label">Налоги</span><span class="cost-value">${formatRub(d.fact_taxes)}</span></div>
+            <div class="cost-row"><span class="cost-label">Благотворительность</span><span class="cost-value">${formatRub(d.fact_charity)}</span></div>
             <div class="cost-row"><span class="cost-label">Прочее</span><span class="cost-value">${formatRub(d.fact_other)}</span></div>
             <div class="cost-row cost-total"><span class="cost-label">ИТОГО расходы</span><span class="cost-value">${formatRub(d.fact_total)}</span></div>
             <div class="cost-row" style="margin-top:8px"><span class="cost-label">Выручка</span><span class="cost-value text-green">${formatRub(d.fact_revenue)}</span></div>
@@ -150,6 +154,7 @@ const Import = {
             fact_printing: d.fact_printing,
             fact_molds: d.fact_molds,
             fact_taxes: d.fact_taxes,
+            fact_charity: d.fact_charity,
             fact_other: d.fact_other,
             fact_total: d.fact_total,
             fact_revenue: d.fact_revenue,

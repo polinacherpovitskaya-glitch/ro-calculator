@@ -10,7 +10,7 @@
     <link rel="stylesheet" href="css/style.css?v=101">
     <script>
         (function () {
-            const CURRENT_HTML_VERSION = 'v240';
+            const CURRENT_HTML_VERSION = 'v241';
             const ATTEMPT_KEY = 'ro_calc_force_update_attempts';
 
             function parseVersion(version) {
@@ -81,7 +81,7 @@
     <aside class="sidebar">
         <div class="sidebar-brand">
             <h2>Recycle Object</h2>
-            <span>Калькулятор <span id="app-version">v240</span></span>
+            <span>Калькулятор <span id="app-version">v241</span></span>
         </div>
         <nav class="sidebar-nav">
             <a href="#tasks" data-page="tasks">
@@ -402,7 +402,8 @@
                     <div class="cost-row"><span class="cost-label">Пластик</span><span class="cost-value" id="fin-plastic">0 &#8381;</span></div>
                     <div class="cost-row"><span class="cost-label">Молды</span><span class="cost-value" id="fin-molds">0 &#8381;</span></div>
                     <div class="cost-row"><span class="cost-label">Доставка клиенту</span><span class="cost-value" id="fin-delivery">0 &#8381;</span></div>
-                    <div class="cost-row"><span class="cost-label">Налоги + благотворительность (НДС 5% + налог 6% + 1%)</span><span class="cost-value" id="fin-taxes">0 &#8381;</span></div>
+                    <div class="cost-row"><span class="cost-label">Налоги (НДС 5% + налог 6%)</span><span class="cost-value" id="fin-taxes">0 &#8381;</span></div>
+                    <div class="cost-row"><span class="cost-label">Благотворительность (1%)</span><span class="cost-value" id="fin-charity">0 &#8381;</span></div>
                     <div class="cost-row cost-total"><span class="cost-label">ИТОГО расходы</span><span class="cost-value" id="fin-total-costs">0 &#8381;</span></div>
                     <div class="cost-row" id="fin-discount-row" style="display:none"><span class="cost-label">Скидка по заказу</span><span class="cost-value" id="fin-discount">0 &#8381;</span></div>
                     <div class="cost-row" style="margin-top:8px"><span class="cost-label">Выручка</span><span class="cost-value text-green" id="fin-revenue">0 &#8381;</span></div>
@@ -3425,7 +3426,7 @@
 <script src="js/supabase.js?v=163"></script>
 <script src="js/task-events.js?v=1"></script>
 <script src="js/calculator.js?v=75"></script>
-    <script src="js/app.js?v=240"></script>
+    <script src="js/app.js?v=241"></script>
 <script src="js/wiki.js?v=4"></script>
 <script src="js/order-detail.js?v=62"></script>
 <script src="js/orders.js?v=64"></script>

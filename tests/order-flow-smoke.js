@@ -472,7 +472,8 @@ async function smokeOrderDiscountAffectsSummaryAndFinDirector(context) {
     assert.equal(data.fin.grossRevenue, 100);
     assert.equal(data.fin.discountAmount, 10);
     assert.equal(data.fin.revenue, 90);
-    assert.equal(data.fin.taxes, 10.8);
+    assert.equal(data.fin.taxes, 9.9);
+    assert.equal(data.fin.charity, 0.9);
 }
 
 async function smokeDiscountShownInCustomerInvoice(context) {

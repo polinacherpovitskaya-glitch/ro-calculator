@@ -1030,7 +1030,8 @@ function calculateFinDirectorData(items, hardwareItems, packagingItems, params, 
     const discount = calculateOrderDiscount(totalRevenue, orderAdjustments, params);
     const discountedRevenue = discount.revenueAfterDiscount;
     const charityRate = Number.isFinite(params?.charityRate) ? params.charityRate : 0.01;
-    const totalTaxes = discountedRevenue * (params.taxRate + params.vatRate + charityRate);
+    const totalTaxes = discountedRevenue * (params.taxRate + params.vatRate);
+    const totalCharity = discountedRevenue * charityRate;
 
     return {
         salary: round2(totalSalary),
@@ -1044,13 +1045,14 @@ function calculateFinDirectorData(items, hardwareItems, packagingItems, params, 
         molds: round2(totalMolds),
         delivery: round2(totalDelivery),
         taxes: round2(totalTaxes),
+        charity: round2(totalCharity),
         grossRevenue: round2(totalRevenue),
         discountAmount: discount.amount,
         discountPercent: discount.percent,
         revenue: round2(discountedRevenue),
         totalCosts: round2(totalSalary + totalHardwarePurchase + totalHardwareDelivery
             + totalPackagingPurchase + totalPackagingDelivery
-            + totalDesign + totalPrinting + totalPlastic + totalMolds + totalDelivery + totalTaxes),
+            + totalDesign + totalPrinting + totalPlastic + totalMolds + totalDelivery + totalTaxes + totalCharity),
     };
 }
 

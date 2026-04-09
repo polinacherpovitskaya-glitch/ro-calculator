@@ -250,7 +250,8 @@ function smokeBuildPlanUsesSavedSnapshotCostsAndDedupedHardware(context) {
     assert.equal(result.planData.hardwareTotal, 50, 'duplicate hardware rows should be collapsed in plan costs');
     assert.equal(result.planHours.hoursHardware, 1, 'saved order assembly hours should win over duplicated hardware norm noise');
     assert.equal(result.planData.salaryAssembly, 10, 'assembly salary should follow saved order hours');
-    assert.equal(result.planData.taxes, 24, 'taxes should be recomputed from current revenue settings');
+    assert.equal(result.planData.taxes, 22, 'taxes should be recomputed from current revenue settings without charity');
+    assert.equal(result.planData.charity, 2, 'charity should be stored as a separate plan row');
     assert.equal(result.planData.other, 0, 'no corrective residue should remain for consistent snapshot');
     assert.equal(
         result.planData.totalCosts,
@@ -266,6 +267,7 @@ function smokeBuildPlanUsesSavedSnapshotCostsAndDedupedHardware(context) {
             result.planData.molds +
             result.planData.delivery +
             result.planData.taxes +
+            result.planData.charity +
             result.planData.other,
         'plan rows should add up to current computed total cost'
     );
@@ -415,9 +417,10 @@ async function smokeTaxesIncludeCharity(context) {
                 wasteFactor: 1.1,
             }
         );
-        return built.planData.taxes;
+        return { taxes: built.planData.taxes, charity: built.planData.charity };
     })()`, context);
-    assert.equal(planTaxes, 120, 'plan taxes should include VAT 5%, tax 6% and charity 1%');
+    assert.equal(planTaxes.taxes, 110, 'plan taxes should include only VAT 5% and tax 6%');
+    assert.equal(planTaxes.charity, 10, 'plan charity should be separated as 1% of revenue');
 
     context.__imports = [
         {
@@ -428,6 +431,7 @@ async function smokeTaxesIncludeCharity(context) {
             fact_hardware: 0,
             fact_packaging: 0,
             fact_taxes: 110,
+            fact_charity: 10,
             fact_other: 0,
             fact_delivery: 0,
             fact_molds: 0,
@@ -449,8 +453,10 @@ async function smokeTaxesIncludeCharity(context) {
 
     const fact = context.__charityFact;
     assert.equal(fact.fact_revenue, 1000, 'fact revenue should still come from FinTablo import');
-    assert.equal(fact.fact_taxes, 120, 'fact taxes should add 1% charity on top of imported 11% taxes');
-    assert.equal(fact._source_hints.fact_taxes, 'ФинТабло + 1% благотворительность');
+    assert.equal(fact.fact_taxes, 110, 'fact taxes should stay equal to imported 11% taxes');
+    assert.equal(fact.fact_charity, 10, 'fact charity should be stored separately');
+    assert.equal(fact._source_hints.fact_taxes, 'ФинТабло');
+    assert.equal(fact._source_hints.fact_charity, 'ФинТабло');
 }
 
 async function smokeLegacyStageDistributionAndMaterials(context) {
