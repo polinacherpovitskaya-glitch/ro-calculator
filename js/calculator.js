@@ -462,10 +462,32 @@ function getPendantAttachmentDeliveryPerUnit(type, entry) {
     return round2((entry.delivery_price || 0) * qtyPerPendant);
 }
 
-function getPendantAttachmentCostPerUnit(type, entry) {
+function getPendantAttachmentAssemblyOpsPerPendant(type, entry) {
+    return isPendantMetricAttachment(type, entry)
+        ? 1
+        : (parseFloat(entry?.qty_per_pendant) || 1);
+}
+
+function getPendantAttachmentAssemblyCostPerUnit(type, entry, params) {
+    if (!entry || !(params?.fotPerHour > 0)) return 0;
+    const speed = parseFloat(entry?.assembly_speed) || 0;
+    if (!(speed > 0)) return 0;
+    return round2((getPendantAttachmentAssemblyOpsPerPendant(type, entry) / speed) * (params?.wasteFactor || 1.1) * params.fotPerHour);
+}
+
+function getPendantAttachmentIndirectPerUnit(type, entry, params) {
+    if (!entry || params?.indirectCostMode !== 'all' || !(params?.indirectPerHour > 0)) return 0;
+    const speed = parseFloat(entry?.assembly_speed) || 0;
+    if (!(speed > 0)) return 0;
+    return round2((getPendantAttachmentAssemblyOpsPerPendant(type, entry) / speed) * (params?.wasteFactor || 1.1) * params.indirectPerHour);
+}
+
+function getPendantAttachmentCostPerUnit(type, entry, params) {
     return round2(
         getPendantAttachmentPurchasePerUnit(type, entry)
         + getPendantAttachmentDeliveryPerUnit(type, entry)
+        + getPendantAttachmentAssemblyCostPerUnit(type, entry, params)
+        + getPendantAttachmentIndirectPerUnit(type, entry, params)
     );
 }
 
@@ -670,8 +692,16 @@ function calculatePendantCost(pendant, params) {
 
     const cords = getPendantAttachmentEntries(pendant, 'cord');
     const carabiners = getPendantAttachmentEntries(pendant, 'carabiner');
-    const cordCostTotal = cords.reduce((sum, entry) => sum + getPendantAttachmentTotalCost(pendant, 'cord', entry), 0);
-    const carabinerCostTotal = carabiners.reduce((sum, entry) => sum + getPendantAttachmentTotalCost(pendant, 'carabiner', entry), 0);
+    const cordPurchaseTotal = cords.reduce((sum, entry) => sum + (getPendantAttachmentAllocatedQty(pendant, entry) * getPendantAttachmentPurchasePerUnit('cord', entry)), 0);
+    const cordDeliveryTotal = cords.reduce((sum, entry) => sum + (getPendantAttachmentAllocatedQty(pendant, entry) * getPendantAttachmentDeliveryPerUnit('cord', entry)), 0);
+    const cordAssemblyCostTotal = cords.reduce((sum, entry) => sum + (getPendantAttachmentAllocatedQty(pendant, entry) * getPendantAttachmentAssemblyCostPerUnit('cord', entry, params)), 0);
+    const cordIndirectTotal = cords.reduce((sum, entry) => sum + (getPendantAttachmentAllocatedQty(pendant, entry) * getPendantAttachmentIndirectPerUnit('cord', entry, params)), 0);
+    const carabinerPurchaseTotal = carabiners.reduce((sum, entry) => sum + (getPendantAttachmentAllocatedQty(pendant, entry) * getPendantAttachmentPurchasePerUnit('carabiner', entry)), 0);
+    const carabinerDeliveryTotal = carabiners.reduce((sum, entry) => sum + (getPendantAttachmentAllocatedQty(pendant, entry) * getPendantAttachmentDeliveryPerUnit('carabiner', entry)), 0);
+    const carabinerAssemblyCostTotal = carabiners.reduce((sum, entry) => sum + (getPendantAttachmentAllocatedQty(pendant, entry) * getPendantAttachmentAssemblyCostPerUnit('carabiner', entry, params)), 0);
+    const carabinerIndirectTotal = carabiners.reduce((sum, entry) => sum + (getPendantAttachmentAllocatedQty(pendant, entry) * getPendantAttachmentIndirectPerUnit('carabiner', entry, params)), 0);
+    const cordCostTotal = round2(cordPurchaseTotal + cordDeliveryTotal + cordAssemblyCostTotal + cordIndirectTotal);
+    const carabinerCostTotal = round2(carabinerPurchaseTotal + carabinerDeliveryTotal + carabinerAssemblyCostTotal + carabinerIndirectTotal);
 
     let printCostTotal = 0;
     elements.forEach(el => {
@@ -697,9 +727,7 @@ function calculatePendantCost(pendant, params) {
             if (!(speed > 0)) return sum;
             const allocatedQty = getPendantAttachmentAllocatedQty(pendant, item.entry);
             if (!(allocatedQty > 0)) return sum;
-            const opsPerPendant = isPendantMetricAttachment(item.type, item.entry)
-                ? 1
-                : (parseFloat(item.entry?.qty_per_pendant) || 1);
+            const opsPerPendant = getPendantAttachmentAssemblyOpsPerPendant(item.type, item.entry);
             return sum + ((allocatedQty * opsPerPendant / speed) * (params.wasteFactor || 1.1));
         }, 0);
     const assemblyHours = round2(attachmentAssemblyHours);
@@ -712,6 +740,10 @@ function calculatePendantCost(pendant, params) {
         totalRevenue: round2(sellPerUnit * qty),
         assemblyHours,
         packagingHours,
+        attachmentPurchaseTotal: round2(cordPurchaseTotal + carabinerPurchaseTotal),
+        attachmentDeliveryTotal: round2(cordDeliveryTotal + carabinerDeliveryTotal),
+        attachmentAssemblyTotal: round2(cordAssemblyCostTotal + carabinerAssemblyCostTotal),
+        attachmentIndirectTotal: round2(cordIndirectTotal + carabinerIndirectTotal),
         hoursPlastic: round2(letterMetrics?.hoursPlastic || 0),
         hoursCutting: round2(letterMetrics?.hoursCutting || 0),
         hoursBuiltinHw: round2(letterMetrics?.hoursBuiltinHw || 0),
@@ -911,6 +943,7 @@ function calculateProductionLoad(items, hardwareItems, packagingItems, params, p
  */
 function calculateFinDirectorData(items, hardwareItems, packagingItems, params, pendantItems = [], orderAdjustments = {}) {
     let totalSalary = 0;
+    let totalIndirect = 0;
     let totalHardwarePurchase = 0;
     let totalHardwareDelivery = 0;
     let totalPackagingPurchase = 0;
@@ -928,7 +961,8 @@ function calculateFinDirectorData(items, hardwareItems, packagingItems, params, 
         const qty = item.quantity;
 
         // Зарплата = все часы * ФОТ/час
-        totalSalary += r.hoursTotalPlasticNfc * params.fotPerHour;
+        totalSalary += (r.hoursTotalPlasticNfc + (r.hoursBuiltinHw || 0)) * params.fotPerHour;
+        totalIndirect += ((r.costIndirect || 0) + (r.costCuttingIndirect || 0) + (r.costNfcIndirect || 0) + (r.costBuiltinHwIndirect || 0)) * qty;
 
         // NFC метки
         if (item.is_nfc) totalHardwarePurchase += qty * params.nfcTagCost;
@@ -969,6 +1003,7 @@ function calculateFinDirectorData(items, hardwareItems, packagingItems, params, 
         totalRevenue += (hw.sell_price || 0) * qty;
         if (hw.result) {
             totalSalary += hw.result.hoursHardware * params.fotPerHour;
+            totalIndirect += qty * (hw.result.indirectPerUnit || 0);
         }
     });
 
@@ -980,6 +1015,7 @@ function calculateFinDirectorData(items, hardwareItems, packagingItems, params, 
         totalRevenue += (pkg.sell_price || 0) * qty;
         if (pkg.result) {
             totalSalary += pkg.result.hoursPackaging * params.fotPerHour;
+            totalIndirect += qty * (pkg.result.indirectPerUnit || 0);
         }
     });
 
@@ -996,8 +1032,10 @@ function calculateFinDirectorData(items, hardwareItems, packagingItems, params, 
         const letterBreakdown = letterMetrics?.breakdown || null;
         // Assembly salary
         totalSalary += (r.assemblyHours + r.packagingHours) * params.fotPerHour;
+        totalIndirect += r.attachmentIndirectTotal || 0;
         if (letterBreakdown) {
             totalSalary += letterBreakdown.salaryTotal;
+            totalIndirect += letterBreakdown.omittedIndirectTotal;
             totalHardwarePurchase += letterBreakdown.hardwarePurchaseTotal;
             totalHardwareDelivery += letterBreakdown.hardwareDeliveryTotal;
             totalPlastic += letterBreakdown.plasticTotal;
@@ -1035,6 +1073,7 @@ function calculateFinDirectorData(items, hardwareItems, packagingItems, params, 
 
     return {
         salary: round2(totalSalary),
+        indirect: round2(totalIndirect),
         hardwarePurchase: round2(totalHardwarePurchase),
         hardwareDelivery: round2(totalHardwareDelivery),
         packagingPurchase: round2(totalPackagingPurchase),
@@ -1050,7 +1089,7 @@ function calculateFinDirectorData(items, hardwareItems, packagingItems, params, 
         discountAmount: discount.amount,
         discountPercent: discount.percent,
         revenue: round2(discountedRevenue),
-        totalCosts: round2(totalSalary + totalHardwarePurchase + totalHardwareDelivery
+        totalCosts: round2(totalSalary + totalIndirect + totalHardwarePurchase + totalHardwareDelivery
             + totalPackagingPurchase + totalPackagingDelivery
             + totalDesign + totalPrinting + totalPlastic + totalMolds + totalDelivery + totalTaxes + totalCharity),
     };

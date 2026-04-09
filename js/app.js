@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v243';
+const APP_VERSION = 'v244';
 
 const App = {
     currentPage: 'orders',
@@ -3561,6 +3561,7 @@ const Calculator = {
             } else {
                 if (finSalaryRow) finSalaryRow.style.display = 'none';
             }
+            this.setText('fin-indirect', formatRub(fin.indirect));
             this.setText('fin-hardware', formatRub(fin.hardwarePurchase));
             this.setText('fin-hw-delivery', formatRub(fin.hardwareDelivery));
             this.setText('fin-packaging', formatRub(fin.packagingPurchase));

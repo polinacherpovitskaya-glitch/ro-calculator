@@ -776,6 +776,45 @@ async function smokeFinDirectorPendantsUseAllAttachments(context) {
     assert.equal(fin.revenue, 500);
 }
 
+async function smokePendantAttachmentCostsIncludeAssemblyAndIndirect(context) {
+    const state = clone(await vm.runInContext(`(() => {
+        const params = {
+            ...App.params,
+            wasteFactor: 1,
+            fotPerHour: 100,
+            indirectCostMode: 'all',
+            indirectPerHour: 50,
+            taxRate: 0.06,
+            charityRate: 0.01,
+        };
+        const pendant = {
+            quantity: 10,
+            name: 'AA',
+            elements: [],
+            cords: [
+                {
+                    name: 'Smoke Cord',
+                    unit: 'шт',
+                    allocated_qty: 10,
+                    qty_per_pendant: 1,
+                    price_per_unit: 20,
+                    delivery_price: 1,
+                    assembly_speed: 10,
+                },
+            ],
+            carabiners: [],
+        };
+        return calculatePendantCost(pendant, params);
+    })()`, context));
+
+    assert.equal(state.costPerUnit, 36);
+    assert.equal(state.totalCost, 360);
+    assert.equal(state.attachmentPurchaseTotal, 200);
+    assert.equal(state.attachmentDeliveryTotal, 10);
+    assert.equal(state.attachmentAssemblyTotal, 100);
+    assert.equal(state.attachmentIndirectTotal, 50);
+}
+
 async function smokePackagingWarehousePickerDefaults(context) {
     context.__warehouseItems = [{
         id: 701,
@@ -1748,7 +1787,7 @@ async function smokePendantCentimeterCordPricing() {
 
     assert.equal(state.costPerPendant, 35);
     assert.equal(state.sellPerPendant, 70);
-    assert.equal(state.calcResult.costPerUnit, 35);
+    assert.equal(state.calcResult.costPerUnit, 40.5);
     assert.match(state.step4Html, /Нужно: <b>150 м<\/b>/);
     assert.match(state.step4Html, /Цена за подвес: <b>35 ₽<\/b>/);
 }
@@ -1825,8 +1864,8 @@ async function smokePendantSplitAllocationUsesAllocatedQty() {
     assert.doesNotMatch(state.step4Html, /30000/);
     assert.match(state.step5Html, /100 шт · 100 подв\./);
     assert.match(state.step5Html, /200 шт · 200 подв\./);
-    assert.equal(state.calcResult.costPerUnit, 35.67);
-    assert.equal(state.calcResult.totalCost, 10700);
+    assert.equal(state.calcResult.costPerUnit, 41.17);
+    assert.equal(state.calcResult.totalCost, 12350);
 }
 
 async function smokePendantIgnoresSpaces() {
@@ -2323,6 +2362,7 @@ async function smokePendantFinDirectorUsesCurrentLetterCost(context) {
             fin,
             expected: metrics ? {
                 salary: metrics.breakdown.salaryTotal,
+                indirect: metrics.breakdown.omittedIndirectTotal,
                 hardwarePurchase: metrics.breakdown.hardwarePurchaseTotal,
                 hardwareDelivery: metrics.breakdown.hardwareDeliveryTotal,
                 plastic: metrics.breakdown.plasticTotal,
@@ -2334,6 +2374,7 @@ async function smokePendantFinDirectorUsesCurrentLetterCost(context) {
 
     assert.ok(finState.expected, 'pendant letter metrics should be available for fin director split');
     assert.equal(finState.fin.salary, finState.expected.salary, 'fin director salary should include letter production labour');
+    assert.equal(finState.fin.indirect, finState.expected.indirect, 'fin director should expose pendant indirect production separately');
     assert.equal(finState.fin.hardwarePurchase, finState.expected.hardwarePurchase, 'fin director hardware purchase should only include built-in hardware purchase for letters');
     assert.equal(finState.fin.hardwareDelivery, finState.expected.hardwareDelivery, 'fin director hardware delivery should include built-in hardware delivery for letters');
     assert.equal(finState.fin.plastic, finState.expected.plastic, 'fin director plastic should include letter plastic cost');
@@ -6456,6 +6497,7 @@ async function main() {
     await smokeDiscountShownInCustomerInvoice(context);
     await smokeGenerateKPPassesDiscount(context);
     await smokeFinDirectorPendantsUseAllAttachments(context);
+    await smokePendantAttachmentCostsIncludeAssemblyAndIndirect(context);
     await smokePackagingWarehousePickerDefaults(context);
     await smokeCurrentOrderReservationRestoresWarehouseQuota(context);
     await smokeCommittedOrderDemandRestoresWarehouseQuotaWithoutActiveReservation();

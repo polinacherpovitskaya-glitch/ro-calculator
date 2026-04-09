@@ -1115,6 +1115,10 @@ const Pendant = {
 
     _getAttachmentCostPerPendant(type, entry) {
         if (!entry) return 0;
+        const params = App.params || {};
+        if (typeof getPendantAttachmentCostPerUnit === 'function') {
+            return getPendantAttachmentCostPerUnit(type, entry, params);
+        }
         if (this._isMetricAttachment(type, entry)) {
             return round2(((entry.price_per_unit || 0) * this._getMetricAttachmentRateFactor(entry)) + (entry.delivery_price || 0));
         }
@@ -1378,7 +1382,19 @@ const Pendant = {
             const allocatedQty = this._getAttachmentAllocatedQty(entry, pnd);
             const lengthCm = parseFloat(entry.length_cm) || 0;
             const qtyPerPendant = parseFloat(entry.qty_per_pendant) || 1;
-            const costPer = this._getAttachmentCostPerPendant('cord', entry);
+            const purchasePer = typeof getPendantAttachmentPurchasePerUnit === 'function'
+                ? getPendantAttachmentPurchasePerUnit('cord', entry)
+                : 0;
+            const deliveryPer = typeof getPendantAttachmentDeliveryPerUnit === 'function'
+                ? getPendantAttachmentDeliveryPerUnit('cord', entry)
+                : 0;
+            const assemblyPer = typeof getPendantAttachmentAssemblyCostPerUnit === 'function'
+                ? getPendantAttachmentAssemblyCostPerUnit('cord', entry, App.params || {})
+                : 0;
+            const indirectPer = typeof getPendantAttachmentIndirectPerUnit === 'function'
+                ? getPendantAttachmentIndirectPerUnit('cord', entry, App.params || {})
+                : 0;
+            const costPer = round2(purchasePer + deliveryPer + assemblyPer + indirectPer);
             const sellPer = this._getAttachmentSellPerPendant('cord', entry);
             const totalQtyLabel = isMetric
                 ? `${round2(lengthCm * allocatedQty / 100)} м${allocatedQty > 0 ? ` · ${allocatedQty} подв.` : ''}`
@@ -1392,6 +1408,7 @@ const Pendant = {
                 qtyLabel: totalQtyLabel,
                 costPer,
                 sellPer,
+                breakdownHint: [purchasePer > 0 ? `закупка ${formatRub(purchasePer)}` : '', deliveryPer > 0 ? `доставка ${formatRub(deliveryPer)}` : '', assemblyPer > 0 ? `сборка ${formatRub(assemblyPer)}` : '', indirectPer > 0 ? `косвенные ${formatRub(indirectPer)}` : ''].filter(Boolean).join(' · '),
                 totalCostValue: round2(allocatedQty * costPer),
                 totalSellValue: round2(allocatedQty * sellPer),
                 totalSell: formatRub(round2(allocatedQty * sellPer)),
@@ -1401,7 +1418,19 @@ const Pendant = {
         const carabinerRows = carabiners.map((entry, index) => {
             const allocatedQty = this._getAttachmentAllocatedQty(entry, pnd);
             const qtyPerPendant = parseFloat(entry.qty_per_pendant) || 1;
-            const costPer = this._getAttachmentCostPerPendant('carabiner', entry);
+            const purchasePer = typeof getPendantAttachmentPurchasePerUnit === 'function'
+                ? getPendantAttachmentPurchasePerUnit('carabiner', entry)
+                : 0;
+            const deliveryPer = typeof getPendantAttachmentDeliveryPerUnit === 'function'
+                ? getPendantAttachmentDeliveryPerUnit('carabiner', entry)
+                : 0;
+            const assemblyPer = typeof getPendantAttachmentAssemblyCostPerUnit === 'function'
+                ? getPendantAttachmentAssemblyCostPerUnit('carabiner', entry, App.params || {})
+                : 0;
+            const indirectPer = typeof getPendantAttachmentIndirectPerUnit === 'function'
+                ? getPendantAttachmentIndirectPerUnit('carabiner', entry, App.params || {})
+                : 0;
+            const costPer = round2(purchasePer + deliveryPer + assemblyPer + indirectPer);
             const sellPer = this._getAttachmentSellPerPendant('carabiner', entry);
             const titleSuffix = qtyPerPendant > 1 ? ` × ${qtyPerPendant}` : '';
             return {
@@ -1410,6 +1439,7 @@ const Pendant = {
                 qtyLabel: `${round2(allocatedQty * qtyPerPendant)} шт${allocatedQty > 0 ? ` · ${allocatedQty} подв.` : ''}`,
                 costPer,
                 sellPer,
+                breakdownHint: [purchasePer > 0 ? `закупка ${formatRub(purchasePer)}` : '', deliveryPer > 0 ? `доставка ${formatRub(deliveryPer)}` : '', assemblyPer > 0 ? `сборка ${formatRub(assemblyPer)}` : '', indirectPer > 0 ? `косвенные ${formatRub(indirectPer)}` : ''].filter(Boolean).join(' · '),
                 totalCostValue: round2(allocatedQty * costPer),
                 totalSellValue: round2(allocatedQty * sellPer),
                 totalSell: formatRub(round2(allocatedQty * sellPer)),
@@ -1494,14 +1524,14 @@ const Pendant = {
                     ${cordRows.map(row => `<tr>
                         <td>${row.title}</td>
                         <td>${row.qtyLabel}</td>
-                        <td>${formatRub(row.costPer)}${marginPct(row.costPer, row.sellPer)}</td>
+                        <td>${formatRub(row.costPer)}${marginPct(row.costPer, row.sellPer)}${row.breakdownHint ? `<div style="font-size:10px;color:var(--text-muted);margin-top:1px;">${row.breakdownHint}</div>` : ''}</td>
                         <td><input type="number" class="input" style="${inputStyle}" value="${row.sellPer || ''}" placeholder="0" onchange="Pendant._setAttachmentSellPrice('cord', ${row.index}, parseFloat(this.value)||0)"></td>
                         <td>${row.totalSell}</td>
                     </tr>`).join('')}
                     ${carabinerRows.map(row => `<tr>
                         <td>${row.title}</td>
                         <td>${row.qtyLabel}</td>
-                        <td>${formatRub(row.costPer)}${marginPct(row.costPer, row.sellPer)}</td>
+                        <td>${formatRub(row.costPer)}${marginPct(row.costPer, row.sellPer)}${row.breakdownHint ? `<div style="font-size:10px;color:var(--text-muted);margin-top:1px;">${row.breakdownHint}</div>` : ''}</td>
                         <td><input type="number" class="input" style="${inputStyle}" value="${row.sellPer || ''}" placeholder="0" onchange="Pendant._setAttachmentSellPrice('carabiner', ${row.index}, parseFloat(this.value)||0)"></td>
                         <td>${row.totalSell}</td>
                     </tr>`).join('')}
