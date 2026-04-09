@@ -1191,7 +1191,7 @@ const Pendant = {
     // Find letter blank pricing from enriched Molds or App.templates
     _getLetterBlankTier(totalElements) {
         if (typeof getPendantLetterBlankMetrics === 'function') {
-            const metrics = getPendantLetterBlankMetrics(totalElements, App.params);
+            const metrics = getPendantLetterBlankMetrics(totalElements, App.params, this._wizardData);
             if (metrics) {
                 return {
                     cost: metrics.cost || 0,

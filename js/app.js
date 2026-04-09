@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v237';
+const APP_VERSION = 'v238';
 
 const App = {
     currentPage: 'orders',
@@ -4520,8 +4520,9 @@ const Calculator = {
 
         // Pendant items
         this.pendants.forEach((pnd, i) => {
+            const pendantPayload = this._stripPendantPersistenceFields(pnd);
             items.push({
-                ...pnd,
+                ...pendantPayload,
                 item_number: 400 + i,
                 item_type: 'pendant',
                 product_name: 'Подвес "' + (pnd.name || '') + '"',
@@ -5062,16 +5063,18 @@ const Calculator = {
                 try {
                     const outer = typeof dbPnd.item_data === 'string' ? JSON.parse(dbPnd.item_data) : dbPnd.item_data;
                     if (outer && typeof outer === 'object') {
-                        pnd = { ...outer, ...pnd };
-                        if (outer.item_data) {
+                        if (this._isMeaningfulPendantPayload(outer)) {
+                            pnd = { ...pnd, ...outer };
+                        } else if (outer.item_data) {
                             const nested = typeof outer.item_data === 'string' ? JSON.parse(outer.item_data) : outer.item_data;
-                            if (nested && typeof nested === 'object') {
+                            if (nested && typeof nested === 'object' && this._isMeaningfulPendantPayload(nested)) {
                                 pnd = { ...pnd, ...nested };
                             }
                         }
                     }
                 } catch (e) { /* ignore malformed legacy pendant payloads */ }
             }
+            pnd = this._stripPendantPersistenceFields(pnd);
             if (pnd && pnd.item_type === 'pendant') {
                 this.pendants.push(pnd);
             }
@@ -5139,6 +5142,36 @@ const Calculator = {
             }
         });
         return changes;
+    },
+
+    _isMeaningfulPendantPayload(payload) {
+        if (!payload || typeof payload !== 'object') return false;
+        if (typeof payload.name === 'string' && payload.name.trim()) return true;
+        if (Array.isArray(payload.elements) && payload.elements.length > 0) return true;
+        if (Array.isArray(payload.cords) && payload.cords.length > 0) return true;
+        if (Array.isArray(payload.carabiners) && payload.carabiners.length > 0) return true;
+        if (payload.cord && typeof payload.cord === 'object') return true;
+        if (payload.carabiner && typeof payload.carabiner === 'object') return true;
+        if ((parseFloat(payload._totalSellPerUnit) || 0) > 0) return true;
+        if ((parseFloat(payload.element_price_per_unit) || 0) > 0) return true;
+        return false;
+    },
+
+    _stripPendantPersistenceFields(pnd) {
+        if (!pnd || typeof pnd !== 'object') return pnd;
+        const cleaned = { ...pnd };
+        delete cleaned.id;
+        delete cleaned.order_id;
+        delete cleaned.created_at;
+        delete cleaned.updated_at;
+        delete cleaned.item_data;
+        delete cleaned.cost_total;
+        delete cleaned.sell_price_item;
+        delete cleaned.product_name;
+        delete cleaned.total_price;
+        delete cleaned.unit_price;
+        delete cleaned.template_id;
+        return cleaned;
     },
 
     _diffOrderItems(oldItems, newItems) {

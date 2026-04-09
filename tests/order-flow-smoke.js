@@ -2112,25 +2112,7 @@ async function smokePendantAutoPriceFromBlanks() {
         Pendant._wizardData.quantity = 100;
         Pendant._syncElements(Pendant._nameChars(Pendant._wizardData.name));
 
-        const tierQty = 500;
-        const singleMoldCost = (800 * 12.5) + 8000;
-        const moldAmortPerUnit = singleMoldCost / 4500;
-        const item = {
-            quantity: tierQty,
-            pieces_per_hour: 100,
-            weight_grams: 5,
-            extra_molds: 0,
-            complex_design: false,
-            is_nfc: false,
-            nfc_programming: false,
-            hardware_qty: 0,
-            packaging_qty: 0,
-            printing_qty: 0,
-            delivery_included: false,
-        };
-        const result = calculateItemCost(item, App.params);
-        const cost = round2(result.costTotal - result.costMoldAmortization + moldAmortPerUnit);
-        const expectedSellPrice = Math.ceil((round2(cost / (1 - 0.30) / (1 - 0.06 - 0.05))) / 5) * 5;
+        const expectedSellPrice = getPendantLetterBlankMetrics(500, App.params).sellPrice;
 
         const html = Pendant._renderStep5();
         return {
@@ -2194,6 +2176,7 @@ async function smokePendantLettersContributePlasticLoad() {
             hw_speed: 60,
         }];
 
+        const metrics = getPendantLetterBlankMetrics(1200, params);
         const pendant = {
             item_type: 'pendant',
             name: 'CCCC',
@@ -2206,15 +2189,146 @@ async function smokePendantLettersContributePlasticLoad() {
         };
         pendant.result = calculatePendantCost(pendant, params);
         const load = calculateProductionLoad([], [], [], params, [pendant]);
-        return { result: pendant.result, load };
+        return { result: pendant.result, load, metrics };
     })()`, pendantContext));
 
     assert.ok(state.result.hoursPlasticZone > 0, 'letter pendant should contribute casting/trim load');
     assert.ok(state.result.hoursPlastic > 0, 'letter pendant should contribute casting hours');
     assert.ok(state.result.hoursCutting > 0, 'letter pendant should contribute trimming hours');
     assert.ok(state.result.hoursBuiltinHw > 0, 'letter pendant should include built-in blank hardware time');
+    assert.equal(
+        state.result.costPerUnit,
+        clone(state.metrics).cost * 4,
+        'letter pendant cost should follow the current blanks formula instead of stale stored per-letter cost'
+    );
     assert.equal(state.load.hoursPlasticTotal, state.result.hoursPlasticZone);
     assert.equal(state.load.hoursHardwareTotal, 0);
+}
+
+async function smokeCyrillicPendantUsesLiveBlankPphFields(context) {
+    const state = clone(await vm.runInContext(`(() => {
+        const params = {
+            ...App.params,
+            wasteFactor: 1.1,
+            fotPerHour: 100,
+            indirectCostMode: 'none',
+            indirectPerHour: 0,
+            taxRate: 0.06,
+            vatRate: 0.05,
+            charityRate: 0.01,
+            packagingHours: 8,
+            plasticHours: 8,
+            hardwareHours: 8,
+            plasticCostPerKg: 2500,
+            moldBaseCost: 18000,
+            designCost: 0,
+            cuttingSpeed: 1000,
+        };
+        App.params = params;
+        App.templates = [{
+            id: 31,
+            category: 'blank',
+            custom_prices: {},
+            custom_margins: {},
+            pph_min: 100,
+            pph_max: 120,
+            pph_actual: null,
+            weight_grams: 10,
+            mold_count: 1,
+            cost_cny: 800,
+            cny_rate: 12.5,
+            delivery_cost: 8000,
+            hw_name: 'Фурнитура',
+            hw_price_per_unit: 1,
+            hw_speed: 300,
+        }];
+        const pendant = {
+            item_type: 'pendant',
+            name: 'ФНТР',
+            quantity: 250,
+            elements: [{ char: 'Ф' }, { char: 'Н' }, { char: 'Т' }, { char: 'Р' }],
+            cords: [],
+            carabiners: [],
+            element_price_per_unit: 145.95,
+            _totalSellPerUnit: 876,
+        };
+        const metrics = getPendantLetterBlankMetrics(1000, params, pendant);
+        const result = calculatePendantCost(pendant, params);
+        return { metrics, result };
+    })()`, context));
+
+    assert.ok(state.metrics && state.metrics.cost > 0, 'cyrillic pendant should resolve live blank metrics');
+    assert.ok(state.result.hoursPlastic > 0, 'cyrillic pendant should contribute casting hours');
+    assert.ok(state.result.hoursCutting > 0, 'cyrillic pendant should contribute trimming hours');
+    assert.equal(
+        state.result.costPerUnit,
+        Math.round(state.metrics.cost * 4 * 100) / 100,
+        'cyrillic pendant should ignore stale saved per-letter cost and use current blank formula'
+    );
+}
+
+async function smokePendantFinDirectorUsesCurrentLetterCost(context) {
+    const finState = clone(await vm.runInContext(`(() => {
+        const params = {
+            ...App.params,
+            wasteFactor: 1.1,
+            fotPerHour: 100,
+            indirectCostMode: 'none',
+            indirectPerHour: 0,
+            taxRate: 0.06,
+            vatRate: 0.05,
+            charityRate: 0.01,
+            packagingHours: 8,
+            plasticHours: 8,
+            hardwareHours: 8,
+            plasticCostPerKg: 2500,
+            moldBaseCost: 18000,
+            designCost: 0,
+            cuttingSpeed: 1000,
+        };
+        App.params = params;
+        App.templates = [{
+            id: 30,
+            category: 'blank',
+            custom_prices: {},
+            custom_margins: {},
+            pieces_per_hour_avg: 100,
+            pieces_per_hour_min: 100,
+            weight_grams: 5,
+            mold_count: 1,
+            cost_cny: 800,
+            cny_rate: 12.5,
+            delivery_cost: 8000,
+            hw_name: '',
+            hw_price_per_unit: 0,
+            hw_speed: 0,
+        }];
+        const pendant = {
+            quantity: 100,
+            name: 'AB',
+            elements: [{ char: 'A' }, { char: 'B' }],
+            cords: [],
+            carabiners: [],
+            element_price_per_unit: 999,
+            result: {
+                assemblyHours: 0,
+                packagingHours: 0,
+                totalRevenue: 0,
+            },
+        };
+        const metrics = getPendantLetterBlankMetrics(200, params);
+        const fin = calculateFinDirectorData([], [], [], params, [pendant]);
+        return {
+            fin,
+            expectedHardwarePurchase: metrics ? Math.round(metrics.cost * 2 * 100 * 100) / 100 : 0,
+        };
+    })()`, context));
+
+    assert.equal(
+        finState.fin.hardwarePurchase,
+        finState.expectedHardwarePurchase,
+        'fin director hardware purchase should use current blank-derived letter cost, not stale saved element price'
+    );
 }
 
 async function smokeLegacyPendantRestore(context) {
@@ -2266,6 +2380,62 @@ async function smokeLegacyPendantRestore(context) {
     assert.equal(restored.cord.name, 'Legacy Cord');
     assert.equal(restored.carabiner.name, 'Legacy Carabiner');
     assert.equal(restored.elements.length, 2);
+}
+
+async function smokeCurrentPendantPayloadBeatsStaleNested(context) {
+    const staleNestedPendant = {
+        item_type: 'pendant',
+        name: 'STALE',
+        quantity: 7,
+        elements: [{ char: 'S' }],
+        cord: { name: 'Stale Cord' },
+        carabiner: { name: 'Stale Carabiner' },
+        element_price_per_unit: 999,
+        _totalSellPerUnit: 11,
+    };
+    const currentPendant = {
+        item_type: 'pendant',
+        name: 'CURRENT',
+        quantity: 7,
+        elements: [{ char: 'C' }, { char: 'U' }],
+        cords: [{ name: 'Current Cord', allocated_qty: 7, qty_per_pendant: 1 }],
+        carabiners: [{ name: 'Current Carabiner', allocated_qty: 7, qty_per_pendant: 1 }],
+        element_price_per_unit: 55,
+        _totalSellPerUnit: 77,
+        item_data: JSON.stringify(staleNestedPendant),
+    };
+    const currentRow = {
+        item_number: 400,
+        item_type: 'pendant',
+        product_name: 'Подвес "CURRENT"',
+        quantity: 7,
+        cost_total: 20,
+        sell_price_item: 77,
+        item_data: JSON.stringify(currentPendant),
+    };
+
+    context.__loadOrderData = {
+        order: {
+            id: 9003,
+            order_name: 'Current Smoke Order',
+            client_name: 'Smoke Client',
+            manager_name: 'Smoke',
+            status: 'draft',
+        },
+        items: [clone(currentRow)],
+        repaired_duplicates: false,
+    };
+    context.loadOrder = async () => clone(context.__loadOrderData);
+
+    await vm.runInContext('Calculator.loadOrder(9003)', context);
+    const restored = clone(await vm.runInContext('Calculator.pendants[0]', context));
+
+    assert.equal(restored.name, 'CURRENT');
+    assert.equal(restored._totalSellPerUnit, 77);
+    assert.equal(restored.cords[0].name, 'Current Cord');
+    assert.equal(restored.carabiners[0].name, 'Current Carabiner');
+    assert.equal(restored.element_price_per_unit, 55);
+    assert.equal('item_data' in restored, false);
 }
 
 async function smokeCloneOrderRestoresLegacySnapshotItems(context) {
@@ -6290,7 +6460,10 @@ async function main() {
     await smokePendantOverlayDoesNotCloseWizard();
     await smokePendantAutoPriceFromBlanks();
     await smokePendantLettersContributePlasticLoad();
+    await smokeCyrillicPendantUsesLiveBlankPphFields(context);
+    await smokePendantFinDirectorUsesCurrentLetterCost(context);
     await smokeLegacyPendantRestore(context);
+    await smokeCurrentPendantPayloadBeatsStaleNested(context);
     await smokeCloneOrderRestoresLegacySnapshotItems(context);
     await smokeCloneOrderPrefersNormalizedItems(context);
     await smokeReadyGoodsRollback(context);

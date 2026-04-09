@@ -472,6 +472,15 @@ function getPendantAttachmentCostPerUnit(type, entry) {
 const PENDANT_LETTER_BLANK_IDS = [30, 31];
 const PENDANT_LETTER_TIERS = [50, 100, 300, 500, 1000, 3000];
 
+function getPendantPreferredLetterBlankIds(pendant) {
+    const elements = getCountablePendantElements(pendant);
+    const sample = elements
+        .map(el => String(el?.char || ''))
+        .join('');
+    const hasCyrillic = /[А-Яа-яЁё]/.test(sample);
+    return hasCyrillic ? [31, 30] : [30, 31];
+}
+
 function getPendantLetterBlankTierQty(totalElements) {
     if (!(totalElements > 0)) return null;
     let tierQty = PENDANT_LETTER_TIERS[PENDANT_LETTER_TIERS.length - 1];
@@ -484,27 +493,47 @@ function getPendantLetterBlankTierQty(totalElements) {
     return tierQty;
 }
 
-function getPendantLetterBlankSource() {
+function getPendantLetterBlankSource(pendant) {
+    const preferredIds = getPendantPreferredLetterBlankIds(pendant);
     if (typeof Molds !== 'undefined' && Array.isArray(Molds?.allMolds) && Molds.allMolds.length) {
-        const mold = Molds.allMolds.find(item => PENDANT_LETTER_BLANK_IDS.includes(Number(item?.id)));
+        const mold = preferredIds
+            .map(id => Molds.allMolds.find(item => Number(item?.id) === id))
+            .find(Boolean)
+            || Molds.allMolds.find(item => PENDANT_LETTER_BLANK_IDS.includes(Number(item?.id)));
         if (mold) return mold;
     }
     if (typeof App !== 'undefined' && Array.isArray(App?.templates) && App.templates.length) {
-        const tpl = App.templates.find(item => PENDANT_LETTER_BLANK_IDS.includes(Number(item?.id)));
+        const tpl = preferredIds
+            .map(id => App.templates.find(item => Number(item?.id) === id))
+            .find(Boolean)
+            || App.templates.find(item => PENDANT_LETTER_BLANK_IDS.includes(Number(item?.id)));
         if (tpl) return tpl;
     }
     return null;
 }
 
-function getPendantLetterBlankMetrics(totalElements, params) {
+function getPendantLetterBlankMetrics(totalElements, params, pendant) {
     if (!(totalElements > 0)) return null;
     const tierQty = getPendantLetterBlankTierQty(totalElements);
     if (!(tierQty > 0)) return null;
 
-    const source = getPendantLetterBlankSource();
+    const source = getPendantLetterBlankSource(pendant);
     if (!source) return null;
 
-    const pph = Number(source?.pieces_per_hour_avg || source?.pieces_per_hour_min || source?.pieces_per_hour || 0);
+    const pphMin = Number(source?.pph_min || source?.pieces_per_hour_min || 0);
+    const pphMax = Number(source?.pph_max || source?.pieces_per_hour_max || 0);
+    const pphAvg = (pphMin > 0 && pphMax > 0)
+        ? Math.round((pphMin + pphMax) / 2)
+        : 0;
+    const pph = Number(
+        source?.pph_actual
+        || source?.pieces_per_hour_actual
+        || source?.pieces_per_hour_avg
+        || pphAvg
+        || pphMin
+        || source?.pieces_per_hour
+        || 0
+    );
     const weight = Number(source?.weight_grams || 0);
     if (!(pph > 0) || !(weight > 0) || !params) return null;
 
@@ -611,10 +640,9 @@ function calculatePendantCost(pendant, params) {
 
     const elements = getCountablePendantElements(pendant);
     const totalElements = qty * elements.length;
-    const letterMetrics = getPendantLetterBlankMetrics(totalElements, params);
+    const letterMetrics = getPendantLetterBlankMetrics(totalElements, params, pendant);
 
-    // Element cost (production/purchase cost per element)
-    const elemCostPerUnit = pendant.element_price_per_unit || 0;
+    const elemCostPerUnit = getPendantElementCostPerUnit(pendant, params, letterMetrics);
     const elemCostTotal = qty * elements.length * elemCostPerUnit;
 
     const cords = getPendantAttachmentEntries(pendant, 'cord');
@@ -667,6 +695,17 @@ function calculatePendantCost(pendant, params) {
         hoursPlasticZone: round2(letterMetrics?.hoursPlasticZone || 0),
         margin: calculateActualMargin(sellPerUnit, costPerUnit),
     };
+}
+
+function getPendantElementCostPerUnit(pendant, params, letterMetricsOverride) {
+    const totalElements = (pendant?.quantity || 0) * getCountablePendantElements(pendant).length;
+    const letterMetrics = letterMetricsOverride || getPendantLetterBlankMetrics(totalElements, params, pendant);
+    const derivedElemCostPerUnit = Number.isFinite(letterMetrics?.cost) && letterMetrics.cost > 0
+        ? round2(letterMetrics.cost)
+        : 0;
+    return derivedElemCostPerUnit > 0
+        ? derivedElemCostPerUnit
+        : (pendant?.element_price_per_unit || 0);
 }
 
 /**
@@ -928,6 +967,7 @@ function calculateFinDirectorData(items, hardwareItems, packagingItems, params, 
         const r = pnd.result;
         const cords = getPendantAttachmentEntries(pnd, 'cord');
         const carabiners = getPendantAttachmentEntries(pnd, 'carabiner');
+        const elementCostPerUnit = getPendantElementCostPerUnit(pnd, params);
         // Assembly salary
         totalSalary += (r.assemblyHours + r.packagingHours) * params.fotPerHour;
         // Cord + carabiner → hardware purchases
@@ -937,7 +977,7 @@ function calculateFinDirectorData(items, hardwareItems, packagingItems, params, 
         totalHardwareDelivery += cords.reduce((sum, entry) => sum + (getPendantAttachmentAllocatedQty(pnd, entry) * getPendantAttachmentDeliveryPerUnit('cord', entry)), 0);
         totalHardwareDelivery += carabiners.reduce((sum, entry) => sum + (getPendantAttachmentAllocatedQty(pnd, entry) * getPendantAttachmentDeliveryPerUnit('carabiner', entry)), 0);
         // Elements → hardware purchase
-        totalHardwarePurchase += qty * elements.length * (pnd.element_price_per_unit || 0);
+        totalHardwarePurchase += qty * elements.length * elementCostPerUnit;
         // Printing
         elements.forEach(el => {
             if (el.has_print && el.print_price) totalPrinting += qty * el.print_price;
