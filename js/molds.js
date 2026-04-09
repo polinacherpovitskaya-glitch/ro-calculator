@@ -1164,9 +1164,10 @@ const Molds = {
             b._cost = round2(priceRub + assemblyCost);
             b._assemblyCost = assemblyCost;
             b._priceRubCalc = round2(priceRub);
-            // Fixed sell price from blank form (fallback to old 40% formula for legacy records).
+            // Fixed sell price from blank form (fallback to the same 40% net formula used in the card).
+            b._targetSellPrice = b._cost > 0 ? calcSellByNetMargin40(b._cost, params) : 0;
             const fixedSell = parseFloat(b.sell_price) || 0;
-            b._sellPrice = fixedSell > 0 ? fixedSell : (b._cost > 0 ? Math.ceil(b._cost / (1 - 0.40)) : 0);
+            b._sellPrice = fixedSell > 0 ? fixedSell : b._targetSellPrice;
 
             // Source badge
             b._srcBadge = src === 'china' ? '🇨🇳' : src === 'custom_cny' ? '¥' : '📦';
@@ -1228,6 +1229,11 @@ const Molds = {
             const speedPcsMin = b.assembly_speed ? round2(b.assembly_speed / 60) : 0;
             const speedLabel = speedPcsMin > 0 ? (speedPcsMin + ' шт/мин') : '—';
             const srcBadge = b._srcBadge || '📦';
+            const inlineSellValue = (parseFloat(b.sell_price) || 0) > 0 ? round2(b.sell_price) : '';
+            const targetSell = b._targetSellPrice || 0;
+            const sellHint = (parseFloat(b.sell_price) || 0) > 0
+                ? `Таргет: ${formatRub(targetSell)}`
+                : `По формуле 40%: ${formatRub(targetSell)}`;
             // Extra info line for china/custom
             const detailBits = [speedLabel];
             if (src === 'warehouse' && displaySku) detailBits.push(displaySku);
@@ -1248,9 +1254,26 @@ const Molds = {
                 <td style="padding:6px 8px;text-align:right;font-size:12px;color:var(--text-secondary);">${formatRub(priceRub)}</td>
                 <td style="padding:6px 8px;text-align:right;font-size:12px;color:var(--text-secondary);">${formatRub(b._assemblyCost)}</td>
                 <td style="padding:6px 8px;text-align:right;font-size:15px;font-weight:700;">${formatRub(b._cost)}</td>
-                <td style="padding:6px 8px;text-align:right;font-size:15px;font-weight:700;color:var(--green);">${formatRub(b._sellPrice)}</td>
+                <td style="padding:6px 8px;text-align:right;">
+                    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;min-width:130px;">
+                        <input
+                            id="hw-inline-sell-${b.id}"
+                            type="number"
+                            min="0"
+                            step="1"
+                            class="input"
+                            style="width:96px;height:34px;text-align:right;"
+                            value="${inlineSellValue}"
+                            placeholder="${targetSell > 0 ? Math.round(targetSell) : ''}"
+                            oninput="Molds.updateInlineHwSellHint(${b.id})"
+                            onkeydown="if(event.key==='Enter'){event.preventDefault();Molds.saveInlineHwBlank(${b.id});}"
+                        >
+                        <div id="hw-inline-hint-${b.id}" style="font-size:10px;color:var(--text-muted);">${sellHint}</div>
+                    </div>
+                </td>
                 <td style="padding:6px;">
-                    <div style="display:flex;gap:4px;">
+                    <div style="display:flex;gap:4px;align-items:center;">
+                        <button class="btn btn-sm btn-primary" style="padding:2px 8px;font-size:10px;" onclick="Molds.saveInlineHwBlank(${b.id})">Сохранить</button>
                         <button class="btn btn-sm btn-outline" style="padding:2px 6px;font-size:10px;" onclick="Molds.editHwBlank(${b.id})">&#9998;</button>
                         <button class="btn-remove" style="font-size:9px;width:24px;height:24px;" onclick="Molds.confirmDeleteHw(${b.id}, '${this.esc(displayName)}')">&#10005;</button>
                     </div>
@@ -1259,9 +1282,54 @@ const Molds = {
         });
 
         html += '</tbody></table>';
-        html += `<div style="margin-top:10px;font-size:11px;color:var(--text-muted);">ФОТ: ${formatRub(fotPerHour)}/ч · Косвенные: ${formatRub(round2(indirectPerHour))}/ч · Себестоимость = цена/шт + (ФОТ + косвенные) ÷ скорость · Цена продажи берётся фиксированно из поля бланка · 📦 склад · 🇨🇳 каталог · ¥ кастом</div></div>`;
+        html += `<div style="margin-top:10px;font-size:11px;color:var(--text-muted);">ФОТ: ${formatRub(fotPerHour)}/ч · Косвенные: ${formatRub(round2(indirectPerHour))}/ч · Себестоимость = цена/шт + (ФОТ + косвенные) ÷ скорость · Пустая цена продажи = таргет по формуле 40% чистой маржи · 📦 склад · 🇨🇳 каталог · ¥ кастом</div></div>`;
 
         container.innerHTML = html;
+    },
+
+    updateInlineHwSellHint(id) {
+        const blank = this._hwBlanks.find(x => x.id === id);
+        const input = document.getElementById(`hw-inline-sell-${id}`);
+        const hint = document.getElementById(`hw-inline-hint-${id}`);
+        if (!blank || !input || !hint) return;
+        const entered = parseFloat(input.value) || 0;
+        const targetSell = blank._targetSellPrice || 0;
+        if (entered > 0) {
+            hint.textContent = `Таргет: ${formatRub(targetSell)}`;
+            hint.style.color = 'var(--text-muted)';
+        } else {
+            hint.textContent = targetSell > 0 ? `По формуле 40%: ${formatRub(targetSell)}` : 'Цена по формуле появится после расчёта себестоимости';
+            hint.style.color = 'var(--text-muted)';
+        }
+    },
+
+    async saveInlineHwBlank(id) {
+        const blank = this._hwBlanks.find(x => x.id === id);
+        if (!blank) return;
+        const input = document.getElementById(`hw-inline-sell-${id}`);
+        const rawValue = input ? String(input.value || '').trim() : '';
+        const sellPrice = rawValue === '' ? 0 : (parseFloat(rawValue) || 0);
+
+        const payload = {
+            id: blank.id,
+            name: blank.name,
+            price_rub: blank.price_rub || 0,
+            sell_price: sellPrice,
+            warehouse_item_id: blank.warehouse_item_id || null,
+            china_catalog_id: blank.china_catalog_id || null,
+            assembly_speed: blank.assembly_speed || 0,
+            notes: blank.notes || '',
+            photo_url: blank.photo_url || '',
+            hw_form_source: blank.hw_form_source || 'warehouse',
+            price_cny: blank.price_cny || 0,
+            weight_grams: blank.weight_grams || 0,
+            delivery_method: blank.delivery_method || '',
+            delivery_per_unit: blank.delivery_per_unit || 0,
+        };
+
+        await saveHwBlank(payload);
+        App.toast(sellPrice > 0 ? 'Цена продажи сохранена' : 'Ручная цена очищена, включён таргет');
+        await this.loadHwTab();
     },
 
     _hwFormSource: 'warehouse', // 'warehouse' | 'china' | 'custom_cny'

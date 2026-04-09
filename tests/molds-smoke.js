@@ -182,6 +182,7 @@ async function main() {
     vm.runInContext(`
         Molds.recalcHwCost = () => {};
         Molds.recalcPkgCost = () => {};
+        App.params = { fotPerHour: 400, indirectPerHour: 100, taxRate: 0.06, charityRate: 0.01 };
         Molds._warehouseHwItems = [{
             id: 501,
             name: 'Карабин',
@@ -229,6 +230,26 @@ async function main() {
     assert.match(String(context.document.getElementById('hw-blank-selected-info').textContent || ''), /Артикул: CRB-501/);
     assert.match(String(context.document.getElementById('hw-blank-selected-info').textContent || ''), /10 ₽/);
     assert.equal(String(context.document.getElementById('hw-blank-notes').value || ''), '');
+
+    vm.runInContext(`
+        Molds._hwBlanks = [{
+            id: 91,
+            name: 'Карабин-кольцо',
+            price_rub: 10,
+            sell_price: 0,
+            warehouse_item_id: 501,
+            assembly_speed: 540,
+            notes: '',
+            photo_url: '',
+            hw_form_source: 'warehouse',
+        }];
+        Molds.enrichHwBlanks();
+        document.getElementById('hw-blanks-container');
+        Molds.renderHwTable();
+    `, context);
+    const hwTableHtml = String(context.document.getElementById('hw-blanks-container').innerHTML || '');
+    assert.match(hwTableHtml, /hw-inline-sell-91/);
+    assert.match(hwTableHtml, /По формуле 40%/);
 
     const pkgSkuOnlySnapshot = JSON.parse(vm.runInContext(`JSON.stringify(Molds._getWarehousePkgSnapshot(601, 'ENV-150'))`, context));
     assert.equal(pkgSkuOnlySnapshot.notes, '');
