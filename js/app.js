@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v234';
+const APP_VERSION = 'v235';
 
 const App = {
     currentPage: 'orders',
@@ -853,9 +853,20 @@ const App = {
             const banner = document.getElementById('update-banner');
             const targetVersion = (banner && banner.dataset && banner.dataset.targetVersion) || this.getMaxSeenVersion() || APP_VERSION;
             const url = new URL(window.location.href);
-            url.searchParams.set('reload', Date.now().toString());
+            try {
+                sessionStorage.removeItem('ro_calc_force_update_attempts');
+            } catch (e) { /* ignore */ }
+            url.searchParams.set('reload', `${Date.now()}-manual`);
             url.searchParams.set('targetVersion', String(targetVersion));
-            window.location.replace(url.toString());
+            const targetHref = url.toString();
+            window.location.replace(targetHref);
+            setTimeout(() => {
+                try {
+                    const secondUrl = new URL(targetHref);
+                    secondUrl.searchParams.set('reload', `${Date.now()}-fallback`);
+                    window.location.replace(secondUrl.toString());
+                } catch (e) { /* ignore */ }
+            }, 250);
         } catch (e) {
             window.location.reload();
         }

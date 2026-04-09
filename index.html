@@ -8,6 +8,52 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="css/style.css?v=101">
+    <script>
+        (function () {
+            const CURRENT_HTML_VERSION = 'v235';
+            const ATTEMPT_KEY = 'ro_calc_force_update_attempts';
+
+            function parseVersion(version) {
+                return String(version || '')
+                    .trim()
+                    .toLowerCase()
+                    .replace(/^v/, '')
+                    .split('.')
+                    .map(part => parseInt(part, 10) || 0);
+            }
+
+            function isNewer(left, right) {
+                const a = parseVersion(left);
+                const b = parseVersion(right);
+                const len = Math.max(a.length, b.length);
+                for (let i = 0; i < len; i += 1) {
+                    const av = a[i] || 0;
+                    const bv = b[i] || 0;
+                    if (av > bv) return true;
+                    if (av < bv) return false;
+                }
+                return false;
+            }
+
+            try {
+                const url = new URL(window.location.href);
+                const targetVersion = String(url.searchParams.get('targetVersion') || '').trim();
+                if (!targetVersion) return;
+                if (!isNewer(targetVersion, CURRENT_HTML_VERSION)) {
+                    sessionStorage.removeItem(ATTEMPT_KEY);
+                    return;
+                }
+
+                const attempts = Number(sessionStorage.getItem(ATTEMPT_KEY) || '0');
+                if (attempts >= 4) return;
+                sessionStorage.setItem(ATTEMPT_KEY, String(attempts + 1));
+                url.searchParams.set('reload', `${Date.now()}-${attempts + 1}`);
+                window.location.replace(url.toString());
+            } catch (e) {
+                // Ignore — update fallback in js/app.js will handle the rest.
+            }
+        })();
+    </script>
 </head>
 <body>
 
@@ -35,7 +81,7 @@
     <aside class="sidebar">
         <div class="sidebar-brand">
             <h2>Recycle Object</h2>
-            <span>Калькулятор <span id="app-version">v234</span></span>
+            <span>Калькулятор <span id="app-version">v235</span></span>
         </div>
         <nav class="sidebar-nav">
             <a href="#tasks" data-page="tasks">
@@ -3393,7 +3439,7 @@
 <script src="js/supabase.js?v=162"></script>
 <script src="js/task-events.js?v=1"></script>
 <script src="js/calculator.js?v=74"></script>
-    <script src="js/app.js?v=234"></script>
+    <script src="js/app.js?v=235"></script>
 <script src="js/wiki.js?v=4"></script>
 <script src="js/order-detail.js?v=62"></script>
 <script src="js/orders.js?v=64"></script>

@@ -21,6 +21,8 @@ assert.ok(appJs.includes('ro_calc_max_seen_version'), 'App should remember the n
 assert.match(appJs, /window\.location\.replace\(/, 'Update action should hard-navigate to bypass stale cached HTML');
 assert.match(appJs, /searchParams\.set\('reload'/, 'Update action should add a cache-busting reload token');
 assert.match(appJs, /dataset\.targetVersion/, 'Update banner should remember the exact remote version shown to the user');
+assert.match(indexHtml, /CURRENT_HTML_VERSION = 'v\d+'/, 'index.html should include an early HTML-version bootstrap for stale cached documents');
+assert.match(indexHtml, /ro_calc_force_update_attempts/, 'index.html should guard repeated forced update attempts');
 
 const appScriptMatch = indexHtml.match(/<script src="js\/app\.js\?v=(\d+)"><\/script>/);
 assert.ok(appScriptMatch, 'index.html must include a versioned js/app.js asset');
