@@ -308,13 +308,12 @@ const Factual = {
         const allOrders = await loadOrders();
         this._allOrders = (allOrders || []).filter(o => this.VISIBLE_STATUSES.includes(o.status));
         this._allOrders.sort((a, b) => (this.STATUS_ORDER[a.status] || 99) - (this.STATUS_ORDER[b.status] || 99));
-        await this._syncFinTabloImportsIfNeeded();
-        this._entries = await loadTimeEntries();
-        this._employees = (await loadEmployees()) || [];
-
         this._ensurePeriodState();
         this._syncPeriodControls();
         this._applyFilter();
+        await this._syncFinTabloImportsIfNeeded();
+        this._entries = await loadTimeEntries();
+        this._employees = (await loadEmployees()) || [];
         await this._renderAll();
     },
 
@@ -385,14 +384,18 @@ const Factual = {
     async _syncFinTabloImportsIfNeeded() {
         if (!Array.isArray(this._allOrders) || this._allOrders.length === 0) return;
         if (typeof window === 'undefined' || !window.FinTablo || typeof window.FinTablo.autoSyncMatchedImports !== 'function') return;
-        const orderIds = this._allOrders
+        const scopedOrders = Array.isArray(this._filteredOrders) && this._filteredOrders.length
+            ? this._filteredOrders
+            : this._allOrders;
+        const orderIds = scopedOrders
             .map(order => Number(order?.id))
             .filter(Number.isFinite);
         if (!orderIds.length) return;
         await window.FinTablo.autoSyncMatchedImports({
             orderIds,
-            orders: this._allOrders,
+            orders: scopedOrders,
             silent: true,
+            minIntervalMs: 60 * 1000,
         });
     },
 

@@ -199,6 +199,19 @@ async function smokeAutoSyncMatchedImports(context) {
     assert.equal(context.__savedImports[0].fact_revenue, 75600);
 }
 
+function smokeBuildMatchMapUsesExplicitFinTabloLink(context) {
+    const result = vm.runInContext(`(() => {
+        return FinTablo._buildMatchMap(
+            [{ id: 991, name: 'Совсем другое имя сделки' }],
+            [{ id: 15, order_name: 'КЭЭЭШШШ', fintablo_link: 'https://app.fintablo.ru/deals/991' }]
+        );
+    })()`, context);
+
+    const plain = JSON.parse(JSON.stringify(result));
+    assert.equal(plain['991'].id, 15);
+    assert.equal(plain['991'].order_name, 'КЭЭЭШШШ');
+}
+
 async function main() {
     const context = createContext();
     runScript(context, 'js/fintablo.js');
@@ -207,6 +220,7 @@ async function main() {
     smokeBuildImportUsesOnlyOrderSplit(context);
     smokeBuildImportKeepsFullIncomeForAttachedDeal(context);
     smokeRenderDetailShowsAllocatedValue(context);
+    smokeBuildMatchMapUsesExplicitFinTabloLink(context);
     await smokeAutoSyncMatchedImports(context);
 
     console.log('fintablo-smoke: ok');

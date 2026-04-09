@@ -693,6 +693,7 @@ async function smokeFactualRequestsFinTabloAutoSync(context) {
     assert.equal(context.__autoSyncCalls.length, 1, 'plan-fact should request one FinTablo auto-sync');
     const orderIds = JSON.parse(JSON.stringify(context.__autoSyncCalls[0].orderIds)).sort((a, b) => a - b);
     assert.deepEqual(orderIds, [11, 12], 'plan-fact should auto-sync all visible orders');
+    assert.equal(context.__autoSyncCalls[0].minIntervalMs, 60000, 'plan-fact should refresh FinTablo much more often than the daily default');
 
     factual._applyFilter = originalApplyFilter;
     factual._renderAll = originalRenderAll;

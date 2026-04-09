@@ -173,16 +173,53 @@ const FinTablo = {
         this._matchMap = this._buildMatchMap(this._deals, this._orders);
     },
 
+    _normalizeMatchName(value) {
+        return String(value || '')
+            .toLowerCase()
+            .replace(/ё/g, 'е')
+            .replace(/[«»"'`]/g, '')
+            .replace(/[^\p{L}\p{N}]+/gu, ' ')
+            .trim()
+            .replace(/\s+/g, ' ');
+    },
+
+    _extractDealId(value) {
+        const raw = String(value || '').trim();
+        if (!raw) return null;
+        if (/^\d+$/.test(raw)) return Number(raw);
+
+        const patterns = [
+            /[?&]dealId=(\d+)/i,
+            /\/deals?\/(\d+)(?:[/?#]|$)/i,
+            /\/(\d+)(?:[/?#]|$)/,
+        ];
+        for (const pattern of patterns) {
+            const match = raw.match(pattern);
+            if (match && match[1]) return Number(match[1]);
+        }
+        return null;
+    },
+
     _buildMatchMap(deals, orders) {
         const matchMap = {};
         const ordersByName = {};
+        const ordersByDealId = {};
         (orders || []).forEach(o => {
-            const name = (o.order_name || '').trim().toLowerCase();
+            const name = this._normalizeMatchName(o.order_name);
             if (name) ordersByName[name] = o;
+            const explicitDealId = this._extractDealId(o.fintablo_link);
+            if (Number.isFinite(explicitDealId) && explicitDealId > 0) {
+                ordersByDealId[explicitDealId] = o;
+            }
         });
 
         (deals || []).forEach(d => {
-            const dealName = (d.name || '').trim().toLowerCase();
+            const explicitOrder = ordersByDealId[Number(d.id)];
+            if (explicitOrder) {
+                matchMap[d.id] = explicitOrder;
+                return;
+            }
+            const dealName = this._normalizeMatchName(d.name);
             if (ordersByName[dealName]) {
                 matchMap[d.id] = ordersByName[dealName];
             }
@@ -200,8 +237,11 @@ const FinTablo = {
         if (!key) return { synced: 0, skipped: 'no_key' };
 
         const force = !!opts.force;
+        const minIntervalMs = Number.isFinite(Number(opts.minIntervalMs))
+            ? Math.max(0, Number(opts.minIntervalMs))
+            : this.AUTO_SYNC_INTERVAL_MS;
         const lastSyncAt = this._getLastAutoSyncAt();
-        if (!force && lastSyncAt > 0 && (Date.now() - lastSyncAt) < this.AUTO_SYNC_INTERVAL_MS) {
+        if (!force && lastSyncAt > 0 && (Date.now() - lastSyncAt) < minIntervalMs) {
             return { synced: 0, skipped: 'fresh' };
         }
 
