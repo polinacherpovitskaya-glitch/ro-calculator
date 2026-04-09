@@ -349,11 +349,13 @@ const Molds = {
             const pphDisplay = m.pph_actual
                 ? `<strong>${m.pph_actual}</strong><sup style="color:var(--green);font-size:9px">✓</sup>`
                 : (m.pph_min > 0 ? `${m.pph_min}${m.pph_max !== m.pph_min ? '-' + m.pph_max : ''}` : '—');
-            const collectionLabel = m.collection ? `<span style="font-size:9px;color:var(--accent);margin-left:4px;">${this.esc(m.collection)}</span>` : '';
+            const collectionBadge = m.collection
+                ? `<span style="display:inline-flex;align-items:center;height:18px;padding:0 7px;border-radius:999px;background:rgba(69,125,255,.08);color:var(--accent);font-size:10px;font-weight:600;">${this.esc(m.collection)}</span>`
+                : '';
             const metaPills = [
                 `${pphDisplay} шт/ч`,
                 `${m.weight_grams || 0} г`,
-                `${m.complexity_label || ''}`,
+                this._getInlineMoldTypeLabel(m),
                 this._hasInlineNfcChip(m) ? 'NFC' : '',
             ].filter(Boolean).map(label => `<span style="display:inline-flex;align-items:center;height:20px;padding:0 8px;border:1px solid var(--border);border-radius:999px;background:#fff;font-size:10px;color:var(--text-secondary);">${label}</span>`).join(' ');
             const priceModeBadge = hasManualBlankPriceOverride(m)
@@ -381,7 +383,10 @@ const Molds = {
                         <div style="display:flex;gap:8px;align-items:flex-start;">
                             ${this.getPhotoThumb(m)}
                             <div style="min-width:0">
-                                <div style="font-weight:700; font-size:13px;"><span class="status-dot ${statusDot}"></span>${this.esc(m.name)}${collectionLabel}</div>
+                                <div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;">
+                                    <div style="font-weight:700; font-size:13px;min-width:0;"><span class="status-dot ${statusDot}"></span>${this.esc(m.name)}</div>
+                                    ${collectionBadge}
+                                </div>
                                 <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;">${metaPills} ${priceModeBadge}</div>
                                 ${m.hw_name ? `<div style="font-size:10px; color:var(--accent); margin-top:1px;">+ ${this.esc(m.hw_name)}</div>` : ''}
                                 ${m.notes ? `<div style="font-size:10px; color:var(--text-muted); font-style:italic;">${this.esc(m.notes)}</div>` : ''}
@@ -431,6 +436,19 @@ const Molds = {
         container.innerHTML = html;
     },
 
+    _getInlineMoldTypeLabel(mold) {
+        switch (String(mold?.complexity || '')) {
+            case 'simple':
+                return 'простой молд';
+            case 'complex':
+                return 'сложный молд';
+            case 'nfc_triple':
+                return 'NFC-молд';
+            default:
+                return '';
+        }
+    },
+
     _renderInlineControls(mold) {
         const inlinePph = Number(mold.pph_actual || mold.pph_max || mold.pph_min || 0) || '';
         const inlineWeight = Number(mold.weight_grams || 0) || '';
@@ -440,42 +458,42 @@ const Molds = {
         const hwHint = mold.hw_name && !nfcChecked ? `Сейчас: ${this.esc(mold.hw_name)}` : 'Встроенный чип';
 
         return `
-            <div style="display:flex;flex-direction:column;gap:8px;">
+            <div style="display:flex;flex-direction:column;gap:10px;">
                 <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
-                    <div style="font-size:11px;color:var(--text-secondary);display:flex;gap:10px;flex-wrap:wrap;">
-                        <span>Быстрое редактирование прямо из таблицы</span>
-                        <span>${this.esc(mold.status_label || '')}</span>
+                    <div style="font-size:11px;color:var(--text-secondary);display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+                        <span style="font-weight:600;color:var(--text);">Быстрые настройки</span>
+                        <span style="display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;background:rgba(0,0,0,.04);">${this.esc(mold.status_label || '')}</span>
                     </div>
-                    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
-                        <button class="btn btn-sm btn-primary" onclick="Molds.saveInlineMold(${mold.id})">Сохранить</button>
-                        <button class="btn btn-sm btn-outline" onclick="Molds.editMold(${mold.id})">Открыть карточку</button>
+                    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                        <button class="btn btn-sm btn-primary" style="min-width:124px;" onclick="Molds.saveInlineMold(${mold.id})">Сохранить</button>
+                        <button class="btn btn-sm btn-outline" onclick="Molds.editMold(${mold.id})">Карточка</button>
                     </div>
                 </div>
-                <div style="display:grid;grid-template-columns:minmax(90px,110px) minmax(90px,110px) minmax(220px,1.35fr) minmax(220px,1fr);gap:10px;align-items:stretch;">
-                <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text-secondary);">
-                    <span>Шт/ч</span>
-                    <input id="mold-inline-pph-${mold.id}" type="number" min="0" step="1" class="input" style="width:100%;height:38px;" value="${inlinePph}">
-                </label>
-                <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text-secondary);">
-                    <span>Вес, г</span>
-                    <input id="mold-inline-weight-${mold.id}" type="number" min="0" step="0.01" class="input" style="width:100%;height:38px;" value="${inlineWeight}">
-                </label>
-                <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text-secondary);">
-                    <span>Тип молда</span>
-                    <select id="mold-inline-complexity-${mold.id}" class="input" style="width:100%;height:38px;">
-                        <option value="simple" ${inlineComplexity === 'simple' ? 'selected' : ''}>Простой · 2 части · 800¥</option>
-                        <option value="complex" ${inlineComplexity === 'complex' ? 'selected' : ''}>Сложный · 2 части · 1000¥</option>
-                        <option value="nfc_triple" ${inlineComplexity === 'nfc_triple' ? 'selected' : ''}>Сложный · 3 части · 1200¥</option>
-                    </select>
-                </label>
-                <div style="display:flex;flex-direction:column;gap:4px;min-width:0;">
-                    <span style="font-size:11px;color:var(--text-secondary);">${hwHint}</span>
-                    <label style="display:flex;align-items:center;gap:8px;min-height:38px;padding:0 12px;border:1px solid var(--border);border-radius:10px;background:#fff;">
-                        <input id="mold-inline-nfc-${mold.id}" type="checkbox" ${nfcChecked ? 'checked' : ''}>
-                        <span style="font-size:12px;color:var(--text);font-weight:600;">NFC ${nfcCost > 0 ? `(+${formatRub(nfcCost)})` : ''}</span>
-                        <span style="font-size:11px;color:var(--text-muted);margin-left:auto;">${nfcChecked ? 'включён' : 'выключен'}</span>
+                <div style="display:grid;grid-template-columns:minmax(92px,110px) minmax(92px,110px) minmax(220px,1.4fr) minmax(220px,0.95fr);gap:12px;align-items:end;">
+                    <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text-secondary);">
+                        <span>Шт/ч</span>
+                        <input id="mold-inline-pph-${mold.id}" type="number" min="0" step="1" class="input" style="width:100%;height:38px;" value="${inlinePph}">
                     </label>
-                </div>
+                    <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text-secondary);">
+                        <span>Вес, г</span>
+                        <input id="mold-inline-weight-${mold.id}" type="number" min="0" step="0.01" class="input" style="width:100%;height:38px;" value="${inlineWeight}">
+                    </label>
+                    <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text-secondary);">
+                        <span>Тип молда</span>
+                        <select id="mold-inline-complexity-${mold.id}" class="input" style="width:100%;height:38px;">
+                            <option value="simple" ${inlineComplexity === 'simple' ? 'selected' : ''}>Простой — 800¥</option>
+                            <option value="complex" ${inlineComplexity === 'complex' ? 'selected' : ''}>Сложный — 1000¥</option>
+                            <option value="nfc_triple" ${inlineComplexity === 'nfc_triple' ? 'selected' : ''}>NFC — 1200¥</option>
+                        </select>
+                    </label>
+                    <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text-secondary);min-width:0;">
+                        <span>${hwHint}</span>
+                        <span style="display:flex;align-items:center;gap:8px;min-height:38px;padding:0 12px;border:1px solid var(--border);border-radius:10px;background:#fff;">
+                            <input id="mold-inline-nfc-${mold.id}" type="checkbox" ${nfcChecked ? 'checked' : ''}>
+                            <span style="font-size:12px;color:var(--text);font-weight:600;">NFC ${nfcCost > 0 ? `(+${formatRub(nfcCost)})` : ''}</span>
+                            <span style="font-size:11px;color:var(--text-muted);margin-left:auto;">${nfcChecked ? 'вкл.' : 'выкл.'}</span>
+                        </span>
+                    </label>
                 </div>
             </div>`;
     },
