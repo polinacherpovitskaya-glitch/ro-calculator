@@ -508,6 +508,23 @@ const Molds = {
         return name === 'nfc метка' || name === 'nfc метка / чип' || name === 'nfc chip' || name === 'nfc';
     },
 
+    _findWarehouseNfcSnapshot() {
+        const items = [
+            ...(Array.isArray(this._warehouseHwItems) ? this._warehouseHwItems : []),
+            ...(Array.isArray(this._warehouseItems) ? this._warehouseItems : []),
+        ].filter((item, index, arr) => arr.findIndex(other => Number(other?.id) === Number(item?.id)) === index);
+        const match = items.find(item => {
+            const sku = String(item?.sku || '').trim().toUpperCase();
+            const name = String(item?.name || '').trim().toLowerCase();
+            return sku === 'NFC'
+                || name === 'nfc'
+                || name === 'nfc метка'
+                || name === 'nfc метка / чип'
+                || name.includes('nfc');
+        });
+        return match ? this._getWarehouseHwSnapshot(match.id, '') : null;
+    },
+
     async saveInlineMold(id) {
         const mold = this.allMolds.find(x => x.id === id);
         if (!mold) return;
@@ -518,6 +535,10 @@ const Molds = {
         const wantsNfc = !!document.getElementById(`mold-inline-nfc-${id}`)?.checked;
         const hadNfc = this._hasInlineNfcChip(mold);
         const nfcCost = Number(App?.params?.nfcTagCost || App?.settings?.nfc_tag_cost || 0) || 0;
+        if (wantsNfc) {
+            await this.loadWarehouseForHw();
+        }
+        const nfcSnapshot = wantsNfc ? this._findWarehouseNfcSnapshot() : null;
 
         const next = {
             ...mold,
@@ -538,14 +559,18 @@ const Molds = {
         };
 
         if (wantsNfc) {
-            next.hw_source = 'custom';
-            next.hw_name = 'NFC метка';
-            next.hw_price_per_unit = nfcCost;
+            next.hw_source = nfcSnapshot ? 'warehouse' : 'custom';
+            next.hw_name = nfcSnapshot?.name || 'NFC метка';
+            next.hw_price_per_unit = nfcSnapshot?.priceRub || nfcCost;
             next.hw_delivery_total = 0;
             next.hw_speed = null;
-            next.hw_warehouse_item_id = null;
-            next.hw_warehouse_sku = '';
+            next.hw_warehouse_item_id = nfcSnapshot?.warehouseItemId || null;
+            next.hw_warehouse_sku = nfcSnapshot?.sku || '';
+            if (!nfcSnapshot) {
+                App.toast('NFC на складе не найдена: сохранили как кастомную метку без резерва');
+            }
         } else if (hadNfc) {
+            next.hw_source = 'custom';
             next.hw_name = '';
             next.hw_price_per_unit = 0;
             next.hw_delivery_total = 0;
@@ -989,14 +1014,22 @@ const Molds = {
     _warehouseItems: [],
 
     async loadWarehouseForHw() {
-        if (this._warehouseItems && this._warehouseItems.length > 0) return;
+        if (this._warehouseHwItems && this._warehouseHwItems.length > 0) {
+            this._warehouseItems = this._warehouseHwItems;
+            return;
+        }
         try {
-            this._warehouseItems = await loadWarehouseItems();
-            // All categories except packaging (packaging = only bags/boxes)
-            this._warehouseItems = this._warehouseItems.filter(i =>
+            const whItems = await loadWarehouseItems();
+            const filtered = (whItems || []).filter(i =>
                 i.category !== 'packaging'
             );
-        } catch (e) { console.warn('loadWarehouseForHw error:', e); this._warehouseItems = []; }
+            this._warehouseItems = filtered;
+            this._warehouseHwItems = filtered;
+        } catch (e) {
+            console.warn('loadWarehouseForHw error:', e);
+            this._warehouseItems = [];
+            this._warehouseHwItems = [];
+        }
     },
 
     setHwSource(source) {
@@ -1051,7 +1084,7 @@ const Molds = {
     },
 
     selectWarehouseHw(itemId) {
-        const item = this._warehouseItems.find(i => i.id === itemId);
+        const item = (this._warehouseHwItems || this._warehouseItems || []).find(i => Number(i.id) === Number(itemId));
         if (!item) return;
         this._hwWarehouseItemId = item.id;
         this._hwWarehouseSku = item.sku || '';
@@ -1064,7 +1097,7 @@ const Molds = {
     },
 
     selectWarehouseHwPicker(_idx, itemId) {
-        this.selectHwWarehouseItem(itemId);
+        this.selectWarehouseHw(itemId);
     },
 
     esc(str) {

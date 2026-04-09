@@ -861,10 +861,13 @@ function _moldToTemplate(m) {
         pieces_per_hour_avg: pAvg,
         weight_grams: m.weight_grams,
         // Built-in hardware (e.g. mirror, magnet, ring)
+        hw_source: m.hw_source || (m.hw_warehouse_item_id ? 'warehouse' : 'custom'),
         hw_name: m.hw_name || '',
         hw_price_per_unit: m.hw_price_per_unit || 0,
         hw_delivery_total: m.hw_delivery_total || 0,
         hw_speed: m.hw_speed || 0,
+        hw_warehouse_item_id: m.hw_warehouse_item_id || null,
+        hw_warehouse_sku: m.hw_warehouse_sku || '',
         // Per-mold custom margins (overrides standard tier margins)
         custom_margins: m.custom_margins || {},
         // Per-mold custom prices (absolute sell prices per tier)

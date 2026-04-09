@@ -3692,6 +3692,57 @@ async function smokeProductNfcWarehouseDemandSync(context) {
     assert.deepEqual(dedupedCalcDemand, [[197, 12]]);
 }
 
+async function smokeTemplateBuiltInNfcUsesWarehouseDemand(context) {
+    vm.runInContext(`
+        App.templates = [{
+            id: 'tmpl-builtin-nfc',
+            name: 'NFC Бирка',
+            category: 'blank',
+            hw_name: 'NFC',
+            hw_price_per_unit: 10,
+            hw_delivery_total: 0,
+            hw_speed: 0,
+            hw_source: 'warehouse',
+            hw_warehouse_item_id: 197,
+            hw_warehouse_sku: 'NFC',
+        }];
+        Calculator.items = [Object.assign(Calculator.getEmptyItem(1), {
+            product_name: 'Встроенная NFC',
+            quantity: 12,
+            is_blank_mold: true,
+            template_id: 'tmpl-builtin-nfc',
+        })];
+        Calculator.hardwareItems = [];
+        Calculator.packagingItems = [];
+        Calculator.pendants = [];
+        Calculator._whPickerData = { other: { items: [{
+            id: 197,
+            name: 'NFC',
+            sku: 'NFC',
+            category: 'other',
+            qty: 160,
+            unit: 'шт',
+            price_per_unit: 8,
+        }] } };
+        Calculator._renderPerItemHwPkg = () => {};
+        Calculator.rerenderAllHardware = () => {};
+        Calculator._syncTemplateHardware(0, App.templates[0]);
+        globalThis.__templateHw = Calculator.hardwareItems[0];
+        globalThis.__templateDemand = Array.from(Calculator._collectWarehouseReservationDemand({ hardware: true, packaging: false }).entries());
+    `, context);
+
+    const hw = clone(vm.runInContext('globalThis.__templateHw', context));
+    assert.equal(hw.source, 'warehouse');
+    assert.equal(hw.warehouse_item_id, 197);
+    assert.equal(hw.warehouse_sku, 'NFC');
+    assert.equal(hw.price, 10);
+
+    const demand = clone(vm.runInContext('globalThis.__templateDemand', context));
+    assert.deepEqual(demand, [[197, 12]]);
+
+    vm.runInContext('delete globalThis.__templateHw; delete globalThis.__templateDemand;', context);
+}
+
 async function smokeProjectHardwareShortageDetailsForHiddenNfc(context) {
     const order = {
         id: 656,
@@ -6572,6 +6623,7 @@ async function main() {
     await smokeProductionPlanCompletedGuard(context);
     await smokePendantWarehouseDemandSync(context);
     await smokeProductNfcWarehouseDemandSync(context);
+    await smokeTemplateBuiltInNfcUsesWarehouseDemand(context);
     await smokeProjectHardwareShortageDetailsForHiddenNfc(context);
     await smokeProjectHardwareShortageDetailsShowBlockingOrders(context);
     await smokePackagingWarehouseSaveSync(context);

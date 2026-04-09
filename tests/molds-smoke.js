@@ -82,6 +82,8 @@ function createContext() {
         loadMolds: async () => [],
         refreshTemplatesFromMolds() {},
     };
+    context.__warehouseItems = [];
+    context.loadWarehouseItems = async () => JSON.parse(JSON.stringify(context.__warehouseItems || []));
     context.Warehouse = {
         async getItemsForPicker() {
             return {
@@ -183,7 +185,31 @@ async function main() {
         Molds.recalcHwCost = () => {};
         Molds.recalcPkgCost = () => {};
         App.params = { fotPerHour: 400, indirectPerHour: 100, taxRate: 0.06, charityRate: 0.01 };
+        globalThis.__warehouseItems = [{
+            id: 77,
+            name: 'NFC',
+            sku: 'NFC',
+            category: 'other',
+            price_per_unit: 39,
+            photo_thumbnail: '',
+        }, {
+            id: 501,
+            name: 'Карабин',
+            sku: 'CRB-501',
+            size: '5 см',
+            color: 'черный',
+            category: 'chains',
+            price_per_unit: 10,
+            photo_thumbnail: 'https://example.com/hw.jpg',
+        }];
         Molds._warehouseHwItems = [{
+            id: 77,
+            name: 'NFC',
+            sku: 'NFC',
+            category: 'other',
+            price_per_unit: 39,
+            photo_thumbnail: '',
+        }, {
             id: 501,
             name: 'Карабин',
             sku: 'CRB-501',
@@ -248,8 +274,8 @@ async function main() {
         Molds.renderHwTable();
     `, context);
     const hwTableHtml = String(context.document.getElementById('hw-blanks-container').innerHTML || '');
-    assert.match(hwTableHtml, /hw-inline-sell-91/);
-    assert.match(hwTableHtml, /По формуле 40%/);
+    assert.match(hwTableHtml, /авто 40%/);
+    assert.match(hwTableHtml, /Карабин черный 5 см/);
 
     const pkgSkuOnlySnapshot = JSON.parse(vm.runInContext(`JSON.stringify(Molds._getWarehousePkgSnapshot(601, 'ENV-150'))`, context));
     assert.equal(pkgSkuOnlySnapshot.notes, '');
@@ -310,8 +336,11 @@ async function main() {
     assert.equal(context.__savedInlineMold.weight_grams, 7.5);
     assert.equal(context.__savedInlineMold.complexity, 'complex');
     assert.equal(context.__savedInlineMold.mold_count, 1);
-    assert.equal(context.__savedInlineMold.hw_name, 'NFC метка');
+    assert.equal(context.__savedInlineMold.hw_source, 'warehouse');
+    assert.equal(context.__savedInlineMold.hw_name, 'NFC');
     assert.equal(context.__savedInlineMold.hw_price_per_unit, 39);
+    assert.equal(context.__savedInlineMold.hw_warehouse_item_id, 77);
+    assert.equal(context.__savedInlineMold.hw_warehouse_sku, 'NFC');
     assert.equal(context.__savedInlineMold.use_manual_prices, false);
     assert.deepEqual(context.__savedInlineMold.custom_prices, {});
     assert.deepEqual(context.__savedInlineMold.custom_margins, {});

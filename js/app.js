@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v247';
+const APP_VERSION = 'v248';
 
 const App = {
     currentPage: 'orders',
@@ -3016,15 +3016,24 @@ const Calculator = {
         if (tpl && tpl.hw_name) {
             const hw = this.getEmptyHardware(itemIdx);
             hw._from_template = true;
-            hw.source = 'custom';
+            const templateWarehouseItemId = Number(tpl.hw_warehouse_item_id || 0) || null;
+            hw.source = templateWarehouseItemId ? 'warehouse' : 'custom';
             hw.custom_country = 'russia';
-            hw.name = tpl.hw_name;
+            hw.name = templateWarehouseItemId ? '' : tpl.hw_name;
             hw.price = tpl.hw_price_per_unit || 0;
             hw.delivery_total = tpl.hw_delivery_total || 0;
             hw.qty = this.items[itemIdx].quantity || 0;
             hw.delivery_price = hw.qty > 0 ? round2(hw.delivery_total / hw.qty) : 0;
             hw.assembly_speed = tpl.hw_speed || 0;
             hw.assembly_minutes = hw.assembly_speed > 0 ? round2(hw.assembly_speed / 60) : 0;
+            hw.warehouse_item_id = templateWarehouseItemId;
+            hw.warehouse_sku = tpl.hw_warehouse_sku || '';
+            if (templateWarehouseItemId) {
+                this._hydrateWarehouseBackedLineFromCurrentWarehouse(hw);
+                if (!String(hw.name || '').trim()) {
+                    hw.name = tpl.hw_name;
+                }
+            }
             this.hardwareItems.push(hw);
         }
 
@@ -5003,6 +5012,20 @@ const Calculator = {
             hw.weight_grams = dbHw.weight_grams || 0;
             hw.parent_item_index = dbHw.hardware_parent_item_index ?? null;
             hw._from_template = dbHw.hardware_from_template || false;
+            if (hw._from_template && !(Number(hw.warehouse_item_id || 0) > 0) && hw.parent_item_index !== null && hw.parent_item_index !== undefined) {
+                const parentItem = this.items[hw.parent_item_index];
+                const tpl = parentItem?.template_id && Array.isArray(App.templates)
+                    ? App.templates.find(t => String(t.id) === String(parentItem.template_id))
+                    : null;
+                const templateWarehouseItemId = Number(tpl?.hw_warehouse_item_id || 0) || null;
+                if (templateWarehouseItemId) {
+                    hw.source = 'warehouse';
+                    hw.warehouse_item_id = templateWarehouseItemId;
+                    hw.warehouse_sku = tpl?.hw_warehouse_sku || '';
+                    hw.name = '';
+                    hw.price = 0;
+                }
+            }
             this._hydrateWarehouseBackedLineFromCurrentWarehouse(hw);
             // Save originals for diff on next save
             hw._original_qty = hw.qty;
