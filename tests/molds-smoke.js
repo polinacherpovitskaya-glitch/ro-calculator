@@ -136,6 +136,8 @@ function runScript(context, relativePath) {
 
 async function main() {
     const context = createContext();
+    context.calculateItemCost = () => ({ costTotal: 100, costMoldAmortization: 0 });
+    context.App.params = { taxRate: 0.06, vatRate: 0.05, charityRate: 0.01 };
     runScript(context, 'js/molds.js');
 
     assert.equal(vm.runInContext('getBlankMargin(10)', context), 0.65);
@@ -290,7 +292,46 @@ async function main() {
     assert.equal(context.__savedInlineMold.mold_count, 3);
     assert.equal(context.__savedInlineMold.hw_name, 'NFC метка');
     assert.equal(context.__savedInlineMold.hw_price_per_unit, 39);
+    assert.equal(context.__savedInlineMold.use_manual_prices, false);
+    assert.deepEqual(context.__savedInlineMold.custom_prices, {});
+    assert.deepEqual(context.__savedInlineMold.custom_margins, {});
     assert.equal(context.__reloadedInlineMolds, true);
+
+    vm.runInContext(`
+        Molds.allMolds = [{
+            id: 91,
+            name: 'Формульный бланк',
+            status: 'active',
+            pph_min: 25,
+            pph_max: 25,
+            pph_actual: 25,
+            weight_grams: 30,
+            complexity: 'simple',
+            cost_cny: 800,
+            cny_rate: 12.5,
+            delivery_cost: 8000,
+            mold_count: 1,
+            hw_name: '',
+            hw_price_per_unit: 0,
+            hw_delivery_total: 0,
+            hw_speed: null,
+            custom_prices: { 50: 999 },
+            custom_margins: {},
+            use_manual_prices: false,
+            total_orders: 0,
+            total_units_produced: 0
+        }];
+        Molds.enrichMolds();
+    `, context);
+    const formulaPrice = vm.runInContext(`Molds.allMolds[0].tiers[50].sellPrice`, context);
+    assert.equal(formulaPrice, 485);
+
+    vm.runInContext(`
+        Molds.allMolds[0].use_manual_prices = true;
+        Molds.enrichMolds();
+    `, context);
+    const manualPrice = vm.runInContext(`Molds.allMolds[0].tiers[50].sellPrice`, context);
+    assert.equal(manualPrice, 999);
 
     console.log('molds smoke checks passed');
 }

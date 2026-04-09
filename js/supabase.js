@@ -869,6 +869,7 @@ function _moldToTemplate(m) {
         custom_margins: m.custom_margins || {},
         // Per-mold custom prices (absolute sell prices per tier)
         custom_prices: m.custom_prices || {},
+        use_manual_prices: !!m.use_manual_prices,
         // Keep mold economics on template so calculator can match "Бланки" себестоимость
         cost_cny: m.cost_cny || 0,
         cny_rate: m.cny_rate || 0,

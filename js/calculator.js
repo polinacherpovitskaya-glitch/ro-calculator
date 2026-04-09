@@ -532,11 +532,12 @@ function getPendantLetterBlankMetrics(totalElements, params) {
 
     const cost = round2((result?.costTotal || 0) - (result?.costMoldAmortization || 0) + moldAmortPerUnit);
 
-    const customPrice = Number(source?.custom_prices?.[tierQty]);
+    const allowManualPrices = !!source?.use_manual_prices;
+    const customPrice = allowManualPrices ? Number(source?.custom_prices?.[tierQty]) : NaN;
     let sellPrice = Number.isFinite(customPrice) && customPrice > 0 ? customPrice : 0;
     let targetMargin = 0;
     if (!(sellPrice > 0) && cost > 0) {
-        const customMargin = Number(source?.custom_margins?.[tierQty]);
+        const customMargin = allowManualPrices ? Number(source?.custom_margins?.[tierQty]) : NaN;
         if (Number.isFinite(customMargin)) {
             targetMargin = customMargin;
         } else if (typeof getBlankMargin === 'function') {
