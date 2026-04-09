@@ -330,7 +330,33 @@ const Orders = {
             hardware: this.buildHardwareMeta(items),
             china: this.buildChinaMeta(purchases, items),
             production: this.buildProductionMeta(order),
+            financial: this.buildFinancialMeta(order, items),
         };
+    },
+
+    buildFinancialMeta(order, items) {
+        if (typeof getOrderLiveCalculatorSnapshot !== 'function') {
+            return {
+                revenue: Number(order?.total_revenue_plan || 0),
+                marginPercent: Number(order?.margin_percent_plan || 0),
+                hours: Number(order?.total_hours_plan || 0),
+            };
+        }
+        try {
+            const snapshot = getOrderLiveCalculatorSnapshot(order, items || []);
+            return {
+                revenue: Number(snapshot?.revenue || 0),
+                marginPercent: Number(snapshot?.marginPercent || 0),
+                hours: Number(snapshot?.hours || 0),
+            };
+        } catch (e) {
+            console.warn('Orders.buildFinancialMeta fallback:', e);
+            return {
+                revenue: Number(order?.total_revenue_plan || 0),
+                marginPercent: Number(order?.margin_percent_plan || 0),
+                hours: Number(order?.total_hours_plan || 0),
+            };
+        }
     },
 
     buildTodoMeta(tasks) {
@@ -646,7 +672,7 @@ const Orders = {
         const collapsed = this.collapsedSections[section.key];
         const totalRevenue = sectionOrders
             .filter(order => (order.client_name || '').toUpperCase() !== 'B2C')
-            .reduce((sum, order) => sum + (order.total_revenue_plan || 0), 0);
+            .reduce((sum, order) => sum + Number(this.metaByOrderId[order.id]?.financial?.revenue || order.total_revenue_plan || 0), 0);
         const b2cCount = sectionOrders.filter(order => (order.client_name || '').toUpperCase() === 'B2C').length;
 
         return `
@@ -699,7 +725,7 @@ const Orders = {
             const columnOrders = orders.filter(order => column.statuses.includes(order.status));
             const totalRevenue = columnOrders
                 .filter(order => (order.client_name || '').toUpperCase() !== 'B2C')
-                .reduce((sum, order) => sum + (order.total_revenue_plan || 0), 0);
+                .reduce((sum, order) => sum + Number(this.metaByOrderId[order.id]?.financial?.revenue || order.total_revenue_plan || 0), 0);
             const b2cCount = columnOrders.filter(order => (order.client_name || '').toUpperCase() === 'B2C').length;
 
             return `
@@ -722,7 +748,9 @@ const Orders = {
 
     renderBoardCard(order) {
         const payment = PAYMENT_STATUSES.find(item => item.key === (order.payment_status || 'not_sent')) || PAYMENT_STATUSES[0];
-        const margin = order.margin_percent_plan || 0;
+        const financial = this.metaByOrderId[order.id]?.financial || null;
+        const margin = Number(financial?.marginPercent || order.margin_percent_plan || 0);
+        const revenue = Number(financial?.revenue || order.total_revenue_plan || 0);
 
         let deadlineHtml = '';
         if (order.deadline_end || order.deadline_start || order.deadline) {
@@ -758,7 +786,7 @@ const Orders = {
                 <span style="font-size:11px;font-weight:600;${margin >= 30 ? 'color:var(--green)' : 'color:var(--red)'}">${formatPercent(margin)}</span>
             </div>
             <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px">
-                <span style="font-size:11px;color:var(--text-muted)">${formatRub(order.total_revenue_plan || 0)}</span>
+                <span style="font-size:11px;color:var(--text-muted)">${formatRub(revenue)}</span>
                 ${deadlineHtml}
             </div>
         </div>`;

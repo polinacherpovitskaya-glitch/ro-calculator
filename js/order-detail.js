@@ -25,6 +25,7 @@ const HARDWARE_STATUSES = [
 const OrderDetail = {
     currentOrder: null,
     currentItems: [],
+    currentFinancial: null,
     currentTab: 'info',
 
     // ==========================================
@@ -43,6 +44,7 @@ const OrderDetail = {
 
         this.currentOrder = data.order;
         this.currentItems = data.items || [];
+        this.currentFinancial = this.buildLiveFinancialMeta();
         this.currentTab = 'info';
 
         this.renderHeader();
@@ -97,22 +99,51 @@ const OrderDetail = {
     // STATS
     // ==========================================
 
+    buildLiveFinancialMeta() {
+        if (typeof getOrderLiveCalculatorSnapshot !== 'function') {
+            return {
+                revenue: Number(this.currentOrder?.total_revenue_plan || 0),
+                marginPercent: Number(this.currentOrder?.margin_percent_plan || 0),
+                hours: Number(this.currentOrder?.total_hours_plan || 0),
+            };
+        }
+        try {
+            const snapshot = getOrderLiveCalculatorSnapshot(this.currentOrder || {}, this.currentItems || []);
+            return {
+                revenue: Number(snapshot?.revenue || 0),
+                marginPercent: Number(snapshot?.marginPercent || 0),
+                hours: Number(snapshot?.hours || 0),
+            };
+        } catch (e) {
+            console.warn('OrderDetail.buildLiveFinancialMeta fallback:', e);
+            return {
+                revenue: Number(this.currentOrder?.total_revenue_plan || 0),
+                marginPercent: Number(this.currentOrder?.margin_percent_plan || 0),
+                hours: Number(this.currentOrder?.total_hours_plan || 0),
+            };
+        }
+    },
+
     renderStats() {
         const o = this.currentOrder;
         const ps = PAYMENT_STATUSES.find(s => s.key === o.payment_status) || PAYMENT_STATUSES[0];
+        this.currentFinancial = this.buildLiveFinancialMeta();
+        const revenue = Number(this.currentFinancial?.revenue || o.total_revenue_plan || 0);
+        const marginPercent = Number(this.currentFinancial?.marginPercent || o.margin_percent_plan || 0);
+        const hours = Number(this.currentFinancial?.hours || o.total_hours_plan || 0);
 
         document.getElementById('od-stats').innerHTML = `
             <div class="stat-card">
                 <div class="stat-label">Выручка</div>
-                <div class="stat-value">${formatRub(o.total_revenue_plan || 0)}</div>
+                <div class="stat-value">${formatRub(revenue)}</div>
             </div>
             <div class="stat-card">
                 <div class="stat-label">Маржа</div>
-                <div class="stat-value ${(o.margin_percent_plan || 0) >= 30 ? 'text-green' : 'text-red'}">${formatPercent(o.margin_percent_plan || 0)}</div>
+                <div class="stat-value ${marginPercent >= 30 ? 'text-green' : 'text-red'}">${formatPercent(marginPercent)}</div>
             </div>
             <div class="stat-card">
                 <div class="stat-label">Часы</div>
-                <div class="stat-value">${(o.total_hours_plan || 0).toFixed(1)} ч</div>
+                <div class="stat-value">${hours.toFixed(1)} ч</div>
             </div>
             <div class="stat-card">
                 <div class="stat-label">Оплата</div>

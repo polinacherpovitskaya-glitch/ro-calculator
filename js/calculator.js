@@ -1203,6 +1203,170 @@ function calculateOrderSummary(items, hardwareItems, packagingItems, extraCosts,
     };
 }
 
+function parseOrderCalcJson(value, fallback) {
+    if (value === null || value === undefined || value === '') return fallback;
+    if (Array.isArray(fallback)) {
+        if (Array.isArray(value)) return value;
+    } else if (typeof fallback === 'object' && fallback !== null) {
+        if (typeof value === 'object' && value !== null && !Array.isArray(value)) return value;
+    }
+    if (typeof value !== 'string') return fallback;
+    try {
+        const parsed = JSON.parse(value);
+        if (Array.isArray(fallback)) return Array.isArray(parsed) ? parsed : fallback;
+        if (typeof fallback === 'object' && fallback !== null) {
+            return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : fallback;
+        }
+        return parsed;
+    } catch (e) {
+        return fallback;
+    }
+}
+
+function getOrderLiveCalculatorSnapshot(order = {}, orderItems = [], params = null, templates = null) {
+    const runtimeParams = params || (typeof App !== 'undefined' ? (App.params || {}) : {});
+    const runtimeTemplates = Array.isArray(templates)
+        ? templates
+        : (typeof App !== 'undefined' && Array.isArray(App.templates) ? App.templates : []);
+
+    const products = [];
+    const hardwareItems = [];
+    const packagingItems = [];
+    const extraCosts = [];
+    const pendantItems = [];
+
+    (orderItems || []).forEach(rawItem => {
+        if (!rawItem) return;
+        const itemType = String(rawItem.item_type || 'product').trim().toLowerCase();
+
+        if (itemType === 'product') {
+            const item = { ...rawItem };
+            item.quantity = Number(item.quantity || 0);
+            item.pieces_per_hour = Number(item.pieces_per_hour || 0);
+            item.weight_grams = Number(item.weight_grams || 0);
+            item.extra_molds = Number(item.extra_molds || 0);
+            item.sell_price_item = Number(item.sell_price_item || 0);
+            item.sell_price_printing = Number(item.sell_price_printing || 0);
+            item.printings = parseOrderCalcJson(item.printings, []);
+
+            const tpl = item.template_id
+                ? runtimeTemplates.find(template => String(template.id) === String(item.template_id))
+                : null;
+            if (tpl) {
+                item.product_name = item.product_name || tpl.name || '';
+                item.pieces_per_hour = Number(
+                    tpl.pieces_per_hour_avg
+                    || tpl.pieces_per_hour_min
+                    || item.pieces_per_hour
+                    || 0
+                );
+                item.weight_grams = Number(tpl.weight_grams || item.weight_grams || 0);
+                item.is_blank_mold = true;
+                item.builtin_hw_name = tpl.hw_name || '';
+                item.builtin_hw_price = Number(tpl.hw_price_per_unit || 0);
+                item.builtin_hw_delivery_total = Number(tpl.hw_delivery_total || 0);
+                item.builtin_hw_speed = Number(tpl.hw_speed || 0);
+            }
+
+            item.result = calculateItemCost(item, runtimeParams);
+            products.push(item);
+            return;
+        }
+
+        if (itemType === 'hardware') {
+            const hw = {
+                ...rawItem,
+                source: rawItem.hardware_source || 'custom',
+                name: rawItem.product_name || '',
+                qty: Number(rawItem.quantity || 0),
+                assembly_speed: Number(rawItem.hardware_assembly_speed || 0),
+                price: Number(rawItem.hardware_price_per_unit || 0),
+                delivery_price: Number(rawItem.hardware_delivery_per_unit || 0),
+                delivery_total: Number(rawItem.hardware_delivery_total || 0),
+                sell_price: Number(rawItem.sell_price_hardware || 0),
+                warehouse_item_id: rawItem.hardware_warehouse_item_id || null,
+                warehouse_sku: rawItem.hardware_warehouse_sku || '',
+            };
+            if (!(hw.delivery_total > 0) && hw.qty > 0 && hw.delivery_price > 0) {
+                hw.delivery_total = round2(hw.delivery_price * hw.qty);
+            }
+            if (typeof Calculator !== 'undefined' && Calculator && typeof Calculator._hydrateWarehouseBackedLineFromCurrentWarehouse === 'function') {
+                Calculator._hydrateWarehouseBackedLineFromCurrentWarehouse(hw);
+            }
+            hw.result = calculateHardwareCost(hw, runtimeParams);
+            hardwareItems.push(hw);
+            return;
+        }
+
+        if (itemType === 'packaging') {
+            const pkg = {
+                ...rawItem,
+                source: rawItem.packaging_source || 'custom',
+                name: rawItem.product_name || '',
+                qty: Number(rawItem.quantity || 0),
+                assembly_speed: Number(rawItem.packaging_assembly_speed || 0),
+                price: Number(rawItem.packaging_price_per_unit || 0),
+                delivery_price: Number(rawItem.packaging_delivery_per_unit || 0),
+                delivery_total: Number(rawItem.packaging_delivery_total || 0),
+                sell_price: Number(rawItem.sell_price_packaging || 0),
+                warehouse_item_id: rawItem.packaging_warehouse_item_id || null,
+                warehouse_sku: rawItem.packaging_warehouse_sku || '',
+            };
+            if (!(pkg.delivery_total > 0) && pkg.qty > 0 && pkg.delivery_price > 0) {
+                pkg.delivery_total = round2(pkg.delivery_price * pkg.qty);
+            }
+            if (typeof Calculator !== 'undefined' && Calculator && typeof Calculator._hydrateWarehouseBackedLineFromCurrentWarehouse === 'function') {
+                Calculator._hydrateWarehouseBackedLineFromCurrentWarehouse(pkg);
+            }
+            pkg.result = calculatePackagingCost(pkg, runtimeParams);
+            packagingItems.push(pkg);
+            return;
+        }
+
+        if (itemType === 'extra_cost') {
+            extraCosts.push({
+                name: rawItem.product_name || rawItem.name || '',
+                amount: Number(rawItem.cost_total || rawItem.sell_price_item || 0),
+            });
+            return;
+        }
+
+        if (itemType === 'pendant') {
+            const nestedPayload = parseOrderCalcJson(rawItem.item_data, {});
+            const pendant = { ...nestedPayload, ...rawItem };
+            pendant.quantity = Number(pendant.quantity || 0);
+            pendant.elements = parseOrderCalcJson(pendant.elements, []);
+            pendant.cords = parseOrderCalcJson(pendant.cords, []);
+            pendant.carabiners = parseOrderCalcJson(pendant.carabiners, []);
+            pendant.packaging = parseOrderCalcJson(pendant.packaging, pendant.packaging || null);
+            if (!pendant.cord && pendant.cords[0]) pendant.cord = pendant.cords[0];
+            if (!pendant.carabiner && pendant.carabiners[0]) pendant.carabiner = pendant.carabiners[0];
+            pendant.result = calculatePendantCost(pendant, runtimeParams);
+            pendantItems.push(pendant);
+        }
+    });
+
+    const orderAdjustments = {
+        mode: order?.discount_mode,
+        value: order?.discount_value,
+    };
+    const load = calculateProductionLoad(products, hardwareItems, packagingItems, runtimeParams, pendantItems);
+    const summary = calculateOrderSummary(products, hardwareItems, packagingItems, extraCosts, runtimeParams, pendantItems, orderAdjustments);
+
+    return {
+        products,
+        hardwareItems,
+        packagingItems,
+        extraCosts,
+        pendantItems,
+        load,
+        summary,
+        revenue: round2(summary.totalRevenue || 0),
+        marginPercent: round2(summary.marginPercent || 0),
+        hours: round2(load.totalHours || 0),
+    };
+}
+
 // === Утилиты ===
 
 function round2(n) {

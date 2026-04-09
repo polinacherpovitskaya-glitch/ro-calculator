@@ -687,6 +687,90 @@ async function smokeLoadOrderHydratesZeroWarehousePriceFromCurrentStock(context)
     assert.equal(restored.name, 'Карабины · 5 см · красный');
 }
 
+async function smokeOrderListAndDetailUseLiveFinancialSnapshot(context) {
+    const state = clone(await vm.runInContext(`(() => {
+        App.templates = [{
+            id: 77,
+            name: 'Live Blank',
+            pieces_per_hour_avg: 200,
+            pieces_per_hour_min: 200,
+            weight_grams: 8,
+            hw_name: '',
+            hw_price_per_unit: 0,
+            hw_delivery_total: 0,
+            hw_speed: 0,
+        }];
+        App.params = {
+            ...App.params,
+            wasteFactor: 1.1,
+            fotPerHour: 100,
+            indirectCostMode: 'none',
+            indirectPerHour: 0,
+            plasticCostPerKg: 2500,
+            moldBaseCost: 18000,
+            designCost: 0,
+            cuttingSpeed: 1000,
+            nfcTagCost: 0,
+            nfcWriteSpeed: 1000,
+            taxRate: 0.06,
+            vatRate: 0.05,
+            charityRate: 0.01,
+            deliveryCostMoscow: 0,
+        };
+
+        const order = {
+            id: 77,
+            order_name: 'Live Snapshot Order',
+            payment_status: 'paid_100',
+            total_revenue_plan: 1000,
+            margin_percent_plan: 5,
+            total_hours_plan: 99,
+            discount_mode: 'none',
+            discount_value: 0,
+        };
+        const items = [{
+            item_type: 'product',
+            template_id: 77,
+            quantity: 100,
+            pieces_per_hour: 50,
+            weight_grams: 20,
+            sell_price_item: 150,
+            printings: [],
+        }];
+
+        const snapshot = getOrderLiveCalculatorSnapshot(order, items, App.params, App.templates);
+
+        Orders.metaByOrderId = {
+            77: {
+                financial: {
+                    revenue: snapshot.revenue,
+                    marginPercent: snapshot.marginPercent,
+                    hours: snapshot.hours,
+                },
+            },
+        };
+        const boardHtml = Orders.renderBoardCard(order);
+
+        OrderDetail.currentOrder = order;
+        OrderDetail.currentItems = items;
+        OrderDetail.renderStats();
+
+        return {
+            snapshot,
+            formattedMargin: formatPercent(snapshot.marginPercent),
+            formattedHours: snapshot.hours.toFixed(1) + ' ч',
+            boardHtml,
+            statsHtml: document.getElementById('od-stats').innerHTML,
+        };
+    })()`, context));
+
+    assert.ok(state.snapshot.marginPercent > 5, 'live snapshot should differ from stale saved margin');
+    assert.ok(state.snapshot.hours < 99, 'live snapshot should use current template productivity');
+    assert.match(state.boardHtml, new RegExp(state.formattedMargin.replace('.', '[,.]')));
+    assert.match(state.statsHtml, new RegExp(state.formattedMargin.replace('.', '[,.]')));
+    assert.match(state.statsHtml, new RegExp(state.formattedHours.replace('.', '[,.]')));
+}
+
 async function smokeBlankPricingSeparatesCatalogPriceAndNetMargin(context) {
     vm.runInContext(`
         App.getItemOriginLabel = (item) => item?.is_blank_mold ? 'бланк' : 'кастом';
@@ -6583,6 +6667,7 @@ async function main() {
     await smokeHardwareOnlyAutosave(context);
     await smokeZeroCostWarehouseHardwareStillShowsInPricing(context);
     await smokeLoadOrderHydratesZeroWarehousePriceFromCurrentStock(context);
+    await smokeOrderListAndDetailUseLiveFinancialSnapshot(context);
     await smokeBlankPricingSeparatesCatalogPriceAndNetMargin(context);
     await smokeOrderDiscountAffectsSummaryAndFinDirector(context);
     await smokeDiscountShownInCustomerInvoice(context);
