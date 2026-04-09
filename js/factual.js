@@ -36,7 +36,8 @@ const Factual = {
         { key: 'salary_assembly',     label: 'ЗП сборка',        planField: 'salaryAssembly',   hint: 'часы × ставка' },
         { key: 'salary_packaging',    label: 'ЗП упаковка',      planField: 'salaryPackaging',  hint: 'часы × ставка' },
         { key: 'indirect_production', label: 'Косвенные',        planField: 'indirectProduction', hint: 'часы × косв./ч' },
-        { key: 'hardware_total',      label: 'Фурнитура+NFC',    planField: 'hardwareTotal',    hint: 'склад или план' },
+        { key: 'hardware_total',      label: 'Фурнитура',        planField: 'hardwareTotal',    hint: 'склад или план' },
+        { key: 'nfc_total',           label: 'NFC',              planField: 'nfcTotal',         hint: 'склад или план' },
         { key: 'packaging_total',     label: 'Упаковка',         planField: 'packagingTotal',   hint: 'склад или план' },
         { key: 'design_printing',     label: 'Нанесение',        planField: 'designPrinting',   hint: 'FinTablo / вруч.' },
         { key: 'plastic',             label: 'Пластик / материалы', planField: 'plastic',       hint: 'план + ФинТабло / вруч.' },
@@ -56,7 +57,7 @@ const Factual = {
 
     AUTO_FACT_KEYS: new Set([
         'salary_production', 'salary_trim', 'salary_assembly', 'salary_packaging',
-        'indirect_production', 'hardware_total', 'packaging_total',
+        'indirect_production', 'hardware_total', 'nfc_total', 'packaging_total',
         'design_printing', 'plastic', 'molds', 'delivery_client', 'taxes', 'charity', 'other',
     ]),
 
@@ -129,7 +130,7 @@ const Factual = {
 
         const grouped = new Map();
         const explicitHardwareWarehouseIds = new Set();
-        const addDemandRow = (itemId, qty, name, materialType = 'hardware') => {
+        const addDemandRow = (itemId, qty, name, materialType = 'hardware', attachmentType = '') => {
             const normalizedItemId = Number(itemId || 0);
             const normalizedQty = parseFloat(qty) || 0;
             if (!normalizedItemId || normalizedQty <= 0) return;
@@ -143,6 +144,7 @@ const Factual = {
                     qty: normalizedQty,
                     names: normalizedName ? [normalizedName] : [],
                     material_type: materialType,
+                    attachment_type: attachmentType || '',
                 });
                 return;
             }
@@ -150,6 +152,7 @@ const Factual = {
             prev.qty += normalizedQty;
             if (normalizedName && !prev.names.includes(normalizedName)) prev.names.push(normalizedName);
             if (prev.material_type !== materialType) prev.material_type = 'mixed';
+            if (attachmentType && prev.attachment_type !== attachmentType) prev.attachment_type = attachmentType;
             grouped.set(key, prev);
         };
 
@@ -166,7 +169,7 @@ const Factual = {
             const itemType = String(item.item_type || '').toLowerCase();
             if (itemType === 'pendant' && typeof getPendantWarehouseDemandRows === 'function') {
                 (getPendantWarehouseDemandRows(item) || []).forEach(row => {
-                    addDemandRow(row.warehouse_item_id, row.qty, row.name, row.material_type || 'hardware');
+                    addDemandRow(row.warehouse_item_id, row.qty, row.name, row.material_type || 'hardware', row.attachment_type || '');
                 });
                 return;
             }
@@ -174,7 +177,7 @@ const Factual = {
             if (itemType === 'product' && typeof getProductWarehouseDemandRows === 'function') {
                 (getProductWarehouseDemandRows(item, allItems || []) || []).forEach(row => {
                     if (explicitHardwareWarehouseIds.has(Number(row.warehouse_item_id || 0))) return;
-                    addDemandRow(row.warehouse_item_id, row.qty, row.name, row.material_type || 'hardware');
+                    addDemandRow(row.warehouse_item_id, row.qty, row.name, row.material_type || 'hardware', row.attachment_type || '');
                 });
                 return;
             }
@@ -202,10 +205,29 @@ const Factual = {
                 ?? 0
             ) || 0;
             const name = item.product_name || item.name || '';
-            addDemandRow(itemId, qty, name, isPackaging ? 'packaging' : 'hardware');
+            addDemandRow(itemId, qty, name, isPackaging ? 'packaging' : 'hardware', item.attachment_type || '');
         });
 
         return Array.from(grouped.values());
+    },
+    _isNfcWarehouseRow(row = {}, warehouseItem = null) {
+        const attachmentType = String(row?.attachment_type || '').trim().toLowerCase();
+        if (attachmentType === 'nfc') return true;
+        const candidates = [
+            row?.warehouse_sku,
+            row?.sku,
+            warehouseItem?.sku,
+            row?.name,
+            Array.isArray(row?.names) ? row.names.join(' ') : '',
+            row?.product_name,
+            warehouseItem?.name,
+        ];
+        return candidates.some(value => {
+            const normalized = String(value || '').trim().toLowerCase();
+            if (!normalized) return false;
+            if (normalized === 'nfc') return true;
+            return /(^|[^a-zа-яё])nfc([^a-zа-яё]|$)/i.test(normalized) || normalized.includes('нфс') || normalized.includes('чип');
+        });
     },
     _getSourceHints(factData) {
         const raw = factData && factData._source_hints;
@@ -876,7 +898,7 @@ async _loadFactSummaries() {
     _buildPlan(order, rawItems, params) {
         const planItems = this._dedupePlanItems(rawItems || []);
         let planHoursPlastic = 0, planHoursTrim = 0, planHoursAssembly = 0, planHoursPackaging = 0;
-        let hardwarePurchase = 0, hardwareDelivery = 0, packagingPurchase = 0, packagingDelivery = 0;
+        let hardwarePurchase = 0, hardwareDelivery = 0, nfcTotal = 0, packagingPurchase = 0, packagingDelivery = 0;
         let designPrinting = 0, plastic = 0, molds = 0, delivery = 0;
         let savedIndirect = 0;
         let hasSavedSnapshot = false;
@@ -933,7 +955,7 @@ async _loadFactSummaries() {
                 if (!ri.is_blank_mold) molds += qty * productMold;
                 designPrinting += qty * (productDesign + productPrinting);
                 delivery += qty * productDelivery;
-                hardwarePurchase += qty * productNfc;
+                nfcTotal += qty * productNfc;
                 savedIndirect += qty * (productIndirect + cuttingIndirect);
             } else if (ri.item_type === 'hardware') {
                 const savedHardwareHours = this._num(ri.hours_hardware) || this._num(ri.result?.hoursHardware);
@@ -976,7 +998,7 @@ async _loadFactSummaries() {
         const orderRevenue = this._num(order.total_revenue_plan);
         const rowsWithoutTaxes = round2(
             round2(salaryProduction) + round2(salaryTrim) + round2(salaryAssembly) + round2(salaryPackaging) + round2(prodIndirect) +
-            round2(hardwarePurchase) + round2(hardwareDelivery) + round2(packagingPurchase) + round2(packagingDelivery) +
+            round2(hardwarePurchase) + round2(hardwareDelivery) + round2(nfcTotal) + round2(packagingPurchase) + round2(packagingDelivery) +
             round2(designPrinting) + round2(plastic) + round2(molds) + round2(delivery)
         );
         const charityRate = this._num(params.charityRate) || 0.01;
@@ -993,6 +1015,7 @@ async _loadFactSummaries() {
                 salaryAssembly: round2(salaryAssembly), salaryPackaging: round2(salaryPackaging),
                 indirectProduction: round2(prodIndirect),
                 hardwareTotal: round2(hardwarePurchase + hardwareDelivery),
+                nfcTotal: round2(nfcTotal),
                 packagingTotal: round2(packagingPurchase + packagingDelivery),
                 designPrinting: round2(designPrinting), plastic: round2(plastic),
                 molds: round2(molds), delivery: round2(delivery), taxes: round2(taxes), charity: round2(charity), other: round2(otherBalance),
@@ -1059,6 +1082,7 @@ async _loadFactSummaries() {
         const itemMap = new Map((warehouseItems || []).map(item => [Number(item.id || 0), item]));
         const demandRows = this._collectWarehouseDemandRows(planItems, warehouseItems);
         let hardwareWarehouseTotal = 0;
+        let nfcWarehouseTotal = 0;
         let packagingWarehouseTotal = 0;
         let usedCurrentWarehouse = false;
 
@@ -1071,11 +1095,13 @@ async _loadFactSummaries() {
             const rowTotal = round2(qty * unitPrice);
             const category = String(row.material_type || warehouseItem?.category || '').toLowerCase();
             if (category === 'packaging') packagingWarehouseTotal += rowTotal;
+            else if (this._isNfcWarehouseRow(row, warehouseItem)) nfcWarehouseTotal += rowTotal;
             else hardwareWarehouseTotal += rowTotal;
             usedCurrentWarehouse = true;
         });
 
         let hardwareManualTotal = 0;
+        let nfcManualTotal = 0;
         let packagingManualTotal = 0;
         planItems.forEach(item => {
             const type = String(item?.item_type || '').toLowerCase();
@@ -1092,15 +1118,23 @@ async _loadFactSummaries() {
                 : this._planItemCost(item, 'packaging_delivery_per_unit');
             const rowTotal = round2(qty * (unitPrice + unitDelivery));
             if (type === 'packaging') packagingManualTotal += rowTotal;
+            else if (this._isNfcWarehouseRow({
+                warehouse_sku: item?.hardware_warehouse_sku,
+                sku: item?.hardware_warehouse_sku,
+                name: item?.product_name || item?.name,
+                product_name: item?.product_name || item?.name,
+            })) nfcManualTotal += rowTotal;
             else hardwareManualTotal += rowTotal;
         });
 
-        if (!usedCurrentWarehouse && !hardwareManualTotal && !packagingManualTotal) return planBuild;
+        if (!usedCurrentWarehouse && !hardwareManualTotal && !nfcManualTotal && !packagingManualTotal) return planBuild;
 
         const planData = planBuild.planData;
         const nextHardwareTotal = round2(hardwareWarehouseTotal + hardwareManualTotal);
+        const nextNfcTotal = round2(nfcWarehouseTotal + nfcManualTotal);
         const nextPackagingTotal = round2(packagingWarehouseTotal + packagingManualTotal);
         planData.hardwareTotal = nextHardwareTotal;
+        planData.nfcTotal = nextNfcTotal;
         planData.packagingTotal = nextPackagingTotal;
 
         const recomputedTotalCosts = round2(
@@ -1110,6 +1144,7 @@ async _loadFactSummaries() {
             this._num(planData.salaryPackaging) +
             this._num(planData.indirectProduction) +
             this._num(planData.hardwareTotal) +
+            this._num(planData.nfcTotal) +
             this._num(planData.packagingTotal) +
             this._num(planData.designPrinting) +
             this._num(planData.plastic) +
@@ -1127,6 +1162,9 @@ async _loadFactSummaries() {
 
         const planMeta = planBuild.planMeta || {};
         planMeta.hardware_total = {
+            source: usedCurrentWarehouse ? 'current_warehouse' : 'manual_items',
+        };
+        planMeta.nfc_total = {
             source: usedCurrentWarehouse ? 'current_warehouse' : 'manual_items',
         };
         planMeta.packaging_total = {
@@ -1358,19 +1396,23 @@ async _loadFactSummaries() {
         }
 
         // 4. Warehouse fallback for hardware/packaging (only if fintablo didn't provide them)
-        if (!factData._auto_fintablo.fact_hardware_total || !factData._auto_fintablo.fact_packaging_total) {
+        if (!factData._auto_fintablo.fact_hardware_total || !factData._auto_fintablo.fact_nfc_total || !factData._auto_fintablo.fact_packaging_total) {
             const whActual = this._isWorkshopOrder(orderRef || orderName)
                 ? await this._deriveWorkshopMaterialFacts(orderId, orderRef || { order_name: orderName }, orderItems || [])
                 : await this._deriveMaterialFacts(orderId, orderName);
-            if (!factData._auto_fintablo.fact_hardware_total) {
-                this._applyAutoFactValue(factData, 'fact_hardware_total', whActual.found ? whActual.hardware : (planData?.hardwareTotal || 0));
-                this._setSourceHint(factData, 'fact_hardware_total', whActual.found ? (whActual.sourceHint || 'склад') : 'план');
+                if (!factData._auto_fintablo.fact_hardware_total) {
+                    this._applyAutoFactValue(factData, 'fact_hardware_total', whActual.found ? whActual.hardware : (planData?.hardwareTotal || 0));
+                    this._setSourceHint(factData, 'fact_hardware_total', whActual.found ? (whActual.sourceHint || 'склад') : 'план');
+                }
+                if (!factData._auto_fintablo.fact_nfc_total) {
+                    this._applyAutoFactValue(factData, 'fact_nfc_total', whActual.found ? whActual.nfc : (planData?.nfcTotal || 0));
+                    this._setSourceHint(factData, 'fact_nfc_total', whActual.found ? (whActual.nfcSourceHint || whActual.sourceHint || 'склад') : 'план');
+                }
+                if (!factData._auto_fintablo.fact_packaging_total) {
+                    this._applyAutoFactValue(factData, 'fact_packaging_total', whActual.found ? whActual.packaging : (planData?.packagingTotal || 0));
+                    this._setSourceHint(factData, 'fact_packaging_total', whActual.found ? (whActual.packagingSourceHint || whActual.sourceHint || 'склад') : 'план');
+                }
             }
-            if (!factData._auto_fintablo.fact_packaging_total) {
-                this._applyAutoFactValue(factData, 'fact_packaging_total', whActual.found ? whActual.packaging : (planData?.packagingTotal || 0));
-                this._setSourceHint(factData, 'fact_packaging_total', whActual.found ? (whActual.packagingSourceHint || whActual.sourceHint || 'склад') : 'план');
-            }
-        }
     },
 
     async _deriveWorkshopMaterialFacts(orderId, orderRef = null, orderItems = []) {
@@ -1386,6 +1428,7 @@ async _loadFactSummaries() {
         if (!demandRows.length) return { found: false, hardware: 0, packaging: 0 };
 
         let hardware = 0;
+        let nfc = 0;
         let packaging = 0;
         let found = false;
         const normalizedOrderId = Number(typeof orderRef === 'object' ? orderRef?.id ?? orderId : orderId) || Number(orderId) || 0;
@@ -1404,6 +1447,7 @@ async _loadFactSummaries() {
             const deltaCost = round2(consumedQty * unitPrice);
             const category = String(row.material_type || (itemMap.get(itemId) || {}).category || '').toLowerCase();
             if (category === 'packaging') packaging += deltaCost;
+            else if (this._isNfcWarehouseRow(row, itemMap.get(itemId) || null)) nfc += deltaCost;
             else hardware += deltaCost;
             found = true;
         });
@@ -1411,8 +1455,10 @@ async _loadFactSummaries() {
         return {
             found,
             hardware: round2(hardware),
+            nfc: round2(nfc),
             packaging: round2(packaging),
             sourceHint: found ? 'фурнитура проекта' : 'склад',
+            nfcSourceHint: found ? 'фурнитура проекта' : 'склад',
             packagingSourceHint: found ? 'фурнитура проекта' : 'склад',
         };
     },
@@ -1420,14 +1466,14 @@ async _loadFactSummaries() {
     async _deriveMaterialFacts
 (orderId, orderName) {
         const history = (await loadWarehouseHistory()) || [];
-        if (history.length === 0) return { found: false, hardware: 0, packaging: 0 };
+        if (history.length === 0) return { found: false, hardware: 0, nfc: 0, packaging: 0 };
         const items = (await loadWarehouseItems()) || [];
         const itemMap = new Map(items.map(i => [Number(i.id), i]));
         const sameOrder = (h) => {
             if (h.order_id !== undefined && h.order_id !== null && h.order_id !== '') return Number(h.order_id) === Number(orderId);
             return orderName && String(h.order_name || '').trim() === String(orderName).trim();
         };
-        let hardware = 0, packaging = 0, found = false;
+        let hardware = 0, nfc = 0, packaging = 0, found = false;
         history.forEach(h => {
             if (!sameOrder(h)) return;
             const type = String(h.type || '');
@@ -1439,9 +1485,19 @@ async _loadFactSummaries() {
             if (deltaCost === 0) return;
             const category = String(h.item_category || (itemMap.get(Number(h.item_id)) || {}).category || '').toLowerCase();
             if (category === 'packaging') packaging += deltaCost; else hardware += deltaCost;
+            if (category !== 'packaging' && this._isNfcWarehouseRow(h, itemMap.get(Number(h.item_id)) || null)) {
+                nfc += deltaCost;
+                hardware -= deltaCost;
+            }
             found = true;
         });
-        return { found, hardware: round2(Math.max(0, hardware)), packaging: round2(Math.max(0, packaging)) };
+        return {
+            found,
+            hardware: round2(Math.max(0, hardware)),
+            nfc: round2(Math.max(0, nfc)),
+            packaging: round2(Math.max(0, packaging)),
+            nfcSourceHint: found ? 'склад' : 'план',
+        };
     },
 
     _stageKey(entry) {

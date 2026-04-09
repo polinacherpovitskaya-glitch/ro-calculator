@@ -87,6 +87,7 @@ function smokeHiddenSalaryTotals(context) {
         const plan = {
             salaryProduction: 100,
             hardwareTotal: 50,
+            nfcTotal: 0,
             totalCosts: 150,
             revenue: 300,
         };
@@ -94,6 +95,7 @@ function smokeHiddenSalaryTotals(context) {
         const fact = {
             fact_salary_production: 100,
             fact_hardware_total: 50,
+            fact_nfc_total: 0,
             fact_revenue: 300,
         };
         Factual._renderDetail(1, document.getElementById('fact-detail-1'), plan, planHours, fact, { order_name: 'Smoke Order' });
@@ -248,6 +250,7 @@ function smokeBuildPlanUsesSavedSnapshotCostsAndDedupedHardware(context) {
     assert.equal(result.planData.salaryTrim, 10, 'plan should reuse saved cutting cost from item snapshot');
     assert.equal(result.planData.indirectProduction, 40, 'plan should reuse saved indirect costs from item snapshot');
     assert.equal(result.planData.hardwareTotal, 50, 'duplicate hardware rows should be collapsed in plan costs');
+    assert.equal(result.planData.nfcTotal, 0, 'without NFC the separate plan NFC row should stay empty');
     assert.equal(result.planHours.hoursHardware, 1, 'saved order assembly hours should win over duplicated hardware norm noise');
     assert.equal(result.planData.salaryAssembly, 10, 'assembly salary should follow saved order hours');
     assert.equal(result.planData.taxes, 22, 'taxes should be recomputed from current revenue settings without charity');
@@ -261,6 +264,7 @@ function smokeBuildPlanUsesSavedSnapshotCostsAndDedupedHardware(context) {
             result.planData.salaryPackaging +
             result.planData.indirectProduction +
             result.planData.hardwareTotal +
+            result.planData.nfcTotal +
             result.planData.packagingTotal +
             result.planData.designPrinting +
             result.planData.plastic +
@@ -364,21 +368,25 @@ async function smokeWorkshopHardwareFactUsesProjectState(context) {
     context.__warehouseItems = [
         { id: 501, price_per_unit: 5, category: 'hardware' },
         { id: 502, price_per_unit: 2, category: 'hardware' },
-        { id: 503, price_per_unit: 9, category: 'hardware' },
+        { id: 503, price_per_unit: 9, category: 'other', sku: 'NFC', name: 'NFC' },
     ];
     context.__warehouseHistory = [
         { order_id: 88, order_name: 'МТС 3 воркшопа', type: 'deduction', item_id: 501, qty_change: -999, unit_price: 5, item_category: 'hardware' },
     ];
     context.loadProjectHardwareState = async () => ({
-        checks: { '88:501': true, '88:502': true },
-        actual_qtys: { '88:501': 30, '88:502': 0 },
+        checks: { '88:501': true, '88:502': true, '88:503': true },
+        actual_qtys: { '88:501': 30, '88:502': 0, '88:503': 4 },
     });
+    context.getProductWarehouseDemandRows = (item) => {
+        if (!item || !item.is_nfc) return [];
+        return [{ warehouse_item_id: 503, qty: Number(item.quantity) || 0, name: 'NFC', material_type: 'hardware', attachment_type: 'nfc' }];
+    };
 
     await vm.runInContext(`(async () => {
         const factData = {};
         await Factual._applyDerivedFacts(
             factData,
-            { plastic: 0, hardwareTotal: 0, packagingTotal: 0 },
+            { plastic: 0, hardwareTotal: 0, nfcTotal: 0, packagingTotal: 0 },
             { hoursPlastic: 0, hoursTrim: 0, hoursHardware: 0, hoursPackaging: 0 },
             { fotPerHour: 0, indirectPerHour: 0 },
             88,
@@ -387,6 +395,7 @@ async function smokeWorkshopHardwareFactUsesProjectState(context) {
             [
                 { item_type: 'hardware', product_name: 'A', quantity: 20, warehouse_item_id: 501, hardware_source: 'warehouse' },
                 { item_type: 'hardware', product_name: 'B', quantity: 10, warehouse_item_id: 502, hardware_source: 'warehouse' },
+                { item_type: 'product', product_name: 'C', quantity: 4, is_nfc: true, nfc_warehouse_item_id: 503 },
                 { item_type: 'hardware', product_name: 'C', quantity: 50, warehouse_item_id: 503, hardware_source: 'warehouse' }
             ]
         );
@@ -395,7 +404,9 @@ async function smokeWorkshopHardwareFactUsesProjectState(context) {
 
     const fact = context.__workshopHardwareFact;
     assert.equal(fact.fact_hardware_total, 150, 'workshop hardware fact should follow current checked project hardware quantities');
+    assert.equal(fact.fact_nfc_total, 36, 'workshop NFC fact should be separated from ordinary hardware');
     assert.equal(fact._source_hints.fact_hardware_total, 'фурнитура проекта');
+    assert.equal(fact._source_hints.fact_nfc_total, 'фурнитура проекта');
 }
 
 async function smokeTaxesIncludeCharity(context) {
@@ -597,7 +608,8 @@ async function smokeEnsureComputedOrderUsesCurrentWarehousePlanMaterials(context
     };
 
     const computed = await vm.runInContext(`(async () => Factual._ensureComputedOrder(91))()`, context);
-    assert.equal(computed.planData.hardwareTotal, 87, 'plan hardware should use current warehouse prices, not stale item snapshot prices');
+    assert.equal(computed.planData.hardwareTotal, 7, 'plan hardware should keep only ordinary hardware in hardware row');
+    assert.equal(computed.planData.nfcTotal, 80, 'plan NFC should use current warehouse prices in a separate row');
     assert.equal(computed.planData.totalCosts, 307, 'total plan cost should be recomputed after current material totals');
     assert.equal(computed.planData.planEarned, 693, 'plan profit should follow recomputed current rows');
 }

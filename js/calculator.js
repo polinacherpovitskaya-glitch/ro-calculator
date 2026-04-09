@@ -389,6 +389,17 @@ function findNfcWarehouseItem(warehouseItems) {
     }) || null;
 }
 
+function isNfcLikeEntry(...values) {
+    return values.some(value => {
+        const normalized = String(value || '').trim().toLowerCase();
+        if (!normalized) return false;
+        if (normalized === 'nfc') return true;
+        return /(^|[^a-zа-яё])nfc([^a-zа-яё]|$)/i.test(normalized)
+            || normalized.includes('нфс')
+            || normalized.includes('чип');
+    });
+}
+
 function getProductWarehouseDemandRows(item, warehouseItems) {
     const itemType = String(item?.item_type || 'product').toLowerCase();
     const qty = parseFloat(item?.quantity) || 0;
@@ -591,16 +602,24 @@ function getPendantLetterBlankMetrics(totalElements, params, pendant) {
 
     const breakdown = {
         salaryPerUnit: round2((result?.costFot || 0) + (result?.costCutting || 0) + (result?.costNfcProgramming || 0) + builtinHwLaborPerUnit),
-        hardwarePurchasePerUnit: builtinHwPurchasePerUnit,
-        hardwareDeliveryPerUnit: builtinHwDeliveryPerUnit,
+        hardwarePurchasePerUnit: 0,
+        hardwareDeliveryPerUnit: 0,
+        nfcTotalPerUnit: 0,
         plasticPerUnit: round2(result?.costPlastic || 0),
         moldsPerUnit: round2(moldAmortPerUnit),
         printingPerUnit: round2(result?.costPrinting || 0),
         omittedIndirectPerUnit: round2((result?.costIndirect || 0) + (result?.costCuttingIndirect || 0) + (result?.costNfcIndirect || 0) + builtinHwIndirectPerUnit),
     };
+    if (isNfcLikeEntry(source?.hw_name)) {
+        breakdown.nfcTotalPerUnit = round2(builtinHwPurchasePerUnit + builtinHwDeliveryPerUnit);
+    } else {
+        breakdown.hardwarePurchasePerUnit = builtinHwPurchasePerUnit;
+        breakdown.hardwareDeliveryPerUnit = builtinHwDeliveryPerUnit;
+    }
     breakdown.salaryTotal = scaled(breakdown.salaryPerUnit);
     breakdown.hardwarePurchaseTotal = scaled(breakdown.hardwarePurchasePerUnit);
     breakdown.hardwareDeliveryTotal = scaled(breakdown.hardwareDeliveryPerUnit);
+    breakdown.nfcTotal = scaled(breakdown.nfcTotalPerUnit);
     breakdown.plasticTotal = scaled(breakdown.plasticPerUnit);
     breakdown.moldsTotal = scaled(breakdown.moldsPerUnit);
     breakdown.printingTotal = scaled(breakdown.printingPerUnit);
@@ -942,9 +961,17 @@ function calculateProductionLoad(items, hardwareItems, packagingItems, params, p
  * Обновлено: фурнитура и упаковка — отдельные массивы
  */
 function calculateFinDirectorData(items, hardwareItems, packagingItems, params, pendantItems = [], orderAdjustments = {}) {
+    const safeFotPerHour = Number.isFinite(params?.fotPerHour) ? params.fotPerHour : 0;
+    const safeTaxRate = Number.isFinite(params?.taxRate) ? params.taxRate : 0.06;
+    const safeVatRate = Number.isFinite(params?.vatRate) ? params.vatRate : 0.05;
+    const safeCharityRate = Number.isFinite(params?.charityRate) ? params.charityRate : 0.01;
+    const safeDesignCost = Number.isFinite(params?.designCost) ? params.designCost : 0;
+    const safeMoldBaseCost = Number.isFinite(params?.moldBaseCost) ? params.moldBaseCost : 0;
+    const safeDeliveryCostMoscow = Number.isFinite(params?.deliveryCostMoscow) ? params.deliveryCostMoscow : 0;
     let totalSalary = 0;
     let totalIndirect = 0;
     let totalHardwarePurchase = 0;
+    let totalNfc = 0;
     let totalHardwareDelivery = 0;
     let totalPackagingPurchase = 0;
     let totalPackagingDelivery = 0;
@@ -961,14 +988,14 @@ function calculateFinDirectorData(items, hardwareItems, packagingItems, params, 
         const qty = item.quantity;
 
         // Зарплата = все часы * ФОТ/час
-        totalSalary += (r.hoursTotalPlasticNfc + (r.hoursBuiltinHw || 0)) * params.fotPerHour;
+        totalSalary += ((Number(r?.hoursTotalPlasticNfc) || 0) + (Number(r?.hoursBuiltinHw) || 0)) * safeFotPerHour;
         totalIndirect += ((r.costIndirect || 0) + (r.costCuttingIndirect || 0) + (r.costNfcIndirect || 0) + (r.costBuiltinHwIndirect || 0)) * qty;
 
         // NFC метки
-        if (item.is_nfc) totalHardwarePurchase += qty * params.nfcTagCost;
+        if (item.is_nfc) totalNfc += qty * params.nfcTagCost;
 
         // Проектирование
-        if (item.complex_design) totalDesign += params.designCost;
+        if (item.complex_design) totalDesign += safeDesignCost;
 
         // Печать (из массива printings)
         const printings = item.printings || [];
@@ -981,15 +1008,15 @@ function calculateFinDirectorData(items, hardwareItems, packagingItems, params, 
         }
 
         // Пластик
-        totalPlastic += r.costPlastic * qty;
+        totalPlastic += (r.costPlastic || 0) * qty;
 
         // Молды
         const paidBaseMolds = (!item.is_blank_mold && item.base_mold_in_stock) ? 0 : 1;
         const totalPaidMolds = Math.max(0, paidBaseMolds + (item.extra_molds || 0));
-        totalMolds += params.moldBaseCost * totalPaidMolds;
+        totalMolds += safeMoldBaseCost * totalPaidMolds;
 
         // Доставка
-        if (item.delivery_included) totalDelivery += params.deliveryCostMoscow;
+        if (item.delivery_included) totalDelivery += safeDeliveryCostMoscow;
 
         // Выручка изделий (item + printing)
         totalRevenue += ((item.sell_price_item || 0) + (item.sell_price_printing || 0)) * qty;
@@ -1002,7 +1029,7 @@ function calculateFinDirectorData(items, hardwareItems, packagingItems, params, 
         totalHardwareDelivery += qty * (hw.delivery_price || 0);
         totalRevenue += (hw.sell_price || 0) * qty;
         if (hw.result) {
-            totalSalary += hw.result.hoursHardware * params.fotPerHour;
+            totalSalary += hw.result.hoursHardware * safeFotPerHour;
             totalIndirect += qty * (hw.result.indirectPerUnit || 0);
         }
     });
@@ -1014,7 +1041,7 @@ function calculateFinDirectorData(items, hardwareItems, packagingItems, params, 
         totalPackagingDelivery += qty * (pkg.delivery_price || 0);
         totalRevenue += (pkg.sell_price || 0) * qty;
         if (pkg.result) {
-            totalSalary += pkg.result.hoursPackaging * params.fotPerHour;
+            totalSalary += pkg.result.hoursPackaging * safeFotPerHour;
             totalIndirect += qty * (pkg.result.indirectPerUnit || 0);
         }
     });
@@ -1031,13 +1058,14 @@ function calculateFinDirectorData(items, hardwareItems, packagingItems, params, 
         const letterMetrics = getPendantLetterBlankMetrics(totalElements, params, pnd);
         const letterBreakdown = letterMetrics?.breakdown || null;
         // Assembly salary
-        totalSalary += (r.assemblyHours + r.packagingHours) * params.fotPerHour;
+        totalSalary += (r.assemblyHours + r.packagingHours) * safeFotPerHour;
         totalIndirect += r.attachmentIndirectTotal || 0;
         if (letterBreakdown) {
             totalSalary += letterBreakdown.salaryTotal;
             totalIndirect += letterBreakdown.omittedIndirectTotal;
             totalHardwarePurchase += letterBreakdown.hardwarePurchaseTotal;
             totalHardwareDelivery += letterBreakdown.hardwareDeliveryTotal;
+            totalNfc += letterBreakdown.nfcTotal || 0;
             totalPlastic += letterBreakdown.plasticTotal;
             totalMolds += letterBreakdown.moldsTotal;
             totalPrinting += letterBreakdown.printingTotal;
@@ -1067,14 +1095,14 @@ function calculateFinDirectorData(items, hardwareItems, packagingItems, params, 
 
     const discount = calculateOrderDiscount(totalRevenue, orderAdjustments, params);
     const discountedRevenue = discount.revenueAfterDiscount;
-    const charityRate = Number.isFinite(params?.charityRate) ? params.charityRate : 0.01;
-    const totalTaxes = discountedRevenue * (params.taxRate + params.vatRate);
-    const totalCharity = discountedRevenue * charityRate;
+    const totalTaxes = discountedRevenue * (safeTaxRate + safeVatRate);
+    const totalCharity = discountedRevenue * safeCharityRate;
 
     return {
         salary: round2(totalSalary),
         indirect: round2(totalIndirect),
         hardwarePurchase: round2(totalHardwarePurchase),
+        nfcTotal: round2(totalNfc),
         hardwareDelivery: round2(totalHardwareDelivery),
         packagingPurchase: round2(totalPackagingPurchase),
         packagingDelivery: round2(totalPackagingDelivery),
@@ -1089,7 +1117,7 @@ function calculateFinDirectorData(items, hardwareItems, packagingItems, params, 
         discountAmount: discount.amount,
         discountPercent: discount.percent,
         revenue: round2(discountedRevenue),
-        totalCosts: round2(totalSalary + totalIndirect + totalHardwarePurchase + totalHardwareDelivery
+        totalCosts: round2(totalSalary + totalIndirect + totalHardwarePurchase + totalNfc + totalHardwareDelivery
             + totalPackagingPurchase + totalPackagingDelivery
             + totalDesign + totalPrinting + totalPlastic + totalMolds + totalDelivery + totalTaxes + totalCharity),
     };

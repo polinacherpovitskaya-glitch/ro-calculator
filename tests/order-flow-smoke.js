@@ -772,8 +772,46 @@ async function smokeFinDirectorPendantsUseAllAttachments(context) {
 
     assert.equal(fin.salary, 100);
     assert.equal(fin.hardwarePurchase, 346);
+    assert.equal(fin.nfcTotal, 0);
     assert.equal(fin.hardwareDelivery, 30);
     assert.equal(fin.revenue, 500);
+}
+
+async function smokeFinDirectorSeparatesHardwareAndNfc(context) {
+    const fin = clone(await vm.runInContext(`(() => {
+        const params = { ...App.params, nfcTagCost: 8, taxRate: 0, vatRate: 0, charityRate: 0, moldBaseCost: 0, deliveryCostMoscow: 0 };
+        const items = [{
+            quantity: 10,
+            is_nfc: true,
+            is_blank_mold: true,
+            base_mold_in_stock: true,
+            complex_design: false,
+            delivery_included: false,
+            printings: [],
+            sell_price_item: 0,
+            sell_price_printing: 0,
+            result: {
+                hoursTotalPlasticNfc: 0,
+                hoursBuiltinHw: 0,
+                costIndirect: 0,
+                costCuttingIndirect: 0,
+                costNfcIndirect: 0,
+                costBuiltinHwIndirect: 0,
+            },
+        }];
+        const hardware = [{
+            qty: 10,
+            price: 5,
+            delivery_price: 1,
+            sell_price: 0,
+        }];
+        return calculateFinDirectorData(items, hardware, [], params, []);
+    })()`, context));
+
+    assert.equal(fin.hardwarePurchase, 50, 'ordinary hardware should stay in hardware row');
+    assert.equal(fin.hardwareDelivery, 10, 'ordinary hardware delivery should stay in hardware delivery row');
+    assert.equal(fin.nfcTotal, 80, 'product NFC should go to dedicated NFC row');
+    assert.equal(fin.totalCosts, 140, 'fin director total should include hardware and NFC separately');
 }
 
 async function smokePendantAttachmentCostsIncludeAssemblyAndIndirect(context) {
@@ -2365,6 +2403,7 @@ async function smokePendantFinDirectorUsesCurrentLetterCost(context) {
                 indirect: metrics.breakdown.omittedIndirectTotal,
                 hardwarePurchase: metrics.breakdown.hardwarePurchaseTotal,
                 hardwareDelivery: metrics.breakdown.hardwareDeliveryTotal,
+                nfcTotal: metrics.breakdown.nfcTotal,
                 plastic: metrics.breakdown.plasticTotal,
                 molds: metrics.breakdown.moldsTotal,
                 printing: metrics.breakdown.printingTotal,
@@ -2377,6 +2416,7 @@ async function smokePendantFinDirectorUsesCurrentLetterCost(context) {
     assert.equal(finState.fin.indirect, finState.expected.indirect, 'fin director should expose pendant indirect production separately');
     assert.equal(finState.fin.hardwarePurchase, finState.expected.hardwarePurchase, 'fin director hardware purchase should only include built-in hardware purchase for letters');
     assert.equal(finState.fin.hardwareDelivery, finState.expected.hardwareDelivery, 'fin director hardware delivery should include built-in hardware delivery for letters');
+    assert.equal(finState.fin.nfcTotal, finState.expected.nfcTotal, 'fin director should keep built-in NFC separate from ordinary hardware');
     assert.equal(finState.fin.plastic, finState.expected.plastic, 'fin director plastic should include letter plastic cost');
     assert.equal(finState.fin.molds, finState.expected.molds, 'fin director molds should include letter mold amortization');
     assert.equal(finState.fin.printing, finState.expected.printing, 'fin director printing should include letter printing cost');
@@ -6497,6 +6537,7 @@ async function main() {
     await smokeDiscountShownInCustomerInvoice(context);
     await smokeGenerateKPPassesDiscount(context);
     await smokeFinDirectorPendantsUseAllAttachments(context);
+    await smokeFinDirectorSeparatesHardwareAndNfc(context);
     await smokePendantAttachmentCostsIncludeAssemblyAndIndirect(context);
     await smokePackagingWarehousePickerDefaults(context);
     await smokeCurrentOrderReservationRestoresWarehouseQuota(context);

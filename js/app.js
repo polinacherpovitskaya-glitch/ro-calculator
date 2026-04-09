@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v244';
+const APP_VERSION = 'v245';
 
 const App = {
     currentPage: 'orders',
@@ -3563,6 +3563,7 @@ const Calculator = {
             }
             this.setText('fin-indirect', formatRub(fin.indirect));
             this.setText('fin-hardware', formatRub(fin.hardwarePurchase));
+            this.setText('fin-nfc', formatRub(fin.nfcTotal));
             this.setText('fin-hw-delivery', formatRub(fin.hardwareDelivery));
             this.setText('fin-packaging', formatRub(fin.packagingPurchase));
             this.setText('fin-pkg-delivery', formatRub(fin.packagingDelivery));
