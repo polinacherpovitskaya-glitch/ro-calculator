@@ -773,75 +773,49 @@
             <div class="page-header">
                 <h1>Справочник бланков</h1>
                 <div class="flex gap-8">
-                    <button class="btn btn-outline" onclick="Molds.exportCSV()">Экспорт CSV</button>
+                    <button class="btn btn-outline btn-sm" onclick="Molds.exportCSV()">Экспорт CSV</button>
                     <button class="btn btn-primary" onclick="Molds.showAddForm()">+ Новый бланк</button>
                 </div>
             </div>
 
-            <!-- Tabs: Пластик | Фурнитура | Упаковка -->
+            <!-- Tabs -->
             <div class="molds-tabs" style="display:flex;gap:4px;margin-bottom:16px;">
-                <button class="btn btn-sm tab-btn active" data-tab="plastic" onclick="Molds.switchTab('plastic')">&#9670; Пластик</button>
-                <button class="btn btn-sm tab-btn" data-tab="hardware" onclick="Molds.switchTab('hardware')">&#128295; Фурнитура</button>
-                <button class="btn btn-sm tab-btn" data-tab="packaging" onclick="Molds.switchTab('packaging')">&#128230; Упаковка</button>
-                <button class="btn btn-sm tab-btn" data-tab="china_catalog" onclick="Molds.switchTab('china_catalog')">&#127464;&#127475; Каталог Китай</button>
+                <button class="btn btn-sm tab-btn active" data-tab="plastic" onclick="Molds.switchTab('plastic')">Пластик</button>
+                <button class="btn btn-sm tab-btn" data-tab="hardware" onclick="Molds.switchTab('hardware')">Фурнитура</button>
+                <button class="btn btn-sm tab-btn" data-tab="packaging" onclick="Molds.switchTab('packaging')">Упаковка</button>
+                <button class="btn btn-sm tab-btn" data-tab="china_catalog" onclick="Molds.switchTab('china_catalog')">Каталог Китай</button>
             </div>
 
-            <!-- TAB: Пластик (existing content) -->
+            <!-- TAB: Пластик -->
             <div id="molds-tab-plastic">
 
-            <!-- Summary stats -->
-            <div class="stats-grid" id="molds-stats">
-                <div class="stat-card">
-                    <div class="stat-label">Всего бланков</div>
-                    <div class="stat-value" id="molds-total">0</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-label">Активных</div>
-                    <div class="stat-value" id="molds-active">0</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-label">Ср. себестоимость (100 шт)</div>
-                    <div class="stat-value" id="molds-avg-cost">0 &#8381;</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-label">Общая стоимость бланков</div>
-                    <div class="stat-value" id="molds-total-value">0 &#8381;</div>
+            <!-- Compact stats + filters -->
+            <div style="display:flex;gap:12px;align-items:center;margin-bottom:12px;flex-wrap:wrap;">
+                <div style="display:flex;gap:16px;font-size:13px;">
+                    <span style="color:var(--text-muted);">Всего: <b id="molds-total" style="color:var(--text);">0</b></span>
+                    <span style="color:var(--text-muted);">Активных: <b id="molds-active" style="color:var(--green);">0</b></span>
+                    <span style="color:var(--text-muted);">Ср. себест. (100шт): <b id="molds-avg-cost" style="color:var(--text);">0 &#8381;</b></span>
+                    <span style="color:var(--text-muted);">Стоимость молдов: <b id="molds-total-value" style="color:var(--text);">0 &#8381;</b></span>
                 </div>
             </div>
-
-            <!-- Filters -->
-            <div class="card" style="padding: 12px 20px;">
-                <div class="form-row" style="align-items:end">
-                    <div class="form-group" style="margin:0">
-                        <label>Статус</label>
-                        <select id="molds-filter-status" onchange="Molds.filterAndRender()">
-                            <option value="">Все</option>
-                            <option value="active">Активные</option>
-                            <option value="client">Клиентские</option>
-                            <option value="retired">Неактивные</option>
-                        </select>
-                    </div>
-                    <div class="form-group" style="margin:0">
-                        <label>Коллекция</label>
-                        <select id="molds-filter-collection" onchange="Molds.filterAndRender()">
-                            <option value="">Все</option>
-                        </select>
-                    </div>
-                    <div class="form-group" style="margin:0">
-                        <label>Сортировка</label>
-                        <select id="molds-sort" onchange="Molds.filterAndRender()">
-                            <option value="name">По названию</option>
-                            <option value="cost_asc">Себестоимость ↑</option>
-                            <option value="cost_desc">Себестоимость ↓</option>
-                            <option value="margin_desc">Маржа ↓</option>
-                            <option value="orders_desc">Кол-во заказов ↓</option>
-                        </select>
-                    </div>
-                    <div class="form-group" style="margin:0">
-                        <label>Поиск</label>
-                        <input type="text" id="molds-search" placeholder="Название" oninput="Molds.filterAndRender()">
-                    </div>
-                </div>
+            <div style="display:flex;gap:8px;align-items:end;margin-bottom:12px;flex-wrap:wrap;">
+                <select id="molds-filter-status" onchange="Molds.filterAndRender()" style="height:34px;font-size:12px;padding:4px 8px;">
+                    <option value="">Все статусы</option>
+                    <option value="active">Активные</option>
+                    <option value="client">Клиентские</option>
+                    <option value="retired">Неактивные</option>
+                </select>
+                <select id="molds-filter-collection" onchange="Molds.filterAndRender()" style="height:34px;font-size:12px;padding:4px 8px;">
+                    <option value="">Все коллекции</option>
+                </select>
+                <select id="molds-sort" onchange="Molds.filterAndRender()" style="height:34px;font-size:12px;padding:4px 8px;">
+                    <option value="name">По названию</option>
+                    <option value="cost_asc">Себестоимость ↑</option>
+                    <option value="cost_desc">Себестоимость ↓</option>
+                    <option value="margin_desc">Маржа ↓</option>
+                    <option value="orders_desc">Заказы ↓</option>
+                </select>
+                <input type="text" id="molds-search" placeholder="Поиск по названию..." oninput="Molds.filterAndRender()" style="height:34px;font-size:12px;padding:4px 10px;min-width:160px;">
             </div>
 
             <!-- Molds cards container -->
@@ -1035,8 +1009,8 @@
             <!-- TAB: Фурнитура -->
             <div id="molds-tab-hardware" style="display:none">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-                    <p class="text-muted" style="font-size:12px;margin:0;">Фурнитура со склада + сборка. Себестоимость = цена склада + (ФОТ + косвенные) / скорость</p>
-                    <button class="btn btn-primary btn-sm" onclick="Molds.showHwForm()">+ Новый бланк</button>
+                    <p class="text-muted" style="font-size:12px;margin:0;">Фурнитура: себестоимость = закупка + сборка</p>
+                    <button class="btn btn-primary btn-sm" onclick="Molds.showHwForm()">+ Новая фурнитура</button>
                 </div>
                 <div id="hw-blanks-container"></div>
                 <!-- HW edit form -->
@@ -1141,8 +1115,8 @@
             <!-- TAB: Упаковка -->
             <div id="molds-tab-packaging" style="display:none">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-                    <p class="text-muted" style="font-size:12px;margin:0;">Упаковка: стоимость + доставка + сборка. Себестоимость считается как у фурнитуры.</p>
-                    <button class="btn btn-primary btn-sm" onclick="Molds.showPkgForm()">+ Новый бланк</button>
+                    <p class="text-muted" style="font-size:12px;margin:0;">Упаковка: себестоимость = цена + доставка + сборка</p>
+                    <button class="btn btn-primary btn-sm" onclick="Molds.showPkgForm()">+ Новая упаковка</button>
                 </div>
                 <div id="pkg-blanks-container"></div>
                 <!-- PKG edit form -->
@@ -1195,7 +1169,7 @@
             <!-- TAB: Каталог Китай -->
             <div id="molds-tab-china_catalog" style="display:none">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-                    <p class="text-muted" style="font-size:12px;margin:0;">Каталог фурнитуры и упаковки из Китая. Цены в &#165; + калькулятор доставки.</p>
+                    <p class="text-muted" style="font-size:12px;margin:0;">Каталог из Китая: цены в ¥ + калькулятор доставки</p>
                     <button class="btn btn-primary btn-sm" onclick="ChinaCatalog.showAddForm()">+ Новая позиция</button>
                 </div>
                 <div id="china-catalog-container"></div>

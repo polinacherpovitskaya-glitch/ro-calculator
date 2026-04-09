@@ -288,10 +288,11 @@ const Molds = {
             ? round2(this.allMolds.reduce((s, m) => s + (m.tiers?.[100]?.cost || 0), 0) / total) : 0;
         const totalValue = this.allMolds.reduce((s, m) => s + (m.cost_rub_calc || 0), 0);
 
-        document.getElementById('molds-total').textContent = total;
-        document.getElementById('molds-active').textContent = active;
-        document.getElementById('molds-avg-cost').textContent = formatRub(avgCost);
-        document.getElementById('molds-total-value').textContent = formatRub(totalValue);
+        const el = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
+        el('molds-total', total);
+        el('molds-active', active);
+        el('molds-avg-cost', formatRub(avgCost));
+        el('molds-total-value', formatRub(totalValue));
     },
 
     filterAndRender() {
@@ -316,7 +317,7 @@ const Molds = {
         this.renderTable(filtered);
     },
 
-    // === COMPACT TABLE VIEW — 2 rows: себес (gray) + цена (green) ===
+    // === COMPACT TABLE — collapsed inline controls ===
     renderTable(molds) {
         const container = document.getElementById('molds-cards-container');
 
@@ -325,91 +326,84 @@ const Molds = {
             return;
         }
 
-        // Build tier headers with qty labels
-        const tierHeaders = MOLD_TIERS.map(q => {
-            const label = q >= 1000 ? (q/1000) + 'K' : q;
-            return `<th class="text-right" style="font-size:11px;padding:4px 6px;">${label} шт</th>`;
-        }).join('');
+        // Show 5 key tiers: 50, 100, 300, 500, 1K
+        const DISPLAY_TIERS = [50, 100, 300, 500, 1000];
 
         let html = `
-        <div class="card" style="padding:12px; overflow-x:auto;">
+        <div class="card" style="padding:0; overflow-x:auto;">
             <table style="width:100%; font-size:12px; white-space:nowrap; border-collapse:collapse;">
                 <thead>
-                    <tr>
-                        <th style="min-width:220px; padding:6px 8px; text-align:left;">Бланк</th>
-                        <th style="width:50px;padding:4px 6px;"></th>
-                        ${tierHeaders}
-                        <th style="width:30px"></th>
+                    <tr style="border-bottom:2px solid var(--border);">
+                        <th style="min-width:200px; padding:10px 12px; text-align:left;">Бланк</th>
+                        <th style="text-align:center;padding:8px 4px;width:48px;font-size:11px;color:var(--text-muted);font-weight:500;">Шт/ч</th>
+                        <th style="text-align:center;padding:8px 4px;width:42px;font-size:11px;color:var(--text-muted);font-weight:500;">Вес</th>`;
+
+        DISPLAY_TIERS.forEach(q => {
+            const label = q >= 1000 ? (q/1000) + 'K' : q;
+            html += `
+                        <th style="text-align:center;padding:8px 2px;font-size:11px;border-left:1px solid var(--border);" colspan="2">${label} шт</th>`;
+        });
+
+        html += `
+                        <th style="width:36px;padding:8px 4px;"></th>
                     </tr>
+                    <tr style="border-bottom:1px solid var(--border);background:var(--bg);">
+                        <th></th><th></th><th></th>`;
+
+        DISPLAY_TIERS.forEach(() => {
+            html += `<th style="text-align:right;padding:2px 4px;font-size:9px;color:var(--text-muted);font-weight:400;border-left:1px solid var(--border);">себест</th>
+                     <th style="text-align:right;padding:2px 6px;font-size:9px;color:var(--green);font-weight:600;">цена</th>`;
+        });
+        html += `<th></th></tr>
                 </thead>
                 <tbody>`;
 
         molds.forEach(m => {
             const statusDot = m.status === 'active' ? 'calculated' : m.status === 'client' ? 'in_production' : 'cancelled';
-            const pphDisplay = m.pph_actual
-                ? `<strong>${m.pph_actual}</strong><sup style="color:var(--green);font-size:9px">✓</sup>`
-                : (m.pph_min > 0 ? `${m.pph_min}${m.pph_max !== m.pph_min ? '-' + m.pph_max : ''}` : '—');
+            const pph = m.pph_actual || ((m.pph_min && m.pph_max) ? Math.round((m.pph_min + m.pph_max) / 2) : m.pph_min) || 0;
+            const pphText = m.pph_actual ? `<b>${pph}</b>` : (pph > 0 ? `${pph}` : '—');
             const collectionBadge = m.collection
-                ? `<span style="display:inline-flex;align-items:center;height:18px;padding:0 7px;border-radius:999px;background:rgba(69,125,255,.08);color:var(--accent);font-size:10px;font-weight:600;">${this.esc(m.collection)}</span>`
+                ? ` <span style="color:var(--accent);font-size:10px;font-weight:600;">${this.esc(m.collection)}</span>`
                 : '';
-            const metaPills = [
-                `${pphDisplay} шт/ч`,
-                `${m.weight_grams || 0} г`,
-                this._getInlineMoldTypeLabel(m),
-                this._hasInlineNfcChip(m) ? 'NFC' : '',
-            ].filter(Boolean).map(label => `<span style="display:inline-flex;align-items:center;height:20px;padding:0 8px;border:1px solid var(--border);border-radius:999px;background:#fff;font-size:10px;color:var(--text-secondary);">${label}</span>`).join(' ');
-            const priceModeBadge = hasManualBlankPriceOverride(m)
-                ? `<span style="display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;background:rgba(255,165,0,.12);color:var(--orange);font-size:10px;font-weight:700;">ручная цена</span>`
-                : `<span style="display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;background:rgba(38,185,109,.12);color:var(--green);font-size:10px;font-weight:700;">по формуле</span>`;
+            const nfcBadge = this._hasInlineNfcChip(m) ? '<span style="background:rgba(69,125,255,.1);color:var(--accent);font-size:9px;padding:1px 5px;border-radius:3px;font-weight:700;">NFC</span>' : '';
+            const priceBadge = hasManualBlankPriceOverride(m)
+                ? '<span style="color:var(--orange);font-size:9px;font-weight:600;">ручная</span>'
+                : '';
 
-            // Row 1: Себестоимость (gray, small)
-            const costCells = MOLD_TIERS.map(q => {
+            // Build tier cells (cost + sell pairs)
+            let tierCells = '';
+            DISPLAY_TIERS.forEach(q => {
                 const t = m.tiers?.[q];
-                return `<td class="text-right" style="font-size:10px;color:var(--text-secondary);padding:3px 6px;">${t ? Math.round(t.cost) : '—'}</td>`;
-            }).join('');
-
-            // Row 2: Цена продажи (green, bold; orange if custom price)
-            const sellCells = MOLD_TIERS.map(q => {
-                const t = m.tiers?.[q];
-                const color = t?.isCustom ? 'var(--orange)' : 'var(--green)';
+                const sellColor = t?.isCustom ? 'var(--orange)' : 'var(--green)';
                 const marginPct = t ? Math.round(t.margin * 100) : 0;
-                const title = t?.isCustom ? `title="Ручная цена · маржа ${marginPct}%"` : `title="Расчётная цена · маржа ${marginPct}%"`;
-                return `<td class="text-right" ${title} style="font-size:13px;font-weight:700;color:${color};padding:3px 6px;">${t ? Math.round(t.sellPrice) : '—'}</td>`;
-            }).join('');
+                tierCells += `<td style="text-align:right;padding:6px 4px;font-size:10px;color:var(--text-muted);border-left:1px solid var(--border);">${t ? Math.round(t.cost) : '—'}</td>`;
+                tierCells += `<td style="text-align:right;padding:6px 6px;font-size:13px;font-weight:700;color:${sellColor};" title="Маржа ${marginPct}%">${t ? Math.round(t.sellPrice) : '—'}</td>`;
+            });
 
             html += `
-                <tr>
-                    <td rowspan="2" style="vertical-align:top; padding:6px 8px; border-bottom:2px solid var(--border);">
-                        <div style="display:flex;gap:8px;align-items:flex-start;">
+                <tr style="border-bottom:1px solid var(--border);cursor:pointer;" onclick="Molds.toggleInline(${m.id}, event)">
+                    <td style="padding:8px 12px;">
+                        <div style="display:flex;gap:8px;align-items:center;">
                             ${this.getPhotoThumb(m)}
-                            <div style="min-width:0">
-                                <div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;">
-                                    <div style="font-weight:700; font-size:13px;min-width:0;"><span class="status-dot ${statusDot}"></span>${this.esc(m.name)}</div>
-                                    ${collectionBadge}
+                            <div style="min-width:0;">
+                                <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                                    <span class="status-dot ${statusDot}"></span>
+                                    <span style="font-weight:700;font-size:13px;">${this.esc(m.name)}</span>
+                                    ${collectionBadge} ${nfcBadge} ${priceBadge}
                                 </div>
-                                <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;">${metaPills} ${priceModeBadge}</div>
-                                ${m.hw_name ? `<div style="font-size:10px; color:var(--accent); margin-top:1px;">+ ${this.esc(m.hw_name)}</div>` : ''}
-                                ${m.notes ? `<div style="font-size:10px; color:var(--text-muted); font-style:italic;">${this.esc(m.notes)}</div>` : ''}
+                                ${m.hw_name ? `<div style="font-size:10px;color:var(--text-muted);">+ ${this.esc(m.hw_name)}</div>` : ''}
                             </div>
                         </div>
                     </td>
-                    <td style="font-size:9px;color:var(--text-secondary);padding:3px 4px;white-space:nowrap;">себест.</td>
-                    ${costCells}
-                    <td rowspan="2" style="vertical-align:top; border-bottom:2px solid var(--border);">
-                        <div style="display:flex;flex-direction:column;gap:2px;">
-                            <button class="btn btn-sm btn-outline" style="padding:2px 6px;font-size:10px;" onclick="Molds.editMold(${m.id})">&#9998;</button>
-                            <button class="btn-remove" style="font-size:9px;width:24px;height:24px;" title="Удалить" onclick="Molds.confirmDelete(${m.id}, '${this.esc(m.name)}')">&#10005;</button>
-                        </div>
+                    <td style="text-align:center;padding:6px 4px;font-size:12px;">${pphText}</td>
+                    <td style="text-align:center;padding:6px 4px;font-size:11px;color:var(--text-muted);">${m.weight_grams || '—'}г</td>
+                    ${tierCells}
+                    <td style="padding:6px 4px;text-align:center;">
+                        <button class="btn btn-sm btn-outline" style="padding:2px 6px;font-size:10px;" onclick="event.stopPropagation();Molds.editMold(${m.id})" title="Редактировать">&#9998;</button>
                     </td>
                 </tr>
-                <tr style="border-bottom:2px solid var(--border);">
-                    <td style="font-size:9px;color:var(--green);font-weight:600;padding:3px 4px;white-space:nowrap;">цена расч.</td>
-                    ${sellCells}
-                </tr>`;
-
-            html += `
-                <tr style="border-bottom:2px solid var(--border);background:rgba(0,0,0,.015);">
-                    <td colspan="${MOLD_TIERS.length + 3}" style="padding:8px 8px 10px;">
+                <tr id="mold-inline-row-${m.id}" style="display:none;border-bottom:2px solid var(--border);background:var(--bg);">
+                    <td colspan="${DISPLAY_TIERS.length * 2 + 4}" style="padding:12px 16px;">
                         ${this._renderInlineControls(m)}
                     </td>
                 </tr>`;
@@ -417,23 +411,25 @@ const Molds = {
 
         html += '</tbody></table>';
 
-        // Legend with tier margins + multipliers
-        const marginLabels = MOLD_TIERS.map(q => {
-            const label = q >= 1000 ? (q/1000) + 'K' : q;
-            const m = getBlankMargin(q);
-            const x = getBlankMultiplier(q);
-            return `${label}=${Math.round(m*100)}%×${x}`;
-        }).join(', ');
+        // Compact legend
         html += `
-            <div style="margin-top:10px; font-size:11px; color:var(--text-muted); display:flex; gap:16px; flex-wrap:wrap;">
-                <span><span style="color:var(--text-secondary);">себест.</span> — текущая себестоимость</span>
-                <span><span style="color:var(--green);font-weight:700;">цена расч.</span> — по формуле от себестоимости</span>
-                <span>Тиражная чистая маржа: ${marginLabels}</span>
-                <span>Округление до 5₽</span>
+            <div style="padding:10px 12px;font-size:10px;color:var(--text-muted);display:flex;gap:12px;flex-wrap:wrap;border-top:1px solid var(--border);">
+                <span><span style="color:var(--text-secondary);">себест</span> — себестоимость · <span style="color:var(--green);font-weight:700;">цена</span> — расчётная цена продажи</span>
+                <span>Нажмите на строку для быстрых настроек</span>
             </div>
         </div>`;
 
         container.innerHTML = html;
+    },
+
+    toggleInline(id, event) {
+        if (event && (event.target.tagName === 'INPUT' || event.target.tagName === 'SELECT' || event.target.tagName === 'BUTTON' || event.target.closest('button'))) return;
+        const row = document.getElementById('mold-inline-row-' + id);
+        if (!row) return;
+        const isVisible = row.style.display !== 'none';
+        // Close all other inline rows
+        document.querySelectorAll('[id^="mold-inline-row-"]').forEach(r => { r.style.display = 'none'; });
+        if (!isVisible) row.style.display = '';
     },
 
     _getInlineMoldTypeLabel(mold) {
@@ -455,46 +451,55 @@ const Molds = {
         const inlineComplexity = String(mold.complexity || 'simple');
         const nfcChecked = this._hasInlineNfcChip(mold);
         const nfcCost = Number(App?.params?.nfcTagCost || App?.settings?.nfc_tag_cost || 0) || 0;
-        const hwHint = mold.hw_name && !nfcChecked ? `Сейчас: ${this.esc(mold.hw_name)}` : 'Встроенный чип';
+
+        // Full tier breakdown (all 7 tiers)
+        const allTiersHtml = MOLD_TIERS.map(q => {
+            const label = q >= 1000 ? (q/1000) + 'K' : q;
+            const t = mold.tiers?.[q];
+            const sellColor = t?.isCustom ? 'var(--orange)' : 'var(--green)';
+            const marginPct = t ? Math.round(t.margin * 100) : 0;
+            return `<div style="text-align:center;min-width:64px;">
+                <div style="font-size:10px;color:var(--text-muted);margin-bottom:2px;">${label} шт</div>
+                <div style="font-size:10px;color:var(--text-secondary);">${t ? Math.round(t.cost) + '₽' : '—'}</div>
+                <div style="font-size:14px;font-weight:700;color:${sellColor};">${t ? Math.round(t.sellPrice) + '₽' : '—'}</div>
+                <div style="font-size:9px;color:var(--text-muted);">${marginPct}%</div>
+            </div>`;
+        }).join('');
 
         return `
-            <div style="display:flex;flex-direction:column;gap:10px;">
-                <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
-                    <div style="font-size:11px;color:var(--text-secondary);display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-                        <span style="font-weight:600;color:var(--text);">Быстрые настройки</span>
-                        <span style="display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;background:rgba(0,0,0,.04);">${this.esc(mold.status_label || '')}</span>
-                    </div>
-                    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-                        <button class="btn btn-sm btn-primary" style="min-width:124px;" onclick="Molds.saveInlineMold(${mold.id})">Сохранить</button>
-                        <button class="btn btn-sm btn-outline" onclick="Molds.editMold(${mold.id})">Карточка</button>
-                    </div>
+            <div style="display:flex;flex-direction:column;gap:12px;" onclick="event.stopPropagation()">
+                <div style="display:flex;gap:4px;overflow-x:auto;padding:4px 0;">
+                    ${allTiersHtml}
                 </div>
-                <div style="display:grid;grid-template-columns:minmax(92px,110px) minmax(92px,110px) minmax(220px,1.4fr) minmax(220px,0.95fr);gap:12px;align-items:end;">
-                    <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text-secondary);">
+                <div style="border-top:1px solid var(--border);padding-top:10px;display:flex;gap:10px;align-items:end;flex-wrap:wrap;">
+                    <label style="display:flex;flex-direction:column;gap:3px;font-size:11px;color:var(--text-secondary);">
                         <span>Шт/ч</span>
-                        <input id="mold-inline-pph-${mold.id}" type="number" min="0" step="1" class="input" style="width:100%;height:38px;" value="${inlinePph}">
+                        <input id="mold-inline-pph-${mold.id}" type="number" min="0" step="1" class="input" style="width:80px;height:32px;font-size:12px;" value="${inlinePph}">
                     </label>
-                    <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text-secondary);">
+                    <label style="display:flex;flex-direction:column;gap:3px;font-size:11px;color:var(--text-secondary);">
                         <span>Вес, г</span>
-                        <input id="mold-inline-weight-${mold.id}" type="number" min="0" step="0.01" class="input" style="width:100%;height:38px;" value="${inlineWeight}">
+                        <input id="mold-inline-weight-${mold.id}" type="number" min="0" step="0.01" class="input" style="width:80px;height:32px;font-size:12px;" value="${inlineWeight}">
                     </label>
-                    <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text-secondary);">
+                    <label style="display:flex;flex-direction:column;gap:3px;font-size:11px;color:var(--text-secondary);">
                         <span>Тип молда</span>
-                        <select id="mold-inline-complexity-${mold.id}" class="input" style="width:100%;height:38px;">
-                            <option value="simple" ${inlineComplexity === 'simple' ? 'selected' : ''}>Простой — 800¥</option>
-                            <option value="complex" ${inlineComplexity === 'complex' ? 'selected' : ''}>Сложный — 1000¥</option>
-                            <option value="nfc_triple" ${inlineComplexity === 'nfc_triple' ? 'selected' : ''}>NFC — 1200¥</option>
+                        <select id="mold-inline-complexity-${mold.id}" class="input" style="height:32px;font-size:12px;">
+                            <option value="simple" ${inlineComplexity === 'simple' ? 'selected' : ''}>Простой 800¥</option>
+                            <option value="complex" ${inlineComplexity === 'complex' ? 'selected' : ''}>Сложный 1000¥</option>
+                            <option value="nfc_triple" ${inlineComplexity === 'nfc_triple' ? 'selected' : ''}>NFC 1200¥</option>
                         </select>
                     </label>
-                    <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text-secondary);min-width:0;">
-                        <span>${hwHint}</span>
-                        <span style="display:flex;align-items:center;gap:8px;min-height:38px;padding:0 12px;border:1px solid var(--border);border-radius:10px;background:#fff;">
-                            <input id="mold-inline-nfc-${mold.id}" type="checkbox" ${nfcChecked ? 'checked' : ''}>
-                            <span style="font-size:12px;color:var(--text);font-weight:600;">NFC ${nfcCost > 0 ? `(+${formatRub(nfcCost)})` : ''}</span>
-                            <span style="font-size:11px;color:var(--text-muted);margin-left:auto;">${nfcChecked ? 'вкл.' : 'выкл.'}</span>
-                        </span>
+                    <label style="display:flex;align-items:center;gap:6px;height:32px;padding:0 10px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:12px;cursor:pointer;">
+                        <input id="mold-inline-nfc-${mold.id}" type="checkbox" ${nfcChecked ? 'checked' : ''}>
+                        <span style="font-weight:600;">NFC</span>
+                        ${nfcCost > 0 ? `<span style="color:var(--text-muted);font-size:10px;">+${formatRub(nfcCost)}</span>` : ''}
                     </label>
+                    <div style="display:flex;gap:6px;margin-left:auto;">
+                        <button class="btn btn-sm btn-primary" onclick="Molds.saveInlineMold(${mold.id})">Сохранить</button>
+                        <button class="btn btn-sm btn-outline" onclick="Molds.editMold(${mold.id})">Карточка</button>
+                        <button class="btn btn-sm btn-danger" style="font-size:10px;" onclick="Molds.confirmDelete(${mold.id}, '${this.esc(mold.name)}')">Удалить</button>
+                    </div>
                 </div>
+                ${mold.notes ? `<div style="font-size:10px;color:var(--text-muted);font-style:italic;border-top:1px solid var(--border);padding-top:6px;">${this.esc(mold.notes)}</div>` : ''}
             </div>`;
     },
 
@@ -1201,16 +1206,16 @@ const Molds = {
         const fotPerHour = params.fotPerHour || 400;
         const indirectPerHour = params.indirectPerHour || 0;
 
-        let html = `<div class="card" style="padding:12px;overflow-x:auto;">
+        let html = `<div class="card" style="padding:0;overflow-x:auto;">
             <table style="font-size:12px;white-space:nowrap;border-collapse:collapse;width:100%;">
-            <thead><tr>
-                <th style="width:48px;padding:6px;"></th>
-                <th style="min-width:180px;padding:6px 8px;text-align:left;">Фурнитура</th>
-                <th style="padding:6px 8px;text-align:right;">Цена/шт</th>
-                <th style="padding:6px 8px;text-align:right;">Сборка</th>
-                <th style="padding:6px 8px;text-align:right;font-weight:700;">Себестоимость</th>
-                <th style="padding:6px 8px;text-align:right;">Цена продажи</th>
-                <th style="width:60px;"></th>
+            <thead><tr style="border-bottom:2px solid var(--border);">
+                <th style="width:44px;padding:10px 8px;"></th>
+                <th style="min-width:180px;padding:10px 8px;text-align:left;">Фурнитура</th>
+                <th style="padding:10px 8px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:500;">Цена/шт</th>
+                <th style="padding:10px 8px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:500;">Сборка</th>
+                <th style="padding:10px 8px;text-align:right;">Себестоимость</th>
+                <th style="padding:10px 8px;text-align:right;">Цена продажи</th>
+                <th style="width:52px;padding:10px 4px;"></th>
             </tr></thead><tbody>`;
 
         this._hwBlanks.forEach(b => {
@@ -1223,66 +1228,53 @@ const Molds = {
                 ? (b._whPhoto || b.photo_url || '')
                 : (b.photo_url || b._whPhoto || '');
             const photo = photoSrc
-                ? `<img src="${photoSrc.startsWith('data:') ? photoSrc : this.esc(photoSrc)}" style="width:44px;height:44px;object-fit:cover;border-radius:6px;border:1px solid var(--border);" onerror="this.style.display='none'">`
-                : `<span style="width:44px;height:44px;display:flex;align-items:center;justify-content:center;background:var(--accent-light);border-radius:6px;font-size:16px;">🔩</span>`;
+                ? `<img src="${photoSrc.startsWith('data:') ? photoSrc : this.esc(photoSrc)}" style="width:40px;height:40px;object-fit:cover;border-radius:6px;border:1px solid var(--border);" onerror="this.style.display='none'">`
+                : `<span style="width:40px;height:40px;display:flex;align-items:center;justify-content:center;background:var(--accent-light);border-radius:6px;font-size:14px;">🔩</span>`;
 
             const speedPcsMin = b.assembly_speed ? round2(b.assembly_speed / 60) : 0;
-            const speedLabel = speedPcsMin > 0 ? (speedPcsMin + ' шт/мин') : '—';
             const srcBadge = b._srcBadge || '📦';
             const inlineSellValue = (parseFloat(b.sell_price) || 0) > 0 ? round2(b.sell_price) : '';
             const targetSell = b._targetSellPrice || 0;
-            const sellHint = (parseFloat(b.sell_price) || 0) > 0
-                ? `Таргет: ${formatRub(targetSell)}`
-                : `По формуле 40%: ${formatRub(targetSell)}`;
-            // Extra info line for china/custom
-            const detailBits = [speedLabel];
+            const sellDisplay = inlineSellValue ? formatRub(inlineSellValue) : (targetSell > 0 ? formatRub(targetSell) : '—');
+            const sellIsCustom = inlineSellValue > 0;
+
+            // Subtitle details
+            const detailBits = [];
+            if (speedPcsMin > 0) detailBits.push(speedPcsMin + ' шт/мин');
             if (src === 'warehouse' && displaySku) detailBits.push(displaySku);
             if (src === 'china' || src === 'custom_cny') {
-                const methodInfo = ChinaCatalog.DELIVERY_METHODS[b.delivery_method];
-                const deliveryLabel = methodInfo ? methodInfo.label : (b.delivery_method || '');
                 detailBits.push(`${b.price_cny || 0}¥`);
-                if (deliveryLabel) detailBits.push(deliveryLabel);
+                const methodInfo = ChinaCatalog.DELIVERY_METHODS[b.delivery_method];
+                if (methodInfo) detailBits.push(methodInfo.label);
             }
             if (displayNotes) detailBits.push(displayNotes);
 
             html += `<tr style="border-bottom:1px solid var(--border);">
-                <td style="padding:6px;">${photo}</td>
-                <td style="padding:6px 8px;">
+                <td style="padding:8px;">${photo}</td>
+                <td style="padding:8px;">
                     <div style="font-weight:700;font-size:13px;">${srcBadge} ${this.esc(displayName)}</div>
-                    <div style="font-size:10px;color:var(--text-muted);margin-top:2px;">${this.esc(detailBits.filter(Boolean).join(' · '))}</div>
+                    ${detailBits.length ? `<div style="font-size:10px;color:var(--text-muted);margin-top:1px;">${this.esc(detailBits.join(' · '))}</div>` : ''}
                 </td>
-                <td style="padding:6px 8px;text-align:right;font-size:12px;color:var(--text-secondary);">${formatRub(priceRub)}</td>
-                <td style="padding:6px 8px;text-align:right;font-size:12px;color:var(--text-secondary);">${formatRub(b._assemblyCost)}</td>
-                <td style="padding:6px 8px;text-align:right;font-size:15px;font-weight:700;">${formatRub(b._cost)}</td>
-                <td style="padding:6px 8px;text-align:right;">
-                    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;min-width:130px;">
-                        <input
-                            id="hw-inline-sell-${b.id}"
-                            type="number"
-                            min="0"
-                            step="1"
-                            class="input"
-                            style="width:96px;height:34px;text-align:right;"
-                            value="${inlineSellValue}"
-                            placeholder="${targetSell > 0 ? Math.round(targetSell) : ''}"
-                            oninput="Molds.updateInlineHwSellHint(${b.id})"
-                            onkeydown="if(event.key==='Enter'){event.preventDefault();Molds.saveInlineHwBlank(${b.id});}"
-                        >
-                        <div id="hw-inline-hint-${b.id}" style="font-size:10px;color:var(--text-muted);">${sellHint}</div>
-                    </div>
+                <td style="padding:8px;text-align:right;font-size:12px;color:var(--text-secondary);">${formatRub(priceRub)}</td>
+                <td style="padding:8px;text-align:right;font-size:12px;color:var(--text-secondary);">${formatRub(b._assemblyCost)}</td>
+                <td style="padding:8px;text-align:right;font-size:14px;font-weight:700;">${formatRub(b._cost)}</td>
+                <td style="padding:8px;text-align:right;font-size:14px;font-weight:700;color:${sellIsCustom ? 'var(--green)' : 'var(--text-secondary)'};">
+                    ${sellDisplay}
+                    ${!sellIsCustom && targetSell > 0 ? '<div style="font-size:9px;color:var(--text-muted);font-weight:400;">авто 40%</div>' : ''}
                 </td>
-                <td style="padding:6px;">
-                    <div style="display:flex;gap:4px;align-items:center;">
-                        <button class="btn btn-sm btn-primary" style="padding:2px 8px;font-size:10px;" onclick="Molds.saveInlineHwBlank(${b.id})">Сохранить</button>
-                        <button class="btn btn-sm btn-outline" style="padding:2px 6px;font-size:10px;" onclick="Molds.editHwBlank(${b.id})">&#9998;</button>
-                        <button class="btn-remove" style="font-size:9px;width:24px;height:24px;" onclick="Molds.confirmDeleteHw(${b.id}, '${this.esc(displayName)}')">&#10005;</button>
+                <td style="padding:8px 4px;">
+                    <div style="display:flex;gap:3px;align-items:center;">
+                        <button class="btn btn-sm btn-outline" style="padding:2px 6px;font-size:10px;" onclick="Molds.editHwBlank(${b.id})" title="Редактировать">&#9998;</button>
+                        <button class="btn-remove" style="font-size:9px;width:22px;height:22px;" onclick="Molds.confirmDeleteHw(${b.id}, '${this.esc(displayName)}')" title="Удалить">&#10005;</button>
                     </div>
                 </td>
             </tr>`;
         });
 
         html += '</tbody></table>';
-        html += `<div style="margin-top:10px;font-size:11px;color:var(--text-muted);">ФОТ: ${formatRub(fotPerHour)}/ч · Косвенные: ${formatRub(round2(indirectPerHour))}/ч · Себестоимость = цена/шт + (ФОТ + косвенные) ÷ скорость · Пустая цена продажи = таргет по формуле 40% чистой маржи · 📦 склад · 🇨🇳 каталог · ¥ кастом</div></div>`;
+        html += `<div style="padding:10px 12px;font-size:10px;color:var(--text-muted);border-top:1px solid var(--border);">
+            Себестоимость = цена/шт + (ФОТ ${formatRub(fotPerHour)}/ч + косвенные ${formatRub(round2(indirectPerHour))}/ч) ÷ скорость сборки &nbsp;·&nbsp; 📦 склад &nbsp;·&nbsp; 🇨🇳 каталог &nbsp;·&nbsp; ¥ кастом
+        </div></div>`;
 
         container.innerHTML = html;
     },
@@ -2005,50 +1997,50 @@ const Molds = {
             return;
         }
 
-        let html = `<div class="card" style="padding:12px;overflow-x:auto;">
+        let html = `<div class="card" style="padding:0;overflow-x:auto;">
             <table style="font-size:12px;white-space:nowrap;border-collapse:collapse;width:100%;">
-            <thead><tr>
-                <th style="width:48px;padding:6px;"></th>
-                <th style="min-width:180px;padding:6px 8px;text-align:left;">Упаковка</th>
-                <th style="padding:6px 8px;text-align:right;">Цена</th>
-                <th style="padding:6px 8px;text-align:right;">Доставка</th>
-                <th style="padding:6px 8px;text-align:right;">Сборка</th>
-                <th style="padding:6px 8px;text-align:right;font-weight:700;">Себестоимость</th>
-                <th style="padding:6px 8px;text-align:right;">Цена продажи</th>
-                <th style="width:60px;"></th>
+            <thead><tr style="border-bottom:2px solid var(--border);">
+                <th style="width:44px;padding:10px 8px;"></th>
+                <th style="min-width:180px;padding:10px 8px;text-align:left;">Упаковка</th>
+                <th style="padding:10px 8px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:500;">Цена</th>
+                <th style="padding:10px 8px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:500;">Доставка</th>
+                <th style="padding:10px 8px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:500;">Сборка</th>
+                <th style="padding:10px 8px;text-align:right;">Себестоимость</th>
+                <th style="padding:10px 8px;text-align:right;">Цена продажи</th>
+                <th style="width:52px;padding:10px 4px;"></th>
             </tr></thead><tbody>`;
 
         this._pkgBlanks.forEach(b => {
             const price = b._priceCalc != null ? b._priceCalc : (b.price_per_unit || 0);
             const delivery = b._deliveryCalc != null ? b._deliveryCalc : (b.delivery_per_unit || 0);
             const speedPcsMin = b.assembly_speed ? round2(b.assembly_speed / 60) : 0;
-            const speedLabel = speedPcsMin > 0 ? (speedPcsMin + ' шт/мин') : '—';
             const displayName = b._warehouseName || b.name;
             const displayNotes = b._displayNotes || b.notes || '';
             const displaySku = b._warehouseSku || '';
             const photoSrc = b._whPhoto || b.photo_url || '';
             const photo = photoSrc
-                ? `<img src="${photoSrc.startsWith('data:') ? photoSrc : this.esc(photoSrc)}" style="width:44px;height:44px;object-fit:cover;border-radius:6px;border:1px solid var(--border);" onerror="this.style.display='none'">`
-                : `<span style="width:44px;height:44px;display:flex;align-items:center;justify-content:center;background:var(--accent-light);border-radius:6px;font-size:16px;">📦</span>`;
-            const detailBits = [speedLabel];
+                ? `<img src="${photoSrc.startsWith('data:') ? photoSrc : this.esc(photoSrc)}" style="width:40px;height:40px;object-fit:cover;border-radius:6px;border:1px solid var(--border);" onerror="this.style.display='none'">`
+                : `<span style="width:40px;height:40px;display:flex;align-items:center;justify-content:center;background:var(--accent-light);border-radius:6px;font-size:14px;">📦</span>`;
+            const detailBits = [];
+            if (speedPcsMin > 0) detailBits.push(speedPcsMin + ' шт/мин');
             if (displaySku) detailBits.push(displaySku);
             if (displayNotes) detailBits.push(displayNotes);
 
             html += `<tr style="border-bottom:1px solid var(--border);">
-                <td style="padding:6px;">${photo}</td>
-                <td style="padding:6px 8px;">
-                    <div style="font-weight:700;font-size:13px;">📦 ${this.esc(displayName)}</div>
-                    <div style="font-size:10px;color:var(--text-muted);font-style:italic;">${this.esc(detailBits.filter(Boolean).join(' · '))}</div>
+                <td style="padding:8px;">${photo}</td>
+                <td style="padding:8px;">
+                    <div style="font-weight:700;font-size:13px;">${this.esc(displayName)}</div>
+                    ${detailBits.length ? `<div style="font-size:10px;color:var(--text-muted);margin-top:1px;">${this.esc(detailBits.join(' · '))}</div>` : ''}
                 </td>
-                <td style="padding:6px 8px;text-align:right;font-size:12px;color:var(--text-secondary);">${formatRub(price)}</td>
-                <td style="padding:6px 8px;text-align:right;font-size:12px;color:var(--text-secondary);">${formatRub(delivery)}</td>
-                <td style="padding:6px 8px;text-align:right;font-size:12px;color:var(--text-secondary);">${formatRub(b._assemblyCost)}</td>
-                <td style="padding:6px 8px;text-align:right;font-size:15px;font-weight:700;">${formatRub(b._cost)}</td>
-                <td style="padding:6px 8px;text-align:right;font-size:15px;font-weight:700;color:var(--green);">${formatRub(b._sellPrice)}</td>
-                <td style="padding:6px;">
-                    <div style="display:flex;gap:4px;">
-                        <button class="btn btn-sm btn-outline" style="padding:2px 6px;font-size:10px;" onclick="Molds.editPkgBlank(${b.id})">&#9998;</button>
-                        <button class="btn-remove" style="font-size:9px;width:24px;height:24px;" onclick="Molds.confirmDeletePkg(${b.id}, '${this.esc(b.name)}')">&#10005;</button>
+                <td style="padding:8px;text-align:right;font-size:12px;color:var(--text-secondary);">${formatRub(price)}</td>
+                <td style="padding:8px;text-align:right;font-size:12px;color:var(--text-secondary);">${formatRub(delivery)}</td>
+                <td style="padding:8px;text-align:right;font-size:12px;color:var(--text-secondary);">${formatRub(b._assemblyCost)}</td>
+                <td style="padding:8px;text-align:right;font-size:14px;font-weight:700;">${formatRub(b._cost)}</td>
+                <td style="padding:8px;text-align:right;font-size:14px;font-weight:700;color:var(--green);">${formatRub(b._sellPrice)}</td>
+                <td style="padding:8px 4px;">
+                    <div style="display:flex;gap:3px;">
+                        <button class="btn btn-sm btn-outline" style="padding:2px 6px;font-size:10px;" onclick="Molds.editPkgBlank(${b.id})" title="Редактировать">&#9998;</button>
+                        <button class="btn-remove" style="font-size:9px;width:22px;height:22px;" onclick="Molds.confirmDeletePkg(${b.id}, '${this.esc(b.name)}')" title="Удалить">&#10005;</button>
                     </div>
                 </td>
             </tr>`;
@@ -2058,7 +2050,9 @@ const Molds = {
         const params = App.params || {};
         const fotPerHour = params.fotPerHour || 400;
         const indirectPerHour = params.indirectPerHour || 0;
-        html += `<div style="margin-top:10px;font-size:11px;color:var(--text-muted);">ФОТ: ${formatRub(fotPerHour)}/ч · Косвенные: ${formatRub(round2(indirectPerHour))}/ч · Себестоимость = цена + доставка + (ФОТ + косвенные) ÷ скорость · Цена продажи берётся фиксированно из поля бланка</div></div>`;
+        html += `<div style="padding:10px 12px;font-size:10px;color:var(--text-muted);border-top:1px solid var(--border);">
+            Себестоимость = цена + доставка + (ФОТ ${formatRub(fotPerHour)}/ч + косвенные ${formatRub(round2(indirectPerHour))}/ч) ÷ скорость сборки
+        </div></div>`;
 
         container.innerHTML = html;
     },
