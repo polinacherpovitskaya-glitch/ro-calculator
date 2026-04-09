@@ -122,6 +122,48 @@ const NON_CRITICAL_LOCAL_CACHE_KEYS = new Set([
     LOCAL_KEYS.taskNotificationEvents,
 ]);
 
+const SHARED_VOLATILE_LOCAL_CACHE_KEYS = new Set([
+    LOCAL_KEYS.orderItems,
+    LOCAL_KEYS.imports,
+    LOCAL_KEYS.molds,
+    LOCAL_KEYS.timeEntries,
+    LOCAL_KEYS.chinaPurchases,
+    LOCAL_KEYS.chinaOrders,
+    LOCAL_KEYS.orderFactuals,
+    LOCAL_KEYS.warehouseItems,
+    LOCAL_KEYS.warehouseReservations,
+    LOCAL_KEYS.warehouseHistory,
+    LOCAL_KEYS.shipments,
+    LOCAL_KEYS.colors,
+    LOCAL_KEYS.hwBlanks,
+    LOCAL_KEYS.pkgBlanks,
+    LOCAL_KEYS.marketplaceSets,
+    LOCAL_KEYS.productionPlan,
+    LOCAL_KEYS.projectHardwareState,
+    LOCAL_KEYS.readyGoods,
+    LOCAL_KEYS.readyGoodsHistory,
+    LOCAL_KEYS.salesRecords,
+    LOCAL_KEYS.workProjects,
+    LOCAL_KEYS.workTasks,
+    LOCAL_KEYS.bugReports,
+    LOCAL_KEYS.taskComments,
+    LOCAL_KEYS.workAssets,
+    LOCAL_KEYS.taskChecklistItems,
+    LOCAL_KEYS.taskWatchers,
+    LOCAL_KEYS.workActivity,
+    LOCAL_KEYS.workTemplatesV2,
+    LOCAL_KEYS.taskNotificationEvents,
+]);
+
+const ALWAYS_PERSIST_LOCAL_KEYS = new Set([
+    LOCAL_KEYS.settings,
+    LOCAL_KEYS.templates,
+    LOCAL_KEYS.authAccounts,
+    LOCAL_KEYS.deletedMoldIds,
+]);
+
+const SHARED_VOLATILE_PAYLOAD_THRESHOLD = 25_000;
+
 const WORK_SETTINGS_KEYS = {
     areas: 'work_areas_json',
     projects: 'work_projects_json',
@@ -147,6 +189,17 @@ const OPTIONAL_WORK_MODULE_TABLES = new Set([
 const _missingOptionalWorkTables = new Set();
 
 const _volatileLocalCache = new Map();
+
+function _isSharedCacheOnlyMode() {
+    return isSupabaseReady() && !_hasSupabaseAccessProblem();
+}
+
+function _shouldKeepOnlyInVolatileCache(key, payload = '') {
+    if (!_isSharedCacheOnlyMode()) return false;
+    if (ALWAYS_PERSIST_LOCAL_KEYS.has(key)) return false;
+    if (SHARED_VOLATILE_LOCAL_CACHE_KEYS.has(key)) return true;
+    return typeof payload === 'string' && payload.length > SHARED_VOLATILE_PAYLOAD_THRESHOLD;
+}
 
 // Data version — increment to trigger NON-DESTRUCTIVE migration
 // NEVER delete user data! Only add missing fields to existing molds
@@ -434,6 +487,13 @@ function setLocal(key, data) {
         console.error('[setLocal] JSON stringify error for key:', key, e);
         return;
     }
+    if (_shouldKeepOnlyInVolatileCache(key, payload)) {
+        _volatileLocalCache.set(key, data);
+        try {
+            localStorage.removeItem(key);
+        } catch (e) { /* ignore */ }
+        return;
+    }
     try {
         localStorage.setItem(key, payload);
         _volatileLocalCache.delete(key);
@@ -447,6 +507,13 @@ function setLocal(key, data) {
             } catch (e2) {
                 console.error('[setLocal] Still no space after cleanup for key:', key);
                 _volatileLocalCache.set(key, data);
+                if (_isSharedCacheOnlyMode()) {
+                    console.warn('[setLocal] Falling back to in-memory cache in shared-db mode:', key);
+                    try {
+                        localStorage.removeItem(key);
+                    } catch (e3) { /* ignore */ }
+                    return;
+                }
                 if (isSupabaseReady() && !_hasSupabaseAccessProblem() && NON_CRITICAL_LOCAL_CACHE_KEYS.has(key)) {
                     console.warn('[setLocal] Skipping non-critical local cache because Supabase is available:', key);
                     return;

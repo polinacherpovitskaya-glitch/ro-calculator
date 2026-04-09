@@ -151,6 +151,29 @@ async function main() {
         runScript(context, 'js/supabase.js');
 
         vm.runInContext(`
+            initSupabase();
+            setLocal(LOCAL_KEYS.orderItems, [{
+                id: 1,
+                order_id: 9001,
+                item_data: 'x'.repeat(50000),
+            }]);
+            setLocal(LOCAL_KEYS.settings, { version: 'persist-me' });
+        `, context);
+
+        const cachedOrderItems = JSON.parse(JSON.stringify(vm.runInContext('getLocal(LOCAL_KEYS.orderItems)', context)));
+        assert.equal(cachedOrderItems.length, 1);
+        assert.equal(cachedOrderItems[0].order_id, 9001);
+        assert.equal(context.localStorage.getItem('ro_calc_order_items'), null, 'heavy shared-db cache should stay in memory instead of filling localStorage');
+
+        const storedSettings = JSON.parse(context.localStorage.getItem('ro_calc_settings') || '{}');
+        assert.equal(storedSettings.version, 'persist-me', 'lightweight local settings should still persist across reloads');
+    }
+
+    {
+        const context = createContext();
+        runScript(context, 'js/supabase.js');
+
+        vm.runInContext(`
             setLocal(LOCAL_KEYS.readyGoods, [{ id: 99, payload: 'x'.repeat(20000) }]);
             setLocal(LOCAL_KEYS.readyGoodsHistory, [{ id: 50, type: 'manual_add', qty: 3 }]);
             initSupabase();
@@ -201,9 +224,10 @@ async function main() {
             saveSalesRecords([{ id: 2, product_name: 'Saved Locally', qty: 5 }]);
         `, context);
 
-        const savedLocal = JSON.parse(context.localStorage.getItem('ro_calc_sales_records') || '[]');
+        const savedLocal = JSON.parse(JSON.stringify(vm.runInContext('getLocal(LOCAL_KEYS.salesRecords)', context)));
         assert.equal(savedLocal.length, 1);
         assert.equal(savedLocal[0].product_name, 'Saved Locally');
+        assert.equal(context.localStorage.getItem('ro_calc_sales_records'), null);
         const updatedRemoteSales = JSON.parse(context.__settingsStore.get('ready_goods_sales_records_json') || '[]');
         assert.equal(updatedRemoteSales.length, 1);
         assert.equal(updatedRemoteSales[0].product_name, 'Saved Locally');
