@@ -560,6 +560,29 @@ function getPendantLetterBlankMetrics(totalElements, params, pendant) {
     }, params);
 
     const cost = round2((result?.costTotal || 0) - (result?.costMoldAmortization || 0) + moldAmortPerUnit);
+    const builtinHwDeliveryPerUnit = tierQty > 0 ? round2(Number(source?.hw_delivery_total || 0) / tierQty) : 0;
+    const builtinHwPurchasePerUnit = round2(Number(source?.hw_price_per_unit || source?.hw_price || 0));
+    const builtinHwLaborPerUnit = tierQty > 0 ? round2(((result?.hoursBuiltinHw || 0) * (params?.fotPerHour || 0)) / tierQty) : 0;
+    const builtinHwIndirectPerUnit = round2(Math.max(0, (result?.costBuiltinHw || 0) - builtinHwPurchasePerUnit - builtinHwDeliveryPerUnit - builtinHwLaborPerUnit));
+    const scaled = (value) => round2((Number(value) || 0) * totalElements);
+    const hoursScale = tierQty > 0 ? (totalElements / tierQty) : 0;
+
+    const breakdown = {
+        salaryPerUnit: round2((result?.costFot || 0) + (result?.costCutting || 0) + (result?.costNfcProgramming || 0) + builtinHwLaborPerUnit),
+        hardwarePurchasePerUnit: builtinHwPurchasePerUnit,
+        hardwareDeliveryPerUnit: builtinHwDeliveryPerUnit,
+        plasticPerUnit: round2(result?.costPlastic || 0),
+        moldsPerUnit: round2(moldAmortPerUnit),
+        printingPerUnit: round2(result?.costPrinting || 0),
+        omittedIndirectPerUnit: round2((result?.costIndirect || 0) + (result?.costCuttingIndirect || 0) + (result?.costNfcIndirect || 0) + builtinHwIndirectPerUnit),
+    };
+    breakdown.salaryTotal = scaled(breakdown.salaryPerUnit);
+    breakdown.hardwarePurchaseTotal = scaled(breakdown.hardwarePurchasePerUnit);
+    breakdown.hardwareDeliveryTotal = scaled(breakdown.hardwareDeliveryPerUnit);
+    breakdown.plasticTotal = scaled(breakdown.plasticPerUnit);
+    breakdown.moldsTotal = scaled(breakdown.moldsPerUnit);
+    breakdown.printingTotal = scaled(breakdown.printingPerUnit);
+    breakdown.omittedIndirectTotal = scaled(breakdown.omittedIndirectPerUnit);
 
     const allowManualPrices = !!source?.use_manual_prices;
     const customPrice = allowManualPrices ? Number(source?.custom_prices?.[tierQty]) : NaN;
@@ -608,16 +631,16 @@ function getPendantLetterBlankMetrics(totalElements, params, pendant) {
         ? round2(((sellPrice * keepNetRate) - cost) / sellPrice)
         : targetMargin;
 
-    const scale = tierQty > 0 ? (totalElements / tierQty) : 0;
     return {
         tierQty,
         cost,
         sellPrice,
         margin,
-        hoursPlastic: round2((result?.hoursPlastic || 0) * scale),
-        hoursCutting: round2((result?.hoursCutting || 0) * scale),
-        hoursBuiltinHw: round2((result?.hoursBuiltinHw || 0) * scale),
-        hoursPlasticZone: round2((result?.hoursPlasticZone || 0) * scale),
+        breakdown,
+        hoursPlastic: round2((result?.hoursPlastic || 0) * hoursScale),
+        hoursCutting: round2((result?.hoursCutting || 0) * hoursScale),
+        hoursBuiltinHw: round2((result?.hoursBuiltinHw || 0) * hoursScale),
+        hoursPlasticZone: round2((result?.hoursPlasticZone || 0) * hoursScale),
     };
 }
 
@@ -967,21 +990,34 @@ function calculateFinDirectorData(items, hardwareItems, packagingItems, params, 
         const r = pnd.result;
         const cords = getPendantAttachmentEntries(pnd, 'cord');
         const carabiners = getPendantAttachmentEntries(pnd, 'carabiner');
-        const elementCostPerUnit = getPendantElementCostPerUnit(pnd, params);
+        const elements = getCountablePendantElements(pnd);
+        const totalElements = qty * elements.length;
+        const letterMetrics = getPendantLetterBlankMetrics(totalElements, params, pnd);
+        const letterBreakdown = letterMetrics?.breakdown || null;
         // Assembly salary
         totalSalary += (r.assemblyHours + r.packagingHours) * params.fotPerHour;
+        if (letterBreakdown) {
+            totalSalary += letterBreakdown.salaryTotal;
+            totalHardwarePurchase += letterBreakdown.hardwarePurchaseTotal;
+            totalHardwareDelivery += letterBreakdown.hardwareDeliveryTotal;
+            totalPlastic += letterBreakdown.plasticTotal;
+            totalMolds += letterBreakdown.moldsTotal;
+            totalPrinting += letterBreakdown.printingTotal;
+        } else {
+            const elementCostPerUnit = getPendantElementCostPerUnit(pnd, params, letterMetrics);
+            totalHardwarePurchase += qty * elements.length * elementCostPerUnit;
+        }
         // Cord + carabiner → hardware purchases
-        const elements = getCountablePendantElements(pnd);
         totalHardwarePurchase += cords.reduce((sum, entry) => sum + (getPendantAttachmentAllocatedQty(pnd, entry) * getPendantAttachmentPurchasePerUnit('cord', entry)), 0);
         totalHardwarePurchase += carabiners.reduce((sum, entry) => sum + (getPendantAttachmentAllocatedQty(pnd, entry) * getPendantAttachmentPurchasePerUnit('carabiner', entry)), 0);
         totalHardwareDelivery += cords.reduce((sum, entry) => sum + (getPendantAttachmentAllocatedQty(pnd, entry) * getPendantAttachmentDeliveryPerUnit('cord', entry)), 0);
         totalHardwareDelivery += carabiners.reduce((sum, entry) => sum + (getPendantAttachmentAllocatedQty(pnd, entry) * getPendantAttachmentDeliveryPerUnit('carabiner', entry)), 0);
-        // Elements → hardware purchase
-        totalHardwarePurchase += qty * elements.length * elementCostPerUnit;
         // Printing
-        elements.forEach(el => {
-            if (el.has_print && el.print_price) totalPrinting += qty * el.print_price;
-        });
+        if (!letterBreakdown) {
+            elements.forEach(el => {
+                if (el.has_print && el.print_price) totalPrinting += qty * el.print_price;
+            });
+        }
         // Packaging
         if (pnd.packaging) {
             totalPackagingPurchase += qty * (pnd.packaging.price_per_unit || 0);

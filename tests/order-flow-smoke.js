@@ -2320,15 +2320,25 @@ async function smokePendantFinDirectorUsesCurrentLetterCost(context) {
         const fin = calculateFinDirectorData([], [], [], params, [pendant]);
         return {
             fin,
-            expectedHardwarePurchase: metrics ? Math.round(metrics.cost * 2 * 100 * 100) / 100 : 0,
+            expected: metrics ? {
+                salary: metrics.breakdown.salaryTotal,
+                hardwarePurchase: metrics.breakdown.hardwarePurchaseTotal,
+                hardwareDelivery: metrics.breakdown.hardwareDeliveryTotal,
+                plastic: metrics.breakdown.plasticTotal,
+                molds: metrics.breakdown.moldsTotal,
+                printing: metrics.breakdown.printingTotal,
+            } : null,
         };
     })()`, context));
 
-    assert.equal(
-        finState.fin.hardwarePurchase,
-        finState.expectedHardwarePurchase,
-        'fin director hardware purchase should use current blank-derived letter cost, not stale saved element price'
-    );
+    assert.ok(finState.expected, 'pendant letter metrics should be available for fin director split');
+    assert.equal(finState.fin.salary, finState.expected.salary, 'fin director salary should include letter production labour');
+    assert.equal(finState.fin.hardwarePurchase, finState.expected.hardwarePurchase, 'fin director hardware purchase should only include built-in hardware purchase for letters');
+    assert.equal(finState.fin.hardwareDelivery, finState.expected.hardwareDelivery, 'fin director hardware delivery should include built-in hardware delivery for letters');
+    assert.equal(finState.fin.plastic, finState.expected.plastic, 'fin director plastic should include letter plastic cost');
+    assert.equal(finState.fin.molds, finState.expected.molds, 'fin director molds should include letter mold amortization');
+    assert.equal(finState.fin.printing, finState.expected.printing, 'fin director printing should include letter printing cost');
+    assert.ok(finState.fin.plastic > 0, 'pendant letters should not disappear from plastic budget');
 }
 
 async function smokeLegacyPendantRestore(context) {
