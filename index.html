@@ -35,7 +35,7 @@
     <aside class="sidebar">
         <div class="sidebar-brand">
             <h2>Recycle Object</h2>
-            <span>Калькулятор <span id="app-version">v233</span></span>
+            <span>Калькулятор <span id="app-version">v234</span></span>
         </div>
         <nav class="sidebar-nav">
             <a href="#tasks" data-page="tasks">
@@ -3328,14 +3328,13 @@
                     <div id="auto-backup-list" style="font-size:12px;color:var(--text-muted);">Загрузка...</div>
                 </div>
 
-                <div class="card" style="margin-top:16px;border-left:3px solid var(--orange);">
-                    <h4 style="margin-bottom:8px;color:var(--orange)">Облачная синхронизация (Supabase)</h4>
+                <div id="supabase-status-card" class="card" style="margin-top:16px;border-left:3px solid var(--border);background:var(--card);">
+                    <h4 id="supabase-status-title" style="margin-bottom:8px;color:var(--text);">Синхронизация данных</h4>
                     <p style="font-size:12px;color:var(--text-muted);margin-bottom:8px;" id="supabase-status-text">
                         Проверка...
                     </p>
-                    <p style="font-size:11px;color:var(--text-muted);">
-                        Для работы с нескольких компьютеров нужна облачная база данных.
-                        Обратитесь к разработчику для настройки Supabase.
+                    <p style="font-size:11px;color:var(--text-muted);" id="supabase-status-note">
+                        Проверяем, где сейчас хранятся данные.
                     </p>
                 </div>
             </div>
@@ -3394,7 +3393,7 @@
 <script src="js/supabase.js?v=162"></script>
 <script src="js/task-events.js?v=1"></script>
 <script src="js/calculator.js?v=74"></script>
-    <script src="js/app.js?v=233"></script>
+    <script src="js/app.js?v=234"></script>
 <script src="js/wiki.js?v=4"></script>
 <script src="js/order-detail.js?v=62"></script>
 <script src="js/orders.js?v=64"></script>

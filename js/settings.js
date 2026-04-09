@@ -2093,11 +2093,26 @@ const Settings = {
 
         // Supabase status
         const statusEl = document.getElementById('supabase-status-text');
+        const noteEl = document.getElementById('supabase-status-note');
+        const titleEl = document.getElementById('supabase-status-title');
+        const cardEl = document.getElementById('supabase-status-card');
         if (statusEl) {
             if (typeof isSupabaseReady === 'function' && isSupabaseReady()) {
-                statusEl.innerHTML = '<span style="color:var(--green);font-weight:600;">Supabase подключён — данные синхронизируются</span>';
+                statusEl.innerHTML = '<span style="color:var(--green);font-weight:600;">Облачная база подключена — данные синхронизируются между устройствами.</span>';
+                if (titleEl) titleEl.textContent = 'Синхронизация данных';
+                if (noteEl) noteEl.textContent = 'Ничего делать не нужно. Этот режим нужен, чтобы работать с заказами и складом с разных устройств.';
+                if (cardEl) {
+                    cardEl.style.borderLeft = '3px solid var(--green)';
+                    cardEl.style.background = 'rgba(74, 179, 126, 0.06)';
+                }
             } else {
-                statusEl.innerHTML = '<span style="color:var(--red);font-weight:600;">Supabase НЕ подключён — данные только в этом браузере!</span>';
+                statusEl.innerHTML = '<span style="color:var(--text);font-weight:600;">Облачная база не подключена — данные сохраняются только в этом браузере.</span>';
+                if (titleEl) titleEl.textContent = 'Локальное хранение данных';
+                if (noteEl) noteEl.textContent = 'Это нормально, если работа идёт с одного компьютера. Для синхронизации между устройствами нужна облачная база.';
+                if (cardEl) {
+                    cardEl.style.borderLeft = '3px solid var(--border)';
+                    cardEl.style.background = 'var(--card)';
+                }
             }
         }
     },
