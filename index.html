@@ -10,7 +10,7 @@
     <link rel="stylesheet" href="css/style.css?v=101">
     <script>
         (function () {
-            const CURRENT_HTML_VERSION = 'v248';
+            const CURRENT_HTML_VERSION = 'v249';
             const ATTEMPT_KEY = 'ro_calc_force_update_attempts';
 
             function parseVersion(version) {
@@ -81,7 +81,7 @@
     <aside class="sidebar">
         <div class="sidebar-brand">
             <h2>Recycle Object</h2>
-            <span>Калькулятор <span id="app-version">v248</span></span>
+            <span>Калькулятор <span id="app-version">v249</span></span>
         </div>
         <nav class="sidebar-nav">
             <a href="#tasks" data-page="tasks">
@@ -865,19 +865,13 @@
                         </div>
                     </div>
                 </div>
+                <input type="hidden" id="mold-pph-min">
+                <input type="hidden" id="mold-pph-max">
                 <div class="form-row">
                     <div class="form-group">
-                        <label>Шт/час (план мин)</label>
-                        <input type="number" min="0" id="mold-pph-min">
-                    </div>
-                    <div class="form-group">
-                        <label>Шт/час (план макс)</label>
-                        <input type="number" min="0" id="mold-pph-max">
-                    </div>
-                    <div class="form-group">
-                        <label>Шт/час (факт)</label>
+                        <label>Шт/ч</label>
                         <input type="number" min="0" id="mold-pph-actual">
-                        <span class="form-hint">Реальная скорость по хронометражу</span>
+                        <span class="form-hint">Одна рабочая скорость для расчёта бланка</span>
                     </div>
                 </div>
                 <div class="form-row">
@@ -932,7 +926,7 @@
 
                 <!-- Warehouse picker (hidden by default) -->
                 <div id="mold-hw-warehouse-picker" style="display:none;margin-bottom:8px">
-                    <div id="mold-hw-warehouse-list" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:6px;max-height:200px;overflow-y:auto;padding:4px;"></div>
+                    <div id="mold-builtin-hw-warehouse-picker-host"></div>
                 </div>
 
                 <!-- Custom fields (always visible to show selected data) -->
@@ -3402,13 +3396,13 @@
 <script src="js/supabase.js?v=164"></script>
 <script src="js/task-events.js?v=1"></script>
 <script src="js/calculator.js?v=75"></script>
-    <script src="js/app.js?v=248"></script>
+<script src="js/app.js?v=249"></script>
 <script src="js/wiki.js?v=4"></script>
 <script src="js/order-detail.js?v=62"></script>
 <script src="js/orders.js?v=64"></script>
 <script src="js/production_plan.js?v=75"></script>
 <script src="js/analytics.js?v=46g"></script>
-    <script src="js/molds.js?v=76"></script>
+    <script src="js/molds.js?v=77"></script>
 <script src="js/colors.js?v=46g"></script>
 <script src="js/kp.js?v=47"></script>
 <script src="js/timetrack.js?v=63"></script>

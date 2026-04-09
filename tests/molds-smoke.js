@@ -165,6 +165,7 @@ async function main() {
         'hw-blank-selected-name',
         'hw-blank-selected-info',
         'hw-blank-photo-preview',
+        'mold-builtin-hw-warehouse-picker-host',
         'mold-hw-warehouse-picker-host',
         'pkg-blank-wh-id',
         'pkg-blank-name',
@@ -244,7 +245,11 @@ async function main() {
     assert.equal(prefixedNotesSnapshot.notes, 'полная сборка');
 
     vm.runInContext(`document.getElementById('hw-blank-wh-id').value = '501'; Molds.renderWarehouseHwPicker();`, context);
-    const pickerHtml = String(context.document.getElementById('mold-hw-warehouse-picker-host').innerHTML || '');
+    const pickerHtml = String(
+        context.document.getElementById('mold-builtin-hw-warehouse-picker-host').innerHTML
+        || context.document.getElementById('mold-hw-warehouse-picker-host').innerHTML
+        || ''
+    );
     const pickerArgs = context.__pickerArgs;
     assert.match(pickerHtml, /wh-img-picker/);
     assert.match(pickerHtml, /Поиск по названию или артикулу/);
@@ -347,6 +352,8 @@ async function main() {
     assert.equal(context.__reloadedInlineMolds, true);
     const inlineHtml = String(vm.runInContext(`Molds._renderInlineControls(Molds.allMolds[0])`, context));
     assert.doesNotMatch(inlineHtml, /Кол-во частей/);
+    assert.match(inlineHtml, /39 ₽/);
+    assert.doesNotMatch(inlineHtml, /\+10 ₽/);
 
     vm.runInContext(`
         Molds.allMolds = [{

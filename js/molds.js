@@ -450,7 +450,7 @@ const Molds = {
         const inlineWeight = Number(mold.weight_grams || 0) || '';
         const inlineComplexity = String(mold.complexity || 'simple');
         const nfcChecked = this._hasInlineNfcChip(mold);
-        const nfcCost = Number(App?.params?.nfcTagCost || App?.settings?.nfc_tag_cost || 0) || 0;
+        const nfcCost = Number(mold?.hw_price_per_unit || App?.params?.nfcTagCost || App?.settings?.nfc_tag_cost || 0) || 0;
 
         // Full tier breakdown (all 7 tiers)
         const allTiersHtml = MOLD_TIERS.map(q => {
@@ -491,7 +491,7 @@ const Molds = {
                     <label style="display:flex;align-items:center;gap:6px;height:32px;padding:0 10px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:12px;cursor:pointer;">
                         <input id="mold-inline-nfc-${mold.id}" type="checkbox" ${nfcChecked ? 'checked' : ''}>
                         <span style="font-weight:600;">NFC</span>
-                        ${nfcCost > 0 ? `<span style="color:var(--text-muted);font-size:10px;">+${formatRub(nfcCost)}</span>` : ''}
+                        ${nfcCost > 0 ? `<span style="color:var(--text-muted);font-size:10px;">${formatRub(nfcCost)}</span>` : ''}
                     </label>
                     <div style="display:flex;gap:6px;margin-left:auto;">
                         <button class="btn btn-sm btn-primary" onclick="Molds.saveInlineMold(${mold.id})">Сохранить</button>
@@ -648,9 +648,10 @@ const Molds = {
             collEl.value = '';
         }
         document.getElementById('mold-status').value = m.status || 'active';
-        document.getElementById('mold-pph-min').value = m.pph_min || '';
-        document.getElementById('mold-pph-max').value = m.pph_max || '';
-        document.getElementById('mold-pph-actual').value = m.pph_actual || '';
+        const singlePph = m.pph_actual || m.pph_max || m.pph_min || '';
+        document.getElementById('mold-pph-min').value = singlePph;
+        document.getElementById('mold-pph-max').value = singlePph;
+        document.getElementById('mold-pph-actual').value = singlePph;
         document.getElementById('mold-weight').value = m.weight_grams || '';
         document.getElementById('mold-complexity').value = m.complexity || 'simple';
         document.getElementById('mold-cost-cny').value = m.cost_cny || '';
@@ -745,7 +746,10 @@ const Molds = {
          'mold-weight', 'mold-cost-cny', 'mold-client',
          'mold-hw-name', 'mold-hw-price', 'mold-hw-speed', 'mold-notes',
          'mold-photo-url'
-        ].forEach(id => { document.getElementById(id).value = ''; });
+        ].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.value = '';
+        });
         document.getElementById('mold-photo-file').value = '';
         this._pendingPhoto = '';
         this.updatePhotoPreview('');
@@ -784,6 +788,8 @@ const Molds = {
         const customPrices = this._collectCustomPrices();
         const useManualPrices = Object.keys(customPrices).length > 0;
 
+        const pphValue = parseFloat(document.getElementById('mold-pph-actual').value) || 0;
+
         const mold = {
             id: this.editingId || undefined,
             name,
@@ -791,9 +797,9 @@ const Molds = {
             photo_url: this._pendingPhoto || '',
             collection: (document.getElementById('mold-collection')?.value || '').trim(),
             status: document.getElementById('mold-status').value,
-            pph_min: parseFloat(document.getElementById('mold-pph-min').value) || 0,
-            pph_max: parseFloat(document.getElementById('mold-pph-max').value) || 0,
-            pph_actual: parseFloat(document.getElementById('mold-pph-actual').value) || null,
+            pph_min: pphValue,
+            pph_max: pphValue,
+            pph_actual: pphValue || null,
             weight_grams: parseFloat(document.getElementById('mold-weight').value) || 0,
             complexity: document.getElementById('mold-complexity').value,
             cost_cny: parseFloat(document.getElementById('mold-cost-cny').value) || 0,
@@ -1065,7 +1071,9 @@ const Molds = {
     },
 
     renderWarehouseHwPicker() {
-        const container = document.getElementById('mold-hw-warehouse-picker-host');
+        const container = document.getElementById('mold-builtin-hw-warehouse-picker-host')
+            || document.getElementById('mold-hw-warehouse-picker-host')
+            || document.getElementById('mold-hw-warehouse-list');
         if (!container) return;
         if (!this._warehouseHwItems.length) {
             container.innerHTML = '<p class="text-muted" style="font-size:12px">Нет фурнитуры на складе</p>';
