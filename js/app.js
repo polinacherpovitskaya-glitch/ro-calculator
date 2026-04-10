@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v252';
+const APP_VERSION = 'v253';
 
 const App = {
     currentPage: 'orders',
@@ -940,14 +940,13 @@ const App = {
 // =============================================
 
 const Calculator = {
-    items: [],          // Product items (max 6)
+    items: [],          // Product items
     hardwareItems: [],  // Hardware items (unlimited)
     packagingItems: [], // Packaging items (unlimited)
     pendants: [],       // Pendant items (unlimited)
     extraCosts: [],     // Extra costs [{name, amount}]
     discountMode: 'none',
     discountValue: 0,
-    maxItems: 6,
     _autosaveTimer: null,
     _isDirty: false,
     _autosaving: false,
@@ -1114,19 +1113,10 @@ const Calculator = {
     // ==========================================
 
     addItem() {
-        if (this.items.length >= this.maxItems) {
-            App.toast('Максимум 6 изделий в заказе');
-            return;
-        }
-
         const idx = this.items.length;
         this.items.push(this.getEmptyItem(idx + 1));
         this.renderItemBlock(idx);
         this._updateItemsEmptyState();
-
-        if (this.items.length >= this.maxItems) {
-            document.getElementById('calc-add-item-btn').style.display = 'none';
-        }
         this.scheduleAutosave();
     },
 

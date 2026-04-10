@@ -517,6 +517,27 @@ async function smokeDiscountShownInCustomerInvoice(context) {
     assert.match(invoiceHtml, /Итого после скидки/i);
 }
 
+async function smokeCalculatorSupportsMoreThanSixItems(context) {
+    const state = clone(await vm.runInContext(`(() => {
+        Calculator.resetForm();
+        Calculator.renderItemBlock = () => {};
+        Calculator._updateItemsEmptyState = () => {};
+        for (let i = 0; i < 14; i += 1) {
+            Calculator.addItem();
+        }
+        const btn = document.getElementById('calc-add-item-btn');
+        return {
+            count: Calculator.items.length,
+            lastNumber: Calculator.items[13]?.item_number || 0,
+            btnDisplay: btn ? btn.style.display : '',
+        };
+    })()`, context));
+
+    assert.equal(state.count, 14);
+    assert.equal(state.lastNumber, 14);
+    assert.notEqual(state.btnDisplay, 'none');
+}
+
 async function smokeRemovedPrintingDoesNotLeakIntoInvoiceOrSummary(context) {
     const summary = clone(await vm.runInContext(`(() => {
         Calculator.resetForm();
@@ -6723,6 +6744,7 @@ async function main() {
     await smokeBlankPricingSeparatesCatalogPriceAndNetMargin(context);
     await smokeOrderDiscountAffectsSummaryAndFinDirector(context);
     await smokeDiscountShownInCustomerInvoice(context);
+    await smokeCalculatorSupportsMoreThanSixItems(context);
     await smokeRemovedPrintingDoesNotLeakIntoInvoiceOrSummary(context);
     await smokeGenerateKPPassesDiscount(context);
     await smokeFinDirectorPendantsUseAllAttachments(context);
