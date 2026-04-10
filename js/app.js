@@ -4955,6 +4955,7 @@ const Calculator = {
             if (item.printings.length === 0 && dbItem.printing_qty > 0) {
                 item.printings = [{ name: 'Нанесение', qty: dbItem.printing_qty, price: dbItem.printing_price_per_unit || 0 }];
             }
+            item.sell_price_printing = getPrintingSellPricePerUnit(item);
             // Parse colors from JSON
             if (typeof item.colors === 'string') {
                 try { item.colors = JSON.parse(item.colors); } catch (e) { item.colors = []; }
