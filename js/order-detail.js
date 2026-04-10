@@ -741,7 +741,7 @@ const OrderDetail = {
 
     _renderProductMeta(item) {
         const colors = this._normalizeProductColors(item);
-        const attachment = this._normalizeColorAttachment(item);
+        const attachments = this._normalizeColorAttachments(item);
         const sections = [];
 
         if (colors.length > 0) {
@@ -755,14 +755,16 @@ const OrderDetail = {
             `);
         }
 
-        if (attachment) {
-            const label = this._esc(attachment.name || 'Файл цветового решения');
-            const linkHtml = attachment.data_url
-                ? `<a href="${this._escAttr(attachment.data_url)}" download="${this._escAttr(attachment.name || 'color-solution')}" class="od-url-link">${label}</a>`
-                : label;
+        if (attachments.length > 0) {
+            const linkHtml = attachments.map(attachment => {
+                const label = this._esc(attachment.name || 'Файл цветового решения');
+                return attachment.data_url
+                    ? `<a href="${this._escAttr(attachment.data_url)}" download="${this._escAttr(attachment.name || 'color-solution')}" class="od-url-link">${label}</a>`
+                    : label;
+            }).join('<br>');
             sections.push(`
                 <div style="display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap;">
-                    <span class="text-muted" style="min-width:62px;">Файл:</span>
+                    <span class="text-muted" style="min-width:62px;">${attachments.length > 1 ? 'Файлы:' : 'Файл:'}</span>
                     <span>${linkHtml}</span>
                 </div>
             `);
@@ -807,17 +809,8 @@ const OrderDetail = {
         return [];
     },
 
-    _normalizeColorAttachment(item) {
-        let attachment = item?.color_solution_attachment || null;
-        if (typeof attachment === 'string') {
-            try {
-                attachment = JSON.parse(attachment);
-            } catch (e) {
-                attachment = null;
-            }
-        }
-        if (!attachment || typeof attachment !== 'object') return null;
-        return attachment;
+    _normalizeColorAttachments(item) {
+        return normalizeColorAttachments(item);
     },
 
     // ==========================================

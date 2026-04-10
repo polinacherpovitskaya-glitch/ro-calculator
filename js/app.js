@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v251';
+const APP_VERSION = 'v252';
 
 const App = {
     currentPage: 'orders',
@@ -1154,7 +1154,7 @@ const Calculator = {
             builtin_hw_speed: 0,
             // Colors (multiple per item)
             colors: [],  // [{id, name}, ...]
-            color_solution_attachment: null, // {name, type, data_url, size}
+            color_solution_attachment: null, // legacy object or array of {name, type, data_url, size}
             color_id: null,   // backward compat (first color)
             color_name: '',   // backward compat (first color)
             // Sell prices
@@ -1177,6 +1177,7 @@ const Calculator = {
                 || (parseFloat(pr.delivery_total) || 0) > 0;
         });
         const hasColors = Array.isArray(item.colors) && item.colors.length > 0;
+        const hasColorAttachments = normalizeColorAttachments(item).length > 0;
 
         return !!String(item.product_name || '').trim()
             || (parseFloat(item.quantity) || 0) > 0
@@ -1193,7 +1194,7 @@ const Calculator = {
             || !!item.template_id
             || !!item.color_id
             || hasColors
-            || !!(item.color_solution_attachment && (item.color_solution_attachment.data_url || item.color_solution_attachment.name))
+            || hasColorAttachments
             || hasPrintings
             || (parseFloat(item.sell_price_item) || 0) > 0
             || (parseFloat(item.sell_price_printing) || 0) > 0
@@ -1326,34 +1327,31 @@ const Calculator = {
         // File attachment for color mix reference (photo/PDF/etc.)
         let colorAttachmentHtml = '';
         try {
-            const att = item.color_solution_attachment;
-            if (att && att.data_url) {
+            const attachments = normalizeColorAttachments(item);
+            const attachmentListHtml = attachments.map((att, attIdx) => {
                 const isImage = String(att.type || '').startsWith('image/');
                 const sizeKb = att.size ? Math.round(att.size / 1024) : 0;
-                colorAttachmentHtml = `
-                <div class="form-group" style="margin-top:8px;">
-                    <label>Файл цветового решения</label>
-                    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                return `
+                    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:8px 10px;border:1px solid var(--border);border-radius:10px;background:var(--card-bg);">
                         ${isImage ? `<img src="${this._escAttr(att.data_url)}" style="width:56px;height:56px;object-fit:cover;border-radius:8px;border:1px solid var(--border)">` : `<span style="width:56px;height:56px;display:flex;align-items:center;justify-content:center;background:var(--bg);border:1px solid var(--border);border-radius:8px;font-size:18px;">📎</span>`}
                         <div style="min-width:0;flex:1;">
                             <div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${this._esc(att.name || 'Файл')}</div>
                             <div style="font-size:10px;color:var(--text-muted);">${this._esc(att.type || 'file')} ${sizeKb ? `· ${sizeKb} KB` : ''}</div>
                         </div>
-                        <button class="btn btn-sm btn-outline" onclick="Calculator.openColorAttachment(${idx})">Открыть</button>
-                        <button class="btn btn-sm btn-outline" onclick="Calculator.removeColorAttachment(${idx})">Удалить</button>
-                    </div>
-                </div>`;
-            } else {
-                colorAttachmentHtml = `
+                        <button class="btn btn-sm btn-outline" onclick="Calculator.openColorAttachment(${idx}, ${attIdx})">Открыть</button>
+                        <button class="btn btn-sm btn-outline" onclick="Calculator.removeColorAttachment(${idx}, ${attIdx})">Удалить</button>
+                    </div>`;
+            }).join('');
+            colorAttachmentHtml = `
                 <div class="form-group" style="margin-top:8px;">
                     <label>Файл цветового решения</label>
                     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-                        <input type="file" id="item-color-file-${idx}" accept="image/*,.pdf,.ai,.psd,.svg,.zip,.rar,.7z,.doc,.docx,.xls,.xlsx,.txt"
-                            onchange="Calculator.onColorAttachmentChange(${idx}, this)" style="max-width:300px;font-size:12px;">
-                        <span style="font-size:10px;color:var(--text-muted);">До 3 МБ</span>
+                        <input type="file" id="item-color-file-${idx}" accept="image/*,.pdf,.ai,.psd,.svg,.zip,.rar,.7z,.doc,.docx,.xls,.xlsx,.txt" multiple
+                            onchange="Calculator.onColorAttachmentChange(${idx}, this)" style="max-width:320px;font-size:12px;">
+                        <span style="font-size:10px;color:var(--text-muted);">Можно несколько файлов, до 3 МБ каждый</span>
                     </div>
+                    ${attachmentListHtml ? `<div style="display:flex;flex-direction:column;gap:8px;margin-top:10px;">${attachmentListHtml}</div>` : ''}
                 </div>`;
-            }
         } catch (e) { console.error('[renderItemBlock] attachment block error:', e); }
 
         // Preserve collapse state when re-rendering an existing card
@@ -3230,37 +3228,56 @@ const Calculator = {
     },
 
     onColorAttachmentChange(idx, input) {
-        const file = input?.files?.[0];
-        if (!file) return;
+        const files = Array.from(input?.files || []);
+        if (!files.length) return;
         const maxBytes = 3 * 1024 * 1024; // 3 MB
-        if (file.size > maxBytes) {
-            App.toast('Файл слишком большой. Максимум 3 МБ');
+        const validFiles = files.filter(file => {
+            if ((file?.size || 0) > maxBytes) {
+                App.toast(`Файл "${file.name || 'без имени'}" слишком большой. Максимум 3 МБ`);
+                return false;
+            }
+            return true;
+        });
+        if (!validFiles.length) {
             input.value = '';
             return;
         }
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            this.items[idx].color_solution_attachment = {
+        Promise.all(validFiles.map(file => new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (e) => resolve({
                 name: file.name || 'file',
                 type: file.type || '',
                 size: file.size || 0,
                 data_url: e.target?.result || '',
-            };
+            });
+            reader.onerror = () => reject(new Error(file.name || 'file'));
+            reader.readAsDataURL(file);
+        }))).then(loaded => {
+            const attachments = normalizeColorAttachments(this.items[idx]);
+            this.items[idx].color_solution_attachment = attachments.concat(loaded);
             this.renderItemBlock(idx);
             this.scheduleAutosave();
-        };
-        reader.onerror = () => App.toast('Не удалось прочитать файл');
-        reader.readAsDataURL(file);
+        }).catch(() => {
+            App.toast('Не удалось прочитать один из файлов');
+        }).finally(() => {
+            input.value = '';
+        });
     },
 
-    removeColorAttachment(idx) {
-        this.items[idx].color_solution_attachment = null;
+    removeColorAttachment(idx, attachmentIdx) {
+        const attachments = normalizeColorAttachments(this.items[idx]);
+        if (attachmentIdx === undefined || attachmentIdx === null) {
+            this.items[idx].color_solution_attachment = null;
+        } else {
+            attachments.splice(attachmentIdx, 1);
+            this.items[idx].color_solution_attachment = attachments.length ? attachments : null;
+        }
         this.renderItemBlock(idx);
         this.scheduleAutosave();
     },
 
-    openColorAttachment(idx) {
-        const att = this.items[idx]?.color_solution_attachment;
+    openColorAttachment(idx, attachmentIdx = 0) {
+        const att = normalizeColorAttachments(this.items[idx])[attachmentIdx];
         if (!att?.data_url) return;
         const win = window.open(att.data_url, '_blank');
         if (!win) {
@@ -4460,7 +4477,7 @@ const Calculator = {
                 color_id: item.color_id || null,
                 color_name: item.color_name || '',
                 colors: JSON.stringify(item.colors || []),
-                color_solution_attachment: item.color_solution_attachment ? JSON.stringify(item.color_solution_attachment) : null,
+                color_solution_attachment: serializeColorAttachments(item),
             });
         });
 
@@ -4961,9 +4978,7 @@ const Calculator = {
                 try { item.colors = JSON.parse(item.colors); } catch (e) { item.colors = []; }
             }
             if (!Array.isArray(item.colors)) item.colors = [];
-            if (typeof item.color_solution_attachment === 'string') {
-                try { item.color_solution_attachment = JSON.parse(item.color_solution_attachment); } catch (e) { item.color_solution_attachment = null; }
-            }
+            item.color_solution_attachment = normalizeColorAttachments(item);
             // Migrate old single color_id to colors array
             if (item.colors.length === 0 && item.color_id) {
                 const allC = Colors.data || [];

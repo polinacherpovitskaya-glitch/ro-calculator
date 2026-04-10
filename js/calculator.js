@@ -73,6 +73,36 @@ function getPrintingSellPricePerUnit(item) {
     return hasLegacyPrintingFallback(item) ? (Number(item?.sell_price_printing) || 0) : 0;
 }
 
+function normalizeColorAttachments(source) {
+    let attachments = source;
+    if (attachments && typeof attachments === 'object' && !Array.isArray(attachments) && Object.prototype.hasOwnProperty.call(attachments, 'color_solution_attachment')) {
+        attachments = attachments.color_solution_attachment;
+    }
+    if (typeof attachments === 'string') {
+        try {
+            attachments = JSON.parse(attachments);
+        } catch (e) {
+            attachments = null;
+        }
+    }
+    if (!attachments) return [];
+    if (!Array.isArray(attachments)) attachments = [attachments];
+    return attachments
+        .filter(att => att && typeof att === 'object' && (att.data_url || att.name))
+        .map(att => ({
+            name: String(att.name || 'Файл'),
+            type: String(att.type || ''),
+            size: Number(att.size) || 0,
+            data_url: String(att.data_url || ''),
+        }));
+}
+
+function serializeColorAttachments(source) {
+    const attachments = normalizeColorAttachments(source);
+    if (!attachments.length) return null;
+    return JSON.stringify(attachments.length === 1 ? attachments[0] : attachments);
+}
+
 /**
  * Рассчитать себестоимость одной позиции заказа
  * Теперь поддерживает:

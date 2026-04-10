@@ -270,8 +270,7 @@ const ProductionPlan = {
             } else {
                 colorLines.push({ text: item.product_name || 'Изделие', qty, name: item.product_name || 'Изделие', colors: [], setName, colorGroup });
             }
-            const att = this._extractAttachment(item);
-            if (att) attachments.push(att);
+            attachments.push(...this._extractAttachments(item));
             const printings = this._extractPrintings(item);
             if (printings.length) printingLines.push(`${item.product_name || 'Изделие'}: ${printings.join(', ')}`);
         });
@@ -581,17 +580,14 @@ const ProductionPlan = {
         return names;
     },
 
-    _extractAttachment(item) {
-        let att = item.color_solution_attachment || null;
-        if (typeof att === 'string') {
-            try { att = JSON.parse(att); } catch (e) { att = null; }
-        }
-        if (!att || !att.data_url) return null;
-        return {
-            name: att.name || 'Файл',
-            type: att.type || '',
-            data_url: att.data_url,
-        };
+    _extractAttachments(item) {
+        return normalizeColorAttachments(item)
+            .filter(att => !!att.data_url)
+            .map(att => ({
+                name: att.name || 'Файл',
+                type: att.type || '',
+                data_url: att.data_url,
+            }));
     },
 
     _extractPrintings(item) {

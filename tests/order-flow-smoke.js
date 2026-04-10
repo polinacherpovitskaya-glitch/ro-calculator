@@ -217,12 +217,20 @@ async function buildCollectedItems(context) {
             { id: 12, name: 'Красный' },
             { id: 13, name: 'Синий' },
         ];
-        Calculator.items[0].color_solution_attachment = {
-            name: 'palette.pdf',
-            type: 'application/pdf',
-            data_url: 'data:application/pdf;base64,AAA',
-            size: 1234,
-        };
+        Calculator.items[0].color_solution_attachment = [
+            {
+                name: 'palette.pdf',
+                type: 'application/pdf',
+                data_url: 'data:application/pdf;base64,AAA',
+                size: 1234,
+            },
+            {
+                name: 'reference.png',
+                type: 'image/png',
+                data_url: 'data:image/png;base64,BBB',
+                size: 4321,
+            },
+        ];
         Calculator.items[0].result = {
             costTotal: 120,
             hoursPlastic: 1,
@@ -319,7 +327,11 @@ async function smokeCalculatorPersistence(context) {
         { id: 12, name: 'Красный' },
         { id: 13, name: 'Синий' },
     ]);
-    assert.equal(JSON.parse(productRow.color_solution_attachment).name, 'palette.pdf');
+    const savedAttachments = JSON.parse(productRow.color_solution_attachment);
+    assert.equal(Array.isArray(savedAttachments), true);
+    assert.equal(savedAttachments.length, 2);
+    assert.equal(savedAttachments[0].name, 'palette.pdf');
+    assert.equal(savedAttachments[1].name, 'reference.png');
 
     assert.equal(hardwareRow.china_item_id, 501);
     assert.equal(hardwareRow.china_delivery_method, 'auto');
@@ -382,7 +394,10 @@ async function smokeCalculatorPersistence(context) {
     assert.equal(Array.isArray(restored.product.colors), true);
     assert.equal(restored.product.colors.length, 2);
     assert.equal(restored.product.colors[1].name, 'Синий');
-    assert.equal(restored.product.color_solution_attachment.name, 'palette.pdf');
+    assert.equal(Array.isArray(restored.product.color_solution_attachment), true);
+    assert.equal(restored.product.color_solution_attachment.length, 2);
+    assert.equal(restored.product.color_solution_attachment[0].name, 'palette.pdf');
+    assert.equal(restored.product.color_solution_attachment[1].name, 'reference.png');
 
     assert.equal(restored.hardware.china_item_id, 501);
     assert.equal(restored.hardware.china_delivery_method, 'auto');
@@ -5975,11 +5990,18 @@ async function smokeOrderDetailColorRendering(context) {
                 { id: 12, name: 'Красный' },
                 { id: 13, name: 'Синий' },
             ]),
-            color_solution_attachment: JSON.stringify({
-                name: 'palette.pdf',
-                type: 'application/pdf',
-                data_url: 'data:application/pdf;base64,AAA',
-            }),
+            color_solution_attachment: JSON.stringify([
+                {
+                    name: 'palette.pdf',
+                    type: 'application/pdf',
+                    data_url: 'data:application/pdf;base64,AAA',
+                },
+                {
+                    name: 'reference.png',
+                    type: 'image/png',
+                    data_url: 'data:image/png;base64,BBB',
+                },
+            ]),
         };
         return OrderDetail._renderItemCard(rawProduct, 'product');
     })()`, context));
@@ -5988,7 +6010,9 @@ async function smokeOrderDetailColorRendering(context) {
     assert.match(rendered, /Красный/);
     assert.match(rendered, /Синий/);
     assert.match(rendered, /palette\.pdf/);
+    assert.match(rendered, /reference\.png/);
     assert.match(rendered, /download="palette\.pdf"/);
+    assert.match(rendered, /download="reference\.png"/);
 
     const legacyRendered = String(await vm.runInContext(`(() => {
         const legacyProduct = {
