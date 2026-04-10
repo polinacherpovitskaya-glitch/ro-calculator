@@ -43,6 +43,36 @@ function getProductionParams(settings) {
     };
 }
 
+function getActivePrintings(item) {
+    const rawPrintings = Array.isArray(item?.printings) ? item.printings : [];
+    return rawPrintings.filter(pr => {
+        if (!pr || typeof pr !== 'object') return false;
+        const name = String(pr.name || '').trim();
+        const qty = Number(pr.qty) || 0;
+        const price = Number(pr.price) || 0;
+        const sellPrice = Number(pr.sell_price) || 0;
+        const deliveryTotal = Number(pr.delivery_total) || 0;
+        return !!name && (qty > 0 || price > 0 || sellPrice > 0 || deliveryTotal > 0);
+    });
+}
+
+function hasLegacyPrintingFallback(item) {
+    const rawPrintings = Array.isArray(item?.printings) ? item.printings : [];
+    if (rawPrintings.length > 0) return false;
+    const qty = Number(item?.printing_qty) || 0;
+    const purchasePrice = Number(item?.printing_price_per_unit) || 0;
+    const sellPrice = Number(item?.sell_price_printing) || 0;
+    return qty > 0 && (purchasePrice > 0 || sellPrice > 0);
+}
+
+function getPrintingSellPricePerUnit(item) {
+    const activePrintings = getActivePrintings(item);
+    if (activePrintings.length > 0) {
+        return activePrintings.reduce((sum, pr) => sum + (Number(pr.sell_price) || 0), 0);
+    }
+    return hasLegacyPrintingFallback(item) ? (Number(item?.sell_price_printing) || 0) : 0;
+}
+
 /**
  * Рассчитать себестоимость одной позиции заказа
  * Теперь поддерживает:
@@ -112,7 +142,7 @@ function calculateItemCost(item, params) {
     // === Нанесение (теперь массив printings[]) ===
     let costPrinting = 0;
     const costPrintingDetails = []; // per-printing cost breakdown
-    const printings = item.printings || [];
+    const printings = getActivePrintings(item);
     if (printings.length > 0) {
         printings.forEach(pr => {
             const prQty = pr.qty || 0;
@@ -998,12 +1028,12 @@ function calculateFinDirectorData(items, hardwareItems, packagingItems, params, 
         if (item.complex_design) totalDesign += safeDesignCost;
 
         // Печать (из массива printings)
-        const printings = item.printings || [];
+        const printings = getActivePrintings(item);
         printings.forEach(pr => {
             totalPrinting += (pr.qty || 0) * (pr.price || 0);
         });
         // Обратная совместимость
-        if (printings.length === 0) {
+        if (hasLegacyPrintingFallback(item)) {
             totalPrinting += (item.printing_qty || 0) * (item.printing_price_per_unit || 0);
         }
 
@@ -1019,7 +1049,7 @@ function calculateFinDirectorData(items, hardwareItems, packagingItems, params, 
         if (item.delivery_included) totalDelivery += safeDeliveryCostMoscow;
 
         // Выручка изделий (item + printing)
-        totalRevenue += ((item.sell_price_item || 0) + (item.sell_price_printing || 0)) * qty;
+        totalRevenue += ((item.sell_price_item || 0) + getPrintingSellPricePerUnit(item)) * qty;
     });
 
     // Фурнитура
@@ -1138,10 +1168,10 @@ function calculateOrderSummary(items, hardwareItems, packagingItems, extraCosts,
         // Item revenue (without printing)
         totalRevenue += (item.sell_price_item || 0) * qty;
         // Printing revenue (separate)
-        totalRevenue += (item.sell_price_printing || 0) * qty;
+        totalRevenue += getPrintingSellPricePerUnit(item) * qty;
 
         // Total sell = item + printing, total cost = costTotal (includes printing cost)
-        const totalSellPerUnit = (item.sell_price_item || 0) + (item.sell_price_printing || 0);
+        const totalSellPerUnit = (item.sell_price_item || 0) + getPrintingSellPricePerUnit(item);
         const marginItem = calculateActualMargin(totalSellPerUnit, item.result.costTotal);
         totalEarned += marginItem.earned * qty;
     });

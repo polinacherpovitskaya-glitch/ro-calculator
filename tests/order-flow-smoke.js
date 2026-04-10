@@ -502,6 +502,34 @@ async function smokeDiscountShownInCustomerInvoice(context) {
     assert.match(invoiceHtml, /Итого после скидки/i);
 }
 
+async function smokeRemovedPrintingDoesNotLeakIntoInvoiceOrSummary(context) {
+    const summary = clone(await vm.runInContext(`(() => {
+        Calculator.resetForm();
+        Calculator.items = [Calculator.getEmptyItem(1)];
+        Calculator.items[0].product_name = 'Ласты для плавания';
+        Calculator.items[0].quantity = 200;
+        Calculator.items[0].sell_price_item = 630;
+        Calculator.items[0].sell_price_printing = 150;
+        Calculator.items[0].printings = [{ name: '', qty: 0, price: 0, sell_price: 0, delivery_total: 0 }];
+        Calculator.items[0].result = {
+            costTotal: 400,
+            costPrinting: 0,
+            costPrintingDetails: [],
+        };
+        Calculator.hardwareItems = [];
+        Calculator.packagingItems = [];
+        Calculator.extraCosts = [];
+        Calculator.pendants = [];
+        Calculator.renderOrderInvoice(App.params, '', document.getElementById('calc-pricing-content'));
+        return calculateOrderSummary(Calculator.items, [], [], [], App.params, [], { mode: 'none', value: 0 });
+    })()`, context));
+
+    const invoiceHtml = String(vm.runInContext(`document.getElementById('calc-pricing-content').innerHTML`, context));
+    assert.doesNotMatch(invoiceHtml, /Нанесение/i);
+    assert.equal(summary.grossRevenue, 126000);
+    assert.equal(summary.totalRevenue, 126000);
+}
+
 async function smokeGenerateKPPassesDiscount(context) {
     await vm.runInContext(`(async () => {
         globalThis.__kpArgs = null;
@@ -6671,6 +6699,7 @@ async function main() {
     await smokeBlankPricingSeparatesCatalogPriceAndNetMargin(context);
     await smokeOrderDiscountAffectsSummaryAndFinDirector(context);
     await smokeDiscountShownInCustomerInvoice(context);
+    await smokeRemovedPrintingDoesNotLeakIntoInvoiceOrSummary(context);
     await smokeGenerateKPPassesDiscount(context);
     await smokeFinDirectorPendantsUseAllAttachments(context);
     await smokeFinDirectorSeparatesHardwareAndNfc(context);

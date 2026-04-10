@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v250';
+const APP_VERSION = 'v251';
 
 const App = {
     currentPage: 'orders',
@@ -1594,6 +1594,7 @@ const Calculator = {
 
     removePrinting(itemIdx, printIdx) {
         this.items[itemIdx].printings.splice(printIdx, 1);
+        this.items[itemIdx].sell_price_printing = getPrintingSellPricePerUnit(this.items[itemIdx]);
         this.rerenderPrintings(itemIdx);
         this.recalculate();
         this.scheduleAutosave();
@@ -1612,8 +1613,9 @@ const Calculator = {
             this.items[itemIdx].printings[printIdx].name = value;
         } else {
             this.items[itemIdx].printings[printIdx][field] = parseFloat(value) || 0;
-            this.recalculate();
         }
+        this.items[itemIdx].sell_price_printing = getPrintingSellPricePerUnit(this.items[itemIdx]);
+        this.recalculate();
         this.scheduleAutosave();
     },
 
@@ -3848,7 +3850,7 @@ const Calculator = {
 
             // Printing columns — one per printing
             const printingDetails = item.result.costPrintingDetails || [];
-            (item.printings || []).forEach((pr, pi) => {
+            getActivePrintings(item).forEach((pr, pi) => {
                 const prCost = printingDetails[pi] || 0;
                 if (prCost > 0) {
                     const prName = pr.name || ('Нанесение ' + (pi + 1));
@@ -4065,7 +4067,8 @@ const Calculator = {
             }
             // Each printing as separate invoice row
             const multiItems = this.items.filter(it => it.result && it.quantity).length > 1;
-            (item.printings || []).forEach((pr, pi) => {
+            const activePrintings = getActivePrintings(item);
+            activePrintings.forEach((pr, pi) => {
                 if (pr.sell_price > 0) {
                     const prName = pr.name || ('Нанесение ' + (pi + 1));
                     const suffix = multiItems ? ' — ' + (item.product_name || (i + 1)) : '';
@@ -4079,7 +4082,7 @@ const Calculator = {
                 }
             });
             // Backwards compat: if no per-printing sell_price but aggregate exists
-            if (!(item.printings || []).some(pr => pr.sell_price > 0) && item.sell_price_printing > 0) {
+            if (activePrintings.length === 0 && hasLegacyPrintingFallback(item) && item.sell_price_printing > 0) {
                 invoiceRows.push({
                     name: 'Нанесение' + (multiItems ? ' — ' + (item.product_name || (i + 1)) : ''),
                     qty: qty,
@@ -4289,9 +4292,7 @@ const Calculator = {
                 this.items[globalIdx].printings[printingIdx].sell_price = price;
             }
             // Also keep backwards-compat aggregate
-            let totalPrintSell = 0;
-            (this.items[globalIdx].printings || []).forEach(pr => totalPrintSell += (pr.sell_price || 0));
-            this.items[globalIdx].sell_price_printing = totalPrintSell;
+            this.items[globalIdx].sell_price_printing = getPrintingSellPricePerUnit(this.items[globalIdx]);
         } else if (type === 'hw') {
             this.hardwareItems[globalIdx].sell_price = price;
         } else if (type === 'pkg') {
@@ -4952,7 +4953,7 @@ const Calculator = {
             if (!Array.isArray(item.printings)) item.printings = [];
             // Migrate old single-printing to new format
             if (item.printings.length === 0 && dbItem.printing_qty > 0) {
-                item.printings = [{ name: '', qty: dbItem.printing_qty, price: dbItem.printing_price_per_unit || 0 }];
+                item.printings = [{ name: 'Нанесение', qty: dbItem.printing_qty, price: dbItem.printing_price_per_unit || 0 }];
             }
             // Parse colors from JSON
             if (typeof item.colors === 'string') {
@@ -5378,16 +5379,14 @@ const Calculator = {
 
             // Auto-fill per-printing sell prices if not set
             const printingDetails = item.result.costPrintingDetails || [];
-            (item.printings || []).forEach((pr, pi) => {
+            getActivePrintings(item).forEach((pr, pi) => {
                 const prCost = printingDetails[pi] || 0;
                 if (prCost > 0 && (!pr.sell_price || pr.sell_price <= 0)) {
                     pr.sell_price = roundTo5(calcTarget(prCost, 0.40));
                 }
             });
             // Keep aggregate for backwards compat
-            let totalPrintSell = 0;
-            (item.printings || []).forEach(pr => totalPrintSell += (pr.sell_price || 0));
-            if (totalPrintSell > 0) item.sell_price_printing = totalPrintSell;
+            item.sell_price_printing = getPrintingSellPricePerUnit(item);
         });
 
         // Auto-fill hardware sell prices (only order-level; per-item included in item price)
@@ -5425,7 +5424,8 @@ const Calculator = {
                 });
             }
             // Printing (separate line per printing)
-            (item.printings || []).forEach((pr, pi) => {
+            const activePrintings = getActivePrintings(item);
+            activePrintings.forEach((pr, pi) => {
                 if (pr.sell_price > 0) {
                     kpItems.push({
                         type: 'printing',
@@ -5436,7 +5436,7 @@ const Calculator = {
                 }
             });
             // Backwards compat: if no per-printing sell_price
-            if (!(item.printings || []).some(pr => pr.sell_price > 0) && item.sell_price_printing > 0) {
+            if (activePrintings.length === 0 && hasLegacyPrintingFallback(item) && item.sell_price_printing > 0) {
                 kpItems.push({
                     type: 'printing',
                     name: 'Нанесение',
