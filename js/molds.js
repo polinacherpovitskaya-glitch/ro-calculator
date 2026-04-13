@@ -5,10 +5,10 @@
 
 // Pricing formula for blanks page:
 // 1. Себестоимость рассчитывается как для любых изделий (молд / 4500)
-// 2. Из цены после оплаты остаётся 82.5%:
+// 2. Из цены после оплаты остаётся 81.5%:
 //    5% НДС + 6% УСН + 1% благотворительность + 6.5% коммерческий отдел
 // 3. Целевая чистая маржа зависит от тиража
-// 4. Цена = себест / (0.825 - target_net_margin), округление до 5₽
+// 4. Цена = себест / (0.815 - target_net_margin), округление до 5₽
 
 // Молд НЕ делим на тираж заказа — делим на макс. производительность молда
 // Макс. производительность = 5000 шт * 0.9 = 4500 шт
@@ -389,7 +389,7 @@ const Molds = {
                 const sellColor = t?.isCustom ? 'var(--orange)' : 'var(--green)';
                 const marginPct = t ? Math.round(t.margin * 100) : 0;
                 tierCells += `<td style="text-align:right;padding:6px 4px;font-size:10px;color:var(--text-muted);border-left:1px solid var(--border);">${t ? Math.round(t.cost) : '—'}</td>`;
-                tierCells += `<td style="text-align:right;padding:6px 6px;font-size:13px;font-weight:700;color:${sellColor};" title="Маржа ${marginPct}%">${t ? Math.round(t.sellPrice) : '—'}</td>`;
+                tierCells += `<td style="text-align:right;padding:6px 6px;font-size:13px;font-weight:700;color:${sellColor};" title="Чистая маржа ${marginPct}% после НДС 5%, УСН 6%, 1% благотворительности и 6.5% коммерческого отдела">${t ? Math.round(t.sellPrice) : '—'}</td>`;
             });
 
             html += `
@@ -428,6 +428,7 @@ const Molds = {
         html += `
             <div style="padding:10px 12px;font-size:10px;color:var(--text-muted);display:flex;gap:12px;flex-wrap:wrap;border-top:1px solid var(--border);">
                 <span><span style="color:var(--text-secondary);">себест</span> — себестоимость · <span style="color:var(--green);font-weight:700;">цена</span> — расчётная цена продажи</span>
+                <span>Проценты под ценой — чистая маржа после НДС 5% + УСН 6% + 1% благотворительности + 6.5% коммерческого отдела</span>
                 <span>Нажмите на строку для быстрых настроек</span>
             </div>
         </div>`;
@@ -475,7 +476,7 @@ const Molds = {
                 <div style="font-size:10px;color:var(--text-muted);margin-bottom:2px;">${label} шт</div>
                 <div style="font-size:10px;color:var(--text-secondary);">${t ? Math.round(t.cost) + '₽' : '—'}</div>
                 <div style="font-size:14px;font-weight:700;color:${sellColor};">${t ? Math.round(t.sellPrice) + '₽' : '—'}</div>
-                <div style="font-size:9px;color:var(--text-muted);">${marginPct}%</div>
+                <div style="font-size:9px;color:var(--text-muted);" title="Чистая маржа после НДС 5%, УСН 6%, 1% благотворительности и 6.5% коммерческого отдела">${marginPct}%</div>
             </div>`;
         }).join('');
 
