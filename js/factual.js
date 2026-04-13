@@ -63,6 +63,25 @@ const Factual = {
         'indirect_production', 'hardware_total', 'nfc_total', 'packaging_total',
         'design_printing', 'plastic', 'molds', 'delivery_client', 'taxes', 'commercial', 'charity', 'other',
     ]),
+    AUTO_FACT_FIELDS: [
+        'fact_salary_production',
+        'fact_salary_trim',
+        'fact_salary_assembly',
+        'fact_salary_packaging',
+        'fact_indirect_production',
+        'fact_hardware_total',
+        'fact_nfc_total',
+        'fact_packaging_total',
+        'fact_design_printing',
+        'fact_plastic',
+        'fact_molds',
+        'fact_delivery_client',
+        'fact_taxes',
+        'fact_commercial',
+        'fact_charity',
+        'fact_other',
+        'fact_revenue',
+    ],
     MATERIAL_ROW_KEYS: new Set(['hardware_total', 'nfc_total', 'packaging_total']),
     MONEY_ONLY_ROW_KEYS: new Set(['design_printing', 'delivery_client', 'taxes', 'commercial', 'charity', 'other']),
 
@@ -242,6 +261,10 @@ const Factual = {
         const raw = factData && factData._fintablo_breakdown;
         return (raw && typeof raw === 'object') ? raw : {};
     },
+    _getStaleFinTabloSummary(factData) {
+        const raw = factData && factData._stale_fintablo;
+        return (raw && typeof raw === 'object') ? raw : null;
+    },
     _getConfirmedMaterialFacts(factData) {
         const raw = factData && factData._confirmed_material_facts;
         return (raw && typeof raw === 'object') ? raw : {};
@@ -267,6 +290,14 @@ const Factual = {
     _setFinTabloBreakdowns(factData, breakdown) {
         if (!factData) return;
         factData._fintablo_breakdown = (breakdown && typeof breakdown === 'object') ? breakdown : {};
+    },
+    _setStaleFinTabloSummary(factData, summary) {
+        if (!factData) return;
+        if (summary && typeof summary === 'object' && this._num(summary.total) > 0) {
+            factData._stale_fintablo = summary;
+        } else {
+            delete factData._stale_fintablo;
+        }
     },
     _setSourceHint(factData, key, hint) {
         if (!factData || !key || !hint) return;
@@ -494,6 +525,70 @@ const Factual = {
             + this._num(row?.fact_commercial)
             + this._num(row?.fact_charity);
         return classifiedTotal <= 0.01;
+    },
+
+    _partitionFinTabloImports(imports = []) {
+        const healthy = [];
+        const stale = [];
+        (Array.isArray(imports) ? imports : []).forEach(row => {
+            if (this._isStaleSplitFinTabloImport(row)) stale.push(row);
+            else healthy.push(row);
+        });
+        return { healthy, stale };
+    },
+
+    _summarizeStaleFinTabloImports(rows = []) {
+        const list = Array.isArray(rows) ? rows : [];
+        const total = round2(list.reduce((sum, row) => {
+            const rowTotal = this._num(row?.fact_materials)
+                + this._num(row?.fact_hardware)
+                + this._num(row?.fact_packaging)
+                + this._num(row?.fact_delivery)
+                + this._num(row?.fact_printing)
+                + this._num(row?.fact_molds)
+                + this._num(row?.fact_taxes)
+                + this._num(row?.fact_commercial)
+                + this._num(row?.fact_charity)
+                + this._num(row?.fact_other);
+            return sum + rowTotal;
+        }, 0));
+        if (total <= 0) return null;
+        return {
+            count: list.length,
+            total,
+            latestUpdatedAt: list
+                .map(row => row?.updated_at || row?.import_date || row?.created_at || '')
+                .filter(Boolean)
+                .sort()
+                .slice(-1)[0] || '',
+        };
+    },
+
+    _resetDerivedMoneyFacts(factData) {
+        if (!factData) return;
+        this.AUTO_FACT_FIELDS.forEach(field => {
+            if (!this._isManualOverride(factData, field)) factData[field] = 0;
+        });
+        const hints = { ...this._getSourceHints(factData) };
+        [
+            'fact_hardware_total',
+            'fact_nfc_total',
+            'fact_packaging_total',
+            'fact_design_printing',
+            'fact_plastic',
+            'fact_molds',
+            'fact_delivery_client',
+            'fact_taxes',
+            'fact_commercial',
+            'fact_charity',
+            'fact_other',
+            'fact_revenue',
+        ].forEach(key => delete hints[key]);
+        factData._source_hints = hints;
+        factData._auto_fintablo = {};
+        this._setFinTabloBreakdowns(factData, {});
+        factData._material_fact_breakdown = {};
+        this._setStaleFinTabloSummary(factData, null);
     },
 
     setCustomRange() {
@@ -933,6 +1028,7 @@ _renderCompactResult(result, options = {}) {
             return labels.length ? labels : this._buildMaterialPlanLabels(planMeta?.[rowKey] || {});
         }
         const hint = this._getRowSourceHint(factData, factKey, '');
+        if (hint.includes('переимпорт')) return ['нужен переимпорт'];
         if (hint.includes('ФинТабло')) return ['ФинТабло'];
         if (hint.includes('вручную')) return ['вручную'];
         if (hint.includes('табель') || hint.includes('legacy')) return ['табель'];
@@ -964,6 +1060,13 @@ _renderCompactResult(result, options = {}) {
             if (this._num(breakdown.confirmedManual) > 0) lines.push(`подтверждено вручную — ${this.fmtRub(breakdown.confirmedManual)}`);
             if (!this._num(breakdown.confirmedManual) && this._num(breakdown.manualPlan) > 0) lines.push(`ожидает подтверждения — ${this.fmtRub(breakdown.manualPlan)}`);
             return lines.join('<br>');
+        }
+        if (rowKey === 'other') {
+            const stale = this._getStaleFinTabloSummary(factData);
+            if (stale && this._num(stale.total) > 0) {
+                const dateLabel = stale.latestUpdatedAt ? this._formatDateLabel(new Date(stale.latestUpdatedAt)) : '';
+                return `старый split-импорт ФинТабло без расшифровки исключён из факта денег — ${this.fmtRub(stale.total)}${dateLabel ? ` · последнее обновление ${dateLabel}` : ''}<br>нужен новый переимпорт из ФинТабло`;
+            }
         }
         if (rowKey === 'taxes') {
             const factRevenue = this._num(factData.fact_revenue);
@@ -1776,6 +1879,8 @@ async _loadFactSummaries() {
             packaging: this._sumStageSalary(orderId, 'packaging', params, planHours, orderName),
         };
 
+        this._resetDerivedMoneyFacts(factData);
+
         // 1. Salaries from time entries (per-stage)
         this._applyAutoFactValue(factData, 'fact_salary_production', stageSalary.casting);
         this._applyAutoFactValue(factData, 'fact_salary_trim', stageSalary.trim);
@@ -1786,9 +1891,9 @@ async _loadFactSummaries() {
         this._applyAutoFactValue(factData, 'fact_indirect_production', totalHours * (params?.indirectPerHour || 0));
 
         // 3. FinTablo imports — pull all available fact fields
-        factData._auto_fintablo = {};
-        this._setFinTabloBreakdowns(factData, {});
-        const imports = (await loadFintabloImports(orderId)) || [];
+        const rawImports = (await loadFintabloImports(orderId)) || [];
+        const { healthy: imports, stale: staleImports } = this._partitionFinTabloImports(rawImports);
+        this._setStaleFinTabloSummary(factData, this._summarizeStaleFinTabloImports(staleImports));
         if (imports.length > 0) {
             const importTotals = imports.reduce((acc, row) => {
                 acc.fact_materials += this._num(row?.fact_materials);
@@ -2213,6 +2318,13 @@ async _loadFactSummaries() {
             ${fact._legacy_stage_scope === 'production_only'
                 ? 'Legacy-часы без этапа распределены только в выливание/срезание по плановым стадиям заказа. Сборка и упаковка считаются только по явно указанным этапам.'
                 : 'Legacy-часы без этапа распределены по плановым стадиям заказа, чтобы выливание/срезание/сборка отражали реальную загрузку до ручной детализации.'}
+        </div>`;
+    }
+    const staleFinTablo = this._getStaleFinTabloSummary(fact);
+    if (staleFinTablo && this._num(staleFinTablo.total) > 0) {
+        const staleDateLabel = staleFinTablo.latestUpdatedAt ? this._formatDateLabel(new Date(staleFinTablo.latestUpdatedAt)) : '';
+        html += `<div style="margin:-2px 0 10px;padding:8px 10px;border:1px solid #f59e0b;border-radius:10px;background:#fff7ed;font-size:11px;color:#92400e">
+            Найден старый split-импорт ФинТабло без расшифровки. Он исключён из факта денег, чтобы не засорять “Прочее”: ${this.fmtRub(staleFinTablo.total)}${staleDateLabel ? ` · последнее обновление ${staleDateLabel}` : ''}. Нужен свежий переимпорт ФинТабло.
         </div>`;
     }
     if (hasPlanDrift) {

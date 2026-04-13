@@ -1139,6 +1139,68 @@ async function smokeMonthlySnapshotFreezesPastMonth(context) {
     assert.equal(snapshotRecord.factData.fact_revenue, 900, 'snapshot should keep original fact revenue even if live order changes later');
 }
 
+async function smokeStaleSplitImportDoesNotLeakIntoFactMoney(context) {
+    context.__imports = [
+        {
+            source: 'api',
+            fact_materials: 0,
+            fact_hardware: 0,
+            fact_packaging: 0,
+            fact_delivery: 0,
+            fact_printing: 0,
+            fact_molds: 0,
+            fact_taxes: 0,
+            fact_commercial: 0,
+            fact_charity: 0,
+            fact_other: 142215,
+            updated_at: '2026-04-09T17:19:13.959Z',
+            raw_data: { splitApplied: true },
+        },
+    ];
+
+    await vm.runInContext(`(async () => {
+        App.params = { taxRate: 0.06, vatRate: 0.05, charityRate: 0.01, indirectPerHour: 0 };
+        const factData = {
+            fact_revenue: 710500,
+            fact_hardware_total: 114394,
+            fact_other: 49620,
+            _auto_fintablo: { fact_revenue: true, fact_hardware_total: true, fact_other: true },
+            _source_hints: { fact_other: 'ФинТабло' },
+        };
+        await Factual._applyDerivedFacts(
+            factData,
+            { plastic: 11550, molds: 6384 },
+            {},
+            App.params,
+            77,
+            'Сплат картхолдеры',
+            { id: 77, order_name: 'Сплат картхолдеры', status: 'production_casting' },
+            [],
+            {}
+        );
+        Factual._renderDetail(
+            77,
+            document.getElementById('fact-detail-stale'),
+            { revenue: 666400, totalCosts: 665283, plastic: 11550, molds: 6384 },
+            {},
+            factData,
+            { id: 77, order_name: 'Сплат картхолдеры', status: 'production_casting' }
+        );
+        globalThis.__staleFactData = JSON.parse(JSON.stringify(factData));
+    })()`, context);
+
+    const fact = context.__staleFactData;
+    assert.equal(fact.fact_other, 0, 'stale split import should not leak into fact_other');
+    assert.equal(fact.fact_revenue, 0, 'stale split import should not keep old auto revenue alive');
+    assert.equal(fact.fact_hardware_total, 0, 'stale split import should not keep old auto hardware alive');
+    assert.equal(fact.fact_plastic, 11550, 'plan fallback should still restore plastic norm');
+    assert.equal(fact.fact_molds, 6384, 'plan fallback should still restore mold norm');
+    assert.equal(fact._stale_fintablo.total, 142215, 'stale split import summary should be kept for the UI warning');
+    const html = context.document.getElementById('fact-detail-stale').innerHTML;
+    assert.ok(html.includes('старый split-импорт ФинТабло'), 'detail should warn when a stale split import was ignored');
+    context.__imports = [];
+}
+
 async function main() {
     const context = createContext();
     runScript(context, 'js/factual.js');
@@ -1164,6 +1226,7 @@ async function main() {
     smokePeriodFilterUsesDeadlineAndFactLoad(context);
     await smokeConfirmMaterialFactStoresManualConfirmation(context);
     await smokeMonthlySnapshotFreezesPastMonth(context);
+    await smokeStaleSplitImportDoesNotLeakIntoFactMoney(context);
     console.log('factual smoke checks passed');
 }
 
