@@ -324,8 +324,10 @@ async function main() {
             hw_price_per_unit: 0,
             hw_delivery_total: 0,
             hw_speed: null,
+            use_manual_prices: true,
             custom_prices: { 50: 500 },
             custom_margins: {},
+            disable_historical_blank_price_recovery: false,
             total_orders: 0,
             total_units_produced: 0
         }];
@@ -346,9 +348,10 @@ async function main() {
     assert.equal(context.__savedInlineMold.hw_price_per_unit, 39);
     assert.equal(context.__savedInlineMold.hw_warehouse_item_id, 77);
     assert.equal(context.__savedInlineMold.hw_warehouse_sku, 'NFC');
-    assert.equal(context.__savedInlineMold.use_manual_prices, false);
-    assert.deepEqual(context.__savedInlineMold.custom_prices, {});
+    assert.equal(context.__savedInlineMold.use_manual_prices, true);
+    assert.deepEqual(context.__savedInlineMold.custom_prices, { 50: 500 });
     assert.deepEqual(context.__savedInlineMold.custom_margins, {});
+    assert.equal(context.__savedInlineMold.disable_historical_blank_price_recovery, false);
     assert.equal(context.__reloadedInlineMolds, true);
     const inlineHtml = String(vm.runInContext(`Molds._renderInlineControls(Molds.allMolds[0])`, context));
     assert.doesNotMatch(inlineHtml, /Кол-во частей/);

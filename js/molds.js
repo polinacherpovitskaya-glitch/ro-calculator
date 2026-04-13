@@ -88,6 +88,22 @@ const Molds = {
     allMolds: [],
     editingId: null,
 
+    _speedPerMinute(speedPerHour) {
+        const perHour = Number(speedPerHour || 0);
+        return perHour > 0 ? round2(perHour / 60) : 0;
+    },
+
+    _speedPerHour(speedPerMinute) {
+        const perMinute = Number(speedPerMinute || 0);
+        return perMinute > 0 ? round2(perMinute * 60) : null;
+    },
+
+    _formatSpeedPerMinute(speedPerHour) {
+        const perMinute = this._speedPerMinute(speedPerHour);
+        if (!(perMinute > 0)) return '';
+        return Number.isInteger(perMinute) ? String(perMinute) : String(perMinute);
+    },
+
     async load() {
         try {
             this.allMolds = await loadMolds();
@@ -404,7 +420,7 @@ const Molds = {
                                     ${collectionBadge} ${nfcBadge} ${priceBadge}
                                 </div>
                                 ${m.hw_name ? `<div style="font-size:10px;color:var(--text-muted);">+ ${this.esc(m.hw_name)}</div>` : ''}
-                                ${Number(m.builtin_assembly_speed || 0) > 0 ? `<div style="font-size:10px;color:var(--orange);">🛠 ${this.esc(m.builtin_assembly_name || 'Сборка')} · ${Math.round(m.builtin_assembly_speed)} шт/ч</div>` : ''}
+                                ${Number(m.builtin_assembly_speed || 0) > 0 ? `<div style="font-size:10px;color:var(--orange);">🛠 ${this.esc(m.builtin_assembly_name || 'Сборка')} · ${this._formatSpeedPerMinute(m.builtin_assembly_speed)} шт/мин</div>` : ''}
                             </div>
                         </div>
                     </td>
@@ -566,10 +582,11 @@ const Molds = {
             })(),
             complexity,
             mold_count: Math.max(1, Number.parseInt(mold.mold_count, 10) || 1),
-            use_manual_prices: false,
-            custom_prices: {},
-            custom_margins: {},
-            disable_historical_blank_price_recovery: true,
+            // Inline save changes only tech params and must not silently reset pricing strategy.
+            use_manual_prices: !!mold.use_manual_prices,
+            custom_prices: { ...(mold.custom_prices || {}) },
+            custom_margins: { ...(mold.custom_margins || {}) },
+            disable_historical_blank_price_recovery: !!mold.disable_historical_blank_price_recovery,
         };
 
         if (wantsNfc) {
@@ -677,9 +694,9 @@ const Molds = {
         document.getElementById('mold-hw-name').value = m.hw_name || '';
         document.getElementById('mold-hw-price').value = m.hw_price_per_unit || '';
         document.getElementById('mold-hw-delivery-total').value = m.hw_delivery_total || '';
-        document.getElementById('mold-hw-speed').value = m.hw_speed || '';
+        document.getElementById('mold-hw-speed').value = this._speedPerMinute(m.hw_speed) || '';
         document.getElementById('mold-assembly-name').value = m.builtin_assembly_name || '';
-        document.getElementById('mold-assembly-speed').value = m.builtin_assembly_speed || '';
+        document.getElementById('mold-assembly-speed').value = this._speedPerMinute(m.builtin_assembly_speed) || '';
         document.getElementById('mold-notes').value = m.notes || '';
 
         // Custom prices per tier
@@ -830,11 +847,11 @@ const Molds = {
             hw_name: document.getElementById('mold-hw-name').value.trim(),
             hw_price_per_unit: parseFloat(document.getElementById('mold-hw-price').value) || 0,
             hw_delivery_total: parseFloat(document.getElementById('mold-hw-delivery-total').value) || 0,
-            hw_speed: parseFloat(document.getElementById('mold-hw-speed').value) || null,
+            hw_speed: this._speedPerHour(document.getElementById('mold-hw-speed').value),
             hw_warehouse_item_id: this._hwWarehouseItemId || null,
             hw_warehouse_sku: this._hwWarehouseSku || '',
             builtin_assembly_name: document.getElementById('mold-assembly-name').value.trim(),
-            builtin_assembly_speed: parseFloat(document.getElementById('mold-assembly-speed').value) || null,
+            builtin_assembly_speed: this._speedPerHour(document.getElementById('mold-assembly-speed').value),
             notes: document.getElementById('mold-notes').value.trim(),
             total_orders: 0,
             total_units_produced: 0,
