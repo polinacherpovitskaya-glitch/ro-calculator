@@ -1273,6 +1273,8 @@ const Pendant = {
             packaging_qty: 0,
             printing_qty: 0,
             delivery_included: false,
+            builtin_assembly_name: tpl.builtin_assembly_name || '',
+            builtin_assembly_speed: Number(tpl.builtin_assembly_speed || 0),
         };
         let cost = 0;
         if (typeof calculateItemCost === 'function') {
@@ -1291,6 +1293,15 @@ const Pendant = {
                 }
             }
             cost += hwCost;
+        }
+
+        if (Number(tpl.builtin_assembly_speed || 0) > 0) {
+            const assemblyHours = baseQtyForCost / Number(tpl.builtin_assembly_speed || 0) * (params.wasteFactor || 1.1);
+            let assemblyCost = assemblyHours * params.fotPerHour / baseQtyForCost;
+            if (params.indirectCostMode === 'all') {
+                assemblyCost += params.indirectPerHour * assemblyHours / baseQtyForCost;
+            }
+            cost += assemblyCost;
         }
         cost = round2(cost);
 

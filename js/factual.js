@@ -898,9 +898,11 @@ async _loadFactSummaries() {
     _buildPlan(order, rawItems, params) {
         const planItems = this._dedupePlanItems(rawItems || []);
         let planHoursPlastic = 0, planHoursTrim = 0, planHoursAssembly = 0, planHoursPackaging = 0;
+        let planHoursAssemblyProducts = 0, planHoursAssemblyExternal = 0;
         let hardwarePurchase = 0, hardwareDelivery = 0, nfcTotal = 0, packagingPurchase = 0, packagingDelivery = 0;
         let designPrinting = 0, plastic = 0, molds = 0, delivery = 0;
         let savedIndirect = 0;
+        let hasProductAssemblySnapshot = false;
         let hasSavedSnapshot = false;
         let usedDuplicateCollapse = planItems.length !== (rawItems || []).length;
 
@@ -909,9 +911,13 @@ async _loadFactSummaries() {
             if (qty <= 0) return;
 
             if (ri.item_type === 'product') {
+                const liveTemplate = ri.template_id && Array.isArray(App?.templates)
+                    ? App.templates.find(template => String(template.id) === String(ri.template_id))
+                    : null;
                 const snapshotHoursPlastic = this._num(ri.hours_plastic) || this._num(ri.result?.hoursPlastic);
                 const snapshotHoursTrim = this._num(ri.hours_cutting) || this._num(ri.result?.hoursCutting);
-                const calcFallback = (!snapshotHoursPlastic && !snapshotHoursTrim)
+                const snapshotHoursAssembly = this._planItemHours(ri, 'hours_assembly');
+                const calcFallback = ((!snapshotHoursPlastic && !snapshotHoursTrim) || !(snapshotHoursAssembly > 0))
                     ? calculateItemCost({
                         quantity: ri.quantity,
                         pieces_per_hour: ri.pieces_per_hour,
@@ -928,27 +934,39 @@ async _loadFactSummaries() {
                         sell_price_printing: ri.sell_price_printing || 0,
                         product_name: ri.product_name,
                         template_id: ri.template_id || null,
-                        builtin_hw_name: ri.builtin_hw_name || '',
-                        builtin_hw_price: ri.builtin_hw_price || 0,
-                        builtin_hw_delivery_total: ri.builtin_hw_delivery_total || 0,
-                        builtin_hw_speed: ri.builtin_hw_speed || 0,
+                        builtin_hw_name: ri.builtin_hw_name || liveTemplate?.hw_name || '',
+                        builtin_hw_price: ri.builtin_hw_price || liveTemplate?.hw_price_per_unit || 0,
+                        builtin_hw_delivery_total: ri.builtin_hw_delivery_total || liveTemplate?.hw_delivery_total || 0,
+                        builtin_hw_speed: ri.builtin_hw_speed || liveTemplate?.hw_speed || 0,
+                        builtin_assembly_name: ri.builtin_assembly_name || liveTemplate?.builtin_assembly_name || '',
+                        builtin_assembly_speed: ri.builtin_assembly_speed || liveTemplate?.builtin_assembly_speed || 0,
                     }, params)
                     : null;
                 planHoursPlastic += snapshotHoursPlastic > 0 ? snapshotHoursPlastic : this._num(calcFallback?.hoursPlastic);
                 planHoursTrim += snapshotHoursTrim > 0 ? snapshotHoursTrim : this._num(calcFallback?.hoursCutting);
+                const resolvedProductAssemblyHours = snapshotHoursAssembly > 0
+                    ? snapshotHoursAssembly
+                    : this._num(calcFallback?.hoursAssemblyZone);
+                planHoursAssembly += resolvedProductAssemblyHours;
+                planHoursAssemblyProducts += resolvedProductAssemblyHours;
 
                 const productFot = this._planItemCost(ri, 'cost_fot');
                 const productCutting = this._planItemCost(ri, 'cost_cutting');
                 const productIndirect = this._planItemCost(ri, 'cost_indirect');
                 const cuttingIndirect = this._planItemCost(ri, 'cost_cutting_indirect');
+                const productAssembly = this._planItemCost(ri, 'cost_builtin_assembly');
+                const productAssemblyIndirect = this._planItemCost(ri, 'cost_builtin_assembly_indirect');
                 const productPlastic = this._planItemCost(ri, 'cost_plastic');
                 const productMold = this._planItemCost(ri, 'cost_mold_amortization');
                 const productDesign = this._planItemCost(ri, 'cost_design');
                 const productPrinting = this._planItemCost(ri, 'cost_printing');
                 const productDelivery = this._planItemCost(ri, 'cost_delivery');
                 const productNfc = this._planItemCost(ri, 'cost_nfc_tag');
-                if (productFot || productCutting || productIndirect || cuttingIndirect || productPlastic || productMold || productDesign || productPrinting || productDelivery || productNfc) {
+                if (productFot || productCutting || productIndirect || cuttingIndirect || productAssembly || productAssemblyIndirect || productPlastic || productMold || productDesign || productPrinting || productDelivery || productNfc) {
                     hasSavedSnapshot = true;
+                }
+                if (productAssembly || productAssemblyIndirect || snapshotHoursAssembly > 0) {
+                    hasProductAssemblySnapshot = true;
                 }
 
                 plastic += qty * productPlastic;
@@ -956,10 +974,11 @@ async _loadFactSummaries() {
                 designPrinting += qty * (productDesign + productPrinting);
                 delivery += qty * productDelivery;
                 nfcTotal += qty * productNfc;
-                savedIndirect += qty * (productIndirect + cuttingIndirect);
+                savedIndirect += qty * (productIndirect + cuttingIndirect + productAssemblyIndirect);
             } else if (ri.item_type === 'hardware') {
                 const savedHardwareHours = this._num(ri.hours_hardware) || this._num(ri.result?.hoursHardware);
                 planHoursAssembly += savedHardwareHours;
+                planHoursAssemblyExternal += savedHardwareHours;
                 hardwarePurchase += qty * this._planItemCost(ri, 'hardware_price_per_unit');
                 hardwareDelivery += qty * this._planItemCost(ri, 'hardware_delivery_per_unit');
                 if (savedHardwareHours > 0 || this._planItemCost(ri, 'hardware_price_per_unit', 'hardware_delivery_per_unit') > 0) {
@@ -989,11 +1008,23 @@ async _loadFactSummaries() {
         const salaryTrim = round2(hasSavedSnapshot
             ? planItems.reduce((sum, ri) => ri.item_type === 'product' ? sum + (this._num(ri.quantity) * this._planItemCost(ri, 'cost_cutting')) : sum, 0)
             : (planHoursTrim * (params.fotPerHour || 0)));
-        const salaryAssembly = round2(planHoursAssembly * (params.fotPerHour || 0));
+        const externalAssemblyHoursForSalary = Math.max(0, planHoursAssembly - planHoursAssemblyProducts);
+        const salaryAssembly = round2(hasSavedSnapshot
+            ? (hasProductAssemblySnapshot
+                ? (
+                    planItems.reduce((sum, ri) => ri.item_type === 'product'
+                        ? sum + (this._num(ri.quantity) * this._planItemCost(ri, 'cost_builtin_assembly'))
+                        : sum, 0)
+                    + (externalAssemblyHoursForSalary * (params.fotPerHour || 0))
+                )
+                : (planHoursAssembly * (params.fotPerHour || 0)))
+            : (planHoursAssembly * (params.fotPerHour || 0)));
         const salaryPackaging = round2(planHoursPackaging * (params.fotPerHour || 0));
 
         const plannedHoursTotal = planHoursPlastic + planHoursTrim + planHoursAssembly + planHoursPackaging;
-        const prodIndirect = round2(hasSavedSnapshot ? savedIndirect : (plannedHoursTotal * (params.indirectPerHour || 0)));
+        const prodIndirect = round2(hasSavedSnapshot
+            ? (savedIndirect + ((planHoursAssemblyExternal + planHoursPackaging) * (params.indirectPerHour || 0)))
+            : (plannedHoursTotal * (params.indirectPerHour || 0)));
 
         const orderRevenue = this._num(order.total_revenue_plan);
         const rowsWithoutTaxes = round2(

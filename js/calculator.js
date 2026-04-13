@@ -219,6 +219,21 @@ function calculateItemCost(item, params) {
         }
     }
 
+    // === Встроенная сборка бланка (например, буквы нанизываются на шнур) ===
+    let costBuiltinAssembly = 0;
+    let costBuiltinAssemblyIndirect = 0;
+    let hoursBuiltinAssembly = 0;
+    const builtinAssemblyName = String(item.builtin_assembly_name || '').trim();
+    const builtinAssemblySpeed = Number(item.builtin_assembly_speed || 0);
+
+    if (builtinAssemblySpeed > 0 && qty > 0) {
+        hoursBuiltinAssembly = qty / builtinAssemblySpeed * p.wasteFactor;
+        costBuiltinAssembly = hoursBuiltinAssembly * p.fotPerHour / qty;
+        if (p.indirectCostMode === 'all') {
+            costBuiltinAssemblyIndirect = p.indirectPerHour * hoursBuiltinAssembly / qty;
+        }
+    }
+
     // === Доставка за наш счет ===
     const costDelivery = item.delivery_included ? p.deliveryCostMoscow / qty : 0;
 
@@ -226,7 +241,9 @@ function calculateItemCost(item, params) {
     let costTotal = costFot + costIndirect + costPlastic + costMoldAmortization
         + costDesign + costCutting + costCuttingIndirect
         + costNfcTag + costNfcProgramming + costNfcIndirect
-        + costPrinting + costDelivery + costBuiltinHw + costBuiltinHwIndirect;
+        + costPrinting + costDelivery
+        + costBuiltinHw + costBuiltinHwIndirect
+        + costBuiltinAssembly + costBuiltinAssemblyIndirect;
     // Protect against NaN/Infinity from division by zero in params
     if (!isFinite(costTotal)) {
         console.warn('costTotal is NaN/Infinity, components:', {costFot, costIndirect, costPlastic, costMoldAmortization, costDesign, costCutting, costCuttingIndirect, costNfcTag, costPrinting, costDelivery});
@@ -250,6 +267,8 @@ function calculateItemCost(item, params) {
         costDelivery: round2(costDelivery),
         costBuiltinHw: round2(costBuiltinHw),
         costBuiltinHwIndirect: round2(costBuiltinHwIndirect),
+        costBuiltinAssembly: round2(costBuiltinAssembly),
+        costBuiltinAssemblyIndirect: round2(costBuiltinAssemblyIndirect),
         costTotal: round2(costTotal),
 
         // Часы производства (на всю партию)
@@ -257,11 +276,13 @@ function calculateItemCost(item, params) {
         hoursCutting: round2(hoursCutting),
         hoursNfc: round2(hoursNfc),
         hoursBuiltinHw: round2(hoursBuiltinHw),
+        hoursBuiltinAssembly: round2(hoursBuiltinAssembly),
 
         // Часы по зонам загрузки:
-        // 70% зона (литьё) — литьё + срезка + NFC + встроенная фурнитура
-        hoursPlasticZone: round2(hoursPlastic + hoursCutting + hoursNfc + hoursBuiltinHw),
-        // 30% зона (упаковка/обработка) — только внешняя фурнитура/упаковка
+        // 70% зона (литьё) — только литьё + срезка + NFC
+        hoursPlasticZone: round2(hoursPlastic + hoursCutting + hoursNfc),
+        // 30% зона (сборка/упаковка) — встроенная сборка/фурнитура и внешняя фурнитура/упаковка
+        hoursAssemblyZone: round2(hoursBuiltinHw + hoursBuiltinAssembly),
         hoursCuttingZone: 0,
 
         // Обратная совместимость — общие часы
@@ -650,6 +671,8 @@ function getPendantLetterBlankMetrics(totalElements, params, pendant) {
         builtin_hw_price: Number(source?.hw_price_per_unit || source?.hw_price || 0),
         builtin_hw_delivery_total: Number(source?.hw_delivery_total || 0),
         builtin_hw_speed: Number(source?.hw_speed || 0),
+        builtin_assembly_name: source?.builtin_assembly_name || '',
+        builtin_assembly_speed: Number(source?.builtin_assembly_speed || 0),
     }, params);
 
     const cost = round2((result?.costTotal || 0) - (result?.costMoldAmortization || 0) + moldAmortPerUnit);
@@ -657,18 +680,20 @@ function getPendantLetterBlankMetrics(totalElements, params, pendant) {
     const builtinHwPurchasePerUnit = round2(Number(source?.hw_price_per_unit || source?.hw_price || 0));
     const builtinHwLaborPerUnit = tierQty > 0 ? round2(((result?.hoursBuiltinHw || 0) * (params?.fotPerHour || 0)) / tierQty) : 0;
     const builtinHwIndirectPerUnit = round2(Math.max(0, (result?.costBuiltinHw || 0) - builtinHwPurchasePerUnit - builtinHwDeliveryPerUnit - builtinHwLaborPerUnit));
+    const builtinAssemblyLaborPerUnit = tierQty > 0 ? round2(((result?.hoursBuiltinAssembly || 0) * (params?.fotPerHour || 0)) / tierQty) : 0;
+    const builtinAssemblyIndirectPerUnit = round2(result?.costBuiltinAssemblyIndirect || 0);
     const scaled = (value) => round2((Number(value) || 0) * totalElements);
     const hoursScale = tierQty > 0 ? (totalElements / tierQty) : 0;
 
     const breakdown = {
-        salaryPerUnit: round2((result?.costFot || 0) + (result?.costCutting || 0) + (result?.costNfcProgramming || 0) + builtinHwLaborPerUnit),
+        salaryPerUnit: round2((result?.costFot || 0) + (result?.costCutting || 0) + (result?.costNfcProgramming || 0) + builtinHwLaborPerUnit + builtinAssemblyLaborPerUnit),
         hardwarePurchasePerUnit: 0,
         hardwareDeliveryPerUnit: 0,
         nfcTotalPerUnit: 0,
         plasticPerUnit: round2(result?.costPlastic || 0),
         moldsPerUnit: round2(moldAmortPerUnit),
         printingPerUnit: round2(result?.costPrinting || 0),
-        omittedIndirectPerUnit: round2((result?.costIndirect || 0) + (result?.costCuttingIndirect || 0) + (result?.costNfcIndirect || 0) + builtinHwIndirectPerUnit),
+        omittedIndirectPerUnit: round2((result?.costIndirect || 0) + (result?.costCuttingIndirect || 0) + (result?.costNfcIndirect || 0) + builtinHwIndirectPerUnit + builtinAssemblyIndirectPerUnit),
     };
     if (isNfcLikeEntry(source?.hw_name)) {
         breakdown.nfcTotalPerUnit = round2(builtinHwPurchasePerUnit + builtinHwDeliveryPerUnit);
@@ -741,7 +766,9 @@ function getPendantLetterBlankMetrics(totalElements, params, pendant) {
         hoursPlastic: round2((result?.hoursPlastic || 0) * hoursScale),
         hoursCutting: round2((result?.hoursCutting || 0) * hoursScale),
         hoursBuiltinHw: round2((result?.hoursBuiltinHw || 0) * hoursScale),
+        hoursBuiltinAssembly: round2((result?.hoursBuiltinAssembly || 0) * hoursScale),
         hoursPlasticZone: round2((result?.hoursPlasticZone || 0) * hoursScale),
+        hoursAssemblyZone: round2((result?.hoursAssemblyZone || 0) * hoursScale),
     };
 }
 
@@ -758,7 +785,11 @@ function calculatePendantCost(pendant, params) {
             hoursPlastic: 0,
             hoursCutting: 0,
             hoursBuiltinHw: 0,
+            hoursBuiltinAssembly: 0,
             hoursPlasticZone: 0,
+            hoursAssemblyZone: 0,
+            attachmentAssemblyHours: 0,
+            letterAssemblyHours: 0,
         };
     }
 
@@ -809,7 +840,8 @@ function calculatePendantCost(pendant, params) {
             const opsPerPendant = getPendantAttachmentAssemblyOpsPerPendant(item.type, item.entry);
             return sum + ((allocatedQty * opsPerPendant / speed) * (params.wasteFactor || 1.1));
         }, 0);
-    const assemblyHours = round2(attachmentAssemblyHours);
+    const letterAssemblyHours = round2(letterMetrics?.hoursAssemblyZone || 0);
+    const assemblyHours = round2(attachmentAssemblyHours + letterAssemblyHours);
     const packagingHours = 0;
 
     return {
@@ -818,6 +850,8 @@ function calculatePendantCost(pendant, params) {
         totalCost: totalCost,
         totalRevenue: round2(sellPerUnit * qty),
         assemblyHours,
+        attachmentAssemblyHours: round2(attachmentAssemblyHours),
+        letterAssemblyHours,
         packagingHours,
         attachmentPurchaseTotal: round2(cordPurchaseTotal + carabinerPurchaseTotal),
         attachmentDeliveryTotal: round2(cordDeliveryTotal + carabinerDeliveryTotal),
@@ -826,7 +860,9 @@ function calculatePendantCost(pendant, params) {
         hoursPlastic: round2(letterMetrics?.hoursPlastic || 0),
         hoursCutting: round2(letterMetrics?.hoursCutting || 0),
         hoursBuiltinHw: round2(letterMetrics?.hoursBuiltinHw || 0),
+        hoursBuiltinAssembly: round2(letterMetrics?.hoursBuiltinAssembly || 0),
         hoursPlasticZone: round2(letterMetrics?.hoursPlasticZone || 0),
+        hoursAssemblyZone: round2(letterMetrics?.hoursAssemblyZone || 0),
         margin: calculateActualMargin(sellPerUnit, costPerUnit),
     };
 }
@@ -966,8 +1002,10 @@ function calculateProductionLoad(items, hardwareItems, packagingItems, params, p
 
     items.forEach(item => {
         if (item.result) {
-            // 70% зона — литьё + срезка лейника + NFC + встроенная фурнитура
+            // 70% зона — литьё + срезка лейника + NFC
             hoursPlasticTotal += item.result.hoursPlasticZone || 0;
+            // 30% зона — встроенная сборка/фурнитура
+            hoursHardwareTotal += item.result.hoursAssemblyZone || 0;
             // (hoursCuttingZone теперь всегда 0 — срезка в зоне литья)
         }
     });
@@ -1048,11 +1086,20 @@ function calculateFinDirectorData(items, hardwareItems, packagingItems, params, 
         const qty = item.quantity;
 
         // Зарплата = все часы * ФОТ/час
-        totalSalary += ((Number(r?.hoursTotalPlasticNfc) || 0) + (Number(r?.hoursBuiltinHw) || 0)) * safeFotPerHour;
-        totalIndirect += ((r.costIndirect || 0) + (r.costCuttingIndirect || 0) + (r.costNfcIndirect || 0) + (r.costBuiltinHwIndirect || 0)) * qty;
+        totalSalary += ((Number(r?.hoursTotalPlasticNfc) || 0) + (Number(r?.hoursBuiltinHw) || 0) + (Number(r?.hoursBuiltinAssembly) || 0)) * safeFotPerHour;
+        totalIndirect += ((r.costIndirect || 0) + (r.costCuttingIndirect || 0) + (r.costNfcIndirect || 0) + (r.costBuiltinHwIndirect || 0) + (r.costBuiltinAssemblyIndirect || 0)) * qty;
 
         // NFC метки
         if (item.is_nfc) totalNfc += qty * params.nfcTagCost;
+
+        const builtinHwPurchasePerUnit = Number(item?.builtin_hw_price || 0);
+        const builtinHwDeliveryPerUnit = qty > 0 ? round2(Number(item?.builtin_hw_delivery_total || 0) / qty) : 0;
+        if (isNfcLikeEntry(item?.builtin_hw_name)) {
+            totalNfc += qty * (builtinHwPurchasePerUnit + builtinHwDeliveryPerUnit);
+        } else {
+            totalHardwarePurchase += qty * builtinHwPurchasePerUnit;
+            totalHardwareDelivery += qty * builtinHwDeliveryPerUnit;
+        }
 
         // Проектирование
         if (item.complex_design) totalDesign += safeDesignCost;
@@ -1118,7 +1165,7 @@ function calculateFinDirectorData(items, hardwareItems, packagingItems, params, 
         const letterMetrics = getPendantLetterBlankMetrics(totalElements, params, pnd);
         const letterBreakdown = letterMetrics?.breakdown || null;
         // Assembly salary
-        totalSalary += (r.assemblyHours + r.packagingHours) * safeFotPerHour;
+        totalSalary += ((r.attachmentAssemblyHours ?? r.assemblyHours) + r.packagingHours) * safeFotPerHour;
         totalIndirect += r.attachmentIndirectTotal || 0;
         if (letterBreakdown) {
             totalSalary += letterBreakdown.salaryTotal;
@@ -1294,12 +1341,20 @@ function getOrderLiveCalculatorSnapshot(order = {}, orderItems = [], params = nu
     const packagingItems = [];
     const extraCosts = [];
     const pendantItems = [];
+    let rawProductIndex = -1;
+    const templateHardwareParentIndices = new Set(
+        (orderItems || [])
+            .filter(item => String(item?.item_type || '').trim().toLowerCase() === 'hardware' && !!item?.hardware_from_template)
+            .map(item => Number(item?.hardware_parent_item_index))
+            .filter(index => Number.isFinite(index) && index >= 0)
+    );
 
     (orderItems || []).forEach(rawItem => {
         if (!rawItem) return;
         const itemType = String(rawItem.item_type || 'product').trim().toLowerCase();
 
         if (itemType === 'product') {
+            rawProductIndex += 1;
             const item = { ...rawItem };
             item.quantity = Number(item.quantity || 0);
             item.pieces_per_hour = Number(item.pieces_per_hour || 0);
@@ -1322,10 +1377,14 @@ function getOrderLiveCalculatorSnapshot(order = {}, orderItems = [], params = nu
                 );
                 item.weight_grams = Number(tpl.weight_grams || item.weight_grams || 0);
                 item.is_blank_mold = true;
-                item.builtin_hw_name = tpl.hw_name || '';
-                item.builtin_hw_price = Number(tpl.hw_price_per_unit || 0);
-                item.builtin_hw_delivery_total = Number(tpl.hw_delivery_total || 0);
-                item.builtin_hw_speed = Number(tpl.hw_speed || 0);
+                item.builtin_assembly_name = tpl.builtin_assembly_name || '';
+                item.builtin_assembly_speed = Number(tpl.builtin_assembly_speed || 0);
+                if (!templateHardwareParentIndices.has(rawProductIndex)) {
+                    item.builtin_hw_name = tpl.hw_name || '';
+                    item.builtin_hw_price = Number(tpl.hw_price_per_unit || 0);
+                    item.builtin_hw_delivery_total = Number(tpl.hw_delivery_total || 0);
+                    item.builtin_hw_speed = Number(tpl.hw_speed || 0);
+                }
             }
 
             item.result = calculateItemCost(item, runtimeParams);
@@ -1439,9 +1498,10 @@ function getEmptyCostResult() {
         costDesign: 0, costCutting: 0, costCuttingIndirect: 0,
         costNfcTag: 0, costNfcProgramming: 0, costNfcIndirect: 0,
         costBuiltinHw: 0, costBuiltinHwIndirect: 0,
+        costBuiltinAssembly: 0, costBuiltinAssemblyIndirect: 0,
         costPrinting: 0, costDelivery: 0, costTotal: 0,
-        hoursPlastic: 0, hoursCutting: 0, hoursNfc: 0, hoursBuiltinHw: 0,
-        hoursPlasticZone: 0, hoursCuttingZone: 0,
+        hoursPlastic: 0, hoursCutting: 0, hoursNfc: 0, hoursBuiltinHw: 0, hoursBuiltinAssembly: 0,
+        hoursPlasticZone: 0, hoursAssemblyZone: 0, hoursCuttingZone: 0,
         hoursTotalPlasticNfc: 0,
     };
 }

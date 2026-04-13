@@ -2397,9 +2397,8 @@ async function smokePendantLettersContributePlasticLoad() {
             cost_cny: 800,
             cny_rate: 12.5,
             delivery_cost: 8000,
-            hw_name: 'Фурнитура',
-            hw_price_per_unit: 1,
-            hw_speed: 60,
+            builtin_assembly_name: 'Сборка букв на шнур',
+            builtin_assembly_speed: 600,
         }];
 
         const metrics = getPendantLetterBlankMetrics(1200, params);
@@ -2421,14 +2420,14 @@ async function smokePendantLettersContributePlasticLoad() {
     assert.ok(state.result.hoursPlasticZone > 0, 'letter pendant should contribute casting/trim load');
     assert.ok(state.result.hoursPlastic > 0, 'letter pendant should contribute casting hours');
     assert.ok(state.result.hoursCutting > 0, 'letter pendant should contribute trimming hours');
-    assert.ok(state.result.hoursBuiltinHw > 0, 'letter pendant should include built-in blank hardware time');
+    assert.ok(state.result.hoursBuiltinAssembly > 0, 'letter pendant should include built-in blank assembly time');
     assert.equal(
         state.result.costPerUnit,
         clone(state.metrics).cost * 4,
         'letter pendant cost should follow the current blanks formula instead of stale stored per-letter cost'
     );
     assert.equal(state.load.hoursPlasticTotal, state.result.hoursPlasticZone);
-    assert.equal(state.load.hoursHardwareTotal, 0);
+    assert.equal(state.load.hoursHardwareTotal, state.result.assemblyHours);
 }
 
 async function smokeCyrillicPendantUsesLiveBlankPphFields(context) {
@@ -2464,9 +2463,8 @@ async function smokeCyrillicPendantUsesLiveBlankPphFields(context) {
             cost_cny: 800,
             cny_rate: 12.5,
             delivery_cost: 8000,
-            hw_name: 'Фурнитура',
-            hw_price_per_unit: 1,
-            hw_speed: 300,
+            builtin_assembly_name: 'Сборка букв на шнур',
+            builtin_assembly_speed: 600,
         }];
         const pendant = {
             item_type: 'pendant',
@@ -2486,11 +2484,52 @@ async function smokeCyrillicPendantUsesLiveBlankPphFields(context) {
     assert.ok(state.metrics && state.metrics.cost > 0, 'cyrillic pendant should resolve live blank metrics');
     assert.ok(state.result.hoursPlastic > 0, 'cyrillic pendant should contribute casting hours');
     assert.ok(state.result.hoursCutting > 0, 'cyrillic pendant should contribute trimming hours');
+    assert.ok(state.result.hoursBuiltinAssembly > 0, 'cyrillic pendant should contribute built-in assembly hours');
     assert.equal(
         state.result.costPerUnit,
         Math.round(state.metrics.cost * 4 * 100) / 100,
         'cyrillic pendant should ignore stale saved per-letter cost and use current blank formula'
     );
+}
+
+async function smokeBlankBuiltinAssemblyUsesAssemblyLoad(context) {
+    const state = clone(await vm.runInContext(`(() => {
+        const params = {
+            ...App.params,
+            wasteFactor: 1.1,
+            fotPerHour: 100,
+            indirectCostMode: 'all',
+            indirectPerHour: 50,
+            taxRate: 0.06,
+            vatRate: 0.05,
+            charityRate: 0.01,
+            plasticCostPerKg: 2500,
+            moldBaseCost: 18000,
+            designCost: 0,
+            cuttingSpeed: 1000,
+        };
+        const item = {
+            quantity: 600,
+            pieces_per_hour: 120,
+            weight_grams: 10,
+            extra_molds: 0,
+            complex_design: false,
+            is_nfc: false,
+            nfc_programming: false,
+            delivery_included: false,
+            builtin_assembly_name: 'Сборка букв на шнур',
+            builtin_assembly_speed: 600,
+        };
+        const result = calculateItemCost(item, params);
+        const load = calculateProductionLoad([{ result }], [], [], params, []);
+        return { result, load };
+    })()`, context));
+
+    assert.ok(state.result.hoursPlasticZone > 0, 'blank should keep casting hours in plastic zone');
+    assert.ok(state.result.hoursAssemblyZone > 0, 'blank should expose built-in assembly in assembly zone');
+    assert.ok(state.result.costBuiltinAssembly > 0, 'blank should price built-in assembly as labor');
+    assert.equal(state.load.hoursPlasticTotal, state.result.hoursPlasticZone, 'production load should keep plastic hours separate');
+    assert.equal(state.load.hoursHardwareTotal, state.result.hoursAssemblyZone, 'production load should send built-in assembly to assembly bucket');
 }
 
 async function smokePendantFinDirectorUsesCurrentLetterCost(context) {
@@ -6766,6 +6805,7 @@ async function main() {
     await smokePendantAutoPriceFromBlanks();
     await smokePendantLettersContributePlasticLoad();
     await smokeCyrillicPendantUsesLiveBlankPphFields(context);
+    await smokeBlankBuiltinAssemblyUsesAssemblyLoad(context);
     await smokePendantFinDirectorUsesCurrentLetterCost(context);
     await smokeLegacyPendantRestore(context);
     await smokeCurrentPendantPayloadBeatsStaleNested(context);

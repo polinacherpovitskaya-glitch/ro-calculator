@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v253';
+const APP_VERSION = 'v254';
 
 const App = {
     currentPage: 'orders',
@@ -1142,6 +1142,9 @@ const Calculator = {
             builtin_hw_price: 0,
             builtin_hw_delivery_total: 0,
             builtin_hw_speed: 0,
+            // Built-in assembly from blank template
+            builtin_assembly_name: '',
+            builtin_assembly_speed: 0,
             // Colors (multiple per item)
             colors: [],  // [{id, name}, ...]
             color_solution_attachment: null, // legacy object or array of {name, type, data_url, size}
@@ -1191,7 +1194,9 @@ const Calculator = {
             || !!String(item.builtin_hw_name || '').trim()
             || (parseFloat(item.builtin_hw_price) || 0) > 0
             || (parseFloat(item.builtin_hw_delivery_total) || 0) > 0
-            || (parseFloat(item.builtin_hw_speed) || 0) > 0;
+            || (parseFloat(item.builtin_hw_speed) || 0) > 0
+            || !!String(item.builtin_assembly_name || '').trim()
+            || (parseFloat(item.builtin_assembly_speed) || 0) > 0;
     },
 
     renderItemBlock(idx) {
@@ -1399,7 +1404,8 @@ const Calculator = {
             <div class="form-group template-select" id="template-wrap-${idx}" style="${item.is_blank_mold ? '' : 'display:none'};position:relative">
                 <label>Бланк из справочника</label>
                 ${moldPickerHtml}
-                <span id="item-hw-badge-${idx}" style="display:none;font-size:11px;color:var(--accent);margin-top:4px;font-weight:600;">+ ${item.builtin_hw_name || ''}</span>
+                ${item.builtin_assembly_speed > 0 ? `<span id="item-assembly-badge-${idx}" style="display:block;font-size:11px;color:var(--orange);margin-top:4px;font-weight:600;">🛠 ${this._esc(item.builtin_assembly_name || 'Сборка')} · ${Math.round(item.builtin_assembly_speed)} шт/ч</span>` : ''}
+                <span id="item-hw-badge-${idx}" style="display:${item.builtin_hw_name ? 'block' : 'none'};font-size:11px;color:var(--accent);margin-top:4px;font-weight:600;">+ ${this._esc(item.builtin_hw_name || '')}</span>
             </div>
 
             <div class="form-row">
@@ -1488,6 +1494,8 @@ const Calculator = {
                 <div class="cost-row"><span class="cost-label">NFC метка</span><span class="cost-value" id="c-${idx}-nfc-tag">0</span></div>
                 <div class="cost-row"><span class="cost-label">NFC программирование</span><span class="cost-value" id="c-${idx}-nfc-prog">0</span></div>
                 <div class="cost-row"><span class="cost-label">NFC (косв.)</span><span class="cost-value" id="c-${idx}-nfc-ind">0</span></div>
+                <div class="cost-row"><span class="cost-label">Встроенная сборка</span><span class="cost-value" id="c-${idx}-builtin-assembly">0</span></div>
+                <div class="cost-row" style="display:none"><span class="cost-label">Сборка (косв.)</span><span class="cost-value" id="c-${idx}-builtin-assembly-ind">0</span></div>
                 <div class="cost-row"><span class="cost-label">Встроенная фурнитура</span><span class="cost-value" id="c-${idx}-builtin-hw">0</span></div>
                 <div class="cost-row" style="display:none"><span class="cost-label">Фурнитура (косв.)</span><span class="cost-value" id="c-${idx}-builtin-hw-ind">0</span></div>
                 <div class="cost-row"><span class="cost-label">Нанесение</span><span class="cost-value" id="c-${idx}-printing">0</span></div>
@@ -2976,6 +2984,8 @@ const Calculator = {
         this.items[idx].builtin_hw_price = 0;
         this.items[idx].builtin_hw_delivery_total = 0;
         this.items[idx].builtin_hw_speed = 0;
+        this.items[idx].builtin_assembly_name = tpl.builtin_assembly_name || '';
+        this.items[idx].builtin_assembly_speed = Number(tpl.builtin_assembly_speed || 0);
 
         // Auto-create per-item hardware from template
         this._syncTemplateHardware(idx, tpl);
@@ -3155,8 +3165,12 @@ const Calculator = {
             this.items[idx].builtin_hw_price = 0;
             this.items[idx].builtin_hw_delivery_total = 0;
             this.items[idx].builtin_hw_speed = 0;
+            this.items[idx].builtin_assembly_name = '';
+            this.items[idx].builtin_assembly_speed = 0;
             const hwBadge = document.getElementById('item-hw-badge-' + idx);
             if (hwBadge) hwBadge.style.display = 'none';
+            const assemblyBadge = document.getElementById('item-assembly-badge-' + idx);
+            if (assemblyBadge) assemblyBadge.style.display = 'none';
             // Remove template-created per-item hardware
             this._syncTemplateHardware(idx, null);
         }
@@ -3432,6 +3446,8 @@ const Calculator = {
                 this._setCostValueAndVisibility('c-' + idx + '-nfc-tag', result.costNfcTag);
                 this._setCostValueAndVisibility('c-' + idx + '-nfc-prog', result.costNfcProgramming);
                 this._setCostValueAndVisibility('c-' + idx + '-nfc-ind', result.costNfcIndirect);
+                this._setCostValueAndVisibility('c-' + idx + '-builtin-assembly', result.costBuiltinAssembly || 0);
+                this._setCostValueAndVisibility('c-' + idx + '-builtin-assembly-ind', result.costBuiltinAssemblyIndirect || 0);
                 this._setCostValueAndVisibility('c-' + idx + '-builtin-hw', result.costBuiltinHw || 0);
                 this._setCostValueAndVisibility('c-' + idx + '-builtin-hw-ind', result.costBuiltinHwIndirect || 0);
                 this._setCostValueAndVisibility('c-' + idx + '-printing', result.costPrinting);
@@ -3690,6 +3706,8 @@ const Calculator = {
             builtin_hw_price: 0,
             builtin_hw_delivery_total: 0,
             builtin_hw_speed: 0,
+            builtin_assembly_name: tpl.builtin_assembly_name || '',
+            builtin_assembly_speed: Number(tpl.builtin_assembly_speed || 0),
         };
 
         const base = calculateItemCost(calcItem, params);
@@ -3710,6 +3728,15 @@ const Calculator = {
                 }
             }
             adjusted += hwCost;
+        }
+
+        if (Number(tpl.builtin_assembly_speed || 0) > 0) {
+            const assemblyHours = baseQtyForCost / Number(tpl.builtin_assembly_speed || 0) * (params.wasteFactor || 1.1);
+            let assemblyCost = assemblyHours * params.fotPerHour / baseQtyForCost;
+            if (params.indirectCostMode === 'all') {
+                assemblyCost += params.indirectPerHour * assemblyHours / baseQtyForCost;
+            }
+            adjusted += assemblyCost;
         }
 
         return round2(Math.max(0, adjusted));
@@ -4454,6 +4481,8 @@ const Calculator = {
                 cost_nfc_tag: r.costNfcTag,
                 cost_nfc_programming: r.costNfcProgramming,
                 cost_nfc_indirect: r.costNfcIndirect,
+                cost_builtin_assembly: r.costBuiltinAssembly,
+                cost_builtin_assembly_indirect: r.costBuiltinAssemblyIndirect,
                 cost_printing: r.costPrinting,
                 cost_delivery: r.costDelivery,
                 cost_total: r.costTotal,
@@ -4463,6 +4492,9 @@ const Calculator = {
                 hours_plastic: r.hoursPlastic,
                 hours_cutting: r.hoursCutting,
                 hours_nfc: r.hoursNfc,
+                hours_assembly: r.hoursAssemblyZone,
+                builtin_assembly_name: item.builtin_assembly_name || '',
+                builtin_assembly_speed: item.builtin_assembly_speed || 0,
                 template_id: item.template_id,
                 color_id: item.color_id || null,
                 color_name: item.color_name || '',
@@ -4983,6 +5015,8 @@ const Calculator = {
                     item.builtin_hw_price = tpl.hw_price_per_unit || 0;
                     item.builtin_hw_delivery_total = tpl.hw_delivery_total || 0;
                     item.builtin_hw_speed = tpl.hw_speed || 0;
+                    item.builtin_assembly_name = tpl.builtin_assembly_name || '';
+                    item.builtin_assembly_speed = tpl.builtin_assembly_speed || 0;
                 }
             }
             this.items.push(item);

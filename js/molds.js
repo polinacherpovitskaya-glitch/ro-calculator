@@ -187,6 +187,8 @@ const Molds = {
                 packaging_qty: 0,
                 printing_qty: 0,
                 delivery_included: false,
+                builtin_assembly_name: m.builtin_assembly_name || '',
+                builtin_assembly_speed: Number(m.builtin_assembly_speed || 0),
             };
 
             const baseResult = calculateItemCost(baseItem, params);
@@ -202,6 +204,16 @@ const Molds = {
                     }
                 }
                 baseAdjustedCost += baseHwCostPerUnit;
+            }
+
+            let baseAssemblyCostPerUnit = 0;
+            if (Number(m.builtin_assembly_speed || 0) > 0) {
+                const assemblyHours = baseQtyForCost / Number(m.builtin_assembly_speed || 0) * (params.wasteFactor || 1.1);
+                baseAssemblyCostPerUnit = (assemblyHours * params.fotPerHour) / baseQtyForCost;
+                if (params.indirectCostMode === 'all') {
+                    baseAssemblyCostPerUnit += (params.indirectPerHour * assemblyHours) / baseQtyForCost;
+                }
+                baseAdjustedCost += baseAssemblyCostPerUnit;
             }
 
             // Calculate cost per unit at each tier
@@ -392,6 +404,7 @@ const Molds = {
                                     ${collectionBadge} ${nfcBadge} ${priceBadge}
                                 </div>
                                 ${m.hw_name ? `<div style="font-size:10px;color:var(--text-muted);">+ ${this.esc(m.hw_name)}</div>` : ''}
+                                ${Number(m.builtin_assembly_speed || 0) > 0 ? `<div style="font-size:10px;color:var(--orange);">🛠 ${this.esc(m.builtin_assembly_name || 'Сборка')} · ${Math.round(m.builtin_assembly_speed)} шт/ч</div>` : ''}
                             </div>
                         </div>
                     </td>
@@ -664,6 +677,8 @@ const Molds = {
         document.getElementById('mold-hw-price').value = m.hw_price_per_unit || '';
         document.getElementById('mold-hw-delivery-total').value = m.hw_delivery_total || '';
         document.getElementById('mold-hw-speed').value = m.hw_speed || '';
+        document.getElementById('mold-assembly-name').value = m.builtin_assembly_name || '';
+        document.getElementById('mold-assembly-speed').value = m.builtin_assembly_speed || '';
         document.getElementById('mold-notes').value = m.notes || '';
 
         // Custom prices per tier
@@ -744,7 +759,9 @@ const Molds = {
     clearForm() {
         ['mold-name', 'mold-pph-min', 'mold-pph-max', 'mold-pph-actual',
          'mold-weight', 'mold-cost-cny', 'mold-client',
-         'mold-hw-name', 'mold-hw-price', 'mold-hw-speed', 'mold-notes',
+         'mold-hw-name', 'mold-hw-price', 'mold-hw-speed',
+         'mold-assembly-name', 'mold-assembly-speed',
+         'mold-notes',
          'mold-photo-url'
         ].forEach(id => {
             const el = document.getElementById(id);
@@ -815,6 +832,8 @@ const Molds = {
             hw_speed: parseFloat(document.getElementById('mold-hw-speed').value) || null,
             hw_warehouse_item_id: this._hwWarehouseItemId || null,
             hw_warehouse_sku: this._hwWarehouseSku || '',
+            builtin_assembly_name: document.getElementById('mold-assembly-name').value.trim(),
+            builtin_assembly_speed: parseFloat(document.getElementById('mold-assembly-speed').value) || null,
             notes: document.getElementById('mold-notes').value.trim(),
             total_orders: 0,
             total_units_produced: 0,

@@ -10,7 +10,7 @@
     <link rel="stylesheet" href="css/style.css?v=101">
     <script>
         (function () {
-            const CURRENT_HTML_VERSION = 'v253';
+            const CURRENT_HTML_VERSION = 'v254';
             const ATTEMPT_KEY = 'ro_calc_force_update_attempts';
 
             function parseVersion(version) {
@@ -81,7 +81,7 @@
     <aside class="sidebar">
         <div class="sidebar-brand">
             <h2>Recycle Object</h2>
-            <span>Калькулятор <span id="app-version">v253</span></span>
+            <span>Калькулятор <span id="app-version">v254</span></span>
         </div>
         <nav class="sidebar-nav">
             <a href="#tasks" data-page="tasks">
@@ -945,10 +945,23 @@
                             <input type="number" min="0" id="mold-hw-delivery-total" value="0">
                         </div>
                         <div class="form-group">
-                            <label>Сборка (шт/ч)</label>
+                            <label>Крепление фурнитуры (шт/ч)</label>
                             <input type="number" min="0" id="mold-hw-speed">
-                            <span class="form-hint">Скорость приклейки/сборки</span>
+                            <span class="form-hint">Скорость приклейки, вставки зеркала, крепления кольца и т.д.</span>
                         </div>
+                    </div>
+                </div>
+
+                <div class="section-title" style="margin-top:12px; margin-bottom:4px;">Встроенная сборка <span style="font-weight:400;font-size:11px;color:var(--text-muted)">(если у изделия есть ручная сборка без отдельной фурнитуры)</span></div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Название операции</label>
+                        <input type="text" id="mold-assembly-name" placeholder="Сборка букв на шнур">
+                    </div>
+                    <div class="form-group">
+                        <label>Скорость сборки (шт/ч)</label>
+                        <input type="number" min="0" id="mold-assembly-speed">
+                        <span class="form-hint">Эти часы попадут в сборку, косвенные и производственный календарь</span>
                     </div>
                 </div>
 
@@ -3396,7 +3409,7 @@
 <script src="js/supabase.js?v=164"></script>
 <script src="js/task-events.js?v=1"></script>
 <script src="js/calculator.js?v=78"></script>
-<script src="js/app.js?v=253"></script>
+<script src="js/app.js?v=254"></script>
 <script src="js/wiki.js?v=4"></script>
 <script src="js/order-detail.js?v=64"></script>
 <script src="js/orders.js?v=65"></script>

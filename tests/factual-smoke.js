@@ -49,9 +49,14 @@ function createContext() {
         setTimeout(fn) { fn(); return 1; },
         clearTimeout() {},
         calculateItemCost(item) {
+            const quantity = Number(item.quantity) || 0;
+            const pph = Number(item.pieces_per_hour) || 1;
+            const assemblySpeed = Number(item.builtin_assembly_speed) || 0;
+            const waste = 1.1;
             return {
-                hoursPlastic: Math.round(((Number(item.quantity) || 0) / ((Number(item.pieces_per_hour) || 1))) * 100) / 100,
+                hoursPlastic: Math.round((quantity / pph) * 100) / 100,
                 hoursCutting: 0,
+                hoursAssemblyZone: assemblySpeed > 0 ? Math.round(((quantity / assemblySpeed) * waste) * 100) / 100 : 0,
             };
         },
         calculateHardwareCost(hw, params) {
@@ -276,6 +281,52 @@ function smokeBuildPlanUsesSavedSnapshotCostsAndDedupedHardware(context) {
         'plan rows should add up to current computed total cost'
     );
     assert.equal(result.planData.planEarned, 6, 'plan profit should be recomputed from current plan rows');
+}
+
+function smokeBuildPlanSeparatesProductBuiltinAssembly(context) {
+    const result = vm.runInContext(`(() => {
+        return Factual._buildPlan(
+            {
+                total_revenue_plan: 300,
+                total_cost_plan: 120,
+                production_hours_hardware: 1.5,
+                production_hours_packaging: 0,
+            },
+            [
+                {
+                    item_type: 'product',
+                    quantity: 10,
+                    cost_fot: 2,
+                    cost_cutting: 0,
+                    cost_indirect: 1,
+                    cost_cutting_indirect: 0,
+                    cost_builtin_assembly: 1.5,
+                    cost_builtin_assembly_indirect: 0.5,
+                    cost_plastic: 4,
+                    cost_mold_amortization: 0,
+                    cost_design: 0,
+                    cost_printing: 0,
+                    cost_delivery: 0,
+                    cost_nfc_tag: 0,
+                    hours_plastic: 2,
+                    hours_cutting: 0,
+                    hours_assembly: 1.5,
+                    is_blank_mold: true,
+                },
+            ],
+            {
+                fotPerHour: 10,
+                taxRate: 0.06,
+                vatRate: 0.05,
+                indirectPerHour: 100,
+                wasteFactor: 1.1,
+            }
+        );
+    })()`, context);
+
+    assert.equal(result.planHours.hoursHardware, 1.5, 'product built-in assembly should appear in plan assembly hours');
+    assert.equal(result.planData.salaryAssembly, 15, 'product built-in assembly salary should come from saved snapshot');
+    assert.equal(result.planData.indirectProduction, 15, 'product built-in assembly indirect should be added to production indirect');
 }
 
 function smokeBuildPlanRendersSavedSnapshotHints(context) {
@@ -759,6 +810,7 @@ async function main() {
     smokeRevenueManualOverride(context);
     await smokeResetAutoFactInput(context);
     smokeBuildPlanUsesSavedSnapshotCostsAndDedupedHardware(context);
+    smokeBuildPlanSeparatesProductBuiltinAssembly(context);
     smokeBuildPlanRendersSavedSnapshotHints(context);
     await smokeTaxesIncludeCharity(context);
     await smokeLegacyStageDistributionAndMaterials(context);

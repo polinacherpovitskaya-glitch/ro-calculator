@@ -203,7 +203,7 @@ function _shouldKeepOnlyInVolatileCache(key, payload = '') {
 
 // Data version — increment to trigger NON-DESTRUCTIVE migration
 // NEVER delete user data! Only add missing fields to existing molds
-const MOLDS_DATA_VERSION = 12; // v12: уважать ручное удаление custom_prices у бланков и не восстанавливать их обратно автоматически
+const MOLDS_DATA_VERSION = 13; // v13: отдельная встроенная сборка у бланков + миграция букв со старой "фурнитуры"
 const MOLDS_VERSION_KEY = 'ro_calc_molds_version';
 
 // Latest known manual sell prices from the exported blanks catalog.
@@ -391,6 +391,55 @@ function _withHistoricalBlankPriceRecovery(mold) {
     };
 }
 
+function _isLegacyLetterAssemblyMold(mold) {
+    if (!mold || typeof mold !== 'object') return false;
+    const collection = String(mold.collection || '').trim().toLowerCase();
+    const name = String(mold.hw_name || '').trim().toLowerCase();
+    const price = Number(mold.hw_price_per_unit || 0);
+    const delivery = Number(mold.hw_delivery_total || 0);
+    const speed = Number(mold.hw_speed || 0);
+    return collection === 'буквы'
+        && name === 'фурнитура'
+        && price <= 1
+        && delivery === 0
+        && (speed === 0 || speed === 60);
+}
+
+function _normalizeMoldRecord(mold) {
+    if (!mold || typeof mold !== 'object') return mold;
+    const normalized = { ...mold };
+    if (normalized.hw_name === undefined) normalized.hw_name = '';
+    if (normalized.hw_price_per_unit === undefined) normalized.hw_price_per_unit = 0;
+    if (normalized.hw_delivery_total === undefined) normalized.hw_delivery_total = 0;
+    if (normalized.hw_speed === undefined) normalized.hw_speed = null;
+    if (normalized.hw_source === undefined) normalized.hw_source = 'custom';
+    if (normalized.hw_warehouse_item_id === undefined) normalized.hw_warehouse_item_id = null;
+    if (normalized.hw_warehouse_sku === undefined) normalized.hw_warehouse_sku = '';
+    if (normalized.photo_url === undefined) normalized.photo_url = '';
+    if (!normalized.category) normalized.category = 'blank';
+    if (normalized.custom_margins === undefined) normalized.custom_margins = {};
+    if (normalized.custom_prices === undefined) normalized.custom_prices = {};
+    if (normalized.disable_historical_blank_price_recovery === undefined) {
+        normalized.disable_historical_blank_price_recovery = false;
+    }
+    if (normalized.builtin_assembly_name === undefined) normalized.builtin_assembly_name = '';
+    if (normalized.builtin_assembly_speed === undefined) normalized.builtin_assembly_speed = null;
+
+    if (_isLegacyLetterAssemblyMold(normalized)) {
+        normalized.builtin_assembly_name = normalized.builtin_assembly_name || 'Сборка букв на шнур';
+        normalized.builtin_assembly_speed = Number(normalized.builtin_assembly_speed || 600) || 600;
+        normalized.hw_name = '';
+        normalized.hw_price_per_unit = 0;
+        normalized.hw_delivery_total = 0;
+        normalized.hw_speed = null;
+        normalized.hw_source = 'custom';
+        normalized.hw_warehouse_item_id = null;
+        normalized.hw_warehouse_sku = '';
+    }
+
+    return normalized;
+}
+
 function checkMoldsVersion() {
     const stored = parseInt(localStorage.getItem(MOLDS_VERSION_KEY)) || 0;
     if (stored < MOLDS_DATA_VERSION) {
@@ -406,44 +455,20 @@ function checkMoldsVersion() {
             // Add missing fields to each mold (preserve user data like photos, PPH)
             const defaults = getDefaultMolds();
             const migrated = existing.map(m => {
-                const def = defaults.find(d => d.id === m.id);
+                const current = _normalizeMoldRecord(m);
+                const def = defaults.find(d => d.id === current.id);
                 // Ensure collection field exists (added in v4)
-                if (!m.collection && def) {
-                    m.collection = def.collection || '';
+                if (!current.collection && def) {
+                    current.collection = def.collection || '';
                 }
                 // Fill PPH from reference table if user hasn't set them (v6)
                 // Only fill if both min and max are 0 or missing
-                if ((!m.pph_min || m.pph_min === 0) && (!m.pph_max || m.pph_max === 0) && def) {
-                    if (def.pph_min > 0) m.pph_min = def.pph_min;
-                    if (def.pph_max > 0) m.pph_max = def.pph_max;
+                if ((!current.pph_min || current.pph_min === 0) && (!current.pph_max || current.pph_max === 0) && def) {
+                    if (def.pph_min > 0) current.pph_min = def.pph_min;
+                    if (def.pph_max > 0) current.pph_max = def.pph_max;
                 }
-                // Ensure hw fields exist (added in v3)
-                if (m.hw_name === undefined) m.hw_name = '';
-                if (m.hw_price_per_unit === undefined) m.hw_price_per_unit = 0;
-                if (m.hw_delivery_total === undefined) m.hw_delivery_total = 0;
-                if (m.hw_speed === undefined) m.hw_speed = null;
-                if (m.hw_source === undefined) m.hw_source = 'custom';
-                if (m.hw_warehouse_item_id === undefined) m.hw_warehouse_item_id = null;
-                if (m.hw_warehouse_sku === undefined) m.hw_warehouse_sku = '';
-                // Ensure photo field exists (added in v36)
-                if (m.photo_url === undefined) m.photo_url = '';
-                // Ensure category field
-                if (!m.category) m.category = 'blank';
-                // Ensure custom_margins field exists (added in v7)
-                if (m.custom_margins === undefined) m.custom_margins = {};
-                // Ensure custom_prices field exists (added in v8)
-                if (m.custom_prices === undefined) m.custom_prices = {};
-                if (m.disable_historical_blank_price_recovery === undefined) {
-                    m.disable_historical_blank_price_recovery = false;
-                }
-                m.custom_prices = _mergeHistoricalBlankCustomPrices(m.custom_prices, m.name);
-                // v9: Update letter blanks (id 30, 31) with hw_* fields
-                if ((m.id === 30 || m.id === 31) && !m.hw_name) {
-                    m.hw_name = 'Фурнитура';
-                    m.hw_price_per_unit = 1;
-                    m.hw_speed = 60;
-                }
-                return m;
+                current.custom_prices = _mergeHistoricalBlankCustomPrices(current.custom_prices, current.name);
+                return _normalizeMoldRecord(current);
             });
             setLocal(LOCAL_KEYS.molds, migrated);
             console.log('Molds migrated to version', MOLDS_DATA_VERSION, '(preserved', migrated.length, 'records)');
@@ -845,40 +870,43 @@ function getDefaultTemplates() {
 
 /** Convert a mold object to a template object (single source of truth) */
 function _moldToTemplate(m) {
-    const pMin = m.pph_min || 0;
-    const pMax = m.pph_max || 0;
+    const mold = _normalizeMoldRecord(m);
+    const pMin = mold.pph_min || 0;
+    const pMax = mold.pph_max || 0;
     const pAvg = (pMin > 0 && pMax > 0) ? Math.round((pMin + pMax) / 2) : (pMin || pMax || 0);
     const display = pMin === 0 ? '—' : (pMin === pMax ? String(pMin) : `${pMin}-${pMax}`);
     return {
-        id: m.id,
-        name: m.name,
-        category: m.category === 'nfc' ? 'blank' : (m.category || 'blank'),
-        collection: m.collection || '',
-        photo_url: m.photo_url || '',
+        id: mold.id,
+        name: mold.name,
+        category: mold.category === 'nfc' ? 'blank' : (mold.category || 'blank'),
+        collection: mold.collection || '',
+        photo_url: mold.photo_url || '',
         pieces_per_hour_display: display,
         pieces_per_hour_min: pMin,
         pieces_per_hour_max: pMax,
         pieces_per_hour_avg: pAvg,
-        weight_grams: m.weight_grams,
+        weight_grams: mold.weight_grams,
         // Built-in hardware (e.g. mirror, magnet, ring)
-        hw_source: m.hw_source || (m.hw_warehouse_item_id ? 'warehouse' : 'custom'),
-        hw_name: m.hw_name || '',
-        hw_price_per_unit: m.hw_price_per_unit || 0,
-        hw_delivery_total: m.hw_delivery_total || 0,
-        hw_speed: m.hw_speed || 0,
-        hw_warehouse_item_id: m.hw_warehouse_item_id || null,
-        hw_warehouse_sku: m.hw_warehouse_sku || '',
+        hw_source: mold.hw_source || (mold.hw_warehouse_item_id ? 'warehouse' : 'custom'),
+        hw_name: mold.hw_name || '',
+        hw_price_per_unit: mold.hw_price_per_unit || 0,
+        hw_delivery_total: mold.hw_delivery_total || 0,
+        hw_speed: mold.hw_speed || 0,
+        hw_warehouse_item_id: mold.hw_warehouse_item_id || null,
+        hw_warehouse_sku: mold.hw_warehouse_sku || '',
+        builtin_assembly_name: mold.builtin_assembly_name || '',
+        builtin_assembly_speed: mold.builtin_assembly_speed || 0,
         // Per-mold custom margins (overrides standard tier margins)
-        custom_margins: m.custom_margins || {},
+        custom_margins: mold.custom_margins || {},
         // Per-mold custom prices (absolute sell prices per tier)
-        custom_prices: m.custom_prices || {},
-        use_manual_prices: !!m.use_manual_prices,
+        custom_prices: mold.custom_prices || {},
+        use_manual_prices: !!mold.use_manual_prices,
         // Keep mold economics on template so calculator can match "Бланки" себестоимость
-        cost_cny: m.cost_cny || 0,
-        cny_rate: m.cny_rate || 0,
-        delivery_cost: m.delivery_cost || 0,
-        mold_count: m.mold_count || 1,
-        complexity: m.complexity || 'simple',
+        cost_cny: mold.cost_cny || 0,
+        cny_rate: mold.cny_rate || 0,
+        delivery_cost: mold.delivery_cost || 0,
+        mold_count: mold.mold_count || 1,
+        complexity: mold.complexity || 'simple',
     };
 }
 
@@ -1908,6 +1936,7 @@ async function loadMolds() {
 
             const rawSupabaseMolds = (data || [])
                 .map(_parseMoldRow)
+                .map(_normalizeMoldRecord)
                 .filter(mold => !deletedIds.has(Number(mold.id)));
 
             const repairedSupabaseMolds = [];
@@ -1939,6 +1968,7 @@ async function loadMolds() {
             // caches previously overwrote shared manual pricing for blanks.
             const localMolds = (getLocal(LOCAL_KEYS.molds) || [])
                 .filter(mold => !deletedIds.has(Number(mold.id)))
+                .map(_normalizeMoldRecord)
                 .map(mold => _withHistoricalBlankPriceRecovery(mold).mold);
             if (localMolds.length > 0) {
                 const sbMap = new Map(supabaseMolds.map(m => [m.id, m]));
@@ -1962,7 +1992,7 @@ async function loadMolds() {
                     // Re-fetch merged data
                     const { data: refreshed } = await supabaseClient.from('molds').select('*').order('name');
                     if (refreshed && refreshed.length > 0) {
-                        const merged = refreshed.map(_parseMoldRow);
+                        const merged = refreshed.map(_parseMoldRow).map(_normalizeMoldRecord);
                         setLocal(LOCAL_KEYS.molds, merged);
                         return merged;
                     }
@@ -1993,12 +2023,14 @@ async function loadMolds() {
             if (_isSupabaseAccessError(e)) _markSupabaseAccessProblem(e);
             const localMolds = (getLocal(LOCAL_KEYS.molds) || getDefaultMolds())
                 .filter(mold => !deletedIds.has(Number(mold.id)))
+                .map(_normalizeMoldRecord)
                 .map(mold => _withHistoricalBlankPriceRecovery(mold).mold);
             return localMolds;
         }
     }
     return (getLocal(LOCAL_KEYS.molds) || getDefaultMolds())
         .filter(mold => !deletedIds.has(Number(mold.id)))
+        .map(_normalizeMoldRecord)
         .map(mold => _withHistoricalBlankPriceRecovery(mold).mold);
 }
 
@@ -2037,6 +2069,7 @@ async function uploadMoldPhoto(moldId, base64DataUrl) {
 }
 
 async function saveMold(mold) {
+    mold = _normalizeMoldRecord(mold);
     if (!mold.id) { mold.id = Date.now(); mold.created_at = new Date().toISOString(); }
     mold.updated_at = new Date().toISOString();
     _clearDeletedMold(mold.id);
@@ -2091,6 +2124,8 @@ function getDefaultMolds() {
         cost_rub: costCny * CNY_RATE + deliveryCost, mold_count: opts.mold_count || 1,
         hw_name: opts.hw_name || '', hw_price_per_unit: opts.hw_price || 0,
         hw_delivery_total: opts.hw_delivery || 0, hw_speed: opts.hw_speed || null,
+        builtin_assembly_name: opts.builtin_assembly_name || '',
+        builtin_assembly_speed: opts.builtin_assembly_speed || null,
         client: opts.client || '', notes: opts.notes || '',
         total_orders: opts.orders || 0, total_units_produced: opts.produced || 0,
         custom_margins: {}, custom_prices: _getHistoricalBlankCustomPrices(name),
@@ -2137,8 +2172,8 @@ function getDefaultMolds() {
         m(29, 'Бусины маленькие',           'blank', 70,  90,  null, 5,  'simple', simpleCostCNY, { collection: 'Бусины', orders: 7, produced: 6000 }),
 
         // === Буквы ===
-        m(30, 'Буква из алфавита (лат.)',    'blank', 100, 120, null, 10, 'simple', simpleCostCNY, { collection: 'Буквы', hw_name: 'Фурнитура', hw_price: 1, hw_speed: 60 }),
-        m(31, 'Буква из алфавита (кир.)',    'blank', 100, 120, null, 10, 'simple', simpleCostCNY, { collection: 'Буквы', hw_name: 'Фурнитура', hw_price: 1, hw_speed: 60 }),
+        m(30, 'Буква из алфавита (лат.)',    'blank', 100, 120, null, 10, 'simple', simpleCostCNY, { collection: 'Буквы', builtin_assembly_name: 'Сборка букв на шнур', builtin_assembly_speed: 600 }),
+        m(31, 'Буква из алфавита (кир.)',    'blank', 100, 120, null, 10, 'simple', simpleCostCNY, { collection: 'Буквы', builtin_assembly_name: 'Сборка букв на шнур', builtin_assembly_speed: 600 }),
 
         // === Фигурки / сувениры ===
         m(32, 'Шар',                        'blank', 15,  20,  null, 30, 'complex', complexCostCNY, { collection: 'Фигурки' }),
