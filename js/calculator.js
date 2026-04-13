@@ -1088,21 +1088,61 @@ function calculateFinDirectorData(items, hardwareItems, packagingItems, params, 
     let totalMolds = 0;
     let totalDelivery = 0;
     let totalRevenue = 0;
+    let totalCommercial = 0;
 
     items.forEach(item => {
         if (!item.result || !item.quantity) return;
         const r = item.result;
         const qty = item.quantity;
 
-        // Зарплата = все часы * ФОТ/час
-        totalSalary += ((Number(r?.hoursTotalPlasticNfc) || 0) + (Number(r?.hoursBuiltinHw) || 0) + (Number(r?.hoursBuiltinAssembly) || 0)) * safeFotPerHour;
-        totalIndirect += ((r.costIndirect || 0) + (r.costCuttingIndirect || 0) + (r.costNfcIndirect || 0) + (r.costBuiltinHwIndirect || 0) + (r.costBuiltinAssemblyIndirect || 0)) * qty;
+        const builtinHwPurchasePerUnitRaw = Number(item?.builtin_hw_price || 0);
+        const builtinHwDeliveryPerUnitRaw = qty > 0 ? round2(Number(item?.builtin_hw_delivery_total || 0) / qty) : 0;
+        const builtinHwLaborTotal = round2((Number(r?.hoursBuiltinHw) || 0) * safeFotPerHour);
+        const builtinHwLaborResolvedPerUnit = qty > 0
+            ? round2(builtinHwLaborTotal / qty)
+            : 0;
+        const builtinHwPurchaseDeliveryFallbackPerUnit = Math.max(0, round2((Number(r?.costBuiltinHw) || 0) - builtinHwLaborResolvedPerUnit));
+        const builtinHwPurchasePerUnit = builtinHwPurchasePerUnitRaw > 0 || builtinHwDeliveryPerUnitRaw > 0
+            ? builtinHwPurchasePerUnitRaw
+            : builtinHwPurchaseDeliveryFallbackPerUnit;
+        const builtinHwDeliveryPerUnit = builtinHwPurchasePerUnitRaw > 0 || builtinHwDeliveryPerUnitRaw > 0
+            ? builtinHwDeliveryPerUnitRaw
+            : 0;
+
+        // Зарплата и косвенные: сначала берём точную раскладку новых полей,
+        // а если заказ старый/неполный — падаем обратно на legacy-часы.
+        const productSalaryByCosts = qty * (
+            (Number(r?.costFot) || 0)
+            + (Number(r?.costCutting) || 0)
+            + (Number(r?.costNfcProgramming) || 0)
+        );
+        const productSalaryByHours = (Number(r?.hoursTotalPlasticNfc) || 0) * safeFotPerHour;
+        totalSalary += productSalaryByCosts > 0 ? productSalaryByCosts : productSalaryByHours;
+        totalSalary += builtinHwLaborTotal;
+
+        const builtinAssemblySalaryByCosts = qty * (Number(r?.costBuiltinAssembly) || 0);
+        const builtinAssemblySalaryByHours = (Number(r?.hoursBuiltinAssembly) || 0) * safeFotPerHour;
+        totalSalary += builtinAssemblySalaryByCosts > 0 ? builtinAssemblySalaryByCosts : builtinAssemblySalaryByHours;
+
+        const productIndirectByCosts = qty * (
+            (Number(r?.costIndirect) || 0)
+            + (Number(r?.costCuttingIndirect) || 0)
+            + (Number(r?.costNfcIndirect) || 0)
+        );
+        const productIndirectByHours = (Number(r?.hoursTotalPlasticNfc) || 0) * (Number(params?.indirectPerHour) || 0);
+        totalIndirect += productIndirectByCosts > 0 ? productIndirectByCosts : productIndirectByHours;
+
+        const builtinHwIndirectByCosts = qty * (Number(r?.costBuiltinHwIndirect) || 0);
+        const builtinHwIndirectByHours = (Number(r?.hoursBuiltinHw) || 0) * (Number(params?.indirectPerHour) || 0);
+        totalIndirect += builtinHwIndirectByCosts > 0 ? builtinHwIndirectByCosts : builtinHwIndirectByHours;
+
+        const builtinAssemblyIndirectByCosts = qty * (Number(r?.costBuiltinAssemblyIndirect) || 0);
+        const builtinAssemblyIndirectByHours = (Number(r?.hoursBuiltinAssembly) || 0) * (Number(params?.indirectPerHour) || 0);
+        totalIndirect += builtinAssemblyIndirectByCosts > 0 ? builtinAssemblyIndirectByCosts : builtinAssemblyIndirectByHours;
 
         // NFC метки
-        if (item.is_nfc) totalNfc += qty * params.nfcTagCost;
-
-        const builtinHwPurchasePerUnit = Number(item?.builtin_hw_price || 0);
-        const builtinHwDeliveryPerUnit = qty > 0 ? round2(Number(item?.builtin_hw_delivery_total || 0) / qty) : 0;
+        const directNfcPerUnit = Number(r?.costNfcTag) || (item.is_nfc ? Number(params?.nfcTagCost || 0) : 0);
+        totalNfc += qty * directNfcPerUnit;
         if (isNfcLikeEntry(item?.builtin_hw_name)) {
             totalNfc += qty * (builtinHwPurchasePerUnit + builtinHwDeliveryPerUnit);
         } else {
@@ -1111,35 +1151,50 @@ function calculateFinDirectorData(items, hardwareItems, packagingItems, params, 
         }
 
         // Проектирование
-        if (item.complex_design) totalDesign += safeDesignCost;
+        const designTotal = qty * (Number(r?.costDesign) || 0);
+        totalDesign += designTotal > 0 ? designTotal : (item.complex_design ? safeDesignCost : 0);
 
-        // Печать (из массива printings)
-        const printings = getActivePrintings(item);
-        printings.forEach(pr => {
-            totalPrinting += (pr.qty || 0) * (pr.price || 0);
-        });
-        // Обратная совместимость
-        if (hasLegacyPrintingFallback(item)) {
-            totalPrinting += (item.printing_qty || 0) * (item.printing_price_per_unit || 0);
+        // Печать: используем уже посчитанную себестоимость строки,
+        // чтобы не терять доставку/налоги поставщика и не расходиться с costTotal.
+        const resolvedPrintingTotal = qty * (Number(r?.costPrinting) || 0);
+        if (resolvedPrintingTotal > 0) {
+            totalPrinting += resolvedPrintingTotal;
+        } else {
+            const printings = getActivePrintings(item);
+            if (printings.length > 0) {
+                printings.forEach(pr => {
+                    const prQty = pr.qty || 0;
+                    const prPrice = pr.price || 0;
+                    if (prQty > 0 && prPrice > 0) {
+                        const prDelivery = pr.delivery_total || 0;
+                        const deliveryCost = prDelivery > 0 ? prDelivery / prQty : (params?.printingDeliveryCost || 0) / prQty;
+                        totalPrinting += qty * ((prPrice * 1.06) + deliveryCost);
+                    }
+                });
+            } else if (hasLegacyPrintingFallback(item)) {
+                const printQty = item.printing_qty || 0;
+                const printPrice = item.printing_price_per_unit || 0;
+                if (printQty > 0 && printPrice > 0) {
+                    totalPrinting += qty * ((printPrice * 1.06) + ((params?.printingDeliveryCost || 0) / printQty));
+                }
+            }
         }
 
         // Пластик
         totalPlastic += (r.costPlastic || 0) * qty;
 
         // Молды
-        // Для бланков в финсмету должна идти амортизация на тираж,
-        // а не полная закупка молда. Иначе бланковый заказ внезапно
-        // выглядит так, будто мы каждый раз заново покупаем форму.
-        if (item.is_blank_mold) {
-            totalMolds += qty * (Number(r?.costMoldAmortization) || 0);
-        } else {
+        const savedMoldTotal = qty * (Number(r?.costMoldAmortization) || 0);
+        if (savedMoldTotal > 0) totalMolds += savedMoldTotal;
+        else {
             const paidBaseMolds = item.base_mold_in_stock ? 0 : 1;
             const totalPaidMolds = Math.max(0, paidBaseMolds + (item.extra_molds || 0));
             totalMolds += safeMoldBaseCost * totalPaidMolds;
         }
 
         // Доставка
-        if (item.delivery_included) totalDelivery += safeDeliveryCostMoscow;
+        const deliveryTotal = qty * (Number(r?.costDelivery) || 0);
+        totalDelivery += deliveryTotal > 0 ? deliveryTotal : (item.delivery_included ? safeDeliveryCostMoscow : 0);
 
         // Выручка изделий (item + printing)
         totalRevenue += ((item.sell_price_item || 0) + getPrintingSellPricePerUnit(item)) * qty;
@@ -1218,8 +1273,9 @@ function calculateFinDirectorData(items, hardwareItems, packagingItems, params, 
 
     const discount = calculateOrderDiscount(totalRevenue, orderAdjustments, params);
     const discountedRevenue = discount.revenueAfterDiscount;
-    const totalTaxes = discountedRevenue * (safeTaxRate + safeVatRate);
+    const totalTaxes = discountedRevenue * safeTaxRate;
     const totalCharity = discountedRevenue * safeCharityRate;
+    totalCommercial = discountedRevenue * 0.065;
 
     return {
         salary: round2(totalSalary),
@@ -1235,14 +1291,17 @@ function calculateFinDirectorData(items, hardwareItems, packagingItems, params, 
         molds: round2(totalMolds),
         delivery: round2(totalDelivery),
         taxes: round2(totalTaxes),
+        commercial: round2(totalCommercial),
         charity: round2(totalCharity),
         grossRevenue: round2(totalRevenue),
         discountAmount: discount.amount,
         discountPercent: discount.percent,
+        revenueNet: round2(discountedRevenue),
+        revenueWithVat: round2(discountedRevenue * (1 + safeVatRate)),
         revenue: round2(discountedRevenue),
         totalCosts: round2(totalSalary + totalIndirect + totalHardwarePurchase + totalNfc + totalHardwareDelivery
             + totalPackagingPurchase + totalPackagingDelivery
-            + totalDesign + totalPrinting + totalPlastic + totalMolds + totalDelivery + totalTaxes + totalCharity),
+            + totalDesign + totalPrinting + totalPlastic + totalMolds + totalDelivery + totalTaxes + totalCommercial + totalCharity),
     };
 }
 

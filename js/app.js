@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v260';
+const APP_VERSION = 'v261';
 
 const App = {
     currentPage: 'orders',
@@ -3610,6 +3610,7 @@ const Calculator = {
             this.setText('fin-molds', formatRub(fin.molds));
             this.setText('fin-delivery', formatRub(fin.delivery));
             this.setText('fin-taxes', formatRub(fin.taxes));
+            this.setText('fin-commercial', formatRub(fin.commercial));
             this.setText('fin-charity', formatRub(fin.charity));
             this.setText('fin-total-costs', formatRub(fin.totalCosts));
             this.setText('fin-revenue', formatRub(fin.revenue));

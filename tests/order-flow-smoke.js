@@ -488,7 +488,8 @@ async function smokeOrderDiscountAffectsSummaryAndFinDirector(context) {
     assert.equal(data.fin.grossRevenue, 100);
     assert.equal(data.fin.discountAmount, 10);
     assert.equal(data.fin.revenue, 90);
-    assert.equal(data.fin.taxes, 9.9);
+    assert.equal(data.fin.taxes, 5.4);
+    assert.equal(data.fin.commercial, 5.85);
     assert.equal(data.fin.charity, 0.9);
 }
 
@@ -1088,6 +1089,61 @@ async function smokeFinDirectorBlankMoldsUseAmortization(context) {
 
     assert.equal(fin.molds, 444, 'blank orders should send mold amortization, not full mold purchase, to fin director');
     assert.equal(fin.totalCosts, 444, 'blank mold amortization should contribute to fin director total cost');
+}
+
+async function smokeFinDirectorRevenueMatchesNetSummaryAndProfit(context) {
+    const data = clone(await vm.runInContext(`(() => {
+        const params = {
+            ...App.params,
+            fotPerHour: 100,
+            taxRate: 0.06,
+            vatRate: 0.05,
+            charityRate: 0.01,
+            moldBaseCost: 0,
+            deliveryCostMoscow: 0,
+        };
+        const items = [{
+            quantity: 100,
+            sell_price_item: 855,
+            sell_price_printing: 0,
+            printings: [],
+            is_blank_mold: true,
+            result: {
+                costFot: 25.9,
+                costIndirect: 181.28,
+                costPlastic: 8.25,
+                costMoldAmortization: 4.44,
+                costDesign: 0,
+                costCutting: 0,
+                costCuttingIndirect: 0,
+                costNfcTag: 6.22,
+                costNfcProgramming: 0,
+                costNfcIndirect: 0,
+                costPrinting: 0,
+                costDelivery: 0,
+                costBuiltinHw: 0,
+                costBuiltinHwIndirect: 0,
+                costBuiltinAssembly: 0,
+                costBuiltinAssemblyIndirect: 0,
+                costTotal: 226.09,
+                hoursBuiltinHw: 0,
+                hoursBuiltinAssembly: 0,
+            },
+            builtin_hw_name: '',
+            builtin_hw_price: 0,
+            builtin_hw_delivery_total: 0,
+        }];
+        const summary = calculateOrderSummary(items, [], [], [], params, [], { mode: 'none', value: 0 });
+        const fin = calculateFinDirectorData(items, [], [], params, [], { mode: 'none', value: 0 });
+        return { summary, fin };
+    })()`, context));
+
+    assert.equal(data.fin.revenue, data.summary.totalRevenue, 'fin director revenue should use the same net-of-VAT base as summary');
+    assert.equal(data.fin.revenueWithVat, data.summary.totalWithVat, 'fin director should still expose the gross customer total with VAT');
+    assert.ok(
+        Math.abs((Math.round((data.fin.revenue - data.fin.totalCosts) * 100) / 100) - data.summary.totalEarned) <= 0.5,
+        'fin director profit should stay aligned with summary earned within row-rounding tolerance'
+    );
 }
 
 async function smokePendantAttachmentCostsIncludeAssemblyAndIndirect(context) {
@@ -7021,6 +7077,7 @@ async function main() {
     await smokeFinDirectorPendantsUseAllAttachments(context);
     await smokeFinDirectorSeparatesHardwareAndNfc(context);
     await smokeFinDirectorBlankMoldsUseAmortization(context);
+    await smokeFinDirectorRevenueMatchesNetSummaryAndProfit(context);
     await smokePendantAttachmentCostsIncludeAssemblyAndIndirect(context);
     await smokePackagingWarehousePickerDefaults(context);
     await smokeCurrentOrderReservationRestoresWarehouseQuota(context);
