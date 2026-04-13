@@ -129,6 +129,7 @@ function createContext() {
         Colors: { data: [] },
         Settings: { getTimingData: () => [] },
         Pendant: { renderAllCards() {} },
+        refreshTemplatesFromMolds() {},
         KPGenerator: { generate: async () => {} },
         STATUS_OPTIONS: [],
         loadHwBlanks: async () => [],
@@ -889,6 +890,27 @@ async function smokeBlankPricingSeparatesCatalogPriceAndNetMargin(context) {
     assert.match(pricingHtml, /вручную в бланке/);
     assert.match(pricingHtml, /Чистая маржа/);
     assert.match(pricingHtml, /35%/);
+}
+
+async function smokeBlankTargetFormulaMatchesVatExclusiveMargin(context) {
+    const state = clone(await vm.runInContext(`(() => {
+        const params = { ...App.params, taxRate: 0.06, vatRate: 0.05, charityRate: 0.01 };
+        const cost = 277;
+        const qty = 1000;
+        return {
+            blankTarget: calcBlankTargetPrice(cost, qty, params),
+            blankSell: calcBlankSellPrice(cost, qty, params),
+            blankNet40: calcSellByNetMargin40(cost, params),
+            customTarget: calculateTargetPrice(cost, params, qty),
+            blankMargin: calculateActualMargin(calcBlankSellPrice(cost, qty, params), cost).percent,
+        };
+    })()`, context));
+
+    assert.equal(state.blankTarget, 595.7, 'blank target price should use the same VAT-exclusive base formula as custom items');
+    assert.equal(state.blankNet40, 595.7, '40% blank helper price should match the calculator target formula');
+    assert.equal(state.customTarget, 595.7, 'custom target formula should stay aligned with blank target formula');
+    assert.equal(state.blankSell, 595, 'blank catalog sell price should round the VAT-exclusive target to the nearest 5');
+    assert.equal(state.blankMargin, 39.95, 'rounded blank price should stay very close to the 40% net target');
 }
 
 async function smokeFinDirectorPendantsUseAllAttachments(context) {
@@ -6916,7 +6938,7 @@ async function smokeWarehouseInventoryAuditMutationBlockedAfterLaterMovement(con
 
 async function main() {
     const context = createContext();
-    ['js/calculator.js', 'js/app.js', 'js/orders.js', 'js/warehouse.js', 'js/order-detail.js'].forEach(file => runScript(context, file));
+    ['js/calculator.js', 'js/app.js', 'js/orders.js', 'js/warehouse.js', 'js/order-detail.js', 'js/molds.js'].forEach(file => runScript(context, file));
     stubRuntime(context);
 
     await smokeCalculatorPersistence(context);
@@ -6926,6 +6948,7 @@ async function main() {
     await smokeLoadOrderHydratesZeroWarehousePriceFromCurrentStock(context);
     await smokeOrderListAndDetailUseLiveFinancialSnapshot(context);
     await smokeBlankPricingSeparatesCatalogPriceAndNetMargin(context);
+    await smokeBlankTargetFormulaMatchesVatExclusiveMargin(context);
     await smokeOrderDiscountAffectsSummaryAndFinDirector(context);
     await smokeDiscountShownInCustomerInvoice(context);
     await smokeCalculatorSupportsMoreThanSixItems(context);

@@ -385,7 +385,7 @@ async function main() {
         Molds.enrichMolds();
     `, context);
     const formulaPrice = vm.runInContext(`Molds.allMolds[0].tiers[50].sellPrice`, context);
-    assert.equal(formulaPrice, 485);
+    assert.equal(formulaPrice, 390);
 
     vm.runInContext(`
         Molds.allMolds[0].use_manual_prices = true;

@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v258';
+const APP_VERSION = 'v259';
 
 const App = {
     currentPage: 'orders',
@@ -3780,7 +3780,6 @@ const Calculator = {
         const calcTarget = (cost, marginPct) => {
             if (cost === 0) return 0;
             const keepRate = 1
-                - (Number.isFinite(params?.vatRate) ? params.vatRate : 0.05)
                 - (params.taxRate || 0.06)
                 - (Number.isFinite(params?.charityRate) ? params.charityRate : 0.01)
                 - 0.065
@@ -3823,10 +3822,9 @@ const Calculator = {
             }
 
             const taxRate = Number.isFinite(params?.taxRate) ? params.taxRate : 0.06;
-            const vatRate = Number.isFinite(params?.vatRate) ? params.vatRate : 0.05;
             const charityRate = Number.isFinite(params?.charityRate) ? params.charityRate : 0.01;
             const commercialRate = 0.065;
-            const keepRate = 1 - vatRate - taxRate - charityRate - commercialRate - margin;
+            const keepRate = 1 - taxRate - charityRate - commercialRate - margin;
             if (keepRate <= 0) {
                 return { price: 0, note: 'прайс бланков', source: 'empty' };
             }
@@ -4056,7 +4054,7 @@ const Calculator = {
         });
 
         // Margin row (% only)
-        html += `<div style="padding:6px 8px;border-right:1px solid var(--border);font-weight:600;">Чистая маржа<div style="font-size:9px;color:var(--text-muted);font-weight:400;">после ОСН и коммерч.</div></div>`;
+        html += `<div style="padding:6px 8px;border-right:1px solid var(--border);font-weight:600;">Чистая маржа<div style="font-size:9px;color:var(--text-muted);font-weight:400;">на цене без НДС; после УСН, благотворительности и коммерч.</div></div>`;
         columns.forEach(col => {
             let marginHtml = '—';
             let warnHtml = '';
