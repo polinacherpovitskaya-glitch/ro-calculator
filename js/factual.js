@@ -422,12 +422,48 @@ const Factual = {
             .map(order => Number(order?.id))
             .filter(Number.isFinite);
         if (!orderIds.length) return;
+        const staleImportOrderIds = await this._collectStaleFinTabloOrderIds(orderIds);
         await window.FinTablo.autoSyncMatchedImports({
             orderIds,
             orders: scopedOrders,
             silent: true,
-            minIntervalMs: 60 * 1000,
+            minIntervalMs: staleImportOrderIds.length ? 0 : 60 * 1000,
+            force: staleImportOrderIds.length > 0,
         });
+    },
+
+    async _collectStaleFinTabloOrderIds(orderIds = []) {
+        const staleOrderIds = [];
+        for (const rawId of orderIds) {
+            const orderId = Number(rawId);
+            if (!Number.isFinite(orderId)) continue;
+            const imports = (await loadFintabloImports(orderId)) || [];
+            if (imports.some(row => this._isStaleSplitFinTabloImport(row))) {
+                staleOrderIds.push(orderId);
+            }
+        }
+        return staleOrderIds;
+    },
+
+    _isStaleSplitFinTabloImport(row = {}) {
+        const rawData = row?.raw_data || {};
+        if (String(row?.source || '') !== 'api') return false;
+        if (!rawData?.splitApplied) return false;
+        const breakdown = rawData?.field_breakdown;
+        const hasBreakdown = breakdown && Object.values(breakdown).some(value => Array.isArray(value) && value.length > 0);
+        if (hasBreakdown) return false;
+        const factOther = this._num(row?.fact_other);
+        if (factOther <= 0) return false;
+        const classifiedTotal = this._num(row?.fact_materials)
+            + this._num(row?.fact_hardware)
+            + this._num(row?.fact_packaging)
+            + this._num(row?.fact_delivery)
+            + this._num(row?.fact_printing)
+            + this._num(row?.fact_molds)
+            + this._num(row?.fact_taxes)
+            + this._num(row?.fact_commercial)
+            + this._num(row?.fact_charity);
+        return classifiedTotal <= 0.01;
     },
 
     setCustomRange() {

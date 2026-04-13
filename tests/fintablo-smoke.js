@@ -122,7 +122,8 @@ function smokeBuildImportUsesOnlyOrderSplit(context) {
     })()`, context);
 
     assert.equal(result.fact_total, 20573);
-    assert.equal(result.fact_other, 20573);
+    assert.equal(result.fact_delivery, 953);
+    assert.equal(result.fact_other, 19620);
     assert.equal(result.raw_data.splitApplied, true);
   }
 
@@ -170,6 +171,30 @@ function smokeBuildImportMatchesByDescriptionAndStoresBreakdown(context) {
     assert.equal(Array.isArray(result.raw_data.field_breakdown.fact_hardware), true);
     assert.equal(result.raw_data.field_breakdown.fact_hardware[0].description, 'Закупка фурнитуры в России');
     assert.equal(result.raw_data.field_breakdown.fact_taxes[0].amount, 1100);
+}
+
+function smokeSplitImportUsesOriginalDescriptionForClassification(context) {
+    const result = vm.runInContext(`(() => {
+        FinTablo._categories = {
+            9: { id: 9, name: 'Прочие расходы', parentId: null },
+        };
+        return FinTablo._buildImportData(
+            { id: 41, order_name: 'Сплат картхолдеры' },
+            { id: 42, name: 'Сплат картхолдеры' },
+            [
+                {
+                    group: 'outcome',
+                    value: 142215,
+                    description: '114394 - Сплат картхолдеры 27821 - Лемана про / Закупка фурнитуры в России',
+                    categoryId: 9,
+                },
+            ]
+        );
+    })()`, context);
+
+    assert.equal(result.fact_hardware, 114394, 'split imports should classify by the original transaction description, not only by the scoped label');
+    assert.equal(result.raw_data.splitApplied, true);
+    assert.match(result.raw_data.field_breakdown.fact_hardware[0].description, /Сплат кардхолдеры|Сплат картхолдеры/);
 }
 
 function smokeCsvImportKeepsPackagingAndCommercial(context) {
@@ -283,6 +308,7 @@ async function main() {
     smokeBuildImportUsesOnlyOrderSplit(context);
     smokeBuildImportSeparatesCommercial(context);
     smokeBuildImportMatchesByDescriptionAndStoresBreakdown(context);
+    smokeSplitImportUsesOriginalDescriptionForClassification(context);
     smokeCsvImportKeepsPackagingAndCommercial(context);
     smokeBuildImportKeepsFullIncomeForAttachedDeal(context);
     smokeRenderDetailShowsAllocatedValue(context);

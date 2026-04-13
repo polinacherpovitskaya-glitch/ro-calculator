@@ -570,9 +570,12 @@ const FinTablo = {
             // Also check parent category name
             const parentCat = cat && cat.parentId ? this._categories[cat.parentId] : null;
             const parentName = (parentCat ? parentCat.name : '').toLowerCase();
-            const description = String(
-                (t._scoped_mode === 'split' && t._scoped_label) ? t._scoped_label : (t.description || '')
-            ).toLowerCase();
+            const scopedLabel = String(t._scoped_label || '').trim();
+            const originalDescription = String(t.description || '').trim();
+            const description = [scopedLabel, originalDescription]
+                .filter(Boolean)
+                .join(' | ')
+                .toLowerCase();
 
             let matchedField = null;
             let matched = false;
@@ -597,7 +600,7 @@ const FinTablo = {
                 if (!Array.isArray(breakdown[matchedField])) breakdown[matchedField] = [];
                 breakdown[matchedField].push({
                     amount,
-                    description: String(t.description || '').trim(),
+                    description: scopedLabel || originalDescription,
                     category: cat ? cat.name : (parentCat ? parentCat.name : ''),
                     date: t.date || t.created_at || '',
                 });
@@ -850,3 +853,7 @@ const FinTablo = {
         return Number.isFinite(num) ? num : 0;
     },
 };
+
+if (typeof window !== 'undefined') {
+    window.FinTablo = FinTablo;
+}

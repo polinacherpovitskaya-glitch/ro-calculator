@@ -960,6 +960,52 @@ async function smokeFactualRequestsFinTabloAutoSync(context) {
     factual._renderAll = originalRenderAll;
 }
 
+async function smokeFactualForcesRepairForStaleSplitImports(context) {
+    context.__autoSyncCalls = [];
+    context.__imports = [
+        {
+            source: 'api',
+            fact_materials: 0,
+            fact_hardware: 0,
+            fact_packaging: 0,
+            fact_delivery: 0,
+            fact_printing: 0,
+            fact_molds: 0,
+            fact_taxes: 0,
+            fact_commercial: 0,
+            fact_charity: 0,
+            fact_other: 142215,
+            raw_data: { splitApplied: true },
+        },
+    ];
+    context.loadOrders = async () => [
+        { id: 77, order_name: 'Сплат картхолдеры', status: 'production_casting' },
+    ];
+    context.loadTimeEntries = async () => [];
+    context.loadEmployees = async () => [];
+    context.window.FinTablo = {
+        autoSyncMatchedImports: async (opts) => {
+            context.__autoSyncCalls.push(opts);
+            return { synced: 1 };
+        },
+    };
+    const factual = vm.runInContext('Factual', context);
+    const originalApplyFilter = factual._applyFilter;
+    const originalRenderAll = factual._renderAll;
+    factual._applyFilter = () => {};
+    factual._renderAll = async () => {};
+
+    await factual.load();
+
+    assert.equal(context.__autoSyncCalls.length, 1, 'stale split imports should still trigger one auto-sync');
+    assert.equal(context.__autoSyncCalls[0].force, true, 'stale split imports should bypass the normal auto-sync interval');
+    assert.equal(context.__autoSyncCalls[0].minIntervalMs, 0, 'stale split imports should request immediate repair sync');
+
+    factual._applyFilter = originalApplyFilter;
+    factual._renderAll = originalRenderAll;
+    context.__imports = [];
+}
+
 function smokePeriodFilterUsesDeadlineAndFactLoad(context) {
     vm.runInContext(`(() => {
         Factual._allOrders = [
@@ -1028,6 +1074,7 @@ async function main() {
     await smokeWorkshopHardwareFactUsesProjectState(context);
     await smokeEnsureComputedOrderUsesCurrentWarehousePlanMaterials(context);
     await smokeFactualRequestsFinTabloAutoSync(context);
+    await smokeFactualForcesRepairForStaleSplitImports(context);
     smokePeriodFilterUsesDeadlineAndFactLoad(context);
     console.log('factual smoke checks passed');
 }
