@@ -45,9 +45,9 @@ const Factual = {
         { key: 'plastic',             label: 'Пластик / материалы', planField: 'plastic',       hint: 'план + ФинТабло / вруч.' },
         { key: 'molds',               label: 'Молды',            planField: 'molds',            hint: 'FinTablo / вруч.' },
         { key: 'delivery_client',     label: 'Доставка',         planField: 'delivery',         hint: 'вручную' },
-        { key: 'taxes',               label: 'Налоги',            planField: 'taxes',            hint: 'калькулятор / ФинТабло' },
-        { key: 'commercial',          label: 'Коммерческий отдел', planField: 'commercial',     hint: '6.5% от выручки' },
-        { key: 'charity',             label: 'Благотворительность', planField: 'charity',       hint: '1% / ФинТабло' },
+        { key: 'taxes',               label: 'Налоги',            planField: 'taxes',            hint: '12% от выручки без НДС / ФинТабло' },
+        { key: 'commercial',          label: 'Коммерческий отдел', planField: 'commercial',     hint: '6.5% от выручки с НДС' },
+        { key: 'charity',             label: 'Благотворительность', planField: 'charity',       hint: '1% от выручки с НДС / ФинТабло' },
         { key: 'other',               label: 'Прочее',           planField: 'other',            hint: 'FinTablo / вруч.' },
     ],
 
@@ -86,6 +86,14 @@ const Factual = {
     MONEY_ONLY_ROW_KEYS: new Set(['design_printing', 'delivery_client', 'taxes', 'commercial', 'charity', 'other']),
 
     _num(v) { const n = parseFloat(v); return Number.isFinite(n) ? n : 0; },
+    _vatRate(params) { const raw = Number(params?.vatRate); return Number.isFinite(raw) ? raw : 0.05; },
+    _taxRate(params) { const raw = Number(params?.taxRate); return Number.isFinite(raw) ? raw : 0.12; },
+    _charityRate(params) { const raw = Number(params?.charityRate); return Number.isFinite(raw) ? raw : 0.01; },
+    _commercialRate() { return 0.065; },
+    _grossMultiplier(params) { return 1 + this._vatRate(params); },
+    _calcTaxesByRevenue(revenue, params) { return round2(this._num(revenue) * this._taxRate(params)); },
+    _calcCommercialByRevenue(revenue, params) { return round2(this._num(revenue) * this._commercialRate() * this._grossMultiplier(params)); },
+    _calcCharityByRevenue(revenue, params) { return round2(this._num(revenue) * this._charityRate(params) * this._grossMultiplier(params)); },
     _planItemCost(item, ...keys) {
         for (const key of keys) {
             const value = this._num(item?.[key]);
@@ -1070,17 +1078,18 @@ _renderCompactResult(result, options = {}) {
         }
         if (rowKey === 'taxes') {
             const factRevenue = this._num(factData.fact_revenue);
-            const taxRate = this._num(App.params?.taxRate);
-            const vatRate = this._num(App.params?.vatRate);
-            return factRevenue > 0 ? `${round2((taxRate + vatRate) * 100)}% от ${this.fmtRub(factRevenue)}` : '';
+            const taxRate = this._taxRate(App.params || {});
+            return factRevenue > 0 ? `${round2(taxRate * 100)}% от ${this.fmtRub(factRevenue)} без НДС` : '';
         }
         if (rowKey === 'commercial') {
             const factRevenue = this._num(factData.fact_revenue);
-            return factRevenue > 0 ? `6.5% от ${this.fmtRub(factRevenue)}` : '';
+            const grossRevenue = round2(factRevenue * this._grossMultiplier(App.params || {}));
+            return factRevenue > 0 ? `6.5% от ${this.fmtRub(grossRevenue)} с НДС` : '';
         }
         if (rowKey === 'charity') {
             const factRevenue = this._num(factData.fact_revenue);
-            return factRevenue > 0 ? `1% от ${this.fmtRub(factRevenue)}` : '';
+            const grossRevenue = round2(factRevenue * this._grossMultiplier(App.params || {}));
+            return factRevenue > 0 ? `1% от ${this.fmtRub(grossRevenue)} с НДС` : '';
         }
         if ((rowKey === 'plastic' || rowKey === 'molds') && this._num(planData?.[rowKey === 'delivery_client' ? 'delivery' : rowKey]) > 0) {
             return `без отдельного денежного факта, пока используем расчетную норму — ${this.fmtRub(planData[rowKey === 'delivery_client' ? 'delivery' : rowKey])}`;
@@ -1543,10 +1552,9 @@ async _loadFactSummaries() {
             round2(hardwarePurchase) + round2(hardwareDelivery) + round2(nfcTotal) + round2(packagingPurchase) + round2(packagingDelivery) +
             round2(designPrinting) + round2(plastic) + round2(molds) + round2(delivery)
         );
-        const charityRate = this._num(params.charityRate) || 0.01;
-        const taxes = round2(orderRevenue * this._num(params.taxRate));
-        const commercial = round2(orderRevenue * 0.065);
-        const charity = round2(orderRevenue * charityRate);
+        const taxes = this._calcTaxesByRevenue(orderRevenue, params);
+        const commercial = this._calcCommercialByRevenue(orderRevenue, params);
+        const charity = this._calcCharityByRevenue(orderRevenue, params);
         const otherBalance = 0;
         const computedTotalCosts = round2(rowsWithoutTaxes + taxes + commercial + charity + otherBalance);
         const computedMarginPercent = orderRevenue > 0 ? round2(((orderRevenue - computedTotalCosts) / orderRevenue) * 100) : 0;
@@ -1995,12 +2003,10 @@ async _loadFactSummaries() {
             const importedCommercial = this._num(importTotals.fact_commercial);
             const importedCharity = this._num(importTotals.fact_charity);
             const currentFactRevenue = this._num(factData.fact_revenue);
-            const taxRate = this._num(params?.taxRate);
-            const vatRate = this._num(params?.vatRate);
-            const charityRate = this._num(params?.charityRate) || 0.01;
-            const taxesByRevenue = currentFactRevenue > 0 ? round2(currentFactRevenue * (taxRate + vatRate)) : 0;
-            const commercialByRevenue = currentFactRevenue > 0 ? round2(currentFactRevenue * 0.065) : 0;
-            const charityByRevenue = currentFactRevenue > 0 ? round2(currentFactRevenue * charityRate) : 0;
+            const taxRate = this._taxRate(params);
+            const taxesByRevenue = currentFactRevenue > 0 ? this._calcTaxesByRevenue(currentFactRevenue, params) : 0;
+            const commercialByRevenue = currentFactRevenue > 0 ? this._calcCommercialByRevenue(currentFactRevenue, params) : 0;
+            const charityByRevenue = currentFactRevenue > 0 ? this._calcCharityByRevenue(currentFactRevenue, params) : 0;
             const effectiveTaxes = importedTaxes > 0 ? importedTaxes : taxesByRevenue;
             if (effectiveTaxes > 0) {
                 this._applyAutoFactValue(factData, 'fact_taxes', effectiveTaxes);
@@ -2008,20 +2014,20 @@ async _loadFactSummaries() {
                 this._setSourceHint(
                     factData,
                     'fact_taxes',
-                    importedTaxes > 0 ? 'ФинТабло' : `${round2((taxRate + vatRate) * 100)}% от факта выручки`
+                    importedTaxes > 0 ? 'ФинТабло' : `${round2(taxRate * 100)}% от факта выручки без НДС`
                 );
             }
             const effectiveCommercial = importedCommercial > 0 ? importedCommercial : commercialByRevenue;
             if (effectiveCommercial > 0) {
                 this._applyAutoFactValue(factData, 'fact_commercial', effectiveCommercial);
                 factData._auto_fintablo.fact_commercial = importedCommercial > 0;
-                this._setSourceHint(factData, 'fact_commercial', importedCommercial > 0 ? 'ФинТабло' : '6.5% от факта выручки');
+                this._setSourceHint(factData, 'fact_commercial', importedCommercial > 0 ? 'ФинТабло' : '6.5% от факта выручки с НДС');
             }
             const effectiveCharity = importedCharity > 0 ? importedCharity : charityByRevenue;
             if (effectiveCharity > 0) {
                 this._applyAutoFactValue(factData, 'fact_charity', effectiveCharity);
                 factData._auto_fintablo.fact_charity = importedCharity > 0;
-                this._setSourceHint(factData, 'fact_charity', importedCharity > 0 ? 'ФинТабло' : '1% от факта выручки');
+                this._setSourceHint(factData, 'fact_charity', importedCharity > 0 ? 'ФинТабло' : '1% от факта выручки с НДС');
             }
 
             const ftPackaging = this._num(importTotals.fact_packaging);
@@ -2657,11 +2663,11 @@ async _loadFactSummaries() {
             return lines.join('<br>');
         }
         if (rowKey === 'taxes') {
-            const rate = this._num(App.params?.taxRate);
+            const rate = this._taxRate(App.params || {});
             return rate > 0 ? `${round2(rate * 100)}% от выручки без НДС` : '';
         }
-        if (rowKey === 'commercial') return '6.5% от выручки без НДС';
-        if (rowKey === 'charity') return '1% от выручки без НДС';
+        if (rowKey === 'commercial') return '6.5% от выручки с НДС';
+        if (rowKey === 'charity') return '1% от выручки с НДС';
         if (rowKey === 'plastic' || rowKey === 'molds') {
             const amount = this._num(planData?.[rowKey === 'delivery_client' ? 'delivery' : rowKey]);
             return amount > 0 ? `расчетная норма — ${this.fmtRub(amount)}` : '';

@@ -751,8 +751,10 @@ async function loadSettings() {
             Object.keys(defaults).forEach(k => {
                 if (obj[k] === undefined) obj[k] = defaults[k];
             });
-            // Legacy normalization: old baseline used 189h/worker, now standard is 168h (21*8).
+            // Legacy normalization.
             if ((obj.hours_per_worker || 0) === 189) obj.hours_per_worker = 168;
+            // Global finance rule updated from 6% to 12% tax reserve.
+            if ((obj.tax_rate || 0) === 0.06) obj.tax_rate = 0.12;
             // Cache to localStorage for offline/backup
             setLocal(LOCAL_KEYS.settings, obj);
             return obj;
@@ -760,12 +762,14 @@ async function loadSettings() {
         // Supabase empty — seed from localStorage or defaults, then return
         const local = getLocal(LOCAL_KEYS.settings) || getDefaultSettings();
         if ((local.hours_per_worker || 0) === 189) local.hours_per_worker = 168;
+        if ((local.tax_rate || 0) === 0.06) local.tax_rate = 0.12;
         console.log('Supabase settings empty, seeding from local...');
         await saveAllSettings(local);
         return local;
     }
     const local = getLocal(LOCAL_KEYS.settings) || getDefaultSettings();
     if ((local.hours_per_worker || 0) === 189) local.hours_per_worker = 168;
+    if ((local.tax_rate || 0) === 0.06) local.tax_rate = 0.12;
     return local;
 }
 
@@ -817,7 +821,7 @@ function getDefaultSettings() {
         design_cost: 8500,
         nfc_tag_cost: 10,
         vat_rate: 0.05,
-        tax_rate: 0.06,
+        tax_rate: 0.12,
         charity_rate: 0.01,
         margin_target: 0.40,
         delivery_cost_moscow: 2000,

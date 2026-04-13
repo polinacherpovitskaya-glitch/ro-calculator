@@ -286,7 +286,7 @@ function smokeBuildPlanUsesSavedSnapshotCostsAndDedupedHardware(context) {
             ],
             {
                 fotPerHour: 10,
-                taxRate: 0.06,
+                taxRate: 0.12,
                 vatRate: 0.05,
                 indirectPerHour: 0,
                 wasteFactor: 1.1,
@@ -301,9 +301,9 @@ function smokeBuildPlanUsesSavedSnapshotCostsAndDedupedHardware(context) {
     assert.equal(result.planData.nfcTotal, 0, 'without NFC the separate plan NFC row should stay empty');
     assert.equal(result.planHours.hoursHardware, 1, 'saved order assembly hours should win over duplicated hardware norm noise');
     assert.equal(result.planData.salaryAssembly, 10, 'assembly salary should follow saved order hours');
-    assert.equal(result.planData.taxes, 12, 'plan taxes should use only the 6% tax from net revenue without VAT');
-    assert.equal(result.planData.commercial, 13, 'commercial department should be planned as 6.5% of revenue');
-    assert.equal(result.planData.charity, 2, 'charity should be stored as a separate plan row');
+    assert.equal(result.planData.taxes, 24, 'plan taxes should use the 12% reserve from revenue without VAT');
+    assert.equal(result.planData.commercial, 13.65, 'commercial department should be planned as 6.5% of revenue with VAT');
+    assert.equal(result.planData.charity, 2.1, 'charity should be stored as 1% of revenue with VAT');
     assert.equal(result.planData.molds, 44.4, 'blank plan rows should keep mold amortization instead of dropping it');
     assert.equal(result.planData.other, 0, 'no corrective residue should remain for consistent snapshot');
     assert.equal(
@@ -326,7 +326,7 @@ function smokeBuildPlanUsesSavedSnapshotCostsAndDedupedHardware(context) {
             result.planData.other,
         'plan rows should add up to current computed total cost'
     );
-    assert.equal(result.planData.planEarned, -41.4, 'plan profit should be recomputed from current plan rows');
+    assert.equal(result.planData.planEarned, -54.15, 'plan profit should be recomputed from current plan rows');
 }
 
 function smokeBuildPlanSeparatesProductBuiltinAssembly(context) {
@@ -362,7 +362,7 @@ function smokeBuildPlanSeparatesProductBuiltinAssembly(context) {
             ],
             {
                 fotPerHour: 10,
-                taxRate: 0.06,
+                taxRate: 0.12,
                 vatRate: 0.05,
                 indirectPerHour: 100,
                 wasteFactor: 1.1,
@@ -518,7 +518,7 @@ async function smokeTaxesIncludeCharity(context) {
             [],
             {
                 fotPerHour: 0,
-                taxRate: 0.06,
+                taxRate: 0.12,
                 vatRate: 0.05,
                 charityRate: 0.01,
                 indirectPerHour: 0,
@@ -527,9 +527,9 @@ async function smokeTaxesIncludeCharity(context) {
         );
         return { taxes: built.planData.taxes, commercial: built.planData.commercial, charity: built.planData.charity };
     })()`, context);
-    assert.equal(planTaxes.taxes, 60, 'plan taxes should include only the 6% tax because VAT lives above net revenue');
-    assert.equal(planTaxes.commercial, 65, 'plan should include commercial department as отдельную строку 6.5%');
-    assert.equal(planTaxes.charity, 10, 'plan charity should be separated as 1% of revenue');
+    assert.equal(planTaxes.taxes, 120, 'plan taxes should include the 12% reserve from revenue without VAT');
+    assert.equal(planTaxes.commercial, 68.25, 'plan should include commercial department as отдельную строку 6.5% от выручки с НДС');
+    assert.equal(planTaxes.charity, 10.5, 'plan charity should be separated as 1% of revenue with НДС');
 
     context.__imports = [
         {
@@ -554,7 +554,7 @@ async function smokeTaxesIncludeCharity(context) {
             factData,
             { plastic: 0, hardwareTotal: 0, packagingTotal: 0 },
             { hoursPlastic: 0, hoursTrim: 0, hoursHardware: 0, hoursPackaging: 0 },
-            { taxRate: 0.06, vatRate: 0.05, charityRate: 0.01, indirectPerHour: 0 },
+            { taxRate: 0.12, vatRate: 0.05, charityRate: 0.01, indirectPerHour: 0 },
             101,
             'Charity Order'
         );
@@ -595,7 +595,7 @@ async function smokeTaxesFallbackToRevenueWhenImportMissing(context) {
             factData,
             { plastic: 0, hardwareTotal: 0, packagingTotal: 0 },
             { hoursPlastic: 0, hoursTrim: 0, hoursHardware: 0, hoursPackaging: 0 },
-            { taxRate: 0.06, vatRate: 0.05, charityRate: 0.01, indirectPerHour: 0 },
+            { taxRate: 0.12, vatRate: 0.05, charityRate: 0.01, indirectPerHour: 0 },
             111,
             'Fallback Taxes Order'
         );
@@ -604,8 +604,8 @@ async function smokeTaxesFallbackToRevenueWhenImportMissing(context) {
 
     const fact = context.__fallbackTaxesFact;
     assert.equal(fact.fact_revenue, 1000, 'fact revenue should still come from FinTablo import');
-    assert.equal(fact.fact_taxes, 110, 'when FinTablo taxes are missing, analytics should fallback to 11% of fact revenue');
-    assert.equal(fact._source_hints.fact_taxes, '11% от факта выручки');
+    assert.equal(fact.fact_taxes, 120, 'when FinTablo taxes are missing, analytics should fallback to 12% of fact revenue without VAT');
+    assert.equal(fact._source_hints.fact_taxes, '12% от факта выручки без НДС');
 }
 
 async function smokeCustomHardwareWaitsForFinTablo(context) {
@@ -619,7 +619,7 @@ async function smokeCustomHardwareWaitsForFinTablo(context) {
             factData,
             { plastic: 0, hardwareTotal: 622, nfcTotal: 0, packagingTotal: 0, molds: 444 },
             { hoursPlastic: 0, hoursTrim: 0, hoursHardware: 0, hoursPackaging: 0 },
-            { taxRate: 0.06, vatRate: 0.05, charityRate: 0.01, indirectPerHour: 0 },
+            { taxRate: 0.12, vatRate: 0.05, charityRate: 0.01, indirectPerHour: 0 },
             211,
             'Custom Hardware Order',
             { id: 211, order_name: 'Custom Hardware Order' },
@@ -651,7 +651,7 @@ async function smokeWarehouseHardwareWaitsForActualWarehouseFact(context) {
             factData,
             { plastic: 0, hardwareTotal: 700, nfcTotal: 80, packagingTotal: 0, molds: 0 },
             { hoursPlastic: 0, hoursTrim: 0, hoursHardware: 0, hoursPackaging: 0 },
-            { taxRate: 0.06, vatRate: 0.05, charityRate: 0.01, indirectPerHour: 0 },
+            { taxRate: 0.12, vatRate: 0.05, charityRate: 0.01, indirectPerHour: 0 },
             212,
             'Warehouse Hardware Order',
             { id: 212, order_name: 'Warehouse Hardware Order' },
@@ -710,7 +710,7 @@ async function smokeMultipleImportsAccumulateIntoFact(context) {
             factData,
             { plastic: 0, hardwareTotal: 0, packagingTotal: 0 },
             { hoursPlastic: 0, hoursTrim: 0, hoursHardware: 0, hoursPackaging: 0 },
-            { taxRate: 0.06, vatRate: 0.05, charityRate: 0.01, indirectPerHour: 0 },
+            { taxRate: 0.12, vatRate: 0.05, charityRate: 0.01, indirectPerHour: 0 },
             102,
             'Accumulated Imports Order'
         );
@@ -815,7 +815,7 @@ async function smokeEnsureComputedOrderUsesCurrentWarehousePlanMaterials(context
     ];
     context.App.params = {
         fotPerHour: 10,
-        taxRate: 0.06,
+        taxRate: 0.12,
         vatRate: 0.05,
         charityRate: 0.01,
         indirectPerHour: 0,
@@ -866,8 +866,8 @@ async function smokeEnsureComputedOrderUsesCurrentWarehousePlanMaterials(context
     const computed = await vm.runInContext(`(async () => Factual._ensureComputedOrder(91))()`, context);
     assert.equal(computed.planData.hardwareTotal, 7, 'plan hardware should keep only ordinary hardware in hardware row');
     assert.equal(computed.planData.nfcTotal, 80, 'plan NFC should use current warehouse prices in a separate row');
-    assert.equal(computed.planData.totalCosts, 322, 'total plan cost should include current materials and commercial department on the net-of-VAT base');
-    assert.equal(computed.planData.planEarned, 678, 'plan profit should follow recomputed current rows including commercial department');
+    assert.equal(computed.planData.totalCosts, 385.75, 'total plan cost should include current materials and commercial department on the current tax-and-gross-share model');
+    assert.equal(computed.planData.planEarned, 614.25, 'plan profit should follow recomputed current rows including commercial department');
 }
 
 async function smokeWorkshopLegacyLeavesAssemblyExplicit(context) {
@@ -1159,7 +1159,7 @@ async function smokeStaleSplitImportDoesNotLeakIntoFactMoney(context) {
     ];
 
     await vm.runInContext(`(async () => {
-        App.params = { taxRate: 0.06, vatRate: 0.05, charityRate: 0.01, indirectPerHour: 0 };
+        App.params = { taxRate: 0.12, vatRate: 0.05, charityRate: 0.01, indirectPerHour: 0 };
         const factData = {
             fact_revenue: 710500,
             fact_hardware_total: 114394,

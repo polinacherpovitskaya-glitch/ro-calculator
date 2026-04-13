@@ -5,11 +5,12 @@
 
 // Pricing formula for blanks page:
 // 1. Себестоимость рассчитывается как для любых изделий (молд / 4500)
-// 2. НДС добавляется сверху и НЕ входит в базовую цену.
-//    Из цены без НДС после оплаты остаётся 86.5%:
-//    6% УСН + 1% благотворительность + 6.5% коммерческий отдел
-// 3. Целевая чистая маржа зависит от тиража
-// 4. Цена без НДС = себест / (0.865 - target_net_margin), округление до 5₽
+// 2. НДС 5% добавляется сверху и НЕ входит в базовую цену.
+// 3. Из цены без НДС удерживаются:
+//    - налоги 12% от базы без НДС
+//    - коммерческий отдел 6.5% от суммы с НДС
+//    - благотворительность 1% от суммы с НДС
+// 4. Цена без НДС = себест / (1 - налоги - коммерческий(с НДС) - благотворительность(с НДС) - target_net_margin), округление до 5₽
 
 // Молд НЕ делим на тираж заказа — делим на макс. производительность молда
 // Макс. производительность = 5000 шт * 0.9 = 4500 шт
@@ -36,6 +37,21 @@ function roundTo5(n) {
     return Math.round(n / 5) * 5;
 }
 
+function getBlankKeepRate(params, margin = 0) {
+    if (typeof getKeepRateForTargetMargin === 'function') {
+        return getKeepRateForTargetMargin(params, margin);
+    }
+    const vatRate = Number.isFinite(params?.vatRate) ? params.vatRate : 0.05;
+    const taxRate = Number.isFinite(params?.taxRate) ? params.taxRate : 0.12;
+    const charityRate = Number.isFinite(params?.charityRate) ? params.charityRate : 0.01;
+    const commercialRate = 0.065;
+    return 1 - taxRate - (commercialRate * (1 + vatRate)) - (charityRate * (1 + vatRate)) - (Number(margin) || 0);
+}
+
+function getBlankRetentionRate(params) {
+    return getBlankKeepRate(params, 0);
+}
+
 function getBlankMargin(qty) {
     const normalizedQty = Number(qty) || 0;
     const tier = BLANKS_TIER_MARGINS.find(t => normalizedQty <= t.max);
@@ -58,21 +74,15 @@ function hasManualBlankPriceOverride(mold) {
 function calcBlankTargetPrice(cost, qty, params) {
     if (cost <= 0 || qty <= 0) return 0;
     const margin = getBlankMargin(qty);
-    const taxRate = Number.isFinite(params?.taxRate) ? params.taxRate : 0.06;
-    const charityRate = Number.isFinite(params?.charityRate) ? params.charityRate : 0.01;
-    const commercialRate = 0.065;
-    const keepRate = 1 - taxRate - charityRate - commercialRate - margin;
+    const keepRate = getBlankKeepRate(params, margin);
     if (keepRate <= 0) return 0;
     return round2(cost / keepRate);
 }
 
 function calcSellByNetMargin40(cost, params) {
     if (!Number.isFinite(cost) || cost <= 0) return 0;
-    const taxRate = Number.isFinite(params?.taxRate) ? params.taxRate : 0.06;
-    const charityRate = Number.isFinite(params?.charityRate) ? params.charityRate : 0.01;
-    const commercialRate = 0.065;
     const margin = 0.40;
-    const keepRate = 1 - taxRate - charityRate - commercialRate - margin;
+    const keepRate = getBlankKeepRate(params, margin);
     if (keepRate <= 0) return 0;
     return round2(cost / keepRate);
 }
@@ -253,11 +263,7 @@ const Molds = {
                     isCustom = true;
                 } else if (customMargin !== null && customMargin !== undefined) {
                     // Custom margin percentage override
-                    const keepRate = 1
-                        - (params.taxRate || 0.06)
-                        - (Number.isFinite(params?.charityRate) ? params.charityRate : 0.01)
-                        - 0.065
-                        - margin;
+                    const keepRate = getBlankKeepRate(params, margin);
                     targetPrice = keepRate > 0 ? round2(adjustedCost / keepRate) : 0;
                     sellPrice = roundTo5(targetPrice);
                     isCustom = true;
@@ -268,10 +274,7 @@ const Molds = {
                 }
 
                 // Calculate actual net margin on the price without VAT.
-                const keepNetRate = 1
-                    - (params.taxRate || 0.06)
-                    - (Number.isFinite(params?.charityRate) ? params.charityRate : 0.01)
-                    - 0.065;
+                const keepNetRate = getBlankRetentionRate(params);
                 const actualMargin = sellPrice > 0
                     ? round2(((sellPrice * keepNetRate) - adjustedCost) / sellPrice)
                     : margin;
@@ -402,7 +405,7 @@ const Molds = {
                 const sellColor = t?.isCustom ? 'var(--orange)' : 'var(--green)';
                 const marginPct = t ? Math.round(t.margin * 100) : 0;
                 tierCells += `<td style="text-align:right;padding:6px 4px;font-size:10px;color:var(--text-muted);border-left:1px solid var(--border);">${t ? Math.round(t.cost) : '—'}</td>`;
-                tierCells += `<td style="text-align:right;padding:6px 6px;font-size:13px;font-weight:700;color:${sellColor};" title="Чистая маржа ${marginPct}% на цене без НДС, после УСН 6%, 1% благотворительности и 6.5% коммерческого отдела">${t ? Math.round(t.sellPrice) : '—'}</td>`;
+                tierCells += `<td style="text-align:right;padding:6px 6px;font-size:13px;font-weight:700;color:${sellColor};" title="Чистая маржа ${marginPct}% на цене без НДС, после налогов 12% от базы, 1% благотворительности с НДС и 6.5% коммерческого отдела с НДС">${t ? Math.round(t.sellPrice) : '—'}</td>`;
             });
 
             html += `
@@ -441,7 +444,7 @@ const Molds = {
         html += `
             <div style="padding:10px 12px;font-size:10px;color:var(--text-muted);display:flex;gap:12px;flex-wrap:wrap;border-top:1px solid var(--border);">
                 <span><span style="color:var(--text-secondary);">себест</span> — себестоимость · <span style="color:var(--green);font-weight:700;">цена</span> — расчётная цена продажи</span>
-                <span>Проценты под ценой — чистая маржа на цене без НДС; НДС 5% добавляется сверху, затем вычитаются УСН 6%, 1% благотворительности и 6.5% коммерческого отдела</span>
+                <span>Проценты под ценой — чистая маржа на цене без НДС; НДС 5% добавляется сверху, затем вычитаются налоги 12% от базы, 1% благотворительности с НДС и 6.5% коммерческого отдела с НДС</span>
                 <span>Нажмите на строку для быстрых настроек</span>
             </div>
         </div>`;
@@ -489,7 +492,7 @@ const Molds = {
                 <div style="font-size:10px;color:var(--text-muted);margin-bottom:2px;">${label} шт</div>
                 <div style="font-size:10px;color:var(--text-secondary);">${t ? Math.round(t.cost) + '₽' : '—'}</div>
                 <div style="font-size:14px;font-weight:700;color:${sellColor};">${t ? Math.round(t.sellPrice) + '₽' : '—'}</div>
-                <div style="font-size:9px;color:var(--text-muted);" title="Чистая маржа на цене без НДС; НДС 5% добавляется сверху, затем вычитаются УСН 6%, 1% благотворительности и 6.5% коммерческого отдела">${marginPct}%</div>
+                <div style="font-size:9px;color:var(--text-muted);" title="Чистая маржа на цене без НДС; НДС 5% добавляется сверху, затем вычитаются налоги 12% от базы, 1% благотворительности с НДС и 6.5% коммерческого отдела с НДС">${marginPct}%</div>
             </div>`;
         }).join('');
 

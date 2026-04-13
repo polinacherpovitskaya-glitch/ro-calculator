@@ -43,6 +43,61 @@ function getProductionParams(settings) {
     };
 }
 
+const DEFAULT_COMMERCIAL_RATE = 0.065;
+
+function getRateValue(value, fallback) {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : fallback;
+}
+
+function getVatRate(params) {
+    return getRateValue(params?.vatRate, 0.05);
+}
+
+function getTaxRate(params) {
+    return getRateValue(params?.taxRate, 0.12);
+}
+
+function getCharityRate(params) {
+    return getRateValue(params?.charityRate, 0.01);
+}
+
+function getCommercialRate(params) {
+    return getRateValue(params?.commercialRate, DEFAULT_COMMERCIAL_RATE);
+}
+
+function getRevenueGrossMultiplier(params) {
+    return 1 + getVatRate(params);
+}
+
+function getCommercialGrossShare(params) {
+    return getCommercialRate(params) * getRevenueGrossMultiplier(params);
+}
+
+function getCharityGrossShare(params) {
+    return getCharityRate(params) * getRevenueGrossMultiplier(params);
+}
+
+function getNetRevenueRetentionRate(params) {
+    return 1 - getTaxRate(params) - getCommercialGrossShare(params) - getCharityGrossShare(params);
+}
+
+function getKeepRateForTargetMargin(params, margin = 0) {
+    return getNetRevenueRetentionRate(params) - (Number(margin) || 0);
+}
+
+function calcTaxesAmount(netRevenue, params) {
+    return round2((Number(netRevenue) || 0) * getTaxRate(params));
+}
+
+function calcCommercialAmount(netRevenue, params) {
+    return round2((Number(netRevenue) || 0) * getCommercialGrossShare(params));
+}
+
+function calcCharityAmount(netRevenue, params) {
+    return round2((Number(netRevenue) || 0) * getCharityGrossShare(params));
+}
+
 function getActivePrintings(item) {
     const rawPrintings = Array.isArray(item?.printings) ? item.printings : [];
     return rawPrintings.filter(pr => {
@@ -744,24 +799,16 @@ function getPendantLetterBlankMetrics(totalElements, params, pendant) {
         } else {
             targetMargin = 0.35;
         }
-        const keepNetRate = 1
-            - (Number.isFinite(params?.vatRate) ? params.vatRate : 0.05)
-            - (Number.isFinite(params?.taxRate) ? params.taxRate : 0.06)
-            - (Number.isFinite(params?.charityRate) ? params.charityRate : 0.01)
-            - 0.065;
-        if (keepNetRate > 0 && targetMargin < 1) {
-            const rawSellPrice = round2(cost / (1 - targetMargin) / keepNetRate);
+        const keepRateForTarget = getKeepRateForTargetMargin(params, targetMargin);
+        if (keepRateForTarget > 0 && targetMargin < 1) {
+            const rawSellPrice = round2(cost / keepRateForTarget);
             sellPrice = typeof roundTo5 === 'function'
                 ? roundTo5(rawSellPrice)
                 : Math.round(rawSellPrice / 5) * 5;
         }
     }
 
-    const keepNetRate = 1
-        - (Number.isFinite(params?.vatRate) ? params.vatRate : 0.05)
-        - (Number.isFinite(params?.taxRate) ? params.taxRate : 0.06)
-        - (Number.isFinite(params?.charityRate) ? params.charityRate : 0.01)
-        - 0.065;
+    const keepNetRate = getNetRevenueRetentionRate(params);
     const margin = sellPrice > 0
         ? round2(((sellPrice * keepNetRate) - cost) / sellPrice)
         : targetMargin;
@@ -916,16 +963,13 @@ function getMultiplierForQty(qty) {
 /**
  * Рассчитать таргет-цену для фурнитуры/упаковки/кастома
  * Формула:
- * цена без НДС = себестоимость / (1 - ОСН - благотворительность - коммерч. - целевая чистая маржа)
+ * цена без НДС = себестоимость / (1 - налоги без НДС - коммерч. с НДС - благотворительность с НДС - целевая чистая маржа)
  * НДС добавляется отдельно сверху в КП/счёте и в эту цену не входит.
  */
 function calculateTargetPrice(cost, params, qty) {
     if (cost === 0) return 0;
     const margin = qty ? getMarginForQty(qty) : (params.marginTarget || 0.55);
-    const taxRate = Number.isFinite(params?.taxRate) ? params.taxRate : 0.06;
-    const charityRate = Number.isFinite(params?.charityRate) ? params.charityRate : 0.01;
-    const commercialRate = 0.065;
-    const keepRate = 1 - taxRate - charityRate - commercialRate - margin;
+    const keepRate = getKeepRateForTargetMargin(params, margin);
     if (keepRate <= 0) return 0;
     return round2(cost / keepRate);
 }
@@ -951,10 +995,7 @@ function calculateActualMargin(sellPrice, costPerUnit) {
             percent: null,
         };
     }
-    const taxRate = Number.isFinite(App?.params?.taxRate) ? App.params.taxRate : 0.06;
-    const charityRate = Number.isFinite(App?.params?.charityRate) ? App.params.charityRate : 0.01;
-    const commercialRate = 0.065;
-    const netBeforeCost = sellPrice * (1 - taxRate - charityRate - commercialRate);
+    const netBeforeCost = sellPrice * getNetRevenueRetentionRate(App?.params || {});
     const earned = netBeforeCost - (costPerUnit || 0);
     return {
         earned: round2(earned),
@@ -985,10 +1026,7 @@ function calculateOrderDiscount(baseRevenue, discount = {}, params = {}) {
         discountAmount = round2((safeBase * discountPercent) / 100);
     }
 
-    const taxRate = Number.isFinite(params?.taxRate) ? params.taxRate : 0.06;
-    const charityRate = Number.isFinite(params?.charityRate) ? params.charityRate : 0.01;
-    const commercialRate = 0.065;
-    const keepRate = Math.max(0, 1 - taxRate - charityRate - commercialRate);
+    const keepRate = Math.max(0, getNetRevenueRetentionRate(params));
 
     return {
         mode: normalized.mode,
@@ -1069,9 +1107,9 @@ function calculateProductionLoad(items, hardwareItems, packagingItems, params, p
  */
 function calculateFinDirectorData(items, hardwareItems, packagingItems, params, pendantItems = [], orderAdjustments = {}) {
     const safeFotPerHour = Number.isFinite(params?.fotPerHour) ? params.fotPerHour : 0;
-    const safeTaxRate = Number.isFinite(params?.taxRate) ? params.taxRate : 0.06;
-    const safeVatRate = Number.isFinite(params?.vatRate) ? params.vatRate : 0.05;
-    const safeCharityRate = Number.isFinite(params?.charityRate) ? params.charityRate : 0.01;
+    const safeTaxRate = getTaxRate(params);
+    const safeVatRate = getVatRate(params);
+    const safeCharityRate = getCharityRate(params);
     const safeDesignCost = Number.isFinite(params?.designCost) ? params.designCost : 0;
     const safeMoldBaseCost = Number.isFinite(params?.moldBaseCost) ? params.moldBaseCost : 0;
     const safeDeliveryCostMoscow = Number.isFinite(params?.deliveryCostMoscow) ? params.deliveryCostMoscow : 0;
@@ -1273,9 +1311,9 @@ function calculateFinDirectorData(items, hardwareItems, packagingItems, params, 
 
     const discount = calculateOrderDiscount(totalRevenue, orderAdjustments, params);
     const discountedRevenue = discount.revenueAfterDiscount;
-    const totalTaxes = discountedRevenue * safeTaxRate;
-    const totalCharity = discountedRevenue * safeCharityRate;
-    totalCommercial = discountedRevenue * 0.065;
+    const totalTaxes = calcTaxesAmount(discountedRevenue, { taxRate: safeTaxRate });
+    const totalCharity = calcCharityAmount(discountedRevenue, { vatRate: safeVatRate, charityRate: safeCharityRate });
+    totalCommercial = calcCommercialAmount(discountedRevenue, { vatRate: safeVatRate });
 
     return {
         salary: round2(totalSalary),
@@ -1354,21 +1392,18 @@ function calculateOrderSummary(items, hardwareItems, packagingItems, extraCosts,
     });
 
     // Extra income — full amount goes to revenue, and net (after taxes/commission) goes to earned.
-    const taxRate = Number.isFinite(params.taxRate) ? params.taxRate : 0.06;
-    const charityRate = Number.isFinite(params.charityRate) ? params.charityRate : 0.01;
-    const commercialRate = 0.065;
     (extraCosts || []).forEach(ec => {
         const amt = ec.amount || 0;
         if (amt > 0) {
             totalRevenue += amt;
-            totalEarned += amt * (1 - taxRate - charityRate - commercialRate);
+            totalEarned += amt * getNetRevenueRetentionRate(params);
         }
     });
 
     const discount = calculateOrderDiscount(totalRevenue, orderAdjustments, params);
     const finalRevenue = discount.revenueAfterDiscount;
     const finalEarned = round2(totalEarned - discount.earnedImpact);
-    const vatRate = Number.isFinite(params.vatRate) ? params.vatRate : 0.05;
+    const vatRate = getVatRate(params);
     const vatOnRevenue = finalRevenue * vatRate;
     const totalWithVat = finalRevenue + vatOnRevenue;
     const marginPercent = finalRevenue > 0 ? round2(finalEarned * 100 / finalRevenue) : 0;
