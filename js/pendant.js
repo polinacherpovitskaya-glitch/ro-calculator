@@ -1312,7 +1312,6 @@ const Pendant = {
             const customMargin = Number(tpl.custom_margins?.[tierQty]);
             targetMargin = Number.isFinite(customMargin) ? customMargin : resolveDefaultBlankMargin(tierQty);
             const keepNetRate = 1
-                - (Number.isFinite(params.vatRate) ? params.vatRate : 0.05)
                 - (Number.isFinite(params.taxRate) ? params.taxRate : 0.06)
                 - (Number.isFinite(params.charityRate) ? params.charityRate : 0.01)
                 - 0.065;
@@ -1322,7 +1321,6 @@ const Pendant = {
         }
 
         const keepNetRate = 1
-            - (Number.isFinite(params.vatRate) ? params.vatRate : 0.05)
             - (Number.isFinite(params.taxRate) ? params.taxRate : 0.06)
             - (Number.isFinite(params.charityRate) ? params.charityRate : 0.01)
             - 0.065;

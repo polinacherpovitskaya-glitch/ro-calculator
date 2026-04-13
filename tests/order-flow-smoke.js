@@ -913,6 +913,69 @@ async function smokeBlankTargetFormulaMatchesVatExclusiveMargin(context) {
     assert.equal(state.blankMargin, 39.95, 'rounded blank price should stay very close to the 40% net target');
 }
 
+async function smokePendantFallbackTierMatchesVatExclusiveMargin() {
+    const pendantContext = createContext();
+    stubRuntime(pendantContext);
+    ['js/calculator.js', 'js/app.js'].forEach(file => runScript(pendantContext, file));
+    vm.runInContext('delete globalThis.Pendant; delete globalThis.getPendantLetterBlankMetrics; delete globalThis.Molds;', pendantContext);
+    runScript(pendantContext, 'js/pendant.js');
+
+    const state = clone(await vm.runInContext(`(() => {
+        const params = {
+            ...App.params,
+            taxRate: 0.06,
+            vatRate: 0.05,
+            charityRate: 0.01,
+            wasteFactor: 1.1,
+            fotPerHour: 100,
+            indirectCostMode: 'none',
+            indirectPerHour: 0,
+            plasticHours: 8,
+            packagingHours: 8,
+            hardwareHours: 8,
+            plasticCostPerKg: 2500,
+            moldBaseCost: 18000,
+            designCost: 0,
+            cuttingSpeed: 1000,
+        };
+        App.params = params;
+        App.templates = [{
+            id: 30,
+            pph_min: 120,
+            pph_max: 120,
+            pph_actual: 120,
+            weight_grams: 5,
+            mold_count: 1,
+            cost_cny: 800,
+            cny_rate: 12.5,
+            delivery_cost: 8000,
+            custom_prices: {},
+            custom_margins: {},
+            hw_name: '',
+            hw_price_per_unit: 0,
+            hw_delivery_total: 0,
+            hw_speed: 0,
+            builtin_assembly_name: 'Сборка букв на шнур',
+            builtin_assembly_speed: 600,
+        }];
+        Pendant._wizardData = Pendant.getEmpty();
+        const tier = Pendant._getLetterBlankTier(1000);
+        const expectedTarget = calculateTargetPrice(tier.cost, params, tier.tierQty);
+        const expectedRounded = Math.round(expectedTarget / 5) * 5;
+        return {
+            tier,
+            margin: calculateActualMargin(tier.sellPrice, tier.cost).percent,
+            expectedTarget,
+            expectedRounded,
+            expectedMargin: calculateActualMargin(expectedRounded, tier.cost).percent,
+        };
+    })()`, pendantContext));
+
+    assert.ok(state.tier && state.tier.sellPrice > 0, 'pendant fallback tier should resolve a live sell price');
+    assert.equal(state.tier.sellPrice, state.expectedRounded, 'pendant fallback tier should round the same VAT-exclusive target formula as blanks');
+    assert.equal(state.margin, state.expectedMargin, 'pendant fallback tier should keep the same net-margin logic as blanks after rounding');
+}
+
 async function smokeFinDirectorPendantsUseAllAttachments(context) {
     const fin = clone(await vm.runInContext(`(() => {
         const pendant = {
@@ -6949,6 +7012,7 @@ async function main() {
     await smokeOrderListAndDetailUseLiveFinancialSnapshot(context);
     await smokeBlankPricingSeparatesCatalogPriceAndNetMargin(context);
     await smokeBlankTargetFormulaMatchesVatExclusiveMargin(context);
+    await smokePendantFallbackTierMatchesVatExclusiveMargin();
     await smokeOrderDiscountAffectsSummaryAndFinDirector(context);
     await smokeDiscountShownInCustomerInvoice(context);
     await smokeCalculatorSupportsMoreThanSixItems(context);
