@@ -1118,9 +1118,16 @@ function calculateFinDirectorData(items, hardwareItems, packagingItems, params, 
         totalPlastic += (r.costPlastic || 0) * qty;
 
         // Молды
-        const paidBaseMolds = (!item.is_blank_mold && item.base_mold_in_stock) ? 0 : 1;
-        const totalPaidMolds = Math.max(0, paidBaseMolds + (item.extra_molds || 0));
-        totalMolds += safeMoldBaseCost * totalPaidMolds;
+        // Для бланков в финсмету должна идти амортизация на тираж,
+        // а не полная закупка молда. Иначе бланковый заказ внезапно
+        // выглядит так, будто мы каждый раз заново покупаем форму.
+        if (item.is_blank_mold) {
+            totalMolds += qty * (Number(r?.costMoldAmortization) || 0);
+        } else {
+            const paidBaseMolds = item.base_mold_in_stock ? 0 : 1;
+            const totalPaidMolds = Math.max(0, paidBaseMolds + (item.extra_molds || 0));
+            totalMolds += safeMoldBaseCost * totalPaidMolds;
+        }
 
         // Доставка
         if (item.delivery_included) totalDelivery += safeDeliveryCostMoscow;

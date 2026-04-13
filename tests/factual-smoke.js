@@ -213,7 +213,7 @@ function smokeBuildPlanUsesSavedSnapshotCostsAndDedupedHardware(context) {
                     cost_indirect: 3,
                     cost_cutting_indirect: 1,
                     cost_plastic: 4,
-                    cost_mold_amortization: 0,
+                    cost_mold_amortization: 4.44,
                     cost_design: 0,
                     cost_printing: 0,
                     cost_delivery: 0,
@@ -260,6 +260,7 @@ function smokeBuildPlanUsesSavedSnapshotCostsAndDedupedHardware(context) {
     assert.equal(result.planData.salaryAssembly, 10, 'assembly salary should follow saved order hours');
     assert.equal(result.planData.taxes, 22, 'taxes should be recomputed from current revenue settings without charity');
     assert.equal(result.planData.charity, 2, 'charity should be stored as a separate plan row');
+    assert.equal(result.planData.molds, 44.4, 'blank plan rows should keep mold amortization instead of dropping it');
     assert.equal(result.planData.other, 0, 'no corrective residue should remain for consistent snapshot');
     assert.equal(
         result.planData.totalCosts,
@@ -280,7 +281,7 @@ function smokeBuildPlanUsesSavedSnapshotCostsAndDedupedHardware(context) {
             result.planData.other,
         'plan rows should add up to current computed total cost'
     );
-    assert.equal(result.planData.planEarned, 6, 'plan profit should be recomputed from current plan rows');
+    assert.equal(result.planData.planEarned, -38.4, 'plan profit should be recomputed from current plan rows');
 }
 
 function smokeBuildPlanSeparatesProductBuiltinAssembly(context) {

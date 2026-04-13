@@ -970,7 +970,7 @@ async _loadFactSummaries() {
                 }
 
                 plastic += qty * productPlastic;
-                if (!ri.is_blank_mold) molds += qty * productMold;
+                molds += qty * productMold;
                 designPrinting += qty * (productDesign + productPrinting);
                 delivery += qty * productDelivery;
                 nfcTotal += qty * productNfc;

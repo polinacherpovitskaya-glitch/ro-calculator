@@ -962,6 +962,49 @@ async function smokeFinDirectorSeparatesHardwareAndNfc(context) {
     assert.equal(fin.totalCosts, 140, 'fin director total should include hardware and NFC separately');
 }
 
+async function smokeFinDirectorBlankMoldsUseAmortization(context) {
+    const fin = clone(await vm.runInContext(`(() => {
+        const params = {
+            ...App.params,
+            fotPerHour: 0,
+            taxRate: 0,
+            vatRate: 0,
+            charityRate: 0,
+            moldBaseCost: 20000,
+            deliveryCostMoscow: 0,
+        };
+        const items = [{
+            quantity: 100,
+            is_nfc: false,
+            is_blank_mold: true,
+            base_mold_in_stock: false,
+            extra_molds: 0,
+            complex_design: false,
+            delivery_included: false,
+            printings: [],
+            sell_price_item: 0,
+            sell_price_printing: 0,
+            result: {
+                hoursTotalPlasticNfc: 0,
+                hoursBuiltinHw: 0,
+                hoursBuiltinAssembly: 0,
+                costIndirect: 0,
+                costCuttingIndirect: 0,
+                costNfcIndirect: 0,
+                costBuiltinHwIndirect: 0,
+                costBuiltinAssemblyIndirect: 0,
+                costPlastic: 0,
+                costMoldAmortization: 4.44,
+                costDelivery: 0,
+            },
+        }];
+        return calculateFinDirectorData(items, [], [], params, []);
+    })()`, context));
+
+    assert.equal(fin.molds, 444, 'blank orders should send mold amortization, not full mold purchase, to fin director');
+    assert.equal(fin.totalCosts, 444, 'blank mold amortization should contribute to fin director total cost');
+}
+
 async function smokePendantAttachmentCostsIncludeAssemblyAndIndirect(context) {
     const state = clone(await vm.runInContext(`(() => {
         const params = {
@@ -6788,6 +6831,7 @@ async function main() {
     await smokeGenerateKPPassesDiscount(context);
     await smokeFinDirectorPendantsUseAllAttachments(context);
     await smokeFinDirectorSeparatesHardwareAndNfc(context);
+    await smokeFinDirectorBlankMoldsUseAmortization(context);
     await smokePendantAttachmentCostsIncludeAssemblyAndIndirect(context);
     await smokePackagingWarehousePickerDefaults(context);
     await smokeCurrentOrderReservationRestoresWarehouseQuota(context);
