@@ -149,6 +149,29 @@ function smokeBuildImportSeparatesCommercial(context) {
     assert.equal(result.fact_revenue, 100000);
 }
 
+function smokeBuildImportMatchesByDescriptionAndStoresBreakdown(context) {
+    const result = vm.runInContext(`(() => {
+        FinTablo._categories = {
+            9: { id: 9, name: 'Прочие расходы', parentId: null },
+        };
+        return FinTablo._buildImportData(
+            { id: 31, order_name: 'Описание статьи' },
+            { id: 32, name: 'Описание статьи' },
+            [
+                { group: 'outcome', value: 4200, description: 'Закупка фурнитуры в России', categoryId: 9, date: '2026-04-10' },
+                { group: 'outcome', value: 1100, description: 'НДС и налог по сделке', categoryId: 9, date: '2026-04-10' },
+            ]
+        );
+    })()`, context);
+
+    assert.equal(result.fact_hardware, 4200);
+    assert.equal(result.fact_taxes, 1100);
+    assert.equal(result.fact_other, 0);
+    assert.equal(Array.isArray(result.raw_data.field_breakdown.fact_hardware), true);
+    assert.equal(result.raw_data.field_breakdown.fact_hardware[0].description, 'Закупка фурнитуры в России');
+    assert.equal(result.raw_data.field_breakdown.fact_taxes[0].amount, 1100);
+}
+
 function smokeCsvImportKeepsPackagingAndCommercial(context) {
     runScript(context, 'js/import.js');
 
@@ -259,6 +282,7 @@ async function main() {
     smokeExtractSplitAllocations(context);
     smokeBuildImportUsesOnlyOrderSplit(context);
     smokeBuildImportSeparatesCommercial(context);
+    smokeBuildImportMatchesByDescriptionAndStoresBreakdown(context);
     smokeCsvImportKeepsPackagingAndCommercial(context);
     smokeBuildImportKeepsFullIncomeForAttachedDeal(context);
     smokeRenderDetailShowsAllocatedValue(context);

@@ -234,6 +234,14 @@ const Factual = {
         const raw = factData && factData._source_hints;
         return (raw && typeof raw === 'object') ? raw : {};
     },
+    _getFinTabloBreakdowns(factData) {
+        const raw = factData && factData._fintablo_breakdown;
+        return (raw && typeof raw === 'object') ? raw : {};
+    },
+    _setFinTabloBreakdowns(factData, breakdown) {
+        if (!factData) return;
+        factData._fintablo_breakdown = (breakdown && typeof breakdown === 'object') ? breakdown : {};
+    },
     _setSourceHint(factData, key, hint) {
         if (!factData || !key || !hint) return;
         const hints = this._getSourceHints(factData);
@@ -1116,7 +1124,6 @@ async _loadFactSummaries() {
         let hardwareWarehouseTotal = 0;
         let nfcWarehouseTotal = 0;
         let packagingWarehouseTotal = 0;
-        let usedCurrentWarehouse = false;
 
         (demandRows || []).forEach(row => {
             const itemId = Number(row.warehouse_item_id || 0);
@@ -1129,7 +1136,6 @@ async _loadFactSummaries() {
             if (category === 'packaging') packagingWarehouseTotal += rowTotal;
             else if (this._isNfcWarehouseRow(row, warehouseItem)) nfcWarehouseTotal += rowTotal;
             else hardwareWarehouseTotal += rowTotal;
-            usedCurrentWarehouse = true;
         });
 
         let hardwareManualTotal = 0;
@@ -1159,7 +1165,8 @@ async _loadFactSummaries() {
             else hardwareManualTotal += rowTotal;
         });
 
-        if (!usedCurrentWarehouse && !hardwareManualTotal && !nfcManualTotal && !packagingManualTotal) return planBuild;
+        const hasWarehousePlan = hardwareWarehouseTotal > 0 || nfcWarehouseTotal > 0 || packagingWarehouseTotal > 0;
+        if (!hasWarehousePlan && !hardwareManualTotal && !nfcManualTotal && !packagingManualTotal) return planBuild;
 
         const planData = planBuild.planData;
         const nextHardwareTotal = round2(hardwareWarehouseTotal + hardwareManualTotal);
@@ -1193,15 +1200,30 @@ async _loadFactSummaries() {
             : 0;
         planData.planEarned = round2(this._num(planData.revenue) - recomputedTotalCosts);
 
+        const materialSource = (warehouseTotal, manualTotal) => {
+            const hasWarehouse = this._num(warehouseTotal) > 0;
+            const hasManual = this._num(manualTotal) > 0;
+            if (hasWarehouse && hasManual) return 'mixed';
+            if (hasWarehouse) return 'current_warehouse';
+            if (hasManual) return 'manual_items';
+            return 'none';
+        };
+
         const planMeta = planBuild.planMeta || {};
         planMeta.hardware_total = {
-            source: usedCurrentWarehouse ? 'current_warehouse' : 'manual_items',
+            source: materialSource(hardwareWarehouseTotal, hardwareManualTotal),
+            warehouseTotal: round2(hardwareWarehouseTotal),
+            manualTotal: round2(hardwareManualTotal),
         };
         planMeta.nfc_total = {
-            source: usedCurrentWarehouse ? 'current_warehouse' : 'manual_items',
+            source: materialSource(nfcWarehouseTotal, nfcManualTotal),
+            warehouseTotal: round2(nfcWarehouseTotal),
+            manualTotal: round2(nfcManualTotal),
         };
         planMeta.packaging_total = {
-            source: usedCurrentWarehouse ? 'current_warehouse' : 'manual_items',
+            source: materialSource(packagingWarehouseTotal, packagingManualTotal),
+            warehouseTotal: round2(packagingWarehouseTotal),
+            manualTotal: round2(packagingManualTotal),
         };
         planBuild.planMeta = planMeta;
         return planBuild;
@@ -1240,7 +1262,7 @@ async _loadFactSummaries() {
         const planHours = cached.planHours || {};
         const orderId = Number(cached.order?.id || cached.orderId || 0);
         await this._applyHoursFromEntries(factData, orderId, planHours, App.params || {}, cached.order || null);
-        await this._applyDerivedFacts(factData, planData, planHours, App.params || {}, orderId, cached.order?.order_name || '', cached.order || null, cached.items || []);
+        await this._applyDerivedFacts(factData, planData, planHours, App.params || {}, orderId, cached.order?.order_name || '', cached.order || null, cached.items || [], cached.planMeta || {});
         let factTotal = 0;
         this.ROWS.forEach(row => { factTotal += parseFloat(factData['fact_' + row.key]) || 0; });
         factData.fact_total = round2(factTotal);
@@ -1269,7 +1291,7 @@ async _loadFactSummaries() {
         const factData = { ...(await loadFactual(orderId) || {}) };
 
         this._applyHoursFromEntries(factData, orderId, planHours, params, order);
-        await this._applyDerivedFacts(factData, planData, planHours, params, orderId, order.order_name || '', order, rawItems || []);
+        await this._applyDerivedFacts(factData, planData, planHours, params, orderId, order.order_name || '', order, rawItems || [], planMeta || {});
 
         const computed = {
             ...(cached || {}),
@@ -1341,7 +1363,7 @@ async _loadFactSummaries() {
         return round2(stageActuals.salary[stage] || 0);
     },
 
-    async _applyDerivedFacts(factData, planData, planHours, params, orderId, orderName, orderRef = null, orderItems = []) {
+    async _applyDerivedFacts(factData, planData, planHours, params, orderId, orderName, orderRef = null, orderItems = [], planMeta = {}) {
         const hProd = parseFloat(factData.fact_hours_production) || 0;
         const hTrim = parseFloat(factData.fact_hours_trim) || 0;
         const hAsm = parseFloat(factData.fact_hours_assembly) || 0;
@@ -1365,6 +1387,7 @@ async _loadFactSummaries() {
 
         // 3. FinTablo imports — pull all available fact fields
         factData._auto_fintablo = {};
+        this._setFinTabloBreakdowns(factData, {});
         const imports = (await loadFintabloImports(orderId)) || [];
         if (imports.length > 0) {
             const importTotals = imports.reduce((acc, row) => {
@@ -1393,6 +1416,44 @@ async _loadFactSummaries() {
                 fact_other: 0,
                 fact_revenue: 0,
             });
+            const breakdown = {};
+            const ftKeyToFactKey = {
+                fact_materials: 'fact_plastic',
+                fact_hardware: 'fact_hardware_total',
+                fact_packaging: 'fact_packaging_total',
+                fact_delivery: 'fact_delivery_client',
+                fact_printing: 'fact_design_printing',
+                fact_molds: 'fact_molds',
+                fact_taxes: 'fact_taxes',
+                fact_commercial: 'fact_commercial',
+                fact_charity: 'fact_charity',
+                fact_other: 'fact_other',
+            };
+            imports.forEach(row => {
+                const importBreakdown = row?.raw_data?.field_breakdown;
+                if (!importBreakdown || typeof importBreakdown !== 'object') return;
+                Object.entries(importBreakdown).forEach(([ftKey, rows]) => {
+                    const factKey = ftKeyToFactKey[ftKey];
+                    if (!factKey || !Array.isArray(rows) || !rows.length) return;
+                    if (!Array.isArray(breakdown[factKey])) breakdown[factKey] = [];
+                    rows.forEach(item => {
+                        const amount = this._num(item?.amount);
+                        if (amount <= 0) return;
+                        breakdown[factKey].push({
+                            amount,
+                            description: String(item?.description || '').trim(),
+                            category: String(item?.category || '').trim(),
+                            date: item?.date || '',
+                        });
+                    });
+                });
+            });
+            Object.keys(breakdown).forEach(key => {
+                breakdown[key] = breakdown[key]
+                    .sort((a, b) => this._num(b.amount) - this._num(a.amount))
+                    .slice(0, 10);
+            });
+            this._setFinTabloBreakdowns(factData, breakdown);
 
             const ftMap = {
                 fact_hardware: 'fact_hardware_total',
@@ -1408,6 +1469,7 @@ async _loadFactSummaries() {
                 if (val > 0) {
                     this._applyAutoFactValue(factData, ourKey, val);
                     factData._auto_fintablo[ourKey] = true;
+                    this._setSourceHint(factData, ourKey, 'ФинТабло');
                 }
             }
 
@@ -1461,6 +1523,7 @@ async _loadFactSummaries() {
             if (ftPackaging > 0) {
                 this._applyAutoFactValue(factData, 'fact_packaging_total', ftPackaging);
                 factData._auto_fintablo.fact_packaging_total = true;
+                this._setSourceHint(factData, 'fact_packaging_total', 'ФинТабло');
             }
         }
 
@@ -1468,25 +1531,64 @@ async _loadFactSummaries() {
             this._applyAutoFactValue(factData, 'fact_plastic', planData.plastic);
             this._setSourceHint(factData, 'fact_plastic', 'план');
         }
+        if (!this._isManualOverride(factData, 'fact_molds') && !factData._auto_fintablo.fact_molds && this._num(planData?.molds) > 0) {
+            this._applyAutoFactValue(factData, 'fact_molds', planData.molds);
+            this._setSourceHint(factData, 'fact_molds', 'план');
+        }
 
         // 4. Warehouse fallback for hardware/packaging (only if fintablo didn't provide them)
         if (!factData._auto_fintablo.fact_hardware_total || !factData._auto_fintablo.fact_nfc_total || !factData._auto_fintablo.fact_packaging_total) {
             const whActual = this._isWorkshopOrder(orderRef || orderName)
                 ? await this._deriveWorkshopMaterialFacts(orderId, orderRef || { order_name: orderName }, orderItems || [])
                 : await this._deriveMaterialFacts(orderId, orderName);
-                if (!factData._auto_fintablo.fact_hardware_total) {
-                    this._applyAutoFactValue(factData, 'fact_hardware_total', whActual.found ? whActual.hardware : (planData?.hardwareTotal || 0));
-                    this._setSourceHint(factData, 'fact_hardware_total', whActual.found ? (whActual.sourceHint || 'склад') : 'план');
+            const resolveMaterialFallback = (factKey, actualValue, meta = {}, warehouseHint, waitingHint) => {
+                const warehousePlan = this._num(meta?.warehouseTotal);
+                const manualPlan = this._num(meta?.manualTotal);
+                const effectiveWarehouse = whActual.found ? this._num(actualValue) : warehousePlan;
+                const nextValue = round2(Math.max(0, effectiveWarehouse));
+                let hint = '';
+                if (whActual.found && nextValue > 0) {
+                    hint = warehouseHint;
+                } else if (warehousePlan > 0) {
+                    hint = 'план склада';
                 }
-                if (!factData._auto_fintablo.fact_nfc_total) {
-                    this._applyAutoFactValue(factData, 'fact_nfc_total', whActual.found ? whActual.nfc : (planData?.nfcTotal || 0));
-                    this._setSourceHint(factData, 'fact_nfc_total', whActual.found ? (whActual.nfcSourceHint || whActual.sourceHint || 'склад') : 'план');
+                if (manualPlan > 0) {
+                    hint = hint ? `${hint} + ${waitingHint}` : waitingHint;
                 }
-                if (!factData._auto_fintablo.fact_packaging_total) {
-                    this._applyAutoFactValue(factData, 'fact_packaging_total', whActual.found ? whActual.packaging : (planData?.packagingTotal || 0));
-                    this._setSourceHint(factData, 'fact_packaging_total', whActual.found ? (whActual.packagingSourceHint || whActual.sourceHint || 'склад') : 'план');
+                if (nextValue > 0 || manualPlan > 0) {
+                    this._applyAutoFactValue(factData, factKey, nextValue);
+                    this._setSourceHint(factData, factKey, hint || waitingHint);
                 }
+            };
+
+            if (!factData._auto_fintablo.fact_hardware_total) {
+                resolveMaterialFallback(
+                    'fact_hardware_total',
+                    whActual.hardware,
+                    planMeta?.hardware_total || {},
+                    whActual.sourceHint || 'склад',
+                    'кастом ждёт ФинТабло'
+                );
             }
+            if (!factData._auto_fintablo.fact_nfc_total) {
+                resolveMaterialFallback(
+                    'fact_nfc_total',
+                    whActual.nfc,
+                    planMeta?.nfc_total || {},
+                    whActual.nfcSourceHint || whActual.sourceHint || 'склад',
+                    'NFC ждёт ФинТабло'
+                );
+            }
+            if (!factData._auto_fintablo.fact_packaging_total) {
+                resolveMaterialFallback(
+                    'fact_packaging_total',
+                    whActual.packaging,
+                    planMeta?.packaging_total || {},
+                    whActual.packagingSourceHint || whActual.sourceHint || 'склад',
+                    'упаковка ждёт ФинТабло'
+                );
+            }
+        }
     },
 
     async _deriveWorkshopMaterialFacts(orderId, orderRef = null, orderItems = []) {
@@ -1678,7 +1780,7 @@ async _loadFactSummaries() {
         const sourceHint = manualOverride ? 'вручную' : this._getRowSourceHint(fact, factKey, row.hint);
         const resetControl = this._renderAutoResetControl(orderId, row.key, isAuto, manualOverride);
         const planDetail = this._renderPlanRowDetail(row.key, planMeta);
-        const factDetail = this._renderFactRowDetail(row.key, factHoursByRow, planMeta);
+        const factDetail = this._renderFactRowDetail(row.key, factHoursByRow, planMeta, fact);
 
         if (isSalaryRow && !_isAdmin) {
             return;
@@ -1899,14 +2001,22 @@ async _loadFactSummaries() {
         }
         return detail;
     },
-    _renderFactRowDetail(rowKey, factHoursByRow = {}, planMeta = {}) {
+    _renderFactRowDetail(rowKey, factHoursByRow = {}, planMeta = {}, factData = {}) {
         const factHours = this._num(factHoursByRow?.[rowKey]);
-        if (factHours <= 0) return '';
         if (rowKey === 'indirect_production') {
+            if (factHours <= 0) return '';
             return `${this.fmtHours(factHours)} × ${this.fmtRub(planMeta?.indirect_production?.perHour || 0)}/ч`;
         }
-        if (!rowKey.startsWith('salary_')) return '';
-        return this.fmtHours(factHours);
+        if (rowKey.startsWith('salary_')) return factHours > 0 ? this.fmtHours(factHours) : '';
+
+        const breakdownRows = this._getFinTabloBreakdowns(factData)[`fact_${rowKey}`];
+        if (Array.isArray(breakdownRows) && breakdownRows.length) {
+            return breakdownRows.slice(0, 3).map(row => {
+                const label = this._esc(row.description || row.category || 'операция');
+                return `${label} — ${this.fmtRub(row.amount)}`;
+            }).join('<br>');
+        }
+        return '';
     },
 
     _esc(str) {

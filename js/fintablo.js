@@ -19,7 +19,7 @@ const FinTablo = {
     CATEGORY_KEYWORDS: {
         'зарплата': 'fact_salary', 'зп': 'fact_salary', 'фот': 'fact_salary',
         'материал': 'fact_materials', 'пластик': 'fact_materials', 'сырье': 'fact_materials',
-        'фурнитура': 'fact_hardware',
+        'фурнитура': 'fact_hardware', 'фурнитур': 'fact_hardware',
         'упаков': 'fact_packaging',
         'доставка': 'fact_delivery', 'логистика': 'fact_delivery',
         'печат': 'fact_printing', 'нанесение': 'fact_printing',
@@ -43,6 +43,25 @@ const FinTablo = {
         fact_charity: 'Благотворительность',
         fact_other: 'Прочее',
         fact_revenue: 'Выручка',
+    },
+
+    _getFieldBreakdownSummary(field, rows = []) {
+        const list = Array.isArray(rows) ? rows : [];
+        return list
+            .filter(row => (parseFloat(row?.amount) || 0) > 0)
+            .slice(0, 10)
+            .map(row => ({
+                amount: parseFloat(row.amount) || 0,
+                description: String(row.description || '').trim(),
+                category: String(row.category || '').trim(),
+                date: row.date || '',
+            }));
+    },
+    _descriptionMatchesKeyword(description = '', keyword = '') {
+        const text = String(description || '').toLowerCase();
+        if (!text || !keyword || !text.includes(keyword)) return false;
+        if (keyword === 'ндс' && /без\s+ндс/i.test(text)) return false;
+        return true;
     },
 
     // =============================================
@@ -541,6 +560,7 @@ const FinTablo = {
             fact_packaging: 0, fact_delivery: 0, fact_printing: 0, fact_molds: 0,
             fact_taxes: 0, fact_commercial: 0, fact_charity: 0, fact_other: 0, fact_revenue: 0,
         };
+        const breakdown = {};
 
         outcomes.forEach(t => {
             const amount = this._effectiveTransactionValue(t);
@@ -550,28 +570,52 @@ const FinTablo = {
             // Also check parent category name
             const parentCat = cat && cat.parentId ? this._categories[cat.parentId] : null;
             const parentName = (parentCat ? parentCat.name : '').toLowerCase();
+            const description = String(
+                (t._scoped_mode === 'split' && t._scoped_label) ? t._scoped_label : (t.description || '')
+            ).toLowerCase();
 
+            let matchedField = null;
             let matched = false;
             for (const [keyword, field] of Object.entries(this.CATEGORY_KEYWORDS)) {
-                if (catName.includes(keyword) || parentName.includes(keyword)) {
+                if (
+                    catName.includes(keyword)
+                    || parentName.includes(keyword)
+                    || this._descriptionMatchesKeyword(description, keyword)
+                ) {
                     result[field] += amount;
+                    matchedField = field;
                     matched = true;
                     break;
                 }
             }
             if (!matched) {
                 result.fact_other += amount;
+                matchedField = 'fact_other';
+            }
+
+            if (matchedField) {
+                if (!Array.isArray(breakdown[matchedField])) breakdown[matchedField] = [];
+                breakdown[matchedField].push({
+                    amount,
+                    description: String(t.description || '').trim(),
+                    category: cat ? cat.name : (parentCat ? parentCat.name : ''),
+                    date: t.date || t.created_at || '',
+                });
             }
         });
 
-        return result;
+        return {
+            totals: result,
+            breakdown,
+        };
     },
 
     _buildImportData(order, deal, txns) {
         const scopedTxns = this._scopeTransactionsToOrder(txns, order);
         const outcomes = scopedTxns.filter(t => t.group === 'outcome');
         const incomes = scopedTxns.filter(t => t.group === 'income');
-        const factSums = this._mapToFactFields(outcomes);
+        const mapped = this._mapToFactFields(outcomes);
+        const factSums = mapped.totals;
         const totalIncome = incomes.reduce((s, t) => s + this._effectiveTransactionValue(t), 0);
         const totalOutcome = outcomes.reduce((s, t) => s + this._effectiveTransactionValue(t), 0);
         const splitApplied = scopedTxns.some(t => t._scoped_mode === 'split' || t._scoped_mode === 'split_zero');
@@ -599,6 +643,12 @@ const FinTablo = {
                 dealName: deal.name,
                 txnCount: txns.length,
                 splitApplied,
+                field_breakdown: Object.fromEntries(
+                    Object.entries(mapped.breakdown || {}).map(([field, rows]) => [
+                        field,
+                        this._getFieldBreakdownSummary(field, rows),
+                    ])
+                ),
             },
             source: 'api',
         };

@@ -195,6 +195,42 @@ function smokeSavedPlanTotalWins(context) {
     assert.ok(html.includes('Пересчитанные статьи дают 250 ₽, но сохраненный план заказа равен 150 ₽.'), 'drift note should explain why total uses saved plan');
 }
 
+function smokeFactDetailShowsFinTabloBreakdown(context) {
+    const container = context.document.getElementById('fact-detail-breakdown');
+    vm.runInContext(`(() => {
+        Factual._renderDetail(
+            44,
+            document.getElementById('fact-detail-breakdown'),
+            {
+                salaryProduction: 0,
+                hardwareTotal: 0,
+                packagingTotal: 0,
+                nfcTotal: 0,
+                totalCosts: 0,
+                revenue: 1000,
+                other: 0,
+            },
+            {},
+            {
+                fact_other: 3200,
+                fact_revenue: 1000,
+                _source_hints: { fact_other: 'ФинТабло' },
+                _fintablo_breakdown: {
+                    fact_other: [
+                        { amount: 2000, description: 'Закупка фурнитуры в России', category: 'Прочие расходы' },
+                        { amount: 1200, description: 'Доставка до склада', category: 'Логистика' },
+                    ],
+                },
+            },
+            { order_name: 'Breakdown Order' }
+        );
+    })()`, context);
+
+    const html = container.innerHTML;
+    assert.ok(html.includes('Закупка фурнитуры в России'), 'plan-fact should show imported breakdown descriptions for finance rows');
+    assert.ok(html.includes('2 000 ₽') || html.includes('2 000 ₽'), 'plan-fact should show imported breakdown amounts');
+}
+
 function smokeBuildPlanUsesSavedSnapshotCostsAndDedupedHardware(context) {
     const result = vm.runInContext(`(() => {
         return Factual._buildPlan(
@@ -565,6 +601,70 @@ async function smokeTaxesFallbackToRevenueWhenImportMissing(context) {
     assert.equal(fact._source_hints.fact_taxes, '11% от факта выручки');
 }
 
+async function smokeCustomHardwareWaitsForFinTablo(context) {
+    context.__imports = [];
+    context.__warehouseItems = [];
+    context.__warehouseHistory = [];
+
+    await vm.runInContext(`(async () => {
+        const factData = {};
+        await Factual._applyDerivedFacts(
+            factData,
+            { plastic: 0, hardwareTotal: 622, nfcTotal: 0, packagingTotal: 0, molds: 444 },
+            { hoursPlastic: 0, hoursTrim: 0, hoursHardware: 0, hoursPackaging: 0 },
+            { taxRate: 0.06, vatRate: 0.05, charityRate: 0.01, indirectPerHour: 0 },
+            211,
+            'Custom Hardware Order',
+            { id: 211, order_name: 'Custom Hardware Order' },
+            [],
+            {
+                hardware_total: { source: 'manual_items', warehouseTotal: 0, manualTotal: 622 },
+                nfc_total: { source: 'none', warehouseTotal: 0, manualTotal: 0 },
+                packaging_total: { source: 'none', warehouseTotal: 0, manualTotal: 0 },
+            }
+        );
+        globalThis.__customHardwareFact = factData;
+    })()`, context);
+
+    const fact = context.__customHardwareFact;
+    assert.equal(fact.fact_hardware_total, 0, 'custom hardware should not silently mirror plan into fact without FinTablo confirmation');
+    assert.equal(fact._source_hints.fact_hardware_total, 'кастом ждёт ФинТабло');
+    assert.equal(fact.fact_molds, 444, 'mold amortization should carry into fact when actual mold usage matches plan');
+    assert.equal(fact._source_hints.fact_molds, 'план');
+}
+
+async function smokeWarehouseHardwareCanFallbackToPlannedWarehouse(context) {
+    context.__imports = [];
+    context.__warehouseItems = [];
+    context.__warehouseHistory = [];
+
+    await vm.runInContext(`(async () => {
+        const factData = {};
+        await Factual._applyDerivedFacts(
+            factData,
+            { plastic: 0, hardwareTotal: 700, nfcTotal: 80, packagingTotal: 0, molds: 0 },
+            { hoursPlastic: 0, hoursTrim: 0, hoursHardware: 0, hoursPackaging: 0 },
+            { taxRate: 0.06, vatRate: 0.05, charityRate: 0.01, indirectPerHour: 0 },
+            212,
+            'Warehouse Hardware Order',
+            { id: 212, order_name: 'Warehouse Hardware Order' },
+            [],
+            {
+                hardware_total: { source: 'current_warehouse', warehouseTotal: 700, manualTotal: 0 },
+                nfc_total: { source: 'current_warehouse', warehouseTotal: 80, manualTotal: 0 },
+                packaging_total: { source: 'none', warehouseTotal: 0, manualTotal: 0 },
+            }
+        );
+        globalThis.__warehouseFallbackFact = factData;
+    })()`, context);
+
+    const fact = context.__warehouseFallbackFact;
+    assert.equal(fact.fact_hardware_total, 700, 'warehouse-backed hardware may fallback to current planned warehouse value');
+    assert.equal(fact.fact_nfc_total, 80, 'warehouse-backed NFC may fallback to current planned warehouse value');
+    assert.equal(fact._source_hints.fact_hardware_total, 'план склада');
+    assert.equal(fact._source_hints.fact_nfc_total, 'план склада');
+}
+
 async function smokeMultipleImportsAccumulateIntoFact(context) {
     context.__imports = [
         {
@@ -912,6 +1012,7 @@ async function main() {
     runScript(context, 'js/factual.js');
     smokeHiddenSalaryTotals(context);
     smokeSavedPlanTotalWins(context);
+    smokeFactDetailShowsFinTabloBreakdown(context);
     smokeRevenueManualOverride(context);
     await smokeResetAutoFactInput(context);
     smokeBuildPlanUsesSavedSnapshotCostsAndDedupedHardware(context);
@@ -919,6 +1020,8 @@ async function main() {
     smokeBuildPlanRendersSavedSnapshotHints(context);
     await smokeTaxesIncludeCharity(context);
     await smokeTaxesFallbackToRevenueWhenImportMissing(context);
+    await smokeCustomHardwareWaitsForFinTablo(context);
+    await smokeWarehouseHardwareCanFallbackToPlannedWarehouse(context);
     await smokeMultipleImportsAccumulateIntoFact(context);
     await smokeLegacyStageDistributionAndMaterials(context);
     await smokeWorkshopLegacyLeavesAssemblyExplicit(context);
