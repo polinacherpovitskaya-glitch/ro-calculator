@@ -13,6 +13,8 @@ const Factual = {
     _periodKind: 'month',
     _periodAnchor: null,
     _renderTimer: null,
+    _monthSnapshots: {},
+    _visibleOrderRecords: [],
 
     VISIBLE_STATUSES: ['sample', 'production_casting', 'production_printing', 'production_hardware', 'production_packaging', 'in_production', 'delivery', 'completed'],
     STATUS_LABELS: {
@@ -61,6 +63,8 @@ const Factual = {
         'indirect_production', 'hardware_total', 'nfc_total', 'packaging_total',
         'design_printing', 'plastic', 'molds', 'delivery_client', 'taxes', 'commercial', 'charity', 'other',
     ]),
+    MATERIAL_ROW_KEYS: new Set(['hardware_total', 'nfc_total', 'packaging_total']),
+    MONEY_ONLY_ROW_KEYS: new Set(['design_printing', 'delivery_client', 'taxes', 'commercial', 'charity', 'other']),
 
     _num(v) { const n = parseFloat(v); return Number.isFinite(n) ? n : 0; },
     _planItemCost(item, ...keys) {
@@ -238,6 +242,28 @@ const Factual = {
         const raw = factData && factData._fintablo_breakdown;
         return (raw && typeof raw === 'object') ? raw : {};
     },
+    _getConfirmedMaterialFacts(factData) {
+        const raw = factData && factData._confirmed_material_facts;
+        return (raw && typeof raw === 'object') ? raw : {};
+    },
+    _setConfirmedMaterialFact(factData, rowKey, payload) {
+        if (!factData || !rowKey) return;
+        const current = this._getConfirmedMaterialFacts(factData);
+        if (payload && typeof payload === 'object') current[rowKey] = payload;
+        else delete current[rowKey];
+        factData._confirmed_material_facts = current;
+    },
+    _getMaterialFactBreakdowns(factData) {
+        const raw = factData && factData._material_fact_breakdown;
+        return (raw && typeof raw === 'object') ? raw : {};
+    },
+    _setMaterialFactBreakdown(factData, rowKey, payload) {
+        if (!factData || !rowKey) return;
+        const current = this._getMaterialFactBreakdowns(factData);
+        if (payload && typeof payload === 'object') current[rowKey] = payload;
+        else delete current[rowKey];
+        factData._material_fact_breakdown = current;
+    },
     _setFinTabloBreakdowns(factData, breakdown) {
         if (!factData) return;
         factData._fintablo_breakdown = (breakdown && typeof breakdown === 'object') ? breakdown : {};
@@ -336,9 +362,13 @@ const Factual = {
 
     async load() {
         this._orderCache = {};
+        this._visibleOrderRecords = [];
         const allOrders = await loadOrders();
         this._allOrders = (allOrders || []).filter(o => this.VISIBLE_STATUSES.includes(o.status));
         this._allOrders.sort((a, b) => (this.STATUS_ORDER[a.status] || 99) - (this.STATUS_ORDER[b.status] || 99));
+        this._monthSnapshots = (typeof loadFactualSnapshots === 'function'
+            ? ((await loadFactualSnapshots()) || {})
+            : {}) || {};
         this._ensurePeriodState();
         this._syncPeriodControls();
         this._applyFilter();
@@ -480,22 +510,173 @@ const Factual = {
         });
     },
 
+    _snapshotMonthKey() {
+        this._ensurePeriodState();
+        return this._periodKind === 'month' ? String(this._periodAnchor || this._currentMonthValue()) : '';
+    },
+
+    _currentMonthKey() {
+        return this._currentMonthValue();
+    },
+
+    _isPastMonthKey(monthKey) {
+        const normalized = String(monthKey || '').slice(0, 7);
+        return !!normalized && normalized < this._currentMonthKey();
+    },
+
+    _getSnapshotStore() {
+        if (!this._monthSnapshots || typeof this._monthSnapshots !== 'object') this._monthSnapshots = {};
+        return this._monthSnapshots;
+    },
+
+    _getActiveSnapshot() {
+        const monthKey = this._snapshotMonthKey();
+        if (!monthKey || !this._isPastMonthKey(monthKey)) return null;
+        const snapshot = this._getSnapshotStore()[monthKey];
+        if (!snapshot || !Array.isArray(snapshot.records)) return null;
+        return snapshot;
+    },
+
+    _makeLiveRecord(computed) {
+        if (!computed?.order) return null;
+        return {
+            orderId: Number(computed.order.id),
+            order: computed.order,
+            planData: computed.planData || {},
+            planHours: computed.planHours || {},
+            planMeta: computed.planMeta || {},
+            factData: computed.factData || {},
+            snapshot: false,
+            snapshotMeta: null,
+        };
+    },
+
+    async _getVisibleOrderRecords() {
+        const snapshot = this._getActiveSnapshot();
+        if (snapshot) {
+            return (snapshot.records || []).map(record => ({
+                ...JSON.parse(JSON.stringify(record)),
+                snapshot: true,
+                snapshotMeta: {
+                    monthKey: snapshot.monthKey || this._snapshotMonthKey(),
+                    savedAt: snapshot.savedAt || snapshot.saved_at || '',
+                },
+            }));
+        }
+        const computedOrders = await Promise.all(this._filteredOrders.map(order => this._ensureComputedOrder(order)));
+        return computedOrders.map(computed => this._makeLiveRecord(computed)).filter(Boolean);
+    },
+
+    async saveMonthlySnapshot() {
+        if (this._periodKind !== 'month') {
+            App.toast('Снимки доступны только для помесячной аналитики');
+            return;
+        }
+        const period = this._getPeriodRange();
+        const computedOrders = await Promise.all(this._filteredOrders.map(order => this._ensureComputedOrder(order)));
+        const records = computedOrders
+            .map(computed => this._makeLiveRecord(computed))
+            .filter(Boolean)
+            .map(record => JSON.parse(JSON.stringify({
+                orderId: record.orderId,
+                order: record.order,
+                planData: record.planData,
+                planHours: record.planHours,
+                planMeta: record.planMeta,
+                factData: record.factData,
+            })));
+        const store = this._getSnapshotStore();
+        const monthKey = this._snapshotMonthKey();
+        store[monthKey] = {
+            monthKey,
+            label: period.label,
+            caption: period.caption,
+            savedAt: new Date().toISOString(),
+            records,
+        };
+        this._monthSnapshots = store;
+        if (typeof saveFactualSnapshots === 'function') {
+            await saveFactualSnapshots(store);
+        }
+        App.toast(`Снимок ${period.label} зафиксирован`);
+        await this._renderAll();
+    },
+
+    _renderSnapshotBanner() {
+        const el = document.getElementById('fact-snapshot-banner');
+        if (!el) return;
+        if (this._periodKind !== 'month') {
+            el.innerHTML = '';
+            return;
+        }
+
+        const monthKey = this._snapshotMonthKey();
+        const snapshot = this._getSnapshotStore()[monthKey];
+        const isPast = this._isPastMonthKey(monthKey);
+        const savedAt = snapshot?.savedAt || snapshot?.saved_at || '';
+        const savedLabel = savedAt ? this._formatDateLabel(new Date(savedAt)) : '';
+
+        if (snapshot && Array.isArray(snapshot.records) && isPast) {
+            el.innerHTML = `<div class="card" style="padding:12px 14px;border:1px solid rgba(34,197,94,0.25);background:rgba(34,197,94,0.06)">
+                <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap">
+                    <div>
+                        <div style="font-weight:700;color:var(--green)">Снимок месяца активен</div>
+                        <div style="font-size:12px;color:var(--text-muted);margin-top:4px">
+                            Для ${this._esc(monthKey)} показывается зафиксированный срез${savedLabel ? ` от ${savedLabel}` : ''}. Эти цифры не дрейфуют от поздних правок заказов.
+                        </div>
+                    </div>
+                    <button class="btn btn-sm btn-outline" onclick="Factual.saveMonthlySnapshot()">Обновить снимок</button>
+                </div>
+            </div>`;
+            return;
+        }
+
+        if (isPast) {
+            el.innerHTML = `<div class="card" style="padding:12px 14px;border:1px solid rgba(245,158,11,0.35);background:#fff7ed">
+                <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap">
+                    <div>
+                        <div style="font-weight:700;color:#92400e">Снимок месяца ещё не зафиксирован</div>
+                        <div style="font-size:12px;color:var(--text-muted);margin-top:4px">
+                            Сейчас для ${this._esc(monthKey)} показываются живые данные. Если позже кто-то пересохранит заказ, цифры месяца изменятся.
+                        </div>
+                    </div>
+                    <button class="btn btn-sm btn-primary" onclick="Factual.saveMonthlySnapshot()">Зафиксировать месяц</button>
+                </div>
+            </div>`;
+            return;
+        }
+
+        el.innerHTML = `<div class="card" style="padding:12px 14px">
+            <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap">
+                <div>
+                    <div style="font-weight:700">Текущий месяц показывается по живым данным</div>
+                    <div style="font-size:12px;color:var(--text-muted);margin-top:4px">
+                        Можно вручную зафиксировать снапшот, когда нужно закрыть месяц для финдиректора.
+                    </div>
+                </div>
+                <button class="btn btn-sm btn-outline" onclick="Factual.saveMonthlySnapshot()">Зафиксировать сейчас</button>
+            </div>
+        </div>`;
+    },
+
     // ==========================================
     // Render all
     // ==========================================
 
     async _renderAll() {
+        this._visibleOrderRecords = await this._getVisibleOrderRecords();
+        this._renderSnapshotBanner();
         await this._renderGlobalStats();
         this._renderOrdersTable();
     },
 
     async _renderGlobalStats() {
-        const orders = this._filteredOrders;
+        const records = Array.isArray(this._visibleOrderRecords) ? this._visibleOrderRecords : [];
+        const orders = records.map(record => record.order).filter(Boolean);
         const $ = id => document.getElementById(id);
         if (!$('fact-stat-orders')) return;
 
         const period = this._getPeriodRange();
-        const computedOrders = await Promise.all(orders.map(o => this._ensureComputedOrder(o)));
 
         const inProd = orders.filter(o => this.SECTION_PRODUCTION.has(o.status));
         const completed = orders.filter(o => o.status === 'completed');
@@ -512,11 +693,11 @@ const Factual = {
         let factCostTotal = 0;
         let hasFactData = false;
 
-        computedOrders.forEach((computed, idx) => {
-            const order = orders[idx];
-            const plan = computed?.planData || {};
-            const planHours = computed?.planHours || {};
-            const fact = computed?.factData || {};
+        records.forEach(record => {
+            const order = record?.order || {};
+            const plan = record?.planData || {};
+            const planHours = record?.planHours || {};
+            const fact = record?.factData || {};
 
             planRevTotal += this._num(plan.revenue ?? order?.total_revenue_plan);
             planCostTotal += this._num(plan.totalCosts ?? order?.total_cost_plan);
@@ -609,7 +790,7 @@ const Factual = {
         const ordersHint = $('fact-orders-hint');
         if (ordersTitle) ordersTitle.textContent = `План-факт по заказам · ${period.label}`;
         if (ordersHint) {
-            ordersHint.textContent = 'Сверху деньги и расходы показаны как текущий итог по заказам выбранного периода, а загрузка — по табелю сотрудников за сам период.';
+            ordersHint.textContent = 'Внутри каждого заказа отдельно показаны: план заказа, факт производства и факт денег. Для прошлого месяца может открываться зафиксированный снапшот.';
         }
     },
 
@@ -666,6 +847,170 @@ _renderCompactResult(result, options = {}) {
         if (hintEl) {
             hintEl.textContent = `${round2(hours)}ч / ${round2(capacity)}ч${suffix ? ` · ${suffix}` : ''}`;
         }
+    },
+
+    _sourceBadgeStyle(label) {
+        const normalized = String(label || '').toLowerCase();
+        if (normalized.includes('финтабло')) return 'background:rgba(59,130,246,0.12);color:#1d4ed8;border:1px solid rgba(59,130,246,0.18)';
+        if (normalized.includes('план')) return 'background:rgba(148,163,184,0.14);color:#475569;border:1px solid rgba(148,163,184,0.2)';
+        if (normalized.includes('склад') || normalized.includes('фурнитура проекта')) return 'background:rgba(16,185,129,0.12);color:#047857;border:1px solid rgba(16,185,129,0.18)';
+        if (normalized.includes('вручную')) return 'background:rgba(245,158,11,0.12);color:#b45309;border:1px solid rgba(245,158,11,0.2)';
+        if (normalized.includes('ожидает')) return 'background:#fff7ed;color:#9a3412;border:1px solid rgba(245,158,11,0.25)';
+        if (normalized.includes('формула') || normalized.includes('табель') || normalized.includes('норма') || normalized.includes('заказ')) return 'background:rgba(168,85,247,0.1);color:#7e22ce;border:1px solid rgba(168,85,247,0.16)';
+        return 'background:var(--bg-muted);color:var(--text-muted);border:1px solid var(--border)';
+    },
+
+    _renderSourceBadges(labels = []) {
+        const unique = [...new Set((labels || []).filter(Boolean).map(label => String(label).trim()).filter(Boolean))];
+        if (!unique.length) return '';
+        return `<div style="display:flex;flex-wrap:wrap;gap:4px;justify-content:flex-end;margin-top:4px">${unique.map(label => {
+            return `<span style="display:inline-flex;align-items:center;padding:2px 7px;border-radius:999px;font-size:10px;font-weight:600;${this._sourceBadgeStyle(label)}">${this._esc(label)}</span>`;
+        }).join('')}</div>`;
+    },
+
+    _renderBreakdownDetails(detailHtml = '') {
+        if (!detailHtml) return '';
+        return `<details style="margin-top:4px">
+            <summary style="cursor:pointer;font-size:11px;color:var(--text-muted)">из чего сложилось</summary>
+            <div style="margin-top:6px;font-size:11px;line-height:1.4;color:var(--text-muted)">${detailHtml}</div>
+        </details>`;
+    },
+
+    _renderLayerCell(view = {}, options = {}) {
+        const amount = view?.amount;
+        const hasValue = amount != null && (this._num(amount) > 0 || view?.showZero);
+        const amountHtml = options.editable
+            ? `<input type="text" inputmode="decimal" value="${this._num(amount) || ''}"
+                class="fact-input ${options.inputClass || ''}" ${options.disabled ? 'disabled' : ''}
+                oninput="${options.onInput || ''}">`
+            : (hasValue ? `<div>${this.fmtRub(amount)}</div>` : '<div class="text-muted">—</div>');
+        return `<div style="min-width:0">
+            ${amountHtml}
+            ${this._renderSourceBadges(view?.labels || [])}
+            ${this._renderBreakdownDetails(view?.detailHtml || '')}
+            ${view?.actionHtml ? `<div style="margin-top:6px">${view.actionHtml}</div>` : ''}
+        </div>`;
+    },
+
+    _buildMaterialPlanLabels(meta = {}) {
+        const labels = ['план'];
+        if (meta.source === 'current_warehouse') labels.push('склад');
+        else if (meta.source === 'manual_items') labels.push('ожидает подтверждения');
+        else if (meta.source === 'mixed') labels.push('склад', 'ожидает подтверждения');
+        return labels;
+    },
+
+    _buildPlanRowLabels(rowKey, planMeta = {}) {
+        const meta = planMeta?.[rowKey] || {};
+        if (this.MATERIAL_ROW_KEYS.has(rowKey)) return this._buildMaterialPlanLabels(meta);
+        if (rowKey.startsWith('salary_')) {
+            const labels = ['план'];
+            if (meta.source === 'blank_norms' || meta.source === 'blank_norms_plus_manual') labels.push('бланки');
+            if (meta.source === 'saved_items' || meta.source === 'saved_order' || meta.source === 'blank_norms_plus_manual') labels.push('заказ');
+            return labels;
+        }
+        if (rowKey === 'indirect_production') return ['план', 'формула'];
+        if (rowKey === 'taxes' || rowKey === 'commercial' || rowKey === 'charity') return ['план', 'формула'];
+        if (rowKey === 'plastic' || rowKey === 'molds') return ['план', 'норма'];
+        return ['план'];
+    },
+
+    _buildMoneyRowLabels(rowKey, factData = {}, planMeta = {}) {
+        if (rowKey === 'revenue') {
+            if (this._isManualOverride(factData, 'fact_revenue')) return ['вручную'];
+            if (factData?._auto_fintablo?.fact_revenue) return ['ФинТабло'];
+            return [];
+        }
+        const factKey = `fact_${rowKey}`;
+        if (this._isManualOverride(factData, factKey)) return ['вручную'];
+        if (factData?._auto_fintablo?.[factKey]) return ['ФинТабло'];
+        if (this.MATERIAL_ROW_KEYS.has(rowKey)) {
+            const breakdown = this._getMaterialFactBreakdowns(factData)?.[rowKey] || {};
+            const labels = [];
+            if (this._num(breakdown.warehouseActual) > 0) labels.push(breakdown.actualHint || 'склад');
+            if (this._num(breakdown.confirmedManual) > 0) labels.push('вручную');
+            if (!labels.length && (this._num(breakdown.warehousePlan) > 0 || this._num(breakdown.manualPlan) > 0)) labels.push('ожидает подтверждения');
+            return labels.length ? labels : this._buildMaterialPlanLabels(planMeta?.[rowKey] || {});
+        }
+        const hint = this._getRowSourceHint(factData, factKey, '');
+        if (hint.includes('ФинТабло')) return ['ФинТабло'];
+        if (hint.includes('вручную')) return ['вручную'];
+        if (hint.includes('табель') || hint.includes('legacy')) return ['табель'];
+        if (hint.includes('формула')) return ['формула'];
+        if (hint.includes('план')) return ['план'];
+        return [];
+    },
+
+    _buildMoneyRowDetail(rowKey, factData = {}, planMeta = {}, planData = {}) {
+        const breakdownRows = this._getFinTabloBreakdowns(factData)[`fact_${rowKey}`];
+        if (Array.isArray(breakdownRows) && breakdownRows.length) {
+            return breakdownRows.slice(0, 8).map(row => {
+                const label = this._esc(row.description || row.category || 'операция');
+                return `${label} — ${this.fmtRub(row.amount)}`;
+            }).join('<br>');
+        }
+        if (this.MATERIAL_ROW_KEYS.has(rowKey)) {
+            const breakdown = this._getMaterialFactBreakdowns(factData)?.[rowKey] || {};
+            const lines = [];
+            if (this._num(breakdown.warehousePlan) > 0) lines.push(`план со склада — ${this.fmtRub(breakdown.warehousePlan)}`);
+            if (Array.isArray(breakdown.details) && breakdown.details.length) {
+                breakdown.details.slice(0, 6).forEach(item => {
+                    lines.push(`${item.label} · ${item.qty} шт — ${this.fmtRub(item.amount)}`);
+                });
+            } else if (this._num(breakdown.warehouseActual) > 0) {
+                lines.push(`подтверждено складом — ${this.fmtRub(breakdown.warehouseActual)}`);
+            }
+            if (this._num(breakdown.manualPlan) > 0) lines.push(`кастом по заказу — ${this.fmtRub(breakdown.manualPlan)}`);
+            if (this._num(breakdown.confirmedManual) > 0) lines.push(`подтверждено вручную — ${this.fmtRub(breakdown.confirmedManual)}`);
+            if (!this._num(breakdown.confirmedManual) && this._num(breakdown.manualPlan) > 0) lines.push(`ожидает подтверждения — ${this.fmtRub(breakdown.manualPlan)}`);
+            return lines.join('<br>');
+        }
+        if (rowKey === 'taxes') {
+            const factRevenue = this._num(factData.fact_revenue);
+            const taxRate = this._num(App.params?.taxRate);
+            const vatRate = this._num(App.params?.vatRate);
+            return factRevenue > 0 ? `${round2((taxRate + vatRate) * 100)}% от ${this.fmtRub(factRevenue)}` : '';
+        }
+        if (rowKey === 'commercial') {
+            const factRevenue = this._num(factData.fact_revenue);
+            return factRevenue > 0 ? `6.5% от ${this.fmtRub(factRevenue)}` : '';
+        }
+        if (rowKey === 'charity') {
+            const factRevenue = this._num(factData.fact_revenue);
+            return factRevenue > 0 ? `1% от ${this.fmtRub(factRevenue)}` : '';
+        }
+        if ((rowKey === 'plastic' || rowKey === 'molds') && this._num(planData?.[rowKey === 'delivery_client' ? 'delivery' : rowKey]) > 0) {
+            return `без отдельного денежного факта, пока используем расчетную норму — ${this.fmtRub(planData[rowKey === 'delivery_client' ? 'delivery' : rowKey])}`;
+        }
+        return '';
+    },
+
+    _buildProductionMaterialView(rowKey, factData = {}, planMeta = {}) {
+        const breakdown = this._getMaterialFactBreakdowns(factData)?.[rowKey] || {};
+        const amount = round2(this._num(breakdown.warehouseActual) + this._num(breakdown.confirmedManual));
+        const labels = [];
+        if (this._num(breakdown.warehouseActual) > 0) labels.push(breakdown.actualHint || 'склад');
+        if (this._num(breakdown.confirmedManual) > 0) labels.push('вручную');
+        if (!labels.length && (this._num(breakdown.warehousePlan) > 0 || this._num(breakdown.manualPlan) > 0)) labels.push('ожидает подтверждения');
+        const lines = [];
+        if (this._num(breakdown.warehousePlan) > 0) lines.push(`план со склада — ${this.fmtRub(breakdown.warehousePlan)}`);
+        if (Array.isArray(breakdown.details) && breakdown.details.length) {
+            breakdown.details.slice(0, 6).forEach(item => {
+                lines.push(`${item.label} · ${item.qty} шт — ${this.fmtRub(item.amount)}`);
+            });
+        } else if (this._num(breakdown.warehouseActual) > 0) {
+            lines.push(`подтверждено складом — ${this.fmtRub(breakdown.warehouseActual)}`);
+        }
+        if (this._num(breakdown.manualPlan) > 0) lines.push(`кастом по заказу — ${this.fmtRub(breakdown.manualPlan)}`);
+        if (this._num(breakdown.confirmedManual) > 0) lines.push(`подтверждено вручную — ${this.fmtRub(breakdown.confirmedManual)}`);
+        if (!this._num(breakdown.confirmedManual) && this._num(breakdown.manualPlan) > 0) lines.push(`ожидает подтверждения — ${this.fmtRub(breakdown.manualPlan)}`);
+        return {
+            amount,
+            labels,
+            detailHtml: lines.join('<br>'),
+            waitingManual: this._num(breakdown.manualPlan) > this._num(breakdown.confirmedManual),
+            manualOutstanding: round2(Math.max(0, this._num(breakdown.manualPlan) - this._num(breakdown.confirmedManual))),
+        };
     },
 
     _parseDateValue(rawValue) {
@@ -773,16 +1118,18 @@ _renderCompactResult(result, options = {}) {
         const tbody = document.getElementById('fact-orders-body');
         if (!tbody) return;
 
-        if (this._filteredOrders.length === 0) {
+        const records = Array.isArray(this._visibleOrderRecords) ? this._visibleOrderRecords : [];
+
+        if (records.length === 0) {
             tbody.innerHTML = '<tr><td colspan="9" class="text-muted text-center" style="padding:24px">Нет заказов за выбранный период</td></tr>';
             return;
         }
 
         // Group orders by section
         const groups = { production: [], sample: [], completed: [] };
-        this._filteredOrders.forEach(o => {
-            const sec = this._getSection(o.status);
-            groups[sec].push(o);
+        records.forEach(record => {
+            const sec = this._getSection(record?.order?.status);
+            groups[sec].push(record);
         });
 
         const sectionMeta = [
@@ -793,18 +1140,18 @@ _renderCompactResult(result, options = {}) {
 
         let html = '';
         sectionMeta.forEach(sec => {
-            const orders = groups[sec.key];
-            if (orders.length === 0) return;
+            const sectionRecords = groups[sec.key];
+            if (sectionRecords.length === 0) return;
 
             // Section header row
             html += `<tr class="fact-section-header">
                 <td colspan="9" style="padding:10px 8px 6px;font-weight:700;font-size:13px;color:${sec.color};border-bottom:2px solid ${sec.color};background:var(--bg)">
-                    ${sec.label} <span style="font-weight:400;font-size:12px;color:var(--text-muted)">(${orders.length})</span>
+                    ${sec.label} <span style="font-weight:400;font-size:12px;color:var(--text-muted)">(${sectionRecords.length})</span>
                 </td>
             </tr>`;
 
-            orders.forEach(o => {
-                html += this._renderOrderRow(o);
+            sectionRecords.forEach(record => {
+                html += this._renderOrderRow(record);
             });
         });
 
@@ -823,16 +1170,17 @@ _renderCompactResult(result, options = {}) {
         }
     },
 
-    _renderOrderRow(o) {
-    const computed = this._orderCache[o.id] || {};
-    const planRevenue = this._num(computed.planData?.revenue ?? o.total_revenue_plan);
-    const planCost = this._num(computed.planData?.totalCosts ?? o.total_cost_plan);
+    _renderOrderRow(record) {
+    const o = record?.order || {};
+    const planRevenue = this._num(record?.planData?.revenue ?? o.total_revenue_plan);
+    const planCost = this._num(record?.planData?.totalCosts ?? o.total_cost_plan);
     const planResult = this._calcProfitability(planRevenue, planCost);
     const status = this.STATUS_LABELS[o.status] || o.status;
     const isOpen = this._openOrderId === o.id;
+    const snapshotHint = record?.snapshot ? '<div class="text-muted" style="font-size:10px;margin-top:2px">снимок месяца</div>' : '';
 
     let html = `<tr class="fact-order-row ${isOpen ? 'fact-row-open' : ''}" onclick="Factual.toggleDetail(${o.id})" style="cursor:pointer">
-        <td style="font-weight:600;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${this._esc(o.order_name || '—')}</td>
+        <td style="font-weight:600;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${this._esc(o.order_name || '—')}${snapshotHint}</td>
         <td><span class="fact-status-badge">${status}</span></td>
         <td class="text-right text-muted">${this.fmtRub(planCost)}</td>
         <td class="text-right" id="fact-row-fcost-${o.id}"><span class="text-muted">—</span></td>
@@ -851,9 +1199,10 @@ _renderCompactResult(result, options = {}) {
 },
 
 async _loadFactSummaries() {
-    const computedOrders = await Promise.all(this._filteredOrders.map(o => this._ensureComputedOrder(o)));
-    this._filteredOrders.forEach((o, idx) => {
-        const f = computedOrders[idx]?.factData;
+    const records = Array.isArray(this._visibleOrderRecords) ? this._visibleOrderRecords : [];
+    records.forEach(record => {
+        const o = record?.order || {};
+        const f = record?.factData;
         if (!f) return;
 
         const factRevenue = parseFloat(f.fact_revenue) || 0;
@@ -867,7 +1216,7 @@ async _loadFactSummaries() {
 
         if (costEl) {
             if (hasFactData) {
-                const planCost = this._num(computedOrders[idx]?.planData?.totalCosts ?? o.total_cost_plan);
+                const planCost = this._num(record?.planData?.totalCosts ?? o.total_cost_plan);
                 const alarm = this.getAlarm(factCosts, planCost);
                 costEl.innerHTML = `<span style="color:${alarm.color};font-weight:500">${this.fmtRub(factCosts)}</span>`;
             } else {
@@ -930,13 +1279,28 @@ async _loadFactSummaries() {
         if (!container) return;
         container.innerHTML = '<p class="text-muted text-center">⏳ Загрузка...</p>';
 
+        const snapshotRecord = (this._visibleOrderRecords || []).find(record => Number(record?.orderId) === Number(orderId));
+        if (snapshotRecord?.snapshot) {
+            this._renderDetail(
+                orderId,
+                container,
+                snapshotRecord.planData || {},
+                snapshotRecord.planHours || {},
+                snapshotRecord.factData || {},
+                snapshotRecord.order || {},
+                snapshotRecord.planMeta || {},
+                { snapshot: true, snapshotMeta: snapshotRecord.snapshotMeta || null }
+            );
+            return;
+        }
+
         const computed = await this._ensureComputedOrder(orderId);
         if (!computed) {
             container.innerHTML = '<p class="text-muted">Заказ не найден</p>';
             return;
         }
         const { order, planData, planHours, factData, planMeta } = computed;
-        this._renderDetail(orderId, container, planData, planHours, factData, order, planMeta || {});
+        this._renderDetail(orderId, container, planData, planHours, factData, order, planMeta || {}, { snapshot: false, snapshotMeta: null });
     },
 
     _buildPlan(order, rawItems, params) {
@@ -1573,58 +1937,63 @@ async _loadFactSummaries() {
         }
 
         // 4. Warehouse fallback for hardware/packaging (only if fintablo didn't provide them)
-        if (!factData._auto_fintablo.fact_hardware_total || !factData._auto_fintablo.fact_nfc_total || !factData._auto_fintablo.fact_packaging_total) {
-            const whActual = this._isWorkshopOrder(orderRef || orderName)
-                ? await this._deriveWorkshopMaterialFacts(orderId, orderRef || { order_name: orderName }, orderItems || [])
-                : await this._deriveMaterialFacts(orderId, orderName);
-            const resolveMaterialFallback = (factKey, actualValue, meta = {}, warehouseHint, waitingHint) => {
-                const warehousePlan = this._num(meta?.warehouseTotal);
-                const manualPlan = this._num(meta?.manualTotal);
-                const effectiveWarehouse = whActual.found ? this._num(actualValue) : warehousePlan;
-                const nextValue = round2(Math.max(0, effectiveWarehouse));
-                let hint = '';
-                if (whActual.found && nextValue > 0) {
-                    hint = warehouseHint;
-                } else if (warehousePlan > 0) {
-                    hint = 'план склада';
-                }
-                if (manualPlan > 0) {
-                    hint = hint ? `${hint} + ${waitingHint}` : waitingHint;
-                }
-                if (nextValue > 0 || manualPlan > 0) {
-                    this._applyAutoFactValue(factData, factKey, nextValue);
-                    this._setSourceHint(factData, factKey, hint || waitingHint);
-                }
-            };
+        const whActual = this._isWorkshopOrder(orderRef || orderName)
+            ? await this._deriveWorkshopMaterialFacts(orderId, orderRef || { order_name: orderName }, orderItems || [])
+            : await this._deriveMaterialFacts(orderId, orderName);
+        const confirmedMaterials = this._getConfirmedMaterialFacts(factData);
+        const resolveMaterialFallback = (rowKey, actualValue, meta = {}, actualHint, waitingHint, details = []) => {
+            const factKey = `fact_${rowKey}`;
+            const warehousePlan = this._num(meta?.warehouseTotal);
+            const manualPlan = this._num(meta?.manualTotal);
+            const warehouseActual = whActual.found ? this._num(actualValue) : 0;
+            const confirmedManual = this._num(confirmedMaterials?.[rowKey]?.amount);
+            const nextValue = round2(Math.max(0, warehouseActual + confirmedManual));
 
-            if (!factData._auto_fintablo.fact_hardware_total) {
-                resolveMaterialFallback(
-                    'fact_hardware_total',
-                    whActual.hardware,
-                    planMeta?.hardware_total || {},
-                    whActual.sourceHint || 'склад',
-                    'кастом ждёт ФинТабло'
-                );
+            this._setMaterialFactBreakdown(factData, rowKey, {
+                warehousePlan: round2(warehousePlan),
+                manualPlan: round2(manualPlan),
+                warehouseActual: round2(warehouseActual),
+                confirmedManual: round2(confirmedManual),
+                details: Array.isArray(details) ? details : [],
+                actualHint: actualHint || 'склад',
+                waitingHint,
+            });
+
+            if (!factData._auto_fintablo[factKey]) {
+                this._applyAutoFactValue(factData, factKey, nextValue);
+                let hint = '';
+                if (warehouseActual > 0 && confirmedManual > 0) hint = `${actualHint} + вручную подтверждено`;
+                else if (warehouseActual > 0) hint = actualHint || 'склад';
+                else if (confirmedManual > 0) hint = 'вручную подтверждено';
+                else if (warehousePlan > 0 || manualPlan > 0) hint = waitingHint;
+                if (hint) this._setSourceHint(factData, factKey, hint);
             }
-            if (!factData._auto_fintablo.fact_nfc_total) {
-                resolveMaterialFallback(
-                    'fact_nfc_total',
-                    whActual.nfc,
-                    planMeta?.nfc_total || {},
-                    whActual.nfcSourceHint || whActual.sourceHint || 'склад',
-                    'NFC ждёт ФинТабло'
-                );
-            }
-            if (!factData._auto_fintablo.fact_packaging_total) {
-                resolveMaterialFallback(
-                    'fact_packaging_total',
-                    whActual.packaging,
-                    planMeta?.packaging_total || {},
-                    whActual.packagingSourceHint || whActual.sourceHint || 'склад',
-                    'упаковка ждёт ФинТабло'
-                );
-            }
-        }
+        };
+
+        resolveMaterialFallback(
+            'hardware_total',
+            whActual.hardware,
+            planMeta?.hardware_total || {},
+            whActual.sourceHint || 'склад',
+            'ожидает подтверждения',
+            whActual.hardwareDetails || []
+        );
+        resolveMaterialFallback(
+            'nfc_total',
+            whActual.nfc,
+            planMeta?.nfc_total || {},
+            whActual.nfcSourceHint || whActual.sourceHint || 'склад',
+            'ожидает подтверждения',
+            whActual.nfcDetails || []
+        );
+        resolveMaterialFallback(
+            'packaging_total',
+            whActual.packaging,
+            planMeta?.packaging_total || {},
+            whActual.packagingSourceHint || whActual.sourceHint || 'склад',
+            'ожидает подтверждения',
+            whActual.packagingDetails || []
+        );
     },
 
     async _deriveWorkshopMaterialFacts(orderId, orderRef = null, orderItems = []) {
@@ -1643,6 +2012,9 @@ async _loadFactSummaries() {
         let nfc = 0;
         let packaging = 0;
         let found = false;
+        const hardwareDetails = [];
+        const nfcDetails = [];
+        const packagingDetails = [];
         const normalizedOrderId = Number(typeof orderRef === 'object' ? orderRef?.id ?? orderId : orderId) || Number(orderId) || 0;
 
         demandRows.forEach(row => {
@@ -1658,9 +2030,21 @@ async _loadFactSummaries() {
             const unitPrice = this._num((itemMap.get(itemId) || {}).price_per_unit);
             const deltaCost = round2(consumedQty * unitPrice);
             const category = String(row.material_type || (itemMap.get(itemId) || {}).category || '').toLowerCase();
-            if (category === 'packaging') packaging += deltaCost;
-            else if (this._isNfcWarehouseRow(row, itemMap.get(itemId) || null)) nfc += deltaCost;
-            else hardware += deltaCost;
+            const detailEntry = {
+                label: this._esc((row.names || []).join(', ') || (itemMap.get(itemId) || {}).name || `#${itemId}`),
+                qty: round2(consumedQty),
+                amount: deltaCost,
+            };
+            if (category === 'packaging') {
+                packaging += deltaCost;
+                packagingDetails.push(detailEntry);
+            } else if (this._isNfcWarehouseRow(row, itemMap.get(itemId) || null)) {
+                nfc += deltaCost;
+                nfcDetails.push(detailEntry);
+            } else {
+                hardware += deltaCost;
+                hardwareDetails.push(detailEntry);
+            }
             found = true;
         });
 
@@ -1672,6 +2056,9 @@ async _loadFactSummaries() {
             sourceHint: found ? 'фурнитура проекта' : 'склад',
             nfcSourceHint: found ? 'фурнитура проекта' : 'склад',
             packagingSourceHint: found ? 'фурнитура проекта' : 'склад',
+            hardwareDetails,
+            nfcDetails,
+            packagingDetails,
         };
     },
 
@@ -1686,6 +2073,11 @@ async _loadFactSummaries() {
             return orderName && String(h.order_name || '').trim() === String(orderName).trim();
         };
         let hardware = 0, nfc = 0, packaging = 0, found = false;
+        const byGroup = {
+            hardware: new Map(),
+            nfc: new Map(),
+            packaging: new Map(),
+        };
         history.forEach(h => {
             if (!sameOrder(h)) return;
             const type = String(h.type || '');
@@ -1696,10 +2088,32 @@ async _loadFactSummaries() {
             const deltaCost = round2(-qtyChange * unitPrice);
             if (deltaCost === 0) return;
             const category = String(h.item_category || (itemMap.get(Number(h.item_id)) || {}).category || '').toLowerCase();
-            if (category === 'packaging') packaging += deltaCost; else hardware += deltaCost;
+            const entryLabel = String(h.item_name || (itemMap.get(Number(h.item_id)) || {}).name || h.sku || `#${h.item_id}`).trim() || `#${h.item_id}`;
+            const qtyAbs = Math.abs(this._num(qtyChange));
+            const addDetail = (bucketKey, label) => {
+                const bucket = byGroup[bucketKey];
+                const prev = bucket.get(label) || { label: this._esc(label), qty: 0, amount: 0 };
+                prev.qty = round2(prev.qty + qtyAbs);
+                prev.amount = round2(prev.amount + deltaCost);
+                bucket.set(label, prev);
+            };
+            if (category === 'packaging') {
+                packaging += deltaCost;
+                addDetail('packaging', entryLabel);
+            } else {
+                hardware += deltaCost;
+                addDetail('hardware', entryLabel);
+            }
             if (category !== 'packaging' && this._isNfcWarehouseRow(h, itemMap.get(Number(h.item_id)) || null)) {
                 nfc += deltaCost;
                 hardware -= deltaCost;
+                addDetail('nfc', entryLabel);
+                const hardwareBucket = byGroup.hardware.get(entryLabel);
+                if (hardwareBucket) {
+                    hardwareBucket.amount = round2(hardwareBucket.amount - deltaCost);
+                    if (hardwareBucket.amount <= 0.009) byGroup.hardware.delete(entryLabel);
+                    else byGroup.hardware.set(entryLabel, hardwareBucket);
+                }
             }
             found = true;
         });
@@ -1709,6 +2123,9 @@ async _loadFactSummaries() {
             nfc: round2(Math.max(0, nfc)),
             packaging: round2(Math.max(0, packaging)),
             nfcSourceHint: found ? 'склад' : 'план',
+            hardwareDetails: Array.from(byGroup.hardware.values()).filter(item => item.amount > 0),
+            nfcDetails: Array.from(byGroup.nfc.values()).filter(item => item.amount > 0),
+            packagingDetails: Array.from(byGroup.packaging.values()).filter(item => item.amount > 0),
         };
     },
 
@@ -1730,14 +2147,16 @@ async _loadFactSummaries() {
     // Render detail accordion
     // ==========================================
 
-    _renderDetail(orderId, container, plan, planHours, fact, order, planMeta = {}) {
+    _renderDetail(orderId, container, plan, planHours, fact, order, planMeta = {}, options = {}) {
     let html = '';
 
-    const planRev = plan.revenue || 0;
-    const planCost = plan.totalCosts || 0;
-    const factRev = parseFloat(fact.fact_revenue) || 0;
+    const isSnapshot = !!options?.snapshot;
+    const snapshotSavedAt = options?.snapshotMeta?.savedAt || '';
+    const planRev = this._num(plan.revenue);
+    const planCost = this._num(plan.totalCosts);
+    const factRev = this._num(fact.fact_revenue);
     let factCost = 0;
-    this.ROWS.forEach(r => { factCost += parseFloat(fact['fact_' + r.key]) || 0; });
+    this.ROWS.forEach(r => { factCost += this._num(fact['fact_' + r.key]); });
     const planResult = this._calcProfitability(planRev, planCost);
     const factResult = this._calcProfitability(factRev, factCost);
     const hasFactPnL = factRev > 0 || factCost > 0;
@@ -1750,9 +2169,8 @@ async _loadFactSummaries() {
         : (revManual ? 'внесено вручную' : 'пока не внесена');
     const _isAdmin = App.isAdmin();
     const planTotalRowsVisible = round2(this.ROWS.reduce((sum, row) => {
-        const planVal = plan[row.planField] || 0;
-        const factKey = 'fact_' + row.key;
-        const factVal = parseFloat(fact[factKey]) || 0;
+        const planVal = this._num(plan[row.planField]);
+        const factVal = this._num(fact[`fact_${row.key}`]);
         if (row.key === 'molds' && planVal === 0 && factVal === 0) return sum;
         const isSalaryRow = row.key.startsWith('salary_') || row.key === 'indirect_production';
         if (isSalaryRow && !_isAdmin) return sum;
@@ -1760,28 +2178,6 @@ async _loadFactSummaries() {
     }, 0));
     const planTotalBase = round2(plan.totalCosts || planTotalRowsVisible);
     const hasPlanDrift = Math.abs(planTotalRowsVisible - planTotalBase) > 0.01;
-
-    html += `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;margin-bottom:12px">
-        <div class="fact-mini-stat"><span class="text-muted" style="font-size:11px">План расходы</span><br><b>${this.fmtRub(planCost)}</b><div class="text-muted" style="font-size:11px">из калькулятора</div></div>
-        <div class="fact-mini-stat"><span class="text-muted" style="font-size:11px">Факт расходы</span><br><b style="color:${hasFactPnL ? (factCost > planCost * 1.15 ? 'var(--red)' : factCost > planCost ? 'var(--yellow)' : 'var(--green)') : 'var(--text-muted)'}">${hasFactPnL ? this.fmtRub(factCost) : '—'}</b><div class="text-muted" style="font-size:11px">часы + склад + ФинТабло</div></div>
-        <div class="fact-mini-stat"><span class="text-muted" style="font-size:11px">План выручка</span><br><b>${this.fmtRub(planRev)}</b><div class="text-muted" style="font-size:11px">из калькулятора</div></div>
-        <div class="fact-mini-stat"><span class="text-muted" style="font-size:11px">Факт выручка</span><br><b style="color:${hasFactPnL ? (factRev > 0 ? 'var(--green)' : 'var(--text-muted)') : 'var(--text-muted)'}">${hasFactPnL ? this.fmtRub(factRev) : '—'}</b><div class="text-muted" style="font-size:11px">${factRevenueHint}</div></div>
-        <div class="fact-mini-stat"><span class="text-muted" style="font-size:11px">План прибыль</span><div style="margin-top:6px">${this._renderCompactResult(planResult)}</div></div>
-        <div class="fact-mini-stat"><span class="text-muted" style="font-size:11px">Факт прибыль</span><div style="margin-top:6px">${this._renderCompactResult(factResult)}</div></div>
-    </div>`;
-    if (fact._legacy_stage_estimate) {
-        html += `<div style="margin:-2px 0 10px;padding:8px 10px;border:1px solid var(--border);border-radius:10px;background:var(--bg-muted);font-size:11px;color:var(--text-muted)">
-            ${fact._legacy_stage_scope === 'production_only'
-                ? 'Legacy-часы без этапа распределены только в выливание/срезание по плановым стадиям заказа. Сборка и упаковка считаются только по явно указанным этапам.'
-                : 'Legacy-часы без этапа распределены по плановым стадиям заказа, чтобы выливание/срезание/сборка отражали реальную загрузку до ручной детализации.'}
-        </div>`;
-    }
-    if (hasPlanDrift) {
-        html += `<div style="margin:-2px 0 10px;padding:8px 10px;border:1px solid #f59e0b;border-radius:10px;background:#fff7ed;font-size:11px;color:#92400e">
-            Важно: видимые плановые строки сейчас пересчитаны по текущим строкам заказа и дают ${this.fmtRub(planTotalRowsVisible)}, но сохраненный план заказа в калькуляторе равен ${this.fmtRub(planTotalBase)}. Верхний ИТОГО использует сохраненный план заказа.
-        </div>`;
-    }
-
     const factHoursByRow = {
         salary_production: this._num(fact.fact_hours_production),
         salary_trim: this._num(fact.fact_hours_trim),
@@ -1795,90 +2191,176 @@ async _loadFactSummaries() {
         ),
     };
 
-    html += '<div style="overflow-x:auto"><table class="data-table" style="width:100%;font-size:12px">';
-    html += '<thead><tr><th style="text-align:left;width:35%">Статья расходов</th><th class="text-right" style="width:20%">План</th><th class="text-right" style="width:25%">Факт</th><th class="text-right" style="width:20%">Δ</th></tr></thead><tbody>';
+    let productionTotal = 0;
 
-    let planTotal = 0, factTotal = 0;
+    if (isSnapshot) {
+        html += `<div style="margin:0 0 12px;padding:10px 12px;border:1px solid rgba(34,197,94,0.25);border-radius:10px;background:rgba(34,197,94,0.06);font-size:12px">
+            <b style="color:var(--green)">Снимок месяца</b>
+            <div class="text-muted" style="margin-top:4px">Открыт зафиксированный срез${snapshotSavedAt ? ` от ${this._formatDateLabel(new Date(snapshotSavedAt))}` : ''}. В этом режиме строки только для чтения.</div>
+        </div>`;
+    }
+
+    html += `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;margin-bottom:12px">
+        <div class="fact-mini-stat"><span class="text-muted" style="font-size:11px">План заказа · расходы</span><br><b>${this.fmtRub(planCost)}</b><div class="text-muted" style="font-size:11px">что было заложено в калькуляторе</div></div>
+        <div class="fact-mini-stat"><span class="text-muted" style="font-size:11px">Факт денег · расходы</span><br><b style="color:${hasFactPnL ? (factCost > planCost * 1.15 ? 'var(--red)' : factCost > planCost ? 'var(--yellow)' : 'var(--green)') : 'var(--text-muted)'}">${hasFactPnL ? this.fmtRub(factCost) : '—'}</b><div class="text-muted" style="font-size:11px">ФинТабло + вручную + подтверждённые факты</div></div>
+        <div class="fact-mini-stat"><span class="text-muted" style="font-size:11px">План заказа · выручка</span><br><b>${this.fmtRub(planRev)}</b><div class="text-muted" style="font-size:11px">без НДС</div></div>
+        <div class="fact-mini-stat"><span class="text-muted" style="font-size:11px">Факт денег · выручка</span><br><b style="color:${hasFactPnL ? (factRev > 0 ? 'var(--green)' : 'var(--text-muted)') : 'var(--text-muted)'}">${hasFactPnL ? this.fmtRub(factRev) : '—'}</b><div class="text-muted" style="font-size:11px">${factRevenueHint}</div></div>
+        <div class="fact-mini-stat"><span class="text-muted" style="font-size:11px">План заказа · прибыль</span><div style="margin-top:6px">${this._renderCompactResult(planResult)}</div></div>
+        <div class="fact-mini-stat"><span class="text-muted" style="font-size:11px">Факт денег · прибыль</span><div style="margin-top:6px">${this._renderCompactResult(factResult)}</div></div>
+    </div>`;
+    if (fact._legacy_stage_estimate) {
+        html += `<div style="margin:-2px 0 10px;padding:8px 10px;border:1px solid var(--border);border-radius:10px;background:var(--bg-muted);font-size:11px;color:var(--text-muted)">
+            ${fact._legacy_stage_scope === 'production_only'
+                ? 'Legacy-часы без этапа распределены только в выливание/срезание по плановым стадиям заказа. Сборка и упаковка считаются только по явно указанным этапам.'
+                : 'Legacy-часы без этапа распределены по плановым стадиям заказа, чтобы выливание/срезание/сборка отражали реальную загрузку до ручной детализации.'}
+        </div>`;
+    }
+    if (hasPlanDrift) {
+        html += `<div style="margin:-2px 0 10px;padding:8px 10px;border:1px solid #f59e0b;border-radius:10px;background:#fff7ed;font-size:11px;color:#92400e">
+            Видимые плановые строки сейчас дают ${this.fmtRub(planTotalRowsVisible)}, но сохранённый план заказа в калькуляторе равен ${this.fmtRub(planTotalBase)}. В прибыли и ИТОГО используется сохранённый план заказа.
+        </div>`;
+    }
+
+    html += '<div style="overflow-x:auto"><table class="data-table" style="width:100%;font-size:12px">';
+    html += '<thead><tr><th style="text-align:left;width:24%">Статья расходов</th><th class="text-right" style="width:20%">План заказа</th><th class="text-right" style="width:20%">Факт производства</th><th class="text-right" style="width:23%">Факт денег</th><th class="text-right" style="width:13%">Δ денег</th></tr></thead><tbody>';
+
     this.ROWS.forEach(row => {
-        const planVal = plan[row.planField] || 0;
-        const factKey = 'fact_' + row.key;
-        const factVal = parseFloat(fact[factKey]) || 0;
+        const planVal = this._num(plan[row.planField]);
+        const factKey = `fact_${row.key}`;
+        const factVal = this._num(fact[factKey]);
         if (row.key === 'molds' && planVal === 0 && factVal === 0) return;
         const isSalaryRow = row.key.startsWith('salary_') || row.key === 'indirect_production';
-        const isAuto = this._isAutoFactRow(fact, row.key);
-        const manualOverride = this._isManualOverride(fact, factKey);
-        planTotal += planVal;
-        factTotal += factVal;
+        if (isSalaryRow && !_isAdmin) return;
+
+        const planView = {
+            amount: planVal,
+            showZero: true,
+            labels: this._buildPlanRowLabels(row.key, planMeta),
+            detailHtml: this._renderPlanRowDetail(row.key, planMeta, plan),
+        };
+
+        let productionView = { amount: null, labels: [], detailHtml: '' };
+        if (row.key.startsWith('salary_')) {
+            productionView = {
+                amount: this._num((fact._auto_stage_salary || {})[
+                    row.key === 'salary_production' ? 'casting'
+                        : row.key === 'salary_trim' ? 'trim'
+                        : row.key === 'salary_assembly' ? 'assembly'
+                        : 'packaging'
+                ]),
+                labels: ['табель'],
+                detailHtml: factHoursByRow[row.key] > 0 ? this.fmtHours(factHoursByRow[row.key]) : '',
+            };
+        } else if (row.key === 'indirect_production') {
+            productionView = {
+                amount: this._num(fact._auto_stage_salary) ? this._num(fact.fact_indirect_production) : this._num(fact.fact_indirect_production),
+                labels: factHoursByRow.indirect_production > 0 ? ['табель', 'формула'] : [],
+                detailHtml: factHoursByRow.indirect_production > 0
+                    ? `${this.fmtHours(factHoursByRow.indirect_production)} × ${this.fmtRub(planMeta?.indirect_production?.perHour || 0)}/ч`
+                    : '',
+            };
+        } else if (this.MATERIAL_ROW_KEYS.has(row.key)) {
+            productionView = this._buildProductionMaterialView(row.key, fact, planMeta);
+        } else if (row.key === 'plastic' || row.key === 'molds') {
+            productionView = {
+                amount: planVal,
+                labels: planVal > 0 ? ['норма'] : [],
+                detailHtml: planVal > 0 ? `расчетная норма из калькулятора — ${this.fmtRub(planVal)}` : '',
+            };
+        }
+
+        if (productionView.amount != null) productionTotal += this._num(productionView.amount);
+
+        const moneyView = {
+            amount: factVal,
+            showZero: this.MATERIAL_ROW_KEYS.has(row.key) && !!this._getMaterialFactBreakdowns(fact)?.[row.key],
+            labels: this._buildMoneyRowLabels(row.key, fact, planMeta),
+            detailHtml: this._buildMoneyRowDetail(row.key, fact, planMeta, plan),
+            actionHtml: '',
+        };
+
+        if (this.MATERIAL_ROW_KEYS.has(row.key) && !isSnapshot && !this._isManualOverride(fact, factKey) && !fact?._auto_fintablo?.[factKey]) {
+            const confirmedAmount = this._num(this._getConfirmedMaterialFacts(fact)?.[row.key]?.amount);
+            if (productionView.waitingManual && productionView.manualOutstanding > 0) {
+                moneyView.actionHtml = `<button class="btn btn-sm btn-outline" type="button" onclick="event.stopPropagation();Factual.confirmMaterialFact(${orderId}, '${row.key}')">Подтвердить ${this.fmtRub(productionView.manualOutstanding)}</button>`;
+            } else if (confirmedAmount > 0) {
+                moneyView.actionHtml = `<button class="btn btn-sm btn-outline" type="button" onclick="event.stopPropagation();Factual.clearConfirmedMaterialFact(${orderId}, '${row.key}')">Снять подтверждение</button>`;
+            }
+        }
+
         const delta = factVal - planVal;
         const pct = planVal > 0 ? ((delta / planVal) * 100) : 0;
         const alarm = this.getAlarm(factVal, planVal);
-
-        const sourceHint = manualOverride ? 'вручную' : this._getRowSourceHint(fact, factKey, row.hint);
+        const isAuto = this._isAutoFactRow(fact, row.key);
+        const manualOverride = this._isManualOverride(fact, factKey);
+        const inputClass = isAuto && !manualOverride ? 'fact-input-auto' : '';
         const resetControl = this._renderAutoResetControl(orderId, row.key, isAuto, manualOverride);
-        const planDetail = this._renderPlanRowDetail(row.key, planMeta);
-        const factDetail = this._renderFactRowDetail(row.key, factHoursByRow, planMeta, fact);
+        const rowHint = row.key.startsWith('salary_')
+            ? 'план/табель/деньги'
+            : this.MATERIAL_ROW_KEYS.has(row.key)
+                ? 'план/склад/деньги'
+                : this.MONEY_ONLY_ROW_KEYS.has(row.key)
+                    ? 'денежная статья'
+                    : 'норма/деньги';
 
-        if (isSalaryRow && !_isAdmin) {
-            return;
-        }
         html += `<tr style="${alarm.bgStyle}">
-            <td style="padding:6px 8px;font-weight:500">${row.label} <span class="text-muted" style="font-size:10px">${sourceHint}</span>${resetControl}</td>
-            <td class="text-right" style="padding:6px 8px;color:var(--text-muted)">
-                <div>${this.fmtRub(planVal)}</div>
-                ${planDetail ? `<div class="text-muted" style="font-size:11px;margin-top:2px;line-height:1.35">${planDetail}</div>` : ''}
+            <td style="padding:8px 8px;font-weight:500;vertical-align:top">
+                <div>${row.label}</div>
+                <div class="text-muted" style="font-size:10px;margin-top:4px">${rowHint}${resetControl}</div>
             </td>
-            <td class="text-right" style="padding:6px 4px">
-                <input type="text" inputmode="decimal" value="${factVal || ''}"
-                    class="fact-input ${isAuto && !manualOverride ? 'fact-input-auto' : ''}"
-                    oninput="Factual.onFactInput(${orderId}, '${row.key}', this.value)">
-                ${factDetail ? `<div class="text-muted" style="font-size:11px;margin-top:2px;line-height:1.35;text-align:right;padding-right:4px">${factDetail}</div>` : ''}
-            </td>
-            <td class="text-right" style="padding:6px 8px;font-weight:600;color:${alarm.color}">
+            <td class="text-right" style="padding:8px 8px;vertical-align:top">${this._renderLayerCell(planView)}</td>
+            <td class="text-right" style="padding:8px 8px;vertical-align:top">${this._renderLayerCell(productionView)}</td>
+            <td class="text-right" style="padding:8px 4px;vertical-align:top">${this._renderLayerCell(moneyView, {
+                editable: !isSnapshot,
+                disabled: isSnapshot,
+                inputClass,
+                onInput: `Factual.onFactInput(${orderId}, '${row.key}', this.value)`,
+            })}</td>
+            <td class="text-right" style="padding:8px 8px;font-weight:600;color:${alarm.color};vertical-align:top">
                 ${factVal > 0 ? alarm.icon + ' ' + this.fmtDelta(delta, pct) : '<span class="text-muted">—</span>'}
             </td>
         </tr>`;
     });
 
-    const planTotalRows = round2(planTotal);
-    const tDelta = factTotal - planTotalBase;
-    const tPct = planTotalBase > 0 ? (tDelta / planTotalBase) * 100 : 0;
-    const tAlarm = this.getAlarm(factTotal, planTotalBase);
+    const productionAlarm = this.getAlarm(productionTotal, planTotalBase);
+    const moneyAlarm = this.getAlarm(factCost, planTotalBase);
+    const productionDelta = productionTotal - planTotalBase;
+    const productionPct = planTotalBase > 0 ? (productionDelta / planTotalBase) * 100 : 0;
+    const moneyDelta = factCost - planTotalBase;
+    const moneyPct = planTotalBase > 0 ? (moneyDelta / planTotalBase) * 100 : 0;
+
     html += `<tr style="border-top:2px solid var(--border);font-weight:700;background:var(--bg-muted)">
         <td style="padding:8px">ИТОГО расходы</td>
         <td class="text-right" style="padding:8px">${this.fmtRub(planTotalBase)}</td>
-        <td class="text-right" style="padding:8px">${factTotal > 0 ? this.fmtRub(factTotal) : '—'}</td>
-        <td class="text-right" style="padding:8px;color:${tAlarm.color}">${factTotal > 0 ? tAlarm.icon + ' ' + this.fmtDelta(tDelta, tPct) : '—'}</td>
+        <td class="text-right" style="padding:8px">${productionTotal > 0 ? `<span style="color:${productionAlarm.color}">${this.fmtRub(productionTotal)}</span><div style="font-size:11px;color:${productionAlarm.color}">${productionAlarm.icon} ${this.fmtDelta(productionDelta, productionPct)}</div>` : '—'}</td>
+        <td class="text-right" style="padding:8px">${factCost > 0 ? this.fmtRub(factCost) : '—'}</td>
+        <td class="text-right" style="padding:8px;color:${moneyAlarm.color}">${factCost > 0 ? moneyAlarm.icon + ' ' + this.fmtDelta(moneyDelta, moneyPct) : '—'}</td>
     </tr>`;
-    if (hasPlanDrift) {
-        html += `<tr style="background:var(--bg)">
-            <td colspan="4" style="padding:6px 8px;font-size:11px;color:var(--text-muted)">
-                Пересчитанные статьи дают ${this.fmtRub(planTotalRows)}, но сохраненный план заказа равен ${this.fmtRub(planTotalBase)}. ИТОГО использует сохраненный план заказа.
-            </td>
-        </tr>`;
-    }
     html += '</tbody></table></div>';
 
     html += `<div style="margin-top:12px;padding:12px;border:1px solid var(--border);border-radius:10px;background:var(--card-bg)">
-        <div style="font-weight:700;margin-bottom:8px">Выручка и деньги по сделке</div>
+        <div style="font-weight:700;margin-bottom:8px">Деньги по сделке</div>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;align-items:end">
             <div>
-                <div class="text-muted" style="font-size:11px;margin-bottom:6px">Факт выручка</div>
-                <input type="text" inputmode="decimal" value="${factRev || ''}"
-                    class="fact-input ${revAutoClass}" style="max-width:220px;font-weight:600"
-                    oninput="Factual.onFactInput(${orderId}, 'revenue', this.value)">
-                ${revenueResetControl}
+                <div class="text-muted" style="font-size:11px;margin-bottom:6px">Факт выручка без НДС</div>
+                ${isSnapshot
+                    ? `<div style="font-weight:600">${factRev > 0 ? this.fmtRub(factRev) : '—'}</div>`
+                    : `<input type="text" inputmode="decimal" value="${factRev || ''}"
+                        class="fact-input ${revAutoClass}" style="max-width:220px;font-weight:600"
+                        oninput="Factual.onFactInput(${orderId}, 'revenue', this.value)">`}
+                ${!isSnapshot ? revenueResetControl : ''}
+                ${this._renderSourceBadges(this._buildMoneyRowLabels('revenue', fact, planMeta))}
             </div>
             <div class="text-muted" style="font-size:11px;line-height:1.5">
-                Факт выручка = деньги, которые реально пришли по этой сделке. ${fact._auto_fintablo?.fact_revenue ? 'Сейчас значение приходит из ФинТабло.' : 'Сейчас значение можно ввести вручную.'}
-                ${fact._auto_fintablo?.fact_revenue ? ' Пока клиент оплатил не все, фактическая прибыльность может выглядеть хуже плана — это нормально.' : ''}
+                Факт денег = реальные деньги и статьи расходов по сделке. Факт производства рядом показывает только подтвержденные часы/склад/ручные подтверждения, чтобы план не путался с денежным фактом.
             </div>
         </div>
     </div>`;
 
     html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin-top:12px">';
     this.HOUR_ROWS.forEach(row => {
-        const pv = planHours[row.planField] || 0;
-        const fv = parseFloat(fact['fact_' + row.key]) || 0;
+        const pv = this._num(planHours[row.planField]);
+        const fv = this._num(fact[`fact_${row.key}`]);
         const d = fv - pv;
         const a = fv > 0 ? this.getAlarm(fv, pv) : { color: 'var(--text-muted)', icon: '' };
         html += `<div class="fact-mini-stat">
@@ -1891,9 +2373,9 @@ async _loadFactSummaries() {
     html += '</div>';
 
     html += `<div style="margin-top:12px;display:flex;gap:12px;align-items:flex-start">
-        <textarea class="form-control" rows="2" style="flex:1;font-size:12px"
+        <textarea class="form-control" rows="2" style="flex:1;font-size:12px" ${isSnapshot ? 'disabled' : ''}
             placeholder="Комментарий..." oninput="Factual.onNotesChange(${orderId}, this.value)">${this._esc(fact.notes || '')}</textarea>
-        <button class="btn btn-success" onclick="Factual.saveFact(${orderId})">💾 Сохранить</button>
+        ${isSnapshot ? '<button class="btn btn-outline" disabled>Снимок</button>' : `<button class="btn btn-success" onclick="Factual.saveFact(${orderId})">💾 Сохранить</button>`}
     </div>`;
 
     container.innerHTML = html;
@@ -1968,6 +2450,52 @@ async _loadFactSummaries() {
         this._loadFactSummaries();
     },
 
+    async confirmMaterialFact(orderId, rowKey) {
+        const activeSnapshot = this._getActiveSnapshot();
+        if (activeSnapshot) {
+            App.toast('Снимок месяца открыт только для чтения');
+            return;
+        }
+        const cached = this._orderCache[orderId] || await this._ensureComputedOrder(orderId);
+        if (!cached) return;
+        const breakdown = this._getMaterialFactBreakdowns(cached.factData)?.[rowKey] || {};
+        const targetAmount = this._num(breakdown.manualPlan);
+        if (!(targetAmount > 0)) {
+            App.toast('Для этой строки нечего подтверждать вручную');
+            return;
+        }
+        this._setConfirmedMaterialFact(cached.factData, rowKey, {
+            amount: round2(targetAmount),
+            confirmed_at: new Date().toISOString(),
+            source: 'manual_confirmation',
+        });
+        await this._recomputeCachedFact(cached);
+        const container = document.getElementById(`fact-detail-${orderId}`);
+        if (container) {
+            this._renderDetail(orderId, container, cached.planData, cached.planHours, cached.factData, cached.order, cached.planMeta || {}, { snapshot: false, snapshotMeta: null });
+        }
+        await this._renderGlobalStats();
+        await this._loadFactSummaries();
+    },
+
+    async clearConfirmedMaterialFact(orderId, rowKey) {
+        const activeSnapshot = this._getActiveSnapshot();
+        if (activeSnapshot) {
+            App.toast('Снимок месяца открыт только для чтения');
+            return;
+        }
+        const cached = this._orderCache[orderId] || await this._ensureComputedOrder(orderId);
+        if (!cached) return;
+        this._setConfirmedMaterialFact(cached.factData, rowKey, null);
+        await this._recomputeCachedFact(cached);
+        const container = document.getElementById(`fact-detail-${orderId}`);
+        if (container) {
+            this._renderDetail(orderId, container, cached.planData, cached.planHours, cached.factData, cached.order, cached.planMeta || {}, { snapshot: false, snapshotMeta: null });
+        }
+        await this._renderGlobalStats();
+        await this._loadFactSummaries();
+    },
+
     // ==========================================
     // Alarm & formatting
     // ==========================================
@@ -2000,13 +2528,33 @@ async _loadFactSummaries() {
             maximumFractionDigits: fractionDigits,
         }).format(round2(num)) + 'ч';
     },
-    _renderPlanRowDetail(rowKey, planMeta = {}) {
+    _renderPlanRowDetail(rowKey, planMeta = {}, planData = {}) {
         const meta = planMeta?.[rowKey];
-        if (!meta) return '';
-        if (meta.detailHtml) return meta.detailHtml;
+        if (meta?.detailHtml) return meta.detailHtml;
         if (rowKey === 'indirect_production') {
-            return `${this.fmtHours(meta.planHours)} × ${this.fmtRub(meta.perHour || 0)}/ч`;
+            const planHours = this._num(meta?.planHours);
+            const perHour = this._num(meta?.perHour || 0);
+            return (planHours > 0 || perHour > 0)
+                ? `${this.fmtHours(planHours)} × ${this.fmtRub(perHour)}/ч`
+                : '';
         }
+        if (this.MATERIAL_ROW_KEYS.has(rowKey)) {
+            const lines = [];
+            if (this._num(meta?.warehouseTotal) > 0) lines.push(`склад по заказу — ${this.fmtRub(meta.warehouseTotal)}`);
+            if (this._num(meta?.manualTotal) > 0) lines.push(`задано в заказе — ${this.fmtRub(meta.manualTotal)}`);
+            return lines.join('<br>');
+        }
+        if (rowKey === 'taxes') {
+            const rate = this._num(App.params?.taxRate);
+            return rate > 0 ? `${round2(rate * 100)}% от выручки без НДС` : '';
+        }
+        if (rowKey === 'commercial') return '6.5% от выручки без НДС';
+        if (rowKey === 'charity') return '1% от выручки без НДС';
+        if (rowKey === 'plastic' || rowKey === 'molds') {
+            const amount = this._num(planData?.[rowKey === 'delivery_client' ? 'delivery' : rowKey]);
+            return amount > 0 ? `расчетная норма — ${this.fmtRub(amount)}` : '';
+        }
+        if (!meta) return '';
         if (!rowKey.startsWith('salary_')) return '';
         let detail = this.fmtHours(meta.planHours);
         if (meta.source === 'blank_norms_plus_manual') {
@@ -2038,6 +2586,9 @@ async _loadFactSummaries() {
         return detail;
     },
     _renderFactRowDetail(rowKey, factHoursByRow = {}, planMeta = {}, factData = {}) {
+        if (this.MATERIAL_ROW_KEYS.has(rowKey)) {
+            return this._buildMoneyRowDetail(rowKey, factData, planMeta, {});
+        }
         const factHours = this._num(factHoursByRow?.[rowKey]);
         if (rowKey === 'indirect_production') {
             if (factHours <= 0) return '';

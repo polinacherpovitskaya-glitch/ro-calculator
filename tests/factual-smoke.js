@@ -38,6 +38,7 @@ function createContext() {
         __imports: [],
         __warehouseHistory: [],
         __warehouseItems: [],
+        __savedSnapshots: null,
         round2(value) {
             const num = parseFloat(value) || 0;
             return Math.round(num * 100) / 100;
@@ -74,6 +75,11 @@ function createContext() {
     context.loadWarehouseHistory = async () => context.__warehouseHistory;
     context.loadWarehouseItems = async () => context.__warehouseItems;
     context.loadFactual = async () => ({});
+    context.loadFactualSnapshots = async () => ({});
+    context.saveFactualSnapshots = async (payload) => {
+        context.__savedSnapshots = payload;
+        return payload;
+    };
     context.loadOrder = async () => null;
     context.loadProjectHardwareState = async () => ({ checks: {}, actual_qtys: {} });
     context.window = context;
@@ -107,11 +113,12 @@ function smokeHiddenSalaryTotals(context) {
     })()`, context);
 
     const html = container.innerHTML;
-    assert.ok(html.includes('План прибыль'), 'detail should show plan profit summary');
-    assert.ok(html.includes('Факт прибыль'), 'detail should show fact profit summary');
-    assert.ok(html.includes('Выручка и деньги по сделке'), 'detail should separate revenue from expense table');
+    assert.ok(html.includes('План заказа · прибыль'), 'detail should show separated plan profitability');
+    assert.ok(html.includes('Факт денег · прибыль'), 'detail should show separated money profitability');
+    assert.ok(html.includes('Деньги по сделке'), 'detail should keep a dedicated money section');
+    assert.ok(html.includes('Факт производства'), 'detail should show separate production fact column');
     assert.ok(!html.includes('ЗП выливание'), 'salary row should stay hidden for non-admin');
-    assert.match(html, /ИТОГО[\s\S]*?>150 ₽<\/td>[\s\S]*?>150 ₽<\/td>/);
+    assert.ok(html.includes('ИТОГО расходы'), 'detail should keep total row');
     assert.ok(!html.includes('250 ₽'), 'total should not double count hidden salary rows');
 }
 
@@ -191,8 +198,8 @@ function smokeSavedPlanTotalWins(context) {
     })()`, context);
 
     const html = container.innerHTML;
-    assert.match(html, /ИТОГО[\s\S]*?>150 ₽<\/td>[\s\S]*?>250 ₽<\/td>/);
-    assert.ok(html.includes('Пересчитанные статьи дают 250 ₽, но сохраненный план заказа равен 150 ₽.'), 'drift note should explain why total uses saved plan');
+    assert.ok(html.includes('ИТОГО расходы'), 'detail should still show total row when plan drifts');
+    assert.ok(html.includes('сохранённый план заказа'), 'drift note should explain why total uses saved plan');
 }
 
 function smokeFactDetailShowsFinTabloBreakdown(context) {
@@ -628,12 +635,12 @@ async function smokeCustomHardwareWaitsForFinTablo(context) {
 
     const fact = context.__customHardwareFact;
     assert.equal(fact.fact_hardware_total, 0, 'custom hardware should not silently mirror plan into fact without FinTablo confirmation');
-    assert.equal(fact._source_hints.fact_hardware_total, 'кастом ждёт ФинТабло');
+    assert.equal(fact._source_hints.fact_hardware_total, 'ожидает подтверждения');
     assert.equal(fact.fact_molds, 444, 'mold amortization should carry into fact when actual mold usage matches plan');
     assert.equal(fact._source_hints.fact_molds, 'план');
 }
 
-async function smokeWarehouseHardwareCanFallbackToPlannedWarehouse(context) {
+async function smokeWarehouseHardwareWaitsForActualWarehouseFact(context) {
     context.__imports = [];
     context.__warehouseItems = [];
     context.__warehouseHistory = [];
@@ -659,10 +666,10 @@ async function smokeWarehouseHardwareCanFallbackToPlannedWarehouse(context) {
     })()`, context);
 
     const fact = context.__warehouseFallbackFact;
-    assert.equal(fact.fact_hardware_total, 700, 'warehouse-backed hardware may fallback to current planned warehouse value');
-    assert.equal(fact.fact_nfc_total, 80, 'warehouse-backed NFC may fallback to current planned warehouse value');
-    assert.equal(fact._source_hints.fact_hardware_total, 'план склада');
-    assert.equal(fact._source_hints.fact_nfc_total, 'план склада');
+    assert.equal(fact.fact_hardware_total, 0, 'warehouse-backed hardware should wait for real stock fact instead of mirroring the plan');
+    assert.equal(fact.fact_nfc_total, 0, 'warehouse-backed NFC should also wait for real stock fact');
+    assert.equal(fact._source_hints.fact_hardware_total, 'ожидает подтверждения');
+    assert.equal(fact._source_hints.fact_nfc_total, 'ожидает подтверждения');
 }
 
 async function smokeMultipleImportsAccumulateIntoFact(context) {
@@ -1053,6 +1060,85 @@ function smokePeriodFilterUsesDeadlineAndFactLoad(context) {
     assert.equal(context.__periodFactLoad, 9, 'fact load should include only in-period production or legacy production hours');
 }
 
+async function smokeConfirmMaterialFactStoresManualConfirmation(context) {
+    await vm.runInContext(`(async () => {
+        Factual._orderCache[301] = {
+            order: { id: 301, order_name: 'Manual Hardware Order' },
+            planData: { revenue: 1000, totalCosts: 622, hardwareTotal: 622, nfcTotal: 0, packagingTotal: 0 },
+            planHours: {},
+            planMeta: {
+                hardware_total: { source: 'manual_items', warehouseTotal: 0, manualTotal: 622 },
+            },
+            factData: {
+                fact_revenue: 0,
+                fact_hardware_total: 0,
+                _material_fact_breakdown: {
+                    hardware_total: {
+                        warehousePlan: 0,
+                        warehouseActual: 0,
+                        manualPlan: 622,
+                        confirmedManual: 0,
+                        details: [],
+                    },
+                },
+            },
+        };
+        Factual._getActiveSnapshot = () => null;
+        Factual._recomputeCachedFact = async (cached) => {
+            const confirmed = (((cached.factData || {})._confirmed_material_facts || {}).hardware_total || {}).amount || 0;
+            cached.factData.fact_hardware_total = confirmed;
+            const breakdown = ((cached.factData || {})._material_fact_breakdown || {}).hardware_total;
+            if (breakdown) breakdown.confirmedManual = confirmed;
+        };
+        Factual._renderGlobalStats = async () => {};
+        Factual._loadFactSummaries = async () => {};
+        await Factual.confirmMaterialFact(301, 'hardware_total');
+        globalThis.__confirmedMaterialFact = JSON.parse(JSON.stringify(Factual._orderCache[301].factData));
+    })()`, context);
+
+    const fact = context.__confirmedMaterialFact;
+    assert.equal(fact.fact_hardware_total, 622, 'manual material confirmation should move planned custom hardware into fact money');
+    assert.equal(fact._confirmed_material_facts.hardware_total.amount, 622, 'manual material confirmation should persist confirmed amount');
+    assert.equal(fact._material_fact_breakdown.hardware_total.confirmedManual, 622, 'material breakdown should reflect confirmed manual amount');
+}
+
+async function smokeMonthlySnapshotFreezesPastMonth(context) {
+    await vm.runInContext(`(async () => {
+        Factual._periodKind = 'month';
+        Factual._periodAnchor = '2024-02';
+        Factual._monthSnapshots = {};
+        Factual._filteredOrders = [
+            { id: 401, order_name: 'Frozen Month Order', status: 'completed' },
+        ];
+        Factual._ensureComputedOrder = async () => ({
+            order: { id: 401, order_name: 'Frozen Month Order', status: 'completed' },
+            planData: { revenue: 1000, totalCosts: 400 },
+            planHours: { hoursPlastic: 1, hoursTrim: 0, hoursHardware: 0, hoursPackaging: 0 },
+            planMeta: {},
+            factData: { fact_revenue: 900, fact_other: 50 },
+        });
+        Factual._renderGlobalStats = async () => {};
+        Factual._renderOrdersTable = () => {};
+        await Factual.saveMonthlySnapshot();
+
+        Factual._ensureComputedOrder = async () => ({
+            order: { id: 401, order_name: 'Frozen Month Order', status: 'completed' },
+            planData: { revenue: 2000, totalCosts: 900 },
+            planHours: { hoursPlastic: 9, hoursTrim: 0, hoursHardware: 0, hoursPackaging: 0 },
+            planMeta: {},
+            factData: { fact_revenue: 50, fact_other: 500 },
+        });
+        Factual._getActiveSnapshot = () => Factual._monthSnapshots['2024-02'];
+        globalThis.__snapshotVisibleRecords = JSON.parse(JSON.stringify(await Factual._getVisibleOrderRecords()));
+    })()`, context);
+
+    assert.ok(context.__savedSnapshots && context.__savedSnapshots['2024-02'], 'saving a past month should persist a monthly snapshot');
+    assert.equal(context.__savedSnapshots['2024-02'].records.length, 1, 'snapshot should capture visible orders for the month');
+    const snapshotRecord = context.__snapshotVisibleRecords[0];
+    assert.equal(snapshotRecord.planData.revenue, 1000, 'snapshot should keep original plan revenue even if live order changes later');
+    assert.equal(snapshotRecord.factData.fact_revenue, 900, 'snapshot should keep original fact revenue even if live order changes later');
+}
+
 async function main() {
     const context = createContext();
     runScript(context, 'js/factual.js');
@@ -1067,7 +1153,7 @@ async function main() {
     await smokeTaxesIncludeCharity(context);
     await smokeTaxesFallbackToRevenueWhenImportMissing(context);
     await smokeCustomHardwareWaitsForFinTablo(context);
-    await smokeWarehouseHardwareCanFallbackToPlannedWarehouse(context);
+    await smokeWarehouseHardwareWaitsForActualWarehouseFact(context);
     await smokeMultipleImportsAccumulateIntoFact(context);
     await smokeLegacyStageDistributionAndMaterials(context);
     await smokeWorkshopLegacyLeavesAssemblyExplicit(context);
@@ -1076,6 +1162,8 @@ async function main() {
     await smokeFactualRequestsFinTabloAutoSync(context);
     await smokeFactualForcesRepairForStaleSplitImports(context);
     smokePeriodFilterUsesDeadlineAndFactLoad(context);
+    await smokeConfirmMaterialFactStoresManualConfirmation(context);
+    await smokeMonthlySnapshotFreezesPastMonth(context);
     console.log('factual smoke checks passed');
 }
 

@@ -80,6 +80,7 @@ const LOCAL_KEYS = {
     marketplaceSets: 'ro_calc_marketplace_sets',
     productionPlan: 'ro_calc_production_plan',
     projectHardwareState: 'ro_calc_project_hardware_state',
+    factualSnapshots: 'ro_calc_factual_month_snapshots',
     readyGoods: 'ro_calc_ready_goods_stock',
     readyGoodsHistory: 'ro_calc_ready_goods_history',
     salesRecords: 'ro_calc_sales_records',
@@ -105,6 +106,7 @@ const NON_CRITICAL_LOCAL_CACHE_KEYS = new Set([
     LOCAL_KEYS.authSessions,
     LOCAL_KEYS.productionPlan,
     LOCAL_KEYS.projectHardwareState,
+    LOCAL_KEYS.factualSnapshots,
     LOCAL_KEYS.warehouseHistory,
     LOCAL_KEYS.shipments,
     LOCAL_KEYS.readyGoods,
@@ -140,6 +142,7 @@ const SHARED_VOLATILE_LOCAL_CACHE_KEYS = new Set([
     LOCAL_KEYS.marketplaceSets,
     LOCAL_KEYS.productionPlan,
     LOCAL_KEYS.projectHardwareState,
+    LOCAL_KEYS.factualSnapshots,
     LOCAL_KEYS.readyGoods,
     LOCAL_KEYS.readyGoodsHistory,
     LOCAL_KEYS.salesRecords,
@@ -2662,6 +2665,39 @@ async function saveProjectHardwareState(state) {
             }, { onConflict: 'key' });
         if (error) console.error('saveProjectHardwareState error:', error);
     }
+}
+
+// =============================================
+// FACTUAL MONTH SNAPSHOTS
+// =============================================
+
+async function loadFactualSnapshots() {
+    const fallback = getLocal(LOCAL_KEYS.factualSnapshots) || {};
+    if (isSupabaseReady()) {
+        try {
+            const parsed = await _loadJsonSetting('factual_month_snapshots_json', null);
+            if (parsed && typeof parsed === 'object') {
+                setLocal(LOCAL_KEYS.factualSnapshots, parsed);
+                return parsed;
+            }
+        } catch (e) {
+            console.error('loadFactualSnapshots error:', e);
+        }
+    }
+    return fallback && typeof fallback === 'object' ? fallback : {};
+}
+
+async function saveFactualSnapshots(state) {
+    const payload = state && typeof state === 'object' ? state : {};
+    setLocal(LOCAL_KEYS.factualSnapshots, payload);
+    if (isSupabaseReady()) {
+        try {
+            await _saveJsonSetting('factual_month_snapshots_json', payload);
+        } catch (e) {
+            console.error('saveFactualSnapshots error:', e);
+        }
+    }
+    return payload;
 }
 
 // =============================================
