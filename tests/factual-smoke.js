@@ -528,6 +528,43 @@ async function smokeTaxesIncludeCharity(context) {
     assert.equal(fact._source_hints.fact_charity, 'ФинТабло');
 }
 
+async function smokeTaxesFallbackToRevenueWhenImportMissing(context) {
+    context.__imports = [
+        {
+            import_date: '2026-04-01T12:00:00.000Z',
+            fact_materials: 0,
+            fact_revenue: 1000,
+            fact_printing: 0,
+            fact_hardware: 0,
+            fact_packaging: 0,
+            fact_taxes: 0,
+            fact_commercial: 0,
+            fact_charity: 0,
+            fact_other: 0,
+            fact_delivery: 0,
+            fact_molds: 0,
+        },
+    ];
+
+    await vm.runInContext(`(async () => {
+        const factData = {};
+        await Factual._applyDerivedFacts(
+            factData,
+            { plastic: 0, hardwareTotal: 0, packagingTotal: 0 },
+            { hoursPlastic: 0, hoursTrim: 0, hoursHardware: 0, hoursPackaging: 0 },
+            { taxRate: 0.06, vatRate: 0.05, charityRate: 0.01, indirectPerHour: 0 },
+            111,
+            'Fallback Taxes Order'
+        );
+        globalThis.__fallbackTaxesFact = factData;
+    })()`, context);
+
+    const fact = context.__fallbackTaxesFact;
+    assert.equal(fact.fact_revenue, 1000, 'fact revenue should still come from FinTablo import');
+    assert.equal(fact.fact_taxes, 110, 'when FinTablo taxes are missing, analytics should fallback to 11% of fact revenue');
+    assert.equal(fact._source_hints.fact_taxes, '11% от факта выручки');
+}
+
 async function smokeMultipleImportsAccumulateIntoFact(context) {
     context.__imports = [
         {
@@ -881,6 +918,7 @@ async function main() {
     smokeBuildPlanSeparatesProductBuiltinAssembly(context);
     smokeBuildPlanRendersSavedSnapshotHints(context);
     await smokeTaxesIncludeCharity(context);
+    await smokeTaxesFallbackToRevenueWhenImportMissing(context);
     await smokeMultipleImportsAccumulateIntoFact(context);
     await smokeLegacyStageDistributionAndMaterials(context);
     await smokeWorkshopLegacyLeavesAssemblyExplicit(context);

@@ -1428,13 +1428,21 @@ async _loadFactSummaries() {
             const importedCommercial = this._num(importTotals.fact_commercial);
             const importedCharity = this._num(importTotals.fact_charity);
             const currentFactRevenue = this._num(factData.fact_revenue);
+            const taxRate = this._num(params?.taxRate);
+            const vatRate = this._num(params?.vatRate);
             const charityRate = this._num(params?.charityRate) || 0.01;
+            const taxesByRevenue = currentFactRevenue > 0 ? round2(currentFactRevenue * (taxRate + vatRate)) : 0;
             const commercialByRevenue = currentFactRevenue > 0 ? round2(currentFactRevenue * 0.065) : 0;
             const charityByRevenue = currentFactRevenue > 0 ? round2(currentFactRevenue * charityRate) : 0;
-            if (importedTaxes > 0) {
-                this._applyAutoFactValue(factData, 'fact_taxes', importedTaxes);
+            const effectiveTaxes = importedTaxes > 0 ? importedTaxes : taxesByRevenue;
+            if (effectiveTaxes > 0) {
+                this._applyAutoFactValue(factData, 'fact_taxes', effectiveTaxes);
                 factData._auto_fintablo.fact_taxes = importedTaxes > 0;
-                this._setSourceHint(factData, 'fact_taxes', 'ФинТабло');
+                this._setSourceHint(
+                    factData,
+                    'fact_taxes',
+                    importedTaxes > 0 ? 'ФинТабло' : `${round2((taxRate + vatRate) * 100)}% от факта выручки`
+                );
             }
             const effectiveCommercial = importedCommercial > 0 ? importedCommercial : commercialByRevenue;
             if (effectiveCommercial > 0) {
