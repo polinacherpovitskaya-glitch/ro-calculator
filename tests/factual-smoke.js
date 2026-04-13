@@ -840,6 +840,13 @@ function smokePeriodFilterUsesDeadlineAndFactLoad(context) {
                 created_at: '2026-03-05T12:00:00.000Z',
                 deadline_end: '2026-04-02',
             },
+            {
+                id: 203,
+                order_name: 'Edited Old Order',
+                status: 'completed',
+                created_at: '2025-12-20T12:00:00.000Z',
+                updated_at: '2026-03-12T10:00:00.000Z',
+            },
         ];
         Factual._periodKind = 'month';
         Factual._periodAnchor = '2026-03';
@@ -859,7 +866,7 @@ function smokePeriodFilterUsesDeadlineAndFactLoad(context) {
     })()`, context);
 
     assert.equal(context.__periodLabel, 'март 2026 г.', 'month period should be fixed to the anchor month');
-    assert.deepEqual(Array.from(context.__periodFilteredOrderIds), [201], 'orders should be filtered by deadline month, not creation month');
+    assert.deepEqual(Array.from(context.__periodFilteredOrderIds), [201], 'orders should be filtered by real period dates, not by a recent edit timestamp');
     assert.equal(context.__periodFactLoad, 9, 'fact load should include only in-period production or legacy production hours');
 }
 

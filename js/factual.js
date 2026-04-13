@@ -565,7 +565,7 @@ const Factual = {
         const ordersHint = $('fact-orders-hint');
         if (ordersTitle) ordersTitle.textContent = `План-факт по заказам · ${period.label}`;
         if (ordersHint) {
-            ordersHint.textContent = 'Верхние карточки — периодный срез, строки ниже — детализация по каждому заказу.';
+            ordersHint.textContent = 'Сверху деньги и расходы показаны как текущий итог по заказам выбранного периода, а загрузка — по табелю сотрудников за сам период.';
         }
     },
 
@@ -683,7 +683,6 @@ _renderCompactResult(result, options = {}) {
             || order?.deadline
             || order?.deadline_start
             || order?.created_at
-            || order?.updated_at
         );
     },
 
