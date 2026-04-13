@@ -2575,6 +2575,108 @@ async function smokeBlankBuiltinAssemblyUsesAssemblyLoad(context) {
     assert.equal(state.load.hoursHardwareTotal, state.result.hoursAssemblyZone, 'production load should send built-in assembly to assembly bucket');
 }
 
+async function smokeBlankTemplateMoldCostOverridesGlobalDefault(context) {
+    const state = clone(await vm.runInContext(`(() => {
+        App.templates = [{
+            id: 'blank-mold-override',
+            name: 'Blank Mold Override',
+            category: 'blank',
+            pieces_per_hour_avg: 100,
+            weight_grams: 10,
+            cost_cny: 1000,
+            cny_rate: 10,
+            delivery_cost: 5000,
+            mold_count: 2,
+        }];
+        const params = {
+            ...App.params,
+            wasteFactor: 1,
+            fotPerHour: 0,
+            indirectPerHour: 0,
+            indirectCostMode: 'production',
+            plasticCostPerKg: 0,
+            cuttingSpeed: 1000,
+            moldBaseCost: 20000,
+        };
+        const item = Calculator.getEmptyItem(1);
+        item.quantity = 100;
+        Calculator.items = [item];
+        Calculator.onTemplatePickerSelect(0, 'blank-mold-override');
+        Calculator.items[0].quantity = 100;
+        const result = calculateItemCost(Calculator.items[0], params);
+        return {
+            blankMoldTotalCost: Calculator.items[0].blank_mold_total_cost,
+            moldAmortization: result.costMoldAmortization,
+        };
+    })()`, context));
+
+    assert.equal(state.blankMoldTotalCost, 30000, 'template should carry its real mold total cost into calculator items');
+    assert.equal(state.moldAmortization, 6.67, 'blank mold amortization should come from template cost, not global mold setting');
+}
+
+async function smokeSavedBlankMoldCostSurvivesOrderReload(context) {
+    const prepared = clone(await vm.runInContext(`(() => {
+        App.templates = [{
+            id: 'blank-mold-persist',
+            name: 'Blank Mold Persist',
+            pieces_per_hour_avg: 100,
+            weight_grams: 10,
+            cost_cny: 1500,
+            cny_rate: 10,
+            delivery_cost: 5000,
+            mold_count: 2,
+        }];
+        Calculator.resetForm();
+        Calculator.items = [Calculator.getEmptyItem(1)];
+        Calculator.items[0].product_name = 'Blank Mold Persist';
+        Calculator.items[0].template_id = 'blank-mold-persist';
+        Calculator.items[0].is_blank_mold = true;
+        Calculator.items[0].quantity = 100;
+        Calculator.items[0].pieces_per_hour = 100;
+        Calculator.items[0].weight_grams = 10;
+        Calculator.items[0].blank_mold_total_cost = 30000;
+        const saved = Calculator._collectItemsForSave()[0];
+        return {
+            saved,
+            templateCurrent: getBlankTemplateTotalMoldCost(App.templates[0]),
+        };
+    })()`, context));
+
+    context.__loadOrderData = {
+        order: {
+            id: 93003,
+            order_name: 'Blank Mold Persist Order',
+            client_name: 'Smoke Client',
+            manager_name: 'Smoke',
+            status: 'draft',
+        },
+        items: [prepared.saved],
+        repaired_duplicates: false,
+    };
+    context.loadOrder = async () => clone(context.__loadOrderData);
+
+    await vm.runInContext(`
+        Calculator.renderItemBlock = () => {};
+        Calculator.renderHardwareRow = () => {};
+        Calculator.renderPackagingRow = () => {};
+        Calculator.renderExtraCosts = () => {};
+        Calculator._renderPerItemHwPkg = () => {};
+        Calculator.recalculate = () => {};
+        Calculator.showOrderHistory = () => {};
+        Calculator._ensureWhPickerData = async () => ({});
+    `, context);
+
+    await vm.runInContext(`Calculator.loadOrder(93003)`, context);
+    const restored = clone(await vm.runInContext(`({
+        blankMoldTotalCost: Calculator.items[0].blank_mold_total_cost,
+        savedBlankMoldTotalCost: Calculator._collectItemsForSave()[0].blank_mold_total_cost,
+    })`, context));
+
+    assert.equal(prepared.templateCurrent, 40000, 'test should use a current template cost different from the saved historical one');
+    assert.equal(restored.blankMoldTotalCost, 30000, 'loading an order should preserve the saved blank mold total cost');
+    assert.equal(restored.savedBlankMoldTotalCost, 30000, 're-saving a loaded order should keep the same blank mold total cost');
+}
+
 async function smokePendantFinDirectorUsesCurrentLetterCost(context) {
     const finState = clone(await vm.runInContext(`(() => {
         const params = {
@@ -6850,6 +6952,8 @@ async function main() {
     await smokePendantLettersContributePlasticLoad();
     await smokeCyrillicPendantUsesLiveBlankPphFields(context);
     await smokeBlankBuiltinAssemblyUsesAssemblyLoad(context);
+    await smokeBlankTemplateMoldCostOverridesGlobalDefault(context);
+    await smokeSavedBlankMoldCostSurvivesOrderReload(context);
     await smokePendantFinDirectorUsesCurrentLetterCost(context);
     await smokeLegacyPendantRestore(context);
     await smokeCurrentPendantPayloadBeatsStaleNested(context);

@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v257';
+const APP_VERSION = 'v258';
 
 const App = {
     currentPage: 'orders',
@@ -1145,6 +1145,7 @@ const Calculator = {
             // Built-in assembly from blank template
             builtin_assembly_name: '',
             builtin_assembly_speed: 0,
+            blank_mold_total_cost: 0,
             // Colors (multiple per item)
             colors: [],  // [{id, name}, ...]
             color_solution_attachment: null, // legacy object or array of {name, type, data_url, size}
@@ -2978,6 +2979,7 @@ const Calculator = {
         this.items[idx].pieces_per_hour = pphAvg;
         this.items[idx].weight_grams = tpl.weight_grams || 0;
         this.items[idx].is_blank_mold = true;
+        this.items[idx].blank_mold_total_cost = getBlankTemplateTotalMoldCost(tpl);
 
         // Clear builtin_hw fields — now handled by real per-item hardware
         this.items[idx].builtin_hw_name = '';
@@ -3161,6 +3163,7 @@ const Calculator = {
         // Clear template and built-in hw if switching to custom
         if (!isBlank) {
             this.items[idx].template_id = null;
+            this.items[idx].blank_mold_total_cost = 0;
             this.items[idx].builtin_hw_name = '';
             this.items[idx].builtin_hw_price = 0;
             this.items[idx].builtin_hw_delivery_total = 0;
@@ -3711,9 +3714,7 @@ const Calculator = {
         };
 
         const base = calculateItemCost(calcItem, params);
-        const moldCount = Number(tpl.mold_count || 1);
-        const singleMoldCost = Number(tpl.cost_cny || 800) * Number(tpl.cny_rate || 12.5) + Number(tpl.delivery_cost || 8000);
-        const moldAmortPerUnit = (singleMoldCost * moldCount) / 4500;
+        const moldAmortPerUnit = getBlankTemplateTotalMoldCost(tpl) / 4500;
 
         let adjusted = Number(base.costTotal || 0) - Number(base.costMoldAmortization || 0) + moldAmortPerUnit;
 
@@ -4495,6 +4496,7 @@ const Calculator = {
                 hours_assembly: r.hoursAssemblyZone,
                 builtin_assembly_name: item.builtin_assembly_name || '',
                 builtin_assembly_speed: item.builtin_assembly_speed || 0,
+                blank_mold_total_cost: Number(item.blank_mold_total_cost || 0),
                 template_id: item.template_id,
                 color_id: item.color_id || null,
                 color_name: item.color_name || '',
@@ -5011,6 +5013,9 @@ const Calculator = {
             if (item.template_id && App.templates) {
                 const tpl = App.templates.find(t => t.id == item.template_id);
                 if (tpl) {
+                    if (!(Number(item.blank_mold_total_cost || 0) > 0)) {
+                        item.blank_mold_total_cost = getBlankTemplateTotalMoldCost(tpl);
+                    }
                     item.builtin_hw_name = tpl.hw_name || '';
                     item.builtin_hw_price = tpl.hw_price_per_unit || 0;
                     item.builtin_hw_delivery_total = tpl.hw_delivery_total || 0;

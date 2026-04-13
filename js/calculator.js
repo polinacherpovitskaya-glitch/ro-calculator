@@ -103,6 +103,13 @@ function serializeColorAttachments(source) {
     return JSON.stringify(attachments.length === 1 ? attachments[0] : attachments);
 }
 
+function getBlankTemplateTotalMoldCost(source) {
+    if (!source || typeof source !== 'object') return 0;
+    const singleMoldCost = (Number(source?.cost_cny || 800) * Number(source?.cny_rate || 12.5)) + Number(source?.delivery_cost || 8000);
+    const moldCount = Math.max(1, Number(source?.mold_count || 1) || 1);
+    return round2(singleMoldCost * moldCount);
+}
+
 /**
  * Рассчитать себестоимость одной позиции заказа
  * Теперь поддерживает:
@@ -140,12 +147,14 @@ function calculateItemCost(item, params) {
     // Амортизация молда
     // Бланковая форма → делим на 4500 (макс. ресурс молда)
     // Кастомная форма → делим на тираж заказа
+    const MOLD_LIFETIME = 4500;
     const extraMolds = item.extra_molds || 0;
     const paidBaseMolds = (!item.is_blank_mold && item.base_mold_in_stock) ? 0 : 1;
     const totalPaidMolds = Math.max(0, paidBaseMolds + extraMolds);
-    const MOLD_LIFETIME = 4500;
-    const moldDivisor = item.is_blank_mold ? MOLD_LIFETIME : qty;
-    const costMoldAmortization = p.moldBaseCost * totalPaidMolds / moldDivisor;
+    const blankMoldTotalCost = Number(item.blank_mold_total_cost || 0);
+    const costMoldAmortization = item.is_blank_mold
+        ? ((blankMoldTotalCost > 0 ? blankMoldTotalCost : (p.moldBaseCost * totalPaidMolds)) / MOLD_LIFETIME)
+        : (p.moldBaseCost * totalPaidMolds / qty);
 
     // Проектирование формы (если сложная)
     const costDesign = item.complex_design ? p.designCost / qty : 0;
@@ -652,8 +661,7 @@ function getPendantLetterBlankMetrics(totalElements, params, pendant) {
     if (!(pph > 0) || !(weight > 0) || !params) return null;
 
     const wasteFactor = Number.isFinite(params?.wasteFactor) ? params.wasteFactor : 1.1;
-    const singleMoldCost = (Number(source?.cost_cny || 800) * Number(source?.cny_rate || 12.5)) + Number(source?.delivery_cost || 8000);
-    const moldTotalCost = singleMoldCost * Number(source?.mold_count || 1 || 1);
+    const moldTotalCost = getBlankTemplateTotalMoldCost(source);
     const moldAmortPerUnit = moldTotalCost / 4500;
 
     const result = calculateItemCost({
@@ -667,6 +675,7 @@ function getPendantLetterBlankMetrics(totalElements, params, pendant) {
         delivery_included: false,
         is_blank_mold: true,
         base_mold_in_stock: false,
+        blank_mold_total_cost: moldTotalCost,
         builtin_hw_name: source?.hw_name || '',
         builtin_hw_price: Number(source?.hw_price_per_unit || source?.hw_price || 0),
         builtin_hw_delivery_total: Number(source?.hw_delivery_total || 0),
@@ -1384,6 +1393,9 @@ function getOrderLiveCalculatorSnapshot(order = {}, orderItems = [], params = nu
                 );
                 item.weight_grams = Number(tpl.weight_grams || item.weight_grams || 0);
                 item.is_blank_mold = true;
+                if (!(Number(item.blank_mold_total_cost || 0) > 0)) {
+                    item.blank_mold_total_cost = getBlankTemplateTotalMoldCost(tpl);
+                }
                 item.builtin_assembly_name = tpl.builtin_assembly_name || '';
                 item.builtin_assembly_speed = Number(tpl.builtin_assembly_speed || 0);
                 if (!templateHardwareParentIndices.has(rawProductIndex)) {
