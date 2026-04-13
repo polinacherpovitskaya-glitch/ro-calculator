@@ -1368,7 +1368,32 @@ async _loadFactSummaries() {
         factData._auto_fintablo = {};
         const imports = (await loadFintabloImports(orderId)) || [];
         if (imports.length > 0) {
-            const latest = [...imports].sort((a, b) => new Date(b.import_date || 0) - new Date(a.import_date || 0))[0];
+            const importTotals = imports.reduce((acc, row) => {
+                acc.fact_materials += this._num(row?.fact_materials);
+                acc.fact_hardware += this._num(row?.fact_hardware);
+                acc.fact_packaging += this._num(row?.fact_packaging);
+                acc.fact_delivery += this._num(row?.fact_delivery);
+                acc.fact_printing += this._num(row?.fact_printing);
+                acc.fact_molds += this._num(row?.fact_molds);
+                acc.fact_taxes += this._num(row?.fact_taxes);
+                acc.fact_commercial += this._num(row?.fact_commercial);
+                acc.fact_charity += this._num(row?.fact_charity);
+                acc.fact_other += this._num(row?.fact_other);
+                acc.fact_revenue += this._num(row?.fact_revenue);
+                return acc;
+            }, {
+                fact_materials: 0,
+                fact_hardware: 0,
+                fact_packaging: 0,
+                fact_delivery: 0,
+                fact_printing: 0,
+                fact_molds: 0,
+                fact_taxes: 0,
+                fact_commercial: 0,
+                fact_charity: 0,
+                fact_other: 0,
+                fact_revenue: 0,
+            });
 
             const ftMap = {
                 fact_hardware: 'fact_hardware_total',
@@ -1380,29 +1405,29 @@ async _loadFactSummaries() {
             };
 
             for (const [ftKey, ourKey] of Object.entries(ftMap)) {
-                const val = this._num(latest[ftKey]);
+                const val = this._num(importTotals[ftKey]);
                 if (val > 0) {
                     this._applyAutoFactValue(factData, ourKey, val);
                     factData._auto_fintablo[ourKey] = true;
                 }
             }
 
-            const ftMaterials = this._num(latest.fact_materials);
+            const ftMaterials = this._num(importTotals.fact_materials);
             if (ftMaterials > 0 && this._num(planData?.plastic) <= 0) {
                 this._applyAutoFactValue(factData, 'fact_plastic', ftMaterials);
                 factData._auto_fintablo.fact_plastic = true;
                 this._setSourceHint(factData, 'fact_plastic', 'ФинТабло');
             }
 
-            const ftRevenue = this._num(latest.fact_revenue);
+            const ftRevenue = this._num(importTotals.fact_revenue);
             if (ftRevenue > 0) {
                 this._applyAutoFactValue(factData, 'fact_revenue', ftRevenue);
                 factData._auto_fintablo.fact_revenue = true;
             }
 
-            const importedTaxes = this._num(latest.fact_taxes);
-            const importedCommercial = this._num(latest.fact_commercial);
-            const importedCharity = this._num(latest.fact_charity);
+            const importedTaxes = this._num(importTotals.fact_taxes);
+            const importedCommercial = this._num(importTotals.fact_commercial);
+            const importedCharity = this._num(importTotals.fact_charity);
             const currentFactRevenue = this._num(factData.fact_revenue);
             const charityRate = this._num(params?.charityRate) || 0.01;
             const commercialByRevenue = currentFactRevenue > 0 ? round2(currentFactRevenue * 0.065) : 0;
@@ -1425,7 +1450,7 @@ async _loadFactSummaries() {
                 this._setSourceHint(factData, 'fact_charity', importedCharity > 0 ? 'ФинТабло' : '1% от факта выручки');
             }
 
-            const ftPackaging = this._num(latest.fact_packaging);
+            const ftPackaging = this._num(importTotals.fact_packaging);
             if (ftPackaging > 0) {
                 this._applyAutoFactValue(factData, 'fact_packaging_total', ftPackaging);
                 factData._auto_fintablo.fact_packaging_total = true;

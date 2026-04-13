@@ -528,6 +528,60 @@ async function smokeTaxesIncludeCharity(context) {
     assert.equal(fact._source_hints.fact_charity, 'ФинТабло');
 }
 
+async function smokeMultipleImportsAccumulateIntoFact(context) {
+    context.__imports = [
+        {
+            import_date: '2026-04-01T12:00:00.000Z',
+            fact_materials: 0,
+            fact_revenue: 1000,
+            fact_printing: 300,
+            fact_hardware: 0,
+            fact_packaging: 120,
+            fact_taxes: 60,
+            fact_commercial: 65,
+            fact_charity: 10,
+            fact_other: 0,
+            fact_delivery: 0,
+            fact_molds: 0,
+        },
+        {
+            import_date: '2026-04-10T12:00:00.000Z',
+            fact_materials: 0,
+            fact_revenue: 500,
+            fact_printing: 0,
+            fact_hardware: 0,
+            fact_packaging: 80,
+            fact_taxes: 30,
+            fact_commercial: 32.5,
+            fact_charity: 5,
+            fact_other: 0,
+            fact_delivery: 0,
+            fact_molds: 0,
+        },
+    ];
+
+    await vm.runInContext(`(async () => {
+        const factData = {};
+        await Factual._applyDerivedFacts(
+            factData,
+            { plastic: 0, hardwareTotal: 0, packagingTotal: 0 },
+            { hoursPlastic: 0, hoursTrim: 0, hoursHardware: 0, hoursPackaging: 0 },
+            { taxRate: 0.06, vatRate: 0.05, charityRate: 0.01, indirectPerHour: 0 },
+            102,
+            'Accumulated Imports Order'
+        );
+        globalThis.__aggregatedImportFact = factData;
+    })()`, context);
+
+    const fact = context.__aggregatedImportFact;
+    assert.equal(fact.fact_revenue, 1500, 'fact revenue should sum all imports for the order, not only the latest one');
+    assert.equal(fact.fact_taxes, 90, 'taxes should sum across imports');
+    assert.equal(fact.fact_commercial, 97.5, 'commercial should sum across imports');
+    assert.equal(fact.fact_charity, 15, 'charity should sum across imports');
+    assert.equal(fact.fact_packaging_total, 200, 'packaging should sum across imports');
+    assert.equal(fact.fact_design_printing, 300, 'printing should sum across imports');
+}
+
 async function smokeLegacyStageDistributionAndMaterials(context) {
     context.__imports = [
         {
@@ -820,6 +874,7 @@ async function main() {
     smokeBuildPlanSeparatesProductBuiltinAssembly(context);
     smokeBuildPlanRendersSavedSnapshotHints(context);
     await smokeTaxesIncludeCharity(context);
+    await smokeMultipleImportsAccumulateIntoFact(context);
     await smokeLegacyStageDistributionAndMaterials(context);
     await smokeWorkshopLegacyLeavesAssemblyExplicit(context);
     await smokeWorkshopHardwareFactUsesProjectState(context);
