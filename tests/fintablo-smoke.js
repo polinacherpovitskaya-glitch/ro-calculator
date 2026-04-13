@@ -126,6 +126,46 @@ function smokeBuildImportUsesOnlyOrderSplit(context) {
     assert.equal(result.raw_data.splitApplied, true);
   }
 
+function smokeBuildImportSeparatesCommercial(context) {
+    const result = vm.runInContext(`(() => {
+        FinTablo._categories = {
+            1: { id: 1, name: 'Коммерческий отдел', parentId: null },
+            2: { id: 2, name: 'Налоги', parentId: null },
+        };
+        return FinTablo._buildImportData(
+            { id: 11, order_name: 'Тестовый заказ' },
+            { id: 12, name: 'Тестовый заказ' },
+            [
+                { group: 'outcome', value: 6500, description: 'коммерческий расход', categoryId: 1 },
+                { group: 'outcome', value: 11000, description: 'налоги', categoryId: 2 },
+                { group: 'income', value: 100000, description: 'доход по сделке', categoryId: 0 },
+            ]
+        );
+    })()`, context);
+
+    assert.equal(result.fact_commercial, 6500);
+    assert.equal(result.fact_taxes, 11000);
+    assert.equal(result.fact_total, 17500);
+    assert.equal(result.fact_revenue, 100000);
+}
+
+function smokeCsvImportKeepsPackagingAndCommercial(context) {
+    runScript(context, 'js/import.js');
+
+    const result = vm.runInContext(`Import.parseCSV([
+        'Упаковка;1500',
+        'Коммерческий отдел;650',
+        'Налоги;1100',
+        'Выручка;10000'
+    ].join('\\n'))`, context);
+
+    assert.equal(result.fact_packaging, 1500);
+    assert.equal(result.fact_commercial, 650);
+    assert.equal(result.fact_taxes, 1100);
+    assert.equal(result.fact_revenue, 10000);
+    assert.equal(result.fact_total, 3250);
+}
+
 function smokeBuildImportKeepsFullIncomeForAttachedDeal(context) {
     const result = vm.runInContext(`(() => {
         FinTablo._categories = {};
@@ -218,6 +258,8 @@ async function main() {
 
     smokeExtractSplitAllocations(context);
     smokeBuildImportUsesOnlyOrderSplit(context);
+    smokeBuildImportSeparatesCommercial(context);
+    smokeCsvImportKeepsPackagingAndCommercial(context);
     smokeBuildImportKeepsFullIncomeForAttachedDeal(context);
     smokeRenderDetailShowsAllocatedValue(context);
     smokeBuildMatchMapUsesExplicitFinTabloLink(context);

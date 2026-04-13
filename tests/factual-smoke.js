@@ -497,6 +497,7 @@ async function smokeTaxesIncludeCharity(context) {
             fact_hardware: 0,
             fact_packaging: 0,
             fact_taxes: 110,
+            fact_commercial: 66,
             fact_charity: 10,
             fact_other: 0,
             fact_delivery: 0,
@@ -520,10 +521,10 @@ async function smokeTaxesIncludeCharity(context) {
     const fact = context.__charityFact;
     assert.equal(fact.fact_revenue, 1000, 'fact revenue should still come from FinTablo import');
     assert.equal(fact.fact_taxes, 110, 'fact taxes should stay equal to imported 11% taxes');
-    assert.equal(fact.fact_commercial, 65, 'fact commercial should auto-follow actual revenue');
+    assert.equal(fact.fact_commercial, 66, 'fact commercial should prefer imported fact value when FinTablo sends it separately');
     assert.equal(fact.fact_charity, 10, 'fact charity should be stored separately');
     assert.equal(fact._source_hints.fact_taxes, 'ФинТабло');
-    assert.equal(fact._source_hints.fact_commercial, '6.5% от факта выручки');
+    assert.equal(fact._source_hints.fact_commercial, 'ФинТабло');
     assert.equal(fact._source_hints.fact_charity, 'ФинТабло');
 }
 

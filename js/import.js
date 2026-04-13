@@ -56,10 +56,12 @@ const Import = {
             fact_salary: 0,
             fact_materials: 0,
             fact_hardware: 0,
+            fact_packaging: 0,
             fact_delivery: 0,
             fact_printing: 0,
             fact_molds: 0,
             fact_taxes: 0,
+            fact_commercial: 0,
             fact_charity: 0,
             fact_other: 0,
             fact_total: 0,
@@ -76,12 +78,15 @@ const Import = {
             'пластик': 'fact_materials',
             'сырье': 'fact_materials',
             'фурнитура': 'fact_hardware',
+            'упаков': 'fact_packaging',
             'доставка': 'fact_delivery',
             'логистика': 'fact_delivery',
             'печат': 'fact_printing',
             'нанесение': 'fact_printing',
             'молд': 'fact_molds',
             'форма': 'fact_molds',
+            'коммер': 'fact_commercial',
+            'комисси': 'fact_commercial',
             'благотвор': 'fact_charity',
             'благотв': 'fact_charity',
             'налог': 'fact_taxes',
@@ -112,8 +117,8 @@ const Import = {
         });
 
         result.fact_total = result.fact_salary + result.fact_materials + result.fact_hardware
-            + result.fact_delivery + result.fact_printing + result.fact_molds
-            + result.fact_taxes + result.fact_charity + result.fact_other;
+            + result.fact_packaging + result.fact_delivery + result.fact_printing + result.fact_molds
+            + result.fact_taxes + result.fact_commercial + result.fact_charity + result.fact_other;
 
         return result;
     },
@@ -127,10 +132,12 @@ const Import = {
             ${_isAdmin ? `<div class="cost-row"><span class="cost-label">Зарплата</span><span class="cost-value">${formatRub(d.fact_salary)}</span></div>` : ''}
             <div class="cost-row"><span class="cost-label">Материалы</span><span class="cost-value">${formatRub(d.fact_materials)}</span></div>
             <div class="cost-row"><span class="cost-label">Фурнитура</span><span class="cost-value">${formatRub(d.fact_hardware)}</span></div>
+            <div class="cost-row"><span class="cost-label">Упаковка</span><span class="cost-value">${formatRub(d.fact_packaging)}</span></div>
             <div class="cost-row"><span class="cost-label">Доставка</span><span class="cost-value">${formatRub(d.fact_delivery)}</span></div>
             <div class="cost-row"><span class="cost-label">Нанесение</span><span class="cost-value">${formatRub(d.fact_printing)}</span></div>
             <div class="cost-row"><span class="cost-label">Молды</span><span class="cost-value">${formatRub(d.fact_molds)}</span></div>
             <div class="cost-row"><span class="cost-label">Налоги</span><span class="cost-value">${formatRub(d.fact_taxes)}</span></div>
+            <div class="cost-row"><span class="cost-label">Коммерческий отдел</span><span class="cost-value">${formatRub(d.fact_commercial)}</span></div>
             <div class="cost-row"><span class="cost-label">Благотворительность</span><span class="cost-value">${formatRub(d.fact_charity)}</span></div>
             <div class="cost-row"><span class="cost-label">Прочее</span><span class="cost-value">${formatRub(d.fact_other)}</span></div>
             <div class="cost-row cost-total"><span class="cost-label">ИТОГО расходы</span><span class="cost-value">${formatRub(d.fact_total)}</span></div>
@@ -150,10 +157,12 @@ const Import = {
             fact_salary: d.fact_salary,
             fact_materials: d.fact_materials,
             fact_hardware: d.fact_hardware,
+            fact_packaging: d.fact_packaging,
             fact_delivery: d.fact_delivery,
             fact_printing: d.fact_printing,
             fact_molds: d.fact_molds,
             fact_taxes: d.fact_taxes,
+            fact_commercial: d.fact_commercial,
             fact_charity: d.fact_charity,
             fact_other: d.fact_other,
             fact_total: d.fact_total,

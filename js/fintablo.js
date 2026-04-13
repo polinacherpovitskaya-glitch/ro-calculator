@@ -24,6 +24,7 @@ const FinTablo = {
         'доставка': 'fact_delivery', 'логистика': 'fact_delivery',
         'печат': 'fact_printing', 'нанесение': 'fact_printing',
         'молд': 'fact_molds', 'форма': 'fact_molds',
+        'коммер': 'fact_commercial', 'комисси': 'fact_commercial',
         'благотвор': 'fact_charity', 'благотв': 'fact_charity',
         'налог': 'fact_taxes', 'ндс': 'fact_taxes',
         'выручка': 'fact_revenue', 'доход': 'fact_revenue',
@@ -38,6 +39,7 @@ const FinTablo = {
         fact_printing: 'Нанесение',
         fact_molds: 'Молды',
         fact_taxes: 'Налоги',
+        fact_commercial: 'Коммерческий отдел',
         fact_charity: 'Благотворительность',
         fact_other: 'Прочее',
         fact_revenue: 'Выручка',
@@ -537,7 +539,7 @@ const FinTablo = {
         const result = {
             fact_salary: 0, fact_materials: 0, fact_hardware: 0,
             fact_packaging: 0, fact_delivery: 0, fact_printing: 0, fact_molds: 0,
-            fact_taxes: 0, fact_charity: 0, fact_other: 0, fact_revenue: 0,
+            fact_taxes: 0, fact_commercial: 0, fact_charity: 0, fact_other: 0, fact_revenue: 0,
         };
 
         outcomes.forEach(t => {
@@ -586,6 +588,7 @@ const FinTablo = {
             fact_printing: factSums.fact_printing,
             fact_molds: factSums.fact_molds,
             fact_taxes: factSums.fact_taxes,
+            fact_commercial: factSums.fact_commercial,
             fact_charity: factSums.fact_charity,
             fact_other: factSums.fact_other,
             fact_total: totalOutcome,
@@ -740,7 +743,7 @@ const FinTablo = {
         const importData = this._buildImportData(order, deal, txns);
         const hasAnyMoney = [
             importData.fact_salary, importData.fact_materials, importData.fact_hardware, importData.fact_packaging,
-            importData.fact_delivery, importData.fact_printing, importData.fact_molds, importData.fact_taxes,
+            importData.fact_delivery, importData.fact_printing, importData.fact_molds, importData.fact_taxes, importData.fact_commercial,
             importData.fact_charity,
             importData.fact_other, importData.fact_revenue,
         ].some(v => (parseFloat(v) || 0) > 0);

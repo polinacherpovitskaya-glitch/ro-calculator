@@ -1401,6 +1401,7 @@ async _loadFactSummaries() {
             }
 
             const importedTaxes = this._num(latest.fact_taxes);
+            const importedCommercial = this._num(latest.fact_commercial);
             const importedCharity = this._num(latest.fact_charity);
             const currentFactRevenue = this._num(factData.fact_revenue);
             const charityRate = this._num(params?.charityRate) || 0.01;
@@ -1411,9 +1412,11 @@ async _loadFactSummaries() {
                 factData._auto_fintablo.fact_taxes = importedTaxes > 0;
                 this._setSourceHint(factData, 'fact_taxes', 'ФинТабло');
             }
-            if (commercialByRevenue > 0) {
-                this._applyAutoFactValue(factData, 'fact_commercial', commercialByRevenue);
-                this._setSourceHint(factData, 'fact_commercial', '6.5% от факта выручки');
+            const effectiveCommercial = importedCommercial > 0 ? importedCommercial : commercialByRevenue;
+            if (effectiveCommercial > 0) {
+                this._applyAutoFactValue(factData, 'fact_commercial', effectiveCommercial);
+                factData._auto_fintablo.fact_commercial = importedCommercial > 0;
+                this._setSourceHint(factData, 'fact_commercial', importedCommercial > 0 ? 'ФинТабло' : '6.5% от факта выручки');
             }
             const effectiveCharity = importedCharity > 0 ? importedCharity : charityByRevenue;
             if (effectiveCharity > 0) {
