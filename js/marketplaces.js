@@ -20,6 +20,8 @@ const Marketplaces = {
     _productionSelection: [],
     _pendingPhoto: '',
     _colorVariants: [],
+    DEFAULT_PACKAGING_COST: 80,
+    DEFAULT_PACKAGING_SPEED_PER_HOUR: 60,
 
     async load() {
         try {
@@ -50,15 +52,118 @@ const Marketplaces = {
 
     renderStats() {
         const total = this.allSets.length;
-        const costs = this.allSets.map(s => s.total_cost || 0).filter(c => c > 0);
-        const prices = this.allSets.map(s => (s.mp_actual_price || s.selling_price || 0)).filter(p => p > 0);
-        const shopPrices = this.allSets.map(s => (s.shop_actual_price || s.shop_suggested_price || 0)).filter(p => p > 0);
+        const costs = this.allSets
+            .map(s => this._safeNumber(s.total_cost, this._calcSetBreakdown(s).totalCost))
+            .filter(c => c > 0);
+        const prices = this.allSets
+            .map(s => this._safeNumber(
+                s.mp_actual_price || s.selling_price || s.mp_suggested_price,
+                this._getSuggestedChannelPrice(this._calcSetBreakdown(s).totalCost, s, 'marketplace')
+            ))
+            .filter(p => p > 0);
+        const shopPrices = this.allSets
+            .map(s => this._safeNumber(
+                s.shop_actual_price || s.shop_suggested_price,
+                this._getSuggestedChannelPrice(this._calcSetBreakdown(s).totalCost, s, 'shop')
+            ))
+            .filter(p => p > 0);
 
         document.getElementById('mp-total-sets').textContent = total;
         document.getElementById('mp-avg-cost').textContent = costs.length ? formatRub(round2(costs.reduce((a,b) => a+b, 0) / costs.length)) : '0 ₽';
         document.getElementById('mp-avg-price').textContent = prices.length ? formatRub(round2(prices.reduce((a,b) => a+b, 0) / prices.length)) : '0 ₽';
         const shopEl = document.getElementById('mp-avg-shop-price');
         if (shopEl) shopEl.textContent = shopPrices.length ? formatRub(round2(shopPrices.reduce((a,b) => a+b, 0) / shopPrices.length)) : '0 ₽';
+    },
+
+    _safeNumber(value, fallback = 0) {
+        const numeric = Number(value);
+        return Number.isFinite(numeric) ? numeric : fallback;
+    },
+
+    _roundSuggestedPrice(value) {
+        const numeric = this._safeNumber(value, 0);
+        if (numeric <= 0) return 0;
+        return Math.ceil(numeric / 10) * 10;
+    },
+
+    _normalizeChannelRates(source = {}) {
+        const commissionPct = this._safeNumber(source.commission, 46);
+        const vatPct = this._safeNumber(source.vat, 5);
+        const taxPct = this._safeNumber(source.osn, 12);
+        const charityPct = this._safeNumber(source.charity, 1);
+        const commercialPct = this._safeNumber(source.commercial, 6.5);
+        const acquiringPct = this._safeNumber(source.acquiring, 5);
+        const targetMarginPct = this._safeNumber(source.target_margin, 40);
+
+        return {
+            commissionPct,
+            vatPct,
+            taxPct,
+            charityPct,
+            commercialPct,
+            acquiringPct,
+            targetMarginPct,
+        };
+    },
+
+    _calcChannelResult(totalCost, price, rates, channel) {
+        const cleanPrice = this._safeNumber(price, 0);
+        const cleanCost = this._safeNumber(totalCost, 0);
+        const {
+            commissionPct,
+            vatPct,
+            taxPct,
+            charityPct,
+            commercialPct,
+            acquiringPct,
+        } = this._normalizeChannelRates(rates);
+
+        const deductionPcts = channel === 'marketplace'
+            ? [commissionPct, vatPct, taxPct, charityPct, commercialPct]
+            : [vatPct, taxPct, charityPct, commercialPct, acquiringPct];
+        const keepFactor = deductionPcts.reduce((acc, pct) => acc * (1 - Math.max(0, pct) / 100), 1);
+        const cleanInflow = round2(cleanPrice * Math.max(keepFactor, 0));
+        const cleanProfit = round2(cleanInflow - cleanCost);
+        const cleanMarginPct = cleanInflow > 0 ? round2(cleanProfit * 100 / cleanInflow) : 0;
+
+        return {
+            keepFactor,
+            cleanInflow,
+            cleanProfit,
+            cleanMarginPct,
+        };
+    },
+
+    _getSuggestedChannelPrice(totalCost, rates, channel) {
+        const {
+            targetMarginPct,
+        } = this._normalizeChannelRates(rates);
+        const baseResult = this._calcChannelResult(totalCost, 1, rates, channel);
+        const keepFactor = baseResult.keepFactor * (1 - Math.max(0, targetMarginPct) / 100);
+        if (!(keepFactor > 0) || !(totalCost > 0)) return 0;
+        return this._roundSuggestedPrice(totalCost / keepFactor);
+    },
+
+    _isDefaultPackagingEnabled(source = null) {
+        if (!source || typeof source !== 'object') return false;
+        if (Object.prototype.hasOwnProperty.call(source, 'default_packaging_enabled')) {
+            return !!source.default_packaging_enabled;
+        }
+        return false;
+    },
+
+    _getDefaultPackagingConfig(source = null) {
+        const isFormSource = !source || source === 'form';
+        const enabled = isFormSource
+            ? !!document.getElementById('mp-set-default-packaging-enabled')?.checked
+            : this._isDefaultPackagingEnabled(source);
+
+        return {
+            enabled,
+            costPerUnit: this.DEFAULT_PACKAGING_COST,
+            assemblySpeed: this.DEFAULT_PACKAGING_SPEED_PER_HOUR,
+            name: 'Дефолтная упаковка B2C',
+        };
     },
 
     // ==========================================
@@ -76,16 +181,19 @@ const Marketplaces = {
         this.allSets.forEach(s => {
             const bd = this._calcSetBreakdown(s);
             const cost = bd.totalCost;
-            const mpPrice = s.mp_actual_price || s.selling_price || 0;
-            const shopPrice = s.shop_actual_price || s.shop_suggested_price || 0;
-            const mpMargin = parseFloat(s.mp_margin_actual) || 0;
-            const shopMargin = parseFloat(s.shop_margin_actual) || 0;
+            const suggestedMpPrice = this._getSuggestedChannelPrice(cost, s, 'marketplace');
+            const suggestedShopPrice = this._getSuggestedChannelPrice(cost, s, 'shop');
+            const mpPrice = this._safeNumber(s.mp_actual_price || s.selling_price || s.mp_suggested_price, suggestedMpPrice);
+            const shopPrice = this._safeNumber(s.shop_actual_price || s.shop_suggested_price, suggestedShopPrice);
+            const mpMargin = this._calcChannelResult(cost, mpPrice, s, 'marketplace').cleanMarginPct;
+            const shopMargin = this._calcChannelResult(cost, shopPrice, s, 'shop').cleanMarginPct;
 
             // Composition
             const parts = [];
             (s.plastic_items || []).forEach(i => parts.push(i.name || 'Пластик'));
             (s.hw_items || []).forEach(i => parts.push(i.name || 'Фурнитура'));
             (s.pkg_items || []).forEach(i => parts.push(i.name || 'Упаковка'));
+            if (this._isDefaultPackagingEnabled(s)) parts.push('Дефолтная упаковка');
 
             const photo = s.photo_url
                 ? `<img src="${this._esc(s.photo_url)}" style="width:80px;height:80px;object-fit:cover;border-radius:10px;border:1px solid var(--border);" onerror="this.style.display='none'">`
@@ -156,12 +264,13 @@ const Marketplaces = {
         document.getElementById('mp-set-name').value = '';
         document.getElementById('mp-set-commission').value = 46;
         document.getElementById('mp-set-vat').value = 5;
-        document.getElementById('mp-set-osn').value = 6;
+        document.getElementById('mp-set-osn').value = 12;
         document.getElementById('mp-set-charity').value = 1;
         document.getElementById('mp-set-commercial').value = 6.5;
-        document.getElementById('mp-set-acquiring').value = 4;
-        document.getElementById('mp-set-shop-multiplier').value = 3;
+        document.getElementById('mp-set-acquiring').value = 5;
         document.getElementById('mp-set-margin').value = 40;
+        const defaultPackagingEl = document.getElementById('mp-set-default-packaging-enabled');
+        if (defaultPackagingEl) defaultPackagingEl.checked = false;
         document.getElementById('mp-set-price-manual').value = '';
         document.getElementById('mp-set-shop-price-manual').value = '';
         this._plasticItems = [];
@@ -188,12 +297,13 @@ const Marketplaces = {
         document.getElementById('mp-set-name').value = normalizedSet.name || '';
         document.getElementById('mp-set-commission').value = normalizedSet.commission || 46;
         document.getElementById('mp-set-vat').value = normalizedSet.vat || 5;
-        document.getElementById('mp-set-osn').value = normalizedSet.osn || 6;
+        document.getElementById('mp-set-osn').value = normalizedSet.osn || 12;
         document.getElementById('mp-set-charity').value = Number.isFinite(parseFloat(normalizedSet.charity)) ? normalizedSet.charity : 1;
         document.getElementById('mp-set-commercial').value = normalizedSet.commercial || 6.5;
-        document.getElementById('mp-set-acquiring').value = normalizedSet.acquiring || 4;
-        document.getElementById('mp-set-shop-multiplier').value = normalizedSet.shop_multiplier || 3;
+        document.getElementById('mp-set-acquiring').value = normalizedSet.acquiring || 5;
         document.getElementById('mp-set-margin').value = normalizedSet.target_margin || 40;
+        const defaultPackagingEl = document.getElementById('mp-set-default-packaging-enabled');
+        if (defaultPackagingEl) defaultPackagingEl.checked = this._isDefaultPackagingEnabled(normalizedSet);
         document.getElementById('mp-set-price-manual').value = normalizedSet.mp_actual_price || normalizedSet.selling_price || '';
         document.getElementById('mp-set-shop-price-manual').value = normalizedSet.shop_actual_price || normalizedSet.shop_suggested_price || '';
         this._plasticItems = (normalizedSet.plastic_items || []).map(i => ({ ...i, colors: Array.isArray(i.colors) ? i.colors : [] }));
@@ -605,7 +715,14 @@ const Marketplaces = {
         if (!set) return set;
         return {
             ...set,
+            commission: this._safeNumber(set.commission, 46),
+            vat: this._safeNumber(set.vat, 5),
+            osn: this._safeNumber(set.osn, 12),
             charity: Number.isFinite(parseFloat(set.charity)) ? parseFloat(set.charity) : 1,
+            commercial: this._safeNumber(set.commercial, 6.5),
+            acquiring: this._safeNumber(set.acquiring, 5),
+            target_margin: this._safeNumber(set.target_margin, 40),
+            default_packaging_enabled: !!set.default_packaging_enabled,
             hw_items: (set.hw_items || []).map(item => this._normalizeHwItem(item)),
             pkg_items: (set.pkg_items || []).map(item => this._normalizePkgItem(item)),
         };
@@ -945,44 +1062,25 @@ const Marketplaces = {
     // ==========================================
 
     recalcSet() {
-        const commissionPct = parseFloat(document.getElementById('mp-set-commission')?.value) || 46;
-        const vatPct = parseFloat(document.getElementById('mp-set-vat')?.value) || 5;
-        const osnPct = parseFloat(document.getElementById('mp-set-osn')?.value) || 6;
-        const charityPctRaw = parseFloat(document.getElementById('mp-set-charity')?.value);
-        const charityPct = Number.isFinite(charityPctRaw) ? charityPctRaw : 1;
-        const commercialPct = parseFloat(document.getElementById('mp-set-commercial')?.value) || 6.5;
-        const acquiringPct = parseFloat(document.getElementById('mp-set-acquiring')?.value) || 4;
-        const shopMultiplier = parseFloat(document.getElementById('mp-set-shop-multiplier')?.value) || 3;
-        const targetMarginPct = parseFloat(document.getElementById('mp-set-margin')?.value) || 40;
-
+        const rates = this._normalizeChannelRates({
+            commission: document.getElementById('mp-set-commission')?.value,
+            vat: document.getElementById('mp-set-vat')?.value,
+            osn: document.getElementById('mp-set-osn')?.value,
+            charity: document.getElementById('mp-set-charity')?.value,
+            commercial: document.getElementById('mp-set-commercial')?.value,
+            acquiring: document.getElementById('mp-set-acquiring')?.value,
+            target_margin: document.getElementById('mp-set-margin')?.value,
+        });
         const params = App.params || {};
-        let totalCost = 0;
-
-        // Plastic: use enriched tier cost at 500 (standard production batch)
-        this._plasticItems.forEach(item => {
-            if (!item.blank_id) return;
-            const mold = this._plasticBlanks.find(m => m.id === item.blank_id);
-            if (!mold || !mold.tiers) return;
-            const tier = mold.tiers[500] || mold.tiers[300] || mold.tiers[1000];
-            if (tier) totalCost += tier.cost * (item.qty || 1);
+        const breakdown = this._calcSetBreakdown({
+            plastic_items: this._plasticItems,
+            hw_items: this._hwItems,
+            pkg_items: this._pkgItems,
+            default_packaging_enabled: this._getDefaultPackagingConfig('form').enabled,
         });
-
-        // Hardware
-        this._hwItems.forEach(item => {
-            totalCost += this._calcHwUnitCost(item, params) * (item.qty || 1);
-        });
-
-        // Packaging
-        this._pkgItems.forEach(item => {
-            totalCost += this._calcPkgUnitCost(item, params) * (item.qty || 1);
-        });
-
-        totalCost = round2(totalCost);
-
-        // MP suggested price by target net margin.
-        const keepFactorMp = (1 - commissionPct/100) * (1 - vatPct/100) * (1 - osnPct/100) * (1 - charityPct/100) * (1 - commercialPct/100) * (1 - targetMarginPct/100);
-        const suggestedMpPrice = keepFactorMp > 0 ? Math.ceil(totalCost / keepFactorMp) : 0;
-        const suggestedShopPrice = totalCost > 0 ? Math.round(totalCost * Math.max(shopMultiplier, 0)) : 0;
+        const totalCost = breakdown.totalCost;
+        const suggestedMpPrice = this._getSuggestedChannelPrice(totalCost, rates, 'marketplace');
+        const suggestedShopPrice = this._getSuggestedChannelPrice(totalCost, rates, 'shop');
 
         // Show result
         const resultBlock = document.getElementById('mp-result-block');
@@ -999,16 +1097,14 @@ const Marketplaces = {
 
             const mpActualPrice = parseFloat(mpManualEl?.value) || suggestedMpPrice || 0;
             const shopActualPrice = parseFloat(shopManualEl?.value) || suggestedShopPrice || 0;
-
-            const mpNetFactor = (1 - commissionPct/100) * (1 - vatPct/100) * (1 - osnPct/100) * (1 - charityPct/100) * (1 - commercialPct/100);
-            const mpNet = round2(mpActualPrice * Math.max(mpNetFactor, 0));
-            const mpProfit = round2(mpNet - totalCost);
-            const mpMargin = mpNet > 0 ? round2(mpProfit * 100 / mpNet) : 0;
-
-            const shopNetFactor = (1 - vatPct/100) * (1 - osnPct/100) * (1 - charityPct/100) * (1 - commercialPct/100) * (1 - acquiringPct/100);
-            const shopNet = round2(shopActualPrice * Math.max(shopNetFactor, 0));
-            const shopProfit = round2(shopNet - totalCost);
-            const shopMargin = shopNet > 0 ? round2(shopProfit * 100 / shopNet) : 0;
+            const mpSummary = this._calcChannelResult(totalCost, mpActualPrice, rates, 'marketplace');
+            const shopSummary = this._calcChannelResult(totalCost, shopActualPrice, rates, 'shop');
+            const mpNet = mpSummary.cleanInflow;
+            const mpProfit = mpSummary.cleanProfit;
+            const mpMargin = mpSummary.cleanMarginPct;
+            const shopNet = shopSummary.cleanInflow;
+            const shopProfit = shopSummary.cleanProfit;
+            const shopMargin = shopSummary.cleanMarginPct;
 
             const mpMarginEl = document.getElementById('mp-calc-manual-margin');
             const shopMarginEl = document.getElementById('mp-calc-shop-margin');
@@ -1020,24 +1116,19 @@ const Marketplaces = {
                 shopMarginEl.innerHTML = `Чистыми: <b style="color:${shopProfit >= 0 ? 'var(--green)' : 'var(--red)'}">${formatRub(shopProfit)}</b> · Маржа <b style="color:${marginColor(shopMargin)}">${shopMargin}%</b>`;
             }
 
-            const bd = this._calcSetBreakdown({
-                plastic_items: this._plasticItems,
-                hw_items: this._hwItems,
-                pkg_items: this._pkgItems,
-            });
             const stageParts = [];
-            if (bd.castingCost > 0) stageParts.push(`Выливание (пластик + амортизация молда + тех. добавки): ${formatRub(bd.castingCost)}`);
-            if (bd.fotCost > 0) stageParts.push(`ФОТ выливания/срезки/NFC: ${formatRub(bd.fotCost)}`);
-            if (bd.indirectCastingCost > 0) stageParts.push(`Косвенные выливания: ${formatRub(bd.indirectCastingCost)}`);
-            if (bd.hwMaterialCost > 0) stageParts.push(`Фурнитура (материалы, включая встроенную): ${formatRub(bd.hwMaterialCost)}`);
-            if (bd.pkgMaterialCost > 0) stageParts.push(`Упаковка (материалы): ${formatRub(bd.pkgMaterialCost)}`);
-            if (bd.assemblyCost > 0) stageParts.push(`Сборка фурнитуры/упаковки (ФОТ): ${formatRub(bd.assemblyCost)}`);
-            if (bd.indirectAssemblyCost > 0) stageParts.push(`Косвенные сборки фурнитуры/упаковки: ${formatRub(bd.indirectAssemblyCost)}`);
+            if (breakdown.castingCost > 0) stageParts.push(`Выливание (пластик + амортизация молда + тех. добавки): ${formatRub(breakdown.castingCost)}`);
+            if (breakdown.fotCost > 0) stageParts.push(`ФОТ выливания/срезки/NFC: ${formatRub(breakdown.fotCost)}`);
+            if (breakdown.indirectCastingCost > 0) stageParts.push(`Косвенные выливания: ${formatRub(breakdown.indirectCastingCost)}`);
+            if (breakdown.hwMaterialCost > 0) stageParts.push(`Фурнитура (материалы, включая встроенную): ${formatRub(breakdown.hwMaterialCost)}`);
+            if (breakdown.pkgMaterialCost > 0) stageParts.push(`Упаковка (материалы): ${formatRub(breakdown.pkgMaterialCost)}`);
+            if (breakdown.assemblyCost > 0) stageParts.push(`Сборка фурнитуры/упаковки (ФОТ): ${formatRub(breakdown.assemblyCost)}`);
+            if (breakdown.indirectAssemblyCost > 0) stageParts.push(`Косвенные сборки фурнитуры/упаковки: ${formatRub(breakdown.indirectAssemblyCost)}`);
 
             document.getElementById('mp-calc-details').innerHTML = `
                 ${stageParts.length ? `<div style="margin-bottom:6px;line-height:1.5;">${stageParts.join('<br>')}</div>` : ''}
-                МП (факт ${formatRub(mpActualPrice)}): −комиссия ${commissionPct}% · −НДС ${vatPct}% · −ОСН ${osnPct}% · −благотв. ${charityPct}% · −коммерч. ${commercialPct}% → чистый вход ${formatRub(mpNet)}<br>
-                ИМ (факт ${formatRub(shopActualPrice)}): −НДС ${vatPct}% · −ОСН ${osnPct}% · −благотв. ${charityPct}% · −коммерч. ${commercialPct}% · −эквайринг ${acquiringPct}% → чистый вход ${formatRub(shopNet)}
+                МП (факт ${formatRub(mpActualPrice)}): −комиссия ${rates.commissionPct}% · −НДС ${rates.vatPct}% · −налоги ${rates.taxPct}% · −благотв. ${rates.charityPct}% · −коммерч. ${rates.commercialPct}% → чистый вход ${formatRub(mpNet)}<br>
+                ИМ (факт ${formatRub(shopActualPrice)}): −НДС ${rates.vatPct}% · −налоги ${rates.taxPct}% · −благотв. ${rates.charityPct}% · −коммерч. ${rates.commercialPct}% · −эквайринг ${rates.acquiringPct}% → чистый вход ${formatRub(shopNet)}
             `;
 
             this._lastCalc = {
@@ -1071,6 +1162,7 @@ const Marketplaces = {
         const normalizedPkgItems = this._pkgItems
             .map(item => this._normalizePkgItem(item))
             .filter(item => item.blank_id || item.wh_id || (item.source === 'custom' && item.name));
+        const defaultPackaging = this._getDefaultPackagingConfig('form');
 
         const mset = {
             id: this.editingSetId || undefined,
@@ -1078,15 +1170,15 @@ const Marketplaces = {
             photo_url: this._pendingPhoto || '',
             commission: parseFloat(document.getElementById('mp-set-commission').value) || 46,
             vat: parseFloat(document.getElementById('mp-set-vat').value) || 5,
-            osn: parseFloat(document.getElementById('mp-set-osn').value) || 6,
+            osn: parseFloat(document.getElementById('mp-set-osn').value) || 12,
             charity: (() => {
                 const value = parseFloat(document.getElementById('mp-set-charity').value);
                 return Number.isFinite(value) ? value : 1;
             })(),
             commercial: parseFloat(document.getElementById('mp-set-commercial').value) || 6.5,
-            acquiring: parseFloat(document.getElementById('mp-set-acquiring').value) || 4,
-            shop_multiplier: parseFloat(document.getElementById('mp-set-shop-multiplier').value) || 3,
+            acquiring: parseFloat(document.getElementById('mp-set-acquiring').value) || 5,
             target_margin: parseFloat(document.getElementById('mp-set-margin').value) || 40,
+            default_packaging_enabled: defaultPackaging.enabled,
             plastic_items: this._plasticItems.filter(i => i.blank_id),
             hw_items: normalizedHwItems,
             pkg_items: normalizedPkgItems,
@@ -1138,6 +1230,7 @@ const Marketplaces = {
         this._productionSelection = this.allSets.map(s => ({ id: s.id, qty: 0, selected: false, variantQtys: {} }));
         list.innerHTML = this.allSets.map(s => {
             const hasVariants = Array.isArray(s.color_variants) && s.color_variants.length > 0;
+            const liveCost = this._calcSetBreakdown(s).totalCost;
 
             let variantsHtml = '';
             if (hasVariants) {
@@ -1163,7 +1256,7 @@ const Marketplaces = {
                 + '<input type="checkbox" id="mp-prod-sel-' + s.id + '" onchange="Marketplaces._toggleProductionSet(' + s.id + ', this.checked)">'
                 + '<label for="mp-prod-sel-' + s.id + '" style="cursor:pointer;">'
                 + '<div style="font-weight:600;">' + this._esc(s.name || 'Набор') + (hasVariants ? ' <span style="font-size:10px;color:var(--accent);">(' + s.color_variants.length + ' цвет.)</span>' : '') + '</div>'
-                + '<div style="font-size:11px;color:var(--text-muted);">Себестоимость ' + formatRub(s.total_cost || 0) + ' · МП ' + formatRub(s.mp_actual_price || s.selling_price || 0) + '</div>'
+                + '<div style="font-size:11px;color:var(--text-muted);">Себестоимость ' + formatRub(liveCost) + ' · МП ' + formatRub(s.mp_actual_price || s.selling_price || s.mp_suggested_price || 0) + '</div>'
                 + '</label>'
                 + (hasVariants ? '' : '<input type="number" min="1" placeholder="Тираж" disabled id="mp-prod-qty-' + s.id + '" oninput="Marketplaces._setProductionQty(' + s.id + ', this.value)" style="width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:6px;">')
                 + '</div>'
@@ -1561,7 +1654,48 @@ const Marketplaces = {
                 totalHoursPackaging += res.hoursPackaging || 0;
             });
 
-            totalRevenue += round2((parseFloat(s.mp_actual_price || s.selling_price || 0) || 0) * setQty);
+            const defaultPackaging = this._getDefaultPackagingConfig(s);
+            if (defaultPackaging.enabled) {
+                const qty = setQty;
+                const pkgItem = {
+                    name: defaultPackaging.name,
+                    qty,
+                    assembly_speed: defaultPackaging.assemblySpeed,
+                    price: defaultPackaging.costPerUnit,
+                    delivery_price: 0,
+                    delivery_total: 0,
+                    sell_price: 0,
+                };
+                const res = calculatePackagingCost(pkgItem, params);
+                items.push({
+                    item_number: itemNumber++,
+                    item_type: 'packaging',
+                    product_name: pkgItem.name,
+                    quantity: qty,
+                    packaging_assembly_speed: pkgItem.assembly_speed,
+                    packaging_price_per_unit: pkgItem.price,
+                    packaging_delivery_per_unit: pkgItem.delivery_price,
+                    packaging_delivery_total: pkgItem.delivery_total,
+                    sell_price_packaging: 0,
+                    target_price_packaging: 0,
+                    cost_total: res.costPerUnit,
+                    hours_packaging: res.hoursPackaging,
+                    packaging_source: 'default',
+                    custom_country: 'russia',
+                    packaging_warehouse_item_id: null,
+                    packaging_warehouse_sku: '',
+                    packaging_parent_item_index: null,
+                    marketplace_set_name: s.set_name || s.name || '',
+                });
+                totalCosts += res.costPerUnit * qty;
+                totalHoursPackaging += res.hoursPackaging || 0;
+            }
+
+            const liveMpPrice = this._safeNumber(
+                s.mp_actual_price || s.selling_price || s.mp_suggested_price,
+                this._getSuggestedChannelPrice(this._calcSetBreakdown(s).totalCost, s, 'marketplace')
+            );
+            totalRevenue += round2(liveMpPrice * setQty);
         });
 
         totalCosts = round2(totalCosts);
@@ -1765,7 +1899,6 @@ const Marketplaces = {
         const fotPerHour = params.fotPerHour || 400;
 
         this._plasticBlanks.forEach(m => {
-            if (m.tiers && Object.keys(m.tiers).length > 0) return;
             const pMin = m.pph_min || 0;
             const pMax = m.pph_max || 0;
             const pAvg = (pMin > 0 && pMax > 0) ? Math.round((pMin + pMax) / 2) : (pMin || pMax || 0);
@@ -1794,7 +1927,7 @@ const Marketplaces = {
                     adjustedCost += hwCostPerUnit;
                 }
 
-                m.tiers[qty] = { cost: round2(adjustedCost) };
+                m.tiers[qty] = { cost: round2(this._safeNumber(adjustedCost, 0)) };
             });
         });
     },
@@ -1890,6 +2023,19 @@ const Marketplaces = {
             indirectAssemblyCost += c.assemblyIndirect * qtyMult;
         });
 
+        const defaultPackaging = this._getDefaultPackagingConfig(s);
+        if (defaultPackaging.enabled) {
+            const assemblyFot = round2((params.fotPerHour || 400) / defaultPackaging.assemblySpeed * (params.wasteFactor || 1.1));
+            const assemblyIndirect = params.indirectCostMode === 'all'
+                ? round2((params.indirectPerHour || 0) / defaultPackaging.assemblySpeed * (params.wasteFactor || 1.1))
+                : 0;
+            pkgCost += defaultPackaging.costPerUnit + assemblyFot + assemblyIndirect;
+            pkgMaterialCost += defaultPackaging.costPerUnit;
+            assemblyCost += assemblyFot;
+            indirectCost += assemblyIndirect;
+            indirectAssemblyCost += assemblyIndirect;
+        }
+
         // fallback: if detailed split couldn't be reconstructed, keep at least basic categories
         if (castingCost === 0 && plasticCost > 0) castingCost = plasticCost;
         if (hwMaterialCost === 0 && hwCost > 0) hwMaterialCost = hwCost;
@@ -1907,7 +2053,7 @@ const Marketplaces = {
             indirectCastingCost: round2(indirectCastingCost),
             indirectAssemblyCost: round2(indirectAssemblyCost),
             indirectCost: round2(indirectCost),
-            totalCost: round2(plasticCost + hwCost + pkgCost)
+            totalCost: round2(castingCost + hwMaterialCost + pkgMaterialCost + fotCost + assemblyCost + indirectCastingCost + indirectAssemblyCost)
         };
     },
 

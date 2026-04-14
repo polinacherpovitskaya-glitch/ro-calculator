@@ -33,6 +33,7 @@ function createElement(id = '') {
         querySelectorAll() { return []; },
         insertAdjacentHTML() {},
         scrollIntoView() {},
+        matches() { return false; },
     };
 }
 
@@ -75,6 +76,8 @@ function createContext() {
         Promise,
         setTimeout,
         clearTimeout,
+        MOLD_MAX_LIFETIME: 4500,
+        MOLD_TIERS: [10, 50, 100, 300, 500, 1000, 3000],
         document,
         localStorage: {
             getItem() { return null; },
@@ -123,6 +126,7 @@ async function main() {
     const context = createContext();
     runScript(context, 'js/warehouse.js');
     runScript(context, 'js/marketplaces.js');
+    vm.runInContext(`globalThis.__marketplacesRealRecalcSet = Marketplaces.recalcSet.bind(Marketplaces)`, context);
 
     assert.equal(vm.runInContext(`typeof Marketplaces`, context), 'object');
     assert.equal(vm.runInContext(`typeof Warehouse`, context), 'object');
@@ -416,11 +420,10 @@ async function main() {
         document.getElementById('mp-set-name').value = 'Charity set';
         document.getElementById('mp-set-commission').value = '46';
         document.getElementById('mp-set-vat').value = '5';
-        document.getElementById('mp-set-osn').value = '6';
+        document.getElementById('mp-set-osn').value = '12';
         document.getElementById('mp-set-charity').value = '1.5';
         document.getElementById('mp-set-commercial').value = '6.5';
-        document.getElementById('mp-set-acquiring').value = '4';
-        document.getElementById('mp-set-shop-multiplier').value = '3';
+        document.getElementById('mp-set-acquiring').value = '5';
         document.getElementById('mp-set-margin').value = '40';
         __originalMarketplacesLoad = Marketplaces.load;
         Marketplaces.load = async () => {};
@@ -774,6 +777,97 @@ async function main() {
     assert.match(cordHtml, /0,7 ₽\/см/);
     assert.match(cordHtml, /Кол-во \(см\)/);
     assert.doesNotMatch(cordHtml, /70 ₽\/шт/);
+
+    vm.runInContext(`
+        Marketplaces.recalcSet = globalThis.__marketplacesRealRecalcSet;
+        App.params = {
+            cnyRate: 12.5,
+            fotPerHour: 400,
+            indirectPerHour: 100,
+            wasteFactor: 1.1,
+            indirectCostMode: 'all',
+        };
+        calculateItemCost = () => ({
+            costFot: 20,
+            costIndirect: 30,
+            costPlastic: 40,
+            costMoldAmortization: 10,
+            costCutting: 0,
+            costCuttingIndirect: 0,
+            costNfcTag: 0,
+            costNfcProgramming: 0,
+            costNfcIndirect: 0,
+            costDesign: 0,
+            costPrinting: 0,
+            costDelivery: 0,
+            costTotal: 100,
+            hoursPlastic: 1,
+            hoursCutting: 0,
+            hoursNfc: 0,
+        });
+        Marketplaces._plasticBlanks = [{
+            id: 300,
+            name: 'Бег',
+            status: 'active',
+            pph_actual: 25,
+            weight_grams: 10,
+            mold_count: 1,
+            cost_cny: 800,
+            cny_rate: 12.5,
+            delivery_cost: 8000,
+            tiers: { 500: { cost: NaN } },
+        }];
+        Marketplaces._plasticItems = [{ blank_id: 300, qty: 1, name: 'Бег', colors: [] }];
+        Marketplaces._hwItems = [];
+        Marketplaces._pkgItems = [];
+        document.getElementById('mp-set-commission').value = '46';
+        document.getElementById('mp-set-vat').value = '5';
+        document.getElementById('mp-set-osn').value = '12';
+        document.getElementById('mp-set-charity').value = '1';
+        document.getElementById('mp-set-commercial').value = '6.5';
+        document.getElementById('mp-set-acquiring').value = '5';
+        document.getElementById('mp-set-margin').value = '40';
+        document.getElementById('mp-set-price-manual').value = '';
+        document.getElementById('mp-set-shop-price-manual').value = '';
+        document.getElementById('mp-result-block');
+        document.getElementById('mp-calc-cost');
+        document.getElementById('mp-calc-price');
+        document.getElementById('mp-calc-shop-price');
+        document.getElementById('mp-calc-manual-margin');
+        document.getElementById('mp-calc-shop-margin');
+        document.getElementById('mp-calc-details');
+        document.getElementById('mp-set-default-packaging-enabled').checked = true;
+        Marketplaces._enrichPlasticBlanks();
+        __breakdown = Marketplaces._calcSetBreakdown({
+            plastic_items: Marketplaces._plasticItems,
+            hw_items: [],
+            pkg_items: [],
+            default_packaging_enabled: true,
+        });
+        Marketplaces.recalcSet();
+        __calcState = {
+            cost: document.getElementById('mp-calc-cost').textContent,
+            mp: document.getElementById('mp-calc-price').textContent,
+            shop: document.getElementById('mp-calc-shop-price').textContent,
+            mpValue: Number(document.getElementById('mp-set-price-manual').value || 0),
+            shopValue: Number(document.getElementById('mp-set-shop-price-manual').value || 0),
+            lastCalc: Marketplaces._lastCalc,
+        };
+    `, context);
+
+    const b2cBreakdown = JSON.parse(vm.runInContext(`JSON.stringify(__breakdown)`, context));
+    const b2cCalcState = JSON.parse(vm.runInContext(`JSON.stringify(__calcState)`, context));
+    assert.equal(b2cBreakdown.pkgMaterialCost, 80);
+    assert.equal(b2cBreakdown.totalCost, 183.16);
+    assert.equal(Number(b2cCalcState.lastCalc.totalCost), 183.16);
+    assert.ok(b2cCalcState.mpValue > 0);
+    assert.ok(b2cCalcState.shopValue > 0);
+    assert.equal(b2cCalcState.mpValue % 10, 0);
+    assert.equal(b2cCalcState.shopValue % 10, 0);
+    assert.ok(b2cCalcState.mpValue >= 740);
+    assert.ok(b2cCalcState.shopValue >= 420);
+    assert.ok(Number(b2cCalcState.lastCalc.mpMargin) >= 39.5);
+    assert.ok(Number(b2cCalcState.lastCalc.shopMargin) >= 39.5);
 
     console.log('marketplaces smoke checks passed');
 }

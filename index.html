@@ -10,7 +10,7 @@
     <link rel="stylesheet" href="css/style.css?v=101">
     <script>
         (function () {
-            const CURRENT_HTML_VERSION = 'v270';
+            const CURRENT_HTML_VERSION = 'v271';
             const ATTEMPT_KEY = 'ro_calc_force_update_attempts';
 
             function parseVersion(version) {
@@ -81,7 +81,7 @@
     <aside class="sidebar">
         <div class="sidebar-brand">
             <h2>Recycle Object</h2>
-            <span>Калькулятор <span id="app-version">v270</span></span>
+            <span>Калькулятор <span id="app-version">v271</span></span>
         </div>
         <nav class="sidebar-nav">
             <a href="#tasks" data-page="tasks">
@@ -2141,7 +2141,7 @@
             </div>
 
             <div class="card" style="padding:12px 20px;margin-bottom:12px;">
-                <p class="text-muted" style="font-size:12px;margin:0;">База знаний B2C: соберите набор (пластик + фурнитура + упаковка), получите цену для маркетплейса (целевая чистая маржа 40%) и цену для интернет-магазина с учетом НДС, ОСН, 1% благотворительности, коммерческого отдела и эквайринга.</p>
+                <p class="text-muted" style="font-size:12px;margin:0;">B2C: соберите набор (пластик + фурнитура + упаковка), получите цену для маркетплейса с чистой маржой 40% уже с учётом комиссии МП и цену для интернет-магазина с чистой маржой 40% после НДС, налогов, благотворительности, коммерческого отдела и эквайринга. Рекомендованные цены округляются вверх до 10 ₽.</p>
             </div>
 
             <!-- Sets list -->
@@ -2181,11 +2181,10 @@
                 <div class="form-row">
                     <div class="form-group"><label>Комиссия МП (%)</label><input type="number" min="0" max="100" step="1" id="mp-set-commission" value="46" oninput="Marketplaces.recalcSet()"></div>
                     <div class="form-group"><label>НДС (%)</label><input type="number" min="0" max="100" step="0.1" id="mp-set-vat" value="5" oninput="Marketplaces.recalcSet()"></div>
-                    <div class="form-group"><label>ОСН (%)</label><input type="number" min="0" max="100" step="0.1" id="mp-set-osn" value="6" oninput="Marketplaces.recalcSet()"></div>
+                    <div class="form-group"><label>Налоги/УСН (%)</label><input type="number" min="0" max="100" step="0.1" id="mp-set-osn" value="12" oninput="Marketplaces.recalcSet()"></div>
                     <div class="form-group"><label>Благотворительность (%)</label><input type="number" min="0" max="100" step="0.1" id="mp-set-charity" value="1" oninput="Marketplaces.recalcSet()"></div>
                     <div class="form-group"><label>Коммерч. (%)</label><input type="number" min="0" max="100" step="0.1" id="mp-set-commercial" value="6.5" oninput="Marketplaces.recalcSet()"></div>
-                    <div class="form-group"><label>Эквайринг ИМ (%)</label><input type="number" min="0" max="100" step="0.1" id="mp-set-acquiring" value="4" oninput="Marketplaces.recalcSet()"></div>
-                    <div class="form-group"><label>Множитель ИМ (x)</label><input type="number" min="0.1" step="0.1" id="mp-set-shop-multiplier" value="3" oninput="Marketplaces.recalcSet()"></div>
+                    <div class="form-group"><label>Эквайринг ИМ (%)</label><input type="number" min="0" max="100" step="0.1" id="mp-set-acquiring" value="5" oninput="Marketplaces.recalcSet()"></div>
                     <div class="form-group"><label>Целевая маржа (%)</label><input type="number" min="0" max="100" step="1" id="mp-set-margin" value="40" oninput="Marketplaces.recalcSet()"></div>
                 </div>
 
@@ -2204,6 +2203,10 @@
                 <div class="section-title" style="margin-top:8px;">&#128230; Упаковка</div>
                 <div id="mp-pkg-items"></div>
                 <button class="btn btn-sm btn-outline" onclick="Marketplaces.addPkgItem()" style="margin-top:4px;">+ Упаковка</button>
+                <label style="display:flex;align-items:center;gap:8px;margin-top:10px;font-size:12px;">
+                    <input type="checkbox" id="mp-set-default-packaging-enabled" oninput="Marketplaces.recalcSet()">
+                    <span>Добавить дефолтную упаковку для магазина: закуп 80 ₽/шт + сборка 1 мин/шт</span>
+                </label>
 
                 <!-- Color variants -->
                 <div class="section-title" style="margin-top:12px;">&#127912; Цветовые варианты</div>
@@ -2224,18 +2227,18 @@
                         <div style="display:flex;gap:14px;flex-wrap:wrap;">
                             <div style="min-width:250px;padding:10px;border:1px solid var(--border);border-radius:10px;background:#fff;">
                                 <div style="font-size:12px;color:var(--green);font-weight:700;margin-bottom:4px;">Маркетплейс</div>
-                                <div style="font-size:11px;color:var(--text-muted);">Рекомендовано</div>
+                                <div style="font-size:11px;color:var(--text-muted);">Рекомендовано по чистой марже 40%</div>
                                 <div style="font-size:24px;font-weight:800;color:var(--green);" id="mp-calc-price">0 &#8381;</div>
                                 <div style="margin-top:6px;font-size:11px;color:var(--text-muted);">Фактическая цена продажи</div>
-                                <input type="number" id="mp-set-price-manual" min="0" step="1" oninput="Marketplaces.recalcSet()" style="width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:6px;">
+                                <input type="number" id="mp-set-price-manual" min="0" step="10" oninput="Marketplaces.recalcSet()" style="width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:6px;">
                                 <div id="mp-calc-manual-margin" style="margin-top:6px;font-size:11px;"></div>
                             </div>
                             <div style="min-width:250px;padding:10px;border:1px solid var(--border);border-radius:10px;background:#fff;">
                                 <div style="font-size:12px;color:var(--accent);font-weight:700;margin-bottom:4px;">Интернет-магазин</div>
-                                <div style="font-size:11px;color:var(--text-muted);">Рекомендовано (x-множитель)</div>
+                                <div style="font-size:11px;color:var(--text-muted);">Рекомендовано по чистой марже 40%</div>
                                 <div style="font-size:24px;font-weight:800;color:var(--accent);" id="mp-calc-shop-price">0 &#8381;</div>
                                 <div style="margin-top:6px;font-size:11px;color:var(--text-muted);">Фактическая цена продажи</div>
-                                <input type="number" id="mp-set-shop-price-manual" min="0" step="1" oninput="Marketplaces.recalcSet()" style="width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:6px;">
+                                <input type="number" id="mp-set-shop-price-manual" min="0" step="10" oninput="Marketplaces.recalcSet()" style="width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:6px;">
                                 <div id="mp-calc-shop-margin" style="margin-top:6px;font-size:11px;"></div>
                             </div>
                         </div>
@@ -3412,7 +3415,7 @@
 <script src="js/supabase.js?v=164"></script>
 <script src="js/task-events.js?v=1"></script>
 <script src="js/calculator.js?v=78"></script>
-<script src="js/app.js?v=270"></script>
+<script src="js/app.js?v=271"></script>
 <script src="js/wiki.js?v=4"></script>
 <script src="js/order-detail.js?v=64"></script>
 <script src="js/orders.js?v=65"></script>
