@@ -898,12 +898,44 @@ async function main() {
     assert.equal(Number(legacyMigration.allSets[0].osn), 12);
     assert.equal(Number(legacyMigration.allSets[0].acquiring), 5);
     assert.equal(Boolean(legacyMigration.allSets[0].default_packaging_enabled), true);
-    assert.equal(Number(legacyMigration.allSets[0].marketplace_pricing_version), 2);
+    assert.equal(Number(legacyMigration.allSets[0].marketplace_pricing_version), 3);
     assert.ok(Number(legacyMigration.allSets[0].mp_actual_price) > 0);
     assert.ok(Number(legacyMigration.allSets[0].shop_actual_price) > 0);
     assert.equal(Number(legacyMigration.allSets[0].mp_actual_price), Number(legacyMigration.allSets[0].mp_suggested_price));
     assert.equal(Number(legacyMigration.allSets[0].shop_actual_price), Number(legacyMigration.allSets[0].shop_suggested_price));
     assert.equal(vm.runInContext(`__defaultPackagingChecked`, context), true);
+
+    vm.runInContext(`
+        __customPkgWithDefault = Marketplaces._calcSetBreakdown({
+            plastic_items: [],
+            hw_items: [],
+            pkg_items: [{
+                source: 'custom',
+                name: 'Своя упаковка',
+                qty: 1,
+                cost_per_unit: 100,
+                assembly_speed: 60,
+            }],
+            default_packaging_enabled: true,
+        });
+        __customPkgWithoutDefault = Marketplaces._calcSetBreakdown({
+            plastic_items: [],
+            hw_items: [],
+            pkg_items: [{
+                source: 'custom',
+                name: 'Своя упаковка',
+                qty: 1,
+                cost_per_unit: 100,
+                assembly_speed: 60,
+            }],
+            default_packaging_enabled: false,
+        });
+    `, context);
+    const customPkgWithDefault = JSON.parse(vm.runInContext(`JSON.stringify(__customPkgWithDefault)`, context));
+    const customPkgWithoutDefault = JSON.parse(vm.runInContext(`JSON.stringify(__customPkgWithoutDefault)`, context));
+    assert.equal(customPkgWithDefault.pkgMaterialCost, 100);
+    assert.equal(customPkgWithDefault.pkgMaterialCost, customPkgWithoutDefault.pkgMaterialCost);
+    assert.equal(customPkgWithDefault.totalCost, customPkgWithoutDefault.totalCost);
 
     console.log('marketplaces smoke checks passed');
 }

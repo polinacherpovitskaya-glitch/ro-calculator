@@ -22,7 +22,7 @@ const Marketplaces = {
     _colorVariants: [],
     DEFAULT_PACKAGING_COST: 80,
     DEFAULT_PACKAGING_SPEED_PER_HOUR: 60,
-    B2C_PRICING_VERSION: 2,
+    B2C_PRICING_VERSION: 3,
 
     async load() {
         try {
@@ -253,6 +253,20 @@ const Marketplaces = {
         };
     },
 
+    _hasCustomPackagingItems(source = null) {
+        if (!source || typeof source !== 'object') return false;
+        return Array.isArray(source.pkg_items) && source.pkg_items.some(item => {
+            const qty = this._safeNumber(item?.qty, 0);
+            return qty > 0;
+        });
+    },
+
+    _shouldApplyDefaultPackaging(source = null) {
+        const defaultPackaging = this._getDefaultPackagingConfig(source);
+        if (!defaultPackaging.enabled) return false;
+        return !this._hasCustomPackagingItems(source);
+    },
+
     // ==========================================
     // TABLE VIEW — photo, name, cost, MP price
     // ==========================================
@@ -280,7 +294,7 @@ const Marketplaces = {
             (s.plastic_items || []).forEach(i => parts.push(i.name || 'Пластик'));
             (s.hw_items || []).forEach(i => parts.push(i.name || 'Фурнитура'));
             (s.pkg_items || []).forEach(i => parts.push(i.name || 'Упаковка'));
-            if (this._isDefaultPackagingEnabled(s)) parts.push('Дефолтная упаковка');
+            if (this._shouldApplyDefaultPackaging(s)) parts.push('Дефолтная упаковка');
 
             const photo = s.photo_url
                 ? `<img src="${this._esc(s.photo_url)}" style="width:80px;height:80px;object-fit:cover;border-radius:10px;border:1px solid var(--border);" onerror="this.style.display='none'">`
@@ -1754,7 +1768,7 @@ const Marketplaces = {
             });
 
             const defaultPackaging = this._getDefaultPackagingConfig(s);
-            if (defaultPackaging.enabled) {
+            if (this._shouldApplyDefaultPackaging(s)) {
                 const qty = setQty;
                 const pkgItem = {
                     name: defaultPackaging.name,
@@ -2123,7 +2137,7 @@ const Marketplaces = {
         });
 
         const defaultPackaging = this._getDefaultPackagingConfig(s);
-        if (defaultPackaging.enabled) {
+        if (this._shouldApplyDefaultPackaging(s)) {
             const assemblyFot = round2((params.fotPerHour || 400) / defaultPackaging.assemblySpeed * (params.wasteFactor || 1.1));
             const assemblyIndirect = params.indirectCostMode === 'all'
                 ? round2((params.indirectPerHour || 0) / defaultPackaging.assemblySpeed * (params.wasteFactor || 1.1))
