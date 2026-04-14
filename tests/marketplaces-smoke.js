@@ -450,7 +450,9 @@ async function main() {
         }];
         Marketplaces.editSet(4);
     `, context);
-    assert.equal(String(context.document.getElementById('mp-set-charity').value), '2.25');
+    assert.equal(String(context.document.getElementById('mp-set-charity').value), '1');
+    assert.equal(String(context.document.getElementById('mp-set-osn').value), '12');
+    assert.equal(String(context.document.getElementById('mp-set-acquiring').value), '5');
 
     vm.runInContext(`
         let savedOrderPayload = null;
@@ -868,6 +870,40 @@ async function main() {
     assert.ok(b2cCalcState.shopValue >= 420);
     assert.ok(Number(b2cCalcState.lastCalc.mpMargin) >= 39.5);
     assert.ok(Number(b2cCalcState.lastCalc.shopMargin) >= 39.5);
+
+    vm.runInContext(`
+        __legacyMigration = Marketplaces._migrateLegacySets([{
+            id: 999,
+            name: 'Старый набор',
+            commission: 46,
+            vat: 5,
+            osn: 6,
+            charity: 1,
+            commercial: 6.5,
+            acquiring: 4,
+            target_margin: 40,
+            plastic_items: [{ blank_id: 300, qty: 1, name: 'Бег', colors: [] }],
+            hw_items: [],
+            pkg_items: [],
+            mp_actual_price: 0,
+            shop_actual_price: 0,
+            mp_suggested_price: 0,
+            shop_suggested_price: 0,
+        }]);
+        Marketplaces.showSetForm();
+        __defaultPackagingChecked = document.getElementById('mp-set-default-packaging-enabled').checked;
+    `, context);
+    const legacyMigration = JSON.parse(vm.runInContext(`JSON.stringify(__legacyMigration)`, context));
+    assert.equal(legacyMigration.changedSets.length, 1);
+    assert.equal(Number(legacyMigration.allSets[0].osn), 12);
+    assert.equal(Number(legacyMigration.allSets[0].acquiring), 5);
+    assert.equal(Boolean(legacyMigration.allSets[0].default_packaging_enabled), true);
+    assert.equal(Number(legacyMigration.allSets[0].marketplace_pricing_version), 2);
+    assert.ok(Number(legacyMigration.allSets[0].mp_actual_price) > 0);
+    assert.ok(Number(legacyMigration.allSets[0].shop_actual_price) > 0);
+    assert.equal(Number(legacyMigration.allSets[0].mp_actual_price), Number(legacyMigration.allSets[0].mp_suggested_price));
+    assert.equal(Number(legacyMigration.allSets[0].shop_actual_price), Number(legacyMigration.allSets[0].shop_suggested_price));
+    assert.equal(vm.runInContext(`__defaultPackagingChecked`, context), true);
 
     console.log('marketplaces smoke checks passed');
 }

@@ -22,6 +22,7 @@ const Marketplaces = {
     _colorVariants: [],
     DEFAULT_PACKAGING_COST: 80,
     DEFAULT_PACKAGING_SPEED_PER_HOUR: 60,
+    B2C_PRICING_VERSION: 2,
 
     async load() {
         try {
@@ -43,6 +44,11 @@ const Marketplaces = {
             this._allWarehousePkg = (warehouseItems || []).filter(i => i.category === 'packaging');
 
             this._enrichPlasticBlanks();
+            const migratedSets = this._migrateLegacySets(this.allSets);
+            this.allSets = migratedSets.allSets;
+            if (migratedSets.changedSets.length) {
+                await Promise.allSettled(migratedSets.changedSets.map(set => saveMarketplaceSet(set)));
+            }
             this.renderStats();
             this.renderSets();
         } catch(e) {
@@ -144,12 +150,93 @@ const Marketplaces = {
         return this._roundSuggestedPrice(totalCost / keepFactor);
     },
 
+    _getCurrentPricingDefaults() {
+        return {
+            commission: 46,
+            vat: 5,
+            osn: 12,
+            charity: 1,
+            commercial: 6.5,
+            acquiring: 5,
+            target_margin: 40,
+            default_packaging_enabled: true,
+            marketplace_pricing_version: this.B2C_PRICING_VERSION,
+        };
+    },
+
+    _ratesEqual(left, right) {
+        return Math.abs(this._safeNumber(left, 0) - this._safeNumber(right, 0)) < 0.0001;
+    },
+
+    _needsLegacySetMigration(set) {
+        if (!set || typeof set !== 'object') return false;
+        const defaults = this._getCurrentPricingDefaults();
+        const version = this._safeNumber(set.marketplace_pricing_version, 0);
+        const missingPrices = !(
+            this._safeNumber(set.mp_actual_price, 0) > 0
+            && this._safeNumber(set.shop_actual_price, 0) > 0
+            && this._safeNumber(set.mp_suggested_price, 0) > 0
+            && this._safeNumber(set.shop_suggested_price, 0) > 0
+        );
+        const missingCost = !(this._safeNumber(set.total_cost, 0) > 0);
+        const staleRates = !this._ratesEqual(set.commission, defaults.commission)
+            || !this._ratesEqual(set.vat, defaults.vat)
+            || !this._ratesEqual(set.osn, defaults.osn)
+            || !this._ratesEqual(set.charity, defaults.charity)
+            || !this._ratesEqual(set.commercial, defaults.commercial)
+            || !this._ratesEqual(set.acquiring, defaults.acquiring)
+            || !this._ratesEqual(set.target_margin, defaults.target_margin);
+        const packagingMismatch = this._isDefaultPackagingEnabled(set) !== true;
+        return version < this.B2C_PRICING_VERSION || missingPrices || missingCost || staleRates || packagingMismatch;
+    },
+
+    _buildAutoPricedSet(set) {
+        const defaults = this._getCurrentPricingDefaults();
+        const normalizedSet = this._normalizeMarketplaceSet({
+            ...set,
+            ...defaults,
+            default_packaging_enabled: true,
+        });
+        const breakdown = this._calcSetBreakdown(normalizedSet);
+        const totalCost = breakdown.totalCost;
+        const suggestedMpPrice = this._getSuggestedChannelPrice(totalCost, normalizedSet, 'marketplace');
+        const suggestedShopPrice = this._getSuggestedChannelPrice(totalCost, normalizedSet, 'shop');
+        const mpSummary = this._calcChannelResult(totalCost, suggestedMpPrice, normalizedSet, 'marketplace');
+        const shopSummary = this._calcChannelResult(totalCost, suggestedShopPrice, normalizedSet, 'shop');
+
+        return {
+            ...normalizedSet,
+            ...defaults,
+            default_packaging_enabled: true,
+            total_cost: totalCost,
+            selling_price: suggestedMpPrice,
+            mp_suggested_price: suggestedMpPrice,
+            mp_actual_price: suggestedMpPrice,
+            shop_suggested_price: suggestedShopPrice,
+            shop_actual_price: suggestedShopPrice,
+            mp_margin_actual: mpSummary.cleanMarginPct,
+            shop_margin_actual: shopSummary.cleanMarginPct,
+            actual_margin: mpSummary.cleanMarginPct,
+        };
+    },
+
+    _migrateLegacySets(sets) {
+        const changedSets = [];
+        const allSets = (sets || []).map(set => {
+            if (!this._needsLegacySetMigration(set)) return set;
+            const migrated = this._buildAutoPricedSet(set);
+            changedSets.push(migrated);
+            return migrated;
+        });
+        return { allSets, changedSets };
+    },
+
     _isDefaultPackagingEnabled(source = null) {
         if (!source || typeof source !== 'object') return false;
         if (Object.prototype.hasOwnProperty.call(source, 'default_packaging_enabled')) {
             return !!source.default_packaging_enabled;
         }
-        return false;
+        return true;
     },
 
     _getDefaultPackagingConfig(source = null) {
@@ -244,7 +331,7 @@ const Marketplaces = {
                     <div style="font-size:10px;color:${shopMargin >= 40 ? 'var(--green)' : shopMargin >= 20 ? 'var(--yellow)' : 'var(--red)'};margin-top:2px;">чистая маржа ${Math.round(shopMargin)}%</div>
                 </div>
                 <div style="flex-shrink:0;display:flex;flex-direction:column;gap:4px;">
-                    <button class="btn btn-sm btn-outline" style="padding:4px 8px;font-size:11px;" onclick="Marketplaces.editSet(${s.id})">&#9998;</button>
+                    <button type="button" class="btn btn-sm btn-outline" style="padding:4px 8px;font-size:11px;" onclick="Marketplaces.openSetEditor(${s.id})">&#9998;</button>
                     <button class="btn-remove" style="font-size:10px;width:26px;height:26px;" onclick="Marketplaces.confirmDelete(${s.id}, '${this._esc(s.name)}')">&#10005;</button>
                 </div>
             </div>`;
@@ -270,7 +357,7 @@ const Marketplaces = {
         document.getElementById('mp-set-acquiring').value = 5;
         document.getElementById('mp-set-margin').value = 40;
         const defaultPackagingEl = document.getElementById('mp-set-default-packaging-enabled');
-        if (defaultPackagingEl) defaultPackagingEl.checked = false;
+        if (defaultPackagingEl) defaultPackagingEl.checked = true;
         document.getElementById('mp-set-price-manual').value = '';
         document.getElementById('mp-set-shop-price-manual').value = '';
         this._plasticItems = [];
@@ -287,10 +374,21 @@ const Marketplaces = {
         document.getElementById('mp-set-form').scrollIntoView({ behavior: 'smooth' });
     },
 
+    openSetEditor(id) {
+        try {
+            this.editSet(id);
+        } catch (error) {
+            console.error('Marketplaces.openSetEditor error:', error);
+            App.toast('Не удалось открыть набор');
+        }
+    },
+
     editSet(id) {
         const s = this.allSets.find(x => x.id === id);
         if (!s) return;
-        const normalizedSet = this._normalizeMarketplaceSet(s);
+        const normalizedSet = this._needsLegacySetMigration(s)
+            ? this._buildAutoPricedSet(s)
+            : this._normalizeMarketplaceSet(s);
         this.editingSetId = id;
         this._pendingPhoto = normalizedSet.photo_url || '';
         document.getElementById('mp-form-title').textContent = 'Редактировать: ' + (normalizedSet.name || '');
@@ -304,7 +402,7 @@ const Marketplaces = {
         document.getElementById('mp-set-margin').value = normalizedSet.target_margin || 40;
         const defaultPackagingEl = document.getElementById('mp-set-default-packaging-enabled');
         if (defaultPackagingEl) defaultPackagingEl.checked = this._isDefaultPackagingEnabled(normalizedSet);
-        document.getElementById('mp-set-price-manual').value = normalizedSet.mp_actual_price || normalizedSet.selling_price || '';
+        document.getElementById('mp-set-price-manual').value = normalizedSet.mp_actual_price || normalizedSet.selling_price || normalizedSet.mp_suggested_price || '';
         document.getElementById('mp-set-shop-price-manual').value = normalizedSet.shop_actual_price || normalizedSet.shop_suggested_price || '';
         this._plasticItems = (normalizedSet.plastic_items || []).map(i => ({ ...i, colors: Array.isArray(i.colors) ? i.colors : [] }));
         this._hwItems = (normalizedSet.hw_items || []).map(i => ({ ...i }));
@@ -1179,6 +1277,7 @@ const Marketplaces = {
             acquiring: parseFloat(document.getElementById('mp-set-acquiring').value) || 5,
             target_margin: parseFloat(document.getElementById('mp-set-margin').value) || 40,
             default_packaging_enabled: defaultPackaging.enabled,
+            marketplace_pricing_version: this.B2C_PRICING_VERSION,
             plastic_items: this._plasticItems.filter(i => i.blank_id),
             hw_items: normalizedHwItems,
             pkg_items: normalizedPkgItems,
