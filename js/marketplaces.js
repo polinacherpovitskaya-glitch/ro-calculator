@@ -779,6 +779,43 @@ const Marketplaces = {
         return [normalizedSku, ...(parts || []).filter(Boolean)].join(' · ');
     },
 
+    _buildMarketplacePlasticPickerData() {
+        const grouped = {};
+        (this._plasticBlanks || []).forEach(blank => {
+            const rawCollection = String(blank.collection || '').trim() || 'Без коллекции';
+            const groupKey = `molds:${rawCollection.toLowerCase().replace(/[^a-z0-9а-я]+/gi, '_')}`;
+            if (!grouped[groupKey]) {
+                grouped[groupKey] = {
+                    label: rawCollection,
+                    icon: '🧩',
+                    color: 'rgba(99, 102, 241, 0.12)',
+                    textColor: '#4338ca',
+                    items: [],
+                };
+            }
+
+            const pph = this._safeNumber(blank.pph_actual || blank.pph_min || blank.pph_max, 0);
+            const metaParts = [
+                blank.weight_grams ? `${blank.weight_grams} г` : '',
+                pph > 0 ? `${pph} шт/ч` : '',
+                rawCollection,
+            ];
+
+            grouped[groupKey].items.push({
+                id: blank.id,
+                category: 'molds',
+                name: blank.name || '',
+                sku: blank.sku || '',
+                size: blank.weight_grams ? `${blank.weight_grams} г` : '',
+                color: '',
+                photo_thumbnail: blank.photo_url || '',
+                photo_url: blank.photo_url || '',
+                meta_line: this._buildPickerMetaLine(blank.sku || '', metaParts),
+            });
+        });
+        return grouped;
+    },
+
     _getPartUnitLabel(item) {
         if (typeof Warehouse !== 'undefined' && Warehouse && typeof Warehouse.getPickerUnitLabel === 'function') {
             return Warehouse.getPickerUnitLabel(item);
@@ -1010,24 +1047,13 @@ const Marketplaces = {
         this._hwItems = (this._hwItems || []).map(item => this._normalizeHwItem(item));
         this._pkgItems = (this._pkgItems || []).map(item => this._normalizePkgItem(item));
 
-        // Plastic — searchable dropdown from molds
-        const plasticList = this._plasticBlanks.map(b => ({
-            id: b.id,
-            name: b.name,
-            detail: b.collection ? b.collection + ' · ' + (b.weight_grams || 0) + 'г' : (b.weight_grams || 0) + 'г',
-            photo: b.photo_url || '',
-            searchText: this._buildSearchText([
-                b.name,
-                b.collection,
-                b.weight_grams ? `${b.weight_grams}г` : '',
-                ...this._getPlasticSearchAliases(b),
-            ]),
-        }));
+        // Plastic — use the same robust picker as warehouse/catalog items
+        const plasticPickerData = this._buildMarketplacePlasticPickerData();
 
         document.getElementById('mp-plastic-items').innerHTML = this._plasticItems.map((item, i) => `
             <div class="form-row" style="margin-bottom:4px;align-items:end;gap:6px;">
                 <div class="form-group" style="flex:3;margin:0">
-                    ${this._renderSearchableSelect('mp-pl-'+i, plasticList, item.blank_id, 'Поиск бланка...', 'Marketplaces._selectPlastic('+i+',')}
+                    ${Warehouse.buildImagePicker(`mppl-picker-${i}`, plasticPickerData, item.blank_id, 'Marketplaces._selectPlastic', null, { searchPlaceholder: 'Поиск бланка по названию...' })}
                 </div>
                 <div class="form-group" style="flex:0 0 55px;margin:0">
                     <input type="number" min="1" value="${item.qty || 1}" oninput="Marketplaces._onQtyChange('plastic',${i},this.value)" style="text-align:center;" title="Кол-во">

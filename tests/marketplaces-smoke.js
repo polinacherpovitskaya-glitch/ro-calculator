@@ -227,7 +227,10 @@ async function main() {
     const hwHtml = String(context.document.getElementById('mp-hw-items').innerHTML || '');
     const pkgHtml = String(context.document.getElementById('mp-pkg-items').innerHTML || '');
 
-    assert.match(plasticHtml, /card holder/i);
+    assert.match(plasticHtml, /wh-img-picker/);
+    assert.match(plasticHtml, /Новый кардхолдер/);
+    assert.match(plasticHtml, /Поиск бланка по названию/);
+    assert.match(plasticHtml, /Аксессуары/);
     assert.match(hwHtml, /wh-img-picker/);
     assert.match(hwHtml, /CRB-501/);
     assert.match(hwHtml, /Каталог/);
