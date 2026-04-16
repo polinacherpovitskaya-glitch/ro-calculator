@@ -16,7 +16,7 @@ const {
     pickAnyLinkedEmployee,
     buildInactiveBindingMessage,
 } = require('./timebot-employee-access');
-const { getStateTtlMs } = require('./timebot-state-utils');
+const { getStateTtlMs, requiresCommentToSave } = require('./timebot-state-utils');
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -544,6 +544,17 @@ bot.on('callback_query', async (query) => {
         }
 
         if (data === 'finish_report') {
+            if (state.step !== 'choose_more_or_done') return;
+            if (requiresCommentToSave(state.employee)) {
+                await askDescription(chatId, state);
+            } else {
+                await saveAllEntries(chatId, telegramId, state, '');
+            }
+            return;
+        }
+
+        if (data === 'finish_report_with_comment') {
+            if (state.step !== 'choose_more_or_done') return;
             await askDescription(chatId, state);
             return;
         }
@@ -777,6 +788,14 @@ function handleHoursEntry(chatId, telegramId, state, hours) {
 
     const sessionHours = round2(state.entries.reduce((s, e) => s + e.hours, 0));
     const dayTotal = round2(state.existing_hours + sessionHours);
+    const commentRequired = requiresCommentToSave(state.employee);
+    const actionButtons = [
+        [{ text: '➕ Добавить ещё', callback_data: 'more_entries' }],
+        [{ text: commentRequired ? '✔️ К комментарию' : '✔️ Сохранить', callback_data: 'finish_report' }],
+    ];
+    if (!commentRequired) {
+        actionButtons.push([{ text: '💬 Комментарий перед сохранением', callback_data: 'finish_report_with_comment' }]);
+    }
 
     state.step = 'choose_more_or_done';
     send(chatId,
@@ -784,10 +803,7 @@ function handleHoursEntry(chatId, telegramId, state, hours) {
         `За сегодня: ${dayTotal}ч`,
         {
             reply_markup: {
-                inline_keyboard: [
-                    [{ text: '➕ Добавить ещё', callback_data: 'more_entries' }],
-                    [{ text: '✔️ Завершить', callback_data: 'finish_report' }],
-                ],
+                inline_keyboard: actionButtons,
             },
         }
     );
