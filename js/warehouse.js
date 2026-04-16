@@ -5765,9 +5765,14 @@ const Warehouse = {
                     </div>
                     ${simpleSelectHtml}
                 </div>`;
+            const weakIdentityHintHtml = item.source === 'new' && this._isWeakShipmentIdentity(item)
+                ? `<div style="margin-top:6px;padding:8px 10px;border:1px solid rgba(239,68,68,0.22);border-radius:8px;background:rgba(239,68,68,0.06);color:#b42318;font-size:11px;line-height:1.4;">
+                    ${this.esc(this._shipmentIdentityHint(item))}
+                </div>`
+                : '';
 
             return `<tr>
-                <td>${itemSourceCell}</td>
+                <td>${itemSourceCell}${weakIdentityHintHtml}</td>
                 <td><input type="number" value="${item.qty_received || ''}" min="0" onchange="Warehouse.onShipmentItemField(${idx}, 'qty_received', this.value)" style="width:70px;text-align:right;padding:4px;border:1px solid var(--border);border-radius:4px;font-size:12px;"></td>
                 <td><input type="number" value="${item.weight_grams || ''}" min="0" step="0.1" onchange="Warehouse.onShipmentItemField(${idx}, 'weight_grams', this.value)" style="width:80px;text-align:right;padding:4px;border:1px solid var(--border);border-radius:4px;font-size:12px;"></td>
                 <td><input type="number" value="${item.purchase_price_cny || ''}" min="0" step="0.01" onchange="Warehouse.onShipmentItemField(${idx}, 'purchase_price_cny', this.value)" title="Цена за всю позицию/тираж в CNY" style="width:80px;text-align:right;padding:4px;border:1px solid var(--border);border-radius:4px;font-size:12px;"></td>
@@ -6034,6 +6039,17 @@ const Warehouse = {
         });
         if (validItemsRaw.length === 0) {
             App.toast('Добавьте хотя бы одну позицию с кол-вом > 0');
+            return;
+        }
+        const unsafeItems = this._collectUnsafeShipmentItems(validItemsRaw);
+        if (unsafeItems.length > 0) {
+            const details = unsafeItems.map(entry => {
+                const prefix = entry.index === null ? 'Позиция' : `Строка ${entry.index + 1}`;
+                return `${prefix}: ${this._shipmentIdentityHint(entry.item)}`;
+            }).join('\n');
+            const message = `Нельзя автоматически принять слишком общие новые позиции.\n\n${details}\n\nВыберите существующую позицию со склада или сначала заполните SKU / точную категорию и цвет/размер.`;
+            if (typeof alert === 'function') alert(message);
+            App.toast('Проверьте новые позиции приёмки: не хватает данных для безопасного автосоздания');
             return;
         }
 
@@ -6874,6 +6890,36 @@ const Warehouse = {
         ].join('|');
     },
 
+    _isWeakShipmentIdentity(item) {
+        if (!item || this._isMoldCategory(item.category)) return false;
+        const sku = this._normStr(item.sku);
+        if (sku) return false;
+        const category = this._normStr(item.category || 'other');
+        const color = this._normStr(item.color);
+        const size = this._normStr(item.size);
+        return (!category || category === 'other') || (!color && !size);
+    },
+
+    _shipmentIdentityHint(item) {
+        const name = String(item && item.name || '').trim() || 'Без названия';
+        return `«${name}» — для новой позиции заполните SKU или хотя бы укажите точную категорию и цвет/размер.`;
+    },
+
+    _collectUnsafeShipmentItems(items) {
+        return (items || []).map(item => {
+            const index = this.shipmentItems.indexOf(item);
+            return {
+                item,
+                index: index >= 0 ? index : null,
+            };
+        }).filter(entry => {
+            if (!entry.item) return false;
+            if (entry.item.warehouse_item_id) return false;
+            if (entry.item.source !== 'new') return false;
+            return this._isWeakShipmentIdentity(entry.item);
+        });
+    },
+
     _findExistingItemForShipment(shItem, warehouseItems) {
         if (this._isMoldCategory(shItem.category)) {
             const moldType = this._normalizeMoldType(shItem.mold_type);
@@ -6891,6 +6937,7 @@ const Warehouse = {
             );
             if (byMoldKey) return byMoldKey;
         }
+        if (this._isWeakShipmentIdentity(shItem)) return null;
         const sku = this._normStr(shItem.sku);
         const category = this._normStr(shItem.category);
         if (sku) {

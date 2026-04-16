@@ -3515,6 +3515,73 @@ async function smokeChinaReceiptStatusLinkage(context) {
     }
 }
 
+async function smokeChinaReceiptBlocksWeakAutoCreatedItems(context) {
+    const fieldValues = {
+        'wh-sh-name': 'Weak Receipt Shipment',
+        'wh-sh-date': '2026-03-16',
+        'wh-sh-supplier': 'China Supplier',
+        'wh-sh-cny-rate': '12.5',
+        'wh-sh-fee-cashout': '5',
+        'wh-sh-fee-crypto': '2',
+        'wh-sh-fee-1688': '1',
+        'wh-sh-delivery-china': '2500',
+        'wh-sh-delivery-moscow': '500',
+        'wh-sh-total-delivery': '3000',
+        'wh-sh-pricing-mode': 'weighted_avg',
+        'wh-sh-notes': 'Weak note',
+    };
+    Object.entries(fieldValues).forEach(([id, value]) => {
+        context.document.getElementById(id).value = value;
+    });
+
+    context.__savedShipment = null;
+    context.__savedWarehouseItem = null;
+    context.__alerts = [];
+    context.__toasts = [];
+    context.alert = (message) => { context.__alerts.push(String(message || '')); };
+    context.window.alert = context.alert;
+    context.saveShipment = async (shipment) => {
+        context.__savedShipment = clone(shipment);
+        return shipment.id || 89;
+    };
+    context.loadWarehouseItems = async () => clone(context.__warehouseItems || []);
+    context.saveWarehouseItem = async (item) => {
+        context.__savedWarehouseItem = clone(item);
+        return item.id || 1900;
+    };
+
+    vm.runInContext(`
+        App.toast = (message) => {
+            globalThis.__toasts.push(String(message || ''));
+        };
+        Warehouse.editingShipmentId = null;
+        Warehouse.allShipments = [];
+        Warehouse.shipmentItems = [{
+            source: 'new',
+            category: 'other',
+            name: 'Шнур с силиконом',
+            sku: '',
+            color: '',
+            size: '',
+            unit: 'шт',
+            qty_received: 2000,
+            weight_grams: 120,
+            purchase_price_cny: 30,
+            purchase_price_rub: 0,
+            delivery_allocated: 0,
+            total_cost_per_unit: 22.49,
+        }];
+    `, context);
+
+    await vm.runInContext('Warehouse.confirmShipment()', context);
+
+    assert.equal(context.__savedShipment, null, 'weak shipment rows should block receipt confirmation');
+    assert.equal(context.__savedWarehouseItem, null, 'weak shipment rows should not auto-create warehouse items');
+    assert.match(String(context.__alerts.join('\n')), /нельзя автоматически принять/i);
+    assert.match(String(context.__alerts.join('\n')), /Шнур с силиконом/);
+    assert.match(String(context.__toasts.join('\n')), /не хватает данных/i);
+}
+
 async function smokeChinaReceiptCreatesMoldAndPromotesOrder(context) {
     const fieldValues = {
         'wh-sh-name': 'Mold Receipt Shipment',
@@ -7107,6 +7174,7 @@ async function main() {
     await smokeReadyGoodsSalesAndManualAdd(context);
     await smokeChinaShipmentMetadata(context);
     await smokeChinaReceiptStatusLinkage(context);
+    await smokeChinaReceiptBlocksWeakAutoCreatedItems(context);
     await smokeChinaReceiptCreatesMoldAndPromotesOrder(context);
     await smokeBlankMoldAutoFieldsWithoutVisibleTemplate(context);
     await smokeOrderStatusWarehouseSync(context);
