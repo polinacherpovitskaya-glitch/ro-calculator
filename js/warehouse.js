@@ -3458,6 +3458,9 @@ const Warehouse = {
     },
 
     async _waitForProjectHardwareMutations() {
+        // Allow nested refreshes (for example, Warehouse.load() at the end of a mutation)
+        // to continue immediately instead of waiting on the currently running mutation.
+        if (this._projectHardwareMutationDepth > 0) return;
         const pending = this._projectHardwareMutationQueue;
         if (!pending || typeof pending.then !== 'function') return;
         await pending;

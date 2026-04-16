@@ -4766,6 +4766,7 @@ async function smokeWarehouseLoadRendersBeforeBackgroundSync() {
     `, warehouseContext);
 
     await vm.runInContext(`Warehouse.load()`, warehouseContext);
+    await vm.runInContext(`Warehouse.renderProjectHardwareView(Warehouse._viewToken)`, warehouseContext);
 
     const immediateEvents = clone(vm.runInContext(`globalThis.__events.slice()`, warehouseContext));
     assert.deepEqual(immediateEvents, ['recalc', 'populate', 'stats', 'table-render']);
@@ -5828,6 +5829,124 @@ async function smokeProjectHardwareCollectedStateSurvivesStateLoss(context) {
         return Warehouse._getProjectHardwareDisplayActualQty(655, 903, 5, history, globalThis.__warehouseHistory);
     })()`, context);
     assert.equal(displayActual, 3);
+}
+
+async function smokeProjectHardwareReadyToggleReloadsAndClosesProject() {
+    const warehouseContext = createContext();
+    ['js/calculator.js', 'js/app.js', 'js/orders.js', 'js/warehouse.js', 'js/order-detail.js'].forEach(file => runScript(warehouseContext, file));
+    stubRuntime(warehouseContext);
+
+    const order = {
+        id: 656,
+        order_name: 'Hardware Close After Ready',
+        manager_name: 'Smoke',
+        status: 'production_hardware',
+        created_at: '2026-03-18T14:00:00.000Z',
+    };
+    const items = [{
+        item_type: 'hardware',
+        product_name: 'Closable Hardware',
+        quantity: 5,
+        hardware_source: 'warehouse',
+        hardware_warehouse_item_id: 904,
+    }];
+
+    warehouseContext.__orders = [clone(order)];
+    warehouseContext.__orderDetails = {
+        656: {
+            order: clone(order),
+            items: clone(items),
+        },
+    };
+    warehouseContext.__projectHardwareState = { checks: {}, actual_qtys: {} };
+    warehouseContext.__reservations = [{
+        id: 1,
+        item_id: 904,
+        order_id: 656,
+        order_name: 'Hardware Close After Ready',
+        qty: 5,
+        status: 'active',
+        source: 'project_hardware',
+        created_at: '2026-03-18T14:00:00.000Z',
+        created_by: 'Smoke',
+    }];
+    warehouseContext.__warehouseItems = [{
+        id: 904,
+        name: 'Closable Hardware',
+        sku: 'CLS-904',
+        category: 'hardware',
+        qty: 5,
+        unit: 'шт',
+        price_per_unit: 10,
+        created_at: '2026-03-18T13:50:00.000Z',
+        updated_at: '2026-03-18T13:50:00.000Z',
+    }];
+    warehouseContext.__warehouseHistory = [];
+    warehouseContext.__toasts = [];
+    warehouseContext.loadOrders = async () => clone(warehouseContext.__orders);
+    warehouseContext.loadOrder = async (orderId) => clone(warehouseContext.__orderDetails[Number(orderId)] || null);
+    warehouseContext.loadProjectHardwareState = async () => clone(warehouseContext.__projectHardwareState);
+    warehouseContext.saveProjectHardwareState = async (state) => {
+        warehouseContext.__projectHardwareState = clone(state);
+    };
+    warehouseContext.loadWarehouseReservations = async () => clone(warehouseContext.__reservations);
+    warehouseContext.saveWarehouseReservations = async (reservations) => {
+        warehouseContext.__reservations = clone(reservations);
+    };
+    warehouseContext.loadWarehouseItems = async () => clone(warehouseContext.__warehouseItems);
+    warehouseContext.saveWarehouseItem = async (item) => {
+        warehouseContext.__warehouseItems = warehouseContext.__warehouseItems.map(existing =>
+            Number(existing.id) === Number(item.id) ? clone(item) : existing
+        );
+    };
+    warehouseContext.saveWarehouseItems = async (itemsArg) => {
+        warehouseContext.__warehouseItems = clone(itemsArg);
+    };
+    warehouseContext.loadWarehouseHistory = async () => clone(warehouseContext.__warehouseHistory);
+    warehouseContext.saveWarehouseHistory = async (history) => {
+        warehouseContext.__warehouseHistory = clone(history);
+    };
+
+    vm.runInContext(`
+        globalThis.__toasts = [];
+        App.toast = (message) => { globalThis.__toasts.push(String(message || '')); };
+        localStorage.setItem('wh_photo_fix_v3', '1');
+        localStorage.setItem('wh_photo_fix_v4', '1');
+        Warehouse._ensureRequiredSeedItems = async (items) => items;
+        Warehouse._loadMoldOrders = async () => {};
+        Warehouse._refreshBlankHardwareWarehouseItemIds = async () => {};
+        Warehouse._cleanupZeroDuplicateItems = () => false;
+        Warehouse._reconcileBlankHardwareLowStockAlerts = async () => ({ changed: false, alertsCreated: 0 });
+        Warehouse.applyTabStyles = () => {};
+        document.getElementById('wh-content');
+        document.getElementById('wh-shipments-content');
+        document.getElementById('wh-filters-card');
+        Warehouse.currentView = 'project-hardware';
+        Warehouse._viewInitialized = false;
+        Warehouse._viewToken = 0;
+        Warehouse._backgroundSyncPromise = null;
+        Warehouse._backgroundSyncScheduled = false;
+    `, warehouseContext);
+
+    await vm.runInContext(`Warehouse.load()`, warehouseContext);
+
+    const result = await Promise.race([
+        vm.runInContext(`Warehouse.toggleProjectHardwareReady(656, 904, true).then(() => 'done')`, warehouseContext),
+        new Promise(resolve => setTimeout(() => resolve('timeout'), 200)),
+    ]);
+    assert.equal(result, 'done');
+
+    assert.equal(Boolean(warehouseContext.__projectHardwareState.checks['656:904']), true);
+    assert.equal(warehouseContext.__warehouseItems[0].qty, 0);
+    assert.equal(warehouseContext.__warehouseHistory.length, 1);
+    assert.equal(warehouseContext.__warehouseHistory[0].qty_change, -5);
+    assert.equal(warehouseContext.__reservations.filter(item => Number(item.order_id) === 656 && item.status === 'active').length, 0);
+
+    const completion = clone(await vm.runInContext(`Warehouse.getOrderProjectHardwareCompletion(656)`, warehouseContext));
+    assert.equal(completion.canComplete, true);
+    assert.equal(completion.totalRows, 1);
+    assert.equal(completion.readyRows, 1);
+    assert.equal(completion.pendingRows, 0);
 }
 
 async function smokeCompletedOrderConsumesBlankMoldCapacity(context) {
@@ -7266,6 +7385,7 @@ async function main() {
     await smokeOrderDetailHardwareTabShowsAndEditsProjectHardware(context);
     await smokeProjectHardwareReadySyncDoesNotAutoReturnConsumedStock(context);
     await smokeProjectHardwareCollectedStateSurvivesStateLoss(context);
+    await smokeProjectHardwareReadyToggleReloadsAndClosesProject(context);
     await smokeCompletedOrderConsumesBlankMoldCapacity(context);
     await smokeMoldUsageThresholdCreatesTasksWithoutDuplicates(context);
     await smokeBlankHardwareFilterAndLowStockAlerts(context);
