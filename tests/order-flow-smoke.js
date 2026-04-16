@@ -4787,6 +4787,69 @@ async function smokeWarehouseLoadRendersBeforeBackgroundSync() {
     ]);
 }
 
+async function smokeWarehouseLoadPreservesManualPhotos() {
+    const warehouseContext = createContext();
+    ['js/calculator.js', 'js/app.js', 'js/orders.js', 'js/warehouse.js', 'js/order-detail.js'].forEach(file => runScript(warehouseContext, file));
+    stubRuntime(warehouseContext);
+
+    warehouseContext.__warehouseItems = [
+        {
+            id: 814,
+            name: 'Photo Keep Item',
+            sku: 'PHOTO-814',
+            category: 'other',
+            qty: 12,
+            price_per_unit: 3,
+            photo_thumbnail: 'data:image/png;base64,manual-thumb',
+            photo_url: 'https://example.com/manual-photo.png',
+            created_at: '2026-04-02T10:00:00.000Z',
+            updated_at: '2026-04-02T10:00:00.000Z',
+        },
+    ];
+    warehouseContext.__savedSnapshots = [];
+    warehouseContext.loadWarehouseItems = async () => clone(warehouseContext.__warehouseItems);
+    warehouseContext.saveWarehouseItems = async (items) => {
+        warehouseContext.__savedSnapshots.push(clone(items));
+        warehouseContext.__warehouseItems = clone(items);
+    };
+    warehouseContext.loadWarehouseReservations = async () => [];
+    warehouseContext.loadProjectHardwareState = async () => ({ checks: {}, actual_qtys: {} });
+
+    vm.runInContext(`
+        localStorage.removeItem('wh_photo_fix_v3');
+        localStorage.removeItem('wh_photo_fix_v4');
+        Warehouse._ensureRequiredSeedItems = async (items) => items;
+        Warehouse._loadMoldOrders = async () => {};
+        Warehouse._refreshBlankHardwareWarehouseItemIds = async () => {};
+        Warehouse._cleanupZeroDuplicateItems = () => false;
+        Warehouse.applyTabStyles = () => {};
+        Warehouse.reconcileProjectHardwareReservations = async function () {
+            return { reservationsChanged: false, stateChanged: false, shortage: false };
+        };
+        Warehouse._reconcileBlankHardwareLowStockAlerts = async function () {
+            return { changed: false, alertsCreated: 0 };
+        };
+        Warehouse.recalcReservations = function () {};
+        Warehouse.populateCategoryFilter = function () {};
+        Warehouse.renderStats = function () {};
+        Warehouse.filterAndRender = function () {};
+        Warehouse.currentView = 'table';
+        Warehouse._viewInitialized = false;
+        Warehouse._viewToken = 0;
+        Warehouse._backgroundSyncPromise = null;
+        Warehouse._backgroundSyncScheduled = false;
+    `, warehouseContext);
+
+    await vm.runInContext(`Warehouse.load()`, warehouseContext);
+
+    const loadedItem = clone(vm.runInContext(`Warehouse.allItems[0]`, warehouseContext));
+    assert.equal(loadedItem.photo_thumbnail, 'data:image/png;base64,manual-thumb');
+    assert.equal(loadedItem.photo_url, 'https://example.com/manual-photo.png');
+    assert.equal(warehouseContext.__savedSnapshots.length, 0);
+    assert.equal(vm.runInContext(`localStorage.getItem('wh_photo_fix_v3')`, warehouseContext), '1');
+    assert.equal(vm.runInContext(`localStorage.getItem('wh_photo_fix_v4')`, warehouseContext), '1');
+}
+
 async function smokeWarehouseThumbnailGetsWhiteBackground(context) {
     vm.runInContext(`
         globalThis.__drawOps = [];
@@ -7192,6 +7255,7 @@ async function main() {
     await smokeWarehouseReserveLabelsShowSource(context);
     await smokeWarehouseProjectReserveCannotBeEditedInline(context);
     await smokeWarehouseLoadRendersBeforeBackgroundSync();
+    await smokeWarehouseLoadPreservesManualPhotos();
     await smokeWarehouseThumbnailGetsWhiteBackground(context);
     await smokeProjectHardwarePersistenceAndBuckets(context);
     await smokeProjectHardwareToggleShortageGuard(context);

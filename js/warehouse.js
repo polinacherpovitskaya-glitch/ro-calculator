@@ -273,42 +273,17 @@ const Warehouse = {
             this.allItems = await loadWarehouseItems();
         }
 
-        // ONE-TIME MIGRATION v3: clear ALL photos — the SKU->photo mapping was wrong.
-        // Photos should be added manually by users via the edit form.
+        // Legacy photo migrations used localStorage as their rollout flag, which made them
+        // re-run from every new browser/profile and overwrite already-saved cloud photos.
+        // We keep the flags for old clients, but the migration itself must now be a no-op.
         if (!localStorage.getItem('wh_photo_fix_v3')) {
-            let cleared = 0;
-            this.allItems.forEach(item => {
-                if (item.photo_thumbnail || item.photo_url) {
-                    item.photo_thumbnail = '';
-                    item.photo_url = '';
-                    cleared++;
-                }
-            });
-            if (cleared > 0) {
-                await saveWarehouseItems(this.allItems);
-                console.log(`[Warehouse] Cleared ${cleared} photos (v3 — full reset)`);
-            }
             localStorage.setItem('wh_photo_fix_v3', '1');
+            console.info('[Warehouse] Skipped legacy photo reset migration (v3) to preserve manual photos');
         }
 
-        // ONE-TIME MIGRATION v4: apply CORRECT photos from verified spreadsheet data.
-        // WAREHOUSE_SEED_PHOTOS_BY_SKU now contains the right SKU→photo mapping.
         if (!localStorage.getItem('wh_photo_fix_v4')) {
-            let applied = 0;
-            this.allItems.forEach(item => {
-                const photo = (typeof WAREHOUSE_SEED_PHOTOS_BY_SKU !== 'undefined')
-                    ? WAREHOUSE_SEED_PHOTOS_BY_SKU[item.sku]
-                    : null;
-                if (photo && !item.photo_thumbnail) {
-                    item.photo_thumbnail = photo;
-                    applied++;
-                }
-            });
-            if (applied > 0) {
-                await saveWarehouseItems(this.allItems);
-                console.log(`[Warehouse] Applied ${applied} correct photos (v4)`);
-            }
             localStorage.setItem('wh_photo_fix_v4', '1');
+            console.info('[Warehouse] Skipped legacy seed-photo migration (v4) to preserve manual photos');
         }
 
         // Migrate: patch prices from WAREHOUSE_SEED_DATA if items have price_per_unit = 0
