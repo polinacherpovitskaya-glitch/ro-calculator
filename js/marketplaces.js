@@ -20,6 +20,8 @@ const Marketplaces = {
     _productionSelection: [],
     _pendingPhoto: '',
     _colorVariants: [],
+    _inlineSaveTimers: {},
+    _inlineSaveSeq: {},
     DEFAULT_PACKAGING_COST: 80,
     DEFAULT_PACKAGING_SPEED_PER_HOUR: 60,
     B2C_PRICING_VERSION: 3,
@@ -90,6 +92,24 @@ const Marketplaces = {
         const numeric = this._safeNumber(value, 0);
         if (numeric <= 0) return 0;
         return Math.ceil(numeric / 10) * 10;
+    },
+
+    _parseInlinePrice(value, fallback = 0) {
+        const raw = String(value ?? '').trim().replace(',', '.');
+        if (!raw) return fallback;
+        const numeric = Number(raw);
+        return Number.isFinite(numeric) && numeric > 0 ? numeric : fallback;
+    },
+
+    _marginTone(marginPct) {
+        if (marginPct >= 40) return 'var(--green)';
+        if (marginPct >= 20) return 'var(--yellow)';
+        return 'var(--red)';
+    },
+
+    _findSetIndex(setId) {
+        const id = String(setId);
+        return this.allSets.findIndex(set => String(set.id) === id);
     },
 
     _normalizeChannelRates(source = {}) {
@@ -288,6 +308,13 @@ const Marketplaces = {
             const shopPrice = this._safeNumber(s.shop_actual_price || s.shop_suggested_price, suggestedShopPrice);
             const mpMargin = this._calcChannelResult(cost, mpPrice, s, 'marketplace').cleanMarginPct;
             const shopMargin = this._calcChannelResult(cost, shopPrice, s, 'shop').cleanMarginPct;
+            const statusId = `mp-inline-status-${s.id}`;
+            const mpInputId = `mp-inline-price-${s.id}`;
+            const shopInputId = `mp-inline-shop-price-${s.id}`;
+            const mpMarginId = `mp-inline-margin-${s.id}`;
+            const shopMarginId = `mp-inline-shop-margin-${s.id}`;
+            const mpHintId = `mp-inline-hint-${s.id}`;
+            const shopHintId = `mp-inline-shop-hint-${s.id}`;
 
             // Composition
             const parts = [];
@@ -336,13 +363,42 @@ const Marketplaces = {
                     ` : ''}
                     ${breakdownParts.length > 0 ? `<div style="font-size:10px;color:var(--text-muted);margin-top:2px;line-height:1.4;">${breakdownParts.join(' · ')}</div>` : ''}
                 </div>
-                <div style="text-align:right;flex-shrink:0;min-width:170px;">
+                <div style="text-align:right;flex-shrink:0;min-width:220px;">
                     <div style="font-size:11px;color:var(--text-muted);">Маркетплейс</div>
-                    <div style="font-size:22px;font-weight:800;color:var(--green);line-height:1.1;">${formatRub(mpPrice)}</div>
-                    <div style="font-size:10px;color:${mpMargin >= 40 ? 'var(--green)' : mpMargin >= 20 ? 'var(--yellow)' : 'var(--red)'};margin-top:2px;">чистая маржа ${Math.round(mpMargin)}%</div>
+                    <div style="display:flex;justify-content:flex-end;align-items:center;gap:6px;margin-top:2px;">
+                        <input
+                            id="${mpInputId}"
+                            type="number"
+                            min="0"
+                            step="10"
+                            value="${mpPrice}"
+                            style="width:110px;padding:5px 8px;border:1px solid var(--border);border-radius:8px;font-size:18px;font-weight:800;color:var(--green);text-align:right;background:#fff;"
+                            oninput="Marketplaces.onInlinePriceInput(${s.id})"
+                            onblur="Marketplaces.saveInlinePrices(${s.id})"
+                            onkeydown="Marketplaces.handleInlinePriceKeydown(event, ${s.id})"
+                        >
+                        <span style="font-size:16px;font-weight:700;color:var(--green);">₽</span>
+                    </div>
+                    <div id="${mpMarginId}" style="font-size:10px;color:${this._marginTone(mpMargin)};margin-top:2px;">чистая маржа ${round2(mpMargin)}%</div>
+                    <div id="${mpHintId}" style="font-size:10px;color:var(--text-muted);margin-top:1px;">авто ${formatRub(suggestedMpPrice)}</div>
                     <div style="font-size:11px;color:var(--text-muted);margin-top:6px;">Интернет-магазин</div>
-                    <div style="font-size:20px;font-weight:800;color:var(--accent);line-height:1.1;">${formatRub(shopPrice)}</div>
-                    <div style="font-size:10px;color:${shopMargin >= 40 ? 'var(--green)' : shopMargin >= 20 ? 'var(--yellow)' : 'var(--red)'};margin-top:2px;">чистая маржа ${Math.round(shopMargin)}%</div>
+                    <div style="display:flex;justify-content:flex-end;align-items:center;gap:6px;margin-top:2px;">
+                        <input
+                            id="${shopInputId}"
+                            type="number"
+                            min="0"
+                            step="10"
+                            value="${shopPrice}"
+                            style="width:110px;padding:5px 8px;border:1px solid var(--border);border-radius:8px;font-size:17px;font-weight:800;color:var(--accent);text-align:right;background:#fff;"
+                            oninput="Marketplaces.onInlinePriceInput(${s.id})"
+                            onblur="Marketplaces.saveInlinePrices(${s.id})"
+                            onkeydown="Marketplaces.handleInlinePriceKeydown(event, ${s.id})"
+                        >
+                        <span style="font-size:15px;font-weight:700;color:var(--accent);">₽</span>
+                    </div>
+                    <div id="${shopMarginId}" style="font-size:10px;color:${this._marginTone(shopMargin)};margin-top:2px;">чистая маржа ${round2(shopMargin)}%</div>
+                    <div id="${shopHintId}" style="font-size:10px;color:var(--text-muted);margin-top:1px;">авто ${formatRub(suggestedShopPrice)}</div>
+                    <div id="${statusId}" style="font-size:10px;color:var(--text-muted);margin-top:6px;min-height:12px;"></div>
                 </div>
                 <div style="flex-shrink:0;display:flex;flex-direction:column;gap:4px;">
                     <button type="button" class="btn btn-sm btn-outline" style="padding:4px 8px;font-size:11px;" onclick="Marketplaces.openSetEditor(${s.id})">&#9998;</button>
@@ -352,6 +408,112 @@ const Marketplaces = {
         });
 
         container.innerHTML = html;
+    },
+
+    _setInlinePriceStatus(setId, text = '', color = 'var(--text-muted)') {
+        const statusEl = document.getElementById(`mp-inline-status-${setId}`);
+        if (!statusEl) return;
+        statusEl.textContent = text;
+        statusEl.style.color = color;
+    },
+
+    _updateInlinePriceCard(setId) {
+        const idx = this._findSetIndex(setId);
+        if (idx < 0) return null;
+
+        const set = this.allSets[idx];
+        const totalCost = this._calcSetBreakdown(set).totalCost;
+        const suggestedMpPrice = this._getSuggestedChannelPrice(totalCost, set, 'marketplace');
+        const suggestedShopPrice = this._getSuggestedChannelPrice(totalCost, set, 'shop');
+
+        const mpInput = document.getElementById(`mp-inline-price-${setId}`);
+        const shopInput = document.getElementById(`mp-inline-shop-price-${setId}`);
+        const mpPrice = this._parseInlinePrice(
+            mpInput?.value,
+            this._safeNumber(set.mp_actual_price || set.selling_price || set.mp_suggested_price, suggestedMpPrice)
+        );
+        const shopPrice = this._parseInlinePrice(
+            shopInput?.value,
+            this._safeNumber(set.shop_actual_price || set.shop_suggested_price, suggestedShopPrice)
+        );
+
+        const mpSummary = this._calcChannelResult(totalCost, mpPrice, set, 'marketplace');
+        const shopSummary = this._calcChannelResult(totalCost, shopPrice, set, 'shop');
+
+        const mpMarginEl = document.getElementById(`mp-inline-margin-${setId}`);
+        if (mpMarginEl) {
+            mpMarginEl.textContent = `чистая маржа ${round2(mpSummary.cleanMarginPct)}%`;
+            mpMarginEl.style.color = this._marginTone(mpSummary.cleanMarginPct);
+        }
+
+        const shopMarginEl = document.getElementById(`mp-inline-shop-margin-${setId}`);
+        if (shopMarginEl) {
+            shopMarginEl.textContent = `чистая маржа ${round2(shopSummary.cleanMarginPct)}%`;
+            shopMarginEl.style.color = this._marginTone(shopSummary.cleanMarginPct);
+        }
+
+        const mpHintEl = document.getElementById(`mp-inline-hint-${setId}`);
+        if (mpHintEl) mpHintEl.textContent = `авто ${formatRub(suggestedMpPrice)}`;
+        const shopHintEl = document.getElementById(`mp-inline-shop-hint-${setId}`);
+        if (shopHintEl) shopHintEl.textContent = `авто ${formatRub(suggestedShopPrice)}`;
+
+        this.allSets[idx] = {
+            ...set,
+            total_cost: totalCost,
+            mp_suggested_price: suggestedMpPrice,
+            shop_suggested_price: suggestedShopPrice,
+            mp_actual_price: mpPrice,
+            shop_actual_price: shopPrice,
+            selling_price: mpPrice,
+            mp_margin_actual: mpSummary.cleanMarginPct,
+            shop_margin_actual: shopSummary.cleanMarginPct,
+            actual_margin: mpSummary.cleanMarginPct,
+            marketplace_pricing_version: this.B2C_PRICING_VERSION,
+        };
+        this.renderStats();
+
+        return this.allSets[idx];
+    },
+
+    onInlinePriceInput(setId) {
+        this._updateInlinePriceCard(setId);
+        this._setInlinePriceStatus(setId, 'сохраняем…');
+        clearTimeout(this._inlineSaveTimers[setId]);
+        this._inlineSaveTimers[setId] = setTimeout(() => {
+            this.saveInlinePrices(setId);
+        }, 500);
+    },
+
+    handleInlinePriceKeydown(event, setId) {
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            clearTimeout(this._inlineSaveTimers[setId]);
+            this.saveInlinePrices(setId);
+            event.target.blur();
+        }
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            this.renderSets();
+            this.renderStats();
+        }
+    },
+
+    async saveInlinePrices(setId) {
+        clearTimeout(this._inlineSaveTimers[setId]);
+        const updatedSet = this._updateInlinePriceCard(setId);
+        if (!updatedSet) return;
+
+        const saveSeq = (this._inlineSaveSeq[setId] || 0) + 1;
+        this._inlineSaveSeq[setId] = saveSeq;
+        this._setInlinePriceStatus(setId, 'сохраняем…');
+
+        await saveMarketplaceSet(updatedSet);
+
+        if (this._inlineSaveSeq[setId] !== saveSeq) return;
+        this._setInlinePriceStatus(setId, 'сохранено', 'var(--green)');
+        setTimeout(() => {
+            if (this._inlineSaveSeq[setId] === saveSeq) this._setInlinePriceStatus(setId, '');
+        }, 1400);
     },
 
     // ==========================================

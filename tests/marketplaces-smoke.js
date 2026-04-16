@@ -937,6 +937,61 @@ async function main() {
     assert.equal(customPkgWithDefault.pkgMaterialCost, customPkgWithoutDefault.pkgMaterialCost);
     assert.equal(customPkgWithDefault.totalCost, customPkgWithoutDefault.totalCost);
 
+    await vm.runInContext(`(async () => {
+        __savedInlineSet = null;
+        saveMarketplaceSet = async (set) => {
+            __savedInlineSet = JSON.parse(JSON.stringify(set));
+        };
+        Marketplaces._calcSetBreakdown = () => ({
+            castingCost: 0,
+            hwMaterialCost: 0,
+            pkgMaterialCost: 0,
+            fotCost: 0,
+            assemblyCost: 0,
+            indirectCastingCost: 0,
+            indirectAssemblyCost: 0,
+            totalCost: 200,
+        });
+        Marketplaces.allSets = [{
+            id: 777,
+            name: 'Inline цены',
+            commission: 46,
+            vat: 5,
+            osn: 12,
+            charity: 1,
+            commercial: 6.5,
+            acquiring: 5,
+            target_margin: 40,
+            plastic_items: [],
+            hw_items: [],
+            pkg_items: [],
+            total_cost: 200,
+            mp_suggested_price: 810,
+            mp_actual_price: 810,
+            shop_suggested_price: 460,
+            shop_actual_price: 460,
+        }];
+        document.getElementById('mp-total-sets');
+        document.getElementById('mp-avg-cost');
+        document.getElementById('mp-avg-price');
+        document.getElementById('mp-avg-shop-price');
+        document.getElementById('mp-inline-price-777').value = '900';
+        document.getElementById('mp-inline-shop-price-777').value = '560';
+        document.getElementById('mp-inline-margin-777');
+        document.getElementById('mp-inline-shop-margin-777');
+        document.getElementById('mp-inline-hint-777');
+        document.getElementById('mp-inline-shop-hint-777');
+        document.getElementById('mp-inline-status-777');
+        await Marketplaces.saveInlinePrices(777);
+    })()`, context);
+    const savedInlineSet = JSON.parse(vm.runInContext(`JSON.stringify(__savedInlineSet)`, context));
+    assert.equal(Number(savedInlineSet.mp_actual_price), 900);
+    assert.equal(Number(savedInlineSet.shop_actual_price), 560);
+    assert.equal(Number(savedInlineSet.selling_price), 900);
+    assert.ok(Number(savedInlineSet.mp_margin_actual) > 0);
+    assert.ok(Number(savedInlineSet.shop_margin_actual) > 0);
+    assert.match(String(vm.runInContext(`document.getElementById('mp-inline-status-777').textContent`, context)), /сохранено/i);
+
     console.log('marketplaces smoke checks passed');
 }
 
