@@ -11,7 +11,7 @@ const latestBaselineSection = supabaseJs.split('const LEGACY_HISTORICAL_BLANK_PR
 
 assert.match(
     supabaseJs,
-    /const MOLDS_DATA_VERSION = 12;/,
+    /const MOLDS_DATA_VERSION = 13;/,
     'MOLDS_DATA_VERSION should be bumped for the manual blank-price deletion fix',
 );
 
@@ -47,13 +47,13 @@ assert.match(
 
 assert.match(
     moldsJs,
-    /disable_historical_blank_price_recovery: false/,
+    /disable_historical_blank_price_recovery:\s*!!mold\.disable_historical_blank_price_recovery/,
     'Mold editor should persist the manual blank-price recovery flag',
 );
 
 assert.match(
     moldsJs,
-    /if \(!Object\.keys\(mold\.custom_prices\)\.length\) \{\s*mold\.disable_historical_blank_price_recovery = true;\s*\}/,
+    /disable_historical_blank_price_recovery:\s*!useManualPrices/,
     'Saving a blank with all prices cleared should mark historical recovery as disabled',
 );
 

@@ -7,10 +7,10 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=101">
+    <link rel="stylesheet" href="css/style.css?v=102">
     <script>
         (function () {
-            const CURRENT_HTML_VERSION = 'v276';
+            const CURRENT_HTML_VERSION = 'v277';
             const ATTEMPT_KEY = 'ro_calc_force_update_attempts';
 
             function parseVersion(version) {
@@ -81,7 +81,7 @@
     <aside class="sidebar">
         <div class="sidebar-brand">
             <h2>Recycle Object</h2>
-            <span>Калькулятор <span id="app-version">v276</span></span>
+            <span>Калькулятор <span id="app-version">v277</span></span>
         </div>
         <nav class="sidebar-nav">
             <a href="#tasks" data-page="tasks">
@@ -91,6 +91,10 @@
             <a href="#calculator" data-page="calculator">
                 <span class="nav-icon">&#9998;</span>
                 <span>Калькулятор</span>
+            </a>
+            <a href="#tpa" data-page="tpa">
+                <span class="nav-icon">&#9883;</span>
+                <span>ТПА XPM-17</span>
             </a>
             <a href="#orders" data-page="orders">
                 <span class="nav-icon">&#9776;</span>
@@ -455,6 +459,11 @@
                 <div id="calc-history-list" style="font-size:12px;"></div>
             </div>
 
+        </div>
+
+        <!-- ========== TPA ========== -->
+        <div id="page-tpa" class="page">
+            <div id="tpa-root"></div>
         </div>
 
         <!-- ========== ORDERS ========== -->
@@ -3415,7 +3424,8 @@
 <script src="js/supabase.js?v=164"></script>
 <script src="js/task-events.js?v=1"></script>
 <script src="js/calculator.js?v=78"></script>
-<script src="js/app.js?v=276"></script>
+<script src="js/app.js?v=277"></script>
+<script src="js/tpa.js?v=1"></script>
 <script src="js/wiki.js?v=4"></script>
 <script src="js/order-detail.js?v=64"></script>
 <script src="js/orders.js?v=65"></script>

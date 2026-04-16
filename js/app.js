@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v276';
+const APP_VERSION = 'v277';
 
 const App = {
     currentPage: 'orders',
@@ -29,7 +29,7 @@ const App = {
     // All pages in the app
     ALL_PAGES: [
         'calculator', 'orders', 'factual',
-        'analytics', 'molds', 'colors', 'timetrack', 'tasks', 'bugs', 'projects', 'wiki', 'gantt',
+        'analytics', 'molds', 'colors', 'timetrack', 'tasks', 'bugs', 'projects', 'wiki', 'gantt', 'tpa',
         'import', 'warehouse', 'marketplaces', 'china', 'monitoring', 'settings',
     ],
 
@@ -46,6 +46,7 @@ const App = {
     canAccess(page) {
         if (!this.currentUser) return false;
         page = this.normalizePageAlias(page);
+        if (page === 'tpa') page = 'calculator';
         if (page === 'bugs') return true;
         if (page === 'wiki') return true;
         if (page === 'monitoring') return true;
@@ -709,6 +710,7 @@ const App = {
             case 'orders': Orders.loadList(); break;
             case 'production-plan':
             case 'gantt': Gantt.load(); break;
+            case 'tpa': TPA.load(); break;
             case 'order-detail': if (subId) OrderDetail.load(parseInt(subId)); break;
             case 'factual': Factual.load(); break;
             case 'analytics': this.navigate('factual'); break;
