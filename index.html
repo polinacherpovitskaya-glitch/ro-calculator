@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=102">
+  <link rel="stylesheet" href="css/style.css?v=123">
     <script>
         (function () {
             const CURRENT_HTML_VERSION = 'v279';
@@ -130,7 +130,7 @@
             </a>
             <a href="#import" data-page="import">
                 <span class="nav-icon">&#128176;</span>
-                <span>ФинТабло</span>
+                <span>Финансы</span>
             </a>
             <a href="#warehouse" data-page="warehouse">
                 <span class="nav-icon">&#128230;</span>
@@ -1639,74 +1639,122 @@
         <!-- ========== IMPORT ========== -->
         <div id="page-import" class="page">
             <div class="page-header">
-                <h1>ФинТабло</h1>
-                <div class="flex gap-8">
-                    <button class="btn btn-outline" onclick="FinTablo.refresh()" id="ft-refresh-btn">&#128260; Обновить</button>
-                </div>
-            </div>
-
-            <!-- API key setup -->
-            <div class="card" id="ft-setup" style="display:none">
-                <h3 style="margin-bottom: 12px;">Настройка подключения</h3>
-                <p class="text-muted" style="margin-bottom: 16px; font-size: 13px;">
-                    Введите API-ключ из профиля FinTablo для подключения.
-                </p>
-                <div class="form-group">
-                    <label>API-ключ FinTablo</label>
-                    <input type="text" id="ft-api-key" placeholder="t1.xxxxx...">
-                </div>
-                <button class="btn btn-primary" onclick="FinTablo.saveApiKey()">Подключить</button>
-            </div>
-
-            <!-- Loading -->
-            <div class="card" id="ft-loading" style="display:none">
-                <p class="text-center text-muted" style="padding:24px 0">&#9203; Загрузка данных из ФинТабло...</p>
-            </div>
-
-            <!-- Error -->
-            <div class="card" id="ft-error" style="display:none">
-                <p class="text-center" style="padding:16px 0;color:var(--danger)" id="ft-error-text"></p>
-            </div>
-
-            <!-- Deals table -->
-            <div class="card" id="ft-deals-card" style="display:none">
-                <div class="card-header">
-                    <h3>Сделки <span class="text-muted" id="ft-deals-count" style="font-weight:400;font-size:13px"></span></h3>
-                    <div class="flex gap-8">
-                        <select id="ft-filter" onchange="FinTablo.applyFilter()" style="min-width:160px;font-size:13px">
-                            <option value="matched">Связанные с заказами</option>
-                            <option value="all">Все сделки</option>
-                            <option value="unmatched">Без заказа</option>
-                        </select>
+                <div>
+                    <h1>Финансы</h1>
+                    <div class="text-muted" style="font-size:12px;margin-top:4px">
+                        Деньги, зарплаты, отчеты и учет внутри калькулятора.
                     </div>
                 </div>
-                <div class="table-wrap">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Сделка</th>
-                                <th>Заказ</th>
-                                <th class="text-right">Сумма сделки</th>
-                                <th class="text-right">Расходы</th>
-                                <th class="text-right">Доходы</th>
-                                <th style="width:40px"></th>
-                            </tr>
-                        </thead>
-                        <tbody id="ft-deals-body"></tbody>
-                    </table>
+                <div class="flex gap-8">
+                    <button class="btn btn-outline" onclick="Finance.reload()">&#128260; Обновить данные</button>
+                    <button class="btn btn-primary" onclick="Finance.saveWorkspace()">Сохранить структуру</button>
                 </div>
             </div>
 
-            <!-- Deal detail (transactions) -->
-            <div class="card" id="ft-detail" style="display:none">
-                <div class="card-header">
-                    <h3 id="ft-detail-title">Транзакции</h3>
-                    <button class="btn btn-outline btn-sm" onclick="FinTablo.closeDetail()">&#10005; Закрыть</button>
+            <div class="card" id="finance-loading" style="display:none;padding:24px 16px;text-align:center;color:var(--text-muted)">
+                &#9203; Загружаю финансовый контур...
+            </div>
+
+            <div class="card" id="finance-error" style="display:none;padding:16px;color:var(--danger)"></div>
+
+            <div id="finance-content" style="display:none">
+                <div class="finance-shell">
+                    <aside class="finance-sidebar">
+                        <div class="finance-sidebar-title">Финансы</div>
+                        <div class="finance-sidebar-note">Внутренний контур, собранный по логике FinTablo.</div>
+                        <div class="finance-nav">
+                            <button class="finance-tab-btn active" data-tab="operations" onclick="Finance.setTab('operations')">Деньги</button>
+                            <button class="finance-tab-btn" data-tab="overview" onclick="Finance.setTab('overview')">Отчеты</button>
+                            <button class="finance-tab-btn" data-tab="payroll" onclick="Finance.setTab('payroll')">Зарплаты</button>
+                            <button class="finance-tab-btn" data-tab="legacy" onclick="Finance.setTab('legacy')">Сделки</button>
+                            <button class="finance-tab-btn" data-tab="tools" onclick="Finance.setTab('tools')">Инструменты учета</button>
+                        </div>
+                    </aside>
+
+                    <div class="finance-main">
+                        <div class="stats-grid" id="finance-stats" style="display:none"></div>
+                        <div id="finance-tab-overview" class="finance-tab-pane" style="display:none"></div>
+                        <div id="finance-tab-operations" class="finance-tab-pane"></div>
+                        <div id="finance-tab-payroll" class="finance-tab-pane" style="display:none"></div>
+                        <div id="finance-tab-tools" class="finance-tab-pane" style="display:none"></div>
+                        <div id="finance-tab-legacy" class="finance-tab-pane" style="display:none">
+                    <div class="card finance-section-card" style="margin-bottom:12px">
+                        <div class="card-header">
+                            <h3>Legacy импорт из FinTablo</h3>
+                            <button class="btn btn-outline btn-sm" onclick="FinTablo.refresh()" id="ft-refresh-btn">&#128260; Обновить импорт</button>
+                        </div>
+                        <div class="text-muted" style="font-size:12px;line-height:1.6">
+                            Здесь оставлен старый импорт сделок, чтобы можно было дотянуть историю и сверять авторазнос.
+                            Это не канонический финансовый контур, а мостик между старой схемой и новой внутренней моделью.
+                        </div>
+                    </div>
+
+                    <!-- API key setup -->
+                    <div class="card" id="ft-setup" style="display:none">
+                        <h3 style="margin-bottom: 12px;">Настройка подключения</h3>
+                        <p class="text-muted" style="margin-bottom: 16px; font-size: 13px;">
+                            Введите API-ключ из профиля FinTablo для подключения.
+                        </p>
+                        <div class="form-group">
+                            <label>API-ключ FinTablo</label>
+                            <input type="text" id="ft-api-key" placeholder="t1.xxxxx...">
+                        </div>
+                        <button class="btn btn-primary" onclick="FinTablo.saveApiKey()">Подключить</button>
+                    </div>
+
+                    <!-- Loading -->
+                    <div class="card" id="ft-loading" style="display:none">
+                        <p class="text-center text-muted" style="padding:24px 0">&#9203; Загрузка данных из ФинТабло...</p>
+                    </div>
+
+                    <!-- Error -->
+                    <div class="card" id="ft-error" style="display:none">
+                        <p class="text-center" style="padding:16px 0;color:var(--danger)" id="ft-error-text"></p>
+                    </div>
+
+                    <!-- Deals table -->
+                    <div class="card" id="ft-deals-card" style="display:none">
+                        <div class="card-header">
+                            <h3>Сделки <span class="text-muted" id="ft-deals-count" style="font-weight:400;font-size:13px"></span></h3>
+                            <div class="flex gap-8">
+                                <select id="ft-filter" onchange="FinTablo.applyFilter()" style="min-width:160px;font-size:13px">
+                                    <option value="matched">Связанные с заказами</option>
+                                    <option value="all">Все сделки</option>
+                                    <option value="unmatched">Без заказа</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="table-wrap">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Сделка</th>
+                                        <th>Заказ</th>
+                                        <th class="text-right">Сумма сделки</th>
+                                        <th class="text-right">Расходы</th>
+                                        <th class="text-right">Доходы</th>
+                                        <th style="width:40px"></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="ft-deals-body"></tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Deal detail (transactions) -->
+                    <div class="card" id="ft-detail" style="display:none">
+                        <div class="card-header">
+                            <h3 id="ft-detail-title">Транзакции</h3>
+                            <button class="btn btn-outline btn-sm" onclick="FinTablo.closeDetail()">&#10005; Закрыть</button>
+                        </div>
+                        <div id="ft-detail-loading" style="display:none">
+                            <p class="text-center text-muted" style="padding:16px 0">&#9203; Загрузка транзакций...</p>
+                        </div>
+                        <div id="ft-detail-content"></div>
+                    </div>
                 </div>
-                <div id="ft-detail-loading" style="display:none">
-                    <p class="text-center text-muted" style="padding:16px 0">&#9203; Загрузка транзакций...</p>
+                    </div>
                 </div>
-                <div id="ft-detail-content"></div>
             </div>
         </div>
 
@@ -1929,7 +1977,8 @@
                     </div>
                 </div>
 
-                <!-- Reservations for this item (when editing) -->
+                <!-- Stock truth / reservations for this item (when editing) -->
+                <div id="wh-stock-truth-section" style="margin-top:12px; padding-top:12px; border-top:1px solid var(--border);"></div>
                 <div id="wh-reservations-section" style="margin-top:12px; padding-top:12px; border-top:1px solid var(--border);"></div>
 
                 <div style="margin-top:16px; display:flex; gap:8px; align-items:center;">
@@ -3421,13 +3470,13 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="js/work-management-core.js?v=1"></script>
 <script src="js/bug-report-core.js?v=2"></script>
-<script src="js/supabase.js?v=164"></script>
+<script src="js/supabase.js?v=165"></script>
 <script src="js/task-events.js?v=1"></script>
 <script src="js/calculator.js?v=78"></script>
-<script src="js/app.js?v=279"></script>
+<script src="js/app.js?v=281"></script>
 <script src="js/tpa.js?v=1"></script>
 <script src="js/wiki.js?v=4"></script>
-<script src="js/order-detail.js?v=64"></script>
+<script src="js/order-detail.js?v=65"></script>
 <script src="js/orders.js?v=65"></script>
 <script src="js/production_plan.js?v=76"></script>
 <script src="js/analytics.js?v=46g"></script>
@@ -3440,13 +3489,14 @@
 <script src="js/bugs.js?v=6"></script>
 <script src="js/gantt.js?v=59"></script>
 <script src="js/fintablo.js?v=2"></script>
+  <script src="js/finance.js?v=26"></script>
 <script src="js/indirect_costs.js?v=8"></script>
 <script src="js/factual.js?v=92"></script>
 <script src="js/china.js?v=163"></script>
 <script src="js/warehouse_photos.js?v=48"></script>
 <script src="js/china_catalog.js?v=46k"></script>
 <script src="js/marketplaces.js?v=279"></script>
-<script src="js/warehouse.js?v=181"></script>
+<script src="js/warehouse.js?v=182"></script>
 <script src="js/monitoring.js?v=1"></script>
 <script src="js/settings.js?v=81"></script>
 <script src="js/pendant.js?v=12"></script>

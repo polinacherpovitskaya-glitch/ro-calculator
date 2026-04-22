@@ -512,6 +512,14 @@ const Warehouse = {
         return this._supportsFractionalWarehouseQty(unitOrItem) ? 'any' : '1';
     },
 
+    _formatWarehouseQtyDisplay(value, unitOrItem) {
+        const qty = this._parseWarehouseQty(value);
+        const supportsFractions = this._supportsFractionalWarehouseQty(unitOrItem);
+        return qty.toLocaleString('ru-RU', supportsFractions
+            ? { minimumFractionDigits: 0, maximumFractionDigits: 2 }
+            : { maximumFractionDigits: 0 });
+    },
+
     populateCategoryFilter() {
         const sel = document.getElementById('wh-filter-category');
         if (!sel) return;
@@ -2249,6 +2257,7 @@ const Warehouse = {
         if (orderSelect) orderSelect.innerHTML = this._buildMoldOrderOptionsHtml('');
         document.getElementById('wh-form-title').textContent = 'Новая позиция';
         document.getElementById('wh-delete-btn').style.display = 'none';
+        document.getElementById('wh-stock-truth-section').innerHTML = '';
         document.getElementById('wh-reservations-section').innerHTML = '';
         this._syncMoldFieldsVisibility(document.getElementById('wh-f-category').value);
         this._syncWarehouseFormMoldDerivedFields();
@@ -2292,6 +2301,7 @@ const Warehouse = {
         this.updatePhotoPreview(item.photo_thumbnail || item.photo_url || '');
 
         document.getElementById('wh-delete-btn').style.display = '';
+        await this.renderItemStockTruth(id);
         this.renderItemReservations(id);
         this._syncMoldFieldsVisibility(item.category || 'other');
         this._syncWarehouseFormMoldDerivedFields();
@@ -2678,7 +2688,10 @@ const Warehouse = {
         App.toast('Резерв отменён');
         await this.load();
         // Re-render reservations if editing
-        if (this.editingId) this.renderItemReservations(this.editingId);
+        if (this.editingId) {
+            await this.renderItemStockTruth(this.editingId);
+            this.renderItemReservations(this.editingId);
+        }
     },
 
     getAvailableQty(item) {
@@ -2717,6 +2730,158 @@ const Warehouse = {
                     </div>
                 </div>`;
             }).join('');
+    },
+
+    _isStockCorrectionHistoryEntry(entry) {
+        if (!entry || typeof entry !== 'object') return false;
+        const type = this._normStr(entry.type || '');
+        const notes = this._normStr(entry.notes || '');
+        if (notes.includes('ручн') || notes.includes('инвентар') || notes.includes('коррект')) return true;
+        if (type === 'inventory_adjustment' || type === 'inventory_apply' || type === 'adjustment') return true;
+        return !Number(entry.order_id || 0) && !String(entry.order_name || '').trim() && (type === 'addition' || type === 'deduction');
+    },
+
+    _describeWarehouseHistoryEntry(entry, item) {
+        const qty = this._parseWarehouseQty(entry && entry.qty_change);
+        const type = this._normStr(entry && entry.type);
+        const notes = String(entry && entry.notes || '').trim();
+        const orderName = String(entry && entry.order_name || '').trim();
+        const createdBy = String(entry && entry.created_by || '').trim();
+        let title = notes || orderName || 'Движение';
+        if (!title) {
+            if (type === 'inventory_adjustment' || type === 'inventory_apply') title = 'Инвентаризация';
+            else if (type === 'addition') title = 'Пополнение';
+            else if (type === 'deduction') title = 'Списание';
+            else if (type === 'import') title = 'Импорт';
+            else title = type || 'Движение';
+        }
+        const metaBits = [];
+        if (orderName && title !== orderName) metaBits.push(orderName);
+        if (createdBy) metaBits.push(createdBy);
+        metaBits.push(this._formatDateCompact(entry && entry.created_at));
+        const sign = qty > 0 ? '+' : (qty < 0 ? '−' : '');
+        return {
+            title,
+            meta: metaBits.filter(Boolean).join(' · '),
+            qtyLabel: `${sign}${this._formatWarehouseQtyDisplay(Math.abs(qty), item)} ${String(item && item.unit || 'шт').trim() || 'шт'}`,
+            toneClass: qty > 0 ? 'is-positive' : (qty < 0 ? 'is-negative' : ''),
+        };
+    },
+
+    async renderItemStockTruth(itemId) {
+        const container = document.getElementById('wh-stock-truth-section');
+        if (!container) return;
+        const normalizedItemId = Number(itemId || 0);
+        const item = (this.allItems || []).find(entry => Number(entry && entry.id || 0) === normalizedItemId);
+        if (!item) {
+            container.innerHTML = '';
+            return;
+        }
+
+        const activeReservations = this._getActiveReservationsForItem(normalizedItemId);
+        const reservedQty = activeReservations.reduce((sum, reservation) => sum + this._parseWarehouseQty(reservation.qty), 0);
+        const projectReservedQty = activeReservations
+            .filter(reservation => this._isProjectHardwareReservationSource(reservation && reservation.source) || Number(reservation && reservation.order_id || 0) > 0)
+            .reduce((sum, reservation) => sum + this._parseWarehouseQty(reservation.qty), 0);
+        const manualReservedQty = activeReservations
+            .filter(reservation => this._isManualReservationRecord(reservation))
+            .reduce((sum, reservation) => sum + this._parseWarehouseQty(reservation.qty), 0);
+        const totalQty = this._parseWarehouseQty(item.qty);
+        const availableQty = Math.max(0, totalQty - reservedQty);
+
+        const history = (await loadWarehouseHistory())
+            .filter(entry => Number(entry && entry.item_id || 0) === normalizedItemId)
+            .sort((a, b) => {
+                const byDate = new Date(String(b && b.created_at || '')).getTime() - new Date(String(a && a.created_at || '')).getTime();
+                if (byDate !== 0) return byDate;
+                return Number(b && b.id || 0) - Number(a && a.id || 0);
+            });
+        const recentHistory = history.slice(0, 6);
+        const correctionEntries = history.filter(entry => this._isStockCorrectionHistoryEntry(entry)).slice(0, 12);
+        const correctionNet = correctionEntries.reduce((sum, entry) => sum + this._parseWarehouseQty(entry && entry.qty_change), 0);
+        const correctionSign = correctionNet > 0 ? '+' : (correctionNet < 0 ? '−' : '');
+
+        const reserveRowsHtml = activeReservations.length
+            ? activeReservations.map(reservation => {
+                const meta = this._getReservationDisplayMeta(reservation);
+                const detailBits = [meta.sourceLabel];
+                if (reservation.created_by) detailBits.push(String(reservation.created_by).trim());
+                detailBits.push(this._formatDateCompact(reservation.created_at));
+                return `<div class="wh-stock-truth-row">
+                    <div class="wh-stock-truth-row-main">
+                        <div class="wh-stock-truth-row-title">${this.esc(meta.primaryLabel)}</div>
+                        <div class="wh-stock-truth-row-meta">${this.esc(detailBits.filter(Boolean).join(' · '))}</div>
+                    </div>
+                    <div class="wh-stock-truth-row-value">${this._formatWarehouseQtyDisplay(meta.qty, item)} ${this.esc(item.unit || 'шт')}</div>
+                </div>`;
+            }).join('')
+            : '<div class="wh-stock-truth-empty">Сейчас эта позиция никем не удерживается в активном резерве.</div>';
+
+        const historyRowsHtml = recentHistory.length
+            ? recentHistory.map(entry => {
+                const meta = this._describeWarehouseHistoryEntry(entry, item);
+                return `<div class="wh-stock-truth-row">
+                    <div class="wh-stock-truth-row-main">
+                        <div class="wh-stock-truth-row-title">${this.esc(meta.title)}</div>
+                        <div class="wh-stock-truth-row-meta">${this.esc(meta.meta)}</div>
+                    </div>
+                    <div class="wh-stock-truth-row-value ${meta.toneClass}">${meta.qtyLabel}</div>
+                </div>`;
+            }).join('')
+            : '<div class="wh-stock-truth-empty">У этой позиции пока нет истории движений.</div>';
+
+        const noteParts = [
+            `<strong>Что значит "Доступно":</strong> ${this._formatWarehouseQtyDisplay(totalQty, item)} ${this.esc(item.unit || 'шт')} на руках минус ${this._formatWarehouseQtyDisplay(reservedQty, item)} ${this.esc(item.unit || 'шт')} в активном резерве = ${this._formatWarehouseQtyDisplay(availableQty, item)} ${this.esc(item.unit || 'шт')}.`,
+        ];
+        if (projectReservedQty > 0) {
+            noteParts.push(`Из резерва сейчас <strong>${this._formatWarehouseQtyDisplay(projectReservedQty, item)} ${this.esc(item.unit || 'шт')}</strong> удерживают проекты и заказы.`);
+        }
+        if (manualReservedQty > 0) {
+            noteParts.push(`Ещё <strong>${this._formatWarehouseQtyDisplay(manualReservedQty, item)} ${this.esc(item.unit || 'шт')}</strong> стоит в ручном резерве.`);
+        }
+        if (correctionEntries.length > 0) {
+            noteParts.push(`В истории есть <strong>${correctionEntries.length}</strong> ручн./корректирующих движений с нетто <strong>${correctionSign}${this._formatWarehouseQtyDisplay(Math.abs(correctionNet), item)} ${this.esc(item.unit || 'шт')}</strong>.`);
+        }
+
+        container.innerHTML = `
+            <div class="wh-stock-truth">
+                <div>
+                    <h4 style="margin:0 0 8px;font-size:13px;">Разбор остатка</h4>
+                    <div class="wh-stock-truth-note">${noteParts.join(' ')}</div>
+                </div>
+                <div class="wh-stock-truth-grid">
+                    <div class="wh-stock-truth-card">
+                        <div class="wh-stock-truth-card-label">Всего на складе</div>
+                        <div class="wh-stock-truth-card-value">${this._formatWarehouseQtyDisplay(totalQty, item)}</div>
+                        <div class="wh-stock-truth-card-subtle">${this.esc(item.unit || 'шт')}</div>
+                    </div>
+                    <div class="wh-stock-truth-card">
+                        <div class="wh-stock-truth-card-label">Активный резерв</div>
+                        <div class="wh-stock-truth-card-value">${this._formatWarehouseQtyDisplay(reservedQty, item)}</div>
+                        <div class="wh-stock-truth-card-subtle">проекты + ручной резерв</div>
+                    </div>
+                    <div class="wh-stock-truth-card">
+                        <div class="wh-stock-truth-card-label">Свободно сейчас</div>
+                        <div class="wh-stock-truth-card-value">${this._formatWarehouseQtyDisplay(availableQty, item)}</div>
+                        <div class="wh-stock-truth-card-subtle">это и видно в таблице</div>
+                    </div>
+                    <div class="wh-stock-truth-card">
+                        <div class="wh-stock-truth-card-label">Корректировки</div>
+                        <div class="wh-stock-truth-card-value">${correctionSign}${this._formatWarehouseQtyDisplay(Math.abs(correctionNet), item)}</div>
+                        <div class="wh-stock-truth-card-subtle">${correctionEntries.length ? `${correctionEntries.length} движений в истории` : 'без ручных правок'}</div>
+                    </div>
+                </div>
+                <div class="wh-stock-truth-panels">
+                    <div class="wh-stock-truth-panel">
+                        <h4>Кто держит резерв</h4>
+                        <div class="wh-stock-truth-list">${reserveRowsHtml}</div>
+                    </div>
+                    <div class="wh-stock-truth-panel">
+                        <h4>Последние движения</h4>
+                        <div class="wh-stock-truth-list">${historyRowsHtml}</div>
+                    </div>
+                </div>
+            </div>`;
     },
 
     // ==========================================
@@ -4220,14 +4385,19 @@ const Warehouse = {
         const savedReady = this._isProjectHardwareReady(orderId, itemId);
         const explicitActual = this._getProjectHardwareActualQty(orderId, itemId);
         const historicalTarget = this._getProjectHardwareHistoricalTargetQty(orderId, itemId, history, historyDeltaMap);
-        const effectiveQty = historicalTarget !== null
+        const effectiveQty = explicitActual !== null
+            ? explicitActual
+            : (historicalTarget !== null
             ? historicalTarget
-            : (parseFloat(requiredQty || 0) || 0);
+            : (parseFloat(requiredQty || 0) || 0));
         const historicalReady = this._isProjectHardwareHistoricallyReady(orderId, itemId, requiredQty, historyDeltaMap, history);
         if ((savedReady || historicalReady) && this._hasProjectHardwareClampedShortfall(orderId, itemId, effectiveQty, history, historyDeltaMap)) {
             return false;
         }
-        if (savedReady && explicitActual === null && !historicalReady && this._hasProjectHardwareLegacyOnlyEvidence(orderId, itemId, history)) {
+        // A bare saved checkbox is not enough to treat the row as collected.
+        // We require either explicit actual qty or matching stock-history evidence;
+        // otherwise state/history divergence can falsely show "собрано" without deduction.
+        if (savedReady && explicitActual === null && !historicalReady) {
             return false;
         }
         return savedReady || historicalReady;

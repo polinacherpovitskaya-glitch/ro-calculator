@@ -39,6 +39,7 @@ const App = {
     normalizePageAlias(page) {
         if (page === 'dashboard') return 'orders';
         if (page === 'production-plan' || page === 'calendar') return 'gantt';
+        if (page === 'finance') return 'import';
         return page;
     },
 
@@ -721,7 +722,10 @@ const App = {
             case 'bugs': BugReports.load(); break;
             case 'projects': Projects.load(subId ? parseInt(subId, 10) : null); break;
             case 'wiki': Wiki.load(); break;
-            case 'import': FinTablo.load(); break;
+            case 'import':
+                if (typeof Finance !== 'undefined' && Finance && typeof Finance.load === 'function') Finance.load();
+                else FinTablo.load();
+                break;
             case 'indirect-costs': App.navigate('settings'); setTimeout(() => Settings.switchTab('indirect'), 100); break;
             case 'warehouse': Warehouse.load(); break;
             case 'marketplaces': Marketplaces.load(); break;
@@ -2213,6 +2217,7 @@ const Calculator = {
             hw.delivery_price = 0;
             this._rerenderHwItem(idx);
             this.recalculate();
+            this.scheduleAutosave();
             return;
         }
 
@@ -2233,24 +2238,39 @@ const Calculator = {
         hw.delivery_total = 0;
         hw.delivery_price = 0;
 
-        // Apply blanks defaults (assembly timing + fixed sell price) by linked warehouse item.
-        await this._ensureBlanksCatalog(true);
-        const linkedBlank = this._findHwBlankByWarehouseItemId(whItem.id);
-        if (linkedBlank) {
-            const speed = parseFloat(linkedBlank.assembly_speed) || 0;
-            if (speed > 0) {
-                hw.assembly_speed = round2(speed);
-                hw.assembly_minutes = round2(speed / 60);
-            }
-            const fixedSellPrice = parseFloat(linkedBlank.sell_price) || 0;
-            if (fixedSellPrice > 0) {
-                hw.sell_price = fixedSellPrice;
-            }
-        }
-
+        // Reflect the newly picked warehouse item immediately.
+        // Blanks-linked defaults are applied in a second step so the picker never feels stuck.
         this._rerenderHwItem(idx);
         this.recalculate();
         this.scheduleAutosave();
+
+        // Apply blanks defaults (assembly timing + fixed sell price) by linked warehouse item.
+        await this._ensureBlanksCatalog();
+        const linkedBlank = this._findHwBlankByWarehouseItemId(whItem.id);
+        let linkedDefaultsChanged = false;
+        if (linkedBlank) {
+            const speed = parseFloat(linkedBlank.assembly_speed) || 0;
+            if (speed > 0) {
+                const nextSpeed = round2(speed);
+                const nextMinutes = round2(speed / 60);
+                if (hw.assembly_speed !== nextSpeed || hw.assembly_minutes !== nextMinutes) {
+                    hw.assembly_speed = nextSpeed;
+                    hw.assembly_minutes = nextMinutes;
+                    linkedDefaultsChanged = true;
+                }
+            }
+            const fixedSellPrice = parseFloat(linkedBlank.sell_price) || 0;
+            if (fixedSellPrice > 0 && hw.sell_price !== fixedSellPrice) {
+                hw.sell_price = fixedSellPrice;
+                linkedDefaultsChanged = true;
+            }
+        }
+
+        if (linkedDefaultsChanged) {
+            this._rerenderHwItem(idx);
+            this.recalculate();
+            this.scheduleAutosave();
+        }
     },
 
     onHwField(idx, field, value) {
@@ -2840,6 +2860,7 @@ const Calculator = {
             pkg.delivery_price = 0;
             this._rerenderPkgItem(idx);
             this.recalculate();
+            this.scheduleAutosave();
             return;
         }
         const whItem = this._getWhItemForCurrentOrder(itemId, { kind: 'packaging', idx });
@@ -2857,24 +2878,38 @@ const Calculator = {
         pkg.delivery_total = 0;
         pkg.delivery_price = 0;
 
-        // Optional link: if packaging blank is linked to this warehouse position, apply fixed sell price.
-        await this._ensureBlanksCatalog(true);
-        const linkedBlank = this._findPkgBlankByWarehouseItemId(whItem.id);
-        if (linkedBlank) {
-            const speed = parseFloat(linkedBlank.assembly_speed) || 0;
-            if (speed > 0) {
-                pkg.assembly_speed = round2(speed);
-                pkg.assembly_minutes = round2(speed / 60);
-            }
-            const fixedSellPrice = parseFloat(linkedBlank.sell_price) || 0;
-            if (fixedSellPrice > 0) {
-                pkg.sell_price = fixedSellPrice;
-            }
-        }
-
+        // Show the picked packaging immediately and keep blanks-linked defaults async.
         this._rerenderPkgItem(idx);
         this.recalculate();
         this.scheduleAutosave();
+
+        // Optional link: if packaging blank is linked to this warehouse position, apply fixed sell price.
+        await this._ensureBlanksCatalog();
+        const linkedBlank = this._findPkgBlankByWarehouseItemId(whItem.id);
+        let linkedDefaultsChanged = false;
+        if (linkedBlank) {
+            const speed = parseFloat(linkedBlank.assembly_speed) || 0;
+            if (speed > 0) {
+                const nextSpeed = round2(speed);
+                const nextMinutes = round2(speed / 60);
+                if (pkg.assembly_speed !== nextSpeed || pkg.assembly_minutes !== nextMinutes) {
+                    pkg.assembly_speed = nextSpeed;
+                    pkg.assembly_minutes = nextMinutes;
+                    linkedDefaultsChanged = true;
+                }
+            }
+            const fixedSellPrice = parseFloat(linkedBlank.sell_price) || 0;
+            if (fixedSellPrice > 0 && pkg.sell_price !== fixedSellPrice) {
+                pkg.sell_price = fixedSellPrice;
+                linkedDefaultsChanged = true;
+            }
+        }
+
+        if (linkedDefaultsChanged) {
+            this._rerenderPkgItem(idx);
+            this.recalculate();
+            this.scheduleAutosave();
+        }
     },
 
     onPkgField(idx, field, value) {
@@ -3964,22 +3999,29 @@ const Calculator = {
             });
         });
 
-        // Render as a compact table-like grid
+        // Render as a compact table-like grid that stays visually tight instead of
+        // stretching each product column across the whole card width.
         const cellBorder = 'border-bottom:1px solid var(--border);';
-        const leftCell = `padding:6px 8px;border-right:1px solid var(--border);${cellBorder}`;
-        let html = '<div class="pricing-grid" style="display:grid; grid-template-columns: 140px ' + columns.map(() => '1fr').join(' ') + '; gap:0; font-size:12px; border:1px solid var(--border); border-radius:8px; overflow:hidden;">';
+        const leftColumnWidth = columns.length >= 4 ? 112 : (columns.length === 3 ? 120 : 132);
+        const valueColumnWidth = columns.length >= 4 ? 126 : (columns.length === 3 ? 136 : 156);
+        const gridTemplate = `${leftColumnWidth}px ${columns.map(() => `minmax(${valueColumnWidth}px, max-content)`).join(' ')}`;
+        const headerCell = `background:var(--bg);padding:7px 6px;font-weight:600;${cellBorder}text-align:center;font-size:10.5px;line-height:1.2;`;
+        const leftCell = `padding:5px 6px;border-right:1px solid var(--border);${cellBorder}line-height:1.25;`;
+        const centerCell = `padding:5px 6px;text-align:center;${cellBorder}line-height:1.2;font-variant-numeric:tabular-nums;`;
+        const compactCell = `padding:4px 6px;text-align:center;${cellBorder}line-height:1.15;font-variant-numeric:tabular-nums;`;
+        let html = '<div class="pricing-grid pricing-grid-compact" style="display:grid; grid-template-columns:' + gridTemplate + '; gap:0; font-size:11px; border:1px solid var(--border); border-radius:8px; overflow:hidden;">';
 
         // Header row
-        html += `<div style="background:var(--bg);padding:8px;font-weight:600;${cellBorder}border-right:1px solid var(--border);"></div>`;
+        html += `<div style="${headerCell}border-right:1px solid var(--border);"></div>`;
         columns.forEach(col => {
             const icon = col.type === 'item' ? '&#9670;' : col.type === 'printing' ? '&#9998;' : col.type === 'hw' ? '&#9881;' : '&#9744;';
-            html += `<div style="background:var(--bg);padding:8px;font-weight:600;${cellBorder}text-align:center;font-size:11px;">${icon} ${col.label}</div>`;
+            html += `<div style="${headerCell}">${icon} ${col.label}</div>`;
         });
 
         // Себестоимость row
         html += `<div style="${leftCell}color:var(--text-secondary);">Себестоимость</div>`;
         columns.forEach(col => {
-            html += `<div style="padding:6px 8px;text-align:center;${cellBorder}font-weight:600;">${formatRub(col.cost)}</div>`;
+            html += `<div style="${centerCell}font-weight:600;">${formatRub(col.cost)}</div>`;
         });
 
         // Check if any column needs target spread (non-blank)
@@ -3997,40 +4039,40 @@ const Calculator = {
             ];
 
             targets.forEach(t => {
-                html += `<div style="padding:4px 8px;border-right:1px solid var(--border);${cellBorder}font-size:11px;${t.style}">${t.label}${t.suffix ? `<span style="font-size:9px;font-weight:400">${t.suffix}</span>` : ''}</div>`;
+                html += `<div style="padding:4px 6px;border-right:1px solid var(--border);${cellBorder}font-size:10.5px;line-height:1.15;${t.style}">${t.label}${t.suffix ? `<span style="font-size:9px;font-weight:400">${t.suffix}</span>` : ''}</div>`;
                 columns.forEach(col => {
                     if (col.isPendant) {
-                        html += `<div style="padding:4px 8px;text-align:center;${cellBorder}font-size:11px;color:var(--text-muted);">—</div>`;
+                        html += `<div style="${compactCell}font-size:11px;color:var(--text-muted);">—</div>`;
                     } else if (col.isBlank) {
-                        html += `<div style="padding:4px 8px;text-align:center;${cellBorder}font-size:11px;color:var(--text-muted);">—</div>`;
+                        html += `<div style="${compactCell}font-size:11px;color:var(--text-muted);">—</div>`;
                     } else {
-                        html += `<div style="padding:4px 8px;text-align:center;${cellBorder}font-size:11px;${t.style}">${formatRub(col[t.key])}</div>`;
+                        html += `<div style="${compactCell}font-size:11px;${t.style}">${formatRub(col[t.key])}</div>`;
                     }
                 });
             });
 
             if (hasBlank || hasPendant) {
-                html += `<div style="padding:4px 8px;border-right:1px solid var(--border);${cellBorder}font-size:11px;color:var(--green);font-weight:700;">Рекоменд. цена<span style="font-size:9px;font-weight:400;color:var(--text-muted)"> бланки / подвесы</span></div>`;
+                html += `<div style="padding:4px 6px;border-right:1px solid var(--border);${cellBorder}font-size:10.5px;line-height:1.15;color:var(--green);font-weight:700;">Рекоменд. цена<span style="font-size:9px;font-weight:400;color:var(--text-muted)"> бланки / подвесы</span></div>`;
                 columns.forEach(col => {
                     if (col.isPendant) {
-                        html += `<div style="padding:4px 8px;text-align:center;${cellBorder}font-size:11px;color:var(--green);font-weight:700;">${formatRub(col.sellPrice)}<div style="font-size:9px;font-weight:400;color:var(--text-muted)">из подвеса</div></div>`;
+                        html += `<div style="${compactCell}font-size:11px;color:var(--green);font-weight:700;">${formatRub(col.sellPrice)}<div style="font-size:9px;font-weight:400;color:var(--text-muted)">из подвеса</div></div>`;
                     } else if (col.isBlank) {
-                        html += `<div style="padding:4px 8px;text-align:center;${cellBorder}font-size:11px;color:var(--green);font-weight:700;">${formatRub(col.blankPrice)}<div style="font-size:9px;font-weight:400;color:var(--text-muted)">${App.escHtml(col.blankPriceNote || 'прайс бланков')}</div></div>`;
+                        html += `<div style="${compactCell}font-size:11px;color:var(--green);font-weight:700;">${formatRub(col.blankPrice)}<div style="font-size:9px;font-weight:400;color:var(--text-muted)">${App.escHtml(col.blankPriceNote || 'прайс бланков')}</div></div>`;
                     } else {
-                        html += `<div style="padding:4px 8px;text-align:center;${cellBorder}font-size:11px;color:var(--text-muted);">—</div>`;
+                        html += `<div style="${compactCell}font-size:11px;color:var(--text-muted);">—</div>`;
                     }
                 });
             }
         } else {
             // All blanks — show just the fixed price row
-            html += `<div style="padding:4px 8px;border-right:1px solid var(--border);${cellBorder}font-size:11px;color:var(--green);font-weight:700;">Прайс бланков</div>`;
+            html += `<div style="padding:4px 6px;border-right:1px solid var(--border);${cellBorder}font-size:10.5px;line-height:1.15;color:var(--green);font-weight:700;">Прайс бланков</div>`;
             columns.forEach(col => {
                 if (col.isPendant) {
-                    html += `<div style="padding:4px 8px;text-align:center;${cellBorder}font-size:11px;color:var(--green);font-weight:700;">${formatRub(col.sellPrice)}<div style="font-size:9px;font-weight:400;color:var(--text-muted)">из подвеса</div></div>`;
+                    html += `<div style="${compactCell}font-size:11px;color:var(--green);font-weight:700;">${formatRub(col.sellPrice)}<div style="font-size:9px;font-weight:400;color:var(--text-muted)">из подвеса</div></div>`;
                 } else if (col.isBlank) {
-                    html += `<div style="padding:4px 8px;text-align:center;${cellBorder}font-size:11px;color:var(--green);font-weight:700;">${formatRub(col.blankPrice)}<div style="font-size:9px;font-weight:400;color:var(--text-muted)">${App.escHtml(col.blankPriceNote || 'прайс бланков')}</div></div>`;
+                    html += `<div style="${compactCell}font-size:11px;color:var(--green);font-weight:700;">${formatRub(col.blankPrice)}<div style="font-size:9px;font-weight:400;color:var(--text-muted)">${App.escHtml(col.blankPriceNote || 'прайс бланков')}</div></div>`;
                 } else {
-                    html += `<div style="padding:4px 8px;text-align:center;${cellBorder}font-size:11px;">${formatRub(col.t40 || 0)}</div>`;
+                    html += `<div style="${compactCell}font-size:11px;">${formatRub(col.t40 || 0)}</div>`;
                 }
             });
         }
@@ -4040,23 +4082,23 @@ const Calculator = {
         columns.forEach((col, ci) => {
             if (col.isPendant) {
                 // Pendant: read-only, edit inside wizard
-                html += `<div style="padding:6px 8px;text-align:center;${cellBorder}background:var(--green-light);font-weight:600;font-size:13px;">${formatRub(col.sellPrice)}</div>`;
+                html += `<div style="${centerCell}background:var(--green-light);font-weight:600;font-size:12.5px;">${formatRub(col.sellPrice)}</div>`;
             } else {
                 const inputId = `sell-${col.type}-${col.globalIdx}${col.printingIdx !== undefined ? '-p' + col.printingIdx : ''}`;
                 const piArg = col.printingIdx !== undefined ? `, ${col.printingIdx}` : '';
                 // Show recommended price as placeholder for blanks
                 const placeholder = col.isBlank && col.blankPrice ? col.blankPrice : '';
-                html += `<div style="padding:4px;text-align:center;${cellBorder}background:var(--green-light);">
+                html += `<div style="padding:3px 4px;text-align:center;${cellBorder}background:var(--green-light);">
                     <input type="text" inputmode="decimal" id="${inputId}" value="${col.sellPrice || ''}"
                         placeholder="${placeholder}"
-                        style="width:100%;text-align:center;font-weight:600;font-size:13px;border:1px solid var(--border);border-radius:4px;padding:4px;"
+                        style="width:100%;max-width:100%;box-sizing:border-box;text-align:center;font-weight:600;font-size:12px;font-variant-numeric:tabular-nums;border:1px solid var(--border);border-radius:4px;padding:3px 5px;min-height:30px;"
                         oninput="Calculator.onPricingSellChange('${col.type}', ${col.globalIdx}, this.value${piArg})">
                 </div>`;
             }
         });
 
         // Margin row (% only)
-        html += `<div style="padding:6px 8px;border-right:1px solid var(--border);font-weight:600;">Чистая маржа<div style="font-size:9px;color:var(--text-muted);font-weight:400;">на цене без НДС; после налогов 12%, благотворительности с НДС и коммерческого с НДС</div></div>`;
+        html += `<div style="padding:5px 6px;border-right:1px solid var(--border);font-weight:600;line-height:1.2;">Чистая маржа<div style="font-size:9px;color:var(--text-muted);font-weight:400;line-height:1.2;margin-top:2px;">на цене без НДС; после налогов 12%, благотворительности с НДС и коммерческого с НДС</div></div>`;
         columns.forEach(col => {
             let marginHtml = '—';
             let warnHtml = '';
@@ -4070,7 +4112,7 @@ const Calculator = {
             } else if (col.cost > 0) {
                 marginHtml = '<span style="color:var(--red);font-weight:700;">В минусе</span>';
             }
-            html += `<div style="padding:6px 8px;text-align:center;">${marginHtml}${warnHtml}</div>`;
+            html += `<div style="padding:5px 6px;text-align:center;line-height:1.2;font-variant-numeric:tabular-nums;">${marginHtml}${warnHtml}</div>`;
         });
 
         html += '</div>';

@@ -459,6 +459,18 @@ const OrderDetail = {
                         targetQty,
                         actualQty,
                         ready,
+                        unit: String(whItem.unit || 'шт').trim() || 'шт',
+                        stockTruth: this._buildProjectHardwareStockTruth({
+                            orderId,
+                            itemId,
+                            item: whItem,
+                            currentReserveQty,
+                            totalReservedQty,
+                            stockQty,
+                            availableQty,
+                            reservations: activeReservations,
+                            history: history || [],
+                        }),
                         currentReserveQty,
                         availableQty,
                         reserveHint,
@@ -514,6 +526,7 @@ const OrderDetail = {
                                             <div style="font-weight:600;">${this._esc(row.itemName)}</div>
                                             <div style="font-size:11px;color:var(--text-muted);">${this._esc(row.itemKind)}</div>
                                             ${row.itemSku ? `<div style="font-size:11px;color:var(--text-muted);">${this._esc(row.itemSku)}</div>` : ''}
+                                            ${this._renderProjectHardwareStockTruth(row.stockTruth, row)}
                                         </td>
                                         <td class="text-right" style="font-weight:700;">${row.plannedQty}</td>
                                         <td class="text-right">
@@ -577,6 +590,109 @@ const OrderDetail = {
             this.currentItems = data.items || [];
         }
         await this.renderHardwareTab();
+    },
+
+    _formatProjectHardwareQty(value, unitOrItem) {
+        if (typeof Warehouse !== 'undefined' && Warehouse && typeof Warehouse._formatWarehouseQtyDisplay === 'function') {
+            return Warehouse._formatWarehouseQtyDisplay(value, unitOrItem);
+        }
+        const parsed = round2(Math.max(0, parseFloat(value || 0) || 0));
+        return parsed.toLocaleString('ru-RU', { maximumFractionDigits: 2 });
+    },
+
+    _buildProjectHardwareHistoryEntryLabel(entry, item) {
+        const qty = round2(parseFloat(entry && entry.qty_change || 0) || 0);
+        const sign = qty > 0 ? '+' : (qty < 0 ? '−' : '');
+        const title = String(entry && (entry.notes || entry.order_name) || '').trim()
+            || (String(entry && entry.type || '').trim() || 'движение');
+        const dateLabel = (typeof Warehouse !== 'undefined' && Warehouse && typeof Warehouse._formatDateCompact === 'function')
+            ? Warehouse._formatDateCompact(entry && entry.created_at)
+            : App.formatDate(entry && entry.created_at);
+        return `${dateLabel} · ${title} · ${sign}${this._formatProjectHardwareQty(Math.abs(qty), item)} ${String(item && item.unit || 'шт').trim() || 'шт'}`;
+    },
+
+    _buildProjectHardwareStockTruth({ orderId, itemId, item, currentReserveQty, totalReservedQty, stockQty, availableQty, reservations, history }) {
+        const itemUnit = String(item && item.unit || 'шт').trim() || 'шт';
+        const activeReservations = (Array.isArray(reservations) ? reservations : []).filter(reservation =>
+            Number(reservation && reservation.item_id || 0) === Number(itemId || 0)
+            && String(reservation && reservation.status || '') === 'active'
+        );
+        const otherReservations = activeReservations.filter(reservation => Number(reservation && reservation.order_id || 0) !== Number(orderId || 0));
+        const otherReservedQty = round2(otherReservations.reduce((sum, reservation) => sum + (parseFloat(reservation.qty) || 0), 0));
+        const manualReservedQty = round2(otherReservations
+            .filter(reservation => Warehouse._isManualReservationRecord(reservation))
+            .reduce((sum, reservation) => sum + (parseFloat(reservation.qty) || 0), 0));
+        const itemHistory = (Array.isArray(history) ? history : [])
+            .filter(entry => Number(entry && entry.item_id || 0) === Number(itemId || 0))
+            .sort((a, b) => {
+                const byDate = new Date(String(b && b.created_at || '')).getTime() - new Date(String(a && a.created_at || '')).getTime();
+                if (byDate !== 0) return byDate;
+                return Number(b && b.id || 0) - Number(a && a.id || 0);
+            });
+        const correctionEntries = itemHistory.filter(entry => Warehouse._isStockCorrectionHistoryEntry(entry));
+        const correctionNet = round2(correctionEntries.reduce((sum, entry) => sum + (parseFloat(entry.qty_change) || 0), 0));
+        const correctionSign = correctionNet > 0 ? '+' : (correctionNet < 0 ? '−' : '');
+        const recentEntries = itemHistory.slice(0, 3).map(entry => this._buildProjectHardwareHistoryEntryLabel(entry, item));
+        const otherReservationLabels = otherReservations.slice(0, 3).map(reservation => {
+            const meta = Warehouse._getReservationDisplayMeta(reservation);
+            return `${meta.primaryLabel} ${this._formatProjectHardwareQty(meta.qty, item)} ${itemUnit}`;
+        });
+
+        return {
+            itemUnit,
+            stockQty: round2(stockQty),
+            totalReservedQty: round2(totalReservedQty),
+            currentReserveQty: round2(currentReserveQty),
+            otherReservedQty,
+            manualReservedQty,
+            availableQty: round2(availableQty),
+            correctionEntriesCount: correctionEntries.length,
+            correctionNet,
+            correctionSign,
+            otherReservationLabels,
+            hasMoreOtherReservations: otherReservations.length > otherReservationLabels.length,
+            recentEntries,
+        };
+    },
+
+    _renderProjectHardwareStockTruth(truth, row) {
+        if (!truth) return '';
+        const unit = String(truth.itemUnit || row.unit || 'шт').trim() || 'шт';
+        const summaryBits = [
+            `На складе ${this._formatProjectHardwareQty(truth.stockQty, row)} ${unit}`,
+            `резерв всего ${this._formatProjectHardwareQty(truth.totalReservedQty, row)} ${unit}`,
+            `свободно ${this._formatProjectHardwareQty(truth.availableQty, row)} ${unit}`,
+        ];
+        if (truth.correctionEntriesCount > 0) {
+            summaryBits.push(`корр. ${truth.correctionSign}${this._formatProjectHardwareQty(Math.abs(truth.correctionNet), row)} ${unit}`);
+        }
+
+        const detailLines = [];
+        if (truth.currentReserveQty > 0) {
+            detailLines.push(`Этот заказ держит ${this._formatProjectHardwareQty(truth.currentReserveQty, row)} ${unit}.`);
+        }
+        if (truth.otherReservationLabels.length > 0) {
+            detailLines.push(`Другие резервы: ${truth.otherReservationLabels.map(label => this._esc(label)).join('; ')}${truth.hasMoreOtherReservations ? ' …' : ''}.`);
+        } else if (truth.manualReservedQty > 0) {
+            detailLines.push(`Есть ручной резерв ${this._formatProjectHardwareQty(truth.manualReservedQty, row)} ${unit}.`);
+        } else {
+            detailLines.push('Других активных резервов сейчас нет.');
+        }
+        if (truth.recentEntries.length > 0) {
+            detailLines.push(`Последние движения: ${truth.recentEntries.map(line => this._esc(line)).join('; ')}.`);
+        }
+
+        return `
+            <div class="od-hardware-truth">
+                <div class="od-hardware-truth-summary">${summaryBits.map(bit => this._esc(bit)).join(' · ')}</div>
+                <details class="od-hardware-truth-details">
+                    <summary>Почему такой остаток</summary>
+                    <div class="od-hardware-truth-details-body">
+                        ${detailLines.map(line => `<div>${line}</div>`).join('')}
+                    </div>
+                </details>
+            </div>
+        `;
     },
 
     _renderPendantDetail(pnd, dbItem) {

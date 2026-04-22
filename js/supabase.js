@@ -55,6 +55,9 @@ function isSupabaseReady() {
 
 const LOCAL_KEYS = {
     settings: 'ro_calc_settings',
+    financeWorkspace: 'ro_calc_finance_workspace',
+    tochkaSnapshot: 'ro_calc_tochka_snapshot',
+    fintabloSnapshot: 'ro_calc_fintablo_snapshot',
     templates: 'ro_calc_templates',
     orders: 'ro_calc_orders',
     orderItems: 'ro_calc_order_items',
@@ -160,6 +163,8 @@ const SHARED_VOLATILE_LOCAL_CACHE_KEYS = new Set([
 
 const ALWAYS_PERSIST_LOCAL_KEYS = new Set([
     LOCAL_KEYS.settings,
+    LOCAL_KEYS.financeWorkspace,
+    LOCAL_KEYS.tochkaSnapshot,
     LOCAL_KEYS.templates,
     LOCAL_KEYS.authAccounts,
     LOCAL_KEYS.deletedMoldIds,
@@ -206,7 +211,7 @@ function _shouldKeepOnlyInVolatileCache(key, payload = '') {
 
 // Data version — increment to trigger NON-DESTRUCTIVE migration
 // NEVER delete user data! Only add missing fields to existing molds
-const MOLDS_DATA_VERSION = 13; // v13: отдельная встроенная сборка у бланков + миграция букв со старой "фурнитуры"
+const MOLDS_DATA_VERSION = 14; // v14: устойчивый парсинг mold_data + очистка случайно прилипшего NFC у не-NFC бланков
 const MOLDS_VERSION_KEY = 'ro_calc_molds_version';
 
 // Latest known manual sell prices from the exported blanks catalog.
@@ -377,6 +382,44 @@ function _isHistoricalBlankPriceRecoveryDisabled(mold) {
     return !!(mold && mold.disable_historical_blank_price_recovery);
 }
 
+function _isNfcLikeHardwareName(name) {
+    const normalized = String(name || '').trim().toLowerCase();
+    if (!normalized) return false;
+    if (normalized === 'nfc') return true;
+    if (normalized === 'nfc метка' || normalized === 'nfc метка / чип' || normalized === 'nfc chip') return true;
+    return /(^|[^a-zа-яё])nfc([^a-zа-яё]|$)/i.test(normalized);
+}
+
+function _isExplicitNfcMold(mold) {
+    if (!mold || typeof mold !== 'object') return false;
+    const category = String(mold.category || '').trim().toLowerCase();
+    if (category === 'nfc') return true;
+    const name = String(mold.name || '').trim();
+    return /(^|[^a-zа-яё])nfc([^a-zа-яё]|$)/i.test(name);
+}
+
+function _withUnexpectedNfcHardwareCleanup(mold) {
+    if (!mold || typeof mold !== 'object') {
+        return { mold, changed: false };
+    }
+    if (_isExplicitNfcMold(mold) || !_isNfcLikeHardwareName(mold.hw_name)) {
+        return { mold, changed: false };
+    }
+    return {
+        mold: {
+            ...mold,
+            hw_name: '',
+            hw_price_per_unit: 0,
+            hw_delivery_total: 0,
+            hw_speed: null,
+            hw_source: 'custom',
+            hw_warehouse_item_id: null,
+            hw_warehouse_sku: '',
+        },
+        changed: true,
+    };
+}
+
 function _withHistoricalBlankPriceRecovery(mold) {
     if (!mold || typeof mold !== 'object') {
         return { mold, changed: false };
@@ -392,6 +435,61 @@ function _withHistoricalBlankPriceRecovery(mold) {
         mold: { ...mold, custom_prices: after },
         changed: true,
     };
+}
+
+function _deserializeStoredMoldData(payload) {
+    if (!payload) return null;
+    if (Array.isArray(payload)) {
+        let merged = {};
+        let hasObjectData = false;
+        payload.forEach((part) => {
+            const parsed = _deserializeStoredMoldData(part);
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                merged = { ...merged, ...parsed };
+                hasObjectData = true;
+            }
+        });
+        return hasObjectData ? merged : null;
+    }
+    if (typeof payload === 'string') {
+        try {
+            return _deserializeStoredMoldData(JSON.parse(payload));
+        } catch (e) {
+            return null;
+        }
+    }
+    if (typeof payload === 'object') {
+        return { ...payload };
+    }
+    return null;
+}
+
+function _parseStoredMoldRow(row) {
+    if (!row || typeof row !== 'object') return row;
+    const parsed = _deserializeStoredMoldData(row.mold_data);
+    if (!parsed) return row;
+    return {
+        ...parsed,
+        id: row.id ?? parsed.id,
+        name: row.name || parsed.name || '',
+        created_at: row.created_at || parsed.created_at,
+        updated_at: row.updated_at || parsed.updated_at,
+    };
+}
+
+function _applyAutomaticMoldRepairs(mold) {
+    let next = mold;
+    let changed = false;
+
+    const nfcCleanup = _withUnexpectedNfcHardwareCleanup(next);
+    next = nfcCleanup.mold;
+    changed = changed || nfcCleanup.changed;
+
+    const historicalRecovery = _withHistoricalBlankPriceRecovery(next);
+    next = historicalRecovery.mold;
+    changed = changed || historicalRecovery.changed;
+
+    return { mold: next, changed };
 }
 
 function _isLegacyLetterAssemblyMold(mold) {
@@ -470,8 +568,8 @@ function checkMoldsVersion() {
                     if (def.pph_min > 0) current.pph_min = def.pph_min;
                     if (def.pph_max > 0) current.pph_max = def.pph_max;
                 }
-                current.custom_prices = _mergeHistoricalBlankCustomPrices(current.custom_prices, current.name);
-                return _normalizeMoldRecord(current);
+                const repaired = _applyAutomaticMoldRepairs(current);
+                return _normalizeMoldRecord(repaired.mold);
             });
             setLocal(LOCAL_KEYS.molds, migrated);
             console.log('Molds migrated to version', MOLDS_DATA_VERSION, '(preserved', migrated.length, 'records)');
@@ -1694,6 +1792,181 @@ async function loadFintabloImports(orderId) {
     return localImports;
 }
 
+async function loadAllFintabloImports() {
+    const localImports = getLocal(LOCAL_KEYS.imports) || [];
+    if (isSupabaseReady()) {
+        try {
+            const { data, error } = await supabaseClient
+                .from('fintablo_imports')
+                .select('*')
+                .order('import_date', { ascending: false });
+            if (!error && Array.isArray(data)) return data.map(row => _mergePayloadRow(row, 'import_data'));
+            if (error) console.warn('loadAllFintabloImports Supabase error, falling back to localStorage:', error);
+        } catch (e) {
+            console.warn('loadAllFintabloImports Supabase exception, falling back to localStorage:', e);
+        }
+    }
+    return localImports;
+}
+
+// =============================================
+// FINANCE WORKSPACE (internal finance structure)
+// =============================================
+
+const FINANCE_WORKSPACE_SUPABASE_KEY = 'finance_workspace_json';
+const TOCHKA_SNAPSHOT_SUPABASE_KEY = 'tochka_snapshot_json';
+const FINTABLO_SNAPSHOT_SUPABASE_KEY = 'fintablo_snapshot_json';
+
+async function loadFinanceWorkspace() {
+    const local = getLocal(LOCAL_KEYS.financeWorkspace) || null;
+    if (isSupabaseReady()) {
+        try {
+            const { data, error } = await supabaseClient
+                .from('settings')
+                .select('value')
+                .eq('key', FINANCE_WORKSPACE_SUPABASE_KEY)
+                .maybeSingle();
+            if (!error && data && data.value) {
+                const parsed = typeof data.value === 'string' ? JSON.parse(data.value) : data.value;
+                if (parsed && typeof parsed === 'object') {
+                    setLocal(LOCAL_KEYS.financeWorkspace, parsed);
+                    return parsed;
+                }
+            }
+            if (error) {
+                console.warn('loadFinanceWorkspace Supabase error, falling back to localStorage:', error);
+                if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
+            }
+        } catch (e) {
+            console.warn('loadFinanceWorkspace Supabase exception, falling back to localStorage:', e);
+        }
+    }
+    return local;
+}
+
+async function saveFinanceWorkspace(data) {
+    const payload = (data && typeof data === 'object') ? data : {};
+    setLocal(LOCAL_KEYS.financeWorkspace, payload);
+    if (isSupabaseReady()) {
+        try {
+            const { error } = await supabaseClient
+                .from('settings')
+                .upsert({
+                    key: FINANCE_WORKSPACE_SUPABASE_KEY,
+                    value: JSON.stringify(payload),
+                    updated_at: new Date().toISOString(),
+                }, { onConflict: 'key' });
+            if (error) {
+                console.warn('saveFinanceWorkspace Supabase error:', error);
+                if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
+            }
+        } catch (e) {
+            console.warn('saveFinanceWorkspace Supabase exception:', e);
+        }
+    }
+    return payload;
+}
+
+async function loadTochkaSnapshot() {
+    const local = getLocal(LOCAL_KEYS.tochkaSnapshot) || null;
+    if (isSupabaseReady()) {
+        try {
+            const { data, error } = await supabaseClient
+                .from('settings')
+                .select('value')
+                .eq('key', TOCHKA_SNAPSHOT_SUPABASE_KEY)
+                .maybeSingle();
+            if (!error && data && data.value) {
+                const parsed = typeof data.value === 'string' ? JSON.parse(data.value) : data.value;
+                if (parsed && typeof parsed === 'object') {
+                    setLocal(LOCAL_KEYS.tochkaSnapshot, parsed);
+                    return parsed;
+                }
+            }
+            if (error) {
+                console.warn('loadTochkaSnapshot Supabase error, falling back to localStorage:', error);
+                if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
+            }
+        } catch (e) {
+            console.warn('loadTochkaSnapshot Supabase exception, falling back to localStorage:', e);
+        }
+    }
+    return local;
+}
+
+async function saveTochkaSnapshot(data) {
+    const payload = (data && typeof data === 'object') ? data : {};
+    setLocal(LOCAL_KEYS.tochkaSnapshot, payload);
+    if (isSupabaseReady()) {
+        try {
+            const { error } = await supabaseClient
+                .from('settings')
+                .upsert({
+                    key: TOCHKA_SNAPSHOT_SUPABASE_KEY,
+                    value: JSON.stringify(payload),
+                    updated_at: new Date().toISOString(),
+                }, { onConflict: 'key' });
+            if (error) {
+                console.warn('saveTochkaSnapshot Supabase error:', error);
+                if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
+            }
+        } catch (e) {
+            console.warn('saveTochkaSnapshot Supabase exception:', e);
+        }
+    }
+    return payload;
+}
+
+async function loadFintabloSnapshot() {
+    const local = getLocal(LOCAL_KEYS.fintabloSnapshot) || null;
+    if (isSupabaseReady()) {
+        try {
+            const { data, error } = await supabaseClient
+                .from('settings')
+                .select('value')
+                .eq('key', FINTABLO_SNAPSHOT_SUPABASE_KEY)
+                .maybeSingle();
+            if (!error && data && data.value) {
+                const parsed = typeof data.value === 'string' ? JSON.parse(data.value) : data.value;
+                if (parsed && typeof parsed === 'object') {
+                    setLocal(LOCAL_KEYS.fintabloSnapshot, parsed);
+                    return parsed;
+                }
+            }
+            if (error) {
+                console.warn('loadFintabloSnapshot Supabase error, falling back to localStorage:', error);
+                if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
+            }
+        } catch (e) {
+            console.warn('loadFintabloSnapshot Supabase exception, falling back to localStorage:', e);
+        }
+    }
+    return local;
+}
+
+async function saveFintabloSnapshot(data) {
+    const payload = (data && typeof data === 'object') ? data : {};
+    setLocal(LOCAL_KEYS.fintabloSnapshot, payload);
+    if (isSupabaseReady()) {
+        try {
+            const { error } = await supabaseClient
+                .from('settings')
+                .upsert({
+                    key: FINTABLO_SNAPSHOT_SUPABASE_KEY,
+                    value: JSON.stringify(payload),
+                    updated_at: new Date().toISOString(),
+                }, { onConflict: 'key' });
+            if (error) {
+                console.warn('saveFintabloSnapshot Supabase error:', error);
+                if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
+            }
+        } catch (e) {
+            console.warn('saveFintabloSnapshot Supabase exception:', e);
+        }
+    }
+    return payload;
+}
+
 // =============================================
 // ORDER FACTUALS (Plan vs Fact data)
 // =============================================
@@ -1920,15 +2193,6 @@ async function loadMolds() {
             }
 
             // Parse Supabase rows
-            const _parseMoldRow = (row) => {
-                if (row.mold_data) {
-                    try {
-                        const parsed = typeof row.mold_data === 'string' ? JSON.parse(row.mold_data) : row.mold_data;
-                        return { ...parsed, id: row.id };
-                    } catch(e) { /* fallthrough */ }
-                }
-                return row;
-            };
             if (deletedIds.size > 0) {
                 try {
                     const { error: deleteError } = await supabaseClient
@@ -1942,16 +2206,16 @@ async function loadMolds() {
             }
 
             const rawSupabaseMolds = (data || [])
-                .map(_parseMoldRow)
+                .map(_parseStoredMoldRow)
                 .map(_normalizeMoldRecord)
                 .filter(mold => !deletedIds.has(Number(mold.id)));
 
             const repairedSupabaseMolds = [];
             rawSupabaseMolds.forEach(mold => {
-                const recovered = _withHistoricalBlankPriceRecovery(mold);
+                const recovered = _applyAutomaticMoldRepairs(mold);
                 if (recovered.changed) repairedSupabaseMolds.push(recovered.mold);
             });
-            const supabaseMolds = rawSupabaseMolds.map(mold => _withHistoricalBlankPriceRecovery(mold).mold);
+            const supabaseMolds = rawSupabaseMolds.map(mold => _applyAutomaticMoldRepairs(mold).mold);
             if (repairedSupabaseMolds.length > 0) {
                 try {
                     await supabaseClient.from('molds').upsert(
@@ -1964,9 +2228,9 @@ async function loadMolds() {
                         })),
                         { onConflict: 'id' }
                     );
-                    console.log('[Molds] Restored historical custom_prices for', repairedSupabaseMolds.length, 'records');
+                    console.log('[Molds] Applied automatic repairs for', repairedSupabaseMolds.length, 'records');
                 } catch (e) {
-                    console.warn('Historical mold price repair error:', e);
+                    console.warn('Automatic mold repair error:', e);
                 }
             }
 
@@ -1976,7 +2240,7 @@ async function loadMolds() {
             const localMolds = (getLocal(LOCAL_KEYS.molds) || [])
                 .filter(mold => !deletedIds.has(Number(mold.id)))
                 .map(_normalizeMoldRecord)
-                .map(mold => _withHistoricalBlankPriceRecovery(mold).mold);
+                .map(mold => _applyAutomaticMoldRepairs(mold).mold);
             if (localMolds.length > 0) {
                 const sbMap = new Map(supabaseMolds.map(m => [m.id, m]));
                 let pushed = 0;
@@ -1999,7 +2263,10 @@ async function loadMolds() {
                     // Re-fetch merged data
                     const { data: refreshed } = await supabaseClient.from('molds').select('*').order('name');
                     if (refreshed && refreshed.length > 0) {
-                        const merged = refreshed.map(_parseMoldRow).map(_normalizeMoldRecord);
+                        const merged = refreshed
+                            .map(_parseStoredMoldRow)
+                            .map(_normalizeMoldRecord)
+                            .map(mold => _applyAutomaticMoldRepairs(mold).mold);
                         setLocal(LOCAL_KEYS.molds, merged);
                         return merged;
                     }
@@ -2031,14 +2298,14 @@ async function loadMolds() {
             const localMolds = (getLocal(LOCAL_KEYS.molds) || getDefaultMolds())
                 .filter(mold => !deletedIds.has(Number(mold.id)))
                 .map(_normalizeMoldRecord)
-                .map(mold => _withHistoricalBlankPriceRecovery(mold).mold);
+                .map(mold => _applyAutomaticMoldRepairs(mold).mold);
             return localMolds;
         }
     }
     return (getLocal(LOCAL_KEYS.molds) || getDefaultMolds())
         .filter(mold => !deletedIds.has(Number(mold.id)))
         .map(_normalizeMoldRecord)
-        .map(mold => _withHistoricalBlankPriceRecovery(mold).mold);
+        .map(mold => _applyAutomaticMoldRepairs(mold).mold);
 }
 
 // Upload base64 mold photo to Supabase Storage, return public URL

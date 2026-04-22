@@ -11,8 +11,8 @@ const latestBaselineSection = supabaseJs.split('const LEGACY_HISTORICAL_BLANK_PR
 
 assert.match(
     supabaseJs,
-    /const MOLDS_DATA_VERSION = 13;/,
-    'MOLDS_DATA_VERSION should be bumped for the manual blank-price deletion fix',
+    /const MOLDS_DATA_VERSION = 14;/,
+    'MOLDS_DATA_VERSION should be bumped for the mold payload/NFC repair fix',
 );
 
 assert.match(
@@ -110,6 +110,66 @@ assert.deepEqual(
     JSON.parse(JSON.stringify(preservedEmpty.mold.custom_prices)),
     {},
     'Historical recovery must not re-add prices that the user manually cleared',
+);
+
+const nfcCleanup = vm.runInContext(`_withUnexpectedNfcHardwareCleanup({
+    name: 'Карабин',
+    category: 'blank',
+    hw_name: 'NFC метка',
+    hw_price_per_unit: 6.22,
+    hw_delivery_total: 14,
+    hw_speed: 120,
+    hw_source: 'warehouse',
+    hw_warehouse_item_id: 55,
+    hw_warehouse_sku: 'NFC',
+})`, context);
+assert.equal(nfcCleanup.changed, true, 'Unexpected NFC hardware should be stripped from non-NFC molds');
+assert.deepEqual(
+    JSON.parse(JSON.stringify(nfcCleanup.mold)),
+    {
+        name: 'Карабин',
+        category: 'blank',
+        hw_name: '',
+        hw_price_per_unit: 0,
+        hw_delivery_total: 0,
+        hw_speed: null,
+        hw_source: 'custom',
+        hw_warehouse_item_id: null,
+        hw_warehouse_sku: '',
+    },
+    'Unexpected NFC cleanup should reset the hardware fields back to empty custom values',
+);
+
+const nfcNamedMold = vm.runInContext(`_withUnexpectedNfcHardwareCleanup({
+    name: 'NFC Камушек',
+    category: 'nfc',
+    hw_name: 'NFC',
+    hw_price_per_unit: 6.22,
+})`, context);
+assert.equal(nfcNamedMold.changed, false, 'Named NFC molds must keep their NFC hardware');
+
+const parsedFragmented = vm.runInContext(`_parseStoredMoldRow({
+    id: 123,
+    name: 'Бланк сердце',
+    mold_data: [
+        '{\"name\":\"Бланк сердце\",\"category\":\"blank\",\"hw_name\":\"NFC метка\"}',
+        { custom_prices: { 50: 550 } },
+        { photo_url: 'https://example.com/heart.jpg' }
+    ],
+    updated_at: '2026-04-21T00:00:00.000Z',
+})`, context);
+assert.deepEqual(
+    JSON.parse(JSON.stringify(parsedFragmented)),
+    {
+        id: 123,
+        name: 'Бланк сердце',
+        category: 'blank',
+        hw_name: 'NFC метка',
+        custom_prices: { 50: 550 },
+        photo_url: 'https://example.com/heart.jpg',
+        updated_at: '2026-04-21T00:00:00.000Z',
+    },
+    'Fragmented mold_data arrays should merge into a normal mold object instead of looking empty',
 );
 
 console.log('molds price recovery smoke passed');

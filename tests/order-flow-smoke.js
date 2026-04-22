@@ -692,6 +692,7 @@ async function smokeZeroCostWarehouseHardwareStillShowsInPricing(context) {
     assert.match(pricingHtml, /Общая упаковка/);
     assert.match(pricingHtml, /Крафт-конверт/);
     assert.match(pricingHtml, /sell-pkg-0/);
+    assert.match(pricingHtml, /pricing-grid-compact/);
 }
 
 async function smokeLoadOrderHydratesZeroWarehousePriceFromCurrentStock(context) {
@@ -891,6 +892,7 @@ async function smokeBlankPricingSeparatesCatalogPriceAndNetMargin(context) {
     assert.match(pricingHtml, /вручную в бланке/);
     assert.match(pricingHtml, /Чистая маржа/);
     assert.match(pricingHtml, /налогов 12%/);
+    assert.match(pricingHtml, /pricing-grid-compact/);
 }
 
 async function smokeBlankTargetFormulaMatchesVatExclusiveMargin(context) {
@@ -1223,6 +1225,76 @@ async function smokePackagingWarehousePickerDefaults(context) {
     assert.equal(pkg.assembly_speed, 300);
     assert.equal(pkg.assembly_minutes, 5);
     assert.equal(pkg.sell_price, 19);
+}
+
+async function smokeHardwareWarehousePickerUpdatesImmediately(context) {
+    context.__warehouseItems = [{
+        id: 702,
+        name: 'Warehouse Carabiner',
+        sku: 'CR-STD-050-RD+',
+        size: '5 см',
+        color: 'красный',
+        available_qty: 100,
+        qty: 100,
+        unit: 'шт',
+        price_per_unit: 10,
+        photo_thumbnail: '',
+        category: 'carabiners',
+    }];
+    vm.runInContext(`
+        globalThis.__hwPickerEvents = [];
+        globalThis.__resolveHwCatalog = null;
+        globalThis.__hwCatalogPending = new Promise(resolve => {
+            globalThis.__resolveHwCatalog = resolve;
+        });
+        Calculator.hardwareItems = [Calculator.getEmptyHardware(null)];
+        Calculator.hardwareItems[0].source = 'warehouse';
+        Calculator._findWhItem = (itemId) => (globalThis.__warehouseItems || []).find(item => Number(item.id) === Number(itemId)) || null;
+        Calculator._ensureBlanksCatalog = async () => globalThis.__hwCatalogPending;
+        Calculator._findHwBlankByWarehouseItemId = () => ({
+            warehouse_item_id: 702,
+            assembly_speed: 300,
+            sell_price: 19,
+            updated_at: '2026-03-17T12:00:00.000Z',
+        });
+        Calculator._rerenderHwItem = () => { globalThis.__hwPickerEvents.push('rerender'); };
+        Calculator.recalculate = () => { globalThis.__hwPickerEvents.push('recalc'); };
+        Calculator.scheduleAutosave = () => { globalThis.__hwPickerEvents.push('save'); };
+        document.querySelectorAll = () => [];
+        globalThis.__hwSelectPromise = Calculator.onHwWarehouseSelect(0, '702');
+    `, context);
+
+    const immediate = clone(await vm.runInContext(`({
+        events: globalThis.__hwPickerEvents.slice(),
+        hw: Calculator.hardwareItems[0],
+    })`, context));
+    assert.deepEqual(
+        immediate.events,
+        ['rerender', 'recalc', 'save'],
+        'Hardware picker should update the row immediately, before blank defaults finish loading',
+    );
+    assert.equal(immediate.hw.warehouse_item_id, 702);
+    assert.equal(immediate.hw.name, 'Warehouse Carabiner · 5 см · красный');
+    assert.equal(immediate.hw.price, 10);
+    assert.equal(immediate.hw.assembly_speed, 0);
+    assert.equal(immediate.hw.sell_price, 0);
+
+    const resolved = clone(await vm.runInContext(`(async () => {
+        globalThis.__resolveHwCatalog();
+        await globalThis.__hwSelectPromise;
+        return {
+            events: globalThis.__hwPickerEvents.slice(),
+            hw: Calculator.hardwareItems[0],
+        };
+    })()`, context));
+    assert.deepEqual(
+        resolved.events,
+        ['rerender', 'recalc', 'save', 'rerender', 'recalc', 'save'],
+        'Hardware picker should apply linked blank defaults in a second pass after the async catalog load',
+    );
+    assert.equal(resolved.hw.assembly_speed, 300);
+    assert.equal(resolved.hw.assembly_minutes, 5);
+    assert.equal(resolved.hw.sell_price, 19);
 }
 
 async function smokeCurrentOrderReservationRestoresWarehouseQuota() {
@@ -3849,7 +3921,28 @@ async function smokeOrderStatusWarehouseSync(context) {
 
 async function smokeCompletedStatusGuardBlocksUntilAllCollected(context) {
     context.__projectHardwareState = { checks: { '42:501': true } };
-    context.__warehouseHistory = [];
+    context.__warehouseHistory = [{
+        id: 1,
+        item_id: 501,
+        item_name: 'Collected hardware',
+        item_sku: 'COL-501',
+        item_category: 'hardware',
+        type: 'deduction',
+        qty_change: -2,
+        requested_qty_change: -2,
+        qty_before: 10,
+        qty_after: 8,
+        unit_price: 10,
+        total_cost_change: 20,
+        order_id: 42,
+        order_name: 'Guarded Order',
+        notes: 'Списание собранной позиции со склада: 2 шт',
+        clamped: false,
+        created_at: '2026-03-17T10:10:00.000Z',
+        created_by: 'Smoke',
+        project_hardware_flow: 'ready_toggle',
+        project_hardware_target_qty: 2,
+    }];
     context.__orderDetails = {
         42: {
             order: { id: 42, order_name: 'Guarded Order', status: 'delivery' },
@@ -3917,6 +4010,31 @@ async function smokeCompletedStatusGuardBlocksUntilAllCollected(context) {
     assert.equal(vm.runInContext(`globalThis.__loadListCount`, context), 0);
 
     context.__projectHardwareState = { checks: { '42:501': true, '42:601': true } };
+    context.__warehouseHistory = [
+        ...context.__warehouseHistory,
+        {
+            id: 2,
+            item_id: 601,
+            item_name: 'Pending packaging',
+            item_sku: 'PKG-601',
+            item_category: 'packaging',
+            type: 'deduction',
+            qty_change: -1,
+            requested_qty_change: -1,
+            qty_before: 7,
+            qty_after: 6,
+            unit_price: 5,
+            total_cost_change: 5,
+            order_id: 42,
+            order_name: 'Guarded Order',
+            notes: 'Списание собранной позиции со склада: 1 шт',
+            clamped: false,
+            created_at: '2026-03-17T10:12:00.000Z',
+            created_by: 'Smoke',
+            project_hardware_flow: 'ready_toggle',
+            project_hardware_target_qty: 1,
+        }
+    ];
     context.__toasts = [];
     vm.runInContext(`
         Warehouse.projectHardwareState = null;
@@ -4030,6 +4148,28 @@ async function smokeProductionPlanCompletedGuard(context) {
     assert.ok((clone(context.__toasts) || []).some(message => /нельзя перевести заказ в «готово»/i.test(message)));
 
     context.__projectHardwareState = { checks: { '91:801': true } };
+    context.__warehouseHistory = [{
+        id: 1,
+        item_id: 801,
+        item_name: 'Plan hardware',
+        item_sku: 'PLN-801',
+        item_category: 'hardware',
+        type: 'deduction',
+        qty_change: -1,
+        requested_qty_change: -1,
+        qty_before: 4,
+        qty_after: 3,
+        unit_price: 10,
+        total_cost_change: 10,
+        order_id: 91,
+        order_name: 'Plan Guard',
+        notes: 'Списание собранной позиции со склада: 1 шт',
+        clamped: false,
+        created_at: '2026-03-17T10:15:00.000Z',
+        created_by: 'Smoke',
+        project_hardware_flow: 'ready_toggle',
+        project_hardware_target_qty: 1,
+    }];
     context.__ordersUpdateCalls = [];
     context.__toasts = [];
     vm.runInContext(`
@@ -4660,6 +4800,95 @@ async function smokeWarehouseReserveLabelsShowSource(context) {
     assert.match(detailHtml, /Открыть/);
 }
 
+async function smokeWarehouseStockTruthShowsAvailableAndCorrections(context) {
+    context.__warehouseItems = [
+        {
+            id: 8115,
+            name: 'Шнур с силик. наконечником фиолетовый 80 см',
+            sku: 'SLS-800-VT-NN',
+            category: 'cords',
+            unit: 'шт',
+            qty: 945,
+            reserved_qty: 433,
+            available_qty: 512,
+            price_per_unit: 23,
+        },
+    ];
+    context.__warehouseReservations = [
+        {
+            id: 811501,
+            item_id: 8115,
+            order_id: 1774617825968,
+            order_name: 'обвесы Яндекс Музыка',
+            source: 'project_hardware',
+            qty: 433,
+            status: 'active',
+            created_at: '2026-04-21T11:00:00.000Z',
+            created_by: 'Smoke',
+        },
+    ];
+    context.__warehouseHistory = [
+        {
+            id: 8115901,
+            item_id: 8115,
+            item_name: 'Шнур с силик. наконечником фиолетовый 80 см',
+            item_sku: 'SLS-800-VT-NN',
+            type: 'addition',
+            qty_change: 500,
+            qty_before: 445,
+            qty_after: 945,
+            notes: 'Ручная правка',
+            created_at: '2026-04-03T09:00:00.000Z',
+            created_by: 'Полина',
+        },
+        {
+            id: 8115900,
+            item_id: 8115,
+            item_name: 'Шнур с силик. наконечником фиолетовый 80 см',
+            item_sku: 'SLS-800-VT-NN',
+            type: 'deduction',
+            qty_change: -225,
+            qty_before: 670,
+            qty_after: 445,
+            notes: 'Ручная правка по фото 2026-04-02',
+            created_at: '2026-04-02T08:30:00.000Z',
+            created_by: 'Полина',
+        },
+        {
+            id: 8115899,
+            item_id: 8115,
+            item_name: 'Шнур с силик. наконечником фиолетовый 80 см',
+            item_sku: 'SLS-800-VT-NN',
+            type: 'deduction',
+            qty_change: -250,
+            qty_before: 1000,
+            qty_after: 750,
+            order_id: 1774868781815,
+            order_name: 'ФНТР 1 партия',
+            notes: 'Списание собранной позиции со склада: 250 шт',
+            created_at: '2026-03-31T09:06:32.225Z',
+            created_by: 'Smoke',
+        },
+    ];
+    context.loadWarehouseHistory = async () => clone(context.__warehouseHistory);
+
+    vm.runInContext(`
+        Warehouse.allItems = globalThis.__warehouseItems.map(item => ({ ...item }));
+        Warehouse.allReservations = globalThis.__warehouseReservations.map(item => ({ ...item }));
+    `, context);
+
+    await vm.runInContext(`Warehouse.renderItemStockTruth(8115)`, context);
+    const truthHtml = String(vm.runInContext(`document.getElementById('wh-stock-truth-section').innerHTML`, context));
+    assert.match(truthHtml, /Разбор остатка/);
+    assert.match(truthHtml, /945/);
+    assert.match(truthHtml, /433/);
+    assert.match(truthHtml, /512/);
+    assert.match(truthHtml, /обвесы Яндекс Музыка/);
+    assert.match(truthHtml, /ФНТР 1 партия/);
+    assert.match(truthHtml, /Ручная правка/);
+    assert.match(truthHtml, /Корректировки/);
+}
+
 async function smokeWarehouseProjectReserveCannotBeEditedInline(context) {
     context.__warehouseItems = [
         {
@@ -4885,6 +5114,10 @@ async function smokeProjectHardwarePersistenceAndBuckets(context) {
             '200:504': true,
             '300:501': true,
             '999:999': true,
+        },
+        actual_qtys: {
+            '200:504': 1,
+            '300:501': 2,
         },
     };
     context.__savedProjectHardwareState = null;
@@ -5585,6 +5818,15 @@ async function smokeOrderDetailHardwareTabShowsAndEditsProjectHardware(context) 
         status: 'active',
         source: 'project_hardware',
         created_at: '2026-03-18T12:00:00.000Z',
+    }, {
+        id: 2,
+        item_id: 915,
+        order_id: 778,
+        order_name: 'обвесы Яндекс Музыка',
+        qty: 4,
+        status: 'active',
+        source: 'project_hardware',
+        created_at: '2026-03-19T12:00:00.000Z',
     }];
     context.__warehouseItems = [{
         id: 915,
@@ -5595,7 +5837,33 @@ async function smokeOrderDetailHardwareTabShowsAndEditsProjectHardware(context) 
         unit: 'шт',
         price_per_unit: 5,
     }];
-    context.__warehouseHistory = [];
+    context.__warehouseHistory = [{
+        id: 101,
+        item_id: 915,
+        item_name: 'Трос',
+        item_sku: 'TR-050-WH',
+        type: 'addition',
+        qty_change: 5,
+        qty_before: 5,
+        qty_after: 10,
+        notes: 'Ручная правка',
+        created_at: '2026-03-20T12:00:00.000Z',
+        created_by: 'Smoke',
+    }, {
+        id: 100,
+        item_id: 915,
+        item_name: 'Трос',
+        item_sku: 'TR-050-WH',
+        type: 'deduction',
+        qty_change: -3,
+        qty_before: 8,
+        qty_after: 5,
+        order_id: 777,
+        order_name: 'Order Detail Hardware',
+        notes: 'Списание собранной позиции со склада: 3 шт',
+        created_at: '2026-03-19T12:00:00.000Z',
+        created_by: 'Smoke',
+    }];
     context.__orderDetails = { 777: clone(detail) };
     context.loadProjectHardwareState = async () => clone(context.__projectHardwareState);
     context.saveProjectHardwareState = async (state) => {
@@ -5629,14 +5897,18 @@ async function smokeOrderDetailHardwareTabShowsAndEditsProjectHardware(context) 
     assert.match(html, /Фурнитура и упаковка заказа/i);
     assert.match(html, /Трос/);
     assert.match(html, /TR-050-WH/);
-    assert.match(html, /Резерв совпадает/);
+    assert.match(html, /Уже собрано/);
     assert.match(html, /value="3"/);
+    assert.match(html, /На складе 10 шт/);
+    assert.match(html, /Почему такой остаток/);
+    assert.match(html, /обвесы Яндекс Музыка 4 шт/);
+    assert.match(html, /Ручная правка/);
 
     await vm.runInContext(`OrderDetail.setProjectHardwareActualQty(915, '4')`, context);
 
     assert.equal(context.__projectHardwareState.actual_qtys['777:915'], 4);
     const activeReservation = context.__reservations.find(item => Number(item.order_id) === 777 && item.status === 'active');
-    assert.equal(activeReservation.qty, 4);
+    assert.equal(activeReservation, undefined);
 }
 
 async function smokeProjectHardwareReadySyncDoesNotAutoReturnConsumedStock(context) {
@@ -5829,6 +6101,88 @@ async function smokeProjectHardwareCollectedStateSurvivesStateLoss(context) {
         return Warehouse._getProjectHardwareDisplayActualQty(655, 903, 5, history, globalThis.__warehouseHistory);
     })()`, context);
     assert.equal(displayActual, 3);
+}
+
+async function smokeProjectHardwareSavedCheckWithoutHistoryIsNotReady(context) {
+    const order = {
+        id: 657,
+        order_name: 'Stale Project Hardware Check',
+        manager_name: 'Smoke',
+        status: 'production_hardware',
+        created_at: '2026-03-18T14:30:00.000Z',
+    };
+    const items = [{
+        item_type: 'hardware',
+        product_name: 'Stale Hardware Qty',
+        quantity: 5,
+        hardware_source: 'warehouse',
+        hardware_warehouse_item_id: 905,
+    }];
+
+    context.__projectHardwareState = { checks: { '657:905': true }, actual_qtys: {} };
+    context.__reservations = [];
+    context.__warehouseItems = [{
+        id: 905,
+        name: 'Stale Hardware Qty',
+        sku: 'STL-905',
+        category: 'hardware',
+        qty: 12,
+        unit: 'шт',
+        price_per_unit: 10,
+    }];
+    context.__warehouseHistory = [];
+    context.__orderDetails = {
+        657: {
+            order: clone(order),
+            items: clone(items),
+        },
+    };
+    context.loadProjectHardwareState = async () => clone(context.__projectHardwareState);
+    context.saveProjectHardwareState = async (state) => {
+        context.__projectHardwareState = clone(state);
+    };
+    context.loadWarehouseReservations = async () => clone(context.__reservations);
+    context.saveWarehouseReservations = async (reservations) => {
+        context.__reservations = clone(reservations);
+    };
+    context.loadWarehouseItems = async () => clone(context.__warehouseItems);
+    context.saveWarehouseItems = async (itemsArg) => {
+        context.__warehouseItems = clone(itemsArg);
+    };
+    context.loadWarehouseHistory = async () => clone(context.__warehouseHistory);
+    context.saveWarehouseHistory = async (history) => {
+        context.__warehouseHistory = clone(history);
+    };
+    context.loadOrder = async (orderId) => clone(context.__orderDetails[Number(orderId)] || null);
+
+    vm.runInContext(`
+        Warehouse.projectHardwareState = null;
+        Warehouse.load = async () => {};
+    `, context);
+
+    const completionBefore = clone(await vm.runInContext(`Warehouse.getOrderProjectHardwareCompletion(657, JSON.parse(${JSON.stringify(JSON.stringify({
+        order,
+        items,
+    }))}))`, context));
+
+    assert.equal(completionBefore.canComplete, false);
+    assert.equal(completionBefore.readyRows, 0);
+    assert.equal(completionBefore.pendingRows, 1);
+
+    await vm.runInContext(`Warehouse.syncProjectHardwareOrderState({
+        orderId: 657,
+        orderName: 'Stale Project Hardware Check',
+        managerName: 'Smoke',
+        status: 'production_hardware',
+        currentItems: JSON.parse(${JSON.stringify(JSON.stringify(items))}),
+        previousItems: JSON.parse(${JSON.stringify(JSON.stringify(items))})
+    })`, context);
+
+    assert.equal(Boolean(context.__projectHardwareState.checks['657:905']), false);
+    assert.equal(context.__warehouseItems[0].qty, 12);
+    assert.equal(context.__warehouseHistory.length, 0);
+    const reservation = context.__reservations.find(item => Number(item.order_id) === 657 && item.status === 'active');
+    assert.equal(reservation.qty, 5);
 }
 
 async function smokeProjectHardwareReadyToggleReloadsAndClosesProject() {
@@ -7328,6 +7682,7 @@ async function main() {
     await smokeFinDirectorBlankMoldsUseAmortization(context);
     await smokeFinDirectorRevenueMatchesNetSummaryAndProfit(context);
     await smokePendantAttachmentCostsIncludeAssemblyAndIndirect(context);
+    await smokeHardwareWarehousePickerUpdatesImmediately(context);
     await smokePackagingWarehousePickerDefaults(context);
     await smokeCurrentOrderReservationRestoresWarehouseQuota(context);
     await smokeCommittedOrderDemandRestoresWarehouseQuotaWithoutActiveReservation();
@@ -7372,6 +7727,7 @@ async function main() {
     await smokeWarehouseManualAdjustment(context);
     await smokeWarehouseAdjustmentPersistsWithoutBulkSave(context);
     await smokeWarehouseReserveLabelsShowSource(context);
+    await smokeWarehouseStockTruthShowsAvailableAndCorrections(context);
     await smokeWarehouseProjectReserveCannotBeEditedInline(context);
     await smokeWarehouseLoadRendersBeforeBackgroundSync();
     await smokeWarehouseLoadPreservesManualPhotos();
@@ -7385,6 +7741,7 @@ async function main() {
     await smokeOrderDetailHardwareTabShowsAndEditsProjectHardware(context);
     await smokeProjectHardwareReadySyncDoesNotAutoReturnConsumedStock(context);
     await smokeProjectHardwareCollectedStateSurvivesStateLoss(context);
+    await smokeProjectHardwareSavedCheckWithoutHistoryIsNotReady(context);
     await smokeProjectHardwareReadyToggleReloadsAndClosesProject(context);
     await smokeCompletedOrderConsumesBlankMoldCapacity(context);
     await smokeMoldUsageThresholdCreatesTasksWithoutDuplicates(context);
