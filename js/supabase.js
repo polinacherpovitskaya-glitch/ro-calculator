@@ -202,6 +202,7 @@ const ALWAYS_PERSIST_LOCAL_KEYS = new Set([
     LOCAL_KEYS.financeWorkspace,
     LOCAL_KEYS.tochkaSnapshot,
     LOCAL_KEYS.templates,
+    LOCAL_KEYS.molds,
     LOCAL_KEYS.authAccounts,
     LOCAL_KEYS.deletedMoldIds,
 ]);
@@ -727,7 +728,10 @@ function _estimateLocalStorageBytes() {
 
 function _cleanupLocalStorage(options = {}) {
     const aggressive = !!options.aggressive;
-    const preserveKeys = new Set(options.preserveKeys || []);
+    const preserveKeys = new Set([
+        ...ALWAYS_PERSIST_LOCAL_KEYS,
+        ...(options.preserveKeys || []),
+    ]);
     // 1. Trim auth activity & sessions (keep last 50 entries each)
     ['ro_calc_auth_activity', 'ro_calc_auth_sessions'].forEach(key => {
         try {
@@ -1078,6 +1082,66 @@ function _getFallbackMoldsFromTemplates(deletedIds = new Set()) {
         .map(mold => _applyAutomaticMoldRepairs(mold).mold);
 }
 
+function _normalizeLookupKey(value) {
+    return String(value || '')
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, ' ');
+}
+
+function _buildLegacyMoldIndex(records = []) {
+    const byId = new Map();
+    const byName = new Map();
+    (records || []).forEach(record => {
+        if (!record || typeof record !== 'object') return;
+        const normalized = _normalizeMoldRecord(record);
+        if (normalized.id !== undefined && normalized.id !== null && normalized.id !== '') {
+            byId.set(String(normalized.id), normalized);
+        }
+        const key = _normalizeLookupKey(normalized.name);
+        if (key) byName.set(key, normalized);
+    });
+    return { byId, byName };
+}
+
+function _findLegacyMoldRecord(mold, index) {
+    if (!mold || !index) return null;
+    const idKey = mold.id !== undefined && mold.id !== null ? String(mold.id) : '';
+    if (idKey && index.byId?.has(idKey)) return index.byId.get(idKey);
+    const nameKey = _normalizeLookupKey(mold.name);
+    if (nameKey && index.byName?.has(nameKey)) return index.byName.get(nameKey);
+    return null;
+}
+
+function _hydrateMissingMoldFields(mold, legacyIndexes = []) {
+    const normalized = _normalizeMoldRecord(mold);
+    let changed = false;
+    for (const index of legacyIndexes) {
+        const legacy = _findLegacyMoldRecord(normalized, index);
+        if (!legacy) continue;
+        if (!normalized.photo_url && legacy.photo_url) {
+            normalized.photo_url = String(legacy.photo_url).trim();
+            changed = true;
+        }
+        if (!normalized.collection && legacy.collection) {
+            normalized.collection = String(legacy.collection).trim();
+            changed = true;
+        }
+        if (!(normalized.pph_actual > 0) && Number(legacy.pph_actual || legacy.pieces_per_hour_avg || 0) > 0) {
+            normalized.pph_actual = Number(legacy.pph_actual || legacy.pieces_per_hour_avg || 0);
+            changed = true;
+        }
+        if (!(normalized.weight_grams > 0) && Number(legacy.weight_grams || 0) > 0) {
+            normalized.weight_grams = Number(legacy.weight_grams || 0);
+            changed = true;
+        }
+        if (normalized.photo_url && normalized.collection && normalized.pph_actual > 0 && normalized.weight_grams > 0) {
+            break;
+        }
+    }
+    return { mold: normalized, changed };
+}
+
 function getDefaultTemplates() {
     // Auto-generate from default molds (blanks catalog is the source of truth)
     const molds = getDefaultMolds();
@@ -1130,7 +1194,26 @@ function _moldToTemplate(m) {
 
 /** Rebuild App.templates from molds (called after mold save) */
 function refreshTemplatesFromMolds(molds) {
-    const templates = (molds || []).map(m => _moldToTemplate(m));
+    const existingTemplates = _getLocalTemplates();
+    const legacyIndex = _buildLegacyMoldIndex(existingTemplates);
+    const templates = (molds || []).map(m => {
+        const template = _moldToTemplate(m);
+        const legacy = _findLegacyMoldRecord(template, legacyIndex);
+        if (legacy) {
+            if (!template.photo_url && legacy.photo_url) template.photo_url = String(legacy.photo_url).trim();
+            if (!template.collection && legacy.collection) template.collection = String(legacy.collection).trim();
+            if (!(template.pieces_per_hour_avg > 0) && Number(legacy.pieces_per_hour_avg || legacy.pph_actual || 0) > 0) {
+                const pph = Number(legacy.pieces_per_hour_avg || legacy.pph_actual || 0);
+                template.pieces_per_hour_avg = pph;
+                if (!(template.pieces_per_hour_min > 0)) template.pieces_per_hour_min = pph;
+                if (!(template.pieces_per_hour_max > 0)) template.pieces_per_hour_max = pph;
+            }
+            if (!(template.weight_grams > 0) && Number(legacy.weight_grams || 0) > 0) {
+                template.weight_grams = Number(legacy.weight_grams || 0);
+            }
+        }
+        return template;
+    });
     App.templates = templates;
     setLocal(LOCAL_KEYS.templates, templates);
     return templates;
@@ -2297,6 +2380,19 @@ async function deleteTimeEntry(entryId) {
 async function loadMolds() {
     checkMoldsVersion();
     const deletedIds = new Set(_getDeletedMoldIds());
+    const localMolds = (getLocal(LOCAL_KEYS.molds) || [])
+        .filter(mold => !deletedIds.has(Number(mold.id)))
+        .map(_normalizeMoldRecord)
+        .map(mold => _applyAutomaticMoldRepairs(mold).mold);
+    const legacyTemplateMolds = (_getLocalTemplates() || [])
+        .map((template, index) => _templateToMold(template, index))
+        .filter(Boolean)
+        .filter(mold => !deletedIds.has(Number(mold.id)))
+        .map(_normalizeMoldRecord);
+    const legacyIndexes = [
+        _buildLegacyMoldIndex(localMolds),
+        _buildLegacyMoldIndex(legacyTemplateMolds),
+    ];
     if (isSupabaseReady()) {
         try {
             const { data, error } = await supabaseClient.from('molds').select('*').order('name');
@@ -2324,11 +2420,13 @@ async function loadMolds() {
                 .filter(mold => !deletedIds.has(Number(mold.id)));
 
             const repairedSupabaseMolds = [];
-            rawSupabaseMolds.forEach(mold => {
-                const recovered = _applyAutomaticMoldRepairs(mold);
-                if (recovered.changed) repairedSupabaseMolds.push(recovered.mold);
+            const hydratedSupabaseMolds = rawSupabaseMolds.map(mold => {
+                const hydrated = _hydrateMissingMoldFields(mold, legacyIndexes);
+                const repaired = _applyAutomaticMoldRepairs(hydrated.mold);
+                if (hydrated.changed || repaired.changed) repairedSupabaseMolds.push(repaired.mold);
+                return repaired.mold;
             });
-            const supabaseMolds = rawSupabaseMolds.map(mold => _applyAutomaticMoldRepairs(mold).mold);
+            const supabaseMolds = hydratedSupabaseMolds;
             if (repairedSupabaseMolds.length > 0) {
                 try {
                     await supabaseClient.from('molds').upsert(
@@ -2350,10 +2448,6 @@ async function loadMolds() {
             // Smart merge: only push local records that are missing in Supabase.
             // Existing Supabase molds stay authoritative, because browser-local
             // caches previously overwrote shared manual pricing for blanks.
-            const localMolds = (getLocal(LOCAL_KEYS.molds) || [])
-                .filter(mold => !deletedIds.has(Number(mold.id)))
-                .map(_normalizeMoldRecord)
-                .map(mold => _applyAutomaticMoldRepairs(mold).mold);
             if (localMolds.length > 0) {
                 const sbMap = new Map(supabaseMolds.map(m => [m.id, m]));
                 let pushed = 0;

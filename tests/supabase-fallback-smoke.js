@@ -184,6 +184,105 @@ async function main() {
 
         vm.runInContext(`
             initSupabase();
+            setLocal(LOCAL_KEYS.templates, [{
+                id: 501,
+                name: 'NFC Звезда',
+                category: 'blank',
+                collection: 'NFC',
+                photo_url: 'https://example.com/nfc-star.jpg',
+                pieces_per_hour_avg: 25,
+                weight_grams: 30,
+            }]);
+            localStorage.setItem('ro_calc_templates', 'x'.repeat(40000));
+            localStorage.setItem('ro_calc_molds', 'x'.repeat(40000));
+            _cleanupLocalStorage({ aggressive: true });
+        `, context);
+
+        assert.notEqual(context.localStorage.getItem('ro_calc_templates'), null, 'templates must stay in persistent storage during aggressive cleanup');
+        assert.notEqual(context.localStorage.getItem('ro_calc_molds'), null, 'molds must stay in persistent storage during aggressive cleanup');
+    }
+
+    {
+        const context = createContext();
+        runScript(context, 'js/supabase.js');
+
+        context.supabase = {
+            createClient() {
+                return {
+                    from(table) {
+                        return {
+                            select() {
+                                return {
+                                    order() {
+                                        if (table !== 'molds') return Promise.resolve({ data: [], error: null });
+                                        return Promise.resolve({
+                                            data: [{
+                                                id: 777,
+                                                name: 'NFC Звезда',
+                                                mold_data: JSON.stringify({
+                                                    id: 777,
+                                                    name: 'NFC Звезда',
+                                                    category: 'nfc',
+                                                    collection: '',
+                                                    photo_url: '',
+                                                    pph_actual: 0,
+                                                    weight_grams: 0,
+                                                    cost_cny: 800,
+                                                    cny_rate: 12.5,
+                                                    delivery_cost: 8000,
+                                                    mold_count: 1,
+                                                }),
+                                            }],
+                                            error: null,
+                                        });
+                                    },
+                                };
+                            },
+                            delete() {
+                                return { in() { return Promise.resolve({ error: null }); } };
+                            },
+                            upsert(payload) {
+                                context.__remoteCalls.push({ table, action: 'upsert', payload });
+                                return Promise.resolve({ error: null });
+                            },
+                        };
+                    },
+                };
+            },
+        };
+
+        vm.runInContext(`
+            initSupabase();
+            setLocal(LOCAL_KEYS.templates, [{
+                id: 777,
+                name: 'NFC Звезда',
+                category: 'blank',
+                collection: 'NFC',
+                photo_url: 'https://example.com/nfc-star.jpg',
+                pieces_per_hour_avg: 25,
+                weight_grams: 30,
+                cost_cny: 800,
+                cny_rate: 12.5,
+                delivery_cost: 8000,
+                mold_count: 1,
+            }]);
+        `, context);
+
+        const restoredMolds = JSON.parse(JSON.stringify(await vm.runInContext('loadMolds()', context)));
+        assert.equal(restoredMolds.length, 1);
+        assert.equal(restoredMolds[0].photo_url, 'https://example.com/nfc-star.jpg');
+        assert.equal(restoredMolds[0].collection, 'NFC');
+        assert.equal(restoredMolds[0].pph_actual, 25);
+        assert.equal(restoredMolds[0].weight_grams, 30);
+        assert.equal(context.__remoteCalls.filter(call => call.table === 'molds' && call.action === 'upsert').length, 1, 'hydrated mold should be synced back to shared molds');
+    }
+
+    {
+        const context = createContext();
+        runScript(context, 'js/supabase.js');
+
+        vm.runInContext(`
+            initSupabase();
             setLocal(LOCAL_KEYS.orderItems, [{
                 id: 1,
                 order_id: 9001,
