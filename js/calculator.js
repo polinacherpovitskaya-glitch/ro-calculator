@@ -221,7 +221,13 @@ function calculateItemCost(item, params) {
     const costCuttingIndirect = hoursCutting > 0 ? p.indirectPerHour * hoursCutting / qty : 0;
 
     // === NFC ===
-    const costNfcTag = item.is_nfc ? p.nfcTagCost : 0;
+    const hasExplicitNfcHardware = !!item.is_nfc
+        && isNfcLikeEntry(item.builtin_hw_name)
+        && (
+            (Number(item.builtin_hw_price) || 0) > 0
+            || (Number(item.builtin_hw_delivery_total) || 0) > 0
+        );
+    const costNfcTag = item.is_nfc ? (hasExplicitNfcHardware ? 0 : p.nfcTagCost) : 0;
 
     let hoursNfc = 0;
     let costNfcProgramming = 0;

@@ -230,7 +230,13 @@ const Molds = {
             }
 
             const baseAssemblyCostPerUnit = round2((baseResult.costBuiltinAssembly || 0) + (baseResult.costBuiltinAssemblyIndirect || 0));
-            const baseNfcCostPerUnit = round2((baseResult.costNfcTag || 0) + (baseResult.costNfcProgramming || 0) + (baseResult.costNfcIndirect || 0));
+            const hasExplicitNfcHardware = this._hasInlineNfcChip(m) && baseHwCostPerUnit > 0;
+            const baseNfcCostPerUnit = round2(
+                (baseResult.costNfcTag || 0)
+                + (baseResult.costNfcProgramming || 0)
+                + (baseResult.costNfcIndirect || 0)
+                + (hasExplicitNfcHardware ? baseHwCostPerUnit : 0)
+            );
             const baseCuttingCostPerUnit = round2((baseResult.costCutting || 0) + (baseResult.costCuttingIndirect || 0));
             m.cost_breakdown = {
                 total: round2(baseAdjustedCost),
@@ -241,7 +247,7 @@ const Molds = {
                 design: round2(baseResult.costDesign || 0),
                 cutting: baseCuttingCostPerUnit,
                 nfc: baseNfcCostPerUnit,
-                builtin_hw: round2(baseHwCostPerUnit),
+                builtin_hw: hasExplicitNfcHardware ? 0 : round2(baseHwCostPerUnit),
                 builtin_assembly: baseAssemblyCostPerUnit,
             };
 

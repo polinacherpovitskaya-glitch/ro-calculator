@@ -916,6 +916,46 @@ async function smokeBlankTargetFormulaMatchesVatExclusiveMargin(context) {
     assert.equal(state.blankMargin, 40.08, 'rounded blank price should stay very close to the 40% net target');
 }
 
+async function smokeWarehouseBackedNfcDoesNotDoubleCountFallback(context) {
+    const result = clone(await vm.runInContext(`(() => {
+        return calculateItemCost({
+            quantity: 1,
+            pieces_per_hour: 1,
+            weight_grams: 0,
+            extra_molds: 0,
+            complex_design: false,
+            is_blank_mold: false,
+            is_nfc: true,
+            nfc_programming: false,
+            delivery_included: false,
+            printings: [],
+            builtin_hw_name: 'NFC',
+            builtin_hw_price: 6.5,
+            builtin_hw_delivery_total: 0,
+            builtin_hw_speed: 0,
+            builtin_assembly_name: '',
+            builtin_assembly_speed: 0,
+        }, {
+            fotPerHour: 0,
+            indirectPerHour: 0,
+            plasticCostPerKg: 0,
+            moldBaseCost: 0,
+            designCost: 0,
+            nfcTagCost: 10,
+            nfcWriteSpeed: 350,
+            wasteFactor: 1,
+            cuttingSpeed: 0,
+            printingDeliveryCost: 0,
+            deliveryCostMoscow: 0,
+            indirectCostMode: 'all',
+        });
+    })()`, context));
+
+    assert.equal(result.costNfcTag, 0, 'warehouse-backed NFC should replace the generic tag fallback instead of stacking on top of it');
+    assert.equal(result.costBuiltinHw, 6.5, 'warehouse-backed NFC should keep its real purchase price');
+    assert.equal(result.costTotal, 6.5, 'warehouse-backed NFC should not double count fallback and hardware prices');
+}
+
 async function smokePendantFallbackTierMatchesVatExclusiveMargin() {
     const pendantContext = createContext();
     stubRuntime(pendantContext);
@@ -7671,6 +7711,7 @@ async function main() {
     await smokeOrderListAndDetailUseLiveFinancialSnapshot(context);
     await smokeBlankPricingSeparatesCatalogPriceAndNetMargin(context);
     await smokeBlankTargetFormulaMatchesVatExclusiveMargin(context);
+    await smokeWarehouseBackedNfcDoesNotDoubleCountFallback(context);
     await smokePendantFallbackTierMatchesVatExclusiveMargin();
     await smokeOrderDiscountAffectsSummaryAndFinDirector(context);
     await smokeDiscountShownInCustomerInvoice(context);
