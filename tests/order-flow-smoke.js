@@ -120,7 +120,7 @@ function createContext() {
                 fotPerHour: 100,
                 indirectCostMode: 'none',
                 indirectPerHour: 0,
-                taxRate: 0.12,
+                taxRate: 0.07,
                 packagingHours: 8,
                 plasticHours: 8,
                 hardwareHours: 8,
@@ -190,7 +190,7 @@ function stubRuntime(context) {
             fotPerHour: 100,
             indirectCostMode: 'none',
             indirectPerHour: 0,
-            taxRate: 0.12,
+            taxRate: 0.07,
             packagingHours: 8,
             plasticHours: 8,
             hardwareHours: 8,
@@ -459,7 +459,7 @@ async function smokeEmptyPlaceholderProductIsNotSaved(context) {
 
 async function smokeOrderDiscountAffectsSummaryAndFinDirector(context) {
     const data = clone(await vm.runInContext(`(() => {
-        const params = { ...App.params, taxRate: 0.12, vatRate: 0.05, charityRate: 0.01 };
+        const params = { ...App.params, taxRate: 0.07, vatRate: 0.05, charityRate: 0.01 };
         const items = [{
             quantity: 1,
             sell_price_item: 100,
@@ -480,7 +480,7 @@ async function smokeOrderDiscountAffectsSummaryAndFinDirector(context) {
     assert.equal(data.amountSummary.totalRevenue, 90);
     assert.equal(data.amountSummary.vatOnRevenue, 4.5);
     assert.equal(data.amountSummary.totalWithVat, 94.5);
-    assert.equal(data.amountSummary.totalEarned, 22.12);
+    assert.equal(data.amountSummary.totalEarned, 26.62);
 
     assert.equal(data.percentSummary.discountAmount, 10);
     assert.equal(data.percentSummary.totalRevenue, 90);
@@ -488,7 +488,7 @@ async function smokeOrderDiscountAffectsSummaryAndFinDirector(context) {
     assert.equal(data.fin.grossRevenue, 100);
     assert.equal(data.fin.discountAmount, 10);
     assert.equal(data.fin.revenue, 90);
-    assert.equal(data.fin.taxes, 10.8);
+    assert.equal(data.fin.taxes, 6.3);
     assert.equal(data.fin.commercial, 6.14);
     assert.equal(data.fin.charity, 0.95);
 }
@@ -779,7 +779,7 @@ async function smokeOrderListAndDetailUseLiveFinancialSnapshot(context) {
             cuttingSpeed: 1000,
             nfcTagCost: 0,
             nfcWriteSpeed: 1000,
-            taxRate: 0.12,
+            taxRate: 0.07,
             vatRate: 0.05,
             charityRate: 0.01,
             deliveryCostMoscow: 0,
@@ -891,13 +891,13 @@ async function smokeBlankPricingSeparatesCatalogPriceAndNetMargin(context) {
     assert.match(pricingHtml, /Рекоменд\. цена/);
     assert.match(pricingHtml, /вручную в бланке/);
     assert.match(pricingHtml, /Чистая маржа/);
-    assert.match(pricingHtml, /налогов 12%/);
+    assert.match(pricingHtml, /налогов 7%/);
     assert.match(pricingHtml, /pricing-grid-compact/);
 }
 
 async function smokeBlankTargetFormulaMatchesVatExclusiveMargin(context) {
     const state = clone(await vm.runInContext(`(() => {
-        const params = { ...App.params, taxRate: 0.12, vatRate: 0.05, charityRate: 0.01 };
+        const params = { ...App.params, taxRate: 0.07, vatRate: 0.05, charityRate: 0.01 };
         const cost = 277;
         const qty = 1000;
         return {
@@ -909,11 +909,11 @@ async function smokeBlankTargetFormulaMatchesVatExclusiveMargin(context) {
         };
     })()`, context));
 
-    assert.equal(state.blankTarget, 690.34, 'blank target price should use the same VAT-exclusive base formula as custom items');
-    assert.equal(state.blankNet40, 690.34, '40% blank helper price should match the calculator target formula');
-    assert.equal(state.customTarget, 690.34, 'custom target formula should stay aligned with blank target formula');
-    assert.equal(state.blankSell, 690, 'blank catalog sell price should round the VAT-exclusive target to the nearest 5');
-    assert.equal(state.blankMargin, 39.98, 'rounded blank price should stay very close to the 40% net target');
+    assert.equal(state.blankTarget, 613.85, 'blank target price should use the same VAT-exclusive base formula as custom items');
+    assert.equal(state.blankNet40, 613.85, '40% blank helper price should match the calculator target formula');
+    assert.equal(state.customTarget, 613.85, 'custom target formula should stay aligned with blank target formula');
+    assert.equal(state.blankSell, 615, 'blank catalog sell price should round the VAT-exclusive target to the nearest 5');
+    assert.equal(state.blankMargin, 40.08, 'rounded blank price should stay very close to the 40% net target');
 }
 
 async function smokePendantFallbackTierMatchesVatExclusiveMargin() {
@@ -926,7 +926,7 @@ async function smokePendantFallbackTierMatchesVatExclusiveMargin() {
     const state = clone(await vm.runInContext(`(() => {
         const params = {
             ...App.params,
-            taxRate: 0.12,
+            taxRate: 0.07,
             vatRate: 0.05,
             charityRate: 0.01,
             wasteFactor: 1.1,
@@ -1098,7 +1098,7 @@ async function smokeFinDirectorRevenueMatchesNetSummaryAndProfit(context) {
         const params = {
             ...App.params,
             fotPerHour: 100,
-            taxRate: 0.12,
+            taxRate: 0.07,
             vatRate: 0.05,
             charityRate: 0.01,
             moldBaseCost: 0,
@@ -1156,7 +1156,7 @@ async function smokePendantAttachmentCostsIncludeAssemblyAndIndirect(context) {
             fotPerHour: 100,
             indirectCostMode: 'all',
             indirectPerHour: 50,
-            taxRate: 0.12,
+            taxRate: 0.07,
             charityRate: 0.01,
         };
         const pendant = {
@@ -2562,7 +2562,7 @@ async function smokePendantAutoPriceFromBlanks() {
             fotPerHour: 100,
             indirectCostMode: 'none',
             indirectPerHour: 0,
-            taxRate: 0.12,
+            taxRate: 0.07,
             packagingHours: 8,
             plasticHours: 8,
             hardwareHours: 8,
@@ -2629,7 +2629,7 @@ async function smokePendantLettersContributePlasticLoad() {
             fotPerHour: 100,
             indirectCostMode: 'all',
             indirectPerHour: 50,
-            taxRate: 0.12,
+            taxRate: 0.07,
             packagingHours: 8,
             plasticHours: 8,
             hardwareHours: 8,
@@ -2694,7 +2694,7 @@ async function smokeCyrillicPendantUsesLiveBlankPphFields(context) {
             fotPerHour: 100,
             indirectCostMode: 'none',
             indirectPerHour: 0,
-            taxRate: 0.12,
+            taxRate: 0.07,
             vatRate: 0.05,
             charityRate: 0.01,
             packagingHours: 8,
@@ -2756,7 +2756,7 @@ async function smokeBlankBuiltinAssemblyUsesAssemblyLoad(context) {
             fotPerHour: 100,
             indirectCostMode: 'all',
             indirectPerHour: 50,
-            taxRate: 0.12,
+            taxRate: 0.07,
             vatRate: 0.05,
             charityRate: 0.01,
             plasticCostPerKg: 2500,
@@ -2898,7 +2898,7 @@ async function smokePendantFinDirectorUsesCurrentLetterCost(context) {
             fotPerHour: 100,
             indirectCostMode: 'none',
             indirectPerHour: 0,
-            taxRate: 0.12,
+            taxRate: 0.07,
             vatRate: 0.05,
             charityRate: 0.01,
             packagingHours: 8,

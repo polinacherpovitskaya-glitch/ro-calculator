@@ -1315,7 +1315,7 @@ const Pendant = {
                 ? getKeepRateForTargetMargin(params, targetMargin)
                 : (() => {
                     const vatRate = Number.isFinite(params.vatRate) ? params.vatRate : 0.05;
-                    const taxRate = Number.isFinite(params.taxRate) ? params.taxRate : 0.12;
+                    const taxRate = Number.isFinite(params.taxRate) ? params.taxRate : 0.07;
                     const charityRate = Number.isFinite(params.charityRate) ? params.charityRate : 0.01;
                     const retention = 1 - taxRate - (0.065 * (1 + vatRate)) - (charityRate * (1 + vatRate));
                     return retention - targetMargin;
@@ -1328,7 +1328,7 @@ const Pendant = {
         const keepNetRate = typeof getNetRevenueRetentionRate === 'function'
             ? getNetRevenueRetentionRate(params)
             : 1
-                - (Number.isFinite(params.taxRate) ? params.taxRate : 0.12)
+                - (Number.isFinite(params.taxRate) ? params.taxRate : 0.07)
                 - (0.065 * (1 + (Number.isFinite(params.vatRate) ? params.vatRate : 0.05)))
                 - ((Number.isFinite(params.charityRate) ? params.charityRate : 0.01) * (1 + (Number.isFinite(params.vatRate) ? params.vatRate : 0.05)));
         const margin = sellPrice > 0
@@ -1493,7 +1493,7 @@ const Pendant = {
         const _keepNetRate = typeof getNetRevenueRetentionRate === 'function'
             ? getNetRevenueRetentionRate(App?.params || {})
             : 1
-                - (Number.isFinite(App?.params?.taxRate) ? App.params.taxRate : 0.12)
+                - (Number.isFinite(App?.params?.taxRate) ? App.params.taxRate : 0.07)
                 - (0.065 * (1 + (Number.isFinite(App?.params?.vatRate) ? App.params.vatRate : 0.05)))
                 - ((Number.isFinite(App?.params?.charityRate) ? App.params.charityRate : 0.01) * (1 + (Number.isFinite(App?.params?.vatRate) ? App.params.vatRate : 0.05)));
         const finalMargin = typeof calculateActualMargin === 'function'

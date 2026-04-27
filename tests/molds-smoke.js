@@ -139,7 +139,7 @@ function runScript(context, relativePath) {
 async function main() {
     const context = createContext();
     context.calculateItemCost = () => ({ costTotal: 100, costMoldAmortization: 0 });
-    context.App.params = { taxRate: 0.12, vatRate: 0.05, charityRate: 0.01 };
+    context.App.params = { taxRate: 0.07, vatRate: 0.05, charityRate: 0.01 };
     runScript(context, 'js/molds.js');
 
     assert.equal(vm.runInContext('getBlankMargin(10)', context), 0.65);
@@ -215,7 +215,7 @@ async function main() {
     vm.runInContext(`
         Molds.recalcHwCost = () => {};
         Molds.recalcPkgCost = () => {};
-        App.params = { fotPerHour: 400, indirectPerHour: 100, taxRate: 0.12, charityRate: 0.01 };
+        App.params = { fotPerHour: 400, indirectPerHour: 100, taxRate: 0.07, charityRate: 0.01 };
         globalThis.__warehouseItems = [{
             id: 77,
             name: 'NFC',
@@ -416,7 +416,7 @@ async function main() {
         Molds.enrichMolds();
     `, context);
     const formulaPriceWithoutManual = vm.runInContext(`Molds.allMolds[0].tiers[50].sellPrice`, context);
-    assert.equal(formulaPriceWithoutManual, 515);
+    assert.equal(formulaPriceWithoutManual, 415);
 
     vm.runInContext(`
         Molds.allMolds[0].use_manual_prices = true;
@@ -442,7 +442,7 @@ async function main() {
     });
     vm.runInContext(`
         App.params = {
-            taxRate: 0.12,
+            taxRate: 0.07,
             vatRate: 0.05,
             charityRate: 0.01,
             wasteFactor: 1.1,

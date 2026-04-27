@@ -10,7 +10,7 @@
   <link rel="stylesheet" href="css/style.css?v=123">
     <script>
         (function () {
-            const CURRENT_HTML_VERSION = 'v292';
+            const CURRENT_HTML_VERSION = 'v293';
             const ATTEMPT_KEY = 'ro_calc_force_update_attempts';
 
             function parseVersion(version) {
@@ -81,7 +81,7 @@
     <aside class="sidebar">
         <div class="sidebar-brand">
             <h2>Recycle Object</h2>
-            <span>Калькулятор <span id="app-version">v292</span></span>
+            <span>Калькулятор <span id="app-version">v293</span></span>
         </div>
         <nav class="sidebar-nav">
             <a href="#tasks" data-page="tasks">
@@ -409,7 +409,7 @@
                     <div class="cost-row"><span class="cost-label">Молды</span><span class="cost-value" id="fin-molds">0 &#8381;</span></div>
                     <div class="cost-row"><span class="cost-label">Доставка клиенту</span><span class="cost-value" id="fin-delivery">0 &#8381;</span></div>
                     <div class="cost-row"><span class="cost-label">Коммерческий отдел (6.5% с НДС)</span><span class="cost-value" id="fin-commercial">0 &#8381;</span></div>
-                    <div class="cost-row"><span class="cost-label">Налоги от выручки без НДС (12%)</span><span class="cost-value" id="fin-taxes">0 &#8381;</span></div>
+                    <div class="cost-row"><span class="cost-label">Налоги от выручки без НДС (7%)</span><span class="cost-value" id="fin-taxes">0 &#8381;</span></div>
                     <div class="cost-row"><span class="cost-label">Благотворительность (1% с НДС)</span><span class="cost-value" id="fin-charity">0 &#8381;</span></div>
                     <div class="cost-row cost-total"><span class="cost-label">ИТОГО расходы</span><span class="cost-value" id="fin-total-costs">0 &#8381;</span></div>
                     <div class="cost-row" id="fin-discount-row" style="display:none"><span class="cost-label">Скидка по заказу</span><span class="cost-value" id="fin-discount">0 &#8381;</span></div>
@@ -2932,7 +2932,7 @@
                         <div class="form-group">
                             <label>Налоги от выручки без НДС</label>
                             <input type="number" step="0.01" id="set-tax_rate" data-key="tax_rate">
-                            <span class="form-hint">0.12 = 12%</span>
+                            <span class="form-hint">0.07 = 7%</span>
                         </div>
                         <div class="form-group">
                             <label>Благотворительность с НДС</label>
@@ -3470,17 +3470,17 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="js/work-management-core.js?v=1"></script>
 <script src="js/bug-report-core.js?v=2"></script>
-<script src="js/supabase.js?v=174"></script>
+<script src="js/supabase.js?v=175"></script>
 <script src="js/task-events.js?v=1"></script>
-<script src="js/calculator.js?v=78"></script>
-<script src="js/app.js?v=292"></script>
-<script src="js/tpa.js?v=1"></script>
+<script src="js/calculator.js?v=79"></script>
+<script src="js/app.js?v=293"></script>
+<script src="js/tpa.js?v=2"></script>
 <script src="js/wiki.js?v=4"></script>
 <script src="js/order-detail.js?v=65"></script>
 <script src="js/orders.js?v=65"></script>
 <script src="js/production_plan.js?v=76"></script>
 <script src="js/analytics.js?v=46g"></script>
-    <script src="js/molds.js?v=80"></script>
+    <script src="js/molds.js?v=81"></script>
 <script src="js/colors.js?v=46g"></script>
 <script src="js/kp.js?v=47"></script>
 <script src="js/timetrack.js?v=63"></script>
@@ -3490,8 +3490,8 @@
 <script src="js/gantt.js?v=59"></script>
 <script src="js/fintablo.js?v=2"></script>
   <script src="js/finance.js?v=26"></script>
-<script src="js/indirect_costs.js?v=8"></script>
-<script src="js/factual.js?v=92"></script>
+<script src="js/indirect_costs.js?v=9"></script>
+<script src="js/factual.js?v=93"></script>
 <script src="js/china.js?v=163"></script>
 <script src="js/warehouse_photos.js?v=48"></script>
 <script src="js/china_catalog.js?v=46k"></script>
@@ -3499,6 +3499,6 @@
 <script src="js/warehouse.js?v=182"></script>
 <script src="js/monitoring.js?v=1"></script>
 <script src="js/settings.js?v=81"></script>
-<script src="js/pendant.js?v=12"></script>
+<script src="js/pendant.js?v=13"></script>
 </body>
 </html>

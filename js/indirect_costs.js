@@ -250,7 +250,7 @@ const IndirectCosts = {
         const s = key => settings[key] || 0;
         const totalHoursAll = s('workers_count') * s('hours_per_worker');
         const workLoadHours = totalHoursAll * s('work_load_ratio');
-        const indirectCostMode = settings['indirect_cost_mode'] || 'production';
+        const indirectCostMode = settings['indirect_cost_mode'] || 'all';
         const plasticHours = workLoadHours * s('plastic_injection_ratio');
         return indirectCostMode === 'all' ? workLoadHours : plasticHours;
     },

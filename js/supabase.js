@@ -892,6 +892,26 @@ function _clearDeletedMold(moldId) {
 // SETTINGS
 // =============================================
 
+const NORMALIZED_TAX_RATE = 0.07;
+const LEGACY_TAX_RATES = new Set([0.06, 0.12]);
+const DEFAULT_INDIRECT_COST_MODE = 'all';
+
+function normalizeLegacySettings(settings) {
+    if (!settings || typeof settings !== 'object') return settings;
+    if ((settings.hours_per_worker || 0) === 189) settings.hours_per_worker = 168;
+
+    const rawTaxRate = Number(settings.tax_rate);
+    if (!Number.isFinite(rawTaxRate) || LEGACY_TAX_RATES.has(rawTaxRate)) {
+        settings.tax_rate = NORMALIZED_TAX_RATE;
+    }
+
+    if (!settings.indirect_cost_mode || settings.indirect_cost_mode === 'production') {
+        settings.indirect_cost_mode = DEFAULT_INDIRECT_COST_MODE;
+    }
+
+    return settings;
+}
+
 async function loadSettings() {
     if (isSupabaseReady()) {
         const { data, error } = await supabaseClient
@@ -919,25 +939,20 @@ async function loadSettings() {
             Object.keys(defaults).forEach(k => {
                 if (obj[k] === undefined) obj[k] = defaults[k];
             });
-            // Legacy normalization.
-            if ((obj.hours_per_worker || 0) === 189) obj.hours_per_worker = 168;
-            // Global finance rule updated from 6% to 12% tax reserve.
-            if ((obj.tax_rate || 0) === 0.06) obj.tax_rate = 0.12;
+            normalizeLegacySettings(obj);
             // Cache to localStorage for offline/backup
             setLocal(LOCAL_KEYS.settings, obj);
             return obj;
         }
         // Supabase empty — seed from localStorage or defaults, then return
         const local = getLocal(LOCAL_KEYS.settings) || getDefaultSettings();
-        if ((local.hours_per_worker || 0) === 189) local.hours_per_worker = 168;
-        if ((local.tax_rate || 0) === 0.06) local.tax_rate = 0.12;
+        normalizeLegacySettings(local);
         console.log('Supabase settings empty, seeding from local...');
         await saveAllSettings(local);
         return local;
     }
     const local = getLocal(LOCAL_KEYS.settings) || getDefaultSettings();
-    if ((local.hours_per_worker || 0) === 189) local.hours_per_worker = 168;
-    if ((local.tax_rate || 0) === 0.06) local.tax_rate = 0.12;
+    normalizeLegacySettings(local);
     return local;
 }
 
@@ -989,7 +1004,7 @@ function getDefaultSettings() {
         design_cost: 8500,
         nfc_tag_cost: 10,
         vat_rate: 0.05,
-        tax_rate: 0.12,
+        tax_rate: NORMALIZED_TAX_RATE,
         charity_rate: 0.01,
         margin_target: 0.40,
         delivery_cost_moscow: 2000,
@@ -999,7 +1014,7 @@ function getDefaultSettings() {
         mp_storage_ratio: 0.32,
         mp_acquiring: 0.065,
         waste_factor: 1.1,
-        indirect_cost_mode: 'production',
+        indirect_cost_mode: DEFAULT_INDIRECT_COST_MODE,
         // China catalog delivery rates & surcharges
         china_cny_rate: 12.5,
         china_usd_rate: 90,

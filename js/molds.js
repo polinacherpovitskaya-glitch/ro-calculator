@@ -7,7 +7,7 @@
 // 1. Себестоимость рассчитывается как для любых изделий (молд / 4500)
 // 2. НДС 5% добавляется сверху и НЕ входит в базовую цену.
 // 3. Из цены без НДС удерживаются:
-//    - налоги 12% от базы без НДС
+//    - налоги 7% от базы без НДС
 //    - коммерческий отдел 6.5% от суммы с НДС
 //    - благотворительность 1% от суммы с НДС
 // 4. Цена без НДС = себест / (1 - налоги - коммерческий(с НДС) - благотворительность(с НДС) - target_net_margin), округление до 5₽
@@ -42,7 +42,7 @@ function getBlankKeepRate(params, margin = 0) {
         return getKeepRateForTargetMargin(params, margin);
     }
     const vatRate = Number.isFinite(params?.vatRate) ? params.vatRate : 0.05;
-    const taxRate = Number.isFinite(params?.taxRate) ? params.taxRate : 0.12;
+    const taxRate = Number.isFinite(params?.taxRate) ? params.taxRate : 0.07;
     const charityRate = Number.isFinite(params?.charityRate) ? params.charityRate : 0.01;
     const commercialRate = 0.065;
     return 1 - taxRate - (commercialRate * (1 + vatRate)) - (charityRate * (1 + vatRate)) - (Number(margin) || 0);
@@ -411,7 +411,7 @@ const Molds = {
                 const marginPct = t ? Math.round(t.margin * 100) : 0;
                 const sellWithVat = t ? round2(t.sellPrice * (1 + vatRate)) : 0;
                 tierCells += `<td style="text-align:right;padding:6px 4px;font-size:10px;color:var(--text-muted);border-left:1px solid var(--border);" title="${this.esc(this._getCostBreakdownTitle(m))}">${t ? Math.round(t.cost) : '—'}</td>`;
-                tierCells += `<td style="text-align:right;padding:6px 6px;font-size:13px;font-weight:700;color:${sellColor};" title="Цена в колонке указана без НДС: ${t ? formatRub(t.sellPrice) : '—'}. С НДС: ${t ? formatRub(sellWithVat) : '—'}. Чистая маржа ${marginPct}% считается после налогов 12% от базы, 1% благотворительности с НДС и 6.5% коммерческого отдела с НДС.">${t ? Math.round(t.sellPrice) : '—'}</td>`;
+                tierCells += `<td style="text-align:right;padding:6px 6px;font-size:13px;font-weight:700;color:${sellColor};" title="Цена в колонке указана без НДС: ${t ? formatRub(t.sellPrice) : '—'}. С НДС: ${t ? formatRub(sellWithVat) : '—'}. Чистая маржа ${marginPct}% считается после налогов 7% от базы, 1% благотворительности с НДС и 6.5% коммерческого отдела с НДС.">${t ? Math.round(t.sellPrice) : '—'}</td>`;
             });
 
             html += `
@@ -450,7 +450,7 @@ const Molds = {
         html += `
             <div style="padding:10px 12px;font-size:10px;color:var(--text-muted);display:flex;gap:12px;flex-wrap:wrap;border-top:1px solid var(--border);">
                 <span><span style="color:var(--text-secondary);">себест</span> — себестоимость · <span style="color:var(--green);font-weight:700;">без НДС</span> — базовая цена без НДС</span>
-                <span>Проценты под ценой — чистая маржа на базе без НДС; сверху потом добавляется НДС 5%, а из базы вычитаются налоги 12%, 1% благотворительности с НДС и 6.5% коммерческого отдела с НДС</span>
+                <span>Проценты под ценой — чистая маржа на базе без НДС; сверху потом добавляется НДС 5%, а из базы вычитаются налоги 7%, 1% благотворительности с НДС и 6.5% коммерческого отдела с НДС</span>
                 <span>Нажмите на строку для быстрых настроек</span>
             </div>
         </div>`;
@@ -524,7 +524,7 @@ const Molds = {
                 <div style="font-size:10px;color:var(--text-secondary);">${t ? Math.round(t.cost) + '₽' : '—'}</div>
                 <div style="font-size:14px;font-weight:700;color:${sellColor};">${t ? Math.round(t.sellPrice) + '₽' : '—'}</div>
                 <div style="font-size:9px;color:var(--text-muted);">${t ? 'с НДС ' + Math.round(sellWithVat) + '₽' : ''}</div>
-                <div style="font-size:9px;color:var(--text-muted);" title="Чистая маржа на базе без НДС; сверху добавляется НДС 5%, затем вычитаются налоги 12% от базы, 1% благотворительности с НДС и 6.5% коммерческого отдела с НДС">${marginPct}%</div>
+                <div style="font-size:9px;color:var(--text-muted);" title="Чистая маржа на базе без НДС; сверху добавляется НДС 5%, затем вычитаются налоги 7% от базы, 1% благотворительности с НДС и 6.5% коммерческого отдела с НДС">${marginPct}%</div>
             </div>`;
         }).join('');
 
@@ -1946,7 +1946,7 @@ const Molds = {
             html += `Сборка: <span style="color:var(--text-muted)">укажите скорость (шт/мин)</span>`;
         }
         if (formulaSellPrice > 0) {
-            html += `<br><span style="color:var(--green);font-weight:700;">Цена без НДС по формуле (40% чистой маржи, −12% налоги от базы, −1% благотворительность с НДС, −6,5% коммерческий с НДС): ${formatRub(formulaSellPrice)}</span>`;
+            html += `<br><span style="color:var(--green);font-weight:700;">Цена без НДС по формуле (40% чистой маржи, −7% налоги от базы, −1% благотворительность с НДС, −6,5% коммерческий с НДС): ${formatRub(formulaSellPrice)}</span>`;
         }
         if (fixedSellPrice > 0) {
             html += `<br><span style="color:var(--text-muted);">Ручная цена в поле: ${formatRub(fixedSellPrice)}</span>`;
@@ -2251,7 +2251,7 @@ const Molds = {
         }
         html += `Итого себестоимость: <b>${formatRub(totalCost)}</b>`;
         if (formulaSellPrice > 0) {
-            html += `<br><span style="color:var(--green);font-weight:700;">Цена без НДС по формуле (40% чистой маржи, −12% налоги от базы, −1% благотворительность с НДС, −6,5% коммерческий с НДС): ${formatRub(formulaSellPrice)}</span>`;
+            html += `<br><span style="color:var(--green);font-weight:700;">Цена без НДС по формуле (40% чистой маржи, −7% налоги от базы, −1% благотворительность с НДС, −6,5% коммерческий с НДС): ${formatRub(formulaSellPrice)}</span>`;
         }
         if (fixedSellPrice > 0) {
             html += `<br><span style="color:var(--text-muted);">Ручная цена в поле: ${formatRub(fixedSellPrice)}</span>`;

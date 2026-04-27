@@ -14,8 +14,8 @@ function getProductionParams(settings) {
     const workLoadHours = totalHoursAll * s('work_load_ratio');
     const plasticHours = workLoadHours * s('plastic_injection_ratio');
     const packagingHours = workLoadHours * s('packaging_ratio');
-    // Режим распределения косвенных: 'production' (только литьё) или 'all' (все часы)
-    const indirectCostMode = settings['indirect_cost_mode'] || 'production';
+    // Режим распределения косвенных: 'production' (только литьё) или 'all' (все производственные часы)
+    const indirectCostMode = settings['indirect_cost_mode'] || 'all';
     const indirectDenom = indirectCostMode === 'all' ? workLoadHours : plasticHours;
     const indirectPerHour = indirectDenom > 0 ? s('indirect_costs_monthly') / indirectDenom : 0;
 
@@ -55,7 +55,7 @@ function getVatRate(params) {
 }
 
 function getTaxRate(params) {
-    return getRateValue(params?.taxRate, 0.12);
+    return getRateValue(params?.taxRate, 0.07);
 }
 
 function getCharityRate(params) {

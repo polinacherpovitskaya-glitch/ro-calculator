@@ -45,7 +45,7 @@ const Factual = {
         { key: 'plastic',             label: 'Пластик / материалы', planField: 'plastic',       hint: 'план + ФинТабло / вруч.' },
         { key: 'molds',               label: 'Молды',            planField: 'molds',            hint: 'FinTablo / вруч.' },
         { key: 'delivery_client',     label: 'Доставка',         planField: 'delivery',         hint: 'вручную' },
-        { key: 'taxes',               label: 'Налоги',            planField: 'taxes',            hint: '12% от выручки без НДС / ФинТабло' },
+        { key: 'taxes',               label: 'Налоги',            planField: 'taxes',            hint: '7% от выручки без НДС / ФинТабло' },
         { key: 'commercial',          label: 'Коммерческий отдел', planField: 'commercial',     hint: '6.5% от выручки с НДС' },
         { key: 'charity',             label: 'Благотворительность', planField: 'charity',       hint: '1% от выручки с НДС / ФинТабло' },
         { key: 'other',               label: 'Прочее',           planField: 'other',            hint: 'FinTablo / вруч.' },
@@ -87,7 +87,7 @@ const Factual = {
 
     _num(v) { const n = parseFloat(v); return Number.isFinite(n) ? n : 0; },
     _vatRate(params) { const raw = Number(params?.vatRate); return Number.isFinite(raw) ? raw : 0.05; },
-    _taxRate(params) { const raw = Number(params?.taxRate); return Number.isFinite(raw) ? raw : 0.12; },
+    _taxRate(params) { const raw = Number(params?.taxRate); return Number.isFinite(raw) ? raw : 0.07; },
     _charityRate(params) { const raw = Number(params?.charityRate); return Number.isFinite(raw) ? raw : 0.01; },
     _commercialRate() { return 0.065; },
     _grossMultiplier(params) { return 1 + this._vatRate(params); },

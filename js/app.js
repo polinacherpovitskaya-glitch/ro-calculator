@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v292';
+const APP_VERSION = 'v293';
 
 const App = {
     currentPage: 'orders',
@@ -3630,7 +3630,7 @@ const Calculator = {
                     if (costItemOnly === 0) return 0;
                     const keepRate = typeof getKeepRateForTargetMargin === 'function'
                         ? getKeepRateForTargetMargin(params, marginPct)
-                        : 1 - (params.taxRate || 0.12) - ((Number.isFinite(params?.charityRate) ? params.charityRate : 0.01) * (1 + (Number.isFinite(params?.vatRate) ? params.vatRate : 0.05))) - (0.065 * (1 + (Number.isFinite(params?.vatRate) ? params.vatRate : 0.05))) - marginPct;
+                        : 1 - (params.taxRate || 0.07) - ((Number.isFinite(params?.charityRate) ? params.charityRate : 0.01) * (1 + (Number.isFinite(params?.vatRate) ? params.vatRate : 0.05))) - (0.065 * (1 + (Number.isFinite(params?.vatRate) ? params.vatRate : 0.05))) - marginPct;
                     if (keepRate <= 0) return 0;
                     return round2(costItemOnly / keepRate);
                 };
@@ -3911,7 +3911,7 @@ const Calculator = {
             if (cost === 0) return 0;
             const keepRate = typeof getKeepRateForTargetMargin === 'function'
                 ? getKeepRateForTargetMargin(params, marginPct)
-                : 1 - (params.taxRate || 0.12) - ((Number.isFinite(params?.charityRate) ? params.charityRate : 0.01) * (1 + (Number.isFinite(params?.vatRate) ? params.vatRate : 0.05))) - (0.065 * (1 + (Number.isFinite(params?.vatRate) ? params.vatRate : 0.05))) - marginPct;
+                : 1 - (params.taxRate || 0.07) - ((Number.isFinite(params?.charityRate) ? params.charityRate : 0.01) * (1 + (Number.isFinite(params?.vatRate) ? params.vatRate : 0.05))) - (0.065 * (1 + (Number.isFinite(params?.vatRate) ? params.vatRate : 0.05))) - marginPct;
             if (keepRate <= 0) return 0;
             return round2(cost / keepRate);
         };
@@ -3951,7 +3951,7 @@ const Calculator = {
 
             const keepRate = typeof getKeepRateForTargetMargin === 'function'
                 ? getKeepRateForTargetMargin(params, margin)
-                : 1 - (Number.isFinite(params?.taxRate) ? params.taxRate : 0.12) - ((Number.isFinite(params?.charityRate) ? params.charityRate : 0.01) * (1 + (Number.isFinite(params?.vatRate) ? params.vatRate : 0.05))) - (0.065 * (1 + (Number.isFinite(params?.vatRate) ? params.vatRate : 0.05))) - margin;
+                : 1 - (Number.isFinite(params?.taxRate) ? params.taxRate : 0.07) - ((Number.isFinite(params?.charityRate) ? params.charityRate : 0.01) * (1 + (Number.isFinite(params?.vatRate) ? params.vatRate : 0.05))) - (0.065 * (1 + (Number.isFinite(params?.vatRate) ? params.vatRate : 0.05))) - margin;
             if (keepRate <= 0) {
                 return { price: 0, note: 'прайс бланков', source: 'empty' };
             }
@@ -4188,7 +4188,7 @@ const Calculator = {
         });
 
         // Margin row (% only)
-        html += `<div style="padding:5px 6px;border-right:1px solid var(--border);font-weight:600;line-height:1.2;">Чистая маржа<div style="font-size:9px;color:var(--text-muted);font-weight:400;line-height:1.2;margin-top:2px;">на цене без НДС; после налогов 12%, благотворительности с НДС и коммерческого с НДС</div></div>`;
+        html += `<div style="padding:5px 6px;border-right:1px solid var(--border);font-weight:600;line-height:1.2;">Чистая маржа<div style="font-size:9px;color:var(--text-muted);font-weight:400;line-height:1.2;margin-top:2px;">на цене без НДС; после налогов 7%, благотворительности с НДС и коммерческого с НДС</div></div>`;
         columns.forEach(col => {
             let marginHtml = '—';
             let warnHtml = '';
@@ -5543,7 +5543,7 @@ const Calculator = {
             if (cost === 0) return 0;
             const keepRate = typeof getKeepRateForTargetMargin === 'function'
                 ? getKeepRateForTargetMargin(params, marginPct)
-                : 1 - (params.taxRate || 0.12) - ((Number.isFinite(params?.charityRate) ? params.charityRate : 0.01) * (1 + (Number.isFinite(params?.vatRate) ? params.vatRate : 0.05))) - (0.065 * (1 + (Number.isFinite(params?.vatRate) ? params.vatRate : 0.05))) - marginPct;
+                : 1 - (params.taxRate || 0.07) - ((Number.isFinite(params?.charityRate) ? params.charityRate : 0.01) * (1 + (Number.isFinite(params?.vatRate) ? params.vatRate : 0.05))) - (0.065 * (1 + (Number.isFinite(params?.vatRate) ? params.vatRate : 0.05))) - marginPct;
             if (keepRate <= 0) return 0;
             return round2(cost / keepRate);
         };
