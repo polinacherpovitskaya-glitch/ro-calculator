@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v285';
+const APP_VERSION = 'v286';
 
 const App = {
     currentPage: 'orders',
@@ -19,6 +19,21 @@ const App = {
     currentEmployeeId: null,
     currentUser: null,
     _bootstrappingApp: false,
+
+    showLocalFileModeWarning() {
+        const authScreen = document.getElementById('auth-screen');
+        const appLayout = document.getElementById('app-layout');
+        const authBox = authScreen ? authScreen.querySelector('.auth-box') : null;
+        if (appLayout) appLayout.classList.remove('active');
+        if (authScreen) authScreen.style.display = 'flex';
+        if (!authBox) return;
+        authBox.innerHTML = `
+            <h1>Открыта временная копия</h1>
+            <p style="margin-bottom:12px;">Этот экран открыт из <code>file:///...</code>, поэтому здесь нет нормальных бланков, фото и ручных цен. Такая копия не должна использоваться для работы.</p>
+            <a class="btn btn-primary btn-lg" style="width:100%;text-align:center;display:block;" href="https://polinacherpovitskaya-glitch.github.io/ro-calculator/#molds">Открыть рабочий сайт</a>
+            <p style="margin-top:10px;font-size:12px;color:var(--text-muted);">Нужный адрес: polinacherpovitskaya-glitch.github.io/ro-calculator</p>
+        `;
+    },
 
     syncQuickBugButton() {
         const api = (typeof BugReports !== 'undefined' ? BugReports : null) || (typeof window !== 'undefined' ? window.BugReports : null);
@@ -183,6 +198,10 @@ const App = {
 
     async init() {
         initSupabase();
+        if (typeof window !== 'undefined' && window.__roLocalFileMode) {
+            this.showLocalFileModeWarning();
+            return;
+        }
         this.initDefaultPermissions();
         this.bindWarmCacheListeners();
         await this.prepareAuthUI();

@@ -8,6 +8,12 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 
 let supabaseClient = null;
 let supabaseAccessWarningShown = false;
+
+function _isFileProtocolRuntime() {
+    if (typeof window === 'undefined') return false;
+    const protocol = String(window.location?.protocol || '').toLowerCase();
+    return protocol === 'file:';
+}
 let _authAccountsRefreshPromise = null;
 let _authAccountsLastSyncAt = 0;
 let _employeesRefreshPromise = null;
@@ -41,6 +47,13 @@ function _markSupabaseAccessProblem(error) {
 }
 
 function initSupabase() {
+    if (_isFileProtocolRuntime()) {
+        if (typeof window !== 'undefined') {
+            window.__roLocalFileMode = true;
+        }
+        console.warn('Supabase disabled in file:// mode. Open the app through GitHub Pages or a local http server.');
+        return null;
+    }
     if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
         console.warn('Supabase not configured. Running in local/demo mode.');
         return null;
