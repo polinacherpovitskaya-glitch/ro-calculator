@@ -153,6 +153,37 @@ async function main() {
 
         vm.runInContext(`
             initSupabase();
+            setLocal(LOCAL_KEYS.templates, [{
+                id: 321,
+                name: 'Фото-бланк',
+                category: 'blank',
+                collection: 'Пластик',
+                photo_url: 'https://example.com/photo-blank.jpg',
+                pieces_per_hour_min: 42,
+                pieces_per_hour_max: 42,
+                pieces_per_hour_avg: 42,
+                weight_grams: 18,
+                cost_cny: 800,
+                cny_rate: 12.5,
+                delivery_cost: 8000,
+                mold_count: 1,
+            }]);
+        `, context);
+
+        const moldsFromTemplates = JSON.parse(JSON.stringify(await vm.runInContext('loadMolds()', context)));
+        assert.equal(moldsFromTemplates.length, 1);
+        assert.equal(moldsFromTemplates[0].name, 'Фото-бланк');
+        assert.equal(moldsFromTemplates[0].photo_url, 'https://example.com/photo-blank.jpg');
+        assert.equal(moldsFromTemplates[0].pph_actual, 42);
+        assert.equal(moldsFromTemplates[0].weight_grams, 18);
+    }
+
+    {
+        const context = createContext();
+        runScript(context, 'js/supabase.js');
+
+        vm.runInContext(`
+            initSupabase();
             setLocal(LOCAL_KEYS.orderItems, [{
                 id: 1,
                 order_id: 9001,

@@ -1018,12 +1018,64 @@ async function loadTemplates() {
 }
 
 function _getLocalTemplates() {
-    // In localStorage mode, always derive templates from molds (source of truth)
+    const storedTemplates = getLocal(LOCAL_KEYS.templates);
+    if (Array.isArray(storedTemplates) && storedTemplates.length > 0) {
+        return storedTemplates;
+    }
+    // In localStorage mode, otherwise derive templates from molds (source of truth)
     const molds = getLocal(LOCAL_KEYS.molds);
     if (molds && molds.length > 0) {
         return molds.map(m => _moldToTemplate(m));
     }
     return getDefaultTemplates();
+}
+
+function _templateToMold(template, index = 0) {
+    if (!template || typeof template !== 'object') return null;
+    const pMin = Number(template.pieces_per_hour_min || template.pieces_per_hour_avg || 0) || 0;
+    const pMax = Number(template.pieces_per_hour_max || template.pieces_per_hour_avg || pMin || 0) || 0;
+    const pAct = Number(template.pieces_per_hour_avg || template.pieces_per_hour_max || template.pieces_per_hour_min || 0) || null;
+    return _normalizeMoldRecord({
+        id: template.id || `tpl-fallback-${index + 1}`,
+        name: String(template.name || '').trim(),
+        category: template.category === 'nfc' ? 'nfc' : 'blank',
+        collection: String(template.collection || '').trim(),
+        photo_url: String(template.photo_url || '').trim(),
+        status: template.status || 'active',
+        pph_min: pMin,
+        pph_max: pMax,
+        pph_actual: pAct,
+        weight_grams: Number(template.weight_grams || 0) || 0,
+        hw_source: template.hw_source || (template.hw_warehouse_item_id ? 'warehouse' : 'custom'),
+        hw_name: template.hw_name || '',
+        hw_price_per_unit: Number(template.hw_price_per_unit || 0) || 0,
+        hw_delivery_total: Number(template.hw_delivery_total || 0) || 0,
+        hw_speed: Number(template.hw_speed || 0) || null,
+        hw_warehouse_item_id: template.hw_warehouse_item_id || null,
+        hw_warehouse_sku: template.hw_warehouse_sku || '',
+        builtin_assembly_name: template.builtin_assembly_name || '',
+        builtin_assembly_speed: Number(template.builtin_assembly_speed || 0) || null,
+        custom_margins: template.custom_margins || {},
+        custom_prices: template.custom_prices || {},
+        use_manual_prices: !!template.use_manual_prices,
+        cost_cny: Number(template.cost_cny || 0) || 0,
+        cny_rate: Number(template.cny_rate || 0) || 0,
+        delivery_cost: Number(template.delivery_cost || 0) || 0,
+        mold_count: Math.max(1, Number(template.mold_count || 1) || 1),
+        complexity: template.complexity || 'simple',
+        total_orders: Number(template.total_orders || 0) || 0,
+        total_units_produced: Number(template.total_units_produced || 0) || 0,
+    });
+}
+
+function _getFallbackMoldsFromTemplates(deletedIds = new Set()) {
+    const templates = _getLocalTemplates();
+    if (!Array.isArray(templates) || templates.length === 0) return [];
+    return templates
+        .map((template, index) => _templateToMold(template, index))
+        .filter(Boolean)
+        .filter(mold => !deletedIds.has(Number(mold.id)))
+        .map(mold => _applyAutomaticMoldRepairs(mold).mold);
 }
 
 function getDefaultTemplates() {
@@ -2339,6 +2391,13 @@ async function loadMolds() {
                 return supabaseMolds;
             }
 
+            const templateFallback = _getFallbackMoldsFromTemplates(deletedIds);
+            if (templateFallback.length > 0) {
+                console.warn('[Molds] Supabase returned empty list, restoring molds from local templates fallback');
+                setLocal(LOCAL_KEYS.molds, templateFallback);
+                return templateFallback;
+            }
+
             // Supabase truly empty — seed from localStorage or defaults
             const seedData = (localMolds.length > 0 ? localMolds : getDefaultMolds())
                 .filter(mold => !deletedIds.has(Number(mold.id)));
@@ -2356,6 +2415,11 @@ async function loadMolds() {
         } catch(e) {
             console.error('loadMolds exception:', e);
             if (_isSupabaseAccessError(e)) _markSupabaseAccessProblem(e);
+            const templateFallback = _getFallbackMoldsFromTemplates(deletedIds);
+            if (templateFallback.length > 0) {
+                console.warn('[Molds] loadMolds exception fallback to local templates');
+                return templateFallback;
+            }
             const localMolds = (getLocal(LOCAL_KEYS.molds) || getDefaultMolds())
                 .filter(mold => !deletedIds.has(Number(mold.id)))
                 .map(_normalizeMoldRecord)
@@ -2363,6 +2427,8 @@ async function loadMolds() {
             return localMolds;
         }
     }
+    const templateFallback = _getFallbackMoldsFromTemplates(deletedIds);
+    if (templateFallback.length > 0) return templateFallback;
     return (getLocal(LOCAL_KEYS.molds) || getDefaultMolds())
         .filter(mold => !deletedIds.has(Number(mold.id)))
         .map(_normalizeMoldRecord)
