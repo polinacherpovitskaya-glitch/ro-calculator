@@ -46,6 +46,7 @@ function createContext() {
         __remoteCalls: [],
         __RO_REMOTE_LOAD_TIMEOUT_MS: 10,
         __RO_REMOTE_WRITE_TIMEOUT_MS: 10,
+        __RO_AUTH_ACCOUNTS_LOAD_TIMEOUT_MS: 10,
         __invalidTables: new Set(),
         __missingTables: new Set(),
         __hangingTables: new Set(),
@@ -308,6 +309,28 @@ async function main() {
         assert.equal(hydratedWarehouse[0].qty, 75);
         assert.equal(hydratedWarehouse[0].reserved_qty, 15, 'warehouse load should rebuild reserved qty from live reservations');
         assert.equal(hydratedWarehouse[0].available_qty, 60, 'warehouse load should not trust stale available qty from cached item_data');
+    }
+
+    {
+        const context = createContext();
+        runScript(context, 'js/supabase.js');
+        vm.runInContext(`initSupabase();`, context);
+        context.__invalidTables.add('warehouse_items');
+        context.__settingsStore.set('warehouse_items_json', JSON.stringify([{
+            id: 8801,
+            name: 'Снэпшотный карабин',
+            sku: 'SNAP-CARABIN',
+            category: 'hardware',
+            qty: 21,
+        }]));
+
+        const snapshotWarehouse = JSON.parse(JSON.stringify(await vm.runInContext('loadWarehouseItems()', context)));
+        assert.equal(snapshotWarehouse.length, 1, 'warehouse load should fall back to shared snapshot when table request fails');
+        assert.equal(snapshotWarehouse[0].id, 8801);
+        assert.equal(snapshotWarehouse[0].available_qty, 21);
+        const cachedSnapshot = JSON.parse(JSON.stringify(vm.runInContext('getLocal(LOCAL_KEYS.warehouseItems)', context)));
+        assert.equal(cachedSnapshot.length, 1, 'shared warehouse snapshot should hydrate local cache');
+        assert.equal(cachedSnapshot[0].sku, 'SNAP-CARABIN');
     }
 
     {

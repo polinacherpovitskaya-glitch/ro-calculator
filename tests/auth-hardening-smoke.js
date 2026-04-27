@@ -412,6 +412,13 @@ async function smokeLogoutCleanup(context) {
 
 async function smokeInitSkipsShowAppWithoutRestoredUser(context) {
     context.__showAppCalled = false;
+    vm.runInContext(`(() => {
+        window.__origPrepareAuthUI = App.prepareAuthUI;
+        window.__origMigratePages = App._migratePagePermsToAuthAccounts;
+        window.__origIsAuthenticated = App.isAuthenticated;
+        window.__origRestoreAuthenticatedUser = App.restoreAuthenticatedUser;
+        window.__origShowApp = App.showApp;
+    })()`, context);
     await vm.runInContext(`(async () => {
         App.prepareAuthUI = async () => {};
         App._migratePagePermsToAuthAccounts = async () => {};
@@ -426,6 +433,42 @@ async function smokeInitSkipsShowAppWithoutRestoredUser(context) {
     })()`, context);
 
     assert.equal(context.__showAppCalled, false);
+    vm.runInContext(`(() => {
+        App.prepareAuthUI = window.__origPrepareAuthUI;
+        App._migratePagePermsToAuthAccounts = window.__origMigratePages;
+        App.isAuthenticated = window.__origIsAuthenticated;
+        App.restoreAuthenticatedUser = window.__origRestoreAuthenticatedUser;
+        App.showApp = window.__origShowApp;
+    })()`, context);
+}
+
+async function smokePrepareAuthUILoadsAccountsWithoutWaitingForEmployees(context) {
+    context.__employeesSettled = false;
+    context.__authStartedBeforeEmployeesSettled = false;
+    context.__employeesSource = [{ id: 5, name: 'Полина', role: 'admin', is_active: true }];
+    context.__authAccountsSource = [{
+        id: '1772715209137',
+        employee_name: 'Smoke User',
+        username: 'smoke_user',
+        is_active: true,
+    }];
+
+    context.loadEmployees = async () => new Promise((resolve) => {
+        setTimeout(() => {
+            context.__employeesSettled = true;
+            resolve(clone(context.__employeesSource));
+        }, 25);
+    });
+    context.loadAuthAccounts = async () => {
+        context.__authStartedBeforeEmployeesSettled = context.__employeesSettled === false;
+        return clone(context.__authAccountsSource);
+    };
+
+    await vm.runInContext(`App.prepareAuthUI()`, context);
+
+    assert.equal(context.__authStartedBeforeEmployeesSettled, true, 'auth accounts should load in parallel with employees');
+    assert.equal(vm.runInContext(`App.authAccounts.length`, context), 1);
+    assert.match(String(context.document.getElementById('auth-user-select').innerHTML || ''), /Smoke User/);
 }
 
 async function main() {
@@ -444,6 +487,7 @@ async function main() {
     await smokePasswordResetDisclosure(context);
     await smokeLogoutCleanup(context);
     await smokeInitSkipsShowAppWithoutRestoredUser(context);
+    await smokePrepareAuthUILoadsAccountsWithoutWaitingForEmployees(context);
 
     console.log('auth hardening smoke checks passed');
 }

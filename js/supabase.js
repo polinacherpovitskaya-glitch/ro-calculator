@@ -2720,18 +2720,26 @@ function sanitizeAuthAccount(account) {
     return sanitized;
 }
 
+function _authAccountsRemoteTimeoutMs() {
+    if (typeof window !== 'undefined') {
+        const explicit = Number(window.__RO_AUTH_ACCOUNTS_LOAD_TIMEOUT_MS);
+        if (Number.isFinite(explicit) && explicit > 0) return explicit;
+    }
+    return Math.max(_remoteTimeoutMs('load'), 15000);
+}
+
 async function loadAuthAccounts() {
     const fallback = (getLocal(LOCAL_KEYS.authAccounts) || []).map(sanitizeAuthAccount);
     if (isSupabaseReady()) {
         try {
-            const timeoutMs = Number(window.__RO_REMOTE_LOAD_TIMEOUT_MS) > 0 ? Number(window.__RO_REMOTE_LOAD_TIMEOUT_MS) : 5000;
+            const timeoutMs = _authAccountsRemoteTimeoutMs();
             const result = await Promise.race([
                 supabaseClient
                     .from('settings')
                     .select('value')
                     .eq('key', 'auth_accounts_json')
                     .maybeSingle(),
-                new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), timeoutMs)),
+                new Promise((_, reject) => setTimeout(() => reject(_remoteTimeoutError('load auth accounts', timeoutMs)), timeoutMs)),
             ]);
             const { data, error } = result || {};
             if (!error && data && data.value) {
@@ -3198,6 +3206,19 @@ async function saveVacations(vacations) {
 // v45: Cloud sync between computers
 // =============================================
 
+const WAREHOUSE_ITEMS_SETTINGS_KEY = 'warehouse_items_json';
+
+function _buildWarehouseSnapshot(items) {
+    return (Array.isArray(items) ? items : []).map((item) => {
+        if (!item || typeof item !== 'object') return item;
+        const compact = { ...item };
+        delete compact.photo_thumbnail;
+        delete compact.photo_storage_bucket;
+        delete compact.photo_storage_path;
+        return compact;
+    });
+}
+
 async function loadWarehouseItems() {
     const normalizeWarehouseItem = (item) => {
         if (!item || typeof item !== 'object') return item;
@@ -3243,11 +3264,19 @@ async function loadWarehouseItems() {
             };
         });
     };
+    const readSharedWarehouseSnapshot = async () => {
+        const snapshot = await _loadJsonSetting(WAREHOUSE_ITEMS_SETTINGS_KEY, null);
+        if (!Array.isArray(snapshot) || snapshot.length === 0) return null;
+        const normalizedSnapshot = snapshot.map(normalizeWarehouseItem);
+        setLocal(LOCAL_KEYS.warehouseItems, normalizedSnapshot);
+        return applyReservationSnapshot(normalizedSnapshot);
+    };
+    const localFallback = async () => applyReservationSnapshot(getLocal(LOCAL_KEYS.warehouseItems) || []);
 
     if (isSupabaseReady()) {
         try {
-            const { data, error } = await supabaseClient
-                .from('warehouse_items').select('*').order('name');
+            const { data, error } = await _withRemoteTimeout('load', 'load warehouse_items', () => supabaseClient
+                .from('warehouse_items').select('*').order('name'));
             if (error) { console.error('loadWarehouseItems error:', error); }
 
             if (data && data.length > 0) {
@@ -3266,6 +3295,9 @@ async function loadWarehouseItems() {
                 setLocal(LOCAL_KEYS.warehouseItems, hydratedItems);
                 return hydratedItems;
             }
+
+            const sharedSnapshot = await readSharedWarehouseSnapshot();
+            if (sharedSnapshot) return sharedSnapshot;
 
             // One-time migration: localStorage → Supabase
             const local = getLocal(LOCAL_KEYS.warehouseItems) || [];
@@ -3290,10 +3322,12 @@ async function loadWarehouseItems() {
             return [];
         } catch(e) {
             console.error('loadWarehouseItems exception:', e);
-            return await applyReservationSnapshot(getLocal(LOCAL_KEYS.warehouseItems) || []);
+            const sharedSnapshot = await readSharedWarehouseSnapshot();
+            if (sharedSnapshot) return sharedSnapshot;
+            return await localFallback();
         }
     }
-    return await applyReservationSnapshot(getLocal(LOCAL_KEYS.warehouseItems) || []);
+    return await localFallback();
 }
 
 async function saveWarehouseItem(item) {
@@ -3336,6 +3370,9 @@ async function saveWarehouseItem(item) {
     });
     if (idx >= 0) items[idx] = item; else items.push(item);
     setLocal(LOCAL_KEYS.warehouseItems, items);
+    if (isSupabaseReady()) {
+        await _saveJsonSetting(WAREHOUSE_ITEMS_SETTINGS_KEY, _buildWarehouseSnapshot(items));
+    }
 
     return item.id;
 }
@@ -3358,6 +3395,9 @@ async function saveWarehouseItems(items) {
         } catch(e) { console.error('saveWarehouseItems exception:', e); }
     }
     setLocal(LOCAL_KEYS.warehouseItems, items);
+    if (isSupabaseReady()) {
+        await _saveJsonSetting(WAREHOUSE_ITEMS_SETTINGS_KEY, _buildWarehouseSnapshot(items));
+    }
 }
 
 async function deleteWarehouseItem(itemId) {
@@ -3386,6 +3426,9 @@ async function deleteWarehouseItem(itemId) {
         return true;
     });
     setLocal(LOCAL_KEYS.warehouseItems, items);
+    if (isSupabaseReady()) {
+        await _saveJsonSetting(WAREHOUSE_ITEMS_SETTINGS_KEY, _buildWarehouseSnapshot(items));
+    }
 }
 
 async function loadWarehouseReservations() {
