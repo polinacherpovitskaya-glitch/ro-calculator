@@ -247,7 +247,7 @@ function _shouldKeepOnlyInVolatileCache(key, payload = '') {
 
 // Data version — increment to trigger NON-DESTRUCTIVE migration
 // NEVER delete user data! Only add missing fields to existing molds
-const MOLDS_DATA_VERSION = 14; // v14: устойчивый парсинг mold_data + очистка случайно прилипшего NFC у не-NFC бланков
+const MOLDS_DATA_VERSION = 15; // v15: убираем автоподмешивание исторического прайса в бланки и чистим случайно сохраненные catalog-price overrides
 const MOLDS_VERSION_KEY = 'ro_calc_molds_version';
 
 // Latest known manual sell prices from the exported blanks catalog.
@@ -425,6 +425,33 @@ function _hasBlankPriceOverridePayload(mold) {
     return Object.keys(prices).length > 0 || Object.keys(margins).length > 0;
 }
 
+function _isHistoricalBlankPriceSeed(mold) {
+    if (!mold || typeof mold !== 'object') return false;
+    if (_isHistoricalBlankPriceRecoveryDisabled(mold)) return false;
+    const margins = mold.custom_margins && typeof mold.custom_margins === 'object' ? mold.custom_margins : {};
+    if (Object.keys(margins).length > 0) return false;
+    const prices = _cloneHistoricalBlankPrices(mold.custom_prices);
+    if (!Object.keys(prices).length) return false;
+    const historical = _getHistoricalBlankCustomPrices(mold.name);
+    if (!Object.keys(historical).length) return false;
+    return _isExactHistoricalPriceMatch(prices, historical) || _isSubsetHistoricalPriceMatch(prices, historical);
+}
+
+function _withoutHistoricalBlankPriceSeed(mold) {
+    if (!_isHistoricalBlankPriceSeed(mold)) {
+        return { mold, changed: false };
+    }
+    return {
+        mold: {
+            ...mold,
+            custom_prices: {},
+            use_manual_prices: false,
+            disable_historical_blank_price_recovery: true,
+        },
+        changed: true,
+    };
+}
+
 function _isNfcLikeHardwareName(name) {
     const normalized = String(name || '').trim().toLowerCase();
     if (!normalized) return false;
@@ -458,27 +485,6 @@ function _withUnexpectedNfcHardwareCleanup(mold) {
             hw_source: 'custom',
             hw_warehouse_item_id: null,
             hw_warehouse_sku: '',
-        },
-        changed: true,
-    };
-}
-
-function _withHistoricalBlankPriceRecovery(mold) {
-    if (!mold || typeof mold !== 'object') {
-        return { mold, changed: false };
-    }
-    if (_isHistoricalBlankPriceRecoveryDisabled(mold)) {
-        return { mold, changed: false };
-    }
-    const before = _cloneHistoricalBlankPrices(mold.custom_prices);
-    const after = _mergeHistoricalBlankCustomPrices(before, mold.name);
-    const changed = JSON.stringify(before) !== JSON.stringify(after);
-    if (!changed) return { mold, changed: false };
-    return {
-        mold: {
-            ...mold,
-            custom_prices: after,
-            use_manual_prices: Object.keys(after).length > 0 ? true : !!mold.use_manual_prices,
         },
         changed: true,
     };
@@ -532,9 +538,9 @@ function _applyAutomaticMoldRepairs(mold) {
     next = nfcCleanup.mold;
     changed = changed || nfcCleanup.changed;
 
-    const historicalRecovery = _withHistoricalBlankPriceRecovery(next);
-    next = historicalRecovery.mold;
-    changed = changed || historicalRecovery.changed;
+    const historicalSeedCleanup = _withoutHistoricalBlankPriceSeed(next);
+    next = historicalSeedCleanup.mold;
+    changed = changed || historicalSeedCleanup.changed;
 
     return { mold: next, changed };
 }
@@ -571,7 +577,9 @@ function _normalizeMoldRecord(mold) {
         normalized.disable_historical_blank_price_recovery = false;
     }
     if (normalized.use_manual_prices === undefined) normalized.use_manual_prices = false;
-    if (!normalized.disable_historical_blank_price_recovery && _hasBlankPriceOverridePayload(normalized)) {
+    if (_isHistoricalBlankPriceSeed(normalized)) {
+        normalized.use_manual_prices = false;
+    } else if (!normalized.disable_historical_blank_price_recovery && _hasBlankPriceOverridePayload(normalized)) {
         normalized.use_manual_prices = true;
     }
     if (normalized.builtin_assembly_name === undefined) normalized.builtin_assembly_name = '';
@@ -1031,6 +1039,8 @@ function _moldToTemplate(m) {
     const pMax = mold.pph_max || 0;
     const pAvg = (pMin > 0 && pMax > 0) ? Math.round((pMin + pMax) / 2) : (pMin || pMax || 0);
     const display = pMin === 0 ? '—' : (pMin === pMax ? String(pMin) : `${pMin}-${pMax}`);
+    const hasExplicitManualBlankPricing = !_isHistoricalBlankPriceSeed(mold)
+        && (((!mold.disable_historical_blank_price_recovery) && _hasBlankPriceOverridePayload(mold)) || !!mold.use_manual_prices);
     return {
         id: mold.id,
         name: mold.name,
@@ -1056,7 +1066,7 @@ function _moldToTemplate(m) {
         custom_margins: mold.custom_margins || {},
         // Per-mold custom prices (absolute sell prices per tier)
         custom_prices: mold.custom_prices || {},
-        use_manual_prices: (!mold.disable_historical_blank_price_recovery && _hasBlankPriceOverridePayload(mold)) || !!mold.use_manual_prices,
+        use_manual_prices: hasExplicitManualBlankPricing,
         // Keep mold economics on template so calculator can match "Бланки" себестоимость
         cost_cny: mold.cost_cny || 0,
         cny_rate: mold.cny_rate || 0,
@@ -2453,7 +2463,7 @@ function getDefaultMolds() {
         builtin_assembly_speed: opts.builtin_assembly_speed || null,
         client: opts.client || '', notes: opts.notes || '',
         total_orders: opts.orders || 0, total_units_produced: opts.produced || 0,
-        custom_margins: {}, custom_prices: _getHistoricalBlankCustomPrices(name),
+        custom_margins: {}, custom_prices: {},
     });
 
     return [

@@ -66,10 +66,7 @@ function getBlankMultiplier(qty) {
 
 function hasManualBlankPriceOverride(mold) {
     if (!mold || mold.disable_historical_blank_price_recovery) return false;
-    const prices = mold.custom_prices || {};
-    const margins = mold.custom_margins || {};
-    const hasPayload = Object.keys(prices).length > 0 || Object.keys(margins).length > 0;
-    return !!mold.use_manual_prices || hasPayload;
+    return !!mold.use_manual_prices;
 }
 
 function calcBlankTargetPrice(cost, qty, params) {

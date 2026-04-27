@@ -158,8 +158,8 @@ async function main() {
             custom_margins: {},
             disable_historical_blank_price_recovery: false,
         })`, context),
-        true,
-        'Recovered catalog prices must still count as manual overrides until the user explicitly disables them',
+        false,
+        'Historical catalog seed must not count as a manual override in the blanks table',
     );
     assert.equal(
         vm.runInContext(`hasManualBlankPriceOverride({
@@ -170,6 +170,16 @@ async function main() {
         })`, context),
         false,
         'Explicit opt-out should still force formula pricing even when old manual prices remain in payload',
+    );
+    assert.equal(
+        vm.runInContext(`hasManualBlankPriceOverride({
+            use_manual_prices: true,
+            custom_prices: { 50: 1400 },
+            custom_margins: {},
+            disable_historical_blank_price_recovery: false,
+        })`, context),
+        true,
+        'True manual prices must still be treated as manual overrides',
     );
 
     [
@@ -405,16 +415,15 @@ async function main() {
         }];
         Molds.enrichMolds();
     `, context);
-    const recoveredPrice = vm.runInContext(`Molds.allMolds[0].tiers[50].sellPrice`, context);
-    assert.equal(recoveredPrice, 999);
+    const formulaPriceWithoutManual = vm.runInContext(`Molds.allMolds[0].tiers[50].sellPrice`, context);
+    assert.equal(formulaPriceWithoutManual, 515);
 
     vm.runInContext(`
-        Molds.allMolds[0].disable_historical_blank_price_recovery = true;
-        Molds.allMolds[0].use_manual_prices = false;
+        Molds.allMolds[0].use_manual_prices = true;
         Molds.enrichMolds();
     `, context);
-    const formulaPrice = vm.runInContext(`Molds.allMolds[0].tiers[50].sellPrice`, context);
-    assert.equal(formulaPrice, 515);
+    const explicitManualPrice = vm.runInContext(`Molds.allMolds[0].tiers[50].sellPrice`, context);
+    assert.equal(explicitManualPrice, 999);
 
     console.log('molds smoke checks passed');
 }

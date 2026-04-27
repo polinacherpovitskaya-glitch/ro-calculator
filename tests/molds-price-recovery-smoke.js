@@ -11,8 +11,8 @@ const latestBaselineSection = supabaseJs.split('const LEGACY_HISTORICAL_BLANK_PR
 
 assert.match(
     supabaseJs,
-    /const MOLDS_DATA_VERSION = 14;/,
-    'MOLDS_DATA_VERSION should be bumped for the mold payload/NFC repair fix',
+    /const MOLDS_DATA_VERSION = 15;/,
+    'MOLDS_DATA_VERSION should be bumped for the historical blank-price cleanup',
 );
 
 assert.match(
@@ -90,23 +90,34 @@ context.window = context;
 
 vm.runInContext(supabaseJs, context, { filename: 'js/supabase.js' });
 
-const recovered = vm.runInContext(`_withHistoricalBlankPriceRecovery({
+const recoveredSeed = vm.runInContext(`_applyAutomaticMoldRepairs({
     name: 'Шар',
-    custom_prices: {},
+    custom_prices: { 50: 2365, 100: 2030, 300: 1760, 500: 1600, 1000: 1450, 3000: 1075 },
+    custom_margins: {},
     disable_historical_blank_price_recovery: false,
 })`, context);
 assert.equal(
-    recovered.mold.use_manual_prices,
+    recoveredSeed.changed,
     true,
-    'Historical recovery should mark restored blank prices as manual overrides so UI and calculator keep the catalog prices',
+    'Automatic mold repairs should strip auto-seeded catalog prices from blanks',
 );
 assert.deepEqual(
-    JSON.parse(JSON.stringify(recovered.mold.custom_prices)),
-    { 50: 2365, 100: 2030, 300: 1760, 500: 1600, 1000: 1450, 3000: 1075 },
-    'Historical recovery should still restore baseline prices when no manual opt-out is set',
+    JSON.parse(JSON.stringify(recoveredSeed.mold.custom_prices)),
+    {},
+    'Historical catalog seed should no longer survive as custom blank prices',
+);
+assert.equal(
+    recoveredSeed.mold.use_manual_prices,
+    false,
+    'Historical catalog seed should no longer force the blank into manual pricing mode',
+);
+assert.equal(
+    recoveredSeed.mold.disable_historical_blank_price_recovery,
+    true,
+    'Historical catalog seed cleanup should mark the blank as explicitly formula-driven',
 );
 
-const preservedEmpty = vm.runInContext(`_withHistoricalBlankPriceRecovery({
+const preservedEmpty = vm.runInContext(`_applyAutomaticMoldRepairs({
     name: 'Шар',
     custom_prices: {},
     disable_historical_blank_price_recovery: true,
@@ -127,8 +138,8 @@ const templateMirror = vm.runInContext(`_moldToTemplate({
 })`, context);
 assert.equal(
     templateMirror.use_manual_prices,
-    true,
-    'Template mirror must carry recovered manual prices into the calculator instead of silently switching to formula pricing',
+    false,
+    'Template mirror must not expose auto-seeded catalog prices as manual overrides',
 );
 
 const nfcCleanup = vm.runInContext(`_withUnexpectedNfcHardwareCleanup({
