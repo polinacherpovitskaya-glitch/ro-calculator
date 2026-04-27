@@ -318,6 +318,34 @@ async function main() {
 
     {
         const context = createContext();
+        context.__productTemplatesData = [{
+            id: 902,
+            name: 'NFC Квадрат',
+            category: 'blank',
+            collection: 'NFC',
+            photo_url: '',
+            pieces_per_hour_min: 25,
+            pieces_per_hour_max: 25,
+            pieces_per_hour_avg: 25,
+            weight_grams: 30,
+            cost_cny: 800,
+            cny_rate: 12.5,
+            delivery_cost: 8000,
+            mold_count: 1,
+        }];
+        runScript(context, 'js/supabase.js');
+
+        vm.runInContext(`
+            initSupabase();
+        `, context);
+
+        const bundledPhotoMolds = JSON.parse(JSON.stringify(await vm.runInContext('loadMolds()', context)));
+        assert.equal(bundledPhotoMolds.length, 1);
+        assert.equal(bundledPhotoMolds[0].photo_url, 'assets/molds/nfc-square.jpg');
+    }
+
+    {
+        const context = createContext();
         runScript(context, 'js/supabase.js');
 
         vm.runInContext(`

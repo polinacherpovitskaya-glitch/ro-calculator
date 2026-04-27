@@ -304,6 +304,13 @@ const HISTORICAL_BLANK_PRICE_BASELINE = Object.freeze({
     'Шар': Object.freeze({ 50: 2365, 100: 2030, 300: 1760, 500: 1600, 1000: 1450, 3000: 1075 }),
 });
 
+const LEGACY_BUNDLED_MOLD_PHOTOS = new Map([
+    ['nfc звезда', 'assets/molds/nfc-star.jpg'],
+    ['nfc камушек', 'assets/molds/nfc-stone.jpg'],
+    ['nfc квадрат', 'assets/molds/nfc-square.jpg'],
+    ['nfc сердце', 'assets/molds/nfc-heart.png'],
+]);
+
 // Legacy prices from the earlier export that should be upgraded in-place.
 const LEGACY_HISTORICAL_BLANK_PRICE_BASELINES = Object.freeze([
     Object.freeze({
@@ -1047,12 +1054,13 @@ function _templateToMold(template, index = 0) {
     const pMin = Number(template.pieces_per_hour_min || template.pieces_per_hour_avg || 0) || 0;
     const pMax = Number(template.pieces_per_hour_max || template.pieces_per_hour_avg || pMin || 0) || 0;
     const pAct = Number(template.pieces_per_hour_avg || template.pieces_per_hour_max || template.pieces_per_hour_min || 0) || null;
+    const fallbackPhoto = LEGACY_BUNDLED_MOLD_PHOTOS.get(_normalizeLookupKey(template.name)) || '';
     return _normalizeMoldRecord({
         id: template.id || `tpl-fallback-${index + 1}`,
         name: String(template.name || '').trim(),
         category: template.category === 'nfc' ? 'nfc' : 'blank',
         collection: String(template.collection || '').trim(),
-        photo_url: String(template.photo_url || '').trim(),
+        photo_url: String(template.photo_url || fallbackPhoto || '').trim(),
         status: template.status || 'active',
         pph_min: pMin,
         pph_max: pMax,
@@ -1146,6 +1154,7 @@ function _findLegacyMoldRecord(mold, index) {
 function _hydrateMissingMoldFields(mold, legacyIndexes = []) {
     const normalized = _normalizeMoldRecord(mold);
     let changed = false;
+    const nameKey = _normalizeLookupKey(normalized.name);
     for (const index of legacyIndexes) {
         const legacy = _findLegacyMoldRecord(normalized, index);
         if (!legacy) continue;
@@ -1168,6 +1177,10 @@ function _hydrateMissingMoldFields(mold, legacyIndexes = []) {
         if (normalized.photo_url && normalized.collection && normalized.pph_actual > 0 && normalized.weight_grams > 0) {
             break;
         }
+    }
+    if (!normalized.photo_url && nameKey && LEGACY_BUNDLED_MOLD_PHOTOS.has(nameKey)) {
+        normalized.photo_url = LEGACY_BUNDLED_MOLD_PHOTOS.get(nameKey);
+        changed = true;
     }
     return { mold: normalized, changed };
 }
@@ -1241,6 +1254,9 @@ function refreshTemplatesFromMolds(molds) {
             if (!(template.weight_grams > 0) && Number(legacy.weight_grams || 0) > 0) {
                 template.weight_grams = Number(legacy.weight_grams || 0);
             }
+        }
+        if (!template.photo_url) {
+            template.photo_url = LEGACY_BUNDLED_MOLD_PHOTOS.get(_normalizeLookupKey(template.name)) || '';
         }
         return template;
     });
