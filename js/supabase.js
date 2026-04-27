@@ -1014,11 +1014,19 @@ async function loadTemplates() {
     // `product_templates` is only a legacy mirror and may lag behind edits.
     try {
         const molds = await loadMolds();
-        return refreshTemplatesFromMolds(molds);
+        if (Array.isArray(molds) && molds.length > 0) {
+            return refreshTemplatesFromMolds(molds);
+        }
     } catch (e) {
         console.warn('loadTemplates fallback to local templates:', e);
-        return _getLocalTemplates();
     }
+    const remoteTemplates = await _loadRemoteLegacyTemplates();
+    if (Array.isArray(remoteTemplates) && remoteTemplates.length > 0) {
+        App.templates = remoteTemplates;
+        setLocal(LOCAL_KEYS.templates, remoteTemplates);
+        return remoteTemplates;
+    }
+    return _getLocalTemplates();
 }
 
 function _getLocalTemplates() {
@@ -1080,6 +1088,28 @@ function _getFallbackMoldsFromTemplates(deletedIds = new Set()) {
         .filter(Boolean)
         .filter(mold => !deletedIds.has(Number(mold.id)))
         .map(mold => _applyAutomaticMoldRepairs(mold).mold);
+}
+
+async function _loadRemoteLegacyTemplates() {
+    if (!isSupabaseReady()) return [];
+    try {
+        const { data, error } = await _withRemoteTimeout('load', 'load product templates', () => supabaseClient
+            .from('product_templates')
+            .select('*')
+            .order('name'));
+        if (error) {
+            console.warn('loadRemoteLegacyTemplates error:', error);
+            if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
+            return [];
+        }
+        if (!Array.isArray(data) || data.length === 0) return [];
+        setLocal(LOCAL_KEYS.templates, data);
+        return data;
+    } catch (error) {
+        console.warn('loadRemoteLegacyTemplates exception:', error);
+        if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
+        return [];
+    }
 }
 
 function _normalizeLookupKey(value) {
@@ -2418,6 +2448,24 @@ async function loadMolds() {
                 .map(_parseStoredMoldRow)
                 .map(_normalizeMoldRecord)
                 .filter(mold => !deletedIds.has(Number(mold.id)));
+
+            const needsRemoteLegacyTemplates = rawSupabaseMolds.length === 0
+                || rawSupabaseMolds.some(mold =>
+                    !mold.photo_url
+                    || !mold.collection
+                    || !(Number(mold.pph_actual || 0) > 0)
+                    || !(Number(mold.weight_grams || 0) > 0)
+                );
+            if (needsRemoteLegacyTemplates) {
+                const remoteLegacyTemplateMolds = (await _loadRemoteLegacyTemplates())
+                    .map((template, index) => _templateToMold(template, index))
+                    .filter(Boolean)
+                    .filter(mold => !deletedIds.has(Number(mold.id)))
+                    .map(_normalizeMoldRecord);
+                if (remoteLegacyTemplateMolds.length > 0) {
+                    legacyIndexes.push(_buildLegacyMoldIndex(remoteLegacyTemplateMolds));
+                }
+            }
 
             const repairedSupabaseMolds = [];
             const hydratedSupabaseMolds = rawSupabaseMolds.map(mold => {

@@ -51,6 +51,7 @@ function createContext() {
         __missingTables: new Set(),
         __hangingTables: new Set(),
         __settingsStore: new Map(),
+        __productTemplatesData: [],
     };
 
     context.window = context;
@@ -110,6 +111,9 @@ function createContext() {
                                     }
                                     if (missingTableError(table)) {
                                         return Promise.resolve({ data: null, error: missingTableError(table) });
+                                    }
+                                    if (table === 'product_templates') {
+                                        return Promise.resolve({ data: context.__productTemplatesData, error: null });
                                     }
                                     return Promise.resolve({ data: [], error: null });
                                 },
@@ -275,6 +279,41 @@ async function main() {
         assert.equal(restoredMolds[0].pph_actual, 25);
         assert.equal(restoredMolds[0].weight_grams, 30);
         assert.equal(context.__remoteCalls.filter(call => call.table === 'molds' && call.action === 'upsert').length, 1, 'hydrated mold should be synced back to shared molds');
+    }
+
+    {
+        const context = createContext();
+        context.__productTemplatesData = [{
+            id: 901,
+            name: 'NFC Сердце',
+            category: 'blank',
+            collection: 'NFC',
+            photo_url: 'https://example.com/nfc-heart.jpg',
+            pieces_per_hour_min: 13,
+            pieces_per_hour_max: 13,
+            pieces_per_hour_avg: 13,
+            weight_grams: 30,
+            cost_cny: 800,
+            cny_rate: 12.5,
+            delivery_cost: 8000,
+            mold_count: 1,
+        }];
+        runScript(context, 'js/supabase.js');
+
+        vm.runInContext(`
+            initSupabase();
+        `, context);
+
+        const remoteFallbackMolds = JSON.parse(JSON.stringify(await vm.runInContext('loadMolds()', context)));
+        assert.equal(remoteFallbackMolds.length, 1);
+        assert.equal(remoteFallbackMolds[0].name, 'NFC Сердце');
+        assert.equal(remoteFallbackMolds[0].photo_url, 'https://example.com/nfc-heart.jpg');
+        assert.equal(remoteFallbackMolds[0].pph_actual, 13);
+        assert.equal(remoteFallbackMolds[0].weight_grams, 30);
+
+        const persistedTemplates = JSON.parse(context.localStorage.getItem('ro_calc_templates') || '[]');
+        assert.equal(persistedTemplates.length, 1);
+        assert.equal(persistedTemplates[0].photo_url, 'https://example.com/nfc-heart.jpg');
     }
 
     {
