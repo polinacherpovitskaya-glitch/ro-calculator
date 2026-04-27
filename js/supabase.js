@@ -405,6 +405,13 @@ function _isHistoricalBlankPriceRecoveryDisabled(mold) {
     return !!(mold && mold.disable_historical_blank_price_recovery);
 }
 
+function _hasBlankPriceOverridePayload(mold) {
+    if (!mold || typeof mold !== 'object') return false;
+    const prices = mold.custom_prices && typeof mold.custom_prices === 'object' ? mold.custom_prices : {};
+    const margins = mold.custom_margins && typeof mold.custom_margins === 'object' ? mold.custom_margins : {};
+    return Object.keys(prices).length > 0 || Object.keys(margins).length > 0;
+}
+
 function _isNfcLikeHardwareName(name) {
     const normalized = String(name || '').trim().toLowerCase();
     if (!normalized) return false;
@@ -455,7 +462,11 @@ function _withHistoricalBlankPriceRecovery(mold) {
     const changed = JSON.stringify(before) !== JSON.stringify(after);
     if (!changed) return { mold, changed: false };
     return {
-        mold: { ...mold, custom_prices: after },
+        mold: {
+            ...mold,
+            custom_prices: after,
+            use_manual_prices: Object.keys(after).length > 0 ? true : !!mold.use_manual_prices,
+        },
         changed: true,
     };
 }
@@ -545,6 +556,10 @@ function _normalizeMoldRecord(mold) {
     if (normalized.custom_prices === undefined) normalized.custom_prices = {};
     if (normalized.disable_historical_blank_price_recovery === undefined) {
         normalized.disable_historical_blank_price_recovery = false;
+    }
+    if (normalized.use_manual_prices === undefined) normalized.use_manual_prices = false;
+    if (!normalized.disable_historical_blank_price_recovery && _hasBlankPriceOverridePayload(normalized)) {
+        normalized.use_manual_prices = true;
     }
     if (normalized.builtin_assembly_name === undefined) normalized.builtin_assembly_name = '';
     if (normalized.builtin_assembly_speed === undefined) normalized.builtin_assembly_speed = null;
@@ -1028,7 +1043,7 @@ function _moldToTemplate(m) {
         custom_margins: mold.custom_margins || {},
         // Per-mold custom prices (absolute sell prices per tier)
         custom_prices: mold.custom_prices || {},
-        use_manual_prices: !!mold.use_manual_prices,
+        use_manual_prices: (!mold.disable_historical_blank_price_recovery && _hasBlankPriceOverridePayload(mold)) || !!mold.use_manual_prices,
         // Keep mold economics on template so calculator can match "Бланки" себестоимость
         cost_cny: mold.cost_cny || 0,
         cny_rate: mold.cny_rate || 0,

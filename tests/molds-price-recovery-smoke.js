@@ -95,6 +95,11 @@ const recovered = vm.runInContext(`_withHistoricalBlankPriceRecovery({
     custom_prices: {},
     disable_historical_blank_price_recovery: false,
 })`, context);
+assert.equal(
+    recovered.mold.use_manual_prices,
+    true,
+    'Historical recovery should mark restored blank prices as manual overrides so UI and calculator keep the catalog prices',
+);
 assert.deepEqual(
     JSON.parse(JSON.stringify(recovered.mold.custom_prices)),
     { 50: 2365, 100: 2030, 300: 1760, 500: 1600, 1000: 1450, 3000: 1075 },
@@ -110,6 +115,20 @@ assert.deepEqual(
     JSON.parse(JSON.stringify(preservedEmpty.mold.custom_prices)),
     {},
     'Historical recovery must not re-add prices that the user manually cleared',
+);
+
+const templateMirror = vm.runInContext(`_moldToTemplate({
+    name: 'NFC Квадрат',
+    category: 'blank',
+    custom_prices: { 50: 1250, 100: 890 },
+    custom_margins: {},
+    disable_historical_blank_price_recovery: false,
+    use_manual_prices: false,
+})`, context);
+assert.equal(
+    templateMirror.use_manual_prices,
+    true,
+    'Template mirror must carry recovered manual prices into the calculator instead of silently switching to formula pricing',
 );
 
 const nfcCleanup = vm.runInContext(`_withUnexpectedNfcHardwareCleanup({

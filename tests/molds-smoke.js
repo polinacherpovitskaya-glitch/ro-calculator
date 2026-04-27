@@ -151,6 +151,26 @@ async function main() {
     assert.equal(vm.runInContext('getBlankMargin(3000)', context), 0.35);
     assert.equal(vm.runInContext('roundTo5(1162)', context), 1160);
     assert.equal(vm.runInContext('roundTo5(1163)', context), 1165);
+    assert.equal(
+        vm.runInContext(`hasManualBlankPriceOverride({
+            use_manual_prices: false,
+            custom_prices: { 50: 1250 },
+            custom_margins: {},
+            disable_historical_blank_price_recovery: false,
+        })`, context),
+        true,
+        'Recovered catalog prices must still count as manual overrides until the user explicitly disables them',
+    );
+    assert.equal(
+        vm.runInContext(`hasManualBlankPriceOverride({
+            use_manual_prices: false,
+            custom_prices: { 50: 1250 },
+            custom_margins: {},
+            disable_historical_blank_price_recovery: true,
+        })`, context),
+        false,
+        'Explicit opt-out should still force formula pricing even when old manual prices remain in payload',
+    );
 
     [
         'hw-blank-wh-search',
@@ -379,20 +399,22 @@ async function main() {
             custom_prices: { 50: 999 },
             custom_margins: {},
             use_manual_prices: false,
+            disable_historical_blank_price_recovery: false,
             total_orders: 0,
             total_units_produced: 0
         }];
         Molds.enrichMolds();
     `, context);
-    const formulaPrice = vm.runInContext(`Molds.allMolds[0].tiers[50].sellPrice`, context);
-    assert.equal(formulaPrice, 515);
+    const recoveredPrice = vm.runInContext(`Molds.allMolds[0].tiers[50].sellPrice`, context);
+    assert.equal(recoveredPrice, 999);
 
     vm.runInContext(`
-        Molds.allMolds[0].use_manual_prices = true;
+        Molds.allMolds[0].disable_historical_blank_price_recovery = true;
+        Molds.allMolds[0].use_manual_prices = false;
         Molds.enrichMolds();
     `, context);
-    const manualPrice = vm.runInContext(`Molds.allMolds[0].tiers[50].sellPrice`, context);
-    assert.equal(manualPrice, 999);
+    const formulaPrice = vm.runInContext(`Molds.allMolds[0].tiers[50].sellPrice`, context);
+    assert.equal(formulaPrice, 515);
 
     console.log('molds smoke checks passed');
 }
