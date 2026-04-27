@@ -464,6 +464,56 @@ async function main() {
         assert.equal(context.__remoteCalls.some(call => call.table === 'settings' && call.action === 'upsert'), true);
     }
 
+    {
+        const context = createContext();
+        runScript(context, 'js/supabase.js');
+        vm.runInContext(`
+            initSupabase();
+            setLocal(LOCAL_KEYS.authAccounts, [{
+                id: 11,
+                username: 'cached_user',
+                employee_name: 'Cached User',
+                is_active: true,
+            }]);
+        `, context);
+
+        const winner = await Promise.race([
+            vm.runInContext(`loadAuthAccounts().then(rows => ({
+                kind: 'resolved',
+                usernames: rows.map(row => row.username)
+            }))`, context),
+            new Promise(resolve => setTimeout(() => resolve({ kind: 'timeout' }), 50)),
+        ]);
+
+        assert.equal(winner.kind, 'resolved', 'auth accounts should resolve from warm local cache without waiting for remote settings');
+        assert.equal(winner.usernames[0], 'cached_user');
+    }
+
+    {
+        const context = createContext();
+        context.__hangingTables = new Set(['settings']);
+        runScript(context, 'js/supabase.js');
+        vm.runInContext(`
+            initSupabase();
+            setLocal(LOCAL_KEYS.employees, [{
+                id: 501,
+                name: 'Warm Employee',
+                is_active: true,
+            }]);
+        `, context);
+
+        const winner = await Promise.race([
+            vm.runInContext(`loadEmployees().then(rows => ({
+                kind: 'resolved',
+                names: rows.map(row => row.name)
+            }))`, context),
+            new Promise(resolve => setTimeout(() => resolve({ kind: 'timeout' }), 50)),
+        ]);
+
+        assert.equal(winner.kind, 'resolved', 'employees should resolve from warm local cache without waiting for remote payroll extras');
+        assert.equal(winner.names[0], 'Warm Employee');
+    }
+
     console.log('supabase fallback smoke checks passed');
 }
 

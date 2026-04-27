@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v282';
+const APP_VERSION = 'v283';
 
 const App = {
     currentPage: 'orders',
@@ -105,7 +105,9 @@ const App = {
     async _migratePagePermsToAuthAccounts() {
         if (localStorage.getItem('ro_pages_to_auth_migrated')) return;
         try {
-            const accounts = await loadAuthAccounts();
+            const accounts = Array.isArray(this.authAccounts) && this.authAccounts.length
+                ? this.authAccounts.map(account => ({ ...account }))
+                : await loadAuthAccounts();
             if (!accounts || !accounts.length) return;
             const perms = JSON.parse(localStorage.getItem('ro_employee_pages') || '{}');
             let changed = false;
@@ -126,6 +128,34 @@ const App = {
         } catch (e) {
             console.error('Page perm migration error:', e);
         }
+    },
+
+    bindWarmCacheListeners() {
+        if (this._warmCacheListenersBound || typeof window === 'undefined' || typeof window.addEventListener !== 'function') return;
+        this._warmCacheListenersBound = true;
+        window.addEventListener('ro:auth-accounts-refreshed', async (event) => {
+            const accounts = Array.isArray(event?.detail?.accounts) ? event.detail.accounts : [];
+            if (!accounts.length) return;
+            this.authAccounts = accounts.map(account => ({
+                ...account,
+                pages: this.normalizePageList(account.pages),
+            }));
+            this.renderAuthUserSelect();
+
+            if (!this.currentUser && this.isAuthenticated()) {
+                const userId = localStorage.getItem('ro_calc_auth_user_id');
+                const account = this.authAccounts.find(a => String(a.id) === String(userId) && a.is_active !== false);
+                if (!account) return;
+                this.currentUser = this.buildCurrentUserFromAccount(account);
+                if (account.employee_id != null && account.pages && Array.isArray(account.pages)) {
+                    this.setEmployeePages(account.employee_id, account.pages);
+                }
+                const appLayout = document.getElementById('app-layout');
+                if (appLayout && !appLayout.classList.contains('active')) {
+                    await this.showApp();
+                }
+            }
+        });
     },
 
     initDefaultPermissions() {
@@ -153,6 +183,7 @@ const App = {
     async init() {
         initSupabase();
         this.initDefaultPermissions();
+        this.bindWarmCacheListeners();
         await this.prepareAuthUI();
         await this._migratePagePermsToAuthAccounts();
 
@@ -256,7 +287,10 @@ const App = {
     },
 
     async restoreAuthenticatedUser() {
-        this.authAccounts = (await loadAuthAccounts()).map(account => ({
+        const accounts = (Array.isArray(this.authAccounts) && this.authAccounts.length)
+            ? this.authAccounts
+            : await loadAuthAccounts();
+        this.authAccounts = (accounts || []).map(account => ({
             ...account,
             pages: this.normalizePageList(account.pages),
         }));

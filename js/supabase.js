@@ -8,6 +8,13 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 
 let supabaseClient = null;
 let supabaseAccessWarningShown = false;
+let _authAccountsRefreshPromise = null;
+let _authAccountsLastSyncAt = 0;
+let _employeesRefreshPromise = null;
+let _employeesLastSyncAt = 0;
+let _empExtraRefreshPromise = null;
+
+const WARM_CACHE_REMOTE_REFRESH_TTL_MS = 120000;
 
 function _isSupabaseAccessError(error) {
     const message = String(error?.message || error || '').toLowerCase();
@@ -46,6 +53,22 @@ function initSupabase() {
 
 function isSupabaseReady() {
     return supabaseClient !== null;
+}
+
+function _shouldRefreshWarmCache(lastSyncAt, ttlMs = WARM_CACHE_REMOTE_REFRESH_TTL_MS) {
+    if (!lastSyncAt) return true;
+    return (Date.now() - Number(lastSyncAt)) >= ttlMs;
+}
+
+function _dispatchDataRefreshEvent(name, detail) {
+    if (typeof window === 'undefined') return;
+    if (typeof window.dispatchEvent !== 'function') return;
+    if (typeof CustomEvent !== 'function') return;
+    try {
+        window.dispatchEvent(new CustomEvent(name, { detail }));
+    } catch (_) {
+        // Ignore browsers / test harnesses without CustomEvent support.
+    }
 }
 
 // =============================================
@@ -2521,6 +2544,30 @@ async function _loadEmpExtraFromSupabase() {
     return _getEmpExtra();
 }
 
+function _empExtraRemoteTimeoutMs() {
+    return Math.min(_remoteTimeoutMs('load'), 2500);
+}
+
+async function _refreshEmpExtraCache() {
+    if (!isSupabaseReady()) return _getEmpExtra();
+    if (_empExtraRefreshPromise) return _empExtraRefreshPromise;
+    _empExtraRefreshPromise = (async () => {
+        const timeoutMs = _empExtraRemoteTimeoutMs();
+        try {
+            return await Promise.race([
+                _loadEmpExtraFromSupabase(),
+                new Promise((_, reject) => setTimeout(() => reject(_remoteTimeoutError('load employee extra', timeoutMs)), timeoutMs)),
+            ]);
+        } catch (e) {
+            console.warn('loadEmpExtra timeout/error, using local:', e);
+            return _getEmpExtra();
+        } finally {
+            _empExtraRefreshPromise = null;
+        }
+    })();
+    return _empExtraRefreshPromise;
+}
+
 async function _saveEmpExtraToSupabase() {
     const data = _getEmpExtra();
     if (!isSupabaseReady()) return;
@@ -2615,41 +2662,54 @@ function _seedDefaultEmpExtra() {
 }
 
 async function loadEmployees() {
-    try {
-        _seedDefaultEmpExtra();
-        // Load extra data from Supabase (with timeout to avoid hanging)
-        if (isSupabaseReady()) {
+    _seedDefaultEmpExtra();
+    const cachedEmployees = getLocal(LOCAL_KEYS.employees) || [];
+    const fallbackEmployees = _mergeEmpExtra(cachedEmployees.length ? cachedEmployees : getDefaultEmployees());
+
+    const refreshRemote = async () => {
+        if (!isSupabaseReady()) return fallbackEmployees;
+        if (_employeesRefreshPromise) return _employeesRefreshPromise;
+        _employeesRefreshPromise = (async () => {
             try {
-                await Promise.race([
-                    _loadEmpExtraFromSupabase(),
-                    new Promise((_, rej) => setTimeout(() => rej('timeout'), 5000))
-                ]);
-            } catch (e) { console.warn('loadEmpExtra timeout/error, using local:', e); }
-        }
-        if (isSupabaseReady()) {
-            const { data, error } = await supabaseClient.from('employees').select('*').order('name');
-            if (!error && data && data.length > 0) {
-                const merged = _mergeEmpExtra(data);
-                setLocal(LOCAL_KEYS.employees, merged);
-                return merged;
-            }
-            if (!error && data && data.length === 0) {
-                const defaults = getLocal(LOCAL_KEYS.employees) || getDefaultEmployees();
-                try {
-                    const filtered = defaults.map(d => _supabaseEmployeePayload(d));
-                    await supabaseClient.from('employees').upsert(filtered, { onConflict: 'id' });
-                } catch (e) {
-                    console.error('loadEmployees seed error:', e);
+                await _refreshEmpExtraCache();
+                const { data, error } = await _withRemoteTimeout('load', 'load employees', () => supabaseClient.from('employees').select('*').order('name'));
+                if (!error && data && data.length > 0) {
+                    const merged = _mergeEmpExtra(data);
+                    setLocal(LOCAL_KEYS.employees, merged);
+                    _employeesLastSyncAt = Date.now();
+                    _dispatchDataRefreshEvent('ro:employees-refreshed', { employees: merged });
+                    return merged;
                 }
-                return _mergeEmpExtra(defaults);
+                if (!error && data && data.length === 0) {
+                    const defaults = fallbackEmployees;
+                    try {
+                        const filtered = defaults.map(d => _supabaseEmployeePayload(d));
+                        await supabaseClient.from('employees').upsert(filtered, { onConflict: 'id' });
+                    } catch (e) {
+                        console.error('loadEmployees seed error:', e);
+                    }
+                    _employeesLastSyncAt = Date.now();
+                    return defaults;
+                }
+                if (error) console.error('loadEmployees supabase error:', error);
+            } catch (err) {
+                console.error('loadEmployees exception:', err);
+            } finally {
+                _employeesRefreshPromise = null;
             }
-            if (error) console.error('loadEmployees supabase error:', error);
+            return fallbackEmployees;
+        })();
+        return _employeesRefreshPromise;
+    };
+
+    if (fallbackEmployees.length > 0) {
+        if (isSupabaseReady() && _shouldRefreshWarmCache(_employeesLastSyncAt) && !_employeesRefreshPromise) {
+            refreshRemote().catch(() => {});
         }
-    } catch (err) {
-        console.error('loadEmployees exception:', err);
+        return fallbackEmployees;
     }
-    const emps = getLocal(LOCAL_KEYS.employees) || getDefaultEmployees();
-    return _mergeEmpExtra(emps);
+
+    return refreshRemote();
 }
 
 async function saveEmployee(employee) {
@@ -2728,9 +2788,10 @@ function _authAccountsRemoteTimeoutMs() {
     return Math.max(_remoteTimeoutMs('load'), 15000);
 }
 
-async function loadAuthAccounts() {
-    const fallback = (getLocal(LOCAL_KEYS.authAccounts) || []).map(sanitizeAuthAccount);
-    if (isSupabaseReady()) {
+async function _refreshAuthAccountsCache() {
+    if (!isSupabaseReady()) return (getLocal(LOCAL_KEYS.authAccounts) || []).map(sanitizeAuthAccount);
+    if (_authAccountsRefreshPromise) return _authAccountsRefreshPromise;
+    _authAccountsRefreshPromise = (async () => {
         try {
             const timeoutMs = _authAccountsRemoteTimeoutMs();
             const result = await Promise.race([
@@ -2745,13 +2806,29 @@ async function loadAuthAccounts() {
             if (!error && data && data.value) {
                 const parsed = (JSON.parse(data.value) || []).map(sanitizeAuthAccount);
                 setLocal(LOCAL_KEYS.authAccounts, parsed);
+                _authAccountsLastSyncAt = Date.now();
+                _dispatchDataRefreshEvent('ro:auth-accounts-refreshed', { accounts: parsed });
                 return parsed;
             }
         } catch (e) {
             console.warn('loadAuthAccounts timeout/error, using local:', e);
+        } finally {
+            _authAccountsRefreshPromise = null;
         }
+        return (getLocal(LOCAL_KEYS.authAccounts) || []).map(sanitizeAuthAccount);
+    })();
+    return _authAccountsRefreshPromise;
+}
+
+async function loadAuthAccounts() {
+    const fallback = (getLocal(LOCAL_KEYS.authAccounts) || []).map(sanitizeAuthAccount);
+    if (fallback.length > 0) {
+        if (isSupabaseReady() && _shouldRefreshWarmCache(_authAccountsLastSyncAt) && !_authAccountsRefreshPromise) {
+            _refreshAuthAccountsCache().catch(() => {});
+        }
+        return fallback;
     }
-    return fallback;
+    return _refreshAuthAccountsCache();
 }
 
 async function saveAuthAccounts(accounts) {
