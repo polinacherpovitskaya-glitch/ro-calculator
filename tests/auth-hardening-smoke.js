@@ -7,6 +7,40 @@ function clone(value) {
     return JSON.parse(JSON.stringify(value));
 }
 
+function createTrackedClassList(element, initial = '') {
+    const classes = new Set(String(initial || '').split(/\s+/).filter(Boolean));
+    const sync = () => {
+        element.className = Array.from(classes).join(' ');
+    };
+    sync();
+    return {
+        add(...tokens) {
+            tokens.forEach(token => token && classes.add(token));
+            sync();
+        },
+        remove(...tokens) {
+            tokens.forEach(token => classes.delete(token));
+            sync();
+        },
+        toggle(token, force) {
+            if (force === true) {
+                classes.add(token);
+            } else if (force === false) {
+                classes.delete(token);
+            } else if (classes.has(token)) {
+                classes.delete(token);
+            } else {
+                classes.add(token);
+            }
+            sync();
+            return classes.has(token);
+        },
+        contains(token) {
+            return classes.has(token);
+        },
+    };
+}
+
 function createElement(id = '') {
     return {
         id,
@@ -141,6 +175,7 @@ function createContext() {
         loadEmployeesForPayroll: async () => [],
         loadSettings: async () => ({}),
         saveSettings: async () => {},
+        getProductionParams: () => ({}),
     };
 
     context.__employeesSource = [{ id: 5, name: 'Полина', role: 'admin', is_active: true }];
@@ -471,6 +506,64 @@ async function smokePrepareAuthUILoadsAccountsWithoutWaitingForEmployees(context
     assert.match(String(context.document.getElementById('auth-user-select').innerHTML || ''), /Smoke User/);
 }
 
+async function smokeShowAppPrimesRouteShellBeforeDataReady(context) {
+    const authScreen = context.document.getElementById('auth-screen');
+    const appLayout = context.document.getElementById('app-layout');
+    const pageOrders = context.document.getElementById('page-orders');
+    const pageMolds = context.document.getElementById('page-molds');
+    const navOrders = createElement('nav-orders');
+    const navMolds = createElement('nav-molds');
+
+    appLayout.classList = createTrackedClassList(appLayout);
+    pageOrders.classList = createTrackedClassList(pageOrders, 'page');
+    pageMolds.classList = createTrackedClassList(pageMolds, 'page');
+    navOrders.classList = createTrackedClassList(navOrders);
+    navMolds.classList = createTrackedClassList(navMolds);
+    navOrders.dataset.page = 'orders';
+    navMolds.dataset.page = 'molds';
+
+    context.document.querySelectorAll = (selector) => {
+        if (selector === '.page') return [pageOrders, pageMolds];
+        if (selector === '.sidebar-nav a') return [navOrders, navMolds];
+        return [];
+    };
+    context.location.hash = '#molds';
+    context.__settingsResolved = false;
+    context.__settingsWaiter = null;
+    context.loadSettings = async () => new Promise((resolve) => {
+        context.__settingsWaiter = () => {
+            context.__settingsResolved = true;
+            resolve({});
+        };
+    });
+    context.loadTemplates = async () => [];
+
+    vm.runInContext(`(() => {
+        App.currentUser = { id: '11', name: 'Smoke', role: 'admin', pages: ['orders', 'molds'] };
+        App.toast = () => {};
+        App.startUpdateChecker = () => {};
+        App.startSessionTracking = () => {};
+        App.trackAuthEvent = () => {};
+        App.initEmployeeContext = async () => {};
+        App.applyNavVisibility = () => {};
+        App.syncQuickBugButton = () => {};
+        window.Molds = { load() {} };
+    })()`, context);
+
+    const pendingShowApp = vm.runInContext(`App.showApp()`, context);
+
+    assert.equal(authScreen.style.display, 'none');
+    assert.equal(appLayout.classList.contains('active'), true);
+    assert.equal(pageMolds.classList.contains('active'), true, 'molds shell should activate before data load resolves');
+    assert.equal(pageOrders.classList.contains('active'), false);
+    assert.equal(navMolds.classList.contains('active'), true, 'molds nav should highlight immediately');
+    assert.equal(vm.runInContext(`App.currentPage`, context), 'molds');
+    assert.equal(context.__settingsResolved, false, 'route shell should activate before settings resolve');
+
+    context.__settingsWaiter();
+    await pendingShowApp;
+}
+
 async function main() {
     const context = createContext();
     runScript(context, 'js/app.js');
@@ -488,6 +581,11 @@ async function main() {
     await smokeLogoutCleanup(context);
     await smokeInitSkipsShowAppWithoutRestoredUser(context);
     await smokePrepareAuthUILoadsAccountsWithoutWaitingForEmployees(context);
+
+    const routeContext = createContext();
+    runScript(routeContext, 'js/app.js');
+    runScript(routeContext, 'js/settings.js');
+    await smokeShowAppPrimesRouteShellBeforeDataReady(routeContext);
 
     console.log('auth hardening smoke checks passed');
 }

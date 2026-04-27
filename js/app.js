@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v283';
+const APP_VERSION = 'v284';
 
 const App = {
     currentPage: 'orders',
@@ -18,6 +18,7 @@ const App = {
     authAccounts: [],
     currentEmployeeId: null,
     currentUser: null,
+    _bootstrappingApp: false,
 
     syncQuickBugButton() {
         const api = (typeof BugReports !== 'undefined' ? BugReports : null) || (typeof window !== 'undefined' ? window.BugReports : null);
@@ -474,6 +475,7 @@ const App = {
     async showApp() {
         document.getElementById('auth-screen').style.display = 'none';
         document.getElementById('app-layout').classList.add('active');
+        this._bootstrappingApp = true;
 
         // Show logged-in user name in sidebar
         const userInfo = document.getElementById('sidebar-user-info');
@@ -505,23 +507,29 @@ const App = {
         }
         localStorage.setItem('ro_calc_last_version', APP_VERSION);
 
-        this.settings = await loadSettings();
-        this.templates = await loadTemplates();
-        this.params = getProductionParams(this.settings);
-        if (typeof window !== 'undefined' && window.__roSupabaseAccessProblem) {
-            setTimeout(() => {
-                this.toast('Нет доступа к общей базе данных. Приложение использует локальные данные браузера, поэтому значения у сотрудников могут отличаться.');
-            }, 300);
-        }
-        await this.initEmployeeContext();
-        this._sessionStartedAt = Date.now();
-        this.startSessionTracking();
-        this.trackAuthEvent('session_start');
-
         this.applyNavVisibility();
+        this.primeRouteShell();
+        this.syncQuickBugButton();
+
+        try {
+            this.settings = await loadSettings();
+            this.templates = await loadTemplates();
+            this.params = getProductionParams(this.settings);
+            if (typeof window !== 'undefined' && window.__roSupabaseAccessProblem) {
+                setTimeout(() => {
+                    this.toast('Нет доступа к общей базе данных. Приложение использует локальные данные браузера, поэтому значения у сотрудников могут отличаться.');
+                }, 300);
+            }
+            await this.initEmployeeContext();
+            this._sessionStartedAt = Date.now();
+            this.startSessionTracking();
+            this.trackAuthEvent('session_start');
+        } finally {
+            this._bootstrappingApp = false;
+        }
+
         this.handleRoute();
         this.startUpdateChecker();
-        this.syncQuickBugButton();
     },
 
     // Hide sidebar links for pages the user has no access to
@@ -704,43 +712,67 @@ const App = {
         const parts = hash.split('/');
         const page = this.normalizePageAlias(parts[0]);
         const subId = parts[1] || null;
+        if (this._bootstrappingApp) {
+            this.applyRouteShell(page, subId, { pushHash: false, quiet: true });
+            this.syncQuickBugButton();
+            return;
+        }
         this.navigate(page, false, subId);
     },
 
-    navigate(page, pushHash = true, subId = null) {
+    resolveAccessiblePage(page) {
         page = this.normalizePageAlias(page);
+        if (this.canAccess(page)) return page;
+        return this.canAccess('orders') ? 'orders' : (this.ALL_PAGES.find(p => this.canAccess(p)) || 'orders');
+    },
 
-        // Access control: redirect to orders if not allowed
-        if (!this.canAccess(page)) {
-            const fallback = this.canAccess('orders') ? 'orders' : (this.ALL_PAGES.find(p => this.canAccess(p)) || 'orders');
-            page = fallback;
-            subId = null;
+    applyRouteShell(page, subId = null, options = {}) {
+        const { pushHash = false, quiet = false } = options;
+        const requestedPage = this.normalizePageAlias(page);
+        const resolvedPage = this.resolveAccessiblePage(requestedPage);
+        let resolvedSubId = requestedPage === resolvedPage ? subId : null;
+        if (resolvedPage !== requestedPage && !quiet) {
             App.toast('Нет доступа к этой странице');
         }
 
         document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
 
-        const target = document.getElementById('page-' + page);
+        const target = document.getElementById('page-' + resolvedPage);
         if (target) {
             target.classList.add('active');
-            this.currentPage = page;
+            this.currentPage = resolvedPage;
         } else {
             document.getElementById('page-orders').classList.add('active');
             this.currentPage = 'orders';
+            resolvedSubId = null;
         }
 
         // Highlight sidebar (order-detail highlights 'orders')
-        const navPage = page === 'order-detail' ? 'orders' : this.currentPage;
+        const navPage = this.currentPage === 'order-detail' ? 'orders' : this.currentPage;
         document.querySelectorAll('.sidebar-nav a').forEach(a => {
             a.classList.toggle('active', a.dataset.page === navPage);
         });
 
         if (pushHash) {
-            window.location.hash = subId ? this.currentPage + '/' + subId : this.currentPage;
+            window.location.hash = resolvedSubId ? this.currentPage + '/' + resolvedSubId : this.currentPage;
         }
+        return { page: this.currentPage, subId: resolvedSubId };
+    },
+
+    primeRouteShell() {
+        const hash = window.location.hash.replace('#', '') || 'orders';
+        const parts = hash.split('/');
+        const page = this.normalizePageAlias(parts[0]);
+        const subId = parts[1] || null;
+        return this.applyRouteShell(page, subId, { pushHash: false, quiet: true });
+    },
+
+    navigate(page, pushHash = true, subId = null) {
+        const route = this.applyRouteShell(page, subId, { pushHash });
 
         this.syncQuickBugButton();
-        this.onPageEnter(this.currentPage, subId);
+        if (this._bootstrappingApp) return;
+        this.onPageEnter(this.currentPage, route.subId);
         this.trackAuthEvent('navigate', { to_page: this.currentPage });
     },
 

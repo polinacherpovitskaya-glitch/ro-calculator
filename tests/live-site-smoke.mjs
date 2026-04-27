@@ -327,6 +327,35 @@ async function smokeWarehouseLoads(page) {
   });
 }
 
+async function smokeMoldsPageLoads(page) {
+  await openAuthedHash(page, '#molds');
+
+  await page.waitForFunction(() => {
+    return typeof App !== 'undefined'
+      && App.currentPage === 'molds'
+      && typeof Molds !== 'undefined'
+      && !!document.querySelector('#page-molds.active')
+      && document.body.innerText.includes('Справочник бланков');
+  }, null, { timeout: 30_000 });
+
+  const moldsState = await page.evaluate(() => ({
+    currentPage: App?.currentPage ?? null,
+    hasActivePage: !!document.querySelector('#page-molds.active'),
+    hasTitle: document.body.innerText.includes('Справочник бланков'),
+    cardsMounted: !!document.getElementById('molds-cards-container'),
+  }));
+
+  assert.equal(moldsState.currentPage, 'molds', `Expected current page molds, got ${moldsState.currentPage}`);
+  assert.equal(moldsState.hasActivePage, true, 'Molds page must become active on live site');
+  assert.equal(moldsState.hasTitle, true, 'Molds page must render visible title on live site');
+  assert.equal(moldsState.cardsMounted, true, 'Molds page must mount cards container on live site');
+
+  await page.screenshot({
+    path: path.join(outputDir, 'molds.png'),
+    fullPage: false
+  });
+}
+
 async function smokeMonitoringLoads(page) {
   await openAuthedHash(page, '#monitoring');
 
@@ -405,6 +434,7 @@ page.on('pageerror', (error) => {
 
 try {
   await smokeBugDoneFallback(page);
+  await smokeMoldsPageLoads(page);
   await smokeWarehouseLoads(page);
   await smokeMonitoringLoads(page);
   console.log(`live site smoke checks passed (${expectedVersion})`);
