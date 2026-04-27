@@ -248,8 +248,10 @@ function _shouldKeepOnlyInVolatileCache(key, payload = '') {
 
 // Data version — increment to trigger NON-DESTRUCTIVE migration
 // NEVER delete user data! Only add missing fields to existing molds
-const MOLDS_DATA_VERSION = 15; // v15: убираем автоподмешивание исторического прайса в бланки и чистим случайно сохраненные catalog-price overrides
+const MOLDS_DATA_VERSION = 16; // v16: нормализуем доставку каталожных молдов до 3000₽ вместо legacy 8000₽
 const MOLDS_VERSION_KEY = 'ro_calc_molds_version';
+const LEGACY_CATALOG_MOLD_DELIVERY_RUB = 8000;
+const DEFAULT_CATALOG_MOLD_DELIVERY_RUB = 3000;
 
 // Latest known manual sell prices from the exported blanks catalog.
 // Source: /Users/krollipolli/Downloads/molds_2026-03-26.csv
@@ -542,6 +544,10 @@ function _applyAutomaticMoldRepairs(mold) {
     let next = mold;
     let changed = false;
 
+    const deliveryNormalization = _withCatalogMoldDeliveryNormalization(next);
+    next = deliveryNormalization.mold;
+    changed = changed || deliveryNormalization.changed;
+
     const nfcCleanup = _withUnexpectedNfcHardwareCleanup(next);
     next = nfcCleanup.mold;
     changed = changed || nfcCleanup.changed;
@@ -567,6 +573,27 @@ function _isLegacyLetterAssemblyMold(mold) {
         && (speed === 0 || speed === 60);
 }
 
+function _isCatalogBlankLikeMold(mold) {
+    if (!mold || typeof mold !== 'object') return false;
+    const category = String(mold.category || '').trim().toLowerCase();
+    return category === 'blank' || category === 'nfc';
+}
+
+function _withCatalogMoldDeliveryNormalization(mold) {
+    if (!_isCatalogBlankLikeMold(mold)) return { mold, changed: false };
+    const delivery = Number(mold.delivery_cost);
+    if (!Number.isFinite(delivery) || delivery === LEGACY_CATALOG_MOLD_DELIVERY_RUB) {
+        return {
+            mold: {
+                ...mold,
+                delivery_cost: DEFAULT_CATALOG_MOLD_DELIVERY_RUB,
+            },
+            changed: true,
+        };
+    }
+    return { mold, changed: false };
+}
+
 function _normalizeMoldRecord(mold) {
     if (!mold || typeof mold !== 'object') return mold;
     const normalized = { ...mold };
@@ -579,6 +606,9 @@ function _normalizeMoldRecord(mold) {
     if (normalized.hw_warehouse_sku === undefined) normalized.hw_warehouse_sku = '';
     if (normalized.photo_url === undefined) normalized.photo_url = '';
     if (!normalized.category) normalized.category = 'blank';
+    if (normalized.delivery_cost === undefined || normalized.delivery_cost === null || normalized.delivery_cost === '') {
+        normalized.delivery_cost = _isCatalogBlankLikeMold(normalized) ? DEFAULT_CATALOG_MOLD_DELIVERY_RUB : 0;
+    }
     if (normalized.custom_margins === undefined) normalized.custom_margins = {};
     if (normalized.custom_prices === undefined) normalized.custom_prices = {};
     if (normalized.disable_historical_blank_price_recovery === undefined) {
@@ -2688,7 +2718,7 @@ function getDefaultMolds() {
     const simpleCostCNY = 800;
     const complexCostCNY = 1000;
     const nfcCostCNY = 1200;
-    const deliveryCost = 8000; // ~100$ доставка
+    const deliveryCost = DEFAULT_CATALOG_MOLD_DELIVERY_RUB; // каталожные молды обычно везем партией, не поштучно самолетом
 
     // Helper to create a mold entry
     const m = (id, name, cat, pMin, pMax, pAct, weight, complexity, costCny, opts = {}) => ({

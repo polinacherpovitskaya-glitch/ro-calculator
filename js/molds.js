@@ -190,7 +190,7 @@ const Molds = {
             const moldCount = m.mold_count || 1;
 
             // Real mold total cost (including delivery)
-            const singleMoldCost = (m.cost_cny || 800) * (m.cny_rate || 12.5) + (m.delivery_cost || 8000);
+            const singleMoldCost = (m.cost_cny ?? 800) * (m.cny_rate ?? 12.5) + (m.delivery_cost ?? 3000);
             m.cost_rub_calc = round2(singleMoldCost * moldCount);
 
             // Амортизация молда = стоимость / макс. ресурс (4500 шт), одинаковая для всех тиражей
@@ -726,7 +726,7 @@ const Molds = {
         document.getElementById('mold-complexity').value = m.complexity || 'simple';
         document.getElementById('mold-cost-cny').value = m.cost_cny || '';
         document.getElementById('mold-cny-rate').value = m.cny_rate || 12.5;
-        document.getElementById('mold-delivery-cost').value = m.delivery_cost || 8000;
+        document.getElementById('mold-delivery-cost').value = m.delivery_cost ?? 3000;
         document.getElementById('mold-cost-rub').value = m.cost_rub_calc || '';
         document.getElementById('mold-count').value = m.mold_count || 1;
         document.getElementById('mold-client').value = m.client || '';
@@ -834,7 +834,7 @@ const Molds = {
         document.getElementById('mold-status').value = 'active';
         document.getElementById('mold-complexity').value = 'simple';
         document.getElementById('mold-cny-rate').value = 12.5;
-        document.getElementById('mold-delivery-cost').value = 8000;
+        document.getElementById('mold-delivery-cost').value = 3000;
         document.getElementById('mold-count').value = 1;
         document.getElementById('mold-cost-rub').value = '';
         document.getElementById('mold-hw-delivery-total').value = 0;
@@ -878,7 +878,12 @@ const Molds = {
             complexity: document.getElementById('mold-complexity').value,
             cost_cny: parseFloat(document.getElementById('mold-cost-cny').value) || 0,
             cny_rate: parseFloat(document.getElementById('mold-cny-rate').value) || 12.5,
-            delivery_cost: parseFloat(document.getElementById('mold-delivery-cost').value) || 8000,
+            delivery_cost: (() => {
+                const raw = document.getElementById('mold-delivery-cost').value;
+                if (String(raw).trim() === '') return 3000;
+                const value = parseFloat(raw);
+                return Number.isFinite(value) ? value : 3000;
+            })(),
             cost_rub: parseFloat(document.getElementById('mold-cost-rub').value) || 0,
             mold_count: parseInt(document.getElementById('mold-count').value) || 1,
             client: document.getElementById('mold-client').value.trim(),

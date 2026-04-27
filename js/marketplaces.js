@@ -2206,7 +2206,7 @@ const Marketplaces = {
             const pph = m.pph_actual || pAvg || 1;
             const weight = m.weight_grams || 0;
             const moldCount = m.mold_count || 1;
-            const singleMoldCost = (m.cost_cny || 800) * (m.cny_rate || 12.5) + (m.delivery_cost || 8000);
+            const singleMoldCost = (m.cost_cny ?? 800) * (m.cny_rate ?? 12.5) + (m.delivery_cost ?? 3000);
             const moldAmortPerUnit = (singleMoldCost * moldCount) / MOLD_MAX_LIFETIME;
 
             m.tiers = {};
@@ -2260,7 +2260,7 @@ const Marketplaces = {
             const pph = mold.pph_actual || pAvg || 1;
             const weight = mold.weight_grams || 0;
             const moldCount = mold.mold_count || 1;
-            const singleMoldCost = (mold.cost_cny || 800) * (mold.cny_rate || 12.5) + (mold.delivery_cost || 8000);
+            const singleMoldCost = (mold.cost_cny ?? 800) * (mold.cny_rate ?? 12.5) + (mold.delivery_cost ?? 3000);
             const moldAmortPerUnit = (singleMoldCost * moldCount) / MOLD_MAX_LIFETIME;
             const baseItem = {
                 quantity: 500,

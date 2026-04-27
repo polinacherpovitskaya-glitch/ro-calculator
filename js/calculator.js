@@ -160,7 +160,7 @@ function serializeColorAttachments(source) {
 
 function getBlankTemplateTotalMoldCost(source) {
     if (!source || typeof source !== 'object') return 0;
-    const singleMoldCost = (Number(source?.cost_cny || 800) * Number(source?.cny_rate || 12.5)) + Number(source?.delivery_cost || 8000);
+    const singleMoldCost = (Number(source?.cost_cny ?? 800) * Number(source?.cny_rate ?? 12.5)) + Number(source?.delivery_cost ?? 3000);
     const moldCount = Math.max(1, Number(source?.mold_count || 1) || 1);
     return round2(singleMoldCost * moldCount);
 }
