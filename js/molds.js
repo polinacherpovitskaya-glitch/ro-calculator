@@ -229,15 +229,21 @@ const Molds = {
                 baseAdjustedCost += baseHwCostPerUnit;
             }
 
-            let baseAssemblyCostPerUnit = 0;
-            if (Number(m.builtin_assembly_speed || 0) > 0) {
-                const assemblyHours = baseQtyForCost / Number(m.builtin_assembly_speed || 0) * (params.wasteFactor || 1.1);
-                baseAssemblyCostPerUnit = (assemblyHours * params.fotPerHour) / baseQtyForCost;
-                if (params.indirectCostMode === 'all') {
-                    baseAssemblyCostPerUnit += (params.indirectPerHour * assemblyHours) / baseQtyForCost;
-                }
-                baseAdjustedCost += baseAssemblyCostPerUnit;
-            }
+            const baseAssemblyCostPerUnit = round2((baseResult.costBuiltinAssembly || 0) + (baseResult.costBuiltinAssemblyIndirect || 0));
+            const baseNfcCostPerUnit = round2((baseResult.costNfcTag || 0) + (baseResult.costNfcProgramming || 0) + (baseResult.costNfcIndirect || 0));
+            const baseCuttingCostPerUnit = round2((baseResult.costCutting || 0) + (baseResult.costCuttingIndirect || 0));
+            m.cost_breakdown = {
+                total: round2(baseAdjustedCost),
+                fot: round2(baseResult.costFot || 0),
+                indirect: round2(baseResult.costIndirect || 0),
+                plastic: round2(baseResult.costPlastic || 0),
+                mold: round2(moldAmortPerUnit),
+                design: round2(baseResult.costDesign || 0),
+                cutting: baseCuttingCostPerUnit,
+                nfc: baseNfcCostPerUnit,
+                builtin_hw: round2(baseHwCostPerUnit),
+                builtin_assembly: baseAssemblyCostPerUnit,
+            };
 
             // Calculate cost per unit at each tier
             m.tiers = {};
@@ -346,6 +352,7 @@ const Molds = {
     // === COMPACT TABLE — collapsed inline controls ===
     renderTable(molds) {
         const container = document.getElementById('molds-cards-container');
+        const vatRate = Number.isFinite(App?.params?.vatRate) ? App.params.vatRate : 0.05;
 
         if (molds.length === 0) {
             container.innerHTML = '<div class="empty-state"><p>Нет бланков по фильтрам</p></div>';
@@ -378,7 +385,7 @@ const Molds = {
 
         DISPLAY_TIERS.forEach(() => {
             html += `<th style="text-align:right;padding:2px 4px;font-size:9px;color:var(--text-muted);font-weight:400;border-left:1px solid var(--border);">себест</th>
-                     <th style="text-align:right;padding:2px 6px;font-size:9px;color:var(--green);font-weight:600;">цена</th>`;
+                     <th style="text-align:right;padding:2px 6px;font-size:9px;color:var(--green);font-weight:600;">без НДС</th>`;
         });
         html += `<th></th></tr>
                 </thead>
@@ -402,8 +409,9 @@ const Molds = {
                 const t = m.tiers?.[q];
                 const sellColor = t?.isCustom ? 'var(--orange)' : 'var(--green)';
                 const marginPct = t ? Math.round(t.margin * 100) : 0;
-                tierCells += `<td style="text-align:right;padding:6px 4px;font-size:10px;color:var(--text-muted);border-left:1px solid var(--border);">${t ? Math.round(t.cost) : '—'}</td>`;
-                tierCells += `<td style="text-align:right;padding:6px 6px;font-size:13px;font-weight:700;color:${sellColor};" title="Чистая маржа ${marginPct}% на цене без НДС, после налогов 12% от базы, 1% благотворительности с НДС и 6.5% коммерческого отдела с НДС">${t ? Math.round(t.sellPrice) : '—'}</td>`;
+                const sellWithVat = t ? round2(t.sellPrice * (1 + vatRate)) : 0;
+                tierCells += `<td style="text-align:right;padding:6px 4px;font-size:10px;color:var(--text-muted);border-left:1px solid var(--border);" title="${this.esc(this._getCostBreakdownTitle(m))}">${t ? Math.round(t.cost) : '—'}</td>`;
+                tierCells += `<td style="text-align:right;padding:6px 6px;font-size:13px;font-weight:700;color:${sellColor};" title="Цена в колонке указана без НДС: ${t ? formatRub(t.sellPrice) : '—'}. С НДС: ${t ? formatRub(sellWithVat) : '—'}. Чистая маржа ${marginPct}% считается после налогов 12% от базы, 1% благотворительности с НДС и 6.5% коммерческого отдела с НДС.">${t ? Math.round(t.sellPrice) : '—'}</td>`;
             });
 
             html += `
@@ -441,8 +449,8 @@ const Molds = {
         // Compact legend
         html += `
             <div style="padding:10px 12px;font-size:10px;color:var(--text-muted);display:flex;gap:12px;flex-wrap:wrap;border-top:1px solid var(--border);">
-                <span><span style="color:var(--text-secondary);">себест</span> — себестоимость · <span style="color:var(--green);font-weight:700;">цена</span> — расчётная цена продажи</span>
-                <span>Проценты под ценой — чистая маржа на цене без НДС; НДС 5% добавляется сверху, затем вычитаются налоги 12% от базы, 1% благотворительности с НДС и 6.5% коммерческого отдела с НДС</span>
+                <span><span style="color:var(--text-secondary);">себест</span> — себестоимость · <span style="color:var(--green);font-weight:700;">без НДС</span> — базовая цена без НДС</span>
+                <span>Проценты под ценой — чистая маржа на базе без НДС; сверху потом добавляется НДС 5%, а из базы вычитаются налоги 12%, 1% благотворительности с НДС и 6.5% коммерческого отдела с НДС</span>
                 <span>Нажмите на строку для быстрых настроек</span>
             </div>
         </div>`;
@@ -458,6 +466,28 @@ const Molds = {
         // Close all other inline rows
         document.querySelectorAll('[id^="mold-inline-row-"]').forEach(r => { r.style.display = 'none'; });
         if (!isVisible) row.style.display = '';
+    },
+
+    _getCostBreakdownParts(mold) {
+        const breakdown = mold?.cost_breakdown || {};
+        const parts = [];
+        if ((breakdown.indirect || 0) > 0) parts.push(`косвенные ${formatRub(breakdown.indirect)}`);
+        if ((breakdown.fot || 0) > 0) parts.push(`ФОТ ${formatRub(breakdown.fot)}`);
+        if ((breakdown.nfc || 0) > 0) parts.push(`NFC ${formatRub(breakdown.nfc)}`);
+        if ((breakdown.builtin_hw || 0) > 0) parts.push(`встроенная фурнитура ${formatRub(breakdown.builtin_hw)}`);
+        if ((breakdown.builtin_assembly || 0) > 0) parts.push(`сборка ${formatRub(breakdown.builtin_assembly)}`);
+        if ((breakdown.plastic || 0) > 0) parts.push(`пластик ${formatRub(breakdown.plastic)}`);
+        if ((breakdown.mold || 0) > 0) parts.push(`молд ${formatRub(breakdown.mold)}`);
+        if ((breakdown.cutting || 0) > 0) parts.push(`срезка ${formatRub(breakdown.cutting)}`);
+        if ((breakdown.design || 0) > 0) parts.push(`дизайн ${formatRub(breakdown.design)}`);
+        return parts;
+    },
+
+    _getCostBreakdownTitle(mold) {
+        const total = mold?.cost_breakdown?.total || 0;
+        const parts = this._getCostBreakdownParts(mold);
+        if (!parts.length) return '';
+        return `Себестоимость ${formatRub(total)} = ${parts.join(' • ')}`;
     },
 
     _getInlineMoldTypeLabel(mold) {
@@ -479,6 +509,8 @@ const Molds = {
         const inlineComplexity = String(mold.complexity || 'simple');
         const nfcChecked = this._hasInlineNfcChip(mold);
         const nfcCost = Number(mold?.hw_price_per_unit || App?.params?.nfcTagCost || App?.settings?.nfc_tag_cost || 0) || 0;
+        const vatRate = Number.isFinite(App?.params?.vatRate) ? App.params.vatRate : 0.05;
+        const costBreakdownSummary = this._getCostBreakdownParts(mold);
 
         // Full tier breakdown (all 7 tiers)
         const allTiersHtml = MOLD_TIERS.map(q => {
@@ -486,11 +518,13 @@ const Molds = {
             const t = mold.tiers?.[q];
             const sellColor = t?.isCustom ? 'var(--orange)' : 'var(--green)';
             const marginPct = t ? Math.round(t.margin * 100) : 0;
+            const sellWithVat = t ? round2(t.sellPrice * (1 + vatRate)) : 0;
             return `<div style="text-align:center;min-width:64px;">
                 <div style="font-size:10px;color:var(--text-muted);margin-bottom:2px;">${label} шт</div>
                 <div style="font-size:10px;color:var(--text-secondary);">${t ? Math.round(t.cost) + '₽' : '—'}</div>
                 <div style="font-size:14px;font-weight:700;color:${sellColor};">${t ? Math.round(t.sellPrice) + '₽' : '—'}</div>
-                <div style="font-size:9px;color:var(--text-muted);" title="Чистая маржа на цене без НДС; НДС 5% добавляется сверху, затем вычитаются налоги 12% от базы, 1% благотворительности с НДС и 6.5% коммерческого отдела с НДС">${marginPct}%</div>
+                <div style="font-size:9px;color:var(--text-muted);">${t ? 'с НДС ' + Math.round(sellWithVat) + '₽' : ''}</div>
+                <div style="font-size:9px;color:var(--text-muted);" title="Чистая маржа на базе без НДС; сверху добавляется НДС 5%, затем вычитаются налоги 12% от базы, 1% благотворительности с НДС и 6.5% коммерческого отдела с НДС">${marginPct}%</div>
             </div>`;
         }).join('');
 
@@ -499,6 +533,7 @@ const Molds = {
                 <div style="display:flex;gap:4px;overflow-x:auto;padding:4px 0;">
                     ${allTiersHtml}
                 </div>
+                ${costBreakdownSummary.length ? `<div style="font-size:11px;color:var(--text-secondary);line-height:1.5;"><span style="font-weight:700;color:var(--text-primary);">Себест ${formatRub(mold?.cost_breakdown?.total || 0)}</span> = ${costBreakdownSummary.join(' • ')}</div>` : ''}
                 <div style="border-top:1px solid var(--border);padding-top:10px;display:flex;gap:10px;align-items:end;flex-wrap:wrap;">
                     <label style="display:flex;flex-direction:column;gap:3px;font-size:11px;color:var(--text-secondary);">
                         <span>Шт/ч</span>
@@ -1911,7 +1946,7 @@ const Molds = {
             html += `Сборка: <span style="color:var(--text-muted)">укажите скорость (шт/мин)</span>`;
         }
         if (formulaSellPrice > 0) {
-            html += `<br><span style="color:var(--green);font-weight:700;">Цена продажи по формуле (40% чистой маржи, −6% ОСН, −1% благотворительность, −6,5% коммерч., +НДС сверху): ${formatRub(formulaSellPrice)}</span>`;
+            html += `<br><span style="color:var(--green);font-weight:700;">Цена без НДС по формуле (40% чистой маржи, −12% налоги от базы, −1% благотворительность с НДС, −6,5% коммерческий с НДС): ${formatRub(formulaSellPrice)}</span>`;
         }
         if (fixedSellPrice > 0) {
             html += `<br><span style="color:var(--text-muted);">Ручная цена в поле: ${formatRub(fixedSellPrice)}</span>`;
@@ -2216,7 +2251,7 @@ const Molds = {
         }
         html += `Итого себестоимость: <b>${formatRub(totalCost)}</b>`;
         if (formulaSellPrice > 0) {
-            html += `<br><span style="color:var(--green);font-weight:700;">Цена продажи по формуле (40% чистой маржи, −6% ОСН, −1% благотворительность, −6,5% коммерч., +НДС сверху): ${formatRub(formulaSellPrice)}</span>`;
+            html += `<br><span style="color:var(--green);font-weight:700;">Цена без НДС по формуле (40% чистой маржи, −12% налоги от базы, −1% благотворительность с НДС, −6,5% коммерческий с НДС): ${formatRub(formulaSellPrice)}</span>`;
         }
         if (fixedSellPrice > 0) {
             html += `<br><span style="color:var(--text-muted);">Ручная цена в поле: ${formatRub(fixedSellPrice)}</span>`;

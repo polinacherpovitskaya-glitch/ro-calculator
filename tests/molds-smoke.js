@@ -425,6 +425,64 @@ async function main() {
     const explicitManualPrice = vm.runInContext(`Molds.allMolds[0].tiers[50].sellPrice`, context);
     assert.equal(explicitManualPrice, 999);
 
+    context.calculateItemCost = () => ({
+        costTotal: 120,
+        costMoldAmortization: 4,
+        costFot: 10,
+        costIndirect: 20,
+        costPlastic: 5,
+        costDesign: 0,
+        costCutting: 0,
+        costCuttingIndirect: 0,
+        costNfcTag: 0,
+        costNfcProgramming: 0,
+        costNfcIndirect: 0,
+        costBuiltinAssembly: 7,
+        costBuiltinAssemblyIndirect: 3,
+    });
+    vm.runInContext(`
+        App.params = {
+            taxRate: 0.12,
+            vatRate: 0.05,
+            charityRate: 0.01,
+            wasteFactor: 1.1,
+            fotPerHour: 500,
+            indirectPerHour: 0,
+            indirectCostMode: 'production',
+        };
+        Molds.allMolds = [{
+            id: 92,
+            name: 'Буквы на шнуре',
+            status: 'active',
+            pph_min: 50,
+            pph_max: 50,
+            pph_actual: 50,
+            weight_grams: 20,
+            complexity: 'simple',
+            cost_cny: 800,
+            cny_rate: 12.5,
+            delivery_cost: 8000,
+            mold_count: 1,
+            hw_name: '',
+            hw_price_per_unit: 0,
+            hw_delivery_total: 0,
+            hw_speed: null,
+            builtin_assembly_name: 'Сборка букв на шнур',
+            builtin_assembly_speed: 55,
+            custom_prices: {},
+            custom_margins: {},
+            use_manual_prices: false,
+            disable_historical_blank_price_recovery: true,
+            total_orders: 0,
+            total_units_produced: 0
+        }];
+        Molds.enrichMolds();
+    `, context);
+    const noDoubleCountAssembly = vm.runInContext(`Molds.allMolds[0].tiers[50].cost`, context);
+    assert.equal(noDoubleCountAssembly, 120);
+    const assemblyBreakdown = vm.runInContext(`Molds.allMolds[0].cost_breakdown.builtin_assembly`, context);
+    assert.equal(assemblyBreakdown, 10);
+
     console.log('molds smoke checks passed');
 }
 
