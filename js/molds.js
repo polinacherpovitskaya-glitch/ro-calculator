@@ -936,6 +936,68 @@ const Molds = {
         }
     },
 
+    /**
+     * Публикация каталога: записывает посчитанные тиры и метаданные
+     * в mold_data.tiers_prices каждого активного молда. Плагин Figma
+     * читает это поле и подставляет в товарные слайды презентации.
+     */
+    async publishCatalog() {
+        if (!isSupabaseReady()) {
+            App.toast('Supabase не подключён');
+            return;
+        }
+        const activeMolds = this.allMolds.filter(m => m.status === 'active' && !m.hidden_on_site);
+        if (activeMolds.length === 0) {
+            App.toast('Нет активных молдов для публикации');
+            return;
+        }
+        if (!confirm(`Опубликовать ${activeMolds.length} молдов в каталог Figma-плагина?`)) return;
+
+        const TIERS = [50, 100, 300, 500, 1000, 3000];
+        let updated = 0, errors = 0;
+
+        for (const m of activeMolds) {
+            try {
+                const tiers_prices = {};
+                TIERS.forEach(qty => {
+                    const t = m.tiers?.[qty];
+                    if (t?.sellPrice > 0) tiers_prices[qty] = Math.round(t.sellPrice);
+                });
+                if (Object.keys(tiers_prices).length === 0) continue;
+
+                const { data: existing, error: fetchErr } = await supabaseClient
+                    .from('molds')
+                    .select('mold_data')
+                    .eq('id', m.id)
+                    .single();
+                if (fetchErr) { errors++; continue; }
+
+                let moldData = existing.mold_data;
+                if (typeof moldData === 'string') {
+                    try { moldData = JSON.parse(moldData); } catch (e) { moldData = {}; }
+                }
+                moldData.tiers_prices = tiers_prices;
+                moldData.tiers_published_at = new Date().toISOString();
+                moldData.weight_grams = m.weight_grams;
+                moldData.collection = m.collection || '';
+
+                const { error: updErr } = await supabaseClient
+                    .from('molds')
+                    .update({ mold_data: moldData })
+                    .eq('id', m.id);
+                if (updErr) { errors++; continue; }
+                updated++;
+            } catch (e) {
+                console.error('publishCatalog error for mold', m.id, e);
+                errors++;
+            }
+        }
+
+        const message = `Опубликовано: ${updated}/${activeMolds.length}` + (errors > 0 ? ` (ошибок: ${errors})` : '');
+        App.toast(message);
+        console.log('publishCatalog summary:', { updated, errors, total: activeMolds.length });
+    },
+
     exportCSV() {
         const tierCols = MOLD_TIERS.flatMap(q => [`Себест. ${q}шт`, `Цена ${q}шт`, `Маржа ${q}шт`, `Множ. ${q}шт`]);
         const headers = ['Название', 'Категория', 'Коллекция', 'Статус', 'Кол-во молдов',
