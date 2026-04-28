@@ -52,6 +52,7 @@ function createContext() {
         __hangingTables: new Set(),
         __settingsStore: new Map(),
         __productTemplatesData: [],
+        App: {},
     };
 
     context.window = context;
@@ -709,6 +710,79 @@ async function main() {
 
         assert.equal(winner.kind, 'resolved', 'employees should resolve from warm local cache without waiting for remote payroll extras');
         assert.equal(winner.names[0], 'Warm Employee');
+    }
+
+    {
+        const context = createContext();
+        const staleRemoteRow = {
+            id: 4242,
+            name: 'Тестовый бланк',
+            mold_data: JSON.stringify({
+                id: 4242,
+                name: 'Тестовый бланк',
+                category: 'blank',
+                collection: 'Пластик',
+                pph_actual: 25,
+                weight_grams: 10,
+                cost_cny: 800,
+                cny_rate: 12.5,
+                delivery_cost: 3000,
+                mold_count: 1,
+                updated_at: '2026-04-27T10:00:00.000Z',
+            }),
+            updated_at: '2026-04-27T10:00:00.000Z',
+        };
+        context.supabase = {
+            createClient() {
+                return {
+                    from(table) {
+                        return {
+                            select() {
+                                return {
+                                    order() {
+                                        if (table === 'molds') {
+                                            return Promise.resolve({ data: [staleRemoteRow], error: null });
+                                        }
+                                        return Promise.resolve({ data: [], error: null });
+                                    },
+                                };
+                            },
+                            delete() {
+                                return { in() { return Promise.resolve({ error: null }); } };
+                            },
+                            upsert(payload) {
+                                context.__remoteCalls.push({ table, action: 'upsert', payload });
+                                if (table === 'molds') {
+                                    return Promise.resolve({ error: { code: '500', message: 'write failed' } });
+                                }
+                                return Promise.resolve({ error: null });
+                            },
+                        };
+                    },
+                };
+            },
+        };
+        runScript(context, 'js/supabase.js');
+        vm.runInContext('initSupabase()', context);
+
+        const saveResult = JSON.parse(JSON.stringify(await vm.runInContext(`saveMold({
+            id: 4242,
+            name: 'Тестовый бланк',
+            category: 'blank',
+            collection: 'Пластик',
+            pph_actual: 110,
+            weight_grams: 10,
+            cost_cny: 900,
+            cny_rate: 12.5,
+            delivery_cost: 3000,
+            mold_count: 1
+        })`, context)));
+        assert.equal(saveResult.remoteOk, false, 'saveMold should surface shared-db write failures');
+
+        const mergedMolds = JSON.parse(JSON.stringify(await vm.runInContext('loadMolds()', context)));
+        assert.equal(mergedMolds.length, 1);
+        assert.equal(mergedMolds[0].pph_actual, 110, 'newer local mold must not be overwritten by stale shared row');
+        assert.equal(mergedMolds[0].cost_cny, 900, 'loadMolds should preserve the latest local edit when shared save lags');
     }
 
     console.log('supabase fallback smoke checks passed');

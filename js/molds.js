@@ -649,8 +649,10 @@ const Molds = {
             next.hw_warehouse_sku = '';
         }
 
-        await saveMold(next);
-        App.toast('Бланк обновлён');
+        const saveResult = await saveMold(next);
+        App.toast(saveResult?.remoteOk === false
+            ? 'Сохранили локально. Общая база пока не подтвердила обновление'
+            : 'Бланк обновлён');
         await this.load();
     },
 
@@ -916,8 +918,10 @@ const Molds = {
             }
         }
 
-        await saveMold(mold);
-        App.toast('Бланк сохранен');
+        const saveResult = await saveMold(mold);
+        App.toast(saveResult?.remoteOk === false
+            ? 'Сохранили локально. Общая база пока не подтвердила обновление'
+            : 'Бланк сохранен');
         this.hideForm();
         await this.load();
         // Sync templates so calculator sees updated photo_url, collection etc.

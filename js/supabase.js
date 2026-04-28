@@ -594,6 +594,21 @@ function _withCatalogMoldDeliveryNormalization(mold) {
     return { mold, changed: false };
 }
 
+function _toComparableTimestamp(value) {
+    const ms = Date.parse(value || '');
+    return Number.isFinite(ms) ? ms : 0;
+}
+
+function _isLocalMoldNewer(localMold, remoteMold) {
+    if (!localMold) return false;
+    if (!remoteMold) return true;
+    const localTs = _toComparableTimestamp(localMold.updated_at || localMold.created_at);
+    const remoteTs = _toComparableTimestamp(remoteMold.updated_at || remoteMold.created_at);
+    if (localTs && remoteTs) return localTs > remoteTs;
+    if (localTs && !remoteTs) return true;
+    return false;
+}
+
 function _normalizeMoldRecord(mold) {
     if (!mold || typeof mold !== 'object') return mold;
     const normalized = { ...mold };
@@ -2554,23 +2569,30 @@ async function loadMolds() {
                 }
             }
 
-            // Smart merge: only push local records that are missing in Supabase.
-            // Existing Supabase molds stay authoritative, because browser-local
-            // caches previously overwrote shared manual pricing for blanks.
+            // Smart merge: push local records that are missing in Supabase,
+            // and also prefer newer local edits over stale shared rows.
             if (localMolds.length > 0) {
                 const sbMap = new Map(supabaseMolds.map(m => [m.id, m]));
                 let pushed = 0;
+                let mergedChanged = false;
                 for (const local of localMolds) {
                     if (!local.id) continue;
-                    const sbExists = sbMap.has(local.id);
-                    if (!sbExists) {
+                    const remote = sbMap.get(local.id);
+                    const shouldPush = !remote || _isLocalMoldNewer(local, remote);
+                    if (shouldPush) {
+                        mergedChanged = true;
+                        sbMap.set(local.id, local);
                         try {
-                            await supabaseClient.from('molds').upsert({
+                            const { error: mergeError } = await supabaseClient.from('molds').upsert({
                                 id: local.id, name: local.name || '', mold_data: JSON.stringify(local),
                                 created_at: local.created_at || new Date().toISOString(),
                                 updated_at: local.updated_at || new Date().toISOString(),
                             }, { onConflict: 'id' });
-                            pushed++;
+                            if (mergeError) {
+                                console.warn('Mold merge upsert error:', mergeError);
+                            } else {
+                                pushed++;
+                            }
                         } catch(e) { console.warn('Mold merge error:', e); }
                     }
                 }
@@ -2586,6 +2608,12 @@ async function loadMolds() {
                         setLocal(LOCAL_KEYS.molds, merged);
                         return merged;
                     }
+                }
+                if (mergedChanged) {
+                    const mergedLocalPreferred = Array.from(sbMap.values())
+                        .sort((a, b) => String(a?.name || '').localeCompare(String(b?.name || ''), 'ru'));
+                    setLocal(LOCAL_KEYS.molds, mergedLocalPreferred);
+                    return mergedLocalPreferred;
                 }
             }
 
@@ -2677,6 +2705,7 @@ async function saveMold(mold) {
     if (!mold.id) { mold.id = Date.now(); mold.created_at = new Date().toISOString(); }
     mold.updated_at = new Date().toISOString();
     _clearDeletedMold(mold.id);
+    let remoteOk = !isSupabaseReady();
 
     // Upload photo to Storage if it's base64 (instead of storing huge data URI in JSON)
     if (mold.photo_url && mold.photo_url.startsWith('data:')) {
@@ -2689,15 +2718,23 @@ async function saveMold(mold) {
                 id: mold.id, name: mold.name || '', mold_data: JSON.stringify(mold),
                 created_at: mold.created_at || new Date().toISOString(), updated_at: mold.updated_at,
             }, { onConflict: 'id' });
-            if (error) console.error('saveMold error:', error);
-        } catch(e) { console.error('saveMold exception:', e); }
+            if (error) {
+                remoteOk = false;
+                console.error('saveMold error:', error);
+            } else {
+                remoteOk = true;
+            }
+        } catch(e) {
+            remoteOk = false;
+            console.error('saveMold exception:', e);
+        }
     }
     const molds = getLocal(LOCAL_KEYS.molds) || [];
     const idx = molds.findIndex(m => m.id === mold.id);
     if (idx >= 0) molds[idx] = mold; else molds.push(mold);
     setLocal(LOCAL_KEYS.molds, molds);
     refreshTemplatesFromMolds(molds);
-    return mold.id;
+    return { id: mold.id, remoteOk };
 }
 
 async function deleteMold(moldId) {
