@@ -594,6 +594,21 @@ function _withCatalogMoldDeliveryNormalization(mold) {
     return { mold, changed: false };
 }
 
+function _normalizeDimensionValue(value) {
+    const num = Number(value);
+    return Number.isFinite(num) && num > 0 ? Math.round(num * 10) / 10 : 0;
+}
+
+function _formatDimensionText(width, height, depth) {
+    const w = _normalizeDimensionValue(width);
+    const h = _normalizeDimensionValue(height);
+    const d = _normalizeDimensionValue(depth);
+    if (!w && !h && !d) return '';
+    const compact = (value) => Number.isInteger(value) ? String(value) : String(value);
+    const base = [w || '—', h || '—'].map(compact).join('×');
+    return d ? `${base}×${compact(d)} мм` : `${base} мм`;
+}
+
 function _toComparableTimestamp(value) {
     const ms = Date.parse(value || '');
     return Number.isFinite(ms) ? ms : 0;
@@ -621,6 +636,9 @@ function _normalizeMoldRecord(mold) {
     if (normalized.hw_warehouse_sku === undefined) normalized.hw_warehouse_sku = '';
     if (normalized.photo_url === undefined) normalized.photo_url = '';
     if (!normalized.category) normalized.category = 'blank';
+    normalized.width_mm = _normalizeDimensionValue(normalized.width_mm);
+    normalized.height_mm = _normalizeDimensionValue(normalized.height_mm);
+    normalized.depth_mm = _normalizeDimensionValue(normalized.depth_mm);
     if (normalized.delivery_cost === undefined || normalized.delivery_cost === null || normalized.delivery_cost === '') {
         normalized.delivery_cost = _isCatalogBlankLikeMold(normalized) ? DEFAULT_CATALOG_MOLD_DELIVERY_RUB : 0;
     }
@@ -1126,6 +1144,9 @@ function _templateToMold(template, index = 0) {
         pph_max: pMax,
         pph_actual: pAct,
         weight_grams: Number(template.weight_grams || 0) || 0,
+        width_mm: _normalizeDimensionValue(template.width_mm ?? template.width),
+        height_mm: _normalizeDimensionValue(template.height_mm ?? template.height),
+        depth_mm: _normalizeDimensionValue(template.depth_mm ?? template.depth),
         hw_source: template.hw_source || (template.hw_warehouse_item_id ? 'warehouse' : 'custom'),
         hw_name: template.hw_name || '',
         hw_price_per_unit: Number(template.hw_price_per_unit || 0) || 0,
@@ -1234,7 +1255,24 @@ function _hydrateMissingMoldFields(mold, legacyIndexes = []) {
             normalized.weight_grams = Number(legacy.weight_grams || 0);
             changed = true;
         }
-        if (normalized.photo_url && normalized.collection && normalized.pph_actual > 0 && normalized.weight_grams > 0) {
+        if (!(normalized.width_mm > 0) && _normalizeDimensionValue(legacy.width_mm ?? legacy.width) > 0) {
+            normalized.width_mm = _normalizeDimensionValue(legacy.width_mm ?? legacy.width);
+            changed = true;
+        }
+        if (!(normalized.height_mm > 0) && _normalizeDimensionValue(legacy.height_mm ?? legacy.height) > 0) {
+            normalized.height_mm = _normalizeDimensionValue(legacy.height_mm ?? legacy.height);
+            changed = true;
+        }
+        if (!(normalized.depth_mm > 0) && _normalizeDimensionValue(legacy.depth_mm ?? legacy.depth) > 0) {
+            normalized.depth_mm = _normalizeDimensionValue(legacy.depth_mm ?? legacy.depth);
+            changed = true;
+        }
+        if (normalized.photo_url
+            && normalized.collection
+            && normalized.pph_actual > 0
+            && normalized.weight_grams > 0
+            && normalized.width_mm > 0
+            && normalized.height_mm > 0) {
             break;
         }
     }
@@ -1271,6 +1309,10 @@ function _moldToTemplate(m) {
         pieces_per_hour_max: pMax,
         pieces_per_hour_avg: pAvg,
         weight_grams: mold.weight_grams,
+        size: _formatDimensionText(mold.width_mm, mold.height_mm, mold.depth_mm),
+        width_mm: mold.width_mm || 0,
+        height_mm: mold.height_mm || 0,
+        depth_mm: mold.depth_mm || 0,
         // Built-in hardware (e.g. mirror, magnet, ring)
         hw_source: mold.hw_source || (mold.hw_warehouse_item_id ? 'warehouse' : 'custom'),
         hw_name: mold.hw_name || '',
@@ -1313,6 +1355,15 @@ function refreshTemplatesFromMolds(molds) {
             }
             if (!(template.weight_grams > 0) && Number(legacy.weight_grams || 0) > 0) {
                 template.weight_grams = Number(legacy.weight_grams || 0);
+            }
+            if (!(template.width_mm > 0) && _normalizeDimensionValue(legacy.width_mm ?? legacy.width) > 0) {
+                template.width_mm = _normalizeDimensionValue(legacy.width_mm ?? legacy.width);
+            }
+            if (!(template.height_mm > 0) && _normalizeDimensionValue(legacy.height_mm ?? legacy.height) > 0) {
+                template.height_mm = _normalizeDimensionValue(legacy.height_mm ?? legacy.height);
+            }
+            if (!(template.depth_mm > 0) && _normalizeDimensionValue(legacy.depth_mm ?? legacy.depth) > 0) {
+                template.depth_mm = _normalizeDimensionValue(legacy.depth_mm ?? legacy.depth);
             }
         }
         if (!template.photo_url) {
@@ -2761,6 +2812,9 @@ function getDefaultMolds() {
     const m = (id, name, cat, pMin, pMax, pAct, weight, complexity, costCny, opts = {}) => ({
         id, name, category: cat, collection: opts.collection || '', status: opts.status || 'active',
         pph_min: pMin, pph_max: pMax, pph_actual: pAct, weight_grams: weight,
+        width_mm: _normalizeDimensionValue(opts.width_mm),
+        height_mm: _normalizeDimensionValue(opts.height_mm),
+        depth_mm: _normalizeDimensionValue(opts.depth_mm),
         complexity, cost_cny: costCny, cny_rate: CNY_RATE, delivery_cost: deliveryCost,
         cost_rub: costCny * CNY_RATE + deliveryCost, mold_count: opts.mold_count || 1,
         hw_name: opts.hw_name || '', hw_price_per_unit: opts.hw_price || 0,

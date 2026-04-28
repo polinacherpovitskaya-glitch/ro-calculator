@@ -371,6 +371,9 @@ async function main() {
     await vm.runInContext(`Molds.saveInlineMold(77)`, context);
     assert.equal(context.__savedInlineMold.pph_actual, 120);
     assert.equal(context.__savedInlineMold.weight_grams, 7.5);
+    assert.equal(context.__savedInlineMold.width_mm || 0, 0);
+    assert.equal(context.__savedInlineMold.height_mm || 0, 0);
+    assert.equal(context.__savedInlineMold.depth_mm || 0, 0);
     assert.equal(context.__savedInlineMold.complexity, 'complex');
     assert.equal(context.__savedInlineMold.mold_count, 1);
     assert.equal(context.__savedInlineMold.hw_source, 'warehouse');
@@ -387,6 +390,53 @@ async function main() {
     assert.doesNotMatch(inlineHtml, /Кол-во частей/);
     assert.match(inlineHtml, /39 ₽/);
     assert.doesNotMatch(inlineHtml, /\+10 ₽/);
+
+    vm.runInContext(`
+        Molds.allMolds = [{
+            id: 78,
+            name: 'Размерный бланк',
+            status: 'active',
+            pph_min: 80,
+            pph_max: 80,
+            pph_actual: 80,
+            weight_grams: 6,
+            width_mm: 22,
+            height_mm: 18,
+            depth_mm: 3,
+            complexity: 'simple',
+            mold_count: 1,
+            hw_name: '',
+            hw_price_per_unit: 0,
+            hw_delivery_total: 0,
+            hw_speed: null,
+            use_manual_prices: false,
+            custom_prices: {},
+            custom_margins: {},
+            disable_historical_blank_price_recovery: true,
+            tiers: {
+                50: { cost: 100, sellPrice: 200, margin: 0.5 },
+                100: { cost: 100, sellPrice: 190, margin: 0.48 },
+                300: { cost: 100, sellPrice: 180, margin: 0.45 },
+                500: { cost: 100, sellPrice: 170, margin: 0.41 },
+                1000: { cost: 100, sellPrice: 160, margin: 0.38 }
+            }
+        }];
+    `, context);
+    const tableHtml = String(vm.runInContext(`(function(){ Molds.renderTable(Molds.allMolds); return document.getElementById('molds-cards-container').innerHTML; })()`, context));
+    assert.match(tableHtml, /Размер/);
+    assert.match(tableHtml, /22×18×3/);
+
+    context.document.getElementById('mold-inline-pph-78').value = '95';
+    context.document.getElementById('mold-inline-weight-78').value = '7';
+    context.document.getElementById('mold-inline-width-78').value = '24';
+    context.document.getElementById('mold-inline-height-78').value = '19';
+    context.document.getElementById('mold-inline-depth-78').value = '4';
+    context.document.getElementById('mold-inline-complexity-78').value = 'simple';
+    context.document.getElementById('mold-inline-nfc-78').checked = false;
+    await vm.runInContext(`Molds.saveInlineMold(78)`, context);
+    assert.equal(context.__savedInlineMold.width_mm, 24);
+    assert.equal(context.__savedInlineMold.height_mm, 19);
+    assert.equal(context.__savedInlineMold.depth_mm, 4);
 
     vm.runInContext(`
         Molds.allMolds = [{

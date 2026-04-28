@@ -10,7 +10,7 @@
   <link rel="stylesheet" href="css/style.css?v=123">
     <script>
         (function () {
-            const CURRENT_HTML_VERSION = 'v296';
+            const CURRENT_HTML_VERSION = 'v297';
             const ATTEMPT_KEY = 'ro_calc_force_update_attempts';
 
             function parseVersion(version) {
@@ -81,7 +81,7 @@
     <aside class="sidebar">
         <div class="sidebar-brand">
             <h2>Recycle Object</h2>
-            <span>Калькулятор <span id="app-version">v296</span></span>
+            <span>Калькулятор <span id="app-version">v297</span></span>
         </div>
         <nav class="sidebar-nav">
             <a href="#tasks" data-page="tasks">
@@ -893,6 +893,20 @@
                         <input type="number" min="0" id="mold-weight">
                     </div>
                     <div class="form-group">
+                        <label>Ширина (мм)</label>
+                        <input type="number" min="0" step="0.1" id="mold-width">
+                    </div>
+                    <div class="form-group">
+                        <label>Высота (мм)</label>
+                        <input type="number" min="0" step="0.1" id="mold-height">
+                    </div>
+                    <div class="form-group">
+                        <label>Глубина (мм)</label>
+                        <input type="number" min="0" step="0.1" id="mold-depth">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
                         <label>Тип молда</label>
                         <select id="mold-complexity">
                             <option value="simple">Простой (2 части) — 800&#165;</option>
@@ -914,12 +928,12 @@
                     </div>
                     <div class="form-group">
                         <label>Курс юаня (&#8381;)</label>
-                        <input type="number" step="0.01" id="mold-cny-rate" value="14">
+                        <input type="number" step="0.01" id="mold-cny-rate" value="12.5">
                     </div>
                     <div class="form-group">
                         <label>Доставка 1 молда (&#8381;)</label>
-                        <input type="number" min="0" id="mold-delivery-cost" value="15200">
-                        <span class="form-hint">~160$ (60$ Китай + 100$ МСК)</span>
+                        <input type="number" min="0" id="mold-delivery-cost" value="3000">
+                        <span class="form-hint">Каталожный молд везём партией, не самолётом поштучно</span>
                     </div>
                     <div class="form-group">
                         <label>Стоимость ИТОГО (&#8381;)</label>
@@ -3471,10 +3485,10 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="js/work-management-core.js?v=1"></script>
 <script src="js/bug-report-core.js?v=2"></script>
-<script src="js/supabase.js?v=177"></script>
+<script src="js/supabase.js?v=178"></script>
 <script src="js/task-events.js?v=1"></script>
 <script src="js/calculator.js?v=81"></script>
-<script src="js/app.js?v=296"></script>
+<script src="js/app.js?v=297"></script>
 <script src="js/tpa.js?v=2"></script>
 <script src="js/wiki.js?v=4"></script>
 <script src="js/order-detail.js?v=65"></script>

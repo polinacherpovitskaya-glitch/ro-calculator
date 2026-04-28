@@ -168,6 +168,9 @@ async function main() {
                 pieces_per_hour_max: 42,
                 pieces_per_hour_avg: 42,
                 weight_grams: 18,
+                width_mm: 24,
+                height_mm: 18,
+                depth_mm: 3,
                 cost_cny: 800,
                 cny_rate: 12.5,
                 delivery_cost: 8000,
@@ -181,6 +184,9 @@ async function main() {
         assert.equal(moldsFromTemplates[0].photo_url, 'https://example.com/photo-blank.jpg');
         assert.equal(moldsFromTemplates[0].pph_actual, 42);
         assert.equal(moldsFromTemplates[0].weight_grams, 18);
+        assert.equal(moldsFromTemplates[0].width_mm, 24);
+        assert.equal(moldsFromTemplates[0].height_mm, 18);
+        assert.equal(moldsFromTemplates[0].depth_mm, 3);
     }
 
     {

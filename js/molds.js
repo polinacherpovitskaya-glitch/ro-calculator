@@ -18,6 +18,12 @@ const MOLD_MAX_LIFETIME = 4500; // максимальный ресурс мол�
 
 const MOLD_TIERS = [10, 50, 100, 300, 500, 1000, 3000];
 
+function formatDimensionValue(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num) || num <= 0) return '';
+    return Number.isInteger(num) ? String(num) : String(Math.round(num * 10) / 10);
+}
+
 // Тиражные чистые маржи бланков после всех удержаний.
 const BLANKS_TIER_MARGINS = [
     { max: 10, margin: 0.65, mult: 1.00 },
@@ -376,6 +382,7 @@ const Molds = {
                         <th style="min-width:200px; padding:10px 12px; text-align:left;">Бланк</th>
                         <th style="text-align:center;padding:8px 4px;width:48px;font-size:11px;color:var(--text-muted);font-weight:500;">Шт/ч</th>
                         <th style="text-align:center;padding:8px 4px;width:42px;font-size:11px;color:var(--text-muted);font-weight:500;">Вес</th>`;
+                        html += `<th style="text-align:center;padding:8px 6px;width:92px;font-size:11px;color:var(--text-muted);font-weight:500;">Размер</th>`;
 
         DISPLAY_TIERS.forEach(q => {
             const label = q >= 1000 ? (q/1000) + 'K' : q;
@@ -387,7 +394,7 @@ const Molds = {
                         <th style="width:36px;padding:8px 4px;"></th>
                     </tr>
                     <tr style="border-bottom:1px solid var(--border);background:var(--bg);">
-                        <th></th><th></th><th></th>`;
+                        <th></th><th></th><th></th><th></th>`;
 
         DISPLAY_TIERS.forEach(() => {
             html += `<th style="text-align:right;padding:2px 4px;font-size:9px;color:var(--text-muted);font-weight:400;border-left:1px solid var(--border);">себест</th>
@@ -401,6 +408,7 @@ const Molds = {
             const statusDot = m.status === 'active' ? 'calculated' : m.status === 'client' ? 'in_production' : 'cancelled';
             const pph = m.pph_actual || ((m.pph_min && m.pph_max) ? Math.round((m.pph_min + m.pph_max) / 2) : m.pph_min) || 0;
             const pphText = m.pph_actual ? `<b>${pph}</b>` : (pph > 0 ? `${pph}` : '—');
+            const dimensionsText = this._formatDimensions(m);
             const collectionBadge = m.collection
                 ? ` <span style="color:var(--accent);font-size:10px;font-weight:600;">${this.esc(m.collection)}</span>`
                 : '';
@@ -438,13 +446,14 @@ const Molds = {
                     </td>
                     <td style="text-align:center;padding:6px 4px;font-size:12px;">${pphText}</td>
                     <td style="text-align:center;padding:6px 4px;font-size:11px;color:var(--text-muted);">${m.weight_grams || '—'}г</td>
+                    <td style="text-align:center;padding:6px 6px;font-size:11px;color:var(--text-secondary);">${this.esc(dimensionsText)}${dimensionsText !== '—' ? '<span style="color:var(--text-muted);font-size:10px;"> мм</span>' : ''}</td>
                     ${tierCells}
                     <td style="padding:6px 4px;text-align:center;">
                         <button class="btn btn-sm btn-outline" style="padding:2px 6px;font-size:10px;" onclick="event.stopPropagation();Molds.editMold(${m.id})" title="Редактировать">&#9998;</button>
                     </td>
                 </tr>
                 <tr id="mold-inline-row-${m.id}" style="display:none;border-bottom:2px solid var(--border);background:var(--bg);">
-                    <td colspan="${DISPLAY_TIERS.length * 2 + 4}" style="padding:12px 16px;">
+                    <td colspan="${DISPLAY_TIERS.length * 2 + 5}" style="padding:12px 16px;">
                         ${this._renderInlineControls(m)}
                     </td>
                 </tr>`;
@@ -509,9 +518,21 @@ const Molds = {
         }
     },
 
+    _formatDimensions(mold) {
+        const width = formatDimensionValue(mold?.width_mm);
+        const height = formatDimensionValue(mold?.height_mm);
+        const depth = formatDimensionValue(mold?.depth_mm);
+        if (!width && !height && !depth) return '—';
+        const base = [width || '—', height || '—'].join('×');
+        return depth ? `${base}×${depth}` : base;
+    },
+
     _renderInlineControls(mold) {
         const inlinePph = Number(mold.pph_actual || mold.pph_max || mold.pph_min || 0) || '';
         const inlineWeight = Number(mold.weight_grams || 0) || '';
+        const inlineWidth = Number(mold.width_mm || 0) || '';
+        const inlineHeight = Number(mold.height_mm || 0) || '';
+        const inlineDepth = Number(mold.depth_mm || 0) || '';
         const inlineComplexity = String(mold.complexity || 'simple');
         const nfcChecked = this._hasInlineNfcChip(mold);
         const nfcCost = Number(mold?.hw_price_per_unit || App?.params?.nfcTagCost || App?.settings?.nfc_tag_cost || 0) || 0;
@@ -549,6 +570,20 @@ const Molds = {
                         <span>Вес, г</span>
                         <input id="mold-inline-weight-${mold.id}" type="number" min="0" step="0.01" class="input" style="width:80px;height:32px;font-size:12px;" value="${inlineWeight}">
                     </label>
+                    <div style="display:flex;gap:6px;align-items:end;padding:0 6px 0 0;">
+                        <label style="display:flex;flex-direction:column;gap:3px;font-size:11px;color:var(--text-secondary);">
+                            <span>Ш, мм</span>
+                            <input id="mold-inline-width-${mold.id}" type="number" min="0" step="0.1" class="input" style="width:70px;height:32px;font-size:12px;" value="${inlineWidth}">
+                        </label>
+                        <label style="display:flex;flex-direction:column;gap:3px;font-size:11px;color:var(--text-secondary);">
+                            <span>В, мм</span>
+                            <input id="mold-inline-height-${mold.id}" type="number" min="0" step="0.1" class="input" style="width:70px;height:32px;font-size:12px;" value="${inlineHeight}">
+                        </label>
+                        <label style="display:flex;flex-direction:column;gap:3px;font-size:11px;color:var(--text-secondary);">
+                            <span>Г, мм</span>
+                            <input id="mold-inline-depth-${mold.id}" type="number" min="0" step="0.1" class="input" style="width:70px;height:32px;font-size:12px;" value="${inlineDepth}">
+                        </label>
+                    </div>
                     <label style="display:flex;flex-direction:column;gap:3px;font-size:11px;color:var(--text-secondary);">
                         <span>Тип молда</span>
                         <select id="mold-inline-complexity-${mold.id}" class="input" style="height:32px;font-size:12px;">
@@ -600,6 +635,9 @@ const Molds = {
 
         const pphRaw = document.getElementById(`mold-inline-pph-${id}`)?.value;
         const weightRaw = document.getElementById(`mold-inline-weight-${id}`)?.value;
+        const widthRaw = document.getElementById(`mold-inline-width-${id}`)?.value;
+        const heightRaw = document.getElementById(`mold-inline-height-${id}`)?.value;
+        const depthRaw = document.getElementById(`mold-inline-depth-${id}`)?.value;
         const complexity = document.getElementById(`mold-inline-complexity-${id}`)?.value || mold.complexity || 'simple';
         const wantsNfc = !!document.getElementById(`mold-inline-nfc-${id}`)?.checked;
         const hadNfc = this._hasInlineNfcChip(mold);
@@ -617,6 +655,18 @@ const Molds = {
             })(),
             weight_grams: (() => {
                 const value = Number(weightRaw);
+                return Number.isFinite(value) && value > 0 ? value : 0;
+            })(),
+            width_mm: (() => {
+                const value = Number(widthRaw);
+                return Number.isFinite(value) && value > 0 ? value : 0;
+            })(),
+            height_mm: (() => {
+                const value = Number(heightRaw);
+                return Number.isFinite(value) && value > 0 ? value : 0;
+            })(),
+            depth_mm: (() => {
+                const value = Number(depthRaw);
                 return Number.isFinite(value) && value > 0 ? value : 0;
             })(),
             complexity,
@@ -725,6 +775,9 @@ const Molds = {
         document.getElementById('mold-pph-max').value = singlePph;
         document.getElementById('mold-pph-actual').value = singlePph;
         document.getElementById('mold-weight').value = m.weight_grams || '';
+        document.getElementById('mold-width').value = m.width_mm || '';
+        document.getElementById('mold-height').value = m.height_mm || '';
+        document.getElementById('mold-depth').value = m.depth_mm || '';
         document.getElementById('mold-complexity').value = m.complexity || 'simple';
         document.getElementById('mold-cost-cny').value = m.cost_cny || '';
         document.getElementById('mold-cny-rate').value = m.cny_rate || 12.5;
@@ -817,7 +870,7 @@ const Molds = {
 
     clearForm() {
         ['mold-name', 'mold-pph-min', 'mold-pph-max', 'mold-pph-actual',
-         'mold-weight', 'mold-cost-cny', 'mold-client',
+         'mold-weight', 'mold-width', 'mold-height', 'mold-depth', 'mold-cost-cny', 'mold-client',
          'mold-hw-name', 'mold-hw-price', 'mold-hw-speed',
          'mold-assembly-name', 'mold-assembly-speed',
          'mold-notes',
@@ -877,6 +930,9 @@ const Molds = {
             pph_max: pphValue,
             pph_actual: pphValue || null,
             weight_grams: parseFloat(document.getElementById('mold-weight').value) || 0,
+            width_mm: parseFloat(document.getElementById('mold-width').value) || 0,
+            height_mm: parseFloat(document.getElementById('mold-height').value) || 0,
+            depth_mm: parseFloat(document.getElementById('mold-depth').value) || 0,
             complexity: document.getElementById('mold-complexity').value,
             cost_cny: parseFloat(document.getElementById('mold-cost-cny').value) || 0,
             cny_rate: parseFloat(document.getElementById('mold-cny-rate').value) || 12.5,
@@ -1001,6 +1057,7 @@ const Molds = {
     exportCSV() {
         const tierCols = MOLD_TIERS.flatMap(q => [`Себест. ${q}шт`, `Цена ${q}шт`, `Маржа ${q}шт`, `Множ. ${q}шт`]);
         const headers = ['Название', 'Категория', 'Коллекция', 'Статус', 'Кол-во молдов',
+            'Ширина мм', 'Высота мм', 'Глубина мм',
             'Шт/ч план', 'Шт/ч факт', 'Вес г', ...tierCols,
             'Заказов', 'Выпущено'];
 
@@ -1013,6 +1070,7 @@ const Molds = {
             });
             return [
                 m.name, m.category_label, m.collection || '', m.status_label, m.mold_count || 1,
+                m.width_mm || '', m.height_mm || '', m.depth_mm || '',
                 m.pph_min + (m.pph_max !== m.pph_min ? '-' + m.pph_max : ''), m.pph_actual || '',
                 m.weight_grams, ...tierData,
                 m.total_orders || 0, m.total_units_produced || 0,
