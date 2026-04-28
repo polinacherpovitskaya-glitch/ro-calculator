@@ -993,16 +993,16 @@ const Molds = {
     },
 
     /**
-     * Публикация каталога: записывает посчитанные тиры и метаданные
-     * в mold_data.tiers_prices каждого активного молда. Плагин Figma
-     * читает это поле и подставляет в товарные слайды презентации.
+     * Публикация каталога: для каждого активного молда сохраняет в mold_data
+     * посчитанные тиры (tiers_prices), размеры (width_mm, height_mm, depth_mm),
+     * вес и коллекцию. Плагин Figma читает эти поля и подставляет в слайды.
      */
     async publishCatalog() {
         if (!isSupabaseReady()) {
             App.toast('Supabase не подключён');
             return;
         }
-        const activeMolds = this.allMolds.filter(m => m.status === 'active' && !m.hidden_on_site);
+        const activeMolds = this.allMolds.filter(m => m.status === 'active');
         if (activeMolds.length === 0) {
             App.toast('Нет активных молдов для публикации');
             return;
@@ -1010,7 +1010,7 @@ const Molds = {
         if (!confirm(`Опубликовать ${activeMolds.length} молдов в каталог Figma-плагина?`)) return;
 
         const TIERS = [50, 100, 300, 500, 1000, 3000];
-        let updated = 0, errors = 0;
+        let updated = 0, errors = 0, noTiers = 0;
 
         for (const m of activeMolds) {
             try {
@@ -1019,7 +1019,6 @@ const Molds = {
                     const t = m.tiers?.[qty];
                     if (t?.sellPrice > 0) tiers_prices[qty] = Math.round(t.sellPrice);
                 });
-                if (Object.keys(tiers_prices).length === 0) continue;
 
                 const { data: existing, error: fetchErr } = await supabaseClient
                     .from('molds')
@@ -1029,13 +1028,24 @@ const Molds = {
                 if (fetchErr) { errors++; continue; }
 
                 let moldData = existing.mold_data;
+                if (Array.isArray(moldData) && moldData.length > 0) moldData = moldData[0];
                 if (typeof moldData === 'string') {
                     try { moldData = JSON.parse(moldData); } catch (e) { moldData = {}; }
                 }
-                moldData.tiers_prices = tiers_prices;
-                moldData.tiers_published_at = new Date().toISOString();
+                if (!moldData || typeof moldData !== 'object') moldData = {};
+
+                if (Object.keys(tiers_prices).length > 0) {
+                    moldData.tiers_prices = tiers_prices;
+                    moldData.tiers_published_at = new Date().toISOString();
+                } else {
+                    noTiers++;
+                }
+                // Always sync these fields
                 moldData.weight_grams = m.weight_grams;
                 moldData.collection = m.collection || '';
+                if (m.width_mm !== undefined) moldData.width_mm = m.width_mm;
+                if (m.height_mm !== undefined) moldData.height_mm = m.height_mm;
+                if (m.depth_mm !== undefined) moldData.depth_mm = m.depth_mm;
 
                 const { error: updErr } = await supabaseClient
                     .from('molds')
@@ -1049,9 +1059,11 @@ const Molds = {
             }
         }
 
-        const message = `Опубликовано: ${updated}/${activeMolds.length}` + (errors > 0 ? ` (ошибок: ${errors})` : '');
+        const message = `Опубликовано: ${updated}/${activeMolds.length}` +
+            (noTiers > 0 ? ` (без цен: ${noTiers})` : '') +
+            (errors > 0 ? ` (ошибок: ${errors})` : '');
         App.toast(message);
-        console.log('publishCatalog summary:', { updated, errors, total: activeMolds.length });
+        console.log('publishCatalog summary:', { updated, errors, noTiers, total: activeMolds.length });
     },
 
     exportCSV() {
