@@ -1,0 +1,12 @@
+.git
+.github
+node_modules
+output
+docs
+tests
+bot
+corporate-gift
+migration*.sql
+supabase-schema.sql
+supabase_schema.sql
+nixpacks.toml

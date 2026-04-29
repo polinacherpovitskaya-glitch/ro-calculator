@@ -2169,6 +2169,749 @@ async function loadAllFintabloImports() {
 const FINANCE_WORKSPACE_SUPABASE_KEY = 'finance_workspace_json';
 const TOCHKA_SNAPSHOT_SUPABASE_KEY = 'tochka_snapshot_json';
 const FINTABLO_SNAPSHOT_SUPABASE_KEY = 'fintablo_snapshot_json';
+const FINANCE_PHASE1_TABLES = Object.freeze({
+    sources: 'finance_sources',
+    accounts: 'finance_accounts',
+    transactions: 'finance_transactions',
+    rules: 'finance_rules',
+    syncRuns: 'bank_sync_runs',
+    bankAccounts: 'bank_accounts',
+    bankTransactions: 'bank_transactions',
+    legacyImportRuns: 'legacy_finance_import_runs',
+    legacyTransactions: 'legacy_finance_transactions',
+});
+const _missingFinancePhase1Tables = new Set();
+
+function _isMissingSupabaseTableError(error) {
+    const code = String(error?.code || '').toUpperCase();
+    const message = String(error?.message || error || '').toLowerCase();
+    return code === 'PGRST205'
+        || message.includes('could not find the table')
+        || message.includes('schema cache')
+        || message.includes('relation') && message.includes('does not exist');
+}
+
+function _rememberMissingFinancePhase1Table(table, error) {
+    if (!table || _missingFinancePhase1Tables.has(table)) return;
+    _missingFinancePhase1Tables.add(table);
+    console.warn(`[Finance Phase 1] Table ${table} is not available yet. Keeping JSON source of truth for now.`, error);
+}
+
+function _clearMissingFinancePhase1Table(table) {
+    if (!table) return;
+    _missingFinancePhase1Tables.delete(table);
+}
+
+function _canUseFinancePhase1Table(table) {
+    return isSupabaseReady() && !_hasSupabaseAccessProblem() && !_missingFinancePhase1Tables.has(table);
+}
+
+function _financeNowIso() {
+    return new Date().toISOString();
+}
+
+function _normalizeFinanceSourceType(kind = '') {
+    const normalized = String(kind || '').trim().toLowerCase();
+    if (normalized.includes('bank')) return 'bank';
+    if (normalized.includes('legacy')) return 'legacy_import';
+    if (normalized === 'manual') return 'manual';
+    return 'internal';
+}
+
+function _inferFinanceSourceProvider(source = {}) {
+    const slug = String(source?.id || source?.slug || '').trim().toLowerCase();
+    if (slug.includes('tochka')) return 'tochka';
+    if (slug.includes('fintablo') || slug.includes('orders_fintablo')) return 'fintablo';
+    if (slug.includes('cash')) return 'manual_cash';
+    return slug || 'app';
+}
+
+function _normalizeFinanceAccountKind(kind = '') {
+    const normalized = String(kind || '').trim().toLowerCase();
+    if (normalized === 'bank') return 'bank';
+    if (normalized === 'cash') return 'cash';
+    if (normalized === 'card') return 'card';
+    if (normalized === 'fund' || normalized === 'reserve') return 'fund';
+    if (normalized === 'tax') return 'tax';
+    if (normalized === 'crypto') return 'crypto';
+    return 'other';
+}
+
+function _normalizeFinanceTransactionType(kind = '', row = {}) {
+    const normalized = String(kind || row.kind || row.transaction_type || '').trim().toLowerCase();
+    if (normalized === 'income' || normalized === 'expense' || normalized === 'transfer' || normalized === 'payroll' || normalized === 'asset' || normalized === 'tax' || normalized === 'charity' || normalized === 'adjustment') {
+        return normalized;
+    }
+    const direction = String(row.direction || '').trim().toLowerCase();
+    if (direction === 'in' || direction === 'income') return 'income';
+    if (direction === 'out' || direction === 'expense') return 'expense';
+    return 'expense';
+}
+
+function _normalizeFinanceReviewStatus(value = '', row = {}) {
+    const normalized = String(value || row.review_status || row.route || '').trim().toLowerCase();
+    if (normalized === 'confirmed' || normalized === 'ignored' || normalized === 'hidden' || normalized === 'draft' || normalized === 'review') {
+        return normalized;
+    }
+    if (normalized === 'auto' || normalized === 'manual') return 'confirmed';
+    return 'review';
+}
+
+function _safeFinanceDate(value, fallback = '') {
+    const raw = String(value || '').trim();
+    if (!raw) return fallback;
+    return raw.slice(0, 10);
+}
+
+function _financeLegacyTxKey(row = {}, prefix = 'finance') {
+    const explicit = String(row.legacy_tx_key || row.tx_key || row.external_id || row.transaction_id || row.id || '').trim();
+    if (explicit) return explicit;
+    const accountId = String(row.accountId || row.account_id || row.external_account_id || '').trim();
+    const date = _safeFinanceDate(row.date || row.occurred_on || row.booked_at || '');
+    const amount = Number(row.amount || row.amount_rub || 0) || 0;
+    const description = String(row.description || row.note || '').trim().slice(0, 120);
+    return [prefix, accountId, date, amount.toFixed(2), description].join(':');
+}
+
+function _mapSnapshotAccountToFinanceAccountRow(account = {}, sourceSlug = '') {
+    const legacyId = String(account.id || account.accountId || account.account_id || account.external_id || account.account_number || '').trim();
+    const displayName = String(account.displayName || account.accountLabel || account.name || legacyId || 'Счет').trim();
+    return {
+        legacy_id: legacyId,
+        source_slug: sourceSlug || String(account.source_id || '').trim(),
+        account_kind: 'bank',
+        currency_code: String(account.currency || 'RUB').trim() || 'RUB',
+        name: displayName,
+        owner_name: String(account.owner || account.ownerName || '').trim(),
+        external_account_id: String(account.external_id || account.accountId || account.account_id || '').trim(),
+        account_number: String(account.accountNumber || account.account_number || account.external_ref || '').trim(),
+        bank_name: String(account.bank_name || 'Точка').trim(),
+        bank_bic: String(account.bank_bic || '').trim(),
+        is_hidden: !!account.hidden,
+        is_active: account.status !== 'archived' && account.status !== 'deleted',
+        sort_order: Number(account.sort_order || 0) || 0,
+        metadata_json: { original: account },
+    };
+}
+
+function _mapWorkspaceAccountToFinanceAccountRow(account = {}) {
+    return {
+        legacy_id: String(account.id || '').trim(),
+        source_slug: String(account.source_id || '').trim(),
+        account_kind: _normalizeFinanceAccountKind(account.type),
+        currency_code: String(account.currency || 'RUB').trim() || 'RUB',
+        name: String(account.name || '').trim() || 'Счет',
+        owner_name: String(account.owner || '').trim(),
+        external_account_id: String(account.external_ref || account.external_account_id || '').trim(),
+        account_number: String(account.account_number || '').trim(),
+        bank_name: String(account.bank_name || '').trim(),
+        bank_bic: String(account.bank_bic || '').trim(),
+        is_hidden: account.show_in_money === false || !!account.legacy_hide_in_total,
+        is_active: String(account.status || '').trim().toLowerCase() !== 'archived',
+        sort_order: Number(account.sort_order || 0) || 0,
+        metadata_json: { original: account },
+    };
+}
+
+function _mapRawTransactionToFinanceRow(row = {}, defaults = {}) {
+    const amount = Number(row.amount || row.amount_rub || 0) || 0;
+    const occurredOn = _safeFinanceDate(row.date || row.occurred_on || row.booked_at || '', _safeFinanceDate(defaults.occurred_on || ''));
+    return {
+        legacy_tx_key: _financeLegacyTxKey(row, defaults.prefix || 'finance'),
+        source_slug: String(defaults.source_slug || row.source_id || '').trim(),
+        legacy_account_id: String(row.accountId || row.account_id || row.external_account_id || '').trim(),
+        legacy_category_id: String(row.category_id || '').trim(),
+        legacy_direction_id: String(row.direction_id || row.project_id || '').trim(),
+        legacy_counterparty_id: String(row.counterparty_id || '').trim(),
+        transaction_type: _normalizeFinanceTransactionType(defaults.transaction_type || row.transaction_type || row.kind, row),
+        review_status: _normalizeFinanceReviewStatus(defaults.review_status || row.review_status || row.route, row),
+        confidence: Number(defaults.confidence ?? row.confidence ?? 0) || 0,
+        amount,
+        currency_code: String(row.currency || row.currency_code || defaults.currency_code || 'RUB').trim() || 'RUB',
+        amount_rub: Number(row.amount_rub || amount) || amount,
+        occurred_on: occurredOn || _safeFinanceDate(_financeNowIso()),
+        booked_at: row.booked_at || row.bookedAt || null,
+        description: String(row.description || '').trim(),
+        note: String(row.note || '').trim(),
+        route: String(row.route || '').trim(),
+        external_transaction_id: String(row.external_id || row.transaction_id || '').trim(),
+        external_reference: String(row.reference || row.external_reference || '').trim(),
+        linked_order_label: String(row.project_label || row.linked_order_label || '').trim(),
+        linked_project_ref: String(row.project_id || row.linked_project_ref || '').trim(),
+        imported_from: String(defaults.imported_from || row.imported_from || '').trim(),
+        metadata_json: {
+            ...((defaults.metadata_json && typeof defaults.metadata_json === 'object') ? defaults.metadata_json : {}),
+            original: row,
+        },
+        raw_json: row,
+    };
+}
+
+function _mapRecurringTransactionToFinanceRuleRow(rule = {}) {
+    const amount = Number(rule.amount || 0) || 0;
+    const kind = _normalizeFinanceTransactionType(rule.kind, rule);
+    const legacyId = String(rule.id || '').trim();
+    const sourceSlug = String(rule.source_slug || 'manual_finance').trim() || 'manual_finance';
+    return {
+        legacy_id: legacyId,
+        rule_kind: 'recurring',
+        name: String(rule.name || rule.description || legacyId || 'Recurring rule').trim(),
+        description: String(rule.description || '').trim(),
+        match_text: '',
+        match_account_legacy_id: String(rule.account_id || rule.match_account_legacy_id || '').trim(),
+        match_amount: amount || null,
+        match_amount_sign: kind === 'income' ? 'income' : (kind === 'expense' ? 'expense' : ''),
+        target_transaction_type: kind,
+        target_note: String(rule.note || '').trim(),
+        auto_apply: rule.auto_apply !== undefined ? !!rule.auto_apply : !!rule.active,
+        priority: Number(rule.priority || 50) || 50,
+        is_active: rule.active !== false,
+        metadata_json: {
+            source_slug: sourceSlug,
+            cadence: String(rule.cadence || '').trim(),
+            start_date: _safeFinanceDate(rule.start_date || ''),
+            day_of_month: Number(rule.day_of_month || 0) || null,
+            legacy_category_id: String(rule.category_id || '').trim(),
+            legacy_direction_id: String(rule.project_id || '').trim(),
+            counterparty_name: String(rule.counterparty_name || '').trim(),
+            original: rule,
+        },
+    };
+}
+
+async function saveFinanceSources(sources) {
+    const payload = Array.isArray(sources) ? sources : [];
+    if (!_canUseFinancePhase1Table(FINANCE_PHASE1_TABLES.sources) || payload.length === 0) return [];
+    const nowIso = _financeNowIso();
+    const rows = payload.map(source => ({
+        slug: String(source.id || source.slug || '').trim(),
+        source_type: _normalizeFinanceSourceType(source.kind || source.type),
+        provider: _inferFinanceSourceProvider(source),
+        name: String(source.name || source.id || 'Источник').trim(),
+        is_active: String(source.status || '').trim().toLowerCase() !== 'archived',
+        settings_json: { original: source },
+        created_at: source.created_at || nowIso,
+        updated_at: nowIso,
+    })).filter(row => row.slug);
+    if (!rows.length) return [];
+    try {
+        const { error } = await _withRemoteTimeout('write', 'save finance sources', () => supabaseClient
+            .from(FINANCE_PHASE1_TABLES.sources)
+            .upsert(rows, { onConflict: 'slug' }));
+        if (error) {
+            if (_isMissingSupabaseTableError(error)) {
+                _rememberMissingFinancePhase1Table(FINANCE_PHASE1_TABLES.sources, error);
+                return [];
+            }
+            console.warn('saveFinanceSources error:', error);
+        } else {
+            _clearMissingFinancePhase1Table(FINANCE_PHASE1_TABLES.sources);
+        }
+    } catch (error) {
+        if (_isMissingSupabaseTableError(error)) {
+            _rememberMissingFinancePhase1Table(FINANCE_PHASE1_TABLES.sources, error);
+            return [];
+        }
+        console.warn('saveFinanceSources exception:', error);
+    }
+    return rows;
+}
+
+async function loadFinanceAccounts() {
+    const fallbackWorkspace = await loadFinanceWorkspace();
+    const fallback = Array.isArray(fallbackWorkspace?.accounts)
+        ? fallbackWorkspace.accounts.map(item => _mapWorkspaceAccountToFinanceAccountRow(item))
+        : [];
+    if (!_canUseFinancePhase1Table(FINANCE_PHASE1_TABLES.accounts)) return fallback;
+    try {
+        const { data, error } = await _withRemoteTimeout('load', 'load finance accounts', () => supabaseClient
+            .from(FINANCE_PHASE1_TABLES.accounts)
+            .select('*')
+            .order('sort_order', { ascending: true }));
+        if (error) {
+            if (_isMissingSupabaseTableError(error)) {
+                _rememberMissingFinancePhase1Table(FINANCE_PHASE1_TABLES.accounts, error);
+                return fallback;
+            }
+            console.warn('loadFinanceAccounts error:', error);
+            return fallback;
+        }
+        _clearMissingFinancePhase1Table(FINANCE_PHASE1_TABLES.accounts);
+        return Array.isArray(data) && data.length > 0 ? data : fallback;
+    } catch (error) {
+        if (_isMissingSupabaseTableError(error)) {
+            _rememberMissingFinancePhase1Table(FINANCE_PHASE1_TABLES.accounts, error);
+            return fallback;
+        }
+        console.warn('loadFinanceAccounts exception:', error);
+        return fallback;
+    }
+}
+
+async function saveFinanceAccounts(accounts) {
+    const payload = Array.isArray(accounts) ? accounts : [];
+    if (!_canUseFinancePhase1Table(FINANCE_PHASE1_TABLES.accounts) || payload.length === 0) return [];
+    const nowIso = _financeNowIso();
+    const rows = payload.map(item => ({
+        legacy_id: String(item.legacy_id || item.id || '').trim(),
+        source_id: null,
+        account_kind: _normalizeFinanceAccountKind(item.account_kind || item.type),
+        currency_code: String(item.currency_code || item.currency || 'RUB').trim() || 'RUB',
+        name: String(item.name || '').trim() || 'Счет',
+        owner_name: String(item.owner_name || item.owner || '').trim(),
+        external_account_id: String(item.external_account_id || item.external_ref || '').trim(),
+        account_number: String(item.account_number || '').trim(),
+        bank_name: String(item.bank_name || '').trim(),
+        bank_bic: String(item.bank_bic || '').trim(),
+        is_hidden: item.is_hidden !== undefined ? !!item.is_hidden : (item.show_in_money === false || !!item.legacy_hide_in_total),
+        is_active: item.is_active !== undefined ? !!item.is_active : String(item.status || '').trim().toLowerCase() !== 'archived',
+        sort_order: Number(item.sort_order || 0) || 0,
+        metadata_json: {
+            source_slug: String(item.source_slug || item.source_id || '').trim(),
+            original: item,
+        },
+        created_at: item.created_at || nowIso,
+        updated_at: nowIso,
+    })).filter(row => row.legacy_id);
+    if (!rows.length) return [];
+    try {
+        const { error } = await _withRemoteTimeout('write', 'save finance accounts', () => supabaseClient
+            .from(FINANCE_PHASE1_TABLES.accounts)
+            .upsert(rows, { onConflict: 'legacy_id' }));
+        if (error) {
+            if (_isMissingSupabaseTableError(error)) {
+                _rememberMissingFinancePhase1Table(FINANCE_PHASE1_TABLES.accounts, error);
+                return [];
+            }
+            console.warn('saveFinanceAccounts error:', error);
+        } else {
+            _clearMissingFinancePhase1Table(FINANCE_PHASE1_TABLES.accounts);
+        }
+    } catch (error) {
+        if (_isMissingSupabaseTableError(error)) {
+            _rememberMissingFinancePhase1Table(FINANCE_PHASE1_TABLES.accounts, error);
+            return [];
+        }
+        console.warn('saveFinanceAccounts exception:', error);
+    }
+    return rows;
+}
+
+async function loadFinanceTransactions() {
+    const [tochkaSnapshot, fintabloSnapshot] = await Promise.all([
+        loadTochkaSnapshot(),
+        loadFintabloSnapshot(),
+    ]);
+    const fallback = []
+        .concat(Array.isArray(tochkaSnapshot?.transactions) ? tochkaSnapshot.transactions.map(row => _mapRawTransactionToFinanceRow(row, { prefix: 'tochka', source_slug: 'tochka_api', imported_from: 'tochka_snapshot' })) : [])
+        .concat(Array.isArray(fintabloSnapshot?.transactions) ? fintabloSnapshot.transactions.map(row => _mapRawTransactionToFinanceRow(row, { prefix: 'fintablo', source_slug: 'legacy_fintablo', imported_from: 'fintablo_snapshot' })) : []);
+    if (!_canUseFinancePhase1Table(FINANCE_PHASE1_TABLES.transactions)) return fallback;
+    try {
+        const { data, error } = await _withRemoteTimeout('load', 'load finance transactions', () => supabaseClient
+            .from(FINANCE_PHASE1_TABLES.transactions)
+            .select('*')
+            .order('occurred_on', { ascending: false }));
+        if (error) {
+            if (_isMissingSupabaseTableError(error)) {
+                _rememberMissingFinancePhase1Table(FINANCE_PHASE1_TABLES.transactions, error);
+                return fallback;
+            }
+            console.warn('loadFinanceTransactions error:', error);
+            return fallback;
+        }
+        _clearMissingFinancePhase1Table(FINANCE_PHASE1_TABLES.transactions);
+        return Array.isArray(data) && data.length > 0 ? data : fallback;
+    } catch (error) {
+        if (_isMissingSupabaseTableError(error)) {
+            _rememberMissingFinancePhase1Table(FINANCE_PHASE1_TABLES.transactions, error);
+            return fallback;
+        }
+        console.warn('loadFinanceTransactions exception:', error);
+        return fallback;
+    }
+}
+
+async function saveFinanceTransactions(transactions, defaults = {}) {
+    const payload = Array.isArray(transactions) ? transactions : [];
+    if (!_canUseFinancePhase1Table(FINANCE_PHASE1_TABLES.transactions) || payload.length === 0) return [];
+    const nowIso = _financeNowIso();
+    const rows = payload.map(item => {
+        const mapped = _mapRawTransactionToFinanceRow(item, defaults);
+        return {
+            legacy_tx_key: mapped.legacy_tx_key,
+            source_id: null,
+            account_id: null,
+            counterparty_id: null,
+            category_id: null,
+            direction_id: null,
+            order_id: Number(item.order_id || 0) || null,
+            employee_id: Number(item.employee_id || 0) || null,
+            linked_order_label: mapped.linked_order_label,
+            linked_project_ref: mapped.linked_project_ref,
+            transaction_type: mapped.transaction_type,
+            review_status: mapped.review_status,
+            confidence: mapped.confidence,
+            amount: mapped.amount,
+            currency_code: mapped.currency_code,
+            amount_rub: mapped.amount_rub,
+            occurred_on: mapped.occurred_on,
+            booked_at: mapped.booked_at,
+            description: mapped.description,
+            note: mapped.note,
+            route: mapped.route,
+            external_transaction_id: mapped.external_transaction_id,
+            external_reference: mapped.external_reference,
+            imported_from: mapped.imported_from,
+            raw_json: mapped.raw_json,
+            metadata_json: {
+                legacy_account_id: mapped.legacy_account_id,
+                legacy_category_id: mapped.legacy_category_id,
+                legacy_direction_id: mapped.legacy_direction_id,
+                legacy_counterparty_id: mapped.legacy_counterparty_id,
+                ...((mapped.metadata_json && typeof mapped.metadata_json === 'object') ? mapped.metadata_json : {}),
+            },
+            created_at: item.created_at || nowIso,
+            updated_at: nowIso,
+        };
+    }).filter(row => row.legacy_tx_key);
+    if (!rows.length) return [];
+    try {
+        const { error } = await _withRemoteTimeout('write', 'save finance transactions', () => supabaseClient
+            .from(FINANCE_PHASE1_TABLES.transactions)
+            .upsert(rows, { onConflict: 'legacy_tx_key' }));
+        if (error) {
+            if (_isMissingSupabaseTableError(error)) {
+                _rememberMissingFinancePhase1Table(FINANCE_PHASE1_TABLES.transactions, error);
+                return [];
+            }
+            console.warn('saveFinanceTransactions error:', error);
+        } else {
+            _clearMissingFinancePhase1Table(FINANCE_PHASE1_TABLES.transactions);
+        }
+    } catch (error) {
+        if (_isMissingSupabaseTableError(error)) {
+            _rememberMissingFinancePhase1Table(FINANCE_PHASE1_TABLES.transactions, error);
+            return [];
+        }
+        console.warn('saveFinanceTransactions exception:', error);
+    }
+    return rows;
+}
+
+async function saveFinanceRules(rules) {
+    const payload = Array.isArray(rules) ? rules : [];
+    if (!_canUseFinancePhase1Table(FINANCE_PHASE1_TABLES.rules) || payload.length === 0) return [];
+    const nowIso = _financeNowIso();
+    const rows = payload.map(item => {
+        const mapped = _mapRecurringTransactionToFinanceRuleRow(item);
+        return {
+            legacy_id: mapped.legacy_id,
+            rule_kind: mapped.rule_kind,
+            name: mapped.name,
+            description: mapped.description,
+            match_text: mapped.match_text,
+            match_account_legacy_id: mapped.match_account_legacy_id,
+            match_amount: mapped.match_amount,
+            match_amount_sign: mapped.match_amount_sign,
+            target_transaction_type: mapped.target_transaction_type,
+            target_category_id: null,
+            target_direction_id: null,
+            target_counterparty_id: null,
+            target_note: mapped.target_note,
+            auto_apply: mapped.auto_apply,
+            priority: mapped.priority,
+            is_active: mapped.is_active,
+            metadata_json: mapped.metadata_json,
+            created_at: item.created_at || nowIso,
+            updated_at: nowIso,
+        };
+    }).filter(row => row.legacy_id);
+    if (!rows.length) return [];
+    try {
+        const { error } = await _withRemoteTimeout('write', 'save finance rules', () => supabaseClient
+            .from(FINANCE_PHASE1_TABLES.rules)
+            .upsert(rows, { onConflict: 'legacy_id' }));
+        if (error) {
+            if (_isMissingSupabaseTableError(error)) {
+                _rememberMissingFinancePhase1Table(FINANCE_PHASE1_TABLES.rules, error);
+                return [];
+            }
+            console.warn('saveFinanceRules error:', error);
+        } else {
+            _clearMissingFinancePhase1Table(FINANCE_PHASE1_TABLES.rules);
+        }
+    } catch (error) {
+        if (_isMissingSupabaseTableError(error)) {
+            _rememberMissingFinancePhase1Table(FINANCE_PHASE1_TABLES.rules, error);
+            return [];
+        }
+        console.warn('saveFinanceRules exception:', error);
+    }
+    return rows;
+}
+
+async function saveBankSyncRun(run = {}) {
+    const runId = Number(run.id || 0) || Date.now();
+    if (!_canUseFinancePhase1Table(FINANCE_PHASE1_TABLES.syncRuns)) {
+        return { id: runId, ...run };
+    }
+    const nowIso = _financeNowIso();
+    const row = {
+        id: runId,
+        provider: String(run.provider || 'tochka').trim() || 'tochka',
+        status: String(run.status || 'success').trim() || 'success',
+        date_from: _safeFinanceDate(run.date_from || run.dateFrom || ''),
+        date_to: _safeFinanceDate(run.date_to || run.dateTo || ''),
+        started_at: run.started_at || run.startedAt || nowIso,
+        finished_at: run.finished_at || run.finishedAt || nowIso,
+        imported_accounts_count: Number(run.imported_accounts_count || run.importedAccountsCount || 0) || 0,
+        imported_transactions_count: Number(run.imported_transactions_count || run.importedTransactionsCount || 0) || 0,
+        request_json: (run.request_json && typeof run.request_json === 'object') ? run.request_json : {},
+        response_json: (run.response_json && typeof run.response_json === 'object') ? run.response_json : {},
+        error_text: String(run.error_text || run.errorText || '').trim(),
+    };
+    try {
+        const { error } = await _withRemoteTimeout('write', 'save bank sync run', () => supabaseClient
+            .from(FINANCE_PHASE1_TABLES.syncRuns)
+            .upsert(row, { onConflict: 'id' }));
+        if (error) {
+            if (_isMissingSupabaseTableError(error)) {
+                _rememberMissingFinancePhase1Table(FINANCE_PHASE1_TABLES.syncRuns, error);
+                return { id: runId, ...run };
+            }
+            console.warn('saveBankSyncRun error:', error);
+        } else {
+            _clearMissingFinancePhase1Table(FINANCE_PHASE1_TABLES.syncRuns);
+        }
+    } catch (error) {
+        if (_isMissingSupabaseTableError(error)) {
+            _rememberMissingFinancePhase1Table(FINANCE_PHASE1_TABLES.syncRuns, error);
+            return { id: runId, ...run };
+        }
+        console.warn('saveBankSyncRun exception:', error);
+    }
+    return { id: runId, ...run };
+}
+
+async function saveBankAccounts(accounts, options = {}) {
+    const payload = Array.isArray(accounts) ? accounts : [];
+    if (!_canUseFinancePhase1Table(FINANCE_PHASE1_TABLES.bankAccounts) || payload.length === 0) return [];
+    const nowIso = _financeNowIso();
+    const provider = String(options.provider || 'tochka').trim() || 'tochka';
+    const syncRunId = Number(options.syncRunId || 0) || null;
+    const rows = payload.map(item => ({
+        provider,
+        sync_run_id: syncRunId,
+        external_id: String(item.accountId || item.account_id || item.external_id || item.accountNumber || item.account_number || '').trim(),
+        account_number: String(item.accountNumber || item.account_number || item.accountId || item.account_id || '').trim(),
+        display_name: String(item.displayName || item.accountLabel || item.name || '').trim() || 'Счет',
+        owner_name: String(item.ownerName || item.owner || '').trim(),
+        currency_code: String(item.currency || 'RUB').trim() || 'RUB',
+        bank_name: String(item.bank_name || item.bankName || 'Точка').trim(),
+        bank_bic: String(item.bank_bic || item.bic || '').trim(),
+        status: String(item.status || '').trim(),
+        opened_at: _safeFinanceDate(item.opened_at || item.openedAt || ''),
+        closed_at: _safeFinanceDate(item.closed_at || item.closedAt || ''),
+        last_balance: Number(item.balance || item.last_balance || 0) || null,
+        raw_json: item,
+        last_seen_at: nowIso,
+    })).filter(row => row.external_id);
+    if (!rows.length) return [];
+    try {
+        const { error } = await _withRemoteTimeout('write', 'save bank accounts', () => supabaseClient
+            .from(FINANCE_PHASE1_TABLES.bankAccounts)
+            .upsert(rows, { onConflict: 'provider,external_id' }));
+        if (error) {
+            if (_isMissingSupabaseTableError(error)) {
+                _rememberMissingFinancePhase1Table(FINANCE_PHASE1_TABLES.bankAccounts, error);
+                return [];
+            }
+            console.warn('saveBankAccounts error:', error);
+        } else {
+            _clearMissingFinancePhase1Table(FINANCE_PHASE1_TABLES.bankAccounts);
+        }
+    } catch (error) {
+        if (_isMissingSupabaseTableError(error)) {
+            _rememberMissingFinancePhase1Table(FINANCE_PHASE1_TABLES.bankAccounts, error);
+            return [];
+        }
+        console.warn('saveBankAccounts exception:', error);
+    }
+    return rows;
+}
+
+async function loadBankTransactions() {
+    const tochkaSnapshot = await loadTochkaSnapshot();
+    const fallback = Array.isArray(tochkaSnapshot?.transactions)
+        ? tochkaSnapshot.transactions.map(item => ({
+            provider: 'tochka',
+            external_id: String(item.external_id || item.transaction_id || _financeLegacyTxKey(item, 'tochka-bank')).trim(),
+            external_account_id: String(item.accountId || item.account_id || '').trim(),
+            direction: String(item.direction === 'in' ? 'income' : 'expense'),
+            amount: Number(item.amount || 0) || 0,
+            currency_code: String(item.currency || 'RUB').trim() || 'RUB',
+            booked_at: item.booked_at || null,
+            occurred_on: _safeFinanceDate(item.date || ''),
+            description: String(item.description || '').trim(),
+            counterparty_name: String(item.counterpartyName || '').trim(),
+            counterparty_inn: String(item.counterpartyInn || '').trim(),
+            raw_json: item,
+        }))
+        : [];
+    if (!_canUseFinancePhase1Table(FINANCE_PHASE1_TABLES.bankTransactions)) return fallback;
+    try {
+        const { data, error } = await _withRemoteTimeout('load', 'load bank transactions', () => supabaseClient
+            .from(FINANCE_PHASE1_TABLES.bankTransactions)
+            .select('*')
+            .order('occurred_on', { ascending: false }));
+        if (error) {
+            if (_isMissingSupabaseTableError(error)) {
+                _rememberMissingFinancePhase1Table(FINANCE_PHASE1_TABLES.bankTransactions, error);
+                return fallback;
+            }
+            console.warn('loadBankTransactions error:', error);
+            return fallback;
+        }
+        _clearMissingFinancePhase1Table(FINANCE_PHASE1_TABLES.bankTransactions);
+        return Array.isArray(data) && data.length > 0 ? data : fallback;
+    } catch (error) {
+        if (_isMissingSupabaseTableError(error)) {
+            _rememberMissingFinancePhase1Table(FINANCE_PHASE1_TABLES.bankTransactions, error);
+            return fallback;
+        }
+        console.warn('loadBankTransactions exception:', error);
+        return fallback;
+    }
+}
+
+async function saveBankTransactions(transactions, options = {}) {
+    const payload = Array.isArray(transactions) ? transactions : [];
+    if (!_canUseFinancePhase1Table(FINANCE_PHASE1_TABLES.bankTransactions) || payload.length === 0) return [];
+    const provider = String(options.provider || 'tochka').trim() || 'tochka';
+    const syncRunId = Number(options.syncRunId || 0) || null;
+    const nowIso = _financeNowIso();
+    const rows = payload.map(item => ({
+        provider,
+        sync_run_id: syncRunId,
+        bank_account_id: null,
+        finance_transaction_id: null,
+        external_id: String(item.external_id || item.transaction_id || _financeLegacyTxKey(item, `${provider}-bank`)).trim(),
+        external_account_id: String(item.accountId || item.account_id || '').trim(),
+        direction: String(item.direction === 'in' ? 'income' : (item.direction === 'out' ? 'expense' : String(item.direction || '').trim().toLowerCase())).trim(),
+        amount: Number(item.amount || 0) || 0,
+        currency_code: String(item.currency || 'RUB').trim() || 'RUB',
+        booked_at: item.booked_at || null,
+        occurred_on: _safeFinanceDate(item.date || item.occurred_on || ''),
+        description: String(item.description || '').trim(),
+        counterparty_name: String(item.counterpartyName || item.counterparty_name || '').trim(),
+        counterparty_inn: String(item.counterpartyInn || item.counterparty_inn || '').trim(),
+        raw_json: item,
+        created_at: item.created_at || nowIso,
+        updated_at: nowIso,
+    })).filter(row => row.external_id);
+    if (!rows.length) return [];
+    try {
+        const { error } = await _withRemoteTimeout('write', 'save bank transactions', () => supabaseClient
+            .from(FINANCE_PHASE1_TABLES.bankTransactions)
+            .upsert(rows, { onConflict: 'provider,external_id' }));
+        if (error) {
+            if (_isMissingSupabaseTableError(error)) {
+                _rememberMissingFinancePhase1Table(FINANCE_PHASE1_TABLES.bankTransactions, error);
+                return [];
+            }
+            console.warn('saveBankTransactions error:', error);
+        } else {
+            _clearMissingFinancePhase1Table(FINANCE_PHASE1_TABLES.bankTransactions);
+        }
+    } catch (error) {
+        if (_isMissingSupabaseTableError(error)) {
+            _rememberMissingFinancePhase1Table(FINANCE_PHASE1_TABLES.bankTransactions, error);
+            return [];
+        }
+        console.warn('saveBankTransactions exception:', error);
+    }
+    return rows;
+}
+
+async function saveLegacyFinanceImportRun(run = {}) {
+    const runId = Number(run.id || 0) || Date.now();
+    if (!_canUseFinancePhase1Table(FINANCE_PHASE1_TABLES.legacyImportRuns)) {
+        return { id: runId, ...run };
+    }
+    const nowIso = _financeNowIso();
+    const row = {
+        id: runId,
+        source_system: String(run.source_system || run.sourceSystem || 'fintablo').trim() || 'fintablo',
+        imported_at: run.imported_at || run.importedAt || nowIso,
+        date_from: _safeFinanceDate(run.date_from || run.dateFrom || ''),
+        date_to: _safeFinanceDate(run.date_to || run.dateTo || ''),
+        rows_count: Number(run.rows_count || run.rowsCount || 0) || 0,
+        source_reference: String(run.source_reference || run.sourceReference || '').trim(),
+        payload_json: (run.payload_json && typeof run.payload_json === 'object') ? run.payload_json : {},
+        notes: String(run.notes || '').trim(),
+    };
+    try {
+        const { error } = await _withRemoteTimeout('write', 'save legacy finance import run', () => supabaseClient
+            .from(FINANCE_PHASE1_TABLES.legacyImportRuns)
+            .upsert(row, { onConflict: 'id' }));
+        if (error) {
+            if (_isMissingSupabaseTableError(error)) {
+                _rememberMissingFinancePhase1Table(FINANCE_PHASE1_TABLES.legacyImportRuns, error);
+                return { id: runId, ...run };
+            }
+            console.warn('saveLegacyFinanceImportRun error:', error);
+        } else {
+            _clearMissingFinancePhase1Table(FINANCE_PHASE1_TABLES.legacyImportRuns);
+        }
+    } catch (error) {
+        if (_isMissingSupabaseTableError(error)) {
+            _rememberMissingFinancePhase1Table(FINANCE_PHASE1_TABLES.legacyImportRuns, error);
+            return { id: runId, ...run };
+        }
+        console.warn('saveLegacyFinanceImportRun exception:', error);
+    }
+    return { id: runId, ...run };
+}
+
+async function saveLegacyFinanceTransactions(transactions, options = {}) {
+    const payload = Array.isArray(transactions) ? transactions : [];
+    if (!_canUseFinancePhase1Table(FINANCE_PHASE1_TABLES.legacyTransactions) || payload.length === 0) return [];
+    const importRunId = Number(options.importRunId || options.import_run_id || 0) || null;
+    const rows = payload.map(item => ({
+        import_run_id: importRunId,
+        finance_transaction_id: null,
+        legacy_account_id: String(item.accountId || item.account_id || '').trim(),
+        legacy_transaction_id: String(item.external_id || item.transaction_id || _financeLegacyTxKey(item, 'fintablo-legacy')).trim(),
+        occurred_on: _safeFinanceDate(item.date || item.occurred_on || ''),
+        amount: Number(item.amount || 0) || 0,
+        currency_code: String(item.currency || 'RUB').trim() || 'RUB',
+        description: String(item.description || '').trim(),
+        source_label: String(options.sourceLabel || item.source_label || 'FinTablo').trim(),
+        raw_json: item,
+    })).filter(row => row.import_run_id && row.legacy_transaction_id);
+    if (!rows.length) return [];
+    try {
+        const { error } = await _withRemoteTimeout('write', 'save legacy finance transactions', () => supabaseClient
+            .from(FINANCE_PHASE1_TABLES.legacyTransactions)
+            .upsert(rows, { onConflict: 'import_run_id,legacy_transaction_id' }));
+        if (error) {
+            if (_isMissingSupabaseTableError(error)) {
+                _rememberMissingFinancePhase1Table(FINANCE_PHASE1_TABLES.legacyTransactions, error);
+                return [];
+            }
+            console.warn('saveLegacyFinanceTransactions error:', error);
+        } else {
+            _clearMissingFinancePhase1Table(FINANCE_PHASE1_TABLES.legacyTransactions);
+        }
+    } catch (error) {
+        if (_isMissingSupabaseTableError(error)) {
+            _rememberMissingFinancePhase1Table(FINANCE_PHASE1_TABLES.legacyTransactions, error);
+            return [];
+        }
+        console.warn('saveLegacyFinanceTransactions exception:', error);
+    }
+    return rows;
+}
 
 async function loadFinanceWorkspace() {
     const local = getLocal(LOCAL_KEYS.financeWorkspace) || null;
@@ -2216,6 +2959,13 @@ async function saveFinanceWorkspace(data) {
         } catch (e) {
             console.warn('saveFinanceWorkspace Supabase exception:', e);
         }
+    }
+    try {
+        await saveFinanceSources(Array.isArray(payload.sources) ? payload.sources : []);
+        await saveFinanceAccounts((Array.isArray(payload.accounts) ? payload.accounts : []).map(item => _mapWorkspaceAccountToFinanceAccountRow(item)));
+        await saveFinanceRules(Array.isArray(payload.recurringTransactions) ? payload.recurringTransactions : []);
+    } catch (error) {
+        console.warn('saveFinanceWorkspace dual-write exception:', error);
     }
     return payload;
 }
@@ -2267,6 +3017,31 @@ async function saveTochkaSnapshot(data) {
             console.warn('saveTochkaSnapshot Supabase exception:', e);
         }
     }
+    try {
+        const accounts = Array.isArray(payload.accounts) ? payload.accounts : [];
+        const transactions = Array.isArray(payload.transactions) ? payload.transactions : [];
+        const syncRun = await saveBankSyncRun({
+            provider: 'tochka',
+            status: 'success',
+            date_from: payload.range?.[0] || payload.date_from || '',
+            date_to: payload.range?.[1] || payload.date_to || '',
+            started_at: payload.synced_at || _financeNowIso(),
+            finished_at: _financeNowIso(),
+            imported_accounts_count: accounts.length,
+            imported_transactions_count: transactions.length,
+            response_json: payload,
+        });
+        await saveBankAccounts(accounts, { provider: 'tochka', syncRunId: syncRun.id });
+        await saveFinanceAccounts(accounts.map(item => _mapSnapshotAccountToFinanceAccountRow(item, 'tochka_api')));
+        await saveBankTransactions(transactions, { provider: 'tochka', syncRunId: syncRun.id });
+        await saveFinanceTransactions(transactions, {
+            prefix: 'tochka',
+            source_slug: 'tochka_api',
+            imported_from: 'tochka_snapshot',
+        });
+    } catch (error) {
+        console.warn('saveTochkaSnapshot dual-write exception:', error);
+    }
     return payload;
 }
 
@@ -2316,6 +3091,26 @@ async function saveFintabloSnapshot(data) {
         } catch (e) {
             console.warn('saveFintabloSnapshot Supabase exception:', e);
         }
+    }
+    try {
+        const transactions = Array.isArray(payload.transactions) ? payload.transactions : [];
+        const importRun = await saveLegacyFinanceImportRun({
+            source_system: 'fintablo',
+            imported_at: payload.synced_at || _financeNowIso(),
+            date_from: payload.range?.[0] || payload.date_from || '',
+            date_to: payload.range?.[1] || payload.date_to || '',
+            rows_count: transactions.length,
+            payload_json: payload,
+            source_reference: 'fintablo_snapshot_json',
+        });
+        await saveLegacyFinanceTransactions(transactions, { importRunId: importRun.id, sourceLabel: 'FinTablo snapshot' });
+        await saveFinanceTransactions(transactions, {
+            prefix: 'fintablo',
+            source_slug: 'legacy_fintablo',
+            imported_from: 'fintablo_snapshot',
+        });
+    } catch (error) {
+        console.warn('saveFintabloSnapshot dual-write exception:', error);
     }
     return payload;
 }

@@ -791,6 +791,109 @@ async function main() {
         assert.equal(mergedMolds[0].cost_cny, 900, 'loadMolds should preserve the latest local edit when shared save lags');
     }
 
+    {
+        const context = createContext();
+        runScript(context, 'js/supabase.js');
+        vm.runInContext('initSupabase()', context);
+
+        await vm.runInContext(`saveFinanceWorkspace({
+            sources: [
+                { id: 'tochka_api', name: 'Точка API', kind: 'bank_api', status: 'active' }
+            ],
+            accounts: [
+                {
+                    id: 'bank_tochka_main',
+                    name: 'Точка ••••6756',
+                    type: 'bank',
+                    owner: 'Компания',
+                    source_id: 'tochka_api',
+                    status: 'active',
+                    external_ref: '40802810902500136756'
+                }
+            ],
+            recurringTransactions: [
+                {
+                    id: 'recurring_vercel',
+                    active: true,
+                    name: 'Vercel Pro',
+                    account_id: 'bank_tochka_main',
+                    kind: 'expense',
+                    amount: 1800,
+                    cadence: 'monthly',
+                    start_date: '2026-04-29',
+                    day_of_month: 29,
+                    category_id: 'site_services',
+                    project_id: 'site',
+                    counterparty_name: 'Vercel',
+                    description: 'Ежемесячная подписка',
+                    note: 'USD card flow'
+                }
+            ]
+        })`, context);
+
+        const upserts = JSON.parse(JSON.stringify(context.__remoteCalls.filter(call => call.action === 'upsert')));
+        assert.equal(upserts.some(call => call.table === 'settings' && call.payload.key === 'finance_workspace_json'), true, 'workspace JSON should still be saved');
+        assert.equal(upserts.some(call => call.table === 'finance_sources'), true, 'finance sources should dual-write into relational phase1 table');
+        assert.equal(upserts.some(call => call.table === 'finance_accounts'), true, 'finance accounts should dual-write into relational phase1 table');
+        assert.equal(upserts.some(call => call.table === 'finance_rules'), true, 'recurring transactions should dual-write into finance rules table');
+    }
+
+    {
+        const context = createContext();
+        runScript(context, 'js/supabase.js');
+        vm.runInContext('initSupabase()', context);
+
+        await vm.runInContext(`saveTochkaSnapshot({
+            synced_at: '2026-04-29T12:00:00.000Z',
+            range: ['2026-04-01', '2026-04-29'],
+            accounts: [{
+                accountId: '40802810902500136756',
+                displayName: 'Точка *6756'
+            }],
+            transactions: [{
+                accountId: '40802810902500136756',
+                direction: 'out',
+                amount: 12500,
+                currency: 'RUB',
+                date: '2026-04-28',
+                description: 'Налог',
+                counterpartyName: 'ФНС'
+            }]
+        })`, context);
+
+        const upserts = JSON.parse(JSON.stringify(context.__remoteCalls.filter(call => call.action === 'upsert')));
+        assert.equal(upserts.some(call => call.table === 'settings' && call.payload.key === 'tochka_snapshot_json'), true, 'tochka snapshot JSON should still be saved');
+        assert.equal(upserts.some(call => call.table === 'bank_sync_runs'), true, 'tochka sync should dual-write sync runs');
+        assert.equal(upserts.some(call => call.table === 'bank_accounts'), true, 'tochka sync should dual-write bank accounts');
+        assert.equal(upserts.some(call => call.table === 'bank_transactions'), true, 'tochka sync should dual-write bank transactions');
+        assert.equal(upserts.some(call => call.table === 'finance_transactions'), true, 'tochka sync should also seed canonical finance transactions');
+    }
+
+    {
+        const context = createContext();
+        runScript(context, 'js/supabase.js');
+        vm.runInContext('initSupabase()', context);
+
+        await vm.runInContext(`saveFintabloSnapshot({
+            synced_at: '2026-04-29T12:10:00.000Z',
+            range: ['2024-01-01', '2026-04-29'],
+            transactions: [{
+                accountId: 'fintablo_112021',
+                amount: 45000,
+                currency: 'RUB',
+                date: '2026-04-17',
+                description: 'Поступление от заказа',
+                source_label: 'FinTablo'
+            }]
+        })`, context);
+
+        const upserts = JSON.parse(JSON.stringify(context.__remoteCalls.filter(call => call.action === 'upsert')));
+        assert.equal(upserts.some(call => call.table === 'settings' && call.payload.key === 'fintablo_snapshot_json'), true, 'fintablo snapshot JSON should still be saved');
+        assert.equal(upserts.some(call => call.table === 'legacy_finance_import_runs'), true, 'fintablo snapshot should dual-write import runs');
+        assert.equal(upserts.some(call => call.table === 'legacy_finance_transactions'), true, 'fintablo snapshot should dual-write legacy rows');
+        assert.equal(upserts.some(call => call.table === 'finance_transactions'), true, 'fintablo snapshot should also seed canonical finance transactions');
+    }
+
     console.log('supabase fallback smoke checks passed');
 }
 
