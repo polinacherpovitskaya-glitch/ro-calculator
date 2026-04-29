@@ -18,7 +18,9 @@ jobs:
   smoke:
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 60
+    container:
+      image: mcr.microsoft.com/playwright:v1.54.2-noble
 
     steps:
       - name: Checkout
@@ -29,11 +31,8 @@ jobs:
         with:
           node-version: '24'
 
-      - name: Install Playwright
-        run: |
-          set -euo pipefail
-          npm install --no-save playwright@1.54.2
-          npx playwright install --with-deps chromium
+      - name: Install Playwright package
+        run: npm install --no-save playwright@1.54.2
 
       - name: Run live smoke
         env:
