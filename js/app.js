@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v298';
+const APP_VERSION = 'v305';
 
 const App = {
     currentPage: 'orders',
@@ -19,6 +19,8 @@ const App = {
     currentEmployeeId: null,
     currentUser: null,
     _bootstrappingApp: false,
+    LEGACY_PUBLIC_HOST: 'polinacherpovitskaya-glitch.github.io',
+    CANONICAL_APP_ORIGIN: 'https://calc.recycleobject.ru',
 
     showLocalFileModeWarning() {
         const authScreen = document.getElementById('auth-screen');
@@ -33,6 +35,56 @@ const App = {
             <a class="btn btn-primary btn-lg" style="width:100%;text-align:center;display:block;" href="https://polinacherpovitskaya-glitch.github.io/ro-calculator/#molds">Открыть рабочий сайт</a>
             <p style="margin-top:10px;font-size:12px;color:var(--text-muted);">Нужный адрес: polinacherpovitskaya-glitch.github.io/ro-calculator</p>
         `;
+    },
+
+    shouldBlockLegacyHost() {
+        try {
+            const hostname = String(window?.location?.hostname || '').trim().toLowerCase();
+            return hostname === this.LEGACY_PUBLIC_HOST;
+        } catch (_) {
+            return false;
+        }
+    },
+
+    getCanonicalAppUrl() {
+        try {
+            const target = new URL(this.CANONICAL_APP_ORIGIN);
+            const currentHash = String(window?.location?.hash || '').trim();
+            if (currentHash) target.hash = currentHash;
+            return target.toString();
+        } catch (_) {
+            return `${this.CANONICAL_APP_ORIGIN}/`;
+        }
+    },
+
+    showLegacyHostBlocker() {
+        if (typeof document === 'undefined') return;
+        const targetUrl = this.getCanonicalAppUrl();
+        const safeTargetUrl = String(targetUrl)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+        document.title = 'Recycle Object — новый адрес калькулятора';
+        document.body.innerHTML = `
+            <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:32px;background:#f5f7fb;font-family:Inter,system-ui,sans-serif;color:#111827;">
+                <div style="max-width:640px;width:100%;background:#fff;border:1px solid #dbe3f0;border-radius:24px;box-shadow:0 24px 80px rgba(15,23,42,.08);padding:32px 32px 28px;">
+                    <div style="display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border-radius:999px;background:#eef4ff;color:#2f5bea;font-size:12px;font-weight:700;letter-spacing:.02em;text-transform:uppercase;">Старый адрес закрыт</div>
+                    <h1 style="margin:18px 0 10px;font-size:34px;line-height:1.1;font-weight:800;color:#111827;">Рабочий калькулятор переехал на новый адрес</h1>
+                    <p style="margin:0 0 12px;font-size:17px;line-height:1.55;color:#374151;">Чтобы сотрудники случайно не считали на старой версии, этот адрес теперь открыт только как заглушка. Рабочий сайт и все актуальные данные находятся на <b>calc.recycleobject.ru</b>.</p>
+                    <p style="margin:0 0 20px;font-size:15px;line-height:1.55;color:#6b7280;">Все заказы, склад, бланки, фото и публикация каталога остаются в общей базе. Просто переходите на новый адрес и работайте там.</p>
+                    <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-bottom:18px;">
+                        <a href="${safeTargetUrl}" style="display:inline-flex;align-items:center;justify-content:center;padding:14px 18px;border-radius:14px;background:#2f5bea;color:#fff;text-decoration:none;font-size:15px;font-weight:700;box-shadow:0 10px 24px rgba(47,91,234,.22);">Открыть рабочий калькулятор</a>
+                        <a href="${safeTargetUrl}" style="display:inline-flex;align-items:center;justify-content:center;padding:14px 18px;border-radius:14px;border:1px solid #dbe3f0;background:#fff;color:#111827;text-decoration:none;font-size:15px;font-weight:600;">${safeTargetUrl}</a>
+                    </div>
+                    <div style="padding:14px 16px;border-radius:16px;background:#f8fafc;border:1px solid #e5e7eb;font-size:13px;line-height:1.55;color:#475569;">
+                        Если у вас была открыта старая вкладка, просто закрепите новый адрес:
+                        <br>
+                        <span style="font-weight:700;color:#111827;">https://calc.recycleobject.ru</span>
+                    </div>
+                </div>
+            </div>`;
     },
 
     syncQuickBugButton() {
@@ -197,6 +249,10 @@ const App = {
     AUTH_PASSWORD_HASH_ROUNDS: 2048,
 
     async init() {
+        if (this.shouldBlockLegacyHost()) {
+            this.showLegacyHostBlocker();
+            return;
+        }
         initSupabase();
         if (typeof window !== 'undefined' && window.__roLocalFileMode) {
             this.showLocalFileModeWarning();
@@ -5706,4 +5762,10 @@ const Calculator = {
 };
 
 // Init on load
-document.addEventListener('DOMContentLoaded', () => App.init());
+document.addEventListener('DOMContentLoaded', () => {
+    if (App.shouldBlockLegacyHost()) {
+        App.showLegacyHostBlocker();
+        return;
+    }
+    App.init();
+});

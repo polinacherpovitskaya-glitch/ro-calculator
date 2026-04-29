@@ -151,6 +151,8 @@ async function main() {
     assert.equal(vm.runInContext('getBlankMargin(3000)', context), 0.35);
     assert.equal(vm.runInContext('roundTo5(1162)', context), 1160);
     assert.equal(vm.runInContext('roundTo5(1163)', context), 1165);
+    assert.equal(vm.runInContext(`formatDimensionValue(30)`, context), '30');
+    assert.equal(vm.runInContext(`Molds._formatDimensions({ width_mm: 30, height_mm: 55, depth_mm: 10 })`, context), '30×55×10');
     assert.equal(
         vm.runInContext(`hasManualBlankPriceOverride({
             use_manual_prices: false,
@@ -390,6 +392,7 @@ async function main() {
     assert.doesNotMatch(inlineHtml, /Кол-во частей/);
     assert.match(inlineHtml, /39 ₽/);
     assert.doesNotMatch(inlineHtml, /\+10 ₽/);
+    assert.match(inlineHtml, /Ш, мм/);
 
     vm.runInContext(`
         Molds.allMolds = [{
@@ -425,6 +428,9 @@ async function main() {
     const tableHtml = String(vm.runInContext(`(function(){ Molds.renderTable(Molds.allMolds); return document.getElementById('molds-cards-container').innerHTML; })()`, context));
     assert.match(tableHtml, /Размер/);
     assert.match(tableHtml, /22×18×3/);
+    assert.match(tableHtml, /без НДС/);
+    assert.match(tableHtml, /с НДС/);
+    assert.match(tableHtml, /цена/);
 
     context.document.getElementById('mold-inline-pph-78').value = '95';
     context.document.getElementById('mold-inline-weight-78').value = '7';
@@ -450,7 +456,7 @@ async function main() {
             complexity: 'simple',
             cost_cny: 800,
             cny_rate: 12.5,
-            delivery_cost: 8000,
+            delivery_cost: 3000,
             mold_count: 1,
             hw_name: '',
             hw_price_per_unit: 0,
@@ -466,7 +472,7 @@ async function main() {
         Molds.enrichMolds();
     `, context);
     const formulaPriceWithoutManual = vm.runInContext(`Molds.allMolds[0].tiers[50].sellPrice`, context);
-    assert.equal(formulaPriceWithoutManual, 415);
+    assert.equal(formulaPriceWithoutManual, 405);
 
     vm.runInContext(`
         Molds.allMolds[0].use_manual_prices = true;

@@ -12,7 +12,7 @@ const versionMeta = JSON.parse(
 );
 const expectedVersion = versionMeta.version;
 const baseOrigin =
-  process.env.RO_LIVE_URL || 'https://polinacherpovitskaya-glitch.github.io/ro-calculator/';
+  process.env.RO_LIVE_URL || 'https://calc.recycleobject.ru/';
 const smokeUserId = process.env.RO_SMOKE_USER_ID || '1772715209137';
 const browserLogs = [];
 

@@ -10,7 +10,7 @@
   <link rel="stylesheet" href="css/style.css?v=123">
     <script>
         (function () {
-            const CURRENT_HTML_VERSION = 'v298';
+            const CURRENT_HTML_VERSION = 'v305';
             const ATTEMPT_KEY = 'ro_calc_force_update_attempts';
 
             function parseVersion(version) {
@@ -81,7 +81,7 @@
     <aside class="sidebar">
         <div class="sidebar-brand">
             <h2>Recycle Object</h2>
-            <span>Калькулятор <span id="app-version">v298</span></span>
+            <span>Калькулятор <span id="app-version">v305</span></span>
         </div>
         <nav class="sidebar-nav">
             <a href="#tasks" data-page="tasks">
@@ -408,9 +408,9 @@
                     <div class="cost-row"><span class="cost-label">Пластик</span><span class="cost-value" id="fin-plastic">0 &#8381;</span></div>
                     <div class="cost-row"><span class="cost-label">Молды</span><span class="cost-value" id="fin-molds">0 &#8381;</span></div>
                     <div class="cost-row"><span class="cost-label">Доставка клиенту</span><span class="cost-value" id="fin-delivery">0 &#8381;</span></div>
-                    <div class="cost-row"><span class="cost-label">Коммерческий отдел (6.5% с НДС)</span><span class="cost-value" id="fin-commercial">0 &#8381;</span></div>
+                    <div class="cost-row"><span class="cost-label">Коммерческий отдел (6.5% от базы без НДС)</span><span class="cost-value" id="fin-commercial">0 &#8381;</span></div>
                     <div class="cost-row"><span class="cost-label">Налоги от выручки без НДС (7%)</span><span class="cost-value" id="fin-taxes">0 &#8381;</span></div>
-                    <div class="cost-row"><span class="cost-label">Благотворительность (1% с НДС)</span><span class="cost-value" id="fin-charity">0 &#8381;</span></div>
+                    <div class="cost-row"><span class="cost-label">Благотворительность (1% от базы без НДС)</span><span class="cost-value" id="fin-charity">0 &#8381;</span></div>
                     <div class="cost-row cost-total"><span class="cost-label">ИТОГО расходы</span><span class="cost-value" id="fin-total-costs">0 &#8381;</span></div>
                     <div class="cost-row" id="fin-discount-row" style="display:none"><span class="cost-label">Скидка по заказу</span><span class="cost-value" id="fin-discount">0 &#8381;</span></div>
                     <div class="cost-row" style="margin-top:8px"><span class="cost-label">Выручка без НДС</span><span class="cost-value text-green" id="fin-revenue">0 &#8381;</span></div>
@@ -786,7 +786,7 @@
                 <h1>Справочник бланков</h1>
                 <div class="flex gap-8">
                     <button class="btn btn-outline btn-sm" onclick="Molds.exportCSV()">Экспорт CSV</button>
-                    <button class="btn btn-outline btn-sm" onclick="Molds.publishCatalog()" title="Опубликовать актуальные цены для плагина Figma">📤 Опубликовать каталог</button>
+                    <button class="btn btn-outline btn-sm" onclick="Molds.publishCatalog()" title="Опубликовать актуальные цены и размеры для сайта и плагина Figma">📤 Опубликовать каталог</button>
                     <button class="btn btn-primary" onclick="Molds.showAddForm()">+ Новый бланк</button>
                 </div>
             </div>
@@ -2950,7 +2950,7 @@
                             <span class="form-hint">0.07 = 7%</span>
                         </div>
                         <div class="form-group">
-                            <label>Благотворительность с НДС</label>
+                            <label>Благотворительность от базы без НДС</label>
                             <input type="number" step="0.01" id="set-charity_rate" data-key="charity_rate">
                             <span class="form-hint">0.01 = 1%</span>
                         </div>
@@ -3488,7 +3488,7 @@
 <script src="js/supabase.js?v=179"></script>
 <script src="js/task-events.js?v=1"></script>
 <script src="js/calculator.js?v=81"></script>
-<script src="js/app.js?v=298"></script>
+<script src="js/app.js?v=305"></script>
 <script src="js/tpa.js?v=2"></script>
 <script src="js/wiki.js?v=4"></script>
 <script src="js/order-detail.js?v=65"></script>
