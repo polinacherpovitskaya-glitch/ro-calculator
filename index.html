@@ -10,7 +10,7 @@
   <link rel="stylesheet" href="css/style.css?v=123">
     <script>
         (function () {
-            const CURRENT_HTML_VERSION = 'v309';
+            const CURRENT_HTML_VERSION = 'v310';
             const ATTEMPT_KEY = 'ro_calc_force_update_attempts';
 
             function parseVersion(version) {
@@ -81,7 +81,7 @@
     <aside class="sidebar">
         <div class="sidebar-brand">
             <h2>Recycle Object</h2>
-            <span>Калькулятор <span id="app-version">v309</span></span>
+            <span>Калькулятор <span id="app-version">v310</span></span>
         </div>
         <nav class="sidebar-nav">
             <a href="#tasks" data-page="tasks">
@@ -2652,7 +2652,6 @@
                 <div class="tab" data-tab="indirect" onclick="Settings.switchTab('indirect')">Косв. расходы</div>
                 <div class="tab" data-tab="costs" onclick="Settings.switchTab('costs')">Расходы</div>
                 <div class="tab" data-tab="pricing" onclick="Settings.switchTab('pricing')">Ценообразование</div>
-                <div class="tab" data-tab="templates" onclick="Settings.switchTab('templates')">Справочник форм</div>
                 <div class="tab" data-tab="employees" onclick="Settings.switchTab('employees')">Сотрудники</div>
                 <div class="tab" data-tab="logins" onclick="Settings.switchTab('logins')">Логины</div>
                 <div class="tab" data-tab="sessions" onclick="Settings.switchTab('sessions')">Сессии</div>
@@ -3434,36 +3433,6 @@
                 </div>
             </div>
 
-            <!-- Templates tab -->
-            <div id="settings-tab-templates" class="settings-tab-content" style="display:none">
-                <div class="card">
-                    <div class="card-header">
-                        <h3>Справочник форм/бланков</h3>
-                        <div style="display:flex;gap:8px;">
-                            <button class="btn btn-sm btn-success" id="settings-save-molds-btn" style="display:none" onclick="Settings.saveMoldsChanges()">Сохранить</button>
-                        </div>
-                    </div>
-                    <p style="font-size:11px;color:var(--text-muted);margin-bottom:12px;">Редактируйте параметры прямо в таблице. Изменённые строки подсветятся зелёным.</p>
-                    <div class="table-wrap">
-                        <table style="font-size:12px;">
-                            <thead>
-                                <tr>
-                                    <th style="min-width:140px">Название</th>
-                                    <th style="width:70px;text-align:center">Тип</th>
-                                    <th style="width:70px;text-align:center">Шт/ч мин</th>
-                                    <th style="width:70px;text-align:center">Шт/ч макс</th>
-                                    <th style="width:70px;text-align:center">Шт/ч факт</th>
-                                    <th style="width:70px;text-align:center">Вес (г)</th>
-                                    <th style="width:60px;text-align:center">Молды</th>
-                                    <th style="width:40px"></th>
-                                </tr>
-                            </thead>
-                            <tbody id="settings-templates-body">
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
         </div>
 
     </main>
@@ -3485,10 +3454,10 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="js/work-management-core.js?v=1"></script>
 <script src="js/bug-report-core.js?v=2"></script>
-<script src="js/supabase.js?v=180"></script>
+<script src="js/supabase.js?v=181"></script>
 <script src="js/task-events.js?v=1"></script>
 <script src="js/calculator.js?v=81"></script>
-<script src="js/app.js?v=309"></script>
+<script src="js/app.js?v=310"></script>
 <script src="js/tpa.js?v=2"></script>
 <script src="js/wiki.js?v=4"></script>
 <script src="js/order-detail.js?v=65"></script>
@@ -3513,7 +3482,7 @@
 <script src="js/marketplaces.js?v=280"></script>
 <script src="js/warehouse.js?v=182"></script>
 <script src="js/monitoring.js?v=1"></script>
-<script src="js/settings.js?v=81"></script>
+<script src="js/settings.js?v=82"></script>
 <script src="js/pendant.js?v=14"></script>
 </body>
 </html>
