@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v307';
+const APP_VERSION = 'v308';
 
 const App = {
     currentPage: 'orders',
@@ -19,6 +19,11 @@ const App = {
     currentEmployeeId: null,
     currentUser: null,
     _bootstrappingApp: false,
+    _navPrefetchBound: false,
+    _prefetchInFlight: new Map(),
+    _prefetchDoneAt: new Map(),
+    _prefetchTtlMs: 120000,
+    _prefetchBaseDelayMs: 700,
     LEGACY_PUBLIC_HOST: 'polinacherpovitskaya-glitch.github.io',
     CANONICAL_APP_ORIGIN: 'https://calc.recycleobject.ru',
 
@@ -246,6 +251,125 @@ const App = {
         });
     },
 
+    bindNavPrefetchListeners() {
+        if (this._navPrefetchBound || typeof document === 'undefined') return;
+        const navLinks = Array.from(document.querySelectorAll('.sidebar-nav a[data-page]') || []);
+        if (!navLinks.length) return;
+        this._navPrefetchBound = true;
+        navLinks.forEach(link => {
+            if (!link || link.__roPrefetchBound) return;
+            link.__roPrefetchBound = true;
+            const handler = () => {
+                const page = link.dataset?.page;
+                if (page) this.prefetchPageData(page, { reason: 'nav-hover' });
+            };
+            if (typeof link.addEventListener === 'function') {
+                link.addEventListener('mouseenter', handler);
+                link.addEventListener('focus', handler);
+                link.addEventListener('touchstart', handler, { passive: true });
+            }
+        });
+    },
+
+    getWarmPrefetchPlan(currentPage = this.currentPage) {
+        const page = this.normalizePageAlias(currentPage || 'orders');
+        const plans = {
+            orders: ['orders', 'warehouse', 'molds', 'import'],
+            'order-detail': ['orders', 'warehouse', 'molds', 'import'],
+            molds: ['molds', 'warehouse', 'orders', 'import'],
+            calculator: ['molds', 'orders', 'warehouse', 'import'],
+            warehouse: ['warehouse', 'orders', 'molds', 'import'],
+            import: ['import', 'orders', 'molds', 'warehouse'],
+            tasks: ['tasks', 'projects', 'orders'],
+            projects: ['projects', 'tasks', 'orders'],
+        };
+        const fallback = [page, 'orders', 'molds', 'warehouse', 'import'];
+        return [...new Set((plans[page] || fallback)
+            .map(item => this.normalizePageAlias(item))
+            .filter(item => this.canAccess(item)))];
+    },
+
+    scheduleWarmDataPrefetch(currentPage = this.currentPage) {
+        if (!this.currentUser) return;
+        const plan = this.getWarmPrefetchPlan(currentPage);
+        if (!plan.length) return;
+        const customBaseDelay = typeof window !== 'undefined' ? Number(window.__RO_PREFETCH_BASE_DELAY_MS) : NaN;
+        const baseDelayMs = Number.isFinite(customBaseDelay) && customBaseDelay >= 0
+            ? customBaseDelay
+            : this._prefetchBaseDelayMs;
+
+        plan.forEach((page, index) => {
+            const delayMs = index === 0 ? Math.min(80, baseDelayMs) : (index * baseDelayMs);
+            const runPrefetch = () => {
+                this.prefetchPageData(page, { reason: index === 0 ? 'route-warm' : 'background-warm' });
+            };
+            setTimeout(() => {
+                if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function' && index > 0) {
+                    window.requestIdleCallback(runPrefetch, { timeout: 1500 });
+                    return;
+                }
+                runPrefetch();
+            }, delayMs);
+        });
+    },
+
+    prefetchPageData(page, options = {}) {
+        const normalizedPage = this.normalizePageAlias(page);
+        if (!this.currentUser || !this.canAccess(normalizedPage)) return null;
+
+        const inflight = this._prefetchInFlight.get(normalizedPage);
+        if (inflight) return inflight;
+
+        const lastDoneAt = Number(this._prefetchDoneAt.get(normalizedPage) || 0);
+        if (!options.force && lastDoneAt && (Date.now() - lastDoneAt) < this._prefetchTtlMs) {
+            return null;
+        }
+
+        const tasks = [];
+        switch (normalizedPage) {
+            case 'orders':
+            case 'order-detail':
+                if (typeof loadOrders === 'function') tasks.push(() => loadOrders({}));
+                break;
+            case 'calculator':
+            case 'molds':
+                if (typeof loadSettings === 'function') tasks.push(() => loadSettings());
+                if (typeof loadTemplates === 'function') tasks.push(() => loadTemplates());
+                if (typeof loadMolds === 'function') tasks.push(() => loadMolds());
+                break;
+            case 'warehouse':
+                if (typeof loadWarehouseItems === 'function') tasks.push(() => loadWarehouseItems());
+                if (typeof loadProjectHardwareState === 'function') tasks.push(() => loadProjectHardwareState());
+                break;
+            case 'import':
+                if (typeof loadFinanceWorkspace === 'function') tasks.push(() => loadFinanceWorkspace());
+                if (typeof loadTochkaSnapshot === 'function') tasks.push(() => loadTochkaSnapshot());
+                if (typeof loadFintabloSnapshot === 'function') tasks.push(() => loadFintabloSnapshot());
+                break;
+            case 'tasks':
+            case 'projects':
+                if (typeof loadOrders === 'function') tasks.push(() => loadOrders({}));
+                if (typeof loadEmployees === 'function') tasks.push(() => loadEmployees());
+                break;
+            default:
+                break;
+        }
+
+        if (!tasks.length) return null;
+
+        const promise = Promise.allSettled(tasks.map(task => Promise.resolve().then(task)))
+            .catch(error => {
+                console.warn('[Prefetch] data prefetch failed:', normalizedPage, options.reason || '', error);
+            })
+            .finally(() => {
+                this._prefetchInFlight.delete(normalizedPage);
+                this._prefetchDoneAt.set(normalizedPage, Date.now());
+            });
+
+        this._prefetchInFlight.set(normalizedPage, promise);
+        return promise;
+    },
+
     initDefaultPermissions() {
         const perms = JSON.parse(localStorage.getItem('ro_employee_pages') || '{}');
         Object.keys(perms).forEach(empId => {
@@ -280,6 +404,7 @@ const App = {
         }
         this.initDefaultPermissions();
         this.bindWarmCacheListeners();
+        this.bindNavPrefetchListeners();
         await this.prepareAuthUI();
         await this._migratePagePermsToAuthAccounts();
 
@@ -609,13 +734,18 @@ const App = {
         // Boot from local cache/defaults first so weak networks do not leave the app
         // on a white screen before the main route can render.
         try {
+            const localSettings = (typeof getLocal === 'function' && typeof LOCAL_KEYS !== 'undefined')
+                ? getLocal(LOCAL_KEYS.settings)
+                : null;
             this.settings = typeof _getSettingsFallback === 'function'
                 ? _getSettingsFallback()
-                : (getLocal(LOCAL_KEYS.settings) || getDefaultSettings());
+                : (localSettings || (typeof getDefaultSettings === 'function' ? getDefaultSettings() : {}));
             this.templates = typeof _getLocalTemplates === 'function'
                 ? _getLocalTemplates()
                 : [];
-            this.params = getProductionParams(this.settings);
+            if (typeof getProductionParams === 'function') {
+                this.params = getProductionParams(this.settings);
+            }
         } catch (e) {
             console.warn('[App] Failed to hydrate cached boot data:', e);
         }
@@ -631,6 +761,7 @@ const App = {
 
         this.handleRoute();
         this.startUpdateChecker();
+        this.scheduleWarmDataPrefetch(this.currentPage);
 
         Promise.allSettled([
             loadSettings().then(settings => {
@@ -890,6 +1021,7 @@ const App = {
         this.syncQuickBugButton();
         if (this._bootstrappingApp) return;
         this.onPageEnter(this.currentPage, route.subId);
+        this.scheduleWarmDataPrefetch(this.currentPage);
         this.trackAuthEvent('navigate', { to_page: this.currentPage });
     },
 

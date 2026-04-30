@@ -529,13 +529,7 @@ async function smokeShowAppPrimesRouteShellBeforeDataReady(context) {
     };
     context.location.hash = '#molds';
     context.__settingsResolved = false;
-    context.__settingsWaiter = null;
-    context.loadSettings = async () => new Promise((resolve) => {
-        context.__settingsWaiter = () => {
-            context.__settingsResolved = true;
-            resolve({});
-        };
-    });
+    context.loadSettings = async () => new Promise(() => {});
     context.loadTemplates = async () => [];
 
     vm.runInContext(`(() => {
@@ -558,10 +552,34 @@ async function smokeShowAppPrimesRouteShellBeforeDataReady(context) {
     assert.equal(pageOrders.classList.contains('active'), false);
     assert.equal(navMolds.classList.contains('active'), true, 'molds nav should highlight immediately');
     assert.equal(vm.runInContext(`App.currentPage`, context), 'molds');
-    assert.equal(context.__settingsResolved, false, 'route shell should activate before settings resolve');
-
-    context.__settingsWaiter();
     await pendingShowApp;
+    assert.equal(context.__settingsResolved, false, 'showApp should not await remote settings before route shell is active');
+}
+
+async function smokeWarmPrefetchStartsBackgroundLoads(context) {
+    vm.runInContext(`(() => {
+        window.__RO_PREFETCH_BASE_DELAY_MS = 1;
+        globalThis.__prefetchCalls = [];
+        globalThis.loadOrders = async () => { __prefetchCalls.push('orders'); return []; };
+        globalThis.loadSettings = async () => { __prefetchCalls.push('settings'); return {}; };
+        globalThis.loadTemplates = async () => { __prefetchCalls.push('templates'); return []; };
+        globalThis.loadMolds = async () => { __prefetchCalls.push('molds'); return []; };
+        globalThis.loadWarehouseItems = async () => { __prefetchCalls.push('warehouse'); return []; };
+        globalThis.loadProjectHardwareState = async () => { __prefetchCalls.push('warehouse-state'); return { checks:{}, actual_qtys:{} }; };
+        globalThis.loadFinanceWorkspace = async () => { __prefetchCalls.push('finance'); return null; };
+        globalThis.loadTochkaSnapshot = async () => { __prefetchCalls.push('tochka'); return null; };
+        globalThis.loadFintabloSnapshot = async () => { __prefetchCalls.push('fintablo'); return null; };
+        App.currentUser = { id: '__admin', role: 'admin', employee_id: null, pages: null };
+    })()`, context);
+
+    vm.runInContext(`App.scheduleWarmDataPrefetch('orders')`, context);
+    await new Promise(resolve => setTimeout(resolve, 25));
+
+    const calls = clone(vm.runInContext(`globalThis.__prefetchCalls.slice()`, context));
+    assert.equal(calls.includes('orders'), true, 'orders should be prefetched in the background');
+    assert.equal(calls.includes('warehouse'), true, 'warehouse should be warmed after orders');
+    assert.equal(calls.includes('molds'), true, 'molds should be warmed after orders');
+    assert.equal(calls.includes('finance'), true, 'finance workspace should be warmed after orders');
 }
 
 async function main() {
@@ -586,6 +604,11 @@ async function main() {
     runScript(routeContext, 'js/app.js');
     runScript(routeContext, 'js/settings.js');
     await smokeShowAppPrimesRouteShellBeforeDataReady(routeContext);
+
+    const prefetchContext = createContext();
+    runScript(prefetchContext, 'js/app.js');
+    runScript(prefetchContext, 'js/settings.js');
+    await smokeWarmPrefetchStartsBackgroundLoads(prefetchContext);
 
     console.log('auth hardening smoke checks passed');
 }
