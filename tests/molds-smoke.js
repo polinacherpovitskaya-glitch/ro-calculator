@@ -142,6 +142,17 @@ async function main() {
     context.App.params = { taxRate: 0.07, vatRate: 0.05, charityRate: 0.01 };
     runScript(context, 'js/molds.js');
 
+    assert.equal(
+        vm.runInContext('Number(getBlankKeepRate(App.params, 0.45).toFixed(3))', context),
+        0.405,
+        'blank keep rate should subtract 7% tax, 6.5% commercial, 1% charity and 45% target margin from the base without VAT',
+    );
+    assert.equal(
+        vm.runInContext('calcBlankSellPrice(257.99, 500, App.params)', context),
+        635,
+        '500-unit blank price should be derived from the VAT-free base, not from commercial/charity shares on top of VAT',
+    );
+
     assert.equal(vm.runInContext('getBlankMargin(10)', context), 0.65);
     assert.equal(vm.runInContext('getBlankMargin(50)', context), 0.60);
     assert.equal(vm.runInContext('getBlankMargin(100)', context), 0.55);

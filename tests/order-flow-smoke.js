@@ -909,11 +909,11 @@ async function smokeBlankTargetFormulaMatchesVatExclusiveMargin(context) {
         };
     })()`, context));
 
-    assert.equal(state.blankTarget, 613.85, 'blank target price should use the same VAT-exclusive base formula as custom items');
-    assert.equal(state.blankNet40, 613.85, '40% blank helper price should match the calculator target formula');
-    assert.equal(state.customTarget, 613.85, 'custom target formula should stay aligned with blank target formula');
-    assert.equal(state.blankSell, 615, 'blank catalog sell price should round the VAT-exclusive target to the nearest 5');
-    assert.equal(state.blankMargin, 40.08, 'rounded blank price should stay very close to the 40% net target');
+    assert.equal(state.blankTarget, 608.79, 'blank target price should treat tax, commercial and charity as deductions from the VAT-free base');
+    assert.equal(state.blankNet40, 608.79, '40% blank helper price should match the blanks catalog target formula');
+    assert.equal(state.customTarget, 613.85, 'generic calculator target formula still follows the shared product calculation until it is migrated separately');
+    assert.equal(state.blankSell, 610, 'blank catalog sell price should round the VAT-free target to the nearest 5');
+    assert.equal(state.blankMargin, 39.72, 'generic margin helper still reflects the shared calculator retention model until it is migrated together with blanks');
 }
 
 async function smokeWarehouseBackedNfcDoesNotDoubleCountFallback(context) {
