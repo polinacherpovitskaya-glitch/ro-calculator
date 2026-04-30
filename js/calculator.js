@@ -70,16 +70,16 @@ function getRevenueGrossMultiplier(params) {
     return 1 + getVatRate(params);
 }
 
-function getCommercialGrossShare(params) {
-    return getCommercialRate(params) * getRevenueGrossMultiplier(params);
+function getCommercialBaseShare(params) {
+    return getCommercialRate(params);
 }
 
-function getCharityGrossShare(params) {
-    return getCharityRate(params) * getRevenueGrossMultiplier(params);
+function getCharityBaseShare(params) {
+    return getCharityRate(params);
 }
 
 function getNetRevenueRetentionRate(params) {
-    return 1 - getTaxRate(params) - getCommercialGrossShare(params) - getCharityGrossShare(params);
+    return 1 - getTaxRate(params) - getCommercialBaseShare(params) - getCharityBaseShare(params);
 }
 
 function getKeepRateForTargetMargin(params, margin = 0) {
@@ -91,11 +91,11 @@ function calcTaxesAmount(netRevenue, params) {
 }
 
 function calcCommercialAmount(netRevenue, params) {
-    return round2((Number(netRevenue) || 0) * getCommercialGrossShare(params));
+    return round2((Number(netRevenue) || 0) * getCommercialBaseShare(params));
 }
 
 function calcCharityAmount(netRevenue, params) {
-    return round2((Number(netRevenue) || 0) * getCharityGrossShare(params));
+    return round2((Number(netRevenue) || 0) * getCharityBaseShare(params));
 }
 
 function getActivePrintings(item) {
@@ -925,7 +925,7 @@ function calculatePendantCost(pendant, params) {
         hoursBuiltinAssembly: round2(letterMetrics?.hoursBuiltinAssembly || 0),
         hoursPlasticZone: round2(letterMetrics?.hoursPlasticZone || 0),
         hoursAssemblyZone: round2(letterMetrics?.hoursAssemblyZone || 0),
-        margin: calculateActualMargin(sellPerUnit, costPerUnit),
+        margin: calculateActualMargin(sellPerUnit, costPerUnit, params),
     };
 }
 
@@ -969,7 +969,7 @@ function getMultiplierForQty(qty) {
 /**
  * Рассчитать таргет-цену для фурнитуры/упаковки/кастома
  * Формула:
- * цена без НДС = себестоимость / (1 - налоги без НДС - коммерч. с НДС - благотворительность с НДС - целевая чистая маржа)
+ * цена без НДС = себестоимость / (1 - налоги - коммерческий - благотворительность - целевая чистая маржа)
  * НДС добавляется отдельно сверху в КП/счёте и в эту цену не входит.
  */
 function calculateTargetPrice(cost, params, qty) {
@@ -993,7 +993,7 @@ function calculateMpTargetPrice(cost, params) {
 /**
  * Рассчитать фактическую маржу
  */
-function calculateActualMargin(sellPrice, costPerUnit) {
+function calculateActualMargin(sellPrice, costPerUnit, params = null) {
     // Explicit free sale: revenue is zero, full unit cost goes to loss.
     if (sellPrice <= 0) {
         return {
@@ -1001,7 +1001,8 @@ function calculateActualMargin(sellPrice, costPerUnit) {
             percent: null,
         };
     }
-    const netBeforeCost = sellPrice * getNetRevenueRetentionRate(App?.params || {});
+    const runtimeParams = params || App?.params || {};
+    const netBeforeCost = sellPrice * getNetRevenueRetentionRate(runtimeParams);
     const earned = netBeforeCost - (costPerUnit || 0);
     return {
         earned: round2(earned),
@@ -1368,7 +1369,7 @@ function calculateOrderSummary(items, hardwareItems, packagingItems, extraCosts,
 
         // Total sell = item + printing, total cost = costTotal (includes printing cost)
         const totalSellPerUnit = (item.sell_price_item || 0) + getPrintingSellPricePerUnit(item);
-        const marginItem = calculateActualMargin(totalSellPerUnit, item.result.costTotal);
+        const marginItem = calculateActualMargin(totalSellPerUnit, item.result.costTotal, params);
         totalEarned += marginItem.earned * qty;
     });
 
@@ -1376,7 +1377,7 @@ function calculateOrderSummary(items, hardwareItems, packagingItems, extraCosts,
         const qty = hw.qty || 0;
         if (!hw.result) return;
         totalRevenue += (hw.sell_price || 0) * qty;
-        const m = calculateActualMargin(hw.sell_price || 0, hw.result.costPerUnit);
+        const m = calculateActualMargin(hw.sell_price || 0, hw.result.costPerUnit, params);
         totalEarned += m.earned * qty;
     });
 
@@ -1384,7 +1385,7 @@ function calculateOrderSummary(items, hardwareItems, packagingItems, extraCosts,
         const qty = pkg.qty || 0;
         if (!pkg.result) return;
         totalRevenue += (pkg.sell_price || 0) * qty;
-        const m = calculateActualMargin(pkg.sell_price || 0, pkg.result.costPerUnit);
+        const m = calculateActualMargin(pkg.sell_price || 0, pkg.result.costPerUnit, params);
         totalEarned += m.earned * qty;
     });
 
@@ -1393,7 +1394,7 @@ function calculateOrderSummary(items, hardwareItems, packagingItems, extraCosts,
         if (!pnd.result) return;
         const qty = pnd.quantity || 0;
         totalRevenue += pnd.result.totalRevenue;
-        const m = calculateActualMargin(pnd.result.sellPerUnit, pnd.result.costPerUnit);
+        const m = calculateActualMargin(pnd.result.sellPerUnit, pnd.result.costPerUnit, params);
         totalEarned += m.earned * qty;
     });
 

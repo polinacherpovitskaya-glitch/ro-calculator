@@ -714,10 +714,9 @@ const TPA = {
         if (typeof getKeepRateForTargetMargin === 'function') {
             return getKeepRateForTargetMargin(App.params || getProductionParams(App.settings || {}), targetMargin);
         }
-        const vatRate = Number.isFinite(App?.params?.vatRate) ? Number(App.params.vatRate) : 0.05;
         const taxRate = Number.isFinite(App?.params?.taxRate) ? Number(App.params.taxRate) : 0.07;
         const charityRate = Number.isFinite(App?.params?.charityRate) ? Number(App.params.charityRate) : 0.01;
-        return 1 - taxRate - (0.065 * (1 + vatRate)) - (charityRate * (1 + vatRate)) - (Number(targetMargin) || 0);
+        return 1 - taxRate - 0.065 - charityRate - (Number(targetMargin) || 0);
     },
 
     getTechnicalAssessment(input) {

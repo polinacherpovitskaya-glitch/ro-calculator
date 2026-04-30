@@ -1314,10 +1314,9 @@ const Pendant = {
             const keepRateForTarget = typeof getKeepRateForTargetMargin === 'function'
                 ? getKeepRateForTargetMargin(params, targetMargin)
                 : (() => {
-                    const vatRate = Number.isFinite(params.vatRate) ? params.vatRate : 0.05;
                     const taxRate = Number.isFinite(params.taxRate) ? params.taxRate : 0.07;
                     const charityRate = Number.isFinite(params.charityRate) ? params.charityRate : 0.01;
-                    const retention = 1 - taxRate - (0.065 * (1 + vatRate)) - (charityRate * (1 + vatRate));
+                    const retention = 1 - taxRate - 0.065 - charityRate;
                     return retention - targetMargin;
                 })();
             if (keepRateForTarget > 0 && targetMargin < 1) {
@@ -1329,8 +1328,8 @@ const Pendant = {
             ? getNetRevenueRetentionRate(params)
             : 1
                 - (Number.isFinite(params.taxRate) ? params.taxRate : 0.07)
-                - (0.065 * (1 + (Number.isFinite(params.vatRate) ? params.vatRate : 0.05)))
-                - ((Number.isFinite(params.charityRate) ? params.charityRate : 0.01) * (1 + (Number.isFinite(params.vatRate) ? params.vatRate : 0.05)));
+                - 0.065
+                - (Number.isFinite(params.charityRate) ? params.charityRate : 0.01);
         const margin = sellPrice > 0
             ? round2(((sellPrice * keepNetRate) - cost) / sellPrice)
             : targetMargin;
@@ -1494,8 +1493,8 @@ const Pendant = {
             ? getNetRevenueRetentionRate(App?.params || {})
             : 1
                 - (Number.isFinite(App?.params?.taxRate) ? App.params.taxRate : 0.07)
-                - (0.065 * (1 + (Number.isFinite(App?.params?.vatRate) ? App.params.vatRate : 0.05)))
-                - ((Number.isFinite(App?.params?.charityRate) ? App.params.charityRate : 0.01) * (1 + (Number.isFinite(App?.params?.vatRate) ? App.params.vatRate : 0.05)));
+                - 0.065
+                - (Number.isFinite(App?.params?.charityRate) ? App.params.charityRate : 0.01);
         const finalMargin = typeof calculateActualMargin === 'function'
             ? calculateActualMargin(totalSellAll, totalCostAll)
             : {

@@ -16,8 +16,8 @@ CREATE TABLE settings (
 -- Начальные данные настроек
 INSERT INTO settings (key, value, unit, description) VALUES
   ('fot_per_hour', 550, 'р', 'ФОТ производственного персонала в час'),
-  ('indirect_costs_monthly', 1913265, 'р', 'Косвенные расходы в месяц'),
-  ('cutting_speed', 180, 'шт/ч', 'Скорость срезания лейников'),
+  ('indirect_costs_monthly', 1900000, 'р', 'Косвенные расходы в месяц'),
+  ('cutting_speed', 300, 'шт/ч', 'Скорость срезания лейников'),
   ('plastic_cost_per_kg', 250, 'р', 'Стоимость пластика за кг'),
   ('nfc_write_speed', 350, 'шт/ч', 'Скорость записи NFC метки'),
   ('workers_count', 3.5, 'чел', 'Количество сотрудников на производстве'),
@@ -29,7 +29,8 @@ INSERT INTO settings (key, value, unit, description) VALUES
   ('design_cost', 8500, 'р', 'Стоимость проектирования формы (Игорь)'),
   ('nfc_tag_cost', 10, 'р', 'Стоимость NFC метки'),
   ('vat_rate', 0.05, '', 'Ставка НДС (5%)'),
-  ('tax_rate', 0.06, '', 'Ставка налога (6%)'),
+  ('tax_rate', 0.07, '', 'Ставка налога (7%)'),
+  ('charity_rate', 0.01, '', 'Благотворительность от базы без НДС (1%)'),
   ('margin_target', 0.40, '', 'Целевая маржа (40%)'),
   ('delivery_cost_moscow', 2000, 'р', 'Стоимость доставки по МСК'),
   ('printing_delivery_cost', 1500, 'р', 'Стоимость доставки с печати'),
