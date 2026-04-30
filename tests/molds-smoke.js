@@ -550,6 +550,89 @@ async function main() {
     const assemblyBreakdown = vm.runInContext(`Molds.allMolds[0].cost_breakdown.builtin_assembly`, context);
     assert.equal(assemblyBreakdown, 10);
 
+    context.__publishedCatalogUpdates = [];
+    context.confirm = () => true;
+    context.isSupabaseReady = () => true;
+    context.supabaseClient = {
+        from(table) {
+            assert.equal(table, 'molds');
+            return {
+                select() {
+                    return {
+                        eq() {
+                            return {
+                                async single() {
+                                    return {
+                                        data: {
+                                            mold_data: {
+                                                legacy: true,
+                                            },
+                                        },
+                                        error: null,
+                                    };
+                                },
+                            };
+                        },
+                    };
+                },
+                update(payload) {
+                    return {
+                        async eq(_column, value) {
+                            context.__publishedCatalogUpdates.push({ id: value, payload });
+                            return { error: null };
+                        },
+                    };
+                },
+            };
+        },
+    };
+    vm.runInContext(`
+        Molds.allMolds = [{
+            id: 123,
+            name: 'Публикуемый бланк',
+            status: 'active',
+            collection: 'Пластик',
+            pph_min: 25,
+            pph_max: 25,
+            pph_actual: 25,
+            weight_grams: 30,
+            width_mm: 24,
+            height_mm: 18,
+            depth_mm: 3,
+            complexity: 'simple',
+            cost_cny: 800,
+            cny_rate: 12.5,
+            delivery_cost: 3000,
+            mold_count: 1,
+            hw_name: '',
+            hw_price_per_unit: 0,
+            hw_delivery_total: 0,
+            hw_speed: null,
+            custom_prices: {},
+            custom_margins: {},
+            use_manual_prices: false,
+            disable_historical_blank_price_recovery: true,
+            total_orders: 0,
+            total_units_produced: 0
+        }];
+        Molds.enrichMolds();
+    `, context);
+    await vm.runInContext(`Molds.publishCatalog()`, context);
+    assert.equal(context.__publishedCatalogUpdates.length, 1, 'publishCatalog should push one update per active mold');
+    const publishedMoldData = context.__publishedCatalogUpdates[0].payload.mold_data;
+    assert.equal(publishedMoldData.width_mm, 24);
+    assert.equal(publishedMoldData.height_mm, 18);
+    assert.equal(publishedMoldData.depth_mm, 3);
+    assert.equal(publishedMoldData.weight_grams, 30);
+    assert.equal(publishedMoldData.collection, 'Пластик');
+    assert.equal(publishedMoldData.tiers_prices[50], 465);
+    assert.equal(publishedMoldData.tiers_prices[100], 390);
+    assert.equal(publishedMoldData.tiers_prices[300], 335);
+    assert.equal(publishedMoldData.tiers_prices[500], 295);
+    assert.equal(publishedMoldData.tiers_prices[1000], 260);
+    assert.equal(publishedMoldData.tiers_prices[3000], 235);
+    assert.match(String(publishedMoldData.tiers_published_at || ''), /^20\d\d-/);
+
     console.log('molds smoke checks passed');
 }
 

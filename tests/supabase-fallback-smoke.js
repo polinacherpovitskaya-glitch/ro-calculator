@@ -159,6 +159,17 @@ async function main() {
         const context = createContext();
         runScript(context, 'js/supabase.js');
 
+        assert.equal(
+            vm.runInContext('getDefaultSettings().cutting_speed', context),
+            300,
+            'cold-start defaults should already use the fixed cutting speed so blanks do not flash old prices before settings refresh',
+        );
+        assert.equal(
+            vm.runInContext('getDefaultSettings().indirect_costs_monthly', context),
+            1900000,
+            'cold-start defaults should already use the fixed indirect costs so molds do not flash stale prices before settings refresh',
+        );
+
         vm.runInContext(`
             initSupabase();
             setLocal(LOCAL_KEYS.templates, [{

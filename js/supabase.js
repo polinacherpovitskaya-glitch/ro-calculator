@@ -1088,8 +1088,8 @@ async function saveAllSettings(settingsObj) {
 function getDefaultSettings() {
     return {
         fot_per_hour: 550,
-        indirect_costs_monthly: 1913265,
-        cutting_speed: 180,
+        indirect_costs_monthly: 1900000,
+        cutting_speed: 300,
         plastic_cost_per_kg: 250,
         nfc_write_speed: 350,
         workers_count: 3.5,
