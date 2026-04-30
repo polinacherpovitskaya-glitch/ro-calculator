@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v313';
+const APP_VERSION = 'v314';
 
 const App = {
     currentPage: 'orders',
@@ -274,12 +274,13 @@ const App = {
     getWarmPrefetchPlan(currentPage = this.currentPage) {
         const page = this.normalizePageAlias(currentPage || 'orders');
         const plans = {
-            orders: ['orders', 'warehouse', 'molds', 'import'],
-            'order-detail': ['orders', 'warehouse', 'molds', 'import'],
-            molds: ['molds', 'warehouse', 'orders', 'import'],
-            calculator: ['molds', 'orders', 'warehouse', 'import'],
-            warehouse: ['warehouse', 'orders', 'molds', 'import'],
-            import: ['import', 'orders', 'molds', 'warehouse'],
+            orders: ['orders', 'warehouse', 'molds', 'import', 'factual'],
+            'order-detail': ['orders', 'warehouse', 'molds', 'import', 'factual'],
+            molds: ['molds', 'warehouse', 'orders', 'import', 'factual'],
+            calculator: ['molds', 'orders', 'warehouse', 'import', 'factual'],
+            warehouse: ['warehouse', 'orders', 'molds', 'import', 'factual'],
+            import: ['import', 'orders', 'molds', 'warehouse', 'factual'],
+            factual: ['factual', 'orders', 'warehouse', 'import'],
             tasks: ['tasks', 'projects', 'orders'],
             projects: ['projects', 'tasks', 'orders'],
         };
@@ -345,6 +346,13 @@ const App = {
                 if (typeof loadFinanceWorkspace === 'function') tasks.push(() => loadFinanceWorkspace());
                 if (typeof loadTochkaSnapshot === 'function') tasks.push(() => loadTochkaSnapshot());
                 if (typeof loadFintabloSnapshot === 'function') tasks.push(() => loadFintabloSnapshot());
+                break;
+            case 'factual':
+                if (typeof loadOrders === 'function') tasks.push(() => loadOrders({}));
+                if (typeof loadFactualSnapshots === 'function') tasks.push(() => loadFactualSnapshots());
+                if (typeof loadTimeEntries === 'function') tasks.push(() => loadTimeEntries());
+                if (typeof loadEmployees === 'function') tasks.push(() => loadEmployees());
+                if (typeof loadWarehouseItems === 'function') tasks.push(() => loadWarehouseItems());
                 break;
             case 'tasks':
             case 'projects':

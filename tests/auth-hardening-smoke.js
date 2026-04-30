@@ -569,6 +569,9 @@ async function smokeWarmPrefetchStartsBackgroundLoads(context) {
         globalThis.loadFinanceWorkspace = async () => { __prefetchCalls.push('finance'); return null; };
         globalThis.loadTochkaSnapshot = async () => { __prefetchCalls.push('tochka'); return null; };
         globalThis.loadFintabloSnapshot = async () => { __prefetchCalls.push('fintablo'); return null; };
+        globalThis.loadFactualSnapshots = async () => { __prefetchCalls.push('factual-snapshots'); return {}; };
+        globalThis.loadTimeEntries = async () => { __prefetchCalls.push('time-entries'); return []; };
+        globalThis.loadEmployees = async () => { __prefetchCalls.push('employees'); return []; };
         App.currentUser = { id: '__admin', role: 'admin', employee_id: null, pages: null };
     })()`, context);
 
@@ -580,6 +583,9 @@ async function smokeWarmPrefetchStartsBackgroundLoads(context) {
     assert.equal(calls.includes('warehouse'), true, 'warehouse should be warmed after orders');
     assert.equal(calls.includes('molds'), true, 'molds should be warmed after orders');
     assert.equal(calls.includes('finance'), true, 'finance workspace should be warmed after orders');
+    assert.equal(calls.includes('factual-snapshots'), true, 'factual snapshots should be warmed after orders');
+    assert.equal(calls.includes('time-entries'), true, 'time entries should be warmed after orders for analytics');
+    assert.equal(calls.includes('employees'), true, 'employees should be warmed after orders for analytics');
 }
 
 async function main() {
