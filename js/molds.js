@@ -1030,8 +1030,13 @@ const Molds = {
         }
         if (!confirm(`Опубликовать ${activeMolds.length} молдов в каталог Figma-плагина?`)) return;
 
-        const TIERS = [50, 100, 300, 500, 1000, 3000];
-        let updated = 0, errors = 0, noTiers = 0;
+        // Public catalog + Figma plugin must receive the full published
+        // blank ladder, including the 10-piece tier.
+        const TIERS = [10, 50, 100, 300, 500, 1000, 3000];
+        let updated = 0;
+        let errors = 0;
+        let noTiers = 0;
+        const catalogRows = []; // зеркало для Google Sheets
 
         for (const m of activeMolds) {
             try {
@@ -1074,15 +1079,39 @@ const Molds = {
                     .eq('id', m.id);
                 if (updErr) { errors++; continue; }
                 updated++;
+
+                // Накапливаем для зеркального сихнка в Google Sheets
+                catalogRows.push({
+                    name: m.name || '',
+                    collection: m.collection || '',
+                    tiers_prices
+                });
             } catch (e) {
                 console.error('publishCatalog error for mold', m.id, e);
                 errors++;
             }
         }
 
-        const message = `Опубликовано: ${updated}/${activeMolds.length}` +
-            (noTiers > 0 ? ` (без цен: ${noTiers})` : '') +
-            (errors > 0 ? ` (ошибок: ${errors})` : '');
+        // Зеркальный синк в Google Sheets через Apps Script webhook (fire-and-forget).
+        // Если sheet не ответил — основная публикация в Supabase уже прошла, кнопка не падает.
+        // URL получи из «Deploy → Web app» в Apps Script-редакторе таблицы.
+        const SHEET_WEBHOOK_URL = 'https://script.google.com/macros/s/AKfycbznxilQfEYpqubCATNvZO4kKDRPih0Y_2fcXdNOL7SzhjkydONPizqO9PNGLI3D_hC8/exec';
+        if (catalogRows.length > 0 && SHEET_WEBHOOK_URL.indexOf('PASTE_') === -1) {
+            try {
+                await fetch(SHEET_WEBHOOK_URL, {
+                    method: 'POST',
+                    mode: 'no-cors', // GAS не любит CORS preflight, простой fire-and-forget
+                    body: JSON.stringify(catalogRows),
+                });
+                console.log('Sheet sync sent:', catalogRows.length, 'rows');
+            } catch (e) {
+                console.warn('Sheet sync failed (non-fatal):', e);
+            }
+        }
+
+        const message = `Опубликовано: ${updated}/${activeMolds.length}`
+            + (noTiers > 0 ? ` (без цен: ${noTiers})` : '')
+            + (errors > 0 ? ` (ошибок: ${errors})` : '');
         App.toast(message);
         console.log('publishCatalog summary:', { updated, errors, noTiers, total: activeMolds.length });
     },
