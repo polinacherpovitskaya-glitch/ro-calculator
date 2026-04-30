@@ -7,6 +7,7 @@ const SURFACES = [
   'js/calculator.js',
   'js/molds.js',
   'js/app.js',
+  'js/factual.js',
   'js/pendant.js',
   'js/tpa.js',
   'js/marketplaces.js',
@@ -25,7 +26,7 @@ const STALE_PATTERNS = [
   },
   {
     label: 'old UI copy about charity/commercial with VAT',
-    pattern: /благотворительности\s+с\s+НДС|коммерческ(?:ого|ий)\s+с\s+НДС/gi,
+    pattern: /благотворительности\s+с\s+НДС|коммерческ(?:ого|ий)\s+с\s+НДС|выручки\s+с\s+НДС/gi,
   },
 ];
 

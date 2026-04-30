@@ -302,8 +302,8 @@ function smokeBuildPlanUsesSavedSnapshotCostsAndDedupedHardware(context) {
     assert.equal(result.planHours.hoursHardware, 1, 'saved order assembly hours should win over duplicated hardware norm noise');
     assert.equal(result.planData.salaryAssembly, 10, 'assembly salary should follow saved order hours');
     assert.equal(result.planData.taxes, 14, 'plan taxes should use the 7% reserve from revenue without VAT');
-    assert.equal(result.planData.commercial, 13.65, 'commercial department should be planned as 6.5% of revenue with VAT');
-    assert.equal(result.planData.charity, 2.1, 'charity should be stored as 1% of revenue with VAT');
+    assert.equal(result.planData.commercial, 13, 'commercial department should be planned as 6.5% of revenue without VAT');
+    assert.equal(result.planData.charity, 2, 'charity should be stored as 1% of revenue without VAT');
     assert.equal(result.planData.molds, 44.4, 'blank plan rows should keep mold amortization instead of dropping it');
     assert.equal(result.planData.other, 0, 'no corrective residue should remain for consistent snapshot');
     assert.equal(
@@ -326,7 +326,7 @@ function smokeBuildPlanUsesSavedSnapshotCostsAndDedupedHardware(context) {
             result.planData.other,
         'plan rows should add up to current computed total cost'
     );
-    assert.equal(result.planData.planEarned, -44.15, 'plan profit should be recomputed from current plan rows');
+    assert.equal(result.planData.planEarned, -43.4, 'plan profit should be recomputed from current plan rows');
 }
 
 function smokeBuildPlanSeparatesProductBuiltinAssembly(context) {
@@ -528,8 +528,8 @@ async function smokeTaxesIncludeCharity(context) {
         return { taxes: built.planData.taxes, commercial: built.planData.commercial, charity: built.planData.charity };
     })()`, context);
     assert.equal(planTaxes.taxes, 70, 'plan taxes should include the 7% reserve from revenue without VAT');
-    assert.equal(planTaxes.commercial, 68.25, 'plan should include commercial department as отдельную строку 6.5% от выручки с НДС');
-    assert.equal(planTaxes.charity, 10.5, 'plan charity should be separated as 1% of revenue with НДС');
+    assert.equal(planTaxes.commercial, 65, 'plan should include commercial department as отдельную строку 6.5% от выручки без НДС');
+    assert.equal(planTaxes.charity, 10, 'plan charity should be separated as 1% of revenue without VAT');
 
     context.__imports = [
         {
@@ -866,8 +866,8 @@ async function smokeEnsureComputedOrderUsesCurrentWarehousePlanMaterials(context
     const computed = await vm.runInContext(`(async () => Factual._ensureComputedOrder(91))()`, context);
     assert.equal(computed.planData.hardwareTotal, 7, 'plan hardware should keep only ordinary hardware in hardware row');
     assert.equal(computed.planData.nfcTotal, 80, 'plan NFC should use current warehouse prices in a separate row');
-    assert.equal(computed.planData.totalCosts, 335.75, 'total plan cost should include current materials and commercial department on the current tax-and-gross-share model');
-    assert.equal(computed.planData.planEarned, 664.25, 'plan profit should follow recomputed current rows including commercial department');
+    assert.equal(computed.planData.totalCosts, 332, 'total plan cost should include current materials and commercial department on the current base-without-VAT model');
+    assert.equal(computed.planData.planEarned, 668, 'plan profit should follow recomputed current rows including commercial department');
 }
 
 async function smokeWorkshopLegacyLeavesAssemblyExplicit(context) {

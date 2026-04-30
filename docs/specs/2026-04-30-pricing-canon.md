@@ -62,6 +62,9 @@ margin_pct = earned / price_wo_vat
   - подвесы и буквенные blank tiers
 - `js/tpa.js`
   - TPA/XPM pricing view
+- `js/factual.js`
+  - plan-fact строки `налоги / коммерческий / благотворительность`
+  - прибыль по заказу и по факту денег
 
 ## Осознанные исключения
 - `js/marketplaces.js` живет по отдельной B2C-логике и не обязан копировать B2B-канон 1:1.
