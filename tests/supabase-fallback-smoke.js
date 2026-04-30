@@ -42,7 +42,7 @@ function createContext() {
         sessionStorage,
         navigator: {},
         document: {},
-        location: { href: 'http://localhost' },
+        location: { href: 'http://localhost/', origin: 'http://localhost', protocol: 'http:' },
         __remoteCalls: [],
         __RO_REMOTE_LOAD_TIMEOUT_MS: 10,
         __RO_REMOTE_WRITE_TIMEOUT_MS: 10,
@@ -53,6 +53,33 @@ function createContext() {
         __settingsStore: new Map(),
         __productTemplatesData: [],
         App: {},
+    };
+
+    context.URL = URL;
+    context.URLSearchParams = URLSearchParams;
+    context.fetch = async (input) => {
+        const url = String(input);
+        context.__remoteCalls.push({ table: 'fetch', action: 'request', url });
+        const parsed = new URL(url, 'http://localhost');
+        if (parsed.pathname === '/api/bootstrap') {
+            const keys = String(parsed.searchParams.get('keys') || '')
+                .split(',')
+                .map(key => key.trim())
+                .filter(Boolean);
+            const data = {};
+            if (keys.includes('orders')) data.orders = context.__bootstrapOrders || [];
+            if (keys.includes('timeEntries')) data.timeEntries = context.__bootstrapTimeEntries || [];
+            if (keys.includes('employees')) data.employees = context.__bootstrapEmployees || [];
+            if (keys.includes('factualSnapshots')) data.factualSnapshots = context.__bootstrapFactualSnapshots || {};
+            if (keys.includes('warehouseItems')) data.warehouseItems = context.__bootstrapWarehouseItems || [];
+            return {
+                ok: true,
+                async json() {
+                    return { ok: true, data, errors: {} };
+                },
+            };
+        }
+        throw new Error(`Unexpected fetch ${url}`);
     };
 
     context.window = context;
@@ -768,15 +795,15 @@ async function main() {
     {
         const context = createContext();
         context.__hangingTables = new Set(['orders']);
+        context.__bootstrapOrders = [{
+            id: 9102,
+            status: 'sample',
+            client_name: 'Bootstrap Order',
+            created_at: '2026-04-30T10:00:00.000Z',
+        }];
         runScript(context, 'js/supabase.js');
         vm.runInContext(`
             initSupabase();
-            setLocal(LOCAL_KEYS.orders, [{
-                id: 9101,
-                status: 'sample',
-                client_name: 'Warm Order',
-                created_at: '2026-04-28T10:00:00.000Z'
-            }]);
         `, context);
 
         const winner = await Promise.race([
@@ -788,9 +815,22 @@ async function main() {
             new Promise(resolve => setTimeout(() => resolve({ kind: 'timeout' }), 50)),
         ]);
 
-        assert.equal(winner.kind, 'resolved', 'orders should resolve from local cache when remote list hangs');
+        assert.equal(winner.kind, 'resolved', 'orders should resolve from same-origin bootstrap when remote list hangs');
         assert.equal(winner.count, 1);
-        assert.equal(winner.firstClient, 'Warm Order');
+        assert.equal(winner.firstClient, 'Bootstrap Order');
+    }
+
+    {
+        const context = createContext();
+        context.__hangingTables = new Set(['settings']);
+        context.__bootstrapFactualSnapshots = {
+            '2026-04': { revenue: 123456 },
+        };
+        runScript(context, 'js/supabase.js');
+        vm.runInContext(`initSupabase();`, context);
+
+        const snapshots = JSON.parse(JSON.stringify(await vm.runInContext(`loadFactualSnapshots()`, context)));
+        assert.equal(snapshots['2026-04'].revenue, 123456, 'factual snapshots should resolve from same-origin bootstrap when settings hang');
     }
 
     {

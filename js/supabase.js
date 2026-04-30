@@ -7,6 +7,13 @@ const SUPABASE_URL = 'https://jbpmorruwjrxcieqlbmd.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpicG1vcnJ1d2pyeGNpZXFsYm1kIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIwMTY1NzUsImV4cCI6MjA4NzU5MjU3NX0.Z26DuC4f5UM1I04N7ozr3FOUpF4tVIlUEh0cu1c0Jec';
 
 let supabaseClient = null;
+const SAME_ORIGIN_BOOTSTRAP_PATH = '/api/bootstrap';
+const SAME_ORIGIN_BOOTSTRAP_TTL_MS = 30 * 1000;
+let _sameOriginBootstrapCache = {};
+let _sameOriginBootstrapFetchedAt = {};
+let _sameOriginBootstrapLastErrors = {};
+const _sameOriginBootstrapPromises = new Map();
+const _lastDataLoadMeta = {};
 let supabaseAccessWarningShown = false;
 
 function _isFileProtocolRuntime() {
@@ -86,6 +93,113 @@ function _dispatchDataRefreshEvent(name, detail) {
     } catch (_) {
         // Ignore browsers / test harnesses without CustomEvent support.
     }
+}
+
+function _setDataLoadMeta(key, meta = {}) {
+    if (!key) return;
+    _lastDataLoadMeta[key] = {
+        key,
+        updatedAt: Date.now(),
+        source: meta.source || 'unknown',
+        unavailable: !!meta.unavailable,
+        message: meta.message || '',
+    };
+}
+
+function getLastDataLoadMeta(key) {
+    if (!key) return null;
+    return _lastDataLoadMeta[key] || null;
+}
+
+function _canUseSameOriginBootstrap() {
+    return typeof window !== 'undefined'
+        && typeof fetch === 'function'
+        && !!window.location
+        && /^https?:$/.test(window.location.protocol || '');
+}
+
+async function _fetchJsonWithTimeout(url, timeoutMs = 3000) {
+    const controller = typeof AbortController === 'function' ? new AbortController() : null;
+    const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+    try {
+        const response = await fetch(url, {
+            cache: 'no-store',
+            headers: { Accept: 'application/json' },
+            signal: controller ? controller.signal : undefined,
+        });
+        if (!response.ok) {
+            throw new Error(`bootstrap ${response.status}`);
+        }
+        return await response.json();
+    } finally {
+        if (timer) clearTimeout(timer);
+    }
+}
+
+function _isBootstrapCacheFresh(key) {
+    const fetchedAt = Number(_sameOriginBootstrapFetchedAt[key] || 0);
+    return fetchedAt > 0 && (Date.now() - fetchedAt) < SAME_ORIGIN_BOOTSTRAP_TTL_MS;
+}
+
+async function _loadSameOriginBootstrap(keys = [], options = {}) {
+    const normalizedKeys = [...new Set((Array.isArray(keys) ? keys : [keys])
+        .map(key => String(key || '').trim())
+        .filter(Boolean))];
+    if (!_canUseSameOriginBootstrap() || normalizedKeys.length === 0) return null;
+
+    const readyData = {};
+    const missingKeys = [];
+    normalizedKeys.forEach(key => {
+        if (_isBootstrapCacheFresh(key)) readyData[key] = _sameOriginBootstrapCache[key];
+        else missingKeys.push(key);
+    });
+    if (missingKeys.length === 0) return readyData;
+
+    const requestKey = missingKeys.slice().sort().join(',');
+    if (!_sameOriginBootstrapPromises.has(requestKey)) {
+        const url = new URL(SAME_ORIGIN_BOOTSTRAP_PATH, window.location.origin);
+        url.searchParams.set('keys', requestKey);
+        const timeoutMs = Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : 3500;
+        const bootstrapPromise = _fetchJsonWithTimeout(url.toString(), timeoutMs)
+            .then(payload => {
+                const now = Date.now();
+                const data = payload && typeof payload === 'object' ? (payload.data || {}) : {};
+                _sameOriginBootstrapLastErrors = payload && typeof payload === 'object' ? (payload.errors || {}) : {};
+                Object.entries(data).forEach(([key, value]) => {
+                    _sameOriginBootstrapCache[key] = value;
+                    _sameOriginBootstrapFetchedAt[key] = now;
+                });
+                return data;
+            })
+            .finally(() => {
+                _sameOriginBootstrapPromises.delete(requestKey);
+            });
+        _sameOriginBootstrapPromises.set(requestKey, bootstrapPromise);
+    }
+
+    try {
+        const fetched = await _sameOriginBootstrapPromises.get(requestKey);
+        return { ...readyData, ...(fetched || {}) };
+    } catch (error) {
+        return Object.keys(readyData).length ? readyData : null;
+    }
+}
+
+function _mergeOrderRows(rawRows) {
+    return (rawRows || []).map(order => {
+        if (order && order.calculator_data) {
+            try {
+                const extras = JSON.parse(order.calculator_data);
+                const merged = { ...extras, ...order };
+                if (merged.total_revenue !== undefined) merged.total_revenue_plan = merged.total_revenue;
+                if (merged.total_cost !== undefined) merged.total_cost_plan = merged.total_cost;
+                if (merged.total_margin !== undefined) merged.total_margin_plan = merged.total_margin;
+                if (merged.margin_percent !== undefined) merged.margin_percent_plan = merged.margin_percent;
+                return merged;
+            } catch (e) { /* ignore */ }
+        }
+        return order;
+    });
 }
 
 // =============================================
@@ -1782,7 +1896,26 @@ async function loadOrders(filters = {}) {
         return orders;
     };
 
+    const applyOrderFilters = (orders = []) => {
+        let rows = Array.isArray(orders) ? orders.slice() : [];
+        rows.forEach(o => {
+            if (!o.status) o.status = 'draft';
+        });
+        if (filters.status) rows = rows.filter(o => o.status === filters.status);
+        else rows = rows.filter(o => o.status !== 'deleted');
+        rows.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+        if (filters.limit) rows = rows.slice(0, filters.limit);
+        return rows;
+    };
+
     const localFallback = loadLocalOrders();
+    const bootstrapPayload = await _loadSameOriginBootstrap(['orders']);
+    if (bootstrapPayload && Array.isArray(bootstrapPayload.orders) && bootstrapPayload.orders.length > 0) {
+        const mergedOrders = _mergeOrderRows(bootstrapPayload.orders);
+        setLocal(LOCAL_KEYS.orders, mergedOrders);
+        _setDataLoadMeta('orders', { source: 'bootstrap' });
+        return applyOrderFilters(mergedOrders);
+    }
     if (isSupabaseReady()) {
         try {
             let query = supabaseClient.from('orders').select('*').order('created_at', { ascending: false });
@@ -1827,27 +1960,31 @@ async function loadOrders(filters = {}) {
                 }
             }
 
-            // Restore full data from calculator_data JSON for each order
-            return (data || []).map(order => {
-                if (order.calculator_data) {
-                    try {
-                        const extras = JSON.parse(order.calculator_data);
-                        const merged = { ...extras, ...order };
-                        if (merged.total_revenue !== undefined) merged.total_revenue_plan = merged.total_revenue;
-                        if (merged.total_cost !== undefined) merged.total_cost_plan = merged.total_cost;
-                        if (merged.total_margin !== undefined) merged.total_margin_plan = merged.total_margin;
-                        if (merged.margin_percent !== undefined) merged.margin_percent_plan = merged.margin_percent;
-                        return merged;
-                    } catch (e) { /* ignore */ }
-                }
-                return order;
-            });
+            const mergedOrders = _mergeOrderRows(data || []);
+            if (!filters.status && !filters.limit) {
+                setLocal(LOCAL_KEYS.orders, mergedOrders);
+            }
+            _setDataLoadMeta('orders', { source: 'supabase' });
+            return mergedOrders;
         } catch (error) {
             console.error('loadOrders exception:', error);
             if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
+            if (localFallback.length > 0) {
+                _setDataLoadMeta('orders', { source: 'local', message: 'remote unavailable' });
+            } else {
+                _setDataLoadMeta('orders', {
+                    source: 'unavailable',
+                    unavailable: true,
+                    message: _sameOriginBootstrapLastErrors.orders?.message || (error?.message || 'remote unavailable'),
+                });
+            }
             return localFallback;
         }
     }
+    _setDataLoadMeta('orders', {
+        source: localFallback.length > 0 ? 'local' : 'empty',
+        unavailable: false,
+    });
     return localFallback;
 }
 
@@ -3329,6 +3466,12 @@ function _timeEntryToDb(entry) {
 
 async function loadTimeEntries() {
     const fallback = getLocal(LOCAL_KEYS.timeEntries) || [];
+    const bootstrapPayload = await _loadSameOriginBootstrap(['timeEntries']);
+    if (bootstrapPayload && Array.isArray(bootstrapPayload.timeEntries) && bootstrapPayload.timeEntries.length > 0) {
+        const mapped = bootstrapPayload.timeEntries.map(_timeEntryFromDb);
+        setLocal(LOCAL_KEYS.timeEntries, mapped);
+        return mapped;
+    }
     if (isSupabaseReady()) {
         try {
             const timeoutMs = Number(window.__RO_REMOTE_LOAD_TIMEOUT_MS) > 0 ? Number(window.__RO_REMOTE_LOAD_TIMEOUT_MS) : 5000;
@@ -3344,7 +3487,9 @@ async function loadTimeEntries() {
                 console.error('loadTimeEntries error:', error);
                 return fallback;
             }
-            return (data || []).map(_timeEntryFromDb);
+            const mapped = (data || []).map(_timeEntryFromDb);
+            setLocal(LOCAL_KEYS.timeEntries, mapped);
+            return mapped;
         } catch (err) {
             console.warn('loadTimeEntries timeout/error, using local:', err);
         }
@@ -3962,6 +4107,12 @@ async function loadEmployees() {
     _seedDefaultEmpExtra();
     const cachedEmployees = getLocal(LOCAL_KEYS.employees) || [];
     const fallbackEmployees = _mergeEmpExtra(cachedEmployees.length ? cachedEmployees : getDefaultEmployees());
+    const bootstrapPayload = await _loadSameOriginBootstrap(['employees']);
+    if (bootstrapPayload && Array.isArray(bootstrapPayload.employees) && bootstrapPayload.employees.length > 0) {
+        const merged = _mergeEmpExtra(bootstrapPayload.employees);
+        setLocal(LOCAL_KEYS.employees, merged);
+        return merged;
+    }
 
     const refreshRemote = async () => {
         if (!isSupabaseReady()) return fallbackEmployees;
@@ -4326,6 +4477,11 @@ async function saveProjectHardwareState(state) {
 
 async function loadFactualSnapshots() {
     const fallback = getLocal(LOCAL_KEYS.factualSnapshots) || {};
+    const bootstrapPayload = await _loadSameOriginBootstrap(['factualSnapshots']);
+    if (bootstrapPayload && bootstrapPayload.factualSnapshots && typeof bootstrapPayload.factualSnapshots === 'object') {
+        setLocal(LOCAL_KEYS.factualSnapshots, bootstrapPayload.factualSnapshots);
+        return bootstrapPayload.factualSnapshots;
+    }
     if (isSupabaseReady()) {
         try {
             const parsed = await _loadJsonSetting('factual_month_snapshots_json', null);
@@ -4646,6 +4802,23 @@ async function loadWarehouseItems() {
         return applyReservationSnapshot(normalizedSnapshot);
     };
     const localFallback = async () => applyReservationSnapshot(getLocal(LOCAL_KEYS.warehouseItems) || []);
+    const bootstrapPayload = await _loadSameOriginBootstrap(['warehouseItems']);
+    if (bootstrapPayload && Array.isArray(bootstrapPayload.warehouseItems) && bootstrapPayload.warehouseItems.length > 0) {
+        const items = bootstrapPayload.warehouseItems.map(row => {
+            if (row && row.item_data) {
+                try {
+                    const parsed = typeof row.item_data === 'string' ? JSON.parse(row.item_data) : row.item_data;
+                    return normalizeWarehouseItem({ ...parsed, id: row.id });
+                } catch (error) {
+                    return normalizeWarehouseItem(row);
+                }
+            }
+            return normalizeWarehouseItem(row);
+        });
+        const hydratedItems = await applyReservationSnapshot(items);
+        setLocal(LOCAL_KEYS.warehouseItems, hydratedItems);
+        return hydratedItems;
+    }
 
     if (isSupabaseReady()) {
         try {

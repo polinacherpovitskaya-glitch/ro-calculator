@@ -604,6 +604,10 @@ const Orders = {
     },
 
     renderManagerView(orders) {
+        const ordersLoadMeta = typeof getLastDataLoadMeta === 'function' ? getLastDataLoadMeta('orders') : null;
+        if (orders.length === 0 && ordersLoadMeta?.unavailable) {
+            return this.renderEmptyState('Не удалось загрузить заказы из базы. Попробуй обновить страницу чуть позже.');
+        }
         if (orders.length === 0) {
             return this.renderEmptyState('Нет заказов в этом списке');
         }
@@ -618,6 +622,10 @@ const Orders = {
     },
 
     renderSkyView(orders) {
+        const ordersLoadMeta = typeof getLastDataLoadMeta === 'function' ? getLastDataLoadMeta('orders') : null;
+        if (orders.length === 0 && ordersLoadMeta?.unavailable) {
+            return this.renderEmptyState('Не удалось загрузить заказы из базы. Попробуй обновить страницу чуть позже.');
+        }
         if (orders.length === 0) {
             return this.renderEmptyState('Нет заказов для списка Sky');
         }
@@ -720,6 +728,11 @@ const Orders = {
     renderBoard(orders) {
         const container = document.getElementById('orders-board-view');
         if (!container) return;
+        const ordersLoadMeta = typeof getLastDataLoadMeta === 'function' ? getLastDataLoadMeta('orders') : null;
+        if (orders.length === 0 && ordersLoadMeta?.unavailable) {
+            container.innerHTML = this.renderEmptyState('Не удалось загрузить заказы из базы. Попробуй обновить страницу чуть позже.');
+            return;
+        }
 
         container.innerHTML = BOARD_COLUMNS.map(column => {
             const columnOrders = orders.filter(order => column.statuses.includes(order.status));

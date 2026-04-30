@@ -868,8 +868,13 @@ const Factual = {
 
         const summaryNote = $('fact-stat-summary-note');
         const summaryHint = $('fact-stat-summary-note-hint');
+        const ordersLoadMeta = typeof getLastDataLoadMeta === 'function' ? getLastDataLoadMeta('orders') : null;
         if (summaryNote) {
-            if (!orders.length) {
+            if (!orders.length && ordersLoadMeta?.unavailable) {
+                summaryNote.textContent = 'Источник заказов недоступен';
+                summaryNote.style.color = 'var(--red)';
+                if (summaryHint) summaryHint.textContent = 'Сейчас база не ответила, поэтому нули не считаем фактом';
+            } else if (!orders.length) {
                 summaryNote.textContent = 'Нет заказов';
                 summaryNote.style.color = 'var(--text-muted)';
                 if (summaryHint) summaryHint.textContent = 'Попробуй переключить период';
@@ -1228,9 +1233,14 @@ _renderCompactResult(result, options = {}) {
         if (!tbody) return;
 
         const records = Array.isArray(this._visibleOrderRecords) ? this._visibleOrderRecords : [];
+        const ordersLoadMeta = typeof getLastDataLoadMeta === 'function' ? getLastDataLoadMeta('orders') : null;
 
         if (records.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="9" class="text-muted text-center" style="padding:24px">Нет заказов за выбранный период</td></tr>';
+            if (ordersLoadMeta?.unavailable) {
+                tbody.innerHTML = '<tr><td colspan="9" class="text-danger text-center" style="padding:24px">Не удалось загрузить заказы из базы. Попробуй обновить страницу чуть позже.</td></tr>';
+            } else {
+                tbody.innerHTML = '<tr><td colspan="9" class="text-muted text-center" style="padding:24px">Нет заказов за выбранный период</td></tr>';
+            }
             return;
         }
 
