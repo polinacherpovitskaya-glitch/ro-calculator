@@ -9,26 +9,50 @@ const SUPABASE_HEADERS = {
 
 const SETTINGS_KEYS = {
     factualSnapshots: 'factual_month_snapshots_json',
+    authAccounts: 'auth_accounts_json',
 };
 
 const ALLOWED_KEYS = new Set([
     'orders',
     'timeEntries',
     'employees',
+    'authAccounts',
     'factualSnapshots',
     'warehouseItems',
 ]);
 
-async function fetchSupabaseJson(path) {
-    const response = await fetch(`${SUPABASE_URL}${path}`, { headers: SUPABASE_HEADERS });
-    if (!response.ok) {
-        const text = await response.text().catch(() => '');
-        const error = new Error(`Supabase ${response.status} for ${path}`);
-        error.status = response.status;
-        error.body = text;
-        throw error;
+async function fetchSupabaseJson(path, options = {}) {
+    const attempts = Math.max(1, Number(options.attempts) || 3);
+    const timeoutMs = Math.max(1000, Number(options.timeoutMs) || 5000);
+    let lastError = null;
+
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+        const controller = typeof AbortController === 'function' ? new AbortController() : null;
+        const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+        try {
+            const response = await fetch(`${SUPABASE_URL}${path}`, {
+                headers: SUPABASE_HEADERS,
+                signal: controller ? controller.signal : undefined,
+            });
+            if (!response.ok) {
+                const text = await response.text().catch(() => '');
+                const error = new Error(`Supabase ${response.status} for ${path}`);
+                error.status = response.status;
+                error.body = text;
+                throw error;
+            }
+            return await response.json();
+        } catch (error) {
+            lastError = error;
+            if (attempt < attempts) {
+                await new Promise(resolve => setTimeout(resolve, 250 * attempt));
+            }
+        } finally {
+            if (timer) clearTimeout(timer);
+        }
     }
-    return response.json();
+
+    throw lastError || new Error(`Supabase unavailable for ${path}`);
 }
 
 async function loadOrders() {
@@ -57,10 +81,21 @@ async function loadFactualSnapshots() {
     }
 }
 
+async function loadAuthAccounts() {
+    const rows = await fetchSupabaseJson(`/rest/v1/settings?select=value&key=eq.${encodeURIComponent(SETTINGS_KEYS.authAccounts)}&limit=1`);
+    if (!Array.isArray(rows) || rows.length === 0 || !rows[0]?.value) return [];
+    try {
+        return JSON.parse(rows[0].value);
+    } catch (error) {
+        return [];
+    }
+}
+
 const LOADERS = {
     orders: loadOrders,
     timeEntries: loadTimeEntries,
     employees: loadEmployees,
+    authAccounts: loadAuthAccounts,
     factualSnapshots: loadFactualSnapshots,
     warehouseItems: loadWarehouseItems,
 };

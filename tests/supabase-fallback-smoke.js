@@ -70,6 +70,7 @@ function createContext() {
             if (keys.includes('orders')) data.orders = context.__bootstrapOrders || [];
             if (keys.includes('timeEntries')) data.timeEntries = context.__bootstrapTimeEntries || [];
             if (keys.includes('employees')) data.employees = context.__bootstrapEmployees || [];
+            if (keys.includes('authAccounts')) data.authAccounts = context.__bootstrapAuthAccounts || [];
             if (keys.includes('factualSnapshots')) data.factualSnapshots = context.__bootstrapFactualSnapshots || {};
             if (keys.includes('warehouseItems')) data.warehouseItems = context.__bootstrapWarehouseItems || [];
             return {
@@ -818,6 +819,24 @@ async function main() {
         assert.equal(winner.kind, 'resolved', 'orders should resolve from same-origin bootstrap when remote list hangs');
         assert.equal(winner.count, 1);
         assert.equal(winner.firstClient, 'Bootstrap Order');
+    }
+
+    {
+        const context = createContext();
+        context.__hangingTables = new Set(['settings']);
+        context.__bootstrapAuthAccounts = [{
+            id: 77,
+            username: 'polina_cherp',
+            employee_name: 'Полина',
+            password_hash: 'v2:test',
+            is_active: true,
+        }];
+        runScript(context, 'js/supabase.js');
+        vm.runInContext(`initSupabase();`, context);
+
+        const accounts = JSON.parse(JSON.stringify(await vm.runInContext(`loadAuthAccounts()`, context)));
+        assert.equal(accounts.length, 1, 'auth accounts should resolve from same-origin bootstrap when settings hang');
+        assert.equal(accounts[0].username, 'polina_cherp');
     }
 
     {

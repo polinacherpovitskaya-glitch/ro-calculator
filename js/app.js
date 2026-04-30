@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v316';
+const APP_VERSION = 'v318';
 
 const App = {
     currentPage: 'orders',
@@ -650,23 +650,24 @@ const App = {
     },
 
     async prepareAuthUI() {
-        const [employeesResult, authAccountsResult] = await Promise.allSettled([
-            loadEmployees(),
-            loadAuthAccounts(),
-        ]);
+        this._prepareAuthEmployeesPromise = Promise.resolve()
+            .then(() => loadEmployees())
+            .then(rows => {
+                this.employees = (rows || []).filter(e => e && e.name && e.is_active !== false);
+                return this.employees;
+            })
+            .catch(() => {
+                this.employees = [];
+                return [];
+            });
 
-        if (employeesResult.status === 'fulfilled') {
-            this.employees = (employeesResult.value || []).filter(e => e && e.name && e.is_active !== false);
-        } else {
-            this.employees = [];
-        }
-
-        if (authAccountsResult.status === 'fulfilled') {
-            this.authAccounts = (authAccountsResult.value || []).map(account => ({
+        try {
+            const authAccounts = await loadAuthAccounts();
+            this.authAccounts = (authAccounts || []).map(account => ({
                 ...account,
                 pages: this.normalizePageList(account.pages),
             }));
-        } else {
+        } catch (_) {
             this.authAccounts = [];
         }
         this.renderAuthUserSelect();
@@ -689,6 +690,18 @@ const App = {
             const sel = String(a.id) === String(lastUserId) ? ' selected' : '';
             return `<option value="${this.escHtml(String(a.id))}"${sel}>${name}${login ? ` (${login})` : ''}</option>`;
         }).join('');
+        if (!html) {
+            html = '<option value="">Не удалось загрузить список сотрудников</option>';
+            select.disabled = true;
+            if (typeof select.setAttribute === 'function') {
+                select.setAttribute('aria-busy', 'true');
+            }
+        } else {
+            select.disabled = false;
+            if (typeof select.removeAttribute === 'function') {
+                select.removeAttribute('aria-busy');
+            }
+        }
         select.innerHTML = html;
     },
 

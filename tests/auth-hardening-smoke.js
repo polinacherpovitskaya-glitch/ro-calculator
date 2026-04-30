@@ -499,11 +499,17 @@ async function smokePrepareAuthUILoadsAccountsWithoutWaitingForEmployees(context
         return clone(context.__authAccountsSource);
     };
 
-    await vm.runInContext(`App.prepareAuthUI()`, context);
+    const preparePromise = vm.runInContext(`App.prepareAuthUI()`, context);
+    await new Promise(resolve => setTimeout(resolve, 5));
 
     assert.equal(context.__authStartedBeforeEmployeesSettled, true, 'auth accounts should load in parallel with employees');
     assert.equal(vm.runInContext(`App.authAccounts.length`, context), 1);
     assert.match(String(context.document.getElementById('auth-user-select').innerHTML || ''), /Smoke User/);
+    assert.equal(context.__employeesSettled, false, 'auth UI should not wait for employees before rendering the login select');
+
+    await preparePromise;
+    await new Promise(resolve => setTimeout(resolve, 30));
+    assert.equal(context.__employeesSettled, true, 'employees should still finish loading in the background');
 }
 
 async function smokeShowAppPrimesRouteShellBeforeDataReady(context) {

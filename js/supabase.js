@@ -4270,6 +4270,14 @@ async function _refreshAuthAccountsCache() {
 
 async function loadAuthAccounts() {
     const fallback = (getLocal(LOCAL_KEYS.authAccounts) || []).map(sanitizeAuthAccount);
+    const bootstrapPayload = await _loadSameOriginBootstrap(['authAccounts'], {
+        timeoutMs: Math.max(_authAccountsRemoteTimeoutMs(), 4000),
+    });
+    if (bootstrapPayload && Array.isArray(bootstrapPayload.authAccounts) && bootstrapPayload.authAccounts.length > 0) {
+        const parsed = bootstrapPayload.authAccounts.map(sanitizeAuthAccount);
+        setLocal(LOCAL_KEYS.authAccounts, parsed);
+        return parsed;
+    }
     if (fallback.length > 0) {
         if (isSupabaseReady() && _shouldRefreshWarmCache(_authAccountsLastSyncAt) && !_authAccountsRefreshPromise) {
             _refreshAuthAccountsCache().catch(() => {});
