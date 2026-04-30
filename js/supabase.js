@@ -19,6 +19,10 @@ let _authAccountsLastSyncAt = 0;
 let _employeesRefreshPromise = null;
 let _employeesLastSyncAt = 0;
 let _empExtraRefreshPromise = null;
+let _settingsRefreshPromise = null;
+let _settingsLastSyncAt = 0;
+let _moldsRefreshPromise = null;
+let _moldsLastSyncAt = 0;
 
 const WARM_CACHE_REMOTE_REFRESH_TTL_MS = 120000;
 
@@ -975,48 +979,80 @@ function normalizeLegacySettings(settings) {
     return settings;
 }
 
+function _getSettingsFallback() {
+    const cached = getLocal(LOCAL_KEYS.settings);
+    const base = cached && typeof cached === 'object' ? { ...cached } : getDefaultSettings();
+    normalizeLegacySettings(base);
+    return base;
+}
+
+function _settingsRowsToObject(data = []) {
+    const defaults = getDefaultSettings();
+    const numericKeys = new Set(Object.keys(defaults));
+    const obj = {};
+    data.forEach(r => {
+        if (numericKeys.has(r.key) && typeof defaults[r.key] === 'number') {
+            obj[r.key] = parseFloat(r.value) || 0;
+        } else {
+            obj[r.key] = r.value ?? '';
+        }
+    });
+    Object.keys(defaults).forEach(k => {
+        if (obj[k] === undefined) obj[k] = defaults[k];
+    });
+    normalizeLegacySettings(obj);
+    return obj;
+}
+
 async function loadSettings() {
-    if (isSupabaseReady()) {
-        const { data, error } = await supabaseClient
-            .from('settings')
-            .select('key, value');
-        if (error) {
-            console.error('loadSettings error:', error);
-            if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
-            // Fallback to localStorage, not just defaults
-            return getLocal(LOCAL_KEYS.settings) || getDefaultSettings();
-        }
-        if (data && data.length > 0) {
-            const defaults = getDefaultSettings();
-            const numericKeys = new Set(Object.keys(defaults));
-            const obj = {};
-            data.forEach(r => {
-                // Parse numeric values back to numbers (Supabase TEXT column returns strings)
-                if (numericKeys.has(r.key) && typeof defaults[r.key] === 'number') {
-                    obj[r.key] = parseFloat(r.value) || 0;
-                } else {
-                    obj[r.key] = r.value ?? '';
+    const cachedSettings = getLocal(LOCAL_KEYS.settings);
+    const fallbackSettings = _getSettingsFallback();
+
+    const refreshRemote = async () => {
+        if (!isSupabaseReady()) return fallbackSettings;
+        if (_settingsRefreshPromise) return _settingsRefreshPromise;
+        _settingsRefreshPromise = (async () => {
+            try {
+                const { data, error } = await _withRemoteTimeout('load', 'load settings', () => supabaseClient
+                    .from('settings')
+                    .select('key, value'));
+                if (error) {
+                    console.error('loadSettings error:', error);
+                    if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
+                    return fallbackSettings;
                 }
-            });
-            // Ensure all default keys exist
-            Object.keys(defaults).forEach(k => {
-                if (obj[k] === undefined) obj[k] = defaults[k];
-            });
-            normalizeLegacySettings(obj);
-            // Cache to localStorage for offline/backup
-            setLocal(LOCAL_KEYS.settings, obj);
-            return obj;
-        }
-        // Supabase empty — seed from localStorage or defaults, then return
-        const local = getLocal(LOCAL_KEYS.settings) || getDefaultSettings();
-        normalizeLegacySettings(local);
-        console.log('Supabase settings empty, seeding from local...');
-        await saveAllSettings(local);
-        return local;
+                if (Array.isArray(data) && data.length > 0) {
+                    const remoteSettings = _settingsRowsToObject(data);
+                    setLocal(LOCAL_KEYS.settings, remoteSettings);
+                    _settingsLastSyncAt = Date.now();
+                    _dispatchDataRefreshEvent('ro:settings-refreshed', { settings: remoteSettings });
+                    return remoteSettings;
+                }
+                console.log('Supabase settings empty, seeding from local...');
+                await saveAllSettings(fallbackSettings);
+                _settingsLastSyncAt = Date.now();
+                return fallbackSettings;
+            } catch (error) {
+                console.error('loadSettings exception:', error);
+                if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
+                return fallbackSettings;
+            } finally {
+                _settingsRefreshPromise = null;
+            }
+        })();
+        return _settingsRefreshPromise;
+    };
+
+    if (isSupabaseReady() && _shouldRefreshWarmCache(_settingsLastSyncAt) && !_settingsRefreshPromise) {
+        refreshRemote().catch(() => {});
     }
-    const local = getLocal(LOCAL_KEYS.settings) || getDefaultSettings();
-    normalizeLegacySettings(local);
-    return local;
+
+    if (cachedSettings && typeof cachedSettings === 'object') {
+        return fallbackSettings;
+    }
+
+    if (!isSupabaseReady()) return fallbackSettings;
+    return fallbackSettings;
 }
 
 async function saveSetting(key, value) {
@@ -1728,139 +1764,166 @@ function _saveOrderLocally(order, items) {
 }
 
 async function loadOrders(filters = {}) {
-    if (isSupabaseReady()) {
-        let query = supabaseClient.from('orders').select('*').order('created_at', { ascending: false });
-        if (filters.status) {
-            query = query.eq('status', filters.status);
-        } else {
-            query = query.neq('status', 'deleted');
-        }
-        if (filters.limit) query = query.limit(filters.limit);
-        const { data, error } = await query;
-        if (error) { console.error('loadOrders error:', error); return []; }
-
-        // One-time migration: if Supabase empty but localStorage has orders, push them up
-        if ((!data || data.length === 0) && !filters.status) {
-            const localOrders = getLocal(LOCAL_KEYS.orders) || [];
-            const activeLocal = localOrders.filter(o => o.status !== 'deleted');
-            if (activeLocal.length > 0) {
-                console.log('Migrating', activeLocal.length, 'orders from localStorage to Supabase...');
-                for (const order of localOrders) {
-                    try {
-                        const filtered = _filterForDB(order, _ORDER_COLS, 'calculator_data', _ORDER_FIELD_MAP);
-                        await supabaseClient.from('orders').upsert(filtered, { onConflict: 'id' });
-                    } catch (e) { console.warn('Order migration error:', e); }
-                }
-                // Also migrate order items
-                const localItems = getLocal(LOCAL_KEYS.orderItems) || [];
-                if (localItems.length > 0) {
-                    try {
-                        const filteredItems = localItems.map(item => {
-                            const f = _filterForDB(item, _ITEM_COLS, 'item_data', null);
-                            f.id = f.id || Date.now() + Math.floor(Math.random() * 10000);
-                            return f;
-                        });
-                        await supabaseClient.from('order_items').insert(filteredItems);
-                    } catch (e) { console.warn('Items migration error:', e); }
-                }
-                return activeLocal.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-            }
-        }
-
-        // Restore full data from calculator_data JSON for each order
-        return (data || []).map(order => {
-            if (order.calculator_data) {
-                try {
-                    const extras = JSON.parse(order.calculator_data);
-                    const merged = { ...extras, ...order };
-                    if (merged.total_revenue !== undefined) merged.total_revenue_plan = merged.total_revenue;
-                    if (merged.total_cost !== undefined) merged.total_cost_plan = merged.total_cost;
-                    if (merged.total_margin !== undefined) merged.total_margin_plan = merged.total_margin;
-                    if (merged.margin_percent !== undefined) merged.margin_percent_plan = merged.margin_percent;
-                    return merged;
-                } catch (e) { /* ignore */ }
-            }
-            return order;
+    const loadLocalOrders = () => {
+        let orders = getLocal(LOCAL_KEYS.orders) || [];
+        let needsSave = false;
+        orders.forEach(o => {
+            if (!o.status) { o.status = 'draft'; needsSave = true; }
         });
-    }
-    let orders = getLocal(LOCAL_KEYS.orders) || [];
-    // Fix orders with missing status (bug from v40e autosave)
-    let needsSave = false;
-    orders.forEach(o => {
-        if (!o.status) { o.status = 'draft'; needsSave = true; }
-    });
-    if (needsSave) setLocal(LOCAL_KEYS.orders, orders);
+        if (needsSave) setLocal(LOCAL_KEYS.orders, orders);
 
-    if (filters.status) {
-        orders = orders.filter(o => o.status === filters.status);
-    } else {
-        // By default, exclude deleted orders
-        orders = orders.filter(o => o.status !== 'deleted');
+        if (filters.status) {
+            orders = orders.filter(o => o.status === filters.status);
+        } else {
+            orders = orders.filter(o => o.status !== 'deleted');
+        }
+        orders.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+        if (filters.limit) orders = orders.slice(0, filters.limit);
+        return orders;
+    };
+
+    const localFallback = loadLocalOrders();
+    if (isSupabaseReady()) {
+        try {
+            let query = supabaseClient.from('orders').select('*').order('created_at', { ascending: false });
+            if (filters.status) {
+                query = query.eq('status', filters.status);
+            } else {
+                query = query.neq('status', 'deleted');
+            }
+            if (filters.limit) query = query.limit(filters.limit);
+            const { data, error } = await _withRemoteTimeout('load', 'load orders', () => query);
+            if (error) {
+                console.error('loadOrders error:', error);
+                if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
+                return localFallback;
+            }
+
+            // One-time migration: if Supabase empty but localStorage has orders, push them up
+            if ((!data || data.length === 0) && !filters.status) {
+                const localOrders = getLocal(LOCAL_KEYS.orders) || [];
+                const activeLocal = localOrders.filter(o => o.status !== 'deleted');
+                if (activeLocal.length > 0) {
+                    console.log('Migrating', activeLocal.length, 'orders from localStorage to Supabase...');
+                    for (const order of localOrders) {
+                        try {
+                            const filtered = _filterForDB(order, _ORDER_COLS, 'calculator_data', _ORDER_FIELD_MAP);
+                            await supabaseClient.from('orders').upsert(filtered, { onConflict: 'id' });
+                        } catch (e) { console.warn('Order migration error:', e); }
+                    }
+                    // Also migrate order items
+                    const localItems = getLocal(LOCAL_KEYS.orderItems) || [];
+                    if (localItems.length > 0) {
+                        try {
+                            const filteredItems = localItems.map(item => {
+                                const f = _filterForDB(item, _ITEM_COLS, 'item_data', null);
+                                f.id = f.id || Date.now() + Math.floor(Math.random() * 10000);
+                                return f;
+                            });
+                            await supabaseClient.from('order_items').insert(filteredItems);
+                        } catch (e) { console.warn('Items migration error:', e); }
+                    }
+                    return activeLocal.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+                }
+            }
+
+            // Restore full data from calculator_data JSON for each order
+            return (data || []).map(order => {
+                if (order.calculator_data) {
+                    try {
+                        const extras = JSON.parse(order.calculator_data);
+                        const merged = { ...extras, ...order };
+                        if (merged.total_revenue !== undefined) merged.total_revenue_plan = merged.total_revenue;
+                        if (merged.total_cost !== undefined) merged.total_cost_plan = merged.total_cost;
+                        if (merged.total_margin !== undefined) merged.total_margin_plan = merged.total_margin;
+                        if (merged.margin_percent !== undefined) merged.margin_percent_plan = merged.margin_percent;
+                        return merged;
+                    } catch (e) { /* ignore */ }
+                }
+                return order;
+            });
+        } catch (error) {
+            console.error('loadOrders exception:', error);
+            if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
+            return localFallback;
+        }
     }
-    orders.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-    if (filters.limit) orders = orders.slice(0, filters.limit);
-    return orders;
+    return localFallback;
 }
 
 async function loadOrder(orderId) {
     // Coerce string ID to number (select values are always strings, but IDs are Date.now() numbers)
     if (typeof orderId === 'string' && /^\d+$/.test(orderId)) orderId = Number(orderId);
-    if (isSupabaseReady()) {
-        const { data: order, error: e1 } = await supabaseClient
-            .from('orders').select('*').eq('id', orderId).single();
-        if (e1) { console.error('loadOrder error:', e1); return null; }
-
-        // Restore full order data from calculator_data JSON
-        let fullOrder = { ...order };
-        if (order.calculator_data) {
-            try {
-                const extras = JSON.parse(order.calculator_data);
-                fullOrder = { ...extras, ...order }; // DB columns take priority
-                // Reverse-map schema fields back to code fields
-                if (fullOrder.total_revenue !== undefined) fullOrder.total_revenue_plan = fullOrder.total_revenue;
-                if (fullOrder.total_cost !== undefined) fullOrder.total_cost_plan = fullOrder.total_cost;
-                if (fullOrder.total_margin !== undefined) fullOrder.total_margin_plan = fullOrder.total_margin;
-                if (fullOrder.margin_percent !== undefined) fullOrder.margin_percent_plan = fullOrder.margin_percent;
-            } catch (e) { /* ignore parse errors */ }
-        }
-
-        const { data: rawItems, error: e2 } = await supabaseClient
-            .from('order_items').select('*').eq('order_id', orderId).order('item_number');
-        if (e2) { console.error('loadOrderItems error:', e2); return null; }
-
-        const dedupedRawItems = _dedupeOrderItems(rawItems || [], orderId);
+    const loadLocalOrder = async () => {
+        const normalizedOrderId = _normalizeOrderId(orderId);
+        const orders = getLocal(LOCAL_KEYS.orders) || [];
+        const order = orders.find(o => String(_normalizeOrderId(o.id)) === String(normalizedOrderId));
+        const allItems = getLocal(LOCAL_KEYS.orderItems) || [];
+        const orderItems = allItems.filter(i => String(_normalizeOrderId(i.order_id)) === String(normalizedOrderId));
+        const dedupedItems = _dedupeOrderItems(orderItems, normalizedOrderId);
         let repairedDuplicates = false;
-        if (dedupedRawItems.length !== (rawItems || []).length) {
-            repairedDuplicates = await _rewriteOrderItems(orderId, dedupedRawItems);
+        if (order && dedupedItems.length !== orderItems.length) {
+            repairedDuplicates = await _rewriteOrderItems(normalizedOrderId, dedupedItems);
         }
-
-        // Restore full item data from item_data JSON
-        const items = dedupedRawItems.map(item => {
-            if (item.item_data) {
-                try {
-                    const extras = JSON.parse(item.item_data);
-                    return { ...extras, ...item }; // DB columns take priority
-                } catch (e) { /* ignore */ }
+        return order ? { order, items: dedupedItems, repaired_duplicates: repairedDuplicates } : null;
+    };
+    if (isSupabaseReady()) {
+        try {
+            const { data: order, error: e1 } = await _withRemoteTimeout('load', 'load order', () => supabaseClient
+                .from('orders').select('*').eq('id', orderId).single());
+            if (e1) {
+                console.error('loadOrder error:', e1);
+                if (_isSupabaseAccessError(e1)) _markSupabaseAccessProblem(e1);
+                return await loadLocalOrder();
             }
-            return item;
-        });
 
-        return { order: fullOrder, items, repaired_duplicates: repairedDuplicates };
+            // Restore full order data from calculator_data JSON
+            let fullOrder = { ...order };
+            if (order.calculator_data) {
+                try {
+                    const extras = JSON.parse(order.calculator_data);
+                    fullOrder = { ...extras, ...order }; // DB columns take priority
+                    // Reverse-map schema fields back to code fields
+                    if (fullOrder.total_revenue !== undefined) fullOrder.total_revenue_plan = fullOrder.total_revenue;
+                    if (fullOrder.total_cost !== undefined) fullOrder.total_cost_plan = fullOrder.total_cost;
+                    if (fullOrder.total_margin !== undefined) fullOrder.total_margin_plan = fullOrder.total_margin;
+                    if (fullOrder.margin_percent !== undefined) fullOrder.margin_percent_plan = fullOrder.margin_percent;
+                } catch (e) { /* ignore parse errors */ }
+            }
+
+            const { data: rawItems, error: e2 } = await _withRemoteTimeout('load', 'load order items', () => supabaseClient
+                .from('order_items').select('*').eq('order_id', orderId).order('item_number'));
+            if (e2) {
+                console.error('loadOrderItems error:', e2);
+                if (_isSupabaseAccessError(e2)) _markSupabaseAccessProblem(e2);
+                return await loadLocalOrder();
+            }
+
+            const dedupedRawItems = _dedupeOrderItems(rawItems || [], orderId);
+            let repairedDuplicates = false;
+            if (dedupedRawItems.length !== (rawItems || []).length) {
+                repairedDuplicates = await _rewriteOrderItems(orderId, dedupedRawItems);
+            }
+
+            // Restore full item data from item_data JSON
+            const items = dedupedRawItems.map(item => {
+                if (item.item_data) {
+                    try {
+                        const extras = JSON.parse(item.item_data);
+                        return { ...extras, ...item }; // DB columns take priority
+                    } catch (e) { /* ignore */ }
+                }
+                return item;
+            });
+
+            return { order: fullOrder, items, repaired_duplicates: repairedDuplicates };
+        } catch (error) {
+            console.error('loadOrder exception:', error);
+            if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
+            return await loadLocalOrder();
+        }
     }
-    const normalizedOrderId = _normalizeOrderId(orderId);
-    const orders = getLocal(LOCAL_KEYS.orders) || [];
-    const order = orders.find(o => String(_normalizeOrderId(o.id)) === String(normalizedOrderId));
-    const allItems = getLocal(LOCAL_KEYS.orderItems) || [];
-    const orderItems = allItems.filter(i => String(_normalizeOrderId(i.order_id)) === String(normalizedOrderId));
-    const dedupedItems = _dedupeOrderItems(
-        orderItems,
-        normalizedOrderId
-    );
-    let repairedDuplicates = false;
-    if (order && dedupedItems.length !== orderItems.length) {
-        repairedDuplicates = await _rewriteOrderItems(normalizedOrderId, dedupedItems);
-    }
-    return order ? { order, items: dedupedItems, repaired_duplicates: repairedDuplicates } : null;
+    return await loadLocalOrder();
 }
 
 async function loadOrderItemsByOrderIds(orderIds = []) {
@@ -1869,29 +1932,7 @@ async function loadOrderItemsByOrderIds(orderIds = []) {
         .filter(id => Number.isFinite(id) && id > 0))];
     if (ids.length === 0) return [];
 
-    if (isSupabaseReady()) {
-        const { data, error } = await supabaseClient
-            .from('order_items')
-            .select('*')
-            .in('order_id', ids)
-            .order('order_id')
-            .order('item_number');
-        if (error) {
-            console.error('loadOrderItemsByOrderIds error:', error);
-            return [];
-        }
-        return (data || []).map(item => {
-            if (item.item_data) {
-                try {
-                    const extras = JSON.parse(item.item_data);
-                    return { ...extras, ...item };
-                } catch (e) { /* ignore */ }
-            }
-            return item;
-        });
-    }
-
-    return (getLocal(LOCAL_KEYS.orderItems) || [])
+    const localFallback = () => (getLocal(LOCAL_KEYS.orderItems) || [])
         .filter(item => ids.includes(Number(item.order_id)))
         .sort((a, b) => {
             if (Number(a.order_id) !== Number(b.order_id)) {
@@ -1899,6 +1940,37 @@ async function loadOrderItemsByOrderIds(orderIds = []) {
             }
             return Number(a.item_number || 0) - Number(b.item_number || 0);
         });
+
+    if (isSupabaseReady()) {
+        try {
+            const { data, error } = await _withRemoteTimeout('load', 'load order items by ids', () => supabaseClient
+                .from('order_items')
+                .select('*')
+                .in('order_id', ids)
+                .order('order_id')
+                .order('item_number'));
+            if (error) {
+                console.error('loadOrderItemsByOrderIds error:', error);
+                if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
+                return localFallback();
+            }
+            return (data || []).map(item => {
+                if (item.item_data) {
+                    try {
+                        const extras = JSON.parse(item.item_data);
+                        return { ...extras, ...item };
+                    } catch (e) { /* ignore */ }
+                }
+                return item;
+            });
+        } catch (error) {
+            console.error('loadOrderItemsByOrderIds exception:', error);
+            if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
+            return localFallback();
+        }
+    }
+
+    return localFallback();
 }
 
 async function updateOrderStatus(orderId, status) {
@@ -3332,6 +3404,7 @@ async function deleteTimeEntry(entryId) {
 async function loadMolds() {
     checkMoldsVersion();
     const deletedIds = new Set(_getDeletedMoldIds());
+    const storedTemplates = getLocal(LOCAL_KEYS.templates);
     const localMolds = (getLocal(LOCAL_KEYS.molds) || [])
         .filter(mold => !deletedIds.has(Number(mold.id)))
         .map(_normalizeMoldRecord)
@@ -3345,92 +3418,107 @@ async function loadMolds() {
         _buildLegacyMoldIndex(localMolds),
         _buildLegacyMoldIndex(legacyTemplateMolds),
     ];
-    if (isSupabaseReady()) {
-        try {
-            const { data, error } = await supabaseClient.from('molds').select('*').order('name');
-            if (error) {
-                console.error('loadMolds error:', error);
-                if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
-            }
+    const templateFallback = _getFallbackMoldsFromTemplates(deletedIds);
+    const localFallback = localMolds.length > 0
+        ? localMolds
+        : (templateFallback.length > 0 ? templateFallback : (getDefaultMolds() || [])
+            .filter(mold => !deletedIds.has(Number(mold.id)))
+            .map(_normalizeMoldRecord)
+            .map(mold => _applyAutomaticMoldRepairs(mold).mold));
+    const hasWarmLocalFallback = localMolds.length > 0 || (Array.isArray(storedTemplates) && storedTemplates.length > 0);
 
-            // Parse Supabase rows
-            if (deletedIds.size > 0) {
-                try {
-                    const { error: deleteError } = await supabaseClient
-                        .from('molds')
-                        .delete()
-                        .in('id', Array.from(deletedIds));
-                    if (deleteError) console.warn('loadMolds deleted-id sync error:', deleteError);
-                } catch (e) {
-                    console.warn('loadMolds deleted-id sync exception:', e);
+    const refreshRemote = async () => {
+        if (!isSupabaseReady()) return localFallback;
+        if (_moldsRefreshPromise) return _moldsRefreshPromise;
+        _moldsRefreshPromise = (async () => {
+            try {
+                const { data, error } = await _withRemoteTimeout('load', 'load molds', () => supabaseClient.from('molds').select('*').order('name'));
+                if (error) {
+                    console.error('loadMolds error:', error);
+                    if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
+                    return localFallback;
                 }
-            }
 
-            const rawSupabaseMolds = (data || [])
-                .map(_parseStoredMoldRow)
-                .map(_normalizeMoldRecord)
-                .filter(mold => !deletedIds.has(Number(mold.id)));
-
-            const needsRemoteLegacyTemplates = rawSupabaseMolds.length === 0
-                || rawSupabaseMolds.some(mold =>
-                    !mold.photo_url
-                    || !mold.collection
-                    || !(Number(mold.pph_actual || 0) > 0)
-                    || !(Number(mold.weight_grams || 0) > 0)
-                );
-            if (needsRemoteLegacyTemplates) {
-                const remoteLegacyTemplateMolds = (await _loadRemoteLegacyTemplates())
-                    .map((template, index) => _templateToMold(template, index))
-                    .filter(Boolean)
-                    .filter(mold => !deletedIds.has(Number(mold.id)))
-                    .map(_normalizeMoldRecord);
-                if (remoteLegacyTemplateMolds.length > 0) {
-                    legacyIndexes.push(_buildLegacyMoldIndex(remoteLegacyTemplateMolds));
+                if (deletedIds.size > 0) {
+                    try {
+                        const { error: deleteError } = await supabaseClient
+                            .from('molds')
+                            .delete()
+                            .in('id', Array.from(deletedIds));
+                        if (deleteError) console.warn('loadMolds deleted-id sync error:', deleteError);
+                    } catch (e) {
+                        console.warn('loadMolds deleted-id sync exception:', e);
+                    }
                 }
-            }
 
-            const repairedSupabaseMolds = [];
-            const hydratedSupabaseMolds = rawSupabaseMolds.map(mold => {
-                const hydrated = _hydrateMissingMoldFields(mold, legacyIndexes);
-                const repaired = _applyAutomaticMoldRepairs(hydrated.mold);
-                if (hydrated.changed || repaired.changed) repairedSupabaseMolds.push(repaired.mold);
-                return repaired.mold;
-            });
-            const supabaseMolds = hydratedSupabaseMolds;
-            if (repairedSupabaseMolds.length > 0) {
-                try {
-                    await supabaseClient.from('molds').upsert(
-                        repairedSupabaseMolds.map(mold => ({
-                            id: mold.id,
-                            name: mold.name || '',
-                            mold_data: JSON.stringify(mold),
-                            created_at: mold.created_at || new Date().toISOString(),
-                            updated_at: new Date().toISOString(),
-                        })),
-                        { onConflict: 'id' }
+                const rawSupabaseMolds = (data || [])
+                    .map(_parseStoredMoldRow)
+                    .map(_normalizeMoldRecord)
+                    .filter(mold => !deletedIds.has(Number(mold.id)));
+
+                const effectiveLegacyIndexes = [...legacyIndexes];
+                let effectiveTemplateFallback = templateFallback;
+                const needsRemoteLegacyTemplates = rawSupabaseMolds.length === 0
+                    || rawSupabaseMolds.some(mold =>
+                        !mold.photo_url
+                        || !mold.collection
+                        || !(Number(mold.pph_actual || 0) > 0)
+                        || !(Number(mold.weight_grams || 0) > 0)
                     );
-                    console.log('[Molds] Applied automatic repairs for', repairedSupabaseMolds.length, 'records');
-                } catch (e) {
-                    console.warn('Automatic mold repair error:', e);
+                if (needsRemoteLegacyTemplates) {
+                    const remoteLegacyTemplateMolds = (await _loadRemoteLegacyTemplates())
+                        .map((template, index) => _templateToMold(template, index))
+                        .filter(Boolean)
+                        .filter(mold => !deletedIds.has(Number(mold.id)))
+                        .map(_normalizeMoldRecord);
+                    if (remoteLegacyTemplateMolds.length > 0) {
+                        effectiveLegacyIndexes.push(_buildLegacyMoldIndex(remoteLegacyTemplateMolds));
+                        effectiveTemplateFallback = remoteLegacyTemplateMolds;
+                    }
                 }
-            }
 
-            // Smart merge: push local records that are missing in Supabase,
-            // and also prefer newer local edits over stale shared rows.
-            if (localMolds.length > 0) {
-                const sbMap = new Map(supabaseMolds.map(m => [m.id, m]));
-                let pushed = 0;
-                let mergedChanged = false;
-                for (const local of localMolds) {
-                    if (!local.id) continue;
-                    const remote = sbMap.get(local.id);
-                    const shouldPush = !remote || _isLocalMoldNewer(local, remote);
-                    if (shouldPush) {
+                const repairedSupabaseMolds = [];
+                const supabaseMolds = rawSupabaseMolds.map(mold => {
+                    const hydrated = _hydrateMissingMoldFields(mold, effectiveLegacyIndexes);
+                    const repaired = _applyAutomaticMoldRepairs(hydrated.mold);
+                    if (hydrated.changed || repaired.changed) repairedSupabaseMolds.push(repaired.mold);
+                    return repaired.mold;
+                });
+
+                if (repairedSupabaseMolds.length > 0) {
+                    try {
+                        await supabaseClient.from('molds').upsert(
+                            repairedSupabaseMolds.map(mold => ({
+                                id: mold.id,
+                                name: mold.name || '',
+                                mold_data: JSON.stringify(mold),
+                                created_at: mold.created_at || new Date().toISOString(),
+                                updated_at: new Date().toISOString(),
+                            })),
+                            { onConflict: 'id' }
+                        );
+                        console.log('[Molds] Applied automatic repairs for', repairedSupabaseMolds.length, 'records');
+                    } catch (e) {
+                        console.warn('Automatic mold repair error:', e);
+                    }
+                }
+
+                if (localMolds.length > 0) {
+                    const sbMap = new Map(supabaseMolds.map(m => [m.id, m]));
+                    let pushed = 0;
+                    let mergedChanged = false;
+                    for (const local of localMolds) {
+                        if (!local.id) continue;
+                        const remote = sbMap.get(local.id);
+                        const shouldPush = !remote || _isLocalMoldNewer(local, remote);
+                        if (!shouldPush) continue;
                         mergedChanged = true;
                         sbMap.set(local.id, local);
                         try {
                             const { error: mergeError } = await supabaseClient.from('molds').upsert({
-                                id: local.id, name: local.name || '', mold_data: JSON.stringify(local),
+                                id: local.id,
+                                name: local.name || '',
+                                mold_data: JSON.stringify(local),
                                 created_at: local.created_at || new Date().toISOString(),
                                 updated_at: local.updated_at || new Date().toISOString(),
                             }, { onConflict: 'id' });
@@ -3439,77 +3527,93 @@ async function loadMolds() {
                             } else {
                                 pushed++;
                             }
-                        } catch(e) { console.warn('Mold merge error:', e); }
+                        } catch (e) {
+                            console.warn('Mold merge error:', e);
+                        }
+                    }
+                    if (pushed > 0) {
+                        console.log(`[Molds] Smart-merged ${pushed} local records to Supabase`);
+                        const { data: refreshed } = await _withRemoteTimeout('load', 'reload molds after merge', () => supabaseClient.from('molds').select('*').order('name'));
+                        if (refreshed && refreshed.length > 0) {
+                            const merged = refreshed
+                                .map(_parseStoredMoldRow)
+                                .map(_normalizeMoldRecord)
+                                .map(mold => _applyAutomaticMoldRepairs(mold).mold);
+                            setLocal(LOCAL_KEYS.molds, merged);
+                            _moldsLastSyncAt = Date.now();
+                            _dispatchDataRefreshEvent('ro:molds-refreshed', { molds: merged });
+                            return merged;
+                        }
+                    }
+                    if (mergedChanged) {
+                        const mergedLocalPreferred = Array.from(sbMap.values())
+                            .sort((a, b) => String(a?.name || '').localeCompare(String(b?.name || ''), 'ru'));
+                        setLocal(LOCAL_KEYS.molds, mergedLocalPreferred);
+                        _moldsLastSyncAt = Date.now();
+                        _dispatchDataRefreshEvent('ro:molds-refreshed', { molds: mergedLocalPreferred });
+                        return mergedLocalPreferred;
                     }
                 }
-                if (pushed > 0) {
-                    console.log(`[Molds] Smart-merged ${pushed} local records to Supabase`);
-                    // Re-fetch merged data
-                    const { data: refreshed } = await supabaseClient.from('molds').select('*').order('name');
-                    if (refreshed && refreshed.length > 0) {
-                        const merged = refreshed
-                            .map(_parseStoredMoldRow)
-                            .map(_normalizeMoldRecord)
-                            .map(mold => _applyAutomaticMoldRepairs(mold).mold);
-                        setLocal(LOCAL_KEYS.molds, merged);
-                        return merged;
+
+                if (supabaseMolds.length > 0) {
+                    setLocal(LOCAL_KEYS.molds, supabaseMolds);
+                    _moldsLastSyncAt = Date.now();
+                    _dispatchDataRefreshEvent('ro:molds-refreshed', { molds: supabaseMolds });
+                    return supabaseMolds;
+                }
+
+                if (effectiveTemplateFallback.length > 0) {
+                    console.warn('[Molds] Supabase returned empty list, restoring molds from local templates fallback');
+                    setLocal(LOCAL_KEYS.molds, effectiveTemplateFallback);
+                    _moldsLastSyncAt = Date.now();
+                    _dispatchDataRefreshEvent('ro:molds-refreshed', { molds: effectiveTemplateFallback });
+                    return effectiveTemplateFallback;
+                }
+
+                const seedData = (localMolds.length > 0 ? localMolds : getDefaultMolds())
+                    .filter(mold => !deletedIds.has(Number(mold.id)));
+                console.log('Seeding', seedData.length, 'molds to Supabase...');
+                for (const m of seedData) {
+                    try {
+                        await supabaseClient.from('molds').upsert({
+                            id: m.id || Date.now(),
+                            name: m.name || '',
+                            mold_data: JSON.stringify(m),
+                            created_at: m.created_at || new Date().toISOString(),
+                            updated_at: m.updated_at || new Date().toISOString(),
+                        }, { onConflict: 'id' });
+                    } catch (e) {
+                        console.warn('Mold seed error:', e);
                     }
                 }
-                if (mergedChanged) {
-                    const mergedLocalPreferred = Array.from(sbMap.values())
-                        .sort((a, b) => String(a?.name || '').localeCompare(String(b?.name || ''), 'ru'));
-                    setLocal(LOCAL_KEYS.molds, mergedLocalPreferred);
-                    return mergedLocalPreferred;
+                setLocal(LOCAL_KEYS.molds, seedData);
+                _moldsLastSyncAt = Date.now();
+                _dispatchDataRefreshEvent('ro:molds-refreshed', { molds: seedData });
+                return seedData;
+            } catch (e) {
+                console.error('loadMolds exception:', e);
+                if (_isSupabaseAccessError(e)) _markSupabaseAccessProblem(e);
+                if (templateFallback.length > 0) {
+                    console.warn('[Molds] loadMolds exception fallback to local templates');
+                    return templateFallback;
                 }
+                return localFallback;
+            } finally {
+                _moldsRefreshPromise = null;
             }
+        })();
+        return _moldsRefreshPromise;
+    };
 
-            if (supabaseMolds.length > 0) {
-                setLocal(LOCAL_KEYS.molds, supabaseMolds);
-                return supabaseMolds;
-            }
-
-            const templateFallback = _getFallbackMoldsFromTemplates(deletedIds);
-            if (templateFallback.length > 0) {
-                console.warn('[Molds] Supabase returned empty list, restoring molds from local templates fallback');
-                setLocal(LOCAL_KEYS.molds, templateFallback);
-                return templateFallback;
-            }
-
-            // Supabase truly empty — seed from localStorage or defaults
-            const seedData = (localMolds.length > 0 ? localMolds : getDefaultMolds())
-                .filter(mold => !deletedIds.has(Number(mold.id)));
-            console.log('Seeding', seedData.length, 'molds to Supabase...');
-            for (const m of seedData) {
-                try {
-                    await supabaseClient.from('molds').upsert({
-                        id: m.id || Date.now(), name: m.name || '', mold_data: JSON.stringify(m),
-                        created_at: m.created_at || new Date().toISOString(), updated_at: m.updated_at || new Date().toISOString(),
-                    }, { onConflict: 'id' });
-                } catch(e) { console.warn('Mold seed error:', e); }
-            }
-            setLocal(LOCAL_KEYS.molds, seedData);
-            return seedData;
-        } catch(e) {
-            console.error('loadMolds exception:', e);
-            if (_isSupabaseAccessError(e)) _markSupabaseAccessProblem(e);
-            const templateFallback = _getFallbackMoldsFromTemplates(deletedIds);
-            if (templateFallback.length > 0) {
-                console.warn('[Molds] loadMolds exception fallback to local templates');
-                return templateFallback;
-            }
-            const localMolds = (getLocal(LOCAL_KEYS.molds) || getDefaultMolds())
-                .filter(mold => !deletedIds.has(Number(mold.id)))
-                .map(_normalizeMoldRecord)
-                .map(mold => _applyAutomaticMoldRepairs(mold).mold);
-            return localMolds;
+    if (localFallback.length > 0 && hasWarmLocalFallback) {
+        if (isSupabaseReady() && _shouldRefreshWarmCache(_moldsLastSyncAt) && !_moldsRefreshPromise) {
+            refreshRemote().catch(() => {});
         }
+        return localFallback;
     }
-    const templateFallback = _getFallbackMoldsFromTemplates(deletedIds);
-    if (templateFallback.length > 0) return templateFallback;
-    return (getLocal(LOCAL_KEYS.molds) || getDefaultMolds())
-        .filter(mold => !deletedIds.has(Number(mold.id)))
-        .map(_normalizeMoldRecord)
-        .map(mold => _applyAutomaticMoldRepairs(mold).mold);
+
+    if (!isSupabaseReady()) return localFallback;
+    return refreshRemote();
 }
 
 // Upload base64 mold photo to Supabase Storage, return public URL

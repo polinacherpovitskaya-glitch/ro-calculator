@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v305';
+const APP_VERSION = 'v307';
 
 const App = {
     currentPage: 'orders',
@@ -201,6 +201,26 @@ const App = {
     bindWarmCacheListeners() {
         if (this._warmCacheListenersBound || typeof window === 'undefined' || typeof window.addEventListener !== 'function') return;
         this._warmCacheListenersBound = true;
+        window.addEventListener('ro:settings-refreshed', (event) => {
+            const settings = event?.detail?.settings;
+            if (!settings || typeof settings !== 'object') return;
+            this.settings = settings;
+            this.params = getProductionParams(settings);
+            if (this.currentPage === 'molds' && typeof Molds !== 'undefined' && Molds && typeof Molds.load === 'function') {
+                Promise.resolve(Molds.load()).catch(() => {});
+            }
+            if (this.currentPage === 'calculator' && typeof Calculator !== 'undefined' && Calculator && typeof Calculator.init === 'function') {
+                Calculator.init();
+            }
+        });
+        window.addEventListener('ro:molds-refreshed', () => {
+            if (this.currentPage === 'molds' && typeof Molds !== 'undefined' && Molds && typeof Molds.load === 'function') {
+                Promise.resolve(Molds.load()).catch(() => {});
+            }
+            if (this.currentPage === 'calculator' && typeof Calculator !== 'undefined' && Calculator && typeof Calculator.init === 'function') {
+                Calculator.init();
+            }
+        });
         window.addEventListener('ro:auth-accounts-refreshed', async (event) => {
             const accounts = Array.isArray(event?.detail?.accounts) ? event.detail.accounts : [];
             if (!accounts.length) return;
@@ -586,15 +606,21 @@ const App = {
         this.primeRouteShell();
         this.syncQuickBugButton();
 
+        // Boot from local cache/defaults first so weak networks do not leave the app
+        // on a white screen before the main route can render.
         try {
-            this.settings = await loadSettings();
-            this.templates = await loadTemplates();
+            this.settings = typeof _getSettingsFallback === 'function'
+                ? _getSettingsFallback()
+                : (getLocal(LOCAL_KEYS.settings) || getDefaultSettings());
+            this.templates = typeof _getLocalTemplates === 'function'
+                ? _getLocalTemplates()
+                : [];
             this.params = getProductionParams(this.settings);
-            if (typeof window !== 'undefined' && window.__roSupabaseAccessProblem) {
-                setTimeout(() => {
-                    this.toast('Нет доступа к общей базе данных. Приложение использует локальные данные браузера, поэтому значения у сотрудников могут отличаться.');
-                }, 300);
-            }
+        } catch (e) {
+            console.warn('[App] Failed to hydrate cached boot data:', e);
+        }
+
+        try {
             await this.initEmployeeContext();
             this._sessionStartedAt = Date.now();
             this.startSessionTracking();
@@ -605,6 +631,22 @@ const App = {
 
         this.handleRoute();
         this.startUpdateChecker();
+
+        Promise.allSettled([
+            loadSettings().then(settings => {
+                this.settings = settings;
+                this.params = getProductionParams(settings);
+            }),
+            loadTemplates().then(templates => {
+                this.templates = templates;
+            }),
+        ]).finally(() => {
+            if (typeof window !== 'undefined' && window.__roSupabaseAccessProblem) {
+                setTimeout(() => {
+                    this.toast('Нет доступа к общей базе данных. Приложение использует локальные данные браузера, поэтому значения у сотрудников могут отличаться.');
+                }, 300);
+            }
+        });
     },
 
     // Hide sidebar links for pages the user has no access to

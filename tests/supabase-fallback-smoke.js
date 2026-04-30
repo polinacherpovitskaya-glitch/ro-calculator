@@ -107,6 +107,9 @@ function createContext() {
                                 },
                                 order() {
                                     context.__remoteCalls.push({ table, action: 'order' });
+                                    if (context.__hangingTables.has(table)) {
+                                        return new Promise(() => {});
+                                    }
                                     if (remoteError(table)) {
                                         return Promise.resolve({ data: null, error: remoteError(table) });
                                     }
@@ -280,6 +283,7 @@ async function main() {
         `, context);
 
         const restoredMolds = JSON.parse(JSON.stringify(await vm.runInContext('loadMolds()', context)));
+        await new Promise(resolve => setTimeout(resolve, 20));
         assert.equal(restoredMolds.length, 1);
         assert.equal(restoredMolds[0].photo_url, 'https://example.com/nfc-star.jpg');
         assert.equal(restoredMolds[0].collection, 'NFC');
@@ -716,6 +720,66 @@ async function main() {
 
         assert.equal(winner.kind, 'resolved', 'employees should resolve from warm local cache without waiting for remote payroll extras');
         assert.equal(winner.names[0], 'Warm Employee');
+    }
+
+    {
+        const context = createContext();
+        context.__hangingTables = new Set(['molds']);
+        runScript(context, 'js/supabase.js');
+        vm.runInContext(`
+            initSupabase();
+            setLocal(LOCAL_KEYS.molds, [{
+                id: 771,
+                name: 'Теплый бланк',
+                category: 'blank',
+                collection: 'Пластик',
+                pph_actual: 42,
+                weight_grams: 18,
+                cost_cny: 900,
+                cny_rate: 12.5,
+                delivery_cost: 3000,
+                mold_count: 1
+            }]);
+        `, context);
+
+        const winner = await Promise.race([
+            vm.runInContext(`loadMolds().then(rows => ({
+                kind: 'resolved',
+                firstName: rows[0]?.name || ''
+            }))`, context),
+            new Promise(resolve => setTimeout(() => resolve({ kind: 'timeout' }), 50)),
+        ]);
+
+        assert.equal(winner.kind, 'resolved', 'molds should resolve from warm local cache without hanging on remote table');
+        assert.equal(winner.firstName, 'Теплый бланк');
+    }
+
+    {
+        const context = createContext();
+        context.__hangingTables = new Set(['orders']);
+        runScript(context, 'js/supabase.js');
+        vm.runInContext(`
+            initSupabase();
+            setLocal(LOCAL_KEYS.orders, [{
+                id: 9101,
+                status: 'sample',
+                client_name: 'Warm Order',
+                created_at: '2026-04-28T10:00:00.000Z'
+            }]);
+        `, context);
+
+        const winner = await Promise.race([
+            vm.runInContext(`loadOrders({}).then(rows => ({
+                kind: 'resolved',
+                count: rows.length,
+                firstClient: rows[0]?.client_name || ''
+            }))`, context),
+            new Promise(resolve => setTimeout(() => resolve({ kind: 'timeout' }), 50)),
+        ]);
+
+        assert.equal(winner.kind, 'resolved', 'orders should resolve from local cache when remote list hangs');
+        assert.equal(winner.count, 1);
+        assert.equal(winner.firstClient, 'Warm Order');
     }
 
     {
