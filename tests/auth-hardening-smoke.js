@@ -478,8 +478,7 @@ async function smokeInitSkipsShowAppWithoutRestoredUser(context) {
 }
 
 async function smokePrepareAuthUILoadsAccountsWithoutWaitingForEmployees(context) {
-    context.__employeesSettled = false;
-    context.__authStartedBeforeEmployeesSettled = false;
+    context.__employeesCalled = 0;
     context.__employeesSource = [{ id: 5, name: 'Полина', role: 'admin', is_active: true }];
     context.__authAccountsSource = [{
         id: '1772715209137',
@@ -488,28 +487,17 @@ async function smokePrepareAuthUILoadsAccountsWithoutWaitingForEmployees(context
         is_active: true,
     }];
 
-    context.loadEmployees = async () => new Promise((resolve) => {
-        setTimeout(() => {
-            context.__employeesSettled = true;
-            resolve(clone(context.__employeesSource));
-        }, 25);
-    });
-    context.loadAuthAccounts = async () => {
-        context.__authStartedBeforeEmployeesSettled = context.__employeesSettled === false;
-        return clone(context.__authAccountsSource);
+    context.loadEmployees = async () => {
+        context.__employeesCalled += 1;
+        return clone(context.__employeesSource);
     };
+    context.loadAuthAccounts = async () => clone(context.__authAccountsSource);
 
-    const preparePromise = vm.runInContext(`App.prepareAuthUI()`, context);
-    await new Promise(resolve => setTimeout(resolve, 5));
+    await vm.runInContext(`App.prepareAuthUI()`, context);
 
-    assert.equal(context.__authStartedBeforeEmployeesSettled, true, 'auth accounts should load in parallel with employees');
     assert.equal(vm.runInContext(`App.authAccounts.length`, context), 1);
     assert.match(String(context.document.getElementById('auth-user-select').innerHTML || ''), /Smoke User/);
-    assert.equal(context.__employeesSettled, false, 'auth UI should not wait for employees before rendering the login select');
-
-    await preparePromise;
-    await new Promise(resolve => setTimeout(resolve, 30));
-    assert.equal(context.__employeesSettled, true, 'employees should still finish loading in the background');
+    assert.equal(context.__employeesCalled, 0, 'auth UI should not request employees before login');
 }
 
 async function smokeShowAppPrimesRouteShellBeforeDataReady(context) {

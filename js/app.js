@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v318';
+const APP_VERSION = 'v319';
 
 const App = {
     currentPage: 'orders',
@@ -650,17 +650,6 @@ const App = {
     },
 
     async prepareAuthUI() {
-        this._prepareAuthEmployeesPromise = Promise.resolve()
-            .then(() => loadEmployees())
-            .then(rows => {
-                this.employees = (rows || []).filter(e => e && e.name && e.is_active !== false);
-                return this.employees;
-            })
-            .catch(() => {
-                this.employees = [];
-                return [];
-            });
-
         try {
             const authAccounts = await loadAuthAccounts();
             this.authAccounts = (authAccounts || []).map(account => ({
