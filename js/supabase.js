@@ -1560,6 +1560,41 @@ const _ORDER_FIELD_MAP = {
     margin_percent_plan: 'margin_percent',
 };
 
+const ORDER_LIST_SELECT = [
+    'id',
+    'order_name',
+    'client_name',
+    'status',
+    'deadline',
+    'deadline_start',
+    'deadline_end',
+    'delivery_address',
+    'telegram',
+    'crm_link',
+    'fintablo_link',
+    'client_legal_name',
+    'client_inn',
+    'client_legal_address',
+    'client_bank_name',
+    'client_bank_account',
+    'client_bank_bik',
+    'payment_status',
+    'total_hours_plan',
+    'production_hours_plastic',
+    'production_hours_packaging',
+    'production_hours_hardware',
+    'total_cost',
+    'total_revenue',
+    'total_margin',
+    'margin_percent',
+    'manager_name',
+    'owner_name',
+    'notes',
+    'created_at',
+    'updated_at',
+    'deleted_at',
+].join(',');
+
 /**
  * Filter object to only known DB columns + store ALL data as JSON backup
  */
@@ -1918,7 +1953,7 @@ async function loadOrders(filters = {}) {
     }
     if (isSupabaseReady()) {
         try {
-            let query = supabaseClient.from('orders').select('*').order('created_at', { ascending: false });
+            let query = supabaseClient.from('orders').select(ORDER_LIST_SELECT).order('created_at', { ascending: false });
             if (filters.status) {
                 query = query.eq('status', filters.status);
             } else {

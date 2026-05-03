@@ -21,6 +21,41 @@ const ALLOWED_KEYS = new Set([
     'warehouseItems',
 ]);
 
+const ORDER_LIST_SELECT = [
+    'id',
+    'order_name',
+    'client_name',
+    'status',
+    'deadline',
+    'deadline_start',
+    'deadline_end',
+    'delivery_address',
+    'telegram',
+    'crm_link',
+    'fintablo_link',
+    'client_legal_name',
+    'client_inn',
+    'client_legal_address',
+    'client_bank_name',
+    'client_bank_account',
+    'client_bank_bik',
+    'payment_status',
+    'total_hours_plan',
+    'production_hours_plastic',
+    'production_hours_packaging',
+    'production_hours_hardware',
+    'total_cost',
+    'total_revenue',
+    'total_margin',
+    'margin_percent',
+    'manager_name',
+    'owner_name',
+    'notes',
+    'created_at',
+    'updated_at',
+    'deleted_at',
+].join(',');
+
 async function fetchSupabaseJson(path, options = {}) {
     const attempts = Math.max(1, Number(options.attempts) || 3);
     const timeoutMs = Math.max(1000, Number(options.timeoutMs) || 5000);
@@ -56,7 +91,7 @@ async function fetchSupabaseJson(path, options = {}) {
 }
 
 async function loadOrders() {
-    return fetchSupabaseJson('/rest/v1/orders?select=*&order=created_at.desc');
+    return fetchSupabaseJson(`/rest/v1/orders?select=${encodeURIComponent(ORDER_LIST_SELECT)}&order=created_at.desc`);
 }
 
 async function loadTimeEntries() {
