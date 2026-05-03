@@ -361,13 +361,91 @@ async function smokeMonitoringLoads(page) {
 
   await page.waitForFunction(() => {
     return typeof Monitoring !== 'undefined'
-      && Array.isArray(Monitoring?.state?.workflows)
+      && typeof Monitoring.render === 'function'
+      && Array.isArray(Monitoring.workflowMeta)
+      && document.body.innerText.includes('Панель спокойствия');
+  }, null, { timeout: 60_000 });
+
+  // Unauthenticated calls to api.github.com hit rate limits on CI runners, so
+  // inject mocked workflow data instead of relying on the live API response.
+  await page.evaluate(() => {
+    if (Monitoring._refreshTimer) {
+      clearInterval(Monitoring._refreshTimer);
+      Monitoring._refreshTimer = null;
+    }
+    Monitoring.refresh = async () => {};
+    Monitoring.forceRefresh = async () => {};
+
+    const now = new Date().toISOString();
+    const mockRuns = {
+      'Deploy GitHub Pages': {
+        id: 1001,
+        html_url: 'https://example.test/deploy',
+        run_number: 42,
+        status: 'completed',
+        conclusion: 'success',
+        head_branch: 'main',
+        head_sha: 'abcdef1234567890',
+        created_at: now,
+        updated_at: now,
+        actor: { login: 'smoke' },
+        display_title: 'Deploy mock',
+        event: 'push',
+      },
+      'Live site smoke': {
+        id: 1002,
+        html_url: 'https://example.test/smoke',
+        run_number: 7,
+        status: 'completed',
+        conclusion: 'success',
+        head_branch: 'main',
+        head_sha: 'abcdef1234567890',
+        created_at: now,
+        updated_at: now,
+        actor: { login: 'smoke' },
+        display_title: 'Smoke mock',
+        event: 'schedule',
+      },
+      'Warehouse stress smoke': {
+        id: 1003,
+        html_url: 'https://example.test/warehouse',
+        run_number: 3,
+        status: 'completed',
+        conclusion: 'success',
+        head_branch: 'main',
+        head_sha: 'abcdef1234567890',
+        created_at: now,
+        updated_at: now,
+        actor: { login: 'smoke' },
+        display_title: 'Warehouse mock',
+        event: 'schedule',
+      },
+    };
+
+    const workflows = Monitoring.workflowMeta.map((meta) =>
+      Monitoring.normalizeRun(meta, mockRuns[meta.name] || null)
+    );
+
+    Monitoring.state = {
+      ...Monitoring.state,
+      loading: false,
+      error: '',
+      workflows,
+      fetchedAt: now,
+      fromCache: false,
+      rateLimitRemaining: 5000,
+      rateLimitResetAt: now,
+    };
+    Monitoring.render();
+  });
+
+  await page.waitForFunction(() => {
+    return Array.isArray(Monitoring?.state?.workflows)
       && Monitoring.state.workflows.length >= 3
-      && document.body.innerText.includes('Панель спокойствия')
       && document.body.innerText.includes('Deploy')
       && document.body.innerText.includes('Live smoke')
       && document.body.innerText.includes('Warehouse stress');
-  }, null, { timeout: 60_000 });
+  }, null, { timeout: 30_000 });
 
   const monitoringState = await page.evaluate(() => ({
     version: typeof APP_VERSION !== 'undefined' ? APP_VERSION : null,
