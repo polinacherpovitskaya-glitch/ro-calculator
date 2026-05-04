@@ -66,6 +66,9 @@ function createContext() {
                 .split(',')
                 .map(key => key.trim())
                 .filter(Boolean);
+            if ((context.__hangingBootstrapKeys || new Set()).has(keys.join(',')) || keys.some(key => (context.__hangingBootstrapKeys || new Set()).has(key))) {
+                return new Promise(() => {});
+            }
             const data = {};
             if (keys.includes('orders')) data.orders = context.__bootstrapOrders || [];
             if (keys.includes('timeEntries')) data.timeEntries = context.__bootstrapTimeEntries || [];
@@ -819,6 +822,34 @@ async function main() {
         assert.equal(winner.kind, 'resolved', 'orders should resolve from same-origin bootstrap when remote list hangs');
         assert.equal(winner.count, 1);
         assert.equal(winner.firstClient, 'Bootstrap Order');
+    }
+
+    {
+        const context = createContext();
+        context.__hangingBootstrapKeys = new Set(['orders']);
+        runScript(context, 'js/supabase.js');
+        vm.runInContext(`
+            initSupabase();
+            setLocal(LOCAL_KEYS.orders, [{
+                id: 501,
+                status: 'sample',
+                client_name: 'Warm Cached Order',
+                created_at: '2026-05-02T10:00:00.000Z'
+            }]);
+        `, context);
+
+        const winner = await Promise.race([
+            vm.runInContext(`loadOrders({}).then(rows => ({
+                kind: 'resolved',
+                count: rows.length,
+                firstClient: rows[0]?.client_name || ''
+            }))`, context),
+            new Promise(resolve => setTimeout(() => resolve({ kind: 'timeout' }), 50)),
+        ]);
+
+        assert.equal(winner.kind, 'resolved', 'orders should resolve from warm local cache without waiting for bootstrap');
+        assert.equal(winner.count, 1);
+        assert.equal(winner.firstClient, 'Warm Cached Order');
     }
 
     {

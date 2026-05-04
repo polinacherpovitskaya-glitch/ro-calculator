@@ -25,6 +25,8 @@ let _authAccountsRefreshPromise = null;
 let _authAccountsLastSyncAt = 0;
 let _employeesRefreshPromise = null;
 let _employeesLastSyncAt = 0;
+let _ordersRefreshPromise = null;
+let _ordersLastSyncAt = 0;
 let _empExtraRefreshPromise = null;
 let _settingsRefreshPromise = null;
 let _settingsLastSyncAt = 0;
@@ -1944,10 +1946,38 @@ async function loadOrders(filters = {}) {
     };
 
     const localFallback = loadLocalOrders();
+    const refreshOrdersWarmCache = async () => {
+        if (_ordersRefreshPromise) return _ordersRefreshPromise;
+        _ordersRefreshPromise = (async () => {
+            const bootstrapPayload = await _loadSameOriginBootstrap(['orders']);
+            if (bootstrapPayload && Array.isArray(bootstrapPayload.orders) && bootstrapPayload.orders.length > 0) {
+                const mergedOrders = _mergeOrderRows(bootstrapPayload.orders);
+                setLocal(LOCAL_KEYS.orders, mergedOrders);
+                _ordersLastSyncAt = Date.now();
+                _setDataLoadMeta('orders', { source: 'bootstrap' });
+                _dispatchDataRefreshEvent('ro:orders-refreshed', { orders: mergedOrders });
+                return mergedOrders;
+            }
+            return null;
+        })().finally(() => {
+            _ordersRefreshPromise = null;
+        });
+        return _ordersRefreshPromise;
+    };
+
+    if (localFallback.length > 0) {
+        _setDataLoadMeta('orders', { source: 'local' });
+        if (_shouldRefreshWarmCache(_ordersLastSyncAt)) {
+            refreshOrdersWarmCache().catch(() => {});
+        }
+        return localFallback;
+    }
+
     const bootstrapPayload = await _loadSameOriginBootstrap(['orders']);
     if (bootstrapPayload && Array.isArray(bootstrapPayload.orders) && bootstrapPayload.orders.length > 0) {
         const mergedOrders = _mergeOrderRows(bootstrapPayload.orders);
         setLocal(LOCAL_KEYS.orders, mergedOrders);
+        _ordersLastSyncAt = Date.now();
         _setDataLoadMeta('orders', { source: 'bootstrap' });
         return applyOrderFilters(mergedOrders);
     }
@@ -1999,6 +2029,7 @@ async function loadOrders(filters = {}) {
             if (!filters.status && !filters.limit) {
                 setLocal(LOCAL_KEYS.orders, mergedOrders);
             }
+            _ordersLastSyncAt = Date.now();
             _setDataLoadMeta('orders', { source: 'supabase' });
             return mergedOrders;
         } catch (error) {
