@@ -2852,6 +2852,68 @@ async function _loadFinancePhase1LookupMaps(options = {}) {
     };
 }
 
+function _financeBankAccountLookupKey(provider = '', externalId = '') {
+    return `${String(provider || '').trim()}::${String(externalId || '').trim()}`;
+}
+
+async function _loadBankAccountIdMap() {
+    if (!_canUseFinancePhase1Table(FINANCE_PHASE1_TABLES.bankAccounts)) return new Map();
+    try {
+        const { data, error } = await _withRemoteTimeout('load', 'load bank account lookup', () => supabaseClient
+            .from(FINANCE_PHASE1_TABLES.bankAccounts)
+            .select('id, provider, external_id')
+            .order('id', { ascending: true }));
+        if (error) {
+            if (_isMissingSupabaseTableError(error)) {
+                _rememberMissingFinancePhase1Table(FINANCE_PHASE1_TABLES.bankAccounts, error);
+                return new Map();
+            }
+            console.warn('load bank account lookup error:', error);
+            return new Map();
+        }
+        _clearMissingFinancePhase1Table(FINANCE_PHASE1_TABLES.bankAccounts);
+        return new Map((Array.isArray(data) ? data : [])
+            .map(item => [_financeBankAccountLookupKey(item?.provider, item?.external_id), Number(item?.id || 0) || null])
+            .filter(([key, id]) => key && id));
+    } catch (error) {
+        if (_isMissingSupabaseTableError(error)) {
+            _rememberMissingFinancePhase1Table(FINANCE_PHASE1_TABLES.bankAccounts, error);
+            return new Map();
+        }
+        console.warn('load bank account lookup exception:', error);
+        return new Map();
+    }
+}
+
+async function _loadFinanceTransactionIdMap() {
+    if (!_canUseFinancePhase1Table(FINANCE_PHASE1_TABLES.transactions)) return new Map();
+    try {
+        const { data, error } = await _withRemoteTimeout('load', 'load finance transaction lookup', () => supabaseClient
+            .from(FINANCE_PHASE1_TABLES.transactions)
+            .select('id, legacy_tx_key')
+            .order('id', { ascending: true }));
+        if (error) {
+            if (_isMissingSupabaseTableError(error)) {
+                _rememberMissingFinancePhase1Table(FINANCE_PHASE1_TABLES.transactions, error);
+                return new Map();
+            }
+            console.warn('load finance transaction lookup error:', error);
+            return new Map();
+        }
+        _clearMissingFinancePhase1Table(FINANCE_PHASE1_TABLES.transactions);
+        return new Map((Array.isArray(data) ? data : [])
+            .map(item => [String(item?.legacy_tx_key || '').trim(), Number(item?.id || 0) || null])
+            .filter(([key, id]) => key && id));
+    } catch (error) {
+        if (_isMissingSupabaseTableError(error)) {
+            _rememberMissingFinancePhase1Table(FINANCE_PHASE1_TABLES.transactions, error);
+            return new Map();
+        }
+        console.warn('load finance transaction lookup exception:', error);
+        return new Map();
+    }
+}
+
 async function loadFinanceAccounts() {
     const fallbackWorkspace = await loadFinanceWorkspace();
     const fallback = Array.isArray(fallbackWorkspace?.accounts)
@@ -3469,26 +3531,35 @@ async function saveBankTransactions(transactions, options = {}) {
     if (!_canUseFinancePhase1Table(FINANCE_PHASE1_TABLES.bankTransactions) || payload.length === 0) return [];
     const provider = String(options.provider || 'tochka').trim() || 'tochka';
     const syncRunId = Number(options.syncRunId || 0) || null;
+    const financePrefix = String(options.financePrefix || provider).trim() || provider;
+    const [bankAccountIdsByExternalKey, financeTransactionIdsByLegacyKey] = await Promise.all([
+        _loadBankAccountIdMap(),
+        _loadFinanceTransactionIdMap(),
+    ]);
     const nowIso = _financeNowIso();
-    const rows = payload.map(item => ({
-        provider,
-        sync_run_id: syncRunId,
-        bank_account_id: null,
-        finance_transaction_id: null,
-        external_id: String(item.external_id || item.transaction_id || _financeLegacyTxKey(item, `${provider}-bank`)).trim(),
-        external_account_id: String(item.accountId || item.account_id || '').trim(),
-        direction: String(item.direction === 'in' ? 'income' : (item.direction === 'out' ? 'expense' : String(item.direction || '').trim().toLowerCase())).trim(),
-        amount: Number(item.amount || 0) || 0,
-        currency_code: String(item.currency || 'RUB').trim() || 'RUB',
-        booked_at: item.booked_at || null,
-        occurred_on: _safeFinanceDate(item.date || item.occurred_on || ''),
-        description: String(item.description || '').trim(),
-        counterparty_name: String(item.counterpartyName || item.counterparty_name || '').trim(),
-        counterparty_inn: String(item.counterpartyInn || item.counterparty_inn || '').trim(),
-        raw_json: item,
-        created_at: item.created_at || nowIso,
-        updated_at: nowIso,
-    })).filter(row => row.external_id);
+    const rows = payload.map(item => {
+        const externalAccountId = String(item.accountId || item.account_id || '').trim();
+        const financeLegacyKey = _financeLegacyTxKey(item, financePrefix);
+        return {
+            provider,
+            sync_run_id: syncRunId,
+            bank_account_id: bankAccountIdsByExternalKey.get(_financeBankAccountLookupKey(provider, externalAccountId)) || null,
+            finance_transaction_id: financeTransactionIdsByLegacyKey.get(financeLegacyKey) || null,
+            external_id: String(item.external_id || item.transaction_id || _financeLegacyTxKey(item, `${provider}-bank`)).trim(),
+            external_account_id: externalAccountId,
+            direction: String(item.direction === 'in' ? 'income' : (item.direction === 'out' ? 'expense' : String(item.direction || '').trim().toLowerCase())).trim(),
+            amount: Number(item.amount || 0) || 0,
+            currency_code: String(item.currency || 'RUB').trim() || 'RUB',
+            booked_at: item.booked_at || null,
+            occurred_on: _safeFinanceDate(item.date || item.occurred_on || ''),
+            description: String(item.description || '').trim(),
+            counterparty_name: String(item.counterpartyName || item.counterparty_name || '').trim(),
+            counterparty_inn: String(item.counterpartyInn || item.counterparty_inn || '').trim(),
+            raw_json: item,
+            created_at: item.created_at || nowIso,
+            updated_at: nowIso,
+        };
+    }).filter(row => row.external_id);
     if (!rows.length) return [];
     try {
         const { error } = await _withRemoteTimeout('write', 'save bank transactions', () => supabaseClient
@@ -3557,9 +3628,11 @@ async function saveLegacyFinanceTransactions(transactions, options = {}) {
     const payload = Array.isArray(transactions) ? transactions : [];
     if (!_canUseFinancePhase1Table(FINANCE_PHASE1_TABLES.legacyTransactions) || payload.length === 0) return [];
     const importRunId = Number(options.importRunId || options.import_run_id || 0) || null;
+    const financePrefix = String(options.financePrefix || 'fintablo').trim() || 'fintablo';
+    const financeTransactionIdsByLegacyKey = await _loadFinanceTransactionIdMap();
     const rows = payload.map(item => ({
         import_run_id: importRunId,
-        finance_transaction_id: null,
+        finance_transaction_id: financeTransactionIdsByLegacyKey.get(_financeLegacyTxKey(item, financePrefix)) || null,
         legacy_account_id: String(item.accountId || item.account_id || '').trim(),
         legacy_transaction_id: String(item.external_id || item.transaction_id || _financeLegacyTxKey(item, 'fintablo-legacy')).trim(),
         occurred_on: _safeFinanceDate(item.date || item.occurred_on || ''),
@@ -3716,12 +3789,12 @@ async function saveTochkaSnapshot(data) {
         });
         await saveBankAccounts(accounts, { provider: 'tochka', syncRunId: syncRun.id });
         await saveFinanceAccounts(accounts.map(item => _mapSnapshotAccountToFinanceAccountRow(item, 'tochka_api')));
-        await saveBankTransactions(transactions, { provider: 'tochka', syncRunId: syncRun.id });
         await saveFinanceTransactions(transactions, {
             prefix: 'tochka',
             source_slug: 'tochka_api',
             imported_from: 'tochka_snapshot',
         });
+        await saveBankTransactions(transactions, { provider: 'tochka', syncRunId: syncRun.id, financePrefix: 'tochka' });
     } catch (error) {
         console.warn('saveTochkaSnapshot dual-write exception:', error);
     }
@@ -3786,12 +3859,12 @@ async function saveFintabloSnapshot(data) {
             payload_json: payload,
             source_reference: 'fintablo_snapshot_json',
         });
-        await saveLegacyFinanceTransactions(transactions, { importRunId: importRun.id, sourceLabel: 'FinTablo snapshot' });
         await saveFinanceTransactions(transactions, {
             prefix: 'fintablo',
             source_slug: 'legacy_fintablo',
             imported_from: 'fintablo_snapshot',
         });
+        await saveLegacyFinanceTransactions(transactions, { importRunId: importRun.id, sourceLabel: 'FinTablo snapshot', financePrefix: 'fintablo' });
     } catch (error) {
         console.warn('saveFintabloSnapshot dual-write exception:', error);
     }

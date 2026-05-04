@@ -172,6 +172,7 @@ function createContext() {
                             if (table === 'settings' && payload && payload.key) {
                                 context.__settingsStore.set(payload.key, payload.value);
                             }
+                            persistTableRows(context, table, payload);
                             return { error: null };
                         },
                     };
@@ -187,6 +188,38 @@ function runScript(context, relativePath) {
     const absolutePath = path.join(__dirname, '..', relativePath);
     const code = fs.readFileSync(absolutePath, 'utf8');
     vm.runInContext(code, context, { filename: relativePath });
+}
+
+function persistTableRows(context, table, payload) {
+    if (table === 'settings') return;
+    const rows = Array.isArray(payload) ? payload : [payload];
+    const existing = Array.isArray(context.__tableRows[table]) ? context.__tableRows[table].map(row => ({ ...row })) : [];
+    let nextId = existing.reduce((max, row) => Math.max(max, Number(row?.id || 0) || 0), 0);
+    const keyFor = (row) => {
+        if (!row || typeof row !== 'object') return '';
+        if (table === 'finance_sources') return `slug:${row.slug || ''}`;
+        if (table === 'finance_accounts') return `legacy:${row.legacy_id || ''}`;
+        if (table === 'finance_categories') return `legacy:${row.legacy_id || ''}`;
+        if (table === 'finance_directions') return `legacy:${row.legacy_id || ''}`;
+        if (table === 'finance_counterparties') return `legacy:${row.legacy_id || ''}`;
+        if (table === 'finance_transactions') return `legacy:${row.legacy_tx_key || ''}`;
+        if (table === 'finance_rules') return `legacy:${row.legacy_id || ''}`;
+        if (table === 'bank_accounts') return `bank:${row.provider || ''}:${row.external_id || ''}`;
+        if (table === 'bank_transactions') return `banktx:${row.provider || ''}:${row.external_id || ''}`;
+        if (table === 'legacy_finance_import_runs') return `run:${row.id || ''}`;
+        if (table === 'legacy_finance_transactions') return `legacytx:${row.import_run_id || ''}:${row.legacy_transaction_id || ''}`;
+        return `id:${row.id || ''}`;
+    };
+    const map = new Map(existing.map(row => [keyFor(row), row]));
+    rows.forEach(rawRow => {
+        if (!rawRow || typeof rawRow !== 'object') return;
+        const row = { ...rawRow };
+        const key = keyFor(row);
+        const current = map.get(key);
+        if (row.id == null) row.id = current?.id || ++nextId;
+        map.set(key, current ? { ...current, ...row } : row);
+    });
+    context.__tableRows[table] = Array.from(map.values());
 }
 
 async function main() {
@@ -1125,6 +1158,9 @@ async function main() {
         assert.equal(upserts.some(call => call.table === 'bank_accounts'), true, 'tochka sync should dual-write bank accounts');
         assert.equal(upserts.some(call => call.table === 'bank_transactions'), true, 'tochka sync should dual-write bank transactions');
         assert.equal(upserts.some(call => call.table === 'finance_transactions'), true, 'tochka sync should also seed canonical finance transactions');
+        const bankTxUpsert = upserts.find(call => call.table === 'bank_transactions');
+        assert.equal(bankTxUpsert.payload[0].bank_account_id > 0, true, 'bank transactions should resolve bank_account_id from bank_accounts');
+        assert.equal(bankTxUpsert.payload[0].finance_transaction_id > 0, true, 'bank transactions should resolve finance_transaction_id from canonical finance transactions');
     }
 
     {
@@ -1150,6 +1186,8 @@ async function main() {
         assert.equal(upserts.some(call => call.table === 'legacy_finance_import_runs'), true, 'fintablo snapshot should dual-write import runs');
         assert.equal(upserts.some(call => call.table === 'legacy_finance_transactions'), true, 'fintablo snapshot should dual-write legacy rows');
         assert.equal(upserts.some(call => call.table === 'finance_transactions'), true, 'fintablo snapshot should also seed canonical finance transactions');
+        const legacyTxUpsert = upserts.find(call => call.table === 'legacy_finance_transactions');
+        assert.equal(legacyTxUpsert.payload[0].finance_transaction_id > 0, true, 'legacy finance rows should resolve finance_transaction_id from canonical finance transactions');
     }
 
     console.log('supabase fallback smoke checks passed');
