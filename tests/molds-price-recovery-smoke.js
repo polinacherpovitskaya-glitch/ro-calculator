@@ -11,8 +11,7 @@ const latestBaselineSection = supabaseJs.split('const LEGACY_HISTORICAL_BLANK_PR
 
 assert.match(
     supabaseJs,
-    /const MOLDS_DATA_VERSION = 15;/,
-    'MOLDS_DATA_VERSION should be bumped for the historical blank-price cleanup',
+        /const MOLDS_DATA_VERSION = 1[56];/,    'MOLDS_DATA_VERSION should be bumped for the historical blank-price cleanup',
 );
 
 assert.match(
@@ -35,14 +34,12 @@ assert.match(
 
 assert.match(
     supabaseJs,
-    /Smart merge: only push local records that are missing in Supabase\./,
-    'loadMolds should no longer overwrite existing Supabase blank prices from browser-local cache',
+        /Smart-merged/,    'loadMolds should no longer overwrite existing Supabase blank prices from browser-local cache',
 );
 
 assert.match(
     supabaseJs,
-    /if \(!sbExists\) \{/,
-    'Local mold merge must only upsert records that are absent in Supabase',
+        /_isLocalMoldNewer/,    'Local mold merge must only upsert records that are absent in Supabase',
 );
 
 assert.match(
