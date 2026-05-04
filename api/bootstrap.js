@@ -165,7 +165,10 @@ module.exports = async function handler(req, res) {
         }
     }));
 
-    res.setHeader('Cache-Control', 'public, s-maxage=30, stale-while-revalidate=600');
+    const hasLiveBootData = keys.includes('timeEntries') || keys.includes('authAccounts') || keys.includes('warehouseItems');
+    res.setHeader('Cache-Control', hasLiveBootData
+        ? 'no-store, max-age=0'
+        : 'public, s-maxage=30, stale-while-revalidate=600');
     res.status(200).json({
         ok: Object.keys(data).length > 0,
         data,

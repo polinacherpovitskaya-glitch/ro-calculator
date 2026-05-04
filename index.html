@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="css/style.css?v=123">
     <script>
         (function () {
-            const CURRENT_HTML_VERSION = 'v324';
+            const CURRENT_HTML_VERSION = 'v328';
             const ATTEMPT_KEY = 'ro_calc_force_update_attempts';
 
             function parseVersion(version) {
@@ -143,7 +143,7 @@
             }, { once: true });
 
             window.addEventListener('load', () => {
-                window.setTimeout(verifyBoot, 0);
+                window.setTimeout(verifyBoot, 4500);
             }, { once: true });
 
             window.addEventListener('error', (event) => {
@@ -183,7 +183,7 @@
     <aside class="sidebar">
         <div class="sidebar-brand">
             <h2>Recycle Object</h2>
-            <span>Калькулятор <span id="app-version">v324</span></span>
+            <span>Калькулятор <span id="app-version">v328</span></span>
         </div>
         <nav class="sidebar-nav">
             <a href="#tasks" data-page="tasks">
@@ -1554,6 +1554,7 @@
                         <select id="tt-filter-period" onchange="TimeTrack.filterAndRender()">
                             <option value="week">Эта неделя</option>
                             <option value="month" selected>Этот месяц</option>
+                            <option value="last-month">Прошлый месяц</option>
                             <option value="all">Все записи</option>
                         </select>
                     </div>
@@ -3556,10 +3557,10 @@
 <script src="vendor/jspdf-2.5.1.umd.min.js?v=1"></script>
 <script src="js/work-management-core.js?v=1"></script>
 <script src="js/bug-report-core.js?v=2"></script>
-<script src="js/supabase.js?v=188"></script>
+<script src="js/supabase.js?v=189"></script>
 <script src="js/task-events.js?v=1"></script>
 <script src="js/calculator.js?v=82"></script>
-<script src="js/app.js?v=324"></script>
+<script src="js/app.js?v=328"></script>
 <script src="js/tpa.js?v=3"></script>
 <script src="js/wiki.js?v=4"></script>
 <script src="js/order-detail.js?v=65"></script>
@@ -3569,7 +3570,7 @@
     <script src="js/molds.js?v=87"></script>
 <script src="js/colors.js?v=46g"></script>
 <script src="js/kp.js?v=47"></script>
-<script src="js/timetrack.js?v=63"></script>
+<script src="js/timetrack.js?v=64"></script>
 <script src="js/projects.js?v=2"></script>
 <script src="js/tasks.js?v=57"></script>
 <script src="js/bugs.js?v=6"></script>

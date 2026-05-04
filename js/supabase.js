@@ -4011,6 +4011,37 @@ function _timeEntryToDb(entry) {
     return row;
 }
 
+function _invalidateBootstrapCache(keys = []) {
+    (Array.isArray(keys) ? keys : [keys])
+        .map(key => String(key || '').trim())
+        .filter(Boolean)
+        .forEach(key => {
+            delete _sameOriginBootstrapCache[key];
+            delete _sameOriginBootstrapFetchedAt[key];
+            delete _sameOriginBootstrapLastErrors[key];
+        });
+}
+
+function _upsertLocalTimeEntry(entry, id = null) {
+    if (!entry) return null;
+    const entries = getLocal(LOCAL_KEYS.timeEntries) || [];
+    const rowId = id || entry.id || Date.now();
+    const nextEntry = {
+        ...entry,
+        id: rowId,
+        updated_at: new Date().toISOString(),
+    };
+    const idx = entries.findIndex(e => String(e.id) === String(rowId));
+    if (idx >= 0) {
+        entries[idx] = { ...entries[idx], ...nextEntry };
+    } else {
+        entries.push({ ...nextEntry, created_at: nextEntry.created_at || new Date().toISOString() });
+    }
+    setLocal(LOCAL_KEYS.timeEntries, entries);
+    _invalidateBootstrapCache(['timeEntries']);
+    return rowId;
+}
+
 async function loadTimeEntries() {
     const fallback = getLocal(LOCAL_KEYS.timeEntries) || [];
     const bootstrapPayload = await _loadSameOriginBootstrap(['timeEntries']);
@@ -4045,6 +4076,7 @@ async function loadTimeEntries() {
 }
 
 async function saveTimeEntry(entry) {
+    _invalidateBootstrapCache(['timeEntries']);
     if (isSupabaseReady()) {
         const dbRow = _timeEntryToDb(entry);
         const { id: dbId, ...updateRow } = dbRow;
@@ -4062,31 +4094,22 @@ async function saveTimeEntry(entry) {
                 .single();
         const { data, error } = await query;
         if (error) { console.error('saveTimeEntry error:', error); return null; }
-        return data.id;
+        return _upsertLocalTimeEntry(entry, data.id);
     }
-    const entries = getLocal(LOCAL_KEYS.timeEntries) || [];
-    if (entry && entry.id) {
-        const idx = entries.findIndex(e => String(e.id) === String(entry.id));
-        if (idx >= 0) {
-            entries[idx] = { ...entries[idx], ...entry, updated_at: new Date().toISOString() };
-            setLocal(LOCAL_KEYS.timeEntries, entries);
-            return entry.id;
-        }
-    }
-    const id = entry?.id || Date.now();
-    entries.push({ ...entry, id, created_at: new Date().toISOString() });
-    setLocal(LOCAL_KEYS.timeEntries, entries);
-    return id;
+    return _upsertLocalTimeEntry(entry);
 }
 
 async function deleteTimeEntry(entryId) {
+    _invalidateBootstrapCache(['timeEntries']);
     if (isSupabaseReady()) {
         const { error } = await supabaseClient.from('time_entries').delete().eq('id', entryId);
-        if (error) console.error('deleteTimeEntry error:', error);
-    } else {
-        const entries = (getLocal(LOCAL_KEYS.timeEntries) || []).filter(e => e.id !== entryId);
-        setLocal(LOCAL_KEYS.timeEntries, entries);
+        if (error) {
+            console.error('deleteTimeEntry error:', error);
+            return;
+        }
     }
+    const entries = (getLocal(LOCAL_KEYS.timeEntries) || []).filter(e => String(e.id) !== String(entryId));
+    setLocal(LOCAL_KEYS.timeEntries, entries);
 }
 
 // =============================================
@@ -5356,21 +5379,42 @@ async function loadWarehouseItems() {
         setLocal(LOCAL_KEYS.warehouseItems, normalizedSnapshot);
         return applyReservationSnapshot(normalizedSnapshot);
     };
+    const parseWarehouseRows = (rows) => (Array.isArray(rows) ? rows : []).map(row => {
+        if (row && row.item_data) {
+            try {
+                const parsed = typeof row.item_data === 'string' ? JSON.parse(row.item_data) : row.item_data;
+                return normalizeWarehouseItem({ ...parsed, id: row.id });
+            } catch (error) {
+                return normalizeWarehouseItem(row);
+            }
+        }
+        return normalizeWarehouseItem(row);
+    });
+    const readLiveBootstrapWarehouseItems = async () => {
+        if (!_canUseSameOriginBootstrap()) return null;
+        try {
+            const url = new URL(SAME_ORIGIN_BOOTSTRAP_PATH, window.location.origin);
+            url.searchParams.set('keys', 'warehouseItems');
+            url.searchParams.set('warehouseReload', String(Date.now()));
+            const payload = await _fetchJsonWithTimeout(url.toString(), 6000);
+            const rows = payload?.data?.warehouseItems;
+            if (!Array.isArray(rows) || rows.length === 0) return null;
+            const hydratedItems = await applyReservationSnapshot(parseWarehouseRows(rows));
+            setLocal(LOCAL_KEYS.warehouseItems, hydratedItems);
+            _invalidateBootstrapCache(['warehouseItems']);
+            return hydratedItems;
+        } catch (error) {
+            console.warn('loadWarehouseItems direct bootstrap failed:', error);
+            return null;
+        }
+    };
     const localFallback = async () => applyReservationSnapshot(getLocal(LOCAL_KEYS.warehouseItems) || []);
+    const liveBootstrapItems = await readLiveBootstrapWarehouseItems();
+    if (liveBootstrapItems && liveBootstrapItems.length > 0) return liveBootstrapItems;
+
     const bootstrapPayload = await _loadSameOriginBootstrap(['warehouseItems']);
     if (bootstrapPayload && Array.isArray(bootstrapPayload.warehouseItems) && bootstrapPayload.warehouseItems.length > 0) {
-        const items = bootstrapPayload.warehouseItems.map(row => {
-            if (row && row.item_data) {
-                try {
-                    const parsed = typeof row.item_data === 'string' ? JSON.parse(row.item_data) : row.item_data;
-                    return normalizeWarehouseItem({ ...parsed, id: row.id });
-                } catch (error) {
-                    return normalizeWarehouseItem(row);
-                }
-            }
-            return normalizeWarehouseItem(row);
-        });
-        const hydratedItems = await applyReservationSnapshot(items);
+        const hydratedItems = await applyReservationSnapshot(parseWarehouseRows(bootstrapPayload.warehouseItems));
         setLocal(LOCAL_KEYS.warehouseItems, hydratedItems);
         return hydratedItems;
     }
@@ -5383,16 +5427,7 @@ async function loadWarehouseItems() {
 
             if (data && data.length > 0) {
                 // Restore full data from item_data JSON
-                const items = data.map(row => {
-                    if (row.item_data) {
-                        try {
-                            const parsed = typeof row.item_data === 'string' ? JSON.parse(row.item_data) : row.item_data;
-                            return normalizeWarehouseItem({ ...parsed, id: row.id });
-                        } catch(e) { /* fallthrough */ }
-                    }
-                    return normalizeWarehouseItem(row);
-                });
-                const hydratedItems = await applyReservationSnapshot(items);
+                const hydratedItems = await applyReservationSnapshot(parseWarehouseRows(data));
                 // Update localStorage backup
                 setLocal(LOCAL_KEYS.warehouseItems, hydratedItems);
                 return hydratedItems;

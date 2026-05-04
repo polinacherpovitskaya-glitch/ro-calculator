@@ -1033,6 +1033,29 @@ const Molds = {
         // Public catalog + Figma plugin must receive the full published
         // blank ladder, including the 10-piece tier.
         const TIERS = [10, 50, 100, 300, 500, 1000, 3000];
+        const mergeMoldData = (raw) => {
+            const merged = {};
+            const append = (value) => {
+                if (value == null) return;
+                if (Array.isArray(value)) {
+                    value.forEach(append);
+                    return;
+                }
+                if (typeof value === 'string') {
+                    try {
+                        append(JSON.parse(value));
+                    } catch (e) {
+                        // Ignore legacy fragments we can't parse.
+                    }
+                    return;
+                }
+                if (typeof value === 'object') {
+                    Object.assign(merged, value);
+                }
+            };
+            append(raw);
+            return merged;
+        };
         let updated = 0;
         let errors = 0;
         let noTiers = 0;
@@ -1053,16 +1076,18 @@ const Molds = {
                     .single();
                 if (fetchErr) { errors++; continue; }
 
-                let moldData = existing.mold_data;
-                if (Array.isArray(moldData) && moldData.length > 0) moldData = moldData[0];
-                if (typeof moldData === 'string') {
-                    try { moldData = JSON.parse(moldData); } catch (e) { moldData = {}; }
-                }
+                let moldData = mergeMoldData(existing.mold_data);
                 if (!moldData || typeof moldData !== 'object') moldData = {};
 
                 if (Object.keys(tiers_prices).length > 0) {
                     moldData.tiers_prices = tiers_prices;
                     moldData.tiers_published_at = new Date().toISOString();
+                    TIERS.forEach(qty => {
+                        const published = tiers_prices[qty];
+                        if (Number.isFinite(published) && published > 0) {
+                            moldData[`price${qty}`] = published;
+                        }
+                    });
                 } else {
                     noTiers++;
                 }
@@ -1107,6 +1132,31 @@ const Molds = {
             } catch (e) {
                 console.warn('Sheet sync failed (non-fatal):', e);
             }
+        }
+
+        // Tell the public site that the published catalog changed, so it can
+        // invalidate long-lived caches instead of polling Supabase every few
+        // seconds.
+        const SITE_REVALIDATE_URL = 'https://recycleobject.ru/api/catalog-published';
+        try {
+            await fetch(SITE_REVALIDATE_URL, {
+                method: 'POST',
+                mode: 'no-cors',
+                keepalive: true,
+                headers: {
+                    'Content-Type': 'text/plain;charset=UTF-8',
+                },
+                body: JSON.stringify({
+                    source: 'calc.recycleobject.ru',
+                    updated,
+                    total: activeMolds.length,
+                    ids: activeMolds.map(m => m.id),
+                    publishedAt: new Date().toISOString(),
+                }),
+            });
+            console.log('Site revalidate sent');
+        } catch (e) {
+            console.warn('Site revalidate failed (non-fatal):', e);
         }
 
         const message = `Опубликовано: ${updated}/${activeMolds.length}`

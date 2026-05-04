@@ -56,7 +56,7 @@ function main() {
     const context = createContext();
     runScript(context, 'js/app.js');
 
-    assert.equal(vm.runInContext('App.shouldBlockLegacyHost()', context), true);
+    assert.equal(vm.runInContext('App.shouldBlockLegacyHost()', context), false);
     assert.equal(
         vm.runInContext('App.getCanonicalAppUrl()', context),
         'https://calc.recycleobject.ru/#molds'
@@ -64,16 +64,10 @@ function main() {
 
     const domReady = context.document.getEventListener('DOMContentLoaded');
     assert.equal(typeof domReady, 'function', 'DOMContentLoaded handler should be registered');
-    domReady();
+    assert.equal(String(context.document.body.innerHTML || ''), '');
+    assert.equal(context.document.title, 'Recycle Object');
 
-    const html = String(context.document.body.innerHTML || '');
-    assert.match(html, /Старый адрес закрыт/);
-    assert.match(html, /Открыть рабочий калькулятор/);
-    assert.match(html, /calc\.recycleobject\.ru/);
-    assert.match(html, /Рабочий калькулятор переехал на новый адрес/);
-    assert.equal(context.document.title, 'Recycle Object — новый адрес калькулятора');
-
-    console.log('legacy host blocker smoke checks passed');
+    console.log('legacy host fallback smoke checks passed');
 }
 
 main();

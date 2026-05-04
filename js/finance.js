@@ -13,6 +13,13 @@ const Finance = {
         employees: [],
         timeEntries: [],
         indirectMonths: {},
+        financeAccounts: [],
+        financeCategories: [],
+        financeDirections: [],
+        financeCounterparties: [],
+        financeTransactions: [],
+        bankAccounts: [],
+        bankTransactions: [],
         tochkaSnapshot: null,
         fintabloSnapshot: null,
     },
@@ -163,12 +170,34 @@ const Finance = {
         this._showLoading('Собираю текущий финансовый контур...');
         this._loadingPromise = (async () => {
             try {
-                const [workspaceRaw, orders, imports, employees, timeEntries, tochkaSnapshot, fintabloSnapshot] = await Promise.all([
+                const [
+                    workspaceRaw,
+                    orders,
+                    imports,
+                    employees,
+                    timeEntries,
+                    financeAccounts,
+                    financeCategories,
+                    financeDirections,
+                    financeCounterparties,
+                    financeTransactions,
+                    bankAccounts,
+                    bankTransactions,
+                    tochkaSnapshot,
+                    fintabloSnapshot,
+                ] = await Promise.all([
                     (typeof loadFinanceWorkspace === 'function') ? loadFinanceWorkspace() : null,
                     (typeof loadOrders === 'function') ? loadOrders({}) : [],
                     (typeof loadAllFintabloImports === 'function') ? loadAllFintabloImports() : [],
                     (typeof loadEmployees === 'function') ? loadEmployees() : [],
                     (typeof loadTimeEntries === 'function') ? loadTimeEntries() : [],
+                    (typeof loadFinanceAccounts === 'function') ? loadFinanceAccounts() : [],
+                    (typeof loadFinanceCategories === 'function') ? loadFinanceCategories() : [],
+                    (typeof loadFinanceDirections === 'function') ? loadFinanceDirections() : [],
+                    (typeof loadFinanceCounterparties === 'function') ? loadFinanceCounterparties() : [],
+                    (typeof loadFinanceTransactions === 'function') ? loadFinanceTransactions() : [],
+                    (typeof loadBankAccounts === 'function') ? loadBankAccounts() : [],
+                    (typeof loadBankTransactions === 'function') ? loadBankTransactions() : [],
                     (typeof loadTochkaSnapshot === 'function') ? loadTochkaSnapshot() : null,
                     (typeof loadFintabloSnapshot === 'function') ? loadFintabloSnapshot() : null,
                 ]);
@@ -182,11 +211,24 @@ const Finance = {
                     employees: Array.isArray(employees) ? employees : [],
                     timeEntries: Array.isArray(timeEntries) ? timeEntries : [],
                     indirectMonths: (typeof loadIndirectCostsData === 'function') ? (loadIndirectCostsData() || {}) : {},
+                    financeAccounts: Array.isArray(financeAccounts) ? financeAccounts : [],
+                    financeCategories: Array.isArray(financeCategories) ? financeCategories : [],
+                    financeDirections: Array.isArray(financeDirections) ? financeDirections : [],
+                    financeCounterparties: Array.isArray(financeCounterparties) ? financeCounterparties : [],
+                    financeTransactions: Array.isArray(financeTransactions) ? financeTransactions : [],
+                    bankAccounts: Array.isArray(bankAccounts) ? bankAccounts : [],
+                    bankTransactions: Array.isArray(bankTransactions) ? bankTransactions : [],
                     tochkaSnapshot: normalizedSnapshot,
                     fintabloSnapshot: normalizedFintabloSnapshot,
                 };
                 this.workspace = this._hydrateWorkspaceFromFintablo(
-                    this._hydrateWorkspaceFromTochka(normalizedWorkspace, normalizedSnapshot),
+                    this._hydrateWorkspaceFromTochka(
+                        this._hydrateWorkspaceFromRelationalFinance(
+                            normalizedWorkspace,
+                            this.data,
+                        ),
+                        normalizedSnapshot,
+                    ),
                     normalizedFintabloSnapshot,
                 );
                 if (!this.ui?.report?.month) {
@@ -202,6 +244,13 @@ const Finance = {
                     employees: this.data.employees,
                     timeEntries: this.data.timeEntries,
                     indirectMonths: this.data.indirectMonths,
+                    financeAccounts: this.data.financeAccounts,
+                    financeCategories: this.data.financeCategories,
+                    financeDirections: this.data.financeDirections,
+                    financeCounterparties: this.data.financeCounterparties,
+                    financeTransactions: this.data.financeTransactions,
+                    bankAccounts: this.data.bankAccounts,
+                    bankTransactions: this.data.bankTransactions,
                     tochkaSnapshot: this.data.tochkaSnapshot,
                     fintabloSnapshot: this.data.fintabloSnapshot,
                 });
@@ -2699,6 +2748,123 @@ const Finance = {
             .filter(item => item.purchase_cost > 0);
     },
 
+    _financeAccountWorkspaceId(row) {
+        if (!row || typeof row !== 'object') return '';
+        return String(row.legacy_id || row.id || '').trim();
+    },
+
+    _financeCategoryWorkspaceId(row) {
+        if (!row || typeof row !== 'object') return '';
+        return String(row.legacy_id || row.id || '').trim();
+    },
+
+    _financeDirectionWorkspaceId(row) {
+        if (!row || typeof row !== 'object') return '';
+        return String(row.legacy_id || row.id || '').trim();
+    },
+
+    _financeCounterpartyWorkspaceId(row) {
+        if (!row || typeof row !== 'object') return '';
+        return String(row.legacy_id || row.id || '').trim();
+    },
+
+    _hydrateWorkspaceFromRelationalFinance(workspace, data = {}) {
+        const next = this._normalizeWorkspace(workspace, App.settings || {});
+
+        (Array.isArray(data?.financeAccounts) ? data.financeAccounts : []).forEach(row => {
+            const accountId = this._financeAccountWorkspaceId(row);
+            if (!accountId) return;
+            const existing = next.accounts.find(item => String(item?.id || '') === accountId);
+            const metadata = row?.metadata_json && typeof row.metadata_json === 'object' ? row.metadata_json : {};
+            const original = metadata.original && typeof metadata.original === 'object' ? metadata.original : {};
+            const patch = {
+                id: accountId,
+                name: String(row.name || original.name || 'Счет').trim() || 'Счет',
+                type: String(row.account_kind || original.type || 'settlement').trim() || 'settlement',
+                owner: String(row.owner_name || original.owner || '').trim(),
+                source_id: String(metadata.source_slug || original.source_id || '').trim(),
+                status: row.is_active === false ? 'archived' : (String(original.status || 'active').trim() || 'active'),
+                note: String(original.note || '').trim(),
+                show_in_money: row.is_hidden ? false : (original.show_in_money !== false),
+                legacy_hide_in_total: !!row.is_hidden,
+                external_ref: String(row.external_account_id || row.account_number || original.external_ref || '').trim(),
+                bank_name: String(row.bank_name || original.bank_name || '').trim(),
+                bank_bic: String(row.bank_bic || original.bank_bic || '').trim(),
+                sort_order: Number(row.sort_order || original.sort_order || 0) || 0,
+            };
+            if (existing) Object.assign(existing, patch);
+            else next.accounts.push(patch);
+        });
+
+        (Array.isArray(data?.financeCategories) ? data.financeCategories : []).forEach(row => {
+            const categoryId = this._financeCategoryWorkspaceId(row);
+            if (!categoryId) return;
+            const existing = next.categories.find(item => String(item?.id || '') === categoryId);
+            const metadata = row?.metadata_json && typeof row.metadata_json === 'object' ? row.metadata_json : {};
+            const original = metadata.original && typeof metadata.original === 'object' ? metadata.original : {};
+            const patch = {
+                id: categoryId,
+                name: String(row.name || original.name || 'Статья').trim() || 'Статья',
+                group: String(original.group || row.category_group || 'other').trim() || 'other',
+                bucket: String(row.bucket || original.bucket || 'general').trim() || 'general',
+                source_id: String(metadata.source_id || original.source_id || '').trim(),
+                mapping: String(row.code || original.mapping || '').trim(),
+                active: row.is_active !== false && original.active !== false,
+                color: String(row.color || original.color || '').trim(),
+                sort_order: Number(row.sort_order || original.sort_order || 0) || 0,
+            };
+            if (existing) Object.assign(existing, patch);
+            else next.categories.push(patch);
+        });
+
+        (Array.isArray(data?.financeDirections) ? data.financeDirections : []).forEach(row => {
+            const projectId = this._financeDirectionWorkspaceId(row);
+            if (!projectId) return;
+            const existing = next.projects.find(item => String(item?.id || '') === projectId);
+            const metadata = row?.metadata_json && typeof row.metadata_json === 'object' ? row.metadata_json : {};
+            const original = metadata.original && typeof metadata.original === 'object' ? metadata.original : {};
+            const patch = {
+                id: projectId,
+                name: String(row.name || original.name || 'Направление').trim() || 'Направление',
+                type: String(metadata.project_type || original.type || 'core').trim() || 'core',
+                note: String(original.note || '').trim(),
+                active: row.is_active !== false && original.active !== false,
+                sort_order: Number(row.sort_order || original.sort_order || 0) || 0,
+            };
+            if (existing) Object.assign(existing, patch);
+            else next.projects.push(patch);
+        });
+
+        (Array.isArray(data?.financeCounterparties) ? data.financeCounterparties : []).forEach(row => {
+            const counterpartyId = this._financeCounterpartyWorkspaceId(row);
+            if (!counterpartyId) return;
+            const existing = next.counterparties.find(item => String(item?.id || '') === counterpartyId);
+            const metadata = row?.metadata_json && typeof row.metadata_json === 'object' ? row.metadata_json : {};
+            const original = metadata.original && typeof metadata.original === 'object' ? metadata.original : {};
+            const patch = {
+                id: counterpartyId,
+                name: String(row.name || original.name || 'Контрагент').trim() || 'Контрагент',
+                role: String(metadata.role || original.role || 'other').trim() || 'other',
+                inn: String(row.inn || original.inn || '').trim(),
+                note: String(row.notes || original.note || '').trim(),
+                what_they_sell: String(original.what_they_sell || '').trim(),
+                default_project_id: String(metadata.default_project_id || original.default_project_id || '').trim(),
+                default_category_id: String(metadata.default_category_id || original.default_category_id || '').trim(),
+                research_mode: String(original.research_mode || 'manual').trim() || 'manual',
+                match_hint: String(metadata.match_hint || original.match_hint || '').trim(),
+                active: original.active !== false,
+            };
+            if (existing) Object.assign(existing, patch);
+            else next.counterparties.push(patch);
+        });
+
+        next.accounts = this._normalizeAccounts(next.accounts);
+        next.categories = this._normalizeCategories(next.categories);
+        next.projects = this._normalizeProjects(next.projects);
+        next.counterparties = this._normalizeCounterparties(next.counterparties);
+        return next;
+    },
+
     _hydrateWorkspaceFromTochka(workspace, tochkaSnapshot) {
         const next = {
             ...(workspace || {}),
@@ -2936,6 +3102,134 @@ const Finance = {
                 };
             })
             .filter(item => item && item.date && item.amount > 0);
+    },
+
+    _canonicalTochkaAccounts() {
+        const relational = Array.isArray(this.data?.bankAccounts) ? this.data.bankAccounts : [];
+        if (relational.length > 0) {
+            return relational
+                .filter(item => item && typeof item === 'object')
+                .map(item => {
+                    const raw = item.raw_json && typeof item.raw_json === 'object' ? item.raw_json : {};
+                    const accountId = String(item.external_id || item.external_account_id || raw.accountId || raw.account_number || '').trim();
+                    const accountNumber = String(item.account_number || raw.accountNumber || raw.account_number || accountId).trim();
+                    return {
+                        accountId,
+                        accountNumber,
+                        displayName: String(item.display_name || raw.displayName || raw.accountLabel || raw.name || accountId).trim(),
+                        ownerName: String(item.owner_name || raw.ownerName || raw.owner || '').trim(),
+                        currency: String(item.currency_code || raw.currency || 'RUB').trim() || 'RUB',
+                        currentBalance: this._num(item.last_balance || raw.currentBalance || raw.balance || 0),
+                        bank_name: String(item.bank_name || raw.bank_name || raw.bankName || '').trim(),
+                        bank_bic: String(item.bank_bic || raw.bank_bic || raw.bic || '').trim(),
+                        status: String(item.status || raw.status || '').trim(),
+                    };
+                })
+                .filter(item => item.accountId);
+        }
+        return Array.isArray(this.data?.tochkaSnapshot?.accounts) ? this.data.tochkaSnapshot.accounts : [];
+    },
+
+    _canonicalExternalTransactions(workspace = this.workspace) {
+        const relational = this._financeTransactionsToRows({
+            financeTransactions: this.data?.financeTransactions,
+            financeAccounts: this.data?.financeAccounts,
+            financeCategories: this.data?.financeCategories,
+            financeDirections: this.data?.financeDirections,
+            financeCounterparties: this.data?.financeCounterparties,
+            workspace,
+        });
+        if (relational.length > 0) return relational;
+        const tochkaAccounts = this._canonicalTochkaAccounts();
+        const fintabloRows = this._fintabloTransactionsToRows(this.data?.fintabloSnapshot, tochkaAccounts);
+        return [
+            ...((this.data?.tochkaSnapshot?.transactions || []).filter(item => item && typeof item === 'object')),
+            ...fintabloRows,
+        ];
+    },
+
+    _financeTransactionsToRows({ financeTransactions, financeAccounts, financeCategories, financeDirections, financeCounterparties, workspace }) {
+        const rows = Array.isArray(financeTransactions) ? financeTransactions : [];
+        if (rows.length === 0) return [];
+        const accountRows = Array.isArray(financeAccounts) ? financeAccounts : [];
+        const categoryRows = Array.isArray(financeCategories) ? financeCategories : [];
+        const directionRows = Array.isArray(financeDirections) ? financeDirections : [];
+        const counterpartyRows = Array.isArray(financeCounterparties) ? financeCounterparties : [];
+        const accountsByDbId = new Map(accountRows.map(item => [String(item?.id || ''), item]));
+        const categoriesByDbId = new Map(categoryRows.map(item => [String(item?.id || ''), item]));
+        const directionsByDbId = new Map(directionRows.map(item => [String(item?.id || ''), item]));
+        const counterpartiesByDbId = new Map(counterpartyRows.map(item => [String(item?.id || ''), item]));
+        const tochkaAccounts = this._canonicalTochkaAccounts();
+        return rows
+            .filter(item => item && typeof item === 'object')
+            .map(item => {
+                const metadata = item?.metadata_json && typeof item.metadata_json === 'object' ? item.metadata_json : {};
+                const raw = item?.raw_json && typeof item.raw_json === 'object'
+                    ? item.raw_json
+                    : (metadata.original && typeof metadata.original === 'object' ? metadata.original : {});
+                const accountRow = accountsByDbId.get(String(item.account_id || '')) || null;
+                const categoryRow = categoriesByDbId.get(String(item.category_id || '')) || null;
+                const directionRow = directionsByDbId.get(String(item.direction_id || '')) || null;
+                const counterpartyRow = counterpartiesByDbId.get(String(item.counterparty_id || '')) || null;
+                const accountId = this._financeAccountWorkspaceId(accountRow) || String(metadata.legacy_account_id || raw.accountId || raw.account_id || '').trim();
+                const categoryId = this._financeCategoryWorkspaceId(categoryRow) || String(metadata.legacy_category_id || raw.categoryId || raw.category_id || '').trim();
+                const projectId = this._financeDirectionWorkspaceId(directionRow) || String(metadata.legacy_direction_id || raw.directionId || raw.direction_id || raw.project_id || '').trim();
+                const counterpartyId = this._financeCounterpartyWorkspaceId(counterpartyRow) || String(metadata.legacy_counterparty_id || raw.counterpartyId || raw.counterparty_id || '').trim();
+                const importedFrom = String(item.imported_from || '').trim();
+                const sourceKind = String(accountRow?.account_kind || raw.sourceKind || '').trim().toLowerCase();
+                if (importedFrom === 'fintablo_snapshot' && sourceKind === 'bank' && this._relationalFinanceAccountMatchesBank(accountRow, tochkaAccounts, raw)) {
+                    return null;
+                }
+                const type = String(item.transaction_type || '').trim().toLowerCase();
+                const rawDirection = String(raw.direction || '').trim().toLowerCase();
+                const direction = rawDirection === 'in' || rawDirection === 'out'
+                    ? rawDirection
+                    : (type === 'income' ? 'in' : 'out');
+                return {
+                    source: importedFrom === 'fintablo_snapshot' ? 'fintablo' : 'finance_phase1',
+                    sourceKind: sourceKind || (direction === 'in' ? 'bank' : 'settlement'),
+                    transactionId: String(item.external_transaction_id || item.legacy_tx_key || item.id || '').trim(),
+                    legacyTransactionId: String(item.legacy_tx_key || item.id || '').trim(),
+                    accountId,
+                    accountLabel: String(accountRow?.name || raw.accountLabel || raw.displayName || accountId).trim(),
+                    bankNumber: String(accountRow?.account_number || accountRow?.external_account_id || raw.bankNumber || '').trim(),
+                    date: this._parseBusinessDate(item.occurred_on || raw.date),
+                    direction,
+                    amount: Math.abs(this._num(item.amount_rub || item.amount)),
+                    currency: String(item.currency_code || raw.currency || 'RUB').trim() || 'RUB',
+                    counterpartyName: String(counterpartyRow?.name || raw.counterpartyName || raw.counterparty_name || '').trim(),
+                    counterpartyInn: String(counterpartyRow?.inn || raw.counterpartyInn || raw.counterparty_inn || '').trim(),
+                    description: String(item.description || raw.description || '').trim(),
+                    paymentId: String(item.external_reference || raw.paymentId || '').trim(),
+                    documentNumber: '',
+                    group: type === 'transfer' ? 'transfer' : String(raw.group || '').trim(),
+                    legacyMoneybagId: String(raw.legacyMoneybagId || '').trim(),
+                    partnerId: String(raw.partnerId || '').trim(),
+                    dealId: String(raw.dealId || '').trim(),
+                    categoryId,
+                    directionId: projectId,
+                    categoryHint: categoryId,
+                    projectHint: projectId,
+                    projectLabel: String(item.linked_order_label || raw.project_label || raw.linked_order_label || '').trim(),
+                    kindHint: ['transfer', 'payroll', 'tax', 'charity', 'asset', 'adjustment'].includes(type) ? type : '',
+                    reviewStatus: String(item.review_status || '').trim(),
+                    counterpartyHint: counterpartyId,
+                    employeeHint: item.employee_id != null ? String(item.employee_id) : '',
+                    noteHint: String(item.note || raw.note || '').trim(),
+                };
+            })
+            .filter(item => item && item.date && item.amount > 0);
+    },
+
+    _relationalFinanceAccountMatchesBank(accountRow, tochkaAccounts = [], raw = {}) {
+        const accountNumber = this._digitsOnly(accountRow?.account_number || accountRow?.external_account_id || raw.bankNumber || raw.accountId || '');
+        const accountName = this._normalizeText(accountRow?.name || raw.accountLabel || '');
+        return (Array.isArray(tochkaAccounts) ? tochkaAccounts : []).some(item => {
+            const bankNumber = this._extractBankAccountNumber(item?.accountId || item?.accountNumber || '');
+            if (accountNumber && bankNumber && accountNumber === bankNumber) return true;
+            if (accountNumber && bankNumber && accountNumber.slice(-4) && bankNumber.endsWith(accountNumber.slice(-4))) return true;
+            return accountName && accountName === this._normalizeText(item?.displayName || '');
+        });
     },
 
     _shouldIncludeFintabloMoneybagInOperations(moneybag, tochkaAccounts = []) {
@@ -4114,14 +4408,11 @@ const Finance = {
         const normalizedKey = String(txKey || '');
         const manualRows = this._manualTransactionsToBankRows(this.workspace);
         const recurringRows = this._recurringTransactionsToBankRows(this.workspace);
-        const tochkaAccounts = Array.isArray(this.data?.tochkaSnapshot?.accounts) ? this.data.tochkaSnapshot.accounts : [];
-        const fintabloRows = this._fintabloTransactionsToRows(this.data?.fintabloSnapshot, tochkaAccounts);
         return [
             ...((this.summary?.transactions?.rows || []).filter(item => item && typeof item === 'object')),
             ...manualRows,
             ...recurringRows,
-            ...((this.data?.tochkaSnapshot?.transactions || []).filter(item => item && typeof item === 'object')),
-            ...fintabloRows,
+            ...this._canonicalExternalTransactions(this.workspace),
         ].find(item => String(item?.txKey || this._transactionKey(item)) === normalizedKey) || null;
     },
 
@@ -4339,7 +4630,7 @@ const Finance = {
         return plan;
     },
 
-    _buildManagementReports({ workspace, employees, timeEntries, transactionsRows, orders, tochkaSnapshot, fintabloSnapshot }) {
+    _buildManagementReports({ workspace, employees, timeEntries, transactionsRows, orders, bankAccounts, tochkaSnapshot, fintabloSnapshot }) {
         const availableMonths = this._collectAvailableReportMonths({
             transactionsRows,
             timeEntries,
@@ -4375,6 +4666,7 @@ const Finance = {
             workspace,
             payroll,
             fixedAssetRows,
+            bankAccounts,
             tochkaSnapshot,
             fintabloSnapshot,
         });
@@ -4794,10 +5086,15 @@ const Finance = {
         };
     },
 
-    _buildBalanceReport({ workspace, payroll, fixedAssetRows, tochkaSnapshot, fintabloSnapshot }) {
-        const tochkaAccounts = Array.isArray(tochkaSnapshot?.accounts) ? tochkaSnapshot.accounts : [];
+    _buildBalanceReport({ workspace, payroll, fixedAssetRows, bankAccounts, tochkaSnapshot, fintabloSnapshot }) {
+        const canonicalTochkaAccounts = this._canonicalTochkaAccounts();
+        const tochkaAccounts = Array.isArray(bankAccounts) && bankAccounts.length > 0
+            ? bankAccounts
+            : (canonicalTochkaAccounts.length > 0
+                ? canonicalTochkaAccounts
+                : (Array.isArray(tochkaSnapshot?.accounts) ? tochkaSnapshot.accounts : []));
         const fintabloAccounts = this._canonicalFintabloMoneybags(fintabloSnapshot);
-        const bankMoney = this._roundMoney(tochkaAccounts.reduce((sum, item) => sum + this._num(item?.currentBalance), 0));
+        const bankMoney = this._roundMoney(tochkaAccounts.reduce((sum, item) => sum + this._num(item?.currentBalance ?? item?.last_balance), 0));
         const nonBankMoney = this._roundMoney(fintabloAccounts
             .filter(item => !this._moneybagMatchesTochkaAccount(item, tochkaAccounts))
             .filter(item => {
@@ -4821,13 +5118,33 @@ const Finance = {
             liabilities,
             equity: this._roundMoney(assetsTotal - liabilities),
             assetsTotal,
-            syncLabel: tochkaSnapshot?.synced_at
-                ? `банк на ${String(tochkaSnapshot.synced_at).slice(0, 10)}`
-                : (fintabloSnapshot?.synced_at ? `moneybags на ${String(fintabloSnapshot.synced_at).slice(0, 10)}` : 'без свежего снапшота'),
+            syncLabel: this.data?.bankTransactions?.[0]?.occurred_on
+                ? `банк на ${String(this.data.bankTransactions[0].occurred_on).slice(0, 10)}`
+                : (tochkaSnapshot?.synced_at
+                    ? `банк на ${String(tochkaSnapshot.synced_at).slice(0, 10)}`
+                    : (fintabloSnapshot?.synced_at
+                        ? `moneybags на ${String(fintabloSnapshot.synced_at).slice(0, 10)}`
+                        : 'без свежего снапшота')),
         };
     },
 
-    _buildSummary({ workspace, orders, imports, employees, timeEntries, indirectMonths, tochkaSnapshot, fintabloSnapshot }) {
+    _buildSummary({
+        workspace,
+        orders,
+        imports,
+        employees,
+        timeEntries,
+        indirectMonths,
+        financeAccounts,
+        financeCategories,
+        financeDirections,
+        financeCounterparties,
+        financeTransactions,
+        bankAccounts,
+        bankTransactions,
+        tochkaSnapshot,
+        fintabloSnapshot,
+    }) {
         const validOrderDates = [];
         const invalidOrderDates = [];
         const statusCounts = {};
@@ -4955,13 +5272,32 @@ const Finance = {
             .map(field => this.FACT_FIELD_LABELS[field] || field);
 
         const queueConfig = workspace?.queueConfig || this._defaultQueueConfig();
-        const tochkaAccounts = Array.isArray(tochkaSnapshot?.accounts) ? tochkaSnapshot.accounts : [];
-        const tochkaTransactions = Array.isArray(tochkaSnapshot?.transactions) ? tochkaSnapshot.transactions : [];
+        const canonicalTochkaAccounts = this._canonicalTochkaAccounts();
+        const tochkaAccounts = canonicalTochkaAccounts.length > 0
+            ? canonicalTochkaAccounts
+            : (Array.isArray(tochkaSnapshot?.accounts) ? tochkaSnapshot.accounts : []);
+        const tochkaTransactions = Array.isArray(bankTransactions) && bankTransactions.length > 0
+            ? bankTransactions
+            : (Array.isArray(tochkaSnapshot?.transactions) ? tochkaSnapshot.transactions : []);
         const fintabloAccounts = this._canonicalFintabloMoneybags(fintabloSnapshot);
+        const relationalTransactions = this._financeTransactionsToRows({
+            financeTransactions,
+            financeAccounts,
+            financeCategories,
+            financeDirections,
+            financeCounterparties,
+            workspace,
+        });
         const fintabloTransactions = this._fintabloTransactionsToRows(fintabloSnapshot, tochkaAccounts);
         const manualTransactions = this._manualTransactionsToBankRows(workspace);
         const recurringTransactions = this._recurringTransactionsToBankRows(workspace);
-        const allTransactions = [...manualTransactions, ...recurringTransactions, ...tochkaTransactions, ...fintabloTransactions];
+        const allTransactions = [
+            ...manualTransactions,
+            ...recurringTransactions,
+            ...(relationalTransactions.length > 0
+                ? relationalTransactions
+                : [...((tochkaSnapshot?.transactions || []).filter(item => item && typeof item === 'object')), ...fintabloTransactions]),
+        ];
         const txRows = this._buildTransactionRows(allTransactions, workspace, queueConfig, employees);
         const bankAccountActivity = new Map();
         txRows.forEach(item => {
@@ -5025,6 +5361,7 @@ const Finance = {
             timeEntries,
             transactionsRows: txRows,
             orders,
+            bankAccounts: tochkaAccounts,
             tochkaSnapshot,
             fintabloSnapshot,
         });
@@ -5121,14 +5458,14 @@ const Finance = {
                 syncedAt: tochkaSnapshot?.synced_at || null,
                 accounts: tochkaAccounts.length,
                 transactions: tochkaTransactions.length,
-                range: this._range((tochkaTransactions || []).map(item => item.date || null)),
-                latestTransactionDate: this._range((tochkaTransactions || []).map(item => item.date || null))[1],
+                range: this._range((tochkaTransactions || []).map(item => item.date || item.occurred_on || null)),
+                latestTransactionDate: this._range((tochkaTransactions || []).map(item => item.date || item.occurred_on || null))[1],
                 accountRows: bankAccountRows,
             },
             fintablo: {
                 syncedAt: fintabloSnapshot?.synced_at || null,
                 accounts: fintabloAccounts.length,
-                transactions: fintabloTransactions.length,
+                transactions: relationalTransactions.filter(item => item?.source === 'fintablo').length || fintabloTransactions.length,
                 range: this._range((fintabloTransactions || []).map(item => item.date || null)),
                 latestTransactionDate: this._range((fintabloTransactions || []).map(item => item.date || null))[1],
                 accountRows: fintabloAccountRows,
@@ -5186,12 +5523,13 @@ const Finance = {
                 const suggestion = this._normalizeSuggestionForTransaction(tx, this._suggestTransaction(tx, workspace), workspace);
                 const decision = decisionMap.get(txKey) || null;
                 const employeeGuess = this._guessEmployeeForTransaction(tx, employees);
-                let kind = decision?.kind || (String(tx?.group || '') === 'transfer' ? 'transfer' : this._inferTransactionKind(tx, suggestion, workspace, employeeGuess));
+                const persistedConfirmed = String(tx?.reviewStatus || '').trim().toLowerCase() === 'confirmed';
+                let kind = decision?.kind || tx.kindHint || (String(tx?.group || '') === 'transfer' ? 'transfer' : this._inferTransactionKind(tx, suggestion, workspace, employeeGuess));
                 let projectId = decision?.project_id || tx.projectHint || suggestion.projectId || '';
                 let projectLabel = decision?.project_label || '';
                 let categoryId = decision?.category_id || tx.categoryHint || suggestion.categoryId || '';
-                let counterpartyId = decision?.counterparty_id || suggestion.counterpartyProfileId || '';
-                let payrollEmployeeId = decision?.payroll_employee_id || (employeeGuess?.id != null ? String(employeeGuess.id) : '');
+                let counterpartyId = decision?.counterparty_id || tx.counterpartyHint || suggestion.counterpartyProfileId || '';
+                let payrollEmployeeId = decision?.payroll_employee_id || tx.employeeHint || (employeeGuess?.id != null ? String(employeeGuess.id) : '');
                 let transferAccountId = decision?.transfer_account_id || '';
 
                 if (kind === 'transfer') {
@@ -5208,12 +5546,12 @@ const Finance = {
                     projectId = projectId || suggestion.projectId || 'project_recycle_object';
                 }
 
-                const isManual = !!decision;
+                const isManual = !!decision || persistedConfirmed;
                 const hasAssignment = !!(categoryId || projectId || counterpartyId || kind);
                 let route = 'unmatched';
                 if (kind === 'ignore') {
                     route = 'ignored';
-                } else if (decision?.confirmed) {
+                } else if (decision?.confirmed || persistedConfirmed) {
                     route = 'manual';
                 } else if (isManual && hasAssignment) {
                     route = 'draft';
@@ -5229,6 +5567,7 @@ const Finance = {
 
                 const reasons = [];
                 if (decision?.confirmed) reasons.push('подтверждено вручную');
+                else if (persistedConfirmed) reasons.push('подтверждено в finance ledger');
                 else if (isManual) reasons.push('черновик ручной разноски');
                 if (tx.recurringTemplateName && !decision?.confirmed) reasons.push(`автосписание "${tx.recurringTemplateName}"`);
                 if (decision?.note) reasons.push(decision.note);
@@ -5257,8 +5596,8 @@ const Finance = {
                     payrollEmployeeName: selectedEmployee?.name || '',
                     transferAccountId,
                     transferAccountName: this._findById(workspace?.accounts, transferAccountId)?.name || '',
-                    confirmed: !!decision?.confirmed,
-                    confidence: this._clamp01(decision?.confirmed ? 1 : suggestion.confidence, 0),
+                    confirmed: !!decision?.confirmed || persistedConfirmed,
+                    confidence: this._clamp01((decision?.confirmed || persistedConfirmed) ? 1 : suggestion.confidence, 0),
                     route,
                     routeLabel: this.TRANSACTION_ROUTE_LABELS[route] || 'Нужен разбор',
                     statusTone: this._routeTone(route),

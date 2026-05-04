@@ -7247,12 +7247,30 @@ const Warehouse = {
 
     async getItemsForPicker() {
         const items = await this._ensureRequiredSeedItems(await loadWarehouseItems());
-        const reservations = await loadWarehouseReservations();
+        const needsReservationSnapshot = (items || []).some(item =>
+            item && (item.available_qty === undefined || item.available_qty === null || item.reserved_qty === undefined || item.reserved_qty === null)
+        );
+        const activeReservedByItem = new Map();
+        if (needsReservationSnapshot) {
+            const reservations = await loadWarehouseReservations();
+            (reservations || []).forEach(reservation => {
+                if (!reservation || reservation.status !== 'active') return;
+                const itemId = Number(reservation.item_id || 0);
+                if (!itemId) return;
+                activeReservedByItem.set(
+                    itemId,
+                    (activeReservedByItem.get(itemId) || 0) + this._parseWarehouseQty(reservation.qty)
+                );
+            });
+        }
 
         items.forEach(item => {
-            const activeRes = reservations.filter(r => r.item_id === item.id && r.status === 'active');
-            const reservedQty = activeRes.reduce((s, r) => s + this._parseWarehouseQty(r.qty), 0);
-            item.available_qty = Math.max(0, this._parseWarehouseQty(item.qty) - reservedQty);
+            const qty = this._parseWarehouseQty(item && item.qty);
+            const reservedQty = needsReservationSnapshot
+                ? (activeReservedByItem.get(Number(item && item.id || 0)) || 0)
+                : this._parseWarehouseQty(item && item.reserved_qty);
+            item.reserved_qty = reservedQty;
+            item.available_qty = Math.max(0, qty - reservedQty);
         });
 
         const grouped = {};
@@ -7273,6 +7291,7 @@ const Warehouse = {
                         color: i.color || '',
                         qty: i.qty || 0,
                         available_qty: i.available_qty || 0,
+                        reserved_qty: i.reserved_qty || 0,
                         price_per_unit: this.getPickerEffectivePrice(i),
                         unit: this.getPickerUnitLabel(i),
                         photo_thumbnail: i.photo_thumbnail || '',
@@ -7337,11 +7356,15 @@ const Warehouse = {
     _pickerMetaText(item) {
         if (!item) return '';
         if (item.meta_line) return String(item.meta_line);
-        const stock = item.available_qty == null
+        const unitLabel = this.getPickerUnitLabel(item);
+        const availableQty = item.available_qty == null ? null : this._parseWarehouseQty(item.available_qty);
+        const reservedQty = this._parseWarehouseQty(item.reserved_qty);
+        const stock = availableQty == null
             ? ''
-            : (item.available_qty > 0 ? `${item.available_qty} ${this.getPickerUnitLabel(item)}` : 'нет');
+            : (availableQty > 0 ? `${availableQty} ${unitLabel}` : 'нет');
+        const reserve = reservedQty > 0 ? `резерв ${reservedQty} ${unitLabel}` : '';
         const priceStr = this.getPickerPriceLabel(item);
-        return [item.sku || '', stock, priceStr].filter(Boolean).join(' · ');
+        return [item.sku || '', stock, reserve, priceStr].filter(Boolean).join(' · ');
     },
 
     // Custom image-based picker for calculator and other warehouse-linked pickers.

@@ -420,23 +420,32 @@ const TimeTrack = {
         return this.getCurrentMonthPrefix();
     },
 
+    getPreviousMonthRange(today = this.getCurrentReportDate()) {
+        const parsed = this.parseYMD(`${String(today || '').slice(0, 7)}-01`);
+        if (!parsed) return null;
+        parsed.setUTCMonth(parsed.getUTCMonth() - 1);
+        const start = this.formatUtcYMD(parsed);
+        parsed.setUTCMonth(parsed.getUTCMonth() + 1);
+        const end = this.formatUtcYMD(parsed);
+        return { start, end };
+    },
+
+    entryMatchesPeriod(entry, period, today = this.getCurrentReportDate()) {
+        const rawDate = String(entry?.date || '').trim();
+        if (!rawDate) return false;
+        if (period === 'week') return rawDate >= this.shiftYMD(today, -7);
+        if (period === 'month') return rawDate >= `${today.slice(0, 7)}-01`;
+        if (period === 'last-month') {
+            const range = this.getPreviousMonthRange(today);
+            return !!range && rawDate >= range.start && rawDate < range.end;
+        }
+        return true;
+    },
+
     getEntriesForPeriod(period) {
+        if (period === 'all') return [...(this.entries || [])];
         const today = this.getCurrentReportDate();
-        if (period === 'week') {
-            const weekAgo = this.shiftYMD(today, -7);
-            return (this.entries || []).filter(e => {
-                const rawDate = String(e?.date || '').trim();
-                return rawDate && rawDate >= weekAgo;
-            });
-        }
-        if (period === 'month') {
-            const monthStart = `${today.slice(0, 7)}-01`;
-            return (this.entries || []).filter(e => {
-                const rawDate = String(e?.date || '').trim();
-                return rawDate && rawDate >= monthStart;
-            });
-        }
-        return [...(this.entries || [])];
+        return (this.entries || []).filter(e => this.entryMatchesPeriod(e, period, today));
     },
 
     ensureSensibleDefaultPeriod() {
@@ -471,7 +480,9 @@ const TimeTrack = {
         if (this._periodNote && period !== 'month') {
             note = this._periodNote;
         } else if (period === 'month' && filtered.length === 0 && (this.entries || []).length > 0) {
-            note = 'За текущий месяц записей пока нет. Мартовские часы можно увидеть через «Эта неделя» или «Все записи».';
+            note = 'За текущий месяц записей пока нет. Попробуйте «Прошлый месяц», «Эта неделя» или «Все записи».';
+        } else if (period === 'last-month' && filtered.length === 0 && (this.entries || []).length > 0) {
+            note = 'За прошлый месяц записей нет. Попробуйте «Этот месяц» или «Все записи».';
         }
 
         noteEl.textContent = note;
@@ -486,19 +497,9 @@ const TimeTrack = {
 
         let filtered = [...this.entries];
 
-        const today = this.getCurrentReportDate();
-        if (period === 'week') {
-            const weekAgo = this.shiftYMD(today, -7);
-            filtered = filtered.filter(e => {
-                const rawDate = String(e?.date || '').trim();
-                return rawDate && rawDate >= weekAgo;
-            });
-        } else if (period === 'month') {
-            const monthStart = `${today.slice(0, 7)}-01`;
-            filtered = filtered.filter(e => {
-                const rawDate = String(e?.date || '').trim();
-                return rawDate && rawDate >= monthStart;
-            });
+        if (period !== 'all') {
+            const today = this.getCurrentReportDate();
+            filtered = filtered.filter(e => this.entryMatchesPeriod(e, period, today));
         }
 
         if (worker) filtered = filtered.filter(e => e.worker_name === worker);
@@ -1191,7 +1192,11 @@ const TimeTrack = {
             description: this.buildDescriptionWithMeta(stage, stageLabel, comment, projectName),
         };
 
-        await saveTimeEntry(entry);
+        const savedId = await saveTimeEntry(entry);
+        if (!savedId) {
+            App.toast('Не удалось сохранить запись');
+            return;
+        }
         App.toast(this.editingEntryId ? 'Запись обновлена' : 'Запись добавлена');
 
         this.resetManualEntryForm();

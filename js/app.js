@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v324';
+const APP_VERSION = 'v328';
 
 const App = {
     currentPage: 'orders',
@@ -43,12 +43,7 @@ const App = {
     },
 
     shouldBlockLegacyHost() {
-        try {
-            const hostname = String(window?.location?.hostname || '').trim().toLowerCase();
-            return hostname === this.LEGACY_PUBLIC_HOST;
-        } catch (_) {
-            return false;
-        }
+        return false;
     },
 
     getCanonicalAppUrl() {
@@ -653,8 +648,9 @@ const App = {
     },
 
     async prepareAuthUI() {
+        this.renderAuthUserSelect('loading');
         try {
-            const authAccounts = await loadAuthAccounts();
+            const authAccounts = await this.loadAuthAccountsForLogin();
             this.authAccounts = (authAccounts || []).map(account => ({
                 ...account,
                 pages: this.normalizePageList(account.pages),
@@ -665,9 +661,51 @@ const App = {
         this.renderAuthUserSelect();
     },
 
-    renderAuthUserSelect() {
+    async loadAuthAccountsForLogin() {
+        const direct = await this.fetchAuthAccountsDirect().catch(() => []);
+        if (Array.isArray(direct) && direct.length > 0) return direct;
+        return loadAuthAccounts();
+    },
+
+    async fetchAuthAccountsDirect(timeoutMs = 5000) {
+        if (typeof fetch !== 'function') return [];
+        const controller = typeof AbortController === 'function' ? new AbortController() : null;
+        const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+        try {
+            const url = new URL('/api/bootstrap', window.location.origin);
+            url.searchParams.set('keys', 'authAccounts');
+            url.searchParams.set('authReload', String(Date.now()));
+            const response = await fetch(url.toString(), {
+                cache: 'no-store',
+                headers: { Accept: 'application/json' },
+                signal: controller ? controller.signal : undefined,
+            });
+            if (!response.ok) return [];
+            const payload = await response.json();
+            const accounts = payload && payload.data && Array.isArray(payload.data.authAccounts)
+                ? payload.data.authAccounts
+                : [];
+            if (accounts.length && typeof setLocal === 'function' && typeof LOCAL_KEYS !== 'undefined') {
+                setLocal(LOCAL_KEYS.authAccounts, accounts);
+            }
+            return accounts;
+        } finally {
+            if (timer) clearTimeout(timer);
+        }
+    },
+
+    renderAuthUserSelect(state = '') {
         const select = document.getElementById('auth-user-select');
         if (!select) return;
+
+        if (state === 'loading') {
+            select.innerHTML = '<option value="">Загружаем сотрудников...</option>';
+            select.disabled = true;
+            if (typeof select.setAttribute === 'function') {
+                select.setAttribute('aria-busy', 'true');
+            }
+            return;
+        }
 
         const accounts = (this.authAccounts || [])
             .filter(a => a && a.is_active !== false)
@@ -688,6 +726,9 @@ const App = {
             if (typeof select.setAttribute === 'function') {
                 select.setAttribute('aria-busy', 'true');
             }
+            window.setTimeout(() => {
+                this.refreshAuthUsers().catch(() => {});
+            }, 2000);
         } else {
             select.disabled = false;
             if (typeof select.removeAttribute === 'function') {
@@ -698,7 +739,7 @@ const App = {
     },
 
     async refreshAuthUsers() {
-        this.authAccounts = (await loadAuthAccounts()).map(account => ({
+        this.authAccounts = (await this.loadAuthAccountsForLogin()).map(account => ({
             ...account,
             pages: this.normalizePageList(account.pages),
         }));
@@ -5953,9 +5994,5 @@ const Calculator = {
 
 // Init on load
 document.addEventListener('DOMContentLoaded', () => {
-    if (App.shouldBlockLegacyHost()) {
-        App.showLegacyHostBlocker();
-        return;
-    }
     App.init();
 });
