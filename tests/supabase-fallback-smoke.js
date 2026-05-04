@@ -52,6 +52,7 @@ function createContext() {
         __hangingTables: new Set(),
         __settingsStore: new Map(),
         __productTemplatesData: [],
+        __tableRows: Object.create(null),
         App: {},
     };
 
@@ -149,6 +150,9 @@ function createContext() {
                                     }
                                     if (table === 'product_templates') {
                                         return Promise.resolve({ data: context.__productTemplatesData, error: null });
+                                    }
+                                    if (Array.isArray(context.__tableRows[table])) {
+                                        return Promise.resolve({ data: context.__tableRows[table], error: null });
                                     }
                                     return Promise.resolve({ data: [], error: null });
                                 },
@@ -976,6 +980,36 @@ async function main() {
                     external_ref: '40802810902500136756'
                 }
             ],
+            categories: [
+                {
+                    id: 'site_services',
+                    name: 'Сайт и сервисы',
+                    group: 'commercial',
+                    bucket: 'monthly',
+                    source_id: 'cash_manual',
+                    mapping: 'site / services',
+                    active: true
+                }
+            ],
+            projects: [
+                {
+                    id: 'site',
+                    name: 'Сайт',
+                    type: 'channel',
+                    default_income_category_id: 'site_services',
+                    active: true
+                }
+            ],
+            counterparties: [
+                {
+                    id: 'cp_vercel',
+                    name: 'Vercel',
+                    role: 'service',
+                    default_project_id: 'site',
+                    default_category_id: 'site_services',
+                    active: true
+                }
+            ],
             recurringTransactions: [
                 {
                     id: 'recurring_vercel',
@@ -999,8 +1033,67 @@ async function main() {
         const upserts = JSON.parse(JSON.stringify(context.__remoteCalls.filter(call => call.action === 'upsert')));
         assert.equal(upserts.some(call => call.table === 'settings' && call.payload.key === 'finance_workspace_json'), true, 'workspace JSON should still be saved');
         assert.equal(upserts.some(call => call.table === 'finance_sources'), true, 'finance sources should dual-write into relational phase1 table');
+        assert.equal(upserts.some(call => call.table === 'finance_categories'), true, 'finance categories should dual-write into relational phase1 table');
+        assert.equal(upserts.some(call => call.table === 'finance_directions'), true, 'finance directions should dual-write into relational phase1 table');
+        assert.equal(upserts.some(call => call.table === 'finance_counterparties'), true, 'finance counterparties should dual-write into relational phase1 table');
         assert.equal(upserts.some(call => call.table === 'finance_accounts'), true, 'finance accounts should dual-write into relational phase1 table');
         assert.equal(upserts.some(call => call.table === 'finance_rules'), true, 'recurring transactions should dual-write into finance rules table');
+    }
+
+    {
+        const context = createContext();
+        context.__tableRows.finance_sources = [{ id: 1, slug: 'tochka_api' }];
+        context.__tableRows.finance_accounts = [{ id: 2, legacy_id: 'bank_tochka_main' }];
+        context.__tableRows.finance_categories = [{ id: 3, legacy_id: 'direct_hardware' }];
+        context.__tableRows.finance_directions = [{ id: 4, legacy_id: 'project_recycle_object' }];
+        context.__tableRows.finance_counterparties = [{ id: 5, legacy_id: 'cp_marketplaces' }];
+        runScript(context, 'js/supabase.js');
+        vm.runInContext('initSupabase()', context);
+
+        await vm.runInContext(`saveFinanceTransactions([{
+            account_id: 'bank_tochka_main',
+            category_id: 'direct_hardware',
+            direction_id: 'project_recycle_object',
+            counterparty_id: 'cp_marketplaces',
+            amount: 12500,
+            amount_rub: 12500,
+            currency: 'RUB',
+            date: '2026-04-30',
+            description: 'Фурнитура для заказа',
+            external_id: 'tx_123'
+        }], {
+            prefix: 'manual',
+            source_slug: 'tochka_api',
+            imported_from: 'finance_smoke'
+        })`, context);
+
+        await vm.runInContext(`saveFinanceRules([{
+            id: 'recurring_hardware',
+            active: true,
+            name: 'Фурнитура ежемесячно',
+            account_id: 'bank_tochka_main',
+            kind: 'expense',
+            amount: 4500,
+            cadence: 'monthly',
+            start_date: '2026-04-29',
+            day_of_month: 29,
+            category_id: 'direct_hardware',
+            project_id: 'project_recycle_object',
+            description: 'Поставка фурнитуры',
+            note: 'monthly'
+        }])`, context);
+
+        const financeTxUpsert = context.__remoteCalls.find(call => call.table === 'finance_transactions' && call.action === 'upsert');
+        const financeRuleUpsert = context.__remoteCalls.find(call => call.table === 'finance_rules' && call.action === 'upsert');
+        assert.equal(Array.isArray(financeTxUpsert?.payload), true, 'finance transaction upsert should be captured');
+        assert.equal(financeTxUpsert.payload[0].source_id, 1, 'finance transactions should resolve source FK from source_slug');
+        assert.equal(financeTxUpsert.payload[0].account_id, 2, 'finance transactions should resolve account FK from legacy account id');
+        assert.equal(financeTxUpsert.payload[0].category_id, 3, 'finance transactions should resolve category FK from legacy category id');
+        assert.equal(financeTxUpsert.payload[0].direction_id, 4, 'finance transactions should resolve direction FK from legacy direction id');
+        assert.equal(financeTxUpsert.payload[0].counterparty_id, 5, 'finance transactions should resolve counterparty FK from legacy counterparty id');
+        assert.equal(Array.isArray(financeRuleUpsert?.payload), true, 'finance rule upsert should be captured');
+        assert.equal(financeRuleUpsert.payload[0].target_category_id, 3, 'finance rules should resolve target category FK');
+        assert.equal(financeRuleUpsert.payload[0].target_direction_id, 4, 'finance rules should resolve target direction FK');
     }
 
     {

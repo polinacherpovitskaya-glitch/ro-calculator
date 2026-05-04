@@ -2447,6 +2447,9 @@ const FINTABLO_SNAPSHOT_SUPABASE_KEY = 'fintablo_snapshot_json';
 const FINANCE_PHASE1_TABLES = Object.freeze({
     sources: 'finance_sources',
     accounts: 'finance_accounts',
+    categories: 'finance_categories',
+    directions: 'finance_directions',
+    counterparties: 'finance_counterparties',
     transactions: 'finance_transactions',
     rules: 'finance_rules',
     syncRuns: 'bank_sync_runs',
@@ -2538,6 +2541,34 @@ function _safeFinanceDate(value, fallback = '') {
     return raw.slice(0, 10);
 }
 
+function _normalizeFinanceCategoryGroup(group = '', row = {}) {
+    const normalized = String(group || row.group || row.category_group || '').trim().toLowerCase();
+    if (normalized === 'income') return 'income';
+    if (normalized === 'direct') return 'direct';
+    if (normalized === 'payroll') return 'payroll';
+    if (normalized === 'tax' || normalized === 'taxes') return 'tax';
+    if (normalized === 'charity') return 'charity';
+    if (normalized === 'investment' || normalized === 'asset') return 'asset';
+    if (normalized === 'finance' || normalized === 'transfer') return 'transfer';
+    if (normalized === 'commercial' || normalized === 'overhead' || normalized === 'opex') return 'opex';
+    return 'other';
+}
+
+function _normalizeFinanceCounterpartyType(role = '', row = {}) {
+    const normalized = String(role || row.role || row.counterparty_type || '').trim().toLowerCase();
+    if (normalized === 'person' || normalized === 'employee' || normalized === 'founder') return 'person';
+    if (normalized === 'bank') return 'bank';
+    if (normalized === 'government' || normalized === 'tax' || normalized === 'treasury') return 'government';
+    if (normalized === 'service' || normalized === 'marketplace' || normalized === 'platform') return 'service';
+    if (normalized === 'company' || normalized === 'supplier' || normalized === 'contractor' || normalized === 'vendor') return 'company';
+    return 'other';
+}
+
+function _normalizeFinanceDirectionLevel(value, row = {}) {
+    const numeric = Number(value ?? row.level_num ?? row.level ?? 1) || 1;
+    return Math.min(3, Math.max(1, numeric));
+}
+
 function _financeLegacyTxKey(row = {}, prefix = 'finance') {
     const explicit = String(row.legacy_tx_key || row.tx_key || row.external_id || row.transaction_id || row.id || '').trim();
     if (explicit) return explicit;
@@ -2585,6 +2616,63 @@ function _mapWorkspaceAccountToFinanceAccountRow(account = {}) {
         is_active: String(account.status || '').trim().toLowerCase() !== 'archived',
         sort_order: Number(account.sort_order || 0) || 0,
         metadata_json: { original: account },
+    };
+}
+
+function _mapWorkspaceCategoryToFinanceCategoryRow(category = {}) {
+    return {
+        legacy_id: String(category.id || '').trim(),
+        code: String(category.code || category.mapping || category.id || '').trim(),
+        name: String(category.name || '').trim() || 'Статья',
+        category_group: _normalizeFinanceCategoryGroup(category.group, category),
+        bucket: String(category.bucket || 'general').trim() || 'general',
+        color: String(category.color || '').trim(),
+        is_system: category.is_system === true,
+        is_active: category.active !== false,
+        sort_order: Number(category.sort_order || 0) || 0,
+        metadata_json: {
+            source_id: String(category.source_id || '').trim(),
+            original: category,
+        },
+    };
+}
+
+function _mapWorkspaceProjectToFinanceDirectionRow(project = {}) {
+    return {
+        legacy_id: String(project.id || '').trim(),
+        code: String(project.code || project.id || '').trim(),
+        name: String(project.name || '').trim() || 'Направление',
+        level_num: _normalizeFinanceDirectionLevel(project.level_num, project),
+        is_active: project.active !== false,
+        sort_order: Number(project.sort_order || 0) || 0,
+        metadata_json: {
+            project_type: String(project.type || '').trim(),
+            default_income_category_id: String(project.default_income_category_id || '').trim(),
+            original: project,
+        },
+    };
+}
+
+function _mapWorkspaceCounterpartyToFinanceCounterpartyRow(counterparty = {}) {
+    return {
+        legacy_id: String(counterparty.id || '').trim(),
+        name: String(counterparty.name || '').trim() || 'Контрагент',
+        legal_name: String(counterparty.legal_name || '').trim(),
+        counterparty_type: _normalizeFinanceCounterpartyType(counterparty.role, counterparty),
+        inn: String(counterparty.inn || '').trim(),
+        kpp: String(counterparty.kpp || '').trim(),
+        ogrn: String(counterparty.ogrn || '').trim(),
+        country_code: String(counterparty.country_code || '').trim(),
+        notes: String(counterparty.note || counterparty.notes || '').trim(),
+        metadata_json: {
+            role: String(counterparty.role || '').trim(),
+            what_they_sell: String(counterparty.what_they_sell || '').trim(),
+            default_project_id: String(counterparty.default_project_id || '').trim(),
+            default_category_id: String(counterparty.default_category_id || '').trim(),
+            research_mode: String(counterparty.research_mode || '').trim(),
+            match_hint: String(counterparty.match_hint || '').trim(),
+            original: counterparty,
+        },
     };
 }
 
@@ -2692,6 +2780,78 @@ async function saveFinanceSources(sources) {
     return rows;
 }
 
+async function _loadFinancePhase1IdMap(table, keyField, label) {
+    if (!_canUseFinancePhase1Table(table)) return new Map();
+    try {
+        const { data, error } = await _withRemoteTimeout('load', label, () => supabaseClient
+            .from(table)
+            .select(`id, ${keyField}`)
+            .order('id', { ascending: true }));
+        if (error) {
+            if (_isMissingSupabaseTableError(error)) {
+                _rememberMissingFinancePhase1Table(table, error);
+                return new Map();
+            }
+            console.warn(`${label} error:`, error);
+            return new Map();
+        }
+        _clearMissingFinancePhase1Table(table);
+        return new Map((Array.isArray(data) ? data : [])
+            .map(item => [String(item?.[keyField] || '').trim(), Number(item?.id || 0) || null])
+            .filter(([key, id]) => key && id));
+    } catch (error) {
+        if (_isMissingSupabaseTableError(error)) {
+            _rememberMissingFinancePhase1Table(table, error);
+            return new Map();
+        }
+        console.warn(`${label} exception:`, error);
+        return new Map();
+    }
+}
+
+async function _loadFinancePhase1LookupMaps(options = {}) {
+    const tasks = [];
+    if (options.sources) {
+        tasks.push(_loadFinancePhase1IdMap(FINANCE_PHASE1_TABLES.sources, 'slug', 'load finance source lookup'));
+    } else {
+        tasks.push(Promise.resolve(new Map()));
+    }
+    if (options.accounts) {
+        tasks.push(_loadFinancePhase1IdMap(FINANCE_PHASE1_TABLES.accounts, 'legacy_id', 'load finance account lookup'));
+    } else {
+        tasks.push(Promise.resolve(new Map()));
+    }
+    if (options.categories) {
+        tasks.push(_loadFinancePhase1IdMap(FINANCE_PHASE1_TABLES.categories, 'legacy_id', 'load finance category lookup'));
+    } else {
+        tasks.push(Promise.resolve(new Map()));
+    }
+    if (options.directions) {
+        tasks.push(_loadFinancePhase1IdMap(FINANCE_PHASE1_TABLES.directions, 'legacy_id', 'load finance direction lookup'));
+    } else {
+        tasks.push(Promise.resolve(new Map()));
+    }
+    if (options.counterparties) {
+        tasks.push(_loadFinancePhase1IdMap(FINANCE_PHASE1_TABLES.counterparties, 'legacy_id', 'load finance counterparty lookup'));
+    } else {
+        tasks.push(Promise.resolve(new Map()));
+    }
+    const [
+        sourceIdsBySlug,
+        accountIdsByLegacy,
+        categoryIdsByLegacy,
+        directionIdsByLegacy,
+        counterpartyIdsByLegacy,
+    ] = await Promise.all(tasks);
+    return {
+        sourceIdsBySlug,
+        accountIdsByLegacy,
+        categoryIdsByLegacy,
+        directionIdsByLegacy,
+        counterpartyIdsByLegacy,
+    };
+}
+
 async function loadFinanceAccounts() {
     const fallbackWorkspace = await loadFinanceWorkspace();
     const fallback = Array.isArray(fallbackWorkspace?.accounts)
@@ -2726,10 +2886,11 @@ async function loadFinanceAccounts() {
 async function saveFinanceAccounts(accounts) {
     const payload = Array.isArray(accounts) ? accounts : [];
     if (!_canUseFinancePhase1Table(FINANCE_PHASE1_TABLES.accounts) || payload.length === 0) return [];
+    const lookups = await _loadFinancePhase1LookupMaps({ sources: true });
     const nowIso = _financeNowIso();
     const rows = payload.map(item => ({
         legacy_id: String(item.legacy_id || item.id || '').trim(),
-        source_id: null,
+        source_id: lookups.sourceIdsBySlug.get(String(item.source_slug || item.source_id || '').trim()) || null,
         account_kind: _normalizeFinanceAccountKind(item.account_kind || item.type),
         currency_code: String(item.currency_code || item.currency || 'RUB').trim() || 'RUB',
         name: String(item.name || '').trim() || 'Счет',
@@ -2772,6 +2933,237 @@ async function saveFinanceAccounts(accounts) {
     return rows;
 }
 
+async function loadFinanceCategories() {
+    const fallbackWorkspace = await loadFinanceWorkspace();
+    const fallback = Array.isArray(fallbackWorkspace?.categories)
+        ? fallbackWorkspace.categories.map(item => _mapWorkspaceCategoryToFinanceCategoryRow(item))
+        : [];
+    if (!_canUseFinancePhase1Table(FINANCE_PHASE1_TABLES.categories)) return fallback;
+    try {
+        const { data, error } = await _withRemoteTimeout('load', 'load finance categories', () => supabaseClient
+            .from(FINANCE_PHASE1_TABLES.categories)
+            .select('*')
+            .order('sort_order', { ascending: true }));
+        if (error) {
+            if (_isMissingSupabaseTableError(error)) {
+                _rememberMissingFinancePhase1Table(FINANCE_PHASE1_TABLES.categories, error);
+                return fallback;
+            }
+            console.warn('loadFinanceCategories error:', error);
+            return fallback;
+        }
+        _clearMissingFinancePhase1Table(FINANCE_PHASE1_TABLES.categories);
+        return Array.isArray(data) && data.length > 0 ? data : fallback;
+    } catch (error) {
+        if (_isMissingSupabaseTableError(error)) {
+            _rememberMissingFinancePhase1Table(FINANCE_PHASE1_TABLES.categories, error);
+            return fallback;
+        }
+        console.warn('loadFinanceCategories exception:', error);
+        return fallback;
+    }
+}
+
+async function saveFinanceCategories(categories) {
+    const payload = Array.isArray(categories) ? categories : [];
+    if (!_canUseFinancePhase1Table(FINANCE_PHASE1_TABLES.categories) || payload.length === 0) return [];
+    const nowIso = _financeNowIso();
+    const rows = payload.map(item => {
+        const mapped = _mapWorkspaceCategoryToFinanceCategoryRow(item);
+        return {
+            legacy_id: mapped.legacy_id,
+            code: mapped.code,
+            name: mapped.name,
+            category_group: mapped.category_group,
+            bucket: mapped.bucket,
+            color: mapped.color,
+            is_system: mapped.is_system,
+            is_active: mapped.is_active,
+            sort_order: mapped.sort_order,
+            metadata_json: mapped.metadata_json,
+            created_at: item.created_at || nowIso,
+            updated_at: nowIso,
+        };
+    }).filter(row => row.legacy_id);
+    if (!rows.length) return [];
+    try {
+        const { error } = await _withRemoteTimeout('write', 'save finance categories', () => supabaseClient
+            .from(FINANCE_PHASE1_TABLES.categories)
+            .upsert(rows, { onConflict: 'legacy_id' }));
+        if (error) {
+            if (_isMissingSupabaseTableError(error)) {
+                _rememberMissingFinancePhase1Table(FINANCE_PHASE1_TABLES.categories, error);
+                return [];
+            }
+            console.warn('saveFinanceCategories error:', error);
+        } else {
+            _clearMissingFinancePhase1Table(FINANCE_PHASE1_TABLES.categories);
+        }
+    } catch (error) {
+        if (_isMissingSupabaseTableError(error)) {
+            _rememberMissingFinancePhase1Table(FINANCE_PHASE1_TABLES.categories, error);
+            return [];
+        }
+        console.warn('saveFinanceCategories exception:', error);
+    }
+    return rows;
+}
+
+async function loadFinanceDirections() {
+    const fallbackWorkspace = await loadFinanceWorkspace();
+    const fallback = Array.isArray(fallbackWorkspace?.projects)
+        ? fallbackWorkspace.projects.map(item => _mapWorkspaceProjectToFinanceDirectionRow(item))
+        : [];
+    if (!_canUseFinancePhase1Table(FINANCE_PHASE1_TABLES.directions)) return fallback;
+    try {
+        const { data, error } = await _withRemoteTimeout('load', 'load finance directions', () => supabaseClient
+            .from(FINANCE_PHASE1_TABLES.directions)
+            .select('*')
+            .order('sort_order', { ascending: true }));
+        if (error) {
+            if (_isMissingSupabaseTableError(error)) {
+                _rememberMissingFinancePhase1Table(FINANCE_PHASE1_TABLES.directions, error);
+                return fallback;
+            }
+            console.warn('loadFinanceDirections error:', error);
+            return fallback;
+        }
+        _clearMissingFinancePhase1Table(FINANCE_PHASE1_TABLES.directions);
+        return Array.isArray(data) && data.length > 0 ? data : fallback;
+    } catch (error) {
+        if (_isMissingSupabaseTableError(error)) {
+            _rememberMissingFinancePhase1Table(FINANCE_PHASE1_TABLES.directions, error);
+            return fallback;
+        }
+        console.warn('loadFinanceDirections exception:', error);
+        return fallback;
+    }
+}
+
+async function saveFinanceDirections(directions) {
+    const payload = Array.isArray(directions) ? directions : [];
+    if (!_canUseFinancePhase1Table(FINANCE_PHASE1_TABLES.directions) || payload.length === 0) return [];
+    const directionIdsByLegacy = await _loadFinancePhase1IdMap(FINANCE_PHASE1_TABLES.directions, 'legacy_id', 'load finance direction self lookup');
+    const nowIso = _financeNowIso();
+    const rows = payload.map(item => {
+        const mapped = _mapWorkspaceProjectToFinanceDirectionRow(item);
+        return {
+            legacy_id: mapped.legacy_id,
+            parent_id: directionIdsByLegacy.get(String(item.parent_id || item.parent_legacy_id || '').trim()) || null,
+            code: mapped.code,
+            name: mapped.name,
+            level_num: mapped.level_num,
+            is_active: mapped.is_active,
+            sort_order: mapped.sort_order,
+            metadata_json: mapped.metadata_json,
+            created_at: item.created_at || nowIso,
+            updated_at: nowIso,
+        };
+    }).filter(row => row.legacy_id);
+    if (!rows.length) return [];
+    try {
+        const { error } = await _withRemoteTimeout('write', 'save finance directions', () => supabaseClient
+            .from(FINANCE_PHASE1_TABLES.directions)
+            .upsert(rows, { onConflict: 'legacy_id' }));
+        if (error) {
+            if (_isMissingSupabaseTableError(error)) {
+                _rememberMissingFinancePhase1Table(FINANCE_PHASE1_TABLES.directions, error);
+                return [];
+            }
+            console.warn('saveFinanceDirections error:', error);
+        } else {
+            _clearMissingFinancePhase1Table(FINANCE_PHASE1_TABLES.directions);
+        }
+    } catch (error) {
+        if (_isMissingSupabaseTableError(error)) {
+            _rememberMissingFinancePhase1Table(FINANCE_PHASE1_TABLES.directions, error);
+            return [];
+        }
+        console.warn('saveFinanceDirections exception:', error);
+    }
+    return rows;
+}
+
+async function loadFinanceCounterparties() {
+    const fallbackWorkspace = await loadFinanceWorkspace();
+    const fallback = Array.isArray(fallbackWorkspace?.counterparties)
+        ? fallbackWorkspace.counterparties.map(item => _mapWorkspaceCounterpartyToFinanceCounterpartyRow(item))
+        : [];
+    if (!_canUseFinancePhase1Table(FINANCE_PHASE1_TABLES.counterparties)) return fallback;
+    try {
+        const { data, error } = await _withRemoteTimeout('load', 'load finance counterparties', () => supabaseClient
+            .from(FINANCE_PHASE1_TABLES.counterparties)
+            .select('*')
+            .order('name', { ascending: true }));
+        if (error) {
+            if (_isMissingSupabaseTableError(error)) {
+                _rememberMissingFinancePhase1Table(FINANCE_PHASE1_TABLES.counterparties, error);
+                return fallback;
+            }
+            console.warn('loadFinanceCounterparties error:', error);
+            return fallback;
+        }
+        _clearMissingFinancePhase1Table(FINANCE_PHASE1_TABLES.counterparties);
+        return Array.isArray(data) && data.length > 0 ? data : fallback;
+    } catch (error) {
+        if (_isMissingSupabaseTableError(error)) {
+            _rememberMissingFinancePhase1Table(FINANCE_PHASE1_TABLES.counterparties, error);
+            return fallback;
+        }
+        console.warn('loadFinanceCounterparties exception:', error);
+        return fallback;
+    }
+}
+
+async function saveFinanceCounterparties(counterparties) {
+    const payload = Array.isArray(counterparties) ? counterparties : [];
+    if (!_canUseFinancePhase1Table(FINANCE_PHASE1_TABLES.counterparties) || payload.length === 0) return [];
+    const lookups = await _loadFinancePhase1LookupMaps({ categories: true, directions: true });
+    const nowIso = _financeNowIso();
+    const rows = payload.map(item => {
+        const mapped = _mapWorkspaceCounterpartyToFinanceCounterpartyRow(item);
+        const metadata = mapped.metadata_json && typeof mapped.metadata_json === 'object' ? mapped.metadata_json : {};
+        return {
+            legacy_id: mapped.legacy_id,
+            name: mapped.name,
+            legal_name: mapped.legal_name,
+            counterparty_type: mapped.counterparty_type,
+            inn: mapped.inn,
+            kpp: mapped.kpp,
+            ogrn: mapped.ogrn,
+            country_code: mapped.country_code,
+            notes: mapped.notes,
+            default_category_id: lookups.categoryIdsByLegacy.get(String(metadata.default_category_id || '').trim()) || null,
+            default_direction_id: lookups.directionIdsByLegacy.get(String(metadata.default_project_id || '').trim()) || null,
+            metadata_json: mapped.metadata_json,
+            created_at: item.created_at || nowIso,
+            updated_at: nowIso,
+        };
+    }).filter(row => row.legacy_id);
+    if (!rows.length) return [];
+    try {
+        const { error } = await _withRemoteTimeout('write', 'save finance counterparties', () => supabaseClient
+            .from(FINANCE_PHASE1_TABLES.counterparties)
+            .upsert(rows, { onConflict: 'legacy_id' }));
+        if (error) {
+            if (_isMissingSupabaseTableError(error)) {
+                _rememberMissingFinancePhase1Table(FINANCE_PHASE1_TABLES.counterparties, error);
+                return [];
+            }
+            console.warn('saveFinanceCounterparties error:', error);
+        } else {
+            _clearMissingFinancePhase1Table(FINANCE_PHASE1_TABLES.counterparties);
+        }
+    } catch (error) {
+        if (_isMissingSupabaseTableError(error)) {
+            _rememberMissingFinancePhase1Table(FINANCE_PHASE1_TABLES.counterparties, error);
+            return [];
+        }
+        console.warn('saveFinanceCounterparties exception:', error);
+    }
+    return rows;
+}
+
 async function loadFinanceTransactions() {
     const [tochkaSnapshot, fintabloSnapshot] = await Promise.all([
         loadTochkaSnapshot(),
@@ -2809,16 +3201,23 @@ async function loadFinanceTransactions() {
 async function saveFinanceTransactions(transactions, defaults = {}) {
     const payload = Array.isArray(transactions) ? transactions : [];
     if (!_canUseFinancePhase1Table(FINANCE_PHASE1_TABLES.transactions) || payload.length === 0) return [];
+    const lookups = await _loadFinancePhase1LookupMaps({
+        sources: true,
+        accounts: true,
+        categories: true,
+        directions: true,
+        counterparties: true,
+    });
     const nowIso = _financeNowIso();
     const rows = payload.map(item => {
         const mapped = _mapRawTransactionToFinanceRow(item, defaults);
         return {
             legacy_tx_key: mapped.legacy_tx_key,
-            source_id: null,
-            account_id: null,
-            counterparty_id: null,
-            category_id: null,
-            direction_id: null,
+            source_id: lookups.sourceIdsBySlug.get(String(mapped.source_slug || '').trim()) || null,
+            account_id: lookups.accountIdsByLegacy.get(String(mapped.legacy_account_id || '').trim()) || null,
+            counterparty_id: lookups.counterpartyIdsByLegacy.get(String(mapped.legacy_counterparty_id || '').trim()) || null,
+            category_id: lookups.categoryIdsByLegacy.get(String(mapped.legacy_category_id || '').trim()) || null,
+            direction_id: lookups.directionIdsByLegacy.get(String(mapped.legacy_direction_id || '').trim()) || null,
             order_id: Number(item.order_id || 0) || null,
             employee_id: Number(item.employee_id || 0) || null,
             linked_order_label: mapped.linked_order_label,
@@ -2876,9 +3275,15 @@ async function saveFinanceTransactions(transactions, defaults = {}) {
 async function saveFinanceRules(rules) {
     const payload = Array.isArray(rules) ? rules : [];
     if (!_canUseFinancePhase1Table(FINANCE_PHASE1_TABLES.rules) || payload.length === 0) return [];
+    const lookups = await _loadFinancePhase1LookupMaps({
+        categories: true,
+        directions: true,
+        counterparties: true,
+    });
     const nowIso = _financeNowIso();
     const rows = payload.map(item => {
         const mapped = _mapRecurringTransactionToFinanceRuleRow(item);
+        const metadata = mapped.metadata_json && typeof mapped.metadata_json === 'object' ? mapped.metadata_json : {};
         return {
             legacy_id: mapped.legacy_id,
             rule_kind: mapped.rule_kind,
@@ -2889,9 +3294,9 @@ async function saveFinanceRules(rules) {
             match_amount: mapped.match_amount,
             match_amount_sign: mapped.match_amount_sign,
             target_transaction_type: mapped.target_transaction_type,
-            target_category_id: null,
-            target_direction_id: null,
-            target_counterparty_id: null,
+            target_category_id: lookups.categoryIdsByLegacy.get(String(metadata.legacy_category_id || '').trim()) || null,
+            target_direction_id: lookups.directionIdsByLegacy.get(String(metadata.legacy_direction_id || '').trim()) || null,
+            target_counterparty_id: lookups.counterpartyIdsByLegacy.get(String(metadata.legacy_counterparty_id || '').trim()) || null,
             target_note: mapped.target_note,
             auto_apply: mapped.auto_apply,
             priority: mapped.priority,
@@ -3237,6 +3642,9 @@ async function saveFinanceWorkspace(data) {
     }
     try {
         await saveFinanceSources(Array.isArray(payload.sources) ? payload.sources : []);
+        await saveFinanceCategories(Array.isArray(payload.categories) ? payload.categories : []);
+        await saveFinanceDirections(Array.isArray(payload.projects) ? payload.projects : []);
+        await saveFinanceCounterparties(Array.isArray(payload.counterparties) ? payload.counterparties : []);
         await saveFinanceAccounts((Array.isArray(payload.accounts) ? payload.accounts : []).map(item => _mapWorkspaceAccountToFinanceAccountRow(item)));
         await saveFinanceRules(Array.isArray(payload.recurringTransactions) ? payload.recurringTransactions : []);
     } catch (error) {
