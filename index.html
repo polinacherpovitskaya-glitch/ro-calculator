@@ -10,7 +10,7 @@
   <link rel="stylesheet" href="css/style.css?v=123">
     <script>
         (function () {
-            const CURRENT_HTML_VERSION = 'v321';
+            const CURRENT_HTML_VERSION = 'v322';
             const ATTEMPT_KEY = 'ro_calc_force_update_attempts';
 
             function parseVersion(version) {
@@ -54,6 +54,111 @@
             }
         })();
     </script>
+    <script>
+        (function () {
+            const RECOVERY_PARAM = '__ro_recover';
+            const ATTEMPT_KEY = 'ro_calc_boot_recovery_attempts';
+            const MAX_ATTEMPTS = 2;
+            const RETRY_WINDOW_MS = 30000;
+
+            function storageKey() {
+                return `${ATTEMPT_KEY}:${window.location.pathname}`;
+            }
+
+            function canAttemptRecovery() {
+                try {
+                    const raw = sessionStorage.getItem(storageKey());
+                    if (!raw) return true;
+                    const parsed = JSON.parse(raw);
+                    const count = Number(parsed && parsed.count || 0);
+                    const last = Number(parsed && parsed.last || 0);
+                    if (!Number.isFinite(count) || !Number.isFinite(last)) return true;
+                    if (Date.now() - last > RETRY_WINDOW_MS) return true;
+                    return count < MAX_ATTEMPTS;
+                } catch (_) {
+                    return true;
+                }
+            }
+
+            function markRecoveryAttempt(reason) {
+                try {
+                    const raw = sessionStorage.getItem(storageKey());
+                    const parsed = raw ? JSON.parse(raw) : null;
+                    const nextCount = Number(parsed && parsed.count || 0) + 1;
+                    sessionStorage.setItem(storageKey(), JSON.stringify({
+                        count: nextCount,
+                        last: Date.now(),
+                        reason,
+                    }));
+                } catch (_) {
+                    // Ignore storage errors.
+                }
+            }
+
+            function clearRecoveryAttempt() {
+                try {
+                    sessionStorage.removeItem(storageKey());
+                } catch (_) {
+                    // Ignore storage errors.
+                }
+            }
+
+            function recoveryUrl() {
+                const url = new URL(window.location.href);
+                url.searchParams.set(RECOVERY_PARAM, String(Date.now()));
+                url.searchParams.set('reload', `${Date.now()}-recover`);
+                return url.toString();
+            }
+
+            function recover(reason) {
+                if (!canAttemptRecovery()) return;
+                markRecoveryAttempt(reason);
+                window.location.replace(recoveryUrl());
+            }
+
+            function isBootReady() {
+                if (window.__roCalcBooted === true) return true;
+                const appLayout = document.getElementById('app-layout');
+                if (appLayout && appLayout.classList.contains('active')) return true;
+                const select = document.getElementById('auth-user-select');
+                return !!(select && select.options && select.options.length > 0 && !select.disabled);
+            }
+
+            function verifyBoot() {
+                if (!isBootReady()) {
+                    recover('boot-timeout');
+                    return;
+                }
+                clearRecoveryAttempt();
+                try {
+                    const url = new URL(window.location.href);
+                    if (url.searchParams.has(RECOVERY_PARAM)) {
+                        url.searchParams.delete(RECOVERY_PARAM);
+                        window.history.replaceState(null, '', url.toString());
+                    }
+                } catch (_) {
+                    // Ignore malformed URL/runtime errors.
+                }
+            }
+
+            document.addEventListener('DOMContentLoaded', () => {
+                window.setTimeout(verifyBoot, 4500);
+            }, { once: true });
+
+            window.addEventListener('load', () => {
+                window.setTimeout(verifyBoot, 0);
+            }, { once: true });
+
+            window.addEventListener('error', (event) => {
+                const target = event.target;
+                if (!(target instanceof HTMLScriptElement) && !(target instanceof HTMLLinkElement)) return;
+                const source = String(target.src || target.href || '');
+                if (source.includes('/js/') || source.includes('/css/style.css')) {
+                    recover('asset-error');
+                }
+            }, true);
+        })();
+    </script>
 </head>
 <body>
 
@@ -81,7 +186,7 @@
     <aside class="sidebar">
         <div class="sidebar-brand">
             <h2>Recycle Object</h2>
-            <span>Калькулятор <span id="app-version">v321</span></span>
+            <span>Калькулятор <span id="app-version">v322</span></span>
         </div>
         <nav class="sidebar-nav">
             <a href="#tasks" data-page="tasks">
@@ -3457,7 +3562,7 @@
 <script src="js/supabase.js?v=186"></script>
 <script src="js/task-events.js?v=1"></script>
 <script src="js/calculator.js?v=82"></script>
-<script src="js/app.js?v=321"></script>
+<script src="js/app.js?v=322"></script>
 <script src="js/tpa.js?v=3"></script>
 <script src="js/wiki.js?v=4"></script>
 <script src="js/order-detail.js?v=65"></script>

@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v321';
+const APP_VERSION = 'v322';
 
 const App = {
     currentPage: 'orders',
@@ -414,6 +414,9 @@ const App = {
         this.bindWarmCacheListeners();
         this.bindNavPrefetchListeners();
         await this.prepareAuthUI();
+        if (typeof window !== 'undefined') {
+            window.__roCalcBooted = Array.isArray(this.authAccounts) && this.authAccounts.length > 0;
+        }
         await this._migratePagePermsToAuthAccounts();
 
         // Check auth
@@ -706,6 +709,9 @@ const App = {
         document.getElementById('auth-screen').style.display = 'none';
         document.getElementById('app-layout').classList.add('active');
         this._bootstrappingApp = true;
+        if (typeof window !== 'undefined') {
+            window.__roCalcBooted = true;
+        }
 
         // Show logged-in user name in sidebar
         const userInfo = document.getElementById('sidebar-user-info');
