@@ -2,11 +2,13 @@ require('dotenv').config();
 const TelegramBot = require('node-telegram-bot-api');
 const { createClient } = require('@supabase/supabase-js');
 const { createTaskNotificationWorker } = require('./task-notification-worker');
+const { buildTelegramRequestOptions, formatTelegramTransportError } = require('./telegram-runtime');
 
 const BOT_TOKEN = process.env.TASK_BOT_TOKEN || process.env.BOT_TOKEN;
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_KEY;
 const POLL_INTERVAL_MS = Number(process.env.TASK_BOT_POLL_INTERVAL_MS || 15000);
+const TELEGRAM_REQUEST_OPTIONS = buildTelegramRequestOptions();
 
 if (!BOT_TOKEN || !SUPABASE_URL || !SUPABASE_KEY) {
     console.error('Missing env vars: TASK_BOT_TOKEN/BOT_TOKEN, SUPABASE_URL, SUPABASE_KEY');
@@ -19,6 +21,7 @@ const bot = new TelegramBot(BOT_TOKEN, {
         autoStart: true,
         params: { timeout: 30 },
     },
+    request: TELEGRAM_REQUEST_OPTIONS,
 });
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -30,14 +33,14 @@ bot.on('polling_error', (err) => {
         process.exit(1);
     }
     if (String(code).startsWith('E') || code === 502 || code === 504) {
-        console.warn(`TaskBot polling transient error (${code}), will retry...`);
+        console.warn(`TaskBot polling transient error (${code}), will retry... ${formatTelegramTransportError(err)}`);
         return;
     }
-    console.error('TaskBot polling error:', err?.message || err);
+    console.error('TaskBot polling error:', formatTelegramTransportError(err));
 });
 
 bot.on('error', (err) => {
-    console.error('TaskBot general error:', err?.message || err);
+    console.error('TaskBot general error:', formatTelegramTransportError(err));
 });
 
 function shutdown(signal) {
@@ -65,7 +68,7 @@ async function send(chatId, text, opts) {
             console.log(`User ${chatId} blocked the task bot, skipping.`);
             return null;
         }
-        console.error(`TaskBot sendMessage error (${code}):`, err?.message || err);
+        console.error(`TaskBot sendMessage error (${code}):`, formatTelegramTransportError(err));
         return null;
     }
 }

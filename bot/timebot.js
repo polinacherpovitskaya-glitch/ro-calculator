@@ -9,6 +9,7 @@ require('dotenv').config({ path: path.join(__dirname, '.env') });
 const TelegramBot = require('node-telegram-bot-api');
 const { createClient } = require('@supabase/supabase-js');
 const { buildTaskNotificationText, getTaskNotificationRecipientIds } = require('./task-notification-core');
+const { buildTelegramRequestOptions, formatTelegramTransportError } = require('./telegram-runtime');
 const { getLocalDate, shiftYmd, isWeekendYmd, normalizeWorkDate } = require('./timebot-date-utils');
 const { parseFreeformBatchReport, looksLikeFreeformBatchReport, normalizeText } = require('./timebot-freeform-parser');
 const {
@@ -22,6 +23,7 @@ const BOT_TOKEN = process.env.BOT_TOKEN;
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_KEY;
 const ENABLE_TASK_NOTIFICATION_WORKER = String(process.env.ENABLE_TASK_NOTIFICATION_WORKER || 'false').toLowerCase() === 'true';
+const TELEGRAM_REQUEST_OPTIONS = buildTelegramRequestOptions();
 
 if (!BOT_TOKEN || !SUPABASE_URL || !SUPABASE_KEY) {
     console.error(`Missing env vars for timebot (.env at ${path.join(__dirname, '.env')}): BOT_TOKEN, SUPABASE_URL, SUPABASE_KEY`);
@@ -34,6 +36,7 @@ const bot = new TelegramBot(BOT_TOKEN, {
         autoStart: true,
         params: { timeout: 30 }, // long-poll 30s
     },
+    request: TELEGRAM_REQUEST_OPTIONS,
 });
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -58,14 +61,14 @@ bot.on('polling_error', (err) => {
     }
     // ETIMEOUT / EFATAL — transient, will retry
     if (String(code).startsWith('E') || code === 502 || code === 504) {
-        console.warn(`Polling transient error (${code}), will retry...`);
+        console.warn(`Polling transient error (${code}), will retry... ${formatTelegramTransportError(err)}`);
         return;
     }
-    console.error('Polling error:', err?.message || err);
+    console.error('Polling error:', formatTelegramTransportError(err));
 });
 
 bot.on('error', (err) => {
-    console.error('Bot general error:', err?.message || err);
+    console.error('Bot general error:', formatTelegramTransportError(err));
 });
 
 // =============================================
@@ -227,7 +230,7 @@ async function send(chatId, text, opts) {
             console.log(`User ${chatId} blocked the bot, skipping.`);
             return null;
         }
-        console.error(`sendMessage error (${code}):`, err?.message || err);
+        console.error(`sendMessage error (${code}):`, formatTelegramTransportError(err));
         return null;
     }
 }
