@@ -1,0 +1,108 @@
+name: Yandex migration backup
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '41 2 * * *'
+  workflow_run:
+    workflows:
+      - Yandex migration snapshot
+    types:
+      - completed
+
+permissions:
+  contents: read
+
+concurrency:
+  group: yandex-migration-backup
+  cancel-in-progress: true
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  YC_CLOUD_ID: b1gl59l77vb50ihub2nd
+  YC_FOLDER_ID: b1gc32hu5ujioie1o0ht
+  RO_YANDEX_MIGRATION_BUCKET: ro-yandex-migration-snapshots-b1gl59l77vb50ihub2nd
+
+jobs:
+  backup:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Build full sanitized Supabase snapshot
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          RO_SNAPSHOT_MODE: full
+          RO_SNAPSHOT_OUT_DIR: output/yandex-migration-backup
+        run: node scripts/export-supabase-snapshot.mjs
+
+      - name: Install Yandex Cloud CLI
+        run: |
+          set -euo pipefail
+          curl -fsSL https://storage.yandexcloud.net/yandexcloud-yc/install.sh | bash -s -- -i "$HOME/yandex-cloud" -n
+          echo "$HOME/yandex-cloud/bin" >> "$GITHUB_PATH"
+
+      - name: Upload snapshot to private Yandex bucket
+        env:
+          YC_OAUTH_TOKEN: ${{ secrets.YC_OAUTH_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${YC_OAUTH_TOKEN:-}" ]; then
+            echo "YC_OAUTH_TOKEN secret is required for Yandex migration backup" >&2
+            exit 1
+          fi
+
+          yc config set token "$YC_OAUTH_TOKEN" >/dev/null
+          yc config set cloud-id "$YC_CLOUD_ID" >/dev/null
+          yc config set folder-id "$YC_FOLDER_ID" >/dev/null
+
+          if ! yc storage bucket get --name "$RO_YANDEX_MIGRATION_BUCKET" >/dev/null 2>&1; then
+            yc storage bucket create --name "$RO_YANDEX_MIGRATION_BUCKET" >/dev/null
+          fi
+
+          snapshot_file="$(find output/yandex-migration-backup -type f -name 'ro-supabase-full-*.json' | sort | tail -n 1)"
+          test -n "$snapshot_file"
+          remote_key="supabase/full/$(basename "$snapshot_file")"
+          yc storage s3 cp "$snapshot_file" "s3://${RO_YANDEX_MIGRATION_BUCKET}/${remote_key}" --content-type "application/json; charset=utf-8"
+          yc storage s3 cp "s3://${RO_YANDEX_MIGRATION_BUCKET}/${remote_key}" output/yandex-migration-backup/downloaded.json
+
+          SNAPSHOT_FILE="$snapshot_file" DOWNLOADED_FILE="output/yandex-migration-backup/downloaded.json" REMOTE_KEY="$remote_key" node <<'NODE'
+          const fs = require('fs');
+          const original = JSON.parse(fs.readFileSync(process.env.SNAPSHOT_FILE, 'utf8'));
+          const downloaded = JSON.parse(fs.readFileSync(process.env.DOWNLOADED_FILE, 'utf8'));
+          const pick = value => JSON.stringify(value && value.summary);
+          if (pick(original) !== pick(downloaded)) {
+            console.error('Downloaded Yandex snapshot summary mismatch');
+            process.exit(1);
+          }
+          const summary = {
+            uploaded: true,
+            bucket: process.env.RO_YANDEX_MIGRATION_BUCKET,
+            key: process.env.REMOTE_KEY,
+            summary: downloaded.summary,
+          };
+          fs.writeFileSync('output/yandex-migration-backup/summary.json', `${JSON.stringify(summary, null, 2)}\n`);
+          console.log(JSON.stringify(summary, null, 2));
+          NODE
+
+          rm -f output/yandex-migration-backup/ro-supabase-full-*.json output/yandex-migration-backup/downloaded.json
+
+          yc config unset token >/dev/null
+
+      - name: Upload backup summary artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: yandex-migration-backup-summary
+          path: output/yandex-migration-backup/summary.json
+          if-no-files-found: error
