@@ -4,20 +4,47 @@ The reliable deployment path is:
 
 1. push to `main`;
 2. GitHub Actions runs `Deploy GitHub Pages`;
-3. GitHub Pages serves the current commit;
-4. `Live site smoke` checks the deployed site version from `js/version.json`.
+3. the workflow deploys the same commit to GitHub Pages and Vercel;
+4. Vercel aliases the production deployment to `calc.recycleobject.ru`;
+5. `Live site smoke` checks `https://calc.recycleobject.ru/` and verifies `js/version.json`.
 
-Current canonical Pages URL:
+Current production URL:
+
+```text
+https://calc.recycleobject.ru/
+```
+
+Backup Pages URL:
 
 ```text
 https://polinacherpovitskaya-glitch.github.io/ro-calculator/
 ```
 
-## Move `calc.recycleobject.ru` to GitHub Pages
+## Required GitHub Secrets
 
-At the DNS provider, replace the current Vercel record for `calc.recycleobject.ru`.
+The production deploy job needs these repository secrets:
 
-Use one CNAME record:
+```text
+VERCEL_TOKEN
+VERCEL_ORG_ID
+VERCEL_PROJECT_ID
+```
+
+The deploy fails early if any of these secrets are missing, so the domain cannot silently stay on an old version.
+
+## Current DNS
+
+`calc.recycleobject.ru` currently points to Vercel:
+
+```text
+calc.recycleobject.ru A 76.76.21.21
+```
+
+Keep this while the Vercel production deploy is used.
+
+## Optional: move `calc.recycleobject.ru` to GitHub Pages
+
+Only do this if we intentionally stop using Vercel. At the DNS provider, replace the current Vercel record for `calc.recycleobject.ru` with one CNAME record:
 
 ```text
 calc.recycleobject.ru CNAME polinacherpovitskaya-glitch.github.io
@@ -47,8 +74,6 @@ Finally run the smoke manually against the domain:
 gh workflow run "Live site smoke" -f live_url=https://calc.recycleobject.ru/
 ```
 
-If that passes, update the workflow default from the GitHub Pages URL to `https://calc.recycleobject.ru/`.
-
 ## Why this is necessary
 
-`calc.recycleobject.ru` currently points to Vercel, so a GitHub Pages deploy does not update it. That is why the repository could be on `v331` while `calc.recycleobject.ru` was still serving `v329`.
+`calc.recycleobject.ru` points to Vercel, so a GitHub Pages deploy alone does not update it. The production workflow now deploys to both hosts and the live smoke checks the real domain, preventing the repository from being on a new version while `calc.recycleobject.ru` still serves an old one.

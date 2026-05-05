@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       live_url:
-        description: 'URL to smoke-test. Defaults to the GitHub Pages deployment.'
+        description: 'URL to smoke-test. Defaults to calc.recycleobject.ru.'
         required: false
         type: string
   schedule:
@@ -41,7 +41,7 @@ jobs:
 
       - name: Run live smoke
         env:
-          RO_LIVE_URL: ${{ inputs.live_url || 'https://polinacherpovitskaya-glitch.github.io/ro-calculator/' }}
+          RO_LIVE_URL: ${{ inputs.live_url || 'https://calc.recycleobject.ru/' }}
           RO_SMOKE_USER_ID: 1772715209137
         run: node tests/live-site-smoke.mjs
 

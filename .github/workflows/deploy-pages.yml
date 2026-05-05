@@ -12,7 +12,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: pages
+  group: production-deploy
   cancel-in-progress: true
 
 jobs:
@@ -78,3 +78,36 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
+  deploy-vercel:
+    needs: verify
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://calc.recycleobject.ru/
+    env:
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Deploy to calc.recycleobject.ru
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${VERCEL_TOKEN:-}" ]; then
+            echo "VERCEL_TOKEN secret is required to deploy calc.recycleobject.ru" >&2
+            exit 1
+          fi
+          if [ -z "${VERCEL_ORG_ID:-}" ] || [ -z "${VERCEL_PROJECT_ID:-}" ]; then
+            echo "VERCEL_ORG_ID and VERCEL_PROJECT_ID secrets are required to deploy calc.recycleobject.ru" >&2
+            exit 1
+          fi
+          npx vercel@51.6.1 deploy --prod --yes --token "$VERCEL_TOKEN"
