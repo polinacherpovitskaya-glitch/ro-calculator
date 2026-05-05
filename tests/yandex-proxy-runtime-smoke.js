@@ -48,6 +48,17 @@ assert.strictEqual(
   assert.match(allowedHeaders, /content-profile/);
   assert.match(allowedHeaders, /x-retry-count/);
 
+  const proxied = await proxy.handler({
+    httpMethod: 'GET',
+    rawPath: '/rest/v1/settings',
+    rawQueryString: 'select=value&limit=1',
+    headers: {
+      origin: 'https://calc2.recycleobject.ru',
+    },
+  });
+  assert.strictEqual(proxied.headers['Access-Control-Allow-Origin'], 'https://calc2.recycleobject.ru');
+  assert.doesNotMatch(proxied.headers['Access-Control-Allow-Origin'], /,/);
+
   console.log('yandex proxy runtime smoke checks passed');
 })().catch(error => {
   console.error(error);

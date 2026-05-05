@@ -121,7 +121,9 @@ function forwardHeaders(event) {
 function responseHeaders(headers) {
   const result = {};
   headers.forEach((value, key) => {
-    if (HOP_BY_HOP_HEADERS.has(key.toLowerCase())) return;
+    const normalizedKey = key.toLowerCase();
+    if (HOP_BY_HOP_HEADERS.has(normalizedKey)) return;
+    if (normalizedKey === 'vary' || normalizedKey.startsWith('access-control-')) return;
     result[key] = value;
   });
   return result;
