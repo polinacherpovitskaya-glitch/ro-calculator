@@ -2673,6 +2673,57 @@ const Finance = {
             }));
     },
 
+    _normalizeCategories(list) {
+        return (Array.isArray(list) ? list : [])
+            .filter(item => item && typeof item === 'object')
+            .map(item => ({
+                id: String(item.id || this._uid('category')).trim(),
+                name: String(item.name || 'Статья').trim() || 'Статья',
+                group: String(item.group || 'other').trim() || 'other',
+                bucket: String(item.bucket || 'general').trim() || 'general',
+                source_id: String(item.source_id || '').trim(),
+                mapping: String(item.mapping || '').trim(),
+                active: item.active !== false,
+                color: String(item.color || '').trim(),
+                sort_order: Number(item.sort_order || 0) || 0,
+            }))
+            .filter(item => item.id && item.name);
+    },
+
+    _normalizeProjects(list) {
+        return (Array.isArray(list) ? list : [])
+            .filter(item => item && typeof item === 'object')
+            .map(item => ({
+                id: String(item.id || this._uid('project')).trim(),
+                name: String(item.name || 'Направление').trim() || 'Направление',
+                type: String(item.type || 'core').trim() || 'core',
+                default_income_category_id: String(item.default_income_category_id || '').trim(),
+                note: String(item.note || '').trim(),
+                active: item.active !== false,
+                sort_order: Number(item.sort_order || 0) || 0,
+            }))
+            .filter(item => item.id && item.name);
+    },
+
+    _normalizeCounterparties(list) {
+        return (Array.isArray(list) ? list : [])
+            .filter(item => item && typeof item === 'object')
+            .map(item => ({
+                id: String(item.id || this._uid('counterparty')).trim(),
+                name: String(item.name || 'Контрагент').trim() || 'Контрагент',
+                role: String(item.role || 'other').trim() || 'other',
+                inn: String(item.inn || '').trim(),
+                what_they_sell: String(item.what_they_sell || '').trim(),
+                default_project_id: String(item.default_project_id || '').trim(),
+                default_category_id: String(item.default_category_id || '').trim(),
+                research_mode: String(item.research_mode || 'manual').trim() || 'manual',
+                match_hint: String(item.match_hint || '').trim(),
+                note: String(item.note || '').trim(),
+                active: item.active !== false,
+            }))
+            .filter(item => item.id && item.name);
+    },
+
     _normalizeRecurringTransactions(list) {
         return (Array.isArray(list) ? list : [])
             .filter(item => item && typeof item === 'object')

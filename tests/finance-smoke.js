@@ -51,6 +51,56 @@ function smokeDefaultWorkspaceSeedsAccounts(context) {
     assert.equal(workspace.queueConfig.dailySyncEnabled, true);
 }
 
+function smokeRelationalFinanceHydrationNormalizesWorkspace(context) {
+    const workspace = vm.runInContext(`Finance._hydrateWorkspaceFromRelationalFinance(
+        Finance._defaultWorkspace(App.settings),
+        {
+            financeCategories: [{
+                legacy_id: 'rel_cat_materials',
+                name: 'Материалы из FinTablo',
+                category_group: 'direct',
+                bucket: 'orders',
+                is_active: true,
+                metadata_json: {
+                    original: {
+                        source_id: 'orders_fintablo',
+                        mapping: 'fact_materials'
+                    }
+                }
+            }],
+            financeDirections: [{
+                legacy_id: 'rel_project_core',
+                name: 'FinTablo направление',
+                is_active: true,
+                metadata_json: {
+                    project_type: 'core',
+                    original: {
+                        note: 'Приехало из нормализованной таблицы'
+                    }
+                }
+            }],
+            financeCounterparties: [{
+                legacy_id: 'rel_cp_vendor',
+                name: 'ООО Поставщик',
+                inn: '7700000000',
+                metadata_json: {
+                    role: 'vendor',
+                    default_project_id: 'rel_project_core',
+                    default_category_id: 'rel_cat_materials',
+                    original: {
+                        what_they_sell: 'сырье',
+                        research_mode: 'manual'
+                    }
+                }
+            }]
+        }
+    )`, context);
+
+    assert.equal(workspace.categories.some(item => item.id === 'rel_cat_materials' && item.source_id === 'orders_fintablo'), true);
+    assert.equal(workspace.projects.some(item => item.id === 'rel_project_core' && item.type === 'core'), true);
+    assert.equal(workspace.counterparties.some(item => item.id === 'rel_cp_vendor' && item.default_category_id === 'rel_cat_materials'), true);
+}
+
 function smokeSummaryIgnoresBrokenDatesAndShowsGaps(context) {
     const summary = vm.runInContext(`Finance._buildSummary({
         workspace: Finance._defaultWorkspace(App.settings),
@@ -1283,6 +1333,7 @@ function run() {
     const context = createContext();
     runScript(context, 'js/finance.js');
     smokeDefaultWorkspaceSeedsAccounts(context);
+    smokeRelationalFinanceHydrationNormalizesWorkspace(context);
     smokeSummaryIgnoresBrokenDatesAndShowsGaps(context);
     smokeManualDecisionsAndPayrollRollup(context);
     smokeBatchHelpers(context);
