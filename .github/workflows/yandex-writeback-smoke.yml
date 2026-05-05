@@ -1,0 +1,77 @@
+name: Yandex write-back smoke
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '23 * * * *'
+  workflow_run:
+    workflows:
+      - Yandex Supabase proxy deploy
+      - Yandex static mirror sync
+    types:
+      - completed
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  smoke:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Run Yandex write-back smoke
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: node tests/yandex-writeback-smoke.mjs
+
+      - name: Upload write-back artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: yandex-writeback-smoke-artifacts
+          path: output/yandex-writeback-smoke
+          if-no-files-found: ignore
+
+      - name: Notify Telegram
+        if: ${{ always() }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TASK_BOT_TOKEN: ${{ secrets.TASK_BOT_TOKEN }}
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          TELEGRAM_ALERT_CHAT_ID: ${{ secrets.TELEGRAM_ALERT_CHAT_ID }}
+          TELEGRAM_SMOKE_CHAT_ID: ${{ secrets.TELEGRAM_SMOKE_CHAT_ID }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          ALERT_WORKFLOW: Yandex write-back smoke
+          ALERT_SCOPE: calc2/Yandex write path to shared Supabase
+          ALERT_STATUS: ${{ job.status }}
+          ALERT_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          ALERT_SOURCE_WORKFLOW: ${{ github.event.workflow_run.name }}
+        run: node .github/scripts/send-telegram-alert.mjs
+
+      - name: Sync GitHub issue
+        if: ${{ always() }}
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ALERT_WORKFLOW: Yandex write-back smoke
+          ALERT_SCOPE: calc2/Yandex write path to shared Supabase
+          ALERT_STATUS: ${{ job.status }}
+          ALERT_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          ALERT_SOURCE_WORKFLOW: ${{ github.event.workflow_run.name }}
+        run: node .github/scripts/sync-smoke-issue.mjs
