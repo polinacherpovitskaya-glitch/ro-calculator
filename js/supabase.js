@@ -1205,9 +1205,29 @@ function _settingsRowsToObject(data = []) {
     return obj;
 }
 
+async function _loadBootstrapSettings() {
+    const bootstrapPayload = await _loadSameOriginBootstrap(['settingsRows', 'settingsByKey']);
+    let rows = [];
+    if (bootstrapPayload && Array.isArray(bootstrapPayload.settingsRows) && bootstrapPayload.settingsRows.length > 0) {
+        rows = bootstrapPayload.settingsRows.filter(row => row && !row.omitted_from_snapshot);
+    } else if (bootstrapPayload && bootstrapPayload.settingsByKey && typeof bootstrapPayload.settingsByKey === 'object') {
+        rows = Object.entries(bootstrapPayload.settingsByKey).map(([key, value]) => ({ key, value }));
+    }
+    if (!rows.length) return null;
+    const settings = _settingsRowsToObject(rows);
+    setLocal(LOCAL_KEYS.settings, settings);
+    _settingsLastSyncAt = Date.now();
+    _setDataLoadMeta('settings', { source: 'bootstrap' });
+    return settings;
+}
+
 async function loadSettings() {
     const cachedSettings = getLocal(LOCAL_KEYS.settings);
     const fallbackSettings = _getSettingsFallback();
+    const bootstrapSettings = _isStaticYandexMirrorRuntime()
+        ? await _loadBootstrapSettings().catch(() => null)
+        : null;
+    if (bootstrapSettings) return bootstrapSettings;
 
     const refreshRemote = async () => {
         if (!isSupabaseReady()) return fallbackSettings;
@@ -3904,6 +3924,7 @@ async function saveTochkaSnapshot(data) {
 
 async function loadFintabloSnapshot() {
     const local = getLocal(LOCAL_KEYS.fintabloSnapshot) || null;
+    if (_isStaticYandexMirrorRuntime()) return local;
     if (isSupabaseReady()) {
         try {
             const { data, error } = await supabaseClient
