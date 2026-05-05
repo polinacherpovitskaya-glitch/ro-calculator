@@ -5522,6 +5522,7 @@ async function loadWarehouseItems() {
     });
     const readLiveBootstrapWarehouseItems = async () => {
         if (!_canUseSameOriginBootstrap()) return null;
+        if (_isStaticYandexMirrorRuntime()) return null;
         try {
             const url = new URL(SAME_ORIGIN_BOOTSTRAP_PATH, window.location.origin);
             url.searchParams.set('keys', 'warehouseItems');
