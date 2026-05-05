@@ -305,6 +305,55 @@ async function main() {
     assert.match(String(context.document.getElementById('hw-blank-selected-info').textContent || ''), /10 ₽/);
     assert.equal(String(context.document.getElementById('hw-blank-notes').value || ''), '');
 
+    context.__savedFormMold = null;
+    context.saveMold = async (mold) => {
+        context.__savedFormMold = JSON.parse(JSON.stringify(mold));
+        return mold.id || 9001;
+    };
+    vm.runInContext(`
+        Molds._pendingPhoto = '';
+        Molds.editingId = null;
+        Molds.allMolds = [];
+        App.molds = [];
+        document.getElementById('mold-name').value = 'Открывашка тест';
+        document.getElementById('mold-collection').value = '';
+        document.getElementById('mold-status').value = 'active';
+        document.getElementById('mold-pph-actual').value = '100';
+        document.getElementById('mold-weight').value = '8';
+        document.getElementById('mold-width').value = '45';
+        document.getElementById('mold-height').value = '20';
+        document.getElementById('mold-depth').value = '3';
+        document.getElementById('mold-complexity').value = 'simple';
+        document.getElementById('mold-cost-cny').value = '100';
+        document.getElementById('mold-cny-rate').value = '12.5';
+        document.getElementById('mold-delivery-cost').value = '3000';
+        document.getElementById('mold-cost-rub').value = '4250';
+        document.getElementById('mold-count').value = '1';
+        document.getElementById('mold-client').value = '';
+        document.getElementById('mold-notes').value = '';
+        document.getElementById('mold-assembly-name').value = '';
+        document.getElementById('mold-assembly-speed').value = '';
+        Molds.setHwSource('warehouse');
+        Molds.selectWarehouseHw(501);
+    `, context);
+    await vm.runInContext(`Molds.saveMold()`, context);
+    assert.equal(context.__savedFormMold.hw_source, 'warehouse');
+    assert.equal(context.__savedFormMold.hw_warehouse_item_id, 501);
+    assert.equal(context.__savedFormMold.hw_warehouse_sku, 'CRB-501');
+    assert.equal(context.__savedFormMold.hw_name, 'Карабин');
+    assert.equal(context.__savedFormMold.hw_price_per_unit, 10);
+
+    vm.runInContext(`
+        Molds._hwSource = 'custom';
+        Molds._hwWarehouseItemId = null;
+        Molds._hwWarehouseSku = '';
+        Molds.editingId = 123;
+        Molds.allMolds = [{ id: 123, name: 'Старый складской бланк', hw_warehouse_item_id: 501, hw_warehouse_sku: 'CRB-501' }];
+        Molds.editMold(123);
+    `, context);
+    assert.equal(vm.runInContext(`Molds._hwSource`, context), 'warehouse');
+    assert.equal(vm.runInContext(`Molds._hwWarehouseItemId`, context), 501);
+
     vm.runInContext(`
         Molds._hwBlanks = [{
             id: 91,

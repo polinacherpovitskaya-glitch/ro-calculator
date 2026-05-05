@@ -663,6 +663,9 @@ function _withUnexpectedNfcHardwareCleanup(mold) {
     if (_isExplicitNfcMold(mold) || !_isNfcLikeHardwareName(mold.hw_name)) {
         return { mold, changed: false };
     }
+    if (String(mold.hw_source || '').toLowerCase() === 'warehouse' || Number(mold.hw_warehouse_item_id || 0) > 0) {
+        return { mold, changed: false };
+    }
     return {
         mold: {
             ...mold,

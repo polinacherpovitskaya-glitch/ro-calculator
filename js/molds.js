@@ -825,7 +825,7 @@ const Molds = {
         setTimeout(() => this.onCustomPriceInput(), 50);
 
         // Hardware source
-        this._hwSource = m.hw_source || 'custom';
+        this._hwSource = m.hw_source || (m.hw_warehouse_item_id ? 'warehouse' : 'custom');
         this._hwWarehouseItemId = m.hw_warehouse_item_id || null;
         this._hwWarehouseSku = m.hw_warehouse_sku || '';
         this.renderHwSourceToggle();
@@ -904,6 +904,8 @@ const Molds = {
         this._pendingPhoto = '';
         this.updatePhotoPreview('');
         this._hwSource = 'custom';
+        this._hwWarehouseItemId = null;
+        this._hwWarehouseSku = '';
         this.renderHwSourceToggle();
         const collEl = document.getElementById('mold-collection');
         if (collEl) collEl.value = '';
@@ -939,6 +941,10 @@ const Molds = {
         const useManualPrices = Object.keys(customPrices).length > 0;
 
         const pphValue = parseFloat(document.getElementById('mold-pph-actual').value) || 0;
+        if (this._hwSource === 'warehouse' && !Number(this._hwWarehouseItemId || 0)) {
+            App.toast('Выберите позицию со склада для встроенной фурнитуры');
+            return;
+        }
 
         const mold = {
             id: this.editingId || undefined,
@@ -1357,6 +1363,10 @@ const Molds = {
 
     setHwSource(source) {
         this._hwSource = source;
+        if (source !== 'warehouse') {
+            this._hwWarehouseItemId = null;
+            this._hwWarehouseSku = '';
+        }
         this.renderHwSourceToggle();
         if (source === 'warehouse') {
             this.loadWarehouseForHw().then(() => this.renderWarehouseHwPicker());
@@ -1397,7 +1407,7 @@ const Molds = {
             return;
         }
         const grouped = this._buildWarehouseHwPickerData();
-        const selectedId = document.getElementById('hw-blank-wh-id')?.value || '';
+        const selectedId = this._hwWarehouseItemId || document.getElementById('hw-blank-wh-id')?.value || '';
         container.innerHTML = Warehouse.buildImagePicker(
             'moldhw-picker-0',
             grouped,
@@ -1411,6 +1421,7 @@ const Molds = {
     selectWarehouseHw(itemId) {
         const item = (this._warehouseHwItems || this._warehouseItems || []).find(i => Number(i.id) === Number(itemId));
         if (!item) return;
+        this._hwSource = 'warehouse';
         this._hwWarehouseItemId = item.id;
         this._hwWarehouseSku = item.sku || '';
         // Fill the custom fields with warehouse data

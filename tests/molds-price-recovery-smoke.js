@@ -150,22 +150,35 @@ const nfcCleanup = vm.runInContext(`_withUnexpectedNfcHardwareCleanup({
     hw_warehouse_item_id: 55,
     hw_warehouse_sku: 'NFC',
 })`, context);
-assert.equal(nfcCleanup.changed, true, 'Unexpected NFC hardware should be stripped from non-NFC molds');
+assert.equal(nfcCleanup.changed, false, 'Warehouse-linked NFC hardware must stay attached to non-NFC molds');
 assert.deepEqual(
     JSON.parse(JSON.stringify(nfcCleanup.mold)),
     {
         name: 'Карабин',
         category: 'blank',
-        hw_name: '',
-        hw_price_per_unit: 0,
-        hw_delivery_total: 0,
-        hw_speed: null,
-        hw_source: 'custom',
-        hw_warehouse_item_id: null,
-        hw_warehouse_sku: '',
+        hw_name: 'NFC метка',
+        hw_price_per_unit: 6.22,
+        hw_delivery_total: 14,
+        hw_speed: 120,
+        hw_source: 'warehouse',
+        hw_warehouse_item_id: 55,
+        hw_warehouse_sku: 'NFC',
     },
-    'Unexpected NFC cleanup should reset the hardware fields back to empty custom values',
+    'Warehouse NFC cleanup must preserve the stock link so production can reserve and write off inventory',
 );
+
+const customNfcCleanup = vm.runInContext(`_withUnexpectedNfcHardwareCleanup({
+    name: 'Карабин',
+    category: 'blank',
+    hw_name: 'NFC метка',
+    hw_price_per_unit: 6.22,
+    hw_delivery_total: 14,
+    hw_speed: 120,
+    hw_source: 'custom',
+    hw_warehouse_item_id: null,
+    hw_warehouse_sku: '',
+})`, context);
+assert.equal(customNfcCleanup.changed, true, 'Custom unexpected NFC hardware should still be stripped from non-NFC molds');
 
 const nfcNamedMold = vm.runInContext(`_withUnexpectedNfcHardwareCleanup({
     name: 'NFC Камушек',
