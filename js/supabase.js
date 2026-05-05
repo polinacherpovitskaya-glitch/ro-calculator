@@ -4,6 +4,7 @@
 
 // Supabase config
 const SUPABASE_URL = 'https://jbpmorruwjrxcieqlbmd.supabase.co';
+const YANDEX_SUPABASE_PROXY_URL = 'https://d5dktgh0f2nqktmc326f.wnq2w1o5.apigw.yandexcloud.net';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpicG1vcnJ1d2pyeGNpZXFsYm1kIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIwMTY1NzUsImV4cCI6MjA4NzU5MjU3NX0.Z26DuC4f5UM1I04N7ozr3FOUpF4tVIlUEh0cu1c0Jec';
 
 let supabaseClient = null;
@@ -22,6 +23,18 @@ function _isFileProtocolRuntime() {
     const protocol = String(window.location?.protocol || '').toLowerCase();
     return protocol === 'file:';
 }
+
+function _getSupabaseRuntimeUrl() {
+    if (typeof window === 'undefined') return SUPABASE_URL;
+    const host = String(window.location?.hostname || '').toLowerCase();
+    const shouldUseYandexProxy = host === 'calc2.recycleobject.ru'
+        || host.endsWith('.website.yandexcloud.net')
+        || host === 'storage.yandexcloud.net';
+    return shouldUseYandexProxy && YANDEX_SUPABASE_PROXY_URL
+        ? YANDEX_SUPABASE_PROXY_URL
+        : SUPABASE_URL;
+}
+
 let _authAccountsRefreshPromise = null;
 let _authAccountsLastSyncAt = 0;
 let _employeesRefreshPromise = null;
@@ -72,7 +85,11 @@ function initSupabase() {
         console.warn('Supabase not configured. Running in local/demo mode.');
         return null;
     }
-    supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    const runtimeSupabaseUrl = _getSupabaseRuntimeUrl();
+    if (typeof window !== 'undefined') {
+        window.__roSupabaseRuntimeUrl = runtimeSupabaseUrl;
+    }
+    supabaseClient = supabase.createClient(runtimeSupabaseUrl, SUPABASE_ANON_KEY);
     // In shared-db mode localStorage is only a cache, so compact it aggressively on boot.
     _cleanupLocalStorage({ aggressive: true });
     return supabaseClient;
