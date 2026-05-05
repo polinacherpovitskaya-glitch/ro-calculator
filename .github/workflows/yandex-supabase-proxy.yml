@@ -64,7 +64,7 @@ jobs:
             yc serverless function create --name "$FUNCTION_NAME"
           fi
 
-          RUNTIME="$(yc serverless function runtime list --format json | node -e "const fs=require('fs'); const runtimes=JSON.parse(fs.readFileSync(0,'utf8')); const names=runtimes.map(r=>r.name); console.log(names.find(n=>n==='nodejs22') || names.find(n=>n==='nodejs20') || names.find(n=>n==='nodejs18') || 'nodejs16');")"
+          RUNTIME="$(yc serverless function runtime list --format json | node -e "const fs=require('fs'); const data=JSON.parse(fs.readFileSync(0,'utf8')); const runtimes=Array.isArray(data) ? data : (data.runtimes || data.items || []); const names=runtimes.map(r=>r.name || r.id || String(r)); console.log(names.find(n=>n==='nodejs22') || names.find(n=>n==='nodejs20') || names.find(n=>n==='nodejs18') || 'nodejs16');")"
           echo "Using runtime: ${RUNTIME}"
 
           yc serverless function version create \
