@@ -2256,7 +2256,7 @@ async function loadOrderItemsByOrderIds(orderIds = []) {
         .filter(id => Number.isFinite(id) && id > 0))];
     if (ids.length === 0) return [];
 
-    const localFallback = () => (getLocal(LOCAL_KEYS.orderItems) || [])
+    const localFallback = (rows = null) => (Array.isArray(rows) ? rows : (getLocal(LOCAL_KEYS.orderItems) || []))
         .filter(item => ids.includes(Number(item.order_id)))
         .sort((a, b) => {
             if (Number(a.order_id) !== Number(b.order_id)) {
@@ -2264,6 +2264,15 @@ async function loadOrderItemsByOrderIds(orderIds = []) {
             }
             return Number(a.item_number || 0) - Number(b.item_number || 0);
         });
+
+    if (_isStaticYandexMirrorRuntime()) {
+        const bootstrapPayload = await _loadSameOriginBootstrap(['orderItems'], { timeoutMs: 15000 });
+        if (bootstrapPayload && Array.isArray(bootstrapPayload.orderItems)) {
+            setLocal(LOCAL_KEYS.orderItems, bootstrapPayload.orderItems);
+            return localFallback(bootstrapPayload.orderItems);
+        }
+        return localFallback();
+    }
 
     if (isSupabaseReady()) {
         try {

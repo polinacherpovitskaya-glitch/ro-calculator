@@ -62,16 +62,30 @@ function createContext() {
         const url = String(input);
         context.__remoteCalls.push({ table: 'fetch', action: 'request', url });
         const parsed = new URL(url, 'http://localhost');
-        if (parsed.pathname === '/api/bootstrap') {
-            const keys = String(parsed.searchParams.get('keys') || '')
+        if (parsed.pathname === '/api/bootstrap' || parsed.pathname === '/data/bootstrap.json') {
+            let keys = String(parsed.searchParams.get('keys') || '')
                 .split(',')
                 .map(key => key.trim())
                 .filter(Boolean);
+            if (parsed.pathname === '/data/bootstrap.json' && keys.length === 0) {
+                keys = [
+                    'orders',
+                    'orderItems',
+                    'timeEntries',
+                    'employees',
+                    'authAccounts',
+                    'factualSnapshots',
+                    'warehouseItems',
+                    'shipments',
+                    'chinaPurchases',
+                ];
+            }
             if ((context.__hangingBootstrapKeys || new Set()).has(keys.join(',')) || keys.some(key => (context.__hangingBootstrapKeys || new Set()).has(key))) {
                 return new Promise(() => {});
             }
             const data = {};
             if (keys.includes('orders')) data.orders = context.__bootstrapOrders || [];
+            if (keys.includes('orderItems')) data.orderItems = context.__bootstrapOrderItems || [];
             if (keys.includes('timeEntries')) data.timeEntries = context.__bootstrapTimeEntries || [];
             if (keys.includes('employees')) data.employees = context.__bootstrapEmployees || [];
             if (keys.includes('authAccounts')) data.authAccounts = context.__bootstrapAuthAccounts || [];
@@ -921,6 +935,40 @@ async function main() {
         assert.equal(winner.kind, 'resolved', 'orders should resolve from warm local cache without waiting for bootstrap');
         assert.equal(winner.count, 1);
         assert.equal(winner.firstClient, 'Warm Cached Order');
+    }
+
+    {
+        const context = createContext();
+        context.location = {
+            href: 'https://calc2.recycleobject.ru/#orders',
+            origin: 'https://calc2.recycleobject.ru',
+            protocol: 'https:',
+            hostname: 'calc2.recycleobject.ru',
+        };
+        context.window.location = context.location;
+        context.__hangingTables = new Set(['order_items']);
+        context.__bootstrapOrderItems = [{
+            id: 3001,
+            order_id: 7001,
+            item_number: 2,
+            name: 'Bootstrap item',
+        }, {
+            id: 3002,
+            order_id: 7002,
+            item_number: 1,
+            name: 'Other item',
+        }];
+        runScript(context, 'js/supabase.js');
+        vm.runInContext(`initSupabase();`, context);
+
+        const items = JSON.parse(JSON.stringify(await vm.runInContext(`loadOrderItemsByOrderIds([7001])`, context)));
+        assert.equal(items.length, 1, 'static Yandex mirror should resolve order items from bootstrap');
+        assert.equal(items[0].name, 'Bootstrap item');
+        assert.equal(
+            context.__remoteCalls.some(call => call.table === 'order_items'),
+            false,
+            'static Yandex mirror should not call remote order_items by ids'
+        );
     }
 
     {
