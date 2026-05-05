@@ -22,6 +22,7 @@ env:
   YC_CLOUD_ID: b1gl59l77vb50ihub2nd
   YC_FOLDER_ID: b1gc32hu5ujioie1o0ht
   RO_YANDEX_MIGRATION_BUCKET: ro-yandex-migration-snapshots-b1gl59l77vb50ihub2nd
+  RO_YANDEX_MIGRATION_KEEP_FULL: 7
 
 jobs:
   backup:
@@ -76,6 +77,17 @@ jobs:
           yc storage s3 cp "$snapshot_file" "s3://${RO_YANDEX_MIGRATION_BUCKET}/${remote_key}" --content-type "application/json; charset=utf-8"
           yc storage s3 cp "s3://${RO_YANDEX_MIGRATION_BUCKET}/${remote_key}" output/yandex-migration-backup/downloaded.json
 
+          mapfile -t old_snapshots < <(
+            yc storage s3 ls "s3://${RO_YANDEX_MIGRATION_BUCKET}/supabase/full/" \
+              | awk '{print $4}' \
+              | grep '^supabase/full/ro-supabase-full-.*\.json$' \
+              | sort \
+              | head -n -"${RO_YANDEX_MIGRATION_KEEP_FULL}"
+          )
+          for old_key in "${old_snapshots[@]}"; do
+            yc storage s3 rm "s3://${RO_YANDEX_MIGRATION_BUCKET}/${old_key}"
+          done
+
           SNAPSHOT_FILE="$snapshot_file" DOWNLOADED_FILE="output/yandex-migration-backup/downloaded.json" REMOTE_KEY="$remote_key" node <<'NODE'
           const fs = require('fs');
           const original = JSON.parse(fs.readFileSync(process.env.SNAPSHOT_FILE, 'utf8'));
@@ -89,6 +101,7 @@ jobs:
             uploaded: true,
             bucket: process.env.RO_YANDEX_MIGRATION_BUCKET,
             key: process.env.REMOTE_KEY,
+            keepFullSnapshots: Number(process.env.RO_YANDEX_MIGRATION_KEEP_FULL || 0),
             summary: downloaded.summary,
           };
           fs.writeFileSync('output/yandex-migration-backup/summary.json', `${JSON.stringify(summary, null, 2)}\n`);

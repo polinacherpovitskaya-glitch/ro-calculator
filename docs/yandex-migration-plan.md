@@ -104,6 +104,7 @@ Storage buckets отдельно:
 - Write-back smoke покрывает служебную запись, склад, приемку, Китай и молды.
 - Есть `Yandex migration snapshot`: inventory/full снимок Supabase перед переносом.
 - Есть приватная Yandex backup-цель для migration snapshot: следующий шаг перед импортом в Yandex PostgreSQL.
+- Полные Yandex backup snapshot ограничены retention: храним последние 7 файлов, чтобы storage не рос бесконечно.
 
 ## Следующие шаги
 
