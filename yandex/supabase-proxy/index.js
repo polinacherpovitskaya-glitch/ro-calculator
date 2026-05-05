@@ -24,13 +24,41 @@ const HOP_BY_HOP_HEADERS = new Set([
   'upgrade',
 ]);
 
+const BASE_CORS_ALLOWED_HEADERS = [
+  'accept',
+  'accept-profile',
+  'authorization',
+  'apikey',
+  'cache-control',
+  'content-profile',
+  'content-type',
+  'prefer',
+  'range',
+  'x-client-info',
+  'x-retry-count',
+  'x-supabase-api-version',
+];
+
+function allowedRequestHeaders(event) {
+  const requested = event.headers?.['access-control-request-headers']
+    || event.headers?.['Access-Control-Request-Headers']
+    || '';
+  const headers = new Set(BASE_CORS_ALLOWED_HEADERS);
+  String(requested)
+    .split(',')
+    .map(header => header.trim().toLowerCase())
+    .filter(Boolean)
+    .forEach(header => headers.add(header));
+  return Array.from(headers).sort().join(',');
+}
+
 function corsHeaders(event) {
   const origin = event.headers?.Origin || event.headers?.origin || '';
   const allowedOrigin = ALLOWED_ORIGINS.has(origin) ? origin : 'https://calc2.recycleobject.ru';
   return {
     'Access-Control-Allow-Origin': allowedOrigin,
     'Access-Control-Allow-Methods': 'GET,POST,PATCH,PUT,DELETE,OPTIONS',
-    'Access-Control-Allow-Headers': 'authorization,apikey,content-type,prefer,range,x-client-info,x-supabase-api-version',
+    'Access-Control-Allow-Headers': allowedRequestHeaders(event),
     'Access-Control-Expose-Headers': 'content-range,range-unit',
     'Access-Control-Max-Age': '86400',
     Vary: 'Origin',

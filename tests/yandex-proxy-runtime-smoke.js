@@ -5,6 +5,7 @@ const vm = require('vm');
 
 const root = path.resolve(__dirname, '..');
 const source = fs.readFileSync(path.join(root, 'js', 'supabase.js'), 'utf8');
+const proxy = require('../yandex/supabase-proxy');
 
 function runtimeUrlFor(hostname) {
   const context = {
@@ -31,4 +32,24 @@ assert.strictEqual(
   'https://jbpmorruwjrxcieqlbmd.supabase.co',
 );
 
-console.log('yandex proxy runtime smoke checks passed');
+(async () => {
+  const response = await proxy.handler({
+    httpMethod: 'OPTIONS',
+    rawPath: '/rest/v1/settings',
+    headers: {
+      origin: 'https://calc2.recycleobject.ru',
+      'access-control-request-headers': 'accept-profile,content-profile,x-retry-count',
+    },
+  });
+  assert.strictEqual(response.statusCode, 204);
+  assert.strictEqual(response.headers['Access-Control-Allow-Origin'], 'https://calc2.recycleobject.ru');
+  const allowedHeaders = response.headers['Access-Control-Allow-Headers'];
+  assert.match(allowedHeaders, /accept-profile/);
+  assert.match(allowedHeaders, /content-profile/);
+  assert.match(allowedHeaders, /x-retry-count/);
+
+  console.log('yandex proxy runtime smoke checks passed');
+})().catch(error => {
+  console.error(error);
+  process.exitCode = 1;
+});
