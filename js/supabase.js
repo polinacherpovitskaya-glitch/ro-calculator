@@ -2611,6 +2611,7 @@ function _clearMissingFinancePhase1Table(table) {
 }
 
 function _canUseFinancePhase1Table(table) {
+    if (_isStaticYandexMirrorRuntime()) return false;
     return isSupabaseReady() && !_hasSupabaseAccessProblem() && !_missingFinancePhase1Tables.has(table);
 }
 

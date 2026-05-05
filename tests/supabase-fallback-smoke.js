@@ -973,6 +973,37 @@ async function main() {
 
     {
         const context = createContext();
+        context.location = {
+            href: 'https://calc2.recycleobject.ru/#import',
+            origin: 'https://calc2.recycleobject.ru',
+            protocol: 'https:',
+            hostname: 'calc2.recycleobject.ru',
+        };
+        context.window.location = context.location;
+        runScript(context, 'js/supabase.js');
+        vm.runInContext(`
+            initSupabase();
+            setLocal(LOCAL_KEYS.fintabloSnapshot, {
+                transactions: [{
+                    id: 'ft-1',
+                    date: '2026-05-01',
+                    amount: 1234,
+                    description: 'FinTablo row'
+                }]
+            });
+        `, context);
+
+        const transactions = JSON.parse(JSON.stringify(await vm.runInContext(`loadFinanceTransactions()`, context)));
+        assert.equal(transactions.length, 1, 'static Yandex mirror should build finance data from snapshots');
+        assert.equal(
+            context.__remoteCalls.some(call => call.table === 'finance_transactions'),
+            false,
+            'static Yandex mirror should not call Phase 1 finance tables'
+        );
+    }
+
+    {
+        const context = createContext();
         context.__hangingTables = new Set(['settings']);
         context.__bootstrapAuthAccounts = [{
             id: 77,
