@@ -1,0 +1,47 @@
+name: Yandex migration snapshot
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: inventory or full
+        required: false
+        default: inventory
+  schedule:
+    - cron: '17 2 * * *'
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Build Supabase migration snapshot
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          RO_SNAPSHOT_MODE: ${{ github.event.inputs.mode || 'inventory' }}
+          RO_SNAPSHOT_OUT_DIR: output/yandex-migration-snapshot
+        run: node scripts/export-supabase-snapshot.mjs
+
+      - name: Upload snapshot artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: yandex-migration-snapshot
+          path: output/yandex-migration-snapshot
+          if-no-files-found: error
