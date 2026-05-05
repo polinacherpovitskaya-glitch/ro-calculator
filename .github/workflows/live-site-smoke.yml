@@ -2,6 +2,11 @@ name: Live site smoke
 
 on:
   workflow_dispatch:
+    inputs:
+      live_url:
+        description: 'URL to smoke-test. Defaults to the GitHub Pages deployment.'
+        required: false
+        type: string
   schedule:
     - cron: '17 */4 * * *'
   workflow_run:
@@ -36,7 +41,7 @@ jobs:
 
       - name: Run live smoke
         env:
-          RO_LIVE_URL: https://polinacherpovitskaya-glitch.github.io/ro-calculator/
+          RO_LIVE_URL: ${{ inputs.live_url || 'https://polinacherpovitskaya-glitch.github.io/ro-calculator/' }}
           RO_SMOKE_USER_ID: 1772715209137
         run: node tests/live-site-smoke.mjs
 
