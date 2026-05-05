@@ -4784,6 +4784,51 @@ async function smokeWarehouseAdjustmentPersistsWithoutBulkSave(context) {
     assert.match(context.__warehouseHistory[0].notes, /batch-save/);
 }
 
+async function smokeWarehouseInlineQtyUsesLatestCloudQty(context) {
+    context.__warehouseItems = [
+        {
+            id: 802,
+            name: 'Stale Render Qty Item',
+            sku: 'ADJ-802',
+            category: 'other',
+            qty: 4,
+            price_per_unit: 9,
+            updated_at: '2026-03-15T00:00:00.000Z',
+        },
+    ];
+    context.__warehouseHistory = [];
+    context.loadWarehouseItems = async () => clone(context.__warehouseItems);
+    context.saveWarehouseItem = async (item) => {
+        const normalized = clone(item);
+        const idx = context.__warehouseItems.findIndex(entry => Number(entry.id) === Number(normalized.id));
+        if (idx >= 0) context.__warehouseItems[idx] = normalized;
+        else context.__warehouseItems.push(normalized);
+        return normalized.id;
+    };
+    context.saveWarehouseItems = async (items) => {
+        context.__warehouseItems = clone(items);
+    };
+    context.loadWarehouseHistory = async () => clone(context.__warehouseHistory);
+    context.saveWarehouseHistory = async (history) => {
+        context.__warehouseHistory = clone(history);
+    };
+
+    vm.runInContext(`
+        App.toast = () => {};
+        Warehouse._inlineSaved = () => {};
+        Warehouse.load = async () => {};
+        Warehouse.allItems = [{ id: 802, name: 'Stale Render Qty Item', qty: 10 }];
+    `, context);
+
+    await vm.runInContext(`Warehouse.inlineQty(802, '1', 10)`, context);
+
+    assert.equal(context.__warehouseItems[0].qty, 1);
+    assert.equal(context.__warehouseHistory.length, 1);
+    assert.equal(context.__warehouseHistory[0].qty_before, 4);
+    assert.equal(context.__warehouseHistory[0].qty_after, 1);
+    assert.equal(context.__warehouseHistory[0].requested_qty_change, -3);
+}
+
 async function smokeWarehouseReserveLabelsShowSource(context) {
     context.__warehouseItems = [
         {
@@ -7768,6 +7813,7 @@ async function main() {
     await smokePackagingWarehouseSaveSync(context);
     await smokeWarehouseManualAdjustment(context);
     await smokeWarehouseAdjustmentPersistsWithoutBulkSave(context);
+    await smokeWarehouseInlineQtyUsesLatestCloudQty(context);
     await smokeWarehouseReserveLabelsShowSource(context);
     await smokeWarehouseStockTruthShowsAvailableAndCorrections(context);
     await smokeWarehouseProjectReserveCannotBeEditedInline(context);

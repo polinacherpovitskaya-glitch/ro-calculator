@@ -2177,7 +2177,8 @@ const Warehouse = {
                 </td>
                 <td>
                     <input type="number" class="wh-inline-input text-right ${qtyClass}" value="${item.qty || 0}" min="0" step="${qtyStep}"
-                        onchange="Warehouse.inlineQty(${item.id}, this.value, ${item.qty || 0})">
+                        onchange="Warehouse.inlineQty(${item.id}, this.value, ${item.qty || 0})"
+                        onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}">
                 </td>
                 <td>
                     <input type="number" class="wh-inline-input text-right" value="${item.reserved_qty || 0}" min="0" max="${item.qty || 0}" step="${qtyStep}"
@@ -2550,8 +2551,17 @@ const Warehouse = {
     },
 
     async inlineQty(itemId, newValueStr, oldQty) {
+        const normalizedItemId = Number(itemId || 0);
         const newQty = Math.max(0, this._parseWarehouseQty(newValueStr));
-        const delta = newQty - (oldQty || 0);
+        let currentQty = this._parseWarehouseQty(oldQty);
+        try {
+            const latestItems = await loadWarehouseItems();
+            const latestItem = (latestItems || []).find(i => Number(i && i.id || 0) === normalizedItemId);
+            if (latestItem) currentQty = this._parseWarehouseQty(latestItem.qty);
+        } catch (error) {
+            console.warn('[Warehouse] inlineQty failed to load latest stock, using rendered value', error);
+        }
+        const delta = newQty - currentQty;
         if (delta === 0) return;
 
         const inputEl = document.activeElement;
@@ -5474,16 +5484,30 @@ const Warehouse = {
                                     </td>
                                     <td class="text-right" style="font-weight:700;">${r.qty}</td>
                                     <td class="text-right">
-                                        <input
-                                            type="number"
-                                            min="0"
-                                            step="0.01"
-                                            value="${r.actual_qty === null || r.actual_qty === undefined ? '' : r.actual_qty}"
-                                            placeholder="${r.qty}"
-                                            style="width:86px;text-align:right;"
-                                            onblur="Warehouse.setProjectHardwareActualQty(${r.order_id}, ${r.item_id}, this.value)"
-                                            onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}"
-                                        >
+                                        <div style="display:flex;justify-content:flex-end;align-items:center;gap:6px;flex-wrap:wrap;">
+                                            <input
+                                                id="wh-ph-actual-${r.order_id}-${r.item_id}"
+                                                type="number"
+                                                min="0"
+                                                step="0.01"
+                                                value="${r.actual_qty === null || r.actual_qty === undefined ? '' : r.actual_qty}"
+                                                placeholder="${r.qty}"
+                                                style="width:86px;text-align:right;"
+                                                onkeydown="if(event.key==='Enter'){event.preventDefault();Warehouse.setProjectHardwareActualQty(${r.order_id}, ${r.item_id}, this.value);}"
+                                            >
+                                            <button
+                                                type="button"
+                                                class="btn btn-sm btn-outline"
+                                                title="Сохранить фактическое количество"
+                                                onclick="Warehouse.setProjectHardwareActualQty(${r.order_id}, ${r.item_id}, (document.getElementById('wh-ph-actual-${r.order_id}-${r.item_id}') || {}).value)"
+                                            >OK</button>
+                                            <button
+                                                type="button"
+                                                class="btn btn-sm btn-outline"
+                                                title="Вернуть плановое количество"
+                                                onclick="Warehouse.setProjectHardwareActualQty(${r.order_id}, ${r.item_id}, '')"
+                                            >план</button>
+                                        </div>
                                         <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">план ${r.qty}</div>
                                     </td>
                                     <td>
