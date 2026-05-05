@@ -77,6 +77,8 @@ function createContext() {
             if (keys.includes('authAccounts')) data.authAccounts = context.__bootstrapAuthAccounts || [];
             if (keys.includes('factualSnapshots')) data.factualSnapshots = context.__bootstrapFactualSnapshots || {};
             if (keys.includes('warehouseItems')) data.warehouseItems = context.__bootstrapWarehouseItems || [];
+            if (keys.includes('shipments')) data.shipments = context.__bootstrapShipments || [];
+            if (keys.includes('chinaPurchases')) data.chinaPurchases = context.__bootstrapChinaPurchases || [];
             return {
                 ok: true,
                 async json() {
@@ -950,6 +952,34 @@ async function main() {
 
         const snapshots = JSON.parse(JSON.stringify(await vm.runInContext(`loadFactualSnapshots()`, context)));
         assert.equal(snapshots['2026-04'].revenue, 123456, 'factual snapshots should resolve from same-origin bootstrap when settings hang');
+    }
+
+    {
+        const context = createContext();
+        context.__bootstrapChinaPurchases = [{
+            id: 501,
+            status: 'ordered',
+            name: 'NFC партия',
+            supplier: 'Shenzhen NFC',
+            created_at: '2026-05-01T10:00:00.000Z',
+        }];
+        context.__bootstrapShipments = [{
+            id: 601,
+            status: 'in_transit',
+            name: 'Приемка NFC',
+            created_at: '2026-05-02T10:00:00.000Z',
+        }];
+        runScript(context, 'js/supabase.js');
+
+        const [purchases, shipments] = await Promise.all([
+            vm.runInContext('loadChinaPurchases({})', context),
+            vm.runInContext('loadShipments()', context),
+        ]);
+
+        assert.equal(purchases.length, 1, 'china purchases should resolve from same-origin bootstrap on calc2 mirror');
+        assert.equal(purchases[0].name, 'NFC партия', 'china purchase payload should keep business fields from bootstrap');
+        assert.equal(shipments.length, 1, 'shipments should resolve from same-origin bootstrap on calc2 mirror');
+        assert.equal(shipments[0].name, 'Приемка NFC', 'shipment payload should keep business fields from bootstrap');
     }
 
     {

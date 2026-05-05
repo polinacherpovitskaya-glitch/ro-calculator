@@ -115,6 +115,8 @@ async function main() {
             draftOrders: orders.filter(order => ['draft', 'calculated'].includes(String(order.status || ''))).length,
             cancelledOrders: orders.filter(order => String(order.status || '') === 'cancelled').length,
             orderItems: payload.data?.orderItems?.length || 0,
+            shipments: payload.data?.shipments?.length || 0,
+            chinaPurchases: payload.data?.chinaPurchases?.length || 0,
           };
         })
         .catch(error => ({ ok: false, error: error.message }));
@@ -127,6 +129,12 @@ async function main() {
         : [];
       const orderItems = typeof getLocal === 'function' && typeof LOCAL_KEYS !== 'undefined'
         ? (getLocal(LOCAL_KEYS.orderItems) || [])
+        : [];
+      const chinaPurchases = typeof loadChinaPurchases === 'function'
+        ? await loadChinaPurchases({}).catch(() => [])
+        : [];
+      const shipments = typeof loadShipments === 'function'
+        ? await loadShipments().catch(() => [])
         : [];
 
       let demandRows = [];
@@ -169,6 +177,8 @@ async function main() {
         warehouseItemCount: Array.isArray(warehouseItems) ? warehouseItems.length : 0,
         ordersCount: Array.isArray(orders) ? orders.length : 0,
         orderItemsCount: Array.isArray(orderItems) ? orderItems.length : 0,
+        chinaPurchaseCount: Array.isArray(chinaPurchases) ? chinaPurchases.length : 0,
+        shipmentsCount: Array.isArray(shipments) ? shipments.length : 0,
         demandRowsCount: demandRows.length,
         demandOrder,
         firstDemandRows: demandRows.slice(0, 5),
@@ -199,9 +209,13 @@ async function main() {
     assert.ok(state.bootstrap.draftOrders > 0, `Expected draft orders in bootstrap, got ${state.bootstrap.draftOrders}`);
     assert.equal(state.bootstrap.cancelledOrders, 0, `Cancelled orders should stay out of the default mirror snapshot, got ${state.bootstrap.cancelledOrders}`);
     assert.ok(state.bootstrap.orderItems > 0, `Expected order items in bootstrap, got ${state.bootstrap.orderItems}`);
+    assert.ok(state.bootstrap.chinaPurchases > 0, `Expected China purchases in bootstrap, got ${state.bootstrap.chinaPurchases}`);
+    assert.ok(state.bootstrap.shipments >= 0, `Expected shipments field in bootstrap, got ${state.bootstrap.shipments}`);
     assert.ok(state.warehouseItemCount > 0, `Expected warehouse items from mirror fallback, got ${state.warehouseItemCount}`);
     assert.ok(state.ordersCount > 0, `Expected orders from mirror fallback, got ${state.ordersCount}`);
     assert.ok(state.orderItemsCount > 0, `Expected cached order items from mirror fallback, got ${state.orderItemsCount}`);
+    assert.ok(state.chinaPurchaseCount > 0, `Expected China purchases from mirror fallback, got ${state.chinaPurchaseCount}`);
+    assert.ok(state.shipmentsCount >= 0, `Expected shipments from mirror fallback, got ${state.shipmentsCount}`);
     assert.ok(state.demandRowsCount > 0, `Expected at least one project hardware demand row, got ${JSON.stringify(state.demandOrder)}`);
     assert.ok(
       blockedSupabaseRequests > 0 || yandexProxyRequests > 0 || state.supabaseRuntimeUrl.includes('apigw.yandexcloud.net'),
@@ -215,6 +229,8 @@ async function main() {
       warehouseItemCount: state.warehouseItemCount,
       ordersCount: state.ordersCount,
       orderItemsCount: state.orderItemsCount,
+      chinaPurchaseCount: state.chinaPurchaseCount,
+      shipmentsCount: state.shipmentsCount,
       demandRowsCount: state.demandRowsCount,
       demandOrder: state.demandOrder,
       blockedSupabaseRequests,

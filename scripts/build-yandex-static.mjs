@@ -168,6 +168,26 @@ function parseWarehouseRows(rows) {
   });
 }
 
+function parseShipmentRows(rows) {
+  return (Array.isArray(rows) ? rows : []).map(row => {
+    const parsed = parseJsonColumn(row, 'shipment_data');
+    const full = stripHeavy({ ...parsed, ...row, id: row.id });
+    delete full.shipment_data;
+    return full;
+  });
+}
+
+function parseChinaPurchaseRows(rows) {
+  return (Array.isArray(rows) ? rows : [])
+    .map(row => {
+      const parsed = parseJsonColumn(row, 'purchase_data');
+      const full = stripHeavy({ ...parsed, ...row, id: row.id });
+      delete full.purchase_data;
+      return full;
+    })
+    .filter(purchase => String(purchase.status || '') !== 'deleted');
+}
+
 function parseSingletonJsonRow(rows, columnName, fallback) {
   const raw = rows?.[0]?.[columnName];
   if (!raw) return fallback;
@@ -208,6 +228,8 @@ async function buildBootstrapSnapshot() {
     orderItemsRows,
     timeEntries,
     factualSnapshots,
+    shipmentsRows,
+    chinaPurchaseRows,
   ] = await Promise.all([
     fetchSupabaseJson('/rest/v1/settings?select=key,value').catch(error => ({ __error: error.message })),
     fetchSupabaseJson('/rest/v1/employees?select=*&order=name.asc').catch(() => []),
@@ -221,6 +243,8 @@ async function buildBootstrapSnapshot() {
     fetchSupabaseJson('/rest/v1/order_items?select=*&order=order_id.asc,item_number.asc').catch(() => []),
     fetchSupabaseJson('/rest/v1/time_entries?select=*&order=date.desc').catch(() => []),
     fetchSettingJson('factual_month_snapshots_json', {}).catch(() => ({})),
+    fetchSupabaseJson('/rest/v1/shipments?select=*&order=created_at.desc').catch(() => []),
+    fetchSupabaseJson('/rest/v1/china_purchases?select=*&order=created_at.desc').catch(() => []),
   ]);
 
   const orders = parseOrderRows(ordersRows);
@@ -232,6 +256,8 @@ async function buildBootstrapSnapshot() {
   const warehouseHistory = parseSingletonJsonRow(historyRows, 'history_data', []);
   const cleanSettingsRows = sanitizeSettingsRows(settingsRows);
   const settingsByKey = Object.fromEntries(cleanSettingsRows.map(row => [row.key, row.value]));
+  const shipments = parseShipmentRows(shipmentsRows);
+  const chinaPurchases = parseChinaPurchaseRows(chinaPurchaseRows);
 
   return {
     ok: true,
@@ -250,6 +276,8 @@ async function buildBootstrapSnapshot() {
       orderItems,
       timeEntries,
       factualSnapshots,
+      shipments,
+      chinaPurchases,
     },
     errors: {},
   };
@@ -285,6 +313,8 @@ async function main() {
     orders: bootstrap.data.orders.length,
     orderItems: bootstrap.data.orderItems.length,
     timeEntries: bootstrap.data.timeEntries.length,
+    shipments: bootstrap.data.shipments.length,
+    chinaPurchases: bootstrap.data.chinaPurchases.length,
   };
   console.log(JSON.stringify(summary, null, 2));
 }

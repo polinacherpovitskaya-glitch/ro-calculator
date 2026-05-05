@@ -262,6 +262,30 @@ function _mergeOrderRows(rawRows) {
     });
 }
 
+function _mergeShipmentRows(rawRows) {
+    return (Array.isArray(rawRows) ? rawRows : []).map(row => {
+        if (row && row.shipment_data) {
+            try {
+                const parsed = typeof row.shipment_data === 'string' ? JSON.parse(row.shipment_data) : row.shipment_data;
+                return { ...parsed, ...row, id: row.id };
+            } catch (e) { /* ignore */ }
+        }
+        return row;
+    });
+}
+
+function _mergeChinaPurchaseRows(rawRows) {
+    return (Array.isArray(rawRows) ? rawRows : []).map(row => {
+        if (row && row.purchase_data) {
+            try {
+                const parsed = typeof row.purchase_data === 'string' ? JSON.parse(row.purchase_data) : row.purchase_data;
+                return { ...parsed, ...row, id: row.id };
+            } catch (e) { /* ignore */ }
+        }
+        return row;
+    });
+}
+
 // =============================================
 // LOCAL STORAGE FALLBACK
 // When Supabase is not configured, use localStorage
@@ -5758,20 +5782,19 @@ async function saveWarehouseHistory(history) {
 // =============================================
 
 async function loadShipments() {
+    const bootstrapPayload = await _loadSameOriginBootstrap(['shipments']);
+    if (bootstrapPayload && Array.isArray(bootstrapPayload.shipments) && bootstrapPayload.shipments.length > 0) {
+        const shipments = _mergeShipmentRows(bootstrapPayload.shipments);
+        setLocal(LOCAL_KEYS.shipments, shipments);
+        return shipments;
+    }
+
     if (isSupabaseReady()) {
         try {
             const { data, error } = await supabaseClient.from('shipments').select('*').order('created_at', { ascending: false });
             if (error) console.error('loadShipments error:', error);
             if (data && data.length > 0) {
-                const shipments = data.map(row => {
-                    if (row.shipment_data) {
-                        try {
-                            const parsed = typeof row.shipment_data === 'string' ? JSON.parse(row.shipment_data) : row.shipment_data;
-                            return { ...parsed, id: row.id };
-                        } catch(e) { /* fallthrough */ }
-                    }
-                    return row;
-                });
+                const shipments = _mergeShipmentRows(data);
                 setLocal(LOCAL_KEYS.shipments, shipments);
                 return shipments;
             }
@@ -5867,20 +5890,18 @@ async function saveChinaPurchase(purchase) {
 
 async function loadChinaPurchases(filters = {}) {
     let purchases;
+    const bootstrapPayload = await _loadSameOriginBootstrap(['chinaPurchases']);
+    if (bootstrapPayload && Array.isArray(bootstrapPayload.chinaPurchases) && bootstrapPayload.chinaPurchases.length > 0) {
+        purchases = _mergeChinaPurchaseRows(bootstrapPayload.chinaPurchases);
+        setLocal(LOCAL_KEYS.chinaPurchases, purchases);
+    }
+
     if (isSupabaseReady()) {
-        try {
+        if (!purchases) try {
             const { data, error } = await supabaseClient.from('china_purchases').select('*').order('created_at', { ascending: false });
             if (error) console.error('loadChinaPurchases error:', error);
             if (data && data.length > 0) {
-                purchases = data.map(row => {
-                    if (row.purchase_data) {
-                        try {
-                            const parsed = typeof row.purchase_data === 'string' ? JSON.parse(row.purchase_data) : row.purchase_data;
-                            return { ...parsed, id: row.id };
-                        } catch(e) { /* fallthrough */ }
-                    }
-                    return row;
-                });
+                purchases = _mergeChinaPurchaseRows(data);
                 setLocal(LOCAL_KEYS.chinaPurchases, purchases);
             } else {
                 // Migration from localStorage
@@ -5907,7 +5928,7 @@ async function loadChinaPurchases(filters = {}) {
             purchases = getLocal(LOCAL_KEYS.chinaPurchases) || [];
         }
     } else {
-        purchases = getLocal(LOCAL_KEYS.chinaPurchases) || [];
+        purchases = purchases || getLocal(LOCAL_KEYS.chinaPurchases) || [];
     }
 
     // Apply filters client-side
@@ -5933,7 +5954,8 @@ async function loadChinaPurchase(purchaseId) {
             if (data) return data;
         } catch(e) { console.error('loadChinaPurchase exception:', e); }
     }
-    const purchases = getLocal(LOCAL_KEYS.chinaPurchases) || [];
+    let purchases = getLocal(LOCAL_KEYS.chinaPurchases) || [];
+    if (!purchases.length) purchases = await loadChinaPurchases({});
     return purchases.find(p => p.id === purchaseId) || null;
 }
 
