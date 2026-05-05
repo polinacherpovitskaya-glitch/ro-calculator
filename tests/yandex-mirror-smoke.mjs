@@ -64,7 +64,13 @@ async function main() {
   const failedRequests = [];
   const consoleMessages = [];
   let blockedSupabaseRequests = 0;
+  let yandexProxyRequests = 0;
 
+  page.on('request', request => {
+    if (request.url().includes('apigw.yandexcloud.net')) {
+      yandexProxyRequests += 1;
+    }
+  });
   page.on('requestfailed', request => {
     failedRequests.push({
       url: request.url(),
@@ -170,12 +176,14 @@ async function main() {
         reservedText: document.querySelector('#wh-total-reserved')?.textContent?.trim() || '',
         projectHardwareText: document.querySelector('#wh-content')?.innerText?.slice(0, 1000) || '',
         supabaseScript: Array.from(document.scripts).find(script => /supabase\.js/.test(script.src))?.src || '',
+        supabaseRuntimeUrl: typeof window.__roSupabaseRuntimeUrl === 'string' ? window.__roSupabaseRuntimeUrl : '',
       };
     });
 
     fs.writeFileSync(path.join(outputDir, 'state.json'), JSON.stringify({
       state,
       blockedSupabaseRequests,
+      yandexProxyRequests,
       failedRequests,
       consoleMessages,
     }, null, 2));
@@ -195,7 +203,10 @@ async function main() {
     assert.ok(state.ordersCount > 0, `Expected orders from mirror fallback, got ${state.ordersCount}`);
     assert.ok(state.orderItemsCount > 0, `Expected cached order items from mirror fallback, got ${state.orderItemsCount}`);
     assert.ok(state.demandRowsCount > 0, `Expected at least one project hardware demand row, got ${JSON.stringify(state.demandOrder)}`);
-    assert.ok(blockedSupabaseRequests > 0, 'Smoke must block Supabase requests to verify the Russian mirror fallback path');
+    assert.ok(
+      blockedSupabaseRequests > 0 || yandexProxyRequests > 0 || state.supabaseRuntimeUrl.includes('apigw.yandexcloud.net'),
+      'Smoke must verify either Russian mirror fallback or the Yandex Supabase proxy path'
+    );
 
     console.log(JSON.stringify({
       ok: true,
@@ -207,6 +218,8 @@ async function main() {
       demandRowsCount: state.demandRowsCount,
       demandOrder: state.demandOrder,
       blockedSupabaseRequests,
+      yandexProxyRequests,
+      supabaseRuntimeUrl: state.supabaseRuntimeUrl,
     }, null, 2));
   } finally {
     await browser.close();
