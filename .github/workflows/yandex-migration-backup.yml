@@ -93,9 +93,11 @@ jobs:
             process.exit(1);
           }
           const keep = Number(process.env.RO_YANDEX_MIGRATION_KEEP_FULL || 0);
-          const contents = Array.isArray(listed?.Contents) ? listed.Contents : [];
+          const contents = Array.isArray(listed?.Contents)
+            ? listed.Contents
+            : (Array.isArray(listed?.contents) ? listed.contents : []);
           const keys = contents
-            .map(item => String(item.Key || ''))
+            .map(item => String(item.Key || item.key || ''))
             .filter(key => /^supabase\/full\/ro-supabase-full-.*\.json$/.test(key))
             .sort();
           const staleKeys = keep > 0 ? keys.slice(0, Math.max(0, keys.length - keep)) : [];
