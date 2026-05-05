@@ -36,7 +36,7 @@ jobs:
 
       - name: Run live smoke
         env:
-          RO_LIVE_URL: https://calc.recycleobject.ru/
+          RO_LIVE_URL: https://polinacherpovitskaya-glitch.github.io/ro-calculator/
           RO_SMOKE_USER_ID: 1772715209137
         run: node tests/live-site-smoke.mjs
 
