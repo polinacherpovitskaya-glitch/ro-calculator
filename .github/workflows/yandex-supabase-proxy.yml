@@ -21,6 +21,7 @@ env:
   YC_CLOUD_ID: b1gl59l77vb50ihub2nd
   YC_FOLDER_ID: b1gc32hu5ujioie1o0ht
   FUNCTION_NAME: ro-supabase-proxy
+  GATEWAY_NAME: ro-supabase-proxy-gateway
   SUPABASE_URL: https://jbpmorruwjrxcieqlbmd.supabase.co
 
 jobs:
@@ -79,6 +80,39 @@ jobs:
           yc serverless function allow-unauthenticated-invoke --name "$FUNCTION_NAME"
 
           FUNCTION_ID="$(yc serverless function get --name "$FUNCTION_NAME" --format json | node -e "const fs=require('fs'); const data=JSON.parse(fs.readFileSync(0,'utf8')); console.log(data.id);")"
-          echo "PROXY_URL=https://functions.yandexcloud.net/${FUNCTION_ID}"
+          echo "FUNCTION_URL=https://functions.yandexcloud.net/${FUNCTION_ID}"
+
+          cat > /tmp/ro-supabase-proxy-openapi.yaml <<EOF
+          openapi: 3.0.0
+          info:
+            title: RO Supabase proxy
+            version: 1.0.0
+          paths:
+            /{proxy+}:
+              x-yc-apigateway-any-method:
+                summary: Forward Supabase REST, Auth, and Storage calls
+                operationId: supabaseProxy
+                parameters:
+                  - name: proxy
+                    in: path
+                    required: true
+                    schema:
+                      type: string
+                x-yc-apigateway-integration:
+                  type: cloud_functions
+                  function_id: ${FUNCTION_ID}
+                  tag: "\$latest"
+                  payload_format_version: "2.0"
+          EOF
+
+          if yc serverless api-gateway get --name "$GATEWAY_NAME" >/dev/null 2>&1; then
+            yc serverless api-gateway update --name "$GATEWAY_NAME" --spec /tmp/ro-supabase-proxy-openapi.yaml
+          else
+            yc serverless api-gateway create --name "$GATEWAY_NAME" --spec /tmp/ro-supabase-proxy-openapi.yaml
+          fi
+
+          yc serverless api-gateway get --name "$GATEWAY_NAME"
+          GATEWAY_DOMAIN="$(yc serverless api-gateway get --name "$GATEWAY_NAME" --format json | node -e "const fs=require('fs'); const data=JSON.parse(fs.readFileSync(0,'utf8')); console.log(data.domain || data.default_domain || data.api_gateway_domain || data.url || '');")"
+          echo "PROXY_URL=https://${GATEWAY_DOMAIN}"
 
           yc config unset token >/dev/null
