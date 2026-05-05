@@ -267,10 +267,18 @@ const Warehouse = {
         const initialView = this.currentView || 'table';
         const shouldDeferHeavySync = initialView !== 'project-hardware';
 
-        // Auto-seed on first visit if warehouse is empty
+        // Auto-seed only for a truly local first run. In cloud mode an empty
+        // load can mean a transient fetch failure; seeding then would duplicate
+        // the production warehouse.
         if (this.allItems.length === 0 && WAREHOUSE_SEED_DATA.length > 0) {
-            await this._seedInitialData();
-            this.allItems = await loadWarehouseItems();
+            const canSeedInitialData = !isSupabaseReady()
+                || localStorage.getItem('ro_calc_allow_warehouse_seed') === '1';
+            if (canSeedInitialData) {
+                await this._seedInitialData();
+                this.allItems = await loadWarehouseItems();
+            } else {
+                console.warn('[Warehouse] Skipped initial seed while Supabase is enabled; warehouse load returned empty.');
+            }
         }
 
         // Legacy photo migrations used localStorage as their rollout flag, which made them

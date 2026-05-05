@@ -755,6 +755,24 @@ const BugReports = {
         button.style.cursor = isSubmitting ? 'progress' : '';
     },
 
+    async withTimeout(promiseFactory, label, timeoutMs = 12000) {
+        let timer = null;
+        try {
+            return await Promise.race([
+                Promise.resolve().then(promiseFactory),
+                new Promise((_, reject) => {
+                    timer = setTimeout(() => {
+                        const error = new Error(`timeout (${label}, ${timeoutMs}ms)`);
+                        error.code = 'timeout';
+                        reject(error);
+                    }, timeoutMs);
+                }),
+            ]);
+        } finally {
+            if (timer) clearTimeout(timer);
+        }
+    },
+
     syncQuickButton() {
         const button = document.getElementById('quick-bug-report-btn');
         if (!button) return;
@@ -845,7 +863,7 @@ const BugReports = {
             const assigneeId = this.defaultBugAssigneeId();
             const assigneeName = this.employeeName(assigneeId);
             const areaId = this.findAreaId('website') || this.findAreaId('general');
-            const taskRow = await saveWorkTask({
+            const taskRow = await this.withTimeout(() => saveWorkTask({
                 title: BugReportCore.buildBugTaskTitle(payload),
                 description: BugReportCore.buildBugSummary(payload),
                 status: 'incoming',
@@ -866,26 +884,35 @@ const BugReports = {
             }, {
                 actor_id: App.currentEmployeeId,
                 actor_name: App.getCurrentEmployeeName(),
-            });
+            }), 'создание задачи бага');
 
             const assets = [];
             for (const file of payload.files) {
-                const savedAsset = await this.uploadBugFile(taskRow.id, file);
-                if (savedAsset) assets.push(savedAsset);
+                try {
+                    const savedAsset = await this.withTimeout(() => this.uploadBugFile(taskRow.id, file), `загрузка файла ${file.name || ''}`.trim(), 18000);
+                    if (savedAsset) assets.push(savedAsset);
+                } catch (error) {
+                    console.warn('[BugReports] file upload skipped:', error);
+                    App.toast(`Баг отправим без файла ${file.name || ''}: загрузка не ответила.`);
+                }
             }
             if (payload.extra_link) {
-                const linkAsset = await saveWorkAsset({
-                    task_id: taskRow.id,
-                    kind: 'link',
-                    title: 'Дополнительная ссылка',
-                    url: payload.extra_link,
-                    created_by: App.currentEmployeeId,
-                    created_by_name: App.getCurrentEmployeeName(),
-                });
-                assets.push(linkAsset);
+                try {
+                    const linkAsset = await this.withTimeout(() => saveWorkAsset({
+                        task_id: taskRow.id,
+                        kind: 'link',
+                        title: 'Дополнительная ссылка',
+                        url: payload.extra_link,
+                        created_by: App.currentEmployeeId,
+                        created_by_name: App.getCurrentEmployeeName(),
+                    }), 'сохранение ссылки бага');
+                    assets.push(linkAsset);
+                } catch (error) {
+                    console.warn('[BugReports] link asset skipped:', error);
+                }
             }
 
-            const bugRow = await saveBugReport({
+            const bugRow = await this.withTimeout(() => saveBugReport({
                 task_id: taskRow.id,
                 title: payload.title,
                 section_key: payload.section_key,
@@ -909,7 +936,7 @@ const BugReports = {
             }, {
                 actor_id: App.currentEmployeeId,
                 actor_name: App.getCurrentEmployeeName(),
-            });
+            }), 'сохранение баг-репорта');
 
             const codexPrompt = BugReportCore.buildCodexPrompt({
                 task: taskRow,
@@ -917,7 +944,7 @@ const BugReports = {
                 assets,
             });
 
-            const finalBugRow = await saveBugReport({
+            const finalBugRow = await this.withTimeout(() => saveBugReport({
                 ...bugRow,
                 codex_prompt: codexPrompt,
                 codex_status: 'prompt_ready',
@@ -925,25 +952,37 @@ const BugReports = {
             }, {
                 actor_id: App.currentEmployeeId,
                 actor_name: App.getCurrentEmployeeName(),
-            });
+            }), 'подготовка prompt бага');
 
             if (taskRow.assignee_id) {
-                await TaskEvents.emit('task_assigned', {
+                this.withTimeout(() => TaskEvents.emit('task_assigned', {
+                        task_id: taskRow.id,
+                        project_id: null,
+                        assignee_id: taskRow.assignee_id,
+                    }), 'уведомление о назначении', 7000)
+                    .catch(error => console.warn('[BugReports] task_assigned event skipped:', error));
+            }
+            this.withTimeout(() => TaskEvents.emit('bug_report_submitted', {
                     task_id: taskRow.id,
                     project_id: null,
-                    assignee_id: taskRow.assignee_id,
+                    bug_report_id: finalBugRow.id,
+                    severity: finalBugRow.severity,
+                    section_key: finalBugRow.section_key,
+                    subsection_key: finalBugRow.subsection_key,
+                }), 'уведомление о баге', 7000)
+                .catch(error => console.warn('[BugReports] bug_report_submitted event skipped:', error));
+
+            try {
+                await this.withTimeout(() => this.refreshData(), 'обновление списка багов', 12000);
+            } catch (error) {
+                console.warn('[BugReports] refresh after submit skipped:', error);
+                this.bundle = this._hydrateBundle({
+                    ...(this.bundle || {}),
+                    tasks: [...(this.bundle?.tasks || []), taskRow],
+                    bugReports: [...(this.bundle?.bugReports || []), finalBugRow],
+                    assets: [...(this.bundle?.assets || []), ...assets],
                 });
             }
-            await TaskEvents.emit('bug_report_submitted', {
-                task_id: taskRow.id,
-                project_id: null,
-                bug_report_id: finalBugRow.id,
-                severity: finalBugRow.severity,
-                section_key: finalBugRow.section_key,
-                subsection_key: finalBugRow.subsection_key,
-            });
-
-            await this.refreshData();
             this.render();
             this.clearStoredDraft();
             if (prefix === 'bug-overlay') {

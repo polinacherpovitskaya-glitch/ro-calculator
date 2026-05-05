@@ -5571,8 +5571,12 @@ async function deleteWarehouseItem(itemId) {
 async function loadWarehouseReservations() {
     if (isSupabaseReady()) {
         try {
-            const { data } = await supabaseClient
-                .from('warehouse_reservations').select('*').eq('id', 1).maybeSingle();
+            const { data, error } = await _withRemoteTimeout('load', 'load warehouse_reservations', () => supabaseClient
+                .from('warehouse_reservations').select('*').eq('id', 1).maybeSingle());
+            if (error) {
+                console.error('loadWarehouseReservations error:', error);
+                return getLocal(LOCAL_KEYS.warehouseReservations) || [];
+            }
             if (data && data.reservations_data) {
                 const parsed = typeof data.reservations_data === 'string'
                     ? JSON.parse(data.reservations_data) : data.reservations_data;
@@ -5583,9 +5587,9 @@ async function loadWarehouseReservations() {
             const local = getLocal(LOCAL_KEYS.warehouseReservations) || [];
             if (local.length > 0) {
                 console.log('Migrating warehouse reservations to Supabase...');
-                await supabaseClient.from('warehouse_reservations').upsert({
+                await _withRemoteTimeout('write', 'migrate warehouse_reservations', () => supabaseClient.from('warehouse_reservations').upsert({
                     id: 1, reservations_data: JSON.stringify(local), updated_at: new Date().toISOString()
-                }, { onConflict: 'id' });
+                }, { onConflict: 'id' }));
                 return local;
             }
             return [];
@@ -5600,9 +5604,9 @@ async function loadWarehouseReservations() {
 async function saveWarehouseReservations(reservations) {
     if (isSupabaseReady()) {
         try {
-            const { error } = await supabaseClient.from('warehouse_reservations').upsert({
+            const { error } = await _withRemoteTimeout('write', 'save warehouse_reservations', () => supabaseClient.from('warehouse_reservations').upsert({
                 id: 1, reservations_data: JSON.stringify(reservations), updated_at: new Date().toISOString()
-            }, { onConflict: 'id' });
+            }, { onConflict: 'id' }));
             if (error) console.error('saveWarehouseReservations error:', error);
         } catch(e) { console.error('saveWarehouseReservations exception:', e); }
     }
@@ -5612,8 +5616,12 @@ async function saveWarehouseReservations(reservations) {
 async function loadWarehouseHistory() {
     if (isSupabaseReady()) {
         try {
-            const { data } = await supabaseClient
-                .from('warehouse_history').select('*').eq('id', 1).maybeSingle();
+            const { data, error } = await _withRemoteTimeout('load', 'load warehouse_history', () => supabaseClient
+                .from('warehouse_history').select('*').eq('id', 1).maybeSingle());
+            if (error) {
+                console.error('loadWarehouseHistory error:', error);
+                return getLocal(LOCAL_KEYS.warehouseHistory) || [];
+            }
             if (data && data.history_data) {
                 const parsed = typeof data.history_data === 'string'
                     ? JSON.parse(data.history_data) : data.history_data;
@@ -5624,9 +5632,9 @@ async function loadWarehouseHistory() {
             const local = getLocal(LOCAL_KEYS.warehouseHistory) || [];
             if (local.length > 0) {
                 console.log('Migrating warehouse history to Supabase...');
-                await supabaseClient.from('warehouse_history').upsert({
+                await _withRemoteTimeout('write', 'migrate warehouse_history', () => supabaseClient.from('warehouse_history').upsert({
                     id: 1, history_data: JSON.stringify(local), created_at: new Date().toISOString()
-                }, { onConflict: 'id' });
+                }, { onConflict: 'id' }));
                 return local;
             }
             return [];
@@ -5641,9 +5649,9 @@ async function loadWarehouseHistory() {
 async function saveWarehouseHistory(history) {
     if (isSupabaseReady()) {
         try {
-            const { error } = await supabaseClient.from('warehouse_history').upsert({
+            const { error } = await _withRemoteTimeout('write', 'save warehouse_history', () => supabaseClient.from('warehouse_history').upsert({
                 id: 1, history_data: JSON.stringify(history), created_at: new Date().toISOString()
-            }, { onConflict: 'id' });
+            }, { onConflict: 'id' }));
             if (error) console.error('saveWarehouseHistory error:', error);
         } catch(e) { console.error('saveWarehouseHistory exception:', e); }
     }
@@ -6738,7 +6746,7 @@ async function _loadWorkTableRows(table, localKey, orderBy, ascending) {
         try {
             let query = supabaseClient.from(table).select('*');
             if (orderBy) query = query.order(orderBy, { ascending: !!ascending });
-            const { data, error } = await query;
+            const { data, error } = await _withRemoteTimeout('load', `load ${table}`, () => query);
             if (!error && Array.isArray(data)) {
                 _workModuleRemoteAvailable = true;
                 _clearOptionalWorkTableMissing(table);

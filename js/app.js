@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v328';
+const APP_VERSION = 'v331';
 
 const App = {
     currentPage: 'orders',
@@ -2076,7 +2076,12 @@ const Calculator = {
             return this._whCurrentOrderReservationMap;
         }
         if (this._whReservationLoading) {
-            while (this._whReservationLoading) await new Promise(r => setTimeout(r, 50));
+            const startedAt = Date.now();
+            while (this._whReservationLoading && Date.now() - startedAt < 6000) await new Promise(r => setTimeout(r, 50));
+            if (this._whReservationLoading) {
+                console.warn('[Calculator] Warehouse reservation context timed out, continuing without reservation snapshot');
+                this._whReservationLoading = false;
+            }
             return this._whCurrentOrderReservationMap || new Map();
         }
 
@@ -2098,8 +2103,9 @@ const Calculator = {
             console.error('[Calculator] Failed to load warehouse reservations:', e);
             this._whCurrentOrderReservationMap = new Map();
             this._whReservationOrderId = orderId;
+        } finally {
+            this._whReservationLoading = false;
         }
-        this._whReservationLoading = false;
         return this._whCurrentOrderReservationMap;
     },
 
@@ -2108,7 +2114,13 @@ const Calculator = {
         if (this._whPickerData) return this._whPickerData;
         if (this._whPickerLoading) {
             // Wait for loading to finish
-            while (this._whPickerLoading) await new Promise(r => setTimeout(r, 50));
+            const startedAt = Date.now();
+            while (this._whPickerLoading && Date.now() - startedAt < 8000) await new Promise(r => setTimeout(r, 50));
+            if (this._whPickerLoading) {
+                console.warn('[Calculator] Warehouse picker load timed out, continuing with empty picker');
+                this._whPickerLoading = false;
+                this._whPickerData = this._whPickerData || {};
+            }
             return this._whPickerData;
         }
         this._whPickerLoading = true;
@@ -2117,8 +2129,9 @@ const Calculator = {
         } catch (e) {
             console.error('[Calculator] Failed to load warehouse items:', e);
             this._whPickerData = {};
+        } finally {
+            this._whPickerLoading = false;
         }
-        this._whPickerLoading = false;
         return this._whPickerData;
     },
 
