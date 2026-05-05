@@ -98,13 +98,16 @@ async function main() {
       const bootstrap = await fetch('/data/bootstrap.json', { cache: 'no-store' })
         .then(async response => {
           const payload = await response.json();
+          const orders = Array.isArray(payload.data?.orders) ? payload.data.orders : [];
           return {
             ok: response.ok,
             status: response.status,
             generatedAt: payload.generated_at || '',
             warehouseItems: payload.data?.warehouseItems?.length || 0,
             warehouseReservations: payload.data?.warehouseReservations?.length || 0,
-            orders: payload.data?.orders?.length || 0,
+            orders: orders.length,
+            draftOrders: orders.filter(order => ['draft', 'calculated'].includes(String(order.status || ''))).length,
+            cancelledOrders: orders.filter(order => String(order.status || '') === 'cancelled').length,
             orderItems: payload.data?.orderItems?.length || 0,
           };
         })
@@ -185,6 +188,8 @@ async function main() {
     assert.equal(state.bootstrap.ok, true, `Yandex bootstrap must load: ${JSON.stringify(state.bootstrap)}`);
     assert.ok(state.bootstrap.warehouseItems > 0, `Expected warehouse items in bootstrap, got ${state.bootstrap.warehouseItems}`);
     assert.ok(state.bootstrap.orders > 0, `Expected project orders in bootstrap, got ${state.bootstrap.orders}`);
+    assert.ok(state.bootstrap.draftOrders > 0, `Expected draft orders in bootstrap, got ${state.bootstrap.draftOrders}`);
+    assert.equal(state.bootstrap.cancelledOrders, 0, `Cancelled orders should stay out of the default mirror snapshot, got ${state.bootstrap.cancelledOrders}`);
     assert.ok(state.bootstrap.orderItems > 0, `Expected order items in bootstrap, got ${state.bootstrap.orderItems}`);
     assert.ok(state.warehouseItemCount > 0, `Expected warehouse items from mirror fallback, got ${state.warehouseItemCount}`);
     assert.ok(state.ordersCount > 0, `Expected orders from mirror fallback, got ${state.ordersCount}`);
