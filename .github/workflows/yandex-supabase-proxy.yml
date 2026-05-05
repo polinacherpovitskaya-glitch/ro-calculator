@@ -1,0 +1,84 @@
+name: Yandex Supabase proxy deploy
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'yandex/supabase-proxy/**'
+      - '.github/workflows/yandex-supabase-proxy.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: yandex-supabase-proxy
+  cancel-in-progress: true
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  YC_CLOUD_ID: b1gl59l77vb50ihub2nd
+  YC_FOLDER_ID: b1gc32hu5ujioie1o0ht
+  FUNCTION_NAME: ro-supabase-proxy
+  SUPABASE_URL: https://jbpmorruwjrxcieqlbmd.supabase.co
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate proxy syntax
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Check proxy
+        run: node --check yandex/supabase-proxy/index.js
+
+      - name: Install Yandex Cloud CLI
+        run: |
+          set -euo pipefail
+          curl -fsSL https://storage.yandexcloud.net/yandexcloud-yc/install.sh | bash -s -- -i "$HOME/yandex-cloud" -n
+          echo "$HOME/yandex-cloud/bin" >> "$GITHUB_PATH"
+
+      - name: Deploy Cloud Function
+        env:
+          YC_OAUTH_TOKEN: ${{ secrets.YC_OAUTH_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${YC_OAUTH_TOKEN:-}" ]; then
+            echo "YC_OAUTH_TOKEN secret is required to deploy ${FUNCTION_NAME}" >&2
+            exit 1
+          fi
+
+          yc config set token "$YC_OAUTH_TOKEN" >/dev/null
+          yc config set cloud-id "$YC_CLOUD_ID" >/dev/null
+          yc config set folder-id "$YC_FOLDER_ID" >/dev/null
+
+          if ! yc serverless function get --name "$FUNCTION_NAME" >/dev/null 2>&1; then
+            yc serverless function create --name "$FUNCTION_NAME"
+          fi
+
+          RUNTIME="$(yc serverless function runtime list --format json | node -e "const fs=require('fs'); const runtimes=JSON.parse(fs.readFileSync(0,'utf8')); const names=runtimes.map(r=>r.name); console.log(names.find(n=>n==='nodejs22') || names.find(n=>n==='nodejs20') || names.find(n=>n==='nodejs18') || 'nodejs16');")"
+          echo "Using runtime: ${RUNTIME}"
+
+          yc serverless function version create \
+            --function-name "$FUNCTION_NAME" \
+            --runtime "$RUNTIME" \
+            --entrypoint index.handler \
+            --memory 256MB \
+            --execution-timeout 30s \
+            --source-path yandex/supabase-proxy \
+            --environment SUPABASE_URL="$SUPABASE_URL"
+
+          yc serverless function allow-unauthenticated-invoke --name "$FUNCTION_NAME"
+
+          FUNCTION_ID="$(yc serverless function get --name "$FUNCTION_NAME" --format json | node -e "const fs=require('fs'); const data=JSON.parse(fs.readFileSync(0,'utf8')); console.log(data.id);")"
+          echo "PROXY_URL=https://functions.yandexcloud.net/${FUNCTION_ID}"
+
+          yc config unset token >/dev/null
