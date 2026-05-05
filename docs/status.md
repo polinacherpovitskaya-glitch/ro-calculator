@@ -22,6 +22,7 @@
 - Version baseline is clean: `APP_VERSION`, `CURRENT_HTML_VERSION`, sidebar version and `js/version.json` all match `v332`.
 - Risk counters to inspect during the long audit: 14 `prompt`, 36 `confirm`, 1 `alert`, 202 `console.error`, 3 `setInterval`, 28 `addEventListener`, 133 direct `localStorage` usages.
 - Data-path baseline from `scripts/audit-data-paths.mjs`: 133 load/save/update/delete functions in `js/supabase.js`, 67 remote writers, 40 remote readers, 96 functions with fallback/local cache behavior, 26 remote tables and 46 local cache keys.
+- First targeted warehouse audit package targets `v333`: fixed manual warehouse form quantity saves to compute deltas from latest shared stock, not stale rendered stock; added `tests/warehouse-migration-smoke.js` for stale qty, ready/unready idempotency and shipment repost delta.
 - New CI gates added: `node scripts/audit-codebase-health.mjs` and `node scripts/audit-data-paths.mjs` run inside `Deploy GitHub Pages` verify; the health audit fails on hard static regressions, and the data-path audit updates the migration inventory report.
 - Local validation passed after adding the gate: syntax check for `js/*.js` and `corporate-gift/*.js`, `version-smoke`, `order-flow-smoke`, `supabase-fallback-smoke`, `yandex-writeback-smoke`, `auth-hardening-smoke`, `factual-smoke`, `finance-smoke`, `fintablo-smoke`, `marketplaces-smoke`, `molds-smoke`, `molds-price-recovery-smoke`, `tasks-smoke`, `work-management-smoke`, `employee-auth-payroll-smoke`, `payroll-half-month-smoke`, `production-calendar-smoke`.
 
@@ -117,6 +118,7 @@ for f in js/*.js corporate-gift/*.js; do node --check "$f"; done
 node scripts/audit-codebase-health.mjs
 node scripts/audit-data-paths.mjs
 node tests/order-flow-smoke.js
+node tests/warehouse-migration-smoke.js
 node tests/auth-hardening-smoke.js
 node tests/factual-smoke.js
 node tests/supabase-fallback-smoke.js
@@ -167,6 +169,7 @@ curl -s 'https://polinacherpovitskaya-glitch.github.io/ro-calculator/' | rg 'js/
 | 2026-03-17 | Project hardware shortage toggle | `js/warehouse.js`, `tests/order-flow-smoke.js`, `index.html` | `node --check js/warehouse.js && node tests/order-flow-smoke.js` + full smoke gate set | fail -> fixed | Пушнуть публичный билд и проверить `warehouse.js?v=95` |
 | 2026-03-17 | Packaging reserve + warehouse collection parity | `js/app.js`, `js/orders.js`, `js/warehouse.js`, `tests/order-flow-smoke.js`, `index.html` | `node --check js/app.js && node --check js/orders.js && node --check js/warehouse.js && node --check tests/order-flow-smoke.js && node tests/order-flow-smoke.js && node tests/work-management-smoke.js && node tests/auth-hardening-smoke.js && node tests/factual-smoke.js && node tests/supabase-fallback-smoke.js` | fail -> fixed | Пушнуть публичный билд и проверить `app.js?v=110`, `orders.js?v=61`, `warehouse.js?v=96` |
 | 2026-05-05 | M6 global stabilization baseline | `scripts/audit-codebase-health.mjs`, `scripts/audit-data-paths.mjs`, `.github/workflows/deploy-pages.yml`, `docs/plans.md`, `docs/status.md`, `docs/test-plan.md`, `docs/yandex-migration-plan.md` | `node scripts/audit-codebase-health.mjs`; `node scripts/audit-data-paths.mjs`; full local smoke baseline; `node tests/yandex-writeback-smoke.mjs` | pass | Build module-by-module migration readiness matrix, then start China/warehouse write-flow audit |
+| 2026-05-05 | Warehouse migration target pass | `js/warehouse.js`, `tests/warehouse-migration-smoke.js`, `tests/warehouse-stress-smoke.mjs`, `.github/workflows/deploy-pages.yml`, `index.html`, `js/app.js`, `js/version.json` | `node --check js/warehouse.js && node --check tests/warehouse-migration-smoke.js && node tests/warehouse-migration-smoke.js && node tests/order-flow-smoke.js && node tests/supabase-fallback-smoke.js && node tests/warehouse-stress-smoke.mjs --iterations=1` | pass | Deploy `v333` and verify live/Yandex smokes |
 
 ## Smoke / Demo Checklist
 - [x] Root app стабильно грузится локально и дает пройти навигацию `orders -> colors -> warehouse -> china` без blocker-level runtime errors.

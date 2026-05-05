@@ -29,7 +29,7 @@
 
 Текущий baseline на 2026-05-05:
 
-- `v332` развернут на `calc`, `calc2` и GitHub Pages reserve.
+- `v333` готовится как первый складской target-pass релиз; предыдущий полностью зелёный baseline был `v332`.
 - `Yandex mirror smoke` и `Yandex write-back smoke` зеленые.
 - `scripts/audit-codebase-health.mjs` добавлен как повторяемый static gate: версии, script tags, duplicate ids и inline handler targets проверяются автоматически.
 - `scripts/audit-data-paths.mjs` добавлен как повторяемая карта источников данных: сейчас найдено 133 функции чтения/записи, 67 remote writers и 96 функций с fallback/local cache поведением.

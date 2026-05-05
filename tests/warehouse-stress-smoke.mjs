@@ -33,7 +33,7 @@ const includeLive = shouldIncludeLive();
 const startedAt = Date.now();
 
 console.log(`warehouse stress smoke: starting ${iterations} iteration(s)`);
-console.log('critical coverage: current-order reservation quota, pendant warehouse picker, clone order, legacy warehouse deductions, local fallback ids');
+console.log('critical coverage: current-order reservation quota, pendant warehouse picker, clone order, legacy warehouse deductions, local fallback ids, migration write idempotency');
 if (includeLive) {
   console.log('live coverage enabled: bugs done fallback + warehouse page');
 }
@@ -41,6 +41,9 @@ if (includeLive) {
 for (let index = 1; index <= iterations; index += 1) {
   console.log(`\n[warehouse-stress] iteration ${index}/${iterations}: order-flow smoke`);
   runSuite('order-flow smoke', ['tests/order-flow-smoke.js']);
+
+  console.log(`\n[warehouse-stress] iteration ${index}/${iterations}: warehouse migration smoke`);
+  runSuite('warehouse migration smoke', ['tests/warehouse-migration-smoke.js']);
 
   console.log(`\n[warehouse-stress] iteration ${index}/${iterations}: supabase fallback smoke`);
   runSuite('supabase fallback smoke', ['tests/supabase-fallback-smoke.js']);

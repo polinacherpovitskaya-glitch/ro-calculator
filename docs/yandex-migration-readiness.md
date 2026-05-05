@@ -7,18 +7,19 @@ This file is the working checklist before moving write ownership from Supabase/V
 ## Current Baseline
 
 - Public entry points: `calc.recycleobject.ru`, `calc2.recycleobject.ru`, GitHub Pages reserve.
-- Current deployed app version: `v332`.
+- Current target app version: `v333`.
 - Current Yandex write-back smoke: green for service rows in `warehouse_items`, `shipments`, `china_purchases`, `molds`.
 - Static audit: green for duplicate scripts, missing scripts, duplicate HTML ids and missing inline handler object methods.
 - Data-path audit: 133 load/save/update/delete functions, 67 remote writers, 40 remote readers, 96 functions with fallback/local cache behavior.
+- Warehouse migration smoke: covers stale rendered qty vs latest shared stock, ready/unready idempotency and shipment repost delta.
 
 ## Readiness Matrix
 
 | Module | Current Source | Yandex State | Risk | Next Gate |
 | --- | --- | --- | --- | --- |
-| Warehouse items | Supabase `warehouse_items` + local fallback + static bootstrap | Read works on `calc2`; proxy smoke can write service item | High | Verify quantity edit, add, delete, inventory and repeated save from `calc2`, then compare on `calc` |
-| Warehouse reservations/project hardware | Supabase `warehouse_reservations` + `settings.projectHardwareState` + local fallback | Read works after recent fixes | Very high | Smoke collect/uncollect project hardware twice; final stock/reserve must equal one intentional action |
-| Shipments / приемки | Supabase `shipments` + local fallback | Proxy smoke can write service shipment | High | Verify China receipt creates shipment once and receiving twice does not duplicate stock |
+| Warehouse items | Supabase `warehouse_items` + local fallback + static bootstrap | Read works on `calc2`; proxy smoke can write service item; manual form qty regression covered | High | Verify add/delete/live edit from `calc2`, then compare on `calc` |
+| Warehouse reservations/project hardware | Supabase `warehouse_reservations` + `settings.projectHardwareState` + local fallback | Read works after recent fixes; ready/unready repeated click regression covered | Very high | Verify same flow live on `calc2` and compare reload on `calc` |
+| Shipments / приемки | Supabase `shipments` + local fallback | Proxy smoke can write service shipment; repost delta regression covered | High | Verify China receipt creates shipment once and live receiving twice does not duplicate stock |
 | China purchases | Supabase `china_purchases` + legacy `china_orders` + local fallback | Proxy smoke can write service purchase | High | Verify draft/edit/status/receive/delete from `calc2`, then reload on `calc` |
 | Orders and order items | Supabase `orders`, `order_items`, `fintablo_imports` + local fallback | Main source still Supabase | Very high | Verify save/order status/delete/clone/idempotency before any write-source switch |
 | Molds and blanks | Supabase `molds`, `hw_blanks`, `pkg_blanks`, `app_colors`, `marketplace_sets` + local fallback/templates | Proxy smoke can write mold; UI link preservation fixed | Medium-high | Verify attach stock hardware to mold, reload, calculate order, and preserve link instead of converting to custom |
@@ -51,6 +52,7 @@ node scripts/audit-codebase-health.mjs
 node scripts/audit-data-paths.mjs
 node tests/version-smoke.js
 node tests/order-flow-smoke.js
+node tests/warehouse-migration-smoke.js
 node tests/supabase-fallback-smoke.js
 node tests/yandex-writeback-smoke.mjs
 ```

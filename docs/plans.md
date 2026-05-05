@@ -257,6 +257,7 @@ python3 -m http.server 4173
 - `node scripts/audit-data-paths.mjs` added as a repeatable data-path inventory. Current baseline: 133 load/save/update/delete functions, 67 remote writers, 40 remote readers, 96 functions with fallback/local cache behavior, 26 remote tables, 46 local cache keys.
 - Current clean hard checks: 0 duplicate scripts, 0 missing scripts, 0 duplicate ids, 0 missing object-method inline handler targets, version metadata aligned at `v332`.
 - Current inspection counters: 202 `console.error`, 133 direct `localStorage`, 36 `confirm`, 14 `prompt`, 3 `setInterval`; these are not automatically bugs, but they define the first manual review queue.
+- First warehouse target pass added `node tests/warehouse-migration-smoke.js` and fixed manual quantity saves to use latest shared stock before computing a delta.
 
 ### Definition of Done
 - Each critical module has a migration-readiness row with current source of truth, Yandex behavior, write-back behavior, tests/smokes and blockers.
@@ -270,6 +271,7 @@ node scripts/audit-data-paths.mjs
 for f in js/*.js corporate-gift/*.js; do node --check "$f"; done
 node tests/version-smoke.js
 node tests/order-flow-smoke.js
+node tests/warehouse-migration-smoke.js
 node tests/supabase-fallback-smoke.js
 node tests/yandex-writeback-smoke.mjs
 ```

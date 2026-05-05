@@ -72,6 +72,7 @@
 ## Acceptance Gates
 - [x] `node scripts/audit-codebase-health.mjs`
 - [x] `node scripts/audit-data-paths.mjs`
+- [x] `node tests/warehouse-migration-smoke.js`
 - [ ] `for f in js/*.js corporate-gift/*.js; do node --check "$f"; done`
 - [ ] `python3 -m http.server 4173`
 - [x] `node tests/order-flow-smoke.js`
@@ -111,6 +112,7 @@ node scripts/audit-data-paths.mjs
 for f in js/*.js corporate-gift/*.js; do node --check "$f"; done
 python3 -m http.server 4173
 node tests/order-flow-smoke.js
+node tests/warehouse-migration-smoke.js
 node tests/auth-hardening-smoke.js
 node tests/factual-smoke.js
 node tests/supabase-fallback-smoke.js

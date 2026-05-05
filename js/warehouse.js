@@ -2357,7 +2357,16 @@ const Warehouse = {
         if (!name) { App.toast('Укажите название'); return; }
 
         const existingItem = this.editingId ? this.allItems.find(i => i.id === this.editingId) : null;
-        const previousQty = this._parseWarehouseQty(existingItem ? existingItem.qty : 0);
+        let previousQty = this._parseWarehouseQty(existingItem ? existingItem.qty : 0);
+        if (this.editingId && existingItem) {
+            try {
+                const latestItems = await loadWarehouseItems();
+                const latestItem = (latestItems || []).find(i => Number(i && i.id || 0) === Number(this.editingId || 0));
+                if (latestItem) previousQty = this._parseWarehouseQty(latestItem.qty);
+            } catch (error) {
+                console.warn('[Warehouse] saveItem failed to load latest stock, using rendered value', error);
+            }
+        }
         const newQty = this._parseWarehouseQty(document.getElementById('wh-f-qty').value);
         const qtyDelta = newQty - previousQty;
         const qtyChanged = this.editingId && existingItem && Math.abs(qtyDelta) > 1e-9;
