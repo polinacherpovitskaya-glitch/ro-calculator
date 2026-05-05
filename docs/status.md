@@ -1,16 +1,29 @@
 # Status
 
 ## Snapshot
-- Current phase: M3 -> M3b - warehouse end-to-end audit requested (add/writeoff/inventory/receiving across all windows)
+- Current phase: M6 - pre-Yandex-migration global stabilization audit
 - Plan file: `/Users/krollipolli/Documents/Github/RO calculator/docs/plans.md`
+- Migration readiness file: `/Users/krollipolli/Documents/Github/RO calculator/docs/yandex-migration-readiness.md`
 - Status: yellow
-- Last updated: 2026-03-30
+- Last updated: 2026-05-05
 
 ## Build / Deploy Source Of Truth
-- Public deploy source: `origin/main` -> `.github/workflows/deploy-pages.yml` -> GitHub Pages.
-- Workflow behavior: checkout `main`, run repo-local verify gates, upload repository root as Pages artifact, deploy artifact to GitHub Pages.
+- Public deploy source: `origin/main` -> `.github/workflows/deploy-pages.yml` -> Vercel (`calc.recycleobject.ru`) + GitHub Pages reserve.
+- Yandex mirror source: successful deploy workflow -> `.github/workflows/yandex-static-sync.yml` -> Yandex Object Storage (`calc2.recycleobject.ru`).
+- Workflow behavior: checkout `main`, run repo-local verify gates, deploy to Vercel/GitHub Pages, sync Yandex mirror, then run live smoke, warehouse stress smoke, Yandex mirror smoke and Yandex write-back smoke.
 - Local smoke source of truth: server must be started from `/Users/krollipolli/Documents/Github/RO calculator`; earlier confusion came from a stale server running out of `.codex/worktrees/...`.
-- Latest verified public release: workflow run `#138` for commit `98562ed` completed successfully, and the public site served `js/supabase.js?v=110`, `js/app.js?v=107`, `js/order-detail.js?v=57`, `js/warehouse.js?v=92`.
+- Latest verified public/Yandex release: `v332`, `js/app.js?v=332`, `js/warehouse.js?v=184`, commit `dc9a7d7`; deploy, live smoke, warehouse stress smoke, Yandex static sync, Yandex mirror smoke and Yandex write-back smoke completed successfully on 2026-05-05.
+
+## Current Global Audit Baseline - 2026-05-05
+- User request: spend a deep pass before the Yandex migration to find duplicated actions, double-writes, hidden data drift, load/performance risks and cross-module bugs.
+- Codebase size from `scripts/audit-codebase-health.mjs`: 33 JS files, 31 test files, 9 workflow files, about 65k JS+HTML lines and 18k test lines.
+- Static HTML baseline is clean: 35 script tags, 0 duplicate scripts, 0 missing script files, 0 duplicate HTML ids.
+- Inline handler baseline is clean: 291 inline handlers, 289 object method references, 0 missing object methods.
+- Version baseline is clean: `APP_VERSION`, `CURRENT_HTML_VERSION`, sidebar version and `js/version.json` all match `v332`.
+- Risk counters to inspect during the long audit: 14 `prompt`, 36 `confirm`, 1 `alert`, 202 `console.error`, 3 `setInterval`, 28 `addEventListener`, 133 direct `localStorage` usages.
+- Data-path baseline from `scripts/audit-data-paths.mjs`: 133 load/save/update/delete functions in `js/supabase.js`, 67 remote writers, 40 remote readers, 96 functions with fallback/local cache behavior, 26 remote tables and 46 local cache keys.
+- New CI gates added: `node scripts/audit-codebase-health.mjs` and `node scripts/audit-data-paths.mjs` run inside `Deploy GitHub Pages` verify; the health audit fails on hard static regressions, and the data-path audit updates the migration inventory report.
+- Local validation passed after adding the gate: syntax check for `js/*.js` and `corporate-gift/*.js`, `version-smoke`, `order-flow-smoke`, `supabase-fallback-smoke`, `yandex-writeback-smoke`, `auth-hardening-smoke`, `factual-smoke`, `finance-smoke`, `fintablo-smoke`, `marketplaces-smoke`, `molds-smoke`, `molds-price-recovery-smoke`, `tasks-smoke`, `work-management-smoke`, `employee-auth-payroll-smoke`, `payroll-half-month-smoke`, `production-calendar-smoke`.
 
 ## Done
 - Execution docs мигрированы с узкого `work-management rollout` на новый канонический поток: сквозной аудит заказов, цветов, Китая, склада и готовой продукции.
@@ -64,6 +77,7 @@
 - Закрыт packaging warehouse sync gap: упаковка со склада теперь идет в тот же `project_hardware` цикл, что и фурнитура, поэтому на обычном `save` она реально ставится в резерв, попадает в блок `Фурнитура и упаковка для проектов`, не списывается раньше времени и не теряет визуальный selected-state из-за string/number id drift в picker.
 
 ## In Progress
+- M6 global stabilization audit before deeper Yandex migration: data paths, duplicate writes, fallback/write-back parity, performance/load behavior and high-risk UI flows.
 - Продолжение Phase 0/1 для auth: forced reset/storage migration path, live verification и оставшиеся warehouse edge cases после shortage-safe toggle fix.
 - Повторная live/browser проверка складских edge cases уже с зафиксированным deploy source, чтобы локальный smoke и публичный релиз больше не путались между собой.
 - Повторная live/browser проверка `План-факт/FinTablo` perimeter после sync-fix и factual drift hotfix.
@@ -73,6 +87,9 @@
 - Повторная near-live проверка `project_hardware` уже на реальных складских данных после sticky-check fix, shortage-safe toggle, блока `Собрано` и auto-hide для завершенных заказов.
 
 ## Next
+- Use the module-by-module migration readiness matrix in `docs/yandex-migration-readiness.md` as the working order: warehouse -> China/shipments -> molds/blanks -> orders -> people/payroll -> finance.
+- Run the full local verify set plus targeted static audits after every package; promote only green packages to `main`.
+- Start the next functional sweep from `China` and warehouse receipts because the employee report says those tabs are still "мимо" on calc2.
 - Закрыть первый незавершенный пункт M3: partial reserve, возврат и списание при нехватке warehouse hardware/packaging уже на live-click path.
 - Выполнить M3b warehouse E2E audit и зафиксировать фактические расхождения (если есть).
 - Дойти от частичного Phase 0 до forced reset/storage migration path из `/Users/krollipolli/Documents/Github/RO calculator/docs/auth-remediation-plan.md`.
@@ -97,6 +114,8 @@
 ## Commands
 ```sh
 for f in js/*.js corporate-gift/*.js; do node --check "$f"; done
+node scripts/audit-codebase-health.mjs
+node scripts/audit-data-paths.mjs
 node tests/order-flow-smoke.js
 node tests/auth-hardening-smoke.js
 node tests/factual-smoke.js
@@ -147,6 +166,7 @@ curl -s 'https://polinacherpovitskaya-glitch.github.io/ro-calculator/' | rg 'js/
 | 2026-03-17 | Project hardware sticky checks | `js/warehouse.js`, `tests/order-flow-smoke.js`, `index.html` | `node --check js/warehouse.js && node tests/order-flow-smoke.js` + browser runtime warehouse sanity on local server | fail -> fixed | Перепроверить live project hardware data после auto-hide правила для `completed + собрано` |
 | 2026-03-17 | Project hardware shortage toggle | `js/warehouse.js`, `tests/order-flow-smoke.js`, `index.html` | `node --check js/warehouse.js && node tests/order-flow-smoke.js` + full smoke gate set | fail -> fixed | Пушнуть публичный билд и проверить `warehouse.js?v=95` |
 | 2026-03-17 | Packaging reserve + warehouse collection parity | `js/app.js`, `js/orders.js`, `js/warehouse.js`, `tests/order-flow-smoke.js`, `index.html` | `node --check js/app.js && node --check js/orders.js && node --check js/warehouse.js && node --check tests/order-flow-smoke.js && node tests/order-flow-smoke.js && node tests/work-management-smoke.js && node tests/auth-hardening-smoke.js && node tests/factual-smoke.js && node tests/supabase-fallback-smoke.js` | fail -> fixed | Пушнуть публичный билд и проверить `app.js?v=110`, `orders.js?v=61`, `warehouse.js?v=96` |
+| 2026-05-05 | M6 global stabilization baseline | `scripts/audit-codebase-health.mjs`, `scripts/audit-data-paths.mjs`, `.github/workflows/deploy-pages.yml`, `docs/plans.md`, `docs/status.md`, `docs/test-plan.md`, `docs/yandex-migration-plan.md` | `node scripts/audit-codebase-health.mjs`; `node scripts/audit-data-paths.mjs`; full local smoke baseline; `node tests/yandex-writeback-smoke.mjs` | pass | Build module-by-module migration readiness matrix, then start China/warehouse write-flow audit |
 
 ## Smoke / Demo Checklist
 - [x] Root app стабильно грузится локально и дает пройти навигацию `orders -> colors -> warehouse -> china` без blocker-level runtime errors.

@@ -47,6 +47,7 @@
 | M3b | Сквозная проверка склада (добавление/списание/инвентаризация/приемка) во всех окнах | M3 | [ ] |
 | M4 | Закрыть найденные дефекты, прогнать регрессию и собрать список улучшений | M2, M3, M3b | [~] |
 | M5 | Подтвердить результат на live-сессии и оформить handoff | M4 | [~] |
+| M6 | Глобальная стабилизация перед миграцией в Яндекс | M3, M4, M5 | [~] |
 
 ## M1. Зафиксировать audit matrix и воспроизводимый harness `[x]`
 ### Goal
@@ -232,3 +233,47 @@ python3 -m http.server 4173
 
 ### Stop-and-Fix Rule
 - Если для продолжения нужен необратимый live action, секрет или ручная операция вне текущего доступа, остановиться, зафиксировать blocker и согласовать следующий шаг отдельно.
+
+## M6. Глобальная стабилизация перед миграцией в Яндекс `[~]`
+### Goal
+- Перед переносом источника истины в российскую инфраструктуру найти и закрыть системные риски: double-write, stale fallback, конфликтующие действия, скрытые расхождения данных, медленные загрузки и слабые smoke gaps.
+
+### Scope
+- Основной сайт `calc.recycleobject.ru`, зеркало `calc2.recycleobject.ru`, GitHub Pages reserve и Yandex proxy/write-back path.
+- Data modules: `orders/order_items`, `warehouse_items/reservations/history`, `shipments`, `china_purchases`, `molds`, `hw_blanks/pkg_blanks`, `time_entries`, `employees/auth`, `tasks/projects`, `finance/FinTablo snapshots`.
+- UI modules: `calculator`, `orders`, `order-detail`, `warehouse`, `china`, `molds`, `marketplaces`, `timetrack`, `finance`, `factual`, `settings`, `monitoring`.
+
+### Passes
+- [x] Static integrity baseline: scripts, HTML ids, visible version metadata, inline handler targets.
+- [x] Data-path inventory baseline: for every `load*/save*/delete*/sync*`, document source of truth, fallback, local cache key, remote table/settings key and write conflict behavior.
+- [ ] Duplicate-action audit: status transitions, warehouse deductions/returns, shipment posting/reposting, China receipt posting, ready-goods moves, task notification events.
+- [ ] Cross-site parity: verify that each critical action works from `calc` and `calc2`, and that write-back appears in the shared current source of truth.
+- [ ] Performance/load audit: identify first-load heavy data, repeated fetches, giant base64/photo payloads, localStorage pressure and modules that should lazy-load or snapshot.
+- [ ] Migration readiness: rank modules as safe for Yandex read-only, safe for Yandex write-back, safe for dual-write, or blocked.
+- [ ] Regression expansion: add smoke coverage for every confirmed defect before shipping its fix.
+
+### Initial Baseline
+- `node scripts/audit-codebase-health.mjs` added as a repeatable audit gate and CI verify step.
+- `node scripts/audit-data-paths.mjs` added as a repeatable data-path inventory. Current baseline: 133 load/save/update/delete functions, 67 remote writers, 40 remote readers, 96 functions with fallback/local cache behavior, 26 remote tables, 46 local cache keys.
+- Current clean hard checks: 0 duplicate scripts, 0 missing scripts, 0 duplicate ids, 0 missing object-method inline handler targets, version metadata aligned at `v332`.
+- Current inspection counters: 202 `console.error`, 133 direct `localStorage`, 36 `confirm`, 14 `prompt`, 3 `setInterval`; these are not automatically bugs, but they define the first manual review queue.
+
+### Definition of Done
+- Each critical module has a migration-readiness row with current source of truth, Yandex behavior, write-back behavior, tests/smokes and blockers.
+- Confirmed double-write/idempotency bugs are fixed or explicitly blocked with owner/reason.
+- Heavy-load and fallback risks are separated into immediate fixes vs migration blockers.
+
+### Validation
+```sh
+node scripts/audit-codebase-health.mjs
+node scripts/audit-data-paths.mjs
+for f in js/*.js corporate-gift/*.js; do node --check "$f"; done
+node tests/version-smoke.js
+node tests/order-flow-smoke.js
+node tests/supabase-fallback-smoke.js
+node tests/yandex-writeback-smoke.mjs
+```
+
+### Stop-and-Fix Rule
+- If an audited action can write different results on `calc` and `calc2`, pause migration work for that module and fix parity before moving forward.
+- If a data action can run twice and produce a different final state than once, add a regression and fix idempotency before treating the module as migration-ready.

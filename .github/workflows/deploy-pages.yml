@@ -55,6 +55,8 @@ jobs:
           node tests/production-calendar-smoke.js
           node tests/factual-smoke.js
           node tests/supabase-fallback-smoke.js
+          node scripts/audit-codebase-health.mjs
+          node scripts/audit-data-paths.mjs
           node --check tests/live-site-smoke.mjs
           node --check tests/yandex-mirror-smoke.mjs
           node --check tests/warehouse-stress-smoke.mjs

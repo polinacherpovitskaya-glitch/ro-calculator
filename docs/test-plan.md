@@ -70,6 +70,8 @@
 - `corporate-gift` с пустой или некорректной формой должен блокировать submit и фокусировать корректное поле.
 
 ## Acceptance Gates
+- [x] `node scripts/audit-codebase-health.mjs`
+- [x] `node scripts/audit-data-paths.mjs`
 - [ ] `for f in js/*.js corporate-gift/*.js; do node --check "$f"; done`
 - [ ] `python3 -m http.server 4173`
 - [x] `node tests/order-flow-smoke.js`
@@ -104,6 +106,8 @@
 
 ## Command Matrix
 ```sh
+node scripts/audit-codebase-health.mjs
+node scripts/audit-data-paths.mjs
 for f in js/*.js corporate-gift/*.js; do node --check "$f"; done
 python3 -m http.server 4173
 node tests/order-flow-smoke.js
