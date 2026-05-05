@@ -9,6 +9,7 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 let supabaseClient = null;
 const SAME_ORIGIN_BOOTSTRAP_PATH = '/api/bootstrap';
 const SAME_ORIGIN_BOOTSTRAP_TTL_MS = 30 * 1000;
+const STATIC_BOOTSTRAP_PATH = '/data/bootstrap.json';
 let _sameOriginBootstrapCache = {};
 let _sameOriginBootstrapFetchedAt = {};
 let _sameOriginBootstrapLastErrors = {};
@@ -120,6 +121,25 @@ function _canUseSameOriginBootstrap() {
         && /^https?:$/.test(window.location.protocol || '');
 }
 
+function _getStaticBootstrapUrls() {
+    if (typeof window === 'undefined' || typeof fetch !== 'function' || !window.location) return [];
+    const urls = [];
+    try {
+        urls.push(new URL(STATIC_BOOTSTRAP_PATH, window.location.origin).toString());
+    } catch (_) {}
+    const host = String(window.location.hostname || '').toLowerCase();
+    if (host === 'calc2.recycleobject.ru' || host.endsWith('.website.yandexcloud.net')) {
+        urls.push('https://storage.yandexcloud.net/calc2.recycleobject.ru/data/bootstrap.json');
+    }
+    return [...new Set(urls)];
+}
+
+function _isStaticYandexMirrorRuntime() {
+    if (typeof window === 'undefined' || !window.location) return false;
+    const host = String(window.location.hostname || '').toLowerCase();
+    return host === 'calc2.recycleobject.ru' || host.endsWith('.website.yandexcloud.net');
+}
+
 async function _fetchJsonWithTimeout(url, timeoutMs = 3000) {
     const controller = typeof AbortController === 'function' ? new AbortController() : null;
     const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
@@ -162,17 +182,38 @@ async function _loadSameOriginBootstrap(keys = [], options = {}) {
         const url = new URL(SAME_ORIGIN_BOOTSTRAP_PATH, window.location.origin);
         url.searchParams.set('keys', requestKey);
         const timeoutMs = Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : 3500;
+        const cacheBootstrapData = (payload) => {
+            const now = Date.now();
+            const data = payload && typeof payload === 'object' ? (payload.data || {}) : {};
+            _sameOriginBootstrapLastErrors = payload && typeof payload === 'object' ? (payload.errors || {}) : {};
+            Object.entries(data).forEach(([key, value]) => {
+                _sameOriginBootstrapCache[key] = value;
+                _sameOriginBootstrapFetchedAt[key] = now;
+            });
+            return data;
+        };
+        const loadStaticBootstrap = async () => {
+            const urls = _getStaticBootstrapUrls();
+            for (const staticUrl of urls) {
+                try {
+                    const payload = await _fetchJsonWithTimeout(staticUrl, Math.max(timeoutMs, 15000));
+                    const data = cacheBootstrapData(payload);
+                    const hasAnyRequestedKey = missingKeys.some(key => data && Object.prototype.hasOwnProperty.call(data, key));
+                    if (hasAnyRequestedKey) return data;
+                } catch (error) {
+                    console.warn('static bootstrap failed:', staticUrl, error);
+                }
+            }
+            return null;
+        };
         const bootstrapPromise = _fetchJsonWithTimeout(url.toString(), timeoutMs)
             .then(payload => {
-                const now = Date.now();
-                const data = payload && typeof payload === 'object' ? (payload.data || {}) : {};
-                _sameOriginBootstrapLastErrors = payload && typeof payload === 'object' ? (payload.errors || {}) : {};
-                Object.entries(data).forEach(([key, value]) => {
-                    _sameOriginBootstrapCache[key] = value;
-                    _sameOriginBootstrapFetchedAt[key] = now;
-                });
+                const data = cacheBootstrapData(payload);
+                const hasAnyRequestedKey = missingKeys.some(key => data && Object.prototype.hasOwnProperty.call(data, key));
+                if (!hasAnyRequestedKey) return loadStaticBootstrap();
                 return data;
             })
+            .catch(() => loadStaticBootstrap())
             .finally(() => {
                 _sameOriginBootstrapPromises.delete(requestKey);
             });
@@ -1949,10 +1990,14 @@ async function loadOrders(filters = {}) {
     const refreshOrdersWarmCache = async () => {
         if (_ordersRefreshPromise) return _ordersRefreshPromise;
         _ordersRefreshPromise = (async () => {
-            const bootstrapPayload = await _loadSameOriginBootstrap(['orders']);
+            const bootstrapKeys = _isStaticYandexMirrorRuntime() ? ['orders', 'orderItems'] : ['orders'];
+            const bootstrapPayload = await _loadSameOriginBootstrap(bootstrapKeys);
             if (bootstrapPayload && Array.isArray(bootstrapPayload.orders) && bootstrapPayload.orders.length > 0) {
                 const mergedOrders = _mergeOrderRows(bootstrapPayload.orders);
                 setLocal(LOCAL_KEYS.orders, mergedOrders);
+                if (Array.isArray(bootstrapPayload.orderItems)) {
+                    setLocal(LOCAL_KEYS.orderItems, bootstrapPayload.orderItems);
+                }
                 _ordersLastSyncAt = Date.now();
                 _setDataLoadMeta('orders', { source: 'bootstrap' });
                 _dispatchDataRefreshEvent('ro:orders-refreshed', { orders: mergedOrders });
@@ -1965,7 +2010,11 @@ async function loadOrders(filters = {}) {
         return _ordersRefreshPromise;
     };
 
-    if (localFallback.length > 0) {
+    const shouldRefreshStaticOrderItems = _isStaticYandexMirrorRuntime()
+        && localFallback.length > 0
+        && (!Array.isArray(getLocal(LOCAL_KEYS.orderItems)) || getLocal(LOCAL_KEYS.orderItems).length === 0);
+
+    if (localFallback.length > 0 && !shouldRefreshStaticOrderItems) {
         _setDataLoadMeta('orders', { source: 'local' });
         if (_shouldRefreshWarmCache(_ordersLastSyncAt)) {
             refreshOrdersWarmCache().catch(() => {});
@@ -1973,10 +2022,14 @@ async function loadOrders(filters = {}) {
         return localFallback;
     }
 
-    const bootstrapPayload = await _loadSameOriginBootstrap(['orders']);
+    const bootstrapKeys = _isStaticYandexMirrorRuntime() ? ['orders', 'orderItems'] : ['orders'];
+    const bootstrapPayload = await _loadSameOriginBootstrap(bootstrapKeys);
     if (bootstrapPayload && Array.isArray(bootstrapPayload.orders) && bootstrapPayload.orders.length > 0) {
         const mergedOrders = _mergeOrderRows(bootstrapPayload.orders);
         setLocal(LOCAL_KEYS.orders, mergedOrders);
+        if (Array.isArray(bootstrapPayload.orderItems)) {
+            setLocal(LOCAL_KEYS.orderItems, bootstrapPayload.orderItems);
+        }
         _ordersLastSyncAt = Date.now();
         _setDataLoadMeta('orders', { source: 'bootstrap' });
         return applyOrderFilters(mergedOrders);
@@ -2070,6 +2123,10 @@ async function loadOrder(orderId) {
         }
         return order ? { order, items: dedupedItems, repaired_duplicates: repairedDuplicates } : null;
     };
+    const localSnapshot = await loadLocalOrder();
+    if (_isStaticYandexMirrorRuntime() && localSnapshot) {
+        return localSnapshot;
+    }
     if (isSupabaseReady()) {
         try {
             const { data: order, error: e1 } = await _withRemoteTimeout('load', 'load order', () => supabaseClient
@@ -5009,6 +5066,14 @@ async function saveProductionPlanState(state) {
 
 async function loadProjectHardwareState() {
     const fallback = getLocal(LOCAL_KEYS.projectHardwareState) || { checks: {}, actual_qtys: {} };
+    const bootstrapPayload = await _loadSameOriginBootstrap(['projectHardwareState']);
+    if (bootstrapPayload && bootstrapPayload.projectHardwareState && typeof bootstrapPayload.projectHardwareState === 'object') {
+        const parsed = bootstrapPayload.projectHardwareState;
+        if (!parsed.checks || typeof parsed.checks !== 'object') parsed.checks = {};
+        if (!parsed.actual_qtys || typeof parsed.actual_qtys !== 'object') parsed.actual_qtys = {};
+        setLocal(LOCAL_KEYS.projectHardwareState, parsed);
+        return parsed;
+    }
     if (isSupabaseReady()) {
         try {
             const { data, error } = await supabaseClient
@@ -5569,6 +5634,11 @@ async function deleteWarehouseItem(itemId) {
 }
 
 async function loadWarehouseReservations() {
+    const bootstrapPayload = await _loadSameOriginBootstrap(['warehouseReservations']);
+    if (bootstrapPayload && Array.isArray(bootstrapPayload.warehouseReservations)) {
+        setLocal(LOCAL_KEYS.warehouseReservations, bootstrapPayload.warehouseReservations);
+        return bootstrapPayload.warehouseReservations;
+    }
     if (isSupabaseReady()) {
         try {
             const { data, error } = await _withRemoteTimeout('load', 'load warehouse_reservations', () => supabaseClient
@@ -5614,6 +5684,11 @@ async function saveWarehouseReservations(reservations) {
 }
 
 async function loadWarehouseHistory() {
+    const bootstrapPayload = await _loadSameOriginBootstrap(['warehouseHistory']);
+    if (bootstrapPayload && Array.isArray(bootstrapPayload.warehouseHistory)) {
+        setLocal(LOCAL_KEYS.warehouseHistory, bootstrapPayload.warehouseHistory);
+        return bootstrapPayload.warehouseHistory;
+    }
     if (isSupabaseReady()) {
         try {
             const { data, error } = await _withRemoteTimeout('load', 'load warehouse_history', () => supabaseClient

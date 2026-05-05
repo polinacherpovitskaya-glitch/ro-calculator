@@ -1,0 +1,98 @@
+name: Yandex static mirror sync
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_run:
+    workflows:
+      - Deploy GitHub Pages
+    types:
+      - completed
+
+permissions:
+  contents: read
+
+concurrency:
+  group: yandex-static-mirror
+  cancel-in-progress: true
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  RO_YANDEX_BUCKET: calc2.recycleobject.ru
+  YC_CLOUD_ID: b1gl59l77vb50ihub2nd
+  YC_FOLDER_ID: b1gc32hu5ujioie1o0ht
+
+jobs:
+  sync:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Build Yandex static bundle
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          RO_YANDEX_BUCKET: ${{ env.RO_YANDEX_BUCKET }}
+        run: node scripts/build-yandex-static.mjs
+
+      - name: Install Yandex Cloud CLI
+        run: |
+          set -euo pipefail
+          curl -fsSL https://storage.yandexcloud.net/yandexcloud-yc/install.sh | bash -s -- -i "$HOME/yandex-cloud" -n
+          echo "$HOME/yandex-cloud/bin" >> "$GITHUB_PATH"
+
+      - name: Upload mirror to Yandex Object Storage
+        env:
+          YC_OAUTH_TOKEN: ${{ secrets.YC_OAUTH_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${YC_OAUTH_TOKEN:-}" ]; then
+            echo "YC_OAUTH_TOKEN secret is required to sync calc2.recycleobject.ru" >&2
+            exit 1
+          fi
+
+          yc config set token "$YC_OAUTH_TOKEN" >/dev/null
+          yc config set cloud-id "$YC_CLOUD_ID" >/dev/null
+          yc config set folder-id "$YC_FOLDER_ID" >/dev/null
+
+          upload_one() {
+            local file="$1"
+            local rel="${file#deploy/static-yandex/}"
+            local content_type="application/octet-stream"
+            case "$file" in
+              *.html) content_type="text/html; charset=utf-8" ;;
+              *.css) content_type="text/css; charset=utf-8" ;;
+              *.js) content_type="application/javascript; charset=utf-8" ;;
+              *.json) content_type="application/json; charset=utf-8" ;;
+              *.png) content_type="image/png" ;;
+              *.jpg|*.jpeg) content_type="image/jpeg" ;;
+              *.svg) content_type="image/svg+xml" ;;
+              *.ico) content_type="image/x-icon" ;;
+              *.webp) content_type="image/webp" ;;
+            esac
+            yc storage s3 cp "$file" "s3://${RO_YANDEX_BUCKET}/${rel}" --content-type "$content_type"
+          }
+
+          while IFS= read -r -d '' file; do
+            upload_one "$file"
+          done < <(find deploy/static-yandex -type f -print0)
+
+          yc config unset token >/dev/null
+
+      - name: Upload bundle artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: yandex-static-bundle
+          path: deploy/static-yandex
+          if-no-files-found: ignore
