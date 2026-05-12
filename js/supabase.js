@@ -223,14 +223,15 @@ async function _loadSameOriginBootstrap(keys = [], options = {}) {
             }
             return null;
         };
-        const bootstrapPromise = _fetchJsonWithTimeout(url.toString(), timeoutMs)
+        const remoteBootstrap = () => _fetchJsonWithTimeout(url.toString(), timeoutMs)
             .then(payload => {
                 const data = cacheBootstrapData(payload);
                 const hasAnyRequestedKey = missingKeys.some(key => data && Object.prototype.hasOwnProperty.call(data, key));
                 if (!hasAnyRequestedKey) return loadStaticBootstrap();
                 return data;
             })
-            .catch(() => loadStaticBootstrap())
+            .catch(() => loadStaticBootstrap());
+        const bootstrapPromise = (_isStaticYandexMirrorRuntime() ? loadStaticBootstrap() : remoteBootstrap())
             .finally(() => {
                 _sameOriginBootstrapPromises.delete(requestKey);
             });
@@ -5760,15 +5761,21 @@ async function loadWarehouseReservations() {
 }
 
 async function saveWarehouseReservations(reservations) {
+    setLocal(LOCAL_KEYS.warehouseReservations, reservations);
     if (isSupabaseReady()) {
         try {
             const { error } = await _withRemoteTimeout('write', 'save warehouse_reservations', () => supabaseClient.from('warehouse_reservations').upsert({
                 id: 1, reservations_data: JSON.stringify(reservations), updated_at: new Date().toISOString()
             }, { onConflict: 'id' }));
             if (error) console.error('saveWarehouseReservations error:', error);
-        } catch(e) { console.error('saveWarehouseReservations exception:', e); }
+        } catch(e) {
+            if (e && e.code === 'timeout') {
+                console.warn('saveWarehouseReservations timed out; kept local reservations snapshot.', e);
+            } else {
+                console.error('saveWarehouseReservations exception:', e);
+            }
+        }
     }
-    setLocal(LOCAL_KEYS.warehouseReservations, reservations);
 }
 
 async function loadWarehouseHistory() {
