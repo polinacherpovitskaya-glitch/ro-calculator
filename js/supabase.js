@@ -6813,12 +6813,18 @@ function _isWorkModuleMissingTableError(error) {
     return _isSupabaseMissingTableError(error);
 }
 
+function _isTransientWorkModuleRemoteError(error) {
+    const message = String(error?.message || error || '').toLowerCase();
+    return message.includes('timeout')
+        || message.includes('bad gateway')
+        || message.includes('response code 502');
+}
+
 function _markWorkModuleRemoteUnavailable(error) {
     if (_workModuleRemoteAvailable === false) return;
-    const message = String(error?.message || error || '').toLowerCase();
-    if (message.includes('timeout') || message.includes('bad gateway') || message.includes('response code 502')) {
+    if (_isTransientWorkModuleRemoteError(error)) {
         _workModuleRemoteAvailable = false;
-        console.warn('Work management remote is temporarily unavailable. Using local fallback for this module.', error);
+        console.info('Work management remote is temporarily unavailable. Using local fallback for this module.', error);
         return;
     }
     if (_isSupabaseAccessError(error)) {
@@ -6941,8 +6947,10 @@ async function _loadWorkTableRows(table, localKey, orderBy, ascending) {
                 }
             }
         } catch (e) {
-            console.error(`load ${table} exception:`, e);
             _markWorkModuleRemoteUnavailable(e);
+            if (!_isTransientWorkModuleRemoteError(e) && !_isSupabaseAccessError(e)) {
+                console.error(`load ${table} exception:`, e);
+            }
         }
     }
     const local = getLocal(localKey) || [];
@@ -6992,10 +7000,12 @@ async function _upsertWorkTableRows(table, localKey, rows, onConflict) {
                 _workModuleRemoteAvailable = true;
                 _clearOptionalWorkTableMissing(table);
             }
-    } catch (e) {
-        console.error(`upsert ${table} exception:`, e);
-        _markWorkModuleRemoteUnavailable(e);
-    }
+        } catch (e) {
+            _markWorkModuleRemoteUnavailable(e);
+            if (!_isTransientWorkModuleRemoteError(e) && !_isSupabaseAccessError(e)) {
+                console.error(`upsert ${table} exception:`, e);
+            }
+        }
     }
     if (conflictKey && conflictKey !== 'id') {
         const keys = conflictKey.split(',').map(part => part.trim()).filter(Boolean);
@@ -7035,8 +7045,10 @@ async function _deleteWorkTableRow(table, localKey, rowId) {
                 _workModuleRemoteAvailable = true;
             }
         } catch (e) {
-            console.error(`delete ${table} exception:`, e);
             _markWorkModuleRemoteUnavailable(e);
+            if (!_isTransientWorkModuleRemoteError(e) && !_isSupabaseAccessError(e)) {
+                console.error(`delete ${table} exception:`, e);
+            }
         }
     }
     const next = _removeLocalEntityRow(localKey, item => String(item?.id) === String(rowId));

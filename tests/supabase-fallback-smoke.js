@@ -819,6 +819,21 @@ async function main() {
 
     {
         const context = createContext();
+        context.__consoleErrors = [];
+        context.__consoleWarnings = [];
+        context.__consoleInfos = [];
+        context.console = {
+            ...console,
+            error(...args) {
+                context.__consoleErrors.push(args.map(String).join(' '));
+            },
+            warn(...args) {
+                context.__consoleWarnings.push(args.map(String).join(' '));
+            },
+            info(...args) {
+                context.__consoleInfos.push(args.map(String).join(' '));
+            },
+        };
         context.__hangingTables = new Set(['tasks', 'settings']);
         runScript(context, 'js/supabase.js');
         vm.runInContext('initSupabase()', context);
@@ -838,6 +853,73 @@ async function main() {
         assert.equal(context.__remoteCalls.some(call => call.table === 'tasks' && call.action === 'upsert'), true);
         assert.equal(context.__remoteCalls.some(call => call.table === 'settings' && call.action === 'maybeSingle'), true);
         assert.equal(context.__remoteCalls.some(call => call.table === 'settings' && call.action === 'upsert'), true);
+        assert.equal(
+            context.__consoleErrors.some((line) => line.includes('upsert tasks exception')),
+            false,
+            'work task write timeout fallback should not emit a console error'
+        );
+        assert.equal(
+            context.__consoleWarnings.some((line) => line.includes('Work management remote is temporarily unavailable')),
+            false,
+            'work task write timeout fallback should not emit a warning'
+        );
+        assert.equal(
+            context.__consoleInfos.some((line) => line.includes('Work management remote is temporarily unavailable')),
+            true,
+            'work task write timeout fallback should remain visible as diagnostic info'
+        );
+    }
+
+    {
+        const context = createContext();
+        context.__consoleErrors = [];
+        context.__consoleWarnings = [];
+        context.__consoleInfos = [];
+        context.console = {
+            ...console,
+            error(...args) {
+                context.__consoleErrors.push(args.map(String).join(' '));
+            },
+            warn(...args) {
+                context.__consoleWarnings.push(args.map(String).join(' '));
+            },
+            info(...args) {
+                context.__consoleInfos.push(args.map(String).join(' '));
+            },
+        };
+        context.__hangingTables = new Set(['work_assets']);
+        runScript(context, 'js/supabase.js');
+        vm.runInContext(`
+            initSupabase();
+            setLocal(LOCAL_KEYS.workAssets, [{
+                id: 909,
+                task_id: 303,
+                kind: 'link',
+                title: 'Warm local asset',
+                created_at: '2026-03-23T10:00:00.000Z'
+            }]);
+        `, context);
+
+        const loadedAssets = JSON.parse(JSON.stringify(await vm.runInContext(`
+            _loadWorkTableRows('work_assets', LOCAL_KEYS.workAssets, 'created_at', true)
+        `, context)));
+        assert.equal(loadedAssets.length, 1, 'work assets timeout should resolve from local fallback');
+        assert.equal(loadedAssets[0].title, 'Warm local asset');
+        assert.equal(
+            context.__consoleErrors.some((line) => line.includes('load work_assets exception')),
+            false,
+            'work assets timeout fallback should not emit a console error'
+        );
+        assert.equal(
+            context.__consoleWarnings.some((line) => line.includes('Work management remote is temporarily unavailable')),
+            false,
+            'work assets timeout fallback should not emit a warning'
+        );
+        assert.equal(
+            context.__consoleInfos.some((line) => line.includes('Work management remote is temporarily unavailable')),
+            true,
+            'work assets timeout fallback should remain visible as diagnostic info'
+        );
     }
 
     {
