@@ -373,14 +373,16 @@ async function main() {
         await vm.runInContext('permanentDeleteOrder(301)', context);
 
         const localOrders = JSON.parse(context.localStorage.getItem('ro_calc_orders') || '[]');
-        const localItems = JSON.parse(context.localStorage.getItem('ro_calc_order_items') || '[]');
+        const cachedItems = JSON.parse(JSON.stringify(vm.runInContext('getLocal(LOCAL_KEYS.orderItems)', context) || []));
+        const rawLocalItems = JSON.parse(context.localStorage.getItem('ro_calc_order_items') || '[]');
 
         assert.equal(context.__tables.orders.some(order => order.id === 301), false);
         assert.equal(context.__tables.order_items.some(item => item.order_id === 301), false);
         assert.equal(localOrders.some(order => order.id === 301), false, 'permanent delete must purge local order cache');
-        assert.equal(localItems.some(item => item.order_id === 301), false, 'permanent delete must purge local item cache');
+        assert.equal(cachedItems.some(item => item.order_id === 301), false, 'permanent delete must purge local item cache');
+        assert.equal(rawLocalItems.some(item => item.order_id === 301), false, 'permanent delete must purge persisted local item cache when present');
         assert.equal(localOrders.some(order => order.id === 302), true);
-        assert.equal(localItems.some(item => item.order_id === 302), true);
+        assert.equal(cachedItems.some(item => item.order_id === 302), true);
         assert.equal(context.App.editingOrderId, null);
         assert.equal(context.localStorage.getItem('ro_calc_editing_order_id'), null);
         assert.equal(context.Calculator.resetCount, 1);
