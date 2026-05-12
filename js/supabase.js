@@ -1984,6 +1984,7 @@ async function saveOrder(order, items = []) {
 
         // Also save to localStorage as backup (full data, no filtering)
         _saveOrderLocally(localBackupOrder, items);
+        _markLocalDatasetDirty(['orders', 'orderItems']);
 
         return orderId;
     } else {
@@ -2007,6 +2008,7 @@ async function saveOrder(order, items = []) {
             updated_at: nowIso,
         }));
         setLocal(LOCAL_KEYS.orderItems, [...filtered, ...newItems]);
+        _markLocalDatasetDirty(['orders', 'orderItems']);
 
         return orderId;
     }
@@ -2093,7 +2095,7 @@ async function loadOrders(filters = {}) {
 
     if (localFallback.length > 0 && !shouldRefreshStaticOrderItems) {
         _setDataLoadMeta('orders', { source: 'local' });
-        if (_shouldRefreshWarmCache(_ordersLastSyncAt)) {
+        if (!_isLocalDatasetDirty('orders') && _shouldRefreshWarmCache(_ordersLastSyncAt)) {
             refreshOrdersWarmCache().catch(() => {});
         }
         return localFallback;
@@ -2379,6 +2381,7 @@ async function deleteOrder(orderId) {
         }
     }
     _upsertOrderLocally({ id: orderId, status: 'deleted', deleted_at: nowIso }, { allowDeletedOverride: true });
+    _markLocalDatasetDirty(['orders', 'orderItems']);
     _clearEditingOrderReference(orderId);
 }
 
@@ -2405,6 +2408,7 @@ async function restoreOrder(orderId) {
         }
     }
     _upsertOrderLocally({ id: orderId, status: 'draft', deleted_at: null }, { allowDeletedOverride: true });
+    _markLocalDatasetDirty(['orders', 'orderItems']);
 }
 
 async function permanentDeleteOrder(orderId) {
@@ -2422,10 +2426,12 @@ async function permanentDeleteOrder(orderId) {
         }
     } else {
         _removeOrderLocally(orderId);
+        _markLocalDatasetDirty(['orders', 'orderItems']);
         _clearEditingOrderReference(orderId);
         return;
     }
     _removeOrderLocally(orderId);
+    _markLocalDatasetDirty(['orders', 'orderItems']);
     _clearEditingOrderReference(orderId);
 }
 
@@ -4167,6 +4173,41 @@ function _invalidateBootstrapCache(keys = []) {
         });
 }
 
+const LOCAL_DIRTY_DATASETS_KEY = 'ro_calc_dirty_datasets';
+
+function _readLocalDirtyDatasets() {
+    try {
+        const raw = localStorage.getItem(LOCAL_DIRTY_DATASETS_KEY);
+        const parsed = raw ? JSON.parse(raw) : {};
+        return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch (_) {
+        return {};
+    }
+}
+
+function _writeLocalDirtyDatasets(dirtyMap) {
+    try {
+        localStorage.setItem(LOCAL_DIRTY_DATASETS_KEY, JSON.stringify(dirtyMap || {}));
+    } catch (_) { /* ignore */ }
+}
+
+function _markLocalDatasetDirty(keys = []) {
+    const normalizedKeys = (Array.isArray(keys) ? keys : [keys])
+        .map(key => String(key || '').trim())
+        .filter(Boolean);
+    if (normalizedKeys.length === 0) return;
+    const dirtyMap = _readLocalDirtyDatasets();
+    const now = Date.now();
+    normalizedKeys.forEach(key => { dirtyMap[key] = now; });
+    _writeLocalDirtyDatasets(dirtyMap);
+    _invalidateBootstrapCache(normalizedKeys);
+}
+
+function _isLocalDatasetDirty(key) {
+    const dirtyMap = _readLocalDirtyDatasets();
+    return Number(dirtyMap && dirtyMap[key] || 0) > 0;
+}
+
 function _upsertLocalTimeEntry(entry, id = null) {
     if (!entry) return null;
     const entries = getLocal(LOCAL_KEYS.timeEntries) || [];
@@ -5563,6 +5604,9 @@ async function loadWarehouseItems() {
         }
     };
     const localFallback = async () => applyReservationSnapshot(getLocal(LOCAL_KEYS.warehouseItems) || []);
+    if (_isLocalDatasetDirty('warehouseItems')) {
+        return await localFallback();
+    }
     const liveBootstrapItems = await readLiveBootstrapWarehouseItems();
     if (liveBootstrapItems && liveBootstrapItems.length > 0) return liveBootstrapItems;
 
@@ -5661,6 +5705,7 @@ async function saveWarehouseItem(item) {
     });
     if (idx >= 0) items[idx] = item; else items.push(item);
     setLocal(LOCAL_KEYS.warehouseItems, items);
+    _markLocalDatasetDirty(['warehouseItems']);
     if (isSupabaseReady()) {
         await _saveJsonSetting(WAREHOUSE_ITEMS_SETTINGS_KEY, _buildWarehouseSnapshot(items));
     }
@@ -5686,6 +5731,7 @@ async function saveWarehouseItems(items) {
         } catch(e) { console.error('saveWarehouseItems exception:', e); }
     }
     setLocal(LOCAL_KEYS.warehouseItems, items);
+    _markLocalDatasetDirty(['warehouseItems']);
     if (isSupabaseReady()) {
         await _saveJsonSetting(WAREHOUSE_ITEMS_SETTINGS_KEY, _buildWarehouseSnapshot(items));
     }
@@ -5717,6 +5763,7 @@ async function deleteWarehouseItem(itemId) {
         return true;
     });
     setLocal(LOCAL_KEYS.warehouseItems, items);
+    _markLocalDatasetDirty(['warehouseItems']);
     if (isSupabaseReady()) {
         await _saveJsonSetting(WAREHOUSE_ITEMS_SETTINGS_KEY, _buildWarehouseSnapshot(items));
     }
