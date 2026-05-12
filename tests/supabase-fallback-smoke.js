@@ -648,6 +648,47 @@ async function main() {
 
     {
         const context = createContext();
+        context.__consoleWarnings = [];
+        context.__consoleInfos = [];
+        context.console = {
+            ...console,
+            warn(...args) {
+                context.__consoleWarnings.push(args.map(String).join(' '));
+            },
+            info(...args) {
+                context.__consoleInfos.push(args.map(String).join(' '));
+            },
+        };
+        runScript(context, 'js/supabase.js');
+        vm.runInContext('initSupabase();', context);
+        context.__hangingTables.add('warehouse_reservations');
+
+        await vm.runInContext(`saveWarehouseReservations([{
+            id: 41,
+            item_id: 7001,
+            order_id: 9001,
+            qty: 3,
+            status: 'active',
+            source: 'project_hardware',
+        }])`, context);
+
+        const cachedReservations = JSON.parse(JSON.stringify(vm.runInContext('getLocal(LOCAL_KEYS.warehouseReservations)', context)));
+        assert.equal(cachedReservations.length, 1, 'warehouse reservations timeout should still keep local snapshot');
+        assert.equal(cachedReservations[0].qty, 3);
+        assert.equal(
+            context.__consoleWarnings.some((line) => line.includes('saveWarehouseReservations timed out')),
+            false,
+            'warehouse reservations timeout fallback should not emit a warning when local snapshot is kept'
+        );
+        assert.equal(
+            context.__consoleInfos.some((line) => line.includes('saveWarehouseReservations timed out')),
+            true,
+            'warehouse reservations timeout fallback should remain visible as diagnostic info'
+        );
+    }
+
+    {
+        const context = createContext();
         runScript(context, 'js/supabase.js');
         vm.runInContext(`initSupabase();`, context);
         context.__invalidTables.add('warehouse_items');

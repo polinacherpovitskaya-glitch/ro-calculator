@@ -5770,7 +5770,7 @@ async function saveWarehouseReservations(reservations) {
             if (error) console.error('saveWarehouseReservations error:', error);
         } catch(e) {
             if (e && e.code === 'timeout') {
-                console.warn('saveWarehouseReservations timed out; kept local reservations snapshot.', e);
+                console.info('saveWarehouseReservations timed out; kept local reservations snapshot.', e);
             } else {
                 console.error('saveWarehouseReservations exception:', e);
             }
