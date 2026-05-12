@@ -433,10 +433,101 @@ async function smokeShipmentRepostAppliesOnlyDelta() {
     assert.match(context.__warehouseHistory[0].notes, /Перепроведение приёмки: было 2, стало 5/);
 }
 
+async function smokeChinaShipmentInfersSupplyCategories() {
+    const context = createContext();
+    runScript(context, 'js/china.js');
+
+    const items = clone(vm.runInContext(`ChinaPurchases._buildShipmentItemsFromPurchases([{
+        id: 7101,
+        purchase_name: 'Фурнитура на склад',
+        delivery_cost_cny: 0,
+        items: [
+            { name: 'Шнур серый', qty: 15000, price_cny: 0.02 },
+            { name: 'Карабин голубой', qty: 3000, price_cny: 0.04 },
+            { name: 'Пакет zip', qty: 1000, price_cny: 0.01 }
+        ]
+    }])`, context));
+
+    assert.equal(items[0].category, 'cords');
+    assert.equal(items[1].category, 'carabiners');
+    assert.equal(items[2].category, 'packaging');
+}
+
+async function smokeShipmentCreatesSpecificSupplyWithoutSku() {
+    const context = buildWarehouseContext();
+    context.__warehouseItems = [];
+    context.__savedWarehouseItem = null;
+    context.__savedShipment = null;
+    context.__adjustStockCalls = [];
+    context.confirm = () => true;
+    context.loadWarehouseItems = async () => clone(context.__warehouseItems);
+    context.saveWarehouseItem = async (item) => {
+        const saved = { ...clone(item), id: item.id || 7001 };
+        context.__savedWarehouseItem = clone(saved);
+        context.__warehouseItems.push(clone(saved));
+        return saved.id;
+    };
+    context.saveShipment = async (shipment) => {
+        context.__savedShipment = clone(shipment);
+        return shipment.id || 8001;
+    };
+
+    setInputValues(context, {
+        'wh-sh-name': 'China Hardware Receipt',
+        'wh-sh-date': '2026-05-12',
+        'wh-sh-supplier': 'China',
+        'wh-sh-cny-rate': '12',
+        'wh-sh-fee-cashout': '0',
+        'wh-sh-fee-crypto': '0',
+        'wh-sh-fee-1688': '0',
+        'wh-sh-delivery-china': '0',
+        'wh-sh-delivery-moscow': '0',
+        'wh-sh-total-delivery': '0',
+        'wh-sh-pricing-mode': 'weighted_avg',
+        'wh-sh-notes': '',
+    });
+
+    vm.runInContext(`
+        Warehouse.editingShipmentId = null;
+        Warehouse.allShipments = [];
+        Warehouse.shipmentItems = [{
+            source: 'new',
+            category: 'cords',
+            name: 'Шнур серый',
+            sku: '',
+            color: '',
+            size: '',
+            unit: 'шт',
+            qty_received: 15000,
+            weight_grams: 1200,
+            purchase_price_cny: 300,
+            purchase_price_rub: 0,
+            delivery_allocated: 0,
+            total_cost_per_unit: 0.24,
+        }];
+        Warehouse.adjustStock = async (itemId, delta, type, refName, note) => {
+            globalThis.__adjustStockCalls.push({ itemId, delta, type, refName, note });
+        };
+        Warehouse.hideShipmentForm = () => {};
+        Warehouse.setView = () => {};
+    `, context);
+
+    await vm.runInContext(`Warehouse.confirmShipment()`, context);
+
+    assert.equal(context.__savedWarehouseItem.name, 'Шнур серый');
+    assert.equal(context.__savedWarehouseItem.category, 'cords');
+    assert.equal(context.__savedShipment.status, 'received');
+    assert.equal(context.__savedShipment.items[0].warehouse_item_id, 7001);
+    assert.equal(context.__adjustStockCalls[0].itemId, 7001);
+    assert.equal(context.__adjustStockCalls[0].delta, 15000);
+}
+
 async function main() {
     await smokeManualFormQtyUsesLatestSharedStock();
     await smokeProjectHardwareReadyToggleIsIdempotent();
     await smokeShipmentRepostAppliesOnlyDelta();
+    await smokeChinaShipmentInfersSupplyCategories();
+    await smokeShipmentCreatesSpecificSupplyWithoutSku();
     console.log('warehouse migration smoke checks passed');
 }
 

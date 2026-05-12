@@ -7744,6 +7744,85 @@ async function smokeWarehouseInventoryAuditMutationBlockedAfterLaterMovement(con
     assert.match(inventoryHtml, /нельзя безопасно менять/i);
 }
 
+async function smokeStandaloneLetterBlankUsesPendantTierPricing(context) {
+    const state = clone(await vm.runInContext(`(() => {
+        const params = {
+            ...App.params,
+            wasteFactor: 1.1,
+            fotPerHour: 100,
+            indirectCostMode: 'none',
+            indirectPerHour: 0,
+            taxRate: 0.07,
+            vatRate: 0.05,
+            charityRate: 0.01,
+            commercialRate: 0.065,
+            plasticCostPerKg: 2500,
+            moldBaseCost: 18000,
+            designCost: 0,
+            cuttingSpeed: 1000,
+        };
+        App.params = params;
+        Molds.allMolds = [];
+        App.templates = [{
+            id: 30,
+            name: 'Буквы (бланк)',
+            category: 'blank',
+            custom_prices: { 3000: 140 },
+            custom_margins: {},
+            use_manual_prices: true,
+            pph_min: 60,
+            pph_max: 60,
+            pph_actual: 100,
+            pieces_per_hour_avg: 60,
+            pieces_per_hour_min: 60,
+            weight_grams: 10,
+            mold_count: 1,
+            cost_cny: 800,
+            cny_rate: 12.5,
+            delivery_cost: 8000,
+            hw_name: '',
+            hw_price_per_unit: 0,
+            hw_delivery_total: 0,
+            hw_speed: 0,
+            builtin_assembly_name: 'Сборка букв на шнур',
+            builtin_assembly_speed: 600,
+        }];
+        Calculator.items = [Calculator.getEmptyItem(1)];
+        Calculator.onTemplatePickerSelect(0, 30);
+        Calculator.items[0].quantity = 15000;
+        Calculator.items[0].sell_price_item = 140;
+        Calculator.items[0].result = calculateItemCost(Calculator.items[0], params);
+        Calculator.hardwareItems = [];
+        Calculator.packagingItems = [];
+        Calculator.pendants = [];
+        Calculator.extraCosts = [];
+
+        const standaloneCost = Calculator._calcBlankBaseCostFromTemplate(Calculator.items[0], 15000, params);
+        const pendantMetrics = getPendantLetterBlankMetrics(15000, params, {
+            quantity: 7500,
+            elements: [{ char: 'A' }, { char: 'B' }],
+        });
+        Calculator.renderPricingCard(params);
+        const html = document.getElementById('calc-pricing-content').innerHTML;
+        return {
+            selectedPph: Calculator.items[0].pieces_per_hour,
+            standaloneAssemblySpeed: Calculator.items[0].builtin_assembly_speed,
+            tierQty: getBlankCatalogTierQty(15000),
+            standaloneCost,
+            pendantCost: pendantMetrics.cost,
+            pendantSellPrice: pendantMetrics.sellPrice,
+            html,
+        };
+    })()`, context));
+
+    assert.equal(state.selectedPph, 100, 'standalone blank picker should prefer live pph_actual over stale average');
+    assert.equal(state.standaloneAssemblySpeed, 0, 'standalone letter blanks should be loose letters without built-in pendant assembly');
+    assert.equal(state.tierQty, 3000, '15000 loose letters should use the top blank catalog tier');
+    assert.equal(state.pendantSellPrice, 140, 'pendant letter pricing should use the top-tier manual blank price');
+    assert.match(state.html, /140 ₽/, 'standalone blank pricing card should show the same top-tier blank price');
+    assert.doesNotMatch(state.html, /170 ₽/, 'standalone blank pricing card should not recalculate a higher non-tier price at 15000');
+}
+
 async function main() {
     const context = createContext();
     ['js/calculator.js', 'js/app.js', 'js/orders.js', 'js/warehouse.js', 'js/order-detail.js', 'js/molds.js'].forEach(file => runScript(context, file));
@@ -7789,6 +7868,7 @@ async function main() {
     await smokeBlankBuiltinAssemblyUsesAssemblyLoad(context);
     await smokeBlankTemplateMoldCostOverridesGlobalDefault(context);
     await smokeSavedBlankMoldCostSurvivesOrderReload(context);
+    await smokeStandaloneLetterBlankUsesPendantTierPricing(context);
     await smokePendantFinDirectorUsesCurrentLetterCost(context);
     await smokeLegacyPendantRestore(context);
     await smokeCurrentPendantPayloadBeatsStaleNested(context);

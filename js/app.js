@@ -3400,10 +3400,10 @@ const Calculator = {
 
         this.items[idx].template_id = tpl.id;
         this.items[idx].product_name = tpl.name;
-        // Используем среднее между min и max — единая цена для заказчика
-        // независимо от цвета/качества пластика
-        const pphAvg = tpl.pieces_per_hour_avg || tpl.pieces_per_hour_min;
-        this.items[idx].pieces_per_hour = pphAvg;
+        const pph = typeof getBlankTemplatePiecesPerHour === 'function'
+            ? getBlankTemplatePiecesPerHour(tpl, this.items[idx].pieces_per_hour)
+            : (tpl.pph_actual || tpl.pieces_per_hour_actual || tpl.pieces_per_hour_avg || tpl.pieces_per_hour_min || this.items[idx].pieces_per_hour || 0);
+        this.items[idx].pieces_per_hour = pph;
         this.items[idx].weight_grams = tpl.weight_grams || 0;
         this.items[idx].is_blank_mold = true;
         this.items[idx].blank_mold_total_cost = getBlankTemplateTotalMoldCost(tpl);
@@ -3413,14 +3413,15 @@ const Calculator = {
         this.items[idx].builtin_hw_price = 0;
         this.items[idx].builtin_hw_delivery_total = 0;
         this.items[idx].builtin_hw_speed = 0;
-        this.items[idx].builtin_assembly_name = tpl.builtin_assembly_name || '';
-        this.items[idx].builtin_assembly_speed = Number(tpl.builtin_assembly_speed || 0);
+        const isLooseLetterBlank = typeof isPendantLetterBlankTemplate === 'function' && isPendantLetterBlankTemplate(tpl);
+        this.items[idx].builtin_assembly_name = isLooseLetterBlank ? '' : (tpl.builtin_assembly_name || '');
+        this.items[idx].builtin_assembly_speed = isLooseLetterBlank ? 0 : Number(tpl.builtin_assembly_speed || 0);
 
         // Auto-create per-item hardware from template
         this._syncTemplateHardware(idx, tpl);
 
         document.getElementById('item-name-' + idx).value = tpl.name;
-        document.getElementById('item-pph-' + idx).value = pphAvg;
+        document.getElementById('item-pph-' + idx).value = pph;
         document.getElementById('item-weight-' + idx).value = tpl.weight_grams || '';
         document.getElementById('item-title-' + idx).textContent = tpl.name;
 
@@ -4119,7 +4120,9 @@ const Calculator = {
         const tpl = (App.templates || []).find(t => t.id == item.template_id);
         if (!tpl) return 0;
 
-        const pph = Number(tpl.pieces_per_hour_avg || tpl.pieces_per_hour_min || item.pieces_per_hour || 0);
+        const pph = typeof getBlankTemplatePiecesPerHour === 'function'
+            ? getBlankTemplatePiecesPerHour(tpl, item.pieces_per_hour)
+            : Number(tpl.pph_actual || tpl.pieces_per_hour_actual || tpl.pieces_per_hour_avg || tpl.pieces_per_hour_min || item.pieces_per_hour || 0);
         const weight = Number(tpl.weight_grams || item.weight_grams || 0);
         if (!pph || pph <= 0) return 0;
 
@@ -4139,8 +4142,8 @@ const Calculator = {
             builtin_hw_price: 0,
             builtin_hw_delivery_total: 0,
             builtin_hw_speed: 0,
-            builtin_assembly_name: tpl.builtin_assembly_name || '',
-            builtin_assembly_speed: Number(tpl.builtin_assembly_speed || 0),
+            builtin_assembly_name: (typeof isPendantLetterBlankTemplate === 'function' && isPendantLetterBlankTemplate(tpl)) ? '' : (tpl.builtin_assembly_name || ''),
+            builtin_assembly_speed: (typeof isPendantLetterBlankTemplate === 'function' && isPendantLetterBlankTemplate(tpl)) ? 0 : Number(tpl.builtin_assembly_speed || 0),
         };
 
         const base = calculateItemCost(calcItem, params);
@@ -4159,15 +4162,6 @@ const Calculator = {
                 }
             }
             adjusted += hwCost;
-        }
-
-        if (Number(tpl.builtin_assembly_speed || 0) > 0) {
-            const assemblyHours = baseQtyForCost / Number(tpl.builtin_assembly_speed || 0) * (params.wasteFactor || 1.1);
-            let assemblyCost = assemblyHours * params.fotPerHour / baseQtyForCost;
-            if (params.indirectCostMode === 'all') {
-                assemblyCost += params.indirectPerHour * assemblyHours / baseQtyForCost;
-            }
-            adjusted += assemblyCost;
         }
 
         return round2(Math.max(0, adjusted));
@@ -4237,14 +4231,22 @@ const Calculator = {
             if (!Number.isFinite(cost) || cost <= 0) {
                 return { price: 0, note: 'прайс бланков', source: 'empty' };
             }
-            const customPrice = Number(tpl?.custom_prices?.[qty]);
+            const tierQty = typeof getBlankCatalogTierQty === 'function'
+                ? getBlankCatalogTierQty(qty)
+                : (() => {
+                    const normalizedQty = Number(qty) || 0;
+                    if (!(normalizedQty > 0)) return null;
+                    const tiers = [50, 100, 300, 500, 1000, 3000];
+                    return tiers.find(t => normalizedQty <= t) || tiers[tiers.length - 1];
+                })();
+            const customPrice = Number(tpl?.custom_prices?.[tierQty]);
             if (Number.isFinite(customPrice) && customPrice > 0) {
                 return { price: customPrice, note: 'вручную в бланке', source: 'custom_price' };
             }
 
-            const customMarginRaw = tpl?.custom_margins?.[qty];
+            const customMarginRaw = tpl?.custom_margins?.[tierQty];
             const hasCustomMargin = customMarginRaw !== null && customMarginRaw !== undefined && customMarginRaw !== '';
-            const margin = hasCustomMargin ? Number(customMarginRaw) : getBlankTierMarginLocal(qty);
+            const margin = hasCustomMargin ? Number(customMarginRaw) : getBlankTierMarginLocal(tierQty || qty);
             if (!Number.isFinite(margin)) {
                 return { price: 0, note: 'прайс бланков', source: 'empty' };
             }
@@ -5452,8 +5454,9 @@ const Calculator = {
                     item.builtin_hw_price = tpl.hw_price_per_unit || 0;
                     item.builtin_hw_delivery_total = tpl.hw_delivery_total || 0;
                     item.builtin_hw_speed = tpl.hw_speed || 0;
-                    item.builtin_assembly_name = tpl.builtin_assembly_name || '';
-                    item.builtin_assembly_speed = tpl.builtin_assembly_speed || 0;
+                    const isLooseLetterBlank = typeof isPendantLetterBlankTemplate === 'function' && isPendantLetterBlankTemplate(tpl);
+                    item.builtin_assembly_name = isLooseLetterBlank ? '' : (tpl.builtin_assembly_name || '');
+                    item.builtin_assembly_speed = isLooseLetterBlank ? 0 : (tpl.builtin_assembly_speed || 0);
                 }
             }
             this.items.push(item);

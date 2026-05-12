@@ -7079,11 +7079,16 @@ const Warehouse = {
         ].join('|');
     },
 
+    _isSpecificShipmentSupplyCategory(category) {
+        return ['carabiners', 'cables', 'rings', 'chains', 'cords', 'packaging'].includes(this._normStr(category));
+    },
+
     _isWeakShipmentIdentity(item) {
         if (!item || this._isMoldCategory(item.category)) return false;
         const sku = this._normStr(item.sku);
         if (sku) return false;
         const category = this._normStr(item.category || 'other');
+        if (this._isSpecificShipmentSupplyCategory(category) && this._normStr(item.name)) return false;
         const color = this._normStr(item.color);
         const size = this._normStr(item.size);
         return (!category || category === 'other') || (!color && !size);

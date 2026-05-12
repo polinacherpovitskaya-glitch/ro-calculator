@@ -177,6 +177,26 @@ const ChinaPurchases = {
         });
     },
 
+    _inferWarehouseCategoryFromChinaItem(item, purchase) {
+        if (item && item.category) return item.category;
+        const text = [
+            item && item.name,
+            item && item.sku,
+            purchase && purchase.purchase_name,
+        ].filter(Boolean).join(' ').toLowerCase();
+        if (!text) return 'other';
+
+        const hasAny = (patterns) => patterns.some(pattern => pattern.test(text));
+        if (hasAny([/молд/, /форма/, /\bmold\b/])) return 'molds';
+        if (hasAny([/караб/, /\bcarabin/, /\bkarabin/, /\bclasp\b/, /\bhook\b/])) return 'carabiners';
+        if (hasAny([/кольц/, /\bring\b/, /\bkey\s*ring\b/])) return 'rings';
+        if (hasAny([/шнур/, /lanyard/, /\bcord\b/, /\blace\b/])) return 'cords';
+        if (hasAny([/трос/, /\bcable\b/, /\bwire\b/])) return 'cables';
+        if (hasAny([/цеп/, /\bchain\b/])) return 'chains';
+        if (hasAny([/упаков/, /короб/, /пакет/, /мешоч/, /\bbox\b/, /\bbag\b/, /\bpouch\b/, /\bpackag/])) return 'packaging';
+        return 'other';
+    },
+
     _buildShipmentItemsFromPurchases(purchases) {
         const items = [];
         (purchases || []).forEach(purchase => {
@@ -205,7 +225,7 @@ const ChinaPurchases = {
                     warehouse_item_id: item.warehouse_item_id || null,
                     name: item.name || `Позиция ${index + 1}`,
                     sku: item.sku || '',
-                    category: item.category || 'other',
+                    category: this._inferWarehouseCategoryFromChinaItem(item, purchase),
                     size: item.size || '',
                     color: item.color || '',
                     unit: item.unit || 'шт',

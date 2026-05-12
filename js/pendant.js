@@ -1251,7 +1251,9 @@ const Pendant = {
                 : null;
         }
 
-        const pph = tpl.pieces_per_hour_avg || tpl.pieces_per_hour_min || 100;
+        const pph = typeof getBlankTemplatePiecesPerHour === 'function'
+            ? getBlankTemplatePiecesPerHour(tpl, 100)
+            : (tpl.pph_actual || tpl.pieces_per_hour_actual || tpl.pieces_per_hour_avg || tpl.pieces_per_hour_min || 100);
         const weight = tpl.weight_grams || 5;
         const moldCount = tpl.mold_count || 1;
         const singleMoldCost = (tpl.cost_cny ?? 800) * (tpl.cny_rate ?? 12.5) + (tpl.delivery_cost ?? 3000);
@@ -1295,14 +1297,6 @@ const Pendant = {
             cost += hwCost;
         }
 
-        if (Number(tpl.builtin_assembly_speed || 0) > 0) {
-            const assemblyHours = baseQtyForCost / Number(tpl.builtin_assembly_speed || 0) * (params.wasteFactor || 1.1);
-            let assemblyCost = assemblyHours * params.fotPerHour / baseQtyForCost;
-            if (params.indirectCostMode === 'all') {
-                assemblyCost += params.indirectPerHour * assemblyHours / baseQtyForCost;
-            }
-            cost += assemblyCost;
-        }
         cost = round2(cost);
 
         let sellPrice = Number.isFinite(customPrice) && customPrice > 0 ? customPrice : 0;

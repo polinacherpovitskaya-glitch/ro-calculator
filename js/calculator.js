@@ -656,6 +656,45 @@ function getPendantAttachmentCostPerUnit(type, entry, params) {
 const PENDANT_LETTER_BLANK_IDS = [30, 31];
 const PENDANT_LETTER_TIERS = [50, 100, 300, 500, 1000, 3000];
 
+function isPendantLetterBlankTemplate(sourceOrId) {
+    const id = typeof sourceOrId === 'object' && sourceOrId !== null
+        ? Number(sourceOrId.id)
+        : Number(sourceOrId);
+    return PENDANT_LETTER_BLANK_IDS.includes(id);
+}
+
+function getBlankCatalogTierQty(qty) {
+    const normalizedQty = Number(qty) || 0;
+    if (!(normalizedQty > 0)) return null;
+    let tierQty = PENDANT_LETTER_TIERS[PENDANT_LETTER_TIERS.length - 1];
+    for (const tier of PENDANT_LETTER_TIERS) {
+        if (normalizedQty <= tier) {
+            tierQty = tier;
+            break;
+        }
+    }
+    return tierQty;
+}
+
+function getBlankTemplatePiecesPerHour(source, fallback = 0) {
+    if (!source || typeof source !== 'object') return Number(fallback) || 0;
+    const pphMin = Number(source?.pph_min || source?.pieces_per_hour_min || 0);
+    const pphMax = Number(source?.pph_max || source?.pieces_per_hour_max || 0);
+    const pphAvg = (pphMin > 0 && pphMax > 0)
+        ? Math.round((pphMin + pphMax) / 2)
+        : (pphMin || pphMax || 0);
+    return Number(
+        source?.pph_actual
+        || source?.pieces_per_hour_actual
+        || source?.pieces_per_hour_avg
+        || pphAvg
+        || pphMin
+        || source?.pieces_per_hour
+        || fallback
+        || 0
+    );
+}
+
 function getPendantPreferredLetterBlankIds(pendant) {
     const elements = getCountablePendantElements(pendant);
     const sample = elements
@@ -666,15 +705,7 @@ function getPendantPreferredLetterBlankIds(pendant) {
 }
 
 function getPendantLetterBlankTierQty(totalElements) {
-    if (!(totalElements > 0)) return null;
-    let tierQty = PENDANT_LETTER_TIERS[PENDANT_LETTER_TIERS.length - 1];
-    for (const tier of PENDANT_LETTER_TIERS) {
-        if (totalElements <= tier) {
-            tierQty = tier;
-            break;
-        }
-    }
-    return tierQty;
+    return getBlankCatalogTierQty(totalElements);
 }
 
 function getPendantLetterBlankSource(pendant) {
@@ -704,20 +735,7 @@ function getPendantLetterBlankMetrics(totalElements, params, pendant) {
     const source = getPendantLetterBlankSource(pendant);
     if (!source) return null;
 
-    const pphMin = Number(source?.pph_min || source?.pieces_per_hour_min || 0);
-    const pphMax = Number(source?.pph_max || source?.pieces_per_hour_max || 0);
-    const pphAvg = (pphMin > 0 && pphMax > 0)
-        ? Math.round((pphMin + pphMax) / 2)
-        : 0;
-    const pph = Number(
-        source?.pph_actual
-        || source?.pieces_per_hour_actual
-        || source?.pieces_per_hour_avg
-        || pphAvg
-        || pphMin
-        || source?.pieces_per_hour
-        || 0
-    );
+    const pph = getBlankTemplatePiecesPerHour(source);
     const weight = Number(source?.weight_grams || 0);
     if (!(pph > 0) || !(weight > 0) || !params) return null;
 
@@ -1486,19 +1504,14 @@ function getOrderLiveCalculatorSnapshot(order = {}, orderItems = [], params = nu
                 : null;
             if (tpl) {
                 item.product_name = item.product_name || tpl.name || '';
-                item.pieces_per_hour = Number(
-                    tpl.pieces_per_hour_avg
-                    || tpl.pieces_per_hour_min
-                    || item.pieces_per_hour
-                    || 0
-                );
+                item.pieces_per_hour = getBlankTemplatePiecesPerHour(tpl, item.pieces_per_hour);
                 item.weight_grams = Number(tpl.weight_grams || item.weight_grams || 0);
                 item.is_blank_mold = true;
                 if (!(Number(item.blank_mold_total_cost || 0) > 0)) {
                     item.blank_mold_total_cost = getBlankTemplateTotalMoldCost(tpl);
                 }
-                item.builtin_assembly_name = tpl.builtin_assembly_name || '';
-                item.builtin_assembly_speed = Number(tpl.builtin_assembly_speed || 0);
+                item.builtin_assembly_name = isPendantLetterBlankTemplate(tpl) ? '' : (tpl.builtin_assembly_name || '');
+                item.builtin_assembly_speed = isPendantLetterBlankTemplate(tpl) ? 0 : Number(tpl.builtin_assembly_speed || 0);
                 if (!templateHardwareParentIndices.has(rawProductIndex)) {
                     item.builtin_hw_name = tpl.hw_name || '';
                     item.builtin_hw_price = Number(tpl.hw_price_per_unit || 0);
