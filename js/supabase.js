@@ -5586,6 +5586,8 @@ async function loadWarehouseItems() {
     });
     const readLiveBootstrapWarehouseItems = async () => {
         if (!_canUseSameOriginBootstrap()) return null;
+        // On the Yandex static mirror there is no live /api/bootstrap; the caller
+        // will use the supabaseClient (Yandex proxy) path below for fresh data.
         if (_isStaticYandexMirrorRuntime()) return null;
         try {
             const url = new URL(SAME_ORIGIN_BOOTSTRAP_PATH, window.location.origin);
@@ -5603,12 +5605,35 @@ async function loadWarehouseItems() {
             return null;
         }
     };
+    const readLiveSupabaseWarehouseItems = async () => {
+        if (!isSupabaseReady()) return null;
+        try {
+            const { data, error } = await _withRemoteTimeout('load', 'load warehouse_items', () => supabaseClient
+                .from('warehouse_items').select('*').order('name'));
+            if (error) {
+                console.error('loadWarehouseItems error:', error);
+                return null;
+            }
+            if (!Array.isArray(data) || data.length === 0) return null;
+            const hydratedItems = await applyReservationSnapshot(parseWarehouseRows(data));
+            setLocal(LOCAL_KEYS.warehouseItems, hydratedItems);
+            _invalidateBootstrapCache(['warehouseItems']);
+            return hydratedItems;
+        } catch (error) {
+            console.warn('loadWarehouseItems direct supabase failed:', error);
+            return null;
+        }
+    };
     const localFallback = async () => applyReservationSnapshot(getLocal(LOCAL_KEYS.warehouseItems) || []);
     if (_isLocalDatasetDirty('warehouseItems')) {
         return await localFallback();
     }
     const liveBootstrapItems = await readLiveBootstrapWarehouseItems();
     if (liveBootstrapItems && liveBootstrapItems.length > 0) return liveBootstrapItems;
+    // On Yandex mirror (and as a Vercel API fallback) read directly from Supabase so
+    // recent saves are visible immediately — the static bootstrap is up to ~30 min stale.
+    const liveSupabaseItems = await readLiveSupabaseWarehouseItems();
+    if (liveSupabaseItems && liveSupabaseItems.length > 0) return liveSupabaseItems;
 
     const bootstrapPayload = await _loadSameOriginBootstrap(['warehouseItems']);
     if (bootstrapPayload && Array.isArray(bootstrapPayload.warehouseItems) && bootstrapPayload.warehouseItems.length > 0) {
@@ -5709,6 +5734,7 @@ async function saveWarehouseItem(item) {
     if (isSupabaseReady()) {
         await _saveJsonSetting(WAREHOUSE_ITEMS_SETTINGS_KEY, _buildWarehouseSnapshot(items));
     }
+    _invalidateBootstrapCache(['warehouseItems']);
 
     return item.id;
 }
@@ -5735,6 +5761,7 @@ async function saveWarehouseItems(items) {
     if (isSupabaseReady()) {
         await _saveJsonSetting(WAREHOUSE_ITEMS_SETTINGS_KEY, _buildWarehouseSnapshot(items));
     }
+    _invalidateBootstrapCache(['warehouseItems']);
 }
 
 async function deleteWarehouseItem(itemId) {
@@ -5767,48 +5794,52 @@ async function deleteWarehouseItem(itemId) {
     if (isSupabaseReady()) {
         await _saveJsonSetting(WAREHOUSE_ITEMS_SETTINGS_KEY, _buildWarehouseSnapshot(items));
     }
+    _invalidateBootstrapCache(['warehouseItems']);
 }
 
 async function loadWarehouseReservations() {
-    const bootstrapPayload = await _loadSameOriginBootstrap(['warehouseReservations']);
-    if (bootstrapPayload && Array.isArray(bootstrapPayload.warehouseReservations)) {
-        setLocal(LOCAL_KEYS.warehouseReservations, bootstrapPayload.warehouseReservations);
-        return bootstrapPayload.warehouseReservations;
-    }
+    // Prefer live Supabase read so recent saves are immediately visible;
+    // the bootstrap mirror snapshot is up to ~30 min stale on the Yandex CDN.
     if (isSupabaseReady()) {
         try {
             const { data, error } = await _withRemoteTimeout('load', 'load warehouse_reservations', () => supabaseClient
                 .from('warehouse_reservations').select('*').eq('id', 1).maybeSingle());
             if (error) {
                 console.error('loadWarehouseReservations error:', error);
-                return getLocal(LOCAL_KEYS.warehouseReservations) || [];
-            }
-            if (data && data.reservations_data) {
+            } else if (data && data.reservations_data) {
                 const parsed = typeof data.reservations_data === 'string'
                     ? JSON.parse(data.reservations_data) : data.reservations_data;
                 setLocal(LOCAL_KEYS.warehouseReservations, parsed);
+                _invalidateBootstrapCache(['warehouseReservations']);
                 return parsed;
+            } else if (!error) {
+                // Migration
+                const local = getLocal(LOCAL_KEYS.warehouseReservations) || [];
+                if (local.length > 0) {
+                    console.log('Migrating warehouse reservations to Supabase...');
+                    await _withRemoteTimeout('write', 'migrate warehouse_reservations', () => supabaseClient.from('warehouse_reservations').upsert({
+                        id: 1, reservations_data: JSON.stringify(local), updated_at: new Date().toISOString()
+                    }, { onConflict: 'id' }));
+                    return local;
+                }
+                return [];
             }
-            // Migration
-            const local = getLocal(LOCAL_KEYS.warehouseReservations) || [];
-            if (local.length > 0) {
-                console.log('Migrating warehouse reservations to Supabase...');
-                await _withRemoteTimeout('write', 'migrate warehouse_reservations', () => supabaseClient.from('warehouse_reservations').upsert({
-                    id: 1, reservations_data: JSON.stringify(local), updated_at: new Date().toISOString()
-                }, { onConflict: 'id' }));
-                return local;
-            }
-            return [];
         } catch(e) {
             console.error('loadWarehouseReservations exception:', e);
-            return getLocal(LOCAL_KEYS.warehouseReservations) || [];
+            // Fall through to bootstrap / local cache below.
         }
+    }
+    const bootstrapPayload = await _loadSameOriginBootstrap(['warehouseReservations']);
+    if (bootstrapPayload && Array.isArray(bootstrapPayload.warehouseReservations)) {
+        setLocal(LOCAL_KEYS.warehouseReservations, bootstrapPayload.warehouseReservations);
+        return bootstrapPayload.warehouseReservations;
     }
     return getLocal(LOCAL_KEYS.warehouseReservations) || [];
 }
 
 async function saveWarehouseReservations(reservations) {
     setLocal(LOCAL_KEYS.warehouseReservations, reservations);
+    _invalidateBootstrapCache(['warehouseReservations']);
     if (isSupabaseReady()) {
         try {
             const { error } = await _withRemoteTimeout('write', 'save warehouse_reservations', () => supabaseClient.from('warehouse_reservations').upsert({
@@ -5826,39 +5857,41 @@ async function saveWarehouseReservations(reservations) {
 }
 
 async function loadWarehouseHistory() {
-    const bootstrapPayload = await _loadSameOriginBootstrap(['warehouseHistory']);
-    if (bootstrapPayload && Array.isArray(bootstrapPayload.warehouseHistory)) {
-        setLocal(LOCAL_KEYS.warehouseHistory, bootstrapPayload.warehouseHistory);
-        return bootstrapPayload.warehouseHistory;
-    }
+    // Prefer live Supabase read so recent stock adjustments appear immediately;
+    // the bootstrap mirror snapshot is up to ~30 min stale on the Yandex CDN.
     if (isSupabaseReady()) {
         try {
             const { data, error } = await _withRemoteTimeout('load', 'load warehouse_history', () => supabaseClient
                 .from('warehouse_history').select('*').eq('id', 1).maybeSingle());
             if (error) {
                 console.error('loadWarehouseHistory error:', error);
-                return getLocal(LOCAL_KEYS.warehouseHistory) || [];
-            }
-            if (data && data.history_data) {
+            } else if (data && data.history_data) {
                 const parsed = typeof data.history_data === 'string'
                     ? JSON.parse(data.history_data) : data.history_data;
                 setLocal(LOCAL_KEYS.warehouseHistory, parsed);
+                _invalidateBootstrapCache(['warehouseHistory']);
                 return parsed;
+            } else if (!error) {
+                // Migration
+                const local = getLocal(LOCAL_KEYS.warehouseHistory) || [];
+                if (local.length > 0) {
+                    console.log('Migrating warehouse history to Supabase...');
+                    await _withRemoteTimeout('write', 'migrate warehouse_history', () => supabaseClient.from('warehouse_history').upsert({
+                        id: 1, history_data: JSON.stringify(local), created_at: new Date().toISOString()
+                    }, { onConflict: 'id' }));
+                    return local;
+                }
+                return [];
             }
-            // Migration
-            const local = getLocal(LOCAL_KEYS.warehouseHistory) || [];
-            if (local.length > 0) {
-                console.log('Migrating warehouse history to Supabase...');
-                await _withRemoteTimeout('write', 'migrate warehouse_history', () => supabaseClient.from('warehouse_history').upsert({
-                    id: 1, history_data: JSON.stringify(local), created_at: new Date().toISOString()
-                }, { onConflict: 'id' }));
-                return local;
-            }
-            return [];
         } catch(e) {
             console.error('loadWarehouseHistory exception:', e);
-            return getLocal(LOCAL_KEYS.warehouseHistory) || [];
+            // Fall through to bootstrap / local cache below.
         }
+    }
+    const bootstrapPayload = await _loadSameOriginBootstrap(['warehouseHistory']);
+    if (bootstrapPayload && Array.isArray(bootstrapPayload.warehouseHistory)) {
+        setLocal(LOCAL_KEYS.warehouseHistory, bootstrapPayload.warehouseHistory);
+        return bootstrapPayload.warehouseHistory;
     }
     return getLocal(LOCAL_KEYS.warehouseHistory) || [];
 }
@@ -5873,6 +5906,7 @@ async function saveWarehouseHistory(history) {
         } catch(e) { console.error('saveWarehouseHistory exception:', e); }
     }
     setLocal(LOCAL_KEYS.warehouseHistory, history);
+    _invalidateBootstrapCache(['warehouseHistory']);
 }
 
 // =============================================
@@ -5880,13 +5914,8 @@ async function saveWarehouseHistory(history) {
 // =============================================
 
 async function loadShipments() {
-    const bootstrapPayload = await _loadSameOriginBootstrap(['shipments']);
-    if (bootstrapPayload && Array.isArray(bootstrapPayload.shipments) && bootstrapPayload.shipments.length > 0) {
-        const shipments = _mergeShipmentRows(bootstrapPayload.shipments);
-        setLocal(LOCAL_KEYS.shipments, shipments);
-        return shipments;
-    }
-
+    // Prefer live Supabase read; the bootstrap mirror is refreshed only every ~30 min,
+    // so honoring it here masks recent saves and causes "values revert" bugs.
     if (isSupabaseReady()) {
         try {
             const { data, error } = await supabaseClient.from('shipments').select('*').order('created_at', { ascending: false });
@@ -5894,6 +5923,7 @@ async function loadShipments() {
             if (data && data.length > 0) {
                 const shipments = _mergeShipmentRows(data);
                 setLocal(LOCAL_KEYS.shipments, shipments);
+                _invalidateBootstrapCache(['shipments']);
                 return shipments;
             }
             // Migration from localStorage
@@ -5910,11 +5940,18 @@ async function loadShipments() {
                 }
                 return local;
             }
-            return [];
+            // Fall through to bootstrap below only when Supabase had no data, not on error.
         } catch(e) {
             console.error('loadShipments exception:', e);
-            return getLocal(LOCAL_KEYS.shipments) || [];
+            // Supabase unreachable: fall through to bootstrap snapshot, then local cache.
         }
+    }
+
+    const bootstrapPayload = await _loadSameOriginBootstrap(['shipments']);
+    if (bootstrapPayload && Array.isArray(bootstrapPayload.shipments) && bootstrapPayload.shipments.length > 0) {
+        const shipments = _mergeShipmentRows(bootstrapPayload.shipments);
+        setLocal(LOCAL_KEYS.shipments, shipments);
+        return shipments;
     }
     return getLocal(LOCAL_KEYS.shipments) || [];
 }
@@ -5939,6 +5976,7 @@ async function saveShipment(shipment) {
     const idx = shipments.findIndex(s => s.id === shipment.id);
     if (idx >= 0) shipments[idx] = shipment; else shipments.push(shipment);
     setLocal(LOCAL_KEYS.shipments, shipments);
+    _invalidateBootstrapCache(['shipments']);
     return shipment.id;
 }
 
@@ -5951,6 +5989,7 @@ async function deleteShipment(shipmentId) {
     }
     const shipments = (getLocal(LOCAL_KEYS.shipments) || []).filter(s => s.id !== shipmentId);
     setLocal(LOCAL_KEYS.shipments, shipments);
+    _invalidateBootstrapCache(['shipments']);
 }
 
 // =============================================
@@ -5983,24 +6022,22 @@ async function saveChinaPurchase(purchase) {
     const idx = purchases.findIndex(p => p.id === purchaseId);
     if (idx >= 0) purchases[idx] = purchase; else purchases.push(purchase);
     setLocal(LOCAL_KEYS.chinaPurchases, purchases);
+    _invalidateBootstrapCache(['chinaPurchases']);
     return purchaseId;
 }
 
 async function loadChinaPurchases(filters = {}) {
     let purchases;
-    const bootstrapPayload = await _loadSameOriginBootstrap(['chinaPurchases']);
-    if (bootstrapPayload && Array.isArray(bootstrapPayload.chinaPurchases) && bootstrapPayload.chinaPurchases.length > 0) {
-        purchases = _mergeChinaPurchaseRows(bootstrapPayload.chinaPurchases);
-        setLocal(LOCAL_KEYS.chinaPurchases, purchases);
-    }
-
+    // Prefer live Supabase read; the bootstrap mirror is refreshed only every ~30 min,
+    // so honoring it here masks recent saves and causes "values revert" bugs.
     if (isSupabaseReady()) {
-        if (!purchases) try {
+        try {
             const { data, error } = await supabaseClient.from('china_purchases').select('*').order('created_at', { ascending: false });
             if (error) console.error('loadChinaPurchases error:', error);
             if (data && data.length > 0) {
                 purchases = _mergeChinaPurchaseRows(data);
                 setLocal(LOCAL_KEYS.chinaPurchases, purchases);
+                _invalidateBootstrapCache(['chinaPurchases']);
             } else {
                 // Migration from localStorage
                 const local = getLocal(LOCAL_KEYS.chinaPurchases) || [];
@@ -6017,16 +6054,23 @@ async function loadChinaPurchases(filters = {}) {
                         } catch(e) { console.warn('ChinaPurchase migration error:', e); }
                     }
                     purchases = local;
-                } else {
-                    purchases = [];
                 }
             }
         } catch(e) {
             console.error('loadChinaPurchases exception:', e);
-            purchases = getLocal(LOCAL_KEYS.chinaPurchases) || [];
+            // Supabase unreachable: fall through to bootstrap snapshot, then local cache.
         }
-    } else {
-        purchases = purchases || getLocal(LOCAL_KEYS.chinaPurchases) || [];
+    }
+
+    if (!purchases) {
+        const bootstrapPayload = await _loadSameOriginBootstrap(['chinaPurchases']);
+        if (bootstrapPayload && Array.isArray(bootstrapPayload.chinaPurchases) && bootstrapPayload.chinaPurchases.length > 0) {
+            purchases = _mergeChinaPurchaseRows(bootstrapPayload.chinaPurchases);
+            setLocal(LOCAL_KEYS.chinaPurchases, purchases);
+        }
+    }
+    if (!purchases) {
+        purchases = getLocal(LOCAL_KEYS.chinaPurchases) || [];
     }
 
     // Apply filters client-side
