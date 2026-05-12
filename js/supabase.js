@@ -6805,7 +6805,8 @@ function _clearOptionalWorkTableMissing(table) {
 }
 
 function _shouldSkipOptionalWorkTableRemote(table) {
-    return _isOptionalWorkModuleTable(table) && _missingOptionalWorkTables.has(table);
+    return _isOptionalWorkModuleTable(table)
+        && (_missingOptionalWorkTables.has(table) || _isStaticYandexMirrorRuntime());
 }
 
 function _isWorkModuleMissingTableError(error) {
@@ -6815,9 +6816,9 @@ function _isWorkModuleMissingTableError(error) {
 function _markWorkModuleRemoteUnavailable(error) {
     if (_workModuleRemoteAvailable === false) return;
     const message = String(error?.message || error || '').toLowerCase();
-    if (message.includes('timeout')) {
+    if (message.includes('timeout') || message.includes('bad gateway') || message.includes('response code 502')) {
         _workModuleRemoteAvailable = false;
-        console.warn('Work management remote timed out. Using local fallback for this module.', error);
+        console.warn('Work management remote is temporarily unavailable. Using local fallback for this module.', error);
         return;
     }
     if (_isSupabaseAccessError(error)) {
@@ -6941,10 +6942,11 @@ async function _loadWorkTableRows(table, localKey, orderBy, ascending) {
             }
         } catch (e) {
             console.error(`load ${table} exception:`, e);
+            _markWorkModuleRemoteUnavailable(e);
         }
     }
     const local = getLocal(localKey) || [];
-    if (settingsKey && isSupabaseReady()) {
+    if (settingsKey && isSupabaseReady() && (_workModuleRemoteAvailable !== false || remoteTableMissing)) {
         const remoteFallback = await _loadJsonSetting(settingsKey, null);
         if (Array.isArray(remoteFallback)) {
             if (remoteFallback.length === 0 && local.length > 0) {

@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v341';
+const APP_VERSION = 'v342';
 
 const App = {
     currentPage: 'orders',
@@ -669,6 +669,8 @@ const App = {
 
     async fetchAuthAccountsDirect(timeoutMs = 5000) {
         if (typeof fetch !== 'function') return [];
+        const host = String(window.location?.hostname || '').toLowerCase();
+        if (host === 'calc2.recycleobject.ru' || host.endsWith('.website.yandexcloud.net')) return [];
         const controller = typeof AbortController === 'function' ? new AbortController() : null;
         const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
         try {
