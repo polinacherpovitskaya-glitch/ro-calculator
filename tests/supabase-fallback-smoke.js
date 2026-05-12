@@ -1331,6 +1331,45 @@ async function main() {
         assert.equal(legacyTxUpsert.payload[0].finance_transaction_id > 0, true, 'legacy finance rows should resolve finance_transaction_id from canonical finance transactions');
     }
 
+    {
+        const context = createContext();
+        context.supabase = {
+            createClient() {
+                return {
+                    from(table) {
+                        return {
+                            select() {
+                                return {
+                                    eq() {
+                                        return {
+                                            maybeSingle() {
+                                                context.__remoteCalls.push({ table, action: 'maybeSingle' });
+                                                return Promise.resolve({
+                                                    data: null,
+                                                    error: { code: '500', message: 'lookup failed' },
+                                                });
+                                            },
+                                        };
+                                    },
+                                };
+                            },
+                        };
+                    },
+                };
+            },
+        };
+        runScript(context, 'js/supabase.js');
+        vm.runInContext('initSupabase()', context);
+
+        const message = await vm.runInContext(`
+            saveOrder({ id: 12345, order_name: 'Broken save' }, [])
+                .then(() => '')
+                .catch(error => error && error.message)
+        `, context);
+
+        assert.match(message, /Не удалось проверить заказ перед сохранением/, 'saveOrder should reject instead of silently returning null');
+    }
+
     console.log('supabase fallback smoke checks passed');
 }
 

@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v339';
+const APP_VERSION = 'v340';
 
 const App = {
     currentPage: 'orders',
@@ -4876,6 +4876,8 @@ const Calculator = {
             }
         } catch (e) {
             console.error('[autosave] error:', e);
+            const statusEl = document.getElementById('calc-autosave-status');
+            if (statusEl) statusEl.textContent = 'Ошибка автосохранения';
         }
         this._autosaving = false;
     },
@@ -5104,7 +5106,16 @@ const Calculator = {
                 || 'draft';
         }
 
-        const orderId = await saveOrder(order, items);
+        let orderId = null;
+        try {
+            orderId = await saveOrder(order, items);
+        } catch (error) {
+            console.error('[Calculator.saveOrder] save failed:', error);
+            const statusEl = document.getElementById('calc-autosave-status');
+            if (statusEl) statusEl.textContent = 'Ошибка сохранения';
+            App.toast('Ошибка сохранения: ' + (error && error.message ? error.message : 'проверьте соединение и попробуйте ещё раз'));
+            return;
+        }
         if (orderId) {
             App.editingOrderId = orderId;
             localStorage.setItem('ro_calc_editing_order_id', String(orderId));

@@ -1898,7 +1898,7 @@ async function _rewriteOrderItems(orderId, items) {
     return true;
 }
 
-async function saveOrder(order, items) {
+async function saveOrder(order, items = []) {
     if (isSupabaseReady()) {
         // Generate ID for new orders (Supabase BIGINT PK has no auto-increment)
         let orderId = _normalizeOrderId(order.id);
@@ -1912,10 +1912,12 @@ async function saveOrder(order, items) {
         orderData.updated_at = new Date().toISOString();
 
         // Try update first if order exists, otherwise insert
-        const { data: existing, error: existingError } = await supabaseClient
-            .from('orders').select('id,status,deleted_at').eq('id', orderId).maybeSingle();
+        const { data: existing, error: existingError } = await _withRemoteTimeout('write', 'save order lookup', () => supabaseClient
+            .from('orders').select('id,status,deleted_at').eq('id', orderId).maybeSingle());
         if (existingError && existingError.code !== 'PGRST116') {
             console.error('saveOrder lookup error:', existingError);
+            if (_isSupabaseAccessError(existingError)) _markSupabaseAccessProblem(existingError);
+            throw new Error('Не удалось проверить заказ перед сохранением: ' + (existingError.message || existingError.code || 'ошибка базы'));
         }
 
         const localBackupOrder = { ...order, id: orderId };
@@ -1929,28 +1931,37 @@ async function saveOrder(order, items) {
             }
             // Update existing order
             const { id: _id, ...updateFields } = orderData;
-            const { error } = await supabaseClient
+            const { error } = await _withRemoteTimeout('write', 'update order', () => supabaseClient
                 .from('orders')
                 .update(updateFields)
-                .eq('id', orderId);
-            if (error) { console.error('updateOrder error:', error); return null; }
+                .eq('id', orderId));
+            if (error) {
+                console.error('updateOrder error:', error);
+                if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
+                throw new Error('Не удалось обновить заказ: ' + (error.message || error.code || 'ошибка базы'));
+            }
         } else {
             // Insert new order
             orderData.created_at = orderData.created_at || new Date().toISOString();
-            const { error } = await supabaseClient
+            const { error } = await _withRemoteTimeout('write', 'insert order', () => supabaseClient
                 .from('orders')
-                .insert(orderData);
-            if (error) { console.error('insertOrder error:', error); return null; }
+                .insert(orderData));
+            if (error) {
+                console.error('insertOrder error:', error);
+                if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
+                throw new Error('Не удалось создать заказ: ' + (error.message || error.code || 'ошибка базы'));
+            }
         }
 
         // Delete old items and insert new
-        const { error: deleteItemsError } = await supabaseClient
+        const { error: deleteItemsError } = await _withRemoteTimeout('write', 'delete order items', () => supabaseClient
             .from('order_items')
             .delete()
-            .eq('order_id', orderId);
+            .eq('order_id', orderId));
         if (deleteItemsError) {
             console.error('deleteOrderItems error:', deleteItemsError);
-            return null;
+            if (_isSupabaseAccessError(deleteItemsError)) _markSupabaseAccessProblem(deleteItemsError);
+            throw new Error('Не удалось обновить состав заказа: ' + (deleteItemsError.message || deleteItemsError.code || 'ошибка базы'));
         }
         if (items.length > 0) {
             const nowIso = new Date().toISOString();
@@ -1962,10 +1973,11 @@ async function saveOrder(order, items) {
                 filtered.updated_at = nowIso;
                 return filtered;
             });
-            const { error } = await supabaseClient.from('order_items').insert(rows);
+            const { error } = await _withRemoteTimeout('write', 'insert order items', () => supabaseClient.from('order_items').insert(rows));
             if (error) {
                 console.error('insertOrderItems error:', error);
-                return null;
+                if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
+                throw new Error('Не удалось сохранить состав заказа: ' + (error.message || error.code || 'ошибка базы'));
             }
         }
 

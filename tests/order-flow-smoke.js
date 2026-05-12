@@ -838,6 +838,29 @@ async function smokeOrderListAndDetailUseLiveFinancialSnapshot(context) {
     assert.match(state.statsHtml, new RegExp(state.formattedHours.replace('.', '[,.]')));
 }
 
+async function smokeOrderListUsesStoredFinancialMetaWhenItemsMissing(context) {
+    const state = clone(await vm.runInContext(`(() => {
+        const order = {
+            id: 88,
+            order_name: 'Stored Margin Order',
+            payment_status: 'paid_100',
+            total_revenue_plan: 2600,
+            margin_percent_plan: 24.7,
+            total_hours_plan: 3.5,
+        };
+        const financial = Orders.buildFinancialMeta(order, []);
+        Orders.metaByOrderId = { 88: { financial } };
+        return {
+            financial,
+            boardHtml: Orders.renderBoardCard(order),
+        };
+    })()`, context));
+
+    assert.equal(state.financial.revenue, 2600, 'orders list should keep stored revenue when items are missing');
+    assert.equal(state.financial.marginPercent, 24.7, 'orders list should keep stored margin when items are missing');
+    assert.match(state.boardHtml, /24[,.]7\s*%/, 'board card should render stored margin instead of 0%');
+}
+
 async function smokeBlankPricingSeparatesCatalogPriceAndNetMargin(context) {
     vm.runInContext(`
         App.getItemOriginLabel = (item) => item?.is_blank_mold ? 'бланк' : 'кастом';
@@ -7834,6 +7857,7 @@ async function main() {
     await smokeZeroCostWarehouseHardwareStillShowsInPricing(context);
     await smokeLoadOrderHydratesZeroWarehousePriceFromCurrentStock(context);
     await smokeOrderListAndDetailUseLiveFinancialSnapshot(context);
+    await smokeOrderListUsesStoredFinancialMetaWhenItemsMissing(context);
     await smokeBlankPricingSeparatesCatalogPriceAndNetMargin(context);
     await smokeBlankTargetFormulaMatchesVatExclusiveMargin(context);
     await smokeWarehouseBackedNfcDoesNotDoubleCountFallback(context);

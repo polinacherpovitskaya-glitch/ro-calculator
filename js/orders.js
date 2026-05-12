@@ -334,28 +334,47 @@ const Orders = {
         };
     },
 
+    getStoredFinancialMeta(order) {
+        return {
+            revenue: Number(order?.total_revenue_plan ?? order?.total_revenue ?? 0),
+            marginPercent: Number(order?.margin_percent_plan ?? order?.margin_percent ?? 0),
+            hours: Number(order?.total_hours_plan ?? 0),
+        };
+    },
+
+    hasStoredFinancialMeta(order) {
+        const stored = this.getStoredFinancialMeta(order);
+        return Number.isFinite(stored.revenue) && stored.revenue > 0
+            || Number.isFinite(stored.marginPercent) && stored.marginPercent !== 0
+            || Number.isFinite(stored.hours) && stored.hours > 0;
+    },
+
     buildFinancialMeta(order, items) {
+        const stored = this.getStoredFinancialMeta(order);
         if (typeof getOrderLiveCalculatorSnapshot !== 'function') {
-            return {
-                revenue: Number(order?.total_revenue_plan || 0),
-                marginPercent: Number(order?.margin_percent_plan || 0),
-                hours: Number(order?.total_hours_plan || 0),
-            };
+            return stored;
         }
         try {
-            const snapshot = getOrderLiveCalculatorSnapshot(order, items || []);
-            return {
+            const safeItems = items || [];
+            const snapshot = getOrderLiveCalculatorSnapshot(order, safeItems);
+            const live = {
                 revenue: Number(snapshot?.revenue || 0),
                 marginPercent: Number(snapshot?.marginPercent || 0),
                 hours: Number(snapshot?.hours || 0),
             };
+
+            if (safeItems.length === 0 && this.hasStoredFinancialMeta(order)) {
+                return stored;
+            }
+
+            return {
+                revenue: live.revenue,
+                marginPercent: live.marginPercent,
+                hours: live.hours,
+            };
         } catch (e) {
             console.warn('Orders.buildFinancialMeta fallback:', e);
-            return {
-                revenue: Number(order?.total_revenue_plan || 0),
-                marginPercent: Number(order?.margin_percent_plan || 0),
-                hours: Number(order?.total_hours_plan || 0),
-            };
+            return stored;
         }
     },
 
