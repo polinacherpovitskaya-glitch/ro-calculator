@@ -7,8 +7,24 @@
  * Рассчитать вспомогательные параметры производства
  * (аналог листа "Вспомогательная таблица")
  */
+function calcNumber(value, fallback = 0) {
+    if (typeof value === 'number') return Number.isFinite(value) ? value : fallback;
+    if (typeof value === 'string') {
+        const normalized = value
+            .trim()
+            .replace(/[\s\u00a0]+/g, '')
+            .replace(',', '.')
+            .replace(/[^\d.+-]/g, '');
+        if (!normalized) return fallback;
+        const parsed = Number(normalized);
+        return Number.isFinite(parsed) ? parsed : fallback;
+    }
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : fallback;
+}
+
 function getProductionParams(settings) {
-    const s = key => settings[key] || 0;
+    const s = key => calcNumber(settings?.[key], 0);
     const totalHoursPerWorker = s('hours_per_worker'); // 8*21 = 168
     const totalHoursAll = s('workers_count') * totalHoursPerWorker;
     const workLoadHours = totalHoursAll * s('work_load_ratio');
@@ -35,7 +51,7 @@ function getProductionParams(settings) {
         nfcTagCost: s('nfc_tag_cost'),
         vatRate: s('vat_rate'),
         taxRate: s('tax_rate'),
-        charityRate: Number.isFinite(settings?.charity_rate) ? settings.charity_rate : 0.01,
+        charityRate: calcNumber(settings?.charity_rate, 0.01),
         marginTarget: s('margin_target'),
         deliveryCostMoscow: s('delivery_cost_moscow'),
         printingDeliveryCost: s('printing_delivery_cost'),
@@ -103,10 +119,10 @@ function getActivePrintings(item) {
     return rawPrintings.filter(pr => {
         if (!pr || typeof pr !== 'object') return false;
         const name = String(pr.name || '').trim();
-        const qty = Number(pr.qty) || 0;
-        const price = Number(pr.price) || 0;
-        const sellPrice = Number(pr.sell_price) || 0;
-        const deliveryTotal = Number(pr.delivery_total) || 0;
+        const qty = calcNumber(pr.qty, 0);
+        const price = calcNumber(pr.price, 0);
+        const sellPrice = calcNumber(pr.sell_price, 0);
+        const deliveryTotal = calcNumber(pr.delivery_total, 0);
         return !!name && (qty > 0 || price > 0 || sellPrice > 0 || deliveryTotal > 0);
     });
 }
@@ -114,18 +130,18 @@ function getActivePrintings(item) {
 function hasLegacyPrintingFallback(item) {
     const rawPrintings = Array.isArray(item?.printings) ? item.printings : [];
     if (rawPrintings.length > 0) return false;
-    const qty = Number(item?.printing_qty) || 0;
-    const purchasePrice = Number(item?.printing_price_per_unit) || 0;
-    const sellPrice = Number(item?.sell_price_printing) || 0;
+    const qty = calcNumber(item?.printing_qty, 0);
+    const purchasePrice = calcNumber(item?.printing_price_per_unit, 0);
+    const sellPrice = calcNumber(item?.sell_price_printing, 0);
     return qty > 0 && (purchasePrice > 0 || sellPrice > 0);
 }
 
 function getPrintingSellPricePerUnit(item) {
     const activePrintings = getActivePrintings(item);
     if (activePrintings.length > 0) {
-        return activePrintings.reduce((sum, pr) => sum + (Number(pr.sell_price) || 0), 0);
+        return activePrintings.reduce((sum, pr) => sum + calcNumber(pr.sell_price, 0), 0);
     }
-    return hasLegacyPrintingFallback(item) ? (Number(item?.sell_price_printing) || 0) : 0;
+    return hasLegacyPrintingFallback(item) ? calcNumber(item?.sell_price_printing, 0) : 0;
 }
 
 function normalizeColorAttachments(source) {
@@ -177,9 +193,9 @@ function getBlankTemplateTotalMoldCost(source) {
  */
 function calculateItemCost(item, params) {
     const p = params;
-    const qty = item.quantity || 0;
-    const pph = item.pieces_per_hour || 0;
-    const weight = item.weight_grams || 0;
+    const qty = calcNumber(item.quantity, 0);
+    const pph = calcNumber(item.pieces_per_hour, 0);
+    const weight = calcNumber(item.weight_grams, 0);
 
     if (qty === 0 || pph === 0) {
         return getEmptyCostResult();
@@ -203,10 +219,10 @@ function calculateItemCost(item, params) {
     // Бланковая форма → делим на 4500 (макс. ресурс молда)
     // Кастомная форма → делим на тираж заказа
     const MOLD_LIFETIME = 4500;
-    const extraMolds = item.extra_molds || 0;
+    const extraMolds = calcNumber(item.extra_molds, 0);
     const paidBaseMolds = (!item.is_blank_mold && item.base_mold_in_stock) ? 0 : 1;
     const totalPaidMolds = Math.max(0, paidBaseMolds + extraMolds);
-    const blankMoldTotalCost = Number(item.blank_mold_total_cost || 0);
+    const blankMoldTotalCost = calcNumber(item.blank_mold_total_cost, 0);
     const costMoldAmortization = item.is_blank_mold
         ? ((blankMoldTotalCost > 0 ? blankMoldTotalCost : (p.moldBaseCost * totalPaidMolds)) / MOLD_LIFETIME)
         : (p.moldBaseCost * totalPaidMolds / qty);
@@ -245,10 +261,10 @@ function calculateItemCost(item, params) {
     const printings = getActivePrintings(item);
     if (printings.length > 0) {
         printings.forEach(pr => {
-            const prQty = pr.qty || 0;
-            const prPrice = pr.price || 0;
+            const prQty = calcNumber(pr.qty, 0);
+            const prPrice = calcNumber(pr.price, 0);
             if (prQty > 0 && prPrice > 0) {
-                const prDelivery = pr.delivery_total || 0;
+                const prDelivery = calcNumber(pr.delivery_total, 0);
                 const deliveryCost = prDelivery > 0 ? prDelivery / prQty : (p.printingDeliveryCost / prQty);
                 const c = (prPrice * 1.06) + deliveryCost;
                 costPrinting += c;
@@ -259,8 +275,8 @@ function calculateItemCost(item, params) {
         });
     } else {
         // Обратная совместимость со старыми данными
-        const printQty = item.printing_qty || 0;
-        const printPrice = item.printing_price_per_unit || 0;
+        const printQty = calcNumber(item.printing_qty, 0);
+        const printPrice = calcNumber(item.printing_price_per_unit, 0);
         if (printQty > 0 && printPrice > 0) {
             costPrinting = (printPrice * 1.06) + (p.printingDeliveryCost / printQty);
         }
@@ -271,9 +287,9 @@ function calculateItemCost(item, params) {
     let costBuiltinHwIndirect = 0;
     let hoursBuiltinHw = 0;
     const hwName = item.builtin_hw_name || '';
-    const hwPricePerUnit = item.builtin_hw_price || 0;
-    const hwDeliveryTotal = item.builtin_hw_delivery_total || 0;
-    const hwSpeed = item.builtin_hw_speed || 0;
+    const hwPricePerUnit = calcNumber(item.builtin_hw_price, 0);
+    const hwDeliveryTotal = calcNumber(item.builtin_hw_delivery_total, 0);
+    const hwSpeed = calcNumber(item.builtin_hw_speed, 0);
 
     if (hwName && (hwPricePerUnit > 0 || hwSpeed > 0)) {
         // Закупка + доставка за шт
@@ -294,7 +310,7 @@ function calculateItemCost(item, params) {
     let costBuiltinAssemblyIndirect = 0;
     let hoursBuiltinAssembly = 0;
     const builtinAssemblyName = String(item.builtin_assembly_name || '').trim();
-    const builtinAssemblySpeed = Number(item.builtin_assembly_speed || 0);
+    const builtinAssemblySpeed = calcNumber(item.builtin_assembly_speed, 0);
 
     if (builtinAssemblySpeed > 0 && qty > 0) {
         hoursBuiltinAssembly = qty / builtinAssemblySpeed * p.wasteFactor;
@@ -364,8 +380,8 @@ function calculateItemCost(item, params) {
  * Рассчитать себестоимость одной позиции фурнитуры
  */
 function calculateHardwareCost(hw, params) {
-    const qty = hw.qty || 0;
-    const speed = hw.assembly_speed || 0;
+    const qty = calcNumber(hw.qty, 0);
+    const speed = calcNumber(hw.assembly_speed, 0);
     let hoursHardware = 0;
     let fotPerUnit = 0;
     let indirectPerUnit = 0;
@@ -378,7 +394,7 @@ function calculateHardwareCost(hw, params) {
         }
     }
 
-    const costPerUnit = fotPerUnit + indirectPerUnit + (hw.price || 0) + (hw.delivery_price || 0);
+    const costPerUnit = fotPerUnit + indirectPerUnit + calcNumber(hw.price, 0) + calcNumber(hw.delivery_price, 0);
 
     return {
         costPerUnit: round2(costPerUnit),
@@ -393,8 +409,8 @@ function calculateHardwareCost(hw, params) {
  * Рассчитать себестоимость одной позиции упаковки
  */
 function calculatePackagingCost(pkg, params) {
-    const qty = pkg.qty || 0;
-    const speed = pkg.assembly_speed || 0;
+    const qty = calcNumber(pkg.qty, 0);
+    const speed = calcNumber(pkg.assembly_speed, 0);
     let hoursPackaging = 0;
     let fotPerUnit = 0;
     let indirectPerUnit = 0;
@@ -407,7 +423,7 @@ function calculatePackagingCost(pkg, params) {
         }
     }
 
-    const costPerUnit = fotPerUnit + indirectPerUnit + (pkg.price || 0) + (pkg.delivery_price || 0);
+    const costPerUnit = fotPerUnit + indirectPerUnit + calcNumber(pkg.price, 0) + calcNumber(pkg.delivery_price, 0);
 
     return {
         costPerUnit: round2(costPerUnit),
