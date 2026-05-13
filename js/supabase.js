@@ -1954,16 +1954,6 @@ async function saveOrder(order, items = []) {
             }
         }
 
-        // Delete old items and insert new
-        const { error: deleteItemsError } = await _withRemoteTimeout('write', 'delete order items', () => supabaseClient
-            .from('order_items')
-            .delete()
-            .eq('order_id', orderId));
-        if (deleteItemsError) {
-            console.error('deleteOrderItems error:', deleteItemsError);
-            if (_isSupabaseAccessError(deleteItemsError)) _markSupabaseAccessProblem(deleteItemsError);
-            throw new Error('Не удалось обновить состав заказа: ' + (deleteItemsError.message || deleteItemsError.code || 'ошибка базы'));
-        }
         if (items.length > 0) {
             const nowIso = new Date().toISOString();
             const rows = items.map((item, i) => {
@@ -1974,11 +1964,49 @@ async function saveOrder(order, items = []) {
                 filtered.updated_at = nowIso;
                 return filtered;
             });
-            const { error } = await _withRemoteTimeout('write', 'insert order items', () => supabaseClient.from('order_items').insert(rows));
-            if (error) {
-                console.error('insertOrderItems error:', error);
-                if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
-                throw new Error('Не удалось сохранить состав заказа: ' + (error.message || error.code || 'ошибка базы'));
+            const { error: upsertItemsError } = await _withRemoteTimeout('write', 'upsert order items', () => supabaseClient
+                .from('order_items')
+                .upsert(rows, { onConflict: 'id' }));
+            if (upsertItemsError) {
+                console.error('upsertOrderItems error:', upsertItemsError);
+                if (_isSupabaseAccessError(upsertItemsError)) _markSupabaseAccessProblem(upsertItemsError);
+                throw new Error('Не удалось сохранить состав заказа: ' + (upsertItemsError.message || upsertItemsError.code || 'ошибка базы'));
+            }
+
+            const savedItemIds = new Set(rows.map(row => String(row.id)).filter(Boolean));
+            const { data: existingItems, error: listItemsError } = await _withRemoteTimeout('write', 'list order items for cleanup', () => supabaseClient
+                .from('order_items')
+                .select('id')
+                .eq('order_id', orderId));
+            if (listItemsError) {
+                console.error('listOrderItemsForCleanup error:', listItemsError);
+                if (_isSupabaseAccessError(listItemsError)) _markSupabaseAccessProblem(listItemsError);
+                throw new Error('Заказ сохранён, но не удалось проверить старые позиции: ' + (listItemsError.message || listItemsError.code || 'ошибка базы'));
+            }
+
+            const staleItemIds = (Array.isArray(existingItems) ? existingItems : [])
+                .map(item => item?.id)
+                .filter(id => id != null && !savedItemIds.has(String(id)));
+            for (const staleItemId of staleItemIds) {
+                const { error: deleteStaleItemError } = await _withRemoteTimeout('write', 'delete stale order item', () => supabaseClient
+                    .from('order_items')
+                    .delete()
+                    .eq('id', staleItemId));
+                if (deleteStaleItemError) {
+                    console.error('deleteStaleOrderItem error:', deleteStaleItemError);
+                    if (_isSupabaseAccessError(deleteStaleItemError)) _markSupabaseAccessProblem(deleteStaleItemError);
+                    throw new Error('Заказ сохранён, но не удалось очистить старую позицию: ' + (deleteStaleItemError.message || deleteStaleItemError.code || 'ошибка базы'));
+                }
+            }
+        } else {
+            const { error: deleteItemsError } = await _withRemoteTimeout('write', 'delete order items', () => supabaseClient
+                .from('order_items')
+                .delete()
+                .eq('order_id', orderId));
+            if (deleteItemsError) {
+                console.error('deleteOrderItems error:', deleteItemsError);
+                if (_isSupabaseAccessError(deleteItemsError)) _markSupabaseAccessProblem(deleteItemsError);
+                throw new Error('Не удалось обновить состав заказа: ' + (deleteItemsError.message || deleteItemsError.code || 'ошибка базы'));
             }
         }
 

@@ -1493,6 +1493,214 @@ async function main() {
         assert.match(message, /Не удалось проверить заказ перед сохранением/, 'saveOrder should reject instead of silently returning null');
     }
 
+    {
+        const context = createContext();
+        const orderId = 777123;
+        const oldItemId = orderId * 1000 + 1;
+        context.__tableRows.orders = [{
+            id: orderId,
+            order_name: 'бифри 100 шт юла+цветок',
+            status: 'draft',
+            deleted_at: null,
+        }];
+        context.__tableRows.order_items = [{
+            id: oldItemId,
+            order_id: orderId,
+            item_number: 1,
+            item_type: 'product',
+            product_name: 'Старая сохраненная позиция',
+            item_data: JSON.stringify({ product_name: 'Старая сохраненная позиция' }),
+        }];
+        context.supabase = {
+            createClient() {
+                return {
+                    from(table) {
+                        const state = {};
+                        return {
+                            select() {
+                                return {
+                                    eq(column, value) {
+                                        state.eqColumn = column;
+                                        state.eqValue = value;
+                                        return {
+                                            maybeSingle() {
+                                                context.__remoteCalls.push({ table, action: 'maybeSingle', column, value });
+                                                const rows = context.__tableRows[table] || [];
+                                                return Promise.resolve({
+                                                    data: rows.find(row => String(row[column]) === String(value)) || null,
+                                                    error: null,
+                                                });
+                                            },
+                                            then(resolve, reject) {
+                                                context.__remoteCalls.push({ table, action: 'selectEq', column, value });
+                                                const rows = context.__tableRows[table] || [];
+                                                return Promise.resolve({
+                                                    data: rows.filter(row => String(row[column]) === String(value)),
+                                                    error: null,
+                                                }).then(resolve, reject);
+                                            },
+                                        };
+                                    },
+                                };
+                            },
+                            update(fields) {
+                                return {
+                                    eq(column, value) {
+                                        context.__remoteCalls.push({ table, action: 'update', column, value, fields });
+                                        const rows = context.__tableRows[table] || [];
+                                        context.__tableRows[table] = rows.map(row => (
+                                            String(row[column]) === String(value) ? { ...row, ...fields } : row
+                                        ));
+                                        return Promise.resolve({ error: null });
+                                    },
+                                };
+                            },
+                            upsert(payload) {
+                                context.__remoteCalls.push({ table, action: 'upsert', payload });
+                                if (table === 'order_items') {
+                                    return Promise.resolve({ error: { code: '500', message: 'insert failed' } });
+                                }
+                                persistTableRows(context, table, payload);
+                                return Promise.resolve({ error: null });
+                            },
+                            delete() {
+                                return {
+                                    eq(column, value) {
+                                        context.__remoteCalls.push({ table, action: 'delete', column, value });
+                                        const rows = context.__tableRows[table] || [];
+                                        context.__tableRows[table] = rows.filter(row => String(row[column]) !== String(value));
+                                        return Promise.resolve({ error: null });
+                                    },
+                                };
+                            },
+                        };
+                    },
+                };
+            },
+        };
+        runScript(context, 'js/supabase.js');
+        vm.runInContext('initSupabase()', context);
+
+        const message = await vm.runInContext(`
+            saveOrder(
+                { id: ${orderId}, order_name: 'бифри 100 шт юла+цветок', status: 'draft' },
+                [{ item_number: 1, item_type: 'product', product_name: 'Новая позиция', quantity: 100 }]
+            )
+                .then(() => '')
+                .catch(error => error && error.message)
+        `, context);
+
+        assert.match(message, /Не удалось сохранить состав заказа/, 'saveOrder should surface item-write failures');
+        assert.equal(context.__tableRows.order_items.length, 1, 'failed item upsert must not wipe existing order items');
+        assert.equal(context.__tableRows.order_items[0].id, oldItemId, 'old saved item should remain after failed item upsert');
+        assert.equal(context.__remoteCalls.some(call => call.table === 'order_items' && call.action === 'delete'), false, 'saveOrder must not delete old items before new items are saved');
+    }
+
+    {
+        const context = createContext();
+        const orderId = 777124;
+        const currentItemId = orderId * 1000 + 1;
+        const staleItemId = orderId * 1000 + 9;
+        context.__tableRows.orders = [{
+            id: orderId,
+            order_name: 'cleanup save',
+            status: 'draft',
+            deleted_at: null,
+        }];
+        context.__tableRows.order_items = [{
+            id: currentItemId,
+            order_id: orderId,
+            item_number: 1,
+            item_type: 'product',
+            product_name: 'Старая версия позиции',
+        }, {
+            id: staleItemId,
+            order_id: orderId,
+            item_number: 9,
+            item_type: 'product',
+            product_name: 'Лишняя старая позиция',
+        }];
+        context.supabase = {
+            createClient() {
+                return {
+                    from(table) {
+                        return {
+                            select() {
+                                return {
+                                    eq(column, value) {
+                                        return {
+                                            maybeSingle() {
+                                                context.__remoteCalls.push({ table, action: 'maybeSingle', column, value });
+                                                const rows = context.__tableRows[table] || [];
+                                                return Promise.resolve({
+                                                    data: rows.find(row => String(row[column]) === String(value)) || null,
+                                                    error: null,
+                                                });
+                                            },
+                                            then(resolve, reject) {
+                                                context.__remoteCalls.push({ table, action: 'selectEq', column, value });
+                                                const rows = context.__tableRows[table] || [];
+                                                return Promise.resolve({
+                                                    data: rows.filter(row => String(row[column]) === String(value)),
+                                                    error: null,
+                                                }).then(resolve, reject);
+                                            },
+                                        };
+                                    },
+                                };
+                            },
+                            update(fields) {
+                                return {
+                                    eq(column, value) {
+                                        context.__remoteCalls.push({ table, action: 'update', column, value, fields });
+                                        const rows = context.__tableRows[table] || [];
+                                        context.__tableRows[table] = rows.map(row => (
+                                            String(row[column]) === String(value) ? { ...row, ...fields } : row
+                                        ));
+                                        return Promise.resolve({ error: null });
+                                    },
+                                };
+                            },
+                            upsert(payload) {
+                                context.__remoteCalls.push({ table, action: 'upsert', payload });
+                                persistTableRows(context, table, payload);
+                                return Promise.resolve({ error: null });
+                            },
+                            delete() {
+                                return {
+                                    eq(column, value) {
+                                        context.__remoteCalls.push({ table, action: 'delete', column, value });
+                                        const rows = context.__tableRows[table] || [];
+                                        context.__tableRows[table] = rows.filter(row => String(row[column]) !== String(value));
+                                        return Promise.resolve({ error: null });
+                                    },
+                                };
+                            },
+                        };
+                    },
+                };
+            },
+        };
+        runScript(context, 'js/supabase.js');
+        vm.runInContext('initSupabase()', context);
+
+        const savedOrderId = await vm.runInContext(`
+            saveOrder(
+                { id: ${orderId}, order_name: 'cleanup save', status: 'draft' },
+                [{ item_number: 1, item_type: 'product', product_name: 'Новая версия позиции', quantity: 100 }]
+            )
+        `, context);
+
+        assert.equal(savedOrderId, orderId);
+        assert.deepEqual(
+            context.__tableRows.order_items.map(item => item.id).sort((a, b) => a - b),
+            [currentItemId],
+            'successful save should keep current item and remove stale order items',
+        );
+        assert.equal(context.__tableRows.order_items[0].product_name, 'Новая версия позиции');
+        assert.equal(context.__remoteCalls.some(call => call.table === 'order_items' && call.action === 'delete' && call.value === staleItemId), true, 'stale item should be deleted after successful upsert');
+    }
+
     console.log('supabase fallback smoke checks passed');
 }
 
