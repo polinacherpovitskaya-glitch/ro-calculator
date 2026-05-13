@@ -69,18 +69,27 @@ jobs:
             local file="$1"
             local rel="${file#deploy/static-yandex/}"
             local content_type="application/octet-stream"
+            local cache_control="public, max-age=31536000, immutable"
             case "$file" in
-              *.html) content_type="text/html; charset=utf-8" ;;
+              *.html)
+                content_type="text/html; charset=utf-8"
+                cache_control="no-cache, no-store, must-revalidate"
+                ;;
               *.css) content_type="text/css; charset=utf-8" ;;
               *.js) content_type="application/javascript; charset=utf-8" ;;
-              *.json) content_type="application/json; charset=utf-8" ;;
+              *.json)
+                content_type="application/json; charset=utf-8"
+                if [ "$rel" = "js/version.json" ]; then
+                  cache_control="no-cache, no-store, must-revalidate"
+                fi
+                ;;
               *.png) content_type="image/png" ;;
               *.jpg|*.jpeg) content_type="image/jpeg" ;;
               *.svg) content_type="image/svg+xml" ;;
               *.ico) content_type="image/x-icon" ;;
               *.webp) content_type="image/webp" ;;
             esac
-            yc storage s3 cp "$file" "s3://${RO_YANDEX_BUCKET}/${rel}" --content-type "$content_type"
+            yc storage s3 cp "$file" "s3://${RO_YANDEX_BUCKET}/${rel}" --content-type "$content_type" --cache-control "$cache_control"
           }
 
           while IFS= read -r -d '' file; do

@@ -6,6 +6,7 @@ const root = path.join(__dirname, '..');
 const appJs = fs.readFileSync(path.join(root, 'js', 'app.js'), 'utf8');
 const indexHtml = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const versionJson = JSON.parse(fs.readFileSync(path.join(root, 'js', 'version.json'), 'utf8'));
+const yandexStaticSync = fs.readFileSync(path.join(root, '.github', 'workflows', 'yandex-static-sync.yml'), 'utf8');
 
 const appMatch = appJs.match(/const APP_VERSION = '(v\d+)'/);
 assert.ok(appMatch, 'APP_VERSION not found in js/app.js');
@@ -23,6 +24,8 @@ assert.match(appJs, /searchParams\.set\('reload'/, 'Update action should add a c
 assert.match(appJs, /dataset\.targetVersion/, 'Update banner should remember the exact remote version shown to the user');
 assert.match(indexHtml, /CURRENT_HTML_VERSION = 'v\d+'/, 'index.html should include an early HTML-version bootstrap for stale cached documents');
 assert.match(indexHtml, /ro_calc_force_update_attempts/, 'index.html should guard repeated forced update attempts');
+assert.match(yandexStaticSync, /--cache-control "\$cache_control"/, 'calc2 sync must upload explicit cache-control metadata');
+assert.match(yandexStaticSync, /no-cache, no-store, must-revalidate/, 'calc2 HTML/version files must be uploaded as non-cacheable');
 
 const appScriptMatch = indexHtml.match(/<script src="js\/app\.js\?v=(\d+)"><\/script>/);
 assert.ok(appScriptMatch, 'index.html must include a versioned js/app.js asset');
