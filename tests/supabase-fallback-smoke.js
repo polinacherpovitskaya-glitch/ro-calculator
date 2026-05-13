@@ -1142,6 +1142,94 @@ async function main() {
     {
         const context = createContext();
         context.location = {
+            href: 'https://calc2.recycleobject.ru/#calculator',
+            origin: 'https://calc2.recycleobject.ru',
+            protocol: 'https:',
+            hostname: 'calc2.recycleobject.ru',
+        };
+        context.window.location = context.location;
+        const orderId = 1777974526025;
+        context.__tableRows.orders = [{
+            id: orderId,
+            order_name: 'бифри 100 шт юла+цветок',
+            status: 'draft',
+            updated_at: '2026-05-13T13:25:50.539+00:00',
+        }];
+        context.__tableRows.order_items = [{
+            id: orderId * 1000 + 1,
+            order_id: orderId,
+            item_number: 1,
+            product_name: 'Маленький цветочек',
+            quantity: 100,
+            updated_at: '2026-05-13T13:25:50.539+00:00',
+            item_data: JSON.stringify({
+                item_type: 'product',
+                product_name: 'Маленький цветочек',
+                quantity: 100,
+            }),
+        }];
+        context.supabase = {
+            createClient() {
+                return {
+                    from(table) {
+                        return {
+                            select() {
+                                return {
+                                    eq(column, value) {
+                                        const rows = context.__tableRows[table] || [];
+                                        const filtered = rows.filter(row => String(row[column]) === String(value));
+                                        return {
+                                            single() {
+                                                context.__remoteCalls.push({ table, action: 'single', column, value });
+                                                return Promise.resolve({ data: filtered[0] || null, error: filtered[0] ? null : { code: 'PGRST116', message: 'not found' } });
+                                            },
+                                            order(orderColumn) {
+                                                context.__remoteCalls.push({ table, action: 'order', column, value, orderColumn });
+                                                const sorted = filtered.slice().sort((a, b) => (Number(a[orderColumn]) || 0) - (Number(b[orderColumn]) || 0));
+                                                return Promise.resolve({ data: sorted, error: null });
+                                            },
+                                        };
+                                    },
+                                };
+                            },
+                        };
+                    },
+                };
+            },
+        };
+        runScript(context, 'js/supabase.js');
+        vm.runInContext(`
+            initSupabase();
+            setLocal(LOCAL_KEYS.orders, [{
+                id: ${orderId},
+                order_name: 'бифри 100 шт юла+цветок',
+                status: 'draft',
+                updated_at: '2026-05-13T10:00:00.000+00:00'
+            }]);
+            setLocal(LOCAL_KEYS.orderItems, [{
+                id: ${orderId * 1000 + 1},
+                order_id: ${orderId},
+                item_number: 1,
+                product_name: 'Маленький цветочек',
+                quantity: 98,
+                updated_at: '2026-05-13T10:00:00.000+00:00',
+                item_data: JSON.stringify({ item_type: 'product', product_name: 'Маленький цветочек', quantity: 98 })
+            }]);
+        `, context);
+
+        const loaded = JSON.parse(JSON.stringify(await vm.runInContext(`loadOrder(${orderId})`, context)));
+        assert.equal(loaded.items.length, 1, 'static Yandex order detail should load remote items through proxy');
+        assert.equal(loaded.items[0].quantity, 100, 'fresh remote order item quantity should override stale local/bootstrap cache');
+
+        const cachedQty = vm.runInContext(`
+            (getLocal(LOCAL_KEYS.orderItems) || []).find(item => String(item.order_id) === String(${orderId}))?.quantity
+        `, context);
+        assert.equal(cachedQty, 100, 'fresh order detail load should refresh the local cache too');
+    }
+
+    {
+        const context = createContext();
+        context.location = {
             href: 'https://calc2.recycleobject.ru/#import',
             origin: 'https://calc2.recycleobject.ru',
             protocol: 'https:',

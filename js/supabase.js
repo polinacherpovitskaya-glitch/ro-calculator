@@ -2012,7 +2012,7 @@ async function saveOrder(order, items = []) {
 
         // Also save to localStorage as backup (full data, no filtering)
         _saveOrderLocally(localBackupOrder, items);
-        _markLocalDatasetDirty(['orders', 'orderItems']);
+        _clearLocalDatasetDirty(['orders', 'orderItems']);
 
         return orderId;
     } else {
@@ -2217,7 +2217,8 @@ async function loadOrders(filters = {}) {
 async function loadOrder(orderId) {
     // Coerce string ID to number (select values are always strings, but IDs are Date.now() numbers)
     if (typeof orderId === 'string' && /^\d+$/.test(orderId)) orderId = Number(orderId);
-    const loadLocalOrder = async () => {
+    const loadLocalOrder = async (options = {}) => {
+        const repairDuplicates = options.repairDuplicates !== false;
         const normalizedOrderId = _normalizeOrderId(orderId);
         const orders = getLocal(LOCAL_KEYS.orders) || [];
         const order = orders.find(o => String(_normalizeOrderId(o.id)) === String(normalizedOrderId));
@@ -2225,15 +2226,12 @@ async function loadOrder(orderId) {
         const orderItems = allItems.filter(i => String(_normalizeOrderId(i.order_id)) === String(normalizedOrderId));
         const dedupedItems = _dedupeOrderItems(orderItems, normalizedOrderId);
         let repairedDuplicates = false;
-        if (order && dedupedItems.length !== orderItems.length) {
+        if (repairDuplicates && order && dedupedItems.length !== orderItems.length) {
             repairedDuplicates = await _rewriteOrderItems(normalizedOrderId, dedupedItems);
         }
         return order ? { order, items: dedupedItems, repaired_duplicates: repairedDuplicates } : null;
     };
-    const localSnapshot = await loadLocalOrder();
-    if (_isStaticYandexMirrorRuntime() && localSnapshot) {
-        return localSnapshot;
-    }
+    const localSnapshot = await loadLocalOrder({ repairDuplicates: false });
     if (isSupabaseReady()) {
         try {
             const { data: order, error: e1 } = await _withRemoteTimeout('load', 'load order', () => supabaseClient
@@ -2241,7 +2239,7 @@ async function loadOrder(orderId) {
             if (e1) {
                 console.error('loadOrder error:', e1);
                 if (_isSupabaseAccessError(e1)) _markSupabaseAccessProblem(e1);
-                return await loadLocalOrder();
+                return await loadLocalOrder({ repairDuplicates: true });
             }
 
             // Restore full order data from calculator_data JSON
@@ -2263,7 +2261,7 @@ async function loadOrder(orderId) {
             if (e2) {
                 console.error('loadOrderItems error:', e2);
                 if (_isSupabaseAccessError(e2)) _markSupabaseAccessProblem(e2);
-                return await loadLocalOrder();
+                return await loadLocalOrder({ repairDuplicates: true });
             }
 
             const dedupedRawItems = _dedupeOrderItems(rawItems || [], orderId);
@@ -2283,14 +2281,16 @@ async function loadOrder(orderId) {
                 return item;
             });
 
+            _saveOrderLocally(fullOrder, items);
+            _clearLocalDatasetDirty(['orders', 'orderItems']);
             return { order: fullOrder, items, repaired_duplicates: repairedDuplicates };
         } catch (error) {
             console.error('loadOrder exception:', error);
             if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
-            return await loadLocalOrder();
+            return await loadLocalOrder({ repairDuplicates: true });
         }
     }
-    return await loadLocalOrder();
+    return await loadLocalOrder({ repairDuplicates: true });
 }
 
 async function loadOrderItemsByOrderIds(orderIds = []) {
@@ -4229,6 +4229,22 @@ function _markLocalDatasetDirty(keys = []) {
     normalizedKeys.forEach(key => { dirtyMap[key] = now; });
     _writeLocalDirtyDatasets(dirtyMap);
     _invalidateBootstrapCache(normalizedKeys);
+}
+
+function _clearLocalDatasetDirty(keys = []) {
+    const normalizedKeys = (Array.isArray(keys) ? keys : [keys])
+        .map(key => String(key || '').trim())
+        .filter(Boolean);
+    if (normalizedKeys.length === 0) return;
+    const dirtyMap = _readLocalDirtyDatasets();
+    let changed = false;
+    normalizedKeys.forEach(key => {
+        if (Object.prototype.hasOwnProperty.call(dirtyMap, key)) {
+            delete dirtyMap[key];
+            changed = true;
+        }
+    });
+    if (changed) _writeLocalDirtyDatasets(dirtyMap);
 }
 
 function _isLocalDatasetDirty(key) {
