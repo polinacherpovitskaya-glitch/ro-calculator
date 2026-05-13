@@ -804,6 +804,94 @@ async function main() {
 
     {
         const context = createContext();
+        runScript(context, 'js/supabase.js');
+
+        vm.runInContext(`
+            setLocal(LOCAL_KEYS.orders, [{
+                id: 9101,
+                order_name: 'Semantic duplicate hardware order',
+                status: 'draft',
+            }]);
+            setLocal(LOCAL_KEYS.orderItems, [{
+                id: 9101001,
+                order_id: 9101,
+                item_number: 1,
+                item_type: 'product',
+                product_name: 'Кроссовки кастом',
+                quantity: 600,
+            }, {
+                id: 9101100,
+                order_id: 9101,
+                item_number: 100,
+                item_type: 'hardware',
+                product_name: 'Круглый карабин с ушком · 2,3 см · серебряный',
+                quantity: 600,
+                hardware_source: 'warehouse',
+                hardware_warehouse_item_id: 701,
+                hardware_warehouse_sku: 'CR-RING-HOOK',
+                hardware_parent_item_index: 0,
+                hardware_assembly_speed: 360,
+                hardware_price_per_unit: 7.86,
+                sell_price_hardware: 40,
+                updated_at: '2026-05-13T20:00:00.000Z',
+            }, {
+                id: 9101101,
+                order_id: 9101,
+                item_number: 101,
+                item_type: 'hardware',
+                product_name: 'Соединительное кольцо · 12мм · серебряный',
+                quantity: 600,
+                hardware_source: 'warehouse',
+                hardware_warehouse_item_id: 702,
+                hardware_warehouse_sku: 'RNG-12-SV',
+                hardware_parent_item_index: 0,
+                hardware_assembly_speed: 360,
+                hardware_price_per_unit: 1.02,
+                sell_price_hardware: 30,
+                updated_at: '2026-05-13T20:00:00.000Z',
+            }, {
+                id: 9101102,
+                order_id: 9101,
+                item_number: 102,
+                item_type: 'hardware',
+                product_name: 'Круглый карабин с ушком · 2,3 см · серебряный',
+                quantity: 600,
+                hardware_source: 'warehouse',
+                hardware_warehouse_item_id: 701,
+                hardware_warehouse_sku: 'CR-RING-HOOK',
+                hardware_parent_item_index: 0,
+                hardware_assembly_speed: 360,
+                hardware_price_per_unit: 7.86,
+                sell_price_hardware: 40,
+                updated_at: '2026-05-13T20:05:00.000Z',
+            }, {
+                id: 9101103,
+                order_id: 9101,
+                item_number: 103,
+                item_type: 'hardware',
+                product_name: 'Соединительное кольцо · 12мм · серебряный',
+                quantity: 600,
+                hardware_source: 'warehouse',
+                hardware_warehouse_item_id: 702,
+                hardware_warehouse_sku: 'RNG-12-SV',
+                hardware_parent_item_index: 0,
+                hardware_assembly_speed: 360,
+                hardware_price_per_unit: 1.02,
+                sell_price_hardware: 30,
+                updated_at: '2026-05-13T20:05:00.000Z',
+            }]);
+        `, context);
+
+        const loaded = JSON.parse(JSON.stringify(await vm.runInContext('loadOrder(9101)', context)));
+        assert.equal(loaded.repaired_duplicates, true, 'semantic duplicate hardware rows should be repaired on load');
+        assert.equal(loaded.items.length, 3, 'loadOrder should keep product plus one row per unique hardware item');
+        assert.equal(loaded.items.filter(item => item.item_type === 'hardware').length, 2);
+        const cachedItems = JSON.parse(JSON.stringify(vm.runInContext('getLocal(LOCAL_KEYS.orderItems) || []', context)));
+        assert.equal(cachedItems.filter(item => String(item.order_id) === '9101').length, 3, 'local order_items should be rewritten without duplicate hardware rows');
+    }
+
+    {
+        const context = createContext();
         context.__invalidTables = new Set(['settings']);
         runScript(context, 'js/supabase.js');
 

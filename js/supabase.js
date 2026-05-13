@@ -1856,20 +1856,89 @@ function _getOrderItemDedupKey(item) {
     return `${type}:${itemNumber}`;
 }
 
+function _orderItemValueKey(value) {
+    if (value === null || value === undefined) return '';
+    if (typeof value === 'number') {
+        if (!Number.isFinite(value)) return '';
+        return String(Math.round(value * 1000000) / 1000000);
+    }
+    const asNumber = Number(value);
+    if (value !== '' && Number.isFinite(asNumber)) {
+        return String(Math.round(asNumber * 1000000) / 1000000);
+    }
+    return String(value).trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function _orderItemNumberKey(value) {
+    const asNumber = Number(value);
+    if (!Number.isFinite(asNumber)) return '0';
+    return String(Math.round(asNumber * 1000000) / 1000000);
+}
+
+function _orderItemBoolKey(value) {
+    return value === true || String(value).trim().toLowerCase() === 'true' ? '1' : '0';
+}
+
+function _getOrderItemSemanticDedupKey(item) {
+    const type = String(item?.item_type || 'product').trim().toLowerCase() || 'product';
+    if (type !== 'hardware' && type !== 'packaging') return '';
+
+    const prefix = type === 'hardware' ? 'hardware' : 'packaging';
+    const parent = item?.[`${prefix}_parent_item_index`] ?? '';
+    const source = item?.[`${prefix}_source`] || 'custom';
+    const warehouseId = item?.[`${prefix}_warehouse_item_id`] || '';
+    const warehouseSku = item?.[`${prefix}_warehouse_sku`] || '';
+    const chinaItemId = item?.china_item_id || '';
+    const name = item?.product_name || '';
+    const identity = warehouseId
+        ? `warehouse:${_orderItemValueKey(warehouseId)}:${_orderItemValueKey(warehouseSku)}`
+        : chinaItemId
+            ? `china:${_orderItemValueKey(chinaItemId)}:${_orderItemValueKey(name)}`
+            : `name:${_orderItemValueKey(name)}`;
+
+    return [
+        type,
+        'semantic',
+        _orderItemValueKey(parent),
+        _orderItemValueKey(source),
+        identity,
+        _orderItemNumberKey(item?.quantity),
+        _orderItemNumberKey(item?.[`${prefix}_assembly_speed`]),
+        _orderItemNumberKey(item?.[`${prefix}_price_per_unit`]),
+        _orderItemNumberKey(item?.[`${prefix}_delivery_per_unit`]),
+        _orderItemNumberKey(item?.[`${prefix}_delivery_total`]),
+        _orderItemNumberKey(item?.[`sell_price_${prefix}`]),
+        _orderItemBoolKey(item?.[`${prefix}_from_template`]),
+    ].join(':');
+}
+
 function _getOrderItemFreshness(item) {
     return String(item?.updated_at || item?.created_at || '');
 }
 
-function _dedupeOrderItems(items, orderId = null) {
+function _dedupeOrderItemsByKey(items, getKey) {
     const byKey = new Map();
-    (items || []).forEach(item => {
-        const key = _getOrderItemDedupKey(item);
+    (items || []).forEach((item, index) => {
+        const key = getKey(item, index);
+        if (!key) {
+            const fallbackKey = `__row:${index}`;
+            byKey.set(fallbackKey, item);
+            return;
+        }
         const existing = byKey.get(key);
         if (!existing || _getOrderItemFreshness(item) >= _getOrderItemFreshness(existing)) {
             byKey.set(key, item);
         }
     });
-    const deduped = [...byKey.values()].sort((a, b) => (Number(a.item_number) || 0) - (Number(b.item_number) || 0));
+    return [...byKey.values()];
+}
+
+function _dedupeOrderItems(items, orderId = null) {
+    const byNumber = _dedupeOrderItemsByKey(items, _getOrderItemDedupKey);
+    const bySemantic = _dedupeOrderItemsByKey(byNumber, item =>
+        _getOrderItemSemanticDedupKey(item) || `row:${item?.id ?? ''}:${item?.item_number ?? ''}`
+    );
+    const deduped = bySemantic.sort((a, b) => (Number(a.item_number) || 0) - (Number(b.item_number) || 0));
     if (orderId && deduped.length !== (items || []).length) {
         console.warn('[loadOrder] Deduped duplicated order_items rows', {
             orderId,
