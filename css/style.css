@@ -6992,6 +6992,12 @@ table .text-center { text-align: center; }
     overflow: hidden;
 }
 
+.calc-section.calc-section-picker-open {
+    overflow: visible;
+    position: relative;
+    z-index: 80;
+}
+
 .calc-section-header {
     display: flex;
     align-items: center;

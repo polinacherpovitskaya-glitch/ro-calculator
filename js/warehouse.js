@@ -5989,7 +5989,7 @@ const Warehouse = {
 
     onShipmentPickerSelect(idx, itemId) {
         this.onShipmentItemSelect(idx, itemId);
-        document.querySelectorAll('.wh-picker-dropdown').forEach(d => d.style.display = 'none');
+        this.closeImagePickers();
         this.renderShipmentItemsTable();
     },
 
@@ -7515,10 +7515,11 @@ const Warehouse = {
         if (!el) return;
         const dd = el.querySelector('.wh-picker-dropdown');
         const isOpen = dd.style.display !== 'none';
-        // Close all pickers first
-        document.querySelectorAll('.wh-picker-dropdown').forEach(d => d.style.display = 'none');
+        this.closeImagePickers();
         if (!isOpen) {
             dd.style.display = 'block';
+            const section = el.closest('.calc-section');
+            if (section) section.classList.add('calc-section-picker-open');
             const searchInput = dd.querySelector('.wh-picker-search');
             if (searchInput) { searchInput.value = ''; searchInput.focus(); }
             // Show all items
@@ -7584,7 +7585,7 @@ const Warehouse = {
         const pickValue = dataset.pickValue || '';
         const idxRaw = dataset.selectIdx || '';
 
-        document.querySelectorAll('.wh-picker-dropdown').forEach(d => d.style.display = 'none');
+        this.closeImagePickers();
 
         const resolved = this._resolvePickerCallback(fnName);
         if (!resolved || typeof resolved.fn !== 'function') {
@@ -7599,11 +7600,18 @@ const Warehouse = {
             pickValue
         );
     },
+
+    closeImagePickers() {
+        document.querySelectorAll('.wh-picker-dropdown').forEach(d => d.style.display = 'none');
+        document.querySelectorAll('.calc-section-picker-open').forEach(section => {
+            section.classList.remove('calc-section-picker-open');
+        });
+    },
 };
 
 // Close image picker dropdowns when clicking outside
 document.addEventListener('click', function(e) {
     if (!e.target.closest('.wh-img-picker')) {
-        document.querySelectorAll('.wh-picker-dropdown').forEach(d => d.style.display = 'none');
+        Warehouse.closeImagePickers();
     }
 });

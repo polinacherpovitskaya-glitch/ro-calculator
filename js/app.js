@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v350';
+const APP_VERSION = 'v351';
 
 const App = {
     currentPage: 'orders',
@@ -2596,7 +2596,7 @@ const Calculator = {
     async onHwWarehouseSelect(idx, itemIdStr) {
         const hw = this.hardwareItems[idx];
         // Close any open picker dropdowns
-        document.querySelectorAll('.wh-picker-dropdown').forEach(d => d.style.display = 'none');
+        Warehouse.closeImagePickers();
 
         const itemId = parseInt(itemIdStr) || null;
 
@@ -3241,7 +3241,7 @@ const Calculator = {
 
     async onPkgWarehouseSelect(idx, itemIdStr) {
         const pkg = this.packagingItems[idx];
-        document.querySelectorAll('.wh-picker-dropdown').forEach(d => d.style.display = 'none');
+        Warehouse.closeImagePickers();
         const itemId = parseInt(itemIdStr) || null;
         if (!itemId) {
             pkg.warehouse_item_id = null;
