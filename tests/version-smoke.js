@@ -4,6 +4,7 @@ const path = require('node:path');
 
 const root = path.join(__dirname, '..');
 const appJs = fs.readFileSync(path.join(root, 'js', 'app.js'), 'utf8');
+const supabaseJs = fs.readFileSync(path.join(root, 'js', 'supabase.js'), 'utf8');
 const indexHtml = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const versionJson = JSON.parse(fs.readFileSync(path.join(root, 'js', 'version.json'), 'utf8'));
 const yandexStaticSync = fs.readFileSync(path.join(root, '.github', 'workflows', 'yandex-static-sync.yml'), 'utf8');
@@ -26,6 +27,8 @@ assert.match(indexHtml, /CURRENT_HTML_VERSION = 'v\d+'/, 'index.html should incl
 assert.match(indexHtml, /ro_calc_force_update_attempts/, 'index.html should guard repeated forced update attempts');
 assert.match(yandexStaticSync, /--cache-control "\$cache_control"/, 'calc2 sync must upload explicit cache-control metadata');
 assert.match(yandexStaticSync, /no-cache, no-store, must-revalidate/, 'calc2 HTML/version files must be uploaded as non-cacheable');
+assert.match(yandexStaticSync, /data\/bootstrap\.json/, 'calc2 bootstrap snapshot must be uploaded as non-cacheable');
+assert.match(supabaseJs, /searchParams\.set\('_ro_ts'/, 'Bootstrap fetches must add a cache-busting timestamp');
 
 const appScriptMatch = indexHtml.match(/<script src="js\/app\.js\?v=(\d+)"><\/script>/);
 assert.ok(appScriptMatch, 'index.html must include a versioned js/app.js asset');

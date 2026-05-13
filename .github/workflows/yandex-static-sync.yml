@@ -79,7 +79,7 @@ jobs:
               *.js) content_type="application/javascript; charset=utf-8" ;;
               *.json)
                 content_type="application/json; charset=utf-8"
-                if [ "$rel" = "js/version.json" ]; then
+                if [ "$rel" = "js/version.json" ] || [ "$rel" = "data/bootstrap.json" ]; then
                   cache_control="no-cache, no-store, must-revalidate"
                 fi
                 ;;

@@ -161,7 +161,9 @@ async function _fetchJsonWithTimeout(url, timeoutMs = 3000) {
     const controller = typeof AbortController === 'function' ? new AbortController() : null;
     const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
     try {
-        const response = await fetch(url, {
+        const requestUrl = new URL(url, window.location.origin);
+        requestUrl.searchParams.set('_ro_ts', String(Date.now()));
+        const response = await fetch(requestUrl.toString(), {
             cache: 'no-store',
             headers: { Accept: 'application/json' },
             signal: controller ? controller.signal : undefined,
