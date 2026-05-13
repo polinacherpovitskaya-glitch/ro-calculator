@@ -2151,6 +2151,23 @@ async function smokePendantWarehousePickerRichUI() {
                 photo_thumbnail: 'https://example.com/carabiner-ring.png',
             }],
         },
+        cables: {
+            label: 'Тросы',
+            icon: '⚙',
+            items: [{
+                id: 804,
+                category: 'cables',
+                name: 'Тросы',
+                sku: 'TR-050-YL',
+                size: '5 см',
+                color: 'желтый',
+                qty: 215,
+                available_qty: 200,
+                price_per_unit: 5,
+                unit: 'шт',
+                photo_thumbnail: 'https://example.com/cable-yellow.png',
+            }],
+        },
         rings: {
             label: 'Кольца',
             icon: '⭕',
@@ -2208,7 +2225,9 @@ async function smokePendantWarehousePickerRichUI() {
     assert.match(cordHtml, /img src=/);
     const carabinerHtml = String(vm.runInContext(`Pendant._renderWhDropdown('carabiner', Pendant._wizardData.carabiners[0], Calculator._whPickerData, 0)`, pendantContext));
     assert.match(carabinerHtml, /Карабины/);
+    assert.match(carabinerHtml, /Тросы/);
     assert.match(carabinerHtml, /Кольца/);
+    assert.match(carabinerHtml, /TR-050-YL/);
     assert.match(carabinerHtml, /RNG-FLAT-25-SV/);
 
     vm.runInContext(`Pendant._wizardStep = 4`, pendantContext);
@@ -2234,7 +2253,7 @@ async function smokePendantWarehousePickerRichUI() {
     assert.equal(emptyCarabinerState.carabiners.length, 2);
     assert.match(emptyCarabinerState.html, /Фурнитура 2/);
     await vm.runInContext(`Pendant._updateAttachmentField('carabiner', 0, 'allocated_qty', 4)`, pendantContext);
-    await vm.runInContext(`Pendant._onWhSelect('carabiner', 1, '803')`, pendantContext);
+    await vm.runInContext(`Pendant._onWhSelect('carabiner', 1, '804')`, pendantContext);
     await vm.runInContext(`Pendant._updateAttachmentField('carabiner', 1, 'allocated_qty', 8)`, pendantContext);
     await vm.runInContext(`Pendant._updateAttachmentField('carabiner', 1, 'qty_per_pendant', 2)`, pendantContext);
 
@@ -2248,7 +2267,8 @@ async function smokePendantWarehousePickerRichUI() {
     assert.equal(attachmentState.carabiners.length, 2);
     assert.equal(attachmentState.cord.warehouse_item_id, 701);
     assert.equal(attachmentState.carabiner.warehouse_item_id, 801);
-    assert.equal(attachmentState.carabiners[1].warehouse_item_id, 803);
+    assert.equal(attachmentState.carabiners[1].warehouse_item_id, 804);
+    assert.equal(attachmentState.carabiners[1].category, 'cables');
     assert.equal(attachmentState.cords[0].allocated_qty, 5);
     assert.equal(attachmentState.cords[1].allocated_qty, 7);
     assert.equal(attachmentState.carabiners[0].allocated_qty, 4);
@@ -2256,7 +2276,7 @@ async function smokePendantWarehousePickerRichUI() {
 
     const step4Html = String(vm.runInContext(`Pendant._renderStep4()`, pendantContext));
     assert.match(step4Html, /FLC-550-BK/);
-    assert.match(step4Html, /RNG-FLAT-25-SV/);
+    assert.match(step4Html, /TR-050-YL/);
     assert.match(step4Html, /pendant-step4-layout/);
     assert.match(step4Html, /Сколько подвесов с этой позицией/);
     assert.match(step4Html, /Кол-во на 1 подвес/);
@@ -2265,7 +2285,7 @@ async function smokePendantWarehousePickerRichUI() {
     const step5Html = String(vm.runInContext(`Pendant._renderStep5()`, pendantContext));
     assert.match(step5Html, /Шнур с силик\. наконечником синий 80 см/);
     assert.match(step5Html, /Шнур плоский/);
-    assert.match(step5Html, /Кольцо плоское/);
+    assert.match(step5Html, /Тросы желтый 5 см/);
     assert.match(step5Html, /× 2/);
     assert.match(step5Html, /pendant-summary-table-wrap/);
 }

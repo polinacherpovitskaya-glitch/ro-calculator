@@ -644,7 +644,7 @@ const Pendant = {
         }
     },
 
-    // --- STEP 4: Cord + Carabiner ---
+    // --- STEP 4: Cord + hardware ---
 
     _renderStep4() {
         const pnd = this._wizardData;
@@ -662,7 +662,7 @@ const Pendant = {
 
     _renderAttachmentSection(type, entries, whData, qty) {
         const isCord = type === 'cord';
-        const title = isCord ? '🧵 Шнур' : '🔗 Фурнитура';
+        const title = isCord ? '🧵 Шнур' : '🔗 Фурнитура и тросы';
         const addLabel = isCord ? '+ Добавить шнур' : '+ Добавить фурнитуру';
         const allocatedQty = this._getAttachmentAllocatedTotal(type, this._wizardData, { entries, includeEmpty: true });
         const remainingQty = Math.max(0, round2((qty || 0) - allocatedQty));
@@ -764,7 +764,7 @@ const Pendant = {
     },
 
     _getWarehouseAttachmentCategoryKeys(type) {
-        return type === 'cord' ? ['cords'] : ['carabiners', 'rings'];
+        return type === 'cord' ? ['cords'] : ['carabiners', 'cables', 'rings'];
     },
 
     _getWarehouseAttachmentGroups(type, whData) {
@@ -899,11 +899,11 @@ const Pendant = {
             price_per_unit: data.price_per_unit || 0,
             size: '',
             color: '',
-            category: type === 'cord' ? 'cords' : 'carabiners',
+            category: data.category || (type === 'cord' ? 'cords' : 'carabiners'),
         } : null);
         const uiDefault = type === 'cord'
             ? { icon: '🧵', color: '#fce7f3', textColor: '#9d174d', label: 'шнур' }
-            : { icon: '🔗', color: '#dbeafe', textColor: '#1d4ed8', label: 'фурнитуру' };
+            : { icon: '🔗', color: '#dbeafe', textColor: '#1d4ed8', label: 'фурнитуру или трос' };
         const selectedMeta = selectedPreview
             ? (this._getWarehouseCategoryMeta(selectedPreview.category || selectedPreview.__categoryKey) || uiDefault)
             : uiDefault;
@@ -985,7 +985,7 @@ const Pendant = {
             </div>` : ''}
             <div class="pendant-field-group">
                 <label>Название</label>
-                <input type="text" class="input" id="pw-${type}-name-${index}" value="${App.escHtml(data?.name || '')}" placeholder="${type === 'cord' ? 'Шнур с силик. наконечником' : 'Круглый карабин 2.3 см'}" onchange="Pendant._updateAttachmentField('${type}', ${index}, 'name', this.value)">
+                <input type="text" class="input" id="pw-${type}-name-${index}" value="${App.escHtml(data?.name || '')}" placeholder="${type === 'cord' ? 'Шнур с силик. наконечником' : 'Карабин или трос'}" onchange="Pendant._updateAttachmentField('${type}', ${index}, 'name', this.value)">
             </div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
                 <div class="pendant-field-group">
@@ -1064,6 +1064,7 @@ const Pendant = {
         data.source = 'warehouse';
         data.warehouse_item_id = item.id;
         data.warehouse_sku = item.sku || '';
+        data.category = item.category || item.__categoryKey || (type === 'cord' ? 'cords' : 'carabiners');
         data.photo_thumbnail = item.photo_thumbnail || '';
         data.name = [item.name, item.color, item.size].filter(Boolean).join(' ');
         data.price_per_unit = item.price_per_unit || 0;
