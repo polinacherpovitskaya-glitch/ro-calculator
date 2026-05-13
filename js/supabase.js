@@ -263,6 +263,31 @@ function _mergeOrderRows(rawRows) {
     });
 }
 
+function _isRecordNewer(left, right) {
+    const leftTime = Date.parse(left?.updated_at || left?.created_at || '');
+    const rightTime = Date.parse(right?.updated_at || right?.created_at || '');
+    if (!Number.isFinite(leftTime)) return false;
+    if (!Number.isFinite(rightTime)) return true;
+    return leftTime > rightTime;
+}
+
+function _preserveNewerLocalOrders(incomingRows = []) {
+    const incoming = Array.isArray(incomingRows) ? incomingRows : [];
+    const localOrders = Array.isArray(getLocal(LOCAL_KEYS.orders)) ? getLocal(LOCAL_KEYS.orders) : [];
+    if (!localOrders.length) return incoming;
+
+    const byId = new Map(incoming.map(order => [String(order?.id), order]));
+    localOrders.forEach(localOrder => {
+        const key = String(localOrder?.id);
+        if (!key || key === 'undefined' || key === 'null') return;
+        const incomingOrder = byId.get(key);
+        if (!incomingOrder || _isRecordNewer(localOrder, incomingOrder)) {
+            byId.set(key, localOrder);
+        }
+    });
+    return Array.from(byId.values());
+}
+
 function _mergeShipmentRows(rawRows) {
     return (Array.isArray(rawRows) ? rawRows : []).map(row => {
         if (row && row.shipment_data) {
@@ -2100,7 +2125,7 @@ async function loadOrders(filters = {}) {
             const bootstrapKeys = _isStaticYandexMirrorRuntime() ? ['orders', 'orderItems'] : ['orders'];
             const bootstrapPayload = await _loadSameOriginBootstrap(bootstrapKeys);
             if (bootstrapPayload && Array.isArray(bootstrapPayload.orders) && bootstrapPayload.orders.length > 0) {
-                const mergedOrders = _mergeOrderRows(bootstrapPayload.orders);
+                const mergedOrders = _preserveNewerLocalOrders(_mergeOrderRows(bootstrapPayload.orders));
                 setLocal(LOCAL_KEYS.orders, mergedOrders);
                 if (Array.isArray(bootstrapPayload.orderItems)) {
                     setLocal(LOCAL_KEYS.orderItems, bootstrapPayload.orderItems);
@@ -2132,7 +2157,7 @@ async function loadOrders(filters = {}) {
     const bootstrapKeys = _isStaticYandexMirrorRuntime() ? ['orders', 'orderItems'] : ['orders'];
     const bootstrapPayload = await _loadSameOriginBootstrap(bootstrapKeys);
     if (bootstrapPayload && Array.isArray(bootstrapPayload.orders) && bootstrapPayload.orders.length > 0) {
-        const mergedOrders = _mergeOrderRows(bootstrapPayload.orders);
+        const mergedOrders = _preserveNewerLocalOrders(_mergeOrderRows(bootstrapPayload.orders));
         setLocal(LOCAL_KEYS.orders, mergedOrders);
         if (Array.isArray(bootstrapPayload.orderItems)) {
             setLocal(LOCAL_KEYS.orderItems, bootstrapPayload.orderItems);
@@ -2350,38 +2375,59 @@ async function loadOrderItemsByOrderIds(orderIds = []) {
 }
 
 async function updateOrderStatus(orderId, status) {
+    orderId = _normalizeOrderId(orderId);
+    const nowIso = new Date().toISOString();
     if (isSupabaseReady()) {
-        const { error } = await supabaseClient
+        const { error } = await _withRemoteTimeout('write', 'update order status', () => supabaseClient
             .from('orders')
-            .update({ status, updated_at: new Date().toISOString() })
-            .eq('id', orderId);
-        if (error) console.error('updateOrderStatus error:', error);
+            .update({ status, updated_at: nowIso })
+            .eq('id', orderId));
+        if (error) {
+            console.error('updateOrderStatus error:', error);
+            if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
+            throw new Error('Не удалось обновить статус заказа: ' + (error.message || error.code || 'ошибка базы'));
+        }
+        _upsertOrderLocally({ id: orderId, status, updated_at: nowIso });
+        _ordersLastSyncAt = Date.now();
+        _clearLocalDatasetDirty(['orders']);
+        _invalidateBootstrapCache(['orders']);
     } else {
         const orders = getLocal(LOCAL_KEYS.orders) || [];
-        const idx = orders.findIndex(o => o.id === orderId);
+        const idx = orders.findIndex(o => String(o.id) === String(orderId));
         if (idx >= 0) {
             orders[idx].status = status;
-            orders[idx].updated_at = new Date().toISOString();
+            orders[idx].updated_at = nowIso;
             setLocal(LOCAL_KEYS.orders, orders);
         }
+        _markLocalDatasetDirty(['orders']);
     }
 }
 
 async function updateOrderFields(orderId, updates) {
     if (typeof orderId === 'string' && /^\d+$/.test(orderId)) orderId = Number(orderId);
+    const nowIso = new Date().toISOString();
     if (isSupabaseReady()) {
-        const { error } = await supabaseClient
+        const { error } = await _withRemoteTimeout('write', 'update order fields', () => supabaseClient
             .from('orders')
-            .update({ ...updates, updated_at: new Date().toISOString() })
-            .eq('id', orderId);
-        if (error) console.error('updateOrderFields error:', error);
+            .update({ ...updates, updated_at: nowIso })
+            .eq('id', orderId));
+        if (error) {
+            console.error('updateOrderFields error:', error);
+            if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
+            throw new Error('Не удалось обновить заказ: ' + (error.message || error.code || 'ошибка базы'));
+        }
+        _upsertOrderLocally({ id: orderId, ...updates, updated_at: nowIso });
+        _ordersLastSyncAt = Date.now();
+        _clearLocalDatasetDirty(['orders']);
+        _invalidateBootstrapCache(['orders']);
     } else {
         const orders = getLocal(LOCAL_KEYS.orders) || [];
-        const idx = orders.findIndex(o => o.id === orderId);
+        const idx = orders.findIndex(o => String(o.id) === String(orderId));
         if (idx >= 0) {
-            Object.assign(orders[idx], updates, { updated_at: new Date().toISOString() });
+            Object.assign(orders[idx], updates, { updated_at: nowIso });
             setLocal(LOCAL_KEYS.orders, orders);
         }
+        _markLocalDatasetDirty(['orders']);
     }
 }
 

@@ -191,6 +191,27 @@ function createContext() {
                             persistTableRows(context, table, payload);
                             return { error: null };
                         },
+                        update(fields) {
+                            return {
+                                eq(column, value) {
+                                    context.__remoteCalls.push({ table, action: 'update', column, value, fields });
+                                    if (context.__hangingTables.has(table)) {
+                                        return new Promise(() => {});
+                                    }
+                                    if (remoteError(table)) {
+                                        return Promise.resolve({ error: remoteError(table) });
+                                    }
+                                    if (missingTableError(table)) {
+                                        return Promise.resolve({ error: missingTableError(table) });
+                                    }
+                                    const rows = Array.isArray(context.__tableRows[table]) ? context.__tableRows[table] : [];
+                                    context.__tableRows[table] = rows.map(row => (
+                                        String(row[column]) === String(value) ? { ...row, ...fields } : row
+                                    ));
+                                    return Promise.resolve({ error: null });
+                                },
+                            };
+                        },
                     };
                 },
             };
@@ -1832,6 +1853,71 @@ async function main() {
         );
         assert.equal(context.__tableRows.order_items[0].product_name, 'Новая версия позиции');
         assert.equal(context.__remoteCalls.some(call => call.table === 'order_items' && call.action === 'delete' && call.value === staleItemId), true, 'stale item should be deleted after successful upsert');
+    }
+
+    {
+        const context = createContext();
+        const orderId = 1777974526025;
+        context.__tableRows.orders = [{
+            id: orderId,
+            order_name: 'бифри 100 шт юла+цветок',
+            status: 'draft',
+            updated_at: '2026-05-13T12:00:00.000Z',
+        }];
+        runScript(context, 'js/supabase.js');
+        vm.runInContext(`
+            initSupabase();
+            setLocal(LOCAL_KEYS.orders, [{
+                id: ${orderId},
+                order_name: 'бифри 100 шт юла+цветок',
+                status: 'draft',
+                updated_at: '2026-05-13T12:00:00.000Z',
+            }]);
+        `, context);
+
+        await vm.runInContext(`updateOrderStatus(${orderId}, 'production_casting')`, context);
+
+        assert.equal(context.__tableRows.orders[0].status, 'production_casting', 'remote status should be updated');
+        const cachedOrders = JSON.parse(JSON.stringify(vm.runInContext('getLocal(LOCAL_KEYS.orders)', context)));
+        assert.equal(cachedOrders[0].status, 'production_casting', 'successful remote status update should refresh local cache');
+        assert.equal(
+            JSON.parse(context.localStorage.getItem('ro_calc_dirty_datasets') || '{}').orders,
+            undefined,
+            'successful remote status update should not leave orders dirty',
+        );
+    }
+
+    {
+        const context = createContext();
+        const orderId = 1777974526025;
+        context.location = {
+            href: 'https://calc2.recycleobject.ru/#orders',
+            origin: 'https://calc2.recycleobject.ru',
+            protocol: 'https:',
+        };
+        context.__bootstrapOrders = [{
+            id: orderId,
+            order_name: 'бифри 100 шт юла+цветок',
+            status: 'draft',
+            updated_at: '2026-05-13T12:00:00.000Z',
+        }];
+        runScript(context, 'js/supabase.js');
+        vm.runInContext(`
+            initSupabase();
+            setLocal(LOCAL_KEYS.orders, [{
+                id: ${orderId},
+                order_name: 'бифри 100 шт юла+цветок',
+                status: 'production_casting',
+                updated_at: '2026-05-13T13:40:00.000Z',
+            }]);
+        `, context);
+
+        const loadedOrders = JSON.parse(JSON.stringify(await vm.runInContext('loadOrders({})', context)));
+        assert.equal(loadedOrders[0].status, 'production_casting');
+
+        await new Promise(resolve => setTimeout(resolve, 20));
+        const cachedOrders = JSON.parse(JSON.stringify(vm.runInContext('getLocal(LOCAL_KEYS.orders)', context)));
+        assert.equal(cachedOrders[0].status, 'production_casting', 'older calc2 bootstrap must not overwrite a newer local status after refresh');
     }
 
     console.log('supabase fallback smoke checks passed');
