@@ -89,12 +89,21 @@ jobs:
   deploy-vercel:
     needs: verify
     runs-on: ubuntu-latest
+    # Vercel deploy must not gate the GitHub Pages / Yandex mirror updates.
+    # When the token expires the workflow used to fail outright and hide that
+    # the static mirrors still shipped a fresh build. Treat the Vercel job as
+    # advisory and rely on the post-deploy verification + Telegram alert to
+    # surface the real failure to the team.
+    continue-on-error: true
     environment:
       name: production
       url: https://calc.recycleobject.ru/
     env:
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+    outputs:
+      vercel_status: ${{ steps.vercel-deploy.outputs.status }}
+      vercel_reason: ${{ steps.vercel-deploy.outputs.reason }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -105,16 +114,113 @@ jobs:
           node-version: "24"
 
       - name: Deploy to calc.recycleobject.ru
+        id: vercel-deploy
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
-          set -euo pipefail
+          set +e
+          status="success"
+          reason=""
           if [ -z "${VERCEL_TOKEN:-}" ]; then
-            echo "VERCEL_TOKEN secret is required to deploy calc.recycleobject.ru" >&2
+            status="missing_token"
+            reason="VERCEL_TOKEN secret is empty"
+          elif [ -z "${VERCEL_ORG_ID:-}" ] || [ -z "${VERCEL_PROJECT_ID:-}" ]; then
+            status="missing_project"
+            reason="VERCEL_ORG_ID or VERCEL_PROJECT_ID secret is empty"
+          else
+            log_file="$(mktemp)"
+            npx vercel@51.6.1 deploy --prod --yes --token "$VERCEL_TOKEN" 2>&1 | tee "$log_file"
+            exit_code=${PIPESTATUS[0]}
+            if [ "$exit_code" -ne 0 ]; then
+              if grep -qi "token provided via .* is not valid\|token .* is not valid\|please provide a valid token" "$log_file"; then
+                status="invalid_token"
+                reason="Vercel rejected the token; rotate VERCEL_TOKEN at https://vercel.com/account/tokens and update the GitHub secret"
+              else
+                status="deploy_failed"
+                reason="Vercel CLI exited with code ${exit_code}"
+              fi
+            fi
+            rm -f "$log_file"
+          fi
+          echo "status=${status}" >> "$GITHUB_OUTPUT"
+          echo "reason=${reason}" >> "$GITHUB_OUTPUT"
+          if [ "$status" != "success" ]; then
+            echo ""
+            echo "::error title=Vercel deploy skipped (${status})::${reason}"
+            echo ""
+            echo "================================================================"
+            echo " calc.recycleobject.ru did NOT receive this commit."
+            echo " The team must fall back to one of the working mirrors:"
+            echo "   - https://calc2.recycleobject.ru/      (Yandex static mirror)"
+            echo "   - https://polinacherpovitskaya-glitch.github.io/ro-calculator/"
+            echo " To restore Vercel deploys:"
+            echo "   1. Generate a new token at https://vercel.com/account/tokens"
+            echo "   2. Update the VERCEL_TOKEN secret in GitHub repo settings"
+            echo "   3. Re-run this workflow"
+            echo "================================================================"
             exit 1
           fi
-          if [ -z "${VERCEL_ORG_ID:-}" ] || [ -z "${VERCEL_PROJECT_ID:-}" ]; then
-            echo "VERCEL_ORG_ID and VERCEL_PROJECT_ID secrets are required to deploy calc.recycleobject.ru" >&2
-            exit 1
+
+      - name: Notify Telegram on Vercel deploy failure
+        if: ${{ failure() }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TASK_BOT_TOKEN: ${{ secrets.TASK_BOT_TOKEN }}
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          TELEGRAM_ALERT_CHAT_ID: ${{ secrets.TELEGRAM_ALERT_CHAT_ID }}
+          TELEGRAM_SMOKE_CHAT_ID: ${{ secrets.TELEGRAM_SMOKE_CHAT_ID }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          ALERT_WORKFLOW: Deploy GitHub Pages
+          ALERT_SCOPE: Vercel deploy to calc.recycleobject.ru — ${{ steps.vercel-deploy.outputs.reason || 'unknown failure' }}
+          ALERT_STATUS: failure
+          ALERT_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: node .github/scripts/send-telegram-alert.mjs
+
+  verify-production-version:
+    needs: [deploy, deploy-vercel]
+    if: ${{ always() && needs.deploy.result == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Compare deployed version against committed version.json
+        id: version-check
+        env:
+          VERCEL_DEPLOY_STATUS: ${{ needs.deploy-vercel.result }}
+          VERCEL_DEPLOY_REASON: ${{ needs.deploy-vercel.outputs.vercel_reason }}
+        run: |
+          set -euo pipefail
+          expected="$(node -e 'console.log(require("./js/version.json").version)')"
+          echo "Expected version (from js/version.json): ${expected}"
+
+          declare -A targets
+          targets["calc.recycleobject.ru"]="https://calc.recycleobject.ru/js/version.json"
+          targets["calc2.recycleobject.ru"]="https://calc2.recycleobject.ru/js/version.json"
+          targets["polinacherpovitskaya-glitch.github.io"]="https://polinacherpovitskaya-glitch.github.io/ro-calculator/js/version.json"
+
+          stale=()
+          for label in "${!targets[@]}"; do
+            url="${targets[$label]}"
+            actual="$(curl -fsSL --max-time 20 "${url}?cb=$(date +%s)" 2>/dev/null | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{try{console.log(JSON.parse(d).version||"unknown")}catch{console.log("unparsable")}})' || echo "unreachable")"
+            echo "  ${label}: ${actual}"
+            if [ "${actual}" != "${expected}" ]; then
+              stale+=("${label} (got=${actual}, want=${expected})")
+            fi
+          done
+
+          if [ ${#stale[@]} -gt 0 ]; then
+            echo ""
+            echo "::warning title=Stale production mirrors::$(printf '%s; ' "${stale[@]}")"
+            echo "stale<<STALE_EOF" >> "$GITHUB_OUTPUT"
+            printf '%s\n' "${stale[@]}" >> "$GITHUB_OUTPUT"
+            echo "STALE_EOF" >> "$GITHUB_OUTPUT"
+            if [ "${VERCEL_DEPLOY_STATUS}" != "success" ]; then
+              echo ""
+              echo "Vercel deploy job result: ${VERCEL_DEPLOY_STATUS}"
+              echo "Reason: ${VERCEL_DEPLOY_REASON:-(no detail)}"
+            fi
+          else
+            echo "All production mirrors are up to date."
           fi
-          npx vercel@51.6.1 deploy --prod --yes --token "$VERCEL_TOKEN"
