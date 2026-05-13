@@ -5736,10 +5736,17 @@ async function saveWarehouseItem(item) {
                 created_at: item.created_at || new Date().toISOString(),
                 updated_at: item.updated_at,
             };
-            const { error } = await supabaseClient
-                .from('warehouse_items').upsert(row, { onConflict: 'id' });
-            if (error) console.error('saveWarehouseItem error:', error);
-        } catch(e) { console.error('saveWarehouseItem exception:', e); }
+            const { error } = await _withRemoteTimeout('write', 'save warehouse item', () => supabaseClient
+                .from('warehouse_items').upsert(row, { onConflict: 'id' }));
+            if (error) {
+                console.error('saveWarehouseItem error:', error);
+                if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
+                throw new Error(`Не удалось сохранить позицию склада: ${error.message || error.code || 'ошибка записи'}`);
+            }
+        } catch(e) {
+            console.error('saveWarehouseItem exception:', e);
+            throw e;
+        }
     }
 
     // localStorage backup
@@ -5770,19 +5777,32 @@ async function saveWarehouseItem(item) {
 async function saveWarehouseItems(items) {
     if (isSupabaseReady()) {
         try {
-            const rows = items.map(item => ({
-                id: item.id || Date.now(),
-                name: item.name || '',
-                sku: item.sku || '',
-                category: item.category || '',
-                item_data: JSON.stringify(item),
-                created_at: item.created_at || new Date().toISOString(),
-                updated_at: item.updated_at || new Date().toISOString(),
-            }));
-            const { error } = await supabaseClient
-                .from('warehouse_items').upsert(rows, { onConflict: 'id' });
-            if (error) console.error('saveWarehouseItems error:', error);
-        } catch(e) { console.error('saveWarehouseItems exception:', e); }
+            const now = Date.now();
+            const rows = items.map((item, index) => {
+                if (!item.id) item.id = now + index;
+                if (!item.created_at) item.created_at = new Date().toISOString();
+                item.updated_at = item.updated_at || new Date().toISOString();
+                return {
+                    id: item.id,
+                    name: item.name || '',
+                    sku: item.sku || '',
+                    category: item.category || '',
+                    item_data: JSON.stringify(item),
+                    created_at: item.created_at,
+                    updated_at: item.updated_at,
+                };
+            });
+            const { error } = await _withRemoteTimeout('write', 'save warehouse items', () => supabaseClient
+                .from('warehouse_items').upsert(rows, { onConflict: 'id' }));
+            if (error) {
+                console.error('saveWarehouseItems error:', error);
+                if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
+                throw new Error(`Не удалось сохранить остатки склада: ${error.message || error.code || 'ошибка записи'}`);
+            }
+        } catch(e) {
+            console.error('saveWarehouseItems exception:', e);
+            throw e;
+        }
     }
     setLocal(LOCAL_KEYS.warehouseItems, items);
     _markLocalDatasetDirty(['warehouseItems']);
@@ -5994,9 +6014,17 @@ async function saveShipment(shipment) {
     if (isSupabaseReady()) {
         try {
             const row = { id: shipment.id, shipment_data: JSON.stringify(shipment), created_at: shipment.created_at, updated_at: shipment.updated_at };
-            const { error } = await supabaseClient.from('shipments').upsert(row, { onConflict: 'id' });
-            if (error) console.error('saveShipment error:', error);
-        } catch(e) { console.error('saveShipment exception:', e); }
+            const { error } = await _withRemoteTimeout('write', 'save shipment', () => supabaseClient
+                .from('shipments').upsert(row, { onConflict: 'id' }));
+            if (error) {
+                console.error('saveShipment error:', error);
+                if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
+                throw new Error(`Не удалось сохранить приёмку: ${error.message || error.code || 'ошибка записи'}`);
+            }
+        } catch(e) {
+            console.error('saveShipment exception:', e);
+            throw e;
+        }
     }
 
     // localStorage backup
@@ -6040,9 +6068,17 @@ async function saveChinaPurchase(purchase) {
                 created_at: purchase.created_at || new Date().toISOString(),
                 updated_at: purchase.updated_at,
             };
-            const { error } = await supabaseClient.from('china_purchases').upsert(row, { onConflict: 'id' });
-            if (error) console.error('saveChinaPurchase error:', error);
-        } catch(e) { console.error('saveChinaPurchase exception:', e); }
+            const { error } = await _withRemoteTimeout('write', 'save china purchase', () => supabaseClient
+                .from('china_purchases').upsert(row, { onConflict: 'id' }));
+            if (error) {
+                console.error('saveChinaPurchase error:', error);
+                if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
+                throw new Error(`Не удалось сохранить закупку Китая: ${error.message || error.code || 'ошибка записи'}`);
+            }
+        } catch(e) {
+            console.error('saveChinaPurchase exception:', e);
+            throw e;
+        }
     }
 
     // localStorage backup

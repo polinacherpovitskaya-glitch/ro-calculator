@@ -712,6 +712,51 @@ async function main() {
     {
         const context = createContext();
         runScript(context, 'js/supabase.js');
+        vm.runInContext(`initSupabase();`, context);
+        context.__hangingTables.add('warehouse_items');
+
+        await assert.rejects(
+            vm.runInContext(`
+                saveWarehouseItem({
+                    id: 9901,
+                    name: 'Новая фурнитура из Китая',
+                    sku: 'CN-HARDWARE-SMOKE',
+                    category: 'carabiners',
+                    qty: 0,
+                })
+            `, context),
+            /timeout \(save warehouse item|Не удалось сохранить позицию склада/,
+            'warehouse item save should fail fast when the canonical stock table hangs',
+        );
+        const cachedWarehouse = JSON.parse(JSON.stringify(vm.runInContext('getLocal(LOCAL_KEYS.warehouseItems) || []', context)));
+        assert.equal(cachedWarehouse.length, 0, 'failed shared warehouse save should not pretend the stock item was saved locally');
+    }
+
+    {
+        const context = createContext();
+        runScript(context, 'js/supabase.js');
+        vm.runInContext(`initSupabase();`, context);
+        context.__hangingTables.add('shipments');
+
+        await assert.rejects(
+            vm.runInContext(`
+                saveShipment({
+                    id: 9902,
+                    shipment_name: 'Smoke China box',
+                    items: [],
+                    status: 'draft',
+                })
+            `, context),
+            /timeout \(save shipment|Не удалось сохранить приёмку/,
+            'shipment save should fail fast when the canonical shipments table hangs',
+        );
+        const cachedShipments = JSON.parse(JSON.stringify(vm.runInContext('getLocal(LOCAL_KEYS.shipments) || []', context)));
+        assert.equal(cachedShipments.length, 0, 'failed shared shipment save should not pretend the receipt was saved locally');
+    }
+
+    {
+        const context = createContext();
+        runScript(context, 'js/supabase.js');
 
         vm.runInContext(`
             setLocal(LOCAL_KEYS.orders, [{
