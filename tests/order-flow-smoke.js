@@ -604,7 +604,7 @@ async function smokeHardwareOnlyAutosave(context) {
         window.__savedDraftPayload = null;
         saveOrder = async (order, items) => {
             window.__savedDraftPayload = { order, items };
-            return 555;
+            return order.id;
         };
 
         Calculator.resetForm();
@@ -628,10 +628,69 @@ async function smokeHardwareOnlyAutosave(context) {
     const saved = clone(await vm.runInContext(`window.__savedDraftPayload`, context));
     assert.ok(saved, 'hardware-only draft triggers autosave');
     assert.equal(saved.order.order_name, 'Hardware only draft');
+    assert.ok(saved.order.id, 'new autosave reserves a stable order id before writing');
     assert.equal(saved.items.length, 1);
     assert.equal(saved.items[0].item_type, 'hardware');
     assert.equal(saved.items[0].hardware_warehouse_item_id, 777);
-    assert.equal(context.localStorage.getItem('ro_calc_editing_order_id'), '555');
+    assert.equal(context.localStorage.getItem('ro_calc_editing_order_id'), String(saved.order.id));
+}
+
+async function smokeNewDraftAutosaveAndManualSaveShareReservedId(context) {
+    const result = clone(await vm.runInContext(`(async () => {
+        const saveCalls = [];
+        const saveResolvers = [];
+        saveOrder = (order, items) => new Promise(resolve => {
+            saveCalls.push({ order: { ...order }, itemCount: items.length });
+            saveResolvers.push(() => resolve(order.id));
+        });
+
+        loadOrder = async (orderId) => ({
+            order: { id: orderId, status: 'draft' },
+            items: [],
+        });
+
+        Calculator.resetForm();
+        document.getElementById('calc-order-name').value = 'Race-safe draft';
+        document.getElementById('calc-manager-name').value = 'Smoke';
+        document.getElementById('calc-autosave-status');
+
+        Calculator.hardwareItems = [Object.assign(Calculator.getEmptyHardware(null), {
+            source: 'warehouse',
+            name: 'Race Hardware',
+            qty: 3,
+            warehouse_item_id: 778,
+            warehouse_sku: 'HW-778',
+            assembly_speed: 120,
+            result: { costPerUnit: 15, hoursHardware: 0.4 },
+        })];
+
+        const autosavePromise = Calculator._doAutosave();
+        await Promise.resolve();
+        const manualSavePromise = Calculator.saveOrder();
+        await Promise.resolve();
+        await Promise.resolve();
+
+        const idsBeforeResolve = saveCalls.map(call => call.order.id);
+        saveResolvers.forEach(resolve => resolve());
+        await Promise.all([autosavePromise, manualSavePromise]);
+
+        return {
+            saveCalls,
+            idsBeforeResolve,
+            editingOrderId: App.editingOrderId,
+            storedOrderId: localStorage.getItem('ro_calc_editing_order_id'),
+        };
+    })()`, context));
+
+    assert.equal(result.saveCalls.length, 2, 'autosave and manual save both attempted to persist');
+    assert.ok(result.idsBeforeResolve[0], 'autosave reserves an id before the first write resolves');
+    assert.equal(
+        new Set(result.idsBeforeResolve).size,
+        1,
+        'manual save must reuse the in-flight autosave id instead of creating a duplicate draft'
+    );
+    assert.equal(String(result.editingOrderId), String(result.idsBeforeResolve[0]));
+    assert.equal(result.storedOrderId, String(result.idsBeforeResolve[0]));
 }
 
 async function smokeZeroCostWarehouseHardwareStillShowsInPricing(context) {
@@ -7854,6 +7913,7 @@ async function main() {
     await smokeCalculatorPersistence(context);
     await smokeEmptyPlaceholderProductIsNotSaved(context);
     await smokeHardwareOnlyAutosave(context);
+    await smokeNewDraftAutosaveAndManualSaveShareReservedId(context);
     await smokeZeroCostWarehouseHardwareStillShowsInPricing(context);
     await smokeLoadOrderHydratesZeroWarehousePriceFromCurrentStock(context);
     await smokeOrderListAndDetailUseLiveFinancialSnapshot(context);

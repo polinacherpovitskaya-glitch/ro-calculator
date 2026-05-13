@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v346';
+const APP_VERSION = 'v347';
 
 const App = {
     currentPage: 'orders',
@@ -4779,6 +4779,20 @@ const Calculator = {
     // SAVE / LOAD ORDER
     // ==========================================
 
+    _getCurrentEditingOrderId() {
+        const rawId = App.editingOrderId || localStorage.getItem('ro_calc_editing_order_id');
+        const id = Number(rawId || 0);
+        return Number.isFinite(id) && id > 0 ? id : null;
+    },
+
+    _ensureEditingOrderId() {
+        const existingId = this._getCurrentEditingOrderId();
+        const orderId = existingId || Date.now();
+        App.editingOrderId = orderId;
+        localStorage.setItem('ro_calc_editing_order_id', String(orderId));
+        return orderId;
+    },
+
     // ==========================================
     // AUTOSAVE (draft)
     // ==========================================
@@ -4816,9 +4830,11 @@ const Calculator = {
             const load = calculateProductionLoad(this.items, this.hardwareItems, this.packagingItems, App.params, this.pendants);
             const orderAdjustments = this.getOrderAdjustments();
             const summary = calculateOrderSummary(this.items, this.hardwareItems, this.packagingItems, this.extraCosts, App.params || {}, this.pendants, orderAdjustments);
+            const hadEditingOrderId = !!this._getCurrentEditingOrderId();
+            const orderIdForSave = this._ensureEditingOrderId();
 
             const order = {
-                id: App.editingOrderId || undefined,
+                id: orderIdForSave,
                 order_name: autoName,
                 client_name: document.getElementById('calc-client-name').value.trim(),
                 manager_name: document.getElementById('calc-manager-name').value.trim(),
@@ -4857,7 +4873,7 @@ const Calculator = {
             };
 
             // If editing existing order, preserve its current status (don't overwrite 'calculated'/'in_production' etc.)
-            if (App.editingOrderId) {
+            if (hadEditingOrderId) {
                 // Read current status from stored orders to preserve it
                 order.status = this._currentOrderStatus || 'draft';
             }
@@ -5045,9 +5061,11 @@ const Calculator = {
         const load = calculateProductionLoad(this.items, this.hardwareItems, this.packagingItems, App.params, this.pendants);
         const orderAdjustments = this.getOrderAdjustments();
         const summary = calculateOrderSummary(this.items, this.hardwareItems, this.packagingItems, this.extraCosts, App.params || {}, this.pendants, orderAdjustments);
+        const isEdit = !!this._getCurrentEditingOrderId();
+        const orderIdForSave = this._ensureEditingOrderId();
 
         const order = {
-            id: App.editingOrderId || undefined,
+            id: orderIdForSave,
             order_name: orderName,
             client_name: document.getElementById('calc-client-name').value.trim(),
             manager_name: '',
@@ -5087,7 +5105,6 @@ const Calculator = {
 
         const items = this._collectItemsForSave();
 
-        const isEdit = !!App.editingOrderId;
         const assignedManagerName = document.getElementById('calc-manager-name').value.trim() || App.getCurrentEmployeeName();
         if (assignedManagerName && assignedManagerName !== 'Неизвестный') {
             document.getElementById('calc-manager-name').value = assignedManagerName;
