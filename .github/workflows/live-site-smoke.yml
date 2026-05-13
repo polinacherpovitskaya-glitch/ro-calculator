@@ -41,6 +41,7 @@ jobs:
 
       - name: Check deployed version for workflow-run smoke
         id: preflight
+        shell: bash
         env:
           RO_LIVE_URL: ${{ inputs.live_url || 'https://calc.recycleobject.ru/' }}
         run: |
@@ -75,7 +76,7 @@ jobs:
         run: node tests/live-site-smoke.mjs
 
       - name: Upload Playwright artifacts
-        if: ${{ always() && steps.preflight.outputs.skip != 'true' }}
+        if: ${{ always() && steps.preflight.outcome == 'success' && steps.preflight.outputs.skip != 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: live-site-smoke-artifacts
@@ -83,7 +84,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: Notify Telegram
-        if: ${{ always() && steps.preflight.outputs.skip != 'true' }}
+        if: ${{ always() && steps.preflight.outcome == 'success' && steps.preflight.outputs.skip != 'true' }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -100,7 +101,7 @@ jobs:
         run: node .github/scripts/send-telegram-alert.mjs
 
       - name: Sync GitHub issue
-        if: ${{ always() && steps.preflight.outputs.skip != 'true' }}
+        if: ${{ always() && steps.preflight.outcome == 'success' && steps.preflight.outputs.skip != 'true' }}
         continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ github.token }}
