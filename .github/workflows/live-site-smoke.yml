@@ -39,17 +39,43 @@ jobs:
         with:
           node-version: '24'
 
+      - name: Check deployed version for workflow-run smoke
+        id: preflight
+        env:
+          RO_LIVE_URL: ${{ inputs.live_url || 'https://calc.recycleobject.ru/' }}
+        run: |
+          set -euo pipefail
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+          if [ "${{ github.event_name }}" != "workflow_run" ]; then
+            exit 0
+          fi
+
+          expected="$(node -e 'console.log(require("./js/version.json").version)')"
+          version_url="$(node -e 'const base = new URL(process.env.RO_LIVE_URL || "https://calc.recycleobject.ru/"); base.pathname = base.pathname.replace(/\/?$/, "/js/version.json"); base.search = ""; base.hash = ""; console.log(base.toString())')"
+          actual="$(curl -fsSL --max-time 20 "${version_url}?cb=$(date +%s)" 2>/dev/null | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{try{console.log(JSON.parse(d).version||"unknown")}catch{console.log("unparsable")}})' || echo "unreachable")"
+
+          echo "Expected live version: ${expected}"
+          echo "Actual live version: ${actual}"
+
+          if [ "${actual}" != "${expected}" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Live smoke skipped::${RO_LIVE_URL} is still ${actual}, expected ${expected}. The Deploy GitHub Pages workflow already reports the stale Vercel deployment."
+          fi
+
       - name: Install Playwright package
+        if: ${{ steps.preflight.outputs.skip != 'true' }}
         run: npm install --no-save playwright@1.54.2
 
       - name: Run live smoke
+        if: ${{ steps.preflight.outputs.skip != 'true' }}
         env:
           RO_LIVE_URL: ${{ inputs.live_url || 'https://calc.recycleobject.ru/' }}
           RO_SMOKE_USER_ID: 1772715209137
         run: node tests/live-site-smoke.mjs
 
       - name: Upload Playwright artifacts
-        if: always()
+        if: ${{ always() && steps.preflight.outputs.skip != 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: live-site-smoke-artifacts
@@ -57,7 +83,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: Notify Telegram
-        if: ${{ always() }}
+        if: ${{ always() && steps.preflight.outputs.skip != 'true' }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -74,7 +100,7 @@ jobs:
         run: node .github/scripts/send-telegram-alert.mjs
 
       - name: Sync GitHub issue
-        if: ${{ always() }}
+        if: ${{ always() && steps.preflight.outputs.skip != 'true' }}
         continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ github.token }}
