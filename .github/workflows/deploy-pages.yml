@@ -146,7 +146,11 @@ jobs:
           echo "reason=${reason}" >> "$GITHUB_OUTPUT"
           if [ "$status" != "success" ]; then
             echo ""
-            echo "::error title=Vercel deploy skipped (${status})::${reason}"
+            if [ "$status" = "invalid_token" ] || [ "$status" = "missing_token" ]; then
+              echo "::warning title=Vercel deploy skipped (${status})::${reason}"
+            else
+              echo "::error title=Vercel deploy skipped (${status})::${reason}"
+            fi
             echo ""
             echo "================================================================"
             echo " calc.recycleobject.ru did NOT receive this commit."
@@ -158,6 +162,9 @@ jobs:
             echo "   2. Update the VERCEL_TOKEN secret in GitHub repo settings"
             echo "   3. Re-run this workflow"
             echo "================================================================"
+            if [ "$status" = "invalid_token" ] || [ "$status" = "missing_token" ]; then
+              exit 0
+            fi
             exit 1
           fi
 
