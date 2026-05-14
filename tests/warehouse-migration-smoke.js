@@ -522,12 +522,55 @@ async function smokeShipmentCreatesSpecificSupplyWithoutSku() {
     assert.equal(context.__adjustStockCalls[0].delta, 15000);
 }
 
+async function smokeReceiptPickerLoadsSpecificWarehouseSupplies() {
+    const context = buildWarehouseContext();
+    context.__warehouseItems = [
+        { id: 8101, category: 'carabiners', name: 'Карабин круглый', sku: 'CR-RNG-TEST', qty: 12, unit: 'шт', price_per_unit: 5 },
+        { id: 8102, category: 'cables', name: 'Трос серебряный', sku: 'TR-TEST', qty: 34, unit: 'шт', price_per_unit: 5 },
+        { id: 8103, category: 'packaging', name: 'Коробка тест', sku: 'BOX-TEST', qty: 7, unit: 'шт', price_per_unit: 12 },
+    ];
+    context.loadWarehouseItems = async () => clone(context.__warehouseItems);
+
+    const grouped = await vm.runInContext(`Warehouse.getItemsForPicker()`, context);
+    assert.equal(grouped.carabiners.items[0].id, 8101);
+    assert.equal(grouped.cables.items[0].id, 8102);
+    assert.equal(grouped.packaging.items[0].id, 8103);
+    assert.ok(vm.runInContext(`Warehouse.allItems.length >= 3`, context));
+
+    const html = vm.runInContext(`Warehouse.buildPickerOptions(${JSON.stringify(grouped)}, null, true)`, context);
+    assert.match(html, /Карабин круглый/);
+    assert.match(html, /Трос серебряный/);
+    assert.match(html, /Коробка тест/);
+}
+
+async function smokeShipmentSelectUsesFreshPickerCache() {
+    const context = buildWarehouseContext();
+    context.__warehouseItems = [
+        { id: 8201, category: 'rings', name: 'Соединительное кольцо', sku: 'RNG-TEST', size: '10 мм', color: 'серебро', qty: 100, unit: 'шт', price_per_unit: 1 },
+    ];
+    context.loadWarehouseItems = async () => clone(context.__warehouseItems);
+
+    await vm.runInContext(`Warehouse.getItemsForPicker()`, context);
+    vm.runInContext(`
+        Warehouse.allItems = [];
+        Warehouse.shipmentItems = [{ source: 'existing', warehouse_item_id: null }];
+        Warehouse.recalcShipmentValues = () => {};
+        Warehouse.onShipmentItemSelect(0, '8201');
+    `, context);
+
+    assert.equal(vm.runInContext(`Warehouse.shipmentItems[0].warehouse_item_id`, context), 8201);
+    assert.equal(vm.runInContext(`Warehouse.shipmentItems[0].category`, context), 'rings');
+    assert.equal(vm.runInContext(`Warehouse.shipmentItems[0].sku`, context), 'RNG-TEST');
+}
+
 async function main() {
     await smokeManualFormQtyUsesLatestSharedStock();
     await smokeProjectHardwareReadyToggleIsIdempotent();
     await smokeShipmentRepostAppliesOnlyDelta();
     await smokeChinaShipmentInfersSupplyCategories();
     await smokeShipmentCreatesSpecificSupplyWithoutSku();
+    await smokeReceiptPickerLoadsSpecificWarehouseSupplies();
+    await smokeShipmentSelectUsesFreshPickerCache();
     console.log('warehouse migration smoke checks passed');
 }
 

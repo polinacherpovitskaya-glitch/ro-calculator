@@ -5834,6 +5834,7 @@ const Warehouse = {
         document.getElementById('wh-sh-update-btn').style.display = isReceived ? '' : 'none';
         document.getElementById('wh-shipment-form').style.display = '';
 
+        await this._loadWarehouseItemsForPicker();
         this.recalcShipment();
         document.getElementById('wh-shipment-form').scrollIntoView({ behavior: 'smooth' });
     },
@@ -6022,7 +6023,8 @@ const Warehouse = {
             shItem.mold_arrived_at = '';
             shItem.mold_storage_until = '';
         } else {
-            const whItem = this.allItems.find(i => Number(i && i.id || 0) === itemId);
+            const whItem = (this.allItems || []).find(i => Number(i && i.id || 0) === itemId)
+                || (this._pickerItemsById instanceof Map ? this._pickerItemsById.get(itemId) : null);
             if (whItem) {
                 shItem.source = 'existing';
                 shItem.warehouse_item_id = whItem.id;
@@ -7260,6 +7262,23 @@ const Warehouse = {
         return Array.from(map.values());
     },
 
+    async _loadWarehouseItemsForPicker() {
+        let loadedItems = [];
+        try {
+            loadedItems = await loadWarehouseItems();
+        } catch (error) {
+            console.warn('[Warehouse] Failed to load items for picker; using current cache', error);
+            loadedItems = [];
+        }
+
+        const sourceItems = Array.isArray(loadedItems) && loadedItems.length
+            ? loadedItems
+            : (Array.isArray(this.allItems) ? this.allItems : []);
+        const items = await this._ensureRequiredSeedItems(sourceItems);
+        this.allItems = items;
+        return items;
+    },
+
     _cleanupZeroDuplicateItems() {
         const grouped = new Map();
         (this.allItems || []).forEach(item => {
@@ -7292,7 +7311,7 @@ const Warehouse = {
     // ==========================================
 
     async getItemsForPicker() {
-        const items = await this._ensureRequiredSeedItems(await loadWarehouseItems());
+        const items = await this._loadWarehouseItemsForPicker();
         const needsReservationSnapshot = (items || []).some(item =>
             item && (item.available_qty === undefined || item.available_qty === null || item.reserved_qty === undefined || item.reserved_qty === null)
         );
@@ -7318,6 +7337,10 @@ const Warehouse = {
             item.reserved_qty = reservedQty;
             item.available_qty = Math.max(0, qty - reservedQty);
         });
+        this.allItems = items;
+        this._pickerItemsById = new Map(items
+            .map(item => [Number(item && item.id || 0), item])
+            .filter(([id]) => id));
 
         const grouped = {};
         WAREHOUSE_CATEGORIES.forEach(cat => {

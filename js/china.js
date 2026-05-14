@@ -734,6 +734,7 @@ const ChinaPurchases = {
         App.navigate('warehouse');
         setTimeout(async () => {
             Warehouse.setView('shipments');
+            await Warehouse._loadWarehouseItemsForPicker?.();
             await Warehouse.loadShipmentsList();
             Warehouse.editShipment(shipmentId);
         }, 250);
