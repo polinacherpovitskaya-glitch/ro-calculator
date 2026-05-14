@@ -39,7 +39,7 @@ jobs:
         with:
           node-version: '24'
 
-      - name: Check deployed version for workflow-run smoke
+      - name: Check deployed version before automatic smoke
         id: preflight
         shell: bash
         env:
@@ -48,7 +48,7 @@ jobs:
           set -euo pipefail
           echo "skip=false" >> "$GITHUB_OUTPUT"
 
-          if [ "${{ github.event_name }}" != "workflow_run" ]; then
+          if [ "${{ github.event_name }}" != "workflow_run" ] && [ "${{ github.event_name }}" != "schedule" ]; then
             exit 0
           fi
 
