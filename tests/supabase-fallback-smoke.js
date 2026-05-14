@@ -1183,6 +1183,25 @@ async function main() {
 
     {
         const context = createContext();
+        runScript(context, 'js/supabase.js');
+        const template = vm.runInContext(`_moldToTemplate({
+            id: 772,
+            name: 'Отельный брелок',
+            category: 'blank',
+            collection: 'Аксессуары',
+            pph_actual: 25,
+            pph_min: 0,
+            pph_max: 0,
+            weight_grams: 30
+        })`, context);
+
+        assert.equal(template.pieces_per_hour, 25, 'calculator template should inherit live pph_actual from molds');
+        assert.equal(template.pieces_per_hour_avg, 25, 'template average should fall back to live pph_actual');
+        assert.equal(template.pieces_per_hour_display, '25', 'template picker should show live pph_actual instead of dash');
+    }
+
+    {
+        const context = createContext();
         context.__hangingTables = new Set(['orders']);
         context.__bootstrapOrders = [{
             id: 9102,

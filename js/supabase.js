@@ -1433,9 +1433,9 @@ function _getLocalTemplates() {
 
 function _templateToMold(template, index = 0) {
     if (!template || typeof template !== 'object') return null;
-    const pMin = Number(template.pieces_per_hour_min || template.pieces_per_hour_avg || 0) || 0;
-    const pMax = Number(template.pieces_per_hour_max || template.pieces_per_hour_avg || pMin || 0) || 0;
-    const pAct = Number(template.pieces_per_hour_avg || template.pieces_per_hour_max || template.pieces_per_hour_min || 0) || null;
+    const pAct = Number(template.pph_actual || template.pieces_per_hour_actual || template.pieces_per_hour || template.pieces_per_hour_avg || 0) || null;
+    const pMin = Number(template.pieces_per_hour_min || template.pph_min || template.pieces_per_hour_avg || pAct || 0) || 0;
+    const pMax = Number(template.pieces_per_hour_max || template.pph_max || template.pieces_per_hour_avg || pAct || pMin || 0) || 0;
     const fallbackPhoto = LEGACY_BUNDLED_MOLD_PHOTOS.get(_normalizeLookupKey(template.name)) || '';
     return _normalizeMoldRecord({
         id: template.id || `tpl-fallback-${index + 1}`,
@@ -1596,10 +1596,12 @@ function getDefaultTemplates() {
 /** Convert a mold object to a template object (single source of truth) */
 function _moldToTemplate(m) {
     const mold = _normalizeMoldRecord(m);
-    const pMin = mold.pph_min || 0;
-    const pMax = mold.pph_max || 0;
+    const pAct = Number(mold.pph_actual || mold.pieces_per_hour_actual || mold.pieces_per_hour || mold.pieces_per_hour_avg || 0) || 0;
+    const pMin = Number(mold.pph_min || mold.pieces_per_hour_min || pAct || 0) || 0;
+    const pMax = Number(mold.pph_max || mold.pieces_per_hour_max || pAct || pMin || 0) || 0;
     const pAvg = (pMin > 0 && pMax > 0) ? Math.round((pMin + pMax) / 2) : (pMin || pMax || 0);
-    const display = pMin === 0 ? '—' : (pMin === pMax ? String(pMin) : `${pMin}-${pMax}`);
+    const displayValue = pAct || pAvg || pMin || pMax || 0;
+    const display = displayValue === 0 ? '—' : (pMin > 0 && pMax > 0 && pMin !== pMax ? `${pMin}-${pMax}` : String(displayValue));
     const hasExplicitManualBlankPricing = !_isHistoricalBlankPriceSeed(mold)
         && (((!mold.disable_historical_blank_price_recovery) && _hasBlankPriceOverridePayload(mold)) || !!mold.use_manual_prices);
     return {
@@ -1612,6 +1614,8 @@ function _moldToTemplate(m) {
         pieces_per_hour_min: pMin,
         pieces_per_hour_max: pMax,
         pieces_per_hour_avg: pAvg,
+        pph_actual: pAct || null,
+        pieces_per_hour: pAct || pAvg || 0,
         weight_grams: mold.weight_grams,
         size: _formatDimensionText(mold.width_mm, mold.height_mm, mold.depth_mm),
         width_mm: mold.width_mm || 0,
