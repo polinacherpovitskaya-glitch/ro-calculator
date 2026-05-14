@@ -149,6 +149,10 @@ function createContext() {
                                                     error: null,
                                                 });
                                             }
+                                            if (Array.isArray(context.__tableRows[table])) {
+                                                const row = context.__tableRows[table].find(item => String(item.id) === String(state.eqValue)) || null;
+                                                return Promise.resolve({ data: row, error: null });
+                                            }
                                             return Promise.resolve({ data: null, error: null });
                                         },
                                     };
@@ -208,6 +212,25 @@ function createContext() {
                                     context.__tableRows[table] = rows.map(row => (
                                         String(row[column]) === String(value) ? { ...row, ...fields } : row
                                     ));
+                                    return Promise.resolve({ error: null });
+                                },
+                            };
+                        },
+                        delete() {
+                            return {
+                                eq(column, value) {
+                                    context.__remoteCalls.push({ table, action: 'delete', column, value });
+                                    if (context.__hangingTables.has(table)) {
+                                        return new Promise(() => {});
+                                    }
+                                    if (remoteError(table)) {
+                                        return Promise.resolve({ error: remoteError(table) });
+                                    }
+                                    if (missingTableError(table)) {
+                                        return Promise.resolve({ error: missingTableError(table) });
+                                    }
+                                    const rows = Array.isArray(context.__tableRows[table]) ? context.__tableRows[table] : [];
+                                    context.__tableRows[table] = rows.filter(row => String(row[column]) !== String(value));
                                     return Promise.resolve({ error: null });
                                 },
                             };
@@ -1950,6 +1973,11 @@ async function main() {
             id: orderId,
             order_name: 'бифри 100 шт юла+цветок',
             status: 'draft',
+            calculator_data: JSON.stringify({
+                id: orderId,
+                order_name: 'бифри 100 шт юла+цветок',
+                status: 'draft',
+            }),
             updated_at: '2026-05-13T12:00:00.000Z',
         }];
         runScript(context, 'js/supabase.js');
@@ -1966,13 +1994,61 @@ async function main() {
         await vm.runInContext(`updateOrderStatus(${orderId}, 'production_casting')`, context);
 
         assert.equal(context.__tableRows.orders[0].status, 'production_casting', 'remote status should be updated');
+        assert.equal(
+            JSON.parse(context.__tableRows.orders[0].calculator_data).status,
+            'production_casting',
+            'remote calculator_data status should stay in sync with board status',
+        );
         const cachedOrders = JSON.parse(JSON.stringify(vm.runInContext('getLocal(LOCAL_KEYS.orders)', context)));
         assert.equal(cachedOrders[0].status, 'production_casting', 'successful remote status update should refresh local cache');
+        assert.equal(
+            JSON.parse(cachedOrders[0].calculator_data).status,
+            'production_casting',
+            'local calculator_data status should stay in sync with board status',
+        );
         assert.equal(
             JSON.parse(context.localStorage.getItem('ro_calc_dirty_datasets') || '{}').orders,
             undefined,
             'successful remote status update should not leave orders dirty',
         );
+    }
+
+    {
+        const context = createContext();
+        const orderId = 1777468761780;
+        context.__tableRows.orders = [{
+            id: orderId,
+            order_name: 'кроссовки петрович',
+            status: 'production_casting',
+            calculator_data: JSON.stringify({
+                id: orderId,
+                order_name: 'кроссовки петрович',
+                status: 'draft',
+            }),
+            updated_at: '2026-05-14T14:20:00.000Z',
+        }];
+        runScript(context, 'js/supabase.js');
+        vm.runInContext('initSupabase()', context);
+
+        await vm.runInContext(`
+            saveOrder(
+                { id: ${orderId}, order_name: 'кроссовки петрович', status: 'draft', total_revenue_plan: 252000 },
+                []
+            )
+        `, context);
+
+        assert.equal(
+            context.__tableRows.orders[0].status,
+            'production_casting',
+            'stale calculator autosave must not revert a production order to draft',
+        );
+        assert.equal(
+            JSON.parse(context.__tableRows.orders[0].calculator_data).status,
+            'production_casting',
+            'saved calculator_data should mirror preserved workflow status',
+        );
+        const cachedOrders = JSON.parse(JSON.stringify(vm.runInContext('getLocal(LOCAL_KEYS.orders)', context)));
+        assert.equal(cachedOrders[0].status, 'production_casting', 'local backup should mirror preserved workflow status');
     }
 
     {

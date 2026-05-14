@@ -290,6 +290,25 @@ function _preserveNewerLocalOrders(incomingRows = []) {
     return Array.from(byId.values());
 }
 
+function _parseOrderJsonSnapshot(value) {
+    if (!value) return {};
+    if (typeof value === 'object' && !Array.isArray(value)) return { ...value };
+    if (typeof value !== 'string') return {};
+    try {
+        const parsed = JSON.parse(value);
+        return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } catch (e) {
+        return {};
+    }
+}
+
+function _syncOrderStatusSnapshot(calculatorData, status, updatedAt) {
+    const snapshot = _parseOrderJsonSnapshot(calculatorData);
+    snapshot.status = status || 'draft';
+    if (updatedAt) snapshot.updated_at = updatedAt;
+    return JSON.stringify(snapshot);
+}
+
 function _mergeShipmentRows(rawRows) {
     return (Array.isArray(rawRows) ? rawRows : []).map(row => {
         if (row && row.shipment_data) {
@@ -2025,7 +2044,13 @@ async function saveOrder(order, items = []) {
                 orderData.deleted_at = existing.deleted_at || orderData.deleted_at || new Date().toISOString();
                 localBackupOrder.status = 'deleted';
                 localBackupOrder.deleted_at = existing.deleted_at || localBackupOrder.deleted_at || orderData.deleted_at;
+            } else if ((orderData.status || 'draft') === 'draft' && existing.status && existing.status !== 'draft' && existing.status !== 'calculated') {
+                // Autosave drafts can run from an old calculator tab after an order was moved
+                // on the board. Preserve the workflow status unless it was changed explicitly.
+                orderData.status = existing.status;
+                localBackupOrder.status = existing.status;
             }
+            orderData.calculator_data = _syncOrderStatusSnapshot(orderData.calculator_data, orderData.status || 'draft', orderData.updated_at);
             // Update existing order
             const { id: _id, ...updateFields } = orderData;
             const { error } = await _withRemoteTimeout('write', 'update order', () => supabaseClient
@@ -2040,6 +2065,7 @@ async function saveOrder(order, items = []) {
         } else {
             // Insert new order
             orderData.created_at = orderData.created_at || new Date().toISOString();
+            orderData.calculator_data = _syncOrderStatusSnapshot(orderData.calculator_data, orderData.status || 'draft', orderData.updated_at);
             const { error } = await _withRemoteTimeout('write', 'insert order', () => supabaseClient
                 .from('orders')
                 .insert(orderData));
@@ -2449,16 +2475,37 @@ async function updateOrderStatus(orderId, status) {
     orderId = _normalizeOrderId(orderId);
     const nowIso = new Date().toISOString();
     if (isSupabaseReady()) {
+        let syncedCalculatorData = null;
+        const { data: existingOrder, error: readError } = await _withRemoteTimeout('write', 'load order status snapshot', () => supabaseClient
+            .from('orders')
+            .select('calculator_data')
+            .eq('id', orderId)
+            .maybeSingle());
+        if (!readError && existingOrder) {
+            syncedCalculatorData = _syncOrderStatusSnapshot(existingOrder.calculator_data, status, nowIso);
+        } else if (readError) {
+            console.warn('updateOrderStatus snapshot read warning:', readError);
+            if (_isSupabaseAccessError(readError)) _markSupabaseAccessProblem(readError);
+        }
+
+        const updateFields = { status, updated_at: nowIso };
+        if (syncedCalculatorData) updateFields.calculator_data = syncedCalculatorData;
+
         const { error } = await _withRemoteTimeout('write', 'update order status', () => supabaseClient
             .from('orders')
-            .update({ status, updated_at: nowIso })
+            .update(updateFields)
             .eq('id', orderId));
         if (error) {
             console.error('updateOrderStatus error:', error);
             if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
             throw new Error('Не удалось обновить статус заказа: ' + (error.message || error.code || 'ошибка базы'));
         }
-        _upsertOrderLocally({ id: orderId, status, updated_at: nowIso });
+        _upsertOrderLocally({
+            id: orderId,
+            status,
+            updated_at: nowIso,
+            ...(syncedCalculatorData ? { calculator_data: syncedCalculatorData } : {}),
+        });
         _ordersLastSyncAt = Date.now();
         _clearLocalDatasetDirty(['orders']);
         _invalidateBootstrapCache(['orders']);
