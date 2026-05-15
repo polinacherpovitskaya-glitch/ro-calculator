@@ -915,6 +915,59 @@ async function main() {
 
     {
         const context = createContext();
+        context.location = {
+            href: 'https://calc2.recycleobject.ru/#orders',
+            origin: 'https://calc2.recycleobject.ru',
+            protocol: 'https:',
+            hostname: 'calc2.recycleobject.ru',
+        };
+        context.window.location = context.location;
+        const orderId = 1777468761780;
+        context.__bootstrapOrders = [{
+            id: orderId,
+            order_name: 'кроссовки петрович',
+            status: 'production_casting',
+            updated_at: '2026-05-15T09:30:00.000Z',
+        }];
+        context.__bootstrapOrderItems = [{
+            id: orderId * 1000 + 1,
+            order_id: orderId,
+            item_number: 1,
+            item_type: 'product',
+            product_name: 'кроссовки кастом',
+            quantity: 600,
+        }, {
+            id: orderId * 1000 + 100,
+            order_id: orderId,
+            item_number: 100,
+            item_type: 'hardware',
+            product_name: 'Круглый карабин с ушком · 2,3 см · серебряный',
+            quantity: 600,
+            hardware_source: 'warehouse',
+            hardware_warehouse_item_id: 1771942065391,
+        }];
+        runScript(context, 'js/supabase.js');
+        vm.runInContext(`
+            setLocal(LOCAL_KEYS.orders, [{
+                id: ${orderId},
+                order_name: 'кроссовки петрович',
+                status: 'production_casting',
+                updated_at: '2026-05-14T09:30:00.000Z'
+            }]);
+            setLocal(LOCAL_KEYS.orderItems, []);
+        `, context);
+
+        const loaded = JSON.parse(JSON.stringify(await vm.runInContext(`loadOrder(${orderId})`, context)));
+        assert.equal(loaded.order.order_name, 'кроссовки петрович');
+        assert.equal(loaded.items.length, 2, 'calc2 static fallback loadOrder should hydrate order_items from bootstrap');
+        assert.equal(loaded.items[1].item_type, 'hardware');
+
+        const cachedItems = JSON.parse(JSON.stringify(vm.runInContext('getLocal(LOCAL_KEYS.orderItems) || []', context)));
+        assert.equal(cachedItems.filter(item => String(item.order_id) === String(orderId)).length, 2, 'bootstrap order_items should refresh local detail cache');
+    }
+
+    {
+        const context = createContext();
         context.__invalidTables = new Set(['settings']);
         runScript(context, 'js/supabase.js');
 

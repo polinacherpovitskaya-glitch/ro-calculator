@@ -2376,6 +2376,24 @@ async function loadOrder(orderId) {
         }
         return order ? { order, items: dedupedItems, repaired_duplicates: repairedDuplicates } : null;
     };
+    const loadStaticBootstrapOrder = async () => {
+        if (!_isStaticYandexMirrorRuntime()) return null;
+        const bootstrapPayload = await _loadSameOriginBootstrap(['orders', 'orderItems'], { timeoutMs: 15000 });
+        let refreshed = false;
+        if (bootstrapPayload && Array.isArray(bootstrapPayload.orders) && bootstrapPayload.orders.length > 0) {
+            const mergedOrders = _preserveNewerLocalOrders(_mergeOrderRows(bootstrapPayload.orders));
+            setLocal(LOCAL_KEYS.orders, mergedOrders);
+            refreshed = true;
+        }
+        if (bootstrapPayload && Array.isArray(bootstrapPayload.orderItems)) {
+            setLocal(LOCAL_KEYS.orderItems, bootstrapPayload.orderItems);
+            refreshed = true;
+        }
+        if (!refreshed) return null;
+        _ordersLastSyncAt = Date.now();
+        _setDataLoadMeta('orders', { source: 'bootstrap' });
+        return await loadLocalOrder({ repairDuplicates: true });
+    };
     const localSnapshot = await loadLocalOrder({ repairDuplicates: false });
     if (isSupabaseReady()) {
         try {
@@ -2384,6 +2402,8 @@ async function loadOrder(orderId) {
             if (e1) {
                 console.error('loadOrder error:', e1);
                 if (_isSupabaseAccessError(e1)) _markSupabaseAccessProblem(e1);
+                const bootstrapSnapshot = await loadStaticBootstrapOrder();
+                if (bootstrapSnapshot) return bootstrapSnapshot;
                 return await loadLocalOrder({ repairDuplicates: true });
             }
 
@@ -2406,6 +2426,8 @@ async function loadOrder(orderId) {
             if (e2) {
                 console.error('loadOrderItems error:', e2);
                 if (_isSupabaseAccessError(e2)) _markSupabaseAccessProblem(e2);
+                const bootstrapSnapshot = await loadStaticBootstrapOrder();
+                if (bootstrapSnapshot) return bootstrapSnapshot;
                 return await loadLocalOrder({ repairDuplicates: true });
             }
 
@@ -2432,8 +2454,14 @@ async function loadOrder(orderId) {
         } catch (error) {
             console.error('loadOrder exception:', error);
             if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
+            const bootstrapSnapshot = await loadStaticBootstrapOrder();
+            if (bootstrapSnapshot) return bootstrapSnapshot;
             return await loadLocalOrder({ repairDuplicates: true });
         }
+    }
+    if (_isStaticYandexMirrorRuntime() && !_isLocalDatasetDirty('orders') && !_isLocalDatasetDirty('orderItems')) {
+        const bootstrapSnapshot = await loadStaticBootstrapOrder();
+        if (bootstrapSnapshot) return bootstrapSnapshot;
     }
     return await loadLocalOrder({ repairDuplicates: true });
 }

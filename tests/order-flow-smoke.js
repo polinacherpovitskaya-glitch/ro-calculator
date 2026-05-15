@@ -7167,6 +7167,82 @@ async function smokeOrderDetailColorRendering(context) {
     assert.match(legacyRendered, /Лайм/);
 }
 
+async function smokeCompletedUnreadyProjectHardwareCanBeWrittenOff(context) {
+    const order = {
+        id: 771,
+        order_name: 'Completed With Pending Hardware',
+        manager_name: 'Алина',
+        status: 'completed',
+        created_at: '2026-05-15T09:00:00.000Z',
+    };
+    const detail = {
+        order: clone(order),
+        items: [{
+            item_number: 100,
+            item_type: 'hardware',
+            product_name: 'Круглый карабин для готового проекта',
+            quantity: 40,
+            hardware_source: 'warehouse',
+            hardware_warehouse_item_id: 501,
+            hardware_warehouse_sku: 'READY-HW-501',
+        }],
+    };
+
+    context.__orders = [clone(order)];
+    context.__orderDetails = { 771: clone(detail) };
+    context.__projectHardwareState = { checks: {}, actual_qtys: {} };
+    context.__reservations = [];
+    context.__warehouseItems = [{
+        id: 501,
+        name: 'Круглый карабин для готового проекта',
+        sku: 'READY-HW-501',
+        category: 'hardware',
+        qty: 50,
+        price_per_unit: 9,
+        unit: 'шт',
+    }];
+    context.__warehouseHistory = [];
+    context.loadOrders = async () => clone(context.__orders);
+    context.loadOrder = async (orderId) => clone(context.__orderDetails[Number(orderId)] || null);
+    context.loadProjectHardwareState = async () => clone(context.__projectHardwareState);
+    context.saveProjectHardwareState = async (state) => { context.__projectHardwareState = clone(state); };
+    context.loadWarehouseReservations = async () => clone(context.__reservations);
+    context.saveWarehouseReservations = async (reservations) => { context.__reservations = clone(reservations); };
+    context.loadWarehouseItems = async () => clone(context.__warehouseItems);
+    context.saveWarehouseItem = async (item) => {
+        const idx = context.__warehouseItems.findIndex(entry => Number(entry.id) === Number(item.id));
+        if (idx >= 0) context.__warehouseItems[idx] = clone(item);
+        else context.__warehouseItems.push(clone(item));
+    };
+    context.saveWarehouseItems = async (itemsArg) => { context.__warehouseItems = clone(itemsArg); };
+    context.loadWarehouseHistory = async () => clone(context.__warehouseHistory);
+    context.saveWarehouseHistory = async (history) => { context.__warehouseHistory = clone(history); };
+
+    vm.runInContext(`
+        Warehouse.projectHardwareState = null;
+        Warehouse.allItems = globalThis.__warehouseItems.map(item => ({ ...item }));
+        Warehouse.currentView = 'project-hardware';
+        Warehouse._viewToken = 1;
+        Warehouse.load = async function () {
+            this.allItems = await loadWarehouseItems();
+        };
+    `, context);
+
+    await vm.runInContext(`Warehouse.renderProjectHardwareView(1)`, context);
+    const htmlBefore = String(vm.runInContext(`document.getElementById('wh-content').innerHTML`, context));
+    assert.match(htmlBefore, /Completed With Pending Hardware/);
+    assert.match(htmlBefore, /не готово/);
+    assert.match(htmlBefore, /Собрано 0 из 1/);
+
+    await vm.runInContext(`Warehouse.toggleProjectHardwareReady(771, 501, true)`, context);
+
+    assert.equal(context.__warehouseItems[0].qty, 10, 'completed unready project hardware should still deduct stock when marked collected');
+    assert.equal(Boolean(context.__projectHardwareState.checks['771:501']), true);
+    assert.equal(context.__warehouseHistory.length, 1);
+    assert.equal(context.__warehouseHistory[0].qty_change, -40);
+    assert.equal(context.__warehouseHistory[0].project_hardware_flow, 'ready_toggle');
+}
+
 async function smokeWarehouseInventoryAuditDraftAndFinalize(context) {
     context.__warehouseItems = [
         {
@@ -8015,6 +8091,7 @@ async function main() {
     await smokeProjectHardwareCollectedStateSurvivesStateLoss(context);
     await smokeProjectHardwareSavedCheckWithoutHistoryIsNotReady(context);
     await smokeProjectHardwareReadyToggleReloadsAndClosesProject(context);
+    await smokeCompletedUnreadyProjectHardwareCanBeWrittenOff(context);
     await smokeCompletedOrderConsumesBlankMoldCapacity(context);
     await smokeMoldUsageThresholdCreatesTasksWithoutDuplicates(context);
     await smokeBlankHardwareFilterAndLowStockAlerts(context);
