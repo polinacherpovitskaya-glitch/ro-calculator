@@ -85,6 +85,12 @@ const Settings = {
                 });
             }
         }
+        if (tab === 'monitoring') {
+            const host = document.getElementById('settings-monitoring-host');
+            if (host && typeof Monitoring !== 'undefined' && typeof Monitoring.mount === 'function') {
+                Monitoring.mount(host);
+            }
+        }
     },
 
     populateFields() {
