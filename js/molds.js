@@ -1056,7 +1056,19 @@ const Molds = {
                     return;
                 }
                 if (typeof value === 'object') {
-                    Object.assign(merged, value);
+                    if (Object.prototype.hasOwnProperty.call(value, '0')) {
+                        // A fragment array spread into an object ({...["{json}", {obj}, ...]})
+                        // leaves numeric-string keys "0","1",... holding the pre-corruption
+                        // mold. Un-nest those fragments; the flat keys are newer, so they win.
+                        const flat = {};
+                        for (const [key, val] of Object.entries(value)) {
+                            if (/^\d+$/.test(key)) append(val);
+                            else flat[key] = val;
+                        }
+                        Object.assign(merged, flat);
+                    } else {
+                        Object.assign(merged, value);
+                    }
                 }
             };
             append(raw);

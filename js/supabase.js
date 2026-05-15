@@ -774,6 +774,25 @@ function _deserializeStoredMoldData(payload) {
         }
     }
     if (typeof payload === 'object') {
+        // A fragment array spread into an object ({...["{json}", {obj}, ...]})
+        // leaves numeric-string keys "0","1",... holding the pre-corruption mold,
+        // while newer edits sit in the normal flat keys. Un-nest the numeric
+        // fragments (oldest), then let the flat keys win (newest).
+        if (Object.prototype.hasOwnProperty.call(payload, '0')) {
+            let merged = {};
+            const flat = {};
+            for (const [key, value] of Object.entries(payload)) {
+                if (/^\d+$/.test(key)) {
+                    const fragment = _deserializeStoredMoldData(value);
+                    if (fragment && typeof fragment === 'object' && !Array.isArray(fragment)) {
+                        merged = { ...merged, ...fragment };
+                    }
+                } else {
+                    flat[key] = value;
+                }
+            }
+            return { ...merged, ...flat };
+        }
         return { ...payload };
     }
     return null;

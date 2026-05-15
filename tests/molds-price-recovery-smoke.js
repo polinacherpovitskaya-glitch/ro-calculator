@@ -212,4 +212,48 @@ assert.deepEqual(
     'Fragmented mold_data arrays should merge into a normal mold object instead of looking empty',
 );
 
+// calc2's Yandex write path spread a fragment array into an object
+// ({...["{json}", {obj}, ...]}) and stored it as a string, leaving numeric-key
+// fragments "0","1",... around real flat fields (molds id 10/16, 2026-05-06).
+// _parseStoredMoldRow must un-nest those into a normal mold instead of leaving
+// the real card trapped inside the "0" string.
+const parsedSpreadFragments = vm.runInContext(`_parseStoredMoldRow({
+    id: 10,
+    name: 'Отельный брелок',
+    mold_data: JSON.stringify({
+        0: JSON.stringify({
+            name: 'Отельный брелок',
+            category: 'blank',
+            status: 'active',
+            cost_cny: 800,
+            cny_rate: 12.5,
+            price100: 0,
+        }),
+        1: { template_url: 'https://example.com/mold-10.ai' },
+        2: { hw_items: ['tr-38-sv'] },
+        collection: 'Аксессуары',
+        price100: 16820,
+        weight_grams: 30,
+    }),
+    updated_at: '2026-05-06T06:42:33.231Z',
+})`, context);
+assert.deepEqual(
+    JSON.parse(JSON.stringify(parsedSpreadFragments)),
+    {
+        id: 10,
+        name: 'Отельный брелок',
+        category: 'blank',
+        status: 'active',
+        cost_cny: 800,
+        cny_rate: 12.5,
+        template_url: 'https://example.com/mold-10.ai',
+        hw_items: ['tr-38-sv'],
+        collection: 'Аксессуары',
+        price100: 16820,
+        weight_grams: 30,
+        updated_at: '2026-05-06T06:42:33.231Z',
+    },
+    'mold_data spread into numeric "0","1" keys must un-nest, with newer flat fields winning over the stale "0" blob',
+);
+
 console.log('molds price recovery smoke passed');

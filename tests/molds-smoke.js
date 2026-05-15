@@ -682,6 +682,85 @@ async function main() {
     assert.equal(publishedMoldData.tiers_prices[3000], 235);
     assert.match(String(publishedMoldData.tiers_published_at || ''), /^20\d\d-/);
 
+    // Regression: publishCatalog must heal a corrupted {"0":..,"1":..} mold_data
+    // (calc2 Yandex write path, molds id 10/16). mergeMoldData has to un-nest the
+    // numeric fragments instead of writing the {0,1,2,3} blob straight back.
+    context.__publishedCatalogUpdates = [];
+    context.supabaseClient = {
+        from(table) {
+            assert.equal(table, 'molds');
+            return {
+                select() {
+                    return {
+                        eq() {
+                            return {
+                                async single() {
+                                    return {
+                                        data: {
+                                            mold_data: JSON.stringify({
+                                                0: JSON.stringify({
+                                                    id: 10,
+                                                    name: 'Отельный брелок',
+                                                    status: 'active',
+                                                    category: 'blank',
+                                                    cost_cny: 800,
+                                                    price100: 0,
+                                                }),
+                                                1: { template_url: 'https://example.com/mold-10.ai' },
+                                                collection: 'Аксессуары',
+                                                price100: 16820,
+                                            }),
+                                        },
+                                        error: null,
+                                    };
+                                },
+                            };
+                        },
+                    };
+                },
+                update(payload) {
+                    return {
+                        async eq(_column, value) {
+                            context.__publishedCatalogUpdates.push({ id: value, payload });
+                            return { error: null };
+                        },
+                    };
+                },
+            };
+        },
+    };
+    vm.runInContext(`
+        Molds.allMolds = [{
+            id: 10,
+            name: 'Отельный брелок',
+            status: 'active',
+            collection: 'Аксессуары',
+            weight_grams: 30,
+            width_mm: 0,
+            height_mm: 0,
+            depth_mm: 0,
+            tiers: {
+                10: { sellPrice: 2000 },
+                50: { sellPrice: 1500 },
+                100: { sellPrice: 1200 },
+                300: { sellPrice: 1000 },
+                500: { sellPrice: 900 },
+                1000: { sellPrice: 800 },
+                3000: { sellPrice: 700 }
+            }
+        }];
+    `, context);
+    await vm.runInContext(`Molds.publishCatalog()`, context);
+    assert.equal(context.__publishedCatalogUpdates.length, 1, 'publishCatalog should push one update for the corrupted mold');
+    const healedMoldData = context.__publishedCatalogUpdates[0].payload.mold_data;
+    assert.ok(!('0' in healedMoldData), 'published mold_data must not keep the numeric "0" fragment key');
+    assert.ok(!('1' in healedMoldData), 'published mold_data must not keep the numeric "1" fragment key');
+    assert.equal(healedMoldData.status, 'active', 'status trapped in the "0" blob must be recovered');
+    assert.equal(healedMoldData.cost_cny, 800, 'cost_cny trapped in the "0" blob must be recovered');
+    assert.equal(healedMoldData.template_url, 'https://example.com/mold-10.ai', 'the "1" fragment (template_url) must be recovered');
+    assert.equal(healedMoldData.collection, 'Аксессуары');
+    assert.equal(healedMoldData.tiers_prices[50], 1500, 'publishCatalog must attach freshly computed tier prices to the healed record');
+
     console.log('molds smoke checks passed');
 }
 
