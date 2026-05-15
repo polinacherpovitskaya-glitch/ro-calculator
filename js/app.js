@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v362';
+const APP_VERSION = 'v363';
 
 const App = {
     currentPage: 'orders',
@@ -1236,7 +1236,10 @@ const App = {
     reloadForUpdate() {
         try {
             const banner = document.getElementById('update-banner');
-            const targetVersion = (banner && banner.dataset && banner.dataset.targetVersion) || this.getMaxSeenVersion() || APP_VERSION;
+            const bannerTargetVersion = banner && banner.dataset ? String(banner.dataset.targetVersion || '').trim() : '';
+            const maxSeenVersion = this.getMaxSeenVersion();
+            const targetVersion = bannerTargetVersion
+                || (maxSeenVersion && this.isRemoteVersionNewer(maxSeenVersion, APP_VERSION) ? maxSeenVersion : APP_VERSION);
             const url = new URL(window.location.href);
             try {
                 sessionStorage.removeItem('ro_calc_force_update_attempts');

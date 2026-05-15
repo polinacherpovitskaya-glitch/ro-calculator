@@ -131,6 +131,25 @@ function createContext() {
                                 eq(_column, value) {
                                     state.eqValue = value;
                                     return {
+                                        then(resolve, reject) {
+                                            context.__remoteCalls.push({ table, action: 'selectEq', column: _column, value });
+                                            if (context.__hangingTables.has(table)) {
+                                                return new Promise(() => {}).then(resolve, reject);
+                                            }
+                                            if (remoteError(table)) {
+                                                return Promise.resolve({ data: null, error: remoteError(table) }).then(resolve, reject);
+                                            }
+                                            if (missingTableError(table)) {
+                                                return Promise.resolve({ data: null, error: missingTableError(table) }).then(resolve, reject);
+                                            }
+                                            const rows = Array.isArray(context.__tableRows[table])
+                                                ? context.__tableRows[table].filter(item => String(item?.[_column]) === String(value))
+                                                : [];
+                                            return Promise.resolve({ data: rows, error: null }).then(resolve, reject);
+                                        },
+                                        catch(reject) {
+                                            return this.then(undefined, reject);
+                                        },
                                         maybeSingle() {
                                             context.__remoteCalls.push({ table, action: 'maybeSingle' });
                                             if (context.__hangingTables.has(table)) {
@@ -2270,6 +2289,59 @@ async function main() {
         );
         const cachedOrders = JSON.parse(JSON.stringify(vm.runInContext('getLocal(LOCAL_KEYS.orders)', context)));
         assert.equal(cachedOrders[0].status, 'production_casting', 'local backup should mirror preserved workflow status');
+    }
+
+    {
+        const context = createContext();
+        const orderId = 1778581363060;
+        context.__tableRows.orders = [{
+            id: orderId,
+            order_name: 'цветы для иллан',
+            status: 'production_casting',
+            calculator_data: JSON.stringify({
+                id: orderId,
+                order_name: 'цветы для иллан',
+                status: 'production_casting',
+            }),
+            updated_at: '2026-05-15T14:20:00.000Z',
+        }];
+        context.__tableRows.order_items = [{
+            id: '1778581363060-product-1',
+            order_id: orderId,
+            item_number: 1,
+            item_type: 'product',
+            product_name: 'цветы для иллан',
+            quantity: 100,
+            item_data: JSON.stringify({
+                product_name: 'цветы для иллан',
+                quantity: 100,
+                sell_price: 375,
+            }),
+            updated_at: '2026-05-15T14:20:00.000Z',
+        }];
+        runScript(context, 'js/supabase.js');
+        vm.runInContext('initSupabase()', context);
+
+        await vm.runInContext(`
+            saveOrder(
+                { id: ${orderId}, order_name: 'цветы для иллан', status: 'production_casting', total_revenue_plan: 37500 },
+                []
+            )
+        `, context);
+
+        assert.equal(
+            context.__tableRows.order_items.length,
+            1,
+            'empty save payload for an existing order must not delete previously saved order_items',
+        );
+        assert.equal(
+            context.__remoteCalls.some(call => call.table === 'order_items' && call.action === 'delete'),
+            false,
+            'empty save payload should not issue order_items delete when existing items are present',
+        );
+        const cachedItems = JSON.parse(JSON.stringify(vm.runInContext('getLocal(LOCAL_KEYS.orderItems)', context)));
+        assert.equal(cachedItems.length, 1, 'local backup should preserve existing order items after empty save payload');
+        assert.equal(cachedItems[0].quantity, 100, 'preserved local item should keep full item_data fields');
     }
 
     {

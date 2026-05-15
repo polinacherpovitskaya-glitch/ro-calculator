@@ -1958,6 +1958,20 @@ function _getOrderItemFreshness(item) {
     return String(item?.updated_at || item?.created_at || '');
 }
 
+function _hydrateOrderItemRow(item) {
+    if (item && item.item_data) {
+        try {
+            const extras = typeof item.item_data === 'string' ? JSON.parse(item.item_data) : item.item_data;
+            return { ...extras, ...item };
+        } catch (e) { /* ignore malformed item_data */ }
+    }
+    return item;
+}
+
+function _hydrateOrderItemRows(items) {
+    return (items || []).map(_hydrateOrderItemRow);
+}
+
 function _dedupeOrderItemsByKey(items, getKey) {
     const byKey = new Map();
     (items || []).forEach((item, index) => {
@@ -2060,6 +2074,11 @@ async function saveOrder(order, items = []) {
         }
 
         const localBackupOrder = { ...order, id: orderId };
+        let localBackupItems = Array.isArray(items) ? items : [];
+        const allowEmptyItemsDelete = order && (
+            order.__allowEmptyItemsDelete === true
+            || order.allow_empty_items_delete === true
+        );
 
         if (existing) {
             if (existing.status === 'deleted') {
@@ -2144,19 +2163,44 @@ async function saveOrder(order, items = []) {
                 }
             }
         } else {
-            const { error: deleteItemsError } = await _withRemoteTimeout('write', 'delete order items', () => supabaseClient
-                .from('order_items')
-                .delete()
-                .eq('order_id', orderId));
-            if (deleteItemsError) {
-                console.error('deleteOrderItems error:', deleteItemsError);
-                if (_isSupabaseAccessError(deleteItemsError)) _markSupabaseAccessProblem(deleteItemsError);
-                throw new Error('Не удалось обновить состав заказа: ' + (deleteItemsError.message || deleteItemsError.code || 'ошибка базы'));
+            let shouldDeleteEmptyItems = !existing || allowEmptyItemsDelete;
+            if (existing && !allowEmptyItemsDelete) {
+                const { data: existingItems, error: listExistingItemsError } = await _withRemoteTimeout('write', 'list existing order items before empty save', () => supabaseClient
+                    .from('order_items')
+                    .select('*')
+                    .eq('order_id', orderId));
+                if (listExistingItemsError) {
+                    console.error('listExistingOrderItemsBeforeEmptySave error:', listExistingItemsError);
+                    if (_isSupabaseAccessError(listExistingItemsError)) _markSupabaseAccessProblem(listExistingItemsError);
+                    throw new Error('Заказ сохранён, но не удалось безопасно проверить состав перед пустым сохранением: ' + (listExistingItemsError.message || listExistingItemsError.code || 'ошибка базы'));
+                }
+
+                const preservedItems = _hydrateOrderItemRows(_dedupeOrderItems(existingItems || [], orderId));
+                if (preservedItems.length > 0) {
+                    console.warn('[saveOrder] Skipped empty order_items delete for existing order; preserving previously saved items', {
+                        orderId,
+                        preservedItems: preservedItems.length,
+                    });
+                    localBackupItems = preservedItems;
+                    shouldDeleteEmptyItems = false;
+                }
+            }
+
+            if (shouldDeleteEmptyItems) {
+                const { error: deleteItemsError } = await _withRemoteTimeout('write', 'delete order items', () => supabaseClient
+                    .from('order_items')
+                    .delete()
+                    .eq('order_id', orderId));
+                if (deleteItemsError) {
+                    console.error('deleteOrderItems error:', deleteItemsError);
+                    if (_isSupabaseAccessError(deleteItemsError)) _markSupabaseAccessProblem(deleteItemsError);
+                    throw new Error('Не удалось обновить состав заказа: ' + (deleteItemsError.message || deleteItemsError.code || 'ошибка базы'));
+                }
             }
         }
 
         // Also save to localStorage as backup (full data, no filtering)
-        _saveOrderLocally(localBackupOrder, items);
+        _saveOrderLocally(localBackupOrder, localBackupItems);
         _clearLocalDatasetDirty(['orders', 'orderItems']);
 
         return orderId;
@@ -2171,6 +2215,19 @@ async function saveOrder(order, items = []) {
         }
 
         const allItems = getLocal(LOCAL_KEYS.orderItems) || [];
+        const existingLocalItems = allItems.filter(i => String(i.order_id) === String(orderId));
+        const allowEmptyItemsDelete = order && (
+            order.__allowEmptyItemsDelete === true
+            || order.allow_empty_items_delete === true
+        );
+        if (items.length === 0 && existingLocalItems.length > 0 && !allowEmptyItemsDelete) {
+            console.warn('[saveOrder] Skipped empty local order_items delete for existing order; preserving local items', {
+                orderId,
+                preservedItems: existingLocalItems.length,
+            });
+            _markLocalDatasetDirty(['orders']);
+            return orderId;
+        }
         const filtered = allItems.filter(i => String(i.order_id) !== String(orderId));
         const nowIso = new Date().toISOString();
         const newItems = items.map((item, idx) => ({
@@ -2439,13 +2496,7 @@ async function loadOrder(orderId) {
 
             // Restore full item data from item_data JSON
             const items = dedupedRawItems.map(item => {
-                if (item.item_data) {
-                    try {
-                        const extras = JSON.parse(item.item_data);
-                        return { ...extras, ...item }; // DB columns take priority
-                    } catch (e) { /* ignore */ }
-                }
-                return item;
+                return _hydrateOrderItemRow(item);
             });
 
             _saveOrderLocally(fullOrder, items);
@@ -2503,15 +2554,7 @@ async function loadOrderItemsByOrderIds(orderIds = []) {
                 if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
                 return localFallback();
             }
-            return (data || []).map(item => {
-                if (item.item_data) {
-                    try {
-                        const extras = JSON.parse(item.item_data);
-                        return { ...extras, ...item };
-                    } catch (e) { /* ignore */ }
-                }
-                return item;
-            });
+            return _hydrateOrderItemRows(data || []);
         } catch (error) {
             console.error('loadOrderItemsByOrderIds exception:', error);
             if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);

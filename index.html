@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="css/style.css?v=124">
     <script>
         (function () {
-            const CURRENT_HTML_VERSION = 'v362';
+            const CURRENT_HTML_VERSION = 'v363';
             const ATTEMPT_KEY = 'ro_calc_force_update_attempts';
 
             function parseVersion(version) {
@@ -38,6 +38,10 @@
                 if (!targetVersion) return;
                 if (!isNewer(targetVersion, CURRENT_HTML_VERSION)) {
                     sessionStorage.removeItem(ATTEMPT_KEY);
+                    if (targetVersion && targetVersion !== CURRENT_HTML_VERSION) {
+                        url.searchParams.set('targetVersion', CURRENT_HTML_VERSION);
+                        window.history.replaceState(null, '', url.toString());
+                    }
                     return;
                 }
 
@@ -183,7 +187,7 @@
     <aside class="sidebar">
         <div class="sidebar-brand">
             <h2>Recycle Object</h2>
-            <span>Калькулятор <span id="app-version">v362</span></span>
+            <span>Калькулятор <span id="app-version">v363</span></span>
         </div>
         <nav class="sidebar-nav">
             <a href="#tasks" data-page="tasks">
@@ -3557,10 +3561,10 @@
 <script src="vendor/jspdf-2.5.1.umd.min.js?v=1"></script>
 <script src="js/work-management-core.js?v=1"></script>
 <script src="js/bug-report-core.js?v=2"></script>
-<script src="js/supabase.js?v=217"></script>
+<script src="js/supabase.js?v=218"></script>
 <script src="js/task-events.js?v=1"></script>
 <script src="js/calculator.js?v=84"></script>
-<script src="js/app.js?v=362"></script>
+<script src="js/app.js?v=363"></script>
 <script src="js/tpa.js?v=3"></script>
 <script src="js/wiki.js?v=4"></script>
 <script src="js/order-detail.js?v=65"></script>
