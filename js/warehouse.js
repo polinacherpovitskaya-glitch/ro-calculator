@@ -4030,7 +4030,10 @@ const Warehouse = {
             history,
             historyDeltaMap
         );
-        if (wasChecked === !!checked) return;
+        if (wasChecked === !!checked) {
+            await this.load();
+            return;
+        }
 
         if (checked) {
             const targetQty = this._buildProjectHardwareTargetQty(normalizedOrderId, normalizedItemId, qty, historyDeltaMap);
@@ -4134,6 +4137,47 @@ const Warehouse = {
 
         await this.load();
         });
+    },
+
+    async handleProjectHardwareReadyClick(event, orderId, itemId) {
+        if (event && typeof event.preventDefault === 'function') {
+            event.preventDefault();
+        }
+
+        const input = event && (event.currentTarget || event.target) ? (event.currentTarget || event.target) : null;
+        const renderedReady = input && input.dataset ? input.dataset.ready === '1' : !!(input && input.checked);
+        const nextReady = !renderedReady;
+        const label = input && typeof input.closest === 'function'
+            ? input.closest('label')
+            : null;
+        const labelText = label ? label.querySelector('[data-project-hardware-ready-label]') : null;
+        const previousText = labelText ? labelText.textContent : '';
+
+        if (input) {
+            input.checked = renderedReady;
+            input.disabled = true;
+            input.setAttribute('aria-busy', 'true');
+        }
+        if (labelText) {
+            labelText.textContent = nextReady ? 'сохраняем...' : 'снимаем...';
+        }
+
+        try {
+            await this.toggleProjectHardwareReady(orderId, itemId, nextReady);
+        } catch (error) {
+            console.error('Warehouse.handleProjectHardwareReadyClick failed:', error);
+            App.toast('Не удалось сохранить отметку сборки');
+            await this.load();
+        } finally {
+            if (input && input.isConnected) {
+                input.disabled = false;
+                input.removeAttribute('aria-busy');
+                input.checked = renderedReady;
+            }
+            if (labelText && labelText.isConnected) {
+                labelText.textContent = previousText || 'собрано';
+            }
+        }
     },
 
     async setProjectHardwareActualQty(orderId, itemId, rawValue) {
@@ -5613,8 +5657,14 @@ const Warehouse = {
                                     </td>
                                     <td>
                                         <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;">
-                                            <input type="checkbox" ${r.ready ? 'checked' : ''} onchange="Warehouse.toggleProjectHardwareReady(${r.order_id}, ${r.item_id}, this.checked)">
-                                            <span style="font-size:12px;color:var(--text-secondary);">собрано</span>
+                                            <input
+                                                type="checkbox"
+                                                data-ready="${r.ready ? '1' : '0'}"
+                                                autocomplete="off"
+                                                ${r.ready ? 'checked' : ''}
+                                                onclick="Warehouse.handleProjectHardwareReadyClick(event, ${r.order_id}, ${r.item_id})"
+                                            >
+                                            <span data-project-hardware-ready-label style="font-size:12px;color:var(--text-secondary);">собрано</span>
                                         </label>
                                     </td>
                                 </tr>`).join('')}

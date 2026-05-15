@@ -5773,9 +5773,30 @@ async function smokeProjectHardwareActualQtyEditableFlow(context) {
     const adjustedReservation = context.__reservations.find(item => Number(item.order_id) === 321 && item.status === 'active');
     assert.equal(adjustedReservation.qty, 3);
 
-    await vm.runInContext(`Warehouse.toggleProjectHardwareReady(321, 901, true)`, context);
+    await vm.runInContext(`
+        globalThis.__readyClickInput = {
+            dataset: { ready: '0' },
+            checked: true,
+            disabled: false,
+            isConnected: false,
+            setAttribute(name, value) { this[name] = value; },
+            removeAttribute(name) { delete this[name]; },
+            closest() {
+                return {
+                    querySelector() {
+                        return { textContent: 'собрано', isConnected: false };
+                    },
+                };
+            },
+        };
+        Warehouse.handleProjectHardwareReadyClick({
+            preventDefault() { globalThis.__readyPrevented = true; },
+            currentTarget: globalThis.__readyClickInput,
+        }, 321, 901)
+    `, context);
 
     assert.equal(Boolean(context.__projectHardwareState.checks['321:901']), true);
+    assert.equal(context.__readyPrevented, true);
     assert.equal(context.__projectHardwareState.actual_qtys['321:901'], 3);
     assert.equal(context.__warehouseItems[0].qty, 7);
     assert.equal(context.__warehouseHistory.length, 1);
