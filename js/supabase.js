@@ -5873,9 +5873,21 @@ async function loadWarehouseItems() {
             return null;
         }
     };
-    const localFallback = async () => applyReservationSnapshot(getLocal(LOCAL_KEYS.warehouseItems) || []);
+    const getLocalWarehouseItems = () => {
+        const localItems = getLocal(LOCAL_KEYS.warehouseItems);
+        return Array.isArray(localItems) ? localItems : [];
+    };
+    const localFallback = async () => applyReservationSnapshot(getLocalWarehouseItems());
     if (_isLocalDatasetDirty('warehouseItems')) {
-        return await localFallback();
+        const localItems = getLocalWarehouseItems();
+        if (localItems.length > 0) {
+            return await applyReservationSnapshot(localItems);
+        }
+        // A stale dirty flag with an empty local cache can make the cloud warehouse
+        // look completely empty. Treat that as cache corruption and continue to
+        // live/bootstrap sources before showing an empty warehouse.
+        console.warn('[Warehouse] Ignoring empty dirty local warehouse cache; loading shared warehouse data.');
+        _clearLocalDatasetDirty(['warehouseItems']);
     }
     const liveBootstrapItems = await readLiveBootstrapWarehouseItems();
     if (liveBootstrapItems && liveBootstrapItems.length > 0) return liveBootstrapItems;

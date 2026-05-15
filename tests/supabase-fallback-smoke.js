@@ -1018,6 +1018,38 @@ async function main() {
 
     {
         const context = createContext();
+        context.location = {
+            href: 'https://calc2.recycleobject.ru/#warehouse',
+            origin: 'https://calc2.recycleobject.ru',
+            protocol: 'https:',
+            hostname: 'calc2.recycleobject.ru',
+        };
+        context.window.location = context.location;
+        context.__bootstrapWarehouseItems = [{
+            id: 9301,
+            name: 'Карабин тестовый',
+            sku: 'CR-TEST',
+            category: 'Карабины',
+            qty: 248,
+        }];
+        context.__hangingTables.add('warehouse_items');
+        context.__hangingTables.add('warehouse_reservations');
+        runScript(context, 'js/supabase.js');
+        vm.runInContext(`
+            initSupabase();
+            setLocal(LOCAL_KEYS.warehouseItems, []);
+            localStorage.setItem('ro_calc_dirty_datasets', JSON.stringify({ warehouseItems: Date.now() }));
+        `, context);
+
+        const loaded = JSON.parse(JSON.stringify(await vm.runInContext('loadWarehouseItems()', context)));
+        assert.equal(loaded.length, 1, 'empty dirty local warehouse cache must not hide calc2 bootstrap warehouse items');
+        assert.equal(loaded[0].name, 'Карабин тестовый');
+        const dirtyMap = JSON.parse(context.localStorage.getItem('ro_calc_dirty_datasets') || '{}');
+        assert.equal(Boolean(dirtyMap.warehouseItems), false, 'empty dirty warehouse flag should be cleared after recovery');
+    }
+
+    {
+        const context = createContext();
         context.__invalidTables = new Set(['settings']);
         runScript(context, 'js/supabase.js');
 
