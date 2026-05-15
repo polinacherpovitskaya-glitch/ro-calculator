@@ -3928,7 +3928,14 @@ const Warehouse = {
             const ownReservedQty = this._getProjectHardwareReservedQtyForOrderItem(reservationRows || [], orderId, itemId);
             const canUseOwnReservation = ownReservedQty > 0 && stockQty + ownReservedQty + 0.000001 >= delta;
             if (stockQty + 0.000001 < delta && !canUseOwnReservation) {
-                return { ok: false, reason: 'insufficient_stock', targetQty: normalizedTarget };
+                return {
+                    ok: false,
+                    reason: 'insufficient_stock',
+                    targetQty: normalizedTarget,
+                    neededQty: delta,
+                    stockQty,
+                    ownReservedQty,
+                };
             }
 
             const notes = flow === 'ready_toggle'
@@ -3965,7 +3972,14 @@ const Warehouse = {
                         }
                     );
                 }
-                return { ok: false, reason: 'insufficient_stock', targetQty: normalizedTarget };
+                return {
+                    ok: false,
+                    reason: 'insufficient_stock',
+                    targetQty: normalizedTarget,
+                    neededQty: delta,
+                    stockQty,
+                    ownReservedQty,
+                };
             }
             return { ok: true, changed: true, targetQty: normalizedTarget };
         }
@@ -4031,7 +4045,13 @@ const Warehouse = {
                 reservations,
             });
             if (!syncResult.ok) {
-                App.toast('Не удалось отметить как собрано: недостаточно остатка');
+                const stockQty = Number.isFinite(syncResult.stockQty) ? syncResult.stockQty : null;
+                const neededQty = Number.isFinite(syncResult.neededQty) ? syncResult.neededQty : targetQty;
+                const suffix = stockQty !== null
+                    ? `: на складе ${round2(stockQty)} шт, нужно ${round2(neededQty)} шт`
+                    : ': недостаточно остатка';
+                App.toast(`Не удалось отметить как собрано${suffix}`);
+                await this.load();
                 return;
             }
 
@@ -4159,7 +4179,13 @@ const Warehouse = {
                 flow: 'ready_delta',
             });
             if (!syncResult.ok) {
-                App.toast('Не удалось сохранить фактическое количество: недостаточно остатка');
+                const stockQty = Number.isFinite(syncResult.stockQty) ? syncResult.stockQty : null;
+                const neededQty = Number.isFinite(syncResult.neededQty) ? syncResult.neededQty : targetQty;
+                const suffix = stockQty !== null
+                    ? `: на складе ${round2(stockQty)} шт, нужно ${round2(neededQty)} шт`
+                    : ': недостаточно остатка';
+                App.toast(`Не удалось сохранить фактическое количество${suffix}`);
+                await this.load();
                 return;
             }
             if (!this._isProjectHardwareReady(normalizedOrderId, normalizedItemId)) {

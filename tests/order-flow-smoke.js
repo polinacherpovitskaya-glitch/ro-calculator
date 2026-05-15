@@ -5504,8 +5504,9 @@ async function smokeProjectHardwareToggleShortageGuard(context) {
     context.__toasts = [];
     vm.runInContext(`App.toast = (message) => { globalThis.__toasts.push(String(message || '')); };`, context);
     vm.runInContext(`
+        globalThis.__warehouseLoadCalls = 0;
         Warehouse.projectHardwareState = null;
-        Warehouse.load = async () => {};
+        Warehouse.load = async () => { globalThis.__warehouseLoadCalls += 1; };
     `, context);
 
     try {
@@ -5516,6 +5517,8 @@ async function smokeProjectHardwareToggleShortageGuard(context) {
         assert.equal(context.__warehouseHistory.length, 0);
         assert.equal(context.__reservations[0].status, 'active');
         assert.ok(context.__toasts.some(message => /не удалось отметить как собрано/i.test(message)));
+        assert.ok(context.__toasts.some(message => /на складе 2 шт, нужно 5 шт/i.test(message)));
+        assert.equal(context.__warehouseLoadCalls, 1);
 
         context.__projectHardwareState = { checks: { '42:501': true } };
         context.__reservations = [];
@@ -5609,6 +5612,7 @@ async function smokeProjectHardwareToggleShortageGuard(context) {
         vm.runInContext(`
             Warehouse.load = globalThis.__originalWarehouseLoad;
             delete globalThis.__originalWarehouseLoad;
+            delete globalThis.__warehouseLoadCalls;
         `, context);
     }
 }
