@@ -5880,6 +5880,18 @@ async function loadWarehouseItems() {
         return Array.isArray(localItems) ? localItems : [];
     };
     const localFallback = async () => applyReservationSnapshot(getLocalWarehouseItems());
+    const readStaticMirrorBootstrapWarehouseItems = async () => {
+        if (!_isStaticYandexMirrorRuntime()) return null;
+        const bootstrapPayload = await _loadSameOriginBootstrap(['warehouseItems'], { timeoutMs: 15000 });
+        if (!bootstrapPayload || !Array.isArray(bootstrapPayload.warehouseItems) || bootstrapPayload.warehouseItems.length === 0) {
+            return null;
+        }
+        const hydratedItems = await applyReservationSnapshot(parseWarehouseRows(bootstrapPayload.warehouseItems));
+        setLocal(LOCAL_KEYS.warehouseItems, hydratedItems);
+        _clearLocalDatasetDirty(['warehouseItems']);
+        return hydratedItems;
+    };
+
     if (_isLocalDatasetDirty('warehouseItems')) {
         const localItems = getLocalWarehouseItems();
         if (localItems.length > 0 && !isSupabaseReady()) {
@@ -5896,6 +5908,9 @@ async function loadWarehouseItems() {
             _clearLocalDatasetDirty(['warehouseItems']);
         }
     }
+    const staticMirrorItems = await readStaticMirrorBootstrapWarehouseItems();
+    if (staticMirrorItems && staticMirrorItems.length > 0) return staticMirrorItems;
+
     const liveBootstrapItems = await readLiveBootstrapWarehouseItems();
     if (liveBootstrapItems && liveBootstrapItems.length > 0) return liveBootstrapItems;
     // On Yandex mirror (and as a Vercel API fallback) read directly from Supabase so
@@ -6097,6 +6112,14 @@ async function deleteWarehouseItem(itemId) {
 }
 
 async function loadWarehouseReservations() {
+    if (_isStaticYandexMirrorRuntime()) {
+        const bootstrapPayload = await _loadSameOriginBootstrap(['warehouseReservations'], { timeoutMs: 15000 });
+        if (bootstrapPayload && Array.isArray(bootstrapPayload.warehouseReservations)) {
+            setLocal(LOCAL_KEYS.warehouseReservations, bootstrapPayload.warehouseReservations);
+            return bootstrapPayload.warehouseReservations;
+        }
+    }
+
     // Prefer live Supabase read so recent saves are immediately visible;
     // the bootstrap mirror snapshot is up to ~30 min stale on the Yandex CDN.
     if (isSupabaseReady()) {

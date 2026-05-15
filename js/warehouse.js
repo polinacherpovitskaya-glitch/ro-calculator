@@ -259,6 +259,8 @@ const Warehouse = {
     // ==========================================
 
     async load() {
+        const isStaticMirror = typeof _isStaticYandexMirrorRuntime === 'function'
+            && _isStaticYandexMirrorRuntime();
         await this._waitForProjectHardwareMutations();
         this.allItems = await loadWarehouseItems();
         this.allItems = await this._ensureRequiredSeedItems(this.allItems);
@@ -306,7 +308,7 @@ const Warehouse = {
                     }
                 }
             });
-            if (pricedCount > 0) {
+            if (pricedCount > 0 && !isStaticMirror) {
                 await saveWarehouseItems(this.allItems);
                 console.log(`[Warehouse] Patched ${pricedCount} items with seed prices`);
             }
@@ -329,14 +331,14 @@ const Warehouse = {
                 item.updated_at = item.created_at || new Date().toISOString();
                 qtyFixedCount++;
             });
-            if (qtyFixedCount > 0) {
+            if (qtyFixedCount > 0 && !isStaticMirror) {
                 await saveWarehouseItems(this.allItems);
                 console.log(`[Warehouse] Repaired ${qtyFixedCount} untouched seed quantities`);
             }
         }
 
         // Cleanup: remove exact duplicate rows with zero qty
-        if (this._cleanupZeroDuplicateItems()) {
+        if (!isStaticMirror && this._cleanupZeroDuplicateItems()) {
             await saveWarehouseItems(this.allItems);
             console.log('[Warehouse] Removed zero-qty duplicate items');
         }
@@ -5852,7 +5854,7 @@ const Warehouse = {
             </table></div></div>`;
     },
 
-    showNewShipmentForm() {
+    async showNewShipmentForm() {
         this.editingShipmentId = null;
         this.shipmentItems = [];
         this.clearShipmentForm();
@@ -5862,7 +5864,7 @@ const Warehouse = {
         document.getElementById('wh-sh-confirm-btn').textContent = 'Принять на склад';
         document.getElementById('wh-sh-update-btn').style.display = 'none';
         document.getElementById('wh-shipment-form').style.display = '';
-        this.addShipmentItem();
+        await this.addShipmentItem();
         document.getElementById('wh-shipment-form').scrollIntoView({ behavior: 'smooth' });
     },
 
@@ -5927,7 +5929,7 @@ const Warehouse = {
         document.getElementById('wh-sh-summary').innerHTML = '';
     },
 
-    addShipmentItem() {
+    async addShipmentItem() {
         this.shipmentItems.push({
             source: 'existing',
             warehouse_item_id: null, name: '', sku: '', category: '',
@@ -5937,12 +5939,12 @@ const Warehouse = {
             purchase_price_cny: 0, purchase_price_rub: 0,
             delivery_allocated: 0, total_cost_per_unit: 0,
         });
-        this.renderShipmentItemsTable();
+        await this.renderShipmentItemsTable();
     },
 
-    removeShipmentItem(idx) {
+    async removeShipmentItem(idx) {
         this.shipmentItems.splice(idx, 1);
-        this.renderShipmentItemsTable();
+        await this.renderShipmentItemsTable();
         this.recalcShipmentValues();
     },
 
