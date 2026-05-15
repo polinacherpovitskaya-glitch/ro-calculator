@@ -5773,7 +5773,10 @@ async function smokeProjectHardwareActualQtyEditableFlow(context) {
     const adjustedReservation = context.__reservations.find(item => Number(item.order_id) === 321 && item.status === 'active');
     assert.equal(adjustedReservation.qty, 3);
 
-    await vm.runInContext(`
+    const readyClickPromise = vm.runInContext(`
+        globalThis.__readyLabel = { textContent: 'собрано', style: {}, isConnected: false };
+        globalThis.__readyProgress = { textContent: 'Собрано 0 из 1' };
+        globalThis.__readyBadge = { textContent: 'не готово', style: {} };
         globalThis.__readyClickInput = {
             dataset: { ready: '0' },
             checked: true,
@@ -5781,19 +5784,55 @@ async function smokeProjectHardwareActualQtyEditableFlow(context) {
             isConnected: false,
             setAttribute(name, value) { this[name] = value; },
             removeAttribute(name) { delete this[name]; },
-            closest() {
-                return {
-                    querySelector() {
-                        return { textContent: 'собрано', isConnected: false };
-                    },
-                };
+        };
+        globalThis.__readyRow = {
+            dataset: { projectHardwareRow: '321:901', projectHardwareReady: '0' },
+            style: {},
+            querySelector(selector) {
+                if (String(selector).includes('checkbox')) return globalThis.__readyClickInput;
+                if (selector === '[data-project-hardware-ready-label]') return globalThis.__readyLabel;
+                return null;
+            },
+            closest(selector) {
+                return selector === '[data-project-hardware-order-card]' ? globalThis.__readyCard : null;
             },
         };
-        Warehouse.handleProjectHardwareReadyClick({
+        globalThis.__readyCard = {
+            querySelectorAll(selector) {
+                return selector === '[data-project-hardware-row]' ? [globalThis.__readyRow] : [];
+            },
+            querySelector(selector) {
+                if (selector === '[data-project-hardware-order-progress]') return globalThis.__readyProgress;
+                if (selector === '[data-project-hardware-order-badge]') return globalThis.__readyBadge;
+                return null;
+            },
+        };
+        globalThis.__readyOriginalQuerySelectorAll = document.querySelectorAll;
+        document.querySelectorAll = (selector) => selector === '[data-project-hardware-row]' ? [globalThis.__readyRow] : globalThis.__readyOriginalQuerySelectorAll.call(document, selector);
+        globalThis.__readyPromise = Warehouse.handleProjectHardwareReadyClick({
             preventDefault() { globalThis.__readyPrevented = true; },
             currentTarget: globalThis.__readyClickInput,
-        }, 321, 901)
+        }, 321, 901);
+        globalThis.__readyAfterClick = {
+            checked: globalThis.__readyClickInput.checked,
+            disabled: globalThis.__readyClickInput.disabled,
+            rowReady: globalThis.__readyRow.dataset.projectHardwareReady,
+            label: globalThis.__readyLabel.textContent,
+            progress: globalThis.__readyProgress.textContent,
+            badge: globalThis.__readyBadge.textContent,
+        };
+        globalThis.__readyPromise
     `, context);
+
+    assert.equal(context.__readyAfterClick.checked, true);
+    assert.equal(context.__readyAfterClick.disabled, true);
+    assert.equal(context.__readyAfterClick.rowReady, '1');
+    assert.equal(context.__readyAfterClick.label, 'собрано, записываем...');
+    assert.equal(context.__readyAfterClick.progress, 'Собрано 1 из 1');
+    assert.equal(context.__readyAfterClick.badge, 'готово');
+
+    await readyClickPromise;
+    vm.runInContext(`document.querySelectorAll = globalThis.__readyOriginalQuerySelectorAll;`, context);
 
     assert.equal(Boolean(context.__projectHardwareState.checks['321:901']), true);
     assert.equal(context.__readyPrevented, true);
