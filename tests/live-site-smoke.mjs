@@ -305,20 +305,53 @@ async function smokeWarehouseLoads(page) {
       && document.body.innerText.includes('Склад фурнитуры');
   }, null, { timeout: 30_000 });
 
-  const warehouseState = await page.evaluate(() => ({
-    itemCount: Warehouse?.allItems?.length ?? null,
-    shipmentCount: Warehouse?.allShipments?.length ?? null,
-    currentView: Warehouse?.currentView ?? null,
-    hasHeading: document.body.innerText.includes('Склад фурнитуры'),
-    hasTable: document.body.innerText.includes('Таблица')
-  }));
+  const warehouseState = await page.evaluate(async () => {
+    const initialCurrentView = Warehouse?.currentView ?? null;
+    const initialHasTable = document.body.innerText.includes('Таблица');
+
+    if (typeof Warehouse !== 'undefined'
+      && typeof Warehouse.setView === 'function'
+      && typeof Warehouse.showNewShipmentForm === 'function') {
+      Warehouse.setView('shipments', { force: true });
+      await new Promise(resolve => setTimeout(resolve, 500));
+      Warehouse.showNewShipmentForm();
+      await new Promise(resolve => setTimeout(resolve, 3_000));
+    }
+
+    const form = document.querySelector('#wh-shipment-form');
+    const select = document.querySelector('#wh-sh-items-table select');
+    const options = Array.from(select?.options || []);
+    const shipmentPicker = {
+      formVisible: !!form && form.style.display !== 'none',
+      selectExists: !!select,
+      optionCount: options.length,
+      selectableOptionCount: options.filter(option => String(option.value || '').trim()).length,
+      firstOptions: options.slice(0, 8).map(option => option.textContent?.trim() || ''),
+    };
+
+    return {
+      itemCount: Warehouse?.allItems?.length ?? null,
+      shipmentCount: Warehouse?.allShipments?.length ?? null,
+      currentView: Warehouse?.currentView ?? null,
+      initialCurrentView,
+      hasHeading: document.body.innerText.includes('Склад фурнитуры'),
+      hasTable: initialHasTable,
+      shipmentPicker,
+    };
+  });
 
   assert.equal(warehouseState.hasHeading, true, 'Warehouse page must render heading on live site');
-  assert.equal(warehouseState.currentView, 'table', `Expected warehouse table view, got ${warehouseState.currentView}`);
+  assert.equal(warehouseState.initialCurrentView, 'table', `Expected warehouse table view before opening receipt form, got ${warehouseState.initialCurrentView}`);
   assert.equal(warehouseState.hasTable, true, 'Warehouse page must render table section');
   assert.ok(
     Number.isFinite(warehouseState.itemCount) && warehouseState.itemCount > 0,
     `Expected live warehouse items, got ${warehouseState.itemCount}`
+  );
+  assert.equal(warehouseState.shipmentPicker.formVisible, true, `Expected shipment receipt form to open: ${JSON.stringify(warehouseState.shipmentPicker)}`);
+  assert.equal(warehouseState.shipmentPicker.selectExists, true, `Expected shipment warehouse-position picker select: ${JSON.stringify(warehouseState.shipmentPicker)}`);
+  assert.ok(
+    warehouseState.shipmentPicker.selectableOptionCount > 0,
+    `Expected warehouse positions in shipment receipt picker, got ${JSON.stringify(warehouseState.shipmentPicker)}`
   );
 
   await page.screenshot({

@@ -170,6 +170,32 @@ async function main() {
         await new Promise(resolve => setTimeout(resolve, 2_000));
       }
 
+      let shipmentPickerState = {
+        formVisible: false,
+        selectExists: false,
+        optionCount: 0,
+        selectableOptionCount: 0,
+        firstOptions: [],
+      };
+      if (typeof Warehouse !== 'undefined'
+        && typeof Warehouse.setView === 'function'
+        && typeof Warehouse.showNewShipmentForm === 'function') {
+        Warehouse.setView('shipments', { force: true });
+        await new Promise(resolve => setTimeout(resolve, 500));
+        Warehouse.showNewShipmentForm();
+        await new Promise(resolve => setTimeout(resolve, 3_000));
+        const form = document.querySelector('#wh-shipment-form');
+        const select = document.querySelector('#wh-sh-items-table select');
+        const options = Array.from(select?.options || []);
+        shipmentPickerState = {
+          formVisible: !!form && form.style.display !== 'none',
+          selectExists: !!select,
+          optionCount: options.length,
+          selectableOptionCount: options.filter(option => String(option.value || '').trim()).length,
+          firstOptions: options.slice(0, 8).map(option => option.textContent?.trim() || ''),
+        };
+      }
+
       return {
         appVersion: typeof APP_VERSION !== 'undefined' ? APP_VERSION : null,
         currentHost: location.hostname,
@@ -182,6 +208,7 @@ async function main() {
         demandRowsCount: demandRows.length,
         demandOrder,
         firstDemandRows: demandRows.slice(0, 5),
+        shipmentPickerState,
         totalItemsText: document.querySelector('#wh-total-items')?.textContent?.trim() || '',
         reservedText: document.querySelector('#wh-total-reserved')?.textContent?.trim() || '',
         projectHardwareText: document.querySelector('#wh-content')?.innerText?.slice(0, 1000) || '',
@@ -217,6 +244,12 @@ async function main() {
     assert.ok(state.chinaPurchaseCount > 0, `Expected China purchases from mirror fallback, got ${state.chinaPurchaseCount}`);
     assert.ok(state.shipmentsCount >= 0, `Expected shipments from mirror fallback, got ${state.shipmentsCount}`);
     assert.ok(state.demandRowsCount > 0, `Expected at least one project hardware demand row, got ${JSON.stringify(state.demandOrder)}`);
+    assert.equal(state.shipmentPickerState.formVisible, true, `Expected shipment receipt form to open: ${JSON.stringify(state.shipmentPickerState)}`);
+    assert.equal(state.shipmentPickerState.selectExists, true, `Expected shipment warehouse-position picker select: ${JSON.stringify(state.shipmentPickerState)}`);
+    assert.ok(
+      state.shipmentPickerState.selectableOptionCount > 0,
+      `Expected warehouse positions in shipment receipt picker, got ${JSON.stringify(state.shipmentPickerState)}`
+    );
     assert.ok(
       blockedSupabaseRequests > 0 || yandexProxyRequests > 0 || state.supabaseRuntimeUrl.includes('apigw.yandexcloud.net'),
       'Smoke must verify either Russian mirror fallback or the Yandex Supabase proxy path'
@@ -233,6 +266,7 @@ async function main() {
       shipmentsCount: state.shipmentsCount,
       demandRowsCount: state.demandRowsCount,
       demandOrder: state.demandOrder,
+      shipmentPickerState: state.shipmentPickerState,
       blockedSupabaseRequests,
       yandexProxyRequests,
       supabaseRuntimeUrl: state.supabaseRuntimeUrl,
