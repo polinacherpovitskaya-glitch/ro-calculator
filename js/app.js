@@ -97,7 +97,7 @@ const App = {
     // All pages in the app
     ALL_PAGES: [
         'calculator', 'orders', 'factual', 'leads',
-        'analytics', 'molds', 'colors', 'timetrack', 'tasks', 'bugs', 'projects', 'gantt', 'tpa',
+        'analytics', 'molds', 'colors', 'timetrack', 'tasks', 'bugs', 'projects', 'gantt',
         'import', 'warehouse', 'marketplaces', 'china', 'monitoring', 'settings',
     ],
 
@@ -148,7 +148,6 @@ const App = {
     canAccess(page) {
         if (!this.currentUser) return false;
         page = this.normalizePageAlias(page);
-        if (page === 'tpa') page = 'calculator';
         if (page === 'bugs') return true;
         if (page === 'leads') return true;
         if (page === 'monitoring') return true;
@@ -1145,7 +1144,6 @@ const App = {
             case 'orders': Orders.loadList(); break;
             case 'production-plan':
             case 'gantt': Gantt.load(); break;
-            case 'tpa': TPA.load(); break;
             case 'order-detail': if (subId) OrderDetail.load(parseInt(subId)); break;
             case 'factual': Factual.load(); break;
             case 'analytics': this.navigate('factual'); break;
