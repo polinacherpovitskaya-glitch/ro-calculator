@@ -62,20 +62,28 @@ const TPA = {
     state: null,
     shellRendered: false,
     bound: false,
+    boundRoots: new WeakSet(),
 
     async load() {
-        this.root = document.getElementById('tpa-root');
-        if (!this.root) return;
+        await this.mount(document.getElementById('tpa-root'));
+    },
+
+    async mount(container) {
+        if (!container) return;
+        const previousRoot = this.root;
+        if (previousRoot && previousRoot !== container) {
+            previousRoot.innerHTML = '';
+        }
+        this.root = container;
         if (!this.state) this.state = this.getDefaultState();
         await this.loadBlanks();
-        if (!this.shellRendered) {
-            this.renderShell();
-            this.shellRendered = true;
-        }
-        if (!this.bound) {
+        this.renderShell();
+        this.shellRendered = true;
+        if (!this.boundRoots.has(this.root)) {
             this.bindEvents();
-            this.bound = true;
+            this.boundRoots.add(this.root);
         }
+        this.bound = true;
         this.refresh();
     },
 

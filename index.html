@@ -2777,6 +2777,7 @@
 
             <div class="tabs">
                 <div class="tab active" data-tab="production" onclick="Settings.switchTab('production')">Производство</div>
+                <div class="tab" data-tab="tpa" onclick="Settings.switchTab('tpa')">🧮 Расчёт ТПА</div>
                 <div class="tab" data-tab="indirect" onclick="Settings.switchTab('indirect')">Косв. расходы</div>
                 <div class="tab" data-tab="costs" onclick="Settings.switchTab('costs')">Расходы</div>
                 <div class="tab" data-tab="pricing" onclick="Settings.switchTab('pricing')">Ценообразование</div>
@@ -2873,6 +2874,11 @@
                         </div>
                     </div>
                 </div>
+            </div>
+
+            <!-- TPA tab -->
+            <div id="settings-tab-tpa" class="settings-tab-content" style="display:none">
+                <div id="settings-tpa-host"></div>
             </div>
 
             <!-- Costs tab -->

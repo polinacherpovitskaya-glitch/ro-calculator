@@ -76,6 +76,15 @@ const Settings = {
         if (tab === 'timing') {
             this.loadTimingTab();
         }
+        if (tab === 'tpa') {
+            const host = document.getElementById('settings-tpa-host');
+            if (host && typeof TPA !== 'undefined' && typeof TPA.mount === 'function') {
+                Promise.resolve(TPA.mount(host)).catch(error => {
+                    console.error('[Settings] TPA mount failed:', error);
+                    App.toast('Не удалось открыть расчет ТПА');
+                });
+            }
+        }
     },
 
     populateFields() {
