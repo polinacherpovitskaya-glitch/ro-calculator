@@ -5847,6 +5847,7 @@ async function loadWarehouseItems() {
             if (!Array.isArray(rows) || rows.length === 0) return null;
             const hydratedItems = await applyReservationSnapshot(parseWarehouseRows(rows));
             setLocal(LOCAL_KEYS.warehouseItems, hydratedItems);
+            _clearLocalDatasetDirty(['warehouseItems']);
             _invalidateBootstrapCache(['warehouseItems']);
             return hydratedItems;
         } catch (error) {
@@ -5866,6 +5867,7 @@ async function loadWarehouseItems() {
             if (!Array.isArray(data) || data.length === 0) return null;
             const hydratedItems = await applyReservationSnapshot(parseWarehouseRows(data));
             setLocal(LOCAL_KEYS.warehouseItems, hydratedItems);
+            _clearLocalDatasetDirty(['warehouseItems']);
             _invalidateBootstrapCache(['warehouseItems']);
             return hydratedItems;
         } catch (error) {
@@ -5880,14 +5882,19 @@ async function loadWarehouseItems() {
     const localFallback = async () => applyReservationSnapshot(getLocalWarehouseItems());
     if (_isLocalDatasetDirty('warehouseItems')) {
         const localItems = getLocalWarehouseItems();
-        if (localItems.length > 0) {
+        if (localItems.length > 0 && !isSupabaseReady()) {
             return await applyReservationSnapshot(localItems);
+        }
+        if (localItems.length > 0) {
+            console.warn('[Warehouse] Ignoring dirty local warehouse cache while shared warehouse is reachable; loading shared warehouse data.');
         }
         // A stale dirty flag with an empty local cache can make the cloud warehouse
         // look completely empty. Treat that as cache corruption and continue to
         // live/bootstrap sources before showing an empty warehouse.
-        console.warn('[Warehouse] Ignoring empty dirty local warehouse cache; loading shared warehouse data.');
-        _clearLocalDatasetDirty(['warehouseItems']);
+        if (localItems.length === 0) {
+            console.warn('[Warehouse] Ignoring empty dirty local warehouse cache; loading shared warehouse data.');
+            _clearLocalDatasetDirty(['warehouseItems']);
+        }
     }
     const liveBootstrapItems = await readLiveBootstrapWarehouseItems();
     if (liveBootstrapItems && liveBootstrapItems.length > 0) return liveBootstrapItems;
@@ -5900,6 +5907,7 @@ async function loadWarehouseItems() {
     if (bootstrapPayload && Array.isArray(bootstrapPayload.warehouseItems) && bootstrapPayload.warehouseItems.length > 0) {
         const hydratedItems = await applyReservationSnapshot(parseWarehouseRows(bootstrapPayload.warehouseItems));
         setLocal(LOCAL_KEYS.warehouseItems, hydratedItems);
+        _clearLocalDatasetDirty(['warehouseItems']);
         return hydratedItems;
     }
 
@@ -5914,6 +5922,7 @@ async function loadWarehouseItems() {
                 const hydratedItems = await applyReservationSnapshot(parseWarehouseRows(data));
                 // Update localStorage backup
                 setLocal(LOCAL_KEYS.warehouseItems, hydratedItems);
+                _clearLocalDatasetDirty(['warehouseItems']);
                 return hydratedItems;
             }
 
@@ -5958,6 +5967,7 @@ async function saveWarehouseItem(item) {
     }
     item.updated_at = new Date().toISOString();
 
+    let remoteSaved = false;
     if (isSupabaseReady()) {
         try {
             const row = {
@@ -5976,6 +5986,7 @@ async function saveWarehouseItem(item) {
                 if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
                 throw new Error(`Не удалось сохранить позицию склада: ${error.message || error.code || 'ошибка записи'}`);
             }
+            remoteSaved = true;
         } catch(e) {
             console.error('saveWarehouseItem exception:', e);
             throw e;
@@ -5998,7 +6009,8 @@ async function saveWarehouseItem(item) {
     });
     if (idx >= 0) items[idx] = item; else items.push(item);
     setLocal(LOCAL_KEYS.warehouseItems, items);
-    _markLocalDatasetDirty(['warehouseItems']);
+    if (remoteSaved) _clearLocalDatasetDirty(['warehouseItems']);
+    else _markLocalDatasetDirty(['warehouseItems']);
     if (isSupabaseReady()) {
         await _saveJsonSetting(WAREHOUSE_ITEMS_SETTINGS_KEY, _buildWarehouseSnapshot(items));
     }
@@ -6008,6 +6020,7 @@ async function saveWarehouseItem(item) {
 }
 
 async function saveWarehouseItems(items) {
+    let remoteSaved = false;
     if (isSupabaseReady()) {
         try {
             const now = Date.now();
@@ -6032,13 +6045,15 @@ async function saveWarehouseItems(items) {
                 if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
                 throw new Error(`Не удалось сохранить остатки склада: ${error.message || error.code || 'ошибка записи'}`);
             }
+            remoteSaved = true;
         } catch(e) {
             console.error('saveWarehouseItems exception:', e);
             throw e;
         }
     }
     setLocal(LOCAL_KEYS.warehouseItems, items);
-    _markLocalDatasetDirty(['warehouseItems']);
+    if (remoteSaved) _clearLocalDatasetDirty(['warehouseItems']);
+    else _markLocalDatasetDirty(['warehouseItems']);
     if (isSupabaseReady()) {
         await _saveJsonSetting(WAREHOUSE_ITEMS_SETTINGS_KEY, _buildWarehouseSnapshot(items));
     }
@@ -6046,11 +6061,13 @@ async function saveWarehouseItems(items) {
 }
 
 async function deleteWarehouseItem(itemId) {
+    let remoteDeleted = false;
     if (isSupabaseReady()) {
         try {
             const { error } = await supabaseClient
                 .from('warehouse_items').delete().eq('id', itemId);
             if (error) console.error('deleteWarehouseItem error:', error);
+            else remoteDeleted = true;
         } catch(e) { console.error('deleteWarehouseItem exception:', e); }
     }
     const normalizedItemId = String(itemId || '').trim();
@@ -6071,7 +6088,8 @@ async function deleteWarehouseItem(itemId) {
         return true;
     });
     setLocal(LOCAL_KEYS.warehouseItems, items);
-    _markLocalDatasetDirty(['warehouseItems']);
+    if (remoteDeleted) _clearLocalDatasetDirty(['warehouseItems']);
+    else _markLocalDatasetDirty(['warehouseItems']);
     if (isSupabaseReady()) {
         await _saveJsonSetting(WAREHOUSE_ITEMS_SETTINGS_KEY, _buildWarehouseSnapshot(items));
     }

@@ -1050,6 +1050,73 @@ async function main() {
 
     {
         const context = createContext();
+        context.location = {
+            href: 'https://calc2.recycleobject.ru/#warehouse',
+            origin: 'https://calc2.recycleobject.ru',
+            protocol: 'https:',
+            hostname: 'calc2.recycleobject.ru',
+        };
+        context.__tableRows.warehouse_items = [{
+            id: 9401,
+            name: 'Живой складской трос',
+            sku: 'TR-LIVE',
+            category: 'cables',
+            item_data: JSON.stringify({
+                id: 9401,
+                name: 'Живой складской трос',
+                sku: 'TR-LIVE',
+                category: 'cables',
+                qty: 245,
+            }),
+        }];
+        context.__hangingTables.add('warehouse_reservations');
+        runScript(context, 'js/supabase.js');
+        vm.runInContext(`
+            initSupabase();
+            setLocal(LOCAL_KEYS.warehouseItems, [{
+                id: 9402,
+                name: 'Старый локальный склад',
+                sku: 'OLD',
+                category: 'cables',
+                qty: 1
+            }]);
+            localStorage.setItem('ro_calc_dirty_datasets', JSON.stringify({ warehouseItems: Date.now() }));
+        `, context);
+
+        const loaded = JSON.parse(JSON.stringify(await vm.runInContext('loadWarehouseItems()', context)));
+        assert.equal(loaded.length, 1, 'calc2 should load shared warehouse even when stale local warehouse is marked dirty');
+        assert.equal(loaded[0].id, 9401);
+        assert.equal(loaded[0].sku, 'TR-LIVE');
+        const dirtyMap = JSON.parse(context.localStorage.getItem('ro_calc_dirty_datasets') || '{}');
+        assert.equal(Boolean(dirtyMap.warehouseItems), false, 'successful shared warehouse load should clear stale dirty flag');
+    }
+
+    {
+        const context = createContext();
+        runScript(context, 'js/supabase.js');
+        vm.runInContext(`
+            initSupabase();
+            localStorage.setItem('ro_calc_dirty_datasets', JSON.stringify({ warehouseItems: Date.now() }));
+        `, context);
+
+        await vm.runInContext(`
+            saveWarehouseItem({
+                id: 9501,
+                name: 'Карабин после успешного сохранения',
+                sku: 'CR-SAVED',
+                category: 'hooks',
+                qty: 10
+            })
+        `, context);
+
+        const dirtyMap = JSON.parse(context.localStorage.getItem('ro_calc_dirty_datasets') || '{}');
+        assert.equal(Boolean(dirtyMap.warehouseItems), false, 'successful warehouse save must not leave calc2 pinned to local cache');
+        assert.equal(context.__tableRows.warehouse_items.length, 1);
+        assert.equal(context.__tableRows.warehouse_items[0].sku, 'CR-SAVED');
+    }
+
+    {
+        const context = createContext();
         context.__invalidTables = new Set(['settings']);
         runScript(context, 'js/supabase.js');
 
