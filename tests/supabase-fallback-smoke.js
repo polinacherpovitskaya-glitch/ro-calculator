@@ -75,6 +75,7 @@ function createContext() {
                     'employees',
                     'authAccounts',
                     'factualSnapshots',
+                    'projectHardwareState',
                     'warehouseItems',
                     'shipments',
                     'chinaPurchases',
@@ -90,6 +91,7 @@ function createContext() {
             if (keys.includes('employees')) data.employees = context.__bootstrapEmployees || [];
             if (keys.includes('authAccounts')) data.authAccounts = context.__bootstrapAuthAccounts || [];
             if (keys.includes('factualSnapshots')) data.factualSnapshots = context.__bootstrapFactualSnapshots || {};
+            if (keys.includes('projectHardwareState')) data.projectHardwareState = context.__bootstrapProjectHardwareState || {};
             if (keys.includes('warehouseItems')) data.warehouseItems = context.__bootstrapWarehouseItems || [];
             if (keys.includes('shipments')) data.shipments = context.__bootstrapShipments || [];
             if (keys.includes('chinaPurchases')) data.chinaPurchases = context.__bootstrapChinaPurchases || [];
@@ -964,6 +966,54 @@ async function main() {
 
         const cachedItems = JSON.parse(JSON.stringify(vm.runInContext('getLocal(LOCAL_KEYS.orderItems) || []', context)));
         assert.equal(cachedItems.filter(item => String(item.order_id) === String(orderId)).length, 2, 'bootstrap order_items should refresh local detail cache');
+    }
+
+    {
+        const context = createContext();
+        context.__bootstrapProjectHardwareState = {
+            checks: {},
+            actual_qtys: {},
+            updated_at: '2026-05-15T09:00:00.000Z',
+        };
+        context.__settingsStore.set('project_hardware_state_json', JSON.stringify({
+            checks: { '771:501': true },
+            actual_qtys: { '771:501': 40 },
+            updated_at: '2026-05-15T10:00:00.000Z',
+        }));
+        runScript(context, 'js/supabase.js');
+        vm.runInContext(`initSupabase();`, context);
+
+        const loaded = JSON.parse(JSON.stringify(await vm.runInContext('loadProjectHardwareState()', context)));
+        assert.equal(loaded.checks['771:501'], true, 'live project hardware state should win over stale bootstrap');
+        assert.equal(loaded.actual_qtys['771:501'], 40);
+        assert.equal(
+            context.__remoteCalls.some(call => call.table === 'settings' && call.action === 'maybeSingle'),
+            true,
+            'project hardware state should check shared settings before bootstrap fallback',
+        );
+    }
+
+    {
+        const context = createContext();
+        context.location = {
+            href: 'https://calc2.recycleobject.ru/#warehouse',
+            origin: 'https://calc2.recycleobject.ru',
+            protocol: 'https:',
+            hostname: 'calc2.recycleobject.ru',
+        };
+        context.window.location = context.location;
+        context.__bootstrapProjectHardwareState = {
+            checks: { '88:601': true },
+            actual_qtys: { '88:601': 100 },
+            updated_at: '2026-05-15T11:00:00.000Z',
+        };
+        context.__hangingTables.add('settings');
+        runScript(context, 'js/supabase.js');
+        vm.runInContext(`initSupabase();`, context);
+
+        const loaded = JSON.parse(JSON.stringify(await vm.runInContext('loadProjectHardwareState()', context)));
+        assert.equal(loaded.checks['88:601'], true, 'calc2 should still fall back to bootstrap when shared settings are unreachable');
+        assert.equal(loaded.actual_qtys['88:601'], 100);
     }
 
     {

@@ -5453,35 +5453,34 @@ async function saveProductionPlanState(state) {
 // =============================================
 
 async function loadProjectHardwareState() {
-    const fallback = getLocal(LOCAL_KEYS.projectHardwareState) || { checks: {}, actual_qtys: {} };
-    const bootstrapPayload = await _loadSameOriginBootstrap(['projectHardwareState']);
-    if (bootstrapPayload && bootstrapPayload.projectHardwareState && typeof bootstrapPayload.projectHardwareState === 'object') {
-        const parsed = bootstrapPayload.projectHardwareState;
+    const normalizeState = (raw) => {
+        const parsed = raw && typeof raw === 'object' ? { ...raw } : { checks: {}, actual_qtys: {} };
         if (!parsed.checks || typeof parsed.checks !== 'object') parsed.checks = {};
+        else parsed.checks = { ...parsed.checks };
         if (!parsed.actual_qtys || typeof parsed.actual_qtys !== 'object') parsed.actual_qtys = {};
+        else parsed.actual_qtys = { ...parsed.actual_qtys };
+        return parsed;
+    };
+    const fallback = normalizeState(getLocal(LOCAL_KEYS.projectHardwareState));
+
+    // This state changes when warehouse marks project hardware as collected.
+    // Prefer live shared settings first; the static bootstrap can be minutes stale
+    // and must not resurrect old "not collected" checkboxes after a page refresh.
+    const liveState = await _loadJsonSetting('project_hardware_state_json', null);
+    if (liveState && typeof liveState === 'object') {
+        const parsed = normalizeState(liveState);
         setLocal(LOCAL_KEYS.projectHardwareState, parsed);
+        _setDataLoadMeta('projectHardwareState', { source: 'supabase' });
         return parsed;
     }
-    if (isSupabaseReady()) {
-        try {
-            const { data, error } = await supabaseClient
-                .from('settings')
-                .select('value')
-                .eq('key', 'project_hardware_state_json')
-                .maybeSingle();
-            if (!error && data && data.value) {
-                const parsed = JSON.parse(data.value) || { checks: {}, actual_qtys: {} };
-                if (!parsed.checks || typeof parsed.checks !== 'object') parsed.checks = {};
-                if (!parsed.actual_qtys || typeof parsed.actual_qtys !== 'object') parsed.actual_qtys = {};
-                setLocal(LOCAL_KEYS.projectHardwareState, parsed);
-                return parsed;
-            }
-        } catch (e) {
-            console.error('loadProjectHardwareState error:', e);
-        }
+
+    const bootstrapPayload = await _loadSameOriginBootstrap(['projectHardwareState']);
+    if (bootstrapPayload && bootstrapPayload.projectHardwareState && typeof bootstrapPayload.projectHardwareState === 'object') {
+        const parsed = normalizeState(bootstrapPayload.projectHardwareState);
+        setLocal(LOCAL_KEYS.projectHardwareState, parsed);
+        _setDataLoadMeta('projectHardwareState', { source: 'bootstrap' });
+        return parsed;
     }
-    if (!fallback.checks || typeof fallback.checks !== 'object') fallback.checks = {};
-    if (!fallback.actual_qtys || typeof fallback.actual_qtys !== 'object') fallback.actual_qtys = {};
     return fallback;
 }
 
@@ -5490,16 +5489,7 @@ async function saveProjectHardwareState(state) {
     if (!payload.checks || typeof payload.checks !== 'object') payload.checks = {};
     if (!payload.actual_qtys || typeof payload.actual_qtys !== 'object') payload.actual_qtys = {};
     setLocal(LOCAL_KEYS.projectHardwareState, payload);
-    if (isSupabaseReady()) {
-        const { error } = await supabaseClient
-            .from('settings')
-            .upsert({
-                key: 'project_hardware_state_json',
-                value: JSON.stringify(payload),
-                updated_at: new Date().toISOString(),
-            }, { onConflict: 'key' });
-        if (error) console.error('saveProjectHardwareState error:', error);
-    }
+    await _saveJsonSetting('project_hardware_state_json', payload);
 }
 
 // =============================================
