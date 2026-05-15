@@ -1485,13 +1485,17 @@ const Warehouse = {
             return;
         }
 
-        container.innerHTML = `<div class="wh-inventory-list">
-            ${audits.map((audit, index) => this._renderInventoryAuditCard(
-                audit,
-                index === 0,
-                mutationContexts.get(Number(audit && audit.id || 0)) || null
-            )).join('')}
-        </div>`;
+        container.innerHTML = `
+            <div style="margin-bottom:12px;">
+                <button class="btn btn-primary" onclick="Warehouse.showAudit()">+ Новая инвентаризация</button>
+            </div>
+            <div class="wh-inventory-list">
+                ${audits.map((audit, index) => this._renderInventoryAuditCard(
+                    audit,
+                    index === 0,
+                    mutationContexts.get(Number(audit && audit.id || 0)) || null
+                )).join('')}
+            </div>`;
     },
 
     // ==========================================
