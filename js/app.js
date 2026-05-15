@@ -111,6 +111,39 @@ const App = {
         return page;
     },
 
+    getLegacyRouteRedirect(page) {
+        switch (String(page || '').trim()) {
+            case 'tpa':
+                return { page: 'settings', hash: 'settings', settingsTab: 'tpa' };
+            case 'monitoring':
+                return { page: 'settings', hash: 'settings', settingsTab: 'monitoring' };
+            case 'wiki':
+                return { page: 'tasks', hash: 'tasks' };
+            default:
+                return null;
+        }
+    },
+
+    replaceRouteHash(hash) {
+        if (typeof window === 'undefined' || !hash) return;
+        const pathname = window.location?.pathname || '';
+        const search = window.location?.search || '';
+        if (window.history && typeof window.history.replaceState === 'function') {
+            window.history.replaceState(null, '', `${pathname}${search}#${hash}`);
+        } else {
+            window.location.hash = hash;
+        }
+    },
+
+    openSettingsTabAfterRoute(tab) {
+        if (!tab) return;
+        setTimeout(() => {
+            if (this.currentPage === 'settings' && typeof Settings !== 'undefined') {
+                Settings.switchTab(tab);
+            }
+        }, 0);
+    },
+
     // Check if current user has access to a specific page
     canAccess(page) {
         if (!this.currentUser) return false;
@@ -1018,6 +1051,18 @@ const App = {
     handleRoute() {
         const hash = window.location.hash.replace('#', '') || 'orders';
         const parts = hash.split('/');
+        const legacyRedirect = this.getLegacyRouteRedirect(parts[0]);
+        if (legacyRedirect) {
+            this.replaceRouteHash(legacyRedirect.hash || legacyRedirect.page);
+            if (this._bootstrappingApp) {
+                this.applyRouteShell(legacyRedirect.page, null, { pushHash: false, quiet: true });
+                this.syncQuickBugButton();
+                return;
+            }
+            this.navigate(legacyRedirect.page, false, null);
+            this.openSettingsTabAfterRoute(legacyRedirect.settingsTab);
+            return;
+        }
         const page = this.normalizePageAlias(parts[0]);
         const subId = parts[1] || null;
         if (this._bootstrappingApp) {
@@ -1070,17 +1115,27 @@ const App = {
     primeRouteShell() {
         const hash = window.location.hash.replace('#', '') || 'orders';
         const parts = hash.split('/');
-        const page = this.normalizePageAlias(parts[0]);
+        const legacyRedirect = this.getLegacyRouteRedirect(parts[0]);
+        const page = legacyRedirect ? legacyRedirect.page : this.normalizePageAlias(parts[0]);
         const subId = parts[1] || null;
         return this.applyRouteShell(page, subId, { pushHash: false, quiet: true });
     },
 
     navigate(page, pushHash = true, subId = null) {
-        const route = this.applyRouteShell(page, subId, { pushHash });
+        const legacyRedirect = this.getLegacyRouteRedirect(page);
+        if (legacyRedirect && pushHash) {
+            this.replaceRouteHash(legacyRedirect.hash || legacyRedirect.page);
+        }
+        const route = this.applyRouteShell(
+            legacyRedirect ? legacyRedirect.page : page,
+            legacyRedirect ? null : subId,
+            { pushHash: legacyRedirect ? false : pushHash }
+        );
 
         this.syncQuickBugButton();
         if (this._bootstrappingApp) return;
         this.onPageEnter(this.currentPage, route.subId);
+        this.openSettingsTabAfterRoute(legacyRedirect?.settingsTab);
         this.scheduleWarmDataPrefetch(this.currentPage);
         this.trackAuthEvent('navigate', { to_page: this.currentPage });
     },
