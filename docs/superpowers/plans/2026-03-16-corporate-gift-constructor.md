@@ -1,0 +1,631 @@
+# Corporate Gift Constructor — Implementation Plan
+
+> **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Build a standalone page where corporate clients' employees configure their custom RO pendant (letters, colors, cord, carabiner) and submit orders to Google Sheets.
+
+**Architecture:** Single-page vanilla HTML/CSS/JS app. All config (client name, colors, delivery options) in `config.json`. SVG-based pendant visualizer updates in real-time. Form submits via fetch to Google Apps Script → Google Sheets.
+
+**Tech Stack:** HTML5, CSS3 (custom properties), vanilla JS (ES6+), SVG for visualization, Google Apps Script for data collection.
+
+---
+
+## File Structure
+
+```
+corporate-gift/
+├── index.html          # Main page — greeting, constructor, form, thank-you
+├── config.json         # Client config (colors, delivery options, texts)
+├── style.css           # All styles — RO branding, responsive
+├── app.js              # Main logic — state, rendering, form, submission
+├── pendant-svg.js      # SVG pendant visualizer — carabiner, cord, letters, heart
+└── assets/
+    └── ro-logo.svg     # RO logo for heart charm
+```
+
+**Responsibilities:**
+- `index.html` — semantic markup, all 8 steps as sections, no inline JS
+- `config.json` — all customizable values (swap per client, no code changes)
+- `style.css` — RO brand palette, mobile-first responsive, step transitions
+- `app.js` — state management, DOM binding, validation, Google Sheets POST
+- `pendant-svg.js` — pure function: takes state → returns SVG string. Zero DOM dependencies outside its render target.
+
+---
+
+## Chunk 1: Project Skeleton & Config
+
+### Task 1: Create directory structure and config.json
+
+**Files:**
+- Create: `corporate-gift/config.json`
+- Create: `corporate-gift/assets/ro-logo.svg`
+
+- [ ] **Step 1: Create config.json with all client settings**
+
+```json
+{
+  "client": "RO",
+  "greeting": "Привет! Мы готовим для тебя особенный подарок",
+  "subtext": "Собери свой уникальный подвес — выбери буквы, цвета, и мы сделаем его специально для тебя",
+  "maxLetters": 8,
+  "alphabets": ["ru", "en"],
+  "letterColors": [
+    { "name": "Оранжевый", "hex": "#FC4400" },
+    { "name": "Оливковый", "hex": "#6C6D47" },
+    { "name": "Жёлтый", "hex": "#FFD239" }
+  ],
+  "cordColors": [
+    { "name": "Чёрный", "hex": "#1A1A1A" },
+    { "name": "Голубой", "hex": "#5BA4E6" },
+    { "name": "Оранжевый", "hex": "#FC4400" }
+  ],
+  "carabinerColors": [
+    { "name": "Зелёный", "hex": "#2E8B57" },
+    { "name": "Синий", "hex": "#2255CC" },
+    { "name": "Красный", "hex": "#CC2222" }
+  ],
+  "charmColor": "#FC4400",
+  "googleScriptUrl": "",
+  "delivery": {
+    "buildings": ["Башня А", "Башня Б", "Башня В"],
+    "floors": ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20"],
+    "departments": ["Маркетинг", "Финансы", "IT", "HR", "Продажи", "Юридический", "Операции", "Логистика"]
+  }
+}
+```
+
+- [ ] **Step 2: Create RO logo SVG placeholder**
+
+Create `corporate-gift/assets/ro-logo.svg` — simplified RO logo mark (the "R.O." lettering in brand orange). This will be embedded inside the heart charm.
+
+```svg
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 50" fill="white">
+  <text x="50" y="38" font-family="Arial Black, sans-serif" font-size="36" font-weight="900" text-anchor="middle">R.O.</text>
+</svg>
+```
+
+---
+
+### Task 2: Create index.html with all sections
+
+**Files:**
+- Create: `corporate-gift/index.html`
+
+- [ ] **Step 1: Write the full HTML structure**
+
+The page is a single scroll with 8 logical sections:
+
+```html
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Собери свой подвес</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Section 1: Greeting -->
+  <header class="greeting">
+    <div class="greeting__logo" id="clientLogo"></div>
+    <h1 class="greeting__title" id="greetingTitle"></h1>
+    <p class="greeting__subtitle" id="greetingSubtext"></p>
+  </header>
+
+  <main class="constructor">
+    <!-- Pendant Preview (sticky) -->
+    <section class="preview" id="pendantPreview">
+      <div class="preview__container" id="svgContainer"></div>
+    </section>
+
+    <!-- Section 2+3: Word input + letter colors -->
+    <section class="step" id="stepWord">
+      <h2 class="step__title">Введи своё слово</h2>
+      <div class="word-input">
+        <input type="text" id="wordInput" maxlength="8" placeholder="Например: ПОЛИНА" autocomplete="off">
+        <div class="word-input__counter"><span id="letterCount">0</span> из 8 букв</div>
+      </div>
+      <div class="letter-colors" id="letterColors">
+        <!-- Generated by JS: per-letter color pickers -->
+      </div>
+    </section>
+
+    <!-- Section 4: Cord color -->
+    <section class="step" id="stepCord">
+      <h2 class="step__title">Выбери цвет шнура</h2>
+      <div class="swatches" id="cordSwatches"></div>
+    </section>
+
+    <!-- Section 5: Carabiner color -->
+    <section class="step" id="stepCarabiner">
+      <h2 class="step__title">Выбери цвет карабина</h2>
+      <div class="swatches" id="carabinerSwatches"></div>
+    </section>
+
+    <!-- Section 6: Final preview text -->
+    <section class="step" id="stepResult">
+      <h2 class="step__title">Вот твой подвес!</h2>
+      <p class="step__subtitle">Проверь — всё как ты хочешь?</p>
+    </section>
+
+    <!-- Section 7: Delivery info -->
+    <section class="step" id="stepDelivery">
+      <h2 class="step__title">Данные для получения</h2>
+      <form id="orderForm" novalidate>
+        <div class="form-group">
+          <label for="fullName">Фамилия Имя Отчество</label>
+          <input type="text" id="fullName" required placeholder="Иванова Полина Сергеевна">
+        </div>
+        <div class="form-group">
+          <label for="phone">Телефон</label>
+          <input type="tel" id="phone" required placeholder="+7 (999) 123-45-67">
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="building">Башня</label>
+            <select id="building" required></select>
+          </div>
+          <div class="form-group">
+            <label for="floor">Этаж</label>
+            <select id="floor" required></select>
+          </div>
+          <div class="form-group">
+            <label for="department">Отдел</label>
+            <select id="department" required></select>
+          </div>
+        </div>
+
+        <!-- Section 8: Submit -->
+        <button type="submit" class="submit-btn" id="submitBtn">Отправить заказ</button>
+      </form>
+    </section>
+
+    <!-- Thank you screen (hidden by default) -->
+    <section class="thank-you hidden" id="thankYou">
+      <div class="thank-you__icon">✨</div>
+      <h2>Спасибо!</h2>
+      <p>Твой подвес уже в работе. В преддверии праздника он будет ждать тебя!</p>
+    </section>
+  </main>
+
+  <script src="pendant-svg.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
+```
+
+---
+
+### Task 3: Create style.css
+
+**Files:**
+- Create: `corporate-gift/style.css`
+
+- [ ] **Step 1: Write all CSS styles**
+
+Key design decisions:
+- CSS custom properties loaded from config via JS (`:root` style injection)
+- Mobile-first, max-width 600px container
+- Sticky pendant preview at top while scrolling through options
+- RO brand feel: bold, warm, clean
+- Swatches as circles with border on selected state
+- Per-letter color dots below each letter in the preview
+- Smooth transitions on all interactive elements
+
+The CSS should cover:
+- Reset/base (box-sizing, font stack)
+- `.greeting` — centered, padded top section
+- `.preview` — sticky container for SVG, with subtle shadow
+- `.step` — section spacing, title styling
+- `.word-input` — large input field, counter badge
+- `.letter-colors` — flex row of letter groups, each with color dots below
+- `.swatches` — flex row of color circles
+- `.swatch` — circle, border on `.swatch--active`
+- `.form-group`, `.form-row` — standard form layout
+- `.submit-btn` — big orange button, hover/disabled states
+- `.thank-you` — centered celebration screen
+- `.hidden` — display:none utility
+- Responsive: works on phone screens (320px+)
+
+---
+
+## Chunk 2: SVG Pendant Visualizer
+
+### Task 4: Create pendant-svg.js
+
+**Files:**
+- Create: `corporate-gift/pendant-svg.js`
+
+- [ ] **Step 1: Write the SVG generator function**
+
+`pendant-svg.js` exports a single function `renderPendant(state)` that returns an SVG string.
+
+**Input state:**
+```js
+{
+  letters: [
+    { char: 'П', color: '#FC4400' },
+    { char: 'О', color: '#6C6D47' },
+    ...
+  ],
+  cordColor: '#1A1A1A',
+  carabinerColor: '#2E8B57',
+  charmColor: '#FC4400',
+  charmLogo: 'assets/ro-logo.svg' // or inline SVG
+}
+```
+
+**SVG structure (left to right):**
+1. **Carabiner** — oval ring (ellipse with thick stroke, no fill) at left edge. Color = `carabinerColor`. Approximately 30x40 units.
+
+2. **Cord** — double line (two parallel paths, 2px apart) from carabiner, running horizontally with a gentle catenary sag between each hanging letter. Color = `cordColor`. The cord passes through the top of each letter's "loop".
+
+3. **Letters** — each letter rendered as:
+   - A small loop/ring at top (connecting to cord)
+   - The character below in the RO font, filled with its color
+   - Letters hang at slightly varying heights (±3px random but deterministic based on char code) for natural look
+   - Spacing: ~50 units per letter
+
+4. **Heart charm** — at the end, always present:
+   - Heart shape path filled with `charmColor`
+   - Small loop at top connecting to cord
+   - RO logo centered inside heart (white, scaled down)
+
+**Empty state:** When no letters, show a gray dashed outline with text "Введи своё слово" centered.
+
+**Viewbox:** Dynamic width based on letter count. Height fixed ~120 units. The SVG scales responsively via CSS (width:100%, height:auto).
+
+- [ ] **Step 2: Implement the carabiner drawing**
+
+```js
+function drawCarabiner(color) {
+  return `
+    <g transform="translate(20, 30)">
+      <ellipse cx="0" cy="0" rx="12" ry="18"
+        fill="none" stroke="${color}" stroke-width="5"
+        stroke-linecap="round"/>
+      <!-- Opening gap at top-right -->
+      <line x1="8" y1="-14" x2="12" y2="-8"
+        stroke="${color}" stroke-width="3" stroke-linecap="round"/>
+    </g>`;
+}
+```
+
+- [ ] **Step 3: Implement the cord drawing**
+
+The cord is two parallel bezier curves that sag between attachment points (each letter's loop position). Uses quadratic beziers with control points offset downward for sag.
+
+- [ ] **Step 4: Implement letter rendering**
+
+Each letter at position `i`:
+- Small ring at top (circle, r=4, stroke=cordColor)
+- Short vertical line from ring down to letter
+- `<text>` element with the character, font-family from config, fill=letterColor
+- Vertical offset: `3 * Math.sin(charCode * 1.7)` for natural wobble
+
+- [ ] **Step 5: Implement heart charm**
+
+Heart as an SVG path. RO logo embedded via `<image>` or inline `<text>`. Loop at top same as letters.
+
+- [ ] **Step 6: Assemble renderPendant function**
+
+Combines all parts, calculates dynamic viewBox width, returns complete SVG string.
+
+---
+
+## Chunk 3: App Logic & Interactivity
+
+### Task 5: Create app.js — State & Config Loading
+
+**Files:**
+- Create: `corporate-gift/app.js`
+
+- [ ] **Step 1: Write config loader and state initialization**
+
+```js
+// App state
+const state = {
+  letters: [],          // [{char, color}]
+  cordColor: '',        // hex
+  carabinerColor: '',   // hex
+  config: null          // loaded config.json
+};
+
+async function loadConfig() {
+  const res = await fetch('config.json');
+  state.config = await res.json();
+  initPage();
+}
+
+function initPage() {
+  // Set greeting text
+  document.getElementById('greetingTitle').textContent = state.config.greeting;
+  document.getElementById('greetingSubtext').textContent = state.config.subtext;
+
+  // Set defaults
+  state.cordColor = state.config.cordColors[0].hex;
+  state.carabinerColor = state.config.carabinerColors[0].hex;
+
+  // Render swatches
+  renderSwatches('cordSwatches', state.config.cordColors, state.cordColor, selectCord);
+  renderSwatches('carabinerSwatches', state.config.carabinerColors, state.carabinerColor, selectCarabiner);
+
+  // Populate delivery dropdowns
+  populateSelect('building', state.config.delivery.buildings);
+  populateSelect('floor', state.config.delivery.floors);
+  populateSelect('department', state.config.delivery.departments);
+
+  // Initial render
+  updatePreview();
+}
+
+document.addEventListener('DOMContentLoaded', loadConfig);
+```
+
+- [ ] **Step 2: Write word input handler**
+
+```js
+document.getElementById('wordInput').addEventListener('input', (e) => {
+  const raw = e.target.value.toUpperCase();
+  // Filter: only Cyrillic + Latin letters
+  const filtered = raw.replace(/[^А-ЯЁA-Z]/g, '');
+  e.target.value = filtered;
+
+  // Update state.letters — preserve existing colors where possible
+  const defaultColor = state.config.letterColors[0].hex;
+  state.letters = [...filtered].map((char, i) => ({
+    char,
+    color: state.letters[i]?.char === char ? state.letters[i].color : (state.letters[i]?.color || defaultColor)
+  }));
+
+  document.getElementById('letterCount').textContent = state.letters.length;
+  renderLetterColorPickers();
+  updatePreview();
+});
+```
+
+- [ ] **Step 3: Write letter color picker renderer**
+
+```js
+function renderLetterColorPickers() {
+  const container = document.getElementById('letterColors');
+  container.innerHTML = state.letters.map((letter, i) => `
+    <div class="letter-color-group">
+      <span class="letter-color-group__char" style="color:${letter.color}">${letter.char}</span>
+      <div class="letter-color-group__dots">
+        ${state.config.letterColors.map(c => `
+          <button class="color-dot ${c.hex === letter.color ? 'color-dot--active' : ''}"
+            style="background:${c.hex}"
+            data-letter-index="${i}"
+            data-color="${c.hex}"
+            aria-label="${c.name}"></button>
+        `).join('')}
+      </div>
+    </div>
+  `).join('');
+
+  // Delegated click handler
+  container.onclick = (e) => {
+    const dot = e.target.closest('.color-dot');
+    if (!dot) return;
+    const idx = parseInt(dot.dataset.letterIndex);
+    state.letters[idx].color = dot.dataset.color;
+    renderLetterColorPickers();
+    updatePreview();
+  };
+}
+```
+
+- [ ] **Step 4: Write swatch renderer and selection handlers**
+
+```js
+function renderSwatches(containerId, colors, activeHex, onSelect) {
+  const container = document.getElementById(containerId);
+  container.innerHTML = colors.map(c => `
+    <button class="swatch ${c.hex === activeHex ? 'swatch--active' : ''}"
+      style="background:${c.hex}"
+      data-hex="${c.hex}"
+      aria-label="${c.name}">
+    </button>
+  `).join('');
+
+  container.onclick = (e) => {
+    const swatch = e.target.closest('.swatch');
+    if (!swatch) return;
+    onSelect(swatch.dataset.hex);
+  };
+}
+
+function selectCord(hex) {
+  state.cordColor = hex;
+  renderSwatches('cordSwatches', state.config.cordColors, hex, selectCord);
+  updatePreview();
+}
+
+function selectCarabiner(hex) {
+  state.carabinerColor = hex;
+  renderSwatches('carabinerSwatches', state.config.carabinerColors, hex, selectCarabiner);
+  updatePreview();
+}
+```
+
+- [ ] **Step 5: Write preview updater**
+
+```js
+function updatePreview() {
+  const svg = renderPendant({
+    letters: state.letters,
+    cordColor: state.cordColor,
+    carabinerColor: state.carabinerColor,
+    charmColor: state.config.charmColor,
+  });
+  document.getElementById('svgContainer').innerHTML = svg;
+}
+```
+
+---
+
+### Task 6: Form Submission & Google Sheets
+
+**Files:**
+- Modify: `corporate-gift/app.js` (append)
+
+- [ ] **Step 1: Write form validation and submission**
+
+```js
+document.getElementById('orderForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+
+  const form = e.target;
+  const fullName = document.getElementById('fullName').value.trim();
+  const phone = document.getElementById('phone').value.trim();
+  const building = document.getElementById('building').value;
+  const floor = document.getElementById('floor').value;
+  const department = document.getElementById('department').value;
+
+  // Validation
+  if (!state.letters.length) {
+    alert('Введи хотя бы одну букву для подвеса');
+    return;
+  }
+  if (!fullName || !phone || !building || !floor || !department) {
+    alert('Пожалуйста, заполни все поля');
+    return;
+  }
+
+  const btn = document.getElementById('submitBtn');
+  btn.disabled = true;
+  btn.textContent = 'Отправляем...';
+
+  const payload = {
+    date: new Date().toISOString(),
+    word: state.letters.map(l => l.char).join(''),
+    lettersDetail: state.letters.map(l => `${l.char}:${l.color}`).join(', '),
+    cordColor: state.cordColor,
+    carabinerColor: state.carabinerColor,
+    letterCount: state.letters.length,
+    fullName,
+    phone,
+    building,
+    floor,
+    department
+  };
+
+  try {
+    if (state.config.googleScriptUrl) {
+      await fetch(state.config.googleScriptUrl, {
+        method: 'POST',
+        mode: 'no-cors',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+    }
+    // Optimistic UI — show success
+    document.querySelector('.constructor').classList.add('hidden');
+    document.getElementById('thankYou').classList.remove('hidden');
+  } catch (err) {
+    btn.disabled = false;
+    btn.textContent = 'Попробовать ещё раз';
+  }
+});
+```
+
+- [ ] **Step 2: Write helper for populating selects**
+
+```js
+function populateSelect(id, options) {
+  const select = document.getElementById(id);
+  select.innerHTML = '<option value="">Выбери...</option>' +
+    options.map(o => `<option value="${o}">${o}</option>`).join('');
+}
+```
+
+---
+
+## Chunk 4: Google Apps Script
+
+### Task 7: Create Google Apps Script for receiving orders
+
+**Files:**
+- Create: `corporate-gift/google-apps-script.js` (reference file — to be pasted into Google Apps Script editor)
+
+- [ ] **Step 1: Write the Apps Script**
+
+```js
+// Paste this into Google Apps Script editor (script.google.com)
+// Then Deploy → Web App → Anyone can access
+
+function doPost(e) {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  var data = JSON.parse(e.postData.contents);
+
+  // Add header row if sheet is empty
+  if (sheet.getLastRow() === 0) {
+    sheet.appendRow([
+      'Дата', 'Слово', 'Буквы и цвета', 'Цвет шнура',
+      'Цвет карабина', 'Кол-во букв', 'ФИО', 'Телефон',
+      'Башня', 'Этаж', 'Отдел'
+    ]);
+  }
+
+  sheet.appendRow([
+    data.date,
+    data.word,
+    data.lettersDetail,
+    data.cordColor,
+    data.carabinerColor,
+    data.letterCount,
+    data.fullName,
+    data.phone,
+    data.building,
+    data.floor,
+    data.department
+  ]);
+
+  return ContentService
+    .createTextOutput(JSON.stringify({ status: 'ok' }))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+function doGet() {
+  return ContentService
+    .createTextOutput('Corporate Gift Order API is running')
+    .setMimeType(ContentService.MimeType.TEXT);
+}
+```
+
+---
+
+## Chunk 5: Polish & Test
+
+### Task 8: End-to-end testing and polish
+
+- [ ] **Step 1: Start local server and test the page**
+
+```bash
+cd corporate-gift && python3 -m http.server 8080
+```
+
+Open `http://localhost:8080` and verify:
+- Greeting text loads from config
+- Word input filters to letters only, max 8
+- Letter color pickers appear per letter
+- Cord/carabiner swatches work
+- SVG pendant updates in real-time
+- Form validation works
+- Submit shows thank-you screen
+
+- [ ] **Step 2: Test responsive layout on mobile widths**
+
+Verify the page works at 320px, 375px, 414px widths.
+
+- [ ] **Step 3: Final visual polish**
+
+Adjust spacing, transitions, shadows as needed for a polished demo feel.
+
+- [ ] **Step 4: Commit all files**
+
+```bash
+git add corporate-gift/
+git commit -m "feat: add corporate gift pendant constructor page"
+```
