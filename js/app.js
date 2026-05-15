@@ -96,7 +96,7 @@ const App = {
 
     // All pages in the app
     ALL_PAGES: [
-        'calculator', 'orders', 'factual',
+        'calculator', 'orders', 'factual', 'leads',
         'analytics', 'molds', 'colors', 'timetrack', 'tasks', 'bugs', 'projects', 'wiki', 'gantt', 'tpa',
         'import', 'warehouse', 'marketplaces', 'china', 'monitoring', 'settings',
     ],
@@ -118,6 +118,7 @@ const App = {
         if (page === 'tpa') page = 'calculator';
         if (page === 'bugs') return true;
         if (page === 'wiki') return true;
+        if (page === 'leads') return true;
         if (page === 'monitoring') return true;
         // order-detail is part of orders
         if (page === 'order-detail') page = 'orders';
@@ -1110,6 +1111,10 @@ const App = {
             case 'marketplaces': Marketplaces.load(); break;
             case 'china': ChinaPurchases.load(); break;
             case 'monitoring': Monitoring.load(); break;
+            case 'leads':
+                // Placeholder page: static HTML inside index.html.
+                // AmoCRM integration will replace this with real lead-listing logic.
+                break;
             case 'settings': Settings.load(); break;
         }
     },
