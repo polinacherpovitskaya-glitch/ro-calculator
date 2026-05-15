@@ -514,8 +514,8 @@ const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 await page.addInitScript(() => {
   const smokePages = [
     'calculator', 'orders', 'factual',
-    'analytics', 'molds', 'colors', 'timetrack', 'tasks', 'bugs', 'projects', 'wiki', 'gantt', 'tpa',
-    'import', 'warehouse', 'marketplaces', 'china', 'monitoring', 'settings',
+    'analytics', 'molds', 'colors', 'timetrack', 'tasks', 'bugs', 'projects', 'gantt',
+    'import', 'warehouse', 'marketplaces', 'china', 'settings',
   ];
   localStorage.setItem('ro_calc_auth_accounts', JSON.stringify([{
     id: '1772715209137',

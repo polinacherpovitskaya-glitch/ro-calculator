@@ -372,7 +372,6 @@ const LOCAL_KEYS = {
     readyGoods: 'ro_calc_ready_goods_stock',
     readyGoodsHistory: 'ro_calc_ready_goods_history',
     salesRecords: 'ro_calc_sales_records',
-    wikiState: 'ro_calc_wiki_state',
     indirectCosts: 'ro_calc_indirect_costs',
     workAreas: 'ro_calc_work_areas',
     workProjects: 'ro_calc_work_projects',
@@ -5569,48 +5568,6 @@ async function saveFactualSnapshots(state) {
         } catch (e) {
             console.error('saveFactualSnapshots error:', e);
         }
-    }
-    return payload;
-}
-
-// =============================================
-// KNOWLEDGE BASE / INTERNAL WIKI
-// =============================================
-
-async function loadWikiState() {
-    const fallback = getLocal(LOCAL_KEYS.wikiState) || null;
-    if (isSupabaseReady()) {
-        try {
-            const { data, error } = await supabaseClient
-                .from('settings')
-                .select('value')
-                .eq('key', 'knowledge_wiki_json')
-                .maybeSingle();
-            if (!error && data && data.value) {
-                const parsed = JSON.parse(data.value) || null;
-                if (parsed) setLocal(LOCAL_KEYS.wikiState, parsed);
-                return parsed;
-            }
-        } catch (e) {
-            console.error('loadWikiState error:', e);
-        }
-    }
-    return fallback;
-}
-
-async function saveWikiState(state) {
-    const payload = state && typeof state === 'object' ? state : null;
-    if (!payload) return null;
-    setLocal(LOCAL_KEYS.wikiState, payload);
-    if (isSupabaseReady()) {
-        const { error } = await supabaseClient
-            .from('settings')
-            .upsert({
-                key: 'knowledge_wiki_json',
-                value: JSON.stringify(payload),
-                updated_at: new Date().toISOString(),
-            }, { onConflict: 'key' });
-        if (error) console.error('saveWikiState error:', error);
     }
     return payload;
 }

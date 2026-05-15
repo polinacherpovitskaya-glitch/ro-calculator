@@ -97,12 +97,12 @@ const App = {
     // All pages in the app
     ALL_PAGES: [
         'calculator', 'orders', 'factual', 'leads',
-        'analytics', 'molds', 'colors', 'timetrack', 'tasks', 'bugs', 'projects', 'wiki', 'gantt', 'tpa',
+        'analytics', 'molds', 'colors', 'timetrack', 'tasks', 'bugs', 'projects', 'gantt', 'tpa',
         'import', 'warehouse', 'marketplaces', 'china', 'monitoring', 'settings',
     ],
 
     // Pages visible to everyone by default (if no custom config)
-    DEFAULT_PAGES: ['orders', 'timetrack', 'tasks', 'bugs', 'projects', 'wiki'],
+    DEFAULT_PAGES: ['orders', 'timetrack', 'tasks', 'bugs', 'projects'],
 
     normalizePageAlias(page) {
         if (page === 'dashboard') return 'orders';
@@ -118,7 +118,7 @@ const App = {
             case 'monitoring':
                 return { page: 'settings', hash: 'settings', settingsTab: 'monitoring' };
             case 'wiki':
-                return { page: 'tasks', hash: 'tasks' };
+                return { page: 'calculator', hash: 'calculator' };
             default:
                 return null;
         }
@@ -150,7 +150,6 @@ const App = {
         page = this.normalizePageAlias(page);
         if (page === 'tpa') page = 'calculator';
         if (page === 'bugs') return true;
-        if (page === 'wiki') return true;
         if (page === 'leads') return true;
         if (page === 'monitoring') return true;
         // order-detail is part of orders
@@ -1156,7 +1155,6 @@ const App = {
             case 'tasks': Tasks.load(subId ? parseInt(subId, 10) : null); break;
             case 'bugs': BugReports.load(); break;
             case 'projects': Projects.load(subId ? parseInt(subId, 10) : null); break;
-            case 'wiki': Wiki.load(); break;
             case 'import':
                 if (typeof Finance !== 'undefined' && Finance && typeof Finance.load === 'function') Finance.load();
                 else FinTablo.load();
