@@ -2449,7 +2449,13 @@ const Warehouse = {
         const item = items[idx];
         const requestedQtyChange = this._parseWarehouseQty(qtyChange);
         const qtyBefore = this._parseWarehouseQty(item.qty);
-        const qtyAfter = Math.max(0, qtyBefore + requestedQtyChange);
+        const extraMeta = meta && typeof meta === 'object' ? { ...meta } : {};
+        const allowNegativeStock = !!(extraMeta && extraMeta.allow_negative_stock);
+        if (extraMeta && Object.prototype.hasOwnProperty.call(extraMeta, 'allow_negative_stock')) {
+            delete extraMeta.allow_negative_stock;
+        }
+        const rawQtyAfter = qtyBefore + requestedQtyChange;
+        const qtyAfter = allowNegativeStock ? round2(rawQtyAfter) : Math.max(0, rawQtyAfter);
         const appliedQtyChange = qtyAfter - qtyBefore;
         const clamped = Math.abs(appliedQtyChange - requestedQtyChange) > 1e-9;
         item.qty = qtyAfter;
@@ -2467,7 +2473,6 @@ const Warehouse = {
 
         // Record in history
         const history = await loadWarehouseHistory();
-        const extraMeta = meta && typeof meta === 'object' ? { ...meta } : {};
         const historyOrderId = extraMeta && extraMeta.order_id ? extraMeta.order_id : null;
         if (extraMeta && Object.prototype.hasOwnProperty.call(extraMeta, 'order_id')) {
             delete extraMeta.order_id;
@@ -3802,6 +3807,58 @@ const Warehouse = {
             .reduce((sum, r) => sum + (parseFloat(r.qty) || 0), 0));
     },
 
+    _setProjectHardwareReservationQtyForRow(reservations, orderId, itemId, targetQty, orderName, managerName, nowIso) {
+        const normalizedOrderId = Number(orderId || 0);
+        const normalizedItemId = Number(itemId || 0);
+        const normalizedTarget = round2(Math.max(0, parseFloat(targetQty) || 0));
+        if (!normalizedOrderId || !normalizedItemId || !Array.isArray(reservations)) return false;
+
+        const rows = reservations.filter(r =>
+            String(r && r.status || '') === 'active'
+            && Number(r && r.order_id || 0) === normalizedOrderId
+            && Number(r && r.item_id || 0) === normalizedItemId
+            && this._isProjectHardwareReservationSource(r && r.source)
+        );
+
+        const currentQty = round2(rows.reduce((sum, r) => sum + (parseFloat(r.qty) || 0), 0));
+        if (Math.abs(currentQty - normalizedTarget) <= 0.000001) return false;
+
+        if (normalizedTarget <= 0) {
+            rows.forEach(r => {
+                r.status = 'released';
+                r.released_at = nowIso;
+            });
+            return rows.length > 0;
+        }
+
+        if (rows.length > 0) {
+            rows.forEach((r, index) => {
+                if (index === 0) {
+                    r.qty = normalizedTarget;
+                    r.updated_at = nowIso;
+                    r.updated_by = managerName || '';
+                    return;
+                }
+                r.status = 'released';
+                r.released_at = nowIso;
+            });
+            return true;
+        }
+
+        reservations.push({
+            id: Date.now() + Math.floor(Math.random() * 1000),
+            item_id: normalizedItemId,
+            order_id: normalizedOrderId,
+            order_name: orderName || 'Заказ',
+            qty: normalizedTarget,
+            status: 'active',
+            source: 'project_hardware',
+            created_at: nowIso,
+            created_by: managerName || '',
+        });
+        return true;
+    },
+
     _getProjectHardwareBlockingReservations(reservations, currentOrderId, itemId) {
         const grouped = new Map();
         (reservations || []).forEach(r => {
@@ -3851,7 +3908,7 @@ const Warehouse = {
             : 'Фурнитура';
     },
 
-    async _syncProjectHardwareConsumedQty({ orderId, itemId, targetQty, orderName, managerName, historyDeltaMap, flow = 'ready_delta' }) {
+    async _syncProjectHardwareConsumedQty({ orderId, itemId, targetQty, orderName, managerName, historyDeltaMap, flow = 'ready_delta', reservations = null }) {
         const normalizedTarget = round2(Math.max(0, parseFloat(targetQty) || 0));
         const consumedQty = this._getProjectHardwareConsumedQty(orderId, itemId, historyDeltaMap);
         const delta = round2(normalizedTarget - consumedQty);
@@ -3860,10 +3917,15 @@ const Warehouse = {
         }
 
         if (delta > 0) {
-            const items = await loadWarehouseItems();
+            const [items, reservationRows] = await Promise.all([
+                loadWarehouseItems(),
+                Array.isArray(reservations) ? Promise.resolve(reservations) : loadWarehouseReservations().catch(() => []),
+            ]);
             const whItem = (items || []).find(i => Number(i.id) === Number(itemId)) || null;
             const stockQty = parseFloat(whItem && whItem.qty) || 0;
-            if (stockQty + 0.000001 < delta) {
+            const ownReservedQty = this._getProjectHardwareReservedQtyForOrderItem(reservationRows || [], orderId, itemId);
+            const canUseOwnReservation = ownReservedQty > 0 && stockQty + ownReservedQty + 0.000001 >= delta;
+            if (stockQty + 0.000001 < delta && !canUseOwnReservation) {
                 return { ok: false, reason: 'insufficient_stock', targetQty: normalizedTarget };
             }
 
@@ -3881,6 +3943,7 @@ const Warehouse = {
                     order_id: Number(orderId || 0),
                     project_hardware_flow: flow,
                     project_hardware_target_qty: normalizedTarget,
+                    allow_negative_stock: canUseOwnReservation,
                 }
             );
             const appliedQty = Math.max(0, -(parseFloat(result && result.appliedQtyChange) || 0));
@@ -3963,6 +4026,7 @@ const Warehouse = {
                 managerName,
                 historyDeltaMap,
                 flow: 'ready_toggle',
+                reservations,
             });
             if (!syncResult.ok) {
                 App.toast('Не удалось отметить как собрано: недостаточно остатка');
@@ -4107,16 +4171,16 @@ const Warehouse = {
                 nowIso
             ) || reservationsChanged;
         } else if (this._isProjectHardwareReserveStatus(order.status) && plannedQty > 0) {
-            const syncResult = await this.syncProjectHardwareOrderState({
-                orderId: normalizedOrderId,
-                orderName: order.order_name || 'Заказ',
+            const targetReserveQty = nextActual !== null ? nextActual : round2(Math.max(0, plannedQty));
+            reservationsChanged = this._setProjectHardwareReservationQtyForRow(
+                reservations,
+                normalizedOrderId,
+                normalizedItemId,
+                targetReserveQty,
+                order.order_name || 'Заказ',
                 managerName,
-                status: order.status || '',
-                currentItems: data.items || [],
-                previousItems: data.items || [],
-            });
-            reservations = await loadWarehouseReservations();
-            reservationsChanged = reservationsChanged || !!syncResult.reservationsChanged;
+                nowIso
+            ) || reservationsChanged;
         }
 
         if (stateChanged) {
@@ -5509,13 +5573,13 @@ const Warehouse = {
                                                 class="btn btn-sm btn-outline"
                                                 title="Сохранить фактическое количество"
                                                 onclick="Warehouse.setProjectHardwareActualQty(${r.order_id}, ${r.item_id}, (document.getElementById('wh-ph-actual-${r.order_id}-${r.item_id}') || {}).value)"
-                                            >OK</button>
+                                            >сохранить</button>
                                             <button
                                                 type="button"
                                                 class="btn btn-sm btn-outline"
                                                 title="Вернуть плановое количество"
                                                 onclick="Warehouse.setProjectHardwareActualQty(${r.order_id}, ${r.item_id}, '')"
-                                            >план</button>
+                                            >по плану</button>
                                         </div>
                                         <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">план ${r.qty}</div>
                                     </td>

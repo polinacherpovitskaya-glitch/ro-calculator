@@ -5804,6 +5804,68 @@ async function smokeProjectHardwareActualQtyEditableFlow(context) {
     assert.equal(context.__warehouseHistory[3].qty_change, 5);
     const restoredReservation = context.__reservations.find(item => Number(item.order_id) === 321 && item.status === 'active');
     assert.equal(restoredReservation.qty, 5);
+
+    const reservedButEmptyDetail = {
+        order: {
+            id: 324,
+            order_name: 'Reserved Empty Stock Order',
+            manager_name: 'Smoke',
+            status: 'production_hardware',
+            created_at: '2026-03-18T12:30:00.000Z',
+        },
+        items: [{
+            item_type: 'hardware',
+            product_name: 'Reserved Empty Stock Hardware',
+            quantity: 10,
+            hardware_source: 'warehouse',
+            hardware_warehouse_item_id: 903,
+        }],
+    };
+
+    context.__projectHardwareState = { checks: {}, actual_qtys: {} };
+    context.__reservations = [{
+        id: 11,
+        item_id: 903,
+        order_id: 324,
+        order_name: 'Reserved Empty Stock Order',
+        qty: 10,
+        status: 'active',
+        source: 'project_hardware',
+        created_at: '2026-03-18T12:30:00.000Z',
+    }];
+    context.__warehouseItems = [{
+        id: 903,
+        name: 'Reserved Empty Stock Hardware',
+        sku: 'RESH-1',
+        category: 'hardware',
+        qty: 0,
+        unit: 'шт',
+        price_per_unit: 10,
+    }];
+    context.__warehouseHistory = [];
+    context.__orderDetails = { 324: clone(reservedButEmptyDetail) };
+    vm.runInContext(`
+        globalThis.__toasts = [];
+        Warehouse.projectHardwareState = null;
+        Warehouse.load = async () => {};
+    `, context);
+
+    await vm.runInContext(`Warehouse.setProjectHardwareActualQty(324, 903, '10')`, context);
+
+    assert.equal(context.__projectHardwareState.actual_qtys['324:903'], 10);
+    assert.equal(context.__reservations.find(item => Number(item.order_id) === 324 && item.status === 'active').qty, 10);
+    assert.equal(context.__warehouseItems[0].qty, 0);
+
+    await vm.runInContext(`Warehouse.toggleProjectHardwareReady(324, 903, true)`, context);
+
+    assert.equal(Boolean(context.__projectHardwareState.checks['324:903']), true);
+    assert.equal(context.__warehouseItems[0].qty, -10);
+    assert.equal(context.__warehouseHistory.length, 1);
+    assert.equal(context.__warehouseHistory[0].qty_change, -10);
+    assert.equal(context.__warehouseHistory[0].requested_qty_change, -10);
+    assert.equal(context.__warehouseHistory[0].project_hardware_flow, 'ready_toggle');
+    assert.equal(context.__warehouseHistory[0].clamped, false);
+    assert.equal(context.__reservations[0].status, 'released');
 }
 
 async function smokeProjectHardwareZeroActualCanStayReady(context) {
