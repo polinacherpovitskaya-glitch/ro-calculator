@@ -4,6 +4,7 @@ const Monitoring = {
     refreshMs: 120000,
     cacheTtlMs: 120000,
     cacheKey: 'ro_monitoring_cache_v1',
+    root: null,
     _refreshTimer: null,
     state: {
         loading: false,
@@ -33,6 +34,16 @@ const Monitoring = {
     ],
 
     load() {
+        this.mount(document.getElementById('page-monitoring'));
+    },
+
+    mount(container) {
+        if (!container) return;
+        const previousRoot = this.root;
+        if (previousRoot && previousRoot !== container) {
+            previousRoot.innerHTML = '';
+        }
+        this.root = container;
         this.ensureAutoRefresh();
         this.render();
         this.refresh({ force: false }).catch((error) => {
@@ -40,12 +51,18 @@ const Monitoring = {
         });
     },
 
+    isActive() {
+        const currentPage = typeof App !== 'undefined' ? App.currentPage : '';
+        const currentSettingsTab = typeof Settings !== 'undefined' ? Settings.currentTab : '';
+        return currentPage === 'monitoring' || (currentPage === 'settings' && currentSettingsTab === 'monitoring');
+    },
+
     ensureAutoRefresh() {
         if (this._refreshTimer) {
             clearInterval(this._refreshTimer);
         }
         this._refreshTimer = setInterval(() => {
-            if (typeof App !== 'undefined' && App.currentPage !== 'monitoring') {
+            if (!this.isActive()) {
                 return;
             }
             this.refresh({ force: true, silent: true }).catch((error) => {
@@ -365,7 +382,7 @@ const Monitoring = {
     },
 
     render() {
-        const page = document.getElementById('page-monitoring');
+        const page = this.root || document.getElementById('page-monitoring');
         if (!page) return;
 
         const summaryCard = this.renderSummaryCard();

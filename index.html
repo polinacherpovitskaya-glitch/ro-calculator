@@ -4,10 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Recycle Object — Калькулятор заказов</title>
-  <link rel="stylesheet" href="css/style.css?v=125">
+  <link rel="stylesheet" href="css/style.css?v=126">
     <script>
         (function () {
-            const CURRENT_HTML_VERSION = 'v367';
+            const CURRENT_HTML_VERSION = 'v368';
             const ATTEMPT_KEY = 'ro_calc_force_update_attempts';
 
             function parseVersion(version) {
@@ -187,33 +187,46 @@
     <aside class="sidebar">
         <div class="sidebar-brand">
             <h2>Recycle Object</h2>
-            <span>Калькулятор <span id="app-version">v367</span></span>
+            <span>Калькулятор <span id="app-version">v368</span></span>
         </div>
         <nav class="sidebar-nav">
+            <div class="sidebar-group-label">Каждый день</div>
             <a href="#tasks" data-page="tasks">
                 <span class="nav-icon">&#9745;</span>
                 <span>Задачи</span>
+            </a>
+            <a href="#leads" data-page="leads">
+                <span class="nav-icon">&#128229;</span>
+                <span>Лиды</span>
             </a>
             <a href="#calculator" data-page="calculator">
                 <span class="nav-icon">&#9998;</span>
                 <span>Калькулятор</span>
             </a>
-            <a href="#tpa" data-page="tpa">
-                <span class="nav-icon">&#9883;</span>
-                <span>ТПА XPM-17</span>
-            </a>
             <a href="#orders" data-page="orders">
                 <span class="nav-icon">&#9776;</span>
                 <span>Заказы</span>
             </a>
+
+            <div class="sidebar-group-label">Производство</div>
             <a href="#gantt" data-page="gantt">
                 <span class="nav-icon">&#128197;</span>
                 <span>Производственный календарь</span>
             </a>
-            <a href="#factual" data-page="factual">
-                <span class="nav-icon">&#9646;</span>
-                <span>Аналитика</span>
+            <a href="#warehouse" data-page="warehouse">
+                <span class="nav-icon">&#128230;</span>
+                <span>Склад</span>
             </a>
+            <a href="#china" data-page="china">
+                <span class="nav-icon">&#127464;&#127475;</span>
+                <span>Китай</span>
+            </a>
+            <a href="#timetrack" data-page="timetrack">
+                <span class="nav-icon">&#9201;</span>
+                <span>Часы</span>
+            </a>
+
+            <div class="sidebar-group-label">Справочники</div>
             <a href="#molds" data-page="molds">
                 <span class="nav-icon">&#9670;</span>
                 <span>Бланки</span>
@@ -222,41 +235,25 @@
                 <span class="nav-icon">&#127912;</span>
                 <span>Цвета</span>
             </a>
-            <a href="#timetrack" data-page="timetrack">
-                <span class="nav-icon">&#9201;</span>
-                <span>Часы</span>
+
+            <div class="sidebar-group-label">Деньги и аналитика</div>
+            <a href="#marketplaces" data-page="marketplaces">
+                <span class="nav-icon">&#128722;</span>
+                <span>B2C продажи</span>
             </a>
-            <a href="#projects" data-page="projects">
-                <span class="nav-icon">&#128193;</span>
-                <span>Проекты</span>
-            </a>
-            <a href="#wiki" data-page="wiki">
-                <span class="nav-icon">&#128218;</span>
-                <span>База знаний</span>
+            <a href="#factual" data-page="factual">
+                <span class="nav-icon">&#9646;</span>
+                <span>Аналитика</span>
             </a>
             <a href="#import" data-page="import">
                 <span class="nav-icon">&#128176;</span>
                 <span>Финансы</span>
             </a>
-            <a href="#warehouse" data-page="warehouse">
-                <span class="nav-icon">&#128230;</span>
-                <span>Склад</span>
-            </a>
-            <a href="#marketplaces" data-page="marketplaces">
-                <span class="nav-icon">&#128722;</span>
-                <span>B2C продажи</span>
-            </a>
-            <a href="#china" data-page="china">
-                <span class="nav-icon">&#127464;&#127475;</span>
-                <span>Китай</span>
-            </a>
+
+            <div class="sidebar-group-label">Служебное</div>
             <a href="#bugs" data-page="bugs">
                 <span class="nav-icon">&#128027;</span>
                 <span>Баги</span>
-            </a>
-            <a href="#monitoring" data-page="monitoring">
-                <span class="nav-icon">&#128200;</span>
-                <span>Мониторинг</span>
             </a>
             <a href="#settings" data-page="settings">
                 <span class="nav-icon">&#9881;</span>
@@ -567,9 +564,21 @@
 
         </div>
 
-        <!-- ========== TPA ========== -->
-        <div id="page-tpa" class="page">
-            <div id="tpa-root"></div>
+        <!-- ========== ЛИДЫ (AmoCRM placeholder) ========== -->
+        <div id="page-leads" class="page">
+            <div class="page-header">
+                <h1>Лиды</h1>
+            </div>
+            <div class="card" style="max-width:640px;margin:48px auto;text-align:center;padding:32px">
+                <div style="display:inline-block;background:rgba(59,130,246,0.12);color:#2563eb;padding:4px 12px;border-radius:12px;font-size:12px;font-weight:600;margin-bottom:16px">СКОРО</div>
+                <h2 style="margin-bottom:12px">Интеграция с AmoCRM</h2>
+                <p style="font-size:15px;color:#666;line-height:1.6;max-width:480px;margin:0 auto">
+                    Здесь будут все входящие лиды из AmoCRM. Из каждого можно будет одним кликом открыть калькулятор и сразу сформировать заказ.
+                </p>
+                <p style="font-size:13px;color:#999;margin-top:16px">
+                    В работе — отдельный спек на интеграцию по API.
+                </p>
+            </div>
         </div>
 
         <!-- ========== ORDERS ========== -->
@@ -2744,10 +2753,6 @@
         </div>
 
         <!-- ========== SETTINGS ========== -->
-        <div id="page-wiki" class="page">
-            <div id="wiki-root"></div>
-        </div>
-
         <div id="page-settings" class="page">
             <div class="page-header">
                 <h1>Настройки</h1>
@@ -2756,6 +2761,8 @@
 
             <div class="tabs">
                 <div class="tab active" data-tab="production" onclick="Settings.switchTab('production')">Производство</div>
+                <div class="tab" data-tab="tpa" onclick="Settings.switchTab('tpa')">🧮 Расчёт ТПА</div>
+                <div class="tab" data-tab="monitoring" onclick="Settings.switchTab('monitoring')">Мониторинг</div>
                 <div class="tab" data-tab="indirect" onclick="Settings.switchTab('indirect')">Косв. расходы</div>
                 <div class="tab" data-tab="costs" onclick="Settings.switchTab('costs')">Расходы</div>
                 <div class="tab" data-tab="pricing" onclick="Settings.switchTab('pricing')">Ценообразование</div>
@@ -2852,6 +2859,16 @@
                         </div>
                     </div>
                 </div>
+            </div>
+
+            <!-- TPA tab -->
+            <div id="settings-tab-tpa" class="settings-tab-content" style="display:none">
+                <div id="settings-tpa-host"></div>
+            </div>
+
+            <!-- Monitoring tab -->
+            <div id="settings-tab-monitoring" class="settings-tab-content" style="display:none">
+                <div id="settings-monitoring-host"></div>
             </div>
 
             <!-- Costs tab -->
@@ -3561,12 +3578,11 @@
 <script src="vendor/jspdf-2.5.1.umd.min.js?v=1"></script>
 <script src="js/work-management-core.js?v=1"></script>
 <script src="js/bug-report-core.js?v=2"></script>
-<script src="js/supabase.js?v=218"></script>
+<script src="js/supabase.js?v=219"></script>
 <script src="js/task-events.js?v=1"></script>
 <script src="js/calculator.js?v=84"></script>
-<script src="js/app.js?v=367"></script>
-<script src="js/tpa.js?v=3"></script>
-<script src="js/wiki.js?v=4"></script>
+<script src="js/app.js?v=368"></script>
+<script src="js/tpa.js?v=4"></script>
 <script src="js/order-detail.js?v=65"></script>
 <script src="js/orders.js?v=67"></script>
 <script src="js/production_plan.js?v=76"></script>
@@ -3588,8 +3604,8 @@
 <script src="js/china_catalog.js?v=46k"></script>
 <script src="js/marketplaces.js?v=280"></script>
 <script src="js/warehouse.js?v=193"></script>
-<script src="js/monitoring.js?v=1"></script>
-<script src="js/settings.js?v=82"></script>
+<script src="js/monitoring.js?v=2"></script>
+<script src="js/settings.js?v=83"></script>
 <script src="js/pendant.js?v=17"></script>
 </body>
 </html>

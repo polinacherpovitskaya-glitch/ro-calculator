@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v367';
+const APP_VERSION = 'v368';
 
 const App = {
     currentPage: 'orders',
@@ -96,13 +96,13 @@ const App = {
 
     // All pages in the app
     ALL_PAGES: [
-        'calculator', 'orders', 'factual',
-        'analytics', 'molds', 'colors', 'timetrack', 'tasks', 'bugs', 'projects', 'wiki', 'gantt', 'tpa',
-        'import', 'warehouse', 'marketplaces', 'china', 'monitoring', 'settings',
+        'calculator', 'orders', 'factual', 'leads',
+        'analytics', 'molds', 'colors', 'timetrack', 'tasks', 'bugs', 'projects', 'gantt',
+        'import', 'warehouse', 'marketplaces', 'china', 'settings',
     ],
 
     // Pages visible to everyone by default (if no custom config)
-    DEFAULT_PAGES: ['orders', 'timetrack', 'tasks', 'bugs', 'projects', 'wiki'],
+    DEFAULT_PAGES: ['orders', 'timetrack', 'tasks', 'bugs'],
 
     normalizePageAlias(page) {
         if (page === 'dashboard') return 'orders';
@@ -111,14 +111,45 @@ const App = {
         return page;
     },
 
+    getLegacyRouteRedirect(page) {
+        switch (String(page || '').trim()) {
+            case 'tpa':
+                return { page: 'settings', hash: 'settings', settingsTab: 'tpa' };
+            case 'monitoring':
+                return { page: 'settings', hash: 'settings', settingsTab: 'monitoring' };
+            case 'wiki':
+                return { page: 'calculator', hash: 'calculator' };
+            default:
+                return null;
+        }
+    },
+
+    replaceRouteHash(hash) {
+        if (typeof window === 'undefined' || !hash) return;
+        const pathname = window.location?.pathname || '';
+        const search = window.location?.search || '';
+        if (window.history && typeof window.history.replaceState === 'function') {
+            window.history.replaceState(null, '', `${pathname}${search}#${hash}`);
+        } else {
+            window.location.hash = hash;
+        }
+    },
+
+    openSettingsTabAfterRoute(tab) {
+        if (!tab) return;
+        setTimeout(() => {
+            if (this.currentPage === 'settings' && typeof Settings !== 'undefined') {
+                Settings.switchTab(tab);
+            }
+        }, 0);
+    },
+
     // Check if current user has access to a specific page
     canAccess(page) {
         if (!this.currentUser) return false;
         page = this.normalizePageAlias(page);
-        if (page === 'tpa') page = 'calculator';
         if (page === 'bugs') return true;
-        if (page === 'wiki') return true;
-        if (page === 'monitoring') return true;
+        if (page === 'leads') return true;
         // order-detail is part of orders
         if (page === 'order-detail') page = 'orders';
         if ((this.currentUser.id === '__admin' || this.currentUser.role === 'admin') && this.currentUser.employee_id == null) {
@@ -1017,6 +1048,18 @@ const App = {
     handleRoute() {
         const hash = window.location.hash.replace('#', '') || 'orders';
         const parts = hash.split('/');
+        const legacyRedirect = this.getLegacyRouteRedirect(parts[0]);
+        if (legacyRedirect) {
+            this.replaceRouteHash(legacyRedirect.hash || legacyRedirect.page);
+            if (this._bootstrappingApp) {
+                this.applyRouteShell(legacyRedirect.page, null, { pushHash: false, quiet: true });
+                this.syncQuickBugButton();
+                return;
+            }
+            this.navigate(legacyRedirect.page, false, null);
+            this.openSettingsTabAfterRoute(legacyRedirect.settingsTab);
+            return;
+        }
         const page = this.normalizePageAlias(parts[0]);
         const subId = parts[1] || null;
         if (this._bootstrappingApp) {
@@ -1069,17 +1112,27 @@ const App = {
     primeRouteShell() {
         const hash = window.location.hash.replace('#', '') || 'orders';
         const parts = hash.split('/');
-        const page = this.normalizePageAlias(parts[0]);
+        const legacyRedirect = this.getLegacyRouteRedirect(parts[0]);
+        const page = legacyRedirect ? legacyRedirect.page : this.normalizePageAlias(parts[0]);
         const subId = parts[1] || null;
         return this.applyRouteShell(page, subId, { pushHash: false, quiet: true });
     },
 
     navigate(page, pushHash = true, subId = null) {
-        const route = this.applyRouteShell(page, subId, { pushHash });
+        const legacyRedirect = this.getLegacyRouteRedirect(page);
+        if (legacyRedirect && pushHash) {
+            this.replaceRouteHash(legacyRedirect.hash || legacyRedirect.page);
+        }
+        const route = this.applyRouteShell(
+            legacyRedirect ? legacyRedirect.page : page,
+            legacyRedirect ? null : subId,
+            { pushHash: legacyRedirect ? false : pushHash }
+        );
 
         this.syncQuickBugButton();
         if (this._bootstrappingApp) return;
         this.onPageEnter(this.currentPage, route.subId);
+        this.openSettingsTabAfterRoute(legacyRedirect?.settingsTab);
         this.scheduleWarmDataPrefetch(this.currentPage);
         this.trackAuthEvent('navigate', { to_page: this.currentPage });
     },
@@ -1090,7 +1143,6 @@ const App = {
             case 'orders': Orders.loadList(); break;
             case 'production-plan':
             case 'gantt': Gantt.load(); break;
-            case 'tpa': TPA.load(); break;
             case 'order-detail': if (subId) OrderDetail.load(parseInt(subId)); break;
             case 'factual': Factual.load(); break;
             case 'analytics': this.navigate('factual'); break;
@@ -1100,7 +1152,6 @@ const App = {
             case 'tasks': Tasks.load(subId ? parseInt(subId, 10) : null); break;
             case 'bugs': BugReports.load(); break;
             case 'projects': Projects.load(subId ? parseInt(subId, 10) : null); break;
-            case 'wiki': Wiki.load(); break;
             case 'import':
                 if (typeof Finance !== 'undefined' && Finance && typeof Finance.load === 'function') Finance.load();
                 else FinTablo.load();
@@ -1110,6 +1161,10 @@ const App = {
             case 'marketplaces': Marketplaces.load(); break;
             case 'china': ChinaPurchases.load(); break;
             case 'monitoring': Monitoring.load(); break;
+            case 'leads':
+                // Placeholder page: static HTML inside index.html.
+                // AmoCRM integration will replace this with real lead-listing logic.
+                break;
             case 'settings': Settings.load(); break;
         }
     },

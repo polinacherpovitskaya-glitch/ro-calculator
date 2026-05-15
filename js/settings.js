@@ -76,6 +76,21 @@ const Settings = {
         if (tab === 'timing') {
             this.loadTimingTab();
         }
+        if (tab === 'tpa') {
+            const host = document.getElementById('settings-tpa-host');
+            if (host && typeof TPA !== 'undefined' && typeof TPA.mount === 'function') {
+                Promise.resolve(TPA.mount(host)).catch(error => {
+                    console.error('[Settings] TPA mount failed:', error);
+                    App.toast('Не удалось открыть расчет ТПА');
+                });
+            }
+        }
+        if (tab === 'monitoring') {
+            const host = document.getElementById('settings-monitoring-host');
+            if (host && typeof Monitoring !== 'undefined' && typeof Monitoring.mount === 'function') {
+                Monitoring.mount(host);
+            }
+        }
     },
 
     populateFields() {
@@ -920,7 +935,7 @@ const Settings = {
         calculator: 'Калькулятор', orders: 'Заказы',
         factual: 'План-Факт', analytics: 'Аналитика',
         molds: 'Молды', colors: 'Цвета', timetrack: 'Учёт времени',
-        tasks: 'Задачи', bugs: 'Баги', projects: 'Проекты', wiki: 'База знаний', gantt: 'Производственный календарь', import: 'Импорт',
+        tasks: 'Задачи', bugs: 'Баги', projects: 'Проекты', gantt: 'Производственный календарь', import: 'Импорт',
         warehouse: 'Склад', marketplaces: 'Маркетплейсы', china: 'Китай',
         monitoring: 'Мониторинг',
         settings: 'Настройки',
@@ -1201,7 +1216,7 @@ const Settings = {
         const container = document.getElementById('auth-pages-checkboxes');
         if (!container) return;
         const allowed = App.getEmployeePages(empId) || [...App.DEFAULT_PAGES];
-        container.innerHTML = App.ALL_PAGES.filter(page => page !== 'monitoring').map(page => {
+        container.innerHTML = App.ALL_PAGES.map(page => {
             const checked = allowed.includes(page) ? 'checked' : '';
             const label = this.PAGE_LABELS[page] || page;
             return `<label style="display:flex;align-items:center;gap:4px;cursor:pointer;">
