@@ -5205,6 +5205,48 @@ async function smokeWarehouseLoadRendersBeforeBackgroundSync() {
     ]);
 }
 
+async function smokeWarehouseViewsShowLoadingImmediately() {
+    const context = createContext();
+    ['js/calculator.js', 'js/app.js', 'js/orders.js', 'js/warehouse.js', 'js/order-detail.js'].forEach(file => runScript(context, file));
+    stubRuntime(context);
+
+    context.loadOrders = async () => {
+        await new Promise(resolve => setTimeout(resolve, 30));
+        return [];
+    };
+    context.loadWarehouseReservations = async () => [];
+    context.loadWarehouseHistory = async () => [];
+    context.loadShipments = async () => {
+        await new Promise(resolve => setTimeout(resolve, 30));
+        return [];
+    };
+
+    vm.runInContext(`
+        document.getElementById('wh-content');
+        document.getElementById('wh-shipments-list');
+        document.getElementById('wh-shipments-content');
+        document.getElementById('wh-filters-card');
+        Warehouse.allItems = [];
+        Warehouse.currentView = 'table';
+        Warehouse._viewInitialized = false;
+        Warehouse._viewToken = 0;
+        Warehouse.setView('project-hardware', { force: true });
+    `, context);
+
+    const projectLoadingHtml = String(context.document.getElementById('wh-content').innerHTML || '');
+    assert.match(projectLoadingHtml, /Загружаем фурнитуру для проектов/);
+    assert.match(projectLoadingHtml, /wh-loading-progress/);
+
+    await new Promise(resolve => setTimeout(resolve, 60));
+    const projectFinalHtml = String(context.document.getElementById('wh-content').innerHTML || '');
+    assert.match(projectFinalHtml, /Фурнитура и упаковка для проектов/);
+
+    vm.runInContext(`Warehouse.setView('shipments', { force: true });`, context);
+    const shipmentsLoadingHtml = String(context.document.getElementById('wh-shipments-list').innerHTML || '');
+    assert.match(shipmentsLoadingHtml, /Загружаем приёмки из Китая/);
+    assert.match(shipmentsLoadingHtml, /wh-loading-progress/);
+}
+
 async function smokeWarehouseLoadPreservesManualPhotos() {
     const warehouseContext = createContext();
     ['js/calculator.js', 'js/app.js', 'js/orders.js', 'js/warehouse.js', 'js/order-detail.js'].forEach(file => runScript(warehouseContext, file));
@@ -8204,6 +8246,7 @@ async function main() {
     await smokeWarehouseStockTruthShowsAvailableAndCorrections(context);
     await smokeWarehouseProjectReserveCannotBeEditedInline(context);
     await smokeWarehouseLoadRendersBeforeBackgroundSync();
+    await smokeWarehouseViewsShowLoadingImmediately();
     await smokeWarehouseLoadPreservesManualPhotos();
     await smokeWarehouseThumbnailGetsWhiteBackground(context);
     await smokeProjectHardwarePersistenceAndBuckets(context);

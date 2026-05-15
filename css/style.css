@@ -2523,6 +2523,88 @@ table .text-center { text-align: center; }
     color: var(--accent);
     border-bottom-color: var(--accent) !important;
 }
+#wh-tabs .tab.is-loading {
+    position: relative;
+}
+#wh-tabs .tab.is-loading::after {
+    content: "";
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    margin-left: 8px;
+    border-radius: 50%;
+    background: var(--accent);
+    vertical-align: middle;
+    animation: whTabLoadingPulse 0.9s ease-in-out infinite;
+}
+
+.wh-loading-card {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--card-bg);
+    padding: 28px;
+    min-height: 240px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 10px;
+    box-shadow: var(--shadow-sm);
+}
+.wh-loading-title {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--text);
+}
+.wh-loading-detail {
+    font-size: 13px;
+    color: var(--text-muted);
+}
+.wh-loading-progress {
+    position: relative;
+    overflow: hidden;
+    height: 6px;
+    margin-top: 8px;
+    border-radius: 999px;
+    background: rgba(37, 99, 235, 0.12);
+}
+.wh-loading-progress span {
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 42%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, rgba(37, 99, 235, 0), var(--accent), rgba(37, 99, 235, 0));
+    animation: whLoadingSlide 1.1s ease-in-out infinite;
+}
+.wh-loading-skeleton {
+    display: grid;
+    gap: 8px;
+    margin-top: 12px;
+}
+.wh-loading-skeleton div {
+    height: 14px;
+    border-radius: 999px;
+    background: linear-gradient(90deg, rgba(148, 163, 184, 0.14), rgba(148, 163, 184, 0.28), rgba(148, 163, 184, 0.14));
+    background-size: 220% 100%;
+    animation: whSkeletonShimmer 1.4s ease-in-out infinite;
+}
+.wh-loading-skeleton div:nth-child(2) {
+    width: 78%;
+}
+.wh-loading-skeleton div:nth-child(3) {
+    width: 58%;
+}
+@keyframes whTabLoadingPulse {
+    0%, 100% { opacity: 0.35; transform: scale(0.85); }
+    50% { opacity: 1; transform: scale(1); }
+}
+@keyframes whLoadingSlide {
+    0% { transform: translateX(-110%); }
+    100% { transform: translateX(250%); }
+}
+@keyframes whSkeletonShimmer {
+    0% { background-position: 120% 0; }
+    100% { background-position: -120% 0; }
+}
 
 /* Photo upload preview */
 #wh-f-photo-preview img {

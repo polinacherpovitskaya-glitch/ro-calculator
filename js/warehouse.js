@@ -240,6 +240,7 @@ const Warehouse = {
     _viewToken: 0,
     _shipmentsLoadedAt: 0,
     _viewInitialized: false,
+    _loadingViews: new Set(),
     _backgroundSyncPromise: null,
     _backgroundSyncScheduled: false,
     _projectHardwareMutationQueue: Promise.resolve(),
@@ -262,12 +263,13 @@ const Warehouse = {
     async load() {
         const isStaticMirror = typeof _isStaticYandexMirrorRuntime === 'function'
             && _isStaticYandexMirrorRuntime();
+        const initialView = this.currentView || 'table';
+        this._startViewLoading(initialView, this._getWarehouseLoadingMessage(initialView), { replace: true });
         await this._waitForProjectHardwareMutations();
         this.allItems = await loadWarehouseItems();
         this.allItems = await this._ensureRequiredSeedItems(this.allItems);
         await this._loadMoldOrders();
         await this._refreshBlankHardwareWarehouseItemIds();
-        const initialView = this.currentView || 'table';
         const shouldDeferHeavySync = initialView !== 'project-hardware';
 
         // Auto-seed only for a truly local first run. In cloud mode an empty
@@ -401,6 +403,118 @@ const Warehouse = {
             }
         })();
         return this._backgroundSyncPromise;
+    },
+
+    _getWarehouseLoadingMessage(view) {
+        switch (view) {
+            case 'project-hardware':
+                return {
+                    title: 'Загружаем фурнитуру для проектов',
+                    detail: 'Сверяем заказы, складские позиции и уже собранные строки.',
+                };
+            case 'shipments':
+                return {
+                    title: 'Загружаем приёмки из Китая',
+                    detail: 'Подтягиваем список поставок и складские позиции для выбора.',
+                };
+            case 'inventory':
+                return {
+                    title: 'Загружаем инвентаризации',
+                    detail: 'Собираем историю пересчётов и текущие остатки.',
+                };
+            case 'history':
+                return {
+                    title: 'Загружаем историю движений',
+                    detail: 'Получаем последние операции по складу.',
+                };
+            case 'ready-goods':
+                return {
+                    title: 'Загружаем готовую продукцию',
+                    detail: 'Проверяем остатки, продажи и источник данных.',
+                };
+            case 'table':
+            default:
+                return {
+                    title: 'Загружаем склад',
+                    detail: 'Получаем позиции, резервы и остатки.',
+                };
+        }
+    },
+
+    _getWarehouseViewContainer(view) {
+        if (view === 'shipments') return document.getElementById('wh-shipments-list');
+        return document.getElementById('wh-content');
+    },
+
+    _setViewTabLoading(view, isLoading) {
+        const safeView = String(view || 'table').replace(/"/g, '\\"');
+        const tab = document.querySelector(`#wh-tabs .tab[data-tab="${safeView}"]`);
+        if (!tab) return;
+        tab.classList.toggle('is-loading', !!isLoading);
+        if (isLoading) {
+            tab.setAttribute('aria-busy', 'true');
+        } else if (typeof tab.removeAttribute === 'function') {
+            tab.removeAttribute('aria-busy');
+        }
+    },
+
+    _renderWarehouseLoadingState(container, message) {
+        if (!container) return;
+        const title = typeof message === 'string'
+            ? message
+            : (message && message.title) || 'Загружаем данные';
+        const detail = typeof message === 'object' && message && message.detail
+            ? message.detail
+            : 'Пожалуйста, подождите немного.';
+        container.innerHTML = `
+            <div class="wh-loading-card" role="status" aria-live="polite">
+                <div class="wh-loading-title">${this.esc(title)}</div>
+                <div class="wh-loading-detail">${this.esc(detail)}</div>
+                <div class="wh-loading-progress"><span></span></div>
+                <div class="wh-loading-skeleton">
+                    <div></div><div></div><div></div>
+                </div>
+            </div>
+        `;
+    },
+
+    _startViewLoading(view, message, options = {}) {
+        const normalizedView = view || 'table';
+        if (!this._loadingViews || typeof this._loadingViews.add !== 'function') {
+            this._loadingViews = new Set();
+        }
+        this._loadingViews.add(normalizedView);
+        this._setViewTabLoading(normalizedView, true);
+
+        const container = this._getWarehouseViewContainer(normalizedView);
+        if (!container) return;
+        const hasContent = String(container.innerHTML || '').trim().length > 0;
+        if (options.replace || !hasContent) {
+            this._renderWarehouseLoadingState(container, message || this._getWarehouseLoadingMessage(normalizedView));
+        }
+    },
+
+    _finishViewLoading(view) {
+        const normalizedView = view || 'table';
+        if (this._loadingViews && typeof this._loadingViews.delete === 'function') {
+            this._loadingViews.delete(normalizedView);
+        }
+        this._setViewTabLoading(normalizedView, false);
+    },
+
+    _renderWarehouseLoadError(view, error) {
+        const container = this._getWarehouseViewContainer(view);
+        if (!container) return;
+        const retryView = this.esc(String(view || 'table'));
+        container.innerHTML = `
+            <div class="card" style="padding:22px;text-align:center;">
+                <div style="font-weight:700;margin-bottom:6px;">Не удалось загрузить раздел</div>
+                <div style="font-size:13px;color:var(--text-muted);margin-bottom:14px;">
+                    ${this.esc(error && error.message ? error.message : 'Попробуйте обновить данные ещё раз.')}
+                </div>
+                <button class="btn btn-primary" onclick="Warehouse.setView('${retryView}', { force: true })">Повторить</button>
+            </div>
+        `;
     },
 
     _createRequiredSeedWarehouseItem(raw, id, nowIso = new Date().toISOString()) {
@@ -1347,11 +1461,14 @@ const Warehouse = {
         </div>`;
     },
 
-    async renderInventoryView() {
+    async renderInventoryView(viewToken) {
+        const shouldGuardView = viewToken !== undefined && viewToken !== null;
+        const token = viewToken ?? this._viewToken;
         const container = document.getElementById('wh-content');
         if (!container) return;
 
         const history = await loadWarehouseHistory();
+        if (shouldGuardView && (token !== this._viewToken || this.currentView !== 'inventory')) return;
         const audits = this._getInventoryAuditEntries(history);
         const mutationContexts = new Map(audits.map(audit => [
             Number(audit && audit.id || 0),
@@ -3491,11 +3608,14 @@ const Warehouse = {
     // HISTORY VIEW
     // ==========================================
 
-    async renderHistory() {
+    async renderHistory(viewToken) {
+        const shouldGuardView = viewToken !== undefined && viewToken !== null;
+        const token = viewToken ?? this._viewToken;
         const container = document.getElementById('wh-content');
         if (!container) return;
 
         const history = await loadWarehouseHistory();
+        if (shouldGuardView && (token !== this._viewToken || this.currentView !== 'history')) return;
         const sorted = history.sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 200);
 
         if (sorted.length === 0) {
@@ -5474,10 +5594,40 @@ const Warehouse = {
         const historyDeltaMap = this._buildProjectHardwareHistoryDeltaMap(history || []);
         const sampleOrders = (orders || []).filter(o => this._isSampleStatus(o.status));
         const productionOrders = (orders || []).filter(o => this._isProjectHardwareActionStatus(o.status));
-        const [sampleDetails, productionDetails] = await Promise.all([
-            Promise.all(sampleOrders.map(o => loadOrder(o.id).catch(() => null))),
-            Promise.all(productionOrders.map(o => loadOrder(o.id).catch(() => null))),
-        ]);
+        let sampleDetails = [];
+        let productionDetails = [];
+        let usedBulkOrderItems = false;
+        if (typeof loadOrderItemsByOrderIds === 'function') {
+            const uniqueOrderIds = Array.from(new Set([...sampleOrders, ...productionOrders]
+                .map(o => Number(o.id))
+                .filter(id => Number.isFinite(id) && id > 0)));
+            const rows = await loadOrderItemsByOrderIds(uniqueOrderIds).catch(() => null);
+            if (Array.isArray(rows)) {
+                usedBulkOrderItems = true;
+                const itemsByOrderId = new Map();
+                rows.forEach(row => {
+                    const orderId = Number(row && row.order_id);
+                    if (!Number.isFinite(orderId)) return;
+                    const current = itemsByOrderId.get(orderId) || [];
+                    current.push(row);
+                    itemsByOrderId.set(orderId, current);
+                });
+                sampleDetails = sampleOrders.map(order => ({
+                    order,
+                    items: itemsByOrderId.get(Number(order.id)) || [],
+                }));
+                productionDetails = productionOrders.map(order => ({
+                    order,
+                    items: itemsByOrderId.get(Number(order.id)) || [],
+                }));
+            }
+        }
+        if (!usedBulkOrderItems && !sampleDetails.length && sampleOrders.length) {
+            sampleDetails = await Promise.all(sampleOrders.map(o => loadOrder(o.id).catch(() => null)));
+        }
+        if (!usedBulkOrderItems && !productionDetails.length && productionOrders.length) {
+            productionDetails = await Promise.all(productionOrders.map(o => loadOrder(o.id).catch(() => null)));
+        }
         if (token !== this._viewToken || this.currentView !== 'project-hardware') return;
 
         const sampleHardwareByOrder = new Map();
@@ -5822,26 +5972,47 @@ const Warehouse = {
             filtersCard.style.display = view === 'table' ? '' : 'none';
         }
 
+        const runAsyncView = (loaderMessage, renderer) => {
+            this._startViewLoading(view, loaderMessage, { replace: true });
+            Promise.resolve()
+                .then(renderer)
+                .catch(error => {
+                    console.warn(`[Warehouse] Failed to render ${view}`, error);
+                    if (token === this._viewToken && this.currentView === view) {
+                        this._renderWarehouseLoadError(view, error);
+                        if (typeof App !== 'undefined' && App && typeof App.toast === 'function') {
+                            App.toast('Не удалось загрузить раздел склада. Попробуйте ещё раз.');
+                        }
+                    }
+                })
+                .finally(() => {
+                    this._finishViewLoading(view);
+                });
+        };
+
         if (view === 'shipments') {
             if (mainContent) mainContent.style.display = 'none';
             if (shipmentsContent) shipmentsContent.style.display = '';
             const now = Date.now();
             if (now - (this._shipmentsLoadedAt || 0) > 1500) {
-                this.loadShipmentsList();
+                runAsyncView(this._getWarehouseLoadingMessage(view), () => this.loadShipmentsList(token));
                 this._shipmentsLoadedAt = now;
+            } else {
+                this._finishViewLoading(view);
             }
         } else {
             if (mainContent) mainContent.style.display = '';
             if (shipmentsContent) shipmentsContent.style.display = 'none';
             if (view === 'history') {
-                this.renderHistory();
+                runAsyncView(this._getWarehouseLoadingMessage(view), () => this.renderHistory(token));
             } else if (view === 'inventory') {
-                this.renderInventoryView();
+                runAsyncView(this._getWarehouseLoadingMessage(view), () => this.renderInventoryView(token));
             } else if (view === 'project-hardware') {
-                this.renderProjectHardwareView(token);
+                runAsyncView(this._getWarehouseLoadingMessage(view), () => this.renderProjectHardwareView(token));
             } else if (view === 'ready-goods') {
-                this.renderReadyGoodsView();
+                runAsyncView(this._getWarehouseLoadingMessage(view), () => this.renderReadyGoodsView(token));
             } else {
+                this._finishViewLoading(view);
                 this.filterAndRender();
             }
         }
@@ -5930,8 +6101,11 @@ const Warehouse = {
     // SHIPMENTS (Приёмки из Китая)
     // ==========================================
 
-    async loadShipmentsList() {
+    async loadShipmentsList(viewToken) {
+        const shouldGuardView = viewToken !== undefined && viewToken !== null;
+        const token = viewToken ?? this._viewToken;
         this.allShipments = await loadShipments();
+        if (shouldGuardView && (token !== this._viewToken || this.currentView !== 'shipments')) return;
         this.renderShipmentsList();
     },
 
@@ -6723,7 +6897,9 @@ const Warehouse = {
     // READY GOODS (Готовая продукция)
     // ==========================================
 
-    async renderReadyGoodsView() {
+    async renderReadyGoodsView(viewToken) {
+        const shouldGuardView = viewToken !== undefined && viewToken !== null;
+        const token = viewToken ?? this._viewToken;
         const container = document.getElementById('wh-content');
         if (!container) return;
         const filtersCard = document.getElementById('wh-filters-card');
@@ -6731,6 +6907,7 @@ const Warehouse = {
 
         const rg = (await loadReadyGoods()).map(item => this._normalizeReadyGoodsItem(item));
         const salesRecords = (await loadSalesRecords()).map(item => this._normalizeSalesRecord(item));
+        if (shouldGuardView && (token !== this._viewToken || this.currentView !== 'ready-goods')) return;
         const sourceStatus = typeof getReadyGoodsSourceStatus === 'function' ? getReadyGoodsSourceStatus() : null;
         const sourceItems = sourceStatus ? [sourceStatus.ready_goods, sourceStatus.ready_goods_history, sourceStatus.sales_records].filter(Boolean) : [];
         const usesSharedSource = sourceItems.length > 0 && sourceItems.every(item => item.source === 'shared-settings');
