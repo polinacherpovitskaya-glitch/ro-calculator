@@ -234,7 +234,7 @@ async function main() {
     assert.ok(state.bootstrap.warehouseItems > 0, `Expected warehouse items in bootstrap, got ${state.bootstrap.warehouseItems}`);
     assert.ok(state.bootstrap.orders > 0, `Expected project orders in bootstrap, got ${state.bootstrap.orders}`);
     assert.ok(state.bootstrap.draftOrders > 0, `Expected draft orders in bootstrap, got ${state.bootstrap.draftOrders}`);
-    assert.equal(state.bootstrap.cancelledOrders, 0, `Cancelled orders should stay out of the default mirror snapshot, got ${state.bootstrap.cancelledOrders}`);
+    assert.ok(state.bootstrap.cancelledOrders > 0, `Expected cancelled orders in mirror bootstrap, got ${state.bootstrap.cancelledOrders}`);
     assert.ok(state.bootstrap.orderItems > 0, `Expected order items in bootstrap, got ${state.bootstrap.orderItems}`);
     assert.ok(state.bootstrap.chinaPurchases > 0, `Expected China purchases in bootstrap, got ${state.bootstrap.chinaPurchases}`);
     assert.ok(state.bootstrap.shipments >= 0, `Expected shipments field in bootstrap, got ${state.bootstrap.shipments}`);
