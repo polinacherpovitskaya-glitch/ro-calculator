@@ -19,6 +19,7 @@ const MIRROR_ORDER_STATUSES = new Set([
   'in_production',
   'delivery',
   'completed',
+  'cancelled',
 ]);
 
 const COPY_PATHS = [
