@@ -98,11 +98,11 @@ const App = {
     ALL_PAGES: [
         'calculator', 'orders', 'factual', 'leads',
         'analytics', 'molds', 'colors', 'timetrack', 'tasks', 'bugs', 'projects', 'gantt',
-        'import', 'warehouse', 'marketplaces', 'china', 'monitoring', 'settings',
+        'import', 'warehouse', 'marketplaces', 'china', 'settings',
     ],
 
     // Pages visible to everyone by default (if no custom config)
-    DEFAULT_PAGES: ['orders', 'timetrack', 'tasks', 'bugs', 'projects'],
+    DEFAULT_PAGES: ['orders', 'timetrack', 'tasks', 'bugs'],
 
     normalizePageAlias(page) {
         if (page === 'dashboard') return 'orders';
@@ -150,7 +150,6 @@ const App = {
         page = this.normalizePageAlias(page);
         if (page === 'bugs') return true;
         if (page === 'leads') return true;
-        if (page === 'monitoring') return true;
         // order-detail is part of orders
         if (page === 'order-detail') page = 'orders';
         if ((this.currentUser.id === '__admin' || this.currentUser.role === 'admin') && this.currentUser.employee_id == null) {
