@@ -5188,9 +5188,17 @@ async function smokeWarehouseLoadRendersBeforeBackgroundSync() {
     const immediateEvents = clone(vm.runInContext(`globalThis.__events.slice()`, warehouseContext));
     assert.deepEqual(immediateEvents, ['recalc', 'populate', 'stats', 'table-render']);
 
-    await new Promise(resolve => setTimeout(resolve, 60));
+    const waitForEvents = async (expectedCount, timeoutMs = 500) => {
+        const startedAt = Date.now();
+        while (Date.now() - startedAt < timeoutMs) {
+            const events = clone(vm.runInContext(`globalThis.__events.slice()`, warehouseContext));
+            if (events.length >= expectedCount) return events;
+            await new Promise(resolve => setTimeout(resolve, 10));
+        }
+        return clone(vm.runInContext(`globalThis.__events.slice()`, warehouseContext));
+    };
 
-    const finalEvents = clone(vm.runInContext(`globalThis.__events.slice()`, warehouseContext));
+    const finalEvents = await waitForEvents(10);
     assert.deepEqual(finalEvents, [
         'recalc',
         'populate',
