@@ -1651,6 +1651,14 @@ const Calculator = {
         const num = idx + 1;
         const container = document.getElementById('calc-items-container');
         const showCustomOnly = !item.is_blank_mold;
+        const pickerErrorCard = (label, retryHandler) => `
+            <div class="picker-error-card" style="padding:12px;border:1px solid var(--red);background:rgba(239,68,68,0.05);border-radius:6px;color:var(--text-primary);">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+                    <span style="font-size:18px;">⚠</span>
+                    <span style="font-weight:600;">${this._esc(label)}</span>
+                </div>
+                <button class="btn btn-outline" onclick="${retryHandler}">Попробовать снова</button>
+            </div>`;
 
         // Build visual mold picker (with photos)
         let moldPickerHtml = '';
@@ -1692,7 +1700,10 @@ const Calculator = {
                 </div>
             </div>`;
         }
-        } catch (err) { console.error('[renderItemBlock] Mold picker error:', err); moldPickerHtml = '<p style="color:var(--red);font-size:11px">Ошибка загрузки справочника</p>'; }
+        } catch (err) {
+            console.error('[renderItemBlock] Mold picker error:', err);
+            moldPickerHtml = pickerErrorCard('Не удалось загрузить молды', `Calculator.refreshItemPicker(${idx}, 'mold')`);
+        }
 
         // Render printings
         let printingsHtml = '';
@@ -1764,7 +1775,10 @@ const Calculator = {
                     </div>
                 </div>`;
             }
-        } catch (e) { console.error('[renderItemBlock] Color picker error:', e); }
+        } catch (e) {
+            console.error('[renderItemBlock] Color picker error:', e);
+            colorPickerHtml = pickerErrorCard('Не удалось загрузить цвета', `Calculator.refreshItemPicker(${idx}, 'color')`);
+        }
 
         // File attachment for color mix reference (photo/PDF/etc.)
         let colorAttachmentHtml = '';
@@ -4794,6 +4808,10 @@ const Calculator = {
     _escAttr(s) {
         if (!s) return '';
         return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    },
+
+    refreshItemPicker(idx, kind) {
+        this.renderItemBlock(idx);
     },
 
     // Re-render just the mold picker selected display after picking a mold
