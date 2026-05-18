@@ -791,9 +791,20 @@ body {
 
 .item-block-header .item-title {
     flex: 1;
+    min-width: 0;
     margin-left: 10px;
     font-weight: 600;
     font-size: 15px;
+}
+
+.item-block-header .item-name,
+.item-card-summary .item-name {
+    max-width: 60%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    display: inline-block;
+    vertical-align: middle;
 }
 
 .section-title {

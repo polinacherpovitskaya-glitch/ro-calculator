@@ -1804,12 +1804,13 @@ const Calculator = {
         const summaryPrintQty = (item.printings || []).reduce((s, p) => s + (p.qty || 0), 0);
         const summaryPrint = summaryPrintQty > 0 ? summaryPrintQty.toLocaleString('ru') + ' шт' : '';
         const summaryPrice = item.sell_price_item > 0 ? item.sell_price_item + ' ₽/шт' : '';
+        const itemTitle = item.product_name || 'Изделие ' + num;
 
         const html = `
         <div class="item-block${wasCollapsed ? ' is-collapsed' : ''}" id="item-block-${idx}">
             <div class="item-block-header">
                 <div class="item-num">${num}</div>
-                <div class="item-title" id="item-title-${idx}">${item.product_name || 'Изделие ' + num}</div>
+                <div class="item-title item-name" id="item-title-${idx}" title="${this._escAttr(itemTitle)}">${this._esc(itemTitle)}</div>
                 <button class="btn btn-sm btn-outline item-collapse-btn" onclick="Calculator.toggleItemCollapse(${idx})">${wasCollapsed ? '▼ Показать' : '▲ Свернуть'}</button>
                 <button class="btn btn-sm btn-outline" onclick="Calculator.cloneItem(${idx})">Клонировать</button>
                 <button class="btn-danger-sm" onclick="Calculator.removeItem(${idx})">✕</button>
@@ -3483,7 +3484,11 @@ const Calculator = {
         document.getElementById('item-name-' + idx).value = tpl.name;
         document.getElementById('item-pph-' + idx).value = pph;
         document.getElementById('item-weight-' + idx).value = tpl.weight_grams || '';
-        document.getElementById('item-title-' + idx).textContent = tpl.name;
+        const titleEl = document.getElementById('item-title-' + idx);
+        if (titleEl) {
+            titleEl.textContent = tpl.name;
+            titleEl.title = tpl.name;
+        }
 
         // Close picker & re-render selected display
         this.closeMoldPicker(idx);
@@ -3692,7 +3697,12 @@ const Calculator = {
     onFieldChange(idx, field, value) {
         this.items[idx][field] = value;
         if (field === 'product_name') {
-            document.getElementById('item-title-' + idx).textContent = value || 'Изделие ' + (idx + 1);
+            const titleEl = document.getElementById('item-title-' + idx);
+            const title = value || 'Изделие ' + (idx + 1);
+            if (titleEl) {
+                titleEl.textContent = title;
+                titleEl.title = title;
+            }
         }
         this.scheduleAutosave();
     },
