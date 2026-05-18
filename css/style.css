@@ -570,6 +570,12 @@ body {
     border: 1px solid var(--accent);
 }
 
+.picker-above {
+    bottom: 100% !important;
+    top: auto !important;
+    margin-bottom: 4px;
+}
+
 /* Color page — grid of color cards */
 .colors-grid {
     display: grid;

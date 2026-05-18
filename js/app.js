@@ -1423,10 +1423,13 @@ const Calculator = {
             this._moldPickerBound = true;
             document.addEventListener('click', (e) => {
                 if (!e.target.closest('.mold-picker')) {
-                    document.querySelectorAll('.mold-picker-dropdown').forEach(d => d.style.display = 'none');
+                    document.querySelectorAll('.mold-picker-dropdown').forEach(d => { d.style.display = 'none'; d.classList.remove('picker-above'); });
                 }
                 if (!e.target.closest('.color-picker')) {
-                    document.querySelectorAll('.color-picker-dropdown').forEach(d => d.style.display = 'none');
+                    document.querySelectorAll('.color-picker-dropdown').forEach(d => { d.style.display = 'none'; d.classList.remove('picker-above'); });
+                }
+                if (!e.target.closest('.mold-picker') && !e.target.closest('.color-picker')) {
+                    document.querySelectorAll('.calc-section-picker-open').forEach(section => section.classList.remove('calc-section-picker-open'));
                 }
                 if (!e.target.closest('.china-picker')) {
                     document.querySelectorAll('.china-picker-dropdown').forEach(d => d.style.display = 'none');
@@ -3538,15 +3541,29 @@ const Calculator = {
         this.rerenderAllHardware();
     },
 
+    positionOpenPicker(dd) {
+        if (!dd) return;
+        dd.classList.remove('picker-above');
+        const section = dd.closest('.calc-section');
+        if (section) section.classList.add('calc-section-picker-open');
+        const rect = dd.getBoundingClientRect();
+        if (rect.bottom > window.innerHeight) {
+            dd.classList.add('picker-above');
+        }
+        dd.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    },
+
     toggleMoldPicker(idx) {
         const dd = document.getElementById('mold-picker-dd-' + idx);
         if (!dd) return;
         const isOpen = dd.style.display !== 'none';
         // Close all pickers first
-        document.querySelectorAll('.mold-picker-dropdown').forEach(d => d.style.display = 'none');
-        document.querySelectorAll('.color-picker-dropdown').forEach(d => d.style.display = 'none');
+        document.querySelectorAll('.mold-picker-dropdown').forEach(d => { d.style.display = 'none'; d.classList.remove('picker-above'); });
+        document.querySelectorAll('.color-picker-dropdown').forEach(d => { d.style.display = 'none'; d.classList.remove('picker-above'); });
+        document.querySelectorAll('.calc-section-picker-open').forEach(section => section.classList.remove('calc-section-picker-open'));
         if (!isOpen) {
             dd.style.display = '';
+            this.positionOpenPicker(dd);
             // Focus search
             const input = dd.querySelector('input[type="text"]');
             if (input) input.focus();
@@ -3555,7 +3572,11 @@ const Calculator = {
 
     closeMoldPicker(idx) {
         const dd = document.getElementById('mold-picker-dd-' + idx);
-        if (dd) dd.style.display = 'none';
+        if (dd) {
+            dd.style.display = 'none';
+            dd.classList.remove('picker-above');
+        }
+        document.querySelectorAll('.calc-section-picker-open').forEach(section => section.classList.remove('calc-section-picker-open'));
     },
 
     filterMoldPicker(idx, query) {
@@ -3575,11 +3596,13 @@ const Calculator = {
         if (!dd) return;
         const isOpen = dd.style.display !== 'none';
         // Close all color pickers first
-        document.querySelectorAll('.color-picker-dropdown').forEach(d => d.style.display = 'none');
+        document.querySelectorAll('.color-picker-dropdown').forEach(d => { d.style.display = 'none'; d.classList.remove('picker-above'); });
         // Also close mold pickers
-        document.querySelectorAll('.mold-picker-dropdown').forEach(d => d.style.display = 'none');
+        document.querySelectorAll('.mold-picker-dropdown').forEach(d => { d.style.display = 'none'; d.classList.remove('picker-above'); });
+        document.querySelectorAll('.calc-section-picker-open').forEach(section => section.classList.remove('calc-section-picker-open'));
         if (!isOpen) {
             dd.style.display = '';
+            this.positionOpenPicker(dd);
             const input = dd.querySelector('input[type="text"]');
             if (input) input.focus();
         }
