@@ -403,9 +403,9 @@
 
                 <!-- Add button row (JS hides this when no items) -->
                 <div id="calc-items-add-row" style="padding:0 16px 16px;display:none">
-                    <button class="btn btn-outline" id="calc-add-item-btn" onclick="Calculator.addItem()" style="width:100%">+ Добавить изделие</button>
-                    <div style="text-align:center;margin-top:8px">
-                        <button class="btn btn-outline btn-sm" onclick="Pendant.openWizard()">+ Подвес из букв</button>
+                    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+                        <button class="btn btn-outline" id="calc-add-item-btn" onclick="Calculator.addItem()">+ Добавить изделие</button>
+                        <a href="javascript:void(0)" onclick="Pendant.openWizard()" class="calc-pendant-link" style="font-size:13px;color:var(--text-secondary);text-decoration:underline;">или подвес из букв</a>
                     </div>
                 </div>
             </div><!-- /.calc-section (2) -->
