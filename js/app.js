@@ -5501,10 +5501,31 @@ const Calculator = {
     },
 
     async loadOrder(orderId) {
-        const data = await loadOrder(orderId);
-        if (!data) {
-            App.toast('Заказ не найден');
-            return;
+        const itemsContainer = document.getElementById('calc-items-container');
+        const emptyEl = document.getElementById('calc-items-empty');
+        if (emptyEl) emptyEl.style.display = 'none';
+        if (itemsContainer) {
+            itemsContainer.innerHTML = `
+                <div class="calc-loader">
+                    <div class="calc-loader-spinner"></div>
+                    <div>Загружаем заказ…</div>
+                </div>`;
+        }
+
+        let data;
+        try {
+            data = await loadOrder(orderId);
+            if (!data) {
+                if (itemsContainer) itemsContainer.innerHTML = '';
+                this._updateItemsEmptyState();
+                App.toast('Заказ не найден');
+                return;
+            }
+        } catch (err) {
+            if (itemsContainer) {
+                itemsContainer.innerHTML = '<div class="calc-loader" style="color:var(--red)">Не удалось загрузить заказ. Перезагрузите страницу.</div>';
+            }
+            throw err;
         }
 
         this.resetForm();

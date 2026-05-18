@@ -6688,6 +6688,30 @@ table .text-center { text-align: center; }
     margin: 0 0 14px;
 }
 
+.calc-loader {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 60px 20px;
+    color: var(--text-muted);
+    font-size: 14px;
+}
+
+.calc-loader-spinner {
+    width: 32px;
+    height: 32px;
+    border: 3px solid var(--bg-muted);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: calc-loader-spin 0.8s linear infinite;
+    margin-bottom: 12px;
+}
+
+@keyframes calc-loader-spin {
+    to { transform: rotate(360deg); }
+}
+
 /* Item card collapse support */
 .item-body {
     /* content is always block; toggled to none when collapsed */
