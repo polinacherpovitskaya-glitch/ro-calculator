@@ -1540,6 +1540,18 @@ async function loadPendingTaskNotificationEvents() {
         .sort((a, b) => String(a?.created_at || '').localeCompare(String(b?.created_at || '')));
 }
 
+async function markFallbackTaskNotificationProcessed(eventId, processedAt) {
+    const staged = await loadJsonSetting(WORK_SETTINGS_KEYS.taskNotificationEvents, []);
+    if (!Array.isArray(staged)) return;
+    let changed = false;
+    const next = staged.map(item => {
+        if (String(item?.id) !== String(eventId) || item?.processed_at) return item;
+        changed = true;
+        return { ...item, processed_at: processedAt };
+    });
+    if (changed) await saveJsonSetting(WORK_SETTINGS_KEYS.taskNotificationEvents, next);
+}
+
 async function markTaskNotificationProcessed(eventId) {
     const processedAt = new Date().toISOString();
     try {
@@ -1547,16 +1559,13 @@ async function markTaskNotificationProcessed(eventId) {
             .from('task_notification_events')
             .update({ processed_at: processedAt })
             .eq('id', eventId);
-        if (!error) return;
+        if (error) {
+            console.warn('Task notifications: failed to mark remote event processed:', error.message || error);
+        }
     } catch (error) {
-        // Fall through to settings-backed update below.
+        console.warn('Task notifications: remote event table unavailable while marking processed.');
     }
-    const staged = await loadJsonSetting(WORK_SETTINGS_KEYS.taskNotificationEvents, []);
-    if (!Array.isArray(staged)) return;
-    const next = staged.map(item => String(item?.id) === String(eventId)
-        ? { ...item, processed_at: processedAt }
-        : item);
-    await saveJsonSetting(WORK_SETTINGS_KEYS.taskNotificationEvents, next);
+    await markFallbackTaskNotificationProcessed(eventId, processedAt);
 }
 
 async function loadWorkTasksSnapshot() {
