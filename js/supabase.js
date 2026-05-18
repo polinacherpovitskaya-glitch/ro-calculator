@@ -5908,15 +5908,22 @@ async function loadWarehouseItems() {
             _clearLocalDatasetDirty(['warehouseItems']);
         }
     }
-    const staticMirrorItems = await readStaticMirrorBootstrapWarehouseItems();
-    if (staticMirrorItems && staticMirrorItems.length > 0) return staticMirrorItems;
+    if (_isStaticYandexMirrorRuntime()) {
+        // Warehouse stock changes often, so calc2 must prefer live proxy data.
+        // The static bootstrap is only a fallback when the proxy is unavailable.
+        const liveSupabaseItems = await readLiveSupabaseWarehouseItems();
+        if (liveSupabaseItems && liveSupabaseItems.length > 0) return liveSupabaseItems;
 
-    const liveBootstrapItems = await readLiveBootstrapWarehouseItems();
-    if (liveBootstrapItems && liveBootstrapItems.length > 0) return liveBootstrapItems;
-    // On Yandex mirror (and as a Vercel API fallback) read directly from Supabase so
-    // recent saves are visible immediately — the static bootstrap is up to ~30 min stale.
-    const liveSupabaseItems = await readLiveSupabaseWarehouseItems();
-    if (liveSupabaseItems && liveSupabaseItems.length > 0) return liveSupabaseItems;
+        const staticMirrorItems = await readStaticMirrorBootstrapWarehouseItems();
+        if (staticMirrorItems && staticMirrorItems.length > 0) return staticMirrorItems;
+    } else {
+        const liveBootstrapItems = await readLiveBootstrapWarehouseItems();
+        if (liveBootstrapItems && liveBootstrapItems.length > 0) return liveBootstrapItems;
+        // As a Vercel API fallback, read directly from Supabase so recent saves are
+        // visible immediately when same-origin bootstrap is unavailable.
+        const liveSupabaseItems = await readLiveSupabaseWarehouseItems();
+        if (liveSupabaseItems && liveSupabaseItems.length > 0) return liveSupabaseItems;
+    }
 
     const bootstrapPayload = await _loadSameOriginBootstrap(['warehouseItems']);
     if (bootstrapPayload && Array.isArray(bootstrapPayload.warehouseItems) && bootstrapPayload.warehouseItems.length > 0) {

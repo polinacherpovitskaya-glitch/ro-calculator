@@ -1112,6 +1112,48 @@ async function main() {
 
     {
         const context = createContext();
+        context.location = {
+            href: 'https://calc2.recycleobject.ru/#warehouse',
+            origin: 'https://calc2.recycleobject.ru',
+            protocol: 'https:',
+            hostname: 'calc2.recycleobject.ru',
+        };
+        context.__bootstrapWarehouseItems = [{
+            id: 9602,
+            name: 'Старые цепочки',
+            sku: 'CH-MTL-10CM',
+            category: 'chains',
+            qty: 1900,
+        }];
+        context.__tableRows.warehouse_items = [{
+            id: 9601,
+            name: 'Цепочки металл 10см',
+            sku: 'CH-MTL-10CM',
+            category: 'chains',
+            item_data: JSON.stringify({
+                id: 9601,
+                name: 'Цепочки металл 10см',
+                sku: 'CH-MTL-10CM',
+                category: 'chains',
+                qty: 6500,
+            }),
+        }];
+        runScript(context, 'js/supabase.js');
+        vm.runInContext('initSupabase();', context);
+
+        const loaded = JSON.parse(JSON.stringify(await vm.runInContext('loadWarehouseItems()', context)));
+        assert.equal(loaded.length, 1, 'calc2 warehouse should prefer live shared stock over stale static bootstrap');
+        assert.equal(loaded[0].id, 9601);
+        assert.equal(loaded[0].sku, 'CH-MTL-10CM');
+        assert.equal(loaded[0].qty, 6500);
+        assert.ok(
+            context.__remoteCalls.some(call => call.table === 'warehouse_items' && call.action === 'order'),
+            'calc2 warehouse must query live warehouse_items before using static bootstrap'
+        );
+    }
+
+    {
+        const context = createContext();
         runScript(context, 'js/supabase.js');
         vm.runInContext(`
             initSupabase();
