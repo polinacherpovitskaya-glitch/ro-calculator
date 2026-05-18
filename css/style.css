@@ -994,6 +994,14 @@ table .text-center { text-align: center; }
     z-index: 50;
 }
 
+.summary-footer-content {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+    flex-wrap: wrap;
+}
+
 #page-calculator {
     width: 100%;
     max-width: 100%;
@@ -1078,8 +1086,10 @@ table .text-center { text-align: center; }
     .stats-grid {
         grid-template-columns: 1fr 1fr;
     }
-    .summary-footer {
+    .summary-footer,
+    .summary-footer-content {
         flex-direction: column;
+        align-items: stretch;
         gap: 12px;
     }
 }
@@ -6596,6 +6606,10 @@ table .text-center { text-align: center; }
     border-radius: var(--radius);
     margin-bottom: 16px;
     overflow: hidden;
+}
+
+.calc-section-footer {
+    margin-top: 24px;
 }
 
 .calc-section.calc-section-picker-open {
