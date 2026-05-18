@@ -6659,11 +6659,12 @@ const Warehouse = {
             }
             const matched = this._findExistingItemForShipment(shItem, itemsBefore);
             if (matched) {
-                shItem.warehouse_item_id = matched.id;
+                this._applyWarehouseMatchToShipmentItem(shItem, matched);
                 continue;
             }
+            const preferredCategory = this._preferredCategoryForSku(shItem.sku);
             const newItem = {
-                category: shItem.category || 'other',
+                category: preferredCategory || shItem.category || 'other',
                 name: (shItem.name || '').trim(),
                 sku: (shItem.sku || '').trim(),
                 size: (shItem.size || '').trim(),
@@ -7466,14 +7467,63 @@ const Warehouse = {
         ].join('|');
     },
 
+    _normalizeShipmentSkuKey(sku) {
+        return String(sku || '').trim().toUpperCase().replace(/\s+/g, '');
+    },
+
+    _hasSpecificShipmentSku(sku) {
+        const key = this._normalizeShipmentSkuKey(sku);
+        if (!key || key === '-' || key === '—') return false;
+        return /[A-ZА-Я0-9]/i.test(key);
+    },
+
+    _preferredCategoryForSku(sku) {
+        const key = this._normalizeShipmentSkuKey(sku);
+        if (!key) return '';
+        if (key.startsWith('SLS-')) return 'cords';
+        if (key.startsWith('TR-')) return 'cables';
+        if (key.startsWith('CR-')) return 'carabiners';
+        if (key.startsWith('RNG-')) return 'rings';
+        if (key.startsWith('BOX-') || key.startsWith('PKG-') || key.startsWith('PACK-')) return 'packaging';
+        return '';
+    },
+
+    _pickShipmentSkuMatch(shItem, matches) {
+        if (!Array.isArray(matches) || !matches.length) return null;
+        const preferredCategory = this._preferredCategoryForSku(shItem && shItem.sku);
+        if (preferredCategory) {
+            const preferred = matches.find(item => this._normStr(item && item.category) === preferredCategory);
+            if (preferred) return preferred;
+        }
+        const incomingCategory = this._normStr(shItem && shItem.category);
+        if (incomingCategory) {
+            const sameCategory = matches.find(item => this._normStr(item && item.category) === incomingCategory);
+            if (sameCategory) return sameCategory;
+        }
+        return matches.find(item => (parseFloat(item && item.qty) || 0) > 0) || matches[0];
+    },
+
+    _applyWarehouseMatchToShipmentItem(shItem, matched) {
+        if (!shItem || !matched) return;
+        shItem.source = 'existing';
+        shItem.warehouse_item_id = matched.id;
+        shItem.name = matched.name || shItem.name || '';
+        shItem.sku = matched.sku || shItem.sku || '';
+        shItem.category = matched.category || shItem.category || '';
+        shItem.color = matched.color || shItem.color || '';
+        shItem.size = matched.size || shItem.size || '';
+        shItem.unit = matched.unit || shItem.unit || 'шт';
+        shItem.photo_url = matched.photo_url || shItem.photo_url || '';
+        shItem.photo_thumbnail = matched.photo_thumbnail || shItem.photo_thumbnail || '';
+    },
+
     _isSpecificShipmentSupplyCategory(category) {
         return ['carabiners', 'cables', 'rings', 'chains', 'cords', 'packaging'].includes(this._normStr(category));
     },
 
     _isWeakShipmentIdentity(item) {
         if (!item || this._isMoldCategory(item.category)) return false;
-        const sku = this._normStr(item.sku);
-        if (sku) return false;
+        if (this._hasSpecificShipmentSku(item.sku)) return false;
         const category = this._normStr(item.category || 'other');
         if (this._isSpecificShipmentSupplyCategory(category) && this._normStr(item.name)) return false;
         const color = this._normStr(item.color);
@@ -7519,14 +7569,13 @@ const Warehouse = {
             if (byMoldKey) return byMoldKey;
         }
         if (this._isWeakShipmentIdentity(shItem)) return null;
-        const sku = this._normStr(shItem.sku);
-        const category = this._normStr(shItem.category);
-        if (sku) {
-            const bySku = warehouseItems.find(i =>
-                this._normStr(i.sku) === sku &&
-                (!category || this._normStr(i.category) === category)
+        const sku = this._normalizeShipmentSkuKey(shItem.sku);
+        if (this._hasSpecificShipmentSku(sku)) {
+            const bySku = warehouseItems.filter(i =>
+                this._normalizeShipmentSkuKey(i && i.sku) === sku
             );
-            if (bySku) return bySku;
+            const matchedBySku = this._pickShipmentSkuMatch(shItem, bySku);
+            if (matchedBySku) return matchedBySku;
         }
         const key = this._itemIdentityKey(shItem);
         return warehouseItems.find(i => this._itemIdentityKey(i) === key) || null;

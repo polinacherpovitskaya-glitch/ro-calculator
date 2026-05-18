@@ -522,6 +522,88 @@ async function smokeShipmentCreatesSpecificSupplyWithoutSku() {
     assert.equal(context.__adjustStockCalls[0].delta, 15000);
 }
 
+async function smokeShipmentMatchesExistingItemByExactSkuAcrossWrongCategory() {
+    const context = buildWarehouseContext();
+    context.__warehouseItems = [{
+        id: 8301,
+        name: 'Шнур с силик. наконечником',
+        sku: 'SLS-800-OR-NN',
+        category: 'cords',
+        size: '80 см',
+        color: 'оранжевый',
+        unit: 'шт',
+        qty: 222,
+        price_per_unit: 23,
+    }];
+    context.__savedShipment = null;
+    context.__adjustStockCalls = [];
+    context.__saveWarehouseItemCalls = 0;
+    context.loadWarehouseItems = async () => clone(context.__warehouseItems);
+    context.saveWarehouseItem = async () => {
+        context.__saveWarehouseItemCalls += 1;
+        throw new Error('confirmShipment should reuse the existing SKU instead of creating a duplicate warehouse item');
+    };
+    context.saveWarehouseItems = async (items) => { context.__warehouseItems = clone(items); };
+    context.saveShipment = async (shipment) => {
+        context.__savedShipment = clone(shipment);
+        return shipment.id || 8401;
+    };
+
+    setInputValues(context, {
+        'wh-sh-name': 'China Duplicate SKU Receipt',
+        'wh-sh-date': '2026-05-18',
+        'wh-sh-supplier': 'China',
+        'wh-sh-cny-rate': '12',
+        'wh-sh-fee-cashout': '0',
+        'wh-sh-fee-crypto': '0',
+        'wh-sh-fee-1688': '0',
+        'wh-sh-delivery-china': '0',
+        'wh-sh-delivery-moscow': '0',
+        'wh-sh-total-delivery': '0',
+        'wh-sh-pricing-mode': 'weighted_avg',
+        'wh-sh-notes': '',
+    });
+
+    vm.runInContext(`
+        Warehouse.editingShipmentId = null;
+        Warehouse.allShipments = [];
+        Warehouse.shipmentItems = [{
+            source: 'new',
+            category: 'carabiners',
+            name: 'Шнуры с силиконовыми наконечниками',
+            sku: ' SLS-800-OR-NN ',
+            color: '',
+            size: '',
+            unit: 'шт',
+            qty_received: 10,
+            weight_grams: 100,
+            purchase_price_cny: 0,
+            purchase_price_rub: 0,
+            delivery_allocated: 0,
+            total_cost_per_unit: 55.3,
+        }];
+        Warehouse.adjustStock = async (itemId, delta, type, refName, note) => {
+            globalThis.__adjustStockCalls.push({ itemId, delta, type, refName, note });
+        };
+        Warehouse.hideShipmentForm = () => {};
+        Warehouse.setView = () => {};
+    `, context);
+
+    await vm.runInContext(`Warehouse.confirmShipment()`, context);
+
+    assert.equal(context.__saveWarehouseItemCalls, 0);
+    assert.equal(context.__savedShipment.status, 'received');
+    assert.equal(context.__savedShipment.items.length, 1);
+    assert.equal(context.__savedShipment.items[0].warehouse_item_id, 8301);
+    assert.equal(context.__savedShipment.items[0].category, 'cords');
+    assert.equal(context.__savedShipment.items[0].name, 'Шнур с силик. наконечником');
+    assert.equal(context.__savedShipment.items[0].size, '80 см');
+    assert.equal(context.__savedShipment.items[0].color, 'оранжевый');
+    assert.equal(context.__adjustStockCalls.length, 1);
+    assert.equal(context.__adjustStockCalls[0].itemId, 8301);
+    assert.equal(context.__adjustStockCalls[0].delta, 10);
+}
+
 async function smokeReceiptPickerLoadsSpecificWarehouseSupplies() {
     const context = buildWarehouseContext();
     context.__warehouseItems = [
@@ -569,6 +651,7 @@ async function main() {
     await smokeShipmentRepostAppliesOnlyDelta();
     await smokeChinaShipmentInfersSupplyCategories();
     await smokeShipmentCreatesSpecificSupplyWithoutSku();
+    await smokeShipmentMatchesExistingItemByExactSkuAcrossWrongCategory();
     await smokeReceiptPickerLoadsSpecificWarehouseSupplies();
     await smokeShipmentSelectUsesFreshPickerCache();
     console.log('warehouse migration smoke checks passed');
