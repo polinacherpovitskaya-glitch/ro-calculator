@@ -265,6 +265,26 @@ body {
 }
 .btn-outline:hover { background: var(--bg); }
 
+.btn-outline-primary {
+    background: transparent;
+    border: 1px solid var(--accent);
+    color: var(--accent);
+}
+.btn-outline-primary:hover {
+    background: var(--accent);
+    color: #fff;
+}
+
+.btn-outline-muted {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+}
+.btn-outline-muted:hover {
+    background: var(--bg-muted);
+    color: var(--text);
+}
+
 .btn-sm { padding: 5px 10px; font-size: 12px; }
 .btn-lg { padding: 12px 24px; font-size: 15px; }
 
