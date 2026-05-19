@@ -1,10 +1,10 @@
 # Migration status
 
-Last update: 2026-05-19T16:44:32-03:00
+Last update: 2026-05-19T16:45:51-03:00
 Current block: 7
-Current task within block: Task 11 — production-safe `/api/calc/preview` wiring
+Current task within block: Task 12/13 — verification, docs, PR
 Branch: block-7-calculator
-Last commit: `2240a8e` calc: support pendant live totals
+Last commit: `aa264a5` calc: add tpa and factual functions
 Tests: Block 7 Task 1 fixture export ran locally against Supabase using the existing read key and produced 24 real-order JSON fixtures under `ops/api/test/fixtures/orders/`. Fixture coverage: 3 factual orders, 7 pendant orders, 22 mold orders, 24 hardware orders, 1 NFC order, and 13 complex orders. `cd ops/api && npm run typecheck` passes. `cd ops/api && npm run test:calc` passes 74/74: 25 golden-master tests, 38 pricing unit tests, 8 live calc tests, and 3 TPA/factual tests.
 
 ## What was just done
@@ -75,6 +75,15 @@ Tests: Block 7 Task 1 fixture export ran locally against Supabase using the exis
 - Re-ran `npm run typecheck`: passed.
 - Re-ran `npm run test:calc`: passed 74/74.
 - Next blocker before `/api/calc/preview`: current API Docker image runs `node src/index.js` and copies TS files without compiling. Need production-safe TS compilation or JS wrapper before importing calc from an Express route.
+- Added production-safe calc compilation:
+  - `ops/api/tsconfig.build.json`
+  - `npm run build:calc`
+  - Docker build now installs dev deps in a build stage, compiles calc TS into ignored `src/calc-dist/`, prunes dev deps, and copies compiled output into the runtime stage.
+  - `npm test` now runs `npm run build:calc` before JS integration tests so the Express route can import compiled calc code.
+- Added `POST /api/calc/preview` behind `requireAuth`.
+- Added `ops/api/test/calc-route.test.js` for unauthenticated 401 and authenticated typical preview response.
+- Re-ran `npm run build:calc`, `npm run typecheck`, and `npm run test:calc`: all passed.
+- Full API integration suite still needs a Postgres-backed run (local Postgres is not running here; use CI or VPS temporary Postgres as in prior blocks).
 - Block 1 PR #36 was merged to `main`; GitHub Actions deploy to staging passed.
 - Block 2 PR #37 was merged to `main`; GitHub Actions deploy run `26111396624` passed.
 - Created `block-3-warehouse` from fresh `main`.

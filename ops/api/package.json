@@ -7,8 +7,9 @@
     "node": ">=20.0.0"
   },
   "scripts": {
+    "build:calc": "tsc -p tsconfig.build.json",
     "start": "node src/index.js",
-    "test": "node --test test/*.test.js",
+    "test": "npm run build:calc && node --test test/*.test.js",
     "test:calc": "tsx --test test/calc/*.test.ts",
     "typecheck": "tsc --noEmit"
   },

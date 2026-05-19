@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": "src/calc-dist",
+    "rootDir": "src/calc",
+    "declaration": false,
+    "sourceMap": false
+  },
+  "include": ["src/calc/**/*.ts"]
+}
