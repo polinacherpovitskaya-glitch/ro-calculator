@@ -6,6 +6,7 @@ import ChangePasswordView from './views/ChangePasswordView.vue';
 import WarehouseListView from './views/WarehouseListView.vue';
 import WarehouseItemView from './views/WarehouseItemView.vue';
 import InventoryAuditView from './views/InventoryAuditView.vue';
+import WarehouseHistoryView from './views/WarehouseHistoryView.vue';
 
 const router = createRouter({
   history: createWebHistory(),
@@ -15,6 +16,7 @@ const router = createRouter({
     { path: '/change-password', name: 'change-password', component: ChangePasswordView, meta: { requiresAuth: true } },
     { path: '/warehouse', name: 'warehouse', component: WarehouseListView, meta: { requiresAuth: true } },
     { path: '/warehouse/inventory', name: 'warehouse-inventory', component: InventoryAuditView, meta: { requiresAuth: true } },
+    { path: '/warehouse/history', name: 'warehouse-history', component: WarehouseHistoryView, meta: { requiresAuth: true } },
     { path: '/warehouse/:id', name: 'warehouse-item', component: WarehouseItemView, meta: { requiresAuth: true } },
   ],
 });

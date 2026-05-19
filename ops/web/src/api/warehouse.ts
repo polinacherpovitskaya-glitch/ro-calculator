@@ -74,10 +74,16 @@ export async function getItem(id: number): Promise<WarehouseItem> {
   return item;
 }
 
-export async function listHistory(params: { itemId?: number; limit?: number } = {}): Promise<WarehouseHistoryEntry[]> {
+export async function listHistory(
+  params: { itemId?: number; type?: string; from?: string; to?: string; limit?: number; offset?: number } = {}
+): Promise<WarehouseHistoryEntry[]> {
   const searchParams = new URLSearchParams();
   if (params.itemId) searchParams.set('item_id', String(params.itemId));
+  if (params.type) searchParams.set('type', params.type);
+  if (params.from) searchParams.set('from', params.from);
+  if (params.to) searchParams.set('to', params.to);
   if (params.limit) searchParams.set('limit', String(params.limit));
+  if (params.offset) searchParams.set('offset', String(params.offset));
   const query = searchParams.toString();
   const { history } = await apiFetch<{ history: WarehouseHistoryEntry[] }>(`/api/warehouse/history${query ? `?${query}` : ''}`);
   return history;

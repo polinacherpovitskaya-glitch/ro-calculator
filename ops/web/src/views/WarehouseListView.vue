@@ -8,6 +8,7 @@
       <div class="header-actions">
         <RouterLink to="/">Главная</RouterLink>
         <RouterLink to="/warehouse/inventory">Инвентаризация</RouterLink>
+        <RouterLink to="/warehouse/history">Журнал</RouterLink>
         <button type="button" @click="showCreate = true">Новая позиция</button>
       </div>
     </header>

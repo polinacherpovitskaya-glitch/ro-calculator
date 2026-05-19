@@ -1,8 +1,8 @@
 # Migration status
 
-Last update: 2026-05-19T14:26:00-03:00
+Last update: 2026-05-19T14:31:00-03:00
 Current block: 3
-Current task within block: Task 8 Vue warehouse history view
+Current task within block: Task 9 Playwright E2E smoke
 Branch: block-3-warehouse
 Last commit: main `9a563e6` includes Block 2 merge
 Tests: Block 2 PR checks passed; main deploy passed; live staging health `db.ok=true`; live auth smoke passed after deploy.
@@ -69,12 +69,16 @@ Tests: Block 2 PR checks passed; main deploy passed; live staging health `db.ok=
 - Verified `cd ops/web && npm run build` passing after item card.
 - Added `/warehouse/inventory` inventory audit view with factual qty entry, delta calculation, and `POST /api/warehouse/inventory-audit` integration.
 - Verified `cd ops/web && npm run build` passing after inventory view.
+- Added `/warehouse/history` movement history view with type/item/date filters and simple page controls.
+- Extended `GET /api/warehouse/history` with `type` and `offset` query support.
+- Verified API test suite again in temporary VPS containers: 30/30 passing.
+- Verified `cd ops/web && npm run build` passing after history view.
 
 ## Next steps for Codex
 
-1. Add `/warehouse/history` movement history view.
-2. Add filters and pagination/limit controls.
-3. Re-run web build before the next commit.
+1. Add Playwright warehouse smoke test scaffold.
+2. Decide/run available E2E path for staging once branch is deployed, or document if CI-only until PR deploy.
+3. Update `ops/README.md`.
 
 ## Quality gates status (Block 2)
 

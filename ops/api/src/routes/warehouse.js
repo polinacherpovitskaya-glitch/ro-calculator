@@ -427,13 +427,20 @@ router.get(
       params.push(req.query.to);
       where.push(`created_at <= $${params.length}`);
     }
+    if (req.query.type) {
+      params.push(req.query.type);
+      where.push(`type = $${params.length}`);
+    }
     const limit = Math.min(Math.max(Number(req.query.limit || 50), 1), 200);
+    const offset = Math.max(Number(req.query.offset || 0), 0);
     params.push(limit);
+    params.push(offset);
     const { rows } = await getPool().query(
       `SELECT * FROM warehouse_history
         ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
         ORDER BY created_at DESC, id DESC
-        LIMIT $${params.length}`,
+        LIMIT $${params.length - 1}
+        OFFSET $${params.length}`,
       params
     );
     res.json({ history: rows });
