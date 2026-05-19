@@ -1,10 +1,10 @@
 # Migration status
 
-Last update: 2026-05-19T12:52:44-03:00
+Last update: 2026-05-19T12:54:45-03:00
 Current block: 1
-Current task within block: 8
+Current task within block: 9
 Branch: block-1-infrastructure
-Last commit: f40b405
+Last commit: 72f22cf
 Tests: 4/4 API health tests passing in temporary VPS containers; `ops/web` production build passing; compose smoke passing on VPS temp stack; live staging health `db.ok=true`; production dependency audit has 0 vulnerabilities
 
 ## What was just done
@@ -21,12 +21,16 @@ Tests: 4/4 API health tests passing in temporary VPS containers; `ops/web` produ
 - Completed Block 1 Task 7: deployed `/srv/ops` to the VPS, generated `/srv/ops/infra/.env` with a private Postgres password, built web on the VPS, started the real staging compose stack.
 - Caddy obtained a Let's Encrypt certificate for `ops-staging.recycleobject.ru`.
 - Verified `https://ops-staging.recycleobject.ru/api/health` returns `status: "ok"` and `db.ok=true`.
+- Completed Block 1 Task 8 code/setup: generated and installed GitHub Actions deploy key, set GitHub secrets `OPS_SSH_PRIVATE_KEY`, `OPS_HOST`, `OPS_USER`, added `.github/workflows/ops-deploy.yml`, and pushed `block-1-infrastructure`.
+- Workflow runs tests/builds on PRs and deploys only on push to `main`.
 
 ## Next steps
-- Continue Block 1 Task 8: add GitHub Actions deploy workflow. This requires GitHub Actions deploy secrets (`OPS_SSH_PRIVATE_KEY`, `OPS_HOST`, `OPS_USER`) to be configured before the workflow can deploy from `main`.
+- Continue Block 1 Task 9: add backup script and systemd timer, then configure Selectel Object Storage credentials on the VPS.
+- Need `S3_ACCESS_KEY` and `S3_SECRET_KEY` for bucket `ro-ops-backups` before backup verification can be completed.
 
 ## Blockers / questions
-- Local shell currently has no `docker` or `psql`, so DB-positive tests cannot run locally. I used isolated temporary VPS containers as the verification path for Task 4.
+- Need Selectel Object Storage S3 credentials (`S3_ACCESS_KEY`, `S3_SECRET_KEY`) for Task 9 backup verification.
+- Local shell currently has no `docker` or `psql`, so DB-positive tests cannot run locally. I used isolated temporary VPS containers as the verification path.
 
 ## How to resume
 Read this `STATUS.md`, then continue with Block 1 Task 5 in `docs/superpowers/plans/2026-05-15-block-1-infrastructure.md`.
