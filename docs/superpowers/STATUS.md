@@ -1,8 +1,8 @@
 # Migration status
 
-Last update: 2026-05-19T16:20:00-03:00
+Last update: 2026-05-19T16:55:00-03:00
 Current block: 4
-Current task within block: Task 6 Playwright smoke + README + PR
+Current task within block: Task 6 final PR
 Branch: block-4-shipments-china
 Last commit: main `e951fd0` includes Block 3 + Playwright smoke follow-up
 Tests: Block 3 PR checks passed; main deploy passed; live staging health `db.ok=true`; warehouse API/UI smoke passed; Playwright warehouse smoke 1/1 passed.
@@ -130,12 +130,28 @@ Tests: Block 3 PR checks passed; main deploy passed; live staging health `db.ok=
   - `/china/catalog`
 - Added home navigation links for shipments and China.
 - Verified `cd ops/web && npm run build` passing.
+- Added `tests/playwright/shipments-china.spec.ts`:
+  - login
+  - create shipment with a linked warehouse item
+  - receive it
+  - verify warehouse qty increased
+  - verify receipt history is visible
+- Fixed the `/shipments/new -> /shipments/:id` and `/china/new -> /china/:id` component reuse bug by updating local form state after create.
+- Relaxed the warehouse Playwright history assertion so it checks that `manual_edit` exists, not that it is the newest row; Block 4 receipts can legitimately appear above it.
+- Updated `ops/README.md` with Block 4 endpoints, screens, refresh, compare, and smoke notes.
+- Manually deployed the current branch to staging for live smoke.
+- Verified final gates:
+  - API suite in temporary VPS containers: 52/52 passing
+  - `cd ops/web && npm run build`: passing
+  - Playwright staging smoke: `warehouse.spec.ts` + `shipments-china.spec.ts`, 2/2 passing
+  - staging refresh/compare re-run after smoke, all counts matched
+  - live staging `/api/health`: `db.ok=true`
 
 ## Next steps for Codex
 
-1. Add Playwright smoke for shipments/china.
-2. Update `ops/README.md`.
-3. Run final quality gates, open PR, and merge only if green.
+1. Commit Task 6 changes.
+2. Push `block-4-shipments-china`.
+3. Open Block 4 PR to `main`.
 
 ## Quality gates status (Block 2)
 
@@ -169,8 +185,8 @@ Tests: Block 3 PR checks passed; main deploy passed; live staging health `db.ok=
 - [x] refresh/compare scripts updated
 - [x] staging shipments/china data refreshed from Supabase
 - [x] Vue shipments/china screens built
-- [ ] Playwright shipments/china smoke passing
-- [ ] `ops/README.md` updated
+- [x] Playwright shipments/china smoke passing
+- [x] `ops/README.md` updated
 - [ ] PR opened
 - [ ] PR merged to main
 

@@ -206,6 +206,14 @@ async function save() {
         extras: {},
       })),
     });
+    form.id = Number(purchase.id);
+    form.status = purchase.status;
+    form.items = (purchase.items || []).map((item) => ({
+      warehouse_item_id: item.warehouse_item_id ? Number(item.warehouse_item_id) : null,
+      name: item.name,
+      qty: Number(item.qty),
+      unit_price: item.unit_price === null || item.unit_price === undefined ? null : Number(item.unit_price),
+    }));
     await router.replace(`/china/${purchase.id}`);
   } catch (caught) {
     error.value = caught instanceof Error ? caught.message : 'Не удалось сохранить закупку';

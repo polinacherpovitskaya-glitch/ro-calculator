@@ -183,6 +183,15 @@ async function save() {
       note: form.note || null,
       items: payloadItems(),
     });
+    form.id = Number(created.id);
+    form.status = created.status;
+    form.items = (created.items || []).map((item) => ({
+      warehouse_item_id: item.warehouse_item_id ? Number(item.warehouse_item_id) : null,
+      name: item.name,
+      sku: String(item.extras?.sku || ''),
+      qty: Number(item.received_qty ?? item.qty),
+      unit_price: item.unit_price === null || item.unit_price === undefined ? null : Number(item.unit_price),
+    }));
     await router.replace(`/shipments/${created.id}`);
   } catch (caught) {
     error.value = caught instanceof Error ? caught.message : 'Не удалось сохранить приёмку';

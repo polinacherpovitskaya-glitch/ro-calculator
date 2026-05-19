@@ -27,5 +27,5 @@ test('warehouse e2e: login, edit qty, verify history', async ({ page }) => {
   await qtyInput.fill(String(before + 1));
   await page.getByRole('button', { name: 'Сохранить' }).click();
 
-  await expect(page.locator('.history-entry').first()).toContainText('manual_edit');
+  await expect(page.locator('.history-entry').filter({ hasText: 'manual_edit' }).first()).toBeVisible();
 });

@@ -4,7 +4,7 @@ Operational core of `recycleobject.ru`: migration target for the old Vercel + Su
 
 ## Status
 
-- Stage A — Build, Blocks 1-2 merged; Block 3 warehouse in progress
+- Stage A — Build, Blocks 1-3 merged; Block 4 shipments + China in progress
 - Staging domain: `https://ops-staging.recycleobject.ru`
 - Production cutover: not here; Stage C is owner-run only
 - UptimeRobot: deferred/manual follow-up, not blocking the migration blocks
@@ -54,7 +54,14 @@ cd ../web
 npm run build
 ```
 
-Warehouse staging smoke is scaffolded in `tests/playwright/warehouse.spec.ts`. It expects:
+Warehouse and shipments/China staging smokes live in:
+
+```text
+tests/playwright/warehouse.spec.ts
+tests/playwright/shipments-china.spec.ts
+```
+
+They expect:
 
 ```text
 E2E_BASE_URL=https://ops-staging.recycleobject.ru
@@ -264,6 +271,69 @@ Dataset compare:
 node ops/scripts/compare-datasets.mjs
 ```
 
+## Shipments + China Module
+
+Block 4 adds receipt workflows and China purchasing on top of the warehouse redesign.
+
+Tables:
+
+```text
+shipments
+shipment_items
+china_purchases
+china_purchase_items
+china_catalog
+```
+
+Canonical rules:
+
+- `POST /api/shipments/:id/receive` and `POST /api/china/purchases/:id/receive` require `Idempotency-Key`.
+- Receive runs in a transaction, locks the shipment row, locks each touched warehouse item, writes `warehouse_history.type='receipt'`, and increments `warehouse_items.qty`.
+- Receipt never creates reservations.
+- New warehouse items must be explicit (`extras.create_new=true`) and carry a SKU.
+- China purchase receive creates a shipment, copies purchase items into `shipment_items`, then uses the same receive operation as direct shipments.
+
+Endpoints:
+
+```text
+GET    /api/shipments
+GET    /api/shipments/:id
+POST   /api/shipments
+PATCH  /api/shipments/:id
+DELETE /api/shipments/:id
+POST   /api/shipments/:id/receive
+
+GET    /api/china/purchases
+POST   /api/china/purchases
+GET    /api/china/purchases/:id
+PATCH  /api/china/purchases/:id
+DELETE /api/china/purchases/:id
+POST   /api/china/purchases/:id/receive
+
+GET    /api/china/catalog
+POST   /api/china/catalog
+PATCH  /api/china/catalog/:id
+```
+
+Screens:
+
+```text
+/shipments
+/shipments/new
+/shipments/:id
+/china
+/china/new
+/china/:id
+/china/catalog
+```
+
+Refresh notes:
+
+- Legacy Supabase stores shipments and China purchases as JSON snapshot columns (`shipment_data`, `purchase_data`).
+- `ops/scripts/refresh/03-shipments-china.mjs` normalizes child item rows from those snapshots.
+- The China catalog is seeded from `data/china_catalog.json` locally, or from `https://calc.recycleobject.ru/data/china_catalog.json` on VPS.
+- Compare includes `shipments`, `shipment_items`, `china_purchases`, `china_purchase_items`, and `china_catalog`.
+
 ## Current Infra
 
 | Parameter | Value |
@@ -279,4 +349,4 @@ node ops/scripts/compare-datasets.mjs
 
 ## Next
 
-Finish Block 3 PR, then continue with Block 4 shipments + China.
+Finish Block 4 PR, then continue with Block 5 molds + blanks + colors + marketplaces.
