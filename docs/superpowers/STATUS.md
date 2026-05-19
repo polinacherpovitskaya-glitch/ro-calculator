@@ -1,11 +1,11 @@
 # Migration status
 
-Last update: 2026-05-19T14:18:00-03:00
-Current block: 3
-Current task within block: Playwright smoke follow-up PR
-Branch: block-3-warehouse
-Last commit: main `9a563e6` includes Block 2 merge
-Tests: Block 2 PR checks passed; main deploy passed; live staging health `db.ok=true`; live auth smoke passed after deploy.
+Last update: 2026-05-19T14:20:00-03:00
+Current block: 4
+Current task within block: Task 1 SQL migration
+Branch: block-4-shipments-china
+Last commit: main `e951fd0` includes Block 3 + Playwright smoke follow-up
+Tests: Block 3 PR checks passed; main deploy passed; live staging health `db.ok=true`; warehouse API/UI smoke passed; Playwright warehouse smoke 1/1 passed.
 
 ## What was just done
 
@@ -83,12 +83,15 @@ Tests: Block 2 PR checks passed; main deploy passed; live staging health `db.ok=
   - protected `/api/warehouse/items` returned 227 rows
   - `/warehouse` SPA route returned HTTP 200
 - Fixed and ran Playwright warehouse smoke against live staging: 1/1 passing.
+- Block 3 Playwright follow-up PR #39 was merged to `main`.
+- Created `block-4-shipments-china` from fresh `main`.
+- Read `docs/superpowers/plans/2026-05-15-block-4-shipments-china.md`.
 
 ## Next steps for Codex
 
-1. Push `block-3-playwright-smoke-fix`.
-2. Open/merge the small PR with the Playwright smoke selector/import fixes and updated status.
-3. Start Block 4 from fresh `main`.
+1. Implement `ops/db/migrations/004_shipments_china.sql`.
+2. Verify migrations 001-004 on a clean temporary Postgres container.
+3. Continue Shipments API TDD.
 
 ## Quality gates status (Block 2)
 
@@ -114,9 +117,22 @@ Tests: Block 2 PR checks passed; main deploy passed; live staging health `db.ok=
 - [x] PR merged to main
 - [x] main deploy passed
 
+## Quality gates status (Block 4)
+
+- [ ] `004_shipments_china.sql` added
+- [ ] Shipments API tests passing
+- [ ] China API tests passing
+- [ ] refresh/compare scripts updated
+- [ ] staging shipments/china data refreshed from Supabase
+- [ ] Vue shipments/china screens built
+- [ ] Playwright shipments/china smoke passing
+- [ ] `ops/README.md` updated
+- [ ] PR opened
+- [ ] PR merged to main
+
 ## Blockers / questions
 
-- No current Block 2 blocker.
+- No current Block 4 blocker.
 - Supabase `employees` currently have no email values, so employee temp-password issuance produced only a CSV header. Staging admin smoke still covers the protected auth path.
 - Local shell currently has no `docker` or `psql`, so DB-positive tests cannot run locally. Using isolated VPS containers as the verification path.
 
@@ -128,10 +144,11 @@ Tests: Block 2 PR checks passed; main deploy passed; live staging health `db.ok=
 
 - ✅ Block 1: Infrastructure merged to `main` and deployed to staging
 - ✅ Block 2: Auth + employees merged to `main` and deployed to staging
-- 🔄 Block 3: Warehouse started
-- ⏳ Block 4-16, Stages B/C/D: pending
+- ✅ Block 3: Warehouse merged to `main`, deployed to staging, live smoke passed
+- 🔄 Block 4: Shipments + China started
+- ⏳ Block 5-16, Stages B/C/D: pending
 
 ## How to resume
 
 1. Read this `STATUS.md`.
-2. Continue Block 3 from Task 1 (`003_warehouse.sql`) on branch `block-3-warehouse`.
+2. Continue Block 4 from Task 1 (`004_shipments_china.sql`) on branch `block-4-shipments-china`.
