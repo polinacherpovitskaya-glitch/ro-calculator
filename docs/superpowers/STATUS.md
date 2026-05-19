@@ -1,8 +1,8 @@
 # Migration status
 
-Last update: 2026-05-19T17:14:35-03:00
+Last update: 2026-05-19T17:15:29-03:00
 Current block: 8
-Current task within block: Block 8 implementation drafted; next is staging refresh/smoke and PR
+Current task within block: PR opened; waiting for review/CI
 Branch: block-8-production
 Last commit: `d45592f` Record Block 7 merge and deploy (local branch includes this status carry-over; `main` was not pushed directly)
 Tests: `ops/api npm run typecheck` passed; `ops/api npm run test:calc` passed 77/77; `ops/web npm run build` passed; full Postgres-backed API suite passed 111/111 on a temporary VPS Postgres container with migrations 001-007.
@@ -49,6 +49,8 @@ Tests: `ops/api npm run typecheck` passed; `ops/api npm run test:calc` passed 77
   - `cd ops/web && npm run build`: passed
   - `node --check` for new/changed refresh scripts: passed
   - Full API suite on VPS temporary Postgres with migrations 001-007: passed 111/111
+- Opened Block 8 PR: https://github.com/polinacherpovitskaya-glitch/ro-calculator/pull/46
+- Next after review/merge: watch main deploy, run staging refresh/compare, then smoke `/production/calendar`, `/templates`, `/indirect-costs`, and `/production/plan`.
 - Block 7 PR #45 was squash-merged to `main` as `230ceaf`.
 - GitHub Actions main deploy run `26121716549` passed.
 - Verified live staging after Block 7 deploy:
