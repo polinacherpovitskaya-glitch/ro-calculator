@@ -1,15 +1,25 @@
 <template>
   <main class="placeholder">
-    <h1>RO Ops - staging</h1>
-    <p>Infrastructure ready. Block 1 complete.</p>
+    <header>
+      <div>
+        <h1>RO Ops - staging</h1>
+        <p>Привет, {{ auth.user?.email }}</p>
+      </div>
+      <button type="button" @click="handleLogout">Выйти</button>
+    </header>
+    <p>Infrastructure ready. Auth enabled.</p>
     <p>API health: <code>{{ healthStatus }}</code></p>
   </main>
 </template>
 
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
+import { useRouter } from 'vue-router';
+import { useAuthStore } from '../stores/auth';
 
 const healthStatus = ref('loading...');
+const auth = useAuthStore();
+const router = useRouter();
 
 onMounted(async () => {
   try {
@@ -20,6 +30,11 @@ onMounted(async () => {
     healthStatus.value = `error: ${String(error)}`;
   }
 });
+
+async function handleLogout() {
+  await auth.logout();
+  await router.push('/login');
+}
 </script>
 
 <style scoped>
@@ -31,13 +46,36 @@ onMounted(async () => {
   line-height: 1.5;
 }
 
+.placeholder header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
 .placeholder h1 {
   margin-top: 0;
+  margin-bottom: 0.35rem;
+}
+
+.placeholder header p {
+  margin: 0;
+  color: #4f5b67;
 }
 
 .placeholder code {
   background: #eee;
   padding: 0.1rem 0.4rem;
   border-radius: 4px;
+}
+
+.placeholder button {
+  min-height: 2.25rem;
+  border: 1px solid #c7cbd1;
+  border-radius: 6px;
+  background: white;
+  padding: 0 0.8rem;
+  font: inherit;
+  cursor: pointer;
 }
 </style>

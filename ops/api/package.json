@@ -11,6 +11,8 @@
     "test": "node --test test/*.test.js"
   },
   "dependencies": {
+    "argon2": "^0.41.1",
+    "cookie-parser": "^1.4.7",
     "express": "^4.19.2",
     "pg": "^8.11.5"
   }
