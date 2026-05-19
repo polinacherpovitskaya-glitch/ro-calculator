@@ -51,12 +51,36 @@ cd ops/web && npm run build
 # Calculator golden masters (включены в npm test, но прогнать отдельно для отчёта)
 cd ops/api && node --test test/calc/
 
+# Инварианты I1-I7 (см. WAREHOUSE-INTERACTION-MAP раздел 6) — это
+# защитная сетка против регрессии складских багов
+cd ops/api && node --test test/warehouse-invariants.test.js
+
 # Playwright e2e против staging
 cd tests/playwright && npx playwright test
 ```
 
 - [ ] **Все тесты зелёные.** Если что-то падает — это блокер.
 - [ ] Зафиксировать в отчёте (например `docs/stage-B-test-results.md`) сколько тестов прошло.
+
+### Прогон инвариантов прямо на staging-БД
+
+Помимо тестов с подготовленными фикстурами, прогнать I1-I7 SQL-запросы прямо на live-staging — это финальная проверка что данные после полного refresh + всей разработки не нарушают инвариантов:
+
+```bash
+DATABASE_URL="postgres://ops:<password>@<staging-host>:5432/ops" \
+  node ops/scripts/check-warehouse-invariants.mjs
+```
+
+Скрипт `ops/scripts/check-warehouse-invariants.mjs` запускает каждый из 7 запросов из WAREHOUSE-INTERACTION-MAP раздел 6, выводит:
+- I1: sum of active reservations vs qty: 0 violations
+- I2: history sum vs current qty: 0 violations
+- I3: actor missing on non-audit history: 0 violations
+- I4: orphan reservations: 0 violations
+- I5: (atomic — невозможно проверить SQL, только через тесты consume)
+- I6: (idempotency — невозможно SQL, только через тесты)
+- I7: (no localStorage — invariant архитектуры)
+
+**Любое нарушение I1-I4 = блокер cutover.** Разбираемся, чиним, повторяем.
 
 ---
 

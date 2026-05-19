@@ -1,6 +1,14 @@
 # Block 9 — ⭐ Orders + Order items + Factual Implementation Plan
 
-> **REQUIRED:** мастер-плейбук + Block 7 (calc engine) + Block 8 (templates).
+> **REQUIRED:** мастер-плейбук + Block 7 + Block 8 + **[WAREHOUSE-INTERACTION-MAP.md](2026-05-15-WAREHOUSE-INTERACTION-MAP.md)** + **[BUG-INVENTORY.md](2026-05-15-BUG-INVENTORY.md)**.
+
+> **Класс багов, которые фиксятся (главные!):**
+> - **D. "Project hardware ready" не помечается / не обновляется** — фиксили 4+ раза. Решение: state хранится только в `warehouse_reservations.status`, UI читает оттуда. `_buildProjectHardwareStockTruth` УДАЛЯЕТСЯ как класс.
+> - **C. Фантомные/орфанные резервы** — FK `warehouse_reservations.order_id REFERENCES orders(id) ON DELETE CASCADE` + cron-задача очистки при close/cancel
+> - **E. Дубликаты позиций в orders / item_data drift** — order_items хранятся отдельно от calculator_data
+> - **B. Двойное consume** — Idempotency-Key
+> - **G. Race conditions** при параллельных consume — транзакция + SELECT FOR UPDATE
+> - **F. Цены рассинхрон** — calculator_data хранит snapshot цен, не живые ссылки
 >
 > **ВТОРОЙ САМЫЙ КРИТИЧНЫЙ БЛОК (после Block 7).** Пользователь сказал:
 > *"Заказы: супер важная штука. Мы очень активно смотрим и каждый день пользуемся. Очень важно, чтобы это тоже перенеслось точь-в-точь, копеечку в копеечку."*
@@ -126,22 +134,194 @@ POST   /api/orders/:id/consume-hardware         { items: [{warehouse_item_id, qt
                                                 ИДЕМПОТЕНТНО (через Idempotency-Key)
 ```
 
-**Бизнес-правила:**
-- `consume-hardware` — критическая операция. Транзакция:
-  1. Для каждой `{warehouse_item_id, qty}`: проверить `available_qty >= qty`, иначе 400.
-  2. Уменьшить `warehouse_items.qty` на qty.
-  3. Создать `warehouse_history` запись type='consume', order_id=:id, qty_change=-qty.
-  4. Если есть активные `warehouse_reservations` для этого item+order — переводим в status='consumed' (по очереди FIFO до покрытия qty).
+**Бизнес-правила (главная часть редизайна, см. WAREHOUSE-INTERACTION-MAP и BUG-INVENTORY):**
+
+### consume-hardware — критическая операция
+
+Транзакция с FOR UPDATE и идемпотентностью (фикс классов B, G, D):
+
+```js
+// POST /api/orders/:id/consume-hardware
+// Body: { items: [{ warehouse_item_id, qty, note? }], note? }
+// Header: Idempotency-Key
+//
+router.post('/:id/consume-hardware', requireAuth, async (req, res) => {
+  await withIdempotency(req, res, async (req, res) => {
+    const orderId = Number(req.params.id);
+    const items = Array.isArray(req.body.items) ? req.body.items : [];
+    if (!items.length) throw httpError(400, 'NO_ITEMS');
+
+    await withTransaction(async (client) => {
+      // 1. Lock order
+      const orderRes = await client.query(
+        `SELECT id, status FROM orders WHERE id = $1 FOR UPDATE`, [orderId]
+      );
+      if (!orderRes.rows[0]) throw httpError(404, 'NOT_FOUND');
+      if (['closed', 'cancelled'].includes(orderRes.rows[0].status)) {
+        throw httpError(400, 'ORDER_FINAL', 'Нельзя списывать в закрытый/отменённый заказ');
+      }
+
+      // 2. Lock all warehouse items в одном порядке (ORDER BY id — избегаем дедлоков)
+      const itemIds = [...new Set(items.map(i => Number(i.warehouse_item_id)))].sort((a,b) => a-b);
+      await client.query(
+        `SELECT id, qty FROM warehouse_items WHERE id = ANY($1) ORDER BY id FOR UPDATE`,
+        [itemIds]
+      );
+
+      // 3. Для каждого item: проверить хватает, посчитать new qty, обновить, записать history
+      for (const inp of items) {
+        const itemId = Number(inp.warehouse_item_id);
+        const qtyNeeded = Number(inp.qty);
+        if (qtyNeeded <= 0) throw httpError(400, 'BAD_QTY');
+
+        const cur = await client.query(
+          `SELECT qty FROM warehouse_items WHERE id = $1`, [itemId]
+        );
+        const qty_before = Number(cur.rows[0].qty);
+        const qty_after = qty_before - qtyNeeded;
+        if (qty_after < 0) {
+          throw httpError(400, 'INSUFFICIENT_STOCK',
+            `На складе ${qty_before}, запрошено ${qtyNeeded}`, { item_id: itemId, available: qty_before, requested: qtyNeeded });
+        }
+
+        await client.query(
+          `UPDATE warehouse_items SET qty = $1, updated_at = NOW() WHERE id = $2`,
+          [qty_after, itemId]
+        );
+        await client.query(
+          `INSERT INTO warehouse_history (item_id, type, qty_before, qty_after, qty_change,
+             order_id, actor_user_id, actor_name, note)
+           VALUES ($1, 'consume', $2, $3, $4, $5, $6, $7, $8)`,
+          [itemId, qty_before, qty_after, -qtyNeeded, orderId, req.user.id, req.user.email, inp.note || null]
+        );
+
+        // 4. Если у заказа были резервы на этот item — переводим в consumed (FIFO)
+        const reservationsToConsume = await client.query(
+          `SELECT id, qty FROM warehouse_reservations
+            WHERE order_id = $1 AND item_id = $2 AND status = 'active' AND source = 'order'
+            ORDER BY created_at ASC
+            FOR UPDATE`,
+          [orderId, itemId]
+        );
+        let remaining = qtyNeeded;
+        for (const r of reservationsToConsume.rows) {
+          if (remaining <= 0) break;
+          const rQty = Number(r.qty);
+          if (rQty <= remaining) {
+            // Полностью consume
+            await client.query(
+              `UPDATE warehouse_reservations SET status = 'consumed', consumed_at = NOW()
+               WHERE id = $1`, [r.id]
+            );
+            remaining -= rQty;
+          } else {
+            // Частичное — split: текущий резерв становится consumed на qty=remaining,
+            // остаток создаётся новой записью со status='active'
+            await client.query(
+              `UPDATE warehouse_reservations SET qty = $1, status = 'consumed', consumed_at = NOW()
+               WHERE id = $2`, [remaining, r.id]
+            );
+            await client.query(
+              `INSERT INTO warehouse_reservations (item_id, order_id, qty, source, status, note, actor_user_id)
+               VALUES ($1, $2, $3, 'order', 'active', $4, $5)`,
+              [itemId, orderId, rQty - remaining,
+               `Split from consumed res #${r.id}`, req.user.id]
+            );
+            remaining = 0;
+          }
+        }
+      }
+    });
+    res.json({ ok: true });
+  });
+});
+```
+
+### Резервы под заказ (fix классы C, D, E)
+
+- При **создании заказа** или **изменении состава фурнитуры** (если order_items содержат `warehouse_item_id`):
+  - В транзакции: удалить все `active` резервы со `source='order'` и `order_id=:id`, создать новые согласно текущему составу.
+  - Не пытаемся «обновить» существующие резервы — это путь к багам класса E. Только полная пересборка.
+- При `DELETE order` или `status = 'closed'/'cancelled'`:
+  - CASCADE FK удаляет резервы физически — для DELETE
+  - Для close/cancel cron-задача переводит резервы в `released`, no qty change
+
+### Cron-задача очистки резервов
+
+Файл `ops/api/src/cron/reservation-cleanup.js`:
+
+```js
+import { getPool } from '../db.js';
+
+export async function releaseOrphanReservations() {
+  const pool = getPool();
+  // Резервы где order закрыт/отменён — переводим в released
+  const res = await pool.query(`
+    UPDATE warehouse_reservations r
+    SET status = 'released', released_at = NOW()
+    FROM orders o
+    WHERE r.order_id = o.id
+      AND r.source = 'order'
+      AND r.status = 'active'
+      AND o.status IN ('closed', 'cancelled')
+    RETURNING r.id, r.item_id, r.order_id, r.qty
+  `);
+  console.log(`[cron] released ${res.rows.length} orphan reservations`);
+  return res.rows;
+}
+```
+
+Запуск: через `node-cron` каждый час, или через systemd timer:
+
+```
+# ops/infra/systemd/ops-reservation-cleanup.timer
+[Unit]
+Description=Release orphan reservations for closed/cancelled orders
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+```
+# ops/infra/systemd/ops-reservation-cleanup.service
+[Unit]
+Description=Release orphan reservations
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/curl -fsS -X POST -H "Authorization: Bearer <internal-token>" https://localhost/api/internal/cleanup-reservations
+```
+
+Эндпойнт `POST /api/internal/cleanup-reservations` — с auth по internal-token (НЕ user session), вызывает `releaseOrphanReservations()`.
+
+### Другие правила
+
 - `recalc`: вызвать `calcOrder()` из Block 7, сохранить результат в `orders.calculator_data` + `total_*` поля.
 - `status` transitions allow only valid moves (например, нельзя из `cancelled` в `in_production`).
+- **calculator_data — snapshot**, не live ссылки на цены (фикс класс F). При recalc пересоздаётся.
+- **order_items хранятся отдельно** от calculator_data — отдельные эндпойнты, не json merge (фикс класс E).
+- При `consume-hardware` — `UPDATE orders SET updated_at = NOW()` чтобы `updated_at` отражал реальное состояние.
 
-**Тесты (≥25):**
+**Тесты (≥35, фокус на регрессионных багах):**
 - CRUD стандартный
-- Idempotency на consume-hardware (повторный вызов → нет дубликата списания)
-- consume-hardware с недостаточным остатком → 400
+- Idempotency на consume-hardware (повторный вызов с тем же ключом → нет дубликата списания) — фикс класс B
+- consume-hardware с недостаточным остатком → 400 INSUFFICIENT_STOCK c details (item_id, available, requested)
+- consume-hardware в order со status='closed'/'cancelled' → 400 ORDER_FINAL
+- consume-hardware с qty <= 0 → 400 BAD_QTY
+- **Race-condition тест:** два параллельных consume на один item, qty=5, item.qty=8 → один 200, другой 400 INSUFFICIENT_STOCK (не оба прошли из-за FOR UPDATE)
+- consume переводит соответствующие active reservations в consumed (FIFO)
+- Резерв split: если qty запроса < qty резерва — split на consumed + новый active
+- **DELETE order CASCADE удаляет резервы** — проверить SELECT после DELETE возвращает 0 строк
+- close/cancel order + запуск cron releaseOrphanReservations() → резервы становятся released
 - recalc обновляет calculator_data
 - Status transitions: валидные проходят, невалидные → 400 INVALID_TRANSITION
 - DELETE non-draft → 400 NOT_DELETABLE
+- **Инвариант I1** после серии consume: SUM(active reservations qty) ≤ warehouse_items.qty
+- **Инвариант I2** после операций: SUM(qty_change в history) = warehouse_items.qty
+- **Инвариант I4**: после close order → 0 orphan active reservations
 
 - [ ] TDD-цикл. Commits: `Add orders API list+CRUD`, `Add order items API`, `Add consume-hardware operation`, `Add status transitions and recalc`
 

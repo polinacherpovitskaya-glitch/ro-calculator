@@ -1,12 +1,23 @@
 # Block 3 — Склад (warehouse) Implementation Plan
 
-> **REQUIRED:** Прочитай мастер-плейбук + Block 2 plan (паттерны auth, idempotency, общие обёртки).
+> **REQUIRED:** Прочитай мастер-плейбук + **[WAREHOUSE-INTERACTION-MAP.md](2026-05-15-WAREHOUSE-INTERACTION-MAP.md)** + **[BUG-INVENTORY.md](2026-05-15-BUG-INVENTORY.md)**. Эти два документа описывают, **что и зачем мы редизайним** в складе. Без них этот план не имеет смысла.
 
-**Goal:** Сотрудник видит склад в новой системе. Может посмотреть остатки, открыть карточку позиции, отредактировать qty/min/категорию, посмотреть журнал движений. Резервы под проекты — отдельная таблица, видна в карточке. Инвентаризация — отдельный сценарий.
+> **ВАЖНО:** В отличие от других блоков, Block 3 **редизайнит** структуру склада, а не переносит 1:1. Конкретно:
+> - История движений: 5 канонических типов вместо текущих 12+ (см. map раздел 3)
+> - Резервы: 2 источника вместо текущих 8+ (см. map раздел 4)
+> - State machine резервов: active → consumed | released, без обратных переходов (см. map раздел 2)
+> - Инварианты I1-I7 проверяются в CI (см. map раздел 6)
+> - Idempotency обязателен для всех мутаций (см. bug-inventory класс B)
+> - `SELECT FOR UPDATE` на всех изменениях qty (см. bug-inventory класс G)
 
-**Why this is critical:** склад — главная боль текущей системы. Тут нет права на "оптимистичный UI" — все изменения только после подтверждения сервером.
+**Goal:** Сотрудник видит склад в новой системе. Может посмотреть остатки, открыть карточку позиции, отредактировать qty/min/категорию, посмотреть журнал движений. Резервы под проекты — отдельная таблица, видна в карточке. Инвентаризация — отдельный сценарий. **Никаких локальных кэшей, никаких bootstrap'ов, единственный источник истины — Postgres через API.**
 
-**Source reference:** изучить `js/warehouse.js` в репо (7700 строк) — оттуда переносим логику инвентаризации, расчёта `available_qty = qty - reserved_qty`, фильтров по категориям, поиска и т.п.
+**Why this is critical:** склад — главная боль текущей системы (см. BUG-INVENTORY раздел A — "Cache hell" с 8+ commit'ами попыток починки только за последние 60 дней). Здесь мы лечим целые классы багов сменой архитектуры.
+
+**Source reference:**
+- `js/warehouse.js` (7700 строк) — UI логика, перенести как есть для **отображения**
+- `js/warehouse.js` функции вокруг `_isProjectHardwareReservationSource`, `_releaseProjectHardwareReservationsForRow` — **НЕ переносить дословно**, заменить чистым API (см. map раздел 2)
+- `js/supabase.js` функции `loadWarehouseItems`, `saveWarehouseItem`, `loadWarehouseReservations` — **НЕ переносить fallback-каскад**, заменить прямыми запросами
 
 **Dependencies:** Block 2 (auth + middleware готовы).
 
@@ -68,32 +79,58 @@ CREATE INDEX IF NOT EXISTS idx_warehouse_items_category ON warehouse_items(categ
 CREATE TABLE IF NOT EXISTS warehouse_reservations (
     id              BIGSERIAL PRIMARY KEY,
     item_id         BIGINT NOT NULL REFERENCES warehouse_items(id) ON DELETE CASCADE,
-    order_id        BIGINT,
-    project_id      BIGINT,
-    qty             NUMERIC NOT NULL,
+    -- CASCADE на order: удаление заказа физически удаляет резервы
+    -- (это часть лечения класса C "фантомные резервы")
+    order_id        BIGINT REFERENCES orders(id) ON DELETE CASCADE,
+    qty             NUMERIC NOT NULL CHECK (qty > 0),
+    -- Канонические source: 'order' | 'manual' (см. WAREHOUSE-INTERACTION-MAP раздел 4)
+    source          TEXT NOT NULL DEFAULT 'order' CHECK (source IN ('order','manual')),
     status          TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','released','consumed')),
     note            TEXT,
+    actor_user_id   INTEGER REFERENCES auth_users(id) ON DELETE SET NULL,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     consumed_at     TIMESTAMPTZ,
-    released_at     TIMESTAMPTZ
+    released_at     TIMESTAMPTZ,
+    -- Если source='order' — обязателен order_id
+    CONSTRAINT reservation_order_has_order_id
+        CHECK ((source = 'order' AND order_id IS NOT NULL) OR source != 'order'),
+    -- Финальные статусы — иммутабельны (но это enforce-ится на уровне API, не SQL)
+    -- consumed_at / released_at заполнены только для соответствующих статусов
+    CONSTRAINT reservation_consumed_has_timestamp
+        CHECK ((status = 'consumed' AND consumed_at IS NOT NULL) OR status != 'consumed'),
+    CONSTRAINT reservation_released_has_timestamp
+        CHECK ((status = 'released' AND released_at IS NOT NULL) OR status != 'released')
 );
 CREATE INDEX IF NOT EXISTS idx_reservations_item ON warehouse_reservations(item_id);
 CREATE INDEX IF NOT EXISTS idx_reservations_order ON warehouse_reservations(order_id) WHERE order_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_reservations_status ON warehouse_reservations(status);
+CREATE INDEX IF NOT EXISTS idx_reservations_active_by_item ON warehouse_reservations(item_id) WHERE status = 'active';
 
 CREATE TABLE IF NOT EXISTS warehouse_history (
     id              BIGSERIAL PRIMARY KEY,
     item_id         BIGINT REFERENCES warehouse_items(id) ON DELETE SET NULL,
-    type            TEXT NOT NULL,    -- receipt, consume, adjust, inventory_audit, manual_edit
+    -- Канонические 5 типов (см. WAREHOUSE-INTERACTION-MAP раздел 3)
+    type            TEXT NOT NULL CHECK (type IN ('receipt','consume','inventory_audit','manual_edit','return')),
     qty_before      NUMERIC,
     qty_after       NUMERIC,
-    qty_change      NUMERIC,
-    order_id        BIGINT,
-    shipment_id     BIGINT,
-    manager_name    TEXT,
+    qty_change      NUMERIC NOT NULL,
+    -- Контекст: хотя бы одна из этих ссылок заполнена (или ни одной — для manual_edit/inventory_audit)
+    order_id        BIGINT REFERENCES orders(id) ON DELETE SET NULL,
+    shipment_id     BIGINT,                       -- FK добавляется в Block 4
+    mold_id         BIGINT,                       -- FK добавляется в Block 5
+    marketplace_set_id BIGINT,                    -- FK добавляется в Block 5
+    audit_id        BIGINT,                       -- группирует inventory_audit
+    actor_user_id   INTEGER REFERENCES auth_users(id) ON DELETE SET NULL,
+    actor_name      TEXT,                          -- snapshot имени для случаев когда юзер удалён
     note            TEXT,
     details         JSONB DEFAULT '{}'::jsonb,
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    -- Инвариант: receipt всегда qty_change > 0
+    CONSTRAINT history_receipt_positive CHECK (type != 'receipt' OR qty_change > 0),
+    -- Инвариант: consume всегда qty_change < 0
+    CONSTRAINT history_consume_negative CHECK (type != 'consume' OR qty_change < 0),
+    -- Инвариант: return всегда qty_change > 0
+    CONSTRAINT history_return_positive CHECK (type != 'return' OR qty_change > 0)
 );
 CREATE INDEX IF NOT EXISTS idx_history_item ON warehouse_history(item_id);
 CREATE INDEX IF NOT EXISTS idx_history_created ON warehouse_history(created_at DESC);
@@ -177,21 +214,43 @@ GET    /api/warehouse/history[?item_id=&from=&to=&limit=]
 POST   /api/warehouse/inventory-audit перенос всех актуальных qty + список несоответствий
 ```
 
-**Бизнес-правила:**
+**Бизнес-правила (см. WAREHOUSE-INTERACTION-MAP раздел 1-3 для полной картины):**
 - `qty` всегда >= 0 (по БД проверяется при обновлении; если итог < 0 — 400 INSUFFICIENT_STOCK)
-- На каждое изменение `qty` (вручную, через приёмку, через consume) — запись в `warehouse_history`
-- При `POST /reservations/:id/consume`: текущий резерв переводится в status='consumed', `qty` позиции уменьшается на `reservation.qty`, в history добавляется запись type='consume'
-- При `POST /reservations/:id/release`: резерв → 'released', qty не меняется
-- При создании item — autoincrement ID (или передать ID, если копируем из Supabase — поэтому BIGINT PRIMARY KEY, не SERIAL)
+- На каждое изменение `qty` (вручную, через приёмку, через consume) — запись в `warehouse_history` с **каноническим** `type` из 5 разрешённых: `receipt`, `consume`, `inventory_audit`, `manual_edit`, `return`.
+- При `POST /reservations/:id/consume`: текущий резерв переводится в status='consumed', `qty` позиции уменьшается на `reservation.qty`, в history добавляется запись type='consume'. Всё в одной транзакции с `SELECT FOR UPDATE` на warehouse_items строке.
+- При `POST /reservations/:id/release`: резерв → 'released', qty не меняется.
+- Резервы со status='consumed' или 'released' — **иммутабельны**: PATCH запрещён, DELETE запрещён (только CASCADE-удаление через order).
+- При создании item — передаётся ID (BIGINT, не SERIAL — чтобы совпадать с существующими ID в старой Supabase).
+- **Idempotency-Key обязателен** на всех мутациях (POST/PATCH/DELETE). Без него — 400 NO_IDEMPOTENCY_KEY.
+- **Все мутации qty — внутри транзакции** с `SELECT FOR UPDATE` на затронутых items (см. BUG-INVENTORY класс G).
 
 **Тесты в `ops/api/test/warehouse.test.js`:**
 - GET без auth → 401
 - POST без Idempotency-Key → 400 NO_IDEMPOTENCY_KEY
 - POST с Idempotency-Key повторно → возвращает закешированный ответ, НЕ создаёт дубликат
-- Создание item → history содержит запись type='manual_edit'
-- Резерв > qty → 400 INSUFFICIENT_STOCK
-- consume резерв → qty уменьшается, history растёт
+- Создание item → history содержит запись type='manual_edit' с actor_user_id
+- Резерв > available qty → 400 INSUFFICIENT_STOCK
+- consume резерв → qty уменьшается, history растёт, status='consumed', consumed_at заполнен
 - DELETE item с активными резервами → 400 HAS_RESERVATIONS
+- PATCH резерва status='consumed' → 400 IMMUTABLE_RESERVATION (нельзя ничего менять у финальных статусов)
+- Параллельные consume (две сессии, одно qty=10, available=5): одна 200, вторая 400 INSUFFICIENT_STOCK. Race-condition тест через `Promise.all`.
+
+**Инвариантные тесты (отдельный файл `ops/api/test/warehouse-invariants.test.js`):**
+Каждый из 7 инвариантов (см. WAREHOUSE-INTERACTION-MAP раздел 6) — отдельный SQL-запрос, который должен возвращать 0 строк после любой серии операций. Эти тесты подготавливают сценарии (создают items, резервы, делают consume), затем проверяют что ни один инвариант не нарушен.
+
+Пример:
+```js
+test('I1: sum of active reservations never exceeds qty', async () => {
+  // Создать item с qty=10
+  // Зарезервировать 5, потом ещё 3, потом попытаться 5 — должно дать 400
+  // SELECT по инварианту I1 должен вернуть 0 строк
+});
+test('I2: sum of qty_change in history equals current qty', async () => {
+  // Создать item, сделать 5 разных операций (manual_edit, consume, receipt, inventory_audit)
+  // SUM(qty_change) должно быть равно текущему qty
+});
+// ... и так далее для I3-I7
+```
 
 (Заголовок тестов аналогично Block 2 — `import { test } from 'node:test'`, helper для login и получения cookie, помощник для парcинга `Set-Cookie`)
 
@@ -253,36 +312,80 @@ async function main() {
   }
 
   // 2. reservations
+  // ВАЖНО: source mapping (см. WAREHOUSE-INTERACTION-MAP раздел 4).
+  // Старые источники → канонические 2.
+  function mapReservationSource(oldSource, hasOrderId) {
+    const s = String(oldSource || '').toLowerCase();
+    if (['order_calc', 'project_hardware', 'order'].includes(s)) return 'order';
+    if (hasOrderId) return 'order';  // если есть order_id — это order-резерв, даже если source мусорный
+    return 'manual';
+  }
+
   const reservations = (await supabase.from('warehouse_reservations').select('*').throwOnError()).data;
   console.log(`warehouse_reservations: ${reservations.length}`);
+  let droppedReservations = 0;
   for (const r of reservations) {
+    const newSource = mapReservationSource(r.source, !!r.order_id);
+    // Если source=order но нет order_id — это битый резерв, пропускаем
+    if (newSource === 'order' && !r.order_id) { droppedReservations++; continue; }
+    // Финальные статусы — должны иметь timestamps
+    const consumed_at = r.status === 'consumed' ? (r.consumed_at || r.updated_at || r.created_at) : null;
+    const released_at = r.status === 'released' ? (r.released_at || r.updated_at || r.created_at) : null;
     await pool.query(
       `INSERT INTO warehouse_reservations
-         (id, item_id, order_id, project_id, qty, status, note, created_at, consumed_at, released_at)
+         (id, item_id, order_id, qty, source, status, note, created_at, consumed_at, released_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        ON CONFLICT (id) DO UPDATE SET
          status = EXCLUDED.status, qty = EXCLUDED.qty, note = EXCLUDED.note,
          consumed_at = EXCLUDED.consumed_at, released_at = EXCLUDED.released_at`,
-      [r.id, r.item_id, r.order_id || null, r.project_id || null, r.qty, r.status || 'active',
-       r.note || null, r.created_at || new Date().toISOString(), r.consumed_at || null, r.released_at || null]
+      [r.id, r.item_id, r.order_id || null, r.qty, newSource, r.status || 'active',
+       r.note || null, r.created_at || new Date().toISOString(), consumed_at, released_at]
     );
   }
+  if (droppedReservations) console.warn(`Dropped ${droppedReservations} reservations with source='order' but no order_id`);
 
   // 3. history
+  // ВАЖНО: type mapping (см. WAREHOUSE-INTERACTION-MAP раздел 3).
+  // 12+ старых типов → 5 канонических.
+  function mapHistoryType(oldType, qty_change, ctx) {
+    const t = String(oldType || '').toLowerCase();
+    if (['receipt', 'shipment_receive'].includes(t)) return 'receipt';
+    if (['inventory_audit', 'inventory_adjustment', 'inventory_apply'].includes(t)) return 'inventory_audit';
+    if (['return_to_warehouse', 'return_from_order'].includes(t)) return 'return';
+    if (['from_order', 'mold_usage', 'packaging', 'pendant', 'hardware', 'consume'].includes(t)) return 'consume';
+    if (['manual_add', 'manual_edit', 'manual', 'addition', 'deduction', 'adjustment', 'writeoff', 'extra_cost', 'import'].includes(t)) {
+      return 'manual_edit';
+    }
+    // unknown: эвристика по знаку
+    if (Number(qty_change) > 0 && ctx.shipment_id) return 'receipt';
+    if (Number(qty_change) < 0 && ctx.order_id) return 'consume';
+    return 'manual_edit';
+  }
+
   const history = (await supabase.from('warehouse_history').select('*').throwOnError()).data;
   console.log(`warehouse_history: ${history.length}`);
+  let droppedHistory = 0;
   for (const h of history) {
+    const newType = mapHistoryType(h.type, h.qty_change, {
+      shipment_id: h.shipment_id,
+      order_id: h.order_id,
+    });
+    // Проверка инварианта: receipt > 0, consume < 0, return > 0
+    if (newType === 'receipt' && Number(h.qty_change) <= 0) { droppedHistory++; continue; }
+    if (newType === 'consume' && Number(h.qty_change) >= 0) { droppedHistory++; continue; }
+    if (newType === 'return' && Number(h.qty_change) <= 0) { droppedHistory++; continue; }
     await pool.query(
       `INSERT INTO warehouse_history
-         (id, item_id, type, qty_before, qty_after, qty_change, order_id, shipment_id, manager_name, note, details, created_at)
+         (id, item_id, type, qty_before, qty_after, qty_change, order_id, shipment_id, actor_name, note, details, created_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
        ON CONFLICT (id) DO NOTHING`,
-      [h.id, h.item_id || null, h.type || 'manual_edit',
-       h.qty_before ?? null, h.qty_after ?? null, h.qty_change ?? null,
+      [h.id, h.item_id || null, newType,
+       h.qty_before ?? null, h.qty_after ?? null, h.qty_change ?? 0,
        h.order_id || null, h.shipment_id || null, h.manager_name || null,
        h.note || null, h.details || {}, h.created_at || new Date().toISOString()]
     );
   }
+  if (droppedHistory) console.warn(`Dropped ${droppedHistory} history rows with violated type/sign invariants — needs manual review`);
 
   // Bump sequences for serial columns so future inserts don't conflict
   await pool.query(`SELECT setval('warehouse_reservations_id_seq', GREATEST((SELECT COALESCE(MAX(id),0) FROM warehouse_reservations), 1))`);

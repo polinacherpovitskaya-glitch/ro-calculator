@@ -1,6 +1,12 @@
 # Block 4 — Приёмки + Китай (закупки + каталог) Implementation Plan
 
-> **REQUIRED:** Прочитай мастер-плейбук + Block 3 plan (паттерны: idempotency, refresh, compare). Используется тот же scaffolding.
+> **REQUIRED:** мастер-плейбук + Block 3 plan + **[WAREHOUSE-INTERACTION-MAP.md](2026-05-15-WAREHOUSE-INTERACTION-MAP.md)** + **[BUG-INVENTORY.md](2026-05-15-BUG-INVENTORY.md)**. `receive` операция — главная точка где склад растёт; здесь применяются все защиты из map'а.
+
+> **Класс багов, которые фиксятся в этом блоке** (см. BUG-INVENTORY):
+> - **I. Авто-создание «пустых» позиций при приёмке** (commit e93ca26) → валидация `warehouse_item_id` или явный `create_new=true`
+> - **B. Двойная приёмка** → Idempotency-Key на receive
+> - **G. Race conditions** при параллельных приёмках → `SELECT FOR UPDATE` + транзакция
+> - **A. Stale qty после приёмки** → один путь, никаких локальных кэшей
 
 **Goal:** Сотрудник может:
 - Создавать «приёмки» (shipments) — груз пришёл, такие-то позиции в таком-то количестве
@@ -130,19 +136,31 @@ Endpoints:
 - `POST /api/shipments` — создать
 - `PATCH /api/shipments/:id`
 - `DELETE /api/shipments/:id` (только если status='planned')
-- `POST /api/shipments/:id/receive` — критическая операция:
-  - меняет status на 'received', `received_at = NOW()`
-  - для каждого `shipment_item` с `warehouse_item_id`: увеличить `warehouse_items.qty` на `received_qty` (или `qty` если received_qty NULL)
-  - добавить в `warehouse_history` запись type='receipt', shipment_id=..., qty_change=...
-  - если линкованный `china_purchases.shipment_id` есть — поставить `arrived_at = NOW()`, status='received'
-  - всё в одной транзакции (`withTransaction`)
-  - идемпотентно через `withIdempotency`
+- `POST /api/shipments/:id/receive` — **критическая операция** (фиксит классы B/G/I/A из BUG-INVENTORY):
+  - Всё в одной транзакции (`withTransaction`)
+  - Идемпотентно через `withIdempotency` — повторный вызов с тем же ключом не дублирует
+  - `SELECT ... FOR UPDATE` на shipment row + на все затронутые warehouse_items (lock — фиксит race conditions класс G)
+  - **Валидация перед мутацией** (класс I):
+    - shipment.status != 'received' иначе 400 ALREADY_RECEIVED
+    - shipment_items не пустой иначе 400 EMPTY_SHIPMENT
+    - каждый shipment_item имеет `warehouse_item_id` ИЛИ `extras.create_new === true` с обязательными `name`, `extras.sku`. Иначе 400 NO_WAREHOUSE_LINK.
+  - Для `create_new` items: создаётся warehouse_item (qty=0 initially), потом по общему пути.
+  - Для каждого item: increment `warehouse_items.qty`, обновить `last_price`/`last_currency` если в shipment_item указаны.
+  - Запись в `warehouse_history` с **каноническим type='receipt'**, shipment_id=..., actor_user_id=..., qty_change > 0 (CHECK constraint enforce-нёт).
+  - Mark shipment.status='received', received_at=NOW().
+  - Если есть связанный `china_purchases.shipment_id` — обновить его status='received', arrived_at=NOW().
+  - **НЕ создаёт reservations.** Receipt — это просто увеличение qty, никаких резервов это не порождает.
 
 Тесты:
 - POST receive дважды с тем же Idempotency-Key → второй раз возвращает кешированный ответ, qty НЕ увеличивается дважды
 - POST receive без Idempotency-Key → 400
 - POST receive shipment, у которого нет items → 400 EMPTY_SHIPMENT
-- POST receive обновляет qty + добавляет history записи
+- POST receive обновляет qty + добавляет history записи c type='receipt'
+- POST receive с item без warehouse_item_id и без create_new → 400 NO_WAREHOUSE_LINK (фикс класс I)
+- POST receive с create_new=true но без name/sku → 400 INSUFFICIENT_NEW_ITEM_DATA
+- POST receive дважды без Idempotency-Key (разные ключи) → второй вызов 400 ALREADY_RECEIVED
+- **Race-condition тест:** два одновременных receive разных shipments на одни warehouse_items → оба завершаются без потери qty (sequential через FOR UPDATE)
+- **Инвариант I2 после receive:** SUM(qty_change) в history по item = текущему qty
 
 - [ ] TDD: тесты падают → реализация → зелёные
 - [ ] Commits: `Add shipments API`, `Add shipment receive operation`

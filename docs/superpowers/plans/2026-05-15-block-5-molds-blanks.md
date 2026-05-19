@@ -1,6 +1,11 @@
 # Block 5 — Молды + Бланки + Цвета + Marketplaces Implementation Plan
 
-> **REQUIRED:** мастер-плейбук + предыдущие блоки.
+> **REQUIRED:** мастер-плейбук + Block 3 + **[WAREHOUSE-INTERACTION-MAP.md](2026-05-15-WAREHOUSE-INTERACTION-MAP.md)** + **[BUG-INVENTORY.md](2026-05-15-BUG-INVENTORY.md)**.
+
+> **Класс багов, которые фиксятся:**
+> - **J. Mold ↔ blank ссылки теряются на calc reload** (commit c2511c9) → `mold_hardware` — единственное место хранения связи, не дублируется в order_items
+> - **B. Двойное использование молда** → Idempotency-Key на POST /molds/:id/use
+> - **G. Race conditions при mold use** → транзакция с SELECT FOR UPDATE
 
 **Goal:** Перенести модули:
 - **Молды** (`molds`) — формы для отливки с привязкой к hardware/blanks
@@ -142,10 +147,22 @@ ON CONFLICT (id) DO UPDATE SET version = EXCLUDED.version, applied_at = NOW();
 - Стандартный auth middleware + idempotency на мутациях
 - TDD тесты: 5-6 тестов на ресурс
 
-**Особенности молдов:**
+**Особенности молдов (учитываем WAREHOUSE-INTERACTION-MAP раздел 2 — mold НЕ создаёт reservations):**
 - `GET /api/molds/:id/hardware` — список привязанной фурнитуры
-- `PUT /api/molds/:id/hardware` — заменить весь список (массив `[{warehouse_item_id, qty_per_use, note}, ...]`)
-- `POST /api/molds/:id/use` — записать использование: `usage_count` инкрементируется на `units`, запись в `mold_usage_log`. Если есть привязанные `mold_hardware` — для каждого: создать или увеличить активный резерв в `warehouse_reservations` по `qty_per_use * units` (или сразу списать через consume — зависит от рабочего флоу, читай `js/molds.js` секцию `useMold()`)
+- `PUT /api/molds/:id/hardware` — заменить весь список (массив `[{warehouse_item_id, qty_per_use, note}, ...]`). Валидация: все warehouse_item_id существуют.
+- `POST /api/molds/:id/use` — записать использование:
+  - Body: `{ units, order_id?, operator_name?, note? }`
+  - Транзакция с `SELECT FOR UPDATE` на molds + на затронутые warehouse_items
+  - Шаги:
+    1. Lock mold row
+    2. Получить mold_hardware привязки
+    3. Lock все warehouse_items по этим привязкам (FOR UPDATE, ORDER BY id для избегания дедлоков)
+    4. Для каждой привязки: проверить available_qty >= qty_per_use * units, иначе 400 INSUFFICIENT_STOCK с детализацией какой именно фурнитуры не хватает.
+    5. Для каждой привязки: `UPDATE warehouse_items SET qty = qty - (qty_per_use * units)`, `INSERT warehouse_history (type='consume', mold_id=..., order_id=..., qty_change=-(...))`. **type='consume' с обязательным mold_id.**
+    6. `UPDATE molds SET usage_count = usage_count + units`
+    7. `INSERT mold_usage_log (mold_id, units, order_id, operator_name, note)`
+  - Idempotency-Key обязателен — повторный вызов с тем же ключом не списывает дважды.
+  - **НЕ создаёт reservations.** Mold use делает прямой consume, без промежуточного резерва (см. map раздел 2 — резервы только для orders/manual).
 
 **Особенности marketplaces:**
 - `composition` — массив `[{warehouse_item_id, qty}, ...]`. Валидация: все referencce-ы существуют.
