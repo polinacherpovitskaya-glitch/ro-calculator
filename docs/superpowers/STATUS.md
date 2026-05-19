@@ -1,11 +1,11 @@
 # Migration status
 
-Last update: 2026-05-19T16:34:00-03:00
+Last update: 2026-05-19T16:36:31-03:00
 Current block: 7
-Current task within block: Task 4 — golden-master test runner
+Current task within block: Task 5 — implement calcOrder baseline
 Branch: block-7-calculator
-Last commit: `83eb5df` Document calc engine layout
-Tests: Block 7 Task 1 fixture export ran locally against Supabase using the existing read key and produced 24 real-order JSON fixtures under `ops/api/test/fixtures/orders/`. Fixture coverage: 3 factual orders, 7 pendant orders, 22 mold orders, 24 hardware orders, 1 NFC order, and 13 complex orders. Task 3 TypeScript syntax check passed with `npx -y -p typescript tsc --strict --noEmit ops/api/src/calc/types.ts`. Plain `npx tsc` resolved to the wrong package, so the API package still needs an explicit TypeScript devDependency before CI wiring.
+Last commit: `f9b4337` Add calc TypeScript types skeleton
+Tests: Block 7 Task 1 fixture export ran locally against Supabase using the existing read key and produced 24 real-order JSON fixtures under `ops/api/test/fixtures/orders/`. Fixture coverage: 3 factual orders, 7 pendant orders, 22 mold orders, 24 hardware orders, 1 NFC order, and 13 complex orders. `cd ops/api && npm run typecheck` passes. `cd ops/api && npm run test:calc` is intentionally red at this TDD point: 1 fixture-count test passes and 24 golden tests fail with `calcOrder is not implemented yet`.
 
 ## What was just done
 
@@ -46,6 +46,11 @@ Tests: Block 7 Task 1 fixture export ran locally against Supabase using the exis
 - Added `ops/api/src/calc/README.md` with the migration map for public calc functions, shared internals, snapshot conversion, pricing unification constraints, and fixture gaps.
 - Added `ops/api/src/calc/types.ts` with strict TypeScript skeletons for production settings/params, product/hardware/packaging/pendant inputs and outputs, order summary, financial director data, factual output, TPA, legacy Supabase rows, and golden fixtures.
 - Verified the types file with TypeScript strict/noEmit via `npx -y -p typescript`.
+- Added API TypeScript tooling for calc work: `typescript`, `tsx`, `@types/node`, `ops/api/tsconfig.json`, `npm run typecheck`, and a separate `npm run test:calc`.
+- Added `ops/api/test/calc/golden-master.test.ts`.
+- Added a temporary `ops/api/src/calc/index.ts` stub that exports `calcOrder()` and throws until Task 5 implementation starts.
+- Ran `npm run typecheck`: passed.
+- Ran `npm run test:calc`: expected failure, 1/25 passed and 24/25 failed because `calcOrder` is still a stub.
 - Block 1 PR #36 was merged to `main`; GitHub Actions deploy to staging passed.
 - Block 2 PR #37 was merged to `main`; GitHub Actions deploy run `26111396624` passed.
 - Created `block-3-warehouse` from fresh `main`.

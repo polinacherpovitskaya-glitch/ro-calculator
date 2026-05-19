@@ -8,7 +8,9 @@
   },
   "scripts": {
     "start": "node src/index.js",
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "test:calc": "tsx --test test/calc/*.test.ts",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1049.0",
@@ -18,5 +20,10 @@
     "express": "^4.19.2",
     "multer": "^2.1.1",
     "pg": "^8.11.5"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.1",
+    "tsx": "^4.22.3",
+    "typescript": "^6.0.3"
   }
 }

@@ -351,6 +351,22 @@ export interface OrderOutput {
   revenue: number;
   marginPercent: number;
   hours: number;
+  total_revenue: number;
+  total_cost: number;
+  total_margin: number;
+  margin_percent: number;
+  total_hours_plan: number;
+}
+
+export interface CalcOrderResult {
+  total_revenue: number;
+  total_cost: number;
+  total_margin: number;
+  margin_percent: number;
+  total_hours_plan: number;
+  production_hours_plastic: number;
+  production_hours_packaging: number;
+  production_hours_hardware: number;
 }
 
 export interface TpaInput {
