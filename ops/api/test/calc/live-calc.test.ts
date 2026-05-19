@@ -4,6 +4,7 @@ import { calcOrder } from '../../src/calc/index.js';
 import { calcHardware } from '../../src/calc/hardware.js';
 import { calcPackaging } from '../../src/calc/packaging.js';
 import { getProductionParams } from '../../src/calc/params.js';
+import { calcPendant } from '../../src/calc/pendant.js';
 import { calcProduct } from '../../src/calc/product.js';
 import type { OrderInput, ProductInput, ProductionSettings } from '../../src/calc/types.js';
 
@@ -155,5 +156,121 @@ test('calcOrder live path supports products, hardware, packaging, fees, and hour
     production_hours_plastic: 3.3,
     production_hours_packaging: 1.1,
     production_hours_hardware: 2.2,
+  });
+});
+
+test('calcPendant supports element, cord, carabiner, assembly, and indirect costs', () => {
+  assert.deepEqual(calcPendant({
+    item_type: 'pendant',
+    name: 'AB',
+    quantity: 10,
+    element_price_per_unit: 3,
+    _totalSellPerUnit: 50,
+    elements: [{ char: 'A' }, { char: 'B' }],
+    cords: [{
+      name: 'Cord',
+      price_per_unit: 2,
+      delivery_price: 0.5,
+      assembly_speed: 10,
+      allocated_qty: 10,
+      qty_per_pendant: 1,
+      unit: 'шт',
+    }],
+    carabiners: [{
+      name: 'Ring',
+      price_per_unit: 1,
+      delivery_price: 0,
+      assembly_speed: 0,
+      allocated_qty: 10,
+      qty_per_pendant: 1,
+      unit: 'шт',
+    }],
+  }, params), {
+    costPerUnit: 21.6,
+    sellPerUnit: 50,
+    totalCost: 216,
+    totalRevenue: 500,
+    assemblyHours: 1.1,
+    packagingHours: 0,
+    hoursPlastic: 0,
+    hoursCutting: 0,
+    hoursBuiltinHw: 0,
+    hoursBuiltinAssembly: 0,
+    hoursPlasticZone: 0,
+    hoursAssemblyZone: 0,
+    attachmentAssemblyHours: 1.1,
+    letterAssemblyHours: 0,
+    attachmentPurchaseTotal: 30,
+    attachmentDeliveryTotal: 5,
+    attachmentAssemblyTotal: 110,
+    attachmentIndirectTotal: 11,
+    margin: { earned: 21.15, percent: 42.3 },
+  });
+});
+
+test('calcPendant supports metric cord pricing', () => {
+  const result = calcPendant({
+    item_type: 'pendant',
+    quantity: 10,
+    element_price_per_unit: 0,
+    _totalSellPerUnit: 100,
+    elements: [{ char: 'A' }],
+    cords: [{
+      name: 'Metric cord',
+      price_per_unit: 100,
+      delivery_price: 2,
+      allocated_qty: 10,
+      length_cm: 50,
+      unit: 'м',
+    }],
+  }, params);
+
+  assert.equal(result.attachmentPurchaseTotal, 500);
+  assert.equal(result.attachmentDeliveryTotal, 20);
+  assert.equal(result.totalCost, 520);
+});
+
+test('calcOrder live path includes pendant revenue, costs, and assembly hours', () => {
+  const order: OrderInput = {
+    settings,
+    products: [],
+    hardwareItems: [],
+    packagingItems: [],
+    pendantItems: [{
+      item_type: 'pendant',
+      quantity: 10,
+      element_price_per_unit: 3,
+      _totalSellPerUnit: 50,
+      elements: [{ char: 'A' }, { char: 'B' }],
+      cords: [{
+        name: 'Cord',
+        price_per_unit: 2,
+        delivery_price: 0.5,
+        assembly_speed: 10,
+        allocated_qty: 10,
+        qty_per_pendant: 1,
+        unit: 'шт',
+      }],
+      carabiners: [{
+        name: 'Ring',
+        price_per_unit: 1,
+        delivery_price: 0,
+        allocated_qty: 10,
+        qty_per_pendant: 1,
+        unit: 'шт',
+      }],
+    }],
+    extraCosts: [],
+  };
+
+  assert.deepEqual(calcOrder(order), {
+    total_revenue: 500,
+    total_cost: 288.5,
+    total_margin: 211.5,
+    margin_percent: 42.3,
+    total_hours_plan: 1.1,
+    production_hours_plastic: 0,
+    production_hours_packaging: 0,
+    production_hours_hardware: 1.1,
   });
 });

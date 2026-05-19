@@ -1,11 +1,11 @@
 # Migration status
 
-Last update: 2026-05-19T16:41:40-03:00
+Last update: 2026-05-19T16:43:03-03:00
 Current block: 7
-Current task within block: Task 8/9 — implement molds/pendants live calc support
+Current task within block: Task 10/11 — factual/TPA and calc preview endpoint
 Branch: block-7-calculator
-Last commit: `5b1e731` calc: add unified pricing module
-Tests: Block 7 Task 1 fixture export ran locally against Supabase using the existing read key and produced 24 real-order JSON fixtures under `ops/api/test/fixtures/orders/`. Fixture coverage: 3 factual orders, 7 pendant orders, 22 mold orders, 24 hardware orders, 1 NFC order, and 13 complex orders. `cd ops/api && npm run typecheck` passes. `cd ops/api && npm run test:calc` passes 68/68: 25 golden-master tests, 38 pricing unit tests, and 5 live product/hardware/packaging tests.
+Last commit: `8e6dc9d` calc: support product hardware packaging live totals
+Tests: Block 7 Task 1 fixture export ran locally against Supabase using the existing read key and produced 24 real-order JSON fixtures under `ops/api/test/fixtures/orders/`. Fixture coverage: 3 factual orders, 7 pendant orders, 22 mold orders, 24 hardware orders, 1 NFC order, and 13 complex orders. `cd ops/api && npm run typecheck` passes. `cd ops/api && npm run test:calc` passes 71/71: 25 golden-master tests, 38 pricing unit tests, and 8 live calc tests.
 
 ## What was just done
 
@@ -64,6 +64,11 @@ Tests: Block 7 Task 1 fixture export ran locally against Supabase using the exis
 - Added `ops/api/test/calc/live-calc.test.ts` covering production params, product cost, hardware cost, packaging cost, and live order totals/hours.
 - Re-ran `npm run typecheck`: passed.
 - Re-ran `npm run test:calc`: passed 68/68.
+- Added `ops/api/src/calc/pendant.ts` for live pendant calculations covering countable elements, element cost, cord/carabiner purchase and delivery, metric cord pricing, assembly salary, indirect, fallback retail price, and margin.
+- Wired live pendant results into `calcOrder()`.
+- Extended live calc tests for pendant totals, metric cord pricing, and order totals with pendant assembly hours.
+- Re-ran `npm run typecheck`: passed.
+- Re-ran `npm run test:calc`: passed 71/71.
 - Block 1 PR #36 was merged to `main`; GitHub Actions deploy to staging passed.
 - Block 2 PR #37 was merged to `main`; GitHub Actions deploy run `26111396624` passed.
 - Created `block-3-warehouse` from fresh `main`.

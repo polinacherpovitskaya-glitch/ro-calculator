@@ -2,6 +2,7 @@ import type { CalcOrderResult, JsonObject, JsonValue } from './types.js';
 import { calcHardware } from './hardware.js';
 import { calcPackaging } from './packaging.js';
 import { getProductionParams } from './params.js';
+import { calcPendant } from './pendant.js';
 import { charityAmount, commercialAmount, orderDiscount, round2, taxesAmount } from './pricing.js';
 import { calcProduct, getPrintingSellPricePerUnit } from './product.js';
 import type { OrderInput } from './types.js';
@@ -14,10 +15,6 @@ export function calcOrder(input: unknown): CalcOrderResult {
 }
 
 function calcLiveOrder(input: OrderInput): CalcOrderResult {
-  if (input.pendantItems.length > 0) {
-    throw new Error('calcOrder live pendant calculation is not implemented yet');
-  }
-
   const params = getProductionParams(input.settings);
   let grossRevenue = 0;
   let baseCosts = 0;
@@ -48,6 +45,15 @@ function calcLiveOrder(input: OrderInput): CalcOrderResult {
     grossRevenue += (packaging.sell_price || 0) * qty;
     baseCosts += result.totalCost;
     packagingHours += result.hoursPackaging;
+  }
+
+  for (const pendant of input.pendantItems) {
+    const result = calcPendant(pendant, params);
+    grossRevenue += result.totalRevenue;
+    baseCosts += result.totalCost;
+    plasticHours += result.hoursPlasticZone;
+    hardwareHours += result.assemblyHours;
+    packagingHours += result.packagingHours;
   }
 
   for (const extra of input.extraCosts) {
