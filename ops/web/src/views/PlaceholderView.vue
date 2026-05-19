@@ -14,6 +14,10 @@
         <RouterLink to="/colors">Цвета</RouterLink>
         <RouterLink to="/marketplaces">Маркетплейсы</RouterLink>
         <RouterLink to="/bugs">Баги</RouterLink>
+        <RouterLink to="/templates">Шаблоны</RouterLink>
+        <RouterLink to="/production/calendar">Календарь</RouterLink>
+        <RouterLink to="/production/plan">План</RouterLink>
+        <RouterLink to="/indirect-costs">Косвенные</RouterLink>
         <button type="button" @click="handleLogout">Выйти</button>
       </nav>
     </header>

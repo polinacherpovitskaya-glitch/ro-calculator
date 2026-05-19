@@ -1,0 +1,112 @@
+<template>
+  <main class="page">
+    <header class="page-header">
+      <div><h1>Шаблоны товаров</h1><p>{{ templates.length }} записей</p></div>
+      <div class="header-actions"><RouterLink to="/">Главная</RouterLink><RouterLink to="/production/plan">План</RouterLink><button type="button" @click="startCreate">Новый шаблон</button></div>
+    </header>
+
+    <section class="toolbar">
+      <label>Поиск <input v-model="search" type="search" @keydown.enter="load" /></label>
+      <label>Категория <input v-model="category" @keydown.enter="load" /></label>
+      <label class="check"><input v-model="activeOnly" type="checkbox" /> Только активные</label>
+      <button type="button" :disabled="loading" @click="load">Обновить</button>
+    </section>
+
+    <p v-if="error" class="error">{{ error }}</p>
+
+    <section class="layout">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Название</th><th>Категория</th><th>Статус</th><th></th></tr></thead>
+          <tbody>
+            <tr v-if="loading"><td colspan="4">Загрузка...</td></tr>
+            <tr v-for="template in templates" :key="template.id" :class="{ selected: selected?.id === template.id }">
+              <td>{{ template.name }}</td>
+              <td>{{ template.category || '—' }}</td>
+              <td>{{ template.is_active ? 'Активен' : 'Архив' }}</td>
+              <td class="right"><button type="button" @click="selectTemplate(template)">Открыть</button></td>
+            </tr>
+            <tr v-if="!loading && templates.length === 0"><td colspan="4">Пусто</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <aside v-if="selected" class="editor">
+        <header><h2>{{ isNew ? 'Новый шаблон' : selected.name }}</h2><button type="button" @click="selected = null">×</button></header>
+        <label>Название <input v-model="form.name" /></label>
+        <label>Категория <input v-model="form.category" /></label>
+        <label class="check"><input v-model="form.is_active" type="checkbox" /> Активен</label>
+        <label>JSON <textarea v-model="form.dataText" rows="16" spellcheck="false" /></label>
+        <footer class="actions">
+          <button v-if="!isNew" type="button" @click="remove">Удалить</button>
+          <button type="button" :disabled="saving" @click="save">Сохранить</button>
+        </footer>
+      </aside>
+    </section>
+  </main>
+</template>
+
+<script setup lang="ts">
+import { computed, onMounted, reactive, ref, watch } from 'vue';
+import type { ProductTemplate } from '../api/templates';
+import * as api from '../api/templates';
+
+const templates = ref<ProductTemplate[]>([]);
+const selected = ref<ProductTemplate | null>(null);
+const loading = ref(false);
+const saving = ref(false);
+const error = ref('');
+const search = ref('');
+const category = ref('');
+const activeOnly = ref(true);
+const form = reactive({ id: 0, name: '', category: '', is_active: true, dataText: '{}' });
+const isNew = computed(() => form.id === 0);
+let timer: number | undefined;
+
+onMounted(load);
+watch(search, () => { window.clearTimeout(timer); timer = window.setTimeout(() => void load(), 250); });
+
+function message(caught: unknown) { return caught && typeof caught === 'object' && 'message' in caught ? String(caught.message) : 'Операция не выполнена'; }
+function fill(template: ProductTemplate | null) {
+  Object.assign(form, {
+    id: template ? Number(template.id) : 0,
+    name: template?.name || '',
+    category: template?.category || '',
+    is_active: template?.is_active ?? true,
+    dataText: JSON.stringify(template?.data || {}, null, 2),
+  });
+}
+async function load() {
+  loading.value = true; error.value = '';
+  try { templates.value = await api.listTemplates({ search: search.value, category: category.value, active: activeOnly.value ? true : undefined }); }
+  catch (caught) { error.value = message(caught); }
+  finally { loading.value = false; }
+}
+function selectTemplate(template: ProductTemplate) { selected.value = template; fill(template); }
+function startCreate() { selected.value = { id: 0, name: '', category: null, data: {}, is_active: true }; fill(null); }
+async function save() {
+  saving.value = true; error.value = '';
+  try {
+    const data = JSON.parse(form.dataText || '{}') as Record<string, unknown>;
+    const payload = { name: form.name, category: form.category || null, is_active: form.is_active, data };
+    const saved = isNew.value ? await api.createTemplate(payload) : await api.updateTemplate(form.id, payload);
+    selected.value = saved; fill(saved); await load();
+  } catch (caught) { error.value = caught instanceof SyntaxError ? 'JSON содержит ошибку' : message(caught); }
+  finally { saving.value = false; }
+}
+async function remove() {
+  if (!selected.value || !window.confirm('Удалить шаблон?')) return;
+  await api.deleteTemplate(Number(selected.value.id));
+  selected.value = null;
+  await load();
+}
+</script>
+
+<style scoped>
+.page { min-height: 100vh; padding: 1.5rem; background: #f6f7f9; color: #1f2933; font-family: system-ui, sans-serif; } .page-header, .toolbar, .layout { max-width: 78rem; margin: 0 auto 1rem; } .page-header, .header-actions, .toolbar { display: flex; align-items: end; justify-content: space-between; gap: .75rem; } .header-actions, .toolbar { justify-content: flex-start; flex-wrap: wrap; }
+h1, h2, p { margin: 0; } h1 { font-size: 1.7rem; } h2 { font-size: 1.1rem; } p { color: #697586; margin-top: .25rem; } .layout { display: grid; grid-template-columns: minmax(0, 1fr) 26rem; gap: 1rem; align-items: start; } label { display: grid; gap: .3rem; color: #52606d; font-size: .85rem; } .check { display: flex; align-items: center; gap: .5rem; }
+input, textarea, button, a { box-sizing: border-box; font: inherit; } input, textarea { min-height: 2.25rem; border: 1px solid #cbd5df; border-radius: 6px; padding: .35rem .55rem; background: white; } textarea { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .82rem; resize: vertical; }
+button, a { display: inline-flex; align-items: center; min-height: 2.25rem; border: 1px solid #b8c2cc; border-radius: 6px; background: white; padding: 0 .75rem; color: #1f2933; text-decoration: none; cursor: pointer; } table { width: 100%; border-collapse: collapse; background: white; border: 1px solid #d9e2ec; } th, td { padding: .65rem; border-bottom: 1px solid #eef2f6; text-align: left; } th { color: #52606d; font-size: .78rem; text-transform: uppercase; } tr.selected { background: #eef2ff; } .right { text-align: right; }
+.editor { display: grid; gap: .75rem; background: white; border: 1px solid #d9e2ec; border-radius: 8px; padding: 1rem; } .editor header, .actions { display: flex; align-items: center; justify-content: space-between; gap: .75rem; } .actions { justify-content: flex-end; } .error { max-width: 78rem; margin: 0 auto 1rem; color: #b42318; }
+@media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
+</style>

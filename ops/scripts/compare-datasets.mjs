@@ -50,6 +50,10 @@ const TABLES = [
   'marketplace_sets',
   'bug_reports',
   'bug_attachments',
+  'product_templates',
+  'production_calendar_days',
+  'production_plan_entries',
+  'indirect_costs',
 ];
 
 function parseJson(value) {
@@ -94,6 +98,51 @@ async function fetchColumns(table, columns) {
     throw error;
   }
   return data || [];
+}
+
+async function fetchSetting(...keys) {
+  for (const key of keys) {
+    const { data, error } = await supabase.from('settings').select('value').eq('key', key).maybeSingle();
+    if (error) {
+      const message = String(error.message || '');
+      if (message.includes(`Could not find the table 'public.settings'`)) return null;
+      throw error;
+    }
+    if (data?.value !== null && data?.value !== undefined && data.value !== '') {
+      return parseJson(data.value);
+    }
+  }
+  return null;
+}
+
+function countCalendarDays(raw) {
+  if (!raw) return 0;
+  if (Array.isArray(raw)) return raw.length;
+  if (typeof raw === 'object') return Object.keys(raw).length;
+  return 0;
+}
+
+function countPlanEntries(raw) {
+  if (!raw) return 0;
+  if (Array.isArray(raw)) return raw.length;
+  if (Array.isArray(raw.entries)) return raw.entries.length;
+  if (Array.isArray(raw.items)) return raw.items.length;
+  if (Array.isArray(raw.order_ids)) return raw.order_ids.length;
+  return 0;
+}
+
+function countIndirectCosts(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return Array.isArray(raw) ? raw.length : 0;
+  let count = 0;
+  for (const data of Object.values(raw)) {
+    if (!data || typeof data !== 'object' || Array.isArray(data)) continue;
+    if (Number(data.total_override) > 0) {
+      count += 1;
+      continue;
+    }
+    count += Object.entries(data).filter(([key, value]) => key !== 'total_override' && numberOrNull(value) !== null).length;
+  }
+  return count;
 }
 
 async function loadCatalogSeed() {
@@ -198,6 +247,22 @@ async function supabaseCount(table) {
     }
     const assets = await fetchColumns('work_assets', 'task_id,kind');
     return assets.filter((asset) => asset.kind === 'file' && taskIds.has(String(asset.task_id || ''))).length;
+  }
+
+  if (table === 'product_templates') {
+    return (await fetchAll('product_templates')).length;
+  }
+
+  if (table === 'production_calendar_days') {
+    return countCalendarDays(await fetchSetting('productionCalendar', 'production_calendar_json'));
+  }
+
+  if (table === 'production_plan_entries') {
+    return countPlanEntries(await fetchSetting('productionPlan', 'production_plan_state_json'));
+  }
+
+  if (table === 'indirect_costs') {
+    return countIndirectCosts(await fetchSetting('indirectCosts', 'indirect_costs_json'));
   }
 
   const { count, error } = await supabase.from(table).select('*', { count: 'exact', head: true });

@@ -509,6 +509,71 @@ Verification:
 - `npm run test:calc`
 - Full Postgres-backed API suite includes `/api/calc/preview`.
 
+## Production Planning
+
+Block 8 adds product templates, the production calendar, production plan entries, and indirect costs.
+
+Tables:
+
+```text
+product_templates
+production_calendar_days
+production_plan_entries
+indirect_costs
+```
+
+Endpoints:
+
+```text
+GET    /api/templates
+POST   /api/templates
+PATCH  /api/templates/:id
+DELETE /api/templates/:id
+
+GET    /api/production/calendar?year=YYYY
+PUT    /api/production/calendar
+GET    /api/production/plan
+POST   /api/production/plan
+PATCH  /api/production/plan/:id
+DELETE /api/production/plan/:id
+POST   /api/production/plan/reorder
+
+GET    /api/indirect-costs
+POST   /api/indirect-costs
+PATCH  /api/indirect-costs/:id
+DELETE /api/indirect-costs/:id
+```
+
+Screens:
+
+```text
+/templates
+/production/calendar
+/production/plan
+/indirect-costs
+```
+
+Rules:
+
+- Mutating endpoints require `Idempotency-Key`.
+- Production plan `operator_id` references `employees.id` as `BIGINT`, matching the real migrated employee IDs.
+- Reorder is persisted through `POST /api/production/plan/reorder` by updating `position` inside a DB transaction. This replaces the old local-only priority save path.
+- `ops/api/src/calc/indirect.ts` exposes `getIndirectAllocation()` from real `indirect_costs` and `production_calendar_days`.
+- `/api/calc/preview` can return `indirect_allocation` when the request includes `indirect_period` / `indirect_year` + `indirect_month`; saved legacy snapshots are not recalculated.
+
+Refresh notes:
+
+- `ops/scripts/refresh/06-production.mjs` copies `product_templates` and parses production settings JSON.
+- It accepts both plan names and observed legacy keys: `productionCalendar`, `production_plan_state_json`, `indirectCosts`, and `indirect_costs_json`.
+- `compare-datasets.mjs` includes Block 8 counts.
+
+Verification:
+
+- `npm run typecheck`
+- `npm run test:calc`
+- `npm run build` in `ops/web`
+- Full Postgres-backed API suite: 111 tests on a temporary VPS Postgres container.
+
 ## Current Infra
 
 | Parameter | Value |
@@ -524,4 +589,4 @@ Verification:
 
 ## Next
 
-Finish Block 7 review, then continue with Block 8 per the migration playbook.
+Finish Block 8 review, then continue with Block 9 per the migration playbook.

@@ -1,14 +1,61 @@
 # Migration status
 
-Last update: 2026-05-19T16:50:32-03:00
-Current block: 7
-Current task within block: Task 13 — PR
-Branch: block-7-calculator
-Last commit: `e42f1ac` Add calc preview endpoint
-Tests: Block 7 Task 1 fixture export ran locally against Supabase using the existing read key and produced 24 real-order JSON fixtures under `ops/api/test/fixtures/orders/`. Fixture coverage: 3 factual orders, 7 pendant orders, 22 mold orders, 24 hardware orders, 1 NFC order, and 13 complex orders. `cd ops/api && npm run typecheck` passes. `cd ops/api && npm run test:calc` passes 74/74. Full API suite passed on VPS temporary Postgres: 92/92. API Docker build passed on VPS. Staging refresh/compare passed after Block 7 work; `/api/health` returned `db.ok=true`.
+Last update: 2026-05-19T17:15:29-03:00
+Current block: 8
+Current task within block: PR opened; waiting for review/CI
+Branch: block-8-production
+Last commit: `d45592f` Record Block 7 merge and deploy (local branch includes this status carry-over; `main` was not pushed directly)
+Tests: `ops/api npm run typecheck` passed; `ops/api npm run test:calc` passed 77/77; `ops/web npm run build` passed; full Postgres-backed API suite passed 111/111 on a temporary VPS Postgres container with migrations 001-007.
 
 ## What was just done
 
+- Created Block 8 working branch `block-8-production` from local `main` after Block 7 merge/deploy status was recorded. This preserves the status update without pushing `main` directly.
+- Added migration `ops/db/migrations/007_production.sql`:
+  - `product_templates`
+  - `production_calendar_days`
+  - `production_plan_entries`
+  - `indirect_costs`
+- Used `BIGINT` for `production_plan_entries.operator_id` to match migrated `employees.id`, and added explicit `position` for persisted reorder.
+- Added authenticated/idempotent APIs:
+  - `/api/templates`
+  - `/api/production/calendar`
+  - `/api/production/plan`
+  - `/api/production/plan/reorder`
+  - `/api/indirect-costs`
+- Added Block 8 API tests:
+  - `ops/api/test/templates.test.js`
+  - `ops/api/test/production.test.js`
+  - `ops/api/test/indirect.test.js`
+- Added `ops/api/src/calc/indirect.ts` with `getIndirectAllocation()` from real indirect costs and production calendar hours.
+- Wired `/api/calc/preview` to optionally return `indirect_allocation` when an indirect period is supplied, without changing saved legacy snapshot totals.
+- Added refresh/compare support:
+  - `ops/scripts/refresh/06-production.mjs`
+  - `ops/scripts/refresh-staging-snapshot.mjs` now runs `06-production`
+  - `ops/scripts/compare-datasets.mjs` includes Block 8 counts
+- Refresh script handles both plan names and observed legacy keys:
+  - `productionCalendar`
+  - `production_plan_state_json`
+  - `indirectCosts`
+  - `indirect_costs_json`
+- Added Vue API wrappers and screens:
+  - `/templates`
+  - `/production/calendar`
+  - `/production/plan`
+  - `/indirect-costs`
+- Updated home navigation and `ops/README.md` for Block 8.
+- Verified:
+  - `cd ops/api && npm run typecheck`: passed
+  - `cd ops/api && npm run test:calc`: passed 77/77; golden masters still pass
+  - `cd ops/web && npm run build`: passed
+  - `node --check` for new/changed refresh scripts: passed
+  - Full API suite on VPS temporary Postgres with migrations 001-007: passed 111/111
+- Opened Block 8 PR: https://github.com/polinacherpovitskaya-glitch/ro-calculator/pull/46
+- Next after review/merge: watch main deploy, run staging refresh/compare, then smoke `/production/calendar`, `/templates`, `/indirect-costs`, and `/production/plan`.
+- Block 7 PR #45 was squash-merged to `main` as `230ceaf`.
+- GitHub Actions main deploy run `26121716549` passed.
+- Verified live staging after Block 7 deploy:
+  - `/api/health` returned `{"status":"ok","version":"dev","uptime_seconds":44,"db":{"ok":true,"latency_ms":2}}`
+  - Authenticated `POST /api/calc/preview` returned `{"total_revenue":10000,"total_cost":7413,"total_margin":2587,"margin_percent":25.87,"total_hours_plan":3.3,"production_hours_plastic":3.3,"production_hours_packaging":0,"production_hours_hardware":0}`.
 - Block 6 PR #44 was squash-merged to `main` as `db87d1f`.
 - GitHub Actions deploy run `26120030103` passed on `main`.
 - Verified live staging after Block 6 deploy:
