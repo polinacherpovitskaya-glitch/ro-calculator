@@ -1,11 +1,11 @@
 # Migration status
 
-Last update: 2026-05-19T16:43:03-03:00
+Last update: 2026-05-19T16:44:32-03:00
 Current block: 7
-Current task within block: Task 10/11 — factual/TPA and calc preview endpoint
+Current task within block: Task 11 — production-safe `/api/calc/preview` wiring
 Branch: block-7-calculator
-Last commit: `8e6dc9d` calc: support product hardware packaging live totals
-Tests: Block 7 Task 1 fixture export ran locally against Supabase using the existing read key and produced 24 real-order JSON fixtures under `ops/api/test/fixtures/orders/`. Fixture coverage: 3 factual orders, 7 pendant orders, 22 mold orders, 24 hardware orders, 1 NFC order, and 13 complex orders. `cd ops/api && npm run typecheck` passes. `cd ops/api && npm run test:calc` passes 71/71: 25 golden-master tests, 38 pricing unit tests, and 8 live calc tests.
+Last commit: `2240a8e` calc: support pendant live totals
+Tests: Block 7 Task 1 fixture export ran locally against Supabase using the existing read key and produced 24 real-order JSON fixtures under `ops/api/test/fixtures/orders/`. Fixture coverage: 3 factual orders, 7 pendant orders, 22 mold orders, 24 hardware orders, 1 NFC order, and 13 complex orders. `cd ops/api && npm run typecheck` passes. `cd ops/api && npm run test:calc` passes 74/74: 25 golden-master tests, 38 pricing unit tests, 8 live calc tests, and 3 TPA/factual tests.
 
 ## What was just done
 
@@ -69,6 +69,12 @@ Tests: Block 7 Task 1 fixture export ran locally against Supabase using the exis
 - Extended live calc tests for pendant totals, metric cord pricing, and order totals with pendant assembly hours.
 - Re-ran `npm run typecheck`: passed.
 - Re-ran `npm run test:calc`: passed 71/71.
+- Added `ops/api/src/calc/tpa.ts` with XPM-17 live scenario formula.
+- Added `ops/api/src/calc/factual.ts` with factual revenue/cost/profit/margin aggregation.
+- Added `ops/api/test/calc/tpa-factual.test.ts`.
+- Re-ran `npm run typecheck`: passed.
+- Re-ran `npm run test:calc`: passed 74/74.
+- Next blocker before `/api/calc/preview`: current API Docker image runs `node src/index.js` and copies TS files without compiling. Need production-safe TS compilation or JS wrapper before importing calc from an Express route.
 - Block 1 PR #36 was merged to `main`; GitHub Actions deploy to staging passed.
 - Block 2 PR #37 was merged to `main`; GitHub Actions deploy run `26111396624` passed.
 - Created `block-3-warehouse` from fresh `main`.
