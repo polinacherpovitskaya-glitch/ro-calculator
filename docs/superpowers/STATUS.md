@@ -1,10 +1,10 @@
 # Migration status
 
-Last update: 2026-05-19T17:03:22-03:00
+Last update: 2026-05-19T17:10:41-03:00
 Current block: 6
-Current task within block: Task 9 PR
+Current task within block: PR opened, waiting for review
 Branch: block-6-bugs
-Last commit: `3091251` Add bugs Vue UI
+Last commit: `c4cbd16` Document bugs module and smoke
 Tests: Full API suite passed in a clean temporary VPS Postgres container with migrations 001-006 and `S3_MOCK_DIR`: 90/90. Full refresh/compare passed in a clean temporary VPS Postgres container, including `bug_reports 10/10` and `bug_attachments 8/8`. `cd ops/web && npm run build` passed after Bugs UI. Staging Playwright `bugs.spec.ts` passed 1/1. Final staging refresh/compare passed and `/api/health` returned `db.ok=true`. Local API test attempt failed because local Postgres `127.0.0.1:5433` is not running; VPS temp containers are the current verification path.
 
 ## What was just done
@@ -362,12 +362,13 @@ Tests: Full API suite passed in a clean temporary VPS Postgres container with mi
   - bug_attachments 8/8
   - all previously migrated table counts matched.
 - Updated `ops/README.md` with Block 6 endpoints, screens, refresh/storage migration notes, and smoke notes.
+- Opened PR #44 to `main`: https://github.com/polinacherpovitskaya-glitch/ro-calculator/pull/44
 
 ## Next steps for Codex
 
-1. Commit README/smoke finalization.
-2. Open Block 6 PR to `main`.
-3. Stop for review.
+1. Stop for review.
+2. After review approval/checks, merge PR #44 to `main`.
+3. After merge, verify main deploy and refresh staging again.
 
 ## Quality gates status (Block 2)
 
@@ -432,7 +433,7 @@ Tests: Full API suite passed in a clean temporary VPS Postgres container with mi
 - [x] Vue bugs screens built
 - [x] Playwright bugs smoke passing on staging
 - [x] `ops/README.md` updated
-- [ ] PR opened
+- [x] PR opened
 - [ ] PR merged to main
 
 ## Blockers / questions
