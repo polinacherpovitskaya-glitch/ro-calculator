@@ -12,6 +12,11 @@ import ShipmentView from './views/ShipmentView.vue';
 import ChinaPurchasesView from './views/ChinaPurchasesView.vue';
 import ChinaPurchaseView from './views/ChinaPurchaseView.vue';
 import ChinaCatalogView from './views/ChinaCatalogView.vue';
+import MoldsListView from './views/MoldsListView.vue';
+import MoldView from './views/MoldView.vue';
+import BlanksView from './views/BlanksView.vue';
+import ColorsView from './views/ColorsView.vue';
+import MarketplacesView from './views/MarketplacesView.vue';
 
 const router = createRouter({
   history: createWebHistory(),
@@ -28,6 +33,11 @@ const router = createRouter({
     { path: '/china', name: 'china', component: ChinaPurchasesView, meta: { requiresAuth: true } },
     { path: '/china/catalog', name: 'china-catalog', component: ChinaCatalogView, meta: { requiresAuth: true } },
     { path: '/china/:id', name: 'china-purchase', component: ChinaPurchaseView, meta: { requiresAuth: true } },
+    { path: '/molds', name: 'molds', component: MoldsListView, meta: { requiresAuth: true } },
+    { path: '/molds/:id', name: 'mold', component: MoldView, meta: { requiresAuth: true } },
+    { path: '/blanks', name: 'blanks', component: BlanksView, meta: { requiresAuth: true } },
+    { path: '/colors', name: 'colors', component: ColorsView, meta: { requiresAuth: true } },
+    { path: '/marketplaces', name: 'marketplaces', component: MarketplacesView, meta: { requiresAuth: true } },
   ],
 });
 

@@ -1,11 +1,11 @@
 # Migration status
 
-Last update: 2026-05-19T15:38:33-03:00
+Last update: 2026-05-19T15:43:24-03:00
 Current block: 5
-Current task within block: Task 7 Vue screens
+Current task within block: Task 8 Playwright smoke + PR
 Branch: block-5-molds-blanks
-Last commit: Add molds-blanks refresh and compare
-Tests: Block 5 API suite 80/80 passing in temp VPS containers with migrations 001-005; Block 5 temp refresh/compare matched all migrated tables; Block 4 web build and Playwright smoke passed; staging health `db.ok=true`.
+Last commit: Add Block 5 Vue screens
+Tests: Block 5 API suite 80/80 passing in temp VPS containers with migrations 001-005; Block 5 temp refresh/compare matched all migrated tables; `cd ops/web && npm run build` passed; staging health `db.ok=true`.
 
 ## What was just done
 
@@ -239,12 +239,21 @@ Tests: Block 5 API suite 80/80 passing in temp VPS containers with migrations 00
   - pkg_blanks 12/12
   - app_colors 40/40
   - marketplace_sets 43/43
+- Added Vue API wrappers and Pinia stores for molds, blanks, colors, and marketplaces.
+- Added screens:
+  - `/molds`
+  - `/molds/:id`
+  - `/blanks`
+  - `/colors`
+  - `/marketplaces`
+- Added home navigation links for Block 5 modules.
+- Verified `cd ops/web && npm run build` passing.
 
 ## Next steps for Codex
 
-1. Add Vue API wrappers and Pinia stores for molds, blanks, colors, and marketplaces.
-2. Add `/molds`, `/molds/:id`, `/blanks`, `/colors`, and `/marketplaces` screens.
-3. Verify `cd ops/web && npm run build`.
+1. Add Playwright smoke for molds/blanks/colors/marketplaces.
+2. Deploy current branch to staging, refresh staging snapshot from Supabase, and run smoke against staging.
+3. Update `ops/README.md`, open PR to `main`, and stop for review.
 
 ## Quality gates status (Block 2)
 
@@ -291,7 +300,10 @@ Tests: Block 5 API suite 80/80 passing in temp VPS containers with migrations 00
 - [x] Colors API tests passing
 - [x] Marketplace API tests passing
 - [x] Refresh/compare updated for Block 5 tables
-- [ ] Vue screens built
+- [x] Vue screens built
+- [ ] Playwright smoke passing
+- [ ] `ops/README.md` updated
+- [ ] PR opened
 - [ ] Marketplaces API tests passing
 - [ ] refresh/compare scripts updated
 - [ ] staging molds/blanks/colors/marketplaces data refreshed from Supabase
