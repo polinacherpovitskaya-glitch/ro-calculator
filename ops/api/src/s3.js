@@ -1,5 +1,7 @@
 import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import fs from 'node:fs/promises';
+import path from 'node:path';
 
 let client = null;
 let clientKey = '';
@@ -16,6 +18,10 @@ function requireEnv(name) {
 
 function getBucket() {
   return requireEnv('S3_BUCKET');
+}
+
+function mockPath(key) {
+  return process.env.S3_MOCK_DIR ? path.join(process.env.S3_MOCK_DIR, key) : null;
 }
 
 function getClient() {
@@ -38,6 +44,13 @@ function getClient() {
 }
 
 export async function uploadObject(key, body, contentType) {
+  const target = mockPath(key);
+  if (target) {
+    await fs.mkdir(path.dirname(target), { recursive: true });
+    await fs.writeFile(target, body);
+    return;
+  }
+
   await getClient().send(
     new PutObjectCommand({
       Bucket: getBucket(),
@@ -49,9 +62,19 @@ export async function uploadObject(key, body, contentType) {
 }
 
 export async function deleteObject(key) {
+  const target = mockPath(key);
+  if (target) {
+    await fs.rm(target, { force: true });
+    return;
+  }
+
   await getClient().send(new DeleteObjectCommand({ Bucket: getBucket(), Key: key }));
 }
 
 export async function presignedGetUrl(key, expiresIn = 600) {
+  if (mockPath(key)) {
+    return `mock-s3://${key}`;
+  }
+
   return getSignedUrl(getClient(), new GetObjectCommand({ Bucket: getBucket(), Key: key }), { expiresIn });
 }

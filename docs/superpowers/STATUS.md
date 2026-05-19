@@ -1,11 +1,11 @@
 # Migration status
 
-Last update: 2026-05-19T16:03:15-03:00
+Last update: 2026-05-19T16:18:42-03:00
 Current block: 6
-Current task within block: Task 3 Bugs API TDD
+Current task within block: Task 4 Refresh/compare for bugs
 Branch: block-6-bugs
-Last commit: main `11bb4a1` includes Block 5 + smoke follow-up
-Tests: Block 6 migrations 001-006 verified on clean temp Postgres; app_meta.version=`006-bugs`; `bug_reports` and `bug_attachments` exist. Local API test attempt failed because local Postgres `127.0.0.1:5433` is not running; use temp VPS Postgres for real suite.
+Last commit: `6791f1f` Add S3 helper for bug attachments
+Tests: Full API suite passed in a clean temporary VPS Postgres container with migrations 001-006 and `S3_MOCK_DIR`: 90/90. Local API test attempt failed because local Postgres `127.0.0.1:5433` is not running; VPS temp containers are the current verification path.
 
 ## What was just done
 
@@ -317,12 +317,24 @@ Tests: Block 6 migrations 001-006 verified on clean temp Postgres; app_meta.vers
   - `@aws-sdk/s3-request-presigner`
   - `multer`
 - Local `cd ops/api && npm test` was attempted but failed because local Postgres on `127.0.0.1:5433` is not running. This is not a code regression; previous block verification uses temp VPS Postgres.
+- Added `S3_MOCK_DIR` support to the S3 helper so API tests can verify attachment flows without live Selectel credentials.
+- Added Bugs API tests covering auth, Idempotency-Key enforcement, create/list/detail, status update, invalid status validation, attachment upload/delete, non-admin delete rejection, and admin delete.
+- Implemented `/api/bugs` routes:
+  - `GET /api/bugs`
+  - `POST /api/bugs`
+  - `GET /api/bugs/:id`
+  - `PATCH /api/bugs/:id`
+  - `DELETE /api/bugs/:id`
+  - `POST /api/bugs/:id/attachments`
+  - `DELETE /api/bugs/:id/attachments/:attId`
+- Bug mutations require `Idempotency-Key`; delete requires `admin`; attachment reads return presigned URLs (or `mock-s3://` URLs in tests).
+- Verified full API suite in temporary VPS containers: 90/90 passing.
 
 ## Next steps for Codex
 
-1. Add Bugs API tests first.
-2. Implement `ops/api/src/routes/bugs.js`.
-3. Verify full API suite in a temporary VPS Postgres container.
+1. Add Block 6 refresh script and compare coverage for `bug_reports` / `bug_attachments`.
+2. Decide/live-confirm Selectel S3 bucket/env for bug attachments before running real storage migration.
+3. Add Vue Bugs UI and staging smoke after API/data path is complete.
 
 ## Quality gates status (Block 2)
 
@@ -380,20 +392,20 @@ Tests: Block 6 migrations 001-006 verified on clean temp Postgres; app_meta.vers
 
 - [x] `006_bug_reports.sql` added
 - [x] S3 helper added
-- [ ] Bugs API tests passing
+- [x] Bugs API tests passing
 - [ ] Refresh/compare updated for Block 6 tables
-- [ ] Marketplaces API tests passing
-- [ ] refresh/compare scripts updated
-- [ ] staging molds/blanks/colors/marketplaces data refreshed from Supabase
-- [ ] Vue molds/blanks/colors/marketplaces screens built
-- [ ] Playwright molds/blanks smoke passing
+- [ ] Storage migration script added/tested for bug attachments
+- [ ] staging bugs data refreshed from Supabase
+- [ ] Vue bugs screens built
+- [ ] Playwright bugs smoke passing
 - [ ] `ops/README.md` updated
 - [ ] PR opened
 - [ ] PR merged to main
 
 ## Blockers / questions
 
-- No current Block 5 blocker.
+- No current Block 6 API blocker.
+- Need a live decision for bug attachment storage before real storage migration: reuse the existing Selectel S3 credentials/bucket from `/srv/ops/infra/.env`, or create/configure a dedicated bug-attachments bucket.
 - Supabase `employees` currently have no email values, so employee temp-password issuance produced only a CSV header. Staging admin smoke still covers the protected auth path.
 - Local shell currently has no `docker` or `psql`, so DB-positive tests cannot run locally. Using isolated VPS containers as the verification path.
 
@@ -407,10 +419,11 @@ Tests: Block 6 migrations 001-006 verified on clean temp Postgres; app_meta.vers
 - ✅ Block 2: Auth + employees merged to `main` and deployed to staging
 - ✅ Block 3: Warehouse merged to `main`, deployed to staging, live smoke passed
 - ✅ Block 4: Shipments + China merged to `main`, deployed to staging, live smoke passed
-- 🔄 Block 5: Molds + blanks + colors + marketplaces started
-- ⏳ Block 6-16, Stages B/C/D: pending
+- ✅ Block 5: Molds + blanks + colors + marketplaces merged to `main`, deployed to staging, live smoke passed
+- 🔄 Block 6: Bugs + bug attachments started
+- ⏳ Block 7-16, Stages B/C/D: pending
 
 ## How to resume
 
 1. Read this `STATUS.md`.
-2. Continue Block 5 from Task 1 (`005_molds_blanks.sql`) on branch `block-5-molds-blanks`.
+2. Continue Block 6 from refresh/compare and storage migration tasks on branch `block-6-bugs`.

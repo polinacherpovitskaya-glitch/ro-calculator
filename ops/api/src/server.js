@@ -10,6 +10,7 @@ import moldsRoute from './routes/molds.js';
 import blanksRoute from './routes/blanks.js';
 import colorsRoute from './routes/colors.js';
 import marketplacesRoute from './routes/marketplaces.js';
+import bugsRoute from './routes/bugs.js';
 
 export function createServer() {
   const app = express();
@@ -26,5 +27,6 @@ export function createServer() {
   app.use('/api/blanks', blanksRoute);
   app.use('/api/colors', colorsRoute);
   app.use('/api/marketplaces', marketplacesRoute);
+  app.use('/api/bugs', bugsRoute);
   return app;
 }
