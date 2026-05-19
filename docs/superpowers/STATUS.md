@@ -1,8 +1,8 @@
 # Migration status
 
-Last update: 2026-05-19T15:52:42-03:00
+Last update: 2026-05-19T15:53:39-03:00
 Current block: 5
-Current task within block: Task 8 PR
+Current task within block: PR #42 opened; waiting for review
 Branch: block-5-molds-blanks
 Last commit: Add Block 5 smoke and docs
 Tests: Block 5 API suite 80/80 passing in temp VPS containers with migrations 001-005; Block 5 temp and live staging refresh/compare matched all migrated tables; `cd ops/web && npm run build` passed; staging Playwright smoke 3/3 passed; staging health `db.ok=true`.
@@ -276,11 +276,12 @@ Tests: Block 5 API suite 80/80 passing in temp VPS containers with migrations 00
 - Verified live staging `/api/health`: `db.ok=true`.
 - Verified Playwright staging smoke: `warehouse.spec.ts` + `shipments-china.spec.ts` + `molds-blanks.spec.ts`, 3/3 passing.
 - Updated `ops/README.md` with Block 5 endpoints, screens, refresh notes, and smoke notes.
+- Opened PR #42 to `main`: https://github.com/polinacherpovitskaya-glitch/ro-calculator/pull/42
 
 ## Next steps for Codex
 
-1. Open PR to `main`.
-2. Stop for review.
+1. Stop for review.
+2. After review approval, merge PR #42 to `main` and verify main deploy.
 
 ## Quality gates status (Block 2)
 
@@ -330,7 +331,7 @@ Tests: Block 5 API suite 80/80 passing in temp VPS containers with migrations 00
 - [x] Vue screens built
 - [x] Playwright smoke passing
 - [x] `ops/README.md` updated
-- [ ] PR opened
+- [x] PR opened
 - [ ] Marketplaces API tests passing
 - [ ] refresh/compare scripts updated
 - [ ] staging molds/blanks/colors/marketplaces data refreshed from Supabase
