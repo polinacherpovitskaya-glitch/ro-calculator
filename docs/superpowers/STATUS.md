@@ -1,11 +1,11 @@
 # Migration status
 
 Last update: 2026-05-19T17:20:00-03:00
-Current block: 4
-Current task within block: Block 4 merged; post-merge smoke follow-up
-Branch: block-4-shipments-china
-Last commit: main `e951fd0` includes Block 3 + Playwright smoke follow-up
-Tests: Block 3 PR checks passed; main deploy passed; live staging health `db.ok=true`; warehouse API/UI smoke passed; Playwright warehouse smoke 1/1 passed.
+Current block: 5
+Current task within block: Task 1 SQL migration
+Branch: block-5-molds-blanks
+Last commit: main `9f913a0` includes Block 4 + warehouse Playwright follow-up
+Tests: Block 4 API suite 52/52; web build passed; Playwright warehouse + shipments/china smoke 2/2; main deploy passed; staging health `db.ok=true`; staging refresh/compare matched.
 
 ## What was just done
 
@@ -161,11 +161,17 @@ Tests: Block 3 PR checks passed; main deploy passed; live staging health `db.ok=
   - china_purchase_items 45/45
   - china_catalog 103/103
   - `/api/health`: `db.ok=true`
+- Created `block-5-molds-blanks` from fresh `main`.
+- Read Block 5 required docs before editing:
+  - `docs/superpowers/plans/2026-05-15-block-5-molds-blanks.md`
+  - `docs/superpowers/plans/2026-05-15-WAREHOUSE-INTERACTION-MAP.md`
+  - `docs/superpowers/plans/2026-05-15-BUG-INVENTORY.md`
 
 ## Next steps for Codex
 
-1. Commit and merge the post-merge warehouse smoke hardening follow-up.
-2. Start Block 5 from fresh `main`.
+1. Add `ops/db/migrations/005_molds_blanks.sql`.
+2. Verify migrations 001-005 on a clean temporary Postgres container.
+3. Commit `Add molds, blanks, colors, marketplaces tables`.
 
 ## Quality gates status (Block 2)
 
@@ -204,9 +210,24 @@ Tests: Block 3 PR checks passed; main deploy passed; live staging health `db.ok=
 - [x] PR opened
 - [x] PR merged to main
 
+## Quality gates status (Block 5)
+
+- [ ] `005_molds_blanks.sql` added
+- [ ] Molds API tests passing
+- [ ] Blanks API tests passing
+- [ ] Colors API tests passing
+- [ ] Marketplaces API tests passing
+- [ ] refresh/compare scripts updated
+- [ ] staging molds/blanks/colors/marketplaces data refreshed from Supabase
+- [ ] Vue molds/blanks/colors/marketplaces screens built
+- [ ] Playwright molds/blanks smoke passing
+- [ ] `ops/README.md` updated
+- [ ] PR opened
+- [ ] PR merged to main
+
 ## Blockers / questions
 
-- No current Block 4 blocker.
+- No current Block 5 blocker.
 - Supabase `employees` currently have no email values, so employee temp-password issuance produced only a CSV header. Staging admin smoke still covers the protected auth path.
 - Local shell currently has no `docker` or `psql`, so DB-positive tests cannot run locally. Using isolated VPS containers as the verification path.
 
@@ -219,10 +240,11 @@ Tests: Block 3 PR checks passed; main deploy passed; live staging health `db.ok=
 - ✅ Block 1: Infrastructure merged to `main` and deployed to staging
 - ✅ Block 2: Auth + employees merged to `main` and deployed to staging
 - ✅ Block 3: Warehouse merged to `main`, deployed to staging, live smoke passed
-- 🔄 Block 4: Shipments + China started
-- ⏳ Block 5-16, Stages B/C/D: pending
+- ✅ Block 4: Shipments + China merged to `main`, deployed to staging, live smoke passed
+- 🔄 Block 5: Molds + blanks + colors + marketplaces started
+- ⏳ Block 6-16, Stages B/C/D: pending
 
 ## How to resume
 
 1. Read this `STATUS.md`.
-2. Continue Block 4 from Task 1 (`004_shipments_china.sql`) on branch `block-4-shipments-china`.
+2. Continue Block 5 from Task 1 (`005_molds_blanks.sql`) on branch `block-5-molds-blanks`.
