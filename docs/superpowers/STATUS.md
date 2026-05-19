@@ -1,8 +1,8 @@
 # Migration status
 
-Last update: 2026-05-19T14:31:00-03:00
+Last update: 2026-05-19T14:34:00-03:00
 Current block: 3
-Current task within block: Task 9 Playwright E2E smoke
+Current task within block: Task 10 README + PR
 Branch: block-3-warehouse
 Last commit: main `9a563e6` includes Block 2 merge
 Tests: Block 2 PR checks passed; main deploy passed; live staging health `db.ok=true`; live auth smoke passed after deploy.
@@ -73,12 +73,14 @@ Tests: Block 2 PR checks passed; main deploy passed; live staging health `db.ok=
 - Extended `GET /api/warehouse/history` with `type` and `offset` query support.
 - Verified API test suite again in temporary VPS containers: 30/30 passing.
 - Verified `cd ops/web && npm run build` passing after history view.
+- Added `tests/playwright/warehouse.spec.ts` staging smoke scaffold for login -> warehouse -> edit qty -> verify history.
+- Playwright smoke not run yet because Block 3 UI is not deployed to staging until this branch is merged; it requires `E2E_USER` / `E2E_PASSWORD`.
 
 ## Next steps for Codex
 
-1. Add Playwright warehouse smoke test scaffold.
-2. Decide/run available E2E path for staging once branch is deployed, or document if CI-only until PR deploy.
-3. Update `ops/README.md`.
+1. Update `ops/README.md` with Warehouse module endpoints/screens/tests.
+2. Run final API test suite and web build.
+3. Push branch, open PR, wait for checks, merge if green.
 
 ## Quality gates status (Block 2)
 
@@ -97,8 +99,8 @@ Tests: Block 2 PR checks passed; main deploy passed; live staging health `db.ok=
 - [x] API warehouse tests added and passing
 - [x] `refresh-staging-snapshot.mjs` and `compare-datasets.mjs` added
 - [x] staging warehouse data refreshed from Supabase
-- [ ] Vue warehouse screens built (list done; item card, inventory, and history pending)
-- [ ] Playwright warehouse smoke passing
+- [x] Vue warehouse screens built
+- [ ] Playwright warehouse smoke passing (spec added; runnable after deploy with E2E credentials)
 - [ ] PR opened
 - [ ] PR merged to main
 
