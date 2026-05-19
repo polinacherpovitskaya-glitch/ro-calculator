@@ -1,11 +1,11 @@
 # Migration status
 
-Last update: 2026-05-19T16:00:04-03:00
-Current block: 5
-Current task within block: Block 5 merged; smoke follow-up PR in progress
-Branch: block-5-smoke-followup
-Last commit: main `b6fe548` includes Block 5
-Tests: Block 5 API suite 80/80 passing; main deploy run `26118538860` passed; staging health `db.ok=true`; staging refresh/compare matched all tables after post-deploy smoke; hardened Block 5 smoke passed.
+Last update: 2026-05-19T16:02:16-03:00
+Current block: 6
+Current task within block: Task 2 S3 helper
+Branch: block-6-bugs
+Last commit: main `11bb4a1` includes Block 5 + smoke follow-up
+Tests: Block 6 migrations 001-006 verified on clean temp Postgres; app_meta.version=`006-bugs`; `bug_reports` and `bug_attachments` exist.
 
 ## What was just done
 
@@ -301,12 +301,22 @@ Tests: Block 5 API suite 80/80 passing; main deploy run `26118538860` passed; st
   - app_colors 40/40
   - marketplace_sets 43/43
   - `/api/health`: `db.ok=true`
+- PR #43 was squash-merged to `main`; main is now `11bb4a1`.
+- Created `block-6-bugs` from fresh `main`.
+- Read Block 6 required docs before editing:
+  - `docs/superpowers/plans/2026-05-15-block-6-bugs.md`
+  - `docs/superpowers/plans/2026-05-15-MIGRATION-PLAYBOOK.md`
+- Added `ops/db/migrations/006_bug_reports.sql` for:
+  - `bug_reports`
+  - `bug_attachments`
+- Used `BIGINT` for `bug_reports.assignee_id` because `employees.id` is `BIGINT` since Block 2.
+- Verified migrations 001-006 on a clean temporary Postgres container on the VPS; `app_meta.version` is `006-bugs`, and both bug tables exist.
 
 ## Next steps for Codex
 
-1. Open and merge the small smoke follow-up PR.
-2. Run main deploy checks again.
-3. Continue to Block 6 from fresh `main`.
+1. Add S3 client helper for Selectel Object Storage.
+2. Add Bugs API tests first, then routes.
+3. Verify full API suite in a temporary VPS Postgres container.
 
 ## Quality gates status (Block 2)
 
@@ -357,6 +367,15 @@ Tests: Block 5 API suite 80/80 passing; main deploy run `26118538860` passed; st
 - [x] Playwright smoke passing
 - [x] `ops/README.md` updated
 - [x] PR opened
+- [x] PR merged to main
+- [x] main deploy passed
+
+## Quality gates status (Block 6)
+
+- [x] `006_bug_reports.sql` added
+- [ ] S3 helper added
+- [ ] Bugs API tests passing
+- [ ] Refresh/compare updated for Block 6 tables
 - [ ] Marketplaces API tests passing
 - [ ] refresh/compare scripts updated
 - [ ] staging molds/blanks/colors/marketplaces data refreshed from Supabase
