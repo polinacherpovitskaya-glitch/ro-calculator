@@ -5,7 +5,10 @@
         <h1>RO Ops - staging</h1>
         <p>Привет, {{ auth.user?.email }}</p>
       </div>
-      <button type="button" @click="handleLogout">Выйти</button>
+      <nav>
+        <RouterLink to="/warehouse">Склад</RouterLink>
+        <button type="button" @click="handleLogout">Выйти</button>
+      </nav>
     </header>
     <p>Infrastructure ready. Auth enabled.</p>
     <p>API health: <code>{{ healthStatus }}</code></p>
@@ -69,13 +72,23 @@ async function handleLogout() {
   border-radius: 4px;
 }
 
-.placeholder button {
+.placeholder nav {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.placeholder button,
+.placeholder a {
+  display: inline-flex;
+  align-items: center;
   min-height: 2.25rem;
   border: 1px solid #c7cbd1;
   border-radius: 6px;
   background: white;
   padding: 0 0.8rem;
+  color: #1f2933;
   font: inherit;
   cursor: pointer;
+  text-decoration: none;
 }
 </style>

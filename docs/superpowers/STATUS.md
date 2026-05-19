@@ -1,8 +1,8 @@
 # Migration status
 
-Last update: 2026-05-19T14:08:00-03:00
+Last update: 2026-05-19T14:15:00-03:00
 Current block: 3
-Current task within block: Task 5 Vue warehouse list view
+Current task within block: Task 6 Vue warehouse item card + history
 Branch: block-3-warehouse
 Last commit: main `9a563e6` includes Block 2 merge
 Tests: Block 2 PR checks passed; main deploy passed; live staging health `db.ok=true`; live auth smoke passed after deploy.
@@ -60,12 +60,15 @@ Tests: Block 2 PR checks passed; main deploy passed; live staging health `db.ok=
   - warehouse_items 227/227
   - warehouse_reservations 348/348
   - warehouse_history 1/1
+- Added Vue warehouse API wrapper, Pinia store, `/warehouse` route, and list view with search, category filter, create dialog, inline qty/min/category edits, delete action, and low-stock highlighting.
+- Added home navigation link to `/warehouse`.
+- Verified `cd ops/web && npm run build` passing.
 
 ## Next steps for Codex
 
-1. Add Vue warehouse API wrapper and Pinia store.
-2. Add `/warehouse` list view with search, category filter, create modal, and row navigation.
-3. Build web locally.
+1. Add warehouse item card route `/warehouse/:id`.
+2. Add item edit form and recent movement history.
+3. Re-run web build and API tests before the next commit.
 
 ## Quality gates status (Block 2)
 
@@ -84,7 +87,7 @@ Tests: Block 2 PR checks passed; main deploy passed; live staging health `db.ok=
 - [x] API warehouse tests added and passing
 - [x] `refresh-staging-snapshot.mjs` and `compare-datasets.mjs` added
 - [x] staging warehouse data refreshed from Supabase
-- [ ] Vue warehouse screens built
+- [ ] Vue warehouse screens built (list done; item card, inventory, and history pending)
 - [ ] Playwright warehouse smoke passing
 - [ ] PR opened
 - [ ] PR merged to main
