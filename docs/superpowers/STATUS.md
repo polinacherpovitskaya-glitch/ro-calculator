@@ -1,88 +1,66 @@
 # Migration status
 
-Last update: 2026-05-19T13:17:02-03:00
-Current block: 1
-Current task within block: complete, PR/merge pending
-Branch: block-1-infrastructure
-Last commit: 9477403
-Tests: 4/4 API health tests passing in temp VPS containers; `ops/web` production build passing; live staging health `db.ok=true`; backup verified end-to-end with 2 successful uploads to S3; restore drill passed.
+Last update: 2026-05-19T13:26:51-03:00
+Current block: 2
+Current task within block: Task 5 staging data copy / smoke, blocked on Supabase service key
+Branch: block-2-auth
+Last commit: 764895d
+Tests: Block 2 API tests 15/15 passing in temporary VPS containers; `ops/web npm run build` passing; live staging health `db.ok=true`.
 
 ## What was just done
 
-### By Codex (Tasks 4-9 code, blocker on Task 9 verification):
-- Block 1 Task 4: Postgres migration `001_init.sql`, `db.js`, DB-aware `/api/health`.
-- Block 1 Task 5: Vue 3 + Vite + Pinia + vue-router skeleton in `ops/web`.
-- Block 1 Task 6: API Dockerfile, Caddyfile, docker-compose stack, `.env.example`.
-- Block 1 Task 7: live staging deploy — `https://ops-staging.recycleobject.ru/api/health` returns `status:ok, db.ok=true`. TLS via Let's Encrypt working.
-- Block 1 Task 8: GitHub Actions deploy workflow + deploy secrets + ssh key.
-- Block 1 Task 9/10 code: `backup.sh`, `restore.sh`, `ops-backup.service`, `ops-backup.timer` added to repo.
-- Stopped at Task 9 verification: needed S3 access/secret keys.
+- Block 1 PR #36 was merged to `main`; GitHub Actions deploy to staging passed.
+- Created `block-2-auth` from fresh `main`.
+- Read `docs/superpowers/plans/2026-05-15-block-2-auth.md` before editing.
+- Added migration `002_auth.sql` for `employees`, `auth_users`, `auth_sessions`, and `idempotency_keys`.
+- Added `argon2`, `cookie-parser`, password hashing helpers, `withTransaction`, session store, auth middleware.
+- Added `/api/auth/login`, `/api/auth/logout`, `/api/auth/me`, `/api/auth/change-password`.
+- Added protected `/api/employees`.
+- Added employee refresh and temporary password scripts:
+  - `ops/scripts/refresh/01-employees.mjs`
+  - `ops/scripts/issue-temp-passwords.mjs`
+  - `ops/api/scripts/hash.mjs`
+- Added Vue login flow: auth API wrapper, Pinia auth store, `/login`, `/change-password`, route guards, logout button.
+- Verified API tests 15/15 in isolated VPS containers with migrations 001+002.
+- Verified `ops/web npm run build` locally.
 
-### By Polina (just now — unblocking Task 9):
-- Selectel S3 bucket **`ro-ops-backups` created in region `ru-3` (СПб)**, type private, standard storage.
-- S3 service-key "ops-backup" created (account-scoped key, "Мне" option — see Selectel: S3 → S3-ключи).
-- Credentials placed in `/srv/ops/infra/.env` on the VPS.
-- **S3_ENDPOINT changed from `https://s3.storage.selcloud.ru` to `https://s3.ru-3.storage.selcloud.ru`** (region-specific) — the default endpoint fails SSL hostname verification when using vHosted addressing for ru-3 buckets (cert is regional). **Codex: please reflect this in `ops/infra/.env.example`.**
-- `backup.sh` + `restore.sh` + systemd unit files rsync'ed to `/srv/ops/infra/scripts/` and `/srv/ops/infra/systemd/` on the VPS, chowned `ops:ops`, chmod +x. (Codex's `gh actions deploy` will also pick them up on next push to main.)
-- **backup.sh verified end-to-end** on VPS:
-  - pg_dump → /srv/ops/backups/ops-<ts>.sql.gz
-  - upload to `s3://ro-ops-backups/ops-<ts>.sql.gz` ✓
-  - rotate local backups
-  - "Backup complete."
-- Two test backups now visible in S3 bucket: `ops-20260519-1607.sql.gz`, `ops-20260519-1608.sql.gz`.
-- systemd timer `ops-backup.timer` installed + enabled. Next run: 2026-05-20 03:00 MSK (00:00 UTC + ~3 min RandomizedDelay).
+## Next steps for Codex
 
-### By Codex after unblock:
-- Updated `ops/infra/.env.example` to use `S3_ENDPOINT=https://s3.ru-3.storage.selcloud.ru`.
-- Ran restore drill from latest S3 backup `ops-20260519-1608.sql.gz`.
-- Stopped API/Caddy before restore, restored DB, confirmed `app_meta` contains `(1, 001-init)`, dropped `ops_old`, restarted stack.
-- Verified `https://ops-staging.recycleobject.ru/api/health` returns `status:ok, db.ok=true` after restore.
-- Added `ops/README.md` with deploy, backup, restore, SSH, and monitoring notes. UptimeRobot is documented as deferred/manual, not blocking Block 1.
-- Re-ran Block 1 quality gates: API tests 4/4 in temporary VPS containers, `ops/web npm run build`, and live staging health.
+1. Get `SUPABASE_SERVICE_KEY` from Polina.
+2. Add `SUPABASE_URL` / `SUPABASE_SERVICE_KEY` to the secure runtime environment only, not the repo.
+3. Apply `002_auth.sql` to staging and run `ops/scripts/refresh/01-employees.mjs` against staging Postgres.
+4. Issue temporary passwords or create a staging admin user for manual smoke.
+5. Run staging smoke: `/login`, `/change-password`, `/api/employees`.
+6. Finish Block 2 quality gates, open PR, merge if green.
 
-## Next steps for Codex (auto-resume from here)
+## Quality gates status (Block 2)
 
-1. Push `block-1-infrastructure`.
-2. Open PR `block-1-infrastructure` → `main`.
-3. Verify GitHub checks and merge if green.
-4. Move to Block 2.
-
-## Quality gates status (Block 1 — almost done)
-
-- [x] `cd ops/api && npm test` — passing in temp containers
-- [x] `cd ops/web && npm run build` — passing
+- [x] API tests 15/15 passing in temp VPS containers
+- [x] `cd ops/web && npm run build` passing
 - [x] `/api/health` green on staging
-- [x] Caddy TLS via Let's Encrypt
-- [x] CI workflow added + secrets configured
-- [x] Backup script verified working (2 backups in S3 bucket)
-- [x] systemd timer for backups installed and active
-- [x] Restore drill (Task 10)
-- [ ] UptimeRobot monitor (manual/deferred, not blocking)
-- [x] `ops/README.md` updated with full playbook
+- [ ] `employees` copied from Supabase to staging
+- [ ] admin/user auth smoke on staging
 - [ ] PR opened
 - [ ] PR merged to main
 
 ## Blockers / questions
 
-- ✅ ~~Need Selectel Object Storage S3 credentials~~ — **resolved by Polina**, see above.
+- Need `SUPABASE_SERVICE_KEY` to copy `employees` from Supabase and finish Block 2 staging smoke.
+- Need a desired staging admin email/password decision. I can generate a strong temporary password and store it only on the VPS if preferred.
 - Local shell currently has no `docker` or `psql`, so DB-positive tests cannot run locally. Using isolated VPS containers as the verification path.
 
 ## Manual steps required by Polina
 
-- **UptimeRobot setup (Block 1 Task 11):** Create free UptimeRobot account at https://uptimerobot.com. Add new HTTP(s) monitor:
-  - Friendly name: `RO Ops Staging API Health`
-  - URL: `https://ops-staging.recycleobject.ru/api/health`
-  - Monitoring interval: 5 minutes
-  - Alert contacts: email + (optional) Telegram via `@uptimerobot_bot`
-  - **Not blocking on Codex for now** — Codex can finish Task 10 + open PR. UptimeRobot can be added before PR merge or as a follow-up.
+- Provide `SUPABASE_SERVICE_KEY` for read-only staging refresh from Supabase.
+- UptimeRobot setup from Block 1 is still deferred/manual and not blocking Auth.
 
 ## Completed blocks summary
 
-- 🔄 Block 1: Infrastructure (Tasks 4-9 done; Task 10 + 11 next; PR pending)
-- ⏳ Block 2-16, Stages B/C/D: pending
+- ✅ Block 1: Infrastructure merged to `main` and deployed to staging
+- 🔄 Block 2: Auth + employees in progress, blocked on Supabase service key for data copy/smoke
+- ⏳ Block 3-16, Stages B/C/D: pending
 
 ## How to resume
 
 1. Read this `STATUS.md`.
-2. Continue with Block 1 Task 11 PR/merge.
-3. Per `CODEX-KICKOFF.md`: when all applicable quality gates are green — self-merge PR, continue to Block 2.
+2. Continue Block 2 from Task 5 staging data copy once `SUPABASE_SERVICE_KEY` is available.
