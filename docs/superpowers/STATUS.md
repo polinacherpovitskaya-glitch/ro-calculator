@@ -1,11 +1,11 @@
 # Migration status
 
-Last update: 2026-05-19T16:31:18-03:00
+Last update: 2026-05-19T16:32:34-03:00
 Current block: 7
-Current task within block: Task 2 — calc source study and engine layout README
+Current task within block: Task 3 — TypeScript calc types skeleton
 Branch: block-7-calculator
-Last commit: `6a3cf0c` Start Block 7 calculator migration
-Tests: Block 7 Task 1 fixture export ran locally against Supabase using the existing read key and produced 24 real-order JSON fixtures under `ops/api/test/fixtures/orders/`. Fixture coverage: 3 factual orders, 7 pendant orders, 22 mold orders, 24 hardware orders, 1 NFC order, and 13 complex orders. No active calculator orders matching the plan's "simple without molds/hardware" bucket were found in the current Supabase data.
+Last commit: `061f8e0` Export calculator golden fixtures
+Tests: Block 7 Task 1 fixture export ran locally against Supabase using the existing read key and produced 24 real-order JSON fixtures under `ops/api/test/fixtures/orders/`. Fixture coverage: 3 factual orders, 7 pendant orders, 22 mold orders, 24 hardware orders, 1 NFC order, and 13 complex orders. Task 2 was documentation-only; no runtime tests were needed.
 
 ## What was just done
 
@@ -42,6 +42,8 @@ Tests: Block 7 Task 1 fixture export ran locally against Supabase using the exis
 - Added `ops/scripts/fixtures-order-ids.txt` with 24 selected real order IDs.
 - Added `ops/scripts/export-golden-fixtures.mjs` to export orders, items, factuals, expected totals, and coverage summary into calculator golden-master JSON fixtures.
 - Ran the fixture export successfully; `ops/api/test/fixtures/orders/` now contains 24 JSON files.
+- Read the required Block 7 source areas and bug classes L/M/N/O/U.
+- Added `ops/api/src/calc/README.md` with the migration map for public calc functions, shared internals, snapshot conversion, pricing unification constraints, and fixture gaps.
 - Block 1 PR #36 was merged to `main`; GitHub Actions deploy to staging passed.
 - Block 2 PR #37 was merged to `main`; GitHub Actions deploy run `26111396624` passed.
 - Created `block-3-warehouse` from fresh `main`.
