@@ -1,14 +1,44 @@
 # Migration status
 
-Last update: 2026-05-19T17:10:41-03:00
-Current block: 6
-Current task within block: PR opened, waiting for review
-Branch: block-6-bugs
-Last commit: `c4cbd16` Document bugs module and smoke
-Tests: Full API suite passed in a clean temporary VPS Postgres container with migrations 001-006 and `S3_MOCK_DIR`: 90/90. Full refresh/compare passed in a clean temporary VPS Postgres container, including `bug_reports 10/10` and `bug_attachments 8/8`. `cd ops/web && npm run build` passed after Bugs UI. Staging Playwright `bugs.spec.ts` passed 1/1. Final staging refresh/compare passed and `/api/health` returned `db.ok=true`. Local API test attempt failed because local Postgres `127.0.0.1:5433` is not running; VPS temp containers are the current verification path.
+Last update: 2026-05-19T16:29:09-03:00
+Current block: 7
+Current task within block: Task 1 — golden-master fixtures for calculator
+Branch: block-7-calculator
+Last commit: `db87d1f` Block 6: Bugs and attachments (#44)
+Tests: Block 6 was squash-merged to `main`, GitHub Actions staging deploy passed, live `/api/health` returned `db.ok=true`, staging Playwright `bugs.spec.ts` passed 1/1, and a final staging refresh/compare passed with current Supabase counts including `warehouse_reservations 563/563`, `bug_reports 10/10`, and `bug_attachments 8/8`. Local API test attempts still depend on a running local Postgres; VPS temporary containers remain the reliable verification path.
 
 ## What was just done
 
+- Block 6 PR #44 was squash-merged to `main` as `db87d1f`.
+- GitHub Actions deploy run `26120030103` passed on `main`.
+- Verified live staging after Block 6 deploy:
+  - `/api/health` returned `{"status":"ok","version":"dev","uptime_seconds":32,"db":{"ok":true,"latency_ms":1}}`
+  - `tests/playwright/bugs.spec.ts` passed 1/1
+- Refreshed staging from Supabase after smoke tests so staging is clean and current:
+  - employees 14/14
+  - warehouse_items 227/227
+  - warehouse_reservations 563/563
+  - warehouse_history 1/1
+  - shipments 13/13
+  - shipment_items 62/62
+  - china_purchases 14/14
+  - china_purchase_items 45/45
+  - china_catalog 103/103
+  - molds 53/53
+  - mold_hardware 5/5
+  - mold_usage_log 0/0
+  - hw_blanks 61/61
+  - pkg_blanks 12/12
+  - app_colors 40/40
+  - marketplace_sets 43/43
+  - bug_reports 10/10
+  - bug_attachments 8/8
+- Real bug attachment S3 object migration is still intentionally deferred until the storage decision is made: either reuse the existing Selectel S3 bucket/credentials from `/srv/ops/infra/.env` or create a dedicated bug-attachments bucket.
+- Created Block 7 working branch `block-7-calculator` from fresh `main`.
+- Read Block 7 plan and started Task 1. Supabase schema reconnaissance confirmed:
+  - `orders` has 250 rows and stores calculator snapshots in `calculator_data`.
+  - `order_items` has 927 rows and stores per-item calculation snapshots in `item_data`.
+  - `order_factuals` has 3 rows with factual calculation snapshots.
 - Block 1 PR #36 was merged to `main`; GitHub Actions deploy to staging passed.
 - Block 2 PR #37 was merged to `main`; GitHub Actions deploy run `26111396624` passed.
 - Created `block-3-warehouse` from fresh `main`.
