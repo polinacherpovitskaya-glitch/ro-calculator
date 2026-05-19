@@ -5,11 +5,18 @@
 //   SUPABASE_SERVICE_KEY
 //   DATABASE_URL
 
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createClient } from '@supabase/supabase-js';
 import pg from 'pg';
 import WebSocket from 'ws';
 
 const { Pool } = pg;
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const opsRoot = path.resolve(__dirname, '..');
+const repoRoot = path.resolve(opsRoot, '..');
+const DEFAULT_CATALOG_URL = 'https://calc.recycleobject.ru/data/china_catalog.json';
 
 function requireEnv(name) {
   const value = process.env[name];
@@ -24,12 +31,58 @@ const supabase = createClient(requireEnv('SUPABASE_URL'), requireEnv('SUPABASE_S
 });
 const pool = new Pool({ connectionString: requireEnv('DATABASE_URL') });
 
-const TABLES = ['employees', 'warehouse_items', 'warehouse_reservations', 'warehouse_history'];
+const TABLES = [
+  'employees',
+  'warehouse_items',
+  'warehouse_reservations',
+  'warehouse_history',
+  'shipments',
+  'shipment_items',
+  'china_purchases',
+  'china_purchase_items',
+  'china_catalog',
+];
+
+function parseJson(value) {
+  if (!value) return {};
+  if (typeof value === 'object') return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return {};
+  }
+}
+
+async function fetchAll(table) {
+  const { data, error } = await supabase.from(table).select('*');
+  if (error) throw error;
+  return data || [];
+}
+
+async function loadCatalogSeed() {
+  const candidates = [
+    path.join(repoRoot, 'data', 'china_catalog.json'),
+    path.join(opsRoot, 'data', 'china_catalog.json'),
+  ];
+  for (const candidate of candidates) {
+    try {
+      return JSON.parse(await fs.readFile(candidate, 'utf8'));
+    } catch {
+      // Try next source.
+    }
+  }
+
+  const url = process.env.CHINA_CATALOG_JSON_URL || DEFAULT_CATALOG_URL;
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to load China catalog seed from ${url}: HTTP ${response.status}`);
+  }
+  return response.json();
+}
 
 async function supabaseCount(table) {
   if (table === 'warehouse_reservations') {
-    const { data, error } = await supabase.from(table).select('reservations_data');
-    if (error) throw error;
+    const data = await fetchAll(table);
     const ids = new Set();
     let anonymousRows = 0;
     for (const row of data || []) {
@@ -50,6 +103,27 @@ async function supabaseCount(table) {
       }
     }
     return ids.size + anonymousRows;
+  }
+
+  if (table === 'shipment_items') {
+    const shipments = await fetchAll('shipments');
+    return shipments.reduce((sum, row) => {
+      const parsed = parseJson(row.shipment_data);
+      return sum + (Array.isArray(parsed.items) ? parsed.items.filter((item) => Number(item.qty_received ?? item.qty ?? 0) > 0).length : 0);
+    }, 0);
+  }
+
+  if (table === 'china_purchase_items') {
+    const purchases = await fetchAll('china_purchases');
+    return purchases.reduce((sum, row) => {
+      const parsed = parseJson(row.purchase_data);
+      return sum + (Array.isArray(parsed.items) ? parsed.items.filter((item) => Number(item.qty ?? item.quantity ?? 0) > 0).length : 0);
+    }, 0);
+  }
+
+  if (table === 'china_catalog') {
+    const rows = await loadCatalogSeed();
+    return Array.isArray(rows) ? rows.length : 0;
   }
 
   const { count, error } = await supabase.from(table).select('*', { count: 'exact', head: true });

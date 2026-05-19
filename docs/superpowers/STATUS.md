@@ -1,11 +1,11 @@
 # Migration status
 
-Last update: 2026-05-19T14:18:00-03:00
-Current block: 3
-Current task within block: Playwright smoke follow-up PR
-Branch: block-3-warehouse
-Last commit: main `9a563e6` includes Block 2 merge
-Tests: Block 2 PR checks passed; main deploy passed; live staging health `db.ok=true`; live auth smoke passed after deploy.
+Last update: 2026-05-19T16:55:00-03:00
+Current block: 4
+Current task within block: Task 6 final PR
+Branch: block-4-shipments-china
+Last commit: main `e951fd0` includes Block 3 + Playwright smoke follow-up
+Tests: Block 3 PR checks passed; main deploy passed; live staging health `db.ok=true`; warehouse API/UI smoke passed; Playwright warehouse smoke 1/1 passed.
 
 ## What was just done
 
@@ -83,12 +83,75 @@ Tests: Block 2 PR checks passed; main deploy passed; live staging health `db.ok=
   - protected `/api/warehouse/items` returned 227 rows
   - `/warehouse` SPA route returned HTTP 200
 - Fixed and ran Playwright warehouse smoke against live staging: 1/1 passing.
+- Block 3 Playwright follow-up PR #39 was merged to `main`.
+- Created `block-4-shipments-china` from fresh `main`.
+- Read `docs/superpowers/plans/2026-05-15-block-4-shipments-china.md`.
+- Added `ops/db/migrations/004_shipments_china.sql` for `shipments`, `shipment_items`, `china_purchases`, `china_purchase_items`, and `china_catalog`.
+- Verified migrations 001-004 on a clean temporary Postgres container on the VPS.
+- Added shipments API with CRUD and idempotent `POST /api/shipments/:id/receive`.
+- Added shipment receive tests for idempotency, empty shipment, warehouse link validation, create_new validation, receipt history, and ALREADY_RECEIVED.
+- Verified API suite in temporary VPS containers: 37/37 passing.
+- Added China API TDD coverage for purchases, catalog, receive validation, receive idempotency, and status transitions.
+- Extracted the shipment receive operation into `ops/api/src/shipments/receive.js` so direct shipments and China purchase receive use the same transaction/lock/history path.
+- Added `/api/china` routes:
+  - `GET/POST /purchases`
+  - `GET/PATCH/DELETE /purchases/:id`
+  - `POST /purchases/:id/receive`
+  - `GET/POST /catalog`
+  - `PATCH /catalog/:id`
+- Hardened `withIdempotency()` so successful mutation responses are persisted before the JSON response is sent. This closes a same-key immediate retry race where the second request could arrive before the first response was cached.
+- Verified full API suite in temporary VPS containers: 52/52 passing.
+- Added `ops/scripts/refresh/03-shipments-china.mjs` and wired it into staging refresh.
+- Extended compare-datasets for `shipments`, `shipment_items`, `china_purchases`, `china_purchase_items`, and `china_catalog`.
+- Legacy mapping notes:
+  - Supabase stores `shipments.shipment_data` and `china_purchases.purchase_data` as JSON snapshots, so refresh normalizes child item rows from those snapshots.
+  - Old China catalog is a static seed JSON, not a Supabase table; refresh/compare load it from local `data/china_catalog.json` when present or from `https://calc.recycleobject.ru/data/china_catalog.json` on VPS.
+  - If a legacy shipment/purchase item references a missing `warehouse_item_id`, refresh stores that ID in `extras.legacy_warehouse_item_id` and leaves the FK null instead of failing.
+- Verified refresh/compare against a temporary VPS Postgres using Supabase anon read key: all counts matched.
+- Refreshed live staging snapshot from Supabase:
+  - employees 14/14
+  - warehouse_items 227/227
+  - warehouse_reservations 402/402
+  - warehouse_history 1/1
+  - shipments 13/13
+  - shipment_items 62/62
+  - china_purchases 14/14
+  - china_purchase_items 45/45
+  - china_catalog 103/103
+- Verified live staging `/api/health`: `db.ok=true`.
+- Added Vue API wrappers and Pinia stores for shipments/china.
+- Added screens:
+  - `/shipments`
+  - `/shipments/new`
+  - `/shipments/:id`
+  - `/china`
+  - `/china/new`
+  - `/china/:id`
+  - `/china/catalog`
+- Added home navigation links for shipments and China.
+- Verified `cd ops/web && npm run build` passing.
+- Added `tests/playwright/shipments-china.spec.ts`:
+  - login
+  - create shipment with a linked warehouse item
+  - receive it
+  - verify warehouse qty increased
+  - verify receipt history is visible
+- Fixed the `/shipments/new -> /shipments/:id` and `/china/new -> /china/:id` component reuse bug by updating local form state after create.
+- Relaxed the warehouse Playwright history assertion so it checks that `manual_edit` exists, not that it is the newest row; Block 4 receipts can legitimately appear above it.
+- Updated `ops/README.md` with Block 4 endpoints, screens, refresh, compare, and smoke notes.
+- Manually deployed the current branch to staging for live smoke.
+- Verified final gates:
+  - API suite in temporary VPS containers: 52/52 passing
+  - `cd ops/web && npm run build`: passing
+  - Playwright staging smoke: `warehouse.spec.ts` + `shipments-china.spec.ts`, 2/2 passing
+  - staging refresh/compare re-run after smoke, all counts matched
+  - live staging `/api/health`: `db.ok=true`
 
 ## Next steps for Codex
 
-1. Push `block-3-playwright-smoke-fix`.
-2. Open/merge the small PR with the Playwright smoke selector/import fixes and updated status.
-3. Start Block 4 from fresh `main`.
+1. Commit Task 6 changes.
+2. Push `block-4-shipments-china`.
+3. Open Block 4 PR to `main`.
 
 ## Quality gates status (Block 2)
 
@@ -114,9 +177,22 @@ Tests: Block 2 PR checks passed; main deploy passed; live staging health `db.ok=
 - [x] PR merged to main
 - [x] main deploy passed
 
+## Quality gates status (Block 4)
+
+- [x] `004_shipments_china.sql` added
+- [x] Shipments API tests passing
+- [x] China API tests passing
+- [x] refresh/compare scripts updated
+- [x] staging shipments/china data refreshed from Supabase
+- [x] Vue shipments/china screens built
+- [x] Playwright shipments/china smoke passing
+- [x] `ops/README.md` updated
+- [ ] PR opened
+- [ ] PR merged to main
+
 ## Blockers / questions
 
-- No current Block 2 blocker.
+- No current Block 4 blocker.
 - Supabase `employees` currently have no email values, so employee temp-password issuance produced only a CSV header. Staging admin smoke still covers the protected auth path.
 - Local shell currently has no `docker` or `psql`, so DB-positive tests cannot run locally. Using isolated VPS containers as the verification path.
 
@@ -128,10 +204,11 @@ Tests: Block 2 PR checks passed; main deploy passed; live staging health `db.ok=
 
 - ✅ Block 1: Infrastructure merged to `main` and deployed to staging
 - ✅ Block 2: Auth + employees merged to `main` and deployed to staging
-- 🔄 Block 3: Warehouse started
-- ⏳ Block 4-16, Stages B/C/D: pending
+- ✅ Block 3: Warehouse merged to `main`, deployed to staging, live smoke passed
+- 🔄 Block 4: Shipments + China started
+- ⏳ Block 5-16, Stages B/C/D: pending
 
 ## How to resume
 
 1. Read this `STATUS.md`.
-2. Continue Block 3 from Task 1 (`003_warehouse.sql`) on branch `block-3-warehouse`.
+2. Continue Block 4 from Task 1 (`004_shipments_china.sql`) on branch `block-4-shipments-china`.

@@ -32,19 +32,30 @@ export async function withIdempotency(req, res, handler) {
   res.json = (body) => {
     captured = {
       status: res.statusCode || 200,
+      raw: body,
       body: JSON.stringify(body),
     };
-    return originalJson(body);
+    return res;
   };
 
-  await handler(req, res);
+  try {
+    await handler(req, res);
 
-  if (captured && captured.status < 500) {
-    await pool.query(
-      `INSERT INTO idempotency_keys (key, user_id, method, path, response_status, response_body)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       ON CONFLICT (key) DO NOTHING`,
-      [key, req.user?.id || null, req.method, req.path, captured.status, captured.body]
-    );
+    if (captured && captured.status < 500) {
+      await pool.query(
+        `INSERT INTO idempotency_keys (key, user_id, method, path, response_status, response_body)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (key) DO NOTHING`,
+        [key, req.user?.id || null, req.method, req.path, captured.status, captured.body]
+      );
+    }
+
+    res.json = originalJson;
+    if (captured && !res.headersSent) {
+      return originalJson(captured.raw);
+    }
+  } catch (err) {
+    res.json = originalJson;
+    throw err;
   }
 }

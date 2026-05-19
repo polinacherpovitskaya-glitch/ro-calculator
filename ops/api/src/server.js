@@ -4,6 +4,8 @@ import healthRoute from './routes/health.js';
 import authRoute from './routes/auth.js';
 import employeesRoute from './routes/employees.js';
 import warehouseRoute from './routes/warehouse.js';
+import shipmentsRoute from './routes/shipments.js';
+import chinaRoute from './routes/china.js';
 
 export function createServer() {
   const app = express();
@@ -14,5 +16,7 @@ export function createServer() {
   app.use('/api/auth', authRoute);
   app.use('/api/employees', employeesRoute);
   app.use('/api/warehouse', warehouseRoute);
+  app.use('/api/shipments', shipmentsRoute);
+  app.use('/api/china', chinaRoute);
   return app;
 }
