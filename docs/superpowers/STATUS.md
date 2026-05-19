@@ -1,11 +1,11 @@
 # Migration status
 
-Last update: 2026-05-19T16:45:51-03:00
+Last update: 2026-05-19T16:49:49-03:00
 Current block: 7
-Current task within block: Task 12/13 — verification, docs, PR
+Current task within block: Task 13 — PR
 Branch: block-7-calculator
-Last commit: `aa264a5` calc: add tpa and factual functions
-Tests: Block 7 Task 1 fixture export ran locally against Supabase using the existing read key and produced 24 real-order JSON fixtures under `ops/api/test/fixtures/orders/`. Fixture coverage: 3 factual orders, 7 pendant orders, 22 mold orders, 24 hardware orders, 1 NFC order, and 13 complex orders. `cd ops/api && npm run typecheck` passes. `cd ops/api && npm run test:calc` passes 74/74: 25 golden-master tests, 38 pricing unit tests, 8 live calc tests, and 3 TPA/factual tests.
+Last commit: `e42f1ac` Add calc preview endpoint
+Tests: Block 7 Task 1 fixture export ran locally against Supabase using the existing read key and produced 24 real-order JSON fixtures under `ops/api/test/fixtures/orders/`. Fixture coverage: 3 factual orders, 7 pendant orders, 22 mold orders, 24 hardware orders, 1 NFC order, and 13 complex orders. `cd ops/api && npm run typecheck` passes. `cd ops/api && npm run test:calc` passes 74/74. Full API suite passed on VPS temporary Postgres: 92/92. API Docker build passed on VPS.
 
 ## What was just done
 
@@ -83,7 +83,10 @@ Tests: Block 7 Task 1 fixture export ran locally against Supabase using the exis
 - Added `POST /api/calc/preview` behind `requireAuth`.
 - Added `ops/api/test/calc-route.test.js` for unauthenticated 401 and authenticated typical preview response.
 - Re-ran `npm run build:calc`, `npm run typecheck`, and `npm run test:calc`: all passed.
-- Full API integration suite still needs a Postgres-backed run (local Postgres is not running here; use CI or VPS temporary Postgres as in prior blocks).
+- Ran full API integration suite on VPS temporary Postgres with migrations 001-006: 92/92 passed.
+- Verified API Docker image builds successfully with the new TypeScript calc build stage.
+- Cleaned the VPS temporary test directory and test image.
+- Updated `ops/README.md` with the Calculator Engine section, endpoint, TS build notes, fixture/test notes, and current limitations.
 - Block 1 PR #36 was merged to `main`; GitHub Actions deploy to staging passed.
 - Block 2 PR #37 was merged to `main`; GitHub Actions deploy run `26111396624` passed.
 - Created `block-3-warehouse` from fresh `main`.

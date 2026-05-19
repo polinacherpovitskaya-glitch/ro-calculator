@@ -468,6 +468,47 @@ Staging smoke:
 tests/playwright/bugs.spec.ts
 ```
 
+## Calculator Engine
+
+Block 7 adds the first server-side calculator engine under `ops/api/src/calc/`.
+
+Runtime shape:
+
+- Source is TypeScript with `strict` settings.
+- `npm run build:calc` compiles calc TS into ignored `ops/api/src/calc-dist/`.
+- The API Dockerfile compiles calc in a build stage, prunes dev dependencies, and ships compiled JS only.
+- `npm test` runs `build:calc` before JS integration tests so `/api/calc/preview` imports compiled code.
+
+Endpoint:
+
+```text
+POST /api/calc/preview
+```
+
+Rules:
+
+- The endpoint is authenticated.
+- Saved legacy orders with `calculator_data` are treated as snapshots and are returned without live recalculation. This protects margin/no-drift semantics.
+- Live preview currently supports product, hardware, packaging, pendant attachment, TPA, factual helper, pricing, fees, discounts, and production-hour calculations.
+- B2B source fields were not detectable in the current Supabase `orders` data; `b2bPrice()` is explicit but currently follows the retail formula until real B2B inputs are identified.
+- Letter blank template pricing for pendant molds still needs a richer templates/molds input if the UI wants live preview without saved snapshots.
+
+Fixtures and tests:
+
+```text
+ops/scripts/fixtures-order-ids.txt
+ops/scripts/export-golden-fixtures.mjs
+ops/api/test/fixtures/orders/*.json
+ops/api/test/calc/*.test.ts
+```
+
+Verification:
+
+- Golden-master fixtures: 24 real Supabase orders.
+- `npm run typecheck`
+- `npm run test:calc`
+- Full Postgres-backed API suite includes `/api/calc/preview`.
+
 ## Current Infra
 
 | Parameter | Value |
@@ -483,4 +524,4 @@ tests/playwright/bugs.spec.ts
 
 ## Next
 
-Finish Block 6 PR, then continue with Block 7 per the migration playbook.
+Finish Block 7 review, then continue with Block 8 per the migration playbook.
