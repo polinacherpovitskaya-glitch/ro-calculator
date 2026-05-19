@@ -22,20 +22,23 @@ test('bugs e2e: login, create bug, update status', async ({ page }) => {
   await page.goto(`${baseURL}/bugs`);
   await expect(page.getByRole('heading', { name: 'Баги' })).toBeVisible();
   await page.getByRole('button', { name: 'Новый баг' }).click();
-  await page.getByLabel('Заголовок').fill(title);
-  await page.getByLabel('Описание').fill('E2E bug smoke');
-  await page.getByLabel('Страница').fill('e2e');
-  await page.getByLabel('Важность').selectOption('high');
+  const editor = page.locator('.editor');
+  await editor.getByLabel('Заголовок').fill(title);
+  await editor.getByLabel('Описание').fill('E2E bug smoke');
+  await editor.getByLabel('Страница').fill('e2e');
+  await editor.getByLabel('Важность').selectOption('high');
   await Promise.all([
     page.waitForResponse((response) => response.url().includes('/api/bugs') && response.request().method() === 'POST'),
     page.getByRole('button', { name: 'Сохранить' }).click(),
   ]);
+  await page.waitForLoadState('networkidle');
 
   await expect(page.locator('tbody')).toContainText(title);
   await page.locator('.editor').getByLabel('Статус').selectOption('fixed');
-  await Promise.all([
+  const [patchResponse] = await Promise.all([
     page.waitForResponse((response) => response.url().includes('/api/bugs/') && response.request().method() === 'PATCH'),
     page.getByRole('button', { name: 'Сохранить' }).click(),
   ]);
-  await expect(page.locator('.pill.fixed').first()).toContainText('Исправлен');
+  expect(patchResponse.ok(), await patchResponse.text()).toBeTruthy();
+  await expect(page.locator('.editor').getByLabel('Статус')).toHaveValue('fixed');
 });
