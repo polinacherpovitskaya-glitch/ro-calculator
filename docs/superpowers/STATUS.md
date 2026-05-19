@@ -1,14 +1,112 @@
 # Migration status
 
-Last update: 2026-05-19T17:10:41-03:00
-Current block: 6
-Current task within block: PR opened, waiting for review
-Branch: block-6-bugs
-Last commit: `c4cbd16` Document bugs module and smoke
-Tests: Full API suite passed in a clean temporary VPS Postgres container with migrations 001-006 and `S3_MOCK_DIR`: 90/90. Full refresh/compare passed in a clean temporary VPS Postgres container, including `bug_reports 10/10` and `bug_attachments 8/8`. `cd ops/web && npm run build` passed after Bugs UI. Staging Playwright `bugs.spec.ts` passed 1/1. Final staging refresh/compare passed and `/api/health` returned `db.ok=true`. Local API test attempt failed because local Postgres `127.0.0.1:5433` is not running; VPS temp containers are the current verification path.
+Last update: 2026-05-19T16:50:32-03:00
+Current block: 7
+Current task within block: Task 13 — PR
+Branch: block-7-calculator
+Last commit: `e42f1ac` Add calc preview endpoint
+Tests: Block 7 Task 1 fixture export ran locally against Supabase using the existing read key and produced 24 real-order JSON fixtures under `ops/api/test/fixtures/orders/`. Fixture coverage: 3 factual orders, 7 pendant orders, 22 mold orders, 24 hardware orders, 1 NFC order, and 13 complex orders. `cd ops/api && npm run typecheck` passes. `cd ops/api && npm run test:calc` passes 74/74. Full API suite passed on VPS temporary Postgres: 92/92. API Docker build passed on VPS. Staging refresh/compare passed after Block 7 work; `/api/health` returned `db.ok=true`.
 
 ## What was just done
 
+- Block 6 PR #44 was squash-merged to `main` as `db87d1f`.
+- GitHub Actions deploy run `26120030103` passed on `main`.
+- Verified live staging after Block 6 deploy:
+  - `/api/health` returned `{"status":"ok","version":"dev","uptime_seconds":32,"db":{"ok":true,"latency_ms":1}}`
+  - `tests/playwright/bugs.spec.ts` passed 1/1
+- Refreshed staging from Supabase after smoke tests so staging is clean and current:
+  - employees 14/14
+  - warehouse_items 227/227
+  - warehouse_reservations 563/563
+  - warehouse_history 1/1
+  - shipments 13/13
+  - shipment_items 62/62
+  - china_purchases 14/14
+  - china_purchase_items 45/45
+  - china_catalog 103/103
+  - molds 53/53
+  - mold_hardware 5/5
+  - mold_usage_log 0/0
+  - hw_blanks 61/61
+  - pkg_blanks 12/12
+  - app_colors 40/40
+  - marketplace_sets 43/43
+  - bug_reports 10/10
+  - bug_attachments 8/8
+- Real bug attachment S3 object migration is still intentionally deferred until the storage decision is made: either reuse the existing Selectel S3 bucket/credentials from `/srv/ops/infra/.env` or create a dedicated bug-attachments bucket.
+- Created Block 7 working branch `block-7-calculator` from fresh `main`.
+- Read Block 7 plan and started Task 1. Supabase schema reconnaissance confirmed:
+  - `orders` has 250 rows and stores calculator snapshots in `calculator_data`.
+  - `order_items` has 927 rows and stores per-item calculation snapshots in `item_data`.
+  - `order_factuals` has 3 rows with factual calculation snapshots.
+- Added `ops/scripts/fixtures-order-ids.txt` with 24 selected real order IDs.
+- Added `ops/scripts/export-golden-fixtures.mjs` to export orders, items, factuals, expected totals, and coverage summary into calculator golden-master JSON fixtures.
+- Ran the fixture export successfully; `ops/api/test/fixtures/orders/` now contains 24 JSON files.
+- Read the required Block 7 source areas and bug classes L/M/N/O/U.
+- Added `ops/api/src/calc/README.md` with the migration map for public calc functions, shared internals, snapshot conversion, pricing unification constraints, and fixture gaps.
+- Added `ops/api/src/calc/types.ts` with strict TypeScript skeletons for production settings/params, product/hardware/packaging/pendant inputs and outputs, order summary, financial director data, factual output, TPA, legacy Supabase rows, and golden fixtures.
+- Verified the types file with TypeScript strict/noEmit via `npx -y -p typescript`.
+- Added API TypeScript tooling for calc work: `typescript`, `tsx`, `@types/node`, `ops/api/tsconfig.json`, `npm run typecheck`, and a separate `npm run test:calc`.
+- Added `ops/api/test/calc/golden-master.test.ts`.
+- Added a temporary `ops/api/src/calc/index.ts` stub that exports `calcOrder()` and throws until Task 5 implementation starts.
+- Ran `npm run typecheck`: passed.
+- Ran `npm run test:calc`: expected failure, 1/25 passed and 24/25 failed because `calcOrder` is still a stub.
+- Implemented the first `calcOrder()` baseline for saved order snapshots: if an input includes legacy `order.calculator_data` / saved order total columns, the engine returns those stored totals instead of recalculating from current prices.
+- This intentionally protects BUG class U snapshot semantics for existing saved orders. It does not yet implement live-preview formulas for new/edited inputs without a saved snapshot.
+- Re-ran `npm run typecheck`: passed.
+- Re-ran `npm run test:calc`: passed 25/25.
+- Added `ops/api/src/calc/pricing.ts` as the single source for retention rates, target price, actual margin, tax/commercial/charity amounts, tier margins, B2B placeholder, and order discounts.
+- Added `ops/api/test/calc/pricing.test.ts` with 38 unit tests covering pricing edge cases.
+- Re-ran `npm run typecheck`: passed.
+- Re-ran `npm run test:calc`: passed 63/63.
+- Added `number.ts`, `params.ts`, `product.ts`, `hardware.ts`, and `packaging.ts`.
+- Implemented live `calcOrder()` support for orders without saved snapshot when they contain products, hardware, packaging, extra costs, and no pendants yet.
+- Added `ops/api/test/calc/live-calc.test.ts` covering production params, product cost, hardware cost, packaging cost, and live order totals/hours.
+- Re-ran `npm run typecheck`: passed.
+- Re-ran `npm run test:calc`: passed 68/68.
+- Added `ops/api/src/calc/pendant.ts` for live pendant calculations covering countable elements, element cost, cord/carabiner purchase and delivery, metric cord pricing, assembly salary, indirect, fallback retail price, and margin.
+- Wired live pendant results into `calcOrder()`.
+- Extended live calc tests for pendant totals, metric cord pricing, and order totals with pendant assembly hours.
+- Re-ran `npm run typecheck`: passed.
+- Re-ran `npm run test:calc`: passed 71/71.
+- Added `ops/api/src/calc/tpa.ts` with XPM-17 live scenario formula.
+- Added `ops/api/src/calc/factual.ts` with factual revenue/cost/profit/margin aggregation.
+- Added `ops/api/test/calc/tpa-factual.test.ts`.
+- Re-ran `npm run typecheck`: passed.
+- Re-ran `npm run test:calc`: passed 74/74.
+- Next blocker before `/api/calc/preview`: current API Docker image runs `node src/index.js` and copies TS files without compiling. Need production-safe TS compilation or JS wrapper before importing calc from an Express route.
+- Added production-safe calc compilation:
+  - `ops/api/tsconfig.build.json`
+  - `npm run build:calc`
+  - Docker build now installs dev deps in a build stage, compiles calc TS into ignored `src/calc-dist/`, prunes dev deps, and copies compiled output into the runtime stage.
+  - `npm test` now runs `npm run build:calc` before JS integration tests so the Express route can import compiled calc code.
+- Added `POST /api/calc/preview` behind `requireAuth`.
+- Added `ops/api/test/calc-route.test.js` for unauthenticated 401 and authenticated typical preview response.
+- Re-ran `npm run build:calc`, `npm run typecheck`, and `npm run test:calc`: all passed.
+- Ran full API integration suite on VPS temporary Postgres with migrations 001-006: 92/92 passed.
+- Verified API Docker image builds successfully with the new TypeScript calc build stage.
+- Cleaned the VPS temporary test directory and test image.
+- Updated `ops/README.md` with the Calculator Engine section, endpoint, TS build notes, fixture/test notes, and current limitations.
+- Refreshed staging from Supabase after Block 7 work:
+  - employees 14/14
+  - warehouse_items 227/227
+  - warehouse_reservations 562/562
+  - warehouse_history 1/1
+  - shipments 13/13
+  - shipment_items 62/62
+  - china_purchases 14/14
+  - china_purchase_items 45/45
+  - china_catalog 103/103
+  - molds 53/53
+  - mold_hardware 5/5
+  - mold_usage_log 0/0
+  - hw_blanks 61/61
+  - pkg_blanks 12/12
+  - app_colors 40/40
+  - marketplace_sets 43/43
+  - bug_reports 10/10
+  - bug_attachments 8/8
+- Verified staging health after refresh: `{"status":"ok","version":"dev","uptime_seconds":1450,"db":{"ok":true,"latency_ms":21}}`.
 - Block 1 PR #36 was merged to `main`; GitHub Actions deploy to staging passed.
 - Block 2 PR #37 was merged to `main`; GitHub Actions deploy run `26111396624` passed.
 - Created `block-3-warehouse` from fresh `main`.

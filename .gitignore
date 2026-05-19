@@ -11,6 +11,7 @@ bot/timebot.pending.json
 bot/timebot.inbox.jsonl
 PLAN.md
 ops/api/node_modules/
+ops/api/src/calc-dist/
 ops/web/node_modules/
 ops/web/dist/
 ops/infra/.env
