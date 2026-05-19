@@ -1,14 +1,19 @@
 # Migration status
 
-Last update: 2026-05-19T16:50:32-03:00
-Current block: 7
-Current task within block: Task 13 — PR
-Branch: block-7-calculator
-Last commit: `e42f1ac` Add calc preview endpoint
-Tests: Block 7 Task 1 fixture export ran locally against Supabase using the existing read key and produced 24 real-order JSON fixtures under `ops/api/test/fixtures/orders/`. Fixture coverage: 3 factual orders, 7 pendant orders, 22 mold orders, 24 hardware orders, 1 NFC order, and 13 complex orders. `cd ops/api && npm run typecheck` passes. `cd ops/api && npm run test:calc` passes 74/74. Full API suite passed on VPS temporary Postgres: 92/92. API Docker build passed on VPS. Staging refresh/compare passed after Block 7 work; `/api/health` returned `db.ok=true`.
+Last update: 2026-05-19T16:59:45-03:00
+Current block: 8
+Current task within block: starting Block 8 plan review
+Branch: main
+Last commit: `230ceaf` Block 7: Calculator engine (#45)
+Tests: Block 7 PR #45 was squash-merged to `main`; GitHub Actions main deploy run `26121716549` passed. Post-deploy staging health returned `db.ok=true`, and authenticated `POST /api/calc/preview` returned the expected live calculation response.
 
 ## What was just done
 
+- Block 7 PR #45 was squash-merged to `main` as `230ceaf`.
+- GitHub Actions main deploy run `26121716549` passed.
+- Verified live staging after Block 7 deploy:
+  - `/api/health` returned `{"status":"ok","version":"dev","uptime_seconds":44,"db":{"ok":true,"latency_ms":2}}`
+  - Authenticated `POST /api/calc/preview` returned `{"total_revenue":10000,"total_cost":7413,"total_margin":2587,"margin_percent":25.87,"total_hours_plan":3.3,"production_hours_plastic":3.3,"production_hours_packaging":0,"production_hours_hardware":0}`.
 - Block 6 PR #44 was squash-merged to `main` as `db87d1f`.
 - GitHub Actions deploy run `26120030103` passed on `main`.
 - Verified live staging after Block 6 deploy:
