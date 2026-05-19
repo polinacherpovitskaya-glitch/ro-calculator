@@ -1,10 +1,10 @@
 # Migration status
 
-Last update: 2026-05-19T13:16:03-03:00
+Last update: 2026-05-19T13:17:02-03:00
 Current block: 1
-Current task within block: 11
+Current task within block: complete, PR/merge pending
 Branch: block-1-infrastructure
-Last commit: b6e681a
+Last commit: 9477403
 Tests: 4/4 API health tests passing in temp VPS containers; `ops/web` production build passing; live staging health `db.ok=true`; backup verified end-to-end with 2 successful uploads to S3; restore drill passed.
 
 ## What was just done
@@ -38,12 +38,13 @@ Tests: 4/4 API health tests passing in temp VPS containers; `ops/web` production
 - Stopped API/Caddy before restore, restored DB, confirmed `app_meta` contains `(1, 001-init)`, dropped `ops_old`, restarted stack.
 - Verified `https://ops-staging.recycleobject.ru/api/health` returns `status:ok, db.ok=true` after restore.
 - Added `ops/README.md` with deploy, backup, restore, SSH, and monitoring notes. UptimeRobot is documented as deferred/manual, not blocking Block 1.
+- Re-ran Block 1 quality gates: API tests 4/4 in temporary VPS containers, `ops/web npm run build`, and live staging health.
 
 ## Next steps for Codex (auto-resume from here)
 
-1. Commit README/status updates and push `block-1-infrastructure`.
+1. Push `block-1-infrastructure`.
 2. Open PR `block-1-infrastructure` → `main`.
-3. Verify quality gates and merge if green.
+3. Verify GitHub checks and merge if green.
 4. Move to Block 2.
 
 ## Quality gates status (Block 1 — almost done)
@@ -58,7 +59,8 @@ Tests: 4/4 API health tests passing in temp VPS containers; `ops/web` production
 - [x] Restore drill (Task 10)
 - [ ] UptimeRobot monitor (manual/deferred, not blocking)
 - [x] `ops/README.md` updated with full playbook
-- [ ] PR opened + merged to main
+- [ ] PR opened
+- [ ] PR merged to main
 
 ## Blockers / questions
 
