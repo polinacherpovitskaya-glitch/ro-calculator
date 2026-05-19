@@ -1,8 +1,8 @@
 # Migration status
 
-Last update: 2026-05-19T14:38:00-03:00
+Last update: 2026-05-19T14:18:00-03:00
 Current block: 3
-Current task within block: Final verification + PR
+Current task within block: Playwright smoke follow-up PR
 Branch: block-3-warehouse
 Last commit: main `9a563e6` includes Block 2 merge
 Tests: Block 2 PR checks passed; main deploy passed; live staging health `db.ok=true`; live auth smoke passed after deploy.
@@ -76,12 +76,19 @@ Tests: Block 2 PR checks passed; main deploy passed; live staging health `db.ok=
 - Added `tests/playwright/warehouse.spec.ts` staging smoke scaffold for login -> warehouse -> edit qty -> verify history.
 - Playwright smoke not run yet because Block 3 UI is not deployed to staging until this branch is merged; it requires `E2E_USER` / `E2E_PASSWORD`.
 - Updated `ops/README.md` with Auth and Warehouse module endpoints, screens, tests, refresh, and compare notes.
+- Block 3 PR #38 was merged to `main`; GitHub Actions deploy run `26112916646` passed.
+- Verified live staging after deploy:
+  - `/api/health` ok with `db.ok=true`
+  - admin login ok
+  - protected `/api/warehouse/items` returned 227 rows
+  - `/warehouse` SPA route returned HTTP 200
+- Fixed and ran Playwright warehouse smoke against live staging: 1/1 passing.
 
 ## Next steps for Codex
 
-1. Run final API test suite and web build.
-2. Push branch, open PR, wait for checks, merge if green.
-3. Let main deploy, then run live health and warehouse smoke where possible.
+1. Push `block-3-playwright-smoke-fix`.
+2. Open/merge the small PR with the Playwright smoke selector/import fixes and updated status.
+3. Start Block 4 from fresh `main`.
 
 ## Quality gates status (Block 2)
 
@@ -101,10 +108,11 @@ Tests: Block 2 PR checks passed; main deploy passed; live staging health `db.ok=
 - [x] `refresh-staging-snapshot.mjs` and `compare-datasets.mjs` added
 - [x] staging warehouse data refreshed from Supabase
 - [x] Vue warehouse screens built
-- [ ] Playwright warehouse smoke passing (spec added; runnable after deploy with E2E credentials)
+- [x] Playwright warehouse smoke passing
 - [x] `ops/README.md` updated
-- [ ] PR opened
-- [ ] PR merged to main
+- [x] PR opened
+- [x] PR merged to main
+- [x] main deploy passed
 
 ## Blockers / questions
 
