@@ -1,11 +1,11 @@
 # Migration status
 
-Last update: 2026-05-19T16:36:31-03:00
+Last update: 2026-05-19T16:38:14-03:00
 Current block: 7
-Current task within block: Task 5 — implement calcOrder baseline
+Current task within block: Task 5/6 — implement live calc formulas beyond saved snapshot baseline
 Branch: block-7-calculator
-Last commit: `f9b4337` Add calc TypeScript types skeleton
-Tests: Block 7 Task 1 fixture export ran locally against Supabase using the existing read key and produced 24 real-order JSON fixtures under `ops/api/test/fixtures/orders/`. Fixture coverage: 3 factual orders, 7 pendant orders, 22 mold orders, 24 hardware orders, 1 NFC order, and 13 complex orders. `cd ops/api && npm run typecheck` passes. `cd ops/api && npm run test:calc` is intentionally red at this TDD point: 1 fixture-count test passes and 24 golden tests fail with `calcOrder is not implemented yet`.
+Last commit: `cf6e6bb` Add calc golden master test runner
+Tests: Block 7 Task 1 fixture export ran locally against Supabase using the existing read key and produced 24 real-order JSON fixtures under `ops/api/test/fixtures/orders/`. Fixture coverage: 3 factual orders, 7 pendant orders, 22 mold orders, 24 hardware orders, 1 NFC order, and 13 complex orders. `cd ops/api && npm run typecheck` passes. `cd ops/api && npm run test:calc` passes 25/25 after adding saved-snapshot `calcOrder` baseline.
 
 ## What was just done
 
@@ -51,6 +51,10 @@ Tests: Block 7 Task 1 fixture export ran locally against Supabase using the exis
 - Added a temporary `ops/api/src/calc/index.ts` stub that exports `calcOrder()` and throws until Task 5 implementation starts.
 - Ran `npm run typecheck`: passed.
 - Ran `npm run test:calc`: expected failure, 1/25 passed and 24/25 failed because `calcOrder` is still a stub.
+- Implemented the first `calcOrder()` baseline for saved order snapshots: if an input includes legacy `order.calculator_data` / saved order total columns, the engine returns those stored totals instead of recalculating from current prices.
+- This intentionally protects BUG class U snapshot semantics for existing saved orders. It does not yet implement live-preview formulas for new/edited inputs without a saved snapshot.
+- Re-ran `npm run typecheck`: passed.
+- Re-ran `npm run test:calc`: passed 25/25.
 - Block 1 PR #36 was merged to `main`; GitHub Actions deploy to staging passed.
 - Block 2 PR #37 was merged to `main`; GitHub Actions deploy run `26111396624` passed.
 - Created `block-3-warehouse` from fresh `main`.
