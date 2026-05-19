@@ -1,11 +1,11 @@
 # Migration status
 
-Last update: 2026-05-19T15:28:03-03:00
+Last update: 2026-05-19T15:31:12-03:00
 Current block: 5
-Current task within block: Task 4 Colors API TDD
+Current task within block: Task 5 Marketplace sets API TDD
 Branch: block-5-molds-blanks
-Last commit: Add blanks API
-Tests: Block 5 API suite 66/66 passing in temp VPS containers with migrations 001-005; Block 4 web build and Playwright smoke passed; staging health `db.ok=true`; latest staging refresh/compare matched.
+Last commit: Add colors API
+Tests: Block 5 API suite 72/72 passing in temp VPS containers with migrations 001-005; Block 4 web build and Playwright smoke passed; staging health `db.ok=true`; latest staging refresh/compare matched.
 
 ## What was just done
 
@@ -200,11 +200,19 @@ Tests: Block 5 API suite 66/66 passing in temp VPS containers with migrations 00
   - `DELETE /api/blanks/packaging/:id`
 - Blanks mutations require `Idempotency-Key`; list supports `search` and `category` filters.
 - Verified full API suite in temporary VPS containers: 66/66 passing.
+- Added colors API tests first, then implemented `ops/api/src/routes/colors.js`.
+- Added `/api/colors` routes:
+  - `GET /api/colors`
+  - `POST /api/colors`
+  - `PATCH /api/colors/:id`
+  - `DELETE /api/colors/:id`
+- Colors mutations require `Idempotency-Key`; list supports `search` and `category` filters; `hex` is validated as `#RRGGBB` when present.
+- Verified full API suite in temporary VPS containers: 72/72 passing.
 
 ## Next steps for Codex
 
-1. Add colors API tests first.
-2. Implement `app_colors` CRUD routes.
+1. Add marketplace sets API tests first.
+2. Implement `marketplace_sets` CRUD routes with composition validation.
 3. Verify API tests in a temporary VPS Postgres container.
 
 ## Quality gates status (Block 2)
@@ -249,7 +257,7 @@ Tests: Block 5 API suite 66/66 passing in temp VPS containers with migrations 00
 - [x] `005_molds_blanks.sql` added
 - [x] Molds API tests passing
 - [x] Blanks API tests passing
-- [ ] Colors API tests passing
+- [x] Colors API tests passing
 - [ ] Marketplaces API tests passing
 - [ ] refresh/compare scripts updated
 - [ ] staging molds/blanks/colors/marketplaces data refreshed from Supabase
