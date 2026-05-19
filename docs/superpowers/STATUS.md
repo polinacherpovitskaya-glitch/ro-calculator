@@ -1,11 +1,11 @@
 # Migration status
 
-Last update: 2026-05-19T15:35:36-03:00
+Last update: 2026-05-19T15:38:33-03:00
 Current block: 5
-Current task within block: Task 6 Refresh + compare
+Current task within block: Task 7 Vue screens
 Branch: block-5-molds-blanks
-Last commit: Add marketplaces API
-Tests: Block 5 API suite 80/80 passing in temp VPS containers with migrations 001-005; Block 4 web build and Playwright smoke passed; staging health `db.ok=true`; latest staging refresh/compare matched.
+Last commit: Add molds-blanks refresh and compare
+Tests: Block 5 API suite 80/80 passing in temp VPS containers with migrations 001-005; Block 5 temp refresh/compare matched all migrated tables; Block 4 web build and Playwright smoke passed; staging health `db.ok=true`.
 
 ## What was just done
 
@@ -219,12 +219,32 @@ Tests: Block 5 API suite 80/80 passing in temp VPS containers with migrations 00
 - Marketplace composition is normalized and validated against existing `warehouse_items`.
 - Marketplace `sell` uses Idempotency-Key, a transaction, `SELECT FOR UPDATE` on the set and touched warehouse items, direct `warehouse_history.type='consume'` with `marketplace_set_id`, and no reservations.
 - Verified full API suite in temporary VPS containers: 80/80 passing.
+- Added `ops/scripts/refresh/04-molds-blanks.mjs` for molds, mold hardware links, blanks, colors, marketplace sets, and legacy-empty mold usage log.
+- Wired `04-molds-blanks` into `refresh-staging-snapshot.mjs`.
+- Extended `compare-datasets.mjs` for Block 5 tables, including computed expected count for `mold_hardware`.
+- Verified refresh/compare against a temporary VPS Postgres using Supabase anon read key:
+  - employees 14/14
+  - warehouse_items 227/227
+  - warehouse_reservations 483/483
+  - warehouse_history 1/1
+  - shipments 13/13
+  - shipment_items 62/62
+  - china_purchases 14/14
+  - china_purchase_items 45/45
+  - china_catalog 103/103
+  - molds 53/53
+  - mold_hardware 5/5
+  - mold_usage_log 0/0
+  - hw_blanks 61/61
+  - pkg_blanks 12/12
+  - app_colors 40/40
+  - marketplace_sets 43/43
 
 ## Next steps for Codex
 
-1. Add `ops/scripts/refresh/04-molds-blanks.mjs`.
-2. Wire Block 5 tables into `refresh-staging-snapshot.mjs` and `compare-datasets.mjs`.
-3. Verify refresh/compare against a temporary VPS Postgres database.
+1. Add Vue API wrappers and Pinia stores for molds, blanks, colors, and marketplaces.
+2. Add `/molds`, `/molds/:id`, `/blanks`, `/colors`, and `/marketplaces` screens.
+3. Verify `cd ops/web && npm run build`.
 
 ## Quality gates status (Block 2)
 
@@ -270,7 +290,8 @@ Tests: Block 5 API suite 80/80 passing in temp VPS containers with migrations 00
 - [x] Blanks API tests passing
 - [x] Colors API tests passing
 - [x] Marketplace API tests passing
-- [ ] Refresh/compare updated for Block 5 tables
+- [x] Refresh/compare updated for Block 5 tables
+- [ ] Vue screens built
 - [ ] Marketplaces API tests passing
 - [ ] refresh/compare scripts updated
 - [ ] staging molds/blanks/colors/marketplaces data refreshed from Supabase
