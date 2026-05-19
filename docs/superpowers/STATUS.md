@@ -1,11 +1,11 @@
 # Migration status
 
-Last update: 2026-05-19T17:49:35-03:00
+Last update: 2026-05-19T17:56:03-03:00
 Current block: 9
-Current task within block: Task 1 — orders schema
+Current task within block: Task 2/3 — Orders API + factual API initial implementation
 Branch: block-9-orders
-Last commit: `9ced98a` Block 8: Production planning (#46)
-Tests: Block 8 PR #46 was squash-merged to `main`; GitHub Actions main deploy run `26124057155` passed. Staging refresh/compare passed after deploy, and live smoke for `/templates`, `/production/calendar`, `/production/plan`, `/indirect-costs` passed. Block 9 migrations 001-008 apply cleanly in a temporary VPS Postgres container.
+Last commit: `3beead3` Add orders schema
+Tests: Full Postgres-backed API suite passed 125/125 on a temporary VPS Postgres container with migrations 001-008 after adding the initial Orders/Factual APIs. New route syntax checks passed.
 
 ## What was just done
 
@@ -46,6 +46,19 @@ Tests: Block 8 PR #46 was squash-merged to `main`; GitHub Actions main deploy ru
 - Added `ops/db/migrations/008_orders.sql` with `orders`, `order_items`, `order_factuals`, and `order_status_history`.
 - Added `NOT VALID` FKs from `warehouse_reservations.order_id` and `warehouse_history.order_id` to `orders(id)` so deploy is safe against pre-refresh staging rows while new rows are still enforced.
 - Verified migrations 001-008 apply cleanly in a temporary VPS Postgres container.
+- Added initial Orders/Factual API implementation:
+  - `GET/POST/PATCH/DELETE /api/orders`
+  - `GET /api/orders/:id` with items, factual, status history, and `ETag`
+  - `POST/PATCH/DELETE /api/orders/:id/items`
+  - `POST /api/orders/:id/status` with state-machine validation and status history
+  - `POST /api/orders/:id/recalc`
+  - `POST /api/orders/:id/consume-hardware`
+  - `GET/POST/PATCH /api/orders/:id/factual`
+  - `POST /api/orders/:id/factual/recalc`
+  - `POST /api/internal/cleanup-reservations`
+- Added `ops/api/src/cron/reservation-cleanup.js`.
+- Added `ops/api/test/orders.test.js` covering CRUD, ETag conflict, item reservation rebuild, idempotent consume, insufficient stock, final-order rejection, reservation split, status transitions, cleanup, delete cascade, recalc, and factual recalc.
+- Verified full API suite on temporary VPS Postgres: 125/125 passing.
 - Created Block 8 working branch `block-8-production` from local `main` after Block 7 merge/deploy status was recorded. This preserves the status update without pushing `main` directly.
 - Added migration `ops/db/migrations/007_production.sql`:
   - `product_templates`

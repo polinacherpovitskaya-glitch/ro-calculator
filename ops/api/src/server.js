@@ -15,6 +15,8 @@ import calcRoute from './routes/calc.js';
 import templatesRoute from './routes/templates.js';
 import productionRoute from './routes/production.js';
 import indirectRoute from './routes/indirect.js';
+import ordersRoute from './routes/orders.js';
+import internalRoute from './routes/internal.js';
 
 export function createServer() {
   const app = express();
@@ -36,5 +38,7 @@ export function createServer() {
   app.use('/api/templates', templatesRoute);
   app.use('/api/production', productionRoute);
   app.use('/api/indirect-costs', indirectRoute);
+  app.use('/api/orders', ordersRoute);
+  app.use('/api/internal', internalRoute);
   return app;
 }
