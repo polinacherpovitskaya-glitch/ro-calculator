@@ -1,11 +1,11 @@
 # Migration status
 
-Last update: 2026-05-19T16:32:34-03:00
+Last update: 2026-05-19T16:34:00-03:00
 Current block: 7
-Current task within block: Task 3 — TypeScript calc types skeleton
+Current task within block: Task 4 — golden-master test runner
 Branch: block-7-calculator
-Last commit: `061f8e0` Export calculator golden fixtures
-Tests: Block 7 Task 1 fixture export ran locally against Supabase using the existing read key and produced 24 real-order JSON fixtures under `ops/api/test/fixtures/orders/`. Fixture coverage: 3 factual orders, 7 pendant orders, 22 mold orders, 24 hardware orders, 1 NFC order, and 13 complex orders. Task 2 was documentation-only; no runtime tests were needed.
+Last commit: `83eb5df` Document calc engine layout
+Tests: Block 7 Task 1 fixture export ran locally against Supabase using the existing read key and produced 24 real-order JSON fixtures under `ops/api/test/fixtures/orders/`. Fixture coverage: 3 factual orders, 7 pendant orders, 22 mold orders, 24 hardware orders, 1 NFC order, and 13 complex orders. Task 3 TypeScript syntax check passed with `npx -y -p typescript tsc --strict --noEmit ops/api/src/calc/types.ts`. Plain `npx tsc` resolved to the wrong package, so the API package still needs an explicit TypeScript devDependency before CI wiring.
 
 ## What was just done
 
@@ -44,6 +44,8 @@ Tests: Block 7 Task 1 fixture export ran locally against Supabase using the exis
 - Ran the fixture export successfully; `ops/api/test/fixtures/orders/` now contains 24 JSON files.
 - Read the required Block 7 source areas and bug classes L/M/N/O/U.
 - Added `ops/api/src/calc/README.md` with the migration map for public calc functions, shared internals, snapshot conversion, pricing unification constraints, and fixture gaps.
+- Added `ops/api/src/calc/types.ts` with strict TypeScript skeletons for production settings/params, product/hardware/packaging/pendant inputs and outputs, order summary, financial director data, factual output, TPA, legacy Supabase rows, and golden fixtures.
+- Verified the types file with TypeScript strict/noEmit via `npx -y -p typescript`.
 - Block 1 PR #36 was merged to `main`; GitHub Actions deploy to staging passed.
 - Block 2 PR #37 was merged to `main`; GitHub Actions deploy run `26111396624` passed.
 - Created `block-3-warehouse` from fresh `main`.
