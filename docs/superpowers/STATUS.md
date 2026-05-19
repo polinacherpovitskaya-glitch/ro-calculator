@@ -4,7 +4,7 @@ Last update: 2026-05-19T18:15:44-03:00
 Current block: 9
 Current task within block: Task 10 — ready to push Block 9 PR
 Branch: block-9-orders
-Last commit: `d6bf819` Add orders UI and golden master smoke
+Last commit: `9238946` Add orders UI and golden master smoke
 Tests: Full Postgres-backed API suite passed 126/126 on a temporary VPS Postgres container with migrations 001-008. Calc suite passed 102/102, including 24 full-order HTTP API golden masters. `ops/web` build passed. Orders refresh/compare passed on a temporary VPS Postgres container with real Supabase read data.
 
 ## What was just done
