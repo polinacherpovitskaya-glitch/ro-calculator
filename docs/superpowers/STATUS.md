@@ -1,11 +1,11 @@
 # Migration status
 
-Last update: 2026-05-19T16:49:49-03:00
+Last update: 2026-05-19T16:50:32-03:00
 Current block: 7
 Current task within block: Task 13 — PR
 Branch: block-7-calculator
 Last commit: `e42f1ac` Add calc preview endpoint
-Tests: Block 7 Task 1 fixture export ran locally against Supabase using the existing read key and produced 24 real-order JSON fixtures under `ops/api/test/fixtures/orders/`. Fixture coverage: 3 factual orders, 7 pendant orders, 22 mold orders, 24 hardware orders, 1 NFC order, and 13 complex orders. `cd ops/api && npm run typecheck` passes. `cd ops/api && npm run test:calc` passes 74/74. Full API suite passed on VPS temporary Postgres: 92/92. API Docker build passed on VPS.
+Tests: Block 7 Task 1 fixture export ran locally against Supabase using the existing read key and produced 24 real-order JSON fixtures under `ops/api/test/fixtures/orders/`. Fixture coverage: 3 factual orders, 7 pendant orders, 22 mold orders, 24 hardware orders, 1 NFC order, and 13 complex orders. `cd ops/api && npm run typecheck` passes. `cd ops/api && npm run test:calc` passes 74/74. Full API suite passed on VPS temporary Postgres: 92/92. API Docker build passed on VPS. Staging refresh/compare passed after Block 7 work; `/api/health` returned `db.ok=true`.
 
 ## What was just done
 
@@ -87,6 +87,26 @@ Tests: Block 7 Task 1 fixture export ran locally against Supabase using the exis
 - Verified API Docker image builds successfully with the new TypeScript calc build stage.
 - Cleaned the VPS temporary test directory and test image.
 - Updated `ops/README.md` with the Calculator Engine section, endpoint, TS build notes, fixture/test notes, and current limitations.
+- Refreshed staging from Supabase after Block 7 work:
+  - employees 14/14
+  - warehouse_items 227/227
+  - warehouse_reservations 562/562
+  - warehouse_history 1/1
+  - shipments 13/13
+  - shipment_items 62/62
+  - china_purchases 14/14
+  - china_purchase_items 45/45
+  - china_catalog 103/103
+  - molds 53/53
+  - mold_hardware 5/5
+  - mold_usage_log 0/0
+  - hw_blanks 61/61
+  - pkg_blanks 12/12
+  - app_colors 40/40
+  - marketplace_sets 43/43
+  - bug_reports 10/10
+  - bug_attachments 8/8
+- Verified staging health after refresh: `{"status":"ok","version":"dev","uptime_seconds":1450,"db":{"ok":true,"latency_ms":21}}`.
 - Block 1 PR #36 was merged to `main`; GitHub Actions deploy to staging passed.
 - Block 2 PR #37 was merged to `main`; GitHub Actions deploy run `26111396624` passed.
 - Created `block-3-warehouse` from fresh `main`.
