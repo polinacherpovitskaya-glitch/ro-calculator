@@ -12,6 +12,16 @@
 
 Твоя цель — за серию рабочих сессий (несколько недель календарного времени) построить и протестировать всё в `ops-staging.recycleobject.ru` так, чтобы оно было готово к cutover.
 
+## Профиль работы: «долго, дотошно, максимально без меня»
+
+Владелец проекта (Полина) **сознательно выбрала медленную качественную работу вместо быстрой**. Это означает:
+
+- 🎯 **Качество > скорость.** Лучше потратить день на правильный тест чем неделю на отладку без него.
+- 🎯 **Автономия максимальная.** Не дёргай Полину на каждый шаг. Решай сам где можешь, делай ставки на безопасные варианты, документируй решения в STATUS.md.
+- 🎯 **Дотошность.** Каждый блок выполнить полностью по плану. Никаких «потом допишу тесты». Никаких «временно skip эту инвариантную проверку». Никаких «упростим этот edge case».
+- 🎯 **Self-merge OK при зелёных gates.** Если ВСЕ quality gates (см. ниже) зелёные — мержь сам в main. Не жди review. Документируй в STATUS.md что было сделано.
+- 🎯 **Останавливайся только при реальных блокерах** — нужен секрет, не получается достучаться до VPS, нашёл расхождение в формулах которое не объясняется. НЕ останавливайся «спросить мнения по архитектуре» — она вся в документах.
+
 ---
 
 ## Рабочий каталог
@@ -72,12 +82,27 @@ VPS:
 
 Конкретно для каждого блока — список багов, которые в нём чинятся, есть в его плане под секцией «Класс багов, которые фиксятся».
 
-### 2. Никаких прямых push в main
+### 2. Self-merge при зелёных quality gates
 
 - Каждый блок — отдельная ветка `block-N-<slug>` от main.
 - В конце блока — открыть PR в main через `gh pr create`.
-- НЕ мержить самому. Дождаться review от пользователя.
-- Если CI красный — фикси в той же ветке, не мержи.
+- **Если ВСЕ quality gates зелёные — мержь сам** через `gh pr merge --squash --delete-branch`.
+- Если хоть один gate красный — фикси в той же ветке, не мержи. После фикса — gates снова, потом merge.
+- Никогда не пушить прямо в main (только через PR, даже если сам мержишь сразу).
+
+**Quality gates (ВСЕ должны быть зелёные перед merge):**
+
+1. ✅ `cd ops/api && npm test` — unit + integration tests
+2. ✅ `cd ops/web && npm run build` — Vue билдится без TypeScript errors
+3. ✅ Если блок касается склада: `node ops/scripts/check-warehouse-invariants.mjs` на staging БД возвращает 0 violations по I1-I7
+4. ✅ Если блок Block 7: все 20/20 golden-master fixtures проходят
+5. ✅ Если блок Block 9: 20/20 full-order golden-master тестов
+6. ✅ Playwright e2e тест блока проходит на staging
+7. ✅ После деплоя на staging: `curl https://ops-staging.recycleobject.ru/api/health` возвращает `db.ok=true`
+8. ✅ Smoke вручную из плана блока (например «принять приёмку, увидеть qty в warehouse») — выполнен и описан в STATUS.md
+9. ✅ Compare-datasets script показывает что цифры из Supabase совпадают с Postgres для затронутых таблиц
+
+Если **любой** gate не выполнен — НЕ мержь. Документируй причину в STATUS.md, фикси.
 
 ### 3. TDD везде где возможно
 
@@ -163,15 +188,15 @@ VPS:
 
 ---
 
-## Регулярная перезаливка данных (refresh)
+## Регулярная перезаливка данных (refresh) — автоматизированно
 
 **Важно:** старая `calc.recycleobject.ru` продолжает работать. Новые заказы, новые часы, новые приёмки — каждый день. Если ты скопировал данные неделю назад — они уже устарели.
 
-**Правило:** после каждого блока + перед каждым новым блоком:
+### Manual run (когда руками)
 
 ```bash
 SUPABASE_URL=https://jbpmorruwjrxcieqlbmd.supabase.co \
-SUPABASE_SERVICE_KEY=<выдаст владелец> \
+SUPABASE_SERVICE_KEY=<из env> \
 DATABASE_URL=postgres://ops:<password>@ops-staging.recycleobject.ru:5432/ops \
   node ops/scripts/refresh-staging-snapshot.mjs
 ```
@@ -182,50 +207,210 @@ DATABASE_URL=postgres://ops:<password>@ops-staging.recycleobject.ru:5432/ops \
 
 **Скрипт расширяется по мере блоков.** В Block 3 он умеет копировать только warehouse + employees. После Block 4 — добавь Китай. После Block 5 — молды. И т.д. Каждый блок плана содержит инструкцию «добавь refresh-скрипт для этого блока».
 
+### Авто-refresh через systemd timer (настраивается в Block 3)
+
+Чтобы НЕ забывать делать refresh — настрой автоматический weekly refresh на VPS. Это часть Block 3 (после первого refresh-скрипта). Создай unit-файлы:
+
+```ini
+# ops/infra/systemd/ops-refresh-staging.service
+[Unit]
+Description=Refresh staging snapshot from Supabase
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=/srv/ops/infra/.env
+ExecStart=/usr/bin/bash -c 'cd /srv/ops && node scripts/refresh-staging-snapshot.mjs 2>&1 | tee /var/log/ops-refresh.log'
+StandardOutput=journal
+StandardError=journal
+TimeoutStartSec=3600
+```
+
+```ini
+# ops/infra/systemd/ops-refresh-staging.timer
+[Unit]
+Description=Weekly staging refresh — every Sunday at 04:00 MSK
+
+[Timer]
+OnCalendar=Sun *-*-* 04:00:00 Europe/Moscow
+RandomizedDelaySec=600
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+Установить на VPS:
+```bash
+ssh root@ops-staging.recycleobject.ru << 'REMOTE'
+cp /srv/ops/infra/systemd/ops-refresh-staging.* /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now ops-refresh-staging.timer
+systemctl list-timers | grep refresh
+REMOTE
+```
+
+После этого каждое воскресенье в 04:00 МСК staging автоматически обновляется свежими данными.
+
+Дополнительно — настрой алёрт в Telegram если refresh упал:
+```bash
+# В ops/scripts/refresh-staging-snapshot.mjs в catch-блок добавь
+# отправку в Telegram через bot-token (использовать тот же что для taskbot)
+```
+
+### Перед началом нового блока
+
+Всегда проверяй когда был последний refresh:
+```bash
+ssh root@ops-staging.recycleobject.ru "stat -c '%y' /var/log/ops-refresh.log | head -1"
+```
+
+Если старше 7 дней — запусти руками перед началом блока.
+
 ---
 
-## Когда останавливаться и ждать
+## Когда останавливаться (НОВАЯ ВЕРСИЯ — меньше остановок)
 
-Останавливайся (закрывай сессию или жди инструкций пользователя) когда:
+Полина хочет максимум автономии. Останавливайся **ТОЛЬКО** в этих случаях:
 
-- Закончил блок и открыл PR — жди review.
-- Tests красные и не можешь починить за 2 попытки — опиши проблему в STATUS.md и жди.
-- План говорит «Manual step» (например, добавить S3 credentials, настроить UptimeRobot) — выполни всё что МОГ автоматически, дальше попроси пользователя.
-- Нужны секреты (SUPABASE_SERVICE_KEY, S3 access key, тестовые пароли) — спроси.
-- Сомневаешься в архитектурном решении, которое не описано в плане — спроси.
-- Нашёл расхождение в реальных данных, которое не объясняется планом — опиши и спроси.
+### Останавливайся обязательно
 
-Останавливайся **дружелюбно**: создай файл `docs/superpowers/STATUS.md` (или обнови существующий) с актуальным состоянием:
+1. **Нужен реальный секрет, которого нет в репо/окружении:**
+   - `SUPABASE_SERVICE_KEY` (для refresh скриптов)
+   - Selectel S3 access/secret key (для storage migration в Block 6, 10, 13)
+   - Telegram bot token (Block 12)
+   - UptimeRobot API key (Block 1 Task 11)
+   - Postgres production password (на VPS лежит, локально не нужен)
+   - Любые персональные пароли тестовых пользователей
+   
+   → Опиши в STATUS.md в секции "Blockers" что именно нужно и куда положить.
+
+2. **Manual cloud-setup, который ты физически не можешь сделать:**
+   - Создать bucket в Selectel Object Storage (можно через `s3cmd`/AWS-CLI если креды есть — попробуй)
+   - Зарегистрировать UptimeRobot аккаунт
+   - Изменить DNS A-запись (требует доступ к reg.ru)
+   - Подтверждение billing в Selectel
+   
+   → В STATUS.md в "Manual steps required" — список шагов в стиле «зайди туда → сделай то → значение положи в env как X».
+
+3. **CI красный 3 попытки подряд + не понимаешь причину:**
+   - Описать симптом + что пробовал в STATUS.md → ждать.
+
+4. **Расхождение golden-master, которое не воспроизводится:**
+   - Если golden-master fixture показывает разные числа в разных запусках — это не баг твоего кода, это нестабильный test. Описать в STATUS.md.
+
+5. **Возможная потеря данных:**
+   - Если делаешь migration script и он МОЖЕТ испортить данные — стоп, опиши план в STATUS.md, жди подтверждение.
+
+### НЕ останавливайся (раньше я сказал останавливаться — отменяется)
+
+- ❌ После каждого блока — НЕ жди review. Мержь сам если gates зелёные. Двигайся к следующему блоку.
+- ❌ После каждого таска — НЕ жди подтверждения. Делай следующий таск.
+- ❌ "Сомневаюсь в архитектуре" — НЕ останавливайся. Перечитай BUG-INVENTORY, STABILITY-PROGRAM, WAREHOUSE-MAP — там есть ответы. Если действительно нет ответа — выбери самый консервативный вариант, документируй выбор в commit message + STATUS.md.
+- ❌ "Стоит ли добавить эту фичу?" — нет. Делай ТОЛЬКО что в плане. Никаких улучшений.
+- ❌ "Хотелось бы посоветоваться по naming" — нет. Используй имена из старого кода или из плана.
+
+### STATUS.md (обновлять часто)
+
+Создай и поддерживай `docs/superpowers/STATUS.md`. Обновляй **после каждого блока** (не реже) или **каждый день когда работаешь** (если блок длинный):
 
 ```markdown
 # Migration status
 
-Last update: <ISO datetime>
-Current block: <N>
+Last update: <ISO datetime, например 2026-05-22T14:30:00Z>
+Current block: <N> "<topic>"
 Current task within block: <N>
 Branch: <name>
 Last commit: <SHA short>
 Tests: <X/Y passing>
 
-## What was just done
-- ...
+## What was done in last session
+- [bullet list of concrete changes, with file paths if relevant]
 
 ## Next steps
-- ...
+- [ordered list of what comes next, with estimated time]
 
-## Blockers / questions
+## Quality gates status (only when at end of block)
+- [ ] npm test in ops/api
+- [ ] npm run build in ops/web
+- [ ] Warehouse invariants I1-I7 (if applicable)
+- [ ] Golden-master 20/20 (Block 7+9 only)
+- [ ] Playwright e2e
+- [ ] /api/health green on staging
+- [ ] Manual smoke from plan
+
+## Blockers / questions (только если есть)
 - ... (пусто если нет)
+- Если есть — указывай ТОЧНО что нужно: имя env переменной, формат, куда положить
 
-## How to resume
-Прочитать этот STATUS.md, продолжать с «Next steps».
+## Manual steps required by Polina (только если есть)
+- ... (пусто если нет)
+- Точная пошаговая инструкция
+
+## Completed blocks summary
+- ✅ Block 1: Infrastructure (PR #N, merged DATE)
+- ✅ Block 2: Auth (PR #N, merged DATE)
+- 🔄 Block 3: Warehouse (in progress, see Branch above)
+- ⏳ Block 4-16: pending
 ```
+
+Этот файл — главный способ для Полины узнать что происходит. Чем подробнее и регулярнее обновляешь — тем меньше она тебя теребит.
+
+---
+
+## Принципы дотошности (выбраны Полиной явно)
+
+Полина сказала: «лучше долго, но дотошно». Это значит:
+
+### Не пропускай шаги ради скорости
+
+- **Каждый тест из плана — пишется.** Если в плане «≥12 тестов на warehouse API» — должно быть ≥12. Не 10, не 8.
+- **Каждый инвариант из I1-I7 — проверяется.** В тестах + в финальном smoke на staging.
+- **Каждый golden-master fixture — собирается.** Block 7 требует 20+ из них. 18 — недостаточно.
+- **Каждый refresh — с compare.** После refresh-скрипта всегда `compare-datasets.mjs` для верификации.
+
+### Не давай себе послаблений
+
+Соблазны, которые могут возникнуть, и почему НЕ поддаваться:
+
+| Соблазн | Почему НЕТ |
+|---|---|
+| «Этот тест странный, заскипую» | Багу хотим поймать, а не спрятать |
+| «Edge case редкий, обработаю позже» | После Stage D — много «потом» накопится |
+| «Skip Idempotency-Key для этого простого endpoint» | Простых endpoint'ов не бывает в проде |
+| «withTransaction overhead, можно без него» | Race conditions появляются именно тогда |
+| «Этот fixture сложно собрать, возьму попроще» | Сложные — самые важные |
+| «Логи разрослись, заменю на console.error» | Структурированные логи понадобятся при cutover |
+| «Vue компонент не идеален, потом отрефакторю» | «Потом» не наступит, лучше сделать сразу хорошо |
+
+### При сомнениях — более защитный вариант
+
+- Сомневаешься: писать ли валидацию входа? → **писать.**
+- Сомневаешься: добавлять ли FK CASCADE? → **добавлять** (если у схемы это допустимо).
+- Сомневаешься: ставить ли `FOR UPDATE`? → **ставить** (overhead минимальный).
+- Сомневаешься: писать ли integration-тест в добавок к unit? → **писать** оба.
+- Сомневаешься: нужен ли индекс на этой колонке? → **создай**, если фильтруют/сортируют по ней.
+
+### Каждый блок — полностью завершённый
+
+Не оставляй «хвостов». Завершённый блок означает:
+- ✅ Все таски в плане выполнены
+- ✅ Все quality gates зелёные
+- ✅ STATUS.md обновлён
+- ✅ PR merged в main
+- ✅ Staging задеплоен и проверен smoke'ом
+- ✅ refresh-staging-snapshot пробежал и compare совпал
+- ✅ Если применимо — инварианты I1-I7 на live staging возвращают 0 violations
+
+Если хоть один пункт не выполнен — блок НЕ завершён, не переходи к следующему.
 
 ---
 
 ## Что НИКОГДА не делай
 
-- ❌ Не пушь в main напрямую
-- ❌ Не мержь свои PR сам
+- ❌ Не пушь в main напрямую (только через PR, даже если сам merge'аешь сразу)
+- ❌ Не мержь PR пока хоть один из quality gates красный
 - ❌ Не деплой в production (старая calc.recycleobject.ru — табу)
 - ❌ Не меняй `index.html` старого фронта (старая calc продолжает работать)
 - ❌ Не удаляй старые `js/*.js` файлы (это Stage D, не сейчас)
