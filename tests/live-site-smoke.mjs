@@ -34,6 +34,11 @@ async function ensureAuthenticated(page) {
   );
 
   const authResult = await page.evaluate(async (userId) => {
+    const smokePages = [
+      'calculator', 'orders', 'factual',
+      'analytics', 'molds', 'colors', 'timetrack', 'tasks', 'bugs', 'projects', 'gantt',
+      'import', 'warehouse', 'marketplaces', 'china', 'settings',
+    ];
     const accounts = App?.authAccounts || [];
     const account =
       accounts.find((entry) => String(entry.id) === String(userId))
@@ -44,6 +49,20 @@ async function ensureAuthenticated(page) {
         ok: false,
         accountCount: accounts.length
       };
+    }
+
+    account.role = 'admin';
+    account.is_active = true;
+    account.pages = smokePages;
+    App.authAccounts = accounts.map((entry) => (
+      String(entry.id) === String(account.id)
+        ? { ...entry, role: 'admin', is_active: true, pages: smokePages }
+        : entry
+    ));
+    if (account.employee_id != null && account.employee_id !== '') {
+      const pagePerms = JSON.parse(localStorage.getItem('ro_employee_pages') || '{}');
+      pagePerms[String(account.employee_id)] = smokePages;
+      localStorage.setItem('ro_employee_pages', JSON.stringify(pagePerms));
     }
 
     localStorage.setItem('ro_calc_auth_method', 'user');
