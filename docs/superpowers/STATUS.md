@@ -1,8 +1,8 @@
 # Migration status
 
-Last update: 2026-05-19T14:21:00-03:00
+Last update: 2026-05-19T14:26:00-03:00
 Current block: 3
-Current task within block: Task 7 Vue inventory audit
+Current task within block: Task 8 Vue warehouse history view
 Branch: block-3-warehouse
 Last commit: main `9a563e6` includes Block 2 merge
 Tests: Block 2 PR checks passed; main deploy passed; live staging health `db.ok=true`; live auth smoke passed after deploy.
@@ -67,11 +67,13 @@ Tests: Block 2 PR checks passed; main deploy passed; live staging health `db.ok=
 - Added `/warehouse/:id` item card with editable fields and recent movement history.
 - Verified API test suite again in temporary VPS containers: 30/30 passing.
 - Verified `cd ops/web && npm run build` passing after item card.
+- Added `/warehouse/inventory` inventory audit view with factual qty entry, delta calculation, and `POST /api/warehouse/inventory-audit` integration.
+- Verified `cd ops/web && npm run build` passing after inventory view.
 
 ## Next steps for Codex
 
-1. Add `/warehouse/inventory` inventory audit view.
-2. Wire `POST /api/warehouse/inventory-audit` from the UI.
+1. Add `/warehouse/history` movement history view.
+2. Add filters and pagination/limit controls.
 3. Re-run web build before the next commit.
 
 ## Quality gates status (Block 2)

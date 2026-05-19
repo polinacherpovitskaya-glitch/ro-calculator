@@ -54,6 +54,12 @@ export interface WarehouseHistoryEntry {
   created_at: string;
 }
 
+export interface InventoryAuditChange {
+  item_id: number;
+  factual_qty: number;
+  note?: string | null;
+}
+
 export async function listItems(params: { search?: string; category?: string } = {}): Promise<WarehouseItem[]> {
   const searchParams = new URLSearchParams();
   if (params.search) searchParams.set('search', params.search);
@@ -96,5 +102,12 @@ export async function updateItem(id: number, patch: WarehouseItemPatch): Promise
 export async function deleteItem(id: number): Promise<void> {
   await apiFetch<void>(`/api/warehouse/items/${id}`, {
     method: 'DELETE',
+  });
+}
+
+export async function runInventoryAudit(changes: InventoryAuditChange[]): Promise<void> {
+  await apiFetch<void>('/api/warehouse/inventory-audit', {
+    method: 'POST',
+    body: JSON.stringify({ changes }),
   });
 }
