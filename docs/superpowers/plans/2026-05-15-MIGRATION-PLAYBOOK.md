@@ -1,0 +1,327 @@
+# Полный план миграции RO calc → новый стек
+
+> **Для Codex / любой агентной системы:** Это мастер-документ. Конкретные шаги — в отдельных файлах плана для каждого блока (см. таблицу ниже). Этот файл — корневой указатель: что в каком порядке делать и почему.
+
+**Спека:** [`../specs/2026-05-15-ops-redesign-design.md`](../specs/2026-05-15-ops-redesign-design.md) — читать обязательно перед стартом любого блока.
+
+**Текущая ветка разработки:** `block-1-infrastructure` (создаётся новая ветка для каждого нового блока, см. ниже).
+
+---
+
+## Принцип
+
+```
+┌──────────────────────────────────────────────────────────┐
+│ Stage A — BUILD (4-8 месяцев, по 1-2 блока/неделю)       │
+│                                                           │
+│ Старая calc.recycleobject.ru продолжает работать как      │
+│ обычно. Сотрудники не замечают, что параллельно строится  │
+│ замена на ops-staging.recycleobject.ru.                   │
+│                                                           │
+│ Раз в 2-3 недели — REFRESH: накатываем свежий снапшот     │
+│ Supabase → Postgres на staging (новые заказы, остатки,    │
+│ задачи и т.п. подъезжают в staging).                      │
+│                                                           │
+│ Тестируем на свежих копиях боевых данных.                 │
+└────────────────────┬─────────────────────────────────────┘
+                     ▼
+┌──────────────────────────────────────────────────────────┐
+│ Stage B — TEST (1-2 недели)                              │
+│                                                           │
+│ Финальная сверка:                                         │
+│ - Golden-master тесты калькулятора зелёные                │
+│ - 20+ реальных заказов: цифры совпадают копейка-в-копейку │
+│ - Ручная проверка всех ключевых сценариев                 │
+│ - Smoke в CI                                              │
+│ - Performance: время ответа ≤200 мс p95                   │
+└────────────────────┬─────────────────────────────────────┘
+                     ▼
+┌──────────────────────────────────────────────────────────┐
+│ Stage C — CUTOVER (один вечер пятницы/субботы)           │
+│                                                           │
+│ Окно 2-4 часа:                                            │
+│ 1. T-30: объявление в чат: "сегодня в 22:00 переключаем"  │
+│ 2. T+0: Supabase → read-only (kill-switch в calc)         │
+│ 3. T+5: финальный delta-sync Supabase → Postgres          │
+│ 4. T+15: сверка row counts + golden-master                │
+│ 5. T+30: DNS calc.recycleobject.ru → новый сервер         │
+│ 6. T+45: smoke в проде, объявление "переключение готово"  │
+└────────────────────┬─────────────────────────────────────┘
+                     ▼
+┌──────────────────────────────────────────────────────────┐
+│ Stage D — SAFETY NET + CLEANUP (1-2 недели)              │
+│                                                           │
+│ - Supabase + Vercel остаются неделю в read-only           │
+│ - Если критическая регрессия — DNS возвращаем на старое   │
+│ - Через неделю спокойной работы: отключаем Supabase Pro,  │
+│   отключаем Vercel, чистим репо                           │
+└──────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Дополнительные документы (читать перед стартом)
+
+- **[STABILITY-PROGRAM.md](2026-05-15-STABILITY-PROGRAM.md)** — 7 системных защит, тесты, мониторинг, метрики успеха. **Читать первым.** Объясняет философию: мы не правим баги по одному, мы строим защиту против целых классов.
+- **[BUG-INVENTORY.md](2026-05-15-BUG-INVENTORY.md)** — 25 классов багов (A-Y) из 180 дней commit history по всем модулям: склад, калькулятор, заказы, бот, factual, production. Симптом, где живёт, ссылки на commit'ы попыток чинить, и как устраняется архитектурно.
+- **[WAREHOUSE-INTERACTION-MAP.md](2026-05-15-WAREHOUSE-INTERACTION-MAP.md)** — детальная карта склада: где взаимодействует, инварианты I1-I7, канонический справочник типов/источников. Обязательно перед Block 3, 4, 5, 9.
+
+## Карта всех блоков и фаз
+
+| # | Блок / Стейдж | Зависит от | Сложность | План |
+|---|---|---|---|---|
+| **STAGE A — BUILD** | | | | |
+| 1 | Инфраструктура (Selectel, Docker, домен, базовый API) | — | Средняя | [2026-05-15-block-1-infrastructure.md](2026-05-15-block-1-infrastructure.md) ✓ Tasks 1-3 готовы |
+| 2 | Auth + employees | 1 | Низкая | [2026-05-15-block-2-auth.md](2026-05-15-block-2-auth.md) |
+| 3 | Склад: items + reservations + history | 2 | Средняя | [2026-05-15-block-3-warehouse.md](2026-05-15-block-3-warehouse.md) |
+| 4 | Приёмки + Китай (закупки + каталог) | 3 | Средняя | [2026-05-15-block-4-shipments-china.md](2026-05-15-block-4-shipments-china.md) |
+| 5 | Молды + бланки + цвета + marketplaces | 4 | Средняя | [2026-05-15-block-5-molds-blanks.md](2026-05-15-block-5-molds-blanks.md) |
+| 6 | Bug reports + bucket `bug-attachments` | 2 | Низкая | [2026-05-15-block-6-bugs.md](2026-05-15-block-6-bugs.md) |
+| 7 | **⭐ Калькулятор (golden-master + порт)** | 5 | **Высокая** | [2026-05-15-block-7-calculator.md](2026-05-15-block-7-calculator.md) |
+| 8 | Product templates + production calendar/plan + indirect costs | 7 | Средняя | [2026-05-15-block-8-production.md](2026-05-15-block-8-production.md) |
+| 9 | **⭐ Orders + Order items + Factual** | 7, 8 | **Высокая** | [2026-05-15-block-9-orders.md](2026-05-15-block-9-orders.md) |
+| 10 | Bucket `product-images` (миграция фото) | 9 | Низкая | [2026-05-15-block-10-product-images.md](2026-05-15-block-10-product-images.md) |
+| 11 | Tasks + Projects + Areas + Gantt | 2 | Средняя | [2026-05-15-block-11-tasks-projects.md](2026-05-15-block-11-tasks-projects.md) |
+| 12 | Telegram task bot — переключение на новый Postgres | 11 | Низкая | [2026-05-15-block-12-bot.md](2026-05-15-block-12-bot.md) |
+| 13 | Bucket `mold-photos` | 5 | Низкая | [2026-05-15-block-13-mold-photos.md](2026-05-15-block-13-mold-photos.md) |
+| 14 | Время + Vacations + Payroll | 2 | Средняя | [2026-05-15-block-14-time-payroll.md](2026-05-15-block-14-time-payroll.md) |
+| 15 | Analytics | 9, 14 | Низкая (с известными багами OK) | [2026-05-15-block-15-analytics.md](2026-05-15-block-15-analytics.md) |
+| 16 | Remaining settings | все выше | Низкая | [2026-05-15-block-16-settings.md](2026-05-15-block-16-settings.md) |
+| **STAGE B — TEST** | | | | |
+| B | Финальная сверка перед cutover | все блоки A | Высокая | [2026-05-15-stage-B-test.md](2026-05-15-stage-B-test.md) |
+| **STAGE C — CUTOVER** | | | | |
+| C | Cutover-день: переключение DNS | B | Высокая | [2026-05-15-stage-C-cutover.md](2026-05-15-stage-C-cutover.md) |
+| **STAGE D — DECOMMISSION** | | | | |
+| D | Safety net + отключение Supabase/Vercel + чистка | C | Низкая | [2026-05-15-stage-D-decommission.md](2026-05-15-stage-D-decommission.md) |
+
+---
+
+## Общие правила для всех блоков
+
+### Ветки и коммиты
+
+- Каждый блок → отдельная ветка `block-N-<slug>` от `main`
+- Внутри блока — много мелких коммитов, по 1 на каждую завершённую задачу
+- В конце блока — PR в `main`, merge после прохождения CI
+- **Не пушить, не мержить** пока пользователь не подтвердил
+
+### Структура файлов
+
+Весь новый код живёт в `ops/`:
+```
+ops/
+├── api/          Node 20 + Express
+│   ├── src/
+│   │   ├── routes/   один файл на ресурс (warehouse.js, orders.js, ...)
+│   │   ├── db.js
+│   │   ├── server.js
+│   │   ├── index.js
+│   │   └── middleware/   (auth.js и т.п.)
+│   └── test/         один файл на ресурс
+├── web/          Vue 3 + Vite SPA
+│   ├── src/
+│   │   ├── views/       один файл на экран
+│   │   ├── components/  переиспользуемые
+│   │   ├── stores/      Pinia stores
+│   │   ├── api/         обёртки над fetch (один файл на ресурс)
+│   │   └── types/       TypeScript типы
+│   └── ...
+├── db/
+│   └── migrations/   SQL миграции с префиксом NNN_
+├── infra/        docker-compose, Caddyfile, скрипты деплоя/бэкапа
+└── bot/          Telegram task bot (после блока 12)
+```
+
+### Стандарт на каждый блок
+
+Каждый блок должен:
+1. Иметь миграцию БД с префиксом `NNN_block_X_<topic>.sql` в `ops/db/migrations/`
+2. Иметь скрипт копирования данных `ops/scripts/copy-block-X-<topic>.mjs` (читает из Supabase, пишет в Postgres)
+3. Иметь TDD-тесты для API: unit + integration (через временную Postgres в CI)
+4. Иметь Playwright e2e smoke для UI-части (по 1-2 сценария на блок)
+5. Закончиться обновлением `ops/README.md`
+6. Закончиться pull request в `main` с описанием что было сделано
+
+### Стандарт API
+
+Все эндпойнты следуют паттернам из Block 1:
+- REST + JSON
+- Cookie-based auth (после Block 2 — все non-auth эндпойнты под middleware)
+- `Idempotency-Key` header на всех мутациях (POST/PATCH/DELETE)
+- Структурированные ошибки `{ "error": { "code": "...", "message": "...", "details": {...} } }`
+- Health endpoint `/api/health` всегда возвращает 200 + статус БД (расширяется по ходу)
+
+### Стандарт UI
+
+Все экраны следуют паттернам:
+- Pinia store на ресурс
+- Skeleton-loader при первой загрузке
+- Никакого `localStorage` для данных (только память текущей сессии)
+- Никакого "оптимистичного UI" для записей — ждём ответ сервера
+- Явная плашка ошибки "не удалось сохранить, повторить" при сетевом фейле
+- Idempotency-Key на каждом POST/PATCH/DELETE через обёртку `api/index.ts`
+
+---
+
+## Стратегия "живые данные накапливаются"
+
+**Проблема:** мы строим новую систему 4-8 месяцев. В это время в `calc.recycleobject.ru` продолжают:
+- Создаваться новые заказы
+- Списываться/приниматься фурнитура
+- Меняться статусы
+- Загружаться фото
+- Падать новые задачи
+
+Если мы один раз скопировали данные в начале и потом строим — к концу staging-копия безнадёжно устареет.
+
+**Решение:** регулярная "перезаливка" staging-копии из Supabase. Делается каждые 2-3 недели + всегда перед началом тестирования нового блока.
+
+Скрипт `ops/scripts/refresh-staging-snapshot.mjs`:
+1. Подключается к Supabase (read-only)
+2. Дропает все таблицы в staging Postgres (КРОМЕ `auth_users`, `auth_sessions` — наши)
+3. Накатывает миграции заново
+4. Копирует всё, что было успешно перенесено к этому моменту
+5. Сверяет row counts
+
+Этот скрипт создаётся как часть Block 3 (первый блок с реальными данными — склад) и расширяется по мере добавления блоков.
+
+**Поэтому каждый блок должен иметь модуль `ops/scripts/refresh/<block>.mjs`** который добавляется в общий refresh.
+
+---
+
+## Что закладываем в финальный Cutover
+
+К моменту cutover на staging:
+- Все 16 блоков мигрированы
+- Все golden-master тесты зелёные
+- За 24-48 часов до cutover — последняя репетиция delta-sync на staging
+- Stage B пройден (см. [`2026-05-15-stage-B-test.md`](2026-05-15-stage-B-test.md))
+- Кнопка «откат DNS» на руках
+
+В cutover-день — см. [`2026-05-15-stage-C-cutover.md`](2026-05-15-stage-C-cutover.md). Расписан хронологически с T-30 до T+90.
+
+---
+
+## Бюджет
+
+| Период | $/мес |
+|---|---|
+| Сейчас (Supabase + Vercel) | 25-45 |
+| Во время разработки (новый VPS + старый стек) | 32-40 |
+| После Stage D (только новый VPS) | 7-13 |
+
+---
+
+## Где сейчас
+
+Состояние на момент написания (2026-05-19):
+- ✅ Block 1 Tasks 1-3 выполнены: VPS живёт, DNS работает, API скелет тестируется
+- 🔄 Дальше — Block 1 Tasks 4-11, потом Blocks 2-16
+- ⏳ Stage B/C/D — в самом конце
+
+См. свежий статус: `ops/README.md` (обновляется в каждом блоке).
+
+---
+
+## Чек-лист «можно ли начинать новый блок?»
+
+Перед стартом любого блока убедись:
+- [ ] Предыдущий блок смержен в `main`
+- [ ] CI на `main` зелёный
+- [ ] Staging-сайт `ops-staging.recycleobject.ru/api/health` отвечает 200
+- [ ] Свежий refresh staging-данных сделан в течение последних 14 дней (или сделать сейчас)
+- [ ] Ветка для нового блока создана: `git checkout main && git pull && git checkout -b block-N-<slug>`
+
+После завершения блока:
+- [ ] Все тесты блока зелёные
+- [ ] Playwright smoke прошёл
+- [ ] `ops/README.md` обновлён
+- [ ] PR создан, описание заполнено
+- [ ] Дождаться review/merge (или self-approve если ты единственный разработчик)
+- [ ] После merge — staging обновлён через CI, `/api/health` всё ещё 200
+
+---
+
+## Что мы ИСПРАВЛЯЕМ vs что переносим 1:1
+
+> **Правило (расширенная версия):** миграция = шанс системно починить **архитектурные** баги во всех модулях. Бизнес-формулы переносим 1:1 (защищаются golden-master). Архитектура — редизайним по списку из BUG-INVENTORY.
+
+### Чиним по ходу (отдельный документ):
+
+- **`WAREHOUSE-INTERACTION-MAP.md`** — большая карта: где в системе склад взаимодействует с чем, инварианты I1-I7, канонический справочник типов и источников.
+- **`BUG-INVENTORY.md`** — перечень известных багов из commit history (последние 60 дней) и как каждый класс багов устраняется архитектурно.
+
+**Что архитектурно чиним по всей системе (25 классов из BUG-INVENTORY):**
+
+**Складская группа** (Blocks 3, 4, 5, 9):
+- A. Cache hell → single source of truth
+- B. Двойное списание → Idempotency-Key
+- C. Фантомные резервы → FK CASCADE + cron release
+- D. Project hardware ready → state machine на `reservation.status`
+- E. Дубликаты order items → отдельность от calculator_data
+- F. Цены рассинхрон → snapshot semantics
+- G. Race conditions → `SELECT FOR UPDATE`
+- I. Авто-создание пустых items → валидация в receive
+- J. Mold ↔ blank links lost → разделённость mold_hardware
+
+**Калькулятор** (Block 7):
+- L. Draft duplicate saves → idempotency + no auto-save
+- M. Numeric coercion → TypeScript + runtime валидация
+- N. Pricing inconsistency → единый `pricing.ts`
+- O. Slow startup → Vite hash-bundling
+
+**Бот** (Block 12):
+- P. Restart loses state → state в БД
+- Q. Timezone shift → явная TZ через `employees.timezone`
+- R. Telegram binding mess → отдельная таблица с UNIQUE constraint
+
+**Заказы / Factual** (Block 9):
+- S. Status not saved / resurrection → partial PATCH + DELETE CASCADE + If-Match
+- T. Clone bug → явный clone endpoint без reservations
+- U. Margin drift on save → no auto-recalc
+- V. Factual period filtering → SQL aggregation function
+- W. Factual cost drift → snapshot semantics
+
+**Production** (Block 8):
+- X. Drag reorder → atomic position API
+
+**Системно** (везде):
+- Y. Save partial → `withTransaction` обязателен
+- K. Нет мониторинга → invariant checks + UptimeRobot + cron
+
+### НЕ трогаем (переносим 1:1):
+- **Формулы калькулятора** — golden-master заставляет копейка-в-копейку
+- UI заказов, КП — визуально 1:1
+- Структура задач/проектов/ганта — как было
+- Аналитика — переносим с известными багами, фиксим после Stage D
+- Wiki, ТПА (кроме calc), Monitoring, Finance UI — **выкидываем целиком**
+
+## FAQ для Codex
+
+**Q: Если я выполняю Block N, могу ли я смотреть на код из старой calc?**
+A: Да и нужно. Файлы вроде `js/warehouse.js`, `js/orders.js`, `js/calculator.js` содержат ВСЮ бизнес-логику. Цель — перенести её, но **для склада применить редизайн** (см. WAREHOUSE-INTERACTION-MAP). Для всего остального — 1:1.
+
+**Q: Что делать если нашёл баг в старой логике?**
+A: Зависит от модуля:
+- **Склад/резервы/consume/receipt:** проверь, есть ли он в `BUG-INVENTORY.md`. Если есть — фиксится по ходу миграции через новую архитектуру.
+- **Калькулятор/заказы/КП:** перенеси КАК ЕСТЬ. Любое улучшение = регрессия golden-master. Заведи issue, фиксь после Stage D.
+- **Прочее:** 1:1, issue, после Stage D.
+
+**Q: Структура таблицы в Supabase сложная — упростить?**
+A: Для склада — да, см. WAREHOUSE-INTERACTION-MAP раздел 3-4 (упрощаем history.type до 5 значений, reservation.source до 2). Для остального — нет, 1:1. Любая нормализация — после Stage D.
+
+**Q: Как мне понять, могу ли я править логику в Block N?**
+A: Чек-лист:
+1. Это warehouse / reservation / receipt / consume / mold use / order consume-hardware? → можно править, см. WAREHOUSE-INTERACTION-MAP.
+2. Это калькулятор формула или цена? → НЕТ. Golden-master заставит.
+3. Это структура UI? → НЕТ, переносим как есть.
+4. Это очевидный баг типа typo? → можно фиксить, но через отдельный коммит.
+
+**Q: Как проверить, что данные совпадают?**
+A: Скрипт `ops/scripts/compare-datasets.mjs` (создаётся в Block 3, расширяется по блокам). Сравнивает `count(*)` по таблице + контрольные записи по ID.
+
+**Q: Что если staging-БД сломалась во время разработки?**
+A: Запусти `refresh-staging-snapshot.mjs` — он дропнет всё (кроме auth) и накатит свежее. Это безопасно — staging не священный.
+
+**Q: Можно ли пушить блок в `main` если в нём ошибка?**
+A: Нет. CI должен быть зелёный. Если что-то не работает — фиксим в ветке блока, не в `main`. `main` всегда стабильный, он автоматически деплоится на staging.

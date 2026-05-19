@@ -1,0 +1,10 @@
+[Unit]
+Description=Run ops Postgres backup daily at 03:00 MSK
+
+[Timer]
+OnCalendar=*-*-* 03:00:00 Europe/Moscow
+RandomizedDelaySec=300
+Persistent=true
+
+[Install]
+WantedBy=timers.target
