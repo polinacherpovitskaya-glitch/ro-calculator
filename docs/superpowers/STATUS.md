@@ -1,8 +1,8 @@
 # Migration status
 
-Last update: 2026-05-19T13:44:17-03:00
+Last update: 2026-05-19T13:47:00-03:00
 Current block: 3
-Current task within block: Task 1 SQL migration
+Current task within block: Task 2 idempotency helper
 Branch: block-3-warehouse
 Last commit: main `9a563e6` includes Block 2 merge
 Tests: Block 2 PR checks passed; main deploy passed; live staging health `db.ok=true`; live auth smoke passed after deploy.
@@ -34,12 +34,14 @@ Tests: Block 2 PR checks passed; main deploy passed; live staging health `db.ok=
 - Verified live auth smoke on staging: admin login, `/api/auth/me`, protected `/api/employees`, logout.
 - Verified API tests 15/15 in isolated VPS containers with migrations 001+002.
 - Verified `ops/web npm run build` locally.
+- Added `ops/db/migrations/003_warehouse.sql` for warehouse items, reservations, and history. Because `orders` is not created until Block 9, `order_id` columns are raw `BIGINT` for now; Block 9 will add the FK/CASCADE.
+- Verified migrations 001+002+003 on a clean temporary Postgres container on the VPS.
 
 ## Next steps for Codex
 
-1. Implement `ops/db/migrations/003_warehouse.sql`.
-2. Add tests around warehouse schema/API before implementation per Block 3 TDD plan.
-3. Add idempotency helper and warehouse API in small commits.
+1. Add `ops/api/src/idempotency.js`.
+2. Add warehouse API tests before implementation per Block 3 TDD plan.
+3. Implement warehouse API in small commits.
 4. Keep staging data fresh with Supabase refresh scripts between blocks.
 
 ## Quality gates status (Block 2)
@@ -55,7 +57,7 @@ Tests: Block 2 PR checks passed; main deploy passed; live staging health `db.ok=
 
 ## Quality gates status (Block 3)
 
-- [ ] `003_warehouse.sql` added
+- [x] `003_warehouse.sql` added
 - [ ] API warehouse tests added and passing
 - [ ] `refresh-staging-snapshot.mjs` and `compare-datasets.mjs` added
 - [ ] staging warehouse data refreshed from Supabase
