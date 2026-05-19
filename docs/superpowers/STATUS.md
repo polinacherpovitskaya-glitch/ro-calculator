@@ -1,17 +1,22 @@
 # Migration status
 
-Last update: 2026-05-19T13:38:57-03:00
-Current block: 2
-Current task within block: PR / merge
-Branch: block-2-auth
-Last commit: latest `block-2-auth` commit
-Tests: Block 2 API tests 15/15 passing in temporary VPS containers; `ops/web npm run build` passing; live staging health `db.ok=true`; live auth smoke passed.
+Last update: 2026-05-19T13:44:17-03:00
+Current block: 3
+Current task within block: Task 1 SQL migration
+Branch: block-3-warehouse
+Last commit: main `9a563e6` includes Block 2 merge
+Tests: Block 2 PR checks passed; main deploy passed; live staging health `db.ok=true`; live auth smoke passed after deploy.
 
 ## What was just done
 
 - Block 1 PR #36 was merged to `main`; GitHub Actions deploy to staging passed.
-- Created `block-2-auth` from fresh `main`.
-- Read `docs/superpowers/plans/2026-05-15-block-2-auth.md` before editing.
+- Block 2 PR #37 was merged to `main`; GitHub Actions deploy run `26111396624` passed.
+- Created `block-3-warehouse` from fresh `main`.
+- Read Block 3 required docs before editing:
+  - `docs/superpowers/plans/2026-05-15-block-3-warehouse.md`
+  - `docs/superpowers/plans/2026-05-15-WAREHOUSE-INTERACTION-MAP.md`
+  - `docs/superpowers/plans/2026-05-15-BUG-INVENTORY.md`
+- Block 2 summary:
 - Added migration `002_auth.sql` for `employees`, `auth_users`, `auth_sessions`, and `idempotency_keys`.
 - Added `argon2`, `cookie-parser`, password hashing helpers, `withTransaction`, session store, auth middleware.
 - Added `/api/auth/login`, `/api/auth/logout`, `/api/auth/me`, `/api/auth/change-password`.
@@ -25,18 +30,17 @@ Tests: Block 2 API tests 15/15 passing in temporary VPS containers; `ops/web npm
 - Added explicit `ws` transport for the Supabase refresh script so it works in the Node 20 Docker runtime.
 - Copied `employees` from Supabase to staging Postgres: 14 rows total, 12 active.
 - Confirmed current Supabase employee rows have no email values, so `/srv/ops/temp-passwords.csv` currently contains only the header row.
-- Created staging admin credentials and stored them only on the VPS at `/srv/ops/admin-login.txt` with `0600` permissions.
+- Created staging admin credentials and stored them only on the VPS at `/srv/ops-secrets/admin-login.txt` with `0600` permissions. This path is outside the rsync deploy directory.
 - Verified live auth smoke on staging: admin login, `/api/auth/me`, protected `/api/employees`, logout.
 - Verified API tests 15/15 in isolated VPS containers with migrations 001+002.
 - Verified `ops/web npm run build` locally.
 
 ## Next steps for Codex
 
-1. Commit final Block 2 fixes/status.
-2. Push `block-2-auth`.
-3. Open PR to `main`, wait for checks, merge if green.
-4. Let GitHub Actions deploy `main` to staging.
-5. Start Block 3 from fresh `main`.
+1. Implement `ops/db/migrations/003_warehouse.sql`.
+2. Add tests around warehouse schema/API before implementation per Block 3 TDD plan.
+3. Add idempotency helper and warehouse API in small commits.
+4. Keep staging data fresh with Supabase refresh scripts between blocks.
 
 ## Quality gates status (Block 2)
 
@@ -45,6 +49,18 @@ Tests: Block 2 API tests 15/15 passing in temporary VPS containers; `ops/web npm
 - [x] `/api/health` green on staging
 - [x] `employees` copied from Supabase to staging
 - [x] admin auth smoke on staging
+- [x] PR opened
+- [x] PR merged to main
+- [x] main deploy passed
+
+## Quality gates status (Block 3)
+
+- [ ] `003_warehouse.sql` added
+- [ ] API warehouse tests added and passing
+- [ ] `refresh-staging-snapshot.mjs` and `compare-datasets.mjs` added
+- [ ] staging warehouse data refreshed from Supabase
+- [ ] Vue warehouse screens built
+- [ ] Playwright warehouse smoke passing
 - [ ] PR opened
 - [ ] PR merged to main
 
@@ -61,10 +77,11 @@ Tests: Block 2 API tests 15/15 passing in temporary VPS containers; `ops/web npm
 ## Completed blocks summary
 
 - ✅ Block 1: Infrastructure merged to `main` and deployed to staging
-- 🔄 Block 2: Auth + employees ready for PR/merge
-- ⏳ Block 3-16, Stages B/C/D: pending
+- ✅ Block 2: Auth + employees merged to `main` and deployed to staging
+- 🔄 Block 3: Warehouse started
+- ⏳ Block 4-16, Stages B/C/D: pending
 
 ## How to resume
 
 1. Read this `STATUS.md`.
-2. Continue Block 2 by opening/merging the PR if checks are green.
+2. Continue Block 3 from Task 1 (`003_warehouse.sql`) on branch `block-3-warehouse`.
