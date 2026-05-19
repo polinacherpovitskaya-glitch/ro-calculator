@@ -108,19 +108,20 @@ async function load() {
   error.value = '';
   try {
     const id = Number(route.params.id);
-    item.value = await warehouseApi.getItem(id);
-    history.value = await warehouseApi.listHistory({ itemId: id, limit: 50 });
+    const loadedItem = await warehouseApi.getItem(id);
+    item.value = loadedItem;
     Object.assign(form, {
-      name: item.value.name,
-      sku: item.value.sku || '',
-      category: item.value.category || '',
-      qty: item.value.qty,
-      min_qty: item.value.min_qty,
-      unit: item.value.unit || '',
-      last_price: item.value.last_price,
-      last_currency: item.value.last_currency || '',
-      notes: item.value.notes || '',
+      name: loadedItem.name,
+      sku: loadedItem.sku || '',
+      category: loadedItem.category || '',
+      qty: loadedItem.qty,
+      min_qty: loadedItem.min_qty,
+      unit: loadedItem.unit || '',
+      last_price: loadedItem.last_price,
+      last_currency: loadedItem.last_currency || '',
+      notes: loadedItem.notes || '',
     });
+    history.value = await warehouseApi.listHistory({ itemId: id, limit: 50 });
   } catch (caught) {
     error.value = caught instanceof Error ? caught.message : 'Не удалось загрузить позицию';
   }

@@ -1,11 +1,11 @@
 # Migration status
 
-Last update: 2026-05-19T15:43:24-03:00
+Last update: 2026-05-19T15:52:42-03:00
 Current block: 5
-Current task within block: Task 8 Playwright smoke + PR
+Current task within block: Task 8 PR
 Branch: block-5-molds-blanks
-Last commit: Add Block 5 Vue screens
-Tests: Block 5 API suite 80/80 passing in temp VPS containers with migrations 001-005; Block 5 temp refresh/compare matched all migrated tables; `cd ops/web && npm run build` passed; staging health `db.ok=true`.
+Last commit: Add Block 5 smoke and docs
+Tests: Block 5 API suite 80/80 passing in temp VPS containers with migrations 001-005; Block 5 temp and live staging refresh/compare matched all migrated tables; `cd ops/web && npm run build` passed; staging Playwright smoke 3/3 passed; staging health `db.ok=true`.
 
 ## What was just done
 
@@ -248,12 +248,39 @@ Tests: Block 5 API suite 80/80 passing in temp VPS containers with migrations 00
   - `/marketplaces`
 - Added home navigation links for Block 5 modules.
 - Verified `cd ops/web && npm run build` passing.
+- Added `tests/playwright/molds-blanks.spec.ts` staging smoke:
+  - login
+  - create warehouse hardware item and mold
+  - open `/molds`, open the mold, attach hardware
+  - fix mold usage and verify warehouse stock decreases
+  - verify `/blanks`, `/colors`, and `/marketplaces` open and round-trip their created records
+- Fixed a real warehouse item card race: the save button could become active after `item` loaded but before form fields were populated because history loading happened before `Object.assign(form, ...)`.
+- Manually deployed the current branch to staging.
+- Refreshed live staging snapshot from Supabase after deploy and again after Playwright so e2e rows do not remain:
+  - employees 14/14
+  - warehouse_items 227/227
+  - warehouse_reservations 483/483
+  - warehouse_history 1/1
+  - shipments 13/13
+  - shipment_items 62/62
+  - china_purchases 14/14
+  - china_purchase_items 45/45
+  - china_catalog 103/103
+  - molds 53/53
+  - mold_hardware 5/5
+  - mold_usage_log 0/0
+  - hw_blanks 61/61
+  - pkg_blanks 12/12
+  - app_colors 40/40
+  - marketplace_sets 43/43
+- Verified live staging `/api/health`: `db.ok=true`.
+- Verified Playwright staging smoke: `warehouse.spec.ts` + `shipments-china.spec.ts` + `molds-blanks.spec.ts`, 3/3 passing.
+- Updated `ops/README.md` with Block 5 endpoints, screens, refresh notes, and smoke notes.
 
 ## Next steps for Codex
 
-1. Add Playwright smoke for molds/blanks/colors/marketplaces.
-2. Deploy current branch to staging, refresh staging snapshot from Supabase, and run smoke against staging.
-3. Update `ops/README.md`, open PR to `main`, and stop for review.
+1. Open PR to `main`.
+2. Stop for review.
 
 ## Quality gates status (Block 2)
 
@@ -301,8 +328,8 @@ Tests: Block 5 API suite 80/80 passing in temp VPS containers with migrations 00
 - [x] Marketplace API tests passing
 - [x] Refresh/compare updated for Block 5 tables
 - [x] Vue screens built
-- [ ] Playwright smoke passing
-- [ ] `ops/README.md` updated
+- [x] Playwright smoke passing
+- [x] `ops/README.md` updated
 - [ ] PR opened
 - [ ] Marketplaces API tests passing
 - [ ] refresh/compare scripts updated
