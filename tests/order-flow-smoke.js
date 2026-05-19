@@ -4521,6 +4521,7 @@ async function smokeTemplateBuiltInNfcUsesWarehouseDemand(context) {
             id: 'tmpl-builtin-nfc',
             name: 'NFC Бирка',
             category: 'blank',
+            is_nfc: true,
             hw_name: 'NFC',
             hw_price_per_unit: 10,
             hw_delivery_total: 0,
@@ -4549,16 +4550,14 @@ async function smokeTemplateBuiltInNfcUsesWarehouseDemand(context) {
         }] } };
         Calculator._renderPerItemHwPkg = () => {};
         Calculator.rerenderAllHardware = () => {};
+        Calculator._applyNfcTemplateToItem(Calculator.items[0], App.templates[0]);
         Calculator._syncTemplateHardware(0, App.templates[0]);
-        globalThis.__templateHw = Calculator.hardwareItems[0];
+        globalThis.__templateHw = Calculator.hardwareItems[0] || null;
         globalThis.__templateDemand = Array.from(Calculator._collectWarehouseReservationDemand({ hardware: true, packaging: false }).entries());
     `, context);
 
     const hw = clone(vm.runInContext('globalThis.__templateHw', context));
-    assert.equal(hw.source, 'warehouse');
-    assert.equal(hw.warehouse_item_id, 197);
-    assert.equal(hw.warehouse_sku, 'NFC');
-    assert.equal(hw.price, 10);
+    assert.equal(hw, null, 'NFC mold hardware should stay embedded in the product row');
 
     const demand = clone(vm.runInContext('globalThis.__templateDemand', context));
     assert.deepEqual(demand, [[197, 12]]);

@@ -1626,6 +1626,8 @@ function _moldToTemplate(m) {
         id: mold.id,
         name: mold.name,
         category: mold.category === 'nfc' ? 'blank' : (mold.category || 'blank'),
+        is_nfc: _isExplicitNfcMold(mold),
+        nfc_programming: _isExplicitNfcMold(mold),
         collection: mold.collection || '',
         photo_url: mold.photo_url || '',
         pieces_per_hour_display: display,
