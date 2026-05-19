@@ -1,11 +1,11 @@
 # Migration status
 
-Last update: 2026-05-19T17:20:00-03:00
-Current block: 4
-Current task within block: Block 4 merged; post-merge smoke follow-up
-Branch: block-4-shipments-china
-Last commit: main `e951fd0` includes Block 3 + Playwright smoke follow-up
-Tests: Block 3 PR checks passed; main deploy passed; live staging health `db.ok=true`; warehouse API/UI smoke passed; Playwright warehouse smoke 1/1 passed.
+Last update: 2026-05-19T15:53:39-03:00
+Current block: 5
+Current task within block: PR #42 opened; waiting for review
+Branch: block-5-molds-blanks
+Last commit: Add Block 5 smoke and docs
+Tests: Block 5 API suite 80/80 passing in temp VPS containers with migrations 001-005; Block 5 temp and live staging refresh/compare matched all migrated tables; `cd ops/web && npm run build` passed; staging Playwright smoke 3/3 passed; staging health `db.ok=true`.
 
 ## What was just done
 
@@ -161,11 +161,127 @@ Tests: Block 3 PR checks passed; main deploy passed; live staging health `db.ok=
   - china_purchase_items 45/45
   - china_catalog 103/103
   - `/api/health`: `db.ok=true`
+- Created `block-5-molds-blanks` from fresh `main`.
+- Read Block 5 required docs before editing:
+  - `docs/superpowers/plans/2026-05-15-block-5-molds-blanks.md`
+  - `docs/superpowers/plans/2026-05-15-WAREHOUSE-INTERACTION-MAP.md`
+  - `docs/superpowers/plans/2026-05-15-BUG-INVENTORY.md`
+- Added `ops/db/migrations/005_molds_blanks.sql` for:
+  - `molds`
+  - `mold_hardware`
+  - `mold_usage_log`
+  - `hw_blanks`
+  - `pkg_blanks`
+  - `app_colors`
+  - `marketplace_sets`
+- Added FK constraints from `warehouse_history.mold_id` and `warehouse_history.marketplace_set_id` after the referenced tables exist.
+- Verified migrations 001-005 on a clean temporary Postgres container on the VPS; `app_meta.version` is `005-molds-blanks`.
+- Added molds API tests first, then implemented `ops/api/src/routes/molds.js`.
+- Added `/api/molds` routes:
+  - `GET /api/molds`
+  - `GET /api/molds/:id`
+  - `POST /api/molds`
+  - `PATCH /api/molds/:id`
+  - `DELETE /api/molds/:id`
+  - `GET /api/molds/:id/hardware`
+  - `PUT /api/molds/:id/hardware`
+  - `POST /api/molds/:id/use`
+- Mold use uses Idempotency-Key, a transaction, `SELECT FOR UPDATE` on the mold and touched warehouse items, direct `warehouse_history.type='consume'`, and no reservations.
+- Verified full API suite in temporary VPS containers: 60/60 passing.
+- Added blanks API tests first, then implemented `ops/api/src/routes/blanks.js`.
+- Added `/api/blanks` routes:
+  - `GET /api/blanks/hardware`
+  - `POST /api/blanks/hardware`
+  - `PATCH /api/blanks/hardware/:id`
+  - `DELETE /api/blanks/hardware/:id`
+  - `GET /api/blanks/packaging`
+  - `POST /api/blanks/packaging`
+  - `PATCH /api/blanks/packaging/:id`
+  - `DELETE /api/blanks/packaging/:id`
+- Blanks mutations require `Idempotency-Key`; list supports `search` and `category` filters.
+- Verified full API suite in temporary VPS containers: 66/66 passing.
+- Added colors API tests first, then implemented `ops/api/src/routes/colors.js`.
+- Added `/api/colors` routes:
+  - `GET /api/colors`
+  - `POST /api/colors`
+  - `PATCH /api/colors/:id`
+  - `DELETE /api/colors/:id`
+- Colors mutations require `Idempotency-Key`; list supports `search` and `category` filters; `hex` is validated as `#RRGGBB` when present.
+- Verified full API suite in temporary VPS containers: 72/72 passing.
+- Added marketplace sets API tests first, then implemented `ops/api/src/routes/marketplaces.js`.
+- Added `/api/marketplaces` routes:
+  - `GET /api/marketplaces`
+  - `GET /api/marketplaces/:id`
+  - `POST /api/marketplaces`
+  - `PATCH /api/marketplaces/:id`
+  - `DELETE /api/marketplaces/:id`
+  - `POST /api/marketplaces/:id/sell`
+- Marketplace composition is normalized and validated against existing `warehouse_items`.
+- Marketplace `sell` uses Idempotency-Key, a transaction, `SELECT FOR UPDATE` on the set and touched warehouse items, direct `warehouse_history.type='consume'` with `marketplace_set_id`, and no reservations.
+- Verified full API suite in temporary VPS containers: 80/80 passing.
+- Added `ops/scripts/refresh/04-molds-blanks.mjs` for molds, mold hardware links, blanks, colors, marketplace sets, and legacy-empty mold usage log.
+- Wired `04-molds-blanks` into `refresh-staging-snapshot.mjs`.
+- Extended `compare-datasets.mjs` for Block 5 tables, including computed expected count for `mold_hardware`.
+- Verified refresh/compare against a temporary VPS Postgres using Supabase anon read key:
+  - employees 14/14
+  - warehouse_items 227/227
+  - warehouse_reservations 483/483
+  - warehouse_history 1/1
+  - shipments 13/13
+  - shipment_items 62/62
+  - china_purchases 14/14
+  - china_purchase_items 45/45
+  - china_catalog 103/103
+  - molds 53/53
+  - mold_hardware 5/5
+  - mold_usage_log 0/0
+  - hw_blanks 61/61
+  - pkg_blanks 12/12
+  - app_colors 40/40
+  - marketplace_sets 43/43
+- Added Vue API wrappers and Pinia stores for molds, blanks, colors, and marketplaces.
+- Added screens:
+  - `/molds`
+  - `/molds/:id`
+  - `/blanks`
+  - `/colors`
+  - `/marketplaces`
+- Added home navigation links for Block 5 modules.
+- Verified `cd ops/web && npm run build` passing.
+- Added `tests/playwright/molds-blanks.spec.ts` staging smoke:
+  - login
+  - create warehouse hardware item and mold
+  - open `/molds`, open the mold, attach hardware
+  - fix mold usage and verify warehouse stock decreases
+  - verify `/blanks`, `/colors`, and `/marketplaces` open and round-trip their created records
+- Fixed a real warehouse item card race: the save button could become active after `item` loaded but before form fields were populated because history loading happened before `Object.assign(form, ...)`.
+- Manually deployed the current branch to staging.
+- Refreshed live staging snapshot from Supabase after deploy and again after Playwright so e2e rows do not remain:
+  - employees 14/14
+  - warehouse_items 227/227
+  - warehouse_reservations 483/483
+  - warehouse_history 1/1
+  - shipments 13/13
+  - shipment_items 62/62
+  - china_purchases 14/14
+  - china_purchase_items 45/45
+  - china_catalog 103/103
+  - molds 53/53
+  - mold_hardware 5/5
+  - mold_usage_log 0/0
+  - hw_blanks 61/61
+  - pkg_blanks 12/12
+  - app_colors 40/40
+  - marketplace_sets 43/43
+- Verified live staging `/api/health`: `db.ok=true`.
+- Verified Playwright staging smoke: `warehouse.spec.ts` + `shipments-china.spec.ts` + `molds-blanks.spec.ts`, 3/3 passing.
+- Updated `ops/README.md` with Block 5 endpoints, screens, refresh notes, and smoke notes.
+- Opened PR #42 to `main`: https://github.com/polinacherpovitskaya-glitch/ro-calculator/pull/42
 
 ## Next steps for Codex
 
-1. Commit and merge the post-merge warehouse smoke hardening follow-up.
-2. Start Block 5 from fresh `main`.
+1. Stop for review.
+2. After review approval, merge PR #42 to `main` and verify main deploy.
 
 ## Quality gates status (Block 2)
 
@@ -204,9 +320,30 @@ Tests: Block 3 PR checks passed; main deploy passed; live staging health `db.ok=
 - [x] PR opened
 - [x] PR merged to main
 
+## Quality gates status (Block 5)
+
+- [x] `005_molds_blanks.sql` added
+- [x] Molds API tests passing
+- [x] Blanks API tests passing
+- [x] Colors API tests passing
+- [x] Marketplace API tests passing
+- [x] Refresh/compare updated for Block 5 tables
+- [x] Vue screens built
+- [x] Playwright smoke passing
+- [x] `ops/README.md` updated
+- [x] PR opened
+- [ ] Marketplaces API tests passing
+- [ ] refresh/compare scripts updated
+- [ ] staging molds/blanks/colors/marketplaces data refreshed from Supabase
+- [ ] Vue molds/blanks/colors/marketplaces screens built
+- [ ] Playwright molds/blanks smoke passing
+- [ ] `ops/README.md` updated
+- [ ] PR opened
+- [ ] PR merged to main
+
 ## Blockers / questions
 
-- No current Block 4 blocker.
+- No current Block 5 blocker.
 - Supabase `employees` currently have no email values, so employee temp-password issuance produced only a CSV header. Staging admin smoke still covers the protected auth path.
 - Local shell currently has no `docker` or `psql`, so DB-positive tests cannot run locally. Using isolated VPS containers as the verification path.
 
@@ -219,10 +356,11 @@ Tests: Block 3 PR checks passed; main deploy passed; live staging health `db.ok=
 - ✅ Block 1: Infrastructure merged to `main` and deployed to staging
 - ✅ Block 2: Auth + employees merged to `main` and deployed to staging
 - ✅ Block 3: Warehouse merged to `main`, deployed to staging, live smoke passed
-- 🔄 Block 4: Shipments + China started
-- ⏳ Block 5-16, Stages B/C/D: pending
+- ✅ Block 4: Shipments + China merged to `main`, deployed to staging, live smoke passed
+- 🔄 Block 5: Molds + blanks + colors + marketplaces started
+- ⏳ Block 6-16, Stages B/C/D: pending
 
 ## How to resume
 
 1. Read this `STATUS.md`.
-2. Continue Block 4 from Task 1 (`004_shipments_china.sql`) on branch `block-4-shipments-china`.
+2. Continue Block 5 from Task 1 (`005_molds_blanks.sql`) on branch `block-5-molds-blanks`.

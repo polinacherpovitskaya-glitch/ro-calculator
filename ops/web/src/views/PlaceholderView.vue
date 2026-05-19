@@ -9,6 +9,10 @@
         <RouterLink to="/warehouse">Склад</RouterLink>
         <RouterLink to="/shipments">Приёмки</RouterLink>
         <RouterLink to="/china">Китай</RouterLink>
+        <RouterLink to="/molds">Молды</RouterLink>
+        <RouterLink to="/blanks">Бланки</RouterLink>
+        <RouterLink to="/colors">Цвета</RouterLink>
+        <RouterLink to="/marketplaces">Маркетплейсы</RouterLink>
         <button type="button" @click="handleLogout">Выйти</button>
       </nav>
     </header>
@@ -76,6 +80,7 @@ async function handleLogout() {
 
 .placeholder nav {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.75rem;
 }
 

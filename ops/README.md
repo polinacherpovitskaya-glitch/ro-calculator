@@ -4,7 +4,7 @@ Operational core of `recycleobject.ru`: migration target for the old Vercel + Su
 
 ## Status
 
-- Stage A — Build, Blocks 1-3 merged; Block 4 shipments + China in progress
+- Stage A — Build, Blocks 1-4 merged; Block 5 molds + blanks + colors + marketplaces in progress
 - Staging domain: `https://ops-staging.recycleobject.ru`
 - Production cutover: not here; Stage C is owner-run only
 - UptimeRobot: deferred/manual follow-up, not blocking the migration blocks
@@ -59,6 +59,7 @@ Warehouse and shipments/China staging smokes live in:
 ```text
 tests/playwright/warehouse.spec.ts
 tests/playwright/shipments-china.spec.ts
+tests/playwright/molds-blanks.spec.ts
 ```
 
 They expect:
@@ -333,6 +334,88 @@ Refresh notes:
 - `ops/scripts/refresh/03-shipments-china.mjs` normalizes child item rows from those snapshots.
 - The China catalog is seeded from `data/china_catalog.json` locally, or from `https://calc.recycleobject.ru/data/china_catalog.json` on VPS.
 - Compare includes `shipments`, `shipment_items`, `china_purchases`, `china_purchase_items`, and `china_catalog`.
+
+## Molds + Blanks + Colors + Marketplaces Module
+
+Block 5 adds the catalog and direct-consumption workflows used by molds and marketplace sets.
+
+Tables:
+
+```text
+molds
+mold_hardware
+mold_usage_log
+hw_blanks
+pkg_blanks
+app_colors
+marketplace_sets
+```
+
+Canonical rules:
+
+- Mutating endpoints require `Idempotency-Key`.
+- `mold_hardware` is the source of truth for mold-to-warehouse hardware links.
+- `POST /api/molds/:id/use` consumes warehouse stock directly, writes `warehouse_history.type='consume'` with `mold_id`, increments `molds.usage_count`, and does not create reservations.
+- `marketplace_sets.composition` stores `[{ warehouse_item_id, qty }]` and is validated against existing warehouse items.
+- `POST /api/marketplaces/:id/sell` consumes warehouse stock directly, writes `warehouse_history.type='consume'` with `marketplace_set_id`, and does not create reservations.
+
+Endpoints:
+
+```text
+GET    /api/molds
+GET    /api/molds/:id
+POST   /api/molds
+PATCH  /api/molds/:id
+DELETE /api/molds/:id
+GET    /api/molds/:id/hardware
+PUT    /api/molds/:id/hardware
+POST   /api/molds/:id/use
+
+GET    /api/blanks/hardware
+POST   /api/blanks/hardware
+PATCH  /api/blanks/hardware/:id
+DELETE /api/blanks/hardware/:id
+GET    /api/blanks/packaging
+POST   /api/blanks/packaging
+PATCH  /api/blanks/packaging/:id
+DELETE /api/blanks/packaging/:id
+
+GET    /api/colors
+POST   /api/colors
+PATCH  /api/colors/:id
+DELETE /api/colors/:id
+
+GET    /api/marketplaces
+GET    /api/marketplaces/:id
+POST   /api/marketplaces
+PATCH  /api/marketplaces/:id
+DELETE /api/marketplaces/:id
+POST   /api/marketplaces/:id/sell
+```
+
+Screens:
+
+```text
+/molds
+/molds/:id
+/blanks
+/colors
+/marketplaces
+```
+
+Refresh notes:
+
+- `ops/scripts/refresh/04-molds-blanks.mjs` normalizes legacy JSON columns (`mold_data`, `blank_data`, `color_data`, `set_data`) into the Block 5 tables.
+- Legacy `mold_hardware` rows are reconstructed from `mold.hw_warehouse_item_id` when the referenced warehouse item exists.
+- Legacy marketplace compositions are reconstructed from direct `wh_id` values or blank-to-warehouse links.
+- `mold_usage_log` has no legacy source rows, so refresh expects `0`.
+- Compare includes all Block 5 tables and computes the expected `mold_hardware` count from legacy mold links.
+
+Staging smoke:
+
+```text
+tests/playwright/molds-blanks.spec.ts
+```
 
 ## Current Infra
 

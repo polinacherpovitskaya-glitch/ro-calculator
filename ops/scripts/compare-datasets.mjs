@@ -41,6 +41,13 @@ const TABLES = [
   'china_purchases',
   'china_purchase_items',
   'china_catalog',
+  'molds',
+  'mold_hardware',
+  'mold_usage_log',
+  'hw_blanks',
+  'pkg_blanks',
+  'app_colors',
+  'marketplace_sets',
 ];
 
 function parseJson(value) {
@@ -51,6 +58,20 @@ function parseJson(value) {
   } catch {
     return {};
   }
+}
+
+function mergeLegacyRow(row, jsonColumn) {
+  const parsed = parseJson(row[jsonColumn]);
+  return { ...parsed, ...row, id: row.id };
+}
+
+function numberOrNull(...values) {
+  for (const value of values) {
+    if (value === null || value === undefined || value === '') continue;
+    const number = Number(value);
+    if (Number.isFinite(number)) return number;
+  }
+  return null;
 }
 
 async function fetchAll(table) {
@@ -124,6 +145,19 @@ async function supabaseCount(table) {
   if (table === 'china_catalog') {
     const rows = await loadCatalogSeed();
     return Array.isArray(rows) ? rows.length : 0;
+  }
+
+  if (table === 'mold_hardware') {
+    const molds = (await fetchAll('molds')).map((row) => mergeLegacyRow(row, 'mold_data'));
+    const warehouseIds = new Set((await pool.query(`SELECT id::text FROM warehouse_items`)).rows.map((row) => row.id));
+    return molds.filter((mold) => {
+      const warehouseItemId = numberOrNull(mold.hw_warehouse_item_id, mold.warehouse_item_id);
+      return warehouseItemId && warehouseIds.has(String(warehouseItemId));
+    }).length;
+  }
+
+  if (table === 'mold_usage_log') {
+    return 0;
   }
 
   const { count, error } = await supabase.from(table).select('*', { count: 'exact', head: true });
