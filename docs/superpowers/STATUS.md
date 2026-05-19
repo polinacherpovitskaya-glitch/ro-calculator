@@ -1,8 +1,8 @@
 # Migration status
 
-Last update: 2026-05-19T16:55:00-03:00
+Last update: 2026-05-19T17:20:00-03:00
 Current block: 4
-Current task within block: Task 6 final PR
+Current task within block: Block 4 merged; post-merge smoke follow-up
 Branch: block-4-shipments-china
 Last commit: main `e951fd0` includes Block 3 + Playwright smoke follow-up
 Tests: Block 3 PR checks passed; main deploy passed; live staging health `db.ok=true`; warehouse API/UI smoke passed; Playwright warehouse smoke 1/1 passed.
@@ -146,12 +146,26 @@ Tests: Block 3 PR checks passed; main deploy passed; live staging health `db.ok=
   - Playwright staging smoke: `warehouse.spec.ts` + `shipments-china.spec.ts`, 2/2 passing
   - staging refresh/compare re-run after smoke, all counts matched
   - live staging `/api/health`: `db.ok=true`
+- Block 4 PR #40 was squash-merged to `main`.
+- GitHub Actions deploy run `26116185206` passed on `main`.
+- Post-deploy Playwright smoke on main found the old warehouse smoke still depended on imported legacy item history. Updated it to create a dedicated smoke warehouse item via API before editing.
+- Verified post-deploy Playwright smoke again: `warehouse.spec.ts` + `shipments-china.spec.ts`, 2/2 passing.
+- Refreshed staging after post-deploy smoke so e2e-created rows do not remain in staging:
+  - employees 14/14
+  - warehouse_items 227/227
+  - warehouse_reservations 429/429
+  - warehouse_history 1/1
+  - shipments 13/13
+  - shipment_items 62/62
+  - china_purchases 14/14
+  - china_purchase_items 45/45
+  - china_catalog 103/103
+  - `/api/health`: `db.ok=true`
 
 ## Next steps for Codex
 
-1. Commit Task 6 changes.
-2. Push `block-4-shipments-china`.
-3. Open Block 4 PR to `main`.
+1. Commit and merge the post-merge warehouse smoke hardening follow-up.
+2. Start Block 5 from fresh `main`.
 
 ## Quality gates status (Block 2)
 
@@ -187,8 +201,8 @@ Tests: Block 3 PR checks passed; main deploy passed; live staging health `db.ok=
 - [x] Vue shipments/china screens built
 - [x] Playwright shipments/china smoke passing
 - [x] `ops/README.md` updated
-- [ ] PR opened
-- [ ] PR merged to main
+- [x] PR opened
+- [x] PR merged to main
 
 ## Blockers / questions
 

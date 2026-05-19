@@ -16,16 +16,23 @@ test('warehouse e2e: login, edit qty, verify history', async ({ page }) => {
     page.getByRole('button', { name: 'Войти' }).click(),
   ]);
 
-  await page.goto(`${baseURL}/warehouse`);
-  await expect(page.locator('h1')).toContainText('Склад');
+  const itemId = Date.now();
+  const createResponse = await page.request.post(`${baseURL}/api/warehouse/items`, {
+    headers: { 'Idempotency-Key': `warehouse-smoke-${itemId}` },
+    data: { id: itemId, name: `Warehouse smoke ${itemId}`, sku: `SMOKE-${itemId}`, qty: 5 },
+  });
+  expect(createResponse.ok(), await createResponse.text()).toBeTruthy();
 
-  await page.locator('tbody a[href^="/warehouse/"]').first().click();
+  await page.goto(`${baseURL}/warehouse/${itemId}`);
   await expect(page.getByLabel('Количество')).toBeVisible();
 
   const qtyInput = page.getByLabel('Количество');
   const before = Number(await qtyInput.inputValue());
   await qtyInput.fill(String(before + 1));
-  await page.getByRole('button', { name: 'Сохранить' }).click();
+  await Promise.all([
+    page.waitForResponse((response) => response.url().includes(`/api/warehouse/items/${itemId}`) && response.status() === 200),
+    page.getByRole('button', { name: 'Сохранить' }).click(),
+  ]);
 
   await expect(page.locator('.history-entry').filter({ hasText: 'manual_edit' }).first()).toBeVisible();
 });
