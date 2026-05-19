@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from 'playwright/test';
 
 const baseURL = process.env.E2E_BASE_URL || 'https://ops-staging.recycleobject.ru';
 
@@ -11,15 +11,18 @@ test('warehouse e2e: login, edit qty, verify history', async ({ page }) => {
   await page.goto(`${baseURL}/login`);
   await page.fill('input[type=email]', email!);
   await page.fill('input[type=password]', password!);
-  await page.click('button[type=submit]');
+  await Promise.all([
+    page.waitForResponse((response) => response.url().includes('/api/auth/login') && response.status() === 200),
+    page.getByRole('button', { name: 'Войти' }).click(),
+  ]);
 
   await page.goto(`${baseURL}/warehouse`);
   await expect(page.locator('h1')).toContainText('Склад');
 
-  await page.locator('a[href^="/warehouse/"]').first().click();
-  await expect(page.locator('input[type=number]').first()).toBeVisible();
+  await page.locator('tbody a[href^="/warehouse/"]').first().click();
+  await expect(page.getByLabel('Количество')).toBeVisible();
 
-  const qtyInput = page.locator('input[type=number]').first();
+  const qtyInput = page.getByLabel('Количество');
   const before = Number(await qtyInput.inputValue());
   await qtyInput.fill(String(before + 1));
   await page.getByRole('button', { name: 'Сохранить' }).click();
