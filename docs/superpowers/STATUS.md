@@ -1,11 +1,11 @@
 # Migration status
 
-Last update: 2026-05-19T17:56:03-03:00
+Last update: 2026-05-19T17:59:04-03:00
 Current block: 9
-Current task within block: Task 2/3 — Orders API + factual API initial implementation
+Current task within block: Task 5 — orders refresh/compare added
 Branch: block-9-orders
-Last commit: `3beead3` Add orders schema
-Tests: Full Postgres-backed API suite passed 125/125 on a temporary VPS Postgres container with migrations 001-008 after adding the initial Orders/Factual APIs. New route syntax checks passed.
+Last commit: `ff0db86` Add orders API and factual endpoints
+Tests: Full Postgres-backed API suite passed 125/125 on a temporary VPS Postgres container with migrations 001-008. Orders refresh/compare passed on a temporary VPS Postgres container with real Supabase read data.
 
 ## What was just done
 
@@ -59,6 +59,16 @@ Tests: Full Postgres-backed API suite passed 125/125 on a temporary VPS Postgres
 - Added `ops/api/src/cron/reservation-cleanup.js`.
 - Added `ops/api/test/orders.test.js` covering CRUD, ETag conflict, item reservation rebuild, idempotent consume, insufficient stock, final-order rejection, reservation split, status transitions, cleanup, delete cascade, recalc, and factual recalc.
 - Verified full API suite on temporary VPS Postgres: 125/125 passing.
+- Added `ops/scripts/refresh/07-orders.mjs` for orders, order_items, and order_factuals.
+- Updated staging refresh order so `07-orders` runs before warehouse reservations/history, allowing Block 9 order FKs to be enforced for new refresh rows.
+- Updated warehouse refresh to drop order reservations whose order no longer exists and to null invalid history `order_id` values before insert.
+- Updated `compare-datasets.mjs` with `orders`, `order_items`, and `order_factuals`.
+- Verified refresh/compare on temporary VPS Postgres with real Supabase read data:
+  - orders 190/190
+  - order_items 738/738
+  - order_factuals 3/3
+  - warehouse_reservations 642/642 after dropping reservations for skipped/deleted orders
+  - all other previously migrated counts matched
 - Created Block 8 working branch `block-8-production` from local `main` after Block 7 merge/deploy status was recorded. This preserves the status update without pushing `main` directly.
 - Added migration `ops/db/migrations/007_production.sql`:
   - `product_templates`

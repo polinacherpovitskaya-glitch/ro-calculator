@@ -33,6 +33,9 @@ const pool = new Pool({ connectionString: requireEnv('DATABASE_URL') });
 
 const TABLES = [
   'employees',
+  'orders',
+  'order_items',
+  'order_factuals',
   'warehouse_items',
   'warehouse_reservations',
   'warehouse_history',
@@ -189,6 +192,25 @@ async function supabaseCount(table) {
       }
     }
     return ids.size + anonymousRows;
+  }
+
+  if (table === 'orders') {
+    const rows = await fetchAll('orders');
+    return rows.filter((row) => row.status !== 'deleted' && !row.deleted_at).length;
+  }
+
+  if (table === 'order_items') {
+    const orders = await fetchAll('orders');
+    const activeOrderIds = new Set(orders.filter((row) => row.status !== 'deleted' && !row.deleted_at).map((row) => String(row.id)));
+    const rows = await fetchAll('order_items');
+    return rows.filter((row) => activeOrderIds.has(String(row.order_id))).length;
+  }
+
+  if (table === 'order_factuals') {
+    const orders = await fetchAll('orders');
+    const activeOrderIds = new Set(orders.filter((row) => row.status !== 'deleted' && !row.deleted_at).map((row) => String(row.id)));
+    const rows = await fetchAll('order_factuals');
+    return rows.filter((row) => activeOrderIds.has(String(row.order_id))).length;
   }
 
   if (table === 'shipment_items') {
