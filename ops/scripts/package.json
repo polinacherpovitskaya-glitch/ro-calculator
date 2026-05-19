@@ -12,6 +12,7 @@
   "type": "module",
   "dependencies": {
     "@supabase/supabase-js": "^2.106.0",
-    "pg": "^8.21.0"
+    "pg": "^8.21.0",
+    "ws": "^8.20.1"
   }
 }

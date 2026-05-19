@@ -3,7 +3,7 @@
 -- old system.
 
 CREATE TABLE IF NOT EXISTS employees (
-    id              INTEGER PRIMARY KEY,
+    id              BIGINT PRIMARY KEY,
     name            TEXT NOT NULL,
     email           TEXT,
     role            TEXT,
@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS auth_users (
     id                     SERIAL PRIMARY KEY,
     email                  TEXT NOT NULL UNIQUE,
     password_hash          TEXT NOT NULL,
-    employee_id            INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+    employee_id            BIGINT REFERENCES employees(id) ON DELETE SET NULL,
     role                   TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('admin','user')),
     must_change_password   BOOLEAN NOT NULL DEFAULT TRUE,
     created_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),

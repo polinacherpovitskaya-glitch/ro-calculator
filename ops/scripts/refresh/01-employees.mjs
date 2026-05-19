@@ -7,6 +7,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import pg from 'pg';
+import WebSocket from 'ws';
 
 const { Pool } = pg;
 
@@ -18,7 +19,9 @@ function requireEnv(name) {
   return value;
 }
 
-const supabase = createClient(requireEnv('SUPABASE_URL'), requireEnv('SUPABASE_SERVICE_KEY'));
+const supabase = createClient(requireEnv('SUPABASE_URL'), requireEnv('SUPABASE_SERVICE_KEY'), {
+  realtime: { transport: WebSocket },
+});
 const pool = new Pool({ connectionString: requireEnv('DATABASE_URL') });
 
 async function main() {
