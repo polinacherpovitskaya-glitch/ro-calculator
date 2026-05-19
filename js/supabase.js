@@ -1800,6 +1800,27 @@ function _filterForDB(obj, knownCols, jsonCol, fieldMap) {
     return filtered;
 }
 
+function _normalizeOrderItemTemplateIdForDB(value) {
+    if (value === null || value === undefined || value === '') return null;
+    if (typeof value === 'number') {
+        return Number.isInteger(value) && Number.isSafeInteger(value) ? value : null;
+    }
+    if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (!/^\d+$/.test(trimmed)) return null;
+        const numericValue = Number(trimmed);
+        return Number.isSafeInteger(numericValue) ? numericValue : trimmed;
+    }
+    return null;
+}
+
+function _sanitizeOrderItemRowForDB(row) {
+    const normalizedTemplateId = _normalizeOrderItemTemplateIdForDB(row?.template_id);
+    if (normalizedTemplateId === null) delete row.template_id;
+    else row.template_id = normalizedTemplateId;
+    return row;
+}
+
 function _buildStableOrderItemId(orderId, item, index = 0) {
     const numericOrderId = Number(orderId) || 0;
     const numericItemNumber = Number(item?.item_number);
@@ -1963,7 +1984,17 @@ function _hydrateOrderItemRow(item) {
     if (item && item.item_data) {
         try {
             const extras = typeof item.item_data === 'string' ? JSON.parse(item.item_data) : item.item_data;
-            return { ...extras, ...item };
+            const hydrated = { ...extras, ...item };
+            if (
+                (item.template_id === null || item.template_id === undefined || item.template_id === '')
+                && extras
+                && extras.template_id !== null
+                && extras.template_id !== undefined
+                && extras.template_id !== ''
+            ) {
+                hydrated.template_id = extras.template_id;
+            }
+            return hydrated;
         } catch (e) { /* ignore malformed item_data */ }
     }
     return item;
@@ -2029,7 +2060,7 @@ async function _rewriteOrderItems(orderId, items) {
 
         if (normalized.length > 0) {
             const rows = normalized.map((item, index) => {
-                const filtered = _filterForDB(item, _ITEM_COLS, 'item_data', null);
+                const filtered = _sanitizeOrderItemRowForDB(_filterForDB(item, _ITEM_COLS, 'item_data', null));
                 filtered.order_id = orderId;
                 filtered.id = item.id || _buildStableOrderItemId(orderId, item, index + 1);
                 filtered.created_at = item.created_at || nowIso;
@@ -2122,7 +2153,7 @@ async function saveOrder(order, items = []) {
         if (items.length > 0) {
             const nowIso = new Date().toISOString();
             const rows = items.map((item, i) => {
-                const filtered = _filterForDB(item, _ITEM_COLS, 'item_data', null);
+                const filtered = _sanitizeOrderItemRowForDB(_filterForDB(item, _ITEM_COLS, 'item_data', null));
                 filtered.order_id = orderId;
                 filtered.id = item.id || _buildStableOrderItemId(orderId, item, i + 1);
                 filtered.created_at = item.created_at || nowIso;
@@ -2377,7 +2408,7 @@ async function loadOrders(filters = {}) {
                     if (localItems.length > 0) {
                         try {
                             const filteredItems = localItems.map(item => {
-                                const f = _filterForDB(item, _ITEM_COLS, 'item_data', null);
+                                const f = _sanitizeOrderItemRowForDB(_filterForDB(item, _ITEM_COLS, 'item_data', null));
                                 f.id = f.id || Date.now() + Math.floor(Math.random() * 10000);
                                 return f;
                             });
