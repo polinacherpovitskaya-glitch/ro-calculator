@@ -1,14 +1,51 @@
 # Migration status
 
-Last update: 2026-05-19T17:15:29-03:00
-Current block: 8
-Current task within block: PR opened; waiting for review/CI
-Branch: block-8-production
-Last commit: `d45592f` Record Block 7 merge and deploy (local branch includes this status carry-over; `main` was not pushed directly)
-Tests: `ops/api npm run typecheck` passed; `ops/api npm run test:calc` passed 77/77; `ops/web npm run build` passed; full Postgres-backed API suite passed 111/111 on a temporary VPS Postgres container with migrations 001-007.
+Last update: 2026-05-19T17:49:35-03:00
+Current block: 9
+Current task within block: Task 1 — orders schema
+Branch: block-9-orders
+Last commit: `9ced98a` Block 8: Production planning (#46)
+Tests: Block 8 PR #46 was squash-merged to `main`; GitHub Actions main deploy run `26124057155` passed. Staging refresh/compare passed after deploy, and live smoke for `/templates`, `/production/calendar`, `/production/plan`, `/indirect-costs` passed. Block 9 migrations 001-008 apply cleanly in a temporary VPS Postgres container.
 
 ## What was just done
 
+- Block 8 PR #46 was squash-merged to `main` as `9ced98a`.
+- GitHub Actions main deploy run `26124057155` passed.
+- Refreshed live staging from Supabase after Block 8 deploy using the Node 20 container path because host `node` is not installed on the VPS:
+  - employees 14/14
+  - warehouse_items 227/227
+  - warehouse_reservations 643/643
+  - warehouse_history 1/1
+  - shipments 13/13
+  - shipment_items 62/62
+  - china_purchases 14/14
+  - china_purchase_items 45/45
+  - china_catalog 103/103
+  - molds 53/53
+  - mold_hardware 5/5
+  - mold_usage_log 0/0
+  - hw_blanks 61/61
+  - pkg_blanks 12/12
+  - app_colors 40/40
+  - marketplace_sets 43/43
+  - bug_reports 10/10
+  - bug_attachments 8/8
+  - product_templates 0/0
+  - production_calendar_days 0/0
+  - production_plan_entries 0/0
+  - indirect_costs 0/0
+- Verified Block 8 live staging smoke:
+  - login: 200
+  - `/templates`, `/production/calendar`, `/production/plan`, `/indirect-costs`: HTTP 200
+  - calendar update: 200
+  - template create: 201
+  - indirect cost create: 201
+  - production plan create: 201
+- Created Block 9 working branch `block-9-orders` from fresh `origin/main`.
+- Read Block 9 plan plus required warehouse interaction map and bug classes B/C/D/E/F/G.
+- Added `ops/db/migrations/008_orders.sql` with `orders`, `order_items`, `order_factuals`, and `order_status_history`.
+- Added `NOT VALID` FKs from `warehouse_reservations.order_id` and `warehouse_history.order_id` to `orders(id)` so deploy is safe against pre-refresh staging rows while new rows are still enforced.
+- Verified migrations 001-008 apply cleanly in a temporary VPS Postgres container.
 - Created Block 8 working branch `block-8-production` from local `main` after Block 7 merge/deploy status was recorded. This preserves the status update without pushing `main` directly.
 - Added migration `ops/db/migrations/007_production.sql`:
   - `product_templates`
