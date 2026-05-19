@@ -14,6 +14,7 @@
         <RouterLink to="/colors">Цвета</RouterLink>
         <RouterLink to="/marketplaces">Маркетплейсы</RouterLink>
         <RouterLink to="/bugs">Баги</RouterLink>
+        <RouterLink to="/orders">Заказы</RouterLink>
         <RouterLink to="/templates">Шаблоны</RouterLink>
         <RouterLink to="/production/calendar">Календарь</RouterLink>
         <RouterLink to="/production/plan">План</RouterLink>

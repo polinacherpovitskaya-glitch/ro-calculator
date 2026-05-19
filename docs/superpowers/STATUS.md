@@ -1,15 +1,39 @@
 # Migration status
 
-Last update: 2026-05-19T17:59:04-03:00
+Last update: 2026-05-19T18:15:44-03:00
 Current block: 9
-Current task within block: Task 5 — orders refresh/compare added
+Current task within block: Task 10 — ready to push Block 9 PR
 Branch: block-9-orders
-Last commit: `ff0db86` Add orders API and factual endpoints
-Tests: Full Postgres-backed API suite passed 125/125 on a temporary VPS Postgres container with migrations 001-008. Orders refresh/compare passed on a temporary VPS Postgres container with real Supabase read data.
+Last commit: `d6bf819` Add orders UI and golden master smoke
+Tests: Full Postgres-backed API suite passed 126/126 on a temporary VPS Postgres container with migrations 001-008. Calc suite passed 102/102, including 24 full-order HTTP API golden masters. `ops/web` build passed. Orders refresh/compare passed on a temporary VPS Postgres container with real Supabase read data.
 
 ## What was just done
 
 - Block 8 PR #46 was squash-merged to `main` as `9ced98a`.
+- Added full-order golden master HTTP integration test covering 24 real legacy order fixtures via `/api/orders`, `/items`, and `/recalc`.
+- Raised API JSON body limit to `5mb` after the full-order test exposed real legacy `calculator_data` payloads over Express' default limit.
+- Added `POST /api/orders/:id/clone` and a Postgres-backed API test for cloning a draft copy with items.
+- Added Orders Vue API wrapper, Pinia store, `/orders`, `/orders/new`, and `/orders/:id`.
+- Added order editor tabs/components:
+  - header/actions/status
+  - items inline editing
+  - add item dialog
+  - consume hardware dialog
+  - calculator snapshot/live preview tab
+  - production tab
+  - factual tab
+  - history tab
+- Decided and documented that factuals live inside the order editor for Block 9; separate `/factual` analytics remains deferred.
+- Added `tests/playwright/orders.spec.ts` for create order, add 2 positions, recalc, reload persistence, and consume-hardware.
+- Verified:
+  - `cd ops/web && npm run build`: passed
+  - `node --check` for changed API JS files/tests: passed
+  - Full API suite on VPS temporary Postgres: 126/126 passed
+  - `npm run test:calc` on VPS temporary Postgres: 102/102 passed
+- Remaining Block 9 staging-only checks after PR merge/deploy:
+  - run staging refresh/compare with `07-orders`
+  - run `tests/playwright/orders.spec.ts` against staging
+  - manually compare 5 real active orders on staging, копейка-в-копейку
 - GitHub Actions main deploy run `26124057155` passed.
 - Refreshed live staging from Supabase after Block 8 deploy using the Node 20 container path because host `node` is not installed on the VPS:
   - employees 14/14

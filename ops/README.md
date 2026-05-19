@@ -574,6 +574,70 @@ Verification:
 - `npm run build` in `ops/web`
 - Full Postgres-backed API suite: 111 tests on a temporary VPS Postgres container.
 
+## Orders
+
+Block 9 adds migrated orders, order items, factuals, status history, order-aware warehouse reservations, and the first Vue order workspace.
+
+Tables:
+
+```text
+orders
+order_items
+order_factuals
+order_status_history
+```
+
+Endpoints:
+
+```text
+GET    /api/orders
+POST   /api/orders
+GET    /api/orders/:id
+PATCH  /api/orders/:id
+DELETE /api/orders/:id
+POST   /api/orders/:id/clone
+POST   /api/orders/:id/items
+PATCH  /api/orders/:id/items/:itemId
+DELETE /api/orders/:id/items/:itemId
+POST   /api/orders/:id/status
+POST   /api/orders/:id/recalc
+POST   /api/orders/:id/consume-hardware
+GET    /api/orders/:id/factual
+POST   /api/orders/:id/factual
+PATCH  /api/orders/:id/factual
+POST   /api/orders/:id/factual/recalc
+```
+
+Screens:
+
+```text
+/orders
+/orders/new
+/orders/:id
+```
+
+Rules:
+
+- Order item rows are stored in `order_items`; saved `calculator_data` remains a snapshot, not the only source of order positions.
+- Order reservations now carry an enforced `order_id` FK for new rows. The migration uses `NOT VALID` so staging can deploy before the post-deploy refresh replaces old rows.
+- `consume-hardware` locks the order and warehouse rows, is idempotent, rejects closed/cancelled orders, writes `warehouse_history`, and consumes/splits active order reservations.
+- Closing or cancelling orders releases active order reservations through `releaseOrphanReservations()`.
+- Large legacy calculator snapshots require the API JSON body limit to be above Express' default; the API currently uses `5mb`.
+- The factual workflow lives inside `/orders/:id` on the `Факт` tab. A separate `/factual` analytics page is deferred until the reporting block needs it.
+
+Refresh notes:
+
+- `ops/scripts/refresh/07-orders.mjs` copies non-deleted legacy orders, items, and factuals before warehouse refresh runs.
+- Warehouse refresh drops order reservations whose order was skipped/deleted and nulls invalid history `order_id` values.
+- `compare-datasets.mjs` includes `orders`, `order_items`, and `order_factuals`.
+
+Verification:
+
+- Full Postgres-backed API suite: 126 tests on a temporary VPS Postgres container.
+- Calc suite: 102 tests, including 24 real full-order golden masters through the HTTP Orders API.
+- `npm run build` in `ops/web`.
+- `tests/playwright/orders.spec.ts` covers create, add items, recalc, reload persistence, and consume-hardware. Run it after Block 9 is deployed to staging.
+
 ## Current Infra
 
 | Parameter | Value |
@@ -589,4 +653,4 @@ Verification:
 
 ## Next
 
-Finish Block 8 review, then continue with Block 9 per the migration playbook.
+Finish Block 9 PR review/deploy, run staging refresh/compare, then run the orders Playwright smoke and manual 5-order staging comparison.

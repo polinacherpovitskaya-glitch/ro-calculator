@@ -22,6 +22,8 @@ import TemplatesView from './views/TemplatesView.vue';
 import ProductionCalendarView from './views/ProductionCalendarView.vue';
 import ProductionPlanView from './views/ProductionPlanView.vue';
 import IndirectCostsView from './views/IndirectCostsView.vue';
+import OrdersListView from './views/OrdersListView.vue';
+import OrderEditorView from './views/OrderEditorView.vue';
 
 const router = createRouter({
   history: createWebHistory(),
@@ -48,6 +50,8 @@ const router = createRouter({
     { path: '/production/calendar', name: 'production-calendar', component: ProductionCalendarView, meta: { requiresAuth: true } },
     { path: '/production/plan', name: 'production-plan', component: ProductionPlanView, meta: { requiresAuth: true } },
     { path: '/indirect-costs', name: 'indirect-costs', component: IndirectCostsView, meta: { requiresAuth: true } },
+    { path: '/orders', name: 'orders', component: OrdersListView, meta: { requiresAuth: true } },
+    { path: '/orders/:id', name: 'order-editor', component: OrderEditorView, meta: { requiresAuth: true } },
   ],
 });
 

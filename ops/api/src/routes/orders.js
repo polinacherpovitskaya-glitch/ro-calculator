@@ -329,6 +329,58 @@ router.delete(
 );
 
 router.post(
+  '/:id/clone',
+  requireAuth,
+  asyncHandler((req, res) =>
+    withIdempotency(req, res, async () => {
+      const cloned = await withTransaction(async (client) => {
+        const source = await loadOrderDetail(client, req.params.id);
+        if (!source) return null;
+        const newId = integer(req.body?.id || Date.now());
+        const newName = req.body?.order_name || `${source.order.order_name || `Заказ ${source.order.id}`} (копия)`;
+        const order = await client.query(
+          `INSERT INTO orders (
+              id, order_name, client_name, client_phone, client_email, manager_id, status, deadline,
+              total_revenue, total_cost, total_margin, margin_percent, total_hours_plan,
+              production_hours_plastic, production_hours_packaging, production_hours_hardware,
+              calculator_data, extras
+            )
+            SELECT
+              $1, $2, client_name, client_phone, client_email, manager_id, 'draft', deadline,
+              total_revenue, total_cost, total_margin, margin_percent, total_hours_plan,
+              production_hours_plastic, production_hours_packaging, production_hours_hardware,
+              calculator_data, extras
+            FROM orders WHERE id = $3
+            RETURNING *`,
+          [newId, newName, req.params.id]
+        );
+        for (const item of source.items) {
+          await client.query(
+            `INSERT INTO order_items (id, order_id, type, name, qty, unit_price, line_total, position, item_data)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+            [
+              Date.now() + Math.floor(Math.random() * 100000),
+              newId,
+              item.type,
+              item.name,
+              item.qty,
+              item.unit_price,
+              item.line_total,
+              item.position,
+              item.item_data || {},
+            ]
+          );
+        }
+        await rebuildOrderReservations(client, newId);
+        return order.rows[0];
+      });
+      if (!cloned) return error(res, 404, 'NOT_FOUND', 'Заказ не найден');
+      res.status(201).json({ order: orderPayload(cloned) });
+    })
+  )
+);
+
+router.post(
   '/:id/items',
   requireAuth,
   asyncHandler((req, res) =>

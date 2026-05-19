@@ -281,6 +281,30 @@ test('DELETE /api/orders/:id rejects non-draft orders', async (t) => {
   assert.equal(body.error.code, 'NOT_DELETABLE');
 });
 
+test('POST /api/orders/:id/clone creates draft copy with items', async (t) => {
+  const { port, cookie } = await setup(t);
+  const order = await createOrder(port, cookie, { status: 'quoted', total_revenue: 500 });
+  const itemId = id(8);
+  await requestJson(
+    port,
+    'POST',
+    `/api/orders/${order.id}/items`,
+    { id: itemId, type: 'product', name: 'Badge', qty: 3, unit_price: 100, line_total: 300, item_data: { color: 'red' } },
+    cookie
+  );
+
+  const res = await requestJson(port, 'POST', `/api/orders/${order.id}/clone`, { order_name: 'Copy order' }, cookie);
+  const body = await res.json();
+  const detail = await fetch(`http://127.0.0.1:${port}/api/orders/${body.order.id}`, { headers: { cookie } }).then((response) => response.json());
+
+  assert.equal(res.status, 201);
+  assert.equal(body.order.status, 'draft');
+  assert.equal(body.order.order_name, 'Copy order');
+  assert.equal(Number(body.order.total_revenue), 500);
+  assert.equal(detail.items.length, 1);
+  assert.equal(detail.items[0].name, 'Badge');
+});
+
 test('POST /api/orders/:id/recalc preserves saved calculator snapshot totals', async (t) => {
   const { port, cookie } = await setup(t);
   const order = await createOrder(port, cookie, {
