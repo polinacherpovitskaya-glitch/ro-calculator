@@ -144,6 +144,38 @@ function getPrintingSellPricePerUnit(item) {
     return hasLegacyPrintingFallback(item) ? calcNumber(item?.sell_price_printing, 0) : 0;
 }
 
+const COLOR_ATTACHMENT_MAX_UPLOAD_BYTES = 3 * 1024 * 1024;
+const COLOR_ATTACHMENT_TARGET_BYTES = 450 * 1024;
+const COLOR_ATTACHMENT_TOTAL_TARGET_BYTES = 1800 * 1024;
+const COLOR_ATTACHMENT_MAX_IMAGE_DIMENSION = 1400;
+
+function estimateDataUrlBytes(dataUrl) {
+    const value = String(dataUrl || '');
+    if (!value) return 0;
+    const commaIdx = value.indexOf(',');
+    const body = commaIdx >= 0 ? value.slice(commaIdx + 1) : value;
+    if (value.includes(';base64,')) {
+        return Math.ceil((body.length * 3) / 4);
+    }
+    try {
+        return decodeURIComponent(body).length;
+    } catch (e) {
+        return body.length;
+    }
+}
+
+function estimateColorAttachmentBytes(attachment) {
+    if (!attachment) return 0;
+    const dataBytes = estimateDataUrlBytes(attachment.data_url);
+    return dataBytes || Number(attachment.size) || 0;
+}
+
+function isCompressibleColorAttachment(attachment) {
+    const type = String(attachment?.type || '').toLowerCase();
+    const dataUrl = String(attachment?.data_url || '').toLowerCase();
+    return type.startsWith('image/') && dataUrl.startsWith('data:image/');
+}
+
 function normalizeColorAttachments(source) {
     let attachments = source;
     if (attachments && typeof attachments === 'object' && !Array.isArray(attachments) && Object.prototype.hasOwnProperty.call(attachments, 'color_solution_attachment')) {

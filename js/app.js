@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v374';
+const APP_VERSION = 'v375';
 
 const App = {
     currentPage: 'orders',
@@ -1787,7 +1787,7 @@ const Calculator = {
                     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
                         <input type="file" id="item-color-file-${idx}" accept="image/*,.pdf,.ai,.psd,.svg,.zip,.rar,.7z,.doc,.docx,.xls,.xlsx,.txt" multiple
                             onchange="Calculator.onColorAttachmentChange(${idx}, this)" style="max-width:320px;font-size:12px;">
-                        <span style="font-size:10px;color:var(--text-muted);">Можно несколько файлов, до 3 МБ каждый</span>
+                        <span style="font-size:10px;color:var(--text-muted);">Картинки сжимаются для сохранения, до 3 МБ исходный файл</span>
                     </div>
                     ${attachmentListHtml ? `<div style="display:flex;flex-direction:column;gap:8px;margin-top:10px;">${attachmentListHtml}</div>` : ''}
                 </div>`;
@@ -3762,12 +3762,150 @@ const Calculator = {
         this.scheduleAutosave();
     },
 
+    _readFileAsDataUrl(file) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (e) => resolve(e.target?.result || '');
+            reader.onerror = () => reject(new Error(file?.name || 'file'));
+            reader.readAsDataURL(file);
+        });
+    },
+
+    _loadColorAttachmentImage(dataUrl) {
+        return new Promise((resolve, reject) => {
+            const img = new Image();
+            img.onload = () => resolve(img);
+            img.onerror = () => reject(new Error('image load failed'));
+            img.src = dataUrl;
+        });
+    },
+
+    async _compressColorAttachment(attachment, maxBytes = COLOR_ATTACHMENT_TARGET_BYTES) {
+        const att = attachment && typeof attachment === 'object' ? attachment : null;
+        if (!att?.data_url || !isCompressibleColorAttachment(att)) return att;
+        const originalBytes = estimateColorAttachmentBytes(att);
+        if (originalBytes > 0 && originalBytes <= maxBytes) return att;
+        if (typeof document === 'undefined' || typeof Image === 'undefined') return att;
+
+        try {
+            const img = await this._loadColorAttachmentImage(att.data_url);
+            const sourceWidth = img.naturalWidth || img.width || 0;
+            const sourceHeight = img.naturalHeight || img.height || 0;
+            if (!sourceWidth || !sourceHeight) return att;
+
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return att;
+
+            let scale = Math.min(1, COLOR_ATTACHMENT_MAX_IMAGE_DIMENSION / Math.max(sourceWidth, sourceHeight));
+            let quality = 0.82;
+            let best = null;
+
+            for (let attempt = 0; attempt < 12; attempt += 1) {
+                canvas.width = Math.max(1, Math.round(sourceWidth * scale));
+                canvas.height = Math.max(1, Math.round(sourceHeight * scale));
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = '#fff';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+                const dataUrl = canvas.toDataURL('image/jpeg', quality);
+                const size = estimateDataUrlBytes(dataUrl);
+                best = {
+                    ...att,
+                    type: 'image/jpeg',
+                    data_url: dataUrl,
+                    size,
+                    original_size: Number(att.original_size || att.size || originalBytes) || originalBytes || size,
+                    compressed: true,
+                };
+                if (size <= maxBytes) return best;
+
+                if (quality > 0.5) {
+                    quality = Math.max(0.46, quality - 0.12);
+                } else {
+                    scale *= 0.82;
+                    quality = 0.72;
+                }
+            }
+
+            return best || att;
+        } catch (error) {
+            console.warn('[Calculator] color attachment compression failed:', error);
+            return att;
+        }
+    },
+
+    async _prepareColorFileAttachment(file) {
+        if (!file) return null;
+        if ((file.size || 0) > COLOR_ATTACHMENT_MAX_UPLOAD_BYTES) {
+            App.toast(`Файл "${file.name || 'без имени'}" слишком большой. Максимум 3 МБ`);
+            return null;
+        }
+        const dataUrl = await this._readFileAsDataUrl(file);
+        let attachment = {
+            name: file.name || 'file',
+            type: file.type || '',
+            size: file.size || estimateDataUrlBytes(dataUrl),
+            data_url: dataUrl,
+        };
+        if (isCompressibleColorAttachment(attachment)) {
+            attachment = await this._compressColorAttachment(attachment, COLOR_ATTACHMENT_TARGET_BYTES);
+        } else if (estimateColorAttachmentBytes(attachment) > COLOR_ATTACHMENT_TARGET_BYTES) {
+            App.toast(`Файл "${file.name || 'без имени'}" нельзя сжать автоматически. Для таких файлов максимум 450 КБ`);
+            return null;
+        }
+        return attachment;
+    },
+
+    async _prepareColorAttachmentsForSave(options = {}) {
+        let compressedCount = 0;
+        let strippedCount = 0;
+
+        for (const item of this.items) {
+            const attachments = normalizeColorAttachments(item);
+            if (!attachments.length) continue;
+
+            const perFileBudget = Math.max(
+                180 * 1024,
+                Math.min(COLOR_ATTACHMENT_TARGET_BYTES, Math.floor(COLOR_ATTACHMENT_TOTAL_TARGET_BYTES / attachments.length))
+            );
+            const prepared = [];
+            for (const attachment of attachments) {
+                const beforeBytes = estimateColorAttachmentBytes(attachment);
+                let next = attachment;
+                if (beforeBytes > perFileBudget && isCompressibleColorAttachment(attachment)) {
+                    next = await this._compressColorAttachment(attachment, perFileBudget);
+                    if (next?.data_url && next.data_url !== attachment.data_url) compressedCount += 1;
+                }
+
+                const afterBytes = estimateColorAttachmentBytes(next);
+                if (afterBytes > perFileBudget && !isCompressibleColorAttachment(next)) {
+                    next = {
+                        ...next,
+                        data_url: '',
+                        save_warning: 'Файл был слишком большим для сохранения в заказе',
+                    };
+                    strippedCount += 1;
+                }
+                prepared.push(next);
+            }
+
+            item.color_solution_attachment = prepared.length ? prepared : null;
+        }
+
+        if (!options.quiet) {
+            if (compressedCount > 0) App.toast(`Сжала ${compressedCount} файл(а) цветового решения для сохранения`);
+            if (strippedCount > 0) App.toast(`Не сохранила ${strippedCount} слишком большой несжимаемый файл`);
+        }
+        return { compressedCount, strippedCount };
+    },
+
     onColorAttachmentChange(idx, input) {
         const files = Array.from(input?.files || []);
         if (!files.length) return;
-        const maxBytes = 3 * 1024 * 1024; // 3 MB
         const validFiles = files.filter(file => {
-            if ((file?.size || 0) > maxBytes) {
+            if ((file?.size || 0) > COLOR_ATTACHMENT_MAX_UPLOAD_BYTES) {
                 App.toast(`Файл "${file.name || 'без имени'}" слишком большой. Максимум 3 МБ`);
                 return false;
             }
@@ -3777,19 +3915,14 @@ const Calculator = {
             input.value = '';
             return;
         }
-        Promise.all(validFiles.map(file => new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = (e) => resolve({
-                name: file.name || 'file',
-                type: file.type || '',
-                size: file.size || 0,
-                data_url: e.target?.result || '',
-            });
-            reader.onerror = () => reject(new Error(file.name || 'file'));
-            reader.readAsDataURL(file);
-        }))).then(loaded => {
+        Promise.all(validFiles.map(file => this._prepareColorFileAttachment(file))).then(loaded => {
+            loaded = loaded.filter(Boolean);
+            if (!loaded.length) return;
             const attachments = normalizeColorAttachments(this.items[idx]);
             this.items[idx].color_solution_attachment = attachments.concat(loaded);
+            if (loaded.some(att => att.compressed)) {
+                App.toast('Картинки цветового решения сжаты, чтобы заказ сохранялся на calc2');
+            }
             this.renderItemBlock(idx);
             this.scheduleAutosave();
         }).catch(() => {
@@ -3813,7 +3946,10 @@ const Calculator = {
 
     openColorAttachment(idx, attachmentIdx = 0) {
         const att = normalizeColorAttachments(this.items[idx])[attachmentIdx];
-        if (!att?.data_url) return;
+        if (!att?.data_url) {
+            App.toast('Файл недоступен: он был слишком большим для сохранения в заказе');
+            return;
+        }
         const win = window.open(att.data_url, '_blank');
         if (!win) {
             App.toast('Браузер заблокировал открытие файла');
@@ -4976,6 +5112,8 @@ const Calculator = {
                 order.status = this._currentOrderStatus || 'draft';
             }
 
+            await this._prepareColorAttachmentsForSave({ quiet: true });
+
             // Collect items (same logic as saveOrder but without qty filter for drafts)
             const items = this._collectItemsForSave();
 
@@ -5200,6 +5338,10 @@ const Calculator = {
             production_hours_hardware: load.hoursHardwareTotal,
             production_load_percent: load.plasticLoadPercent,
         };
+
+        const statusElBeforeSave = document.getElementById('calc-autosave-status');
+        if (statusElBeforeSave) statusElBeforeSave.textContent = 'Подготавливаю файлы...';
+        await this._prepareColorAttachmentsForSave();
 
         const items = this._collectItemsForSave();
 
