@@ -7,6 +7,8 @@
       </div>
       <nav>
         <RouterLink to="/warehouse">Склад</RouterLink>
+        <RouterLink to="/shipments">Приёмки</RouterLink>
+        <RouterLink to="/china">Китай</RouterLink>
         <button type="button" @click="handleLogout">Выйти</button>
       </nav>
     </header>

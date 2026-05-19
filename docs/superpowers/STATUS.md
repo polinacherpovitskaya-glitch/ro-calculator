@@ -1,8 +1,8 @@
 # Migration status
 
-Last update: 2026-05-19T15:55:00-03:00
+Last update: 2026-05-19T16:20:00-03:00
 Current block: 4
-Current task within block: Task 5 Vue 3 screens
+Current task within block: Task 6 Playwright smoke + README + PR
 Branch: block-4-shipments-china
 Last commit: main `e951fd0` includes Block 3 + Playwright smoke follow-up
 Tests: Block 3 PR checks passed; main deploy passed; live staging health `db.ok=true`; warehouse API/UI smoke passed; Playwright warehouse smoke 1/1 passed.
@@ -119,12 +119,23 @@ Tests: Block 3 PR checks passed; main deploy passed; live staging health `db.ok=
   - china_purchase_items 45/45
   - china_catalog 103/103
 - Verified live staging `/api/health`: `db.ok=true`.
+- Added Vue API wrappers and Pinia stores for shipments/china.
+- Added screens:
+  - `/shipments`
+  - `/shipments/new`
+  - `/shipments/:id`
+  - `/china`
+  - `/china/new`
+  - `/china/:id`
+  - `/china/catalog`
+- Added home navigation links for shipments and China.
+- Verified `cd ops/web && npm run build` passing.
 
 ## Next steps for Codex
 
-1. Add Vue API wrappers and Pinia stores for shipments/china.
-2. Build `/shipments`, `/shipments/:id`, `/china`, `/china/:id`, and `/china/catalog`.
-3. Run `cd ops/web && npm run build`.
+1. Add Playwright smoke for shipments/china.
+2. Update `ops/README.md`.
+3. Run final quality gates, open PR, and merge only if green.
 
 ## Quality gates status (Block 2)
 
@@ -157,7 +168,7 @@ Tests: Block 3 PR checks passed; main deploy passed; live staging health `db.ok=
 - [x] China API tests passing
 - [x] refresh/compare scripts updated
 - [x] staging shipments/china data refreshed from Supabase
-- [ ] Vue shipments/china screens built
+- [x] Vue shipments/china screens built
 - [ ] Playwright shipments/china smoke passing
 - [ ] `ops/README.md` updated
 - [ ] PR opened
