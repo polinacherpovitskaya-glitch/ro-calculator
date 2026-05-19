@@ -1,8 +1,8 @@
 # Migration status
 
-Last update: 2026-05-19T14:34:00-03:00
+Last update: 2026-05-19T14:38:00-03:00
 Current block: 3
-Current task within block: Task 10 README + PR
+Current task within block: Final verification + PR
 Branch: block-3-warehouse
 Last commit: main `9a563e6` includes Block 2 merge
 Tests: Block 2 PR checks passed; main deploy passed; live staging health `db.ok=true`; live auth smoke passed after deploy.
@@ -75,12 +75,13 @@ Tests: Block 2 PR checks passed; main deploy passed; live staging health `db.ok=
 - Verified `cd ops/web && npm run build` passing after history view.
 - Added `tests/playwright/warehouse.spec.ts` staging smoke scaffold for login -> warehouse -> edit qty -> verify history.
 - Playwright smoke not run yet because Block 3 UI is not deployed to staging until this branch is merged; it requires `E2E_USER` / `E2E_PASSWORD`.
+- Updated `ops/README.md` with Auth and Warehouse module endpoints, screens, tests, refresh, and compare notes.
 
 ## Next steps for Codex
 
-1. Update `ops/README.md` with Warehouse module endpoints/screens/tests.
-2. Run final API test suite and web build.
-3. Push branch, open PR, wait for checks, merge if green.
+1. Run final API test suite and web build.
+2. Push branch, open PR, wait for checks, merge if green.
+3. Let main deploy, then run live health and warehouse smoke where possible.
 
 ## Quality gates status (Block 2)
 
@@ -101,6 +102,7 @@ Tests: Block 2 PR checks passed; main deploy passed; live staging health `db.ok=
 - [x] staging warehouse data refreshed from Supabase
 - [x] Vue warehouse screens built
 - [ ] Playwright warehouse smoke passing (spec added; runnable after deploy with E2E credentials)
+- [x] `ops/README.md` updated
 - [ ] PR opened
 - [ ] PR merged to main
 
