@@ -1,8 +1,8 @@
 # Migration status
 
-Last update: 2026-05-19T13:58:00-03:00
+Last update: 2026-05-19T14:08:00-03:00
 Current block: 3
-Current task within block: Task 4 refresh/compare scripts
+Current task within block: Task 5 Vue warehouse list view
 Branch: block-3-warehouse
 Last commit: main `9a563e6` includes Block 2 merge
 Tests: Block 2 PR checks passed; main deploy passed; live staging health `db.ok=true`; live auth smoke passed after deploy.
@@ -46,14 +46,26 @@ Tests: Block 2 PR checks passed; main deploy passed; live staging health `db.ok=
   - `POST /inventory-audit`
 - Added warehouse API tests and invariant tests I1-I7.
 - Verified full API test suite in temporary VPS containers: 30/30 passing.
+- Added warehouse refresh/data scripts:
+  - `ops/scripts/refresh/02-warehouse.mjs`
+  - `ops/scripts/refresh-staging-snapshot.mjs`
+  - `ops/scripts/compare-datasets.mjs`
+- Ran staging snapshot refresh from Supabase:
+  - employees: 14
+  - warehouse_items: 227
+  - warehouse_reservations: 351 legacy JSON entries -> 348 canonical unique reservation rows
+  - warehouse_history: 1
+- Ran dataset compare successfully:
+  - employees 14/14
+  - warehouse_items 227/227
+  - warehouse_reservations 348/348
+  - warehouse_history 1/1
 
 ## Next steps for Codex
 
-1. Add `ops/scripts/refresh/02-warehouse.mjs`.
-2. Add `ops/scripts/refresh-staging-snapshot.mjs`.
-3. Add `ops/scripts/compare-datasets.mjs`.
-4. Refresh staging warehouse data from Supabase and compare counts.
-5. Continue Vue warehouse screens.
+1. Add Vue warehouse API wrapper and Pinia store.
+2. Add `/warehouse` list view with search, category filter, create modal, and row navigation.
+3. Build web locally.
 
 ## Quality gates status (Block 2)
 
@@ -70,8 +82,8 @@ Tests: Block 2 PR checks passed; main deploy passed; live staging health `db.ok=
 
 - [x] `003_warehouse.sql` added
 - [x] API warehouse tests added and passing
-- [ ] `refresh-staging-snapshot.mjs` and `compare-datasets.mjs` added
-- [ ] staging warehouse data refreshed from Supabase
+- [x] `refresh-staging-snapshot.mjs` and `compare-datasets.mjs` added
+- [x] staging warehouse data refreshed from Supabase
 - [ ] Vue warehouse screens built
 - [ ] Playwright warehouse smoke passing
 - [ ] PR opened
