@@ -1,8 +1,8 @@
 # Migration status
 
-Last update: 2026-05-19T14:15:00-03:00
+Last update: 2026-05-19T14:21:00-03:00
 Current block: 3
-Current task within block: Task 6 Vue warehouse item card + history
+Current task within block: Task 7 Vue inventory audit
 Branch: block-3-warehouse
 Last commit: main `9a563e6` includes Block 2 merge
 Tests: Block 2 PR checks passed; main deploy passed; live staging health `db.ok=true`; live auth smoke passed after deploy.
@@ -63,12 +63,16 @@ Tests: Block 2 PR checks passed; main deploy passed; live staging health `db.ok=
 - Added Vue warehouse API wrapper, Pinia store, `/warehouse` route, and list view with search, category filter, create dialog, inline qty/min/category edits, delete action, and low-stock highlighting.
 - Added home navigation link to `/warehouse`.
 - Verified `cd ops/web && npm run build` passing.
+- Added `GET /api/warehouse/items/:id`.
+- Added `/warehouse/:id` item card with editable fields and recent movement history.
+- Verified API test suite again in temporary VPS containers: 30/30 passing.
+- Verified `cd ops/web && npm run build` passing after item card.
 
 ## Next steps for Codex
 
-1. Add warehouse item card route `/warehouse/:id`.
-2. Add item edit form and recent movement history.
-3. Re-run web build and API tests before the next commit.
+1. Add `/warehouse/inventory` inventory audit view.
+2. Wire `POST /api/warehouse/inventory-audit` from the UI.
+3. Re-run web build before the next commit.
 
 ## Quality gates status (Block 2)
 

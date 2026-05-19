@@ -103,6 +103,25 @@ router.get(
   })
 );
 
+router.get(
+  '/items/:id',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { rows } = await getPool().query(
+      `SELECT i.*,
+              COALESCE(SUM(r.qty) FILTER (WHERE r.status = 'active'), 0) AS reserved_qty,
+              i.qty - COALESCE(SUM(r.qty) FILTER (WHERE r.status = 'active'), 0) AS available_qty
+         FROM warehouse_items i
+         LEFT JOIN warehouse_reservations r ON r.item_id = i.id
+        WHERE i.id = $1
+        GROUP BY i.id`,
+      [req.params.id]
+    );
+    if (!rows[0]) return error(res, 404, 'NOT_FOUND', 'Позиция не найдена');
+    res.json({ item: itemPayload(rows[0]) });
+  })
+);
+
 router.post(
   '/items',
   requireAuth,
