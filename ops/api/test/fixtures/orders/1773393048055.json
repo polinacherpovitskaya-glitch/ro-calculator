@@ -1,0 +1,147 @@
+{
+  "id": "1773393048055",
+  "exportedAt": "2026-05-19T19:30:55.662Z",
+  "source": "supabase",
+  "summary": {
+    "order_id": "1773393048055",
+    "order_name": "Обвеcы Озон банк КЕШШШ",
+    "status": "completed",
+    "item_count": 2,
+    "factual_count": 1,
+    "has_pendant": true,
+    "has_mold": true,
+    "has_hardware": true,
+    "has_nfc": false,
+    "is_complex": false
+  },
+  "expected": {
+    "total_revenue": 471970,
+    "total_cost": 354386.25,
+    "total_margin": 117583.75,
+    "margin_percent": 24.91,
+    "total_hours_plan": 29.98,
+    "production_hours_plastic": 0,
+    "production_hours_packaging": 0,
+    "production_hours_hardware": 29.98
+  },
+  "order": {
+    "id": 1773393048055,
+    "order_name": "Обвеcы Озон банк КЕШШШ",
+    "client_name": "Озон банк",
+    "status": "completed",
+    "deadline": "2026-03-13",
+    "deadline_start": "2026-03-13",
+    "deadline_end": "2026-03-25",
+    "delivery_address": "",
+    "telegram": "",
+    "crm_link": "",
+    "fintablo_link": "",
+    "client_legal_name": "",
+    "client_inn": "",
+    "client_legal_address": "",
+    "client_bank_name": "",
+    "client_bank_account": "",
+    "client_bank_bik": "",
+    "payment_status": "paid_100",
+    "total_hours_plan": 29.98,
+    "production_hours_plastic": 0,
+    "production_hours_packaging": 0,
+    "production_hours_hardware": 29.98,
+    "total_cost": 354386.25,
+    "total_revenue": 471970,
+    "total_margin": 117583.75,
+    "margin_percent": 24.91,
+    "calculator_data": "{\"id\":1773393048055,\"order_name\":\"Обвеcы Озон банк КЕШШШ\",\"client_name\":\"Озон банк\",\"manager_name\":\"Алина\",\"deadline\":\"2026-03-13\",\"deadline_start\":\"2026-03-13\",\"deadline_end\":\"2026-03-25\",\"notes\":\"синий адель + много белого\",\"delivery_address\":\"\",\"telegram\":\"\",\"crm_link\":\"\",\"fintablo_link\":\"\",\"client_legal_name\":\"\",\"client_inn\":\"\",\"client_legal_address\":\"\",\"client_bank_name\":\"\",\"client_bank_account\":\"\",\"client_bank_bik\":\"\",\"plastic_type\":\"PP\",\"print_type\":null,\"status\":\"completed\",\"total_revenue_plan\":471970,\"total_cost_plan\":354386.25,\"total_margin_plan\":117583.75,\"margin_percent_plan\":24.91,\"total_hours_plan\":29.98,\"production_hours_plastic\":0,\"production_hours_packaging\":0,\"production_hours_hardware\":29.98,\"production_load_percent\":0}",
+    "items_snapshot": null,
+    "hardware_snapshot": null,
+    "packaging_snapshot": null,
+    "manager_name": "Алина",
+    "owner_name": null,
+    "notes": "синий адель + много белого",
+    "created_at": "2026-03-13T09:10:48.362+00:00",
+    "updated_at": "2026-04-02T12:22:53.741+00:00",
+    "deleted_at": null
+  },
+  "items": [
+    {
+      "id": 1773393048055001,
+      "order_id": 1773393048055,
+      "item_number": 1,
+      "template_id": null,
+      "product_name": "",
+      "quantity": 0,
+      "unit_price": null,
+      "sell_price_item": 0,
+      "sell_price_printing": 0,
+      "total_price": null,
+      "cost_total": 0,
+      "item_data": "{\"item_number\":1,\"item_type\":\"product\",\"product_name\":\"\",\"quantity\":0,\"pieces_per_hour\":0,\"weight_grams\":0,\"extra_molds\":0,\"base_mold_in_stock\":false,\"complex_design\":false,\"is_blank_mold\":false,\"is_nfc\":false,\"nfc_programming\":false,\"delivery_included\":false,\"printings\":\"[]\",\"cost_fot\":0,\"cost_indirect\":0,\"cost_plastic\":0,\"cost_mold_amortization\":0,\"cost_design\":0,\"cost_cutting\":0,\"cost_cutting_indirect\":0,\"cost_nfc_tag\":0,\"cost_nfc_programming\":0,\"cost_nfc_indirect\":0,\"cost_printing\":0,\"cost_delivery\":0,\"cost_total\":0,\"sell_price_item\":0,\"sell_price_printing\":0,\"target_price_item\":0,\"hours_plastic\":0,\"hours_cutting\":0,\"hours_nfc\":0,\"template_id\":null,\"color_id\":null,\"color_name\":\"\",\"colors\":\"[]\",\"color_solution_attachment\":null}",
+      "created_at": "2026-03-31T11:52:01.233+00:00",
+      "updated_at": "2026-03-31T11:52:01.233+00:00"
+    },
+    {
+      "id": 1773393048055400,
+      "order_id": 1773393048055,
+      "item_number": 400,
+      "template_id": null,
+      "product_name": "Подвес \"КЕШШШ❤️\"",
+      "quantity": 545,
+      "unit_price": null,
+      "sell_price_item": 866,
+      "sell_price_printing": null,
+      "total_price": null,
+      "cost_total": 542,
+      "item_data": "{\"item_type\":\"pendant\",\"pendant_id\":\"pnd_1774893349963\",\"name\":\"КЕШШШ❤️\",\"quantity\":545,\"elements\":[{\"char\":\"К\",\"color\":\"\",\"has_print\":false,\"print_price\":0,\"sell_price\":122,\"sell_price_auto\":false,\"sell_print\":0},{\"char\":\"Е\",\"color\":\"\",\"has_print\":false,\"print_price\":0,\"sell_price\":122,\"sell_price_auto\":false,\"sell_print\":0},{\"char\":\"Ш\",\"color\":\"\",\"has_print\":false,\"print_price\":0,\"sell_price\":122,\"sell_price_auto\":false,\"sell_print\":0},{\"char\":\"Ш\",\"color\":\"\",\"has_print\":false,\"print_price\":0,\"sell_price\":122,\"sell_price_auto\":false,\"sell_print\":0},{\"char\":\"Ш\",\"color\":\"\",\"has_print\":false,\"print_price\":0,\"sell_price\":122,\"sell_price_auto\":false,\"sell_print\":0},{\"char\":\"❤️\",\"color\":\"\",\"has_print\":true,\"print_price\":15,\"sell_price\":122,\"sell_price_auto\":false,\"sell_print\":24}],\"cords\":[{\"source\":\"warehouse\",\"warehouse_item_id\":1771942065478,\"warehouse_sku\":\"SLS-800-SLD-NN\",\"photo_thumbnail\":\"\",\"name\":\"Шнур с силик. наконечником салатовый 80 см\",\"price_per_unit\":23,\"delivery_price\":0,\"sell_price\":100,\"assembly_speed\":20,\"unit\":\"шт\",\"allocated_qty\":200,\"qty_per_pendant\":1,\"length_cm\":0},{\"source\":\"warehouse\",\"warehouse_item_id\":1771942065473,\"warehouse_sku\":\"SLS-800-PGY-NN\",\"photo_thumbnail\":\"data:image/jpeg;base64,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\",\"name\":\"Шнур с силик. наконечником поросячий 80 см\",\"price_per_unit\":23,\"delivery_price\":0,\"sell_price\":100,\"assembly_speed\":20,\"unit\":\"шт\",\"allocated_qty\":245,\"qty_per_pendant\":1,\"length_cm\":0},{\"source\":\"warehouse\",\"warehouse_item_id\":1771942065479,\"warehouse_sku\":\"SLS-800-LZR-NN\",\"photo_thumbnail\":\"data:image/jpeg;base64,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\",\"name\":\"Шнур с силик. наконечником лазурный 80 см\",\"price_per_unit\":23,\"delivery_price\":0,\"sell_price\":100,\"assembly_speed\":20,\"unit\":\"шт\",\"allocated_qty\":100,\"qty_per_pendant\":1,\"length_cm\":0}],\"carabiners\":[{\"source\":\"warehouse\",\"warehouse_item_id\":1772786411438,\"warehouse_sku\":\"CR-RNG-025-SV\",\"photo_thumbnail\":\"\",\"name\":\"Карабин круглый серебряный 25мм\",\"price_per_unit\":3.6,\"delivery_price\":0,\"sell_price\":10,\"assembly_speed\":0,\"unit\":\"шт\",\"allocated_qty\":545,\"qty_per_pendant\":1,\"length_cm\":0}],\"cord\":{\"source\":\"warehouse\",\"warehouse_item_id\":1771942065478,\"warehouse_sku\":\"SLS-800-SLD-NN\",\"photo_thumbnail\":\"\",\"name\":\"Шнур с силик. наконечником салатовый 80 см\",\"price_per_unit\":23,\"delivery_price\":0,\"sell_price\":100,\"assembly_speed\":20,\"unit\":\"шт\",\"allocated_qty\":200,\"qty_per_pendant\":1,\"length_cm\":0},\"cord_length_cm\":0,\"carabiner\":{\"source\":\"warehouse\",\"warehouse_item_id\":1772786411438,\"warehouse_sku\":\"CR-RNG-025-SV\",\"photo_thumbnail\":\"\",\"name\":\"Карабин круглый серебряный 25мм\",\"price_per_unit\":3.6,\"delivery_price\":0,\"sell_price\":10,\"assembly_speed\":0,\"unit\":\"шт\",\"allocated_qty\":545,\"qty_per_pendant\":1,\"length_cm\":0},\"packaging\":null,\"element_price_per_unit\":83.4,\"sell_price_override\":null,\"result\":{\"costPerUnit\":542,\"sellPerUnit\":866,\"totalCost\":295390,\"totalRevenue\":471970,\"assemblyHours\":29.98,\"packagingHours\":0,\"margin\":{\"earned\":215.75,\"percent\":24.91}},\"_elemSellTotal\":732,\"_totalSellPerUnit\":866,\"item_number\":400,\"product_name\":\"Подвес \\\"КЕШШШ❤️\\\"\",\"cost_total\":542,\"sell_price_item\":866,\"id\":1773393048055400,\"order_id\":1773393048055,\"template_id\":null,\"unit_price\":null,\"sell_price_printing\":null,\"total_price\":null,\"item_data\":\"{\\\"item_type\\\":\\\"pendant\\\",\\\"pendant_id\\\":\\\"pnd_1774893349963\\\",\\\"name\\\":\\\"КЕШШШ❤️\\\",\\\"quantity\\\":545,\\\"elements\\\":[{\\\"char\\\":\\\"К\\\",\\\"color\\\":\\\"\\\",\\\"has_print\\\":false,\\\"print_price\\\":0,\\\"sell_price\\\":160,\\\"sell_price_auto\\\":true,\\\"sell_print\\\":0},{\\\"char\\\":\\\"Е\\\",\\\"color\\\":\\\"\\\",\\\"has_print\\\":false,\\\"print_price\\\":0,\\\"sell_price\\\":160,\\\"sell_price_auto\\\":true,\\\"sell_print\\\":0},{\\\"char\\\":\\\"Ш\\\",\\\"color\\\":\\\"\\\",\\\"has_print\\\":false,\\\"print_price\\\":0,\\\"sell_price\\\":160,\\\"sell_price_auto\\\":true,\\\"sell_print\\\":0},{\\\"char\\\":\\\"Ш\\\",\\\"color\\\":\\\"\\\",\\\"has_print\\\":false,\\\"print_price\\\":0,\\\"sell_price\\\":160,\\\"sell_price_auto\\\":true,\\\"sell_print\\\":0},{\\\"char\\\":\\\"Ш\\\",\\\"color\\\":\\\"\\\",\\\"has_print\\\":false,\\\"print_price\\\":0,\\\"sell_price\\\":160,\\\"sell_price_auto\\\":true,\\\"sell_print\\\":0},{\\\"char\\\":\\\"❤️\\\",\\\"color\\\":\\\"\\\",\\\"has_print\\\":true,\\\"print_price\\\":15,\\\"sell_price\\\":160,\\\"sell_price_auto\\\":true,\\\"sell_print\\\":32}],\\\"cords\\\":[{\\\"source\\\":\\\"warehouse\\\",\\\"warehouse_item_id\\\":1771942065478,\\\"warehouse_sku\\\":\\\"SLS-800-SLD-NN\\\",\\\"photo_thumbnail\\\":\\\"\\\",\\\"name\\\":\\\"Шнур с силик. наконечником салатовый 80 см\\\",\\\"price_per_unit\\\":23,\\\"delivery_price\\\":0,\\\"sell_price\\\":100,\\\"assembly_speed\\\":20,\\\"unit\\\":\\\"шт\\\",\\\"allocated_qty\\\":200,\\\"qty_per_pendant\\\":1,\\\"length_cm\\\":0},{\\\"source\\\":\\\"warehouse\\\",\\\"warehouse_item_id\\\":1771942065473,\\\"warehouse_sku\\\":\\\"SLS-800-PGY-NN\\\",\\\"photo_thumbnail\\\":\\\"data:image/jpeg;base64,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\\\",\\\"name\\\":\\\"Шнур с силик. наконечником поросячий 80 см\\\",\\\"price_per_unit\\\":23,\\\"delivery_price\\\":0,\\\"sell_price\\\":100,\\\"assembly_speed\\\":20,\\\"unit\\\":\\\"шт\\\",\\\"allocated_qty\\\":245,\\\"qty_per_pendant\\\":1,\\\"length_cm\\\":0},{\\\"source\\\":\\\"warehouse\\\",\\\"warehouse_item_id\\\":1771942065479,\\\"warehouse_sku\\\":\\\"SLS-800-LZR-NN\\\",\\\"photo_thumbnail\\\":\\\"data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAASABIAAD/4QBMRXhpZgAATU0AKgAAAAgAAYdpAAQAAAABAAAAGgAAAAAAA6ABAAMAAAABAAEAAKACAAQAAAABAAAAUKADAAQAAAABAAAAUAAAAAD/7QA4UGhvdG9zaG9wIDMuMAA4QklNBAQAAAAAAAA4QklNBCUAAAAAABDUHYzZjwCyBOmACZjs+EJ+/8AAEQgAUABQAwEiAAIRAQMRAf/EAB8AAAEFAQEBAQEBAAAAAAAAAAABAgMEBQYHCAkKC//EALUQAAIBAwMCBAMFBQQEAAABfQECAwAEEQUSITFBBhNRYQcicRQygZGhCCNCscEVUtHwJDNicoIJChYXGBkaJSYnKCkqNDU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6g4SFhoeIiYqSk5SVlpeYmZqio6Slpqeoqaqys7S1tre4ubrCw8TFxsfIycrS09TV1tfY2drh4uPk5ebn6Onq8fLz9PX29/j5+v/EAB8BAAMBAQEBAQEBAQEAAAAAAAABAgMEBQYHCAkKC//EALURAAIBAgQEAwQHBQQEAAECdwABAgMRBAUhMQYSQVEHYXETIjKBCBRCkaGxwQkjM1LwFWJy0QoWJDThJfEXGBkaJicoKSo1Njc4OTpDREVGR0hJSlNUVVZXWFlaY2RlZmdoaWpzdHV2d3h5eoKDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uLj5OXm5+jp6vLz9PX29/j5+v/bAEMABAQEBAQEBgQEBgkGBgYJDAkJCQkMDwwMDAwMDxIPDw8PDw8SEhISEhISEhUVFRUVFRkZGRkZHBwcHBwcHBwcHP/bAEMBBAUFBwcHDAcHDB0UEBQdHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHf/dAAQABf/aAAwDAQACEQMRAD8A+r8YFJipcUYrlOkixTgBTttVri5SCNmwXYKSEX7zEdAB3J6Ci5DsWMClArl7TxXp92JBGkiMg3KrgjKjqc9Bz71hat4z2WUNlZuo1O6GwLEQwjfHPznKEpkEjOfat/ZzTs0c6xFNq6ff8D0gCnAV5Lp3xIjltbK4nw3n+TGQBjJm+QMQe4kDZAONvOcnA6P/AITuwiASWJ5GjWVpzGVIURcMygElhn0zwCa2lhai1sc8cdRk7X/r+v6sdxin4ribLxlFfxjUBGbbT0fDSSKzNKGIEflBRg7ic9Tx711lhqFrqdu9zaltiSvE29SpDRnDDBGfpWTpyitUdMK8JaRZ/9D642008Vza+IJTrDac8Q8sx74yOpwASTzjGc/pXkPjXxX4ntVk0yZkjF1MWtjFgyrEhwHI46v8q56kdcDnOnQc5KN+l/kZVcVGnFytfW3zPdLy8jtoJJpSFSNSzE9AAMmvIfEviq2m06eezmIdFzk8cEsFIOe7LxjmuPl+13evTJ5klxb2dlFNcpJMxG5gqEMCcZLMWA5GCKxdS1DTdU0y7s9OgW33x2aITy2/M21RySNyuM89RXfSwcYyvK7t/Wp5OIzCcouMLJPvfW/Y6WLUtSvb+x0jT7g2y3lu5VCAIomYM8rtnP7tAQRnJzg88AclpSaf/a1lao5jiku1mjQfd8tQVQjPdx8x7cgdqxPE2oG3W+a2J8u0s4LWF8/eaZmLEH3Crn2NXdOu7KfUNPC2ywHT7W3yynlmS3R3Y/RE6eua9PktJI8V1b022/68uxvWzWju2kwKwNjMFjGeWKKJFbP03kitC8uP7Q/06OBUtrK0jR3QAfIzMkhyemBkn1rmtIn8vxPeI/pEP+BPDIP5YFU/EDhfDdjZLI0aTxx+Zg9UfeTn1+VHOK3cVZs44yaklfcvNqz6HrX2YB57aZciBc7MKE2N1/jbdggdD9K9f8J6zqdlrX2V0mnn1S4bzonJaO3VEDSMvP8AfbaCc5Ckdq8Evp7NdV0eHa0ons2uJRnkQ2+TGM9csFr2/SriO9kt9SlX7PesmySQfKAzF1ZRz/FIQfYVm6fMmmbwr+zcZJ2f9fj0P//R9hubqbUddtyt0Io9PmkVok4LRpHvdmIPQsY1xjHFeE3+t3o/tOeTGy8ugsbHJZYrf5UCk9AZDXZ3d+Y9TMVpIAJWKSk/eyh82Qfj8o+gFec30f2g2cDnKkHOPX7QhH/oBr1FQULr0X3f8Fnyk8U6nLJebfz0/JHVa0G0qLzrVhu1cW0DMpx5jIfvEf7iRn61yFjORrl3aW/Mdvqdqmf9i1hlVj/30gb8a0NZvX/sjQ5YsOtlqcdu2f7snQ/+OsKzPKn0fUNYbeoaL7fP0ycyzeVF+S/zFelo7NeR5Kurxl5jfEYtYzbaUseVunfzSegW3hijzj0AJP4UuhXSTR67qqrlre2uBGh7yMrIg/BUYUeMXhtU+0v99ftByf4YlZdw9tzIq/TNV/Dc8Vj4F1KCbi8utPub8HuFXckY+p3sfxqbfvS7t0fwJbu8aDxJqUyZ3RW1vcoo7vEqv+RBOa6TxBCt3FGpASKdg8QHAWKRRBAPb5Xl/EVx12inxZDbg5GoQeS2OxNuY8fmR+Nbd1NLc+HdNslYi6ffAT1x5GQgH080sfQiri9zGas4tPoE8Ik1OBNOxcT3FnbbFxysBdYQPx3O34165ZTm4ieK1TcIrqSQE9GEcm0fmy5z714x4d8yLU73W48pbabpMUfuXZiEyfbIP4V6x4Ds7yaygg8zbLcaYsikD5o2aR3yc8cBlI+laRsk2zGom5Rij//S67xlo1vaeKIJYSAZJpHYL6SwhM49iEH415XvU2Fpf55nhkRR/tZeQ/yr2nxpbs/i3THQgEv82e6mJtw/Hy1/Kvn+zkM1tpMDbin2+5hA7hni3qD7YJr2KL5qMZPsfHYiHJiJwW13+v8AmdCLZGgltW+YNqFpCg/2jKGz+Rb8KW+iEvjLUY2wReXtvbsCOBEkCzSY/wCBYJqTToZGujnkR6zaynPoAE/9CcVkarHdTeKdVhs2zdh98Azjm4to4w3/AAEjPtXbTfuf15nDUjep8n+hT8RXdjqY1i6uuNOtoyrMvdRIDtU/3ppAQPY56CsbRbw3UwgcZe40uWHb2yLffj/vpaveLrK30PwqdChfzI4pYoS3/PaZAHdsem5lQemDWL4ZO3xRYwt2tp93p/qiv+NE1aormlOzou3n+RYvrpovFlvcMf8AUTO4H+ys0Z/kK7G6jt9Jtr+SaQNNpDTTcdCblOcD/fT9a4zxHbjzb6+BwWa2tofo2yWU/wDfOB+NXrxI9W8Q6lpTOFS9nZJGJ4EcUu5mPoF2OT7fWrh7rZlUipKLZ10UsVv4Bu4EXE17aQSvnqQZEiQfjy30Ir2DwLNFaaldRTHHkab5oz2U/Ko/ICvLb3Zf2upXdrHttpY7BIRjouUZR/3ygz711GkySy6xf2oGXns7OzAHX97IQR/3yprepC8HHucVGdqin2Z//9P1bxhasPEGn3ZBKhoyMf8AA4z+W8V4FrVp9m069MWEnsJ4Zto677fDAj/rpAefdTX1h4s0x7vS1vLcYltmzn0VuCfwOG/CvmDUANd1OdCvkvqUMts4X+C4tGBjb8nx9M16mXz58Ml20Plc0punjG++v+ZNZBftdxcA5VVeYe5ja3lU/wDkOqVxbNa+Km15myt1aoAT/CIQyyn8fLUD/frqNJ06OZmQAqrWJfB7ErsIP+e1QahpqlrS1jXPzzB3PQxrKD5Y/wBp3Ix9Ca9GltqeTVeraOLEU9xDDNejzJLW0mmyRx55iLs2Omd5JFed6Y0s15BLBlZZvMts+5Yqf5mvdtQt4HjvIICEWC28t3HQvKdoA+g3H8a4Twha2qSPf3EYMdle3L/8CEmxR+JbP4U56ySKpStBuxn6sq6tEEh58m7DjA6rJMYl/wDHFWrGgxC4HivX51BM0NzbW4Puju5/LH51uWlnDZSJDEAwku0j5/u25aQ/yWq/h+2lk0u00pR893Z3U7+u64YIn5KP1rdJcyZg5PlaOsuF+yeGvsoAEi2MDkf9NZcRx/lt4+tdH4QKTeMZ5I+ViugpPtawnP8A4/L+lc5LJHNPvPMT3WVz0MVioVc+xkAIroPAq/YY5L6VSZXMr/jNKT1+iCtMR7sJPyM8FFTqwj5/gtf0P//Z\\\",\\\"name\\\":\\\"Шнур с силик. наконечником лазурный 80 см\\\",\\\"price_per_unit\\\":23,\\\"delivery_price\\\":0,\\\"sell_price\\\":48.42,\\\"assembly_speed\\\":20,\\\"unit\\\":\\\"шт\\\",\\\"allocated_qty\\\":100,\\\"qty_per_pendant\\\":1,\\\"length_cm\\\":0}],\\\"carabiners\\\":[{\\\"source\\\":\\\"warehouse\\\",\\\"warehouse_item_id\\\":null,\\\"warehouse_sku\\\":\\\"\\\",\\\"photo_thumbnail\\\":\\\"\\\",\\\"name\\\":\\\"\\\",\\\"price_per_unit\\\":0,\\\"delivery_price\\\":0,\\\"sell_price\\\":0,\\\"assembly_speed\\\":0,\\\"unit\\\":\\\"шт\\\",\\\"allocated_qty\\\":0,\\\"qty_per_pendant\\\":1,\\\"length_cm\\\":0}],\\\"cord\\\":{\\\"source\\\":\\\"warehouse\\\",\\\"warehouse_item_id\\\":1771942065478,\\\"warehouse_sku\\\":\\\"SLS-800-SLD-NN\\\",\\\"photo_thumbnail\\\":\\\"\\\",\\\"name\\\":\\\"Шнур с силик. наконечником салатовый 80 см\\\",\\\"price_per_unit\\\":23,\\\"delivery_price\\\":0,\\\"sell_price\\\":100,\\\"assembly_speed\\\":20,\\\"unit\\\":\\\"шт\\\",\\\"allocated_qty\\\":200,\\\"qty_per_pendant\\\":1,\\\"length_cm\\\":0},\\\"cord_length_cm\\\":0,\\\"carabiner\\\":{\\\"source\\\":\\\"warehouse\\\",\\\"warehouse_item_id\\\":null,\\\"warehouse_sku\\\":\\\"\\\",\\\"photo_thumbnail\\\":\\\"\\\",\\\"name\\\":\\\"\\\",\\\"price_per_unit\\\":0,\\\"delivery_price\\\":0,\\\"sell_price\\\":0,\\\"assembly_speed\\\":0,\\\"unit\\\":\\\"шт\\\",\\\"allocated_qty\\\":0,\\\"qty_per_pendant\\\":1,\\\"length_cm\\\":0},\\\"packaging\\\":null,\\\"element_price_per_unit\\\":83.4,\\\"sell_price_override\\\":null,\\\"result\\\":{\\\"costPerUnit\\\":538.4,\\\"sellPerUnit\\\":1082.54,\\\"totalCost\\\":293428,\\\"totalRevenue\\\":589984.3,\\\"assemblyHours\\\":29.98,\\\"packagingHours\\\":0,\\\"margin\\\":{\\\"earned\\\":408.82,\\\"percent\\\":37.77}},\\\"_elemSellTotal\\\":960,\\\"_totalSellPerUnit\\\":1082.54,\\\"item_number\\\":400,\\\"product_name\\\":\\\"Подвес \\\\\\\"КЕШШШ❤️\\\\\\\"\\\",\\\"cost_total\\\":538.4,\\\"sell_price_item\\\":1082.54}\",\"created_at\":\"2026-03-30T17:58:47.495+00:00\",\"updated_at\":\"2026-03-30T17:58:47.495+00:00\"}",
+      "created_at": "2026-03-30T17:58:47.495+00:00",
+      "updated_at": "2026-03-31T11:52:01.233+00:00"
+    }
+  ],
+  "factuals": [
+    {
+      "id": 1774287716051,
+      "order_id": 1773393048055,
+      "factual_data": {
+        "id": 1774287726400,
+        "order_id": 1773393048055,
+        "fact_other": 52620,
+        "fact_total": 394406.81,
+        "updated_at": "2026-03-23T17:42:06.400Z",
+        "updated_by": "Полина",
+        "fact_plastic": 4512.6,
+        "fact_revenue": 0,
+        "_hours_source": "timetrack",
+        "_source_hints": {
+          "fact_plastic": "план",
+          "fact_hardware_total": "склад",
+          "fact_packaging_total": "склад"
+        },
+        "_auto_fintablo": {
+          "fact_other": true
+        },
+        "fact_hours_trim": 1,
+        "fact_salary_trim": 583.33,
+        "_manual_overrides": {
+          "fact_revenue": true
+        },
+        "_auto_stage_salary": {
+          "trim": 583.33,
+          "casting": 19750,
+          "assembly": 20291.67,
+          "packaging": 0
+        },
+        "fact_hardware_total": 0,
+        "fact_hours_assembly": 36.5,
+        "fact_hours_packaging": 0,
+        "fact_packaging_total": 0,
+        "fact_salary_assembly": 20291.67,
+        "fact_hours_production": 39.5,
+        "fact_salary_packaging": 0,
+        "_legacy_stage_estimate": false,
+        "fact_salary_production": 19750,
+        "fact_indirect_production": 296649.21
+      },
+      "created_at": "2026-03-23T17:41:56.051+00:00",
+      "updated_at": "2026-03-23T17:42:06.4+00:00"
+    }
+  ]
+}

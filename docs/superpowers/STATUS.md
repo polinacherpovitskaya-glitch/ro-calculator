@@ -1,11 +1,11 @@
 # Migration status
 
-Last update: 2026-05-19T16:29:09-03:00
+Last update: 2026-05-19T16:31:18-03:00
 Current block: 7
-Current task within block: Task 1 — golden-master fixtures for calculator
+Current task within block: Task 2 — calc source study and engine layout README
 Branch: block-7-calculator
-Last commit: `db87d1f` Block 6: Bugs and attachments (#44)
-Tests: Block 6 was squash-merged to `main`, GitHub Actions staging deploy passed, live `/api/health` returned `db.ok=true`, staging Playwright `bugs.spec.ts` passed 1/1, and a final staging refresh/compare passed with current Supabase counts including `warehouse_reservations 563/563`, `bug_reports 10/10`, and `bug_attachments 8/8`. Local API test attempts still depend on a running local Postgres; VPS temporary containers remain the reliable verification path.
+Last commit: `6a3cf0c` Start Block 7 calculator migration
+Tests: Block 7 Task 1 fixture export ran locally against Supabase using the existing read key and produced 24 real-order JSON fixtures under `ops/api/test/fixtures/orders/`. Fixture coverage: 3 factual orders, 7 pendant orders, 22 mold orders, 24 hardware orders, 1 NFC order, and 13 complex orders. No active calculator orders matching the plan's "simple without molds/hardware" bucket were found in the current Supabase data.
 
 ## What was just done
 
@@ -39,6 +39,9 @@ Tests: Block 6 was squash-merged to `main`, GitHub Actions staging deploy passed
   - `orders` has 250 rows and stores calculator snapshots in `calculator_data`.
   - `order_items` has 927 rows and stores per-item calculation snapshots in `item_data`.
   - `order_factuals` has 3 rows with factual calculation snapshots.
+- Added `ops/scripts/fixtures-order-ids.txt` with 24 selected real order IDs.
+- Added `ops/scripts/export-golden-fixtures.mjs` to export orders, items, factuals, expected totals, and coverage summary into calculator golden-master JSON fixtures.
+- Ran the fixture export successfully; `ops/api/test/fixtures/orders/` now contains 24 JSON files.
 - Block 1 PR #36 was merged to `main`; GitHub Actions deploy to staging passed.
 - Block 2 PR #37 was merged to `main`; GitHub Actions deploy run `26111396624` passed.
 - Created `block-3-warehouse` from fresh `main`.
