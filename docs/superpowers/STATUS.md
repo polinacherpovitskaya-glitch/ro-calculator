@@ -1,14 +1,54 @@
 # Migration status
 
-Last update: 2026-05-19T16:59:45-03:00
+Last update: 2026-05-19T17:14:35-03:00
 Current block: 8
-Current task within block: starting Block 8 plan review
-Branch: main
-Last commit: `230ceaf` Block 7: Calculator engine (#45)
-Tests: Block 7 PR #45 was squash-merged to `main`; GitHub Actions main deploy run `26121716549` passed. Post-deploy staging health returned `db.ok=true`, and authenticated `POST /api/calc/preview` returned the expected live calculation response.
+Current task within block: Block 8 implementation drafted; next is staging refresh/smoke and PR
+Branch: block-8-production
+Last commit: `d45592f` Record Block 7 merge and deploy (local branch includes this status carry-over; `main` was not pushed directly)
+Tests: `ops/api npm run typecheck` passed; `ops/api npm run test:calc` passed 77/77; `ops/web npm run build` passed; full Postgres-backed API suite passed 111/111 on a temporary VPS Postgres container with migrations 001-007.
 
 ## What was just done
 
+- Created Block 8 working branch `block-8-production` from local `main` after Block 7 merge/deploy status was recorded. This preserves the status update without pushing `main` directly.
+- Added migration `ops/db/migrations/007_production.sql`:
+  - `product_templates`
+  - `production_calendar_days`
+  - `production_plan_entries`
+  - `indirect_costs`
+- Used `BIGINT` for `production_plan_entries.operator_id` to match migrated `employees.id`, and added explicit `position` for persisted reorder.
+- Added authenticated/idempotent APIs:
+  - `/api/templates`
+  - `/api/production/calendar`
+  - `/api/production/plan`
+  - `/api/production/plan/reorder`
+  - `/api/indirect-costs`
+- Added Block 8 API tests:
+  - `ops/api/test/templates.test.js`
+  - `ops/api/test/production.test.js`
+  - `ops/api/test/indirect.test.js`
+- Added `ops/api/src/calc/indirect.ts` with `getIndirectAllocation()` from real indirect costs and production calendar hours.
+- Wired `/api/calc/preview` to optionally return `indirect_allocation` when an indirect period is supplied, without changing saved legacy snapshot totals.
+- Added refresh/compare support:
+  - `ops/scripts/refresh/06-production.mjs`
+  - `ops/scripts/refresh-staging-snapshot.mjs` now runs `06-production`
+  - `ops/scripts/compare-datasets.mjs` includes Block 8 counts
+- Refresh script handles both plan names and observed legacy keys:
+  - `productionCalendar`
+  - `production_plan_state_json`
+  - `indirectCosts`
+  - `indirect_costs_json`
+- Added Vue API wrappers and screens:
+  - `/templates`
+  - `/production/calendar`
+  - `/production/plan`
+  - `/indirect-costs`
+- Updated home navigation and `ops/README.md` for Block 8.
+- Verified:
+  - `cd ops/api && npm run typecheck`: passed
+  - `cd ops/api && npm run test:calc`: passed 77/77; golden masters still pass
+  - `cd ops/web && npm run build`: passed
+  - `node --check` for new/changed refresh scripts: passed
+  - Full API suite on VPS temporary Postgres with migrations 001-007: passed 111/111
 - Block 7 PR #45 was squash-merged to `main` as `230ceaf`.
 - GitHub Actions main deploy run `26121716549` passed.
 - Verified live staging after Block 7 deploy:

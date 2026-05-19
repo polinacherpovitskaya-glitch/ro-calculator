@@ -12,6 +12,9 @@ import colorsRoute from './routes/colors.js';
 import marketplacesRoute from './routes/marketplaces.js';
 import bugsRoute from './routes/bugs.js';
 import calcRoute from './routes/calc.js';
+import templatesRoute from './routes/templates.js';
+import productionRoute from './routes/production.js';
+import indirectRoute from './routes/indirect.js';
 
 export function createServer() {
   const app = express();
@@ -30,5 +33,8 @@ export function createServer() {
   app.use('/api/marketplaces', marketplacesRoute);
   app.use('/api/bugs', bugsRoute);
   app.use('/api/calc', calcRoute);
+  app.use('/api/templates', templatesRoute);
+  app.use('/api/production', productionRoute);
+  app.use('/api/indirect-costs', indirectRoute);
   return app;
 }
