@@ -1,11 +1,11 @@
 # Migration status
 
-Last update: 2026-05-19T16:02:16-03:00
+Last update: 2026-05-19T16:03:15-03:00
 Current block: 6
-Current task within block: Task 2 S3 helper
+Current task within block: Task 3 Bugs API TDD
 Branch: block-6-bugs
 Last commit: main `11bb4a1` includes Block 5 + smoke follow-up
-Tests: Block 6 migrations 001-006 verified on clean temp Postgres; app_meta.version=`006-bugs`; `bug_reports` and `bug_attachments` exist.
+Tests: Block 6 migrations 001-006 verified on clean temp Postgres; app_meta.version=`006-bugs`; `bug_reports` and `bug_attachments` exist. Local API test attempt failed because local Postgres `127.0.0.1:5433` is not running; use temp VPS Postgres for real suite.
 
 ## What was just done
 
@@ -311,11 +311,17 @@ Tests: Block 6 migrations 001-006 verified on clean temp Postgres; app_meta.vers
   - `bug_attachments`
 - Used `BIGINT` for `bug_reports.assignee_id` because `employees.id` is `BIGINT` since Block 2.
 - Verified migrations 001-006 on a clean temporary Postgres container on the VPS; `app_meta.version` is `006-bugs`, and both bug tables exist.
+- Added S3 helper `ops/api/src/s3.js` with lazy Selectel S3 client, upload/delete/presigned GET helpers, and `S3_NOT_CONFIGURED` errors when env vars are missing.
+- Added API dependencies:
+  - `@aws-sdk/client-s3`
+  - `@aws-sdk/s3-request-presigner`
+  - `multer`
+- Local `cd ops/api && npm test` was attempted but failed because local Postgres on `127.0.0.1:5433` is not running. This is not a code regression; previous block verification uses temp VPS Postgres.
 
 ## Next steps for Codex
 
-1. Add S3 client helper for Selectel Object Storage.
-2. Add Bugs API tests first, then routes.
+1. Add Bugs API tests first.
+2. Implement `ops/api/src/routes/bugs.js`.
 3. Verify full API suite in a temporary VPS Postgres container.
 
 ## Quality gates status (Block 2)
@@ -373,7 +379,7 @@ Tests: Block 6 migrations 001-006 verified on clean temp Postgres; app_meta.vers
 ## Quality gates status (Block 6)
 
 - [x] `006_bug_reports.sql` added
-- [ ] S3 helper added
+- [x] S3 helper added
 - [ ] Bugs API tests passing
 - [ ] Refresh/compare updated for Block 6 tables
 - [ ] Marketplaces API tests passing
