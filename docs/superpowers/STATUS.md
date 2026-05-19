@@ -1,11 +1,11 @@
 # Migration status
 
-Last update: 2026-05-19T16:39:32-03:00
+Last update: 2026-05-19T16:41:40-03:00
 Current block: 7
-Current task within block: Task 5/6 — implement product/hardware/packaging live calc formulas
+Current task within block: Task 8/9 — implement molds/pendants live calc support
 Branch: block-7-calculator
-Last commit: `425ae80` calc: preserve saved order snapshots
-Tests: Block 7 Task 1 fixture export ran locally against Supabase using the existing read key and produced 24 real-order JSON fixtures under `ops/api/test/fixtures/orders/`. Fixture coverage: 3 factual orders, 7 pendant orders, 22 mold orders, 24 hardware orders, 1 NFC order, and 13 complex orders. `cd ops/api && npm run typecheck` passes. `cd ops/api && npm run test:calc` passes 63/63: 25 golden-master tests and 38 pricing unit tests.
+Last commit: `5b1e731` calc: add unified pricing module
+Tests: Block 7 Task 1 fixture export ran locally against Supabase using the existing read key and produced 24 real-order JSON fixtures under `ops/api/test/fixtures/orders/`. Fixture coverage: 3 factual orders, 7 pendant orders, 22 mold orders, 24 hardware orders, 1 NFC order, and 13 complex orders. `cd ops/api && npm run typecheck` passes. `cd ops/api && npm run test:calc` passes 68/68: 25 golden-master tests, 38 pricing unit tests, and 5 live product/hardware/packaging tests.
 
 ## What was just done
 
@@ -59,6 +59,11 @@ Tests: Block 7 Task 1 fixture export ran locally against Supabase using the exis
 - Added `ops/api/test/calc/pricing.test.ts` with 38 unit tests covering pricing edge cases.
 - Re-ran `npm run typecheck`: passed.
 - Re-ran `npm run test:calc`: passed 63/63.
+- Added `number.ts`, `params.ts`, `product.ts`, `hardware.ts`, and `packaging.ts`.
+- Implemented live `calcOrder()` support for orders without saved snapshot when they contain products, hardware, packaging, extra costs, and no pendants yet.
+- Added `ops/api/test/calc/live-calc.test.ts` covering production params, product cost, hardware cost, packaging cost, and live order totals/hours.
+- Re-ran `npm run typecheck`: passed.
+- Re-ran `npm run test:calc`: passed 68/68.
 - Block 1 PR #36 was merged to `main`; GitHub Actions deploy to staging passed.
 - Block 2 PR #37 was merged to `main`; GitHub Actions deploy run `26111396624` passed.
 - Created `block-3-warehouse` from fresh `main`.
