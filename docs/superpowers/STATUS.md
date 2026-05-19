@@ -1,8 +1,8 @@
 # Migration status
 
-Last update: 2026-05-19T14:30:00-03:00
+Last update: 2026-05-19T15:25:00-03:00
 Current block: 4
-Current task within block: Task 3 China API TDD
+Current task within block: Task 4 refresh + compare
 Branch: block-4-shipments-china
 Last commit: main `e951fd0` includes Block 3 + Playwright smoke follow-up
 Tests: Block 3 PR checks passed; main deploy passed; live staging health `db.ok=true`; warehouse API/UI smoke passed; Playwright warehouse smoke 1/1 passed.
@@ -91,12 +91,22 @@ Tests: Block 3 PR checks passed; main deploy passed; live staging health `db.ok=
 - Added shipments API with CRUD and idempotent `POST /api/shipments/:id/receive`.
 - Added shipment receive tests for idempotency, empty shipment, warehouse link validation, create_new validation, receipt history, and ALREADY_RECEIVED.
 - Verified API suite in temporary VPS containers: 37/37 passing.
+- Added China API TDD coverage for purchases, catalog, receive validation, receive idempotency, and status transitions.
+- Extracted the shipment receive operation into `ops/api/src/shipments/receive.js` so direct shipments and China purchase receive use the same transaction/lock/history path.
+- Added `/api/china` routes:
+  - `GET/POST /purchases`
+  - `GET/PATCH/DELETE /purchases/:id`
+  - `POST /purchases/:id/receive`
+  - `GET/POST /catalog`
+  - `PATCH /catalog/:id`
+- Hardened `withIdempotency()` so successful mutation responses are persisted before the JSON response is sent. This closes a same-key immediate retry race where the second request could arrive before the first response was cached.
+- Verified full API suite in temporary VPS containers: 52/52 passing.
 
 ## Next steps for Codex
 
-1. Add China API tests first.
-2. Implement China purchases/catalog CRUD and receive integration.
-3. Verify API tests in temporary VPS containers.
+1. Add `ops/scripts/refresh/03-shipments-china.mjs`.
+2. Wire Block 4 tables into `refresh-staging-snapshot.mjs` and `compare-datasets.mjs`.
+3. Run staging refresh/compare from Supabase and document row counts.
 
 ## Quality gates status (Block 2)
 
@@ -126,7 +136,7 @@ Tests: Block 3 PR checks passed; main deploy passed; live staging health `db.ok=
 
 - [x] `004_shipments_china.sql` added
 - [x] Shipments API tests passing
-- [ ] China API tests passing
+- [x] China API tests passing
 - [ ] refresh/compare scripts updated
 - [ ] staging shipments/china data refreshed from Supabase
 - [ ] Vue shipments/china screens built
