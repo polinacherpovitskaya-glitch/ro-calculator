@@ -1,8 +1,8 @@
 # Migration status
 
-Last update: 2026-05-19T14:23:00-03:00
+Last update: 2026-05-19T14:30:00-03:00
 Current block: 4
-Current task within block: Task 2 Shipments API TDD
+Current task within block: Task 3 China API TDD
 Branch: block-4-shipments-china
 Last commit: main `e951fd0` includes Block 3 + Playwright smoke follow-up
 Tests: Block 3 PR checks passed; main deploy passed; live staging health `db.ok=true`; warehouse API/UI smoke passed; Playwright warehouse smoke 1/1 passed.
@@ -88,11 +88,14 @@ Tests: Block 3 PR checks passed; main deploy passed; live staging health `db.ok=
 - Read `docs/superpowers/plans/2026-05-15-block-4-shipments-china.md`.
 - Added `ops/db/migrations/004_shipments_china.sql` for `shipments`, `shipment_items`, `china_purchases`, `china_purchase_items`, and `china_catalog`.
 - Verified migrations 001-004 on a clean temporary Postgres container on the VPS.
+- Added shipments API with CRUD and idempotent `POST /api/shipments/:id/receive`.
+- Added shipment receive tests for idempotency, empty shipment, warehouse link validation, create_new validation, receipt history, and ALREADY_RECEIVED.
+- Verified API suite in temporary VPS containers: 37/37 passing.
 
 ## Next steps for Codex
 
-1. Add shipments API tests first.
-2. Implement shipments CRUD and idempotent receive operation.
+1. Add China API tests first.
+2. Implement China purchases/catalog CRUD and receive integration.
 3. Verify API tests in temporary VPS containers.
 
 ## Quality gates status (Block 2)
@@ -122,7 +125,7 @@ Tests: Block 3 PR checks passed; main deploy passed; live staging health `db.ok=
 ## Quality gates status (Block 4)
 
 - [x] `004_shipments_china.sql` added
-- [ ] Shipments API tests passing
+- [x] Shipments API tests passing
 - [ ] China API tests passing
 - [ ] refresh/compare scripts updated
 - [ ] staging shipments/china data refreshed from Supabase
