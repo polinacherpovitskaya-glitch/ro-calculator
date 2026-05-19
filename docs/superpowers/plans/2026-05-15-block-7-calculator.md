@@ -1,15 +1,35 @@
 # Block 7 — ⭐ Калькулятор (golden-master + порт) Implementation Plan
 
-> **REQUIRED:** мастер-плейбук + Blocks 1-6.
+> **REQUIRED:** мастер-плейбук + **[BUG-INVENTORY.md](2026-05-15-BUG-INVENTORY.md)** (классы L, M, N, O, U) + **[STABILITY-PROGRAM.md](2026-05-15-STABILITY-PROGRAM.md)**.
 >
-> **САМЫЙ КРИТИЧНЫЙ БЛОК.** Пользователь явно сказал:
+> **САМЫЙ КРИТИЧНЫЙ БЛОК.** Пользователь сказал:
 > *"Калькулятор самый важный и дотошный: это просто должно быть перетянуто, чтобы не потерялось вообще ничего."*
 >
-> Любая регрессия в расчётах = катастрофа для бизнеса. Подход: **golden-master snapshots из реальных заказов** + автоматическая сверка байт-в-байт + ручная верификация.
+> И позже: *"калькулятор тоже постоянно лажает... чтобы летало и никогда не падало"*. Это значит мы **И** переносим 1:1 формулы (через golden-master) **И** фиксим архитектурные баги (numeric coercion, pricing inconsistency, duplicate saves).
+>
+> **Двойная стратегия:**
+> 1. **Формулы** — переносим 1:1. Golden-master гарантирует это.
+> 2. **Архитектура** — редизайним. TypeScript типы вместо `parseFloat(event.target.value)`, единый `pricing.ts` вместо 5 разрозненных мест, snapshot semantics для `calculator_data`, явная кнопка «Пересчитать» вместо невидимого auto-recalc.
 
-**Goal:** Перенести всю расчётную логику из `js/calculator.js`, `js/pendant.js`, `js/factual.js`, `js/colors.js`, нужная часть `js/tpa.js` (только живой калькулятор) в чистый TypeScript-модуль, изолированный от UI. Полный набор тестов на основе ≥20 реальных заказов.
+**Goal:** Перенести всю расчётную логику из `js/calculator.js`, `js/pendant.js`, `js/factual.js`, `js/colors.js`, нужная часть `js/tpa.js` в чистый TypeScript-модуль, изолированный от UI. Полный набор golden-master тестов на основе ≥20 реальных заказов. Архитектурные защиты против классов багов L-N-O-U.
 
-**Stratagem:** перенести **БЕЗ изменения логики**. Все формулы, все edge-cases, все странности — копируем 1:1. Любая «улучшение» = риск регрессии. Багфиксы — после Stage D.
+**Класс багов, которые фиксятся:**
+- **L. Calc draft duplicate saves** → Idempotency + явная кнопка save (no auto-save)
+- **M. Numeric coercion** → TypeScript типы + runtime валидация на API границе
+- **N. Pricing inconsistency** (blank/pendant/B2B) → единый `pricing.ts`, переиспользуется всеми surfaces
+- **O. Slow startup, stale assets** → Vite hash-based bundling, один JS-бандл
+- **U. Margin drift on save** → no auto-recalc, явная кнопка «Пересчитать»
+
+**Что переносим 1:1 (без изменений):**
+- Все формулы расчёта (это блокировка golden-master'ом)
+- Все edge case'ы и «странности»
+- Все коэффициенты
+
+**Что меняем архитектурно:**
+- Структуру: разрозненная логика в `js/calculator.js` → модули в `ops/api/src/calc/`
+- Типы: динамическая JS → TypeScript strict
+- Pricing: 5 мест → 1 модуль `pricing.ts`
+- Recalc: implicit/auto → explicit user action
 
 **Source files to study (read first):**
 - `js/calculator.js` — главный движок (~5000 строк)
@@ -30,18 +50,26 @@
 ```
 ops/api/src/calc/
 ├── index.ts             публичный API: calcOrder(input) → output
-├── pendant.ts           логика подвесов
-├── packaging.ts         логика упаковки
-├── hardware.ts          логика фурнитуры
+├── pricing.ts           ⭐ ЕДИНЫЙ модуль расчёта цены (фикс класса N)
+│                        retailPrice, b2bPrice, costPrice — три ф-ции
+│                        Все остальные модули дёргают ОТСЮДА.
+├── pendant.ts           логика подвесов (использует pricing.ts)
+├── packaging.ts         логика упаковки (использует pricing.ts)
+├── hardware.ts          логика фурнитуры (использует pricing.ts)
 ├── colors.ts            справочник цветов и расход
 ├── factual.ts           фактические показатели + сравнение план/факт
 ├── indirect.ts          косвенные расходы
 ├── tpa.ts               ТПА живой калькулятор
-├── types.ts             все TypeScript интерфейсы (Order, Item, Pendant, ...)
+├── types.ts             все TypeScript интерфейсы (strict mode)
+├── validate.ts          runtime валидация входов (zod схемы)
 └── README.md            документация: что куда подключается, как работают формулы
 ```
 
-**Принцип:** каждый файл — чистые функции, без `window`, без `document`, без сетевых вызовов. Все данные передаются параметрами. Тесты могут вызывать функции напрямую без поднятия Express.
+**Принципы:**
+- Каждый файл — чистые функции, без `window`, без `document`, без сетевых вызовов. Все данные передаются параметрами. Тесты могут вызывать функции напрямую без поднятия Express.
+- **TypeScript strict mode**, никаких `any`, все числовые поля типа `number` (не `number | string`).
+- На границе API (`POST /api/calc/preview`) — runtime валидация через zod схему. Если клиент шлёт `"1.5"` строкой — преобразуется в число или 400 если не парсится. **Фикс класса M.**
+- **ЕДИНЫЙ pricing.ts.** Все surface (calculator screen, КП, factual recalc, b2b price suggestion) дёргают одни и те же функции. **Фикс класса N.** Никакого «retail price считается тут, B2B price там, blank price вообще третьим способом».
 
 ---
 
@@ -375,11 +403,18 @@ export default router;
 ## Acceptance Criteria
 
 - [ ] `ops/api/test/fixtures/orders/` содержит ≥20 JSON-снапшотов реальных заказов
+  - Минимум 3-5 B2B-заказа в выборке (чтобы покрыть pricing.ts:b2bPrice)
+  - Минимум 5 с подвесами (pendant.ts)
+  - Минимум 5 с молдами (mold cost + indirect)
 - [ ] `npm test` запускает все golden master тесты, **20/20 проходят**
 - [ ] Расхождение по любому полю **< 0.005 (полкопейки)**
 - [ ] `/api/calc/preview` живой на staging, возвращает корректные ответы
 - [ ] Ручная сверка с 5 реальными заказами — копейка в копейку
 - [ ] `ops/api/src/calc/README.md` документирует все формулы и зависимости
+- [ ] **TypeScript strict mode** включён без single `any` или `@ts-ignore`
+- [ ] **pricing.ts** имеет ≥30 unit-тестов (отдельно от golden-master): edge cases (zero base, negative margin, missing currency, etc.)
+- [ ] **Все retail/B2B/cost функции вызываются ТОЛЬКО из pricing.ts** — grep на остальные `.ts` файлы должен показать что нет дублирования pricing формул
+- [ ] **No auto-recalc:** в UI кнопка «Пересчитать» нажимается явно. PATCH /orders/:id НЕ вызывает calcOrder.
 - [ ] PR смержен в main
 
 ## Что делать если golden master ВНЕЗАПНО ломается

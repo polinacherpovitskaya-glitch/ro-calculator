@@ -119,20 +119,89 @@ ON CONFLICT (id) DO UPDATE SET version = EXCLUDED.version, applied_at = NOW();
 GET    /api/orders[?status=&from=&to=&search=&manager_id=]
 POST   /api/orders                              создать (draft)
 GET    /api/orders/:id                          с items + factual
-PATCH  /api/orders/:id                          обновить любые поля
-DELETE /api/orders/:id                          (только admin, и только draft/cancelled)
+                                                Response Header: ETag: <updated_at-iso>
+PATCH  /api/orders/:id                          partial update (только переданные поля)
+                                                Request Header: If-Match: <ETag> — optimistic locking
+                                                412 если кто-то обновил параллельно
+DELETE /api/orders/:id                          (только admin)
+                                                Физическое DELETE + CASCADE FK
+                                                НЕ может быть "resurrected" из кэша
 
-POST   /api/orders/:id/items                    добавить позицию
-PATCH  /api/orders/:id/items/:itemId            обновить
+POST   /api/orders/:id/items                    добавить позицию (Idempotency-Key)
+PATCH  /api/orders/:id/items/:itemId            обновить (Idempotency-Key + If-Match)
 DELETE /api/orders/:id/items/:itemId
 
-POST   /api/orders/:id/recalc                   пересчитать через calc engine, обновить calculator_data, total_*
-POST   /api/orders/:id/status                   { new_status }: проверить переход допустим
+POST   /api/orders/:id/clone                    ⭐ создаёт новый draft заказ
+                                                Копирует order_items с новыми ID
+                                                НЕ копирует reservations (фикс класса T)
+                                                НЕ копирует factual
 
-POST   /api/orders/:id/consume-hardware         { items: [{warehouse_item_id, qty}], note }:
-                                                списать фурнитуру со склада + history записи
-                                                ИДЕМПОТЕНТНО (через Idempotency-Key)
+POST   /api/orders/:id/recalc                   пересчитать через calc engine, обновить calculator_data, total_*
+                                                ЯВНАЯ операция (фикс класса U — no auto-recalc)
+POST   /api/orders/:id/status                   { new_status }
+                                                Проверка transition (state machine)
+                                                FOR UPDATE на row
+                                                Запись в order_status_history (audit trail)
+
+POST   /api/orders/:id/consume-hardware         { items: [{warehouse_item_id, qty}], note }
+                                                Транзакция с FOR UPDATE
+                                                Idempotency-Key обязателен
 ```
+
+**Дополнительная таблица для audit:**
+
+```sql
+CREATE TABLE IF NOT EXISTS order_status_history (
+    id              BIGSERIAL PRIMARY KEY,
+    order_id        BIGINT NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+    from_status     TEXT,
+    to_status       TEXT NOT NULL,
+    actor_user_id   INTEGER REFERENCES auth_users(id) ON DELETE SET NULL,
+    actor_name      TEXT,
+    note            TEXT,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_order_status_history_order ON order_status_history(order_id, created_at DESC);
+```
+
+**State machine для status (валидные transitions):**
+
+```
+                  draft
+                /   |   \
+               /    |    \
+           quoted  in_production  cancelled
+              |    /  |             |
+              |   /   |             |
+           approved   |             |
+              |       |             |
+              ▼       ▼             ▼
+         in_production              (final)
+              |
+              ▼
+            ready
+              |
+              ▼
+           shipped
+              |
+              ▼
+            closed
+              |
+              ▼
+          (final)
+
+Valid transitions:
+  draft → quoted, in_production, cancelled
+  quoted → approved, draft, cancelled
+  approved → in_production, draft, cancelled
+  in_production → ready, cancelled
+  ready → shipped, in_production
+  shipped → closed
+  closed → (none — final)
+  cancelled → (none — final)
+```
+
+Если запрошен невалидный transition → 400 INVALID_TRANSITION с детализацией.
 
 **Бизнес-правила (главная часть редизайна, см. WAREHOUSE-INTERACTION-MAP и BUG-INVENTORY):**
 

@@ -106,6 +106,7 @@ ON CONFLICT (id) DO UPDATE SET version = EXCLUDED.version, applied_at = NOW();
 **production.js:**
 - GET/PUT `/api/production/calendar?year=YYYY` (PUT принимает массив дней — bulk update)
 - GET/POST/PATCH/DELETE `/api/production/plan` (фильтры по date, order_id)
+- `POST /api/production/plan/reorder { entry_id, new_position }` — **атомарный reorder** (фикс класса X). Использует position типа INTEGER шагом 100 (изначально 100, 200, 300...). При вставке между 200 и 300 — получает 250. Если позиции забиваются — periodic renumber background job.
 
 **indirect.js:**
 - GET `/api/indirect-costs?year=&month=`

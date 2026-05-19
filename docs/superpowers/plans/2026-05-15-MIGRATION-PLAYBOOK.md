@@ -62,8 +62,9 @@
 
 ## Дополнительные документы (читать перед стартом)
 
-- **[WAREHOUSE-INTERACTION-MAP.md](2026-05-15-WAREHOUSE-INTERACTION-MAP.md)** — карта взаимодействия склада со всей системой. Инварианты I1-I7, канонический справочник типов и источников. Обязательно к чтению перед Block 3, 4, 5, 9.
-- **[BUG-INVENTORY.md](2026-05-15-BUG-INVENTORY.md)** — перечень известных багов с ссылками на старые commit-попытки починки. Объясняет как каждый класс багов устраняется архитектурно.
+- **[STABILITY-PROGRAM.md](2026-05-15-STABILITY-PROGRAM.md)** — 7 системных защит, тесты, мониторинг, метрики успеха. **Читать первым.** Объясняет философию: мы не правим баги по одному, мы строим защиту против целых классов.
+- **[BUG-INVENTORY.md](2026-05-15-BUG-INVENTORY.md)** — 25 классов багов (A-Y) из 180 дней commit history по всем модулям: склад, калькулятор, заказы, бот, factual, production. Симптом, где живёт, ссылки на commit'ы попыток чинить, и как устраняется архитектурно.
+- **[WAREHOUSE-INTERACTION-MAP.md](2026-05-15-WAREHOUSE-INTERACTION-MAP.md)** — детальная карта склада: где взаимодействует, инварианты I1-I7, канонический справочник типов/источников. Обязательно перед Block 3, 4, 5, 9.
 
 ## Карта всех блоков и фаз
 
@@ -243,29 +244,57 @@ ops/
 
 ## Что мы ИСПРАВЛЯЕМ vs что переносим 1:1
 
-> Главное правило: **миграция = шанс починить склад, всё остальное 1:1.**
+> **Правило (расширенная версия):** миграция = шанс системно починить **архитектурные** баги во всех модулях. Бизнес-формулы переносим 1:1 (защищаются golden-master). Архитектура — редизайним по списку из BUG-INVENTORY.
 
 ### Чиним по ходу (отдельный документ):
 
 - **`WAREHOUSE-INTERACTION-MAP.md`** — большая карта: где в системе склад взаимодействует с чем, инварианты I1-I7, канонический справочник типов и источников.
 - **`BUG-INVENTORY.md`** — перечень известных багов из commit history (последние 60 дней) и как каждый класс багов устраняется архитектурно.
 
-**Что чиним:**
-- Cache hell (5-уровневый fallback) — полностью устраняется новой инфрой
-- Двойное списание / приёмка — Idempotency-Key
-- Фантомные/орфанные резервы — FK CASCADE + cron
-- "Project hardware ready" — single source of truth (`reservation.status`)
-- Дубликаты позиций в orders при resave — отдельность order_items от calculator_data
-- Цены рассинхрон — snapshot semantics в calculator_data
-- Race conditions — `SELECT FOR UPDATE` + транзакции
-- Авто-создание пустых warehouse items при приёмке — валидация
+**Что архитектурно чиним по всей системе (25 классов из BUG-INVENTORY):**
 
-### НЕ трогаем (1:1):
-- Калькулятор формулы (golden-master заставляет копейка-в-копейку)
-- UI заказов, КП
-- Аналитика (известные баги — фиксим после Stage D)
-- Структура задач/проектов/ганта
-- Всё, что просто работает
+**Складская группа** (Blocks 3, 4, 5, 9):
+- A. Cache hell → single source of truth
+- B. Двойное списание → Idempotency-Key
+- C. Фантомные резервы → FK CASCADE + cron release
+- D. Project hardware ready → state machine на `reservation.status`
+- E. Дубликаты order items → отдельность от calculator_data
+- F. Цены рассинхрон → snapshot semantics
+- G. Race conditions → `SELECT FOR UPDATE`
+- I. Авто-создание пустых items → валидация в receive
+- J. Mold ↔ blank links lost → разделённость mold_hardware
+
+**Калькулятор** (Block 7):
+- L. Draft duplicate saves → idempotency + no auto-save
+- M. Numeric coercion → TypeScript + runtime валидация
+- N. Pricing inconsistency → единый `pricing.ts`
+- O. Slow startup → Vite hash-bundling
+
+**Бот** (Block 12):
+- P. Restart loses state → state в БД
+- Q. Timezone shift → явная TZ через `employees.timezone`
+- R. Telegram binding mess → отдельная таблица с UNIQUE constraint
+
+**Заказы / Factual** (Block 9):
+- S. Status not saved / resurrection → partial PATCH + DELETE CASCADE + If-Match
+- T. Clone bug → явный clone endpoint без reservations
+- U. Margin drift on save → no auto-recalc
+- V. Factual period filtering → SQL aggregation function
+- W. Factual cost drift → snapshot semantics
+
+**Production** (Block 8):
+- X. Drag reorder → atomic position API
+
+**Системно** (везде):
+- Y. Save partial → `withTransaction` обязателен
+- K. Нет мониторинга → invariant checks + UptimeRobot + cron
+
+### НЕ трогаем (переносим 1:1):
+- **Формулы калькулятора** — golden-master заставляет копейка-в-копейку
+- UI заказов, КП — визуально 1:1
+- Структура задач/проектов/ганта — как было
+- Аналитика — переносим с известными багами, фиксим после Stage D
+- Wiki, ТПА (кроме calc), Monitoring, Finance UI — **выкидываем целиком**
 
 ## FAQ для Codex
 
