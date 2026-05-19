@@ -1,11 +1,11 @@
 # Migration status
 
-Last update: 2026-05-19T15:31:12-03:00
+Last update: 2026-05-19T15:35:36-03:00
 Current block: 5
-Current task within block: Task 5 Marketplace sets API TDD
+Current task within block: Task 6 Refresh + compare
 Branch: block-5-molds-blanks
-Last commit: Add colors API
-Tests: Block 5 API suite 72/72 passing in temp VPS containers with migrations 001-005; Block 4 web build and Playwright smoke passed; staging health `db.ok=true`; latest staging refresh/compare matched.
+Last commit: Add marketplaces API
+Tests: Block 5 API suite 80/80 passing in temp VPS containers with migrations 001-005; Block 4 web build and Playwright smoke passed; staging health `db.ok=true`; latest staging refresh/compare matched.
 
 ## What was just done
 
@@ -208,12 +208,23 @@ Tests: Block 5 API suite 72/72 passing in temp VPS containers with migrations 00
   - `DELETE /api/colors/:id`
 - Colors mutations require `Idempotency-Key`; list supports `search` and `category` filters; `hex` is validated as `#RRGGBB` when present.
 - Verified full API suite in temporary VPS containers: 72/72 passing.
+- Added marketplace sets API tests first, then implemented `ops/api/src/routes/marketplaces.js`.
+- Added `/api/marketplaces` routes:
+  - `GET /api/marketplaces`
+  - `GET /api/marketplaces/:id`
+  - `POST /api/marketplaces`
+  - `PATCH /api/marketplaces/:id`
+  - `DELETE /api/marketplaces/:id`
+  - `POST /api/marketplaces/:id/sell`
+- Marketplace composition is normalized and validated against existing `warehouse_items`.
+- Marketplace `sell` uses Idempotency-Key, a transaction, `SELECT FOR UPDATE` on the set and touched warehouse items, direct `warehouse_history.type='consume'` with `marketplace_set_id`, and no reservations.
+- Verified full API suite in temporary VPS containers: 80/80 passing.
 
 ## Next steps for Codex
 
-1. Add marketplace sets API tests first.
-2. Implement `marketplace_sets` CRUD routes with composition validation.
-3. Verify API tests in a temporary VPS Postgres container.
+1. Add `ops/scripts/refresh/04-molds-blanks.mjs`.
+2. Wire Block 5 tables into `refresh-staging-snapshot.mjs` and `compare-datasets.mjs`.
+3. Verify refresh/compare against a temporary VPS Postgres database.
 
 ## Quality gates status (Block 2)
 
@@ -258,6 +269,8 @@ Tests: Block 5 API suite 72/72 passing in temp VPS containers with migrations 00
 - [x] Molds API tests passing
 - [x] Blanks API tests passing
 - [x] Colors API tests passing
+- [x] Marketplace API tests passing
+- [ ] Refresh/compare updated for Block 5 tables
 - [ ] Marketplaces API tests passing
 - [ ] refresh/compare scripts updated
 - [ ] staging molds/blanks/colors/marketplaces data refreshed from Supabase

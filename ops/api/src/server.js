@@ -9,6 +9,7 @@ import chinaRoute from './routes/china.js';
 import moldsRoute from './routes/molds.js';
 import blanksRoute from './routes/blanks.js';
 import colorsRoute from './routes/colors.js';
+import marketplacesRoute from './routes/marketplaces.js';
 
 export function createServer() {
   const app = express();
@@ -24,5 +25,6 @@ export function createServer() {
   app.use('/api/molds', moldsRoute);
   app.use('/api/blanks', blanksRoute);
   app.use('/api/colors', colorsRoute);
+  app.use('/api/marketplaces', marketplacesRoute);
   return app;
 }
