@@ -13,6 +13,7 @@
         <RouterLink to="/blanks">Бланки</RouterLink>
         <RouterLink to="/colors">Цвета</RouterLink>
         <RouterLink to="/marketplaces">Маркетплейсы</RouterLink>
+        <RouterLink to="/bugs">Баги</RouterLink>
         <button type="button" @click="handleLogout">Выйти</button>
       </nav>
     </header>

@@ -48,6 +48,8 @@ const TABLES = [
   'pkg_blanks',
   'app_colors',
   'marketplace_sets',
+  'bug_reports',
+  'bug_attachments',
 ];
 
 function parseJson(value) {
@@ -76,7 +78,21 @@ function numberOrNull(...values) {
 
 async function fetchAll(table) {
   const { data, error } = await supabase.from(table).select('*');
-  if (error) throw error;
+  if (error) {
+    const message = String(error.message || '');
+    if (message.includes(`Could not find the table 'public.${table}'`)) return [];
+    throw error;
+  }
+  return data || [];
+}
+
+async function fetchColumns(table, columns) {
+  const { data, error } = await supabase.from(table).select(columns);
+  if (error) {
+    const message = String(error.message || '');
+    if (message.includes(`Could not find the table 'public.${table}'`)) return [];
+    throw error;
+  }
   return data || [];
 }
 
@@ -158,6 +174,30 @@ async function supabaseCount(table) {
 
   if (table === 'mold_usage_log') {
     return 0;
+  }
+
+  if (table === 'bug_reports') {
+    const direct = await fetchAll('bug_reports');
+    if (direct.length) return direct.length;
+    const tasks = await fetchColumns('tasks', 'id,title');
+    return tasks.filter((task) => /^\[баг\]/i.test(String(task.title || ''))).length;
+  }
+
+  if (table === 'bug_attachments') {
+    const direct = await fetchAll('bug_reports');
+    const taskIds = new Set();
+    if (direct.length) {
+      for (const row of direct) {
+        if (row.task_id) taskIds.add(String(row.task_id));
+      }
+    } else {
+      const tasks = await fetchColumns('tasks', 'id,title');
+      for (const task of tasks) {
+        if (/^\[баг\]/i.test(String(task.title || ''))) taskIds.add(String(task.id));
+      }
+    }
+    const assets = await fetchColumns('work_assets', 'task_id,kind');
+    return assets.filter((asset) => asset.kind === 'file' && taskIds.has(String(asset.task_id || ''))).length;
   }
 
   const { count, error } = await supabase.from(table).select('*', { count: 'exact', head: true });

@@ -4,7 +4,7 @@ Operational core of `recycleobject.ru`: migration target for the old Vercel + Su
 
 ## Status
 
-- Stage A — Build, Blocks 1-4 merged; Block 5 molds + blanks + colors + marketplaces in progress
+- Stage A — Build, Blocks 1-5 merged; Block 6 bugs in progress
 - Staging domain: `https://ops-staging.recycleobject.ru`
 - Production cutover: not here; Stage C is owner-run only
 - UptimeRobot: deferred/manual follow-up, not blocking the migration blocks
@@ -54,12 +54,13 @@ cd ../web
 npm run build
 ```
 
-Warehouse and shipments/China staging smokes live in:
+Staging smokes live in:
 
 ```text
 tests/playwright/warehouse.spec.ts
 tests/playwright/shipments-china.spec.ts
 tests/playwright/molds-blanks.spec.ts
+tests/playwright/bugs.spec.ts
 ```
 
 They expect:
@@ -417,6 +418,56 @@ Staging smoke:
 tests/playwright/molds-blanks.spec.ts
 ```
 
+## Bugs Module
+
+Block 6 adds bug report tracking and bug attachment metadata.
+
+Tables:
+
+```text
+bug_reports
+bug_attachments
+```
+
+Canonical rules:
+
+- Mutating endpoints require `Idempotency-Key`.
+- Bugs API is authenticated; delete requires `admin`.
+- Attachment bytes belong in private Selectel Object Storage and are exposed through short-lived signed URLs.
+- During Stage A, legacy attachment markers may still point to Supabase/public data sources until the one-shot storage migration is run.
+- Current Supabase does not expose `bug_reports`; refresh synthesizes bug rows from legacy `[Баг]` tasks and preserves source fields in `bug_reports.extras`.
+
+Endpoints:
+
+```text
+GET    /api/bugs
+POST   /api/bugs
+GET    /api/bugs/:id
+PATCH  /api/bugs/:id
+DELETE /api/bugs/:id
+POST   /api/bugs/:id/attachments
+DELETE /api/bugs/:id/attachments/:attId
+```
+
+Screens:
+
+```text
+/bugs
+```
+
+Refresh notes:
+
+- `ops/scripts/refresh/05-bugs.mjs` imports 10 current legacy bug tasks and 8 bug file assets from `work_assets`.
+- `compare-datasets.mjs` includes `bug_reports` and `bug_attachments`.
+- `ops/scripts/migrate-storage-bug-attachments.mjs` handles `supabase://`, `data-url://work_assets/...`, direct `data:`, and legacy HTTP(S) attachment sources.
+- Do not run the real storage migration until the final bug attachment S3 bucket/env decision is confirmed.
+
+Staging smoke:
+
+```text
+tests/playwright/bugs.spec.ts
+```
+
 ## Current Infra
 
 | Parameter | Value |
@@ -432,4 +483,4 @@ tests/playwright/molds-blanks.spec.ts
 
 ## Next
 
-Finish Block 4 PR, then continue with Block 5 molds + blanks + colors + marketplaces.
+Finish Block 6 PR, then continue with Block 7 per the migration playbook.

@@ -1,11 +1,11 @@
 # Migration status
 
-Last update: 2026-05-19T16:00:04-03:00
-Current block: 5
-Current task within block: Block 5 merged; smoke follow-up PR in progress
-Branch: block-5-smoke-followup
-Last commit: main `b6fe548` includes Block 5
-Tests: Block 5 API suite 80/80 passing; main deploy run `26118538860` passed; staging health `db.ok=true`; staging refresh/compare matched all tables after post-deploy smoke; hardened Block 5 smoke passed.
+Last update: 2026-05-19T17:10:41-03:00
+Current block: 6
+Current task within block: PR opened, waiting for review
+Branch: block-6-bugs
+Last commit: `c4cbd16` Document bugs module and smoke
+Tests: Full API suite passed in a clean temporary VPS Postgres container with migrations 001-006 and `S3_MOCK_DIR`: 90/90. Full refresh/compare passed in a clean temporary VPS Postgres container, including `bug_reports 10/10` and `bug_attachments 8/8`. `cd ops/web && npm run build` passed after Bugs UI. Staging Playwright `bugs.spec.ts` passed 1/1. Final staging refresh/compare passed and `/api/health` returned `db.ok=true`. Local API test attempt failed because local Postgres `127.0.0.1:5433` is not running; VPS temp containers are the current verification path.
 
 ## What was just done
 
@@ -301,12 +301,74 @@ Tests: Block 5 API suite 80/80 passing; main deploy run `26118538860` passed; st
   - app_colors 40/40
   - marketplace_sets 43/43
   - `/api/health`: `db.ok=true`
+- PR #43 was squash-merged to `main`; main is now `11bb4a1`.
+- Created `block-6-bugs` from fresh `main`.
+- Read Block 6 required docs before editing:
+  - `docs/superpowers/plans/2026-05-15-block-6-bugs.md`
+  - `docs/superpowers/plans/2026-05-15-MIGRATION-PLAYBOOK.md`
+- Added `ops/db/migrations/006_bug_reports.sql` for:
+  - `bug_reports`
+  - `bug_attachments`
+- Used `BIGINT` for `bug_reports.assignee_id` because `employees.id` is `BIGINT` since Block 2.
+- Verified migrations 001-006 on a clean temporary Postgres container on the VPS; `app_meta.version` is `006-bugs`, and both bug tables exist.
+- Added S3 helper `ops/api/src/s3.js` with lazy Selectel S3 client, upload/delete/presigned GET helpers, and `S3_NOT_CONFIGURED` errors when env vars are missing.
+- Added API dependencies:
+  - `@aws-sdk/client-s3`
+  - `@aws-sdk/s3-request-presigner`
+  - `multer`
+- Local `cd ops/api && npm test` was attempted but failed because local Postgres on `127.0.0.1:5433` is not running. This is not a code regression; previous block verification uses temp VPS Postgres.
+- Added `S3_MOCK_DIR` support to the S3 helper so API tests can verify attachment flows without live Selectel credentials.
+- Added Bugs API tests covering auth, Idempotency-Key enforcement, create/list/detail, status update, invalid status validation, attachment upload/delete, non-admin delete rejection, and admin delete.
+- Implemented `/api/bugs` routes:
+  - `GET /api/bugs`
+  - `POST /api/bugs`
+  - `GET /api/bugs/:id`
+  - `PATCH /api/bugs/:id`
+  - `DELETE /api/bugs/:id`
+  - `POST /api/bugs/:id/attachments`
+  - `DELETE /api/bugs/:id/attachments/:attId`
+- Bug mutations require `Idempotency-Key`; delete requires `admin`; attachment reads return presigned URLs (or `mock-s3://` URLs in tests).
+- Verified full API suite in temporary VPS containers: 90/90 passing.
+- Added `ops/scripts/refresh/05-bugs.mjs`.
+  - Supabase `bug_reports` is currently missing, so refresh synthesizes 10 bug reports from legacy `[Баг]` tasks and stores original task fields in `extras`.
+  - Legacy bug attachments are stored in `work_assets`; refresh imports 8 file assets as `bug_attachments`.
+  - Supabase Storage paths are stored as `supabase://...`; data URL fallback assets are stored as lightweight `data-url://work_assets/<id>` markers to avoid oversized indexed `storage_key` values.
+- Wired `05-bugs` into `refresh-staging-snapshot.mjs`.
+- Extended `compare-datasets.mjs` for `bug_reports` and `bug_attachments`.
+- Added `ops/scripts/migrate-storage-bug-attachments.mjs` for one-shot migration from `supabase://`, `data-url://work_assets/...`, direct `data:`, and legacy HTTP(S) keys into Selectel S3.
+- Updated API URL generation so legacy `supabase://` URLs can still be read through public Supabase URLs when `SUPABASE_URL` is present, while data-url markers return an empty URL until storage migration is run.
+- Verified full refresh/compare against a temporary VPS Postgres using Supabase anon read key:
+  - bug_reports 10/10
+  - bug_attachments 8/8
+  - all previously migrated tables also matched.
+- Added Vue Bugs UI:
+  - `ops/web/src/api/bugs.ts`
+  - `ops/web/src/stores/bugs.ts`
+  - `ops/web/src/views/BugsView.vue`
+  - `/bugs` route and home navigation link.
+- Bugs screen supports list filters, create/update/delete, detail loading, attachment display, attachment upload, and attachment delete.
+- Added `tests/playwright/bugs.spec.ts` smoke for login -> `/bugs` -> create bug -> mark fixed.
+- Verified `cd ops/web && npm run build` passing.
+- Re-ran full API suite after S3 legacy URL changes: 90/90 passing.
+- Manually deployed the current branch to staging for live smoke.
+- Refreshed live staging snapshot from Supabase before smoke:
+  - bug_reports 10/10
+  - bug_attachments 8/8
+  - all previously migrated table counts matched.
+- Verified live staging `/api/health`: `db.ok=true`.
+- Verified Playwright staging smoke: `tests/playwright/bugs.spec.ts`, 1/1 passing.
+- Refreshed live staging again after smoke so e2e-created bug rows do not remain:
+  - bug_reports 10/10
+  - bug_attachments 8/8
+  - all previously migrated table counts matched.
+- Updated `ops/README.md` with Block 6 endpoints, screens, refresh/storage migration notes, and smoke notes.
+- Opened PR #44 to `main`: https://github.com/polinacherpovitskaya-glitch/ro-calculator/pull/44
 
 ## Next steps for Codex
 
-1. Open and merge the small smoke follow-up PR.
-2. Run main deploy checks again.
-3. Continue to Block 6 from fresh `main`.
+1. Stop for review.
+2. After review approval/checks, merge PR #44 to `main`.
+3. After merge, verify main deploy and refresh staging again.
 
 ## Quality gates status (Block 2)
 
@@ -357,18 +419,27 @@ Tests: Block 5 API suite 80/80 passing; main deploy run `26118538860` passed; st
 - [x] Playwright smoke passing
 - [x] `ops/README.md` updated
 - [x] PR opened
-- [ ] Marketplaces API tests passing
-- [ ] refresh/compare scripts updated
-- [ ] staging molds/blanks/colors/marketplaces data refreshed from Supabase
-- [ ] Vue molds/blanks/colors/marketplaces screens built
-- [ ] Playwright molds/blanks smoke passing
-- [ ] `ops/README.md` updated
-- [ ] PR opened
+- [x] PR merged to main
+- [x] main deploy passed
+
+## Quality gates status (Block 6)
+
+- [x] `006_bug_reports.sql` added
+- [x] S3 helper added
+- [x] Bugs API tests passing
+- [x] Refresh/compare updated for Block 6 tables
+- [x] Storage migration script added/syntax-tested for bug attachments
+- [x] staging bugs data refreshed from Supabase
+- [x] Vue bugs screens built
+- [x] Playwright bugs smoke passing on staging
+- [x] `ops/README.md` updated
+- [x] PR opened
 - [ ] PR merged to main
 
 ## Blockers / questions
 
-- No current Block 5 blocker.
+- No current Block 6 API blocker.
+- Need a live decision for bug attachment storage before real storage migration: reuse the existing Selectel S3 credentials/bucket from `/srv/ops/infra/.env`, or create/configure a dedicated bug-attachments bucket.
 - Supabase `employees` currently have no email values, so employee temp-password issuance produced only a CSV header. Staging admin smoke still covers the protected auth path.
 - Local shell currently has no `docker` or `psql`, so DB-positive tests cannot run locally. Using isolated VPS containers as the verification path.
 
@@ -382,10 +453,11 @@ Tests: Block 5 API suite 80/80 passing; main deploy run `26118538860` passed; st
 - ✅ Block 2: Auth + employees merged to `main` and deployed to staging
 - ✅ Block 3: Warehouse merged to `main`, deployed to staging, live smoke passed
 - ✅ Block 4: Shipments + China merged to `main`, deployed to staging, live smoke passed
-- 🔄 Block 5: Molds + blanks + colors + marketplaces started
-- ⏳ Block 6-16, Stages B/C/D: pending
+- ✅ Block 5: Molds + blanks + colors + marketplaces merged to `main`, deployed to staging, live smoke passed
+- 🔄 Block 6: Bugs + bug attachments started
+- ⏳ Block 7-16, Stages B/C/D: pending
 
 ## How to resume
 
 1. Read this `STATUS.md`.
-2. Continue Block 5 from Task 1 (`005_molds_blanks.sql`) on branch `block-5-molds-blanks`.
+2. Continue Block 6 from refresh/compare and storage migration tasks on branch `block-6-bugs`.
