@@ -4,10 +4,10 @@ Operational core of `recycleobject.ru`: migration target for the old Vercel + Su
 
 ## Status
 
-- Stage A — Build, Block 1 complete pending PR merge
+- Stage A — Build, Blocks 1-2 merged; Block 3 warehouse in progress
 - Staging domain: `https://ops-staging.recycleobject.ru`
 - Production cutover: not here; Stage C is owner-run only
-- UptimeRobot: deferred/manual follow-up, not blocking Block 1
+- UptimeRobot: deferred/manual follow-up, not blocking the migration blocks
 
 ## Structure
 
@@ -52,6 +52,14 @@ TEST_DATABASE_URL="postgres://ops:ops_dev_password@127.0.0.1:5433/ops" npm test
 
 cd ../web
 npm run build
+```
+
+Warehouse staging smoke is scaffolded in `tests/playwright/warehouse.spec.ts`. It expects:
+
+```text
+E2E_BASE_URL=https://ops-staging.recycleobject.ru
+E2E_USER=<staging user>
+E2E_PASSWORD=<staging password>
 ```
 
 ## Deploy
@@ -165,7 +173,96 @@ External monitoring is intended to use UptimeRobot:
 - Interval: 5 minutes
 - Alert contacts: email, optional Telegram
 
-This manual UptimeRobot setup is deferred and is not blocking Block 1 completion. The health endpoint and TLS are already live.
+This manual UptimeRobot setup is deferred and is not blocking the migration. The health endpoint and TLS are already live.
+
+## Auth Module
+
+Block 2 adds cookie-based auth for the staging ops stack.
+
+Endpoints:
+
+```text
+POST /api/auth/login
+POST /api/auth/logout
+GET  /api/auth/me
+POST /api/auth/change-password
+GET  /api/employees
+```
+
+Runtime notes:
+
+- Sessions live in `auth_sessions`.
+- Password hashes use Argon2.
+- Employee data is refreshed from Supabase with `ops/scripts/refresh/01-employees.mjs`.
+- Staging admin credentials are stored outside the rsync deploy directory at `/srv/ops-secrets/admin-login.txt`.
+
+## Warehouse Module
+
+Block 3 redesigns warehouse instead of copying the old cache-heavy shape 1:1.
+
+Tables:
+
+```text
+warehouse_items
+warehouse_reservations
+warehouse_history
+```
+
+Canonical rules:
+
+- `warehouse_history.type`: `receipt`, `consume`, `inventory_audit`, `manual_edit`, `return`.
+- `warehouse_reservations.source`: `order`, `manual`.
+- Mutating endpoints require `Idempotency-Key`.
+- Quantity-changing mutations use transactions and row locks.
+- `orders` FKs are intentionally deferred until Block 9, when the `orders` table exists.
+
+Endpoints:
+
+```text
+GET    /api/warehouse/items
+GET    /api/warehouse/items/:id
+POST   /api/warehouse/items
+PATCH  /api/warehouse/items/:id
+DELETE /api/warehouse/items/:id
+
+GET    /api/warehouse/reservations
+POST   /api/warehouse/reservations
+PATCH  /api/warehouse/reservations/:id
+POST   /api/warehouse/reservations/:id/release
+POST   /api/warehouse/reservations/:id/consume
+
+GET    /api/warehouse/history
+POST   /api/warehouse/inventory-audit
+```
+
+Screens:
+
+```text
+/warehouse
+/warehouse/:id
+/warehouse/inventory
+/warehouse/history
+```
+
+Data refresh:
+
+```bash
+cd /srv/ops
+set -a; source /srv/ops/infra/.env; set +a
+docker run --rm --network infra_internal \
+  -v /srv/ops:/srv/ops \
+  -w /srv/ops \
+  -e SUPABASE_URL=... \
+  -e SUPABASE_SERVICE_KEY=... \
+  -e DATABASE_URL="postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@ops-postgres:5432/${POSTGRES_DB}" \
+  node:20-alpine sh -c "cd scripts && npm ci && cd /srv/ops && node scripts/refresh-staging-snapshot.mjs"
+```
+
+Dataset compare:
+
+```bash
+node ops/scripts/compare-datasets.mjs
+```
 
 ## Current Infra
 
@@ -182,4 +279,4 @@ This manual UptimeRobot setup is deferred and is not blocking Block 1 completion
 
 ## Next
 
-Block 2 adds authentication and employees on top of this foundation.
+Finish Block 3 PR, then continue with Block 4 shipments + China.

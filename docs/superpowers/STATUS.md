@@ -1,17 +1,22 @@
 # Migration status
 
-Last update: 2026-05-19T13:38:57-03:00
-Current block: 2
-Current task within block: PR / merge
-Branch: block-2-auth
-Last commit: latest `block-2-auth` commit
-Tests: Block 2 API tests 15/15 passing in temporary VPS containers; `ops/web npm run build` passing; live staging health `db.ok=true`; live auth smoke passed.
+Last update: 2026-05-19T14:38:00-03:00
+Current block: 3
+Current task within block: Final verification + PR
+Branch: block-3-warehouse
+Last commit: main `9a563e6` includes Block 2 merge
+Tests: Block 2 PR checks passed; main deploy passed; live staging health `db.ok=true`; live auth smoke passed after deploy.
 
 ## What was just done
 
 - Block 1 PR #36 was merged to `main`; GitHub Actions deploy to staging passed.
-- Created `block-2-auth` from fresh `main`.
-- Read `docs/superpowers/plans/2026-05-15-block-2-auth.md` before editing.
+- Block 2 PR #37 was merged to `main`; GitHub Actions deploy run `26111396624` passed.
+- Created `block-3-warehouse` from fresh `main`.
+- Read Block 3 required docs before editing:
+  - `docs/superpowers/plans/2026-05-15-block-3-warehouse.md`
+  - `docs/superpowers/plans/2026-05-15-WAREHOUSE-INTERACTION-MAP.md`
+  - `docs/superpowers/plans/2026-05-15-BUG-INVENTORY.md`
+- Block 2 summary:
 - Added migration `002_auth.sql` for `employees`, `auth_users`, `auth_sessions`, and `idempotency_keys`.
 - Added `argon2`, `cookie-parser`, password hashing helpers, `withTransaction`, session store, auth middleware.
 - Added `/api/auth/login`, `/api/auth/logout`, `/api/auth/me`, `/api/auth/change-password`.
@@ -25,18 +30,58 @@ Tests: Block 2 API tests 15/15 passing in temporary VPS containers; `ops/web npm
 - Added explicit `ws` transport for the Supabase refresh script so it works in the Node 20 Docker runtime.
 - Copied `employees` from Supabase to staging Postgres: 14 rows total, 12 active.
 - Confirmed current Supabase employee rows have no email values, so `/srv/ops/temp-passwords.csv` currently contains only the header row.
-- Created staging admin credentials and stored them only on the VPS at `/srv/ops/admin-login.txt` with `0600` permissions.
+- Created staging admin credentials and stored them only on the VPS at `/srv/ops-secrets/admin-login.txt` with `0600` permissions. This path is outside the rsync deploy directory.
 - Verified live auth smoke on staging: admin login, `/api/auth/me`, protected `/api/employees`, logout.
 - Verified API tests 15/15 in isolated VPS containers with migrations 001+002.
 - Verified `ops/web npm run build` locally.
+- Added `ops/db/migrations/003_warehouse.sql` for warehouse items, reservations, and history. Because `orders` is not created until Block 9, `order_id` columns are raw `BIGINT` for now; Block 9 will add the FK/CASCADE.
+- Verified migrations 001+002+003 on a clean temporary Postgres container on the VPS.
+- Added `ops/api/src/idempotency.js` with required `Idempotency-Key`, cached JSON responses, and conflict detection when a key is reused on another method/path.
+- Added `/api/warehouse` routes:
+  - `GET/POST/PATCH/DELETE /items`
+  - `GET/POST/PATCH /reservations`
+  - `POST /reservations/:id/release`
+  - `POST /reservations/:id/consume`
+  - `GET /history`
+  - `POST /inventory-audit`
+- Added warehouse API tests and invariant tests I1-I7.
+- Verified full API test suite in temporary VPS containers: 30/30 passing.
+- Added warehouse refresh/data scripts:
+  - `ops/scripts/refresh/02-warehouse.mjs`
+  - `ops/scripts/refresh-staging-snapshot.mjs`
+  - `ops/scripts/compare-datasets.mjs`
+- Ran staging snapshot refresh from Supabase:
+  - employees: 14
+  - warehouse_items: 227
+  - warehouse_reservations: 351 legacy JSON entries -> 348 canonical unique reservation rows
+  - warehouse_history: 1
+- Ran dataset compare successfully:
+  - employees 14/14
+  - warehouse_items 227/227
+  - warehouse_reservations 348/348
+  - warehouse_history 1/1
+- Added Vue warehouse API wrapper, Pinia store, `/warehouse` route, and list view with search, category filter, create dialog, inline qty/min/category edits, delete action, and low-stock highlighting.
+- Added home navigation link to `/warehouse`.
+- Verified `cd ops/web && npm run build` passing.
+- Added `GET /api/warehouse/items/:id`.
+- Added `/warehouse/:id` item card with editable fields and recent movement history.
+- Verified API test suite again in temporary VPS containers: 30/30 passing.
+- Verified `cd ops/web && npm run build` passing after item card.
+- Added `/warehouse/inventory` inventory audit view with factual qty entry, delta calculation, and `POST /api/warehouse/inventory-audit` integration.
+- Verified `cd ops/web && npm run build` passing after inventory view.
+- Added `/warehouse/history` movement history view with type/item/date filters and simple page controls.
+- Extended `GET /api/warehouse/history` with `type` and `offset` query support.
+- Verified API test suite again in temporary VPS containers: 30/30 passing.
+- Verified `cd ops/web && npm run build` passing after history view.
+- Added `tests/playwright/warehouse.spec.ts` staging smoke scaffold for login -> warehouse -> edit qty -> verify history.
+- Playwright smoke not run yet because Block 3 UI is not deployed to staging until this branch is merged; it requires `E2E_USER` / `E2E_PASSWORD`.
+- Updated `ops/README.md` with Auth and Warehouse module endpoints, screens, tests, refresh, and compare notes.
 
 ## Next steps for Codex
 
-1. Commit final Block 2 fixes/status.
-2. Push `block-2-auth`.
-3. Open PR to `main`, wait for checks, merge if green.
-4. Let GitHub Actions deploy `main` to staging.
-5. Start Block 3 from fresh `main`.
+1. Run final API test suite and web build.
+2. Push branch, open PR, wait for checks, merge if green.
+3. Let main deploy, then run live health and warehouse smoke where possible.
 
 ## Quality gates status (Block 2)
 
@@ -45,6 +90,19 @@ Tests: Block 2 API tests 15/15 passing in temporary VPS containers; `ops/web npm
 - [x] `/api/health` green on staging
 - [x] `employees` copied from Supabase to staging
 - [x] admin auth smoke on staging
+- [x] PR opened
+- [x] PR merged to main
+- [x] main deploy passed
+
+## Quality gates status (Block 3)
+
+- [x] `003_warehouse.sql` added
+- [x] API warehouse tests added and passing
+- [x] `refresh-staging-snapshot.mjs` and `compare-datasets.mjs` added
+- [x] staging warehouse data refreshed from Supabase
+- [x] Vue warehouse screens built
+- [ ] Playwright warehouse smoke passing (spec added; runnable after deploy with E2E credentials)
+- [x] `ops/README.md` updated
 - [ ] PR opened
 - [ ] PR merged to main
 
@@ -61,10 +119,11 @@ Tests: Block 2 API tests 15/15 passing in temporary VPS containers; `ops/web npm
 ## Completed blocks summary
 
 - ✅ Block 1: Infrastructure merged to `main` and deployed to staging
-- 🔄 Block 2: Auth + employees ready for PR/merge
-- ⏳ Block 3-16, Stages B/C/D: pending
+- ✅ Block 2: Auth + employees merged to `main` and deployed to staging
+- 🔄 Block 3: Warehouse started
+- ⏳ Block 4-16, Stages B/C/D: pending
 
 ## How to resume
 
 1. Read this `STATUS.md`.
-2. Continue Block 2 by opening/merging the PR if checks are green.
+2. Continue Block 3 from Task 1 (`003_warehouse.sql`) on branch `block-3-warehouse`.

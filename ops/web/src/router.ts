@@ -3,6 +3,10 @@ import { useAuthStore } from './stores/auth';
 import PlaceholderView from './views/PlaceholderView.vue';
 import LoginView from './views/LoginView.vue';
 import ChangePasswordView from './views/ChangePasswordView.vue';
+import WarehouseListView from './views/WarehouseListView.vue';
+import WarehouseItemView from './views/WarehouseItemView.vue';
+import InventoryAuditView from './views/InventoryAuditView.vue';
+import WarehouseHistoryView from './views/WarehouseHistoryView.vue';
 
 const router = createRouter({
   history: createWebHistory(),
@@ -10,6 +14,10 @@ const router = createRouter({
     { path: '/', name: 'home', component: PlaceholderView, meta: { requiresAuth: true } },
     { path: '/login', name: 'login', component: LoginView },
     { path: '/change-password', name: 'change-password', component: ChangePasswordView, meta: { requiresAuth: true } },
+    { path: '/warehouse', name: 'warehouse', component: WarehouseListView, meta: { requiresAuth: true } },
+    { path: '/warehouse/inventory', name: 'warehouse-inventory', component: InventoryAuditView, meta: { requiresAuth: true } },
+    { path: '/warehouse/history', name: 'warehouse-history', component: WarehouseHistoryView, meta: { requiresAuth: true } },
+    { path: '/warehouse/:id', name: 'warehouse-item', component: WarehouseItemView, meta: { requiresAuth: true } },
   ],
 });
 
