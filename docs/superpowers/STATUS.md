@@ -1,11 +1,11 @@
 # Migration status
 
-Last update: 2026-05-19T16:36:18-03:00
+Last update: 2026-05-19T16:48:06-03:00
 Current block: 6
-Current task within block: Task 6 Vue Bugs UI
+Current task within block: Task 8 staging deploy/smoke/refresh
 Branch: block-6-bugs
-Last commit: `28bbadb` Add bugs API
-Tests: Full API suite passed in a clean temporary VPS Postgres container with migrations 001-006 and `S3_MOCK_DIR`: 90/90. Full refresh/compare passed in a clean temporary VPS Postgres container, including `bug_reports 10/10` and `bug_attachments 8/8`. Local API test attempt failed because local Postgres `127.0.0.1:5433` is not running; VPS temp containers are the current verification path.
+Last commit: `c4960c2` Add bugs refresh and storage migration
+Tests: Full API suite passed in a clean temporary VPS Postgres container with migrations 001-006 and `S3_MOCK_DIR`: 90/90. Full refresh/compare passed in a clean temporary VPS Postgres container, including `bug_reports 10/10` and `bug_attachments 8/8`. `cd ops/web && npm run build` passed after Bugs UI. Local API test attempt failed because local Postgres `127.0.0.1:5433` is not running; VPS temp containers are the current verification path.
 
 ## What was just done
 
@@ -341,12 +341,21 @@ Tests: Full API suite passed in a clean temporary VPS Postgres container with mi
   - bug_reports 10/10
   - bug_attachments 8/8
   - all previously migrated tables also matched.
+- Added Vue Bugs UI:
+  - `ops/web/src/api/bugs.ts`
+  - `ops/web/src/stores/bugs.ts`
+  - `ops/web/src/views/BugsView.vue`
+  - `/bugs` route and home navigation link.
+- Bugs screen supports list filters, create/update/delete, detail loading, attachment display, attachment upload, and attachment delete.
+- Added `tests/playwright/bugs.spec.ts` smoke for login -> `/bugs` -> create bug -> mark fixed.
+- Verified `cd ops/web && npm run build` passing.
+- Re-ran full API suite after S3 legacy URL changes: 90/90 passing.
 
 ## Next steps for Codex
 
-1. Add Vue Bugs API wrapper/store/screens.
-2. Add staging Playwright bugs smoke.
-3. Confirm Selectel S3 bucket/env before running real storage migration.
+1. Manually deploy current branch to staging for live smoke.
+2. Refresh staging from Supabase after smoke so e2e-created bug rows do not remain.
+3. Update `ops/README.md`, open PR, then stop for review.
 
 ## Quality gates status (Block 2)
 
@@ -408,8 +417,8 @@ Tests: Full API suite passed in a clean temporary VPS Postgres container with mi
 - [x] Refresh/compare updated for Block 6 tables
 - [x] Storage migration script added/syntax-tested for bug attachments
 - [ ] staging bugs data refreshed from Supabase
-- [ ] Vue bugs screens built
-- [ ] Playwright bugs smoke passing
+- [x] Vue bugs screens built
+- [ ] Playwright bugs smoke passing on staging
 - [ ] `ops/README.md` updated
 - [ ] PR opened
 - [ ] PR merged to main

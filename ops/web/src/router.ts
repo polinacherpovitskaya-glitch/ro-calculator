@@ -17,6 +17,7 @@ import MoldView from './views/MoldView.vue';
 import BlanksView from './views/BlanksView.vue';
 import ColorsView from './views/ColorsView.vue';
 import MarketplacesView from './views/MarketplacesView.vue';
+import BugsView from './views/BugsView.vue';
 
 const router = createRouter({
   history: createWebHistory(),
@@ -38,6 +39,7 @@ const router = createRouter({
     { path: '/blanks', name: 'blanks', component: BlanksView, meta: { requiresAuth: true } },
     { path: '/colors', name: 'colors', component: ColorsView, meta: { requiresAuth: true } },
     { path: '/marketplaces', name: 'marketplaces', component: MarketplacesView, meta: { requiresAuth: true } },
+    { path: '/bugs', name: 'bugs', component: BugsView, meta: { requiresAuth: true } },
   ],
 });
 
