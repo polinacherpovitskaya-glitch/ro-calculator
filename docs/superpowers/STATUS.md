@@ -1,8 +1,8 @@
 # Migration status
 
-Last update: 2026-05-19T13:49:00-03:00
+Last update: 2026-05-19T13:58:00-03:00
 Current block: 3
-Current task within block: Task 3 Warehouse API TDD
+Current task within block: Task 4 refresh/compare scripts
 Branch: block-3-warehouse
 Last commit: main `9a563e6` includes Block 2 merge
 Tests: Block 2 PR checks passed; main deploy passed; live staging health `db.ok=true`; live auth smoke passed after deploy.
@@ -37,13 +37,23 @@ Tests: Block 2 PR checks passed; main deploy passed; live staging health `db.ok=
 - Added `ops/db/migrations/003_warehouse.sql` for warehouse items, reservations, and history. Because `orders` is not created until Block 9, `order_id` columns are raw `BIGINT` for now; Block 9 will add the FK/CASCADE.
 - Verified migrations 001+002+003 on a clean temporary Postgres container on the VPS.
 - Added `ops/api/src/idempotency.js` with required `Idempotency-Key`, cached JSON responses, and conflict detection when a key is reused on another method/path.
+- Added `/api/warehouse` routes:
+  - `GET/POST/PATCH/DELETE /items`
+  - `GET/POST/PATCH /reservations`
+  - `POST /reservations/:id/release`
+  - `POST /reservations/:id/consume`
+  - `GET /history`
+  - `POST /inventory-audit`
+- Added warehouse API tests and invariant tests I1-I7.
+- Verified full API test suite in temporary VPS containers: 30/30 passing.
 
 ## Next steps for Codex
 
-1. Add warehouse API tests before implementation per Block 3 TDD plan.
-2. Implement warehouse API in small commits.
-3. Add refresh/compare scripts and refresh staging warehouse data from Supabase.
-4. Keep staging data fresh with Supabase refresh scripts between blocks.
+1. Add `ops/scripts/refresh/02-warehouse.mjs`.
+2. Add `ops/scripts/refresh-staging-snapshot.mjs`.
+3. Add `ops/scripts/compare-datasets.mjs`.
+4. Refresh staging warehouse data from Supabase and compare counts.
+5. Continue Vue warehouse screens.
 
 ## Quality gates status (Block 2)
 
@@ -59,7 +69,7 @@ Tests: Block 2 PR checks passed; main deploy passed; live staging health `db.ok=
 ## Quality gates status (Block 3)
 
 - [x] `003_warehouse.sql` added
-- [ ] API warehouse tests added and passing
+- [x] API warehouse tests added and passing
 - [ ] `refresh-staging-snapshot.mjs` and `compare-datasets.mjs` added
 - [ ] staging warehouse data refreshed from Supabase
 - [ ] Vue warehouse screens built
