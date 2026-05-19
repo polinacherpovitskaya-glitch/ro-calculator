@@ -1,10 +1,10 @@
 # Migration status
 
-Last update: 2026-05-19T12:54:45-03:00
+Last update: 2026-05-19T12:55:50-03:00
 Current block: 1
 Current task within block: 9
 Branch: block-1-infrastructure
-Last commit: 72f22cf
+Last commit: 7e2b6fd
 Tests: 4/4 API health tests passing in temporary VPS containers; `ops/web` production build passing; compose smoke passing on VPS temp stack; live staging health `db.ok=true`; production dependency audit has 0 vulnerabilities
 
 ## What was just done
@@ -23,10 +23,12 @@ Tests: 4/4 API health tests passing in temporary VPS containers; `ops/web` produ
 - Verified `https://ops-staging.recycleobject.ru/api/health` returns `status: "ok"` and `db.ok=true`.
 - Completed Block 1 Task 8 code/setup: generated and installed GitHub Actions deploy key, set GitHub secrets `OPS_SSH_PRIVATE_KEY`, `OPS_HOST`, `OPS_USER`, added `.github/workflows/ops-deploy.yml`, and pushed `block-1-infrastructure`.
 - Workflow runs tests/builds on PRs and deploys only on push to `main`.
+- Added Block 1 Task 9/10 scripts that do not require secrets to write: `backup.sh`, `restore.sh`, `ops-backup.service`, `ops-backup.timer`.
+- Syntax-checked backup/restore scripts with `bash -n`; no whitespace errors from `git diff --check`.
 
 ## Next steps
-- Continue Block 1 Task 9: add backup script and systemd timer, then configure Selectel Object Storage credentials on the VPS.
-- Need `S3_ACCESS_KEY` and `S3_SECRET_KEY` for bucket `ro-ops-backups` before backup verification can be completed.
+- Configure Selectel Object Storage credentials on the VPS, install the systemd timer, run a manual backup, then run restore drill.
+- Need `S3_ACCESS_KEY` and `S3_SECRET_KEY` for bucket `ro-ops-backups` before backup/restore verification can be completed.
 
 ## Blockers / questions
 - Need Selectel Object Storage S3 credentials (`S3_ACCESS_KEY`, `S3_SECRET_KEY`) for Task 9 backup verification.
