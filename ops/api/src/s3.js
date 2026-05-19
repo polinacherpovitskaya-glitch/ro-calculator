@@ -72,6 +72,16 @@ export async function deleteObject(key) {
 }
 
 export async function presignedGetUrl(key, expiresIn = 600) {
+  if (/^(https?:|data:)/.test(key)) {
+    return key;
+  }
+  if (key.startsWith('supabase://') && process.env.SUPABASE_URL) {
+    const storageKey = key.replace('supabase://', '');
+    return `${process.env.SUPABASE_URL.replace(/\/$/, '')}/storage/v1/object/public/bug-attachments/${encodeURI(storageKey)}`;
+  }
+  if (key.startsWith('data-url://') || key.startsWith('legacy-work-asset://')) {
+    return '';
+  }
   if (mockPath(key)) {
     return `mock-s3://${key}`;
   }

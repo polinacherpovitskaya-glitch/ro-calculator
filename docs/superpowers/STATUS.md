@@ -1,11 +1,11 @@
 # Migration status
 
-Last update: 2026-05-19T16:18:42-03:00
+Last update: 2026-05-19T16:36:18-03:00
 Current block: 6
-Current task within block: Task 4 Refresh/compare for bugs
+Current task within block: Task 6 Vue Bugs UI
 Branch: block-6-bugs
-Last commit: `6791f1f` Add S3 helper for bug attachments
-Tests: Full API suite passed in a clean temporary VPS Postgres container with migrations 001-006 and `S3_MOCK_DIR`: 90/90. Local API test attempt failed because local Postgres `127.0.0.1:5433` is not running; VPS temp containers are the current verification path.
+Last commit: `28bbadb` Add bugs API
+Tests: Full API suite passed in a clean temporary VPS Postgres container with migrations 001-006 and `S3_MOCK_DIR`: 90/90. Full refresh/compare passed in a clean temporary VPS Postgres container, including `bug_reports 10/10` and `bug_attachments 8/8`. Local API test attempt failed because local Postgres `127.0.0.1:5433` is not running; VPS temp containers are the current verification path.
 
 ## What was just done
 
@@ -329,12 +329,24 @@ Tests: Full API suite passed in a clean temporary VPS Postgres container with mi
   - `DELETE /api/bugs/:id/attachments/:attId`
 - Bug mutations require `Idempotency-Key`; delete requires `admin`; attachment reads return presigned URLs (or `mock-s3://` URLs in tests).
 - Verified full API suite in temporary VPS containers: 90/90 passing.
+- Added `ops/scripts/refresh/05-bugs.mjs`.
+  - Supabase `bug_reports` is currently missing, so refresh synthesizes 10 bug reports from legacy `[Баг]` tasks and stores original task fields in `extras`.
+  - Legacy bug attachments are stored in `work_assets`; refresh imports 8 file assets as `bug_attachments`.
+  - Supabase Storage paths are stored as `supabase://...`; data URL fallback assets are stored as lightweight `data-url://work_assets/<id>` markers to avoid oversized indexed `storage_key` values.
+- Wired `05-bugs` into `refresh-staging-snapshot.mjs`.
+- Extended `compare-datasets.mjs` for `bug_reports` and `bug_attachments`.
+- Added `ops/scripts/migrate-storage-bug-attachments.mjs` for one-shot migration from `supabase://`, `data-url://work_assets/...`, direct `data:`, and legacy HTTP(S) keys into Selectel S3.
+- Updated API URL generation so legacy `supabase://` URLs can still be read through public Supabase URLs when `SUPABASE_URL` is present, while data-url markers return an empty URL until storage migration is run.
+- Verified full refresh/compare against a temporary VPS Postgres using Supabase anon read key:
+  - bug_reports 10/10
+  - bug_attachments 8/8
+  - all previously migrated tables also matched.
 
 ## Next steps for Codex
 
-1. Add Block 6 refresh script and compare coverage for `bug_reports` / `bug_attachments`.
-2. Decide/live-confirm Selectel S3 bucket/env for bug attachments before running real storage migration.
-3. Add Vue Bugs UI and staging smoke after API/data path is complete.
+1. Add Vue Bugs API wrapper/store/screens.
+2. Add staging Playwright bugs smoke.
+3. Confirm Selectel S3 bucket/env before running real storage migration.
 
 ## Quality gates status (Block 2)
 
@@ -393,8 +405,8 @@ Tests: Full API suite passed in a clean temporary VPS Postgres container with mi
 - [x] `006_bug_reports.sql` added
 - [x] S3 helper added
 - [x] Bugs API tests passing
-- [ ] Refresh/compare updated for Block 6 tables
-- [ ] Storage migration script added/tested for bug attachments
+- [x] Refresh/compare updated for Block 6 tables
+- [x] Storage migration script added/syntax-tested for bug attachments
 - [ ] staging bugs data refreshed from Supabase
 - [ ] Vue bugs screens built
 - [ ] Playwright bugs smoke passing
