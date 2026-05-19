@@ -549,11 +549,20 @@ function getPendantAttachmentTotalSell(pendant, type, entry) {
 
 function findNfcWarehouseItem(warehouseItems) {
     const items = Array.isArray(warehouseItems) ? warehouseItems : [];
-    return items.find(item => {
+    const exact = items.find(item => {
         const sku = String(item?.sku || '').trim().toUpperCase();
         const name = String(item?.name || '').trim().toLowerCase();
         return sku === 'NFC' || name === 'nfc';
-    }) || null;
+    });
+    if (exact) return exact;
+    return items.find(item => isNfcLikeEntry(item?.sku, item?.name)) || null;
+}
+
+function findWarehouseItemById(warehouseItems, id) {
+    const targetId = Number(id || 0);
+    if (!targetId) return null;
+    const items = Array.isArray(warehouseItems) ? warehouseItems : [];
+    return items.find(item => Number(item?.id || 0) === targetId) || null;
 }
 
 function isNfcLikeEntry(...values) {
@@ -572,8 +581,17 @@ function getProductWarehouseDemandRows(item, warehouseItems) {
     const qty = parseFloat(item?.quantity) || 0;
     if (itemType !== 'product' || !item?.is_nfc || !(qty > 0)) return [];
 
-    const resolvedItem = Number(item?.nfc_warehouse_item_id || 0)
-        ? { id: Number(item?.nfc_warehouse_item_id || 0), name: 'NFC', sku: 'NFC', unit: 'шт' }
+    const explicitId = Number(item?.nfc_warehouse_item_id || 0);
+    const resolvedItem = explicitId
+        ? (
+            findWarehouseItemById(warehouseItems, explicitId)
+            || {
+                id: explicitId,
+                name: item?.nfc_warehouse_name || item?.builtin_hw_name || 'NFC',
+                sku: item?.nfc_warehouse_sku || item?.builtin_hw_warehouse_sku || 'NFC',
+                unit: 'шт',
+            }
+        )
         : findNfcWarehouseItem(warehouseItems);
     const warehouseItemId = Number(resolvedItem?.id || 0);
     if (!warehouseItemId) return [];

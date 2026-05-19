@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v371';
+const APP_VERSION = 'v372';
 
 const App = {
     currentPage: 'orders',
@@ -3446,6 +3446,41 @@ const Calculator = {
     // ITEM EVENTS
     // ==========================================
 
+    _isNfcTemplate(tpl) {
+        if (!tpl) return false;
+        if (tpl.is_nfc === true) return true;
+        if (String(tpl.category || '').trim().toLowerCase() === 'nfc') return true;
+        const collection = String(tpl.collection || '').trim().toLowerCase();
+        if (collection === 'nfc' || collection === 'нфс') return true;
+        return typeof isNfcLikeEntry === 'function' && isNfcLikeEntry(tpl.name);
+    },
+
+    _isTemplateHardwareProductNfc(tpl) {
+        return !!tpl
+            && this._isNfcTemplate(tpl)
+            && typeof isNfcLikeEntry === 'function'
+            && isNfcLikeEntry(tpl.hw_name, tpl.hw_warehouse_sku);
+    },
+
+    _applyNfcTemplateToItem(item, tpl, fallback = {}) {
+        if (!item || !this._isNfcTemplate(tpl)) return;
+        item.is_nfc = true;
+        item.nfc_programming = true;
+        const warehouseItemId = Number(
+            item.nfc_warehouse_item_id
+            || fallback.warehouse_item_id
+            || tpl?.hw_warehouse_item_id
+            || 0
+        ) || null;
+        item.nfc_warehouse_item_id = warehouseItemId;
+        if (this._isTemplateHardwareProductNfc(tpl)) {
+            item.builtin_hw_name = tpl.hw_name || fallback.name || 'NFC';
+            item.builtin_hw_price = Number(tpl.hw_price_per_unit || fallback.price || 0);
+            item.builtin_hw_delivery_total = Number(tpl.hw_delivery_total || fallback.delivery_total || 0);
+            item.builtin_hw_speed = Number(tpl.hw_speed || fallback.assembly_speed || 0);
+        }
+    },
+
     // Legacy: kept for backward compat if <select> still used somewhere
     onTemplateSelect(idx, selectEl) {
         const opt = selectEl.selectedOptions[0];
@@ -3468,11 +3503,15 @@ const Calculator = {
         this.items[idx].is_blank_mold = true;
         this.items[idx].blank_mold_total_cost = getBlankTemplateTotalMoldCost(tpl);
 
-        // Clear builtin_hw fields — now handled by real per-item hardware
+        // Clear builtin_hw fields — non-NFC hardware is handled by real per-item rows.
         this.items[idx].builtin_hw_name = '';
         this.items[idx].builtin_hw_price = 0;
         this.items[idx].builtin_hw_delivery_total = 0;
         this.items[idx].builtin_hw_speed = 0;
+        this.items[idx].is_nfc = false;
+        this.items[idx].nfc_programming = false;
+        this.items[idx].nfc_warehouse_item_id = null;
+        this._applyNfcTemplateToItem(this.items[idx], tpl);
         const isLooseLetterBlank = typeof isPendantLetterBlankTemplate === 'function' && isPendantLetterBlankTemplate(tpl);
         this.items[idx].builtin_assembly_name = isLooseLetterBlank ? '' : (tpl.builtin_assembly_name || '');
         this.items[idx].builtin_assembly_speed = isLooseLetterBlank ? 0 : Number(tpl.builtin_assembly_speed || 0);
@@ -3502,8 +3541,9 @@ const Calculator = {
             !(hw._from_template && hw.parent_item_index === itemIdx)
         );
 
-        // Create new hw from template if it has hardware
-        if (tpl && tpl.hw_name) {
+        // Create new hw from template if it has hardware.
+        // NFC molds keep the tag embedded in the product row so stock demand stays linked.
+        if (tpl && tpl.hw_name && !this._isTemplateHardwareProductNfc(tpl)) {
             const hw = this.getEmptyHardware(itemIdx);
             hw._from_template = true;
             const templateWarehouseItemId = Number(tpl.hw_warehouse_item_id || 0) || null;
@@ -5500,6 +5540,13 @@ const Calculator = {
         this.discountValue = this._parseDiscountValue(order.discount_value || 0);
         this._syncDiscountUi();
 
+        const templateHardwareParentIndices = new Set(
+            (dbItems || [])
+                .filter(item => String(item?.item_type || '').trim().toLowerCase() === 'hardware' && !!item?.hardware_from_template)
+                .map(item => Number(item?.hardware_parent_item_index))
+                .filter(index => Number.isFinite(index) && index >= 0)
+        );
+
         // Restore product items
         const productItems = dbItems.filter(i => !i.item_type || i.item_type === 'product');
         productItems.forEach((dbItem, i) => {
@@ -5538,10 +5585,19 @@ const Calculator = {
                     if (!(Number(item.blank_mold_total_cost || 0) > 0)) {
                         item.blank_mold_total_cost = getBlankTemplateTotalMoldCost(tpl);
                     }
-                    item.builtin_hw_name = tpl.hw_name || '';
-                    item.builtin_hw_price = tpl.hw_price_per_unit || 0;
-                    item.builtin_hw_delivery_total = tpl.hw_delivery_total || 0;
-                    item.builtin_hw_speed = tpl.hw_speed || 0;
+                    this._applyNfcTemplateToItem(item, tpl);
+                    const hasTemplateHardwareRow = templateHardwareParentIndices.has(i);
+                    if (!hasTemplateHardwareRow || this._isTemplateHardwareProductNfc(tpl)) {
+                        item.builtin_hw_name = tpl.hw_name || item.builtin_hw_name || '';
+                        item.builtin_hw_price = Number(tpl.hw_price_per_unit || item.builtin_hw_price || 0);
+                        item.builtin_hw_delivery_total = Number(tpl.hw_delivery_total || item.builtin_hw_delivery_total || 0);
+                        item.builtin_hw_speed = Number(tpl.hw_speed || item.builtin_hw_speed || 0);
+                    } else {
+                        item.builtin_hw_name = '';
+                        item.builtin_hw_price = 0;
+                        item.builtin_hw_delivery_total = 0;
+                        item.builtin_hw_speed = 0;
+                    }
                     const isLooseLetterBlank = typeof isPendantLetterBlankTemplate === 'function' && isPendantLetterBlankTemplate(tpl);
                     item.builtin_assembly_name = isLooseLetterBlank ? '' : (tpl.builtin_assembly_name || '');
                     item.builtin_assembly_speed = isLooseLetterBlank ? 0 : (tpl.builtin_assembly_speed || 0);
@@ -5593,6 +5649,22 @@ const Calculator = {
                     hw.warehouse_sku = tpl?.hw_warehouse_sku || '';
                     hw.name = '';
                     hw.price = 0;
+                }
+            }
+            if (hw._from_template && hw.parent_item_index !== null && hw.parent_item_index !== undefined) {
+                const parentItem = this.items[hw.parent_item_index];
+                const tpl = parentItem?.template_id && Array.isArray(App.templates)
+                    ? App.templates.find(t => String(t.id) === String(parentItem.template_id))
+                    : null;
+                if (tpl && this._isTemplateHardwareProductNfc(tpl)) {
+                    this._applyNfcTemplateToItem(parentItem, tpl, {
+                        warehouse_item_id: hw.warehouse_item_id,
+                        name: hw.name,
+                        price: hw.price,
+                        delivery_total: hw.delivery_total,
+                        assembly_speed: hw.assembly_speed,
+                    });
+                    return;
                 }
             }
             this._hydrateWarehouseBackedLineFromCurrentWarehouse(hw);
@@ -5688,7 +5760,10 @@ const Calculator = {
         // Also clear builtin_hw fields if real per-item hw exists (prevent double-counting)
         this.items.forEach((item, i) => {
             const hasTemplateHw = this.hardwareItems.some(hw => hw._from_template && hw.parent_item_index === i);
-            if (hasTemplateHw) {
+            const tpl = item.template_id && Array.isArray(App.templates)
+                ? App.templates.find(t => String(t.id) === String(item.template_id))
+                : null;
+            if (hasTemplateHw && !this._isTemplateHardwareProductNfc(tpl)) {
                 item.builtin_hw_name = '';
                 item.builtin_hw_price = 0;
                 item.builtin_hw_delivery_total = 0;

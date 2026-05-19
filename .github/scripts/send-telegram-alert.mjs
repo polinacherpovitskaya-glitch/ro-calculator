@@ -57,8 +57,18 @@ const eventName = process.env.GITHUB_EVENT_NAME || 'unknown-event';
 const runUrl = process.env.ALERT_RUN_URL || '';
 const sourceWorkflow = process.env.ALERT_SOURCE_WORKFLOW || '';
 const issueTitle = `Smoke alert: ${workflow}`;
+const notifyRecovery = ['1', 'true', 'yes', 'on'].includes(
+  String(process.env.TELEGRAM_NOTIFY_RECOVERY || process.env.ALERT_NOTIFY_RECOVERY || '')
+    .trim()
+    .toLowerCase()
+);
 
 if (status === 'success') {
+  if (!notifyRecovery) {
+    console.log('telegram recovery skipped: recovery notifications disabled');
+    process.exit(0);
+  }
+
   if (!githubToken || !repository) {
     console.log('telegram recovery skipped: missing GitHub token or repository');
     process.exit(0);
