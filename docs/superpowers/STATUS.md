@@ -1,8 +1,8 @@
 # Migration status
 
-Last update: 2026-05-19T15:25:00-03:00
+Last update: 2026-05-19T15:55:00-03:00
 Current block: 4
-Current task within block: Task 4 refresh + compare
+Current task within block: Task 5 Vue 3 screens
 Branch: block-4-shipments-china
 Last commit: main `e951fd0` includes Block 3 + Playwright smoke follow-up
 Tests: Block 3 PR checks passed; main deploy passed; live staging health `db.ok=true`; warehouse API/UI smoke passed; Playwright warehouse smoke 1/1 passed.
@@ -101,12 +101,30 @@ Tests: Block 3 PR checks passed; main deploy passed; live staging health `db.ok=
   - `PATCH /catalog/:id`
 - Hardened `withIdempotency()` so successful mutation responses are persisted before the JSON response is sent. This closes a same-key immediate retry race where the second request could arrive before the first response was cached.
 - Verified full API suite in temporary VPS containers: 52/52 passing.
+- Added `ops/scripts/refresh/03-shipments-china.mjs` and wired it into staging refresh.
+- Extended compare-datasets for `shipments`, `shipment_items`, `china_purchases`, `china_purchase_items`, and `china_catalog`.
+- Legacy mapping notes:
+  - Supabase stores `shipments.shipment_data` and `china_purchases.purchase_data` as JSON snapshots, so refresh normalizes child item rows from those snapshots.
+  - Old China catalog is a static seed JSON, not a Supabase table; refresh/compare load it from local `data/china_catalog.json` when present or from `https://calc.recycleobject.ru/data/china_catalog.json` on VPS.
+  - If a legacy shipment/purchase item references a missing `warehouse_item_id`, refresh stores that ID in `extras.legacy_warehouse_item_id` and leaves the FK null instead of failing.
+- Verified refresh/compare against a temporary VPS Postgres using Supabase anon read key: all counts matched.
+- Refreshed live staging snapshot from Supabase:
+  - employees 14/14
+  - warehouse_items 227/227
+  - warehouse_reservations 402/402
+  - warehouse_history 1/1
+  - shipments 13/13
+  - shipment_items 62/62
+  - china_purchases 14/14
+  - china_purchase_items 45/45
+  - china_catalog 103/103
+- Verified live staging `/api/health`: `db.ok=true`.
 
 ## Next steps for Codex
 
-1. Add `ops/scripts/refresh/03-shipments-china.mjs`.
-2. Wire Block 4 tables into `refresh-staging-snapshot.mjs` and `compare-datasets.mjs`.
-3. Run staging refresh/compare from Supabase and document row counts.
+1. Add Vue API wrappers and Pinia stores for shipments/china.
+2. Build `/shipments`, `/shipments/:id`, `/china`, `/china/:id`, and `/china/catalog`.
+3. Run `cd ops/web && npm run build`.
 
 ## Quality gates status (Block 2)
 
@@ -137,8 +155,8 @@ Tests: Block 3 PR checks passed; main deploy passed; live staging health `db.ok=
 - [x] `004_shipments_china.sql` added
 - [x] Shipments API tests passing
 - [x] China API tests passing
-- [ ] refresh/compare scripts updated
-- [ ] staging shipments/china data refreshed from Supabase
+- [x] refresh/compare scripts updated
+- [x] staging shipments/china data refreshed from Supabase
 - [ ] Vue shipments/china screens built
 - [ ] Playwright shipments/china smoke passing
 - [ ] `ops/README.md` updated
