@@ -2145,6 +2145,56 @@ async function main() {
 
     {
         const context = createContext();
+        const orderId = 777125;
+        context.__tableRows.orders = [{
+            id: orderId,
+            order_name: 'NFC save with string template',
+            status: 'draft',
+            deleted_at: null,
+        }];
+        runScript(context, 'js/supabase.js');
+        vm.runInContext('initSupabase()', context);
+
+        const savedOrderId = await vm.runInContext(`
+            saveOrder(
+                { id: ${orderId}, order_name: 'NFC save with string template', status: 'draft' },
+                [{
+                    item_number: 1,
+                    item_type: 'product',
+                    product_name: 'NFC метка',
+                    quantity: 100,
+                    template_id: 'nfc-embedded-template',
+                    is_nfc: true,
+                    nfc_warehouse_item_id: 197
+                }]
+            )
+        `, context);
+
+        assert.equal(savedOrderId, orderId);
+        const itemUpsert = context.__remoteCalls.find(call => call.table === 'order_items' && call.action === 'upsert');
+        assert.equal(Boolean(itemUpsert), true, 'order item save should upsert rows');
+        assert.equal(
+            Object.prototype.hasOwnProperty.call(itemUpsert.payload[0], 'template_id'),
+            false,
+            'string template_id should not be sent to bigint order_items.template_id',
+        );
+        assert.equal(
+            JSON.parse(itemUpsert.payload[0].item_data).template_id,
+            'nfc-embedded-template',
+            'string template_id should remain in item_data for calculator restore',
+        );
+
+        context.__rowToHydrate = { ...context.__tableRows.order_items[0], template_id: null };
+        const hydrated = JSON.parse(JSON.stringify(vm.runInContext('_hydrateOrderItemRow(__rowToHydrate)', context)));
+        assert.equal(
+            hydrated.template_id,
+            'nfc-embedded-template',
+            'order item hydration should restore string template_id from item_data when DB column is empty',
+        );
+    }
+
+    {
+        const context = createContext();
         const orderId = 777124;
         const currentItemId = orderId * 1000 + 1;
         const staleItemId = orderId * 1000 + 9;
