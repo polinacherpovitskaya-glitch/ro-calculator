@@ -1,8 +1,8 @@
 # Migration status
 
-Last update: 2026-05-19T17:35:00-03:00
+Last update: 2026-05-19T18:00:00-03:00
 Current block: 5
-Current task within block: Task 2 Molds API TDD
+Current task within block: Task 3 Blanks API TDD
 Branch: block-5-molds-blanks
 Last commit: main `9f913a0` includes Block 4 + warehouse Playwright follow-up
 Tests: Block 4 API suite 52/52; web build passed; Playwright warehouse + shipments/china smoke 2/2; main deploy passed; staging health `db.ok=true`; staging refresh/compare matched.
@@ -176,11 +176,23 @@ Tests: Block 4 API suite 52/52; web build passed; Playwright warehouse + shipmen
   - `marketplace_sets`
 - Added FK constraints from `warehouse_history.mold_id` and `warehouse_history.marketplace_set_id` after the referenced tables exist.
 - Verified migrations 001-005 on a clean temporary Postgres container on the VPS; `app_meta.version` is `005-molds-blanks`.
+- Added molds API tests first, then implemented `ops/api/src/routes/molds.js`.
+- Added `/api/molds` routes:
+  - `GET /api/molds`
+  - `GET /api/molds/:id`
+  - `POST /api/molds`
+  - `PATCH /api/molds/:id`
+  - `DELETE /api/molds/:id`
+  - `GET /api/molds/:id/hardware`
+  - `PUT /api/molds/:id/hardware`
+  - `POST /api/molds/:id/use`
+- Mold use uses Idempotency-Key, a transaction, `SELECT FOR UPDATE` on the mold and touched warehouse items, direct `warehouse_history.type='consume'`, and no reservations.
+- Verified full API suite in temporary VPS containers: 60/60 passing.
 
 ## Next steps for Codex
 
-1. Add molds API tests first.
-2. Implement molds CRUD, hardware replacement, and idempotent `/api/molds/:id/use`.
+1. Add blanks API tests first.
+2. Implement `hw_blanks` and `pkg_blanks` CRUD routes.
 3. Verify API tests in a temporary VPS Postgres container.
 
 ## Quality gates status (Block 2)
@@ -223,7 +235,7 @@ Tests: Block 4 API suite 52/52; web build passed; Playwright warehouse + shipmen
 ## Quality gates status (Block 5)
 
 - [x] `005_molds_blanks.sql` added
-- [ ] Molds API tests passing
+- [x] Molds API tests passing
 - [ ] Blanks API tests passing
 - [ ] Colors API tests passing
 - [ ] Marketplaces API tests passing

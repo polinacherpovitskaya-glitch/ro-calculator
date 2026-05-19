@@ -6,6 +6,7 @@ import employeesRoute from './routes/employees.js';
 import warehouseRoute from './routes/warehouse.js';
 import shipmentsRoute from './routes/shipments.js';
 import chinaRoute from './routes/china.js';
+import moldsRoute from './routes/molds.js';
 
 export function createServer() {
   const app = express();
@@ -18,5 +19,6 @@ export function createServer() {
   app.use('/api/warehouse', warehouseRoute);
   app.use('/api/shipments', shipmentsRoute);
   app.use('/api/china', chinaRoute);
+  app.use('/api/molds', moldsRoute);
   return app;
 }
