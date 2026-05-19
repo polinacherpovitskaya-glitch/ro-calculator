@@ -7313,7 +7313,7 @@ function _canUseWorkModuleRemote() {
 }
 
 function _remoteTimeoutMs(kind = 'load') {
-    const fallback = kind === 'write' ? 5000 : 5000;
+    const fallback = kind === 'write' ? 30000 : 5000;
     const key = kind === 'write' ? '__RO_REMOTE_WRITE_TIMEOUT_MS' : '__RO_REMOTE_LOAD_TIMEOUT_MS';
     if (typeof window !== 'undefined') {
         const value = Number(window[key]);
