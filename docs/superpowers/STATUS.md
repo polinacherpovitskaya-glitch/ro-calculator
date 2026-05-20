@@ -1,11 +1,11 @@
 # Migration status
 
-Last update: 2026-05-19T23:07:55-03:00
+Last update: 2026-05-19T23:12:12-03:00
 Current block: 12
-Current task within block: Telegram task bot switched to Ops API; DB integration tests pass; staging Docker/deploy smoke still pending
+Current task within block: Telegram task bot switched to Ops API; tests pass; blocked on Telegram bot token for staging Docker/Telegram smoke
 Branch: block-12-bot
 Last commit: `26843bb` Align bot binding API with schema
-Tests: VPS temporary Postgres integration passed: API auth+bot routes 11/11, bot package tests 27/27. Bot/API syntax checks passed. Staging Docker bot smoke is still pending. Block 11 staging refresh/compare is still blocked because `SUPABASE_URL` and `SUPABASE_SERVICE_KEY` are absent from `/srv/ops/infra/.env`.
+Tests: VPS temporary Postgres integration passed: API auth+bot routes 11/11, bot package tests 27/27. Full API suite on VPS temporary Postgres passed 146/146; calc suite passed 102/102. `cd ops/web && npm run build` passed. Staging Docker bot smoke is blocked because `/srv/ops/infra/.env` still lacks `TG_BOT_TOKEN`. `OPS_BOT_TOKEN` was generated into `/srv/ops/infra/.env`, but inserting it into `bot_tokens` must wait until migration 013 is deployed on staging. Block 11 staging refresh/compare is still blocked because `SUPABASE_URL` and `SUPABASE_SERVICE_KEY` are absent from `/srv/ops/infra/.env`.
 
 ## What was just done
 
@@ -29,6 +29,13 @@ Tests: VPS temporary Postgres integration passed: API auth+bot routes 11/11, bot
   - Verified Block 12 DB path on VPS temporary Postgres with all migrations:
     - API `auth-routes.test.js` + `bot-routes.test.js`: 11/11 passed.
     - Bot `npm test`: 27/27 passed.
+  - Verified full quality gates available without Telegram secret:
+    - Full API suite on VPS temporary Postgres: 146/146 passed.
+    - Calculator suite on VPS temporary Postgres: 102/102 passed.
+    - `cd ops/web && npm run build`: passed.
+  - Generated `OPS_BOT_TOKEN` into `/srv/ops/infra/.env` without printing it.
+  - Could not insert `OPS_BOT_TOKEN` into live `bot_tokens` yet because staging DB has not deployed migration 013.
+  - Block 12 live Docker/Telegram smoke is blocked on missing `TG_BOT_TOKEN` in `/srv/ops/infra/.env`.
 - Block 11 PR #51 was squash-merged to `main` as `0fa4131`.
 - GitHub Actions main deploy run `26136213203` passed.
 - Live staging health after deploy: `status=ok`, `db.ok=true`.
