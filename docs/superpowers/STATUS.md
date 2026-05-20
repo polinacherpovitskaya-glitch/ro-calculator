@@ -1,47 +1,46 @@
 # Migration status
 
-Last update: 2026-05-19T22:05:11-03:00
-Current block: 9
-Current task within block: Block 9 deployed; staging smoke passed; preparing test-only smoke fix PR
-Branch: block-9-orders-smoke-fix
-Last commit: `7096109` Fix live order recalc (#48)
-Tests: Block 9 main deploy passed. Hotfix main deploy passed. Live staging refresh/compare passed after deploy and again after smoke cleanup. Orders Playwright smoke passed 1/1. Hotfix verification passed locally/VPS: `ops/web` build, API 127/127, calc 102/102.
+Last update: 2026-05-19T22:15:12-03:00
+Current block: 10
+Current task within block: Product-images storage migration code ready; live Selectel bucket/env is still needed before staging migration/smoke
+Branch: block-10-product-images
+Last commit: `a3f2448` Preserve dates while signing Selectel URLs
+Tests: Full API suite on VPS temporary Postgres passed 130/130. Calculator suite passed 102/102. Live storage migration and photo smoke not run yet because `/srv/ops/infra/.env` does not have `S3_BUCKET_PRODUCT_IMAGES`.
 
 ## What was just done
 
-- Block 9 PR #47 was squash-merged to `main` as `2a65ba7`.
-- GitHub Actions main deploy run `26134232277` passed.
-- Hotfix PR #48 was squash-merged to `main` as `7096109`.
-- GitHub Actions main deploy run `26134738251` passed.
-- Refreshed live staging from Supabase after Block 9 deploy:
-  - orders 190/190
-  - order_items 738/738
-  - order_factuals 3/3
-  - warehouse_reservations 777/777
-  - all other migrated counts matched
-- Ran `tests/playwright/orders.spec.ts` against staging with a temporary staging admin user. It created a new order and two positions, then exposed a real bug: `/api/orders/:id/recalc` returned `calcOrder input is invalid` for a new order without saved legacy `calculator_data`.
-- Added hotfix on `block-9-orders-hotfix`:
-  - Orders API recalc falls back to a live calc input built from `order_items` when no saved snapshot exists.
-  - Order editor live preview now sends a valid calc input instead of raw `{ order, items }`.
-  - Added API regression test for recalc of a live order item without saved snapshot.
-- Verified hotfix:
-  - `cd ops/web && npm run build`: passed
-  - `node --check ops/api/src/routes/orders.js ops/api/test/orders.test.js`: passed
-  - Full API suite on VPS temporary Postgres: 127/127 passed
-  - `npm run test:calc` on VPS temporary Postgres: 102/102 passed
-- Re-ran `tests/playwright/orders.spec.ts` after hotfix deploy. The functional flow passed, but the test assertion had to be corrected because item names are stored in input values, not table textContent.
-- After correcting the smoke assertion locally, `tests/playwright/orders.spec.ts` passed 1/1 against staging.
-- Refreshed staging again after smoke and deleted the temporary smoke auth user. Final compare:
-  - orders 190/190
-  - order_items 738/738
-  - order_factuals 3/3
-  - warehouse_reservations 804/804
-  - all other migrated counts matched
-- Final staging health: `db.ok=true`.
-- Next immediate steps:
-  - commit/push/merge test-only smoke assertion fix
-  - update Block 9 final status
-  - create Block 10 branch from fresh `origin/main`
+- Block 9 PR #47, hotfix PR #48, and smoke assertion PR #49 were merged to `main`; Block 9 is deployed and staging orders smoke passed.
+- Created Block 10 branch `block-10-product-images` from fresh `origin/main`.
+- Read the Block 10 plan: migrate Supabase Storage bucket `product-images` to private Selectel Object Storage bucket `ro-ops-product-images`, then rewrite DB URLs to `selectel://bucket/key` and return presigned URLs from the API.
+- Confirmed VPS `/srv/ops/infra/.env` currently has backup S3 credentials and `S3_BUCKET`, but does not yet have `S3_BUCKET_PRODUCT_IMAGES`.
+- Added multi-bucket support to `ops/api/src/s3.js`:
+  - `uploadObject`, `deleteObject`, and `presignedGetUrl` accept an explicit bucket.
+  - `selectel://bucket/key` is parsed and signed against that bucket.
+  - `S3_MOCK_DIR` keeps tests deterministic with `mock-s3://bucket/key` URLs.
+- Added recursive API response signing middleware:
+  - `signSelectelUrls()` walks API JSON responses and replaces `selectel://...` strings with presigned URLs.
+  - The signer preserves `Date` and other serializable objects so existing API responses keep their shape.
+- Added `S3_BUCKET_PRODUCT_IMAGES=ro-ops-product-images` to `ops/infra/.env.example`.
+- Added `ops/scripts/migrate-storage-product-images.mjs`:
+  - scans `warehouse_items.photo_url`
+  - scans nested JSON in `order_items.item_data`
+  - scans nested JSON in `product_templates.data`
+  - downloads from Supabase `product-images`
+  - uploads to Selectel using the explicit product-images bucket
+  - rewrites URLs to `selectel://ro-ops-product-images/product-images/<key>`
+  - remains idempotent by only selecting Supabase product-images URLs.
+- Added API regression tests for:
+  - explicit S3 bucket uploads and mock signing
+  - recursive Selectel URL signing
+  - warehouse item photo URL signing in API responses.
+- Verified Block 10 code on a temporary VPS Postgres:
+  - Full API suite: 130/130 passed
+  - Calculator suite: 102/102 passed
+- Remaining Block 10 blocker:
+  - create private Selectel bucket `ro-ops-product-images`
+  - grant the existing service user access
+  - add `S3_BUCKET_PRODUCT_IMAGES=ro-ops-product-images` to `/srv/ops/infra/.env`
+  - then run `ops/scripts/migrate-storage-product-images.mjs`, refresh/compare, deploy, and smoke 5 warehouse/order product images.
 - Block 8 PR #46 was squash-merged to `main` as `9ced98a`.
 - Added full-order golden master HTTP integration test covering 24 real legacy order fixtures via `/api/orders`, `/items`, and `/recalc`.
 - Raised API JSON body limit to `5mb` after the full-order test exposed real legacy `calculator_data` payloads over Express' default limit.
