@@ -19,6 +19,7 @@ import {
   taskDetail,
   text,
   timeValue,
+  codedError,
 } from './work-utils.js';
 
 const router = Router();
@@ -224,11 +225,11 @@ router.patch(
           let value = req.body[field];
           if (field === 'title') {
             value = text(value);
-            if (!value) return error(res, 400, 'INVALID_INPUT', 'title обязателен');
+            if (!value) throw codedError('INVALID_INPUT', 'title обязателен');
           } else if (field === 'status') {
-            if (!TASK_STATUSES.has(value)) return error(res, 400, 'INVALID_INPUT', 'Некорректный status');
+            if (!TASK_STATUSES.has(value)) throw codedError('INVALID_INPUT', 'Некорректный status');
           } else if (field === 'priority') {
-            if (!TASK_PRIORITIES.has(value)) return error(res, 400, 'INVALID_INPUT', 'Некорректный priority');
+            if (!TASK_PRIORITIES.has(value)) throw codedError('INVALID_INPUT', 'Некорректный priority');
           } else if (field.endsWith('_id') || field === 'area_id') {
             value = integer(value);
           } else if (field === 'due_date') {
@@ -239,7 +240,7 @@ router.patch(
             value = numeric(value, 0);
           } else if (field === 'extras') {
             value = jsonObject(value);
-            if (value === undefined) return error(res, 400, 'INVALID_INPUT', 'extras должен быть JSON-объектом');
+            if (value === undefined) throw codedError('INVALID_INPUT', 'extras должен быть JSON-объектом');
           } else {
             value = value === null ? null : text(value);
           }
