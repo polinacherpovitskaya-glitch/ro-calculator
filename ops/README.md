@@ -4,7 +4,7 @@ Operational core of `recycleobject.ru`: migration target for the old Vercel + Su
 
 ## Status
 
-- Stage A — Build, Blocks 1-5 merged; Block 6 bugs in progress
+- Stage A — Build, Blocks 1-14 merged; Block 15 analytics in progress
 - Staging domain: `https://ops-staging.recycleobject.ru`
 - Production cutover: not here; Stage C is owner-run only
 - UptimeRobot: deferred/manual follow-up, not blocking the migration blocks
@@ -61,6 +61,10 @@ tests/playwright/warehouse.spec.ts
 tests/playwright/shipments-china.spec.ts
 tests/playwright/molds-blanks.spec.ts
 tests/playwright/bugs.spec.ts
+tests/playwright/orders.spec.ts
+tests/playwright/work-management.spec.ts
+tests/playwright/time-payroll.spec.ts
+tests/playwright/analytics.spec.ts
 ```
 
 They expect:
@@ -638,6 +642,34 @@ Verification:
 - `npm run build` in `ops/web`.
 - `tests/playwright/orders.spec.ts` covers create, add items, recalc, reload persistence, and consume-hardware. Run it after Block 9 is deployed to staging.
 
+## Analytics
+
+Block 15 adds read-only reporting endpoints and a Vue analytics screen. The legacy `js/analytics.js` module redirects to `Factual`, so the inventory lives in `ops/api/src/analytics/README.md`.
+
+Endpoints:
+
+```text
+GET /api/analytics/summary
+GET /api/analytics/revenue-by-month
+GET /api/analytics/top-clients
+GET /api/analytics/status-dynamics
+GET /api/analytics/production-load
+GET /api/analytics/product-types
+GET /api/analytics/factual-margin
+```
+
+Screen:
+
+```text
+/analytics
+```
+
+Rules:
+
+- No new tables; reports are SELECT-only over `orders`, `order_items`, `order_factuals`, `time_entries`, and `employees`.
+- Known legacy analytics bugs are carried forward intentionally. Business/reporting fixes belong after Stage D unless they block cutover.
+- Staging refresh from Supabase is still blocked until `SUPABASE_URL` and `SUPABASE_SERVICE_KEY` are present in `/srv/ops/infra/.env`.
+
 ## Current Infra
 
 | Parameter | Value |
@@ -653,4 +685,4 @@ Verification:
 
 ## Next
 
-Finish Block 9 PR review/deploy, run staging refresh/compare, then run the orders Playwright smoke and manual 5-order staging comparison.
+Finish Block 15 PR review/deploy, smoke `/analytics` on staging, then continue with Block 16 remaining settings.

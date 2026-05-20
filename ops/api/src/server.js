@@ -25,6 +25,7 @@ import botRoute from './routes/bot.js';
 import timeRoute from './routes/time.js';
 import vacationsRoute from './routes/vacations.js';
 import payrollRoute from './routes/payroll.js';
+import analyticsRoute from './routes/analytics.js';
 import { selectelUrlSigningMiddleware } from './s3.js';
 
 export function createServer() {
@@ -58,5 +59,6 @@ export function createServer() {
   app.use('/api/time-entries', timeRoute);
   app.use('/api/vacations', vacationsRoute);
   app.use('/api/payroll', payrollRoute);
+  app.use('/api/analytics', analyticsRoute);
   return app;
 }
