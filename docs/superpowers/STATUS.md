@@ -4,7 +4,7 @@ Last update: 2026-05-19T22:23:38-03:00
 Current block: 10
 Current task within block: Product-images storage migration completed as staging no-op; preparing PR
 Branch: block-10-product-images
-Last commit: pending local commit for lazy Supabase credentials in product-images migration
+Last commit: `2653927` Allow product image migration without Supabase creds when empty
 Tests: Full API suite on VPS temporary Postgres passed 130/130. Calculator suite passed 102/102. Targeted S3 tests passed 3/3. Product-images migration ran twice on staging and was idempotent no-op because there are currently 0 legacy product image URLs in migrated tables.
 
 ## What was just done
