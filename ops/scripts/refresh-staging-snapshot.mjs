@@ -79,6 +79,7 @@ async function main() {
     '05-bugs',
     '06-production',
     '08-work-management',
+    '09-time-payroll',
   ]) {
     runRefreshScript(script);
   }

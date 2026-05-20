@@ -67,6 +67,8 @@ const TABLES = [
   'work_activity',
   'work_templates',
   'task_notification_events',
+  'time_entries',
+  'app_vacations',
 ];
 
 function parseJson(value) {

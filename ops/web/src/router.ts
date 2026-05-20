@@ -28,6 +28,9 @@ import TasksListView from './views/TasksListView.vue';
 import ProjectsListView from './views/ProjectsListView.vue';
 import AreasView from './views/AreasView.vue';
 import GanttView from './views/GanttView.vue';
+import TimeTrackingView from './views/TimeTrackingView.vue';
+import VacationsView from './views/VacationsView.vue';
+import PayrollView from './views/PayrollView.vue';
 
 const router = createRouter({
   history: createWebHistory(),
@@ -60,6 +63,9 @@ const router = createRouter({
     { path: '/projects', name: 'projects', component: ProjectsListView, meta: { requiresAuth: true } },
     { path: '/areas', name: 'areas', component: AreasView, meta: { requiresAuth: true } },
     { path: '/gantt', name: 'gantt', component: GanttView, meta: { requiresAuth: true } },
+    { path: '/time-tracking', name: 'time-tracking', component: TimeTrackingView, meta: { requiresAuth: true } },
+    { path: '/vacations', name: 'vacations', component: VacationsView, meta: { requiresAuth: true } },
+    { path: '/payroll', name: 'payroll', component: PayrollView, meta: { requiresAuth: true } },
   ],
 });
 
