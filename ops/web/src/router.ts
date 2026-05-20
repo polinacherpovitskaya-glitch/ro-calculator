@@ -24,6 +24,10 @@ import ProductionPlanView from './views/ProductionPlanView.vue';
 import IndirectCostsView from './views/IndirectCostsView.vue';
 import OrdersListView from './views/OrdersListView.vue';
 import OrderEditorView from './views/OrderEditorView.vue';
+import TasksListView from './views/TasksListView.vue';
+import ProjectsListView from './views/ProjectsListView.vue';
+import AreasView from './views/AreasView.vue';
+import GanttView from './views/GanttView.vue';
 
 const router = createRouter({
   history: createWebHistory(),
@@ -52,6 +56,10 @@ const router = createRouter({
     { path: '/indirect-costs', name: 'indirect-costs', component: IndirectCostsView, meta: { requiresAuth: true } },
     { path: '/orders', name: 'orders', component: OrdersListView, meta: { requiresAuth: true } },
     { path: '/orders/:id', name: 'order-editor', component: OrderEditorView, meta: { requiresAuth: true } },
+    { path: '/tasks', name: 'tasks', component: TasksListView, meta: { requiresAuth: true } },
+    { path: '/projects', name: 'projects', component: ProjectsListView, meta: { requiresAuth: true } },
+    { path: '/areas', name: 'areas', component: AreasView, meta: { requiresAuth: true } },
+    { path: '/gantt', name: 'gantt', component: GanttView, meta: { requiresAuth: true } },
   ],
 });
 
