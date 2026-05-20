@@ -1,14 +1,98 @@
 # Migration status
 
-Last update: 2026-05-19T17:15:29-03:00
-Current block: 8
-Current task within block: PR opened; waiting for review/CI
-Branch: block-8-production
-Last commit: `d45592f` Record Block 7 merge and deploy (local branch includes this status carry-over; `main` was not pushed directly)
-Tests: `ops/api npm run typecheck` passed; `ops/api npm run test:calc` passed 77/77; `ops/web npm run build` passed; full Postgres-backed API suite passed 111/111 on a temporary VPS Postgres container with migrations 001-007.
+Last update: 2026-05-19T18:15:44-03:00
+Current block: 9
+Current task within block: Task 10 — ready to push Block 9 PR
+Branch: block-9-orders
+Last commit: `9238946` Add orders UI and golden master smoke
+Tests: Full Postgres-backed API suite passed 126/126 on a temporary VPS Postgres container with migrations 001-008. Calc suite passed 102/102, including 24 full-order HTTP API golden masters. `ops/web` build passed. Orders refresh/compare passed on a temporary VPS Postgres container with real Supabase read data.
 
 ## What was just done
 
+- Block 8 PR #46 was squash-merged to `main` as `9ced98a`.
+- Added full-order golden master HTTP integration test covering 24 real legacy order fixtures via `/api/orders`, `/items`, and `/recalc`.
+- Raised API JSON body limit to `5mb` after the full-order test exposed real legacy `calculator_data` payloads over Express' default limit.
+- Added `POST /api/orders/:id/clone` and a Postgres-backed API test for cloning a draft copy with items.
+- Added Orders Vue API wrapper, Pinia store, `/orders`, `/orders/new`, and `/orders/:id`.
+- Added order editor tabs/components:
+  - header/actions/status
+  - items inline editing
+  - add item dialog
+  - consume hardware dialog
+  - calculator snapshot/live preview tab
+  - production tab
+  - factual tab
+  - history tab
+- Decided and documented that factuals live inside the order editor for Block 9; separate `/factual` analytics remains deferred.
+- Added `tests/playwright/orders.spec.ts` for create order, add 2 positions, recalc, reload persistence, and consume-hardware.
+- Verified:
+  - `cd ops/web && npm run build`: passed
+  - `node --check` for changed API JS files/tests: passed
+  - Full API suite on VPS temporary Postgres: 126/126 passed
+  - `npm run test:calc` on VPS temporary Postgres: 102/102 passed
+- Remaining Block 9 staging-only checks after PR merge/deploy:
+  - run staging refresh/compare with `07-orders`
+  - run `tests/playwright/orders.spec.ts` against staging
+  - manually compare 5 real active orders on staging, копейка-в-копейку
+- GitHub Actions main deploy run `26124057155` passed.
+- Refreshed live staging from Supabase after Block 8 deploy using the Node 20 container path because host `node` is not installed on the VPS:
+  - employees 14/14
+  - warehouse_items 227/227
+  - warehouse_reservations 643/643
+  - warehouse_history 1/1
+  - shipments 13/13
+  - shipment_items 62/62
+  - china_purchases 14/14
+  - china_purchase_items 45/45
+  - china_catalog 103/103
+  - molds 53/53
+  - mold_hardware 5/5
+  - mold_usage_log 0/0
+  - hw_blanks 61/61
+  - pkg_blanks 12/12
+  - app_colors 40/40
+  - marketplace_sets 43/43
+  - bug_reports 10/10
+  - bug_attachments 8/8
+  - product_templates 0/0
+  - production_calendar_days 0/0
+  - production_plan_entries 0/0
+  - indirect_costs 0/0
+- Verified Block 8 live staging smoke:
+  - login: 200
+  - `/templates`, `/production/calendar`, `/production/plan`, `/indirect-costs`: HTTP 200
+  - calendar update: 200
+  - template create: 201
+  - indirect cost create: 201
+  - production plan create: 201
+- Created Block 9 working branch `block-9-orders` from fresh `origin/main`.
+- Read Block 9 plan plus required warehouse interaction map and bug classes B/C/D/E/F/G.
+- Added `ops/db/migrations/008_orders.sql` with `orders`, `order_items`, `order_factuals`, and `order_status_history`.
+- Added `NOT VALID` FKs from `warehouse_reservations.order_id` and `warehouse_history.order_id` to `orders(id)` so deploy is safe against pre-refresh staging rows while new rows are still enforced.
+- Verified migrations 001-008 apply cleanly in a temporary VPS Postgres container.
+- Added initial Orders/Factual API implementation:
+  - `GET/POST/PATCH/DELETE /api/orders`
+  - `GET /api/orders/:id` with items, factual, status history, and `ETag`
+  - `POST/PATCH/DELETE /api/orders/:id/items`
+  - `POST /api/orders/:id/status` with state-machine validation and status history
+  - `POST /api/orders/:id/recalc`
+  - `POST /api/orders/:id/consume-hardware`
+  - `GET/POST/PATCH /api/orders/:id/factual`
+  - `POST /api/orders/:id/factual/recalc`
+  - `POST /api/internal/cleanup-reservations`
+- Added `ops/api/src/cron/reservation-cleanup.js`.
+- Added `ops/api/test/orders.test.js` covering CRUD, ETag conflict, item reservation rebuild, idempotent consume, insufficient stock, final-order rejection, reservation split, status transitions, cleanup, delete cascade, recalc, and factual recalc.
+- Verified full API suite on temporary VPS Postgres: 125/125 passing.
+- Added `ops/scripts/refresh/07-orders.mjs` for orders, order_items, and order_factuals.
+- Updated staging refresh order so `07-orders` runs before warehouse reservations/history, allowing Block 9 order FKs to be enforced for new refresh rows.
+- Updated warehouse refresh to drop order reservations whose order no longer exists and to null invalid history `order_id` values before insert.
+- Updated `compare-datasets.mjs` with `orders`, `order_items`, and `order_factuals`.
+- Verified refresh/compare on temporary VPS Postgres with real Supabase read data:
+  - orders 190/190
+  - order_items 738/738
+  - order_factuals 3/3
+  - warehouse_reservations 642/642 after dropping reservations for skipped/deleted orders
+  - all other previously migrated counts matched
 - Created Block 8 working branch `block-8-production` from local `main` after Block 7 merge/deploy status was recorded. This preserves the status update without pushing `main` directly.
 - Added migration `ops/db/migrations/007_production.sql`:
   - `product_templates`

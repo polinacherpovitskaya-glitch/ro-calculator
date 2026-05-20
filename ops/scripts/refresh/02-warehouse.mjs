@@ -136,6 +136,7 @@ async function refreshItems() {
 
 async function refreshReservations() {
   const reservationRows = await fetchAll('warehouse_reservations');
+  const orderIds = new Set((await pool.query(`SELECT id::text FROM orders`)).rows.map((row) => row.id));
   const reservations = reservationRows.flatMap((row) => {
     if (!row.reservations_data) return [row];
     const parsed = parseJson(row.reservations_data);
@@ -154,6 +155,10 @@ async function refreshReservations() {
     const orderId = numberOrNull(reservation.order_id, reservation.orderId);
     const source = mapReservationSource(reservation.source, !!orderId);
     if (source === 'order' && !orderId) {
+      dropped += 1;
+      continue;
+    }
+    if (source === 'order' && !orderIds.has(String(orderId))) {
       dropped += 1;
       continue;
     }
@@ -194,6 +199,7 @@ async function refreshReservations() {
 
 async function refreshHistory() {
   const history = await fetchAll('warehouse_history');
+  const orderIds = new Set((await pool.query(`SELECT id::text FROM orders`)).rows.map((row) => row.id));
   console.log(`warehouse_history: ${history.length}`);
   let dropped = 0;
 
@@ -216,6 +222,7 @@ async function refreshHistory() {
       continue;
     }
 
+    const orderId = numberOrNull(row.order_id);
     await pool.query(
       `INSERT INTO warehouse_history
          (id, item_id, type, qty_before, qty_after, qty_change, order_id, shipment_id, mold_id, marketplace_set_id, audit_id, actor_name, note, details, created_at)
@@ -228,7 +235,7 @@ async function refreshHistory() {
         numberOrNull(row.qty_before, row.before),
         numberOrNull(row.qty_after, row.after),
         qtyChange,
-        numberOrNull(row.order_id),
+        orderId && orderIds.has(String(orderId)) ? orderId : null,
         numberOrNull(row.shipment_id),
         numberOrNull(row.mold_id),
         numberOrNull(row.marketplace_set_id),
