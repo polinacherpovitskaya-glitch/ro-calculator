@@ -27,9 +27,16 @@ function getProductImagesBucket() {
   return process.env.S3_BUCKET_PRODUCT_IMAGES;
 }
 
+function getMoldPhotosBucket() {
+  return process.env.S3_BUCKET_MOLD_PHOTOS;
+}
+
 function getEndpoint(bucket = undefined) {
   if (bucket && bucket === getProductImagesBucket() && process.env.S3_ENDPOINT_PRODUCT_IMAGES) {
     return process.env.S3_ENDPOINT_PRODUCT_IMAGES;
+  }
+  if (bucket && bucket === getMoldPhotosBucket() && process.env.S3_ENDPOINT_MOLD_PHOTOS) {
+    return process.env.S3_ENDPOINT_MOLD_PHOTOS;
   }
   return requireEnv('S3_ENDPOINT');
 }
@@ -38,7 +45,10 @@ function getRegion(bucket = undefined) {
   if (bucket && bucket === getProductImagesBucket() && process.env.S3_REGION_PRODUCT_IMAGES) {
     return process.env.S3_REGION_PRODUCT_IMAGES;
   }
-  return process.env.S3_REGION || 'ru-1';
+  if (bucket && bucket === getMoldPhotosBucket() && process.env.S3_REGION_MOLD_PHOTOS) {
+    return process.env.S3_REGION_MOLD_PHOTOS;
+  }
+  return process.env.S3_REGION || 'ru-3';
 }
 
 function getClient(bucket = undefined) {

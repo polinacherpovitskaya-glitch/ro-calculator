@@ -60,3 +60,36 @@ test('presignedGetUrl can use product-images endpoint when bucket is regional', 
     }
   }
 });
+
+test('presignedGetUrl can use mold-photos endpoint when bucket is regional', async () => {
+  const previous = {
+    S3_MOCK_DIR: process.env.S3_MOCK_DIR,
+    S3_ENDPOINT: process.env.S3_ENDPOINT,
+    S3_ENDPOINT_MOLD_PHOTOS: process.env.S3_ENDPOINT_MOLD_PHOTOS,
+    S3_BUCKET_MOLD_PHOTOS: process.env.S3_BUCKET_MOLD_PHOTOS,
+    S3_ACCESS_KEY: process.env.S3_ACCESS_KEY,
+    S3_SECRET_KEY: process.env.S3_SECRET_KEY,
+  };
+
+  try {
+    delete process.env.S3_MOCK_DIR;
+    process.env.S3_ENDPOINT = 'https://s3.ru-3.storage.selcloud.ru';
+    process.env.S3_ENDPOINT_MOLD_PHOTOS = 'https://s3.ru-1.storage.selcloud.ru';
+    process.env.S3_BUCKET_MOLD_PHOTOS = 'ro-ops-mold-photos';
+    process.env.S3_ACCESS_KEY = 'test-access-key';
+    process.env.S3_SECRET_KEY = 'test-secret-key';
+
+    const url = await presignedGetUrl('selectel://ro-ops-mold-photos/mold-photos/a.png');
+
+    assert.match(url, /^https:\/\/s3\.ru-1\.storage\.selcloud\.ru\//);
+    assert.match(url, /mold-photos\/a\.png/);
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  }
+});
