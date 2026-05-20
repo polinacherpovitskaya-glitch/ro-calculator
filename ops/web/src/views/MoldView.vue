@@ -14,6 +14,9 @@
     <p v-if="error" class="error">{{ error }}</p>
 
     <section class="panel">
+      <div v-if="form.photo_url" class="photo-preview">
+        <img :src="form.photo_url" :alt="form.name || 'Фото молда'" />
+      </div>
       <div class="grid">
         <label>Название <input v-model="form.name" /></label>
         <label>Тип <input v-model="form.type" /></label>
@@ -26,6 +29,7 @@
           </select>
         </label>
         <label>Лимит <input v-model.number="form.usage_limit" type="number" min="0" /></label>
+        <label class="wide">Фото URL <input v-model="form.photo_url" /></label>
         <label class="wide">Заметка <textarea v-model="form.note" rows="2" /></label>
       </div>
       <footer class="actions"><button type="button" :disabled="saving" @click="saveMold">Сохранить</button></footer>
@@ -82,7 +86,16 @@ const route = useRoute();
 const warehouse = useWarehouseStore();
 const saving = ref(false);
 const error = ref('');
-const form = reactive({ id: 0, name: '', type: '', status: 'active', usage_count: 0, usage_limit: null as number | null, note: '' });
+const form = reactive({
+  id: 0,
+  name: '',
+  type: '',
+  status: 'active',
+  usage_count: 0,
+  usage_limit: null as number | null,
+  photo_url: '',
+  note: '',
+});
 const hardwareDraft = ref<Array<{ warehouse_item_id: number; qty_per_use: number; note: string }>>([]);
 const useDraft = reactive({ units: 1, operator_name: '', order_id: null as number | null, note: '' });
 
@@ -100,6 +113,7 @@ async function loadMold() {
     status: mold.status,
     usage_count: mold.usage_count,
     usage_limit: mold.usage_limit,
+    photo_url: mold.photo_url || '',
     note: mold.note || '',
   });
   hardwareDraft.value = hardware.map((item) => ({
@@ -127,6 +141,7 @@ async function saveMold() {
       type: form.type || null,
       status: form.status,
       usage_limit: form.usage_limit,
+      photo_url: form.photo_url || null,
       note: form.note || null,
     });
     form.usage_count = mold.usage_count;
@@ -186,5 +201,7 @@ async function useMold() {
 .panel { background: white; border: 1px solid #d9e2ec; border-radius: 8px; padding: 1rem; } .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: .8rem; } .wide { grid-column: 1 / -1; }
 label { display: grid; gap: .3rem; color: #52606d; font-size: .85rem; } input, select, textarea, button, a { box-sizing: border-box; font: inherit; } input, select, textarea { min-height: 2.25rem; border: 1px solid #cbd5df; border-radius: 6px; padding: .35rem .55rem; background: white; }
 button, a { display: inline-flex; align-items: center; min-height: 2.25rem; border: 1px solid #b8c2cc; border-radius: 6px; background: white; padding: 0 .75rem; color: #1f2933; text-decoration: none; cursor: pointer; }
+.photo-preview { width: min(22rem, 100%); aspect-ratio: 4 / 3; margin-bottom: 1rem; border-radius: 8px; overflow: hidden; background: #eef2f6; border: 1px solid #d9e2ec; }
+.photo-preview img { width: 100%; height: 100%; object-fit: cover; display: block; }
 table { width: 100%; border-collapse: collapse; } th, td { padding: .65rem; border-bottom: 1px solid #eef2f6; text-align: left; } th { color: #52606d; font-size: .78rem; text-transform: uppercase; } td input, td select { width: 100%; min-width: 8rem; } .number { max-width: 7rem; } .right { text-align: right; } .actions { justify-content: flex-end; margin-top: 1rem; } .error { max-width: 78rem; margin: 0 auto 1rem; color: #b42318; }
 </style>

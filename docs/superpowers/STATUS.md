@@ -1,14 +1,35 @@
 # Migration status
 
-Last update: 2026-05-20T11:31:48-03:00
+Last update: 2026-05-20T11:40:49-03:00
 Current block: 13
-Current task within block: Mold photos storage migration code complete; PR/merge/deploy next, then run staging migration
-Branch: block-13-mold-photos
-Last commit: `eb92279` Block 12 follow-up: Telegram proxy support
-Tests: Block 13 targeted S3 test passed locally (4/4). On VPS temporary Postgres, targeted API tests passed (molds+s3 14/14) and `migrate-storage-mold-photos.mjs` no-op passed (`molds=0`). Full API suite on VPS temporary Postgres passed (151/151). Calculator suite passed (102/102). Selectel bucket `ro-ops-mold-photos` was created in ru-3 and write/read/delete smoke passed. Staging currently has 53 molds, 36 non-empty `photo_url`, 32 legacy Supabase `mold-photos` URLs, and 0 Selectel mold-photo URLs. Live staging DB migration is intentionally not run until this branch deploys, because API compose must pass S3 env before `molds.photo_url` is rewritten to `selectel://...`. `/srv/ops/infra/.env` now has `S3_BUCKET_MOLD_PHOTOS=ro-ops-mold-photos` and `S3_REGION=ru-3`. `SUPABASE_URL` and `SUPABASE_SERVICE_KEY` are still absent, but the Block 13 migrator first downloads public legacy `photo_url` HTTPS URLs and only requires Supabase secrets as fallback.
+Current task within block: Mold photos migrated on staging; follow-up UI photo display PR in progress
+Branch: block-13-mold-photos-display
+Last commit: `1a15d8e` Block 13: migrate mold photos storage
+Tests: Block 13 PR #54 passed `test-and-deploy`, was squash-merged as `1a15d8e`, and main deploy run `26169578150` passed. Staging health is ok with `db.ok=true`. Live staging migration completed: `molds=32`, legacy Supabase `mold-photos` URLs are now 0, Selectel mold-photo URLs are 32, non-empty mold photos remain 36. API signing smoke passed: `/api/molds` returns `https://s3.ru-3.storage.selcloud.ru/...` presigned URLs and a migrated JPEG returned HTTP 200. Follow-up branch adds actual Vue photo thumbnails/detail preview because the existing ops UI accepted `photo_url` but did not render mold photos; `cd ops/web && npm run build` passed.
 
 ## What was just done
 
+- Block 13 post-merge:
+  - PR #54 was squash-merged to `main` as `1a15d8e`.
+  - GitHub Actions main deploy run `26169578150` passed.
+  - Staging health after deploy: `status=ok`, `db.ok=true`.
+  - Verified deployed API container receives:
+    - `S3_ENDPOINT=https://s3.ru-3.storage.selcloud.ru`
+    - `S3_REGION=ru-3`
+    - `S3_BUCKET_MOLD_PHOTOS=ro-ops-mold-photos`
+  - Ran live staging mold-photo migration:
+    - `Mold photos migration complete. molds=32`
+    - `legacy_after=0`
+    - `selectel_after=32`
+    - `photo_nonempty=36`
+  - Verified API signing and object availability:
+    - `/api/molds` returns presigned `https://s3.ru-3.storage.selcloud.ru/...` URLs for migrated mold photos.
+    - One migrated image URL returned `image_http=200`, `content_type=image/jpeg`.
+  - Found that the current Vue ops UI did not render mold photos, even though it stored/loaded `photo_url`.
+  - Created follow-up branch `block-13-mold-photos-display` from fresh `origin/main`.
+  - Added mold photo thumbnails to `/molds`.
+  - Added mold detail photo preview and editable `photo_url` field to `/molds/:id`.
+  - Verified `cd ops/web && npm run build`: passed.
 - Block 13 progress:
   - Created branch `block-13-mold-photos` from fresh `origin/main` after PR #53 merge.
   - Read Block 13 plan: migrate Supabase Storage bucket `mold-photos` to Selectel bucket `ro-ops-mold-photos`, rewrite `molds.photo_url` to `selectel://bucket/key`, and verify photos on staging.
