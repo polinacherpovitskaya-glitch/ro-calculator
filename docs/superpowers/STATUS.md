@@ -1,14 +1,37 @@
 # Migration status
 
-Last update: 2026-05-19T18:15:44-03:00
+Last update: 2026-05-19T21:58:00-03:00
 Current block: 9
-Current task within block: Task 10 — ready to push Block 9 PR
-Branch: block-9-orders
-Last commit: `9238946` Add orders UI and golden master smoke
-Tests: Full Postgres-backed API suite passed 126/126 on a temporary VPS Postgres container with migrations 001-008. Calc suite passed 102/102, including 24 full-order HTTP API golden masters. `ops/web` build passed. Orders refresh/compare passed on a temporary VPS Postgres container with real Supabase read data.
+Current task within block: Post-merge staging smoke hotfix
+Branch: block-9-orders-hotfix
+Last commit: `2a65ba7` Block 9: Orders (#47)
+Tests: Block 9 main deploy passed. Live staging refresh/compare passed after deploy. Orders Playwright smoke found a live-order recalc bug; hotfix is in progress. Hotfix verification passed locally/VPS: `ops/web` build, API 127/127, calc 102/102.
 
 ## What was just done
 
+- Block 9 PR #47 was squash-merged to `main` as `2a65ba7`.
+- GitHub Actions main deploy run `26134232277` passed.
+- Refreshed live staging from Supabase after Block 9 deploy:
+  - orders 190/190
+  - order_items 738/738
+  - order_factuals 3/3
+  - warehouse_reservations 777/777
+  - all other migrated counts matched
+- Ran `tests/playwright/orders.spec.ts` against staging with a temporary staging admin user. It created a new order and two positions, then exposed a real bug: `/api/orders/:id/recalc` returned `calcOrder input is invalid` for a new order without saved legacy `calculator_data`.
+- Added hotfix on `block-9-orders-hotfix`:
+  - Orders API recalc falls back to a live calc input built from `order_items` when no saved snapshot exists.
+  - Order editor live preview now sends a valid calc input instead of raw `{ order, items }`.
+  - Added API regression test for recalc of a live order item without saved snapshot.
+- Verified hotfix:
+  - `cd ops/web && npm run build`: passed
+  - `node --check ops/api/src/routes/orders.js ops/api/test/orders.test.js`: passed
+  - Full API suite on VPS temporary Postgres: 127/127 passed
+  - `npm run test:calc` on VPS temporary Postgres: 102/102 passed
+- Next immediate steps:
+  - commit/push hotfix PR
+  - merge hotfix after check
+  - wait main deploy
+  - rerun staging refresh/compare and orders Playwright smoke
 - Block 8 PR #46 was squash-merged to `main` as `9ced98a`.
 - Added full-order golden master HTTP integration test covering 24 real legacy order fixtures via `/api/orders`, `/items`, and `/recalc`.
 - Raised API JSON body limit to `5mb` after the full-order test exposed real legacy `calculator_data` payloads over Express' default limit.

@@ -103,6 +103,26 @@ function patchLocal(patch: Partial<OrderInput>) {
   dirty.value = true;
   schedulePreview();
 }
+function itemRevenue(item: OrderItem) {
+  const qty = Number(item.qty || 0);
+  const unitPrice = Number(item.unit_price || 0);
+  return item.line_total === null || item.line_total === undefined ? qty * unitPrice : Number(item.line_total);
+}
+function calcPreviewInput() {
+  const settings = ((order.calculator_data || {}) as Record<string, unknown>).settings || {};
+  return {
+    id: order.id,
+    order_name: order.order_name || undefined,
+    client_name: order.client_name || undefined,
+    status: order.status,
+    products: [],
+    hardwareItems: [],
+    packagingItems: [],
+    pendantItems: [],
+    extraCosts: items.value.map((item) => ({ item_type: 'extra_cost', name: item.name || 'Позиция заказа', amount: itemRevenue(item) })),
+    settings,
+  };
+}
 async function saveOrder() {
   saving.value = true;
   error.value = '';
@@ -156,7 +176,7 @@ async function preview() {
   try {
     const result = await apiFetch<Record<string, unknown>>('/api/calc/preview', {
       method: 'POST',
-      body: JSON.stringify({ order: { ...order }, items: items.value }),
+      body: JSON.stringify(calcPreviewInput()),
     });
     Object.assign(order, {
       calculator_data: { ...(order.calculator_data || {}), ...result },
