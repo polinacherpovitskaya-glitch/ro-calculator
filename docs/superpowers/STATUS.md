@@ -1,14 +1,68 @@
 # Migration status
 
-Last update: 2026-05-19T22:45:36-03:00
-Current block: 11
-Current task within block: Tasks/projects/areas/gantt PR opened; waiting for review
-Branch: block-11-tasks-projects
-Last commit: `8d93aaa` Update Block 11 implementation status
-Tests: Block 10 main deploy passed. Block 11 web build passed. Full API suite on VPS temporary Postgres passed 141/141. Calculator suite passed 102/102. Targeted work-management API test passed 10/10. Playwright work-management smoke added but not run against staging yet because Block 11 is not deployed.
+Last update: 2026-05-19T23:30:01-03:00
+Current block: 12
+Current task within block: PR opened; awaiting review / TG_BOT_TOKEN for live Docker Telegram smoke
+Branch: block-12-bot
+Last commit: `703e894` Record Block 12 gate results
+Tests: VPS temporary Postgres integration passed: API auth+bot routes 11/11, bot package tests 27/27. Full API suite on VPS temporary Postgres passed 146/146; calc suite passed 102/102. `cd ops/web && npm run build` passed. Staging Docker bot smoke is blocked because `/srv/ops/infra/.env` still lacks `TG_BOT_TOKEN`. `OPS_BOT_TOKEN` was generated into `/srv/ops/infra/.env`, but inserting it into `bot_tokens` must wait until migration 013 is deployed on staging. Block 11 staging refresh/compare is still blocked because `SUPABASE_URL` and `SUPABASE_SERVICE_KEY` are absent from `/srv/ops/infra/.env`.
 
 ## What was just done
 
+- Block 12 progress:
+  - Added `ops/db/migrations/013_bot_state.sql` for `employees.timezone`, Telegram bindings, bot conversation state, message inbox, and bot bearer tokens.
+  - Added Bearer token auth in the Node API; bot tokens update `last_used_at` and populate `req.user`.
+  - Moved tracked Telegram bot sources from `bot/` to `ops/bot/`.
+  - Added Postgres-backed bot state/inbox module in `ops/bot/state.js` with FIFO/`SKIP LOCKED` message claiming.
+  - Added bot package lock and bot `npm test` script.
+  - Verified state module on a temporary VPS Postgres database: 7/7 passed.
+  - Added IANA timezone helpers and wired `getLocalDate()` to accept timezone strings while preserving numeric-offset behavior.
+  - Added timezone unit tests: 10/10 passed locally.
+  - Added `ops/bot/api-client.js` for Bearer-authenticated Node API calls with idempotency keys.
+  - Added API client unit tests: 8/8 passed locally.
+  - Implemented `/api/bot/bindings` admin routes and notification-event processing endpoints.
+  - Switched `ops/bot/taskbot.js` from Supabase to Ops API (`TG_BOT_TOKEN`, `OPS_API_URL`, `OPS_BOT_TOKEN`).
+  - Updated `task-notification-worker.js` so task notification polling can use the Ops API plus bot bindings.
+  - Added `ops/bot/Dockerfile`, `ops/infra/docker-compose.yml` bot service, and bot env docs/examples.
+  - Local bot unit tests passed 20/20.
+  - Fixed bot binding API field names to match migration (`bound_at`, `last_active_at`).
+  - Verified Block 12 DB path on VPS temporary Postgres with all migrations:
+    - API `auth-routes.test.js` + `bot-routes.test.js`: 11/11 passed.
+    - Bot `npm test`: 27/27 passed.
+  - Verified full quality gates available without Telegram secret:
+    - Full API suite on VPS temporary Postgres: 146/146 passed.
+    - Calculator suite on VPS temporary Postgres: 102/102 passed.
+    - `cd ops/web && npm run build`: passed.
+  - Generated `OPS_BOT_TOKEN` into `/srv/ops/infra/.env` without printing it.
+  - Could not insert `OPS_BOT_TOKEN` into live `bot_tokens` yet because staging DB has not deployed migration 013.
+  - Block 12 live Docker/Telegram smoke is blocked on missing `TG_BOT_TOKEN` in `/srv/ops/infra/.env`.
+  - Pushed `block-12-bot` and opened PR #52: https://github.com/polinacherpovitskaya-glitch/ro-calculator/pull/52
+  - After opening PR #52, checked the ops deploy workflow and made the bot compose service opt-in via profile `bot`.
+    - Regular `docker compose --env-file .env up -d --build` will not start `ops-bot` before `TG_BOT_TOKEN` exists.
+    - Verified on VPS with the Block 12 compose file: default services are `postgres`, `api`, `caddy`; `--profile bot` adds `bot`.
+  - PR #52 GitHub check `test-and-deploy` passed.
+  - Added `/srv/ops/infra/scripts/ensure-bot-token.sh` to the deploy flow after migrations.
+    - It inserts `OPS_BOT_TOKEN` from `/srv/ops/infra/.env` into `bot_tokens` as `taskbot/admin` once migration 013 exists.
+    - It skips safely if the env file, token, or table is missing.
+    - Verified on current staging DB: skips because `bot_tokens` is not deployed yet.
+    - Verified on a temporary VPS Postgres with all migrations: inserted the token row successfully.
+    - PR #52 GitHub check `test-and-deploy` passed after this workflow change.
+  - Self-review found missing idempotency on new bot mutation routes.
+    - Added `withIdempotency` to `POST /api/bot/bindings`, `DELETE /api/bot/bindings/:telegram_chat_id`, and `PATCH /api/bot/notification-events/:id/processed`.
+    - Updated bot API client to send idempotency keys for those writes.
+    - Added regression tests for missing idempotency headers and repeated notification-event processing.
+    - Verified on VPS temporary Postgres: API auth+bot routes 13/13 passed; bot `npm test` 27/27 passed.
+- Block 11 PR #51 was squash-merged to `main` as `0fa4131`.
+- GitHub Actions main deploy run `26136213203` passed.
+- Live staging health after deploy: `status=ok`, `db.ok=true`.
+- Ran `tests/playwright/work-management.spec.ts` against staging with a temporary admin user: passed 1/1.
+- Deleted the temporary smoke auth users and the created `E2E task ...` row from staging.
+- Checked `/srv/ops/infra/.env` for refresh secrets:
+  - `SUPABASE_URL` missing
+  - `SUPABASE_SERVICE_KEY` missing
+  - therefore Block 11 refresh/compare cannot run until the secret is provided.
+- Created Block 12 working branch `block-12-bot` from fresh `origin/main`.
+- Read Block 12 plan plus required bug classes P/Q/R and Stability Program notes.
 - Block 10 PR #50 was squash-merged to `main` as `ff19395`.
 - GitHub Actions main deploy run `26135544637` passed.
 - Created Block 11 branch `block-11-tasks-projects` from fresh `origin/main`.

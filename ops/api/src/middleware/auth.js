@@ -1,6 +1,26 @@
 import { loadSession } from '../auth/sessions.js';
+import { getPool } from '../db.js';
 
 export async function requireAuth(req, res, next) {
+  const authHeader = req.get('Authorization') || '';
+  if (authHeader.startsWith('Bearer ')) {
+    const token = authHeader.slice(7).trim();
+    if (token) {
+      const { rows } = await getPool().query(`SELECT name, role FROM bot_tokens WHERE token = $1`, [token]);
+      if (rows[0]) {
+        await getPool().query(`UPDATE bot_tokens SET last_used_at = NOW() WHERE token = $1`, [token]);
+        req.user = {
+          id: 0,
+          email: `bot:${rows[0].name}`,
+          role: rows[0].role,
+          employeeId: null,
+          mustChangePassword: false,
+        };
+        return next();
+      }
+    }
+  }
+
   const sessionId = req.cookies?.session_id;
   if (!sessionId) {
     return res.status(401).json({
