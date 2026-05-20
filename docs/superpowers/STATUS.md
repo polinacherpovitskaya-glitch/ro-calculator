@@ -1,10 +1,10 @@
 # Migration status
 
-Last update: 2026-05-19T22:23:38-03:00
+Last update: 2026-05-19T22:24:18-03:00
 Current block: 10
-Current task within block: Product-images storage migration completed as staging no-op; preparing PR
+Current task within block: Product-images storage migration PR opened; waiting for review
 Branch: block-10-product-images
-Last commit: `2653927` Allow product image migration without Supabase creds when empty
+Last commit: `dc1d23e` Update Block 10 final status
 Tests: Full API suite on VPS temporary Postgres passed 130/130. Calculator suite passed 102/102. Targeted S3 tests passed 3/3. Product-images migration ran twice on staging and was idempotent no-op because there are currently 0 legacy product image URLs in migrated tables.
 
 ## What was just done
@@ -52,6 +52,7 @@ Tests: Full API suite on VPS temporary Postgres passed 130/130. Calculator suite
   - legacy Supabase product-images URLs in `product_templates`: 0
   - Selectel product-images URLs in the same tables: 0
 - Photo UI smoke could not inspect real images because staging currently has no migrated product-image rows. API signing behavior is covered by regression tests.
+- Opened Block 10 PR: https://github.com/polinacherpovitskaya-glitch/ro-calculator/pull/50
 - Block 8 PR #46 was squash-merged to `main` as `9ced98a`.
 - Added full-order golden master HTTP integration test covering 24 real legacy order fixtures via `/api/orders`, `/items`, and `/recalc`.
 - Raised API JSON body limit to `5mb` after the full-order test exposed real legacy `calculator_data` payloads over Express' default limit.
