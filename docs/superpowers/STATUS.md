@@ -1,14 +1,51 @@
 # Migration status
 
-Last update: 2026-05-20T12:04:39-03:00
-Current block: 14
-Current task within block: Time + vacations + payroll implementation in progress
-Branch: block-14-time-payroll
-Last commit: `b786c00` Block 13 follow-up: display mold photos
-Tests: Block 13 is fully complete: PR #54 and follow-up PR #55 were merged and deployed, staging `mold-photos` migration completed (`legacy=0`, `selectel=32`), API image smoke returned HTTP 200 JPEG, browser UI smoke passed (`ui_photo_smoke=pass`), and temporary e2e users were removed (`0`). Block 14 so far: syntax checks passed for new API/refresh files, `cd ops/api && npm run build:calc` passed, `cd ops/web && npm run build` passed, VPS temporary Postgres targeted `time-payroll.test.js` passed 8/8, full API suite passed 159/159, and calculator suite passed 102/102.
+Last update: 2026-05-20T12:31:49-03:00
+Current block: 15
+Current task within block: Analytics API/UI implementation in progress
+Branch: block-15-analytics
+Last commit: `00220ef` Block 14: time tracking and payroll
+Tests: Block 14 is fully complete: PR #56 was merged and deployed, main deploy run `26171394997` passed, staging health is OK, and the staging time/payroll smoke passed with temporary users/employees cleaned up. Block 15 so far: syntax checks passed for new analytics API files, `cd ops/web && npm run build` passed, VPS temporary Postgres targeted `analytics.test.js` passed 7/7, full API suite passed 166/166, and calc suite passed 102/102. Local Postgres-backed API test was attempted first and failed only because local `127.0.0.1:5433` is not running.
 
 ## What was just done
 
+- Block 15 progress:
+  - Created/continued branch `block-15-analytics` from fresh `origin/main`.
+  - Read Block 15 plan and confirmed the legacy `js/analytics.js` module redirects to `Factual.load()`, so report inventory comes from `js/factual.js`.
+  - Added `ops/api/src/analytics/README.md` documenting the migrated read-only reports and legacy caveats.
+  - Added analytics query layer and authenticated report routes:
+    - `/api/analytics/summary`
+    - `/api/analytics/revenue-by-month`
+    - `/api/analytics/top-clients`
+    - `/api/analytics/status-dynamics`
+    - `/api/analytics/production-load`
+    - `/api/analytics/product-types`
+    - `/api/analytics/factual-margin`
+  - Added API coverage in `ops/api/test/analytics.test.js`: auth requirement plus summary, revenue by month, top clients, status dynamics, production load, product types, and factual margin.
+  - Added Vue analytics API wrapper, `/analytics` route, home navigation link, and analytics screen/components.
+  - Added Playwright smoke `tests/playwright/analytics.spec.ts`.
+  - Updated `ops/README.md` with the Block 15 endpoints/screen and current refresh-secret caveat.
+  - Verified:
+    - `node --check` for analytics route/query/test files: passed
+    - `cd ops/web && npm run build`: passed
+    - VPS temporary Postgres targeted `analytics.test.js`: 7/7 passed
+    - VPS temporary Postgres full API suite: 166/166 passed
+    - VPS temporary Postgres calc suite: 102/102 passed
+  - Remaining Block 15:
+    - PR, self-merge on green gates, deploy, staging smoke
+    - compare 2-3 report figures with old system if Supabase refresh secrets become available.
+- Block 14 final:
+  - PR #56 was squash-merged to `main` as `00220ef`.
+  - GitHub Actions main deploy run `26171394997` passed.
+  - Staging health after deploy: `status=ok`, `db.ok=true`.
+  - Staging DB has Block 14 tables `time_entries` and `payroll_periods`.
+  - Browser/API smoke against staging passed:
+    - created temporary employee and temporary admin user
+    - added a time entry through `/time-tracking`
+    - calculated payroll through `/api/payroll/calculate`
+    - verified `/payroll` showed the temporary employee and `1 000 ₽`
+    - cleaned temporary auth user and employee; counts returned to `0`
+  - Refresh/compare remains blocked because `/srv/ops/infra/.env` still lacks `SUPABASE_URL` and `SUPABASE_SERVICE_KEY`.
 - Block 14 progress:
   - Created branch `block-14-time-payroll` from fresh `origin/main`.
   - Read Block 14 plan and legacy `js/timetrack.js` payroll/time sections.
