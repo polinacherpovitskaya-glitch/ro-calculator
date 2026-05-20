@@ -1,15 +1,18 @@
 # Migration status
 
-Last update: 2026-05-20T13:19:29-03:00
+Last update: 2026-05-20T13:27:01-03:00
 Current block: Stage A complete
 Current task within block: Block 11 follow-up staging delta-sync complete; ready for Stage B test/reconciliation
 Branch: main
-Last commit: `81b2633` Fix shipments refresh idempotency
-Tests: PR #61 was squash-merged to `main` as `81b2633`; GitHub Actions main deploy run `26175175571` passed. Requested staging delta-sync scripts 01-05 ran successfully on ops-staging. Initial compare caught a non-idempotent `03-shipments-china` rerun (`shipment_items` 62/124 and `china_purchase_items` 45/90). The merged/deployed refresh script now clears only those child item tables inside the module transaction before reloading. Re-ran deployed `03` on staging and full compare is all OK, including `warehouse_reservations 1086/1086`, `shipment_items 62/62`, `china_purchase_items 45/45`, and `settings 46/46`. `node --check ops/scripts/refresh/03-shipments-china.mjs` passed. Blocks 13-16 remain merged/deployed; Telegram bot egress is still out of scope and ops-bot was not touched.
+Last commit: `a296adc` Fix Pages verify without bot sources
+Tests: PR #61 was squash-merged to `main` as `81b2633`; GitHub Actions ops deploy run `26175175571` passed. Requested staging delta-sync scripts 01-05 ran successfully on ops-staging. Initial compare caught a non-idempotent `03-shipments-china` rerun (`shipment_items` 62/124 and `china_purchase_items` 45/90`). The merged/deployed refresh script now clears only those child item tables inside the module transaction before reloading. Re-ran deployed `03` on staging and full compare is all OK, including `warehouse_reservations 1086/1086`, `shipment_items 62/62`, `china_purchase_items 45/45`, and `settings 46/46`. PR #63 was squash-merged as `a296adc` to keep the legacy Pages verify workflow from blocking on absent deferred bot sources; GitHub Pages run `26175690226` passed. Blocks 13-16 remain merged/deployed; Telegram bot egress is still out of scope and ops-bot was not touched.
 
 ## What was just done
 
 - Block 11 follow-up delta-sync:
+  - PR #63 was squash-merged to `main` as `a296adc`.
+  - GitHub Actions Pages deploy run `26175690226` passed after the workflow fix.
+  - The Pages verify workflow now skips optional `bot/timebot.js`, `bot/task-notification-core.js`, and `tests/task-notification-smoke.js` only when those deferred bot source files are absent from the checkout.
   - PR #61 was squash-merged to `main` as `81b2633`.
   - GitHub Actions main deploy run `26175175571` passed.
   - Confirmed `/srv/ops/infra/.env` on ops-staging has the Supabase refresh variables present without printing secret values.
