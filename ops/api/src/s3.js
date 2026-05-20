@@ -106,6 +106,7 @@ export async function signSelectelUrls(value, expiresIn = 600) {
     return value.startsWith('selectel://') ? presignedGetUrl(value, expiresIn) : value;
   }
   if (!value || typeof value !== 'object') return value;
+  if (value instanceof Date || typeof value.toJSON === 'function') return value;
   if (Array.isArray(value)) {
     return Promise.all(value.map((entry) => signSelectelUrls(entry, expiresIn)));
   }

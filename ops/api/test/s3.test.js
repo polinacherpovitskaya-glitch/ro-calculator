@@ -15,11 +15,14 @@ test('uploadObject accepts an explicit bucket without breaking mock storage', as
 });
 
 test('signSelectelUrls recursively signs selectel URLs and leaves other values intact', async () => {
+  const createdAt = new Date('2026-01-02T03:04:05.000Z');
   const signed = await signSelectelUrls({
+    created_at: createdAt,
     photo_url: 'selectel://ro-ops-product-images/product-images/a.png',
     nested: [{ url: 'https://example.test/keep.png' }, { url: 'selectel://ro-ops-product-images/product-images/b.png' }],
   });
 
+  assert.equal(signed.created_at, createdAt);
   assert.equal(signed.photo_url, 'mock-s3://ro-ops-product-images/product-images/a.png');
   assert.equal(signed.nested[0].url, 'https://example.test/keep.png');
   assert.equal(signed.nested[1].url, 'mock-s3://ro-ops-product-images/product-images/b.png');
