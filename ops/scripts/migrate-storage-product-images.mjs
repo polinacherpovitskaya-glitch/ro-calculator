@@ -6,12 +6,14 @@
 //
 // Required environment:
 //   DATABASE_URL
-//   SUPABASE_URL
-//   SUPABASE_SERVICE_KEY
 //   S3_ENDPOINT
 //   S3_BUCKET_PRODUCT_IMAGES
 //   S3_ACCESS_KEY
 //   S3_SECRET_KEY
+//
+// Required only when rows with legacy Supabase product image URLs exist:
+//   SUPABASE_URL
+//   SUPABASE_SERVICE_KEY
 
 import { createClient } from '@supabase/supabase-js';
 import pg from 'pg';
@@ -27,8 +29,15 @@ function requireEnv(name) {
 
 const BUCKET = requireEnv('S3_BUCKET_PRODUCT_IMAGES');
 const pool = new Pool({ connectionString: requireEnv('DATABASE_URL') });
-const supabase = createClient(requireEnv('SUPABASE_URL'), requireEnv('SUPABASE_SERVICE_KEY'));
 const migrated = new Map();
+let supabase = null;
+
+function getSupabase() {
+  if (!supabase) {
+    supabase = createClient(requireEnv('SUPABASE_URL'), requireEnv('SUPABASE_SERVICE_KEY'));
+  }
+  return supabase;
+}
 
 function isSupabaseProductImageUrl(value) {
   return typeof value === 'string' && value.includes('/storage/v1/object/') && value.includes('/product-images/');
@@ -52,7 +61,7 @@ async function migrateUrl(originalUrl) {
 
   const newKey = `product-images/${safeKey(sbKey)}`;
   const selectelUrl = `selectel://${BUCKET}/${newKey}`;
-  const { data, error } = await supabase.storage.from('product-images').download(sbKey);
+  const { data, error } = await getSupabase().storage.from('product-images').download(sbKey);
   if (error) throw new Error(`Download failed for ${sbKey}: ${error.message || error}`);
   const body = Buffer.from(await data.arrayBuffer());
   await uploadObject(newKey, body, data.type || 'application/octet-stream', BUCKET);

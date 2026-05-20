@@ -1,11 +1,11 @@
 # Migration status
 
-Last update: 2026-05-19T22:17:15-03:00
+Last update: 2026-05-19T22:23:38-03:00
 Current block: 10
-Current task within block: Product-images storage migration code ready; live Selectel bucket/env is still needed before staging migration/smoke
+Current task within block: Product-images storage migration completed as staging no-op; preparing PR
 Branch: block-10-product-images
-Last commit: `a7b30f1` Support regional product image bucket endpoint
-Tests: Full API suite on VPS temporary Postgres passed 130/130. Calculator suite passed 102/102. Targeted S3 tests passed 3/3. Live storage migration and photo smoke not run yet because `/srv/ops/infra/.env` does not have `S3_BUCKET_PRODUCT_IMAGES`.
+Last commit: pending local commit for lazy Supabase credentials in product-images migration
+Tests: Full API suite on VPS temporary Postgres passed 130/130. Calculator suite passed 102/102. Targeted S3 tests passed 3/3. Product-images migration ran twice on staging and was idempotent no-op because there are currently 0 legacy product image URLs in migrated tables.
 
 ## What was just done
 
@@ -38,11 +38,20 @@ Tests: Full API suite on VPS temporary Postgres passed 130/130. Calculator suite
 - Verified Block 10 code on a temporary VPS Postgres:
   - Full API suite: 130/130 passed
   - Calculator suite: 102/102 passed
-- Remaining Block 10 blocker:
-  - create private Selectel bucket `ro-ops-product-images`
-  - grant the existing service user access
-  - add `S3_BUCKET_PRODUCT_IMAGES=ro-ops-product-images` to `/srv/ops/infra/.env`
-  - then run `ops/scripts/migrate-storage-product-images.mjs`, refresh/compare, deploy, and smoke 5 warehouse/order product images.
+- Created private Selectel bucket `ro-ops-product-images` in the same region as the existing S3 endpoint (`ru-3`) using the existing S3 credentials.
+- Verified the bucket with a write/read/delete smoke object.
+- Added `S3_BUCKET_PRODUCT_IMAGES=ro-ops-product-images` to `/srv/ops/infra/.env`.
+- Updated `ops/scripts/migrate-storage-product-images.mjs` so `SUPABASE_URL` / `SUPABASE_SERVICE_KEY` are required only when rows with legacy Supabase product-image URLs actually exist. This allows an honest idempotent no-op when staging has no product images.
+- Ran product-images migration twice on live staging:
+  - first run: `warehouse_items=0, order_items=0, product_templates=0`
+  - second run: `warehouse_items=0, order_items=0, product_templates=0`
+- Verified staging product-image URL counts after migration:
+  - `warehouse_items.photo_url` non-empty: 0
+  - legacy Supabase product-images URLs in `warehouse_items`: 0
+  - legacy Supabase product-images URLs in `order_items`: 0
+  - legacy Supabase product-images URLs in `product_templates`: 0
+  - Selectel product-images URLs in the same tables: 0
+- Photo UI smoke could not inspect real images because staging currently has no migrated product-image rows. API signing behavior is covered by regression tests.
 - Block 8 PR #46 was squash-merged to `main` as `9ced98a`.
 - Added full-order golden master HTTP integration test covering 24 real legacy order fixtures via `/api/orders`, `/items`, and `/recalc`.
 - Raised API JSON body limit to `5mb` after the full-order test exposed real legacy `calculator_data` payloads over Express' default limit.
