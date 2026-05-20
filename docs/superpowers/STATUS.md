@@ -1,14 +1,63 @@
 # Migration status
 
-Last update: 2026-05-20T11:40:49-03:00
-Current block: 13
-Current task within block: Mold photos migrated on staging; follow-up UI photo display PR in progress
-Branch: block-13-mold-photos-display
-Last commit: `1a15d8e` Block 13: migrate mold photos storage
-Tests: Block 13 PR #54 passed `test-and-deploy`, was squash-merged as `1a15d8e`, and main deploy run `26169578150` passed. Staging health is ok with `db.ok=true`. Live staging migration completed: `molds=32`, legacy Supabase `mold-photos` URLs are now 0, Selectel mold-photo URLs are 32, non-empty mold photos remain 36. API signing smoke passed: `/api/molds` returns `https://s3.ru-3.storage.selcloud.ru/...` presigned URLs and a migrated JPEG returned HTTP 200. Follow-up branch adds actual Vue photo thumbnails/detail preview because the existing ops UI accepted `photo_url` but did not render mold photos; `cd ops/web && npm run build` passed.
+Last update: 2026-05-20T12:04:39-03:00
+Current block: 14
+Current task within block: Time + vacations + payroll implementation in progress
+Branch: block-14-time-payroll
+Last commit: `b786c00` Block 13 follow-up: display mold photos
+Tests: Block 13 is fully complete: PR #54 and follow-up PR #55 were merged and deployed, staging `mold-photos` migration completed (`legacy=0`, `selectel=32`), API image smoke returned HTTP 200 JPEG, browser UI smoke passed (`ui_photo_smoke=pass`), and temporary e2e users were removed (`0`). Block 14 so far: syntax checks passed for new API/refresh files, `cd ops/api && npm run build:calc` passed, `cd ops/web && npm run build` passed, VPS temporary Postgres targeted `time-payroll.test.js` passed 8/8, full API suite passed 159/159, and calculator suite passed 102/102.
 
 ## What was just done
 
+- Block 14 progress:
+  - Created branch `block-14-time-payroll` from fresh `origin/main`.
+  - Read Block 14 plan and legacy `js/timetrack.js` payroll/time sections.
+  - Added migration `ops/db/migrations/011_time_payroll.sql`:
+    - `time_entries`
+    - `app_vacations`
+    - `payroll_rates`
+    - `payroll_periods`
+  - Added payroll calc engine in `ops/api/src/payroll/calc.ts` plus runtime JS mirror `ops/api/src/payroll/calc.js`.
+    - Supports hourly employees.
+    - Supports salary employees with half-month threshold overtime.
+    - Supports tiered hourly rates via `rate.tier='tiered'` and `extras.tiers`.
+  - Added authenticated/idempotent API resources:
+    - `/api/time-entries`
+    - `/api/vacations`
+    - `/api/payroll/rates`
+    - `/api/payroll/periods`
+    - `/api/payroll/calculate`
+    - `/api/payroll/periods/:id/mark-paid`
+  - Added refresh/compare support:
+    - `ops/scripts/refresh/09-time-payroll.mjs`
+    - `refresh-staging-snapshot.mjs` now runs `09-time-payroll`
+    - `compare-datasets.mjs` includes `time_entries` and `app_vacations`
+  - Added Vue API wrapper `ops/web/src/api/timePayroll.ts`.
+  - Added Vue routes/screens:
+    - `/time-tracking`
+    - `/vacations`
+    - `/payroll`
+    - home navigation links
+  - Added Playwright smoke `tests/playwright/time-payroll.spec.ts`.
+  - Verified:
+    - `node --check` for new API routes/payroll/refresh script: passed
+    - `cd ops/api && npm run build:calc`: passed
+    - `cd ops/web && npm run build`: passed
+    - VPS temporary Postgres targeted tests `time-payroll.test.js`: 8/8 passed
+    - VPS temporary Postgres full API suite: 159/159 passed
+    - VPS temporary Postgres calculator suite: 102/102 passed
+  - Remaining Block 14:
+    - run staging refresh/compare once Supabase refresh secrets are available
+    - PR, self-merge on green gates, deploy, staging smoke.
+- Block 13 final:
+  - PR #55 was squash-merged to `main` as `b786c00`.
+  - GitHub Actions main deploy run `26170066884` passed.
+  - Browser UI smoke against staging passed:
+    - logged in with temporary admin
+    - `/molds` thumbnail loaded with nonzero natural size
+    - `/molds/:id` preview loaded with nonzero natural size
+    - `ui_photo_smoke=pass`
+  - Removed temporary Block 13 e2e users; count is `0`.
 - Block 13 post-merge:
   - PR #54 was squash-merged to `main` as `1a15d8e`.
   - GitHub Actions main deploy run `26169578150` passed.

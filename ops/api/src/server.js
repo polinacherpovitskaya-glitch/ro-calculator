@@ -22,6 +22,9 @@ import tasksRoute from './routes/tasks.js';
 import workEventsRoute from './routes/work-events.js';
 import internalRoute from './routes/internal.js';
 import botRoute from './routes/bot.js';
+import timeRoute from './routes/time.js';
+import vacationsRoute from './routes/vacations.js';
+import payrollRoute from './routes/payroll.js';
 import { selectelUrlSigningMiddleware } from './s3.js';
 
 export function createServer() {
@@ -52,5 +55,8 @@ export function createServer() {
   app.use('/api/work', workEventsRoute);
   app.use('/api/internal', internalRoute);
   app.use('/api/bot', botRoute);
+  app.use('/api/time-entries', timeRoute);
+  app.use('/api/vacations', vacationsRoute);
+  app.use('/api/payroll', payrollRoute);
   return app;
 }
