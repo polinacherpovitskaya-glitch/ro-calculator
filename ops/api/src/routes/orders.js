@@ -140,6 +140,95 @@ function itemPayload(row) {
   };
 }
 
+function calcNumber(value, fallback = 0) {
+  const number = numeric(value);
+  return number === null ? fallback : number;
+}
+
+function lineRevenue(item) {
+  const qty = calcNumber(item.qty, 0);
+  const unitPrice = calcNumber(item.unit_price, 0);
+  const lineTotal = numeric(item.line_total);
+  return lineTotal === null ? qty * unitPrice : lineTotal;
+}
+
+function orderCalcInput(detail) {
+  const settings = detail.order.calculator_data?.settings || detail.order.extras?.settings || {};
+  const input = {
+    id: detail.order.id,
+    order_name: detail.order.order_name || undefined,
+    client_name: detail.order.client_name || undefined,
+    status: detail.order.status,
+    products: [],
+    hardwareItems: [],
+    packagingItems: [],
+    pendantItems: [],
+    extraCosts: [],
+    settings,
+  };
+
+  for (const item of detail.items) {
+    const data = item.item_data || {};
+    const type = data.item_type || item.type || 'other';
+    const qty = calcNumber(data.quantity ?? data.qty ?? item.qty, 0);
+    const sellPrice = calcNumber(data.sell_price_item ?? data.sell_price ?? item.unit_price, 0);
+    if (type === 'product' && (data.pieces_per_hour || data.weight_grams || data.sell_price_item)) {
+      input.products.push({
+        ...data,
+        item_type: 'product',
+        quantity: qty,
+        pieces_per_hour: calcNumber(data.pieces_per_hour, 0),
+        weight_grams: calcNumber(data.weight_grams, 0),
+        extra_molds: calcNumber(data.extra_molds, 0),
+        sell_price_item: sellPrice,
+      });
+    } else if (type === 'hardware') {
+      input.hardwareItems.push({
+        ...data,
+        item_type: 'hardware',
+        name: item.name || data.name,
+        qty,
+        assembly_speed: calcNumber(data.assembly_speed, 0),
+        price: calcNumber(data.price, 0),
+        delivery_price: calcNumber(data.delivery_price, 0),
+        delivery_total: numeric(data.delivery_total) ?? undefined,
+        sell_price: sellPrice,
+      });
+    } else if (type === 'packaging') {
+      input.packagingItems.push({
+        ...data,
+        item_type: 'packaging',
+        name: item.name || data.name,
+        qty,
+        assembly_speed: calcNumber(data.assembly_speed, 0),
+        price: calcNumber(data.price, 0),
+        delivery_price: calcNumber(data.delivery_price, 0),
+        delivery_total: numeric(data.delivery_total) ?? undefined,
+        sell_price: sellPrice,
+      });
+    } else if (type === 'pendant' && Array.isArray(data.elements)) {
+      input.pendantItems.push({ ...data, item_type: 'pendant', qty });
+    } else {
+      input.extraCosts.push({
+        item_type: 'extra_cost',
+        name: item.name || data.name || 'Позиция заказа',
+        amount: lineRevenue(item),
+      });
+    }
+  }
+
+  return input;
+}
+
+function calcOrderDetail(detail) {
+  try {
+    return calcOrder({ order: detail.order, items: detail.items });
+  } catch (err) {
+    if (err?.message !== 'calcOrder input is invalid') throw err;
+    return calcOrder(orderCalcInput(detail));
+  }
+}
+
 function normalizeOrderInput(body, partial = false) {
   const values = {};
   for (const field of ORDER_FIELDS) {
@@ -492,7 +581,7 @@ router.post(
       const order = await withTransaction(async (client) => {
         const detail = await loadOrderDetail(client, req.params.id);
         if (!detail) return null;
-        const result = calcOrder({ order: detail.order, items: detail.items });
+        const result = calcOrderDetail(detail);
         const calculatorData = { ...(detail.order.calculator_data || {}), ...result, recalculated_at: new Date().toISOString() };
         const { rows } = await client.query(
           `UPDATE orders

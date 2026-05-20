@@ -320,6 +320,26 @@ test('POST /api/orders/:id/recalc preserves saved calculator snapshot totals', a
   assert.equal(Number(body.order.total_margin), 60);
 });
 
+test('POST /api/orders/:id/recalc supports live order items without saved snapshot', async (t) => {
+  const { port, cookie } = await setup(t);
+  const order = await createOrder(port, cookie);
+  await requestJson(
+    port,
+    'POST',
+    `/api/orders/${order.id}/items`,
+    { id: id(8), type: 'product', name: 'Simple item', qty: 2, unit_price: 150, line_total: 300, item_data: {} },
+    cookie
+  );
+
+  const res = await requestJson(port, 'POST', `/api/orders/${order.id}/recalc`, {}, cookie);
+  const body = await res.json();
+
+  assert.equal(res.status, 200);
+  assert.equal(Number(body.order.total_revenue), 300);
+  assert.equal(Number(body.order.total_cost), 22.5);
+  assert.equal(Number(body.order.total_margin), 277.5);
+});
+
 test('factual endpoints create and recalc factual totals', async (t) => {
   const { port, cookie } = await setup(t);
   const order = await createOrder(port, cookie);
