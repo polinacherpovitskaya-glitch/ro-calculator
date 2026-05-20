@@ -1,14 +1,25 @@
 # Migration status
 
-Last update: 2026-05-19T22:45:36-03:00
-Current block: 11
-Current task within block: Tasks/projects/areas/gantt PR opened; waiting for review
-Branch: block-11-tasks-projects
-Last commit: `8d93aaa` Update Block 11 implementation status
-Tests: Block 10 main deploy passed. Block 11 web build passed. Full API suite on VPS temporary Postgres passed 141/141. Calculator suite passed 102/102. Targeted work-management API test passed 10/10. Playwright work-management smoke added but not run against staging yet because Block 11 is not deployed.
+Last update: 2026-05-19T22:51:08-03:00
+Current block: 12
+Current task within block: Starting Telegram bot migration/redesign after Block 11 deploy/smoke
+Branch: block-12-bot
+Last commit: `0fa4131` Block 11: Work management
+Tests: Block 11 main deploy passed. Staging health passed. Work-management Playwright smoke passed 1/1 after deploy. Smoke temp user and E2E task were deleted. Staging refresh/compare is blocked because `SUPABASE_URL` and `SUPABASE_SERVICE_KEY` are still absent from `/srv/ops/infra/.env`.
 
 ## What was just done
 
+- Block 11 PR #51 was squash-merged to `main` as `0fa4131`.
+- GitHub Actions main deploy run `26136213203` passed.
+- Live staging health after deploy: `status=ok`, `db.ok=true`.
+- Ran `tests/playwright/work-management.spec.ts` against staging with a temporary admin user: passed 1/1.
+- Deleted the temporary smoke auth users and the created `E2E task ...` row from staging.
+- Checked `/srv/ops/infra/.env` for refresh secrets:
+  - `SUPABASE_URL` missing
+  - `SUPABASE_SERVICE_KEY` missing
+  - therefore Block 11 refresh/compare cannot run until the secret is provided.
+- Created Block 12 working branch `block-12-bot` from fresh `origin/main`.
+- Read Block 12 plan plus required bug classes P/Q/R and Stability Program notes.
 - Block 10 PR #50 was squash-merged to `main` as `ff19395`.
 - GitHub Actions main deploy run `26135544637` passed.
 - Created Block 11 branch `block-11-tasks-projects` from fresh `origin/main`.
