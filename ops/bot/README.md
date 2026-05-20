@@ -9,6 +9,7 @@ TG_BOT_TOKEN=<token from BotFather>
 OPS_API_URL=https://ops-staging.recycleobject.ru
 OPS_BOT_TOKEN=<token from bot_tokens>
 TASK_BOT_POLL_INTERVAL_MS=15000
+TELEGRAM_PROXY_URL=
 ```
 
 Create the API token in Postgres if you are running manually:
@@ -30,3 +31,5 @@ cd /srv/ops/infra
 docker compose --env-file .env --profile bot up -d --build bot
 docker compose --env-file .env --profile bot logs -f bot
 ```
+
+If the VPS cannot connect directly to `api.telegram.org:443`, set `TELEGRAM_PROXY_URL` to an HTTP(S) proxy URL and restart the bot profile.
