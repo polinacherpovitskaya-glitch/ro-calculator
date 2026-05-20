@@ -18,8 +18,8 @@ function bindingRow(row) {
     employee_name: row.employee_name,
     employee_email: row.employee_email,
     is_active: row.is_active,
-    created_at: row.created_at,
-    updated_at: row.updated_at,
+    bound_at: row.bound_at,
+    last_active_at: row.last_active_at,
   };
 }
 
@@ -30,7 +30,7 @@ router.get(
   asyncHandler(async (req, res) => {
     const includeInactive = String(req.query.active || 'true') === 'false';
     const { rows } = await getPool().query(
-      `SELECT b.telegram_chat_id, b.telegram_username, b.employee_id, b.is_active, b.created_at, b.updated_at,
+      `SELECT b.telegram_chat_id, b.telegram_username, b.employee_id, b.is_active, b.bound_at, b.last_active_at,
               e.name AS employee_name, e.email AS employee_email
          FROM bot_telegram_bindings b
          JOIN employees e ON e.id = b.employee_id
@@ -55,8 +55,8 @@ router.post(
       if (!employee.rows[0]) throw codedError('NOT_FOUND', 'Активный сотрудник не найден', 404);
 
       await client.query(
-        `UPDATE bot_telegram_bindings
-            SET is_active = FALSE, updated_at = NOW()
+      `UPDATE bot_telegram_bindings
+            SET is_active = FALSE, last_active_at = NOW()
           WHERE employee_id = $1 AND telegram_chat_id <> $2 AND is_active = TRUE`,
         [employeeId, telegramChatId]
       );
@@ -68,7 +68,7 @@ router.post(
            telegram_username = EXCLUDED.telegram_username,
            employee_id = EXCLUDED.employee_id,
            is_active = TRUE,
-           updated_at = NOW()
+           last_active_at = NOW()
          RETURNING *`,
         [telegramChatId, telegramUsername, employeeId]
       );
@@ -86,7 +86,7 @@ router.delete(
     if (!telegramChatId) throw codedError('INVALID_INPUT', 'telegram_chat_id должен быть числом');
     const { rows } = await getPool().query(
       `UPDATE bot_telegram_bindings
-          SET is_active = FALSE, updated_at = NOW()
+          SET is_active = FALSE, last_active_at = NOW()
         WHERE telegram_chat_id = $1
         RETURNING *`,
       [telegramChatId]
