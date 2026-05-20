@@ -1,15 +1,17 @@
 # Migration status
 
-Last update: 2026-05-20T13:12:08-03:00
+Last update: 2026-05-20T13:19:29-03:00
 Current block: Stage A complete
 Current task within block: Block 11 follow-up staging delta-sync complete; ready for Stage B test/reconciliation
-Branch: block-11-refresh-idempotency
-Last commit: pending
-Tests: Requested staging delta-sync scripts 01-05 ran successfully on ops-staging. Initial compare caught a non-idempotent `03-shipments-china` rerun (`shipment_items` 62/124 and `china_purchase_items` 45/90). Patched the refresh script to clear only those child item tables inside the module transaction before reloading. Re-ran patched `03` on staging and full compare is now all OK, including `warehouse_reservations 1086/1086`, `shipment_items 62/62`, `china_purchase_items 45/45`, and `settings 46/46`. `node --check ops/scripts/refresh/03-shipments-china.mjs` passed. Blocks 13-16 remain merged/deployed; Telegram bot egress is still out of scope and ops-bot was not touched.
+Branch: main
+Last commit: `81b2633` Fix shipments refresh idempotency
+Tests: PR #61 was squash-merged to `main` as `81b2633`; GitHub Actions main deploy run `26175175571` passed. Requested staging delta-sync scripts 01-05 ran successfully on ops-staging. Initial compare caught a non-idempotent `03-shipments-china` rerun (`shipment_items` 62/124 and `china_purchase_items` 45/90). The merged/deployed refresh script now clears only those child item tables inside the module transaction before reloading. Re-ran deployed `03` on staging and full compare is all OK, including `warehouse_reservations 1086/1086`, `shipment_items 62/62`, `china_purchase_items 45/45`, and `settings 46/46`. `node --check ops/scripts/refresh/03-shipments-china.mjs` passed. Blocks 13-16 remain merged/deployed; Telegram bot egress is still out of scope and ops-bot was not touched.
 
 ## What was just done
 
 - Block 11 follow-up delta-sync:
+  - PR #61 was squash-merged to `main` as `81b2633`.
+  - GitHub Actions main deploy run `26175175571` passed.
   - Confirmed `/srv/ops/infra/.env` on ops-staging has the Supabase refresh variables present without printing secret values.
   - Ran the requested deployed refresh scripts in order on ops-staging:
     - `01-employees`: 14 employees
@@ -21,6 +23,7 @@ Tests: Requested staging delta-sync scripts 01-05 ran successfully on ops-stagin
     - `shipment_items`: Supabase 62, Postgres 124
     - `china_purchase_items`: Supabase 45, Postgres 90
   - Fixed `ops/scripts/refresh/03-shipments-china.mjs` so the module runs in one transaction and clears `shipment_items` / `china_purchase_items` before rebuilding them from legacy JSON snapshots.
+  - Verified `node --check ops/scripts/refresh/03-shipments-china.mjs` locally.
   - Verified the patched script on ops-staging via a temporary `*.mjs` copy:
     - `shipments 13/13 OK`
     - `shipment_items 62/62 OK`
@@ -28,6 +31,10 @@ Tests: Requested staging delta-sync scripts 01-05 ran successfully on ops-stagin
     - `china_purchase_items 45/45 OK`
     - `china_catalog 103/103 OK`
   - Full deployed compare after the patched rerun is all OK across every currently compared table, including:
+    - `shipments 13/13 OK`
+    - `shipment_items 62/62 OK`
+    - `china_purchases 14/14 OK`
+    - `china_purchase_items 45/45 OK`
     - `warehouse_reservations 1086/1086 OK`
     - `settings 46/46 OK`
     - `time_entries 193/193 OK`
