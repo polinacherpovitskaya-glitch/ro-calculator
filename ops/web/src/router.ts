@@ -32,6 +32,7 @@ import TimeTrackingView from './views/TimeTrackingView.vue';
 import VacationsView from './views/VacationsView.vue';
 import PayrollView from './views/PayrollView.vue';
 import AnalyticsView from './views/AnalyticsView.vue';
+import SettingsView from './views/SettingsView.vue';
 
 const router = createRouter({
   history: createWebHistory(),
@@ -68,6 +69,7 @@ const router = createRouter({
     { path: '/vacations', name: 'vacations', component: VacationsView, meta: { requiresAuth: true } },
     { path: '/payroll', name: 'payroll', component: PayrollView, meta: { requiresAuth: true } },
     { path: '/analytics', name: 'analytics', component: AnalyticsView, meta: { requiresAuth: true } },
+    { path: '/settings', name: 'settings', component: SettingsView, meta: { requiresAuth: true } },
   ],
 });
 

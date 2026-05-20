@@ -23,6 +23,7 @@
         <RouterLink to="/vacations">Отпуска</RouterLink>
         <RouterLink to="/payroll">Зарплаты</RouterLink>
         <RouterLink to="/analytics">Аналитика</RouterLink>
+        <RouterLink v-if="auth.user?.role === 'admin'" to="/settings">Настройки</RouterLink>
         <RouterLink to="/templates">Шаблоны</RouterLink>
         <RouterLink to="/production/calendar">Календарь</RouterLink>
         <RouterLink to="/production/plan">План</RouterLink>
