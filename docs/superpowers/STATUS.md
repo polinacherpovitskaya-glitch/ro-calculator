@@ -1,15 +1,28 @@
 # Migration status
 
-Last update: 2026-05-20T12:59:54-03:00
-Current block: 16
-Current task within block: Settings refresh whitelist follow-up in progress
-Branch: block-16-settings-whitelist
-Last commit: `03d168e` Block 16: remaining settings
-Tests: Block 16 PR #58 was merged to `main` as `03d168e`, main deploy run `26173863522` passed, staging health is OK, and settings API smoke passed. Full staging refresh ran and completed. Follow-up branch fixed the settings whitelist and a patched `10-settings` run on staging copied 46 operational settings including `work_load_ratio`; settings compare is now `46/46 OK`. Full compare has one pre-existing/non-settings mismatch in `warehouse_reservations` (`Supabase=1086`, `Postgres=1059`) caused by legacy duplicate/invalid reservation rows being dropped by the warehouse refresh path.
+Last update: 2026-05-20T13:06:08-03:00
+Current block: Stage A complete
+Current task within block: Ready for Stage B test/reconciliation
+Branch: main
+Last commit: `87ac579` Block 16 follow-up: fix settings refresh selection
+Tests: Blocks 13-16 are merged and deployed. Block 16 PR #58 merged as `03d168e`, follow-up PR #59 merged as `87ac579`, and both main deploys passed. Staging health is OK. Full staging refresh completed. Deployed `10-settings` copied 46 operational settings including `work_load_ratio`; settings compare is `46/46 OK`. Settings API smoke passed and Playwright `/settings` smoke passed 1/1. Full compare has one pre-existing/non-settings mismatch in `warehouse_reservations` (`Supabase=1086`, `Postgres=1059`) caused by legacy duplicate/invalid reservation rows being dropped by the warehouse refresh path.
 
 ## What was just done
 
 - Block 16 follow-up:
+  - PR #59 was squash-merged to `main` as `87ac579`.
+  - GitHub Actions main deploy run `26174496994` passed.
+  - Staging health after deploy: `status=ok`, `db.ok=true`.
+  - Ran deployed `ops/scripts/refresh/10-settings.mjs`:
+    - copied 46 operational settings
+    - `work_load_ratio` is present
+    - skipped normalized/finance/wiki/work/auth/smoke keys as intended.
+  - Ran deployed compare:
+    - `settings 46 46 0 OK`
+    - full compare still reports the known unrelated `warehouse_reservations` mismatch (`1086` vs `1059`).
+  - Ran Playwright `/settings` staging smoke: 1/1 passed.
+  - Cleaned the temporary `app_config.e2e_*` setting created by the smoke.
+  - Stage A is complete; next is Stage B test/reconciliation.
   - PR #58 was squash-merged to `main` as `03d168e`.
   - GitHub Actions main deploy run `26173863522` passed.
   - Staging health after deploy: `status=ok`, `db.ok=true`.
@@ -33,9 +46,6 @@ Tests: Block 16 PR #58 was merged to `main` as `03d168e`, main deploy run `26173
     - Patched staging `10-settings` run copied 46 settings and preserved `work_load_ratio`.
     - Patched compare reports `settings 46 46 0 OK`.
     - Full compare still has one unrelated `warehouse_reservations` mismatch (`1086` vs `1059`) from legacy duplicate/invalid reservation rows dropped by refresh.
-  - Remaining:
-    - PR, merge, deploy
-    - rerun deployed settings refresh/compare and settings Playwright smoke.
 - Block 16 progress:
   - Created branch `block-16-settings` from fresh `origin/main`.
   - Read Block 16 plan.
@@ -61,8 +71,6 @@ Tests: Block 16 PR #58 was merged to `main` as `03d168e`, main deploy run `26173
     - VPS temporary Postgres targeted `settings.test.js`: 4/4 passed
     - VPS temporary Postgres full API suite: 170/170 passed
     - VPS temporary Postgres calc suite: 102/102 passed
-  - Remaining:
-    - PR, self-merge on green gates, deploy, staging smoke.
 - Block 15 final:
   - PR #57 was squash-merged to `main` as `8ffedd3`.
   - GitHub Actions main deploy run `26172931301` passed.
