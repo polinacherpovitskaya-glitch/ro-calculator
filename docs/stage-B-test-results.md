@@ -1,6 +1,6 @@
 # Stage B test results
 
-Last update: 2026-05-20T15:05:13-03:00
+Last update: 2026-05-20T15:14:34-03:00
 
 ## Scope
 
@@ -70,11 +70,23 @@ Warm 20-request samples from the VPS with authenticated cookie:
 | `/api/tasks` | 0.083s | 0.090s | 0.143s | 0.154s | OK |
 | `/api/health` | 0.072s | 0.076s | 0.086s | 0.087s | OK |
 
-`/api/orders` SQL itself is fast (`EXPLAIN ANALYZE` around 1.4 ms); the overhead is response payload size from `SELECT *` including `calculator_data`. This branch changes the list endpoint to return only list columns. Re-test after deploy is required.
+`/api/orders` SQL itself is fast (`EXPLAIN ANALYZE` around 1.4 ms); the overhead was response payload size from `SELECT *` including `calculator_data`. PR #65 changed the list endpoint to return only list columns.
+
+Post-deploy re-test after PR #65 merged to `main`:
+
+| Endpoint | min | p50 | p95 | max | Status |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `/api/orders` | 0.089s | 0.096s | 0.111s | 0.136s | OK |
+
+## Post-deploy verification
+
+- PR #65 was squash-merged to `main` as `b80b563`.
+- GitHub Actions ops deploy run `26181038209` passed.
+- Deployed full staging refresh + compare: all compared tables OK, including `warehouse_reservations 1167/1167`, `warehouse_history 198/198`, `settings 46/46`.
+- Deployed warehouse invariants I1-I4: 0 violations.
 
 ## Remaining Stage B work
 
-- Re-test `/api/orders` p95 after deploy.
 - Manual 10-order production-vs-staging money reconciliation.
 - Full human screen walkthrough / staff double-smoke.
 - Cutover checklist/date confirmation; Stage C remains owner-run.

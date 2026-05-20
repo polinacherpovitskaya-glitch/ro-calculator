@@ -1,11 +1,11 @@
 # Migration status
 
-Last update: 2026-05-20T15:05:13-03:00
-Current block: Stage A complete
-Current task within block: Stage B automated checks in progress
-Branch: stage-B-test
-Last commit: pending
-Tests: Stage B full staging refresh completed and compare is all OK after adding warehouse history baseline handling (`warehouse_history 198/198`). API suite passed 170/170, calc golden masters passed 102/102, API typecheck passed, web build passed, Playwright staging smokes passed 9/9 after a selector-only fix. Live staging warehouse invariants I1-I4 now return 0 violations. Performance warm samples are OK for warehouse/tasks/health; `/api/orders` p95 was 0.220s, so this branch trims the list endpoint payload and needs post-deploy latency re-test. Manual 10-order money reconciliation and staff double-smoke remain owner-led Stage B follow-ups.
+Last update: 2026-05-20T15:14:34-03:00
+Current block: Stage B test/reconciliation
+Current task within block: Automated checks complete; owner-led manual reconciliation/staff smoke remain
+Branch: main
+Last commit: `b80b563` Complete Stage B automated checks
+Tests: PR #65 was squash-merged to `main` as `b80b563`; GitHub Actions ops deploy run `26181038209` passed. Deployed full staging refresh + compare is all OK, including `warehouse_reservations 1167/1167`, `warehouse_history 198/198`, `settings 46/46`, and all work/time/task/order tables. Deployed warehouse invariants I1-I4 return 0 violations. `/api/orders` warm p95 after the list-payload fix is 0.111s, back under the 0.200s Stage B target. Manual 10-order money reconciliation, full human walkthrough/staff double-smoke, and cutover scheduling remain owner-led Stage B follow-ups.
 
 ## What was just done
 
@@ -37,8 +37,25 @@ Tests: Stage B full staging refresh completed and compare is all OK after adding
     - `/api/tasks`: p95 0.143s
     - `/api/health`: p95 0.086s
   - Profiled `/api/orders`: SQL is ~1.4 ms; issue is list response payload size from `SELECT *`.
-  - Updated `/api/orders` list endpoint to return only list columns; post-deploy latency re-test still required.
+  - Updated `/api/orders` list endpoint to return only list columns.
   - Added `docs/stage-B-test-results.md`.
+  - PR #65 was squash-merged to `main` as `b80b563`.
+  - GitHub Actions ops deploy run `26181038209` passed.
+  - Ran deployed full staging refresh + compare after merge:
+    - all compared tables OK
+    - `warehouse_reservations 1167/1167`
+    - `warehouse_history 198/198`
+    - `settings 46/46`
+  - Ran deployed warehouse invariants after merge:
+    - I1: 0 violations
+    - I2: 0 violations
+    - I3: 0 violations
+    - I4: 0 violations
+  - Re-tested `/api/orders` warm latency after deploy:
+    - min 0.089s
+    - p50 0.096s
+    - p95 0.111s
+    - max 0.136s
 - Block 11 follow-up delta-sync:
   - PR #63 was squash-merged to `main` as `a296adc`.
   - GitHub Actions Pages deploy run `26175690226` passed after the workflow fix.
