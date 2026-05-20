@@ -32,6 +32,7 @@ const supabase = createClient(requireEnv('SUPABASE_URL'), requireEnv('SUPABASE_S
   realtime: { transport: WebSocket },
 });
 const pool = new Pool({ connectionString: requireEnv('DATABASE_URL') });
+let db = pool;
 
 function parseJson(value) {
   if (!value) return {};
@@ -124,11 +125,11 @@ async function refreshShipments() {
   const rows = (await fetchAll('shipments')).map((row) => mergeLegacyRow(row, 'shipment_data'));
   console.log(`shipments: ${rows.length}`);
   let items = 0;
-  const warehouseIds = new Set((await pool.query(`SELECT id::text FROM warehouse_items`)).rows.map((row) => row.id));
+  const warehouseIds = new Set((await db.query(`SELECT id::text FROM warehouse_items`)).rows.map((row) => row.id));
 
   for (const shipment of rows) {
     const status = mapShipmentStatus(shipment.status || shipment.china_box_status);
-    await pool.query(
+    await db.query(
       `INSERT INTO shipments
          (id, name, source, status, expected_date, received_at, total_cost, currency, note, extras, created_at, updated_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
@@ -165,7 +166,7 @@ async function refreshShipments() {
       const legacyWarehouseItemId = numberOrNull(item.warehouse_item_id);
       const warehouseItemId = legacyWarehouseItemId && warehouseIds.has(String(legacyWarehouseItemId)) ? legacyWarehouseItemId : null;
       const createNew = !warehouseItemId && (item.source === 'new' || textOrNull(item.sku));
-      await pool.query(
+      await db.query(
         `INSERT INTO shipment_items (shipment_id, warehouse_item_id, name, qty, unit_price, currency, received_qty, extras)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
         [
@@ -195,13 +196,13 @@ async function refreshChinaPurchases() {
   const rows = (await fetchAll('china_purchases')).map((row) => mergeLegacyRow(row, 'purchase_data'));
   console.log(`china_purchases: ${rows.length}`);
   let items = 0;
-  const shipmentIds = new Set((await pool.query(`SELECT id::text FROM shipments`)).rows.map((row) => row.id));
-  const warehouseIds = new Set((await pool.query(`SELECT id::text FROM warehouse_items`)).rows.map((row) => row.id));
+  const shipmentIds = new Set((await db.query(`SELECT id::text FROM shipments`)).rows.map((row) => row.id));
+  const warehouseIds = new Set((await db.query(`SELECT id::text FROM warehouse_items`)).rows.map((row) => row.id));
 
   for (const purchase of rows) {
     const status = mapChinaStatus(purchase.status);
     const shipmentId = numberOrNull(purchase.shipment_id);
-    await pool.query(
+    await db.query(
       `INSERT INTO china_purchases
          (id, title, supplier, order_url, status, paid_amount, paid_currency, paid_at, arrived_at, shipment_id, note, extras, created_at, updated_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
@@ -243,7 +244,7 @@ async function refreshChinaPurchases() {
       if (!qty || qty <= 0) continue;
       const legacyWarehouseItemId = numberOrNull(item.warehouse_item_id);
       const warehouseItemId = legacyWarehouseItemId && warehouseIds.has(String(legacyWarehouseItemId)) ? legacyWarehouseItemId : null;
-      await pool.query(
+      await db.query(
         `INSERT INTO china_purchase_items (purchase_id, warehouse_item_id, name, qty, unit_price, currency, extras)
          VALUES ($1, $2, $3, $4, $5, $6, $7)`,
         [
@@ -269,7 +270,7 @@ async function refreshChinaCatalog() {
   console.log(`china_catalog: ${items.length}`);
 
   for (const item of items) {
-    await pool.query(
+    await db.query(
       `INSERT INTO china_catalog
          (id, name, sku, description, photo_url, last_price, last_currency, supplier, extras, created_at, updated_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
@@ -299,19 +300,33 @@ async function refreshChinaCatalog() {
 }
 
 async function bumpSequences() {
-  await pool.query(
+  await db.query(
     `SELECT setval(pg_get_serial_sequence('shipment_items', 'id'), GREATEST((SELECT COALESCE(MAX(id), 0) FROM shipment_items), 1))`
   );
-  await pool.query(
+  await db.query(
     `SELECT setval(pg_get_serial_sequence('china_purchase_items', 'id'), GREATEST((SELECT COALESCE(MAX(id), 0) FROM china_purchase_items), 1))`
   );
 }
 
 async function main() {
-  await refreshShipments();
-  await refreshChinaPurchases();
-  await refreshChinaCatalog();
-  await bumpSequences();
+  const client = await pool.connect();
+  db = client;
+  try {
+    await client.query('BEGIN');
+    await client.query('DELETE FROM shipment_items');
+    await client.query('DELETE FROM china_purchase_items');
+    await refreshShipments();
+    await refreshChinaPurchases();
+    await refreshChinaCatalog();
+    await bumpSequences();
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    db = pool;
+    client.release();
+  }
 }
 
 main()

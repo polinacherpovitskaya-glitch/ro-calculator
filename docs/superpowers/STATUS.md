@@ -1,14 +1,38 @@
 # Migration status
 
-Last update: 2026-05-20T13:06:08-03:00
+Last update: 2026-05-20T13:12:08-03:00
 Current block: Stage A complete
-Current task within block: Ready for Stage B test/reconciliation
-Branch: main
-Last commit: `87ac579` Block 16 follow-up: fix settings refresh selection
-Tests: Blocks 13-16 are merged and deployed. Block 16 PR #58 merged as `03d168e`, follow-up PR #59 merged as `87ac579`, and both main deploys passed. Staging health is OK. Full staging refresh completed. Deployed `10-settings` copied 46 operational settings including `work_load_ratio`; settings compare is `46/46 OK`. Settings API smoke passed and Playwright `/settings` smoke passed 1/1. Full compare has one pre-existing/non-settings mismatch in `warehouse_reservations` (`Supabase=1086`, `Postgres=1059`) caused by legacy duplicate/invalid reservation rows being dropped by the warehouse refresh path.
+Current task within block: Block 11 follow-up staging delta-sync complete; ready for Stage B test/reconciliation
+Branch: block-11-refresh-idempotency
+Last commit: pending
+Tests: Requested staging delta-sync scripts 01-05 ran successfully on ops-staging. Initial compare caught a non-idempotent `03-shipments-china` rerun (`shipment_items` 62/124 and `china_purchase_items` 45/90). Patched the refresh script to clear only those child item tables inside the module transaction before reloading. Re-ran patched `03` on staging and full compare is now all OK, including `warehouse_reservations 1086/1086`, `shipment_items 62/62`, `china_purchase_items 45/45`, and `settings 46/46`. `node --check ops/scripts/refresh/03-shipments-china.mjs` passed. Blocks 13-16 remain merged/deployed; Telegram bot egress is still out of scope and ops-bot was not touched.
 
 ## What was just done
 
+- Block 11 follow-up delta-sync:
+  - Confirmed `/srv/ops/infra/.env` on ops-staging has the Supabase refresh variables present without printing secret values.
+  - Ran the requested deployed refresh scripts in order on ops-staging:
+    - `01-employees`: 14 employees
+    - `02-warehouse`: 227 warehouse items, 1086 unique reservations, 1 history row
+    - `03-shipments-china`: 13 shipments, 62 shipment items, 14 China purchases, 45 China purchase items, 103 catalog rows
+    - `04-molds-blanks`: 53 molds, 5 mold hardware links, 61 hardware blanks, 12 packaging blanks, 40 colors, 43 marketplace sets
+    - `05-bugs`: 10 bug reports, 8 bug attachments
+  - Ran deployed compare and found only the `03-shipments-china` child rows were doubled by a partial rerun:
+    - `shipment_items`: Supabase 62, Postgres 124
+    - `china_purchase_items`: Supabase 45, Postgres 90
+  - Fixed `ops/scripts/refresh/03-shipments-china.mjs` so the module runs in one transaction and clears `shipment_items` / `china_purchase_items` before rebuilding them from legacy JSON snapshots.
+  - Verified the patched script on ops-staging via a temporary `*.mjs` copy:
+    - `shipments 13/13 OK`
+    - `shipment_items 62/62 OK`
+    - `china_purchases 14/14 OK`
+    - `china_purchase_items 45/45 OK`
+    - `china_catalog 103/103 OK`
+  - Full deployed compare after the patched rerun is all OK across every currently compared table, including:
+    - `warehouse_reservations 1086/1086 OK`
+    - `settings 46/46 OK`
+    - `time_entries 193/193 OK`
+    - work/task tables OK.
+  - Temporary VPS script copy was removed after verification.
 - Block 16 follow-up:
   - PR #59 was squash-merged to `main` as `87ac579`.
   - GitHub Actions main deploy run `26174496994` passed.
