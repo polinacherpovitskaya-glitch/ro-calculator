@@ -1,14 +1,72 @@
 # Migration status
 
-Last update: 2026-05-19T22:24:18-03:00
-Current block: 10
-Current task within block: Product-images storage migration PR opened; waiting for review
-Branch: block-10-product-images
-Last commit: `dc1d23e` Update Block 10 final status
-Tests: Full API suite on VPS temporary Postgres passed 130/130. Calculator suite passed 102/102. Targeted S3 tests passed 3/3. Product-images migration ran twice on staging and was idempotent no-op because there are currently 0 legacy product image URLs in migrated tables.
+Last update: 2026-05-19T22:44:46-03:00
+Current block: 11
+Current task within block: Tasks/projects/areas/gantt implementation complete locally; preparing PR after final status update
+Branch: block-11-tasks-projects
+Last commit: `288add7` Add work management Playwright smoke
+Tests: Block 10 main deploy passed. Block 11 web build passed. Full API suite on VPS temporary Postgres passed 141/141. Calculator suite passed 102/102. Targeted work-management API test passed 10/10. Playwright work-management smoke added but not run against staging yet because Block 11 is not deployed.
 
 ## What was just done
 
+- Block 10 PR #50 was squash-merged to `main` as `ff19395`.
+- GitHub Actions main deploy run `26135544637` passed.
+- Created Block 11 branch `block-11-tasks-projects` from fresh `origin/main`.
+- Added migration `ops/db/migrations/009_work_management.sql`:
+  - `areas`
+  - `projects`
+  - `tasks`
+  - `task_comments`
+  - `work_assets`
+  - `task_checklist_items`
+  - `task_watchers`
+  - `work_activity`
+  - `work_templates`
+  - `task_notification_events`
+  - indexes plus seed areas/templates from `migration_tasks_projects_mvp.sql`
+- Added authenticated/idempotent API resources:
+  - `/api/areas`
+  - `/api/projects`
+  - `/api/tasks`
+  - `/api/work/templates`
+  - `/api/work/tasks/:taskId/comments`
+  - `/api/work/tasks/:taskId/checklist`
+  - `/api/work/tasks/:taskId/watchers/:employeeId`
+  - `/api/work/assets`
+  - `/api/work/activity`
+  - `/api/work/notification-events`
+- Added API regression coverage in `ops/api/test/work-management.test.js`:
+  - auth required
+  - areas CRUD/soft delete
+  - projects CRUD/detail/activity
+  - task CRUD/assign/complete/detail/activity
+  - validation of status/priority/context
+  - comments/checklist/watchers/assets/activity
+  - templates and notification event listing
+- Added refresh/compare support:
+  - `ops/scripts/refresh/08-work-management.mjs`
+  - `refresh-staging-snapshot.mjs` now runs `08-work-management`
+  - `compare-datasets.mjs` includes work-management tables with FK-aware counts
+- Added Vue API wrapper `ops/web/src/api/work.ts`.
+- Added Vue screens and routes:
+  - `/tasks`
+  - `/projects`
+  - `/areas`
+  - `/gantt`
+  - home navigation links
+- Added Playwright smoke `tests/playwright/work-management.spec.ts`:
+  - login
+  - create task
+  - add comment
+  - add checklist item
+  - close task
+- Verified:
+  - `cd ops/web && npm run build`: passed
+  - full API suite on VPS temporary Postgres with migrations 001-009: 141/141 passed
+  - `npm run test:calc` on VPS temporary Postgres: 102/102 passed
+- Remaining Block 11 after PR merge/deploy:
+  - run staging refresh/compare including `08-work-management`
+  - run `tests/playwright/work-management.spec.ts` against staging
 - Block 9 PR #47, hotfix PR #48, and smoke assertion PR #49 were merged to `main`; Block 9 is deployed and staging orders smoke passed.
 - Created Block 10 branch `block-10-product-images` from fresh `origin/main`.
 - Read the Block 10 plan: migrate Supabase Storage bucket `product-images` to private Selectel Object Storage bucket `ro-ops-product-images`, then rewrite DB URLs to `selectel://bucket/key` and return presigned URLs from the API.
