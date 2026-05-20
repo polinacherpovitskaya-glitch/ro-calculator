@@ -1,6 +1,6 @@
 # Migration status
 
-Last update: 2026-05-19T23:13:19-03:00
+Last update: 2026-05-19T23:15:33-03:00
 Current block: 12
 Current task within block: PR opened; awaiting review / TG_BOT_TOKEN for live Docker Telegram smoke
 Branch: block-12-bot
@@ -37,6 +37,9 @@ Tests: VPS temporary Postgres integration passed: API auth+bot routes 11/11, bot
   - Could not insert `OPS_BOT_TOKEN` into live `bot_tokens` yet because staging DB has not deployed migration 013.
   - Block 12 live Docker/Telegram smoke is blocked on missing `TG_BOT_TOKEN` in `/srv/ops/infra/.env`.
   - Pushed `block-12-bot` and opened PR #52: https://github.com/polinacherpovitskaya-glitch/ro-calculator/pull/52
+  - After opening PR #52, checked the ops deploy workflow and made the bot compose service opt-in via profile `bot`.
+    - Regular `docker compose --env-file .env up -d --build` will not start `ops-bot` before `TG_BOT_TOKEN` exists.
+    - Verified on VPS with the Block 12 compose file: default services are `postgres`, `api`, `caddy`; `--profile bot` adds `bot`.
 - Block 11 PR #51 was squash-merged to `main` as `0fa4131`.
 - GitHub Actions main deploy run `26136213203` passed.
 - Live staging health after deploy: `status=ok`, `db.ok=true`.

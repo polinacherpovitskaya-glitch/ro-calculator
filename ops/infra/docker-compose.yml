@@ -35,6 +35,7 @@ services:
       - internal
 
   bot:
+    profiles: ["bot"]
     build:
       context: ../bot
       dockerfile: Dockerfile
@@ -42,7 +43,7 @@ services:
     container_name: ops-bot
     restart: unless-stopped
     environment:
-      TG_BOT_TOKEN: ${TG_BOT_TOKEN}
+      TG_BOT_TOKEN: ${TG_BOT_TOKEN:-}
       OPS_API_URL: http://api:3000
       OPS_BOT_TOKEN: ${OPS_BOT_TOKEN}
       TASK_BOT_POLL_INTERVAL_MS: ${TASK_BOT_POLL_INTERVAL_MS:-15000}
