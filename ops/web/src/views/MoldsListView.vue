@@ -34,6 +34,7 @@
       <table>
         <thead>
           <tr>
+            <th>Фото</th>
             <th>Название</th>
             <th>Тип</th>
             <th>Статус</th>
@@ -44,8 +45,14 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-if="molds.loading"><td colspan="7">Загрузка...</td></tr>
+          <tr v-if="molds.loading"><td colspan="8">Загрузка...</td></tr>
           <tr v-for="mold in molds.molds" :key="mold.id">
+            <td>
+              <RouterLink v-if="mold.photo_url" class="photo-link" :to="`/molds/${mold.id}`">
+                <img class="photo-thumb" :src="mold.photo_url" :alt="mold.name" loading="lazy" />
+              </RouterLink>
+              <span v-else class="photo-empty">—</span>
+            </td>
             <td><RouterLink :to="`/molds/${mold.id}`">{{ mold.name }}</RouterLink></td>
             <td><input :value="mold.type || ''" @change="updateText(mold.id, 'type', $event)" /></td>
             <td>
@@ -60,7 +67,7 @@
             <td><input :value="mold.note || ''" @change="updateText(mold.id, 'note', $event)" /></td>
             <td class="right"><button type="button" @click="deleteMold(mold.id)">Удалить</button></td>
           </tr>
-          <tr v-if="!molds.loading && molds.molds.length === 0"><td colspan="7">Пусто</td></tr>
+          <tr v-if="!molds.loading && molds.molds.length === 0"><td colspan="8">Пусто</td></tr>
         </tbody>
       </table>
     </div>
@@ -149,5 +156,8 @@ input, select, textarea { min-height: 2.25rem; border: 1px solid #cbd5df; border
 button, a { display: inline-flex; align-items: center; min-height: 2.25rem; border: 1px solid #b8c2cc; border-radius: 6px; background: white; padding: 0 .75rem; color: #1f2933; text-decoration: none; cursor: pointer; }
 table { width: 100%; border-collapse: collapse; background: white; border: 1px solid #d9e2ec; } th, td { padding: .65rem; border-bottom: 1px solid #eef2f6; text-align: left; vertical-align: middle; } th { color: #52606d; font-size: .78rem; text-transform: uppercase; }
 td input, td select { width: 100%; min-width: 7rem; } .number { max-width: 7rem; } .right { text-align: right; } .error { max-width: 78rem; margin: 0 auto 1rem; color: #b42318; }
+.photo-link { width: 4rem; height: 4rem; min-height: 0; padding: 0; border: 0; border-radius: 6px; overflow: hidden; background: #eef2f6; }
+.photo-thumb { width: 100%; height: 100%; object-fit: cover; display: block; }
+.photo-empty { display: inline-flex; align-items: center; justify-content: center; width: 4rem; height: 4rem; color: #9aa5b1; background: #f6f7f9; border-radius: 6px; }
 dialog { border: 0; border-radius: 8px; padding: 0; box-shadow: 0 20px 60px #10182833; } .form { display: grid; gap: .8rem; width: min(32rem, calc(100vw - 2rem)); padding: 1rem; } .form header, menu { display: flex; align-items: center; justify-content: space-between; gap: .75rem; } menu { padding: 0; margin: 0; }
 </style>
