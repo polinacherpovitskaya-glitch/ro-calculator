@@ -31,6 +31,7 @@ import GanttView from './views/GanttView.vue';
 import TimeTrackingView from './views/TimeTrackingView.vue';
 import VacationsView from './views/VacationsView.vue';
 import PayrollView from './views/PayrollView.vue';
+import AnalyticsView from './views/AnalyticsView.vue';
 
 const router = createRouter({
   history: createWebHistory(),
@@ -66,6 +67,7 @@ const router = createRouter({
     { path: '/time-tracking', name: 'time-tracking', component: TimeTrackingView, meta: { requiresAuth: true } },
     { path: '/vacations', name: 'vacations', component: VacationsView, meta: { requiresAuth: true } },
     { path: '/payroll', name: 'payroll', component: PayrollView, meta: { requiresAuth: true } },
+    { path: '/analytics', name: 'analytics', component: AnalyticsView, meta: { requiresAuth: true } },
   ],
 });
 

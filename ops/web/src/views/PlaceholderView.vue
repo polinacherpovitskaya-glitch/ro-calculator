@@ -22,6 +22,7 @@
         <RouterLink to="/time-tracking">Часы</RouterLink>
         <RouterLink to="/vacations">Отпуска</RouterLink>
         <RouterLink to="/payroll">Зарплаты</RouterLink>
+        <RouterLink to="/analytics">Аналитика</RouterLink>
         <RouterLink to="/templates">Шаблоны</RouterLink>
         <RouterLink to="/production/calendar">Календарь</RouterLink>
         <RouterLink to="/production/plan">План</RouterLink>
