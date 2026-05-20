@@ -4,7 +4,7 @@ Last update: 2026-05-19T22:17:15-03:00
 Current block: 10
 Current task within block: Product-images storage migration code ready; live Selectel bucket/env is still needed before staging migration/smoke
 Branch: block-10-product-images
-Last commit: `b887709` Support regional product image bucket endpoint
+Last commit: `a7b30f1` Support regional product image bucket endpoint
 Tests: Full API suite on VPS temporary Postgres passed 130/130. Calculator suite passed 102/102. Targeted S3 tests passed 3/3. Live storage migration and photo smoke not run yet because `/srv/ops/infra/.env` does not have `S3_BUCKET_PRODUCT_IMAGES`.
 
 ## What was just done
