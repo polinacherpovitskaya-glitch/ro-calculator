@@ -16,6 +16,10 @@ import templatesRoute from './routes/templates.js';
 import productionRoute from './routes/production.js';
 import indirectRoute from './routes/indirect.js';
 import ordersRoute from './routes/orders.js';
+import areasRoute from './routes/areas.js';
+import projectsRoute from './routes/projects.js';
+import tasksRoute from './routes/tasks.js';
+import workEventsRoute from './routes/work-events.js';
 import internalRoute from './routes/internal.js';
 import { selectelUrlSigningMiddleware } from './s3.js';
 
@@ -41,6 +45,10 @@ export function createServer() {
   app.use('/api/production', productionRoute);
   app.use('/api/indirect-costs', indirectRoute);
   app.use('/api/orders', ordersRoute);
+  app.use('/api/areas', areasRoute);
+  app.use('/api/projects', projectsRoute);
+  app.use('/api/tasks', tasksRoute);
+  app.use('/api/work', workEventsRoute);
   app.use('/api/internal', internalRoute);
   return app;
 }
