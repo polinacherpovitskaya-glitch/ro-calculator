@@ -1,11 +1,11 @@
 # Migration status
 
-Last update: 2026-05-19T22:15:12-03:00
+Last update: 2026-05-19T22:17:15-03:00
 Current block: 10
 Current task within block: Product-images storage migration code ready; live Selectel bucket/env is still needed before staging migration/smoke
 Branch: block-10-product-images
-Last commit: `a3f2448` Preserve dates while signing Selectel URLs
-Tests: Full API suite on VPS temporary Postgres passed 130/130. Calculator suite passed 102/102. Live storage migration and photo smoke not run yet because `/srv/ops/infra/.env` does not have `S3_BUCKET_PRODUCT_IMAGES`.
+Last commit: `b887709` Support regional product image bucket endpoint
+Tests: Full API suite on VPS temporary Postgres passed 130/130. Calculator suite passed 102/102. Targeted S3 tests passed 3/3. Live storage migration and photo smoke not run yet because `/srv/ops/infra/.env` does not have `S3_BUCKET_PRODUCT_IMAGES`.
 
 ## What was just done
 
@@ -21,6 +21,7 @@ Tests: Full API suite on VPS temporary Postgres passed 130/130. Calculator suite
   - `signSelectelUrls()` walks API JSON responses and replaces `selectel://...` strings with presigned URLs.
   - The signer preserves `Date` and other serializable objects so existing API responses keep their shape.
 - Added `S3_BUCKET_PRODUCT_IMAGES=ro-ops-product-images` to `ops/infra/.env.example`.
+- Added optional `S3_ENDPOINT_PRODUCT_IMAGES` / `S3_REGION_PRODUCT_IMAGES` support so the product-images bucket can live in a different Selectel region than the backup bucket.
 - Added `ops/scripts/migrate-storage-product-images.mjs`:
   - scans `warehouse_items.photo_url`
   - scans nested JSON in `order_items.item_data`
@@ -31,6 +32,7 @@ Tests: Full API suite on VPS temporary Postgres passed 130/130. Calculator suite
   - remains idempotent by only selecting Supabase product-images URLs.
 - Added API regression tests for:
   - explicit S3 bucket uploads and mock signing
+  - product-images regional endpoint selection
   - recursive Selectel URL signing
   - warehouse item photo URL signing in API responses.
 - Verified Block 10 code on a temporary VPS Postgres:

@@ -3,8 +3,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-let client = null;
-let clientKey = '';
+const clients = new Map();
 
 function requireEnv(name) {
   const value = process.env[name];
@@ -24,23 +23,43 @@ function mockPath(key) {
   return process.env.S3_MOCK_DIR ? path.join(process.env.S3_MOCK_DIR, key) : null;
 }
 
-function getClient() {
-  const endpoint = requireEnv('S3_ENDPOINT');
+function getProductImagesBucket() {
+  return process.env.S3_BUCKET_PRODUCT_IMAGES;
+}
+
+function getEndpoint(bucket = undefined) {
+  if (bucket && bucket === getProductImagesBucket() && process.env.S3_ENDPOINT_PRODUCT_IMAGES) {
+    return process.env.S3_ENDPOINT_PRODUCT_IMAGES;
+  }
+  return requireEnv('S3_ENDPOINT');
+}
+
+function getRegion(bucket = undefined) {
+  if (bucket && bucket === getProductImagesBucket() && process.env.S3_REGION_PRODUCT_IMAGES) {
+    return process.env.S3_REGION_PRODUCT_IMAGES;
+  }
+  return process.env.S3_REGION || 'ru-1';
+}
+
+function getClient(bucket = undefined) {
+  const endpoint = getEndpoint(bucket);
   const accessKeyId = requireEnv('S3_ACCESS_KEY');
   const secretAccessKey = requireEnv('S3_SECRET_KEY');
-  const region = process.env.S3_REGION || 'ru-1';
-  const nextKey = `${endpoint}|${region}|${accessKeyId}`;
+  const region = getRegion(bucket);
+  const key = `${endpoint}|${region}|${accessKeyId}`;
 
-  if (!client || clientKey !== nextKey) {
-    client = new S3Client({
-      endpoint,
-      region,
-      credentials: { accessKeyId, secretAccessKey },
-      forcePathStyle: true,
-    });
-    clientKey = nextKey;
+  if (!clients.has(key)) {
+    clients.set(
+      key,
+      new S3Client({
+        endpoint,
+        region,
+        credentials: { accessKeyId, secretAccessKey },
+        forcePathStyle: true,
+      })
+    );
   }
-  return client;
+  return clients.get(key);
 }
 
 export async function uploadObject(key, body, contentType, bucket = undefined) {
@@ -51,9 +70,10 @@ export async function uploadObject(key, body, contentType, bucket = undefined) {
     return;
   }
 
-  await getClient().send(
+  const targetBucket = getBucket(bucket);
+  await getClient(targetBucket).send(
     new PutObjectCommand({
-      Bucket: getBucket(bucket),
+      Bucket: targetBucket,
       Key: key,
       Body: body,
       ContentType: contentType || 'application/octet-stream',
@@ -68,7 +88,8 @@ export async function deleteObject(key, bucket = undefined) {
     return;
   }
 
-  await getClient().send(new DeleteObjectCommand({ Bucket: getBucket(bucket), Key: key }));
+  const targetBucket = getBucket(bucket);
+  await getClient(targetBucket).send(new DeleteObjectCommand({ Bucket: targetBucket, Key: key }));
 }
 
 function selectelParts(value) {
@@ -85,7 +106,9 @@ export async function presignedGetUrl(key, expiresIn = 600, bucket = undefined) 
     if (mockPath(selectel.key)) {
       return `mock-s3://${selectel.bucket}/${selectel.key}`;
     }
-    return getSignedUrl(getClient(), new GetObjectCommand({ Bucket: selectel.bucket, Key: selectel.key }), { expiresIn });
+    return getSignedUrl(getClient(selectel.bucket), new GetObjectCommand({ Bucket: selectel.bucket, Key: selectel.key }), {
+      expiresIn,
+    });
   }
   if (key.startsWith('supabase://') && process.env.SUPABASE_URL) {
     const storageKey = key.replace('supabase://', '');
@@ -98,7 +121,10 @@ export async function presignedGetUrl(key, expiresIn = 600, bucket = undefined) 
     return `mock-s3://${key}`;
   }
 
-  return getSignedUrl(getClient(), new GetObjectCommand({ Bucket: getBucket(bucket), Key: key }), { expiresIn });
+  const targetBucket = getBucket(bucket);
+  return getSignedUrl(getClient(targetBucket), new GetObjectCommand({ Bucket: targetBucket, Key: key }), {
+    expiresIn,
+  });
 }
 
 export async function signSelectelUrls(value, expiresIn = 600) {

@@ -27,3 +27,36 @@ test('signSelectelUrls recursively signs selectel URLs and leaves other values i
   assert.equal(signed.nested[0].url, 'https://example.test/keep.png');
   assert.equal(signed.nested[1].url, 'mock-s3://ro-ops-product-images/product-images/b.png');
 });
+
+test('presignedGetUrl can use product-images endpoint when bucket is regional', async () => {
+  const previous = {
+    S3_MOCK_DIR: process.env.S3_MOCK_DIR,
+    S3_ENDPOINT: process.env.S3_ENDPOINT,
+    S3_ENDPOINT_PRODUCT_IMAGES: process.env.S3_ENDPOINT_PRODUCT_IMAGES,
+    S3_BUCKET_PRODUCT_IMAGES: process.env.S3_BUCKET_PRODUCT_IMAGES,
+    S3_ACCESS_KEY: process.env.S3_ACCESS_KEY,
+    S3_SECRET_KEY: process.env.S3_SECRET_KEY,
+  };
+
+  try {
+    delete process.env.S3_MOCK_DIR;
+    process.env.S3_ENDPOINT = 'https://s3.ru-3.storage.selcloud.ru';
+    process.env.S3_ENDPOINT_PRODUCT_IMAGES = 'https://s3.ru-1.storage.selcloud.ru';
+    process.env.S3_BUCKET_PRODUCT_IMAGES = 'ro-ops-product-images';
+    process.env.S3_ACCESS_KEY = 'test-access-key';
+    process.env.S3_SECRET_KEY = 'test-secret-key';
+
+    const url = await presignedGetUrl('selectel://ro-ops-product-images/product-images/a.png');
+
+    assert.match(url, /^https:\/\/s3\.ru-1\.storage\.selcloud\.ru\//);
+    assert.match(url, /product-images\/a\.png/);
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  }
+});
