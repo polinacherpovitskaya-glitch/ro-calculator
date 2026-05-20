@@ -1,14 +1,26 @@
 # Migration status
 
-Last update: 2026-05-19T22:51:08-03:00
+Last update: 2026-05-19T23:01:36-03:00
 Current block: 12
-Current task within block: Starting Telegram bot migration/redesign after Block 11 deploy/smoke
+Current task within block: Telegram bot migration/redesign; DB state, timezone helpers, Ops API client done; bot bindings API implemented and awaiting DB integration run because VPS SSH is timing out
 Branch: block-12-bot
-Last commit: `0fa4131` Block 11: Work management
-Tests: Block 11 main deploy passed. Staging health passed. Work-management Playwright smoke passed 1/1 after deploy. Smoke temp user and E2E task were deleted. Staging refresh/compare is blocked because `SUPABASE_URL` and `SUPABASE_SERVICE_KEY` are still absent from `/srv/ops/infra/.env`.
+Last commit: `589764b` Add Ops API client for bot
+Tests: Block 12 bot state tests passed 7/7 on VPS temporary Postgres before SSH became unavailable. Bot timezone/API-client local unit tests passed 17/17. Bot bindings route syntax check passed, but DB-backed route tests are pending because SSH to the VPS currently times out and local Docker/Postgres binaries are unavailable. Block 11 staging refresh/compare is still blocked because `SUPABASE_URL` and `SUPABASE_SERVICE_KEY` are absent from `/srv/ops/infra/.env`.
 
 ## What was just done
 
+- Block 12 progress:
+  - Added `ops/db/migrations/013_bot_state.sql` for `employees.timezone`, Telegram bindings, bot conversation state, message inbox, and bot bearer tokens.
+  - Added Bearer token auth in the Node API; bot tokens update `last_used_at` and populate `req.user`.
+  - Moved tracked Telegram bot sources from `bot/` to `ops/bot/`.
+  - Added Postgres-backed bot state/inbox module in `ops/bot/state.js` with FIFO/`SKIP LOCKED` message claiming.
+  - Added bot package lock and bot `npm test` script.
+  - Verified state module on a temporary VPS Postgres database: 7/7 passed.
+  - Added IANA timezone helpers and wired `getLocalDate()` to accept timezone strings while preserving numeric-offset behavior.
+  - Added timezone unit tests: 10/10 passed locally.
+  - Added `ops/bot/api-client.js` for Bearer-authenticated Node API calls with idempotency keys.
+  - Added API client unit tests: 7/7 passed locally.
+  - Implemented `/api/bot/bindings` admin routes and tests locally; DB integration run is pending because SSH to `89.169.170.164:22` currently times out and this machine has no local Docker/Postgres.
 - Block 11 PR #51 was squash-merged to `main` as `0fa4131`.
 - GitHub Actions main deploy run `26136213203` passed.
 - Live staging health after deploy: `status=ok`, `db.ok=true`.
