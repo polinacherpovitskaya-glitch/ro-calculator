@@ -56,8 +56,8 @@ test('orders e2e: create, add items, recalc, reload, consume hardware', async ({
   await page.reload();
   await expect(page.getByLabel('Название')).toHaveValue(orderName);
   await page.getByRole('button', { name: 'Позиции' }).click();
-  await expect(page.locator('tbody')).toContainText(`Badge ${stamp}`);
-  await expect(page.locator('tbody')).toContainText(`Package ${stamp}`);
+  await page.waitForFunction((value) => Array.from(document.querySelectorAll('tbody input')).some((input) => (input as HTMLInputElement).value === value), `Badge ${stamp}`);
+  await page.waitForFunction((value) => Array.from(document.querySelectorAll('tbody input')).some((input) => (input as HTMLInputElement).value === value), `Package ${stamp}`);
 
   const warehouseName = `E2E hardware ${stamp}`;
   const createWarehouse = await page.request.post(`${baseURL}/api/warehouse/items`, {
