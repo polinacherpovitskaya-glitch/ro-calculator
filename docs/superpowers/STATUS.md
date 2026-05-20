@@ -1,11 +1,11 @@
 # Migration status
 
-Last update: 2026-05-19T23:04:35-03:00
+Last update: 2026-05-19T23:07:55-03:00
 Current block: 12
-Current task within block: Telegram task bot switched to Ops API; DB integration/deploy smoke pending because VPS SSH is timing out
+Current task within block: Telegram task bot switched to Ops API; DB integration tests pass; staging Docker/deploy smoke still pending
 Branch: block-12-bot
-Last commit: `5995bbe` Switch task bot to Ops API
-Tests: Block 12 bot state tests passed 7/7 on VPS temporary Postgres before SSH became unavailable. Bot timezone/API-client/task-notification-worker local unit tests passed 20/20. Bot/API syntax checks passed. DB-backed bot route tests and Docker smoke are pending because SSH to the VPS currently times out and local Docker/Postgres binaries are unavailable. Block 11 staging refresh/compare is still blocked because `SUPABASE_URL` and `SUPABASE_SERVICE_KEY` are absent from `/srv/ops/infra/.env`.
+Last commit: `26843bb` Align bot binding API with schema
+Tests: VPS temporary Postgres integration passed: API auth+bot routes 11/11, bot package tests 27/27. Bot/API syntax checks passed. Staging Docker bot smoke is still pending. Block 11 staging refresh/compare is still blocked because `SUPABASE_URL` and `SUPABASE_SERVICE_KEY` are absent from `/srv/ops/infra/.env`.
 
 ## What was just done
 
@@ -25,7 +25,10 @@ Tests: Block 12 bot state tests passed 7/7 on VPS temporary Postgres before SSH 
   - Updated `task-notification-worker.js` so task notification polling can use the Ops API plus bot bindings.
   - Added `ops/bot/Dockerfile`, `ops/infra/docker-compose.yml` bot service, and bot env docs/examples.
   - Local bot unit tests passed 20/20.
-  - DB integration run is pending because SSH to `89.169.170.164:22` currently times out and this machine has no local Docker/Postgres.
+  - Fixed bot binding API field names to match migration (`bound_at`, `last_active_at`).
+  - Verified Block 12 DB path on VPS temporary Postgres with all migrations:
+    - API `auth-routes.test.js` + `bot-routes.test.js`: 11/11 passed.
+    - Bot `npm test`: 27/27 passed.
 - Block 11 PR #51 was squash-merged to `main` as `0fa4131`.
 - GitHub Actions main deploy run `26136213203` passed.
 - Live staging health after deploy: `status=ok`, `db.ok=true`.
