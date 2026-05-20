@@ -29,6 +29,28 @@ const ORDER_FIELDS = [
   'extras',
 ];
 const ITEM_FIELDS = ['type', 'name', 'qty', 'unit_price', 'line_total', 'item_data', 'position'];
+const ORDER_LIST_COLUMNS = [
+  'id',
+  'order_name',
+  'client_name',
+  'client_email',
+  'client_phone',
+  'status',
+  'deadline',
+  'deadline_start',
+  'manager_id',
+  'quantity',
+  'total_revenue',
+  'total_cost',
+  'total_margin',
+  'margin_percent',
+  'total_hours_plan',
+  'production_hours_plastic',
+  'production_hours_packaging',
+  'production_hours_hardware',
+  'created_at',
+  'updated_at',
+].join(', ');
 const STATUSES = new Set(['draft', 'quoted', 'approved', 'in_production', 'ready', 'shipped', 'closed', 'cancelled']);
 const TRANSITIONS = {
   draft: new Set(['quoted', 'in_production', 'cancelled']),
@@ -327,7 +349,7 @@ router.get(
       where.push(`(LOWER(COALESCE(order_name, '')) LIKE $${params.length} OR LOWER(COALESCE(client_name, '')) LIKE $${params.length})`);
     }
     const { rows } = await getPool().query(
-      `SELECT * FROM orders
+      `SELECT ${ORDER_LIST_COLUMNS} FROM orders
         ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
         ORDER BY updated_at DESC, id DESC
         LIMIT 500`,

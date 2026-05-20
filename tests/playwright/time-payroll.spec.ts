@@ -41,7 +41,7 @@ test('time tracking and payroll e2e: add hours and calculate payroll', async ({ 
   await page.goto(`${baseURL}/payroll`);
   await expect(page.getByRole('heading', { name: 'Зарплаты' })).toBeVisible();
   await page.getByLabel('Год').fill(String(now.getFullYear()));
-  await page.getByLabel('Месяц').fill(String(now.getMonth() + 1));
+  await page.getByRole('spinbutton', { name: 'Месяц' }).fill(String(now.getMonth() + 1));
   await Promise.all([
     page.waitForResponse((response) => response.url().includes('/api/payroll/calculate') && response.status() === 200),
     page.getByRole('button', { name: 'Пересчитать всех' }).click(),

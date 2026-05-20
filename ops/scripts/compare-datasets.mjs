@@ -96,6 +96,20 @@ function numberOrNull(...values) {
   return null;
 }
 
+function mapWarehouseHistoryType(oldType, qtyChange, ctx) {
+  const type = String(oldType || '').toLowerCase();
+  if (['receipt', 'shipment_receive'].includes(type)) return 'receipt';
+  if (['inventory_audit', 'inventory_adjustment', 'inventory_apply'].includes(type)) return 'inventory_audit';
+  if (['return_to_warehouse', 'return_from_order', 'return_to_order'].includes(type)) return 'return';
+  if (['from_order', 'mold_usage', 'packaging', 'pendant', 'hardware', 'consume'].includes(type)) return 'consume';
+  if (['manual_add', 'manual_edit', 'manual', 'addition', 'deduction', 'adjustment', 'writeoff', 'extra_cost', 'import'].includes(type)) {
+    return 'manual_edit';
+  }
+  if (Number(qtyChange) > 0 && ctx.shipment_id) return 'receipt';
+  if (Number(qtyChange) < 0 && ctx.order_id) return 'consume';
+  return 'manual_edit';
+}
+
 async function fetchAll(table) {
   const { data, error } = await supabase.from(table).select('*');
   if (error) {
@@ -244,6 +258,34 @@ async function supabaseCount(table) {
       }
     }
     return ids.size + anonymousRows;
+  }
+
+  if (table === 'warehouse_history') {
+    const rows = await fetchAll(table);
+    const orderIds = new Set((await pool.query(`SELECT id::text FROM orders`)).rows.map((row) => row.id));
+    const historySumByItem = new Map();
+    let validRows = 0;
+
+    for (const row of rows) {
+      const itemId = numberOrNull(row.item_id, row.warehouse_item_id);
+      if (!itemId) continue;
+      const qtyChange = numberOrNull(row.qty_change, row.delta, row.change) ?? 0;
+      const type = mapWarehouseHistoryType(row.type, qtyChange, {
+        shipment_id: row.shipment_id,
+        order_id: row.order_id,
+      });
+      if (type === 'receipt' && qtyChange <= 0) continue;
+      if (type === 'consume' && qtyChange >= 0) continue;
+      if (type === 'return' && qtyChange <= 0) continue;
+      const orderId = numberOrNull(row.order_id);
+      if (orderId && !orderIds.has(String(orderId))) continue;
+      validRows += 1;
+      historySumByItem.set(String(itemId), (historySumByItem.get(String(itemId)) || 0) + qtyChange);
+    }
+
+    const items = await pool.query(`SELECT id::text, qty::numeric FROM warehouse_items`);
+    const baselineRows = items.rows.filter((item) => Number(item.qty) !== (historySumByItem.get(item.id) || 0)).length;
+    return validRows + baselineRows;
   }
 
   if (table === 'orders') {

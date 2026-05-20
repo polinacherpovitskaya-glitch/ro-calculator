@@ -1,14 +1,44 @@
 # Migration status
 
-Last update: 2026-05-20T13:27:01-03:00
+Last update: 2026-05-20T15:05:13-03:00
 Current block: Stage A complete
-Current task within block: Block 11 follow-up staging delta-sync complete; ready for Stage B test/reconciliation
-Branch: main
-Last commit: `a296adc` Fix Pages verify without bot sources
-Tests: PR #61 was squash-merged to `main` as `81b2633`; GitHub Actions ops deploy run `26175175571` passed. Requested staging delta-sync scripts 01-05 ran successfully on ops-staging. Initial compare caught a non-idempotent `03-shipments-china` rerun (`shipment_items` 62/124 and `china_purchase_items` 45/90`). The merged/deployed refresh script now clears only those child item tables inside the module transaction before reloading. Re-ran deployed `03` on staging and full compare is all OK, including `warehouse_reservations 1086/1086`, `shipment_items 62/62`, `china_purchase_items 45/45`, and `settings 46/46`. PR #63 was squash-merged as `a296adc` to keep the legacy Pages verify workflow from blocking on absent deferred bot sources; GitHub Pages run `26175690226` passed. Blocks 13-16 remain merged/deployed; Telegram bot egress is still out of scope and ops-bot was not touched.
+Current task within block: Stage B automated checks in progress
+Branch: stage-B-test
+Last commit: pending
+Tests: Stage B full staging refresh completed and compare is all OK after adding warehouse history baseline handling (`warehouse_history 198/198`). API suite passed 170/170, calc golden masters passed 102/102, API typecheck passed, web build passed, Playwright staging smokes passed 9/9 after a selector-only fix. Live staging warehouse invariants I1-I4 now return 0 violations. Performance warm samples are OK for warehouse/tasks/health; `/api/orders` p95 was 0.220s, so this branch trims the list endpoint payload and needs post-deploy latency re-test. Manual 10-order money reconciliation and staff double-smoke remain owner-led Stage B follow-ups.
 
 ## What was just done
 
+- Stage B automated checks:
+  - Created `stage-B-test` from fresh `origin/main`.
+  - Pre-flight: staging health returned `status=ok`, `db.ok=true`; recent `main` workflows were green.
+  - Ran full staging refresh from Supabase; final compare is all OK across every compared table.
+  - Added missing `ops/scripts/check-warehouse-invariants.mjs` from the Stage B plan.
+  - Found live staging I2/I3 violations caused by legacy warehouse history being imported as one aggregate blob with no per-item baseline.
+  - Updated `ops/scripts/refresh/02-warehouse.mjs` to drop invalid aggregate legacy history rows and seed `inventory_audit` baseline rows so `qty == SUM(history.qty_change)` after refresh.
+  - Updated `ops/scripts/compare-datasets.mjs` so `warehouse_history` expected count matches canonical valid history rows plus generated baselines.
+  - Re-ran full refresh with patched scripts on staging:
+    - `warehouse_history_baseline: 198`
+    - compare all OK, including `warehouse_history 198/198`.
+  - Live staging warehouse invariants:
+    - I1: 0 violations
+    - I2: 0 violations
+    - I3: 0 violations
+    - I4: 0 violations
+  - Automated tests:
+    - `ops/api npm test`: 170/170 passed
+    - `ops/api npm run test:calc`: 102/102 passed
+    - `ops/api npm run typecheck`: passed
+    - `ops/web npm run build`: passed
+    - `tests/playwright`: first run 8/9 due ambiguous test selector; after fixing `time-payroll.spec.ts`, 9/9 passed.
+  - Performance warm samples:
+    - `/api/warehouse/items`: p95 0.124s
+    - `/api/orders`: p95 0.220s, above the 0.200s Stage B target
+    - `/api/tasks`: p95 0.143s
+    - `/api/health`: p95 0.086s
+  - Profiled `/api/orders`: SQL is ~1.4 ms; issue is list response payload size from `SELECT *`.
+  - Updated `/api/orders` list endpoint to return only list columns; post-deploy latency re-test still required.
+  - Added `docs/stage-B-test-results.md`.
 - Block 11 follow-up delta-sync:
   - PR #63 was squash-merged to `main` as `a296adc`.
   - GitHub Actions Pages deploy run `26175690226` passed after the workflow fix.
