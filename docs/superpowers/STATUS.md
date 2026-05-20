@@ -1,14 +1,41 @@
 # Migration status
 
-Last update: 2026-05-20T12:48:42-03:00
+Last update: 2026-05-20T12:59:54-03:00
 Current block: 16
-Current task within block: Remaining settings implementation in progress
-Branch: block-16-settings
-Last commit: `8ffedd3` Block 15: analytics reports
-Tests: Block 15 is fully complete: PR #57 was merged to `main` as `8ffedd3`, main deploy run `26172931301` passed, staging health is OK, all 7 analytics endpoints returned HTTP 200, and staging Playwright `/analytics` smoke passed 1/1. Block 16 so far: syntax checks passed, `cd ops/web && npm run build` passed, VPS temporary Postgres targeted `settings.test.js` passed 4/4, full API suite passed 170/170, and calc suite passed 102/102.
+Current task within block: Settings refresh whitelist follow-up in progress
+Branch: block-16-settings-whitelist
+Last commit: `03d168e` Block 16: remaining settings
+Tests: Block 16 PR #58 was merged to `main` as `03d168e`, main deploy run `26173863522` passed, staging health is OK, and settings API smoke passed. Full staging refresh ran and completed. Follow-up branch fixed the settings whitelist and a patched `10-settings` run on staging copied 46 operational settings including `work_load_ratio`; settings compare is now `46/46 OK`. Full compare has one pre-existing/non-settings mismatch in `warehouse_reservations` (`Supabase=1086`, `Postgres=1059`) caused by legacy duplicate/invalid reservation rows being dropped by the warehouse refresh path.
 
 ## What was just done
 
+- Block 16 follow-up:
+  - PR #58 was squash-merged to `main` as `03d168e`.
+  - GitHub Actions main deploy run `26173863522` passed.
+  - Staging health after deploy: `status=ok`, `db.ok=true`.
+  - Settings API smoke against staging passed:
+    - temporary `app_config.smoke_*` setting `PUT`: HTTP 200
+    - same key `GET`: HTTP 200
+    - smoke key was deleted from staging DB.
+  - Ran full staging refresh from Supabase with the deployed Block 16 pipeline.
+    - Refresh completed successfully.
+    - It copied 10 company settings but skipped several operational scalar settings because the first whitelist was too narrow.
+  - Created follow-up branch `block-16-settings-whitelist` from fresh `origin/main`.
+  - Changed settings refresh/compare selection from narrow whitelist to broad operational allow-by-default with explicit denylist for:
+    - normalized production/warehouse settings
+    - finance/wiki/knowledge settings
+    - auth/session/employee-extra settings
+    - work/task blobs
+    - smoke/probe keys.
+  - Verified follow-up:
+    - `node --check ops/scripts/refresh/10-settings.mjs`
+    - `node --check ops/scripts/compare-datasets.mjs`
+    - Patched staging `10-settings` run copied 46 settings and preserved `work_load_ratio`.
+    - Patched compare reports `settings 46 46 0 OK`.
+    - Full compare still has one unrelated `warehouse_reservations` mismatch (`1086` vs `1059`) from legacy duplicate/invalid reservation rows dropped by refresh.
+  - Remaining:
+    - PR, merge, deploy
+    - rerun deployed settings refresh/compare and settings Playwright smoke.
 - Block 16 progress:
   - Created branch `block-16-settings` from fresh `origin/main`.
   - Read Block 16 plan.

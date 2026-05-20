@@ -161,15 +161,6 @@ function countIndirectCosts(raw) {
   return count;
 }
 
-const SETTINGS_EXACT_WHITELIST = new Set([
-  'companyInfo',
-  'company_info',
-  'marketplaces_config',
-  'notification_settings',
-  'app_config',
-  'app_colors_default',
-]);
-const SETTINGS_PREFIX_WHITELIST = ['company_', 'marketplace_', 'marketplaces_', 'notification_', 'app_config', 'bug_report_', 'tpa_', 'pricing_'];
 const SETTINGS_EXACT_DENYLIST = new Set([
   'productionCalendar',
   'production_calendar_json',
@@ -180,20 +171,33 @@ const SETTINGS_EXACT_DENYLIST = new Set([
   'warehouseItems',
   'warehouse_items_json',
   'projectHardwareState',
+  'project_hardware_state_json',
   'auth_accounts_json',
   'auth_activity_json',
   'auth_sessions_json',
   'employee_extra_json',
+  'fintablo_snapshot_json',
+  'tochka_snapshot_json',
+  'bug_reports_json',
+  'work_projects_json',
+  'work_areas_json',
+  'work_templates_json',
+  'work_task_notification_events_json',
+  'work_task_comments_json',
+  'work_activity_json',
+  'work_assets_json',
+  'work_task_checklist_items_json',
+  'work_tasks_json',
+  'work_task_watchers_json',
 ]);
-const SETTINGS_PREFIX_DENYLIST = ['finance_', 'wiki_', 'knowledge_', '_legacy_', 'work_', 'task_'];
+const SETTINGS_PREFIX_DENYLIST = ['finance_', 'wiki_', 'knowledge_', '_legacy_', 'codex_', 'ro_yandex_'];
 
 function shouldCopySettingKey(key) {
   const normalized = String(key || '').trim();
   if (!normalized) return false;
   if (SETTINGS_EXACT_DENYLIST.has(normalized)) return false;
   if (SETTINGS_PREFIX_DENYLIST.some((prefix) => normalized.startsWith(prefix))) return false;
-  if (SETTINGS_EXACT_WHITELIST.has(normalized)) return true;
-  return SETTINGS_PREFIX_WHITELIST.some((prefix) => normalized.startsWith(prefix));
+  return true;
 }
 
 async function loadCatalogSeed() {

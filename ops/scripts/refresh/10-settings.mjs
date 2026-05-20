@@ -1,4 +1,4 @@
-// Copy remaining whitelisted settings from Supabase into Postgres.
+// Copy remaining operational settings from Supabase into Postgres.
 //
 // Required environment:
 //   SUPABASE_URL
@@ -11,26 +11,6 @@ import WebSocket from 'ws';
 
 const { Pool } = pg;
 
-export const EXACT_WHITELIST = new Set([
-  'companyInfo',
-  'company_info',
-  'marketplaces_config',
-  'notification_settings',
-  'app_config',
-  'app_colors_default',
-]);
-
-export const PREFIX_WHITELIST = [
-  'company_',
-  'marketplace_',
-  'marketplaces_',
-  'notification_',
-  'app_config',
-  'bug_report_',
-  'tpa_',
-  'pricing_',
-];
-
 export const EXACT_DENYLIST = new Set([
   'productionCalendar',
   'production_calendar_json',
@@ -41,10 +21,24 @@ export const EXACT_DENYLIST = new Set([
   'warehouseItems',
   'warehouse_items_json',
   'projectHardwareState',
+  'project_hardware_state_json',
   'auth_accounts_json',
   'auth_activity_json',
   'auth_sessions_json',
   'employee_extra_json',
+  'fintablo_snapshot_json',
+  'tochka_snapshot_json',
+  'bug_reports_json',
+  'work_projects_json',
+  'work_areas_json',
+  'work_templates_json',
+  'work_task_notification_events_json',
+  'work_task_comments_json',
+  'work_activity_json',
+  'work_assets_json',
+  'work_task_checklist_items_json',
+  'work_tasks_json',
+  'work_task_watchers_json',
 ]);
 
 export const PREFIX_DENYLIST = [
@@ -52,8 +46,8 @@ export const PREFIX_DENYLIST = [
   'wiki_',
   'knowledge_',
   '_legacy_',
-  'work_',
-  'task_',
+  'codex_',
+  'ro_yandex_',
 ];
 
 export function shouldCopySettingKey(key) {
@@ -61,8 +55,7 @@ export function shouldCopySettingKey(key) {
   if (!normalized) return false;
   if (EXACT_DENYLIST.has(normalized)) return false;
   if (PREFIX_DENYLIST.some((prefix) => normalized.startsWith(prefix))) return false;
-  if (EXACT_WHITELIST.has(normalized)) return true;
-  return PREFIX_WHITELIST.some((prefix) => normalized.startsWith(prefix));
+  return true;
 }
 
 function requireEnv(name) {
