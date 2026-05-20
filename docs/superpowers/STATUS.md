@@ -1,16 +1,18 @@
 # Migration status
 
-Last update: 2026-05-19T21:58:00-03:00
+Last update: 2026-05-19T22:05:11-03:00
 Current block: 9
-Current task within block: Post-merge staging smoke hotfix
-Branch: block-9-orders-hotfix
-Last commit: `2a65ba7` Block 9: Orders (#47)
-Tests: Block 9 main deploy passed. Live staging refresh/compare passed after deploy. Orders Playwright smoke found a live-order recalc bug; hotfix is in progress. Hotfix verification passed locally/VPS: `ops/web` build, API 127/127, calc 102/102.
+Current task within block: Block 9 deployed; staging smoke passed; preparing test-only smoke fix PR
+Branch: block-9-orders-smoke-fix
+Last commit: `7096109` Fix live order recalc (#48)
+Tests: Block 9 main deploy passed. Hotfix main deploy passed. Live staging refresh/compare passed after deploy and again after smoke cleanup. Orders Playwright smoke passed 1/1. Hotfix verification passed locally/VPS: `ops/web` build, API 127/127, calc 102/102.
 
 ## What was just done
 
 - Block 9 PR #47 was squash-merged to `main` as `2a65ba7`.
 - GitHub Actions main deploy run `26134232277` passed.
+- Hotfix PR #48 was squash-merged to `main` as `7096109`.
+- GitHub Actions main deploy run `26134738251` passed.
 - Refreshed live staging from Supabase after Block 9 deploy:
   - orders 190/190
   - order_items 738/738
@@ -27,11 +29,19 @@ Tests: Block 9 main deploy passed. Live staging refresh/compare passed after dep
   - `node --check ops/api/src/routes/orders.js ops/api/test/orders.test.js`: passed
   - Full API suite on VPS temporary Postgres: 127/127 passed
   - `npm run test:calc` on VPS temporary Postgres: 102/102 passed
+- Re-ran `tests/playwright/orders.spec.ts` after hotfix deploy. The functional flow passed, but the test assertion had to be corrected because item names are stored in input values, not table textContent.
+- After correcting the smoke assertion locally, `tests/playwright/orders.spec.ts` passed 1/1 against staging.
+- Refreshed staging again after smoke and deleted the temporary smoke auth user. Final compare:
+  - orders 190/190
+  - order_items 738/738
+  - order_factuals 3/3
+  - warehouse_reservations 804/804
+  - all other migrated counts matched
+- Final staging health: `db.ok=true`.
 - Next immediate steps:
-  - commit/push hotfix PR
-  - merge hotfix after check
-  - wait main deploy
-  - rerun staging refresh/compare and orders Playwright smoke
+  - commit/push/merge test-only smoke assertion fix
+  - update Block 9 final status
+  - create Block 10 branch from fresh `origin/main`
 - Block 8 PR #46 was squash-merged to `main` as `9ced98a`.
 - Added full-order golden master HTTP integration test covering 24 real legacy order fixtures via `/api/orders`, `/items`, and `/recalc`.
 - Raised API JSON body limit to `5mb` after the full-order test exposed real legacy `calculator_data` payloads over Express' default limit.
