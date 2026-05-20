@@ -1,14 +1,55 @@
 # Migration status
 
-Last update: 2026-05-20T10:39:29-03:00
-Current block: 12
-Current task within block: Post-merge Telegram transport follow-up; bot code deployed, Telegram egress from VPS blocked without proxy
-Branch: block-12-telegram-proxy
-Last commit: `e903931` Block 12: Telegram bot Ops API migration (#52)
-Tests: Block 12 PR #52 was merged and deployed to staging. GitHub Actions main deploy run `26165612149` passed. Staging health passed with `db.ok=true`. Migration 013 is live (`app_meta=013-bot-state`). `bot_tokens` contains `taskbot/admin`, and Bearer auth works. `TG_BOT_TOKEN` and `OPS_BOT_TOKEN` are present on VPS. Live Telegram smoke is still blocked because the VPS cannot connect to `api.telegram.org:443` (IPv4 timeout, IPv6 no connection). `ops-bot` was stopped to avoid noisy retry logs until `TELEGRAM_PROXY_URL` or another Telegram egress path is configured. Block 11 staging refresh/compare is still blocked because `SUPABASE_URL` and `SUPABASE_SERVICE_KEY` are absent from `/srv/ops/infra/.env`.
+Last update: 2026-05-20T11:31:48-03:00
+Current block: 13
+Current task within block: Mold photos storage migration code complete; PR/merge/deploy next, then run staging migration
+Branch: block-13-mold-photos
+Last commit: `eb92279` Block 12 follow-up: Telegram proxy support
+Tests: Block 13 targeted S3 test passed locally (4/4). On VPS temporary Postgres, targeted API tests passed (molds+s3 14/14) and `migrate-storage-mold-photos.mjs` no-op passed (`molds=0`). Full API suite on VPS temporary Postgres passed (151/151). Calculator suite passed (102/102). Selectel bucket `ro-ops-mold-photos` was created in ru-3 and write/read/delete smoke passed. Staging currently has 53 molds, 36 non-empty `photo_url`, 32 legacy Supabase `mold-photos` URLs, and 0 Selectel mold-photo URLs. Live staging DB migration is intentionally not run until this branch deploys, because API compose must pass S3 env before `molds.photo_url` is rewritten to `selectel://...`. `/srv/ops/infra/.env` now has `S3_BUCKET_MOLD_PHOTOS=ro-ops-mold-photos` and `S3_REGION=ru-3`. `SUPABASE_URL` and `SUPABASE_SERVICE_KEY` are still absent, but the Block 13 migrator first downloads public legacy `photo_url` HTTPS URLs and only requires Supabase secrets as fallback.
 
 ## What was just done
 
+- Block 13 progress:
+  - Created branch `block-13-mold-photos` from fresh `origin/main` after PR #53 merge.
+  - Read Block 13 plan: migrate Supabase Storage bucket `mold-photos` to Selectel bucket `ro-ops-mold-photos`, rewrite `molds.photo_url` to `selectel://bucket/key`, and verify photos on staging.
+  - Confirmed staging data before migration:
+    - `molds_total=53`
+    - `photo_nonempty=36`
+    - `legacy_mold_photos=32`
+    - `selectel_mold_photos=0`
+  - Added `S3_BUCKET_MOLD_PHOTOS=ro-ops-mold-photos` plus optional `S3_ENDPOINT_MOLD_PHOTOS` / `S3_REGION_MOLD_PHOTOS` to `ops/infra/.env.example`.
+  - Set default S3 region to `ru-3` to match the project Selectel endpoint and avoid ru-3 signature/API failures.
+  - Added S3 env passthrough to the `api` service in `ops/infra/docker-compose.yml`, so presigned URLs work after DB rows are rewritten to `selectel://...`.
+  - Extended `ops/api/src/s3.js` with mold-photo bucket endpoint/region overrides.
+  - Added `ops/scripts/migrate-storage-mold-photos.mjs`:
+    - scans `molds.photo_url`
+    - detects legacy Supabase `mold-photos` URLs
+    - downloads public legacy HTTPS URLs directly
+    - falls back to Supabase Storage only if the direct download is unavailable
+    - uploads to Selectel with key `mold-photos/<legacy-key>`
+    - rewrites rows to `selectel://ro-ops-mold-photos/mold-photos/<legacy-key>`
+    - is idempotent because it only selects legacy Supabase URLs.
+  - Added API tests for:
+    - mold-photo regional endpoint signing
+    - `/api/molds` list/detail signing `selectel://` photo URLs.
+  - Created private Selectel bucket `ro-ops-mold-photos` in ru-3 using existing staging S3 credentials.
+  - Verified bucket with write/read/delete smoke object.
+  - Added `S3_BUCKET_MOLD_PHOTOS=ro-ops-mold-photos` and `S3_REGION=ru-3` to `/srv/ops/infra/.env`.
+  - Verified:
+    - `cd ops/api && node --test test/s3.test.js`: 4/4 passed
+    - VPS temporary Postgres targeted tests: molds+s3 14/14 passed
+    - VPS temporary Postgres migrator no-op: `Mold photos migration complete. molds=0`
+    - VPS temporary Postgres full API suite: 151/151 passed
+    - VPS temporary Postgres calculator suite: 102/102 passed
+  - Remaining Block 13 after PR merge/deploy:
+    - run `ops/scripts/migrate-storage-mold-photos.mjs` on live staging
+    - verify staging counts: legacy `mold-photos` URLs should be 0, Selectel mold-photo URLs should be 32
+    - verify `/api/molds` returns signed URLs and photos display on staging.
+- Block 12 follow-up:
+  - PR #53 was squash-merged to `main` as `eb92279`.
+  - GitHub Actions main deploy run `26168644533` passed.
+  - Staging health after deploy: `status=ok`, `db.ok=true`.
+  - Telegram live polling remains blocked by VPS egress to `api.telegram.org`; `TELEGRAM_PROXY_URL` support is deployed but no proxy URL is configured, so `ops-bot` stays stopped.
 - Block 12 post-merge:
   - PR #52 was squash-merged to `main` as `e903931`.
   - GitHub Actions main deploy run `26165612149` passed.

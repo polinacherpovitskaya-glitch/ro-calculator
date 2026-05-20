@@ -1,12 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
+import os from 'node:os';
+import path from 'node:path';
 import { createServer } from '../src/server.js';
 import { getPool } from '../src/db.js';
 import { hashPassword } from '../src/auth/argon.js';
 
 const DB_URL = process.env.TEST_DATABASE_URL || 'postgres://ops:ops_dev_password@127.0.0.1:5433/ops';
 process.env.DATABASE_URL = DB_URL;
+process.env.S3_MOCK_DIR = process.env.S3_MOCK_DIR || path.join(os.tmpdir(), 'ro-ops-s3-test');
 
 async function startServer(t) {
   const app = createServer();
@@ -99,6 +102,35 @@ test('POST and GET /api/molds creates and lists molds', async (t) => {
 
   assert.equal(res.status, 200);
   assert.ok(body.molds.some((entry) => Number(entry.id) === Number(mold.id)));
+});
+
+test('GET /api/molds signs selectel photo URLs', async (t) => {
+  const { port, cookie } = await setup(t);
+  const mold = await createMold(port, cookie, {
+    photo_url: 'selectel://ro-ops-mold-photos/mold-photos/photo.png',
+  });
+
+  const res = await fetch(`http://127.0.0.1:${port}/api/molds?search=${encodeURIComponent(mold.name)}`, {
+    headers: { cookie },
+  });
+  const body = await res.json();
+
+  assert.equal(res.status, 200);
+  assert.equal(body.molds.length, 1);
+  assert.equal(body.molds[0].photo_url, 'mock-s3://ro-ops-mold-photos/mold-photos/photo.png');
+});
+
+test('GET /api/molds/:id signs selectel photo URLs', async (t) => {
+  const { port, cookie } = await setup(t);
+  const mold = await createMold(port, cookie, {
+    photo_url: 'selectel://ro-ops-mold-photos/mold-photos/detail.png',
+  });
+
+  const res = await fetch(`http://127.0.0.1:${port}/api/molds/${mold.id}`, { headers: { cookie } });
+  const body = await res.json();
+
+  assert.equal(res.status, 200);
+  assert.equal(body.mold.photo_url, 'mock-s3://ro-ops-mold-photos/mold-photos/detail.png');
 });
 
 test('PATCH /api/molds/:id updates mold fields', async (t) => {
