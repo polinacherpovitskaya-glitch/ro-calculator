@@ -70,7 +70,16 @@ async function main() {
   poolEnded = true;
 
   console.log('=== Running refresh scripts ===');
-  for (const script of ['01-employees', '07-orders', '02-warehouse', '03-shipments-china', '04-molds-blanks', '05-bugs', '06-production']) {
+  for (const script of [
+    '01-employees',
+    '07-orders',
+    '02-warehouse',
+    '03-shipments-china',
+    '04-molds-blanks',
+    '05-bugs',
+    '06-production',
+    '08-work-management',
+  ]) {
     runRefreshScript(script);
   }
 

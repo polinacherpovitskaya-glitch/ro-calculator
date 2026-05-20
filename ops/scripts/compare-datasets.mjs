@@ -57,6 +57,16 @@ const TABLES = [
   'production_calendar_days',
   'production_plan_entries',
   'indirect_costs',
+  'areas',
+  'projects',
+  'tasks',
+  'task_comments',
+  'work_assets',
+  'task_checklist_items',
+  'task_watchers',
+  'work_activity',
+  'work_templates',
+  'task_notification_events',
 ];
 
 function parseJson(value) {
@@ -285,6 +295,52 @@ async function supabaseCount(table) {
 
   if (table === 'indirect_costs') {
     return countIndirectCosts(await fetchSetting('indirectCosts', 'indirect_costs_json'));
+  }
+
+  if (table === 'areas') {
+    const rows = await fetchAll('areas');
+    return rows.length || 7;
+  }
+
+  if (table === 'projects') {
+    return (await fetchAll('projects')).length;
+  }
+
+  if (table === 'tasks') {
+    const rows = await fetchAll('tasks');
+    const areas = new Set((await pool.query(`SELECT id::text FROM areas`)).rows.map((row) => row.id));
+    const orders = new Set((await pool.query(`SELECT id::text FROM orders`)).rows.map((row) => row.id));
+    const projects = new Set((await pool.query(`SELECT id::text FROM projects`)).rows.map((row) => row.id));
+    return rows.filter((row) => areas.has(String(row.area_id)) || orders.has(String(row.order_id)) || projects.has(String(row.project_id))).length;
+  }
+
+  if (['task_comments', 'task_checklist_items'].includes(table)) {
+    const tasks = new Set((await pool.query(`SELECT id::text FROM tasks`)).rows.map((row) => row.id));
+    return (await fetchAll(table)).filter((row) => tasks.has(String(row.task_id))).length;
+  }
+
+  if (table === 'work_assets') {
+    const tasks = new Set((await pool.query(`SELECT id::text FROM tasks`)).rows.map((row) => row.id));
+    const projects = new Set((await pool.query(`SELECT id::text FROM projects`)).rows.map((row) => row.id));
+    return (await fetchAll('work_assets')).filter((row) => tasks.has(String(row.task_id)) || projects.has(String(row.project_id))).length;
+  }
+
+  if (table === 'task_watchers') {
+    const tasks = new Set((await pool.query(`SELECT id::text FROM tasks`)).rows.map((row) => row.id));
+    const employees = new Set((await pool.query(`SELECT id::text FROM employees`)).rows.map((row) => row.id));
+    return (await fetchAll('task_watchers')).filter((row) => {
+      const userId = row.user_id || row.employee_id;
+      return tasks.has(String(row.task_id)) && employees.has(String(userId));
+    }).length;
+  }
+
+  if (table === 'work_templates') {
+    const rows = await fetchAll('work_templates');
+    return rows.length || 7;
+  }
+
+  if (table === 'work_activity' || table === 'task_notification_events') {
+    return (await fetchAll(table)).length;
   }
 
   const { count, error } = await supabase.from(table).select('*', { count: 'exact', head: true });
