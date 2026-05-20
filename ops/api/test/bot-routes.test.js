@@ -58,10 +58,12 @@ async function login(port, email) {
   return res.headers.get('set-cookie').split(';')[0];
 }
 
-async function postBinding(port, cookie, body) {
+async function postBinding(port, cookie, body, key = crypto.randomUUID()) {
+  const headers = { cookie, 'Content-Type': 'application/json' };
+  if (key) headers['Idempotency-Key'] = key;
   return fetch(`http://127.0.0.1:${port}/api/bot/bindings`, {
     method: 'POST',
-    headers: { cookie, 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify(body),
   });
 }
@@ -107,10 +109,63 @@ test('admin can create, list, update, and deactivate telegram bindings', async (
 
   const deleted = await fetch(`http://127.0.0.1:${port}/api/bot/bindings/700000001`, {
     method: 'DELETE',
-    headers: { cookie },
+    headers: { cookie, 'Idempotency-Key': crypto.randomUUID() },
   });
   assert.equal(deleted.status, 200);
   assert.equal((await deleted.json()).binding.is_active, false);
+});
+
+test('bot binding mutations require idempotency keys', async (t) => {
+  const port = await startServer(t);
+  const user = await createUser('admin');
+  const employee = await createEmployee();
+  const cookie = await login(port, user.email);
+
+  const noKeyPost = await postBinding(port, cookie, { telegram_chat_id: '700000030', employee_id: employee.id }, '');
+  assert.equal(noKeyPost.status, 400);
+  assert.equal((await noKeyPost.json()).error.code, 'NO_IDEMPOTENCY_KEY');
+
+  const created = await postBinding(port, cookie, { telegram_chat_id: '700000030', employee_id: employee.id });
+  assert.equal(created.status, 201);
+
+  const noKeyDelete = await fetch(`http://127.0.0.1:${port}/api/bot/bindings/700000030`, {
+    method: 'DELETE',
+    headers: { cookie },
+  });
+  assert.equal(noKeyDelete.status, 400);
+  assert.equal((await noKeyDelete.json()).error.code, 'NO_IDEMPOTENCY_KEY');
+});
+
+test('notification event processing requires idempotency and caches repeated calls', async (t) => {
+  const port = await startServer(t);
+  const user = await createUser('admin');
+  const cookie = await login(port, user.email);
+  const eventId = id();
+  await getPool().query(
+    `INSERT INTO task_notification_events (id, event_type, task_id, payload)
+     VALUES ($1, 'task_assigned', NULL, '{}'::jsonb)`,
+    [eventId]
+  );
+
+  const noKey = await fetch(`http://127.0.0.1:${port}/api/bot/notification-events/${eventId}/processed`, {
+    method: 'PATCH',
+    headers: { cookie },
+  });
+  assert.equal(noKey.status, 400);
+
+  const key = crypto.randomUUID();
+  const first = await fetch(`http://127.0.0.1:${port}/api/bot/notification-events/${eventId}/processed`, {
+    method: 'PATCH',
+    headers: { cookie, 'Idempotency-Key': key },
+  });
+  const second = await fetch(`http://127.0.0.1:${port}/api/bot/notification-events/${eventId}/processed`, {
+    method: 'PATCH',
+    headers: { cookie, 'Idempotency-Key': key },
+  });
+
+  assert.equal(first.status, 200);
+  assert.equal(second.status, 200);
+  assert.deepEqual(await second.json(), await first.json());
 });
 
 test('creating a new active binding for employee deactivates the old chat', async (t) => {

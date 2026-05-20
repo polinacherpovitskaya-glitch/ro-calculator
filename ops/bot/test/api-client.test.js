@@ -89,23 +89,23 @@ test('client exposes bot bindings and notification event endpoints', async () =>
         baseUrl: 'https://ops.example.test',
         token: 'secret-token',
         fetch: async (url, init) => {
-            paths.push([url, init.method, init.body || '']);
+            paths.push([url, init.method, init.body || '', init.headers['Idempotency-Key'] || '']);
             return jsonResponse({});
         },
     });
 
     await client.listBotBindings();
-    await client.createBotBinding({ telegram_chat_id: '1', employee_id: 2 });
-    await client.deleteBotBinding('1');
+    await client.createBotBinding({ telegram_chat_id: '1', employee_id: 2 }, 'idem-bind');
+    await client.deleteBotBinding('1', 'idem-delete');
     await client.listNotificationEvents({ pending: true, limit: 50 });
-    await client.markNotificationProcessed(7);
+    await client.markNotificationProcessed(7, 'idem-event');
 
     assert.deepEqual(paths, [
-        ['https://ops.example.test/api/bot/bindings', 'GET', ''],
-        ['https://ops.example.test/api/bot/bindings', 'POST', JSON.stringify({ telegram_chat_id: '1', employee_id: 2 })],
-        ['https://ops.example.test/api/bot/bindings/1', 'DELETE', ''],
-        ['https://ops.example.test/api/bot/notification-events?pending=true&limit=50', 'GET', ''],
-        ['https://ops.example.test/api/bot/notification-events/7/processed', 'PATCH', ''],
+        ['https://ops.example.test/api/bot/bindings', 'GET', '', ''],
+        ['https://ops.example.test/api/bot/bindings', 'POST', JSON.stringify({ telegram_chat_id: '1', employee_id: 2 }), 'idem-bind'],
+        ['https://ops.example.test/api/bot/bindings/1', 'DELETE', '', 'idem-delete'],
+        ['https://ops.example.test/api/bot/notification-events?pending=true&limit=50', 'GET', '', ''],
+        ['https://ops.example.test/api/bot/notification-events/7/processed', 'PATCH', '', 'idem-event'],
     ]);
 });
 

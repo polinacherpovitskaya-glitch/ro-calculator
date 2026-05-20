@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { getPool, withTransaction } from '../db.js';
+import { withIdempotency } from '../idempotency.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { asyncHandler, codedError, integer, text } from './work-utils.js';
 
@@ -43,26 +44,27 @@ router.get(
 
 router.post(
   '/bindings',
-  asyncHandler(async (req, res) => {
-    const telegramChatId = chatId(req.body?.telegram_chat_id);
-    const employeeId = integer(req.body?.employee_id);
-    const telegramUsername = text(req.body?.telegram_username) || null;
-    if (!telegramChatId) throw codedError('INVALID_INPUT', 'telegram_chat_id должен быть числом');
-    if (!employeeId) throw codedError('INVALID_INPUT', 'employee_id обязателен');
+  asyncHandler((req, res) =>
+    withIdempotency(req, res, async () => {
+      const telegramChatId = chatId(req.body?.telegram_chat_id);
+      const employeeId = integer(req.body?.employee_id);
+      const telegramUsername = text(req.body?.telegram_username) || null;
+      if (!telegramChatId) throw codedError('INVALID_INPUT', 'telegram_chat_id должен быть числом');
+      if (!employeeId) throw codedError('INVALID_INPUT', 'employee_id обязателен');
 
-    const binding = await withTransaction(async (client) => {
-      const employee = await client.query(`SELECT id, name, email FROM employees WHERE id = $1 AND is_active = TRUE`, [employeeId]);
-      if (!employee.rows[0]) throw codedError('NOT_FOUND', 'Активный сотрудник не найден', 404);
+      const binding = await withTransaction(async (client) => {
+        const employee = await client.query(`SELECT id, name, email FROM employees WHERE id = $1 AND is_active = TRUE`, [employeeId]);
+        if (!employee.rows[0]) throw codedError('NOT_FOUND', 'Активный сотрудник не найден', 404);
 
-      await client.query(
-      `UPDATE bot_telegram_bindings
+        await client.query(
+          `UPDATE bot_telegram_bindings
             SET is_active = FALSE, last_active_at = NOW()
           WHERE employee_id = $1 AND telegram_chat_id <> $2 AND is_active = TRUE`,
-        [employeeId, telegramChatId]
-      );
+          [employeeId, telegramChatId]
+        );
 
-      const { rows } = await client.query(
-        `INSERT INTO bot_telegram_bindings (telegram_chat_id, telegram_username, employee_id, is_active)
+        const { rows } = await client.query(
+          `INSERT INTO bot_telegram_bindings (telegram_chat_id, telegram_username, employee_id, is_active)
          VALUES ($1, $2, $3, TRUE)
          ON CONFLICT (telegram_chat_id) DO UPDATE SET
            telegram_username = EXCLUDED.telegram_username,
@@ -70,30 +72,33 @@ router.post(
            is_active = TRUE,
            last_active_at = NOW()
          RETURNING *`,
-        [telegramChatId, telegramUsername, employeeId]
-      );
-      return { ...rows[0], employee_name: employee.rows[0].name, employee_email: employee.rows[0].email };
-    });
+          [telegramChatId, telegramUsername, employeeId]
+        );
+        return { ...rows[0], employee_name: employee.rows[0].name, employee_email: employee.rows[0].email };
+      });
 
-    res.status(201).json({ binding: bindingRow(binding) });
-  })
+      res.status(201).json({ binding: bindingRow(binding) });
+    })
+  )
 );
 
 router.delete(
   '/bindings/:telegram_chat_id',
-  asyncHandler(async (req, res) => {
-    const telegramChatId = chatId(req.params.telegram_chat_id);
-    if (!telegramChatId) throw codedError('INVALID_INPUT', 'telegram_chat_id должен быть числом');
-    const { rows } = await getPool().query(
-      `UPDATE bot_telegram_bindings
+  asyncHandler((req, res) =>
+    withIdempotency(req, res, async () => {
+      const telegramChatId = chatId(req.params.telegram_chat_id);
+      if (!telegramChatId) throw codedError('INVALID_INPUT', 'telegram_chat_id должен быть числом');
+      const { rows } = await getPool().query(
+        `UPDATE bot_telegram_bindings
           SET is_active = FALSE, last_active_at = NOW()
         WHERE telegram_chat_id = $1
         RETURNING *`,
-      [telegramChatId]
-    );
-    if (!rows[0]) throw codedError('NOT_FOUND', 'Привязка не найдена', 404);
-    res.json({ binding: rows[0] });
-  })
+        [telegramChatId]
+      );
+      if (!rows[0]) throw codedError('NOT_FOUND', 'Привязка не найдена', 404);
+      res.json({ binding: rows[0] });
+    })
+  )
 );
 
 router.get(
@@ -115,19 +120,21 @@ router.get(
 
 router.patch(
   '/notification-events/:id/processed',
-  asyncHandler(async (req, res) => {
-    const id = integer(req.params.id);
-    if (!id) throw codedError('INVALID_INPUT', 'id обязателен');
-    const { rows } = await getPool().query(
-      `UPDATE task_notification_events
+  asyncHandler((req, res) =>
+    withIdempotency(req, res, async () => {
+      const id = integer(req.params.id);
+      if (!id) throw codedError('INVALID_INPUT', 'id обязателен');
+      const { rows } = await getPool().query(
+        `UPDATE task_notification_events
           SET processed_at = NOW()
         WHERE id = $1
         RETURNING *`,
-      [id]
-    );
-    if (!rows[0]) throw codedError('NOT_FOUND', 'Событие не найдено', 404);
-    res.json({ event: rows[0] });
-  })
+        [id]
+      );
+      if (!rows[0]) throw codedError('NOT_FOUND', 'Событие не найдено', 404);
+      res.json({ event: rows[0] });
+    })
+  )
 );
 
 export default router;

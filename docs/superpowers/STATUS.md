@@ -1,6 +1,6 @@
 # Migration status
 
-Last update: 2026-05-19T23:24:27-03:00
+Last update: 2026-05-19T23:30:01-03:00
 Current block: 12
 Current task within block: PR opened; awaiting review / TG_BOT_TOKEN for live Docker Telegram smoke
 Branch: block-12-bot
@@ -47,6 +47,11 @@ Tests: VPS temporary Postgres integration passed: API auth+bot routes 11/11, bot
     - Verified on current staging DB: skips because `bot_tokens` is not deployed yet.
     - Verified on a temporary VPS Postgres with all migrations: inserted the token row successfully.
     - PR #52 GitHub check `test-and-deploy` passed after this workflow change.
+  - Self-review found missing idempotency on new bot mutation routes.
+    - Added `withIdempotency` to `POST /api/bot/bindings`, `DELETE /api/bot/bindings/:telegram_chat_id`, and `PATCH /api/bot/notification-events/:id/processed`.
+    - Updated bot API client to send idempotency keys for those writes.
+    - Added regression tests for missing idempotency headers and repeated notification-event processing.
+    - Verified on VPS temporary Postgres: API auth+bot routes 13/13 passed; bot `npm test` 27/27 passed.
 - Block 11 PR #51 was squash-merged to `main` as `0fa4131`.
 - GitHub Actions main deploy run `26136213203` passed.
 - Live staging health after deploy: `status=ok`, `db.ok=true`.
