@@ -1,17 +1,15 @@
 require('dotenv').config();
 const TelegramBot = require('node-telegram-bot-api');
-const { createClient } = require('@supabase/supabase-js');
 const { createTaskNotificationWorker } = require('./task-notification-worker');
 const { buildTelegramRequestOptions, formatTelegramTransportError } = require('./telegram-runtime');
+const { createOpsApiClient } = require('./api-client');
 
-const BOT_TOKEN = process.env.TASK_BOT_TOKEN || process.env.BOT_TOKEN;
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_KEY = process.env.SUPABASE_KEY;
+const BOT_TOKEN = process.env.TG_BOT_TOKEN || process.env.TASK_BOT_TOKEN || process.env.BOT_TOKEN;
 const POLL_INTERVAL_MS = Number(process.env.TASK_BOT_POLL_INTERVAL_MS || 15000);
 const TELEGRAM_REQUEST_OPTIONS = buildTelegramRequestOptions();
 
-if (!BOT_TOKEN || !SUPABASE_URL || !SUPABASE_KEY) {
-    console.error('Missing env vars: TASK_BOT_TOKEN/BOT_TOKEN, SUPABASE_URL, SUPABASE_KEY');
+if (!BOT_TOKEN || !process.env.OPS_API_URL || !process.env.OPS_BOT_TOKEN) {
+    console.error('Missing env vars: TG_BOT_TOKEN/TASK_BOT_TOKEN/BOT_TOKEN, OPS_API_URL, OPS_BOT_TOKEN');
     process.exit(1);
 }
 
@@ -24,7 +22,7 @@ const bot = new TelegramBot(BOT_TOKEN, {
     request: TELEGRAM_REQUEST_OPTIONS,
 });
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+const apiClient = createOpsApiClient();
 
 bot.on('polling_error', (err) => {
     const code = err?.response?.statusCode || err?.code || '';
@@ -74,12 +72,16 @@ async function send(chatId, text, opts) {
 }
 
 async function getEmployee(telegramId) {
-    const { data } = await supabase
-        .from('employees')
-        .select('*')
-        .eq('telegram_id', telegramId)
-        .maybeSingle();
-    return data || null;
+    const { bindings } = await apiClient.listBotBindings();
+    const binding = (bindings || []).find(item => item.is_active && String(item.telegram_chat_id) === String(telegramId));
+    if (!binding) return null;
+    return {
+        id: binding.employee_id,
+        name: binding.employee_name,
+        email: binding.employee_email,
+        telegram_id: binding.telegram_chat_id,
+        telegram_username: binding.telegram_username,
+    };
 }
 
 bot.onText(/\/start/, async (msg) => {
@@ -93,18 +95,21 @@ bot.onText(/\/start/, async (msg) => {
             return;
         }
 
-        const { data: employees } = await supabase
-            .from('employees')
-            .select('id, name, role')
-            .eq('is_active', true)
-            .is('telegram_id', null);
+        const [{ employees }, { bindings }] = await Promise.all([
+            apiClient.listEmployees({ active: true }),
+            apiClient.listBotBindings(),
+        ]);
+        const boundEmployeeIds = new Set((bindings || [])
+            .filter(binding => binding.is_active)
+            .map(binding => String(binding.employee_id)));
+        const availableEmployees = (employees || []).filter(employee => !boundEmployeeIds.has(String(employee.id)));
 
-        if (!employees || employees.length === 0) {
+        if (!availableEmployees.length) {
             await send(chatId, 'Нет доступных профилей сотрудников. Попроси администратора привязать Telegram в разделе сотрудников.');
             return;
         }
 
-        const keyboard = employees.map(employee => ([{
+        const keyboard = availableEmployees.map(employee => ([{
             text: employee.name,
             callback_data: `link_${employee.id}`,
         }]));
@@ -169,31 +174,18 @@ bot.on('callback_query', async (query) => {
     if (!Number.isFinite(employeeId) || employeeId <= 0) return;
 
     try {
-        const { data: employee, error: employeeError } = await supabase
-            .from('employees')
-            .select('*')
-            .eq('id', employeeId)
-            .maybeSingle();
-
-        if (employeeError || !employee) {
+        const { employees } = await apiClient.listEmployees({ active: true });
+        const employee = (employees || []).find(item => Number(item.id) === employeeId);
+        if (!employee) {
             await send(chatId, 'Не удалось найти сотрудника. Попробуй /start ещё раз.');
             return;
         }
 
-        const { error } = await supabase
-            .from('employees')
-            .update({
-                telegram_id: telegramId,
-                telegram_username: query.from.username || '',
-                updated_at: new Date().toISOString(),
-            })
-            .eq('id', employeeId);
-
-        if (error) {
-            console.error('TaskBot link employee error:', error);
-            await send(chatId, 'Не получилось привязать сотрудника. Попробуй позже.');
-            return;
-        }
+        await apiClient.createBotBinding({
+            telegram_chat_id: telegramId,
+            telegram_username: query.from.username || '',
+            employee_id: employeeId,
+        });
 
         await send(chatId, `Готово, ${employee.name}! Теперь уведомления по задачам будут приходить сюда.`);
     } catch (error) {
@@ -203,7 +195,7 @@ bot.on('callback_query', async (query) => {
 });
 
 const worker = createTaskNotificationWorker({
-    supabase,
+    apiClient,
     sendMessage: send,
     logger: console,
 });

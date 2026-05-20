@@ -96,4 +96,38 @@ router.delete(
   })
 );
 
+router.get(
+  '/notification-events',
+  asyncHandler(async (req, res) => {
+    const pendingOnly = String(req.query.pending || 'false') === 'true';
+    const limit = Math.min(integer(req.query.limit, 50) || 50, 200);
+    const { rows } = await getPool().query(
+      `SELECT *
+         FROM task_notification_events
+        ${pendingOnly ? 'WHERE processed_at IS NULL' : ''}
+        ORDER BY created_at ASC, id ASC
+        LIMIT $1`,
+      [limit]
+    );
+    res.json({ events: rows });
+  })
+);
+
+router.patch(
+  '/notification-events/:id/processed',
+  asyncHandler(async (req, res) => {
+    const id = integer(req.params.id);
+    if (!id) throw codedError('INVALID_INPUT', 'id обязателен');
+    const { rows } = await getPool().query(
+      `UPDATE task_notification_events
+          SET processed_at = NOW()
+        WHERE id = $1
+        RETURNING *`,
+      [id]
+    );
+    if (!rows[0]) throw codedError('NOT_FOUND', 'Событие не найдено', 404);
+    res.json({ event: rows[0] });
+  })
+);
+
 export default router;

@@ -76,6 +76,11 @@ function createOpsApiClient(options = {}) {
         completeTask: (id, idempotencyKey) => write(`/api/tasks/${encodeURIComponent(id)}/complete`, 'POST', {}, idempotencyKey),
         addComment: (taskId, body, idempotencyKey) => write(`/api/work/tasks/${encodeURIComponent(taskId)}/comments`, 'POST', body, idempotencyKey),
         listEmployees: (query) => request('/api/employees', { query }),
+        listBotBindings: (query) => request('/api/bot/bindings', { query }),
+        createBotBinding: (body) => request('/api/bot/bindings', { method: 'POST', body }),
+        deleteBotBinding: (telegramChatId) => request(`/api/bot/bindings/${encodeURIComponent(telegramChatId)}`, { method: 'DELETE' }),
+        listNotificationEvents: (query) => request('/api/bot/notification-events', { query }),
+        markNotificationProcessed: (id) => request(`/api/bot/notification-events/${encodeURIComponent(id)}/processed`, { method: 'PATCH' }),
     };
 }
 

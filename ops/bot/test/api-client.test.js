@@ -83,6 +83,32 @@ test('client exposes task detail and comment endpoints', async () => {
     ]);
 });
 
+test('client exposes bot bindings and notification event endpoints', async () => {
+    const paths = [];
+    const client = createOpsApiClient({
+        baseUrl: 'https://ops.example.test',
+        token: 'secret-token',
+        fetch: async (url, init) => {
+            paths.push([url, init.method, init.body || '']);
+            return jsonResponse({});
+        },
+    });
+
+    await client.listBotBindings();
+    await client.createBotBinding({ telegram_chat_id: '1', employee_id: 2 });
+    await client.deleteBotBinding('1');
+    await client.listNotificationEvents({ pending: true, limit: 50 });
+    await client.markNotificationProcessed(7);
+
+    assert.deepEqual(paths, [
+        ['https://ops.example.test/api/bot/bindings', 'GET', ''],
+        ['https://ops.example.test/api/bot/bindings', 'POST', JSON.stringify({ telegram_chat_id: '1', employee_id: 2 })],
+        ['https://ops.example.test/api/bot/bindings/1', 'DELETE', ''],
+        ['https://ops.example.test/api/bot/notification-events?pending=true&limit=50', 'GET', ''],
+        ['https://ops.example.test/api/bot/notification-events/7/processed', 'PATCH', ''],
+    ]);
+});
+
 test('client throws OpsApiError with API code on failed response', async () => {
     const client = createOpsApiClient({
         baseUrl: 'https://ops.example.test',
