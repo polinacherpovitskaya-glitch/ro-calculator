@@ -69,6 +69,7 @@ const TABLES = [
   'task_notification_events',
   'time_entries',
   'app_vacations',
+  'settings',
 ];
 
 function parseJson(value) {
@@ -158,6 +159,41 @@ function countIndirectCosts(raw) {
     count += Object.entries(data).filter(([key, value]) => key !== 'total_override' && numberOrNull(value) !== null).length;
   }
   return count;
+}
+
+const SETTINGS_EXACT_WHITELIST = new Set([
+  'companyInfo',
+  'company_info',
+  'marketplaces_config',
+  'notification_settings',
+  'app_config',
+  'app_colors_default',
+]);
+const SETTINGS_PREFIX_WHITELIST = ['company_', 'marketplace_', 'marketplaces_', 'notification_', 'app_config', 'bug_report_', 'tpa_', 'pricing_'];
+const SETTINGS_EXACT_DENYLIST = new Set([
+  'productionCalendar',
+  'production_calendar_json',
+  'productionPlan',
+  'production_plan_state_json',
+  'indirectCosts',
+  'indirect_costs_json',
+  'warehouseItems',
+  'warehouse_items_json',
+  'projectHardwareState',
+  'auth_accounts_json',
+  'auth_activity_json',
+  'auth_sessions_json',
+  'employee_extra_json',
+]);
+const SETTINGS_PREFIX_DENYLIST = ['finance_', 'wiki_', 'knowledge_', '_legacy_', 'work_', 'task_'];
+
+function shouldCopySettingKey(key) {
+  const normalized = String(key || '').trim();
+  if (!normalized) return false;
+  if (SETTINGS_EXACT_DENYLIST.has(normalized)) return false;
+  if (SETTINGS_PREFIX_DENYLIST.some((prefix) => normalized.startsWith(prefix))) return false;
+  if (SETTINGS_EXACT_WHITELIST.has(normalized)) return true;
+  return SETTINGS_PREFIX_WHITELIST.some((prefix) => normalized.startsWith(prefix));
 }
 
 async function loadCatalogSeed() {
@@ -343,6 +379,10 @@ async function supabaseCount(table) {
 
   if (table === 'work_activity' || table === 'task_notification_events') {
     return (await fetchAll(table)).length;
+  }
+
+  if (table === 'settings') {
+    return (await fetchAll('settings')).filter((row) => shouldCopySettingKey(row.key)).length;
   }
 
   const { count, error } = await supabase.from(table).select('*', { count: 'exact', head: true });

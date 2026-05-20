@@ -80,6 +80,7 @@ async function main() {
     '06-production',
     '08-work-management',
     '09-time-payroll',
+    '10-settings',
   ]) {
     runRefreshScript(script);
   }
