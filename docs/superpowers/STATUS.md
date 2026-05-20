@@ -1,10 +1,10 @@
 # Migration status
 
-Last update: 2026-05-19T22:44:46-03:00
+Last update: 2026-05-19T22:45:36-03:00
 Current block: 11
-Current task within block: Tasks/projects/areas/gantt implementation complete locally; preparing PR after final status update
+Current task within block: Tasks/projects/areas/gantt PR opened; waiting for review
 Branch: block-11-tasks-projects
-Last commit: `288add7` Add work management Playwright smoke
+Last commit: `8d93aaa` Update Block 11 implementation status
 Tests: Block 10 main deploy passed. Block 11 web build passed. Full API suite on VPS temporary Postgres passed 141/141. Calculator suite passed 102/102. Targeted work-management API test passed 10/10. Playwright work-management smoke added but not run against staging yet because Block 11 is not deployed.
 
 ## What was just done
@@ -67,6 +67,7 @@ Tests: Block 10 main deploy passed. Block 11 web build passed. Full API suite on
 - Remaining Block 11 after PR merge/deploy:
   - run staging refresh/compare including `08-work-management`
   - run `tests/playwright/work-management.spec.ts` against staging
+- Opened Block 11 PR: https://github.com/polinacherpovitskaya-glitch/ro-calculator/pull/51
 - Block 9 PR #47, hotfix PR #48, and smoke assertion PR #49 were merged to `main`; Block 9 is deployed and staging orders smoke passed.
 - Created Block 10 branch `block-10-product-images` from fresh `origin/main`.
 - Read the Block 10 plan: migrate Supabase Storage bucket `product-images` to private Selectel Object Storage bucket `ro-ops-product-images`, then rewrite DB URLs to `selectel://bucket/key` and return presigned URLs from the API.
