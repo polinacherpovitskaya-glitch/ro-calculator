@@ -16,8 +16,8 @@ function requireEnv(name) {
   return value;
 }
 
-function getBucket() {
-  return requireEnv('S3_BUCKET');
+function getBucket(bucket = undefined) {
+  return bucket || requireEnv('S3_BUCKET');
 }
 
 function mockPath(key) {
@@ -43,7 +43,7 @@ function getClient() {
   return client;
 }
 
-export async function uploadObject(key, body, contentType) {
+export async function uploadObject(key, body, contentType, bucket = undefined) {
   const target = mockPath(key);
   if (target) {
     await fs.mkdir(path.dirname(target), { recursive: true });
@@ -53,7 +53,7 @@ export async function uploadObject(key, body, contentType) {
 
   await getClient().send(
     new PutObjectCommand({
-      Bucket: getBucket(),
+      Bucket: getBucket(bucket),
       Key: key,
       Body: body,
       ContentType: contentType || 'application/octet-stream',
@@ -61,19 +61,31 @@ export async function uploadObject(key, body, contentType) {
   );
 }
 
-export async function deleteObject(key) {
+export async function deleteObject(key, bucket = undefined) {
   const target = mockPath(key);
   if (target) {
     await fs.rm(target, { force: true });
     return;
   }
 
-  await getClient().send(new DeleteObjectCommand({ Bucket: getBucket(), Key: key }));
+  await getClient().send(new DeleteObjectCommand({ Bucket: getBucket(bucket), Key: key }));
 }
 
-export async function presignedGetUrl(key, expiresIn = 600) {
+function selectelParts(value) {
+  const match = String(value).match(/^selectel:\/\/([^/]+)\/(.+)$/);
+  return match ? { bucket: match[1], key: match[2] } : null;
+}
+
+export async function presignedGetUrl(key, expiresIn = 600, bucket = undefined) {
   if (/^(https?:|data:)/.test(key)) {
     return key;
+  }
+  const selectel = selectelParts(key);
+  if (selectel) {
+    if (mockPath(selectel.key)) {
+      return `mock-s3://${selectel.bucket}/${selectel.key}`;
+    }
+    return getSignedUrl(getClient(), new GetObjectCommand({ Bucket: selectel.bucket, Key: selectel.key }), { expiresIn });
   }
   if (key.startsWith('supabase://') && process.env.SUPABASE_URL) {
     const storageKey = key.replace('supabase://', '');
@@ -86,5 +98,32 @@ export async function presignedGetUrl(key, expiresIn = 600) {
     return `mock-s3://${key}`;
   }
 
-  return getSignedUrl(getClient(), new GetObjectCommand({ Bucket: getBucket(), Key: key }), { expiresIn });
+  return getSignedUrl(getClient(), new GetObjectCommand({ Bucket: getBucket(bucket), Key: key }), { expiresIn });
+}
+
+export async function signSelectelUrls(value, expiresIn = 600) {
+  if (typeof value === 'string') {
+    return value.startsWith('selectel://') ? presignedGetUrl(value, expiresIn) : value;
+  }
+  if (!value || typeof value !== 'object') return value;
+  if (Array.isArray(value)) {
+    return Promise.all(value.map((entry) => signSelectelUrls(entry, expiresIn)));
+  }
+  const entries = await Promise.all(
+    Object.entries(value).map(async ([key, entry]) => [key, await signSelectelUrls(entry, expiresIn)])
+  );
+  return Object.fromEntries(entries);
+}
+
+export function selectelUrlSigningMiddleware(expiresIn = 600) {
+  return (req, res, next) => {
+    const json = res.json.bind(res);
+    res.json = (body) => {
+      signSelectelUrls(body, expiresIn)
+        .then((signed) => json(signed))
+        .catch(next);
+      return res;
+    };
+    next();
+  };
 }
