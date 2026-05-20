@@ -1,14 +1,34 @@
 # Migration status
 
-Last update: 2026-05-19T23:30:01-03:00
+Last update: 2026-05-20T10:39:29-03:00
 Current block: 12
-Current task within block: PR opened; awaiting review / TG_BOT_TOKEN for live Docker Telegram smoke
-Branch: block-12-bot
-Last commit: `703e894` Record Block 12 gate results
-Tests: VPS temporary Postgres integration passed: API auth+bot routes 11/11, bot package tests 27/27. Full API suite on VPS temporary Postgres passed 146/146; calc suite passed 102/102. `cd ops/web && npm run build` passed. Staging Docker bot smoke is blocked because `/srv/ops/infra/.env` still lacks `TG_BOT_TOKEN`. `OPS_BOT_TOKEN` was generated into `/srv/ops/infra/.env`, but inserting it into `bot_tokens` must wait until migration 013 is deployed on staging. Block 11 staging refresh/compare is still blocked because `SUPABASE_URL` and `SUPABASE_SERVICE_KEY` are absent from `/srv/ops/infra/.env`.
+Current task within block: Post-merge Telegram transport follow-up; bot code deployed, Telegram egress from VPS blocked without proxy
+Branch: block-12-telegram-proxy
+Last commit: `e903931` Block 12: Telegram bot Ops API migration (#52)
+Tests: Block 12 PR #52 was merged and deployed to staging. GitHub Actions main deploy run `26165612149` passed. Staging health passed with `db.ok=true`. Migration 013 is live (`app_meta=013-bot-state`). `bot_tokens` contains `taskbot/admin`, and Bearer auth works. `TG_BOT_TOKEN` and `OPS_BOT_TOKEN` are present on VPS. Live Telegram smoke is still blocked because the VPS cannot connect to `api.telegram.org:443` (IPv4 timeout, IPv6 no connection). `ops-bot` was stopped to avoid noisy retry logs until `TELEGRAM_PROXY_URL` or another Telegram egress path is configured. Block 11 staging refresh/compare is still blocked because `SUPABASE_URL` and `SUPABASE_SERVICE_KEY` are absent from `/srv/ops/infra/.env`.
 
 ## What was just done
 
+- Block 12 post-merge:
+  - PR #52 was squash-merged to `main` as `e903931`.
+  - GitHub Actions main deploy run `26165612149` passed.
+  - Staging health after deploy: `status=ok`, `db.ok=true`.
+  - Verified staging DB:
+    - `app_meta.version = 013-bot-state`
+    - `bot_tokens` has one `taskbot/admin` token row inserted by the deploy bootstrap script.
+  - Verified Ops API Bearer auth with the staged `OPS_BOT_TOKEN`: `/api/auth/me` returns `role=admin`, `email=bot:taskbot`.
+  - `TG_BOT_TOKEN` is now present in `/srv/ops/infra/.env`.
+  - Started/observed `ops-bot`: process starts and stays up, but Telegram polling cannot reach Telegram:
+    - `curl -4 https://api.telegram.org` from VPS times out.
+    - `curl -6 https://api.telegram.org` cannot connect.
+    - Google/GitHub HTTPS from the same VPS succeeds.
+  - Stopped `ops-bot` to avoid noisy `ETIMEDOUT` retry logs while Telegram egress is unavailable.
+  - Created follow-up branch `block-12-telegram-proxy` from fresh `origin/main`.
+  - Added optional `TELEGRAM_PROXY_URL` support to bot Telegram request options and compose env.
+  - Added `ops/bot/test/telegram-runtime.test.js` covering default request options, numeric overrides, proxy pass-through, and error formatting.
+  - Verified local bot runtime tests that do not need local Postgres: 25/25 passed.
+  - Verified full bot test suite on VPS temporary Postgres: 32/32 passed.
+  - Verified compose config on VPS with the follow-up compose file: `--profile bot` includes `bot`.
 - Block 12 progress:
   - Added `ops/db/migrations/013_bot_state.sql` for `employees.timezone`, Telegram bindings, bot conversation state, message inbox, and bot bearer tokens.
   - Added Bearer token auth in the Node API; bot tokens update `last_used_at` and populate `req.user`.
