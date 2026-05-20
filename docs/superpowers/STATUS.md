@@ -1,6 +1,6 @@
 # Migration status
 
-Last update: 2026-05-19T23:21:43-03:00
+Last update: 2026-05-19T23:24:27-03:00
 Current block: 12
 Current task within block: PR opened; awaiting review / TG_BOT_TOKEN for live Docker Telegram smoke
 Branch: block-12-bot
@@ -46,6 +46,7 @@ Tests: VPS temporary Postgres integration passed: API auth+bot routes 11/11, bot
     - It skips safely if the env file, token, or table is missing.
     - Verified on current staging DB: skips because `bot_tokens` is not deployed yet.
     - Verified on a temporary VPS Postgres with all migrations: inserted the token row successfully.
+    - PR #52 GitHub check `test-and-deploy` passed after this workflow change.
 - Block 11 PR #51 was squash-merged to `main` as `0fa4131`.
 - GitHub Actions main deploy run `26136213203` passed.
 - Live staging health after deploy: `status=ok`, `db.ok=true`.
