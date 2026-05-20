@@ -103,6 +103,7 @@ jobs:
               docker cp "$f" ops-postgres:/tmp/migration.sql
               docker exec ops-postgres psql -U ops -d ops -v ON_ERROR_STOP=1 -f /tmp/migration.sql
             done
+            bash /srv/ops/infra/scripts/ensure-bot-token.sh
           REMOTE
 
       - name: Health check

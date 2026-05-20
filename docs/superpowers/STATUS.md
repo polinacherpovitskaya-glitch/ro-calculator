@@ -1,6 +1,6 @@
 # Migration status
 
-Last update: 2026-05-19T23:17:32-03:00
+Last update: 2026-05-19T23:21:43-03:00
 Current block: 12
 Current task within block: PR opened; awaiting review / TG_BOT_TOKEN for live Docker Telegram smoke
 Branch: block-12-bot
@@ -41,6 +41,11 @@ Tests: VPS temporary Postgres integration passed: API auth+bot routes 11/11, bot
     - Regular `docker compose --env-file .env up -d --build` will not start `ops-bot` before `TG_BOT_TOKEN` exists.
     - Verified on VPS with the Block 12 compose file: default services are `postgres`, `api`, `caddy`; `--profile bot` adds `bot`.
   - PR #52 GitHub check `test-and-deploy` passed.
+  - Added `/srv/ops/infra/scripts/ensure-bot-token.sh` to the deploy flow after migrations.
+    - It inserts `OPS_BOT_TOKEN` from `/srv/ops/infra/.env` into `bot_tokens` as `taskbot/admin` once migration 013 exists.
+    - It skips safely if the env file, token, or table is missing.
+    - Verified on current staging DB: skips because `bot_tokens` is not deployed yet.
+    - Verified on a temporary VPS Postgres with all migrations: inserted the token row successfully.
 - Block 11 PR #51 was squash-merged to `main` as `0fa4131`.
 - GitHub Actions main deploy run `26136213203` passed.
 - Live staging health after deploy: `status=ok`, `db.ok=true`.
