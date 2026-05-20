@@ -1,12 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
+import os from 'node:os';
+import path from 'node:path';
 import { createServer } from '../src/server.js';
 import { getPool } from '../src/db.js';
 import { hashPassword } from '../src/auth/argon.js';
 
 const DB_URL = process.env.TEST_DATABASE_URL || 'postgres://ops:ops_dev_password@127.0.0.1:5433/ops';
 process.env.DATABASE_URL = DB_URL;
+process.env.S3_MOCK_DIR = process.env.S3_MOCK_DIR || path.join(os.tmpdir(), 'ro-ops-s3-test');
 
 async function startServer(t) {
   const app = createServer();
@@ -150,6 +153,24 @@ test('creating an item records manual_edit history with actor', async (t) => {
   assert.equal(Number(rows[0].qty_after), 5);
   assert.equal(Number(rows[0].qty_change), 5);
   assert.equal(rows[0].actor_user_id, user.id);
+});
+
+test('GET /api/warehouse/items signs selectel photo URLs', async (t) => {
+  const user = await createUser();
+  const port = await startServer(t);
+  const cookie = await login(port, user.email);
+  const itemId = id();
+  await getPool().query(
+    `INSERT INTO warehouse_items (id, name, qty, photo_url)
+     VALUES ($1, 'Photo item', 1, 'selectel://ro-ops-product-images/product-images/photo.png')`,
+    [itemId]
+  );
+
+  const res = await fetch(`http://127.0.0.1:${port}/api/warehouse/items?search=Photo%20item`, { headers: { cookie } });
+  const body = await res.json();
+
+  assert.equal(res.status, 200);
+  assert.equal(body.items[0].photo_url, 'mock-s3://ro-ops-product-images/product-images/photo.png');
 });
 
 test('reservation greater than available qty returns INSUFFICIENT_STOCK', async (t) => {

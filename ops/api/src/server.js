@@ -17,12 +17,14 @@ import productionRoute from './routes/production.js';
 import indirectRoute from './routes/indirect.js';
 import ordersRoute from './routes/orders.js';
 import internalRoute from './routes/internal.js';
+import { selectelUrlSigningMiddleware } from './s3.js';
 
 export function createServer() {
   const app = express();
   app.set('trust proxy', 1);
   app.use(express.json({ limit: '5mb' }));
   app.use(cookieParser());
+  app.use(selectelUrlSigningMiddleware());
   app.use('/api', healthRoute);
   app.use('/api/auth', authRoute);
   app.use('/api/employees', employeesRoute);
