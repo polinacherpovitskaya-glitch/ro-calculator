@@ -4,7 +4,7 @@ Operational core of `recycleobject.ru`: migration target for the old Vercel + Su
 
 ## Status
 
-- Stage A — Build, Blocks 1-14 merged; Block 15 analytics in progress
+- Stage A — Build complete after Block 16 merge; ready for Stage B test/reconciliation
 - Staging domain: `https://ops-staging.recycleobject.ru`
 - Production cutover: not here; Stage C is owner-run only
 - UptimeRobot: deferred/manual follow-up, not blocking the migration blocks
@@ -65,6 +65,7 @@ tests/playwright/orders.spec.ts
 tests/playwright/work-management.spec.ts
 tests/playwright/time-payroll.spec.ts
 tests/playwright/analytics.spec.ts
+tests/playwright/settings.spec.ts
 ```
 
 They expect:
@@ -668,7 +669,39 @@ Rules:
 
 - No new tables; reports are SELECT-only over `orders`, `order_items`, `order_factuals`, `time_entries`, and `employees`.
 - Known legacy analytics bugs are carried forward intentionally. Business/reporting fixes belong after Stage D unless they block cutover.
-- Staging refresh from Supabase is still blocked until `SUPABASE_URL` and `SUPABASE_SERVICE_KEY` are present in `/srv/ops/infra/.env`.
+- Staging refresh from Supabase uses `SUPABASE_URL` and `SUPABASE_SERVICE_KEY` from `/srv/ops/infra/.env`.
+
+## Settings
+
+Block 16 adds the remaining generic settings table and admin editor.
+
+Table:
+
+```text
+settings
+```
+
+Endpoints:
+
+```text
+GET /api/settings
+GET /api/settings/:key
+PUT /api/settings/:key
+```
+
+Screen:
+
+```text
+/settings
+```
+
+Rules:
+
+- Listing and writes are admin-only.
+- Reading a known key is available to any authenticated user.
+- Writes require `Idempotency-Key`.
+- Refresh copies only whitelisted operational settings. It skips normalized data from earlier blocks plus `finance_*`, `wiki_*`, auth/session blobs, work/task blobs, and legacy warehouse snapshots.
+- `ops/scripts/refresh/10-settings.mjs` is included in the full staging refresh pipeline.
 
 ## Current Infra
 
@@ -685,4 +718,4 @@ Rules:
 
 ## Next
 
-Finish Block 15 PR review/deploy, smoke `/analytics` on staging, then continue with Block 16 remaining settings.
+Proceed to Stage B: final reconciliation, golden-master checks, real-order comparisons, smokes, and performance checks before owner-run Stage C cutover.

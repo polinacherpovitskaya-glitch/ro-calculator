@@ -1,14 +1,54 @@
 # Migration status
 
-Last update: 2026-05-20T12:31:49-03:00
-Current block: 15
-Current task within block: Analytics API/UI implementation in progress
-Branch: block-15-analytics
-Last commit: `00220ef` Block 14: time tracking and payroll
-Tests: Block 14 is fully complete: PR #56 was merged and deployed, main deploy run `26171394997` passed, staging health is OK, and the staging time/payroll smoke passed with temporary users/employees cleaned up. Block 15 so far: syntax checks passed for new analytics API files, `cd ops/web && npm run build` passed, VPS temporary Postgres targeted `analytics.test.js` passed 7/7, full API suite passed 166/166, and calc suite passed 102/102. Local Postgres-backed API test was attempted first and failed only because local `127.0.0.1:5433` is not running.
+Last update: 2026-05-20T12:48:42-03:00
+Current block: 16
+Current task within block: Remaining settings implementation in progress
+Branch: block-16-settings
+Last commit: `8ffedd3` Block 15: analytics reports
+Tests: Block 15 is fully complete: PR #57 was merged to `main` as `8ffedd3`, main deploy run `26172931301` passed, staging health is OK, all 7 analytics endpoints returned HTTP 200, and staging Playwright `/analytics` smoke passed 1/1. Block 16 so far: syntax checks passed, `cd ops/web && npm run build` passed, VPS temporary Postgres targeted `settings.test.js` passed 4/4, full API suite passed 170/170, and calc suite passed 102/102.
 
 ## What was just done
 
+- Block 16 progress:
+  - Created branch `block-16-settings` from fresh `origin/main`.
+  - Read Block 16 plan.
+  - Added migration `ops/db/migrations/012_settings.sql` with generic `settings` table.
+  - Added authenticated settings API:
+    - `GET /api/settings/:key` for any authenticated user
+    - `GET /api/settings` admin-only
+    - `PUT /api/settings/:key` admin-only with `Idempotency-Key`
+  - Added refresh support:
+    - `ops/scripts/refresh/10-settings.mjs`
+    - `refresh-staging-snapshot.mjs` now runs `10-settings`
+    - `compare-datasets.mjs` includes copied settings count
+  - Added Vue `/settings` screen with JSON editor and admin-only home nav link.
+  - Added API tests `ops/api/test/settings.test.js`.
+  - Added Playwright smoke `tests/playwright/settings.spec.ts`.
+  - Confirmed `/srv/ops/infra/.env` now has both Supabase refresh secrets present:
+    - `SUPABASE_URL`
+    - `SUPABASE_SERVICE_KEY`
+  - Updated `ops/README.md` for Stage A complete / Stage B next once Block 16 merges.
+  - Verified:
+    - `node --check` for settings route/test/refresh and compare scripts: passed
+    - `cd ops/web && npm run build`: passed
+    - VPS temporary Postgres targeted `settings.test.js`: 4/4 passed
+    - VPS temporary Postgres full API suite: 170/170 passed
+    - VPS temporary Postgres calc suite: 102/102 passed
+  - Remaining:
+    - PR, self-merge on green gates, deploy, staging smoke.
+- Block 15 final:
+  - PR #57 was squash-merged to `main` as `8ffedd3`.
+  - GitHub Actions main deploy run `26172931301` passed.
+  - Staging health after deploy: `status=ok`, `db.ok=true`.
+  - API smoke against staging passed:
+    - `/api/analytics/summary`: HTTP 200
+    - `/api/analytics/revenue-by-month`: HTTP 200
+    - `/api/analytics/top-clients`: HTTP 200
+    - `/api/analytics/status-dynamics`: HTTP 200
+    - `/api/analytics/production-load`: HTTP 200
+    - `/api/analytics/product-types`: HTTP 200
+    - `/api/analytics/factual-margin`: HTTP 200
+  - Playwright `/analytics` staging smoke passed 1/1.
 - Block 15 progress:
   - Created/continued branch `block-15-analytics` from fresh `origin/main`.
   - Read Block 15 plan and confirmed the legacy `js/analytics.js` module redirects to `Factual.load()`, so report inventory comes from `js/factual.js`.
