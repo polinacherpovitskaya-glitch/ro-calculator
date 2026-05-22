@@ -1,6 +1,6 @@
 # Migration status
 
-Last update: 2026-05-22T11:44:43-03:00
+Last update: 2026-05-22T11:50:03-03:00
 Current block: Stage B test/reconciliation
 Current task within block: Visual polish pass for ops-staging
 Branch: stage-B-visual-polish
@@ -34,6 +34,7 @@ Tests: `cd ops/web && npm run build` passed locally. Previous deployed Stage B a
   - Added a `/projects` follow-up so the list table wrapper explicitly fills the layout column instead of shrinking to table content under the shared theme.
   - Added a shared `.table-wrap` width fix so short/empty tables no longer float as narrow centered cards under wide toolbars.
   - Fixed the warehouse `Новая позиция` flow so `/warehouse/new` opens a real create form instead of trying to load item id `new`; save remains disabled until the required name is filled and existing item editing keeps its loaded-item guard.
+  - Fixed the bug-report create URL so `/bugs/new` now opens the existing `Новый баг` editor instead of a blank routed shell; the `Новый баг` button now reflects the create URL and save is disabled until the title is filled.
   - Kept API/data behavior unchanged; this is a front-end parity pass only.
   - Verified `cd ops/web && npm run build` passes.
 - Stage B automated checks:
