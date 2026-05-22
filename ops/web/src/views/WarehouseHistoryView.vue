@@ -75,7 +75,7 @@
             <td>{{ formatNumber(entry.qty_after) }}</td>
             <td :class="entry.qty_change >= 0 ? 'plus' : 'minus'">{{ signed(entry.qty_change) }}</td>
             <td>{{ entry.actor_name || '—' }}</td>
-            <td>{{ entry.note || '—' }}</td>
+            <td>{{ noteLabel(entry.note) }}</td>
           </tr>
           <tr v-if="!loading && history.length === 0">
             <td colspan="8">Пусто</td>
@@ -169,6 +169,12 @@ function typeLabel(value: string) {
       return: 'Возврат',
     }[value] || value
   );
+}
+
+function noteLabel(value: string | null | undefined) {
+  if (!value) return '—';
+  if (value === 'Baseline after Supabase staging refresh') return 'Базовая запись после обновления staging';
+  return value;
 }
 </script>
 

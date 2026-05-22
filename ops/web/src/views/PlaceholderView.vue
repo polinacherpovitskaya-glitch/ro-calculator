@@ -7,8 +7,8 @@
       </div>
     </header>
     <section class="home-card">
-      <h2>Ops staging</h2>
-      <p>API health: <code>{{ healthStatus }}</code></p>
+      <h2>Staging</h2>
+      <p>{{ healthStatus }}</p>
     </section>
   </main>
 </template>
@@ -17,16 +17,16 @@
 import { onMounted, ref } from 'vue';
 import { useAuthStore } from '../stores/auth';
 
-const healthStatus = ref('loading...');
+const healthStatus = ref('Проверяем состояние системы...');
 const auth = useAuthStore();
 
 onMounted(async () => {
   try {
     const res = await fetch('/api/health');
     const body = await res.json();
-    healthStatus.value = `${body.status} (db: ${body.db?.ok ? 'ok' : 'down'})`;
+    healthStatus.value = body.status === 'ok' && body.db?.ok ? 'API и база данных работают' : 'Есть проблема с API или базой данных';
   } catch (error) {
-    healthStatus.value = `error: ${String(error)}`;
+    healthStatus.value = `Не удалось проверить состояние: ${String(error)}`;
   }
 });
 </script>
@@ -77,9 +77,4 @@ onMounted(async () => {
   color: #4f5b67;
 }
 
-.home-page code {
-  background: #eee;
-  padding: 0.1rem 0.4rem;
-  border-radius: 4px;
-}
 </style>
