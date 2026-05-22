@@ -11,7 +11,7 @@
       <button type="button" :disabled="loading" @click="load">Обновить</button>
     </section>
     <p v-if="error" class="error">{{ error }}</p>
-    <section class="layout">
+    <section class="layout" :class="{ 'has-editor': selected }">
       <div class="table-wrap">
         <table>
           <thead><tr><th>Проект</th><th>Область</th><th>Статус</th><th>Даты</th><th>Задачи</th><th></th></tr></thead>
@@ -106,7 +106,7 @@ async function archive() { if (!selected.value) return; selected.value = await a
 
 <style scoped>
 .page { min-height: 100vh; padding: 1.5rem; background: #f6f7f9; color: #1f2933; font-family: system-ui, sans-serif; } .page-header, .toolbar, .layout { max-width: 90rem; margin: 0 auto 1rem; } .page-header, .header-actions, .toolbar { display: flex; align-items: end; justify-content: space-between; gap: .75rem; } .header-actions, .toolbar { justify-content: flex-start; flex-wrap: wrap; }
-h1, h2, h3, p { margin: 0; } h1 { font-size: 1.7rem; } h2 { font-size: 1.1rem; } h3 { margin-top: .4rem; font-size: .9rem; } p, small { color: #697586; } small { display: block; margin-top: .2rem; } .layout { display: grid; grid-template-columns: minmax(0, 1fr) 27rem; gap: 1rem; align-items: start; } label { display: grid; gap: .3rem; color: #52606d; font-size: .85rem; }
+h1, h2, h3, p { margin: 0; } h1 { font-size: 1.7rem; } h2 { font-size: 1.1rem; } h3 { margin-top: .4rem; font-size: .9rem; } p, small { color: #697586; } small { display: block; margin-top: .2rem; } .layout { display: grid; grid-template-columns: 1fr; gap: 1rem; align-items: start; } .layout.has-editor { grid-template-columns: minmax(0, 1fr) 27rem; } label { display: grid; gap: .3rem; color: #52606d; font-size: .85rem; }
 input, select, textarea, button, a { box-sizing: border-box; font: inherit; } input, select, textarea { min-height: 2.25rem; border: 1px solid #cbd5df; border-radius: 6px; padding: .35rem .55rem; background: white; } button, a { display: inline-flex; align-items: center; min-height: 2.25rem; border: 1px solid #b8c2cc; border-radius: 6px; background: white; padding: 0 .75rem; color: #1f2933; text-decoration: none; cursor: pointer; }
 table { width: 100%; border-collapse: collapse; background: white; border: 1px solid #d9e2ec; } th, td { padding: .6rem; border-bottom: 1px solid #eef2f6; text-align: left; vertical-align: top; } th { color: #52606d; font-size: .76rem; text-transform: uppercase; } tr.selected { background: #eef2ff; } .right { text-align: right; }
 .editor { display: grid; gap: .75rem; background: white; border: 1px solid #d9e2ec; border-radius: 8px; padding: 1rem; } .editor header, .actions { display: flex; align-items: center; justify-content: space-between; gap: .75rem; } .actions { justify-content: flex-end; } .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; } .detail { display: grid; gap: .45rem; border-top: 1px solid #eef2f6; padding-top: .75rem; } .line { font-size: .88rem; padding: .4rem .5rem; background: #f8fafc; border-radius: 6px; } .error { max-width: 90rem; margin: 0 auto 1rem; color: #b42318; }

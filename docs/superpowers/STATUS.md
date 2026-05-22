@@ -1,6 +1,6 @@
 # Migration status
 
-Last update: 2026-05-22T11:15:00-03:00
+Last update: 2026-05-22T11:19:00-03:00
 Current block: Stage B test/reconciliation
 Current task within block: Visual polish pass for ops-staging
 Branch: stage-B-visual-polish
@@ -30,6 +30,7 @@ Tests: `cd ops/web && npm run build` passed locally. Previous deployed Stage B a
   - Tightened `/molds` table sizing so inline fields and the `Удалить` action fit on a standard viewport; empty photo cells now show an intentional `Нет фото` placeholder.
   - Tightened `/china` purchase table so long закупка names wrap and the `Открыть` action remains fully visible on a standard viewport.
   - Fixed `/gantt` date scale layout so days render as one horizontal timeline row instead of spilling into vertical columns.
+  - Fixed `/projects` closed-editor layout so the project list uses the full content width until a project editor is opened.
   - Kept API/data behavior unchanged; this is a front-end parity pass only.
   - Verified `cd ops/web && npm run build` passes.
 - Stage B automated checks:
