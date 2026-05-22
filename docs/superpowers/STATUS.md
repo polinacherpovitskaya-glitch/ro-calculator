@@ -1,6 +1,6 @@
 # Migration status
 
-Last update: 2026-05-22T13:21:23-03:00
+Last update: 2026-05-22T13:27:32-03:00
 Current block: Stage B test/reconciliation
 Current task within block: Visual polish pass for ops-staging
 Branch: stage-B-visual-polish
@@ -45,6 +45,7 @@ Tests: `cd ops/web && npm run build` passed locally. Previous deployed Stage B a
   - Tightened `/warehouse` and `/shipments` tables so columns fit the standard content width, long names wrap, and right-side row actions remain visible without horizontal scrolling.
   - Tightened `/gantt` timeline columns so the 21-day scale fits the standard viewport instead of clipping the final dates and track cells.
   - Polished `/tasks` table deadlines so dates render as compact Russian dates and no longer wrap mid-value on the standard content width.
+  - Polished `/colors` swatches so placeholder or invalid HEX values render as intentional neutral previews instead of empty white boxes, without changing stored color data.
   - Kept API/data behavior unchanged; this is a front-end parity pass only.
   - Verified `cd ops/web && npm run build` passes.
 - Stage B automated checks:
