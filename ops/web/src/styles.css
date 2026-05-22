@@ -1,0 +1,167 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  background: #f2f2f2;
+  color: #222;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+a {
+  color: inherit;
+}
+
+.ops-shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  background: #f2f2f2;
+}
+
+.ops-sidebar {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+  background: #1b1b1b;
+  color: #f7f7f7;
+  border-right: 1px solid #2a2a2a;
+}
+
+.ops-brand {
+  padding: 24px 20px 20px;
+  border-bottom: 1px solid #303030;
+}
+
+.ops-brand strong {
+  display: block;
+  font-size: 16px;
+  line-height: 1.2;
+}
+
+.ops-brand span {
+  display: block;
+  margin-top: 8px;
+  color: #9ca3af;
+  font-size: 12px;
+}
+
+.ops-nav {
+  padding: 16px 0 24px;
+}
+
+.ops-nav-section {
+  margin-top: 18px;
+}
+
+.ops-nav-section:first-child {
+  margin-top: 0;
+}
+
+.ops-nav-title {
+  padding: 0 20px 10px;
+  color: #858585;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+
+.ops-nav a,
+.ops-nav button {
+  width: 100%;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 0;
+  border-left: 4px solid transparent;
+  background: transparent;
+  color: #d8d8d8;
+  padding: 0 18px 0 20px;
+  font-size: 14px;
+  font-weight: 650;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.ops-nav a:hover,
+.ops-nav button:hover {
+  background: #242424;
+  color: #fff;
+}
+
+.ops-nav a.router-link-active {
+  background: #303030;
+  border-left-color: #2f6df6;
+  color: #fff;
+}
+
+.ops-nav-icon {
+  width: 20px;
+  flex: 0 0 20px;
+  text-align: center;
+  opacity: .95;
+}
+
+.ops-content {
+  min-width: 0;
+}
+
+@media (max-width: 900px) {
+  .ops-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .ops-sidebar {
+    position: static;
+    height: auto;
+  }
+
+  .ops-brand {
+    padding: 16px;
+  }
+
+  .ops-nav {
+    display: flex;
+    overflow-x: auto;
+    padding: 0;
+  }
+
+  .ops-nav-section {
+    display: contents;
+  }
+
+  .ops-nav-title {
+    display: none;
+  }
+
+  .ops-nav a,
+  .ops-nav button {
+    width: auto;
+    min-height: 44px;
+    flex: 0 0 auto;
+    border-left: 0;
+    border-bottom: 3px solid transparent;
+    padding: 0 14px;
+  }
+
+  .ops-nav a.router-link-active {
+    border-bottom-color: #2f6df6;
+  }
+}

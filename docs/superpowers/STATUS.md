@@ -1,14 +1,21 @@
 # Migration status
 
-Last update: 2026-05-20T15:14:34-03:00
+Last update: 2026-05-22T09:34:00-03:00
 Current block: Stage B test/reconciliation
-Current task within block: Automated checks complete; owner-led manual reconciliation/staff smoke remain
-Branch: main
-Last commit: `b80b563` Complete Stage B automated checks
-Tests: PR #65 was squash-merged to `main` as `b80b563`; GitHub Actions ops deploy run `26181038209` passed. Deployed full staging refresh + compare is all OK, including `warehouse_reservations 1167/1167`, `warehouse_history 198/198`, `settings 46/46`, and all work/time/task/order tables. Deployed warehouse invariants I1-I4 return 0 violations. `/api/orders` warm p95 after the list-payload fix is 0.111s, back under the 0.200s Stage B target. Manual 10-order money reconciliation, full human walkthrough/staff double-smoke, and cutover scheduling remain owner-led Stage B follow-ups.
+Current task within block: Visual parity follow-up for ops-staging
+Branch: stage-B-visual-parity
+Last commit: pending
+Tests: `cd ops/web && npm run build` passed locally. Previous deployed Stage B automated checks remain green on `main`; 10-order money/items/factual reconciliation passed manually with only expected legacy status normalization (`production_casting` -> `in_production`, `completed` -> `closed`).
 
 ## What was just done
 
+- Stage B visual parity follow-up:
+  - Compared `calc.recycleobject.ru` and `ops-staging.recycleobject.ru` visually in browser for the orders list and a real order detail.
+  - Added a shared Vue app shell with the old calc-style dark left sidebar, grouped navigation, active route highlight, and logout action.
+  - Simplified the home view so navigation lives in the shell instead of a wide button cloud.
+  - Restyled `/orders` toward the old calc UI: top quick filters, search card, compact grouped order sections, old-style table density, blue order names, red overdue deadlines, and pill statuses.
+  - Kept API/data behavior unchanged; this is a front-end parity pass only.
+  - Verified `cd ops/web && npm run build` passes.
 - Stage B automated checks:
   - Created `stage-B-test` from fresh `origin/main`.
   - Pre-flight: staging health returned `status=ok`, `db.ok=true`; recent `main` workflows were green.
