@@ -7,7 +7,7 @@
       <label>Часы <input v-model.number="draft.hours" type="number" min="0.25" step="0.25" /></label>
       <label>Проект <input v-model="draft.project_name" /></label>
       <label>Этап <input v-model="draft.stage" /></label>
-      <label class="check"><input v-model="draft.is_overtime" type="checkbox" /> overtime</label>
+      <label class="check"><input v-model="draft.is_overtime" type="checkbox" /> Сверхурочные</label>
       <button type="button" @click="addEntry">Добавить</button>
     </section>
     <p v-if="error" class="error">{{ error }}</p>
@@ -17,7 +17,7 @@
       <tbody>
         <tr v-for="entry in entries" :key="entry.id">
           <td>{{ formatDate(entry.date) }}</td><td>{{ entry.employee_name }}</td><td>{{ entry.project_name || '—' }}</td><td>{{ entry.stage || '—' }}</td>
-          <td>{{ entry.hours }}<span v-if="entry.is_overtime"> overtime</span></td>
+          <td>{{ entry.hours }}<span v-if="entry.is_overtime"> сверхурочные</span></td>
           <td class="right"><button type="button" @click="removeEntry(entry.id)">Удалить</button></td>
         </tr>
         <tr v-if="!entries.length"><td colspan="6">Пусто</td></tr>
