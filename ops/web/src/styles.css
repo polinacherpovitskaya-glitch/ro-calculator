@@ -805,6 +805,25 @@ a {
   padding: 0 !important;
 }
 
+.ops-content :where(.orders-page .toolbar:not(.expanded)) {
+  min-height: 0 !important;
+  display: inline-flex !important;
+  width: auto !important;
+  padding: 0 !important;
+  margin: -2px 0 16px !important;
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+}
+
+.ops-content :where(.orders-page .toolbar:not(.expanded) .filter-toggle) {
+  min-height: 33px !important;
+}
+
+.ops-content :where(.orders-page .search-card) {
+  grid-template-columns: minmax(20rem, 1fr) minmax(18rem, .75fr) !important;
+}
+
 @media (max-width: 900px) {
   .ops-shell {
     grid-template-columns: 1fr;
