@@ -1,6 +1,6 @@
 # Migration status
 
-Last update: 2026-05-22T10:03:00-03:00
+Last update: 2026-05-22T10:08:00-03:00
 Current block: Stage B test/reconciliation
 Current task within block: Full-page visual parity pass for ops-staging
 Branch: stage-B-visual-parity-all
@@ -16,6 +16,7 @@ Tests: `cd ops/web && npm run build` passed locally. Previous deployed Stage B a
   - Restyled `/orders` toward the old calc UI: top quick filters, search card, compact grouped order sections, old-style table density, blue order names, red overdue deadlines, and pill statuses.
   - Added a second broad legacy-theme pass across all authenticated Vue pages: page background, headers, toolbars, panels, forms, buttons, tabs, tables, badges, auth screens, and mobile shell behavior now share the old calc visual language.
   - Added density/width follow-up after browser review: table rows are tighter, table titles/subtitles are normalized, editor panels share the same card style, and layouts without an open side editor now use the full content width.
+  - Fixed settings/editor grid vertical alignment after live browser review so editor controls stay at the top of the panel.
   - Kept API/data behavior unchanged; this is a front-end parity pass only.
   - Verified `cd ops/web && npm run build` passes.
 - Stage B automated checks:
