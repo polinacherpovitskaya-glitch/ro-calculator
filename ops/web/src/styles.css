@@ -188,6 +188,14 @@ a {
   flex-wrap: wrap !important;
 }
 
+.ops-content :where(.layout) {
+  gap: 16px !important;
+}
+
+.ops-content .layout:not(:has(> aside)):not(:has(> .editor)) {
+  grid-template-columns: 1fr !important;
+}
+
 .ops-content :where(.toolbar) {
   margin-bottom: 16px !important;
   padding: 14px 16px !important;
@@ -307,11 +315,32 @@ a {
 }
 
 .ops-content :where(th, td) {
-  padding: 11px 12px !important;
+  padding: 10px 12px !important;
   border-bottom: 1px solid #ededed !important;
   color: #222 !important;
   text-align: left !important;
   vertical-align: middle !important;
+}
+
+.ops-content :where(td strong) {
+  color: #222 !important;
+  font-size: 14px !important;
+  line-height: 1.3 !important;
+}
+
+.ops-content :where(td small) {
+  display: block !important;
+  margin-top: 4px !important;
+  color: #667085 !important;
+  font-size: 12px !important;
+}
+
+.ops-content :where(.editor, aside.editor) {
+  background: #fff !important;
+  border: 1px solid #ddd !important;
+  border-radius: 8px !important;
+  padding: 16px !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .03) !important;
 }
 
 .ops-content :where(th) {
