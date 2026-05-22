@@ -1,6 +1,6 @@
 # Migration status
 
-Last update: 2026-05-22T11:04:00-03:00
+Last update: 2026-05-22T11:10:00-03:00
 Current block: Stage B test/reconciliation
 Current task within block: Visual polish pass for ops-staging
 Branch: stage-B-visual-polish
@@ -28,6 +28,7 @@ Tests: `cd ops/web && npm run build` passed locally. Previous deployed Stage B a
   - Polished the `/orders` result counter so it no longer looks like a disabled prototype input.
   - Started the next cross-page visual pass and fixed `/time-tracking` table dates so rows show human-readable dates instead of raw ISO timestamps; empty project/stage cells now render as `—`.
   - Tightened `/molds` table sizing so inline fields and the `Удалить` action fit on a standard viewport; empty photo cells now show an intentional `Нет фото` placeholder.
+  - Tightened `/china` purchase table so long закупка names wrap and the `Открыть` action remains fully visible on a standard viewport.
   - Kept API/data behavior unchanged; this is a front-end parity pass only.
   - Verified `cd ops/web && npm run build` passes.
 - Stage B automated checks:
