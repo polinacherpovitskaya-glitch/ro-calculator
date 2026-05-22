@@ -1,5 +1,5 @@
 <template>
-  <section class="panel">
+  <section class="panel order-summary-panel">
     <div class="header-grid">
       <label>Название <input v-model="draft.order_name" @input="emitChange" /></label>
       <label>Клиент <input v-model="draft.client_name" @input="emitChange" /></label>
@@ -13,14 +13,14 @@
       </label>
     </div>
     <div class="metrics">
-      <span>Выручка <strong>{{ money(draft.total_revenue) }}</strong></span>
-      <span>Себестоимость <strong>{{ money(draft.total_cost) }}</strong></span>
-      <span>Маржа <strong>{{ money(draft.total_margin) }}</strong></span>
-      <span>Маржа % <strong>{{ percent(draft.margin_percent) }}</strong></span>
-      <span>План часов <strong>{{ number(draft.total_hours_plan) }}</strong></span>
+      <span><em>Выручка</em><strong>{{ money(draft.total_revenue) }}</strong></span>
+      <span><em>Себестоимость</em><strong>{{ money(draft.total_cost) }}</strong></span>
+      <span><em>Маржа</em><strong>{{ money(draft.total_margin) }}</strong></span>
+      <span><em>Маржа %</em><strong>{{ percent(draft.margin_percent) }}</strong></span>
+      <span><em>План часов</em><strong>{{ number(draft.total_hours_plan) }}</strong></span>
     </div>
     <footer class="actions">
-      <button type="button" :disabled="saving" @click="$emit('save')">Сохранить</button>
+      <button type="button" class="primary-action" :disabled="saving" @click="$emit('save')">Сохранить</button>
       <button type="button" :disabled="!canPersist || saving" @click="$emit('recalc')">Пересчитать</button>
       <button type="button" :disabled="!canPersist || saving || nextStatus === draft.status" @click="$emit('status', nextStatus)">Сменить статус</button>
       <button type="button" :disabled="!canPersist" @click="$emit('clone')">Клонировать</button>
@@ -94,3 +94,19 @@ function number(value: number | null | undefined) { return value === null || val
 function percent(value: number | null | undefined) { return value === null || value === undefined ? '-' : `${Number(value).toFixed(2)}%`; }
 function printQuote() { window.print(); }
 </script>
+
+<style scoped>
+.order-summary-panel {
+  align-content: start;
+}
+
+.metrics em {
+  font-style: normal;
+}
+
+.primary-action {
+  border-color: #2563eb;
+  background: #2563eb;
+  color: #fff;
+}
+</style>

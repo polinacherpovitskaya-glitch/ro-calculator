@@ -1,9 +1,9 @@
 # Migration status
 
-Last update: 2026-05-22T10:08:00-03:00
+Last update: 2026-05-22T10:22:00-03:00
 Current block: Stage B test/reconciliation
-Current task within block: Full-page visual parity pass for ops-staging
-Branch: stage-B-visual-parity-all
+Current task within block: Visual polish pass for ops-staging
+Branch: stage-B-visual-polish
 Last commit: pending
 Tests: `cd ops/web && npm run build` passed locally. Previous deployed Stage B automated checks remain green on `main`; 10-order money/items/factual reconciliation passed manually with only expected legacy status normalization (`production_casting` -> `in_production`, `completed` -> `closed`).
 
@@ -17,6 +17,12 @@ Tests: `cd ops/web && npm run build` passed locally. Previous deployed Stage B a
   - Added a second broad legacy-theme pass across all authenticated Vue pages: page background, headers, toolbars, panels, forms, buttons, tabs, tables, badges, auth screens, and mobile shell behavior now share the old calc visual language.
   - Added density/width follow-up after browser review: table rows are tighter, table titles/subtitles are normalized, editor panels share the same card style, and layouts without an open side editor now use the full content width.
   - Fixed settings/editor grid vertical alignment after live browser review so editor controls stay at the top of the panel.
+  - Started a deeper polish pass after user feedback that the UI still looked raw:
+    - copied closer legacy calc tokens from `css/style.css` into the Vue shell/theme
+    - restored old sidebar spacing, typography, and active states
+    - removed heavy CRUD-style button shadows and normalized buttons/tables/forms to legacy calc proportions
+    - improved status badge colors and table link behavior
+    - polished the order detail header/summary card so it reads like an order screen rather than an admin form.
   - Kept API/data behavior unchanged; this is a front-end parity pass only.
   - Verified `cd ops/web && npm run build` passes.
 - Stage B automated checks:
