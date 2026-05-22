@@ -262,7 +262,7 @@ async function receive() {
   gap: 0.75rem;
 }
 .actions {
-  justify-content: flex-end;
+  justify-content: flex-end !important;
 }
 h1,
 h2,
