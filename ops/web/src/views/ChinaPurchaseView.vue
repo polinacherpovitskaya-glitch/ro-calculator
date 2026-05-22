@@ -95,7 +95,7 @@
       </div>
     </section>
 
-    <section v-if="!isNew && form.status !== 'received'" class="danger">
+    <section v-if="!isNew && form.status !== 'received'" class="stock-notice">
       <strong>Принятие создаст приёмку, увеличит складские остатки и запишет receipt в журнал.</strong>
     </section>
 
@@ -247,7 +247,7 @@ async function receive() {
 }
 .page-header,
 .panel,
-.danger,
+.stock-notice,
 .actions {
   max-width: 78rem;
   margin: 0 auto 1rem;
@@ -260,6 +260,9 @@ async function receive() {
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
+}
+.actions {
+  justify-content: flex-end;
 }
 h1,
 h2,
@@ -356,10 +359,10 @@ td select {
 .right {
   text-align: right;
 }
-.danger {
-  border: 1px solid #f4b4ae;
-  background: #fff5f3;
-  color: #9f1f17;
+.stock-notice {
+  border: 1px solid #d9c48d;
+  background: #fff8e5;
+  color: #6d4f00;
   padding: 0.8rem 1rem;
 }
 .error {
