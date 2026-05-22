@@ -293,15 +293,17 @@ select {
 }
 
 .filter-note {
-  min-height: 44px;
+  min-height: 35px;
   display: flex;
   align-items: center;
-  border: 1px dashed #ddd;
-  border-radius: 7px;
-  background: #f7f7f7;
-  padding: 0 14px;
-  color: #999;
+  justify-content: flex-end;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0 2px;
+  color: #777;
   font-size: 12px;
+  font-weight: 700;
 }
 
 .toolbar {
