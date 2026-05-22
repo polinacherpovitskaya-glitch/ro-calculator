@@ -6,7 +6,7 @@
         <p>
           <span v-if="!isNew">#{{ order.id }}</span>
           <span v-if="order.client_name"> · {{ order.client_name }}</span>
-          <span> · {{ dirty ? 'есть несохраненные изменения' : 'сохранено' }}</span>
+          <span> · {{ saveStateLabel }}</span>
         </p>
       </div>
       <div class="header-actions"><RouterLink to="/orders">Заказы</RouterLink><RouterLink to="/">Главная</RouterLink></div>
@@ -81,6 +81,10 @@ const dirty = ref(false);
 const error = ref('');
 let previewTimer: number | undefined;
 const isNew = computed(() => route.params.id === 'new');
+const saveStateLabel = computed(() => {
+  if (isNew.value) return dirty.value ? 'черновик не сохранён' : 'новый черновик';
+  return dirty.value ? 'есть несохраненные изменения' : 'сохранено';
+});
 
 onMounted(async () => {
   window.addEventListener('beforeunload', beforeUnload);
