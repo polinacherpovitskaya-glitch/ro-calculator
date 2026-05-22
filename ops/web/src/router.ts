@@ -55,6 +55,7 @@ const router = createRouter({
     { path: '/colors', name: 'colors', component: ColorsView, meta: { requiresAuth: true } },
     { path: '/marketplaces', name: 'marketplaces', component: MarketplacesView, meta: { requiresAuth: true } },
     { path: '/bugs', name: 'bugs', component: BugsView, meta: { requiresAuth: true } },
+    { path: '/bugs/new', name: 'bug-new', component: BugsView, meta: { requiresAuth: true } },
     { path: '/templates', name: 'templates', component: TemplatesView, meta: { requiresAuth: true } },
     { path: '/production/calendar', name: 'production-calendar', component: ProductionCalendarView, meta: { requiresAuth: true } },
     { path: '/production/plan', name: 'production-plan', component: ProductionPlanView, meta: { requiresAuth: true } },

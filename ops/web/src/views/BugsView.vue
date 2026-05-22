@@ -8,7 +8,7 @@
       <div class="header-actions">
         <RouterLink to="/">Главная</RouterLink>
         <RouterLink to="/warehouse">Склад</RouterLink>
-        <button type="button" @click="startCreate">Новый баг</button>
+          <button type="button" @click="startCreate()">Новый баг</button>
       </div>
     </header>
 
@@ -112,7 +112,7 @@
 
         <footer class="actions">
           <button v-if="form.id" type="button" @click="deleteBug">Удалить</button>
-          <button type="button" :disabled="saving" @click="saveBug">Сохранить</button>
+          <button type="button" :disabled="saving || !form.title.trim()" @click="saveBug">Сохранить</button>
         </footer>
       </aside>
     </section>
@@ -121,11 +121,14 @@
 
 <script setup lang="ts">
 import { onMounted, reactive, ref, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import type { BugReport } from '../api/bugs';
 import * as bugsApi from '../api/bugs';
 import { useBugsStore } from '../stores/bugs';
 
 const bugs = useBugsStore();
+const route = useRoute();
+const router = useRouter();
 const error = ref('');
 const saving = ref(false);
 const isEditing = ref(false);
@@ -140,7 +143,10 @@ const form = reactive({
 });
 let searchTimer: number | undefined;
 
-onMounted(async () => { await bugs.loadBugs(); });
+onMounted(async () => {
+  await bugs.loadBugs();
+  if (route.name === 'bug-new') startCreate(false);
+});
 watch(() => bugs.search, () => { window.clearTimeout(searchTimer); searchTimer = window.setTimeout(() => void reload(), 250); });
 
 async function reload() { await bugs.loadBugs(); }
@@ -164,17 +170,21 @@ async function openBug(id: number) {
   fillForm(bug);
   isEditing.value = true;
 }
-function startCreate() {
+function startCreate(updateRoute = true) {
   bugs.selected = null;
   fillForm(null);
   isEditing.value = true;
+  if (updateRoute && route.name !== 'bug-new') void router.push('/bugs/new');
 }
 function closeEditor() {
   isEditing.value = false;
   bugs.selected = null;
+  if (route.name === 'bug-new') void router.push('/bugs');
 }
 async function saveBug() {
+  if (!form.title.trim()) return;
   saving.value = true; error.value = '';
+  const wasNew = !form.id;
   const payload = {
     title: form.title.trim(),
     description: form.description.trim() || null,
@@ -185,6 +195,7 @@ async function saveBug() {
   };
   try {
     const saved = form.id ? await bugs.updateBug(form.id, payload) : await bugs.createBug(payload);
+    if (wasNew && route.name === 'bug-new') await router.replace('/bugs');
     await openBug(Number(saved.id));
   } catch (caught) {
     error.value = caught instanceof Error ? caught.message : 'Не удалось сохранить баг';
