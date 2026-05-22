@@ -109,7 +109,8 @@ import { useOrdersStore } from '../stores/orders';
 const orders = useOrdersStore();
 const statuses: OrderStatus[] = ['draft', 'quoted', 'approved', 'in_production', 'ready', 'shipped', 'closed', 'cancelled'];
 const quickTabs = [
-  { key: 'active', label: 'Active', statuses: ['draft', 'quoted', 'approved', 'in_production', 'ready'] as OrderStatus[] },
+  { key: 'active', label: 'Active', statuses: ['quoted', 'approved', 'in_production', 'ready'] as OrderStatus[] },
+  { key: 'drafts', label: 'Черновики', statuses: ['draft'] as OrderStatus[] },
   { key: 'production', label: 'Production', statuses: ['in_production', 'ready'] as OrderStatus[] },
   { key: 'closed', label: 'Закрытые', statuses: ['shipped', 'closed'] as OrderStatus[] },
   { key: 'cancelled', label: 'Корзина', statuses: ['cancelled'] as OrderStatus[] },
