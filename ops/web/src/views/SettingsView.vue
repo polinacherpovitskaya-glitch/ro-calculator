@@ -3,7 +3,7 @@
     <header class="page-header">
       <div>
         <h1>Настройки</h1>
-        <p>Служебные JSON-ключи staging-системы</p>
+        <p>Служебные параметры staging-системы</p>
       </div>
       <div class="header-actions">
         <RouterLink to="/">Главная</RouterLink>
