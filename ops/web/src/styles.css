@@ -123,6 +123,291 @@ a {
   min-width: 0;
 }
 
+.ops-content :where(
+  .page,
+  .warehouse-page,
+  .item-page,
+  .audit-page,
+  .history-page,
+  .home-page
+) {
+  min-height: 100vh !important;
+  background: #f2f2f2 !important;
+  color: #202020 !important;
+  padding: 25px 24px 36px !important;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif !important;
+}
+
+.ops-content :where(
+  .page-header,
+  .toolbar,
+  .layout,
+  .panel,
+  .table-wrap,
+  .timeline,
+  .summary,
+  .summary-grid,
+  .bar-table,
+  .table-section,
+  .error,
+  .muted,
+  table
+) {
+  max-width: 1160px !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+}
+
+.ops-content :where(.page-header) {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 18px !important;
+  margin-bottom: 24px !important;
+}
+
+.ops-content :where(.page-header h1, .home-page h1) {
+  margin: 0 !important;
+  color: #202020 !important;
+  font-size: 24px !important;
+  line-height: 1.2 !important;
+  letter-spacing: 0 !important;
+}
+
+.ops-content :where(.page-header p, .home-page header p, .muted) {
+  margin-top: 6px !important;
+  color: #777 !important;
+  font-size: 13px !important;
+}
+
+.ops-content :where(.header-actions, .actions, .tabs, .toolbar) {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  gap: 10px !important;
+  flex-wrap: wrap !important;
+}
+
+.ops-content :where(.toolbar) {
+  margin-bottom: 16px !important;
+  padding: 14px 16px !important;
+  background: #fff !important;
+  border: 1px solid #ddd !important;
+  border-radius: 8px !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .03) !important;
+}
+
+.ops-content :where(.panel, .home-card, .layout > section, .timeline, .summary-grid > *, .bar-table, .table-section) {
+  background: #fff !important;
+  border: 1px solid #ddd !important;
+  border-radius: 8px !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .03) !important;
+}
+
+.ops-content :where(.panel) {
+  padding: 16px !important;
+}
+
+.ops-content :where(.panel-header, .section-header, .editor-head) {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 12px !important;
+}
+
+.ops-content :where(h2, h3) {
+  margin: 0 !important;
+  color: #222 !important;
+  letter-spacing: 0 !important;
+}
+
+.ops-content :where(h2) {
+  font-size: 18px !important;
+  line-height: 1.25 !important;
+}
+
+.ops-content :where(h3) {
+  font-size: 15px !important;
+  line-height: 1.3 !important;
+}
+
+.ops-content :where(label) {
+  color: #666 !important;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+}
+
+.ops-content :where(input, select, textarea) {
+  min-height: 35px !important;
+  border: 1px solid #d7d7d7 !important;
+  border-radius: 6px !important;
+  background: #fff !important;
+  color: #222 !important;
+  padding: 7px 12px !important;
+  box-shadow: none !important;
+}
+
+.ops-content :where(textarea) {
+  min-height: 84px !important;
+}
+
+.ops-content :where(button, .header-actions a, .page-header a, .tabs button, .toolbar a) {
+  min-height: 31px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  border: 1px solid #d9d9d9 !important;
+  border-radius: 8px !important;
+  background: #fff !important;
+  color: #555 !important;
+  padding: 0 12px !important;
+  font-size: 12px !important;
+  font-weight: 800 !important;
+  line-height: 1 !important;
+  text-decoration: none !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .05) !important;
+  cursor: pointer !important;
+}
+
+.ops-content :where(button:hover, .header-actions a:hover, .page-header a:hover, .tabs button:hover, .toolbar a:hover) {
+  border-color: #c8c8c8 !important;
+  color: #222 !important;
+}
+
+.ops-content :where(button.active, .tabs button.active, .tabs .active, .primary) {
+  border-color: #2563eb !important;
+  background: #2563eb !important;
+  color: #fff !important;
+}
+
+.ops-content :where(button.danger, .danger) {
+  border-color: #ef4444 !important;
+  background: #ef4444 !important;
+  color: #fff !important;
+}
+
+.ops-content :where(button:disabled) {
+  opacity: .55 !important;
+  cursor: not-allowed !important;
+}
+
+.ops-content :where(.table-wrap) {
+  overflow-x: auto !important;
+  background: #fff !important;
+  border: 1px solid #ddd !important;
+  border-radius: 8px !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .03) !important;
+}
+
+.ops-content :where(table) {
+  width: 100% !important;
+  border-collapse: collapse !important;
+  background: #fff !important;
+  border: 0 !important;
+}
+
+.ops-content :where(th, td) {
+  padding: 11px 12px !important;
+  border-bottom: 1px solid #ededed !important;
+  color: #222 !important;
+  text-align: left !important;
+  vertical-align: middle !important;
+}
+
+.ops-content :where(th) {
+  color: #666 !important;
+  font-size: 12px !important;
+  font-weight: 800 !important;
+  letter-spacing: .03em !important;
+  text-transform: uppercase !important;
+}
+
+.ops-content :where(tbody tr:hover) {
+  background: #fafafa !important;
+}
+
+.ops-content :where(.badge, .status, .chip, .tag) {
+  min-height: 24px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  border-radius: 999px !important;
+  padding: 0 12px !important;
+  background: #e5e7eb !important;
+  color: #667085 !important;
+  font-size: 12px !important;
+  font-weight: 800 !important;
+  white-space: nowrap !important;
+}
+
+.ops-content :where(.error) {
+  margin-bottom: 16px !important;
+  color: #b42318 !important;
+}
+
+.auth-page {
+  min-height: 100vh !important;
+  max-width: none !important;
+  display: grid !important;
+  place-items: center !important;
+  margin: 0 !important;
+  padding: 24px !important;
+  background: #1b1b1b !important;
+  color: #fff !important;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif !important;
+}
+
+.auth-panel {
+  width: min(26rem, 100%) !important;
+  display: grid !important;
+  gap: 18px !important;
+  border: 1px solid #303030 !important;
+  border-radius: 8px !important;
+  background: #f7f7f7 !important;
+  color: #202020 !important;
+  padding: 24px !important;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, .28) !important;
+}
+
+.auth-panel h1 {
+  margin: 0 !important;
+  font-size: 24px !important;
+  line-height: 1.2 !important;
+}
+
+.auth-panel form {
+  display: grid !important;
+  gap: 14px !important;
+}
+
+.auth-panel label {
+  display: grid !important;
+  gap: 6px !important;
+  color: #666 !important;
+  font-size: 12px !important;
+  font-weight: 800 !important;
+}
+
+.auth-panel input {
+  width: 100% !important;
+  min-height: 38px !important;
+  border: 1px solid #d7d7d7 !important;
+  border-radius: 6px !important;
+  background: #fff !important;
+  color: #222 !important;
+  padding: 8px 12px !important;
+}
+
+.auth-panel button {
+  min-height: 36px !important;
+  border: 1px solid #2563eb !important;
+  border-radius: 8px !important;
+  background: #2563eb !important;
+  color: #fff !important;
+  font-weight: 800 !important;
+  cursor: pointer !important;
+}
+
 @media (max-width: 900px) {
   .ops-shell {
     grid-template-columns: 1fr;
@@ -163,5 +448,21 @@ a {
 
   .ops-nav a.router-link-active {
     border-bottom-color: #2f6df6;
+  }
+
+  .ops-content :where(
+    .page,
+    .warehouse-page,
+    .item-page,
+    .audit-page,
+    .history-page,
+    .home-page
+  ) {
+    padding: 18px 12px 28px !important;
+  }
+
+  .ops-content :where(.page-header) {
+    align-items: flex-start !important;
+    flex-direction: column !important;
   }
 }
