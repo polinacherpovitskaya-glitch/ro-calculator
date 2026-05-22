@@ -84,7 +84,7 @@
     </section>
 
     <section v-if="form.status !== 'received'" class="stock-notice">
-      <strong>Принятие увеличит складские остатки и запишет receipt в журнал.</strong>
+      <strong>Принятие увеличит складские остатки и запишет приход в журнал.</strong>
     </section>
 
     <footer class="actions">
