@@ -16,7 +16,7 @@
       <thead><tr><th>Дата</th><th>Сотрудник</th><th>Проект</th><th>Этап</th><th>Часы</th><th></th></tr></thead>
       <tbody>
         <tr v-for="entry in entries" :key="entry.id">
-          <td>{{ entry.date }}</td><td>{{ entry.employee_name }}</td><td>{{ entry.project_name }}</td><td>{{ entry.stage }}</td>
+          <td>{{ formatDate(entry.date) }}</td><td>{{ entry.employee_name }}</td><td>{{ entry.project_name || '—' }}</td><td>{{ entry.stage || '—' }}</td>
           <td>{{ entry.hours }}<span v-if="entry.is_overtime"> overtime</span></td>
           <td class="right"><button type="button" @click="removeEntry(entry.id)">Удалить</button></td>
         </tr>
@@ -57,6 +57,13 @@ async function addEntry() {
 async function removeEntry(id: number) {
   await api.deleteTimeEntry(id);
   await load();
+}
+
+function formatDate(value: string) {
+  const raw = String(value || '').slice(0, 10);
+  if (!raw) return '—';
+  const [year, month, day] = raw.split('-');
+  return year && month && day ? `${day}.${month}.${year}` : raw;
 }
 
 onMounted(load);
