@@ -3,15 +3,15 @@
     <header class="page-header">
       <div>
         <RouterLink to="/warehouse">← Склад</RouterLink>
-        <h1>{{ form.name || 'Позиция склада' }}</h1>
+        <h1>{{ form.name || (isNew ? 'Новая позиция' : 'Позиция склада') }}</h1>
         <p v-if="item">ID {{ item.id }}</p>
       </div>
-      <button type="button" :disabled="saving || !item" @click="save">{{ saving ? 'Сохраняем...' : 'Сохранить' }}</button>
+      <button type="button" :disabled="!canSave" @click="save">{{ saving ? 'Сохраняем...' : 'Сохранить' }}</button>
     </header>
 
     <p v-if="error" class="error">{{ error }}</p>
 
-    <section v-if="item" class="layout">
+    <section v-if="item || isNew" class="layout" :class="{ 'is-new': isNew }">
       <form class="item-form" @submit.prevent="save">
         <label>
           Название
@@ -31,11 +31,11 @@
         </label>
         <label>
           Резерв
-          <input :value="formatNumber(item.reserved_qty)" readonly />
+          <input :value="formatNumber(item?.reserved_qty || 0)" readonly />
         </label>
         <label>
           Доступно
-          <input :value="formatNumber(item.available_qty)" readonly />
+          <input :value="formatNumber(item?.available_qty ?? form.qty)" readonly />
         </label>
         <label>
           Мин.
@@ -59,7 +59,7 @@
         </label>
       </form>
 
-      <aside class="history-panel">
+      <aside v-if="!isNew" class="history-panel">
         <h2>Журнал</h2>
         <ol>
           <li v-for="entry in history" :key="entry.id" class="history-entry">
@@ -78,12 +78,13 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue';
-import { useRoute } from 'vue-router';
+import { computed, onMounted, reactive, ref } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import * as warehouseApi from '../api/warehouse';
 import type { WarehouseHistoryEntry, WarehouseItem } from '../api/warehouse';
 
 const route = useRoute();
+const router = useRouter();
 const item = ref<WarehouseItem | null>(null);
 const history = ref<WarehouseHistoryEntry[]>([]);
 const error = ref('');
@@ -99,6 +100,8 @@ const form = reactive({
   last_currency: '',
   notes: '',
 });
+const isNew = computed(() => route.params.id === 'new');
+const canSave = computed(() => !saving.value && Boolean(form.name.trim()) && (isNew.value || Boolean(item.value)));
 
 onMounted(() => {
   void load();
@@ -106,6 +109,11 @@ onMounted(() => {
 
 async function load() {
   error.value = '';
+  if (isNew.value) {
+    item.value = null;
+    history.value = [];
+    return;
+  }
   try {
     const id = Number(route.params.id);
     const loadedItem = await warehouseApi.getItem(id);
@@ -128,11 +136,11 @@ async function load() {
 }
 
 async function save() {
-  if (!item.value) return;
+  if (!canSave.value) return;
   saving.value = true;
   error.value = '';
   try {
-    item.value = await warehouseApi.updateItem(item.value.id, {
+    const payload = {
       name: form.name,
       sku: form.sku || null,
       category: form.category || null,
@@ -142,8 +150,10 @@ async function save() {
       last_price: form.last_price,
       last_currency: form.last_currency || null,
       notes: form.notes || null,
-    });
+    };
+    item.value = isNew.value ? await warehouseApi.createItem(payload) : await warehouseApi.updateItem(item.value!.id, payload);
     history.value = await warehouseApi.listHistory({ itemId: item.value.id, limit: 50 });
+    if (isNew.value) await router.replace(`/warehouse/${item.value.id}`);
   } catch (caught) {
     error.value = caught instanceof Error ? caught.message : 'Не удалось сохранить позицию';
   } finally {
@@ -240,6 +250,10 @@ button:disabled {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 24rem;
   gap: 1rem;
+}
+
+.layout.is-new {
+  grid-template-columns: 1fr;
 }
 
 .item-form,
