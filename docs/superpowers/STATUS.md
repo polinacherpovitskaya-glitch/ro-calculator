@@ -1,6 +1,6 @@
 # Migration status
 
-Last update: 2026-05-22T11:57:06-03:00
+Last update: 2026-05-22T12:02:03-03:00
 Current block: Stage B test/reconciliation
 Current task within block: Visual polish pass for ops-staging
 Branch: stage-B-visual-polish
@@ -36,6 +36,7 @@ Tests: `cd ops/web && npm run build` passed locally. Previous deployed Stage B a
   - Fixed the warehouse `Новая позиция` flow so `/warehouse/new` opens a real create form instead of trying to load item id `new`; save remains disabled until the required name is filled and existing item editing keeps its loaded-item guard.
   - Fixed the bug-report create URL so `/bugs/new` now opens the existing `Новый баг` editor instead of a blank routed shell; the `Новый баг` button now reflects the create URL and save is disabled until the title is filled.
   - Polished the shipment and China purchase detail forms so stock-impact notices use a calm warning style instead of a large red error banner, and footer actions align with the form edge.
+  - Added a follow-up for those form footers so their right alignment wins over the shared legacy toolbar rule.
   - Kept API/data behavior unchanged; this is a front-end parity pass only.
   - Verified `cd ops/web && npm run build` passes.
 - Stage B automated checks:
