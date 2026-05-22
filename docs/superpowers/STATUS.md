@@ -1,6 +1,6 @@
 # Migration status
 
-Last update: 2026-05-22T15:10:56-03:00
+Last update: 2026-05-22T15:16:26-03:00
 Current block: Stage B test/reconciliation
 Current task within block: Visual polish pass for ops-staging
 Branch: stage-B-visual-polish
@@ -50,6 +50,7 @@ Tests: `cd ops/web && npm run build` passed locally. Previous deployed Stage B a
   - Polished `/production/calendar` day cells so day number and work hours render as separate readable lines instead of glued text like `18ч`.
   - Added a follow-up for `/production/calendar` so the day-cell layout wins over the shared legacy button styling on deployed staging.
   - Added a final `/production/calendar` override for the global `button` theme, which uses `display: inline-flex !important` and otherwise collapses day cells back to one line.
+  - Polished `/settings` header copy so the page says `Служебные параметры staging-системы` instead of exposing implementation wording as `JSON-ключи`.
   - Kept API/data behavior unchanged; this is a front-end parity pass only.
   - Verified `cd ops/web && npm run build` passes.
 - Stage B automated checks:
