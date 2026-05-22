@@ -20,7 +20,8 @@
           <div class="grid">
             <span v-for="blank in month.offset" :key="`b-${month.index}-${blank}`" />
             <button v-for="day in month.days" :key="day.date" type="button" :class="dayClass(day.date)" @click="selectDay(day.date)">
-              <span>{{ day.day }}</span><small>{{ dayInfo(day.date).hours || 0 }}ч</small>
+              <span class="day-number">{{ day.day }}</span>
+              <small class="day-hours">{{ formatHours(dayInfo(day.date).hours) }}</small>
             </button>
           </div>
         </article>
@@ -65,6 +66,7 @@ function defaultDay(date: string): ProductionCalendarDay {
   return { date, is_working: !isWeekend, hours: isWeekend ? 0 : 8, note: null, extras: {} };
 }
 function dayInfo(date: string) { return byDate.value.get(date) || defaultDay(date); }
+function formatHours(value: number) { return `${Number(value || 0).toLocaleString('ru-RU')} ч`; }
 function dayClass(date: string) {
   const day = dayInfo(date);
   return { day: true, working: day.is_working, weekend: !day.is_working, picked: selected.value?.date === date };
@@ -91,7 +93,7 @@ async function saveSelected() {
 <style scoped>
 .page { min-height: 100vh; padding: 1.5rem; background: #f6f7f9; color: #1f2933; font-family: system-ui, sans-serif; } .page-header, .toolbar, .layout { max-width: 82rem; margin: 0 auto 1rem; } .page-header, .header-actions, .toolbar { display: flex; align-items: end; justify-content: space-between; gap: .75rem; } .header-actions, .toolbar { justify-content: flex-start; flex-wrap: wrap; }
 h1, h2, p { margin: 0; } h1 { font-size: 1.7rem; } h2 { font-size: 1rem; } p { color: #697586; margin-top: .25rem; } .layout { display: grid; grid-template-columns: minmax(0, 1fr) 22rem; gap: 1rem; align-items: start; } .months { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .75rem; }
-.month, .editor { background: white; border: 1px solid #d9e2ec; border-radius: 8px; padding: .85rem; } .weekdays, .grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: .25rem; } .weekdays { margin: .65rem 0 .3rem; color: #697586; font-size: .72rem; text-align: center; } .day { min-width: 0; height: 2.8rem; display: grid; align-content: center; justify-items: center; border: 1px solid #d9e2ec; border-radius: 6px; background: #f2f5f8; cursor: pointer; } .day span { font-weight: 650; } .day small { color: #697586; } .day.working { background: #eef8f1; border-color: #b7dfc3; } .day.weekend { background: #f3f4f6; color: #697586; } .day.picked { outline: 2px solid #315c96; }
+.month, .editor { background: white; border: 1px solid #d9e2ec; border-radius: 8px; padding: .85rem; } .weekdays, .grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: .25rem; } .weekdays { margin: .65rem 0 .3rem; color: #697586; font-size: .72rem; text-align: center; } .day { min-width: 0; height: 3rem; display: grid; align-content: center; justify-items: center; gap: .1rem; border: 1px solid #d9e2ec; border-radius: 6px; background: #f2f5f8; cursor: pointer; } .day-number { font-weight: 650; line-height: 1; } .day-hours { color: #697586; font-size: .68rem; line-height: 1; white-space: nowrap; } .day.working { background: #eef8f1; border-color: #b7dfc3; } .day.weekend { background: #f3f4f6; color: #697586; } .day.picked { outline: 2px solid #315c96; }
 label { display: grid; gap: .3rem; color: #52606d; font-size: .85rem; } .check { display: flex; align-items: center; gap: .5rem; } input, textarea, button, a { box-sizing: border-box; font: inherit; } input, textarea { min-height: 2.25rem; border: 1px solid #cbd5df; border-radius: 6px; padding: .35rem .55rem; background: white; } button, a { display: inline-flex; align-items: center; justify-content: center; min-height: 2.25rem; border: 1px solid #b8c2cc; border-radius: 6px; background: white; padding: 0 .75rem; color: #1f2933; text-decoration: none; }
 .editor { display: grid; gap: .75rem; } .editor header { display: flex; align-items: center; justify-content: space-between; } .error { max-width: 82rem; margin: 0 auto 1rem; color: #b42318; }
 @media (max-width: 1050px) { .months { grid-template-columns: repeat(2, minmax(0, 1fr)); } .layout { grid-template-columns: 1fr; } } @media (max-width: 640px) { .months { grid-template-columns: 1fr; } }
