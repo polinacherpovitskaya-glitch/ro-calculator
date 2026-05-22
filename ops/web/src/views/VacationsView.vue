@@ -5,14 +5,26 @@
       <label>Сотрудник <select v-model.number="draft.employee_id"><option :value="0">Выбрать</option><option v-for="e in employees" :key="e.id" :value="e.id">{{ e.name }}</option></select></label>
       <label>С <input v-model="draft.start_date" type="date" /></label>
       <label>По <input v-model="draft.end_date" type="date" /></label>
-      <label>Тип <select v-model="draft.type"><option value="vacation">vacation</option><option value="sick">sick</option><option value="unpaid">unpaid</option><option value="holiday">holiday</option></select></label>
+      <label>Тип
+        <select v-model="draft.type">
+          <option value="vacation">Отпуск</option>
+          <option value="sick">Больничный</option>
+          <option value="unpaid">Без оплаты</option>
+          <option value="holiday">Праздник</option>
+        </select>
+      </label>
       <label class="check"><input v-model="draft.is_paid" type="checkbox" /> оплачиваемый</label>
       <button type="button" @click="addVacation">Добавить</button>
     </section>
     <table>
       <thead><tr><th>Сотрудник</th><th>Даты</th><th>Тип</th><th>Оплата</th></tr></thead>
       <tbody>
-        <tr v-for="vacation in vacations" :key="vacation.id"><td>{{ vacation.employee_name }}</td><td>{{ vacation.start_date }} - {{ vacation.end_date }}</td><td>{{ vacation.type }}</td><td>{{ vacation.is_paid ? 'да' : 'нет' }}</td></tr>
+        <tr v-for="vacation in vacations" :key="vacation.id">
+          <td>{{ vacation.employee_name }}</td>
+          <td>{{ formatDate(vacation.start_date) }} - {{ formatDate(vacation.end_date) }}</td>
+          <td>{{ typeLabel(vacation.type) }}</td>
+          <td>{{ vacation.is_paid ? 'Да' : 'Нет' }}</td>
+        </tr>
         <tr v-if="!vacations.length"><td colspan="4">Пусто</td></tr>
       </tbody>
     </table>
@@ -28,6 +40,12 @@ const employees = ref<Array<{ id: number; name: string }>>([]);
 const vacations = ref<api.Vacation[]>([]);
 const today = new Date().toISOString().slice(0, 10);
 const draft = reactive({ employee_id: 0, start_date: today, end_date: today, type: 'vacation', is_paid: true });
+const typeLabels: Record<string, string> = {
+  vacation: 'Отпуск',
+  sick: 'Больничный',
+  unpaid: 'Без оплаты',
+  holiday: 'Праздник',
+};
 
 async function load() {
   const [empBody, rows] = await Promise.all([
@@ -42,6 +60,14 @@ async function addVacation() {
   if (!draft.employee_id) return;
   await api.createVacation(draft);
   await load();
+}
+
+function typeLabel(value: string) {
+  return typeLabels[value] || value;
+}
+
+function formatDate(value: string) {
+  return value ? new Date(value).toLocaleDateString('ru-RU') : '—';
 }
 
 onMounted(load);

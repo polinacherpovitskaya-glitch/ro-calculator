@@ -8,7 +8,7 @@
       <button type="button" @click="recalculate">Пересчитать всех</button>
     </section>
     <table>
-      <thead><tr><th>Сотрудник</th><th>Часы</th><th>Overtime</th><th>База</th><th>Доплата</th><th>Итого</th><th></th></tr></thead>
+      <thead><tr><th>Сотрудник</th><th>Часы</th><th>Сверхурочные</th><th>База</th><th>Доплата</th><th>Итого</th><th></th></tr></thead>
       <tbody>
         <tr v-for="row in periods" :key="row.id">
           <td>{{ row.employee_name }}</td><td>{{ row.hours_regular }}</td><td>{{ row.hours_overtime }}</td>
