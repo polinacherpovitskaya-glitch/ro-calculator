@@ -2,6 +2,26 @@
   box-sizing: border-box;
 }
 
+:root {
+  --ro-bg: #f5f5f5;
+  --ro-card: #fff;
+  --ro-dark: #1a1a1a;
+  --ro-text: #1a1a1a;
+  --ro-secondary: #666;
+  --ro-muted: #999;
+  --ro-border: #e0e0e0;
+  --ro-blue: #2563eb;
+  --ro-blue-soft: #dbeafe;
+  --ro-green: #16a34a;
+  --ro-green-soft: #dcfce7;
+  --ro-red: #dc2626;
+  --ro-red-soft: #fee2e2;
+  --ro-yellow: #ca8a04;
+  --ro-yellow-soft: #fef9c3;
+  --ro-radius: 8px;
+  --ro-shadow: 0 1px 3px rgba(0, 0, 0, .1);
+}
+
 html,
 body,
 #app {
@@ -10,9 +30,11 @@ body,
 }
 
 body {
-  background: #f2f2f2;
-  color: #222;
-  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  background: var(--ro-bg);
+  color: var(--ro-text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
 }
 
 button,
@@ -30,22 +52,27 @@ a {
   min-height: 100vh;
   display: grid;
   grid-template-columns: 240px minmax(0, 1fr);
-  background: #f2f2f2;
+  background: var(--ro-bg);
 }
 
 .ops-sidebar {
-  position: sticky;
+  position: fixed;
   top: 0;
+  left: 0;
+  bottom: 0;
+  width: 240px;
   height: 100vh;
   overflow-y: auto;
-  background: #1b1b1b;
-  color: #f7f7f7;
-  border-right: 1px solid #2a2a2a;
+  z-index: 100;
+  background: var(--ro-dark);
+  color: #fff;
+  border-right: 0;
 }
 
 .ops-brand {
-  padding: 24px 20px 20px;
-  border-bottom: 1px solid #303030;
+  padding: 20px 20px 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, .1);
+  margin-bottom: 12px;
 }
 
 .ops-brand strong {
@@ -56,13 +83,13 @@ a {
 
 .ops-brand span {
   display: block;
-  margin-top: 8px;
-  color: #9ca3af;
-  font-size: 12px;
+  margin-top: 4px;
+  color: rgba(255, 255, 255, .5);
+  font-size: 11px;
 }
 
 .ops-nav {
-  padding: 16px 0 24px;
+  padding: 0 0 24px;
 }
 
 .ops-nav-section {
@@ -74,41 +101,48 @@ a {
 }
 
 .ops-nav-title {
-  padding: 0 20px 10px;
-  color: #858585;
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: .12em;
+  padding: 14px 20px 6px;
+  color: rgba(255, 255, 255, .38);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .08em;
   text-transform: uppercase;
+}
+
+.ops-nav a + .ops-nav-title,
+.ops-nav-section + .ops-nav-section {
+  border-top: 1px solid rgba(255, 255, 255, .08);
 }
 
 .ops-nav a,
 .ops-nav button {
   width: 100%;
-  min-height: 48px;
+  min-height: 0;
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   border: 0;
-  border-left: 4px solid transparent;
+  border-left: 3px solid transparent;
   background: transparent;
-  color: #d8d8d8;
-  padding: 0 18px 0 20px;
-  font-size: 14px;
-  font-weight: 650;
+  color: rgba(255, 255, 255, .7);
+  padding: 10px 20px;
+  font-size: 13px;
+  font-weight: 500;
   text-decoration: none;
   cursor: pointer;
+  box-shadow: none;
+  border-radius: 0;
 }
 
 .ops-nav a:hover,
 .ops-nav button:hover {
-  background: #242424;
+  background: rgba(255, 255, 255, .05);
   color: #fff;
 }
 
 .ops-nav a.router-link-active {
-  background: #303030;
-  border-left-color: #2f6df6;
+  background: rgba(255, 255, 255, .1);
+  border-left-color: var(--ro-blue);
   color: #fff;
 }
 
@@ -121,6 +155,9 @@ a {
 
 .ops-content {
   min-width: 0;
+  margin-left: 240px;
+  max-width: calc(100vw - 240px);
+  overflow-x: hidden;
 }
 
 .ops-content :where(
@@ -436,6 +473,342 @@ a {
   color: #fff !important;
   font-weight: 800 !important;
   cursor: pointer !important;
+}
+
+/* Final polish pass: move from themed CRUD to the legacy calc product feel. */
+.ops-content :where(
+  .page,
+  .warehouse-page,
+  .item-page,
+  .audit-page,
+  .history-page,
+  .home-page,
+  .orders-page
+) {
+  background: var(--ro-bg) !important;
+  color: var(--ro-text) !important;
+  padding: 24px !important;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif !important;
+  font-size: 14px !important;
+  line-height: 1.5 !important;
+}
+
+.ops-content :where(
+  .page-header,
+  .orders-header,
+  .toolbar,
+  .search-card,
+  .order-section,
+  .layout,
+  .panel,
+  .table-wrap,
+  .timeline,
+  .summary,
+  .summary-grid,
+  .bar-table,
+  .table-section,
+  .home-card,
+  .error,
+  table
+) {
+  max-width: none !important;
+}
+
+.ops-content :where(.page-header, .orders-header) {
+  min-height: 40px !important;
+  margin-bottom: 24px !important;
+}
+
+.ops-content :where(.page-header h1, .orders-header h1, .home-page h1) {
+  font-size: 22px !important;
+  font-weight: 700 !important;
+  color: var(--ro-text) !important;
+}
+
+.ops-content :where(.page-header p, .home-page header p, .muted) {
+  color: var(--ro-secondary) !important;
+  font-size: 13px !important;
+  margin-top: 2px !important;
+}
+
+.ops-content :where(.panel, .home-card, .layout > section, .timeline, .summary-grid > *, .bar-table, .table-section, .order-section, .search-card, .toolbar, .table-wrap, .editor, aside.editor) {
+  background: var(--ro-card) !important;
+  border: 1px solid var(--ro-border) !important;
+  border-radius: var(--ro-radius) !important;
+  box-shadow: none !important;
+}
+
+.ops-content :where(.toolbar, .search-card) {
+  padding: 16px !important;
+  margin-bottom: 16px !important;
+}
+
+.ops-content :where(.panel) {
+  padding: 20px !important;
+  margin-bottom: 16px !important;
+}
+
+.ops-content :where(.header-actions a, .page-header a, .toolbar a, button, .tabs button, .quick-tabs button, .new-order) {
+  min-height: 33px !important;
+  padding: 7px 14px !important;
+  border: 1px solid var(--ro-border) !important;
+  border-radius: var(--ro-radius) !important;
+  background: #fff !important;
+  color: var(--ro-text) !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  line-height: 1.2 !important;
+  text-decoration: none !important;
+  box-shadow: none !important;
+  transition: background .2s ease, border-color .2s ease, color .2s ease !important;
+}
+
+.ops-content :where(.header-actions a:hover, .page-header a:hover, .toolbar a:hover, button:hover, .tabs button:hover, .quick-tabs button:hover) {
+  background: var(--ro-bg) !important;
+  color: var(--ro-text) !important;
+}
+
+.ops-content :where(.quick-tabs button, .new-order) {
+  min-height: 31px !important;
+  border-radius: 999px !important;
+  color: var(--ro-muted) !important;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  padding: 7px 16px !important;
+}
+
+.ops-content :where(.quick-tabs button.active, .new-order, button.active, .tabs button.active, .primary) {
+  border-color: var(--ro-blue) !important;
+  background: var(--ro-blue) !important;
+  color: #fff !important;
+}
+
+.ops-content :where(button.danger, .danger) {
+  border-color: var(--ro-red) !important;
+  background: var(--ro-red) !important;
+  color: #fff !important;
+}
+
+.ops-content :where(label) {
+  color: var(--ro-secondary) !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+}
+
+.ops-content :where(input, select, textarea) {
+  min-height: 36px !important;
+  border: 1px solid var(--ro-border) !important;
+  border-radius: 6px !important;
+  color: var(--ro-text) !important;
+  background: #fff !important;
+  padding: 8px 12px !important;
+  font-size: 14px !important;
+}
+
+.ops-content :where(input:focus, select:focus, textarea:focus) {
+  outline: none !important;
+  border-color: var(--ro-blue) !important;
+}
+
+.ops-content :where(.table-wrap) {
+  overflow-x: auto !important;
+}
+
+.ops-content :where(table) {
+  border-collapse: collapse !important;
+  width: 100% !important;
+  background: #fff !important;
+}
+
+.ops-content :where(th, td) {
+  padding: 10px 12px !important;
+  border-bottom: 1px solid var(--ro-border) !important;
+  color: var(--ro-text) !important;
+  font-size: 13px !important;
+  vertical-align: middle !important;
+}
+
+.ops-content :where(th) {
+  color: var(--ro-secondary) !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  letter-spacing: .3px !important;
+  text-transform: uppercase !important;
+}
+
+.ops-content :where(tbody tr:hover td) {
+  background: var(--ro-bg) !important;
+}
+
+.ops-content :where(table a) {
+  color: var(--ro-blue) !important;
+  font-weight: 600 !important;
+  text-decoration: none !important;
+}
+
+.ops-content :where(table a:hover) {
+  text-decoration: underline !important;
+}
+
+.ops-content :where(td strong) {
+  font-size: 13px !important;
+  font-weight: 700 !important;
+}
+
+.ops-content :where(td small) {
+  margin-top: 2px !important;
+  color: var(--ro-secondary) !important;
+  font-size: 12px !important;
+}
+
+.ops-content :where(.badge, .status, .chip, .tag, .todo-pill) {
+  min-height: 22px !important;
+  padding: 3px 10px !important;
+  border-radius: 999px !important;
+  background: #e5e7eb !important;
+  color: #667085 !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+}
+
+.ops-content :where(.s-in_production) {
+  background: var(--ro-yellow-soft) !important;
+  color: var(--ro-yellow) !important;
+}
+
+.ops-content :where(.s-closed, .s-shipped, .status-done) {
+  background: var(--ro-green-soft) !important;
+  color: var(--ro-green) !important;
+}
+
+.ops-content :where(.s-cancelled) {
+  background: var(--ro-red-soft) !important;
+  color: var(--ro-red) !important;
+}
+
+.ops-content :where(.s-draft, .s-quoted, .s-approved, .s-ready) {
+  background: var(--ro-blue-soft) !important;
+  color: var(--ro-blue) !important;
+}
+
+.ops-content :where(.tabs) {
+  display: flex !important;
+  gap: 0 !important;
+  border-bottom: 2px solid var(--ro-border) !important;
+  margin-bottom: 20px !important;
+  background: transparent !important;
+}
+
+.ops-content :where(.tabs button) {
+  min-height: auto !important;
+  border: 0 !important;
+  border-bottom: 2px solid transparent !important;
+  border-radius: 0 !important;
+  margin-bottom: -2px !important;
+  background: transparent !important;
+  color: var(--ro-muted) !important;
+  padding: 8px 16px !important;
+  box-shadow: none !important;
+}
+
+.ops-content :where(.tabs button.active) {
+  border-bottom-color: var(--ro-blue) !important;
+  background: transparent !important;
+  color: var(--ro-blue) !important;
+}
+
+.ops-content :where(.metrics) {
+  display: grid !important;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)) !important;
+  gap: 12px !important;
+}
+
+.ops-content :where(.metrics span) {
+  border: 1px solid var(--ro-border) !important;
+  border-radius: var(--ro-radius) !important;
+  padding: 12px 14px !important;
+  color: var(--ro-secondary) !important;
+  background: #fff !important;
+  font-size: 12px !important;
+}
+
+.ops-content :where(.metrics strong) {
+  color: var(--ro-text) !important;
+  font-size: 18px !important;
+  line-height: 1.2 !important;
+}
+
+.ops-content :where(.modal) {
+  border: 1px solid var(--ro-border) !important;
+  border-radius: 12px !important;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, .18) !important;
+}
+
+.ops-content :where(.modal-backdrop) {
+  background: rgba(26, 26, 26, .45) !important;
+}
+
+.ops-content :where(.order-summary-panel .header-grid) {
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  gap: 12px !important;
+}
+
+.ops-content :where(.order-summary-panel .actions) {
+  border-top: 1px solid var(--ro-border) !important;
+  padding-top: 12px !important;
+  margin-top: 2px !important;
+}
+
+.ops-content :where(.order-summary-panel .primary-action) {
+  border-color: var(--ro-blue) !important;
+  background: var(--ro-blue) !important;
+  color: #fff !important;
+}
+
+.ops-content :where(.order-summary-panel .metrics em) {
+  display: block !important;
+  color: var(--ro-secondary) !important;
+  font-size: 12px !important;
+  margin-bottom: 4px !important;
+}
+
+.ops-content :where(.order-summary-panel .metrics strong) {
+  display: block !important;
+  font-size: 18px !important;
+}
+
+.ops-content :where(.order-cell strong) {
+  color: var(--ro-blue) !important;
+}
+
+.ops-content :where(.order-cell span, .manager-cell span, .money-cell span) {
+  color: var(--ro-secondary) !important;
+}
+
+.ops-content :where(.section-title) {
+  min-height: 40px !important;
+  padding: 0 16px !important;
+  border-bottom: 1px solid var(--ro-border) !important;
+}
+
+.ops-content :where(.section-title strong) {
+  font-size: 14px !important;
+}
+
+.ops-content :where(.dot) {
+  width: 8px !important;
+  height: 8px !important;
+}
+
+.ops-content :where(.deadline.overdue, .overdue) {
+  color: var(--ro-red) !important;
+  font-weight: 700 !important;
+}
+
+.ops-content :where(.row-actions button) {
+  width: 31px !important;
+  min-width: 31px !important;
+  padding: 0 !important;
 }
 
 @media (max-width: 900px) {

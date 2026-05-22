@@ -1,7 +1,14 @@
 <template>
   <main class="page">
-    <header class="page-header">
-      <div><h1>{{ isNew ? 'Новый заказ' : `Заказ #${order.id}` }}</h1><p>{{ dirty ? 'Есть несохраненные изменения' : 'Сохранено' }}</p></div>
+    <header class="page-header order-page-header">
+      <div>
+        <h1>{{ isNew ? 'Новый заказ' : (order.order_name || `Заказ #${order.id}`) }}</h1>
+        <p>
+          <span v-if="!isNew">#{{ order.id }}</span>
+          <span v-if="order.client_name"> · {{ order.client_name }}</span>
+          <span> · {{ dirty ? 'есть несохраненные изменения' : 'сохранено' }}</span>
+        </p>
+      </div>
       <div class="header-actions"><RouterLink to="/orders">Заказы</RouterLink><RouterLink to="/">Главная</RouterLink></div>
     </header>
 
@@ -275,5 +282,6 @@ button.danger { color: #b42318; border-color: #f3b4ad; }
 :deep(.modal.wide) { width: min(50rem, 100%); }
 :deep(.modal header) { display: flex; justify-content: space-between; align-items: center; gap: .75rem; }
 .error { max-width: 88rem; margin: 0 auto 1rem; color: #b42318; }
+.order-page-header p span:first-child { color: #999; }
 @media (max-width: 900px) { :deep(.header-grid) { grid-template-columns: 1fr; } }
 </style>
