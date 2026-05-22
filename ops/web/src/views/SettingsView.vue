@@ -16,11 +16,12 @@
 
     <section v-if="isAdmin" class="layout">
       <aside class="keys">
-        <button v-for="row in settings" :key="row.key" type="button" :class="{ active: row.key === selectedKey }" @click="select(row.key)">
+        <button v-for="row in settingRows" :key="row.key" type="button" :class="{ active: row.key === selectedKey }" @click="select(row.key)">
           <span>{{ row.key }}</span>
           <small>{{ String(row.updated_at || '').slice(0, 10) }}</small>
         </button>
-        <p v-if="!loading && settings.length === 0">Настроек нет</p>
+        <p v-if="loading" class="keys-empty">Загрузка...</p>
+        <p v-else-if="settingRows.length === 0" class="keys-empty">Ключи не найдены</p>
       </aside>
 
       <section class="editor">
@@ -45,6 +46,7 @@ import { useAuthStore } from '../stores/auth';
 const auth = useAuthStore();
 const isAdmin = computed(() => auth.user?.role === 'admin');
 const settings = ref<SettingRow[]>([]);
+const settingRows = computed(() => (Array.isArray(settings.value) ? settings.value : []));
 const selectedKey = ref('');
 const draft = ref('{}');
 const loading = ref(false);
@@ -61,7 +63,8 @@ async function load() {
   error.value = '';
   try {
     settings.value = await listSettings();
-    if (!selectedKey.value && settings.value[0]) select(settings.value[0].key);
+    if (!Array.isArray(settings.value)) settings.value = [];
+    if (!selectedKey.value && settingRows.value[0]) select(settingRows.value[0].key);
   } catch (caught) {
     const apiError = caught as Partial<ApiError>;
     error.value = apiError.message || 'Не удалось загрузить настройки';
@@ -72,7 +75,7 @@ async function load() {
 
 function select(key: string) {
   selectedKey.value = key;
-  const row = settings.value.find((item) => item.key === key);
+  const row = settingRows.value.find((item) => item.key === key);
   draft.value = JSON.stringify(row?.value ?? {}, null, 2);
   parseError.value = '';
 }
@@ -91,7 +94,8 @@ async function save() {
   error.value = '';
   try {
     const saved = await putSetting(selectedKey.value, value);
-    const index = settings.value.findIndex((row) => row.key === saved.key);
+    const index = settingRows.value.findIndex((row) => row.key === saved.key);
+    if (!Array.isArray(settings.value)) settings.value = [];
     if (index >= 0) settings.value.splice(index, 1, saved);
     else settings.value.push(saved);
     settings.value.sort((a, b) => a.key.localeCompare(b.key));
@@ -124,6 +128,7 @@ button:disabled { cursor: wait; opacity: .6; }
 .keys button.active { border-color: #2563eb; background: #eff6ff; color: #1d4ed8; }
 .keys span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .keys small { color: #697586; }
+.keys-empty { margin: 0; color: #697586; font-size: .9rem; }
 .editor { display: grid; gap: .8rem; }
 .editor-head { align-items: end; }
 label { display: grid; gap: .3rem; color: #52606d; font-size: .85rem; flex: 1; }
