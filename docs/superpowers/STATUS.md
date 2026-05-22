@@ -1,6 +1,6 @@
 # Migration status
 
-Last update: 2026-05-22T10:22:00-03:00
+Last update: 2026-05-22T10:30:00-03:00
 Current block: Stage B test/reconciliation
 Current task within block: Visual polish pass for ops-staging
 Branch: stage-B-visual-polish
@@ -23,6 +23,7 @@ Tests: `cd ops/web && npm run build` passed locally. Previous deployed Stage B a
     - removed heavy CRUD-style button shadows and normalized buttons/tables/forms to legacy calc proportions
     - improved status badge colors and table link behavior
     - polished the order detail header/summary card so it reads like an order screen rather than an admin form.
+  - Found and fixed a live staging layout regression from the polish pass: fixed sidebar + grid shell hid the content column. Returned the sidebar to sticky grid behavior while keeping the old visual spacing.
   - Kept API/data behavior unchanged; this is a front-end parity pass only.
   - Verified `cd ops/web && npm run build` passes.
 - Stage B automated checks:
