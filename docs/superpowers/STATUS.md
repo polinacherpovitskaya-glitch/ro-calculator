@@ -1,6 +1,6 @@
 # Migration status
 
-Last update: 2026-05-22T13:34:00-03:00
+Last update: 2026-05-22T15:00:17-03:00
 Current block: Stage B test/reconciliation
 Current task within block: Visual polish pass for ops-staging
 Branch: stage-B-visual-polish
@@ -47,6 +47,7 @@ Tests: `cd ops/web && npm run build` passed locally. Previous deployed Stage B a
   - Polished `/tasks` table deadlines so dates render as compact Russian dates and no longer wrap mid-value on the standard content width.
   - Polished `/colors` swatches so placeholder or invalid HEX values render as intentional neutral previews instead of empty white boxes, without changing stored color data.
   - Localized remaining raw labels found in the Stage B visual audit: `/time-tracking` no longer shows `overtime`, and `/bugs` severity options/badges no longer show `Low/Medium/High/Critical`.
+  - Polished `/production/calendar` day cells so day number and work hours render as separate readable lines instead of glued text like `18ч`.
   - Kept API/data behavior unchanged; this is a front-end parity pass only.
   - Verified `cd ops/web && npm run build` passes.
 - Stage B automated checks:
