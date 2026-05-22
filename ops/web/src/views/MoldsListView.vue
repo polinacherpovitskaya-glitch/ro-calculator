@@ -51,7 +51,7 @@
               <RouterLink v-if="mold.photo_url" class="photo-link" :to="`/molds/${mold.id}`">
                 <img class="photo-thumb" :src="mold.photo_url" :alt="mold.name" loading="lazy" />
               </RouterLink>
-              <span v-else class="photo-empty">—</span>
+              <span v-else class="photo-empty">Нет фото</span>
             </td>
             <td><RouterLink :to="`/molds/${mold.id}`">{{ mold.name }}</RouterLink></td>
             <td><input :value="mold.type || ''" @change="updateText(mold.id, 'type', $event)" /></td>
@@ -154,10 +154,17 @@ label { display: grid; gap: .3rem; color: #52606d; font-size: .85rem; }
 input, select, textarea, button, a { box-sizing: border-box; font: inherit; }
 input, select, textarea { min-height: 2.25rem; border: 1px solid #cbd5df; border-radius: 6px; padding: .35rem .55rem; background: white; }
 button, a { display: inline-flex; align-items: center; min-height: 2.25rem; border: 1px solid #b8c2cc; border-radius: 6px; background: white; padding: 0 .75rem; color: #1f2933; text-decoration: none; cursor: pointer; }
-table { width: 100%; border-collapse: collapse; background: white; border: 1px solid #d9e2ec; } th, td { padding: .65rem; border-bottom: 1px solid #eef2f6; text-align: left; vertical-align: middle; } th { color: #52606d; font-size: .78rem; text-transform: uppercase; }
-td input, td select { width: 100%; min-width: 7rem; } .number { max-width: 7rem; } .right { text-align: right; } .error { max-width: 78rem; margin: 0 auto 1rem; color: #b42318; }
+table { width: 100%; table-layout: fixed; border-collapse: collapse; background: white; border: 1px solid #d9e2ec; } th, td { padding: .55rem .6rem; border-bottom: 1px solid #eef2f6; text-align: left; vertical-align: middle; } th { color: #52606d; font-size: .78rem; text-transform: uppercase; }
+th:nth-child(1) { width: 5.5rem; }
+th:nth-child(2) { width: 10rem; }
+th:nth-child(3) { width: 8rem; }
+th:nth-child(4) { width: 8rem; }
+th:nth-child(5) { width: 8.5rem; }
+th:nth-child(6) { width: 7rem; }
+th:nth-child(8) { width: 6rem; }
+td input, td select { width: 100%; min-width: 0; } .number { max-width: 6.5rem; } .right { text-align: right; } .right button { width: 100%; justify-content: center; padding: 0 .45rem; } .error { max-width: 78rem; margin: 0 auto 1rem; color: #b42318; }
 .photo-link { width: 4rem; height: 4rem; min-height: 0; padding: 0; border: 0; border-radius: 6px; overflow: hidden; background: #eef2f6; }
 .photo-thumb { width: 100%; height: 100%; object-fit: cover; display: block; }
-.photo-empty { display: inline-flex; align-items: center; justify-content: center; width: 4rem; height: 4rem; color: #9aa5b1; background: #f6f7f9; border-radius: 6px; }
+.photo-empty { display: inline-flex; align-items: center; justify-content: center; width: 4rem; height: 4rem; color: #8792a0; background: #f1f3f5; border-radius: 6px; font-size: .72rem; font-weight: 700; text-align: center; }
 dialog { border: 0; border-radius: 8px; padding: 0; box-shadow: 0 20px 60px #10182833; } .form { display: grid; gap: .8rem; width: min(32rem, calc(100vw - 2rem)); padding: 1rem; } .form header, menu { display: flex; align-items: center; justify-content: space-between; gap: .75rem; } menu { padding: 0; margin: 0; }
 </style>
