@@ -1,9 +1,9 @@
 # Migration status
 
-Last update: 2026-05-22T09:34:00-03:00
+Last update: 2026-05-22T09:52:00-03:00
 Current block: Stage B test/reconciliation
-Current task within block: Visual parity follow-up for ops-staging
-Branch: stage-B-visual-parity
+Current task within block: Full-page visual parity pass for ops-staging
+Branch: stage-B-visual-parity-all
 Last commit: pending
 Tests: `cd ops/web && npm run build` passed locally. Previous deployed Stage B automated checks remain green on `main`; 10-order money/items/factual reconciliation passed manually with only expected legacy status normalization (`production_casting` -> `in_production`, `completed` -> `closed`).
 
@@ -14,6 +14,7 @@ Tests: `cd ops/web && npm run build` passed locally. Previous deployed Stage B a
   - Added a shared Vue app shell with the old calc-style dark left sidebar, grouped navigation, active route highlight, and logout action.
   - Simplified the home view so navigation lives in the shell instead of a wide button cloud.
   - Restyled `/orders` toward the old calc UI: top quick filters, search card, compact grouped order sections, old-style table density, blue order names, red overdue deadlines, and pill statuses.
+  - Added a second broad legacy-theme pass across all authenticated Vue pages: page background, headers, toolbars, panels, forms, buttons, tabs, tables, badges, auth screens, and mobile shell behavior now share the old calc visual language.
   - Kept API/data behavior unchanged; this is a front-end parity pass only.
   - Verified `cd ops/web && npm run build` passes.
 - Stage B automated checks:
