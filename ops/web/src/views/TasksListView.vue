@@ -18,7 +18,7 @@
     <section class="layout">
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Задача</th><th>Статус</th><th>Приоритет</th><th>Контекст</th><th>Дедлайн</th><th></th></tr></thead>
+          <thead><tr><th>Задача</th><th class="status-col">Статус</th><th class="priority-col">Приоритет</th><th>Контекст</th><th class="date-col">Дедлайн</th><th class="action-col"></th></tr></thead>
           <tbody>
             <tr v-if="loading"><td colspan="6">Загрузка...</td></tr>
             <tr v-for="task in tasks" :key="task.id" :class="{ selected: selected?.id === task.id }">
@@ -26,8 +26,8 @@
               <td>{{ api.taskStatusLabel(task.status) }}</td>
               <td>{{ api.priorityLabel(task.priority) }}</td>
               <td>{{ task.project_name || task.project_title || task.area_name || task.order_id || '—' }}</td>
-              <td>{{ task.due_date ? String(task.due_date).slice(0, 10) : '—' }}</td>
-              <td class="right"><button type="button" @click="openTask(task)">Открыть</button></td>
+              <td class="date-col">{{ formatDate(task.due_date) }}</td>
+              <td class="right action-col"><button type="button" @click="openTask(task)">Открыть</button></td>
             </tr>
             <tr v-if="!loading && tasks.length === 0"><td colspan="6">Пусто</td></tr>
           </tbody>
@@ -93,6 +93,12 @@ onMounted(async () => { await Promise.all([loadRefs(), load()]); });
 watch(() => filters.search, () => { window.clearTimeout(timer); timer = window.setTimeout(() => void load(), 250); });
 
 function message(caught: unknown) { return caught && typeof caught === 'object' && 'message' in caught ? String(caught.message) : 'Операция не выполнена'; }
+function formatDate(value: string | null | undefined) {
+  const raw = value ? String(value).slice(0, 10) : '';
+  if (!raw) return '—';
+  const [year, month, day] = raw.split('-');
+  return year && month && day ? `${day}.${month}.${year}` : raw;
+}
 async function loadRefs() { [areas.value, projects.value] = await Promise.all([api.listAreas({ active: true }), api.listProjects({ status: 'active' })]); }
 async function load() {
   loading.value = true; error.value = '';
@@ -135,7 +141,7 @@ async function toggleChecklist(item: ChecklistItem) { await api.updateChecklistI
 .page { min-height: 100vh; padding: 1.5rem; background: #f6f7f9; color: #1f2933; font-family: system-ui, sans-serif; } .page-header, .toolbar, .layout { max-width: 90rem; margin: 0 auto 1rem; } .page-header, .header-actions, .toolbar { display: flex; align-items: end; justify-content: space-between; gap: .75rem; } .header-actions, .toolbar { justify-content: flex-start; flex-wrap: wrap; }
 h1, h2, h3, p { margin: 0; } h1 { font-size: 1.7rem; } h2 { font-size: 1.1rem; } h3 { margin-top: .4rem; font-size: .9rem; } p, small { color: #697586; } small { display: block; margin-top: .2rem; } .layout { display: grid; grid-template-columns: minmax(0, 1fr) 28rem; gap: 1rem; align-items: start; } label { display: grid; gap: .3rem; color: #52606d; font-size: .85rem; }
 input, select, textarea, button, a { box-sizing: border-box; font: inherit; } input, select, textarea { min-height: 2.25rem; border: 1px solid #cbd5df; border-radius: 6px; padding: .35rem .55rem; background: white; } button, a { display: inline-flex; align-items: center; min-height: 2.25rem; border: 1px solid #b8c2cc; border-radius: 6px; background: white; padding: 0 .75rem; color: #1f2933; text-decoration: none; cursor: pointer; }
-table { width: 100%; border-collapse: collapse; background: white; border: 1px solid #d9e2ec; } th, td { padding: .6rem; border-bottom: 1px solid #eef2f6; text-align: left; vertical-align: top; } th { color: #52606d; font-size: .76rem; text-transform: uppercase; } tr.selected { background: #eef2ff; } .right { text-align: right; }
+table { width: 100%; border-collapse: collapse; background: white; border: 1px solid #d9e2ec; } th, td { padding: .6rem; border-bottom: 1px solid #eef2f6; text-align: left; vertical-align: top; } th { color: #52606d; font-size: .76rem; text-transform: uppercase; } tr.selected { background: #eef2ff; } .right { text-align: right; } .status-col { width: 8rem; } .priority-col { width: 7.5rem; } .date-col { width: 6.8rem; white-space: nowrap; } .action-col { width: 5.8rem; }
 .editor { display: grid; gap: .75rem; background: white; border: 1px solid #d9e2ec; border-radius: 8px; padding: 1rem; } .editor header, .actions, .inline, .checkline { display: flex; align-items: center; justify-content: space-between; gap: .75rem; } .actions { justify-content: flex-end; } .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; } .detail { display: grid; gap: .45rem; border-top: 1px solid #eef2f6; padding-top: .75rem; } .inline input { flex: 1; } .comment, .activity { font-size: .88rem; padding: .4rem .5rem; background: #f8fafc; border-radius: 6px; } .error { max-width: 90rem; margin: 0 auto 1rem; color: #b42318; }
 @media (max-width: 980px) { .layout { grid-template-columns: 1fr; } .table-wrap { overflow-x: auto; } }
 </style>
