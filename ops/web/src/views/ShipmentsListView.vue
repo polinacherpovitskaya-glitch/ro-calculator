@@ -191,15 +191,39 @@ button,
 }
 table {
   width: 100%;
-  min-width: 58rem;
+  table-layout: fixed;
   border-collapse: collapse;
+}
+
+th:nth-child(1),
+td:nth-child(1) {
+  width: 34%;
+}
+
+th:nth-child(2),
+td:nth-child(2),
+th:nth-child(3),
+td:nth-child(3),
+th:nth-child(4),
+td:nth-child(4),
+th:nth-child(5),
+td:nth-child(5),
+th:nth-child(6),
+td:nth-child(6) {
+  width: 7.5rem;
+}
+
+th:nth-child(7),
+td:nth-child(7) {
+  width: 5.5rem;
 }
 th,
 td {
   border-bottom: 1px solid #edf0f3;
   padding: 0.55rem 0.65rem;
   text-align: left;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 th {
   color: #52606d;
