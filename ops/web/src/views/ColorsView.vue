@@ -18,7 +18,7 @@
         <tbody>
           <tr v-if="colors.loading"><td colspan="5">Загрузка...</td></tr>
           <tr v-for="color in colors.colors" :key="color.id">
-            <td><span class="swatch" :style="{ background: color.hex || '#ffffff' }" /></td>
+            <td><span class="swatch" :class="{ invalid: !isValidHex(color.hex) }" :style="swatchStyle(color.hex)" :title="isValidHex(color.hex) ? color.hex || '' : 'HEX не задан'" /></td>
             <td><input :value="color.name" @change="updateText(color.id, 'name', $event)" /></td>
             <td><input :value="color.hex || ''" placeholder="#RRGGBB" @change="updateText(color.id, 'hex', $event)" /></td>
             <td><input :value="color.category || ''" @change="updateText(color.id, 'category', $event)" /></td>
@@ -55,6 +55,12 @@ let searchTimer: number | undefined;
 onMounted(() => void colors.loadColors());
 watch(() => colors.search, () => { window.clearTimeout(searchTimer); searchTimer = window.setTimeout(() => void reload(), 250); });
 async function reload() { await colors.loadColors(); }
+function isValidHex(value: string | null | undefined) {
+  return /^#[0-9a-f]{6}$/i.test(value || '');
+}
+function swatchStyle(value: string | null | undefined) {
+  return isValidHex(value) ? { background: value || '#ffffff' } : {};
+}
 async function updateText(id: number, field: 'name' | 'hex' | 'category', event: Event) {
   const input = event.target as HTMLInputElement;
   await colors.updateColor(id, { [field]: input.value || null } as ColorPatch);
@@ -77,6 +83,6 @@ async function createColor() {
 .page { min-height: 100vh; padding: 1.5rem; background: #f6f7f9; color: #1f2933; font-family: system-ui, sans-serif; } .page-header, .toolbar, .table-wrap { max-width: 78rem; margin: 0 auto 1rem; } .page-header, .header-actions, .toolbar { display: flex; align-items: end; justify-content: space-between; gap: .75rem; } .header-actions, .toolbar { justify-content: flex-start; flex-wrap: wrap; }
 h1, h2, p { margin: 0; } h1 { font-size: 1.7rem; } p { color: #697586; margin-top: .25rem; } label { display: grid; gap: .3rem; color: #52606d; font-size: .85rem; }
 input, select, button, a { box-sizing: border-box; font: inherit; } input, select { min-height: 2.25rem; border: 1px solid #cbd5df; border-radius: 6px; padding: .35rem .55rem; background: white; } button, a { display: inline-flex; align-items: center; min-height: 2.25rem; border: 1px solid #b8c2cc; border-radius: 6px; background: white; padding: 0 .75rem; color: #1f2933; text-decoration: none; cursor: pointer; }
-table { width: 100%; border-collapse: collapse; background: white; border: 1px solid #d9e2ec; } th, td { padding: .65rem; border-bottom: 1px solid #eef2f6; text-align: left; } th { color: #52606d; font-size: .78rem; text-transform: uppercase; } td input { width: 100%; min-width: 8rem; } .right { text-align: right; } .swatch { display: inline-block; width: 2rem; height: 2rem; border: 1px solid #cbd5df; border-radius: 6px; vertical-align: middle; } .error { max-width: 78rem; margin: 0 auto 1rem; color: #b42318; }
+table { width: 100%; border-collapse: collapse; background: white; border: 1px solid #d9e2ec; } th, td { padding: .65rem; border-bottom: 1px solid #eef2f6; text-align: left; } th { color: #52606d; font-size: .78rem; text-transform: uppercase; } td input { width: 100%; min-width: 8rem; } .right { text-align: right; } .swatch { display: inline-block; width: 2rem; height: 2rem; border: 1px solid #cbd5df; border-radius: 6px; vertical-align: middle; } .swatch.invalid { background: repeating-linear-gradient(45deg, #f8fafc 0 5px, #e5e7eb 5px 10px); border-style: dashed; } .error { max-width: 78rem; margin: 0 auto 1rem; color: #b42318; }
 dialog { border: 0; border-radius: 8px; padding: 0; box-shadow: 0 20px 60px #10182833; } .form { display: grid; gap: .8rem; width: min(28rem, calc(100vw - 2rem)); padding: 1rem; } .form header, menu { display: flex; align-items: center; justify-content: space-between; gap: .75rem; } menu { padding: 0; margin: 0; }
 </style>
