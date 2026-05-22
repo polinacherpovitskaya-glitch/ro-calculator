@@ -605,6 +605,7 @@ a {
 }
 
 .ops-content :where(.table-wrap) {
+  width: 100% !important;
   overflow-x: auto !important;
 }
 
