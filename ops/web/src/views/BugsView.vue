@@ -27,10 +27,10 @@
       <label>Важность
         <select v-model="bugs.severity" @change="reload">
           <option value="">Все</option>
-          <option value="low">Low</option>
-          <option value="medium">Medium</option>
-          <option value="high">High</option>
-          <option value="critical">Critical</option>
+          <option value="low">{{ severityLabel('low') }}</option>
+          <option value="medium">{{ severityLabel('medium') }}</option>
+          <option value="high">{{ severityLabel('high') }}</option>
+          <option value="critical">{{ severityLabel('critical') }}</option>
         </select>
       </label>
       <label>Страница <input v-model="bugs.page" @keydown.enter="reload" /></label>
@@ -54,7 +54,7 @@
               </td>
               <td>{{ bug.page || '—' }}</td>
               <td><span class="pill" :class="bug.status">{{ statusLabel(bug.status) }}</span></td>
-              <td><span class="severity" :class="bug.severity">{{ bug.severity }}</span></td>
+              <td><span class="severity" :class="bug.severity">{{ severityLabel(bug.severity) }}</span></td>
               <td>{{ bug.attachment_count || 0 }}</td>
               <td class="right"><button type="button" @click="openBug(bug.id)">Открыть</button></td>
             </tr>
@@ -83,10 +83,10 @@
           </label>
           <label>Важность
             <select v-model="form.severity">
-              <option value="low">Low</option>
-              <option value="medium">Medium</option>
-              <option value="high">High</option>
-              <option value="critical">Critical</option>
+              <option value="low">{{ severityLabel('low') }}</option>
+              <option value="medium">{{ severityLabel('medium') }}</option>
+              <option value="high">{{ severityLabel('high') }}</option>
+              <option value="critical">{{ severityLabel('critical') }}</option>
             </select>
           </label>
         </div>
@@ -152,6 +152,9 @@ watch(() => bugs.search, () => { window.clearTimeout(searchTimer); searchTimer =
 async function reload() { await bugs.loadBugs(); }
 function statusLabel(value: string) {
   return { open: 'Открыт', in_progress: 'В работе', fixed: 'Исправлен', wontfix: 'Не исправлять', duplicate: 'Дубль' }[value] || value;
+}
+function severityLabel(value: string) {
+  return { low: 'Низкая', medium: 'Средняя', high: 'Высокая', critical: 'Критическая' }[value] || value;
 }
 function formatDate(value: string) { return value ? new Date(value).toLocaleDateString('ru-RU') : ''; }
 function fillForm(bug: BugReport | null) {
