@@ -15,8 +15,8 @@
       <label>Название <input v-model="form.name" required /></label>
       <label>Количество <input v-model.number="form.qty" type="number" min="0" step="0.01" required /></label>
       <label>Цена <input v-model.number="form.unit_price" type="number" min="0" step="0.01" /></label>
-      <label>Warehouse item ID <input v-model.number="form.warehouse_item_id" type="number" min="1" /></label>
-      <label>JSON item_data <textarea v-model="form.dataText" rows="7" spellcheck="false" /></label>
+      <label>ID позиции склада <input v-model.number="form.warehouse_item_id" type="number" min="1" /></label>
+      <label>Данные позиции (JSON) <textarea v-model="form.dataText" rows="7" spellcheck="false" /></label>
       <footer class="actions">
         <button type="button" @click="$emit('close')">Отмена</button>
         <button type="submit">Добавить</button>

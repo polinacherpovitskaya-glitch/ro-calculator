@@ -15,7 +15,7 @@
     <td><input v-model.number="draft.qty" type="number" min="0" step="0.01" @change="save" /></td>
     <td><input v-model.number="draft.unit_price" type="number" min="0" step="0.01" @change="save" /></td>
     <td>{{ lineTotal }}</td>
-    <td><input v-model="warehouseId" type="number" min="1" placeholder="item id" @change="save" /></td>
+    <td><input v-model="warehouseId" type="number" min="1" placeholder="ID" @change="save" /></td>
     <td class="row-actions"><button type="button" @click="$emit('remove', item)">Удалить</button></td>
   </tr>
 </template>
