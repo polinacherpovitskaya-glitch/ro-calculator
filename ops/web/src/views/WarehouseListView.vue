@@ -304,8 +304,36 @@ button:disabled {
 
 table {
   width: 100%;
-  min-width: 62rem;
+  table-layout: fixed;
   border-collapse: collapse;
+}
+
+th:nth-child(1),
+td:nth-child(1) {
+  width: 8rem;
+}
+
+th:nth-child(2),
+td:nth-child(2) {
+  width: 22%;
+}
+
+th:nth-child(4),
+td:nth-child(4),
+th:nth-child(5),
+td:nth-child(5),
+th:nth-child(6),
+td:nth-child(6),
+th:nth-child(7),
+td:nth-child(7),
+th:nth-child(8),
+td:nth-child(8) {
+  width: 6.2rem;
+}
+
+th:nth-child(9),
+td:nth-child(9) {
+  width: 5.6rem;
 }
 
 th,
@@ -314,7 +342,7 @@ td {
   padding: 0.55rem 0.65rem;
   text-align: left;
   vertical-align: middle;
-  white-space: nowrap;
+  white-space: normal;
 }
 
 th {
@@ -325,15 +353,19 @@ th {
 }
 
 td a {
+  display: inline-block;
+  max-width: 100%;
   color: #1d4f91;
+  overflow-wrap: anywhere;
 }
 
 td input {
-  width: 10rem;
+  width: 100%;
+  min-width: 0;
 }
 
 .number-input {
-  width: 6rem;
+  max-width: 5.5rem;
 }
 
 .row-actions {

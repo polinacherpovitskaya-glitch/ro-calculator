@@ -1,6 +1,6 @@
 # Migration status
 
-Last update: 2026-05-22T13:00:31-03:00
+Last update: 2026-05-22T13:06:39-03:00
 Current block: Stage B test/reconciliation
 Current task within block: Visual polish pass for ops-staging
 Branch: stage-B-visual-polish
@@ -42,6 +42,7 @@ Tests: `cd ops/web && npm run build` passed locally. Previous deployed Stage B a
   - Localized remaining technical labels in the ops UI: warehouse movement types, stock receipt notices, blanks kind tabs, and order item warehouse/JSON labels no longer show raw internal names.
   - Fixed the new-order header state so `/orders/new` says `новый черновик` / `черновик не сохранён` instead of incorrectly claiming `сохранено` before the order exists.
   - Polished remaining staging copy: the home health card now says `API и база данных работают`, and warehouse baseline refresh notes display as Russian user-facing text without changing stored data.
+  - Tightened `/warehouse` and `/shipments` tables so columns fit the standard content width, long names wrap, and right-side row actions remain visible without horizontal scrolling.
   - Kept API/data behavior unchanged; this is a front-end parity pass only.
   - Verified `cd ops/web && npm run build` passes.
 - Stage B automated checks:
