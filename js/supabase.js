@@ -2564,14 +2564,22 @@ async function loadOrderItemsByOrderIds(orderIds = []) {
             return Number(a.item_number || 0) - Number(b.item_number || 0);
         });
 
-    if (_isStaticYandexMirrorRuntime()) {
+    const loadBootstrapFallback = async () => {
+        if (!_isStaticYandexMirrorRuntime()) return null;
         const bootstrapPayload = await _loadSameOriginBootstrap(['orderItems'], { timeoutMs: 15000 });
         if (bootstrapPayload && Array.isArray(bootstrapPayload.orderItems)) {
             setLocal(LOCAL_KEYS.orderItems, bootstrapPayload.orderItems);
             return localFallback(bootstrapPayload.orderItems);
         }
-        return localFallback();
-    }
+        return null;
+    };
+
+    const updateLocalOrderItemsCache = (rows = []) => {
+        const allItems = getLocal(LOCAL_KEYS.orderItems) || [];
+        const requestedIds = new Set(ids.map(id => String(id)));
+        const otherItems = allItems.filter(item => !requestedIds.has(String(Number(item.order_id))));
+        setLocal(LOCAL_KEYS.orderItems, [...otherItems, ...rows]);
+    };
 
     if (isSupabaseReady()) {
         try {
@@ -2584,16 +2592,23 @@ async function loadOrderItemsByOrderIds(orderIds = []) {
             if (error) {
                 console.error('loadOrderItemsByOrderIds error:', error);
                 if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
-                return localFallback();
+                const bootstrapFallback = await loadBootstrapFallback();
+                return bootstrapFallback || localFallback();
             }
-            return _hydrateOrderItemRows(data || []);
+            const rows = _hydrateOrderItemRows(data || []);
+            updateLocalOrderItemsCache(rows);
+            _clearLocalDatasetDirty(['orderItems']);
+            return localFallback(rows);
         } catch (error) {
             console.error('loadOrderItemsByOrderIds exception:', error);
             if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
-            return localFallback();
+            const bootstrapFallback = await loadBootstrapFallback();
+            return bootstrapFallback || localFallback();
         }
     }
 
+    const bootstrapFallback = await loadBootstrapFallback();
+    if (bootstrapFallback) return bootstrapFallback;
     return localFallback();
 }
 

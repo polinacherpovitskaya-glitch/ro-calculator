@@ -127,6 +127,25 @@ function createContext() {
                     const state = { eqValue: null };
                     return {
                         select() {
+                            const resolveRows = () => {
+                                context.__remoteCalls.push({ table, action: 'order' });
+                                if (context.__hangingTables.has(table)) {
+                                    return new Promise(() => {});
+                                }
+                                if (remoteError(table)) {
+                                    return Promise.resolve({ data: null, error: remoteError(table) });
+                                }
+                                if (missingTableError(table)) {
+                                    return Promise.resolve({ data: null, error: missingTableError(table) });
+                                }
+                                if (table === 'product_templates') {
+                                    return Promise.resolve({ data: context.__productTemplatesData, error: null });
+                                }
+                                if (Array.isArray(context.__tableRows[table])) {
+                                    return Promise.resolve({ data: context.__tableRows[table], error: null });
+                                }
+                                return Promise.resolve({ data: [], error: null });
+                            };
                             return {
                                 eq(_column, value) {
                                     state.eqValue = value;
@@ -178,24 +197,36 @@ function createContext() {
                                         },
                                     };
                                 },
+                                in(column, values) {
+                                    const selectedValues = new Set((Array.isArray(values) ? values : []).map(value => String(value)));
+                                    const chain = {
+                                        order() {
+                                            return chain;
+                                        },
+                                        then(resolve, reject) {
+                                            context.__remoteCalls.push({ table, action: 'selectIn', column, values });
+                                            if (context.__hangingTables.has(table)) {
+                                                return new Promise(() => {}).then(resolve, reject);
+                                            }
+                                            if (remoteError(table)) {
+                                                return Promise.resolve({ data: null, error: remoteError(table) }).then(resolve, reject);
+                                            }
+                                            if (missingTableError(table)) {
+                                                return Promise.resolve({ data: null, error: missingTableError(table) }).then(resolve, reject);
+                                            }
+                                            const rows = Array.isArray(context.__tableRows[table])
+                                                ? context.__tableRows[table].filter(item => selectedValues.has(String(item?.[column])))
+                                                : [];
+                                            return Promise.resolve({ data: rows, error: null }).then(resolve, reject);
+                                        },
+                                        catch(reject) {
+                                            return this.then(undefined, reject);
+                                        },
+                                    };
+                                    return chain;
+                                },
                                 order() {
-                                    context.__remoteCalls.push({ table, action: 'order' });
-                                    if (context.__hangingTables.has(table)) {
-                                        return new Promise(() => {});
-                                    }
-                                    if (remoteError(table)) {
-                                        return Promise.resolve({ data: null, error: remoteError(table) });
-                                    }
-                                    if (missingTableError(table)) {
-                                        return Promise.resolve({ data: null, error: missingTableError(table) });
-                                    }
-                                    if (table === 'product_templates') {
-                                        return Promise.resolve({ data: context.__productTemplatesData, error: null });
-                                    }
-                                    if (Array.isArray(context.__tableRows[table])) {
-                                        return Promise.resolve({ data: context.__tableRows[table], error: null });
-                                    }
-                                    return Promise.resolve({ data: [], error: null });
+                                    return resolveRows();
                                 },
                             };
                         },
@@ -1548,8 +1579,50 @@ async function main() {
         assert.equal(items[0].name, 'Bootstrap item');
         assert.equal(
             context.__remoteCalls.some(call => call.table === 'order_items'),
+            true,
+            'static Yandex mirror should try live order_items before falling back to bootstrap'
+        );
+    }
+
+    {
+        const context = createContext();
+        context.location = {
+            href: 'https://calc2.recycleobject.ru/#warehouse',
+            origin: 'https://calc2.recycleobject.ru',
+            protocol: 'https:',
+            hostname: 'calc2.recycleobject.ru',
+        };
+        context.window.location = context.location;
+        context.__tableRows.order_items = [{
+            id: 4001,
+            order_id: 7001,
+            item_number: 1,
+            product_name: 'Live item',
+            item_data: JSON.stringify({
+                item_type: 'hardware',
+                product_name: 'Live item',
+                quantity: 12,
+                hardware_source: 'warehouse',
+                hardware_warehouse_item_id: 501,
+            }),
+        }];
+        context.__bootstrapOrderItems = [{
+            id: 3001,
+            order_id: 7001,
+            item_number: 1,
+            product_name: 'Stale bootstrap item',
+        }];
+        runScript(context, 'js/supabase.js');
+        vm.runInContext(`initSupabase();`, context);
+
+        const items = JSON.parse(JSON.stringify(await vm.runInContext(`loadOrderItemsByOrderIds([7001])`, context)));
+        assert.equal(items.length, 1, 'static Yandex mirror should load order items from live proxy when available');
+        assert.equal(items[0].product_name, 'Live item');
+        assert.equal(items[0].hardware_warehouse_item_id, 501);
+        assert.equal(
+            context.__remoteCalls.some(call => call.table === 'fetch' && String(call.url).includes('orderItems')),
             false,
-            'static Yandex mirror should not call remote order_items by ids'
+            'fresh live order items should not be overwritten by static bootstrap'
         );
     }
 
