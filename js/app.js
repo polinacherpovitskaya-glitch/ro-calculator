@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v378';
+const APP_VERSION = 'v379';
 
 const App = {
     currentPage: 'orders',
@@ -14,6 +14,7 @@ const App = {
     _updateCheckMs: 120000,
     _onWindowFocus: null,
     _toastTimer: null,
+    _dbStatusListenerBound: false,
     employees: [],
     authAccounts: [],
     currentEmployeeId: null,
@@ -820,6 +821,8 @@ const App = {
         this.applyNavVisibility();
         this.primeRouteShell();
         this.syncQuickBugButton();
+        this.bindDatabaseStatusBanner();
+        this.syncDatabaseStatusBanner();
 
         // Boot from local cache/defaults first so weak networks do not leave the app
         // on a white screen before the main route can render.
@@ -863,6 +866,7 @@ const App = {
             }),
         ]).finally(() => {
             if (typeof window !== 'undefined' && window.__roSupabaseAccessProblem) {
+                this.syncDatabaseStatusBanner();
                 setTimeout(() => {
                     this.toast('Нет доступа к общей базе данных. Приложение использует локальные данные браузера, поэтому значения у сотрудников могут отличаться.');
                 }, 300);
@@ -1198,6 +1202,30 @@ const App = {
         el.textContent = '';
     },
 
+    // === SHARED DATABASE STATUS ===
+
+    bindDatabaseStatusBanner() {
+        if (this._dbStatusListenerBound || typeof window === 'undefined') return;
+        this._dbStatusListenerBound = true;
+        window.addEventListener('ro:shared-db-status', () => this.syncDatabaseStatusBanner());
+    },
+
+    syncDatabaseStatusBanner() {
+        const banner = document.getElementById('db-status-banner');
+        if (!banner || typeof window === 'undefined') return;
+        const accessProblem = window.__roSupabaseAccessProblem;
+        const connectionProblem = window.__roSharedDatabaseProblem;
+        if (accessProblem || connectionProblem) {
+            banner.textContent = accessProblem
+                ? 'Нет доступа к общей базе. Изменения могут остаться только на этом компьютере и не будут видны коллегам.'
+                : 'Нет связи с общей базой. Включите VPN или проверьте интернет: изменения могут остаться только на этом компьютере.';
+            banner.style.display = 'block';
+            return;
+        }
+        banner.textContent = '';
+        banner.style.display = 'none';
+    },
+
     // === UPDATE CHECKER ===
 
     startUpdateChecker() {
@@ -1356,6 +1384,7 @@ const App = {
             production_printing:  'Производство: Печать',
             production_hardware:  'Производство: Сборка',
             production_packaging: 'Производство: Упаковка',
+            production:           'Производство',      // backward compat
             in_production:        'Производство',      // backward compat
             delivery:             'Доставка',
             completed:            'Готово',
@@ -1398,6 +1427,7 @@ const Calculator = {
     _pkgBlanksCatalog: [],
     _blanksCatalogLoaded: false,
     _preserveStateOnNextInit: false,
+    _localDraftKey: 'ro_calc_calculator_unsaved_draft',
 
     async init() {
         // Ensure colors are loaded for color picker
@@ -1416,7 +1446,8 @@ const Calculator = {
         if (this._preserveStateOnNextInit) {
             this._preserveStateOnNextInit = false;
         } else {
-            this.resetForm();
+            this.resetForm({ preserveLocalDraft: true });
+            await this._restoreLocalDraftIfAvailable();
         }
         // Close mold picker & color picker on outside click
         if (!this._moldPickerBound) {
@@ -1433,18 +1464,20 @@ const Calculator = {
                 }
             });
             window.addEventListener('beforeunload', (e) => {
-                if (this._isDirty && this._autosaveTimer) {
-                    clearTimeout(this._autosaveTimer);
-                }
+                this._saveLocalDraftSnapshot('beforeunload');
+                if (this._isDirty && this._autosaveTimer) clearTimeout(this._autosaveTimer);
             });
+            window.addEventListener('pagehide', () => this._saveLocalDraftSnapshot('pagehide'));
         }
     },
 
-    resetForm() {
+    resetForm(options = {}) {
+        const preserveLocalDraft = options && options.preserveLocalDraft === true;
         // Cancel any pending autosave
         clearTimeout(this._autosaveTimer);
         this._isDirty = false;
         this._autosaving = false;
+        if (!preserveLocalDraft) this._clearLocalDraftSnapshot();
         this._invalidateWhPickerContext();
         this._clearCommittedWhDemandSnapshot();
 
@@ -1494,6 +1527,150 @@ const Calculator = {
         const statusEl = document.getElementById('calc-autosave-status');
         if (statusEl) statusEl.textContent = '';
         this._syncDiscountUi();
+    },
+
+    _getOrderFormSnapshot() {
+        const getValue = id => document.getElementById(id)?.value || '';
+        return {
+            order_name: getValue('calc-order-name'),
+            client_name: getValue('calc-client-name'),
+            manager_name: getValue('calc-manager-name'),
+            deadline_start: getValue('calc-deadline-start'),
+            deadline_end: getValue('calc-deadline-end'),
+            notes: getValue('calc-notes'),
+            delivery_address: getValue('calc-delivery-address'),
+            telegram: getValue('calc-telegram'),
+            crm_link: getValue('calc-crm-link'),
+            fintablo_link: getValue('calc-fintablo-link'),
+            client_legal_name: getValue('calc-client-legal-name'),
+            client_inn: getValue('calc-client-inn'),
+            client_legal_address: getValue('calc-client-legal-address'),
+            client_bank_name: getValue('calc-client-bank-name'),
+            client_bank_account: getValue('calc-client-bank-account'),
+            client_bank_bik: getValue('calc-client-bank-bik'),
+        };
+    },
+
+    _hasAnyDraftData(snapshot = null) {
+        const orderFields = snapshot || this._getOrderFormSnapshot();
+        return Object.values(orderFields).some(value => String(value || '').trim())
+            || this.items.some(i => this._isMeaningfulProductItem(i))
+            || this.hardwareItems.some(hw => hw._from_template || hw.name || hw.warehouse_item_id || hw.china_item_id || (parseFloat(hw.qty) || 0) > 0)
+            || this.packagingItems.some(pkg => pkg.name || pkg.warehouse_item_id || pkg.china_item_id || (parseFloat(pkg.qty) || 0) > 0)
+            || this.pendants.some(pnd => pnd.name || pnd.template_id || (parseFloat(pnd.quantity) || 0) > 0)
+            || (this.extraCosts || []).some(ec => ec.name || (parseFloat(ec.amount) || 0) > 0);
+    },
+
+    _saveLocalDraftSnapshot(reason = 'dirty') {
+        try {
+            if (typeof localStorage === 'undefined' || !document.getElementById('calc-order-name')) return;
+            const orderFields = this._getOrderFormSnapshot();
+            if (!this._hasAnyDraftData(orderFields)) return;
+            const payload = {
+                app_version: APP_VERSION,
+                saved_at: new Date().toISOString(),
+                reason,
+                editing_order_id: this._getCurrentEditingOrderId(),
+                current_order_status: this._currentOrderStatus || 'draft',
+                order_fields: orderFields,
+                discount_mode: this.discountMode,
+                discount_value: this.discountValue,
+                items: this.items,
+                hardwareItems: this.hardwareItems,
+                packagingItems: this.packagingItems,
+                extraCosts: this.extraCosts,
+                pendants: this.pendants,
+            };
+            localStorage.setItem(this._localDraftKey, JSON.stringify(payload));
+        } catch (e) {
+            console.warn('[Calculator] local draft snapshot failed:', e);
+        }
+    },
+
+    _clearLocalDraftSnapshot() {
+        try {
+            if (typeof localStorage !== 'undefined') localStorage.removeItem(this._localDraftKey);
+        } catch (e) { /* ignore */ }
+    },
+
+    async _restoreLocalDraftIfAvailable() {
+        let payload = null;
+        try {
+            const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(this._localDraftKey) : '';
+            if (!raw) return false;
+            payload = JSON.parse(raw);
+        } catch (e) {
+            this._clearLocalDraftSnapshot();
+            return false;
+        }
+
+        const savedAt = Date.parse(payload?.saved_at || '');
+        if (!savedAt || Date.now() - savedAt > 72 * 60 * 60 * 1000) {
+            this._clearLocalDraftSnapshot();
+            return false;
+        }
+
+        const fields = payload.order_fields || {};
+        Object.entries({
+            'calc-order-name': fields.order_name,
+            'calc-client-name': fields.client_name,
+            'calc-manager-name': fields.manager_name,
+            'calc-deadline-start': fields.deadline_start,
+            'calc-deadline-end': fields.deadline_end,
+            'calc-notes': fields.notes,
+            'calc-delivery-address': fields.delivery_address,
+            'calc-telegram': fields.telegram,
+            'calc-crm-link': fields.crm_link,
+            'calc-fintablo-link': fields.fintablo_link,
+            'calc-client-legal-name': fields.client_legal_name,
+            'calc-client-inn': fields.client_inn,
+            'calc-client-legal-address': fields.client_legal_address,
+            'calc-client-bank-name': fields.client_bank_name,
+            'calc-client-bank-account': fields.client_bank_account,
+            'calc-client-bank-bik': fields.client_bank_bik,
+        }).forEach(([id, value]) => {
+            const el = document.getElementById(id);
+            if (el) el.value = value || '';
+        });
+
+        this.items = Array.isArray(payload.items) ? payload.items : [];
+        this.hardwareItems = Array.isArray(payload.hardwareItems) ? payload.hardwareItems : [];
+        this.packagingItems = Array.isArray(payload.packagingItems) ? payload.packagingItems : [];
+        this.extraCosts = Array.isArray(payload.extraCosts) ? payload.extraCosts : [];
+        this.pendants = Array.isArray(payload.pendants) ? payload.pendants : [];
+        this.discountMode = (payload.discount_mode === 'amount' || payload.discount_mode === 'percent') ? payload.discount_mode : 'none';
+        this.discountValue = this._parseDiscountValue(payload.discount_value || 0);
+        this._currentOrderStatus = payload.current_order_status || 'draft';
+
+        const restoredOrderId = Number(payload.editing_order_id || 0) || null;
+        if (restoredOrderId) {
+            App.editingOrderId = restoredOrderId;
+            localStorage.setItem('ro_calc_editing_order_id', String(restoredOrderId));
+        }
+
+        document.getElementById('calc-items-container').innerHTML = '';
+        document.getElementById('calc-hardware-list').innerHTML = '';
+        document.getElementById('calc-packaging-list').innerHTML = '';
+        this.items.forEach((item, idx) => {
+            item.item_number = item.item_number || idx + 1;
+            if (!Array.isArray(item.printings)) item.printings = [];
+            if (!Array.isArray(item.colors)) item.colors = [];
+            this.renderItemBlock(idx);
+        });
+        if (this.hardwareItems.some(hw => hw.source === 'warehouse')) await this._ensureWhPickerData();
+        this.rerenderAllHardware();
+        this.rerenderAllPackaging();
+        this.renderExtraCosts();
+        if (typeof Pendant !== 'undefined') Pendant.renderAllCards();
+        this._updateItemsEmptyState();
+        this._syncDiscountUi();
+        this.recalculate();
+        this._isDirty = true;
+
+        const statusEl = document.getElementById('calc-autosave-status');
+        if (statusEl) statusEl.textContent = 'Восстановлен несохранённый черновик';
+        App.toast('Восстановила черновик после обновления страницы');
+        return true;
     },
 
     _parseDiscountValue(value) {
@@ -5033,6 +5210,7 @@ const Calculator = {
 
     scheduleAutosave() {
         this._isDirty = true;
+        this._saveLocalDraftSnapshot('dirty');
         clearTimeout(this._autosaveTimer);
         this._autosaveTimer = setTimeout(() => {
             this._doAutosave().catch(e => console.error('[autosave] timer error:', e));
@@ -5066,6 +5244,7 @@ const Calculator = {
             const summary = calculateOrderSummary(this.items, this.hardwareItems, this.packagingItems, this.extraCosts, App.params || {}, this.pendants, orderAdjustments);
             const hadEditingOrderId = !!this._getCurrentEditingOrderId();
             const orderIdForSave = this._ensureEditingOrderId();
+            this._saveLocalDraftSnapshot('autosave-pending');
 
             const order = {
                 id: orderIdForSave,
@@ -5127,6 +5306,7 @@ const Calculator = {
                 const timeStr = String(now.getHours()).padStart(2,'0') + ':' + String(now.getMinutes()).padStart(2,'0');
                 const statusEl = document.getElementById('calc-autosave-status');
                 if (statusEl) statusEl.textContent = 'Черновик сохранён • ' + timeStr;
+                this._clearLocalDraftSnapshot();
             }
         } catch (e) {
             console.error('[autosave] error:', e);
@@ -5299,6 +5479,7 @@ const Calculator = {
         const summary = calculateOrderSummary(this.items, this.hardwareItems, this.packagingItems, this.extraCosts, App.params || {}, this.pendants, orderAdjustments);
         const isEdit = !!this._getCurrentEditingOrderId();
         const orderIdForSave = this._ensureEditingOrderId();
+        this._saveLocalDraftSnapshot('manual-save-pending');
 
         const order = {
             id: orderIdForSave,
@@ -5379,6 +5560,7 @@ const Calculator = {
             App.editingOrderId = orderId;
             localStorage.setItem('ro_calc_editing_order_id', String(orderId));
             this._isDirty = false;
+            this._clearLocalDraftSnapshot();
             const statusEl = document.getElementById('calc-autosave-status');
             if (statusEl) statusEl.textContent = 'Сохранено';
 
@@ -5901,11 +6083,11 @@ const Calculator = {
         // Render per-item hw/pkg (loaded after items, so re-render now)
         // Also clear builtin_hw fields if real per-item hw exists (prevent double-counting)
         this.items.forEach((item, i) => {
-            const hasTemplateHw = this.hardwareItems.some(hw => hw._from_template && hw.parent_item_index === i);
+            const hasPerItemHw = this.hardwareItems.some(hw => hw.parent_item_index === i);
             const tpl = item.template_id && Array.isArray(App.templates)
                 ? App.templates.find(t => String(t.id) === String(item.template_id))
                 : null;
-            if (hasTemplateHw && !this._isTemplateHardwareProductNfc(tpl)) {
+            if (hasPerItemHw && !this._isTemplateHardwareProductNfc(tpl)) {
                 item.builtin_hw_name = '';
                 item.builtin_hw_price = 0;
                 item.builtin_hw_delivery_total = 0;

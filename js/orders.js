@@ -18,7 +18,7 @@ const STATUS_OPTIONS = [
 
 const DRAFT_STATUSES = ['draft', 'calculated'];
 const SAMPLE_STATUSES = ['sample'];
-const PRODUCTION_STATUSES = ['production_casting', 'production_printing', 'production_hardware', 'production_packaging', 'in_production', 'delivery'];
+const PRODUCTION_STATUSES = ['production', 'production_casting', 'production_printing', 'production_hardware', 'production_packaging', 'in_production', 'delivery'];
 const ACTIVE_STATUSES = [...SAMPLE_STATUSES, ...PRODUCTION_STATUSES];
 const SKY_STATUSES = [...DRAFT_STATUSES, ...ACTIVE_STATUSES, 'completed', 'cancelled'];
 
@@ -56,6 +56,7 @@ const ORDERS_SECTIONS = {
 };
 
 const PRODUCTION_SUBSTAGES = {
+    production: 'В производстве',
     production_casting: 'Выливание формы',
     production_printing: 'Печать / нанесение',
     production_hardware: 'Сборка фурнитуры',
@@ -1108,7 +1109,7 @@ const Orders = {
     },
 
     _isConsumedStatus(status) {
-        return ['production_casting', 'production_hardware', 'production_packaging', 'in_production', 'delivery', 'completed'].includes(status);
+        return ['production', 'production_casting', 'production_hardware', 'production_packaging', 'in_production', 'delivery', 'completed'].includes(status);
     },
 
     _collectWarehouseDemand(items, options) {

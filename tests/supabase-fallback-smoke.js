@@ -938,6 +938,7 @@ async function main() {
                 hardware_assembly_speed: 360,
                 hardware_price_per_unit: 7.86,
                 sell_price_hardware: 40,
+                hardware_from_template: true,
                 updated_at: '2026-05-13T20:05:00.000Z',
             }, {
                 id: 9101103,
@@ -953,6 +954,7 @@ async function main() {
                 hardware_assembly_speed: 360,
                 hardware_price_per_unit: 1.02,
                 sell_price_hardware: 30,
+                hardware_from_template: true,
                 updated_at: '2026-05-13T20:05:00.000Z',
             }]);
         `, context);

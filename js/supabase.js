@@ -69,8 +69,58 @@ function _markSupabaseAccessProblem(error) {
     supabaseAccessWarningShown = true;
     if (typeof window !== 'undefined') {
         window.__roSupabaseAccessProblem = String(error?.message || error || 'shared database unavailable');
+        _notifySharedDatabaseProblem(error);
     }
     console.error('[Supabase] Shared database unavailable, falling back to local browser data:', error);
+}
+
+function _isSharedDatabaseConnectivityError(error) {
+    const message = String(error?.message || error || '').toLowerCase();
+    const code = String(error?.code || error?.status || '').toLowerCase();
+    return _isSupabaseAccessError(error)
+        || code === '502'
+        || code === '503'
+        || code === '504'
+        || code === 'timeout'
+        || message.includes('timeout')
+        || message.includes('bad gateway')
+        || message.includes('response code 502')
+        || message.includes('failed to fetch')
+        || message.includes('networkerror')
+        || message.includes('network error')
+        || message.includes('load failed');
+}
+
+function _notifySharedDatabaseProblem(error) {
+    if (typeof window === 'undefined') return;
+    const message = String(error?.message || error || 'shared database unavailable');
+    window.__roSharedDatabaseProblem = message;
+    try {
+        window.dispatchEvent(new CustomEvent('ro:shared-db-status', {
+            detail: { ok: false, message },
+        }));
+    } catch (e) { /* ignore */ }
+}
+
+function _clearSharedDatabaseProblem() {
+    if (typeof window === 'undefined') return;
+    if (!window.__roSharedDatabaseProblem) return;
+    delete window.__roSharedDatabaseProblem;
+    try {
+        window.dispatchEvent(new CustomEvent('ro:shared-db-status', {
+            detail: { ok: true },
+        }));
+    } catch (e) { /* ignore */ }
+}
+
+function _markSharedDatabaseProblem(error) {
+    if (_isSupabaseAccessError(error)) {
+        _markSupabaseAccessProblem(error);
+        return;
+    }
+    if (!_isSharedDatabaseConnectivityError(error)) return;
+    _notifySharedDatabaseProblem(error);
+    console.warn('[Supabase] Shared database connection failed. User changes may stay local until the connection recovers:', error);
 }
 
 function initSupabase() {
@@ -1972,7 +2022,6 @@ function _getOrderItemSemanticDedupKey(item) {
         _orderItemNumberKey(item?.[`${prefix}_delivery_per_unit`]),
         _orderItemNumberKey(item?.[`${prefix}_delivery_total`]),
         _orderItemNumberKey(item?.[`sell_price_${prefix}`]),
-        _orderItemBoolKey(item?.[`${prefix}_from_template`]),
     ].join(':');
 }
 
@@ -2101,7 +2150,7 @@ async function saveOrder(order, items = []) {
             .from('orders').select('id,status,deleted_at').eq('id', orderId).maybeSingle());
         if (existingError && existingError.code !== 'PGRST116') {
             console.error('saveOrder lookup error:', existingError);
-            if (_isSupabaseAccessError(existingError)) _markSupabaseAccessProblem(existingError);
+            _markSharedDatabaseProblem(existingError);
             throw new Error('Не удалось проверить заказ перед сохранением: ' + (existingError.message || existingError.code || 'ошибка базы'));
         }
 
@@ -2133,7 +2182,7 @@ async function saveOrder(order, items = []) {
                 .eq('id', orderId));
             if (error) {
                 console.error('updateOrder error:', error);
-                if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
+                _markSharedDatabaseProblem(error);
                 throw new Error('Не удалось обновить заказ: ' + (error.message || error.code || 'ошибка базы'));
             }
         } else {
@@ -2145,7 +2194,7 @@ async function saveOrder(order, items = []) {
                 .insert(orderData));
             if (error) {
                 console.error('insertOrder error:', error);
-                if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
+                _markSharedDatabaseProblem(error);
                 throw new Error('Не удалось создать заказ: ' + (error.message || error.code || 'ошибка базы'));
             }
         }
@@ -2165,7 +2214,7 @@ async function saveOrder(order, items = []) {
                 .upsert(rows, { onConflict: 'id' }));
             if (upsertItemsError) {
                 console.error('upsertOrderItems error:', upsertItemsError);
-                if (_isSupabaseAccessError(upsertItemsError)) _markSupabaseAccessProblem(upsertItemsError);
+                _markSharedDatabaseProblem(upsertItemsError);
                 throw new Error('Не удалось сохранить состав заказа: ' + (upsertItemsError.message || upsertItemsError.code || 'ошибка базы'));
             }
 
@@ -2176,7 +2225,7 @@ async function saveOrder(order, items = []) {
                 .eq('order_id', orderId));
             if (listItemsError) {
                 console.error('listOrderItemsForCleanup error:', listItemsError);
-                if (_isSupabaseAccessError(listItemsError)) _markSupabaseAccessProblem(listItemsError);
+                _markSharedDatabaseProblem(listItemsError);
                 throw new Error('Заказ сохранён, но не удалось проверить старые позиции: ' + (listItemsError.message || listItemsError.code || 'ошибка базы'));
             }
 
@@ -2190,7 +2239,7 @@ async function saveOrder(order, items = []) {
                     .eq('id', staleItemId));
                 if (deleteStaleItemError) {
                     console.error('deleteStaleOrderItem error:', deleteStaleItemError);
-                    if (_isSupabaseAccessError(deleteStaleItemError)) _markSupabaseAccessProblem(deleteStaleItemError);
+                    _markSharedDatabaseProblem(deleteStaleItemError);
                     throw new Error('Заказ сохранён, но не удалось очистить старую позицию: ' + (deleteStaleItemError.message || deleteStaleItemError.code || 'ошибка базы'));
                 }
             }
@@ -2203,7 +2252,7 @@ async function saveOrder(order, items = []) {
                     .eq('order_id', orderId));
                 if (listExistingItemsError) {
                     console.error('listExistingOrderItemsBeforeEmptySave error:', listExistingItemsError);
-                    if (_isSupabaseAccessError(listExistingItemsError)) _markSupabaseAccessProblem(listExistingItemsError);
+                    _markSharedDatabaseProblem(listExistingItemsError);
                     throw new Error('Заказ сохранён, но не удалось безопасно проверить состав перед пустым сохранением: ' + (listExistingItemsError.message || listExistingItemsError.code || 'ошибка базы'));
                 }
 
@@ -2225,7 +2274,7 @@ async function saveOrder(order, items = []) {
                     .eq('order_id', orderId));
                 if (deleteItemsError) {
                     console.error('deleteOrderItems error:', deleteItemsError);
-                    if (_isSupabaseAccessError(deleteItemsError)) _markSupabaseAccessProblem(deleteItemsError);
+                    _markSharedDatabaseProblem(deleteItemsError);
                     throw new Error('Не удалось обновить состав заказа: ' + (deleteItemsError.message || deleteItemsError.code || 'ошибка базы'));
                 }
             }
@@ -7298,10 +7347,7 @@ function _isWorkModuleMissingTableError(error) {
 }
 
 function _isTransientWorkModuleRemoteError(error) {
-    const message = String(error?.message || error || '').toLowerCase();
-    return message.includes('timeout')
-        || message.includes('bad gateway')
-        || message.includes('response code 502');
+    return _isSharedDatabaseConnectivityError(error);
 }
 
 function _markWorkModuleRemoteUnavailable(error) {
@@ -7347,10 +7393,17 @@ function _remoteTimeoutError(label, timeoutMs) {
 
 async function _withRemoteTimeout(kind, label, executor) {
     const timeoutMs = _remoteTimeoutMs(kind);
-    return Promise.race([
-        Promise.resolve().then(executor),
-        new Promise((_, reject) => setTimeout(() => reject(_remoteTimeoutError(label, timeoutMs)), timeoutMs)),
-    ]);
+    try {
+        const result = await Promise.race([
+            Promise.resolve().then(executor),
+            new Promise((_, reject) => setTimeout(() => reject(_remoteTimeoutError(label, timeoutMs)), timeoutMs)),
+        ]);
+        _clearSharedDatabaseProblem();
+        return result;
+    } catch (error) {
+        _markSharedDatabaseProblem(error);
+        throw error;
+    }
 }
 
 async function _loadJsonSetting(settingKey, fallbackValue) {
