@@ -2113,6 +2113,12 @@ async function main() {
         `, context);
 
         assert.match(message, /Не удалось проверить заказ перед сохранением/, 'saveOrder should reject instead of silently returning null');
+        const cachedOrders = JSON.parse(JSON.stringify(vm.runInContext('getLocal(LOCAL_KEYS.orders) || []', context)));
+        assert.equal(cachedOrders.length, 1, 'failed remote lookup should keep an emergency local order copy');
+        assert.equal(cachedOrders[0].order_name, 'Broken save', 'emergency local order copy should keep the order payload');
+        const dirtyMap = JSON.parse(context.localStorage.getItem('ro_calc_dirty_datasets') || '{}');
+        assert.ok(dirtyMap.orders, 'failed remote lookup should mark local orders dirty');
+        assert.ok(dirtyMap.orderItems, 'failed remote lookup should mark local order items dirty');
     }
 
     {
@@ -2216,6 +2222,13 @@ async function main() {
         assert.equal(context.__tableRows.order_items.length, 1, 'failed item upsert must not wipe existing order items');
         assert.equal(context.__tableRows.order_items[0].id, oldItemId, 'old saved item should remain after failed item upsert');
         assert.equal(context.__remoteCalls.some(call => call.table === 'order_items' && call.action === 'delete'), false, 'saveOrder must not delete old items before new items are saved');
+        const cachedOrders = JSON.parse(JSON.stringify(vm.runInContext('getLocal(LOCAL_KEYS.orders) || []', context)));
+        const cachedItems = JSON.parse(JSON.stringify(vm.runInContext('getLocal(LOCAL_KEYS.orderItems) || []', context)));
+        assert.equal(cachedOrders.some(order => String(order.id) === String(orderId)), true, 'failed item upsert should keep an emergency local order copy');
+        assert.equal(cachedItems.some(item => String(item.order_id) === String(orderId) && item.product_name === 'Новая позиция'), true, 'failed item upsert should keep attempted items in local backup');
+        const dirtyMap = JSON.parse(context.localStorage.getItem('ro_calc_dirty_datasets') || '{}');
+        assert.ok(dirtyMap.orders, 'failed item upsert should mark local orders dirty');
+        assert.ok(dirtyMap.orderItems, 'failed item upsert should mark local order items dirty');
     }
 
     {
