@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v380';
+const APP_VERSION = 'v381';
 
 const App = {
     currentPage: 'orders',
@@ -13,6 +13,7 @@ const App = {
     _updateCheckTimer: null,
     _updateCheckMs: 120000,
     _onWindowFocus: null,
+    _onDirtySyncFocus: null,
     _toastTimer: null,
     _dbStatusListenerBound: false,
     employees: [],
@@ -854,6 +855,7 @@ const App = {
 
         this.handleRoute();
         this.startUpdateChecker();
+        this.startDirtyOrderSync();
         this.scheduleWarmDataPrefetch(this.currentPage);
 
         Promise.allSettled([
@@ -1215,15 +1217,35 @@ const App = {
         if (!banner || typeof window === 'undefined') return;
         const accessProblem = window.__roSupabaseAccessProblem;
         const connectionProblem = window.__roSharedDatabaseProblem;
-        if (accessProblem || connectionProblem) {
+        const localUnsynced = window.__roLocalUnsyncedChanges;
+        if (accessProblem || connectionProblem || localUnsynced) {
             banner.textContent = accessProblem
                 ? 'Нет доступа к общей базе. Изменения могут остаться только на этом компьютере и не будут видны коллегам.'
-                : 'Нет связи с общей базой. Включите VPN или проверьте интернет: изменения могут остаться только на этом компьютере.';
+                : connectionProblem
+                    ? 'Нет связи с общей базой. Включите VPN или проверьте интернет: изменения могут остаться только на этом компьютере.'
+                    : 'Есть локальные изменения, которые ещё не видны коллегам. Откройте сайт со связью с общей базой и дождитесь синхронизации.';
             banner.style.display = 'block';
             return;
         }
         banner.textContent = '';
         banner.style.display = 'none';
+    },
+
+    startDirtyOrderSync() {
+        if (typeof syncDirtyLocalOrders !== 'function') return;
+        const run = () => {
+            syncDirtyLocalOrders({ silent: false }).then(result => {
+                if (result && result.synced && typeof Orders !== 'undefined' && Orders && typeof Orders.loadList === 'function' && this.currentPage === 'orders') {
+                    Orders.loadList().catch(() => {});
+                }
+                this.syncDatabaseStatusBanner();
+            }).catch(() => this.syncDatabaseStatusBanner());
+        };
+        setTimeout(run, 1200);
+        if (!this._onDirtySyncFocus && typeof window !== 'undefined') {
+            this._onDirtySyncFocus = run;
+            window.addEventListener('focus', this._onDirtySyncFocus);
+        }
     },
 
     // === UPDATE CHECKER ===

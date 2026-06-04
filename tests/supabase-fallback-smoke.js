@@ -2557,6 +2557,44 @@ async function main() {
         assert.equal(cachedOrders[0].status, 'production_casting', 'older calc2 bootstrap must not overwrite a newer local status after refresh');
     }
 
+    {
+        const context = createContext();
+        const orderId = 1780600000001;
+        runScript(context, 'js/supabase.js');
+        vm.runInContext(`
+            initSupabase();
+            setLocal(LOCAL_KEYS.orders, [{
+                id: ${orderId},
+                order_name: 'Яндекс юла',
+                client_name: 'Яндекс',
+                status: 'production_casting',
+                created_at: '2026-06-04T08:20:00.000Z',
+                updated_at: '2026-06-04T08:47:00.000Z'
+            }]);
+            setLocal(LOCAL_KEYS.orderItems, [{
+                id: '${orderId}-product-1',
+                order_id: ${orderId},
+                item_number: 1,
+                item_type: 'product',
+                product_name: 'брелок',
+                quantity: 100,
+                created_at: '2026-06-04T08:20:00.000Z',
+                updated_at: '2026-06-04T08:47:00.000Z'
+            }]);
+            localStorage.setItem('ro_calc_dirty_datasets', JSON.stringify({ orders: Date.now(), orderItems: Date.now() }));
+        `, context);
+
+        const result = JSON.parse(JSON.stringify(await vm.runInContext(`syncDirtyLocalOrders({ silent: true })`, context)));
+
+        assert.equal(result.synced, true, 'dirty local order sync should report success');
+        assert.equal(result.count, 1, 'dirty local order sync should count synced orders');
+        assert.equal(context.__tableRows.orders.some(order => String(order.id) === String(orderId)), true, 'dirty local order should be upserted to remote orders');
+        assert.equal(context.__tableRows.order_items.some(item => String(item.order_id) === String(orderId)), true, 'dirty local order items should be upserted to remote order_items');
+        const dirtyMap = JSON.parse(context.localStorage.getItem('ro_calc_dirty_datasets') || '{}');
+        assert.equal(dirtyMap.orders, undefined, 'successful dirty order sync should clear orders dirty flag');
+        assert.equal(dirtyMap.orderItems, undefined, 'successful dirty order sync should clear orderItems dirty flag');
+    }
+
     console.log('supabase fallback smoke checks passed');
 }
 

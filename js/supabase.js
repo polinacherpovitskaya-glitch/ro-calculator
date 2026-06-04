@@ -40,6 +40,7 @@ let _authAccountsLastSyncAt = 0;
 let _employeesRefreshPromise = null;
 let _employeesLastSyncAt = 0;
 let _ordersRefreshPromise = null;
+let _dirtyOrdersSyncPromise = null;
 let _ordersLastSyncAt = 0;
 let _empExtraRefreshPromise = null;
 let _settingsRefreshPromise = null;
@@ -123,6 +124,22 @@ function _markSharedDatabaseProblem(error) {
     console.warn('[Supabase] Shared database connection failed. User changes may stay local until the connection recovers:', error);
 }
 
+function _syncLocalUnsyncedWindowFlag(dirtyMap = null) {
+    if (typeof window === 'undefined') return;
+    const map = dirtyMap || _readLocalDirtyDatasets();
+    const hasUnsynced = Object.keys(map || {}).length > 0;
+    if (hasUnsynced) {
+        window.__roLocalUnsyncedChanges = true;
+    } else {
+        delete window.__roLocalUnsyncedChanges;
+    }
+    try {
+        window.dispatchEvent(new CustomEvent('ro:shared-db-status', {
+            detail: { ok: !hasUnsynced, localUnsynced: hasUnsynced },
+        }));
+    } catch (e) { /* ignore */ }
+}
+
 function initSupabase() {
     if (_isFileProtocolRuntime()) {
         if (typeof window !== 'undefined') {
@@ -142,6 +159,7 @@ function initSupabase() {
     supabaseClient = supabase.createClient(runtimeSupabaseUrl, SUPABASE_ANON_KEY);
     // In shared-db mode localStorage is only a cache, so compact it aggressively on boot.
     _cleanupLocalStorage({ aggressive: true });
+    _syncLocalUnsyncedWindowFlag();
     return supabaseClient;
 }
 
@@ -2359,6 +2377,110 @@ function _saveOrderLocally(order, items) {
     } catch (e) { console.warn('Local backup save error:', e); }
 }
 
+function _isRemoteOrderNewer(remoteOrder, localOrder) {
+    const remoteUpdated = Date.parse(remoteOrder?.updated_at || remoteOrder?.created_at || '') || 0;
+    const localUpdated = Date.parse(localOrder?.updated_at || localOrder?.created_at || '') || 0;
+    return remoteUpdated > localUpdated + 1000;
+}
+
+async function syncDirtyLocalOrders(options = {}) {
+    if (!isSupabaseReady()) {
+        _syncLocalUnsyncedWindowFlag();
+        return { synced: false, reason: 'remote-unavailable', count: 0 };
+    }
+    const dirtyMap = _readLocalDirtyDatasets();
+    if (!dirtyMap.orders && !dirtyMap.orderItems) {
+        _syncLocalUnsyncedWindowFlag(dirtyMap);
+        return { synced: false, reason: 'clean', count: 0 };
+    }
+    if (_dirtyOrdersSyncPromise) return _dirtyOrdersSyncPromise;
+
+    _dirtyOrdersSyncPromise = (async () => {
+        const localOrders = (getLocal(LOCAL_KEYS.orders) || [])
+            .filter(order => _normalizeOrderId(order?.id));
+        const localItems = getLocal(LOCAL_KEYS.orderItems) || [];
+        if (localOrders.length === 0) {
+            _clearLocalDatasetDirty(['orders', 'orderItems']);
+            return { synced: false, reason: 'empty-local', count: 0 };
+        }
+
+        let syncedCount = 0;
+        let skippedNewerRemote = 0;
+
+        for (const order of localOrders) {
+            const orderId = _normalizeOrderId(order.id);
+            const { data: existing, error: existingError } = await _withRemoteTimeout('write', 'sync dirty order lookup', () => supabaseClient
+                .from('orders')
+                .select('id,updated_at,created_at,status,deleted_at')
+                .eq('id', orderId)
+                .maybeSingle());
+            if (existingError && existingError.code !== 'PGRST116') {
+                _markSharedDatabaseProblem(existingError);
+                throw existingError;
+            }
+            if (existing && _isRemoteOrderNewer(existing, order)) {
+                skippedNewerRemote += 1;
+                continue;
+            }
+
+            const orderData = _filterForDB(order, _ORDER_COLS, 'calculator_data', _ORDER_FIELD_MAP);
+            orderData.id = orderId;
+            orderData.updated_at = orderData.updated_at || new Date().toISOString();
+            orderData.calculator_data = _syncOrderStatusSnapshot(
+                orderData.calculator_data,
+                orderData.status || order.status || 'draft',
+                orderData.updated_at,
+            );
+
+            const { error: orderError } = await _withRemoteTimeout('write', 'sync dirty order upsert', () => supabaseClient
+                .from('orders')
+                .upsert(orderData, { onConflict: 'id' }));
+            if (orderError) {
+                _markSharedDatabaseProblem(orderError);
+                throw orderError;
+            }
+
+            const itemsForOrder = localItems.filter(item => String(_normalizeOrderId(item.order_id)) === String(orderId));
+            if (itemsForOrder.length > 0) {
+                const nowIso = new Date().toISOString();
+                const rows = itemsForOrder.map((item, index) => {
+                    const filtered = _sanitizeOrderItemRowForDB(_filterForDB(item, _ITEM_COLS, 'item_data', null));
+                    filtered.order_id = orderId;
+                    filtered.id = item.id || _buildStableOrderItemId(orderId, item, index + 1);
+                    filtered.created_at = item.created_at || nowIso;
+                    filtered.updated_at = item.updated_at || nowIso;
+                    return filtered;
+                });
+                const { error: itemsError } = await _withRemoteTimeout('write', 'sync dirty order items', () => supabaseClient
+                    .from('order_items')
+                    .upsert(rows, { onConflict: 'id' }));
+                if (itemsError) {
+                    _markSharedDatabaseProblem(itemsError);
+                    throw itemsError;
+                }
+            }
+
+            syncedCount += 1;
+        }
+
+        _clearLocalDatasetDirty(['orders', 'orderItems']);
+        _ordersLastSyncAt = 0;
+        if (!options.silent && syncedCount > 0 && typeof App !== 'undefined' && App && typeof App.toast === 'function') {
+            App.toast(`Синхронизировано локальных заказов: ${syncedCount}`);
+        }
+        _dispatchDataRefreshEvent('ro:orders-refreshed', { syncedDirtyOrders: syncedCount, skippedNewerRemote });
+        return { synced: syncedCount > 0, count: syncedCount, skippedNewerRemote };
+    })().catch(error => {
+        _markSharedDatabaseProblem(error);
+        _syncLocalUnsyncedWindowFlag();
+        return { synced: false, reason: error?.message || 'sync failed', count: 0, error };
+    }).finally(() => {
+        _dirtyOrdersSyncPromise = null;
+    });
+
+    return _dirtyOrdersSyncPromise;
+}
+
 async function loadOrders(filters = {}) {
     const loadLocalOrders = () => {
         let orders = getLocal(LOCAL_KEYS.orders) || [];
@@ -2420,7 +2542,9 @@ async function loadOrders(filters = {}) {
 
     if (localFallback.length > 0 && !shouldRefreshStaticOrderItems) {
         _setDataLoadMeta('orders', { source: 'local' });
-        if (!_isLocalDatasetDirty('orders') && _shouldRefreshWarmCache(_ordersLastSyncAt)) {
+        if (_isLocalDatasetDirty('orders') || _isLocalDatasetDirty('orderItems')) {
+            syncDirtyLocalOrders({ silent: true }).catch(() => {});
+        } else if (_shouldRefreshWarmCache(_ordersLastSyncAt)) {
             refreshOrdersWarmCache().catch(() => {});
         }
         return localFallback;
@@ -4597,6 +4721,7 @@ function _markLocalDatasetDirty(keys = []) {
     normalizedKeys.forEach(key => { dirtyMap[key] = now; });
     _writeLocalDirtyDatasets(dirtyMap);
     _invalidateBootstrapCache(normalizedKeys);
+    _syncLocalUnsyncedWindowFlag(dirtyMap);
 }
 
 function _clearLocalDatasetDirty(keys = []) {
@@ -4612,7 +4737,10 @@ function _clearLocalDatasetDirty(keys = []) {
             changed = true;
         }
     });
-    if (changed) _writeLocalDirtyDatasets(dirtyMap);
+    if (changed) {
+        _writeLocalDirtyDatasets(dirtyMap);
+        _syncLocalUnsyncedWindowFlag(dirtyMap);
+    }
 }
 
 function _isLocalDatasetDirty(key) {
