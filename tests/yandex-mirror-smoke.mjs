@@ -182,8 +182,14 @@ async function main() {
         && typeof Warehouse.showNewShipmentForm === 'function') {
         Warehouse.setView('shipments', { force: true });
         await new Promise(resolve => setTimeout(resolve, 500));
-        Warehouse.showNewShipmentForm();
-        await new Promise(resolve => setTimeout(resolve, 3_000));
+        await Promise.race([
+          Warehouse.showNewShipmentForm(),
+          new Promise(resolve => setTimeout(resolve, 20_000)),
+        ]);
+        const waitUntil = Date.now() + 15_000;
+        while (!document.querySelector('#wh-sh-items-table select') && Date.now() < waitUntil) {
+          await new Promise(resolve => setTimeout(resolve, 250));
+        }
         const form = document.querySelector('#wh-shipment-form');
         const select = document.querySelector('#wh-sh-items-table select');
         const options = Array.from(select?.options || []);
