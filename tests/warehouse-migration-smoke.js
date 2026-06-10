@@ -645,6 +645,24 @@ async function smokeShipmentSelectUsesFreshPickerCache() {
     assert.equal(vm.runInContext(`Warehouse.shipmentItems[0].sku`, context), 'RNG-TEST');
 }
 
+async function smokeShipmentPickerSurvivesReservationLoadFailure() {
+    const context = buildWarehouseContext();
+    context.__warehouseItems = [
+        { id: 8401, category: 'rings', name: 'Кольцо для смоука', sku: 'RNG-LIVE-SMOKE', qty: 15, unit: 'шт', price_per_unit: 2 },
+    ];
+    context.loadWarehouseItems = async () => clone(context.__warehouseItems);
+    context.loadWarehouseReservations = async () => {
+        throw new Error('reservation read unavailable');
+    };
+
+    await vm.runInContext(`Warehouse.showNewShipmentForm()`, context);
+
+    const html = context.document.getElementById('wh-sh-items-table').innerHTML;
+    assert.match(html, /<select/);
+    assert.match(html, /Кольцо для смоука/);
+    assert.match(html, /RNG-LIVE-SMOKE/);
+}
+
 async function main() {
     await smokeManualFormQtyUsesLatestSharedStock();
     await smokeProjectHardwareReadyToggleIsIdempotent();
@@ -654,6 +672,7 @@ async function main() {
     await smokeShipmentMatchesExistingItemByExactSkuAcrossWrongCategory();
     await smokeReceiptPickerLoadsSpecificWarehouseSupplies();
     await smokeShipmentSelectUsesFreshPickerCache();
+    await smokeShipmentPickerSurvivesReservationLoadFailure();
     console.log('warehouse migration smoke checks passed');
 }
 

@@ -7751,7 +7751,13 @@ const Warehouse = {
         );
         const activeReservedByItem = new Map();
         if (needsReservationSnapshot) {
-            const reservations = await loadWarehouseReservations();
+            let reservations = [];
+            try {
+                reservations = await loadWarehouseReservations();
+            } catch (error) {
+                console.warn('[Warehouse] Failed to load reservations for picker; rendering without reservation snapshot', error);
+                reservations = [];
+            }
             (reservations || []).forEach(reservation => {
                 if (!reservation || reservation.status !== 'active') return;
                 const itemId = Number(reservation.item_id || 0);
