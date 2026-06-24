@@ -1505,15 +1505,24 @@ const Tasks = {
                 <div class="wm-assets-list">
                     ${assets.length === 0
                         ? '<div class="text-muted">Пока ничего не добавлено</div>'
-                        : assets.map(asset => asset.kind === 'file'
+                        : assets.map(asset => {
+                            const assetUrl = asset.data_url || asset.url || '';
+                            const isImage = String(asset.file_type || '').startsWith('image/') || String(assetUrl).startsWith('data:image/');
+                            const previewHtml = isImage && assetUrl
+                                ? `<img src="${this.esc(assetUrl)}" alt="" style="width:48px;height:48px;object-fit:cover;border-radius:6px;border:1px solid var(--border);flex-shrink:0;">`
+                                : '';
+                            return asset.kind === 'file'
                             ? `
                                 <div class="wm-asset-row">
-                                    <div>
-                                        <div style="font-weight:600">${this.esc(asset.title || asset.file_name || 'Файл')}</div>
-                                        <div class="text-muted" style="font-size:12px">${this.esc(asset.file_name || '')}</div>
+                                    <div style="display:flex;align-items:center;gap:10px;min-width:0;">
+                                        ${previewHtml}
+                                        <div style="min-width:0;">
+                                            <div style="font-weight:600">${this.esc(asset.title || asset.file_name || 'Файл')}</div>
+                                            <div class="text-muted" style="font-size:12px">${this.esc(asset.file_name || '')}</div>
+                                        </div>
                                     </div>
                                     <div class="flex gap-8">
-                                        <a class="btn btn-sm btn-outline" href="${this.esc(asset.data_url || asset.url)}" target="_blank">Открыть</a>
+                                        <a class="btn btn-sm btn-outline" href="${this.esc(assetUrl)}" target="_blank" rel="noopener">Открыть</a>
                                         <button class="btn btn-sm btn-outline" onclick="Tasks.deleteAsset(${asset.id})">Удалить</button>
                                     </div>
                                 </div>
@@ -1530,7 +1539,7 @@ const Tasks = {
                                     </div>
                                 </div>
                             `
-                        ).join('')}
+                        }).join('')}
                 </div>
             </div>
         `;
@@ -2422,7 +2431,8 @@ const Tasks = {
             App.toast('Файл слишком большой. Максимум 3 МБ');
             return;
         }
-        const dataUrl = await this.readFileAsDataUrl(file);
+        const prepared = await this.prepareFileAsset(file);
+        if (!prepared) return;
         const task = this.taskById(taskId);
         await saveWorkAsset({
             task_id: taskId,
@@ -2430,10 +2440,14 @@ const Tasks = {
             kind: 'file',
             title: document.getElementById('task-file-title')?.value.trim() || file.name,
             file_name: file.name,
-            file_type: file.type || '',
-            file_size: file.size || 0,
-            data_url: dataUrl,
-            url: dataUrl,
+            file_type: prepared.type || file.type || '',
+            file_size: prepared.size || file.size || 0,
+            data_url: prepared.data_url,
+            url: prepared.data_url,
+            preview_meta: prepared.compressed ? {
+                compressed: true,
+                original_size: prepared.original_size || file.size || 0,
+            } : {},
             created_by: App.currentEmployeeId,
             created_by_name: App.getCurrentEmployeeName(),
         });
@@ -2618,5 +2632,25 @@ const Tasks = {
             reader.onerror = () => reject(new Error('Не удалось прочитать файл'));
             reader.readAsDataURL(file);
         });
+    },
+
+    async prepareFileAsset(file) {
+        const dataUrl = await this.readFileAsDataUrl(file);
+        let attachment = {
+            name: file.name || 'file',
+            type: file.type || '',
+            size: file.size || 0,
+            data_url: dataUrl,
+        };
+        if (
+            typeof Calculator !== 'undefined'
+            && Calculator
+            && typeof Calculator._compressColorAttachment === 'function'
+            && typeof isCompressibleColorAttachment === 'function'
+            && isCompressibleColorAttachment(attachment)
+        ) {
+            attachment = await Calculator._compressColorAttachment(attachment, 450 * 1024);
+        }
+        return attachment;
     },
 };

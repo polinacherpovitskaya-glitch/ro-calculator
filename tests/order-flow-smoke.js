@@ -682,6 +682,52 @@ async function smokeCalculatorLocalDraftSurvivesRefresh(context) {
     assert.match(state.status, /Восстановлен/);
 }
 
+async function smokeLegacyLocalDraftRestoresAsNewOrder(context) {
+    const state = clone(await vm.runInContext(`(async () => {
+        Calculator.resetForm();
+        Calculator.renderItemBlock = () => {};
+        Calculator.rerenderAllHardware = () => {};
+        Calculator.rerenderAllPackaging = () => {};
+        Calculator.renderExtraCosts = () => {};
+        Calculator.recalculate = () => {};
+        Calculator._updateItemsEmptyState = () => {};
+
+        localStorage.setItem(Calculator._localDraftKey, JSON.stringify({
+            app_version: 'v382',
+            saved_at: new Date().toISOString(),
+            reason: 'beforeunload',
+            editing_order_id: 4011,
+            current_order_status: 'sample',
+            order_fields: {
+                order_name: '100 желтых ключей',
+                client_name: 'Алина',
+                manager_name: 'Алина',
+                deadline_start: '2026-06-30',
+            },
+            items: [],
+            hardwareItems: [],
+            packagingItems: [],
+            extraCosts: [],
+            pendants: [],
+        }));
+
+        const restored = await Calculator._restoreLocalDraftIfAvailable();
+        return {
+            restored,
+            editingOrderId: App.editingOrderId,
+            storedOrderId: localStorage.getItem('ro_calc_editing_order_id'),
+            currentStatus: Calculator._currentOrderStatus,
+            orderName: document.getElementById('calc-order-name').value,
+        };
+    })()`, context));
+
+    assert.equal(state.restored, true, 'legacy local draft should still restore form contents');
+    assert.equal(state.orderName, '100 желтых ключей');
+    assert.equal(state.editingOrderId, null, 'legacy local draft must not keep stale editing order id');
+    assert.equal(state.storedOrderId, null, 'legacy local draft must clear stale stored order id');
+    assert.equal(state.currentStatus, 'draft', 'legacy local draft should save as a new draft after restore');
+}
+
 async function smokeNewDraftAutosaveAndManualSaveShareReservedId(context) {
     const result = clone(await vm.runInContext(`(async () => {
         const saveCalls = [];
@@ -8330,6 +8376,7 @@ async function main() {
     await smokeEmptyPlaceholderProductIsNotSaved(context);
     await smokeHardwareOnlyAutosave(context);
     await smokeCalculatorLocalDraftSurvivesRefresh(context);
+    await smokeLegacyLocalDraftRestoresAsNewOrder(context);
     await smokeNewDraftAutosaveAndManualSaveShareReservedId(context);
     await smokeLegacyProductionStatusAppearsInOrdersViews(context);
     await smokeZeroCostWarehouseHardwareStillShowsInPricing(context);
