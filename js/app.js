@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v381';
+const APP_VERSION = 'v383';
 
 const App = {
     currentPage: 'orders',
@@ -1450,6 +1450,7 @@ const Calculator = {
     _blanksCatalogLoaded: false,
     _preserveStateOnNextInit: false,
     _localDraftKey: 'ro_calc_calculator_unsaved_draft',
+    _loadedOrderOrigin: null,
 
     async init() {
         // Ensure colors are loaded for color picker
@@ -1502,6 +1503,7 @@ const Calculator = {
         if (!preserveLocalDraft) this._clearLocalDraftSnapshot();
         this._invalidateWhPickerContext();
         this._clearCommittedWhDemandSnapshot();
+        this._loadedOrderOrigin = null;
 
         App.editingOrderId = null;
         this._currentOrderStatus = 'draft';
@@ -1593,6 +1595,7 @@ const Calculator = {
                 saved_at: new Date().toISOString(),
                 reason,
                 editing_order_id: this._getCurrentEditingOrderId(),
+                editing_origin: this._loadedOrderOrigin,
                 current_order_status: this._currentOrderStatus || 'draft',
                 order_fields: orderFields,
                 discount_mode: this.discountMode,
@@ -1665,9 +1668,17 @@ const Calculator = {
         this._currentOrderStatus = payload.current_order_status || 'draft';
 
         const restoredOrderId = Number(payload.editing_order_id || 0) || null;
-        if (restoredOrderId) {
+        const restoredOriginId = Number(payload.editing_origin?.id || 0) || null;
+        const canRestoreAsExistingOrder = restoredOrderId && restoredOriginId && String(restoredOrderId) === String(restoredOriginId);
+        if (canRestoreAsExistingOrder) {
             App.editingOrderId = restoredOrderId;
             localStorage.setItem('ro_calc_editing_order_id', String(restoredOrderId));
+            this._loadedOrderOrigin = payload.editing_origin || null;
+        } else {
+            App.editingOrderId = null;
+            this._currentOrderStatus = 'draft';
+            this._loadedOrderOrigin = null;
+            localStorage.removeItem('ro_calc_editing_order_id');
         }
 
         document.getElementById('calc-items-container').innerHTML = '';
@@ -5866,6 +5877,12 @@ const Calculator = {
         localStorage.setItem('ro_calc_editing_order_id', String(orderId));
 
         const { order, items: dbItems } = data;
+        this._loadedOrderOrigin = {
+            id: orderId,
+            order_name: order.order_name || '',
+            client_name: order.client_name || '',
+            loaded_at: new Date().toISOString(),
+        };
         document.getElementById('calc-order-name').value = order.order_name || '';
         document.getElementById('calc-client-name').value = order.client_name || '';
         document.getElementById('calc-manager-name').value = order.manager_name || App.getCurrentEmployeeName() || '';
