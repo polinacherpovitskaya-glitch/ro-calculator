@@ -4,7 +4,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 function createElement(id = '') {
-    return {
+    const element = {
         id,
         value: '',
         innerHTML: '',
@@ -13,12 +13,15 @@ function createElement(id = '') {
         src: '',
         files: [],
         classList: {
+            _values: new Set(),
             add() {},
             remove() {},
             toggle() {},
             contains() { return false; },
         },
-        appendChild() {},
+        appendChild(child) {
+            if (child) child.parentElement = element;
+        },
         remove() {},
         focus() {},
         click() {},
@@ -32,6 +35,7 @@ function createElement(id = '') {
         insertAdjacentHTML() {},
         scrollIntoView() {},
     };
+    return element;
 }
 
 function createDocument() {
@@ -47,7 +51,14 @@ function createDocument() {
             return elements.get(id);
         },
         querySelector() { return null; },
-        querySelectorAll() { return []; },
+        querySelectorAll(selector) {
+            if (selector === '[id^="mold-inline-row-"]') {
+                return [...elements.entries()]
+                    .filter(([id]) => id.startsWith('mold-inline-row-'))
+                    .map(([, element]) => element);
+            }
+            return [];
+        },
     };
 }
 
@@ -330,6 +341,8 @@ async function main() {
         document.getElementById('mold-cost-rub').value = '4250';
         document.getElementById('mold-count').value = '1';
         document.getElementById('mold-client').value = '';
+        document.getElementById('mold-price-10').value = '1500';
+        document.getElementById('mold-price-50').value = '1250';
         document.getElementById('mold-notes').value = '';
         document.getElementById('mold-assembly-name').value = '';
         document.getElementById('mold-assembly-speed').value = '';
@@ -342,6 +355,8 @@ async function main() {
     assert.equal(context.__savedFormMold.hw_warehouse_sku, 'CRB-501');
     assert.equal(context.__savedFormMold.hw_name, 'Карабин');
     assert.equal(context.__savedFormMold.hw_price_per_unit, 10);
+    assert.equal(context.__savedFormMold.use_manual_prices, true);
+    assert.deepEqual(context.__savedFormMold.custom_prices, { 10: 1500, 50: 1250 });
 
     vm.runInContext(`
         Molds._hwSource = 'custom';
@@ -491,6 +506,13 @@ async function main() {
     assert.match(tableHtml, /без НДС/);
     assert.match(tableHtml, /с НДС/);
     assert.match(tableHtml, /цена/);
+    assert.match(tableHtml, /mold-inline-card-host-78/);
+
+    vm.runInContext(`
+        Molds.editMold(78);
+    `, context);
+    assert.equal(context.document.getElementById('mold-inline-row-78').style.display, '');
+    assert.equal(context.document.getElementById('mold-edit-form').parentElement.id, 'mold-inline-card-host-78');
 
     context.document.getElementById('mold-inline-pph-78').value = '95';
     context.document.getElementById('mold-inline-weight-78').value = '7';
