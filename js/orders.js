@@ -357,6 +357,10 @@ const Orders = {
         }
         try {
             const safeItems = items || [];
+            const hasHydratedItems = safeItems.some(item => item && item.item_type);
+            if (!hasHydratedItems && this.hasStoredFinancialMeta(order)) {
+                return stored;
+            }
             const snapshot = getOrderLiveCalculatorSnapshot(order, safeItems);
             const live = {
                 revenue: Number(snapshot?.revenue || 0),

@@ -1111,6 +1111,58 @@ async function smokeOrderListUsesStoredFinancialMetaWhenItemsMissing(context) {
     assert.match(state.boardHtml, /24[,.]7\s*%/, 'board card should render stored margin instead of 0%');
 }
 
+async function smokeOrderMetaBundleUsesHydratedItemsForHardware(context) {
+    const originalLoadOrderItemsByOrderIds = context.loadOrderItemsByOrderIds;
+    context.__orderItemLoadCalls = [];
+    context.loadWorkProjects = async () => [];
+    context.loadWorkTasks = async () => [];
+    context.loadChinaPurchases = async () => [];
+    context.loadOrderItemsByOrderIds = async (orderIds, options = {}) => {
+        context.__orderItemLoadCalls.push({ orderIds: clone(orderIds), options: clone(options || {}) });
+        if (options && options.summary === true) {
+            return [{
+                order_id: 42,
+                item_number: 1,
+                product_name: 'Summary-only row',
+                quantity: 5,
+            }];
+        }
+        return [{
+            order_id: 42,
+            item_number: 1,
+            item_type: 'hardware',
+            product_name: 'Warehouse ring',
+            quantity: 5,
+            hardware_source: 'warehouse',
+            hardware_warehouse_item_id: 501,
+        }];
+    };
+
+    try {
+        const state = clone(await vm.runInContext(`(async () => {
+            const bundle = await Orders.loadMetaBundleLocal([42]);
+            const meta = Orders.buildOrderMeta(
+                { id: 42, order_name: 'Hardware Order' },
+                bundle.orderItems,
+                bundle.chinaPurchases,
+                bundle.tasks
+            );
+            return {
+                calls: globalThis.__orderItemLoadCalls,
+                itemType: bundle.orderItems[0]?.item_type || '',
+                hardwareLabel: meta.hardware.label,
+            };
+        })()`, context));
+
+        assert.equal(state.calls.length, 1);
+        assert.notEqual(state.calls[0].options.summary, true, 'orders meta needs hydrated item_data to detect warehouse hardware');
+        assert.equal(state.itemType, 'hardware');
+        assert.equal(state.hardwareLabel, 'Фурнитура из наличия');
+    } finally {
+        context.loadOrderItemsByOrderIds = originalLoadOrderItemsByOrderIds;
+    }
+}
+
 async function smokeBlankPricingSeparatesCatalogPriceAndNetMargin(context) {
     vm.runInContext(`
         App.getItemOriginLabel = (item) => item?.is_blank_mold ? 'бланк' : 'кастом';
@@ -8384,6 +8436,7 @@ async function main() {
     await smokeLegacyPerItemHardwareClearsBuiltinTemplateHardware(context);
     await smokeOrderListAndDetailUseLiveFinancialSnapshot(context);
     await smokeOrderListUsesStoredFinancialMetaWhenItemsMissing(context);
+    await smokeOrderMetaBundleUsesHydratedItemsForHardware(context);
     await smokeBlankPricingSeparatesCatalogPriceAndNetMargin(context);
     await smokeBlankTargetFormulaMatchesVatExclusiveMargin(context);
     await smokeWarehouseBackedNfcDoesNotDoubleCountFallback(context);

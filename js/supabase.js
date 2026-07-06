@@ -2736,11 +2736,28 @@ async function loadOrder(orderId) {
     return await loadLocalOrder({ repairDuplicates: true });
 }
 
-async function loadOrderItemsByOrderIds(orderIds = []) {
+const ORDER_ITEM_SUMMARY_SELECT = [
+    'id',
+    'order_id',
+    'item_number',
+    'template_id',
+    'product_name',
+    'quantity',
+    'unit_price',
+    'sell_price_item',
+    'sell_price_printing',
+    'total_price',
+    'cost_total',
+    'created_at',
+    'updated_at',
+].join(',');
+
+async function loadOrderItemsByOrderIds(orderIds = [], options = {}) {
     const ids = [...new Set((orderIds || [])
         .map(id => Number(id))
         .filter(id => Number.isFinite(id) && id > 0))];
     if (ids.length === 0) return [];
+    const summaryOnly = options && options.summary === true;
 
     const localFallback = (rows = null) => (Array.isArray(rows) ? rows : (getLocal(LOCAL_KEYS.orderItems) || []))
         .filter(item => ids.includes(Number(item.order_id)))
@@ -2762,6 +2779,7 @@ async function loadOrderItemsByOrderIds(orderIds = []) {
     };
 
     const updateLocalOrderItemsCache = (rows = []) => {
+        if (summaryOnly) return;
         const allItems = getLocal(LOCAL_KEYS.orderItems) || [];
         const requestedIds = new Set(ids.map(id => String(id)));
         const otherItems = allItems.filter(item => !requestedIds.has(String(Number(item.order_id))));
@@ -2772,7 +2790,7 @@ async function loadOrderItemsByOrderIds(orderIds = []) {
         try {
             const { data, error } = await _withRemoteTimeout('load', 'load order items by ids', () => supabaseClient
                 .from('order_items')
-                .select('*')
+                .select(summaryOnly ? ORDER_ITEM_SUMMARY_SELECT : '*')
                 .in('order_id', ids)
                 .order('order_id')
                 .order('item_number'));
@@ -2782,9 +2800,9 @@ async function loadOrderItemsByOrderIds(orderIds = []) {
                 const bootstrapFallback = await loadBootstrapFallback();
                 return bootstrapFallback || localFallback();
             }
-            const rows = _hydrateOrderItemRows(data || []);
+            const rows = summaryOnly ? (data || []) : _hydrateOrderItemRows(data || []);
             updateLocalOrderItemsCache(rows);
-            _clearLocalDatasetDirty(['orderItems']);
+            if (!summaryOnly) _clearLocalDatasetDirty(['orderItems']);
             return localFallback(rows);
         } catch (error) {
             console.error('loadOrderItemsByOrderIds exception:', error);
