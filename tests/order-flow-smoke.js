@@ -1111,7 +1111,7 @@ async function smokeOrderListUsesStoredFinancialMetaWhenItemsMissing(context) {
     assert.match(state.boardHtml, /24[,.]7\s*%/, 'board card should render stored margin instead of 0%');
 }
 
-async function smokeOrderMetaBundleUsesHydratedItemsForHardware(context) {
+async function smokeOrderMetaBundleUsesLightItemsForHardware(context) {
     const originalLoadOrderItemsByOrderIds = context.loadOrderItemsByOrderIds;
     context.__orderItemLoadCalls = [];
     context.loadWorkProjects = async () => [];
@@ -1142,7 +1142,7 @@ async function smokeOrderMetaBundleUsesHydratedItemsForHardware(context) {
         const state = clone(await vm.runInContext(`(async () => {
             const bundle = await Orders.loadMetaBundleLocal([42]);
             const meta = Orders.buildOrderMeta(
-                { id: 42, order_name: 'Hardware Order' },
+                { id: 42, order_name: 'Hardware Order', production_hours_hardware: 1.25 },
                 bundle.orderItems,
                 bundle.chinaPurchases,
                 bundle.tasks
@@ -1151,13 +1151,15 @@ async function smokeOrderMetaBundleUsesHydratedItemsForHardware(context) {
                 calls: globalThis.__orderItemLoadCalls,
                 itemType: bundle.orderItems[0]?.item_type || '',
                 hardwareLabel: meta.hardware.label,
+                hardwareTitle: meta.hardware.title,
             };
         })()`, context));
 
         assert.equal(state.calls.length, 1);
-        assert.notEqual(state.calls[0].options.summary, true, 'orders meta needs hydrated item_data to detect warehouse hardware');
-        assert.equal(state.itemType, 'hardware');
-        assert.equal(state.hardwareLabel, 'Фурнитура из наличия');
+        assert.equal(state.calls[0].options.summary, true, 'orders meta must avoid loading bulky item_data for every order');
+        assert.equal(state.itemType, '');
+        assert.equal(state.hardwareLabel, 'Фурнитура / сборка');
+        assert.match(state.hardwareTitle, /плановые часы сборки/i);
     } finally {
         context.loadOrderItemsByOrderIds = originalLoadOrderItemsByOrderIds;
     }
@@ -5677,6 +5679,7 @@ async function smokeProjectHardwarePersistenceAndBuckets(context) {
         created_at: '2026-03-17T08:00:00.000Z',
     }];
     context.__warehouseHistory = [];
+    context.__projectHardwareItemLoadCalls = [];
     context.loadProjectHardwareState = async () => clone(context.__projectHardwareState);
     context.saveProjectHardwareState = async (state) => {
         context.__savedProjectHardwareState = clone(state);
@@ -5684,6 +5687,12 @@ async function smokeProjectHardwarePersistenceAndBuckets(context) {
     };
     context.loadOrders = async () => clone(context.__orders);
     context.loadOrder = async (orderId) => clone(context.__orderDetails[Number(orderId)] || null);
+    context.loadOrderItemsByOrderIds = async (orderIds) => {
+        context.__projectHardwareItemLoadCalls.push(clone(orderIds));
+        assert.equal(orderIds.length, 1, 'project hardware view must not bulk-load bulky item_data for all active orders');
+        const orderId = Number(orderIds[0]);
+        return clone(context.__orderDetails[orderId]?.items || []).map(item => ({ ...item, order_id: orderId }));
+    };
     context.loadWarehouseReservations = async () => clone(context.__reservations);
     context.saveWarehouseReservations = async (reservations) => {
         context.__savedReservations = clone(reservations);
@@ -5724,6 +5733,11 @@ async function smokeProjectHardwarePersistenceAndBuckets(context) {
     assert.equal((html.match(/Collected Delivery Order/g) || []).length, 1);
     assert.equal((html.match(/Active Hardware Order/g) || []).length, 1);
     assert.equal((html.match(/Sample Hardware Order/g) || []).length, 1);
+    assert.equal(context.__projectHardwareItemLoadCalls.length, 4);
+    assert.deepEqual(
+        context.__projectHardwareItemLoadCalls.map(ids => ids[0]).sort((a, b) => a - b),
+        [100, 200, 300, 400]
+    );
     assert.match(html, /Включая завершённые заказы: 1/);
     assert.match(html, /Delivery Hardware/);
     assert.match(html, /Collected Hardware/);
@@ -8436,7 +8450,7 @@ async function main() {
     await smokeLegacyPerItemHardwareClearsBuiltinTemplateHardware(context);
     await smokeOrderListAndDetailUseLiveFinancialSnapshot(context);
     await smokeOrderListUsesStoredFinancialMetaWhenItemsMissing(context);
-    await smokeOrderMetaBundleUsesHydratedItemsForHardware(context);
+    await smokeOrderMetaBundleUsesLightItemsForHardware(context);
     await smokeBlankPricingSeparatesCatalogPriceAndNetMargin(context);
     await smokeBlankTargetFormulaMatchesVatExclusiveMargin(context);
     await smokeWarehouseBackedNfcDoesNotDoubleCountFallback(context);

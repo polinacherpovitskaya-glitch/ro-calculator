@@ -243,7 +243,7 @@ const Orders = {
                 .select('id,status,purchase_data,created_at,updated_at')
                 .order('created_at', { ascending: false }),
             typeof loadOrderItemsByOrderIds === 'function'
-                ? loadOrderItemsByOrderIds(orderIds).catch(() => [])
+                ? loadOrderItemsByOrderIds(orderIds, { summary: true }).catch(() => [])
                 : Promise.resolve([]),
         ]);
 
@@ -306,7 +306,7 @@ const Orders = {
             typeof loadWorkProjects === 'function' ? loadWorkProjects().catch(() => []) : Promise.resolve([]),
             typeof loadWorkTasks === 'function' ? loadWorkTasks().catch(() => []) : Promise.resolve([]),
             typeof loadChinaPurchases === 'function' ? loadChinaPurchases({}).catch(() => []) : Promise.resolve([]),
-            typeof loadOrderItemsByOrderIds === 'function' ? loadOrderItemsByOrderIds(orderIds).catch(() => []) : Promise.resolve([]),
+            typeof loadOrderItemsByOrderIds === 'function' ? loadOrderItemsByOrderIds(orderIds, { summary: true }).catch(() => []) : Promise.resolve([]),
         ]);
 
         const filteredProjects = (projects || []).filter(project => idSet.has(String(project.linked_order_id)));
@@ -328,7 +328,7 @@ const Orders = {
     buildOrderMeta(order, items, purchases, tasks) {
         return {
             todo: this.buildTodoMeta(tasks),
-            hardware: this.buildHardwareMeta(items),
+            hardware: this.buildHardwareMeta(items, order),
             china: this.buildChinaMeta(purchases, items),
             production: this.buildProductionMeta(order),
             financial: this.buildFinancialMeta(order, items),
@@ -413,7 +413,7 @@ const Orders = {
         };
     },
 
-    buildHardwareMeta(items) {
+    buildHardwareMeta(items, order = null) {
         const hardwareItems = (items || []).filter(item => item.item_type === 'hardware');
         const pendantAttachments = [];
         const productNfcAttachments = [];
@@ -443,6 +443,13 @@ const Orders = {
         }
         const demandItems = [...hardwareItems, ...pendantAttachments, ...productNfcAttachments];
         if (demandItems.length === 0) {
+            if ((parseFloat(order?.production_hours_hardware || 0) || 0) > 0) {
+                return {
+                    label: 'Фурнитура / сборка',
+                    className: 'badge-yellow',
+                    title: 'В заказе есть плановые часы сборки. Детали открой в заказе или на складе.',
+                };
+            }
             return {
                 label: 'Фурнитура не нужна',
                 className: 'badge-red',
