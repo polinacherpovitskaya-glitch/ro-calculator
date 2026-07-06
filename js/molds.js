@@ -335,6 +335,10 @@ const Molds = {
         el('molds-total-value', formatRub(totalValue));
     },
 
+    _getManualPriceTiers() {
+        return MOLD_TIERS;
+    },
+
     filterAndRender() {
         const status = document.getElementById('molds-filter-status').value;
         const collectionFilter = document.getElementById('molds-filter-collection')?.value || '';
@@ -453,6 +457,7 @@ const Molds = {
                 <tr id="mold-inline-row-${m.id}" style="display:none;border-bottom:2px solid var(--border);background:var(--bg);">
                     <td colspan="${DISPLAY_TIERS.length * 2 + 5}" style="padding:12px 16px;">
                         ${this._renderInlineControls(m)}
+                        <div id="mold-inline-card-host-${m.id}" style="margin-top:12px;"></div>
                     </td>
                 </tr>`;
         });
@@ -480,6 +485,45 @@ const Molds = {
         // Close all other inline rows
         document.querySelectorAll('[id^="mold-inline-row-"]').forEach(r => { r.style.display = 'none'; });
         if (!isVisible) row.style.display = '';
+    },
+
+    _openInlineRow(id) {
+        const row = document.getElementById('mold-inline-row-' + id);
+        if (!row) return false;
+        document.querySelectorAll('[id^="mold-inline-row-"]').forEach(r => {
+            r.style.display = r === row ? '' : 'none';
+        });
+        return true;
+    },
+
+    _moveMoldFormHome() {
+        const form = document.getElementById('mold-edit-form');
+        const home = document.getElementById('mold-edit-form-home');
+        if (form && home && form.parentElement !== home) {
+            home.appendChild(form);
+        }
+        if (form) {
+            form.classList.add('card');
+            form.style.marginTop = '';
+            form.style.paddingTop = '';
+            form.style.borderTop = '';
+            form.style.marginBottom = '';
+        }
+    },
+
+    _moveMoldFormToInline(id) {
+        const form = document.getElementById('mold-edit-form');
+        const host = document.getElementById(`mold-inline-card-host-${id}`);
+        if (!form || !host) return false;
+        if (form.parentElement !== host) {
+            host.appendChild(form);
+        }
+        form.classList.remove('card');
+        form.style.marginTop = '4px';
+        form.style.paddingTop = '14px';
+        form.style.borderTop = '1px solid var(--border)';
+        form.style.marginBottom = '0';
+        return true;
     },
 
     _getCostBreakdownParts(mold) {
@@ -757,6 +801,7 @@ const Molds = {
 
     showAddForm() {
         this.editingId = null;
+        this._moveMoldFormHome();
         document.getElementById('mold-form-title').textContent = 'Новый бланк';
         this.clearForm();
         document.getElementById('mold-delete-btn').style.display = 'none';
@@ -767,6 +812,8 @@ const Molds = {
     editMold(id) {
         const m = this.allMolds.find(x => x.id === id);
         if (!m) return;
+        const openedInline = this._openInlineRow(id);
+        const movedInline = openedInline && this._moveMoldFormToInline(id);
         this.editingId = id;
         document.getElementById('mold-form-title').textContent = 'Редактировать: ' + (m.name || '');
 
@@ -816,7 +863,7 @@ const Molds = {
 
         // Custom prices per tier
         const cp = hasManualBlankPriceOverride(m) ? (m.custom_prices || {}) : {};
-        [50, 100, 300, 500, 1000, 3000].forEach(q => {
+        this._getManualPriceTiers().forEach(q => {
             const el = document.getElementById('mold-price-' + q);
             if (el) el.value = (cp[q] !== null && cp[q] !== undefined && cp[q] > 0) ? cp[q] : '';
         });
@@ -835,7 +882,10 @@ const Molds = {
 
         document.getElementById('mold-delete-btn').style.display = '';
         document.getElementById('mold-edit-form').style.display = '';
-        document.getElementById('mold-edit-form').scrollIntoView({ behavior: 'smooth' });
+        const scrollTarget = movedInline
+            ? document.getElementById(`mold-inline-card-host-${id}`)
+            : document.getElementById('mold-edit-form');
+        scrollTarget?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     },
 
     async deleteFromForm() {
@@ -852,7 +902,7 @@ const Molds = {
 
     _collectCustomPrices() {
         const prices = {};
-        [50, 100, 300, 500, 1000, 3000].forEach(q => {
+        this._getManualPriceTiers().forEach(q => {
             const el = document.getElementById('mold-price-' + q);
             if (el && el.value !== '') {
                 const price = parseFloat(el.value);
@@ -868,8 +918,9 @@ const Molds = {
         // Show margin % hint under each price input
         // We need the current mold's enriched cost data
         const mId = this._editingMoldId;
-        const mold = mId ? App.molds.find(m => m.id === mId) : null;
-        [50, 100, 300, 500, 1000, 3000].forEach(q => {
+        const moldSource = Array.isArray(App?.molds) ? App.molds : this.allMolds;
+        const mold = mId ? moldSource.find(m => m.id === mId) : null;
+        this._getManualPriceTiers().forEach(q => {
             const priceEl = document.getElementById('mold-price-' + q);
             const hintEl = document.getElementById('mold-price-margin-' + q);
             if (!priceEl || !hintEl) return;
@@ -917,7 +968,7 @@ const Molds = {
         document.getElementById('mold-cost-rub').value = '';
         document.getElementById('mold-hw-delivery-total').value = 0;
         // Clear custom price fields and hints
-        [50, 100, 300, 500, 1000, 3000].forEach(q => {
+        this._getManualPriceTiers().forEach(q => {
             const el = document.getElementById('mold-price-' + q);
             if (el) el.value = '';
             const hint = document.getElementById('mold-price-margin-' + q);
@@ -929,6 +980,7 @@ const Molds = {
     hideForm() {
         document.getElementById('mold-edit-form').style.display = 'none';
         this.editingId = null;
+        this._moveMoldFormHome();
     },
 
     async saveMold() {
