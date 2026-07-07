@@ -235,6 +235,11 @@ async function send(chatId, text, opts) {
     }
 }
 
+async function maybeLogBindingError(context, error) {
+    if (!error) return;
+    console.error(`${context} error:`, error.message || error);
+}
+
 async function retryPendingReports() {
     if (pendingRetryRunning) return;
     pendingRetryRunning = true;
@@ -331,11 +336,7 @@ bot.onText(/\/start/, async (msg) => {
             return;
         }
 
-        const { data: employees } = await supabase
-            .from('employees')
-            .select('id, name, role')
-            .eq('is_active', true)
-            .is('telegram_id', null);
+        const employees = await listAvailableEmployeesForLink();
 
         if (!employees || employees.length === 0) {
             send(chatId,
@@ -462,13 +463,7 @@ bot.on('callback_query', async (query) => {
             if (!state || state.step !== 'link_choose_name') return;
             const empId = data.replace('link_', '');
 
-            const { error } = await supabase
-                .from('employees')
-                .update({
-                    telegram_id: telegramId,
-                    telegram_username: query.from.username || '',
-                })
-                .eq('id', empId);
+            const error = await linkEmployeeToTelegram(empId, telegramId, query.from.username || '');
 
             if (error) {
                 send(chatId, 'Ошибка привязки. Попробуй ещё раз: /start');
@@ -686,6 +681,9 @@ bot.onText(/\/week/, async (msg) => {
 // =============================================
 
 async function getEmployee(telegramId) {
+    const bindingEmployee = await getEmployeeFromBinding(telegramId, true);
+    if (bindingEmployee) return bindingEmployee;
+
     const { data, error } = await supabase
         .from('employees')
         .select('*')
@@ -699,6 +697,9 @@ async function getEmployee(telegramId) {
 }
 
 async function getAnyLinkedEmployee(telegramId) {
+    const bindingEmployee = await getEmployeeFromBinding(telegramId, false);
+    if (bindingEmployee) return bindingEmployee;
+
     const { data, error } = await supabase
         .from('employees')
         .select('*')
@@ -708,6 +709,127 @@ async function getAnyLinkedEmployee(telegramId) {
         return null;
     }
     return pickAnyLinkedEmployee(data);
+}
+
+async function getEmployeeFromBinding(telegramId, activeOnly) {
+    let query = supabase
+        .from('bot_telegram_bindings')
+        .select('telegram_chat_id, telegram_username, employee_id, is_active')
+        .eq('telegram_chat_id', telegramId);
+    if (activeOnly) query = query.eq('is_active', true);
+
+    const { data: bindings, error: bindingError } = await query.limit(1);
+    if (bindingError) {
+        await maybeLogBindingError('getEmployeeFromBinding binding lookup', bindingError);
+        return null;
+    }
+
+    const binding = (bindings || [])[0];
+    if (!binding) return null;
+
+    let employeeQuery = supabase.from('employees').select('*').eq('id', binding.employee_id);
+    if (activeOnly) employeeQuery = employeeQuery.eq('is_active', true);
+
+    const { data: employees, error: employeeError } = await employeeQuery.limit(1);
+    if (employeeError) {
+        await maybeLogBindingError('getEmployeeFromBinding employee lookup', employeeError);
+        return null;
+    }
+
+    const employee = (employees || [])[0];
+    if (!employee) return null;
+
+    return {
+        ...employee,
+        telegram_id: binding.telegram_chat_id,
+        telegram_username: binding.telegram_username || employee.telegram_username || '',
+        is_active: Boolean(employee.is_active && binding.is_active),
+        bot_binding_active: Boolean(binding.is_active),
+    };
+}
+
+async function listAvailableEmployeesForLink() {
+    const [{ data: employees, error: employeeError }, { data: bindings, error: bindingError }] = await Promise.all([
+        supabase
+            .from('employees')
+            .select('id, name, role, telegram_id')
+            .eq('is_active', true),
+        supabase
+            .from('bot_telegram_bindings')
+            .select('employee_id')
+            .eq('is_active', true),
+    ]);
+
+    if (employeeError) {
+        console.error('listAvailableEmployeesForLink employees error:', employeeError.message);
+        return [];
+    }
+
+    if (bindingError) {
+        await maybeLogBindingError('listAvailableEmployeesForLink bindings', bindingError);
+    }
+
+    const boundEmployeeIds = new Set((bindings || []).map(binding => String(binding.employee_id)));
+    return (employees || []).filter(employee => (
+        !employee.telegram_id && !boundEmployeeIds.has(String(employee.id))
+    ));
+}
+
+async function linkEmployeeToTelegram(employeeId, telegramId, telegramUsername) {
+    const employeeResp = await supabase
+        .from('employees')
+        .select('id')
+        .eq('id', employeeId)
+        .eq('is_active', true)
+        .limit(1);
+    if (employeeResp.error) return employeeResp.error;
+    if (!employeeResp.data || employeeResp.data.length === 0) {
+        return new Error('Active employee not found');
+    }
+
+    const now = new Date().toISOString();
+    const deactivateResp = await supabase
+        .from('bot_telegram_bindings')
+        .update({ is_active: false, last_active_at: now })
+        .eq('employee_id', employeeId)
+        .neq('telegram_chat_id', telegramId)
+        .eq('is_active', true);
+    if (deactivateResp.error) {
+        await maybeLogBindingError('linkEmployeeToTelegram deactivate old binding', deactivateResp.error);
+    }
+
+    const bindingResp = await supabase
+        .from('bot_telegram_bindings')
+        .upsert({
+            telegram_chat_id: telegramId,
+            telegram_username: telegramUsername || '',
+            employee_id: employeeId,
+            is_active: true,
+            last_active_at: now,
+        }, { onConflict: 'telegram_chat_id' });
+    if (bindingResp.error) {
+        await maybeLogBindingError('linkEmployeeToTelegram upsert binding', bindingResp.error);
+    }
+
+    const clearLegacyResp = await supabase
+        .from('employees')
+        .update({
+            telegram_id: null,
+            telegram_username: '',
+        })
+        .eq('telegram_id', telegramId)
+        .neq('id', employeeId);
+    if (clearLegacyResp.error) return clearLegacyResp.error;
+
+    const legacyResp = await supabase
+        .from('employees')
+        .update({
+            telegram_id: telegramId,
+            telegram_username: telegramUsername || '',
+        })
+        .eq('id', employeeId);
+
+    return legacyResp.error || null;
 }
 
 async function resolveEmployeeOrNotify(chatId, telegramId) {
