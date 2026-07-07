@@ -46,7 +46,7 @@ function roundTo5(n) {
 function getBlankKeepRate(params, margin = 0) {
     const taxRate = Number.isFinite(params?.taxRate) ? params.taxRate : 0.07;
     const charityRate = Number.isFinite(params?.charityRate) ? params.charityRate : 0.01;
-    const commercialRate = 0.065;
+    const commercialRate = Number.isFinite(params?.commercialRate) ? params.commercialRate : 0.07;
     return 1 - taxRate - commercialRate - charityRate - (Number(margin) || 0);
 }
 
