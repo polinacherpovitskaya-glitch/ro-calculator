@@ -53,6 +53,7 @@ function getProductionParams(settings) {
         taxRate: s('tax_rate'),
         charityRate: calcNumber(settings?.charity_rate, 0.01),
         commercialRate: calcNumber(settings?.commercial_rate, DEFAULT_COMMERCIAL_RATE),
+        setupHoursPerBatch: calcNumber(settings?.setup_hours_per_batch, 2),
         marginTarget: s('margin_target'),
         deliveryCostMoscow: s('delivery_cost_moscow'),
         printingDeliveryCost: s('printing_delivery_cost'),
@@ -236,8 +237,10 @@ function calculateItemCost(item, params) {
 
     // === Производство изделия ===
 
-    // Время на производство всей партии (часы) — с запасом на брак
-    const hoursPlastic = (1 / pph) * qty * p.wasteFactor;
+    // Время на производство всей партии (часы) — с запасом на брак,
+    // плюс запуск партии (переналадка, цвет, приладка) — константа на позицию
+    const setupHours = calcNumber(p.setupHoursPerBatch, 0);
+    const hoursPlastic = setupHours + (1 / pph) * qty * p.wasteFactor;
 
     // ФОТ за единицу
     const costFot = hoursPlastic * p.fotPerHour / qty;
