@@ -53,7 +53,7 @@ function getProductionParams(settings) {
         taxRate: s('tax_rate'),
         charityRate: calcNumber(settings?.charity_rate, 0.01),
         commercialRate: calcNumber(settings?.commercial_rate, DEFAULT_COMMERCIAL_RATE),
-        setupHoursPerBatch: calcNumber(settings?.setup_hours_per_batch, 2),
+        setupHoursPerBatch: calcNumber(settings?.setup_hours_per_batch, 0),
         marginTarget: s('margin_target'),
         deliveryCostMoscow: s('delivery_cost_moscow'),
         printingDeliveryCost: s('printing_delivery_cost'),

@@ -480,7 +480,7 @@ async function smokeOrderDiscountAffectsSummaryAndFinDirector(context) {
     assert.equal(data.amountSummary.totalRevenue, 90);
     assert.equal(data.amountSummary.vatOnRevenue, 4.5);
     assert.equal(data.amountSummary.totalWithVat, 94.5);
-    assert.equal(data.amountSummary.totalEarned, 26.95);
+    assert.equal(data.amountSummary.totalEarned, 26.5);
 
     assert.equal(data.percentSummary.discountAmount, 10);
     assert.equal(data.percentSummary.totalRevenue, 90);
@@ -489,7 +489,7 @@ async function smokeOrderDiscountAffectsSummaryAndFinDirector(context) {
     assert.equal(data.fin.discountAmount, 10);
     assert.equal(data.fin.revenue, 90);
     assert.equal(data.fin.taxes, 6.3);
-    assert.equal(data.fin.commercial, 5.85);
+    assert.equal(data.fin.commercial, 6.3);
     assert.equal(data.fin.charity, 0.9);
 }
 
@@ -1237,11 +1237,11 @@ async function smokeBlankTargetFormulaMatchesVatExclusiveMargin(context) {
         };
     })()`, context));
 
-    assert.equal(state.blankTarget, 608.79, 'blank target price should treat tax, commercial and charity as deductions from the VAT-free base');
-    assert.equal(state.blankNet40, 608.79, '40% blank helper price should match the blanks catalog target formula');
-    assert.equal(state.customTarget, 608.79, 'generic calculator target formula should now use the same VAT-free retention canon as blanks');
-    assert.equal(state.blankSell, 610, 'blank catalog sell price should round the VAT-free target to the nearest 5');
-    assert.equal(state.blankMargin, 40.09, 'generic margin helper should now reflect the same VAT-free retention canon as blanks');
+    assert.equal(state.blankTarget, 615.56, 'blank target price should treat tax, commercial and charity as deductions from the VAT-free base');
+    assert.equal(state.blankNet40, 615.56, '40% blank helper price should match the blanks catalog target formula');
+    assert.equal(state.customTarget, 615.56, 'generic calculator target formula should now use the same VAT-free retention canon as blanks');
+    assert.equal(state.blankSell, 615, 'blank catalog sell price should round the VAT-free target to the nearest 5');
+    assert.equal(state.blankMargin, 39.96, 'generic margin helper should now reflect the same VAT-free retention canon as blanks');
 }
 
 async function smokeWarehouseBackedNfcDoesNotDoubleCountFallback(context) {
@@ -8365,7 +8365,7 @@ async function smokeStandaloneLetterBlankUsesPendantTierPricing(context) {
             taxRate: 0.07,
             vatRate: 0.05,
             charityRate: 0.01,
-            commercialRate: 0.065,
+            commercialRate: 0.07,
             plasticCostPerKg: 2500,
             moldBaseCost: 18000,
             designCost: 0,

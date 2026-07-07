@@ -155,12 +155,12 @@ async function main() {
 
     assert.equal(
         vm.runInContext('Number(getBlankKeepRate(App.params, 0.45).toFixed(3))', context),
-        0.405,
-        'blank keep rate should subtract 7% tax, 6.5% commercial, 1% charity and 45% target margin from the base without VAT',
+        0.4,
+        'blank keep rate should subtract 7% tax, 7% commercial, 1% charity and 45% target margin from the base without VAT',
     );
     assert.equal(
         vm.runInContext('calcBlankSellPrice(257.99, 500, App.params)', context),
-        635,
+        645,
         '500-unit blank price should be derived from the VAT-free base, not from commercial/charity shares on top of VAT',
     );
 
@@ -554,7 +554,7 @@ async function main() {
         Molds.enrichMolds();
     `, context);
     const formulaPriceWithoutManual = vm.runInContext(`Molds.allMolds[0].tiers[50].sellPrice`, context);
-    assert.equal(formulaPriceWithoutManual, 405);
+    assert.equal(formulaPriceWithoutManual, 410);
 
     vm.runInContext(`
         Molds.allMolds[0].use_manual_prices = true;
@@ -696,12 +696,12 @@ async function main() {
     assert.equal(publishedMoldData.depth_mm, 3);
     assert.equal(publishedMoldData.weight_grams, 30);
     assert.equal(publishedMoldData.collection, 'Пластик');
-    assert.equal(publishedMoldData.tiers_prices[50], 465);
-    assert.equal(publishedMoldData.tiers_prices[100], 390);
-    assert.equal(publishedMoldData.tiers_prices[300], 335);
+    assert.equal(publishedMoldData.tiers_prices[50], 475);
+    assert.equal(publishedMoldData.tiers_prices[100], 395);
+    assert.equal(publishedMoldData.tiers_prices[300], 340);
     assert.equal(publishedMoldData.tiers_prices[500], 295);
-    assert.equal(publishedMoldData.tiers_prices[1000], 260);
-    assert.equal(publishedMoldData.tiers_prices[3000], 235);
+    assert.equal(publishedMoldData.tiers_prices[1000], 265);
+    assert.equal(publishedMoldData.tiers_prices[3000], 240);
     assert.match(String(publishedMoldData.tiers_published_at || ''), /^20\d\d-/);
 
     // Regression: publishCatalog must heal a corrupted {"0":..,"1":..} mold_data

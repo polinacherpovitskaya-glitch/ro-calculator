@@ -4377,7 +4377,7 @@ const Calculator = {
                     if (costItemOnly === 0) return 0;
                     const keepRate = typeof getKeepRateForTargetMargin === 'function'
                         ? getKeepRateForTargetMargin(params, marginPct)
-                        : 1 - (params.taxRate || 0.07) - (Number.isFinite(params?.charityRate) ? params.charityRate : 0.01) - 0.065 - marginPct;
+                        : 1 - (params.taxRate || 0.07) - (Number.isFinite(params?.charityRate) ? params.charityRate : 0.01) - (Number.isFinite(params?.commercialRate) ? params.commercialRate : 0.07) - marginPct;
                     if (keepRate <= 0) return 0;
                     return round2(costItemOnly / keepRate);
                 };
@@ -4651,7 +4651,7 @@ const Calculator = {
             if (cost === 0) return 0;
             const keepRate = typeof getKeepRateForTargetMargin === 'function'
                 ? getKeepRateForTargetMargin(params, marginPct)
-                : 1 - (params.taxRate || 0.07) - (Number.isFinite(params?.charityRate) ? params.charityRate : 0.01) - 0.065 - marginPct;
+                : 1 - (params.taxRate || 0.07) - (Number.isFinite(params?.charityRate) ? params.charityRate : 0.01) - (Number.isFinite(params?.commercialRate) ? params.commercialRate : 0.07) - marginPct;
             if (keepRate <= 0) return 0;
             return round2(cost / keepRate);
         };
@@ -4699,7 +4699,7 @@ const Calculator = {
 
             const keepRate = typeof getKeepRateForTargetMargin === 'function'
                 ? getKeepRateForTargetMargin(params, margin)
-                : 1 - (Number.isFinite(params?.taxRate) ? params.taxRate : 0.07) - (Number.isFinite(params?.charityRate) ? params.charityRate : 0.01) - 0.065 - margin;
+                : 1 - (Number.isFinite(params?.taxRate) ? params.taxRate : 0.07) - (Number.isFinite(params?.charityRate) ? params.charityRate : 0.01) - (Number.isFinite(params?.commercialRate) ? params.commercialRate : 0.07) - margin;
             if (keepRate <= 0) {
                 return { price: 0, note: 'прайс бланков', source: 'empty' };
             }
@@ -6372,7 +6372,7 @@ const Calculator = {
             if (cost === 0) return 0;
             const keepRate = typeof getKeepRateForTargetMargin === 'function'
                 ? getKeepRateForTargetMargin(params, marginPct)
-                : 1 - (params.taxRate || 0.07) - (Number.isFinite(params?.charityRate) ? params.charityRate : 0.01) - 0.065 - marginPct;
+                : 1 - (params.taxRate || 0.07) - (Number.isFinite(params?.charityRate) ? params.charityRate : 0.01) - (Number.isFinite(params?.commercialRate) ? params.commercialRate : 0.07) - marginPct;
             if (keepRate <= 0) return 0;
             return round2(cost / keepRate);
         };
