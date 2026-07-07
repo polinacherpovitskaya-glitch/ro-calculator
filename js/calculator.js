@@ -52,6 +52,7 @@ function getProductionParams(settings) {
         vatRate: s('vat_rate'),
         taxRate: s('tax_rate'),
         charityRate: calcNumber(settings?.charity_rate, 0.01),
+        commercialRate: calcNumber(settings?.commercial_rate, DEFAULT_COMMERCIAL_RATE),
         marginTarget: s('margin_target'),
         deliveryCostMoscow: s('delivery_cost_moscow'),
         printingDeliveryCost: s('printing_delivery_cost'),
@@ -59,7 +60,7 @@ function getProductionParams(settings) {
     };
 }
 
-const DEFAULT_COMMERCIAL_RATE = 0.065;
+const DEFAULT_COMMERCIAL_RATE = 0.07;
 
 function getRateValue(value, fallback) {
     const numeric = Number(value);
