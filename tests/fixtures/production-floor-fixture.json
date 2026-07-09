@@ -1,0 +1,78 @@
+{
+  "orders": [
+    {
+      "id": 101,
+      "order_name": "Ready blank order",
+      "client_name": "Acme",
+      "status": "production_casting",
+      "deadline_end": "2026-04-10",
+      "production_priority": 0,
+      "production_hours_plastic": 16,
+      "production_hours_hardware": 8,
+      "production_hours_packaging": 0
+    },
+    {
+      "id": 202,
+      "order_name": "Blocked china order",
+      "client_name": "Beta",
+      "status": "production_casting",
+      "deadline_end": "2026-04-15",
+      "production_priority": 1,
+      "production_hours_plastic": 24,
+      "production_hours_hardware": 0,
+      "production_hours_packaging": 0
+    },
+    {
+      "id": 303,
+      "order_name": "Needs review order",
+      "client_name": "Gamma",
+      "status": "production_hardware",
+      "deadline_end": "2026-04-20",
+      "production_priority": 2,
+      "production_hours_plastic": 8,
+      "production_hours_hardware": 8,
+      "production_hours_packaging": 0
+    },
+    {
+      "id": 404,
+      "order_name": "Ready mold-in-stock order",
+      "client_name": "Delta",
+      "status": "production_casting",
+      "deadline_end": "2026-04-25",
+      "production_priority": 3,
+      "production_hours_plastic": 8,
+      "production_hours_hardware": 0,
+      "production_hours_packaging": 0
+    }
+  ],
+  "orderItems": [
+    { "order_id": 101, "item_type": "product", "product_name": "Ready NFC", "is_blank_mold": true, "base_mold_in_stock": false },
+    { "order_id": 202, "item_type": "product", "product_name": "Beta NFC", "is_blank_mold": false, "base_mold_in_stock": false },
+    { "order_id": 303, "item_type": "product", "product_name": "Gamma NFC", "is_blank_mold": false, "base_mold_in_stock": false },
+    { "order_id": 404, "item_type": "product", "product_name": "Delta NFC", "is_blank_mold": false, "base_mold_in_stock": true }
+  ],
+  "planState": {
+    "order_ids": [101, 202, 303, 404],
+    "manual_start_dates": {},
+    "active_workers_count": 2,
+    "parallel_workers": {}
+  },
+  "settings": {
+    "planning_workers_count": 2,
+    "planning_hours_per_day": 8,
+    "production_holidays": "2026-03-17"
+  },
+  "timeEntries": [
+    { "employee_id": 10, "worker_name": "Тая", "date": "2026-03-02", "hours": 4, "order_id": 101, "project_name": "Ready blank order", "task_description": "[meta]{\"stage\":\"molding\"}[/meta]" },
+    { "employee_id": 12, "worker_name": "Женя Г", "date": "2026-03-03", "hours": 3, "order_id": 404, "project_name": "Ready mold-in-stock order", "task_description": "[meta]{\"stage\":\"casting\"}[/meta]" }
+  ],
+  "employees": [
+    { "id": 10, "name": "Тая", "role": "production" },
+    { "id": 11, "name": "Леша", "role": "management" },
+    { "id": 12, "name": "Женя Г", "role": "production" }
+  ],
+  "chinaPurchases": [
+    { "order_id": 202, "purchase_name": "Молд Beta NFC", "status": "in_transit" },
+    { "order_id": 303, "purchase_name": "Молд Gamma NFC", "status": "received" }
+  ]
+}

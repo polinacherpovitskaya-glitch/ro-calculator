@@ -64,68 +64,27 @@ const Gantt = {
         const effectivePlanningSettings = this.getEffectivePlanningSettings(App.settings || {});
         const orderedOrders = this.buildOrderedOrders(allOrders, this.planState);
 
-        const itemsByOrderId = new Map();
-        (orderItems || []).forEach(item => {
-            const key = Number(item.order_id);
-            if (!itemsByOrderId.has(key)) itemsByOrderId.set(key, []);
-            itemsByOrderId.get(key).push(item);
+        // Pure data -> model pipeline (shared with a headless publisher).
+        const model = buildProductionModel({
+            orders: orderedOrders,
+            orderItems,
+            planState: this.planState,
+            settings: effectivePlanningSettings,
+            timeEntries,
+            employees,
+            chinaPurchases: allChinaPurchases,
         });
 
-        const chinaPurchasesByOrderId = new Map();
-        (allChinaPurchases || []).forEach(purchase => {
-            const key = Number(purchase.order_id);
-            if (!Number.isFinite(key) || key <= 0) return;
-            if (!chinaPurchasesByOrderId.has(key)) chinaPurchasesByOrderId.set(key, []);
-            chinaPurchasesByOrderId.get(key).push(purchase);
-        });
-
-        const orderActuals = this.buildOrderActuals(timeEntries, employees, orderedOrders);
-        this.orders = orderedOrders.map(order => {
-            const actuals = orderActuals.get(Number(order.id)) || this.getEmptyOrderActuals();
-            const plannedMolding = round2(order.production_hours_plastic || 0);
-            const plannedAssembly = round2(order.production_hours_hardware || 0);
-            const plannedPackaging = round2(order.production_hours_packaging || 0);
-            const plannedTotal = round2(plannedMolding + plannedAssembly + plannedPackaging);
-            const remainingTotal = round2(
-                Math.max(plannedMolding - actuals.molding, 0)
-                + Math.max(plannedAssembly - actuals.assembly, 0)
-                + Math.max(plannedPackaging - actuals.packaging, 0)
-            );
-            const actualTotalForPlan = round2(actuals.molding + actuals.assembly + actuals.packaging);
-            const progressPercent = plannedTotal > 0
-                ? round2(Math.min((actualTotalForPlan / plannedTotal) * 100, 999))
-                : 0;
-
-            return {
-                ...order,
-                production_not_before: this.planState.manual_start_dates[String(order.id)] || '',
-                production_parallel_workers: this.getOrderParallelWorkers(Number(order.id)),
-                actual_hours_molding: actuals.molding,
-                actual_hours_assembly: actuals.assembly,
-                actual_hours_packaging: actuals.packaging,
-                actual_hours_other: actuals.other,
-                actual_hours_total: actualTotalForPlan,
-                actual_hours_employee_count: actuals.employeeCount,
-                actual_hours_entry_count: actuals.entryCount,
-                actual_hours_resolved_by_name: actuals.resolvedByNameCount,
-                planned_hours_total: plannedTotal,
-                remaining_hours_total: remainingTotal,
-                progress_percent: progressPercent,
-                ...this.getOrderReadiness(
-                    order,
-                    itemsByOrderId.get(Number(order.id)) || [],
-                    chinaPurchasesByOrderId.get(Number(order.id)) || []
-                ),
-            };
-        });
-        this.blockedOrders = this.orders.filter(order => order.production_ready_state === 'blocked');
-        this.reviewOrders = this.orders.filter(order => order.production_ready_state === 'needs_review');
+        this.orders = model.orders;
+        this.blockedOrders = model.blocked;
+        this.reviewOrders = model.review;
         this.orderSequence = this.orders.map(order => Number(order.id));
         this.actualMonthSummary = this.buildActualMonthSummary(timeEntries, employees);
-        this.schedule = buildProductionSchedule(
-            this.orders.filter(order => order.production_ready_state === 'ready'),
-            effectivePlanningSettings
-        );
+        this.schedule = {
+            queue: model.queue,
+            days: model.days,
+            dailyCapacity: model.dailyCapacity,
+        };
     },
 
     async load() {
@@ -215,6 +174,12 @@ const Gantt = {
     },
 
     buildOrderActuals(entries = [], employees = [], orders = []) {
+        // Canonical implementation lives in js/production-core.js (shared with a
+        // headless publisher). Delegate when that global is loaded; the inline
+        // fallback below keeps this method self-contained for isolated contexts.
+        if (typeof buildOrderActuals === 'function') {
+            return buildOrderActuals(entries, employees, orders);
+        }
         const buckets = new Map();
         const indexedOrders = (orders || [])
             .map(order => ({
@@ -381,6 +346,11 @@ const Gantt = {
     },
 
     getOrderReadiness(order, items = [], chinaPurchases = []) {
+        // Canonical implementation lives in js/production-core.js. Delegate when
+        // the global is loaded; inline fallback keeps this self-contained.
+        if (typeof deriveReadyState === 'function') {
+            return deriveReadyState(order, items, chinaPurchases);
+        }
         const productItems = (items || []).filter(item => String(item?.item_type || 'product') === 'product');
         const customMoldItems = productItems.filter(item => item && item.is_blank_mold === false);
         const blockedItems = customMoldItems.filter(item => !this.isTrueLike(item.base_mold_in_stock));
@@ -1241,6 +1211,11 @@ const Gantt = {
     },
 
     buildCapacityRiskSummary(days = [], dailyCapacity = 0, referenceDate = new Date()) {
+        // Canonical implementation lives in js/production-core.js. Delegate when
+        // the global is loaded; inline fallback keeps this self-contained.
+        if (typeof computeOverloadSummary === 'function') {
+            return computeOverloadSummary(days, dailyCapacity, referenceDate);
+        }
         const point = referenceDate instanceof Date ? referenceDate : this.parseLocalDate(referenceDate);
         const today = this.formatIsoDateLocal(point);
         const futureDays = (days || []).filter(day => String(day?.date || '') >= today);
