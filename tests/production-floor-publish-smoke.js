@@ -91,9 +91,17 @@ for (const o of Object.values(orders)) {
 photoUrls.forEach(u => assert.ok(/^photos\//.test(u), `photo url must be relative photos/*, got: ${u}`));
 
 // ---- queue card carries состав so production sees фурнитура/цвета without opening ----
-assert.deepEqual(plan.queue[0].hardware, ['Шнур джут'], 'queue card lists фурнитура');
+assert.deepEqual(plan.queue[0].hardware.map(h => h.name), ['Шнур джут'], 'queue card lists фурнитура (as {name,thumb_url})');
+assert.ok(plan.queue[0].hardware.every(h => 'thumb_url' in h), 'hardware entries carry a thumb_url slot');
 assert.deepEqual(plan.queue[0].packaging, ['Крафт-коробка'], 'queue card lists упаковка');
 assert.ok(Array.isArray(plan.queue[0].products) && plan.queue[0].products.includes('Ваза Волна'), 'queue card lists изделие(s)');
+
+// ---- per-stage hours + mold status on the card ----
+assert.ok(Array.isArray(plan.queue[0].stages) && plan.queue[0].stages.length === 3, 'queue card carries 3 per-stage hour rows');
+assert.ok(plan.queue[0].stages.every(s => 'label' in s && 'plan' in s), 'stage rows have label/plan');
+assert.ok(['ready', 'waiting', null].includes(plan.queue[0].mold), 'queue card carries mold status');
+assert.equal(orders['501'].mold, 'ready', 'order 501 mold in stock -> ready');
+assert.equal(orders['502'].mold, 'waiting', 'order 502 mold not in stock -> waiting');
 
 // ---- CONTENT: order 501 exposes the real production fields ("показываем то, что реально есть") ----
 const o501 = orders['501'];
