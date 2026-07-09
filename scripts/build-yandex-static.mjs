@@ -99,6 +99,26 @@ async function fetchSupabaseJson(pathname, options = {}) {
   throw lastError || new Error(`Supabase unavailable for ${pathname}`);
 }
 
+// Fetch every row of a list endpoint, page by page. PostgREST caps a single
+// response at ~1000 rows (max-rows), so a plain fetchSupabaseJson silently
+// truncates large tables (e.g. order_items > 1000) — and because the fetches are
+// ordered, the dropped rows are the newest orders' items, which then look empty
+// or falsely "ready" in the mirror. The pathname must carry a deterministic
+// `order=` clause so paging is stable across requests.
+export async function fetchSupabaseAllPages(pathname, options = {}) {
+  const pageSize = Math.max(1, Number(options.pageSize) || 1000);
+  const sep = pathname.includes('?') ? '&' : '?';
+  const all = [];
+  for (let page = 0; page < 10000; page += 1) {
+    const offset = page * pageSize;
+    const chunk = await fetchSupabaseJson(`${pathname}${sep}limit=${pageSize}&offset=${offset}`, options);
+    if (!Array.isArray(chunk)) return chunk;
+    all.push(...chunk);
+    if (chunk.length < pageSize) break;
+  }
+  return all;
+}
+
 async function fetchSettingJson(key, fallback) {
   const rows = await fetchSupabaseJson(`/rest/v1/settings?select=value&key=eq.${encodeURIComponent(key)}&limit=1`);
   const raw = rows?.[0]?.value;
@@ -235,19 +255,19 @@ async function buildBootstrapSnapshot() {
     chinaPurchaseRows,
   ] = await Promise.all([
     fetchSupabaseJson('/rest/v1/settings?select=key,value').catch(error => ({ __error: error.message })),
-    fetchSupabaseJson('/rest/v1/employees?select=*&order=name.asc').catch(() => []),
+    fetchSupabaseAllPages('/rest/v1/employees?select=*&order=name.asc').catch(() => []),
     fetchSettingJson('auth_accounts_json', []).catch(() => []),
-    fetchSupabaseJson('/rest/v1/warehouse_items?select=*&order=name.asc').catch(() => []),
+    fetchSupabaseAllPages('/rest/v1/warehouse_items?select=*&order=name.asc').catch(() => []),
     fetchSettingJson('warehouse_items_json', null).catch(() => null),
     fetchSupabaseJson('/rest/v1/warehouse_reservations?select=reservations_data&id=eq.1&limit=1').catch(() => []),
     fetchSupabaseJson('/rest/v1/warehouse_history?select=history_data&id=eq.1&limit=1').catch(() => []),
     fetchSettingJson('project_hardware_state_json', { checks: {}, actual_qtys: {} }).catch(() => ({ checks: {}, actual_qtys: {} })),
-    fetchSupabaseJson('/rest/v1/orders?select=*&status=neq.deleted&order=created_at.desc').catch(() => []),
-    fetchSupabaseJson('/rest/v1/order_items?select=*&order=order_id.asc,item_number.asc').catch(() => []),
-    fetchSupabaseJson('/rest/v1/time_entries?select=*&order=date.desc').catch(() => []),
+    fetchSupabaseAllPages('/rest/v1/orders?select=*&status=neq.deleted&order=created_at.desc').catch(() => []),
+    fetchSupabaseAllPages('/rest/v1/order_items?select=*&order=order_id.asc,item_number.asc').catch(() => []),
+    fetchSupabaseAllPages('/rest/v1/time_entries?select=*&order=date.desc').catch(() => []),
     fetchSettingJson('factual_month_snapshots_json', {}).catch(() => ({})),
-    fetchSupabaseJson('/rest/v1/shipments?select=*&order=created_at.desc').catch(() => []),
-    fetchSupabaseJson('/rest/v1/china_purchases?select=*&order=created_at.desc').catch(() => []),
+    fetchSupabaseAllPages('/rest/v1/shipments?select=*&order=created_at.desc').catch(() => []),
+    fetchSupabaseAllPages('/rest/v1/china_purchases?select=*&order=created_at.desc').catch(() => []),
   ]);
 
   const orders = parseOrderRows(ordersRows);
