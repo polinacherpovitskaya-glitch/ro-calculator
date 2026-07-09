@@ -1,0 +1,4 @@
+# Generated snapshot — produced by scripts/production-floor-publish.mjs at deploy
+# time (into deploy/static-yandex/floor/), never committed with the page source.
+plan.json
+orders/
