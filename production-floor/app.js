@@ -43,7 +43,7 @@
     if (!days || !days.length) return '';
     var cols = 'minmax(150px,1.3fr) repeat(' + days.length + ', minmax(46px,1fr))';
     var today = todayISO();
-    var html = '<div class="rowname" style="font-size:13px;color:var(--muted)">' + esc(nameHeader || 'Заказ') + '</div>';
+    var html = '<div class="rowname" style="font-size:13px;color:var(--muted)">' + esc(nameHeader != null ? nameHeader : 'Заказ') + '</div>';
     days.forEach(function (d) {
       var cls = 'dayhead' + (d.nonworking ? ' weekend' : '') + (d.date === today ? ' today' : '');
       html += '<div class="' + cls + '">' + esc(d.weekday) + '<br>' + dayNum(d.date) + '</div>';
@@ -69,19 +69,28 @@
   }
   function cardHtml(lbl, val, cls) { return '<div class="card ' + (cls || '') + '"><div class="lbl">' + esc(lbl) + '</div><div class="val">' + val + '</div></div>'; }
 
+  function tagLine(label, values) {
+    return values && values.length ? '<span class="qtag"><b>' + label + ':</b> ' + values.map(esc).join(', ') + '</span>' : '';
+  }
   function queueCard(q) {
     var thumb = q.thumb_url ? '<img class="thumb" src="' + escAttr(q.thumb_url) + '" alt="">' : '<div class="thumb ph">фото</div>';
     var prog = q.hours && q.hours.plan > 0 ? Math.min(100, Math.round((q.hours.fact / q.hours.plan) * 100)) : 0;
-    return '<div class="qcard"><div class="qcard-top"><div>' +
+    var bits = [];
+    if (q.colors && q.colors.length) bits.push('<span class="qtag"><b>Цвет:</b> <span class="swatches">' + q.colors.map(swatch).join('') + '</span></span>');
+    bits.push(tagLine('Фурнитура', q.hardware));
+    bits.push(tagLine('Упаковка', q.packaging));
+    var parts = bits.filter(Boolean).length ? '<div class="qparts">' + bits.filter(Boolean).join('') + '</div>' : '';
+    return '<a class="qcard" href="#/order/' + encodeURIComponent(q.order_id) + '">' +
+      '<div class="qcard-top"><div>' +
       '<div class="qname">' + esc(q.name) + '</div>' +
       '<div class="qmeta">' + esc(q.client || '') + (q.start_date ? ' · старт ' + fmtDate(q.start_date) : '') + '</div></div>' +
       deadlineBadge(q.deadline_state, q.deadline_buffer_days) + '</div>' +
       '<div class="qbody">' + thumb +
-      '<div style="min-width:180px"><div class="qhours">Часы: ' + fmtHours(q.hours.plan) + ' план · ' + fmtHours(q.hours.fact) + ' факт · <b>' + fmtHours(q.hours.remaining) + ' осталось</b></div>' +
+      '<div style="flex:1;min-width:180px"><div class="qhours">Часы: ' + fmtHours(q.hours.plan) + ' план · ' + fmtHours(q.hours.fact) + ' факт · <b>' + fmtHours(q.hours.remaining) + ' осталось</b></div>' +
       '<div class="bar"><i style="width:' + prog + '%"></i></div></div>' +
       (q.quantity ? '<div class="qty">' + q.quantity + ' шт</div>' : '') +
-      (q.colors && q.colors.length ? '<div class="swatches">' + q.colors.map(swatch).join('') + '</div>' : '') +
-      '<a class="open" href="#/order/' + encodeURIComponent(q.order_id) + '">Открыть &rarr;</a></div></div>';
+      '<span class="open">Открыть &rarr;</span></div>' +
+      parts + '</a>';
   }
   function blockedRow(b) {
     var cls = b.state === 'needs_review' ? 'muted' : 'warn';
@@ -140,7 +149,7 @@
     if (o.nfc && o.nfc.is_nfc) specs.push(spec('NFC', o.nfc.programming ? 'да · программирование' : 'да'));
     var calHtml = (o.calendar_days && o.calendar_days.length)
       ? '<div class="section"><div class="panel"><h3 class="card-h">Календарь заказа</h3>' +
-        buildCalendar(o.calendar_days, [{ name: 'Этапы', client: '', cells: segMap(o.calendar_segments) }], 'Этапы') + '</div></div>'
+        buildCalendar(o.calendar_days, [{ name: 'Этапы', client: '', cells: segMap(o.calendar_segments) }], '') + '</div></div>'
       : '';
     app.innerHTML = '<a class="back" href="#/">&larr; К календарю</a>' +
       '<div class="ohead"><div><div class="oname">' + esc(o.name) + '</div>' +

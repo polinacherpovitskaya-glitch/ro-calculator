@@ -63,6 +63,11 @@ assert.equal(plan.blocked[0].order_id, 502, 'blocked entry is 502');
 assert.equal(plan.blocked[0].state, 'blocked', '502 state = blocked');
 assert.ok(/Кита[йя]/i.test(plan.blocked[0].reason), '502 blocked reason mentions China');
 
+// ---- queue card carries состав so production sees фурнитура/цвета without opening ----
+assert.deepEqual(plan.queue[0].hardware, ['Шнур джут'], 'queue card lists фурнитура');
+assert.deepEqual(plan.queue[0].packaging, ['Крафт-коробка'], 'queue card lists упаковка');
+assert.ok(Array.isArray(plan.queue[0].products) && plan.queue[0].products.includes('Ваза Волна'), 'queue card lists изделие(s)');
+
 // ---- CONTENT: order 501 exposes the real production fields ("показываем то, что реально есть") ----
 const o501 = orders['501'];
 assert.equal(o501.quantity, 170, 'order 501 quantity = product 120 + pendant 50 (extra_cost excluded)');
