@@ -80,6 +80,16 @@ assert.ok(withPhotos.photos.every(u => /^photos\//.test(u)), 'photo urls must be
 assert.ok(!/data:image/i.test(allText), 'no base64 image data may appear in JSON');
 assert.ok(fs.existsSync(path.join(out, withPhotos.photos[0])), 'extracted photo file must exist on disk');
 
+// ---- КАЖДАЯ публикуемая фото-ссылка относительна (никаких внешних хостов вроде supabase) ----
+const photoUrls = [];
+plan.queue.forEach(q => { if (q.thumb_url) photoUrls.push(q.thumb_url); });
+for (const o of Object.values(orders)) {
+    if (o.photo_url) photoUrls.push(o.photo_url);
+    (o.photos || []).forEach(u => photoUrls.push(u));
+    (o.items || []).forEach(it => { if (it.thumb_url) photoUrls.push(it.thumb_url); });
+}
+photoUrls.forEach(u => assert.ok(/^photos\//.test(u), `photo url must be relative photos/*, got: ${u}`));
+
 // ---- queue card carries состав so production sees фурнитура/цвета without opening ----
 assert.deepEqual(plan.queue[0].hardware, ['Шнур джут'], 'queue card lists фурнитура');
 assert.deepEqual(plan.queue[0].packaging, ['Крафт-коробка'], 'queue card lists упаковка');
