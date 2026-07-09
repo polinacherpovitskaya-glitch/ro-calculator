@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { execFileSync } from 'node:child_process';
 
 const ROOT = process.cwd();
@@ -96,6 +97,26 @@ async function fetchSupabaseJson(pathname, options = {}) {
   }
 
   throw lastError || new Error(`Supabase unavailable for ${pathname}`);
+}
+
+// Fetch every row of a list endpoint, page by page. PostgREST caps a single
+// response at ~1000 rows (max-rows), so a plain fetchSupabaseJson silently
+// truncates large tables (e.g. order_items > 1000) — and because the fetches are
+// ordered, the dropped rows are the newest orders' items, which then look empty
+// or falsely "ready" in the mirror. The pathname must carry a deterministic
+// `order=` clause so paging is stable across requests.
+export async function fetchSupabaseAllPages(pathname, options = {}) {
+  const pageSize = Math.max(1, Number(options.pageSize) || 1000);
+  const sep = pathname.includes('?') ? '&' : '?';
+  const all = [];
+  for (let page = 0; page < 10000; page += 1) {
+    const offset = page * pageSize;
+    const chunk = await fetchSupabaseJson(`${pathname}${sep}limit=${pageSize}&offset=${offset}`, options);
+    if (!Array.isArray(chunk)) return chunk;
+    all.push(...chunk);
+    if (chunk.length < pageSize) break;
+  }
+  return all;
 }
 
 async function fetchSettingJson(key, fallback) {
@@ -234,19 +255,19 @@ async function buildBootstrapSnapshot() {
     chinaPurchaseRows,
   ] = await Promise.all([
     fetchSupabaseJson('/rest/v1/settings?select=key,value').catch(error => ({ __error: error.message })),
-    fetchSupabaseJson('/rest/v1/employees?select=*&order=name.asc').catch(() => []),
+    fetchSupabaseAllPages('/rest/v1/employees?select=*&order=name.asc').catch(() => []),
     fetchSettingJson('auth_accounts_json', []).catch(() => []),
-    fetchSupabaseJson('/rest/v1/warehouse_items?select=*&order=name.asc').catch(() => []),
+    fetchSupabaseAllPages('/rest/v1/warehouse_items?select=*&order=name.asc').catch(() => []),
     fetchSettingJson('warehouse_items_json', null).catch(() => null),
     fetchSupabaseJson('/rest/v1/warehouse_reservations?select=reservations_data&id=eq.1&limit=1').catch(() => []),
     fetchSupabaseJson('/rest/v1/warehouse_history?select=history_data&id=eq.1&limit=1').catch(() => []),
     fetchSettingJson('project_hardware_state_json', { checks: {}, actual_qtys: {} }).catch(() => ({ checks: {}, actual_qtys: {} })),
-    fetchSupabaseJson('/rest/v1/orders?select=*&status=neq.deleted&order=created_at.desc').catch(() => []),
-    fetchSupabaseJson('/rest/v1/order_items?select=*&order=order_id.asc,item_number.asc').catch(() => []),
-    fetchSupabaseJson('/rest/v1/time_entries?select=*&order=date.desc').catch(() => []),
+    fetchSupabaseAllPages('/rest/v1/orders?select=*&status=neq.deleted&order=created_at.desc').catch(() => []),
+    fetchSupabaseAllPages('/rest/v1/order_items?select=*&order=order_id.asc,item_number.asc').catch(() => []),
+    fetchSupabaseAllPages('/rest/v1/time_entries?select=*&order=date.desc').catch(() => []),
     fetchSettingJson('factual_month_snapshots_json', {}).catch(() => ({})),
-    fetchSupabaseJson('/rest/v1/shipments?select=*&order=created_at.desc').catch(() => []),
-    fetchSupabaseJson('/rest/v1/china_purchases?select=*&order=created_at.desc').catch(() => []),
+    fetchSupabaseAllPages('/rest/v1/shipments?select=*&order=created_at.desc').catch(() => []),
+    fetchSupabaseAllPages('/rest/v1/china_purchases?select=*&order=created_at.desc').catch(() => []),
   ]);
 
   const orders = parseOrderRows(ordersRows);
@@ -290,6 +311,36 @@ function writeJson(filePath, data) {
   fs.writeFileSync(filePath, JSON.stringify(data));
 }
 
+// Core tables that must always contain rows in a healthy production snapshot.
+// Every Supabase fetch in buildBootstrapSnapshot() swallows errors into an empty
+// value, so when Supabase is unreachable during the build (it periodically 522s
+// from CI) these come back empty and the snapshot is silently degraded.
+const REQUIRED_BOOTSTRAP_TABLES = ['authAccounts', 'employees', 'orders', 'settingsRows'];
+
+// Refuse to publish a degraded snapshot. Publishing an empty bootstrap.json breaks
+// calc2 for everyone offline — no login accounts, no orders, the app can't hydrate
+// (the витрина and #gantt read it too). Throwing here fails the build step; the
+// upload step has no `if: always()`, so it is skipped and the CDN keeps the
+// last-good snapshot until a later run catches Supabase healthy.
+export function assertHealthyBootstrap(bootstrap) {
+  const data = (bootstrap && bootstrap.data) || {};
+  const counts = {};
+  const empty = [];
+  for (const key of REQUIRED_BOOTSTRAP_TABLES) {
+    const rows = Array.isArray(data[key]) ? data[key] : [];
+    counts[key] = rows.length;
+    if (rows.length === 0) empty.push(key);
+  }
+  if (empty.length > 0) {
+    throw new Error(
+      `Refusing to publish a degraded bootstrap snapshot: required table(s) empty [${empty.join(', ')}] `
+      + `(counts ${JSON.stringify(counts)}). Supabase was likely unreachable during the build. `
+      + 'Failing the build so the CDN keeps the last-good snapshot instead of emptying calc2.'
+    );
+  }
+  return counts;
+}
+
 // Copy the public production-floor витрина into <out>/floor and publish its
 // curated read-only snapshot (plan.json + orders/<id>.json) alongside it.
 // Non-fatal: if the snapshot build fails, the calc2 mirror must still sync and
@@ -325,6 +376,7 @@ async function main() {
   fs.writeFileSync(path.join(OUT_DIR, 'index.html'), rewriteIndexForObjectStorage(indexSource));
 
   const bootstrap = await buildBootstrapSnapshot();
+  assertHealthyBootstrap(bootstrap);
   writeJson(path.join(OUT_DIR, 'data/bootstrap.json'), bootstrap);
 
   const floor = buildFloor();
@@ -347,7 +399,11 @@ async function main() {
   console.log(JSON.stringify(summary, null, 2));
 }
 
-main().catch(error => {
-  console.error(error);
-  process.exit(1);
-});
+const isDirectRun = process.argv[1]
+  && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isDirectRun) {
+  main().catch(error => {
+    console.error(error);
+    process.exit(1);
+  });
+}
