@@ -57,6 +57,8 @@ assert.equal(plan.in_shop_count, 2, 'in-shop count = active workers');
 assert.equal(plan.queue.length, 1, 'only the ready order (501) is scheduled');
 assert.equal(plan.queue[0].order_id, 501, 'queue[0] = order 501');
 assert.deepEqual(plan.queue[0].hours, { plan: 24, fact: 9, remaining: 16 }, 'queue[0] hours match model (24 plan, 9 fact, 16 remaining)');
+assert.ok(['in_progress', 'queue'].includes(plan.queue[0].group), 'queue entry must carry a group');
+assert.ok('stage_label' in plan.queue[0], 'queue entry must carry stage_label');
 assert.equal(plan.summary.blocked_count, 1, 'order 502 is blocked');
 assert.equal(plan.blocked.length, 1, 'blocked list has one entry');
 assert.equal(plan.blocked[0].order_id, 502, 'blocked entry is 502');

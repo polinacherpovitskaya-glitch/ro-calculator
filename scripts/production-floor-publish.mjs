@@ -39,6 +39,10 @@ const STATUS_LABELS = {
 const WEEKDAYS = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб']; // Date.getDay() index
 const STAGE_LABELS = { molding: 'Литьё', assembly: 'Сборка', packaging: 'Упаковка' };
 
+// Статусы, означающие «заказ реально идёт в цехе сейчас» (vs готов и ждёт слот).
+const IN_PROGRESS_STATUSES = new Set(['production_casting', 'production_printing', 'production_hardware', 'production_packaging', 'in_production', 'delivery']);
+function queueGroup(status) { return IN_PROGRESS_STATUSES.has(String(status)) ? 'in_progress' : 'queue'; }
+
 // Product-like line types (изделия) vs фурнитура/упаковка; extra_cost is a
 // cost line, not a physical item, so it never appears in состав or counts.
 const PRODUCT_TYPES = new Set(['product', 'pendant']);
@@ -356,6 +360,9 @@ function toPublicPlan(ctx, model, slots, data, idx, holidaySet, queueById) {
             start_date: dates[0] || null, deadline: q.deadlineEnd || null,
             deadline_state: ds.state, deadline_buffer_days: ds.buffer,
             hours: { plan: Number(q.plannedTotalHours) || 0, fact: Number(q.actualTotalHours) || 0, remaining: Number(q.remainingTotalHours) || 0 },
+            status: q.status || null,
+            stage_label: STATUS_LABELS[q.status] || '',
+            group: queueGroup(q.status),
             thumb_url: ps.thumb, colors: ps.colors, quantity: ps.quantity,
             products: items.filter(i => i.kind === 'product').map(i => i.name),
             hardware: items.filter(i => i.kind === 'hardware').map(i => i.name),
