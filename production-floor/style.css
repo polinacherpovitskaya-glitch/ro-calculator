@@ -169,3 +169,14 @@ button:active { transform: scale(0.98); }
   .oname { font-size: 24px; }
   .open { margin-left: 0; }
 }
+
+/* Витрина 2.0 — крупные цвета, галерея фото, бейджи этапа/транзита */
+.swatch { font-size: 15px; gap: 8px; }
+.swatch img { width: 34px; height: 34px; border-radius: 8px; }
+.swatch .nohex { width: 34px; height: 34px; border-radius: 8px; }
+.gallery { display: flex; flex-wrap: wrap; gap: 10px; }
+.gallery .photo { width: 160px; height: 160px; object-fit: cover; border-radius: 12px; }
+.qbadges { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.badge.stage { background: #fef3c7; color: #92400e; }
+.badge.info { background: #e0f2fe; color: #075985; }
+.brow.static { cursor: default; }

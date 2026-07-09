@@ -57,11 +57,38 @@ assert.equal(plan.in_shop_count, 2, 'in-shop count = active workers');
 assert.equal(plan.queue.length, 1, 'only the ready order (501) is scheduled');
 assert.equal(plan.queue[0].order_id, 501, 'queue[0] = order 501');
 assert.deepEqual(plan.queue[0].hours, { plan: 24, fact: 9, remaining: 16 }, 'queue[0] hours match model (24 plan, 9 fact, 16 remaining)');
+assert.ok(['in_progress', 'queue'].includes(plan.queue[0].group), 'queue entry must carry a group');
+assert.ok('stage_label' in plan.queue[0], 'queue entry must carry stage_label');
 assert.equal(plan.summary.blocked_count, 1, 'order 502 is blocked');
 assert.equal(plan.blocked.length, 1, 'blocked list has one entry');
 assert.equal(plan.blocked[0].order_id, 502, 'blocked entry is 502');
 assert.equal(plan.blocked[0].state, 'blocked', '502 state = blocked');
 assert.ok(/Кита[йя]/i.test(plan.blocked[0].reason), '502 blocked reason mentions China');
+
+// ---- Формы в пути: только in_transit, без денег ----
+assert.ok(Array.isArray(plan.mold_transit), 'plan.mold_transit must be an array');
+assert.equal(plan.mold_transit.length, 1, 'only the in_transit purchase is shown');
+assert.equal(plan.mold_transit[0].name, 'Молды купер 2шт + варежка', 'transit name from purchase_name');
+assert.deepEqual(plan.mold_transit[0].items, ['Форма ТПА', 'Молд купер'], 'transit items are names only');
+assert.equal(plan.mold_transit[0].stage_label, 'Летит', 'stage from last status_history entry');
+assert.ok(!JSON.stringify(plan.mold_transit).includes('qty'), 'no qty/price fields leak into transit board');
+
+// ---- Фото-примеры извлечены в файлы, ссылки относительные, base64 не утёк ----
+const withPhotos = Object.values(orders).find(o => o.photos && o.photos.length);
+assert.ok(withPhotos, 'at least one order must expose extracted photos');
+assert.ok(withPhotos.photos.every(u => /^photos\//.test(u)), 'photo urls must be relative photos/*');
+assert.ok(!/data:image/i.test(allText), 'no base64 image data may appear in JSON');
+assert.ok(fs.existsSync(path.join(out, withPhotos.photos[0])), 'extracted photo file must exist on disk');
+
+// ---- КАЖДАЯ публикуемая фото-ссылка относительна (никаких внешних хостов вроде supabase) ----
+const photoUrls = [];
+plan.queue.forEach(q => { if (q.thumb_url) photoUrls.push(q.thumb_url); });
+for (const o of Object.values(orders)) {
+    if (o.photo_url) photoUrls.push(o.photo_url);
+    (o.photos || []).forEach(u => photoUrls.push(u));
+    (o.items || []).forEach(it => { if (it.thumb_url) photoUrls.push(it.thumb_url); });
+}
+photoUrls.forEach(u => assert.ok(/^photos\//.test(u), `photo url must be relative photos/*, got: ${u}`));
 
 // ---- queue card carries состав so production sees фурнитура/цвета without opening ----
 assert.deepEqual(plan.queue[0].hardware, ['Шнур джут'], 'queue card lists фурнитура');

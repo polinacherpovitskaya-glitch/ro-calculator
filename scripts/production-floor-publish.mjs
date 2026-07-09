@@ -39,6 +39,10 @@ const STATUS_LABELS = {
 const WEEKDAYS = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб']; // Date.getDay() index
 const STAGE_LABELS = { molding: 'Литьё', assembly: 'Сборка', packaging: 'Упаковка' };
 
+// Статусы, означающие «заказ реально идёт в цехе сейчас» (vs готов и ждёт слот).
+const IN_PROGRESS_STATUSES = new Set(['production_casting', 'production_printing', 'production_hardware', 'production_packaging', 'in_production', 'delivery']);
+function queueGroup(status) { return IN_PROGRESS_STATUSES.has(String(status)) ? 'in_progress' : 'queue'; }
+
 // Product-like line types (изделия) vs фурнитура/упаковка; extra_cost is a
 // cost line, not a physical item, so it never appears in состав or counts.
 const PRODUCT_TYPES = new Set(['product', 'pendant']);
@@ -74,6 +78,58 @@ function parseMaybe(v) {
     if (v == null) return null;
     if (typeof v === 'object') return v;
     try { return JSON.parse(v); } catch { return null; }
+}
+
+// Разбор color_solution_attachment: JSON-строка-объект ИЛИ массив таких.
+// Каждый элемент: { name, type, size, data:'data:image/...;base64,...' }.
+function parseAttachments(raw) {
+    const v = parseMaybe(raw);
+    if (Array.isArray(v)) return v.filter(Boolean);
+    if (v && typeof v === 'object') return [v];
+    return [];
+}
+const IMAGE_EXT = { 'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif' };
+// Пишет одно изображение из base64 в OUT/photos, возвращает относительный URL или null.
+// Безопасность: пишем ТОЛЬКО валидный data:image base64 известного типа. Иначе — null.
+// Реальные данные хранят картинку в поле data_url (иногда data).
+function writePhotoFile(att, outDir, baseName) {
+    const data = att && typeof att === 'object'
+        ? (typeof att.data_url === 'string' ? att.data_url : (typeof att.data === 'string' ? att.data : ''))
+        : (typeof att === 'string' ? att : '');
+    const m = /^data:(image\/[a-z+]+);base64,([A-Za-z0-9+/=\s]+)$/i.exec(data);
+    if (!m) return null;
+    const ext = IMAGE_EXT[m[1].toLowerCase()];
+    if (!ext) return null;
+    let buf;
+    try { buf = Buffer.from(m[2].replace(/\s+/g, ''), 'base64'); } catch { return null; }
+    if (!buf.length) return null;
+    const dir = path.join(outDir, 'photos');
+    fs.mkdirSync(dir, { recursive: true });
+    const file = `${baseName}.${ext}`;
+    fs.writeFileSync(path.join(dir, file), buf);
+    return `photos/${file}`;
+}
+
+// Скачивает внешнюю картинку (напр. публичный mold-photo из Supabase Storage) и
+// перекладывает её в OUT/photos, чтобы в публичный JSON НЕ утекал внешний хост.
+// Best-effort: при любой ошибке возвращает null (фото просто не показываем).
+async function rehostRemote(url, outDir, baseName) {
+    if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) return null;
+    try {
+        const res = await fetch(url);
+        if (!res.ok) return null;
+        const ct = String(res.headers.get('content-type') || '').toLowerCase().split(';')[0].trim();
+        let ext = IMAGE_EXT[ct];
+        if (!ext) { const um = /\.(jpe?g|png|webp|gif)(\?|$)/i.exec(url); ext = um ? um[1].toLowerCase().replace('jpeg', 'jpg') : null; }
+        if (!ext) return null;
+        const buf = Buffer.from(await res.arrayBuffer());
+        if (!buf.length || buf.length > 8 * 1024 * 1024) return null;
+        const dir = path.join(outDir, 'photos');
+        fs.mkdirSync(dir, { recursive: true });
+        const file = `${baseName}.${ext}`;
+        fs.writeFileSync(path.join(dir, file), buf);
+        return `photos/${file}`;
+    } catch { return null; }
 }
 
 // ---------- Supabase (anon REST — mirrors scripts/export-supabase-snapshot.mjs) ----------
@@ -266,7 +322,7 @@ function curateItems(orderId, flatItems, idx, data) {
     const kindOf = t => (t === 'hardware' ? 'hardware' : t === 'packaging' ? 'packaging' : 'product');
     return rows.map(it => {
         const kind = kindOf(it.item_type);
-        const out = { kind, name: String(it.product_name || ''), quantity: Number(it.quantity) || 0, thumb_url: kind === 'product' ? resolvePhoto(it, data) : null };
+        const out = { kind, name: String(it.product_name || ''), quantity: Number(it.quantity) || 0, thumb_url: kind === 'product' ? ((PUB.photosByItemId.get(String(it.id)) || [])[0] || null) : null };
         if (kind === 'product') out.colors = itemColors(it, idx);
         return out;
     });
@@ -337,12 +393,41 @@ function productSummary(orderId, flatItems, idx) {
     const first = products[0] || {};
     const weight = Number(first.weight_grams) || null;
     const nfc = (first.is_nfc === true || first.is_nfc === 1 || first.is_nfc === '1') ? { is_nfc: true, programming: !!first.nfc_programming } : null;
-    const thumb = first.template_id != null || first.color_solution_attachment ? resolvePhoto(first, PUB.data) : null;
+    const thumb = (PUB.photosByOrder.get(Number(orderId)) || [])[0] || null;
     return { quantity, colors, weight, nfc, thumb };
 }
 
 // module-scope holder so productSummary can reach data.molds for photos
-const PUB = { data: null };
+const PUB = { data: null, photosByOrder: new Map(), photosByItemId: new Map() };
+
+// Этапы доставки закупки из Китая (для читаемого статуса).
+const CHINA_STAGE_LABELS = {
+    in_china_warehouse: 'На складе в Китае', consolidating: 'Консолидация',
+    in_transit: 'Летит', received: 'Получено', delivered: 'Доставлено',
+};
+const CHINA_DELIVERY_LABELS = { air_fast: 'Авиа (быстро)', air: 'Авиа', sea: 'Море', truck: 'Авто', rail: 'Ж/д' };
+
+// Публичная доска «Формы в пути»: только реально едущие закупки (in_transit).
+// ВАЖНО: никаких денег — только название, названия позиций, стадия, тип доставки.
+function buildMoldTransit(chinaPurchases) {
+    return (chinaPurchases || [])
+        .filter(row => String(row.status) === 'in_transit')
+        .map(row => {
+            const pd = parseMaybe(row.purchase_data) || {};
+            const history = Array.isArray(pd.status_history) ? pd.status_history : [];
+            const lastStage = history.length ? history[history.length - 1].status : row.status;
+            const items = (Array.isArray(pd.items) ? pd.items : [])
+                .map(it => String(it && it.name || '').trim())
+                .filter(Boolean);
+            return {
+                name: String(pd.purchase_name || '').trim(),
+                items,
+                stage_label: CHINA_STAGE_LABELS[lastStage] || CHINA_STAGE_LABELS[row.status] || '',
+                delivery_label: CHINA_DELIVERY_LABELS[pd.delivery_type] || '',
+            };
+        })
+        .filter(m => m.name);
+}
 
 function toPublicPlan(ctx, model, slots, data, idx, holidaySet, queueById) {
     const inShop = Math.round(Number(slots.workersCount) || 0);
@@ -356,6 +441,9 @@ function toPublicPlan(ctx, model, slots, data, idx, holidaySet, queueById) {
             start_date: dates[0] || null, deadline: q.deadlineEnd || null,
             deadline_state: ds.state, deadline_buffer_days: ds.buffer,
             hours: { plan: Number(q.plannedTotalHours) || 0, fact: Number(q.actualTotalHours) || 0, remaining: Number(q.remainingTotalHours) || 0 },
+            status: q.status || null,
+            stage_label: STATUS_LABELS[q.status] || '',
+            group: queueGroup(q.status),
             thumb_url: ps.thumb, colors: ps.colors, quantity: ps.quantity,
             products: items.filter(i => i.kind === 'product').map(i => i.name),
             hardware: items.filter(i => i.kind === 'hardware').map(i => i.name),
@@ -389,6 +477,7 @@ function toPublicPlan(ctx, model, slots, data, idx, holidaySet, queueById) {
         calendar: cal,
         queue,
         blocked,
+        mold_transit: buildMoldTransit(data.chinaPurchases),
     };
 }
 
@@ -409,7 +498,9 @@ function toPublicOrder(orderId, model, data, idx, holidaySet, queueById, enriche
         deadline, deadline_state: ds.state, deadline_buffer_days: ds.buffer,
         blocked_reason: o.production_blocked_reason || null,
         quantity: ps.quantity, weight_grams: ps.weight, colors: ps.colors,
-        nfc: ps.nfc, photo_url: ps.thumb,
+        nfc: ps.nfc,
+        photos: PUB.photosByOrder.get(Number(orderId)) || [],
+        photo_url: (PUB.photosByOrder.get(Number(orderId)) || [])[0] || ps.thumb,
         note: String(raw.notes || o.notes || '') || null,
         items: curateItems(orderId, data.flatItems, idx, data),
         stages: q ? stagesFromQueue(q) : stagesFromOrder(o),
@@ -445,13 +536,38 @@ async function main() {
     const queueById = new Map(model.queue.map(q => [Number(q.orderId), q]));
     const enrichedById = new Map((model.orders || []).map(o => [Number(o.id), o]));
 
-    const plan = toPublicPlan(ctx, model, slots, data, idx, holidaySet, queueById);
-
+    // Только те заказы, что реально попадут в снимок (очередь + блокеры + review).
     const orderIds = new Set([
         ...model.queue.map(q => Number(q.orderId)),
         ...model.blocked.map(o => Number(o.id)),
         ...model.review.map(o => Number(o.id)),
     ]);
+
+    // Собрать публикуемые фото ТОЛЬКО как относительные photos/* и ТОЛЬКО для
+    // публикуемых заказов: (1) base64-вложения-примеры из заказа; (2) внешние
+    // mold-фото (Supabase Storage) — перекладываем к себе, чтобы внешний хост не
+    // утёк. Онлайн — перехостим; офлайн/фикстура — внешние URL просто пропускаем.
+    const photosByOrder = new Map();
+    const photosByItemId = new Map();
+    for (const it of data.flatItems) {
+        if (!orderIds.has(Number(it.order_id))) continue;
+        const base = `${it.order_id}-${it.item_number != null ? it.item_number : it.id}`;
+        const urls = [];
+        parseAttachments(it.color_solution_attachment).forEach((a, i) => { const u = writePhotoFile(a, OUT_DIR, `${base}-a${i}`); if (u) urls.push(u); });
+        if (!FIXTURE && String(it.item_type || 'product') === 'product') {
+            const ext = resolvePhoto(it, data);
+            if (ext) { const u = await rehostRemote(ext, OUT_DIR, `${base}-m`); if (u) urls.push(u); }
+        }
+        if (urls.length) {
+            photosByItemId.set(String(it.id), urls);
+            photosByOrder.set(Number(it.order_id), (photosByOrder.get(Number(it.order_id)) || []).concat(urls));
+        }
+    }
+    PUB.photosByOrder = photosByOrder;
+    PUB.photosByItemId = photosByItemId;
+
+    const plan = toPublicPlan(ctx, model, slots, data, idx, holidaySet, queueById);
+
     const orders = [...orderIds].map(id => toPublicOrder(id, model, data, idx, holidaySet, queueById, enrichedById));
 
     // Write atomically-ish: build everything, then write.

@@ -28,7 +28,7 @@
     {
       "id": 9001, "order_id": 501, "item_number": 1, "template_id": null, "product_name": "Ваза Волна", "quantity": 120,
       "sell_price_item": 4804, "cost_total": 1276.5,
-      "item_data": { "item_type": "product", "product_name": "Ваза Волна", "quantity": 120, "weight_grams": 480, "is_nfc": true, "nfc_programming": true, "color_id": 10, "color_name": "Терракот", "colors": [{ "id": 10, "name": "Терракот" }], "is_blank_mold": true, "base_mold_in_stock": true, "cost_total": 1276.5, "sell_price_item": 4804, "price_cny": 4242, "target_price_item": 6006 }
+      "item_data": { "item_type": "product", "product_name": "Ваза Волна", "quantity": 120, "weight_grams": 480, "is_nfc": true, "nfc_programming": true, "color_id": 10, "color_name": "Терракот", "colors": [{ "id": 10, "name": "Терракот" }], "is_blank_mold": true, "base_mold_in_stock": true, "cost_total": 1276.5, "sell_price_item": 4804, "price_cny": 4242, "target_price_item": 6006, "color_solution_attachment": { "name": "ex.png", "type": "image/png", "data": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==" } }
     },
     {
       "id": 9005, "order_id": 501, "item_number": 2, "template_id": null, "product_name": "Подвес RO", "quantity": 50,
@@ -49,7 +49,7 @@
     },
     {
       "id": 9004, "order_id": 502, "item_number": 1, "template_id": null, "product_name": "Ваза Гранит", "quantity": 80,
-      "item_data": { "item_type": "product", "product_name": "Ваза Гранит", "quantity": 80, "weight_grams": 600, "is_blank_mold": false, "base_mold_in_stock": false, "colors": [], "color_name": "Гранит" }
+      "item_data": { "item_type": "product", "product_name": "Ваза Гранит", "quantity": 80, "weight_grams": 600, "is_blank_mold": false, "base_mold_in_stock": false, "colors": [], "color_name": "Гранит", "color_solution_attachment": [ { "name": "a.png", "type": "image/png", "data": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==" }, { "name": "b.png", "type": "image/png", "data": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==" } ] }
     }
   ],
   "timeEntries": [
@@ -59,7 +59,9 @@
     { "id": 1, "name": "Женя", "role": "production" }
   ],
   "chinaPurchases": [
-    { "order_id": 502, "status": "ordered", "purchase_name": "Молд Гранит" }
+    { "order_id": 502, "status": "ordered", "purchase_name": "Молд Гранит" },
+    { "id": 9001, "status": "in_transit", "purchase_data": { "purchase_name": "Молды купер 2шт + варежка", "delivery_type": "air_fast", "items": [ { "name": "Форма ТПА", "qty": 1 }, { "name": "Молд купер", "qty": 2 } ], "status_history": [ { "status": "in_china_warehouse", "date": "2026-07-01T00:00:00Z" }, { "status": "in_transit", "date": "2026-07-06T00:00:00Z" } ] } },
+    { "id": 9002, "status": "received", "purchase_data": { "purchase_name": "Уже приехало", "items": [ { "name": "Гвоздики", "qty": 3000 } ] } }
   ],
   "appColors": [
     { "id": 10, "name": "Терракот", "color_data": { "id": 10, "number": "010", "name": "Терракот", "photo_url": "img/colors/010.png" } }

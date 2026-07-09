@@ -86,7 +86,8 @@
       '<div class="qcard-top"><div>' +
       '<div class="qname">' + esc(q.name) + '</div>' +
       '<div class="qmeta">' + esc(q.client || '') + (q.start_date ? ' · старт ' + fmtDate(q.start_date) : '') + '</div></div>' +
-      deadlineBadge(q.deadline_state, q.deadline_buffer_days) + '</div>' +
+      '<div class="qbadges">' + (q.group === 'in_progress' && q.stage_label ? '<span class="badge stage">' + esc(q.stage_label) + '</span>' : '') +
+      deadlineBadge(q.deadline_state, q.deadline_buffer_days) + '</div></div>' +
       '<div class="qbody">' + thumb +
       '<div style="flex:1;min-width:180px"><div class="qhours">Часы: ' + fmtHours(q.hours.plan) + ' план · ' + fmtHours(q.hours.fact) + ' факт · <b>' + fmtHours(q.hours.remaining) + ' осталось</b></div>' +
       '<div class="bar"><i style="width:' + prog + '%"></i></div></div>' +
@@ -99,6 +100,13 @@
     var reason = b.reason || (b.state === 'needs_review' ? 'Требует проверки' : 'Ждёт молд / Китай');
     return '<a class="brow" href="#/order/' + encodeURIComponent(b.order_id) + '"><div class="n">' + esc(b.name) + (b.client ? ' <small>· ' + esc(b.client) + '</small>' : '') + '</div>' +
       '<span class="badge ' + cls + '">' + esc(reason) + '</span></a>';
+  }
+
+  function moldTransitRow(m) {
+    var items = m.items && m.items.length ? ' <small>· ' + m.items.map(esc).join(', ') + '</small>' : '';
+    var tail = [m.stage_label, m.delivery_label].filter(Boolean).map(esc).join(' · ');
+    return '<div class="brow static"><div class="n">' + esc(m.name) + items + '</div>' +
+      (tail ? '<span class="badge info">' + tail + '</span>' : '') + '</div>';
   }
 
   function renderBoard(plan) {
@@ -134,9 +142,18 @@
       '</div>' +
       (buildCalendar(weekDays, cal.rows) || '<div class="qmeta">Нет данных календаря</div>') +
       '</div></div>' +
-      '<div class="section"><h2>Очередь к запуску</h2>' +
-      (plan.queue.length ? plan.queue.map(queueCard).join('') : '<div class="panel qmeta">Очередь пуста</div>') + '</div>' +
-      (plan.blocked.length ? '<div class="section"><h2>Ждут молд / Китай</h2>' + plan.blocked.map(blockedRow).join('') + '</div>' : '') +
+      (function () {
+        var inProg = plan.queue.filter(function (q) { return q.group === 'in_progress'; });
+        var waiting = plan.queue.filter(function (q) { return q.group !== 'in_progress'; });
+        var transit = plan.mold_transit || [];
+        return '' +
+          '<div class="section"><h2>🟢 Сейчас в работе</h2>' +
+          (inProg.length ? inProg.map(queueCard).join('') : '<div class="panel qmeta">Сейчас в цехе ничего не запущено</div>') + '</div>' +
+          '<div class="section"><h2>🔵 Очередь к запуску</h2>' +
+          (waiting.length ? waiting.map(queueCard).join('') : '<div class="panel qmeta">Очередь пуста</div>') + '</div>' +
+          (plan.blocked.length ? '<div class="section"><h2>🟠 Ждут молд</h2>' + plan.blocked.map(blockedRow).join('') + '</div>' : '') +
+          (transit.length ? '<div class="section"><h2>✈️ Формы в пути из Китая</h2>' + transit.map(moldTransitRow).join('') + '</div>' : '');
+      })() +
       '<div class="foot">Только просмотр · обновляется автоматически каждые ~15 минут</div>';
   }
 
@@ -155,7 +172,10 @@
   }
 
   function renderOrder(o) {
-    var photo = o.photo_url ? '<img class="photo" src="' + escAttr(o.photo_url) + '" alt="">' : '<div class="photo ph"><span>нет фото</span></div>';
+    var photoList = (o.photos && o.photos.length) ? o.photos : (o.photo_url ? [o.photo_url] : []);
+    var photo = photoList.length
+      ? '<div class="gallery">' + photoList.map(function (u) { return '<img class="photo" src="' + escAttr(u) + '" alt="">'; }).join('') + '</div>'
+      : '<div class="photo ph"><span>нет фото</span></div>';
     var specs = [];
     if (o.quantity) specs.push(spec('Количество', o.quantity + ' шт'));
     if (o.colors && o.colors.length) specs.push(spec('Цвет', '<div class="swatches">' + o.colors.map(swatch).join('') + '</div>'));
