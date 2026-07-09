@@ -172,7 +172,10 @@
   }
 
   function renderOrder(o) {
-    var photo = o.photo_url ? '<img class="photo" src="' + escAttr(o.photo_url) + '" alt="">' : '<div class="photo ph"><span>нет фото</span></div>';
+    var photoList = (o.photos && o.photos.length) ? o.photos : (o.photo_url ? [o.photo_url] : []);
+    var photo = photoList.length
+      ? '<div class="gallery">' + photoList.map(function (u) { return '<img class="photo" src="' + escAttr(u) + '" alt="">'; }).join('') + '</div>'
+      : '<div class="photo ph"><span>нет фото</span></div>';
     var specs = [];
     if (o.quantity) specs.push(spec('Количество', o.quantity + ' шт'));
     if (o.colors && o.colors.length) specs.push(spec('Цвет', '<div class="swatches">' + o.colors.map(swatch).join('') + '</div>'));
