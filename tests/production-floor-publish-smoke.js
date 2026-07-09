@@ -73,6 +73,13 @@ assert.deepEqual(plan.mold_transit[0].items, ['Форма ТПА', 'Молд к�
 assert.equal(plan.mold_transit[0].stage_label, 'Летит', 'stage from last status_history entry');
 assert.ok(!JSON.stringify(plan.mold_transit).includes('qty'), 'no qty/price fields leak into transit board');
 
+// ---- Фото-примеры извлечены в файлы, ссылки относительные, base64 не утёк ----
+const withPhotos = Object.values(orders).find(o => o.photos && o.photos.length);
+assert.ok(withPhotos, 'at least one order must expose extracted photos');
+assert.ok(withPhotos.photos.every(u => /^photos\//.test(u)), 'photo urls must be relative photos/*');
+assert.ok(!/data:image/i.test(allText), 'no base64 image data may appear in JSON');
+assert.ok(fs.existsSync(path.join(out, withPhotos.photos[0])), 'extracted photo file must exist on disk');
+
 // ---- queue card carries состав so production sees фурнитура/цвета without opening ----
 assert.deepEqual(plan.queue[0].hardware, ['Шнур джут'], 'queue card lists фурнитура');
 assert.deepEqual(plan.queue[0].packaging, ['Крафт-коробка'], 'queue card lists упаковка');

@@ -80,6 +80,33 @@ function parseMaybe(v) {
     try { return JSON.parse(v); } catch { return null; }
 }
 
+// Разбор color_solution_attachment: JSON-строка-объект ИЛИ массив таких.
+// Каждый элемент: { name, type, size, data:'data:image/...;base64,...' }.
+function parseAttachments(raw) {
+    const v = parseMaybe(raw);
+    if (Array.isArray(v)) return v.filter(Boolean);
+    if (v && typeof v === 'object') return [v];
+    return [];
+}
+const IMAGE_EXT = { 'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif' };
+// Пишет одно изображение из base64 в OUT/photos, возвращает относительный URL или null.
+// Безопасность: пишем ТОЛЬКО валидный data:image base64 известного типа. Иначе — null.
+function writePhotoFile(att, outDir, baseName) {
+    const data = att && typeof att.data === 'string' ? att.data : (typeof att === 'string' ? att : '');
+    const m = /^data:(image\/[a-z+]+);base64,([A-Za-z0-9+/=\s]+)$/i.exec(data);
+    if (!m) return null;
+    const ext = IMAGE_EXT[m[1].toLowerCase()];
+    if (!ext) return null;
+    let buf;
+    try { buf = Buffer.from(m[2].replace(/\s+/g, ''), 'base64'); } catch { return null; }
+    if (!buf.length) return null;
+    const dir = path.join(outDir, 'photos');
+    fs.mkdirSync(dir, { recursive: true });
+    const file = `${baseName}.${ext}`;
+    fs.writeFileSync(path.join(dir, file), buf);
+    return `photos/${file}`;
+}
+
 // ---------- Supabase (anon REST — mirrors scripts/export-supabase-snapshot.mjs) ----------
 function extractConst(name) {
     const src = fs.readFileSync(path.join(ROOT, 'js', 'supabase.js'), 'utf8');
@@ -341,12 +368,13 @@ function productSummary(orderId, flatItems, idx) {
     const first = products[0] || {};
     const weight = Number(first.weight_grams) || null;
     const nfc = (first.is_nfc === true || first.is_nfc === 1 || first.is_nfc === '1') ? { is_nfc: true, programming: !!first.nfc_programming } : null;
-    const thumb = first.template_id != null || first.color_solution_attachment ? resolvePhoto(first, PUB.data) : null;
+    const extracted = PUB.photosByOrder.get(Number(orderId)) || [];
+    const thumb = extracted[0] || (first.template_id != null ? resolvePhoto(first, PUB.data) : null);
     return { quantity, colors, weight, nfc, thumb };
 }
 
 // module-scope holder so productSummary can reach data.molds for photos
-const PUB = { data: null };
+const PUB = { data: null, photosByOrder: new Map() };
 
 // Этапы доставки закупки из Китая (для читаемого статуса).
 const CHINA_STAGE_LABELS = {
@@ -446,7 +474,9 @@ function toPublicOrder(orderId, model, data, idx, holidaySet, queueById, enriche
         deadline, deadline_state: ds.state, deadline_buffer_days: ds.buffer,
         blocked_reason: o.production_blocked_reason || null,
         quantity: ps.quantity, weight_grams: ps.weight, colors: ps.colors,
-        nfc: ps.nfc, photo_url: ps.thumb,
+        nfc: ps.nfc,
+        photos: PUB.photosByOrder.get(Number(orderId)) || [],
+        photo_url: (PUB.photosByOrder.get(Number(orderId)) || [])[0] || ps.thumb,
         note: String(raw.notes || o.notes || '') || null,
         items: curateItems(orderId, data.flatItems, idx, data),
         stages: q ? stagesFromQueue(q) : stagesFromOrder(o),
@@ -460,6 +490,17 @@ async function main() {
     const data = await loadData();
     data.flatItems = flattenItems(data.orderItems);
     PUB.data = data;
+
+    // Извлечь фото-примеры (base64 → файлы) один раз; собрать индекс order -> [url].
+    const photosByOrder = new Map();
+    for (const it of data.flatItems) {
+        const atts = parseAttachments(it.color_solution_attachment);
+        if (!atts.length) continue;
+        const urls = [];
+        atts.forEach((a, i) => { const u = writePhotoFile(a, OUT_DIR, `${it.order_id}-${it.item_number != null ? it.item_number : it.id}-${i}`); if (u) urls.push(u); });
+        if (urls.length) photosByOrder.set(Number(it.order_id), (photosByOrder.get(Number(it.order_id)) || []).concat(urls));
+    }
+    PUB.photosByOrder = photosByOrder;
 
     const planState = normalizePlanState(data.rawPlanState);
     const effectiveSettings = getEffectivePlanningSettings(data.settings, planState);
