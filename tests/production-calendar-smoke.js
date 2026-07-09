@@ -262,7 +262,7 @@ vm.runInContext(ganttJs, ganttContext, { filename: 'js/gantt.js' });
 
 const blockedState = JSON.parse(JSON.stringify(vm.runInContext(`
     Gantt.getOrderReadiness(
-        { id: 1, order_name: 'Blocked mold order' },
+        { id: 1, order_name: 'Blocked mold order', status: 'sample' },
         [{ item_type: 'product', product_name: 'Space NFC', is_blank_mold: false, base_mold_in_stock: false }]
     )
 `, ganttContext)));
@@ -271,7 +271,7 @@ assert.match(blockedState.production_blocked_reason, /Ждет молд/, 'Block
 
 const readyState = JSON.parse(JSON.stringify(vm.runInContext(`
     Gantt.getOrderReadiness(
-        { id: 2, order_name: 'Ready custom order' },
+        { id: 2, order_name: 'Ready custom order', status: 'sample' },
         [{ item_type: 'product', product_name: 'Space NFC', is_blank_mold: false, base_mold_in_stock: true }]
     )
 `, ganttContext)));
@@ -279,7 +279,7 @@ assert.equal(readyState.production_ready_state, 'ready', 'Custom order with mold
 
 const chinaBlockedState = JSON.parse(JSON.stringify(vm.runInContext(`
     Gantt.getOrderReadiness(
-        { id: 3, order_name: 'China blocked order' },
+        { id: 3, order_name: 'China blocked order', status: 'sample' },
         [{ item_type: 'product', product_name: 'Space NFC', is_blank_mold: false, base_mold_in_stock: false }],
         [{ order_id: 3, purchase_name: 'Молд Space NFC', status: 'in_transit' }]
     )
@@ -289,7 +289,7 @@ assert.match(chinaBlockedState.production_blocked_reason, /Ждет Китай/,
 
 const needsReviewState = JSON.parse(JSON.stringify(vm.runInContext(`
     Gantt.getOrderReadiness(
-        { id: 4, order_name: 'Needs review order' },
+        { id: 4, order_name: 'Needs review order', status: 'sample' },
         [{ item_type: 'product', product_name: 'Space NFC', is_blank_mold: false, base_mold_in_stock: false }],
         [{ order_id: 4, purchase_name: 'Молд Space NFC', status: 'received' }]
     )
