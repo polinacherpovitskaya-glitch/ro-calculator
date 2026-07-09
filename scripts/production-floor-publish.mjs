@@ -348,6 +348,35 @@ function productSummary(orderId, flatItems, idx) {
 // module-scope holder so productSummary can reach data.molds for photos
 const PUB = { data: null };
 
+// Этапы доставки закупки из Китая (для читаемого статуса).
+const CHINA_STAGE_LABELS = {
+    in_china_warehouse: 'На складе в Китае', consolidating: 'Консолидация',
+    in_transit: 'Летит', received: 'Получено', delivered: 'Доставлено',
+};
+const CHINA_DELIVERY_LABELS = { air_fast: 'Авиа (быстро)', air: 'Авиа', sea: 'Море', truck: 'Авто', rail: 'Ж/д' };
+
+// Публичная доска «Формы в пути»: только реально едущие закупки (in_transit).
+// ВАЖНО: никаких денег — только название, названия позиций, стадия, тип доставки.
+function buildMoldTransit(chinaPurchases) {
+    return (chinaPurchases || [])
+        .filter(row => String(row.status) === 'in_transit')
+        .map(row => {
+            const pd = parseMaybe(row.purchase_data) || {};
+            const history = Array.isArray(pd.status_history) ? pd.status_history : [];
+            const lastStage = history.length ? history[history.length - 1].status : row.status;
+            const items = (Array.isArray(pd.items) ? pd.items : [])
+                .map(it => String(it && it.name || '').trim())
+                .filter(Boolean);
+            return {
+                name: String(pd.purchase_name || '').trim(),
+                items,
+                stage_label: CHINA_STAGE_LABELS[lastStage] || CHINA_STAGE_LABELS[row.status] || '',
+                delivery_label: CHINA_DELIVERY_LABELS[pd.delivery_type] || '',
+            };
+        })
+        .filter(m => m.name);
+}
+
 function toPublicPlan(ctx, model, slots, data, idx, holidaySet, queueById) {
     const inShop = Math.round(Number(slots.workersCount) || 0);
     const queue = model.queue.map(q => {
@@ -396,6 +425,7 @@ function toPublicPlan(ctx, model, slots, data, idx, holidaySet, queueById) {
         calendar: cal,
         queue,
         blocked,
+        mold_transit: buildMoldTransit(data.chinaPurchases),
     };
 }
 

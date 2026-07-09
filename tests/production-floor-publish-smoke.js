@@ -65,6 +65,14 @@ assert.equal(plan.blocked[0].order_id, 502, 'blocked entry is 502');
 assert.equal(plan.blocked[0].state, 'blocked', '502 state = blocked');
 assert.ok(/Кита[йя]/i.test(plan.blocked[0].reason), '502 blocked reason mentions China');
 
+// ---- Формы в пути: только in_transit, без денег ----
+assert.ok(Array.isArray(plan.mold_transit), 'plan.mold_transit must be an array');
+assert.equal(plan.mold_transit.length, 1, 'only the in_transit purchase is shown');
+assert.equal(plan.mold_transit[0].name, 'Молды купер 2шт + варежка', 'transit name from purchase_name');
+assert.deepEqual(plan.mold_transit[0].items, ['Форма ТПА', 'Молд купер'], 'transit items are names only');
+assert.equal(plan.mold_transit[0].stage_label, 'Летит', 'stage from last status_history entry');
+assert.ok(!JSON.stringify(plan.mold_transit).includes('qty'), 'no qty/price fields leak into transit board');
+
 // ---- queue card carries состав so production sees фурнитура/цвета without opening ----
 assert.deepEqual(plan.queue[0].hardware, ['Шнур джут'], 'queue card lists фурнитура');
 assert.deepEqual(plan.queue[0].packaging, ['Крафт-коробка'], 'queue card lists упаковка');
