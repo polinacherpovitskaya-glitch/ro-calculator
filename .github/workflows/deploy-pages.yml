@@ -36,12 +36,18 @@ jobs:
           for f in js/*.js corporate-gift/*.js; do
             node --check "$f"
           done
-          node --check bot/timebot.js
-          node --check bot/task-notification-core.js
+          if [ -f bot/timebot.js ]; then
+            node --check bot/timebot.js
+          fi
+          if [ -f bot/task-notification-core.js ]; then
+            node --check bot/task-notification-core.js
+          fi
           node tests/version-smoke.js
           node tests/work-management-smoke.js
           node tests/tasks-smoke.js
-          node tests/task-notification-smoke.js
+          if [ -f bot/task-notification-core.js ]; then
+            node tests/task-notification-smoke.js
+          fi
           node tests/bug-reports-smoke.js
           node tests/order-flow-smoke.js
           node tests/warehouse-migration-smoke.js

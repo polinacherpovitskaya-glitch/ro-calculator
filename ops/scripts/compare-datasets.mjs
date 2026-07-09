@@ -33,6 +33,9 @@ const pool = new Pool({ connectionString: requireEnv('DATABASE_URL') });
 
 const TABLES = [
   'employees',
+  'orders',
+  'order_items',
+  'order_factuals',
   'warehouse_items',
   'warehouse_reservations',
   'warehouse_history',
@@ -50,6 +53,23 @@ const TABLES = [
   'marketplace_sets',
   'bug_reports',
   'bug_attachments',
+  'product_templates',
+  'production_calendar_days',
+  'production_plan_entries',
+  'indirect_costs',
+  'areas',
+  'projects',
+  'tasks',
+  'task_comments',
+  'work_assets',
+  'task_checklist_items',
+  'task_watchers',
+  'work_activity',
+  'work_templates',
+  'task_notification_events',
+  'time_entries',
+  'app_vacations',
+  'settings',
 ];
 
 function parseJson(value) {
@@ -76,6 +96,20 @@ function numberOrNull(...values) {
   return null;
 }
 
+function mapWarehouseHistoryType(oldType, qtyChange, ctx) {
+  const type = String(oldType || '').toLowerCase();
+  if (['receipt', 'shipment_receive'].includes(type)) return 'receipt';
+  if (['inventory_audit', 'inventory_adjustment', 'inventory_apply'].includes(type)) return 'inventory_audit';
+  if (['return_to_warehouse', 'return_from_order', 'return_to_order'].includes(type)) return 'return';
+  if (['from_order', 'mold_usage', 'packaging', 'pendant', 'hardware', 'consume'].includes(type)) return 'consume';
+  if (['manual_add', 'manual_edit', 'manual', 'addition', 'deduction', 'adjustment', 'writeoff', 'extra_cost', 'import'].includes(type)) {
+    return 'manual_edit';
+  }
+  if (Number(qtyChange) > 0 && ctx.shipment_id) return 'receipt';
+  if (Number(qtyChange) < 0 && ctx.order_id) return 'consume';
+  return 'manual_edit';
+}
+
 async function fetchAll(table) {
   const { data, error } = await supabase.from(table).select('*');
   if (error) {
@@ -94,6 +128,90 @@ async function fetchColumns(table, columns) {
     throw error;
   }
   return data || [];
+}
+
+async function fetchSetting(...keys) {
+  for (const key of keys) {
+    const { data, error } = await supabase.from('settings').select('value').eq('key', key).maybeSingle();
+    if (error) {
+      const message = String(error.message || '');
+      if (message.includes(`Could not find the table 'public.settings'`)) return null;
+      throw error;
+    }
+    if (data?.value !== null && data?.value !== undefined && data.value !== '') {
+      return parseJson(data.value);
+    }
+  }
+  return null;
+}
+
+function countCalendarDays(raw) {
+  if (!raw) return 0;
+  if (Array.isArray(raw)) return raw.length;
+  if (typeof raw === 'object') return Object.keys(raw).length;
+  return 0;
+}
+
+function countPlanEntries(raw) {
+  if (!raw) return 0;
+  if (Array.isArray(raw)) return raw.length;
+  if (Array.isArray(raw.entries)) return raw.entries.length;
+  if (Array.isArray(raw.items)) return raw.items.length;
+  if (Array.isArray(raw.order_ids)) return raw.order_ids.length;
+  return 0;
+}
+
+function countIndirectCosts(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return Array.isArray(raw) ? raw.length : 0;
+  let count = 0;
+  for (const data of Object.values(raw)) {
+    if (!data || typeof data !== 'object' || Array.isArray(data)) continue;
+    if (Number(data.total_override) > 0) {
+      count += 1;
+      continue;
+    }
+    count += Object.entries(data).filter(([key, value]) => key !== 'total_override' && numberOrNull(value) !== null).length;
+  }
+  return count;
+}
+
+const SETTINGS_EXACT_DENYLIST = new Set([
+  'productionCalendar',
+  'production_calendar_json',
+  'productionPlan',
+  'production_plan_state_json',
+  'indirectCosts',
+  'indirect_costs_json',
+  'warehouseItems',
+  'warehouse_items_json',
+  'projectHardwareState',
+  'project_hardware_state_json',
+  'auth_accounts_json',
+  'auth_activity_json',
+  'auth_sessions_json',
+  'employee_extra_json',
+  'fintablo_snapshot_json',
+  'tochka_snapshot_json',
+  'bug_reports_json',
+  'work_projects_json',
+  'work_areas_json',
+  'work_templates_json',
+  'work_task_notification_events_json',
+  'work_task_comments_json',
+  'work_activity_json',
+  'work_assets_json',
+  'work_task_checklist_items_json',
+  'work_tasks_json',
+  'work_task_watchers_json',
+]);
+const SETTINGS_PREFIX_DENYLIST = ['finance_', 'wiki_', 'knowledge_', '_legacy_', 'codex_', 'ro_yandex_'];
+
+function shouldCopySettingKey(key) {
+  const normalized = String(key || '').trim();
+  if (!normalized) return false;
+  if (SETTINGS_EXACT_DENYLIST.has(normalized)) return false;
+  if (SETTINGS_PREFIX_DENYLIST.some((prefix) => normalized.startsWith(prefix))) return false;
+  return true;
 }
 
 async function loadCatalogSeed() {
@@ -140,6 +258,53 @@ async function supabaseCount(table) {
       }
     }
     return ids.size + anonymousRows;
+  }
+
+  if (table === 'warehouse_history') {
+    const rows = await fetchAll(table);
+    const orderIds = new Set((await pool.query(`SELECT id::text FROM orders`)).rows.map((row) => row.id));
+    const historySumByItem = new Map();
+    let validRows = 0;
+
+    for (const row of rows) {
+      const itemId = numberOrNull(row.item_id, row.warehouse_item_id);
+      if (!itemId) continue;
+      const qtyChange = numberOrNull(row.qty_change, row.delta, row.change) ?? 0;
+      const type = mapWarehouseHistoryType(row.type, qtyChange, {
+        shipment_id: row.shipment_id,
+        order_id: row.order_id,
+      });
+      if (type === 'receipt' && qtyChange <= 0) continue;
+      if (type === 'consume' && qtyChange >= 0) continue;
+      if (type === 'return' && qtyChange <= 0) continue;
+      const orderId = numberOrNull(row.order_id);
+      if (orderId && !orderIds.has(String(orderId))) continue;
+      validRows += 1;
+      historySumByItem.set(String(itemId), (historySumByItem.get(String(itemId)) || 0) + qtyChange);
+    }
+
+    const items = await pool.query(`SELECT id::text, qty::numeric FROM warehouse_items`);
+    const baselineRows = items.rows.filter((item) => Number(item.qty) !== (historySumByItem.get(item.id) || 0)).length;
+    return validRows + baselineRows;
+  }
+
+  if (table === 'orders') {
+    const rows = await fetchAll('orders');
+    return rows.filter((row) => row.status !== 'deleted' && !row.deleted_at).length;
+  }
+
+  if (table === 'order_items') {
+    const orders = await fetchAll('orders');
+    const activeOrderIds = new Set(orders.filter((row) => row.status !== 'deleted' && !row.deleted_at).map((row) => String(row.id)));
+    const rows = await fetchAll('order_items');
+    return rows.filter((row) => activeOrderIds.has(String(row.order_id))).length;
+  }
+
+  if (table === 'order_factuals') {
+    const orders = await fetchAll('orders');
+    const activeOrderIds = new Set(orders.filter((row) => row.status !== 'deleted' && !row.deleted_at).map((row) => String(row.id)));
+    const rows = await fetchAll('order_factuals');
+    return rows.filter((row) => activeOrderIds.has(String(row.order_id))).length;
   }
 
   if (table === 'shipment_items') {
@@ -198,6 +363,72 @@ async function supabaseCount(table) {
     }
     const assets = await fetchColumns('work_assets', 'task_id,kind');
     return assets.filter((asset) => asset.kind === 'file' && taskIds.has(String(asset.task_id || ''))).length;
+  }
+
+  if (table === 'product_templates') {
+    return (await fetchAll('product_templates')).length;
+  }
+
+  if (table === 'production_calendar_days') {
+    return countCalendarDays(await fetchSetting('productionCalendar', 'production_calendar_json'));
+  }
+
+  if (table === 'production_plan_entries') {
+    return countPlanEntries(await fetchSetting('productionPlan', 'production_plan_state_json'));
+  }
+
+  if (table === 'indirect_costs') {
+    return countIndirectCosts(await fetchSetting('indirectCosts', 'indirect_costs_json'));
+  }
+
+  if (table === 'areas') {
+    const rows = await fetchAll('areas');
+    return rows.length || 7;
+  }
+
+  if (table === 'projects') {
+    return (await fetchAll('projects')).length;
+  }
+
+  if (table === 'tasks') {
+    const rows = await fetchAll('tasks');
+    const areas = new Set((await pool.query(`SELECT id::text FROM areas`)).rows.map((row) => row.id));
+    const orders = new Set((await pool.query(`SELECT id::text FROM orders`)).rows.map((row) => row.id));
+    const projects = new Set((await pool.query(`SELECT id::text FROM projects`)).rows.map((row) => row.id));
+    return rows.filter((row) => areas.has(String(row.area_id)) || orders.has(String(row.order_id)) || projects.has(String(row.project_id))).length;
+  }
+
+  if (['task_comments', 'task_checklist_items'].includes(table)) {
+    const tasks = new Set((await pool.query(`SELECT id::text FROM tasks`)).rows.map((row) => row.id));
+    return (await fetchAll(table)).filter((row) => tasks.has(String(row.task_id))).length;
+  }
+
+  if (table === 'work_assets') {
+    const tasks = new Set((await pool.query(`SELECT id::text FROM tasks`)).rows.map((row) => row.id));
+    const projects = new Set((await pool.query(`SELECT id::text FROM projects`)).rows.map((row) => row.id));
+    return (await fetchAll('work_assets')).filter((row) => tasks.has(String(row.task_id)) || projects.has(String(row.project_id))).length;
+  }
+
+  if (table === 'task_watchers') {
+    const tasks = new Set((await pool.query(`SELECT id::text FROM tasks`)).rows.map((row) => row.id));
+    const employees = new Set((await pool.query(`SELECT id::text FROM employees`)).rows.map((row) => row.id));
+    return (await fetchAll('task_watchers')).filter((row) => {
+      const userId = row.user_id || row.employee_id;
+      return tasks.has(String(row.task_id)) && employees.has(String(userId));
+    }).length;
+  }
+
+  if (table === 'work_templates') {
+    const rows = await fetchAll('work_templates');
+    return rows.length || 7;
+  }
+
+  if (table === 'work_activity' || table === 'task_notification_events') {
+    return (await fetchAll(table)).length;
+  }
+
+  if (table === 'settings') {
+    return (await fetchAll('settings')).filter((row) => shouldCopySettingKey(row.key)).length;
   }
 
   const { count, error } = await supabase.from(table).select('*', { count: 'exact', head: true });

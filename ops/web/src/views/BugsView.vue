@@ -8,7 +8,7 @@
       <div class="header-actions">
         <RouterLink to="/">Главная</RouterLink>
         <RouterLink to="/warehouse">Склад</RouterLink>
-        <button type="button" @click="startCreate">Новый баг</button>
+          <button type="button" @click="startCreate()">Новый баг</button>
       </div>
     </header>
 
@@ -27,10 +27,10 @@
       <label>Важность
         <select v-model="bugs.severity" @change="reload">
           <option value="">Все</option>
-          <option value="low">Low</option>
-          <option value="medium">Medium</option>
-          <option value="high">High</option>
-          <option value="critical">Critical</option>
+          <option value="low">{{ severityLabel('low') }}</option>
+          <option value="medium">{{ severityLabel('medium') }}</option>
+          <option value="high">{{ severityLabel('high') }}</option>
+          <option value="critical">{{ severityLabel('critical') }}</option>
         </select>
       </label>
       <label>Страница <input v-model="bugs.page" @keydown.enter="reload" /></label>
@@ -54,7 +54,7 @@
               </td>
               <td>{{ bug.page || '—' }}</td>
               <td><span class="pill" :class="bug.status">{{ statusLabel(bug.status) }}</span></td>
-              <td><span class="severity" :class="bug.severity">{{ bug.severity }}</span></td>
+              <td><span class="severity" :class="bug.severity">{{ severityLabel(bug.severity) }}</span></td>
               <td>{{ bug.attachment_count || 0 }}</td>
               <td class="right"><button type="button" @click="openBug(bug.id)">Открыть</button></td>
             </tr>
@@ -83,10 +83,10 @@
           </label>
           <label>Важность
             <select v-model="form.severity">
-              <option value="low">Low</option>
-              <option value="medium">Medium</option>
-              <option value="high">High</option>
-              <option value="critical">Critical</option>
+              <option value="low">{{ severityLabel('low') }}</option>
+              <option value="medium">{{ severityLabel('medium') }}</option>
+              <option value="high">{{ severityLabel('high') }}</option>
+              <option value="critical">{{ severityLabel('critical') }}</option>
             </select>
           </label>
         </div>
@@ -112,7 +112,7 @@
 
         <footer class="actions">
           <button v-if="form.id" type="button" @click="deleteBug">Удалить</button>
-          <button type="button" :disabled="saving" @click="saveBug">Сохранить</button>
+          <button type="button" :disabled="saving || !form.title.trim()" @click="saveBug">Сохранить</button>
         </footer>
       </aside>
     </section>
@@ -121,11 +121,14 @@
 
 <script setup lang="ts">
 import { onMounted, reactive, ref, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import type { BugReport } from '../api/bugs';
 import * as bugsApi from '../api/bugs';
 import { useBugsStore } from '../stores/bugs';
 
 const bugs = useBugsStore();
+const route = useRoute();
+const router = useRouter();
 const error = ref('');
 const saving = ref(false);
 const isEditing = ref(false);
@@ -140,12 +143,18 @@ const form = reactive({
 });
 let searchTimer: number | undefined;
 
-onMounted(async () => { await bugs.loadBugs(); });
+onMounted(async () => {
+  await bugs.loadBugs();
+  if (route.name === 'bug-new') startCreate(false);
+});
 watch(() => bugs.search, () => { window.clearTimeout(searchTimer); searchTimer = window.setTimeout(() => void reload(), 250); });
 
 async function reload() { await bugs.loadBugs(); }
 function statusLabel(value: string) {
   return { open: 'Открыт', in_progress: 'В работе', fixed: 'Исправлен', wontfix: 'Не исправлять', duplicate: 'Дубль' }[value] || value;
+}
+function severityLabel(value: string) {
+  return { low: 'Низкая', medium: 'Средняя', high: 'Высокая', critical: 'Критическая' }[value] || value;
 }
 function formatDate(value: string) { return value ? new Date(value).toLocaleDateString('ru-RU') : ''; }
 function fillForm(bug: BugReport | null) {
@@ -164,17 +173,21 @@ async function openBug(id: number) {
   fillForm(bug);
   isEditing.value = true;
 }
-function startCreate() {
+function startCreate(updateRoute = true) {
   bugs.selected = null;
   fillForm(null);
   isEditing.value = true;
+  if (updateRoute && route.name !== 'bug-new') void router.push('/bugs/new');
 }
 function closeEditor() {
   isEditing.value = false;
   bugs.selected = null;
+  if (route.name === 'bug-new') void router.push('/bugs');
 }
 async function saveBug() {
+  if (!form.title.trim()) return;
   saving.value = true; error.value = '';
+  const wasNew = !form.id;
   const payload = {
     title: form.title.trim(),
     description: form.description.trim() || null,
@@ -185,6 +198,7 @@ async function saveBug() {
   };
   try {
     const saved = form.id ? await bugs.updateBug(form.id, payload) : await bugs.createBug(payload);
+    if (wasNew && route.name === 'bug-new') await router.replace('/bugs');
     await openBug(Number(saved.id));
   } catch (caught) {
     error.value = caught instanceof Error ? caught.message : 'Не удалось сохранить баг';

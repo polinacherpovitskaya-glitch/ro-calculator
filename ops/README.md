@@ -4,7 +4,7 @@ Operational core of `recycleobject.ru`: migration target for the old Vercel + Su
 
 ## Status
 
-- Stage A — Build, Blocks 1-5 merged; Block 6 bugs in progress
+- Stage A — Build complete after Block 16 merge; ready for Stage B test/reconciliation
 - Staging domain: `https://ops-staging.recycleobject.ru`
 - Production cutover: not here; Stage C is owner-run only
 - UptimeRobot: deferred/manual follow-up, not blocking the migration blocks
@@ -61,6 +61,11 @@ tests/playwright/warehouse.spec.ts
 tests/playwright/shipments-china.spec.ts
 tests/playwright/molds-blanks.spec.ts
 tests/playwright/bugs.spec.ts
+tests/playwright/orders.spec.ts
+tests/playwright/work-management.spec.ts
+tests/playwright/time-payroll.spec.ts
+tests/playwright/analytics.spec.ts
+tests/playwright/settings.spec.ts
 ```
 
 They expect:
@@ -509,6 +514,195 @@ Verification:
 - `npm run test:calc`
 - Full Postgres-backed API suite includes `/api/calc/preview`.
 
+## Production Planning
+
+Block 8 adds product templates, the production calendar, production plan entries, and indirect costs.
+
+Tables:
+
+```text
+product_templates
+production_calendar_days
+production_plan_entries
+indirect_costs
+```
+
+Endpoints:
+
+```text
+GET    /api/templates
+POST   /api/templates
+PATCH  /api/templates/:id
+DELETE /api/templates/:id
+
+GET    /api/production/calendar?year=YYYY
+PUT    /api/production/calendar
+GET    /api/production/plan
+POST   /api/production/plan
+PATCH  /api/production/plan/:id
+DELETE /api/production/plan/:id
+POST   /api/production/plan/reorder
+
+GET    /api/indirect-costs
+POST   /api/indirect-costs
+PATCH  /api/indirect-costs/:id
+DELETE /api/indirect-costs/:id
+```
+
+Screens:
+
+```text
+/templates
+/production/calendar
+/production/plan
+/indirect-costs
+```
+
+Rules:
+
+- Mutating endpoints require `Idempotency-Key`.
+- Production plan `operator_id` references `employees.id` as `BIGINT`, matching the real migrated employee IDs.
+- Reorder is persisted through `POST /api/production/plan/reorder` by updating `position` inside a DB transaction. This replaces the old local-only priority save path.
+- `ops/api/src/calc/indirect.ts` exposes `getIndirectAllocation()` from real `indirect_costs` and `production_calendar_days`.
+- `/api/calc/preview` can return `indirect_allocation` when the request includes `indirect_period` / `indirect_year` + `indirect_month`; saved legacy snapshots are not recalculated.
+
+Refresh notes:
+
+- `ops/scripts/refresh/06-production.mjs` copies `product_templates` and parses production settings JSON.
+- It accepts both plan names and observed legacy keys: `productionCalendar`, `production_plan_state_json`, `indirectCosts`, and `indirect_costs_json`.
+- `compare-datasets.mjs` includes Block 8 counts.
+
+Verification:
+
+- `npm run typecheck`
+- `npm run test:calc`
+- `npm run build` in `ops/web`
+- Full Postgres-backed API suite: 111 tests on a temporary VPS Postgres container.
+
+## Orders
+
+Block 9 adds migrated orders, order items, factuals, status history, order-aware warehouse reservations, and the first Vue order workspace.
+
+Tables:
+
+```text
+orders
+order_items
+order_factuals
+order_status_history
+```
+
+Endpoints:
+
+```text
+GET    /api/orders
+POST   /api/orders
+GET    /api/orders/:id
+PATCH  /api/orders/:id
+DELETE /api/orders/:id
+POST   /api/orders/:id/clone
+POST   /api/orders/:id/items
+PATCH  /api/orders/:id/items/:itemId
+DELETE /api/orders/:id/items/:itemId
+POST   /api/orders/:id/status
+POST   /api/orders/:id/recalc
+POST   /api/orders/:id/consume-hardware
+GET    /api/orders/:id/factual
+POST   /api/orders/:id/factual
+PATCH  /api/orders/:id/factual
+POST   /api/orders/:id/factual/recalc
+```
+
+Screens:
+
+```text
+/orders
+/orders/new
+/orders/:id
+```
+
+Rules:
+
+- Order item rows are stored in `order_items`; saved `calculator_data` remains a snapshot, not the only source of order positions.
+- Order reservations now carry an enforced `order_id` FK for new rows. The migration uses `NOT VALID` so staging can deploy before the post-deploy refresh replaces old rows.
+- `consume-hardware` locks the order and warehouse rows, is idempotent, rejects closed/cancelled orders, writes `warehouse_history`, and consumes/splits active order reservations.
+- Closing or cancelling orders releases active order reservations through `releaseOrphanReservations()`.
+- Large legacy calculator snapshots require the API JSON body limit to be above Express' default; the API currently uses `5mb`.
+- The factual workflow lives inside `/orders/:id` on the `Факт` tab. A separate `/factual` analytics page is deferred until the reporting block needs it.
+
+Refresh notes:
+
+- `ops/scripts/refresh/07-orders.mjs` copies non-deleted legacy orders, items, and factuals before warehouse refresh runs.
+- Warehouse refresh drops order reservations whose order was skipped/deleted and nulls invalid history `order_id` values.
+- `compare-datasets.mjs` includes `orders`, `order_items`, and `order_factuals`.
+
+Verification:
+
+- Full Postgres-backed API suite: 126 tests on a temporary VPS Postgres container.
+- Calc suite: 102 tests, including 24 real full-order golden masters through the HTTP Orders API.
+- `npm run build` in `ops/web`.
+- `tests/playwright/orders.spec.ts` covers create, add items, recalc, reload persistence, and consume-hardware. Run it after Block 9 is deployed to staging.
+
+## Analytics
+
+Block 15 adds read-only reporting endpoints and a Vue analytics screen. The legacy `js/analytics.js` module redirects to `Factual`, so the inventory lives in `ops/api/src/analytics/README.md`.
+
+Endpoints:
+
+```text
+GET /api/analytics/summary
+GET /api/analytics/revenue-by-month
+GET /api/analytics/top-clients
+GET /api/analytics/status-dynamics
+GET /api/analytics/production-load
+GET /api/analytics/product-types
+GET /api/analytics/factual-margin
+```
+
+Screen:
+
+```text
+/analytics
+```
+
+Rules:
+
+- No new tables; reports are SELECT-only over `orders`, `order_items`, `order_factuals`, `time_entries`, and `employees`.
+- Known legacy analytics bugs are carried forward intentionally. Business/reporting fixes belong after Stage D unless they block cutover.
+- Staging refresh from Supabase uses `SUPABASE_URL` and `SUPABASE_SERVICE_KEY` from `/srv/ops/infra/.env`.
+
+## Settings
+
+Block 16 adds the remaining generic settings table and admin editor.
+
+Table:
+
+```text
+settings
+```
+
+Endpoints:
+
+```text
+GET /api/settings
+GET /api/settings/:key
+PUT /api/settings/:key
+```
+
+Screen:
+
+```text
+/settings
+```
+
+Rules:
+
+- Listing and writes are admin-only.
+- Reading a known key is available to any authenticated user.
+- Writes require `Idempotency-Key`.
+- Refresh copies only whitelisted operational settings. It skips normalized data from earlier blocks plus `finance_*`, `wiki_*`, auth/session blobs, work/task blobs, and legacy warehouse snapshots.
+- `ops/scripts/refresh/10-settings.mjs` is included in the full staging refresh pipeline.
+
 ## Current Infra
 
 | Parameter | Value |
@@ -524,4 +718,4 @@ Verification:
 
 ## Next
 
-Finish Block 7 review, then continue with Block 8 per the migration playbook.
+Proceed to Stage B: final reconciliation, golden-master checks, real-order comparisons, smokes, and performance checks before owner-run Stage C cutover.

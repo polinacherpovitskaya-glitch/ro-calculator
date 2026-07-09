@@ -136,6 +136,7 @@ async function refreshItems() {
 
 async function refreshReservations() {
   const reservationRows = await fetchAll('warehouse_reservations');
+  const orderIds = new Set((await pool.query(`SELECT id::text FROM orders`)).rows.map((row) => row.id));
   const reservations = reservationRows.flatMap((row) => {
     if (!row.reservations_data) return [row];
     const parsed = parseJson(row.reservations_data);
@@ -154,6 +155,10 @@ async function refreshReservations() {
     const orderId = numberOrNull(reservation.order_id, reservation.orderId);
     const source = mapReservationSource(reservation.source, !!orderId);
     if (source === 'order' && !orderId) {
+      dropped += 1;
+      continue;
+    }
+    if (source === 'order' && !orderIds.has(String(orderId))) {
       dropped += 1;
       continue;
     }
@@ -193,11 +198,21 @@ async function refreshReservations() {
 }
 
 async function refreshHistory() {
+  await pool.query(`DELETE FROM warehouse_history WHERE details->>'refresh_baseline' = 'true'`);
+  await pool.query(`DELETE FROM warehouse_history WHERE item_id IS NULL AND details ? 'legacy'`);
+
   const history = await fetchAll('warehouse_history');
+  const orderIds = new Set((await pool.query(`SELECT id::text FROM orders`)).rows.map((row) => row.id));
   console.log(`warehouse_history: ${history.length}`);
   let dropped = 0;
 
   for (const row of history) {
+    const itemId = numberOrNull(row.item_id, row.warehouse_item_id);
+    if (!itemId) {
+      dropped += 1;
+      continue;
+    }
+
     const qtyChange = numberOrNull(row.qty_change, row.delta, row.change) ?? 0;
     const type = mapHistoryType(row.type, qtyChange, {
       shipment_id: row.shipment_id,
@@ -216,6 +231,7 @@ async function refreshHistory() {
       continue;
     }
 
+    const orderId = numberOrNull(row.order_id);
     await pool.query(
       `INSERT INTO warehouse_history
          (id, item_id, type, qty_before, qty_after, qty_change, order_id, shipment_id, mold_id, marketplace_set_id, audit_id, actor_name, note, details, created_at)
@@ -223,12 +239,12 @@ async function refreshHistory() {
        ON CONFLICT (id) DO NOTHING`,
       [
         row.id,
-        numberOrNull(row.item_id, row.warehouse_item_id),
+        itemId,
         type,
         numberOrNull(row.qty_before, row.before),
         numberOrNull(row.qty_after, row.after),
         qtyChange,
-        numberOrNull(row.order_id),
+        orderId && orderIds.has(String(orderId)) ? orderId : null,
         numberOrNull(row.shipment_id),
         numberOrNull(row.mold_id),
         numberOrNull(row.marketplace_set_id),
@@ -244,6 +260,28 @@ async function refreshHistory() {
   if (dropped) console.warn(`Dropped ${dropped} history rows with invalid canonical type/sign`);
 }
 
+async function seedBaselineHistory() {
+  const { rowCount } = await pool.query(
+    `INSERT INTO warehouse_history
+       (item_id, type, qty_before, qty_after, qty_change, note, details, created_at)
+     SELECT
+       i.id,
+       'inventory_audit',
+       i.qty - COALESCE(SUM(h.qty_change), 0),
+       i.qty,
+       i.qty - COALESCE(SUM(h.qty_change), 0),
+       'Baseline after Supabase staging refresh',
+       jsonb_build_object('refresh_baseline', true),
+       COALESCE(i.created_at, NOW())
+     FROM warehouse_items i
+     LEFT JOIN warehouse_history h ON h.item_id = i.id
+     GROUP BY i.id, i.qty, i.created_at
+     HAVING i.qty != COALESCE(SUM(h.qty_change), 0)`
+  );
+
+  console.log(`warehouse_history_baseline: ${rowCount}`);
+}
+
 async function bumpSequences() {
   await pool.query(
     `SELECT setval(pg_get_serial_sequence('warehouse_reservations', 'id'), GREATEST((SELECT COALESCE(MAX(id), 0) FROM warehouse_reservations), 1))`
@@ -257,6 +295,7 @@ async function main() {
   await refreshItems();
   await refreshReservations();
   await refreshHistory();
+  await seedBaselineHistory();
   await bumpSequences();
   console.log('Warehouse refresh complete.');
 }

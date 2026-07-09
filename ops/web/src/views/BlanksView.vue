@@ -7,8 +7,8 @@
 
     <section class="toolbar">
       <div class="tabs">
-        <button type="button" :class="{ active: blanks.kind === 'hardware' }" @click="switchKind('hardware')">Hardware</button>
-        <button type="button" :class="{ active: blanks.kind === 'packaging' }" @click="switchKind('packaging')">Packaging</button>
+        <button type="button" :class="{ active: blanks.kind === 'hardware' }" @click="switchKind('hardware')">Фурнитура</button>
+        <button type="button" :class="{ active: blanks.kind === 'packaging' }" @click="switchKind('packaging')">Упаковка</button>
       </div>
       <label>Поиск <input v-model="blanks.search" type="search" @keydown.enter="reload" /></label>
       <label>Категория <select v-model="blanks.category" @change="reload"><option value="">Все</option><option v-for="category in blanks.categories" :key="category" :value="category">{{ category }}</option></select></label>

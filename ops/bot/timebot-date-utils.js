@@ -1,3 +1,5 @@
+const { DEFAULT_TIMEZONE, localDateYmd, normalizeTimezone } = require('./timezone');
+
 function formatYmdUtc(date) {
     const year = date.getUTCFullYear();
     const month = String(date.getUTCMonth() + 1).padStart(2, '0');
@@ -6,6 +8,9 @@ function formatYmdUtc(date) {
 }
 
 function getLocalDate(timezoneOffset = 3, baseDate = new Date()) {
+    if (typeof timezoneOffset === 'string') {
+        return localDateYmd(normalizeTimezone(timezoneOffset), baseDate);
+    }
     const safeOffset = Number.isFinite(Number(timezoneOffset)) ? Number(timezoneOffset) : 3;
     return formatYmdUtc(new Date(baseDate.getTime() + safeOffset * 3600000));
 }
@@ -42,6 +47,7 @@ function normalizeWorkDate(dateStr, holidaySet = new Set()) {
 }
 
 module.exports = {
+    DEFAULT_TIMEZONE,
     formatYmdUtc,
     getLocalDate,
     shiftYmd,

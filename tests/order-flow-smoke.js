@@ -480,7 +480,7 @@ async function smokeOrderDiscountAffectsSummaryAndFinDirector(context) {
     assert.equal(data.amountSummary.totalRevenue, 90);
     assert.equal(data.amountSummary.vatOnRevenue, 4.5);
     assert.equal(data.amountSummary.totalWithVat, 94.5);
-    assert.equal(data.amountSummary.totalEarned, 26.95);
+    assert.equal(data.amountSummary.totalEarned, 26.5);
 
     assert.equal(data.percentSummary.discountAmount, 10);
     assert.equal(data.percentSummary.totalRevenue, 90);
@@ -489,7 +489,7 @@ async function smokeOrderDiscountAffectsSummaryAndFinDirector(context) {
     assert.equal(data.fin.discountAmount, 10);
     assert.equal(data.fin.revenue, 90);
     assert.equal(data.fin.taxes, 6.3);
-    assert.equal(data.fin.commercial, 5.85);
+    assert.equal(data.fin.commercial, 6.3);
     assert.equal(data.fin.charity, 0.9);
 }
 
@@ -635,6 +635,99 @@ async function smokeHardwareOnlyAutosave(context) {
     assert.equal(context.localStorage.getItem('ro_calc_editing_order_id'), String(saved.order.id));
 }
 
+async function smokeCalculatorLocalDraftSurvivesRefresh(context) {
+    const state = clone(await vm.runInContext(`(async () => {
+        Calculator.resetForm();
+        Calculator.renderItemBlock = () => {};
+        Calculator.rerenderAllHardware = () => {};
+        Calculator.rerenderAllPackaging = () => {};
+        Calculator.renderExtraCosts = () => {};
+        Calculator.recalculate = () => {};
+        Calculator._updateItemsEmptyState = () => {};
+
+        document.getElementById('calc-order-name').value = 'T-bank ambassadors';
+        document.getElementById('calc-client-name').value = 'T-bank';
+        document.getElementById('calc-manager-name').value = 'Alina';
+        document.getElementById('calc-autosave-status');
+
+        const item = Calculator.getEmptyItem(1);
+        item.product_name = 'Cardholder';
+        item.quantity = 800;
+        item.sell_price_item = 300;
+        item.result = { ...getEmptyCostResult(), costTotal: 120 };
+        Calculator.items = [item];
+
+        Calculator.scheduleAutosave();
+        clearTimeout(Calculator._autosaveTimer);
+        Calculator.resetForm({ preserveLocalDraft: true });
+        const restored = await Calculator._restoreLocalDraftIfAvailable();
+
+        return {
+            restored,
+            orderName: document.getElementById('calc-order-name').value,
+            clientName: document.getElementById('calc-client-name').value,
+            itemCount: Calculator.items.length,
+            productName: Calculator.items[0]?.product_name || '',
+            quantity: Calculator.items[0]?.quantity || 0,
+            status: document.getElementById('calc-autosave-status').textContent,
+        };
+    })()`, context));
+
+    assert.equal(state.restored, true, 'dirty calculator snapshot should restore after refresh-like reset');
+    assert.equal(state.orderName, 'T-bank ambassadors');
+    assert.equal(state.clientName, 'T-bank');
+    assert.equal(state.itemCount, 1);
+    assert.equal(state.productName, 'Cardholder');
+    assert.equal(state.quantity, 800);
+    assert.match(state.status, /Восстановлен/);
+}
+
+async function smokeLegacyLocalDraftRestoresAsNewOrder(context) {
+    const state = clone(await vm.runInContext(`(async () => {
+        Calculator.resetForm();
+        Calculator.renderItemBlock = () => {};
+        Calculator.rerenderAllHardware = () => {};
+        Calculator.rerenderAllPackaging = () => {};
+        Calculator.renderExtraCosts = () => {};
+        Calculator.recalculate = () => {};
+        Calculator._updateItemsEmptyState = () => {};
+
+        localStorage.setItem(Calculator._localDraftKey, JSON.stringify({
+            app_version: 'v382',
+            saved_at: new Date().toISOString(),
+            reason: 'beforeunload',
+            editing_order_id: 4011,
+            current_order_status: 'sample',
+            order_fields: {
+                order_name: '100 желтых ключей',
+                client_name: 'Алина',
+                manager_name: 'Алина',
+                deadline_start: '2026-06-30',
+            },
+            items: [],
+            hardwareItems: [],
+            packagingItems: [],
+            extraCosts: [],
+            pendants: [],
+        }));
+
+        const restored = await Calculator._restoreLocalDraftIfAvailable();
+        return {
+            restored,
+            editingOrderId: App.editingOrderId,
+            storedOrderId: localStorage.getItem('ro_calc_editing_order_id'),
+            currentStatus: Calculator._currentOrderStatus,
+            orderName: document.getElementById('calc-order-name').value,
+        };
+    })()`, context));
+
+    assert.equal(state.restored, true, 'legacy local draft should still restore form contents');
+    assert.equal(state.orderName, '100 желтых ключей');
+    assert.equal(state.editingOrderId, null, 'legacy local draft must not keep stale editing order id');
+    assert.equal(state.storedOrderId, null, 'legacy local draft must clear stale stored order id');
+    assert.equal(state.currentStatus, 'draft', 'legacy local draft should save as a new draft after restore');
+}
+
 async function smokeNewDraftAutosaveAndManualSaveShareReservedId(context) {
     const result = clone(await vm.runInContext(`(async () => {
         const saveCalls = [];
@@ -691,6 +784,34 @@ async function smokeNewDraftAutosaveAndManualSaveShareReservedId(context) {
     );
     assert.equal(String(result.editingOrderId), String(result.idsBeforeResolve[0]));
     assert.equal(result.storedOrderId, String(result.idsBeforeResolve[0]));
+}
+
+async function smokeLegacyProductionStatusAppearsInOrdersViews(context) {
+    const state = clone(await vm.runInContext(`(() => {
+        Orders.allOrders = [
+            { id: 1, order_name: 'Т-банк Амбассадоры', status: 'production' },
+            { id: 2, order_name: 'Черновик', status: 'draft' },
+        ];
+        Orders.mode = 'board';
+        const board = Orders.getModeOrders().map(order => order.id);
+        Orders.mode = 'production';
+        const production = Orders.getModeOrders().map(order => order.id);
+        Orders.mode = 'active';
+        const active = Orders.getModeOrders().map(order => order.id);
+        return {
+            board,
+            production,
+            active,
+            className: Orders.statusClassName('production'),
+            consumed: Orders._isConsumedStatus('production'),
+        };
+    })()`, context));
+
+    assert.deepEqual(state.board, [1, 2]);
+    assert.deepEqual(state.production, [1]);
+    assert.deepEqual(state.active, [1]);
+    assert.equal(state.className, 'badge-yellow');
+    assert.equal(state.consumed, true);
 }
 
 async function smokeZeroCostWarehouseHardwareStillShowsInPricing(context) {
@@ -813,6 +934,76 @@ async function smokeLoadOrderHydratesZeroWarehousePriceFromCurrentStock(context)
     assert.equal(restored.name, 'Карабины · 5 см · красный');
 }
 
+async function smokeLegacyPerItemHardwareClearsBuiltinTemplateHardware(context) {
+    context.__loadOrderData = {
+        order: {
+            id: 9012,
+            order_name: 'Legacy doubled hardware order',
+            client_name: 'Smoke Client',
+            manager_name: 'Smoke',
+            status: 'draft',
+        },
+        items: [{
+            item_type: 'product',
+            item_number: 1,
+            product_name: 'Брелок',
+            quantity: 100,
+            template_id: 77,
+            is_blank_mold: true,
+            builtin_hw_name: 'Карабин',
+            builtin_hw_price: 8,
+            builtin_hw_delivery_total: 0,
+            builtin_hw_speed: 120,
+        }, {
+            item_type: 'hardware',
+            product_name: 'Карабин',
+            quantity: 100,
+            hardware_source: 'custom',
+            hardware_parent_item_index: 0,
+            hardware_assembly_speed: 120,
+            hardware_price_per_unit: 8,
+            sell_price_hardware: 20,
+        }],
+        repaired_duplicates: false,
+    };
+    context.loadOrder = async () => clone(context.__loadOrderData);
+
+    vm.runInContext(`
+        App.templates = [{
+            id: 77,
+            name: 'Брелок',
+            category: 'blank',
+            weight_grams: 10,
+            pieces_per_hour_avg: 100,
+            hw_name: 'Карабин',
+            hw_price_per_unit: 8,
+            hw_delivery_total: 0,
+            hw_speed: 120,
+        }];
+        Calculator.renderItemBlock = () => {};
+        Calculator.renderHardwareRow = () => {};
+        Calculator.renderPackagingRow = () => {};
+        Calculator.renderExtraCosts = () => {};
+        Calculator._renderPerItemHwPkg = () => {};
+        Calculator.recalculate = () => {};
+        Calculator.showOrderHistory = () => {};
+        Calculator._ensureWhPickerData = async () => ({});
+    `, context);
+
+    await vm.runInContext('Calculator.loadOrder(9012)', context);
+    const state = clone(await vm.runInContext(`({
+        builtinName: Calculator.items[0].builtin_hw_name,
+        builtinPrice: Calculator.items[0].builtin_hw_price,
+        hardwareCount: Calculator.hardwareItems.length,
+        hardwareName: Calculator.hardwareItems[0]?.name || '',
+    })`, context));
+
+    assert.equal(state.hardwareCount, 1);
+    assert.equal(state.hardwareName, 'Карабин');
+    assert.equal(state.builtinName, '', 'legacy per-item hardware should suppress template builtin hardware');
+    assert.equal(state.builtinPrice, 0);
+}
+
 async function smokeOrderListAndDetailUseLiveFinancialSnapshot(context) {
     const state = clone(await vm.runInContext(`(() => {
         App.templates = [{
@@ -920,6 +1111,60 @@ async function smokeOrderListUsesStoredFinancialMetaWhenItemsMissing(context) {
     assert.match(state.boardHtml, /24[,.]7\s*%/, 'board card should render stored margin instead of 0%');
 }
 
+async function smokeOrderMetaBundleUsesLightItemsForHardware(context) {
+    const originalLoadOrderItemsByOrderIds = context.loadOrderItemsByOrderIds;
+    context.__orderItemLoadCalls = [];
+    context.loadWorkProjects = async () => [];
+    context.loadWorkTasks = async () => [];
+    context.loadChinaPurchases = async () => [];
+    context.loadOrderItemsByOrderIds = async (orderIds, options = {}) => {
+        context.__orderItemLoadCalls.push({ orderIds: clone(orderIds), options: clone(options || {}) });
+        if (options && options.summary === true) {
+            return [{
+                order_id: 42,
+                item_number: 1,
+                product_name: 'Summary-only row',
+                quantity: 5,
+            }];
+        }
+        return [{
+            order_id: 42,
+            item_number: 1,
+            item_type: 'hardware',
+            product_name: 'Warehouse ring',
+            quantity: 5,
+            hardware_source: 'warehouse',
+            hardware_warehouse_item_id: 501,
+        }];
+    };
+
+    try {
+        const state = clone(await vm.runInContext(`(async () => {
+            const bundle = await Orders.loadMetaBundleLocal([42]);
+            const meta = Orders.buildOrderMeta(
+                { id: 42, order_name: 'Hardware Order', production_hours_hardware: 1.25 },
+                bundle.orderItems,
+                bundle.chinaPurchases,
+                bundle.tasks
+            );
+            return {
+                calls: globalThis.__orderItemLoadCalls,
+                itemType: bundle.orderItems[0]?.item_type || '',
+                hardwareLabel: meta.hardware.label,
+                hardwareTitle: meta.hardware.title,
+            };
+        })()`, context));
+
+        assert.equal(state.calls.length, 1);
+        assert.equal(state.calls[0].options.summary, true, 'orders meta must avoid loading bulky item_data for every order');
+        assert.equal(state.itemType, '');
+        assert.equal(state.hardwareLabel, 'Фурнитура / сборка');
+        assert.match(state.hardwareTitle, /плановые часы сборки/i);
+    } finally {
+        context.loadOrderItemsByOrderIds = originalLoadOrderItemsByOrderIds;
+    }
+}
+
 async function smokeBlankPricingSeparatesCatalogPriceAndNetMargin(context) {
     vm.runInContext(`
         App.getItemOriginLabel = (item) => item?.is_blank_mold ? 'бланк' : 'кастом';
@@ -992,11 +1237,11 @@ async function smokeBlankTargetFormulaMatchesVatExclusiveMargin(context) {
         };
     })()`, context));
 
-    assert.equal(state.blankTarget, 608.79, 'blank target price should treat tax, commercial and charity as deductions from the VAT-free base');
-    assert.equal(state.blankNet40, 608.79, '40% blank helper price should match the blanks catalog target formula');
-    assert.equal(state.customTarget, 608.79, 'generic calculator target formula should now use the same VAT-free retention canon as blanks');
-    assert.equal(state.blankSell, 610, 'blank catalog sell price should round the VAT-free target to the nearest 5');
-    assert.equal(state.blankMargin, 40.09, 'generic margin helper should now reflect the same VAT-free retention canon as blanks');
+    assert.equal(state.blankTarget, 615.56, 'blank target price should treat tax, commercial and charity as deductions from the VAT-free base');
+    assert.equal(state.blankNet40, 615.56, '40% blank helper price should match the blanks catalog target formula');
+    assert.equal(state.customTarget, 615.56, 'generic calculator target formula should now use the same VAT-free retention canon as blanks');
+    assert.equal(state.blankSell, 615, 'blank catalog sell price should round the VAT-free target to the nearest 5');
+    assert.equal(state.blankMargin, 39.96, 'generic margin helper should now reflect the same VAT-free retention canon as blanks');
 }
 
 async function smokeWarehouseBackedNfcDoesNotDoubleCountFallback(context) {
@@ -5434,6 +5679,7 @@ async function smokeProjectHardwarePersistenceAndBuckets(context) {
         created_at: '2026-03-17T08:00:00.000Z',
     }];
     context.__warehouseHistory = [];
+    context.__projectHardwareItemLoadCalls = [];
     context.loadProjectHardwareState = async () => clone(context.__projectHardwareState);
     context.saveProjectHardwareState = async (state) => {
         context.__savedProjectHardwareState = clone(state);
@@ -5441,6 +5687,12 @@ async function smokeProjectHardwarePersistenceAndBuckets(context) {
     };
     context.loadOrders = async () => clone(context.__orders);
     context.loadOrder = async (orderId) => clone(context.__orderDetails[Number(orderId)] || null);
+    context.loadOrderItemsByOrderIds = async (orderIds) => {
+        context.__projectHardwareItemLoadCalls.push(clone(orderIds));
+        assert.equal(orderIds.length, 1, 'project hardware view must not bulk-load bulky item_data for all active orders');
+        const orderId = Number(orderIds[0]);
+        return clone(context.__orderDetails[orderId]?.items || []).map(item => ({ ...item, order_id: orderId }));
+    };
     context.loadWarehouseReservations = async () => clone(context.__reservations);
     context.saveWarehouseReservations = async (reservations) => {
         context.__savedReservations = clone(reservations);
@@ -5481,6 +5733,11 @@ async function smokeProjectHardwarePersistenceAndBuckets(context) {
     assert.equal((html.match(/Collected Delivery Order/g) || []).length, 1);
     assert.equal((html.match(/Active Hardware Order/g) || []).length, 1);
     assert.equal((html.match(/Sample Hardware Order/g) || []).length, 1);
+    assert.equal(context.__projectHardwareItemLoadCalls.length, 4);
+    assert.deepEqual(
+        context.__projectHardwareItemLoadCalls.map(ids => ids[0]).sort((a, b) => a - b),
+        [100, 200, 300, 400]
+    );
     assert.match(html, /Включая завершённые заказы: 1/);
     assert.match(html, /Delivery Hardware/);
     assert.match(html, /Collected Hardware/);
@@ -8108,7 +8365,7 @@ async function smokeStandaloneLetterBlankUsesPendantTierPricing(context) {
             taxRate: 0.07,
             vatRate: 0.05,
             charityRate: 0.01,
-            commercialRate: 0.065,
+            commercialRate: 0.07,
             plasticCostPerKg: 2500,
             moldBaseCost: 18000,
             designCost: 0,
@@ -8184,11 +8441,16 @@ async function main() {
     await smokeCalculatorPersistence(context);
     await smokeEmptyPlaceholderProductIsNotSaved(context);
     await smokeHardwareOnlyAutosave(context);
+    await smokeCalculatorLocalDraftSurvivesRefresh(context);
+    await smokeLegacyLocalDraftRestoresAsNewOrder(context);
     await smokeNewDraftAutosaveAndManualSaveShareReservedId(context);
+    await smokeLegacyProductionStatusAppearsInOrdersViews(context);
     await smokeZeroCostWarehouseHardwareStillShowsInPricing(context);
     await smokeLoadOrderHydratesZeroWarehousePriceFromCurrentStock(context);
+    await smokeLegacyPerItemHardwareClearsBuiltinTemplateHardware(context);
     await smokeOrderListAndDetailUseLiveFinancialSnapshot(context);
     await smokeOrderListUsesStoredFinancialMetaWhenItemsMissing(context);
+    await smokeOrderMetaBundleUsesLightItemsForHardware(context);
     await smokeBlankPricingSeparatesCatalogPriceAndNetMargin(context);
     await smokeBlankTargetFormulaMatchesVatExclusiveMargin(context);
     await smokeWarehouseBackedNfcDoesNotDoubleCountFallback(context);

@@ -1,14 +1,665 @@
 # Migration status
 
-Last update: 2026-05-19T16:59:45-03:00
-Current block: 8
-Current task within block: starting Block 8 plan review
-Branch: main
-Last commit: `230ceaf` Block 7: Calculator engine (#45)
-Tests: Block 7 PR #45 was squash-merged to `main`; GitHub Actions main deploy run `26121716549` passed. Post-deploy staging health returned `db.ok=true`, and authenticated `POST /api/calc/preview` returned the expected live calculation response.
+Last update: 2026-05-22T15:16:26-03:00
+Current block: Stage B test/reconciliation
+Current task within block: Visual polish pass for ops-staging
+Branch: stage-B-visual-polish
+Last commit: pending
+Tests: `cd ops/web && npm run build` passed locally. Previous deployed Stage B automated checks remain green on `main`; 10-order money/items/factual reconciliation passed manually with only expected legacy status normalization (`production_casting` -> `in_production`, `completed` -> `closed`).
 
 ## What was just done
 
+- Stage B visual parity follow-up:
+  - Compared `calc.recycleobject.ru` and `ops-staging.recycleobject.ru` visually in browser for the orders list and a real order detail.
+  - Added a shared Vue app shell with the old calc-style dark left sidebar, grouped navigation, active route highlight, and logout action.
+  - Simplified the home view so navigation lives in the shell instead of a wide button cloud.
+  - Restyled `/orders` toward the old calc UI: top quick filters, search card, compact grouped order sections, old-style table density, blue order names, red overdue deadlines, and pill statuses.
+  - Added a second broad legacy-theme pass across all authenticated Vue pages: page background, headers, toolbars, panels, forms, buttons, tabs, tables, badges, auth screens, and mobile shell behavior now share the old calc visual language.
+  - Added density/width follow-up after browser review: table rows are tighter, table titles/subtitles are normalized, editor panels share the same card style, and layouts without an open side editor now use the full content width.
+  - Fixed settings/editor grid vertical alignment after live browser review so editor controls stay at the top of the panel.
+  - Started a deeper polish pass after user feedback that the UI still looked raw:
+    - copied closer legacy calc tokens from `css/style.css` into the Vue shell/theme
+    - restored old sidebar spacing, typography, and active states
+    - removed heavy CRUD-style button shadows and normalized buttons/tables/forms to legacy calc proportions
+    - improved status badge colors and table link behavior
+    - polished the order detail header/summary card so it reads like an order screen rather than an admin form.
+  - Found and fixed a live staging layout regression from the polish pass: fixed sidebar + grid shell hid the content column. Returned the sidebar to sticky grid behavior while keeping the old visual spacing.
+  - Removed the raw-looking empty collapsed filters card from `/orders`; collapsed filters now render as a small standalone control.
+  - Polished the `/orders` result counter so it no longer looks like a disabled prototype input.
+  - Started the next cross-page visual pass and fixed `/time-tracking` table dates so rows show human-readable dates instead of raw ISO timestamps; empty project/stage cells now render as `—`.
+  - Tightened `/molds` table sizing so inline fields and the `Удалить` action fit on a standard viewport; empty photo cells now show an intentional `Нет фото` placeholder.
+  - Tightened `/china` purchase table so long закупка names wrap and the `Открыть` action remains fully visible on a standard viewport.
+  - Fixed `/gantt` date scale layout so days render as one horizontal timeline row instead of spilling into vertical columns.
+  - Fixed `/projects` closed-editor layout so the project list uses the full content width until a project editor is opened.
+  - Added a `/projects` follow-up so the list table wrapper explicitly fills the layout column instead of shrinking to table content under the shared theme.
+  - Added a shared `.table-wrap` width fix so short/empty tables no longer float as narrow centered cards under wide toolbars.
+  - Fixed the warehouse `Новая позиция` flow so `/warehouse/new` opens a real create form instead of trying to load item id `new`; save remains disabled until the required name is filled and existing item editing keeps its loaded-item guard.
+  - Fixed the bug-report create URL so `/bugs/new` now opens the existing `Новый баг` editor instead of a blank routed shell; the `Новый баг` button now reflects the create URL and save is disabled until the title is filled.
+  - Polished the shipment and China purchase detail forms so stock-impact notices use a calm warning style instead of a large red error banner, and footer actions align with the form edge.
+  - Added a follow-up for those form footers so their right alignment wins over the shared legacy toolbar rule.
+  - Tightened `/settings` empty/list handling so the key panel shows an intentional loading/empty state instead of a blank white pane if no keys render.
+  - Localized raw payroll/vacation labels: vacation types now render in Russian, vacation table dates use `ru-RU` formatting, and payroll `Overtime` became `Сверхурочные`.
+  - Localized remaining technical labels in the ops UI: warehouse movement types, stock receipt notices, blanks kind tabs, and order item warehouse/JSON labels no longer show raw internal names.
+  - Fixed the new-order header state so `/orders/new` says `новый черновик` / `черновик не сохранён` instead of incorrectly claiming `сохранено` before the order exists.
+  - Polished remaining staging copy: the home health card now says `API и база данных работают`, and warehouse baseline refresh notes display as Russian user-facing text without changing stored data.
+  - Tightened `/warehouse` and `/shipments` tables so columns fit the standard content width, long names wrap, and right-side row actions remain visible without horizontal scrolling.
+  - Tightened `/gantt` timeline columns so the 21-day scale fits the standard viewport instead of clipping the final dates and track cells.
+  - Polished `/tasks` table deadlines so dates render as compact Russian dates and no longer wrap mid-value on the standard content width.
+  - Polished `/colors` swatches so placeholder or invalid HEX values render as intentional neutral previews instead of empty white boxes, without changing stored color data.
+  - Localized remaining raw labels found in the Stage B visual audit: `/time-tracking` no longer shows `overtime`, and `/bugs` severity options/badges no longer show `Low/Medium/High/Critical`.
+  - Polished `/production/calendar` day cells so day number and work hours render as separate readable lines instead of glued text like `18ч`.
+  - Added a follow-up for `/production/calendar` so the day-cell layout wins over the shared legacy button styling on deployed staging.
+  - Added a final `/production/calendar` override for the global `button` theme, which uses `display: inline-flex !important` and otherwise collapses day cells back to one line.
+  - Polished `/settings` header copy so the page says `Служебные параметры staging-системы` instead of exposing implementation wording as `JSON-ключи`.
+  - Kept API/data behavior unchanged; this is a front-end parity pass only.
+  - Verified `cd ops/web && npm run build` passes.
+- Stage B automated checks:
+  - Created `stage-B-test` from fresh `origin/main`.
+  - Pre-flight: staging health returned `status=ok`, `db.ok=true`; recent `main` workflows were green.
+  - Ran full staging refresh from Supabase; final compare is all OK across every compared table.
+  - Added missing `ops/scripts/check-warehouse-invariants.mjs` from the Stage B plan.
+  - Found live staging I2/I3 violations caused by legacy warehouse history being imported as one aggregate blob with no per-item baseline.
+  - Updated `ops/scripts/refresh/02-warehouse.mjs` to drop invalid aggregate legacy history rows and seed `inventory_audit` baseline rows so `qty == SUM(history.qty_change)` after refresh.
+  - Updated `ops/scripts/compare-datasets.mjs` so `warehouse_history` expected count matches canonical valid history rows plus generated baselines.
+  - Re-ran full refresh with patched scripts on staging:
+    - `warehouse_history_baseline: 198`
+    - compare all OK, including `warehouse_history 198/198`.
+  - Live staging warehouse invariants:
+    - I1: 0 violations
+    - I2: 0 violations
+    - I3: 0 violations
+    - I4: 0 violations
+  - Automated tests:
+    - `ops/api npm test`: 170/170 passed
+    - `ops/api npm run test:calc`: 102/102 passed
+    - `ops/api npm run typecheck`: passed
+    - `ops/web npm run build`: passed
+    - `tests/playwright`: first run 8/9 due ambiguous test selector; after fixing `time-payroll.spec.ts`, 9/9 passed.
+  - Performance warm samples:
+    - `/api/warehouse/items`: p95 0.124s
+    - `/api/orders`: p95 0.220s, above the 0.200s Stage B target
+    - `/api/tasks`: p95 0.143s
+    - `/api/health`: p95 0.086s
+  - Profiled `/api/orders`: SQL is ~1.4 ms; issue is list response payload size from `SELECT *`.
+  - Updated `/api/orders` list endpoint to return only list columns.
+  - Added `docs/stage-B-test-results.md`.
+  - PR #65 was squash-merged to `main` as `b80b563`.
+  - GitHub Actions ops deploy run `26181038209` passed.
+  - Ran deployed full staging refresh + compare after merge:
+    - all compared tables OK
+    - `warehouse_reservations 1167/1167`
+    - `warehouse_history 198/198`
+    - `settings 46/46`
+  - Ran deployed warehouse invariants after merge:
+    - I1: 0 violations
+    - I2: 0 violations
+    - I3: 0 violations
+    - I4: 0 violations
+  - Re-tested `/api/orders` warm latency after deploy:
+    - min 0.089s
+    - p50 0.096s
+    - p95 0.111s
+    - max 0.136s
+- Block 11 follow-up delta-sync:
+  - PR #63 was squash-merged to `main` as `a296adc`.
+  - GitHub Actions Pages deploy run `26175690226` passed after the workflow fix.
+  - The Pages verify workflow now skips optional `bot/timebot.js`, `bot/task-notification-core.js`, and `tests/task-notification-smoke.js` only when those deferred bot source files are absent from the checkout.
+  - PR #61 was squash-merged to `main` as `81b2633`.
+  - GitHub Actions main deploy run `26175175571` passed.
+  - Confirmed `/srv/ops/infra/.env` on ops-staging has the Supabase refresh variables present without printing secret values.
+  - Ran the requested deployed refresh scripts in order on ops-staging:
+    - `01-employees`: 14 employees
+    - `02-warehouse`: 227 warehouse items, 1086 unique reservations, 1 history row
+    - `03-shipments-china`: 13 shipments, 62 shipment items, 14 China purchases, 45 China purchase items, 103 catalog rows
+    - `04-molds-blanks`: 53 molds, 5 mold hardware links, 61 hardware blanks, 12 packaging blanks, 40 colors, 43 marketplace sets
+    - `05-bugs`: 10 bug reports, 8 bug attachments
+  - Ran deployed compare and found only the `03-shipments-china` child rows were doubled by a partial rerun:
+    - `shipment_items`: Supabase 62, Postgres 124
+    - `china_purchase_items`: Supabase 45, Postgres 90
+  - Fixed `ops/scripts/refresh/03-shipments-china.mjs` so the module runs in one transaction and clears `shipment_items` / `china_purchase_items` before rebuilding them from legacy JSON snapshots.
+  - Verified `node --check ops/scripts/refresh/03-shipments-china.mjs` locally.
+  - Verified the patched script on ops-staging via a temporary `*.mjs` copy:
+    - `shipments 13/13 OK`
+    - `shipment_items 62/62 OK`
+    - `china_purchases 14/14 OK`
+    - `china_purchase_items 45/45 OK`
+    - `china_catalog 103/103 OK`
+  - Full deployed compare after the patched rerun is all OK across every currently compared table, including:
+    - `shipments 13/13 OK`
+    - `shipment_items 62/62 OK`
+    - `china_purchases 14/14 OK`
+    - `china_purchase_items 45/45 OK`
+    - `warehouse_reservations 1086/1086 OK`
+    - `settings 46/46 OK`
+    - `time_entries 193/193 OK`
+    - work/task tables OK.
+  - Temporary VPS script copy was removed after verification.
+- Block 16 follow-up:
+  - PR #59 was squash-merged to `main` as `87ac579`.
+  - GitHub Actions main deploy run `26174496994` passed.
+  - Staging health after deploy: `status=ok`, `db.ok=true`.
+  - Ran deployed `ops/scripts/refresh/10-settings.mjs`:
+    - copied 46 operational settings
+    - `work_load_ratio` is present
+    - skipped normalized/finance/wiki/work/auth/smoke keys as intended.
+  - Ran deployed compare:
+    - `settings 46 46 0 OK`
+    - full compare still reports the known unrelated `warehouse_reservations` mismatch (`1086` vs `1059`).
+  - Ran Playwright `/settings` staging smoke: 1/1 passed.
+  - Cleaned the temporary `app_config.e2e_*` setting created by the smoke.
+  - Stage A is complete; next is Stage B test/reconciliation.
+  - PR #58 was squash-merged to `main` as `03d168e`.
+  - GitHub Actions main deploy run `26173863522` passed.
+  - Staging health after deploy: `status=ok`, `db.ok=true`.
+  - Settings API smoke against staging passed:
+    - temporary `app_config.smoke_*` setting `PUT`: HTTP 200
+    - same key `GET`: HTTP 200
+    - smoke key was deleted from staging DB.
+  - Ran full staging refresh from Supabase with the deployed Block 16 pipeline.
+    - Refresh completed successfully.
+    - It copied 10 company settings but skipped several operational scalar settings because the first whitelist was too narrow.
+  - Created follow-up branch `block-16-settings-whitelist` from fresh `origin/main`.
+  - Changed settings refresh/compare selection from narrow whitelist to broad operational allow-by-default with explicit denylist for:
+    - normalized production/warehouse settings
+    - finance/wiki/knowledge settings
+    - auth/session/employee-extra settings
+    - work/task blobs
+    - smoke/probe keys.
+  - Verified follow-up:
+    - `node --check ops/scripts/refresh/10-settings.mjs`
+    - `node --check ops/scripts/compare-datasets.mjs`
+    - Patched staging `10-settings` run copied 46 settings and preserved `work_load_ratio`.
+    - Patched compare reports `settings 46 46 0 OK`.
+    - Full compare still has one unrelated `warehouse_reservations` mismatch (`1086` vs `1059`) from legacy duplicate/invalid reservation rows dropped by refresh.
+- Block 16 progress:
+  - Created branch `block-16-settings` from fresh `origin/main`.
+  - Read Block 16 plan.
+  - Added migration `ops/db/migrations/012_settings.sql` with generic `settings` table.
+  - Added authenticated settings API:
+    - `GET /api/settings/:key` for any authenticated user
+    - `GET /api/settings` admin-only
+    - `PUT /api/settings/:key` admin-only with `Idempotency-Key`
+  - Added refresh support:
+    - `ops/scripts/refresh/10-settings.mjs`
+    - `refresh-staging-snapshot.mjs` now runs `10-settings`
+    - `compare-datasets.mjs` includes copied settings count
+  - Added Vue `/settings` screen with JSON editor and admin-only home nav link.
+  - Added API tests `ops/api/test/settings.test.js`.
+  - Added Playwright smoke `tests/playwright/settings.spec.ts`.
+  - Confirmed `/srv/ops/infra/.env` now has both Supabase refresh secrets present:
+    - `SUPABASE_URL`
+    - `SUPABASE_SERVICE_KEY`
+  - Updated `ops/README.md` for Stage A complete / Stage B next once Block 16 merges.
+  - Verified:
+    - `node --check` for settings route/test/refresh and compare scripts: passed
+    - `cd ops/web && npm run build`: passed
+    - VPS temporary Postgres targeted `settings.test.js`: 4/4 passed
+    - VPS temporary Postgres full API suite: 170/170 passed
+    - VPS temporary Postgres calc suite: 102/102 passed
+- Block 15 final:
+  - PR #57 was squash-merged to `main` as `8ffedd3`.
+  - GitHub Actions main deploy run `26172931301` passed.
+  - Staging health after deploy: `status=ok`, `db.ok=true`.
+  - API smoke against staging passed:
+    - `/api/analytics/summary`: HTTP 200
+    - `/api/analytics/revenue-by-month`: HTTP 200
+    - `/api/analytics/top-clients`: HTTP 200
+    - `/api/analytics/status-dynamics`: HTTP 200
+    - `/api/analytics/production-load`: HTTP 200
+    - `/api/analytics/product-types`: HTTP 200
+    - `/api/analytics/factual-margin`: HTTP 200
+  - Playwright `/analytics` staging smoke passed 1/1.
+- Block 15 progress:
+  - Created/continued branch `block-15-analytics` from fresh `origin/main`.
+  - Read Block 15 plan and confirmed the legacy `js/analytics.js` module redirects to `Factual.load()`, so report inventory comes from `js/factual.js`.
+  - Added `ops/api/src/analytics/README.md` documenting the migrated read-only reports and legacy caveats.
+  - Added analytics query layer and authenticated report routes:
+    - `/api/analytics/summary`
+    - `/api/analytics/revenue-by-month`
+    - `/api/analytics/top-clients`
+    - `/api/analytics/status-dynamics`
+    - `/api/analytics/production-load`
+    - `/api/analytics/product-types`
+    - `/api/analytics/factual-margin`
+  - Added API coverage in `ops/api/test/analytics.test.js`: auth requirement plus summary, revenue by month, top clients, status dynamics, production load, product types, and factual margin.
+  - Added Vue analytics API wrapper, `/analytics` route, home navigation link, and analytics screen/components.
+  - Added Playwright smoke `tests/playwright/analytics.spec.ts`.
+  - Updated `ops/README.md` with the Block 15 endpoints/screen and current refresh-secret caveat.
+  - Verified:
+    - `node --check` for analytics route/query/test files: passed
+    - `cd ops/web && npm run build`: passed
+    - VPS temporary Postgres targeted `analytics.test.js`: 7/7 passed
+    - VPS temporary Postgres full API suite: 166/166 passed
+    - VPS temporary Postgres calc suite: 102/102 passed
+  - Remaining Block 15:
+    - PR, self-merge on green gates, deploy, staging smoke
+    - compare 2-3 report figures with old system if Supabase refresh secrets become available.
+- Block 14 final:
+  - PR #56 was squash-merged to `main` as `00220ef`.
+  - GitHub Actions main deploy run `26171394997` passed.
+  - Staging health after deploy: `status=ok`, `db.ok=true`.
+  - Staging DB has Block 14 tables `time_entries` and `payroll_periods`.
+  - Browser/API smoke against staging passed:
+    - created temporary employee and temporary admin user
+    - added a time entry through `/time-tracking`
+    - calculated payroll through `/api/payroll/calculate`
+    - verified `/payroll` showed the temporary employee and `1 000 ₽`
+    - cleaned temporary auth user and employee; counts returned to `0`
+  - Refresh/compare remains blocked because `/srv/ops/infra/.env` still lacks `SUPABASE_URL` and `SUPABASE_SERVICE_KEY`.
+- Block 14 progress:
+  - Created branch `block-14-time-payroll` from fresh `origin/main`.
+  - Read Block 14 plan and legacy `js/timetrack.js` payroll/time sections.
+  - Added migration `ops/db/migrations/011_time_payroll.sql`:
+    - `time_entries`
+    - `app_vacations`
+    - `payroll_rates`
+    - `payroll_periods`
+  - Added payroll calc engine in `ops/api/src/payroll/calc.ts` plus runtime JS mirror `ops/api/src/payroll/calc.js`.
+    - Supports hourly employees.
+    - Supports salary employees with half-month threshold overtime.
+    - Supports tiered hourly rates via `rate.tier='tiered'` and `extras.tiers`.
+  - Added authenticated/idempotent API resources:
+    - `/api/time-entries`
+    - `/api/vacations`
+    - `/api/payroll/rates`
+    - `/api/payroll/periods`
+    - `/api/payroll/calculate`
+    - `/api/payroll/periods/:id/mark-paid`
+  - Added refresh/compare support:
+    - `ops/scripts/refresh/09-time-payroll.mjs`
+    - `refresh-staging-snapshot.mjs` now runs `09-time-payroll`
+    - `compare-datasets.mjs` includes `time_entries` and `app_vacations`
+  - Added Vue API wrapper `ops/web/src/api/timePayroll.ts`.
+  - Added Vue routes/screens:
+    - `/time-tracking`
+    - `/vacations`
+    - `/payroll`
+    - home navigation links
+  - Added Playwright smoke `tests/playwright/time-payroll.spec.ts`.
+  - Verified:
+    - `node --check` for new API routes/payroll/refresh script: passed
+    - `cd ops/api && npm run build:calc`: passed
+    - `cd ops/web && npm run build`: passed
+    - VPS temporary Postgres targeted tests `time-payroll.test.js`: 8/8 passed
+    - VPS temporary Postgres full API suite: 159/159 passed
+    - VPS temporary Postgres calculator suite: 102/102 passed
+  - Remaining Block 14:
+    - run staging refresh/compare once Supabase refresh secrets are available
+    - PR, self-merge on green gates, deploy, staging smoke.
+- Block 13 final:
+  - PR #55 was squash-merged to `main` as `b786c00`.
+  - GitHub Actions main deploy run `26170066884` passed.
+  - Browser UI smoke against staging passed:
+    - logged in with temporary admin
+    - `/molds` thumbnail loaded with nonzero natural size
+    - `/molds/:id` preview loaded with nonzero natural size
+    - `ui_photo_smoke=pass`
+  - Removed temporary Block 13 e2e users; count is `0`.
+- Block 13 post-merge:
+  - PR #54 was squash-merged to `main` as `1a15d8e`.
+  - GitHub Actions main deploy run `26169578150` passed.
+  - Staging health after deploy: `status=ok`, `db.ok=true`.
+  - Verified deployed API container receives:
+    - `S3_ENDPOINT=https://s3.ru-3.storage.selcloud.ru`
+    - `S3_REGION=ru-3`
+    - `S3_BUCKET_MOLD_PHOTOS=ro-ops-mold-photos`
+  - Ran live staging mold-photo migration:
+    - `Mold photos migration complete. molds=32`
+    - `legacy_after=0`
+    - `selectel_after=32`
+    - `photo_nonempty=36`
+  - Verified API signing and object availability:
+    - `/api/molds` returns presigned `https://s3.ru-3.storage.selcloud.ru/...` URLs for migrated mold photos.
+    - One migrated image URL returned `image_http=200`, `content_type=image/jpeg`.
+  - Found that the current Vue ops UI did not render mold photos, even though it stored/loaded `photo_url`.
+  - Created follow-up branch `block-13-mold-photos-display` from fresh `origin/main`.
+  - Added mold photo thumbnails to `/molds`.
+  - Added mold detail photo preview and editable `photo_url` field to `/molds/:id`.
+  - Verified `cd ops/web && npm run build`: passed.
+- Block 13 progress:
+  - Created branch `block-13-mold-photos` from fresh `origin/main` after PR #53 merge.
+  - Read Block 13 plan: migrate Supabase Storage bucket `mold-photos` to Selectel bucket `ro-ops-mold-photos`, rewrite `molds.photo_url` to `selectel://bucket/key`, and verify photos on staging.
+  - Confirmed staging data before migration:
+    - `molds_total=53`
+    - `photo_nonempty=36`
+    - `legacy_mold_photos=32`
+    - `selectel_mold_photos=0`
+  - Added `S3_BUCKET_MOLD_PHOTOS=ro-ops-mold-photos` plus optional `S3_ENDPOINT_MOLD_PHOTOS` / `S3_REGION_MOLD_PHOTOS` to `ops/infra/.env.example`.
+  - Set default S3 region to `ru-3` to match the project Selectel endpoint and avoid ru-3 signature/API failures.
+  - Added S3 env passthrough to the `api` service in `ops/infra/docker-compose.yml`, so presigned URLs work after DB rows are rewritten to `selectel://...`.
+  - Extended `ops/api/src/s3.js` with mold-photo bucket endpoint/region overrides.
+  - Added `ops/scripts/migrate-storage-mold-photos.mjs`:
+    - scans `molds.photo_url`
+    - detects legacy Supabase `mold-photos` URLs
+    - downloads public legacy HTTPS URLs directly
+    - falls back to Supabase Storage only if the direct download is unavailable
+    - uploads to Selectel with key `mold-photos/<legacy-key>`
+    - rewrites rows to `selectel://ro-ops-mold-photos/mold-photos/<legacy-key>`
+    - is idempotent because it only selects legacy Supabase URLs.
+  - Added API tests for:
+    - mold-photo regional endpoint signing
+    - `/api/molds` list/detail signing `selectel://` photo URLs.
+  - Created private Selectel bucket `ro-ops-mold-photos` in ru-3 using existing staging S3 credentials.
+  - Verified bucket with write/read/delete smoke object.
+  - Added `S3_BUCKET_MOLD_PHOTOS=ro-ops-mold-photos` and `S3_REGION=ru-3` to `/srv/ops/infra/.env`.
+  - Verified:
+    - `cd ops/api && node --test test/s3.test.js`: 4/4 passed
+    - VPS temporary Postgres targeted tests: molds+s3 14/14 passed
+    - VPS temporary Postgres migrator no-op: `Mold photos migration complete. molds=0`
+    - VPS temporary Postgres full API suite: 151/151 passed
+    - VPS temporary Postgres calculator suite: 102/102 passed
+  - Remaining Block 13 after PR merge/deploy:
+    - run `ops/scripts/migrate-storage-mold-photos.mjs` on live staging
+    - verify staging counts: legacy `mold-photos` URLs should be 0, Selectel mold-photo URLs should be 32
+    - verify `/api/molds` returns signed URLs and photos display on staging.
+- Block 12 follow-up:
+  - PR #53 was squash-merged to `main` as `eb92279`.
+  - GitHub Actions main deploy run `26168644533` passed.
+  - Staging health after deploy: `status=ok`, `db.ok=true`.
+  - Telegram live polling remains blocked by VPS egress to `api.telegram.org`; `TELEGRAM_PROXY_URL` support is deployed but no proxy URL is configured, so `ops-bot` stays stopped.
+- Block 12 post-merge:
+  - PR #52 was squash-merged to `main` as `e903931`.
+  - GitHub Actions main deploy run `26165612149` passed.
+  - Staging health after deploy: `status=ok`, `db.ok=true`.
+  - Verified staging DB:
+    - `app_meta.version = 013-bot-state`
+    - `bot_tokens` has one `taskbot/admin` token row inserted by the deploy bootstrap script.
+  - Verified Ops API Bearer auth with the staged `OPS_BOT_TOKEN`: `/api/auth/me` returns `role=admin`, `email=bot:taskbot`.
+  - `TG_BOT_TOKEN` is now present in `/srv/ops/infra/.env`.
+  - Started/observed `ops-bot`: process starts and stays up, but Telegram polling cannot reach Telegram:
+    - `curl -4 https://api.telegram.org` from VPS times out.
+    - `curl -6 https://api.telegram.org` cannot connect.
+    - Google/GitHub HTTPS from the same VPS succeeds.
+  - Stopped `ops-bot` to avoid noisy `ETIMEDOUT` retry logs while Telegram egress is unavailable.
+  - Created follow-up branch `block-12-telegram-proxy` from fresh `origin/main`.
+  - Added optional `TELEGRAM_PROXY_URL` support to bot Telegram request options and compose env.
+  - Added `ops/bot/test/telegram-runtime.test.js` covering default request options, numeric overrides, proxy pass-through, and error formatting.
+  - Verified local bot runtime tests that do not need local Postgres: 25/25 passed.
+  - Verified full bot test suite on VPS temporary Postgres: 32/32 passed.
+  - Verified compose config on VPS with the follow-up compose file: `--profile bot` includes `bot`.
+- Block 12 progress:
+  - Added `ops/db/migrations/013_bot_state.sql` for `employees.timezone`, Telegram bindings, bot conversation state, message inbox, and bot bearer tokens.
+  - Added Bearer token auth in the Node API; bot tokens update `last_used_at` and populate `req.user`.
+  - Moved tracked Telegram bot sources from `bot/` to `ops/bot/`.
+  - Added Postgres-backed bot state/inbox module in `ops/bot/state.js` with FIFO/`SKIP LOCKED` message claiming.
+  - Added bot package lock and bot `npm test` script.
+  - Verified state module on a temporary VPS Postgres database: 7/7 passed.
+  - Added IANA timezone helpers and wired `getLocalDate()` to accept timezone strings while preserving numeric-offset behavior.
+  - Added timezone unit tests: 10/10 passed locally.
+  - Added `ops/bot/api-client.js` for Bearer-authenticated Node API calls with idempotency keys.
+  - Added API client unit tests: 8/8 passed locally.
+  - Implemented `/api/bot/bindings` admin routes and notification-event processing endpoints.
+  - Switched `ops/bot/taskbot.js` from Supabase to Ops API (`TG_BOT_TOKEN`, `OPS_API_URL`, `OPS_BOT_TOKEN`).
+  - Updated `task-notification-worker.js` so task notification polling can use the Ops API plus bot bindings.
+  - Added `ops/bot/Dockerfile`, `ops/infra/docker-compose.yml` bot service, and bot env docs/examples.
+  - Local bot unit tests passed 20/20.
+  - Fixed bot binding API field names to match migration (`bound_at`, `last_active_at`).
+  - Verified Block 12 DB path on VPS temporary Postgres with all migrations:
+    - API `auth-routes.test.js` + `bot-routes.test.js`: 11/11 passed.
+    - Bot `npm test`: 27/27 passed.
+  - Verified full quality gates available without Telegram secret:
+    - Full API suite on VPS temporary Postgres: 146/146 passed.
+    - Calculator suite on VPS temporary Postgres: 102/102 passed.
+    - `cd ops/web && npm run build`: passed.
+  - Generated `OPS_BOT_TOKEN` into `/srv/ops/infra/.env` without printing it.
+  - Could not insert `OPS_BOT_TOKEN` into live `bot_tokens` yet because staging DB has not deployed migration 013.
+  - Block 12 live Docker/Telegram smoke is blocked on missing `TG_BOT_TOKEN` in `/srv/ops/infra/.env`.
+  - Pushed `block-12-bot` and opened PR #52: https://github.com/polinacherpovitskaya-glitch/ro-calculator/pull/52
+  - After opening PR #52, checked the ops deploy workflow and made the bot compose service opt-in via profile `bot`.
+    - Regular `docker compose --env-file .env up -d --build` will not start `ops-bot` before `TG_BOT_TOKEN` exists.
+    - Verified on VPS with the Block 12 compose file: default services are `postgres`, `api`, `caddy`; `--profile bot` adds `bot`.
+  - PR #52 GitHub check `test-and-deploy` passed.
+  - Added `/srv/ops/infra/scripts/ensure-bot-token.sh` to the deploy flow after migrations.
+    - It inserts `OPS_BOT_TOKEN` from `/srv/ops/infra/.env` into `bot_tokens` as `taskbot/admin` once migration 013 exists.
+    - It skips safely if the env file, token, or table is missing.
+    - Verified on current staging DB: skips because `bot_tokens` is not deployed yet.
+    - Verified on a temporary VPS Postgres with all migrations: inserted the token row successfully.
+    - PR #52 GitHub check `test-and-deploy` passed after this workflow change.
+  - Self-review found missing idempotency on new bot mutation routes.
+    - Added `withIdempotency` to `POST /api/bot/bindings`, `DELETE /api/bot/bindings/:telegram_chat_id`, and `PATCH /api/bot/notification-events/:id/processed`.
+    - Updated bot API client to send idempotency keys for those writes.
+    - Added regression tests for missing idempotency headers and repeated notification-event processing.
+    - Verified on VPS temporary Postgres: API auth+bot routes 13/13 passed; bot `npm test` 27/27 passed.
+- Block 11 PR #51 was squash-merged to `main` as `0fa4131`.
+- GitHub Actions main deploy run `26136213203` passed.
+- Live staging health after deploy: `status=ok`, `db.ok=true`.
+- Ran `tests/playwright/work-management.spec.ts` against staging with a temporary admin user: passed 1/1.
+- Deleted the temporary smoke auth users and the created `E2E task ...` row from staging.
+- Checked `/srv/ops/infra/.env` for refresh secrets:
+  - `SUPABASE_URL` missing
+  - `SUPABASE_SERVICE_KEY` missing
+  - therefore Block 11 refresh/compare cannot run until the secret is provided.
+- Created Block 12 working branch `block-12-bot` from fresh `origin/main`.
+- Read Block 12 plan plus required bug classes P/Q/R and Stability Program notes.
+- Block 10 PR #50 was squash-merged to `main` as `ff19395`.
+- GitHub Actions main deploy run `26135544637` passed.
+- Created Block 11 branch `block-11-tasks-projects` from fresh `origin/main`.
+- Added migration `ops/db/migrations/009_work_management.sql`:
+  - `areas`
+  - `projects`
+  - `tasks`
+  - `task_comments`
+  - `work_assets`
+  - `task_checklist_items`
+  - `task_watchers`
+  - `work_activity`
+  - `work_templates`
+  - `task_notification_events`
+  - indexes plus seed areas/templates from `migration_tasks_projects_mvp.sql`
+- Added authenticated/idempotent API resources:
+  - `/api/areas`
+  - `/api/projects`
+  - `/api/tasks`
+  - `/api/work/templates`
+  - `/api/work/tasks/:taskId/comments`
+  - `/api/work/tasks/:taskId/checklist`
+  - `/api/work/tasks/:taskId/watchers/:employeeId`
+  - `/api/work/assets`
+  - `/api/work/activity`
+  - `/api/work/notification-events`
+- Added API regression coverage in `ops/api/test/work-management.test.js`:
+  - auth required
+  - areas CRUD/soft delete
+  - projects CRUD/detail/activity
+  - task CRUD/assign/complete/detail/activity
+  - validation of status/priority/context
+  - comments/checklist/watchers/assets/activity
+  - templates and notification event listing
+- Added refresh/compare support:
+  - `ops/scripts/refresh/08-work-management.mjs`
+  - `refresh-staging-snapshot.mjs` now runs `08-work-management`
+  - `compare-datasets.mjs` includes work-management tables with FK-aware counts
+- Added Vue API wrapper `ops/web/src/api/work.ts`.
+- Added Vue screens and routes:
+  - `/tasks`
+  - `/projects`
+  - `/areas`
+  - `/gantt`
+  - home navigation links
+- Added Playwright smoke `tests/playwright/work-management.spec.ts`:
+  - login
+  - create task
+  - add comment
+  - add checklist item
+  - close task
+- Verified:
+  - `cd ops/web && npm run build`: passed
+  - full API suite on VPS temporary Postgres with migrations 001-009: 141/141 passed
+  - `npm run test:calc` on VPS temporary Postgres: 102/102 passed
+- Remaining Block 11 after PR merge/deploy:
+  - run staging refresh/compare including `08-work-management`
+  - run `tests/playwright/work-management.spec.ts` against staging
+- Opened Block 11 PR: https://github.com/polinacherpovitskaya-glitch/ro-calculator/pull/51
+- Block 9 PR #47, hotfix PR #48, and smoke assertion PR #49 were merged to `main`; Block 9 is deployed and staging orders smoke passed.
+- Created Block 10 branch `block-10-product-images` from fresh `origin/main`.
+- Read the Block 10 plan: migrate Supabase Storage bucket `product-images` to private Selectel Object Storage bucket `ro-ops-product-images`, then rewrite DB URLs to `selectel://bucket/key` and return presigned URLs from the API.
+- Confirmed VPS `/srv/ops/infra/.env` currently has backup S3 credentials and `S3_BUCKET`, but does not yet have `S3_BUCKET_PRODUCT_IMAGES`.
+- Added multi-bucket support to `ops/api/src/s3.js`:
+  - `uploadObject`, `deleteObject`, and `presignedGetUrl` accept an explicit bucket.
+  - `selectel://bucket/key` is parsed and signed against that bucket.
+  - `S3_MOCK_DIR` keeps tests deterministic with `mock-s3://bucket/key` URLs.
+- Added recursive API response signing middleware:
+  - `signSelectelUrls()` walks API JSON responses and replaces `selectel://...` strings with presigned URLs.
+  - The signer preserves `Date` and other serializable objects so existing API responses keep their shape.
+- Added `S3_BUCKET_PRODUCT_IMAGES=ro-ops-product-images` to `ops/infra/.env.example`.
+- Added optional `S3_ENDPOINT_PRODUCT_IMAGES` / `S3_REGION_PRODUCT_IMAGES` support so the product-images bucket can live in a different Selectel region than the backup bucket.
+- Added `ops/scripts/migrate-storage-product-images.mjs`:
+  - scans `warehouse_items.photo_url`
+  - scans nested JSON in `order_items.item_data`
+  - scans nested JSON in `product_templates.data`
+  - downloads from Supabase `product-images`
+  - uploads to Selectel using the explicit product-images bucket
+  - rewrites URLs to `selectel://ro-ops-product-images/product-images/<key>`
+  - remains idempotent by only selecting Supabase product-images URLs.
+- Added API regression tests for:
+  - explicit S3 bucket uploads and mock signing
+  - product-images regional endpoint selection
+  - recursive Selectel URL signing
+  - warehouse item photo URL signing in API responses.
+- Verified Block 10 code on a temporary VPS Postgres:
+  - Full API suite: 130/130 passed
+  - Calculator suite: 102/102 passed
+- Created private Selectel bucket `ro-ops-product-images` in the same region as the existing S3 endpoint (`ru-3`) using the existing S3 credentials.
+- Verified the bucket with a write/read/delete smoke object.
+- Added `S3_BUCKET_PRODUCT_IMAGES=ro-ops-product-images` to `/srv/ops/infra/.env`.
+- Updated `ops/scripts/migrate-storage-product-images.mjs` so `SUPABASE_URL` / `SUPABASE_SERVICE_KEY` are required only when rows with legacy Supabase product-image URLs actually exist. This allows an honest idempotent no-op when staging has no product images.
+- Ran product-images migration twice on live staging:
+  - first run: `warehouse_items=0, order_items=0, product_templates=0`
+  - second run: `warehouse_items=0, order_items=0, product_templates=0`
+- Verified staging product-image URL counts after migration:
+  - `warehouse_items.photo_url` non-empty: 0
+  - legacy Supabase product-images URLs in `warehouse_items`: 0
+  - legacy Supabase product-images URLs in `order_items`: 0
+  - legacy Supabase product-images URLs in `product_templates`: 0
+  - Selectel product-images URLs in the same tables: 0
+- Photo UI smoke could not inspect real images because staging currently has no migrated product-image rows. API signing behavior is covered by regression tests.
+- Opened Block 10 PR: https://github.com/polinacherpovitskaya-glitch/ro-calculator/pull/50
+- Block 8 PR #46 was squash-merged to `main` as `9ced98a`.
+- Added full-order golden master HTTP integration test covering 24 real legacy order fixtures via `/api/orders`, `/items`, and `/recalc`.
+- Raised API JSON body limit to `5mb` after the full-order test exposed real legacy `calculator_data` payloads over Express' default limit.
+- Added `POST /api/orders/:id/clone` and a Postgres-backed API test for cloning a draft copy with items.
+- Added Orders Vue API wrapper, Pinia store, `/orders`, `/orders/new`, and `/orders/:id`.
+- Added order editor tabs/components:
+  - header/actions/status
+  - items inline editing
+  - add item dialog
+  - consume hardware dialog
+  - calculator snapshot/live preview tab
+  - production tab
+  - factual tab
+  - history tab
+- Decided and documented that factuals live inside the order editor for Block 9; separate `/factual` analytics remains deferred.
+- Added `tests/playwright/orders.spec.ts` for create order, add 2 positions, recalc, reload persistence, and consume-hardware.
+- Verified:
+  - `cd ops/web && npm run build`: passed
+  - `node --check` for changed API JS files/tests: passed
+  - Full API suite on VPS temporary Postgres: 126/126 passed
+  - `npm run test:calc` on VPS temporary Postgres: 102/102 passed
+- Remaining Block 9 staging-only checks after PR merge/deploy:
+  - run staging refresh/compare with `07-orders`
+  - run `tests/playwright/orders.spec.ts` against staging
+  - manually compare 5 real active orders on staging, копейка-в-копейку
+- GitHub Actions main deploy run `26124057155` passed.
+- Refreshed live staging from Supabase after Block 8 deploy using the Node 20 container path because host `node` is not installed on the VPS:
+  - employees 14/14
+  - warehouse_items 227/227
+  - warehouse_reservations 643/643
+  - warehouse_history 1/1
+  - shipments 13/13
+  - shipment_items 62/62
+  - china_purchases 14/14
+  - china_purchase_items 45/45
+  - china_catalog 103/103
+  - molds 53/53
+  - mold_hardware 5/5
+  - mold_usage_log 0/0
+  - hw_blanks 61/61
+  - pkg_blanks 12/12
+  - app_colors 40/40
+  - marketplace_sets 43/43
+  - bug_reports 10/10
+  - bug_attachments 8/8
+  - product_templates 0/0
+  - production_calendar_days 0/0
+  - production_plan_entries 0/0
+  - indirect_costs 0/0
+- Verified Block 8 live staging smoke:
+  - login: 200
+  - `/templates`, `/production/calendar`, `/production/plan`, `/indirect-costs`: HTTP 200
+  - calendar update: 200
+  - template create: 201
+  - indirect cost create: 201
+  - production plan create: 201
+- Created Block 9 working branch `block-9-orders` from fresh `origin/main`.
+- Read Block 9 plan plus required warehouse interaction map and bug classes B/C/D/E/F/G.
+- Added `ops/db/migrations/008_orders.sql` with `orders`, `order_items`, `order_factuals`, and `order_status_history`.
+- Added `NOT VALID` FKs from `warehouse_reservations.order_id` and `warehouse_history.order_id` to `orders(id)` so deploy is safe against pre-refresh staging rows while new rows are still enforced.
+- Verified migrations 001-008 apply cleanly in a temporary VPS Postgres container.
+- Added initial Orders/Factual API implementation:
+  - `GET/POST/PATCH/DELETE /api/orders`
+  - `GET /api/orders/:id` with items, factual, status history, and `ETag`
+  - `POST/PATCH/DELETE /api/orders/:id/items`
+  - `POST /api/orders/:id/status` with state-machine validation and status history
+  - `POST /api/orders/:id/recalc`
+  - `POST /api/orders/:id/consume-hardware`
+  - `GET/POST/PATCH /api/orders/:id/factual`
+  - `POST /api/orders/:id/factual/recalc`
+  - `POST /api/internal/cleanup-reservations`
+- Added `ops/api/src/cron/reservation-cleanup.js`.
+- Added `ops/api/test/orders.test.js` covering CRUD, ETag conflict, item reservation rebuild, idempotent consume, insufficient stock, final-order rejection, reservation split, status transitions, cleanup, delete cascade, recalc, and factual recalc.
+- Verified full API suite on temporary VPS Postgres: 125/125 passing.
+- Added `ops/scripts/refresh/07-orders.mjs` for orders, order_items, and order_factuals.
+- Updated staging refresh order so `07-orders` runs before warehouse reservations/history, allowing Block 9 order FKs to be enforced for new refresh rows.
+- Updated warehouse refresh to drop order reservations whose order no longer exists and to null invalid history `order_id` values before insert.
+- Updated `compare-datasets.mjs` with `orders`, `order_items`, and `order_factuals`.
+- Verified refresh/compare on temporary VPS Postgres with real Supabase read data:
+  - orders 190/190
+  - order_items 738/738
+  - order_factuals 3/3
+  - warehouse_reservations 642/642 after dropping reservations for skipped/deleted orders
+  - all other previously migrated counts matched
+- Created Block 8 working branch `block-8-production` from local `main` after Block 7 merge/deploy status was recorded. This preserves the status update without pushing `main` directly.
+- Added migration `ops/db/migrations/007_production.sql`:
+  - `product_templates`
+  - `production_calendar_days`
+  - `production_plan_entries`
+  - `indirect_costs`
+- Used `BIGINT` for `production_plan_entries.operator_id` to match migrated `employees.id`, and added explicit `position` for persisted reorder.
+- Added authenticated/idempotent APIs:
+  - `/api/templates`
+  - `/api/production/calendar`
+  - `/api/production/plan`
+  - `/api/production/plan/reorder`
+  - `/api/indirect-costs`
+- Added Block 8 API tests:
+  - `ops/api/test/templates.test.js`
+  - `ops/api/test/production.test.js`
+  - `ops/api/test/indirect.test.js`
+- Added `ops/api/src/calc/indirect.ts` with `getIndirectAllocation()` from real indirect costs and production calendar hours.
+- Wired `/api/calc/preview` to optionally return `indirect_allocation` when an indirect period is supplied, without changing saved legacy snapshot totals.
+- Added refresh/compare support:
+  - `ops/scripts/refresh/06-production.mjs`
+  - `ops/scripts/refresh-staging-snapshot.mjs` now runs `06-production`
+  - `ops/scripts/compare-datasets.mjs` includes Block 8 counts
+- Refresh script handles both plan names and observed legacy keys:
+  - `productionCalendar`
+  - `production_plan_state_json`
+  - `indirectCosts`
+  - `indirect_costs_json`
+- Added Vue API wrappers and screens:
+  - `/templates`
+  - `/production/calendar`
+  - `/production/plan`
+  - `/indirect-costs`
+- Updated home navigation and `ops/README.md` for Block 8.
+- Verified:
+  - `cd ops/api && npm run typecheck`: passed
+  - `cd ops/api && npm run test:calc`: passed 77/77; golden masters still pass
+  - `cd ops/web && npm run build`: passed
+  - `node --check` for new/changed refresh scripts: passed
+  - Full API suite on VPS temporary Postgres with migrations 001-007: passed 111/111
+- Opened Block 8 PR: https://github.com/polinacherpovitskaya-glitch/ro-calculator/pull/46
+- Next after review/merge: watch main deploy, run staging refresh/compare, then smoke `/production/calendar`, `/templates`, `/indirect-costs`, and `/production/plan`.
 - Block 7 PR #45 was squash-merged to `main` as `230ceaf`.
 - GitHub Actions main deploy run `26121716549` passed.
 - Verified live staging after Block 7 deploy:

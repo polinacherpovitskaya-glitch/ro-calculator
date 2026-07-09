@@ -11,7 +11,7 @@ function createContext() {
     return vm.createContext({
         console,
         round2,
-        App: { params: { taxRate: 0.07, vatRate: 0.05, charityRate: 0.01, commercialRate: 0.065 } },
+        App: { params: { taxRate: 0.07, vatRate: 0.05, charityRate: 0.01, commercialRate: 0.07 } },
     });
 }
 
@@ -26,15 +26,15 @@ function main() {
     runScript(context, 'js/calculator.js');
 
     const retention = vm.runInContext('Number(getNetRevenueRetentionRate(App.params).toFixed(3))', context);
-    assert.equal(retention, 0.855, 'B2B keep-rate should be based on 7% tax + 6.5% commercial + 1% charity from the VAT-free base');
+    assert.equal(retention, 0.85, 'B2B keep-rate should be based on 7% tax + 7% commercial + 1% charity from the VAT-free base');
 
     assert.equal(vm.runInContext('calcTaxesAmount(1000, App.params)', context), 70);
-    assert.equal(vm.runInContext('calcCommercialAmount(1000, App.params)', context), 65);
+    assert.equal(vm.runInContext('calcCommercialAmount(1000, App.params)', context), 70);
     assert.equal(vm.runInContext('calcCharityAmount(1000, App.params)', context), 10);
 
     const actualMargin = vm.runInContext('calculateActualMargin(635, 257.99, App.params)', context);
-    assert.equal(actualMargin.earned, 284.93);
-    assert.equal(actualMargin.percent, 44.87);
+    assert.equal(actualMargin.earned, 281.76);
+    assert.equal(actualMargin.percent, 44.37);
 
     const sourceChecks = [
         ['js/app.js', /(0\.065\s*\*\s*\(1\s*\+\s*[^)]+\))|благотворительности\s+с\s+НДС|коммерческ(?:ого|ий)\s+с\s+НДС/gi],

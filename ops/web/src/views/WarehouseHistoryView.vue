@@ -17,11 +17,11 @@
         Тип
         <select v-model="type" @change="reloadFirst">
           <option value="">Все</option>
-          <option value="receipt">receipt</option>
-          <option value="consume">consume</option>
-          <option value="inventory_audit">inventory_audit</option>
-          <option value="manual_edit">manual_edit</option>
-          <option value="return">return</option>
+          <option value="receipt">Приход</option>
+          <option value="consume">Списание</option>
+          <option value="inventory_audit">Инвентаризация</option>
+          <option value="manual_edit">Ручная правка</option>
+          <option value="return">Возврат</option>
         </select>
       </label>
       <label>
@@ -69,13 +69,13 @@
           </tr>
           <tr v-for="entry in history" :key="entry.id">
             <td>{{ formatDate(entry.created_at) }}</td>
-            <td>{{ entry.type }}</td>
+            <td>{{ typeLabel(entry.type) }}</td>
             <td>{{ entry.item_id || '—' }}</td>
             <td>{{ formatNumber(entry.qty_before) }}</td>
             <td>{{ formatNumber(entry.qty_after) }}</td>
             <td :class="entry.qty_change >= 0 ? 'plus' : 'minus'">{{ signed(entry.qty_change) }}</td>
             <td>{{ entry.actor_name || '—' }}</td>
-            <td>{{ entry.note || '—' }}</td>
+            <td>{{ noteLabel(entry.note) }}</td>
           </tr>
           <tr v-if="!loading && history.length === 0">
             <td colspan="8">Пусто</td>
@@ -157,6 +157,24 @@ function formatDate(value: string) {
     hour: '2-digit',
     minute: '2-digit',
   }).format(new Date(value));
+}
+
+function typeLabel(value: string) {
+  return (
+    {
+      receipt: 'Приход',
+      consume: 'Списание',
+      inventory_audit: 'Инвентаризация',
+      manual_edit: 'Ручная правка',
+      return: 'Возврат',
+    }[value] || value
+  );
+}
+
+function noteLabel(value: string | null | undefined) {
+  if (!value) return '—';
+  if (value === 'Baseline after Supabase staging refresh') return 'Базовая запись после обновления staging';
+  return value;
 }
 </script>
 

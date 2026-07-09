@@ -11,15 +11,17 @@ function buildEmployeeMap(list) {
 
 function createTaskNotificationWorker({
     supabase,
+    apiClient,
     sendMessage,
     logger = console,
     messageOptions = {},
     settingsKeys = DEFAULT_WORK_SETTINGS_KEYS,
 }) {
-    if (!supabase) throw new Error('Task notification worker requires supabase client');
+    if (!supabase && !apiClient) throw new Error('Task notification worker requires supabase or apiClient');
     if (typeof sendMessage !== 'function') throw new Error('Task notification worker requires sendMessage function');
 
     async function loadJsonSetting(settingKey, fallbackValue = null) {
+        if (!supabase) return fallbackValue;
         try {
             const { data, error } = await supabase
                 .from('settings')
@@ -34,6 +36,7 @@ function createTaskNotificationWorker({
     }
 
     async function saveJsonSetting(settingKey, value) {
+        if (!supabase) return;
         try {
             await supabase
                 .from('settings')
@@ -48,6 +51,10 @@ function createTaskNotificationWorker({
     }
 
     async function loadPendingTaskNotificationEvents() {
+        if (apiClient) {
+            const { events } = await apiClient.listNotificationEvents({ pending: true, limit: 50 });
+            return Array.isArray(events) ? events : [];
+        }
         try {
             const { data, error } = await supabase
                 .from('task_notification_events')
@@ -79,6 +86,10 @@ function createTaskNotificationWorker({
 
     async function markTaskNotificationProcessed(eventId) {
         const processedAt = new Date().toISOString();
+        if (apiClient) {
+            await apiClient.markNotificationProcessed(eventId);
+            return;
+        }
         try {
             const { error } = await supabase
                 .from('task_notification_events')
@@ -94,6 +105,10 @@ function createTaskNotificationWorker({
     }
 
     async function loadWorkTasksSnapshot() {
+        if (apiClient) {
+            const { tasks } = await apiClient.listTasks();
+            return Array.isArray(tasks) ? tasks : [];
+        }
         try {
             const { data, error } = await supabase.from('tasks').select('*');
             if (!error && Array.isArray(data)) return data;
@@ -108,17 +123,36 @@ function createTaskNotificationWorker({
         const events = await loadPendingTaskNotificationEvents();
         if (!events || events.length === 0) return { processed: 0, delivered: 0 };
 
-        const [employeesResp, tasks] = await Promise.all([
-            supabase.from('employees').select('*').eq('is_active', true),
-            loadWorkTasksSnapshot(),
-        ]);
+        let employees = [];
+        let tasks = [];
+        if (apiClient) {
+            const [employeesResp, bindingsResp, tasksResp] = await Promise.all([
+                apiClient.listEmployees({ active: true }),
+                apiClient.listBotBindings(),
+                loadWorkTasksSnapshot(),
+            ]);
+            const activeBindings = new Map((bindingsResp.bindings || [])
+                .filter(binding => binding.is_active)
+                .map(binding => [String(binding.employee_id), binding.telegram_chat_id]));
+            employees = (employeesResp.employees || []).map(employee => ({
+                ...employee,
+                telegram_id: activeBindings.get(String(employee.id)) || null,
+            }));
+            tasks = tasksResp;
+        } else {
+            const [employeesResp, tasksResp] = await Promise.all([
+                supabase.from('employees').select('*').eq('is_active', true),
+                loadWorkTasksSnapshot(),
+            ]);
 
-        if (employeesResp.error) {
-            logger.error('Task notifications: failed to load employees:', employeesResp.error.message);
-            return { processed: 0, delivered: 0 };
+            if (employeesResp.error) {
+                logger.error('Task notifications: failed to load employees:', employeesResp.error.message);
+                return { processed: 0, delivered: 0 };
+            }
+            employees = employeesResp.data || [];
+            tasks = tasksResp;
         }
 
-        const employees = employeesResp.data || [];
         const employeesById = buildEmployeeMap(employees);
         const tasksById = new Map((tasks || []).map(task => [String(task.id), task]));
         let processed = 0;

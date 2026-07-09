@@ -5,6 +5,7 @@ const path = require('node:path');
 const root = path.join(__dirname, '..');
 const appJs = fs.readFileSync(path.join(root, 'js', 'app.js'), 'utf8');
 const supabaseJs = fs.readFileSync(path.join(root, 'js', 'supabase.js'), 'utf8');
+const styleCss = fs.readFileSync(path.join(root, 'css', 'style.css'), 'utf8');
 const indexHtml = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const versionJson = JSON.parse(fs.readFileSync(path.join(root, 'js', 'version.json'), 'utf8'));
 const yandexStaticSync = fs.readFileSync(path.join(root, '.github', 'workflows', 'yandex-static-sync.yml'), 'utf8');
@@ -33,6 +34,13 @@ assert.match(supabaseJs, /searchParams\.set\('_ro_ts'/, 'Bootstrap fetches must 
 const appScriptMatch = indexHtml.match(/<script src="js\/app\.js\?v=(\d+)"><\/script>/);
 assert.ok(appScriptMatch, 'index.html must include a versioned js/app.js asset');
 assert.equal(appScriptMatch[1], appVersion.replace(/^v/, ''), 'index.html js/app.js asset version must match APP_VERSION number');
+
+const stylesheetMatch = indexHtml.match(/<link rel="stylesheet" href="css\/style\.css\?v=(\d+)">/);
+assert.ok(stylesheetMatch, 'index.html must include a versioned css/style.css asset');
+assert.match(indexHtml, /id="db-status-banner"/, 'index.html must include shared database status banner');
+assert.match(styleCss, /\.db-status-banner/, 'css/style.css must style shared database status banner');
+assert.match(appJs, /ro:shared-db-status/, 'App must listen for shared database status changes');
+assert.match(supabaseJs, /_markSharedDatabaseProblem/, 'Supabase layer must mark shared database connectivity problems');
 
 const sidebarNav = indexHtml.match(/<nav class="sidebar-nav">([\s\S]*?)<\/nav>/);
 assert.ok(sidebarNav, 'Sidebar nav not found in index.html');

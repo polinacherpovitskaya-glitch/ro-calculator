@@ -89,7 +89,7 @@ const Factual = {
     _vatRate(params) { const raw = Number(params?.vatRate); return Number.isFinite(raw) ? raw : 0.05; },
     _taxRate(params) { const raw = Number(params?.taxRate); return Number.isFinite(raw) ? raw : 0.07; },
     _charityRate(params) { const raw = Number(params?.charityRate); return Number.isFinite(raw) ? raw : 0.01; },
-    _commercialRate() { return 0.065; },
+    _commercialRate() { return 0.07; },
     _calcTaxesByRevenue(revenue, params) { return round2(this._num(revenue) * this._taxRate(params)); },
     _calcCommercialByRevenue(revenue, params) { return round2(this._num(revenue) * this._commercialRate()); },
     _calcCharityByRevenue(revenue, params) { return round2(this._num(revenue) * this._charityRate(params)); },

@@ -5596,36 +5596,15 @@ const Warehouse = {
         const productionOrders = (orders || []).filter(o => this._isProjectHardwareActionStatus(o.status));
         let sampleDetails = [];
         let productionDetails = [];
-        let usedBulkOrderItems = false;
-        if (typeof loadOrderItemsByOrderIds === 'function') {
-            const uniqueOrderIds = Array.from(new Set([...sampleOrders, ...productionOrders]
-                .map(o => Number(o.id))
-                .filter(id => Number.isFinite(id) && id > 0)));
-            const rows = await loadOrderItemsByOrderIds(uniqueOrderIds).catch(() => null);
-            if (Array.isArray(rows)) {
-                usedBulkOrderItems = true;
-                const itemsByOrderId = new Map();
-                rows.forEach(row => {
-                    const orderId = Number(row && row.order_id);
-                    if (!Number.isFinite(orderId)) return;
-                    const current = itemsByOrderId.get(orderId) || [];
-                    current.push(row);
-                    itemsByOrderId.set(orderId, current);
-                });
-                sampleDetails = sampleOrders.map(order => ({
-                    order,
-                    items: itemsByOrderId.get(Number(order.id)) || [],
-                }));
-                productionDetails = productionOrders.map(order => ({
-                    order,
-                    items: itemsByOrderId.get(Number(order.id)) || [],
-                }));
-            }
+        const detailsFromItems = await this._loadProjectHardwareOrderDetails([...sampleOrders, ...productionOrders]);
+        if (detailsFromItems) {
+            sampleDetails = sampleOrders.map(order => detailsFromItems.get(Number(order.id)) || { order, items: [] });
+            productionDetails = productionOrders.map(order => detailsFromItems.get(Number(order.id)) || { order, items: [] });
         }
-        if (!usedBulkOrderItems && !sampleDetails.length && sampleOrders.length) {
+        if (!detailsFromItems && !sampleDetails.length && sampleOrders.length) {
             sampleDetails = await Promise.all(sampleOrders.map(o => loadOrder(o.id).catch(() => null)));
         }
-        if (!usedBulkOrderItems && !productionDetails.length && productionOrders.length) {
+        if (!detailsFromItems && !productionDetails.length && productionOrders.length) {
             productionDetails = await Promise.all(productionOrders.map(o => loadOrder(o.id).catch(() => null)));
         }
         if (token !== this._viewToken || this.currentView !== 'project-hardware') return;
@@ -5936,6 +5915,35 @@ const Warehouse = {
             </div>
             ${collectedSectionHtml}
         `;
+    },
+
+    async _loadProjectHardwareOrderDetails(orders = []) {
+        if (typeof loadOrderItemsByOrderIds !== 'function') return null;
+        const list = (orders || [])
+            .filter(order => order && Number.isFinite(Number(order.id)) && Number(order.id) > 0);
+        if (!list.length) return new Map();
+
+        const details = new Map();
+        let cursor = 0;
+        const workers = Array.from({ length: Math.min(4, list.length) }, async () => {
+            while (cursor < list.length) {
+                const order = list[cursor++];
+                const orderId = Number(order.id);
+                let rows = null;
+                try {
+                    rows = await loadOrderItemsByOrderIds([orderId]);
+                } catch (error) {
+                    console.warn('Warehouse._loadProjectHardwareOrderDetails item load failed:', orderId, error);
+                }
+                if (!Array.isArray(rows)) continue;
+                details.set(orderId, {
+                    order,
+                    items: rows.filter(row => Number(row && row.order_id) === orderId),
+                });
+            }
+        });
+        await Promise.all(workers);
+        return details;
     },
 
     // ==========================================
@@ -7751,7 +7759,13 @@ const Warehouse = {
         );
         const activeReservedByItem = new Map();
         if (needsReservationSnapshot) {
-            const reservations = await loadWarehouseReservations();
+            let reservations = [];
+            try {
+                reservations = await loadWarehouseReservations();
+            } catch (error) {
+                console.warn('[Warehouse] Failed to load reservations for picker; rendering without reservation snapshot', error);
+                reservations = [];
+            }
             (reservations || []).forEach(reservation => {
                 if (!reservation || reservation.status !== 'active') return;
                 const itemId = Number(reservation.item_id || 0);

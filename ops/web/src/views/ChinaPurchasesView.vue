@@ -58,7 +58,7 @@
               <span v-else>—</span>
             </td>
             <td class="right">
-              <RouterLink :to="`/china/${purchase.id}`">Открыть</RouterLink>
+              <RouterLink class="row-action" :to="`/china/${purchase.id}`">Открыть</RouterLink>
             </td>
           </tr>
           <tr v-if="!china.loading && china.purchases.length === 0">
@@ -187,15 +187,25 @@ button,
 }
 table {
   width: 100%;
-  min-width: 56rem;
+  table-layout: fixed;
   border-collapse: collapse;
 }
+th:nth-child(1) { width: 45%; }
+th:nth-child(2) { width: 12%; }
+th:nth-child(3) { width: 10%; }
+th:nth-child(4) { width: 12%; }
+th:nth-child(5) { width: 11%; }
+th:nth-child(6) { width: 10%; }
 th,
 td {
   border-bottom: 1px solid #edf0f3;
   padding: 0.55rem 0.65rem;
   text-align: left;
   white-space: nowrap;
+}
+td:first-child {
+  white-space: normal;
+  line-height: 1.35;
 }
 th {
   color: #52606d;
@@ -204,6 +214,18 @@ th {
 }
 .right {
   text-align: right;
+}
+.row-action {
+  min-height: 2rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #d7dce2;
+  border-radius: 6px;
+  background: #fff;
+  color: #1f2933;
+  padding: 0 0.65rem;
+  text-decoration: none;
 }
 .badge {
   display: inline-block;

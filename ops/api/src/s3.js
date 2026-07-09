@@ -3,8 +3,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-let client = null;
-let clientKey = '';
+const clients = new Map();
 
 function requireEnv(name) {
   const value = process.env[name];
@@ -16,34 +15,64 @@ function requireEnv(name) {
   return value;
 }
 
-function getBucket() {
-  return requireEnv('S3_BUCKET');
+function getBucket(bucket = undefined) {
+  return bucket || requireEnv('S3_BUCKET');
 }
 
 function mockPath(key) {
   return process.env.S3_MOCK_DIR ? path.join(process.env.S3_MOCK_DIR, key) : null;
 }
 
-function getClient() {
-  const endpoint = requireEnv('S3_ENDPOINT');
-  const accessKeyId = requireEnv('S3_ACCESS_KEY');
-  const secretAccessKey = requireEnv('S3_SECRET_KEY');
-  const region = process.env.S3_REGION || 'ru-1';
-  const nextKey = `${endpoint}|${region}|${accessKeyId}`;
-
-  if (!client || clientKey !== nextKey) {
-    client = new S3Client({
-      endpoint,
-      region,
-      credentials: { accessKeyId, secretAccessKey },
-      forcePathStyle: true,
-    });
-    clientKey = nextKey;
-  }
-  return client;
+function getProductImagesBucket() {
+  return process.env.S3_BUCKET_PRODUCT_IMAGES;
 }
 
-export async function uploadObject(key, body, contentType) {
+function getMoldPhotosBucket() {
+  return process.env.S3_BUCKET_MOLD_PHOTOS;
+}
+
+function getEndpoint(bucket = undefined) {
+  if (bucket && bucket === getProductImagesBucket() && process.env.S3_ENDPOINT_PRODUCT_IMAGES) {
+    return process.env.S3_ENDPOINT_PRODUCT_IMAGES;
+  }
+  if (bucket && bucket === getMoldPhotosBucket() && process.env.S3_ENDPOINT_MOLD_PHOTOS) {
+    return process.env.S3_ENDPOINT_MOLD_PHOTOS;
+  }
+  return requireEnv('S3_ENDPOINT');
+}
+
+function getRegion(bucket = undefined) {
+  if (bucket && bucket === getProductImagesBucket() && process.env.S3_REGION_PRODUCT_IMAGES) {
+    return process.env.S3_REGION_PRODUCT_IMAGES;
+  }
+  if (bucket && bucket === getMoldPhotosBucket() && process.env.S3_REGION_MOLD_PHOTOS) {
+    return process.env.S3_REGION_MOLD_PHOTOS;
+  }
+  return process.env.S3_REGION || 'ru-3';
+}
+
+function getClient(bucket = undefined) {
+  const endpoint = getEndpoint(bucket);
+  const accessKeyId = requireEnv('S3_ACCESS_KEY');
+  const secretAccessKey = requireEnv('S3_SECRET_KEY');
+  const region = getRegion(bucket);
+  const key = `${endpoint}|${region}|${accessKeyId}`;
+
+  if (!clients.has(key)) {
+    clients.set(
+      key,
+      new S3Client({
+        endpoint,
+        region,
+        credentials: { accessKeyId, secretAccessKey },
+        forcePathStyle: true,
+      })
+    );
+  }
+  return clients.get(key);
+}
+
+export async function uploadObject(key, body, contentType, bucket = undefined) {
   const target = mockPath(key);
   if (target) {
     await fs.mkdir(path.dirname(target), { recursive: true });
@@ -51,9 +80,10 @@ export async function uploadObject(key, body, contentType) {
     return;
   }
 
-  await getClient().send(
+  const targetBucket = getBucket(bucket);
+  await getClient(targetBucket).send(
     new PutObjectCommand({
-      Bucket: getBucket(),
+      Bucket: targetBucket,
       Key: key,
       Body: body,
       ContentType: contentType || 'application/octet-stream',
@@ -61,19 +91,34 @@ export async function uploadObject(key, body, contentType) {
   );
 }
 
-export async function deleteObject(key) {
+export async function deleteObject(key, bucket = undefined) {
   const target = mockPath(key);
   if (target) {
     await fs.rm(target, { force: true });
     return;
   }
 
-  await getClient().send(new DeleteObjectCommand({ Bucket: getBucket(), Key: key }));
+  const targetBucket = getBucket(bucket);
+  await getClient(targetBucket).send(new DeleteObjectCommand({ Bucket: targetBucket, Key: key }));
 }
 
-export async function presignedGetUrl(key, expiresIn = 600) {
+function selectelParts(value) {
+  const match = String(value).match(/^selectel:\/\/([^/]+)\/(.+)$/);
+  return match ? { bucket: match[1], key: match[2] } : null;
+}
+
+export async function presignedGetUrl(key, expiresIn = 600, bucket = undefined) {
   if (/^(https?:|data:)/.test(key)) {
     return key;
+  }
+  const selectel = selectelParts(key);
+  if (selectel) {
+    if (mockPath(selectel.key)) {
+      return `mock-s3://${selectel.bucket}/${selectel.key}`;
+    }
+    return getSignedUrl(getClient(selectel.bucket), new GetObjectCommand({ Bucket: selectel.bucket, Key: selectel.key }), {
+      expiresIn,
+    });
   }
   if (key.startsWith('supabase://') && process.env.SUPABASE_URL) {
     const storageKey = key.replace('supabase://', '');
@@ -86,5 +131,36 @@ export async function presignedGetUrl(key, expiresIn = 600) {
     return `mock-s3://${key}`;
   }
 
-  return getSignedUrl(getClient(), new GetObjectCommand({ Bucket: getBucket(), Key: key }), { expiresIn });
+  const targetBucket = getBucket(bucket);
+  return getSignedUrl(getClient(targetBucket), new GetObjectCommand({ Bucket: targetBucket, Key: key }), {
+    expiresIn,
+  });
+}
+
+export async function signSelectelUrls(value, expiresIn = 600) {
+  if (typeof value === 'string') {
+    return value.startsWith('selectel://') ? presignedGetUrl(value, expiresIn) : value;
+  }
+  if (!value || typeof value !== 'object') return value;
+  if (value instanceof Date || typeof value.toJSON === 'function') return value;
+  if (Array.isArray(value)) {
+    return Promise.all(value.map((entry) => signSelectelUrls(entry, expiresIn)));
+  }
+  const entries = await Promise.all(
+    Object.entries(value).map(async ([key, entry]) => [key, await signSelectelUrls(entry, expiresIn)])
+  );
+  return Object.fromEntries(entries);
+}
+
+export function selectelUrlSigningMiddleware(expiresIn = 600) {
+  return (req, res, next) => {
+    const json = res.json.bind(res);
+    res.json = (body) => {
+      signSelectelUrls(body, expiresIn)
+        .then((signed) => json(signed))
+        .catch(next);
+      return res;
+    };
+    next();
+  };
 }

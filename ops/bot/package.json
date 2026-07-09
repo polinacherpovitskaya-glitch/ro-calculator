@@ -7,7 +7,8 @@
   "scripts": {
     "start": "node timebot.js",
     "start:time": "node timebot.js",
-    "start:task": "node taskbot.js"
+    "start:task": "node taskbot.js",
+    "test": "node --test test/*.test.js"
   },
   "engines": {
     "node": ">=20"
@@ -15,6 +16,7 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.56.0",
     "dotenv": "^16.4.0",
+    "pg": "^8.21.0",
     "node-telegram-bot-api": "^0.66.0"
   }
 }

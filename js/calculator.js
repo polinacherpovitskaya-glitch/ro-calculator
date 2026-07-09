@@ -52,6 +52,8 @@ function getProductionParams(settings) {
         vatRate: s('vat_rate'),
         taxRate: s('tax_rate'),
         charityRate: calcNumber(settings?.charity_rate, 0.01),
+        commercialRate: calcNumber(settings?.commercial_rate, DEFAULT_COMMERCIAL_RATE),
+        setupHoursPerBatch: calcNumber(settings?.setup_hours_per_batch, 0),
         marginTarget: s('margin_target'),
         deliveryCostMoscow: s('delivery_cost_moscow'),
         printingDeliveryCost: s('printing_delivery_cost'),
@@ -59,7 +61,7 @@ function getProductionParams(settings) {
     };
 }
 
-const DEFAULT_COMMERCIAL_RATE = 0.065;
+const DEFAULT_COMMERCIAL_RATE = 0.07;
 
 function getRateValue(value, fallback) {
     const numeric = Number(value);
@@ -235,8 +237,10 @@ function calculateItemCost(item, params) {
 
     // === Производство изделия ===
 
-    // Время на производство всей партии (часы) — с запасом на брак
-    const hoursPlastic = (1 / pph) * qty * p.wasteFactor;
+    // Время на производство всей партии (часы) — с запасом на брак,
+    // плюс запуск партии (переналадка, цвет, приладка) — константа на позицию
+    const setupHours = calcNumber(p.setupHoursPerBatch, 0);
+    const hoursPlastic = setupHours + (1 / pph) * qty * p.wasteFactor;
 
     // ФОТ за единицу
     const costFot = hoursPlastic * p.fotPerHour / qty;

@@ -18,6 +18,21 @@ import BlanksView from './views/BlanksView.vue';
 import ColorsView from './views/ColorsView.vue';
 import MarketplacesView from './views/MarketplacesView.vue';
 import BugsView from './views/BugsView.vue';
+import TemplatesView from './views/TemplatesView.vue';
+import ProductionCalendarView from './views/ProductionCalendarView.vue';
+import ProductionPlanView from './views/ProductionPlanView.vue';
+import IndirectCostsView from './views/IndirectCostsView.vue';
+import OrdersListView from './views/OrdersListView.vue';
+import OrderEditorView from './views/OrderEditorView.vue';
+import TasksListView from './views/TasksListView.vue';
+import ProjectsListView from './views/ProjectsListView.vue';
+import AreasView from './views/AreasView.vue';
+import GanttView from './views/GanttView.vue';
+import TimeTrackingView from './views/TimeTrackingView.vue';
+import VacationsView from './views/VacationsView.vue';
+import PayrollView from './views/PayrollView.vue';
+import AnalyticsView from './views/AnalyticsView.vue';
+import SettingsView from './views/SettingsView.vue';
 
 const router = createRouter({
   history: createWebHistory(),
@@ -40,6 +55,22 @@ const router = createRouter({
     { path: '/colors', name: 'colors', component: ColorsView, meta: { requiresAuth: true } },
     { path: '/marketplaces', name: 'marketplaces', component: MarketplacesView, meta: { requiresAuth: true } },
     { path: '/bugs', name: 'bugs', component: BugsView, meta: { requiresAuth: true } },
+    { path: '/bugs/new', name: 'bug-new', component: BugsView, meta: { requiresAuth: true } },
+    { path: '/templates', name: 'templates', component: TemplatesView, meta: { requiresAuth: true } },
+    { path: '/production/calendar', name: 'production-calendar', component: ProductionCalendarView, meta: { requiresAuth: true } },
+    { path: '/production/plan', name: 'production-plan', component: ProductionPlanView, meta: { requiresAuth: true } },
+    { path: '/indirect-costs', name: 'indirect-costs', component: IndirectCostsView, meta: { requiresAuth: true } },
+    { path: '/orders', name: 'orders', component: OrdersListView, meta: { requiresAuth: true } },
+    { path: '/orders/:id', name: 'order-editor', component: OrderEditorView, meta: { requiresAuth: true } },
+    { path: '/tasks', name: 'tasks', component: TasksListView, meta: { requiresAuth: true } },
+    { path: '/projects', name: 'projects', component: ProjectsListView, meta: { requiresAuth: true } },
+    { path: '/areas', name: 'areas', component: AreasView, meta: { requiresAuth: true } },
+    { path: '/gantt', name: 'gantt', component: GanttView, meta: { requiresAuth: true } },
+    { path: '/time-tracking', name: 'time-tracking', component: TimeTrackingView, meta: { requiresAuth: true } },
+    { path: '/vacations', name: 'vacations', component: VacationsView, meta: { requiresAuth: true } },
+    { path: '/payroll', name: 'payroll', component: PayrollView, meta: { requiresAuth: true } },
+    { path: '/analytics', name: 'analytics', component: AnalyticsView, meta: { requiresAuth: true } },
+    { path: '/settings', name: 'settings', component: SettingsView, meta: { requiresAuth: true } },
   ],
 });
 

@@ -40,6 +40,7 @@ let _authAccountsLastSyncAt = 0;
 let _employeesRefreshPromise = null;
 let _employeesLastSyncAt = 0;
 let _ordersRefreshPromise = null;
+let _dirtyOrdersSyncPromise = null;
 let _ordersLastSyncAt = 0;
 let _empExtraRefreshPromise = null;
 let _settingsRefreshPromise = null;
@@ -69,8 +70,74 @@ function _markSupabaseAccessProblem(error) {
     supabaseAccessWarningShown = true;
     if (typeof window !== 'undefined') {
         window.__roSupabaseAccessProblem = String(error?.message || error || 'shared database unavailable');
+        _notifySharedDatabaseProblem(error);
     }
     console.error('[Supabase] Shared database unavailable, falling back to local browser data:', error);
+}
+
+function _isSharedDatabaseConnectivityError(error) {
+    const message = String(error?.message || error || '').toLowerCase();
+    const code = String(error?.code || error?.status || '').toLowerCase();
+    return _isSupabaseAccessError(error)
+        || code === '502'
+        || code === '503'
+        || code === '504'
+        || code === 'timeout'
+        || message.includes('timeout')
+        || message.includes('bad gateway')
+        || message.includes('response code 502')
+        || message.includes('failed to fetch')
+        || message.includes('networkerror')
+        || message.includes('network error')
+        || message.includes('load failed');
+}
+
+function _notifySharedDatabaseProblem(error) {
+    if (typeof window === 'undefined') return;
+    const message = String(error?.message || error || 'shared database unavailable');
+    window.__roSharedDatabaseProblem = message;
+    try {
+        window.dispatchEvent(new CustomEvent('ro:shared-db-status', {
+            detail: { ok: false, message },
+        }));
+    } catch (e) { /* ignore */ }
+}
+
+function _clearSharedDatabaseProblem() {
+    if (typeof window === 'undefined') return;
+    if (!window.__roSharedDatabaseProblem) return;
+    delete window.__roSharedDatabaseProblem;
+    try {
+        window.dispatchEvent(new CustomEvent('ro:shared-db-status', {
+            detail: { ok: true },
+        }));
+    } catch (e) { /* ignore */ }
+}
+
+function _markSharedDatabaseProblem(error) {
+    if (_isSupabaseAccessError(error)) {
+        _markSupabaseAccessProblem(error);
+        return;
+    }
+    if (!_isSharedDatabaseConnectivityError(error)) return;
+    _notifySharedDatabaseProblem(error);
+    console.warn('[Supabase] Shared database connection failed. User changes may stay local until the connection recovers:', error);
+}
+
+function _syncLocalUnsyncedWindowFlag(dirtyMap = null) {
+    if (typeof window === 'undefined') return;
+    const map = dirtyMap || _readLocalDirtyDatasets();
+    const hasUnsynced = Object.keys(map || {}).length > 0;
+    if (hasUnsynced) {
+        window.__roLocalUnsyncedChanges = true;
+    } else {
+        delete window.__roLocalUnsyncedChanges;
+    }
+    try {
+        window.dispatchEvent(new CustomEvent('ro:shared-db-status', {
+            detail: { ok: !hasUnsynced, localUnsynced: hasUnsynced },
+        }));
+    } catch (e) { /* ignore */ }
 }
 
 function initSupabase() {
@@ -92,6 +159,7 @@ function initSupabase() {
     supabaseClient = supabase.createClient(runtimeSupabaseUrl, SUPABASE_ANON_KEY);
     // In shared-db mode localStorage is only a cache, so compact it aggressively on boot.
     _cleanupLocalStorage({ aggressive: true });
+    _syncLocalUnsyncedWindowFlag();
     return supabaseClient;
 }
 
@@ -1972,7 +2040,6 @@ function _getOrderItemSemanticDedupKey(item) {
         _orderItemNumberKey(item?.[`${prefix}_delivery_per_unit`]),
         _orderItemNumberKey(item?.[`${prefix}_delivery_total`]),
         _orderItemNumberKey(item?.[`sell_price_${prefix}`]),
-        _orderItemBoolKey(item?.[`${prefix}_from_template`]),
     ].join(':');
 }
 
@@ -2092,150 +2159,164 @@ async function saveOrder(order, items = []) {
             order.id = orderId;
         }
 
+        const localBackupOrder = { ...order, id: orderId };
+        let localBackupItems = Array.isArray(items) ? items : [];
+        const saveEmergencyLocalCopy = (error) => {
+            _saveOrderLocally(localBackupOrder, localBackupItems);
+            _markLocalDatasetDirty(['orders', 'orderItems']);
+            console.warn('[saveOrder] Saved emergency local copy after remote save failed', {
+                orderId,
+                reason: error && (error.message || error.code || error),
+            });
+        };
+
         // Filter order to known columns + store full data in calculator_data
         const orderData = _filterForDB(order, _ORDER_COLS, 'calculator_data', _ORDER_FIELD_MAP);
         orderData.updated_at = new Date().toISOString();
 
-        // Try update first if order exists, otherwise insert
-        const { data: existing, error: existingError } = await _withRemoteTimeout('write', 'save order lookup', () => supabaseClient
-            .from('orders').select('id,status,deleted_at').eq('id', orderId).maybeSingle());
-        if (existingError && existingError.code !== 'PGRST116') {
-            console.error('saveOrder lookup error:', existingError);
-            if (_isSupabaseAccessError(existingError)) _markSupabaseAccessProblem(existingError);
-            throw new Error('Не удалось проверить заказ перед сохранением: ' + (existingError.message || existingError.code || 'ошибка базы'));
-        }
-
-        const localBackupOrder = { ...order, id: orderId };
-        let localBackupItems = Array.isArray(items) ? items : [];
-        const allowEmptyItemsDelete = order && (
-            order.__allowEmptyItemsDelete === true
-            || order.allow_empty_items_delete === true
-        );
-
-        if (existing) {
-            if (existing.status === 'deleted') {
-                orderData.status = 'deleted';
-                orderData.deleted_at = existing.deleted_at || orderData.deleted_at || new Date().toISOString();
-                localBackupOrder.status = 'deleted';
-                localBackupOrder.deleted_at = existing.deleted_at || localBackupOrder.deleted_at || orderData.deleted_at;
-            } else if ((orderData.status || 'draft') === 'draft' && existing.status && existing.status !== 'draft' && existing.status !== 'calculated') {
-                // Autosave drafts can run from an old calculator tab after an order was moved
-                // on the board. Preserve the workflow status unless it was changed explicitly.
-                orderData.status = existing.status;
-                localBackupOrder.status = existing.status;
-            }
-            orderData.calculator_data = _syncOrderStatusSnapshot(orderData.calculator_data, orderData.status || 'draft', orderData.updated_at);
-            // Update existing order
-            const { id: _id, ...updateFields } = orderData;
-            const { error } = await _withRemoteTimeout('write', 'update order', () => supabaseClient
-                .from('orders')
-                .update(updateFields)
-                .eq('id', orderId));
-            if (error) {
-                console.error('updateOrder error:', error);
-                if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
-                throw new Error('Не удалось обновить заказ: ' + (error.message || error.code || 'ошибка базы'));
-            }
-        } else {
-            // Insert new order
-            orderData.created_at = orderData.created_at || new Date().toISOString();
-            orderData.calculator_data = _syncOrderStatusSnapshot(orderData.calculator_data, orderData.status || 'draft', orderData.updated_at);
-            const { error } = await _withRemoteTimeout('write', 'insert order', () => supabaseClient
-                .from('orders')
-                .insert(orderData));
-            if (error) {
-                console.error('insertOrder error:', error);
-                if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
-                throw new Error('Не удалось создать заказ: ' + (error.message || error.code || 'ошибка базы'));
-            }
-        }
-
-        if (items.length > 0) {
-            const nowIso = new Date().toISOString();
-            const rows = items.map((item, i) => {
-                const filtered = _sanitizeOrderItemRowForDB(_filterForDB(item, _ITEM_COLS, 'item_data', null));
-                filtered.order_id = orderId;
-                filtered.id = item.id || _buildStableOrderItemId(orderId, item, i + 1);
-                filtered.created_at = item.created_at || nowIso;
-                filtered.updated_at = nowIso;
-                return filtered;
-            });
-            const { error: upsertItemsError } = await _withRemoteTimeout('write', 'upsert order items', () => supabaseClient
-                .from('order_items')
-                .upsert(rows, { onConflict: 'id' }));
-            if (upsertItemsError) {
-                console.error('upsertOrderItems error:', upsertItemsError);
-                if (_isSupabaseAccessError(upsertItemsError)) _markSupabaseAccessProblem(upsertItemsError);
-                throw new Error('Не удалось сохранить состав заказа: ' + (upsertItemsError.message || upsertItemsError.code || 'ошибка базы'));
+        try {
+            // Try update first if order exists, otherwise insert
+            const { data: existing, error: existingError } = await _withRemoteTimeout('write', 'save order lookup', () => supabaseClient
+                .from('orders').select('id,status,deleted_at').eq('id', orderId).maybeSingle());
+            if (existingError && existingError.code !== 'PGRST116') {
+                console.error('saveOrder lookup error:', existingError);
+                _markSharedDatabaseProblem(existingError);
+                throw new Error('Не удалось проверить заказ перед сохранением: ' + (existingError.message || existingError.code || 'ошибка базы'));
             }
 
-            const savedItemIds = new Set(rows.map(row => String(row.id)).filter(Boolean));
-            const { data: existingItems, error: listItemsError } = await _withRemoteTimeout('write', 'list order items for cleanup', () => supabaseClient
-                .from('order_items')
-                .select('id')
-                .eq('order_id', orderId));
-            if (listItemsError) {
-                console.error('listOrderItemsForCleanup error:', listItemsError);
-                if (_isSupabaseAccessError(listItemsError)) _markSupabaseAccessProblem(listItemsError);
-                throw new Error('Заказ сохранён, но не удалось проверить старые позиции: ' + (listItemsError.message || listItemsError.code || 'ошибка базы'));
-            }
+            const allowEmptyItemsDelete = order && (
+                order.__allowEmptyItemsDelete === true
+                || order.allow_empty_items_delete === true
+            );
 
-            const staleItemIds = (Array.isArray(existingItems) ? existingItems : [])
-                .map(item => item?.id)
-                .filter(id => id != null && !savedItemIds.has(String(id)));
-            for (const staleItemId of staleItemIds) {
-                const { error: deleteStaleItemError } = await _withRemoteTimeout('write', 'delete stale order item', () => supabaseClient
-                    .from('order_items')
-                    .delete()
-                    .eq('id', staleItemId));
-                if (deleteStaleItemError) {
-                    console.error('deleteStaleOrderItem error:', deleteStaleItemError);
-                    if (_isSupabaseAccessError(deleteStaleItemError)) _markSupabaseAccessProblem(deleteStaleItemError);
-                    throw new Error('Заказ сохранён, но не удалось очистить старую позицию: ' + (deleteStaleItemError.message || deleteStaleItemError.code || 'ошибка базы'));
+            if (existing) {
+                if (existing.status === 'deleted') {
+                    orderData.status = 'deleted';
+                    orderData.deleted_at = existing.deleted_at || orderData.deleted_at || new Date().toISOString();
+                    localBackupOrder.status = 'deleted';
+                    localBackupOrder.deleted_at = existing.deleted_at || localBackupOrder.deleted_at || orderData.deleted_at;
+                } else if ((orderData.status || 'draft') === 'draft' && existing.status && existing.status !== 'draft' && existing.status !== 'calculated') {
+                    // Autosave drafts can run from an old calculator tab after an order was moved
+                    // on the board. Preserve the workflow status unless it was changed explicitly.
+                    orderData.status = existing.status;
+                    localBackupOrder.status = existing.status;
+                }
+                orderData.calculator_data = _syncOrderStatusSnapshot(orderData.calculator_data, orderData.status || 'draft', orderData.updated_at);
+                // Update existing order
+                const { id: _id, ...updateFields } = orderData;
+                const { error } = await _withRemoteTimeout('write', 'update order', () => supabaseClient
+                    .from('orders')
+                    .update(updateFields)
+                    .eq('id', orderId));
+                if (error) {
+                    console.error('updateOrder error:', error);
+                    _markSharedDatabaseProblem(error);
+                    throw new Error('Не удалось обновить заказ: ' + (error.message || error.code || 'ошибка базы'));
+                }
+            } else {
+                // Insert new order
+                orderData.created_at = orderData.created_at || new Date().toISOString();
+                orderData.calculator_data = _syncOrderStatusSnapshot(orderData.calculator_data, orderData.status || 'draft', orderData.updated_at);
+                const { error } = await _withRemoteTimeout('write', 'insert order', () => supabaseClient
+                    .from('orders')
+                    .insert(orderData));
+                if (error) {
+                    console.error('insertOrder error:', error);
+                    _markSharedDatabaseProblem(error);
+                    throw new Error('Не удалось создать заказ: ' + (error.message || error.code || 'ошибка базы'));
                 }
             }
-        } else {
-            let shouldDeleteEmptyItems = !existing || allowEmptyItemsDelete;
-            if (existing && !allowEmptyItemsDelete) {
-                const { data: existingItems, error: listExistingItemsError } = await _withRemoteTimeout('write', 'list existing order items before empty save', () => supabaseClient
+
+            if (items.length > 0) {
+                const nowIso = new Date().toISOString();
+                const rows = items.map((item, i) => {
+                    const filtered = _sanitizeOrderItemRowForDB(_filterForDB(item, _ITEM_COLS, 'item_data', null));
+                    filtered.order_id = orderId;
+                    filtered.id = item.id || _buildStableOrderItemId(orderId, item, i + 1);
+                    filtered.created_at = item.created_at || nowIso;
+                    filtered.updated_at = nowIso;
+                    return filtered;
+                });
+                const { error: upsertItemsError } = await _withRemoteTimeout('write', 'upsert order items', () => supabaseClient
                     .from('order_items')
-                    .select('*')
+                    .upsert(rows, { onConflict: 'id' }));
+                if (upsertItemsError) {
+                    console.error('upsertOrderItems error:', upsertItemsError);
+                    _markSharedDatabaseProblem(upsertItemsError);
+                    throw new Error('Не удалось сохранить состав заказа: ' + (upsertItemsError.message || upsertItemsError.code || 'ошибка базы'));
+                }
+
+                const savedItemIds = new Set(rows.map(row => String(row.id)).filter(Boolean));
+                const { data: existingItems, error: listItemsError } = await _withRemoteTimeout('write', 'list order items for cleanup', () => supabaseClient
+                    .from('order_items')
+                    .select('id')
                     .eq('order_id', orderId));
-                if (listExistingItemsError) {
-                    console.error('listExistingOrderItemsBeforeEmptySave error:', listExistingItemsError);
-                    if (_isSupabaseAccessError(listExistingItemsError)) _markSupabaseAccessProblem(listExistingItemsError);
-                    throw new Error('Заказ сохранён, но не удалось безопасно проверить состав перед пустым сохранением: ' + (listExistingItemsError.message || listExistingItemsError.code || 'ошибка базы'));
+                if (listItemsError) {
+                    console.error('listOrderItemsForCleanup error:', listItemsError);
+                    _markSharedDatabaseProblem(listItemsError);
+                    throw new Error('Заказ сохранён, но не удалось проверить старые позиции: ' + (listItemsError.message || listItemsError.code || 'ошибка базы'));
                 }
 
-                const preservedItems = _hydrateOrderItemRows(_dedupeOrderItems(existingItems || [], orderId));
-                if (preservedItems.length > 0) {
-                    console.warn('[saveOrder] Skipped empty order_items delete for existing order; preserving previously saved items', {
-                        orderId,
-                        preservedItems: preservedItems.length,
-                    });
-                    localBackupItems = preservedItems;
-                    shouldDeleteEmptyItems = false;
+                const staleItemIds = (Array.isArray(existingItems) ? existingItems : [])
+                    .map(item => item?.id)
+                    .filter(id => id != null && !savedItemIds.has(String(id)));
+                for (const staleItemId of staleItemIds) {
+                    const { error: deleteStaleItemError } = await _withRemoteTimeout('write', 'delete stale order item', () => supabaseClient
+                        .from('order_items')
+                        .delete()
+                        .eq('id', staleItemId));
+                    if (deleteStaleItemError) {
+                        console.error('deleteStaleOrderItem error:', deleteStaleItemError);
+                        _markSharedDatabaseProblem(deleteStaleItemError);
+                        throw new Error('Заказ сохранён, но не удалось очистить старую позицию: ' + (deleteStaleItemError.message || deleteStaleItemError.code || 'ошибка базы'));
+                    }
+                }
+            } else {
+                let shouldDeleteEmptyItems = !existing || allowEmptyItemsDelete;
+                if (existing && !allowEmptyItemsDelete) {
+                    const { data: existingItems, error: listExistingItemsError } = await _withRemoteTimeout('write', 'list existing order items before empty save', () => supabaseClient
+                        .from('order_items')
+                        .select('*')
+                        .eq('order_id', orderId));
+                    if (listExistingItemsError) {
+                        console.error('listExistingOrderItemsBeforeEmptySave error:', listExistingItemsError);
+                        _markSharedDatabaseProblem(listExistingItemsError);
+                        throw new Error('Заказ сохранён, но не удалось безопасно проверить состав перед пустым сохранением: ' + (listExistingItemsError.message || listExistingItemsError.code || 'ошибка базы'));
+                    }
+
+                    const preservedItems = _hydrateOrderItemRows(_dedupeOrderItems(existingItems || [], orderId));
+                    if (preservedItems.length > 0) {
+                        console.warn('[saveOrder] Skipped empty order_items delete for existing order; preserving previously saved items', {
+                            orderId,
+                            preservedItems: preservedItems.length,
+                        });
+                        localBackupItems = preservedItems;
+                        shouldDeleteEmptyItems = false;
+                    }
+                }
+
+                if (shouldDeleteEmptyItems) {
+                    const { error: deleteItemsError } = await _withRemoteTimeout('write', 'delete order items', () => supabaseClient
+                        .from('order_items')
+                        .delete()
+                        .eq('order_id', orderId));
+                    if (deleteItemsError) {
+                        console.error('deleteOrderItems error:', deleteItemsError);
+                        _markSharedDatabaseProblem(deleteItemsError);
+                        throw new Error('Не удалось обновить состав заказа: ' + (deleteItemsError.message || deleteItemsError.code || 'ошибка базы'));
+                    }
                 }
             }
 
-            if (shouldDeleteEmptyItems) {
-                const { error: deleteItemsError } = await _withRemoteTimeout('write', 'delete order items', () => supabaseClient
-                    .from('order_items')
-                    .delete()
-                    .eq('order_id', orderId));
-                if (deleteItemsError) {
-                    console.error('deleteOrderItems error:', deleteItemsError);
-                    if (_isSupabaseAccessError(deleteItemsError)) _markSupabaseAccessProblem(deleteItemsError);
-                    throw new Error('Не удалось обновить состав заказа: ' + (deleteItemsError.message || deleteItemsError.code || 'ошибка базы'));
-                }
-            }
+            // Also save to localStorage as backup (full data, no filtering)
+            _saveOrderLocally(localBackupOrder, localBackupItems);
+            _clearLocalDatasetDirty(['orders', 'orderItems']);
+
+            return orderId;
+        } catch (error) {
+            saveEmergencyLocalCopy(error);
+            throw error;
         }
-
-        // Also save to localStorage as backup (full data, no filtering)
-        _saveOrderLocally(localBackupOrder, localBackupItems);
-        _clearLocalDatasetDirty(['orders', 'orderItems']);
-
-        return orderId;
     } else {
         // Local storage
         let orderId = _normalizeOrderId(order.id);
@@ -2294,6 +2375,110 @@ function _saveOrderLocally(order, items) {
         }));
         setLocal(LOCAL_KEYS.orderItems, [...filtered, ...newItems]);
     } catch (e) { console.warn('Local backup save error:', e); }
+}
+
+function _isRemoteOrderNewer(remoteOrder, localOrder) {
+    const remoteUpdated = Date.parse(remoteOrder?.updated_at || remoteOrder?.created_at || '') || 0;
+    const localUpdated = Date.parse(localOrder?.updated_at || localOrder?.created_at || '') || 0;
+    return remoteUpdated > localUpdated + 1000;
+}
+
+async function syncDirtyLocalOrders(options = {}) {
+    if (!isSupabaseReady()) {
+        _syncLocalUnsyncedWindowFlag();
+        return { synced: false, reason: 'remote-unavailable', count: 0 };
+    }
+    const dirtyMap = _readLocalDirtyDatasets();
+    if (!dirtyMap.orders && !dirtyMap.orderItems) {
+        _syncLocalUnsyncedWindowFlag(dirtyMap);
+        return { synced: false, reason: 'clean', count: 0 };
+    }
+    if (_dirtyOrdersSyncPromise) return _dirtyOrdersSyncPromise;
+
+    _dirtyOrdersSyncPromise = (async () => {
+        const localOrders = (getLocal(LOCAL_KEYS.orders) || [])
+            .filter(order => _normalizeOrderId(order?.id));
+        const localItems = getLocal(LOCAL_KEYS.orderItems) || [];
+        if (localOrders.length === 0) {
+            _clearLocalDatasetDirty(['orders', 'orderItems']);
+            return { synced: false, reason: 'empty-local', count: 0 };
+        }
+
+        let syncedCount = 0;
+        let skippedNewerRemote = 0;
+
+        for (const order of localOrders) {
+            const orderId = _normalizeOrderId(order.id);
+            const { data: existing, error: existingError } = await _withRemoteTimeout('write', 'sync dirty order lookup', () => supabaseClient
+                .from('orders')
+                .select('id,updated_at,created_at,status,deleted_at')
+                .eq('id', orderId)
+                .maybeSingle());
+            if (existingError && existingError.code !== 'PGRST116') {
+                _markSharedDatabaseProblem(existingError);
+                throw existingError;
+            }
+            if (existing && _isRemoteOrderNewer(existing, order)) {
+                skippedNewerRemote += 1;
+                continue;
+            }
+
+            const orderData = _filterForDB(order, _ORDER_COLS, 'calculator_data', _ORDER_FIELD_MAP);
+            orderData.id = orderId;
+            orderData.updated_at = orderData.updated_at || new Date().toISOString();
+            orderData.calculator_data = _syncOrderStatusSnapshot(
+                orderData.calculator_data,
+                orderData.status || order.status || 'draft',
+                orderData.updated_at,
+            );
+
+            const { error: orderError } = await _withRemoteTimeout('write', 'sync dirty order upsert', () => supabaseClient
+                .from('orders')
+                .upsert(orderData, { onConflict: 'id' }));
+            if (orderError) {
+                _markSharedDatabaseProblem(orderError);
+                throw orderError;
+            }
+
+            const itemsForOrder = localItems.filter(item => String(_normalizeOrderId(item.order_id)) === String(orderId));
+            if (itemsForOrder.length > 0) {
+                const nowIso = new Date().toISOString();
+                const rows = itemsForOrder.map((item, index) => {
+                    const filtered = _sanitizeOrderItemRowForDB(_filterForDB(item, _ITEM_COLS, 'item_data', null));
+                    filtered.order_id = orderId;
+                    filtered.id = item.id || _buildStableOrderItemId(orderId, item, index + 1);
+                    filtered.created_at = item.created_at || nowIso;
+                    filtered.updated_at = item.updated_at || nowIso;
+                    return filtered;
+                });
+                const { error: itemsError } = await _withRemoteTimeout('write', 'sync dirty order items', () => supabaseClient
+                    .from('order_items')
+                    .upsert(rows, { onConflict: 'id' }));
+                if (itemsError) {
+                    _markSharedDatabaseProblem(itemsError);
+                    throw itemsError;
+                }
+            }
+
+            syncedCount += 1;
+        }
+
+        _clearLocalDatasetDirty(['orders', 'orderItems']);
+        _ordersLastSyncAt = 0;
+        if (!options.silent && syncedCount > 0 && typeof App !== 'undefined' && App && typeof App.toast === 'function') {
+            App.toast(`Синхронизировано локальных заказов: ${syncedCount}`);
+        }
+        _dispatchDataRefreshEvent('ro:orders-refreshed', { syncedDirtyOrders: syncedCount, skippedNewerRemote });
+        return { synced: syncedCount > 0, count: syncedCount, skippedNewerRemote };
+    })().catch(error => {
+        _markSharedDatabaseProblem(error);
+        _syncLocalUnsyncedWindowFlag();
+        return { synced: false, reason: error?.message || 'sync failed', count: 0, error };
+    }).finally(() => {
+        _dirtyOrdersSyncPromise = null;
+    });
+
+    return _dirtyOrdersSyncPromise;
 }
 
 async function loadOrders(filters = {}) {
@@ -2357,7 +2542,9 @@ async function loadOrders(filters = {}) {
 
     if (localFallback.length > 0 && !shouldRefreshStaticOrderItems) {
         _setDataLoadMeta('orders', { source: 'local' });
-        if (!_isLocalDatasetDirty('orders') && _shouldRefreshWarmCache(_ordersLastSyncAt)) {
+        if (_isLocalDatasetDirty('orders') || _isLocalDatasetDirty('orderItems')) {
+            syncDirtyLocalOrders({ silent: true }).catch(() => {});
+        } else if (_shouldRefreshWarmCache(_ordersLastSyncAt)) {
             refreshOrdersWarmCache().catch(() => {});
         }
         return localFallback;
@@ -2549,11 +2736,28 @@ async function loadOrder(orderId) {
     return await loadLocalOrder({ repairDuplicates: true });
 }
 
-async function loadOrderItemsByOrderIds(orderIds = []) {
+const ORDER_ITEM_SUMMARY_SELECT = [
+    'id',
+    'order_id',
+    'item_number',
+    'template_id',
+    'product_name',
+    'quantity',
+    'unit_price',
+    'sell_price_item',
+    'sell_price_printing',
+    'total_price',
+    'cost_total',
+    'created_at',
+    'updated_at',
+].join(',');
+
+async function loadOrderItemsByOrderIds(orderIds = [], options = {}) {
     const ids = [...new Set((orderIds || [])
         .map(id => Number(id))
         .filter(id => Number.isFinite(id) && id > 0))];
     if (ids.length === 0) return [];
+    const summaryOnly = options && options.summary === true;
 
     const localFallback = (rows = null) => (Array.isArray(rows) ? rows : (getLocal(LOCAL_KEYS.orderItems) || []))
         .filter(item => ids.includes(Number(item.order_id)))
@@ -2564,36 +2768,52 @@ async function loadOrderItemsByOrderIds(orderIds = []) {
             return Number(a.item_number || 0) - Number(b.item_number || 0);
         });
 
-    if (_isStaticYandexMirrorRuntime()) {
+    const loadBootstrapFallback = async () => {
+        if (!_isStaticYandexMirrorRuntime()) return null;
         const bootstrapPayload = await _loadSameOriginBootstrap(['orderItems'], { timeoutMs: 15000 });
         if (bootstrapPayload && Array.isArray(bootstrapPayload.orderItems)) {
             setLocal(LOCAL_KEYS.orderItems, bootstrapPayload.orderItems);
             return localFallback(bootstrapPayload.orderItems);
         }
-        return localFallback();
-    }
+        return null;
+    };
+
+    const updateLocalOrderItemsCache = (rows = []) => {
+        if (summaryOnly) return;
+        const allItems = getLocal(LOCAL_KEYS.orderItems) || [];
+        const requestedIds = new Set(ids.map(id => String(id)));
+        const otherItems = allItems.filter(item => !requestedIds.has(String(Number(item.order_id))));
+        setLocal(LOCAL_KEYS.orderItems, [...otherItems, ...rows]);
+    };
 
     if (isSupabaseReady()) {
         try {
             const { data, error } = await _withRemoteTimeout('load', 'load order items by ids', () => supabaseClient
                 .from('order_items')
-                .select('*')
+                .select(summaryOnly ? ORDER_ITEM_SUMMARY_SELECT : '*')
                 .in('order_id', ids)
                 .order('order_id')
                 .order('item_number'));
             if (error) {
                 console.error('loadOrderItemsByOrderIds error:', error);
                 if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
-                return localFallback();
+                const bootstrapFallback = await loadBootstrapFallback();
+                return bootstrapFallback || localFallback();
             }
-            return _hydrateOrderItemRows(data || []);
+            const rows = summaryOnly ? (data || []) : _hydrateOrderItemRows(data || []);
+            updateLocalOrderItemsCache(rows);
+            if (!summaryOnly) _clearLocalDatasetDirty(['orderItems']);
+            return localFallback(rows);
         } catch (error) {
             console.error('loadOrderItemsByOrderIds exception:', error);
             if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
-            return localFallback();
+            const bootstrapFallback = await loadBootstrapFallback();
+            return bootstrapFallback || localFallback();
         }
     }
 
+    const bootstrapFallback = await loadBootstrapFallback();
+    if (bootstrapFallback) return bootstrapFallback;
     return localFallback();
 }
 
@@ -4519,6 +4739,7 @@ function _markLocalDatasetDirty(keys = []) {
     normalizedKeys.forEach(key => { dirtyMap[key] = now; });
     _writeLocalDirtyDatasets(dirtyMap);
     _invalidateBootstrapCache(normalizedKeys);
+    _syncLocalUnsyncedWindowFlag(dirtyMap);
 }
 
 function _clearLocalDatasetDirty(keys = []) {
@@ -4534,7 +4755,10 @@ function _clearLocalDatasetDirty(keys = []) {
             changed = true;
         }
     });
-    if (changed) _writeLocalDirtyDatasets(dirtyMap);
+    if (changed) {
+        _writeLocalDirtyDatasets(dirtyMap);
+        _syncLocalUnsyncedWindowFlag(dirtyMap);
+    }
 }
 
 function _isLocalDatasetDirty(key) {
@@ -7283,10 +7507,7 @@ function _isWorkModuleMissingTableError(error) {
 }
 
 function _isTransientWorkModuleRemoteError(error) {
-    const message = String(error?.message || error || '').toLowerCase();
-    return message.includes('timeout')
-        || message.includes('bad gateway')
-        || message.includes('response code 502');
+    return _isSharedDatabaseConnectivityError(error);
 }
 
 function _markWorkModuleRemoteUnavailable(error) {
@@ -7332,10 +7553,17 @@ function _remoteTimeoutError(label, timeoutMs) {
 
 async function _withRemoteTimeout(kind, label, executor) {
     const timeoutMs = _remoteTimeoutMs(kind);
-    return Promise.race([
-        Promise.resolve().then(executor),
-        new Promise((_, reject) => setTimeout(() => reject(_remoteTimeoutError(label, timeoutMs)), timeoutMs)),
-    ]);
+    try {
+        const result = await Promise.race([
+            Promise.resolve().then(executor),
+            new Promise((_, reject) => setTimeout(() => reject(_remoteTimeoutError(label, timeoutMs)), timeoutMs)),
+        ]);
+        _clearSharedDatabaseProblem();
+        return result;
+    } catch (error) {
+        _markSharedDatabaseProblem(error);
+        throw error;
+    }
 }
 
 async function _loadJsonSetting(settingKey, fallbackValue) {
@@ -7756,13 +7984,13 @@ async function saveWorkProject(project, actor) {
         linked_order_id: _toNumberOrNull(project.linked_order_id ?? existing?.linked_order_id),
         linked_order_name: order?.order_name || project.linked_order_name || existing?.linked_order_name || '',
         area_id: _toNumberOrNull(project.area_id ?? existing?.area_id),
-        start_date: project.start_date || existing?.start_date || null,
-        due_date: project.due_date || existing?.due_date || null,
-        launch_at: project.launch_at || existing?.launch_at || null,
+        start_date: project.start_date ?? existing?.start_date ?? null,
+        due_date: project.due_date ?? existing?.due_date ?? null,
+        launch_at: project.launch_at ?? existing?.launch_at ?? null,
         status: project.status || existing?.status || 'active',
-        brief: project.brief || existing?.brief || '',
-        goal: project.goal || existing?.goal || '',
-        result_summary: project.result_summary || existing?.result_summary || '',
+        brief: project.brief ?? existing?.brief ?? '',
+        goal: project.goal ?? existing?.goal ?? '',
+        result_summary: project.result_summary ?? existing?.result_summary ?? '',
         created_by: createdById,
         created_by_name: _resolvePersonFromPayload(createdById, project.created_by_name || existing?.created_by_name || actor?.name || App?.getCurrentEmployeeName?.() || '', employeesById),
         created_at: existing?.created_at || nowIso,

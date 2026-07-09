@@ -18,7 +18,7 @@ const STATUS_OPTIONS = [
 
 const DRAFT_STATUSES = ['draft', 'calculated'];
 const SAMPLE_STATUSES = ['sample'];
-const PRODUCTION_STATUSES = ['production_casting', 'production_printing', 'production_hardware', 'production_packaging', 'in_production', 'delivery'];
+const PRODUCTION_STATUSES = ['production', 'production_casting', 'production_printing', 'production_hardware', 'production_packaging', 'in_production', 'delivery'];
 const ACTIVE_STATUSES = [...SAMPLE_STATUSES, ...PRODUCTION_STATUSES];
 const SKY_STATUSES = [...DRAFT_STATUSES, ...ACTIVE_STATUSES, 'completed', 'cancelled'];
 
@@ -56,6 +56,7 @@ const ORDERS_SECTIONS = {
 };
 
 const PRODUCTION_SUBSTAGES = {
+    production: 'В производстве',
     production_casting: 'Выливание формы',
     production_printing: 'Печать / нанесение',
     production_hardware: 'Сборка фурнитуры',
@@ -242,7 +243,7 @@ const Orders = {
                 .select('id,status,purchase_data,created_at,updated_at')
                 .order('created_at', { ascending: false }),
             typeof loadOrderItemsByOrderIds === 'function'
-                ? loadOrderItemsByOrderIds(orderIds).catch(() => [])
+                ? loadOrderItemsByOrderIds(orderIds, { summary: true }).catch(() => [])
                 : Promise.resolve([]),
         ]);
 
@@ -305,7 +306,7 @@ const Orders = {
             typeof loadWorkProjects === 'function' ? loadWorkProjects().catch(() => []) : Promise.resolve([]),
             typeof loadWorkTasks === 'function' ? loadWorkTasks().catch(() => []) : Promise.resolve([]),
             typeof loadChinaPurchases === 'function' ? loadChinaPurchases({}).catch(() => []) : Promise.resolve([]),
-            typeof loadOrderItemsByOrderIds === 'function' ? loadOrderItemsByOrderIds(orderIds).catch(() => []) : Promise.resolve([]),
+            typeof loadOrderItemsByOrderIds === 'function' ? loadOrderItemsByOrderIds(orderIds, { summary: true }).catch(() => []) : Promise.resolve([]),
         ]);
 
         const filteredProjects = (projects || []).filter(project => idSet.has(String(project.linked_order_id)));
@@ -327,7 +328,7 @@ const Orders = {
     buildOrderMeta(order, items, purchases, tasks) {
         return {
             todo: this.buildTodoMeta(tasks),
-            hardware: this.buildHardwareMeta(items),
+            hardware: this.buildHardwareMeta(items, order),
             china: this.buildChinaMeta(purchases, items),
             production: this.buildProductionMeta(order),
             financial: this.buildFinancialMeta(order, items),
@@ -356,6 +357,10 @@ const Orders = {
         }
         try {
             const safeItems = items || [];
+            const hasHydratedItems = safeItems.some(item => item && item.item_type);
+            if (!hasHydratedItems && this.hasStoredFinancialMeta(order)) {
+                return stored;
+            }
             const snapshot = getOrderLiveCalculatorSnapshot(order, safeItems);
             const live = {
                 revenue: Number(snapshot?.revenue || 0),
@@ -408,7 +413,7 @@ const Orders = {
         };
     },
 
-    buildHardwareMeta(items) {
+    buildHardwareMeta(items, order = null) {
         const hardwareItems = (items || []).filter(item => item.item_type === 'hardware');
         const pendantAttachments = [];
         const productNfcAttachments = [];
@@ -438,6 +443,13 @@ const Orders = {
         }
         const demandItems = [...hardwareItems, ...pendantAttachments, ...productNfcAttachments];
         if (demandItems.length === 0) {
+            if ((parseFloat(order?.production_hours_hardware || 0) || 0) > 0) {
+                return {
+                    label: 'Фурнитура / сборка',
+                    className: 'badge-yellow',
+                    title: 'В заказе есть плановые часы сборки. Детали открой в заказе или на складе.',
+                };
+            }
             return {
                 label: 'Фурнитура не нужна',
                 className: 'badge-red',
@@ -1108,7 +1120,7 @@ const Orders = {
     },
 
     _isConsumedStatus(status) {
-        return ['production_casting', 'production_hardware', 'production_packaging', 'in_production', 'delivery', 'completed'].includes(status);
+        return ['production', 'production_casting', 'production_hardware', 'production_packaging', 'in_production', 'delivery', 'completed'].includes(status);
     },
 
     _collectWarehouseDemand(items, options) {

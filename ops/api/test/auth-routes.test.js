@@ -72,6 +72,24 @@ test('GET /api/auth/me without cookie returns 401', async (t) => {
   assert.equal(res.status, 401);
 });
 
+test('GET /api/auth/me accepts valid bot bearer token', async (t) => {
+  const token = `bot-${crypto.randomUUID()}`;
+  await getPool().query(`INSERT INTO bot_tokens (token, name, role) VALUES ($1, 'taskbot-test', 'bot')`, [token]);
+  const port = await startServer(t);
+
+  const res = await fetch(`http://127.0.0.1:${port}/api/auth/me`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const body = await res.json();
+
+  assert.equal(res.status, 200);
+  assert.equal(body.user.email, 'bot:taskbot-test');
+  assert.equal(body.user.role, 'bot');
+
+  const { rows } = await getPool().query(`SELECT last_used_at FROM bot_tokens WHERE token = $1`, [token]);
+  assert.ok(rows[0].last_used_at);
+});
+
 test('GET /api/auth/me with cookie returns user', async (t) => {
   const email = `me-${crypto.randomUUID()}@x.test`;
   await createUser({ email });

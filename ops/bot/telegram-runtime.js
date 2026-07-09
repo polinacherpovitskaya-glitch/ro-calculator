@@ -13,10 +13,13 @@ function buildTelegramRequestOptions(env = process.env) {
         ? configuredFamily
         : DEFAULT_REQUEST_FAMILY;
 
-    return {
+    const options = {
         family,
         timeout: parsePositiveInt(env.TELEGRAM_REQUEST_TIMEOUT_MS, DEFAULT_REQUEST_TIMEOUT_MS),
     };
+    const proxy = String(env.TELEGRAM_PROXY_URL || '').trim();
+    if (proxy) options.proxy = proxy;
+    return options;
 }
 
 function formatTelegramTransportError(err) {

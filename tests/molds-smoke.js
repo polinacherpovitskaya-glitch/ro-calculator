@@ -4,7 +4,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 function createElement(id = '') {
-    return {
+    const element = {
         id,
         value: '',
         innerHTML: '',
@@ -13,12 +13,15 @@ function createElement(id = '') {
         src: '',
         files: [],
         classList: {
+            _values: new Set(),
             add() {},
             remove() {},
             toggle() {},
             contains() { return false; },
         },
-        appendChild() {},
+        appendChild(child) {
+            if (child) child.parentElement = element;
+        },
         remove() {},
         focus() {},
         click() {},
@@ -32,6 +35,7 @@ function createElement(id = '') {
         insertAdjacentHTML() {},
         scrollIntoView() {},
     };
+    return element;
 }
 
 function createDocument() {
@@ -47,7 +51,14 @@ function createDocument() {
             return elements.get(id);
         },
         querySelector() { return null; },
-        querySelectorAll() { return []; },
+        querySelectorAll(selector) {
+            if (selector === '[id^="mold-inline-row-"]') {
+                return [...elements.entries()]
+                    .filter(([id]) => id.startsWith('mold-inline-row-'))
+                    .map(([, element]) => element);
+            }
+            return [];
+        },
     };
 }
 
@@ -144,12 +155,12 @@ async function main() {
 
     assert.equal(
         vm.runInContext('Number(getBlankKeepRate(App.params, 0.45).toFixed(3))', context),
-        0.405,
-        'blank keep rate should subtract 7% tax, 6.5% commercial, 1% charity and 45% target margin from the base without VAT',
+        0.4,
+        'blank keep rate should subtract 7% tax, 7% commercial, 1% charity and 45% target margin from the base without VAT',
     );
     assert.equal(
         vm.runInContext('calcBlankSellPrice(257.99, 500, App.params)', context),
-        635,
+        645,
         '500-unit blank price should be derived from the VAT-free base, not from commercial/charity shares on top of VAT',
     );
 
@@ -330,6 +341,8 @@ async function main() {
         document.getElementById('mold-cost-rub').value = '4250';
         document.getElementById('mold-count').value = '1';
         document.getElementById('mold-client').value = '';
+        document.getElementById('mold-price-10').value = '1500';
+        document.getElementById('mold-price-50').value = '1250';
         document.getElementById('mold-notes').value = '';
         document.getElementById('mold-assembly-name').value = '';
         document.getElementById('mold-assembly-speed').value = '';
@@ -342,6 +355,8 @@ async function main() {
     assert.equal(context.__savedFormMold.hw_warehouse_sku, 'CRB-501');
     assert.equal(context.__savedFormMold.hw_name, 'Карабин');
     assert.equal(context.__savedFormMold.hw_price_per_unit, 10);
+    assert.equal(context.__savedFormMold.use_manual_prices, true);
+    assert.deepEqual(context.__savedFormMold.custom_prices, { 10: 1500, 50: 1250 });
 
     vm.runInContext(`
         Molds._hwSource = 'custom';
@@ -491,6 +506,13 @@ async function main() {
     assert.match(tableHtml, /без НДС/);
     assert.match(tableHtml, /с НДС/);
     assert.match(tableHtml, /цена/);
+    assert.match(tableHtml, /mold-inline-card-host-78/);
+
+    vm.runInContext(`
+        Molds.editMold(78);
+    `, context);
+    assert.equal(context.document.getElementById('mold-inline-row-78').style.display, '');
+    assert.equal(context.document.getElementById('mold-edit-form').parentElement.id, 'mold-inline-card-host-78');
 
     context.document.getElementById('mold-inline-pph-78').value = '95';
     context.document.getElementById('mold-inline-weight-78').value = '7';
@@ -532,7 +554,7 @@ async function main() {
         Molds.enrichMolds();
     `, context);
     const formulaPriceWithoutManual = vm.runInContext(`Molds.allMolds[0].tiers[50].sellPrice`, context);
-    assert.equal(formulaPriceWithoutManual, 405);
+    assert.equal(formulaPriceWithoutManual, 410);
 
     vm.runInContext(`
         Molds.allMolds[0].use_manual_prices = true;
@@ -674,12 +696,12 @@ async function main() {
     assert.equal(publishedMoldData.depth_mm, 3);
     assert.equal(publishedMoldData.weight_grams, 30);
     assert.equal(publishedMoldData.collection, 'Пластик');
-    assert.equal(publishedMoldData.tiers_prices[50], 465);
-    assert.equal(publishedMoldData.tiers_prices[100], 390);
-    assert.equal(publishedMoldData.tiers_prices[300], 335);
+    assert.equal(publishedMoldData.tiers_prices[50], 475);
+    assert.equal(publishedMoldData.tiers_prices[100], 395);
+    assert.equal(publishedMoldData.tiers_prices[300], 340);
     assert.equal(publishedMoldData.tiers_prices[500], 295);
-    assert.equal(publishedMoldData.tiers_prices[1000], 260);
-    assert.equal(publishedMoldData.tiers_prices[3000], 235);
+    assert.equal(publishedMoldData.tiers_prices[1000], 265);
+    assert.equal(publishedMoldData.tiers_prices[3000], 240);
     assert.match(String(publishedMoldData.tiers_published_at || ''), /^20\d\d-/);
 
     // Regression: publishCatalog must heal a corrupted {"0":..,"1":..} mold_data

@@ -28,9 +28,44 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       PORT: "3000"
       APP_VERSION: ${APP_VERSION:-dev}
+      S3_ENDPOINT: ${S3_ENDPOINT}
+      S3_REGION: ${S3_REGION:-ru-3}
+      S3_BUCKET: ${S3_BUCKET}
+      S3_BUCKET_PRODUCT_IMAGES: ${S3_BUCKET_PRODUCT_IMAGES:-}
+      S3_ENDPOINT_PRODUCT_IMAGES: ${S3_ENDPOINT_PRODUCT_IMAGES:-}
+      S3_REGION_PRODUCT_IMAGES: ${S3_REGION_PRODUCT_IMAGES:-}
+      S3_BUCKET_MOLD_PHOTOS: ${S3_BUCKET_MOLD_PHOTOS:-}
+      S3_ENDPOINT_MOLD_PHOTOS: ${S3_ENDPOINT_MOLD_PHOTOS:-}
+      S3_REGION_MOLD_PHOTOS: ${S3_REGION_MOLD_PHOTOS:-}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
     depends_on:
       postgres:
         condition: service_healthy
+    networks:
+      - internal
+
+  bot:
+    profiles: ["bot"]
+    build:
+      context: ../bot
+      dockerfile: Dockerfile
+    image: ops-bot:local
+    container_name: ops-bot
+    restart: unless-stopped
+    environment:
+      TG_BOT_TOKEN: ${TG_BOT_TOKEN:-}
+      OPS_API_URL: http://api:3000
+      OPS_BOT_TOKEN: ${OPS_BOT_TOKEN}
+      TASK_BOT_POLL_INTERVAL_MS: ${TASK_BOT_POLL_INTERVAL_MS:-15000}
+      TELEGRAM_PROXY_URL: ${TELEGRAM_PROXY_URL:-}
+      TELEGRAM_REQUEST_FAMILY: ${TELEGRAM_REQUEST_FAMILY:-4}
+      TELEGRAM_REQUEST_TIMEOUT_MS: ${TELEGRAM_REQUEST_TIMEOUT_MS:-45000}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      api:
+        condition: service_started
     networks:
       - internal
 

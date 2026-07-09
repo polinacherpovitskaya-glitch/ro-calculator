@@ -127,6 +127,25 @@ function createContext() {
                     const state = { eqValue: null };
                     return {
                         select() {
+                            const resolveRows = () => {
+                                context.__remoteCalls.push({ table, action: 'order' });
+                                if (context.__hangingTables.has(table)) {
+                                    return new Promise(() => {});
+                                }
+                                if (remoteError(table)) {
+                                    return Promise.resolve({ data: null, error: remoteError(table) });
+                                }
+                                if (missingTableError(table)) {
+                                    return Promise.resolve({ data: null, error: missingTableError(table) });
+                                }
+                                if (table === 'product_templates') {
+                                    return Promise.resolve({ data: context.__productTemplatesData, error: null });
+                                }
+                                if (Array.isArray(context.__tableRows[table])) {
+                                    return Promise.resolve({ data: context.__tableRows[table], error: null });
+                                }
+                                return Promise.resolve({ data: [], error: null });
+                            };
                             return {
                                 eq(_column, value) {
                                     state.eqValue = value;
@@ -178,24 +197,36 @@ function createContext() {
                                         },
                                     };
                                 },
+                                in(column, values) {
+                                    const selectedValues = new Set((Array.isArray(values) ? values : []).map(value => String(value)));
+                                    const chain = {
+                                        order() {
+                                            return chain;
+                                        },
+                                        then(resolve, reject) {
+                                            context.__remoteCalls.push({ table, action: 'selectIn', column, values });
+                                            if (context.__hangingTables.has(table)) {
+                                                return new Promise(() => {}).then(resolve, reject);
+                                            }
+                                            if (remoteError(table)) {
+                                                return Promise.resolve({ data: null, error: remoteError(table) }).then(resolve, reject);
+                                            }
+                                            if (missingTableError(table)) {
+                                                return Promise.resolve({ data: null, error: missingTableError(table) }).then(resolve, reject);
+                                            }
+                                            const rows = Array.isArray(context.__tableRows[table])
+                                                ? context.__tableRows[table].filter(item => selectedValues.has(String(item?.[column])))
+                                                : [];
+                                            return Promise.resolve({ data: rows, error: null }).then(resolve, reject);
+                                        },
+                                        catch(reject) {
+                                            return this.then(undefined, reject);
+                                        },
+                                    };
+                                    return chain;
+                                },
                                 order() {
-                                    context.__remoteCalls.push({ table, action: 'order' });
-                                    if (context.__hangingTables.has(table)) {
-                                        return new Promise(() => {});
-                                    }
-                                    if (remoteError(table)) {
-                                        return Promise.resolve({ data: null, error: remoteError(table) });
-                                    }
-                                    if (missingTableError(table)) {
-                                        return Promise.resolve({ data: null, error: missingTableError(table) });
-                                    }
-                                    if (table === 'product_templates') {
-                                        return Promise.resolve({ data: context.__productTemplatesData, error: null });
-                                    }
-                                    if (Array.isArray(context.__tableRows[table])) {
-                                        return Promise.resolve({ data: context.__tableRows[table], error: null });
-                                    }
-                                    return Promise.resolve({ data: [], error: null });
+                                    return resolveRows();
                                 },
                             };
                         },
@@ -907,6 +938,7 @@ async function main() {
                 hardware_assembly_speed: 360,
                 hardware_price_per_unit: 7.86,
                 sell_price_hardware: 40,
+                hardware_from_template: true,
                 updated_at: '2026-05-13T20:05:00.000Z',
             }, {
                 id: 9101103,
@@ -922,6 +954,7 @@ async function main() {
                 hardware_assembly_speed: 360,
                 hardware_price_per_unit: 1.02,
                 sell_price_hardware: 30,
+                hardware_from_template: true,
                 updated_at: '2026-05-13T20:05:00.000Z',
             }]);
         `, context);
@@ -1548,8 +1581,50 @@ async function main() {
         assert.equal(items[0].name, 'Bootstrap item');
         assert.equal(
             context.__remoteCalls.some(call => call.table === 'order_items'),
+            true,
+            'static Yandex mirror should try live order_items before falling back to bootstrap'
+        );
+    }
+
+    {
+        const context = createContext();
+        context.location = {
+            href: 'https://calc2.recycleobject.ru/#warehouse',
+            origin: 'https://calc2.recycleobject.ru',
+            protocol: 'https:',
+            hostname: 'calc2.recycleobject.ru',
+        };
+        context.window.location = context.location;
+        context.__tableRows.order_items = [{
+            id: 4001,
+            order_id: 7001,
+            item_number: 1,
+            product_name: 'Live item',
+            item_data: JSON.stringify({
+                item_type: 'hardware',
+                product_name: 'Live item',
+                quantity: 12,
+                hardware_source: 'warehouse',
+                hardware_warehouse_item_id: 501,
+            }),
+        }];
+        context.__bootstrapOrderItems = [{
+            id: 3001,
+            order_id: 7001,
+            item_number: 1,
+            product_name: 'Stale bootstrap item',
+        }];
+        runScript(context, 'js/supabase.js');
+        vm.runInContext(`initSupabase();`, context);
+
+        const items = JSON.parse(JSON.stringify(await vm.runInContext(`loadOrderItemsByOrderIds([7001])`, context)));
+        assert.equal(items.length, 1, 'static Yandex mirror should load order items from live proxy when available');
+        assert.equal(items[0].product_name, 'Live item');
+        assert.equal(items[0].hardware_warehouse_item_id, 501);
+        assert.equal(
+            context.__remoteCalls.some(call => call.table === 'fetch' && String(call.url).includes('orderItems')),
             false,
-            'static Yandex mirror should not call remote order_items by ids'
+            'fresh live order items should not be overwritten by static bootstrap'
         );
     }
 
@@ -2038,6 +2113,12 @@ async function main() {
         `, context);
 
         assert.match(message, /Не удалось проверить заказ перед сохранением/, 'saveOrder should reject instead of silently returning null');
+        const cachedOrders = JSON.parse(JSON.stringify(vm.runInContext('getLocal(LOCAL_KEYS.orders) || []', context)));
+        assert.equal(cachedOrders.length, 1, 'failed remote lookup should keep an emergency local order copy');
+        assert.equal(cachedOrders[0].order_name, 'Broken save', 'emergency local order copy should keep the order payload');
+        const dirtyMap = JSON.parse(context.localStorage.getItem('ro_calc_dirty_datasets') || '{}');
+        assert.ok(dirtyMap.orders, 'failed remote lookup should mark local orders dirty');
+        assert.ok(dirtyMap.orderItems, 'failed remote lookup should mark local order items dirty');
     }
 
     {
@@ -2141,6 +2222,13 @@ async function main() {
         assert.equal(context.__tableRows.order_items.length, 1, 'failed item upsert must not wipe existing order items');
         assert.equal(context.__tableRows.order_items[0].id, oldItemId, 'old saved item should remain after failed item upsert');
         assert.equal(context.__remoteCalls.some(call => call.table === 'order_items' && call.action === 'delete'), false, 'saveOrder must not delete old items before new items are saved');
+        const cachedOrders = JSON.parse(JSON.stringify(vm.runInContext('getLocal(LOCAL_KEYS.orders) || []', context)));
+        const cachedItems = JSON.parse(JSON.stringify(vm.runInContext('getLocal(LOCAL_KEYS.orderItems) || []', context)));
+        assert.equal(cachedOrders.some(order => String(order.id) === String(orderId)), true, 'failed item upsert should keep an emergency local order copy');
+        assert.equal(cachedItems.some(item => String(item.order_id) === String(orderId) && item.product_name === 'Новая позиция'), true, 'failed item upsert should keep attempted items in local backup');
+        const dirtyMap = JSON.parse(context.localStorage.getItem('ro_calc_dirty_datasets') || '{}');
+        assert.ok(dirtyMap.orders, 'failed item upsert should mark local orders dirty');
+        assert.ok(dirtyMap.orderItems, 'failed item upsert should mark local order items dirty');
     }
 
     {
@@ -2467,6 +2555,44 @@ async function main() {
         await new Promise(resolve => setTimeout(resolve, 20));
         const cachedOrders = JSON.parse(JSON.stringify(vm.runInContext('getLocal(LOCAL_KEYS.orders)', context)));
         assert.equal(cachedOrders[0].status, 'production_casting', 'older calc2 bootstrap must not overwrite a newer local status after refresh');
+    }
+
+    {
+        const context = createContext();
+        const orderId = 1780600000001;
+        runScript(context, 'js/supabase.js');
+        vm.runInContext(`
+            initSupabase();
+            setLocal(LOCAL_KEYS.orders, [{
+                id: ${orderId},
+                order_name: 'Яндекс юла',
+                client_name: 'Яндекс',
+                status: 'production_casting',
+                created_at: '2026-06-04T08:20:00.000Z',
+                updated_at: '2026-06-04T08:47:00.000Z'
+            }]);
+            setLocal(LOCAL_KEYS.orderItems, [{
+                id: '${orderId}-product-1',
+                order_id: ${orderId},
+                item_number: 1,
+                item_type: 'product',
+                product_name: 'брелок',
+                quantity: 100,
+                created_at: '2026-06-04T08:20:00.000Z',
+                updated_at: '2026-06-04T08:47:00.000Z'
+            }]);
+            localStorage.setItem('ro_calc_dirty_datasets', JSON.stringify({ orders: Date.now(), orderItems: Date.now() }));
+        `, context);
+
+        const result = JSON.parse(JSON.stringify(await vm.runInContext(`syncDirtyLocalOrders({ silent: true })`, context)));
+
+        assert.equal(result.synced, true, 'dirty local order sync should report success');
+        assert.equal(result.count, 1, 'dirty local order sync should count synced orders');
+        assert.equal(context.__tableRows.orders.some(order => String(order.id) === String(orderId)), true, 'dirty local order should be upserted to remote orders');
+        assert.equal(context.__tableRows.order_items.some(item => String(item.order_id) === String(orderId)), true, 'dirty local order items should be upserted to remote order_items');
+        const dirtyMap = JSON.parse(context.localStorage.getItem('ro_calc_dirty_datasets') || '{}');
+        assert.equal(dirtyMap.orders, undefined, 'successful dirty order sync should clear orders dirty flag');
+        assert.equal(dirtyMap.orderItems, undefined, 'successful dirty order sync should clear orderItems dirty flag');
     }
 
     console.log('supabase fallback smoke checks passed');
