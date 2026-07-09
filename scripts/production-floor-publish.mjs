@@ -53,6 +53,18 @@ const isProductLike = it => PRODUCT_TYPES.has(String(it.item_type || 'product'))
 const ASSET_BASE = (process.env.RO_FLOOR_ASSET_BASE || 'https://calc2.recycleobject.ru/').replace(/\/+$/, '') + '/';
 const assetUrl = p => (!p ? null : (/^https?:\/\//i.test(p) ? p : ASSET_BASE + String(p).replace(/^\/+/, '')));
 
+// Фото фурнитуры хранятся в бандле приложения: js/warehouse_photos.js —
+// WAREHOUSE_SEED_PHOTOS_BY_SKU = { <sku>: 'data:image/jpeg;base64,...' } (80×80).
+// Позиция-фурнитура в заказе несёт hardware_warehouse_sku → отсюда берём фото.
+function loadWarehousePhotos() {
+    try {
+        const src = fs.readFileSync(path.join(ROOT, 'js', 'warehouse_photos.js'), 'utf8');
+        const map = vm.runInNewContext(`${src}\n;WAREHOUSE_SEED_PHOTOS_BY_SKU;`, {});
+        return (map && typeof map === 'object') ? map : {};
+    } catch { return {}; }
+}
+const WAREHOUSE_PHOTOS = loadWarehousePhotos();
+
 // ---------- tiny date helpers (local, DST/UTC-safe) ----------
 function isoLocal(d) {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -322,7 +334,7 @@ function curateItems(orderId, flatItems, idx, data) {
     const kindOf = t => (t === 'hardware' ? 'hardware' : t === 'packaging' ? 'packaging' : 'product');
     return rows.map(it => {
         const kind = kindOf(it.item_type);
-        const out = { kind, name: String(it.product_name || ''), quantity: Number(it.quantity) || 0, thumb_url: kind === 'product' ? ((PUB.photosByItemId.get(String(it.id)) || [])[0] || null) : null };
+        const out = { kind, name: String(it.product_name || ''), quantity: Number(it.quantity) || 0, thumb_url: (PUB.photosByItemId.get(String(it.id)) || [])[0] || null };
         if (kind === 'product') out.colors = itemColors(it, idx);
         return out;
     });
@@ -429,6 +441,17 @@ function buildMoldTransit(chinaPurchases) {
         .filter(m => m.name);
 }
 
+// Форма (молд): показываем цеху, есть ли форма под изделия заказа или её ждём.
+// base_mold_in_stock на product-позициях — единственный сигнал (булев флаг).
+function moldStatus(orderId, flatItems) {
+    const molded = (flatItems || []).filter(it =>
+        Number(it.order_id) === Number(orderId) && !isExtraLine(it) && isProductLike(it)
+        && it.base_mold_in_stock !== undefined && it.base_mold_in_stock !== null);
+    if (!molded.length) return null;
+    const waiting = molded.some(it => it.base_mold_in_stock === false || String(it.base_mold_in_stock) === 'false');
+    return waiting ? 'waiting' : 'ready';
+}
+
 function toPublicPlan(ctx, model, slots, data, idx, holidaySet, queueById) {
     const inShop = Math.round(Number(slots.workersCount) || 0);
     const queue = model.queue.map(q => {
@@ -444,9 +467,11 @@ function toPublicPlan(ctx, model, slots, data, idx, holidaySet, queueById) {
             status: q.status || null,
             stage_label: STATUS_LABELS[q.status] || '',
             group: queueGroup(q.status),
+            mold: moldStatus(q.orderId, data.flatItems),
+            stages: stagesFromQueue(q),
             thumb_url: ps.thumb, colors: ps.colors, quantity: ps.quantity,
             products: items.filter(i => i.kind === 'product').map(i => i.name),
-            hardware: items.filter(i => i.kind === 'hardware').map(i => i.name),
+            hardware: items.filter(i => i.kind === 'hardware').map(i => ({ name: i.name, thumb_url: i.thumb_url })),
             packaging: items.filter(i => i.kind === 'packaging').map(i => i.name),
         };
     });
@@ -497,6 +522,7 @@ function toPublicOrder(orderId, model, data, idx, holidaySet, queueById, enriche
         status, status_label: STATUS_LABELS[status] || status || '',
         deadline, deadline_state: ds.state, deadline_buffer_days: ds.buffer,
         blocked_reason: o.production_blocked_reason || null,
+        mold: moldStatus(orderId, data.flatItems),
         quantity: ps.quantity, weight_grams: ps.weight, colors: ps.colors,
         nfc: ps.nfc,
         photos: PUB.photosByOrder.get(Number(orderId)) || [],
@@ -552,16 +578,21 @@ async function main() {
     for (const it of data.flatItems) {
         if (!orderIds.has(Number(it.order_id))) continue;
         const base = `${it.order_id}-${it.item_number != null ? it.item_number : it.id}`;
-        const urls = [];
-        parseAttachments(it.color_solution_attachment).forEach((a, i) => { const u = writePhotoFile(a, OUT_DIR, `${base}-a${i}`); if (u) urls.push(u); });
-        if (!FIXTURE && String(it.item_type || 'product') === 'product') {
+        const type = String(it.item_type || 'product');
+        const itemUrls = [];    // фото на самой позиции (изделие/фурнитура)
+        const galleryUrls = []; // общая галерея заказа — только фото-примеры изделий
+        parseAttachments(it.color_solution_attachment).forEach((a, i) => { const u = writePhotoFile(a, OUT_DIR, `${base}-a${i}`); if (u) { itemUrls.push(u); galleryUrls.push(u); } });
+        if (!FIXTURE && type === 'product') {
             const ext = resolvePhoto(it, data);
-            if (ext) { const u = await rehostRemote(ext, OUT_DIR, `${base}-m`); if (u) urls.push(u); }
+            if (ext) { const u = await rehostRemote(ext, OUT_DIR, `${base}-m`); if (u) { itemUrls.push(u); galleryUrls.push(u); } }
         }
-        if (urls.length) {
-            photosByItemId.set(String(it.id), urls);
-            photosByOrder.set(Number(it.order_id), (photosByOrder.get(Number(it.order_id)) || []).concat(urls));
+        if (type === 'hardware') {
+            const sku = String(it.hardware_warehouse_sku || '').trim();
+            const dataUrl = sku ? WAREHOUSE_PHOTOS[sku] : null;
+            if (dataUrl) { const u = writePhotoFile(dataUrl, OUT_DIR, `${base}-hw`); if (u) itemUrls.push(u); }
         }
+        if (itemUrls.length) photosByItemId.set(String(it.id), itemUrls);
+        if (galleryUrls.length) photosByOrder.set(Number(it.order_id), (photosByOrder.get(Number(it.order_id)) || []).concat(galleryUrls));
     }
     PUB.photosByOrder = photosByOrder;
     PUB.photosByItemId = photosByItemId;

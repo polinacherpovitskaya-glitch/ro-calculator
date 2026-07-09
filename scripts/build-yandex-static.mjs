@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import crypto from 'node:crypto';
 import { fileURLToPath } from 'url';
 import { execFileSync } from 'node:child_process';
 
@@ -345,10 +346,32 @@ export function assertHealthyBootstrap(bootstrap) {
 // curated read-only snapshot (plan.json + orders/<id>.json) alongside it.
 // Non-fatal: if the snapshot build fails, the calc2 mirror must still sync and
 // the CDN keeps the previous good floor snapshot.
+// Витрина грузит app.js/style.css по НЕверсионированным URL, а CDN отдаёт их с
+// immutable-кэшем на год — из-за этого обновления кода не доходили до цеха.
+// Приписываем к ссылкам ?v=<хэш содержимого> (index.html отдаётся no-cache),
+// поэтому смена кода = новый URL = браузер гарантированно берёт свежую версию.
+function versionFloorAssets(dest) {
+  const hash = crypto.createHash('sha1');
+  for (const f of ['app.js', 'style.css']) {
+    const p = path.join(dest, f);
+    if (fs.existsSync(p)) hash.update(fs.readFileSync(p));
+  }
+  const v = hash.digest('hex').slice(0, 10);
+  const idxPath = path.join(dest, 'index.html');
+  if (fs.existsSync(idxPath)) {
+    const html = fs.readFileSync(idxPath, 'utf8')
+      .replace(/href="style\.css(?:\?v=[^"]*)?"/g, `href="style.css?v=${v}"`)
+      .replace(/src="app\.js(?:\?v=[^"]*)?"/g, `src="app.js?v=${v}"`);
+    fs.writeFileSync(idxPath, html);
+  }
+  return v;
+}
+
 function buildFloor() {
   const dest = path.join(OUT_DIR, 'floor');
   copyRecursive(path.join(ROOT, 'production-floor'), dest);
   fs.rmSync(path.join(dest, '.gitignore'), { force: true });
+  versionFloorAssets(dest);
   try {
     execFileSync('node', ['scripts/production-floor-publish.mjs'], {
       cwd: ROOT,

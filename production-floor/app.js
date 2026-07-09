@@ -74,12 +74,34 @@
   function tagLine(label, values) {
     return values && values.length ? '<span class="qtag"><b>' + label + ':</b> ' + values.map(esc).join(', ') + '</span>' : '';
   }
+  function moldBadge(mold) {
+    if (mold === 'waiting') return '<span class="badge warn">Форма: нужна</span>';
+    if (mold === 'ready') return '<span class="badge ok">Форма: есть</span>';
+    return '';
+  }
+  function stageChips(stages) {
+    if (!stages || !stages.length) return '';
+    var chips = stages.filter(function (s) { return (Number(s.plan) || 0) > 0; }).map(function (s) {
+      return '<span class="schip"><i class="dot" style="background:' + (STAGE_COLORS[s.stage] || '#94a3b8') + '"></i>' + esc(s.label || s.stage) + ' <b>' + fmtHours(s.plan) + '</b></span>';
+    });
+    return chips.length ? '<div class="schips">' + chips.join('') + '</div>' : '';
+  }
+  function hwChip(h) {
+    var img = h.thumb_url ? '<img src="' + escAttr(h.thumb_url) + '" alt="">' : '';
+    return '<span class="hwchip">' + img + esc(h.name) + '</span>';
+  }
+  function hwLine(hardware) {
+    return hardware && hardware.length ? '<span class="qtag"><b>Фурнитура:</b> <span class="hwchips">' + hardware.map(hwChip).join('') + '</span></span>' : '';
+  }
+  function zoomImg(url, cls) {
+    return '<img class="' + (cls || '') + ' zoomable" src="' + escAttr(url) + '" alt="" onclick="window.__floorZoom(this.src)">';
+  }
   function queueCard(q) {
     var thumb = q.thumb_url ? '<img class="thumb" src="' + escAttr(q.thumb_url) + '" alt="">' : '<div class="thumb ph">фото</div>';
     var prog = q.hours && q.hours.plan > 0 ? Math.min(100, Math.round((q.hours.fact / q.hours.plan) * 100)) : 0;
     var bits = [];
     if (q.colors && q.colors.length) bits.push('<span class="qtag"><b>Цвет:</b> <span class="swatches">' + q.colors.map(swatch).join('') + '</span></span>');
-    bits.push(tagLine('Фурнитура', q.hardware));
+    bits.push(hwLine(q.hardware));
     bits.push(tagLine('Упаковка', q.packaging));
     var parts = bits.filter(Boolean).length ? '<div class="qparts">' + bits.filter(Boolean).join('') + '</div>' : '';
     return '<a class="qcard" href="#/order/' + encodeURIComponent(q.order_id) + '">' +
@@ -87,9 +109,10 @@
       '<div class="qname">' + esc(q.name) + '</div>' +
       '<div class="qmeta">' + esc(q.client || '') + (q.start_date ? ' · старт ' + fmtDate(q.start_date) : '') + '</div></div>' +
       '<div class="qbadges">' + (q.group === 'in_progress' && q.stage_label ? '<span class="badge stage">' + esc(q.stage_label) + '</span>' : '') +
-      deadlineBadge(q.deadline_state, q.deadline_buffer_days) + '</div></div>' +
+      moldBadge(q.mold) + deadlineBadge(q.deadline_state, q.deadline_buffer_days) + '</div></div>' +
       '<div class="qbody">' + thumb +
-      '<div style="flex:1;min-width:180px"><div class="qhours">Часы: ' + fmtHours(q.hours.plan) + ' план · ' + fmtHours(q.hours.fact) + ' факт · <b>' + fmtHours(q.hours.remaining) + ' осталось</b></div>' +
+      '<div style="flex:1;min-width:180px">' + stageChips(q.stages) +
+      '<div class="qhours">Итого: ' + fmtHours(q.hours.plan) + ' план · <b>' + fmtHours(q.hours.remaining) + ' осталось</b></div>' +
       '<div class="bar"><i style="width:' + prog + '%"></i></div></div>' +
       (q.quantity ? '<div class="qty">' + q.quantity + ' шт</div>' : '') +
       '<span class="open">Открыть &rarr;</span></div>' +
@@ -99,7 +122,7 @@
     var cls = b.state === 'needs_review' ? 'muted' : 'warn';
     var reason = b.reason || (b.state === 'needs_review' ? 'Требует проверки' : 'Ждёт молд / Китай');
     return '<a class="brow" href="#/order/' + encodeURIComponent(b.order_id) + '"><div class="n">' + esc(b.name) + (b.client ? ' <small>· ' + esc(b.client) + '</small>' : '') + '</div>' +
-      '<span class="badge ' + cls + '">' + esc(reason) + '</span></a>';
+      '<span class="badge ' + cls + '">' + esc(reason) + '</span><span class="open">Открыть &rarr;</span></a>';
   }
 
   function moldTransitRow(m) {
@@ -161,7 +184,8 @@
   function itemRow(it) {
     var kindLbl = it.kind === 'hardware' ? 'Фурнитура' : it.kind === 'packaging' ? 'Упаковка' : 'Изделие';
     var colors = it.colors && it.colors.length ? '<div class="swatches" style="margin-top:4px">' + it.colors.map(swatch).join('') + '</div>' : '';
-    return '<div class="irow"><div class="ikind">' + kindLbl + '</div><div class="iname">' + esc(it.name) + colors + '</div><div class="iqty">' + (it.quantity || 0) + ' шт</div></div>';
+    var pic = it.thumb_url ? '<div class="ithumb">' + zoomImg(it.thumb_url, 'ithumb-img') + '</div>' : '<div class="ithumb ph"></div>';
+    return '<div class="irow">' + pic + '<div class="ikind">' + kindLbl + '</div><div class="iname">' + esc(it.name) + colors + '</div><div class="iqty">' + (it.quantity || 0) + ' шт</div></div>';
   }
   function stageRow(s) {
     var done = s.plan > 0 && s.remaining <= 0;
@@ -174,9 +198,10 @@
   function renderOrder(o) {
     var photoList = (o.photos && o.photos.length) ? o.photos : (o.photo_url ? [o.photo_url] : []);
     var photo = photoList.length
-      ? '<div class="gallery">' + photoList.map(function (u) { return '<img class="photo" src="' + escAttr(u) + '" alt="">'; }).join('') + '</div>'
+      ? '<div class="gallery">' + photoList.map(function (u) { return zoomImg(u, 'photo'); }).join('') + '</div>'
       : '<div class="photo ph"><span>нет фото</span></div>';
     var specs = [];
+    if (o.mold) specs.push(spec('Форма', o.mold === 'waiting' ? '<span class="molw">нужна · ждём</span>' : '<span class="molr">есть</span>'));
     if (o.quantity) specs.push(spec('Количество', o.quantity + ' шт'));
     if (o.colors && o.colors.length) specs.push(spec('Цвет', '<div class="swatches">' + o.colors.map(swatch).join('') + '</div>'));
     if (o.weight_grams) specs.push(spec('Вес', o.weight_grams + ' г'));
@@ -209,6 +234,19 @@
     });
     window.scrollTo(0, 0);
   }
+  window.__floorZoom = function (url) {
+    var lb = document.getElementById('floor-lb');
+    if (!lb) {
+      lb = document.createElement('div');
+      lb.id = 'floor-lb';
+      lb.className = 'lightbox';
+      lb.innerHTML = '<img alt=""><span class="lb-close">×</span>';
+      lb.addEventListener('click', function () { lb.classList.remove('on'); });
+      document.body.appendChild(lb);
+    }
+    lb.querySelector('img').src = url;
+    lb.classList.add('on');
+  };
   window.__floorRefresh = route;
   window.__floorWeek = function (d) { boardWeek += d; if (lastPlan) renderBoard(lastPlan); };
   window.addEventListener('hashchange', route);

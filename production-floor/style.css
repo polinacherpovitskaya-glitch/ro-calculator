@@ -180,3 +180,23 @@ button:active { transform: scale(0.98); }
 .badge.stage { background: #fef3c7; color: #92400e; }
 .badge.info { background: #e0f2fe; color: #075985; }
 .brow.static { cursor: default; }
+
+/* Витрина 2.1 — часы по этапам, фото фурнитуры, форма, увеличение фото */
+.schips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.schip { display: inline-flex; align-items: center; gap: 5px; font-size: 14px; font-weight: 700; color: #334155; background: #f1f5f9; border-radius: 8px; padding: 3px 9px; }
+.schip .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+.schip b { font-weight: 900; }
+.hwchips { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.hwchip { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; background: #f8fafc; border: 1px solid var(--border); border-radius: 10px; padding: 3px 9px 3px 3px; }
+.hwchip img { width: 30px; height: 30px; border-radius: 7px; object-fit: cover; }
+.brow .open { margin-left: auto; }
+.ithumb { width: 56px; flex-shrink: 0; }
+.ithumb-img { width: 52px; height: 52px; border-radius: 10px; object-fit: cover; border: 1px solid var(--border); cursor: zoom-in; }
+.ithumb.ph { width: 0; }
+.zoomable { cursor: zoom-in; }
+.molw { color: #b45309; font-weight: 800; }
+.molr { color: var(--ok-tx); font-weight: 800; }
+.lightbox { display: none; position: fixed; inset: 0; z-index: 999; background: rgba(15,23,42,.9); align-items: center; justify-content: center; cursor: zoom-out; }
+.lightbox.on { display: flex; }
+.lightbox img { max-width: 94vw; max-height: 90vh; border-radius: 10px; box-shadow: 0 10px 40px rgba(0,0,0,.5); }
+.lightbox .lb-close { position: fixed; top: 16px; right: 22px; color: #fff; font-size: 40px; line-height: 1; font-weight: 300; }
