@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { execFileSync } from 'node:child_process';
 
 const ROOT = process.cwd();
 const OUT_DIR = path.join(ROOT, 'deploy/static-yandex');
@@ -289,6 +290,29 @@ function writeJson(filePath, data) {
   fs.writeFileSync(filePath, JSON.stringify(data));
 }
 
+// Copy the public production-floor витрина into <out>/floor and publish its
+// curated read-only snapshot (plan.json + orders/<id>.json) alongside it.
+// Non-fatal: if the snapshot build fails, the calc2 mirror must still sync and
+// the CDN keeps the previous good floor snapshot.
+function buildFloor() {
+  const dest = path.join(OUT_DIR, 'floor');
+  copyRecursive(path.join(ROOT, 'production-floor'), dest);
+  fs.rmSync(path.join(dest, '.gitignore'), { force: true });
+  try {
+    execFileSync('node', ['scripts/production-floor-publish.mjs'], {
+      cwd: ROOT,
+      env: { ...process.env, RO_FLOOR_OUT_DIR: dest },
+      stdio: 'inherit',
+    });
+    const ordersDir = path.join(dest, 'orders');
+    const orderFiles = fs.existsSync(ordersDir) ? fs.readdirSync(ordersDir).length : 0;
+    return { ok: true, orderFiles };
+  } catch (error) {
+    console.error('production-floor publish failed (keeping last good snapshot on CDN):', error.message);
+    return { ok: false, error: error.message };
+  }
+}
+
 async function main() {
   fs.rmSync(OUT_DIR, { recursive: true, force: true });
   ensureDir(OUT_DIR);
@@ -303,9 +327,12 @@ async function main() {
   const bootstrap = await buildBootstrapSnapshot();
   writeJson(path.join(OUT_DIR, 'data/bootstrap.json'), bootstrap);
 
+  const floor = buildFloor();
+
   const summary = {
     outDir: path.relative(ROOT, OUT_DIR),
     bucket: BUCKET,
+    floor,
     bytes: fs.statSync(path.join(OUT_DIR, 'data/bootstrap.json')).size,
     employees: bootstrap.data.employees.length,
     authAccounts: bootstrap.data.authAccounts.length,
