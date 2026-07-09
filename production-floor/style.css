@@ -85,7 +85,9 @@ button:active { transform: scale(0.98); }
 .cal .cell.weekend { background: rgba(192, 52, 46, 0.06); }
 
 /* queue cards */
-.qcard { border: 1px solid var(--border); border-radius: 16px; background: #fff; padding: 14px 16px; margin-bottom: 10px; }
+.qcard { display: block; border: 1px solid var(--border); border-radius: 16px; background: #fff; padding: 14px 16px; margin-bottom: 10px; text-decoration: none; color: inherit; cursor: pointer; transition: border-color .12s, box-shadow .12s, transform .05s; }
+.qcard:hover { border-color: var(--brand); box-shadow: 0 8px 22px rgba(33, 79, 42, 0.12); }
+.qcard:active { transform: scale(0.995); }
 .qcard-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .qname { font-size: 17px; font-weight: 800; }
 .qmeta { font-size: 13px; color: var(--muted); }
@@ -103,6 +105,10 @@ button:active { transform: scale(0.98); }
 .swatch .nohex { width: 14px; height: 14px; border-radius: 50%; background: #cbd5e1; }
 .qty { font-size: 14px; font-weight: 800; }
 .open { margin-left: auto; text-decoration: none; font-size: 14px; font-weight: 800; color: var(--brand); white-space: nowrap; }
+.qparts { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-top: 12px; padding-top: 11px; border-top: 1px dashed var(--border); }
+.qtag { font-size: 15px; color: var(--text); display: inline-flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.qtag b { color: var(--muted); font-weight: 800; }
+.qtag .swatches { display: inline-flex; }
 
 /* badges */
 .badge { font-size: 12px; font-weight: 800; padding: 4px 11px; border-radius: 999px; white-space: nowrap; }
@@ -114,7 +120,14 @@ button:active { transform: scale(0.98); }
 
 /* blocked rows */
 .brow { display: flex; align-items: center; justify-content: space-between; gap: 10px;
-  border: 1px solid var(--border); border-radius: 14px; padding: 12px 15px; margin-bottom: 8px; background: rgba(255,255,255,.7); }
+  border: 1px solid var(--border); border-radius: 14px; padding: 12px 15px; margin-bottom: 8px; background: rgba(255,255,255,.7);
+  text-decoration: none; color: inherit; cursor: pointer; transition: border-color .12s, box-shadow .12s; }
+.brow:hover { border-color: var(--brand); box-shadow: 0 6px 16px rgba(33, 79, 42, 0.10); }
+.calhead { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.calnav { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+.calnav-btn { font-size: 14px; font-weight: 800; padding: 8px 14px; }
+.calnav-btn:disabled { opacity: 0.4; cursor: default; }
+.calnav-label { font-size: 14px; font-weight: 800; color: var(--text); text-align: center; }
 .brow .n { font-size: 15px; font-weight: 700; }
 .brow .n small { color: var(--muted); font-weight: 600; }
 

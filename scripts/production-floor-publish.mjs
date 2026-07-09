@@ -305,10 +305,7 @@ function orderCells(schedule) {
 }
 function calendarWindow(queue, holidaySet) {
     const today = startOfToday();
-    let end = addDays(today, 6);
-    queue.forEach(q => (q.schedule || []).forEach(s => { const d = parseISO(s.date); if (d && d > end) end = d; }));
-    const cap = addDays(today, 27);
-    if (end > cap) end = cap;
+    const end = addDays(today, 55); // 8 weeks ahead so the page can page week-by-week
     const days = [];
     for (let d = new Date(today); d <= end; d = addDays(d, 1)) {
         days.push({ date: isoLocal(d), weekday: WEEKDAYS[d.getDay()], nonworking: isNonWorking(d, holidaySet) });
@@ -353,12 +350,16 @@ function toPublicPlan(ctx, model, slots, data, idx, holidaySet, queueById) {
         const dates = (q.schedule || []).map(s => s.date).sort();
         const ds = deadlineState(q.deadlineEnd, dates[dates.length - 1], holidaySet);
         const ps = productSummary(q.orderId, data.flatItems, idx);
+        const items = curateItems(q.orderId, data.flatItems, idx, data);
         return {
             order_id: q.orderId, name: q.orderName, client: q.clientName,
             start_date: dates[0] || null, deadline: q.deadlineEnd || null,
             deadline_state: ds.state, deadline_buffer_days: ds.buffer,
             hours: { plan: Number(q.plannedTotalHours) || 0, fact: Number(q.actualTotalHours) || 0, remaining: Number(q.remainingTotalHours) || 0 },
             thumb_url: ps.thumb, colors: ps.colors, quantity: ps.quantity,
+            products: items.filter(i => i.kind === 'product').map(i => i.name),
+            hardware: items.filter(i => i.kind === 'hardware').map(i => i.name),
+            packaging: items.filter(i => i.kind === 'packaging').map(i => i.name),
         };
     });
     let late = 0, tight = 0;
