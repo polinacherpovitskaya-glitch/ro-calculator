@@ -13,7 +13,7 @@
       "calculator_data": "{\"secret\":9997771,\"total_revenue\":9997771}"
     },
     {
-      "id": 502, "order_name": "Ваза Гранит", "client_name": "ООО Стиль", "status": "production_casting",
+      "id": 502, "order_name": "Ваза Гранит", "client_name": "ООО Стиль", "status": "sample",
       "deadline_end": "2027-06-15",
       "production_hours_plastic": 12, "production_hours_hardware": 4, "production_hours_packaging": 2,
       "notes": "Ждём молд из Китая",

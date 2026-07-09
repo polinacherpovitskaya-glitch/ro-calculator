@@ -244,6 +244,14 @@
     // Readiness classifier — moved verbatim from Gantt.getOrderReadiness.
     // Signature matches the plan: deriveReadyState(order, orderItems, chinaPurchases).
     function deriveReadyState(order, items = [], chinaPurchases = []) {
+        // The mold gate only applies BEFORE production starts. Once an order is in
+        // an active production status it is already being made — the mold is in
+        // hand, so it must never show as "Ждёт молд" (the stored base_mold_in_stock
+        // flag is set at order creation and goes stale). Only a pre-production
+        // `sample` order can genuinely be waiting for a custom mold.
+        if (String((order && order.status) || '') !== 'sample') {
+            return { production_ready_state: 'ready', production_blocked_reason: '', production_blocked_items: 0 };
+        }
         const productItems = (items || []).filter(item => String(item?.item_type || 'product') === 'product');
         const customMoldItems = productItems.filter(item => item && item.is_blank_mold === false);
         const blockedItems = customMoldItems.filter(item => !isTrueLike(item.base_mold_in_stock));
