@@ -6,6 +6,7 @@ const vm = require('node:vm');
 const root = path.join(__dirname, '..');
 const appJs = fs.readFileSync(path.join(root, 'js', 'app.js'), 'utf8');
 const calculatorJs = fs.readFileSync(path.join(root, 'js', 'calculator.js'), 'utf8');
+const productionCoreJs = fs.readFileSync(path.join(root, 'js', 'production-core.js'), 'utf8');
 const ganttJs = fs.readFileSync(path.join(root, 'js', 'gantt.js'), 'utf8');
 const settingsJs = fs.readFileSync(path.join(root, 'js', 'settings.js'), 'utf8');
 const indexHtml = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
@@ -246,10 +247,17 @@ const ganttContext = vm.createContext({
     Boolean,
     RegExp,
     Set,
+    Map,
     Date,
-    round2: (value) => Math.round((Number(value) || 0) * 100) / 100,
     App: { settings: {} },
 });
+// gantt.js now delegates readiness/actuals/overload to production-core.js at
+// runtime (index.html loads calculator.js -> production-core.js -> gantt.js),
+// so load the same dependency chain here before evaluating gantt.js. calculator.js
+// provides round2/buildProductionSchedule; production-core.js provides the
+// deriveReadyState/buildOrderActuals/computeOverloadSummary globals.
+vm.runInContext(calculatorJs, ganttContext, { filename: 'js/calculator.js' });
+vm.runInContext(productionCoreJs, ganttContext, { filename: 'js/production-core.js' });
 vm.runInContext(ganttJs, ganttContext, { filename: 'js/gantt.js' });
 
 const blockedState = JSON.parse(JSON.stringify(vm.runInContext(`
