@@ -203,3 +203,9 @@
 - [ ] Mold-limited заказ не выглядит фальшиво распараллеленным.
 - [ ] При перегрузе до дедлайна экран явно показывает risk.
 - [ ] Заказ можно передвинуть bubble-ом и увидеть последствия.
+
+## Публичная витрина цеха (2026-07-08)
+- Появилось read-only зеркало календаря для производства: `calc2.recycleobject.ru/floor/`.
+- Код: `production-floor/` (страница) + `scripts/production-floor-publish.mjs` (снимок) + `js/production-core.js` (общий движок расчёта, хирургически вынесен из `gantt.js`, парити подтверждён byte-for-byte).
+- Снимок собирается куратором по белому списку (без цен/маржи/PII/ключей — проверено key-allowlist аудитом на живых данных), деплой — вместе с Яндекс-статиком (`build-yandex-static.mjs`), `floor/*.json` отдаётся `no-cache`.
+- Спека: `docs/superpowers/specs/2026-07-08-production-floor-public-view-design.md`, план: `docs/superpowers/plans/2026-07-08-production-floor-public-view.md`.

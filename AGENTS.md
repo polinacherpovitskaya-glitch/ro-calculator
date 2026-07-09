@@ -11,6 +11,8 @@ Single-page vanilla JS app. Two production mirrors deployed from the same `main`
 
 No bundler. No `package.json`. Modules in `js/*.js` loaded as `<script>` tags from `index.html`. State + persistence via Supabase. See [`docs/deploy-domain.md`](docs/deploy-domain.md) and [`docs/yandex-migration-plan.md`](docs/yandex-migration-plan.md).
 
+There is also a **public, read-only производственная витрина цеха** at `calc2.recycleobject.ru/floor/` — a standalone static page in [`production-floor/`](production-floor/) that mirrors the internal `#gantt` calendar for shop-floor staff. It renders a curated snapshot published by [`scripts/production-floor-publish.mjs`](scripts/production-floor-publish.mjs) (built field-by-field from an allowlist — no prices/margins/PII/keys), using [`js/production-core.js`](js/production-core.js) — the shared scheduling engine extracted from `js/gantt.js` so the витрина and `#gantt` compute identical numbers. It is NOT part of the SPA: don't bump the 4 version anchors for changes confined to `production-floor/`. Deploy rides the Yandex static sync (`scripts/build-yandex-static.mjs` copies the page and publishes the snapshot into `floor/`).
+
 ## Version bump rule — READ THIS
 
 **Every shipped change must bump the app version.** The version lives in **four** places and they must stay in sync (enforced by `tests/version-smoke.js`):

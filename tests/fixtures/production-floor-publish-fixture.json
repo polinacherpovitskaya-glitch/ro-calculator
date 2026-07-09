@@ -1,0 +1,68 @@
+{
+  "_note": "Publisher fixture. Orders/items deliberately carry MONEY + PII 'sentinel' values (9997771, 1112223, 8885559, 63.57, 7712345678, 40702810900000012345, @secretclient, 4242, 6006, 1276.5, 4804, 51515) so tests/production-floor-publish-smoke.js can prove none of them reach the public JSON. Item types cover product + pendant (both изделия), hardware, packaging, and extra_cost (a cost line that must be excluded).",
+  "settings": { "planning_workers_count": 2, "planning_hours_per_day": 8, "production_holidays": "" },
+  "planState": { "order_ids": [501, 502], "manual_start_dates": {}, "active_workers_count": 2, "parallel_workers": {} },
+  "allOrders": [
+    {
+      "id": 501, "order_name": "Ваза Волна", "client_name": "ООО Дом", "status": "in_production",
+      "deadline_end": "2027-06-01",
+      "production_hours_plastic": 8, "production_hours_hardware": 10, "production_hours_packaging": 6,
+      "notes": "Матовый лак, без глянца. Дно подписать RO.",
+      "total_revenue": 9997771, "total_cost": 1112223, "total_margin": 8885559, "margin_percent": 63.57,
+      "client_inn": "7712345678", "client_bank_account": "40702810900000012345", "telegram": "@secretclient",
+      "calculator_data": "{\"secret\":9997771,\"total_revenue\":9997771}"
+    },
+    {
+      "id": 502, "order_name": "Ваза Гранит", "client_name": "ООО Стиль", "status": "production_casting",
+      "deadline_end": "2027-06-15",
+      "production_hours_plastic": 12, "production_hours_hardware": 4, "production_hours_packaging": 2,
+      "notes": "Ждём молд из Китая",
+      "total_revenue": 9997771, "client_inn": "7712345678"
+    },
+    {
+      "id": 503, "order_name": "Черновик", "client_name": "Тест", "status": "draft",
+      "production_hours_plastic": 5, "production_hours_hardware": 0, "production_hours_packaging": 0
+    }
+  ],
+  "orderItems": [
+    {
+      "id": 9001, "order_id": 501, "item_number": 1, "template_id": null, "product_name": "Ваза Волна", "quantity": 120,
+      "sell_price_item": 4804, "cost_total": 1276.5,
+      "item_data": { "item_type": "product", "product_name": "Ваза Волна", "quantity": 120, "weight_grams": 480, "is_nfc": true, "nfc_programming": true, "color_id": 10, "color_name": "Терракот", "colors": [{ "id": 10, "name": "Терракот" }], "is_blank_mold": true, "base_mold_in_stock": true, "cost_total": 1276.5, "sell_price_item": 4804, "price_cny": 4242, "target_price_item": 6006 }
+    },
+    {
+      "id": 9005, "order_id": 501, "item_number": 2, "template_id": null, "product_name": "Подвес RO", "quantity": 50,
+      "item_data": { "item_type": "pendant", "product_name": "Подвес RO", "quantity": 50, "weight_grams": 10 }
+    },
+    {
+      "id": 9002, "order_id": 501, "item_number": 100, "template_id": null, "product_name": "Шнур джут", "quantity": 120,
+      "sell_price_item": 4804, "cost_total": 1276.5,
+      "item_data": { "item_type": "hardware", "product_name": "Шнур джут", "quantity": 120, "weight_grams": 5, "hours_hardware": 2, "hardware_warehouse_sku": "JUTE", "cost_total": 1276.5, "sell_price_hardware": 4804, "price_cny": 4242 }
+    },
+    {
+      "id": 9003, "order_id": 501, "item_number": 200, "template_id": null, "product_name": "Крафт-коробка", "quantity": 120,
+      "item_data": { "item_type": "packaging", "product_name": "Крафт-коробка", "quantity": 120, "weight_grams": 20, "hours_packaging": 1, "cost_total": 1276.5, "sell_price_packaging": 4804 }
+    },
+    {
+      "id": 9006, "order_id": 501, "item_number": 900, "template_id": null, "product_name": "Доставка", "quantity": 1,
+      "item_data": { "item_type": "extra_cost", "product_name": "Доставка", "quantity": 1, "cost_total": 51515 }
+    },
+    {
+      "id": 9004, "order_id": 502, "item_number": 1, "template_id": null, "product_name": "Ваза Гранит", "quantity": 80,
+      "item_data": { "item_type": "product", "product_name": "Ваза Гранит", "quantity": 80, "weight_grams": 600, "is_blank_mold": false, "base_mold_in_stock": false, "colors": [], "color_name": "Гранит" }
+    }
+  ],
+  "timeEntries": [
+    { "order_id": 501, "worker_name": "Женя", "hours": 9, "stage": "casting" }
+  ],
+  "employees": [
+    { "id": 1, "name": "Женя", "role": "production" }
+  ],
+  "chinaPurchases": [
+    { "order_id": 502, "status": "ordered", "purchase_name": "Молд Гранит" }
+  ],
+  "appColors": [
+    { "id": 10, "name": "Терракот", "color_data": { "id": 10, "number": "010", "name": "Терракот", "photo_url": "img/colors/010.png" } }
+  ],
+  "molds": [], "hwBlanks": [], "pkgBlanks": []
+}
