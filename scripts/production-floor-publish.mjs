@@ -305,10 +305,7 @@ function orderCells(schedule) {
 }
 function calendarWindow(queue, holidaySet) {
     const today = startOfToday();
-    let end = addDays(today, 6);
-    queue.forEach(q => (q.schedule || []).forEach(s => { const d = parseISO(s.date); if (d && d > end) end = d; }));
-    const cap = addDays(today, 27);
-    if (end > cap) end = cap;
+    const end = addDays(today, 55); // 8 weeks ahead so the page can page week-by-week
     const days = [];
     for (let d = new Date(today); d <= end; d = addDays(d, 1)) {
         days.push({ date: isoLocal(d), weekday: WEEKDAYS[d.getDay()], nonworking: isNonWorking(d, holidaySet) });

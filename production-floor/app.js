@@ -8,6 +8,8 @@
   var STAGE_SHORT = { molding: 'Литьё', assembly: 'Сборка', packaging: 'Упак.' };
   var MONTHS = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
   var app = document.getElementById('app');
+  var lastPlan = null;
+  var boardWeek = 0;
 
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
   function escAttr(s) { return String(s == null ? '' : s).replace(/"/g, '&quot;').replace(/</g, '&lt;'); }
@@ -95,16 +97,23 @@
   function blockedRow(b) {
     var cls = b.state === 'needs_review' ? 'muted' : 'warn';
     var reason = b.reason || (b.state === 'needs_review' ? 'Требует проверки' : 'Ждёт молд / Китай');
-    return '<div class="brow"><div class="n">' + esc(b.name) + (b.client ? ' <small>· ' + esc(b.client) + '</small>' : '') + '</div>' +
-      '<span class="badge ' + cls + '">' + esc(reason) + '</span></div>';
+    return '<a class="brow" href="#/order/' + encodeURIComponent(b.order_id) + '"><div class="n">' + esc(b.name) + (b.client ? ' <small>· ' + esc(b.client) + '</small>' : '') + '</div>' +
+      '<span class="badge ' + cls + '">' + esc(reason) + '</span></a>';
   }
 
   function renderBoard(plan) {
+    lastPlan = plan;
     var s = plan.summary || {};
     var risk = s.first_overload_date ? { cls: 'warn', lbl: 'Первый перегруз', val: fmtDate(s.first_overload_date) }
       : (s.late_count ? { cls: 'warn', lbl: 'Опаздывают', val: s.late_count + ' <small>зак.</small>' }
         : { cls: '', lbl: 'Риски', val: 'нет' });
     var cal = plan.calendar || { days: [], rows: [] };
+    var allDays = cal.days || [];
+    var maxWeek = Math.max(0, Math.ceil(allDays.length / 7) - 1);
+    if (boardWeek > maxWeek) boardWeek = maxWeek;
+    if (boardWeek < 0) boardWeek = 0;
+    var weekDays = allDays.slice(boardWeek * 7, boardWeek * 7 + 7);
+    var weekLabel = weekDays.length ? fmtDate(weekDays[0].date) + '–' + fmtDate(weekDays[weekDays.length - 1].date) : '';
     app.innerHTML = headerHtml(plan.generated_at) +
       '<div class="cards">' +
       cardHtml('Сейчас в цехе', plan.in_shop_count + ' <small>чел.</small>') +
@@ -113,12 +122,17 @@
       cardHtml(risk.lbl, risk.val, risk.cls) +
       '</div>' +
       '<div class="section"><div class="panel">' +
-      '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px">' +
-      '<h2 style="margin:0;font-size:18px;font-weight:900">Календарь · ' + fmtDate(cal.range_start) + '–' + fmtDate(cal.range_end) + '</h2>' +
+      '<div class="calhead">' +
+      '<h2 style="margin:0;font-size:18px;font-weight:900">Календарь</h2>' +
       '<div class="legend"><span><i class="dot" style="background:var(--amber)"></i>Литьё</span>' +
       '<span><i class="dot" style="background:var(--cyan)"></i>Сборка</span>' +
       '<span><i class="dot" style="background:var(--violet)"></i>Упаковка</span></div></div>' +
-      (buildCalendar(cal.days, cal.rows) || '<div class="qmeta">Нет запланированных заказов на неделю</div>') +
+      '<div class="calnav">' +
+      '<button class="calnav-btn"' + (boardWeek <= 0 ? ' disabled' : '') + ' onclick="window.__floorWeek(-1)">&lsaquo; Раньше</button>' +
+      '<span class="calnav-label">' + esc(weekLabel) + (boardWeek === 0 ? ' · текущая неделя' : '') + '</span>' +
+      '<button class="calnav-btn"' + (boardWeek >= maxWeek ? ' disabled' : '') + ' onclick="window.__floorWeek(1)">Дальше &rsaquo;</button>' +
+      '</div>' +
+      (buildCalendar(weekDays, cal.rows) || '<div class="qmeta">Нет данных календаря</div>') +
       '</div></div>' +
       '<div class="section"><h2>Очередь к запуску</h2>' +
       (plan.queue.length ? plan.queue.map(queueCard).join('') : '<div class="panel qmeta">Очередь пуста</div>') + '</div>' +
@@ -176,6 +190,7 @@
     window.scrollTo(0, 0);
   }
   window.__floorRefresh = route;
+  window.__floorWeek = function (d) { boardWeek += d; if (lastPlan) renderBoard(lastPlan); };
   window.addEventListener('hashchange', route);
   setInterval(function () { if (currentRoute().view === 'board') route(); }, 15 * 60 * 1000);
   route();
