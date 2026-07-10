@@ -442,15 +442,16 @@ function buildMoldTransit(chinaPurchases) {
         .filter(m => m.name);
 }
 
-// Форма (молд): показываем цеху, есть ли форма под изделия заказа или её ждём.
-// base_mold_in_stock на product-позициях — единственный сигнал (булев флаг).
-function moldStatus(orderId, flatItems) {
-    const molded = (flatItems || []).filter(it =>
+// Использует ли заказ формы (литьё)? Индикатор формы привязываем к РЕАЛЬНОЙ
+// готовности (в очереди/работе → форма на месте; заблокирован → ждём форму), а
+// НЕ к устаревшему base_mold_in_stock (ставится при создании и устаревает —
+// из-за него заказы в производстве ложно показывали «форма нужна»).
+function hasMold(orderId, flatItems) {
+    return (flatItems || []).some(it =>
         Number(it.order_id) === Number(orderId) && !isExtraLine(it) && isProductLike(it)
-        && it.base_mold_in_stock !== undefined && it.base_mold_in_stock !== null);
-    if (!molded.length) return null;
-    const waiting = molded.some(it => it.base_mold_in_stock === false || String(it.base_mold_in_stock) === 'false');
-    return waiting ? 'waiting' : 'ready';
+        && (it.is_blank_mold === true || it.is_blank_mold === 1 || it.is_blank_mold === '1'
+            || it.base_mold_in_stock === true || it.base_mold_in_stock === false
+            || String(it.base_mold_in_stock) === 'true' || String(it.base_mold_in_stock) === 'false'));
 }
 
 // Загрузка месяца по фин-модели (два бара, как в модуле «Факт», js/factual.js):
@@ -509,7 +510,7 @@ function toPublicPlan(ctx, model, slots, data, idx, holidaySet, queueById) {
             status: q.status || null,
             stage_label: STATUS_LABELS[q.status] || '',
             group: queueGroup(q.status),
-            mold: moldStatus(q.orderId, data.flatItems),
+            mold: hasMold(q.orderId, data.flatItems) ? 'ready' : null,
             stages: stagesFromQueue(q),
             thumb_url: ps.thumb, colors: ps.colors, quantity: ps.quantity,
             products: items.filter(i => i.kind === 'product').map(i => ({ name: i.name, qty: i.quantity })),
@@ -564,7 +565,7 @@ function toPublicOrder(orderId, model, data, idx, holidaySet, queueById, enriche
         status, status_label: STATUS_LABELS[status] || status || '',
         deadline, deadline_state: ds.state, deadline_buffer_days: ds.buffer,
         blocked_reason: o.production_blocked_reason || null,
-        mold: moldStatus(orderId, data.flatItems),
+        mold: String(o.production_ready_state || '') === 'blocked' ? 'waiting' : (q && hasMold(orderId, data.flatItems) ? 'ready' : null),
         quantity: ps.quantity, weight_grams: ps.weight, colors: ps.colors,
         nfc: ps.nfc,
         photos: PUB.photosByOrder.get(Number(orderId)) || [],
