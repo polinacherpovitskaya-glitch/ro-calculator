@@ -37,6 +37,7 @@ const STATUS_LABELS = {
     in_production: 'В производстве', delivery: 'Отгрузка',
 };
 const WEEKDAYS = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб']; // Date.getDay() index
+const MONTH_NAMES = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
 const STAGE_LABELS = { molding: 'Литьё', assembly: 'Сборка', packaging: 'Упаковка' };
 
 // Статусы, означающие «заказ реально идёт в цехе сейчас» (vs готов и ждёт слот).
@@ -452,6 +453,41 @@ function moldStatus(orderId, flatItems) {
     return waiting ? 'waiting' : 'ready';
 }
 
+// Загрузка месяца по фин-модели. target = workers_count*hours_per_worker*work_load_ratio
+// (js/calculator.js getProductionParams). closed = сумма часов табеля за текущий месяц
+// (у time_entries нет стадии — все записи считаются производственными, как legacy в
+// js/factual.js). Темп — по рабочим дням. Только часы, без денег.
+export function buildMonthLoad(settings, timeEntries, today, holidaySet) {
+    const n = v => { const x = Number(String(v == null ? '' : v).replace(',', '.')); return Number.isFinite(x) ? x : 0; };
+    const r2 = x => Math.round((Number(x) || 0) * 100) / 100;
+    const target = r2(n((settings || {}).workers_count) * n((settings || {}).hours_per_worker) * n((settings || {}).work_load_ratio));
+    if (!(target > 0)) return null;
+    const y = today.getFullYear(), mo = today.getMonth();
+    const monthStart = new Date(y, mo, 1), monthEnd = new Date(y, mo + 1, 0);
+    const closed = r2((timeEntries || []).reduce((s, e) => {
+        const raw = String((e && (e.date || e.work_date || e.created_at)) || '').slice(0, 10);
+        const d = parseISO(raw);
+        return (d && d >= monthStart && d <= monthEnd) ? s + (Number(e.hours) || 0) : s;
+    }, 0));
+    let wdTotal = 0, wdElapsed = 0;
+    for (let d = new Date(monthStart); d <= monthEnd; d = addDays(d, 1)) {
+        if (!isNonWorking(d, holidaySet)) { wdTotal += 1; if (d <= today) wdElapsed += 1; }
+    }
+    const expected = wdTotal > 0 ? r2(target * wdElapsed / wdTotal) : 0;
+    const paceDelta = r2(closed - expected);
+    const tol = Math.max(1, expected * 0.05);
+    const status = paceDelta > tol ? 'ahead' : (paceDelta < -tol ? 'behind' : 'on_track');
+    return {
+        month_label: MONTH_NAMES[mo],
+        plan_hours: target, closed,
+        remaining: Math.max(0, r2(target - closed)),
+        pct: target > 0 ? Math.round(closed / target * 100) : 0,
+        expected_by_today: expected,
+        pace_delta: paceDelta,
+        status,
+    };
+}
+
 function toPublicPlan(ctx, model, slots, data, idx, holidaySet, queueById) {
     const inShop = Math.round(Number(slots.workersCount) || 0);
     const queue = model.queue.map(q => {
@@ -503,6 +539,7 @@ function toPublicPlan(ctx, model, slots, data, idx, holidaySet, queueById) {
         queue,
         blocked,
         mold_transit: buildMoldTransit(data.chinaPurchases),
+        month_load: buildMonthLoad(data.settings, data.timeEntries, startOfToday(), holidaySet),
     };
 }
 
@@ -609,8 +646,11 @@ async function main() {
     console.log(`production-floor-publish: wrote plan.json (${plan.queue.length} in queue, ${plan.blocked.length} blocked) + ${orders.length} order files to ${OUT_DIR}`);
 }
 
-main().catch(err => {
-    // On failure, do NOT overwrite the last good snapshot — just fail loudly.
-    console.error('production-floor-publish FAILED:', err && err.stack ? err.stack : err);
-    process.exit(1);
-});
+const isDirectRun = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isDirectRun) {
+    main().catch(err => {
+        // On failure, do NOT overwrite the last good snapshot — just fail loudly.
+        console.error('production-floor-publish FAILED:', err && err.stack ? err.stack : err);
+        process.exit(1);
+    });
+}

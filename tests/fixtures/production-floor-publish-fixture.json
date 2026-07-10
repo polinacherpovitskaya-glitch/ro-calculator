@@ -1,6 +1,6 @@
 {
   "_note": "Publisher fixture. Orders/items deliberately carry MONEY + PII 'sentinel' values (9997771, 1112223, 8885559, 63.57, 7712345678, 40702810900000012345, @secretclient, 4242, 6006, 1276.5, 4804, 51515) so tests/production-floor-publish-smoke.js can prove none of them reach the public JSON. Item types cover product + pendant (both изделия), hardware, packaging, and extra_cost (a cost line that must be excluded).",
-  "settings": { "planning_workers_count": 2, "planning_hours_per_day": 8, "production_holidays": "" },
+  "settings": { "planning_workers_count": 2, "planning_hours_per_day": 8, "production_holidays": "", "workers_count": "2", "hours_per_worker": "168", "work_load_ratio": "0.7" },
   "planState": { "order_ids": [501, 502], "manual_start_dates": {}, "active_workers_count": 2, "parallel_workers": {} },
   "allOrders": [
     {
