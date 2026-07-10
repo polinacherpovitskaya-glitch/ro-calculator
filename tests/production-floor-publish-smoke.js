@@ -73,6 +73,14 @@ assert.deepEqual(plan.mold_transit[0].items, ['Форма ТПА', 'Молд к�
 assert.equal(plan.mold_transit[0].stage_label, 'Летит', 'stage from last status_history entry');
 assert.ok(!JSON.stringify(plan.mold_transit).includes('qty'), 'no qty/price fields leak into transit board');
 
+// ---- Загрузка месяца ----
+assert.ok(plan.month_load && typeof plan.month_load === 'object', 'plan.month_load present');
+assert.ok(plan.month_load.plan_hours > 0, 'month_load.plan_hours computed from settings');
+for (const k of ['closed', 'remaining', 'pct', 'expected_by_today', 'pace_delta', 'status', 'month_label']) {
+    assert.ok(k in plan.month_load, `month_load has ${k}`);
+}
+assert.ok(['ahead', 'on_track', 'behind'].includes(plan.month_load.status), 'month_load.status valid');
+
 // ---- Фото-примеры извлечены в файлы, ссылки относительные, base64 не утёк ----
 const withPhotos = Object.values(orders).find(o => o.photos && o.photos.length);
 assert.ok(withPhotos, 'at least one order must expose extracted photos');
