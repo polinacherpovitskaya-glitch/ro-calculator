@@ -201,9 +201,16 @@ button:active { transform: scale(0.98); }
 .lightbox img { max-width: 94vw; max-height: 90vh; border-radius: 10px; box-shadow: 0 10px 40px rgba(0,0,0,.5); }
 .lightbox .lb-close { position: fixed; top: 16px; right: 22px; color: #fff; font-size: 40px; line-height: 1; font-weight: 300; }
 
-/* Загрузка месяца */
+/* Загрузка месяца (два бара) */
 .mload-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
-.mload-nums { font-size: 22px; margin: 8px 0 6px; }
-.mload-nums b { font-weight: 900; }
-.bar.big { height: 14px; }
-.mload-hint { color: var(--muted); font-size: 13px; margin-top: 6px; }
+.mload-cap { color: var(--muted); font-weight: 700; font-size: 14px; }
+.mrow { margin-top: 10px; }
+.mrow-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 4px; }
+.mrow-l { font-weight: 800; display: inline-flex; align-items: center; gap: 8px; }
+.mrow-l small { color: var(--muted); font-weight: 600; }
+.mrow-r { font-size: 15px; color: #334155; }
+.mrow-r b { font-weight: 900; }
+.bar.big { height: 16px; }
+.bar.big.blue i { background: #2563eb; }
+.bar.big.green i { background: #16a34a; }
+.mload-hint { color: var(--muted); font-size: 13px; margin-top: 8px; }

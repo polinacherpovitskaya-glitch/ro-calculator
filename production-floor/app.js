@@ -100,6 +100,7 @@
     var thumb = q.thumb_url ? '<img class="thumb" src="' + escAttr(q.thumb_url) + '" alt="">' : '<div class="thumb ph">фото</div>';
     var prog = q.hours && q.hours.plan > 0 ? Math.min(100, Math.round((q.hours.fact / q.hours.plan) * 100)) : 0;
     var bits = [];
+    if (q.products && q.products.length) bits.push('<span class="qtag"><b>Изделия:</b> ' + q.products.map(function (p) { return esc(p.name) + ' <b>' + (p.qty || 0) + '</b>'; }).join(' · ') + '</span>');
     if (q.colors && q.colors.length) bits.push('<span class="qtag"><b>Цвет:</b> <span class="swatches">' + q.colors.map(swatch).join('') + '</span></span>');
     bits.push(hwLine(q.hardware));
     bits.push(tagLine('Упаковка', q.packaging));
@@ -114,7 +115,6 @@
       '<div style="flex:1;min-width:180px">' + stageChips(q.stages) +
       '<div class="qhours">Итого: ' + fmtHours(q.hours.plan) + ' план · <b>' + fmtHours(q.hours.remaining) + ' осталось</b></div>' +
       '<div class="bar"><i style="width:' + prog + '%"></i></div></div>' +
-      (q.quantity ? '<div class="qty">' + q.quantity + ' шт</div>' : '') +
       '<span class="open">Открыть &rarr;</span></div>' +
       parts + '</a>';
   }
@@ -133,18 +133,24 @@
   }
 
   function monthLoadPanel(ml) {
-    if (!ml || !(ml.plan_hours > 0)) return '';
-    var pct = Math.max(0, Math.min(100, ml.pct || 0));
+    if (!ml || !(ml.capacity > 0)) return '';
+    var soldPct = Math.max(0, Math.min(100, ml.sold_pct || 0));
+    var closedPct = Math.max(0, Math.min(100, ml.closed_pct || 0));
+    var gapTxt = ml.overbooked > 0 ? ('перепродано на ' + num(ml.overbooked) + ' ч')
+      : ('свободно ещё ' + num(ml.free) + ' ч');
     var paceCls = ml.status === 'ahead' ? 'ok' : (ml.status === 'behind' ? 'bad' : 'muted');
     var d = Math.abs(Math.round(ml.pace_delta || 0));
-    var paceTxt = ml.status === 'ahead' ? ('✅ Опережаем на ' + d + ' ч')
-      : (ml.status === 'behind' ? ('⚠️ Не добираем ' + d + ' ч') : 'В графике');
+    var paceTxt = ml.status === 'ahead' ? ('опережаем ' + d + ' ч') : (ml.status === 'behind' ? ('отстаём ' + d + ' ч') : 'в графике');
     return '<div class="section"><div class="panel mload">' +
       '<div class="mload-head"><h2 style="margin:0;font-size:18px;font-weight:900">Загрузка месяца · ' + esc(ml.month_label) + '</h2>' +
-      '<span class="badge ' + paceCls + '">' + paceTxt + '</span></div>' +
-      '<div class="mload-nums"><b>' + num(ml.closed) + '</b> из <b>' + num(ml.plan_hours) + '</b> ч <small>· осталось ' + num(ml.remaining) + ' ч</small></div>' +
-      '<div class="bar big"><i style="width:' + pct + '%"></i></div>' +
-      '<div class="mload-hint">расчёт по фин-модели · табель за месяц</div>' +
+      '<span class="mload-cap">ёмкость ' + num(ml.capacity) + ' ч/мес</span></div>' +
+      '<div class="mrow"><div class="mrow-top"><span class="mrow-l">🟦 Продано <small>· коммерческий</small></span>' +
+      '<span class="mrow-r"><b>' + num(ml.sold) + '</b> ч · ' + soldPct + '% · ' + gapTxt + '</span></div>' +
+      '<div class="bar big blue"><i style="width:' + soldPct + '%"></i></div></div>' +
+      '<div class="mrow"><div class="mrow-top"><span class="mrow-l">🟩 Сделано <small>· производство</small> <span class="badge ' + paceCls + '">' + paceTxt + '</span></span>' +
+      '<span class="mrow-r"><b>' + num(ml.closed) + '</b> ч · ' + closedPct + '% · из проданного осталось ' + num(ml.sold_remaining) + ' ч</span></div>' +
+      '<div class="bar big green"><i style="width:' + closedPct + '%"></i></div></div>' +
+      '<div class="mload-hint">продано = заказы в работе/образцах · сделано = табель за месяц · ёмкость по фин-модели</div>' +
       '</div></div>';
   }
 
@@ -219,7 +225,7 @@
       : '<div class="photo ph"><span>нет фото</span></div>';
     var specs = [];
     if (o.mold) specs.push(spec('Форма', o.mold === 'waiting' ? '<span class="molw">нужна · ждём</span>' : '<span class="molr">есть</span>'));
-    if (o.quantity) specs.push(spec('Количество', o.quantity + ' шт'));
+    // Количество — по каждому изделию (в «Составе заказа» ниже), не общим комком.
     if (o.colors && o.colors.length) specs.push(spec('Цвет', '<div class="swatches">' + o.colors.map(swatch).join('') + '</div>'));
     if (o.weight_grams) specs.push(spec('Вес', o.weight_grams + ' г'));
     if (o.nfc && o.nfc.is_nfc) specs.push(spec('NFC', o.nfc.programming ? 'да · программирование' : 'да'));
