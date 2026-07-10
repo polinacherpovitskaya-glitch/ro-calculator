@@ -214,3 +214,4 @@ button:active { transform: scale(0.98); }
 .bar.big.blue i { background: #2563eb; }
 .bar.big.green i { background: #16a34a; }
 .mload-hint { color: var(--muted); font-size: 13px; margin-top: 8px; }
+.hsub { color: var(--muted); font-weight: 600; font-size: 14px; }

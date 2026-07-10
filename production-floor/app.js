@@ -75,8 +75,8 @@
     return values && values.length ? '<span class="qtag"><b>' + label + ':</b> ' + values.map(esc).join(', ') + '</span>' : '';
   }
   function moldBadge(mold) {
-    if (mold === 'waiting') return '<span class="badge warn">Форма: нужна</span>';
-    if (mold === 'ready') return '<span class="badge ok">Форма: есть</span>';
+    if (mold === 'waiting') return '<span class="badge bad">⏳ Ждём форму</span>';
+    if (mold === 'ready') return '<span class="badge ok">Форма ✓ на месте</span>';
     return '';
   }
   function stageChips(stages) {
@@ -195,9 +195,9 @@
         return '' +
           '<div class="section"><h2>🟢 Сейчас в работе</h2>' +
           (inProg.length ? inProg.map(queueCard).join('') : '<div class="panel qmeta">Сейчас в цехе ничего не запущено</div>') + '</div>' +
-          '<div class="section"><h2>🔵 Очередь к запуску</h2>' +
+          '<div class="section"><h2>🔵 Очередь к запуску <small class="hsub">· форма на месте</small></h2>' +
           (waiting.length ? waiting.map(queueCard).join('') : '<div class="panel qmeta">Очередь пуста</div>') + '</div>' +
-          (plan.blocked.length ? '<div class="section"><h2>🟠 Ждут молд</h2>' + plan.blocked.map(blockedRow).join('') + '</div>' : '') +
+          (plan.blocked.length ? '<div class="section"><h2>🟠 Ждут форму из Китая <small class="hsub">· начать нельзя</small></h2>' + plan.blocked.map(blockedRow).join('') + '</div>' : '') +
           (transit.length ? '<div class="section"><h2>✈️ Формы в пути из Китая</h2>' + transit.map(moldTransitRow).join('') + '</div>' : '');
       })() +
       '<div class="foot">Только просмотр · обновляется автоматически каждые ~15 минут</div>';
@@ -224,7 +224,7 @@
       ? '<div class="gallery">' + photoList.map(function (u) { return zoomImg(u, 'photo'); }).join('') + '</div>'
       : '<div class="photo ph"><span>нет фото</span></div>';
     var specs = [];
-    if (o.mold) specs.push(spec('Форма', o.mold === 'waiting' ? '<span class="molw">нужна · ждём</span>' : '<span class="molr">есть</span>'));
+    if (o.mold) specs.push(spec('Форма', o.mold === 'waiting' ? '<span class="molw">⏳ ждём форму из Китая — начать нельзя</span>' : '<span class="molr">✓ на месте</span>'));
     // Количество — по каждому изделию (в «Составе заказа» ниже), не общим комком.
     if (o.colors && o.colors.length) specs.push(spec('Цвет', '<div class="swatches">' + o.colors.map(swatch).join('') + '</div>'));
     if (o.weight_grams) specs.push(spec('Вес', o.weight_grams + ' г'));
