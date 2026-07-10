@@ -453,15 +453,18 @@ function moldStatus(orderId, flatItems) {
     return waiting ? 'waiting' : 'ready';
 }
 
-// Загрузка месяца по фин-модели. target = workers_count*hours_per_worker*work_load_ratio
-// (js/calculator.js getProductionParams). closed = сумма часов табеля за текущий месяц
-// (у time_entries нет стадии — все записи считаются производственными, как legacy в
-// js/factual.js). Темп — по рабочим дням. Только часы, без денег.
-export function buildMonthLoad(settings, timeEntries, today, holidaySet) {
+// Загрузка месяца по фин-модели (два бара, как в модуле «Факт», js/factual.js):
+//  capacity = workers_count*hours_per_worker*work_load_ratio (ёмкость/мес);
+//  sold     = плановые часы подтверждённых заказов (в производстве/образцах) —
+//             «продано» (коммерческий бар); передаётся снаружи (soldHours);
+//  closed   = сумма часов табеля за текущий месяц — «сделано» (произв. бар).
+// Темп closed — по рабочим дням. Только часы, без денег.
+export function buildMonthLoad(settings, timeEntries, soldHours, today, holidaySet) {
     const n = v => { const x = Number(String(v == null ? '' : v).replace(',', '.')); return Number.isFinite(x) ? x : 0; };
     const r2 = x => Math.round((Number(x) || 0) * 100) / 100;
-    const target = r2(n((settings || {}).workers_count) * n((settings || {}).hours_per_worker) * n((settings || {}).work_load_ratio));
-    if (!(target > 0)) return null;
+    const capacity = r2(n((settings || {}).workers_count) * n((settings || {}).hours_per_worker) * n((settings || {}).work_load_ratio));
+    if (!(capacity > 0)) return null;
+    const sold = r2(soldHours);
     const y = today.getFullYear(), mo = today.getMonth();
     const monthStart = new Date(y, mo, 1), monthEnd = new Date(y, mo + 1, 0);
     const closed = r2((timeEntries || []).reduce((s, e) => {
@@ -473,15 +476,18 @@ export function buildMonthLoad(settings, timeEntries, today, holidaySet) {
     for (let d = new Date(monthStart); d <= monthEnd; d = addDays(d, 1)) {
         if (!isNonWorking(d, holidaySet)) { wdTotal += 1; if (d <= today) wdElapsed += 1; }
     }
-    const expected = wdTotal > 0 ? r2(target * wdElapsed / wdTotal) : 0;
+    const expected = wdTotal > 0 ? r2(capacity * wdElapsed / wdTotal) : 0;
     const paceDelta = r2(closed - expected);
     const tol = Math.max(1, expected * 0.05);
     const status = paceDelta > tol ? 'ahead' : (paceDelta < -tol ? 'behind' : 'on_track');
     return {
         month_label: MONTH_NAMES[mo],
-        plan_hours: target, closed,
-        remaining: Math.max(0, r2(target - closed)),
-        pct: target > 0 ? Math.round(closed / target * 100) : 0,
+        capacity, sold, closed,
+        sold_pct: Math.round(sold / capacity * 100),
+        closed_pct: Math.round(closed / capacity * 100),
+        free: Math.max(0, r2(capacity - sold)),          // свободно продать
+        overbooked: Math.max(0, r2(sold - capacity)),    // перепродано
+        sold_remaining: Math.max(0, r2(sold - closed)),  // из проданного осталось сделать
         expected_by_today: expected,
         pace_delta: paceDelta,
         status,
@@ -506,7 +512,7 @@ function toPublicPlan(ctx, model, slots, data, idx, holidaySet, queueById) {
             mold: moldStatus(q.orderId, data.flatItems),
             stages: stagesFromQueue(q),
             thumb_url: ps.thumb, colors: ps.colors, quantity: ps.quantity,
-            products: items.filter(i => i.kind === 'product').map(i => i.name),
+            products: items.filter(i => i.kind === 'product').map(i => ({ name: i.name, qty: i.quantity })),
             hardware: items.filter(i => i.kind === 'hardware').map(i => ({ name: i.name, thumb_url: i.thumb_url })),
             packaging: items.filter(i => i.kind === 'packaging').map(i => i.name),
         };
@@ -539,7 +545,6 @@ function toPublicPlan(ctx, model, slots, data, idx, holidaySet, queueById) {
         queue,
         blocked,
         mold_transit: buildMoldTransit(data.chinaPurchases),
-        month_load: buildMonthLoad(data.settings, data.timeEntries, startOfToday(), holidaySet),
     };
 }
 
@@ -635,6 +640,12 @@ async function main() {
     PUB.photosByItemId = photosByItemId;
 
     const plan = toPublicPlan(ctx, model, slots, data, idx, holidaySet, queueById);
+
+    // «Продано» = плановые часы подтверждённого пайплайна (в производстве/образцах),
+    // которые уже отобраны в orderedOrders (LOADABLE_STATUSES, часы > 0). Черновики
+    // и отменённые сюда не попадают.
+    const soldHours = orderedOrders.reduce((s, o) => s + orderTotalHours(o), 0);
+    plan.month_load = buildMonthLoad(data.settings, data.timeEntries, soldHours, startOfToday(), holidaySet);
 
     const orders = [...orderIds].map(id => toPublicOrder(id, model, data, idx, holidaySet, queueById, enrichedById));
 

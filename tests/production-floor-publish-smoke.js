@@ -75,10 +75,11 @@ assert.ok(!JSON.stringify(plan.mold_transit).includes('qty'), 'no qty/price fiel
 
 // ---- Загрузка месяца ----
 assert.ok(plan.month_load && typeof plan.month_load === 'object', 'plan.month_load present');
-assert.ok(plan.month_load.plan_hours > 0, 'month_load.plan_hours computed from settings');
-for (const k of ['closed', 'remaining', 'pct', 'expected_by_today', 'pace_delta', 'status', 'month_label']) {
+assert.ok(plan.month_load.capacity > 0, 'month_load.capacity computed from settings');
+for (const k of ['sold', 'closed', 'sold_pct', 'closed_pct', 'free', 'overbooked', 'sold_remaining', 'expected_by_today', 'pace_delta', 'status', 'month_label']) {
     assert.ok(k in plan.month_load, `month_load has ${k}`);
 }
+assert.ok(plan.month_load.sold >= 0, 'month_load.sold is a non-negative hours number');
 assert.ok(['ahead', 'on_track', 'behind'].includes(plan.month_load.status), 'month_load.status valid');
 
 // ---- Фото-примеры извлечены в файлы, ссылки относительные, base64 не утёк ----
@@ -102,7 +103,8 @@ photoUrls.forEach(u => assert.ok(/^photos\//.test(u), `photo url must be relativ
 assert.deepEqual(plan.queue[0].hardware.map(h => h.name), ['Шнур джут'], 'queue card lists фурнитура (as {name,thumb_url})');
 assert.ok(plan.queue[0].hardware.every(h => 'thumb_url' in h), 'hardware entries carry a thumb_url slot');
 assert.deepEqual(plan.queue[0].packaging, ['Крафт-коробка'], 'queue card lists упаковка');
-assert.ok(Array.isArray(plan.queue[0].products) && plan.queue[0].products.includes('Ваза Волна'), 'queue card lists изделие(s)');
+assert.ok(Array.isArray(plan.queue[0].products) && plan.queue[0].products.map(p => p.name).includes('Ваза Волна'), 'queue card lists изделие(s) as {name,qty}');
+assert.ok(plan.queue[0].products.every(p => 'qty' in p), 'each product carries its own qty');
 
 // ---- per-stage hours + mold status on the card ----
 assert.ok(Array.isArray(plan.queue[0].stages) && plan.queue[0].stages.length === 3, 'queue card carries 3 per-stage hour rows');
