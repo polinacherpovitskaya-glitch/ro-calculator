@@ -200,3 +200,10 @@ button:active { transform: scale(0.98); }
 .lightbox.on { display: flex; }
 .lightbox img { max-width: 94vw; max-height: 90vh; border-radius: 10px; box-shadow: 0 10px 40px rgba(0,0,0,.5); }
 .lightbox .lb-close { position: fixed; top: 16px; right: 22px; color: #fff; font-size: 40px; line-height: 1; font-weight: 300; }
+
+/* Загрузка месяца */
+.mload-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.mload-nums { font-size: 22px; margin: 8px 0 6px; }
+.mload-nums b { font-weight: 900; }
+.bar.big { height: 14px; }
+.mload-hint { color: var(--muted); font-size: 13px; margin-top: 6px; }

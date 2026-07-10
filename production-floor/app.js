@@ -132,6 +132,22 @@
       (tail ? '<span class="badge info">' + tail + '</span>' : '') + '</div>';
   }
 
+  function monthLoadPanel(ml) {
+    if (!ml || !(ml.plan_hours > 0)) return '';
+    var pct = Math.max(0, Math.min(100, ml.pct || 0));
+    var paceCls = ml.status === 'ahead' ? 'ok' : (ml.status === 'behind' ? 'bad' : 'muted');
+    var d = Math.abs(Math.round(ml.pace_delta || 0));
+    var paceTxt = ml.status === 'ahead' ? ('✅ Опережаем на ' + d + ' ч')
+      : (ml.status === 'behind' ? ('⚠️ Не добираем ' + d + ' ч') : 'В графике');
+    return '<div class="section"><div class="panel mload">' +
+      '<div class="mload-head"><h2 style="margin:0;font-size:18px;font-weight:900">Загрузка месяца · ' + esc(ml.month_label) + '</h2>' +
+      '<span class="badge ' + paceCls + '">' + paceTxt + '</span></div>' +
+      '<div class="mload-nums"><b>' + num(ml.closed) + '</b> из <b>' + num(ml.plan_hours) + '</b> ч <small>· осталось ' + num(ml.remaining) + ' ч</small></div>' +
+      '<div class="bar big"><i style="width:' + pct + '%"></i></div>' +
+      '<div class="mload-hint">расчёт по фин-модели · табель за месяц</div>' +
+      '</div></div>';
+  }
+
   function renderBoard(plan) {
     lastPlan = plan;
     var s = plan.summary || {};
@@ -152,6 +168,7 @@
       cardHtml('В очереди', (s.queue_count || 0) + ' <small>зак. · ' + fmtHours(s.queue_hours_remaining) + '</small>') +
       cardHtml(risk.lbl, risk.val, risk.cls) +
       '</div>' +
+      monthLoadPanel(plan.month_load) +
       '<div class="section"><div class="panel">' +
       '<div class="calhead">' +
       '<h2 style="margin:0;font-size:18px;font-weight:900">Календарь</h2>' +
