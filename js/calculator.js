@@ -54,6 +54,9 @@ function getProductionParams(settings) {
         charityRate: calcNumber(settings?.charity_rate, 0.01),
         commercialRate: calcNumber(settings?.commercial_rate, DEFAULT_COMMERCIAL_RATE),
         setupHoursPerBatch: calcNumber(settings?.setup_hours_per_batch, 0),
+        setupHoursBlank: calcNumber(settings?.setup_hours_blank, 0.5),
+        setupHoursCustom: calcNumber(settings?.setup_hours_custom, 2),
+        orderProcessingCost: calcNumber(settings?.order_processing_cost, 4000),
         marginTarget: s('margin_target'),
         deliveryCostMoscow: s('delivery_cost_moscow'),
         printingDeliveryCost: s('printing_delivery_cost'),
@@ -238,8 +241,12 @@ function calculateItemCost(item, params) {
     // === Производство изделия ===
 
     // Время на производство всей партии (часы) — с запасом на брак,
-    // плюс запуск партии (переналадка, цвет, приладка) — константа на позицию
-    const setupHours = calcNumber(p.setupHoursPerBatch, 0);
+    // плюс запуск партии (разогрев формы, подбор цвета/света) — константа на партию.
+    // Бланк — готовая форма (0,5 ч); новый кастомный молд — 2 ч. Каталог передаёт
+    // item.setup_hours_override; прочие вызовы используют глобальную настройку.
+    const setupHours = Number.isFinite(item.setup_hours_override)
+        ? item.setup_hours_override
+        : calcNumber(p.setupHoursPerBatch, 0);
     const hoursPlastic = setupHours + (1 / pph) * qty * p.wasteFactor;
 
     // ФОТ за единицу

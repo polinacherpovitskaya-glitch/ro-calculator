@@ -24,15 +24,17 @@ function formatDimensionValue(value) {
     return Number.isInteger(num) ? String(num) : String(Math.round(num * 10) / 10);
 }
 
-// Тиражные чистые маржи бланков после всех удержаний.
+// Чистая маржа бланков после всех удержаний — единая 40% на всех тиражах.
+// Разницу между тиражами даёт амортизация запуска и обработки заказа в
+// себестоимости (пересчёт на объём каждого тиража), а не лестница маржи.
 const BLANKS_TIER_MARGINS = [
-    { max: 10, margin: 0.65, mult: 1.00 },
-    { max: 50, margin: 0.60, mult: 1.00 },
-    { max: 100, margin: 0.55, mult: 1.00 },
-    { max: 300, margin: 0.50, mult: 1.00 },
-    { max: 500, margin: 0.45, mult: 1.00 },
+    { max: 10, margin: 0.40, mult: 1.00 },
+    { max: 50, margin: 0.40, mult: 1.00 },
+    { max: 100, margin: 0.40, mult: 1.00 },
+    { max: 300, margin: 0.40, mult: 1.00 },
+    { max: 500, margin: 0.40, mult: 1.00 },
     { max: 1000, margin: 0.40, mult: 1.00 },
-    { max: Infinity, margin: 0.35, mult: 1.00 },
+    { max: Infinity, margin: 0.40, mult: 1.00 },
 ];
 
 /**
@@ -198,38 +200,58 @@ const Molds = {
             // Амортизация молда = стоимость / макс. ресурс (4500 шт), одинаковая для всех тиражей
             const moldAmortPerUnit = m.cost_rub_calc / MOLD_MAX_LIFETIME;
 
-            // Себестоимость для всех тиражей привязана к модели 50 шт.
-            const baseQtyForCost = 50;
-            const baseItem = {
-                quantity: baseQtyForCost,
-                pieces_per_hour: pph,
-                weight_grams: weight,
-                extra_molds: 0,
-                complex_design: false,
-                is_nfc: m.category === 'nfc',
-                nfc_programming: m.category === 'nfc',
-                hardware_qty: 0,
-                packaging_qty: 0,
-                printing_qty: 0,
-                delivery_included: false,
-                builtin_assembly_name: m.builtin_assembly_name || '',
-                builtin_assembly_speed: Number(m.builtin_assembly_speed || 0),
+            // Запуск: бланк — готовая приехавшая форма (0,5 ч на разогрев и подбор
+            // света/цвета), новый кастомный молд из Китая — 2 ч.
+            const isCustomMold = m.category === 'custom' || m.category === 'client_custom';
+            const setupHoursForMold = isCustomMold
+                ? (Number.isFinite(params.setupHoursCustom) ? params.setupHoursCustom : 2)
+                : (Number.isFinite(params.setupHoursBlank) ? params.setupHoursBlank : 0.5);
+            const orderProcessingCost = Number.isFinite(params.orderProcessingCost) ? params.orderProcessingCost : 4000;
+
+            // Себестоимость пересчитывается НА ОБЪЁМ КАЖДОГО ТИРАЖА: запуск и обработка
+            // заказа амортизируются по количеству, поэтому мелкий тираж дороже крупного.
+            const computeAdjustedForQty = (qtyForCost) => {
+                const item = {
+                    quantity: qtyForCost,
+                    pieces_per_hour: pph,
+                    weight_grams: weight,
+                    extra_molds: 0,
+                    complex_design: false,
+                    is_nfc: m.category === 'nfc',
+                    nfc_programming: m.category === 'nfc',
+                    hardware_qty: 0,
+                    packaging_qty: 0,
+                    printing_qty: 0,
+                    delivery_included: false,
+                    builtin_assembly_name: m.builtin_assembly_name || '',
+                    builtin_assembly_speed: Number(m.builtin_assembly_speed || 0),
+                    setup_hours_override: setupHoursForMold,
+                };
+                const result = calculateItemCost(item, params);
+                let adjustedCost = result.costTotal - result.costMoldAmortization + moldAmortPerUnit;
+                let hwCostPerUnit = 0;
+                if (m.hw_name && (m.hw_price_per_unit > 0 || m.hw_speed > 0)) {
+                    hwCostPerUnit = m.hw_price_per_unit + (m.hw_delivery_total ? m.hw_delivery_total / qtyForCost : 0);
+                    if (m.hw_speed > 0) {
+                        const hwHours = qtyForCost / m.hw_speed * (params.wasteFactor || 1.1);
+                        hwCostPerUnit += hwHours * params.fotPerHour / qtyForCost;
+                        if (params.indirectCostMode === 'all') {
+                            hwCostPerUnit += params.indirectPerHour * hwHours / qtyForCost;
+                        }
+                    }
+                    adjustedCost += hwCostPerUnit;
+                }
+                // Обработка заказа коммерческим отделом — одна на заказ, амортизируется по тиражу.
+                adjustedCost += orderProcessingCost / qtyForCost;
+                return { adjustedCost, hwCostPerUnit, result };
             };
 
-            const baseResult = calculateItemCost(baseItem, params);
-            let baseAdjustedCost = baseResult.costTotal - baseResult.costMoldAmortization + moldAmortPerUnit;
-            let baseHwCostPerUnit = 0;
-            if (m.hw_name && (m.hw_price_per_unit > 0 || m.hw_speed > 0)) {
-                baseHwCostPerUnit = m.hw_price_per_unit + (m.hw_delivery_total ? m.hw_delivery_total / baseQtyForCost : 0);
-                if (m.hw_speed > 0) {
-                    const hwHours = baseQtyForCost / m.hw_speed * (params.wasteFactor || 1.1);
-                    baseHwCostPerUnit += hwHours * params.fotPerHour / baseQtyForCost;
-                    if (params.indirectCostMode === 'all') {
-                        baseHwCostPerUnit += params.indirectPerHour * hwHours / baseQtyForCost;
-                    }
-                }
-                baseAdjustedCost += baseHwCostPerUnit;
-            }
+            // Разбивка себестоимости для карточки — по референсному тиражу 50 шт.
+            const baseQtyForCost = 50;
+            const base = computeAdjustedForQty(baseQtyForCost);
+            const baseResult = base.result;
+            const baseAdjustedCost = base.adjustedCost;
+            const baseHwCostPerUnit = base.hwCostPerUnit;
 
             const baseAssemblyCostPerUnit = round2((baseResult.costBuiltinAssembly || 0) + (baseResult.costBuiltinAssemblyIndirect || 0));
             const hasExplicitNfcHardware = this._hasInlineNfcChip(m) && baseHwCostPerUnit > 0;
@@ -256,8 +278,9 @@ const Molds = {
             // Calculate cost per unit at each tier
             m.tiers = {};
             MOLD_TIERS.forEach(qty => {
-                const adjustedCost = round2(baseAdjustedCost);
-                const hwCostPerUnit = round2(baseHwCostPerUnit);
+                const tierCost = computeAdjustedForQty(qty);
+                const adjustedCost = round2(tierCost.adjustedCost);
+                const hwCostPerUnit = round2(tierCost.hwCostPerUnit);
 
                 // Расчётная цена всегда идёт от текущей себестоимости.
                 // Ручные цены/маржи применяются только при явном ручном override.
