@@ -101,6 +101,36 @@ function _notifySharedDatabaseProblem(error) {
             detail: { ok: false, message },
         }));
     } catch (e) { /* ignore */ }
+    _startSharedDatabaseRecoveryProbe();
+}
+
+// Пока держится проблема со связью — активно проверяем восстановление, чтобы
+// баннер гас САМ, как только база снова отвечает (а не висел до следующей записи).
+let _sharedDbRecoveryTimer = null;
+function _startSharedDatabaseRecoveryProbe() {
+    if (typeof window === 'undefined' || _sharedDbRecoveryTimer) return;
+    const stop = () => {
+        if (_sharedDbRecoveryTimer) { clearInterval(_sharedDbRecoveryTimer); _sharedDbRecoveryTimer = null; }
+    };
+    const probe = async () => {
+        if (!window.__roSharedDatabaseProblem) { stop(); return; }
+        if (!isSupabaseReady()) return;
+        try {
+            await _withRemoteTimeout('load', 'db recovery probe', () => supabaseClient
+                .from('settings')
+                .select('key')
+                .limit(1)
+                .then(({ error }) => { if (error) throw error; return true; }));
+            // успех → _withRemoteTimeout уже снял флаг и погасил баннер
+            stop();
+        } catch (e) { /* всё ещё недоступна — ждём следующего тика */ }
+    };
+    _sharedDbRecoveryTimer = setInterval(probe, 12000);
+    if (!window.__roDbRecoveryFocusBound) {
+        window.__roDbRecoveryFocusBound = true;
+        window.addEventListener('focus', () => { probe(); });
+    }
+    probe();
 }
 
 function _clearSharedDatabaseProblem() {
