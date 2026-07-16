@@ -160,17 +160,19 @@ async function main() {
     );
     assert.equal(
         vm.runInContext('calcBlankSellPrice(257.99, 500, App.params)', context),
-        645,
-        '500-unit blank price should be derived from the VAT-free base, not from commercial/charity shares on top of VAT',
+        575,
+        '500-unit blank price from VAT-free base at flat 40% margin: 257.99 / 0.45 → 575',
     );
 
-    assert.equal(vm.runInContext('getBlankMargin(10)', context), 0.65);
-    assert.equal(vm.runInContext('getBlankMargin(50)', context), 0.60);
-    assert.equal(vm.runInContext('getBlankMargin(100)', context), 0.55);
-    assert.equal(vm.runInContext('getBlankMargin(300)', context), 0.50);
-    assert.equal(vm.runInContext('getBlankMargin(500)', context), 0.45);
+    // Плоская маржа 40% на всех тиражах (PR #150). Разницу между тиражами
+    // даёт себестоимость (запуск + обработка заказа по объёму), а не лестница маржи.
+    assert.equal(vm.runInContext('getBlankMargin(10)', context), 0.40);
+    assert.equal(vm.runInContext('getBlankMargin(50)', context), 0.40);
+    assert.equal(vm.runInContext('getBlankMargin(100)', context), 0.40);
+    assert.equal(vm.runInContext('getBlankMargin(300)', context), 0.40);
+    assert.equal(vm.runInContext('getBlankMargin(500)', context), 0.40);
     assert.equal(vm.runInContext('getBlankMargin(1000)', context), 0.40);
-    assert.equal(vm.runInContext('getBlankMargin(3000)', context), 0.35);
+    assert.equal(vm.runInContext('getBlankMargin(3000)', context), 0.40);
     assert.equal(vm.runInContext('roundTo5(1162)', context), 1160);
     assert.equal(vm.runInContext('roundTo5(1163)', context), 1165);
     assert.equal(vm.runInContext(`formatDimensionValue(30)`, context), '30');
@@ -554,7 +556,7 @@ async function main() {
         Molds.enrichMolds();
     `, context);
     const formulaPriceWithoutManual = vm.runInContext(`Molds.allMolds[0].tiers[50].sellPrice`, context);
-    assert.equal(formulaPriceWithoutManual, 410);
+    assert.equal(formulaPriceWithoutManual, 405);
 
     vm.runInContext(`
         Molds.allMolds[0].use_manual_prices = true;
@@ -617,7 +619,7 @@ async function main() {
         Molds.enrichMolds();
     `, context);
     const noDoubleCountAssembly = vm.runInContext(`Molds.allMolds[0].tiers[50].cost`, context);
-    assert.equal(noDoubleCountAssembly, 120);
+    assert.equal(noDoubleCountAssembly, 200); // 120 базы + обработка заказа 4000/50=80
     const assemblyBreakdown = vm.runInContext(`Molds.allMolds[0].cost_breakdown.builtin_assembly`, context);
     assert.equal(assemblyBreakdown, 10);
 
@@ -696,12 +698,14 @@ async function main() {
     assert.equal(publishedMoldData.depth_mm, 3);
     assert.equal(publishedMoldData.weight_grams, 30);
     assert.equal(publishedMoldData.collection, 'Пластик');
-    assert.equal(publishedMoldData.tiers_prices[50], 475);
-    assert.equal(publishedMoldData.tiers_prices[100], 395);
-    assert.equal(publishedMoldData.tiers_prices[300], 340);
-    assert.equal(publishedMoldData.tiers_prices[500], 295);
-    assert.equal(publishedMoldData.tiers_prices[1000], 265);
-    assert.equal(publishedMoldData.tiers_prices[3000], 240);
+    // Плоские 40% + себест по тиражу (запуск+обработка): мелкие тиражи ниже
+    // лесенки, крупные — выше (при 3000 маржа 40% > прежних 35%).
+    assert.equal(publishedMoldData.tiers_prices[50], 440);
+    assert.equal(publishedMoldData.tiers_prices[100], 355);
+    assert.equal(publishedMoldData.tiers_prices[300], 295);
+    assert.equal(publishedMoldData.tiers_prices[500], 280);
+    assert.equal(publishedMoldData.tiers_prices[1000], 275);
+    assert.equal(publishedMoldData.tiers_prices[3000], 265);
     assert.match(String(publishedMoldData.tiers_published_at || ''), /^20\d\d-/);
 
     // Regression: publishCatalog must heal a corrupted {"0":..,"1":..} mold_data
