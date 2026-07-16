@@ -600,11 +600,24 @@ const Orders = {
         this.render();
     },
 
+    async renderLoadBar() {
+        const el = document.getElementById('production-load-bar');
+        if (!el || typeof collectQuarterLoad !== 'function') return;
+        if (!this._loadBarEntries && typeof loadTimeEntries === 'function') {
+            try { this._loadBarEntries = await loadTimeEntries(); }
+            catch (_) { this._loadBarEntries = []; }
+        }
+        const settings = (typeof App !== 'undefined' && App.settings) || {};
+        const { load, label } = collectQuarterLoad(this.allOrders, this._loadBarEntries || [], settings, new Date());
+        renderProductionLoadBar(el, load, label);
+    },
+
     render() {
         this.updateModeControls();
         const container = document.getElementById('orders-table-view');
         const board = document.getElementById('orders-board-view');
         if (!container) return;
+        this.renderLoadBar();
 
         if (this.isLoading && !this.allOrders.length) {
             container.style.display = '';

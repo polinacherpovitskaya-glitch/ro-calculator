@@ -73,27 +73,48 @@ function _isSoldOrder(o) {
     return true;
 }
 
+// Парсит дату КАК ЛОКАЛЬНУЮ (согласованно с getQuarterBounds), чтобы записи
+// у границ квартала не смещались из-за UTC-парсинга 'YYYY-MM-DD'.
+function _parseLocalDate(raw) {
+    if (!raw) return null;
+    const m = String(raw).match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    const d = new Date(raw);
+    return isNaN(d.getTime()) ? null : d;
+}
+
 function _orderProdDate(o) {
     return (o && (o.deadline_start || o.deadline || o.created_at)) || null;
 }
 
+function _entryDate(e) {
+    return _parseLocalDate(e && (e.date || e.work_date || e.created_at));
+}
+
+// «Сделано» за диапазон: свой массив записей + предикат производственных
+// записей из Factual (DRY — те же стадии, что видит руководство).
+function doneHoursForRange(entries, from, to) {
+    return (entries || []).reduce((sum, e) => {
+        const d = _entryDate(e);
+        if (!d || d < from || d > to) return sum;
+        const isProd = (typeof Factual !== 'undefined' && typeof Factual._isProductionLoadEntry === 'function')
+            ? Factual._isProductionLoadEntry(e) : true;
+        return isProd ? sum + roLoadNum(e.hours) : sum;
+    }, 0);
+}
+
 // Собирает продано/сделано за текущий квартал и считает load.
-function collectQuarterLoad(orders, settings, now) {
+function collectQuarterLoad(orders, entries, settings, now) {
     const { from, to, label } = getQuarterBounds(now);
     const planHours = quarterTargetHours(settings, now);
     let soldHours = 0;
     (orders || []).forEach(o => {
         if (!_isSoldOrder(o)) return;
-        const raw = _orderProdDate(o);
-        if (!raw) return;
-        const d = new Date(raw);
-        if (d < from || d > to) return;
+        const d = _parseLocalDate(_orderProdDate(o));
+        if (!d || d < from || d > to) return;
         soldHours += roLoadNum(o.total_hours_plan);
     });
-    let doneHours = 0;
-    if (typeof Factual !== 'undefined' && typeof Factual._getFactLoadHoursForPeriod === 'function') {
-        doneHours = roLoadNum(Factual._getFactLoadHoursForPeriod(from, to));
-    }
+    const doneHours = doneHoursForRange(entries, from, to);
     const load = computeQuarterLoad({ planHours, soldHours, doneHours, now, from, to });
     return { load, label };
 }
@@ -165,7 +186,7 @@ function renderProductionLoadBar(container, load, label) {
 
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
-        getQuarterBounds, quarterTargetHours, computeQuarterLoad,
+        getQuarterBounds, quarterTargetHours, computeQuarterLoad, doneHoursForRange,
         collectQuarterLoad, renderProductionLoadBar, _isSoldOrder, _orderProdDate,
     };
 }

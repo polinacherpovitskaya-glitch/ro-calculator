@@ -2,6 +2,7 @@ const assert = require('node:assert');
 const { test } = require('node:test');
 const {
     getQuarterBounds, quarterTargetHours, computeQuarterLoad, _isSoldOrder,
+    doneHoursForRange, collectQuarterLoad,
 } = require('../js/production_load.js');
 
 test('getQuarterBounds: середина июля → Q3, 01.07–30.09', () => {
@@ -72,4 +73,33 @@ test('_isSoldOrder: отменённые и неоплаченные черно�
     assert.equal(_isSoldOrder({ status: 'draft', payment_status: 'not_sent' }), false);
     assert.equal(_isSoldOrder({ status: 'draft', payment_status: 'paid_100' }), true);
     assert.equal(_isSoldOrder({ status: 'completed', deleted_at: '2026-01-01' }), false);
+});
+
+test('doneHoursForRange: суммирует часы записей в диапазоне (Factual нет → все производственные)', () => {
+    const from = new Date(2026, 6, 1), to = new Date(2026, 8, 30, 23, 59);
+    const entries = [
+        { date: '2026-07-10', hours: 8 },
+        { date: '2026-08-02', hours: 5 },
+        { date: '2026-06-30', hours: 9 },   // вне квартала
+        { date: '2026-10-01', hours: 4 },   // вне квартала
+    ];
+    assert.equal(doneHoursForRange(entries, from, to), 13);
+});
+
+test('collectQuarterLoad: считает продано из заказов и сделано из записей', () => {
+    const now = new Date(2026, 7, 19);
+    const orders = [
+        { status: 'completed', deadline_start: '2026-08-05', total_hours_plan: 40 },
+        { status: 'draft', payment_status: 'not_sent', deadline: '2026-08-06', total_hours_plan: 100 }, // не в счёт
+        { status: 'cancelled', deadline: '2026-08-07', total_hours_plan: 50 },                          // не в счёт
+        { status: 'production_casting', deadline: '2026-08-08', total_hours_plan: 20 },
+        { status: 'completed', deadline: '2026-04-01', total_hours_plan: 999 },                          // др. квартал
+    ];
+    const entries = [{ date: '2026-08-10', hours: 12 }];
+    const settings = { seasonal_load_plan_json: JSON.stringify({ Q3: 1632 }) };
+    const { load, label } = collectQuarterLoad(orders, entries, settings, now);
+    assert.equal(load.plan, 1632);
+    assert.equal(load.sold, 60);   // 40 + 20
+    assert.equal(load.done, 12);
+    assert.equal(label, 'III квартал');
 });
