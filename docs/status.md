@@ -1,11 +1,11 @@
 # Status
 
 ## Snapshot
-- Current phase: M6 - pre-Yandex-migration global stabilization audit
+- Current phase: M6a - reproducible Yandex DB cutover preflight
 - Plan file: `/Users/krollipolli/Documents/Github/RO calculator/docs/plans.md`
 - Migration readiness file: `/Users/krollipolli/Documents/Github/RO calculator/docs/yandex-migration-readiness.md`
-- Status: yellow
-- Last updated: 2026-05-05
+- Status: yellow — production остаётся на Supabase, cutover не назначен
+- Last updated: 2026-07-17
 
 ## Build / Deploy Source Of Truth
 - Public deploy source: `origin/main` -> `.github/workflows/deploy-pages.yml` -> Vercel (`calc.recycleobject.ru`) + GitHub Pages reserve.
@@ -27,6 +27,10 @@
 - Local validation passed after adding the gate: syntax check for `js/*.js` and `corporate-gift/*.js`, `version-smoke`, `order-flow-smoke`, `supabase-fallback-smoke`, `yandex-writeback-smoke`, `auth-hardening-smoke`, `factual-smoke`, `finance-smoke`, `fintablo-smoke`, `marketplaces-smoke`, `molds-smoke`, `molds-price-recovery-smoke`, `tasks-smoke`, `work-management-smoke`, `employee-auth-payroll-smoke`, `payroll-half-month-smoke`, `production-calendar-smoke`.
 
 ## Done
+- `v390`: финансовый список защищён от неполной TEXT-выборки; текущая схема показывает сохранённые показатели вместо ложной live-маржи.
+- `v391`: выпущены управление каталогом бланков, сохранение upload фото и группировка отключённых бланков; deploy, live smoke и warehouse stress smoke зелёные.
+- Подтверждено read-only аудитом: 1 224 из 1 224 production `order_items.item_data` — валидные JSON-объекты в TEXT, double-encoded значений нет.
+- Добавлен отдельный preflight-пакет: audit, миграция/rollback и runbook без выполнения ALTER в production.
 - Execution docs мигрированы с узкого `work-management rollout` на новый канонический поток: сквозной аудит заказов, цветов, Китая, склада и готовой продукции.
 - Снята базовая repo-карта ключевых order flows: `js/app.js`, `js/orders.js`, `js/order-detail.js`, `js/warehouse.js`, `js/china.js`, `js/colors.js`, `js/supabase.js`, `corporate-gift/app.js`.
 - Подтверждено, что в репозитории пока нет готового automated smoke harness для `order/warehouse/china` сценариев; существующий `tests/work-management-smoke.js` покрывает другой трек.
@@ -88,6 +92,7 @@
 - Повторная near-live проверка `project_hardware` уже на реальных складских данных после sticky-check fix, shortage-safe toggle, блока `Собрано` и auto-hide для завершенных заказов.
 
 ## Next
+- Перейти к первому незавершённому пункту M6a: создать новый Yandex staging stack, восстановить backup и выполнить полную rehearsal `TEXT -> JSONB -> rollback`.
 - Use the module-by-module migration readiness matrix in `docs/yandex-migration-readiness.md` as the working order: warehouse -> China/shipments -> molds/blanks -> orders -> people/payroll -> finance.
 - Run the full local verify set plus targeted static audits after every package; promote only green packages to `main`.
 - Start the next functional sweep from `China` and warehouse receipts because the employee report says those tabs are still "мимо" on calc2.
@@ -128,6 +133,7 @@ curl -s 'https://polinacherpovitskaya-glitch.github.io/ro-calculator/' | rg 'js/
 ```
 
 ## Current Blockers
+- Новый Yandex self-hosted Supabase staging, его secret store и Storage manifest ещё не предоставлены этому репозиторию: SQL намеренно не запускался, rehearsal остаётся следующим ручным инфраструктурным gate.
 - Полноценный live auth path с реальными employee credentials все еще не подтвержден; однако browser-runtime clean-session checks для legacy login upgrade, disabled restore и permissions fallback уже добавлены и проходят локально.
 - `corporate-gift` submit path использует `mode: 'no-cors'`, поэтому endpoint-level success/failure без mock или intercept наблюдается ограниченно.
 - Auth risk снижен, но не снят: login/session model все еще client-side, а legacy remote payload с `password_plain` остается опасным, пока не пройдет полноценный scrub/migration path.
@@ -170,6 +176,7 @@ curl -s 'https://polinacherpovitskaya-glitch.github.io/ro-calculator/' | rg 'js/
 | 2026-03-17 | Packaging reserve + warehouse collection parity | `js/app.js`, `js/orders.js`, `js/warehouse.js`, `tests/order-flow-smoke.js`, `index.html` | `node --check js/app.js && node --check js/orders.js && node --check js/warehouse.js && node --check tests/order-flow-smoke.js && node tests/order-flow-smoke.js && node tests/work-management-smoke.js && node tests/auth-hardening-smoke.js && node tests/factual-smoke.js && node tests/supabase-fallback-smoke.js` | fail -> fixed | Пушнуть публичный билд и проверить `app.js?v=110`, `orders.js?v=61`, `warehouse.js?v=96` |
 | 2026-05-05 | M6 global stabilization baseline | `scripts/audit-codebase-health.mjs`, `scripts/audit-data-paths.mjs`, `.github/workflows/deploy-pages.yml`, `docs/plans.md`, `docs/status.md`, `docs/test-plan.md`, `docs/yandex-migration-plan.md` | `node scripts/audit-codebase-health.mjs`; `node scripts/audit-data-paths.mjs`; full local smoke baseline; `node tests/yandex-writeback-smoke.mjs` | pass | Build module-by-module migration readiness matrix, then start China/warehouse write-flow audit |
 | 2026-05-05 | Warehouse migration target pass | `js/warehouse.js`, `tests/warehouse-migration-smoke.js`, `tests/warehouse-stress-smoke.mjs`, `.github/workflows/deploy-pages.yml`, `index.html`, `js/app.js`, `js/version.json` | `node --check js/warehouse.js && node --check tests/warehouse-migration-smoke.js && node tests/warehouse-migration-smoke.js && node tests/order-flow-smoke.js && node tests/supabase-fallback-smoke.js && node tests/warehouse-stress-smoke.mjs --iterations=1` | pass | Deploy `v333` and verify live/Yandex smokes |
+| 2026-07-17 | M6a JSONB cutover preflight | `scripts/audit-order-item-data-jsonb.mjs`, `scripts/migrations/*`, `docs/runbooks/2026-07-17-yandex-cutover-preflight.md`, `tests/order-item-data-jsonb-preflight-smoke.mjs` | `node scripts/audit-order-item-data-jsonb.mjs --out output/order-item-data-preflight.json`; `node tests/order-item-data-jsonb-preflight-smoke.mjs`; financial regression smokes | pass: 1,224 valid TEXT JSON objects, 0 unsafe | Restore and rehearse on new Yandex staging |
 
 ## Smoke / Demo Checklist
 - [x] Root app стабильно грузится локально и дает пройти навигацию `orders -> colors -> warehouse -> china` без blocker-level runtime errors.

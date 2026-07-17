@@ -132,3 +132,33 @@ curl -s 'https://polinacherpovitskaya-glitch.github.io/ro-calculator/' | rg 'js/
 - Marketplaces и analytics verification вне прямых order regression paths.
 - Load/performance testing для больших складских каталогов и длинной истории заказов.
 - Отдельный Playwright test suite в формате test files, если его явно не попросят позже.
+
+## Yandex DB cutover preflight — 2026-07-17
+
+**Plan:** [`plans/2026-07-17-yandex-cutover-preflight.md`](plans/2026-07-17-yandex-cutover-preflight.md)
+
+### In scope
+
+- Формат и полнота `order_items.item_data` перед `TEXT -> JSONB`.
+- Транзакционный backup, migration и точный rollback исходного TEXT.
+- Контрольные financial fixtures: скидка, цвета, setup, legacy-печать, фурнитура, упаковка, подвес.
+- New-stack save/reload через calc и calc2, photo upload/reload, Storage URL dry-run и Figma catalog publish.
+
+### Required gates
+
+- [x] `node tests/order-item-data-jsonb-preflight-smoke.mjs`
+- [x] `node tests/order-flow-smoke.js`
+- [x] `node tests/supabase-fallback-smoke.js`
+- [ ] Read-only production audit возвращает `safe: true` и `unsafeRows: 0` на release commit.
+- [ ] Restore + migration + rollback пройдены на новой staging DB.
+- [ ] Cold-session parity и save/reload/photo пройдены на staging для calc и calc2.
+- [ ] Storage inventory и URL rewrite dry-run подписаны оператором.
+- [ ] Figma staging-publish подтверждён без выключенных бланков и без пустых фото.
+- [ ] После будущего cutover зелёны deploy, live smoke, Yandex static sync, Yandex mirror smoke и Yandex write-back smoke.
+
+### Negative cases
+
+- Double-encoded, пустой, JSON-array/scalar и невалидный `item_data` должны дать non-zero exit и не допустить SQL.
+- Несовпадение ID/row count backup и live-таблицы должно откатить SQL-транзакцию.
+- Любой JSONB не-object после ALTER должен откатить SQL-транзакцию.
+- Потеря нового заказа, старое фото после reload или несоответствие финансовых цифр на staging — no-go для фриза.
