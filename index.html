@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="css/style.css?v=379">
     <script>
         (function () {
-            const CURRENT_HTML_VERSION = 'v400';
+            const CURRENT_HTML_VERSION = 'v401';
             const ATTEMPT_KEY = 'ro_calc_force_update_attempts';
 
             function parseVersion(version) {
@@ -187,7 +187,7 @@
     <aside class="sidebar">
         <div class="sidebar-brand">
             <h2>Recycle Object</h2>
-            <span>Калькулятор <span id="app-version">v400</span></span>
+            <span>Калькулятор <span id="app-version">v401</span></span>
         </div>
         <nav class="sidebar-nav">
             <div class="sidebar-group-label">Каждый день</div>
@@ -2771,7 +2771,7 @@
         <div id="page-settings" class="page">
             <div class="page-header">
                 <h1>Настройки</h1>
-                <button class="btn btn-success" onclick="Settings.saveAll()">Сохранить</button>
+                <button class="btn btn-success" id="settings-save-all" onclick="Settings.saveAll()">Сохранить</button>
             </div>
 
             <div class="tabs">
@@ -2796,7 +2796,7 @@
                     <div class="form-row">
                         <div class="form-group">
                             <label>Кол-во сотрудников</label>
-                            <input type="number" step="0.5" id="set-workers_count" data-key="workers_count">
+                            <input type="number" step="0.5" id="set-workers_count" data-key="workers_count" oninput="Settings.updateProductionHints()">
                             <span class="form-hint">чел</span>
                         </div>
                         <div class="form-group">
@@ -2810,27 +2810,28 @@
                             <span class="form-hint" id="set-work-load-hint">0.8 = 80%</span>
                         </div>
                     </div>
-                    <h3 style="margin: 20px 0 8px;">Сезонный план загрузки (ч/квартал)</h3>
+                    <h3 style="margin: 20px 0 8px;">Сезонный план загрузки (% мощности квартала)</h3>
+                    <p class="form-hint" style="margin:0 0 8px;">Проценты превращаются в часы автоматически. Годовой итог обязан совпасть с коэффициентом загрузки выше — это один финансовый консенсус.</p>
                     <div class="form-row">
                         <div class="form-group">
                             <label>Q1 (мёртвый)</label>
-                            <input type="number" id="set-seasonal-q1" oninput="Settings.updateProductionHints()">
-                            <span class="form-hint">ч/квартал</span>
+                            <input type="number" min="0" max="100" step="0.1" id="set-seasonal-q1" oninput="Settings.updateProductionHints()">
+                            <span class="form-hint" id="set-seasonal-q1-hours">ч/квартал</span>
                         </div>
                         <div class="form-group">
                             <label>Q2</label>
-                            <input type="number" id="set-seasonal-q2" oninput="Settings.updateProductionHints()">
-                            <span class="form-hint">ч/квартал</span>
+                            <input type="number" min="0" max="100" step="0.1" id="set-seasonal-q2" oninput="Settings.updateProductionHints()">
+                            <span class="form-hint" id="set-seasonal-q2-hours">ч/квартал</span>
                         </div>
                         <div class="form-group">
                             <label>Q3</label>
-                            <input type="number" id="set-seasonal-q3" oninput="Settings.updateProductionHints()">
-                            <span class="form-hint">ч/квартал</span>
+                            <input type="number" min="0" max="100" step="0.1" id="set-seasonal-q3" oninput="Settings.updateProductionHints()">
+                            <span class="form-hint" id="set-seasonal-q3-hours">ч/квартал</span>
                         </div>
                         <div class="form-group">
                             <label>Q4 (пик)</label>
-                            <input type="number" id="set-seasonal-q4" oninput="Settings.updateProductionHints()">
-                            <span class="form-hint">ч/квартал</span>
+                            <input type="number" min="0" max="100" step="0.1" id="set-seasonal-q4" oninput="Settings.updateProductionHints()">
+                            <span class="form-hint" id="set-seasonal-q4-hours">ч/квартал</span>
                         </div>
                     </div>
                     <div class="form-hint" id="set-seasonal-hint" style="margin-top: 4px;"></div>
@@ -3621,7 +3622,7 @@
 <script src="js/supabase.js?v=396"></script>
 <script src="js/task-events.js?v=1"></script>
 <script src="js/calculator.js?v=400"></script>
-<script src="js/app.js?v=400"></script>
+<script src="js/app.js?v=401"></script>
 <script src="js/tpa.js?v=4"></script>
 <script src="js/order-detail.js?v=397"></script>
 <script src="js/orders.js?v=397"></script>
@@ -3647,7 +3648,7 @@
 <script src="js/marketplaces.js?v=280"></script>
 <script src="js/warehouse.js?v=196"></script>
 <script src="js/monitoring.js?v=2"></script>
-<script src="js/settings.js?v=84"></script>
+<script src="js/settings.js?v=401"></script>
 <script src="js/pendant.js?v=17"></script>
 </body>
 </html>

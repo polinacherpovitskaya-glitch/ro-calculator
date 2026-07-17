@@ -62,6 +62,7 @@ jobs:
           node tests/production-load-tooltip-smoke.js
           node tests/pendant-letter-color-smoke.js
           node tests/recalculate-active-orders-smoke.mjs
+          node tests/seasonal-capacity-consensus-smoke.js
           node tests/factual-smoke.js
           node tests/supabase-fallback-smoke.js
           node tests/bootstrap-guard-smoke.js
