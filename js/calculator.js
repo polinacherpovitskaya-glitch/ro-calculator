@@ -64,6 +64,28 @@ function getProductionParams(settings) {
     };
 }
 
+// Число РАЗНЫХ цветов в позиции: запуск (разогрев формы + подбор цвета) идёт
+// на КАЖДЫЙ цвет отдельно, поэтому одинаковые цвета считаем один раз. Нет цветов
+// (каталог, старые заказы) → 1, поведение не меняется.
+function getItemColorCount(item) {
+    let colors = item && item.colors;
+    if (typeof colors === 'string') {
+        try { colors = JSON.parse(colors); } catch (_) { colors = []; }
+    }
+    if (Array.isArray(colors)) {
+        const keys = new Set(
+            colors
+                .filter(c => c && typeof c === 'object')
+                .map(c => (c.id != null
+                    ? 'id:' + c.id
+                    : (c.name != null ? 'nm:' + String(c.name).trim().toLowerCase() : JSON.stringify(c))))
+        );
+        if (keys.size > 0) return keys.size;
+    }
+    const cc = Math.floor(Number(item && item.color_count));
+    return Number.isFinite(cc) && cc >= 1 ? cc : 1;
+}
+
 const DEFAULT_COMMERCIAL_RATE = 0.07;
 
 function getRateValue(value, fallback) {
@@ -244,9 +266,12 @@ function calculateItemCost(item, params) {
     // плюс запуск партии (разогрев формы, подбор цвета/света) — константа на партию.
     // Бланк — готовая форма (0,5 ч); новый кастомный молд — 2 ч. Каталог передаёт
     // item.setup_hours_override; прочие вызовы используют глобальную настройку.
-    const setupHours = Number.isFinite(item.setup_hours_override)
+    const baseSetupHours = Number.isFinite(item.setup_hours_override)
         ? item.setup_hours_override
         : calcNumber(p.setupHoursPerBatch, 0);
+    // Запуск — на КАЖДЫЙ цвет: разные цвета в одной позиции ведутся отдельными
+    // запусками, даже если бланк и тираж одни и те же (буквы/подвесы, карабин ×5 цветов).
+    const setupHours = baseSetupHours * getItemColorCount(item);
     const hoursPlastic = setupHours + (1 / pph) * qty * p.wasteFactor;
 
     // ФОТ за единицу
@@ -1964,4 +1989,8 @@ function buildProductionSchedule(orders, settings) {
     }
 
     return { queue, dailyCapacity, days };
+}
+
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = { getProductionParams, calculateItemCost, getItemColorCount };
 }
