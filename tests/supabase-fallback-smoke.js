@@ -2644,6 +2644,69 @@ async function main() {
 
     {
         const context = createContext();
+        const orderId = 1777974526031;
+        context.location = {
+            href: 'https://calc2.recycleobject.ru/#orders',
+            origin: 'https://calc2.recycleobject.ru',
+            protocol: 'https:',
+            hostname: 'calc2.recycleobject.ru',
+        };
+        context.window.location = context.location;
+        context.__tableRows.orders = [{
+            id: orderId,
+            order_name: 'Freshly saved calculation',
+            status: 'production_casting',
+            updated_at: '2026-01-01T10:00:00.000Z',
+        }];
+        context.__bootstrapOrders = [{
+            id: orderId,
+            order_name: 'Freshly saved calculation',
+            status: 'production_casting',
+            margin_percent: 41.9,
+            updated_at: '2026-01-01T10:00:00.000Z',
+        }];
+        context.__bootstrapOrderItems = [{
+            id: `${orderId}-product-1`,
+            order_id: orderId,
+            item_number: 1,
+            item_type: 'product',
+            quantity: 100,
+            updated_at: '2026-01-01T10:00:00.000Z',
+        }];
+        runScript(context, 'js/supabase.js');
+        vm.runInContext('initSupabase()', context);
+
+        await vm.runInContext(`saveOrder(
+            {
+                id: ${orderId},
+                order_name: 'Freshly saved calculation',
+                status: 'production_casting',
+                margin_percent_plan: 33.3,
+            },
+            [{ item_number: 1, item_type: 'product', product_name: 'Fresh item', quantity: 125 }]
+        )`, context);
+
+        const savedCache = JSON.parse(JSON.stringify(vm.runInContext(
+            `(getLocal(LOCAL_KEYS.orders) || []).find(order => String(order.id) === String(${orderId}))`,
+            context
+        )));
+        assert.ok(
+            Date.parse(savedCache.updated_at) > Date.parse('2026-01-01T10:00:00.000Z'),
+            'a successful save must stamp the local order snapshot with its new write time'
+        );
+
+        await vm.runInContext('loadOrders({})', context);
+        await new Promise(resolve => setTimeout(resolve, 20));
+        const cachedOrders = JSON.parse(JSON.stringify(vm.runInContext('getLocal(LOCAL_KEYS.orders)', context)));
+        const cachedItems = JSON.parse(JSON.stringify(vm.runInContext('getLocal(LOCAL_KEYS.orderItems)', context)));
+        const cachedOrder = cachedOrders.find(order => String(order.id) === String(orderId));
+        const cachedItem = cachedItems.find(item => String(item.order_id) === String(orderId));
+        assert.equal(cachedOrder.margin_percent_plan, 33.3, 'older calc2 bootstrap must not replace freshly saved financial data');
+        assert.equal(cachedItem.quantity, 125, 'older calc2 bootstrap must not replace freshly saved order items');
+    }
+
+    {
+        const context = createContext();
         const orderId = 1780600000001;
         runScript(context, 'js/supabase.js');
         vm.runInContext(`

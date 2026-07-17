@@ -733,7 +733,7 @@ async function smokeNewDraftAutosaveAndManualSaveShareReservedId(context) {
         const saveCalls = [];
         const saveResolvers = [];
         saveOrder = (order, items) => new Promise(resolve => {
-            saveCalls.push({ order: { ...order }, itemCount: items.length });
+            saveCalls.push({ order: { ...order }, items: JSON.parse(JSON.stringify(items)) });
             saveResolvers.push(() => resolve(order.id));
         });
 
@@ -759,31 +759,102 @@ async function smokeNewDraftAutosaveAndManualSaveShareReservedId(context) {
 
         const autosavePromise = Calculator._doAutosave();
         await Promise.resolve();
+        Calculator.hardwareItems[0].qty = 7;
         const manualSavePromise = Calculator.saveOrder();
         await Promise.resolve();
         await Promise.resolve();
 
+        const writesBeforeFirstResolve = saveCalls.length;
         const idsBeforeResolve = saveCalls.map(call => call.order.id);
-        saveResolvers.forEach(resolve => resolve());
+        saveResolvers[0]();
+        await Promise.resolve();
+        await Promise.resolve();
+        const writesBeforeSecondResolve = saveCalls.length;
+        saveResolvers[1]();
         await Promise.all([autosavePromise, manualSavePromise]);
 
         return {
             saveCalls,
             idsBeforeResolve,
+            writesBeforeFirstResolve,
+            writesBeforeSecondResolve,
             editingOrderId: App.editingOrderId,
             storedOrderId: localStorage.getItem('ro_calc_editing_order_id'),
         };
     })()`, context));
 
-    assert.equal(result.saveCalls.length, 2, 'autosave and manual save both attempted to persist');
+    assert.equal(result.writesBeforeFirstResolve, 1, 'manual save waits for an in-flight autosave write');
+    assert.equal(result.writesBeforeSecondResolve, 2, 'manual save starts only after autosave write resolves');
+    assert.equal(result.saveCalls.length, 2, 'autosave and manual save both persist in sequence');
     assert.ok(result.idsBeforeResolve[0], 'autosave reserves an id before the first write resolves');
     assert.equal(
         new Set(result.idsBeforeResolve).size,
         1,
         'manual save must reuse the in-flight autosave id instead of creating a duplicate draft'
     );
+    assert.equal(result.saveCalls[0].items[0].quantity, 3, 'the first write contains the old autosave snapshot');
+    assert.equal(result.saveCalls[1].items[0].quantity, 7, 'the final manual write contains the edited state');
     assert.equal(String(result.editingOrderId), String(result.idsBeforeResolve[0]));
     assert.equal(result.storedOrderId, String(result.idsBeforeResolve[0]));
+}
+
+async function smokeManualSaveInvalidatesPreparedAutosave(context) {
+    const result = clone(await vm.runInContext(`(async () => {
+        const originalSaveOrder = saveOrder;
+        const originalLoadOrder = loadOrder;
+        const originalPrepare = Calculator._prepareColorAttachmentsForSave;
+        const writes = [];
+        let releaseAutosavePreparation = null;
+        let prepareCalls = 0;
+
+        try {
+            saveOrder = async (order, items) => {
+                writes.push({ order: { ...order }, items: JSON.parse(JSON.stringify(items)) });
+                return order.id;
+            };
+            loadOrder = async (orderId) => ({ order: { id: orderId, status: 'draft' }, items: [] });
+            Calculator._prepareColorAttachmentsForSave = async () => {
+                prepareCalls += 1;
+                if (prepareCalls === 1) {
+                    await new Promise(resolve => { releaseAutosavePreparation = resolve; });
+                }
+            };
+
+            Calculator.resetForm();
+            document.getElementById('calc-order-name').value = 'Prepared autosave must not win';
+            document.getElementById('calc-manager-name').value = 'Smoke';
+            document.getElementById('calc-autosave-status');
+            Calculator.hardwareItems = [Object.assign(Calculator.getEmptyHardware(null), {
+                source: 'warehouse',
+                name: 'Race Hardware',
+                qty: 3,
+                warehouse_item_id: 779,
+                warehouse_sku: 'HW-779',
+                assembly_speed: 120,
+                result: { costPerUnit: 15, hoursHardware: 0.4 },
+            })];
+
+            const autosavePromise = Calculator._doAutosave();
+            await Promise.resolve();
+            Calculator.hardwareItems[0].qty = 7;
+            await Calculator.saveOrder();
+            const writesAfterManualSave = JSON.parse(JSON.stringify(writes));
+            releaseAutosavePreparation();
+            await autosavePromise;
+
+            return { writesAfterManualSave, writes, prepareCalls, autosaving: Calculator._autosaving };
+        } finally {
+            saveOrder = originalSaveOrder;
+            loadOrder = originalLoadOrder;
+            Calculator._prepareColorAttachmentsForSave = originalPrepare;
+        }
+    })()`, context));
+
+    assert.equal(result.prepareCalls, 2, 'autosave and manual save both reached preparation');
+    assert.equal(result.writesAfterManualSave.length, 1, 'manual save persists while autosave is still preparing');
+    assert.equal(result.writes.length, 1, 'obsolete autosave does not write after manual save');
+    assert.equal(result.writes[0].items[0].quantity, 7, 'only the manual snapshot reaches persistence');
+    assert.equal(result.autosaving, false, 'obsolete autosave must release the autosave lock');
 }
 
 async function smokeLegacyProductionStatusAppearsInOrdersViews(context) {
@@ -8602,6 +8673,7 @@ async function main() {
     await smokeCalculatorLocalDraftSurvivesRefresh(context);
     await smokeLegacyLocalDraftRestoresAsNewOrder(context);
     await smokeNewDraftAutosaveAndManualSaveShareReservedId(context);
+    await smokeManualSaveInvalidatesPreparedAutosave(context);
     await smokeLegacyProductionStatusAppearsInOrdersViews(context);
     await smokeZeroCostWarehouseHardwareStillShowsInPricing(context);
     await smokeLoadOrderHydratesZeroWarehousePriceFromCurrentStock(context);
