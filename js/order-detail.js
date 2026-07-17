@@ -100,19 +100,29 @@ const OrderDetail = {
     // ==========================================
 
     buildLiveFinancialMeta() {
+        const purpose = normalizeProductionPurpose(this.currentOrder?.production_purpose);
         if (typeof getOrderLiveCalculatorSnapshot !== 'function') {
             return {
                 revenue: Number(this.currentOrder?.total_revenue_plan || 0),
                 marginPercent: Number(this.currentOrder?.margin_percent_plan || 0),
                 hours: Number(this.currentOrder?.total_hours_plan || 0),
+                purpose,
+                loss: isNonCommercialProductionPurpose(purpose)
+                    ? Math.max(0, Number(this.currentOrder?.total_cost_plan || 0))
+                    : 0,
             };
         }
         try {
             const snapshot = getOrderLiveCalculatorSnapshot(this.currentOrder || {}, this.currentItems || []);
+            const snapshotPurpose = normalizeProductionPurpose(snapshot?.productionPurpose || this.currentOrder?.production_purpose);
             return {
                 revenue: Number(snapshot?.revenue || 0),
                 marginPercent: Number(snapshot?.marginPercent || 0),
                 hours: Number(snapshot?.hours || 0),
+                purpose: snapshotPurpose,
+                loss: isNonCommercialProductionPurpose(snapshotPurpose)
+                    ? Math.max(0, Number(snapshot?.nonCommercialLoss || this.currentOrder?.total_cost_plan || 0))
+                    : 0,
             };
         } catch (e) {
             console.warn('OrderDetail.buildLiveFinancialMeta fallback:', e);
@@ -120,6 +130,10 @@ const OrderDetail = {
                 revenue: Number(this.currentOrder?.total_revenue_plan || 0),
                 marginPercent: Number(this.currentOrder?.margin_percent_plan || 0),
                 hours: Number(this.currentOrder?.total_hours_plan || 0),
+                purpose,
+                loss: isNonCommercialProductionPurpose(purpose)
+                    ? Math.max(0, Number(this.currentOrder?.total_cost_plan || 0))
+                    : 0,
             };
         }
     },
@@ -128,15 +142,19 @@ const OrderDetail = {
         const o = this.currentOrder;
         const ps = PAYMENT_STATUSES.find(s => s.key === o.payment_status) || PAYMENT_STATUSES[0];
         this.currentFinancial = this.buildLiveFinancialMeta();
-        const revenue = Number(this.currentFinancial?.revenue || o.total_revenue_plan || 0);
+        const calculatedRevenue = Number(this.currentFinancial?.revenue || o.total_revenue_plan || 0);
         const marginPercent = Number(this.currentFinancial?.marginPercent || o.margin_percent_plan || 0);
         const hours = Number(this.currentFinancial?.hours || o.total_hours_plan || 0);
+        const purpose = normalizeProductionPurpose(this.currentFinancial?.purpose || o.production_purpose);
+        const isNonCommercial = isNonCommercialProductionPurpose(purpose);
+        const revenue = isNonCommercial ? 0 : calculatedRevenue;
+        const loss = Math.max(0, Number(this.currentFinancial?.loss || o.total_cost_plan || 0));
 
         // Крупная цифра в карточке и списке — живой пересчёт по текущим
         // параметрам. Историческую маржу при продаже сохраняем подписью, когда
         // она отличается, чтобы финансовый контекст заказа не терялся.
         const storedMarginPct = Number(o.margin_percent_plan ?? o.margin_percent ?? 0);
-        const marginNote = (storedMarginPct && Math.abs(storedMarginPct - marginPercent) >= 1)
+        const marginNote = !isNonCommercial && (storedMarginPct && Math.abs(storedMarginPct - marginPercent) >= 1)
             ? `<div class="text-muted" style="font-size:11px;margin-top:2px;" title="Зафиксировано при сохранении заказа — по ценам и ставкам того дня. Крупная цифра — пересчёт по сегодняшним параметрам.">при продаже: ${formatPercent(storedMarginPct)}</div>`
             : '';
 
@@ -146,8 +164,8 @@ const OrderDetail = {
                 <div class="stat-value">${formatRub(revenue)}</div>
             </div>
             <div class="stat-card">
-                <div class="stat-label">Маржа</div>
-                <div class="stat-value ${marginPercent >= 30 ? 'text-green' : 'text-red'}">${formatPercent(marginPercent)}</div>
+                <div class="stat-label">${isNonCommercial ? 'Некоммерческие расходы' : 'Маржа'}</div>
+                <div class="stat-value ${isNonCommercial || marginPercent < 30 ? 'text-red' : 'text-green'}">${isNonCommercial ? '−' + formatRub(loss) : formatPercent(marginPercent)}</div>
                 ${marginNote}
             </div>
             <div class="stat-card">
@@ -155,8 +173,8 @@ const OrderDetail = {
                 <div class="stat-value">${hours.toFixed(1)} ч</div>
             </div>
             <div class="stat-card">
-                <div class="stat-label">Оплата</div>
-                <div class="stat-value"><span class="badge badge-${ps.color}">${ps.label}</span></div>
+                <div class="stat-label">${isNonCommercial ? 'Тип работ' : 'Оплата'}</div>
+                <div class="stat-value">${isNonCommercial ? (purpose === 'rework' ? '↻ Переделка брака' : '▦ Сток / образец') : `<span class="badge badge-${ps.color}">${ps.label}</span>`}</div>
             </div>
         `;
     },

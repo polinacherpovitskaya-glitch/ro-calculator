@@ -336,11 +336,17 @@ const Orders = {
     },
 
     getStoredFinancialMeta(order) {
-        return {
+        const purpose = normalizeProductionPurpose(order?.production_purpose);
+        const financial = {
             revenue: Number(order?.total_revenue_plan ?? order?.total_revenue ?? 0),
             marginPercent: Number(order?.margin_percent_plan ?? order?.margin_percent ?? 0),
             hours: Number(order?.total_hours_plan ?? 0),
         };
+        if (isNonCommercialProductionPurpose(purpose)) {
+            financial.purpose = purpose;
+            financial.loss = Math.max(0, Number(order?.total_cost_plan ?? order?.total_cost ?? -(Number(order?.total_margin_plan || 0))));
+        }
+        return financial;
     },
 
     hasStoredFinancialMeta(order) {
@@ -380,17 +386,18 @@ const Orders = {
                 marginPercent: Number(snapshot?.marginPercent || 0),
                 hours: Number(snapshot?.hours || 0),
             };
+            const livePurpose = normalizeProductionPurpose(snapshot?.productionPurpose || order?.production_purpose);
+            if (isNonCommercialProductionPurpose(livePurpose)) {
+                live.purpose = livePurpose;
+                live.loss = Number(snapshot?.nonCommercialLoss || 0);
+            }
 
             // Пустой пересчёт при наличии сохранённых цифр — не доверяем нулям.
             if (!(live.revenue > 0) && !(live.hours > 0) && this.hasStoredFinancialMeta(order)) {
                 return stored;
             }
 
-            return {
-                revenue: live.revenue,
-                marginPercent: live.marginPercent,
-                hours: live.hours,
-            };
+            return live;
         } catch (e) {
             console.warn('Orders.buildFinancialMeta fallback:', e);
             return stored;
@@ -826,6 +833,9 @@ const Orders = {
         const financial = this.metaByOrderId[order.id]?.financial || null;
         const margin = Number(financial?.marginPercent || order.margin_percent_plan || 0);
         const revenue = Number(financial?.revenue || order.total_revenue_plan || 0);
+        const purpose = normalizeProductionPurpose(financial?.purpose || order.production_purpose);
+        const isNonCommercial = isNonCommercialProductionPurpose(purpose);
+        const loss = Math.max(0, Number(financial?.loss || order.total_cost_plan || 0));
 
         let deadlineHtml = '';
         if (order.deadline_end || order.deadline_start || order.deadline) {
@@ -848,6 +858,9 @@ const Orders = {
         const b2cBadge = isB2C
             ? '<span style="display:inline-block;font-size:9px;font-weight:700;color:#7c3aed;background:rgba(124,58,237,.1);padding:1px 5px;border-radius:4px;margin-left:4px;">B2C</span>'
             : '';
+        const purposeBadge = isNonCommercial
+            ? `<div style="font-size:10px;color:#6e3cbc;font-weight:700;margin-bottom:4px;">${purpose === 'rework' ? '↻ Переделка брака' : '▦ Сток / внутренний образец'}</div>`
+            : '';
 
         return `
         <div class="order-board-card" draggable="true"
@@ -855,13 +868,14 @@ const Orders = {
              onclick="App.navigate('order-detail', true, ${order.id})">
             <div class="order-board-card-title">${this.escHtml(order.order_name || 'Без названия')}${b2cBadge}</div>
             ${subStageBadge}
+            ${purposeBadge}
             <div class="order-board-card-client">${this.escHtml(order.client_name || '')} ${order.manager_name ? '/ ' + this.escHtml(order.manager_name) : ''}</div>
             <div class="order-board-card-footer">
                 <span class="badge badge-${payment.color}" style="font-size:9px">${payment.label}</span>
-                <span style="font-size:11px;font-weight:600;${margin >= 30 ? 'color:var(--green)' : 'color:var(--red)'}">${formatPercent(margin)}</span>
+                <span style="font-size:11px;font-weight:600;${isNonCommercial ? 'color:var(--red)' : (margin >= 30 ? 'color:var(--green)' : 'color:var(--red)')}">${isNonCommercial ? '−' + formatRub(loss) : formatPercent(margin)}</span>
             </div>
             <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px">
-                <span style="font-size:11px;color:var(--text-muted)">${formatRub(revenue)}</span>
+                <span style="font-size:11px;color:var(--text-muted)">${isNonCommercial ? 'выручка 0 ₽' : formatRub(revenue)}</span>
                 ${deadlineHtml}
             </div>
         </div>`;
@@ -974,12 +988,17 @@ const Orders = {
         const b2c = (order.client_name || '').toUpperCase() === 'B2C'
             ? this.renderBadge('B2C', 'badge-blue')
             : '';
+        const purpose = normalizeProductionPurpose(order.production_purpose);
+        const purposeBadge = isNonCommercialProductionPurpose(purpose)
+            ? this.renderBadge(purpose === 'rework' ? 'Переделка брака' : 'Сток / образец', 'badge-purple')
+            : '';
 
         return `<div>
             <a href="#order-detail/${order.id}" class="orders-order-link" onclick="App.navigate('order-detail', true, ${order.id}); return false;" title="Открыть карточку заказа">${this.escHtml(order.order_name || 'Без названия')}</a>
             <div class="orders-order-meta">
                 <span>${client}</span>
                 ${b2c}
+                ${purposeBadge}
             </div>
         </div>`;
     },

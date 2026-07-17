@@ -57,16 +57,22 @@ function quarterTargetHours(settings, now) {
 }
 
 // Чистый расчёт сегментов бара и темпа. Все входы — часы + даты.
-function computeQuarterLoad({ planHours, soldHours, doneHours, now, from, to }) {
+function computeQuarterLoad({ planHours, soldHours, nonCommercialHours = 0, doneHours, now, from, to }) {
     const plan = Math.max(0, roLoadNum(planHours));
     const sold = Math.max(0, roLoadNum(soldHours));
+    const nonCommercial = Math.max(0, roLoadNum(nonCommercialHours));
     const done = Math.max(0, roLoadNum(doneHours));
+    const booked = sold + nonCommercial;
     const gap = Math.max(0, plan - sold);
     const over = Math.max(0, sold - plan);
-    const stock = Math.max(0, done - sold);
+    const capacityOver = Math.max(0, booked - plan);
+    const freeCapacity = Math.max(0, plan - booked);
+    const stock = Math.max(0, done - booked);
     const clampPct = h => plan > 0 ? Math.min(100, Math.round(h / plan * 100)) : 0;
     const soldPct = clampPct(sold);
-    const donePct = clampPct(Math.min(done, sold, plan));
+    const nonCommercialPct = clampPct(nonCommercial);
+    const bookedPct = clampPct(booked);
+    const donePct = clampPct(Math.min(done, booked, plan));
     const gapPct = Math.max(0, 100 - soldPct);
     const nowT = (now instanceof Date ? now : new Date(now)).getTime();
     const fromT = (from instanceof Date ? from : new Date(from)).getTime();
@@ -78,7 +84,13 @@ function computeQuarterLoad({ planHours, soldHours, doneHours, now, from, to }) 
     let status = 'on_track';
     if (sold - expected > tol) status = 'ahead';
     else if (sold - expected < -tol) status = 'behind';
-    return { plan, sold, done, gap, over, stock, soldPct, donePct, gapPct, elapsedRatio, status };
+    const roundHours = value => Math.round(value * 100) / 100;
+    return {
+        plan: roundHours(plan), sold: roundHours(sold), nonCommercial: roundHours(nonCommercial), booked: roundHours(booked), done: roundHours(done),
+        gap: roundHours(gap), over: roundHours(over), capacityOver: roundHours(capacityOver),
+        freeCapacity: roundHours(freeCapacity), stock: roundHours(stock), soldPct, nonCommercialPct, bookedPct, donePct,
+        gapPct, elapsedRatio, status,
+    };
 }
 
 // --- данные из приложения ---
@@ -86,9 +98,26 @@ function computeQuarterLoad({ planHours, soldHours, doneHours, now, from, to }) 
 // Какие заказы считаем «проданными» (загружают производство). См. спеку.
 function _isSoldOrder(o) {
     if (!o || o.deleted_at) return false;
+    if (_isNonCommercialOrder(o)) return false;
     if (o.status === 'cancelled') return false;
     if (o.status === 'draft' && (!o.payment_status || o.payment_status === 'not_sent')) return false;
     return true;
+}
+
+function _orderProductionPurpose(o) {
+    return typeof normalizeProductionPurpose === 'function'
+        ? normalizeProductionPurpose(o?.production_purpose)
+        : (['rework', 'stock_sample'].includes(String(o?.production_purpose || '')) ? String(o.production_purpose) : 'commercial');
+}
+
+function _isNonCommercialOrder(o) {
+    const purpose = _orderProductionPurpose(o);
+    return purpose === 'rework' || purpose === 'stock_sample';
+}
+
+function _isScheduledNonCommercialOrder(o) {
+    if (!o || o.deleted_at || o.status === 'cancelled') return false;
+    return _isNonCommercialOrder(o);
 }
 
 // Парсит дату КАК ЛОКАЛЬНУЮ (согласованно с getQuarterBounds), чтобы записи
@@ -142,21 +171,40 @@ function collectQuarterLoad(orders, entries, settings, now) {
         doneByOrder[key] = (doneByOrder[key] || 0) + roLoadNum(e.hours);
     });
 
-    // Продано: заказы квартала, прошедшие фильтр
+    // Продажи и некоммерческие работы считаются отдельно. Переделка/сток
+    // занимают цех, но не сокращают объём, который ещё нужно продать.
     let soldHours = 0;
+    let nonCommercialHours = 0;
+    let nonCommercialLoss = 0;
     const soldOrders = [];
+    const nonCommercialOrders = [];
     (orders || []).forEach(o => {
-        if (!_isSoldOrder(o)) return;
         const d = _parseLocalDate(_orderProdDate(o));
         if (!d || d < from || d > to) return;
         const plan = roLoadNum(o.total_hours_plan);
+        if (_isScheduledNonCommercialOrder(o)) {
+            const loss = Math.max(0, roLoadNum(o.total_cost_plan, Math.max(0, -roLoadNum(o.total_margin_plan))));
+            nonCommercialHours += plan;
+            nonCommercialLoss += loss;
+            nonCommercialOrders.push({
+                id: o.id,
+                name: o.order_name || ('заказ #' + o.id),
+                plan,
+                done: doneByOrder[String(o.id)] || 0,
+                remain: Math.max(0, plan - (doneByOrder[String(o.id)] || 0)),
+                purpose: _orderProductionPurpose(o),
+                loss,
+            });
+            return;
+        }
+        if (!_isSoldOrder(o)) return;
         soldHours += plan;
         const done = doneByOrder[String(o.id)] || 0;
         soldOrders.push({ id: o.id, name: o.order_name || ('заказ #' + o.id), plan, done, remain: Math.max(0, plan - done) });
     });
 
     const doneHours = doneHoursForRange(entries, from, to);
-    const load = computeQuarterLoad({ planHours, soldHours, doneHours, now, from, to });
+    const load = computeQuarterLoad({ planHours, soldHours, nonCommercialHours, doneHours, now, from, to });
 
     const doneRows = Object.entries(doneByOrder)
         .map(([key, hours]) => ({
@@ -170,7 +218,16 @@ function collectQuarterLoad(orders, entries, settings, now) {
         .filter(r => r.hours > 0.05)
         .sort((a, b) => b.hours - a.hours);
 
-    return { load, label, breakdown: { doneRows, remainRows, soldOrders } };
+    const nonCommercialRows = nonCommercialOrders
+        .map(o => ({ name: o.name, hours: o.remain, purpose: o.purpose, loss: o.loss }))
+        .filter(r => r.hours > 0.05)
+        .sort((a, b) => b.hours - a.hours);
+
+    return {
+        load,
+        label,
+        breakdown: { doneRows, remainRows, nonCommercialRows, soldOrders, nonCommercialOrders, nonCommercialLoss: Math.round(nonCommercialLoss * 100) / 100 },
+    };
 }
 
 // --- рендер ---
@@ -202,6 +259,7 @@ function _ensureProductionLoadStyles() {
 .pl-seg.pl-done{left:0;background:#2da44e;}
 .pl-seg.pl-sold{background:#388bfd;}
 .pl-track .pl-seg.pl-sold{left:var(--pl-sold-left,0);}
+.pl-seg.pl-noncommercial{background:#6e3cbc;}
 .pl-month-boundary{position:absolute;top:-3px;bottom:-3px;width:1px;background:#24292f;opacity:.92;z-index:3;pointer-events:none;}
 .pl-now{position:absolute;top:-4px;bottom:-4px;width:2px;background:var(--text-primary,#24292f);z-index:4;}
 .pl-tip{position:absolute;z-index:5;min-width:220px;max-width:320px;background:var(--pl-tip-bg,#fff);border:1px solid rgba(0,0,0,.12);border-radius:8px;box-shadow:0 4px 14px rgba(0,0,0,.12);padding:8px 10px;font-size:12px;line-height:1.5;color:var(--text-primary,#24292f);pointer-events:none;display:none;}
@@ -213,6 +271,7 @@ function _ensureProductionLoadStyles() {
 .pl-dot{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px;}
 .pl-dot.pl-done{background:#2da44e;}
 .pl-dot.pl-sold{background:#388bfd;}
+.pl-dot.pl-noncommercial{background:#6e3cbc;}
 .pl-dot.pl-gap{background:#eaeef2;border:1px solid rgba(0,0,0,.1);}
 .pl-goal{margin-left:auto;color:#bc4c00;}
 @media (prefers-color-scheme:dark){.pl-track{background:#30363d;border-color:rgba(255,255,255,.08);}.pl-dot.pl-gap{background:#30363d;}.pl-pace.pl-neutral{background:#21262d;color:#8b949e;}.pl-tip{--pl-tip-bg:#1c2128;border-color:rgba(255,255,255,.14);}}
@@ -243,8 +302,10 @@ function renderProductionLoadBar(container, load, label, breakdown) {
     const paceText = load.status === 'ahead' ? 'впереди темпа'
         : load.status === 'behind' ? 'отстаём от темпа' : 'идём в темпе';
     const paceCls = load.status === 'ahead' ? 'pl-ok' : load.status === 'behind' ? 'pl-warn' : 'pl-neutral';
-    const overNote = load.over > 0 ? ` · +${_hrsLoad(load.over)} ч сверх плана` : '';
+    const overNote = load.capacityOver > 0 ? ` · +${_hrsLoad(load.capacityOver)} ч сверх мощности` : '';
     const soldWidth = Math.max(0, load.soldPct - load.donePct);
+    const nonCommercialWidth = Math.max(0, load.bookedPct - load.soldPct);
+    const nonCommercialLoss = Math.max(0, roLoadNum(breakdown?.nonCommercialLoss));
     const nowPct = Math.round(load.elapsedRatio * 100);
     const months = getQuarterMonthMarkers(new Date());
     const monthLabels = months.map((month, index) => `<span class="pl-month-label pl-month-${month.state}${index === 0 ? ' pl-month-first' : ''}" style="left:${month.startPercent}%">${month.label}</span>`).join('');
@@ -261,6 +322,7 @@ function renderProductionLoadBar(container, load, label, breakdown) {
         <div class="pl-track">
           <div class="pl-seg pl-done" style="width:0%"></div>
           <div class="pl-seg pl-sold" style="left:0%;width:0%"></div>
+          <div class="pl-seg pl-noncommercial" style="left:0%;width:0%"></div>
           ${monthBoundaries}
           <div class="pl-now" style="left:${nowPct}%" title="Сегодня. Прошло ${nowPct}% квартала."></div>
         </div>
@@ -269,7 +331,9 @@ function renderProductionLoadBar(container, load, label, breakdown) {
       <div class="pl-legend">
         <span><i class="pl-dot pl-done"></i>сделано ${_hrsLoad(load.done)} ч</span>
         <span><i class="pl-dot pl-sold"></i>ещё делать ${_hrsLoad(Math.max(0, load.sold - load.done))} ч</span>
-        <span><i class="pl-dot pl-gap"></i>недобор ${_hrsLoad(load.gap)} ч${overNote}</span>
+        ${load.nonCommercial > 0 ? `<span><i class="pl-dot pl-noncommercial"></i>некоммерческие ${_hrsLoad(load.nonCommercial)} ч</span>` : ''}
+        ${nonCommercialLoss > 0 ? `<span style="color:#8b1e1e;font-weight:600;">некоммерческие расходы −${_hrsLoad(nonCommercialLoss)} ₽</span>` : ''}
+        <span><i class="pl-dot pl-gap"></i>свободно ${_hrsLoad(load.freeCapacity)} ч${overNote}</span>
         <span class="pl-goal">до плана — продать ещё ${_hrsLoad(load.gap)} ч</span>
       </div>
     </div>`;
@@ -277,10 +341,12 @@ function renderProductionLoadBar(container, load, label, breakdown) {
     // Анимация появления: сегменты растут от нуля до реальных ширин.
     const doneEl = container.querySelector('.pl-seg.pl-done');
     const soldEl = container.querySelector('.pl-seg.pl-sold');
+    const nonCommercialEl = container.querySelector('.pl-seg.pl-noncommercial');
     const raf = (typeof requestAnimationFrame === 'function') ? requestAnimationFrame : (fn => fn());
     raf(() => raf(() => {
         if (doneEl) doneEl.style.width = load.donePct + '%';
         if (soldEl) { soldEl.style.left = load.donePct + '%'; soldEl.style.width = soldWidth + '%'; }
+        if (nonCommercialEl) { nonCommercialEl.style.left = load.soldPct + '%'; nonCommercialEl.style.width = nonCommercialWidth + '%'; }
     }));
 
     // Ховер-тултипы: какие заказы сколько часов занимают.
@@ -288,11 +354,12 @@ function renderProductionLoadBar(container, load, label, breakdown) {
     const track = container.querySelector('.pl-track');
     const tip = container.querySelector('.pl-tip');
     if (!wrap || !track || !tip) return;
-    const bd = breakdown || { doneRows: [], remainRows: [] };
+    const bd = breakdown || { doneRows: [], remainRows: [], nonCommercialRows: [] };
     const zones = [
         { toPct: load.donePct, html: () => _tipHtml(`Сделано · ${_hrsLoad(load.done)} ч`, bd.doneRows || [], 8) },
         { toPct: load.soldPct, html: () => _tipHtml(`Ещё делать · ${_hrsLoad(Math.max(0, load.sold - load.done))} ч`, bd.remainRows || [], 8) },
-        { toPct: 101, html: () => `<b>Недобор · ${_hrsLoad(load.gap)} ч</b><div class="muted">столько часов ещё нужно продать до плана квартала${overNote}</div>` },
+        { toPct: load.bookedPct, html: () => _tipHtml(`Некоммерческие работы · ${_hrsLoad(load.nonCommercial)} ч`, bd.nonCommercialRows || [], 8) + (bd.nonCommercialLoss > 0 ? `<div class="muted" style="margin-top:4px">расходы: ${_hrsLoad(bd.nonCommercialLoss)} ₽</div>` : '') },
+        { toPct: 101, html: () => `<b>Свободная мощность · ${_hrsLoad(load.freeCapacity)} ч</b><div class="muted">для плана продаж всё ещё нужно продать ${_hrsLoad(load.gap)} ч${overNote}</div>` },
     ];
     track.addEventListener('mousemove', (ev) => {
         const r = track.getBoundingClientRect();

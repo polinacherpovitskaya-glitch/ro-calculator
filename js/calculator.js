@@ -1573,6 +1573,67 @@ function calculateOrderSummary(items, hardwareItems, packagingItems, extraCosts,
     };
 }
 
+// Тип работы хранится в calculator_data, поэтому старые заказы без поля
+// безопасно остаются обычными клиентскими. Некоммерческие заказы не получают
+// «виртуальную выручку» из случайно оставшихся цен: это занятые мощности и
+// реальные внутренние расходы, а не продажа.
+const PRODUCTION_PURPOSES = {
+    commercial: { label: 'Клиентский заказ', shortLabel: 'Клиентский' },
+    rework: { label: 'Переделка брака', shortLabel: 'Переделка брака' },
+    stock_sample: { label: 'Сток / внутренний образец', shortLabel: 'Сток / образец' },
+};
+
+function normalizeProductionPurpose(value) {
+    const key = String(value || '').trim().toLowerCase();
+    return Object.prototype.hasOwnProperty.call(PRODUCTION_PURPOSES, key) ? key : 'commercial';
+}
+
+function isNonCommercialProductionPurpose(value) {
+    return normalizeProductionPurpose(value) !== 'commercial';
+}
+
+function getProductionPurposeMeta(value) {
+    return PRODUCTION_PURPOSES[normalizeProductionPurpose(value)];
+}
+
+function calculateNonCommercialWorkCost(items, hardwareItems, packagingItems, pendantItems = []) {
+    let total = 0;
+    (items || []).forEach(item => {
+        total += Number(item?.result?.costTotal || 0) * Number(item?.quantity || 0);
+    });
+    (hardwareItems || []).forEach(item => {
+        total += Number(item?.result?.costPerUnit || 0) * Number(item?.qty || 0);
+    });
+    (packagingItems || []).forEach(item => {
+        total += Number(item?.result?.costPerUnit || 0) * Number(item?.qty || 0);
+    });
+    (pendantItems || []).forEach(item => {
+        total += Number(item?.result?.costPerUnit || 0) * Number(item?.quantity || 0);
+    });
+    return round2(Math.max(0, total));
+}
+
+function applyProductionPurposeToOrderSummary(summary, purpose, items, hardwareItems, packagingItems, pendantItems = []) {
+    const normalizedPurpose = normalizeProductionPurpose(purpose);
+    if (!isNonCommercialProductionPurpose(normalizedPurpose)) {
+        return { ...summary, productionPurpose: normalizedPurpose, nonCommercialLoss: 0 };
+    }
+    const loss = calculateNonCommercialWorkCost(items, hardwareItems, packagingItems, pendantItems);
+    return {
+        ...summary,
+        productionPurpose: normalizedPurpose,
+        grossRevenue: 0,
+        discountAmount: 0,
+        discountPercent: 0,
+        totalRevenue: 0,
+        vatOnRevenue: 0,
+        totalWithVat: 0,
+        totalEarned: round2(-loss),
+        marginPercent: 0,
+        nonCommercialLoss: loss,
+    };
+}
+
 function parseOrderCalcJson(value, fallback) {
     if (value === null || value === undefined || value === '') return fallback;
     if (Array.isArray(fallback)) {
@@ -1753,7 +1814,15 @@ function getOrderLiveCalculatorSnapshot(order = {}, orderItems = [], params = nu
         value: order?.discount_value,
     };
     const load = calculateProductionLoad(products, hardwareItems, packagingItems, runtimeParams, pendantItems);
-    const summary = calculateOrderSummary(products, hardwareItems, packagingItems, extraCosts, runtimeParams, pendantItems, orderAdjustments);
+    const rawSummary = calculateOrderSummary(products, hardwareItems, packagingItems, extraCosts, runtimeParams, pendantItems, orderAdjustments);
+    const summary = applyProductionPurposeToOrderSummary(
+        rawSummary,
+        order?.production_purpose,
+        products,
+        hardwareItems,
+        packagingItems,
+        pendantItems,
+    );
 
     return {
         products,
@@ -1766,6 +1835,8 @@ function getOrderLiveCalculatorSnapshot(order = {}, orderItems = [], params = nu
         revenue: round2(summary.totalRevenue || 0),
         marginPercent: round2(summary.marginPercent || 0),
         hours: round2(load.totalHours || 0),
+        productionPurpose: summary.productionPurpose,
+        nonCommercialLoss: round2(summary.nonCommercialLoss || 0),
     };
 }
 

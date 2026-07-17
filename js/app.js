@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v396';
+const APP_VERSION = 'v397';
 
 const App = {
     currentPage: 'orders',
@@ -1441,6 +1441,7 @@ const Calculator = {
     extraCosts: [],     // Extra costs [{name, amount}]
     discountMode: 'none',
     discountValue: 0,
+    productionPurpose: 'commercial',
     _autosaveTimer: null,
     _isDirty: false,
     _autosaving: false,
@@ -1538,6 +1539,9 @@ const Calculator = {
         this.pendants = [];
         this.discountMode = 'none';
         this.discountValue = 0;
+        this.productionPurpose = 'commercial';
+        const purposeEl = document.getElementById('calc-production-purpose');
+        if (purposeEl) purposeEl.value = this.productionPurpose;
         document.getElementById('calc-items-container').innerHTML = '';
         document.getElementById('calc-hardware-list').innerHTML = '';
         document.getElementById('calc-packaging-list').innerHTML = '';
@@ -1565,6 +1569,7 @@ const Calculator = {
             order_name: getValue('calc-order-name'),
             client_name: getValue('calc-client-name'),
             manager_name: getValue('calc-manager-name'),
+            production_purpose: this.getProductionPurpose(),
             deadline_start: getValue('calc-deadline-start'),
             deadline_end: getValue('calc-deadline-end'),
             notes: getValue('calc-notes'),
@@ -1583,7 +1588,9 @@ const Calculator = {
 
     _hasAnyDraftData(snapshot = null) {
         const orderFields = snapshot || this._getOrderFormSnapshot();
-        return Object.values(orderFields).some(value => String(value || '').trim())
+        const meaningfulFields = { ...orderFields };
+        delete meaningfulFields.production_purpose;
+        return Object.values(meaningfulFields).some(value => String(value || '').trim())
             || this.items.some(i => this._isMeaningfulProductItem(i))
             || this.hardwareItems.some(hw => hw._from_template || hw.name || hw.warehouse_item_id || hw.china_item_id || (parseFloat(hw.qty) || 0) > 0)
             || this.packagingItems.some(pkg => pkg.name || pkg.warehouse_item_id || pkg.china_item_id || (parseFloat(pkg.qty) || 0) > 0)
@@ -1646,6 +1653,7 @@ const Calculator = {
             'calc-order-name': fields.order_name,
             'calc-client-name': fields.client_name,
             'calc-manager-name': fields.manager_name,
+            'calc-production-purpose': fields.production_purpose,
             'calc-deadline-start': fields.deadline_start,
             'calc-deadline-end': fields.deadline_end,
             'calc-notes': fields.notes,
@@ -1671,6 +1679,9 @@ const Calculator = {
         this.pendants = Array.isArray(payload.pendants) ? payload.pendants : [];
         this.discountMode = (payload.discount_mode === 'amount' || payload.discount_mode === 'percent') ? payload.discount_mode : 'none';
         this.discountValue = this._parseDiscountValue(payload.discount_value || 0);
+        this.productionPurpose = normalizeProductionPurpose(fields.production_purpose);
+        const restoredPurposeEl = document.getElementById('calc-production-purpose');
+        if (restoredPurposeEl) restoredPurposeEl.value = this.productionPurpose;
         this._currentOrderStatus = payload.current_order_status || 'draft';
 
         const restoredOrderId = Number(payload.editing_order_id || 0) || null;
@@ -1726,6 +1737,39 @@ const Calculator = {
         return normalizeOrderDiscount(this.discountMode, this.discountValue);
     },
 
+    getProductionPurpose() {
+        const el = document.getElementById('calc-production-purpose');
+        return normalizeProductionPurpose(el?.value || this.productionPurpose);
+    },
+
+    setProductionPurpose(value) {
+        this.productionPurpose = normalizeProductionPurpose(value);
+        const el = document.getElementById('calc-production-purpose');
+        if (el) el.value = this.productionPurpose;
+        this.recalculate();
+        this.scheduleAutosave();
+    },
+
+    getPurposeAwareOrderSummary(params = App.params || {}, orderAdjustments = this.getOrderAdjustments()) {
+        const rawSummary = calculateOrderSummary(
+            this.items,
+            this.hardwareItems,
+            this.packagingItems,
+            this.extraCosts,
+            params,
+            this.pendants,
+            orderAdjustments,
+        );
+        return applyProductionPurposeToOrderSummary(
+            rawSummary,
+            this.getProductionPurpose(),
+            this.items,
+            this.hardwareItems,
+            this.packagingItems,
+            this.pendants,
+        );
+    },
+
     onDiscountModeChange(mode) {
         this.discountMode = (mode === 'amount' || mode === 'percent') ? mode : 'none';
         this._syncDiscountUi();
@@ -1744,11 +1788,14 @@ const Calculator = {
         const modeEl = document.getElementById('calc-discount-mode');
         const valueEl = document.getElementById('calc-discount-value');
         const summaryEl = document.getElementById('calc-discount-summary');
+        const panelEl = document.getElementById('calc-discount-panel');
         const adjustments = this.getOrderAdjustments();
+        const isNonCommercial = isNonCommercialProductionPurpose(this.getProductionPurpose());
 
         if (modeEl) modeEl.value = adjustments.mode;
+        if (panelEl) panelEl.style.display = isNonCommercial ? 'none' : 'flex';
         if (valueEl) {
-            valueEl.disabled = adjustments.mode === 'none';
+            valueEl.disabled = isNonCommercial || adjustments.mode === 'none';
             valueEl.placeholder = adjustments.mode === 'percent' ? '10' : '0';
             valueEl.value = adjustments.mode === 'none'
                 ? ''
@@ -1756,6 +1803,10 @@ const Calculator = {
         }
 
         if (!summaryEl) return;
+        if (isNonCommercial) {
+            summaryEl.innerHTML = 'Для внутренних работ скидка и выручка не применяются';
+            return;
+        }
         if (adjustments.mode === 'none' || !(summary && summary.discountAmount > 0)) {
             summaryEl.innerHTML = 'Без скидки';
             return;
@@ -4470,6 +4521,9 @@ const Calculator = {
             this.setLoadBar('calc-load-plastic-bar', load.plasticLoadPercent);
             this.setLoadBar('calc-load-packaging-bar', load.packagingLoadPercent);
 
+            const summary = this.getPurposeAwareOrderSummary(params, orderAdjustments);
+            const isNonCommercial = isNonCommercialProductionPurpose(summary.productionPurpose);
+
             // FinDirector
             const fin = calculateFinDirectorData(this.items, this.hardwareItems, this.packagingItems, params, this.pendants, orderAdjustments);
             const finSalaryRow = document.getElementById('fin-salary')?.closest('.cost-row');
@@ -4491,20 +4545,22 @@ const Calculator = {
             this.setText('fin-plastic', formatRub(fin.plastic));
             this.setText('fin-molds', formatRub(fin.molds));
             this.setText('fin-delivery', formatRub(fin.delivery));
-            this.setText('fin-taxes', formatRub(fin.taxes));
-            this.setText('fin-commercial', formatRub(fin.commercial));
-            this.setText('fin-charity', formatRub(fin.charity));
-            this.setText('fin-total-costs', formatRub(fin.totalCosts));
-            this.setText('fin-revenue', formatRub(fin.revenue));
+            this.setText('fin-taxes', formatRub(isNonCommercial ? 0 : fin.taxes));
+            this.setText('fin-commercial', formatRub(isNonCommercial ? 0 : fin.commercial));
+            this.setText('fin-charity', formatRub(isNonCommercial ? 0 : fin.charity));
+            this.setText('fin-total-costs', formatRub(isNonCommercial ? summary.nonCommercialLoss : fin.totalCosts));
+            this.setText('fin-revenue', formatRub(isNonCommercial ? 0 : fin.revenue));
             this.setText('fin-discount', '−' + formatRub(fin.discountAmount || 0));
-            if (finDiscountRow) finDiscountRow.style.display = (fin.discountAmount || 0) > 0 ? '' : 'none';
+            if (finDiscountRow) finDiscountRow.style.display = !isNonCommercial && (fin.discountAmount || 0) > 0 ? '' : 'none';
 
             // Summary footer
-            const summary = calculateOrderSummary(this.items, this.hardwareItems, this.packagingItems, this.extraCosts, params, this.pendants, orderAdjustments);
             this.setText('sum-revenue', formatRub(summary.totalRevenue));
-            this.setText('sum-earned', formatRub(summary.totalEarned));
-            this.setText('sum-margin', formatPercent(summary.marginPercent));
+            this.setText('sum-earned', isNonCommercial ? '−' + formatRub(summary.nonCommercialLoss) : formatRub(summary.totalEarned));
+            this.setText('sum-margin', isNonCommercial ? '—' : formatPercent(summary.marginPercent));
             this.setText('sum-hours', formatHours(load.totalHours));
+            this.setText('sum-revenue-label', isNonCommercial ? 'Выручка' : 'Выручка без НДС');
+            this.setText('sum-earned-label', isNonCommercial ? 'Некоммерческие расходы' : 'Заработок');
+            this.setText('sum-margin-label', isNonCommercial ? 'Маржа' : 'Маржа');
             this._syncDiscountUi(summary);
 
             // Re-render pendant cards with updated results
@@ -4970,6 +5026,18 @@ const Calculator = {
      * Shows: item, printing, hw, pkg lines with qty × price + НДС 5%
      */
     renderOrderInvoice(params, pricingHtml, contentEl) {
+        const purpose = this.getProductionPurpose();
+        if (isNonCommercialProductionPurpose(purpose)) {
+            const summary = this.getPurposeAwareOrderSummary(params);
+            const meta = getProductionPurposeMeta(purpose);
+            contentEl.innerHTML = `<div class="pricing-grid-scroll">${pricingHtml}</div>
+                <div style="margin-top:16px;padding:12px 14px;border:1px solid #f1b4b4;border-radius:8px;background:#fff4f4;color:#8b1e1e;font-size:13px;line-height:1.45;">
+                    <strong>${App.escHtml(meta.label)}</strong> — не продажа: выручка и скидка не учитываются.
+                    Реальные некоммерческие расходы по составу работ: <strong>−${formatRub(summary.nonCommercialLoss)}</strong>.
+                    Часы остаются в загрузке производства отдельным сегментом.
+                </div>`;
+            return;
+        }
         let invoiceRows = [];
 
         this.items.forEach((item, i) => {
@@ -5305,7 +5373,7 @@ const Calculator = {
 
             const load = calculateProductionLoad(this.items, this.hardwareItems, this.packagingItems, App.params, this.pendants);
             const orderAdjustments = this.getOrderAdjustments();
-            const summary = calculateOrderSummary(this.items, this.hardwareItems, this.packagingItems, this.extraCosts, App.params || {}, this.pendants, orderAdjustments);
+            const summary = this.getPurposeAwareOrderSummary(App.params || {}, orderAdjustments);
             const hadEditingOrderId = !!this._getCurrentEditingOrderId();
             const orderIdForSave = this._ensureEditingOrderId();
             this._saveLocalDraftSnapshot('autosave-pending');
@@ -5332,6 +5400,7 @@ const Calculator = {
                 plastic_type: 'PP',
                 print_type: null,
                 status: 'draft', // autosave always writes 'draft' for new; existing orders get their status preserved below
+                production_purpose: this.getProductionPurpose(),
                 discount_mode: orderAdjustments.mode,
                 discount_value: orderAdjustments.value,
                 gross_revenue_plan: summary.grossRevenue,
@@ -5549,7 +5618,7 @@ const Calculator = {
 
         const load = calculateProductionLoad(this.items, this.hardwareItems, this.packagingItems, App.params, this.pendants);
         const orderAdjustments = this.getOrderAdjustments();
-        const summary = calculateOrderSummary(this.items, this.hardwareItems, this.packagingItems, this.extraCosts, App.params || {}, this.pendants, orderAdjustments);
+        const summary = this.getPurposeAwareOrderSummary(App.params || {}, orderAdjustments);
         const isEdit = !!this._getCurrentEditingOrderId();
         const orderIdForSave = this._ensureEditingOrderId();
         this._saveLocalDraftSnapshot('manual-save-pending');
@@ -5576,6 +5645,7 @@ const Calculator = {
             plastic_type: 'PP', // always PP
             print_type: null, // determined at printing level
             status: 'draft',
+            production_purpose: this.getProductionPurpose(),
             discount_mode: orderAdjustments.mode,
             discount_value: orderAdjustments.value,
             gross_revenue_plan: summary.grossRevenue,
@@ -5939,6 +6009,9 @@ const Calculator = {
         document.getElementById('calc-client-bank-name').value = order.client_bank_name || '';
         document.getElementById('calc-client-bank-account').value = order.client_bank_account || '';
         document.getElementById('calc-client-bank-bik').value = order.client_bank_bik || '';
+        this.productionPurpose = normalizeProductionPurpose(order.production_purpose);
+        const orderPurposeEl = document.getElementById('calc-production-purpose');
+        if (orderPurposeEl) orderPurposeEl.value = this.productionPurpose;
         this.discountMode = (order.discount_mode === 'amount' || order.discount_mode === 'percent') ? order.discount_mode : 'none';
         this.discountValue = this._parseDiscountValue(order.discount_value || 0);
         this._syncDiscountUi();
