@@ -356,18 +356,20 @@ const Orders = {
             return stored;
         }
         try {
-            let safeItems = items || [];
-            const hasHydratedItems = safeItems.some(item => item && item.item_type);
-            if (!hasHydratedItems) {
-                // Живой пересчёт ВЕЗДЕ (решение Полины 17.07): если позиции ещё
-                // не загружены bundle'ом, берём items_snapshot заказа — он
-                // пишется при каждом сохранении. Список и доска тогда считают
-                // маржу по сегодняшним параметрам, как карточка, а не по
-                // зафиксированной при продаже.
-                const snap = this._parseClonePayload(order?.items_snapshot);
-                if (Array.isArray(snap) && snap.length) {
-                    safeItems = snap;
-                }
+            let safeItems = Array.isArray(items) ? items.filter(Boolean) : [];
+            const hasCompleteTypeCoverage = safeItems.length > 0
+                && safeItems.every(item => String(item?.item_type || '').trim());
+            if (!hasCompleteTypeCoverage) {
+                // On legacy TEXT item_data PostgREST returns physical columns,
+                // but every projected calculation field is null. Running the
+                // engine on that partial payload treats costs as zero. Only a
+                // complete historical snapshot is a safe fallback; otherwise
+                // keep the stored sale-time figures until JSONB is available.
+                const snapshotItems = this._restoreCloneItemsFromOrderPayload(order);
+                const snapshotIsComplete = snapshotItems.length > 0
+                    && snapshotItems.every(item => String(item?.item_type || '').trim());
+                if (!snapshotIsComplete) return stored;
+                safeItems = snapshotItems;
             }
             if (safeItems.length === 0) {
                 return stored;

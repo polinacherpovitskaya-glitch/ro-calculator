@@ -349,15 +349,15 @@ async function _loadSameOriginBootstrap(keys = [], options = {}) {
 function _mergeOrderRows(rawRows) {
     return (rawRows || []).map(order => {
         if (order && order.calculator_data) {
-            try {
-                const extras = JSON.parse(order.calculator_data);
+            const extras = _parseJsonObjectSnapshot(order.calculator_data);
+            if (Object.keys(extras).length > 0) {
                 const merged = { ...extras, ...order };
                 if (merged.total_revenue !== undefined) merged.total_revenue_plan = merged.total_revenue;
                 if (merged.total_cost !== undefined) merged.total_cost_plan = merged.total_cost;
                 if (merged.total_margin !== undefined) merged.total_margin_plan = merged.total_margin;
                 if (merged.margin_percent !== undefined) merged.margin_percent_plan = merged.margin_percent;
                 return merged;
-            } catch (e) { /* ignore */ }
+            }
         }
         return order;
     });
@@ -388,20 +388,24 @@ function _preserveNewerLocalOrders(incomingRows = []) {
     return Array.from(byId.values());
 }
 
-function _parseOrderJsonSnapshot(value) {
+function _parseJsonObjectSnapshot(value) {
     if (!value) return {};
     if (typeof value === 'object' && !Array.isArray(value)) return { ...value };
     if (typeof value !== 'string') return {};
-    try {
-        const parsed = JSON.parse(value);
-        return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
-    } catch (e) {
-        return {};
+    let parsed = value;
+    // Accept historical double encoding, normal TEXT, and native JSONB.
+    for (let depth = 0; depth < 2 && typeof parsed === 'string'; depth += 1) {
+        try {
+            parsed = JSON.parse(parsed);
+        } catch (e) {
+            return {};
+        }
     }
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? { ...parsed } : {};
 }
 
 function _syncOrderStatusSnapshot(calculatorData, status, updatedAt) {
-    const snapshot = _parseOrderJsonSnapshot(calculatorData);
+    const snapshot = _parseJsonObjectSnapshot(calculatorData);
     snapshot.status = status || 'draft';
     if (updatedAt) snapshot.updated_at = updatedAt;
     return JSON.stringify(snapshot);
@@ -1866,6 +1870,8 @@ const ORDER_LIST_SELECT = [
     'manager_name',
     'owner_name',
     'notes',
+    // Compact order snapshot needed for discounts and other order-level inputs.
+    'calculator_data',
     'created_at',
     'updated_at',
     'deleted_at',
@@ -1890,11 +1896,9 @@ function _filterForDB(obj, knownCols, jsonCol, fieldMap) {
         }
     }
 
-    // Store full data as JSON in the designated column.
-    // item_data пишем ОБЪЕКТОМ: jsonb-строка ломала PostgREST-выборку
-    // `item_data->field` (двойное кодирование, как было у mold_data);
-    // его читатели понимают оба формата. calculator_data оставляем строкой —
-    // у него есть читатели с голым JSON.parse (js/supabase.js:353,2723).
+    // item_data is the first snapshot prepared for native JSONB. calculator_data
+    // remains a string until its own documented schema migration; readers are
+    // already tolerant to either representation.
     if (jsonCol === 'item_data') {
         filtered[jsonCol] = fullData;
     } else if (jsonCol) {
@@ -2085,8 +2089,8 @@ function _getOrderItemFreshness(item) {
 
 function _hydrateOrderItemRow(item) {
     if (item && item.item_data) {
-        try {
-            const extras = typeof item.item_data === 'string' ? JSON.parse(item.item_data) : item.item_data;
+        const extras = _parseJsonObjectSnapshot(item.item_data);
+        if (Object.keys(extras).length > 0) {
             const hydrated = { ...extras, ...item };
             if (
                 (item.template_id === null || item.template_id === undefined || item.template_id === '')
@@ -2098,7 +2102,7 @@ function _hydrateOrderItemRow(item) {
                 hydrated.template_id = extras.template_id;
             }
             return hydrated;
-        } catch (e) { /* ignore malformed item_data */ }
+        }
     }
     return item;
 }
@@ -2719,19 +2723,14 @@ async function loadOrder(orderId) {
                 return await loadLocalOrder({ repairDuplicates: true });
             }
 
-            // Restore full order data from calculator_data JSON
-            let fullOrder = { ...order };
-            if (order.calculator_data) {
-                try {
-                    const extras = JSON.parse(order.calculator_data);
-                    fullOrder = { ...extras, ...order }; // DB columns take priority
-                    // Reverse-map schema fields back to code fields
-                    if (fullOrder.total_revenue !== undefined) fullOrder.total_revenue_plan = fullOrder.total_revenue;
-                    if (fullOrder.total_cost !== undefined) fullOrder.total_cost_plan = fullOrder.total_cost;
-                    if (fullOrder.total_margin !== undefined) fullOrder.total_margin_plan = fullOrder.total_margin;
-                    if (fullOrder.margin_percent !== undefined) fullOrder.margin_percent_plan = fullOrder.margin_percent;
-                } catch (e) { /* ignore parse errors */ }
-            }
+            // Restore full order data from legacy TEXT or native JSONB.
+            const extras = _parseJsonObjectSnapshot(order.calculator_data);
+            const fullOrder = { ...extras, ...order }; // DB columns take priority
+            // Reverse-map schema fields back to code fields
+            if (fullOrder.total_revenue !== undefined) fullOrder.total_revenue_plan = fullOrder.total_revenue;
+            if (fullOrder.total_cost !== undefined) fullOrder.total_cost_plan = fullOrder.total_cost;
+            if (fullOrder.total_margin !== undefined) fullOrder.total_margin_plan = fullOrder.total_margin;
+            if (fullOrder.margin_percent !== undefined) fullOrder.margin_percent_plan = fullOrder.margin_percent;
 
             const { data: rawItems, error: e2 } = await _withRemoteTimeout('load', 'load order items', () => supabaseClient
                 .from('order_items').select('*').eq('order_id', orderId).order('item_number'));
@@ -2780,15 +2779,21 @@ const ORDER_ITEM_CALC_FIELDS = [
     'item_type', 'pieces_per_hour', 'weight_grams', 'extra_molds',
     'complex_design', 'is_nfc', 'nfc_programming', 'is_blank_mold',
     'base_mold_in_stock', 'delivery_included', 'blank_mold_total_cost',
+    'setup_hours_override', 'colors', 'color_count',
     'builtin_assembly_name', 'builtin_assembly_speed',
     'builtin_hw_name', 'builtin_hw_price', 'builtin_hw_delivery_total', 'builtin_hw_speed',
-    'printings', 'name',
+    'printings', 'printing_price_per_unit', 'name',
     'hardware_from_template', 'hardware_parent_item_index', 'hardware_source',
+    'hardware_warehouse_item_id', 'hardware_warehouse_sku',
     'hardware_price_per_unit', 'hardware_delivery_per_unit', 'hardware_delivery_total',
     'hardware_assembly_speed', 'hardware_qty',
     'packaging_source', 'packaging_price_per_unit', 'packaging_delivery_per_unit',
     'packaging_delivery_total', 'packaging_assembly_speed', 'packaging_qty',
+    'packaging_warehouse_item_id', 'packaging_warehouse_sku',
     'sell_price_hardware', 'sell_price_packaging', 'printing_qty',
+    // Pendant calculation inputs. Photo/base64 attachment fields stay excluded.
+    'elements', 'cords', 'carabiners', 'cord', 'carabiner', 'packaging',
+    'cord_length_cm', 'element_price_per_unit', '_totalSellPerUnit',
 ];
 const ORDER_ITEM_SUMMARY_SELECT = [
     'id',

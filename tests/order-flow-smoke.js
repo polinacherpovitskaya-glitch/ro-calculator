@@ -1111,6 +1111,164 @@ async function smokeOrderListUsesStoredFinancialMetaWhenItemsMissing(context) {
     assert.match(state.boardHtml, /24[,.]7\s*%/, 'board card should render stored margin instead of 0%');
 }
 
+async function smokeOrderListRejectsPartialTextSummary(context) {
+    const state = clone(await vm.runInContext(`(() => {
+        const order = {
+            id: 89,
+            order_name: 'Legacy TEXT summary',
+            total_revenue_plan: 42000,
+            margin_percent_plan: 17.5,
+            total_hours_plan: 8.25,
+        };
+        // This is the real shape returned by PostgREST while item_data is TEXT:
+        // physical columns exist, projected JSON calculation fields are null.
+        const partialRows = [{
+            order_id: 89,
+            item_number: 1,
+            product_name: 'Купер 500',
+            quantity: 500,
+            sell_price_item: 84,
+            item_type: null,
+            pieces_per_hour: null,
+            weight_grams: null,
+        }];
+        return Orders.buildFinancialMeta(order, partialRows);
+    })()`, context));
+
+    assert.deepEqual(state, {
+        revenue: 42000,
+        marginPercent: 17.5,
+        hours: 8.25,
+    }, 'partial TEXT summary must never be recalculated with zero costs');
+}
+
+async function smokeOrderListSummaryMatchesCardForAllInputs(context) {
+    const state = clone(await vm.runInContext(`(() => {
+        App.params = {
+            ...App.params,
+            wasteFactor: 1.1,
+            fotPerHour: 120,
+            indirectCostMode: 'all',
+            indirectPerHour: 80,
+            plasticCostPerKg: 2500,
+            moldBaseCost: 18000,
+            designCost: 4000,
+            cuttingSpeed: 1000,
+            nfcTagCost: 10,
+            nfcWriteSpeed: 500,
+            taxRate: 0.07,
+            vatRate: 0.05,
+            charityRate: 0.01,
+            commercialRate: 0.07,
+            deliveryCostMoscow: 800,
+            printingDeliveryCost: 300,
+            setupHoursPerBatch: 2,
+        };
+        App.templates = [];
+
+        const order = {
+            id: 90,
+            order_name: 'Parity fixture',
+            discount_mode: 'percent',
+            discount_value: 10,
+            total_revenue_plan: 1,
+            margin_percent_plan: 1,
+            total_hours_plan: 1,
+        };
+        const fullItems = [{
+            item_type: 'product',
+            item_number: 1,
+            product_name: 'Two-color blank',
+            quantity: 100,
+            pieces_per_hour: 100,
+            weight_grams: 12,
+            extra_molds: 1,
+            complex_design: true,
+            is_nfc: false,
+            nfc_programming: false,
+            is_blank_mold: true,
+            base_mold_in_stock: false,
+            blank_mold_total_cost: 20000,
+            setup_hours_override: 0.5,
+            colors: [{ id: 1 }, { id: 2 }],
+            sell_price_item: 190,
+            sell_price_printing: 12,
+            printing_qty: 100,
+            printing_price_per_unit: 4,
+            printings: [],
+            color_solution_attachment: 'data:image/png;base64,SHOULD_NOT_BE_IN_SUMMARY',
+        }, {
+            item_type: 'hardware',
+            item_number: 2,
+            product_name: 'Ring',
+            quantity: 100,
+            hardware_source: 'warehouse',
+            hardware_warehouse_item_id: 501,
+            hardware_warehouse_sku: 'RING-1',
+            hardware_price_per_unit: 7,
+            hardware_delivery_per_unit: 1,
+            hardware_delivery_total: 100,
+            hardware_assembly_speed: 200,
+            sell_price_hardware: 20,
+        }, {
+            item_type: 'packaging',
+            item_number: 3,
+            product_name: 'Box',
+            quantity: 100,
+            packaging_source: 'warehouse',
+            packaging_warehouse_item_id: 601,
+            packaging_warehouse_sku: 'BOX-1',
+            packaging_price_per_unit: 8,
+            packaging_delivery_per_unit: 2,
+            packaging_delivery_total: 200,
+            packaging_assembly_speed: 250,
+            sell_price_packaging: 25,
+        }, {
+            item_type: 'pendant',
+            item_number: 4,
+            name: 'AB pendant',
+            product_name: 'AB pendant',
+            quantity: 20,
+            elements: [{ char: 'A', has_print: true, print_price: 3 }, { char: 'B' }],
+            cords: [{
+                source: 'custom', name: 'Cord', allocated_qty: 20,
+                price_per_unit: 4, delivery_price: 1, assembly_speed: 100,
+            }],
+            carabiners: [{
+                source: 'custom', name: 'Carabiner', allocated_qty: 20,
+                price_per_unit: 6, delivery_price: 1, assembly_speed: 120,
+            }],
+            cord_length_cm: 50,
+            element_price_per_unit: 15,
+            _totalSellPerUnit: 95,
+        }, {
+            item_type: 'extra_cost',
+            item_number: 5,
+            product_name: 'Rush fee',
+            cost_total: 500,
+        }];
+
+        // Mirror ORDER_ITEM_SUMMARY_SELECT: all calculation inputs, no heavy
+        // attachment blobs. The order itself is already hydrated from the
+        // compact calculator_data selected by loadOrders().
+        const summaryItems = fullItems.map(item => {
+            const copy = { ...item };
+            delete copy.color_solution_attachment;
+            return copy;
+        });
+        const card = getOrderLiveCalculatorSnapshot(order, fullItems, App.params, App.templates);
+        const list = Orders.buildFinancialMeta(order, summaryItems);
+        return {
+            card: { revenue: card.revenue, marginPercent: card.marginPercent, hours: card.hours },
+            list,
+        };
+    })()`, context));
+
+    assert.deepEqual(state.list, state.card, 'list summary and card must use identical live inputs');
+    assert.ok(state.card.revenue > 0);
+    assert.ok(state.card.hours > 0);
+}
+
 async function smokeOrderMetaBundleUsesLightItemsForHardware(context) {
     const originalLoadOrderItemsByOrderIds = context.loadOrderItemsByOrderIds;
     context.__orderItemLoadCalls = [];
@@ -8450,6 +8608,8 @@ async function main() {
     await smokeLegacyPerItemHardwareClearsBuiltinTemplateHardware(context);
     await smokeOrderListAndDetailUseLiveFinancialSnapshot(context);
     await smokeOrderListUsesStoredFinancialMetaWhenItemsMissing(context);
+    await smokeOrderListRejectsPartialTextSummary(context);
+    await smokeOrderListSummaryMatchesCardForAllInputs(context);
     await smokeOrderMetaBundleUsesLightItemsForHardware(context);
     await smokeBlankPricingSeparatesCatalogPriceAndNetMargin(context);
     await smokeBlankTargetFormulaMatchesVatExclusiveMargin(context);
