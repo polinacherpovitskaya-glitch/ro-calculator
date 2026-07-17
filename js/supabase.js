@@ -1890,8 +1890,14 @@ function _filterForDB(obj, knownCols, jsonCol, fieldMap) {
         }
     }
 
-    // Store full data as JSON in the designated column
-    if (jsonCol) {
+    // Store full data as JSON in the designated column.
+    // item_data пишем ОБЪЕКТОМ: jsonb-строка ломала PostgREST-выборку
+    // `item_data->field` (двойное кодирование, как было у mold_data);
+    // его читатели понимают оба формата. calculator_data оставляем строкой —
+    // у него есть читатели с голым JSON.parse (js/supabase.js:353,2723).
+    if (jsonCol === 'item_data') {
+        filtered[jsonCol] = fullData;
+    } else if (jsonCol) {
         filtered[jsonCol] = JSON.stringify(fullData);
     }
 
@@ -2766,6 +2772,24 @@ async function loadOrder(orderId) {
     return await loadLocalOrder({ repairDuplicates: true });
 }
 
+// Summary + лёгкие поля движка из item_data (JSON-оператор «->» сохраняет
+// типы: числа/булевы приходят честными, не строками). Тяжёлые вложения
+// (color_solution_attachment с base64 до 5 МБ) НЕ тянем — из-за них summary
+// и появился. Этого набора достаточно для живого пересчёта маржи в списке.
+const ORDER_ITEM_CALC_FIELDS = [
+    'item_type', 'pieces_per_hour', 'weight_grams', 'extra_molds',
+    'complex_design', 'is_nfc', 'nfc_programming', 'is_blank_mold',
+    'base_mold_in_stock', 'delivery_included', 'blank_mold_total_cost',
+    'builtin_assembly_name', 'builtin_assembly_speed',
+    'builtin_hw_name', 'builtin_hw_price', 'builtin_hw_delivery_total', 'builtin_hw_speed',
+    'printings', 'name',
+    'hardware_from_template', 'hardware_parent_item_index', 'hardware_source',
+    'hardware_price_per_unit', 'hardware_delivery_per_unit', 'hardware_delivery_total',
+    'hardware_assembly_speed', 'hardware_qty',
+    'packaging_source', 'packaging_price_per_unit', 'packaging_delivery_per_unit',
+    'packaging_delivery_total', 'packaging_assembly_speed', 'packaging_qty',
+    'sell_price_hardware', 'sell_price_packaging', 'printing_qty',
+];
 const ORDER_ITEM_SUMMARY_SELECT = [
     'id',
     'order_id',
@@ -2780,6 +2804,7 @@ const ORDER_ITEM_SUMMARY_SELECT = [
     'cost_total',
     'created_at',
     'updated_at',
+    ...ORDER_ITEM_CALC_FIELDS.map(f => `${f}:item_data->${f}`),
 ].join(',');
 
 async function loadOrderItemsByOrderIds(orderIds = [], options = {}) {
