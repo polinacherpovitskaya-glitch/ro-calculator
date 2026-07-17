@@ -30,7 +30,7 @@ const itemRows = [{
 
 const engine = {
     getProductionParams() {
-        return { setupHoursBlank: 0.5, setupHoursCustom: 2, indirectPerHour: 100 };
+        return { setupHoursBlank: 0.5, setupHoursCustom: 1, indirectPerHour: 100 };
     },
     getOrderLiveCalculatorSnapshot(order, items, params, currentTemplates) {
         const catalog = new Map(currentTemplates.map(template => [String(template.id), template]));

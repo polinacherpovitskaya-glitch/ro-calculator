@@ -10,9 +10,14 @@ vm.runInContext(`${source}\nglobalThis.__activeOrderTest = { getItemSetupHours, 
 });
 
 const { getItemSetupHours, calculateItemCost, getOrderLiveCalculatorSnapshot } = context.__activeOrderTest;
+assert.equal(
+    context.getProductionParams({}).setupHoursCustom,
+    1,
+    'the production default for a custom mold is one hour when no legacy setting is stored',
+);
 const params = {
     setupHoursBlank: 0.5,
-    setupHoursCustom: 2,
+    setupHoursCustom: 1,
     wasteFactor: 1,
     fotPerHour: 100,
     indirectPerHour: 0,
@@ -37,18 +42,18 @@ assert.equal(
 );
 assert.equal(
     getItemSetupHours({ is_blank_mold: false, extra_molds: 2, colors: [{ id: 1 }, { id: 2 }] }, params),
-    7,
-    'custom has 2 h for each of three forms plus 0.5 h for each colour',
+    4,
+    'custom has 1 h for each of three forms plus 0.5 h for each colour',
 );
 assert.equal(
     getItemSetupHours({ is_blank_mold: false, base_mold_in_stock: true, colors: [{ id: 1 }, { id: 2 }] }, params),
     1,
-    'a repeated custom mold from stock has no two-hour setup but still needs each colour change',
+    'a repeated custom mold from stock has no form setup but still needs each colour change',
 );
 assert.equal(
     getItemSetupHours({ is_blank_mold: false, base_mold_in_stock: true, extra_molds: 2, colors: [{ id: 1 }, { id: 2 }] }, params),
-    5,
-    'stock base mold skips setup while each additional new mold still adds two hours',
+    3,
+    'stock base mold skips setup while each additional new mold adds one hour',
 );
 assert.equal(
     getItemSetupHours({ is_blank_mold: false, setup_hours_override: 0.75, colors: [{ id: 1 }, { id: 2 }] }, params),
@@ -64,7 +69,7 @@ const cost = calculateItemCost({
     extra_molds: 2,
     colors: [{ id: 1 }, { id: 2 }],
 }, params);
-assert.equal(cost.hoursPlastic, 8, 'production hours include seven setup hours plus one runtime hour');
+assert.equal(cost.hoursPlastic, 5, 'production hours include four setup hours plus one runtime hour');
 
 const templates = [{
     id: 9,
