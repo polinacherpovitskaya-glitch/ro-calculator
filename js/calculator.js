@@ -106,7 +106,16 @@ function getItemSetupHours(item, params) {
 
     const customMoldSetupHours = Math.max(0, calcNumber(p.setupHoursCustom, 2));
     const extraMolds = Math.max(0, calcNumber(item && item.extra_molds, 0));
-    return customMoldSetupHours * (1 + extraMolds) + colorSetupHours * colorCount;
+    const baseMoldInStock = item && (
+        item.base_mold_in_stock === true
+        || Number(item.base_mold_in_stock) === 1
+        || String(item.base_mold_in_stock).trim().toLowerCase() === 'true'
+    );
+    // Складской базовый молд уже готов: не начисляем ему 2 ч подготовки.
+    // Цвет всё равно меняется/инжектор очищается, поэтому полчаса за цвет
+    // сохраняются и для повторного заказа.
+    const newCustomMoldCount = (baseMoldInStock ? 0 : 1) + extraMolds;
+    return customMoldSetupHours * newCustomMoldCount + colorSetupHours * colorCount;
 }
 
 const DEFAULT_COMMERCIAL_RATE = 0.07;
@@ -286,7 +295,8 @@ function calculateItemCost(item, params) {
     // === Производство изделия ===
 
     // Время на производство партии с запасом на брак плюс запуск формы/цвета.
-    // 2 ч на каждую кастомную форму + 0,5 ч на цвет; у бланка только 0,5 ч на цвет.
+    // 2 ч на каждую новую кастомную форму + 0,5 ч на цвет; у бланка только
+    // 0,5 ч на цвет. Базовый молд со склада не требует двухчасового запуска.
     const setupHours = getItemSetupHours(item, p);
     const hoursPlastic = setupHours + (1 / pph) * qty * p.wasteFactor;
 
