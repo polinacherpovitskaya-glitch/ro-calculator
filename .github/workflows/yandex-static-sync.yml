@@ -38,6 +38,14 @@ jobs:
         with:
           node-version: '24'
 
+      # Тот же кэш-бастинг, что и в Deploy GitHub Pages: SHA вместо ручных
+      # ?v=N, чтобы calc2 никогда не отставал от calc из-за браузерного кэша.
+      - name: Cache-bust asset versions with commit SHA
+        run: |
+          sha="${GITHUB_SHA::10}"
+          find . -name "*.html" -not -path "./node_modules/*" -print0 \
+            | xargs -0 sed -i -E "s/\.(js|css)\?v=[0-9]+/.\1?v=${sha}/g"
+
       - name: Build Yandex static bundle
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}

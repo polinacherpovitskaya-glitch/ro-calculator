@@ -83,6 +83,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Кэш-бастинг: ручные ?v=N в index.html регулярно забывали бампать при
+      # правках js/css, и браузеры команды неделями держали старый код (старая
+      # лестница маржи, невидимая плашка загрузки, залипший баннер БД).
+      # Подставляем commit SHA во все версии на каждом деплое — забыть нельзя.
+      - name: Cache-bust asset versions with commit SHA
+        run: |
+          sha="${GITHUB_SHA::10}"
+          find . -name "*.html" -not -path "./node_modules/*" -print0 \
+            | xargs -0 sed -i -E "s/\.(js|css)\?v=[0-9]+/.\1?v=${sha}/g"
+          echo "Asset versions stamped with ${sha}:"
+          grep -oE "js/[a-z_]+\.js\?v=[a-z0-9]+" index.html | head -5
+
       - name: Setup Pages
         uses: actions/configure-pages@v5
 
@@ -121,6 +133,13 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "24"
+
+      # Тот же кэш-бастинг, что и в Pages-джобе: SHA вместо ручных ?v=N.
+      - name: Cache-bust asset versions with commit SHA
+        run: |
+          sha="${GITHUB_SHA::10}"
+          find . -name "*.html" -not -path "./node_modules/*" -print0 \
+            | xargs -0 sed -i -E "s/\.(js|css)\?v=[0-9]+/.\1?v=${sha}/g"
 
       - name: Deploy to calc.recycleobject.ru
         id: vercel-deploy
