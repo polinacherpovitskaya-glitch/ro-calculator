@@ -2,7 +2,7 @@ const assert = require('node:assert');
 const { test } = require('node:test');
 const {
     getQuarterBounds, quarterTargetHours, computeQuarterLoad, _isSoldOrder,
-    doneHoursForRange, collectQuarterLoad,
+    doneHoursForRange, collectQuarterLoad, getQuarterMonthMarkers,
 } = require('../js/production_load.js');
 
 test('getQuarterBounds: середина июля → Q3, 01.07–30.09', () => {
@@ -25,6 +25,13 @@ test('quarterTargetHours: сезонный план для квартала', ()
 test('quarterTargetHours: фолбэк на среднегод, если плана нет', () => {
     const s = { workers_count: 4, hours_per_worker: 180, work_load_ratio: 0.7 };
     assert.equal(quarterTargetHours(s, new Date(2026, 6, 16)), Math.round(4 * 180 * 0.7 * 3));
+});
+
+test('getQuarterMonthMarkers: две границы делят квартал на месяцы, текущий выделен', () => {
+    const markers = getQuarterMonthMarkers(new Date(2026, 7, 19));
+    assert.deepEqual(markers.map(marker => marker.label), ['июль', 'август', 'сентябрь']);
+    assert.deepEqual(markers.map(marker => marker.startPercent), [0, 100 / 3, 200 / 3]);
+    assert.deepEqual(markers.map(marker => marker.state), ['past', 'current', 'future']);
 });
 
 test('computeQuarterLoad: обычный случай — сделано<продано<план', () => {

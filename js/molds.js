@@ -209,12 +209,9 @@ const Molds = {
             // Амортизация молда = стоимость / макс. ресурс (4500 шт), одинаковая для всех тиражей
             const moldAmortPerUnit = m.cost_rub_calc / MOLD_MAX_LIFETIME;
 
-            // Запуск: бланк — готовая приехавшая форма (0,5 ч на разогрев и подбор
-            // света/цвета), новый кастомный молд из Китая — 2 ч.
+            // Бланк получает 0,5 ч на цвет; новый кастом — 2 ч на форму плюс
+            // 0,5 ч на цвет. Формула живёт в calculateItemCost.
             const isCustomMold = m.category === 'custom' || m.category === 'client_custom';
-            const setupHoursForMold = isCustomMold
-                ? (Number.isFinite(params.setupHoursCustom) ? params.setupHoursCustom : 2)
-                : (Number.isFinite(params.setupHoursBlank) ? params.setupHoursBlank : 0.5);
             const orderProcessingCost = Number.isFinite(params.orderProcessingCost) ? params.orderProcessingCost : 4000;
 
             // Себестоимость пересчитывается НА ОБЪЁМ КАЖДОГО ТИРАЖА: запуск и обработка
@@ -232,9 +229,9 @@ const Molds = {
                     packaging_qty: 0,
                     printing_qty: 0,
                     delivery_included: false,
+                    is_blank_mold: !isCustomMold,
                     builtin_assembly_name: m.builtin_assembly_name || '',
                     builtin_assembly_speed: Number(m.builtin_assembly_speed || 0),
-                    setup_hours_override: setupHoursForMold,
                 };
                 const result = calculateItemCost(item, params);
                 let adjustedCost = result.costTotal - result.costMoldAmortization + moldAmortPerUnit;

@@ -86,6 +86,29 @@ function getItemColorCount(item) {
     return Number.isFinite(cc) && cc >= 1 ? cc : 1;
 }
 
+// Запуск состоит из подготовки формы и подготовки цвета. Нормы отражают
+// фактический процесс: кастомная форма требует 2 ч на каждую форму, а цвет —
+// 0,5 ч на каждый уникальный цвет; бланк требует только подготовки цвета.
+// Старый per-item override остаётся цельной legacy-нормой на цвет, чтобы не
+// изменить осознанно заданный вручную расчёт старого заказа.
+function getItemSetupHours(item, params) {
+    const p = params || {};
+    const colorCount = getItemColorCount(item);
+    const rawOverride = item && item.setup_hours_override;
+    const hasOverride = rawOverride !== null
+        && rawOverride !== undefined
+        && String(rawOverride).trim() !== ''
+        && Number.isFinite(Number(rawOverride));
+    if (hasOverride) return Math.max(0, Number(rawOverride)) * colorCount;
+
+    const colorSetupHours = Math.max(0, calcNumber(p.setupHoursBlank, 0.5));
+    if (item && item.is_blank_mold) return colorSetupHours * colorCount;
+
+    const customMoldSetupHours = Math.max(0, calcNumber(p.setupHoursCustom, 2));
+    const extraMolds = Math.max(0, calcNumber(item && item.extra_molds, 0));
+    return customMoldSetupHours * (1 + extraMolds) + colorSetupHours * colorCount;
+}
+
 const DEFAULT_COMMERCIAL_RATE = 0.07;
 
 function getRateValue(value, fallback) {
@@ -262,16 +285,9 @@ function calculateItemCost(item, params) {
 
     // === Производство изделия ===
 
-    // Время на производство всей партии (часы) — с запасом на брак,
-    // плюс запуск партии (разогрев формы, подбор цвета/света) — константа на партию.
-    // Бланк — готовая форма (0,5 ч); новый кастомный молд — 2 ч. Каталог передаёт
-    // item.setup_hours_override; прочие вызовы используют глобальную настройку.
-    const baseSetupHours = Number.isFinite(item.setup_hours_override)
-        ? item.setup_hours_override
-        : calcNumber(p.setupHoursPerBatch, 0);
-    // Запуск — на КАЖДЫЙ цвет: разные цвета в одной позиции ведутся отдельными
-    // запусками, даже если бланк и тираж одни и те же (буквы/подвесы, карабин ×5 цветов).
-    const setupHours = baseSetupHours * getItemColorCount(item);
+    // Время на производство партии с запасом на брак плюс запуск формы/цвета.
+    // 2 ч на каждую кастомную форму + 0,5 ч на цвет; у бланка только 0,5 ч на цвет.
+    const setupHours = getItemSetupHours(item, p);
     const hoursPlastic = setupHours + (1 / pph) * qty * p.wasteFactor;
 
     // ФОТ за единицу
@@ -1567,6 +1583,22 @@ function parseOrderCalcJson(value, fallback) {
     }
 }
 
+// Полный item_data в старых заказах иногда оказался обёрнут ещё одним JSON
+// уровнем. Карточка умеет его раскрывать; живой расчёт списка обязан получить
+// те же входы, иначе подвесы и legacy-позиции посчитаются с нулевыми полями.
+function hydrateOrderItemForLiveCalculation(rawItem) {
+    if (!rawItem || typeof rawItem !== 'object') return rawItem;
+    const outer = parseOrderCalcJson(rawItem.item_data, {});
+    const nested = outer && outer.item_data
+        ? parseOrderCalcJson(outer.item_data, {})
+        : {};
+    const hydrated = { ...nested, ...outer };
+    Object.entries(rawItem).forEach(([key, value]) => {
+        if (value !== null && value !== undefined) hydrated[key] = value;
+    });
+    return hydrated;
+}
+
 function getOrderLiveCalculatorSnapshot(order = {}, orderItems = [], params = null, templates = null) {
     const runtimeParams = params || (typeof App !== 'undefined' ? (App.params || {}) : {});
     const runtimeTemplates = Array.isArray(templates)
@@ -1579,15 +1611,17 @@ function getOrderLiveCalculatorSnapshot(order = {}, orderItems = [], params = nu
     const extraCosts = [];
     const pendantItems = [];
     let rawProductIndex = -1;
+    const hydratedOrderItems = (orderItems || [])
+        .map(hydrateOrderItemForLiveCalculation)
+        .filter(Boolean);
     const templateHardwareParentIndices = new Set(
-        (orderItems || [])
+        hydratedOrderItems
             .filter(item => String(item?.item_type || '').trim().toLowerCase() === 'hardware' && !!item?.hardware_from_template)
             .map(item => Number(item?.hardware_parent_item_index))
             .filter(index => Number.isFinite(index) && index >= 0)
     );
 
-    (orderItems || []).forEach(rawItem => {
-        if (!rawItem) return;
+    hydratedOrderItems.forEach(rawItem => {
         const itemType = String(rawItem.item_type || 'product').trim().toLowerCase();
 
         if (itemType === 'product') {
@@ -1606,9 +1640,13 @@ function getOrderLiveCalculatorSnapshot(order = {}, orderItems = [], params = nu
                 : null;
             if (tpl) {
                 item.product_name = item.product_name || tpl.name || '';
+            }
+            // Старая ссылка template_id встречается и у кастомных форм. Скорость
+            // и вес каталога можно брать только у позиции, явно сохранённой как
+            // бланк: иначе массовый/живой пересчёт уменьшит часы кастома неверно.
+            if (tpl && item.is_blank_mold) {
                 item.pieces_per_hour = getBlankTemplatePiecesPerHour(tpl, item.pieces_per_hour);
                 item.weight_grams = Number(tpl.weight_grams || item.weight_grams || 0);
-                item.is_blank_mold = true;
                 if (!(Number(item.blank_mold_total_cost || 0) > 0)) {
                     item.blank_mold_total_cost = getBlankTemplateTotalMoldCost(tpl);
                 }
