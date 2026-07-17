@@ -122,6 +122,10 @@ const Orders = {
     async loadList() {
         const loadSeq = ++this._loadSeq;
         try {
+            // A fresh orders visit must not retain an earlier staffing override,
+            // vacation list or time-sheet snapshot after the calendar changed.
+            this._loadBarEntries = null;
+            this._loadBarCalendar = null;
             this.updateModeControls();
             const hydrated = this.hydrateFromCache();
             this.isLoading = !hydrated && this.allOrders.length === 0;
@@ -622,6 +626,8 @@ const Orders = {
     },
 
     async renderLoadBar() {
+        const renderSeq = (this._loadBarRenderSeq || 0) + 1;
+        this._loadBarRenderSeq = renderSeq;
         try {
             const el = document.getElementById('production-load-bar');
             if (!el || typeof collectQuarterLoad !== 'function') return;
@@ -629,8 +635,26 @@ const Orders = {
                 try { this._loadBarEntries = await loadTimeEntries(); }
                 catch (_) { this._loadBarEntries = []; }
             }
+            // The board and the production Gantt use the same staffing override;
+            // vacations are the existing central record, not a second calendar.
+            if (!this._loadBarCalendar) {
+                const [planState, vacations] = await Promise.all([
+                    typeof loadProductionPlanState === 'function'
+                        ? loadProductionPlanState().catch(() => ({})) : Promise.resolve({}),
+                    typeof loadVacations === 'function'
+                        ? loadVacations().catch(() => []) : Promise.resolve([]),
+                ]);
+                this._loadBarCalendar = { planState: planState || {}, vacations: vacations || [] };
+            }
             const settings = (typeof App !== 'undefined' && App.settings) || {};
-            const { load, label, breakdown } = collectQuarterLoad(this.allOrders, this._loadBarEntries || [], settings, new Date());
+            const { load, label, breakdown } = collectQuarterLoad(
+                this.allOrders,
+                this._loadBarEntries || [],
+                settings,
+                new Date(),
+                this._loadBarCalendar,
+            );
+            if (renderSeq !== this._loadBarRenderSeq) return;
             renderProductionLoadBar(el, load, label, breakdown);
         } catch (e) {
             console.warn('renderLoadBar failed', e);
