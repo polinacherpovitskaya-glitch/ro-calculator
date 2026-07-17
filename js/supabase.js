@@ -5203,7 +5203,7 @@ async function saveMold(mold) {
     if (idx >= 0) molds[idx] = mold; else molds.push(mold);
     setLocal(LOCAL_KEYS.molds, molds);
     refreshTemplatesFromMolds(molds);
-    return { id: mold.id, remoteOk };
+    return { id: mold.id, remoteOk, mold };
 }
 
 async function deleteMold(moldId) {

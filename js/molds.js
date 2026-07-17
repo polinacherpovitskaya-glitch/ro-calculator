@@ -132,6 +132,15 @@ const Molds = {
         }
     },
 
+    _replaceSavedMold(savedMold) {
+        if (!savedMold || !savedMold.id) return;
+        const index = this.allMolds.findIndex(mold => mold.id === savedMold.id);
+        if (index >= 0) this.allMolds[index] = savedMold;
+        else this.allMolds.push(savedMold);
+        this.enrichMolds();
+        refreshTemplatesFromMolds(this.allMolds);
+    },
+
     // Build unique collections list from all molds
     getCollections() {
         const set = new Set();
@@ -362,6 +371,40 @@ const Molds = {
         return MOLD_TIERS;
     },
 
+    _getCatalogSections(molds) {
+        const byCollection = new Map();
+        const inactive = [];
+
+        molds.forEach(mold => {
+            if (mold.status !== 'active') {
+                inactive.push(mold);
+                return;
+            }
+            const collection = String(mold.collection || '').trim() || 'Без коллекции';
+            if (!byCollection.has(collection)) byCollection.set(collection, []);
+            byCollection.get(collection).push(mold);
+        });
+
+        const collectionRank = (collection) => {
+            const normalized = String(collection || '').trim().toLowerCase();
+            if (normalized === 'nfc') return 0;
+            if (normalized === 'бланки') return 1;
+            if (normalized === 'без коллекции') return 99;
+            return 10;
+        };
+        const sections = [...byCollection.entries()]
+            .sort(([a], [b]) => collectionRank(a) - collectionRank(b)
+                || a.localeCompare(b, 'ru'))
+            .map(([title, sectionMolds]) => ({ title, molds: sectionMolds, inactive: false }));
+
+        // Draft, retired and client-specific positions stay available for history,
+        // but do not mix with the catalog the team actively uses.
+        if (inactive.length > 0) {
+            sections.push({ title: 'Выключенные', molds: inactive, inactive: true });
+        }
+        return sections;
+    },
+
     filterAndRender() {
         const status = document.getElementById('molds-filter-status').value;
         const collectionFilter = document.getElementById('molds-filter-collection')?.value || '';
@@ -427,7 +470,15 @@ const Molds = {
                 </thead>
                 <tbody>`;
 
-        molds.forEach(m => {
+        const tableColumnCount = DISPLAY_TIERS.length * 2 + 5;
+        const sections = this._getCatalogSections(molds);
+        sections.forEach((section, sectionIndex) => {
+            html += `<tr style="background:${section.inactive ? 'rgba(160,160,160,.10)' : 'var(--bg)'};border-bottom:1px solid var(--border);">
+                <td colspan="${tableColumnCount}" style="padding:${sectionIndex === 0 ? '10px 12px 8px' : '18px 12px 8px'};font-size:11px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;color:${section.inactive ? 'var(--text-muted)' : 'var(--text-secondary)'};">
+                    ${this.esc(section.title)} <span style="font-weight:500;letter-spacing:0;">· ${section.molds.length}</span>
+                </td>
+            </tr>`;
+            section.molds.forEach(m => {
             const statusDot = m.status === 'active' ? 'calculated' : m.status === 'client' ? 'in_production' : 'cancelled';
             const pph = m.pph_actual || ((m.pph_min && m.pph_max) ? Math.round((m.pph_min + m.pph_max) / 2) : m.pph_min) || 0;
             const pphText = m.pph_actual ? `<b>${pph}</b>` : (pph > 0 ? `${pph}` : '—');
@@ -478,11 +529,12 @@ const Molds = {
                     </td>
                 </tr>
                 <tr id="mold-inline-row-${m.id}" style="display:none;border-bottom:2px solid var(--border);background:var(--bg);">
-                    <td colspan="${DISPLAY_TIERS.length * 2 + 5}" style="padding:12px 16px;">
+                    <td colspan="${tableColumnCount}" style="padding:12px 16px;">
                         ${this._renderInlineControls(m)}
                         <div id="mold-inline-card-host-${m.id}" style="margin-top:12px;"></div>
                     </td>
                 </tr>`;
+            });
         });
 
         html += '</tbody></table>';
@@ -625,6 +677,7 @@ const Molds = {
         const inlineDepth = Number(mold.depth_mm || 0) || '';
         const inlineComplexity = String(mold.complexity || 'simple');
         const nfcChecked = this._hasInlineNfcChip(mold);
+        const catalogEnabled = mold.status === 'active';
         const nfcCost = Number(mold?.hw_price_per_unit || App?.params?.nfcTagCost || App?.settings?.nfc_tag_cost || 0) || 0;
         const vatRate = Number.isFinite(App?.params?.vatRate) ? App.params.vatRate : 0.05;
         const costBreakdownSummary = this._getCostBreakdownParts(mold);
@@ -685,6 +738,10 @@ const Molds = {
                         <span style="font-weight:600;">NFC</span>
                         ${nfcCost > 0 ? `<span style="color:var(--text-muted);font-size:10px;">${formatRub(nfcCost)}</span>` : ''}
                     </label>
+                    <label title="Выключенный бланк остаётся в истории, но не попадает в каталог и Figma" style="display:flex;align-items:center;gap:6px;height:32px;padding:0 10px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:12px;cursor:pointer;">
+                        <input id="mold-inline-enabled-${mold.id}" type="checkbox" ${catalogEnabled ? 'checked' : ''}>
+                        <span style="font-weight:600;">Включён в каталог</span>
+                    </label>
                     <div style="display:flex;gap:6px;margin-left:auto;">
                         <button class="btn btn-sm btn-primary" onclick="Molds.saveInlineMold(${mold.id})">Сохранить</button>
                         <button class="btn btn-sm btn-outline" onclick="Molds.editMold(${mold.id})">Карточка</button>
@@ -728,6 +785,7 @@ const Molds = {
         const depthRaw = document.getElementById(`mold-inline-depth-${id}`)?.value;
         const complexity = document.getElementById(`mold-inline-complexity-${id}`)?.value || mold.complexity || 'simple';
         const wantsNfc = !!document.getElementById(`mold-inline-nfc-${id}`)?.checked;
+        const catalogEnabled = !!document.getElementById(`mold-inline-enabled-${id}`)?.checked;
         const hadNfc = this._hasInlineNfcChip(mold);
         const nfcCost = Number(App?.params?.nfcTagCost || App?.settings?.nfc_tag_cost || 0) || 0;
         if (wantsNfc) {
@@ -758,6 +816,9 @@ const Molds = {
                 return Number.isFinite(value) && value > 0 ? value : 0;
             })(),
             complexity,
+            status: catalogEnabled
+                ? 'active'
+                : (mold.status === 'active' ? 'retired' : (mold.status || 'retired')),
             mold_count: Math.max(1, Number.parseInt(mold.mold_count, 10) || 1),
             // Inline save changes only tech params and must not silently reset pricing strategy.
             use_manual_prices: !!mold.use_manual_prices,
@@ -788,6 +849,7 @@ const Molds = {
         }
 
         const saveResult = await saveMold(next);
+        this._replaceSavedMold(saveResult?.mold || next);
         App.toast(saveResult?.remoteOk === false
             ? 'Сохранили локально. Общая база пока не подтвердила обновление'
             : 'Бланк обновлён');
@@ -1007,6 +1069,7 @@ const Molds = {
     },
 
     async saveMold() {
+        await this._waitForPendingPhotoUpload();
         const name = document.getElementById('mold-name').value.trim();
         if (!name) { App.toast('Введите название бланка'); return; }
 
@@ -1077,6 +1140,7 @@ const Molds = {
         }
 
         const saveResult = await saveMold(mold);
+        this._replaceSavedMold(saveResult?.mold || mold);
         App.toast(saveResult?.remoteOk === false
             ? 'Сохранили локально. Общая база пока не подтвердила обновление'
             : 'Бланк сохранен');
@@ -1105,11 +1169,15 @@ const Molds = {
             return;
         }
         const activeMolds = this.allMolds.filter(m => m.status === 'active');
-        if (activeMolds.length === 0) {
-            App.toast('Нет активных молдов для публикации');
+        const inactiveMolds = this.allMolds.filter(m => m.status !== 'active');
+        if (activeMolds.length === 0 && inactiveMolds.length === 0) {
+            App.toast('Нет бланков для публикации');
             return;
         }
-        if (!confirm(`Опубликовать ${activeMolds.length} молдов в каталог Figma-плагина?`)) return;
+        const publishPrompt = activeMolds.length > 0
+            ? `Опубликовать ${activeMolds.length} молдов в каталог Figma-плагина${inactiveMolds.length ? ` и снять ${inactiveMolds.length} выключенных` : ''}?`
+            : `Снять ${inactiveMolds.length} выключенных молдов с каталога Figma-плагина?`;
+        if (!confirm(publishPrompt)) return;
 
         // Public catalog + Figma plugin must receive the full published
         // blank ladder, including the 10-piece tier.
@@ -1155,10 +1223,9 @@ const Molds = {
         const catalogRows = []; // зеркало для Google Sheets
         let cleared = 0;
 
-        // Отключённые молды не должны оставаться в опубликованном каталоге:
-        // Figma-плагин читает tiers_prices напрямую, и без чистки «выключенные»
-        // бланки продолжали прилетать в каталог со старыми ценами.
-        const inactiveMolds = this.allMolds.filter(m => m.status !== 'active');
+        // Отключённые молды не должны оставаться в опубликованном каталоге.
+        // Some plugin builds recover priceN when tiers_prices is empty, therefore
+        // status and every legacy price must be published as disabled together.
         for (const m of inactiveMolds) {
             try {
                 const { data: existing, error: fetchErr } = await supabaseClient
@@ -1169,14 +1236,19 @@ const Molds = {
                 if (fetchErr) continue;
                 let moldData = mergeMoldData(existing.mold_data);
                 if (!moldData || typeof moldData !== 'object') continue;
-                if (moldData.tiers_prices && Object.keys(moldData.tiers_prices).length) {
-                    moldData.tiers_prices = {};
-                    const { error: updErr } = await supabaseClient
-                        .from('molds')
-                        .update({ mold_data: moldData })
-                        .eq('id', m.id);
-                    if (!updErr) cleared++;
-                }
+                const wasPublished = moldData.catalog_enabled !== false
+                    || (moldData.tiers_prices && Object.keys(moldData.tiers_prices).length > 0)
+                    || TIERS.some(qty => Number(moldData[`price${qty}`]) > 0);
+                moldData.status = m.status || 'retired';
+                moldData.catalog_enabled = false;
+                moldData.tiers_prices = {};
+                moldData.tiers_published_at = new Date().toISOString();
+                TIERS.forEach(qty => { moldData[`price${qty}`] = 0; });
+                const { error: updErr } = await supabaseClient
+                    .from('molds')
+                    .update({ mold_data: moldData })
+                    .eq('id', m.id);
+                if (!updErr && wasPublished) cleared++;
             } catch (e) {
                 console.warn('publishCatalog clear inactive failed for', m.id, e);
             }
@@ -1200,24 +1272,26 @@ const Molds = {
                 let moldData = mergeMoldData(existing.mold_data);
                 if (!moldData || typeof moldData !== 'object') moldData = {};
 
-                if (Object.keys(tiers_prices).length > 0) {
-                    moldData.tiers_prices = tiers_prices;
-                    moldData.tiers_published_at = new Date().toISOString();
-                    TIERS.forEach(qty => {
-                        const published = tiers_prices[qty];
-                        if (Number.isFinite(published) && published > 0) {
-                            moldData[`price${qty}`] = published;
-                        }
-                    });
-                } else {
-                    noTiers++;
-                }
-                // Always sync these fields
-                moldData.weight_grams = m.weight_grams;
+                const publishedAt = new Date().toISOString();
+                if (Object.keys(tiers_prices).length === 0) noTiers++;
+
+                // The catalog is a projection of the current mold, not a patch
+                // over a possibly old/corrupt payload. Always overwrite fields
+                // consumed by Figma and the public catalog.
+                moldData.name = m.name || '';
+                moldData.status = 'active';
+                moldData.catalog_enabled = true;
+                moldData.photo_url = m.photo_url || '';
+                moldData.weight_grams = Number(m.weight_grams || 0) || 0;
                 moldData.collection = m.collection || '';
-                if (m.width_mm !== undefined) moldData.width_mm = m.width_mm;
-                if (m.height_mm !== undefined) moldData.height_mm = m.height_mm;
-                if (m.depth_mm !== undefined) moldData.depth_mm = m.depth_mm;
+                moldData.width_mm = Number(m.width_mm || 0) || 0;
+                moldData.height_mm = Number(m.height_mm || 0) || 0;
+                moldData.depth_mm = Number(m.depth_mm || 0) || 0;
+                moldData.tiers_prices = tiers_prices;
+                moldData.tiers_published_at = publishedAt;
+                TIERS.forEach(qty => {
+                    moldData[`price${qty}`] = Number(tiers_prices[qty] || 0) || 0;
+                });
 
                 const { error: updErr } = await supabaseClient
                     .from('molds')
@@ -1328,6 +1402,16 @@ const Molds = {
     // ==========================================
 
     _pendingPhoto: '',
+    _photoUploadPromise: null,
+    _photoUploadError: '',
+    _photoUploadToken: 0,
+
+    async _waitForPendingPhotoUpload() {
+        const pendingUpload = this._photoUploadPromise;
+        if (!pendingUpload) return;
+        App.toast('Дожидаемся загрузки фото…');
+        await pendingUpload;
+    },
 
     onPhotoFileChange(input) {
         if (!input.files || !input.files[0]) return;
@@ -1336,28 +1420,59 @@ const Molds = {
             App.toast('Файл слишком большой (макс 10MB)');
             return;
         }
+        const uploadToken = ++this._photoUploadToken;
+        this._photoUploadError = '';
+        let finishUpload;
+        this._photoUploadPromise = new Promise(resolve => { finishUpload = resolve; });
+        const completeUpload = () => {
+            if (uploadToken === this._photoUploadToken) {
+                this._photoUploadPromise = null;
+            }
+            finishUpload();
+        };
         const reader = new FileReader();
         reader.onload = (e) => {
             // Resize to 800px max and upload to Supabase Storage
             this.resizeImageToBlob(e.target.result, 800, async (blob) => {
+                if (!blob) {
+                    this._photoUploadError = 'Не удалось обработать выбранное фото';
+                    App.toast(this._photoUploadError, 'warning');
+                    completeUpload();
+                    return;
+                }
                 // Show local preview immediately
                 const localPreview = URL.createObjectURL(blob);
                 this.updatePhotoPreview(localPreview);
                 document.getElementById('mold-photo-url').value = '';
 
                 // Upload to Supabase Storage
-                const url = await this.uploadPhotoToStorage(blob);
-                if (url) {
-                    this._pendingPhoto = url;
-                    this.updatePhotoPreview(url);
-                    App.toast('Фото загружено', 'success');
-                } else {
-                    // Fallback to data URI if upload fails
+                try {
+                    const url = await this.uploadPhotoToStorage(blob);
+                    if (url) {
+                        this._pendingPhoto = url;
+                        this.updatePhotoPreview(url);
+                        App.toast('Фото загружено', 'success');
+                    } else {
+                        // saveMold will make one last Storage attempt with this data URI.
+                        this._pendingPhoto = e.target.result;
+                        this._photoUploadError = 'Фото не подтвердило загрузку в облако';
+                        App.toast('Фото не подтвердило загрузку в облако: сохраним вместе с карточкой', 'warning');
+                    }
+                } catch (err) {
+                    console.error('[Molds] Unexpected photo upload error:', err);
                     this._pendingPhoto = e.target.result;
-                    App.toast('Не удалось загрузить в облако, сохранено локально', 'warning');
+                    this._photoUploadError = 'Фото не подтвердило загрузку в облако';
+                    App.toast('Фото не подтвердило загрузку в облако: сохраним вместе с карточкой', 'warning');
+                } finally {
+                    URL.revokeObjectURL(localPreview);
+                    completeUpload();
                 }
-                URL.revokeObjectURL(localPreview);
             });
+        };
+        reader.onerror = () => {
+            this._photoUploadError = 'Не удалось прочитать выбранное фото';
+            App.toast(this._photoUploadError, 'warning');
+            completeUpload();
         };
         reader.readAsDataURL(file);
     },
@@ -1403,6 +1518,7 @@ const Molds = {
             canvas.getContext('2d').drawImage(img, 0, 0, w, h);
             canvas.toBlob((blob) => callback(blob), 'image/jpeg', 0.85);
         };
+        img.onerror = () => callback(null);
         img.src = dataUrl;
     },
 

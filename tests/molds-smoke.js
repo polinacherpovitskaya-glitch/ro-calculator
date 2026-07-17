@@ -446,10 +446,12 @@ async function main() {
     context.document.getElementById('mold-inline-weight-77').value = '7.5';
     context.document.getElementById('mold-inline-complexity-77').value = 'complex';
     context.document.getElementById('mold-inline-nfc-77').checked = true;
+    context.document.getElementById('mold-inline-enabled-77').checked = true;
 
     await vm.runInContext(`Molds.saveInlineMold(77)`, context);
     assert.equal(context.__savedInlineMold.pph_actual, 120);
     assert.equal(context.__savedInlineMold.weight_grams, 7.5);
+    assert.equal(context.__savedInlineMold.status, 'active');
     assert.equal(context.__savedInlineMold.width_mm || 0, 0);
     assert.equal(context.__savedInlineMold.height_mm || 0, 0);
     assert.equal(context.__savedInlineMold.depth_mm || 0, 0);
@@ -465,11 +467,13 @@ async function main() {
     assert.deepEqual(context.__savedInlineMold.custom_margins, {});
     assert.equal(context.__savedInlineMold.disable_historical_blank_price_recovery, false);
     assert.equal(context.__reloadedInlineMolds, true);
+    assert.equal(vm.runInContext(`Molds.allMolds[0].weight_grams`, context), 7.5, 'the value saved inline must immediately become the card value too');
     const inlineHtml = String(vm.runInContext(`Molds._renderInlineControls(Molds.allMolds[0])`, context));
     assert.doesNotMatch(inlineHtml, /Кол-во частей/);
     assert.match(inlineHtml, /39 ₽/);
     assert.doesNotMatch(inlineHtml, /\+10 ₽/);
     assert.match(inlineHtml, /Ш, мм/);
+    assert.match(inlineHtml, /Включён в каталог/);
 
     vm.runInContext(`
         Molds.allMolds = [{
@@ -523,10 +527,66 @@ async function main() {
     context.document.getElementById('mold-inline-depth-78').value = '4';
     context.document.getElementById('mold-inline-complexity-78').value = 'simple';
     context.document.getElementById('mold-inline-nfc-78').checked = false;
+    context.document.getElementById('mold-inline-enabled-78').checked = false;
     await vm.runInContext(`Molds.saveInlineMold(78)`, context);
     assert.equal(context.__savedInlineMold.width_mm, 24);
     assert.equal(context.__savedInlineMold.height_mm, 19);
     assert.equal(context.__savedInlineMold.depth_mm, 4);
+    assert.equal(context.__savedInlineMold.status, 'retired', 'the inline catalog checkbox must retire a disabled blank');
+
+    // calc2 must not persist the old photo when the user presses Save while the
+    // asynchronous storage upload is still running.
+    [
+        'mold-name', 'mold-cost-cny', 'mold-cny-rate', 'mold-delivery-cost', 'mold-complexity', 'mold-count',
+        'mold-pph-actual', 'mold-status', 'mold-weight', 'mold-width', 'mold-height', 'mold-depth',
+        'mold-cost-rub', 'mold-client', 'mold-hw-name', 'mold-hw-price', 'mold-hw-delivery-total', 'mold-hw-speed',
+        'mold-assembly-name', 'mold-assembly-speed', 'mold-notes', 'mold-edit-form', 'mold-edit-form-home',
+    ].forEach(id => context.document.getElementById(id));
+    context.document.getElementById('mold-name').value = 'Фото после загрузки';
+    context.document.getElementById('mold-cost-cny').value = '800';
+    context.document.getElementById('mold-cny-rate').value = '12.5';
+    context.document.getElementById('mold-delivery-cost').value = '3000';
+    context.document.getElementById('mold-complexity').value = 'simple';
+    context.document.getElementById('mold-count').value = '1';
+    context.document.getElementById('mold-status').value = 'active';
+    context.__savedFormMold = null;
+    context.saveMold = async (mold) => {
+        context.__savedFormMold = JSON.parse(JSON.stringify(mold));
+        return { id: 880, remoteOk: true, mold: { ...mold, id: 880 } };
+    };
+    vm.runInContext(`
+        Molds.editingId = null;
+        Molds._pendingPhoto = 'https://example.com/old-photo.jpg';
+        Molds._photoUploadPromise = new Promise(resolve => {
+            __finishPhotoUpload = () => {
+                Molds._pendingPhoto = 'https://example.com/new-photo.jpg';
+                Molds._photoUploadPromise = null;
+                resolve();
+            };
+        });
+    `, context);
+    const saveAfterUpload = vm.runInContext(`Molds.saveMold()`, context);
+    await Promise.resolve();
+    assert.equal(context.__savedFormMold, null, 'form save must wait for a pending photo upload');
+    vm.runInContext(`__finishPhotoUpload()`, context);
+    await saveAfterUpload;
+    assert.equal(context.__savedFormMold.photo_url, 'https://example.com/new-photo.jpg');
+
+    vm.runInContext(`
+        Molds.allMolds = [
+            { id: 1, name: 'NFC-квадрат', status: 'active', collection: 'NFC' },
+            { id: 2, name: 'Круг', status: 'active', collection: 'Бланки' },
+            { id: 3, name: 'Конь', status: 'active', collection: 'Фигурки' },
+            { id: 4, name: 'Старые бусины', status: 'retired', collection: 'Бусины' },
+            { id: 5, name: 'Черновик', status: 'draft', collection: 'Бусины' }
+        ];
+    `, context);
+    const catalogSections = JSON.parse(vm.runInContext(`JSON.stringify(Molds._getCatalogSections(Molds.allMolds))`, context));
+    assert.deepEqual(
+        catalogSections.map(section => [section.title, section.molds.map(mold => mold.id), section.inactive]),
+        [['NFC', [1], false], ['Бланки', [2], false], ['Фигурки', [3], false], ['Выключенные', [4, 5], true]],
+        'active molds must be grouped by collection and every disabled status must remain in the final section',
+    );
 
     vm.runInContext(`
         Molds.allMolds = [{
@@ -665,6 +725,7 @@ async function main() {
             name: 'Публикуемый бланк',
             status: 'active',
             collection: 'Пластик',
+            photo_url: 'https://example.com/published.jpg',
             pph_min: 25,
             pph_max: 25,
             pph_actual: 25,
@@ -698,6 +759,9 @@ async function main() {
     assert.equal(publishedMoldData.depth_mm, 3);
     assert.equal(publishedMoldData.weight_grams, 30);
     assert.equal(publishedMoldData.collection, 'Пластик');
+    assert.equal(publishedMoldData.status, 'active');
+    assert.equal(publishedMoldData.catalog_enabled, true);
+    assert.equal(publishedMoldData.photo_url, 'https://example.com/published.jpg');
     // Плоские 40% + себест по тиражу (запуск+обработка): мелкие тиражи ниже
     // лесенки, крупные — выше (при 3000 маржа 40% > прежних 35%).
     assert.equal(publishedMoldData.tiers_prices[50], 440);
@@ -707,6 +771,41 @@ async function main() {
     assert.equal(publishedMoldData.tiers_prices[1000], 275);
     assert.equal(publishedMoldData.tiers_prices[3000], 265);
     assert.match(String(publishedMoldData.tiers_published_at || ''), /^20\d\d-/);
+
+    // A retired blank must be hidden even when old priceN values are still present.
+    context.__publishedCatalogUpdates = [];
+    context.supabaseClient = {
+        from() {
+            return {
+                select() {
+                    return {
+                        eq() {
+                            return {
+                                async single() {
+                                    return {
+                                        data: { mold_data: { status: 'active', catalog_enabled: true, tiers_prices: { 50: 500 }, price50: 500, price100: 400 } },
+                                        error: null,
+                                    };
+                                },
+                            };
+                        },
+                    };
+                },
+                update(payload) {
+                    return { async eq(_column, value) { context.__publishedCatalogUpdates.push({ id: value, payload }); return { error: null }; } };
+                },
+            };
+        },
+    };
+    vm.runInContext(`Molds.allMolds = [{ id: 124, name: 'Выключенный бланк', status: 'retired', collection: 'Бусины' }]`, context);
+    await vm.runInContext(`Molds.publishCatalog()`, context);
+    assert.equal(context.__publishedCatalogUpdates.length, 1);
+    const unpublishedMoldData = context.__publishedCatalogUpdates[0].payload.mold_data;
+    assert.equal(unpublishedMoldData.status, 'retired');
+    assert.equal(unpublishedMoldData.catalog_enabled, false);
+    assert.equal(JSON.stringify(unpublishedMoldData.tiers_prices), '{}');
+    assert.equal(unpublishedMoldData.price50, 0);
+    assert.equal(unpublishedMoldData.price100, 0);
 
     // Regression: publishCatalog must heal a corrupted {"0":..,"1":..} mold_data
     // (calc2 Yandex write path, molds id 10/16). mergeMoldData has to un-nest the
