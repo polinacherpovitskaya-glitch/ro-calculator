@@ -132,7 +132,8 @@ function createContext() {
                 from(table) {
                     const state = { eqValue: null };
                     return {
-                        select() {
+                        select(columns = '*') {
+                            context.__remoteCalls.push({ table, action: 'select', columns });
                             const resolveRows = () => {
                                 context.__remoteCalls.push({ table, action: 'order' });
                                 if (context.__hangingTables.has(table)) {
@@ -373,6 +374,83 @@ function persistTableRows(context, table, payload) {
 }
 
 async function main() {
+    {
+        const context = createContext();
+        runScript(context, 'js/supabase.js');
+
+        const rows = JSON.parse(JSON.stringify(vm.runInContext(`_mergeOrderRows([
+            {
+                id: 1,
+                calculator_data: JSON.stringify({ discount_mode: 'percent', discount_value: 10 }),
+                total_revenue: 900,
+            },
+            {
+                id: 2,
+                calculator_data: { discount_mode: 'amount', discount_value: 250 },
+                total_revenue: 1750,
+            },
+            {
+                id: 3,
+                calculator_data: JSON.stringify(JSON.stringify({ discount_mode: 'percent', discount_value: 5 })),
+                total_revenue: 950,
+            },
+        ])`, context)));
+
+        assert.equal(rows[0].discount_mode, 'percent', 'TEXT calculator_data should hydrate order adjustments');
+        assert.equal(rows[1].discount_mode, 'amount', 'JSONB calculator_data should hydrate order adjustments');
+        assert.equal(rows[2].discount_value, 5, 'historical double-encoded calculator_data should remain readable');
+        assert.equal(rows[0].total_revenue_plan, 900);
+        assert.equal(rows[1].total_revenue_plan, 1750);
+
+        const hydratedItems = JSON.parse(JSON.stringify(vm.runInContext(`_hydrateOrderItemRows([
+            { id: 11, item_data: JSON.stringify({ item_type: 'product', pieces_per_hour: 100 }) },
+            { id: 12, item_data: { item_type: 'hardware', hardware_price_per_unit: 7 } },
+            { id: 13, item_data: JSON.stringify(JSON.stringify({ item_type: 'packaging', packaging_price_per_unit: 8 })) },
+        ])`, context)));
+        assert.equal(hydratedItems[0].pieces_per_hour, 100, 'TEXT item_data should hydrate');
+        assert.equal(hydratedItems[1].hardware_price_per_unit, 7, 'JSONB item_data should hydrate');
+        assert.equal(hydratedItems[2].packaging_price_per_unit, 8, 'double-encoded legacy item_data should hydrate');
+    }
+
+    {
+        const context = createContext();
+        context.__tableRows.order_items = [{
+            id: 900001,
+            order_id: 900,
+            item_number: 1,
+            item_type: 'product',
+            product_name: 'Parity fixture',
+            quantity: 100,
+        }];
+        runScript(context, 'js/supabase.js');
+        vm.runInContext('initSupabase()', context);
+
+        await vm.runInContext('loadOrderItemsByOrderIds([900], { summary: true })', context);
+        const selectCall = context.__remoteCalls.find(call => (
+            call.table === 'order_items'
+            && call.action === 'select'
+            && String(call.columns).includes('item_data->')
+        ));
+        assert.ok(selectCall, 'summary load should issue a projected order_items select');
+        const columns = String(selectCall.columns);
+        [
+            'item_type',
+            'setup_hours_override',
+            'colors',
+            'color_count',
+            'printing_price_per_unit',
+            'hardware_warehouse_item_id',
+            'packaging_warehouse_item_id',
+            'elements',
+            'cords',
+            'carabiners',
+            '_totalSellPerUnit',
+        ].forEach(field => {
+            assert.match(columns, new RegExp(`${field}:item_data->${field}`), `summary must project ${field}`);
+        });
+        assert.doesNotMatch(columns, /color_solution_attachment|base64|photo|thumbnail/i, 'summary must not load heavy attachment fields');
+    }
+
     {
         const context = createContext();
         runScript(context, 'js/supabase.js');
