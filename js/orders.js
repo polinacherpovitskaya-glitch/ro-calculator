@@ -609,8 +609,8 @@ const Orders = {
                 catch (_) { this._loadBarEntries = []; }
             }
             const settings = (typeof App !== 'undefined' && App.settings) || {};
-            const { load, label } = collectQuarterLoad(this.allOrders, this._loadBarEntries || [], settings, new Date());
-            renderProductionLoadBar(el, load, label);
+            const { load, label, breakdown } = collectQuarterLoad(this.allOrders, this._loadBarEntries || [], settings, new Date());
+            renderProductionLoadBar(el, load, label, breakdown);
         } catch (e) {
             console.warn('renderLoadBar failed', e);
         }

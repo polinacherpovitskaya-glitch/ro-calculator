@@ -97,9 +97,15 @@ test('collectQuarterLoad: считает продано из заказов и �
     ];
     const entries = [{ date: '2026-08-10', hours: 12 }];
     const settings = { seasonal_load_plan_json: JSON.stringify({ Q3: 1632 }) };
-    const { load, label } = collectQuarterLoad(orders, entries, settings, now);
+    const { load, label, breakdown } = collectQuarterLoad(orders, entries, settings, now);
     assert.equal(load.plan, 1632);
     assert.equal(load.sold, 60);   // 40 + 20
     assert.equal(load.done, 12);
     assert.equal(label, 'III квартал');
+    // breakdown для ховера: сделанные часы без order_id -> «вне заказов»
+    assert.equal(breakdown.doneRows.length, 1);
+    assert.ok(breakdown.doneRows[0].name.includes('вне заказов'));
+    assert.equal(breakdown.doneRows[0].hours, 12);
+    // remain по проданным заказам квартала: 40 и 20 (ничего не сделано по ним)
+    assert.deepEqual(breakdown.remainRows.map(r => r.hours), [40, 20]);
 });

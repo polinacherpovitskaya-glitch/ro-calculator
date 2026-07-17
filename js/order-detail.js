@@ -132,6 +132,15 @@ const OrderDetail = {
         const marginPercent = Number(this.currentFinancial?.marginPercent || o.margin_percent_plan || 0);
         const hours = Number(this.currentFinancial?.hours || o.total_hours_plan || 0);
 
+        // Список заказов показывает маржу, СОХРАНЁННУЮ при продаже (по ставкам
+        // и нормам того дня); карточка — живой пересчёт по текущим параметрам.
+        // Подписываем сохранённую, когда они расходятся, чтобы разница
+        // «в списке 8% — в карточке 17%» не выглядела багом.
+        const storedMarginPct = Number(o.margin_percent_plan ?? o.margin_percent ?? 0);
+        const marginNote = (storedMarginPct && Math.abs(storedMarginPct - marginPercent) >= 1)
+            ? `<div class="text-muted" style="font-size:11px;margin-top:2px;" title="Зафиксировано при сохранении заказа — по ценам и ставкам того дня. Крупная цифра — пересчёт по сегодняшним параметрам.">при продаже: ${formatPercent(storedMarginPct)}</div>`
+            : '';
+
         document.getElementById('od-stats').innerHTML = `
             <div class="stat-card">
                 <div class="stat-label">Выручка</div>
@@ -140,6 +149,7 @@ const OrderDetail = {
             <div class="stat-card">
                 <div class="stat-label">Маржа</div>
                 <div class="stat-value ${marginPercent >= 30 ? 'text-green' : 'text-red'}">${formatPercent(marginPercent)}</div>
+                ${marginNote}
             </div>
             <div class="stat-card">
                 <div class="stat-label">Часы</div>
