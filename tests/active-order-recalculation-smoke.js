@@ -41,6 +41,16 @@ assert.equal(
     'custom has 2 h for each of three forms plus 0.5 h for each colour',
 );
 assert.equal(
+    getItemSetupHours({ is_blank_mold: false, base_mold_in_stock: true, colors: [{ id: 1 }, { id: 2 }] }, params),
+    1,
+    'a repeated custom mold from stock has no two-hour setup but still needs each colour change',
+);
+assert.equal(
+    getItemSetupHours({ is_blank_mold: false, base_mold_in_stock: true, extra_molds: 2, colors: [{ id: 1 }, { id: 2 }] }, params),
+    5,
+    'stock base mold skips setup while each additional new mold still adds two hours',
+);
+assert.equal(
     getItemSetupHours({ is_blank_mold: false, setup_hours_override: 0.75, colors: [{ id: 1 }, { id: 2 }] }, params),
     1.5,
     'an explicit legacy setup override remains unchanged',
