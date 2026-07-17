@@ -2619,8 +2619,14 @@ async function loadOrders(filters = {}) {
     const shouldRefreshStaticOrderItems = _isStaticYandexMirrorRuntime()
         && localFallback.length > 0
         && (!Array.isArray(getLocal(LOCAL_KEYS.orderItems)) || getLocal(LOCAL_KEYS.orderItems).length === 0);
+    // calc.recycleobject.ru has a direct shared-data connection. A warm browser
+    // cache is useful only as an offline fallback there: returning it first made
+    // the orders board keep old saved margins after a recalculation had already
+    // updated the order header in Supabase. The static calc2 mirror still needs
+    // its cache/bootstrap-first path because it has no direct database access.
+    const preferSharedOrders = isSupabaseReady() && !_isStaticYandexMirrorRuntime();
 
-    if (localFallback.length > 0 && !shouldRefreshStaticOrderItems) {
+    if (localFallback.length > 0 && !shouldRefreshStaticOrderItems && !preferSharedOrders) {
         _setDataLoadMeta('orders', { source: 'local' });
         if (_isLocalDatasetDirty('orders') || _isLocalDatasetDirty('orderItems')) {
             syncDirtyLocalOrders({ silent: true }).catch(() => {});
@@ -2630,17 +2636,22 @@ async function loadOrders(filters = {}) {
         return localFallback;
     }
 
-    const bootstrapKeys = _isStaticYandexMirrorRuntime() ? ['orders', 'orderItems'] : ['orders'];
-    const bootstrapPayload = await _loadSameOriginBootstrap(bootstrapKeys);
-    if (bootstrapPayload && Array.isArray(bootstrapPayload.orders) && bootstrapPayload.orders.length > 0) {
-        const mergedPayload = _mergeBootstrapOrderPayload(bootstrapPayload);
-        setLocal(LOCAL_KEYS.orders, mergedPayload.orders);
-        if (Array.isArray(mergedPayload.orderItems)) {
-            setLocal(LOCAL_KEYS.orderItems, mergedPayload.orderItems);
+    // Bootstrap data is intentionally preferred on the static mirror. On the
+    // direct application it can be a stale generated snapshot, so ask
+    // Supabase first and only use local data if that request cannot complete.
+    if (!preferSharedOrders) {
+        const bootstrapKeys = _isStaticYandexMirrorRuntime() ? ['orders', 'orderItems'] : ['orders'];
+        const bootstrapPayload = await _loadSameOriginBootstrap(bootstrapKeys);
+        if (bootstrapPayload && Array.isArray(bootstrapPayload.orders) && bootstrapPayload.orders.length > 0) {
+            const mergedPayload = _mergeBootstrapOrderPayload(bootstrapPayload);
+            setLocal(LOCAL_KEYS.orders, mergedPayload.orders);
+            if (Array.isArray(mergedPayload.orderItems)) {
+                setLocal(LOCAL_KEYS.orderItems, mergedPayload.orderItems);
+            }
+            _ordersLastSyncAt = Date.now();
+            _setDataLoadMeta('orders', { source: 'bootstrap' });
+            return applyOrderFilters(mergedPayload.orders);
         }
-        _ordersLastSyncAt = Date.now();
-        _setDataLoadMeta('orders', { source: 'bootstrap' });
-        return applyOrderFilters(mergedPayload.orders);
     }
     if (isSupabaseReady()) {
         try {

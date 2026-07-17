@@ -233,7 +233,14 @@ function createContext() {
                                     return chain;
                                 },
                                 order() {
-                                    return resolveRows();
+                                    const result = resolveRows();
+                                    // Supabase query builders remain chainable after order().
+                                    // Keep the test double compatible with loadOrders(), which
+                                    // applies the deleted-status filter after ordering.
+                                    result.eq = () => result;
+                                    result.neq = () => result;
+                                    result.limit = () => result;
+                                    return result;
                                 },
                             };
                         },
@@ -1582,6 +1589,13 @@ async function main() {
 
     {
         const context = createContext();
+        context.location = {
+            href: 'https://calc2.recycleobject.ru/#orders',
+            origin: 'https://calc2.recycleobject.ru',
+            protocol: 'https:',
+            hostname: 'calc2.recycleobject.ru',
+        };
+        context.window.location = context.location;
         context.__hangingTables = new Set(['orders']);
         context.__bootstrapOrders = [{
             id: 9102,
@@ -1611,6 +1625,7 @@ async function main() {
     {
         const context = createContext();
         context.__hangingBootstrapKeys = new Set(['orders']);
+        context.__hangingTables = new Set(['orders']);
         runScript(context, 'js/supabase.js');
         vm.runInContext(`
             initSupabase();
@@ -1634,6 +1649,40 @@ async function main() {
         assert.equal(winner.kind, 'resolved', 'orders should resolve from warm local cache without waiting for bootstrap');
         assert.equal(winner.count, 1);
         assert.equal(winner.firstClient, 'Warm Cached Order');
+    }
+
+    {
+        const context = createContext();
+        context.__tableRows.orders = [{
+            id: 502,
+            status: 'production_casting',
+            client_name: 'Fresh shared order',
+            margin_percent: 25.02,
+            created_at: '2026-07-17T10:00:00.000Z',
+            updated_at: '2026-07-17T17:26:55.628Z',
+        }];
+        runScript(context, 'js/supabase.js');
+        vm.runInContext(`
+            initSupabase();
+            setLocal(LOCAL_KEYS.orders, [{
+                id: 502,
+                status: 'production_casting',
+                client_name: 'Stale browser order',
+                margin_percent: 33.6,
+                created_at: '2026-07-17T10:00:00.000Z',
+                updated_at: '2026-07-17T14:00:00.000Z'
+            }]);
+        `, context);
+
+        const rows = JSON.parse(JSON.stringify(await vm.runInContext(`loadOrders({})`, context)));
+        assert.equal(rows.length, 1);
+        assert.equal(rows[0].client_name, 'Fresh shared order', 'direct calc must not render a stale local order header');
+        assert.equal(rows[0].margin_percent, 25.02, 'board margin must come from the current shared header');
+        assert.equal(
+            context.__remoteCalls.some(call => call.table === 'orders' && call.action === 'select'),
+            true,
+            'direct calc should request current orders from Supabase even with a warm cache'
+        );
     }
 
     {
