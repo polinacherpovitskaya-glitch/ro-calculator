@@ -30,4 +30,4 @@
 
 - [x] Поднять версию во всех четырёх anchors и cache-bust `molds.js`/`supabase.js`.
 - [x] Прогнать syntax, version и browser smoke локально; production-smoke — после merge.
-- [ ] Открыть отдельный PR с документами и реализацией.
+- [x] Открыть отдельный PR с документами и реализацией: #170.
