@@ -70,18 +70,38 @@ function calculateSeasonalLoadConsensus({ workersCount, hoursPerWorker, workLoad
     };
 }
 
-function getSeasonalPercentagesFromSettings(settings, quarterCapacity) {
+function getSeasonalPlanEditorState(settings, quarterCapacity) {
     const storedPercents = parseSeasonalLoadJson(settings?.seasonal_load_percent_json);
     const storedHours = parseSeasonalLoadJson(settings?.seasonal_load_plan_json);
-    return SEASONAL_LOAD_QUARTERS.map(key => {
-        const savedPercent = Number(storedPercents[key]);
-        if (Number.isFinite(savedPercent)) return Math.round(savedPercent * 10) / 10;
+    let hasSavedValue = false;
+    const percentages = SEASONAL_LOAD_QUARTERS.map(key => {
+        const rawPercent = storedPercents[key];
+        const savedPercent = Number(rawPercent);
+        if (rawPercent !== '' && rawPercent !== null && rawPercent !== undefined && Number.isFinite(savedPercent)) {
+            hasSavedValue = true;
+            return Math.round(savedPercent * 10) / 10;
+        }
         const savedHours = Number(storedHours[key]);
         if (Number.isFinite(savedHours) && savedHours >= 0 && quarterCapacity > 0) {
+            hasSavedValue = true;
             return Math.round(savedHours * 1000 / quarterCapacity) / 10;
         }
         return null;
     });
+
+    if (hasSavedValue) return { source: 'saved', percentages };
+
+    // A blank JSON plan has always meant "use the yearly load ratio evenly".
+    // Show that effective distribution instead of four misleading blank fields.
+    const fallbackPercent = Math.round(seasonalLoadNumber(settings?.work_load_ratio) * 1000) / 10;
+    return {
+        source: 'derived',
+        percentages: SEASONAL_LOAD_QUARTERS.map(() => fallbackPercent),
+    };
+}
+
+function getSeasonalPercentagesFromSettings(settings, quarterCapacity) {
+    return getSeasonalPlanEditorState(settings, quarterCapacity).percentages;
 }
 
 const Settings = {
@@ -95,6 +115,10 @@ const Settings = {
     employeeAuthAudit: null,
     editingAuthAccountId: null,
     lastIssuedAuthCredentials: null,
+    _visibleSettingsSnapshot: null,
+    _seasonalPlanSource: 'derived',
+    _seasonalPlanEdited: false,
+    _pendingSharedSettings: null,
     // Tabs that require admin access
     ADMIN_TABS: new Set(['indirect', 'costs', 'logins', 'sessions', 'backup']),
     PAYROLL_PROFILE_LABELS: {
@@ -178,6 +202,10 @@ const Settings = {
         const s = App.settings;
         if (!s) return;
 
+        this._visibleSettingsSnapshot = { ...s };
+        this._pendingSharedSettings = null;
+        this._setSettingsSyncNotice('');
+
         // Fill all numeric inputs with data-key attribute
         document.querySelectorAll('[data-key]').forEach(input => {
             const key = input.dataset.key;
@@ -196,10 +224,12 @@ const Settings = {
         // Seasonality is edited as a percentage of one quarter. Old saved
         // hour plans are converted on load, keeping existing boards intact.
         const quarterCapacity = seasonalLoadNumber(s.workers_count) * seasonalLoadNumber(s.hours_per_worker) * 3;
-        const seasonalPercentages = getSeasonalPercentagesFromSettings(s, quarterCapacity);
+        const seasonalPlan = getSeasonalPlanEditorState(s, quarterCapacity);
+        this._seasonalPlanSource = seasonalPlan.source;
+        this._seasonalPlanEdited = false;
         ['q1', 'q2', 'q3', 'q4'].forEach((q, i) => {
             const el = document.getElementById('set-seasonal-' + q);
-            if (el) el.value = seasonalPercentages[i] === null ? '' : seasonalPercentages[i];
+            if (el) el.value = seasonalPlan.percentages[i] === null ? '' : seasonalPlan.percentages[i];
         });
 
         const yFrom = document.getElementById('set-holidays-year-from');
@@ -208,6 +238,71 @@ const Settings = {
         if (yFrom && !yFrom.value) yFrom.value = String(nowYear);
         if (yTo && !yTo.value) yTo.value = String(nowYear + 1);
         this.updateProductionHints();
+    },
+
+    markSeasonalPlanEdited() {
+        this._seasonalPlanEdited = true;
+        this._seasonalPlanSource = 'saved';
+    },
+
+    _setSettingsSyncNotice(text) {
+        const notice = document.getElementById('settings-sync-notice');
+        if (!notice) return;
+        notice.textContent = text || '';
+        notice.style.display = text ? '' : 'none';
+    },
+
+    _captureVisibleSettings() {
+        const captured = { ...(this._visibleSettingsSnapshot || App.settings || {}) };
+        document.querySelectorAll('#settings-tab-production [data-key]').forEach(input => {
+            const key = input.dataset.key;
+            captured[key] = parseFloat(input.value) || 0;
+        });
+        document.querySelectorAll('#settings-tab-production [data-key-text]').forEach(input => {
+            captured[input.dataset.keyText] = input.value.trim();
+        });
+
+        if (this._seasonalPlanEdited) {
+            const quarterPercentages = ['q1', 'q2', 'q3', 'q4'].map(q => {
+                const value = document.getElementById('set-seasonal-' + q)?.value;
+                return value === '' || value === undefined ? null : Number(value);
+            });
+            const seasonal = calculateSeasonalLoadConsensus({
+                workersCount: captured.workers_count,
+                hoursPerWorker: captured.hours_per_worker,
+                workLoadRatio: captured.work_load_ratio,
+                quarterPercentages,
+            });
+            if (seasonal.validForSave && !seasonal.isEmpty) {
+                captured.seasonal_load_percent_json = JSON.stringify({
+                    Q1: seasonal.percentages[0], Q2: seasonal.percentages[1],
+                    Q3: seasonal.percentages[2], Q4: seasonal.percentages[3],
+                });
+                captured.seasonal_load_plan_json = JSON.stringify({
+                    Q1: seasonal.quarterHours[0], Q2: seasonal.quarterHours[1],
+                    Q3: seasonal.quarterHours[2], Q4: seasonal.quarterHours[3],
+                });
+            }
+        }
+        return captured;
+    },
+
+    preserveVisibleSettingsOnRemoteRefresh(sharedSettings) {
+        if (!this._visibleSettingsSnapshot || !sharedSettings || typeof sharedSettings !== 'object') return null;
+        const localSettings = this._captureVisibleSettings();
+        const differs = Object.keys(sharedSettings).some(key => String(localSettings[key] ?? '') !== String(sharedSettings[key] ?? ''));
+        if (!differs) return null;
+
+        // The remote refresh has already updated the browser cache. Restore this
+        // open form's values so a background request cannot silently discard
+        // work in progress. The user decides by pressing the existing Save button.
+        if (typeof setLocal === 'function' && typeof LOCAL_KEYS !== 'undefined') {
+            setLocal(LOCAL_KEYS.settings, localSettings);
+        }
+        this._visibleSettingsSnapshot = { ...localSettings };
+        this._pendingSharedSettings = { ...sharedSettings };
+        this._setSettingsSyncNotice('Показаны ваши локальные настройки: они отличаются от общей базы и сохранены в этой форме. Нажмите «Сохранить», чтобы применить именно их для всех.');
+        return localSettings;
     },
 
     _rfProdCalendarHolidaysByYear(year) {
@@ -315,16 +410,12 @@ const Settings = {
         const workLoad = readNum('set-work_load_ratio', 0.8);
         const planningWorkers = readNum('set-planning_workers_count', 2);
         const planningHoursPerDay = readNum('set-planning_hours_per_day', 8);
-        const plasticRatio = readNum('set-plastic_injection_ratio', 0.7);
-        const packagingRatio = readNum('set-packaging_ratio', 0.3);
         const wasteFactor = readNum('set-waste_factor', 1.1);
 
         setHint('set-hours-per-worker-hint', `ч/мес (сейчас: ${hoursPerWorker})`);
         setHint('set-work-load-hint', `${workLoad} = ${pct(workLoad)}`);
         setHint('set-planning-workers-hint', `${planningWorkers} чел для реального плана, отдельно от pricing`);
         setHint('set-planning-hours-hint', `${planningHoursPerDay} ч/день в календаре`);
-        setHint('set-plastic-ratio-hint', `${plasticRatio} = ${pct(plasticRatio)}`);
-        setHint('set-packaging-ratio-hint', `${packagingRatio} = ${pct(packagingRatio)}`);
         const wastePct = Math.round((wasteFactor - 1) * 1000) / 10;
         const wasteSign = wastePct >= 0 ? '+' : '';
         setHint('set-waste-factor-hint', `${wasteFactor} = ${wasteSign}${wastePct}% к времени/себестоимости`);
@@ -334,6 +425,13 @@ const Settings = {
         // годовым коэффициентом, иначе доска и ценообразование говорят о
         // разной допустимой загрузке.
         const workersCount = readNum('set-workers_count', 4);
+        if (this._seasonalPlanSource === 'derived' && !this._seasonalPlanEdited) {
+            const fallbackPercent = Math.round(workLoad * 1000) / 10;
+            ['q1', 'q2', 'q3', 'q4'].forEach(q => {
+                const el = document.getElementById('set-seasonal-' + q);
+                if (el) el.value = fallbackPercent;
+            });
+        }
         const seasonalRaw = ['q1', 'q2', 'q3', 'q4'].map(q => {
             const el = document.getElementById('set-seasonal-' + q);
             const raw = String(el?.value || '').trim();
@@ -351,12 +449,16 @@ const Settings = {
             if (hoursHint) {
                 hoursHint.textContent = seasonal.percentages[index] === null
                     ? `${Math.round(seasonal.quarterCapacity).toLocaleString('ru-RU')} ч мощности в квартале`
-                    : `${seasonal.quarterHours[index].toLocaleString('ru-RU')} ч/квартал`;
+                    : `${pct(seasonal.percentages[index] / 100)} · ${seasonal.quarterHours[index].toLocaleString('ru-RU')} ч/квартал`;
             }
             if (input) input.setAttribute('aria-invalid', seasonal.isEmpty || seasonal.validForSave ? 'false' : 'true');
         });
 
-        let seasonalHint = `Пустой план использует ровно ${pct(workLoad)} каждый квартал.`;
+        const annualHours = Math.round(seasonal.targetHours).toLocaleString('ru-RU');
+        const monthlyHours = Math.round(seasonal.targetHours / 12).toLocaleString('ru-RU');
+        setHint('set-pricing-load-summary', `В цену заложено: ${pct(workLoad)} годовой загрузки = ${annualHours} ч/год (${monthlyHours} ч/мес) при ${workersCount} чел × ${hoursPerWorker} ч.`);
+
+        let seasonalHint = `Распределение сейчас: ${pct(workLoad)} в каждом квартале. Оно выведено из годового коэффициента и отдельно ещё не сохранено.`;
         if (seasonal.outOfRange) {
             seasonalHint = 'Укажите для каждого квартала число от 0% до 100%.';
         } else if (!seasonal.isEmpty && !seasonal.isComplete) {
@@ -365,7 +467,7 @@ const Settings = {
             const sign = seasonal.differenceHours > 0 ? '+' : '−';
             const deltaHours = Math.abs(seasonal.differenceHours).toLocaleString('ru-RU');
             seasonalHint = `Сейчас ${pct(seasonal.annualPercent / 100)} за год (${seasonal.plannedHours.toLocaleString('ru-RU')} ч), а финансовая модель — ${pct(workLoad)} (${seasonal.targetHours.toLocaleString('ru-RU')} ч). Разница ${sign}${deltaHours} ч. Сумма кварталов должна быть ${seasonal.requiredPercentSum}% — сохранить нельзя.`;
-        } else if (seasonal.isComplete) {
+        } else if (seasonal.isComplete && !(this._seasonalPlanSource === 'derived' && !this._seasonalPlanEdited)) {
             seasonalHint = `Согласовано: ${pct(seasonal.annualPercent / 100)} за год · ${seasonal.plannedHours.toLocaleString('ru-RU')} ч. Доска и цены используют один консенсус.`;
         }
         setHint('set-seasonal-hint', seasonalHint);
@@ -398,7 +500,8 @@ const Settings = {
             App.toast('Сначала согласуйте квартальные проценты с годовой загрузкой');
             return;
         }
-        if (!seasonal.isEmpty) {
+        const shouldPersistSeasonalPlan = this._seasonalPlanEdited || this._seasonalPlanSource === 'saved';
+        if (!seasonal.isEmpty && shouldPersistSeasonalPlan) {
             newSettings['seasonal_load_plan_json'] = JSON.stringify({
                 Q1: seasonal.quarterHours[0], Q2: seasonal.quarterHours[1],
                 Q3: seasonal.quarterHours[2], Q4: seasonal.quarterHours[3],
@@ -407,7 +510,7 @@ const Settings = {
                 Q1: seasonal.percentages[0], Q2: seasonal.percentages[1],
                 Q3: seasonal.percentages[2], Q4: seasonal.percentages[3],
             });
-        } else {
+        } else if (this._seasonalPlanEdited) {
             newSettings['seasonal_load_plan_json'] = '';
             newSettings['seasonal_load_percent_json'] = '';
         }
@@ -417,6 +520,10 @@ const Settings = {
         // Update app state
         App.settings = newSettings;
         App.params = getProductionParams(newSettings);
+        this._visibleSettingsSnapshot = { ...newSettings };
+        this._pendingSharedSettings = null;
+        this._seasonalPlanEdited = false;
+        this._setSettingsSyncNotice('');
 
         // Recalculate if calculator has data
         if (Calculator && Calculator.items && Calculator.items.length > 0) {

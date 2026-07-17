@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v403';
+const APP_VERSION = 'v404';
 
 const App = {
     currentPage: 'orders',
@@ -237,8 +237,15 @@ const App = {
         window.addEventListener('ro:settings-refreshed', (event) => {
             const settings = event?.detail?.settings;
             if (!settings || typeof settings !== 'object') return;
-            this.settings = settings;
-            this.params = getProductionParams(settings);
+            const visibleLocalSettings = this.currentPage === 'settings'
+                && typeof Settings !== 'undefined'
+                && Settings
+                && typeof Settings.preserveVisibleSettingsOnRemoteRefresh === 'function'
+                ? Settings.preserveVisibleSettingsOnRemoteRefresh(settings)
+                : null;
+            const activeSettings = visibleLocalSettings || settings;
+            this.settings = activeSettings;
+            this.params = getProductionParams(activeSettings);
             if (this.currentPage === 'molds' && typeof Molds !== 'undefined' && Molds && typeof Molds.load === 'function') {
                 Promise.resolve(Molds.load()).catch(() => {});
             }

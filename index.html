@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="css/style.css?v=379">
     <script>
         (function () {
-            const CURRENT_HTML_VERSION = 'v403';
+            const CURRENT_HTML_VERSION = 'v404';
             const ATTEMPT_KEY = 'ro_calc_force_update_attempts';
 
             function parseVersion(version) {
@@ -187,7 +187,7 @@
     <aside class="sidebar">
         <div class="sidebar-brand">
             <h2>Recycle Object</h2>
-            <span>Калькулятор <span id="app-version">v403</span></span>
+            <span>Калькулятор <span id="app-version">v404</span></span>
         </div>
         <nav class="sidebar-nav">
             <div class="sidebar-group-label">Каждый день</div>
@@ -2773,6 +2773,7 @@
                 <h1>Настройки</h1>
                 <button class="btn btn-success" id="settings-save-all" onclick="Settings.saveAll()">Сохранить</button>
             </div>
+            <div id="settings-sync-notice" class="form-hint" style="display:none;margin:-8px 0 12px;padding:10px 12px;border:1px solid #f0b44d;border-radius:6px;background:#fff8e8;color:#754900;font-size:13px;"></div>
 
             <div class="tabs">
                 <div class="tab active" data-tab="production" onclick="Settings.switchTab('production')">Производство</div>
@@ -2810,27 +2811,28 @@
                             <span class="form-hint" id="set-work-load-hint">0.8 = 80%</span>
                         </div>
                     </div>
+                    <div class="form-hint" id="set-pricing-load-summary" style="margin:-2px 0 16px;font-size:13px;font-weight:600;color:var(--text-secondary);"></div>
                     <h3 style="margin: 20px 0 8px;">Сезонный план загрузки (% мощности квартала)</h3>
-                    <p class="form-hint" style="margin:0 0 8px;">Проценты превращаются в часы автоматически. Годовой итог обязан совпасть с коэффициентом загрузки выше — это один финансовый консенсус.</p>
+                    <p class="form-hint" style="margin:0 0 8px;">Это распределение того же годового коэффициента, который заложен в цену. Проценты превращаются в часы автоматически; годовой итог обязан совпасть с коэффициентом загрузки выше.</p>
                     <div class="form-row">
                         <div class="form-group">
                             <label>Q1 (мёртвый)</label>
-                            <input type="number" min="0" max="100" step="0.1" id="set-seasonal-q1" oninput="Settings.updateProductionHints()">
+                            <input type="number" min="0" max="100" step="0.1" id="set-seasonal-q1" oninput="Settings.markSeasonalPlanEdited(); Settings.updateProductionHints()">
                             <span class="form-hint" id="set-seasonal-q1-hours">ч/квартал</span>
                         </div>
                         <div class="form-group">
                             <label>Q2</label>
-                            <input type="number" min="0" max="100" step="0.1" id="set-seasonal-q2" oninput="Settings.updateProductionHints()">
+                            <input type="number" min="0" max="100" step="0.1" id="set-seasonal-q2" oninput="Settings.markSeasonalPlanEdited(); Settings.updateProductionHints()">
                             <span class="form-hint" id="set-seasonal-q2-hours">ч/квартал</span>
                         </div>
                         <div class="form-group">
                             <label>Q3</label>
-                            <input type="number" min="0" max="100" step="0.1" id="set-seasonal-q3" oninput="Settings.updateProductionHints()">
+                            <input type="number" min="0" max="100" step="0.1" id="set-seasonal-q3" oninput="Settings.markSeasonalPlanEdited(); Settings.updateProductionHints()">
                             <span class="form-hint" id="set-seasonal-q3-hours">ч/квартал</span>
                         </div>
                         <div class="form-group">
                             <label>Q4 (пик)</label>
-                            <input type="number" min="0" max="100" step="0.1" id="set-seasonal-q4" oninput="Settings.updateProductionHints()">
+                            <input type="number" min="0" max="100" step="0.1" id="set-seasonal-q4" oninput="Settings.markSeasonalPlanEdited(); Settings.updateProductionHints()">
                             <span class="form-hint" id="set-seasonal-q4-hours">ч/квартал</span>
                         </div>
                     </div>
@@ -2852,16 +2854,6 @@
                         </div>
                     </div>
                     <div class="form-row">
-                        <div class="form-group">
-                            <label>Доля литья пластика</label>
-                            <input type="number" step="0.05" id="set-plastic_injection_ratio" data-key="plastic_injection_ratio" oninput="Settings.updateProductionHints()">
-                            <span class="form-hint" id="set-plastic-ratio-hint">0.7 = 70%</span>
-                        </div>
-                        <div class="form-group">
-                            <label>Доля упаковки</label>
-                            <input type="number" step="0.05" id="set-packaging_ratio" data-key="packaging_ratio" oninput="Settings.updateProductionHints()">
-                            <span class="form-hint" id="set-packaging-ratio-hint">0.3 = 30%</span>
-                        </div>
                         <div class="form-group">
                             <label>Коэфф. потерь</label>
                             <input type="number" step="0.05" id="set-waste_factor" data-key="waste_factor" oninput="Settings.updateProductionHints()">
@@ -3622,7 +3614,7 @@
 <script src="js/supabase.js?v=403"></script>
 <script src="js/task-events.js?v=1"></script>
 <script src="js/calculator.js?v=403"></script>
-<script src="js/app.js?v=403"></script>
+<script src="js/app.js?v=404"></script>
 <script src="js/tpa.js?v=4"></script>
 <script src="js/order-detail.js?v=397"></script>
 <script src="js/orders.js?v=402"></script>
@@ -3648,7 +3640,7 @@
 <script src="js/marketplaces.js?v=280"></script>
 <script src="js/warehouse.js?v=196"></script>
 <script src="js/monitoring.js?v=2"></script>
-<script src="js/settings.js?v=401"></script>
+<script src="js/settings.js?v=404"></script>
 <script src="js/pendant.js?v=17"></script>
 </body>
 </html>
