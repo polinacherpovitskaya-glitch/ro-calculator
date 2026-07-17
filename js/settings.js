@@ -112,6 +112,20 @@ const Settings = {
                 input.value = s[key];
             }
         });
+        // Seasonal load plan (одна JSON-настройка → 4 квартальных поля)
+        let seasonalPlan = {};
+        if (s.seasonal_load_plan_json) {
+            try {
+                seasonalPlan = typeof s.seasonal_load_plan_json === 'string'
+                    ? JSON.parse(s.seasonal_load_plan_json)
+                    : s.seasonal_load_plan_json;
+            } catch (_) { seasonalPlan = {}; }
+        }
+        ['q1', 'q2', 'q3', 'q4'].forEach((q, i) => {
+            const el = document.getElementById('set-seasonal-' + q);
+            if (el) el.value = seasonalPlan['Q' + (i + 1)] || '';
+        });
+
         const yFrom = document.getElementById('set-holidays-year-from');
         const yTo = document.getElementById('set-holidays-year-to');
         const nowYear = new Date().getFullYear();
@@ -239,6 +253,16 @@ const Settings = {
         const wasteSign = wastePct >= 0 ? '+' : '';
         setHint('set-waste-factor-hint', `${wasteFactor} = ${wasteSign}${wastePct}% к времени/себестоимости`);
         setHint('set-planning-capacity-summary', `Календарь считает ${planningWorkers * planningHoursPerDay} ч/день как реальную мощность цеха. Цены и калькулятор остаются на своих pricing-параметрах.`);
+
+        // Сезонный план: сумма за год и средняя загрузка (держать ≈ коэфф. загрузки для покрытия косвенных)
+        const workersCount = readNum('set-workers_count', 4);
+        const seasonalSum = ['q1', 'q2', 'q3', 'q4'].reduce((a, q) => a + readNum('set-seasonal-' + q, 0), 0);
+        const capYear = workersCount * hoursPerWorker * 12;
+        const avgLoad = capYear > 0 ? seasonalSum / capYear : 0;
+        const target = pct(workLoad);
+        setHint('set-seasonal-hint', seasonalSum > 0
+            ? `Год: ${seasonalSum.toLocaleString('ru-RU')} ч · среднее ${pct(avgLoad)} загрузки (держи ≈ ${target}, иначе косвенные за год не покрываются)`
+            : `Сезонная загрузка по кварталам. Среднее держи ≈ ${target}.`);
     },
 
     async saveAll() {
@@ -254,6 +278,17 @@ const Settings = {
             const key = input.dataset.keyText;
             newSettings[key] = input.value.trim();
         });
+
+        // Сезонный план: 4 квартальных поля → одна JSON-настройка
+        const seasonalQ = ['q1', 'q2', 'q3', 'q4'].map(q => {
+            const el = document.getElementById('set-seasonal-' + q);
+            return el ? Math.max(0, Math.round(parseFloat(el.value) || 0)) : 0;
+        });
+        if (seasonalQ.some(v => v > 0)) {
+            newSettings['seasonal_load_plan_json'] = JSON.stringify({
+                Q1: seasonalQ[0], Q2: seasonalQ[1], Q3: seasonalQ[2], Q4: seasonalQ[3],
+            });
+        }
 
         await saveAllSettings(newSettings);
 
