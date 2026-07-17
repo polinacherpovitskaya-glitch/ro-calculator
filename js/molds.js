@@ -1153,6 +1153,34 @@ const Molds = {
         let errors = 0;
         let noTiers = 0;
         const catalogRows = []; // зеркало для Google Sheets
+        let cleared = 0;
+
+        // Отключённые молды не должны оставаться в опубликованном каталоге:
+        // Figma-плагин читает tiers_prices напрямую, и без чистки «выключенные»
+        // бланки продолжали прилетать в каталог со старыми ценами.
+        const inactiveMolds = this.allMolds.filter(m => m.status !== 'active');
+        for (const m of inactiveMolds) {
+            try {
+                const { data: existing, error: fetchErr } = await supabaseClient
+                    .from('molds')
+                    .select('mold_data')
+                    .eq('id', m.id)
+                    .single();
+                if (fetchErr) continue;
+                let moldData = mergeMoldData(existing.mold_data);
+                if (!moldData || typeof moldData !== 'object') continue;
+                if (moldData.tiers_prices && Object.keys(moldData.tiers_prices).length) {
+                    moldData.tiers_prices = {};
+                    const { error: updErr } = await supabaseClient
+                        .from('molds')
+                        .update({ mold_data: moldData })
+                        .eq('id', m.id);
+                    if (!updErr) cleared++;
+                }
+            } catch (e) {
+                console.warn('publishCatalog clear inactive failed for', m.id, e);
+            }
+        }
 
         for (const m of activeMolds) {
             try {
@@ -1254,6 +1282,7 @@ const Molds = {
 
         const message = `Опубликовано: ${updated}/${activeMolds.length}`
             + (noTiers > 0 ? ` (без цен: ${noTiers})` : '')
+            + (cleared > 0 ? ` (снято с каталога: ${cleared})` : '')
             + (errors > 0 ? ` (ошибок: ${errors})` : '');
         App.toast(message);
         console.log('publishCatalog summary:', { updated, errors, noTiers, total: activeMolds.length });
