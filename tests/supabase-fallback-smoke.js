@@ -38,6 +38,12 @@ function createContext() {
         Promise,
         setTimeout,
         clearTimeout,
+        // recovery-probe (PR #152) вызывает setInterval + window.addEventListener('focus');
+        // в юнит-тесте гонять его не надо → no-op (не падать и не держать процесс 12с-интервалом).
+        setInterval: () => 0,
+        clearInterval: () => {},
+        addEventListener: () => {},
+        removeEventListener: () => {},
         localStorage,
         sessionStorage,
         navigator: {},
