@@ -104,19 +104,55 @@ function doneHoursForRange(entries, from, to) {
 }
 
 // Собирает продано/сделано за текущий квартал и считает load.
+// breakdown — для ховер-тултипов: какие заказы сколько часов занимают.
 function collectQuarterLoad(orders, entries, settings, now) {
     const { from, to, label } = getQuarterBounds(now);
     const planHours = quarterTargetHours(settings, now);
+
+    const nameById = {};
+    (orders || []).forEach(o => { if (o && o.id != null) nameById[o.id] = o.order_name || ('заказ #' + o.id); });
+
+    // Сделано по заказам (все производственные записи квартала)
+    const doneByOrder = {};
+    (entries || []).forEach(e => {
+        const d = _entryDate(e);
+        if (!d || d < from || d > to) return;
+        const isProd = (typeof Factual !== 'undefined' && typeof Factual._isProductionLoadEntry === 'function')
+            ? Factual._isProductionLoadEntry(e) : true;
+        if (!isProd) return;
+        const key = e.order_id != null ? String(e.order_id) : 'none';
+        doneByOrder[key] = (doneByOrder[key] || 0) + roLoadNum(e.hours);
+    });
+
+    // Продано: заказы квартала, прошедшие фильтр
     let soldHours = 0;
+    const soldOrders = [];
     (orders || []).forEach(o => {
         if (!_isSoldOrder(o)) return;
         const d = _parseLocalDate(_orderProdDate(o));
         if (!d || d < from || d > to) return;
-        soldHours += roLoadNum(o.total_hours_plan);
+        const plan = roLoadNum(o.total_hours_plan);
+        soldHours += plan;
+        const done = doneByOrder[String(o.id)] || 0;
+        soldOrders.push({ id: o.id, name: o.order_name || ('заказ #' + o.id), plan, done, remain: Math.max(0, plan - done) });
     });
+
     const doneHours = doneHoursForRange(entries, from, to);
     const load = computeQuarterLoad({ planHours, soldHours, doneHours, now, from, to });
-    return { load, label };
+
+    const doneRows = Object.entries(doneByOrder)
+        .map(([key, hours]) => ({
+            name: key === 'none' ? 'вне заказов (сток, образцы…)' : (nameById[key] || ('заказ #' + key)),
+            hours,
+        }))
+        .filter(r => r.hours > 0.05)
+        .sort((a, b) => b.hours - a.hours);
+    const remainRows = soldOrders
+        .map(o => ({ name: o.name, hours: o.remain }))
+        .filter(r => r.hours > 0.05)
+        .sort((a, b) => b.hours - a.hours);
+
+    return { load, label, breakdown: { doneRows, remainRows, soldOrders } };
 }
 
 // --- рендер ---
@@ -137,24 +173,47 @@ function _ensureProductionLoadStyles() {
 .pl-pace.pl-ok{background:#dafbe1;color:#1a7f37;}
 .pl-pace.pl-warn{background:#fff1e5;color:#bc4c00;}
 .pl-pace.pl-neutral{background:#eaeef2;color:#57606a;}
+.pl-trackwrap{position:relative;padding-top:16px;}
 .pl-track{position:relative;height:12px;border-radius:999px;background:var(--pl-track,#eaeef2);border:1px solid rgba(0,0,0,.06);overflow:hidden;}
-.pl-seg{position:absolute;top:0;bottom:0;}
+.pl-seg{position:absolute;top:0;bottom:0;transition:width .6s ease,left .6s ease;}
 .pl-seg.pl-done{left:0;background:#2da44e;}
 .pl-seg.pl-sold{background:#388bfd;}
 .pl-track .pl-seg.pl-sold{left:var(--pl-sold-left,0);}
-.pl-now{position:absolute;top:-4px;bottom:-4px;width:2px;background:var(--text-primary,#24292f);z-index:2;}
+.pl-now{position:absolute;top:12px;bottom:-4px;width:2px;background:var(--text-primary,#24292f);z-index:2;}
+.pl-now-label{position:absolute;top:0;transform:translateX(-50%);font-size:11px;color:var(--text-secondary,#57606a);white-space:nowrap;z-index:2;}
+.pl-tip{position:absolute;z-index:5;min-width:220px;max-width:320px;background:var(--pl-tip-bg,#fff);border:1px solid rgba(0,0,0,.12);border-radius:8px;box-shadow:0 4px 14px rgba(0,0,0,.12);padding:8px 10px;font-size:12px;line-height:1.5;color:var(--text-primary,#24292f);pointer-events:none;display:none;}
+.pl-tip b{display:block;margin-bottom:4px;}
+.pl-tip .row{display:flex;justify-content:space-between;gap:12px;}
+.pl-tip .row span:last-child{font-variant-numeric:tabular-nums;white-space:nowrap;}
+.pl-tip .muted{color:var(--text-secondary,#57606a);}
 .pl-legend{display:flex;align-items:center;gap:16px;margin-top:12px;font-size:12px;flex-wrap:wrap;}
 .pl-dot{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px;}
 .pl-dot.pl-done{background:#2da44e;}
 .pl-dot.pl-sold{background:#388bfd;}
 .pl-dot.pl-gap{background:#eaeef2;border:1px solid rgba(0,0,0,.1);}
 .pl-goal{margin-left:auto;color:#bc4c00;}
-@media (prefers-color-scheme:dark){.pl-track{background:#30363d;border-color:rgba(255,255,255,.08);}.pl-dot.pl-gap{background:#30363d;}.pl-pace.pl-neutral{background:#21262d;color:#8b949e;}}
+@media (prefers-color-scheme:dark){.pl-track{background:#30363d;border-color:rgba(255,255,255,.08);}.pl-dot.pl-gap{background:#30363d;}.pl-pace.pl-neutral{background:#21262d;color:#8b949e;}.pl-tip{--pl-tip-bg:#1c2128;border-color:rgba(255,255,255,.14);}}
 `;
     document.head.appendChild(s);
 }
 
-function renderProductionLoadBar(container, load, label) {
+function _escLoad(s) {
+    return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
+
+function _tipHtml(title, rows, maxRows) {
+    const top = rows.slice(0, maxRows);
+    const restH = rows.slice(maxRows).reduce((s, r) => s + r.hours, 0);
+    let html = `<b>${_escLoad(title)}</b>`;
+    if (!top.length) return html + '<div class="muted">пока пусто</div>';
+    top.forEach(r => {
+        html += `<div class="row"><span>${_escLoad(r.name).slice(0, 44)}</span><span>${r.hours < 10 ? r.hours.toFixed(1) : Math.round(r.hours)} ч</span></div>`;
+    });
+    if (restH > 0.5) html += `<div class="row muted"><span>ещё ${rows.length - maxRows}…</span><span>${Math.round(restH)} ч</span></div>`;
+    return html;
+}
+
+function renderProductionLoadBar(container, load, label, breakdown) {
     if (!container) return;
     if (!load || load.plan <= 0) { container.innerHTML = ''; return; }
     _ensureProductionLoadStyles();
@@ -163,6 +222,7 @@ function renderProductionLoadBar(container, load, label) {
     const paceCls = load.status === 'ahead' ? 'pl-ok' : load.status === 'behind' ? 'pl-warn' : 'pl-neutral';
     const overNote = load.over > 0 ? ` · +${_hrsLoad(load.over)} ч сверх плана` : '';
     const soldWidth = Math.max(0, load.soldPct - load.donePct);
+    const nowPct = Math.round(load.elapsedRatio * 100);
     container.innerHTML = `
     <div class="pl-wrap">
       <div class="pl-head">
@@ -170,18 +230,57 @@ function renderProductionLoadBar(container, load, label) {
         <span class="pl-right">продано <b>${_hrsLoad(load.sold)}</b> / ${_hrsLoad(load.plan)} ч
           <span class="pl-pace ${paceCls}">${paceText}</span></span>
       </div>
-      <div class="pl-track">
-        <div class="pl-seg pl-done" style="width:${load.donePct}%"></div>
-        <div class="pl-seg pl-sold" style="left:${load.donePct}%;width:${soldWidth}%"></div>
-        <div class="pl-now" style="left:${Math.round(load.elapsedRatio * 100)}%"></div>
+      <div class="pl-trackwrap">
+        <div class="pl-now-label" style="left:${nowPct}%" title="Сколько квартала уже прошло. Заливка левее метки — отстаём от темпа, правее — идём с опережением.">сегодня · ${nowPct}%</div>
+        <div class="pl-track">
+          <div class="pl-seg pl-done" style="width:0%"></div>
+          <div class="pl-seg pl-sold" style="left:0%;width:0%"></div>
+          <div class="pl-now" style="left:${nowPct}%"></div>
+        </div>
+        <div class="pl-tip"></div>
       </div>
       <div class="pl-legend">
         <span><i class="pl-dot pl-done"></i>сделано ${_hrsLoad(load.done)} ч</span>
-        <span><i class="pl-dot pl-sold"></i>продано, в работе ${_hrsLoad(Math.max(0, load.sold - load.done))} ч</span>
+        <span><i class="pl-dot pl-sold"></i>ещё делать ${_hrsLoad(Math.max(0, load.sold - load.done))} ч</span>
         <span><i class="pl-dot pl-gap"></i>недобор ${_hrsLoad(load.gap)} ч${overNote}</span>
         <span class="pl-goal">до плана — продать ещё ${_hrsLoad(load.gap)} ч</span>
       </div>
     </div>`;
+
+    // Анимация появления: сегменты растут от нуля до реальных ширин.
+    const doneEl = container.querySelector('.pl-seg.pl-done');
+    const soldEl = container.querySelector('.pl-seg.pl-sold');
+    const raf = (typeof requestAnimationFrame === 'function') ? requestAnimationFrame : (fn => fn());
+    raf(() => raf(() => {
+        if (doneEl) doneEl.style.width = load.donePct + '%';
+        if (soldEl) { soldEl.style.left = load.donePct + '%'; soldEl.style.width = soldWidth + '%'; }
+    }));
+
+    // Ховер-тултипы: какие заказы сколько часов занимают.
+    const wrap = container.querySelector('.pl-trackwrap');
+    const track = container.querySelector('.pl-track');
+    const tip = container.querySelector('.pl-tip');
+    if (!wrap || !track || !tip) return;
+    const bd = breakdown || { doneRows: [], remainRows: [] };
+    const zones = [
+        { toPct: load.donePct, html: () => _tipHtml(`Сделано · ${_hrsLoad(load.done)} ч`, bd.doneRows || [], 8) },
+        { toPct: load.soldPct, html: () => _tipHtml(`Ещё делать · ${_hrsLoad(Math.max(0, load.sold - load.done))} ч`, bd.remainRows || [], 8) },
+        { toPct: 101, html: () => `<b>Недобор · ${_hrsLoad(load.gap)} ч</b><div class="muted">столько часов ещё нужно продать до плана квартала${overNote}</div>` },
+    ];
+    track.addEventListener('mousemove', (ev) => {
+        const r = track.getBoundingClientRect();
+        if (!r.width) return;
+        const pct = (ev.clientX - r.left) / r.width * 100;
+        const zone = zones.find(z => pct <= z.toPct) || zones[zones.length - 1];
+        tip.innerHTML = zone.html();
+        tip.style.display = 'block';
+        const wrapR = wrap.getBoundingClientRect();
+        let x = ev.clientX - wrapR.left + 12;
+        x = Math.min(x, wrapR.width - tip.offsetWidth - 4);
+        tip.style.left = Math.max(0, x) + 'px';
+        tip.style.top = (track.getBoundingClientRect().bottom - wrapR.top + 8) + 'px';
+    });
+    track.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
 }
 
 if (typeof module !== 'undefined' && module.exports) {
