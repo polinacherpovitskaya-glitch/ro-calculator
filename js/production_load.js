@@ -5,6 +5,10 @@
 // =============================================
 
 const RO_QUARTER_LABELS = ['', 'I квартал', 'II квартал', 'III квартал', 'IV квартал'];
+const RO_MONTH_LABELS = [
+    'январь', 'февраль', 'март', 'апрель', 'май', 'июнь',
+    'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь',
+];
 
 function roLoadNum(v, dflt = 0) {
     const n = Number(v);
@@ -20,6 +24,20 @@ function getQuarterBounds(now) {
     const from = new Date(y, startMonth, 1, 0, 0, 0, 0);
     const to = new Date(y, startMonth + 3, 0, 23, 59, 59, 999);
     return { q, from, to, label: RO_QUARTER_LABELS[q] };
+}
+
+// Три календарные части квартальной полосы. Это не проценты загрузки — только
+// ориентиры времени, чтобы «сегодня 18%» не принимали за заполнение мощности.
+function getQuarterMonthMarkers(now) {
+    const d = now instanceof Date ? now : new Date(now);
+    const q = Math.floor(d.getMonth() / 3) + 1;
+    const startMonth = (q - 1) * 3;
+    const currentIndex = Math.max(0, Math.min(2, d.getMonth() - startMonth));
+    return [0, 1, 2].map(index => ({
+        label: RO_MONTH_LABELS[startMonth + index],
+        startPercent: index * 100 / 3,
+        state: index < currentIndex ? 'past' : (index === currentIndex ? 'current' : 'future'),
+    }));
 }
 
 // Плановые часы квартала: сезонный план из настроек, иначе фолбэк на среднегод.
@@ -174,13 +192,18 @@ function _ensureProductionLoadStyles() {
 .pl-pace.pl-warn{background:#fff1e5;color:#bc4c00;}
 .pl-pace.pl-neutral{background:#eaeef2;color:#57606a;}
 .pl-trackwrap{position:relative;padding-top:16px;}
+.pl-months{position:relative;height:15px;margin:0 3px 3px;font-size:11px;color:var(--text-secondary,#57606a);}
+.pl-month-label{position:absolute;top:0;transform:translateX(-50%);white-space:nowrap;}
+.pl-month-label.pl-month-first{transform:none;}
+.pl-month-label.pl-month-past{opacity:.58;}
+.pl-month-label.pl-month-current{color:var(--text-primary,#24292f);font-weight:700;}
 .pl-track{position:relative;height:12px;border-radius:999px;background:var(--pl-track,#eaeef2);border:1px solid rgba(0,0,0,.06);overflow:hidden;}
 .pl-seg{position:absolute;top:0;bottom:0;transition:width .6s ease,left .6s ease;}
 .pl-seg.pl-done{left:0;background:#2da44e;}
 .pl-seg.pl-sold{background:#388bfd;}
 .pl-track .pl-seg.pl-sold{left:var(--pl-sold-left,0);}
-.pl-now{position:absolute;top:12px;bottom:-4px;width:2px;background:var(--text-primary,#24292f);z-index:2;}
-.pl-now-label{position:absolute;top:0;transform:translateX(-50%);font-size:11px;color:var(--text-secondary,#57606a);white-space:nowrap;z-index:2;}
+.pl-month-boundary{position:absolute;top:-3px;bottom:-3px;width:1px;background:#24292f;opacity:.92;z-index:3;pointer-events:none;}
+.pl-now{position:absolute;top:-4px;bottom:-4px;width:2px;background:var(--text-primary,#24292f);z-index:4;}
 .pl-tip{position:absolute;z-index:5;min-width:220px;max-width:320px;background:var(--pl-tip-bg,#fff);border:1px solid rgba(0,0,0,.12);border-radius:8px;box-shadow:0 4px 14px rgba(0,0,0,.12);padding:8px 10px;font-size:12px;line-height:1.5;color:var(--text-primary,#24292f);pointer-events:none;display:none;}
 .pl-tip b{display:block;margin-bottom:4px;}
 .pl-tip .row{display:flex;justify-content:space-between;gap:12px;}
@@ -223,6 +246,9 @@ function renderProductionLoadBar(container, load, label, breakdown) {
     const overNote = load.over > 0 ? ` · +${_hrsLoad(load.over)} ч сверх плана` : '';
     const soldWidth = Math.max(0, load.soldPct - load.donePct);
     const nowPct = Math.round(load.elapsedRatio * 100);
+    const months = getQuarterMonthMarkers(new Date());
+    const monthLabels = months.map((month, index) => `<span class="pl-month-label pl-month-${month.state}${index === 0 ? ' pl-month-first' : ''}" style="left:${month.startPercent}%">${month.label}</span>`).join('');
+    const monthBoundaries = months.slice(1).map(month => `<i class="pl-month-boundary" style="left:${month.startPercent}%" title="Начало: ${month.label}"></i>`).join('');
     container.innerHTML = `
     <div class="pl-wrap">
       <div class="pl-head">
@@ -231,11 +257,12 @@ function renderProductionLoadBar(container, load, label, breakdown) {
           <span class="pl-pace ${paceCls}">${paceText}</span></span>
       </div>
       <div class="pl-trackwrap">
-        <div class="pl-now-label" style="left:${nowPct}%" title="Сколько квартала уже прошло. Заливка левее метки — отстаём от темпа, правее — идём с опережением.">сегодня · ${nowPct}%</div>
+        <div class="pl-months" aria-label="Месяцы квартала">${monthLabels}</div>
         <div class="pl-track">
           <div class="pl-seg pl-done" style="width:0%"></div>
           <div class="pl-seg pl-sold" style="left:0%;width:0%"></div>
-          <div class="pl-now" style="left:${nowPct}%"></div>
+          ${monthBoundaries}
+          <div class="pl-now" style="left:${nowPct}%" title="Сегодня. Прошло ${nowPct}% квартала."></div>
         </div>
         <div class="pl-tip"></div>
       </div>
@@ -286,6 +313,6 @@ function renderProductionLoadBar(container, load, label, breakdown) {
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         getQuarterBounds, quarterTargetHours, computeQuarterLoad, doneHoursForRange,
-        collectQuarterLoad, renderProductionLoadBar, _isSoldOrder, _orderProdDate,
+        collectQuarterLoad, renderProductionLoadBar, getQuarterMonthMarkers, _isSoldOrder, _orderProdDate,
     };
 }

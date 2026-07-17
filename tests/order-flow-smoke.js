@@ -1119,6 +1119,7 @@ async function smokeOrderListAndDetailUseLiveFinancialSnapshot(context) {
         const items = [{
             item_type: 'product',
             template_id: 77,
+            is_blank_mold: true,
             quantity: 100,
             pieces_per_hour: 50,
             weight_grams: 20,
