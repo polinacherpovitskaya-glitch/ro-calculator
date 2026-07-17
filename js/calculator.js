@@ -55,7 +55,7 @@ function getProductionParams(settings) {
         commercialRate: calcNumber(settings?.commercial_rate, DEFAULT_COMMERCIAL_RATE),
         setupHoursPerBatch: calcNumber(settings?.setup_hours_per_batch, 0),
         setupHoursBlank: calcNumber(settings?.setup_hours_blank, 0.5),
-        setupHoursCustom: calcNumber(settings?.setup_hours_custom, 2),
+        setupHoursCustom: calcNumber(settings?.setup_hours_custom, 1),
         orderProcessingCost: calcNumber(settings?.order_processing_cost, 4000),
         marginTarget: s('margin_target'),
         deliveryCostMoscow: s('delivery_cost_moscow'),
@@ -87,7 +87,7 @@ function getItemColorCount(item) {
 }
 
 // Запуск состоит из подготовки формы и подготовки цвета. Нормы отражают
-// фактический процесс: кастомная форма требует 2 ч на каждую форму, а цвет —
+// фактический процесс: кастомная форма требует 1 ч на каждую форму, а цвет —
 // 0,5 ч на каждый уникальный цвет; бланк требует только подготовки цвета.
 // Старый per-item override остаётся цельной legacy-нормой на цвет, чтобы не
 // изменить осознанно заданный вручную расчёт старого заказа.
@@ -104,14 +104,14 @@ function getItemSetupHours(item, params) {
     const colorSetupHours = Math.max(0, calcNumber(p.setupHoursBlank, 0.5));
     if (item && item.is_blank_mold) return colorSetupHours * colorCount;
 
-    const customMoldSetupHours = Math.max(0, calcNumber(p.setupHoursCustom, 2));
+    const customMoldSetupHours = Math.max(0, calcNumber(p.setupHoursCustom, 1));
     const extraMolds = Math.max(0, calcNumber(item && item.extra_molds, 0));
     const baseMoldInStock = item && (
         item.base_mold_in_stock === true
         || Number(item.base_mold_in_stock) === 1
         || String(item.base_mold_in_stock).trim().toLowerCase() === 'true'
     );
-    // Складской базовый молд уже готов: не начисляем ему 2 ч подготовки.
+    // Складской базовый молд уже готов: не начисляем ему час подготовки.
     // Цвет всё равно меняется/инжектор очищается, поэтому полчаса за цвет
     // сохраняются и для повторного заказа.
     const newCustomMoldCount = (baseMoldInStock ? 0 : 1) + extraMolds;
@@ -295,8 +295,8 @@ function calculateItemCost(item, params) {
     // === Производство изделия ===
 
     // Время на производство партии с запасом на брак плюс запуск формы/цвета.
-    // 2 ч на каждую новую кастомную форму + 0,5 ч на цвет; у бланка только
-    // 0,5 ч на цвет. Базовый молд со склада не требует двухчасового запуска.
+    // 1 ч на каждую новую кастомную форму + 0,5 ч на цвет; у бланка только
+    // 0,5 ч на цвет. Базовый молд со склада не требует запуска формы.
     const setupHours = getItemSetupHours(item, p);
     const hoursPlastic = setupHours + (1 / pph) * qty * p.wasteFactor;
 

@@ -32,7 +32,7 @@ const actual = JSON.parse(vm.runInContext(`JSON.stringify((() => {
     const params = {
         wasteFactor: 1.1,
         setupHoursBlank: 0.5,
-        setupHoursCustom: 2,
+        setupHoursCustom: 1,
         fotPerHour: 100,
         indirectPerHour: 0,
         indirectCostMode: 'all',

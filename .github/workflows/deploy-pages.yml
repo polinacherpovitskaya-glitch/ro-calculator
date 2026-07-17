@@ -61,6 +61,7 @@ jobs:
           node tests/production-calendar-smoke.js
           node tests/production-load-tooltip-smoke.js
           node tests/calendar-availability-load-smoke.js
+          node tests/active-order-recalculation-smoke.js
           node tests/pendant-letter-color-smoke.js
           node tests/recalculate-active-orders-smoke.mjs
           node tests/seasonal-capacity-consensus-smoke.js
