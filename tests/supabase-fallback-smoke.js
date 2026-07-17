@@ -2272,8 +2272,9 @@ async function main() {
             false,
             'string template_id should not be sent to bigint order_items.template_id',
         );
+        const savedItemData = (v => typeof v === 'string' ? JSON.parse(v) : v)(itemUpsert.payload[0].item_data);
         assert.equal(
-            JSON.parse(itemUpsert.payload[0].item_data).template_id,
+            savedItemData.template_id,
             'nfc-embedded-template',
             'string template_id should remain in item_data for calculator restore',
         );
