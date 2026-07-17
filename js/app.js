@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v392';
+const APP_VERSION = 'v393';
 
 const App = {
     currentPage: 'orders',
@@ -1444,6 +1444,8 @@ const Calculator = {
     _autosaveTimer: null,
     _isDirty: false,
     _autosaving: false,
+    _saveGeneration: 0,
+    _orderWriteQueue: Promise.resolve(),
     _currentOrderStatus: 'draft', // Track current order status to preserve on autosave
     _hwBlanksCatalog: [],
     _pkgBlanksCatalog: [],
@@ -1498,6 +1500,10 @@ const Calculator = {
         const preserveLocalDraft = options && options.preserveLocalDraft === true;
         // Cancel any pending autosave
         clearTimeout(this._autosaveTimer);
+        this._autosaveTimer = null;
+        // An autosave can already be awaiting an upload. It must not persist the
+        // previous form after this form has been reset or another order is loaded.
+        this._saveGeneration += 1;
         this._isDirty = false;
         this._autosaving = false;
         if (!preserveLocalDraft) this._clearLocalDraftSnapshot();
@@ -5237,6 +5243,29 @@ const Calculator = {
         return orderId;
     },
 
+    _beginManualSave() {
+        clearTimeout(this._autosaveTimer);
+        this._autosaveTimer = null;
+        // clearTimeout cannot stop an autosave that has passed its timer. Mark
+        // its snapshot obsolete before manual save starts preparing its payload.
+        this._saveGeneration += 1;
+        return this._saveGeneration;
+    },
+
+    _isCurrentAutosave(generation) {
+        return generation === this._saveGeneration;
+    },
+
+    _enqueueOrderWrite(write) {
+        // A failed write must not block the next intentional save. Keeping this
+        // queue in Calculator also guarantees that a later manual save wins over
+        // an autosave that was already sent to the network.
+        const previous = this._orderWriteQueue || Promise.resolve();
+        const next = previous.catch(() => undefined).then(write);
+        this._orderWriteQueue = next.catch(() => undefined);
+        return next;
+    },
+
     // ==========================================
     // AUTOSAVE (draft)
     // ==========================================
@@ -5246,6 +5275,7 @@ const Calculator = {
         this._saveLocalDraftSnapshot('dirty');
         clearTimeout(this._autosaveTimer);
         this._autosaveTimer = setTimeout(() => {
+            this._autosaveTimer = null;
             this._doAutosave().catch(e => console.error('[autosave] timer error:', e));
         }, 1500);
         const statusEl = document.getElementById('calc-autosave-status');
@@ -5254,6 +5284,7 @@ const Calculator = {
 
     async _doAutosave() {
         if (this._autosaving) return;
+        const autosaveGeneration = this._saveGeneration;
         // Don't autosave if the draft is completely empty.
         const hasAnyData = this.items.some(i => i.product_name || i.quantity > 0 || i.template_id)
             || this.hardwareItems.some(hw => hw._from_template || hw.name || hw.warehouse_item_id || hw.china_item_id || (parseFloat(hw.qty) || 0) > 0)
@@ -5326,11 +5357,18 @@ const Calculator = {
 
             await this._prepareColorAttachmentsForSave({ quiet: true });
 
+            // A click on "Сохранить" (or a form reset) may have happened while
+            // attachments were uploading. Never write that stale snapshot.
+            if (!this._isCurrentAutosave(autosaveGeneration)) return;
+
             // Collect items (same logic as saveOrder but without qty filter for drafts)
             const items = this._collectItemsForSave();
 
-            const orderId = await saveOrder(order, items);
-            if (orderId) {
+            const orderId = await this._enqueueOrderWrite(() => {
+                if (!this._isCurrentAutosave(autosaveGeneration)) return null;
+                return saveOrder(order, items);
+            });
+            if (orderId && this._isCurrentAutosave(autosaveGeneration)) {
                 App.editingOrderId = orderId;
                 // Persist editing ID so it survives page refresh
                 localStorage.setItem('ro_calc_editing_order_id', String(orderId));
@@ -5345,8 +5383,9 @@ const Calculator = {
             console.error('[autosave] error:', e);
             const statusEl = document.getElementById('calc-autosave-status');
             if (statusEl) statusEl.textContent = 'Ошибка автосохранения';
+        } finally {
+            this._autosaving = false;
         }
-        this._autosaving = false;
     },
 
     _collectItemsForSave() {
@@ -5493,8 +5532,9 @@ const Calculator = {
     },
 
     async saveOrder() {
-        // Cancel any pending autosave — we're doing a full save
-        clearTimeout(this._autosaveTimer);
+        // Cancel/invalidate autosave before any async work. A timer cancellation
+        // alone cannot stop an autosave that is already preparing a stale payload.
+        this._beginManualSave();
 
         // Recalculate before saving to ensure fresh results
         try { this._doRecalculate(App.params); } catch (e) { /* ignore */ }
@@ -5581,7 +5621,7 @@ const Calculator = {
 
         let orderId = null;
         try {
-            orderId = await saveOrder(order, items);
+            orderId = await this._enqueueOrderWrite(() => saveOrder(order, items));
         } catch (error) {
             console.error('[Calculator.saveOrder] save failed:', error);
             const statusEl = document.getElementById('calc-autosave-status');

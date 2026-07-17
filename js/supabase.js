@@ -388,6 +388,42 @@ function _preserveNewerLocalOrders(incomingRows = []) {
     return Array.from(byId.values());
 }
 
+function _getNewerLocalOrderIds(incomingRows = []) {
+    const incomingById = new Map((Array.isArray(incomingRows) ? incomingRows : [])
+        .map(order => [String(order?.id), order]));
+    const localOrders = Array.isArray(getLocal(LOCAL_KEYS.orders)) ? getLocal(LOCAL_KEYS.orders) : [];
+    const ids = new Set();
+    localOrders.forEach(localOrder => {
+        const id = String(localOrder?.id);
+        if (!id || id === 'undefined' || id === 'null') return;
+        const incomingOrder = incomingById.get(id);
+        if (!incomingOrder || _isRecordNewer(localOrder, incomingOrder)) ids.add(id);
+    });
+    return ids;
+}
+
+function _preserveNewerLocalOrderItems(incomingRows = [], newerOrderIds = new Set()) {
+    const incoming = Array.isArray(incomingRows) ? incomingRows : [];
+    if (!newerOrderIds || newerOrderIds.size === 0) return incoming;
+    const localItems = Array.isArray(getLocal(LOCAL_KEYS.orderItems)) ? getLocal(LOCAL_KEYS.orderItems) : [];
+    const freshLocalItems = localItems.filter(item => newerOrderIds.has(String(item?.order_id)));
+    return [
+        ...incoming.filter(item => !newerOrderIds.has(String(item?.order_id))),
+        ...freshLocalItems,
+    ];
+}
+
+function _mergeBootstrapOrderPayload(bootstrapPayload) {
+    const incomingOrders = _mergeOrderRows(bootstrapPayload?.orders || []);
+    const newerLocalOrderIds = _getNewerLocalOrderIds(incomingOrders);
+    return {
+        orders: _preserveNewerLocalOrders(incomingOrders),
+        orderItems: Array.isArray(bootstrapPayload?.orderItems)
+            ? _preserveNewerLocalOrderItems(bootstrapPayload.orderItems, newerLocalOrderIds)
+            : null,
+    };
+}
+
 function _parseJsonObjectSnapshot(value) {
     if (!value) return {};
     if (typeof value === 'object' && !Array.isArray(value)) return { ...value };
@@ -2213,6 +2249,10 @@ async function saveOrder(order, items = []) {
         // Filter order to known columns + store full data in calculator_data
         const orderData = _filterForDB(order, _ORDER_COLS, 'calculator_data', _ORDER_FIELD_MAP);
         orderData.updated_at = new Date().toISOString();
+        // The static calc2 bootstrap may be older than a just-saved order. Keep
+        // the exact write timestamp in localStorage so its stale snapshot cannot
+        // win the freshness comparison on the next page load.
+        localBackupOrder.updated_at = orderData.updated_at;
 
         try {
             // Try update first if order exists, otherwise insert
@@ -2559,15 +2599,15 @@ async function loadOrders(filters = {}) {
             const bootstrapKeys = _isStaticYandexMirrorRuntime() ? ['orders', 'orderItems'] : ['orders'];
             const bootstrapPayload = await _loadSameOriginBootstrap(bootstrapKeys);
             if (bootstrapPayload && Array.isArray(bootstrapPayload.orders) && bootstrapPayload.orders.length > 0) {
-                const mergedOrders = _preserveNewerLocalOrders(_mergeOrderRows(bootstrapPayload.orders));
-                setLocal(LOCAL_KEYS.orders, mergedOrders);
-                if (Array.isArray(bootstrapPayload.orderItems)) {
-                    setLocal(LOCAL_KEYS.orderItems, bootstrapPayload.orderItems);
+                const mergedPayload = _mergeBootstrapOrderPayload(bootstrapPayload);
+                setLocal(LOCAL_KEYS.orders, mergedPayload.orders);
+                if (Array.isArray(mergedPayload.orderItems)) {
+                    setLocal(LOCAL_KEYS.orderItems, mergedPayload.orderItems);
                 }
                 _ordersLastSyncAt = Date.now();
                 _setDataLoadMeta('orders', { source: 'bootstrap' });
-                _dispatchDataRefreshEvent('ro:orders-refreshed', { orders: mergedOrders });
-                return mergedOrders;
+                _dispatchDataRefreshEvent('ro:orders-refreshed', { orders: mergedPayload.orders });
+                return mergedPayload.orders;
             }
             return null;
         })().finally(() => {
@@ -2593,14 +2633,14 @@ async function loadOrders(filters = {}) {
     const bootstrapKeys = _isStaticYandexMirrorRuntime() ? ['orders', 'orderItems'] : ['orders'];
     const bootstrapPayload = await _loadSameOriginBootstrap(bootstrapKeys);
     if (bootstrapPayload && Array.isArray(bootstrapPayload.orders) && bootstrapPayload.orders.length > 0) {
-        const mergedOrders = _preserveNewerLocalOrders(_mergeOrderRows(bootstrapPayload.orders));
-        setLocal(LOCAL_KEYS.orders, mergedOrders);
-        if (Array.isArray(bootstrapPayload.orderItems)) {
-            setLocal(LOCAL_KEYS.orderItems, bootstrapPayload.orderItems);
+        const mergedPayload = _mergeBootstrapOrderPayload(bootstrapPayload);
+        setLocal(LOCAL_KEYS.orders, mergedPayload.orders);
+        if (Array.isArray(mergedPayload.orderItems)) {
+            setLocal(LOCAL_KEYS.orderItems, mergedPayload.orderItems);
         }
         _ordersLastSyncAt = Date.now();
         _setDataLoadMeta('orders', { source: 'bootstrap' });
-        return applyOrderFilters(mergedOrders);
+        return applyOrderFilters(mergedPayload.orders);
     }
     if (isSupabaseReady()) {
         try {
@@ -2696,13 +2736,13 @@ async function loadOrder(orderId) {
         if (!_isStaticYandexMirrorRuntime()) return null;
         const bootstrapPayload = await _loadSameOriginBootstrap(['orders', 'orderItems'], { timeoutMs: 15000 });
         let refreshed = false;
+        const mergedPayload = _mergeBootstrapOrderPayload(bootstrapPayload);
         if (bootstrapPayload && Array.isArray(bootstrapPayload.orders) && bootstrapPayload.orders.length > 0) {
-            const mergedOrders = _preserveNewerLocalOrders(_mergeOrderRows(bootstrapPayload.orders));
-            setLocal(LOCAL_KEYS.orders, mergedOrders);
+            setLocal(LOCAL_KEYS.orders, mergedPayload.orders);
             refreshed = true;
         }
-        if (bootstrapPayload && Array.isArray(bootstrapPayload.orderItems)) {
-            setLocal(LOCAL_KEYS.orderItems, bootstrapPayload.orderItems);
+        if (Array.isArray(mergedPayload.orderItems)) {
+            setLocal(LOCAL_KEYS.orderItems, mergedPayload.orderItems);
             refreshed = true;
         }
         if (!refreshed) return null;
