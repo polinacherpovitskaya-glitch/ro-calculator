@@ -663,6 +663,45 @@ async function smokeShipmentPickerSurvivesReservationLoadFailure() {
     assert.match(html, /RNG-LIVE-SMOKE/);
 }
 
+async function smokeShipmentPickerUsesLoadedCacheBeforeNetwork() {
+    const context = buildWarehouseContext();
+    const cachedItem = {
+        id: 8501,
+        category: 'rings',
+        name: 'Кольцо из уже загруженного склада',
+        sku: 'RNG-CACHED-FAST',
+        qty: 21,
+        reserved_qty: 4,
+        unit: 'шт',
+        price_per_unit: 2,
+    };
+    context.__warehouseItems = [cachedItem];
+    context.__warehouseLoadCalls = 0;
+    context.__reservationLoadCalls = 0;
+    context.loadWarehouseItems = async () => {
+        context.__warehouseLoadCalls += 1;
+        return new Promise(() => {});
+    };
+    context.loadWarehouseReservations = async () => {
+        context.__reservationLoadCalls += 1;
+        return new Promise(() => {});
+    };
+    vm.runInContext(`Warehouse.allItems = ${JSON.stringify(cachedItem ? [cachedItem] : [])};`, context);
+
+    await Promise.race([
+        vm.runInContext(`Warehouse.showNewShipmentForm()`, context),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('receipt picker waited for the network despite a loaded cache')), 250)),
+    ]);
+
+    const html = context.document.getElementById('wh-sh-items-table').innerHTML;
+    assert.match(html, /<select/);
+    assert.match(html, /Кольцо из уже загруженного склада/);
+    assert.match(html, /RNG-CACHED-FAST/);
+    assert.match(html, /\(17 шт\)/);
+    assert.equal(context.__warehouseLoadCalls, 0, 'receipt picker should not start another warehouse request when the page cache is populated');
+    assert.equal(context.__reservationLoadCalls, 0, 'receipt picker should use the loaded reservation snapshot without waiting for the network');
+}
+
 async function main() {
     await smokeManualFormQtyUsesLatestSharedStock();
     await smokeProjectHardwareReadyToggleIsIdempotent();
@@ -673,6 +712,7 @@ async function main() {
     await smokeReceiptPickerLoadsSpecificWarehouseSupplies();
     await smokeShipmentSelectUsesFreshPickerCache();
     await smokeShipmentPickerSurvivesReservationLoadFailure();
+    await smokeShipmentPickerUsesLoadedCacheBeforeNetwork();
     console.log('warehouse migration smoke checks passed');
 }
 
