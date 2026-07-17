@@ -8663,6 +8663,32 @@ async function smokeStandaloneLetterBlankUsesPendantTierPricing(context) {
     assert.doesNotMatch(state.html, /170 ₽/, 'standalone blank pricing card should not recalculate a higher non-tier price at 15000');
 }
 
+async function smokeNonCommercialPurposeTurnsSalesIntoInternalLoss(context) {
+    const state = clone(await vm.runInContext(`(() => {
+        Calculator.resetForm();
+        document.getElementById('calc-production-purpose').value = 'rework';
+        Calculator.setProductionPurpose('rework');
+
+        const item = Calculator.getEmptyItem(1);
+        item.product_name = 'Переделываемая форма';
+        item.quantity = 100;
+        item.sell_price_item = 500; // старая цена может остаться в форме, но это не продажа
+        item.result = { ...getEmptyCostResult(), costTotal: 120 };
+        Calculator.items = [item];
+
+        const summary = Calculator.getPurposeAwareOrderSummary(App.params, { mode: 'none', value: 0 });
+        const snapshot = Calculator._getOrderFormSnapshot();
+        return { summary, snapshot, purpose: Calculator.getProductionPurpose() };
+    })()`, context));
+
+    assert.equal(state.purpose, 'rework');
+    assert.equal(state.snapshot.production_purpose, 'rework', 'purpose survives local draft snapshots');
+    assert.equal(state.summary.totalRevenue, 0, 'a rework must never be counted as customer revenue');
+    assert.equal(state.summary.totalEarned, -12000, 'the composition cost becomes an internal loss');
+    assert.equal(state.summary.nonCommercialLoss, 12000);
+    assert.equal(state.summary.marginPercent, 0);
+}
+
 async function main() {
     const context = createContext();
     ['js/calculator.js', 'js/app.js', 'js/orders.js', 'js/warehouse.js', 'js/order-detail.js', 'js/molds.js'].forEach(file => runScript(context, file));
@@ -8719,6 +8745,7 @@ async function main() {
     await smokeBlankTemplateMoldCostOverridesGlobalDefault(context);
     await smokeSavedBlankMoldCostSurvivesOrderReload(context);
     await smokeStandaloneLetterBlankUsesPendantTierPricing(context);
+    await smokeNonCommercialPurposeTurnsSalesIntoInternalLoss(context);
     await smokePendantFinDirectorUsesCurrentLetterCost(context);
     await smokeLegacyPendantRestore(context);
     await smokeCurrentPendantPayloadBeatsStaleNested(context);
