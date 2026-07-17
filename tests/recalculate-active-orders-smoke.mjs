@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { buildRecalculationPlan } from '../scripts/recalculate-active-orders.mjs';
+import { buildRecalculationPlan, loadEngine, templateFromMoldRow } from '../scripts/recalculate-active-orders.mjs';
 
 const templates = [{ id: 10, pph_actual: 50, weight_grams: 12 }];
 const orders = [{
@@ -74,5 +74,51 @@ assert.equal(custom.pieces_per_hour, 80, 'custom keeps its own PPH even with tem
 assert.equal(custom.weight_grams, 30, 'custom keeps its own weight even with template_id');
 assert.equal(plan.orders[0].headerPatch.total_margin, 720);
 assert.equal(plan.orders[0].headerPatch.margin_percent, 40);
+
+const repairedCatalogTemplate = templateFromMoldRow({
+    id: 99,
+    mold_data: [
+        '{"name":"legacy catalog row","pph_actual":42,"weight_grams":3}',
+        { template_url: 'duplicate legacy suffix' },
+    ],
+});
+assert.equal(repairedCatalogTemplate.id, 99, 'catalog row ID still comes from its table row');
+assert.equal(repairedCatalogTemplate.pph_actual, 42, 'known non-JSON catalog suffix is safely ignored');
+
+const letterTemplate = {
+    id: 30,
+    pph_actual: 100,
+    weight_grams: 10,
+    cost_cny: 0,
+    cny_rate: 0,
+    delivery_cost: 0,
+    mold_count: 1,
+};
+const liveEngine = loadEngine();
+liveEngine.setCatalog([letterTemplate]);
+const pendantSnapshot = liveEngine.getOrderLiveCalculatorSnapshot({}, [{
+    id: 501,
+    item_type: 'pendant',
+    quantity: 50,
+    item_data: JSON.stringify({
+        elements: [
+            { char: 'E', color: 'white' }, { char: 'L', color: 'white' },
+            { char: 'E', color: 'red' }, { char: 'M', color: 'white' },
+            { char: 'E', color: 'white' }, { char: 'N', color: 'white' },
+            { char: 'T', color: 'white' },
+        ],
+        cords: [], carabiners: [], _totalSellPerUnit: 100,
+    }),
+}], {
+    wasteFactor: 1.1, setupHoursBlank: 0.5, fotPerHour: 100,
+    indirectPerHour: 0, indirectCostMode: 'all', plasticCostPerKg: 0,
+    moldBaseCost: 0, cuttingSpeed: 300, taxRate: 0, charityRate: 0,
+    commercialRate: 0, vatRate: 0,
+}, [letterTemplate]);
+assert.equal(
+    pendantSnapshot.pendantItems[0].result.hoursPlasticZone,
+    6.13,
+    'CLI engine must receive catalogue blanks before recalculating pendant letters',
+);
 
 console.log('recalculate-active-orders-smoke: OK');

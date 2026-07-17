@@ -18,10 +18,11 @@ export const ACTIVE_STATUSES = [
 export const DRAFT_STATUSES = ['draft', 'calculated'];
 
 function parseArgs(argv) {
-    const result = { scope: 'active', apply: false, rollback: null };
+    const result = { scope: 'active', apply: false, report: false, rollback: null };
     for (let i = 0; i < argv.length; i += 1) {
         const arg = argv[i];
         if (arg === '--apply') result.apply = true;
+        else if (arg === '--report') result.report = true;
         else if (arg === '--scope') result.scope = argv[++i] || '';
         else if (arg === '--rollback') result.rollback = argv[++i] || '';
         else if (arg === '--help' || arg === '-h') result.help = true;
@@ -37,11 +38,14 @@ function parseArgs(argv) {
 function printHelp() {
     console.log(`Использование:
   node scripts/recalculate-active-orders.mjs --scope active
+  node scripts/recalculate-active-orders.mjs --scope active --report
   node scripts/recalculate-active-orders.mjs --scope active --apply
   node scripts/recalculate-active-orders.mjs --rollback /private/tmp/ro-active-order-recalculation-....json
 
-По умолчанию выполняется только dry-run. Scope active — образцы и production;
-scope drafts подготовлен для второй волны и не запускается автоматически.`);
+По умолчанию выполняется только dry-run. --report добавляет контрольный список
+заказов (ID и показатели до/после, без названий и клиентов). Scope active —
+образцы и production; scope drafts подготовлен для второй волны и не запускается
+автоматически.`);
 }
 
 function parseJsonObject(value, context) {
@@ -86,8 +90,34 @@ function assertFinite(value, label) {
     if (!Number.isFinite(Number(value))) throw new Error(`${label}: результат не является числом`);
 }
 
-function templateFromMoldRow(row) {
-    const mold = parseJsonObject(row?.mold_data, `бланк ${row?.id ?? '?'}`);
+// A few legacy catalog rows were saved as a valid JSON object followed by an
+// accidental `,[object Object]` suffix. The calculator itself only needs the
+// valid catalog object. Recover that known, non-semantic suffix here so one
+// broken unused row cannot block a read-only preflight; any other malformed
+// JSON still stops the recalculation.
+function parseCatalogMoldData(value, context) {
+    // PostgREST returns the same legacy corruption as a JSON array in the
+    // current API: the complete object is the first string and the following
+    // values are accidental appended objects. The first value already contains
+    // all catalogue fields, so prefer it rather than stringifying the array.
+    if (Array.isArray(value) && typeof value[0] === 'string') {
+        return parseJsonObject(value[0], context);
+    }
+    try {
+        return parseJsonObject(value, context);
+    } catch (error) {
+        const raw = typeof value === 'string' ? value.trim() : '';
+        const marker = raw.indexOf(',[object Object]');
+        const suffix = marker >= 0 ? raw.slice(marker) : '';
+        if (marker > 0 && /^(,\[object Object\])+$/u.test(suffix)) {
+            return parseJsonObject(raw.slice(0, marker), context);
+        }
+        throw error;
+    }
+}
+
+export function templateFromMoldRow(row) {
+    const mold = parseCatalogMoldData(row?.mold_data, `бланк ${row?.id ?? '?'}`);
     const min = numberOrZero(mold.pph_min || mold.pieces_per_hour_min);
     const max = numberOrZero(mold.pph_max || mold.pieces_per_hour_max);
     const average = min > 0 && max > 0 ? Math.round((min + max) / 2) : (min || max || 0);
@@ -229,6 +259,10 @@ function aggregateHeader(rows, next = false) {
 // Pure planning step: it has no network calls and is used by the smoke test.
 export function buildRecalculationPlan({ orders, itemRows, settings, templates, engine, nowIso = new Date().toISOString() }) {
     const templateById = new Map((templates || []).map(template => [String(template.id), template]));
+    // Pendant letters resolve their blank source through the same catalogue as
+    // the browser. The VM has no app bootstrap, so inject it explicitly before
+    // calculating any order rather than falling back to stale element prices.
+    if (typeof engine.setCatalog === 'function') engine.setCatalog(templates || []);
     const params = engine.getProductionParams(settings || {});
     const plan = [];
 
@@ -268,6 +302,12 @@ export function buildRecalculationPlan({ orders, itemRows, settings, templates, 
         plan.push({
             id: rawOrder.id,
             status: rawOrder.status,
+            before: {
+                hours: round2(rawOrder.total_hours_plan),
+                revenue: round2(rawOrder.total_revenue),
+                margin: round2(rawOrder.total_margin),
+                marginPercent: round2(rawOrder.margin_percent),
+            },
             headerPatch: makeHeaderPatch(order, snapshot, nowIso),
             itemPatches,
             snapshot: {
@@ -289,15 +329,26 @@ export function buildRecalculationPlan({ orders, itemRows, settings, templates, 
     };
 }
 
-function loadEngine() {
+export function loadEngine() {
     const source = fs.readFileSync(path.join(repoRoot, 'js', 'calculator.js'), 'utf8');
-    const sandbox = { console, Math, Date, JSON, Number, String, Array, Object, Set };
+    const sandbox = {
+        console, Math, Date, JSON, Number, String, Array, Object, Set,
+        App: { templates: [] },
+        Molds: { allMolds: [] },
+    };
     sandbox.globalThis = sandbox;
     vm.createContext(sandbox);
     vm.runInContext(`${source}\nglobalThis.__recalculationEngine = { getProductionParams, getOrderLiveCalculatorSnapshot };`, sandbox, {
         filename: 'js/calculator.js',
     });
-    return sandbox.__recalculationEngine;
+    return {
+        ...sandbox.__recalculationEngine,
+        setCatalog(templates) {
+            const catalog = Array.isArray(templates) ? templates : [];
+            sandbox.App.templates = catalog;
+            sandbox.Molds.allMolds = catalog;
+        },
+    };
 }
 
 function loadSupabaseConfig() {
@@ -438,6 +489,14 @@ async function main() {
         after: plan.after,
         changed_items: plan.orders.reduce((sum, order) => sum + order.itemPatches.filter(item => item.patch).length, 0),
     };
+    if (args.report) {
+        report.orders = plan.orders.map(order => ({
+            id: order.id,
+            status: order.status,
+            before: order.before,
+            after: order.snapshot,
+        }));
+    }
     if (!args.apply) {
         console.log(JSON.stringify(report, null, 2));
         return;

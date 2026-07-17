@@ -855,24 +855,42 @@ function getPendantLetterBlankSource(pendant) {
     return null;
 }
 
-function getPendantLetterBlankMetrics(totalElements, params, pendant) {
-    if (!(totalElements > 0)) return null;
-    const tierQty = getPendantLetterBlankTierQty(totalElements);
-    if (!(tierQty > 0)) return null;
+// One pendant may contain several plastic colours. They cannot share the same
+// colour setup: after each colour the injector must be cleaned and switched.
+// Group by the UI's `element.color` label; blank or legacy labels are one
+// conservative group, preserving the old one-colour behaviour.
+function getPendantLetterColorGroups(pendant, totalElementsFallback = 0) {
+    const qty = Number(pendant?.quantity || 0);
+    const elements = getCountablePendantElements(pendant);
+    if (!(qty > 0) || !elements.length) {
+        return totalElementsFallback > 0
+            ? [{ key: '__unassigned__', label: '', quantity: totalElementsFallback }]
+            : [];
+    }
 
-    const source = getPendantLetterBlankSource(pendant);
-    if (!source) return null;
+    const groups = new Map();
+    elements.forEach(element => {
+        const label = String(element?.color || '').trim();
+        const key = label ? label.toLocaleLowerCase() : '__unassigned__';
+        const current = groups.get(key) || { key, label, quantity: 0 };
+        current.quantity += qty;
+        groups.set(key, current);
+    });
+    return [...groups.values()];
+}
 
+function getPendantLetterBlankBatchMetrics(quantity, tierQty, params, source) {
     const pph = getBlankTemplatePiecesPerHour(source);
     const weight = Number(source?.weight_grams || 0);
-    if (!(pph > 0) || !(weight > 0) || !params) return null;
+    if (!(quantity > 0) || !(pph > 0) || !(weight > 0) || !params) return null;
 
-    const wasteFactor = Number.isFinite(params?.wasteFactor) ? params.wasteFactor : 1.1;
     const moldTotalCost = getBlankTemplateTotalMoldCost(source);
     const moldAmortPerUnit = moldTotalCost / 4500;
-
+    // `quantity` deliberately stays the actual colour batch. Price tiers are
+    // for the catalogue price only; scaling a tier calculation also scaled
+    // away its 0.5 h colour setup and understated production hours.
     const result = calculateItemCost({
-        quantity: tierQty,
+        quantity,
         pieces_per_hour: pph,
         weight_grams: weight,
         extra_molds: 0,
@@ -892,15 +910,13 @@ function getPendantLetterBlankMetrics(totalElements, params, pendant) {
     }, params);
 
     const cost = round2((result?.costTotal || 0) - (result?.costMoldAmortization || 0) + moldAmortPerUnit);
-    const builtinHwDeliveryPerUnit = tierQty > 0 ? round2(Number(source?.hw_delivery_total || 0) / tierQty) : 0;
+    const builtinHwDeliveryPerUnit = quantity > 0 ? round2(Number(source?.hw_delivery_total || 0) / quantity) : 0;
     const builtinHwPurchasePerUnit = round2(Number(source?.hw_price_per_unit || source?.hw_price || 0));
-    const builtinHwLaborPerUnit = tierQty > 0 ? round2(((result?.hoursBuiltinHw || 0) * (params?.fotPerHour || 0)) / tierQty) : 0;
+    const builtinHwLaborPerUnit = quantity > 0 ? round2(((result?.hoursBuiltinHw || 0) * (params?.fotPerHour || 0)) / quantity) : 0;
     const builtinHwIndirectPerUnit = round2(Math.max(0, (result?.costBuiltinHw || 0) - builtinHwPurchasePerUnit - builtinHwDeliveryPerUnit - builtinHwLaborPerUnit));
-    const builtinAssemblyLaborPerUnit = tierQty > 0 ? round2(((result?.hoursBuiltinAssembly || 0) * (params?.fotPerHour || 0)) / tierQty) : 0;
+    const builtinAssemblyLaborPerUnit = quantity > 0 ? round2(((result?.hoursBuiltinAssembly || 0) * (params?.fotPerHour || 0)) / quantity) : 0;
     const builtinAssemblyIndirectPerUnit = round2(result?.costBuiltinAssemblyIndirect || 0);
-    const scaled = (value) => round2((Number(value) || 0) * totalElements);
-    const hoursScale = tierQty > 0 ? (totalElements / tierQty) : 0;
-
+    const scaled = value => round2((Number(value) || 0) * quantity);
     const breakdown = {
         salaryPerUnit: round2((result?.costFot || 0) + (result?.costCutting || 0) + (result?.costNfcProgramming || 0) + builtinHwLaborPerUnit + builtinAssemblyLaborPerUnit),
         hardwarePurchasePerUnit: 0,
@@ -925,6 +941,55 @@ function getPendantLetterBlankMetrics(totalElements, params, pendant) {
     breakdown.moldsTotal = scaled(breakdown.moldsPerUnit);
     breakdown.printingTotal = scaled(breakdown.printingPerUnit);
     breakdown.omittedIndirectTotal = scaled(breakdown.omittedIndirectPerUnit);
+
+    return {
+        quantity,
+        tierQty,
+        cost,
+        totalCost: round2(cost * quantity),
+        breakdown,
+        hoursPlastic: round2(result?.hoursPlastic || 0),
+        hoursCutting: round2(result?.hoursCutting || 0),
+        hoursBuiltinHw: round2(result?.hoursBuiltinHw || 0),
+        hoursBuiltinAssembly: round2(result?.hoursBuiltinAssembly || 0),
+        hoursPlasticZone: round2(result?.hoursPlasticZone || 0),
+        hoursAssemblyZone: round2(result?.hoursAssemblyZone || 0),
+    };
+}
+
+function getPendantLetterBlankMetrics(totalElements, params, pendant) {
+    if (!(totalElements > 0)) return null;
+    const tierQty = getPendantLetterBlankTierQty(totalElements);
+    if (!(tierQty > 0)) return null;
+
+    const source = getPendantLetterBlankSource(pendant);
+    if (!source) return null;
+
+    const colorGroups = getPendantLetterColorGroups(pendant, totalElements);
+    const batches = colorGroups
+        .map(group => ({ ...group, metrics: getPendantLetterBlankBatchMetrics(group.quantity, tierQty, params, source) }))
+        .filter(group => group.metrics);
+    if (!batches.length) return null;
+
+    const quantity = batches.reduce((sum, group) => sum + group.metrics.quantity, 0);
+    const sumMetric = key => round2(batches.reduce((sum, group) => sum + (Number(group.metrics[key]) || 0), 0));
+    const sumBreakdown = key => round2(batches.reduce((sum, group) => sum + (Number(group.metrics.breakdown?.[key]) || 0), 0));
+    const totalCost = sumMetric('totalCost');
+    const cost = quantity > 0 ? round2(totalCost / quantity) : 0;
+    const breakdown = {};
+    [
+        ['salaryTotal', 'salaryPerUnit'],
+        ['hardwarePurchaseTotal', 'hardwarePurchasePerUnit'],
+        ['hardwareDeliveryTotal', 'hardwareDeliveryPerUnit'],
+        ['nfcTotal', 'nfcTotalPerUnit'],
+        ['plasticTotal', 'plasticPerUnit'],
+        ['moldsTotal', 'moldsPerUnit'],
+        ['printingTotal', 'printingPerUnit'],
+        ['omittedIndirectTotal', 'omittedIndirectPerUnit'],
+    ].forEach(([totalKey, perUnitKey]) => {
+        breakdown[totalKey] = sumBreakdown(totalKey);
+        breakdown[perUnitKey] = quantity > 0 ? round2(breakdown[totalKey] / quantity) : 0;
+    });
 
     const allowManualPrices = !!source?.use_manual_prices;
     const customPrice = allowManualPrices ? Number(source?.custom_prices?.[tierQty]) : NaN;
@@ -967,16 +1032,24 @@ function getPendantLetterBlankMetrics(totalElements, params, pendant) {
 
     return {
         tierQty,
+        quantity,
         cost,
+        totalCost,
         sellPrice,
         margin,
         breakdown,
-        hoursPlastic: round2((result?.hoursPlastic || 0) * hoursScale),
-        hoursCutting: round2((result?.hoursCutting || 0) * hoursScale),
-        hoursBuiltinHw: round2((result?.hoursBuiltinHw || 0) * hoursScale),
-        hoursBuiltinAssembly: round2((result?.hoursBuiltinAssembly || 0) * hoursScale),
-        hoursPlasticZone: round2((result?.hoursPlasticZone || 0) * hoursScale),
-        hoursAssemblyZone: round2((result?.hoursAssemblyZone || 0) * hoursScale),
+        colorGroups: batches.map(group => ({
+            color: group.label,
+            quantity: group.metrics.quantity,
+            hoursPlastic: group.metrics.hoursPlastic,
+            hoursPlasticZone: group.metrics.hoursPlasticZone,
+        })),
+        hoursPlastic: sumMetric('hoursPlastic'),
+        hoursCutting: sumMetric('hoursCutting'),
+        hoursBuiltinHw: sumMetric('hoursBuiltinHw'),
+        hoursBuiltinAssembly: sumMetric('hoursBuiltinAssembly'),
+        hoursPlasticZone: sumMetric('hoursPlasticZone'),
+        hoursAssemblyZone: sumMetric('hoursAssemblyZone'),
     };
 }
 
@@ -1006,7 +1079,12 @@ function calculatePendantCost(pendant, params) {
     const letterMetrics = getPendantLetterBlankMetrics(totalElements, params, pendant);
 
     const elemCostPerUnit = getPendantElementCostPerUnit(pendant, params, letterMetrics);
-    const elemCostTotal = qty * elements.length * elemCostPerUnit;
+    // Per-letter cost is rounded for the UI. Use the summed colour batches for
+    // the order total, otherwise a multi-colour pendant loses setup cost to
+    // rounding (and can disagree with the finance breakdown).
+    const elemCostTotal = Number.isFinite(letterMetrics?.totalCost)
+        ? letterMetrics.totalCost
+        : qty * elements.length * elemCostPerUnit;
 
     const cords = getPendantAttachmentEntries(pendant, 'cord');
     const carabiners = getPendantAttachmentEntries(pendant, 'carabiner');
