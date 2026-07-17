@@ -208,18 +208,19 @@ function collectQuarterLoad(orders, entries, settings, now) {
 
     const doneRows = Object.entries(doneByOrder)
         .map(([key, hours]) => ({
+            orderId: key === 'none' ? null : (Number(key) > 0 ? Number(key) : null),
             name: key === 'none' ? 'вне заказов (сток, образцы…)' : (nameById[key] || ('заказ #' + key)),
             hours,
         }))
         .filter(r => r.hours > 0.05)
         .sort((a, b) => b.hours - a.hours);
     const remainRows = soldOrders
-        .map(o => ({ name: o.name, hours: o.remain }))
+        .map(o => ({ orderId: o.id, name: o.name, hours: o.remain }))
         .filter(r => r.hours > 0.05)
         .sort((a, b) => b.hours - a.hours);
 
     const nonCommercialRows = nonCommercialOrders
-        .map(o => ({ name: o.name, hours: o.remain, purpose: o.purpose, loss: o.loss }))
+        .map(o => ({ orderId: o.id, name: o.name, hours: o.remain, purpose: o.purpose, loss: o.loss }))
         .filter(r => r.hours > 0.05)
         .sort((a, b) => b.hours - a.hours);
 
@@ -262,9 +263,13 @@ function _ensureProductionLoadStyles() {
 .pl-seg.pl-noncommercial{background:#6e3cbc;}
 .pl-month-boundary{position:absolute;top:-3px;bottom:-3px;width:1px;background:#24292f;opacity:.92;z-index:3;pointer-events:none;}
 .pl-now{position:absolute;top:-4px;bottom:-4px;width:2px;background:var(--text-primary,#24292f);z-index:4;}
-.pl-tip{position:absolute;z-index:5;min-width:220px;max-width:320px;background:var(--pl-tip-bg,#fff);border:1px solid rgba(0,0,0,.12);border-radius:8px;box-shadow:0 4px 14px rgba(0,0,0,.12);padding:8px 10px;font-size:12px;line-height:1.5;color:var(--text-primary,#24292f);pointer-events:none;display:none;}
+.pl-tip{position:absolute;z-index:5;width:min(680px,calc(100vw - 48px));min-width:260px;max-width:calc(100vw - 24px);background:var(--pl-tip-bg,#fff);border:1px solid rgba(0,0,0,.12);border-radius:8px;box-shadow:0 4px 14px rgba(0,0,0,.12);padding:8px 10px;font-size:12px;line-height:1.5;color:var(--text-primary,#24292f);pointer-events:auto;display:none;}
 .pl-tip b{display:block;margin-bottom:4px;}
-.pl-tip .row{display:flex;justify-content:space-between;gap:12px;}
+.pl-tip .row{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:start;gap:12px;width:100%;padding:3px 4px;text-align:left;color:inherit;}
+.pl-tip .pl-tip-order{border:0;border-radius:4px;background:transparent;cursor:pointer;font:inherit;}
+.pl-tip .pl-tip-order:hover{background:var(--bg,#f6f8fa);}
+.pl-tip .pl-tip-order:focus-visible{outline:2px solid #388bfd;outline-offset:1px;}
+.pl-tip .pl-tip-name{min-width:0;overflow-wrap:anywhere;}
 .pl-tip .row span:last-child{font-variant-numeric:tabular-nums;white-space:nowrap;}
 .pl-tip .muted{color:var(--text-secondary,#57606a);}
 .pl-legend{display:flex;align-items:center;gap:16px;margin-top:12px;font-size:12px;flex-wrap:wrap;}
@@ -283,15 +288,18 @@ function _escLoad(s) {
     return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 }
 
-function _tipHtml(title, rows, maxRows) {
-    const top = rows.slice(0, maxRows);
-    const restH = rows.slice(maxRows).reduce((s, r) => s + r.hours, 0);
+function _tipHtml(title, rows) {
     let html = `<b>${_escLoad(title)}</b>`;
-    if (!top.length) return html + '<div class="muted">пока пусто</div>';
-    top.forEach(r => {
-        html += `<div class="row"><span>${_escLoad(r.name).slice(0, 44)}</span><span>${r.hours < 10 ? r.hours.toFixed(1) : Math.round(r.hours)} ч</span></div>`;
+    if (!rows.length) return html + '<div class="muted">пока пусто</div>';
+    rows.forEach(r => {
+        const rowHtml = `<span class="pl-tip-name">${_escLoad(r.name)}</span><span>${r.hours < 10 ? r.hours.toFixed(1) : Math.round(r.hours)} ч</span>`;
+        const orderId = Number(r.orderId);
+        if (Number.isFinite(orderId) && orderId > 0) {
+            html += `<button type="button" class="row pl-tip-order" data-order-id="${orderId}" title="Открыть карточку заказа: ${_escLoad(r.name)}">${rowHtml}</button>`;
+        } else {
+            html += `<div class="row muted">${rowHtml}</div>`;
+        }
     });
-    if (restH > 0.5) html += `<div class="row muted"><span>ещё ${rows.length - maxRows}…</span><span>${Math.round(restH)} ч</span></div>`;
     return html;
 }
 
@@ -356,30 +364,42 @@ function renderProductionLoadBar(container, load, label, breakdown) {
     if (!wrap || !track || !tip) return;
     const bd = breakdown || { doneRows: [], remainRows: [], nonCommercialRows: [] };
     const zones = [
-        { toPct: load.donePct, html: () => _tipHtml(`Сделано · ${_hrsLoad(load.done)} ч`, bd.doneRows || [], 8) },
-        { toPct: load.soldPct, html: () => _tipHtml(`Ещё делать · ${_hrsLoad(Math.max(0, load.sold - load.done))} ч`, bd.remainRows || [], 8) },
-        { toPct: load.bookedPct, html: () => _tipHtml(`Некоммерческие работы · ${_hrsLoad(load.nonCommercial)} ч`, bd.nonCommercialRows || [], 8) + (bd.nonCommercialLoss > 0 ? `<div class="muted" style="margin-top:4px">расходы: ${_hrsLoad(bd.nonCommercialLoss)} ₽</div>` : '') },
+        { toPct: load.donePct, html: () => _tipHtml(`Сделано · ${_hrsLoad(load.done)} ч`, bd.doneRows || []) },
+        { toPct: load.soldPct, html: () => _tipHtml(`Ещё делать · ${_hrsLoad(Math.max(0, load.sold - load.done))} ч`, bd.remainRows || []) },
+        { toPct: load.bookedPct, html: () => _tipHtml(`Некоммерческие работы · ${_hrsLoad(load.nonCommercial)} ч`, bd.nonCommercialRows || []) + (bd.nonCommercialLoss > 0 ? `<div class="muted" style="margin-top:4px">расходы: ${_hrsLoad(nonCommercialLoss)} ₽</div>` : '') },
         { toPct: 101, html: () => `<b>Свободная мощность · ${_hrsLoad(load.freeCapacity)} ч</b><div class="muted">для плана продаж всё ещё нужно продать ${_hrsLoad(load.gap)} ч${overNote}</div>` },
     ];
-    track.addEventListener('mousemove', (ev) => {
+    const showTip = (ev) => {
         const r = track.getBoundingClientRect();
         if (!r.width) return;
         const pct = (ev.clientX - r.left) / r.width * 100;
         const zone = zones.find(z => pct <= z.toPct) || zones[zones.length - 1];
         tip.innerHTML = zone.html();
         tip.style.display = 'block';
-        const wrapR = wrap.getBoundingClientRect();
-        let x = ev.clientX - wrapR.left + 12;
-        x = Math.min(x, wrapR.width - tip.offsetWidth - 4);
-        tip.style.left = Math.max(0, x) + 'px';
-        tip.style.top = (track.getBoundingClientRect().bottom - wrapR.top + 8) + 'px';
+        tip.style.left = '0px';
+        tip.style.top = (track.getBoundingClientRect().bottom - wrap.getBoundingClientRect().top + 4) + 'px';
+        tip.setAttribute('aria-hidden', 'false');
+    };
+    const hideTip = () => {
+        tip.style.display = 'none';
+        tip.setAttribute('aria-hidden', 'true');
+    };
+    track.addEventListener('mouseenter', showTip);
+    track.addEventListener('mousemove', showTip);
+    // The panel is a child of wrap, so moving from the bar onto a row keeps it open.
+    wrap.addEventListener('mouseleave', hideTip);
+    tip.addEventListener('click', (event) => {
+        const row = event.target.closest('[data-order-id]');
+        const orderId = Number(row?.dataset?.orderId);
+        if (!(orderId > 0) || typeof App === 'undefined' || typeof App.navigate !== 'function') return;
+        App.navigate('order-detail', true, orderId);
+        hideTip();
     });
-    track.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
 }
 
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         getQuarterBounds, quarterTargetHours, computeQuarterLoad, doneHoursForRange,
-        collectQuarterLoad, renderProductionLoadBar, getQuarterMonthMarkers, _isSoldOrder, _orderProdDate,
+        collectQuarterLoad, renderProductionLoadBar, getQuarterMonthMarkers, _isSoldOrder, _orderProdDate, _tipHtml,
     };
 }
