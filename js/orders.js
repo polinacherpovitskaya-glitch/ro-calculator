@@ -356,9 +356,20 @@ const Orders = {
             return stored;
         }
         try {
-            const safeItems = items || [];
+            let safeItems = items || [];
             const hasHydratedItems = safeItems.some(item => item && item.item_type);
-            if (!hasHydratedItems && this.hasStoredFinancialMeta(order)) {
+            if (!hasHydratedItems) {
+                // Живой пересчёт ВЕЗДЕ (решение Полины 17.07): если позиции ещё
+                // не загружены bundle'ом, берём items_snapshot заказа — он
+                // пишется при каждом сохранении. Список и доска тогда считают
+                // маржу по сегодняшним параметрам, как карточка, а не по
+                // зафиксированной при продаже.
+                const snap = this._parseClonePayload(order?.items_snapshot);
+                if (Array.isArray(snap) && snap.length) {
+                    safeItems = snap;
+                }
+            }
+            if (safeItems.length === 0) {
                 return stored;
             }
             const snapshot = getOrderLiveCalculatorSnapshot(order, safeItems);
@@ -368,7 +379,8 @@ const Orders = {
                 hours: Number(snapshot?.hours || 0),
             };
 
-            if (safeItems.length === 0 && this.hasStoredFinancialMeta(order)) {
+            // Пустой пересчёт при наличии сохранённых цифр — не доверяем нулям.
+            if (!(live.revenue > 0) && !(live.hours > 0) && this.hasStoredFinancialMeta(order)) {
                 return stored;
             }
 
