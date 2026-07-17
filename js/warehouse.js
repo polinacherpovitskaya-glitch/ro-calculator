@@ -6276,7 +6276,11 @@ const Warehouse = {
         const container = document.getElementById('wh-sh-items-table');
         if (!container) return;
 
-        const grouped = await this.getItemsForPicker();
+        // The warehouse page has already loaded allItems before a user can
+        // open a receipt. Render that known snapshot immediately: repeating
+        // the remote load here left a visibly empty receipt form whenever the
+        // network was slow or temporarily unavailable.
+        const grouped = await this.getItemsForPicker({ preferCurrentCache: true });
         await this._loadMoldOrders();
         const categoryOptions = WAREHOUSE_CATEGORIES.map(c =>
             `<option value="${c.key}">${c.icon} ${c.label}</option>`
@@ -7752,9 +7756,12 @@ const Warehouse = {
     // PICKER FOR CALCULATOR INTEGRATION
     // ==========================================
 
-    async getItemsForPicker() {
-        const items = await this._loadWarehouseItemsForPicker();
-        const needsReservationSnapshot = (items || []).some(item =>
+    async getItemsForPicker({ preferCurrentCache = false } = {}) {
+        const cachedItems = preferCurrentCache && Array.isArray(this.allItems) && this.allItems.length > 0
+            ? this.allItems
+            : null;
+        const items = cachedItems || await this._loadWarehouseItemsForPicker();
+        const needsReservationSnapshot = !cachedItems && (items || []).some(item =>
             item && (item.available_qty === undefined || item.available_qty === null || item.reserved_qty === undefined || item.reserved_qty === null)
         );
         const activeReservedByItem = new Map();
