@@ -48,6 +48,7 @@
 | M4 | Закрыть найденные дефекты, прогнать регрессию и собрать список улучшений | M2, M3, M3b | [~] |
 | M5 | Подтвердить результат на live-сессии и оформить handoff | M4 | [~] |
 | M6 | Глобальная стабилизация перед миграцией в Яндекс | M3, M4, M5 | [~] |
+| M6a | Воспроизводимый DB cutover preflight | M6 | [~] |
 
 ## M1. Зафиксировать audit matrix и воспроизводимый harness `[x]`
 ### Goal
@@ -279,3 +280,30 @@ node tests/yandex-writeback-smoke.mjs
 ### Stop-and-Fix Rule
 - If an audited action can write different results on `calc` and `calc2`, pause migration work for that module and fix parity before moving forward.
 - If a data action can run twice and produce a different final state than once, add a regression and fix idempotency before treating the module as migration-ready.
+
+## M6a. Воспроизводимый DB cutover preflight `[~]`
+
+### Goal
+
+- Перед любым фризом есть повторяемый read-only аудит `order_items.item_data`, SQL-переход с полным rollback и актуальный runbook репетиции для новой Yandex DB.
+
+### Tasks
+
+- [x] Выпустить fail-safe для текущей TEXT-схемы: список не выдаёт частичный пересчёт за живую формулу.
+- [x] Зафиксировать JSONB preflight audit, migration SQL, rollback SQL и runbook rehearsal в отдельном пакете.
+- [ ] Прогнать restore + migration + rollback на новой staging DB.
+- [ ] Подтвердить Storage inventory, URL rewrite dry-run, calc/calc2 save-reload-photo и Figma staging publish.
+- [ ] Получить явный go/no-go на production freeze.
+
+### Validation
+
+```sh
+node scripts/audit-order-item-data-jsonb.mjs --out output/order-item-data-preflight.json
+node tests/order-item-data-jsonb-preflight-smoke.mjs
+node tests/order-flow-smoke.js
+node tests/supabase-fallback-smoke.js
+```
+
+### Stop-and-Fix Rule
+
+- Любая unsafe запись, несоответствие row count, несохранённое фото или расхождение списка с карточкой на staging — стоп до исправления и повторной rehearsal.
