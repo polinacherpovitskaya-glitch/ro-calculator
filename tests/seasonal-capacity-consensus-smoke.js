@@ -44,4 +44,15 @@ const legacy = run(`getSeasonalPercentagesFromSettings({
 }, 2160)`);
 assert.deepEqual(legacy, [40, 60, 80, 90], 'legacy saved hours should open as editable percentages');
 
+const derived = run(`getSeasonalPlanEditorState({ work_load_ratio: 0.6 }, 2160)`);
+assert.equal(derived.source, 'derived', 'blank seasonal JSON keeps the yearly coefficient as the effective plan');
+assert.deepEqual(derived.percentages, [60, 60, 60, 60], 'blank seasonal fields must display the effective 60% quarter plan');
+
+const explicit = run(`getSeasonalPlanEditorState({
+    work_load_ratio: 0.6,
+    seasonal_load_percent_json: JSON.stringify({ Q1: 40, Q2: 60, Q3: 80, Q4: 60 }),
+}, 2160)`);
+assert.equal(explicit.source, 'saved', 'a saved percentage plan must not be replaced by a fallback');
+assert.deepEqual(explicit.percentages, [40, 60, 80, 60]);
+
 console.log('seasonal-capacity-consensus-smoke: OK');
