@@ -68,6 +68,25 @@ function createContext() {
         const url = String(input);
         context.__remoteCalls.push({ table: 'fetch', action: 'request', url });
         const parsed = new URL(url, 'http://localhost');
+        const shardMatch = parsed.pathname.match(/^\/data\/bootstrap\/([^/]+)\.json$/);
+        if (shardMatch) {
+            const key = decodeURIComponent(shardMatch[1]);
+            if (!Object.prototype.hasOwnProperty.call(context.__staticBootstrapShards || {}, key)) {
+                return {
+                    ok: false,
+                    status: 404,
+                    async json() {
+                        return { ok: false, data: {}, errors: { [key]: 'missing shard' } };
+                    },
+                };
+            }
+            return {
+                ok: true,
+                async json() {
+                    return { ok: true, data: { [key]: context.__staticBootstrapShards[key] }, errors: {} };
+                },
+            };
+        }
         if (parsed.pathname === '/api/bootstrap' || parsed.pathname === '/data/bootstrap.json') {
             let keys = String(parsed.searchParams.get('keys') || '')
                 .split(',')
@@ -397,6 +416,33 @@ function persistTableRows(context, table, payload) {
 }
 
 async function main() {
+    {
+        const context = createContext();
+        context.location = {
+            href: 'https://calc2.recycleobject.ru/#warehouse',
+            origin: 'https://calc2.recycleobject.ru',
+            protocol: 'https:',
+            hostname: 'calc2.recycleobject.ru',
+        };
+        context.__staticBootstrapShards = {
+            authAccounts: [{ id: 7, username: 'Полина' }],
+            employees: [{ id: 7, name: 'Полина' }],
+        };
+        runScript(context, 'js/supabase.js');
+
+        const staticPayload = JSON.parse(JSON.stringify(await vm.runInContext(
+            `_loadSameOriginBootstrap(['authAccounts', 'employees'])`,
+            context
+        )));
+        assert.equal(staticPayload.authAccounts[0].username, 'Полина');
+        assert.equal(staticPayload.employees[0].name, 'Полина');
+        const staticRequests = context.__remoteCalls
+            .filter(call => call.table === 'fetch')
+            .map(call => call.url);
+        assert.equal(staticRequests.some(url => /\/data\/bootstrap\.json/.test(url)), false, 'new static mirrors must not fetch the monolithic bootstrap first');
+        assert.equal(staticRequests.filter(url => /\/data\/bootstrap\/(authAccounts|employees)\.json/.test(url)).length, 2, 'static mirror must fetch only requested bootstrap shards');
+    }
+
     {
         const context = createContext();
         runScript(context, 'js/supabase.js');
