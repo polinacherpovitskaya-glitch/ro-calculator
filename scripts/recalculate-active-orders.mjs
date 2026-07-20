@@ -17,6 +17,17 @@ export const ACTIVE_STATUSES = [
 ];
 export const DRAFT_STATUSES = ['draft', 'calculated'];
 
+// The old “Буква из алфавита (лат.)” catalogue row (30) was replaced by the
+// live “Буквы” row (31). Recalculation resolves the historical reference only
+// in memory, so the saved order keeps its original composition and ID while
+// receiving the current blank norm.
+const LEGACY_BLANK_TEMPLATE_ALIASES = Object.freeze([
+    { legacyId: '30', currentId: '31' },
+    // Historical “Картхолдер нью” was removed as ID 18; the live catalogue
+    // replacement is “Новый кардхолдер” (ID 15).
+    { legacyId: '18', currentId: '15' },
+]);
+
 function parseArgs(argv) {
     const result = { scope: 'active', apply: false, report: false, rollback: null };
     for (let i = 0; i < argv.length; i += 1) {
@@ -130,18 +141,69 @@ export function templateFromMoldRow(row) {
     };
 }
 
+export function resolveLegacyBlankTemplateAliases(templates = []) {
+    const resolved = Array.isArray(templates) ? templates.slice() : [];
+    const byId = new Map(resolved.map(template => [String(template.id), template]));
+    LEGACY_BLANK_TEMPLATE_ALIASES.forEach(({ legacyId, currentId }) => {
+        if (byId.has(legacyId)) return;
+        const current = byId.get(currentId);
+        if (!current) return;
+        const alias = { ...current, id: Number(legacyId), legacy_template_alias_of: Number(currentId) };
+        resolved.push(alias);
+        byId.set(legacyId, alias);
+    });
+    return resolved;
+}
+
 function validateProductSafety(item, templateById) {
     if (String(item.item_type || 'product').toLowerCase() !== 'product') return;
-    const pph = numberOrZero(item.pieces_per_hour);
-    if (!(pph > 0)) throw new Error(`позиция ${item.id}: нет производительности шт/ч`);
-    if (!item.is_blank_mold) return;
-    if (item.template_id === null || item.template_id === undefined || item.template_id === '') {
-        throw new Error(`позиция ${item.id}: бланк без template_id нельзя безопасно обновить`);
+    if (item.is_blank_mold) {
+        if (item.template_id === null || item.template_id === undefined || item.template_id === '') {
+            throw new Error(`позиция ${item.id}: бланк без template_id нельзя безопасно обновить`);
+        }
+        const template = templateById.get(String(item.template_id));
+        if (!template) throw new Error(`позиция ${item.id}: бланк отсутствует в текущем каталоге`);
+        const currentPph = numberOrZero(template.pph_actual || template.pieces_per_hour_actual || template.pieces_per_hour_avg);
+        if (!(currentPph > 0)) throw new Error(`позиция ${item.id}: у бланка нет действующей нормы шт/ч`);
+        return;
     }
-    const template = templateById.get(String(item.template_id));
-    if (!template) throw new Error(`позиция ${item.id}: бланк отсутствует в текущем каталоге`);
-    const currentPph = numberOrZero(template.pph_actual || template.pieces_per_hour_actual || template.pieces_per_hour_avg);
-    if (!(currentPph > 0)) throw new Error(`позиция ${item.id}: у бланка нет действующей нормы шт/ч`);
+    if (!(numberOrZero(item.pieces_per_hour) > 0)) throw new Error(`позиция ${item.id}: нет производительности шт/ч`);
+}
+
+// A new calculator draft starts with one technical, entirely empty product row.
+// It has no cost-bearing input and therefore must not be turned into a zeroed
+// financial snapshot. The exception is deliberately narrow: as soon as a row
+// has a name, quantity, productivity, price, catalogue link, or any production
+// choice, it is a real incomplete draft and remains a hard validation error.
+function isCompletelyEmptyDraftProduct(item) {
+    if (String(item?.item_type || 'product').trim().toLowerCase() !== 'product') return false;
+    const hasText = [item.product_name, item.name, item.color_name, item.builtin_assembly_name]
+        .some(value => String(value || '').trim() !== '');
+    const hasNumber = [
+        item.quantity, item.pieces_per_hour, item.weight_grams, item.sell_price_item,
+        item.sell_price_printing, item.extra_molds, item.blank_mold_total_cost,
+        item.setup_hours_override,
+    ].some(value => numberOrZero(value) > 0);
+    const hasTemplate = item.template_id !== null && item.template_id !== undefined && item.template_id !== '';
+    const printings = Array.isArray(item.printings) ? item.printings : [];
+    const colors = Array.isArray(item.colors) ? item.colors : [];
+    return !hasText && !hasNumber && !hasTemplate
+        && !item.is_nfc && !item.nfc_programming && printings.length === 0 && colors.length === 0;
+}
+
+function getDraftManualRecalculationReason(items, templateById) {
+    for (const item of items || []) {
+        if (String(item?.item_type || 'product').trim().toLowerCase() !== 'product') continue;
+        if (item.is_blank_mold) {
+            if (item.template_id === null || item.template_id === undefined || item.template_id === '') {
+                return 'blank_without_catalog_template';
+            }
+            if (!templateById.has(String(item.template_id))) return 'blank_missing_from_catalog';
+            continue;
+        }
+        if (!(numberOrZero(item.pieces_per_hour) > 0)) return 'custom_without_productivity';
+    }
+    return null;
 }
 
 function productPayloadPatch(item) {
@@ -210,20 +272,79 @@ function itemPayloadPatch(item) {
     return {};
 }
 
-function makeHeaderPatch(order, snapshot, nowIso) {
+function getRevenueRetentionRate(params = {}) {
+    return 1
+        - numberOrZero(params.taxRate)
+        - numberOrZero(params.commercialRate)
+        - numberOrZero(params.charityRate);
+}
+
+// This job changes production norms and overhead, not an agreed selling price.
+// Saved non-zero revenue is therefore the source of truth for an existing
+// commercial order. Re-price only an unsaved zero-revenue draft. The calculator
+// reports profit as `revenue * retention - productionCost`, so we can retain
+// the current production cost while applying the saved sale amount exactly.
+function getFinancialSnapshot(order, snapshot, params = {}) {
     const summary = snapshot.summary || {};
+    const productionPurpose = String(snapshot.productionPurpose || summary.productionPurpose || 'commercial');
+    const calculatedRevenue = round2(summary.totalRevenue);
+    const calculatedEarned = round2(summary.totalEarned);
+    if (productionPurpose !== 'commercial') {
+        return {
+            grossRevenue: 0,
+            discountAmount: 0,
+            discountPercent: 0,
+            totalRevenue: 0,
+            totalEarned: calculatedEarned,
+            totalCost: round2(-calculatedEarned),
+            marginPercent: 0,
+            totalWithVat: 0,
+        };
+    }
+
+    const savedRevenue = numberOrZero(order.total_revenue);
+    const totalRevenue = savedRevenue > 0 ? round2(savedRevenue) : calculatedRevenue;
+    const retentionRate = getRevenueRetentionRate(params);
+    const productionCost = round2((calculatedRevenue * retentionRate) - calculatedEarned);
+    const totalEarned = round2((totalRevenue * retentionRate) - productionCost);
+    const totalCost = round2(totalRevenue - totalEarned);
+    const previous = parseJsonObject(order.calculator_data, `заказ ${order.id}`);
+    const grossRevenue = savedRevenue > 0
+        ? round2(numberOrZero(previous.gross_revenue_plan) || totalRevenue)
+        : round2(summary.grossRevenue);
+    const discountAmount = savedRevenue > 0
+        ? round2(numberOrZero(previous.discount_amount_plan))
+        : round2(summary.discountAmount);
+    const discountPercent = savedRevenue > 0
+        ? round2(numberOrZero(previous.discount_percent_plan))
+        : round2(summary.discountPercent);
+    const totalWithVat = round2(totalRevenue * (1 + numberOrZero(params.vatRate)));
+    return {
+        grossRevenue,
+        discountAmount,
+        discountPercent,
+        totalRevenue,
+        totalEarned,
+        totalCost,
+        marginPercent: totalRevenue > 0 ? round2(totalEarned * 100 / totalRevenue) : 0,
+        totalWithVat,
+    };
+}
+
+function makeHeaderPatch(order, snapshot, params, nowIso) {
     const load = snapshot.load || {};
+    const financial = getFinancialSnapshot(order, snapshot, params);
     const calculatorData = {
         ...parseJsonObject(order.calculator_data, `заказ ${order.id}`),
         status: order.status,
-        gross_revenue_plan: round2(summary.grossRevenue),
-        discount_amount_plan: round2(summary.discountAmount),
-        discount_percent_plan: round2(summary.discountPercent),
-        total_revenue_plan: round2(summary.totalRevenue),
-        total_cost_plan: round2(summary.totalRevenue - summary.totalEarned),
-        total_margin_plan: round2(summary.totalEarned),
-        margin_percent_plan: round2(summary.marginPercent),
-        total_with_vat_plan: round2(summary.totalWithVat),
+        gross_revenue_plan: financial.grossRevenue,
+        discount_amount_plan: financial.discountAmount,
+        discount_percent_plan: financial.discountPercent,
+        total_revenue_plan: financial.totalRevenue,
+        total_cost_plan: financial.totalCost,
+        total_margin_plan: financial.totalEarned,
+        margin_percent_plan: financial.marginPercent,
+        total_with_vat_plan: financial.totalWithVat,
         total_hours_plan: round2(load.totalHours),
         production_hours_plastic: round2(load.hoursPlasticTotal),
         production_hours_packaging: round2(load.hoursPackagingTotal),
@@ -247,32 +368,53 @@ function makeHeaderPatch(order, snapshot, nowIso) {
 
 function aggregateHeader(rows, next = false) {
     return rows.reduce((acc, row) => {
-        const source = next ? row.headerPatch : row;
+        const source = next ? row.headerPatch : (row.before || row);
         acc.orders += 1;
-        acc.hours += numberOrZero(source.total_hours_plan);
-        acc.revenue += numberOrZero(source.total_revenue);
-        acc.margin += numberOrZero(source.total_margin);
+        acc.hours += numberOrZero(source.total_hours_plan ?? source.hours);
+        acc.revenue += numberOrZero(source.total_revenue ?? source.revenue);
+        acc.margin += numberOrZero(source.total_margin ?? source.margin);
         return acc;
     }, { orders: 0, hours: 0, revenue: 0, margin: 0 });
 }
 
 // Pure planning step: it has no network calls and is used by the smoke test.
 export function buildRecalculationPlan({ orders, itemRows, settings, templates, engine, nowIso = new Date().toISOString() }) {
-    const templateById = new Map((templates || []).map(template => [String(template.id), template]));
+    const resolvedTemplates = resolveLegacyBlankTemplateAliases(templates);
+    const templateById = new Map(resolvedTemplates.map(template => [String(template.id), template]));
     // Pendant letters resolve their blank source through the same catalogue as
     // the browser. The VM has no app bootstrap, so inject it explicitly before
     // calculating any order rather than falling back to stale element prices.
-    if (typeof engine.setCatalog === 'function') engine.setCatalog(templates || []);
+    if (typeof engine.setCatalog === 'function') engine.setCatalog(resolvedTemplates);
     const params = engine.getProductionParams(settings || {});
     const plan = [];
+    const skipped = [];
 
     for (const rawOrder of orders || []) {
-        const rawItems = (itemRows || []).filter(row => String(row.order_id) === String(rawOrder.id));
+        const sourceItems = (itemRows || []).filter(row => String(row.order_id) === String(rawOrder.id));
+        if (sourceItems.length === 0 && DRAFT_STATUSES.includes(rawOrder.status)) {
+            skipped.push({ id: rawOrder.id, reason: 'empty_draft' });
+            continue;
+        }
+        const rawItems = sourceItems.filter(rawItem => {
+            const item = hydrateItemForCalculation(rawItem);
+            return !(DRAFT_STATUSES.includes(rawOrder.status) && isCompletelyEmptyDraftProduct(item));
+        });
+        if (sourceItems.length > 0 && rawItems.length === 0 && DRAFT_STATUSES.includes(rawOrder.status)) {
+            skipped.push({ id: rawOrder.id, reason: 'empty_draft' });
+            continue;
+        }
         if (!rawItems.length) throw new Error(`заказ ${rawOrder.id}: нет позиций, пересчёт остановлен`);
         const order = { ...parseJsonObject(rawOrder.calculator_data, `заказ ${rawOrder.id}`), ...rawOrder };
         const items = rawItems.map(hydrateItemForCalculation);
+        const manualReason = DRAFT_STATUSES.includes(rawOrder.status)
+            ? getDraftManualRecalculationReason(items, templateById)
+            : null;
+        if (manualReason) {
+            skipped.push({ id: rawOrder.id, reason: manualReason });
+            continue;
+        }
         items.forEach(item => validateProductSafety(item, templateById));
-        const snapshot = engine.getOrderLiveCalculatorSnapshot(order, items, params, templates || []);
+        const snapshot = engine.getOrderLiveCalculatorSnapshot(order, items, params, resolvedTemplates);
 
         [snapshot.revenue, snapshot.marginPercent, snapshot.hours, snapshot.summary?.totalEarned].forEach((value, index) => {
             assertFinite(value, `заказ ${rawOrder.id}, показатель ${index + 1}`);
@@ -308,7 +450,7 @@ export function buildRecalculationPlan({ orders, itemRows, settings, templates, 
                 margin: round2(rawOrder.total_margin),
                 marginPercent: round2(rawOrder.margin_percent),
             },
-            headerPatch: makeHeaderPatch(order, snapshot, nowIso),
+            headerPatch: makeHeaderPatch(order, snapshot, params, nowIso),
             itemPatches,
             snapshot: {
                 hours: round2(snapshot.hours),
@@ -319,7 +461,8 @@ export function buildRecalculationPlan({ orders, itemRows, settings, templates, 
     }
     return {
         orders: plan,
-        before: aggregateHeader(orders || []),
+        skipped,
+        before: aggregateHeader(plan),
         after: aggregateHeader(plan, true),
         params: {
             setupHoursBlank: numberOrZero(params.setupHoursBlank),
@@ -375,6 +518,20 @@ function createRestClient({ url, key }) {
     };
 }
 
+async function loadAllRows(rest, table, query = {}) {
+    const pageSize = 1000;
+    const rows = [];
+    let offset = 0;
+    while (true) {
+        const page = await rest(table, {
+            query: { ...query, limit: String(pageSize), offset: String(offset) },
+        });
+        rows.push(...page);
+        if (page.length < pageSize) return rows;
+        offset += page.length;
+    }
+}
+
 async function loadRemoteRows(rest, scope) {
     const statuses = scope === 'active' ? ACTIVE_STATUSES : DRAFT_STATUSES;
     const orders = await rest('orders', {
@@ -394,7 +551,7 @@ async function loadRemoteRows(rest, scope) {
     });
     const [settingsRows, moldRows] = await Promise.all([
         rest('settings', { query: { select: 'key,value' } }),
-        rest('molds', { query: { select: 'id,mold_data' } }),
+        loadAllRows(rest, 'molds', { select: 'id,mold_data', order: 'id.asc' }),
     ]);
     return {
         orders,
@@ -417,13 +574,15 @@ function writeBackup({ scope, source }) {
     return backupPath;
 }
 
-async function applyPlan(rest, plan, backupPath) {
+async function applyPlan(rest, plan, backupPath, applied = null) {
     for (const orderPlan of plan.orders) {
         for (const item of orderPlan.itemPatches) {
             if (!item.patch) continue;
             await rest('order_items', { method: 'PATCH', query: { id: `eq.${item.id}` }, body: item.patch });
+            applied?.itemIds.add(String(item.id));
         }
         await rest('orders', { method: 'PATCH', query: { id: `eq.${orderPlan.id}` }, body: orderPlan.headerPatch });
+        applied?.orderIds.add(String(orderPlan.id));
         const [saved] = await rest('orders', {
             query: { select: 'id,total_hours_plan,total_revenue,total_margin,margin_percent', id: `eq.${orderPlan.id}` },
         });
@@ -437,17 +596,23 @@ async function applyPlan(rest, plan, backupPath) {
     }
 }
 
-async function rollback(rest, backupPath) {
+async function rollback(rest, backupPath, only = null) {
     const backup = JSON.parse(fs.readFileSync(backupPath, 'utf8'));
     if (!Array.isArray(backup.orders) || !Array.isArray(backup.itemRows)) throw new Error('Файл backup имеет неверный формат');
-    for (const item of backup.itemRows) {
+    const itemRows = only?.itemIds
+        ? backup.itemRows.filter(item => only.itemIds.has(String(item.id)))
+        : backup.itemRows;
+    const orders = only?.orderIds
+        ? backup.orders.filter(order => only.orderIds.has(String(order.id)))
+        : backup.orders;
+    for (const item of itemRows) {
         await rest('order_items', {
             method: 'PATCH',
             query: { id: `eq.${item.id}` },
             body: { item_data: item.item_data, cost_total: item.cost_total, updated_at: item.updated_at },
         });
     }
-    for (const order of backup.orders) {
+    for (const order of orders) {
         await rest('orders', {
             method: 'PATCH',
             query: { id: `eq.${order.id}` },
@@ -465,7 +630,7 @@ async function rollback(rest, backupPath) {
             },
         });
     }
-    return { orders: backup.orders.length, items: backup.itemRows.length };
+    return { orders: orders.length, items: itemRows.length };
 }
 
 async function main() {
@@ -484,10 +649,14 @@ async function main() {
         mode: args.apply ? 'apply' : 'dry-run',
         scope: args.scope,
         statuses: args.scope === 'active' ? ACTIVE_STATUSES : DRAFT_STATUSES,
+        target_orders: source.orders.length,
+        skipped_empty_drafts: plan.skipped.filter(item => item.reason === 'empty_draft').length,
+        skipped_manual_drafts: plan.skipped.filter(item => item.reason !== 'empty_draft').length,
         setup_norms: plan.params,
         before: plan.before,
         after: plan.after,
         changed_items: plan.orders.reduce((sum, order) => sum + order.itemPatches.filter(item => item.patch).length, 0),
+        skipped: plan.skipped,
     };
     if (args.report) {
         report.orders = plan.orders.map(order => ({
@@ -502,7 +671,17 @@ async function main() {
         return;
     }
     const backupPath = writeBackup({ scope: args.scope, source });
-    await applyPlan(rest, plan, backupPath);
+    const applied = { orderIds: new Set(), itemIds: new Set() };
+    try {
+        await applyPlan(rest, plan, backupPath, applied);
+    } catch (error) {
+        try {
+            await rollback(rest, backupPath, applied);
+        } catch (rollbackError) {
+            throw new Error(`${error.message}; автоматический rollback не прошёл: ${rollbackError.message}; backup: ${backupPath}`);
+        }
+        throw new Error(`${error.message}; частичные изменения автоматически отменены; backup: ${backupPath}`);
+    }
     console.log(JSON.stringify({ ...report, backup: backupPath, verified: true }, null, 2));
 }
 
