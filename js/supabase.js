@@ -609,6 +609,28 @@ const WORK_SETTINGS_KEYS = {
     task_notification_events: 'work_task_notification_events_json',
 };
 
+// These payloads live in the same legacy `settings` table, but each one has a
+// dedicated loader. Reading them during the global pricing/settings boot makes
+// every screen download finance and work snapshots that it cannot use. Keeping
+// them out of `loadSettings()` is also what lets a fresh browser receive the
+// actual production coefficients before the five-second remote timeout.
+const GLOBAL_SETTINGS_EXCLUDED_KEYS = Object.freeze([
+    'auth_accounts_json',
+    'auth_activity_json',
+    'auth_sessions_json',
+    'employee_extra_json',
+    'finance_workspace_json',
+    'tochka_snapshot_json',
+    'fintablo_snapshot_json',
+    'production_plan_state_json',
+    'factual_month_snapshots_json',
+    'warehouse_items_json',
+    'ready_goods_stock_json',
+    'ready_goods_history_json',
+    'ready_goods_sales_records_json',
+    ...Object.values(WORK_SETTINGS_KEYS),
+]);
+
 const WORK_TABLE_ON_CONFLICT = {
     task_watchers: 'task_id,user_id',
 };
@@ -1437,9 +1459,17 @@ async function loadSettings() {
         if (_settingsRefreshPromise) return _settingsRefreshPromise;
         _settingsRefreshPromise = (async () => {
             try {
-                const { data, error } = await _withRemoteTimeout('load', 'load settings', () => supabaseClient
-                    .from('settings')
-                    .select('key, value'));
+                const { data, error } = await _withRemoteTimeout('load', 'load settings', () => {
+                    const query = supabaseClient
+                        .from('settings')
+                        .select('key, value');
+                    // The production client exposes PostgREST's `.not()` query
+                    // builder. Keep the bare query as a narrow compatibility
+                    // fallback for minimal test clients only.
+                    return typeof query.not === 'function'
+                        ? query.not('key', 'in', `(${GLOBAL_SETTINGS_EXCLUDED_KEYS.join(',')})`)
+                        : query;
+                });
                 if (error) {
                     console.error('loadSettings error:', error);
                     if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
