@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="css/style.css?v=407">
     <script>
         (function () {
-            const CURRENT_HTML_VERSION = 'v408';
+            const CURRENT_HTML_VERSION = 'v409';
             const ATTEMPT_KEY = 'ro_calc_force_update_attempts';
 
             function parseVersion(version) {
@@ -187,7 +187,7 @@
     <aside class="sidebar">
         <div class="sidebar-brand">
             <h2>Recycle Object</h2>
-            <span>Калькулятор <span id="app-version">v408</span></span>
+            <span>Калькулятор <span id="app-version">v409</span></span>
         </div>
         <nav class="sidebar-nav">
             <div class="sidebar-group-label">Каждый день</div>
@@ -308,6 +308,7 @@
                         <label>Тип работ</label>
                         <select id="calc-production-purpose" onchange="Calculator.setProductionPurpose(this.value)">
                             <option value="commercial">Клиентский заказ</option>
+                            <option value="leftover_assembly">Сборка из неучтённых остатков</option>
                             <option value="rework">Переделка брака</option>
                             <option value="stock_sample">Сток / внутренний образец</option>
                         </select>
@@ -319,6 +320,28 @@
                     <div class="form-group">
                         <label>Дедлайн</label>
                         <input type="date" id="calc-deadline-end" onchange="Calculator.scheduleAutosave()">
+                    </div>
+                </div>
+                <div id="calc-leftover-assembly-panel" class="card" style="display:none;margin:12px 0 0;border-left:4px solid var(--purple);">
+                    <div style="font-weight:700;margin-bottom:4px;">↙ Сборка из неучтённых остатков</div>
+                    <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;line-height:1.4;">Детали физически есть в цехе, но не числятся на складе. Ничего не списывается и не считаются пластик, молд, запуск, цвет или литьё — только продажа и фактические часы ручной сборки.</div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Продажа без НДС, ₽ (всего)</label>
+                            <input type="number" min="0" step="1" id="calc-leftover-assembly-revenue" placeholder="Например: 25000" oninput="Calculator.setLeftoverAssemblyField('revenue', this.value)">
+                        </div>
+                        <div class="form-group">
+                            <label>Количество, шт.</label>
+                            <input type="number" min="0" step="1" id="calc-leftover-assembly-quantity" placeholder="Например: 50" oninput="Calculator.setLeftoverAssemblyField('quantity', this.value)">
+                        </div>
+                        <div class="form-group">
+                            <label>Ручная сборка, ч</label>
+                            <input type="number" min="0" step="0.1" id="calc-leftover-assembly-hours" placeholder="Например: 3.5" oninput="Calculator.setLeftoverAssemblyField('assemblyHours', this.value)">
+                        </div>
+                    </div>
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label>Из чего собрали</label>
+                        <textarea id="calc-leftover-assembly-details" rows="2" placeholder="Например: остатки красных карабинов и готовые фигурки" oninput="Calculator.setLeftoverAssemblyField('details', this.value)"></textarea>
                     </div>
                 </div>
                 <div class="form-group">
@@ -387,7 +410,7 @@
             </div><!-- /.calc-section (1) -->
 
             <!-- SECTION 2: Изделия -->
-            <div class="calc-section calc-section-main">
+            <div class="calc-section calc-section-main" id="calc-items-section">
                 <div class="calc-section-header">
                     <div class="calc-section-number">2</div>
                     <span class="calc-section-title">Изделия</span>
@@ -419,7 +442,7 @@
             </div><!-- /.calc-section (2) -->
 
             <!-- SECTION 3: Фурнитура и упаковка -->
-            <div class="calc-section">
+            <div class="calc-section" id="calc-hardware-packaging-section">
                 <div class="calc-section-header">
                     <div class="calc-section-number">3</div>
                     <span class="calc-section-title">Фурнитура и упаковка</span>
@@ -475,7 +498,7 @@
                         <div class="stat-sub" id="calc-load-plastic-pct">0% от мощности</div>
                     </div>
                     <div class="stat-card">
-                        <div class="stat-label">Упаковка + фурнитура</div>
+                        <div class="stat-label">Сборка + упаковка</div>
                         <div class="stat-value" id="calc-hours-packaging">0 ч</div>
                         <div class="load-bar"><div class="load-bar-fill green" id="calc-load-packaging-bar" style="width:0"></div></div>
                         <div class="stat-sub" id="calc-load-packaging-pct">0% от мощности</div>
@@ -3613,11 +3636,11 @@
 <script src="js/bug-report-core.js?v=2"></script>
 <script src="js/supabase.js?v=403"></script>
 <script src="js/task-events.js?v=1"></script>
-<script src="js/calculator.js?v=403"></script>
-<script src="js/app.js?v=408"></script>
+<script src="js/calculator.js?v=409"></script>
+<script src="js/app.js?v=409"></script>
 <script src="js/tpa.js?v=4"></script>
-<script src="js/order-detail.js?v=397"></script>
-<script src="js/orders.js?v=402"></script>
+<script src="js/order-detail.js?v=409"></script>
+<script src="js/orders.js?v=409"></script>
 <script src="js/production_plan.js?v=76"></script>
 <script src="js/analytics.js?v=46g"></script>
     <script src="js/molds.js?v=407"></script>

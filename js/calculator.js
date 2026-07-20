@@ -1332,6 +1332,97 @@ function calculateProductionLoad(items, hardwareItems, packagingItems, params, p
     };
 }
 
+// Продажа, собранная из физически оставшихся в цехе деталей. Это не складская
+// комплектация: детали не существуют в учёте и не должны создавать резерв или
+// повторно попадать в себестоимость. Вручную фиксируем только время сборки.
+function normalizeLeftoverAssembly(value) {
+    const raw = parseOrderCalcJson(value, {});
+    const parseNonNegative = input => {
+        const numeric = Number(input);
+        return Number.isFinite(numeric) && numeric > 0 ? round2(numeric) : 0;
+    };
+    return {
+        revenue: parseNonNegative(raw?.revenue),
+        quantity: parseNonNegative(raw?.quantity),
+        assemblyHours: parseNonNegative(raw?.assembly_hours ?? raw?.assemblyHours),
+        details: String(raw?.details || '').trim(),
+    };
+}
+
+function calculateLeftoverAssemblyLoad(value, params = {}) {
+    const leftover = normalizeLeftoverAssembly(value);
+    const totalHours = leftover.assemblyHours;
+    const packagingLoadPercent = Number(params?.packagingHours) > 0
+        ? round2((totalHours * 100) / Number(params.packagingHours))
+        : 0;
+    const days1worker = round2(totalHours / 8);
+
+    return {
+        hoursPlasticTotal: 0,
+        hoursPackagingTotal: 0,
+        hoursHardwareTotal: totalHours,
+        totalHours,
+        plasticLoadPercent: 0,
+        packagingLoadPercent,
+        days1worker,
+        days2workers: round2(days1worker / 2),
+        days3workers: round2(days1worker / 3),
+    };
+}
+
+function calculateLeftoverAssemblySummary(value, params = {}, orderAdjustments = {}) {
+    const leftover = normalizeLeftoverAssembly(value);
+    const discount = calculateOrderDiscount(leftover.revenue, orderAdjustments, params);
+    const totalRevenue = discount.revenueAfterDiscount;
+    // Сборщики уже находятся в косвенных расходах. Прямую зарплату повторно не
+    // начисляем, но часы должны получить свою долю косвенных расходов.
+    const indirectCost = round2(leftover.assemblyHours * Math.max(0, Number(params?.indirectPerHour) || 0));
+    const totalEarned = round2(totalRevenue * getNetRevenueRetentionRate(params) - indirectCost);
+    const vatOnRevenue = round2(totalRevenue * getVatRate(params));
+
+    return {
+        productionPurpose: 'leftover_assembly',
+        grossRevenue: round2(leftover.revenue),
+        discountAmount: discount.amount,
+        discountPercent: discount.percent,
+        totalRevenue: round2(totalRevenue),
+        vatOnRevenue,
+        totalWithVat: round2(totalRevenue + vatOnRevenue),
+        totalEarned,
+        marginPercent: totalRevenue > 0 ? round2((totalEarned * 100) / totalRevenue) : 0,
+        nonCommercialLoss: 0,
+        leftoverAssemblyQuantity: leftover.quantity,
+        leftoverAssemblyHours: leftover.assemblyHours,
+        leftoverAssemblyIndirectCost: indirectCost,
+        leftoverAssemblyDetails: leftover.details,
+    };
+}
+
+function calculateLeftoverAssemblyFinDirector(value, params = {}, orderAdjustments = {}) {
+    const summary = calculateLeftoverAssemblySummary(value, params, orderAdjustments);
+    return {
+        salary: 0,
+        indirect: summary.leftoverAssemblyIndirectCost,
+        hardwarePurchase: 0,
+        nfcTotal: 0,
+        hardwareDelivery: 0,
+        packagingPurchase: 0,
+        packagingDelivery: 0,
+        design: 0,
+        printing: 0,
+        plastic: 0,
+        molds: 0,
+        delivery: 0,
+        taxes: calcTaxesAmount(summary.totalRevenue, params),
+        commercial: calcCommercialAmount(summary.totalRevenue, params),
+        charity: calcCharityAmount(summary.totalRevenue, params),
+        totalCosts: round2(summary.totalRevenue - summary.totalEarned),
+        revenue: summary.totalRevenue,
+        totalWithVat: summary.totalWithVat,
+        discountAmount: summary.discountAmount,
+    };
+}
+
 /**
  * Рассчитать данные для финансового директора
  * Обновлено: фурнитура и упаковка — отдельные массивы
@@ -1657,6 +1748,7 @@ function calculateOrderSummary(items, hardwareItems, packagingItems, extraCosts,
 // реальные внутренние расходы, а не продажа.
 const PRODUCTION_PURPOSES = {
     commercial: { label: 'Клиентский заказ', shortLabel: 'Клиентский' },
+    leftover_assembly: { label: 'Сборка из неучтённых остатков', shortLabel: 'Сборка из остатков' },
     rework: { label: 'Переделка брака', shortLabel: 'Переделка брака' },
     stock_sample: { label: 'Сток / внутренний образец', shortLabel: 'Сток / образец' },
 };
@@ -1667,7 +1759,7 @@ function normalizeProductionPurpose(value) {
 }
 
 function isNonCommercialProductionPurpose(value) {
-    return normalizeProductionPurpose(value) !== 'commercial';
+    return ['rework', 'stock_sample'].includes(normalizeProductionPurpose(value));
 }
 
 function getProductionPurposeMeta(value) {
@@ -1753,6 +1845,30 @@ function getOrderLiveCalculatorSnapshot(order = {}, orderItems = [], params = nu
     const runtimeTemplates = Array.isArray(templates)
         ? templates
         : (typeof App !== 'undefined' && Array.isArray(App.templates) ? App.templates : []);
+
+    if (normalizeProductionPurpose(order?.production_purpose) === 'leftover_assembly') {
+        const leftover = normalizeLeftoverAssembly(order?.leftover_assembly);
+        const orderAdjustments = {
+            mode: order?.discount_mode,
+            value: order?.discount_value,
+        };
+        const load = calculateLeftoverAssemblyLoad(leftover, runtimeParams);
+        const summary = calculateLeftoverAssemblySummary(leftover, runtimeParams, orderAdjustments);
+        return {
+            products: [],
+            hardwareItems: [],
+            packagingItems: [],
+            extraCosts: [],
+            pendantItems: [],
+            load,
+            summary,
+            revenue: round2(summary.totalRevenue || 0),
+            marginPercent: round2(summary.marginPercent || 0),
+            hours: round2(load.totalHours || 0),
+            productionPurpose: summary.productionPurpose,
+            nonCommercialLoss: 0,
+        };
+    }
 
     const products = [];
     const hardwareItems = [];

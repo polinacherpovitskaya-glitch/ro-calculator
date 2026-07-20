@@ -147,6 +147,7 @@ const OrderDetail = {
         const hours = Number(this.currentFinancial?.hours || o.total_hours_plan || 0);
         const purpose = normalizeProductionPurpose(this.currentFinancial?.purpose || o.production_purpose);
         const isNonCommercial = isNonCommercialProductionPurpose(purpose);
+        const isLeftoverAssembly = purpose === 'leftover_assembly';
         const revenue = isNonCommercial ? 0 : calculatedRevenue;
         const loss = Math.max(0, Number(this.currentFinancial?.loss || o.total_cost_plan || 0));
 
@@ -173,8 +174,12 @@ const OrderDetail = {
                 <div class="stat-value">${hours.toFixed(1)} ч</div>
             </div>
             <div class="stat-card">
-                <div class="stat-label">${isNonCommercial ? 'Тип работ' : 'Оплата'}</div>
-                <div class="stat-value">${isNonCommercial ? (purpose === 'rework' ? '↻ Переделка брака' : '▦ Сток / образец') : `<span class="badge badge-${ps.color}">${ps.label}</span>`}</div>
+                <div class="stat-label">${isNonCommercial || isLeftoverAssembly ? 'Тип работ' : 'Оплата'}</div>
+                <div class="stat-value">${isNonCommercial
+                    ? (purpose === 'rework' ? '↻ Переделка брака' : '▦ Сток / образец')
+                    : isLeftoverAssembly
+                        ? '↙ Сборка из остатков'
+                        : `<span class="badge badge-${ps.color}">${ps.label}</span>`}</div>
             </div>
         `;
     },
