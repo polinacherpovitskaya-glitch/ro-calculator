@@ -366,6 +366,15 @@ const Orders = {
             return stored;
         }
         try {
+            if (normalizeProductionPurpose(order?.production_purpose) === 'leftover_assembly') {
+                const snapshot = getOrderLiveCalculatorSnapshot(order, []);
+                return {
+                    revenue: Number(snapshot?.revenue || 0),
+                    marginPercent: Number(snapshot?.marginPercent || 0),
+                    hours: Number(snapshot?.hours || 0),
+                    purpose: 'leftover_assembly',
+                };
+            }
             let safeItems = Array.isArray(items) ? items.filter(Boolean) : [];
             const hasCompleteTypeCoverage = safeItems.length > 0
                 && safeItems.every(item => String(item?.item_type || '').trim());
@@ -1013,7 +1022,9 @@ const Orders = {
             ? this.renderBadge('B2C', 'badge-blue')
             : '';
         const purpose = normalizeProductionPurpose(order.production_purpose);
-        const purposeBadge = isNonCommercialProductionPurpose(purpose)
+        const purposeBadge = purpose === 'leftover_assembly'
+            ? this.renderBadge('Сборка из остатков', 'badge-blue')
+            : isNonCommercialProductionPurpose(purpose)
             ? this.renderBadge(purpose === 'rework' ? 'Переделка брака' : 'Сток / образец', 'badge-purple')
             : '';
 

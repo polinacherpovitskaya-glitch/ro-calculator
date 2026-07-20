@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v408';
+const APP_VERSION = 'v409';
 
 const App = {
     currentPage: 'orders',
@@ -1449,6 +1449,7 @@ const Calculator = {
     discountMode: 'none',
     discountValue: 0,
     productionPurpose: 'commercial',
+    leftoverAssembly: { revenue: 0, quantity: 0, assemblyHours: 0, details: '' },
     _autosaveTimer: null,
     _isDirty: false,
     _autosaving: false,
@@ -1547,8 +1548,10 @@ const Calculator = {
         this.discountMode = 'none';
         this.discountValue = 0;
         this.productionPurpose = 'commercial';
+        this.leftoverAssembly = { revenue: 0, quantity: 0, assemblyHours: 0, details: '' };
         const purposeEl = document.getElementById('calc-production-purpose');
         if (purposeEl) purposeEl.value = this.productionPurpose;
+        this._syncLeftoverAssemblyUi();
         document.getElementById('calc-items-container').innerHTML = '';
         document.getElementById('calc-hardware-list').innerHTML = '';
         document.getElementById('calc-packaging-list').innerHTML = '';
@@ -1577,6 +1580,7 @@ const Calculator = {
             client_name: getValue('calc-client-name'),
             manager_name: getValue('calc-manager-name'),
             production_purpose: this.getProductionPurpose(),
+            leftover_assembly: this.getLeftoverAssembly(),
             deadline_start: getValue('calc-deadline-start'),
             deadline_end: getValue('calc-deadline-end'),
             notes: getValue('calc-notes'),
@@ -1597,7 +1601,14 @@ const Calculator = {
         const orderFields = snapshot || this._getOrderFormSnapshot();
         const meaningfulFields = { ...orderFields };
         delete meaningfulFields.production_purpose;
+        delete meaningfulFields.leftover_assembly;
         return Object.values(meaningfulFields).some(value => String(value || '').trim())
+            || (this.isLeftoverAssembly() && (
+                this.getLeftoverAssembly().revenue > 0
+                || this.getLeftoverAssembly().quantity > 0
+                || this.getLeftoverAssembly().assemblyHours > 0
+                || !!this.getLeftoverAssembly().details
+            ))
             || this.items.some(i => this._isMeaningfulProductItem(i))
             || this.hardwareItems.some(hw => hw._from_template || hw.name || hw.warehouse_item_id || hw.china_item_id || (parseFloat(hw.qty) || 0) > 0)
             || this.packagingItems.some(pkg => pkg.name || pkg.warehouse_item_id || pkg.china_item_id || (parseFloat(pkg.qty) || 0) > 0)
@@ -1687,8 +1698,10 @@ const Calculator = {
         this.discountMode = (payload.discount_mode === 'amount' || payload.discount_mode === 'percent') ? payload.discount_mode : 'none';
         this.discountValue = this._parseDiscountValue(payload.discount_value || 0);
         this.productionPurpose = normalizeProductionPurpose(fields.production_purpose);
+        this.leftoverAssembly = normalizeLeftoverAssembly(fields.leftover_assembly);
         const restoredPurposeEl = document.getElementById('calc-production-purpose');
         if (restoredPurposeEl) restoredPurposeEl.value = this.productionPurpose;
+        this._syncLeftoverAssemblyUi();
         this._currentOrderStatus = payload.current_order_status || 'draft';
 
         const restoredOrderId = Number(payload.editing_order_id || 0) || null;
@@ -1749,15 +1762,65 @@ const Calculator = {
         return normalizeProductionPurpose(el?.value || this.productionPurpose);
     },
 
+    isLeftoverAssembly() {
+        return this.getProductionPurpose() === 'leftover_assembly';
+    },
+
+    getLeftoverAssembly() {
+        return normalizeLeftoverAssembly(this.leftoverAssembly);
+    },
+
+    setLeftoverAssemblyField(field, value) {
+        const current = this.getLeftoverAssembly();
+        if (field === 'details') {
+            current.details = String(value || '').trimStart();
+        } else if (field === 'revenue' || field === 'quantity' || field === 'assemblyHours') {
+            const numeric = Number(String(value || '').replace(',', '.'));
+            current[field] = Number.isFinite(numeric) && numeric > 0 ? numeric : 0;
+        }
+        this.leftoverAssembly = current;
+        this.recalculate();
+        this.scheduleAutosave();
+    },
+
+    _syncLeftoverAssemblyUi() {
+        const leftover = this.getLeftoverAssembly();
+        const isLeftover = this.isLeftoverAssembly();
+        const panel = document.getElementById('calc-leftover-assembly-panel');
+        const itemsSection = document.getElementById('calc-items-section');
+        const hardwareSection = document.getElementById('calc-hardware-packaging-section');
+        const revenueEl = document.getElementById('calc-leftover-assembly-revenue');
+        const quantityEl = document.getElementById('calc-leftover-assembly-quantity');
+        const hoursEl = document.getElementById('calc-leftover-assembly-hours');
+        const detailsEl = document.getElementById('calc-leftover-assembly-details');
+        if (panel) panel.style.display = isLeftover ? '' : 'none';
+        if (itemsSection) itemsSection.style.display = isLeftover ? 'none' : '';
+        if (hardwareSection) hardwareSection.style.display = isLeftover ? 'none' : '';
+        if (revenueEl) revenueEl.value = leftover.revenue > 0 ? String(leftover.revenue) : '';
+        if (quantityEl) quantityEl.value = leftover.quantity > 0 ? String(leftover.quantity) : '';
+        if (hoursEl) hoursEl.value = leftover.assemblyHours > 0 ? String(leftover.assemblyHours) : '';
+        if (detailsEl) detailsEl.value = leftover.details || '';
+    },
+
+    getPurposeAwareProductionLoad(params = App.params || {}) {
+        return this.isLeftoverAssembly()
+            ? calculateLeftoverAssemblyLoad(this.getLeftoverAssembly(), params)
+            : calculateProductionLoad(this.items, this.hardwareItems, this.packagingItems, params, this.pendants);
+    },
+
     setProductionPurpose(value) {
         this.productionPurpose = normalizeProductionPurpose(value);
         const el = document.getElementById('calc-production-purpose');
         if (el) el.value = this.productionPurpose;
+        this._syncLeftoverAssemblyUi();
         this.recalculate();
         this.scheduleAutosave();
     },
 
     getPurposeAwareOrderSummary(params = App.params || {}, orderAdjustments = this.getOrderAdjustments()) {
+        if (this.isLeftoverAssembly()) {
+            return calculateLeftoverAssemblySummary(this.getLeftoverAssembly(), params, orderAdjustments);
+        }
         const rawSummary = calculateOrderSummary(
             this.items,
             this.hardwareItems,
@@ -4347,6 +4410,10 @@ const Calculator = {
 
     _doRecalculate(params) {
         let hasData = false;
+        if (this.isLeftoverAssembly()) {
+            const leftover = this.getLeftoverAssembly();
+            hasData = leftover.revenue > 0 || leftover.assemblyHours > 0;
+        }
 
         // === Pre-calculate hw/pkg results (needed for per-item cost aggregation) ===
         this.hardwareItems.forEach(hw => {
@@ -4515,7 +4582,7 @@ const Calculator = {
             sumEl.style.display = '';
             const orderAdjustments = this.getOrderAdjustments();
 
-            const load = calculateProductionLoad(this.items, this.hardwareItems, this.packagingItems, params, this.pendants);
+            const load = this.getPurposeAwareProductionLoad(params);
             this.setText('calc-hours-plastic', formatHours(load.hoursPlasticTotal));
             this.setText('calc-hours-packaging', formatHours(load.hoursPackagingTotal + load.hoursHardwareTotal));
             this.setText('calc-hours-total', formatHours(load.totalHours));
@@ -4532,7 +4599,9 @@ const Calculator = {
             const isNonCommercial = isNonCommercialProductionPurpose(summary.productionPurpose);
 
             // FinDirector
-            const fin = calculateFinDirectorData(this.items, this.hardwareItems, this.packagingItems, params, this.pendants, orderAdjustments);
+            const fin = this.isLeftoverAssembly()
+                ? calculateLeftoverAssemblyFinDirector(this.getLeftoverAssembly(), params, orderAdjustments)
+                : calculateFinDirectorData(this.items, this.hardwareItems, this.packagingItems, params, this.pendants, orderAdjustments);
             const finSalaryRow = document.getElementById('fin-salary')?.closest('.cost-row');
             const finDiscountRow = document.getElementById('fin-discount-row');
             if (App.isAdmin()) {
@@ -4691,6 +4760,31 @@ const Calculator = {
         const contentEl = document.getElementById('calc-pricing-content');
         if (!pricingEl || !contentEl) {
             console.warn('[renderPricingCard] DOM elements not found', { pricingEl: !!pricingEl, contentEl: !!contentEl });
+            return;
+        }
+
+        if (this.isLeftoverAssembly()) {
+            const leftover = this.getLeftoverAssembly();
+            const summary = this.getPurposeAwareOrderSummary(params);
+            const hasInput = leftover.revenue > 0 || leftover.assemblyHours > 0;
+            pricingEl.style.display = hasInput ? '' : 'none';
+            if (!hasInput) return;
+            const details = leftover.details
+                ? `<div style="margin-top:8px;color:var(--text-muted);white-space:pre-wrap;">${App.escHtml(leftover.details)}</div>`
+                : '<div style="margin-top:8px;color:var(--text-muted);">Укажите, из каких остатков собрали заказ.</div>';
+            contentEl.innerHTML = `
+                <div style="padding:14px;border:1px solid var(--border);border-radius:8px;background:var(--bg-muted);line-height:1.45;">
+                    <div style="font-weight:700;margin-bottom:6px;">↙ Продажа из неучтённых остатков</div>
+                    <div style="font-size:12px;color:var(--text-muted);">Без склада, пластика, молда, запусков, цвета и прямой зарплаты. В смету входят только косвенные на ручную сборку и расходы продажи.</div>
+                    <div class="stats-grid" style="margin-top:12px;">
+                        <div class="stat-card"><div class="stat-label">Продажа без НДС</div><div class="stat-value">${formatRub(summary.totalRevenue)}</div></div>
+                        <div class="stat-card"><div class="stat-label">Количество</div><div class="stat-value">${leftover.quantity > 0 ? leftover.quantity + ' шт.' : '—'}</div></div>
+                        <div class="stat-card"><div class="stat-label">Ручная сборка</div><div class="stat-value">${formatHours(leftover.assemblyHours)}</div></div>
+                        <div class="stat-card"><div class="stat-label">Косвенные на сборку</div><div class="stat-value">${formatRub(summary.leftoverAssemblyIndirectCost)}</div></div>
+                        <div class="stat-card"><div class="stat-label">Маржа</div><div class="stat-value ${summary.marginPercent < 30 ? 'text-red' : 'text-green'}">${formatPercent(summary.marginPercent)}</div></div>
+                    </div>
+                    ${details}
+                </div>`;
             return;
         }
 
@@ -5034,6 +5128,16 @@ const Calculator = {
      */
     renderOrderInvoice(params, pricingHtml, contentEl) {
         const purpose = this.getProductionPurpose();
+        if (purpose === 'leftover_assembly') {
+            const summary = this.getPurposeAwareOrderSummary(params);
+            const leftover = this.getLeftoverAssembly();
+            contentEl.innerHTML = `<div class="pricing-grid-scroll">${pricingHtml}</div>
+                <div style="margin-top:16px;padding:12px 14px;border:1px solid var(--border);border-radius:8px;background:var(--bg-muted);font-size:13px;line-height:1.45;">
+                    <strong>↙ Сборка из неучтённых остатков</strong> — продажа без склада и повторного производства.
+                    Ручная сборка: <strong>${formatHours(leftover.assemblyHours)}</strong>; косвенные на неё: <strong>${formatRub(summary.leftoverAssemblyIndirectCost)}</strong>.
+                </div>`;
+            return;
+        }
         if (isNonCommercialProductionPurpose(purpose)) {
             const summary = this.getPurposeAwareOrderSummary(params);
             const meta = getProductionPurposeMeta(purpose);
@@ -5362,6 +5466,12 @@ const Calculator = {
         const autosaveGeneration = this._saveGeneration;
         // Don't autosave if the draft is completely empty.
         const hasAnyData = this.items.some(i => i.product_name || i.quantity > 0 || i.template_id)
+            || (this.isLeftoverAssembly() && (
+                this.getLeftoverAssembly().revenue > 0
+                || this.getLeftoverAssembly().quantity > 0
+                || this.getLeftoverAssembly().assemblyHours > 0
+                || !!this.getLeftoverAssembly().details
+            ))
             || this.hardwareItems.some(hw => hw._from_template || hw.name || hw.warehouse_item_id || hw.china_item_id || (parseFloat(hw.qty) || 0) > 0)
             || this.packagingItems.some(pkg => pkg.name || pkg.warehouse_item_id || pkg.china_item_id || (parseFloat(pkg.qty) || 0) > 0)
             || this.pendants.some(pnd => pnd.name || pnd.template_id || (parseFloat(pnd.quantity) || 0) > 0)
@@ -5378,7 +5488,7 @@ const Calculator = {
             // Recalculate before saving
             try { this._doRecalculate(App.params); } catch (e) { /* ignore */ }
 
-            const load = calculateProductionLoad(this.items, this.hardwareItems, this.packagingItems, App.params, this.pendants);
+            const load = this.getPurposeAwareProductionLoad(App.params);
             const orderAdjustments = this.getOrderAdjustments();
             const summary = this.getPurposeAwareOrderSummary(App.params || {}, orderAdjustments);
             const hadEditingOrderId = !!this._getCurrentEditingOrderId();
@@ -5408,6 +5518,8 @@ const Calculator = {
                 print_type: null,
                 status: 'draft', // autosave always writes 'draft' for new; existing orders get their status preserved below
                 production_purpose: this.getProductionPurpose(),
+                leftover_assembly: this.getLeftoverAssembly(),
+                __allowEmptyItemsDelete: this.isLeftoverAssembly(),
                 discount_mode: orderAdjustments.mode,
                 discount_value: orderAdjustments.value,
                 gross_revenue_plan: summary.grossRevenue,
@@ -5465,6 +5577,10 @@ const Calculator = {
     },
 
     _collectItemsForSave() {
+        // Остатки не находятся на складе и не должны создавать никаких позиций,
+        // резервов или списаний. При переводе старого заказа пустой состав ниже
+        // осознанно удалит прежние позиции через __allowEmptyItemsDelete.
+        if (this.isLeftoverAssembly()) return [];
         const items = [];
 
         // Product items
@@ -5623,7 +5739,7 @@ const Calculator = {
             document.getElementById('calc-order-name').value = orderName;
         }
 
-        const load = calculateProductionLoad(this.items, this.hardwareItems, this.packagingItems, App.params, this.pendants);
+        const load = this.getPurposeAwareProductionLoad(App.params);
         const orderAdjustments = this.getOrderAdjustments();
         const summary = this.getPurposeAwareOrderSummary(App.params || {}, orderAdjustments);
         const isEdit = !!this._getCurrentEditingOrderId();
@@ -5653,6 +5769,8 @@ const Calculator = {
             print_type: null, // determined at printing level
             status: 'draft',
             production_purpose: this.getProductionPurpose(),
+            leftover_assembly: this.getLeftoverAssembly(),
+            __allowEmptyItemsDelete: this.isLeftoverAssembly(),
             discount_mode: orderAdjustments.mode,
             discount_value: orderAdjustments.value,
             gross_revenue_plan: summary.grossRevenue,
@@ -6017,8 +6135,10 @@ const Calculator = {
         document.getElementById('calc-client-bank-account').value = order.client_bank_account || '';
         document.getElementById('calc-client-bank-bik').value = order.client_bank_bik || '';
         this.productionPurpose = normalizeProductionPurpose(order.production_purpose);
+        this.leftoverAssembly = normalizeLeftoverAssembly(order.leftover_assembly);
         const orderPurposeEl = document.getElementById('calc-production-purpose');
         if (orderPurposeEl) orderPurposeEl.value = this.productionPurpose;
+        this._syncLeftoverAssemblyUi();
         this.discountMode = (order.discount_mode === 'amount' || order.discount_mode === 'percent') ? order.discount_mode : 'none';
         this.discountValue = this._parseDiscountValue(order.discount_value || 0);
         this._syncDiscountUi();
@@ -6237,7 +6357,7 @@ const Calculator = {
             Pendant.renderAllCards();
         }
 
-        if (this.items.length === 0) this.addItem();
+        if (this.items.length === 0 && !this.isLeftoverAssembly()) this.addItem();
 
         // Render per-item hw/pkg (loaded after items, so re-render now)
         // Also clear builtin_hw fields if real per-item hw exists (prevent double-counting)
