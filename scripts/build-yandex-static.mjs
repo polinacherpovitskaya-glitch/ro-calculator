@@ -312,6 +312,29 @@ function writeJson(filePath, data) {
   fs.writeFileSync(filePath, JSON.stringify(data));
 }
 
+// The browser asks the static mirror for a small, route-specific subset of the
+// snapshot (auth accounts on boot, orders only on the orders page, etc.). Keep
+// those files independent so a cold session never has to download the whole
+// mirror just to render the login selector.
+export function buildBootstrapShardPayloads(bootstrap) {
+  const data = bootstrap?.data && typeof bootstrap.data === 'object' ? bootstrap.data : {};
+  return Object.fromEntries(Object.entries(data).map(([key, value]) => [key, {
+    ok: true,
+    generated_at: bootstrap?.generated_at || '',
+    source: bootstrap?.source || 'supabase-snapshot-for-yandex-static',
+    data: { [key]: value },
+    errors: bootstrap?.errors || {},
+  }]));
+}
+
+function writeBootstrapShards(bootstrap) {
+  const shards = buildBootstrapShardPayloads(bootstrap);
+  for (const [key, payload] of Object.entries(shards)) {
+    writeJson(path.join(OUT_DIR, 'data', 'bootstrap', `${encodeURIComponent(key)}.json`), payload);
+  }
+  return Object.keys(shards).length;
+}
+
 // Core tables that must always contain rows in a healthy production snapshot.
 // Every Supabase fetch in buildBootstrapSnapshot() swallows errors into an empty
 // value, so when Supabase is unreachable during the build (it periodically 522s
@@ -401,6 +424,7 @@ async function main() {
   const bootstrap = await buildBootstrapSnapshot();
   assertHealthyBootstrap(bootstrap);
   writeJson(path.join(OUT_DIR, 'data/bootstrap.json'), bootstrap);
+  const bootstrapShards = writeBootstrapShards(bootstrap);
 
   const floor = buildFloor();
 
@@ -409,6 +433,7 @@ async function main() {
     bucket: BUCKET,
     floor,
     bytes: fs.statSync(path.join(OUT_DIR, 'data/bootstrap.json')).size,
+    bootstrapShards,
     employees: bootstrap.data.employees.length,
     authAccounts: bootstrap.data.authAccounts.length,
     warehouseItems: bootstrap.data.warehouseItems.length,

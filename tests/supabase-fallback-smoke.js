@@ -68,6 +68,25 @@ function createContext() {
         const url = String(input);
         context.__remoteCalls.push({ table: 'fetch', action: 'request', url });
         const parsed = new URL(url, 'http://localhost');
+        const shardMatch = parsed.pathname.match(/^\/data\/bootstrap\/([^/]+)\.json$/);
+        if (shardMatch) {
+            const key = decodeURIComponent(shardMatch[1]);
+            if (!Object.prototype.hasOwnProperty.call(context.__staticBootstrapShards || {}, key)) {
+                return {
+                    ok: false,
+                    status: 404,
+                    async json() {
+                        return { ok: false, data: {}, errors: { [key]: 'missing shard' } };
+                    },
+                };
+            }
+            return {
+                ok: true,
+                async json() {
+                    return { ok: true, data: { [key]: context.__staticBootstrapShards[key] }, errors: {} };
+                },
+            };
+        }
         if (parsed.pathname === '/api/bootstrap' || parsed.pathname === '/data/bootstrap.json') {
             let keys = String(parsed.searchParams.get('keys') || '')
                 .split(',')
@@ -149,11 +168,27 @@ function createContext() {
                                     return Promise.resolve({ data: context.__productTemplatesData, error: null });
                                 }
                                 if (Array.isArray(context.__tableRows[table])) {
-                                    return Promise.resolve({ data: context.__tableRows[table], error: null });
+                                    const excludedKeys = state.not && state.not.column === 'key'
+                                        && state.not.operator === 'in'
+                                        ? new Set(String(state.not.value || '')
+                                            .replace(/^\(|\)$/g, '')
+                                            .split(',')
+                                            .map(value => value.trim())
+                                            .filter(Boolean))
+                                        : null;
+                                    const rows = excludedKeys
+                                        ? context.__tableRows[table].filter(row => !excludedKeys.has(String(row?.key || '')))
+                                        : context.__tableRows[table];
+                                    return Promise.resolve({ data: rows, error: null });
                                 }
                                 return Promise.resolve({ data: [], error: null });
                             };
                             return {
+                                not(column, operator, value) {
+                                    state.not = { column, operator, value };
+                                    context.__remoteCalls.push({ table, action: 'not', column, operator, value });
+                                    return resolveRows();
+                                },
                                 eq(_column, value) {
                                     state.eqValue = value;
                                     return {
@@ -383,6 +418,33 @@ function persistTableRows(context, table, payload) {
 async function main() {
     {
         const context = createContext();
+        context.location = {
+            href: 'https://calc2.recycleobject.ru/#warehouse',
+            origin: 'https://calc2.recycleobject.ru',
+            protocol: 'https:',
+            hostname: 'calc2.recycleobject.ru',
+        };
+        context.__staticBootstrapShards = {
+            authAccounts: [{ id: 7, username: 'Полина' }],
+            employees: [{ id: 7, name: 'Полина' }],
+        };
+        runScript(context, 'js/supabase.js');
+
+        const staticPayload = JSON.parse(JSON.stringify(await vm.runInContext(
+            `_loadSameOriginBootstrap(['authAccounts', 'employees'])`,
+            context
+        )));
+        assert.equal(staticPayload.authAccounts[0].username, 'Полина');
+        assert.equal(staticPayload.employees[0].name, 'Полина');
+        const staticRequests = context.__remoteCalls
+            .filter(call => call.table === 'fetch')
+            .map(call => call.url);
+        assert.equal(staticRequests.some(url => /\/data\/bootstrap\.json/.test(url)), false, 'new static mirrors must not fetch the monolithic bootstrap first');
+        assert.equal(staticRequests.filter(url => /\/data\/bootstrap\/(authAccounts|employees)\.json/.test(url)).length, 2, 'static mirror must fetch only requested bootstrap shards');
+    }
+
+    {
+        const context = createContext();
         runScript(context, 'js/supabase.js');
 
         const rows = JSON.parse(JSON.stringify(vm.runInContext(`_mergeOrderRows([
@@ -472,6 +534,36 @@ async function main() {
             1900000,
             'cold-start defaults should already use the fixed indirect costs so molds do not flash stale prices before settings refresh',
         );
+
+        context.__tableRows.settings = [
+            { key: 'work_load_ratio', value: '0.625' },
+            { key: 'seasonal_load_percent_json', value: '{"Q1":40,"Q2":60,"Q3":70,"Q4":80}' },
+            { key: 'fintablo_snapshot_json', value: '{"must_not":"arrive in global settings"}' },
+            { key: 'tochka_snapshot_json', value: '{"must_not":"arrive in global settings"}' },
+            { key: 'warehouse_items_json', value: '[{"must_not":"arrive in global settings"}]' },
+            { key: 'auth_sessions_json', value: '[{"must_not":"arrive in global settings"}]' },
+            { key: 'work_tasks_json', value: '[{"must_not":"arrive in global settings"}]' },
+        ];
+        vm.runInContext('initSupabase()', context);
+        await vm.runInContext('loadSettings()', context);
+        await new Promise(resolve => setTimeout(resolve, 20));
+        const refreshedSettings = JSON.parse(JSON.stringify(vm.runInContext('getLocal(LOCAL_KEYS.settings)', context)));
+        const settingsExclusion = context.__remoteCalls.find(call => call.table === 'settings' && call.action === 'not');
+        assert.ok(settingsExclusion, 'global settings request must exclude dedicated JSON snapshots');
+        assert.equal(settingsExclusion.column, 'key');
+        assert.equal(settingsExclusion.operator, 'in');
+        [
+            'fintablo_snapshot_json',
+            'tochka_snapshot_json',
+            'warehouse_items_json',
+            'auth_sessions_json',
+            'work_tasks_json',
+        ].forEach(key => assert.match(settingsExclusion.value, new RegExp(`(^|,)${key}(,|$)`), `${key} must stay out of global settings`));
+        assert.equal(refreshedSettings.work_load_ratio, 0.625, 'fresh settings should hydrate the shared pricing coefficient');
+        assert.equal(refreshedSettings.seasonal_load_percent_json, '{"Q1":40,"Q2":60,"Q3":70,"Q4":80}', 'seasonal capacity remains a global setting');
+        ['fintablo_snapshot_json', 'tochka_snapshot_json', 'warehouse_items_json', 'auth_sessions_json', 'work_tasks_json'].forEach(key => {
+            assert.equal(refreshedSettings[key], undefined, `${key} must not be cached as a global setting`);
+        });
 
         vm.runInContext(`
             initSupabase();

@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
-import { assertHealthyBootstrap } from '../scripts/build-yandex-static.mjs';
+import fs from 'node:fs';
+import path from 'node:path';
+import { assertHealthyBootstrap, buildBootstrapShardPayloads } from '../scripts/build-yandex-static.mjs';
 
 // Guards the calc2 static mirror against publishing an empty bootstrap.json when
 // Supabase is unreachable during the CI build (each fetch swallows errors into an
@@ -22,6 +24,16 @@ function makeBootstrap(overrides = {}) {
 // A healthy snapshot passes and reports its row counts.
 const counts = assertHealthyBootstrap(makeBootstrap());
 assert.deepEqual(counts, { authAccounts: 1, employees: 1, orders: 1, settingsRows: 1 });
+
+const shards = buildBootstrapShardPayloads(makeBootstrap());
+assert.deepEqual(Object.keys(shards).sort(), ['authAccounts', 'employees', 'orders', 'settingsRows']);
+for (const [key, payload] of Object.entries(shards)) {
+  assert.deepEqual(Object.keys(payload.data), [key], `shard ${key} must contain only its requested key`);
+  assert.equal(payload.ok, true);
+}
+
+const yandexSync = fs.readFileSync(path.join(process.cwd(), '.github/workflows/yandex-static-sync.yml'), 'utf8');
+assert.match(yandexSync, /data\/bootstrap\/\*/, 'bootstrap shards must be deployed without immutable one-year cache');
 
 // A fully empty snapshot (Supabase fully unreachable) must fail the build.
 assert.throws(

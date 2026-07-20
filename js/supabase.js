@@ -11,6 +11,7 @@ let supabaseClient = null;
 const SAME_ORIGIN_BOOTSTRAP_PATH = '/api/bootstrap';
 const SAME_ORIGIN_BOOTSTRAP_TTL_MS = 30 * 1000;
 const STATIC_BOOTSTRAP_PATH = '/data/bootstrap.json';
+const STATIC_BOOTSTRAP_SHARDS_PATH = '/data/bootstrap/';
 let _sameOriginBootstrapCache = {};
 let _sameOriginBootstrapFetchedAt = {};
 let _sameOriginBootstrapLastErrors = {};
@@ -236,17 +237,26 @@ function _canUseSameOriginBootstrap() {
         && /^https?:$/.test(window.location.protocol || '');
 }
 
-function _getStaticBootstrapUrls() {
+function _getStaticBootstrapShardUrls(keys = []) {
     if (typeof window === 'undefined' || typeof fetch !== 'function' || !window.location) return [];
-    const urls = [];
     try {
-        urls.push(new URL(STATIC_BOOTSTRAP_PATH, window.location.origin).toString());
-    } catch (_) {}
-    const host = String(window.location.hostname || '').toLowerCase();
-    if (host === 'calc2.recycleobject.ru' || host.endsWith('.website.yandexcloud.net')) {
-        urls.push('https://storage.yandexcloud.net/calc2.recycleobject.ru/data/bootstrap.json');
+        const base = new URL(STATIC_BOOTSTRAP_SHARDS_PATH, window.location.origin);
+        return [...new Set((Array.isArray(keys) ? keys : [keys])
+            .map(key => String(key || '').trim())
+            .filter(Boolean)
+            .map(key => new URL(`${encodeURIComponent(key)}.json`, base).toString()))];
+    } catch (_) {
+        return [];
     }
-    return [...new Set(urls)];
+}
+
+function _getStaticBootstrapLegacyUrls() {
+    if (typeof window === 'undefined' || typeof fetch !== 'function' || !window.location) return [];
+    try {
+        return [new URL(STATIC_BOOTSTRAP_PATH, window.location.origin).toString()];
+    } catch (_) {
+        return [];
+    }
 }
 
 function _isStaticYandexMirrorRuntime() {
@@ -310,18 +320,37 @@ async function _loadSameOriginBootstrap(keys = [], options = {}) {
             return data;
         };
         const loadStaticBootstrap = async () => {
-            const urls = _getStaticBootstrapUrls();
-            for (const staticUrl of urls) {
+            const loaded = {};
+            // The old monolithic bootstrap is currently ~18 MB. On a cold calc2
+            // session, even auth used to wait for that whole file. New mirrors
+            // publish one small JSON file per data key, so fetch exactly what the
+            // current screen requested.
+            for (const staticUrl of _getStaticBootstrapShardUrls(missingKeys)) {
                 try {
                     const payload = await _fetchJsonWithTimeout(staticUrl, Math.max(timeoutMs, 15000));
                     const data = cacheBootstrapData(payload);
-                    const hasAnyRequestedKey = missingKeys.some(key => data && Object.prototype.hasOwnProperty.call(data, key));
-                    if (hasAnyRequestedKey) return data;
+                    Object.assign(loaded, data || {});
                 } catch (error) {
                     console.warn('static bootstrap failed:', staticUrl, error);
                 }
             }
-            return null;
+            const hasAllRequestedKeys = missingKeys.every(key => Object.prototype.hasOwnProperty.call(loaded, key));
+            if (hasAllRequestedKeys) return loaded;
+
+            // A page whose cached JS is newer than the object-storage bundle can
+            // still meet an older monolithic snapshot for one deploy cycle. Keep
+            // that compatibility fallback, but never make it the normal boot path.
+            for (const legacyUrl of _getStaticBootstrapLegacyUrls()) {
+                try {
+                    const payload = await _fetchJsonWithTimeout(legacyUrl, Math.max(timeoutMs, 15000));
+                    const data = cacheBootstrapData(payload);
+                    const merged = { ...loaded, ...(data || {}) };
+                    if (missingKeys.some(key => Object.prototype.hasOwnProperty.call(merged, key))) return merged;
+                } catch (error) {
+                    console.warn('static bootstrap failed:', legacyUrl, error);
+                }
+            }
+            return Object.keys(loaded).length ? loaded : null;
         };
         const remoteBootstrap = () => _fetchJsonWithTimeout(url.toString(), timeoutMs)
             .then(payload => {
@@ -608,6 +637,28 @@ const WORK_SETTINGS_KEYS = {
     work_templates: 'work_templates_json',
     task_notification_events: 'work_task_notification_events_json',
 };
+
+// These payloads live in the same legacy `settings` table, but each one has a
+// dedicated loader. Reading them during the global pricing/settings boot makes
+// every screen download finance and work snapshots that it cannot use. Keeping
+// them out of `loadSettings()` is also what lets a fresh browser receive the
+// actual production coefficients before the five-second remote timeout.
+const GLOBAL_SETTINGS_EXCLUDED_KEYS = Object.freeze([
+    'auth_accounts_json',
+    'auth_activity_json',
+    'auth_sessions_json',
+    'employee_extra_json',
+    'finance_workspace_json',
+    'tochka_snapshot_json',
+    'fintablo_snapshot_json',
+    'production_plan_state_json',
+    'factual_month_snapshots_json',
+    'warehouse_items_json',
+    'ready_goods_stock_json',
+    'ready_goods_history_json',
+    'ready_goods_sales_records_json',
+    ...Object.values(WORK_SETTINGS_KEYS),
+]);
 
 const WORK_TABLE_ON_CONFLICT = {
     task_watchers: 'task_id,user_id',
@@ -1437,9 +1488,17 @@ async function loadSettings() {
         if (_settingsRefreshPromise) return _settingsRefreshPromise;
         _settingsRefreshPromise = (async () => {
             try {
-                const { data, error } = await _withRemoteTimeout('load', 'load settings', () => supabaseClient
-                    .from('settings')
-                    .select('key, value'));
+                const { data, error } = await _withRemoteTimeout('load', 'load settings', () => {
+                    const query = supabaseClient
+                        .from('settings')
+                        .select('key, value');
+                    // The production client exposes PostgREST's `.not()` query
+                    // builder. Keep the bare query as a narrow compatibility
+                    // fallback for minimal test clients only.
+                    return typeof query.not === 'function'
+                        ? query.not('key', 'in', `(${GLOBAL_SETTINGS_EXCLUDED_KEYS.join(',')})`)
+                        : query;
+                });
                 if (error) {
                     console.error('loadSettings error:', error);
                     if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);

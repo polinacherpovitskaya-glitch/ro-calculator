@@ -4,10 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Recycle Object — Калькулятор заказов</title>
-  <link rel="stylesheet" href="css/style.css?v=407">
+  <link rel="stylesheet" href="css/style.css?v=410">
     <script>
         (function () {
-            const CURRENT_HTML_VERSION = 'v409';
+            const CURRENT_HTML_VERSION = 'v411';
             const ATTEMPT_KEY = 'ro_calc_force_update_attempts';
 
             function parseVersion(version) {
@@ -187,7 +187,7 @@
     <aside class="sidebar">
         <div class="sidebar-brand">
             <h2>Recycle Object</h2>
-            <span>Калькулятор <span id="app-version">v409</span></span>
+            <span>Калькулятор <span id="app-version">v411</span></span>
         </div>
         <nav class="sidebar-nav">
             <div class="sidebar-group-label">Каждый день</div>
@@ -933,7 +933,8 @@
                 <h1>Справочник бланков</h1>
                 <div class="flex gap-8">
                     <button class="btn btn-outline btn-sm" onclick="Molds.exportCSV()">Экспорт CSV</button>
-                    <button class="btn btn-outline btn-sm" onclick="Molds.publishCatalog()" title="Опубликовать актуальные цены и размеры для сайта и плагина Figma">📤 Опубликовать каталог</button>
+                    <button id="molds-publish-catalog" class="btn btn-outline btn-sm" onclick="Molds.publishCatalog()" title="Опубликовать актуальные цены и размеры для сайта и плагина Figma">📤 Опубликовать каталог</button>
+                    <span id="molds-publish-status" class="molds-publish-status" role="status" aria-live="polite" hidden></span>
                     <button class="btn btn-primary" onclick="Molds.showAddForm()">+ Новый бланк</button>
                 </div>
             </div>
@@ -3634,16 +3635,16 @@
 <script src="vendor/jspdf-2.5.1.umd.min.js?v=1"></script>
 <script src="js/work-management-core.js?v=1"></script>
 <script src="js/bug-report-core.js?v=2"></script>
-<script src="js/supabase.js?v=403"></script>
+<script src="js/supabase.js?v=411"></script>
 <script src="js/task-events.js?v=1"></script>
 <script src="js/calculator.js?v=409"></script>
-<script src="js/app.js?v=409"></script>
+<script src="js/app.js?v=411"></script>
 <script src="js/tpa.js?v=4"></script>
 <script src="js/order-detail.js?v=409"></script>
 <script src="js/orders.js?v=409"></script>
 <script src="js/production_plan.js?v=76"></script>
 <script src="js/analytics.js?v=46g"></script>
-    <script src="js/molds.js?v=407"></script>
+    <script src="js/molds.js?v=411"></script>
 <script src="js/colors.js?v=46g"></script>
 <script src="js/kp.js?v=47"></script>
 <script src="js/timetrack.js?v=64"></script>
