@@ -439,13 +439,23 @@ const Molds = {
 
         let html = `
         <div class="card" style="padding:0; overflow-x:auto;">
-            <table style="width:100%; font-size:12px; white-space:nowrap; border-collapse:collapse;">
+            <table class="molds-compact-table">
+                <colgroup>
+                    <col class="molds-compact-table__name">
+                    <col class="molds-compact-table__speed">
+                    <col class="molds-compact-table__weight">
+                    <col class="molds-compact-table__size">`;
+        DISPLAY_TIERS.forEach(() => {
+            html += `<col class="molds-compact-table__cost"><col class="molds-compact-table__price">`;
+        });
+        html += `<col class="molds-compact-table__actions">
+                </colgroup>
                 <thead>
                     <tr style="border-bottom:2px solid var(--border);">
-                        <th style="min-width:200px; padding:10px 12px; text-align:left;">Бланк</th>
-                        <th style="text-align:center;padding:8px 4px;width:48px;font-size:11px;color:var(--text-muted);font-weight:500;">Шт/ч</th>
-                        <th style="text-align:center;padding:8px 4px;width:42px;font-size:11px;color:var(--text-muted);font-weight:500;">Вес</th>`;
-                        html += `<th style="text-align:center;padding:8px 6px;width:92px;font-size:11px;color:var(--text-muted);font-weight:500;">Размер</th>`;
+                        <th style="padding:10px 12px; text-align:left;">Бланк</th>
+                        <th style="text-align:center;padding:8px 4px;font-size:11px;color:var(--text-muted);font-weight:500;">Шт/ч</th>
+                        <th style="text-align:center;padding:8px 4px;font-size:11px;color:var(--text-muted);font-weight:500;">Вес</th>`;
+                        html += `<th style="text-align:center;padding:8px 6px;font-size:11px;color:var(--text-muted);font-weight:500;">Размер</th>`;
 
         DISPLAY_TIERS.forEach(q => {
             const label = q >= 1000 ? (q/1000) + 'K' : q;
@@ -503,13 +513,13 @@ const Molds = {
 
             html += `
                 <tr style="border-bottom:1px solid var(--border);cursor:pointer;" onclick="Molds.toggleInline(${m.id}, event)">
-                    <td style="padding:8px 12px;">
+                    <td class="molds-compact-table__name-cell" style="padding:8px 12px;">
                         <div style="display:flex;gap:8px;align-items:center;">
                             ${this.getPhotoThumb(m)}
-                            <div style="min-width:0;">
+                            <div class="molds-compact-table__name-content">
                                 <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
                                     <span class="status-dot ${statusDot}"></span>
-                                    <span style="font-weight:700;font-size:13px;">${this.esc(m.name)}</span>
+                                    <span class="molds-compact-table__name-title" title="${this.esc(m.name)}">${this.esc(m.name)}</span>
                                     ${collectionBadge} ${nfcBadge} ${priceBadge}
                                 </div>
                                 ${m.hw_name ? `<div style="font-size:10px;color:var(--text-muted);">+ ${this.esc(m.hw_name)}</div>` : ''}
