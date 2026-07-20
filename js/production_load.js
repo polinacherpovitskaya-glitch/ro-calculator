@@ -278,10 +278,17 @@ function computeQuarterLoad({ planHours, soldHours = 0, nonCommercialHours = 0, 
     };
 }
 
+// Закрытый заказ больше не является будущей загрузкой. Его фактические часы
+// намеренно остаются в зелёном сегменте (они собираются отдельно по табелю),
+// но недоделанный по старой норме план нельзя оставлять в синем сегменте.
+function _isCompletedProductionOrder(order) {
+    return String(order?.status || '').trim().toLowerCase() === 'completed';
+}
+
 // Какие заказы считаем коммерческими и уже подтверждёнными для загрузки.
 function _isSoldOrder(order) {
     if (!order || order.deleted_at || _isNonCommercialOrder(order)) return false;
-    if (order.status === 'cancelled') return false;
+    if (order.status === 'cancelled' || _isCompletedProductionOrder(order)) return false;
     if (order.status === 'draft' && (!order.payment_status || order.payment_status === 'not_sent')) return false;
     return true;
 }
@@ -298,7 +305,11 @@ function _isNonCommercialOrder(order) {
 }
 
 function _isScheduledNonCommercialOrder(order) {
-    return !!order && !order.deleted_at && order.status !== 'cancelled' && _isNonCommercialOrder(order);
+    return !!order
+        && !order.deleted_at
+        && order.status !== 'cancelled'
+        && !_isCompletedProductionOrder(order)
+        && _isNonCommercialOrder(order);
 }
 
 function _orderProdDate(order) {

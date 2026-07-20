@@ -68,20 +68,24 @@ assert.equal(pace.varianceDays, 0.5, 'reserve is translated through the remainin
 const orders = [
     { id: 1, order_name: 'Коммерческий заказ', status: 'production', deadline: '2026-07-10', total_hours_plan: 20 },
     { id: 2, order_name: 'Переделка', status: 'production', production_purpose: 'rework', deadline: '2026-07-10', total_hours_plan: 10, total_cost_plan: 5000 },
-    { id: 3, order_name: 'Факт без дедлайна в квартале', status: 'completed', deadline: '2026-10-01', total_hours_plan: 0 },
+    { id: 3, order_name: 'Закрыт быстрее плана', status: 'completed', deadline: '2026-07-10', total_hours_plan: 30 },
+    { id: 4, order_name: 'Факт без дедлайна в квартале', status: 'completed', deadline: '2026-10-01', total_hours_plan: 0 },
 ];
 const entries = [
     { date: '2026-07-07', order_id: 1, hours: 8 },
     { date: '2026-07-08', order_id: 2, hours: 4 },
     { date: '2026-07-08', order_id: 3, hours: 2 },
+    { date: '2026-07-08', order_id: 4, hours: 2 },
     { date: '2026-07-08', project_name: 'Без заказа', hours: 3 },
 ];
 const model = collectQuarterLoad(orders, entries, settings, '2026-07-08', { planState: { active_workers_count: 2 }, vacations });
-assert.equal(model.breakdown.scopes.commercial.doneHours, 10, 'commercial fact remains separate');
+assert.equal(model.breakdown.scopes.commercial.doneHours, 12, 'commercial fact remains separate, including closed orders');
 assert.equal(model.breakdown.scopes.noncommercial.doneHours, 4, 'rework fact remains separate');
 assert.equal(model.breakdown.unassignedRows.reduce((sum, row) => sum + row.hours, 0), 3, 'unknown fact is not guessed into a mode');
-assert.ok(model.breakdown.scopes.commercial.doneRows.some(row => row.orderId === 3), 'green fact details retain an order even when its deadline lies outside the quarter');
+assert.ok(model.breakdown.scopes.commercial.doneRows.some(row => row.orderId === 4), 'green fact details retain an order even when its deadline lies outside the quarter');
 assert.equal(model.breakdown.months[0].scopes.commercial.remainingHours, 12, 'month shows only remaining commercial hours by deadline');
 assert.equal(model.breakdown.months[0].scopes.noncommercial.remainingHours, 6, 'month shows only remaining rework hours by deadline');
+assert.equal(model.load.sold, 20, 'a completed order must not keep its stale plan in the blue commercial load');
+assert.ok(!model.breakdown.scopes.commercial.remainingRows.some(row => row.orderId === 3), 'completed order must not stay in the remaining-hours tooltip');
 
 console.log('calendar-availability-load-smoke: OK');
