@@ -98,6 +98,23 @@ function calcBlankSellPrice(cost, qty, params) {
 const Molds = {
     allMolds: [],
     editingId: null,
+    _catalogPublishInFlight: false,
+
+    _setCatalogPublishUi({ busy = false, message = '', state = 'idle' } = {}) {
+        const button = document.getElementById('molds-publish-catalog');
+        if (button) {
+            button.disabled = busy;
+            button.textContent = busy ? 'Публикуем…' : '📤 Опубликовать каталог';
+            button.setAttribute('aria-busy', busy ? 'true' : 'false');
+        }
+
+        const status = document.getElementById('molds-publish-status');
+        if (!status) return;
+        status.textContent = message;
+        status.hidden = !message;
+        if (status.dataset) status.dataset.state = state;
+        else status.setAttribute('data-state', state);
+    },
 
     _speedPerMinute(speedPerHour) {
         const perHour = Number(speedPerHour || 0);
@@ -434,8 +451,8 @@ const Molds = {
             return;
         }
 
-        // Show 5 key tiers: 50, 100, 300, 500, 1K
-        const DISPLAY_TIERS = [50, 100, 300, 500, 1000];
+        // All commercial tiers must be visible at once on the desktop grid.
+        const DISPLAY_TIERS = [50, 100, 300, 500, 1000, 3000];
 
         let html = `
         <div class="card" style="padding:0; overflow-x:auto;">
@@ -1171,6 +1188,12 @@ const Molds = {
      * вес и коллекцию. Плагин Figma читает эти поля и подставляет в слайды.
      */
     async publishCatalog() {
+        if (this._catalogPublishInFlight) {
+            const message = 'Каталог уже публикуется — дождитесь результата.';
+            this._setCatalogPublishUi({ busy: true, message, state: 'pending' });
+            App.toast(message, 5000);
+            return;
+        }
         if (!isSupabaseReady()) {
             App.toast('Supabase не подключён');
             return;
@@ -1185,6 +1208,16 @@ const Molds = {
             ? `Опубликовать ${activeMolds.length} молдов в каталог Figma-плагина${inactiveMolds.length ? ` и снять ${inactiveMolds.length} выключенных` : ''}?`
             : `Снять ${inactiveMolds.length} выключенных молдов с каталога Figma-плагина?`;
         if (!confirm(publishPrompt)) return;
+
+        this._catalogPublishInFlight = true;
+        this._setCatalogPublishUi({
+            busy: true,
+            state: 'pending',
+            message: `Публикуем ${activeMolds.length} бланков в Figma и на сайт…`,
+        });
+        App.toast(`Публикуем каталог: ${activeMolds.length} бланков…`, 8000);
+
+        try {
 
         // Public catalog + Figma plugin must receive the full published
         // blank ladder, including the 10-piece tier.
@@ -1240,9 +1273,9 @@ const Molds = {
                     .select('mold_data')
                     .eq('id', m.id)
                     .single();
-                if (fetchErr) continue;
+                if (fetchErr) { errors++; continue; }
                 let moldData = mergeMoldData(existing.mold_data);
-                if (!moldData || typeof moldData !== 'object') continue;
+                if (!moldData || typeof moldData !== 'object') { errors++; continue; }
                 const wasPublished = moldData.catalog_enabled !== false
                     || (moldData.tiers_prices && Object.keys(moldData.tiers_prices).length > 0)
                     || TIERS.some(qty => Number(moldData[`price${qty}`]) > 0);
@@ -1255,9 +1288,11 @@ const Molds = {
                     .from('molds')
                     .update({ mold_data: moldData })
                     .eq('id', m.id);
-                if (!updErr && wasPublished) cleared++;
+                if (updErr) { errors++; continue; }
+                if (wasPublished) cleared++;
             } catch (e) {
                 console.warn('publishCatalog clear inactive failed for', m.id, e);
+                errors++;
             }
         }
 
@@ -1319,54 +1354,74 @@ const Molds = {
             }
         }
 
-        // Зеркальный синк в Google Sheets через Apps Script webhook (fire-and-forget).
-        // Если sheet не ответил — основная публикация в Supabase уже прошла, кнопка не падает.
-        // URL получи из «Deploy → Web app» в Apps Script-редакторе таблицы.
+        // Google Sheets is only a mirror. Figma reads the Supabase snapshot
+        // above, so a slow Apps Script must never delay or hide a successful
+        // publication result for the person who pressed the button.
         const SHEET_WEBHOOK_URL = 'https://script.google.com/macros/s/AKfycbznxilQfEYpqubCATNvZO4kKDRPih0Y_2fcXdNOL7SzhjkydONPizqO9PNGLI3D_hC8/exec';
-        if (catalogRows.length > 0 && SHEET_WEBHOOK_URL.indexOf('PASTE_') === -1) {
-            try {
-                await fetch(SHEET_WEBHOOK_URL, {
-                    method: 'POST',
-                    mode: 'no-cors', // GAS не любит CORS preflight, простой fire-and-forget
-                    body: JSON.stringify(catalogRows),
-                });
+        if (catalogRows.length > 0 && SHEET_WEBHOOK_URL.indexOf('PASTE_') === -1 && typeof fetch === 'function') {
+            void fetch(SHEET_WEBHOOK_URL, {
+                method: 'POST',
+                mode: 'no-cors', // GAS does not expose a readable CORS response.
+                body: JSON.stringify(catalogRows),
+            }).then(() => {
                 console.log('Sheet sync sent:', catalogRows.length, 'rows');
+            }).catch((error) => {
+                console.warn('Sheet sync failed (non-fatal):', error);
+            });
+        }
+
+        // The public site supports CORS, so verify the revalidation response
+        // instead of treating an opaque no-cors request as proof of success.
+        let siteRevalidated = false;
+        const SITE_REVALIDATE_URL = 'https://recycleobject.ru/api/catalog-published';
+        if (typeof fetch === 'function') {
+            try {
+                const response = await fetch(SITE_REVALIDATE_URL, {
+                    method: 'POST',
+                    keepalive: true,
+                    headers: {
+                        'Content-Type': 'text/plain;charset=UTF-8',
+                    },
+                    body: JSON.stringify({
+                        source: 'calc.recycleobject.ru',
+                        updated,
+                        total: activeMolds.length,
+                        ids: activeMolds.map(m => m.id),
+                        publishedAt: new Date().toISOString(),
+                    }),
+                });
+                const result = await response.json().catch(() => null);
+                if (!response.ok || result?.ok !== true) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                siteRevalidated = true;
+                console.log('Site revalidated:', result.revalidated || []);
             } catch (e) {
-                console.warn('Sheet sync failed (non-fatal):', e);
+                console.warn('Site revalidate failed (non-fatal):', e);
             }
         }
 
-        // Tell the public site that the published catalog changed, so it can
-        // invalidate long-lived caches instead of polling Supabase every few
-        // seconds.
-        const SITE_REVALIDATE_URL = 'https://recycleobject.ru/api/catalog-published';
-        try {
-            await fetch(SITE_REVALIDATE_URL, {
-                method: 'POST',
-                mode: 'no-cors',
-                keepalive: true,
-                headers: {
-                    'Content-Type': 'text/plain;charset=UTF-8',
-                },
-                body: JSON.stringify({
-                    source: 'calc.recycleobject.ru',
-                    updated,
-                    total: activeMolds.length,
-                    ids: activeMolds.map(m => m.id),
-                    publishedAt: new Date().toISOString(),
-                }),
-            });
-            console.log('Site revalidate sent');
-        } catch (e) {
-            console.warn('Site revalidate failed (non-fatal):', e);
-        }
-
+        const publishedAt = new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
         const message = `Опубликовано: ${updated}/${activeMolds.length}`
-            + (noTiers > 0 ? ` (без цен: ${noTiers})` : '')
-            + (cleared > 0 ? ` (снято с каталога: ${cleared})` : '')
-            + (errors > 0 ? ` (ошибок: ${errors})` : '');
-        App.toast(message);
-        console.log('publishCatalog summary:', { updated, errors, noTiers, total: activeMolds.length });
+            + (noTiers > 0 ? ` · без цен: ${noTiers}` : '')
+            + (cleared > 0 ? ` · снято: ${cleared}` : '')
+            + (errors > 0 ? ` · ошибок: ${errors}` : '');
+        const statusMessage = `${message} · ${siteRevalidated ? 'сайт обновлён' : 'снимок Figma сохранён'} · ${publishedAt}`;
+        this._setCatalogPublishUi({
+            busy: false,
+            state: errors > 0 ? 'warning' : 'success',
+            message: `${statusMessage}. Figma: «Обновить каталог».`,
+        });
+        App.toast(`${statusMessage}. В Figma нажмите «Обновить каталог».`, 9000);
+        console.log('publishCatalog summary:', { updated, errors, noTiers, cleared, total: activeMolds.length, siteRevalidated });
+        } catch (error) {
+            console.error('publishCatalog failed:', error);
+            const message = 'Публикация не завершилась. Цены в Figma не обновляйте — повторите попытку.';
+            this._setCatalogPublishUi({ busy: false, state: 'error', message });
+            App.toast(message, 9000);
+        } finally {
+            this._catalogPublishInFlight = false;
+        }
     },
 
     exportCSV() {

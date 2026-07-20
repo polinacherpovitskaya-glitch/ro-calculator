@@ -514,7 +514,11 @@ async function main() {
     assert.match(tableHtml, /без НДС/);
     assert.match(tableHtml, /с НДС/);
     assert.match(tableHtml, /цена/);
+    assert.match(tableHtml, />3K шт</, 'the compact desktop grid must include the 3K tier');
+    assert.match(tableHtml, /colspan="17"/, 'six tiers must expand the grid to seventeen columns including metadata');
     assert.match(tableHtml, /mold-inline-card-host-78/);
+    const moldCss = fs.readFileSync(path.join(__dirname, '..', 'css', 'style.css'), 'utf8');
+    assert.match(moldCss, /\.molds-compact-table\s*\{[\s\S]*?min-width:\s*0;/, 'desktop table must not force horizontal scrolling');
 
     vm.runInContext(`
         Molds.editMold(78);
@@ -753,6 +757,17 @@ async function main() {
         }];
         Molds.enrichMolds();
     `, context);
+    context.__catalogFetchCalls = [];
+    context.fetch = async (url) => {
+        context.__catalogFetchCalls.push(String(url));
+        return {
+            ok: true,
+            status: 200,
+            async json() {
+                return { ok: true, revalidated: ['/fast-blanks'] };
+            },
+        };
+    };
     await vm.runInContext(`Molds.publishCatalog()`, context);
     assert.equal(context.__publishedCatalogUpdates.length, 1, 'publishCatalog should push one update per active mold');
     const publishedMoldData = context.__publishedCatalogUpdates[0].payload.mold_data;
@@ -773,6 +788,18 @@ async function main() {
     assert.equal(publishedMoldData.tiers_prices[1000], 275);
     assert.equal(publishedMoldData.tiers_prices[3000], 265);
     assert.match(String(publishedMoldData.tiers_published_at || ''), /^20\d\d-/);
+    assert.match(context.document.getElementById('molds-publish-status').textContent, /Опубликовано: 1\/1/);
+    assert.equal(context.document.getElementById('molds-publish-status').hidden, false);
+    assert.equal(context.document.getElementById('molds-publish-catalog').disabled, false);
+    assert.match(context.document.getElementById('molds-publish-status').textContent, /сайт обновлён/);
+    assert.ok(context.__catalogFetchCalls.some(url => url.includes('catalog-published')), 'publishCatalog must verify public-site revalidation');
+
+    const updatesBeforeDuplicateAttempt = context.__publishedCatalogUpdates.length;
+    vm.runInContext(`Molds._catalogPublishInFlight = true`, context);
+    await vm.runInContext(`Molds.publishCatalog()`, context);
+    assert.equal(context.__publishedCatalogUpdates.length, updatesBeforeDuplicateAttempt, 'a second click must not publish the catalog twice');
+    assert.match(context.document.getElementById('molds-publish-status').textContent, /уже публикуется/);
+    vm.runInContext(`Molds._catalogPublishInFlight = false`, context);
 
     // A retired blank must be hidden even when old priceN values are still present.
     context.__publishedCatalogUpdates = [];
