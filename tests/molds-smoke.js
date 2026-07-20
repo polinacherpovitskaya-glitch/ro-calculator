@@ -507,6 +507,8 @@ async function main() {
         }];
     `, context);
     const tableHtml = String(vm.runInContext(`(function(){ Molds.renderTable(Molds.allMolds); return document.getElementById('molds-cards-container').innerHTML; })()`, context));
+    assert.match(tableHtml, /molds-compact-table/, 'the blanks table must use its fixed compact column layout');
+    assert.match(tableHtml, /molds-compact-table__name/, 'the blank name column must have an explicit compact width');
     assert.match(tableHtml, /Размер/);
     assert.match(tableHtml, /22×18×3/);
     assert.match(tableHtml, /без НДС/);

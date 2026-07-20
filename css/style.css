@@ -482,6 +482,44 @@ body {
 }
 
 /* Mold thumbnail in molds table */
+.molds-compact-table {
+    width: 100%;
+    min-width: 1280px;
+    table-layout: fixed;
+    font-size: 12px;
+    white-space: nowrap;
+    border-collapse: collapse;
+}
+
+/* Keep the product metadata compact: the production fields must start right
+   after the name instead of a greedy first table column consuming all free width. */
+.molds-compact-table__name { width: 24%; }
+.molds-compact-table__speed { width: 3.5%; }
+.molds-compact-table__weight { width: 3.5%; }
+.molds-compact-table__size { width: 7%; }
+.molds-compact-table__cost { width: 5%; }
+.molds-compact-table__price { width: 7%; }
+.molds-compact-table__actions { width: 2%; }
+
+.molds-compact-table__name-cell {
+    white-space: normal;
+    overflow: hidden;
+}
+
+.molds-compact-table__name-content {
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.molds-compact-table__name-title {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 700;
+    font-size: 13px;
+}
+
 .mold-thumb {
     width: 40px;
     height: 40px;
