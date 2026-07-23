@@ -336,6 +336,7 @@ const Orders = {
             china: this.buildChinaMeta(purchases, items),
             production: this.buildProductionMeta(order),
             financial: this.buildFinancialMeta(order, items),
+            productionQuantity: getOrderProductionQuantity(items),
         };
     },
 
@@ -894,6 +895,17 @@ const Orders = {
         const purposeBadge = isNonCommercial
             ? `<div style="font-size:10px;color:#6e3cbc;font-weight:700;margin-bottom:4px;">${purpose === 'rework' ? '↻ Переделка брака' : '▦ Сток / внутренний образец'}</div>`
             : '';
+        const rawDeliverySchedule = Array.isArray(order.delivery_schedule) ? order.delivery_schedule : [];
+        const deliveryValidation = normalizeDeliverySchedule(
+            rawDeliverySchedule,
+            this.metaByOrderId[order.id]?.productionQuantity || 0
+        );
+        const nextDelivery = deliveryValidation.valid ? (deliveryValidation.schedule[0] || null) : null;
+        const deliveryBadge = nextDelivery
+            ? `<div style="font-size:10px;color:var(--accent);font-weight:700;margin-bottom:4px;">◷ Ближайшая сдача: ${this.escHtml(App.formatDate(nextDelivery.date))} · ${Number(nextDelivery.quantity).toLocaleString('ru-RU')} шт.</div>`
+            : (rawDeliverySchedule.length
+                ? '<div style="font-size:10px;color:var(--red);font-weight:700;margin-bottom:4px;">! График сдачи требует проверки</div>'
+                : '');
 
         return `
         <div class="order-board-card" draggable="true"
@@ -902,6 +914,7 @@ const Orders = {
             <div class="order-board-card-title">${this.escHtml(order.order_name || 'Без названия')}${b2cBadge}</div>
             ${subStageBadge}
             ${purposeBadge}
+            ${deliveryBadge}
             <div class="order-board-card-client">${this.escHtml(order.client_name || '')} ${order.manager_name ? '/ ' + this.escHtml(order.manager_name) : ''}</div>
             <div class="order-board-card-footer">
                 <span class="badge badge-${payment.color}" style="font-size:9px">${payment.label}</span>

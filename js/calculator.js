@@ -2128,6 +2128,86 @@ function buildProductionWorkerSlots(settings) {
     };
 }
 
+function getOrderProductionQuantity(items = []) {
+    return (items || []).reduce((sum, item) => {
+        const type = String(item?.item_type || 'product').trim().toLowerCase();
+        if (type !== 'product' && type !== 'pendant') return sum;
+        const quantity = Number(item?.quantity || 0);
+        return sum + (Number.isFinite(quantity) && quantity > 0 ? quantity : 0);
+    }, 0);
+}
+
+function normalizeDeliverySchedule(rawSchedule, expectedTotal = 0) {
+    let source = rawSchedule;
+    if (typeof source === 'string') {
+        try {
+            source = JSON.parse(source);
+        } catch (e) {
+            source = [];
+        }
+    }
+    if (!Array.isArray(source)) source = [];
+
+    const errors = [];
+    const seenDates = new Set();
+    const schedule = source.map((entry, index) => {
+        const date = String(entry?.date || '').trim();
+        const quantity = Number(entry?.quantity);
+        const dateMatch = date.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        let validDate = false;
+        if (dateMatch) {
+            const parsed = new Date(Number(dateMatch[1]), Number(dateMatch[2]) - 1, Number(dateMatch[3]));
+            validDate = parsed.getFullYear() === Number(dateMatch[1])
+                && parsed.getMonth() === Number(dateMatch[2]) - 1
+                && parsed.getDate() === Number(dateMatch[3]);
+        }
+        if (!validDate) errors.push(`У партии ${index + 1} не указана корректная дата`);
+        if (!Number.isInteger(quantity) || quantity <= 0) {
+            errors.push(`У партии ${index + 1} количество должно быть целым числом больше нуля`);
+        }
+        if (validDate && seenDates.has(date)) {
+            errors.push(`На ${date} уже есть партия`);
+        }
+        if (validDate) seenDates.add(date);
+        return { date, quantity: Number.isFinite(quantity) ? quantity : 0 };
+    }).sort((a, b) => a.date.localeCompare(b.date));
+
+    const total = schedule.reduce((sum, entry) => sum + (Number(entry.quantity) || 0), 0);
+    const normalizedExpected = Number(expectedTotal) || 0;
+    if (schedule.length > 0 && normalizedExpected <= 0) {
+        errors.push('В заказе нет планового тиража');
+    } else if (schedule.length > 0 && total !== normalizedExpected) {
+        errors.push(`Распределено ${total} из ${normalizedExpected} шт.`);
+    }
+
+    return {
+        schedule,
+        total,
+        expectedTotal: normalizedExpected,
+        valid: errors.length === 0,
+        errors,
+    };
+}
+
+function splitDeliveryPhaseHours(totalHours, actualHours, deliverySchedule, totalQuantity) {
+    const plannedTotal = round2(totalHours || 0);
+    let actualLeft = round2(Math.max(Number(actualHours) || 0, 0));
+    let plannedAssigned = 0;
+    return (deliverySchedule || []).map((delivery, index, entries) => {
+        const planned = index === entries.length - 1
+            ? round2(plannedTotal - plannedAssigned)
+            : round2(plannedTotal * (Number(delivery.quantity || 0) / totalQuantity));
+        plannedAssigned = round2(plannedAssigned + planned);
+        const actual = round2(Math.min(actualLeft, planned));
+        actualLeft = round2(Math.max(actualLeft - actual, 0));
+        return {
+            planned,
+            actual,
+            remaining: round2(Math.max(planned - actual, 0)),
+        };
+    });
+}
+
 /**
  * Build production schedule — day-by-day resource allocation
  * Each order has 3 sequential phases: литьё → упаковка → сборка (hardware)
@@ -2174,6 +2254,69 @@ function buildProductionSchedule(orders, settings) {
         const actualTotalHours = round2(actualMolding + actualAssembly + actualPackaging);
         const actualOtherHours = round2(o.actual_hours_other || 0);
         const remainingTotalHours = round2(remainingMolding + remainingAssembly + remainingPackaging);
+        const deliveryValidation = normalizeDeliverySchedule(o.delivery_schedule, o.production_quantity);
+        const deliverySchedule = deliveryValidation.valid ? deliveryValidation.schedule : [];
+        const phaseSources = [
+            { name: 'molding', label: 'Литьё', planned: plannedMolding, actual: actualMolding, color: '#f59e0b' },
+            { name: 'assembly', label: 'Сборка', planned: plannedAssembly, actual: actualAssembly, color: '#06b6d4' },
+            { name: 'packaging', label: 'Упаковка', planned: plannedPackaging, actual: actualPackaging, color: '#8b5cf6' },
+        ];
+        let phases;
+        let deliveryMilestones = [];
+
+        if (deliverySchedule.length > 0) {
+            const splitByPhase = {};
+            phaseSources.forEach(phase => {
+                splitByPhase[phase.name] = splitDeliveryPhaseHours(
+                    phase.planned,
+                    phase.actual,
+                    deliverySchedule,
+                    deliveryValidation.expectedTotal
+                );
+            });
+            phases = [];
+            deliveryMilestones = deliverySchedule.map((delivery, batchIndex) => {
+                let planned = 0;
+                let actual = 0;
+                let remaining = 0;
+                phaseSources.forEach(phase => {
+                    const split = splitByPhase[phase.name][batchIndex];
+                    planned = round2(planned + split.planned);
+                    actual = round2(actual + split.actual);
+                    remaining = round2(remaining + split.remaining);
+                    phases.push({
+                        name: phase.name,
+                        label: phase.label,
+                        remaining: split.remaining,
+                        total: split.planned,
+                        actual: split.actual,
+                        color: phase.color,
+                        batchIndex,
+                        batchDate: delivery.date,
+                        batchQuantity: delivery.quantity,
+                    });
+                });
+                return {
+                    batchIndex,
+                    date: delivery.date,
+                    quantity: delivery.quantity,
+                    plannedHours: planned,
+                    actualHours: actual,
+                    remainingHours: remaining,
+                    completed: remaining <= 0.001,
+                    finishDate: null,
+                };
+            });
+        } else {
+            phases = phaseSources.map(phase => ({
+                name: phase.name,
+                label: phase.label,
+                remaining: round2(Math.max(phase.planned - phase.actual, 0)),
+                total: phase.planned,
+                actual: phase.actual,
+                color: phase.color,
+            }));
+        }
 
         return {
         orderId: o.id,
@@ -2183,11 +2326,11 @@ function buildProductionSchedule(orders, settings) {
         deadlineEnd: o.deadline_end || null,
         notBeforeDate: o.production_not_before || '',
         parallelWorkersTarget: Math.max(1, Math.round(Number(o.production_parallel_workers) || 1)),
-        phases: [
-            { name: 'molding', label: 'Литьё', remaining: remainingMolding, total: plannedMolding, actual: actualMolding, color: '#f59e0b' },
-            { name: 'assembly', label: 'Сборка', remaining: remainingAssembly, total: plannedAssembly, actual: actualAssembly, color: '#06b6d4' },
-            { name: 'packaging', label: 'Упаковка', remaining: remainingPackaging, total: plannedPackaging, actual: actualPackaging, color: '#8b5cf6' },
-        ],
+        phases,
+        deliverySchedule,
+        deliveryScheduleValid: deliveryValidation.valid,
+        deliveryScheduleErrors: deliveryValidation.errors,
+        deliveryMilestones,
         currentPhaseIdx: 0,
         schedule: [], // [{ date, phase, hours }]
         totalHours: remainingTotalHours,
@@ -2268,12 +2411,14 @@ function buildProductionSchedule(orders, settings) {
                     phase: phase.name,
                     hours: give,
                     workerSlot: slotIndex + 1,
+                    batchIndex: Number.isInteger(phase.batchIndex) ? phase.batchIndex : null,
                 });
                 dayAllocations.push({
                     orderId: nextOrder.orderId,
                     phase: phase.name,
                     hours: give,
                     workerSlot: slotIndex + 1,
+                    batchIndex: Number.isInteger(phase.batchIndex) ? phase.batchIndex : null,
                 });
 
                 if (phase.remaining <= 0.001) {
@@ -2300,6 +2445,15 @@ function buildProductionSchedule(orders, settings) {
         // Stop if all orders are done
         if (queue.every(q => q.done)) break;
     }
+
+    queue.forEach(order => {
+        (order.deliveryMilestones || []).forEach(milestone => {
+            const segments = order.schedule.filter(segment => segment.batchIndex === milestone.batchIndex);
+            if (segments.length > 0) {
+                milestone.finishDate = segments[segments.length - 1].date;
+            }
+        });
+    });
 
     return { queue, dailyCapacity, days };
 }

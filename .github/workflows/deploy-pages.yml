@@ -59,6 +59,7 @@ jobs:
           node tests/employee-auth-payroll-smoke.js
           node tests/payroll-half-month-smoke.js
           node tests/production-calendar-smoke.js
+          node tests/partial-delivery-smoke.js
           node tests/production-load-tooltip-smoke.js
           node tests/calendar-availability-load-smoke.js
           node tests/active-order-recalculation-smoke.js

@@ -27,6 +27,7 @@ const OrderDetail = {
     currentItems: [],
     currentFinancial: null,
     currentTab: 'info',
+    deliveryScheduleDraft: [],
 
     // ==========================================
     // LOAD
@@ -44,6 +45,7 @@ const OrderDetail = {
 
         this.currentOrder = data.order;
         this.currentItems = data.items || [];
+        this.deliveryScheduleDraft = normalizeDeliverySchedule(data.order?.delivery_schedule, 0).schedule;
         this.currentFinancial = this.buildLiveFinancialMeta();
         this.currentTab = 'info';
 
@@ -210,7 +212,118 @@ const OrderDetail = {
                 ${this._fieldRow('fintablo_link', 'Финтабло', o.fintablo_link, 'url')}
             </div>
         </div>
+        ${this._renderDeliveryScheduleCard()}
         `;
+    },
+
+    _renderDeliveryScheduleCard() {
+        const totalQuantity = getOrderProductionQuantity(this.currentItems);
+        const validation = normalizeDeliverySchedule(this.deliveryScheduleDraft, totalQuantity);
+        const hasRows = validation.schedule.length > 0;
+        const statusColor = !hasRows ? 'var(--text-muted)' : (validation.valid ? 'var(--green)' : 'var(--red)');
+        const statusText = !hasRows
+            ? `Тираж: ${this._formatQuantity(totalQuantity)} шт. · сдаётся одной частью`
+            : validation.valid
+                ? `Распределено ${this._formatQuantity(validation.total)} из ${this._formatQuantity(totalQuantity)} шт.`
+                : validation.errors[validation.errors.length - 1];
+        const rows = this.deliveryScheduleDraft.map((entry, index) => `
+            <div data-delivery-row="${index}" style="display:grid;grid-template-columns:minmax(150px,1fr) minmax(120px,.7fr) auto;gap:8px;align-items:center;">
+                <input type="date" class="od-status-select" value="${this._escAttr(entry.date || '')}"
+                    onchange="OrderDetail.updateDeliveryScheduleDraft(${index}, 'date', this.value)">
+                <input type="number" class="od-status-select" min="1" step="1" value="${this._escAttr(entry.quantity || '')}"
+                    placeholder="Количество"
+                    onchange="OrderDetail.updateDeliveryScheduleDraft(${index}, 'quantity', this.value)">
+                <button class="btn btn-sm btn-outline" type="button"
+                    onclick="OrderDetail.removeDeliveryScheduleRow(${index})" title="Удалить партию">✕</button>
+            </div>
+        `).join('');
+
+        return `
+        <div class="card" id="od-delivery-schedule-card" style="margin-top:16px;">
+            <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
+                <div>
+                    <h3>График сдачи</h3>
+                    <div style="font-size:12px;color:${statusColor};margin-top:3px;">${this._esc(statusText)}</div>
+                </div>
+                <button class="btn btn-sm btn-outline" type="button" onclick="OrderDetail.addDeliveryScheduleRow()">+ Партия</button>
+            </div>
+            <div style="padding:12px 16px 16px;">
+                ${hasRows
+                    ? `<div style="display:grid;gap:8px;">${rows}</div>`
+                    : '<div class="text-muted" style="font-size:12px;">Добавьте даты и количество, если тираж нужно сдавать частями.</div>'}
+                ${validation.errors.length
+                    ? `<div style="font-size:12px;color:var(--red);margin-top:10px;">${validation.errors.map(error => this._esc(error)).join('<br>')}</div>`
+                    : ''}
+                <div style="display:flex;justify-content:flex-end;margin-top:12px;">
+                    <button class="btn btn-sm btn-success" type="button" onclick="OrderDetail.saveDeliverySchedule()">Сохранить график</button>
+                </div>
+            </div>
+        </div>`;
+    },
+
+    _renderDeliveryScheduleOnly() {
+        const previous = document.getElementById('od-delivery-schedule-card');
+        if (!previous) {
+            this.renderInfoTab();
+            return;
+        }
+        const wrapper = document.createElement('div');
+        wrapper.innerHTML = this._renderDeliveryScheduleCard();
+        const next = wrapper.firstElementChild;
+        if (next) previous.replaceWith(next);
+    },
+
+    updateDeliveryScheduleDraft(index, field, value) {
+        if (!this.deliveryScheduleDraft[index]) return;
+        this.deliveryScheduleDraft[index][field] = field === 'quantity' ? Number(value) : value;
+    },
+
+    addDeliveryScheduleRow() {
+        this.deliveryScheduleDraft.push({
+            date: '',
+            quantity: '',
+        });
+        this._renderDeliveryScheduleOnly();
+    },
+
+    removeDeliveryScheduleRow(index) {
+        this.deliveryScheduleDraft.splice(index, 1);
+        this._renderDeliveryScheduleOnly();
+    },
+
+    async saveDeliverySchedule() {
+        const totalQuantity = getOrderProductionQuantity(this.currentItems);
+        const validation = normalizeDeliverySchedule(this.deliveryScheduleDraft, totalQuantity);
+        if (!validation.valid) {
+            App.toast(validation.errors[0] || 'Проверьте график сдачи');
+            this._renderDeliveryScheduleOnly();
+            return;
+        }
+
+        const siblingUpdates = {};
+        if (validation.schedule.length > 0) {
+            siblingUpdates.deadline_end = validation.schedule[validation.schedule.length - 1].date;
+        }
+        try {
+            const snapshot = await updateOrderCalculatorData(
+                this.currentOrder.id,
+                { delivery_schedule: validation.schedule },
+                siblingUpdates
+            );
+            this.currentOrder.calculator_data = JSON.stringify(snapshot);
+            this.currentOrder.delivery_schedule = validation.schedule;
+            if (siblingUpdates.deadline_end) this.currentOrder.deadline_end = siblingUpdates.deadline_end;
+            this.deliveryScheduleDraft = validation.schedule.map(entry => ({ ...entry }));
+            this.renderInfoTab();
+            App.toast(validation.schedule.length ? 'График сдачи сохранён' : 'График сдачи удалён');
+        } catch (error) {
+            console.error('OrderDetail.saveDeliverySchedule error:', error);
+            App.toast(error?.message || 'Не удалось сохранить график сдачи');
+        }
+    },
+
+    _formatQuantity(value) {
+        return new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 }).format(Number(value) || 0);
     },
 
     // ==========================================
