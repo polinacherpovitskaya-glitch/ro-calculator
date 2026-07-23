@@ -2319,7 +2319,7 @@ async function saveOrder(order, items = []) {
         try {
             // Try update first if order exists, otherwise insert
             const { data: existing, error: existingError } = await _withRemoteTimeout('write', 'save order lookup', () => supabaseClient
-                .from('orders').select('id,status,deleted_at').eq('id', orderId).maybeSingle());
+                .from('orders').select('id,status,deleted_at,calculator_data').eq('id', orderId).maybeSingle());
             if (existingError && existingError.code !== 'PGRST116') {
                 console.error('saveOrder lookup error:', existingError);
                 _markSharedDatabaseProblem(existingError);
@@ -2332,6 +2332,9 @@ async function saveOrder(order, items = []) {
             );
 
             if (existing) {
+                const existingSnapshot = _parseJsonObjectSnapshot(existing.calculator_data);
+                const incomingSnapshot = _parseJsonObjectSnapshot(orderData.calculator_data);
+                orderData.calculator_data = JSON.stringify({ ...existingSnapshot, ...incomingSnapshot });
                 if (existing.status === 'deleted') {
                     orderData.status = 'deleted';
                     orderData.deleted_at = existing.deleted_at || orderData.deleted_at || new Date().toISOString();
@@ -3066,6 +3069,40 @@ async function updateOrderFields(orderId, updates) {
         }
         _markLocalDatasetDirty(['orders']);
     }
+}
+
+async function updateOrderCalculatorData(orderId, patch, siblingUpdates = {}) {
+    if (typeof orderId === 'string' && /^\d+$/.test(orderId)) orderId = Number(orderId);
+    let currentSnapshot = {};
+
+    if (isSupabaseReady()) {
+        const { data, error } = await _withRemoteTimeout('write', 'load order calculator data', () => supabaseClient
+            .from('orders')
+            .select('calculator_data')
+            .eq('id', orderId)
+            .single());
+        if (error) {
+            console.error('updateOrderCalculatorData load error:', error);
+            if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
+            throw new Error('Не удалось загрузить данные заказа: ' + (error.message || error.code || 'ошибка базы'));
+        }
+        currentSnapshot = _parseJsonObjectSnapshot(data?.calculator_data);
+    } else {
+        const orders = getLocal(LOCAL_KEYS.orders) || [];
+        const existing = orders.find(order => String(order.id) === String(orderId));
+        const { calculator_data: existingCalculatorData, ...existingFields } = existing || {};
+        currentSnapshot = {
+            ..._parseJsonObjectSnapshot(existingCalculatorData),
+            ...existingFields,
+        };
+    }
+
+    const nextSnapshot = { ...currentSnapshot, ...(patch || {}) };
+    await updateOrderFields(orderId, {
+        ...(siblingUpdates || {}),
+        calculator_data: JSON.stringify(nextSnapshot),
+    });
+    return nextSnapshot;
 }
 
 async function deleteOrder(orderId) {

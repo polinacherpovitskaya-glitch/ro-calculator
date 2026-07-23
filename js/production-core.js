@@ -346,6 +346,9 @@
         const orderActuals = buildOrderActuals(timeEntries, employees, orders);
         const enrichedOrders = orders.map(order => {
             const actuals = orderActuals.get(Number(order.id)) || getEmptyOrderActuals();
+            const orderProductionQuantity = typeof getOrderProductionQuantity === 'function'
+                ? getOrderProductionQuantity(itemsByOrderId.get(Number(order.id)) || [])
+                : 0;
             const plannedMolding = pcRound2(order.production_hours_plastic || 0);
             const plannedAssembly = pcRound2(order.production_hours_hardware || 0);
             const plannedPackaging = pcRound2(order.production_hours_packaging || 0);
@@ -362,6 +365,7 @@
 
             return {
                 ...order,
+                production_quantity: orderProductionQuantity,
                 production_not_before: manualStartDates[String(order.id)] || '',
                 production_parallel_workers: getOrderParallelWorkers(Number(order.id)),
                 actual_hours_molding: actuals.molding,

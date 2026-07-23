@@ -641,8 +641,15 @@ const Gantt = {
         const paused = blocked || review;
         const startDate = paused ? null : (item.schedule[0]?.date || null);
         const finishDate = paused ? null : (item.schedule[item.schedule.length - 1]?.date || null);
-        const deadlineRisk = this.getDeadlineRiskSummary(item);
+        const nextDeliveryRisk = this.getNextDeliveryRiskSummary(item);
+        const deadlineRisk = nextDeliveryRisk || this.getDeadlineRiskSummary(item);
         const deadlineLabel = item.deadlineEnd ? this.formatDateStr(item.deadlineEnd) : 'без дедлайна';
+        const deliveryLine = nextDeliveryRisk
+            ? `<div class="gantt-queue-dates" style="color:var(--accent);"><strong>Ближайшая сдача:</strong> ${Number(nextDeliveryRisk.quantity).toLocaleString('ru-RU')} шт. · ${this.formatDateStr(nextDeliveryRisk.deadlineEnd)}</div>`
+            : '';
+        const deliveryWarning = item.deliveryScheduleValid === false && (item.deliveryScheduleErrors || []).length
+            ? `<div class="gantt-queue-risk-line tight"><strong>График сдачи требует проверки:</strong> ${this.esc(item.deliveryScheduleErrors[0])}</div>`
+            : '';
         const phasePills = [
             { label: 'Литьё', key: 'molding', color: '#f59e0b' },
             { label: 'Сборка', key: 'assembly', color: '#06b6d4' },
@@ -692,6 +699,8 @@ const Gantt = {
                     <strong>Дедлайн:</strong> ${deadlineLabel}
                     ${manualStart ? `<span> · </span><strong>Не раньше:</strong> ${this.formatDateStr(manualStart)}` : ''}
                 </div>
+                ${deliveryLine}
+                ${deliveryWarning}
                 ${!paused && deadlineRisk.status !== 'no_deadline' && deadlineRisk.status !== 'unplanned'
                     ? `<div class="gantt-queue-risk-line ${riskClass}"><strong>${this.esc(deadlineRisk.label)}</strong>${deadlineRisk.finishDate ? ` · плановый финиш ${this.formatDateStr(deadlineRisk.finishDate)}` : ''}</div>`
                     : ''}
@@ -812,19 +821,25 @@ const Gantt = {
         }).join('');
 
         let deadlineHtml = '';
-        if (item.deadlineEnd) {
-            const deadlineDate = this.parseLocalDate(item.deadlineEnd);
+        const markerMilestones = (item.deliveryMilestones || []).length
+            ? item.deliveryMilestones
+            : (item.deadlineEnd ? [{ date: item.deadlineEnd, quantity: 0, finishDate: item.schedule?.[item.schedule.length - 1]?.date || null }] : []);
+        markerMilestones.forEach(milestone => {
+            const deadlineDate = this.parseLocalDate(milestone.date);
             deadlineDate.setHours(0, 0, 0, 0);
             const deadlineOffset = this.daysBetween(minDate, deadlineDate);
             if (deadlineOffset >= 0 && deadlineOffset < totalDays) {
                 const deadlineLeft = deadlineOffset * cellWidth;
-                const risk = this.getDeadlineRiskSummary(item);
+                const risk = (item.deliveryMilestones || []).length
+                    ? this.getDeliveryMilestoneRisk(milestone)
+                    : this.getDeadlineRiskSummary(item);
                 const markerClass = risk.status === 'late'
                     ? 'overdue'
                     : ((risk.status === 'critical' || risk.status === 'tight') ? 'tight' : '');
-                deadlineHtml = `<div class="gantt-deadline-marker ${markerClass}" style="left:${deadlineLeft}px" title="Дедлайн: ${this.formatDateStr(item.deadlineEnd)} · ${this.esc(risk.label)}">&#9670;</div>`;
+                const quantityLabel = milestone.quantity ? `${Number(milestone.quantity).toLocaleString('ru-RU')} шт. · ` : '';
+                deadlineHtml += `<div class="gantt-deadline-marker ${markerClass}" style="left:${deadlineLeft}px" title="${quantityLabel}${this.formatDateStr(milestone.date)} · ${this.esc(risk.label)}">&#9670;</div>`;
             }
-        }
+        });
 
         return `<div class="gantt-row">${barsHtml}${deadlineHtml}</div>`;
     },
@@ -920,15 +935,17 @@ const Gantt = {
     },
 
     getPhaseHours(item, phaseName) {
-        return round2((item.phases || []).find(phase => phase.name === phaseName)?.total || 0);
+        return round2((item.phases || [])
+            .filter(phase => phase.name === phaseName)
+            .reduce((sum, phase) => sum + (phase.total || 0), 0));
     },
 
     getPhaseProgress(item, phaseName) {
-        const phase = (item.phases || []).find(entry => entry.name === phaseName) || {};
+        const phases = (item.phases || []).filter(entry => entry.name === phaseName);
         return {
-            planned: round2(phase.total || 0),
-            actual: round2(phase.actual || 0),
-            remaining: round2(phase.remaining || 0),
+            planned: round2(phases.reduce((sum, phase) => sum + (phase.total || 0), 0)),
+            actual: round2(phases.reduce((sum, phase) => sum + (phase.actual || 0), 0)),
+            remaining: round2(phases.reduce((sum, phase) => sum + (phase.remaining || 0), 0)),
         };
     },
 
@@ -957,6 +974,13 @@ const Gantt = {
     },
 
     getDeadlineRiskSummary(item, holidaySet = this.getHolidaySet()) {
+        const deliveryRisks = (item?.deliveryMilestones || [])
+            .filter(milestone => !milestone.completed)
+            .map(milestone => this.getDeliveryMilestoneRisk(milestone, holidaySet));
+        if (deliveryRisks.length > 0) {
+            const severity = { late: 4, critical: 3, tight: 2, unplanned: 1, ok: 0 };
+            return deliveryRisks.sort((a, b) => (severity[b.status] || 0) - (severity[a.status] || 0))[0];
+        }
         const deadlineEnd = item?.deadlineEnd || item?.deadline_end || '';
         const finishDate = item?.schedule?.[item.schedule.length - 1]?.date || null;
         if (!deadlineEnd) {
@@ -981,6 +1005,42 @@ const Gantt = {
             return { status: 'tight', label: `Буфер ${bufferDays} раб.дн.`, finishDate };
         }
         return { status: 'ok', label: `Буфер ${bufferDays} раб.дн.`, finishDate };
+    },
+
+    getDeliveryMilestoneRisk(milestone, holidaySet = this.getHolidaySet()) {
+        const finishDate = milestone?.finishDate || null;
+        const deadlineEnd = milestone?.date || '';
+        const quantity = Number(milestone?.quantity || 0);
+        if (milestone?.completed) {
+            return { status: 'done', label: 'Партия готова', finishDate, deadlineEnd, quantity, milestone };
+        }
+        if (!finishDate) {
+            return { status: 'unplanned', label: 'Партия пока без даты финиша', finishDate, deadlineEnd, quantity, milestone };
+        }
+        if (finishDate > deadlineEnd) {
+            const lateDays = this.countWorkingDaysBetween(deadlineEnd, finishDate, holidaySet);
+            return {
+                status: 'late',
+                label: `Партия опаздывает на ${Math.max(lateDays, 1)} раб.дн.`,
+                finishDate,
+                deadlineEnd,
+                quantity,
+                milestone,
+            };
+        }
+        const bufferDays = this.countWorkingDaysBetween(finishDate, deadlineEnd, holidaySet);
+        if (bufferDays === 0) {
+            return { status: 'critical', label: 'Партия впритык к сроку', finishDate, deadlineEnd, quantity, milestone };
+        }
+        if (bufferDays <= 2) {
+            return { status: 'tight', label: `Партия: буфер ${bufferDays} раб.дн.`, finishDate, deadlineEnd, quantity, milestone };
+        }
+        return { status: 'ok', label: `Партия: буфер ${bufferDays} раб.дн.`, finishDate, deadlineEnd, quantity, milestone };
+    },
+
+    getNextDeliveryRiskSummary(item, holidaySet = this.getHolidaySet()) {
+        const next = (item?.deliveryMilestones || []).find(milestone => !milestone.completed);
+        return next ? this.getDeliveryMilestoneRisk(next, holidaySet) : null;
     },
 
     buildActualMonthSummary(entries = [], employees = [], referenceDate = new Date()) {
