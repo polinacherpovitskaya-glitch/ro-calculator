@@ -21,9 +21,9 @@
 
 - [x] Обновить migration smoke под Vercel architecture.
 - [x] Прогнать relay, bot runtime и server migration tests.
-- [ ] Прогнать workflow YAML parse и version smoke.
-- [ ] Взять следующий app version от свежего `origin/main`.
-- [ ] Обновить четыре version anchor и cache-bust `js/app.js`.
+- [x] Прогнать workflow YAML parse и version smoke.
+- [x] Взять следующий app version от свежего `origin/main`.
+- [x] Обновить четыре version anchor и cache-bust `js/app.js`.
 - [ ] Проверить diff на отсутствие секретов.
 
 ## Milestone 4 — Cutover
