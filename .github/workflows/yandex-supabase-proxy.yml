@@ -22,7 +22,7 @@ env:
   YC_FOLDER_ID: b1gc32hu5ujioie1o0ht
   FUNCTION_NAME: ro-supabase-proxy
   GATEWAY_NAME: ro-supabase-proxy-gateway
-  SUPABASE_URL: https://jbpmorruwjrxcieqlbmd.supabase.co
+  SUPABASE_URL: https://db.recycleobject.ru
 
 jobs:
   deploy:

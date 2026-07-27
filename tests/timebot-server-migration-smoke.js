@@ -21,15 +21,18 @@ const timebot = read('ops/bot/timebot.js');
 assert.match(timebot, /getTimebotRuntimePaths\(__dirname\)/, 'timebot should resolve persistent runtime paths');
 assert.match(timebot, /buildTelegramBotOptions\(\)/, 'timebot should use shared Telegram client options');
 
-const workflow = read('.github/workflows/ops-deploy.yml');
-assert.match(workflow, /node --test yandex\/telegram-relay\/index\.test\.js/, 'CI should test the relay');
-assert.match(workflow, /node --test tests\/vercel-telegram-relay\.test\.js/, 'CI should test the Vercel adapter');
-assert.match(workflow, /https:\/\/calc\.recycleobject\.ru\/api\/telegram-relay/, 'CI should use the Vercel relay');
+const workflow = read('.github/workflows/yandex-timebot-deploy.yml');
+const legacyWorkflow = read('.github/workflows/ops-deploy.yml');
+assert.match(legacyWorkflow, /node --test yandex\/telegram-relay\/index\.test\.js/, 'CI should test the relay');
+assert.match(legacyWorkflow, /node --test tests\/vercel-telegram-relay\.test\.js/, 'CI should test the Vercel adapter');
+assert.match(workflow, /https:\/\/ro-calculator\.vercel\.app\/api\/telegram-relay/, 'Yandex VM should use the stable Vercel relay domain');
 assert.doesNotMatch(workflow, /yc serverless/, 'CI should not deploy the unreachable Yandex relay');
 assert.match(workflow, /secrets\.TELEGRAM_RELAY_SECRET/, 'relay authorization should come from a GitHub secret');
 assert.match(workflow, /secrets\.TIMEBOT_TOKEN/, 'timebot token should come from a GitHub secret');
-assert.match(workflow, /--env-file \.env\.timebot --profile timebot/, 'deploy should start timebot with server-only env');
+assert.match(workflow, /SUPABASE_URL=https:\/\/db\.recycleobject\.ru/, 'timebot should write to the Yandex database');
+assert.match(workflow, /ro-timebot-state:\/app\/state/, 'deploy should retain persistent timebot state');
 assert.match(workflow, /FATAL: Another bot instance/, 'deploy should fail on polling conflict');
+assert.doesNotMatch(legacyWorkflow, /^\s{2}push:/m, 'legacy Selectel deploy must not run on push');
 
 const vercelConfig = JSON.parse(read('vercel.json'));
 assert.equal(vercelConfig.functions['api/telegram-relay.js'].maxDuration, 45, 'Vercel relay should outlive upstream polling');

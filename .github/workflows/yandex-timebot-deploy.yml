@@ -1,0 +1,106 @@
+name: Yandex timebot deploy
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'ops/bot/**'
+      - '.github/workflows/yandex-timebot-deploy.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: yandex-timebot-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure VM access
+        env:
+          YANDEX_VM_SSH_PRIVATE_KEY: ${{ secrets.YANDEX_VM_SSH_PRIVATE_KEY }}
+          YANDEX_VM_HOST: ${{ secrets.YANDEX_VM_HOST }}
+        run: |
+          set -euo pipefail
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$YANDEX_VM_SSH_PRIVATE_KEY" > "$HOME/.ssh/yandex_vm"
+          chmod 600 "$HOME/.ssh/yandex_vm"
+          ssh-keyscan -H "$YANDEX_VM_HOST" >> "$HOME/.ssh/known_hosts"
+
+      - name: Upload runtime
+        env:
+          YANDEX_VM_HOST: ${{ secrets.YANDEX_VM_HOST }}
+          YANDEX_VM_USER: ${{ secrets.YANDEX_VM_USER }}
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/yandex_vm" "$YANDEX_VM_USER@$YANDEX_VM_HOST" \
+            "mkdir -p /home/robot/timebot/app"
+          rsync -az --delete \
+            --exclude node_modules \
+            -e "ssh -i $HOME/.ssh/yandex_vm" \
+            ops/bot/ "$YANDEX_VM_USER@$YANDEX_VM_HOST:/home/robot/timebot/app/"
+
+      - name: Install secrets and start poller
+        env:
+          TIMEBOT_TOKEN: ${{ secrets.TIMEBOT_TOKEN }}
+          TELEGRAM_RELAY_SECRET: ${{ secrets.TELEGRAM_RELAY_SECRET }}
+          YANDEX_VM_HOST: ${{ secrets.YANDEX_VM_HOST }}
+          YANDEX_VM_USER: ${{ secrets.YANDEX_VM_USER }}
+        run: |
+          set -euo pipefail
+          umask 077
+          {
+            printf 'BOT_TOKEN=%s\n' "$TIMEBOT_TOKEN"
+            printf 'TELEGRAM_BASE_API_URL=https://ro-calculator.vercel.app/api/telegram-relay/%s\n' "$TELEGRAM_RELAY_SECRET"
+            printf 'TELEGRAM_POLL_TIMEOUT_SECONDS=20\n'
+            printf 'TELEGRAM_REQUEST_TIMEOUT_MS=45000\n'
+            printf 'SUPABASE_URL=https://db.recycleobject.ru\n'
+            printf 'ENABLE_TASK_NOTIFICATION_WORKER=false\n'
+          } > "$RUNNER_TEMP/timebot.env"
+          scp -i "$HOME/.ssh/yandex_vm" "$RUNNER_TEMP/timebot.env" \
+            "$YANDEX_VM_USER@$YANDEX_VM_HOST:/home/robot/timebot/runtime.env"
+
+          ssh -i "$HOME/.ssh/yandex_vm" "$YANDEX_VM_USER@$YANDEX_VM_HOST" bash <<'REMOTE'
+            set -euo pipefail
+            chmod 600 /home/robot/timebot/runtime.env
+            service_key="$(sed -n 's/^SERVICE_ROLE_KEY=//p' /home/robot/sb/docker/.env)"
+            test -n "$service_key"
+            printf 'SUPABASE_KEY=%s\n' "$service_key" >> /home/robot/timebot/runtime.env
+            docker build -t ro-timebot:latest /home/robot/timebot/app
+            docker volume create ro-timebot-state >/dev/null
+            docker rm -f ro-timebot >/dev/null 2>&1 || true
+            docker run -d \
+              --name ro-timebot \
+              --restart unless-stopped \
+              --env-file /home/robot/timebot/runtime.env \
+              -e TIMEBOT_STATE_DIR=/app/state \
+              -v ro-timebot-state:/app/state \
+              ro-timebot:latest node timebot.js >/dev/null
+          REMOTE
+
+      - name: Verify poller
+        env:
+          YANDEX_VM_HOST: ${{ secrets.YANDEX_VM_HOST }}
+          YANDEX_VM_USER: ${{ secrets.YANDEX_VM_USER }}
+        run: |
+          set -euo pipefail
+          sleep 8
+          ssh -i "$HOME/.ssh/yandex_vm" "$YANDEX_VM_USER@$YANDEX_VM_HOST" bash <<'REMOTE'
+            set -euo pipefail
+            test "$(docker inspect --format '{{.State.Status}}' ro-timebot)" = "running"
+            logs="$(docker logs --tail 100 ro-timebot 2>&1)"
+            printf '%s\n' "$logs"
+            printf '%s' "$logs" | grep -q 'Polling started at'
+            if printf '%s' "$logs" | grep -Eq 'FATAL: Another bot instance|Missing env vars'; then
+              exit 1
+            fi
+          REMOTE

@@ -4,8 +4,8 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-const SUPABASE_URL = 'https://jbpmorruwjrxcieqlbmd.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpicG1vcnJ1d2pyeGNpZXFsYm1kIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIwMTY1NzUsImV4cCI6MjA4NzU5MjU3NX0.Z26DuC4f5UM1I04N7ozr3FOUpF4tVIlUEh0cu1c0Jec';
+const SUPABASE_URL = process.env.SUPABASE_URL || 'https://db.recycleobject.ru';
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiAiSFMyNTYiLCAidHlwIjogIkpXVCJ9.eyJyb2xlIjogImFub24iLCAiaXNzIjogInN1cGFiYXNlIiwgImlhdCI6IDE3ODQyOTY2NTUsICJleHAiOiAyMDk5NjU2NjU1fQ.lOvkwgM1TWwYESuJtjkRDVcvSxv7VV6vsbr1-ZGkB4c';
 const FINTABLO_BASE_URL = 'https://api.fintablo.ru/v1';
 const SETTINGS_KEY = 'fintablo_snapshot_json';
 const DEFAULT_CONFIG_PATH = path.join(os.homedir(), '.config', 'ro-calculator', 'fintablo.env');
