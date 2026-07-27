@@ -5,6 +5,7 @@ const vm = require('vm');
 
 const root = path.resolve(__dirname, '..');
 const source = fs.readFileSync(path.join(root, 'js', 'supabase.js'), 'utf8');
+const writebackWorkflow = fs.readFileSync(path.join(root, '.github/workflows/yandex-writeback-smoke.yml'), 'utf8');
 const proxy = require('../yandex/supabase-proxy');
 
 function runtimeUrlFor(hostname) {
@@ -33,6 +34,11 @@ assert.strictEqual(
 );
 
 assert.doesNotMatch(source, /supabase\.co|apigw\.yandexcloud\.net/);
+assert.match(
+  writebackWorkflow,
+  /RO_YANDEX_PROXY_URL: https:\/\/d5dktgh0f2nqktmc326f\.wnq2w1o5\.apigw\.yandexcloud\.net/,
+  'CI must keep testing the rollback proxy even though the browser runtime uses Yandex DB directly',
+);
 
 (async () => {
   const response = await proxy.handler({
