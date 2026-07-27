@@ -37,6 +37,7 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          RO_YANDEX_PROXY_URL: https://d5dktgh0f2nqktmc326f.wnq2w1o5.apigw.yandexcloud.net
         run: node tests/yandex-writeback-smoke.mjs
 
       - name: Upload write-back artifacts
