@@ -28,7 +28,7 @@
 
 ## Milestone 4 — Cutover
 
-- [ ] Отправить ветку и открыть draft PR.
+- [x] Отправить ветку и открыть draft PR.
 - [ ] Дождаться зелёных PR checks.
 - [ ] Merge в `main`.
 - [ ] Дождаться production Vercel relay и успешного `getMe`.
