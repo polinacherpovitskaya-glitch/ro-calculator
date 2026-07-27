@@ -1,0 +1,14 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "functions": {
+    "api/telegram-relay.js": {
+      "maxDuration": 45
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/api/telegram-relay/:relay_path*",
+      "destination": "/api/telegram-relay?relay_path=:relay_path*"
+    }
+  ]
+}

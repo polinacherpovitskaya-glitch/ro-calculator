@@ -40,9 +40,11 @@
 
 - [x] Отправить ветку и открыть draft PR.
 - [x] Дождаться зелёных PR checks.
-- [ ] Merge в `main`.
-- [ ] Отключить локальный `com.recycleobject.timebot.v2`.
-- [ ] Дождаться Yandex relay deploy и server timebot start.
+- [x] Merge в `main`.
+- [x] Выполнить production-проверку Yandex relay — получен upstream HTTP 502.
+- [x] Снова включить локальный `com.recycleobject.timebot.v2` после rollback.
+- [ ] Выполнить cutover по follow-up плану
+  [`2026-07-27-timebot-vercel-relay.md`](2026-07-27-timebot-vercel-relay.md).
 - [ ] Проверить `getMe`, container state и отсутствие conflict 409.
 - [ ] Проверить `/status` и реальную запись времени.
 - [ ] Убедиться, что запись видна в `calc2/#timetrack`.
