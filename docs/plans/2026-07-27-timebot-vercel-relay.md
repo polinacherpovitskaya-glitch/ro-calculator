@@ -24,7 +24,7 @@
 - [x] Прогнать workflow YAML parse и version smoke.
 - [x] Взять следующий app version от свежего `origin/main`.
 - [x] Обновить четыре version anchor и cache-bust `js/app.js`.
-- [ ] Проверить diff на отсутствие секретов.
+- [x] Проверить diff на отсутствие секретов.
 
 ## Milestone 4 — Cutover
 
