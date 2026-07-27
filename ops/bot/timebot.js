@@ -607,7 +607,7 @@ bot.on('message', async (msg) => {
 
         // --- State-based text input ---
         const state = getState(telegramId);
-        if (looksLikeFreeformBatchReport(text) && (!state || state.step === 'choose_project')) {
+        if (looksLikeFreeformBatchReport(text)) {
             const employee = state?.employee || await getEmployee(telegramId);
             if (employee) {
                 const handled = await tryHandleFreeformBatchReport(chatId, telegramId, employee, text);

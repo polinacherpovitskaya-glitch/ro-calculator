@@ -8,6 +8,7 @@ const DEFAULT_STAGE_LABELS = {
 
 const HOURS_SUFFIX_RE = /\s*[—–-]\s*([\d]+(?:[.,]\d+)?)\s*(?:ч|ч\.|час(?:а|ов)?)\s*$/i;
 const DATE_PREFIX_RE = /^\s*(\d{1,2})\.(\d{1,2})(?:\.(\d{2,4}))?\s*[—–-]\s*/;
+const DATE_HEADING_RE = /^\s*(\d{1,2})\.(\d{1,2})(?:\.(\d{2,4}))?\s*:\s*$/;
 
 function normalizeText(value) {
     return String(value || '')
@@ -42,6 +43,24 @@ function formatYmd(year, month, day) {
         String(month).padStart(2, '0'),
         String(day).padStart(2, '0'),
     ].join('-');
+}
+
+function resolveDate(dayRaw, monthRaw, yearRaw, options = {}) {
+    const now = options.now || new Date();
+    const day = Number(dayRaw);
+    const month = Number(monthRaw);
+    const explicitYear = toFourDigitYear(yearRaw, now.getFullYear());
+    if (!Number.isFinite(day) || !Number.isFinite(month) || day < 1 || day > 31 || month < 1 || month > 12) {
+        return { error: 'invalid_date' };
+    }
+
+    const year = inferYear(day, month, explicitYear, now);
+    return {
+        day,
+        month,
+        year,
+        date: formatYmd(year, month, day),
+    };
 }
 
 function buildStageAliasMap(stageLabels = DEFAULT_STAGE_LABELS) {
@@ -90,10 +109,8 @@ function parseLine(line, options = {}) {
         return { error: 'missing_hours', raw: raw };
     }
 
-    const day = Number(dateMatch[1]);
-    const month = Number(dateMatch[2]);
-    const explicitYear = toFourDigitYear(dateMatch[3], (options.now || new Date()).getFullYear());
-    if (!Number.isFinite(day) || !Number.isFinite(month) || day < 1 || day > 31 || month < 1 || month > 12) {
+    const resolvedDate = resolveDate(dateMatch[1], dateMatch[2], dateMatch[3], options);
+    if (resolvedDate.error) {
         return { error: 'invalid_date', raw: raw };
     }
 
@@ -117,11 +134,10 @@ function parseLine(line, options = {}) {
 
     const stageAliases = buildStageAliasMap(options.stageLabels);
     const stageMatch = stageAliases.get(normalizeText(stageRaw));
-    const year = inferYear(day, month, explicitYear, options.now || new Date());
 
     return {
         raw: raw,
-        date: formatYmd(year, month, day),
+        date: resolvedDate.date,
         project_name: projectName,
         stage: stageMatch ? stageMatch.key : 'other',
         stage_label: stageMatch ? stageMatch.label : stageRaw,
@@ -137,14 +153,32 @@ function parseFreeformBatchReport(text, options = {}) {
 
     const entries = [];
     const errors = [];
+    let activeDate = null;
 
     lines.forEach((line, index) => {
-        const parsed = parseLine(line, options);
+        const headingMatch = line.match(DATE_HEADING_RE);
+        if (headingMatch) {
+            const resolvedDate = resolveDate(headingMatch[1], headingMatch[2], headingMatch[3], options);
+            if (resolvedDate.error) {
+                activeDate = null;
+                errors.push({ index, line, error: resolvedDate.error });
+            } else {
+                activeDate = resolvedDate;
+            }
+            return;
+        }
+
+        const hasInlineDate = DATE_PREFIX_RE.test(line);
+        const parseTarget = !hasInlineDate && activeDate
+            ? `${activeDate.day}.${activeDate.month}.${activeDate.year} — ${line}`
+            : line;
+        const parsed = parseLine(parseTarget, options);
         if (!parsed) return;
         if (parsed.error) {
             errors.push({ index, line, error: parsed.error });
             return;
         }
+        parsed.raw = line;
         entries.push(parsed);
     });
 
@@ -152,8 +186,8 @@ function parseFreeformBatchReport(text, options = {}) {
 }
 
 function looksLikeFreeformBatchReport(text) {
-    const raw = String(text || '');
-    return /\d{1,2}\.\d{1,2}(?:\.\d{2,4})?\s*[—–-].+\/.+[—–-]\s*[\d.,]+\s*(?:ч|ч\.|час)/i.test(raw);
+    const parsed = parseFreeformBatchReport(text);
+    return parsed.entries.length > 0 && parsed.errors.length === 0;
 }
 
 module.exports = {
