@@ -60,7 +60,7 @@ jobs:
           umask 077
           {
             printf 'BOT_TOKEN=%s\n' "$TIMEBOT_TOKEN"
-            printf 'TELEGRAM_BASE_API_URL=https://ro-calculator.vercel.app/api/telegram-relay/%s\n' "$TELEGRAM_RELAY_SECRET"
+            printf 'TELEGRAM_BASE_API_URL=https://ro-calculator-xi.vercel.app/api/telegram-relay/%s\n' "$TELEGRAM_RELAY_SECRET"
             printf 'TELEGRAM_POLL_TIMEOUT_SECONDS=20\n'
             printf 'TELEGRAM_REQUEST_TIMEOUT_MS=45000\n'
             printf 'SUPABASE_URL=https://db.recycleobject.ru\n'
