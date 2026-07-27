@@ -15,6 +15,7 @@ function makeBootstrap(overrides = {}) {
       authAccounts: [{ id: 1 }],
       employees: [{ id: 1 }],
       orders: [{ id: 1 }],
+      orderItems: [{ id: 1, order_id: 1 }],
       settingsRows: [{ key: 'x', value: '1' }],
       ...overrides,
     },
@@ -23,10 +24,10 @@ function makeBootstrap(overrides = {}) {
 
 // A healthy snapshot passes and reports its row counts.
 const counts = assertHealthyBootstrap(makeBootstrap());
-assert.deepEqual(counts, { authAccounts: 1, employees: 1, orders: 1, settingsRows: 1 });
+assert.deepEqual(counts, { authAccounts: 1, employees: 1, orders: 1, orderItems: 1, settingsRows: 1 });
 
 const shards = buildBootstrapShardPayloads(makeBootstrap());
-assert.deepEqual(Object.keys(shards).sort(), ['authAccounts', 'employees', 'orders', 'settingsRows']);
+assert.deepEqual(Object.keys(shards).sort(), ['authAccounts', 'employees', 'orderItems', 'orders', 'settingsRows']);
 for (const [key, payload] of Object.entries(shards)) {
   assert.deepEqual(Object.keys(payload.data), [key], `shard ${key} must contain only its requested key`);
   assert.equal(payload.ok, true);
@@ -37,13 +38,13 @@ assert.match(yandexSync, /data\/bootstrap\/\*/, 'bootstrap shards must be deploy
 
 // A fully empty snapshot (Supabase fully unreachable) must fail the build.
 assert.throws(
-  () => assertHealthyBootstrap(makeBootstrap({ authAccounts: [], employees: [], orders: [], settingsRows: [] })),
+  () => assertHealthyBootstrap(makeBootstrap({ authAccounts: [], employees: [], orders: [], orderItems: [], settingsRows: [] })),
   /required table\(s\) empty/,
   'fully empty snapshot must throw',
 );
 
 // Any single empty core table (partial outage) must also fail the build.
-for (const key of ['authAccounts', 'employees', 'orders', 'settingsRows']) {
+for (const key of ['authAccounts', 'employees', 'orders', 'orderItems', 'settingsRows']) {
   assert.throws(
     () => assertHealthyBootstrap(makeBootstrap({ [key]: [] })),
     new RegExp(key),
