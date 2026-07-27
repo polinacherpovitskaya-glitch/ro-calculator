@@ -29,17 +29,17 @@
 
 ## Milestone 4 — Проверки и release
 
-- [ ] Прогнать `ops/bot` test suite.
-- [ ] Прогнать relay tests и syntax check.
-- [ ] Прогнать релевантные app smoke tests.
-- [ ] Взять следующий app version от свежего `origin/main`.
-- [ ] Обновить четыре version anchor и проверить `version-smoke`.
-- [ ] Проверить diff на отсутствие секретов.
+- [x] Прогнать `ops/bot` test suite.
+- [x] Прогнать relay tests и syntax check.
+- [x] Прогнать релевантные app smoke tests.
+- [x] Взять следующий app version от свежего `origin/main`.
+- [x] Обновить четыре version anchor и проверить `version-smoke`.
+- [x] Проверить diff на отсутствие секретов.
 
 ## Milestone 5 — Cutover
 
-- [ ] Отправить ветку и открыть draft PR.
-- [ ] Дождаться зелёных PR checks.
+- [x] Отправить ветку и открыть draft PR.
+- [x] Дождаться зелёных PR checks.
 - [ ] Merge в `main`.
 - [ ] Отключить локальный `com.recycleobject.timebot.v2`.
 - [ ] Дождаться Yandex relay deploy и server timebot start.
