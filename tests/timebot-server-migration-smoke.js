@@ -23,6 +23,7 @@ assert.match(timebot, /buildTelegramBotOptions\(\)/, 'timebot should use shared 
 
 const workflow = read('.github/workflows/yandex-timebot-deploy.yml');
 const legacyWorkflow = read('.github/workflows/ops-deploy.yml');
+const timebotDockerfile = read('ops/bot/Dockerfile');
 assert.match(legacyWorkflow, /node --test yandex\/telegram-relay\/index\.test\.js/, 'CI should test the relay');
 assert.match(legacyWorkflow, /node --test tests\/vercel-telegram-relay\.test\.js/, 'CI should test the Vercel adapter');
 assert.match(workflow, /https:\/\/ro-calculator-xi\.vercel\.app\/api\/telegram-relay/, 'Yandex VM should use the stable Vercel relay domain');
@@ -33,6 +34,11 @@ assert.match(workflow, /SUPABASE_URL=https:\/\/db\.recycleobject\.ru/, 'timebot 
 assert.match(workflow, /ro-timebot-state:\/app\/state/, 'deploy should retain persistent timebot state');
 assert.match(workflow, /FATAL: Another bot instance/, 'deploy should fail on polling conflict');
 assert.doesNotMatch(legacyWorkflow, /^\s{2}push:/m, 'legacy Selectel deploy must not run on push');
+assert.equal(
+    (timebotDockerfile.match(/FROM node:22-alpine/g) || []).length,
+    2,
+    'timebot build and runtime images must provide the WebSocket support required by Supabase'
+);
 
 const vercelConfig = JSON.parse(read('vercel.json'));
 assert.equal(vercelConfig.functions['api/telegram-relay.js'].maxDuration, 45, 'Vercel relay should outlive upstream polling');
