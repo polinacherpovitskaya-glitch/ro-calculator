@@ -1,0 +1,188 @@
+name: Yandex timebot health
+
+on:
+  workflow_dispatch:
+    inputs:
+      send_test_alert:
+        description: Send one test notification after successful checks
+        required: false
+        default: false
+        type: boolean
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_run:
+    workflows:
+      - Yandex timebot deploy
+    types:
+      - completed
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: yandex-timebot-health
+  cancel-in-progress: true
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Configure Yandex VM access
+        env:
+          YANDEX_VM_SSH_PRIVATE_KEY: ${{ secrets.YANDEX_VM_SSH_PRIVATE_KEY }}
+          YANDEX_VM_HOST: ${{ secrets.YANDEX_VM_HOST }}
+        run: |
+          set -euo pipefail
+          test -n "${YANDEX_VM_SSH_PRIVATE_KEY:-}"
+          test -n "${YANDEX_VM_HOST:-}"
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$YANDEX_VM_SSH_PRIVATE_KEY" > "$HOME/.ssh/yandex_vm"
+          chmod 600 "$HOME/.ssh/yandex_vm"
+          ssh-keyscan -H "$YANDEX_VM_HOST" >> "$HOME/.ssh/known_hosts"
+
+      - name: Verify container and fresh self-health
+        env:
+          YANDEX_VM_HOST: ${{ secrets.YANDEX_VM_HOST }}
+          YANDEX_VM_USER: ${{ secrets.YANDEX_VM_USER }}
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/yandex_vm" \
+            -o BatchMode=yes \
+            -o ConnectTimeout=15 \
+            "$YANDEX_VM_USER@$YANDEX_VM_HOST" bash <<'REMOTE'
+          set -euo pipefail
+          status="$(docker inspect --format '{{.State.Status}}' ro-timebot 2>/dev/null || true)"
+          if [ "$status" != "running" ]; then
+            echo "ro-timebot status is ${status:-missing}" >&2
+            exit 1
+          fi
+
+          docker exec -i ro-timebot node - <<'NODE'
+          const fs = require('node:fs');
+          const { validateTimebotHealthSnapshot } = require('./timebot-health-core');
+          const file = '/app/state/timebot.health.json';
+          if (!fs.existsSync(file)) {
+            console.error('timebot health file is missing');
+            process.exit(1);
+          }
+          const snapshot = JSON.parse(fs.readFileSync(file, 'utf8'));
+          const validation = validateTimebotHealthSnapshot(snapshot);
+          console.log(JSON.stringify({
+            checked_at: snapshot.checked_at || null,
+            age_ms: validation.age_ms,
+            polling: snapshot.polling === true,
+            telegram_ok: snapshot.telegram_ok === true,
+            database_ok: snapshot.database_ok === true,
+            ok: validation.ok,
+          }));
+          if (!validation.ok) {
+            console.error(`timebot health validation failed: ${validation.issues.join(', ')}`);
+            process.exit(1);
+          }
+          NODE
+
+          logs="$(docker logs --tail 160 ro-timebot 2>&1)"
+          if printf '%s' "$logs" | grep -Eq 'FATAL: Another bot instance|Missing env vars'; then
+            echo "timebot logs contain a fatal startup error" >&2
+            exit 1
+          fi
+          REMOTE
+
+      - name: Probe Telegram relay independently
+        env:
+          TIMEBOT_TOKEN: ${{ secrets.TIMEBOT_TOKEN }}
+          TELEGRAM_RELAY_SECRET: ${{ secrets.TELEGRAM_RELAY_SECRET }}
+        run: |
+          set -euo pipefail
+          test -n "${TIMEBOT_TOKEN:-}"
+          test -n "${TELEGRAM_RELAY_SECRET:-}"
+          relay_base="https://ro-calculator-xi.vercel.app/api/telegram-relay/${TELEGRAM_RELAY_SECRET}"
+          echo "::add-mask::$relay_base"
+          curl --fail --silent --show-error --max-time 25 \
+            "${relay_base}/bot${TIMEBOT_TOKEN}/getMe" \
+            | node -e '
+                let raw = "";
+                process.stdin.on("data", chunk => raw += chunk);
+                process.stdin.on("end", () => {
+                  const payload = JSON.parse(raw);
+                  if (!payload.ok || payload.result?.username !== "Recycle_object_calc_bot") {
+                    process.exit(1);
+                  }
+                  console.log(`Telegram relay is healthy for @${payload.result.username}`);
+                });
+              '
+
+      - name: Probe Yandex DB independently
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          set -euo pipefail
+          test "$SUPABASE_URL" = "https://db.recycleobject.ru"
+          curl --fail --silent --show-error --max-time 25 \
+            -H "apikey: $SUPABASE_ANON_KEY" \
+            -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
+            "$SUPABASE_URL/rest/v1/employees?select=id&limit=1" \
+            | node -e '
+                let raw = "";
+                process.stdin.on("data", chunk => raw += chunk);
+                process.stdin.on("end", () => {
+                  const rows = JSON.parse(raw);
+                  if (!Array.isArray(rows) || rows.length !== 1 || !rows[0]?.id) {
+                    process.exit(1);
+                  }
+                  console.log("Yandex DB read probe passed");
+                });
+              '
+
+      - name: Send requested test notification
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.send_test_alert }}
+        env:
+          BOT_TOKEN: ${{ secrets.TIMEBOT_TOKEN }}
+          TELEGRAM_ALERT_CHAT_ID: ${{ secrets.TELEGRAM_ALERT_CHAT_ID }}
+          ALERT_WORKFLOW: Yandex timebot health
+          ALERT_SCOPE: Test notification — production hours bot monitoring is active
+          ALERT_STATUS: test
+          ALERT_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: node .github/scripts/send-telegram-alert.mjs
+
+      - name: Notify Telegram on incident or recovery
+        if: ${{ always() }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          BOT_TOKEN: ${{ secrets.TIMEBOT_TOKEN }}
+          TELEGRAM_ALERT_CHAT_ID: ${{ secrets.TELEGRAM_ALERT_CHAT_ID }}
+          ALERT_WORKFLOW: Yandex timebot health
+          ALERT_SCOPE: Production hours bot process, heartbeat, Telegram relay, and Yandex DB
+          ALERT_STATUS: ${{ job.status == 'success' && 'success' || 'failure' }}
+          ALERT_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          ALERT_SOURCE_WORKFLOW: ${{ github.event.workflow_run.name }}
+          TELEGRAM_DEDUP_FAILURES: 'true'
+          TELEGRAM_NOTIFY_RECOVERY: 'true'
+        run: node .github/scripts/send-telegram-alert.mjs
+
+      - name: Sync GitHub incident issue
+        if: ${{ always() }}
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ALERT_WORKFLOW: Yandex timebot health
+          ALERT_SCOPE: Production hours bot process, heartbeat, Telegram relay, and Yandex DB
+          ALERT_STATUS: ${{ job.status == 'success' && 'success' || 'failure' }}
+          ALERT_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          ALERT_SOURCE_WORKFLOW: ${{ github.event.workflow_run.name }}
+        run: node .github/scripts/sync-smoke-issue.mjs

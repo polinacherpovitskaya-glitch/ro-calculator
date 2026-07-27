@@ -27,6 +27,7 @@ assert.deepEqual(
         stateFile: '/app/state/timebot.state.json',
         pendingFile: '/app/state/timebot.pending.json',
         inboxFile: '/app/state/timebot.inbox.jsonl',
+        healthFile: '/app/state/timebot.health.json',
     },
     'server runtime files should live in the persistent state directory'
 );

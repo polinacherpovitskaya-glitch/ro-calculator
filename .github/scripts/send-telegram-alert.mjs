@@ -62,6 +62,29 @@ const notifyRecovery = ['1', 'true', 'yes', 'on'].includes(
     .trim()
     .toLowerCase()
 );
+const dedupeFailures = ['1', 'true', 'yes', 'on'].includes(
+  String(process.env.TELEGRAM_DEDUP_FAILURES || '')
+    .trim()
+    .toLowerCase()
+);
+
+let currentIssue = null;
+const needsIssueLookup = (status === 'success' && notifyRecovery)
+  || (status === 'failure' && dedupeFailures);
+
+if (needsIssueLookup) {
+  if (!githubToken || !repository) {
+    console.log('telegram incident lookup skipped: missing GitHub token or repository');
+  } else {
+    const [owner, repo] = repository.split('/');
+    if (!owner || !repo) {
+      console.log(`telegram incident lookup skipped: invalid repository ${repository}`);
+    } else {
+      const openIssues = await githubRequest(`/repos/${owner}/${repo}/issues?state=open&per_page=100`);
+      currentIssue = (openIssues || []).find((issue) => !issue.pull_request && issue.title === issueTitle) || null;
+    }
+  }
+}
 
 if (status === 'success') {
   if (!notifyRecovery) {
@@ -69,26 +92,22 @@ if (status === 'success') {
     process.exit(0);
   }
 
-  if (!githubToken || !repository) {
-    console.log('telegram recovery skipped: missing GitHub token or repository');
-    process.exit(0);
-  }
-
-  const [owner, repo] = repository.split('/');
-  if (!owner || !repo) {
-    console.log(`telegram recovery skipped: invalid repository ${repository}`);
-    process.exit(0);
-  }
-
-  const openIssues = await githubRequest(`/repos/${owner}/${repo}/issues?state=open&per_page=100`);
-  const currentIssue = (openIssues || []).find((issue) => !issue.pull_request && issue.title === issueTitle) || null;
   if (!currentIssue) {
     console.log('telegram recovery skipped: no open smoke issue to resolve');
     process.exit(0);
   }
 }
 
-const statusLabel = status === 'success' ? 'RECOVERED' : 'FAILED';
+if (status === 'failure' && dedupeFailures && currentIssue) {
+  console.log(`telegram failure skipped: incident already tracked in issue #${currentIssue.number}`);
+  process.exit(0);
+}
+
+const statusLabel = status === 'success'
+  ? 'RECOVERED'
+  : status === 'test'
+    ? 'TEST'
+    : 'FAILED';
 
 const lines = [
   `RO smoke alert: ${statusLabel}`,
