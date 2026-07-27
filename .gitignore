@@ -15,6 +15,7 @@ ops/api/src/calc-dist/
 ops/web/node_modules/
 ops/web/dist/
 ops/infra/.env
+ops/infra/.env.timebot
 *.log
 .vercel
 deploy/

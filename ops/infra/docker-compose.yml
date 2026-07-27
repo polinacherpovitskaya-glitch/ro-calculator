@@ -69,6 +69,30 @@ services:
     networks:
       - internal
 
+  timebot:
+    profiles: ["timebot"]
+    build:
+      context: ../bot
+      dockerfile: Dockerfile
+    image: ops-timebot:local
+    container_name: ops-timebot
+    command: ["node", "timebot.js"]
+    restart: unless-stopped
+    environment:
+      BOT_TOKEN: ${TIMEBOT_TOKEN:-}
+      SUPABASE_URL: ${SUPABASE_URL:-}
+      SUPABASE_KEY: ${SUPABASE_SERVICE_KEY:-}
+      ENABLE_TASK_NOTIFICATION_WORKER: "false"
+      TELEGRAM_BASE_API_URL: ${TELEGRAM_BASE_API_URL:-}
+      TELEGRAM_REQUEST_FAMILY: ${TELEGRAM_REQUEST_FAMILY:-4}
+      TELEGRAM_REQUEST_TIMEOUT_MS: ${TELEGRAM_REQUEST_TIMEOUT_MS:-45000}
+      TELEGRAM_POLL_TIMEOUT_SECONDS: ${TELEGRAM_POLL_TIMEOUT_SECONDS:-20}
+      TIMEBOT_STATE_DIR: /app/state
+    volumes:
+      - timebot-state:/app/state
+    networks:
+      - internal
+
   caddy:
     image: caddy:2.8-alpine
     container_name: ops-caddy
@@ -90,6 +114,7 @@ services:
 
 volumes:
   postgres-data:
+  timebot-state:
   caddy-data:
   caddy-config:
 
