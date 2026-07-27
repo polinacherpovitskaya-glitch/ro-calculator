@@ -1,11 +1,10 @@
 const { createHandler: createRelayHandler } = require('../yandex/telegram-relay');
 
-function firstValue(value) {
-    return Array.isArray(value) ? value[0] : value;
-}
-
 function relayPathFromRequest(req) {
-    const value = String(firstValue(req?.query?.relay_path) || '');
+    const rawValue = req?.query?.relay_path;
+    const value = Array.isArray(rawValue)
+        ? rawValue.join('/')
+        : String(rawValue || '');
     return `/${value.replace(/^\/+/, '')}`;
 }
 

@@ -38,7 +38,7 @@ const vercelConfig = JSON.parse(read('vercel.json'));
 assert.equal(vercelConfig.functions['api/telegram-relay.js'].maxDuration, 45, 'Vercel relay should outlive upstream polling');
 assert.deepEqual(vercelConfig.rewrites[0], {
     source: '/api/telegram-relay/:relay_path*',
-    destination: '/api/telegram-relay?relay_path=:relay_path',
+    destination: '/api/telegram-relay?relay_path=:relay_path*',
 }, 'Vercel should route protected wildcard paths into the relay function');
 
 const relay = read('yandex/telegram-relay/index.js');
