@@ -24,13 +24,15 @@ function runtimeUrlFor(hostname) {
 
 assert.strictEqual(
   runtimeUrlFor('calc2.recycleobject.ru'),
-  'https://d5dktgh0f2nqktmc326f.wnq2w1o5.apigw.yandexcloud.net',
+  'https://db.recycleobject.ru',
 );
 
 assert.strictEqual(
   runtimeUrlFor('calc.recycleobject.ru'),
-  'https://jbpmorruwjrxcieqlbmd.supabase.co',
+  'https://db.recycleobject.ru',
 );
+
+assert.doesNotMatch(source, /supabase\.co|apigw\.yandexcloud\.net/);
 
 (async () => {
   const response = await proxy.handler({

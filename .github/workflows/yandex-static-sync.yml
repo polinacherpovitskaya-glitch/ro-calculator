@@ -19,7 +19,6 @@ concurrency:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  RO_YANDEX_BUCKET: calc2.recycleobject.ru
   YC_CLOUD_ID: b1gl59l77vb50ihub2nd
   YC_FOLDER_ID: b1gc32hu5ujioie1o0ht
 
@@ -28,6 +27,14 @@ jobs:
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        bucket:
+          - calc.recycleobject.ru
+          - calc2.recycleobject.ru
+    env:
+      RO_YANDEX_BUCKET: ${{ matrix.bucket }}
 
     steps:
       - name: Checkout
@@ -65,7 +72,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "${YC_OAUTH_TOKEN:-}" ]; then
-            echo "YC_OAUTH_TOKEN secret is required to sync calc2.recycleobject.ru" >&2
+            echo "YC_OAUTH_TOKEN secret is required to sync ${RO_YANDEX_BUCKET}" >&2
             exit 1
           fi
 
@@ -110,6 +117,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: yandex-static-bundle
+          name: yandex-static-${{ matrix.bucket }}
           path: deploy/static-yandex
           if-no-files-found: ignore

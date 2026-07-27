@@ -67,7 +67,7 @@ jobs:
           TELEGRAM_SMOKE_CHAT_ID: ${{ secrets.TELEGRAM_SMOKE_CHAT_ID }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           ALERT_WORKFLOW: Yandex mirror smoke
-          ALERT_SCOPE: calc2 Russia fallback without Supabase
+          ALERT_SCOPE: calc2 direct Yandex database and static hosting
           ALERT_STATUS: ${{ job.status }}
           ALERT_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           ALERT_SOURCE_WORKFLOW: ${{ github.event.workflow_run.name }}
@@ -79,7 +79,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           ALERT_WORKFLOW: Yandex mirror smoke
-          ALERT_SCOPE: calc2 Russia fallback without Supabase
+          ALERT_SCOPE: calc2 direct Yandex database and static hosting
           ALERT_STATUS: ${{ job.status }}
           ALERT_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           ALERT_SOURCE_WORKFLOW: ${{ github.event.workflow_run.name }}

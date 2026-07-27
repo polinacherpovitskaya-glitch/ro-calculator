@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
-import { fetchSupabaseAllPages } from '../scripts/build-yandex-static.mjs';
+import {
+  assertHealthyBootstrap,
+  fetchSupabaseAllPages,
+} from '../scripts/build-yandex-static.mjs';
 
 // PostgREST caps a single response at ~1000 rows, so the bootstrap build must
 // page through large tables (order_items is already >1000). This stubs global
@@ -52,6 +55,20 @@ try {
   ({ calls } = installFakeEndpoint(5));
   await fetchSupabaseAllPages('/rest/v1/orders?select=*&status=neq.deleted&order=created_at.desc', { pageSize: 1000, attempts: 1 });
   assert.equal(calls.length, 1, 'query with existing params still pages correctly');
+
+  assert.throws(
+    () => assertHealthyBootstrap({
+      data: {
+        authAccounts: [{}],
+        employees: [{}],
+        orders: [{}],
+        orderItems: [],
+        settingsRows: [{}],
+      },
+    }),
+    /orderItems/,
+    'a failed heavy order_items export must stop publication instead of shipping an empty shard'
+  );
 
   console.log('bootstrap-pagination-smoke: OK');
 } finally {

@@ -1,12 +1,13 @@
 const { createHandler: createRelayHandler } = require('../yandex/telegram-relay');
 
-function firstValue(value) {
-    return Array.isArray(value) ? value[0] : value;
-}
-
 function relayPathFromRequest(req) {
-    const value = String(firstValue(req?.query?.relay_path) || '');
-    return `/${value.replace(/^\/+/, '')}`;
+    const rawValue = req?.query?.relay_path;
+    const value = Array.isArray(rawValue)
+        ? rawValue.join('/')
+        : String(rawValue || '');
+    // Vercel may preserve the wildcard marker when a splat is forwarded into
+    // a query parameter. It is routing syntax, not part of the Telegram path.
+    return `/${value.replace(/^\/+/, '').replace(/\*+$/, '')}`;
 }
 
 function upstreamQuery(req) {

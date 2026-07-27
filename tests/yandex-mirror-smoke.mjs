@@ -63,12 +63,12 @@ async function main() {
   const page = await context.newPage();
   const failedRequests = [];
   const consoleMessages = [];
-  let blockedSupabaseRequests = 0;
-  let yandexProxyRequests = 0;
+  let blockedLegacySupabaseRequests = 0;
+  let yandexDatabaseRequests = 0;
 
   page.on('request', request => {
-    if (request.url().includes('apigw.yandexcloud.net')) {
-      yandexProxyRequests += 1;
+    if (request.url().startsWith('https://db.recycleobject.ru/')) {
+      yandexDatabaseRequests += 1;
     }
   });
   page.on('requestfailed', request => {
@@ -88,7 +88,7 @@ async function main() {
   });
 
   await page.route('**/*supabase.co/**', route => {
-    blockedSupabaseRequests += 1;
+    blockedLegacySupabaseRequests += 1;
     route.abort('blockedbyclient');
   });
 
@@ -225,8 +225,8 @@ async function main() {
 
     fs.writeFileSync(path.join(outputDir, 'state.json'), JSON.stringify({
       state,
-      blockedSupabaseRequests,
-      yandexProxyRequests,
+      blockedLegacySupabaseRequests,
+      yandexDatabaseRequests,
       failedRequests,
       consoleMessages,
     }, null, 2));
@@ -256,10 +256,9 @@ async function main() {
       state.shipmentPickerState.selectableOptionCount > 0,
       `Expected warehouse positions in shipment receipt picker, got ${JSON.stringify(state.shipmentPickerState)}`
     );
-    assert.ok(
-      blockedSupabaseRequests > 0 || yandexProxyRequests > 0 || state.supabaseRuntimeUrl.includes('apigw.yandexcloud.net'),
-      'Smoke must verify either Russian mirror fallback or the Yandex Supabase proxy path'
-    );
+    assert.equal(state.supabaseRuntimeUrl, 'https://db.recycleobject.ru');
+    assert.ok(yandexDatabaseRequests > 0, 'Mirror must read from the Yandex-hosted database');
+    assert.equal(blockedLegacySupabaseRequests, 0, 'Mirror must not request the legacy Supabase host');
 
     console.log(JSON.stringify({
       ok: true,
@@ -273,8 +272,8 @@ async function main() {
       demandRowsCount: state.demandRowsCount,
       demandOrder: state.demandOrder,
       shipmentPickerState: state.shipmentPickerState,
-      blockedSupabaseRequests,
-      yandexProxyRequests,
+      blockedLegacySupabaseRequests,
+      yandexDatabaseRequests,
       supabaseRuntimeUrl: state.supabaseRuntimeUrl,
     }, null, 2));
   } finally {

@@ -1,51 +1,68 @@
-name: Yandex migration backup
+name: Yandex production backup
 
 on:
   workflow_dispatch:
   schedule:
     - cron: '41 2 * * *'
-  workflow_run:
-    workflows:
-      - Yandex migration snapshot
-    types:
-      - completed
 
 permissions:
   contents: read
 
 concurrency:
-  group: yandex-migration-backup
-  cancel-in-progress: true
+  group: yandex-production-backup
+  cancel-in-progress: false
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   YC_CLOUD_ID: b1gl59l77vb50ihub2nd
   YC_FOLDER_ID: b1gc32hu5ujioie1o0ht
-  RO_YANDEX_MIGRATION_BUCKET: ro-yandex-migration-snapshots-b1gl59l77vb50ihub2nd
-  RO_YANDEX_MIGRATION_KEEP_FULL: 7
+  RO_YANDEX_BACKUP_BUCKET: ro-yandex-migration-snapshots-b1gl59l77vb50ihub2nd
+  RO_YANDEX_BACKUP_KEEP: 14
 
 jobs:
   backup:
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 45
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-
-      - name: Build full sanitized Supabase snapshot
+      - name: Configure VM access
         env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-          RO_SNAPSHOT_MODE: full
-          RO_SNAPSHOT_OUT_DIR: output/yandex-migration-backup
-        run: node scripts/export-supabase-snapshot.mjs
+          YANDEX_VM_SSH_PRIVATE_KEY: ${{ secrets.YANDEX_VM_SSH_PRIVATE_KEY }}
+          YANDEX_VM_HOST: ${{ secrets.YANDEX_VM_HOST }}
+        run: |
+          set -euo pipefail
+          test -n "$YANDEX_VM_SSH_PRIVATE_KEY"
+          test -n "$YANDEX_VM_HOST"
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$YANDEX_VM_SSH_PRIVATE_KEY" > "$HOME/.ssh/yandex_vm"
+          chmod 600 "$HOME/.ssh/yandex_vm"
+          ssh-keyscan -H "$YANDEX_VM_HOST" >> "$HOME/.ssh/known_hosts"
+
+      - name: Create and validate VM backup
+        env:
+          YANDEX_VM_HOST: ${{ secrets.YANDEX_VM_HOST }}
+          YANDEX_VM_USER: ${{ secrets.YANDEX_VM_USER }}
+        run: |
+          set -euo pipefail
+          test -n "$YANDEX_VM_USER"
+          mkdir -p output/yandex-production-backup
+          stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+          db_file="output/yandex-production-backup/postgres-${stamp}.dump"
+          storage_file="output/yandex-production-backup/storage-${stamp}.tgz"
+
+          ssh -i "$HOME/.ssh/yandex_vm" "$YANDEX_VM_USER@$YANDEX_VM_HOST" \
+            "docker exec supabase-db pg_dump -U supabase_admin -d postgres -Fc" > "$db_file"
+          ssh -i "$HOME/.ssh/yandex_vm" "$YANDEX_VM_USER@$YANDEX_VM_HOST" \
+            "tar -C /home/robot/sb/docker/volumes -czf - storage" > "$storage_file"
+
+          test -s "$db_file"
+          test -s "$storage_file"
+          docker run --rm -i postgres:17 pg_restore --list < "$db_file" >/dev/null
+          tar -tzf "$storage_file" >/dev/null
+          sha256sum "$db_file" "$storage_file" > output/yandex-production-backup/SHA256SUMS
 
       - name: Install Yandex Cloud CLI
         run: |
@@ -53,83 +70,75 @@ jobs:
           curl -fsSL https://storage.yandexcloud.net/yandexcloud-yc/install.sh | bash -s -- -i "$HOME/yandex-cloud" -n
           echo "$HOME/yandex-cloud/bin" >> "$GITHUB_PATH"
 
-      - name: Upload snapshot to private Yandex bucket
+      - name: Upload and verify private backup
         env:
           YC_OAUTH_TOKEN: ${{ secrets.YC_OAUTH_TOKEN }}
         run: |
           set -euo pipefail
-          if [ -z "${YC_OAUTH_TOKEN:-}" ]; then
-            echo "YC_OAUTH_TOKEN secret is required for Yandex migration backup" >&2
-            exit 1
-          fi
-
+          test -n "$YC_OAUTH_TOKEN"
           yc config set token "$YC_OAUTH_TOKEN" >/dev/null
           yc config set cloud-id "$YC_CLOUD_ID" >/dev/null
           yc config set folder-id "$YC_FOLDER_ID" >/dev/null
 
-          if ! yc storage bucket get --name "$RO_YANDEX_MIGRATION_BUCKET" >/dev/null 2>&1; then
-            yc storage bucket create --name "$RO_YANDEX_MIGRATION_BUCKET" >/dev/null
-          fi
+          backup_prefix="production/$(date -u +%Y/%m/%d)"
+          for file in output/yandex-production-backup/postgres-*.dump output/yandex-production-backup/storage-*.tgz; do
+            yc storage s3 cp "$file" "s3://${RO_YANDEX_BACKUP_BUCKET}/${backup_prefix}/$(basename "$file")"
+          done
+          yc storage s3 cp output/yandex-production-backup/SHA256SUMS \
+            "s3://${RO_YANDEX_BACKUP_BUCKET}/${backup_prefix}/SHA256SUMS"
 
-          snapshot_file="$(find output/yandex-migration-backup -type f -name 'ro-supabase-full-*.json' | sort | tail -n 1)"
-          test -n "$snapshot_file"
-          remote_key="supabase/full/$(basename "$snapshot_file")"
-          yc storage s3 cp "$snapshot_file" "s3://${RO_YANDEX_MIGRATION_BUCKET}/${remote_key}" --content-type "application/json; charset=utf-8"
-          yc storage s3 cp "s3://${RO_YANDEX_MIGRATION_BUCKET}/${remote_key}" output/yandex-migration-backup/downloaded.json
+          mkdir -p output/yandex-production-backup/verify
+          for file in output/yandex-production-backup/postgres-*.dump output/yandex-production-backup/storage-*.tgz; do
+            yc storage s3 cp \
+              "s3://${RO_YANDEX_BACKUP_BUCKET}/${backup_prefix}/$(basename "$file")" \
+              "output/yandex-production-backup/verify/$(basename "$file")"
+          done
+          cp output/yandex-production-backup/SHA256SUMS output/yandex-production-backup/verify/SHA256SUMS
+          (cd output/yandex-production-backup/verify && sha256sum -c SHA256SUMS)
 
           yc storage s3api list-objects \
-            --bucket "$RO_YANDEX_MIGRATION_BUCKET" \
-            --prefix "supabase/full/" \
-            --format json > output/yandex-migration-backup/objects.json
-
-          SNAPSHOT_FILE="$snapshot_file" DOWNLOADED_FILE="output/yandex-migration-backup/downloaded.json" OBJECTS_FILE="output/yandex-migration-backup/objects.json" REMOTE_KEY="$remote_key" node <<'NODE'
-          const fs = require('fs');
-          const original = JSON.parse(fs.readFileSync(process.env.SNAPSHOT_FILE, 'utf8'));
-          const downloaded = JSON.parse(fs.readFileSync(process.env.DOWNLOADED_FILE, 'utf8'));
+            --bucket "$RO_YANDEX_BACKUP_BUCKET" \
+            --prefix "production/" \
+            --format json > output/yandex-production-backup/objects.json
+          OBJECTS_FILE=output/yandex-production-backup/objects.json node <<'NODE'
+          const fs = require('node:fs');
           const listed = JSON.parse(fs.readFileSync(process.env.OBJECTS_FILE, 'utf8'));
-          const pick = value => JSON.stringify(value && value.summary);
-          if (pick(original) !== pick(downloaded)) {
-            console.error('Downloaded Yandex snapshot summary mismatch');
-            process.exit(1);
+          const contents = listed.Contents || listed.contents || [];
+          const groups = new Map();
+          for (const item of contents) {
+            const key = String(item.Key || item.key || '');
+            const match = key.match(/^production\/(\d{4}\/\d{2}\/\d{2})\//);
+            if (!match) continue;
+            if (!groups.has(match[1])) groups.set(match[1], []);
+            groups.get(match[1]).push(key);
           }
-          const keep = Number(process.env.RO_YANDEX_MIGRATION_KEEP_FULL || 0);
-          const contents = Array.isArray(listed?.Contents)
-            ? listed.Contents
-            : (Array.isArray(listed?.contents) ? listed.contents : []);
-          const keys = contents
-            .map(item => String(item.Key || item.key || ''))
-            .filter(key => /^supabase\/full\/ro-supabase-full-.*\.json$/.test(key))
-            .sort();
-          const staleKeys = keep > 0 ? keys.slice(0, Math.max(0, keys.length - keep)) : [];
-          fs.writeFileSync('output/yandex-migration-backup/stale-keys.txt', staleKeys.join('\n'));
-          const summary = {
-            uploaded: true,
-            bucket: process.env.RO_YANDEX_MIGRATION_BUCKET,
-            key: process.env.REMOTE_KEY,
-            keepFullSnapshots: keep,
-            fullSnapshotsBeforeRetention: keys.length,
-            fullSnapshotsToDelete: staleKeys.length,
-            summary: downloaded.summary,
-          };
-          fs.writeFileSync('output/yandex-migration-backup/summary.json', `${JSON.stringify(summary, null, 2)}\n`);
-          console.log(JSON.stringify(summary, null, 2));
+          const keep = Number(process.env.RO_YANDEX_BACKUP_KEEP || 14);
+          const staleDates = [...groups.keys()].sort().slice(0, Math.max(0, groups.size - keep));
+          fs.writeFileSync(
+            'output/yandex-production-backup/stale-keys.txt',
+            staleDates.flatMap(date => groups.get(date)).join('\n'),
+          );
+          fs.writeFileSync(
+            'output/yandex-production-backup/summary.json',
+            `${JSON.stringify({ uploaded: true, retainedDays: keep }, null, 2)}\n`,
+          );
           NODE
 
-          while IFS= read -r old_key; do
-            if [ -n "$old_key" ]; then
-              yc storage s3api delete-object --bucket "$RO_YANDEX_MIGRATION_BUCKET" --key "$old_key" >/dev/null
-              echo "deleted stale migration backup: $old_key"
+          while IFS= read -r stale_key; do
+            if [ -n "$stale_key" ]; then
+              yc storage s3api delete-object \
+                --bucket "$RO_YANDEX_BACKUP_BUCKET" \
+                --key "$stale_key" >/dev/null
             fi
-          done < output/yandex-migration-backup/stale-keys.txt
-
-          rm -f output/yandex-migration-backup/ro-supabase-full-*.json output/yandex-migration-backup/downloaded.json output/yandex-migration-backup/objects.json output/yandex-migration-backup/stale-keys.txt
-
+          done < output/yandex-production-backup/stale-keys.txt
           yc config unset token >/dev/null
 
-      - name: Upload backup summary artifact
+      - name: Upload backup report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: yandex-migration-backup-summary
-          path: output/yandex-migration-backup/summary.json
+          name: yandex-production-backup-report
+          path: |
+            output/yandex-production-backup/SHA256SUMS
+            output/yandex-production-backup/summary.json
           if-no-files-found: error

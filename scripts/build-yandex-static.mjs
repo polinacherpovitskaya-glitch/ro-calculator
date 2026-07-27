@@ -8,8 +8,8 @@ const ROOT = process.cwd();
 const OUT_DIR = path.join(ROOT, 'deploy/static-yandex');
 const BUCKET = process.env.RO_YANDEX_BUCKET || 'calc2.recycleobject.ru';
 const STORAGE_ORIGIN = process.env.RO_YANDEX_STORAGE_ORIGIN || `https://storage.yandexcloud.net/${BUCKET}`;
-const SUPABASE_URL = process.env.SUPABASE_URL || 'https://jbpmorruwjrxcieqlbmd.supabase.co';
-const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpicG1vcnJ1d2pyeGNpZXFsYm1kIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIwMTY1NzUsImV4cCI6MjA4NzU5MjU3NX0.Z26DuC4f5UM1I04N7ozr3FOUpF4tVIlUEh0cu1c0Jec';
+const SUPABASE_URL = process.env.SUPABASE_URL || 'https://db.recycleobject.ru';
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiAiSFMyNTYiLCAidHlwIjogIkpXVCJ9.eyJyb2xlIjogImFub24iLCAiaXNzIjogInN1cGFiYXNlIiwgImlhdCI6IDE3ODQyOTY2NTUsICJleHAiOiAyMDk5NjU2NjU1fQ.lOvkwgM1TWwYESuJtjkRDVcvSxv7VV6vsbr1-ZGkB4c';
 
 const MIRROR_ORDER_STATUSES = new Set([
   'draft',
@@ -264,7 +264,13 @@ async function buildBootstrapSnapshot() {
     fetchSupabaseJson('/rest/v1/warehouse_history?select=history_data&id=eq.1&limit=1').catch(() => []),
     fetchSettingJson('project_hardware_state_json', { checks: {}, actual_qtys: {} }).catch(() => ({ checks: {}, actual_qtys: {} })),
     fetchSupabaseAllPages('/rest/v1/orders?select=*&status=neq.deleted&order=created_at.desc').catch(() => []),
-    fetchSupabaseAllPages('/rest/v1/order_items?select=*&order=order_id.asc,item_number.asc').catch(() => []),
+    // item_data can make a 1000-row response larger than 30 MB. On the
+    // self-hosted PostgREST endpoint that regularly exceeds the default
+    // 15-second request timeout, so use smaller pages and a realistic timeout.
+    fetchSupabaseAllPages(
+      '/rest/v1/order_items?select=*&order=order_id.asc,item_number.asc',
+      { pageSize: 100, timeoutMs: 60000 }
+    ).catch(() => []),
     fetchSupabaseAllPages('/rest/v1/time_entries?select=*&order=date.desc').catch(() => []),
     fetchSettingJson('factual_month_snapshots_json', {}).catch(() => ({})),
     fetchSupabaseAllPages('/rest/v1/shipments?select=*&order=created_at.desc').catch(() => []),
@@ -339,7 +345,7 @@ function writeBootstrapShards(bootstrap) {
 // Every Supabase fetch in buildBootstrapSnapshot() swallows errors into an empty
 // value, so when Supabase is unreachable during the build (it periodically 522s
 // from CI) these come back empty and the snapshot is silently degraded.
-const REQUIRED_BOOTSTRAP_TABLES = ['authAccounts', 'employees', 'orders', 'settingsRows'];
+const REQUIRED_BOOTSTRAP_TABLES = ['authAccounts', 'employees', 'orders', 'orderItems', 'settingsRows'];
 
 // Refuse to publish a degraded snapshot. Publishing an empty bootstrap.json breaks
 // calc2 for everyone offline — no login accounts, no orders, the app can't hydrate
