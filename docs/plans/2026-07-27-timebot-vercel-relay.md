@@ -29,7 +29,7 @@
 ## Milestone 4 — Cutover
 
 - [x] Отправить ветку и открыть draft PR.
-- [ ] Дождаться зелёных PR checks.
+- [x] Дождаться зелёных PR checks.
 - [ ] Merge в `main`.
 - [ ] Дождаться production Vercel relay и успешного `getMe`.
 - [ ] Отключить локальный `com.recycleobject.timebot.v2`.
