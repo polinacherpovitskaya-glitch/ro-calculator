@@ -22,6 +22,7 @@ test('getTimebotRuntimePaths uses the configured persistent state directory', ()
         stateFile: path.resolve('/app/state/timebot.state.json'),
         pendingFile: path.resolve('/app/state/timebot.pending.json'),
         inboxFile: path.resolve('/app/state/timebot.inbox.jsonl'),
+        healthFile: path.resolve('/app/state/timebot.health.json'),
     });
 });
 
@@ -29,4 +30,5 @@ test('getTimebotRuntimePaths falls back to the bot directory', () => {
     const paths = getTimebotRuntimePaths('/srv/bot', {});
     assert.equal(paths.stateDir, path.resolve('/srv/bot'));
     assert.equal(paths.stateFile, path.resolve('/srv/bot/timebot.state.json'));
+    assert.equal(paths.healthFile, path.resolve('/srv/bot/timebot.health.json'));
 });

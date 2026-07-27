@@ -12,6 +12,7 @@ const { buildTaskNotificationText, getTaskNotificationRecipientIds } = require('
 const { buildTelegramBotOptions, formatTelegramTransportError } = require('./telegram-runtime');
 const { getLocalDate, shiftYmd, isWeekendYmd, normalizeWorkDate } = require('./timebot-date-utils');
 const { parseFreeformBatchReport, looksLikeFreeformBatchReport, normalizeText } = require('./timebot-freeform-parser');
+const { normalizeHealthErrorCode } = require('./timebot-health-core');
 const {
     pickActiveLinkedEmployee,
     pickAnyLinkedEmployee,
@@ -41,14 +42,24 @@ const {
     stateFile: STATE_FILE,
     pendingFile: PENDING_FILE,
     inboxFile: INBOX_FILE,
+    healthFile: HEALTH_FILE,
 } = getTimebotRuntimePaths(__dirname);
+const TIMEBOT_STARTED_AT = new Date().toISOString();
+const HEALTH_PROBE_INTERVAL_MS = 60 * 1000;
+const HEALTH_PROBE_TIMEOUT_MS = 20 * 1000;
 let productionHolidayCache = { loadedAt: 0, set: new Set() };
+let healthProbeRunning = false;
+let lastHealthSnapshot = null;
+let lastPollingErrorAt = null;
+let lastPollingErrorCode = null;
 
 // =============================================
 // Polling error handler — KEY for stability
 // =============================================
 bot.on('polling_error', (err) => {
     const code = err?.response?.statusCode || err?.code || '';
+    lastPollingErrorAt = new Date().toISOString();
+    lastPollingErrorCode = normalizeHealthErrorCode(err);
     // 409 = another instance is polling the same bot token
     if (code === 409 || String(err).includes('409')) {
         console.error('FATAL: Another bot instance is running! Conflict 409. Shutting down.');
@@ -71,6 +82,13 @@ bot.on('error', (err) => {
 // =============================================
 function shutdown(signal) {
     console.log(`\n${signal} received. Stopping bot...`);
+    writeHealthSnapshot({
+        ...(lastHealthSnapshot || {}),
+        ok: false,
+        status: 'stopping',
+        polling: false,
+        checked_at: new Date().toISOString(),
+    });
     persistStates();
     bot.stopPolling().then(() => {
         console.log('Polling stopped. Exiting.');
@@ -110,6 +128,100 @@ function safeWriteJson(filePath, value) {
         fs.writeFileSync(filePath, JSON.stringify(value, null, 2));
     } catch (error) {
         console.error(`Failed to write JSON file ${filePath}:`, error);
+    }
+}
+
+function writeHealthSnapshot(snapshot) {
+    lastHealthSnapshot = snapshot;
+    safeWriteJson(HEALTH_FILE, snapshot);
+}
+
+function withHealthTimeout(promise, label) {
+    return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+            const error = new Error(`${label}_timeout`);
+            error.code = `${label}_timeout`;
+            reject(error);
+        }, HEALTH_PROBE_TIMEOUT_MS);
+
+        Promise.resolve(promise).then(
+            value => {
+                clearTimeout(timer);
+                resolve(value);
+            },
+            error => {
+                clearTimeout(timer);
+                reject(error);
+            }
+        );
+    });
+}
+
+function isTelegramPolling() {
+    return typeof bot.isPolling === 'function' ? bot.isPolling() : true;
+}
+
+async function refreshTimebotHealth() {
+    if (healthProbeRunning) return;
+    healthProbeRunning = true;
+
+    const snapshot = {
+        schema_version: 1,
+        service: 'ro-timebot',
+        status: 'running',
+        started_at: TIMEBOT_STARTED_AT,
+        checked_at: new Date().toISOString(),
+        polling: isTelegramPolling(),
+        telegram_ok: false,
+        database_ok: false,
+        ok: false,
+        last_polling_error_at: lastPollingErrorAt,
+        last_polling_error_code: lastPollingErrorCode,
+    };
+
+    try {
+        const results = await Promise.allSettled([
+            withHealthTimeout(bot.getMe(), 'telegram_probe'),
+            withHealthTimeout(
+                supabase.from('employees').select('id').limit(1),
+                'database_probe'
+            ),
+        ]);
+
+        const telegramResult = results[0];
+        if (telegramResult.status === 'fulfilled' && telegramResult.value?.id) {
+            snapshot.telegram_ok = true;
+        } else if (telegramResult.status === 'rejected') {
+            snapshot.telegram_error_code = normalizeHealthErrorCode(telegramResult.reason);
+        } else {
+            snapshot.telegram_error_code = 'invalid_get_me_response';
+        }
+
+        const databaseResult = results[1];
+        if (databaseResult.status === 'fulfilled' && !databaseResult.value?.error) {
+            snapshot.database_ok = true;
+        } else if (databaseResult.status === 'fulfilled') {
+            snapshot.database_error_code = normalizeHealthErrorCode(databaseResult.value?.error);
+        } else {
+            snapshot.database_error_code = normalizeHealthErrorCode(databaseResult.reason);
+        }
+
+        snapshot.checked_at = new Date().toISOString();
+        snapshot.polling = isTelegramPolling();
+        snapshot.ok = snapshot.polling && snapshot.telegram_ok && snapshot.database_ok;
+        writeHealthSnapshot(snapshot);
+
+        if (!snapshot.ok) {
+            console.error('Timebot self-health failed:', {
+                polling: snapshot.polling,
+                telegram_ok: snapshot.telegram_ok,
+                database_ok: snapshot.database_ok,
+                telegram_error_code: snapshot.telegram_error_code || null,
+                database_error_code: snapshot.database_error_code || null,
+            });
+        }
+    } finally {
+        healthProbeRunning = false;
     }
 }
 
@@ -207,6 +319,14 @@ function clearState(telegramId) {
 
 loadPersistedStates();
 ensureRuntimeFiles();
+refreshTimebotHealth().catch((error) => {
+    console.error('Initial timebot health probe failed:', normalizeHealthErrorCode(error));
+});
+setInterval(() => {
+    refreshTimebotHealth().catch((error) => {
+        console.error('Timebot health probe failed:', normalizeHealthErrorCode(error));
+    });
+}, HEALTH_PROBE_INTERVAL_MS);
 retryPendingReports().catch((error) => {
     console.error('Initial pending time report retry error:', error);
 });

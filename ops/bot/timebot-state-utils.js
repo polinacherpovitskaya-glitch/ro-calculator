@@ -22,6 +22,7 @@ function getTimebotRuntimePaths(baseDir, env = process.env) {
         stateFile: path.join(stateDir, 'timebot.state.json'),
         pendingFile: path.join(stateDir, 'timebot.pending.json'),
         inboxFile: path.join(stateDir, 'timebot.inbox.jsonl'),
+        healthFile: path.join(stateDir, 'timebot.health.json'),
     };
 }
 
