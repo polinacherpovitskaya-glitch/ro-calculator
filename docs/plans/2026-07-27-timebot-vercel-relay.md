@@ -5,22 +5,22 @@
 
 ## Milestone 1 — Relay adapter
 
-- [ ] Добавить Vercel Function adapter поверх общего relay handler.
-- [ ] Добавить wildcard rewrite и 45-секундный max duration.
-- [ ] Покрыть adapter unit-тестами.
-- [ ] Сохранить фиксированный Telegram upstream и проверку секретного prefix.
+- [x] Добавить Vercel Function adapter поверх общего relay handler.
+- [x] Добавить wildcard rewrite и 45-секундный max duration.
+- [x] Покрыть adapter unit-тестами.
+- [x] Сохранить фиксированный Telegram upstream и проверку секретного prefix.
 
 ## Milestone 2 — Deploy orchestration
 
-- [ ] Передать relay secret в production Vercel deploy как runtime env.
-- [ ] Заменить Yandex relay deploy на ожидание production Vercel `getMe`.
-- [ ] Добавить relay-файлы в path filters Ops workflow.
-- [ ] Сохранить безопасную доставку `.env.timebot` на VPS.
+- [x] Передать relay secret в production Vercel deploy как runtime env.
+- [x] Заменить Yandex relay deploy на ожидание production Vercel `getMe`.
+- [x] Добавить relay-файлы в path filters Ops workflow.
+- [x] Сохранить безопасную доставку `.env.timebot` на VPS.
 
 ## Milestone 3 — Проверки и release
 
-- [ ] Обновить migration smoke под Vercel architecture.
-- [ ] Прогнать relay, bot runtime и server migration tests.
+- [x] Обновить migration smoke под Vercel architecture.
+- [x] Прогнать relay, bot runtime и server migration tests.
 - [ ] Прогнать workflow YAML parse и version smoke.
 - [ ] Взять следующий app version от свежего `origin/main`.
 - [ ] Обновить четыре version anchor и cache-bust `js/app.js`.

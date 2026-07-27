@@ -6,12 +6,16 @@ on:
     branches: [main]
     paths:
       - 'ops/**'
+      - 'api/telegram-relay.js'
+      - 'vercel.json'
       - 'yandex/telegram-relay/**'
       - '.github/workflows/ops-deploy.yml'
   push:
     branches: [main]
     paths:
       - 'ops/**'
+      - 'api/telegram-relay.js'
+      - 'vercel.json'
       - 'yandex/telegram-relay/**'
       - '.github/workflows/ops-deploy.yml'
 
@@ -84,7 +88,9 @@ jobs:
       - name: Test Telegram relay
         run: |
           node --check yandex/telegram-relay/index.js
+          node --check api/telegram-relay.js
           node --test yandex/telegram-relay/index.test.js
+          node --test tests/vercel-telegram-relay.test.js
           node tests/telegram-runtime-smoke.js
           node tests/timebot-server-migration-smoke.js
 
@@ -94,90 +100,33 @@ jobs:
           npm ci
           npm run build
 
-      - name: Install Yandex Cloud CLI
-        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
-        run: |
-          curl -fsSL https://storage.yandexcloud.net/yandexcloud-yc/install.sh | bash -s -- -i "$HOME/yandex-cloud" -n
-          echo "$HOME/yandex-cloud/bin" >> "$GITHUB_PATH"
-
-      - name: Deploy and verify Telegram relay
+      - name: Verify production Vercel Telegram relay
         if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
         env:
           TELEGRAM_RELAY_SECRET: ${{ secrets.TELEGRAM_RELAY_SECRET }}
           TIMEBOT_TOKEN: ${{ secrets.TIMEBOT_TOKEN }}
-          YC_OAUTH_TOKEN: ${{ secrets.YC_OAUTH_TOKEN }}
-          YC_CLOUD_ID: b1gl59l77vb50ihub2nd
-          YC_FOLDER_ID: b1gc32hu5ujioie1o0ht
-          FUNCTION_NAME: ro-telegram-relay
-          GATEWAY_NAME: ro-telegram-relay-gateway
         run: |
           set -euo pipefail
-          if [ -z "${YC_OAUTH_TOKEN:-}" ] || [ -z "${TELEGRAM_RELAY_SECRET:-}" ] || [ -z "${TIMEBOT_TOKEN:-}" ]; then
-            echo "YC_OAUTH_TOKEN, TELEGRAM_RELAY_SECRET and TIMEBOT_TOKEN secrets are required" >&2
+          if [ -z "${TELEGRAM_RELAY_SECRET:-}" ] || [ -z "${TIMEBOT_TOKEN:-}" ]; then
+            echo "TELEGRAM_RELAY_SECRET and TIMEBOT_TOKEN secrets are required" >&2
             exit 1
           fi
 
-          yc config set token "$YC_OAUTH_TOKEN" >/dev/null
-          yc config set cloud-id "$YC_CLOUD_ID" >/dev/null
-          yc config set folder-id "$YC_FOLDER_ID" >/dev/null
-          trap 'yc config unset token >/dev/null 2>&1 || true' EXIT
-
-          if ! yc serverless function get --name "$FUNCTION_NAME" >/dev/null 2>&1; then
-            yc serverless function create --name "$FUNCTION_NAME"
-          fi
-
-          RUNTIME="$(yc serverless function runtime list --format json | node -e "const fs=require('fs'); const data=JSON.parse(fs.readFileSync(0,'utf8')); const items=Array.isArray(data)?data:(data.runtimes||data.items||[]); const names=items.map(item=>item.name||item.id||String(item)); console.log(names.find(name=>name==='nodejs22')||names.find(name=>name==='nodejs20')||'nodejs18');")"
-          yc serverless function version create \
-            --function-name "$FUNCTION_NAME" \
-            --runtime "$RUNTIME" \
-            --entrypoint index.handler \
-            --memory 256MB \
-            --execution-timeout 45s \
-            --source-path yandex/telegram-relay \
-            --environment TELEGRAM_RELAY_SECRET="$TELEGRAM_RELAY_SECRET",TELEGRAM_RELAY_UPSTREAM_TIMEOUT_MS=38000
-          yc serverless function allow-unauthenticated-invoke --name "$FUNCTION_NAME"
-
-          FUNCTION_ID="$(yc serverless function get --name "$FUNCTION_NAME" --format json | node -e "const fs=require('fs'); console.log(JSON.parse(fs.readFileSync(0,'utf8')).id);")"
-          cat > "$RUNNER_TEMP/ro-telegram-relay-openapi.yaml" <<EOF
-          openapi: 3.0.0
-          info:
-            title: RO Telegram relay
-            version: 1.0.0
-          paths:
-            /{proxy+}:
-              x-yc-apigateway-any-method:
-                summary: Forward protected Telegram Bot API calls
-                operationId: telegramRelay
-                parameters:
-                  - name: proxy
-                    in: path
-                    required: true
-                    schema:
-                      type: string
-                x-yc-apigateway-integration:
-                  type: cloud_functions
-                  function_id: ${FUNCTION_ID}
-                  tag: "\$latest"
-                  payload_format_version: "2.0"
-          EOF
-
-          if yc serverless api-gateway get --name "$GATEWAY_NAME" >/dev/null 2>&1; then
-            yc serverless api-gateway update --name "$GATEWAY_NAME" --spec "$RUNNER_TEMP/ro-telegram-relay-openapi.yaml"
-          else
-            yc serverless api-gateway create --name "$GATEWAY_NAME" --spec "$RUNNER_TEMP/ro-telegram-relay-openapi.yaml"
-          fi
-
-          GATEWAY_DOMAIN="$(yc serverless api-gateway get --name "$GATEWAY_NAME" --format json | node -e "const fs=require('fs'); const data=JSON.parse(fs.readFileSync(0,'utf8')); console.log(data.domain||data.default_domain||data.api_gateway_domain||'');")"
-          if [ -z "$GATEWAY_DOMAIN" ]; then
-            echo "Telegram relay gateway has no domain" >&2
-            exit 1
-          fi
-          TELEGRAM_BASE_API_URL="https://${GATEWAY_DOMAIN}/${TELEGRAM_RELAY_SECRET}"
+          TELEGRAM_BASE_API_URL="https://calc.recycleobject.ru/api/telegram-relay/${TELEGRAM_RELAY_SECRET}"
           echo "::add-mask::$TELEGRAM_BASE_API_URL"
           printf '%s' "$TELEGRAM_BASE_API_URL" > "$RUNNER_TEMP/telegram-base-api-url"
 
-          RESPONSE="$(curl --fail --silent --show-error --max-time 20 "${TELEGRAM_BASE_API_URL}/bot${TIMEBOT_TOKEN}/getMe")"
-          printf '%s' "$RESPONSE" | node -e "const fs=require('fs'); const data=JSON.parse(fs.readFileSync(0,'utf8')); if(!data.ok||data.result?.username!=='Recycle_object_calc_bot') process.exit(1); console.log('Telegram relay getMe passed for @'+data.result.username);"
+          for attempt in $(seq 1 36); do
+            if RESPONSE="$(curl --fail --silent --show-error --max-time 20 "${TELEGRAM_BASE_API_URL}/bot${TIMEBOT_TOKEN}/getMe" 2>/dev/null)" \
+              && printf '%s' "$RESPONSE" | node -e "const fs=require('fs'); const data=JSON.parse(fs.readFileSync(0,'utf8')); if(!data.ok||data.result?.username!=='Recycle_object_calc_bot') process.exit(1);"; then
+              printf '%s' "$RESPONSE" | node -e "const fs=require('fs'); const data=JSON.parse(fs.readFileSync(0,'utf8')); console.log('Vercel relay getMe passed for @'+data.result.username);"
+              exit 0
+            fi
+            echo "Vercel relay attempt $attempt/36 is not ready"
+            sleep 10
+          done
+          echo "Vercel Telegram relay did not become ready" >&2
+          exit 1
 
       - name: Set up SSH
         if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'

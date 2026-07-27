@@ -23,11 +23,20 @@ assert.match(timebot, /buildTelegramBotOptions\(\)/, 'timebot should use shared 
 
 const workflow = read('.github/workflows/ops-deploy.yml');
 assert.match(workflow, /node --test yandex\/telegram-relay\/index\.test\.js/, 'CI should test the relay');
-assert.match(workflow, /FUNCTION_NAME:\s*ro-telegram-relay/, 'CI should deploy the dedicated relay function');
+assert.match(workflow, /node --test tests\/vercel-telegram-relay\.test\.js/, 'CI should test the Vercel adapter');
+assert.match(workflow, /https:\/\/calc\.recycleobject\.ru\/api\/telegram-relay/, 'CI should use the Vercel relay');
+assert.doesNotMatch(workflow, /yc serverless/, 'CI should not deploy the unreachable Yandex relay');
 assert.match(workflow, /secrets\.TELEGRAM_RELAY_SECRET/, 'relay authorization should come from a GitHub secret');
 assert.match(workflow, /secrets\.TIMEBOT_TOKEN/, 'timebot token should come from a GitHub secret');
 assert.match(workflow, /--env-file \.env\.timebot --profile timebot/, 'deploy should start timebot with server-only env');
 assert.match(workflow, /FATAL: Another bot instance/, 'deploy should fail on polling conflict');
+
+const vercelConfig = JSON.parse(read('vercel.json'));
+assert.equal(vercelConfig.functions['api/telegram-relay.js'].maxDuration, 45, 'Vercel relay should outlive upstream polling');
+assert.deepEqual(vercelConfig.rewrites[0], {
+    source: '/api/telegram-relay/:relay_path*',
+    destination: '/api/telegram-relay?relay_path=:relay_path*',
+}, 'Vercel should route protected wildcard paths into the relay function');
 
 const relay = read('yandex/telegram-relay/index.js');
 assert.match(relay, /const TELEGRAM_ORIGIN = 'https:\/\/api\.telegram\.org'/, 'relay upstream should be fixed');

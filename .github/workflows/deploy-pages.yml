@@ -152,6 +152,7 @@ jobs:
         id: vercel-deploy
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          TELEGRAM_RELAY_SECRET: ${{ secrets.TELEGRAM_RELAY_SECRET }}
         run: |
           set +e
           status="success"
@@ -162,9 +163,16 @@ jobs:
           elif [ -z "${VERCEL_ORG_ID:-}" ] || [ -z "${VERCEL_PROJECT_ID:-}" ]; then
             status="missing_project"
             reason="VERCEL_ORG_ID or VERCEL_PROJECT_ID secret is empty"
+          elif [ -z "${TELEGRAM_RELAY_SECRET:-}" ]; then
+            status="missing_relay_secret"
+            reason="TELEGRAM_RELAY_SECRET secret is empty"
           else
             log_file="$(mktemp)"
-            npx vercel@51.6.1 deploy --prod --yes --token "$VERCEL_TOKEN" 2>&1 | tee "$log_file"
+            npx vercel@51.6.1 deploy --prod --yes \
+              --token "$VERCEL_TOKEN" \
+              --env "TELEGRAM_RELAY_SECRET=$TELEGRAM_RELAY_SECRET" \
+              --env "TELEGRAM_RELAY_UPSTREAM_TIMEOUT_MS=38000" \
+              2>&1 | tee "$log_file"
             exit_code=${PIPESTATUS[0]}
             if [ "$exit_code" -ne 0 ]; then
               if grep -qi "token provided via .* is not valid\|token .* is not valid\|please provide a valid token" "$log_file"; then

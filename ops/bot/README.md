@@ -43,8 +43,8 @@ If the VPS cannot connect directly to `api.telegram.org:443`, set `TELEGRAM_PROX
 ## Time tracking bot
 
 The VPS cannot reach Telegram directly. `TELEGRAM_BASE_API_URL` points to the
-protected Yandex Telegram relay deployed by `.github/workflows/ops-deploy.yml`.
-CI writes `TIMEBOT_TOKEN` and the generated relay URL to
+protected Vercel Function relay deployed with `calc.recycleobject.ru`.
+CI writes `TIMEBOT_TOKEN` and the protected relay URL to
 `/srv/ops/infra/.env.timebot` without storing either value in git.
 
 The base `/srv/ops/infra/.env` must already contain:
