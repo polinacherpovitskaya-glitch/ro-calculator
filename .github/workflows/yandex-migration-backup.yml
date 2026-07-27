@@ -93,7 +93,9 @@ jobs:
               "s3://${RO_YANDEX_BACKUP_BUCKET}/${backup_prefix}/$(basename "$file")" \
               "output/yandex-production-backup/verify/$(basename "$file")"
           done
-          cp output/yandex-production-backup/SHA256SUMS output/yandex-production-backup/verify/SHA256SUMS
+          sed 's#  output/yandex-production-backup/#  #' \
+            output/yandex-production-backup/SHA256SUMS \
+            > output/yandex-production-backup/verify/SHA256SUMS
           (cd output/yandex-production-backup/verify && sha256sum -c SHA256SUMS)
 
           yc storage s3api list-objects \
