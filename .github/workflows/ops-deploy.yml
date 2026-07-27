@@ -1,15 +1,18 @@
 name: Deploy ops stack
 
 on:
+  workflow_dispatch:
   pull_request:
     branches: [main]
     paths:
       - 'ops/**'
+      - 'yandex/telegram-relay/**'
       - '.github/workflows/ops-deploy.yml'
   push:
     branches: [main]
     paths:
       - 'ops/**'
+      - 'yandex/telegram-relay/**'
       - '.github/workflows/ops-deploy.yml'
 
 concurrency:
@@ -19,7 +22,7 @@ concurrency:
 jobs:
   test-and-deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
 
     services:
       postgres:
@@ -47,6 +50,7 @@ jobs:
           cache: 'npm'
           cache-dependency-path: |
             ops/api/package-lock.json
+            ops/bot/package-lock.json
             ops/web/package-lock.json
 
       - name: Install API deps
@@ -69,14 +73,114 @@ jobs:
           cd ops/api
           npm test
 
+      - name: Install Bot deps and test
+        env:
+          TEST_DATABASE_URL: postgres://ops:ci_password@localhost:5432/ops
+        run: |
+          cd ops/bot
+          npm ci
+          npm test
+
+      - name: Test Telegram relay
+        run: |
+          node --check yandex/telegram-relay/index.js
+          node --test yandex/telegram-relay/index.test.js
+          node tests/telegram-runtime-smoke.js
+          node tests/timebot-server-migration-smoke.js
+
       - name: Install Web deps and build
         run: |
           cd ops/web
           npm ci
           npm run build
 
+      - name: Install Yandex Cloud CLI
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
+        run: |
+          curl -fsSL https://storage.yandexcloud.net/yandexcloud-yc/install.sh | bash -s -- -i "$HOME/yandex-cloud" -n
+          echo "$HOME/yandex-cloud/bin" >> "$GITHUB_PATH"
+
+      - name: Deploy and verify Telegram relay
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
+        env:
+          TELEGRAM_RELAY_SECRET: ${{ secrets.TELEGRAM_RELAY_SECRET }}
+          TIMEBOT_TOKEN: ${{ secrets.TIMEBOT_TOKEN }}
+          YC_OAUTH_TOKEN: ${{ secrets.YC_OAUTH_TOKEN }}
+          YC_CLOUD_ID: b1gl59l77vb50ihub2nd
+          YC_FOLDER_ID: b1gc32hu5ujioie1o0ht
+          FUNCTION_NAME: ro-telegram-relay
+          GATEWAY_NAME: ro-telegram-relay-gateway
+        run: |
+          set -euo pipefail
+          if [ -z "${YC_OAUTH_TOKEN:-}" ] || [ -z "${TELEGRAM_RELAY_SECRET:-}" ] || [ -z "${TIMEBOT_TOKEN:-}" ]; then
+            echo "YC_OAUTH_TOKEN, TELEGRAM_RELAY_SECRET and TIMEBOT_TOKEN secrets are required" >&2
+            exit 1
+          fi
+
+          yc config set token "$YC_OAUTH_TOKEN" >/dev/null
+          yc config set cloud-id "$YC_CLOUD_ID" >/dev/null
+          yc config set folder-id "$YC_FOLDER_ID" >/dev/null
+          trap 'yc config unset token >/dev/null 2>&1 || true' EXIT
+
+          if ! yc serverless function get --name "$FUNCTION_NAME" >/dev/null 2>&1; then
+            yc serverless function create --name "$FUNCTION_NAME"
+          fi
+
+          RUNTIME="$(yc serverless function runtime list --format json | node -e "const fs=require('fs'); const data=JSON.parse(fs.readFileSync(0,'utf8')); const items=Array.isArray(data)?data:(data.runtimes||data.items||[]); const names=items.map(item=>item.name||item.id||String(item)); console.log(names.find(name=>name==='nodejs22')||names.find(name=>name==='nodejs20')||'nodejs18');")"
+          yc serverless function version create \
+            --function-name "$FUNCTION_NAME" \
+            --runtime "$RUNTIME" \
+            --entrypoint index.handler \
+            --memory 256MB \
+            --execution-timeout 45s \
+            --source-path yandex/telegram-relay \
+            --environment TELEGRAM_RELAY_SECRET="$TELEGRAM_RELAY_SECRET",TELEGRAM_RELAY_UPSTREAM_TIMEOUT_MS=38000
+          yc serverless function allow-unauthenticated-invoke --name "$FUNCTION_NAME"
+
+          FUNCTION_ID="$(yc serverless function get --name "$FUNCTION_NAME" --format json | node -e "const fs=require('fs'); console.log(JSON.parse(fs.readFileSync(0,'utf8')).id);")"
+          cat > "$RUNNER_TEMP/ro-telegram-relay-openapi.yaml" <<EOF
+          openapi: 3.0.0
+          info:
+            title: RO Telegram relay
+            version: 1.0.0
+          paths:
+            /{proxy+}:
+              x-yc-apigateway-any-method:
+                summary: Forward protected Telegram Bot API calls
+                operationId: telegramRelay
+                parameters:
+                  - name: proxy
+                    in: path
+                    required: true
+                    schema:
+                      type: string
+                x-yc-apigateway-integration:
+                  type: cloud_functions
+                  function_id: ${FUNCTION_ID}
+                  tag: "\$latest"
+                  payload_format_version: "2.0"
+          EOF
+
+          if yc serverless api-gateway get --name "$GATEWAY_NAME" >/dev/null 2>&1; then
+            yc serverless api-gateway update --name "$GATEWAY_NAME" --spec "$RUNNER_TEMP/ro-telegram-relay-openapi.yaml"
+          else
+            yc serverless api-gateway create --name "$GATEWAY_NAME" --spec "$RUNNER_TEMP/ro-telegram-relay-openapi.yaml"
+          fi
+
+          GATEWAY_DOMAIN="$(yc serverless api-gateway get --name "$GATEWAY_NAME" --format json | node -e "const fs=require('fs'); const data=JSON.parse(fs.readFileSync(0,'utf8')); console.log(data.domain||data.default_domain||data.api_gateway_domain||'');")"
+          if [ -z "$GATEWAY_DOMAIN" ]; then
+            echo "Telegram relay gateway has no domain" >&2
+            exit 1
+          fi
+          TELEGRAM_BASE_API_URL="https://${GATEWAY_DOMAIN}/${TELEGRAM_RELAY_SECRET}"
+          echo "::add-mask::$TELEGRAM_BASE_API_URL"
+          printf '%s' "$TELEGRAM_BASE_API_URL" > "$RUNNER_TEMP/telegram-base-api-url"
+
+          RESPONSE="$(curl --fail --silent --show-error --max-time 20 "${TELEGRAM_BASE_API_URL}/bot${TIMEBOT_TOKEN}/getMe")"
+          printf '%s' "$RESPONSE" | node -e "const fs=require('fs'); const data=JSON.parse(fs.readFileSync(0,'utf8')); if(!data.ok||data.result?.username!=='Recycle_object_calc_bot') process.exit(1); console.log('Telegram relay getMe passed for @'+data.result.username);"
+
       - name: Set up SSH
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.OPS_SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
@@ -84,16 +188,34 @@ jobs:
           ssh-keyscan -H ${{ secrets.OPS_HOST }} >> ~/.ssh/known_hosts
 
       - name: Rsync to VPS
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
         run: |
           rsync -avz --delete \
             -e "ssh -i ~/.ssh/deploy_key" \
             --exclude='node_modules' \
             --exclude='.env' \
+            --exclude='.env.timebot' \
             ops/ ${{ secrets.OPS_USER }}@${{ secrets.OPS_HOST }}:/srv/ops/
 
+      - name: Install timebot runtime secrets
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
+        env:
+          TIMEBOT_TOKEN: ${{ secrets.TIMEBOT_TOKEN }}
+        run: |
+          set -euo pipefail
+          TELEGRAM_BASE_API_URL="$(cat "$RUNNER_TEMP/telegram-base-api-url")"
+          umask 077
+          {
+            printf 'TIMEBOT_TOKEN=%s\n' "$TIMEBOT_TOKEN"
+            printf 'TELEGRAM_BASE_API_URL=%s\n' "$TELEGRAM_BASE_API_URL"
+            printf 'TELEGRAM_POLL_TIMEOUT_SECONDS=20\n'
+            printf 'TELEGRAM_REQUEST_TIMEOUT_MS=45000\n'
+          } > "$RUNNER_TEMP/timebot.env"
+          scp -i ~/.ssh/deploy_key "$RUNNER_TEMP/timebot.env" ${{ secrets.OPS_USER }}@${{ secrets.OPS_HOST }}:/srv/ops/infra/.env.timebot
+          ssh -i ~/.ssh/deploy_key ${{ secrets.OPS_USER }}@${{ secrets.OPS_HOST }} chmod 600 /srv/ops/infra/.env.timebot
+
       - name: Deploy on VPS
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
         run: |
           ssh -i ~/.ssh/deploy_key ${{ secrets.OPS_USER }}@${{ secrets.OPS_HOST }} bash <<'REMOTE'
             set -euo pipefail
@@ -104,10 +226,11 @@ jobs:
               docker exec ops-postgres psql -U ops -d ops -v ON_ERROR_STOP=1 -f /tmp/migration.sql
             done
             bash /srv/ops/infra/scripts/ensure-bot-token.sh
+            docker compose --env-file .env --env-file .env.timebot --profile timebot up -d --build timebot
           REMOTE
 
       - name: Health check
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
         run: |
           sleep 15
           for i in 1 2 3 4 5; do
@@ -121,3 +244,26 @@ jobs:
           echo "Health check failed after retries"
           curl -sS "https://ops-staging.recycleobject.ru/api/health" || true
           exit 1
+
+      - name: Timebot health check
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
+        run: |
+          ssh -i ~/.ssh/deploy_key ${{ secrets.OPS_USER }}@${{ secrets.OPS_HOST }} bash <<'REMOTE'
+            set -euo pipefail
+            for attempt in 1 2 3 4 5; do
+              status="$(docker inspect --format '{{.State.Status}}' ops-timebot 2>/dev/null || true)"
+              if [ "$status" = "running" ]; then
+                break
+              fi
+              echo "Timebot attempt $attempt: status=${status:-missing}"
+              sleep 5
+            done
+            test "$(docker inspect --format '{{.State.Status}}' ops-timebot)" = "running"
+            logs="$(docker logs --tail 120 ops-timebot 2>&1)"
+            printf '%s\n' "$logs"
+            printf '%s' "$logs" | grep -q 'Polling started at'
+            if printf '%s' "$logs" | grep -Eq 'FATAL: Another bot instance|Missing env vars'; then
+              echo "Timebot failed its startup checks" >&2
+              exit 1
+            fi
+          REMOTE

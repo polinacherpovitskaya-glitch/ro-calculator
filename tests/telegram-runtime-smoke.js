@@ -1,9 +1,10 @@
 const assert = require('node:assert/strict');
 const {
+    buildTelegramBotOptions,
     buildTelegramRequestOptions,
     DEFAULT_REQUEST_FAMILY,
     DEFAULT_REQUEST_TIMEOUT_MS,
-} = require('../bot/telegram-runtime');
+} = require('../ops/bot/telegram-runtime');
 
 assert.deepEqual(
     buildTelegramRequestOptions({}),
@@ -36,6 +37,26 @@ assert.deepEqual(
         timeout: DEFAULT_REQUEST_TIMEOUT_MS,
     },
     'invalid env overrides should fall back to safe defaults'
+);
+
+assert.deepEqual(
+    buildTelegramBotOptions({
+        TELEGRAM_BASE_API_URL: 'https://relay.example.test/secret/',
+        TELEGRAM_POLL_TIMEOUT_SECONDS: '20',
+    }),
+    {
+        baseApiUrl: 'https://relay.example.test/secret',
+        polling: {
+            interval: 1000,
+            autoStart: true,
+            params: { timeout: 20 },
+        },
+        request: {
+            family: DEFAULT_REQUEST_FAMILY,
+            timeout: DEFAULT_REQUEST_TIMEOUT_MS,
+        },
+    },
+    'server runtime should route long polling through the configured relay'
 );
 
 console.log('telegram runtime smoke checks passed');

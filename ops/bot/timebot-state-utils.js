@@ -1,4 +1,6 @@
-const STATE_TTL = 30 * 60 * 1000;
+const path = require('node:path');
+
+const STATE_TTL = 24 * 60 * 60 * 1000;
 const DESCRIPTION_STATE_TTL = 24 * 60 * 60 * 1000;
 
 function requiresCommentToSave(employee) {
@@ -12,9 +14,21 @@ function getStateTtlMs(state) {
     return STATE_TTL;
 }
 
+function getTimebotRuntimePaths(baseDir, env = process.env) {
+    const configuredDir = String(env.TIMEBOT_STATE_DIR || '').trim();
+    const stateDir = configuredDir ? path.resolve(configuredDir) : path.resolve(baseDir);
+    return {
+        stateDir,
+        stateFile: path.join(stateDir, 'timebot.state.json'),
+        pendingFile: path.join(stateDir, 'timebot.pending.json'),
+        inboxFile: path.join(stateDir, 'timebot.inbox.jsonl'),
+    };
+}
+
 module.exports = {
     STATE_TTL,
     DESCRIPTION_STATE_TTL,
     requiresCommentToSave,
     getStateTtlMs,
+    getTimebotRuntimePaths,
 };

@@ -1,26 +1,18 @@
 require('dotenv').config();
 const TelegramBot = require('node-telegram-bot-api');
 const { createTaskNotificationWorker } = require('./task-notification-worker');
-const { buildTelegramRequestOptions, formatTelegramTransportError } = require('./telegram-runtime');
+const { buildTelegramBotOptions, formatTelegramTransportError } = require('./telegram-runtime');
 const { createOpsApiClient } = require('./api-client');
 
 const BOT_TOKEN = process.env.TG_BOT_TOKEN || process.env.TASK_BOT_TOKEN || process.env.BOT_TOKEN;
 const POLL_INTERVAL_MS = Number(process.env.TASK_BOT_POLL_INTERVAL_MS || 15000);
-const TELEGRAM_REQUEST_OPTIONS = buildTelegramRequestOptions();
 
 if (!BOT_TOKEN || !process.env.OPS_API_URL || !process.env.OPS_BOT_TOKEN) {
     console.error('Missing env vars: TG_BOT_TOKEN/TASK_BOT_TOKEN/BOT_TOKEN, OPS_API_URL, OPS_BOT_TOKEN');
     process.exit(1);
 }
 
-const bot = new TelegramBot(BOT_TOKEN, {
-    polling: {
-        interval: 1000,
-        autoStart: true,
-        params: { timeout: 30 },
-    },
-    request: TELEGRAM_REQUEST_OPTIONS,
-});
+const bot = new TelegramBot(BOT_TOKEN, buildTelegramBotOptions());
 
 const apiClient = createOpsApiClient();
 

@@ -9,7 +9,7 @@ require('dotenv').config({ path: path.join(__dirname, '.env') });
 const TelegramBot = require('node-telegram-bot-api');
 const { createClient } = require('@supabase/supabase-js');
 const { buildTaskNotificationText, getTaskNotificationRecipientIds } = require('./task-notification-core');
-const { buildTelegramRequestOptions, formatTelegramTransportError } = require('./telegram-runtime');
+const { buildTelegramBotOptions, formatTelegramTransportError } = require('./telegram-runtime');
 const { getLocalDate, shiftYmd, isWeekendYmd, normalizeWorkDate } = require('./timebot-date-utils');
 const { parseFreeformBatchReport, looksLikeFreeformBatchReport, normalizeText } = require('./timebot-freeform-parser');
 const {
@@ -17,36 +17,31 @@ const {
     pickAnyLinkedEmployee,
     buildInactiveBindingMessage,
 } = require('./timebot-employee-access');
-const { getStateTtlMs, requiresCommentToSave } = require('./timebot-state-utils');
+const { getStateTtlMs, getTimebotRuntimePaths, requiresCommentToSave } = require('./timebot-state-utils');
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_KEY;
 const ENABLE_TASK_NOTIFICATION_WORKER = String(process.env.ENABLE_TASK_NOTIFICATION_WORKER || 'false').toLowerCase() === 'true';
-const TELEGRAM_REQUEST_OPTIONS = buildTelegramRequestOptions();
 
 if (!BOT_TOKEN || !SUPABASE_URL || !SUPABASE_KEY) {
     console.error(`Missing env vars for timebot (.env at ${path.join(__dirname, '.env')}): BOT_TOKEN, SUPABASE_URL, SUPABASE_KEY`);
     process.exit(1);
 }
 
-const bot = new TelegramBot(BOT_TOKEN, {
-    polling: {
-        interval: 1000,       // poll every 1s (default 300ms is aggressive)
-        autoStart: true,
-        params: { timeout: 30 }, // long-poll 30s
-    },
-    request: TELEGRAM_REQUEST_OPTIONS,
-});
+const bot = new TelegramBot(BOT_TOKEN, buildTelegramBotOptions());
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 const WORK_SETTINGS_KEYS = {
     tasks: 'work_tasks_json',
     taskNotificationEvents: 'work_task_notification_events_json',
 };
-const STATE_FILE = path.join(__dirname, 'timebot.state.json');
-const PENDING_FILE = path.join(__dirname, 'timebot.pending.json');
-const INBOX_FILE = path.join(__dirname, 'timebot.inbox.jsonl');
+const {
+    stateDir: STATE_DIR,
+    stateFile: STATE_FILE,
+    pendingFile: PENDING_FILE,
+    inboxFile: INBOX_FILE,
+} = getTimebotRuntimePaths(__dirname);
 let productionHolidayCache = { loadedAt: 0, set: new Set() };
 
 // =============================================
@@ -168,6 +163,11 @@ function queuePendingReport(report) {
 }
 
 function ensureRuntimeFiles() {
+    try {
+        fs.mkdirSync(STATE_DIR, { recursive: true });
+    } catch (error) {
+        console.error(`Failed to initialize timebot state directory ${STATE_DIR}:`, error);
+    }
     persistStates();
     savePendingReports(loadPendingReports());
     try {
