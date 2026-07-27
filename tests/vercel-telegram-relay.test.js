@@ -56,6 +56,15 @@ test('Vercel wildcard arrays preserve the full protected relay path', () => {
     assert.equal(relayPathFromRequest(req), `/${RELAY_PATH}`);
 });
 
+test('Vercel wildcard routing markers are not forwarded to Telegram', () => {
+    const req = {
+        query: {
+            relay_path: `${RELAY_PATH}*`,
+        },
+    };
+    assert.equal(relayPathFromRequest(req), `/${RELAY_PATH}`);
+});
+
 test('Vercel adapter forwards Telegram requests and returns binary-safe responses', async () => {
     let upstreamRequest;
     const handler = createVercelHandler({

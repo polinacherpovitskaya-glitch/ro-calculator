@@ -5,7 +5,9 @@ function relayPathFromRequest(req) {
     const value = Array.isArray(rawValue)
         ? rawValue.join('/')
         : String(rawValue || '');
-    return `/${value.replace(/^\/+/, '')}`;
+    // Vercel may preserve the wildcard marker when a splat is forwarded into
+    // a query parameter. It is routing syntax, not part of the Telegram path.
+    return `/${value.replace(/^\/+/, '').replace(/\*+$/, '')}`;
 }
 
 function upstreamQuery(req) {
