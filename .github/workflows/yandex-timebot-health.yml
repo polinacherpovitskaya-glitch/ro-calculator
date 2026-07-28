@@ -8,6 +8,11 @@ on:
         required: false
         default: false
         type: boolean
+      runtime_diagnostic:
+        description: Print sanitized VM/container/rollback diagnostics
+        required: false
+        default: false
+        type: boolean
   schedule:
     - cron: '*/5 * * * *'
   workflow_run:
@@ -53,6 +58,67 @@ jobs:
           printf '%s\n' "$YANDEX_VM_SSH_PRIVATE_KEY" > "$HOME/.ssh/yandex_vm"
           chmod 600 "$HOME/.ssh/yandex_vm"
           ssh-keyscan -H "$YANDEX_VM_HOST" >> "$HOME/.ssh/known_hosts"
+
+      - name: Collect sanitized runtime diagnostics
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.runtime_diagnostic }}
+        env:
+          YANDEX_VM_HOST: ${{ secrets.YANDEX_VM_HOST }}
+          YANDEX_VM_USER: ${{ secrets.YANDEX_VM_USER }}
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/yandex_vm" \
+            -o BatchMode=yes \
+            -o ConnectTimeout=15 \
+            "$YANDEX_VM_USER@$YANDEX_VM_HOST" bash <<'REMOTE'
+          set -euo pipefail
+          for container in \
+            ro-platform-shadow-api \
+            ro-platform-shadow-postgres \
+            ro-timebot \
+            supabase-db; do
+            docker inspect --format \
+              '{{.Name}} status={{.State.Status}} started={{.State.StartedAt}} finished={{.State.FinishedAt}} restart_count={{.RestartCount}} oom={{.State.OOMKilled}} exit={{.State.ExitCode}}' \
+              "$container"
+          done
+
+          docker stats --no-stream --format '{{.Name}} mem={{.MemUsage}} cpu={{.CPUPerc}}' \
+            ro-platform-shadow-api ro-platform-shadow-postgres ro-timebot supabase-db
+          free -m
+          df -h /
+
+          end_at="$(date --iso-8601=seconds)"
+          docker events --since 30m --until "$end_at" \
+            --filter container=ro-platform-shadow-api \
+            --format '{{.Time}} {{.Action}} exit={{.Actor.Attributes.exitCode}}' || true
+          journalctl -k --since '-30 minutes' --no-pager 2>/dev/null \
+            | grep -Ei 'out of memory|oom-kill|killed process' \
+            | tail -40 || true
+
+          source_time_entries="$(
+            docker exec supabase-db psql -U supabase_admin -d postgres -At \
+              -c 'SELECT COUNT(*) FROM time_entries'
+          )"
+          set -a
+          source /home/robot/platform/infra/.env.shadow
+          set +a
+          target_time_entries="$(
+            docker exec ro-platform-shadow-postgres \
+              psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -At \
+              -c 'SELECT COUNT(*) FROM time_entries'
+          )"
+          printf 'time_entries source=%s target=%s\n' \
+            "$source_time_entries" "$target_time_entries"
+
+          test -d /home/robot/cutover-backups/20260728T172717Z
+          (
+            cd /home/robot/cutover-backups/20260728T172717Z
+            sha256sum -c SHA256SUMS
+            sha256sum -c FINAL-SHA256SUMS
+          )
+          docker image inspect \
+            ro-timebot:pre-yandex-cutover-v421-20260728 >/dev/null
+          printf 'rollback_image=present\n'
+          REMOTE
 
       - name: Verify container and fresh self-health
         env:
