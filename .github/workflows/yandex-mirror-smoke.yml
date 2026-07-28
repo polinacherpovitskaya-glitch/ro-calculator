@@ -46,6 +46,7 @@ jobs:
         env:
           RO_YANDEX_URL: ${{ inputs.live_url || 'https://calc2.recycleobject.ru/' }}
           RO_SMOKE_USER_ID: 1772715209137
+          RO_SMOKE_BEARER_TOKEN: ${{ secrets.OPS_BOT_TOKEN }}
         run: node tests/yandex-mirror-smoke.mjs
 
       - name: Upload Playwright artifacts

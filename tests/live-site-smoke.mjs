@@ -14,6 +14,7 @@ const expectedVersion = versionMeta.version;
 const baseOrigin =
   process.env.RO_LIVE_URL || 'https://calc.recycleobject.ru/';
 const smokeUserId = process.env.RO_SMOKE_USER_ID || '1772715209137';
+const smokeBearerToken = String(process.env.RO_SMOKE_BEARER_TOKEN || '').trim();
 const browserLogs = [];
 
 function buildUrl(hash) {
@@ -74,7 +75,7 @@ async function ensureAuthenticated(page) {
       account.employee_name || account.username || 'Сотрудник'
     );
 
-    await App.restoreAuthenticatedUser();
+    App.currentUser = App.buildCurrentUserFromAccount(account);
     if (typeof App.showApp === 'function') {
       await App.showApp();
     }
@@ -529,7 +530,14 @@ async function smokeMonitoringLoads(page) {
 }
 
 const browser = await chromium.launch({ headless: true });
-const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+assert.ok(smokeBearerToken, 'RO_SMOKE_BEARER_TOKEN is required for authenticated live API checks');
+const context = await browser.newContext({
+  viewport: { width: 1440, height: 900 },
+  extraHTTPHeaders: {
+    Authorization: `Bearer ${smokeBearerToken}`,
+  },
+});
+const page = await context.newPage();
 await page.addInitScript(() => {
   const smokePages = [
     'calculator', 'orders', 'factual',

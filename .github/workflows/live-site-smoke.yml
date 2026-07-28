@@ -73,6 +73,7 @@ jobs:
         env:
           RO_LIVE_URL: ${{ inputs.live_url || 'https://calc.recycleobject.ru/' }}
           RO_SMOKE_USER_ID: 1772715209137
+          RO_SMOKE_BEARER_TOKEN: ${{ secrets.OPS_BOT_TOKEN }}
         run: node tests/live-site-smoke.mjs
 
       - name: Upload Playwright artifacts

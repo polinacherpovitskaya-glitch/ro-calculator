@@ -11,6 +11,7 @@ const versionMeta = JSON.parse(fs.readFileSync(path.join(root, 'js', 'version.js
 const expectedVersion = versionMeta.version;
 const baseOrigin = process.env.RO_YANDEX_URL || 'https://calc2.recycleobject.ru/';
 const smokeUserId = process.env.RO_SMOKE_USER_ID || '1772715209137';
+const smokeBearerToken = String(process.env.RO_SMOKE_BEARER_TOKEN || '').trim();
 
 function buildUrl(hash = '#warehouse') {
   const url = new URL(baseOrigin);
@@ -41,7 +42,7 @@ async function authenticate(page) {
     localStorage.setItem('ro_calc_last_user_id', String(account.id));
     localStorage.setItem('ro_calc_last_user_name', account.employee_name || account.username || 'Сотрудник');
 
-    await App.restoreAuthenticatedUser();
+    App.currentUser = App.buildCurrentUserFromAccount(account);
     if (typeof App.showApp === 'function') await App.showApp();
     if (typeof App.navigate === 'function') await App.navigate('warehouse', false, null);
     return {
@@ -56,19 +57,23 @@ async function authenticate(page) {
 
 async function main() {
   const browser = await chromium.launch({ headless: true });
+  assert.ok(smokeBearerToken, 'RO_SMOKE_BEARER_TOKEN is required for authenticated mirror API checks');
   const context = await browser.newContext({
     viewport: { width: 1440, height: 1000 },
     ignoreHTTPSErrors: true,
+    extraHTTPHeaders: {
+      Authorization: `Bearer ${smokeBearerToken}`,
+    },
   });
   const page = await context.newPage();
   const failedRequests = [];
   const consoleMessages = [];
   let blockedLegacySupabaseRequests = 0;
-  let yandexDatabaseRequests = 0;
+  let yandexPlatformRequests = 0;
 
   page.on('request', request => {
-    if (request.url().startsWith('https://db.recycleobject.ru/')) {
-      yandexDatabaseRequests += 1;
+    if (request.url().startsWith('https://api.recycleobject.ru/')) {
+      yandexPlatformRequests += 1;
     }
   });
   page.on('requestfailed', request => {
@@ -219,14 +224,14 @@ async function main() {
         reservedText: document.querySelector('#wh-total-reserved')?.textContent?.trim() || '',
         projectHardwareText: document.querySelector('#wh-content')?.innerText?.slice(0, 1000) || '',
         supabaseScript: Array.from(document.scripts).find(script => /supabase\.js/.test(script.src))?.src || '',
-        supabaseRuntimeUrl: typeof window.__roSupabaseRuntimeUrl === 'string' ? window.__roSupabaseRuntimeUrl : '',
+        platformApiUrl: typeof PLATFORM_API_URL !== 'undefined' ? PLATFORM_API_URL : '',
       };
     });
 
     fs.writeFileSync(path.join(outputDir, 'state.json'), JSON.stringify({
       state,
       blockedLegacySupabaseRequests,
-      yandexDatabaseRequests,
+      yandexPlatformRequests,
       failedRequests,
       consoleMessages,
     }, null, 2));
@@ -256,8 +261,8 @@ async function main() {
       state.shipmentPickerState.selectableOptionCount > 0,
       `Expected warehouse positions in shipment receipt picker, got ${JSON.stringify(state.shipmentPickerState)}`
     );
-    assert.equal(state.supabaseRuntimeUrl, 'https://db.recycleobject.ru');
-    assert.ok(yandexDatabaseRequests > 0, 'Mirror must read from the Yandex-hosted database');
+    assert.equal(state.platformApiUrl, 'https://api.recycleobject.ru');
+    assert.ok(yandexPlatformRequests > 0, 'Mirror must read from the Yandex-hosted platform API');
     assert.equal(blockedLegacySupabaseRequests, 0, 'Mirror must not request the legacy Supabase host');
 
     console.log(JSON.stringify({
@@ -273,8 +278,8 @@ async function main() {
       demandOrder: state.demandOrder,
       shipmentPickerState: state.shipmentPickerState,
       blockedLegacySupabaseRequests,
-      yandexDatabaseRequests,
-      supabaseRuntimeUrl: state.supabaseRuntimeUrl,
+      yandexPlatformRequests,
+      platformApiUrl: state.platformApiUrl,
     }, null, 2));
   } finally {
     await browser.close();
