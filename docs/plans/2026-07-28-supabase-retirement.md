@@ -74,7 +74,7 @@ node tests/version-smoke.js
 
 ### Tasks
 
-- [ ] Добавить Yandex-specific compose без Selectel S3 defaults.
+- [x] Добавить Yandex-specific compose без Selectel S3 defaults.
 - [ ] Запустить отдельный PostgreSQL volume и `ops-api`.
 - [ ] Применить все migrations.
 - [ ] Подключить `api.recycleobject.ru` через существующий Caddy.
@@ -326,4 +326,3 @@ curl -fsS https://api.recycleobject.ru/api/health
 
 - Volume не удаляется без отдельного подтверждения пользователя и успешного
   restore drill.
-

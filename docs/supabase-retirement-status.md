@@ -23,12 +23,11 @@
 
 ## In Progress
 
-- Подготовка Yandex-specific shadow deployment для `ops-api` и PostgreSQL.
+- Yandex-specific shadow deployment для `ops-api` и PostgreSQL.
 
 ## Next
 
-- M2: добавить Yandex compose/deploy contract и поднять shadow stack без
-  production traffic.
+- M2: поднять shadow stack без production traffic и применить migrations.
 
 ## Decisions Made
 
@@ -78,4 +77,3 @@ node tests/version-smoke.js
 - [ ] Timebot writes without Supabase.
 - [ ] Both calculator domains work without Supabase.
 - [ ] Production survives VM reboot without Supabase containers.
-

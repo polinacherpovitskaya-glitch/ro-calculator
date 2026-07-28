@@ -76,6 +76,7 @@
 
 - [ ] `node tests/version-smoke.js`
 - [ ] `node scripts/audit-data-paths.mjs`
+- [ ] `node tests/yandex-platform-shadow-smoke.js`
 - [ ] `cd ops/api && npm test`
 - [ ] `cd ops/bot && npm test`
 - [ ] `node tests/order-flow-smoke.js`
@@ -101,6 +102,7 @@
 ```sh
 node tests/version-smoke.js
 node scripts/audit-data-paths.mjs
+node tests/yandex-platform-shadow-smoke.js
 cd ops/api && npm ci && npm test
 cd ops/bot && npm ci && npm test
 node tests/order-flow-smoke.js
@@ -119,4 +121,3 @@ node tests/tasks-smoke.js
 
 - Physical deletion of the old PostgreSQL volume is a separate destructive
   action after restore drill and explicit user confirmation.
-

@@ -1,0 +1,130 @@
+name: Yandex platform shadow
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - codex/supabase-retirement
+    paths:
+      - 'ops/api/**'
+      - 'ops/db/**'
+      - 'ops/infra/docker-compose.yandex-shadow.yml'
+      - 'ops/infra/scripts/deploy-yandex-shadow.sh'
+      - 'tests/yandex-platform-shadow-smoke.js'
+      - '.github/workflows/yandex-platform-shadow.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: yandex-platform-shadow
+  cancel-in-progress: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  test-and-deploy-shadow:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ops
+          POSTGRES_PASSWORD: ci_password
+          POSTGRES_DB: ops
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: ops/api/package-lock.json
+
+      - name: Install API dependencies
+        working-directory: ops/api
+        run: npm ci
+
+      - name: Apply migrations in CI
+        env:
+          DATABASE_URL: postgres://ops:ci_password@localhost:5432/ops
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+          bash ops/db/migrate.sh
+
+      - name: Run API tests
+        working-directory: ops/api
+        env:
+          TEST_DATABASE_URL: postgres://ops:ci_password@localhost:5432/ops
+        run: npm test
+
+      - name: Verify Yandex shadow contract
+        run: node tests/yandex-platform-shadow-smoke.js
+
+      - name: Configure Yandex VM access
+        env:
+          YANDEX_VM_SSH_PRIVATE_KEY: ${{ secrets.YANDEX_VM_SSH_PRIVATE_KEY }}
+          YANDEX_VM_HOST: ${{ secrets.YANDEX_VM_HOST }}
+        run: |
+          set -euo pipefail
+          test -n "${YANDEX_VM_SSH_PRIVATE_KEY:-}"
+          test -n "${YANDEX_VM_HOST:-}"
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$YANDEX_VM_SSH_PRIVATE_KEY" > "$HOME/.ssh/yandex_vm"
+          chmod 600 "$HOME/.ssh/yandex_vm"
+          ssh-keyscan -H "$YANDEX_VM_HOST" >> "$HOME/.ssh/known_hosts"
+
+      - name: Upload shadow platform
+        env:
+          YANDEX_VM_HOST: ${{ secrets.YANDEX_VM_HOST }}
+          YANDEX_VM_USER: ${{ secrets.YANDEX_VM_USER }}
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/yandex_vm" "$YANDEX_VM_USER@$YANDEX_VM_HOST" \
+            "mkdir -p /home/robot/platform"
+          rsync -az --delete \
+            --exclude node_modules \
+            --exclude .env.shadow \
+            -e "ssh -i $HOME/.ssh/yandex_vm" \
+            ops/ "$YANDEX_VM_USER@$YANDEX_VM_HOST:/home/robot/platform/"
+
+      - name: Deploy localhost-only shadow
+        env:
+          YANDEX_VM_HOST: ${{ secrets.YANDEX_VM_HOST }}
+          YANDEX_VM_USER: ${{ secrets.YANDEX_VM_USER }}
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/yandex_vm" "$YANDEX_VM_USER@$YANDEX_VM_HOST" \
+            "chmod +x /home/robot/platform/infra/scripts/deploy-yandex-shadow.sh && /home/robot/platform/infra/scripts/deploy-yandex-shadow.sh"
+
+      - name: Verify shadow isolation and resources
+        env:
+          YANDEX_VM_HOST: ${{ secrets.YANDEX_VM_HOST }}
+          YANDEX_VM_USER: ${{ secrets.YANDEX_VM_USER }}
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/yandex_vm" "$YANDEX_VM_USER@$YANDEX_VM_HOST" bash <<'REMOTE'
+            set -euo pipefail
+            curl --fail --silent --show-error http://127.0.0.1:3100/api/health
+            docker port ro-platform-shadow-api 3000/tcp | grep -q '^127.0.0.1:3100$'
+            docker inspect --format '{{.State.Status}}' supabase-db | grep -q '^running$'
+            docker inspect --format '{{.State.Status}}' ro-timebot | grep -q '^running$'
+            docker stats --no-stream \
+              --format '{{.Name}} {{.MemUsage}}' \
+              ro-platform-shadow-postgres ro-platform-shadow-api
+          REMOTE
+
