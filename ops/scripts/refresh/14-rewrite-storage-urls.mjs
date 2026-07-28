@@ -4,9 +4,9 @@
 // Required environment:
 //   DATABASE_URL
 
-import pg from 'pg';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const { Pool } = pg;
 const API_BASE = String(process.env.PLATFORM_API_URL || 'https://api.recycleobject.ru').replace(/\/$/, '');
 const STORAGE_URL = /https?:\/\/[^/\s"'<>]+\/storage\/v1\/object\/(?:public|sign)\/([^/\s"'<>]+)\/([^\s"'<>?]+)(?:\?[^\s"'<>]*)?/gi;
 
@@ -16,18 +16,88 @@ function requireEnv(name) {
   return value;
 }
 
-function rewriteJson(value) {
-  const raw = JSON.stringify(value);
+function rewriteText(value) {
   let replacements = 0;
-  const rewritten = raw.replace(STORAGE_URL, (match, bucket, objectPath) => {
+  const rewritten = value.replace(STORAGE_URL, (match, bucket, objectPath) => {
     replacements += 1;
-    const safeBucket = encodeURIComponent(decodeURIComponent(bucket));
+    let decodedBucket = bucket;
+    try {
+      decodedBucket = decodeURIComponent(bucket);
+    } catch {
+      // Keep malformed historical bucket text encoded instead of aborting the
+      // whole migration.
+    }
+    const safeBucket = encodeURIComponent(decodedBucket);
     return `${API_BASE}/api/storage/public/${safeBucket}/${objectPath}`;
   });
-  return {
-    value: replacements ? JSON.parse(rewritten) : value,
-    replacements,
-  };
+  return { value: rewritten, replacements };
+}
+
+export function rewriteJson(value) {
+  if (Array.isArray(value)) {
+    let replacements = 0;
+    const rewritten = value.map((entry) => {
+      const result = rewriteJson(entry);
+      replacements += result.replacements;
+      return result.value;
+    });
+    return { value: replacements ? rewritten : value, replacements };
+  }
+
+  if (value && typeof value === 'object') {
+    let replacements = 0;
+    const rewritten = {};
+    for (const [key, entry] of Object.entries(value)) {
+      const result = rewriteJson(entry);
+      replacements += result.replacements;
+      rewritten[key] = result.value;
+    }
+    return { value: replacements ? rewritten : value, replacements };
+  }
+
+  if (typeof value !== 'string') return { value, replacements: 0 };
+
+  const trimmed = value.trim();
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(value);
+      const nested = rewriteJson(parsed);
+      if (nested.replacements) {
+        return {
+          value: JSON.stringify(nested.value),
+          replacements: nested.replacements,
+        };
+      }
+    } catch {
+      // It is an ordinary string that merely starts with a brace.
+    }
+  }
+
+  return rewriteText(value);
+}
+
+async function main() {
+  const { default: pg } = await import('pg');
+  const { Pool } = pg;
+  const pool = new Pool({ connectionString: requireEnv('DATABASE_URL') });
+
+  try {
+    await pool.query('BEGIN');
+    await rewriteTable(pool, 'compat_rows');
+    await rewriteTable(pool, 'legacy_supabase_rows');
+    await pool.query('COMMIT');
+  } catch (error) {
+    await pool.query('ROLLBACK');
+    throw error;
+  } finally {
+    await pool.end();
+  }
+}
+
+const isDirectRun = process.argv[1]
+  && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isDirectRun) {
+  await main();
 }
 
 async function rewriteTable(pool, table) {
@@ -52,18 +122,4 @@ async function rewriteTable(pool, table) {
     replacements += rewritten.replacements;
   }
   console.log(`${table}: changed_rows=${changedRows} rewritten_urls=${replacements}`);
-}
-
-const pool = new Pool({ connectionString: requireEnv('DATABASE_URL') });
-
-try {
-  await pool.query('BEGIN');
-  await rewriteTable(pool, 'compat_rows');
-  await rewriteTable(pool, 'legacy_supabase_rows');
-  await pool.query('COMMIT');
-} catch (error) {
-  await pool.query('ROLLBACK');
-  throw error;
-} finally {
-  await pool.end();
 }

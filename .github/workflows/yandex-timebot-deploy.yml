@@ -88,7 +88,7 @@ jobs:
               POSTGRES_CONTAINER=ro-platform-shadow-postgres \
               POSTGRES_USER="$POSTGRES_USER" \
               POSTGRES_DB="$POSTGRES_DB" \
-              /home/robot/platform/infra/scripts/ensure-bot-token.sh
+              bash /home/robot/platform/infra/scripts/ensure-bot-token.sh
             docker build -t ro-timebot:latest /home/robot/timebot/app
             docker volume create ro-timebot-state >/dev/null
             docker rm -f ro-timebot >/dev/null 2>&1 || true

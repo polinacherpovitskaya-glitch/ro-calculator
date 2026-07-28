@@ -3,13 +3,15 @@ import path from 'path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'url';
 import { execFileSync } from 'node:child_process';
+import {
+  platformSelectAll,
+  platformSelectOne,
+} from './platform-compat-client.mjs';
 
 const ROOT = process.cwd();
 const OUT_DIR = path.join(ROOT, 'deploy/static-yandex');
 const BUCKET = process.env.RO_YANDEX_BUCKET || 'calc2.recycleobject.ru';
 const STORAGE_ORIGIN = process.env.RO_YANDEX_STORAGE_ORIGIN || `https://storage.yandexcloud.net/${BUCKET}`;
-const SUPABASE_URL = process.env.SUPABASE_URL || 'https://db.recycleobject.ru';
-const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiAiSFMyNTYiLCAidHlwIjogIkpXVCJ9.eyJyb2xlIjogImFub24iLCAiaXNzIjogInN1cGFiYXNlIiwgImlhdCI6IDE3ODQyOTY2NTUsICJleHAiOiAyMDk5NjU2NjU1fQ.lOvkwgM1TWwYESuJtjkRDVcvSxv7VV6vsbr1-ZGkB4c';
 
 const MIRROR_ORDER_STATUSES = new Set([
   'draft',
@@ -67,62 +69,17 @@ function rewriteIndexForObjectStorage(source) {
   });
 }
 
-async function fetchSupabaseJson(pathname, options = {}) {
-  const attempts = Math.max(1, Number(options.attempts) || 3);
-  const timeoutMs = Math.max(1000, Number(options.timeoutMs) || 15000);
-  let lastError = null;
-
-  for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-      const response = await fetch(`${SUPABASE_URL}${pathname}`, {
-        headers: {
-          apikey: SUPABASE_ANON_KEY,
-          Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
-          Accept: 'application/json',
-        },
-        signal: controller.signal,
-      });
-      if (!response.ok) {
-        const body = await response.text().catch(() => '');
-        throw new Error(`Supabase ${response.status} for ${pathname}: ${body.slice(0, 300)}`);
-      }
-      return await response.json();
-    } catch (error) {
-      lastError = error;
-      if (attempt < attempts) await new Promise(resolve => setTimeout(resolve, 300 * attempt));
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-
-  throw lastError || new Error(`Supabase unavailable for ${pathname}`);
-}
-
-// Fetch every row of a list endpoint, page by page. PostgREST caps a single
-// response at ~1000 rows (max-rows), so a plain fetchSupabaseJson silently
-// truncates large tables (e.g. order_items > 1000) — and because the fetches are
-// ordered, the dropped rows are the newest orders' items, which then look empty
-// or falsely "ready" in the mirror. The pathname must carry a deterministic
-// `order=` clause so paging is stable across requests.
-export async function fetchSupabaseAllPages(pathname, options = {}) {
-  const pageSize = Math.max(1, Number(options.pageSize) || 1000);
-  const sep = pathname.includes('?') ? '&' : '?';
-  const all = [];
-  for (let page = 0; page < 10000; page += 1) {
-    const offset = page * pageSize;
-    const chunk = await fetchSupabaseJson(`${pathname}${sep}limit=${pageSize}&offset=${offset}`, options);
-    if (!Array.isArray(chunk)) return chunk;
-    all.push(...chunk);
-    if (chunk.length < pageSize) break;
-  }
-  return all;
+// Keep deterministic paging for large JSON rows such as order_items.
+export async function fetchPlatformAllPages(table, options = {}) {
+  return platformSelectAll(table, options);
 }
 
 async function fetchSettingJson(key, fallback) {
-  const rows = await fetchSupabaseJson(`/rest/v1/settings?select=value&key=eq.${encodeURIComponent(key)}&limit=1`);
-  const raw = rows?.[0]?.value;
+  const row = await platformSelectOne('settings', {
+    columns: 'value',
+    filters: [{ op: 'eq', column: 'key', value: key }],
+  });
+  const raw = row?.value;
   if (!raw) return fallback;
   return typeof raw === 'string' ? JSON.parse(raw) : raw;
 }
@@ -255,26 +212,50 @@ async function buildBootstrapSnapshot() {
     shipmentsRows,
     chinaPurchaseRows,
   ] = await Promise.all([
-    fetchSupabaseJson('/rest/v1/settings?select=key,value').catch(error => ({ __error: error.message })),
-    fetchSupabaseAllPages('/rest/v1/employees?select=*&order=name.asc').catch(() => []),
+    fetchPlatformAllPages('settings', { columns: 'key,value' }).catch(error => ({ __error: error.message })),
+    fetchPlatformAllPages('employees', {
+      orders: [{ column: 'name', ascending: true }],
+    }).catch(() => []),
     fetchSettingJson('auth_accounts_json', []).catch(() => []),
-    fetchSupabaseAllPages('/rest/v1/warehouse_items?select=*&order=name.asc').catch(() => []),
+    fetchPlatformAllPages('warehouse_items', {
+      orders: [{ column: 'name', ascending: true }],
+    }).catch(() => []),
     fetchSettingJson('warehouse_items_json', null).catch(() => null),
-    fetchSupabaseJson('/rest/v1/warehouse_reservations?select=reservations_data&id=eq.1&limit=1').catch(() => []),
-    fetchSupabaseJson('/rest/v1/warehouse_history?select=history_data&id=eq.1&limit=1').catch(() => []),
+    fetchPlatformAllPages('warehouse_reservations', {
+      columns: 'reservations_data',
+      filters: [{ op: 'eq', column: 'id', value: 1 }],
+      pageSize: 1,
+    }).catch(() => []),
+    fetchPlatformAllPages('warehouse_history', {
+      columns: 'history_data',
+      filters: [{ op: 'eq', column: 'id', value: 1 }],
+      pageSize: 1,
+    }).catch(() => []),
     fetchSettingJson('project_hardware_state_json', { checks: {}, actual_qtys: {} }).catch(() => ({ checks: {}, actual_qtys: {} })),
-    fetchSupabaseAllPages('/rest/v1/orders?select=*&status=neq.deleted&order=created_at.desc').catch(() => []),
+    fetchPlatformAllPages('orders', {
+      filters: [{ op: 'neq', column: 'status', value: 'deleted' }],
+      orders: [{ column: 'created_at', ascending: false }],
+    }).catch(() => []),
     // item_data can make a 1000-row response larger than 30 MB. On the
-    // self-hosted PostgREST endpoint that regularly exceeds the default
-    // 15-second request timeout, so use smaller pages and a realistic timeout.
-    fetchSupabaseAllPages(
-      '/rest/v1/order_items?select=*&order=order_id.asc,item_number.asc',
-      { pageSize: 100, timeoutMs: 60000 }
-    ).catch(() => []),
-    fetchSupabaseAllPages('/rest/v1/time_entries?select=*&order=date.desc').catch(() => []),
+    // API that can exceed the default timeout, so use smaller pages.
+    fetchPlatformAllPages('order_items', {
+      orders: [
+        { column: 'order_id', ascending: true },
+        { column: 'item_number', ascending: true },
+      ],
+      pageSize: 100,
+      timeoutMs: 60000,
+    }).catch(() => []),
+    fetchPlatformAllPages('time_entries', {
+      orders: [{ column: 'date', ascending: false }],
+    }).catch(() => []),
     fetchSettingJson('factual_month_snapshots_json', {}).catch(() => ({})),
-    fetchSupabaseAllPages('/rest/v1/shipments?select=*&order=created_at.desc').catch(() => []),
-    fetchSupabaseAllPages('/rest/v1/china_purchases?select=*&order=created_at.desc').catch(() => []),
+    fetchPlatformAllPages('shipments', {
+      orders: [{ column: 'created_at', ascending: false }],
+    }).catch(() => []),
+    fetchPlatformAllPages('china_purchases', {
+      orders: [{ column: 'created_at', ascending: false }],
+    }).catch(() => []),
   ]);
 
   const orders = parseOrderRows(ordersRows);
@@ -292,7 +273,7 @@ async function buildBootstrapSnapshot() {
   return {
     ok: true,
     generated_at: new Date().toISOString(),
-    source: 'supabase-snapshot-for-yandex-static',
+    source: 'yandex-platform-snapshot',
     data: {
       settingsRows: cleanSettingsRows,
       settingsByKey,
@@ -327,7 +308,7 @@ export function buildBootstrapShardPayloads(bootstrap) {
   return Object.fromEntries(Object.entries(data).map(([key, value]) => [key, {
     ok: true,
     generated_at: bootstrap?.generated_at || '',
-    source: bootstrap?.source || 'supabase-snapshot-for-yandex-static',
+    source: bootstrap?.source || 'yandex-platform-snapshot',
     data: { [key]: value },
     errors: bootstrap?.errors || {},
   }]));
@@ -342,16 +323,15 @@ function writeBootstrapShards(bootstrap) {
 }
 
 // Core tables that must always contain rows in a healthy production snapshot.
-// Every Supabase fetch in buildBootstrapSnapshot() swallows errors into an empty
-// value, so when Supabase is unreachable during the build (it periodically 522s
-// from CI) these come back empty and the snapshot is silently degraded.
+// Every platform fetch in buildBootstrapSnapshot() degrades independently so
+// one API error cannot publish an empty production mirror unnoticed.
 const REQUIRED_BOOTSTRAP_TABLES = ['authAccounts', 'employees', 'orders', 'orderItems', 'settingsRows'];
 
 // Refuse to publish a degraded snapshot. Publishing an empty bootstrap.json breaks
 // calc2 for everyone offline — no login accounts, no orders, the app can't hydrate
 // (the витрина and #gantt read it too). Throwing here fails the build step; the
 // upload step has no `if: always()`, so it is skipped and the CDN keeps the
-// last-good snapshot until a later run catches Supabase healthy.
+// last-good snapshot until a later run catches the platform API healthy.
 export function assertHealthyBootstrap(bootstrap) {
   const data = (bootstrap && bootstrap.data) || {};
   const counts = {};
@@ -364,7 +344,7 @@ export function assertHealthyBootstrap(bootstrap) {
   if (empty.length > 0) {
     throw new Error(
       `Refusing to publish a degraded bootstrap snapshot: required table(s) empty [${empty.join(', ')}] `
-      + `(counts ${JSON.stringify(counts)}). Supabase was likely unreachable during the build. `
+      + `(counts ${JSON.stringify(counts)}). The Yandex platform API was likely unreachable during the build. `
       + 'Failing the build so the CDN keeps the last-good snapshot instead of emptying calc2.'
     );
   }
@@ -454,7 +434,7 @@ async function main() {
 }
 
 const isDirectRun = process.argv[1]
-  && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+  && fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(import.meta.url));
 if (isDirectRun) {
   main().catch(error => {
     console.error(error);

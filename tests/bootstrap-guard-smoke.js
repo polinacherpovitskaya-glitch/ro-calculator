@@ -3,8 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { assertHealthyBootstrap, buildBootstrapShardPayloads } from '../scripts/build-yandex-static.mjs';
 
-// Guards the calc2 static mirror against publishing an empty bootstrap.json when
-// Supabase is unreachable during the CI build (each fetch swallows errors into an
+// Guards the static mirrors against publishing an empty bootstrap.json when
+// the Yandex platform API is unreachable during the CI build (each fetch swallows errors into an
 // empty array). A degraded snapshot empties calc2 for everyone offline — no login
 // accounts, no orders — so the build must fail instead of deploying it.
 
@@ -36,7 +36,7 @@ for (const [key, payload] of Object.entries(shards)) {
 const yandexSync = fs.readFileSync(path.join(process.cwd(), '.github/workflows/yandex-static-sync.yml'), 'utf8');
 assert.match(yandexSync, /data\/bootstrap\/\*/, 'bootstrap shards must be deployed without immutable one-year cache');
 
-// A fully empty snapshot (Supabase fully unreachable) must fail the build.
+// A fully empty snapshot (platform API fully unreachable) must fail the build.
 assert.throws(
   () => assertHealthyBootstrap(makeBootstrap({ authAccounts: [], employees: [], orders: [], orderItems: [], settingsRows: [] })),
   /required table\(s\) empty/,

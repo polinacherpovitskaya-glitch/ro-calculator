@@ -71,6 +71,7 @@ jobs:
           node tests/bootstrap-guard-smoke.js
           node tests/yandex-backup-workflow-smoke.js
           node tests/bootstrap-pagination-smoke.js
+          node tests/storage-url-rewrite-smoke.mjs
           node tests/production-floor-publish-smoke.js
           node tests/floor-month-load-smoke.js
           node tests/timebot-state-utils-smoke.js

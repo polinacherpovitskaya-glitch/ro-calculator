@@ -91,7 +91,9 @@ jobs:
         run: npm test
 
       - name: Verify Yandex shadow contract
-        run: node tests/yandex-platform-shadow-smoke.js
+        run: |
+          node tests/yandex-platform-shadow-smoke.js
+          node tests/storage-url-rewrite-smoke.mjs
 
       - name: Configure Yandex VM access
         env:
@@ -200,6 +202,31 @@ jobs:
           set -euo pipefail
           ssh -i "$HOME/.ssh/yandex_vm" "$YANDEX_VM_USER@$YANDEX_VM_HOST" \
             "chmod +x /home/robot/platform/infra/scripts/deploy-yandex-shadow.sh && /home/robot/platform/infra/scripts/deploy-yandex-shadow.sh"
+
+      - name: Install platform automation token
+        env:
+          OPS_BOT_TOKEN: ${{ secrets.OPS_BOT_TOKEN }}
+          YANDEX_VM_HOST: ${{ secrets.YANDEX_VM_HOST }}
+          YANDEX_VM_USER: ${{ secrets.YANDEX_VM_USER }}
+        run: |
+          set -euo pipefail
+          test -n "${OPS_BOT_TOKEN:-}"
+          umask 077
+          printf 'OPS_BOT_TOKEN=%s\n' "$OPS_BOT_TOKEN" > "$RUNNER_TEMP/platform-api.env"
+          scp -i "$HOME/.ssh/yandex_vm" "$RUNNER_TEMP/platform-api.env" \
+            "$YANDEX_VM_USER@$YANDEX_VM_HOST:platform-secrets/platform-api.env"
+          ssh -i "$HOME/.ssh/yandex_vm" "$YANDEX_VM_USER@$YANDEX_VM_HOST" bash <<'REMOTE'
+            set -euo pipefail
+            chmod 600 "$HOME/platform-secrets/platform-api.env"
+            set -a
+            source "$HOME/platform/infra/.env.shadow"
+            set +a
+            ENV_FILE="$HOME/platform-secrets/platform-api.env" \
+              POSTGRES_CONTAINER=ro-platform-shadow-postgres \
+              POSTGRES_USER="$POSTGRES_USER" \
+              POSTGRES_DB="$POSTGRES_DB" \
+              bash "$HOME/platform/infra/scripts/ensure-bot-token.sh"
+          REMOTE
 
       - name: Verify shadow isolation and resources
         env:

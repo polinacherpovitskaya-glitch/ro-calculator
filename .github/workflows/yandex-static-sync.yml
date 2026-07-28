@@ -55,10 +55,13 @@ jobs:
 
       - name: Build Yandex static bundle
         env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          OPS_API_URL: https://api.recycleobject.ru
+          OPS_BOT_TOKEN: ${{ secrets.OPS_BOT_TOKEN }}
           RO_YANDEX_BUCKET: ${{ env.RO_YANDEX_BUCKET }}
-        run: node scripts/build-yandex-static.mjs
+        run: |
+          set -euo pipefail
+          test -n "${OPS_BOT_TOKEN:-}"
+          node scripts/build-yandex-static.mjs
 
       - name: Install Yandex Cloud CLI
         run: |

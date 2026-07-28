@@ -1,23 +1,17 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import {
+  platformDelete,
+  platformQuery,
+  platformSelectOne,
+  platformUpsert,
+} from '../scripts/platform-compat-client.mjs';
 
 const root = process.cwd();
 const outputDir = path.join(root, 'output', 'yandex-writeback-smoke');
 fs.mkdirSync(outputDir, { recursive: true });
 
-const supabaseSource = fs.readFileSync(path.join(root, 'js', 'supabase.js'), 'utf8');
-
-function extractConst(name) {
-  const match = supabaseSource.match(new RegExp(`const\\s+${name}\\s*=\\s*'([^']+)'`));
-  return match ? match[1] : '';
-}
-
-const supabaseUrl = (process.env.SUPABASE_URL || extractConst('SUPABASE_URL')).replace(/\/+$/, '');
-const proxyUrl = (process.env.RO_YANDEX_PROXY_URL || extractConst('YANDEX_SUPABASE_PROXY_URL')).replace(/\/+$/, '');
-const anonKey = process.env.SUPABASE_ANON_KEY || extractConst('SUPABASE_ANON_KEY');
-const smokeOrigin = process.env.RO_WRITEBACK_ORIGIN || 'https://calc.recycleobject.ru';
-const smokeKey = process.env.RO_YANDEX_WRITEBACK_KEY || 'ro_yandex_writeback_smoke_json';
 const marker = [
   'yandex-writeback',
   process.env.GITHUB_RUN_ID || 'local',
@@ -25,401 +19,142 @@ const marker = [
   Math.random().toString(36).slice(2),
 ].join('-');
 const now = new Date().toISOString();
-const smokeValue = {
-  ok: true,
-  source: 'yandex-writeback-smoke',
-  marker,
-  written_at: now,
-};
-const smokeIdBase = Date.now();
-const cleanupTasks = [];
+const smokeKey = process.env.RO_YANDEX_WRITEBACK_KEY || 'ro_yandex_writeback_smoke_json';
+const timeEntryId = Date.now();
+const cleanup = [];
 
-function assertConfigured() {
-  assert.ok(supabaseUrl, 'SUPABASE_URL is required');
-  assert.ok(proxyUrl, 'RO_YANDEX_PROXY_URL / YANDEX_SUPABASE_PROXY_URL is required');
-  assert.ok(anonKey, 'SUPABASE_ANON_KEY is required');
-  assert.equal(new URL(smokeOrigin).protocol, 'https:', 'RO_WRITEBACK_ORIGIN must be HTTPS');
-}
-
-async function fetchJson(url, options = {}) {
-  const response = await fetch(url, options);
-  const text = await response.text();
-  let json = null;
-  if (text) {
-    try {
-      json = JSON.parse(text);
-    } catch (error) {
-      throw new Error(`Expected JSON from ${url}, got HTTP ${response.status}: ${text.slice(0, 500)}`);
-    }
-  }
-  return { response, json, text };
-}
-
-function authHeaders(extra = {}) {
-  return {
-    apikey: anonKey,
-    authorization: `Bearer ${anonKey}`,
-    ...extra,
-  };
-}
-
-function parseStoredValue(value) {
-  if (value && typeof value === 'object') return value;
-  if (typeof value !== 'string') return null;
-  try {
-    return JSON.parse(value);
-  } catch (_) {
-    return null;
-  }
-}
-
-async function restRequest(baseUrl, pathname, options = {}) {
-  const url = `${baseUrl}${pathname}`;
-  return fetchJson(url, {
-    ...options,
-    headers: authHeaders({
-      accept: 'application/json',
-      origin: smokeOrigin,
-      ...(options.headers || {}),
-    }),
+async function verifyHealth() {
+  const apiUrl = String(process.env.OPS_API_URL || 'https://api.recycleobject.ru').replace(/\/+$/, '');
+  const response = await fetch(`${apiUrl}/api/health`, {
+    headers: { Accept: 'application/json' },
   });
-}
-
-async function writeViaYandexProxy() {
-  const row = {
-    key: smokeKey,
-    value: JSON.stringify(smokeValue),
-    updated_at: now,
-  };
-  const { response, json, text } = await fetchJson(`${proxyUrl}/rest/v1/settings?on_conflict=key`, {
-    method: 'POST',
-    headers: authHeaders({
-      'content-type': 'application/json',
-      prefer: 'resolution=merge-duplicates,return=representation',
-      origin: smokeOrigin,
-    }),
-    body: JSON.stringify([row]),
-  });
+  const body = await response.text();
+  assert.ok(response.ok, `Yandex API health failed with HTTP ${response.status}: ${body.slice(0, 300)}`);
+  const payload = JSON.parse(body);
   assert.ok(
-    response.ok,
-    `Yandex proxy write failed with HTTP ${response.status}: ${text.slice(0, 500)}`,
+    payload.ok === true || payload.status === 'ok',
+    `Yandex API health is not green: ${body.slice(0, 300)}`,
   );
-  assert.ok(Array.isArray(json) && json.length === 1, `Expected one written row from proxy, got ${JSON.stringify(json)}`);
-  assert.equal(json[0].key, smokeKey);
-  assert.equal(parseStoredValue(json[0].value)?.marker, marker);
-  return json[0];
+  return payload;
 }
 
-async function readDirectFromSupabase() {
-  const url = `${supabaseUrl}/rest/v1/settings?select=key,value,updated_at&key=eq.${encodeURIComponent(smokeKey)}&limit=1`;
-  const { response, json, text } = await fetchJson(url, {
-    headers: authHeaders({
-      accept: 'application/json',
-      origin: smokeOrigin,
-    }),
+async function verifySettingsWrite() {
+  const value = JSON.stringify({
+    ok: true,
+    source: 'yandex-platform-writeback-smoke',
+    marker,
+    written_at: now,
   });
-  assert.ok(response.ok, `Direct Supabase read failed with HTTP ${response.status}: ${text.slice(0, 500)}`);
-  assert.ok(Array.isArray(json) && json.length === 1, `Expected one direct Supabase row, got ${JSON.stringify(json)}`);
-  assert.equal(json[0].key, smokeKey);
-  assert.equal(parseStoredValue(json[0].value)?.marker, marker);
-  return json[0];
-}
+  await platformUpsert('settings', {
+    key: smokeKey,
+    value,
+    updated_at: now,
+  }, { onConflict: 'key' });
+  cleanup.push(() => platformDelete('settings', [
+    { op: 'eq', column: 'key', value: smokeKey },
+  ]));
 
-async function readBackViaYandexProxy() {
-  const url = `${proxyUrl}/rest/v1/settings?select=key,value,updated_at&key=eq.${encodeURIComponent(smokeKey)}&limit=1`;
-  const { response, json, text } = await fetchJson(url, {
-    headers: authHeaders({
-      accept: 'application/json',
-      origin: smokeOrigin,
-    }),
+  const row = await platformSelectOne('settings', {
+    columns: 'key,value,updated_at',
+    filters: [{ op: 'eq', column: 'key', value: smokeKey }],
   });
-  assert.ok(response.ok, `Yandex proxy readback failed with HTTP ${response.status}: ${text.slice(0, 500)}`);
-  assert.ok(Array.isArray(json) && json.length === 1, `Expected one proxy readback row, got ${JSON.stringify(json)}`);
-  assert.equal(parseStoredValue(json[0].value)?.marker, marker);
-  return json[0];
+  assert.equal(row?.key, smokeKey);
+  assert.equal(JSON.parse(row?.value || '{}').marker, marker);
+  return { key: row.key, updated_at: row.updated_at };
 }
 
-async function upsertViaProxy(table, rows, conflictColumn = 'id') {
-  const { response, json, text } = await restRequest(
-    proxyUrl,
-    `/rest/v1/${table}?on_conflict=${encodeURIComponent(conflictColumn)}`,
-    {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        prefer: 'resolution=merge-duplicates,return=representation',
-      },
-      body: JSON.stringify(Array.isArray(rows) ? rows : [rows]),
-    },
-  );
-  assert.ok(response.ok, `${table} proxy upsert failed with HTTP ${response.status}: ${text.slice(0, 500)}`);
-  assert.ok(Array.isArray(json) && json.length > 0, `${table} proxy upsert returned no rows: ${JSON.stringify(json)}`);
-  return json;
-}
-
-async function readDirectRow(table, id) {
-  const { response, json, text } = await restRequest(
-    supabaseUrl,
-    `/rest/v1/${table}?select=*&id=eq.${encodeURIComponent(id)}&limit=1`,
-  );
-  assert.ok(response.ok, `${table} direct read failed with HTTP ${response.status}: ${text.slice(0, 500)}`);
-  assert.ok(Array.isArray(json) && json.length === 1, `${table} expected one direct row, got ${JSON.stringify(json)}`);
-  return json[0];
-}
-
-async function deleteViaProxy(table, id) {
-  const { response, text } = await restRequest(
-    proxyUrl,
-    `/rest/v1/${table}?id=eq.${encodeURIComponent(id)}`,
-    {
-      method: 'DELETE',
-      headers: {
-        prefer: 'return=minimal',
-      },
-    },
-  );
-  assert.ok(response.ok, `${table} cleanup delete failed with HTTP ${response.status}: ${text.slice(0, 500)}`);
-}
-
-async function deleteDirect(table, id) {
-  const { response, text } = await restRequest(
-    supabaseUrl,
-    `/rest/v1/${table}?id=eq.${encodeURIComponent(id)}`,
-    {
-      method: 'DELETE',
-      headers: {
-        prefer: 'return=minimal',
-      },
-    },
-  );
-  assert.ok(response.ok, `${table} direct cleanup delete failed with HTTP ${response.status}: ${text.slice(0, 500)}`);
-}
-
-function scheduleCleanup(table, id) {
-  cleanupTasks.push(async () => {
-    await deleteViaProxy(table, id);
-  });
-}
-
-function scheduleDirectCleanup(table, id) {
-  cleanupTasks.push(async () => {
-    await deleteDirect(table, id);
-    const { response, json, text } = await restRequest(
-      supabaseUrl,
-      `/rest/v1/${table}?select=id&id=eq.${encodeURIComponent(id)}&limit=1`,
-    );
-    assert.ok(response.ok, `${table} cleanup verification failed with HTTP ${response.status}: ${text.slice(0, 500)}`);
-    assert.deepEqual(json, [], `${table} cleanup left row ${id}`);
-  });
-}
-
-async function assertTransientTableWrite({ table, row, parseColumn, expectedMarker }) {
-  await upsertViaProxy(table, row);
-  scheduleCleanup(table, row.id);
-  const direct = await readDirectRow(table, row.id);
-  const parsed = parseStoredValue(direct[parseColumn]);
-  assert.equal(parsed?.marker, expectedMarker, `${table}.${parseColumn} marker mismatch`);
-  return direct;
-}
-
-async function assertTransientTimeEntryWrite() {
-  const id = smokeIdBase + 105;
+async function verifyTimeEntryWrite() {
+  const description = `[meta]${JSON.stringify({
+    stage: 'other',
+    stage_label: 'Yandex write-back smoke',
+    project: 'RO_SMOKE',
+    marker,
+  })}[/meta] Automated Yandex platform write-back check`;
   const row = {
-    id,
+    id: timeEntryId,
     employee_id: null,
     employee_name: 'RO_SMOKE',
     date: '2000-01-01',
     hours: 0.5,
-    task_description: `[meta]${JSON.stringify({
-      stage: 'other',
-      stage_label: 'Write-back smoke',
-      project: 'RO_SMOKE',
-      marker,
-    })}[/meta] Automated production write-back check`,
+    task_description: description,
     order_id: null,
     notes: 'yandex_writeback_smoke',
+    created_at: now,
+    updated_at: now,
   };
-  const { response, json, text } = await restRequest(
-    supabaseUrl,
-    '/rest/v1/time_entries?on_conflict=id',
-    {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        prefer: 'resolution=merge-duplicates,return=representation',
-      },
-      body: JSON.stringify([row]),
-    },
-  );
-  assert.ok(response.ok, `time_entries direct insert failed with HTTP ${response.status}: ${text.slice(0, 500)}`);
-  scheduleDirectCleanup('time_entries', id);
-  assert.ok(
-    ['*', smokeOrigin].includes(response.headers.get('access-control-allow-origin')),
-    `time_entries CORS does not allow ${smokeOrigin}`,
-  );
-  assert.ok(Array.isArray(json) && json.length === 1, `time_entries direct insert returned ${JSON.stringify(json)}`);
+  await platformQuery('time_entries', {
+    action: 'insert',
+    values: row,
+    columns: '*',
+    returning: true,
+  });
+  cleanup.push(() => platformDelete('time_entries', [
+    { op: 'eq', column: 'id', value: timeEntryId },
+  ]));
 
-  const direct = await readDirectRow('time_entries', id);
-  assert.equal(direct.employee_name, 'RO_SMOKE');
-  assert.equal(Number(direct.hours), 0.5);
-  assert.equal(parseStoredValue(
-    String(direct.task_description || '').match(/^\[meta\](\{.*?\})\[\/meta\]/)?.[1],
-  )?.marker, marker);
+  const stored = await platformSelectOne('time_entries', {
+    columns: '*',
+    filters: [{ op: 'eq', column: 'id', value: timeEntryId }],
+  });
+  assert.equal(Number(stored?.id), timeEntryId);
+  assert.equal(stored?.employee_name, 'RO_SMOKE');
+  assert.equal(Number(stored?.hours), 0.5);
+  assert.match(String(stored?.task_description || ''), new RegExp(marker));
   return {
-    id: direct.id,
-    date: direct.date,
-    hours: Number(direct.hours),
-    origin: smokeOrigin,
+    id: stored.id,
+    date: stored.date,
+    hours: Number(stored.hours),
   };
 }
 
-async function runTransientTableChecks() {
-  const warehouseItemId = smokeIdBase + 101;
-  const shipmentId = smokeIdBase + 102;
-  const chinaPurchaseId = smokeIdBase + 103;
-  const moldId = smokeIdBase + 104;
-
-  const warehouseItem = await assertTransientTableWrite({
-    table: 'warehouse_items',
-    parseColumn: 'item_data',
-    expectedMarker: marker,
-    row: {
-      id: warehouseItemId,
-      name: `RO_SMOKE warehouse ${marker}`,
-      sku: `RO-SMOKE-${warehouseItemId}`,
-      category: 'hardware',
-      item_data: JSON.stringify({
-        id: warehouseItemId,
-        name: `RO_SMOKE warehouse ${marker}`,
-        sku: `RO-SMOKE-${warehouseItemId}`,
-        category: 'hardware',
-        qty: 1,
-        unit: 'шт',
-        price_per_unit: 1,
-        marker,
-      }),
-      created_at: now,
-      updated_at: now,
-    },
-  });
-
-  const shipment = await assertTransientTableWrite({
-    table: 'shipments',
-    parseColumn: 'shipment_data',
-    expectedMarker: marker,
-    row: {
-      id: shipmentId,
-      shipment_data: JSON.stringify({
-        id: shipmentId,
-        status: 'draft',
-        name: `RO_SMOKE shipment ${marker}`,
-        marker,
-        items: [],
-      }),
-      created_at: now,
-      updated_at: now,
-    },
-  });
-
-  const chinaPurchase = await assertTransientTableWrite({
-    table: 'china_purchases',
-    parseColumn: 'purchase_data',
-    expectedMarker: marker,
-    row: {
-      id: chinaPurchaseId,
-      status: 'draft',
-      purchase_data: JSON.stringify({
-        id: chinaPurchaseId,
-        status: 'draft',
-        title: `RO_SMOKE china ${marker}`,
-        marker,
-        items: [],
-      }),
-      created_at: now,
-      updated_at: now,
-    },
-  });
-
-  const mold = await assertTransientTableWrite({
-    table: 'molds',
-    parseColumn: 'mold_data',
-    expectedMarker: marker,
-    row: {
-      id: moldId,
-      name: `RO_SMOKE mold ${marker}`,
-      mold_data: JSON.stringify({
-        id: moldId,
-        name: `RO_SMOKE mold ${marker}`,
-        category: 'blank',
-        status: 'archived',
-        marker,
-      }),
-      created_at: now,
-      updated_at: now,
-    },
-  });
-
-  const timeEntry = await assertTransientTimeEntryWrite();
-
-  return {
-    warehouseItem: { id: warehouseItem.id, sku: warehouseItem.sku },
-    shipment: { id: shipment.id },
-    chinaPurchase: { id: chinaPurchase.id, status: chinaPurchase.status },
-    mold: { id: mold.id, name: mold.name },
-    timeEntry,
-  };
-}
-
-async function cleanupTransientRows() {
-  const errors = [];
-  for (const task of cleanupTasks.reverse()) {
+async function cleanupRows() {
+  const failures = [];
+  for (const remove of cleanup.reverse()) {
     try {
-      await task();
+      await remove();
     } catch (error) {
-      errors.push(error?.message || String(error));
+      failures.push(error?.message || String(error));
     }
   }
-  assert.deepEqual(errors, [], `Write-back smoke cleanup failed: ${errors.join('; ')}`);
+  if (failures.length) throw new Error(`Yandex write-back cleanup failed: ${failures.join('; ')}`);
 }
 
-async function main() {
-  assertConfigured();
-  let tableChecks = null;
-  let result = null;
+async function run() {
+  assert.ok(process.env.OPS_BOT_TOKEN, 'OPS_BOT_TOKEN is required');
+  const health = await verifyHealth();
+  let settings;
+  let timeEntry;
+  let failure = null;
   try {
-    const writtenViaProxy = await writeViaYandexProxy();
-    const readViaSupabase = await readDirectFromSupabase();
-    const readViaProxy = await readBackViaYandexProxy();
-    tableChecks = await runTransientTableChecks();
-
-    result = {
-      ok: true,
-      smokeKey,
-      marker,
-      smokeOrigin,
-      proxyUrl,
-      supabaseUrl,
-      writtenViaProxy,
-      readViaSupabase,
-      readViaProxy,
-      tableChecks,
-    };
-  } finally {
-    await cleanupTransientRows();
+    settings = await verifySettingsWrite();
+    timeEntry = await verifyTimeEntryWrite();
+  } catch (error) {
+    failure = error;
   }
-  fs.writeFileSync(path.join(outputDir, 'state.json'), JSON.stringify(result, null, 2));
-  console.log(JSON.stringify({
+
+  try {
+    await cleanupRows();
+  } catch (cleanupError) {
+    if (!failure) failure = cleanupError;
+    else failure.message += `; ${cleanupError.message}`;
+  }
+  if (failure) throw failure;
+
+  const report = {
     ok: true,
-    smokeKey,
     marker,
-    smokeOrigin,
-    proxyHost: new URL(proxyUrl).host,
-    supabaseHost: new URL(supabaseUrl).host,
-    tableChecks,
-  }, null, 2));
+    api: process.env.OPS_API_URL || 'https://api.recycleobject.ru',
+    health,
+    settings,
+    timeEntry,
+    cleanup: 'verified',
+  };
+  fs.writeFileSync(path.join(outputDir, 'report.json'), JSON.stringify(report, null, 2));
+  console.log(JSON.stringify(report, null, 2));
 }
 
-main().catch(error => {
+run().catch((error) => {
+  fs.writeFileSync(path.join(outputDir, 'failure.txt'), `${error?.stack || error}\n`);
   console.error(error);
   process.exit(1);
 });

@@ -14,7 +14,7 @@
 // engine the in-app #gantt calendar uses — so the витрина matches it exactly.
 //
 // Usage:
-//   node scripts/production-floor-publish.mjs                 # live: read Supabase (anon)
+//   node scripts/production-floor-publish.mjs                 # live: read the Yandex platform API
 //   RO_FLOOR_FIXTURE=path.json node ...                       # offline: read a fixture
 //   RO_FLOOR_OUT_DIR=deploy/floor-public node ...             # output dir (default)
 // =============================================
@@ -23,6 +23,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
 import { fileURLToPath } from 'node:url';
+import { platformSelectAll } from './platform-compat-client.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
@@ -123,7 +124,7 @@ function writePhotoFile(att, outDir, baseName) {
     return `photos/${file}`;
 }
 
-// Скачивает внешнюю картинку (напр. публичный mold-photo из Supabase Storage) и
+// Скачивает внешнюю картинку (например, mold-photo из Yandex Object Storage) и
 // перекладывает её в OUT/photos, чтобы в публичный JSON НЕ утекал внешний хост.
 // Best-effort: при любой ошибке возвращает null (фото просто не показываем).
 async function rehostRemote(url, outDir, baseName) {
@@ -145,27 +146,12 @@ async function rehostRemote(url, outDir, baseName) {
     } catch { return null; }
 }
 
-// ---------- Supabase (anon REST — mirrors scripts/export-supabase-snapshot.mjs) ----------
-function extractConst(name) {
-    const src = fs.readFileSync(path.join(ROOT, 'js', 'supabase.js'), 'utf8');
-    const m = src.match(new RegExp(`const\\s+${name}\\s*=\\s*'([^']+)'`));
-    return m ? m[1] : '';
-}
-const SUPABASE_URL = (process.env.SUPABASE_URL || extractConst('SUPABASE_URL')).replace(/\/+$/, '');
-const ANON_KEY = process.env.SUPABASE_ANON_KEY || extractConst('SUPABASE_ANON_KEY');
-
 async function restAll(table, select = '*') {
-    const pageSize = 1000;
-    const out = [];
-    for (let offset = 0; ; offset += pageSize) {
-        const url = `${SUPABASE_URL}/rest/v1/${table}?select=${encodeURIComponent(select)}&limit=${pageSize}&offset=${offset}`;
-        const res = await fetch(url, { headers: { apikey: ANON_KEY, Authorization: 'Bearer ' + ANON_KEY } });
-        if (!res.ok) throw new Error(`Supabase REST ${table} -> HTTP ${res.status}`);
-        const rows = await res.json();
-        out.push(...rows);
-        if (!Array.isArray(rows) || rows.length < pageSize) break;
-    }
-    return out;
+    return platformSelectAll(table, {
+        columns: select,
+        pageSize: table === 'order_items' ? 100 : 1000,
+        timeoutMs: table === 'order_items' ? 60000 : 30000,
+    });
 }
 
 async function loadData() {
@@ -308,7 +294,7 @@ function itemColors(item, idx) {
     return out;
 }
 
-// ---------- photo (best-effort, safe: only public http(s) urls, never data:/supabase blobs) ----------
+// ---------- photo (best-effort, safe: only public http(s) urls, never embedded data blobs) ----------
 function httpUrlIn(obj) {
     if (!obj) return null;
     for (const v of Object.values(obj)) {
@@ -614,7 +600,7 @@ async function main() {
 
     // Собрать публикуемые фото ТОЛЬКО как относительные photos/* и ТОЛЬКО для
     // публикуемых заказов: (1) base64-вложения-примеры из заказа; (2) внешние
-    // mold-фото (Supabase Storage) — перекладываем к себе, чтобы внешний хост не
+    // mold-фото из Object Storage — перекладываем к себе, чтобы внешний хост не
     // утёк. Онлайн — перехостим; офлайн/фикстура — внешние URL просто пропускаем.
     const photosByOrder = new Map();
     const photosByItemId = new Map();
@@ -658,7 +644,8 @@ async function main() {
     console.log(`production-floor-publish: wrote plan.json (${plan.queue.length} in queue, ${plan.blocked.length} blocked) + ${orders.length} order files to ${OUT_DIR}`);
 }
 
-const isDirectRun = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+const isDirectRun = process.argv[1]
+    && fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(import.meta.url));
 if (isDirectRun) {
     main().catch(err => {
         // On failure, do NOT overwrite the last good snapshot — just fail loudly.
