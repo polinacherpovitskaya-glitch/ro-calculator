@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v425';
+const APP_VERSION = 'v426';
 
 const App = {
     currentPage: 'orders',
@@ -455,19 +455,36 @@ const App = {
         this.initDefaultPermissions();
         this.bindWarmCacheListeners();
         this.bindNavPrefetchListeners();
-        await this.prepareAuthUI();
-        if (typeof window !== 'undefined') {
-            window.__roCalcBooted = Array.isArray(this.authAccounts) && this.authAccounts.length > 0;
-        }
-        await this._migratePagePermsToAuthAccounts();
 
-        // Check auth
+        // A returning user should not wait for the public login list before we
+        // verify the existing secure cookie. /legacy-me returns the complete
+        // sanitized account needed to render the app.
         if (this.isAuthenticated()) {
+            const cachedAccounts = typeof getLocal === 'function' && typeof LOCAL_KEYS !== 'undefined'
+                ? getLocal(LOCAL_KEYS.authAccounts)
+                : [];
+            this.authAccounts = (Array.isArray(cachedAccounts) ? cachedAccounts : []).map(account => ({
+                ...account,
+                pages: this.normalizePageList(account.pages),
+            }));
             await this.restoreAuthenticatedUser();
             if (this.currentUser) {
                 await this.showApp();
             }
         }
+
+        // Load the employee picker only when there is no usable remembered
+        // session. This keeps the full login screen available for first use,
+        // an explicitly expired session, and manual logout.
+        if (!this.currentUser) {
+            await this.prepareAuthUI();
+        }
+        if (typeof window !== 'undefined') {
+            window.__roCalcBooted = Array.isArray(this.authAccounts) && this.authAccounts.length > 0;
+        }
+        this._migratePagePermsToAuthAccounts().catch(error => {
+            console.warn('Page permission migration deferred:', error);
+        });
 
         // Bind enter on password
         document.getElementById('auth-password').addEventListener('keydown', (e) => {
@@ -561,17 +578,49 @@ const App = {
     },
 
     isAuthenticated() {
-        const ts = parseInt(localStorage.getItem('ro_calc_auth_ts') || '0');
-        // Session lasts 30 days (was 24h — too aggressive, kept logging users out)
-        if (!ts || (Date.now() - ts) >= 30 * 86400000) return false;
         const userId = localStorage.getItem('ro_calc_auth_user_id');
+        // The httpOnly server cookie is the source of truth for expiry. Keeping
+        // a second, shorter browser TTL made valid server sessions look logged
+        // out before /legacy-me had a chance to verify them.
         return !!userId;
+    },
+
+    restoreCachedAuthenticatedUser(userId) {
+        if (!userId) return false;
+        const localAccounts = typeof getLocal === 'function' && typeof LOCAL_KEYS !== 'undefined'
+            ? getLocal(LOCAL_KEYS.authAccounts)
+            : [];
+        const candidates = [
+            ...(Array.isArray(this.authAccounts) ? this.authAccounts : []),
+            ...(Array.isArray(localAccounts) ? localAccounts : []),
+        ];
+        const account = candidates.find(item =>
+            item
+            && String(item.id) === String(userId)
+            && item.is_active !== false
+        );
+        if (!account) return false;
+
+        const normalized = {
+            ...account,
+            pages: this.normalizePageList(account.pages),
+        };
+        this.currentUser = this.buildCurrentUserFromAccount(normalized);
+        localStorage.setItem('ro_calc_auth_ts', Date.now().toString());
+        if (normalized.employee_id != null && Array.isArray(normalized.pages)) {
+            this.setEmployeePages(normalized.employee_id, normalized.pages);
+        }
+        if (typeof window !== 'undefined') {
+            window.__roAuthSessionUnverified = true;
+        }
+        return true;
     },
 
     async restoreAuthenticatedUser() {
         const userId = localStorage.getItem('ro_calc_auth_user_id');
+        let response = null;
         try {
-            const response = await fetch(`${this.getPlatformApiUrl()}/api/auth/legacy-me`, {
+            response = await fetch(`${this.getPlatformApiUrl()}/api/auth/legacy-me`, {
                 credentials: 'include',
                 cache: 'no-store',
                 headers: { Accept: 'application/json' },
@@ -591,11 +640,28 @@ const App = {
                 if (account.employee_id != null && Array.isArray(account.pages)) {
                     this.setEmployeePages(account.employee_id, account.pages);
                 }
-                return;
+                if (typeof window !== 'undefined') {
+                    window.__roAuthSessionUnverified = false;
+                }
+                return 'remote';
             }
         } catch (error) {
             console.warn('Platform session restore failed:', error);
+            if (this.restoreCachedAuthenticatedUser(userId)) {
+                return 'cached';
+            }
         }
+
+        // Network/rate-limit/server failures must not revoke a still-valid
+        // session. Continue from the sanitized local account and let protected
+        // API calls retry normally. Explicit auth failures still end the login.
+        const terminalAuthFailure = response
+            && ([401, 403, 404].includes(Number(response.status)) || response.ok);
+        if (!terminalAuthFailure && this.restoreCachedAuthenticatedUser(userId)) {
+            console.warn('Auth restore is temporarily unavailable; using cached account');
+            return 'cached';
+        }
+
         if (userId) {
             console.warn('Auth restore failed: platform session is missing, expired, or disabled');
             const err = document.getElementById('auth-error');
@@ -604,11 +670,13 @@ const App = {
                 err.style.display = 'block';
             }
         }
-        this.logout();
+        this.logout({ revokeRemote: false });
+        return null;
     },
 
-    logout() {
-        if (typeof fetch === 'function') {
+    logout(options = {}) {
+        const revokeRemote = options.revokeRemote !== false;
+        if (revokeRemote && typeof fetch === 'function') {
             fetch(`${this.getPlatformApiUrl()}/api/auth/logout`, {
                 method: 'POST',
                 credentials: 'include',
@@ -873,15 +941,14 @@ const App = {
             console.warn('[App] Failed to hydrate cached boot data:', e);
         }
 
-        try {
-            await this.initEmployeeContext();
-            this._sessionStartedAt = Date.now();
-            this.startSessionTracking();
-            this.trackAuthEvent('session_start');
-        } finally {
-            this._bootstrappingApp = false;
-        }
-
+        // The current route can start from cache immediately. Employee refresh
+        // continues in parallel and applies identity fields as soon as it
+        // completes, instead of holding the orders screen blank.
+        const employeeContextPromise = Promise.resolve(this.initEmployeeContext())
+            .catch(error => {
+                console.warn('[App] Employee context refresh failed:', error);
+            });
+        this._bootstrappingApp = false;
         this.handleRoute();
         this.startUpdateChecker();
         this.startDirtyOrderSync();
@@ -903,6 +970,11 @@ const App = {
                 }, 300);
             }
         });
+
+        await employeeContextPromise;
+        this._sessionStartedAt = Date.now();
+        this.startSessionTracking();
+        this.trackAuthEvent('session_start');
     },
 
     // Hide sidebar links for pages the user has no access to

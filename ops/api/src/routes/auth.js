@@ -1,7 +1,13 @@
 import { Router } from 'express';
 import { getPool } from '../db.js';
 import { hashPassword, verifyPassword } from '../auth/argon.js';
-import { createSession, loadSession, revokeSession } from '../auth/sessions.js';
+import {
+  createSession,
+  loadSession,
+  renewSession,
+  revokeSession,
+  SESSION_TTL_DAYS,
+} from '../auth/sessions.js';
 import { requireAuth } from '../middleware/auth.js';
 import {
   hashLegacyPassword,
@@ -19,7 +25,7 @@ const COOKIE_OPTS = {
   httpOnly: true,
   secure: process.env.NODE_ENV === 'production',
   sameSite: 'lax',
-  maxAge: 60 * 24 * 60 * 60 * 1000,
+  maxAge: SESSION_TTL_DAYS * 24 * 60 * 60 * 1000,
   path: '/',
 };
 
@@ -160,6 +166,8 @@ router.get('/legacy-me', requireAuth, async (req, res) => {
       error: { code: 'ACCOUNT_DISABLED', message: 'Учётная запись отключена' },
     });
   }
+  await renewSession(req.cookies.session_id);
+  res.cookie('session_id', req.cookies.session_id, COOKIE_OPTS);
   return res.json({
     user: req.user,
     account: sanitizeLegacyAccount(account),

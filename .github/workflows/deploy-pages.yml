@@ -54,6 +54,7 @@ jobs:
           node tests/molds-price-recovery-smoke.js
           node tests/legacy-host-blocker-smoke.js
           node tests/auth-hardening-smoke.js
+          node tests/orders-performance-smoke.js
           node tests/employee-auth-payroll-smoke.js
           node tests/payroll-half-month-smoke.js
           node tests/production-calendar-smoke.js

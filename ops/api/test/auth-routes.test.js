@@ -47,6 +47,7 @@ test('POST /api/auth/login with valid credentials sets session cookie and return
 
   assert.equal(res.status, 200);
   assert.match(res.headers.get('set-cookie'), /session_id=/);
+  assert.match(res.headers.get('set-cookie'), /Max-Age=31536000/i);
   const body = await res.json();
   assert.equal(body.user.email, email);
   assert.equal(body.user.role, 'admin');
@@ -216,4 +217,5 @@ test('legacy calculator login verifies server-side and never exposes password ha
   assert.equal(meResponse.status, 200);
   assert.equal(meBody.account.employee_name, 'Тестовый сотрудник');
   assert.equal(meBody.user.legacyAccountId, accountId);
+  assert.match(meResponse.headers.get('set-cookie'), /Max-Age=31536000/i);
 });

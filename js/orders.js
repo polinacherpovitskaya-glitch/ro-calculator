@@ -88,6 +88,7 @@ const Orders = {
     isLoading: false,
     isMetaLoading: false,
     _loadSeq: 0,
+    _metaLoadSeq: 0,
 
     hydrateFromCache() {
         if (typeof getLocal !== 'function' || typeof LOCAL_KEYS === 'undefined') return false;
@@ -109,6 +110,9 @@ const Orders = {
             return;
         }
         this.render();
+        this.ensureMetaForCurrentMode().catch(error => {
+            console.warn('Orders mode meta load failed:', error);
+        });
     },
 
     updateModeControls() {
@@ -124,8 +128,11 @@ const Orders = {
         try {
             // A fresh orders visit must not retain an earlier staffing override,
             // vacation list or time-sheet snapshot after the calendar changed.
+            this._loadBarDataSeq = (this._loadBarDataSeq || 0) + 1;
             this._loadBarEntries = null;
             this._loadBarCalendar = null;
+            this._loadBarEntriesPromise = null;
+            this._loadBarCalendarPromise = null;
             this.updateModeControls();
             const hydrated = this.hydrateFromCache();
             this.isLoading = !hydrated && this.allOrders.length === 0;
@@ -135,18 +142,13 @@ const Orders = {
             this.allOrders = await loadOrders(filters);
             if (this._loadSeq !== loadSeq) return;
             this.isLoading = false;
+            this.metaByOrderId = {};
             if (this.mode === 'basket' || !this.allOrders.length) {
-                this.metaByOrderId = {};
                 this.isMetaLoading = false;
                 this.render();
                 return;
             }
-            this.isMetaLoading = true;
-            this.render();
-            await this.buildMeta(this.allOrders);
-            if (this._loadSeq !== loadSeq) return;
-            this.isMetaLoading = false;
-            this.render();
+            await this.ensureMetaForCurrentMode({ loadSeq });
         } catch (e) {
             console.error('Orders load error:', e);
             this.isLoading = false;
@@ -158,9 +160,43 @@ const Orders = {
         }
     },
 
-    async buildMeta(orders) {
+    async ensureMetaForCurrentMode(options = {}) {
+        const loadSeq = options.loadSeq ?? this._loadSeq;
+        if (this.mode === 'basket') {
+            this.isMetaLoading = false;
+            return;
+        }
+
+        const candidates = this.getModeOrders();
+        const missing = candidates.filter(order =>
+            order
+            && order.id != null
+            && !Object.prototype.hasOwnProperty.call(this.metaByOrderId, order.id)
+        );
+        if (!missing.length) {
+            this.isMetaLoading = false;
+            this.render();
+            return;
+        }
+
+        const metaLoadSeq = ++this._metaLoadSeq;
+        this.isMetaLoading = true;
+        this.render();
+        try {
+            await this.buildMeta(missing, { merge: true });
+        } catch (error) {
+            console.warn('Orders meta load failed:', error);
+        } finally {
+            if (this._loadSeq === loadSeq && this._metaLoadSeq === metaLoadSeq) {
+                this.isMetaLoading = false;
+                this.render();
+            }
+        }
+    },
+
+    async buildMeta(orders, options = {}) {
         if (this.mode === 'basket' || !orders.length) {
-            this.metaByOrderId = {};
+            if (!options.merge) this.metaByOrderId = {};
             return;
         }
 
@@ -210,7 +246,9 @@ const Orders = {
                 tasksByOrder.get(String(order.id)) || []
             );
         });
-        this.metaByOrderId = nextMeta;
+        this.metaByOrderId = options.merge
+            ? { ...this.metaByOrderId, ...nextMeta }
+            : nextMeta;
     },
 
     async loadMetaBundle(orderIds) {
@@ -638,23 +676,47 @@ const Orders = {
     async renderLoadBar() {
         const renderSeq = (this._loadBarRenderSeq || 0) + 1;
         this._loadBarRenderSeq = renderSeq;
+        const dataSeq = this._loadBarDataSeq || 0;
         try {
             const el = document.getElementById('production-load-bar');
             if (!el || typeof collectQuarterLoad !== 'function') return;
             if (!this._loadBarEntries && typeof loadTimeEntries === 'function') {
-                try { this._loadBarEntries = await loadTimeEntries(); }
-                catch (_) { this._loadBarEntries = []; }
+                if (!this._loadBarEntriesPromise) {
+                    const pendingEntries = Promise.resolve(loadTimeEntries()).catch(() => []);
+                    this._loadBarEntriesPromise = pendingEntries;
+                    pendingEntries.finally(() => {
+                        if (this._loadBarEntriesPromise === pendingEntries) {
+                            this._loadBarEntriesPromise = null;
+                        }
+                    });
+                }
+                const entries = await this._loadBarEntriesPromise;
+                if (dataSeq !== (this._loadBarDataSeq || 0)) return;
+                this._loadBarEntries = entries;
             }
             // The board and the production Gantt use the same staffing override;
             // vacations are the existing central record, not a second calendar.
             if (!this._loadBarCalendar) {
-                const [planState, vacations] = await Promise.all([
-                    typeof loadProductionPlanState === 'function'
-                        ? loadProductionPlanState().catch(() => ({})) : Promise.resolve({}),
-                    typeof loadVacations === 'function'
-                        ? loadVacations().catch(() => []) : Promise.resolve([]),
-                ]);
-                this._loadBarCalendar = { planState: planState || {}, vacations: vacations || [] };
+                if (!this._loadBarCalendarPromise) {
+                    const pendingCalendar = Promise.all([
+                        typeof loadProductionPlanState === 'function'
+                            ? loadProductionPlanState().catch(() => ({})) : Promise.resolve({}),
+                        typeof loadVacations === 'function'
+                            ? loadVacations().catch(() => []) : Promise.resolve([]),
+                    ]).then(([planState, vacations]) => ({
+                        planState: planState || {},
+                        vacations: vacations || [],
+                    }));
+                    this._loadBarCalendarPromise = pendingCalendar;
+                    pendingCalendar.finally(() => {
+                        if (this._loadBarCalendarPromise === pendingCalendar) {
+                            this._loadBarCalendarPromise = null;
+                        }
+                    });
+                }
+                const calendar = await this._loadBarCalendarPromise;
+                if (dataSeq !== (this._loadBarDataSeq || 0)) return;
+                this._loadBarCalendar = calendar;
             }
             const settings = (typeof App !== 'undefined' && App.settings) || {};
             const { load, label, breakdown } = collectQuarterLoad(
@@ -676,7 +738,9 @@ const Orders = {
         const container = document.getElementById('orders-table-view');
         const board = document.getElementById('orders-board-view');
         if (!container) return;
-        this.renderLoadBar();
+        if (!this.isLoading || this.allOrders.length) {
+            this.renderLoadBar();
+        }
 
         if (this.isLoading && !this.allOrders.length) {
             container.style.display = '';
