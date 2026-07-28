@@ -16,8 +16,8 @@
 - [x] Взять следующий номер версии от свежего `origin/main`, обновить четыре
   version anchor и cache-bust изменённых скриптов.
 - [x] Запустить полный локальный набор статических smoke-тестов и сборку API.
-- [ ] Запустить 177 API integration tests в CI с отдельной PostgreSQL.
-- [ ] Создать PR, дождаться CI, merge и проверить оба production-зеркала.
+- [x] Запустить 177 API integration tests в CI с отдельной PostgreSQL.
+- [x] Создать PR, дождаться CI, merge и проверить оба production-зеркала.
 
 ## Baseline 2026-07-28
 
