@@ -8,12 +8,14 @@ on:
     paths:
       - 'ops/api/**'
       - 'ops/db/**'
+      - 'ops/scripts/**'
       - 'ops/infra/docker-compose.yandex-shadow.yml'
       - 'ops/infra/scripts/deploy-yandex-shadow.sh'
       - 'ops/infra/scripts/deploy-yandex-caddy.sh'
       - 'ops/infra/scripts/rehearse-yandex-platform.sh'
       - 'ops/infra/yandex-caddy/**'
       - 'tests/yandex-platform-shadow-smoke.js'
+      - 'tests/storage-url-rewrite-smoke.mjs'
       - '.github/workflows/yandex-platform-shadow.yml'
 
 permissions:
