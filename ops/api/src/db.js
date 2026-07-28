@@ -15,13 +15,17 @@ export function getPool() {
     if (pool) {
       void pool.end();
     }
-    pool = new Pool({
+    const nextPool = new Pool({
       connectionString,
       max: 10,
       idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 1000,
-      allowExitOnIdle: true,
+      connectionTimeoutMillis: 5000,
+      allowExitOnIdle: false,
     });
+    nextPool.on('error', (error) => {
+      console.error(`[ops-api] PostgreSQL idle client error: ${error.message}`);
+    });
+    pool = nextPool;
     currentConnectionString = connectionString;
   }
 

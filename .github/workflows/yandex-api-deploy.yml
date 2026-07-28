@@ -1,0 +1,172 @@
+name: Yandex API deploy
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'ops/api/**'
+      - 'ops/db/**'
+      - 'ops/infra/docker-compose.yandex-shadow.yml'
+      - 'ops/infra/scripts/deploy-yandex-shadow.sh'
+      - 'tests/yandex-api-deploy-smoke.js'
+      - '.github/workflows/yandex-api-deploy.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: yandex-api-deploy
+  cancel-in-progress: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ops
+          POSTGRES_PASSWORD: ci_password
+          POSTGRES_DB: ops
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: ops/api/package-lock.json
+
+      - name: Install API dependencies
+        run: |
+          set -euo pipefail
+          cd ops/api
+          npm ci
+
+      - name: Apply migrations in CI
+        env:
+          DATABASE_URL: postgres://ops:ci_password@localhost:5432/ops
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+          bash ops/db/migrate.sh
+
+      - name: Test API
+        env:
+          TEST_DATABASE_URL: postgres://ops:ci_password@localhost:5432/ops
+        run: |
+          set -euo pipefail
+          cd ops/api
+          npm test
+
+      - name: Verify deploy safety contract
+        run: node tests/yandex-api-deploy-smoke.js
+
+      - name: Configure Yandex VM access
+        env:
+          YANDEX_VM_SSH_PRIVATE_KEY: ${{ secrets.YANDEX_VM_SSH_PRIVATE_KEY }}
+          YANDEX_VM_HOST: ${{ secrets.YANDEX_VM_HOST }}
+        run: |
+          set -euo pipefail
+          test -n "${YANDEX_VM_SSH_PRIVATE_KEY:-}"
+          test -n "${YANDEX_VM_HOST:-}"
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$YANDEX_VM_SSH_PRIVATE_KEY" > "$HOME/.ssh/yandex_vm"
+          chmod 600 "$HOME/.ssh/yandex_vm"
+          ssh-keyscan -H "$YANDEX_VM_HOST" >> "$HOME/.ssh/known_hosts"
+
+      - name: Create verified pre-deploy production backup
+        env:
+          YANDEX_VM_HOST: ${{ secrets.YANDEX_VM_HOST }}
+          YANDEX_VM_USER: ${{ secrets.YANDEX_VM_USER }}
+        run: |
+          set -euo pipefail
+          deploy_sha="${GITHUB_SHA::12}"
+          ssh -i "$HOME/.ssh/yandex_vm" \
+            "$YANDEX_VM_USER@$YANDEX_VM_HOST" \
+            "DEPLOY_SHA='$deploy_sha' bash -s" <<'REMOTE'
+          set -euo pipefail
+          set -a
+          source /home/robot/platform/infra/.env.shadow
+          set +a
+          backup_dir=/home/robot/platform-backups/api-deploy
+          backup_file="${backup_dir}/pre-api-deploy-${DEPLOY_SHA}-$(date -u +%Y%m%dT%H%M%SZ).dump"
+          install -d -m 700 "$backup_dir"
+          docker exec ro-platform-shadow-postgres \
+            pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc \
+            > "$backup_file"
+          test -s "$backup_file"
+          docker exec -i ro-platform-shadow-postgres pg_restore --list \
+            < "$backup_file" >/dev/null
+          chmod 600 "$backup_file"
+          sha256sum "$backup_file"
+          REMOTE
+
+      - name: Upload API runtime
+        env:
+          YANDEX_VM_HOST: ${{ secrets.YANDEX_VM_HOST }}
+          YANDEX_VM_USER: ${{ secrets.YANDEX_VM_USER }}
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/yandex_vm" \
+            "$YANDEX_VM_USER@$YANDEX_VM_HOST" \
+            'install -d -m 700 /home/robot/platform/api /home/robot/platform/db /home/robot/platform/infra/scripts'
+          rsync -az --exclude node_modules \
+            -e "ssh -i $HOME/.ssh/yandex_vm" \
+            ops/api/ "$YANDEX_VM_USER@$YANDEX_VM_HOST:/home/robot/platform/api/"
+          rsync -az \
+            -e "ssh -i $HOME/.ssh/yandex_vm" \
+            ops/db/ "$YANDEX_VM_USER@$YANDEX_VM_HOST:/home/robot/platform/db/"
+          scp -i "$HOME/.ssh/yandex_vm" \
+            ops/infra/docker-compose.yandex-shadow.yml \
+            "$YANDEX_VM_USER@$YANDEX_VM_HOST:/home/robot/platform/infra/docker-compose.yandex-shadow.yml"
+          scp -i "$HOME/.ssh/yandex_vm" \
+            ops/infra/scripts/deploy-yandex-shadow.sh \
+            "$YANDEX_VM_USER@$YANDEX_VM_HOST:/home/robot/platform/infra/scripts/deploy-yandex-shadow.sh"
+
+      - name: Deploy replacement API without data refresh
+        env:
+          YANDEX_VM_HOST: ${{ secrets.YANDEX_VM_HOST }}
+          YANDEX_VM_USER: ${{ secrets.YANDEX_VM_USER }}
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/yandex_vm" \
+            "$YANDEX_VM_USER@$YANDEX_VM_HOST" \
+            'chmod +x /home/robot/platform/infra/scripts/deploy-yandex-shadow.sh && /home/robot/platform/infra/scripts/deploy-yandex-shadow.sh'
+
+      - name: Verify production and rollback contour
+        env:
+          YANDEX_VM_HOST: ${{ secrets.YANDEX_VM_HOST }}
+          YANDEX_VM_USER: ${{ secrets.YANDEX_VM_USER }}
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error https://api.recycleobject.ru/api/health \
+            | grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"'
+          ssh -i "$HOME/.ssh/yandex_vm" \
+            "$YANDEX_VM_USER@$YANDEX_VM_HOST" bash <<'REMOTE'
+          set -euo pipefail
+          test "$(docker inspect --format '{{.State.Status}}' ro-platform-shadow-api)" = running
+          test "$(docker inspect --format '{{.RestartCount}}' ro-platform-shadow-api)" = 0
+          test "$(docker inspect --format '{{.State.Status}}' ro-platform-shadow-postgres)" = running
+          test "$(docker inspect --format '{{.State.Status}}' ro-timebot)" = running
+          test "$(docker inspect --format '{{.State.Status}}' supabase-db)" = running
+          docker image inspect ro-timebot:pre-yandex-cutover-v421-20260728 >/dev/null
+          REMOTE

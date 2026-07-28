@@ -63,8 +63,6 @@ for attempt in 1 2 3 4 5 6; do
       docker exec -i "${POSTGRES_CONTAINER}" pg_restore --list \
         < "${BACKUP_FILE}" > /dev/null
       chmod 600 "${BACKUP_FILE}"
-      find "${BACKUP_DIR}" -type f -name 'ro-platform-shadow-*.dump' \
-        -mtime +7 -delete
       cat /tmp/ro-platform-shadow-health.json
       printf '\n'
       exit 0
