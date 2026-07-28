@@ -16,6 +16,7 @@ const baseOrigin =
 const smokeUserId = process.env.RO_SMOKE_USER_ID || '1772715209137';
 const smokeBearerToken = String(process.env.RO_SMOKE_BEARER_TOKEN || '').trim();
 const browserLogs = [];
+const authenticatedPages = new WeakSet();
 
 function buildUrl(hash) {
   const url = new URL(baseOrigin);
@@ -92,11 +93,14 @@ async function ensureAuthenticated(page) {
 }
 
 async function openAuthedHash(page, hash) {
-  await page.goto(buildUrl(hash), {
-    waitUntil: 'domcontentloaded',
-    timeout: 60_000
-  });
-  await ensureAuthenticated(page);
+  if (!authenticatedPages.has(page)) {
+    await page.goto(buildUrl(hash), {
+      waitUntil: 'domcontentloaded',
+      timeout: 60_000
+    });
+    await ensureAuthenticated(page);
+    authenticatedPages.add(page);
+  }
   await page.evaluate(async (nextHash) => {
     if (location.hash !== nextHash) {
       location.hash = nextHash;
