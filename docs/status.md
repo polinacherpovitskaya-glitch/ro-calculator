@@ -1,11 +1,40 @@
 # Status
 
 ## Snapshot
-- Current phase: M6a - reproducible Yandex DB cutover preflight
-- Plan file: `/Users/krollipolli/Documents/Github/RO calculator/docs/plans.md`
-- Migration readiness file: `/Users/krollipolli/Documents/Github/RO calculator/docs/yandex-migration-readiness.md`
-- Status: yellow — production остаётся на Supabase, cutover не назначен
-- Last updated: 2026-07-17
+- Current phase: M2 — deterministic four-person scheduling
+- Plan file: `docs/plans/2026-07-28-production-calendar-priority-gantt.md`
+- Status: yellow — the interaction contract is documented; implementation and regression checks are in progress
+- Last updated: 2026-07-28
+
+## Production calendar priority Gantt — 2026-07-28
+
+### Done
+
+- Documented the unified draggable priority Gantt in `docs/specs/2026-07-28-production-calendar-priority-gantt.md`.
+- Verified that the existing worker-slot scheduler already supports parallel allocation and priority propagation.
+- Confirmed that “36 hours per day” is aggregate person-hours (`4 × 9`), not a useful standalone calendar view.
+
+### In progress
+
+- Fixing the production boundary at four people with a nine-hour default shift.
+- Replacing the separate queue and capacity widgets with controls embedded in the Gantt rows.
+
+### Next
+
+- Update focused smoke coverage.
+- Bump the release version and cache keys after refreshing `origin/main`.
+- Run regression tests and review the final diff.
+
+### Decisions and assumptions
+
+- The control assigns a number of workers, not named employees.
+- Production holidays remain editable because timekeeping also consumes them.
+- No database tables, saved orders, or production-plan fields are deleted.
+- The legacy active-worker override may remain stored for compatibility but no longer controls this calendar.
+
+### Blockers
+
+- None.
 
 ## Build / Deploy Source Of Truth
 - Public deploy source: `origin/main` -> `.github/workflows/deploy-pages.yml` -> Vercel (`calc.recycleobject.ru`) + GitHub Pages reserve.
