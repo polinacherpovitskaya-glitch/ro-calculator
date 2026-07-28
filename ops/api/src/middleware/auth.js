@@ -14,6 +14,7 @@ export async function requireAuth(req, res, next) {
           email: `bot:${rows[0].name}`,
           role: rows[0].role,
           employeeId: null,
+          legacyAccountId: null,
           mustChangePassword: false,
         };
         return next();
@@ -40,6 +41,7 @@ export async function requireAuth(req, res, next) {
     email: session.email,
     role: session.role,
     employeeId: session.employee_id,
+    legacyAccountId: session.legacy_account_id,
     mustChangePassword: session.must_change_password,
   };
   next();

@@ -28,10 +28,13 @@ import payrollRoute from './routes/payroll.js';
 import analyticsRoute from './routes/analytics.js';
 import settingsRoute from './routes/settings.js';
 import { selectelUrlSigningMiddleware } from './s3.js';
+import compatRoute from './routes/compat.js';
+import { calculatorCors } from './middleware/cors.js';
 
 export function createServer() {
   const app = express();
   app.set('trust proxy', 1);
+  app.use(calculatorCors);
   app.use(express.json({ limit: '5mb' }));
   app.use(cookieParser());
   app.use(selectelUrlSigningMiddleware());
@@ -62,5 +65,6 @@ export function createServer() {
   app.use('/api/payroll', payrollRoute);
   app.use('/api/analytics', analyticsRoute);
   app.use('/api/settings', settingsRoute);
+  app.use('/api/compat', compatRoute);
   return app;
 }

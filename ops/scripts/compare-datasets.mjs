@@ -580,7 +580,10 @@ async function main() {
   }
 
   for (const table of COMPAT_TABLES) {
-    const sbCount = await supabaseCount(table);
+    // The compatibility store intentionally preserves raw Supabase row
+    // shapes, including soft-deleted orders and aggregate JSON rows. Do not
+    // compare it against the normalized/canonical count rules above.
+    const sbCount = (await fetchAll(table)).length;
     const { rows } = await pool.query(
       `SELECT COUNT(*)::int AS n
          FROM compat_rows

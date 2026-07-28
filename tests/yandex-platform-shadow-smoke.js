@@ -51,6 +51,22 @@ const compareDatasets = fs.readFileSync(
   path.join(root, 'ops/scripts/compare-datasets.mjs'),
   'utf8'
 );
+const compatMigration = fs.readFileSync(
+  path.join(root, 'ops/db/migrations/017_compatibility_store.sql'),
+  'utf8'
+);
+const legacyAuthMigration = fs.readFileSync(
+  path.join(root, 'ops/db/migrations/018_legacy_auth_bridge.sql'),
+  'utf8'
+);
+const compatRoute = fs.readFileSync(
+  path.join(root, 'ops/api/src/routes/compat.js'),
+  'utf8'
+);
+const apiServer = fs.readFileSync(
+  path.join(root, 'ops/api/src/server.js'),
+  'utf8'
+);
 
 assert.match(compose, /name: ro-platform-shadow/);
 assert.match(compose, /image: postgres:16-alpine/);
@@ -110,6 +126,15 @@ assert.match(compareDatasets, /'finance_transactions'/);
 assert.match(compareDatasets, /'fintablo_imports'/);
 assert.match(compareDatasets, /archive:/);
 assert.match(compareDatasets, /compat:/);
+assert.match(compareDatasets, /const sbCount = \(await fetchAll\(table\)\)\.length/);
+assert.match(compatMigration, /CREATE TABLE IF NOT EXISTS compat_rows/);
+assert.match(compatMigration, /data JSONB NOT NULL/);
+assert.match(legacyAuthMigration, /legacy_account_id TEXT/);
+assert.match(compatRoute, /pg_advisory_xact_lock/);
+assert.match(compatRoute, /withIdempotency/);
+assert.match(compatRoute, /requireAuth/);
+assert.match(apiServer, /calculatorCors/);
+assert.match(apiServer, /\/api\/compat/);
 
 assert.match(workflow, /name: Yandex platform shadow/);
 assert.match(workflow, /secrets\.YANDEX_VM_SSH_PRIVATE_KEY/);

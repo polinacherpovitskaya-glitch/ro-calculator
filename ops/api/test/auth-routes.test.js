@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import { createServer } from '../src/server.js';
 import { getPool } from '../src/db.js';
 import { hashPassword, verifyPassword } from '../src/auth/argon.js';
+import { hashLegacyPassword } from '../src/auth/legacy.js';
 
 const DB_URL = process.env.TEST_DATABASE_URL || 'postgres://ops:ops_dev_password@127.0.0.1:5433/ops';
 process.env.DATABASE_URL = DB_URL;
@@ -160,4 +161,59 @@ test('POST /api/auth/change-password updates hash and clears must_change_passwor
   );
   assert.equal(userRes.rows[0].must_change_password, false);
   assert.equal(await verifyPassword('newpass12345', userRes.rows[0].password_hash), true);
+});
+
+test('legacy calculator login verifies server-side and never exposes password hashes', async (t) => {
+  const accountId = `legacy-${crypto.randomUUID()}`;
+  const password = 'legacy-test-password';
+  const account = {
+    id: accountId,
+    username: `worker-${crypto.randomUUID()}`,
+    employee_name: 'Тестовый сотрудник',
+    role: 'employee',
+    pages: ['orders', 'timetrack'],
+    is_active: true,
+    password_hash: hashLegacyPassword(`worker-placeholder`, password),
+    password_hash_version: 2,
+  };
+  account.password_hash = hashLegacyPassword(account.username, password);
+
+  await getPool().query(
+    `INSERT INTO compat_rows (table_name, source_id, data)
+     VALUES ('settings', 'auth_accounts_json', $1)
+     ON CONFLICT (table_name, source_id) DO UPDATE SET data = EXCLUDED.data`,
+    [{ key: 'auth_accounts_json', value: JSON.stringify([account]) }],
+  );
+  t.after(async () => {
+    await getPool().query(`DELETE FROM auth_users WHERE legacy_account_id = $1`, [accountId]);
+    await getPool().query(
+      `DELETE FROM compat_rows WHERE table_name = 'settings' AND source_id = 'auth_accounts_json'`,
+    );
+  });
+
+  const port = await startServer(t);
+  const listResponse = await fetch(`http://127.0.0.1:${port}/api/auth/legacy-accounts`);
+  const list = await listResponse.json();
+  assert.equal(listResponse.status, 200);
+  assert.equal(list.accounts[0].id, accountId);
+  assert.equal(Object.hasOwn(list.accounts[0], 'password_hash'), false);
+
+  const loginResponse = await fetch(`http://127.0.0.1:${port}/api/auth/legacy-login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ account_id: accountId, password }),
+  });
+  const loginBody = await loginResponse.json();
+  assert.equal(loginResponse.status, 200);
+  assert.equal(loginBody.account.id, accountId);
+  assert.equal(Object.hasOwn(loginBody.account, 'password_hash'), false);
+  const cookie = getSessionCookie(loginResponse);
+
+  const meResponse = await fetch(`http://127.0.0.1:${port}/api/auth/legacy-me`, {
+    headers: { cookie },
+  });
+  const meBody = await meResponse.json();
+  assert.equal(meResponse.status, 200);
+  assert.equal(meBody.account.employee_name, 'Тестовый сотрудник');
+  assert.equal(meBody.user.legacyAccountId, accountId);
 });
