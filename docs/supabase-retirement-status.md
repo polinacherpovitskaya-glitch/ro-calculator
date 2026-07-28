@@ -73,6 +73,10 @@
 ## In Progress
 
 - Окно наблюдения. Старый Supabase и его Storage остаются нетронутыми.
+- Усиливается ежедневный backup: source Supabase + target Yandex PostgreSQL,
+  локальная target-копия на VM, проверенная cloud-копия и bucket versioning.
+- Backup hardening run `30386066187` зелёный: ежедневный и постоянный cutover
+  наборы загружены, скачаны обратно и прошли исходные SHA-256 manifests.
 
 ## Next
 
@@ -135,6 +139,8 @@ node tests/version-smoke.js
 | 2026-07-28 | M7 | final parity | source + Yandex PostgreSQL | 366/366 hours; all datasets and URL rewrite green | switch |
 | 2026-07-28 | M7 | timebot | Actions `30383667643`, `30383872866` | API poller, Telegram relay, DB and heartbeat green | frontend |
 | 2026-07-28 | M7 | v422 production | Actions `30383670546`, `30384324698`, `30384552008`, `30384892744` | both domains, write-back and browser smokes green | M8 |
+| 2026-07-28 | M8 | merged cutover | PR `#212`, merge `6ad500ce` | main deploy, timebot, write-back, health and live smoke green | backup hardening |
+| 2026-07-28 | M8 | backup hardening | Actions `30386066187` | source/target/Storage cloud round-trip green; media and backup versioning enabled | observation |
 
 ## Smoke / Demo Checklist
 

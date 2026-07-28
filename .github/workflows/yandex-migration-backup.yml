@@ -2,6 +2,12 @@ name: Yandex production backup
 
 on:
   workflow_dispatch:
+    inputs:
+      preserve_cutover:
+        description: Copy the verified July 28 cutover bundle into the permanent cloud prefix
+        required: false
+        default: false
+        type: boolean
   schedule:
     - cron: '41 2 * * *'
 
@@ -17,7 +23,9 @@ env:
   YC_CLOUD_ID: b1gl59l77vb50ihub2nd
   YC_FOLDER_ID: b1gc32hu5ujioie1o0ht
   RO_YANDEX_BACKUP_BUCKET: ro-yandex-migration-snapshots-b1gl59l77vb50ihub2nd
-  RO_YANDEX_BACKUP_KEEP: 14
+  RO_YANDEX_MEDIA_BUCKET: ro-platform-media-b1gl59l77vb50ihub2nd
+  RO_YANDEX_BACKUP_KEEP: 30
+  RO_CUTOVER_STAMP: 20260728T172717Z
 
 jobs:
   backup:
@@ -50,19 +58,80 @@ jobs:
           test -n "$YANDEX_VM_USER"
           mkdir -p output/yandex-production-backup
           stamp="$(date -u +%Y%m%dT%H%M%SZ)"
-          db_file="output/yandex-production-backup/postgres-${stamp}.dump"
+          source_db_file="output/yandex-production-backup/source-supabase-postgres-${stamp}.dump"
+          target_db_file="output/yandex-production-backup/target-yandex-postgres-${stamp}.dump"
           storage_file="output/yandex-production-backup/storage-${stamp}.tgz"
+          remote_target_dir="/home/robot/platform-backups/daily"
+          remote_target_file="${remote_target_dir}/target-yandex-postgres-${stamp}.dump"
 
           ssh -i "$HOME/.ssh/yandex_vm" "$YANDEX_VM_USER@$YANDEX_VM_HOST" \
-            "docker exec supabase-db pg_dump -U supabase_admin -d postgres -Fc" > "$db_file"
+            "docker exec supabase-db pg_dump -U supabase_admin -d postgres -Fc" \
+            > "$source_db_file"
+          ssh -i "$HOME/.ssh/yandex_vm" "$YANDEX_VM_USER@$YANDEX_VM_HOST" \
+            "STAMP='$stamp' REMOTE_TARGET_DIR='$remote_target_dir' REMOTE_TARGET_FILE='$remote_target_file' bash -s" <<'REMOTE'
+          set -euo pipefail
+          set -a
+          source /home/robot/platform/infra/.env.shadow
+          set +a
+          install -d -m 700 "$REMOTE_TARGET_DIR"
+          docker exec ro-platform-shadow-postgres \
+            pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc \
+            > "$REMOTE_TARGET_FILE"
+          test -s "$REMOTE_TARGET_FILE"
+          docker exec -i ro-platform-shadow-postgres pg_restore --list \
+            < "$REMOTE_TARGET_FILE" >/dev/null
+          chmod 600 "$REMOTE_TARGET_FILE"
+          (
+            cd "$REMOTE_TARGET_DIR"
+            sha256sum "$(basename "$REMOTE_TARGET_FILE")" \
+              > "$(basename "$REMOTE_TARGET_FILE").sha256"
+          )
+          find "$REMOTE_TARGET_DIR" -type f \
+            \( -name 'target-yandex-postgres-*.dump' -o -name 'target-yandex-postgres-*.dump.sha256' \) \
+            -mtime +30 -delete
+          REMOTE
+          scp -i "$HOME/.ssh/yandex_vm" \
+            "$YANDEX_VM_USER@$YANDEX_VM_HOST:$remote_target_file" \
+            "$target_db_file"
+          scp -i "$HOME/.ssh/yandex_vm" \
+            "$YANDEX_VM_USER@$YANDEX_VM_HOST:${remote_target_file}.sha256" \
+            output/yandex-production-backup/target-remote.sha256
           ssh -i "$HOME/.ssh/yandex_vm" "$YANDEX_VM_USER@$YANDEX_VM_HOST" \
             "tar -C /home/robot/sb/docker/volumes -czf - storage" > "$storage_file"
 
-          test -s "$db_file"
+          test -s "$source_db_file"
+          test -s "$target_db_file"
           test -s "$storage_file"
-          docker run --rm -i postgres:17 pg_restore --list < "$db_file" >/dev/null
+          docker run --rm -i postgres:17 pg_restore --list \
+            < "$source_db_file" >/dev/null
+          docker run --rm -i postgres:17 pg_restore --list \
+            < "$target_db_file" >/dev/null
           tar -tzf "$storage_file" >/dev/null
-          sha256sum "$db_file" "$storage_file" > output/yandex-production-backup/SHA256SUMS
+          expected_target_sha="$(
+            awk '{print $1}' output/yandex-production-backup/target-remote.sha256
+          )"
+          actual_target_sha="$(sha256sum "$target_db_file" | awk '{print $1}')"
+          test "$expected_target_sha" = "$actual_target_sha"
+          sha256sum "$source_db_file" "$target_db_file" "$storage_file" \
+            > output/yandex-production-backup/SHA256SUMS
+
+      - name: Stage immutable cutover bundle
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.preserve_cutover }}
+        env:
+          YANDEX_VM_HOST: ${{ secrets.YANDEX_VM_HOST }}
+          YANDEX_VM_USER: ${{ secrets.YANDEX_VM_USER }}
+        run: |
+          set -euo pipefail
+          cutover_dir="output/yandex-production-backup/cutover/${RO_CUTOVER_STAMP}"
+          mkdir -p "$cutover_dir"
+          scp -i "$HOME/.ssh/yandex_vm" \
+            "$YANDEX_VM_USER@$YANDEX_VM_HOST:/home/robot/cutover-backups/${RO_CUTOVER_STAMP}/*" \
+            "$cutover_dir/"
+          (
+            cd "$cutover_dir"
+            sha256sum -c SHA256SUMS
+            sha256sum -c FINAL-SHA256SUMS
+          )
 
       - name: Install Yandex Cloud CLI
         run: |
@@ -80,15 +149,38 @@ jobs:
           yc config set cloud-id "$YC_CLOUD_ID" >/dev/null
           yc config set folder-id "$YC_FOLDER_ID" >/dev/null
 
-          backup_prefix="production/$(date -u +%Y/%m/%d)"
-          for file in output/yandex-production-backup/postgres-*.dump output/yandex-production-backup/storage-*.tgz; do
+          yc storage bucket update "$RO_YANDEX_BACKUP_BUCKET" \
+            --versioning versioning-enabled >/dev/null
+          yc storage bucket update "$RO_YANDEX_MEDIA_BUCKET" \
+            --versioning versioning-enabled >/dev/null
+          for bucket in "$RO_YANDEX_BACKUP_BUCKET" "$RO_YANDEX_MEDIA_BUCKET"; do
+            yc storage bucket get "$bucket" --format json \
+              | tee "output/yandex-production-backup/${bucket}-versioning.json" \
+              | jq -e '
+                  ((.versioning // "") | ascii_downcase)
+                  | contains("enabled")
+                ' >/dev/null
+          done
+
+          stamp="$(
+            basename output/yandex-production-backup/target-yandex-postgres-*.dump \
+              | sed -E 's/^target-yandex-postgres-(.*)\.dump$/\1/'
+          )"
+          backup_prefix="production/$(date -u +%Y/%m/%d)/${stamp}"
+          for file in \
+            output/yandex-production-backup/source-supabase-postgres-*.dump \
+            output/yandex-production-backup/target-yandex-postgres-*.dump \
+            output/yandex-production-backup/storage-*.tgz; do
             yc storage s3 cp "$file" "s3://${RO_YANDEX_BACKUP_BUCKET}/${backup_prefix}/$(basename "$file")"
           done
           yc storage s3 cp output/yandex-production-backup/SHA256SUMS \
             "s3://${RO_YANDEX_BACKUP_BUCKET}/${backup_prefix}/SHA256SUMS"
 
           mkdir -p output/yandex-production-backup/verify
-          for file in output/yandex-production-backup/postgres-*.dump output/yandex-production-backup/storage-*.tgz; do
+          for file in \
+            output/yandex-production-backup/source-supabase-postgres-*.dump \
+            output/yandex-production-backup/target-yandex-postgres-*.dump \
+            output/yandex-production-backup/storage-*.tgz; do
             yc storage s3 cp \
               "s3://${RO_YANDEX_BACKUP_BUCKET}/${backup_prefix}/$(basename "$file")" \
               "output/yandex-production-backup/verify/$(basename "$file")"
@@ -97,6 +189,23 @@ jobs:
             output/yandex-production-backup/SHA256SUMS \
             > output/yandex-production-backup/verify/SHA256SUMS
           (cd output/yandex-production-backup/verify && sha256sum -c SHA256SUMS)
+
+          if [[ -d "output/yandex-production-backup/cutover/${RO_CUTOVER_STAMP}" ]]; then
+            yc storage s3 cp \
+              "output/yandex-production-backup/cutover/${RO_CUTOVER_STAMP}" \
+              "s3://${RO_YANDEX_BACKUP_BUCKET}/cutover/${RO_CUTOVER_STAMP}/" \
+              --recursive
+            mkdir -p output/yandex-production-backup/cutover-verify
+            yc storage s3 cp \
+              "s3://${RO_YANDEX_BACKUP_BUCKET}/cutover/${RO_CUTOVER_STAMP}/" \
+              output/yandex-production-backup/cutover-verify \
+              --recursive
+            (
+              cd output/yandex-production-backup/cutover-verify
+              sha256sum -c SHA256SUMS
+              sha256sum -c FINAL-SHA256SUMS
+            )
+          fi
 
           yc storage s3api list-objects \
             --bucket "$RO_YANDEX_BACKUP_BUCKET" \
@@ -122,7 +231,15 @@ jobs:
           );
           fs.writeFileSync(
             'output/yandex-production-backup/summary.json',
-            `${JSON.stringify({ uploaded: true, retainedDays: keep }, null, 2)}\n`,
+            `${JSON.stringify({
+              uploaded: true,
+              retainedDays: keep,
+              sourceDatabase: true,
+              targetDatabase: true,
+              sourceStorage: true,
+              vmTargetCopy: true,
+              bucketVersioning: true,
+            }, null, 2)}\n`,
           );
           NODE
 
@@ -143,4 +260,5 @@ jobs:
           path: |
             output/yandex-production-backup/SHA256SUMS
             output/yandex-production-backup/summary.json
+            output/yandex-production-backup/*-versioning.json
           if-no-files-found: error
