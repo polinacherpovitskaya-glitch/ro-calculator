@@ -132,7 +132,7 @@ async function main() {
       const orders = typeof loadOrders === 'function'
         ? await loadOrders()
         : [];
-      const orderItems = typeof getLocal === 'function' && typeof LOCAL_KEYS !== 'undefined'
+      const orderItemsBeforeDemand = typeof getLocal === 'function' && typeof LOCAL_KEYS !== 'undefined'
         ? (getLocal(LOCAL_KEYS.orderItems) || [])
         : [];
       const chinaPurchases = typeof loadChinaPurchases === 'function'
@@ -144,6 +144,7 @@ async function main() {
 
       let demandRows = [];
       let demandOrder = null;
+      let demandOrderItemCount = 0;
       if (typeof Warehouse !== 'undefined' && typeof Warehouse._collectWarehouseDemandFromOrderItems === 'function') {
         Warehouse.allItems = warehouseItems;
         const projectStatuses = new Set([
@@ -163,11 +164,15 @@ async function main() {
           const rows = Warehouse._collectWarehouseDemandFromOrderItems(detail?.items || []);
           if (rows.length > 0) {
             demandRows = rows;
+            demandOrderItemCount = Array.isArray(detail?.items) ? detail.items.length : 0;
             demandOrder = { id: order.id, name: order.order_name || '', status: order.status || '' };
             break;
           }
         }
       }
+      const orderItemsAfterDemand = typeof getLocal === 'function' && typeof LOCAL_KEYS !== 'undefined'
+        ? (getLocal(LOCAL_KEYS.orderItems) || [])
+        : [];
 
       if (typeof Warehouse !== 'undefined' && typeof Warehouse.setView === 'function') {
         Warehouse.allItems = warehouseItems;
@@ -213,7 +218,9 @@ async function main() {
         bootstrap,
         warehouseItemCount: Array.isArray(warehouseItems) ? warehouseItems.length : 0,
         ordersCount: Array.isArray(orders) ? orders.length : 0,
-        orderItemsCount: Array.isArray(orderItems) ? orderItems.length : 0,
+        orderItemsBeforeDemandCount: Array.isArray(orderItemsBeforeDemand) ? orderItemsBeforeDemand.length : 0,
+        orderItemsCount: Array.isArray(orderItemsAfterDemand) ? orderItemsAfterDemand.length : 0,
+        demandOrderItemCount,
         chinaPurchaseCount: Array.isArray(chinaPurchases) ? chinaPurchases.length : 0,
         shipmentsCount: Array.isArray(shipments) ? shipments.length : 0,
         demandRowsCount: demandRows.length,
@@ -251,7 +258,8 @@ async function main() {
     assert.ok(state.bootstrap.shipments >= 0, `Expected shipments field in bootstrap, got ${state.bootstrap.shipments}`);
     assert.ok(state.warehouseItemCount > 0, `Expected warehouse items from mirror fallback, got ${state.warehouseItemCount}`);
     assert.ok(state.ordersCount > 0, `Expected orders from mirror fallback, got ${state.ordersCount}`);
-    assert.ok(state.orderItemsCount > 0, `Expected cached order items from mirror fallback, got ${state.orderItemsCount}`);
+    assert.ok(state.demandOrderItemCount > 0, `Expected on-demand order items from Yandex API, got ${state.demandOrderItemCount}`);
+    assert.ok(state.orderItemsCount > 0, `Expected opened order items in local cache, got ${state.orderItemsCount}`);
     assert.ok(state.chinaPurchaseCount > 0, `Expected China purchases from mirror fallback, got ${state.chinaPurchaseCount}`);
     assert.ok(state.shipmentsCount >= 0, `Expected shipments from mirror fallback, got ${state.shipmentsCount}`);
     assert.ok(state.demandRowsCount > 0, `Expected at least one project hardware demand row, got ${JSON.stringify(state.demandOrder)}`);
@@ -271,7 +279,9 @@ async function main() {
       version: state.appVersion,
       warehouseItemCount: state.warehouseItemCount,
       ordersCount: state.ordersCount,
+      orderItemsBeforeDemandCount: state.orderItemsBeforeDemandCount,
       orderItemsCount: state.orderItemsCount,
+      demandOrderItemCount: state.demandOrderItemCount,
       chinaPurchaseCount: state.chinaPurchaseCount,
       shipmentsCount: state.shipmentsCount,
       demandRowsCount: state.demandRowsCount,
