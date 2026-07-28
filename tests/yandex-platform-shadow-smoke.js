@@ -105,9 +105,11 @@ assert.match(financeRefresh, /finance_transactions/);
 assert.match(financeRefresh, /legacy_finance_transactions/);
 assert.match(refreshSnapshot, /'11-finance'/);
 assert.match(refreshSnapshot, /'12-legacy-site-archive'/);
+assert.match(refreshSnapshot, /'13-compatibility-store'/);
 assert.match(compareDatasets, /'finance_transactions'/);
 assert.match(compareDatasets, /'fintablo_imports'/);
 assert.match(compareDatasets, /archive:/);
+assert.match(compareDatasets, /compat:/);
 
 assert.match(workflow, /name: Yandex platform shadow/);
 assert.match(workflow, /secrets\.YANDEX_VM_SSH_PRIVATE_KEY/);

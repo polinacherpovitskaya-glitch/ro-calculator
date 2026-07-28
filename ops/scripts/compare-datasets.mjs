@@ -112,6 +112,74 @@ const LEGACY_SITE_TABLES = [
   'site_settings',
 ];
 
+const COMPAT_TABLES = [
+  'admin_users',
+  'app_colors',
+  'app_tasks',
+  'app_vacations',
+  'areas',
+  'bank_accounts',
+  'bank_sync_runs',
+  'bank_transactions',
+  'blank_color_tuning',
+  'cases',
+  'certificate_redemptions',
+  'certificates',
+  'china_orders',
+  'china_purchases',
+  'consent_logs',
+  'email_subscribers',
+  'employees',
+  'faq',
+  'finance_accounts',
+  'finance_categories',
+  'finance_counterparties',
+  'finance_directions',
+  'finance_manual_decisions',
+  'finance_rules',
+  'finance_sources',
+  'finance_transaction_links',
+  'finance_transactions',
+  'fintablo_imports',
+  'form_submissions',
+  'hw_blanks',
+  'legacy_finance_import_runs',
+  'legacy_finance_transactions',
+  'marketplace_sets',
+  'message_templates',
+  'molds',
+  'notification_log',
+  'order_factuals',
+  'order_items',
+  'order_shipments',
+  'order_timeline',
+  'orders',
+  'page_content',
+  'pkg_blanks',
+  'product_templates',
+  'products',
+  'projects',
+  'promo_codes',
+  'promo_redemptions',
+  'return_requests',
+  'settings',
+  'shipments',
+  'shop_orders',
+  'site_settings',
+  'task_checklist_items',
+  'task_comments',
+  'task_notification_events',
+  'task_watchers',
+  'tasks',
+  'time_entries',
+  'warehouse_history',
+  'warehouse_items',
+  'warehouse_reservations',
+  'work_activity',
+  'work_assets',
+  'work_templates',
+];
+
 function parseJson(value) {
   if (!value) return {};
   if (typeof value === 'object') return value;
@@ -506,6 +574,22 @@ async function main() {
     const pgCount = rows[0].n;
     const diff = pgCount - sbCount;
     const label = `archive:${table}`;
+    const status = diff === 0 ? 'OK' : 'MISMATCH';
+    console.log(`${label.padEnd(29)} ${String(sbCount).padStart(8)} ${String(pgCount).padStart(9)} ${String(diff).padStart(5)} ${status}`);
+    if (diff !== 0) allOk = false;
+  }
+
+  for (const table of COMPAT_TABLES) {
+    const sbCount = await supabaseCount(table);
+    const { rows } = await pool.query(
+      `SELECT COUNT(*)::int AS n
+         FROM compat_rows
+        WHERE table_name = $1`,
+      [table],
+    );
+    const pgCount = rows[0].n;
+    const diff = pgCount - sbCount;
+    const label = `compat:${table}`;
     const status = diff === 0 ? 'OK' : 'MISMATCH';
     console.log(`${label.padEnd(29)} ${String(sbCount).padStart(8)} ${String(pgCount).padStart(9)} ${String(diff).padStart(5)} ${status}`);
     if (diff !== 0) allOk = false;
