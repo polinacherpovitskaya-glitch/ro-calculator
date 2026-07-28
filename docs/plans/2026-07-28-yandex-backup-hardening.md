@@ -16,8 +16,8 @@
 - [x] Включать и проверять versioning backup/media buckets.
 - [x] Добавить отдельный immutable prefix для cutover bundle.
 - [x] Расширить workflow smoke contract.
-- [ ] Запустить workflow с сохранением cutover bundle.
-- [ ] Проверить production health после backup.
+- [x] Запустить workflow с сохранением cutover bundle.
+- [x] Проверить production health после backup.
 
 ## Stop-and-fix
 
@@ -25,4 +25,3 @@
 - При ошибке target dump старый backup workflow не удаляет исходные данные.
 - Никакой Supabase container, volume или source object не удаляется этим
   проектом.
-
