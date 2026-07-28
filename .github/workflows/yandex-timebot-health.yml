@@ -93,6 +93,15 @@ jobs:
           journalctl -k --since '-30 minutes' --no-pager 2>/dev/null \
             | grep -Ei 'out of memory|oom-kill|killed process' \
             | tail -40 || true
+          docker inspect --format \
+            'api_process path={{.Path}} args={{json .Args}} restart_policy={{.HostConfig.RestartPolicy.Name}}' \
+            ro-platform-shadow-api
+          docker logs --since 30m --timestamps --tail 600 \
+            ro-platform-shadow-api 2>&1 \
+            | grep -Ei '\[ops-api\]|error|fatal|killed|heap|econn|etimedout|uncaught|unhandled|sigterm' \
+            | sed -E \
+                's/(authorization|bearer|token|password|secret)[=: ]+[^ ,;]+/\1=[REDACTED]/Ig' \
+            | tail -240 || true
 
           source_time_entries="$(
             docker exec supabase-db psql -U supabase_admin -d postgres -At \
