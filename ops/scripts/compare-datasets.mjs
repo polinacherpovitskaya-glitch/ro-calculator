@@ -70,6 +70,21 @@ const TABLES = [
   'time_entries',
   'app_vacations',
   'settings',
+  'finance_sources',
+  'finance_accounts',
+  'finance_categories',
+  'finance_directions',
+  'finance_counterparties',
+  'finance_transactions',
+  'finance_transaction_links',
+  'finance_rules',
+  'finance_manual_decisions',
+  'bank_sync_runs',
+  'bank_accounts',
+  'bank_transactions',
+  'legacy_finance_import_runs',
+  'legacy_finance_transactions',
+  'fintablo_imports',
 ];
 
 function parseJson(value) {

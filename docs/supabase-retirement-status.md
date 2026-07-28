@@ -33,13 +33,14 @@
 - Илья Теряев (`@ILAYTONKO`) и Влад Галкин (`@tigreslav`) активны; их записи
   времени за 27 июля присутствуют в production DB.
 - Десять refresh scripts скопировали production snapshot в shadow PostgreSQL.
-- Первый count parity: 39 из 39 покрытых наборов совпали, включая 364
-  `time_entries`, 309 активных заказов, 838 `order_items` и склад.
+- Count parity: 54 из 54 покрытых наборов совпали, включая 364
+  `time_entries`, 309 активных заказов, 838 `order_items`, склад, 19 178
+  `finance_transactions`, 17 534 `legacy_finance_transactions` и 1 644
+  `bank_transactions`.
 
 ## In Progress
 
-- Gap-анализ и migrations для finance/site-таблиц, которых нет в текущих 39
-  parity checks.
+- Gap-анализ и migrations/routes для оставшихся site-таблиц.
 
 ## Next
 
@@ -88,7 +89,8 @@ node tests/version-smoke.js
 | 2026-07-28 | M2 | DNS/Caddy | Actions run `30365536034` | Public HTTPS health green; old DB route green | M3 |
 | 2026-07-28 | M2 | backup/restart | `pg_restore --list`, container restart | Verified backup; API recovered with DB healthy | M3 |
 | 2026-07-28 | M2 | timebot monitor | Actions run `30365779852` | Bot, relay, DB, replacement API and test alert green | M3 |
-| 2026-07-28 | M3 | covered data rehearsal | ten refresh scripts + `compare-datasets.mjs` | 39/39 covered datasets count-match | gap analysis |
+| 2026-07-28 | M3 | core data rehearsal | ten refresh scripts + `compare-datasets.mjs` | 39/39 core datasets count-match | finance |
+| 2026-07-28 | M3 | finance rehearsal | migration 014 + refresh 11 | 15/15 finance datasets count-match; 54/54 total | site gap |
 
 ## Smoke / Demo Checklist
 

@@ -81,6 +81,7 @@ async function main() {
     '08-work-management',
     '09-time-payroll',
     '10-settings',
+    '11-finance',
   ]) {
     runRefreshScript(script);
   }

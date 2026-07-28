@@ -31,6 +31,22 @@ const rehearsal = fs.readFileSync(
   path.join(root, 'ops/infra/scripts/rehearse-yandex-platform.sh'),
   'utf8'
 );
+const financeMigration = fs.readFileSync(
+  path.join(root, 'ops/db/migrations/014_finance.sql'),
+  'utf8'
+);
+const financeRefresh = fs.readFileSync(
+  path.join(root, 'ops/scripts/refresh/11-finance.mjs'),
+  'utf8'
+);
+const refreshSnapshot = fs.readFileSync(
+  path.join(root, 'ops/scripts/refresh-staging-snapshot.mjs'),
+  'utf8'
+);
+const compareDatasets = fs.readFileSync(
+  path.join(root, 'ops/scripts/compare-datasets.mjs'),
+  'utf8'
+);
 
 assert.match(compose, /name: ro-platform-shadow/);
 assert.match(compose, /image: postgres:16-alpine/);
@@ -72,6 +88,18 @@ assert.match(rehearsal, /grep -q 'MISMATCH'/);
 assert.match(rehearsal, /pg_dump[^]*-Fc/);
 assert.match(rehearsal, /pg_restore --list/);
 assert.doesNotMatch(rehearsal, /Selectel|OPS_HOST|ops-staging/i);
+
+assert.match(financeMigration, /CREATE TABLE IF NOT EXISTS finance_transactions/);
+assert.match(financeMigration, /CREATE TABLE IF NOT EXISTS bank_transactions/);
+assert.match(financeMigration, /CREATE TABLE IF NOT EXISTS legacy_finance_transactions/);
+assert.match(financeMigration, /CREATE TABLE IF NOT EXISTS fintablo_imports/);
+assert.match(financeRefresh, /PAGE_SIZE = 1000/);
+assert.match(financeRefresh, /OVERRIDING SYSTEM VALUE/);
+assert.match(financeRefresh, /finance_transactions/);
+assert.match(financeRefresh, /legacy_finance_transactions/);
+assert.match(refreshSnapshot, /'11-finance'/);
+assert.match(compareDatasets, /'finance_transactions'/);
+assert.match(compareDatasets, /'fintablo_imports'/);
 
 assert.match(workflow, /name: Yandex platform shadow/);
 assert.match(workflow, /secrets\.YANDEX_VM_SSH_PRIVATE_KEY/);
