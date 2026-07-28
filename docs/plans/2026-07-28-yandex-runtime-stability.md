@@ -12,7 +12,7 @@
 - [x] Добавить pool error listener и безопасный connect timeout.
 - [x] Добавить unit/contract tests.
 - [x] Добавить API-only deploy с pre-deploy backup.
-- [x] Убрать автоматическое удаление старых deploy dumps.
+- [x] Убрать автоматическое удаление старых deploy, VM и cloud dumps.
 - [x] Делегировать одиночный Telegram timeout независимому relay probe.
 - [ ] Выполнить production API deploy.
 - [ ] Проверить restart count, bot, live, mirror и write-back.

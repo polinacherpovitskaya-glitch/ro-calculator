@@ -33,7 +33,7 @@
 
 - Не запускать migration rehearsal или source-to-target refresh.
 - Не останавливать и не удалять Supabase, volumes, Storage или rollback image.
-- Не удалять старые production dumps по возрасту.
+- Не удалять старые production dumps или cloud generations по возрасту.
 - До API deploy создавать и проверять отдельный production dump.
 - Не логировать connection strings, токены или Telegram secrets.
 
