@@ -2725,6 +2725,11 @@ async function loadOrders(filters = {}) {
             if (error) {
                 console.error('loadOrders error:', error);
                 if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
+                if (localFallback.length > 0) return localFallback;
+                const bootstrapOrders = await refreshOrdersWarmCache().catch(() => null);
+                if (Array.isArray(bootstrapOrders) && bootstrapOrders.length > 0) {
+                    return applyOrderFilters(bootstrapOrders);
+                }
                 return localFallback;
             }
 
@@ -2768,13 +2773,17 @@ async function loadOrders(filters = {}) {
             if (_isSupabaseAccessError(error)) _markSupabaseAccessProblem(error);
             if (localFallback.length > 0) {
                 _setDataLoadMeta('orders', { source: 'local', message: 'remote unavailable' });
-            } else {
-                _setDataLoadMeta('orders', {
-                    source: 'unavailable',
-                    unavailable: true,
-                    message: _sameOriginBootstrapLastErrors.orders?.message || (error?.message || 'remote unavailable'),
-                });
+                return localFallback;
             }
+            const bootstrapOrders = await refreshOrdersWarmCache().catch(() => null);
+            if (Array.isArray(bootstrapOrders) && bootstrapOrders.length > 0) {
+                return applyOrderFilters(bootstrapOrders);
+            }
+            _setDataLoadMeta('orders', {
+                source: 'unavailable',
+                unavailable: true,
+                message: _sameOriginBootstrapLastErrors.orders?.message || (error?.message || 'remote unavailable'),
+            });
             return localFallback;
         }
     }
@@ -2803,7 +2812,7 @@ async function loadOrder(orderId) {
         return order ? { order, items: dedupedItems, repaired_duplicates: repairedDuplicates } : null;
     };
     const loadStaticBootstrapOrder = async () => {
-        if (!_isStaticYandexMirrorRuntime()) return null;
+        if (!_canUseSameOriginBootstrap()) return null;
         const bootstrapPayload = await _loadSameOriginBootstrap(['orders', 'orderItems'], { timeoutMs: 15000 });
         let refreshed = false;
         const mergedPayload = _mergeBootstrapOrderPayload(bootstrapPayload);
@@ -2939,7 +2948,7 @@ async function loadOrderItemsByOrderIds(orderIds = [], options = {}) {
         });
 
     const loadBootstrapFallback = async () => {
-        if (!_isStaticYandexMirrorRuntime()) return null;
+        if (!_canUseSameOriginBootstrap()) return null;
         const bootstrapPayload = await _loadSameOriginBootstrap(['orderItems'], { timeoutMs: 15000 });
         if (bootstrapPayload && Array.isArray(bootstrapPayload.orderItems)) {
             setLocal(LOCAL_KEYS.orderItems, bootstrapPayload.orderItems);
@@ -6378,12 +6387,12 @@ async function loadWarehouseItems() {
         const staticMirrorItems = await readStaticMirrorBootstrapWarehouseItems();
         if (staticMirrorItems && staticMirrorItems.length > 0) return staticMirrorItems;
     } else {
-        const liveBootstrapItems = await readLiveBootstrapWarehouseItems();
-        if (liveBootstrapItems && liveBootstrapItems.length > 0) return liveBootstrapItems;
-        // As a Vercel API fallback, read directly from Supabase so recent saves are
-        // visible immediately when same-origin bootstrap is unavailable.
+        // The Yandex platform API is authoritative. Static snapshots are only
+        // a fallback, otherwise a healthy API could be masked by stale stock.
         const liveSupabaseItems = await readLiveSupabaseWarehouseItems();
         if (liveSupabaseItems && liveSupabaseItems.length > 0) return liveSupabaseItems;
+        const liveBootstrapItems = await readLiveBootstrapWarehouseItems();
+        if (liveBootstrapItems && liveBootstrapItems.length > 0) return liveBootstrapItems;
     }
 
     const bootstrapPayload = await _loadSameOriginBootstrap(['warehouseItems']);

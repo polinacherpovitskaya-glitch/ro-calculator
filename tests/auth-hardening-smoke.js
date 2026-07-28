@@ -146,7 +146,9 @@ function createContext() {
             hash: '#calculator',
             reload() {},
         },
-        fetch: async () => ({ ok: true, json: async () => [] }),
+        fetch: async (...args) => context.__fetchHandler
+            ? context.__fetchHandler(...args)
+            : ({ ok: true, json: async () => [] }),
         confirm: () => true,
         prompt: () => 'Reset#123',
         Blob: class FakeBlob {
@@ -161,6 +163,10 @@ function createContext() {
         },
         loadEmployees: async () => clone(context.__employeesSource),
         loadAuthAccounts: async () => clone(context.__authAccountsSource),
+        LOCAL_KEYS: { authAccounts: 'ro_calc_auth_accounts' },
+        setLocal(key, value) {
+            localStorage.setItem(key, JSON.stringify(value));
+        },
         saveAuthAccounts: async (accounts) => {
             context.__savedAuthAccounts = clone(accounts);
             context.__authAccountsSource = clone(accounts);
@@ -318,6 +324,22 @@ async function smokeLegacyLoginUpgrade(context) {
     context.__savedAuthAccounts = null;
     context.__appendedAuthActivity = [];
     context.__showAppCalled = false;
+    context.__loginRequest = null;
+    context.__fetchHandler = async (url, options = {}) => {
+        context.__loginRequest = { url: String(url), options: clone(options) };
+        const account = {
+            ...context.__authAccountsSource[0],
+            password_hash: undefined,
+            password_hash_version: undefined,
+            password_rotated_at: undefined,
+            last_login_at: '2026-03-16T12:00:00.000Z',
+        };
+        return {
+            ok: true,
+            status: 200,
+            json: async () => ({ account }),
+        };
+    };
     context.document.getElementById('auth-user-select').value = '11';
     context.document.getElementById('auth-password').value = 'demo123';
     context.document.getElementById('auth-error');
@@ -328,13 +350,17 @@ async function smokeLegacyLoginUpgrade(context) {
         await App.login();
     })()`, context);
 
-    const saved = clone(context.__savedAuthAccounts);
     assert.equal(context.__showAppCalled, true);
-    assert.equal(saved[0].password_hash_version, 2);
-    assert.match(String(saved[0].password_hash || ''), /^v2:/);
-    assert.match(String(saved[0].password_rotated_at || ''), /T/);
+    assert.match(context.__loginRequest.url, /\/api\/auth\/legacy-login$/);
+    assert.deepEqual(JSON.parse(context.__loginRequest.options.body), {
+        account_id: '11',
+        password: 'demo123',
+    });
+    const cached = clone(vm.runInContext(`App.authAccounts[0]`, context));
+    assert.equal(cached.password_hash, undefined, 'server-authenticated accounts must not retain password hashes in the browser');
     assert.equal(context.localStorage.getItem('ro_calc_auth_user_id'), '11');
-    assert.equal(context.__appendedAuthActivity.some(entry => entry.type === 'password_hash_upgrade'), true);
+    assert.equal(context.__appendedAuthActivity.some(entry => entry.type === 'password_hash_upgrade'), false);
+    context.__fetchHandler = null;
 }
 
 async function smokeDisabledRestore(context) {
@@ -357,7 +383,10 @@ async function smokeDisabledRestore(context) {
 
     assert.equal(context.localStorage.getItem('ro_calc_auth_user_id'), null);
     assert.equal(context.document.getElementById('auth-error').style.display, 'block');
-    assert.match(String(context.document.getElementById('auth-error').textContent || ''), /логин отключен|данные обновились/i);
+    assert.match(
+        String(context.document.getElementById('auth-error').textContent || ''),
+        /сессия истекла|учётная запись отключена|логин отключен|данные обновились/i,
+    );
 }
 
 async function smokePermissionFallback(context) {

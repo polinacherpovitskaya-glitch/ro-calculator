@@ -29,6 +29,13 @@ const App = {
     LEGACY_PUBLIC_HOST: 'polinacherpovitskaya-glitch.github.io',
     CANONICAL_APP_ORIGIN: 'https://calc.recycleobject.ru',
 
+    getPlatformApiUrl() {
+        if (typeof PLATFORM_API_URL !== 'undefined' && PLATFORM_API_URL) {
+            return String(PLATFORM_API_URL).replace(/\/+$/, '');
+        }
+        return 'https://api.recycleobject.ru';
+    },
+
     showLocalFileModeWarning() {
         const authScreen = document.getElementById('auth-screen');
         const appLayout = document.getElementById('app-layout');
@@ -493,7 +500,7 @@ const App = {
             errorText = 'Пользователь не найден';
         } else {
             try {
-                const response = await fetch(`${PLATFORM_API_URL}/api/auth/legacy-login`, {
+                const response = await fetch(`${this.getPlatformApiUrl()}/api/auth/legacy-login`, {
                     method: 'POST',
                     credentials: 'include',
                     cache: 'no-store',
@@ -507,6 +514,12 @@ const App = {
                         ...payload.account,
                         pages: this.normalizePageList(payload.account.pages || account.pages),
                     };
+                    delete authenticatedAccount.password;
+                    delete authenticatedAccount.password_hash;
+                    delete authenticatedAccount.password_hash_version;
+                    delete authenticatedAccount.password_plain;
+                    delete authenticatedAccount.password_rotated_at;
+                    delete authenticatedAccount.salt;
                     const accountIndex = this.authAccounts.findIndex(item => String(item.id) === String(selectedUserId));
                     if (accountIndex >= 0) this.authAccounts[accountIndex] = authenticatedAccount;
                     setLocal(LOCAL_KEYS.authAccounts, this.authAccounts);
@@ -558,7 +571,7 @@ const App = {
     async restoreAuthenticatedUser() {
         const userId = localStorage.getItem('ro_calc_auth_user_id');
         try {
-            const response = await fetch(`${PLATFORM_API_URL}/api/auth/legacy-me`, {
+            const response = await fetch(`${this.getPlatformApiUrl()}/api/auth/legacy-me`, {
                 credentials: 'include',
                 cache: 'no-store',
                 headers: { Accept: 'application/json' },
@@ -595,8 +608,8 @@ const App = {
     },
 
     logout() {
-        if (typeof fetch === 'function' && typeof PLATFORM_API_URL !== 'undefined') {
-            fetch(`${PLATFORM_API_URL}/api/auth/logout`, {
+        if (typeof fetch === 'function') {
+            fetch(`${this.getPlatformApiUrl()}/api/auth/logout`, {
                 method: 'POST',
                 credentials: 'include',
                 keepalive: true,
@@ -727,7 +740,7 @@ const App = {
         const controller = typeof AbortController === 'function' ? new AbortController() : null;
         const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
         try {
-            const response = await fetch(`${PLATFORM_API_URL}/api/auth/legacy-accounts`, {
+            const response = await fetch(`${this.getPlatformApiUrl()}/api/auth/legacy-accounts`, {
                 credentials: 'include',
                 cache: 'no-store',
                 headers: { Accept: 'application/json' },

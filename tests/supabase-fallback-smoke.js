@@ -341,6 +341,9 @@ function createContext() {
             };
         },
     };
+    // The application now uses the Yandex platform transport, while this
+    // long-running data-layer smoke keeps its established query-builder fake.
+    context.createPlatformClient = () => context.supabase.createClient();
 
     return vm.createContext(context);
 }
@@ -2018,11 +2021,11 @@ async function main() {
         `, context);
 
         const transactions = JSON.parse(JSON.stringify(await vm.runInContext(`loadFinanceTransactions()`, context)));
-        assert.equal(transactions.length, 1, 'static Yandex mirror should build finance data from snapshots');
+        assert.equal(transactions.length, 1, 'Yandex platform should fall back to finance snapshots when the API has no rows');
         assert.equal(
             context.__remoteCalls.some(call => call.table === 'finance_transactions'),
-            false,
-            'static Yandex mirror should not call Phase 1 finance tables'
+            true,
+            'Yandex platform should prefer canonical finance tables before using the snapshot fallback'
         );
     }
 
