@@ -8,7 +8,7 @@ test('PostgreSQL pool tolerates transient idle-client errors', async () => {
   const pool = getPool();
 
   assert.equal(pool.options.connectionTimeoutMillis, 5000);
-  assert.equal(pool.options.allowExitOnIdle, false);
+  assert.equal(pool.options.allowExitOnIdle, true);
   assert.ok(pool.listenerCount('error') > 0);
 
   const originalConsoleError = console.error;
@@ -22,4 +22,3 @@ test('PostgreSQL pool tolerates transient idle-client errors', async () => {
   }
   assert.match(messages.join('\n'), /PostgreSQL idle client error: synthetic timeout/);
 });
-

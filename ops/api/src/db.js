@@ -20,7 +20,7 @@ export function getPool() {
       max: 10,
       idleTimeoutMillis: 30000,
       connectionTimeoutMillis: 5000,
-      allowExitOnIdle: false,
+      allowExitOnIdle: true,
     });
     nextPool.on('error', (error) => {
       console.error(`[ops-api] PostgreSQL idle client error: ${error.message}`);

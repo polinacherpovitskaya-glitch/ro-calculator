@@ -16,6 +16,6 @@ assert.doesNotMatch(workflow, /docker\s+(?:rm|volume\s+rm)\b/, 'API deploy must 
 assert.doesNotMatch(deployScript, /(?:^|\s)-delete(?:\s|$)/m, 'API deploy must preserve every verified rollback dump');
 assert.match(db, /connectionTimeoutMillis:\s*5000/, 'pool must tolerate normal connection scheduling delays');
 assert.match(db, /nextPool\.on\('error'/, 'idle pool errors must not crash the API process');
-assert.match(db, /allowExitOnIdle:\s*false/, 'the HTTP runtime must keep the pool event loop active');
+assert.match(db, /allowExitOnIdle:\s*true/, 'idle test workers must be able to exit without delaying CI');
 
 console.log('yandex API deploy smoke checks passed');

@@ -17,15 +17,14 @@
 
 1. Увеличить PostgreSQL connect timeout API до 5 секунд.
 2. Обрабатывать фоновые `pg.Pool` errors без завершения Node-процесса.
-3. Не разрешать pool освобождать event loop активного HTTP-сервера.
-4. Добавить отдельный безопасный Yandex API deploy:
+3. Добавить отдельный безопасный Yandex API deploy:
    - тесты и migrations на disposable PostgreSQL;
    - pre-deploy custom-format backup production DB;
    - upload только API/schema/deploy files;
    - restart replacement API без refresh production rows;
    - проверка API, DB, Supabase rollback и bot;
    - сохранение всех предыдущих verified dumps без автоматической очистки.
-5. Если свежий timebot snapshot не прошёл только Telegram probe, отложить
+4. Если свежий timebot snapshot не прошёл только Telegram probe, отложить
    решение до независимого relay `getMe`; database/poller/staleness ошибки
    остаются немедленно блокирующими.
 
