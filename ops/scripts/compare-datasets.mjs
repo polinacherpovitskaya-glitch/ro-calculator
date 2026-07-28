@@ -87,6 +87,31 @@ const TABLES = [
   'fintablo_imports',
 ];
 
+const LEGACY_SITE_TABLES = [
+  'admin_users',
+  'app_tasks',
+  'blank_color_tuning',
+  'cases',
+  'certificate_redemptions',
+  'certificates',
+  'china_orders',
+  'consent_logs',
+  'email_subscribers',
+  'faq',
+  'form_submissions',
+  'message_templates',
+  'notification_log',
+  'order_shipments',
+  'order_timeline',
+  'page_content',
+  'products',
+  'promo_codes',
+  'promo_redemptions',
+  'return_requests',
+  'shop_orders',
+  'site_settings',
+];
+
 function parseJson(value) {
   if (!value) return {};
   if (typeof value === 'object') return value;
@@ -467,6 +492,22 @@ async function main() {
     const diff = pgCount - sbCount;
     const status = diff === 0 ? 'OK' : 'MISMATCH';
     console.log(`${table.padEnd(29)} ${String(sbCount).padStart(8)} ${String(pgCount).padStart(9)} ${String(diff).padStart(5)} ${status}`);
+    if (diff !== 0) allOk = false;
+  }
+
+  for (const table of LEGACY_SITE_TABLES) {
+    const sbCount = await supabaseCount(table);
+    const { rows } = await pool.query(
+      `SELECT COUNT(*)::int AS n
+         FROM legacy_supabase_rows
+        WHERE table_name = $1`,
+      [table],
+    );
+    const pgCount = rows[0].n;
+    const diff = pgCount - sbCount;
+    const label = `archive:${table}`;
+    const status = diff === 0 ? 'OK' : 'MISMATCH';
+    console.log(`${label.padEnd(29)} ${String(sbCount).padStart(8)} ${String(pgCount).padStart(9)} ${String(diff).padStart(5)} ${status}`);
     if (diff !== 0) allOk = false;
   }
 

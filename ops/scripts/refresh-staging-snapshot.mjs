@@ -82,6 +82,7 @@ async function main() {
     '09-time-payroll',
     '10-settings',
     '11-finance',
+    '12-legacy-site-archive',
   ]) {
     runRefreshScript(script);
   }
