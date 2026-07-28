@@ -13,6 +13,5 @@ CREATE TABLE IF NOT EXISTS legacy_supabase_rows (
 CREATE INDEX IF NOT EXISTS legacy_supabase_rows_table_idx
   ON legacy_supabase_rows (table_name);
 
-INSERT INTO app_meta (key, value)
-VALUES ('migration_015', 'legacy_site_archive')
-ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
+INSERT INTO app_meta (id, version) VALUES (1, '015-legacy-site-archive')
+ON CONFLICT (id) DO UPDATE SET version = EXCLUDED.version, applied_at = NOW();
