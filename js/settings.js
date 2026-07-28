@@ -408,18 +408,13 @@ const Settings = {
 
         const hoursPerWorker = readNum('set-hours_per_worker', 168);
         const workLoad = readNum('set-work_load_ratio', 0.8);
-        const planningWorkers = readNum('set-planning_workers_count', 2);
-        const planningHoursPerDay = readNum('set-planning_hours_per_day', 8);
         const wasteFactor = readNum('set-waste_factor', 1.1);
 
         setHint('set-hours-per-worker-hint', `ч/мес (сейчас: ${hoursPerWorker})`);
         setHint('set-work-load-hint', `${workLoad} = ${pct(workLoad)}`);
-        setHint('set-planning-workers-hint', `${planningWorkers} чел для реального плана, отдельно от pricing`);
-        setHint('set-planning-hours-hint', `${planningHoursPerDay} ч/день в календаре`);
         const wastePct = Math.round((wasteFactor - 1) * 1000) / 10;
         const wasteSign = wastePct >= 0 ? '+' : '';
         setHint('set-waste-factor-hint', `${wasteFactor} = ${wasteSign}${wastePct}% к времени/себестоимости`);
-        setHint('set-planning-capacity-summary', `Календарь считает ${planningWorkers * planningHoursPerDay} ч/день как реальную мощность цеха. Цены и калькулятор остаются на своих pricing-параметрах.`);
 
         // Сезонный план: проценты мощности квартала должны сходиться с
         // годовым коэффициентом, иначе доска и ценообразование говорят о

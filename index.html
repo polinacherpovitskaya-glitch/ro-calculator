@@ -1771,7 +1771,7 @@
             <div class="page-header">
                 <div>
                     <h1>&#128197; Производственный календарь</h1>
-                    <div class="text-muted gantt-header-note">Один канонический экран для очереди, загрузки цеха и рисков по дедлайнам.</div>
+                    <div class="text-muted gantt-header-note">Расставьте заказы по приоритету и укажите, сколько из четырёх сотрудников работает над каждым.</div>
                 </div>
                 <div class="flex gap-8">
                     <button class="btn btn-sm btn-outline gantt-zoom-btn active" data-zoom="week" onclick="Gantt.setZoom('week')">Неделя</button>
@@ -1779,22 +1779,10 @@
                 </div>
             </div>
 
-            <div id="gantt-toolbar"></div>
-
-            <div class="gantt-intro-card">
-                <div>
-                    <strong>Очередь сверху</strong>
-                    <span>Начальник производства видит порядок запуска, сроки, число сотрудников на заказ и может ускорять приоритетные проекты прямо из очереди.</span>
-                </div>
-                <div>
-                    <strong>Календарь снизу</strong>
-                    <span>Неделя и месяц показывают, как литьё, сборка и упаковка влезают в доступные рабочие часы с автоматическим пропуском выходных и праздников.</span>
-                </div>
+            <div class="gantt-instruction">
+                <span class="gantt-instruction-handle" aria-hidden="true">&#8942;&#8942;</span>
+                <span>Тяните заказ вверх или вниз. Больше людей на верхнем заказе сокращает его срок и сдвигает остальные.</span>
             </div>
-
-            <div class="stats-grid" id="gantt-stats"></div>
-            <div id="gantt-queue"></div>
-            <div id="gantt-capacity-chart"></div>
 
             <div class="gantt-legend">
                 <span class="gantt-legend-item"><span class="gantt-legend-dot" style="background:#f59e0b"></span> Литьё</span>
@@ -2861,22 +2849,6 @@
                         </div>
                     </div>
                     <div class="form-hint" id="set-seasonal-hint" style="margin-top: 4px;"></div>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label>Сотрудников для календаря</label>
-                            <input type="number" step="0.5" id="set-planning_workers_count" data-key="planning_workers_count" oninput="Settings.updateProductionHints()">
-                            <span class="form-hint" id="set-planning-workers-hint">консервативная мощность цеха, не влияет на цены</span>
-                        </div>
-                        <div class="form-group">
-                            <label>Часов в смене для календаря</label>
-                            <input type="number" step="0.5" id="set-planning_hours_per_day" data-key="planning_hours_per_day" oninput="Settings.updateProductionHints()">
-                            <span class="form-hint" id="set-planning-hours-hint">8 ч/день для планирования</span>
-                        </div>
-                        <div class="form-group">
-                            <label>Что это дает</label>
-                            <div class="form-hint" id="set-planning-capacity-summary" style="min-height:40px;display:flex;align-items:center;">Календарь считает реальную мощность отдельно от ценообразования.</div>
-                        </div>
-                    </div>
                     <div class="form-row">
                         <div class="form-group">
                             <label>Коэфф. потерь</label>

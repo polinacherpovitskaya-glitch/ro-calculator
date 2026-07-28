@@ -1,6 +1,6 @@
 // =============================================
 // Recycle Object — Production Calendar
-// v50: canonical week/month production calendar with queue + capacity
+// Unified week/month priority Gantt for a four-person production team
 // =============================================
 
 const Gantt = {
@@ -15,6 +15,8 @@ const Gantt = {
     zoom: 'week',
     isLoading: false,
     _loadSeq: 0,
+    TEAM_SIZE: 4,
+    SHIFT_HOURS: 9,
     LOADABLE_STATUSES: ['sample', 'production_casting', 'production_printing', 'production_hardware', 'production_packaging', 'delivery', 'in_production'],
     STATUS_LABELS: {
         sample: 'Образец',
@@ -182,7 +184,7 @@ const Gantt = {
         Object.entries(raw.parallel_workers || {}).forEach(([orderId, value]) => {
             const normalized = Math.round(Number(value) || 0);
             if (normalized >= 1) {
-                parallelWorkers[String(orderId)] = normalized;
+                parallelWorkers[String(orderId)] = Math.min(normalized, this.TEAM_SIZE);
             }
         });
         const activeWorkersCountRaw = Number(raw.active_workers_count);
@@ -195,20 +197,19 @@ const Gantt = {
     },
 
     getEffectivePlanningSettings(baseSettings = App.settings || {}) {
-        const next = { ...(baseSettings || {}) };
-        const overrideWorkers = Number(this.planState?.active_workers_count || 0);
-        if (overrideWorkers > 0) {
-            next.planning_workers_count = overrideWorkers;
-        }
-        return next;
+        return {
+            ...(baseSettings || {}),
+            planning_workers_count: this.TEAM_SIZE,
+            planning_hours_per_day: this.SHIFT_HOURS,
+        };
     },
 
     getEffectivePlanningCapacity(baseSettings = App.settings || {}) {
         if (typeof getProductionPlanningCapacity === 'function') {
             return getProductionPlanningCapacity(this.getEffectivePlanningSettings(baseSettings));
         }
-        const workersCount = Number(this.planState?.active_workers_count || baseSettings?.planning_workers_count || 2) || 2;
-        const hoursPerDay = Number(baseSettings?.planning_hours_per_day || 8) || 8;
+        const workersCount = this.TEAM_SIZE;
+        const hoursPerDay = this.SHIFT_HOURS;
         return {
             workersCount: round2(workersCount),
             hoursPerDay: round2(hoursPerDay),
@@ -220,7 +221,7 @@ const Gantt = {
         const workers = Math.max(Number(capacity?.workersCount || 0), 0);
         const fullSlots = Math.floor(workers);
         const fractional = round2(workers - fullSlots);
-        return fullSlots + (fractional > 0.001 ? 1 : 0);
+        return Math.min(this.TEAM_SIZE, fullSlots + (fractional > 0.001 ? 1 : 0));
     },
 
     getOrderParallelWorkers(orderId) {
@@ -309,38 +310,10 @@ const Gantt = {
         await this.load();
     },
 
-    async setActiveWorkersCount(value) {
-        const normalized = round2(Number(value) || 0);
-        if (!(normalized > 0)) {
-            App.toast('Укажите количество сотрудников больше нуля');
-            return;
-        }
-        const state = this.normalizePlanState(this.planState);
-        state.active_workers_count = normalized;
-        await saveProductionPlanState(state);
-        this.planState = state;
-        await this.load();
-    },
-
-    async adjustActiveWorkersCount(delta) {
-        const capacity = this.getEffectivePlanningCapacity();
-        const current = Number(this.planState?.active_workers_count || capacity.workersCount || 2) || 2;
-        const next = Math.max(0.5, round2(current + Number(delta || 0)));
-        await this.setActiveWorkersCount(next);
-    },
-
-    async resetActiveWorkersCount() {
-        const state = this.normalizePlanState(this.planState);
-        state.active_workers_count = null;
-        await saveProductionPlanState(state);
-        this.planState = state;
-        await this.load();
-    },
-
     async setOrderParallelWorkers(orderId, value) {
         const normalizedOrderId = String(Number(orderId) || 0);
         if (!normalizedOrderId || normalizedOrderId === '0') return;
-        const slotLimit = Math.max(1, this.getWorkerSlotCount());
+        const slotLimit = Math.max(1, Math.min(this.TEAM_SIZE, this.getWorkerSlotCount()));
         const normalized = Math.max(1, Math.min(slotLimit, Math.round(Number(value) || 1)));
         const state = this.normalizePlanState(this.planState);
         state.parallel_workers[normalizedOrderId] = normalized;
@@ -354,42 +327,7 @@ const Gantt = {
         await this.setOrderParallelWorkers(orderId, current + Number(delta || 0));
     },
 
-    renderToolbar() {
-        const toolbarEl = document.getElementById('gantt-toolbar');
-        if (!toolbarEl) return;
-        const capacity = this.getEffectivePlanningCapacity();
-        const configuredWorkers = Number(App.settings?.planning_workers_count || 0) || 2;
-        const currentWorkers = Number(this.planState?.active_workers_count || capacity.workersCount || configuredWorkers || 2);
-        const slotCount = Math.max(1, this.getWorkerSlotCount(capacity));
-        const hoursPerDay = round2(Number(capacity.hoursPerDay || App.settings?.planning_hours_per_day || 8) || 8);
-        const holidayCount = this.getHolidaySet().size;
-        const isOverride = Number(this.planState?.active_workers_count || 0) > 0;
-
-        toolbarEl.innerHTML = `
-            <div class="gantt-toolbar-card">
-                <div class="gantt-toolbar-block">
-                    <div class="gantt-toolbar-label">Сейчас в цехе</div>
-                    <div class="gantt-toolbar-inline">
-                        <button class="btn btn-sm btn-outline" onclick="Gantt.adjustActiveWorkersCount(-1)" title="Минус 1 сотрудник">&#8722;</button>
-                        <input class="gantt-toolbar-input" type="number" min="0.5" step="0.5" value="${currentWorkers}" onchange="Gantt.setActiveWorkersCount(this.value)" />
-                        <button class="btn btn-sm btn-outline" onclick="Gantt.adjustActiveWorkersCount(1)" title="Плюс 1 сотрудник">+</button>
-                        <button class="btn btn-sm btn-outline" onclick="Gantt.resetActiveWorkersCount()" ${isOverride ? '' : 'disabled'} title="Вернуть значение из настроек">Сбросить</button>
-                    </div>
-                    <div class="gantt-toolbar-hint">Календарь автоматически пропускает субботу, воскресенье и праздничные даты${holidayCount ? ` (${holidayCount} дат в справочнике)` : ''}.</div>
-                </div>
-                <div class="gantt-toolbar-block">
-                    <div class="gantt-toolbar-label">Текущая мощность</div>
-                    <div class="gantt-toolbar-metrics">
-                        <span><strong>${this.formatHours(capacity.dailyCapacity)}</strong> в день</span>
-                        <span>· ${slotCount} одноврем. слота</span>
-                        <span>· ${this.formatHours(hoursPerDay)} на сотрудника</span>
-                    </div>
-                    <div class="gantt-toolbar-hint">По умолчанию каждый заказ занимает 1 слот. Если заказ срочный, увеличь число сотрудников прямо на карточке заказа.</div>
-                </div>
-            </div>`;
-    },
-
-    onQueueDragStart(event, orderId) {
+    onOrderDragStart(event, orderId) {
         this.draggedOrderId = Number(orderId);
         if (event?.dataTransfer) {
             event.dataTransfer.effectAllowed = 'move';
@@ -398,23 +336,23 @@ const Gantt = {
         event?.currentTarget?.classList.add('dragging');
     },
 
-    onQueueDragOver(event) {
+    onOrderDragOver(event) {
         event.preventDefault();
         if (event?.dataTransfer) event.dataTransfer.dropEffect = 'move';
         event?.currentTarget?.classList.add('drag-over');
     },
 
-    onQueueDragLeave(event) {
+    onOrderDragLeave(event) {
         event?.currentTarget?.classList.remove('drag-over');
     },
 
-    onQueueDragEnd(event) {
+    onOrderDragEnd(event) {
         this.draggedOrderId = null;
         event?.currentTarget?.classList.remove('dragging');
-        document.querySelectorAll('.gantt-queue-card.drag-over').forEach(node => node.classList.remove('drag-over'));
+        document.querySelectorAll('.gantt-sidebar-row.drag-over').forEach(node => node.classList.remove('drag-over'));
     },
 
-    async onQueueDrop(event, targetOrderId) {
+    async onOrderDrop(event, targetOrderId) {
         event.preventDefault();
         event?.currentTarget?.classList.remove('drag-over');
         const draggedOrderId = Number(
@@ -445,14 +383,9 @@ const Gantt = {
 
     render() {
         const container = document.getElementById('gantt-container');
-        const capContainer = document.getElementById('gantt-capacity-chart');
-        const queueContainer = document.getElementById('gantt-queue');
         if (!container) return;
-        this.renderToolbar();
 
         if (this.isLoading && !this.schedule && !(this.orders || []).length) {
-            if (capContainer) capContainer.innerHTML = '';
-            if (queueContainer) queueContainer.innerHTML = '';
             container.innerHTML = `
                 <div class="card">
                     <div class="empty-state">
@@ -460,42 +393,37 @@ const Gantt = {
                         <p>Загружаем производственный календарь…</p>
                     </div>
                 </div>`;
-            this.renderStats();
             return;
         }
 
         const blockedQueue = this.blockedOrders || [];
         const reviewQueue = this.reviewOrders || [];
         if (!this.schedule || (this.schedule.queue.length === 0 && blockedQueue.length === 0 && reviewQueue.length === 0)) {
-            if (capContainer) capContainer.innerHTML = '';
-            if (queueContainer) queueContainer.innerHTML = '';
             container.innerHTML = `
                 <div class="card">
                     <div class="empty-state">
                         <div class="empty-icon">&#128197;</div>
                         <p>Нет заказов для планирования</p>
-                        <p class="text-muted" style="font-size:13px">Создайте заказ с изделиями в калькуляторе — после этого он появится в очереди и календаре.</p>
+                        <p class="text-muted" style="font-size:13px">Создайте заказ с производственными часами — после этого он появится здесь.</p>
                     </div>
                 </div>`;
-            this.renderStats();
             return;
         }
 
-        const { queue, dailyCapacity, days } = this.schedule;
+        const { queue, days } = this.schedule;
         const activeQueue = queue.filter(item => item.schedule.length > 0);
-        this.renderQueue(activeQueue, blockedQueue, reviewQueue);
+        const pausedHtml = this.renderPausedOrders(blockedQueue, reviewQueue);
 
         if (!days.length || !activeQueue.length) {
-            if (capContainer) capContainer.innerHTML = '';
             container.innerHTML = `
                 <div class="card">
                     <p class="text-muted text-center">
                         ${(blockedQueue.length || reviewQueue.length)
-                            ? 'Сейчас нет готовых к запуску заказов: активный план пуст, а ожидающие/требующие проверки заказы вынесены выше в отдельные блоки.'
+                            ? 'Сейчас нет готовых к планированию заказов. Заказы, которые ждут данные или молд, показаны ниже.'
                             : 'Нет данных для отображения'}
                     </p>
-                </div>`;
-            this.renderStats();
+                </div>
+                ${pausedHtml}`;
             return;
         }
 
@@ -513,28 +441,10 @@ const Gantt = {
         const cellWidth = this.zoom === 'week' ? 56 : 34;
         const totalWidth = totalDays * cellWidth;
 
-        const dayMap = {};
-        days.forEach(day => {
-            dayMap[day.date] = day;
-        });
-
         const holidaySet = this.getHolidaySet();
         const headerHtml = this.renderTimeAxis(minDate, totalDays, cellWidth, holidaySet);
         const rowsHtml = activeQueue.map(item => this.renderOrderRow(item, minDate, totalDays, cellWidth)).join('');
-        const sidebarRows = activeQueue.map(item => {
-            const risk = this.getDeadlineRiskSummary(item, holidaySet);
-            const statusDot = risk.status === 'late'
-                ? '<span style="color:#e11d48">&#9679;</span>'
-                : (risk.status === 'critical' || risk.status === 'tight')
-                    ? '<span style="color:#f59e0b">&#9679;</span>'
-                    : '<span style="color:#16a34a">&#9679;</span>';
-            const progress = this.getOrderProgress(item);
-            return `
-                <div class="gantt-sidebar-row" title="${this.esc(item.orderName)}" onclick="App.navigate('order-detail', true, ${item.orderId})" style="cursor:pointer">
-                    <div class="gantt-order-name">${statusDot} ${this.esc(this.shortName(item.orderName))}</div>
-                    <div class="gantt-order-meta">${this.esc(item.clientName || 'Без клиента')} · осталось ${this.formatHours(progress.remaining)} · ${this.esc(risk.label)}</div>
-                </div>`;
-        }).join('');
+        const sidebarRows = activeQueue.map((item, index) => this.renderOrderSidebarRow(item, index, holidaySet)).join('');
 
         const today = new Date();
         today.setHours(0, 0, 0, 0);
@@ -545,7 +455,10 @@ const Gantt = {
         container.innerHTML = `
             <div class="gantt-wrapper">
                 <div class="gantt-sidebar">
-                    <div class="gantt-sidebar-header">Очередь заказов</div>
+                    <div class="gantt-sidebar-header">
+                        <span>Приоритет и заказ</span>
+                        <span class="gantt-team-label">Команда: 4</span>
+                    </div>
                     ${sidebarRows}
                 </div>
                 <div class="gantt-timeline" id="gantt-timeline">
@@ -557,255 +470,134 @@ const Gantt = {
                         </div>
                     </div>
                 </div>
-            </div>`;
-
-        if (capContainer) {
-            this.renderCapacityChart(capContainer, minDate, totalDays, cellWidth, totalWidth, dayMap, dailyCapacity);
-        }
+            </div>
+            ${pausedHtml}`;
 
         if (showToday) {
             const timeline = document.getElementById('gantt-timeline');
             if (timeline) {
                 timeline.scrollLeft = Math.max(0, todayLeft - timeline.clientWidth / 3);
-                if (capContainer) capContainer.scrollLeft = timeline.scrollLeft;
             }
         }
-
-        this.renderStats();
     },
 
-    renderQueue(queue, blockedQueue = [], reviewQueue = []) {
-        const queueEl = document.getElementById('gantt-queue');
-        if (!queueEl) return;
-        if (!queue.length && !blockedQueue.length && !reviewQueue.length) {
-            queueEl.innerHTML = '';
-            return;
-        }
-
-        const totalHours = round2(queue.reduce((sum, item) => sum + (item.remainingTotalHours || item.totalHours || 0), 0));
-        const actualHours = round2(queue.reduce((sum, item) => sum + (item.actualTotalHours || 0), 0));
-        const riskSummaries = queue.map(item => this.getDeadlineRiskSummary(item));
-        const lateCount = riskSummaries.filter(risk => risk.status === 'late').length;
-        const tightCount = riskSummaries.filter(risk => risk.status === 'critical' || risk.status === 'tight').length;
-        const blockedCount = blockedQueue.length;
-        const reviewCount = reviewQueue.length;
-        const overloadSummary = this.buildCapacityRiskSummary(this.schedule?.days || [], this.schedule?.dailyCapacity || 0, new Date());
-        const slotCount = Math.max(1, this.getWorkerSlotCount());
-        const cardsHtml = queue.map(item => this.renderQueueCard(item)).join('');
-        const blockedHtml = blockedQueue.map(item => this.renderQueueCard(item, { blocked: true })).join('');
-        const reviewHtml = reviewQueue.map(item => this.renderQueueCard(item, { review: true })).join('');
-
-        queueEl.innerHTML = `
-            <div class="gantt-queue-card-wrap">
-                <div class="gantt-queue-head">
-                    <div>
-                        <h3>Очередь к запуску</h3>
-                        <p>Порядок сверху задает, что начальник производства запускает раньше. Фактические часы уменьшают остаток автоматически, а календарь учитывает лимит одновременных сотрудников, чтобы не планировать больше заказов, чем реально можно вести параллельно.</p>
-                    </div>
-                    <div class="gantt-queue-summary">
-                        <strong>${queue.length}</strong> готово к плану · <strong>${this.formatHours(totalHours)}</strong> осталось · <strong>${slotCount}</strong> слота в день${lateCount ? ` · <span class="text-red">${lateCount} опаздывают</span>` : ''}${tightCount ? ` · <span class="text-orange">${tightCount} впритык к дедлайну</span>` : ''}${overloadSummary.firstOverloadDate ? ` · <span class="text-red">первый перегруз ${this.formatDateStr(overloadSummary.firstOverloadDate)} (+${this.formatHours(overloadSummary.firstOverloadHours)})</span>` : ''}${blockedCount ? ` · <span class="text-orange">${blockedCount} ждут молд/Китай</span>` : ''}${reviewCount ? ` · <span class="text-muted">${reviewCount} требуют проверки</span>` : ''}
-                    </div>
-                </div>
-                ${queue.length ? `
-                    <div class="gantt-queue-section">
-                        <div class="gantt-queue-grid">
-                            ${cardsHtml}
-                        </div>
-                    </div>` : ''}
-                ${blockedCount ? `
-                    <div class="gantt-queue-section gantt-queue-section-blocked">
-                        <div class="gantt-queue-subhead">
-                            <h4>Ждут молд / пока не планируются</h4>
-                            <p>Эти заказы не попадают в active timeline, пока по ним нет молда на складе. Порядок очереди можно заранее настроить уже сейчас.</p>
-                        </div>
-                        <div class="gantt-queue-grid">
-                            ${blockedHtml}
-                        </div>
-                    </div>` : ''}
-                ${reviewCount ? `
-                    <div class="gantt-queue-section gantt-queue-section-review">
-                        <div class="gantt-queue-subhead">
-                            <h4>Требуют проверки</h4>
-                            <p>По этим заказам календарь видит конфликт в данных: Китай уже принят или связка неполная, но молд все еще не отмечен как доступный. Они не попадают в active timeline, пока их не проверят.</p>
-                        </div>
-                        <div class="gantt-queue-grid">
-                            ${reviewHtml}
-                        </div>
-                    </div>` : ''}
-            </div>`;
-    },
-
-    renderQueueCard(item, options = {}) {
-        const blocked = !!options.blocked;
-        const review = !!options.review;
-        const paused = blocked || review;
-        const startDate = paused ? null : (item.schedule[0]?.date || null);
-        const finishDate = paused ? null : (item.schedule[item.schedule.length - 1]?.date || null);
-        const nextDeliveryRisk = this.getNextDeliveryRiskSummary(item);
-        const deadlineRisk = nextDeliveryRisk || this.getDeadlineRiskSummary(item);
-        const deadlineLabel = item.deadlineEnd ? this.formatDateStr(item.deadlineEnd) : 'без дедлайна';
-        const deliveryLine = nextDeliveryRisk
-            ? `<div class="gantt-queue-dates" style="color:var(--accent);"><strong>Ближайшая сдача:</strong> ${Number(nextDeliveryRisk.quantity).toLocaleString('ru-RU')} шт. · ${this.formatDateStr(nextDeliveryRisk.deadlineEnd)}</div>`
-            : '';
-        const deliveryWarning = item.deliveryScheduleValid === false && (item.deliveryScheduleErrors || []).length
-            ? `<div class="gantt-queue-risk-line tight"><strong>График сдачи требует проверки:</strong> ${this.esc(item.deliveryScheduleErrors[0])}</div>`
-            : '';
-        const phasePills = [
-            { label: 'Литьё', key: 'molding', color: '#f59e0b' },
-            { label: 'Сборка', key: 'assembly', color: '#06b6d4' },
-            { label: 'Упаковка', key: 'packaging', color: '#8b5cf6' },
-        ].map(phase => {
-            const summary = this.getPhaseProgress(item, phase.key);
-            if (summary.planned <= 0 && summary.actual <= 0) return '';
-            return `<span class="gantt-queue-phase-pill" style="--phase-color:${phase.color}">${phase.label}: ${this.formatHours(summary.actual)} / ${this.formatHours(summary.planned)}</span>`;
-        }).filter(Boolean).join('');
-        const manualStart = item.notBeforeDate || item.production_not_before || '';
+    renderOrderSidebarRow(item, index, holidaySet = new Set()) {
+        const orderId = Number(item.orderId || item.id);
         const progress = this.getOrderProgress(item);
-        const workerTarget = Math.max(1, Number(item.production_parallel_workers || 1));
-        const slotLimit = Math.max(1, this.getWorkerSlotCount());
-        const progressLabel = progress.overrun > 0
-            ? `Факт ${this.formatHours(progress.actual)} из ${this.formatHours(progress.planned)} · перерасход +${this.formatHours(progress.overrun)}`
-            : `Факт ${this.formatHours(progress.actual)} из ${this.formatHours(progress.planned)} · осталось ${this.formatHours(progress.remaining)}`;
-        const otherHoursLabel = item.actualOtherHours || item.actual_hours_other
-            ? ` · прочее ${this.formatHours(item.actualOtherHours || item.actual_hours_other)}`
-            : '';
-        const riskClass = deadlineRisk.status === 'late'
+        const risk = this.getNextDeliveryRiskSummary(item) || this.getDeadlineRiskSummary(item, holidaySet);
+        const workerTarget = Math.max(
+            1,
+            Math.min(
+                this.TEAM_SIZE,
+                Number(item.parallelWorkersTarget || item.production_parallel_workers || this.getOrderParallelWorkers(orderId))
+            )
+        );
+        const riskClass = risk.status === 'late'
             ? 'risk'
-            : ((deadlineRisk.status === 'critical' || deadlineRisk.status === 'tight') ? 'tight' : '');
+            : ((risk.status === 'critical' || risk.status === 'tight') ? 'tight' : 'ok');
+        const deadlineLabel = item.deadlineEnd
+            ? `дедлайн ${this.formatDateStr(item.deadlineEnd)}`
+            : 'без дедлайна';
 
         return `
-            <article class="gantt-queue-card ${riskClass} ${blocked ? 'blocked' : ''} ${review ? 'review' : ''}" draggable="true" ondragstart="Gantt.onQueueDragStart(event, ${item.orderId || item.id})" ondragover="Gantt.onQueueDragOver(event)" ondragleave="Gantt.onQueueDragLeave(event)" ondragend="Gantt.onQueueDragEnd(event)" ondrop="Gantt.onQueueDrop(event, ${item.orderId || item.id})" onclick="App.navigate('order-detail', true, ${item.orderId || item.id})">
-                <div class="gantt-queue-card-top">
-                    <div>
-                        <div class="gantt-queue-title">${this.esc(item.orderName || item.order_name)}</div>
-                        <div class="gantt-queue-meta">${this.esc(this.getStatusLabel(item.status))} · ${this.esc(item.clientName || item.client_name || 'Без клиента')} · осталось ${this.formatHours(progress.remaining)}</div>
-                    </div>
-                    <div class="gantt-queue-controls">
-                        <span class="gantt-worker-stepper" onclick="event.stopPropagation()">
-                            <button class="btn btn-sm btn-outline" onclick="event.stopPropagation(); Gantt.adjustParallelWorkers(${item.orderId || item.id}, -1)" title="Уменьшить число сотрудников на заказ">&#8722;</button>
-                            <button class="btn btn-sm btn-outline gantt-worker-stepper-label" title="Сколько сотрудников можно ставить на этот заказ одновременно">👥 ${workerTarget}/${slotLimit}</button>
-                            <button class="btn btn-sm btn-outline" onclick="event.stopPropagation(); Gantt.adjustParallelWorkers(${item.orderId || item.id}, 1)" title="Увеличить число сотрудников на заказ">+</button>
-                        </span>
-                        <button class="btn btn-sm btn-outline" onclick="event.stopPropagation(); Gantt.shiftManualStart(${item.orderId || item.id}, -1)" title="Сдвинуть старт на 1 рабочий день раньше">&#8592;</button>
-                        <button class="btn btn-sm btn-outline" onclick="event.stopPropagation(); Gantt.promptManualStart(${item.orderId || item.id})" title="${manualStart ? 'Изменить дату «не раньше»' : 'Задать дату «не раньше»'}">&#128197;</button>
-                        <button class="btn btn-sm btn-outline" onclick="event.stopPropagation(); Gantt.shiftManualStart(${item.orderId || item.id}, 1)" title="Сдвинуть старт на 1 рабочий день позже">&#8594;</button>
-                        <button class="btn btn-sm btn-outline" onclick="event.stopPropagation(); Gantt.moveUp(${item.orderId || item.id})" title="Поднять в очереди">&#8593;</button>
-                        <button class="btn btn-sm btn-outline" onclick="event.stopPropagation(); Gantt.moveDown(${item.orderId || item.id})" title="Опустить в очереди">&#8595;</button>
-                    </div>
+            <div class="gantt-sidebar-row ${riskClass}" draggable="true"
+                ondragstart="Gantt.onOrderDragStart(event, ${orderId})"
+                ondragover="Gantt.onOrderDragOver(event)"
+                ondragleave="Gantt.onOrderDragLeave(event)"
+                ondragend="Gantt.onOrderDragEnd(event)"
+                ondrop="Gantt.onOrderDrop(event, ${orderId})">
+                <span class="gantt-drag-handle" title="Перетащить заказ">&#8942;&#8942;</span>
+                <span class="gantt-priority-index">${index + 1}</span>
+                <div class="gantt-row-main">
+                    <div class="gantt-order-name" title="${this.esc(item.orderName)}">${this.esc(item.orderName || 'Без названия')}</div>
+                    <div class="gantt-order-meta">${this.esc(item.clientName || 'Без клиента')} · осталось ${this.formatHours(progress.remaining)}</div>
+                    <div class="gantt-order-risk ${riskClass}">${this.esc(risk.label)} · ${deadlineLabel}</div>
                 </div>
-                <div class="gantt-queue-dates">
-                    <strong>${paused ? 'Старт:' : 'План:'}</strong> ${paused ? 'ждет готовности' : this.formatDateRange(startDate, finishDate)}
-                    <span> · </span>
-                    <strong>Дедлайн:</strong> ${deadlineLabel}
-                    ${manualStart ? `<span> · </span><strong>Не раньше:</strong> ${this.formatDateStr(manualStart)}` : ''}
-                </div>
-                ${deliveryLine}
-                ${deliveryWarning}
-                ${!paused && deadlineRisk.status !== 'no_deadline' && deadlineRisk.status !== 'unplanned'
-                    ? `<div class="gantt-queue-risk-line ${riskClass}"><strong>${this.esc(deadlineRisk.label)}</strong>${deadlineRisk.finishDate ? ` · плановый финиш ${this.formatDateStr(deadlineRisk.finishDate)}` : ''}</div>`
-                    : ''}
-                <div class="gantt-queue-progress">${progressLabel}${otherHoursLabel} · в плане ${workerTarget} сотр.${item.actual_hours_employee_count ? ` · факт ${item.actual_hours_employee_count} сотр.` : ''}</div>
-                <div class="gantt-queue-phases">${phasePills || '<span class="text-muted">Нет производственных часов</span>'}</div>
-                <div class="gantt-queue-footer">
-                    <span class="gantt-queue-badge ${blocked ? 'blocked' : review ? 'review' : (riskClass || 'ok')}">${blocked || review ? this.esc(item.production_blocked_reason || (review ? 'Требует проверки' : 'Ждет молд')) : this.esc(deadlineRisk.label)}</span>
-                    <span class="gantt-queue-open">Открыть заказ</span>
-                </div>
-            </article>`;
-    },
-
-    renderCapacityChart(el, minDate, totalDays, cellWidth, totalWidth, dayMap, dailyCapacity) {
-        const chartH = 84;
-        const maxH = Math.max(dailyCapacity * 1.3, 1);
-        const holidaySet = this.getHolidaySet();
-        let barsHtml = '';
-
-        for (let i = 0; i < totalDays; i++) {
-            const date = new Date(minDate);
-            date.setDate(date.getDate() + i);
-            const dateStr = this.formatIsoDateLocal(date);
-            const dayData = dayMap[dateStr];
-            if (!dayData || this.isNonWorkingDate(date, holidaySet)) continue;
-
-            let moldingHours = 0;
-            let assemblyHours = 0;
-            let packagingHours = 0;
-            dayData.allocations.forEach(allocation => {
-                if (allocation.phase === 'molding') moldingHours += allocation.hours;
-                if (allocation.phase === 'assembly') assemblyHours += allocation.hours;
-                if (allocation.phase === 'packaging') packagingHours += allocation.hours;
-            });
-
-            const totalUsed = moldingHours + assemblyHours + packagingHours;
-            const overload = totalUsed > dailyCapacity;
-            const left = i * cellWidth;
-            const barWidth = Math.max(cellWidth - 4, 6);
-            const moldPx = (moldingHours / maxH) * chartH;
-            const assemblyPx = (assemblyHours / maxH) * chartH;
-            const packagingPx = (packagingHours / maxH) * chartH;
-
-            barsHtml += `<div class="gantt-cap-day" style="left:${left}px;width:${barWidth}px;height:${chartH}px" title="${this.formatDateStr(dateStr)}: ${this.formatHours(totalUsed)} / ${this.formatHours(dailyCapacity)}">`;
-            if (moldingHours > 0) {
-                barsHtml += `<div class="gantt-cap-seg" style="height:${moldPx}px;background:#f59e0b;bottom:0"></div>`;
-            }
-            if (assemblyHours > 0) {
-                barsHtml += `<div class="gantt-cap-seg" style="height:${assemblyPx}px;background:#06b6d4;bottom:${moldPx}px"></div>`;
-            }
-            if (packagingHours > 0) {
-                barsHtml += `<div class="gantt-cap-seg" style="height:${packagingPx}px;background:#8b5cf6;bottom:${moldPx + assemblyPx}px"></div>`;
-            }
-            if (overload) {
-                barsHtml += '<div class="gantt-cap-overload" title="Перегруз!">!</div>';
-            }
-            barsHtml += '</div>';
-        }
-
-        const capLinePx = (dailyCapacity / maxH) * chartH;
-        el.innerHTML = `
-            <div class="gantt-cap-wrap">
-                <div class="gantt-cap-label">${this.formatHours(dailyCapacity)} в день</div>
-                <div class="gantt-cap-chart" style="height:${chartH}px;width:${totalWidth + 20}px">
-                    <div class="gantt-cap-line" style="bottom:${capLinePx}px"></div>
-                    ${barsHtml}
+                <div class="gantt-row-actions" onclick="event.stopPropagation()">
+                    <span class="gantt-worker-stepper">
+                        <button class="gantt-worker-button" onclick="Gantt.adjustParallelWorkers(${orderId}, -1)" ${workerTarget <= 1 ? 'disabled' : ''} title="Уменьшить число сотрудников">&#8722;</button>
+                        <span class="gantt-worker-count" title="Сотрудников на заказ">${workerTarget} чел.</span>
+                        <button class="gantt-worker-button" onclick="Gantt.adjustParallelWorkers(${orderId}, 1)" ${workerTarget >= this.TEAM_SIZE ? 'disabled' : ''} title="Увеличить число сотрудников">+</button>
+                    </span>
+                    <button class="gantt-open-order" onclick="App.navigate('order-detail', true, ${orderId})">Открыть</button>
                 </div>
             </div>`;
+    },
 
-        const timeline = document.getElementById('gantt-timeline');
-        if (timeline) {
-            timeline.onscroll = () => {
-                if (el.scrollLeft !== timeline.scrollLeft) el.scrollLeft = timeline.scrollLeft;
-            };
-            el.onscroll = () => {
-                if (timeline.scrollLeft !== el.scrollLeft) timeline.scrollLeft = el.scrollLeft;
-            };
-        }
+    renderPausedOrders(blockedQueue = [], reviewQueue = []) {
+        const renderGroup = (title, items, type) => {
+            if (!items.length) return '';
+            const rows = items.map(item => {
+                const orderId = Number(item.orderId || item.id);
+                const name = item.orderName || item.order_name || 'Без названия';
+                const reason = item.production_blocked_reason
+                    || (type === 'review' ? 'Нужно проверить данные заказа' : 'Заказ пока не готов к производству');
+                return `
+                    <div class="gantt-paused-row ${type}">
+                        <div>
+                            <strong>${this.esc(name)}</strong>
+                            <span>${this.esc(reason)}</span>
+                        </div>
+                        <button class="btn btn-sm btn-outline" onclick="App.navigate('order-detail', true, ${orderId})">Открыть заказ</button>
+                    </div>`;
+            }).join('');
+            return `
+                <section class="gantt-paused-group">
+                    <h3>${title} <span>${items.length}</span></h3>
+                    ${rows}
+                </section>`;
+        };
+
+        const groups = [
+            renderGroup('Ждут готовности', blockedQueue, 'blocked'),
+            renderGroup('Нужно проверить', reviewQueue, 'review'),
+        ].filter(Boolean).join('');
+        return groups ? `<div class="gantt-paused-card">${groups}</div>` : '';
     },
 
     renderOrderRow(item, minDate, totalDays, cellWidth) {
         const bars = [];
-        let currentBar = null;
-
-        item.schedule.forEach(segment => {
-            const previousEndDate = currentBar ? this.parseLocalDate(currentBar.endDate) : null;
-            const segmentDate = this.parseLocalDate(segment.date);
-            const dayGap = previousEndDate ? this.daysBetween(previousEndDate, segmentDate) : null;
-
-            if (currentBar && currentBar.phase === segment.phase && dayGap === 1) {
-                currentBar.endDate = segment.date;
-                currentBar.hours += segment.hours;
-            } else {
-                if (currentBar) bars.push(currentBar);
-                currentBar = {
-                    phase: segment.phase,
-                    startDate: segment.date,
-                    endDate: segment.date,
-                    hours: segment.hours,
-                };
-            }
+        const dailyPhaseHours = new Map();
+        (item.schedule || []).forEach(segment => {
+            const key = `${segment.phase}:${segment.date}`;
+            const current = dailyPhaseHours.get(key) || {
+                phase: segment.phase,
+                date: segment.date,
+                hours: 0,
+            };
+            current.hours = round2(current.hours + Number(segment.hours || 0));
+            dailyPhaseHours.set(key, current);
         });
-        if (currentBar) bars.push(currentBar);
 
         const phaseColors = { molding: '#f59e0b', assembly: '#06b6d4', packaging: '#8b5cf6' };
         const phaseLabels = { molding: 'Литьё', assembly: 'Сборка', packaging: 'Упаковка' };
+        const phaseTops = { molding: 10, assembly: 36, packaging: 62 };
+
+        Object.keys(phaseColors).forEach(phase => {
+            const segments = Array.from(dailyPhaseHours.values())
+                .filter(segment => segment.phase === phase)
+                .sort((left, right) => left.date.localeCompare(right.date));
+            let currentBar = null;
+            segments.forEach(segment => {
+                const previousEndDate = currentBar ? this.parseLocalDate(currentBar.endDate) : null;
+                const segmentDate = this.parseLocalDate(segment.date);
+                const dayGap = previousEndDate ? this.daysBetween(previousEndDate, segmentDate) : null;
+
+                if (currentBar && dayGap === 1) {
+                    currentBar.endDate = segment.date;
+                    currentBar.hours = round2(currentBar.hours + segment.hours);
+                } else {
+                    if (currentBar) bars.push(currentBar);
+                    currentBar = {
+                        phase,
+                        startDate: segment.date,
+                        endDate: segment.date,
+                        hours: segment.hours,
+                    };
+                }
+            });
+            if (currentBar) bars.push(currentBar);
+        });
 
         const barsHtml = bars.map(bar => {
             const startOffset = this.daysBetween(minDate, this.parseLocalDate(bar.startDate));
@@ -814,8 +606,9 @@ const Gantt = {
             const width = Math.max(cellWidth, (endOffset - startOffset + 1) * cellWidth);
             const color = phaseColors[bar.phase] || '#6b7280';
             const label = phaseLabels[bar.phase] || bar.phase;
+            const top = phaseTops[bar.phase] ?? 34;
             return `
-                <div class="gantt-phase-bar" style="left:${left}px;width:${width}px;background:${color}22;border-left:4px solid ${color}" title="${label}: ${this.formatHours(bar.hours)} (${this.formatDateStr(bar.startDate)} — ${this.formatDateStr(bar.endDate)})">
+                <div class="gantt-phase-bar" style="left:${left}px;top:${top}px;width:${width}px;background:${color}22;border-left:4px solid ${color}" title="${label}: ${this.formatHours(bar.hours)} (${this.formatDateStr(bar.startDate)} — ${this.formatDateStr(bar.endDate)})">
                     <span class="gantt-bar-text" style="color:${color}">${width > 92 ? label : this.formatHours(bar.hours)}</span>
                 </div>`;
         }).join('');
@@ -842,68 +635,6 @@ const Gantt = {
         });
 
         return `<div class="gantt-row">${barsHtml}${deadlineHtml}</div>`;
-    },
-
-    renderStats() {
-        const statsEl = document.getElementById('gantt-stats');
-        if (!statsEl) return;
-        if (!this.schedule) {
-            statsEl.innerHTML = '';
-            return;
-        }
-
-        const { queue, dailyCapacity, days } = this.schedule;
-        const totalOrders = queue.filter(item => item.schedule.length > 0).length;
-        const blockedCount = (this.blockedOrders || []).length;
-        const reviewCount = (this.reviewOrders || []).length;
-        const today = this.formatIsoDateLocal(new Date());
-        const nextWorkDays = days.filter(day => day.date >= today).slice(0, 5);
-        const weekUsed = round2(nextWorkDays.reduce((sum, day) => sum + day.totalUsed, 0));
-        const weekCapacity = round2(dailyCapacity * 5);
-        const freeHours = round2(weekCapacity - weekUsed);
-        const overloadDays = days.filter(day => day.totalUsed > dailyCapacity).length;
-        const riskSummaries = queue.map(item => this.getDeadlineRiskSummary(item));
-        const lateOrders = riskSummaries.filter(risk => risk.status === 'late').length;
-        const tightOrders = riskSummaries.filter(risk => risk.status === 'critical' || risk.status === 'tight').length;
-        const overloadSummary = this.buildCapacityRiskSummary(days, dailyCapacity, new Date());
-        const monthTracking = this.buildCurrentMonthTrackingSummary(days, this.actualMonthSummary, new Date());
-        const plannedMonthHours = monthTracking.plannedMonthHours;
-        const plannedToDateHours = monthTracking.plannedToDateHours;
-        const actualMonthHours = monthTracking.actualMonthHours;
-        const actualMonthEmployees = monthTracking.employeeCount;
-        const gapToDate = monthTracking.gapToDate;
-        const activeActualHours = round2(queue.reduce((sum, item) => sum + (item.actualTotalHours || 0), 0));
-        const activeRemainingHours = round2(queue.reduce((sum, item) => sum + (item.remainingTotalHours || item.totalHours || 0), 0));
-
-        statsEl.innerHTML = `
-            <div class="stat-card">
-                <div class="stat-value">${totalOrders}${blockedCount ? ` <span style="font-size:12px;color:var(--orange)">+${blockedCount}</span>` : ''}${reviewCount ? ` <span style="font-size:12px;color:var(--text-muted)">+${reviewCount}</span>` : ''}</div>
-                <div class="stat-label">${blockedCount || reviewCount ? 'В плане + ожидание/проверка' : 'Заказов в плане'}</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value">${this.formatHours(weekUsed)} <span style="font-size:12px;color:var(--text-muted)">/ ${this.formatHours(weekCapacity)}</span></div>
-                <div class="stat-label">Загрузка на 5 рабочих дней</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value ${freeHours < 0 ? 'text-red' : 'text-green'}">${freeHours > 0 ? '+' : ''}${this.formatHours(freeHours)}</div>
-                <div class="stat-label">Свободных часов</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value ${(overloadDays || lateOrders || tightOrders) ? 'text-red' : 'text-green'}">${lateOrders ? `${lateOrders} зак.` : tightOrders ? `${tightOrders} зак.` : overloadSummary.firstOverloadDate ? this.formatDateStr(overloadSummary.firstOverloadDate) : 'OK'}</div>
-                <div class="stat-label">${lateOrders ? 'Опаздывают к дедлайну' : tightOrders ? 'Впритык к дедлайну' : overloadSummary.firstOverloadDate ? `Первый перегруз · +${this.formatHours(overloadSummary.firstOverloadHours)}` : 'Риски не найдены'}</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value">${this.formatHours(plannedMonthHours)}</div>
-                <div class="stat-label">План часов в этом месяце</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value ${gapToDate < 0 ? 'text-red' : 'text-green'}">${this.formatHours(actualMonthHours)} <span style="font-size:12px;color:var(--text-muted)">/ ${this.formatHours(plannedToDateHours)}</span></div>
-                <div class="stat-label">Факт / план к сегодня${actualMonthEmployees ? ` · ${actualMonthEmployees} сотр.` : ''}${gapToDate ? ` · <span style="color:${gapToDate < 0 ? '#dc2626' : '#16a34a'}">${gapToDate > 0 ? '+' : ''}${this.formatHours(gapToDate)}</span>` : ''}</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value">${this.formatHours(activeRemainingHours)}</div>
-                <div class="stat-label">Осталось по активным заказам · факт ${this.formatHours(activeActualHours)}</div>
-            </div>`;
     },
 
     renderTimeAxis(minDate, totalDays, cellWidth, holidaySet = new Set()) {
