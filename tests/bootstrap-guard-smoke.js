@@ -35,6 +35,21 @@ for (const [key, payload] of Object.entries(shards)) {
 
 const yandexSync = fs.readFileSync(path.join(process.cwd(), '.github/workflows/yandex-static-sync.yml'), 'utf8');
 assert.match(yandexSync, /data\/bootstrap\/\*/, 'bootstrap shards must be deployed without immutable one-year cache');
+assert.match(
+  yandexSync,
+  /max-parallel:\s*1/,
+  'static mirrors must build sequentially to avoid doubling heavy bootstrap reads',
+);
+assert.match(
+  yandexSync,
+  /concurrency:[\s\S]*cancel-in-progress:\s*false/,
+  'a newer sync must queue instead of cancelling an in-progress non-atomic bucket upload',
+);
+assert.match(
+  yandexSync,
+  /for attempt in 1 2 3; do[\s\S]*node scripts\/build-yandex-static\.mjs[\s\S]*retrying in/,
+  'transient platform API failures must retry the complete guarded build',
+);
 
 // A fully empty snapshot (platform API fully unreachable) must fail the build.
 assert.throws(

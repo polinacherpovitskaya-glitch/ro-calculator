@@ -77,6 +77,8 @@
   локальная target-копия на VM, проверенная cloud-копия и bucket versioning.
 - Backup hardening run `30386066187` зелёный: ежедневный и постоянный cutover
   наборы загружены, скачаны обратно и прошли исходные SHA-256 manifests.
+- Последовательный static run `30386829294` опубликовал `v424` на обоих
+  доменах после transient `order_items` failure; API health зелёный.
 
 ## Next
 
@@ -141,6 +143,7 @@ node tests/version-smoke.js
 | 2026-07-28 | M7 | v422 production | Actions `30383670546`, `30384324698`, `30384552008`, `30384892744` | both domains, write-back and browser smokes green | M8 |
 | 2026-07-28 | M8 | merged cutover | PR `#212`, merge `6ad500ce` | main deploy, timebot, write-back, health and live smoke green | backup hardening |
 | 2026-07-28 | M8 | backup hardening | Actions `30386066187` | source/target/Storage cloud round-trip green; media and backup versioning enabled | observation |
+| 2026-07-28 | M8 | static retry | Actions `30386829294` | sequential calc/calc2 build and upload green; both serve v424 | production smokes |
 
 ## Smoke / Demo Checklist
 

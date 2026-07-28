@@ -15,7 +15,7 @@ permissions:
 
 concurrency:
   group: yandex-static-mirror
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -29,6 +29,7 @@ jobs:
     timeout-minutes: 45
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         bucket:
           - calc.recycleobject.ru
@@ -61,7 +62,18 @@ jobs:
         run: |
           set -euo pipefail
           test -n "${OPS_BOT_TOKEN:-}"
-          node scripts/build-yandex-static.mjs
+          for attempt in 1 2 3; do
+            if node scripts/build-yandex-static.mjs; then
+              exit 0
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "Static bundle failed after ${attempt} attempts" >&2
+              exit 1
+            fi
+            delay=$((attempt * 15))
+            echo "Static bundle attempt ${attempt}/3 failed; retrying in ${delay}s" >&2
+            sleep "$delay"
+          done
 
       - name: Install Yandex Cloud CLI
         run: |
