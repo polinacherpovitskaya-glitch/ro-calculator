@@ -35,6 +35,10 @@ const financeMigration = fs.readFileSync(
   path.join(root, 'ops/db/migrations/014_finance.sql'),
   'utf8'
 );
+const timebotMigration = fs.readFileSync(
+  path.join(root, 'ops/db/migrations/016_timebot_compatibility.sql'),
+  'utf8'
+);
 const financeRefresh = fs.readFileSync(
   path.join(root, 'ops/scripts/refresh/11-finance.mjs'),
   'utf8'
@@ -93,6 +97,8 @@ assert.match(financeMigration, /CREATE TABLE IF NOT EXISTS finance_transactions/
 assert.match(financeMigration, /CREATE TABLE IF NOT EXISTS bank_transactions/);
 assert.match(financeMigration, /CREATE TABLE IF NOT EXISTS legacy_finance_transactions/);
 assert.match(financeMigration, /CREATE TABLE IF NOT EXISTS fintablo_imports/);
+assert.match(timebotMigration, /ALTER TABLE employees ADD COLUMN IF NOT EXISTS telegram_id/);
+assert.match(timebotMigration, /ALTER TABLE time_entries ADD COLUMN IF NOT EXISTS task_description/);
 assert.match(financeRefresh, /PAGE_SIZE = 1000/);
 assert.match(financeRefresh, /OVERRIDING SYSTEM VALUE/);
 assert.match(financeRefresh, /finance_transactions/);

@@ -2,9 +2,9 @@
 
 `taskbot.js` runs against the new Ops API with Bearer auth.
 
-`timebot.js` remains connected to the live Supabase database used by calc/calc2,
-so recorded hours appear immediately in `calc2/#timetrack`. In production it
-runs as a separate `ops-timebot` container with a persistent state volume.
+`timebot.js` writes directly to the independent PostgreSQL database on the
+Yandex VM. In production it runs as a separate `ro-timebot` container on the
+private platform network with a persistent state volume.
 
 Required env:
 
@@ -47,26 +47,27 @@ protected Vercel Function relay deployed with `calc.recycleobject.ru`.
 CI writes `TIMEBOT_TOKEN` and the protected relay URL to
 `/srv/ops/infra/.env.timebot` without storing either value in git.
 
-The base `/srv/ops/infra/.env` must already contain:
+The bot needs the independent PostgreSQL connection:
 
 ```bash
-SUPABASE_URL=https://<project>.supabase.co
-SUPABASE_SERVICE_KEY=<service role key>
+DATABASE_URL=postgres://<user>:<password>@ro-platform-shadow-postgres:5432/<database>
 ```
 
 Manual start:
 
 ```bash
-cd /srv/ops/infra
-docker compose \
-  --env-file .env \
-  --env-file .env.timebot \
-  --profile timebot \
-  up -d --build timebot
-docker logs -f ops-timebot
+docker run -d \
+  --name ro-timebot \
+  --restart unless-stopped \
+  --network ro-platform-shadow_shadow \
+  --env-file /home/robot/timebot/runtime.env \
+  -e TIMEBOT_STATE_DIR=/app/state \
+  -v ro-timebot-state:/app/state \
+  ro-timebot:latest node timebot.js
+docker logs -f ro-timebot
 ```
 
 Runtime files live in the named `timebot-state` volume under `/app/state`.
 Removing or recreating the container does not delete unfinished reports or the
-pending write queue. Do not run the local LaunchAgent and `ops-timebot` at the
+pending write queue. Do not run the local LaunchAgent and `ro-timebot` at the
 same time: Telegram will reject the second poller with conflict 409.

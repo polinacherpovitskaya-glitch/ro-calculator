@@ -7,7 +7,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 const TelegramBot = require('node-telegram-bot-api');
-const { createClient } = require('@supabase/supabase-js');
+const { createPostgresCompatClient } = require('./postgres-compat');
 const { buildTaskNotificationText, getTaskNotificationRecipientIds } = require('./task-notification-core');
 const { buildTelegramBotOptions, formatTelegramTransportError } = require('./telegram-runtime');
 const { getLocalDate, shiftYmd, isWeekendYmd, normalizeWorkDate } = require('./timebot-date-utils');
@@ -21,18 +21,16 @@ const {
 const { getStateTtlMs, getTimebotRuntimePaths, requiresCommentToSave } = require('./timebot-state-utils');
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_KEY = process.env.SUPABASE_KEY;
 const ENABLE_TASK_NOTIFICATION_WORKER = String(process.env.ENABLE_TASK_NOTIFICATION_WORKER || 'false').toLowerCase() === 'true';
 
-if (!BOT_TOKEN || !SUPABASE_URL || !SUPABASE_KEY) {
-    console.error(`Missing env vars for timebot (.env at ${path.join(__dirname, '.env')}): BOT_TOKEN, SUPABASE_URL, SUPABASE_KEY`);
+if (!BOT_TOKEN || !process.env.DATABASE_URL) {
+    console.error(`Missing env vars for timebot (.env at ${path.join(__dirname, '.env')}): BOT_TOKEN, DATABASE_URL`);
     process.exit(1);
 }
 
 const bot = new TelegramBot(BOT_TOKEN, buildTelegramBotOptions());
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+const database = createPostgresCompatClient();
 const WORK_SETTINGS_KEYS = {
     tasks: 'work_tasks_json',
     taskNotificationEvents: 'work_task_notification_events_json',
@@ -183,7 +181,7 @@ async function refreshTimebotHealth() {
         const results = await Promise.allSettled([
             withHealthTimeout(bot.getMe(), 'telegram_probe'),
             withHealthTimeout(
-                supabase.from('employees').select('id').limit(1),
+                database.from('employees').select('id').limit(1),
                 'database_probe'
             ),
         ]);
@@ -373,7 +371,7 @@ async function retryPendingReports() {
             let failed = false;
             const stillPending = [];
             for (const payload of payloads) {
-                const { error } = await supabase.from('time_entries').insert(payload);
+                const { error } = await database.from('time_entries').insert(payload);
                 if (error && String(error.code || '') !== '23505') {
                     failed = true;
                     stillPending.push(payload);
@@ -543,7 +541,7 @@ bot.onText(/\/clear/, async (msg) => {
         if (!emp) return;
 
         const today = await getReportDate(emp.timezone_offset);
-        const { error } = await supabase
+        const { error } = await database
             .from('time_entries')
             .delete()
             .eq('employee_id', emp.id)
@@ -591,7 +589,7 @@ bot.on('callback_query', async (query) => {
                 return;
             }
 
-            const { data: emp } = await supabase.from('employees').select('*').eq('id', empId).single();
+            const { data: emp } = await database.from('employees').select('*').eq('id', empId).single();
             clearState(telegramId);
 
             send(chatId,
@@ -804,7 +802,7 @@ async function getEmployee(telegramId) {
     const bindingEmployee = await getEmployeeFromBinding(telegramId, true);
     if (bindingEmployee) return bindingEmployee;
 
-    const { data, error } = await supabase
+    const { data, error } = await database
         .from('employees')
         .select('*')
         .eq('telegram_id', telegramId)
@@ -820,7 +818,7 @@ async function getAnyLinkedEmployee(telegramId) {
     const bindingEmployee = await getEmployeeFromBinding(telegramId, false);
     if (bindingEmployee) return bindingEmployee;
 
-    const { data, error } = await supabase
+    const { data, error } = await database
         .from('employees')
         .select('*')
         .eq('telegram_id', telegramId);
@@ -832,7 +830,7 @@ async function getAnyLinkedEmployee(telegramId) {
 }
 
 async function getEmployeeFromBinding(telegramId, activeOnly) {
-    let query = supabase
+    let query = database
         .from('bot_telegram_bindings')
         .select('telegram_chat_id, telegram_username, employee_id, is_active')
         .eq('telegram_chat_id', telegramId);
@@ -847,7 +845,7 @@ async function getEmployeeFromBinding(telegramId, activeOnly) {
     const binding = (bindings || [])[0];
     if (!binding) return null;
 
-    let employeeQuery = supabase.from('employees').select('*').eq('id', binding.employee_id);
+    let employeeQuery = database.from('employees').select('*').eq('id', binding.employee_id);
     if (activeOnly) employeeQuery = employeeQuery.eq('is_active', true);
 
     const { data: employees, error: employeeError } = await employeeQuery.limit(1);
@@ -870,11 +868,11 @@ async function getEmployeeFromBinding(telegramId, activeOnly) {
 
 async function listAvailableEmployeesForLink() {
     const [{ data: employees, error: employeeError }, { data: bindings, error: bindingError }] = await Promise.all([
-        supabase
+        database
             .from('employees')
             .select('id, name, role, telegram_id')
             .eq('is_active', true),
-        supabase
+        database
             .from('bot_telegram_bindings')
             .select('employee_id')
             .eq('is_active', true),
@@ -896,7 +894,7 @@ async function listAvailableEmployeesForLink() {
 }
 
 async function linkEmployeeToTelegram(employeeId, telegramId, telegramUsername) {
-    const employeeResp = await supabase
+    const employeeResp = await database
         .from('employees')
         .select('id')
         .eq('id', employeeId)
@@ -908,7 +906,7 @@ async function linkEmployeeToTelegram(employeeId, telegramId, telegramUsername) 
     }
 
     const now = new Date().toISOString();
-    const deactivateResp = await supabase
+    const deactivateResp = await database
         .from('bot_telegram_bindings')
         .update({ is_active: false, last_active_at: now })
         .eq('employee_id', employeeId)
@@ -918,7 +916,7 @@ async function linkEmployeeToTelegram(employeeId, telegramId, telegramUsername) 
         await maybeLogBindingError('linkEmployeeToTelegram deactivate old binding', deactivateResp.error);
     }
 
-    const bindingResp = await supabase
+    const bindingResp = await database
         .from('bot_telegram_bindings')
         .upsert({
             telegram_chat_id: telegramId,
@@ -931,7 +929,7 @@ async function linkEmployeeToTelegram(employeeId, telegramId, telegramUsername) 
         await maybeLogBindingError('linkEmployeeToTelegram upsert binding', bindingResp.error);
     }
 
-    const clearLegacyResp = await supabase
+    const clearLegacyResp = await database
         .from('employees')
         .update({
             telegram_id: null,
@@ -941,7 +939,7 @@ async function linkEmployeeToTelegram(employeeId, telegramId, telegramUsername) 
         .neq('id', employeeId);
     if (clearLegacyResp.error) return clearLegacyResp.error;
 
-    const legacyResp = await supabase
+    const legacyResp = await database
         .from('employees')
         .update({
             telegram_id: telegramId,
@@ -1006,7 +1004,7 @@ async function startReport(chatId, telegramId) {
         if (!emp) return;
 
         const reportDate = await getReportDate(emp.timezone_offset);
-        const { data: todayEntries } = await supabase
+        const { data: todayEntries } = await database
             .from('time_entries')
             .select('hours')
             .eq('employee_id', emp.id)
@@ -1057,7 +1055,7 @@ function handleHoursEntry(chatId, telegramId, state, hours) {
 async function showProjectPicker(chatId, telegramId, emp, existingHours, entries, reportDate = null) {
     let projects = [];
     try {
-        const { data } = await supabase
+        const { data } = await database
             .from('orders')
             .select('id, order_name, client_name, status')
             .in('status', PRODUCTION_STATUSES)
@@ -1294,7 +1292,7 @@ function isSameFreeformEntry(existing, candidate) {
 }
 
 async function loadOrdersForFreeformMatching() {
-    const { data, error } = await supabase
+    const { data, error } = await database
         .from('orders')
         .select('id, order_name, client_name, status, updated_at')
         .order('updated_at', { ascending: false });
@@ -1317,7 +1315,7 @@ async function tryHandleFreeformBatchReport(chatId, telegramId, employee, text) 
                 const dates = parsed.entries.map(item => item.date).sort();
                 const minDate = dates[0];
                 const maxDate = dates[dates.length - 1];
-                const { data, error } = await supabase
+                const { data, error } = await database
                     .from('time_entries')
                     .select('*')
                     .eq('employee_id', employee.id)
@@ -1367,7 +1365,7 @@ async function tryHandleFreeformBatchReport(chatId, telegramId, employee, text) 
 
         for (const item of pendingPayloads) {
             const { entry, payload } = item;
-            const { error } = await supabase.from('time_entries').insert(payload);
+            const { error } = await database.from('time_entries').insert(payload);
             if (error) throw error;
             inserted.push(entry);
             existingEntries.push(payload);
@@ -1439,7 +1437,7 @@ async function saveAllEntries(chatId, telegramId, state, comment) {
         return;
     }
 
-    const { data: todayEntries, error: todayEntriesError } = await supabase
+    const { data: todayEntries, error: todayEntriesError } = await database
         .from('time_entries')
         .select('hours')
         .eq('employee_id', liveEmployee.id)
@@ -1469,7 +1467,7 @@ async function saveAllEntries(chatId, telegramId, state, comment) {
     let insertedCount = 0;
     try {
         for (const payload of payloads) {
-            const { error } = await supabase.from('time_entries').insert(payload);
+            const { error } = await database.from('time_entries').insert(payload);
             if (error) throw error;
             insertedCount += 1;
             await new Promise(r => setTimeout(r, 5));
@@ -1522,7 +1520,7 @@ async function showToday(chatId, telegramId) {
         if (!emp) return;
 
         const today = await getReportDate(emp.timezone_offset);
-        const { data } = await supabase
+        const { data } = await database
             .from('time_entries')
             .select('*')
             .eq('employee_id', emp.id)
@@ -1560,7 +1558,7 @@ async function showWeek(chatId, telegramId) {
         const reportDate = await getReportDate(emp.timezone_offset);
         const weekAgoStr = shiftYmd(reportDate, -7);
 
-        const { data } = await supabase
+        const { data } = await database
             .from('time_entries')
             .select('*')
             .eq('employee_id', emp.id)
@@ -1679,7 +1677,7 @@ async function checkReminders() {
     const utcMinute = now.getUTCMinutes();
     const holidaySet = await getProductionHolidaySet();
 
-    const { data: employees, error } = await supabase
+    const { data: employees, error } = await database
         .from('employees')
         .select('*')
         .eq('is_active', true)
@@ -1700,7 +1698,7 @@ async function checkReminders() {
         // Evening reminder — if no entries today
         if (isTodayWorkday && localHour === (emp.reminder_hour || 17) && localMinute === (emp.reminder_minute || 30)) {
             const today = todayLocal;
-            const { data: todayEntries } = await supabase
+            const { data: todayEntries } = await database
                 .from('time_entries')
                 .select('id')
                 .eq('employee_id', emp.id)
@@ -1719,7 +1717,7 @@ async function checkReminders() {
         if (isTodayWorkday && localHour === 9 && localMinute === 0) {
             const previousWorkday = normalizeWorkDate(shiftYmd(todayLocal, -1), holidaySet);
             if (!previousWorkday || previousWorkday === todayLocal) continue;
-            const { data: yesterdayEntries } = await supabase
+            const { data: yesterdayEntries } = await database
                 .from('time_entries')
                 .select('id')
                 .eq('employee_id', emp.id)
@@ -1738,13 +1736,18 @@ async function checkReminders() {
 
 async function loadJsonSetting(settingKey, fallbackValue = null) {
     try {
-        const { data, error } = await supabase
+        const { data, error } = await database
             .from('settings')
             .select('value')
             .eq('key', settingKey)
             .maybeSingle();
-        if (error || !data?.value) return fallbackValue;
-        return JSON.parse(data.value);
+        if (error || data?.value === null || data?.value === undefined) return fallbackValue;
+        if (typeof data.value !== 'string') return data.value;
+        try {
+            return JSON.parse(data.value);
+        } catch {
+            return data.value;
+        }
     } catch (error) {
         return fallbackValue;
     }
@@ -1752,7 +1755,7 @@ async function loadJsonSetting(settingKey, fallbackValue = null) {
 
 async function saveJsonSetting(settingKey, value) {
     try {
-        await supabase
+        await database
             .from('settings')
             .upsert({
                 key: settingKey,
@@ -1766,7 +1769,7 @@ async function saveJsonSetting(settingKey, value) {
 
 async function loadPendingTaskNotificationEvents() {
     try {
-        const { data, error } = await supabase
+        const { data, error } = await database
             .from('task_notification_events')
             .select('*')
             .is('processed_at', null)
@@ -1797,7 +1800,7 @@ async function markFallbackTaskNotificationProcessed(eventId, processedAt) {
 async function markTaskNotificationProcessed(eventId) {
     const processedAt = new Date().toISOString();
     try {
-        const { error } = await supabase
+        const { error } = await database
             .from('task_notification_events')
             .update({ processed_at: processedAt })
             .eq('id', eventId);
@@ -1812,7 +1815,7 @@ async function markTaskNotificationProcessed(eventId) {
 
 async function loadWorkTasksSnapshot() {
     try {
-        const { data, error } = await supabase.from('tasks').select('*');
+        const { data, error } = await database.from('tasks').select('*');
         if (!error && Array.isArray(data)) return data;
     } catch (error) {
         console.warn('Task notifications: remote tasks table unavailable, using settings fallback.');
@@ -1830,7 +1833,7 @@ async function processTaskNotifications() {
     if (!events || events.length === 0) return;
 
     const [employeesResp, tasks] = await Promise.all([
-        supabase.from('employees').select('*').eq('is_active', true),
+        database.from('employees').select('*').eq('is_active', true),
         loadWorkTasksSnapshot(),
     ]);
 

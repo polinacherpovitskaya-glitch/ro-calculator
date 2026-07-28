@@ -63,7 +63,6 @@ jobs:
             printf 'TELEGRAM_BASE_API_URL=https://ro-calculator-xi.vercel.app/api/telegram-relay/%s\n' "$TELEGRAM_RELAY_SECRET"
             printf 'TELEGRAM_POLL_TIMEOUT_SECONDS=20\n'
             printf 'TELEGRAM_REQUEST_TIMEOUT_MS=45000\n'
-            printf 'SUPABASE_URL=https://db.recycleobject.ru\n'
             printf 'ENABLE_TASK_NOTIFICATION_WORKER=false\n'
           } > "$RUNNER_TEMP/timebot.env"
           scp -i "$HOME/.ssh/yandex_vm" "$RUNNER_TEMP/timebot.env" \
@@ -72,15 +71,22 @@ jobs:
           ssh -i "$HOME/.ssh/yandex_vm" "$YANDEX_VM_USER@$YANDEX_VM_HOST" bash <<'REMOTE'
             set -euo pipefail
             chmod 600 /home/robot/timebot/runtime.env
-            service_key="$(sed -n 's/^SERVICE_ROLE_KEY=//p' /home/robot/sb/docker/.env)"
-            test -n "$service_key"
-            printf 'SUPABASE_KEY=%s\n' "$service_key" >> /home/robot/timebot/runtime.env
+            set -a
+            source /home/robot/platform/infra/.env.shadow
+            set +a
+            test -n "${POSTGRES_USER:-}"
+            test -n "${POSTGRES_PASSWORD:-}"
+            test -n "${POSTGRES_DB:-}"
+            printf 'DATABASE_URL=postgres://%s:%s@ro-platform-shadow-postgres:5432/%s\n' \
+              "$POSTGRES_USER" "$POSTGRES_PASSWORD" "$POSTGRES_DB" \
+              >> /home/robot/timebot/runtime.env
             docker build -t ro-timebot:latest /home/robot/timebot/app
             docker volume create ro-timebot-state >/dev/null
             docker rm -f ro-timebot >/dev/null 2>&1 || true
             docker run -d \
               --name ro-timebot \
               --restart unless-stopped \
+              --network ro-platform-shadow_shadow \
               --env-file /home/robot/timebot/runtime.env \
               -e TIMEBOT_STATE_DIR=/app/state \
               -v ro-timebot-state:/app/state \
@@ -100,6 +106,10 @@ jobs:
             logs="$(docker logs --tail 100 ro-timebot 2>&1)"
             printf '%s\n' "$logs"
             printf '%s' "$logs" | grep -q 'Polling started at'
+            if docker exec ro-timebot env | grep -q '^SUPABASE_'; then
+              echo "Supabase environment leaked into the replacement timebot" >&2
+              exit 1
+            fi
             if printf '%s' "$logs" | grep -Eq 'FATAL: Another bot instance|Missing env vars'; then
               exit 1
             fi

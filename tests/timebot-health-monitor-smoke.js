@@ -17,8 +17,8 @@ assert.match(workflow, /docker inspect[^]*ro-timebot/, 'monitor should verify th
 assert.match(workflow, /timebot\.health\.json/, 'monitor should validate the persistent health file');
 assert.match(workflow, /validateTimebotHealthSnapshot/, 'monitor should reject stale or unhealthy snapshots');
 assert.match(workflow, /telegram-relay[^]*getMe/, 'monitor should probe the Telegram relay independently');
-assert.match(workflow, /https:\/\/db\.recycleobject\.ru/, 'monitor should require the Yandex database');
-assert.match(workflow, /rest\/v1\/employees\?select=id&limit=1/, 'monitor DB probe should be read-only');
+assert.match(workflow, /ro-platform-shadow-postgres/, 'monitor should require the independent Yandex PostgreSQL database');
+assert.match(workflow, /SELECT COUNT\(\*\) FROM employees WHERE is_active = TRUE/, 'monitor DB probe should be read-only');
 assert.match(workflow, /127\.0\.0\.1:3100\/api\/health/, 'monitor should probe the replacement API and PostgreSQL');
 assert.match(workflow, /replacement API/, 'alerts should identify replacement API failures');
 assert.match(workflow, /TELEGRAM_DEDUP_FAILURES:\s*'true'/, 'monitor should deduplicate repeated incidents');
