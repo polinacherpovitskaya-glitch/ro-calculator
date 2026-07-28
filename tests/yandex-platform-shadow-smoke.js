@@ -56,6 +56,7 @@ assert.match(caddyCompose, /name: supabase_default/);
 assert.match(caddyCompose, /name: ro-platform-shadow_shadow/);
 assert.match(caddyDeploy, /caddy validate/);
 assert.match(caddyDeploy, /trap rollback ERR/);
+assert.match(caddyDeploy, /db_status[^]*\^\(200\|401\)\$/);
 assert.match(caddyDeploy, /--resolve db\.recycleobject\.ru:443:127\.0\.0\.1/);
 assert.match(caddyDeploy, /--resolve api\.recycleobject\.ru:443:127\.0\.0\.1/);
 
