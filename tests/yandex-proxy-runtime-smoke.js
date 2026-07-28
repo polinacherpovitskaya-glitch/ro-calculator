@@ -39,18 +39,28 @@ assert.match(
   /RO_YANDEX_PROXY_URL: https:\/\/d5dktgh0f2nqktmc326f\.wnq2w1o5\.apigw\.yandexcloud\.net/,
   'CI must keep testing the rollback proxy even though the browser runtime uses Yandex DB directly',
 );
+assert.match(
+  writebackWorkflow,
+  /RO_WRITEBACK_ORIGIN: https:\/\/calc\.recycleobject\.ru/,
+  'CI write-back smoke must emulate the production calculator origin',
+);
+assert.match(
+  fs.readFileSync(path.join(root, 'tests', 'yandex-writeback-smoke.mjs'), 'utf8'),
+  /rest\/v1\/time_entries/,
+  'CI write-back smoke must exercise the production time_entries path',
+);
 
 (async () => {
   const response = await proxy.handler({
     httpMethod: 'OPTIONS',
     rawPath: '/rest/v1/settings',
     headers: {
-      origin: 'https://calc2.recycleobject.ru',
+      origin: 'https://calc.recycleobject.ru',
       'access-control-request-headers': 'accept-profile,content-profile,x-retry-count',
     },
   });
   assert.strictEqual(response.statusCode, 204);
-  assert.strictEqual(response.headers['Access-Control-Allow-Origin'], 'https://calc2.recycleobject.ru');
+  assert.strictEqual(response.headers['Access-Control-Allow-Origin'], 'https://calc.recycleobject.ru');
   const allowedHeaders = response.headers['Access-Control-Allow-Headers'];
   assert.match(allowedHeaders, /accept-profile/);
   assert.match(allowedHeaders, /content-profile/);
@@ -61,10 +71,10 @@ assert.match(
     rawPath: '/rest/v1/settings',
     rawQueryString: 'select=value&limit=1',
     headers: {
-      origin: 'https://calc2.recycleobject.ru',
+      origin: 'https://calc.recycleobject.ru',
     },
   });
-  assert.strictEqual(proxied.headers['Access-Control-Allow-Origin'], 'https://calc2.recycleobject.ru');
+  assert.strictEqual(proxied.headers['Access-Control-Allow-Origin'], 'https://calc.recycleobject.ru');
   assert.doesNotMatch(proxied.headers['Access-Control-Allow-Origin'], /,/);
 
   console.log('yandex proxy runtime smoke checks passed');

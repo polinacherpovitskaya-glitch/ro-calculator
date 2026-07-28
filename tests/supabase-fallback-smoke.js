@@ -445,6 +445,60 @@ async function main() {
 
     {
         const context = createContext();
+        context.__bootstrapTimeEntries = [{
+            id: 100,
+            employee_name: 'Старый snapshot',
+            date: '2026-07-27',
+            hours: 1,
+            task_description: 'stale bootstrap row',
+        }];
+        context.__tableRows.time_entries = [{
+            id: 101,
+            employee_name: 'Свежая Yandex DB',
+            date: '2026-07-28',
+            hours: 2,
+            task_description: 'fresh database row',
+        }];
+        runScript(context, 'js/supabase.js');
+        vm.runInContext('initSupabase()', context);
+
+        const timeEntries = JSON.parse(JSON.stringify(await vm.runInContext('loadTimeEntries()', context)));
+        assert.equal(timeEntries.length, 1);
+        assert.equal(timeEntries[0].id, 101, 'live Yandex time entry must win over a stale static snapshot');
+        assert.equal(timeEntries[0].worker_name, 'Свежая Yandex DB');
+        assert.equal(
+            context.__remoteCalls.some(call => call.table === 'fetch'),
+            false,
+            'healthy live time-entry load must not fetch bootstrap first',
+        );
+    }
+
+    {
+        const context = createContext();
+        context.__invalidTables.add('time_entries');
+        context.__bootstrapTimeEntries = [{
+            id: 102,
+            employee_name: 'Bootstrap fallback',
+            date: '2026-07-27',
+            hours: 3,
+            task_description: 'fallback row',
+        }];
+        runScript(context, 'js/supabase.js');
+        vm.runInContext('initSupabase()', context);
+
+        const timeEntries = JSON.parse(JSON.stringify(await vm.runInContext('loadTimeEntries()', context)));
+        assert.equal(timeEntries.length, 1);
+        assert.equal(timeEntries[0].id, 102, 'bootstrap must remain available when Yandex DB read fails');
+        assert.equal(timeEntries[0].worker_name, 'Bootstrap fallback');
+        assert.equal(
+            context.__remoteCalls.some(call => call.table === 'fetch'),
+            true,
+            'failed live time-entry load must fall back to bootstrap',
+        );
+    }
+
+    {
+        const context = createContext();
         runScript(context, 'js/supabase.js');
 
         const rows = JSON.parse(JSON.stringify(vm.runInContext(`_mergeOrderRows([
