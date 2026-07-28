@@ -1,0 +1,24 @@
+services:
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /home/robot/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    networks:
+      - supabase
+      - platform_shadow
+
+networks:
+  supabase:
+    name: supabase_default
+    external: true
+  platform_shadow:
+    name: ro-platform-shadow_shadow
+    external: true
+
+volumes:
+  caddy_data:

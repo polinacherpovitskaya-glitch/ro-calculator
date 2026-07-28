@@ -1,0 +1,8 @@
+db.recycleobject.ru {
+	reverse_proxy supabase-kong:8000
+}
+
+api.recycleobject.ru {
+	encode gzip
+	reverse_proxy ro-platform-shadow-api:3000
+}

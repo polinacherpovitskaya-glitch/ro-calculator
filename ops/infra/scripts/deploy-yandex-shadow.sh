@@ -7,6 +7,7 @@ COMPOSE_FILE="${INFRA_DIR}/docker-compose.yandex-shadow.yml"
 ENV_FILE="${RO_SHADOW_ENV_FILE:-${INFRA_DIR}/.env.shadow}"
 POSTGRES_CONTAINER="ro-platform-shadow-postgres"
 API_PORT="${SHADOW_API_PORT:-3100}"
+BACKUP_DIR="${RO_SHADOW_BACKUP_DIR:-/home/robot/platform-backups}"
 
 if [[ ! -f "${ENV_FILE}" ]]; then
   umask 077
@@ -50,6 +51,17 @@ for attempt in 1 2 3 4 5 6; do
       /tmp/ro-platform-shadow-health.json \
       && grep -Eq '"db"[[:space:]]*:[[:space:]]*\{[[:space:]]*"ok"[[:space:]]*:[[:space:]]*true' \
         /tmp/ro-platform-shadow-health.json; then
+      install -d -m 700 "${BACKUP_DIR}"
+      BACKUP_FILE="${BACKUP_DIR}/ro-platform-shadow-$(date -u +%Y%m%d-%H%M%S).dump"
+      docker exec -i "${POSTGRES_CONTAINER}" \
+        pg_dump -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -Fc \
+        > "${BACKUP_FILE}"
+      test -s "${BACKUP_FILE}"
+      docker exec -i "${POSTGRES_CONTAINER}" pg_restore --list \
+        < "${BACKUP_FILE}" > /dev/null
+      chmod 600 "${BACKUP_FILE}"
+      find "${BACKUP_DIR}" -type f -name 'ro-platform-shadow-*.dump' \
+        -mtime +7 -delete
       cat /tmp/ro-platform-shadow-health.json
       printf '\n'
       exit 0
