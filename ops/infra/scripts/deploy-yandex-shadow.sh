@@ -46,13 +46,14 @@ for attempt in 1 2 3 4 5 6; do
   if curl --fail --silent --show-error \
     "http://127.0.0.1:${API_PORT}/api/health" \
     > /tmp/ro-platform-shadow-health.json; then
-    node -e "
-      const fs = require('node:fs');
-      const payload = JSON.parse(fs.readFileSync('/tmp/ro-platform-shadow-health.json', 'utf8'));
-      if (payload.status !== 'ok' || payload.db?.ok !== true) process.exit(1);
-      console.log(JSON.stringify(payload));
-    "
-    exit 0
+    if grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"' \
+      /tmp/ro-platform-shadow-health.json \
+      && grep -Eq '"db"[[:space:]]*:[[:space:]]*\{[[:space:]]*"ok"[[:space:]]*:[[:space:]]*true' \
+        /tmp/ro-platform-shadow-health.json; then
+      cat /tmp/ro-platform-shadow-health.json
+      printf '\n'
+      exit 0
+    fi
   fi
   echo "Shadow API health attempt ${attempt}/6 failed"
   sleep 3
@@ -63,4 +64,3 @@ docker compose \
   -f "${COMPOSE_FILE}" \
   ps
 exit 1
-

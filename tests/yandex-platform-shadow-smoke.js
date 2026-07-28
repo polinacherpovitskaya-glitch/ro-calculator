@@ -30,6 +30,9 @@ assert.match(deploy, /openssl rand -hex 24/);
 assert.match(deploy, /chmod 600 "\$\{ENV_FILE\}"/);
 assert.match(deploy, /db\/migrations\/\*\.sql/);
 assert.match(deploy, /http:\/\/127\.0\.0\.1:\$\{API_PORT\}\/api\/health/);
+assert.match(deploy, /grep -Eq '"status"/);
+assert.match(deploy, /grep -Eq '"db"/);
+assert.doesNotMatch(deploy, /^\s*node\b/m);
 assert.doesNotMatch(deploy, /docker (?:stop|rm).*supabase/);
 
 assert.match(workflow, /name: Yandex platform shadow/);
@@ -43,4 +46,3 @@ assert.match(workflow, /docker inspect[^]*ro-timebot/);
 assert.doesNotMatch(workflow, /OPS_HOST|OPS_SSH_PRIVATE_KEY|Selectel/);
 
 console.log('Yandex platform shadow contract checks passed');
-
