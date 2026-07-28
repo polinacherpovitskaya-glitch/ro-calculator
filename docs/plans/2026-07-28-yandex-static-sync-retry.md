@@ -13,7 +13,7 @@
 - [x] Зафиксировать контракт в `bootstrap-guard-smoke`.
 - [x] Поднять release version.
 - [x] Опубликовать оба Yandex mirrors.
-- [ ] Проверить live, mirror и write-back smokes.
+- [x] Проверить live, mirror и write-back smokes.
 
 ## Stop-and-fix
 

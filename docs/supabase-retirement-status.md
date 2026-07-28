@@ -79,6 +79,9 @@
   наборы загружены, скачаны обратно и прошли исходные SHA-256 manifests.
 - Последовательный static run `30386829294` опубликовал `v424` на обоих
   доменах после transient `order_items` failure; API health зелёный.
+- Runtime diagnostics `30390030439` подтвердил все rollback assets и parity
+  366/366; API restart связан с 1-секундным PostgreSQL connection timeout, а
+  не OOM или потерей данных.
 
 ## Next
 
@@ -144,6 +147,7 @@ node tests/version-smoke.js
 | 2026-07-28 | M8 | merged cutover | PR `#212`, merge `6ad500ce` | main deploy, timebot, write-back, health and live smoke green | backup hardening |
 | 2026-07-28 | M8 | backup hardening | Actions `30386066187` | source/target/Storage cloud round-trip green; media and backup versioning enabled | observation |
 | 2026-07-28 | M8 | static retry | Actions `30386829294` | sequential calc/calc2 build and upload green; both serve v424 | production smokes |
+| 2026-07-28 | M8 | runtime diagnostics | Actions `30390030439`, `30390167041` | DB/bot/Supabase stable; API pool timeout caused automatic restarts | pool hardening |
 
 ## Smoke / Demo Checklist
 

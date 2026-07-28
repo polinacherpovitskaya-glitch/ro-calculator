@@ -17,6 +17,8 @@ assert.match(workflow, /docker inspect[^]*ro-timebot/, 'monitor should verify th
 assert.match(workflow, /timebot\.health\.json/, 'monitor should validate the persistent health file');
 assert.match(workflow, /validateTimebotHealthSnapshot/, 'monitor should reject stale or unhealthy snapshots');
 assert.match(workflow, /telegram-relay[^]*getMe/, 'monitor should probe the Telegram relay independently');
+assert.match(workflow, /deferToIndependentTelegramProbe/, 'one transient bot self-probe timeout should defer to the independent relay');
+assert.match(workflow, /blockingIssues/, 'database, polling and stale snapshot failures must remain blocking');
 assert.match(workflow, /ro-platform-shadow-postgres/, 'monitor should require the independent Yandex PostgreSQL database');
 assert.match(workflow, /SELECT COUNT\(\*\) FROM employees WHERE is_active = TRUE/, 'monitor DB probe should be read-only');
 assert.match(workflow, /127\.0\.0\.1:3100\/api\/health/, 'monitor should probe the replacement API and PostgreSQL');
@@ -25,6 +27,7 @@ assert.match(workflow, /TELEGRAM_DEDUP_FAILURES:\s*'true'/, 'monitor should dedu
 assert.match(workflow, /TELEGRAM_NOTIFY_RECOVERY:\s*'true'/, 'monitor should report recovery');
 assert.match(workflow, /TELEGRAM_ALERT_CHAT_ID/, 'monitor should route alerts to the configured chat');
 assert.match(workflow, /send_test_alert/, 'manual monitor run should support one test notification');
+assert.match(workflow, /Yandex API deploy/, 'monitor should run after replacement API deploy');
 
 assert.match(stateUtils, /timebot\.health\.json/, 'health file should live in the persistent timebot state directory');
 assert.match(timebot, /refreshTimebotHealth/, 'timebot should publish active self-health');

@@ -13,6 +13,7 @@ on:
   workflow_run:
     workflows:
       - Yandex timebot deploy
+      - Yandex API deploy
     types:
       - completed
 
@@ -81,17 +82,32 @@ jobs:
           }
           const snapshot = JSON.parse(fs.readFileSync(file, 'utf8'));
           const validation = validateTimebotHealthSnapshot(snapshot);
+          const deferredTelegramIssues = new Set([
+            'self_check_unhealthy',
+            'telegram_probe_failed',
+          ]);
+          const blockingIssues = validation.issues.filter(
+            issue => !deferredTelegramIssues.has(issue),
+          );
+          const deferToIndependentTelegramProbe = !validation.ok
+            && blockingIssues.length === 0
+            && snapshot.polling === true
+            && snapshot.database_ok === true;
           console.log(JSON.stringify({
             checked_at: snapshot.checked_at || null,
             age_ms: validation.age_ms,
             polling: snapshot.polling === true,
             telegram_ok: snapshot.telegram_ok === true,
             database_ok: snapshot.database_ok === true,
+            deferred_telegram_probe: deferToIndependentTelegramProbe,
             ok: validation.ok,
           }));
-          if (!validation.ok) {
+          if (!validation.ok && !deferToIndependentTelegramProbe) {
             console.error(`timebot health validation failed: ${validation.issues.join(', ')}`);
             process.exit(1);
+          }
+          if (deferToIndependentTelegramProbe) {
+            console.warn('timebot self-probe Telegram timeout; deferring to independent relay probe');
           }
           NODE
 

@@ -24,7 +24,6 @@ env:
   YC_FOLDER_ID: b1gc32hu5ujioie1o0ht
   RO_YANDEX_BACKUP_BUCKET: ro-yandex-migration-snapshots-b1gl59l77vb50ihub2nd
   RO_YANDEX_MEDIA_BUCKET: ro-platform-media-b1gl59l77vb50ihub2nd
-  RO_YANDEX_BACKUP_KEEP: 30
   RO_CUTOVER_STAMP: 20260728T172717Z
 
 jobs:
@@ -86,9 +85,6 @@ jobs:
             sha256sum "$(basename "$REMOTE_TARGET_FILE")" \
               > "$(basename "$REMOTE_TARGET_FILE").sha256"
           )
-          find "$REMOTE_TARGET_DIR" -type f \
-            \( -name 'target-yandex-postgres-*.dump' -o -name 'target-yandex-postgres-*.dump.sha256' \) \
-            -mtime +30 -delete
           REMOTE
           scp -i "$HOME/.ssh/yandex_vm" \
             "$YANDEX_VM_USER@$YANDEX_VM_HOST:$remote_target_file" \
@@ -207,33 +203,13 @@ jobs:
             )
           fi
 
-          yc storage s3api list-objects \
-            --bucket "$RO_YANDEX_BACKUP_BUCKET" \
-            --prefix "production/" \
-            --format json > output/yandex-production-backup/objects.json
-          OBJECTS_FILE=output/yandex-production-backup/objects.json node <<'NODE'
+          node <<'NODE'
           const fs = require('node:fs');
-          const listed = JSON.parse(fs.readFileSync(process.env.OBJECTS_FILE, 'utf8'));
-          const contents = listed.Contents || listed.contents || [];
-          const groups = new Map();
-          for (const item of contents) {
-            const key = String(item.Key || item.key || '');
-            const match = key.match(/^production\/(\d{4}\/\d{2}\/\d{2})\//);
-            if (!match) continue;
-            if (!groups.has(match[1])) groups.set(match[1], []);
-            groups.get(match[1]).push(key);
-          }
-          const keep = Number(process.env.RO_YANDEX_BACKUP_KEEP || 14);
-          const staleDates = [...groups.keys()].sort().slice(0, Math.max(0, groups.size - keep));
-          fs.writeFileSync(
-            'output/yandex-production-backup/stale-keys.txt',
-            staleDates.flatMap(date => groups.get(date)).join('\n'),
-          );
           fs.writeFileSync(
             'output/yandex-production-backup/summary.json',
             `${JSON.stringify({
               uploaded: true,
-              retainedDays: keep,
+              retention: 'all',
               sourceDatabase: true,
               targetDatabase: true,
               sourceStorage: true,
@@ -243,13 +219,6 @@ jobs:
           );
           NODE
 
-          while IFS= read -r stale_key; do
-            if [ -n "$stale_key" ]; then
-              yc storage s3api delete-object \
-                --bucket "$RO_YANDEX_BACKUP_BUCKET" \
-                --key "$stale_key" >/dev/null
-            fi
-          done < output/yandex-production-backup/stale-keys.txt
           yc config unset token >/dev/null
 
       - name: Upload backup report

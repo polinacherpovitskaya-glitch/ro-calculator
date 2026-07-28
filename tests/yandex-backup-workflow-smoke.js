@@ -63,5 +63,10 @@ assert.doesNotMatch(
     /docker\s+(?:rm|volume\s+rm)\b/,
     'backup workflow must never remove containers or volumes'
 );
+assert.doesNotMatch(
+    workflow,
+    /(?:^|\s)-delete(?:\s|$)|storage s3api delete-object/m,
+    'backup workflow must preserve every VM and cloud generation'
+);
 
 console.log('yandex backup workflow smoke checks passed');
