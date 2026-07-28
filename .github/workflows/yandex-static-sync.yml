@@ -45,7 +45,7 @@ jobs:
         with:
           node-version: '24'
 
-      # Тот же кэш-бастинг, что и в Deploy GitHub Pages: SHA вместо ручных
+      # SHA вместо ручных
       # ?v=N, чтобы calc2 никогда не отставал от calc из-за браузерного кэша.
       - name: Cache-bust asset versions with commit SHA
         run: |
@@ -115,6 +115,25 @@ jobs:
           done < <(find deploy/static-yandex -type f -print0)
 
           yc config unset token >/dev/null
+
+      - name: Verify published Yandex version
+        run: |
+          set -euo pipefail
+          expected="$(node -e 'console.log(require("./js/version.json").version)')"
+          for attempt in 1 2 3 4 5 6; do
+            actual="$(
+              curl -fsSL --max-time 20 \
+                "https://${RO_YANDEX_BUCKET}/js/version.json?cb=${GITHUB_RUN_ID}-${attempt}" \
+                | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{try{console.log(JSON.parse(d).version||"")}catch{console.log("")}})'
+            )" || actual=""
+            if [ "$actual" = "$expected" ]; then
+              echo "${RO_YANDEX_BUCKET}: ${actual}"
+              exit 0
+            fi
+            echo "Waiting for ${RO_YANDEX_BUCKET}: got=${actual:-unreachable}, want=${expected}"
+            sleep 10
+          done
+          exit 1
 
       - name: Upload bundle artifact
         if: always()

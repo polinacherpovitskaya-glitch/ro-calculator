@@ -12,11 +12,14 @@ const nested = {
     {
       url: 'https://db.recycleobject.ru/storage/v1/object/sign/product-images/orders/photo.png?token=old',
     },
+    {
+      url: '/api/supabase/storage/v1/object/public/product-images/orders/legacy.png',
+    },
   ],
 };
 
 const result = rewriteJson(nested);
-assert.equal(result.replacements, 3);
+assert.equal(result.replacements, 4);
 assert.doesNotThrow(() => JSON.stringify(result.value));
 
 const moldData = JSON.parse(result.value.mold_data);
@@ -32,6 +35,10 @@ assert.equal(moldData.untouched, 'https://example.test/image.jpg');
 assert.equal(
   result.value.attachments[0].url,
   'https://api.recycleobject.ru/api/storage/public/product-images/orders/photo.png',
+);
+assert.equal(
+  result.value.attachments[1].url,
+  'https://api.recycleobject.ru/api/storage/public/product-images/orders/legacy.png',
 );
 
 const clean = rewriteJson(result.value);

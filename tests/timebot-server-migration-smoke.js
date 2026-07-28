@@ -27,6 +27,7 @@ assert.match(timebot, /buildTelegramBotOptions\(\)/, 'timebot should use shared 
 
 const workflow = read('.github/workflows/yandex-timebot-deploy.yml');
 const legacyWorkflow = read('.github/workflows/ops-deploy.yml');
+const productionWorkflow = read('.github/workflows/deploy-pages.yml');
 const timebotDockerfile = read('ops/bot/Dockerfile');
 assert.match(legacyWorkflow, /node --test yandex\/telegram-relay\/index\.test\.js/, 'CI should test the relay');
 assert.match(legacyWorkflow, /node --test tests\/vercel-telegram-relay\.test\.js/, 'CI should test the Vercel adapter');
@@ -42,6 +43,9 @@ assert.match(timebot, /createPlatformCompatClient/, 'timebot should use the Yand
 assert.doesNotMatch(timebot, /@supabase\/supabase-js/, 'timebot runtime must not import the Supabase SDK');
 assert.match(workflow, /ro-timebot-state:\/app\/state/, 'deploy should retain persistent timebot state');
 assert.match(workflow, /FATAL: Another bot instance/, 'deploy should fail on polling conflict');
+assert.match(productionWorkflow, /Assemble relay-only deployment/, 'Vercel should receive only the Telegram relay bundle');
+assert.match(productionWorkflow, /\$RUNNER_TEMP\/vercel-relay/, 'Vercel deploy must target the isolated relay bundle');
+assert.doesNotMatch(productionWorkflow, /actions\/deploy-pages/, 'application pages must not be deployed to GitHub Pages');
 assert.doesNotMatch(legacyWorkflow, /^\s{2}push:/m, 'legacy Selectel deploy must not run on push');
 assert.equal(
     (timebotDockerfile.match(/FROM node:22-alpine/g) || []).length,

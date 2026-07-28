@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 
 const API_BASE = String(process.env.PLATFORM_API_URL || 'https://api.recycleobject.ru').replace(/\/$/, '');
 const STORAGE_URL = /https?:\/\/[^/\s"'<>]+\/storage\/v1\/object\/(?:public|sign)\/([^/\s"'<>]+)\/([^\s"'<>?]+)(?:\?[^\s"'<>]*)?/gi;
+const LEGACY_PROXY_STORAGE_URL = /\/(?:api\/)?supabase\/storage\/v1\/object\/(?:public|sign)\/([^/\s"'<>]+)\/([^\s"'<>?]+)(?:\?[^\s"'<>]*)?/gi;
 
 function requireEnv(name) {
   const value = process.env[name];
@@ -18,7 +19,7 @@ function requireEnv(name) {
 
 function rewriteText(value) {
   let replacements = 0;
-  const rewritten = value.replace(STORAGE_URL, (match, bucket, objectPath) => {
+  const replaceUrl = (match, bucket, objectPath) => {
     replacements += 1;
     let decodedBucket = bucket;
     try {
@@ -29,7 +30,10 @@ function rewriteText(value) {
     }
     const safeBucket = encodeURIComponent(decodedBucket);
     return `${API_BASE}/api/storage/public/${safeBucket}/${objectPath}`;
-  });
+  };
+  const rewritten = value
+    .replace(STORAGE_URL, replaceUrl)
+    .replace(LEGACY_PROXY_STORAGE_URL, replaceUrl);
   return { value: rewritten, replacements };
 }
 

@@ -8,8 +8,6 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -84,44 +82,12 @@ jobs:
           node --check .github/scripts/send-telegram-alert.mjs
           node --check .github/scripts/sync-smoke-issue.mjs
 
-  deploy:
-    needs: verify
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      # Кэш-бастинг: ручные ?v=N в index.html регулярно забывали бампать при
-      # правках js/css, и браузеры команды неделями держали старый код (старая
-      # лестница маржи, невидимая плашка загрузки, залипший баннер БД).
-      # Подставляем commit SHA во все версии на каждом деплое — забыть нельзя.
-      - name: Cache-bust asset versions with commit SHA
-        run: |
-          sha="${GITHUB_SHA::10}"
-          find . -name "*.html" -not -path "./node_modules/*" -print0 \
-            | xargs -0 sed -i -E "s/\.(js|css)\?v=[0-9]+/.\1?v=${sha}/g"
-          echo "Asset versions stamped with ${sha}:"
-          grep -oE "js/[a-z_]+\.js\?v=[a-z0-9]+" index.html | head -5
-
-      - name: Setup Pages
-        uses: actions/configure-pages@v5
-
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: .
-
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
-
   deploy-vercel:
     needs: verify
     runs-on: ubuntu-latest
-    # Vercel deploy must not gate the GitHub Pages / Yandex mirror updates.
+    # Vercel hosts only the protected Telegram transport relay. Application
+    # pages, API and data are deployed to Yandex.
+    # Relay deploy must not gate the Yandex static updates.
     # When the token expires the workflow used to fail outright and hide that
     # the static mirrors still shipped a fresh build. Treat the Vercel job as
     # advisory and rely on the post-deploy verification + Telegram alert to
@@ -129,7 +95,7 @@ jobs:
     continue-on-error: true
     environment:
       name: production
-      url: https://calc.recycleobject.ru/
+      url: https://ro-calculator-xi.vercel.app/api/telegram-relay/getMe
     env:
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
@@ -145,14 +111,16 @@ jobs:
         with:
           node-version: "24"
 
-      # Тот же кэш-бастинг, что и в Pages-джобе: SHA вместо ручных ?v=N.
-      - name: Cache-bust asset versions with commit SHA
+      - name: Assemble relay-only deployment
         run: |
-          sha="${GITHUB_SHA::10}"
-          find . -name "*.html" -not -path "./node_modules/*" -print0 \
-            | xargs -0 sed -i -E "s/\.(js|css)\?v=[0-9]+/.\1?v=${sha}/g"
+          set -euo pipefail
+          install -d "$RUNNER_TEMP/vercel-relay/api"
+          install -d "$RUNNER_TEMP/vercel-relay/yandex/telegram-relay"
+          install -m 0644 api/telegram-relay.js "$RUNNER_TEMP/vercel-relay/api/telegram-relay.js"
+          install -m 0644 yandex/telegram-relay/index.js "$RUNNER_TEMP/vercel-relay/yandex/telegram-relay/index.js"
+          install -m 0644 vercel.json "$RUNNER_TEMP/vercel-relay/vercel.json"
 
-      - name: Deploy to calc.recycleobject.ru
+      - name: Deploy Telegram relay
         id: vercel-deploy
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
@@ -176,6 +144,7 @@ jobs:
               --token "$VERCEL_TOKEN" \
               --env "TELEGRAM_RELAY_SECRET=$TELEGRAM_RELAY_SECRET" \
               --env "TELEGRAM_RELAY_UPSTREAM_TIMEOUT_MS=38000" \
+              "$RUNNER_TEMP/vercel-relay" \
               2>&1 | tee "$log_file"
             exit_code=${PIPESTATUS[0]}
             if [ "$exit_code" -ne 0 ]; then
@@ -200,11 +169,11 @@ jobs:
             fi
             echo ""
             echo "================================================================"
-            echo " calc.recycleobject.ru did NOT receive this commit."
-            echo " The team must fall back to one of the working mirrors:"
-            echo "   - https://calc2.recycleobject.ru/      (Yandex static mirror)"
-            echo "   - https://polinacherpovitskaya-glitch.github.io/ro-calculator/"
-            echo " To restore Vercel deploys:"
+            echo " Telegram relay did NOT receive this commit."
+            echo " Calculator pages remain available on Yandex:"
+            echo "   - https://calc.recycleobject.ru/"
+            echo "   - https://calc2.recycleobject.ru/"
+            echo " To restore the Vercel relay deploy:"
             echo "   1. Generate a new token at https://vercel.com/account/tokens"
             echo "   2. Update the VERCEL_TOKEN secret in GitHub repo settings"
             echo "   3. Re-run this workflow"
@@ -225,56 +194,8 @@ jobs:
           TELEGRAM_ALERT_CHAT_ID: ${{ secrets.TELEGRAM_ALERT_CHAT_ID }}
           TELEGRAM_SMOKE_CHAT_ID: ${{ secrets.TELEGRAM_SMOKE_CHAT_ID }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          ALERT_WORKFLOW: Deploy GitHub Pages
-          ALERT_SCOPE: Vercel deploy to calc.recycleobject.ru — ${{ steps.vercel-deploy.outputs.reason || 'unknown failure' }}
+          ALERT_WORKFLOW: Telegram relay deploy
+          ALERT_SCOPE: Vercel relay-only deploy — ${{ steps.vercel-deploy.outputs.reason || 'unknown failure' }}
           ALERT_STATUS: failure
           ALERT_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: node .github/scripts/send-telegram-alert.mjs
-
-  verify-production-version:
-    needs: [deploy, deploy-vercel]
-    if: ${{ always() && needs.deploy.result == 'success' }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Compare deployed version against committed version.json
-        id: version-check
-        env:
-          VERCEL_DEPLOY_STATUS: ${{ needs.deploy-vercel.result }}
-          VERCEL_DEPLOY_REASON: ${{ needs.deploy-vercel.outputs.vercel_reason }}
-        run: |
-          set -euo pipefail
-          expected="$(node -e 'console.log(require("./js/version.json").version)')"
-          echo "Expected version (from js/version.json): ${expected}"
-
-          declare -A targets
-          targets["calc.recycleobject.ru"]="https://calc.recycleobject.ru/js/version.json"
-          targets["calc2.recycleobject.ru"]="https://calc2.recycleobject.ru/js/version.json"
-          targets["polinacherpovitskaya-glitch.github.io"]="https://polinacherpovitskaya-glitch.github.io/ro-calculator/js/version.json"
-
-          stale=()
-          for label in "${!targets[@]}"; do
-            url="${targets[$label]}"
-            actual="$(curl -fsSL --max-time 20 "${url}?cb=$(date +%s)" 2>/dev/null | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{try{console.log(JSON.parse(d).version||"unknown")}catch{console.log("unparsable")}})' || echo "unreachable")"
-            echo "  ${label}: ${actual}"
-            if [ "${actual}" != "${expected}" ]; then
-              stale+=("${label} (got=${actual}, want=${expected})")
-            fi
-          done
-
-          if [ ${#stale[@]} -gt 0 ]; then
-            echo ""
-            echo "::warning title=Stale production mirrors::$(printf '%s; ' "${stale[@]}")"
-            echo "stale<<STALE_EOF" >> "$GITHUB_OUTPUT"
-            printf '%s\n' "${stale[@]}" >> "$GITHUB_OUTPUT"
-            echo "STALE_EOF" >> "$GITHUB_OUTPUT"
-            if [ "${VERCEL_DEPLOY_STATUS}" != "success" ]; then
-              echo ""
-              echo "Vercel deploy job result: ${VERCEL_DEPLOY_STATUS}"
-              echo "Reason: ${VERCEL_DEPLOY_REASON:-(no detail)}"
-            fi
-          else
-            echo "All production mirrors are up to date."
-          fi
