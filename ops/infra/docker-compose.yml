@@ -80,7 +80,8 @@ services:
     restart: unless-stopped
     environment:
       BOT_TOKEN: ${TIMEBOT_TOKEN:-}
-      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      OPS_API_URL: http://api:3000
+      OPS_BOT_TOKEN: ${OPS_BOT_TOKEN}
       ENABLE_TASK_NOTIFICATION_WORKER: "false"
       TELEGRAM_BASE_API_URL: ${TELEGRAM_BASE_API_URL:-}
       TELEGRAM_REQUEST_FAMILY: ${TELEGRAM_REQUEST_FAMILY:-4}

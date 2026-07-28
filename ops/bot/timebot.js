@@ -7,7 +7,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 const TelegramBot = require('node-telegram-bot-api');
-const { createPostgresCompatClient } = require('./postgres-compat');
+const { createPlatformCompatClient } = require('./platform-compat');
 const { buildTaskNotificationText, getTaskNotificationRecipientIds } = require('./task-notification-core');
 const { buildTelegramBotOptions, formatTelegramTransportError } = require('./telegram-runtime');
 const { getLocalDate, shiftYmd, isWeekendYmd, normalizeWorkDate } = require('./timebot-date-utils');
@@ -23,14 +23,14 @@ const { getStateTtlMs, getTimebotRuntimePaths, requiresCommentToSave } = require
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const ENABLE_TASK_NOTIFICATION_WORKER = String(process.env.ENABLE_TASK_NOTIFICATION_WORKER || 'false').toLowerCase() === 'true';
 
-if (!BOT_TOKEN || !process.env.DATABASE_URL) {
-    console.error(`Missing env vars for timebot (.env at ${path.join(__dirname, '.env')}): BOT_TOKEN, DATABASE_URL`);
+if (!BOT_TOKEN || !process.env.OPS_API_URL || !process.env.OPS_BOT_TOKEN) {
+    console.error(`Missing env vars for timebot (.env at ${path.join(__dirname, '.env')}): BOT_TOKEN, OPS_API_URL, OPS_BOT_TOKEN`);
     process.exit(1);
 }
 
 const bot = new TelegramBot(BOT_TOKEN, buildTelegramBotOptions());
 
-const database = createPostgresCompatClient();
+const database = createPlatformCompatClient();
 const WORK_SETTINGS_KEYS = {
     tasks: 'work_tasks_json',
     taskNotificationEvents: 'work_task_notification_events_json',

@@ -47,10 +47,12 @@ protected Vercel Function relay deployed with `calc.recycleobject.ru`.
 CI writes `TIMEBOT_TOKEN` and the protected relay URL to
 `/srv/ops/infra/.env.timebot` without storing either value in git.
 
-The bot needs the independent PostgreSQL connection:
+The bot writes through the Yandex platform API, using the same source of truth
+as the calculator:
 
 ```bash
-DATABASE_URL=postgres://<user>:<password>@ro-platform-shadow-postgres:5432/<database>
+OPS_API_URL=http://ro-platform-shadow-api:3000
+OPS_BOT_TOKEN=<token from bot_tokens>
 ```
 
 Manual start:

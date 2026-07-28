@@ -4,7 +4,7 @@ const {
     pickActiveLinkedEmployee,
     pickAnyLinkedEmployee,
     buildInactiveBindingMessage,
-} = require('../bot/timebot-employee-access');
+} = require('../ops/bot/timebot-employee-access');
 
 const rows = [
     { id: 1, name: 'Женя Г', is_active: false },

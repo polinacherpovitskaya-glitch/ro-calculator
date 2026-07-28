@@ -58,10 +58,16 @@ jobs:
         with:
           node-version: '24'
           cache: npm
-          cache-dependency-path: ops/api/package-lock.json
+          cache-dependency-path: |
+            ops/api/package-lock.json
+            ops/bot/package-lock.json
 
       - name: Install API dependencies
         working-directory: ops/api
+        run: npm ci
+
+      - name: Install bot dependencies
+        working-directory: ops/bot
         run: npm ci
 
       - name: Apply migrations in CI
@@ -74,6 +80,12 @@ jobs:
 
       - name: Run API tests
         working-directory: ops/api
+        env:
+          TEST_DATABASE_URL: postgres://ops:ci_password@localhost:5432/ops
+        run: npm test
+
+      - name: Run bot tests
+        working-directory: ops/bot
         env:
           TEST_DATABASE_URL: postgres://ops:ci_password@localhost:5432/ops
         run: npm test
@@ -132,11 +144,13 @@ jobs:
 
           if ! ssh -i "$HOME/.ssh/yandex_vm" "$YANDEX_VM_USER@$YANDEX_VM_HOST" \
             'test -s "$HOME/platform-secrets/yandex-storage.env"'; then
-            SERVICE_ACCOUNT_ID="$(
+            SERVICE_ACCOUNT_JSON="$(
               yc iam service-account get \
                 --name ro-platform-media-api \
-                --format json 2>/dev/null \
-                | jq -r '.id // empty'
+                --format json 2>/dev/null || true
+            )"
+            SERVICE_ACCOUNT_ID="$(
+              jq -r '.id // empty' <<< "$SERVICE_ACCOUNT_JSON"
             )"
             if [[ -z "$SERVICE_ACCOUNT_ID" ]]; then
               SERVICE_ACCOUNT_ID="$(

@@ -8,6 +8,7 @@ export const COMPAT_PRIMARY_KEYS = Object.freeze({
   bank_sync_runs: ['id'],
   bank_transactions: ['id'],
   blank_color_tuning: ['color_id'],
+  bot_telegram_bindings: ['telegram_chat_id'],
   bug_reports: ['id'],
   cases: ['id'],
   certificate_redemptions: ['id'],

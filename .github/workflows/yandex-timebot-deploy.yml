@@ -52,11 +52,15 @@ jobs:
       - name: Install secrets and start poller
         env:
           TIMEBOT_TOKEN: ${{ secrets.TIMEBOT_TOKEN }}
+          OPS_BOT_TOKEN: ${{ secrets.OPS_BOT_TOKEN }}
           TELEGRAM_RELAY_SECRET: ${{ secrets.TELEGRAM_RELAY_SECRET }}
           YANDEX_VM_HOST: ${{ secrets.YANDEX_VM_HOST }}
           YANDEX_VM_USER: ${{ secrets.YANDEX_VM_USER }}
         run: |
           set -euo pipefail
+          test -n "${TIMEBOT_TOKEN:-}"
+          test -n "${OPS_BOT_TOKEN:-}"
+          test -n "${TELEGRAM_RELAY_SECRET:-}"
           umask 077
           {
             printf 'BOT_TOKEN=%s\n' "$TIMEBOT_TOKEN"
@@ -64,6 +68,8 @@ jobs:
             printf 'TELEGRAM_POLL_TIMEOUT_SECONDS=20\n'
             printf 'TELEGRAM_REQUEST_TIMEOUT_MS=45000\n'
             printf 'ENABLE_TASK_NOTIFICATION_WORKER=false\n'
+            printf 'OPS_API_URL=http://ro-platform-shadow-api:3000\n'
+            printf 'OPS_BOT_TOKEN=%s\n' "$OPS_BOT_TOKEN"
           } > "$RUNNER_TEMP/timebot.env"
           scp -i "$HOME/.ssh/yandex_vm" "$RUNNER_TEMP/timebot.env" \
             "$YANDEX_VM_USER@$YANDEX_VM_HOST:/home/robot/timebot/runtime.env"
@@ -73,13 +79,16 @@ jobs:
             chmod 600 /home/robot/timebot/runtime.env
             set -a
             source /home/robot/platform/infra/.env.shadow
+            source /home/robot/timebot/runtime.env
             set +a
             test -n "${POSTGRES_USER:-}"
             test -n "${POSTGRES_PASSWORD:-}"
             test -n "${POSTGRES_DB:-}"
-            printf 'DATABASE_URL=postgres://%s:%s@ro-platform-shadow-postgres:5432/%s\n' \
-              "$POSTGRES_USER" "$POSTGRES_PASSWORD" "$POSTGRES_DB" \
-              >> /home/robot/timebot/runtime.env
+            ENV_FILE=/home/robot/timebot/runtime.env \
+              POSTGRES_CONTAINER=ro-platform-shadow-postgres \
+              POSTGRES_USER="$POSTGRES_USER" \
+              POSTGRES_DB="$POSTGRES_DB" \
+              /home/robot/platform/infra/scripts/ensure-bot-token.sh
             docker build -t ro-timebot:latest /home/robot/timebot/app
             docker volume create ro-timebot-state >/dev/null
             docker rm -f ro-timebot >/dev/null 2>&1 || true
@@ -110,6 +119,11 @@ jobs:
               echo "Supabase environment leaked into the replacement timebot" >&2
               exit 1
             fi
+            if docker exec ro-timebot env | grep -q '^DATABASE_URL='; then
+              echo "Direct database credentials leaked into timebot" >&2
+              exit 1
+            fi
+            docker exec ro-timebot env | grep -q '^OPS_API_URL=http://ro-platform-shadow-api:3000$'
             if printf '%s' "$logs" | grep -Eq 'FATAL: Another bot instance|Missing env vars'; then
               exit 1
             fi
