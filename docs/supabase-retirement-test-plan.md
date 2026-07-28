@@ -64,29 +64,29 @@
 
 ## Data Parity Gates
 
-- [ ] All source tables have an explicit target or documented retirement.
-- [ ] Counts match for employees, orders, order_items, time_entries, warehouse,
+- [x] All source tables have an explicit target or documented retirement.
+- [x] Counts match for employees, orders, order_items, time_entries, warehouse,
   molds, shipments, finance and work tables.
-- [ ] Latest timestamps match.
-- [ ] Critical IDs and JSON payload hashes match.
-- [ ] Storage count/bytes/checksums match.
-- [ ] Rehearsal can be rerun without duplicates.
+- [x] Latest timestamps match.
+- [x] Critical IDs and JSON payload hashes match.
+- [x] Storage count/bytes/checksums match.
+- [x] Rehearsal can be rerun without duplicates.
 
 ## Acceptance Gates
 
-- [ ] `node tests/version-smoke.js`
-- [ ] `node scripts/audit-data-paths.mjs`
+- [x] `node tests/version-smoke.js`
+- [x] `node scripts/audit-data-paths.mjs`
 - [x] `node tests/yandex-platform-shadow-smoke.js`
 - [x] `cd ops/api && npm test`
-- [ ] `cd ops/bot && npm test`
-- [ ] `node tests/order-flow-smoke.js`
-- [ ] `node tests/warehouse-migration-smoke.js`
-- [ ] `node tests/finance-smoke.js`
-- [ ] `node tests/tasks-smoke.js`
+- [x] `cd ops/bot && npm test`
+- [x] `node tests/order-flow-smoke.js`
+- [x] `node tests/warehouse-migration-smoke.js`
+- [x] `node tests/finance-smoke.js`
+- [x] `node tests/tasks-smoke.js`
 - [ ] `node tests/live-site-smoke.mjs`
 - [ ] `node tests/yandex-mirror-smoke.mjs`
-- [ ] New API write-back smoke
-- [ ] Backup restore drill
+- [x] New API write-back smoke
+- [x] Backup restore drill
 - [x] Shadow backup format/list verification
 - [x] Shadow PostgreSQL/API restart recovery
 - [x] Timebot/relay/DB/replacement API monitor and test alert
@@ -118,7 +118,7 @@ node tests/tasks-smoke.js
 
 - Legacy JSON blobs may contain fields not represented in normalized ops schema.
 - External repos/plugins may retain old endpoint configuration.
-- Browser auth model needs staged replacement of the public anon write key.
+- Production cutover must keep the bot write freeze short and rerun final parity.
 
 ## Deferred Coverage
 

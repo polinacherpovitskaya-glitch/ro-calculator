@@ -23,7 +23,7 @@
 | --- | --- | --- | --- |
 | M1 | Baseline и карта зависимостей | — | [x] |
 | M2 | Shadow PostgreSQL + API на Yandex | M1 | [x] |
-| M3 | Rehearsal и parity всех данных | M2 | [ ] |
+| M3 | Rehearsal и parity всех данных | M2 | [x] |
 | M4 | Timebot без Supabase | M3 | [ ] |
 | M5 | Frontend migration waves | M3 | [ ] |
 | M6 | Scripts, CI и Storage | M5 | [ ] |
@@ -105,7 +105,7 @@ curl -fsS https://api.recycleobject.ru/api/health
 - При ухудшении `db.recycleobject.ru` shadow stack останавливается до
   восстановления текущего production.
 
-## M3. Rehearsal и parity всех данных `[ ]`
+## M3. Rehearsal и parity всех данных `[x]`
 
 ### Goal
 
@@ -114,11 +114,11 @@ curl -fsS https://api.recycleobject.ru/api/health
 ### Tasks
 
 - [x] Запустить десять существующих refresh scripts.
-- [ ] Добавить migrations/routes для непокрытых finance/site tables.
-- [ ] Сравнить counts, ID, timestamps и JSON payloads.
-- [ ] Перенести Storage в Yandex Object Storage.
-- [ ] Провести URL rewrite rehearsal.
-- [ ] Выполнить restore drill в отдельную временную БД.
+- [x] Добавить migrations/routes для непокрытых finance/site tables.
+- [x] Сравнить counts, ID, timestamps и JSON payloads.
+- [x] Перенести Storage в Yandex Object Storage.
+- [x] Провести URL rewrite rehearsal.
+- [x] Выполнить restore drill в отдельную временную БД.
 
 ### Definition of Done
 
@@ -150,12 +150,13 @@ node scripts/audit-data-paths.mjs
 
 ### Tasks
 
-- [ ] Добавить bot-token endpoints для employees/time entries.
-- [ ] Расширить `ops/bot/api-client.js`.
-- [ ] Перевести timebot с `@supabase/supabase-js` на API client.
-- [ ] Сохранить persistent state и Telegram bindings.
-- [ ] Обновить health workflow.
-- [ ] Выполнить тестовую запись и cleanup.
+- [x] Добавить bot-token endpoints для employees/time entries.
+- [x] Расширить bot API client и compatibility transport.
+- [x] Перевести timebot с `@supabase/supabase-js` на API client.
+- [x] Сохранить persistent state и Telegram bindings.
+- [x] Обновить health workflow.
+- [x] Выполнить тестовую запись и cleanup.
+- [ ] Переключить production-контейнер во время M7.
 
 ### Definition of Done
 
@@ -189,11 +190,12 @@ node tests/timebot-health-monitor-smoke.js
 
 ### Tasks
 
-- [ ] Wave A: employees, time entries, settings/auth.
-- [ ] Wave B: orders, items, warehouse, production.
-- [ ] Wave C: molds, blanks, colors, marketplaces.
-- [ ] Wave D: finance, work management, bugs.
-- [ ] Удалить Supabase SDK после последней волны.
+- [x] Wave A: employees, time entries, settings/auth.
+- [x] Wave B: orders, items, warehouse, production.
+- [x] Wave C: molds, blanks, colors, marketplaces.
+- [x] Wave D: finance, work management, bugs.
+- [x] Удалить Supabase SDK после последней волны.
+- [ ] Опубликовать frontend и выполнить live smokes во время M7.
 
 ### Definition of Done
 
@@ -227,11 +229,12 @@ node tests/tasks-smoke.js
 
 ### Tasks
 
-- [ ] Перевести bootstrap/static sync.
-- [ ] Перевести FinTablo и Точка.
-- [ ] Перевести backup/snapshot/write-back workflows.
-- [ ] Перевести upload/download на Yandex Object Storage через API.
-- [ ] Обновить внешние consumer checklists.
+- [x] Перевести bootstrap/static sync.
+- [x] Перевести FinTablo и Точка.
+- [x] Перевести production write-back workflow.
+- [x] Перевести upload/download на Yandex Object Storage через API.
+- [x] Ограничить Vercel минимальным Telegram-relay.
+- [ ] Отключить migration-only snapshot workflows после M7.
 
 ### Definition of Done
 

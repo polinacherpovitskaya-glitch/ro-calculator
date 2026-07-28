@@ -2,9 +2,9 @@
 
 ## Snapshot
 
-- Current phase: M3 — Rehearsal и parity всех данных.
+- Current phase: M7 — подготовка production cutover.
 - Plan file: `docs/plans/2026-07-28-supabase-retirement.md`.
-- Status: yellow.
+- Status: green for cutover; production switch is still pending.
 - Last updated: 2026-07-28.
 
 ## Done
@@ -32,20 +32,37 @@
   Telegram-уведомление.
 - Илья Теряев (`@ILAYTONKO`) и Влад Галкин (`@tigreslav`) активны; их записи
   времени за 27 июля присутствуют в production DB.
-- Десять refresh scripts скопировали production snapshot в shadow PostgreSQL.
-- Count parity: 54 из 54 покрытых наборов совпали, включая 364
-  `time_entries`, 309 активных заказов, 838 `order_items`, склад, 19 178
+- Полный rehearsal перенёс все 64 legacy-набора и прошёл без расхождений.
+- Count parity включает 366 `time_entries`, 309 активных заказов, 838
+  `order_items`, склад, 19 178
   `finance_transactions`, 17 534 `legacy_finance_transactions` и 1 644
   `bank_transactions`.
+- Compatibility-слой сохранил 43 028 исходных строк с точной формой payload.
+- Storage перенесён в приватный Yandex Object Storage: 420 из 420 объектов,
+  410 254 132 байта, checksum manifest совпал.
+- Старые абсолютные и относительные Supabase Storage URL переписаны на Yandex.
+- Frontend transport, timebot, FinTablo, Точка, static builder и write-back
+  workflow переведены на собственный API.
+- Пароли calculator auth теперь проверяются сервером и не попадают в browser
+  cache.
+- Actions run `30382180892` повторно подтвердил migrations, API/bot tests,
+  HTTPS health, Storage read/write, полный rehearsal и восстановление
+  automation token после refresh.
+- Write/read/delete smoke через публичный Yandex API прошёл в run
+  `30382619258`.
+- Последний dump размером 76 344 012 байт восстановлен в отдельную БД:
+  66 public tables и ключевые counts полностью совпали; временная БД удалена.
 
 ## In Progress
 
-- Gap-анализ и migrations/routes для оставшихся site-таблиц.
+- Финальный backup/write freeze и production-переключение frontend/timebot.
 
 ## Next
 
-- M3: запустить refresh scripts, получить первый parity report и закрыть
-  непокрытые таблицы.
+- Остановить старый poller на короткое окно.
+- Снять финальную дельту и повторить parity.
+- Опубликовать frontend v422 и запустить API-backed timebot.
+- Выполнить live/write-back/Telegram smokes и начать окно наблюдения.
 
 ## Decisions Made
 
@@ -75,7 +92,8 @@ node tests/version-smoke.js
 
 ## Current Blockers
 
-- Нет. DNS/certificate выполняются только после готовности shadow API.
+- Нет. Физическое удаление старого Supabase запрещено до завершения M7 и окна
+  наблюдения.
 
 ## Audit Log
 
@@ -91,13 +109,17 @@ node tests/version-smoke.js
 | 2026-07-28 | M2 | timebot monitor | Actions run `30365779852` | Bot, relay, DB, replacement API and test alert green | M3 |
 | 2026-07-28 | M3 | core data rehearsal | ten refresh scripts + `compare-datasets.mjs` | 39/39 core datasets count-match | finance |
 | 2026-07-28 | M3 | finance rehearsal | migration 014 + refresh 11 | 15/15 finance datasets count-match; 54/54 total | site gap |
+| 2026-07-28 | M3 | full parity + URL rewrite | Actions `30371648837` | all datasets green; no old Storage URLs | token order |
+| 2026-07-28 | M3 | final rehearsal | Actions `30382180892` | API/bot/Storage/parity green; token restored after refresh | restore drill |
+| 2026-07-28 | M3 | restore drill | temporary DB `ro_restore_drill_20260728` | 66 tables and key counts match; temp DB removed | M7 |
+| 2026-07-28 | M4/M6 | public write-back | Actions `30382619258` | setting + time entry write/read/delete and cleanup green | M7 |
 
 ## Smoke / Demo Checklist
 
 - [x] Current calculator is healthy before migration.
 - [x] Current timebot health is green before migration.
 - [x] Shadow API health is green.
-- [ ] Shadow DB parity is green.
+- [x] Shadow DB parity is green.
 - [ ] Timebot writes without Supabase.
 - [ ] Both calculator domains work without Supabase.
 - [ ] Production survives VM reboot without Supabase containers.
