@@ -8,13 +8,13 @@
 - [x] Проверить фактическое потребление Yandex Cloud.
 - [x] Подтвердить существование неиспользуемых Function и API Gateway.
 - [x] Поднять логи предыдущего `fetch failed`.
-- [ ] Заменить upstream `fetch` на тестируемый IPv4 HTTPS-клиент.
-- [ ] Добавить безопасную диагностику сетевых ошибок.
-- [ ] Расширить unit-тесты relay.
+- [x] Заменить upstream `fetch` на тестируемый IPv4 HTTPS-клиент.
+- [x] Добавить безопасную диагностику сетевых ошибок.
+- [x] Расширить unit-тесты relay.
 
 ## Milestone 2 — Canary
 
-- [ ] Добавить отдельный canary workflow без изменения timebot.
+- [x] Добавить отдельный canary workflow без изменения timebot.
 - [ ] Проверить стандартный serverless egress.
 - [ ] При необходимости проверить функцию в сети `default`.
 - [ ] Получить успешный production `getMe`.
@@ -37,4 +37,3 @@
 - [ ] Наблюдать Yandex relay без повторяющихся timeout.
 - [ ] Удалить Vercel relay и runtime secret.
 - [ ] Зафиксировать итоговый месячный расход Yandex.
-

@@ -1,4 +1,6 @@
 const crypto = require('node:crypto');
+const https = require('node:https');
+const net = require('node:net');
 
 const TELEGRAM_ORIGIN = 'https://api.telegram.org';
 const DEFAULT_UPSTREAM_TIMEOUT_MS = 38000;
@@ -94,9 +96,72 @@ function positiveInt(value, fallback) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+function headerObject(headers) {
+  const result = {};
+  headers.forEach((value, key) => {
+    result[key] = value;
+  });
+  return result;
+}
+
+function createHttpsRequester(options = {}) {
+  const requestImpl = options.request || https.request;
+
+  return function requestTelegram(targetUrl, init = {}) {
+    return new Promise((resolve, reject) => {
+      const request = requestImpl(targetUrl, {
+        method: init.method,
+        headers: headerObject(init.headers || new Headers()),
+        family: 4,
+        timeout: positiveInt(init.timeoutMs, DEFAULT_UPSTREAM_TIMEOUT_MS),
+      }, response => {
+        const chunks = [];
+        response.on('data', chunk => chunks.push(Buffer.from(chunk)));
+        response.on('end', () => {
+          resolve({
+            status: response.statusCode || 502,
+            headers: new Headers(response.headers || {}),
+            arrayBuffer: async () => Buffer.concat(chunks),
+          });
+        });
+        response.on('error', reject);
+      });
+
+      request.on('timeout', () => {
+        const error = new Error('Telegram upstream request timed out');
+        error.code = 'ETIMEDOUT';
+        request.destroy(error);
+      });
+      request.on('error', reject);
+      if (init.body !== undefined) request.write(init.body);
+      request.end();
+    });
+  };
+}
+
+function createFetchRequester(fetchImpl) {
+  return (targetUrl, init = {}) => fetchImpl(targetUrl, {
+    method: init.method,
+    headers: init.headers,
+    body: init.body,
+    signal: AbortSignal.timeout(positiveInt(init.timeoutMs, DEFAULT_UPSTREAM_TIMEOUT_MS)),
+  });
+}
+
+function safeNetworkError(error) {
+  const cause = error?.cause || {};
+  const address = error?.address || cause.address || '';
+  return {
+    code: String(error?.code || cause.code || 'UNKNOWN'),
+    syscall: String(error?.syscall || cause.syscall || 'unknown'),
+    addressFamily: net.isIP(address) || 4,
+  };
+}
+
 function createHandler(options = {}) {
-  const fetchImpl = options.fetch || global.fetch;
   const env = options.env || process.env;
+  const upstreamRequest = options.upstreamRequest
+    || (options.fetch ? createFetchRequester(options.fetch) : createHttpsRequester());
 
   return async function handler(event) {
     const secret = String(env.TELEGRAM_RELAY_SECRET || '');
@@ -123,11 +188,11 @@ function createHandler(options = {}) {
     const operation = telegramOperation(path);
 
     try {
-      const upstream = await fetchImpl(targetUrl, {
+      const upstream = await upstreamRequest(targetUrl, {
         method,
         headers: requestHeaders(event),
         body: method === 'GET' || method === 'HEAD' ? undefined : body,
-        signal: AbortSignal.timeout(positiveInt(env.TELEGRAM_RELAY_UPSTREAM_TIMEOUT_MS, DEFAULT_UPSTREAM_TIMEOUT_MS)),
+        timeoutMs: positiveInt(env.TELEGRAM_RELAY_UPSTREAM_TIMEOUT_MS, DEFAULT_UPSTREAM_TIMEOUT_MS),
       });
       const buffer = Buffer.from(await upstream.arrayBuffer());
       console.log('Telegram relay request completed', {
@@ -145,7 +210,7 @@ function createHandler(options = {}) {
       console.error('Telegram relay request failed', {
         method,
         operation,
-        message: error?.message || String(error),
+        ...safeNetworkError(error),
       });
       return textResponse(502, { ok: false, error: 'Telegram upstream unavailable' });
     }
@@ -154,6 +219,8 @@ function createHandler(options = {}) {
 
 exports.handler = createHandler();
 exports.createHandler = createHandler;
+exports.createHttpsRequester = createHttpsRequester;
 exports.queryString = queryString;
+exports.safeNetworkError = safeNetworkError;
 exports.telegramOperation = telegramOperation;
 exports.telegramPath = telegramPath;

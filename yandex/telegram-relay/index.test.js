@@ -1,8 +1,11 @@
 const assert = require('node:assert/strict');
+const { EventEmitter } = require('node:events');
 const { test } = require('node:test');
 const {
   createHandler,
+  createHttpsRequester,
   queryString,
+  safeNetworkError,
   telegramOperation,
   telegramPath,
 } = require('./index');
@@ -105,4 +108,76 @@ test('handler returns a safe 502 response for upstream errors', async () => {
     ok: false,
     error: 'Telegram upstream unavailable',
   });
+});
+
+test('HTTPS requester forces IPv4 and preserves headers, body, and response', async () => {
+  let captured;
+  const request = (url, init, onResponse) => {
+    const client = new EventEmitter();
+    client.write = body => {
+      captured.body = Buffer.from(body).toString();
+    };
+    client.destroy = error => client.emit('error', error);
+    client.end = () => {
+      queueMicrotask(() => {
+        const response = new EventEmitter();
+        response.statusCode = 200;
+        response.headers = { 'content-type': 'application/json' };
+        onResponse(response);
+        response.emit('data', Buffer.from('{"ok":true}'));
+        response.emit('end');
+      });
+    };
+    captured = { url: String(url), init, body: null };
+    return client;
+  };
+  const requester = createHttpsRequester({ request });
+  const response = await requester('https://api.telegram.org/bot123:ABC/sendMessage', {
+    method: 'POST',
+    headers: new Headers({ 'content-type': 'application/x-www-form-urlencoded' }),
+    body: 'chat_id=42&text=hello',
+    timeoutMs: 1234,
+  });
+
+  assert.equal(captured.url, 'https://api.telegram.org/bot123:ABC/sendMessage');
+  assert.equal(captured.init.family, 4);
+  assert.equal(captured.init.timeout, 1234);
+  assert.equal(captured.init.headers['content-type'], 'application/x-www-form-urlencoded');
+  assert.equal(captured.body, 'chat_id=42&text=hello');
+  assert.equal(response.status, 200);
+  assert.deepEqual(JSON.parse(Buffer.from(await response.arrayBuffer()).toString()), { ok: true });
+});
+
+test('HTTPS requester destroys timed out requests with a stable error code', async () => {
+  const request = () => {
+    const client = new EventEmitter();
+    client.write = () => {};
+    client.destroy = error => client.emit('error', error);
+    client.end = () => queueMicrotask(() => client.emit('timeout'));
+    return client;
+  };
+  const requester = createHttpsRequester({ request });
+
+  await assert.rejects(
+    requester('https://api.telegram.org/bot123:ABC/getMe', {
+      method: 'GET',
+      headers: new Headers(),
+      timeoutMs: 10,
+    }),
+    error => error.code === 'ETIMEDOUT'
+  );
+});
+
+test('network diagnostics never include request URLs or tokens', () => {
+  const error = new Error('fetch failed for https://api.telegram.org/bot123:SECRET/getMe');
+  error.code = 'ETIMEDOUT';
+  error.syscall = 'connect';
+  error.address = '149.154.167.220';
+
+  assert.deepEqual(safeNetworkError(error), {
+    code: 'ETIMEDOUT',
+    syscall: 'connect',
+    addressFamily: 4,
+  });
+  assert.doesNotMatch(JSON.stringify(safeNetworkError(error)), /SECRET|telegram\\.org/);
 });

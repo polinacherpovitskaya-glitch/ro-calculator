@@ -1,0 +1,138 @@
+name: Yandex Telegram relay canary
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - codex/yandex-telegram-relay
+    paths:
+      - 'yandex/telegram-relay/**'
+      - 'tests/yandex-telegram-relay-canary-smoke.js'
+      - '.github/workflows/yandex-telegram-relay-canary.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: yandex-telegram-relay-canary
+  cancel-in-progress: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  canary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Test relay and workflow contract
+        run: |
+          node --check yandex/telegram-relay/index.js
+          node --test yandex/telegram-relay/index.test.js
+          node tests/yandex-telegram-relay-canary-smoke.js
+
+      - name: Install Yandex Cloud CLI
+        run: |
+          curl -fsSL https://storage.yandexcloud.net/yandexcloud-yc/install.sh \
+            | bash -s -- -i "$HOME/yandex-cloud" -n
+          echo "$HOME/yandex-cloud/bin" >> "$GITHUB_PATH"
+
+      - name: Deploy unused canary and probe Telegram
+        env:
+          TELEGRAM_RELAY_SECRET: ${{ secrets.TELEGRAM_RELAY_SECRET }}
+          TIMEBOT_TOKEN: ${{ secrets.TIMEBOT_TOKEN }}
+          YC_OAUTH_TOKEN: ${{ secrets.YC_OAUTH_TOKEN }}
+          YC_CLOUD_ID: b1gl59l77vb50ihub2nd
+          YC_FOLDER_ID: b1gc32hu5ujioie1o0ht
+          FUNCTION_NAME: ro-telegram-relay
+          GATEWAY_NAME: ro-telegram-relay-gateway
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${YC_OAUTH_TOKEN:-}"
+          test -n "${TELEGRAM_RELAY_SECRET:-}"
+          test -n "${TIMEBOT_TOKEN:-}"
+
+          yc config set token "$YC_OAUTH_TOKEN" >/dev/null
+          yc config set cloud-id "$YC_CLOUD_ID" >/dev/null
+          yc config set folder-id "$YC_FOLDER_ID" >/dev/null
+          trap 'yc config unset token >/dev/null 2>&1 || true' EXIT
+
+          function_id="$(yc serverless function get --name "$FUNCTION_NAME" --format json \
+            | node -e "let raw='';process.stdin.on('data',c=>raw+=c).on('end',()=>console.log(JSON.parse(raw).id))")"
+          gateway_domain="$(yc serverless api-gateway get --name "$GATEWAY_NAME" --format json \
+            | node -e "let raw='';process.stdin.on('data',c=>raw+=c).on('end',()=>{const value=JSON.parse(raw);console.log(value.domain||value.default_domain||'')})")"
+          test -n "$function_id"
+          test -n "$gateway_domain"
+
+          relay_base="https://${gateway_domain}/${TELEGRAM_RELAY_SECRET}"
+          echo "::add-mask::$relay_base"
+          diagnostic="$RUNNER_TEMP/yandex-telegram-relay-canary.txt"
+          : > "$diagnostic"
+
+          deploy_version() {
+            local mode="$1"
+            local args=(
+              --function-id "$function_id"
+              --runtime nodejs22
+              --entrypoint index.handler
+              --memory 256MB
+              --execution-timeout 45s
+              --source-path yandex/telegram-relay
+              --description "RO Telegram relay canary: ${mode}"
+              --environment "TELEGRAM_RELAY_SECRET=${TELEGRAM_RELAY_SECRET},TELEGRAM_RELAY_UPSTREAM_TIMEOUT_MS=20000"
+            )
+            if [ "$mode" = "user-vpc" ]; then
+              args+=(--network-name default)
+            fi
+            yc serverless function version create "${args[@]}" >/dev/null
+          }
+
+          probe() {
+            local mode="$1"
+            local response_file="$RUNNER_TEMP/telegram-get-me-${mode}.json"
+            local http_code
+            http_code="$(curl --silent --show-error --max-time 25 \
+              --output "$response_file" \
+              --write-out '%{http_code}' \
+              "${relay_base}/bot${TIMEBOT_TOKEN}/getMe" || true)"
+            printf 'mode=%s http_status=%s\n' "$mode" "${http_code:-000}" >> "$diagnostic"
+            if [ "$http_code" != "200" ]; then
+              return 1
+            fi
+            node -e "
+              const fs = require('node:fs');
+              const payload = JSON.parse(fs.readFileSync(process.argv[1], 'utf8'));
+              if (!payload.ok || payload.result?.username !== 'Recycle_object_calc_bot') process.exit(1);
+              console.log('Yandex Telegram relay getMe passed for @' + payload.result.username);
+            " "$response_file"
+          }
+
+          deploy_version standard
+          if probe standard; then
+            echo "selected_mode=standard" >> "$diagnostic"
+            exit 0
+          fi
+
+          echo "Standard serverless egress failed; retrying through the default user VPC"
+          deploy_version user-vpc
+          probe user-vpc
+          echo "selected_mode=user-vpc" >> "$diagnostic"
+
+      - name: Upload safe diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: yandex-telegram-relay-canary
+          path: ${{ runner.temp }}/yandex-telegram-relay-canary.txt
+          if-no-files-found: ignore
+
