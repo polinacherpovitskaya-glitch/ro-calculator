@@ -4990,12 +4990,6 @@ function _upsertLocalTimeEntry(entry, id = null) {
 
 async function loadTimeEntries() {
     const fallback = getLocal(LOCAL_KEYS.timeEntries) || [];
-    const bootstrapPayload = await _loadSameOriginBootstrap(['timeEntries']);
-    if (bootstrapPayload && Array.isArray(bootstrapPayload.timeEntries) && bootstrapPayload.timeEntries.length > 0) {
-        const mapped = bootstrapPayload.timeEntries.map(_timeEntryFromDb);
-        setLocal(LOCAL_KEYS.timeEntries, mapped);
-        return mapped;
-    }
     if (isSupabaseReady()) {
         try {
             const timeoutMs = Number(window.__RO_REMOTE_LOAD_TIMEOUT_MS) > 0 ? Number(window.__RO_REMOTE_LOAD_TIMEOUT_MS) : 5000;
@@ -5009,14 +5003,20 @@ async function loadTimeEntries() {
             const { data, error } = result || {};
             if (error) {
                 console.error('loadTimeEntries error:', error);
-                return fallback;
+            } else {
+                const mapped = (data || []).map(_timeEntryFromDb);
+                setLocal(LOCAL_KEYS.timeEntries, mapped);
+                return mapped;
             }
-            const mapped = (data || []).map(_timeEntryFromDb);
-            setLocal(LOCAL_KEYS.timeEntries, mapped);
-            return mapped;
         } catch (err) {
-            console.warn('loadTimeEntries timeout/error, using local:', err);
+            console.warn('loadTimeEntries timeout/error, trying bootstrap:', err);
         }
+    }
+    const bootstrapPayload = await _loadSameOriginBootstrap(['timeEntries']);
+    if (bootstrapPayload && Array.isArray(bootstrapPayload.timeEntries) && bootstrapPayload.timeEntries.length > 0) {
+        const mapped = bootstrapPayload.timeEntries.map(_timeEntryFromDb);
+        setLocal(LOCAL_KEYS.timeEntries, mapped);
+        return mapped;
     }
     return fallback;
 }

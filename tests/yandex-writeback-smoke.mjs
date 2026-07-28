@@ -16,6 +16,7 @@ function extractConst(name) {
 const supabaseUrl = (process.env.SUPABASE_URL || extractConst('SUPABASE_URL')).replace(/\/+$/, '');
 const proxyUrl = (process.env.RO_YANDEX_PROXY_URL || extractConst('YANDEX_SUPABASE_PROXY_URL')).replace(/\/+$/, '');
 const anonKey = process.env.SUPABASE_ANON_KEY || extractConst('SUPABASE_ANON_KEY');
+const smokeOrigin = process.env.RO_WRITEBACK_ORIGIN || 'https://calc.recycleobject.ru';
 const smokeKey = process.env.RO_YANDEX_WRITEBACK_KEY || 'ro_yandex_writeback_smoke_json';
 const marker = [
   'yandex-writeback',
@@ -37,6 +38,7 @@ function assertConfigured() {
   assert.ok(supabaseUrl, 'SUPABASE_URL is required');
   assert.ok(proxyUrl, 'RO_YANDEX_PROXY_URL / YANDEX_SUPABASE_PROXY_URL is required');
   assert.ok(anonKey, 'SUPABASE_ANON_KEY is required');
+  assert.equal(new URL(smokeOrigin).protocol, 'https:', 'RO_WRITEBACK_ORIGIN must be HTTPS');
 }
 
 async function fetchJson(url, options = {}) {
@@ -77,7 +79,7 @@ async function restRequest(baseUrl, pathname, options = {}) {
     ...options,
     headers: authHeaders({
       accept: 'application/json',
-      origin: 'https://calc2.recycleobject.ru',
+      origin: smokeOrigin,
       ...(options.headers || {}),
     }),
   });
@@ -94,7 +96,7 @@ async function writeViaYandexProxy() {
     headers: authHeaders({
       'content-type': 'application/json',
       prefer: 'resolution=merge-duplicates,return=representation',
-      origin: 'https://calc2.recycleobject.ru',
+      origin: smokeOrigin,
     }),
     body: JSON.stringify([row]),
   });
@@ -113,6 +115,7 @@ async function readDirectFromSupabase() {
   const { response, json, text } = await fetchJson(url, {
     headers: authHeaders({
       accept: 'application/json',
+      origin: smokeOrigin,
     }),
   });
   assert.ok(response.ok, `Direct Supabase read failed with HTTP ${response.status}: ${text.slice(0, 500)}`);
@@ -127,7 +130,7 @@ async function readBackViaYandexProxy() {
   const { response, json, text } = await fetchJson(url, {
     headers: authHeaders({
       accept: 'application/json',
-      origin: 'https://calc2.recycleobject.ru',
+      origin: smokeOrigin,
     }),
   });
   assert.ok(response.ok, `Yandex proxy readback failed with HTTP ${response.status}: ${text.slice(0, 500)}`);
@@ -178,9 +181,35 @@ async function deleteViaProxy(table, id) {
   assert.ok(response.ok, `${table} cleanup delete failed with HTTP ${response.status}: ${text.slice(0, 500)}`);
 }
 
+async function deleteDirect(table, id) {
+  const { response, text } = await restRequest(
+    supabaseUrl,
+    `/rest/v1/${table}?id=eq.${encodeURIComponent(id)}`,
+    {
+      method: 'DELETE',
+      headers: {
+        prefer: 'return=minimal',
+      },
+    },
+  );
+  assert.ok(response.ok, `${table} direct cleanup delete failed with HTTP ${response.status}: ${text.slice(0, 500)}`);
+}
+
 function scheduleCleanup(table, id) {
   cleanupTasks.push(async () => {
     await deleteViaProxy(table, id);
+  });
+}
+
+function scheduleDirectCleanup(table, id) {
+  cleanupTasks.push(async () => {
+    await deleteDirect(table, id);
+    const { response, json, text } = await restRequest(
+      supabaseUrl,
+      `/rest/v1/${table}?select=id&id=eq.${encodeURIComponent(id)}&limit=1`,
+    );
+    assert.ok(response.ok, `${table} cleanup verification failed with HTTP ${response.status}: ${text.slice(0, 500)}`);
+    assert.deepEqual(json, [], `${table} cleanup left row ${id}`);
   });
 }
 
@@ -191,6 +220,57 @@ async function assertTransientTableWrite({ table, row, parseColumn, expectedMark
   const parsed = parseStoredValue(direct[parseColumn]);
   assert.equal(parsed?.marker, expectedMarker, `${table}.${parseColumn} marker mismatch`);
   return direct;
+}
+
+async function assertTransientTimeEntryWrite() {
+  const id = smokeIdBase + 105;
+  const row = {
+    id,
+    employee_id: null,
+    employee_name: 'RO_SMOKE',
+    date: '2000-01-01',
+    hours: 0.5,
+    task_description: `[meta]${JSON.stringify({
+      stage: 'other',
+      stage_label: 'Write-back smoke',
+      project: 'RO_SMOKE',
+      marker,
+    })}[/meta] Automated production write-back check`,
+    order_id: null,
+    notes: 'yandex_writeback_smoke',
+  };
+  const { response, json, text } = await restRequest(
+    supabaseUrl,
+    '/rest/v1/time_entries?on_conflict=id',
+    {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        prefer: 'resolution=merge-duplicates,return=representation',
+      },
+      body: JSON.stringify([row]),
+    },
+  );
+  assert.ok(response.ok, `time_entries direct insert failed with HTTP ${response.status}: ${text.slice(0, 500)}`);
+  scheduleDirectCleanup('time_entries', id);
+  assert.ok(
+    ['*', smokeOrigin].includes(response.headers.get('access-control-allow-origin')),
+    `time_entries CORS does not allow ${smokeOrigin}`,
+  );
+  assert.ok(Array.isArray(json) && json.length === 1, `time_entries direct insert returned ${JSON.stringify(json)}`);
+
+  const direct = await readDirectRow('time_entries', id);
+  assert.equal(direct.employee_name, 'RO_SMOKE');
+  assert.equal(Number(direct.hours), 0.5);
+  assert.equal(parseStoredValue(
+    String(direct.task_description || '').match(/^\[meta\](\{.*?\})\[\/meta\]/)?.[1],
+  )?.marker, marker);
+  return {
+    id: direct.id,
+    date: direct.date,
+    hours: Number(direct.hours),
+    origin: smokeOrigin,
+  };
 }
 
 async function runTransientTableChecks() {
@@ -279,11 +359,14 @@ async function runTransientTableChecks() {
     },
   });
 
+  const timeEntry = await assertTransientTimeEntryWrite();
+
   return {
     warehouseItem: { id: warehouseItem.id, sku: warehouseItem.sku },
     shipment: { id: shipment.id },
     chinaPurchase: { id: chinaPurchase.id, status: chinaPurchase.status },
     mold: { id: mold.id, name: mold.name },
+    timeEntry,
   };
 }
 
@@ -313,6 +396,7 @@ async function main() {
       ok: true,
       smokeKey,
       marker,
+      smokeOrigin,
       proxyUrl,
       supabaseUrl,
       writtenViaProxy,
@@ -328,6 +412,7 @@ async function main() {
     ok: true,
     smokeKey,
     marker,
+    smokeOrigin,
     proxyHost: new URL(proxyUrl).host,
     supabaseHost: new URL(supabaseUrl).host,
     tableChecks,
