@@ -67,6 +67,10 @@ const apiServer = fs.readFileSync(
   path.join(root, 'ops/api/src/server.js'),
   'utf8'
 );
+const browserPlatformClient = fs.readFileSync(
+  path.join(root, 'js/platform-client.js'),
+  'utf8'
+);
 
 assert.match(compose, /name: ro-platform-shadow/);
 assert.match(compose, /image: postgres:16-alpine/);
@@ -74,12 +78,14 @@ assert.match(compose, /container_name: ro-platform-shadow-postgres/);
 assert.match(compose, /container_name: ro-platform-shadow-api/);
 assert.match(compose, /127\.0\.0\.1:\$\{SHADOW_API_PORT:-3100\}:3000/);
 assert.match(compose, /platform-shadow-postgres-data/);
-assert.match(compose, /S3_MOCK_DIR: \/app\/shadow-s3/);
+assert.match(compose, /path: \.env\.storage/);
+assert.match(compose, /required: true/);
 assert.doesNotMatch(compose, /supabase|selectel/i);
 assert.doesNotMatch(compose, /(?:^|\s)(?:80|443):(?:80|443)/);
 
 assert.match(deploy, /openssl rand -hex 24/);
 assert.match(deploy, /chmod 600 "\$\{ENV_FILE\}"/);
+assert.match(deploy, /test -s "\$\{STORAGE_ENV_FILE\}"/);
 assert.match(deploy, /db\/migrations\/\*\.sql/);
 assert.match(deploy, /http:\/\/127\.0\.0\.1:\$\{API_PORT\}\/api\/health/);
 assert.match(deploy, /grep -Eq '"status"/);
@@ -122,11 +128,13 @@ assert.match(financeRefresh, /legacy_finance_transactions/);
 assert.match(refreshSnapshot, /'11-finance'/);
 assert.match(refreshSnapshot, /'12-legacy-site-archive'/);
 assert.match(refreshSnapshot, /'13-compatibility-store'/);
+assert.match(refreshSnapshot, /'14-rewrite-storage-urls'/);
 assert.match(compareDatasets, /'finance_transactions'/);
 assert.match(compareDatasets, /'fintablo_imports'/);
 assert.match(compareDatasets, /archive:/);
 assert.match(compareDatasets, /compat:/);
-assert.match(compareDatasets, /const sbCount = \(await fetchAll\(table\)\)\.length/);
+assert.match(compareDatasets, /yandex_storage_urls/);
+assert.match(compareDatasets, /const sbCount = await supabaseRawCount\(table\)/);
 assert.match(compatMigration, /CREATE TABLE IF NOT EXISTS compat_rows/);
 assert.match(compatMigration, /data JSONB NOT NULL/);
 assert.match(legacyAuthMigration, /legacy_account_id TEXT/);
@@ -135,12 +143,21 @@ assert.match(compatRoute, /withIdempotency/);
 assert.match(compatRoute, /requireAuth/);
 assert.match(apiServer, /calculatorCors/);
 assert.match(apiServer, /\/api\/compat/);
+assert.match(browserPlatformClient, /credentials: 'include'/);
+assert.match(browserPlatformClient, /Idempotency-Key/);
+assert.match(browserPlatformClient, /\/api\/compat\/query/);
 
 assert.match(workflow, /name: Yandex platform shadow/);
 assert.match(workflow, /secrets\.YANDEX_VM_SSH_PRIVATE_KEY/);
 assert.match(workflow, /secrets\.YANDEX_VM_HOST/);
 assert.match(workflow, /secrets\.YANDEX_VM_USER/);
 assert.match(workflow, /--exclude \.env\.shadow/);
+assert.match(workflow, /ro-platform-media-api/);
+assert.match(workflow, /yc iam access-key create/);
+assert.match(workflow, /S3_ENDPOINT=https:\/\/storage\.yandexcloud\.net/);
+assert.match(workflow, /platform-secrets\/yandex-storage\.env/);
+assert.match(workflow, /Verify Yandex media read and write/);
+assert.match(workflow, /yandex-storage-ok/);
 assert.match(workflow, /docker port ro-platform-shadow-api/);
 assert.match(workflow, /docker inspect[^]*supabase-db/);
 assert.match(workflow, /docker inspect[^]*ro-timebot/);

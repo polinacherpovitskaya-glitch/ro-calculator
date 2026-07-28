@@ -102,6 +102,28 @@ export async function deleteObject(key, bucket = undefined) {
   await getClient(targetBucket).send(new DeleteObjectCommand({ Bucket: targetBucket, Key: key }));
 }
 
+export async function downloadObject(key, bucket = undefined) {
+  const target = mockPath(key);
+  if (target) {
+    return {
+      body: await fs.readFile(target),
+      contentType: 'application/octet-stream',
+      cacheControl: '',
+    };
+  }
+
+  const targetBucket = getBucket(bucket);
+  const response = await getClient(targetBucket).send(
+    new GetObjectCommand({ Bucket: targetBucket, Key: key }),
+  );
+  const bytes = await response.Body.transformToByteArray();
+  return {
+    body: Buffer.from(bytes),
+    contentType: response.ContentType || 'application/octet-stream',
+    cacheControl: response.CacheControl || '',
+  };
+}
+
 function selectelParts(value) {
   const match = String(value).match(/^selectel:\/\/([^/]+)\/(.+)$/);
   return match ? { bucket: match[1], key: match[2] } : null;
@@ -115,6 +137,14 @@ export async function presignedGetUrl(key, expiresIn = 600, bucket = undefined) 
   if (selectel) {
     if (mockPath(selectel.key)) {
       return `mock-s3://${selectel.bucket}/${selectel.key}`;
+    }
+    if (String(process.env.S3_ENDPOINT || '').includes('yandexcloud.net')) {
+      const consolidatedBucket = getBucket();
+      return getSignedUrl(
+        getClient(consolidatedBucket),
+        new GetObjectCommand({ Bucket: consolidatedBucket, Key: selectel.key }),
+        { expiresIn },
+      );
     }
     return getSignedUrl(getClient(selectel.bucket), new GetObjectCommand({ Bucket: selectel.bucket, Key: selectel.key }), {
       expiresIn,

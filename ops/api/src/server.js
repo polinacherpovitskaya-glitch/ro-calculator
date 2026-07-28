@@ -30,6 +30,7 @@ import settingsRoute from './routes/settings.js';
 import { selectelUrlSigningMiddleware } from './s3.js';
 import compatRoute from './routes/compat.js';
 import { calculatorCors } from './middleware/cors.js';
+import storageRoute from './routes/storage.js';
 
 export function createServer() {
   const app = express();
@@ -66,5 +67,6 @@ export function createServer() {
   app.use('/api/analytics', analyticsRoute);
   app.use('/api/settings', settingsRoute);
   app.use('/api/compat', compatRoute);
+  app.use('/api/storage', storageRoute);
   return app;
 }

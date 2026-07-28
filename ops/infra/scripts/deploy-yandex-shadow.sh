@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 INFRA_DIR="${ROOT_DIR}/infra"
 COMPOSE_FILE="${INFRA_DIR}/docker-compose.yandex-shadow.yml"
 ENV_FILE="${RO_SHADOW_ENV_FILE:-${INFRA_DIR}/.env.shadow}"
+STORAGE_ENV_FILE="${RO_STORAGE_ENV_FILE:-${INFRA_DIR}/.env.storage}"
 POSTGRES_CONTAINER="ro-platform-shadow-postgres"
 API_PORT="${SHADOW_API_PORT:-3100}"
 BACKUP_DIR="${RO_SHADOW_BACKUP_DIR:-/home/robot/platform-backups}"
@@ -30,6 +31,8 @@ set +a
 test -n "${POSTGRES_USER:-}"
 test -n "${POSTGRES_PASSWORD:-}"
 test -n "${POSTGRES_DB:-}"
+test -s "${STORAGE_ENV_FILE}"
+chmod 600 "${STORAGE_ENV_FILE}"
 
 docker compose \
   --env-file "${ENV_FILE}" \

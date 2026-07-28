@@ -26,13 +26,13 @@ services:
     image: ro-platform-shadow-api:local
     container_name: ro-platform-shadow-api
     restart: unless-stopped
+    env_file:
+      - path: .env.storage
+        required: true
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       PORT: "3000"
       APP_VERSION: ${APP_VERSION:-shadow}
-      S3_MOCK_DIR: /app/shadow-s3
-    volumes:
-      - platform-shadow-s3:/app/shadow-s3
     ports:
       - "127.0.0.1:${SHADOW_API_PORT:-3100}:3000"
     depends_on:
@@ -43,9 +43,7 @@ services:
 
 volumes:
   platform-shadow-postgres-data:
-  platform-shadow-s3:
 
 networks:
   shadow:
     driver: bridge
-

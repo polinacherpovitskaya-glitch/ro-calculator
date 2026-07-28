@@ -1,10 +1,10 @@
 // =============================================
-// Recycle Object — Supabase Client & Data Layer
+// Recycle Object — shared data layer
 // =============================================
 
-// Supabase config
-const SUPABASE_URL = 'https://db.recycleobject.ru';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiAiSFMyNTYiLCAidHlwIjogIkpXVCJ9.eyJyb2xlIjogImFub24iLCAiaXNzIjogInN1cGFiYXNlIiwgImlhdCI6IDE3ODQyOTY2NTUsICJleHAiOiAyMDk5NjU2NjU1fQ.lOvkwgM1TWwYESuJtjkRDVcvSxv7VV6vsbr1-ZGkB4c';
+// Existing function names remain during the transport migration so the rest
+// of the vanilla application can move without a risky rewrite.
+const PLATFORM_API_URL = 'https://api.recycleobject.ru';
 
 let supabaseClient = null;
 const SAME_ORIGIN_BOOTSTRAP_PATH = '/api/bootstrap';
@@ -25,7 +25,7 @@ function _isFileProtocolRuntime() {
 }
 
 function _getSupabaseRuntimeUrl() {
-    return SUPABASE_URL;
+    return PLATFORM_API_URL;
 }
 
 let _authAccountsRefreshPromise = null;
@@ -168,18 +168,19 @@ function initSupabase() {
         if (typeof window !== 'undefined') {
             window.__roLocalFileMode = true;
         }
-        console.warn('Supabase disabled in file:// mode. Open the app through GitHub Pages or a local http server.');
+        console.warn('Shared platform disabled in file:// mode. Open the app through a local http server.');
         return null;
     }
-    if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-        console.warn('Supabase not configured. Running in local/demo mode.');
+    if (!PLATFORM_API_URL || typeof createPlatformClient !== 'function') {
+        console.warn('Platform API not configured. Running in local/demo mode.');
         return null;
     }
     const runtimeSupabaseUrl = _getSupabaseRuntimeUrl();
     if (typeof window !== 'undefined') {
         window.__roSupabaseRuntimeUrl = runtimeSupabaseUrl;
     }
-    supabaseClient = supabase.createClient(runtimeSupabaseUrl, SUPABASE_ANON_KEY);
+    supabaseClient = createPlatformClient(runtimeSupabaseUrl);
+    if (typeof window !== 'undefined') window.__roUsePlatformApi = true;
     // In shared-db mode localStorage is only a cache, so compact it aggressively on boot.
     _cleanupLocalStorage({ aggressive: true });
     _syncLocalUnsyncedWindowFlag();
@@ -253,6 +254,7 @@ function _getStaticBootstrapLegacyUrls() {
 
 function _isStaticYandexMirrorRuntime() {
     if (typeof window === 'undefined' || !window.location) return false;
+    if (window.__roUsePlatformApi) return false;
     const host = String(window.location.hostname || '').toLowerCase();
     return host === 'calc2.recycleobject.ru' || host.endsWith('.website.yandexcloud.net');
 }

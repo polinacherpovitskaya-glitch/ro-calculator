@@ -228,6 +228,18 @@ async function fetchAll(table) {
   return data || [];
 }
 
+async function supabaseRawCount(table) {
+  const { count, error } = await supabase
+    .from(table)
+    .select('*', { count: 'exact', head: true });
+  if (error) {
+    const message = String(error.message || '');
+    if (message.includes(`Could not find the table 'public.${table}'`)) return 0;
+    throw error;
+  }
+  return Number(count) || 0;
+}
+
 async function fetchColumns(table, columns) {
   const { data, error } = await supabase.from(table).select(columns);
   if (error) {
@@ -583,7 +595,7 @@ async function main() {
     // The compatibility store intentionally preserves raw Supabase row
     // shapes, including soft-deleted orders and aggregate JSON rows. Do not
     // compare it against the normalized/canonical count rules above.
-    const sbCount = (await fetchAll(table)).length;
+    const sbCount = await supabaseRawCount(table);
     const { rows } = await pool.query(
       `SELECT COUNT(*)::int AS n
          FROM compat_rows
@@ -597,6 +609,22 @@ async function main() {
     console.log(`${label.padEnd(29)} ${String(sbCount).padStart(8)} ${String(pgCount).padStart(9)} ${String(diff).padStart(5)} ${status}`);
     if (diff !== 0) allOk = false;
   }
+
+  const storageUrlCheck = await pool.query(
+    `SELECT
+       (SELECT COUNT(*)::int
+          FROM compat_rows
+         WHERE data::text LIKE '%/storage/v1/object/%')
+       +
+       (SELECT COUNT(*)::int
+          FROM legacy_supabase_rows
+         WHERE data::text LIKE '%/storage/v1/object/%')
+       AS n`,
+  );
+  const staleStorageUrls = storageUrlCheck.rows[0].n;
+  const storageStatus = staleStorageUrls === 0 ? 'OK' : 'MISMATCH';
+  console.log(`${'yandex_storage_urls'.padEnd(29)} ${String(0).padStart(8)} ${String(staleStorageUrls).padStart(9)} ${String(staleStorageUrls).padStart(5)} ${storageStatus}`);
+  if (staleStorageUrls !== 0) allOk = false;
 
   if (!allOk) process.exitCode = 1;
 }

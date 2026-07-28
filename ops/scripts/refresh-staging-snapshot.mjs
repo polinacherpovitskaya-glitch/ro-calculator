@@ -84,6 +84,7 @@ async function main() {
     '11-finance',
     '12-legacy-site-archive',
     '13-compatibility-store',
+    '14-rewrite-storage-urls',
   ]) {
     runRefreshScript(script);
   }

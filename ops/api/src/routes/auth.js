@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { getPool } from '../db.js';
 import { hashPassword, verifyPassword } from '../auth/argon.js';
-import { createSession, revokeSession } from '../auth/sessions.js';
+import { createSession, loadSession, revokeSession } from '../auth/sessions.js';
 import { requireAuth } from '../middleware/auth.js';
 import {
   hashLegacyPassword,
@@ -55,10 +55,11 @@ function findLegacyAccount(accounts, accountId) {
 
 router.get('/legacy-accounts', async (req, res) => {
   const { accounts } = await loadLegacyAccounts();
+  const session = req.cookies?.session_id ? await loadSession(req.cookies.session_id) : null;
   res.json({
     accounts: accounts
       .filter((account) => account?.is_active !== false)
-      .map((account) => sanitizeLegacyAccount(account, { loginList: true }))
+      .map((account) => sanitizeLegacyAccount(account, { loginList: !session }))
       .filter(Boolean),
   });
 });
