@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { getPool } from '../db.js';
 
-const SESSION_TTL_DAYS = 60;
+export const SESSION_TTL_DAYS = 365;
 
 export async function createSession(userId, meta = {}) {
   const id = crypto.randomBytes(32).toString('hex');
@@ -28,6 +28,20 @@ export async function loadSession(id) {
   );
 
   return res.rows[0] || null;
+}
+
+export async function renewSession(id) {
+  const expiresAt = new Date(Date.now() + SESSION_TTL_DAYS * 24 * 60 * 60 * 1000);
+  const pool = getPool();
+  const result = await pool.query(
+    `UPDATE auth_sessions
+        SET expires_at = $2
+      WHERE id = $1
+        AND revoked_at IS NULL
+      RETURNING id`,
+    [id, expiresAt],
+  );
+  return result.rows[0] ? expiresAt : null;
 }
 
 export async function revokeSession(id) {

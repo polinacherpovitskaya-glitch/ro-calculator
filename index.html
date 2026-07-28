@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="css/style.css?v=410">
     <script>
         (function () {
-            const CURRENT_HTML_VERSION = 'v425';
+        const CURRENT_HTML_VERSION = 'v426';
             const ATTEMPT_KEY = 'ro_calc_force_update_attempts';
 
             function parseVersion(version) {
@@ -187,10 +187,18 @@
     <aside class="sidebar">
         <div class="sidebar-brand">
             <h2>Recycle Object</h2>
-            <span>Калькулятор <span id="app-version">v425</span></span>
+            <span>Калькулятор <span id="app-version">v426</span></span>
         </div>
         <nav class="sidebar-nav">
             <div class="sidebar-group-label">Каждый день</div>
+            <a href="#orders" data-page="orders">
+                <span class="nav-icon">&#9776;</span>
+                <span>Заказы</span>
+            </a>
+            <a href="#calculator" data-page="calculator">
+                <span class="nav-icon">&#9998;</span>
+                <span>Калькулятор</span>
+            </a>
             <a href="#tasks" data-page="tasks">
                 <span class="nav-icon">&#9745;</span>
                 <span>Задачи</span>
@@ -198,14 +206,6 @@
             <a href="#leads" data-page="leads">
                 <span class="nav-icon">&#128229;</span>
                 <span>Лиды</span>
-            </a>
-            <a href="#calculator" data-page="calculator">
-                <span class="nav-icon">&#9998;</span>
-                <span>Калькулятор</span>
-            </a>
-            <a href="#orders" data-page="orders">
-                <span class="nav-icon">&#9776;</span>
-                <span>Заказы</span>
             </a>
 
             <div class="sidebar-group-label">Производство</div>
@@ -3638,10 +3638,10 @@
 <script src="js/supabase.js?v=422"></script>
 <script src="js/task-events.js?v=1"></script>
 <script src="js/calculator.js?v=412"></script>
-<script src="js/app.js?v=425"></script>
+<script src="js/app.js?v=426"></script>
 <script src="js/tpa.js?v=4"></script>
 <script src="js/order-detail.js?v=412"></script>
-<script src="js/orders.js?v=412"></script>
+<script src="js/orders.js?v=426"></script>
 <script src="js/production_plan.js?v=76"></script>
 <script src="js/analytics.js?v=46g"></script>
     <script src="js/molds.js?v=411"></script>

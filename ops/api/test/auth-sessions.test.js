@@ -2,7 +2,13 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { getPool } from '../src/db.js';
-import { createSession, loadSession, revokeSession } from '../src/auth/sessions.js';
+import {
+  createSession,
+  loadSession,
+  renewSession,
+  revokeSession,
+  SESSION_TTL_DAYS,
+} from '../src/auth/sessions.js';
 
 const DB_URL = process.env.TEST_DATABASE_URL || 'postgres://ops:ops_dev_password@127.0.0.1:5433/ops';
 process.env.DATABASE_URL = DB_URL;
@@ -25,9 +31,25 @@ test('createSession returns id, persists session', async () => {
 
   assert.ok(id.length >= 32);
   assert.ok(expiresAt instanceof Date);
+  const ttlDays = (expiresAt.getTime() - Date.now()) / (24 * 60 * 60 * 1000);
+  assert.equal(SESSION_TTL_DAYS, 365);
+  assert.ok(ttlDays > 364 && ttlDays <= 365);
 
   const loaded = await loadSession(id);
   assert.equal(loaded.user_id, userId);
+});
+
+test('renewSession extends an existing remembered login', async () => {
+  const userId = await ensureUser(`renew-test-${crypto.randomUUID()}@x.test`);
+  const { id } = await createSession(userId);
+  await getPool().query(
+    `UPDATE auth_sessions SET expires_at = NOW() + INTERVAL '1 day' WHERE id = $1`,
+    [id],
+  );
+
+  const expiresAt = await renewSession(id);
+  const ttlDays = (expiresAt.getTime() - Date.now()) / (24 * 60 * 60 * 1000);
+  assert.ok(ttlDays > 364 && ttlDays <= 365);
 });
 
 test('loadSession returns null for unknown id', async () => {

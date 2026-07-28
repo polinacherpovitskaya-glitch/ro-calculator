@@ -389,6 +389,70 @@ async function smokeDisabledRestore(context) {
     );
 }
 
+async function smokeRememberedLoginUsesServerExpiry(context) {
+    context.localStorage.setItem('ro_calc_auth_user_id', 'remembered-user');
+    context.localStorage.setItem('ro_calc_auth_ts', String(Date.now() - (400 * 86400000)));
+    assert.equal(
+        vm.runInContext(`App.isAuthenticated()`, context),
+        true,
+        'a remembered user must reach server cookie verification even when the legacy timestamp is old',
+    );
+}
+
+async function smokeTransientRestoreKeepsRememberedLogin(context) {
+    context.localStorage.setItem('ro_calc_auth_user_id', 'cached-11');
+    context.localStorage.setItem('ro_calc_auth_ts', String(Date.now()));
+    context.__fetchHandler = async () => {
+        throw new Error('temporary network failure');
+    };
+    vm.runInContext(`(() => {
+        App.currentUser = null;
+        App.authAccounts = [{
+            id: 'cached-11',
+            employee_id: 5,
+            employee_name: 'Cached User',
+            username: 'cached',
+            role: 'employee',
+            pages: ['orders'],
+            is_active: true,
+        }];
+    })()`, context);
+
+    const source = await vm.runInContext(`App.restoreAuthenticatedUser()`, context);
+
+    assert.equal(source, 'cached');
+    assert.equal(context.localStorage.getItem('ro_calc_auth_user_id'), 'cached-11');
+    assert.equal(vm.runInContext(`App.currentUser.name`, context), 'Cached User');
+    assert.equal(context.__roAuthSessionUnverified, true);
+    context.__fetchHandler = null;
+}
+
+async function smokeExplicitAuthFailureClearsWithoutLogoutRequest(context) {
+    context.localStorage.setItem('ro_calc_auth_user_id', 'expired-11');
+    context.localStorage.setItem('ro_calc_auth_ts', String(Date.now()));
+    context.__restoreRequestCount = 0;
+    context.__fetchHandler = async () => {
+        context.__restoreRequestCount += 1;
+        return {
+            ok: false,
+            status: 401,
+            json: async () => ({ error: { code: 'INVALID_SESSION' } }),
+        };
+    };
+    vm.runInContext(`(() => {
+        App.currentUser = null;
+        App.endSessionTracking = () => {};
+        App.trackAuthEvent = () => {};
+    })()`, context);
+
+    const source = await vm.runInContext(`App.restoreAuthenticatedUser()`, context);
+
+    assert.equal(source, null);
+    assert.equal(context.localStorage.getItem('ro_calc_auth_user_id'), null);
+    assert.equal(context.__restoreRequestCount, 1, 'terminal restore must not send a redundant remote logout');
+    context.__fetchHandler = null;
+}
+
 async function smokePermissionFallback(context) {
     const defaultOnly = vm.runInContext(`(() => {
         App.currentUser = { id: 'legacy', employee_id: null, role: 'employee', pages: null };
@@ -552,6 +616,7 @@ async function smokeShowAppPrimesRouteShellBeforeDataReady(context) {
     };
     context.location.hash = '#molds';
     context.__settingsResolved = false;
+    context.__routeLoadCount = 0;
     context.loadSettings = async () => new Promise(() => {});
     context.loadTemplates = async () => [];
 
@@ -561,10 +626,12 @@ async function smokeShowAppPrimesRouteShellBeforeDataReady(context) {
         App.startUpdateChecker = () => {};
         App.startSessionTracking = () => {};
         App.trackAuthEvent = () => {};
-        App.initEmployeeContext = async () => {};
+        App.initEmployeeContext = () => new Promise(resolve => {
+            window.__resolveEmployeeContext = resolve;
+        });
         App.applyNavVisibility = () => {};
         App.syncQuickBugButton = () => {};
-        window.Molds = { load() {} };
+        window.Molds = { load() { window.__routeLoadCount += 1; } };
     })()`, context);
 
     const pendingShowApp = vm.runInContext(`App.showApp()`, context);
@@ -575,6 +642,8 @@ async function smokeShowAppPrimesRouteShellBeforeDataReady(context) {
     assert.equal(pageOrders.classList.contains('active'), false);
     assert.equal(navMolds.classList.contains('active'), true, 'molds nav should highlight immediately');
     assert.equal(vm.runInContext(`App.currentPage`, context), 'molds');
+    assert.equal(context.__routeLoadCount, 1, 'route data must start before employee refresh resolves');
+    context.__resolveEmployeeContext();
     await pendingShowApp;
     assert.equal(context.__settingsResolved, false, 'showApp should not await remote settings before route shell is active');
 }
@@ -622,6 +691,9 @@ async function main() {
     await smokeAuthBackup(context);
     await smokeLegacyLoginUpgrade(context);
     await smokeDisabledRestore(context);
+    await smokeRememberedLoginUsesServerExpiry(context);
+    await smokeTransientRestoreKeepsRememberedLogin(context);
+    await smokeExplicitAuthFailureClearsWithoutLogoutRequest(context);
     await smokePermissionFallback(context);
     await smokeAutoUsernameDedup(context);
     await smokePasswordResetDisclosure(context);
