@@ -18,9 +18,9 @@
 ### Automated checks
 
 - `node tests/production-calendar-smoke.js`
-- `node tests/production-core-smoke.js`
+- `node tests/production-floor-core-smoke.js`
 - `node tests/order-flow-smoke.js`
-- `node tests/settings-smoke.js`
+- `node tests/settings-production-ui-smoke.js`
 - `node tests/version-smoke.js`
 
 ### Required scenarios
@@ -36,10 +36,10 @@
 
 ### Release gates
 
-- All focused checks pass.
-- All four version anchors match and exceed the refreshed `origin/main` version.
-- Every changed runtime asset has a new cache-bust suffix.
-- The diff contains no schema migration, deletion, or destructive data operation.
+- [x] All focused checks pass.
+- [x] All four version anchors match and exceed the refreshed `origin/main` version.
+- [x] Every changed runtime asset has a new cache-bust suffix.
+- [x] The diff contains no schema migration, deletion, or destructive data operation.
 
 ## Source
 - Task: провести сквозной аудит order flows, colors, China/warehouse/ready goods и `corporate-gift`, исправить дефекты и оформить backlog улучшений.

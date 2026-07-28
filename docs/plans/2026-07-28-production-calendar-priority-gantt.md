@@ -2,7 +2,7 @@
 
 **Spec:** `docs/specs/2026-07-28-production-calendar-priority-gantt.md`
 **Created:** 2026-07-28
-**Status:** In progress
+**Status:** Complete
 
 ## Milestone 1 — Lock the product contract
 
@@ -15,31 +15,31 @@
 
 ## Milestone 2 — Make scheduling capacity deterministic
 
-- [ ] Default production capacity to four people working nine hours per day.
-- [ ] Cap both total production slots and per-order allocation at four people.
-- [ ] Stop hidden legacy `active_workers_count` overrides from changing the calendar.
-- [ ] Add regression coverage for a four-person order blocking the following priority item.
+- [x] Default production capacity to four people working nine hours per day.
+- [x] Cap both total production slots and per-order allocation at four people.
+- [x] Stop hidden legacy `active_workers_count` overrides from changing the calendar.
+- [x] Add regression coverage for a four-person order blocking the following priority item.
 
 **Gate:** A 36-person-hour order assigned to four workers occupies one working day, and the next order starts on the next available working day.
 
 ## Milestone 3 — Replace the split interface with one priority Gantt
 
-- [ ] Remove the separate launch queue, current-workshop summary, statistic cards, and capacity histogram.
-- [ ] Render draggable order rows directly beside their Gantt bars.
-- [ ] Add an inline 1–4 worker control and an explicit order-open button to every row.
-- [ ] Keep blocked and review orders visible in a compact unscheduled section.
-- [ ] Remove editable team-size and shift-duration controls from Settings while retaining production holidays.
-- [ ] Add responsive styling and keep row/timeline alignment stable.
+- [x] Remove the separate launch queue, current-workshop summary, statistic cards, and capacity histogram.
+- [x] Render draggable order rows directly beside their Gantt bars.
+- [x] Add an inline 1–4 worker control and an explicit order-open button to every row.
+- [x] Keep blocked and review orders visible in a compact unscheduled section.
+- [x] Remove editable team-size and shift-duration controls from Settings while retaining production holidays.
+- [x] Add responsive styling and keep row/timeline alignment stable.
 
 **Gate:** Reordering a row and changing its worker count saves the production plan and immediately recalculates all following dates.
 
 ## Milestone 4 — Validate and ship safely
 
-- [ ] Update the production calendar smoke tests for the new contract.
-- [ ] Run focused production, order-flow, settings, and version smoke tests.
-- [ ] Fetch `origin/main`, choose a collision-free version, and update all four version anchors.
-- [ ] Update cache-bust suffixes for every changed runtime asset.
-- [ ] Review the final diff for accidental data/schema changes.
+- [x] Update the production calendar smoke tests for the new contract.
+- [x] Run focused production, order-flow, settings, and version smoke tests.
+- [x] Fetch `origin/main`, choose a collision-free version, and update all four version anchors.
+- [x] Update cache-bust suffixes for every changed runtime asset.
+- [x] Review the final diff for accidental data/schema changes.
 
 **Gate:** All focused tests pass, version anchors agree, and no destructive migration or data deletion is included.
 

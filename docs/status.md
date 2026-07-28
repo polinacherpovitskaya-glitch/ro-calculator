@@ -1,9 +1,9 @@
 # Status
 
 ## Snapshot
-- Current phase: M2 — deterministic four-person scheduling
+- Current phase: M4 complete — ready for review
 - Plan file: `docs/plans/2026-07-28-production-calendar-priority-gantt.md`
-- Status: yellow — the interaction contract is documented; implementation and regression checks are in progress
+- Status: green — implementation, focused regression tests, visual browser verification, and version bump are complete
 - Last updated: 2026-07-28
 
 ## Production calendar priority Gantt — 2026-07-28
@@ -13,17 +13,27 @@
 - Documented the unified draggable priority Gantt in `docs/specs/2026-07-28-production-calendar-priority-gantt.md`.
 - Verified that the existing worker-slot scheduler already supports parallel allocation and priority propagation.
 - Confirmed that “36 hours per day” is aggregate person-hours (`4 × 9`), not a useful standalone calendar view.
+- Fixed the calendar at four production workers with a nine-hour shift and a 1–4 worker target per order.
+- Replaced the split queue/calendar UI with draggable rows aligned to the Gantt timeline.
+- Removed the workshop toolbar, statistic cards, capacity histogram, and editable calendar-capacity settings.
+- Kept blocked/review orders in compact accessible sections and retained production holidays.
+- Fixed the worker-target rendering bug and aggregate parallel allocations into one phase bar per date.
+- Verified the desktop layout in a headed local Playwright session with representative four-order data.
+- Prepared release `v428` after confirming `origin/main` remained at `v427`.
 
-### In progress
+### Validation
 
-- Fixing the production boundary at four people with a nine-hour default shift.
-- Replacing the separate queue and capacity widgets with controls embedded in the Gantt rows.
-
-### Next
-
-- Update focused smoke coverage.
-- Bump the release version and cache keys after refreshing `origin/main`.
-- Run regression tests and review the final diff.
+- JS syntax check for all `js/*.js`.
+- `node tests/production-calendar-smoke.js`
+- `node tests/partial-delivery-smoke.js`
+- `node tests/calendar-availability-load-smoke.js`
+- `node tests/production-floor-core-smoke.js`
+- `node tests/production-floor-publish-smoke.js`
+- `node tests/production-load-bar-render-smoke.js`
+- `node tests/production-load-tooltip-smoke.js`
+- `node tests/settings-production-ui-smoke.js`
+- `node tests/order-flow-smoke.js`
+- `node tests/version-smoke.js`
 
 ### Decisions and assumptions
 
@@ -31,6 +41,7 @@
 - Production holidays remain editable because timekeeping also consumes them.
 - No database tables, saved orders, or production-plan fields are deleted.
 - The legacy active-worker override may remain stored for compatibility but no longer controls this calendar.
+- Local browser console errors came from unavailable production auth/API calls in the isolated fixture session; the calendar itself rendered successfully.
 
 ### Blockers
 
