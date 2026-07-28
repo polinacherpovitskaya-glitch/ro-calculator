@@ -1,5 +1,46 @@
 # Test Plan
 
+## Active track — Production calendar priority Gantt
+
+**Source:** `docs/specs/2026-07-28-production-calendar-priority-gantt.md`
+**Plan:** `docs/plans/2026-07-28-production-calendar-priority-gantt.md`
+
+### In scope
+
+- Four-person production capacity and nine-hour default shift.
+- Priority propagation when one order uses one to four workers.
+- Unified draggable order rows and Gantt timeline.
+- Persisted order priority and `parallel_workers`.
+- Explicit order navigation.
+- Compact blocked/review sections.
+- Removal of the separate queue, capacity chart, summary widgets, and calendar capacity settings.
+
+### Automated checks
+
+- `node tests/production-calendar-smoke.js`
+- `node tests/production-floor-core-smoke.js`
+- `node tests/order-flow-smoke.js`
+- `node tests/settings-production-ui-smoke.js`
+- `node tests/version-smoke.js`
+
+### Required scenarios
+
+1. A 36-hour order with four workers fills one nine-hour working day.
+2. A lower-priority order cannot consume a worker while all four slots are assigned above it.
+3. One-worker orders can run in parallel up to the four-person total.
+4. Dragging a row changes `order_ids`, saves the plan, and recalculates dates.
+5. Worker controls never save a value below 1 or above 4.
+6. Weekends and production holidays remain excluded.
+7. Blocked and review orders remain accessible but do not consume scheduled capacity.
+8. The page contains no “36 ч в день”, separate launch queue, or editable capacity fields.
+
+### Release gates
+
+- [x] All focused checks pass.
+- [x] All four version anchors match and exceed the refreshed `origin/main` version.
+- [x] Every changed runtime asset has a new cache-bust suffix.
+- [x] The diff contains no schema migration, deletion, or destructive data operation.
+
 ## Source
 - Task: провести сквозной аудит order flows, colors, China/warehouse/ready goods и `corporate-gift`, исправить дефекты и оформить backlog улучшений.
 - Plan file: `/Users/krollipolli/Documents/Github/RO calculator/docs/plans.md`

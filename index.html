@@ -4,10 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Recycle Object — Калькулятор заказов</title>
-  <link rel="stylesheet" href="css/style.css?v=410">
+  <link rel="stylesheet" href="css/style.css?v=428">
     <script>
         (function () {
-        const CURRENT_HTML_VERSION = 'v427';
+        const CURRENT_HTML_VERSION = 'v428';
             const ATTEMPT_KEY = 'ro_calc_force_update_attempts';
 
             function parseVersion(version) {
@@ -187,7 +187,7 @@
     <aside class="sidebar">
         <div class="sidebar-brand">
             <h2>Recycle Object</h2>
-            <span>Калькулятор <span id="app-version">v427</span></span>
+            <span>Калькулятор <span id="app-version">v428</span></span>
         </div>
         <nav class="sidebar-nav">
             <div class="sidebar-group-label">Каждый день</div>
@@ -1771,7 +1771,7 @@
             <div class="page-header">
                 <div>
                     <h1>&#128197; Производственный календарь</h1>
-                    <div class="text-muted gantt-header-note">Один канонический экран для очереди, загрузки цеха и рисков по дедлайнам.</div>
+                    <div class="text-muted gantt-header-note">Расставьте заказы по приоритету и укажите, сколько из четырёх сотрудников работает над каждым.</div>
                 </div>
                 <div class="flex gap-8">
                     <button class="btn btn-sm btn-outline gantt-zoom-btn active" data-zoom="week" onclick="Gantt.setZoom('week')">Неделя</button>
@@ -1779,22 +1779,10 @@
                 </div>
             </div>
 
-            <div id="gantt-toolbar"></div>
-
-            <div class="gantt-intro-card">
-                <div>
-                    <strong>Очередь сверху</strong>
-                    <span>Начальник производства видит порядок запуска, сроки, число сотрудников на заказ и может ускорять приоритетные проекты прямо из очереди.</span>
-                </div>
-                <div>
-                    <strong>Календарь снизу</strong>
-                    <span>Неделя и месяц показывают, как литьё, сборка и упаковка влезают в доступные рабочие часы с автоматическим пропуском выходных и праздников.</span>
-                </div>
+            <div class="gantt-instruction">
+                <span class="gantt-instruction-handle" aria-hidden="true">&#8942;&#8942;</span>
+                <span>Тяните заказ вверх или вниз. Больше людей на верхнем заказе сокращает его срок и сдвигает остальные.</span>
             </div>
-
-            <div class="stats-grid" id="gantt-stats"></div>
-            <div id="gantt-queue"></div>
-            <div id="gantt-capacity-chart"></div>
 
             <div class="gantt-legend">
                 <span class="gantt-legend-item"><span class="gantt-legend-dot" style="background:#f59e0b"></span> Литьё</span>
@@ -2863,22 +2851,6 @@
                     <div class="form-hint" id="set-seasonal-hint" style="margin-top: 4px;"></div>
                     <div class="form-row">
                         <div class="form-group">
-                            <label>Сотрудников для календаря</label>
-                            <input type="number" step="0.5" id="set-planning_workers_count" data-key="planning_workers_count" oninput="Settings.updateProductionHints()">
-                            <span class="form-hint" id="set-planning-workers-hint">консервативная мощность цеха, не влияет на цены</span>
-                        </div>
-                        <div class="form-group">
-                            <label>Часов в смене для календаря</label>
-                            <input type="number" step="0.5" id="set-planning_hours_per_day" data-key="planning_hours_per_day" oninput="Settings.updateProductionHints()">
-                            <span class="form-hint" id="set-planning-hours-hint">8 ч/день для планирования</span>
-                        </div>
-                        <div class="form-group">
-                            <label>Что это дает</label>
-                            <div class="form-hint" id="set-planning-capacity-summary" style="min-height:40px;display:flex;align-items:center;">Календарь считает реальную мощность отдельно от ценообразования.</div>
-                        </div>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group">
                             <label>Коэфф. потерь</label>
                             <input type="number" step="0.05" id="set-waste_factor" data-key="waste_factor" oninput="Settings.updateProductionHints()">
                             <span class="form-hint" id="set-waste-factor-hint">1.1 = +10% к времени/себестоимости</span>
@@ -3637,8 +3609,8 @@
 <script src="js/bug-report-core.js?v=2"></script>
 <script src="js/supabase.js?v=422"></script>
 <script src="js/task-events.js?v=1"></script>
-<script src="js/calculator.js?v=412"></script>
-<script src="js/app.js?v=427"></script>
+<script src="js/calculator.js?v=428"></script>
+<script src="js/app.js?v=428"></script>
 <script src="js/tpa.js?v=4"></script>
 <script src="js/order-detail.js?v=412"></script>
 <script src="js/orders.js?v=426"></script>
@@ -3652,7 +3624,7 @@
 <script src="js/tasks.js?v=58"></script>
 <script src="js/bugs.js?v=7"></script>
 <script src="js/production-core.js?v=412"></script>
-<script src="js/gantt.js?v=412"></script>
+<script src="js/gantt.js?v=428"></script>
 <script src="js/fintablo.js?v=2"></script>
   <script src="js/finance.js?v=27"></script>
 <script src="js/indirect_costs.js?v=9"></script>
@@ -3664,7 +3636,7 @@
 <script src="js/marketplaces.js?v=280"></script>
 <script src="js/warehouse.js?v=196"></script>
 <script src="js/monitoring.js?v=2"></script>
-<script src="js/settings.js?v=404"></script>
+<script src="js/settings.js?v=428"></script>
 <script src="js/pendant.js?v=17"></script>
 </body>
 </html>

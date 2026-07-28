@@ -2096,13 +2096,12 @@ function isProductionNonWorkingDate(date, holidaySet) {
 }
 
 function getProductionPlanningCapacity(settings) {
-    const pricingWorkers = Number(settings && settings.workers_count);
     const explicitPlanningWorkers = Number(settings && settings.planning_workers_count);
     const explicitPlanningHoursPerDay = Number(settings && settings.planning_hours_per_day);
     const workersCount = explicitPlanningWorkers > 0
-        ? explicitPlanningWorkers
-        : (pricingWorkers > 0 ? Math.min(pricingWorkers, 2) : 2);
-    const hoursPerDay = explicitPlanningHoursPerDay > 0 ? explicitPlanningHoursPerDay : 8;
+        ? Math.min(explicitPlanningWorkers, 4)
+        : 4;
+    const hoursPerDay = explicitPlanningHoursPerDay > 0 ? explicitPlanningHoursPerDay : 9;
     return {
         workersCount: round2(workersCount),
         hoursPerDay: round2(hoursPerDay),
