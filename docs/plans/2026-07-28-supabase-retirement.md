@@ -22,7 +22,7 @@
 | ID | Title | Depends on | Status |
 | --- | --- | --- | --- |
 | M1 | Baseline и карта зависимостей | — | [x] |
-| M2 | Shadow PostgreSQL + API на Yandex | M1 | [ ] |
+| M2 | Shadow PostgreSQL + API на Yandex | M1 | [x] |
 | M3 | Rehearsal и parity всех данных | M2 | [ ] |
 | M4 | Timebot без Supabase | M3 | [ ] |
 | M5 | Frontend migration waves | M3 | [ ] |
@@ -65,7 +65,7 @@ node tests/version-smoke.js
 
 - Любой неучтённый runtime consumer добавляется в карту до следующего milestone.
 
-## M2. Shadow PostgreSQL + API на Yandex `[ ]`
+## M2. Shadow PostgreSQL + API на Yandex `[x]`
 
 ### Goal
 
@@ -75,11 +75,11 @@ node tests/version-smoke.js
 ### Tasks
 
 - [x] Добавить Yandex-specific compose без Selectel S3 defaults.
-- [ ] Запустить отдельный PostgreSQL volume и `ops-api`.
-- [ ] Применить все migrations.
-- [ ] Подключить `api.recycleobject.ru` через существующий Caddy.
-- [ ] Добавить health monitor и backup.
-- [ ] Зафиксировать RAM/CPU после запуска.
+- [x] Запустить отдельный PostgreSQL volume и `ops-api`.
+- [x] Применить все migrations.
+- [x] Подключить `api.recycleobject.ru` через существующий Caddy.
+- [x] Добавить health monitor и backup.
+- [x] Зафиксировать RAM/CPU после запуска.
 
 ### Definition of Done
 
@@ -113,7 +113,7 @@ curl -fsS https://api.recycleobject.ru/api/health
 
 ### Tasks
 
-- [ ] Запустить десять существующих refresh scripts.
+- [x] Запустить десять существующих refresh scripts.
 - [ ] Добавить migrations/routes для непокрытых finance/site tables.
 - [ ] Сравнить counts, ID, timestamps и JSON payloads.
 - [ ] Перенести Storage в Yandex Object Storage.

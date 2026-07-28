@@ -2,7 +2,7 @@
 
 ## Snapshot
 
-- Current phase: M2 — Shadow PostgreSQL + API на Yandex.
+- Current phase: M3 — Rehearsal и parity всех данных.
 - Plan file: `docs/plans/2026-07-28-supabase-retirement.md`.
 - Status: yellow.
 - Last updated: 2026-07-28.
@@ -20,14 +20,31 @@
 - Подтверждено существование независимых `ops/api`, migrations и refresh scripts.
 - Selectel исключён из целевой архитектуры.
 - Vercel оставлен только как Telegram-relay.
+- Отдельные PostgreSQL 16 и Express API работают на Yandex VM.
+- `https://api.recycleobject.ru/api/health` опубликован через Caddy с HTTPS.
+- Caddy сохраняет прежний маршрут `db.recycleobject.ru` и автоматически
+  откатывается при неуспешной проверке.
+- Shadow backup создаётся в custom format, проверяется через `pg_restore
+  --list` и хранится с семидневной ротацией.
+- Shadow stack пережил контрольный restart.
+- Новый stack использует около 57 МБ RAM: PostgreSQL 36,9 МБ и API 20,0 МБ.
+- Timebot monitor проверяет replacement API/PostgreSQL и отправил тестовое
+  Telegram-уведомление.
+- Илья Теряев (`@ILAYTONKO`) и Влад Галкин (`@tigreslav`) активны; их записи
+  времени за 27 июля присутствуют в production DB.
+- Десять refresh scripts скопировали production snapshot в shadow PostgreSQL.
+- Первый count parity: 39 из 39 покрытых наборов совпали, включая 364
+  `time_entries`, 309 активных заказов, 838 `order_items` и склад.
 
 ## In Progress
 
-- Yandex-specific shadow deployment для `ops-api` и PostgreSQL.
+- Gap-анализ и migrations для finance/site-таблиц, которых нет в текущих 39
+  parity checks.
 
 ## Next
 
-- M2: поднять shadow stack без production traffic и применить migrations.
+- M3: запустить refresh scripts, получить первый parity report и закрыть
+  непокрытые таблицы.
 
 ## Decisions Made
 
@@ -67,12 +84,17 @@ node tests/version-smoke.js
 | 2026-07-28 | M1 | `ro-db` | `free`, `df`, `docker ps`, `docker stats` | 2,1 ГБ RAM и 28 ГБ disk доступны | M2 |
 | 2026-07-28 | M1 | PostgreSQL | `pg_database_size`, `pg_stat_user_tables` | 124 МБ, table baseline captured | M2 |
 | 2026-07-28 | M1 | repo data layer | `node scripts/audit-data-paths.mjs` | 133 functions, 26 tables | M2 |
+| 2026-07-28 | M2 | Yandex shadow | Actions run `30364415037` | PostgreSQL/API deploy green | Caddy |
+| 2026-07-28 | M2 | DNS/Caddy | Actions run `30365536034` | Public HTTPS health green; old DB route green | M3 |
+| 2026-07-28 | M2 | backup/restart | `pg_restore --list`, container restart | Verified backup; API recovered with DB healthy | M3 |
+| 2026-07-28 | M2 | timebot monitor | Actions run `30365779852` | Bot, relay, DB, replacement API and test alert green | M3 |
+| 2026-07-28 | M3 | covered data rehearsal | ten refresh scripts + `compare-datasets.mjs` | 39/39 covered datasets count-match | gap analysis |
 
 ## Smoke / Demo Checklist
 
 - [x] Current calculator is healthy before migration.
 - [x] Current timebot health is green before migration.
-- [ ] Shadow API health is green.
+- [x] Shadow API health is green.
 - [ ] Shadow DB parity is green.
 - [ ] Timebot writes without Supabase.
 - [ ] Both calculator domains work without Supabase.

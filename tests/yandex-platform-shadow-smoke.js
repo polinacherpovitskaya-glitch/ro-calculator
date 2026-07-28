@@ -27,6 +27,10 @@ const caddyDeploy = fs.readFileSync(
   path.join(root, 'ops/infra/scripts/deploy-yandex-caddy.sh'),
   'utf8'
 );
+const rehearsal = fs.readFileSync(
+  path.join(root, 'ops/infra/scripts/rehearse-yandex-platform.sh'),
+  'utf8'
+);
 
 assert.match(compose, /name: ro-platform-shadow/);
 assert.match(compose, /image: postgres:16-alpine/);
@@ -60,6 +64,15 @@ assert.match(caddyDeploy, /db_status[^]*\^\(200\|401\)\$/);
 assert.match(caddyDeploy, /--resolve db\.recycleobject\.ru:443:127\.0\.0\.1/);
 assert.match(caddyDeploy, /--resolve api\.recycleobject\.ru:443:127\.0\.0\.1/);
 
+assert.match(rehearsal, /refresh-staging-snapshot\.mjs/);
+assert.match(rehearsal, /compare-datasets\.mjs/);
+assert.match(rehearsal, /SUPABASE_URL=https:\/\/db\.recycleobject\.ru/);
+assert.match(rehearsal, /ro-platform-shadow-postgres:5432/);
+assert.match(rehearsal, /grep -q 'MISMATCH'/);
+assert.match(rehearsal, /pg_dump[^]*-Fc/);
+assert.match(rehearsal, /pg_restore --list/);
+assert.doesNotMatch(rehearsal, /Selectel|OPS_HOST|ops-staging/i);
+
 assert.match(workflow, /name: Yandex platform shadow/);
 assert.match(workflow, /secrets\.YANDEX_VM_SSH_PRIVATE_KEY/);
 assert.match(workflow, /secrets\.YANDEX_VM_HOST/);
@@ -70,6 +83,7 @@ assert.match(workflow, /docker inspect[^]*supabase-db/);
 assert.match(workflow, /docker inspect[^]*ro-timebot/);
 assert.match(workflow, /deploy-yandex-caddy\.sh/);
 assert.match(workflow, /https:\/\/api\.recycleobject\.ru\/api\/health/);
+assert.match(workflow, /rehearse-yandex-platform\.sh/);
 assert.doesNotMatch(workflow, /OPS_HOST|OPS_SSH_PRIVATE_KEY|Selectel/);
 
 console.log('Yandex platform shadow contract checks passed');

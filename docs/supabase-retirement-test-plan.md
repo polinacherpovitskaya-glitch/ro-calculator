@@ -76,8 +76,8 @@
 
 - [ ] `node tests/version-smoke.js`
 - [ ] `node scripts/audit-data-paths.mjs`
-- [ ] `node tests/yandex-platform-shadow-smoke.js`
-- [ ] `cd ops/api && npm test`
+- [x] `node tests/yandex-platform-shadow-smoke.js`
+- [x] `cd ops/api && npm test`
 - [ ] `cd ops/bot && npm test`
 - [ ] `node tests/order-flow-smoke.js`
 - [ ] `node tests/warehouse-migration-smoke.js`
@@ -87,6 +87,9 @@
 - [ ] `node tests/yandex-mirror-smoke.mjs`
 - [ ] New API write-back smoke
 - [ ] Backup restore drill
+- [x] Shadow backup format/list verification
+- [x] Shadow PostgreSQL/API restart recovery
+- [x] Timebot/relay/DB/replacement API monitor and test alert
 
 ## Release / Demo Readiness
 

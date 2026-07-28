@@ -11,6 +11,7 @@ on:
       - 'ops/infra/docker-compose.yandex-shadow.yml'
       - 'ops/infra/scripts/deploy-yandex-shadow.sh'
       - 'ops/infra/scripts/deploy-yandex-caddy.sh'
+      - 'ops/infra/scripts/rehearse-yandex-platform.sh'
       - 'ops/infra/yandex-caddy/**'
       - 'tests/yandex-platform-shadow-smoke.js'
       - '.github/workflows/yandex-platform-shadow.yml'
@@ -145,3 +146,12 @@ jobs:
           curl --fail --silent --show-error --max-time 25 \
             https://api.recycleobject.ru/api/health \
             | grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"'
+
+      - name: Rehearse production snapshot and parity
+        env:
+          YANDEX_VM_HOST: ${{ secrets.YANDEX_VM_HOST }}
+          YANDEX_VM_USER: ${{ secrets.YANDEX_VM_USER }}
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/yandex_vm" "$YANDEX_VM_USER@$YANDEX_VM_HOST" \
+            "chmod +x /home/robot/platform/infra/scripts/rehearse-yandex-platform.sh && /home/robot/platform/infra/scripts/rehearse-yandex-platform.sh"
