@@ -24,10 +24,10 @@
 | M1 | Baseline и карта зависимостей | — | [x] |
 | M2 | Shadow PostgreSQL + API на Yandex | M1 | [x] |
 | M3 | Rehearsal и parity всех данных | M2 | [x] |
-| M4 | Timebot без Supabase | M3 | [ ] |
-| M5 | Frontend migration waves | M3 | [ ] |
-| M6 | Scripts, CI и Storage | M5 | [ ] |
-| M7 | Production cutover | M4, M5, M6 | [ ] |
+| M4 | Timebot без Supabase | M3 | [x] |
+| M5 | Frontend migration waves | M3 | [x] |
+| M6 | Scripts, CI и Storage | M5 | [x] |
+| M7 | Production cutover | M4, M5, M6 | [x] |
 | M8 | Наблюдение и удаление Supabase | M7 | [ ] |
 
 ## M1. Baseline и карта зависимостей `[x]`
@@ -142,7 +142,7 @@ node scripts/audit-data-paths.mjs
 
 - Любое расхождение останавливает migration wave до исправления mapper/test.
 
-## M4. Timebot без Supabase `[ ]`
+## M4. Timebot без Supabase `[x]`
 
 ### Goal
 
@@ -156,7 +156,7 @@ node scripts/audit-data-paths.mjs
 - [x] Сохранить persistent state и Telegram bindings.
 - [x] Обновить health workflow.
 - [x] Выполнить тестовую запись и cleanup.
-- [ ] Переключить production-контейнер во время M7.
+- [x] Переключить production-контейнер во время M7.
 
 ### Definition of Done
 
@@ -181,7 +181,7 @@ node tests/timebot-health-monitor-smoke.js
 - При любой ошибке записи timebot возвращается на текущий Supabase URL до
   исправления.
 
-## M5. Frontend migration waves `[ ]`
+## M5. Frontend migration waves `[x]`
 
 ### Goal
 
@@ -195,7 +195,7 @@ node tests/timebot-health-monitor-smoke.js
 - [x] Wave C: molds, blanks, colors, marketplaces.
 - [x] Wave D: finance, work management, bugs.
 - [x] Удалить Supabase SDK после последней волны.
-- [ ] Опубликовать frontend и выполнить live smokes во время M7.
+- [x] Опубликовать frontend и выполнить live smokes во время M7.
 
 ### Definition of Done
 
@@ -221,7 +221,7 @@ node tests/tasks-smoke.js
 
 - Волны не объединяются; упавшая волна чинится или откатывается отдельно.
 
-## M6. Scripts, CI и Storage `[ ]`
+## M6. Scripts, CI и Storage `[x]`
 
 ### Goal
 
@@ -256,7 +256,7 @@ node tests/yandex-writeback-smoke.mjs
 
 - Cutover запрещён, пока старый access log показывает неизвестный consumer.
 
-## M7. Production cutover `[ ]`
+## M7. Production cutover `[x]`
 
 ### Goal
 
@@ -264,12 +264,12 @@ node tests/yandex-writeback-smoke.mjs
 
 ### Tasks
 
-- [ ] Сделать свежий backup.
-- [ ] Ввести короткий write freeze.
-- [ ] Применить финальную дельту и parity.
-- [ ] Переключить frontend, bot и CI.
-- [ ] Выполнить browser/live/write-back smokes.
-- [ ] Снять freeze.
+- [x] Сделать свежий backup.
+- [x] Ввести короткий write freeze.
+- [x] Применить финальную дельту и parity.
+- [x] Переключить frontend, bot и CI.
+- [x] Выполнить browser/live/write-back smokes.
+- [x] Снять freeze.
 
 ### Definition of Done
 

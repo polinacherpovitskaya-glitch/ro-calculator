@@ -2,9 +2,9 @@
 
 ## Snapshot
 
-- Current phase: M7 — подготовка production cutover.
+- Current phase: M8 — наблюдение после production cutover.
 - Plan file: `docs/plans/2026-07-28-supabase-retirement.md`.
-- Status: green for cutover; production switch is still pending.
+- Status: green; v422 and API-backed timebot are live.
 - Last updated: 2026-07-28.
 
 ## Done
@@ -52,17 +52,35 @@
   `30382619258`.
 - Последний dump размером 76 344 012 байт восстановлен в отдельную БД:
   66 public tables и ключевые counts полностью совпали; временная БД удалена.
+- Rollback release закреплён Git-тегом
+  `pre-yandex-cutover-v421-20260728`.
+- Cutover bundle хранится на VM в
+  `/home/robot/cutover-backups/20260728T172717Z`, локально в
+  `/Users/krollipolli/Documents/RO backups/20260728T172717Z` и отдельной
+  проверенной копией в приватном Yandex backup bucket (run `30383083266`).
+- Bundle содержит source Supabase dump, target Yandex dump, архив 420 файлов
+  и SHA-256 manifest; финальные source/target dumps сняты после остановки
+  старого poller.
+- Старый bot image сохранён как
+  `ro-timebot:pre-yandex-cutover-v421-20260728`.
+- Финальная parity после write freeze совпала, включая 366/366 записей часов.
+- API-backed timebot deploy `30383667643` и повторный полный health
+  `30383872866` зелёные.
+- Оба Yandex static buckets опубликовали v422 в run `30383670546`.
+- После публикации зелёные: write-back `30384324698`, calc2 browser smoke
+  `30384552008` и calc browser smoke `30384892744`.
 
 ## In Progress
 
-- Финальный backup/write freeze и production-переключение frontend/timebot.
+- Окно наблюдения. Старый Supabase и его Storage остаются нетронутыми.
 
 ## Next
 
-- Остановить старый poller на короткое окно.
-- Снять финальную дельту и повторить parity.
-- Опубликовать frontend v422 и запустить API-backed timebot.
-- Выполнить live/write-back/Telegram smokes и начать окно наблюдения.
+- Контролировать health, записи часов, backups и отсутствие обращений к
+  Supabase.
+- Не удалять старые контейнеры, volumes, Storage и rollback image.
+- После стабильного окна запросить отдельное подтверждение на физическое
+  удаление Supabase.
 
 ## Decisions Made
 
@@ -113,6 +131,10 @@ node tests/version-smoke.js
 | 2026-07-28 | M3 | final rehearsal | Actions `30382180892` | API/bot/Storage/parity green; token restored after refresh | restore drill |
 | 2026-07-28 | M3 | restore drill | temporary DB `ro_restore_drill_20260728` | 66 tables and key counts match; temp DB removed | M7 |
 | 2026-07-28 | M4/M6 | public write-back | Actions `30382619258` | setting + time entry write/read/delete and cleanup green | M7 |
+| 2026-07-28 | M7 | rollback copies | VM + local + Actions `30383083266` | source/target/Storage SHA-256 verified; v421 Git tag saved | freeze |
+| 2026-07-28 | M7 | final parity | source + Yandex PostgreSQL | 366/366 hours; all datasets and URL rewrite green | switch |
+| 2026-07-28 | M7 | timebot | Actions `30383667643`, `30383872866` | API poller, Telegram relay, DB and heartbeat green | frontend |
+| 2026-07-28 | M7 | v422 production | Actions `30383670546`, `30384324698`, `30384552008`, `30384892744` | both domains, write-back and browser smokes green | M8 |
 
 ## Smoke / Demo Checklist
 
@@ -120,6 +142,6 @@ node tests/version-smoke.js
 - [x] Current timebot health is green before migration.
 - [x] Shadow API health is green.
 - [x] Shadow DB parity is green.
-- [ ] Timebot writes without Supabase.
-- [ ] Both calculator domains work without Supabase.
+- [x] Timebot writes without Supabase.
+- [x] Both calculator domains work without Supabase.
 - [ ] Production survives VM reboot without Supabase containers.

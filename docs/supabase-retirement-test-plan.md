@@ -83,8 +83,8 @@
 - [x] `node tests/warehouse-migration-smoke.js`
 - [x] `node tests/finance-smoke.js`
 - [x] `node tests/tasks-smoke.js`
-- [ ] `node tests/live-site-smoke.mjs`
-- [ ] `node tests/yandex-mirror-smoke.mjs`
+- [x] `node tests/live-site-smoke.mjs`
+- [x] `node tests/yandex-mirror-smoke.mjs`
 - [x] New API write-back smoke
 - [x] Backup restore drill
 - [x] Shadow backup format/list verification
@@ -93,11 +93,11 @@
 
 ## Release / Demo Readiness
 
-- [ ] Core scenarios work end to end through own API.
-- [ ] Primary regression checks are green.
-- [ ] Production rollback is copy-pasteable and rehearsed.
-- [ ] No blocker-level parity issue remains.
-- [ ] Health alert covers API, PostgreSQL, Telegram and write-back.
+- [x] Core scenarios work end to end through own API.
+- [x] Primary regression checks are green.
+- [x] Production rollback is copy-pasteable and rehearsed.
+- [x] No blocker-level parity issue remains.
+- [x] Health alert covers API, PostgreSQL, Telegram and write-back.
 - [ ] Supabase removal waits for the observation window.
 
 ## Command Matrix
