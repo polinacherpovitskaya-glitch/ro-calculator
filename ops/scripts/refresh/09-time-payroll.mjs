@@ -98,8 +98,9 @@ async function refreshTimeEntries() {
     const employee = employees.get(String(employeeId));
     await pool.query(
       `INSERT INTO time_entries
-         (id, employee_id, employee_name, date, hours, task_id, project_id, project_name, order_id, stage, note, is_overtime, source, extras, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+         (id, employee_id, employee_name, date, hours, task_id, project_id, project_name, order_id, stage,
+          note, is_overtime, source, extras, created_at, updated_at, task_description, notes)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
        ON CONFLICT (id) DO UPDATE SET
          employee_id = EXCLUDED.employee_id,
          employee_name = EXCLUDED.employee_name,
@@ -114,6 +115,8 @@ async function refreshTimeEntries() {
          is_overtime = EXCLUDED.is_overtime,
          source = EXCLUDED.source,
          extras = EXCLUDED.extras,
+         task_description = EXCLUDED.task_description,
+         notes = EXCLUDED.notes,
          updated_at = EXCLUDED.updated_at`,
       [
         row.id,
@@ -132,6 +135,8 @@ async function refreshTimeEntries() {
         jsonObject(row.extras, { legacy: row }),
         row.created_at || new Date().toISOString(),
         row.updated_at || row.created_at || new Date().toISOString(),
+        text(row.task_description, row.description, row.note, row.notes),
+        text(row.notes, row.note),
       ]
     );
   }

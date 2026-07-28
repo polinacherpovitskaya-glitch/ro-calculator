@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { platformQuery } from './platform-compat-client.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '..');
@@ -494,27 +495,60 @@ export function loadEngine() {
     };
 }
 
-function loadSupabaseConfig() {
-    const source = fs.readFileSync(path.join(repoRoot, 'js', 'supabase.js'), 'utf8');
-    const url = source.match(/const SUPABASE_URL = '([^']+)'/)?.[1];
-    const key = source.match(/const SUPABASE_ANON_KEY = '([^']+)'/)?.[1];
-    if (!url || !key) throw new Error('Не удалось прочитать публичную конфигурацию Supabase');
-    return { url, key };
+function queryFilter(column, expression) {
+    const raw = String(expression || '');
+    const inMatch = raw.match(/^in\.\((.*)\)$/);
+    if (inMatch) {
+        return {
+            op: 'in',
+            column,
+            value: inMatch[1].split(',').map(value => value.trim()).filter(Boolean),
+        };
+    }
+    const match = raw.match(/^(eq|neq|gt|gte|lt|lte|is)\.(.*)$/);
+    if (!match) throw new Error(`Неподдерживаемый фильтр ${column}=${raw}`);
+    return {
+        op: match[1],
+        column,
+        value: match[1] === 'is' && match[2] === 'null' ? null : match[2],
+    };
 }
 
-function createRestClient({ url, key }) {
-    const headers = { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' };
+function createRestClient() {
     return async function rest(table, { method = 'GET', query = {}, body = undefined } = {}) {
-        const endpoint = new URL(`/rest/v1/${table}`, url);
-        Object.entries(query).forEach(([name, value]) => endpoint.searchParams.set(name, value));
-        const response = await fetch(endpoint, {
-            method,
-            headers: { ...headers, Prefer: method === 'GET' ? 'return=representation' : 'return=representation' },
-            body: body === undefined ? undefined : JSON.stringify(body),
+        const filters = Object.entries(query)
+            .filter(([name]) => !['select', 'order', 'limit', 'offset'].includes(name))
+            .map(([column, expression]) => queryFilter(column, expression));
+        if (method === 'PATCH') {
+            const rows = await platformQuery(table, {
+                action: 'update',
+                values: body,
+                filters,
+                columns: '*',
+                returning: true,
+            });
+            return Array.isArray(rows) ? rows : (rows ? [rows] : []);
+        }
+        if (method !== 'GET') throw new Error(`Неподдерживаемый метод ${method} для ${table}`);
+
+        const orders = String(query.order || '')
+            .split(',')
+            .map(value => value.trim())
+            .filter(Boolean)
+            .map(value => {
+                const [column, direction] = value.split('.');
+                return { column, ascending: direction !== 'desc' };
+            });
+        const offset = Math.max(0, Number(query.offset) || 0);
+        const limit = Math.max(1, Number(query.limit) || 100000);
+        const rows = await platformQuery(table, {
+            action: 'select',
+            columns: query.select || '*',
+            filters,
+            orders,
+            range: { from: offset, to: offset + limit - 1 },
         });
-        const text = await response.text();
-        if (!response.ok) throw new Error(`${method} ${table}: ${response.status} ${text}`);
-        return text ? JSON.parse(text) : [];
+        return Array.isArray(rows) ? rows : (rows ? [rows] : []);
     };
 }
 
@@ -636,7 +670,7 @@ async function rollback(rest, backupPath, only = null) {
 async function main() {
     const args = parseArgs(process.argv.slice(2));
     if (args.help) return printHelp();
-    const rest = createRestClient(loadSupabaseConfig());
+    const rest = createRestClient();
     if (args.rollback) {
         const restored = await rollback(rest, args.rollback);
         console.log(JSON.stringify({ mode: 'rollback', ...restored }, null, 2));

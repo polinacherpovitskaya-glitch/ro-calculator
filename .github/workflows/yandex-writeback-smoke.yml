@@ -6,8 +6,8 @@ on:
     - cron: '23 * * * *'
   workflow_run:
     workflows:
-      - Yandex Supabase proxy deploy
       - Yandex static mirror sync
+      - Yandex timebot deploy
     types:
       - completed
 
@@ -35,10 +35,8 @@ jobs:
 
       - name: Run Yandex write-back smoke
         env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-          RO_YANDEX_PROXY_URL: https://d5dktgh0f2nqktmc326f.wnq2w1o5.apigw.yandexcloud.net
-          RO_WRITEBACK_ORIGIN: https://calc.recycleobject.ru
+          OPS_API_URL: https://api.recycleobject.ru
+          OPS_BOT_TOKEN: ${{ secrets.OPS_BOT_TOKEN }}
         run: node tests/yandex-writeback-smoke.mjs
 
       - name: Upload write-back artifacts
@@ -60,7 +58,7 @@ jobs:
           TELEGRAM_SMOKE_CHAT_ID: ${{ secrets.TELEGRAM_SMOKE_CHAT_ID }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           ALERT_WORKFLOW: Yandex write-back smoke
-          ALERT_SCOPE: calc/Yandex time_entries write path + rollback proxy
+          ALERT_SCOPE: Yandex API + PostgreSQL settings/time_entries write path
           ALERT_STATUS: ${{ job.status }}
           ALERT_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           ALERT_SOURCE_WORKFLOW: ${{ github.event.workflow_run.name }}
@@ -72,7 +70,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           ALERT_WORKFLOW: Yandex write-back smoke
-          ALERT_SCOPE: calc/Yandex time_entries write path + rollback proxy
+          ALERT_SCOPE: Yandex API + PostgreSQL settings/time_entries write path
           ALERT_STATUS: ${{ job.status }}
           ALERT_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           ALERT_SOURCE_WORKFLOW: ${{ github.event.workflow_run.name }}

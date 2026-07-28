@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v421';
+const APP_VERSION = 'v422';
 
 const App = {
     currentPage: 'orders',
@@ -28,6 +28,13 @@ const App = {
     _prefetchBaseDelayMs: 700,
     LEGACY_PUBLIC_HOST: 'polinacherpovitskaya-glitch.github.io',
     CANONICAL_APP_ORIGIN: 'https://calc.recycleobject.ru',
+
+    getPlatformApiUrl() {
+        if (typeof PLATFORM_API_URL !== 'undefined' && PLATFORM_API_URL) {
+            return String(PLATFORM_API_URL).replace(/\/+$/, '');
+        }
+        return 'https://api.recycleobject.ru';
+    },
 
     showLocalFileModeWarning() {
         const authScreen = document.getElementById('auth-screen');
@@ -487,50 +494,58 @@ const App = {
         const nowTs = Date.now().toString();
         let ok = false;
         let errorText = 'Неверный пароль';
-        let upgradedLegacyHash = false;
 
-        // Employee login only (no admin mode)
         const account = this.authAccounts.find(a => String(a.id) === String(selectedUserId) && a.is_active !== false);
         if (!account) {
             errorText = 'Пользователь не найден';
         } else {
-            if (this.verifyUserPassword(account, pwd)) {
-                const currentVersion = Number(this.AUTH_PASSWORD_HASH_VERSION) || 2;
-                if (this.getAccountPasswordHashVersion(account) < currentVersion) {
-                    account.password_hash = this.hashUserPassword(account.username || '', pwd, currentVersion);
-                    account.password_hash_version = currentVersion;
-                    account.password_rotated_at = new Date().toISOString();
-                    delete account.password_plain;
-                    upgradedLegacyHash = true;
-                }
-                localStorage.setItem('ro_calc_auth_method', 'user');
-                localStorage.setItem('ro_calc_auth_ts', nowTs);
-                localStorage.setItem('ro_calc_auth_user_id', String(account.id));
-                localStorage.setItem('ro_calc_last_user_id', String(account.id));
-                localStorage.setItem('ro_calc_last_user_name', account.employee_name || account.username || 'Сотрудник');
-                localStorage.removeItem('ro_calc_auth');
-                this.currentUser = this.buildCurrentUserFromAccount(account);
-                ok = true;
-                // Sync page permissions from auth account to localStorage
-                if (account.employee_id != null && account.pages && Array.isArray(account.pages)) {
-                    this.setEmployeePages(account.employee_id, account.pages);
-                }
-                account.last_login_at = new Date().toISOString();
-                await saveAuthAccounts(this.authAccounts);
-                appendAuthActivity({
-                    type: 'login',
-                    actor: this.currentUser.name,
-                    actor_user_id: this.currentUser.id,
-                    method: 'user',
+            try {
+                const response = await fetch(`${this.getPlatformApiUrl()}/api/auth/legacy-login`, {
+                    method: 'POST',
+                    credentials: 'include',
+                    cache: 'no-store',
+                    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                    body: JSON.stringify({ account_id: selectedUserId, password: pwd }),
                 });
-                if (upgradedLegacyHash) {
+                const payload = await response.json().catch(() => ({}));
+                if (response.ok && payload.account) {
+                    const authenticatedAccount = {
+                        ...account,
+                        ...payload.account,
+                        pages: this.normalizePageList(payload.account.pages || account.pages),
+                    };
+                    delete authenticatedAccount.password;
+                    delete authenticatedAccount.password_hash;
+                    delete authenticatedAccount.password_hash_version;
+                    delete authenticatedAccount.password_plain;
+                    delete authenticatedAccount.password_rotated_at;
+                    delete authenticatedAccount.salt;
+                    const accountIndex = this.authAccounts.findIndex(item => String(item.id) === String(selectedUserId));
+                    if (accountIndex >= 0) this.authAccounts[accountIndex] = authenticatedAccount;
+                    setLocal(LOCAL_KEYS.authAccounts, this.authAccounts);
+                    localStorage.setItem('ro_calc_auth_method', 'user');
+                    localStorage.setItem('ro_calc_auth_ts', nowTs);
+                    localStorage.setItem('ro_calc_auth_user_id', String(authenticatedAccount.id));
+                    localStorage.setItem('ro_calc_last_user_id', String(authenticatedAccount.id));
+                    localStorage.setItem('ro_calc_last_user_name', authenticatedAccount.employee_name || authenticatedAccount.username || 'Сотрудник');
+                    localStorage.removeItem('ro_calc_auth');
+                    this.currentUser = this.buildCurrentUserFromAccount(authenticatedAccount);
+                    ok = true;
+                    if (authenticatedAccount.employee_id != null && Array.isArray(authenticatedAccount.pages)) {
+                        this.setEmployeePages(authenticatedAccount.employee_id, authenticatedAccount.pages);
+                    }
                     appendAuthActivity({
-                        type: 'password_hash_upgrade',
+                        type: 'login',
                         actor: this.currentUser.name,
                         actor_user_id: this.currentUser.id,
                         method: 'user',
                     });
+                } else {
+                    errorText = payload?.error?.message || errorText;
                 }
+            } catch (error) {
+                console.error('Platform login failed:', error);
+                errorText = 'Сервис входа временно недоступен';
             }
         }
 
@@ -554,39 +569,52 @@ const App = {
     },
 
     async restoreAuthenticatedUser() {
-        const accounts = (Array.isArray(this.authAccounts) && this.authAccounts.length)
-            ? this.authAccounts
-            : await loadAuthAccounts();
-        this.authAccounts = (accounts || []).map(account => ({
-            ...account,
-            pages: this.normalizePageList(account.pages),
-        }));
         const userId = localStorage.getItem('ro_calc_auth_user_id');
-        const account = this.authAccounts.find(a => String(a.id) === String(userId) && a.is_active !== false);
-        if (account) {
-            this.currentUser = this.buildCurrentUserFromAccount(account);
-            // Refresh session timestamp on active usage (extends 30-day window)
-            localStorage.setItem('ro_calc_auth_ts', Date.now().toString());
-            // Sync page permissions from auth account to localStorage
-            if (account.employee_id != null && account.pages && Array.isArray(account.pages)) {
-                this.setEmployeePages(account.employee_id, account.pages);
+        try {
+            const response = await fetch(`${this.getPlatformApiUrl()}/api/auth/legacy-me`, {
+                credentials: 'include',
+                cache: 'no-store',
+                headers: { Accept: 'application/json' },
+            });
+            const payload = await response.json().catch(() => ({}));
+            if (response.ok && payload.account && String(payload.account.id) === String(userId)) {
+                const account = {
+                    ...payload.account,
+                    pages: this.normalizePageList(payload.account.pages),
+                };
+                const accountIndex = this.authAccounts.findIndex(item => String(item.id) === String(account.id));
+                if (accountIndex >= 0) this.authAccounts[accountIndex] = account;
+                else this.authAccounts.push(account);
+                setLocal(LOCAL_KEYS.authAccounts, this.authAccounts);
+                this.currentUser = this.buildCurrentUserFromAccount(account);
+                localStorage.setItem('ro_calc_auth_ts', Date.now().toString());
+                if (account.employee_id != null && Array.isArray(account.pages)) {
+                    this.setEmployeePages(account.employee_id, account.pages);
+                }
+                return;
             }
-            return;
+        } catch (error) {
+            console.warn('Platform session restore failed:', error);
         }
-        // Auth data must be available to restore a session safely.
         if (userId) {
-            console.warn('Auth restore failed: account not found or auth accounts unavailable');
+            console.warn('Auth restore failed: platform session is missing, expired, or disabled');
             const err = document.getElementById('auth-error');
             if (err) {
-                err.textContent = 'Не удалось подтвердить вход: логин отключен или данные обновились. Войдите заново.';
+                err.textContent = 'Сессия истекла или учётная запись отключена. Войдите заново.';
                 err.style.display = 'block';
             }
         }
-        // No valid account — force logout
         this.logout();
     },
 
     logout() {
+        if (typeof fetch === 'function') {
+            fetch(`${this.getPlatformApiUrl()}/api/auth/logout`, {
+                method: 'POST',
+                credentials: 'include',
+                keepalive: true,
+            }).catch(() => {});
+        }
         this.endSessionTracking('logout');
         this.trackAuthEvent('logout');
         localStorage.removeItem('ro_calc_auth');
@@ -709,24 +737,18 @@ const App = {
 
     async fetchAuthAccountsDirect(timeoutMs = 5000) {
         if (typeof fetch !== 'function') return [];
-        const host = String(window.location?.hostname || '').toLowerCase();
-        if (host === 'calc2.recycleobject.ru' || host.endsWith('.website.yandexcloud.net')) return [];
         const controller = typeof AbortController === 'function' ? new AbortController() : null;
         const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
         try {
-            const url = new URL('/api/bootstrap', window.location.origin);
-            url.searchParams.set('keys', 'authAccounts');
-            url.searchParams.set('authReload', String(Date.now()));
-            const response = await fetch(url.toString(), {
+            const response = await fetch(`${this.getPlatformApiUrl()}/api/auth/legacy-accounts`, {
+                credentials: 'include',
                 cache: 'no-store',
                 headers: { Accept: 'application/json' },
                 signal: controller ? controller.signal : undefined,
             });
             if (!response.ok) return [];
             const payload = await response.json();
-            const accounts = payload && payload.data && Array.isArray(payload.data.authAccounts)
-                ? payload.data.authAccounts
-                : [];
+            const accounts = Array.isArray(payload?.accounts) ? payload.accounts : [];
             if (accounts.length && typeof setLocal === 'function' && typeof LOCAL_KEYS !== 'undefined') {
                 setLocal(LOCAL_KEYS.authAccounts, accounts);
             }

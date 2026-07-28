@@ -20,7 +20,7 @@ export async function createSession(userId, meta = {}) {
 export async function loadSession(id) {
   const pool = getPool();
   const res = await pool.query(
-    `SELECT s.*, u.email, u.role, u.must_change_password, u.employee_id
+    `SELECT s.*, u.email, u.role, u.must_change_password, u.employee_id, u.legacy_account_id
        FROM auth_sessions s
        JOIN auth_users u ON u.id = s.user_id
       WHERE s.id = $1 AND s.revoked_at IS NULL AND s.expires_at > NOW()`,

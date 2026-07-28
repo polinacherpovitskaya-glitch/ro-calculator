@@ -4,7 +4,7 @@ const {
     shiftYmd,
     isWeekendYmd,
     normalizeWorkDate,
-} = require('../bot/timebot-date-utils');
+} = require('../ops/bot/timebot-date-utils');
 
 assert.equal(getLocalDate(3, new Date('2026-03-20T22:30:00Z')), '2026-03-21');
 assert.equal(shiftYmd('2026-03-23', -1), '2026-03-22');

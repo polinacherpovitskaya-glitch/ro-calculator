@@ -3,9 +3,8 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { platformUpsert } from './platform-compat-client.mjs';
 
-const SUPABASE_URL = process.env.SUPABASE_URL || 'https://db.recycleobject.ru';
-const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiAiSFMyNTYiLCAidHlwIjogIkpXVCJ9.eyJyb2xlIjogImFub24iLCAiaXNzIjogInN1cGFiYXNlIiwgImlhdCI6IDE3ODQyOTY2NTUsICJleHAiOiAyMDk5NjU2NjU1fQ.lOvkwgM1TWwYESuJtjkRDVcvSxv7VV6vsbr1-ZGkB4c';
 const TOCHKA_BASE_URL = 'https://enter.tochka.com/uapi/open-banking/v1.0';
 const SETTINGS_KEY = 'tochka_snapshot_json';
 const DEFAULT_CONFIG_PATH = path.join(os.homedir(), '.config', 'ro-calculator', 'tochka.env');
@@ -182,24 +181,11 @@ async function waitForReadyStatements(token, statementIds, attempts = 8, delayMs
 }
 
 async function saveSnapshot(snapshot) {
-    const response = await fetch(`${SUPABASE_URL}/rest/v1/settings?on_conflict=key`, {
-        method: 'POST',
-        headers: {
-            apikey: SUPABASE_ANON_KEY,
-            Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
-            'Content-Type': 'application/json',
-            Prefer: 'resolution=merge-duplicates,return=minimal',
-        },
-        body: JSON.stringify([{
-            key: SETTINGS_KEY,
-            value: JSON.stringify(snapshot),
-            updated_at: new Date().toISOString(),
-        }]),
-    });
-    if (!response.ok) {
-        const body = await response.text();
-        throw new Error(`Supabase save -> ${response.status}: ${body.slice(0, 200)}`);
-    }
+    await platformUpsert('settings', {
+        key: SETTINGS_KEY,
+        value: JSON.stringify(snapshot),
+        updated_at: new Date().toISOString(),
+    }, { onConflict: 'key', returning: false });
 }
 
 async function main() {

@@ -70,6 +70,114 @@ const TABLES = [
   'time_entries',
   'app_vacations',
   'settings',
+  'finance_sources',
+  'finance_accounts',
+  'finance_categories',
+  'finance_directions',
+  'finance_counterparties',
+  'finance_transactions',
+  'finance_transaction_links',
+  'finance_rules',
+  'finance_manual_decisions',
+  'bank_sync_runs',
+  'bank_accounts',
+  'bank_transactions',
+  'legacy_finance_import_runs',
+  'legacy_finance_transactions',
+  'fintablo_imports',
+];
+
+const LEGACY_SITE_TABLES = [
+  'admin_users',
+  'app_tasks',
+  'blank_color_tuning',
+  'cases',
+  'certificate_redemptions',
+  'certificates',
+  'china_orders',
+  'consent_logs',
+  'email_subscribers',
+  'faq',
+  'form_submissions',
+  'message_templates',
+  'notification_log',
+  'order_shipments',
+  'order_timeline',
+  'page_content',
+  'products',
+  'promo_codes',
+  'promo_redemptions',
+  'return_requests',
+  'shop_orders',
+  'site_settings',
+];
+
+const COMPAT_TABLES = [
+  'admin_users',
+  'app_colors',
+  'app_tasks',
+  'app_vacations',
+  'areas',
+  'bank_accounts',
+  'bank_sync_runs',
+  'bank_transactions',
+  'blank_color_tuning',
+  'cases',
+  'certificate_redemptions',
+  'certificates',
+  'china_orders',
+  'china_purchases',
+  'consent_logs',
+  'email_subscribers',
+  'employees',
+  'faq',
+  'finance_accounts',
+  'finance_categories',
+  'finance_counterparties',
+  'finance_directions',
+  'finance_manual_decisions',
+  'finance_rules',
+  'finance_sources',
+  'finance_transaction_links',
+  'finance_transactions',
+  'fintablo_imports',
+  'form_submissions',
+  'hw_blanks',
+  'legacy_finance_import_runs',
+  'legacy_finance_transactions',
+  'marketplace_sets',
+  'message_templates',
+  'molds',
+  'notification_log',
+  'order_factuals',
+  'order_items',
+  'order_shipments',
+  'order_timeline',
+  'orders',
+  'page_content',
+  'pkg_blanks',
+  'product_templates',
+  'products',
+  'projects',
+  'promo_codes',
+  'promo_redemptions',
+  'return_requests',
+  'settings',
+  'shipments',
+  'shop_orders',
+  'site_settings',
+  'task_checklist_items',
+  'task_comments',
+  'task_notification_events',
+  'task_watchers',
+  'tasks',
+  'time_entries',
+  'warehouse_history',
+  'warehouse_items',
+  'warehouse_reservations',
+  'work_activity',
+  'work_assets',
+  'work_templates',
 ];
 
 function parseJson(value) {
@@ -118,6 +226,18 @@ async function fetchAll(table) {
     throw error;
   }
   return data || [];
+}
+
+async function supabaseRawCount(table) {
+  const { count, error } = await supabase
+    .from(table)
+    .select('*', { count: 'exact', head: true });
+  if (error) {
+    const message = String(error.message || '');
+    if (message.includes(`Could not find the table 'public.${table}'`)) return 0;
+    throw error;
+  }
+  return Number(count) || 0;
 }
 
 async function fetchColumns(table, columns) {
@@ -454,6 +574,57 @@ async function main() {
     console.log(`${table.padEnd(29)} ${String(sbCount).padStart(8)} ${String(pgCount).padStart(9)} ${String(diff).padStart(5)} ${status}`);
     if (diff !== 0) allOk = false;
   }
+
+  for (const table of LEGACY_SITE_TABLES) {
+    const sbCount = await supabaseCount(table);
+    const { rows } = await pool.query(
+      `SELECT COUNT(*)::int AS n
+         FROM legacy_supabase_rows
+        WHERE table_name = $1`,
+      [table],
+    );
+    const pgCount = rows[0].n;
+    const diff = pgCount - sbCount;
+    const label = `archive:${table}`;
+    const status = diff === 0 ? 'OK' : 'MISMATCH';
+    console.log(`${label.padEnd(29)} ${String(sbCount).padStart(8)} ${String(pgCount).padStart(9)} ${String(diff).padStart(5)} ${status}`);
+    if (diff !== 0) allOk = false;
+  }
+
+  for (const table of COMPAT_TABLES) {
+    // The compatibility store intentionally preserves raw Supabase row
+    // shapes, including soft-deleted orders and aggregate JSON rows. Do not
+    // compare it against the normalized/canonical count rules above.
+    const sbCount = await supabaseRawCount(table);
+    const { rows } = await pool.query(
+      `SELECT COUNT(*)::int AS n
+         FROM compat_rows
+        WHERE table_name = $1`,
+      [table],
+    );
+    const pgCount = rows[0].n;
+    const diff = pgCount - sbCount;
+    const label = `compat:${table}`;
+    const status = diff === 0 ? 'OK' : 'MISMATCH';
+    console.log(`${label.padEnd(29)} ${String(sbCount).padStart(8)} ${String(pgCount).padStart(9)} ${String(diff).padStart(5)} ${status}`);
+    if (diff !== 0) allOk = false;
+  }
+
+  const storageUrlCheck = await pool.query(
+    `SELECT
+       (SELECT COUNT(*)::int
+          FROM compat_rows
+         WHERE data::text LIKE '%/storage/v1/object/%')
+       +
+       (SELECT COUNT(*)::int
+          FROM legacy_supabase_rows
+         WHERE data::text LIKE '%/storage/v1/object/%')
+       AS n`,
+  );
+  const staleStorageUrls = storageUrlCheck.rows[0].n;
+  const storageStatus = staleStorageUrls === 0 ? 'OK' : 'MISMATCH';
+  console.log(`${'yandex_storage_urls'.padEnd(29)} ${String(0).padStart(8)} ${String(staleStorageUrls).padStart(9)} ${String(staleStorageUrls).padStart(5)} ${storageStatus}`);
+  if (staleStorageUrls !== 0) allOk = false;
 
   if (!allOk) process.exitCode = 1;
 }

@@ -1,0 +1,49 @@
+name: ro-platform-shadow
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ro-platform-shadow-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - platform-shadow-postgres-data:/var/lib/postgresql/data
+    networks:
+      - shadow
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  api:
+    build:
+      context: ../api
+      dockerfile: Dockerfile
+    image: ro-platform-shadow-api:local
+    container_name: ro-platform-shadow-api
+    restart: unless-stopped
+    env_file:
+      - path: .env.storage
+        required: true
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      PORT: "3000"
+      APP_VERSION: ${APP_VERSION:-shadow}
+    ports:
+      - "127.0.0.1:${SHADOW_API_PORT:-3100}:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - shadow
+
+volumes:
+  platform-shadow-postgres-data:
+
+networks:
+  shadow:
+    driver: bridge

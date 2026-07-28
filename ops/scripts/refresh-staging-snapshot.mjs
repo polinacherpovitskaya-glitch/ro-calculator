@@ -81,6 +81,10 @@ async function main() {
     '08-work-management',
     '09-time-payroll',
     '10-settings',
+    '11-finance',
+    '12-legacy-site-archive',
+    '13-compatibility-store',
+    '14-rewrite-storage-urls',
   ]) {
     runRefreshScript(script);
   }

@@ -1,0 +1,294 @@
+name: Yandex platform shadow
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - codex/supabase-retirement
+    paths:
+      - 'ops/api/**'
+      - 'ops/db/**'
+      - 'ops/scripts/**'
+      - 'ops/infra/docker-compose.yandex-shadow.yml'
+      - 'ops/infra/scripts/deploy-yandex-shadow.sh'
+      - 'ops/infra/scripts/deploy-yandex-caddy.sh'
+      - 'ops/infra/scripts/rehearse-yandex-platform.sh'
+      - 'ops/infra/yandex-caddy/**'
+      - 'tests/yandex-platform-shadow-smoke.js'
+      - 'tests/storage-url-rewrite-smoke.mjs'
+      - '.github/workflows/yandex-platform-shadow.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: yandex-platform-shadow
+  cancel-in-progress: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  YC_CLOUD_ID: b1gl59l77vb50ihub2nd
+  YC_FOLDER_ID: b1gc32hu5ujioie1o0ht
+  RO_YANDEX_MEDIA_BUCKET: ro-platform-media-b1gl59l77vb50ihub2nd
+
+jobs:
+  test-and-deploy-shadow:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ops
+          POSTGRES_PASSWORD: ci_password
+          POSTGRES_DB: ops
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: |
+            ops/api/package-lock.json
+            ops/bot/package-lock.json
+
+      - name: Install API dependencies
+        working-directory: ops/api
+        run: npm ci
+
+      - name: Install bot dependencies
+        working-directory: ops/bot
+        run: npm ci
+
+      - name: Apply migrations in CI
+        env:
+          DATABASE_URL: postgres://ops:ci_password@localhost:5432/ops
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+          bash ops/db/migrate.sh
+
+      - name: Run API tests
+        working-directory: ops/api
+        env:
+          TEST_DATABASE_URL: postgres://ops:ci_password@localhost:5432/ops
+        run: npm test
+
+      - name: Run bot tests
+        working-directory: ops/bot
+        env:
+          TEST_DATABASE_URL: postgres://ops:ci_password@localhost:5432/ops
+        run: npm test
+
+      - name: Verify Yandex shadow contract
+        run: |
+          node tests/yandex-platform-shadow-smoke.js
+          node tests/storage-url-rewrite-smoke.mjs
+
+      - name: Configure Yandex VM access
+        env:
+          YANDEX_VM_SSH_PRIVATE_KEY: ${{ secrets.YANDEX_VM_SSH_PRIVATE_KEY }}
+          YANDEX_VM_HOST: ${{ secrets.YANDEX_VM_HOST }}
+        run: |
+          set -euo pipefail
+          test -n "${YANDEX_VM_SSH_PRIVATE_KEY:-}"
+          test -n "${YANDEX_VM_HOST:-}"
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$YANDEX_VM_SSH_PRIVATE_KEY" > "$HOME/.ssh/yandex_vm"
+          chmod 600 "$HOME/.ssh/yandex_vm"
+          ssh-keyscan -H "$YANDEX_VM_HOST" >> "$HOME/.ssh/known_hosts"
+
+      - name: Upload shadow platform
+        env:
+          YANDEX_VM_HOST: ${{ secrets.YANDEX_VM_HOST }}
+          YANDEX_VM_USER: ${{ secrets.YANDEX_VM_USER }}
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/yandex_vm" "$YANDEX_VM_USER@$YANDEX_VM_HOST" \
+            "mkdir -p /home/robot/platform"
+          rsync -az --delete \
+            --exclude node_modules \
+            --exclude .env.shadow \
+            -e "ssh -i $HOME/.ssh/yandex_vm" \
+            ops/ "$YANDEX_VM_USER@$YANDEX_VM_HOST:/home/robot/platform/"
+
+      - name: Install Yandex Cloud CLI
+        run: |
+          set -euo pipefail
+          curl -fsSL https://storage.yandexcloud.net/yandexcloud-yc/install.sh \
+            | bash -s -- -i "$HOME/yandex-cloud" -n
+          echo "$HOME/yandex-cloud/bin" >> "$GITHUB_PATH"
+
+      - name: Configure private Yandex media access
+        env:
+          YC_OAUTH_TOKEN: ${{ secrets.YC_OAUTH_TOKEN }}
+          YANDEX_VM_HOST: ${{ secrets.YANDEX_VM_HOST }}
+          YANDEX_VM_USER: ${{ secrets.YANDEX_VM_USER }}
+        run: |
+          set -euo pipefail
+          test -n "${YC_OAUTH_TOKEN:-}"
+          yc config set token "$YC_OAUTH_TOKEN" >/dev/null
+          yc config set cloud-id "$YC_CLOUD_ID" >/dev/null
+          yc config set folder-id "$YC_FOLDER_ID" >/dev/null
+
+          ssh -i "$HOME/.ssh/yandex_vm" "$YANDEX_VM_USER@$YANDEX_VM_HOST" \
+            'install -d -m 700 "$HOME/platform-secrets"'
+
+          if ! ssh -i "$HOME/.ssh/yandex_vm" "$YANDEX_VM_USER@$YANDEX_VM_HOST" \
+            'test -s "$HOME/platform-secrets/yandex-storage.env"'; then
+            SERVICE_ACCOUNT_JSON="$(
+              yc iam service-account get \
+                --name ro-platform-media-api \
+                --format json 2>/dev/null || true
+            )"
+            SERVICE_ACCOUNT_ID="$(
+              jq -r '.id // empty' <<< "$SERVICE_ACCOUNT_JSON"
+            )"
+            if [[ -z "$SERVICE_ACCOUNT_ID" ]]; then
+              SERVICE_ACCOUNT_ID="$(
+                yc iam service-account create \
+                  --name ro-platform-media-api \
+                  --description "Recycle Object private media API" \
+                  --format json \
+                  | jq -r '.id'
+              )"
+            fi
+            yc resource-manager folder add-access-binding --id "$YC_FOLDER_ID" \
+              --role storage.editor \
+              --service-account-id "$SERVICE_ACCOUNT_ID" >/dev/null
+
+            KEY_JSON="$(mktemp)"
+            STORAGE_ENV="$(mktemp)"
+            trap 'rm -f "$KEY_JSON" "$STORAGE_ENV"; yc config unset token >/dev/null 2>&1 || true' EXIT
+            yc iam access-key create \
+              --service-account-id "$SERVICE_ACCOUNT_ID" \
+              --description "ro-platform-media-api" \
+              --format json > "$KEY_JSON"
+            ACCESS_KEY="$(jq -r '.access_key.key_id' "$KEY_JSON")"
+            SECRET_KEY="$(jq -r '.secret' "$KEY_JSON")"
+            test -n "$ACCESS_KEY"
+            test -n "$SECRET_KEY"
+            {
+              printf 'S3_ENDPOINT=https://storage.yandexcloud.net\n'
+              printf 'S3_REGION=ru-central1\n'
+              printf 'S3_BUCKET=%s\n' "$RO_YANDEX_MEDIA_BUCKET"
+              printf 'S3_ACCESS_KEY=%s\n' "$ACCESS_KEY"
+              printf 'S3_SECRET_KEY=%s\n' "$SECRET_KEY"
+            } > "$STORAGE_ENV"
+            chmod 600 "$STORAGE_ENV"
+            scp -i "$HOME/.ssh/yandex_vm" "$STORAGE_ENV" \
+              "$YANDEX_VM_USER@$YANDEX_VM_HOST:platform-secrets/yandex-storage.env"
+          fi
+
+          ssh -i "$HOME/.ssh/yandex_vm" "$YANDEX_VM_USER@$YANDEX_VM_HOST" \
+            'install -m 600 "$HOME/platform-secrets/yandex-storage.env" "$HOME/platform/infra/.env.storage"'
+          yc config unset token >/dev/null
+
+      - name: Deploy localhost-only shadow
+        env:
+          YANDEX_VM_HOST: ${{ secrets.YANDEX_VM_HOST }}
+          YANDEX_VM_USER: ${{ secrets.YANDEX_VM_USER }}
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/yandex_vm" "$YANDEX_VM_USER@$YANDEX_VM_HOST" \
+            "chmod +x /home/robot/platform/infra/scripts/deploy-yandex-shadow.sh && /home/robot/platform/infra/scripts/deploy-yandex-shadow.sh"
+
+      - name: Verify shadow isolation and resources
+        env:
+          YANDEX_VM_HOST: ${{ secrets.YANDEX_VM_HOST }}
+          YANDEX_VM_USER: ${{ secrets.YANDEX_VM_USER }}
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/yandex_vm" "$YANDEX_VM_USER@$YANDEX_VM_HOST" bash <<'REMOTE'
+            set -euo pipefail
+            curl --fail --silent --show-error http://127.0.0.1:3100/api/health
+            docker port ro-platform-shadow-api 3000/tcp | grep -q '^127.0.0.1:3100$'
+            docker inspect --format '{{.State.Status}}' supabase-db | grep -q '^running$'
+            docker inspect --format '{{.State.Status}}' ro-timebot | grep -q '^running$'
+            docker stats --no-stream \
+              --format '{{.Name}} {{.MemUsage}}' \
+              ro-platform-shadow-postgres ro-platform-shadow-api
+          REMOTE
+
+      - name: Verify Yandex media read and write
+        env:
+          YANDEX_VM_HOST: ${{ secrets.YANDEX_VM_HOST }}
+          YANDEX_VM_USER: ${{ secrets.YANDEX_VM_USER }}
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3 4 5; do
+            if ssh -i "$HOME/.ssh/yandex_vm" "$YANDEX_VM_USER@$YANDEX_VM_HOST" \
+              "docker exec ro-platform-shadow-api node --input-type=module -e \
+              \"import { uploadObject, downloadObject, deleteObject } from './src/s3.js';
+              const key = '_health/platform-shadow.txt';
+              await uploadObject(key, Buffer.from('yandex-storage-ok'), 'text/plain');
+              const object = await downloadObject(key);
+              if (object.body.toString() !== 'yandex-storage-ok') process.exit(1);
+              await deleteObject(key);\""; then
+              exit 0
+            fi
+            sleep 5
+          done
+          exit 1
+
+      - name: Publish API health through Caddy
+        env:
+          YANDEX_VM_HOST: ${{ secrets.YANDEX_VM_HOST }}
+          YANDEX_VM_USER: ${{ secrets.YANDEX_VM_USER }}
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/yandex_vm" "$YANDEX_VM_USER@$YANDEX_VM_HOST" \
+            "chmod +x /home/robot/platform/infra/scripts/deploy-yandex-caddy.sh && /home/robot/platform/infra/scripts/deploy-yandex-caddy.sh"
+
+      - name: Verify public API health
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --max-time 25 \
+            https://api.recycleobject.ru/api/health \
+            | grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"'
+
+      - name: Rehearse production snapshot and parity
+        env:
+          YANDEX_VM_HOST: ${{ secrets.YANDEX_VM_HOST }}
+          YANDEX_VM_USER: ${{ secrets.YANDEX_VM_USER }}
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/yandex_vm" "$YANDEX_VM_USER@$YANDEX_VM_HOST" \
+            "chmod +x /home/robot/platform/infra/scripts/rehearse-yandex-platform.sh && /home/robot/platform/infra/scripts/rehearse-yandex-platform.sh"
+
+      - name: Install platform automation token after rehearsal
+        env:
+          OPS_BOT_TOKEN: ${{ secrets.OPS_BOT_TOKEN }}
+          YANDEX_VM_HOST: ${{ secrets.YANDEX_VM_HOST }}
+          YANDEX_VM_USER: ${{ secrets.YANDEX_VM_USER }}
+        run: |
+          set -euo pipefail
+          test -n "${OPS_BOT_TOKEN:-}"
+          umask 077
+          printf 'OPS_BOT_TOKEN=%s\n' "$OPS_BOT_TOKEN" > "$RUNNER_TEMP/platform-api.env"
+          scp -i "$HOME/.ssh/yandex_vm" "$RUNNER_TEMP/platform-api.env" \
+            "$YANDEX_VM_USER@$YANDEX_VM_HOST:platform-secrets/platform-api.env"
+          ssh -i "$HOME/.ssh/yandex_vm" "$YANDEX_VM_USER@$YANDEX_VM_HOST" bash <<'REMOTE'
+            set -euo pipefail
+            chmod 600 "$HOME/platform-secrets/platform-api.env"
+            set -a
+            source "$HOME/platform/infra/.env.shadow"
+            set +a
+            ENV_FILE="$HOME/platform-secrets/platform-api.env" \
+              POSTGRES_CONTAINER=ro-platform-shadow-postgres \
+              POSTGRES_USER="$POSTGRES_USER" \
+              POSTGRES_DB="$POSTGRES_DB" \
+              bash "$HOME/platform/infra/scripts/ensure-bot-token.sh"
+          REMOTE

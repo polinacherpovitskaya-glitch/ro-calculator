@@ -100,6 +100,12 @@ jobs:
             echo "timebot logs contain a fatal startup error" >&2
             exit 1
           fi
+
+          platform_health="$(curl --fail --silent --show-error --max-time 15 http://127.0.0.1:3100/api/health)"
+          printf '%s' "$platform_health" \
+            | grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"'
+          printf '%s' "$platform_health" \
+            | grep -Eq '"db"[[:space:]]*:[[:space:]]*\{[[:space:]]*"ok"[[:space:]]*:[[:space:]]*true'
           REMOTE
 
       - name: Probe Telegram relay independently
@@ -128,26 +134,26 @@ jobs:
 
       - name: Probe Yandex DB independently
         env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          YANDEX_VM_HOST: ${{ secrets.YANDEX_VM_HOST }}
+          YANDEX_VM_USER: ${{ secrets.YANDEX_VM_USER }}
         run: |
           set -euo pipefail
-          test "$SUPABASE_URL" = "https://db.recycleobject.ru"
-          curl --fail --silent --show-error --max-time 25 \
-            -H "apikey: $SUPABASE_ANON_KEY" \
-            -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
-            "$SUPABASE_URL/rest/v1/employees?select=id&limit=1" \
-            | node -e '
-                let raw = "";
-                process.stdin.on("data", chunk => raw += chunk);
-                process.stdin.on("end", () => {
-                  const rows = JSON.parse(raw);
-                  if (!Array.isArray(rows) || rows.length !== 1 || !rows[0]?.id) {
-                    process.exit(1);
-                  }
-                  console.log("Yandex DB read probe passed");
-                });
-              '
+          ssh -i "$HOME/.ssh/yandex_vm" \
+            -o BatchMode=yes \
+            -o ConnectTimeout=15 \
+            "$YANDEX_VM_USER@$YANDEX_VM_HOST" bash <<'REMOTE'
+          set -euo pipefail
+          set -a
+          source /home/robot/platform/infra/.env.shadow
+          set +a
+          employee_count="$(
+            docker exec ro-platform-shadow-postgres \
+              psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -At \
+              -c 'SELECT COUNT(*) FROM employees WHERE is_active = TRUE'
+          )"
+          test "${employee_count:-0}" -gt 0
+          printf 'Independent Yandex PostgreSQL probe passed: %s active employees\n' "$employee_count"
+          REMOTE
 
       - name: Send requested test notification
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.send_test_alert }}
@@ -167,7 +173,7 @@ jobs:
           BOT_TOKEN: ${{ secrets.TIMEBOT_TOKEN }}
           TELEGRAM_ALERT_CHAT_ID: ${{ secrets.TELEGRAM_ALERT_CHAT_ID }}
           ALERT_WORKFLOW: Yandex timebot health
-          ALERT_SCOPE: Production hours bot process, heartbeat, Telegram relay, and Yandex DB
+          ALERT_SCOPE: Production hours bot process, heartbeat, Telegram relay, Yandex DB, and replacement API
           ALERT_STATUS: ${{ job.status == 'success' && 'success' || 'failure' }}
           ALERT_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           ALERT_SOURCE_WORKFLOW: ${{ github.event.workflow_run.name }}
@@ -181,7 +187,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           ALERT_WORKFLOW: Yandex timebot health
-          ALERT_SCOPE: Production hours bot process, heartbeat, Telegram relay, and Yandex DB
+          ALERT_SCOPE: Production hours bot process, heartbeat, Telegram relay, Yandex DB, and replacement API
           ALERT_STATUS: ${{ job.status == 'success' && 'success' || 'failure' }}
           ALERT_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           ALERT_SOURCE_WORKFLOW: ${{ github.event.workflow_run.name }}

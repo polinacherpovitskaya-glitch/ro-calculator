@@ -1,0 +1,122 @@
+name: Yandex storage migration
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - codex/supabase-retirement
+    paths:
+      - '.github/workflows/yandex-storage-migration.yml'
+      - 'ops/scripts/storage/**'
+      - 'tests/yandex-storage-migration-smoke.js'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: yandex-storage-migration
+  cancel-in-progress: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  YC_CLOUD_ID: b1gl59l77vb50ihub2nd
+  YC_FOLDER_ID: b1gc32hu5ujioie1o0ht
+  RO_YANDEX_MEDIA_BUCKET: ro-platform-media-b1gl59l77vb50ihub2nd
+
+jobs:
+  migrate-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure VM access
+        env:
+          YANDEX_VM_SSH_PRIVATE_KEY: ${{ secrets.YANDEX_VM_SSH_PRIVATE_KEY }}
+          YANDEX_VM_HOST: ${{ secrets.YANDEX_VM_HOST }}
+        run: |
+          set -euo pipefail
+          test -n "$YANDEX_VM_SSH_PRIVATE_KEY"
+          test -n "$YANDEX_VM_HOST"
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$YANDEX_VM_SSH_PRIVATE_KEY" > "$HOME/.ssh/yandex_vm"
+          chmod 600 "$HOME/.ssh/yandex_vm"
+          ssh-keyscan -H "$YANDEX_VM_HOST" >> "$HOME/.ssh/known_hosts"
+
+      - name: Export Supabase Storage snapshot
+        env:
+          YANDEX_VM_HOST: ${{ secrets.YANDEX_VM_HOST }}
+          YANDEX_VM_USER: ${{ secrets.YANDEX_VM_USER }}
+        run: |
+          set -euo pipefail
+          mkdir -p output/storage/source
+          ssh -i "$HOME/.ssh/yandex_vm" "$YANDEX_VM_USER@$YANDEX_VM_HOST" \
+            "docker exec supabase-db psql -U supabase_admin -d postgres -At -c \
+            \"SELECT json_build_object(
+              'bucket', bucket_id,
+              'name', name,
+              'version', version,
+              'size', (metadata->>'size')::bigint,
+              'mimetype', metadata->>'mimetype'
+            ) FROM storage.objects ORDER BY bucket_id, name\"" \
+            > output/storage/storage-objects.ndjson
+          ssh -i "$HOME/.ssh/yandex_vm" "$YANDEX_VM_USER@$YANDEX_VM_HOST" \
+            "tar -C /home/robot/sb/docker/volumes -czf - storage" \
+            > output/storage/storage.tgz
+          test -s output/storage/storage-objects.ndjson
+          test -s output/storage/storage.tgz
+          tar -xzf output/storage/storage.tgz -C output/storage/source
+
+      - name: Stage canonical object keys
+        run: |
+          set -euo pipefail
+          mkdir -p output/storage/staged
+          node ops/scripts/storage/stage-supabase-storage.mjs \
+            output/storage/storage-objects.ndjson \
+            output/storage/source/storage \
+            output/storage/staged
+          test "$(node -p "require('./output/storage/staged/migration-manifest.json').objectCount")" -gt 0
+
+      - name: Install Yandex Cloud CLI
+        run: |
+          set -euo pipefail
+          curl -fsSL https://storage.yandexcloud.net/yandexcloud-yc/install.sh | bash -s -- -i "$HOME/yandex-cloud" -n
+          echo "$HOME/yandex-cloud/bin" >> "$GITHUB_PATH"
+
+      - name: Upload private media snapshot
+        env:
+          YC_OAUTH_TOKEN: ${{ secrets.YC_OAUTH_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$YC_OAUTH_TOKEN"
+          yc config set token "$YC_OAUTH_TOKEN" >/dev/null
+          yc config set cloud-id "$YC_CLOUD_ID" >/dev/null
+          yc config set folder-id "$YC_FOLDER_ID" >/dev/null
+          mv output/storage/staged/migration-manifest.json output/storage/migration-manifest.json
+          yc storage s3 cp \
+            output/storage/staged \
+            "s3://${RO_YANDEX_MEDIA_BUCKET}/" \
+            --recursive
+
+      - name: Download and checksum every object
+        run: |
+          set -euo pipefail
+          mkdir -p output/storage/downloaded
+          yc storage s3 cp \
+            "s3://${RO_YANDEX_MEDIA_BUCKET}/" \
+            output/storage/downloaded \
+            --recursive
+          node ops/scripts/storage/verify-yandex-storage.mjs \
+            output/storage/migration-manifest.json \
+            output/storage/downloaded
+          yc config unset token >/dev/null
+
+      - name: Upload migration report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: yandex-storage-migration-report
+          path: output/storage/migration-manifest.json
+          if-no-files-found: error
