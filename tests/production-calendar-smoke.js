@@ -18,11 +18,11 @@ assert.ok(sidebarNav, 'Sidebar nav not found');
 assert.equal((sidebarNav[1].match(/data-page="gantt"/g) || []).length, 1, 'Sidebar must contain exactly one production calendar link');
 assert.equal((sidebarNav[1].match(/data-page="production-plan"/g) || []).length, 0, 'Sidebar must not contain legacy production-plan link');
 assert.match(indexHtml, /id="gantt-container"/, 'Gantt page must include the unified calendar container');
-assert.match(indexHtml, /Перетащите заказы — сверху выполняются раньше/, 'Gantt page must explain how queue priority works');
-assert.match(indexHtml, /Каждая горизонтальная линия — один человек/, 'Gantt page must explain the worker-lane model');
-assert.match(indexHtml, /скоба связывает людей его команды/, 'Gantt page must explain how parallel worker lines form one order team');
+assert.match(indexHtml, /Перетащите заказы — сверху выполняются раньше/, 'Gantt page must explain the top queue priority');
+assert.match(indexHtml, /Каждая горизонтальная линия принадлежит конкретному сотруднику/, 'Gantt page must explain the named worker-lane model');
+assert.match(indexHtml, /уникальный цвет контура обозначает заказ/, 'Gantt page must explain unique order identity');
 assert.match(indexHtml, /Загрузка дня/, 'Gantt legend must explain the daily utilization bar');
-assert.match(indexHtml, /N чел\. и скоба — команда заказа/, 'Gantt legend must describe the direct team assignment');
+assert.match(indexHtml, /Инициалы и скоба — конкретная команда заказа/, 'Gantt legend must describe named team assignment');
 assert.doesNotMatch(indexHtml, /до N — максимум людей на заказ/, 'The ambiguous maximum-only worker legend must be removed');
 assert.doesNotMatch(indexHtml, /id="gantt-queue"/, 'Separate launch queue must be removed');
 assert.doesNotMatch(indexHtml, /id="gantt-capacity-chart"/, 'Separate capacity chart must be removed');
@@ -48,20 +48,24 @@ assert.match(ganttJs, /getWorkerLaneAllocations\(queue = \[\], workerSlot/, 'Gan
 assert.match(ganttJs, /getWorkerLaneOrderRuns\(\s*queue = \[\],\s*workerSlot/, 'Gantt must group daily allocations into continuous order runs');
 assert.match(ganttJs, /renderTeamBrackets\(queue, minDate/, 'Gantt must visibly connect people assigned to one order');
 assert.match(ganttJs, /PROJECT_PALETTE/, 'Orders must have a stable project color independent of their phase');
+assert.match(ganttJs, /buildOrderVisualMap\(queue = \[\]\)/, 'Visible orders must receive a queue-wide unique visual map');
+assert.match(ganttJs, /employee_assignments/, 'Gantt plan state must persist named assignments');
+assert.match(ganttJs, /roster_employee_ids/, 'Gantt plan state must persist the selected production roster');
+assert.match(ganttJs, /renderQueueRail\(queue = \[\]\)/, 'Priority queue must render above the calendar');
+assert.match(ganttJs, /renderQueueDrawer\(priorityCards/, 'Detailed priority editing must live in a drawer');
+assert.match(ganttJs, /getWorkerTodaySummary\(workerSlot/, 'Named lanes must expose today plan summaries');
 assert.match(ganttJs, /highlightOrder\(orderId\)/, 'Calendar must cross-highlight related order work');
 assert.match(ganttJs, /clearOrderHighlight\(\)/, 'Calendar must clear cross-highlighting');
 assert.match(ganttJs, /scrollToToday\(smooth = true\)/, 'Calendar must scroll back to today');
-assert.match(ganttJs, /startPriorityPanelResize\(event\)/, 'Calendar must expose a draggable queue/timeline divider');
-assert.match(ganttJs, /resizePriorityPanelByKey\(event\)/, 'Calendar divider must support keyboard resizing');
-assert.match(ganttJs, /PRIORITY_PANEL_STORAGE_KEY/, 'Calendar must remember the selected panel width');
 assert.match(ganttJs, /renderPausedOrders\(blockedQueue = \[\], reviewQueue = \[\]\)/, 'Gantt must keep blocked and review orders accessible');
 assert.match(ganttJs, /onOrderDrop\(event, targetOrderId\)/, 'Unified Gantt rows must support drag reorder');
 assert.match(ganttJs, /TEAM_SIZE: 4/, 'Production calendar must expose the four-person team boundary');
 assert.match(ganttJs, />Открыть<\/button>/, 'Every scheduled row must expose an explicit order-open button');
 assert.match(calculatorJs, /startHour/, 'Scheduler allocations must keep their start inside the shift');
 assert.match(calculatorJs, /endHour/, 'Scheduler allocations must keep their end inside the shift');
-assert.match(styleCss, /\.gantt-priority-panel\s*\{[\s\S]*?--gantt-priority-width,\s*220px/, 'Desktop priority panel must default to about half of the former 430px width');
-assert.match(styleCss, /\.gantt-panel-resizer\s*\{/, 'Calendar must style the queue/timeline divider');
+assert.match(styleCss, /\.gantt-queue-rail\s*\{/, 'Calendar must style the top priority rail');
+assert.match(styleCss, /\.gantt-queue-drawer\s*\{/, 'Calendar must style the priority editor drawer');
+assert.match(styleCss, /\.gantt-assignee-chip\s*\{/, 'Calendar must style named assignee controls');
 assert.match(styleCss, /\.gantt-planner\.order-focus/, 'Worker-lane focus styling must be present');
 assert.match(styleCss, /\.gantt-day-load/, 'Daily load indicator styling must be present');
 assert.match(styleCss, /\.gantt-order-run\s*\{/, 'Calendar must style continuous order runs');
@@ -393,6 +397,122 @@ assert.deepEqual(workersByPriorityOrder.get(201), [1, 2], 'The first two worker 
 assert.deepEqual(workersByPriorityOrder.get(202), [3], 'The second priority order must receive the third worker line');
 assert.deepEqual(workersByPriorityOrder.get(203), [4], 'The third priority order must receive the fourth worker line');
 
+const namedWorkerSchedule = vm.runInContext(`
+    buildProductionSchedule([
+        {
+            id: 211,
+            order_name: 'Т-банк',
+            status: 'production_casting',
+            production_hours_plastic: 18,
+            production_hours_hardware: 0,
+            production_hours_packaging: 0,
+            production_parallel_workers: 2,
+            production_employee_ids: ['polina', 'olya']
+        },
+        {
+            id: 212,
+            order_name: 'e-code',
+            status: 'production_casting',
+            production_hours_plastic: 9,
+            production_hours_hardware: 0,
+            production_hours_packaging: 0,
+            production_employee_ids: ['misha']
+        },
+        {
+            id: 213,
+            order_name: 'Свободная линия',
+            status: 'production_casting',
+            production_hours_plastic: 9,
+            production_hours_hardware: 0,
+            production_hours_packaging: 0
+        },
+        {
+            id: 214,
+            order_name: 'Ждёт Полину',
+            status: 'production_casting',
+            production_hours_plastic: 9,
+            production_hours_hardware: 0,
+            production_hours_packaging: 0,
+            production_employee_ids: ['polina']
+        }
+    ], {
+        planning_worker_slots: [
+            { employeeId: 'polina', employeeName: 'Полина', dailyHours: 9 },
+            { employeeId: 'olya', employeeName: 'Оля', dailyHours: 9 },
+            { employeeId: 'misha', employeeName: 'Миша', dailyHours: 9 },
+            { employeeId: 'anton', employeeName: 'Антон', dailyHours: 9 }
+        ]
+    })
+`, context);
+const namedFirstHour = JSON.parse(JSON.stringify(namedWorkerSchedule.days[0].allocations))
+    .filter(allocation => allocation.startHour === 0);
+assert.deepEqual(
+    namedFirstHour.filter(allocation => allocation.orderId === 211).map(allocation => allocation.employeeId),
+    ['polina', 'olya'],
+    'A two-person priority order must be duplicated onto the two specifically assigned people'
+);
+assert.deepEqual(
+    namedFirstHour.filter(allocation => allocation.orderId === 212).map(allocation => allocation.employeeId),
+    ['misha'],
+    'The next manually assigned order must start on its own free employee'
+);
+assert.deepEqual(
+    namedFirstHour.filter(allocation => allocation.orderId === 213).map(allocation => allocation.employeeId),
+    ['anton'],
+    'An automatic order must use the next free named employee'
+);
+assert.equal(
+    namedWorkerSchedule.queue.find(order => order.orderId === 214).schedule[0].date,
+    '2026-03-17',
+    'A later order assigned to a busy person must wait for that same person instead of moving to somebody else'
+);
+
+const reliableUnitSchedule = vm.runInContext(`
+    buildProductionSchedule([{
+        id: 221,
+        order_name: '200 изделий',
+        status: 'production_casting',
+        production_hours_plastic: 10,
+        production_hours_hardware: 0,
+        production_hours_packaging: 0,
+        production_quantity: 200,
+        production_quantity_reliable: true
+    }], {
+        planning_worker_slots: [
+            { employeeId: 'polina', employeeName: 'Полина', dailyHours: 9 }
+        ]
+    })
+`, context);
+assert.equal(
+    reliableUnitSchedule.queue[0].schedule.reduce((sum, segment) => sum + Number(segment.plannedUnits || 0), 0),
+    200,
+    'A reliable single-product phase must split its complete production quantity across scheduled work'
+);
+assert.equal(
+    reliableUnitSchedule.queue[0].schedule.some(segment => segment.needsNorm),
+    false,
+    'Reliable production quantities must not be marked as needing a norm'
+);
+
+const uncertainUnitSchedule = vm.runInContext(`
+    buildProductionSchedule([{
+        id: 222,
+        order_name: 'Смешанный заказ',
+        status: 'production_casting',
+        production_hours_plastic: 9,
+        production_hours_hardware: 0,
+        production_hours_packaging: 0,
+        production_quantity: 200,
+        production_quantity_reliable: false
+    }], {
+        planning_worker_slots: [
+            { employeeId: 'polina', employeeName: 'Полина', dailyHours: 9 }
+        ]
+    })
+`, context);
+assert.equal(uncertainUnitSchedule.queue[0].schedule[0].plannedUnits, null, 'Mixed orders must not invent a piece target');
+assert.equal(uncertainUnitSchedule.queue[0].schedule[0].needsNorm, true, 'Mixed orders must explicitly request a production norm');
+
 const fourPersonFirstDay = JSON.parse(JSON.stringify(fourPersonSchedule.days[0].allocations));
 assert.deepEqual(
     fourPersonFirstDay.filter(allocation => allocation.orderId === 31).map(allocation => allocation.workerSlot),
@@ -533,8 +653,206 @@ const normalizedWorkerTarget = JSON.parse(JSON.stringify(vm.runInContext(`
 `, ganttContext)));
 assert.equal(normalizedWorkerTarget['55'], 4, 'Saved per-order worker targets must be capped at four');
 
+const normalizedNamedState = JSON.parse(JSON.stringify(vm.runInContext(`
+    Gantt.normalizePlanState({
+        roster_employee_ids: [1, '2', 2, '', 3, 4, 5],
+        employee_assignments: {
+            55: [1, '2', 2, '', 3, 4, 5]
+        },
+        order_color_slots: {
+            55: 3,
+            56: -1,
+            57: '8'
+        }
+    })
+`, ganttContext)));
+assert.deepEqual(normalizedNamedState.roster_employee_ids, ['1', '2', '3', '4'], 'Roster state must deduplicate and cap employee IDs');
+assert.deepEqual(normalizedNamedState.employee_assignments['55'], ['1', '2', '3', '4'], 'Order assignment state must deduplicate and cap employee IDs');
+assert.deepEqual(normalizedNamedState.order_color_slots, { 55: 3, 57: 8 }, 'Color slots must retain only valid stable indexes');
+
+const automaticRoster = JSON.parse(JSON.stringify(vm.runInContext(`
+    buildProductionRoster([
+        { id: 1, name: 'Полина', role: 'management', daily_hours: 7, is_active: true },
+        { id: 2, name: 'Оля', role: 'production', daily_hours: 9, is_active: true },
+        { id: 3, name: 'Миша', role: 'production', daily_hours: 8, is_active: true },
+        { id: 4, name: 'Лёша', role: 'management', daily_hours: 6, is_active: true },
+        { id: 5, name: 'Уволен', role: 'production', daily_hours: 9, is_active: false },
+        { id: 6, name: 'Дата увольнения', role: 'production', daily_hours: 9, is_active: true, fired_date: '2026-03-10' }
+    ], {}, 4)
+`, ganttContext)));
+assert.equal(automaticRoster.length, 4, 'Roster must use up to four active employees from Hours');
+assert.deepEqual(
+    automaticRoster.slice(0, 2).map(employee => employee.role),
+    ['production', 'production'],
+    'Production employees must be proposed before active employees with other roles'
+);
+assert.equal(
+    automaticRoster.some(employee => employee.employeeId === 1),
+    true,
+    'An active manager who also works in production must remain available to the calendar'
+);
+assert.equal(
+    automaticRoster.some(employee => employee.employeeId === 5 || employee.employeeId === 6),
+    false,
+    'Inactive and fired employees must not occupy production lanes'
+);
+
+const savedRoster = JSON.parse(JSON.stringify(vm.runInContext(`
+    buildProductionRoster([
+        { id: 1, name: 'Полина', role: 'management', daily_hours: 7, is_active: true },
+        { id: 2, name: 'Оля', role: 'production', daily_hours: 9, is_active: true },
+        { id: 3, name: 'Миша', role: 'production', daily_hours: 8, is_active: true }
+    ], {
+        roster_employee_ids: [1, 3]
+    }, 4)
+`, ganttContext)));
+assert.deepEqual(
+    savedRoster.map(employee => employee.employeeId),
+    [1, 3],
+    'A saved mixed-role roster must preserve the explicitly selected lane order'
+);
+
+const shortShiftCalendar = JSON.parse(JSON.stringify(vm.runInContext(`
+    (() => {
+        Gantt.applyLoadedData({
+            allOrders: [],
+            planState: { roster_employee_ids: [1, 2] },
+            employees: [
+                { id: 1, name: 'Полина', role: 'management', daily_hours: 7, is_active: true },
+                { id: 2, name: 'Оля', role: 'production', daily_hours: 8, is_active: true }
+            ]
+        });
+        return {
+            hoursPerDay: Gantt.schedule.hoursPerDay,
+            dailyCapacity: Gantt.schedule.dailyCapacity
+        };
+    })()
+`, ganttContext)));
+assert.deepEqual(
+    shortShiftCalendar,
+    { hoursPerDay: 8, dailyCapacity: 15 },
+    'Named lanes must use their real shift lengths instead of stretching every day to nine hours'
+);
+
+const invalidNamedAssignment = JSON.parse(JSON.stringify(vm.runInContext(`
+    (() => {
+        const model = buildProductionModel({
+            orders: [{
+                id: 301,
+                order_name: 'Нужно переназначить',
+                status: 'production_casting',
+                production_hours_plastic: 9,
+                production_hours_hardware: 0,
+                production_hours_packaging: 0
+            }],
+            orderItems: [{ order_id: 301, item_type: 'product', quantity: 100 }],
+            planState: {
+                roster_employee_ids: [1],
+                employee_assignments: { 301: [999] }
+            },
+            employees: [
+                { id: 1, name: 'Полина', role: 'management', daily_hours: 9, is_active: true }
+            ]
+        });
+        return {
+            needsReview: model.orders[0].production_assignment_needs_review,
+            schedule: model.queue[0].schedule
+        };
+    })()
+`, ganttContext)));
+assert.equal(invalidNamedAssignment.needsReview, true, 'A removed employee assignment must be flagged for reassignment');
+assert.equal(
+    invalidNamedAssignment.schedule.length,
+    0,
+    'An invalid manual assignment must wait for review instead of silently moving to another employee'
+);
+
+const uniqueOrderVisuals = JSON.parse(JSON.stringify(vm.runInContext(`
+    (() => {
+        Gantt.planState = Gantt.normalizePlanState({});
+        const queue = Array.from({ length: 30 }, (_, index) => ({ orderId: index + 1 }));
+        Gantt.buildOrderVisualMap(queue);
+        const before = queue.map(item => ({
+            orderId: item.orderId,
+            slot: Gantt.planState.order_color_slots[String(item.orderId)],
+            color: Gantt.getOrderVisual(item.orderId).color
+        }));
+        Gantt.buildOrderVisualMap([...queue].reverse());
+        const after = queue.map(item => ({
+            orderId: item.orderId,
+            slot: Gantt.planState.order_color_slots[String(item.orderId)],
+            color: Gantt.getOrderVisual(item.orderId).color
+        }));
+        return { before, after };
+    })()
+`, ganttContext)));
+assert.equal(new Set(uniqueOrderVisuals.before.map(item => item.slot)).size, 30, 'Every visible order must receive a distinct color slot');
+assert.equal(new Set(uniqueOrderVisuals.before.map(item => item.color)).size, 30, 'Long queues must still receive distinct project colors');
+assert.deepEqual(uniqueOrderVisuals.after, uniqueOrderVisuals.before, 'Reordering must not change a saved order color');
+
+const namedQueueUi = vm.runInContext(`
+    (() => {
+        Gantt.roster = [
+            { employeeId: 1, employeeName: 'Полина', dailyHours: 7 },
+            { employeeId: 2, employeeName: 'Оля', dailyHours: 9 }
+        ];
+        Gantt.planState = Gantt.normalizePlanState({
+            employee_assignments: { 55: [1, 2] },
+            order_color_slots: { 55: 0 }
+        });
+        Gantt.buildOrderVisualMap([{ orderId: 55 }]);
+        const queue = [{
+            orderId: 55,
+            orderName: 'Т-банк',
+            plannedTotalHours: 18,
+            remainingTotalHours: 18,
+            parallelWorkersTarget: 2,
+            schedule: [{
+                date: Gantt.formatIsoDateLocal(new Date()),
+                phase: 'molding',
+                hours: 7,
+                workerSlot: 1,
+                employeeId: 1,
+                employeeName: 'Полина',
+                startHour: 0,
+                endHour: 7,
+                plannedUnits: 140
+            }]
+        }];
+        const card = Gantt.renderPriorityCard(queue[0], 0);
+        const rail = Gantt.renderQueueRail(queue);
+        Gantt.queueEditorOpen = true;
+        const drawer = Gantt.renderQueueDrawer(card, 1, 0);
+        return { card, rail, drawer };
+    })()
+`, ganttContext);
+assert.match(namedQueueUi.rail, /П·О/, 'Top queue must show the initials of the assigned people');
+assert.match(namedQueueUi.rail, /draggable="true"/, 'Top queue chips must be directly draggable to change priority');
+assert.match(namedQueueUi.card, /Полина, Оля/, 'Detailed queue card must name the assigned team');
+assert.match(namedQueueUi.drawer, /Команда календаря/, 'Queue drawer must contain the editable team roster');
+
+const missingNormSummary = JSON.parse(JSON.stringify(vm.runInContext(`
+    Gantt.getWorkerTodaySummary(1, [{
+        orderId: 88,
+        orderName: 'Нужна норма',
+        schedule: [{
+            date: Gantt.formatIsoDateLocal(new Date()),
+            phase: 'molding',
+            hours: 9,
+            workerSlot: 1,
+            plannedUnits: null,
+            needsNorm: true,
+            startHour: 0
+        }]
+    }])
+`, ganttContext)));
+assert.equal(missingNormSummary.plannedUnits, null, 'Missing production norms must stay null in the worker day summary');
+assert.equal(missingNormSummary.needsNorm, true, 'Worker day summary must explicitly surface a missing production norm');
+
 const compactPriorityCard = vm.runInContext(`
     (() => {
+        Gantt.roster = [];
+        Gantt.planState = Gantt.normalizePlanState({});
         const cardStart = new Date();
         cardStart.setHours(0, 0, 0, 0);
         const cardFinish = new Date(cardStart);

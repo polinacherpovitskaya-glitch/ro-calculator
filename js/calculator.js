@@ -2110,6 +2110,30 @@ function getProductionPlanningCapacity(settings) {
 }
 
 function buildProductionWorkerSlots(settings) {
+    const namedSlots = Array.isArray(settings && settings.planning_worker_slots)
+        ? settings.planning_worker_slots
+            .map((slot, index) => {
+                const dailyHours = round2(Number(slot?.dailyHours || slot?.daily_hours || 0));
+                if (!(dailyHours > 0)) return null;
+                return {
+                    employeeId: slot?.employeeId ?? slot?.employee_id ?? `slot-${index + 1}`,
+                    employeeName: String(slot?.employeeName || slot?.employee_name || slot?.name || `Сотрудник ${index + 1}`),
+                    dailyHours,
+                };
+            })
+            .filter(Boolean)
+            .slice(0, 4)
+        : [];
+    if (namedSlots.length > 0) {
+        const slotHours = namedSlots.map(slot => slot.dailyHours);
+        return {
+            workersCount: namedSlots.length,
+            hoursPerDay: round2(Math.max(...slotHours)),
+            dailyCapacity: round2(slotHours.reduce((sum, hours) => sum + hours, 0)),
+            slotHours,
+            workerSlots: namedSlots,
+        };
+    }
     const { workersCount, hoursPerDay, dailyCapacity } = getProductionPlanningCapacity(settings);
     const slots = [];
     let remainingCapacity = round2(dailyCapacity);
@@ -2124,6 +2148,11 @@ function buildProductionWorkerSlots(settings) {
         hoursPerDay,
         dailyCapacity,
         slotHours: slots,
+        workerSlots: slots.map((dailyHours, index) => ({
+            employeeId: `slot-${index + 1}`,
+            employeeName: `Сотрудник ${index + 1}`,
+            dailyHours,
+        })),
     };
 }
 
@@ -2219,7 +2248,13 @@ function splitDeliveryPhaseHours(totalHours, actualHours, deliverySchedule, tota
  * @returns {{ queue: Array, dailyCapacity: number, days: Array }}
  */
 function buildProductionSchedule(orders, settings) {
-    const { workersCount, hoursPerDay, dailyCapacity, slotHours } = buildProductionWorkerSlots(settings);
+    const {
+        workersCount,
+        hoursPerDay,
+        dailyCapacity,
+        slotHours,
+        workerSlots,
+    } = buildProductionWorkerSlots(settings);
     const holidaySet = parseProductionHolidaySet(settings);
 
     // Filter schedulable orders: only past-draft statuses (sample, production, delivery)
@@ -2327,6 +2362,14 @@ function buildProductionSchedule(orders, settings) {
         deadlineEnd: o.deadline_end || null,
         notBeforeDate: o.production_not_before || '',
         parallelWorkersTarget: Math.max(1, Math.round(Number(o.production_parallel_workers) || 1)),
+        employeeIds: Array.isArray(o.production_employee_ids)
+            ? Array.from(new Set(o.production_employee_ids.map(id => String(id)).filter(Boolean)))
+            : [],
+        assignmentMode: Array.isArray(o.production_employee_ids) && o.production_employee_ids.length > 0
+            ? 'manual'
+            : 'auto',
+        productionQuantity: Math.max(0, Number(o.production_quantity || 0)),
+        productionQuantityReliable: o.production_quantity_reliable !== false && Number(o.production_quantity || 0) > 0,
         phases,
         deliverySchedule,
         deliveryScheduleValid: deliveryValidation.valid,
@@ -2399,10 +2442,12 @@ function buildProductionSchedule(orders, settings) {
                     const phase = q.phases[q.currentPhaseIdx];
                     if (!phase || phase.remaining <= 0.001) return false;
                     const assignedWorkers = assignments.filter(value => value?.order === q).length;
+                    const slotEmployeeId = String(workerSlots?.[slotIndex]?.employeeId ?? `slot-${slotIndex + 1}`);
+                    if (q.employeeIds.length > 0 && !q.employeeIds.includes(slotEmployeeId)) return false;
                     const maxWorkersForOrder = Math.max(
                         1,
                         Math.min(
-                            q.parallelWorkersTarget || 1,
+                            q.employeeIds.length || q.parallelWorkersTarget || 1,
                             slotHours.length || 1,
                             Math.max(1, Math.ceil(workersCount || 1))
                         )
@@ -2451,6 +2496,8 @@ function buildProductionSchedule(orders, settings) {
                         phase: phase.name,
                         hours,
                         workerSlot: slotIndex + 1,
+                        employeeId: workerSlots?.[slotIndex]?.employeeId ?? `slot-${slotIndex + 1}`,
+                        employeeName: workerSlots?.[slotIndex]?.employeeName || `Сотрудник ${slotIndex + 1}`,
                         startHour,
                         endHour,
                         batchIndex: Number.isInteger(phase.batchIndex) ? phase.batchIndex : null,
@@ -2460,6 +2507,8 @@ function buildProductionSchedule(orders, settings) {
                         phase: allocation.phase,
                         hours: allocation.hours,
                         workerSlot: allocation.workerSlot,
+                        employeeId: allocation.employeeId,
+                        employeeName: allocation.employeeName,
                         startHour: allocation.startHour,
                         endHour: allocation.endHour,
                         batchIndex: allocation.batchIndex,
@@ -2503,9 +2552,73 @@ function buildProductionSchedule(orders, settings) {
                 milestone.finishDate = segments[segments.length - 1].date;
             }
         });
+
+        const groupedSegments = new Map();
+        (order.schedule || []).forEach((segment, index) => {
+            const key = `${segment.phase}:${Number.isInteger(segment.batchIndex) ? segment.batchIndex : 'all'}`;
+            if (!groupedSegments.has(key)) groupedSegments.set(key, []);
+            groupedSegments.get(key).push({ segment, index });
+        });
+        groupedSegments.forEach((entries, key) => {
+            const [phaseName, rawBatchIndex] = key.split(':');
+            const batchIndex = rawBatchIndex === 'all' ? null : Number(rawBatchIndex);
+            const phase = (order.phases || []).find(candidate => (
+                candidate.name === phaseName
+                && (Number.isInteger(batchIndex) ? candidate.batchIndex === batchIndex : !Number.isInteger(candidate.batchIndex))
+            ));
+            const quantity = Number.isInteger(batchIndex)
+                ? Number(phase?.batchQuantity || 0)
+                : Number(order.productionQuantity || 0);
+            const phaseHours = Number(phase?.total || 0);
+            const scheduledHours = entries.reduce((sum, entry) => sum + Number(entry.segment.hours || 0), 0);
+            if (!order.productionQuantityReliable || !(quantity > 0) || !(phaseHours > 0) || !(scheduledHours > 0)) {
+                entries.forEach(({ segment }) => {
+                    segment.plannedUnits = null;
+                    segment.needsNorm = true;
+                });
+                return;
+            }
+            const unitsToSchedule = Math.max(
+                0,
+                Math.min(quantity, Math.round(quantity * (scheduledHours / phaseHours)))
+            );
+            const rawShares = entries.map(({ segment }, index) => {
+                const raw = unitsToSchedule * (Number(segment.hours || 0) / scheduledHours);
+                const base = Math.floor(raw);
+                return { index, base, remainder: raw - base };
+            });
+            let unitsLeft = unitsToSchedule - rawShares.reduce((sum, share) => sum + share.base, 0);
+            rawShares
+                .slice()
+                .sort((left, right) => right.remainder - left.remainder || left.index - right.index)
+                .forEach(share => {
+                    if (unitsLeft <= 0) return;
+                    share.base += 1;
+                    unitsLeft -= 1;
+                });
+            rawShares.forEach(share => {
+                entries[share.index].segment.plannedUnits = share.base;
+                entries[share.index].segment.needsNorm = false;
+            });
+        });
     });
 
-    return { queue, dailyCapacity, days };
+    days.forEach(day => {
+        (day.allocations || []).forEach(allocation => {
+            const order = queue.find(candidate => Number(candidate.orderId) === Number(allocation.orderId));
+            const match = (order?.schedule || []).find(segment => (
+                segment.date === day.date
+                && segment.phase === allocation.phase
+                && Number(segment.workerSlot) === Number(allocation.workerSlot)
+                && Math.abs(Number(segment.startHour || 0) - Number(allocation.startHour || 0)) < 0.0001
+                && segment.batchIndex === allocation.batchIndex
+            ));
+            allocation.plannedUnits = match?.plannedUnits ?? null;
+            allocation.needsNorm = match?.needsNorm === true;
+        });
+    });
+
+    return { queue, dailyCapacity, days, workerSlots, hoursPerDay };
 }
 
 if (typeof module !== 'undefined' && module.exports) {

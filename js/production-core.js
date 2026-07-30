@@ -123,6 +123,52 @@
         return shortMatches.length === 1 ? shortMatches[0] : null;
     }
 
+    function isActiveCalendarEmployee(employee) {
+        return Boolean(
+            employee
+            && employee.is_active !== false
+            && employee.is_active !== 0
+            && employee.is_active !== 'false'
+            && !employee.fired_date
+        );
+    }
+
+    function buildProductionRoster(employees = [], planState = {}, limit = 4) {
+        const active = (employees || [])
+            .filter(isActiveCalendarEmployee)
+            .sort((left, right) => {
+                const leftProduction = String(left.role || '').trim().toLowerCase() === 'production' ? 0 : 1;
+                const rightProduction = String(right.role || '').trim().toLowerCase() === 'production' ? 0 : 1;
+                return leftProduction - rightProduction
+                    || String(left.name || '').localeCompare(String(right.name || ''), 'ru');
+            });
+        const activeById = new Map(active.map(employee => [String(employee.id), employee]));
+        const selected = [];
+        const seen = new Set();
+        const append = employee => {
+            const key = String(employee?.id ?? '');
+            if (!key || seen.has(key) || selected.length >= limit) return;
+            seen.add(key);
+            selected.push({
+                employeeId: employee.id,
+                employeeName: String(employee.name || 'Без имени'),
+                dailyHours: pcRound2(Number(employee.daily_hours || 0) > 0 ? Number(employee.daily_hours) : 9),
+                role: String(employee.role || ''),
+            });
+        };
+
+        const requestedRoster = Array.isArray(planState?.roster_employee_ids)
+            ? planState.roster_employee_ids
+            : [];
+        requestedRoster
+            .map(id => activeById.get(String(id)))
+            .filter(Boolean)
+            .forEach(append);
+        if (requestedRoster.length > 0 && selected.length > 0) return selected;
+        active.forEach(append);
+        return selected;
+    }
+
     function resolveEntryOrder(entry, indexedOrders = []) {
         if (!entry) return null;
         const directOrderId = Number(entry.order_id);
@@ -318,9 +364,15 @@
         const timeEntries = data.timeEntries || [];
         const employees = data.employees || [];
         const chinaPurchases = data.chinaPurchases || [];
+        const hasNamedRosterState = Object.prototype.hasOwnProperty.call(planState || {}, 'roster_employee_ids');
+        const roster = hasNamedRosterState
+            ? buildProductionRoster(employees, planState, 4)
+            : [];
 
         const manualStartDates = (planState && planState.manual_start_dates) || {};
         const parallelWorkers = (planState && planState.parallel_workers) || {};
+        const employeeAssignments = (planState && planState.employee_assignments) || {};
+        const rosterEmployeeIds = new Set(roster.map(slot => String(slot.employeeId)));
 
         const getOrderParallelWorkers = (orderId) => {
             const normalizedId = String(Number(orderId) || 0);
@@ -346,9 +398,22 @@
         const orderActuals = buildOrderActuals(timeEntries, employees, orders);
         const enrichedOrders = orders.map(order => {
             const actuals = orderActuals.get(Number(order.id)) || getEmptyOrderActuals();
+            const productionItems = (itemsByOrderId.get(Number(order.id)) || []).filter(item => {
+                const type = String(item?.item_type || 'product').trim().toLowerCase();
+                return type === 'product' || type === 'pendant';
+            });
             const orderProductionQuantity = typeof getOrderProductionQuantity === 'function'
-                ? getOrderProductionQuantity(itemsByOrderId.get(Number(order.id)) || [])
+                ? getOrderProductionQuantity(productionItems)
                 : 0;
+            const rawAssignment = Array.isArray(employeeAssignments[String(order.id)])
+                ? employeeAssignments[String(order.id)]
+                : [];
+            const validAssignment = Array.from(new Set(
+                rawAssignment.map(id => String(id)).filter(id => rosterEmployeeIds.has(id))
+            ));
+            const scheduleAssignment = rawAssignment.length > 0 && validAssignment.length === 0
+                ? ['__needs_reassignment__']
+                : validAssignment;
             const plannedMolding = pcRound2(order.production_hours_plastic || 0);
             const plannedAssembly = pcRound2(order.production_hours_hardware || 0);
             const plannedPackaging = pcRound2(order.production_hours_packaging || 0);
@@ -366,8 +431,11 @@
             return {
                 ...order,
                 production_quantity: orderProductionQuantity,
+                production_quantity_reliable: productionItems.length === 1 && orderProductionQuantity > 0,
                 production_not_before: manualStartDates[String(order.id)] || '',
                 production_parallel_workers: getOrderParallelWorkers(Number(order.id)),
+                production_employee_ids: scheduleAssignment,
+                production_assignment_needs_review: rawAssignment.length !== validAssignment.length,
                 actual_hours_molding: actuals.molding,
                 actual_hours_assembly: actuals.assembly,
                 actual_hours_packaging: actuals.packaging,
@@ -391,7 +459,9 @@
         const review = enrichedOrders.filter(order => order.production_ready_state === 'needs_review');
         const schedule = buildProductionSchedule(
             enrichedOrders.filter(order => order.production_ready_state === 'ready'),
-            settings
+            hasNamedRosterState && roster.length > 0
+                ? { ...settings, planning_worker_slots: roster }
+                : settings
         );
         const days = schedule.days || [];
         const dailyCapacity = schedule.dailyCapacity;
@@ -406,6 +476,8 @@
             overload,
             actuals: orderActuals,
             orders: enrichedOrders,
+            roster,
+            workerSlots: schedule.workerSlots || roster,
         };
     }
 
@@ -414,6 +486,7 @@
         buildOrderActuals,
         deriveReadyState,
         computeOverloadSummary,
+        buildProductionRoster,
     };
 
     // Attach individual functions to the global so gantt.js delegators and a
@@ -422,6 +495,7 @@
     global.buildOrderActuals = buildOrderActuals;
     global.deriveReadyState = deriveReadyState;
     global.computeOverloadSummary = computeOverloadSummary;
+    global.buildProductionRoster = buildProductionRoster;
     global.ProductionCore = api;
 
     if (typeof module !== 'undefined' && module.exports) {

@@ -15,7 +15,7 @@
 - In scope:
   - уникальная визуальная карта заказов;
   - верхняя очередь и панель редактирования;
-  - roster из active production employees;
+  - roster из active employees с приоритетом production;
   - автоматические и ручные именные назначения;
   - отсутствие пересечений на линии сотрудника;
   - плановые часы и безопасные плановые штуки;
@@ -27,9 +27,9 @@
 
 ## Environment / fixtures
 
-- Четыре активных production employee с разными `daily_hours`.
-- Пятый неактивный production employee.
-- Один сотрудник другой роли.
+- Четыре активных employee с разными `daily_hours` и ролями.
+- Пятый неактивный employee.
+- Один действующий management employee для проверки ручного выбора.
 - Очередь из 12 заказов для проверки цветов.
 - Верхний заказ на двух вручную выбранных людей.
 - Следующие два заказа в автоматическом режиме.
@@ -43,8 +43,9 @@
 ### Logic / unit
 
 - Нормализация отбрасывает неизвестные employee IDs.
-- Ровно четыре active production employees становятся roster автоматически.
-- Неактивный и non-production employee не занимают линию.
+- До четырёх active employees становятся roster автоматически, production
+  сотрудники идут первыми.
+- Неактивный сотрудник не занимает линию, active management доступен для выбора.
 - Каждому видимому order ID назначается уникальный color slot.
 - Соседние четыре заказа проходят минимальную цветовую дистанцию.
 - Reorder не меняет color slot существующего заказа.
@@ -84,8 +85,8 @@
 
 ## Negative / edge cases
 
-- В справочнике 0–3 production employees.
-- В справочнике больше четырёх production employees.
+- В справочнике 0–3 активных сотрудника.
+- В справочнике больше четырёх активных сотрудников.
 - Сохранённый employee ID больше не активен.
 - Один сотрудник вручную выбран в нескольких следующих заказах.
 - Очередь длиннее числа базовых цветовых слотов.
@@ -97,25 +98,25 @@
 
 ## Acceptance gates
 
-- [ ] JS syntax checks.
-- [ ] `node tests/production-calendar-smoke.js`
-- [ ] `node tests/partial-delivery-smoke.js`
-- [ ] `node tests/order-flow-smoke.js`
-- [ ] `node tests/employee-auth-payroll-smoke.js`
-- [ ] `node tests/version-smoke.js`
-- [ ] Headed browser fixture with 12+ orders and four named employees.
-- [ ] Desktop week/month visual check.
-- [ ] Narrow viewport visual check.
+- [x] JS syntax checks.
+- [x] `node tests/production-calendar-smoke.js`
+- [x] `node tests/partial-delivery-smoke.js`
+- [x] `node tests/order-flow-smoke.js`
+- [x] `node tests/employee-auth-payroll-smoke.js`
+- [x] `node tests/version-smoke.js`
+- [x] Headed browser fixture with 12+ orders and four named employees.
+- [x] Desktop week/month visual check.
+- [x] Narrow viewport visual check.
 
 ## Release / demo readiness
 
-- [ ] Все видимые заказы различимы.
-- [ ] Очередь управляется без постоянной потери ширины.
-- [ ] Руководитель видит конкретные имена.
-- [ ] Ручные назначения не нарушают ресурсные инварианты.
-- [ ] Сегодняшний план понятен в часах и, где возможно, в штуках.
-- [ ] Старые планы открываются без ручной миграции.
-- [ ] Нет blocker-level known issue.
+- [x] Все видимые заказы различимы.
+- [x] Очередь управляется без постоянной потери ширины.
+- [x] Руководитель видит конкретные имена.
+- [x] Ручные назначения не нарушают ресурсные инварианты.
+- [x] Сегодняшний план понятен в часах и, где возможно, в штуках.
+- [x] Старые планы открываются без ручной миграции.
+- [x] Нет blocker-level known issue.
 
 ## Command matrix
 
