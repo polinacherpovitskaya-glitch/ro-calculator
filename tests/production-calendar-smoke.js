@@ -39,7 +39,7 @@ assert.match(ganttJs, /renderPriorityCard\(item, index/, 'Gantt must render comp
 assert.match(ganttJs, /getOrderScheduleWindow\(item\)/, 'Priority queue must expose each order start and finish forecast');
 assert.match(ganttJs, /isOrderWaitingForStart\(item\)/, 'Future orders must remain visibly marked as waiting');
 assert.match(ganttJs, /Дальше ждут очереди/, 'Ready future orders must remain visible below the currently starting queue');
-assert.match(ganttJs, /Распределятся после освобождения людей/, 'Waiting orders must explain when they enter production');
+assert.match(ganttJs, /Начнут после освобождения людей/, 'Waiting orders must explain when they enter production');
 assert.match(ganttJs, /renderWorkerLane\(workerSlot, queue/, 'Gantt must render work by person instead of by order');
 assert.match(ganttJs, /getWorkerLaneAllocations\(queue = \[\], workerSlot/, 'Gantt must expose worker-lane allocations');
 assert.match(ganttJs, /highlightOrder\(orderId\)/, 'Calendar must cross-highlight related order work');
@@ -306,6 +306,40 @@ assert.deepEqual(
 assert.equal(fiveShortOrders.queue[4].schedule[0].workerSlot, 1, 'The fifth order must reuse a released worker line');
 assert.equal(fiveShortOrders.queue[4].schedule[0].startHour, 4, 'The fifth order must start after the first order ends, not in parallel');
 
+const firstWaveSizes = [2, 3, 4].map(workerTarget => {
+    const schedule = vm.runInContext(`
+        buildProductionSchedule([
+            {
+                id: 100,
+                order_name: 'Priority team order',
+                status: 'production_casting',
+                production_hours_plastic: ${workerTarget * 9},
+                production_hours_hardware: 0,
+                production_hours_packaging: 0,
+                production_parallel_workers: ${workerTarget}
+            },
+            ...[101, 102, 103].map(id => ({
+                id,
+                order_name: 'Following order ' + id,
+                status: 'production_casting',
+                production_hours_plastic: 9,
+                production_hours_hardware: 0,
+                production_hours_packaging: 0
+            }))
+        ], {
+            planning_workers_count: 4,
+            planning_hours_per_day: 9
+        })
+    `, context);
+    const firstDay = JSON.parse(JSON.stringify(schedule.days[0].allocations));
+    return new Set(firstDay.filter(allocation => allocation.startHour === 0).map(allocation => allocation.orderId)).size;
+});
+assert.deepEqual(
+    firstWaveSizes,
+    [3, 2, 1],
+    'Two, three, or four people on the priority order must leave room for three, two, or one simultaneous order rows'
+);
+
 const allocationsByWorkerDay = new Map();
 fiveShortOrders.days.forEach(day => {
     day.allocations.forEach(allocation => {
@@ -494,6 +528,34 @@ const futureQueueCard = vm.runInContext(`
 `, ganttContext);
 assert.match(futureQueueCard, /waiting/, 'A fully forecast future order must still be visually marked as waiting');
 assert.match(futureQueueCard, /Ждёт очереди/, 'Future order must explain that it has not started yet');
+
+const laterTodayQueueCard = vm.runInContext(`
+    (() => {
+        const today = new Date();
+        const toLocalIso = date => [
+            date.getFullYear(),
+            String(date.getMonth() + 1).padStart(2, '0'),
+            String(date.getDate()).padStart(2, '0')
+        ].join('-');
+        return Gantt.renderPriorityCard({
+            orderId: 57,
+            orderName: 'Позже в смене',
+            plannedTotalHours: 4,
+            remainingTotalHours: 4,
+            done: true,
+            schedule: [{
+                date: toLocalIso(today),
+                phase: 'molding',
+                hours: 4,
+                workerSlot: 1,
+                startHour: 4,
+                endHour: 8
+            }]
+        }, 4);
+    })()
+`, ganttContext);
+assert.match(laterTodayQueueCard, /Ждёт очереди/, 'An order starting later in the same shift must stay below the immediate wave');
+assert.match(laterTodayQueueCard, /Старт сегодня \+4ч/, 'Same-day waiting order must expose its offset inside the shift');
 
 const blockedState = JSON.parse(JSON.stringify(vm.runInContext(`
     Gantt.getOrderReadiness(

@@ -614,11 +614,13 @@ const Gantt = {
             this.isOrderWaitingForStart(item)
             && priorityQueue.slice(index).every(candidate => this.isOrderWaitingForStart(candidate))
         ));
+        const immediateOrderCount = priorityQueue.filter(item => !this.isOrderWaitingForStart(item)).length;
+        const waitingOrderCount = Math.max(priorityQueue.length - immediateOrderCount, 0);
         const priorityCards = priorityQueue.map((item, index) => `
             ${index === waitingTailIndex ? `
                 <div class="gantt-waiting-divider">
                     <strong>Дальше ждут очереди</strong>
-                    <span>Распределятся после освобождения людей</span>
+                    <span>Начнут после освобождения людей</span>
                 </div>` : ''}
             ${this.renderPriorityCard(item, index, holidaySet)}
         `).join('');
@@ -651,7 +653,7 @@ const Gantt = {
                     <div class="gantt-priority-header">
                         <div>
                             <strong>Приоритеты</strong>
-                            <span>${priorityQueue.length} заказов · меняйте порядок</span>
+                            <span>${immediateOrderCount} сразу · ${waitingOrderCount} ждут</span>
                         </div>
                         <span class="gantt-team-label">4 чел.</span>
                     </div>
@@ -697,32 +699,58 @@ const Gantt = {
         const schedule = Array.isArray(item?.schedule)
             ? item.schedule.filter(segment => segment?.date)
             : [];
-        if (!schedule.length) return { startDate: null, finishDate: null };
+        if (!schedule.length) {
+            return { startDate: null, startHour: null, finishDate: null, finishHour: null };
+        }
+        const normalized = schedule.map(segment => ({
+            ...segment,
+            startHour: Number.isFinite(Number(segment.startHour)) ? Number(segment.startHour) : 0,
+            endHour: Number.isFinite(Number(segment.endHour))
+                ? Number(segment.endHour)
+                : Number(segment.startHour || 0) + Number(segment.hours || 0),
+        }));
+        const starts = [...normalized].sort((left, right) => (
+            String(left.date).localeCompare(String(right.date))
+            || left.startHour - right.startHour
+        ));
+        const finishes = [...normalized].sort((left, right) => (
+            String(left.date).localeCompare(String(right.date))
+            || left.endHour - right.endHour
+        ));
+        const first = starts[0];
+        const last = finishes[finishes.length - 1];
         return {
-            startDate: schedule[0].date,
-            finishDate: schedule[schedule.length - 1].date,
+            startDate: first.date,
+            startHour: first.startHour,
+            finishDate: last.date,
+            finishHour: last.endHour,
         };
     },
 
     isOrderWaitingForStart(item) {
         if (!item) return false;
-        const { startDate } = this.getOrderScheduleWindow(item);
+        const { startDate, startHour } = this.getOrderScheduleWindow(item);
         if (!startDate) return !item.done;
         const today = new Date();
         today.setHours(0, 0, 0, 0);
         const plannedStart = this.parseLocalDate(startDate);
         plannedStart.setHours(0, 0, 0, 0);
-        return plannedStart > today;
+        return plannedStart > today
+            || (plannedStart.getTime() === today.getTime() && Number(startHour || 0) > 0.001);
     },
 
-    formatScheduleDate(dateStr, todayLabel = false) {
+    formatScheduleDate(dateStr, todayLabel = false, startHour = 0) {
         if (!dateStr) return 'за горизонтом';
         if (todayLabel) {
             const today = new Date();
             today.setHours(0, 0, 0, 0);
             const date = this.parseLocalDate(dateStr);
             date.setHours(0, 0, 0, 0);
-            if (date.getTime() === today.getTime()) return 'сегодня';
+            if (date.getTime() === today.getTime()) {
+                return Number(startHour || 0) > 0.001
+                    ? `сегодня +${this.formatHours(startHour)}`
+                    : 'сегодня';
+            }
         }
         return this.formatDateStr(dateStr);
     },
@@ -733,7 +761,7 @@ const Gantt = {
         const risk = this.getNextDeliveryRiskSummary(item) || this.getDeadlineRiskSummary(item, holidaySet);
         const scheduleWindow = this.getOrderScheduleWindow(item);
         const isWaiting = this.isOrderWaitingForStart(item);
-        const startLabel = this.formatScheduleDate(scheduleWindow.startDate, true);
+        const startLabel = this.formatScheduleDate(scheduleWindow.startDate, true, scheduleWindow.startHour);
         const finishLabel = this.formatScheduleDate(scheduleWindow.finishDate);
         const workerTarget = Math.max(
             1,
