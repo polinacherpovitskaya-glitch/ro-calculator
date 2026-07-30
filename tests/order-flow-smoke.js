@@ -1403,8 +1403,10 @@ async function smokeBlankPricingSeparatesCatalogPriceAndNetMargin(context) {
             name: 'Blank Smoke',
             custom_prices: { 500: 210 },
             custom_margins: {},
+            use_manual_prices: true,
         }];
         Calculator.resetForm();
+        Calculator.__blankCostSmokeOriginal = Calculator._calcBlankBaseCostFromTemplate;
         Calculator._calcBlankBaseCostFromTemplate = () => 108.25;
 
         Calculator.items = [Calculator.getEmptyItem(1), Calculator.getEmptyItem(2)];
@@ -1451,6 +1453,110 @@ async function smokeBlankPricingSeparatesCatalogPriceAndNetMargin(context) {
     assert.match(pricingHtml, /налога 7%/);
     assert.match(pricingHtml, /коммерческого 6\.5%/);
     assert.match(pricingHtml, /pricing-grid-compact/);
+    vm.runInContext(`
+        Calculator._calcBlankBaseCostFromTemplate = Calculator.__blankCostSmokeOriginal;
+        delete Calculator.__blankCostSmokeOriginal;
+    `, context);
+}
+
+async function smokeNfcBlankPricingMatchesCatalogTier(context) {
+    const state = clone(await vm.runInContext(`(() => {
+        const params = {
+            wasteFactor: 1.1,
+            fotPerHour: 100,
+            indirectCostMode: 'all',
+            indirectPerHour: 50,
+            taxRate: 0.07,
+            charityRate: 0.01,
+            commercialRate: 0.07,
+            packagingHours: 8,
+            plasticHours: 8,
+            hardwareHours: 8,
+            plasticCostPerKg: 2500,
+            moldBaseCost: 18000,
+            designCost: 0,
+            cuttingSpeed: 300,
+            nfcTagCost: 39,
+            nfcWriteSpeed: 350,
+            setupHoursBlank: 0.5,
+            setupHoursCustom: 1,
+            orderProcessingCost: 4000,
+            printingDeliveryCost: 0,
+            deliveryCostMoscow: 0,
+        };
+        const dormantHistoricalPrice = 910;
+        const blank = {
+            id: 'nfc-blank-parity',
+            name: 'NFC галька',
+            category: 'nfc',
+            status: 'active',
+            pph_actual: 20,
+            pph_min: 18,
+            pph_max: 22,
+            weight_grams: 30,
+            cost_cny: 1200,
+            cny_rate: 12.5,
+            delivery_cost: 3000,
+            mold_count: 1,
+            hw_name: 'NFC',
+            hw_price_per_unit: 25,
+            hw_delivery_total: 0,
+            hw_speed: 0,
+            builtin_assembly_name: '',
+            builtin_assembly_speed: 0,
+            custom_prices: { 3000: dormantHistoricalPrice },
+            custom_margins: {},
+            use_manual_prices: false,
+            disable_historical_blank_price_recovery: false,
+        };
+
+        App.params = params;
+        Molds.allMolds = [blank];
+        Molds.enrichMolds();
+        App.templates = [{ ...blank }];
+        App.getItemOriginLabel = () => 'бланк';
+
+        Calculator.resetForm();
+        const item = Calculator.getEmptyItem(1);
+        item.product_name = blank.name;
+        item.quantity = 3000;
+        item.template_id = blank.id;
+        item.pieces_per_hour = blank.pph_actual;
+        item.weight_grams = blank.weight_grams;
+        item.is_blank_mold = true;
+        item.is_nfc = true;
+        item.nfc_programming = true;
+        item.result = calculateItemCost(item, params);
+
+        Calculator.items = [item];
+        Calculator.hardwareItems = [];
+        Calculator.packagingItems = [];
+        Calculator.extraCosts = [];
+        Calculator.pendants = [];
+
+        const catalogTier = Molds.allMolds[0].tiers[3000];
+        const calculatorCost = Calculator._calcBlankBaseCostFromTemplate(item, item.quantity, params);
+        Calculator.renderPricingCard(params);
+        const html = document.getElementById('calc-pricing-content').innerHTML;
+
+        return {
+            catalogCost: catalogTier.cost,
+            catalogPrice: catalogTier.sellPrice,
+            calculatorCost,
+            hasCatalogPrice: html.includes(formatRub(catalogTier.sellPrice)),
+            hasDormantHistoricalPrice: html.includes(formatRub(dormantHistoricalPrice)),
+            marksPriceAsManual: html.includes('вручную в бланке'),
+        };
+    })()`, context));
+
+    assert.equal(
+        state.calculatorCost,
+        state.catalogCost,
+        'calculator NFC blank cost must use the same 3K tier model as the blanks directory',
+    );
+    assert.equal(state.hasCatalogPrice, true, 'calculator must show the 3K sell price from the blanks formula');
+    assert.equal(state.hasDormantHistoricalPrice, false, 'inactive historical prices must not override the live formula');
+    assert.equal(state.marksPriceAsManual, false, 'inactive historical prices must not be labeled as manual');
 }
 
 async function smokeBlankTargetFormulaMatchesVatExclusiveMargin(context) {
@@ -8711,6 +8817,7 @@ async function main() {
     await smokeOrderListSummaryMatchesCardForAllInputs(context);
     await smokeOrderMetaBundleUsesLightItemsForHardware(context);
     await smokeBlankPricingSeparatesCatalogPriceAndNetMargin(context);
+    await smokeNfcBlankPricingMatchesCatalogTier(context);
     await smokeBlankTargetFormulaMatchesVatExclusiveMargin(context);
     await smokeWarehouseBackedNfcDoesNotDoubleCountFallback(context);
     await smokePendantFallbackTierMatchesVatExclusiveMargin();
