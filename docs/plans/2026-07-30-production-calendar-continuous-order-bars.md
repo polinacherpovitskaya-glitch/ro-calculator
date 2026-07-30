@@ -2,7 +2,7 @@
 
 **Spec:** `docs/specs/2026-07-30-production-calendar-continuous-order-bars.md`
 **Created:** 2026-07-30
-**Status:** In progress
+**Status:** Complete
 
 ## Milestone 1 — Зафиксировать строгий приоритет
 
@@ -45,10 +45,10 @@
 - [x] Обновить production-calendar smoke под новый DOM-контракт.
 - [x] Прогнать сценарии `1 → 2 → 3 → 4 человека` в реальном браузере.
 - [x] Проверить week/month zoom и узкую/широкую очередь.
-- [ ] Запустить syntax, production-calendar, order-flow и version smokes.
-- [ ] Выбрать следующую версию от актуального `origin/main` и обновить четыре
+- [x] Запустить syntax, production-calendar, order-flow и version smokes.
+- [x] Выбрать следующую версию от актуального `origin/main` и обновить четыре
   version anchor плюс cache-bust изменённых runtime-файлов.
-- [ ] Проверить diff на случайные изменения схемы, API и пользовательских
+- [x] Проверить diff на случайные изменения схемы, API и пользовательских
   файлов.
 
 **Gate:** автоматические и визуальные проверки проходят, версия согласована во
