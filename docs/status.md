@@ -49,6 +49,20 @@
   production catalog numbers were not mutated.
 - Browser console errors in this pass are expected network/auth noise from the
   deliberately isolated local session; no production write was attempted.
+- Release candidate is `v430`, selected after refreshing `origin/main` at
+  `v429`.
+
+### Validation after fixes
+
+- Passed syntax checks for every `js/*.js` and `corporate-gift/*.js`.
+- Passed `version-smoke`, `order-flow-smoke`, `supabase-fallback-smoke`,
+  `pricing-canon-smoke`, `molds-smoke`, `factual-smoke`, `finance-smoke` and
+  `warehouse-migration-smoke`.
+- Passed pricing-surface, code-health and data-path audits.
+- Passed ops calculator build, typecheck and the focused 49-test
+  pricing/live-calc/plan-fact suite.
+- Full ops golden-master route tests require the absent local PostgreSQL fixture
+  at `127.0.0.1:5433`; all non-DB ops calculator tests passed.
 
 ### Next exact task
 

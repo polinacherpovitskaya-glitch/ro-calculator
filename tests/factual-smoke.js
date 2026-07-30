@@ -122,6 +122,16 @@ function smokeHiddenSalaryTotals(context) {
     assert.ok(!html.includes('250 ₽'), 'total should not double count hidden salary rows');
 }
 
+function smokeCommercialRateUsesActiveParams(context) {
+    const state = vm.runInContext(`(() => ({
+        fallback: Factual._calcCommercialByRevenue(1000, {}),
+        configured: Factual._calcCommercialByRevenue(1000, { commercialRate: 0.065 }),
+    }))()`, context);
+
+    assert.equal(state.fallback, 70, 'commercial plan should default to the current 7% business rate');
+    assert.equal(state.configured, 65, 'commercial plan should follow the active settings rate');
+}
+
 function smokeRevenueManualOverride(context) {
     vm.runInContext(`(() => {
         Factual._orderCache[5] = {
@@ -1205,6 +1215,7 @@ async function main() {
     const context = createContext();
     runScript(context, 'js/factual.js');
     smokeHiddenSalaryTotals(context);
+    smokeCommercialRateUsesActiveParams(context);
     smokeSavedPlanTotalWins(context);
     smokeFactDetailShowsFinTabloBreakdown(context);
     smokeRevenueManualOverride(context);

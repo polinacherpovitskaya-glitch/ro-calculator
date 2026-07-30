@@ -33,6 +33,8 @@ const params: Partial<ProductionParams> = {
 
 test('round2 rounds standard money values', () => {
   assert.equal(round2(10.235), 10.24);
+  assert.equal(round2(25.875), 25.88);
+  assert.equal(round2(-25.875), -25.88);
 });
 
 test('round2 handles non-numeric input as zero', () => {
@@ -64,8 +66,8 @@ test('charityRate defaults to 1%', () => {
   assert.equal(charityRate({}), 0.01);
 });
 
-test('commercialRate defaults to 6.5%', () => {
-  assert.equal(commercialRate({}), 0.065);
+test('commercialRate defaults to 7%', () => {
+  assert.equal(commercialRate({}), 0.07);
 });
 
 test('netRevenueRetentionRate subtracts tax, commercial, and charity', () => {

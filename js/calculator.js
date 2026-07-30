@@ -1432,6 +1432,7 @@ function calculateFinDirectorData(items, hardwareItems, packagingItems, params, 
     const safeTaxRate = getTaxRate(params);
     const safeVatRate = getVatRate(params);
     const safeCharityRate = getCharityRate(params);
+    const safeCommercialRate = getCommercialRate(params);
     const safeDesignCost = Number.isFinite(params?.designCost) ? params.designCost : 0;
     const safeMoldBaseCost = Number.isFinite(params?.moldBaseCost) ? params.moldBaseCost : 0;
     const safeDeliveryCostMoscow = Number.isFinite(params?.deliveryCostMoscow) ? params.deliveryCostMoscow : 0;
@@ -1635,7 +1636,7 @@ function calculateFinDirectorData(items, hardwareItems, packagingItems, params, 
     const discountedRevenue = discount.revenueAfterDiscount;
     const totalTaxes = calcTaxesAmount(discountedRevenue, { taxRate: safeTaxRate });
     const totalCharity = calcCharityAmount(discountedRevenue, { vatRate: safeVatRate, charityRate: safeCharityRate });
-    totalCommercial = calcCommercialAmount(discountedRevenue, { vatRate: safeVatRate });
+    totalCommercial = calcCommercialAmount(discountedRevenue, { commercialRate: safeCommercialRate });
 
     return {
         salary: round2(totalSalary),
@@ -2037,7 +2038,10 @@ function getOrderLiveCalculatorSnapshot(order = {}, orderItems = [], params = nu
 // === Утилиты ===
 
 function round2(n) {
-    return Math.round(n * 100) / 100;
+    const value = Number(n);
+    if (!Number.isFinite(value)) return value;
+    const correction = Math.sign(value || 1) * Number.EPSILON * Math.max(1, Math.abs(value));
+    return Math.round((value + correction) * 100) / 100;
 }
 
 function getEmptyCostResult() {

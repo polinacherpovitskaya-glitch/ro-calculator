@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="css/style.css?v=428">
     <script>
         (function () {
-        const CURRENT_HTML_VERSION = 'v429';
+        const CURRENT_HTML_VERSION = 'v430';
             const ATTEMPT_KEY = 'ro_calc_force_update_attempts';
 
             function parseVersion(version) {
@@ -187,7 +187,7 @@
     <aside class="sidebar">
         <div class="sidebar-brand">
             <h2>Recycle Object</h2>
-            <span>Калькулятор <span id="app-version">v429</span></span>
+            <span>Калькулятор <span id="app-version">v430</span></span>
         </div>
         <nav class="sidebar-nav">
             <div class="sidebar-group-label">Каждый день</div>
@@ -480,7 +480,7 @@
             <div class="card" id="calc-pricing" style="display:none">
                 <div class="card-header">
                     <h3>Ценообразование</h3>
-                    <span style="font-size:11px; color:var(--text-muted)">+ 6% ОСН + 6.5% коммерч. уже заложены</span>
+                    <span id="calc-pricing-rate-note" style="font-size:11px; color:var(--text-muted)">+ 7% налог + 7% коммерч. уже заложены</span>
                 </div>
                 <div id="calc-pricing-content"></div>
             </div>
@@ -542,9 +542,9 @@
                     <div class="cost-row"><span class="cost-label">Пластик</span><span class="cost-value" id="fin-plastic">0 &#8381;</span></div>
                     <div class="cost-row"><span class="cost-label">Молды</span><span class="cost-value" id="fin-molds">0 &#8381;</span></div>
                     <div class="cost-row"><span class="cost-label">Доставка клиенту</span><span class="cost-value" id="fin-delivery">0 &#8381;</span></div>
-                    <div class="cost-row"><span class="cost-label">Коммерческий отдел (6.5% от базы без НДС)</span><span class="cost-value" id="fin-commercial">0 &#8381;</span></div>
-                    <div class="cost-row"><span class="cost-label">Налоги от выручки без НДС (7%)</span><span class="cost-value" id="fin-taxes">0 &#8381;</span></div>
-                    <div class="cost-row"><span class="cost-label">Благотворительность (1% от базы без НДС)</span><span class="cost-value" id="fin-charity">0 &#8381;</span></div>
+                    <div class="cost-row"><span class="cost-label" id="fin-commercial-label">Коммерческий отдел (7% от базы без НДС)</span><span class="cost-value" id="fin-commercial">0 &#8381;</span></div>
+                    <div class="cost-row"><span class="cost-label" id="fin-taxes-label">Налоги от выручки без НДС (7%)</span><span class="cost-value" id="fin-taxes">0 &#8381;</span></div>
+                    <div class="cost-row"><span class="cost-label" id="fin-charity-label">Благотворительность (1% от базы без НДС)</span><span class="cost-value" id="fin-charity">0 &#8381;</span></div>
                     <div class="cost-row cost-total"><span class="cost-label">ИТОГО расходы</span><span class="cost-value" id="fin-total-costs">0 &#8381;</span></div>
                     <div class="cost-row" id="fin-discount-row" style="display:none"><span class="cost-label">Скидка по заказу</span><span class="cost-value" id="fin-discount">0 &#8381;</span></div>
                     <div class="cost-row" style="margin-top:8px"><span class="cost-label">Выручка без НДС</span><span class="cost-value text-green" id="fin-revenue">0 &#8381;</span></div>
@@ -3609,11 +3609,11 @@
 <script src="js/bug-report-core.js?v=2"></script>
 <script src="js/supabase.js?v=422"></script>
 <script src="js/task-events.js?v=1"></script>
-<script src="js/calculator.js?v=428"></script>
-<script src="js/app.js?v=429"></script>
+<script src="js/calculator.js?v=430"></script>
+<script src="js/app.js?v=430"></script>
 <script src="js/tpa.js?v=4"></script>
-<script src="js/order-detail.js?v=412"></script>
-<script src="js/orders.js?v=426"></script>
+<script src="js/order-detail.js?v=430"></script>
+<script src="js/orders.js?v=430"></script>
 <script src="js/production_plan.js?v=76"></script>
 <script src="js/analytics.js?v=46g"></script>
     <script src="js/molds.js?v=411"></script>
@@ -3628,7 +3628,7 @@
 <script src="js/fintablo.js?v=2"></script>
   <script src="js/finance.js?v=27"></script>
 <script src="js/indirect_costs.js?v=9"></script>
-<script src="js/factual.js?v=95"></script>
+<script src="js/factual.js?v=430"></script>
 <script src="js/production_load.js?v=408"></script>
 <script src="js/china.js?v=165"></script>
 <script src="js/warehouse_photos.js?v=48"></script>

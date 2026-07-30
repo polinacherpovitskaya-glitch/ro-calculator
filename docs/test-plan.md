@@ -82,6 +82,15 @@ Every row below must be checked across the applicable dimensions:
 - [x] order-detail item margin using gross instead of canonical net margin
 - [x] stale 6.5% labels and ignored `commercialRate` setting
 
+### Pass-1 release gates
+
+- [x] all runtime JavaScript syntax checks
+- [x] four `v430` anchors and changed-script cache busts
+- [x] order, persistence, pricing, molds, factual, finance and warehouse smokes
+- [x] pricing-surface, code-health and data-path audits
+- [x] ops calculator build, typecheck and focused 49-test suite
+- [ ] full ops route golden master (requires local PostgreSQL on port 5433)
+
 ### Phase-1 exit gate
 
 - All header fields and representative item-source fields survive both save

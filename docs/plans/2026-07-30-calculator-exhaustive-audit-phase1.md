@@ -13,9 +13,9 @@
 - [ ] Compare the same fixture in calculator, orders list, order detail,
       production load, FinDirector, invoice and KP.
 - [x] Fix each confirmed first-pass defect with a regression.
-- [ ] Refresh from `origin/main`, bump the four version anchors and changed
+- [x] Refresh from `origin/main`, bump the four version anchors and changed
       runtime cache-bust suffixes if runtime code changes.
-- [ ] Run the focused and broad regression gates and document the exact result.
+- [x] Run the focused and broad regression gates and document the exact result.
 - [ ] Ship the phase-1 package and verify both production mirrors if a runtime
       fix is required.
 
@@ -39,3 +39,14 @@
     FinDirector and plan-fact.
 - Warehouse mutation remains deferred to the dedicated reversible fixture in
   C4.
+
+## Release validation
+
+- Refreshed `origin/main` remained at `v429`; this package targets `v430`.
+- Passed all JavaScript syntax checks plus version, order-flow,
+  Supabase-fallback, pricing-canon, molds, factual, finance,
+  warehouse-migration, pricing-surface, code-health and data-path checks.
+- Ops calculator TypeScript build and typecheck passed. The focused 49-test
+  pricing/live-calc/plan-fact suite passed. The full ops suite additionally
+  requires its PostgreSQL fixture on `127.0.0.1:5433`; those 24 integration
+  cases were not available in this local environment.

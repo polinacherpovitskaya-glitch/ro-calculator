@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v429';
+const APP_VERSION = 'v430';
 
 const App = {
     currentPage: 'orders',
@@ -4718,6 +4718,9 @@ const Calculator = {
             this.setText('fin-taxes', formatRub(isNonCommercial ? 0 : fin.taxes));
             this.setText('fin-commercial', formatRub(isNonCommercial ? 0 : fin.commercial));
             this.setText('fin-charity', formatRub(isNonCommercial ? 0 : fin.charity));
+            this.setText('fin-taxes-label', `Налоги от выручки без НДС (${round2(getTaxRate(params) * 100)}%)`);
+            this.setText('fin-commercial-label', `Коммерческий отдел (${round2(getCommercialRate(params) * 100)}% от базы без НДС)`);
+            this.setText('fin-charity-label', `Благотворительность (${round2(getCharityRate(params) * 100)}% от базы без НДС)`);
             this.setText('fin-total-costs', formatRub(isNonCommercial ? summary.nonCommercialLoss : fin.totalCosts));
             this.setText('fin-revenue', formatRub(isNonCommercial ? 0 : fin.revenue));
             this.setText('fin-discount', '−' + formatRub(fin.discountAmount || 0));
@@ -4867,6 +4870,10 @@ const Calculator = {
             console.warn('[renderPricingCard] DOM elements not found', { pricingEl: !!pricingEl, contentEl: !!contentEl });
             return;
         }
+        this.setText(
+            'calc-pricing-rate-note',
+            `+ ${round2(getTaxRate(params) * 100)}% налог + ${round2(getCommercialRate(params) * 100)}% коммерч. уже заложены`
+        );
 
         if (this.isLeftoverAssembly()) {
             const leftover = this.getLeftoverAssembly();
@@ -5205,7 +5212,7 @@ const Calculator = {
         });
 
         // Margin row (% only)
-        html += `<div style="padding:5px 6px;border-right:1px solid var(--border);font-weight:600;line-height:1.2;">Чистая маржа<div style="font-size:9px;color:var(--text-muted);font-weight:400;line-height:1.2;margin-top:2px;">на цене без НДС; после налога 7%, благотворительности 1% и коммерческого 6.5% от базы без НДС</div></div>`;
+        html += `<div style="padding:5px 6px;border-right:1px solid var(--border);font-weight:600;line-height:1.2;">Чистая маржа<div style="font-size:9px;color:var(--text-muted);font-weight:400;line-height:1.2;margin-top:2px;">на цене без НДС; после налога ${round2(getTaxRate(params) * 100)}%, благотворительности ${round2(getCharityRate(params) * 100)}% и коммерческого ${round2(getCommercialRate(params) * 100)}% от базы без НДС</div></div>`;
         columns.forEach(col => {
             let marginHtml = '—';
             let warnHtml = '';

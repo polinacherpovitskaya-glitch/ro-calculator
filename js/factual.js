@@ -46,7 +46,7 @@ const Factual = {
         { key: 'molds',               label: 'Молды',            planField: 'molds',            hint: 'FinTablo / вруч.' },
         { key: 'delivery_client',     label: 'Доставка',         planField: 'delivery',         hint: 'вручную' },
         { key: 'taxes',               label: 'Налоги',            planField: 'taxes',            hint: '7% от выручки без НДС / ФинТабло' },
-        { key: 'commercial',          label: 'Коммерческий отдел', planField: 'commercial',     hint: '6.5% от выручки без НДС' },
+        { key: 'commercial',          label: 'Коммерческий отдел', planField: 'commercial',     hint: '7% от выручки без НДС' },
         { key: 'charity',             label: 'Благотворительность', planField: 'charity',       hint: '1% от выручки без НДС / ФинТабло' },
         { key: 'other',               label: 'Прочее',           planField: 'other',            hint: 'FinTablo / вруч.' },
     ],
@@ -89,9 +89,9 @@ const Factual = {
     _vatRate(params) { const raw = Number(params?.vatRate); return Number.isFinite(raw) ? raw : 0.05; },
     _taxRate(params) { const raw = Number(params?.taxRate); return Number.isFinite(raw) ? raw : 0.07; },
     _charityRate(params) { const raw = Number(params?.charityRate); return Number.isFinite(raw) ? raw : 0.01; },
-    _commercialRate() { return 0.07; },
+    _commercialRate(params) { const raw = Number(params?.commercialRate); return Number.isFinite(raw) ? raw : 0.07; },
     _calcTaxesByRevenue(revenue, params) { return round2(this._num(revenue) * this._taxRate(params)); },
-    _calcCommercialByRevenue(revenue, params) { return round2(this._num(revenue) * this._commercialRate()); },
+    _calcCommercialByRevenue(revenue, params) { return round2(this._num(revenue) * this._commercialRate(params)); },
     _calcCharityByRevenue(revenue, params) { return round2(this._num(revenue) * this._charityRate(params)); },
     _planItemCost(item, ...keys) {
         for (const key of keys) {
@@ -1087,7 +1087,8 @@ _renderCompactResult(result, options = {}) {
         }
         if (rowKey === 'commercial') {
             const factRevenue = this._num(factData.fact_revenue);
-            return factRevenue > 0 ? `6.5% от ${this.fmtRub(factRevenue)} без НДС` : '';
+            const rate = this._commercialRate(App.params || {});
+            return factRevenue > 0 ? `${round2(rate * 100)}% от ${this.fmtRub(factRevenue)} без НДС` : '';
         }
         if (rowKey === 'charity') {
             const factRevenue = this._num(factData.fact_revenue);
@@ -2028,7 +2029,13 @@ async _loadFactSummaries() {
             if (effectiveCommercial > 0) {
                 this._applyAutoFactValue(factData, 'fact_commercial', effectiveCommercial);
                 factData._auto_fintablo.fact_commercial = importedCommercial > 0;
-                this._setSourceHint(factData, 'fact_commercial', importedCommercial > 0 ? 'ФинТабло' : '6.5% от факта выручки без НДС');
+                this._setSourceHint(
+                    factData,
+                    'fact_commercial',
+                    importedCommercial > 0
+                        ? 'ФинТабло'
+                        : `${round2(this._commercialRate(params) * 100)}% от факта выручки без НДС`
+                );
             }
             const effectiveCharity = importedCharity > 0 ? importedCharity : charityByRevenue;
             if (effectiveCharity > 0) {
@@ -2673,7 +2680,10 @@ async _loadFactSummaries() {
             const rate = this._taxRate(App.params || {});
             return rate > 0 ? `${round2(rate * 100)}% от выручки без НДС` : '';
         }
-        if (rowKey === 'commercial') return '6.5% от выручки без НДС';
+        if (rowKey === 'commercial') {
+            const rate = this._commercialRate(App.params || {});
+            return rate > 0 ? `${round2(rate * 100)}% от выручки без НДС` : '';
+        }
         if (rowKey === 'charity') return '1% от выручки без НДС';
         if (rowKey === 'plastic' || rowKey === 'molds') {
             const amount = this._num(planData?.[rowKey === 'delivery_client' ? 'delivery' : rowKey]);

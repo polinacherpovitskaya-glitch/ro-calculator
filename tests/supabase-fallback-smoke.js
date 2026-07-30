@@ -421,6 +421,133 @@ function persistTableRows(context, table, payload) {
 async function main() {
     {
         const context = createContext();
+        const orderId = 730001;
+        context.__tableRows.orders = [{
+            id: orderId,
+            order_name: 'AUDIT / Data-layer header',
+            status: 'draft',
+            calculator_data: JSON.stringify({
+                id: orderId,
+                order_name: 'AUDIT / Data-layer header',
+                status: 'draft',
+            }),
+            created_at: '2026-07-30T00:00:00.000Z',
+            updated_at: '2026-07-30T00:00:00.000Z',
+        }];
+        runScript(context, 'js/supabase.js');
+        vm.runInContext('initSupabase()', context);
+
+        await vm.runInContext(`
+            saveOrder({
+                id: ${orderId},
+                order_name: 'AUDIT / Data-layer header',
+                client_name: 'ООО Клиент',
+                manager_name: 'Полина',
+                status: 'draft',
+                deadline: '2026-08-03',
+                deadline_start: '2026-08-03',
+                deadline_end: '2026-08-17',
+                notes: 'Первое сохранение',
+                delivery_address: 'Москва, Тестовая, 7',
+                telegram: '@audit_client',
+                crm_link: 'https://example.test/crm/730001',
+                fintablo_link: 'https://example.test/finance/730001',
+                client_legal_name: 'ООО «Клиент»',
+                client_inn: '7701234567',
+                client_legal_address: '123456, Москва, Тестовая, 7',
+                client_bank_name: 'АО Тест Банк',
+                client_bank_account: '40702810000000000001',
+                client_bank_bik: '044525001',
+                production_purpose: 'leftover_assembly',
+                leftover_assembly: {
+                    revenue: 25000,
+                    quantity: 50,
+                    assemblyHours: 3.5,
+                    details: 'Красные карабины и готовые фигурки'
+                },
+                discount_mode: 'percent',
+                discount_value: 7.5,
+                gross_revenue_plan: 25000,
+                total_revenue_plan: 23125,
+                total_cost_plan: 350,
+                total_margin_plan: 22775,
+                margin_percent_plan: 98.49
+            }, [])
+        `, context);
+
+        const rawFirst = JSON.parse(JSON.stringify(context.__tableRows.orders[0]));
+        const snapshotFirst = JSON.parse(rawFirst.calculator_data);
+        const loadedFirst = JSON.parse(JSON.stringify(await vm.runInContext('loadOrders({})', context)));
+
+        assert.equal(rawFirst.delivery_address, 'Москва, Тестовая, 7', 'native header columns must be persisted directly');
+        assert.equal(rawFirst.client_bank_account, '40702810000000000001');
+        assert.equal(snapshotFirst.production_purpose, 'leftover_assembly', 'calculator-only header fields must be persisted in calculator_data');
+        assert.deepEqual(snapshotFirst.leftover_assembly, {
+            revenue: 25000,
+            quantity: 50,
+            assemblyHours: 3.5,
+            details: 'Красные карабины и готовые фигурки',
+        });
+        assert.equal(snapshotFirst.discount_mode, 'percent');
+        assert.equal(snapshotFirst.discount_value, 7.5);
+        assert.equal(loadedFirst[0].production_purpose, 'leftover_assembly', 'order list hydration must restore calculator_data fields');
+        assert.equal(loadedFirst[0].discount_value, 7.5);
+        assert.equal(loadedFirst[0].total_revenue_plan, 23125);
+
+        await vm.runInContext(`
+            saveOrder({
+                id: ${orderId},
+                order_name: 'AUDIT / Data-layer header',
+                client_name: 'ООО Клиент',
+                manager_name: 'Полина',
+                status: 'draft',
+                deadline: '2026-08-03',
+                deadline_start: '2026-08-03',
+                deadline_end: '2026-08-17',
+                notes: 'После пересохранения',
+                delivery_address: 'Москва, Тестовая, 7',
+                telegram: '@audit_client',
+                crm_link: 'https://example.test/crm/730001',
+                fintablo_link: 'https://example.test/finance/730001',
+                client_legal_name: 'ООО «Клиент»',
+                client_inn: '7701234567',
+                client_legal_address: '123456, Москва, Тестовая, 7',
+                client_bank_name: 'АО Тест Банк',
+                client_bank_account: '40702810000000000002',
+                client_bank_bik: '044525001',
+                production_purpose: 'leftover_assembly',
+                leftover_assembly: {
+                    revenue: 25000,
+                    quantity: 50,
+                    assemblyHours: 3.5,
+                    details: 'Красные карабины и готовые фигурки'
+                },
+                discount_mode: 'amount',
+                discount_value: 1500,
+                gross_revenue_plan: 25000,
+                total_revenue_plan: 23500,
+                total_cost_plan: 350,
+                total_margin_plan: 23150,
+                margin_percent_plan: 98.51
+            }, [])
+        `, context);
+
+        const rawSecond = JSON.parse(JSON.stringify(context.__tableRows.orders[0]));
+        const snapshotSecond = JSON.parse(rawSecond.calculator_data);
+        const loadedSecond = JSON.parse(JSON.stringify(await vm.runInContext('loadOrders({})', context)));
+
+        assert.equal(context.__tableRows.orders.length, 1, 'resave must update the original remote row');
+        assert.equal(rawSecond.notes, 'После пересохранения');
+        assert.equal(rawSecond.client_bank_account, '40702810000000000002');
+        assert.equal(snapshotSecond.discount_mode, 'amount');
+        assert.equal(snapshotSecond.discount_value, 1500);
+        assert.equal(loadedSecond[0].discount_mode, 'amount');
+        assert.equal(loadedSecond[0].discount_value, 1500);
+        assert.equal(loadedSecond[0].total_revenue_plan, 23500);
+    }
+
+    {
+        const context = createContext();
         context.location = {
             href: 'https://calc2.recycleobject.ru/#warehouse',
             origin: 'https://calc2.recycleobject.ru',

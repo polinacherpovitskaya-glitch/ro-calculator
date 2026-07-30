@@ -1,6 +1,6 @@
 import type { OrderDiscountInput, ProductionParams } from './types.js';
 
-const DEFAULT_COMMERCIAL_RATE = 0.065;
+const DEFAULT_COMMERCIAL_RATE = 0.07;
 
 const TIER_MARGINS = [
   { max: 10, margin: 0.65 },
@@ -34,7 +34,9 @@ export interface OrderDiscountResult {
 }
 
 export function round2(value: number): number {
-  return Math.round((Number(value) || 0) * 100) / 100;
+  const numeric = Number(value) || 0;
+  const correction = Math.sign(numeric || 1) * Number.EPSILON * Math.max(1, Math.abs(numeric));
+  return Math.round((numeric + correction) * 100) / 100;
 }
 
 export function roundTo5(value: number): number {

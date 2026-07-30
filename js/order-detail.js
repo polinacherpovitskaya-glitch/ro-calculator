@@ -167,7 +167,7 @@ const OrderDetail = {
                 <div class="stat-value">${formatRub(revenue)}</div>
             </div>
             <div class="stat-card">
-                <div class="stat-label">${isNonCommercial ? 'Некоммерческие расходы' : 'Маржа'}</div>
+                <div class="stat-label">${isNonCommercial ? 'Некоммерческие расходы' : 'Чистая маржа'}</div>
                 <div class="stat-value ${isNonCommercial || marginPercent < 30 ? 'text-red' : 'text-green'}">${isNonCommercial ? '−' + formatRub(loss) : formatPercent(marginPercent)}</div>
                 ${marginNote}
             </div>
@@ -193,6 +193,26 @@ const OrderDetail = {
     renderInfoTab() {
         const o = this.currentOrder;
         const container = document.getElementById('od-tab-info');
+        const hasLegalDetails = [
+            o.client_legal_name,
+            o.client_inn,
+            o.client_legal_address,
+            o.client_bank_name,
+            o.client_bank_account,
+            o.client_bank_bik,
+        ].some(value => String(value || '').trim());
+        const legalDetailsCard = hasLegalDetails
+            ? `
+            <div class="card">
+                <div class="card-header"><h3>Юридические данные клиента</h3></div>
+                ${this._fieldRow('client_legal_name', 'Название компании', o.client_legal_name, 'text')}
+                ${this._fieldRow('client_inn', 'ИНН', o.client_inn, 'text')}
+                ${this._fieldRow('client_legal_address', 'Юридический адрес', o.client_legal_address, 'text')}
+                ${this._fieldRow('client_bank_name', 'Банк', o.client_bank_name, 'text')}
+                ${this._fieldRow('client_bank_account', 'Расчётный счёт', o.client_bank_account, 'text')}
+                ${this._fieldRow('client_bank_bik', 'БИК', o.client_bank_bik, 'text')}
+            </div>`
+            : '';
 
         container.innerHTML = `
         <div class="od-detail-grid">
@@ -211,6 +231,7 @@ const OrderDetail = {
                 ${this._fieldRow('crm_link', 'CRM', o.crm_link, 'url')}
                 ${this._fieldRow('fintablo_link', 'Финтабло', o.fintablo_link, 'url')}
             </div>
+            ${legalDetailsCard}
         </div>
         ${this._renderDeliveryScheduleCard()}
         `;
@@ -980,8 +1001,14 @@ const OrderDetail = {
         }
 
         const revenue = sellPrice * qty;
-        const cost = costPerUnit * qty;
-        const margin = revenue > 0 ? ((revenue - cost) / revenue * 100) : 0;
+        const marginResult = typeof calculateActualMargin === 'function'
+            ? calculateActualMargin(sellPrice, costPerUnit, App?.params || {})
+            : {
+                percent: sellPrice > 0
+                    ? ((sellPrice - costPerUnit) / sellPrice * 100)
+                    : null,
+            };
+        const margin = Number.isFinite(marginResult?.percent) ? marginResult.percent : null;
         const productMeta = type === 'product' ? this._renderProductMeta(item) : '';
 
         return `
@@ -994,7 +1021,7 @@ const OrderDetail = {
                 <div><span class="text-muted">Себестоимость:</span> ${formatRub(costPerUnit)}/шт</div>
                 <div><span class="text-muted">Продажа:</span> ${formatRub(sellPrice)}/шт</div>
                 <div><span class="text-muted">Выручка:</span> ${formatRub(revenue)}</div>
-                <div><span class="text-muted">Маржа:</span> <span class="${margin >= 30 ? 'text-green' : 'text-red'}">${margin.toFixed(1)}%</span></div>
+                <div><span class="text-muted">Чистая маржа:</span> <span class="${margin !== null && margin >= 30 ? 'text-green' : 'text-red'}">${margin === null ? '—' : margin.toFixed(1) + '%'}</span></div>
             </div>
             ${productMeta}
         </div>`;
