@@ -2209,8 +2209,10 @@ function splitDeliveryPhaseHours(totalHours, actualHours, deliverySchedule, tota
 
 /**
  * Build production schedule — day-by-day resource allocation
- * Each order has 3 sequential phases: литьё → упаковка → сборка (hardware)
- * Workers share a daily capacity pool
+ * Each order has 3 phases: литьё → сборка → упаковка.
+ * Workers share four explicit daily slots. Every allocation keeps its
+ * intra-shift start/end so the UI can distinguish sequential work from real
+ * parallel work.
  *
  * @param {Array} orders — orders with production_hours_plastic, production_hours_packaging, production_hours_hardware
  * @param {Object} settings — app settings (workers_count, hours_per_worker etc.)
@@ -2341,13 +2343,19 @@ function buildProductionSchedule(orders, settings) {
         };
     });
 
-    // Skip phases with 0 hours at the start
-    queue.forEach(q => {
-        while (q.currentPhaseIdx < q.phases.length && q.phases[q.currentPhaseIdx].remaining <= 0) {
-            q.currentPhaseIdx++;
+    const advanceCompletedPhases = (order) => {
+        if (!order) return;
+        while (
+            order.currentPhaseIdx < order.phases.length
+            && order.phases[order.currentPhaseIdx].remaining <= 0
+        ) {
+            order.currentPhaseIdx += 1;
         }
-        if (q.currentPhaseIdx >= q.phases.length) q.done = true;
-    });
+        if (order.currentPhaseIdx >= order.phases.length) order.done = true;
+    };
+
+    // Skip phases with 0 hours at the start.
+    queue.forEach(q => advanceCompletedPhases(q));
 
     // Day-by-day allocation
     const today = new Date();
@@ -2363,18 +2371,34 @@ function buildProductionSchedule(orders, settings) {
 
         const dateStr = formatIsoDateLocal(date);
         const dayAllocations = [];
-        const orderSlotsUsed = new Map();
+        const assignments = Array(slotHours.length).fill(null);
+        let currentHour = 0;
+        let eventCount = 0;
 
-        slotHours.forEach((slotCapacityOriginal, slotIndex) => {
-            let slotCapacity = round2(slotCapacityOriginal);
-            while (slotCapacity > 0.001) {
+        while (eventCount < 1000) {
+            eventCount += 1;
+
+            assignments.forEach((assignment, slotIndex) => {
+                if (!assignment) return;
+                const phase = assignment.order.phases[assignment.order.currentPhaseIdx];
+                if (
+                    assignment.order.done
+                    || !phase
+                    || phase.remaining <= 0.001
+                    || currentHour >= Number(slotHours[slotIndex] || 0) - 0.001
+                ) {
+                    assignments[slotIndex] = null;
+                }
+            });
+
+            assignments.forEach((assignment, slotIndex) => {
+                if (assignment || currentHour >= Number(slotHours[slotIndex] || 0) - 0.001) return;
                 const nextOrder = queue.find(q => {
                     if (q.done) return false;
                     if (q.notBeforeDate && dateStr < q.notBeforeDate) return false;
                     const phase = q.phases[q.currentPhaseIdx];
-                    if (!phase || phase.remaining <= 0) return false;
-                    const usedSlots = orderSlotsUsed.get(q.orderId) || new Set();
-                    if (usedSlots.has(slotIndex)) return true;
+                    if (!phase || phase.remaining <= 0.001) return false;
+                    const assignedWorkers = assignments.filter(value => value?.order === q).length;
                     const maxWorkersForOrder = Math.max(
                         1,
                         Math.min(
@@ -2383,57 +2407,84 @@ function buildProductionSchedule(orders, settings) {
                             Math.max(1, Math.ceil(workersCount || 1))
                         )
                     );
-                    return usedSlots.size < maxWorkersForOrder;
+                    return assignedWorkers < maxWorkersForOrder;
                 });
-
-                if (!nextOrder) break;
-
-                const phase = nextOrder.phases[nextOrder.currentPhaseIdx];
-                if (!phase || phase.remaining <= 0) {
-                    nextOrder.currentPhaseIdx += 1;
-                    continue;
+                if (nextOrder) {
+                    assignments[slotIndex] = { order: nextOrder };
                 }
+            });
 
-                if (!orderSlotsUsed.has(nextOrder.orderId)) {
-                    orderSlotsUsed.set(nextOrder.orderId, new Set());
-                }
-                orderSlotsUsed.get(nextOrder.orderId).add(slotIndex);
+            const activeAssignments = assignments
+                .map((assignment, slotIndex) => ({ assignment, slotIndex }))
+                .filter(({ assignment, slotIndex }) => (
+                    assignment
+                    && currentHour < Number(slotHours[slotIndex] || 0) - 0.001
+                ));
+            if (activeAssignments.length === 0) break;
 
-                const give = round2(Math.min(slotCapacity, phase.remaining));
-                if (give <= 0) break;
+            const assignmentGroups = new Map();
+            activeAssignments.forEach(({ assignment, slotIndex }) => {
+                const order = assignment.order;
+                if (!assignmentGroups.has(order)) assignmentGroups.set(order, []);
+                assignmentGroups.get(order).push(slotIndex);
+            });
 
-                phase.remaining = round2(phase.remaining - give);
-                slotCapacity = round2(slotCapacity - give);
+            let nextHour = Math.min(...activeAssignments.map(({ slotIndex }) => Number(slotHours[slotIndex] || 0)));
+            assignmentGroups.forEach((slotIndexes, order) => {
+                const phase = order.phases[order.currentPhaseIdx];
+                if (!phase || phase.remaining <= 0.001) return;
+                nextHour = Math.min(nextHour, currentHour + (Number(phase.remaining) / slotIndexes.length));
+            });
 
-                nextOrder.schedule.push({
-                    date: dateStr,
-                    phase: phase.name,
-                    hours: give,
-                    workerSlot: slotIndex + 1,
-                    batchIndex: Number.isInteger(phase.batchIndex) ? phase.batchIndex : null,
+            if (!(nextHour > currentHour + 0.000001)) break;
+            const allocationHours = nextHour - currentHour;
+
+            assignmentGroups.forEach((slotIndexes, order) => {
+                const phase = order.phases[order.currentPhaseIdx];
+                if (!phase || phase.remaining <= 0.001) return;
+                slotIndexes.forEach(slotIndex => {
+                    const hours = Number(allocationHours.toFixed(4));
+                    const startHour = Number(currentHour.toFixed(4));
+                    const endHour = Number(nextHour.toFixed(4));
+                    const allocation = {
+                        orderId: order.orderId,
+                        phase: phase.name,
+                        hours,
+                        workerSlot: slotIndex + 1,
+                        startHour,
+                        endHour,
+                        batchIndex: Number.isInteger(phase.batchIndex) ? phase.batchIndex : null,
+                    };
+                    order.schedule.push({
+                        date: dateStr,
+                        phase: allocation.phase,
+                        hours: allocation.hours,
+                        workerSlot: allocation.workerSlot,
+                        startHour: allocation.startHour,
+                        endHour: allocation.endHour,
+                        batchIndex: allocation.batchIndex,
+                    });
+                    dayAllocations.push(allocation);
                 });
-                dayAllocations.push({
-                    orderId: nextOrder.orderId,
-                    phase: phase.name,
-                    hours: give,
-                    workerSlot: slotIndex + 1,
-                    batchIndex: Number.isInteger(phase.batchIndex) ? phase.batchIndex : null,
-                });
+                phase.remaining = round2(
+                    Math.max(Number(phase.remaining) - (allocationHours * slotIndexes.length), 0)
+                );
+            });
 
-                if (phase.remaining <= 0.001) {
-                    nextOrder.currentPhaseIdx++;
-                    while (
-                        nextOrder.currentPhaseIdx < nextOrder.phases.length
-                        && nextOrder.phases[nextOrder.currentPhaseIdx].remaining <= 0
-                    ) {
-                        nextOrder.currentPhaseIdx++;
-                    }
-                    if (nextOrder.currentPhaseIdx >= nextOrder.phases.length) {
-                        nextOrder.done = true;
-                    }
+            currentHour = nextHour;
+
+            assignmentGroups.forEach((slotIndexes, order) => {
+                const phase = order.phases[order.currentPhaseIdx];
+                if (phase && phase.remaining <= 0.001) {
+                    phase.remaining = 0;
+                    order.currentPhaseIdx += 1;
+                    advanceCompletedPhases(order);
+                    slotIndexes.forEach(slotIndex => {
+                        assignments[slotIndex] = null;
+                    });
                 }
-            }
-        });
+            });
+        }
 
         days.push({
             date: dateStr,

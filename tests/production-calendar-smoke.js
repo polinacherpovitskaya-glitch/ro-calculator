@@ -10,6 +10,7 @@ const productionCoreJs = fs.readFileSync(path.join(root, 'js', 'production-core.
 const ganttJs = fs.readFileSync(path.join(root, 'js', 'gantt.js'), 'utf8');
 const settingsJs = fs.readFileSync(path.join(root, 'js', 'settings.js'), 'utf8');
 const indexHtml = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+const styleCss = fs.readFileSync(path.join(root, 'css', 'style.css'), 'utf8');
 const workflow = fs.readFileSync(path.join(root, '.github', 'workflows', 'deploy-pages.yml'), 'utf8');
 
 const sidebarNav = indexHtml.match(/<nav class="sidebar-nav">([\s\S]*?)<\/nav>/);
@@ -17,13 +18,16 @@ assert.ok(sidebarNav, 'Sidebar nav not found');
 assert.equal((sidebarNav[1].match(/data-page="gantt"/g) || []).length, 1, 'Sidebar must contain exactly one production calendar link');
 assert.equal((sidebarNav[1].match(/data-page="production-plan"/g) || []).length, 0, 'Sidebar must not contain legacy production-plan link');
 assert.match(indexHtml, /id="gantt-container"/, 'Gantt page must include the unified calendar container');
-assert.match(indexHtml, /Тяните заказ вверх или вниз/, 'Gantt page must explain priority dragging');
+assert.match(indexHtml, /Перетащите заказы — сверху выполняются раньше/, 'Gantt page must explain how queue priority works');
+assert.match(indexHtml, /Каждая горизонтальная линия — один человек/, 'Gantt page must explain the worker-lane model');
+assert.match(indexHtml, /Загрузка дня/, 'Gantt legend must explain the daily utilization bar');
 assert.doesNotMatch(indexHtml, /id="gantt-queue"/, 'Separate launch queue must be removed');
 assert.doesNotMatch(indexHtml, /id="gantt-capacity-chart"/, 'Separate capacity chart must be removed');
 assert.doesNotMatch(indexHtml, /id="gantt-stats"/, 'Separate calendar statistic cards must be removed');
 assert.doesNotMatch(indexHtml, /id="gantt-toolbar"/, 'Current-workshop toolbar must be removed');
 assert.match(indexHtml, /data-zoom="week"/, 'Week zoom button missing');
 assert.match(indexHtml, /data-zoom="month"/, 'Month zoom button missing');
+assert.match(indexHtml, /Gantt\.scrollToToday\(\)/, 'Calendar must expose a quick return to today');
 assert.doesNotMatch(indexHtml, /data-zoom="day"/, 'Day zoom must be removed');
 assert.doesNotMatch(indexHtml, /set-planning_workers_count/, 'Settings must not expose the fixed team size');
 assert.doesNotMatch(indexHtml, /set-planning_hours_per_day/, 'Settings must not expose the fixed production shift');
@@ -31,11 +35,29 @@ assert.match(ganttJs, /moveUp\(orderId\)/, 'Gantt queue reorder helpers missing'
 assert.doesNotMatch(ganttJs, /adjustActiveWorkersCount\(delta\)/, 'Legacy active-worker controls must be removed');
 assert.match(ganttJs, /adjustParallelWorkers\(orderId, delta\)/, 'Gantt must expose per-order worker targeting');
 assert.match(ganttJs, /parallel_workers/, 'Gantt plan state must persist per-order worker targets');
-assert.match(ganttJs, /renderOrderSidebarRow\(item, index/, 'Gantt must render order controls beside each timeline row');
+assert.match(ganttJs, /renderPriorityCard\(item, index/, 'Gantt must render compact draggable priority cards');
+assert.match(ganttJs, /getOrderScheduleWindow\(item\)/, 'Priority queue must expose each order start and finish forecast');
+assert.match(ganttJs, /isOrderWaitingForStart\(item\)/, 'Future orders must remain visibly marked as waiting');
+assert.match(ganttJs, /Следующие уже запланированы/, 'Ready future orders must be presented as scheduled, not merely parked');
+assert.match(ganttJs, /Начнут на первых освободившихся линиях/, 'Future orders must explain how they enter production');
+assert.match(ganttJs, /renderWorkerLane\(workerSlot, queue/, 'Gantt must render work by person instead of by order');
+assert.match(ganttJs, /getWorkerLaneAllocations\(queue = \[\], workerSlot/, 'Gantt must expose worker-lane allocations');
+assert.match(ganttJs, /highlightOrder\(orderId\)/, 'Calendar must cross-highlight related order work');
+assert.match(ganttJs, /clearOrderHighlight\(\)/, 'Calendar must clear cross-highlighting');
+assert.match(ganttJs, /scrollToToday\(smooth = true\)/, 'Calendar must scroll back to today');
+assert.match(ganttJs, /startPriorityPanelResize\(event\)/, 'Calendar must expose a draggable queue/timeline divider');
+assert.match(ganttJs, /resizePriorityPanelByKey\(event\)/, 'Calendar divider must support keyboard resizing');
+assert.match(ganttJs, /PRIORITY_PANEL_STORAGE_KEY/, 'Calendar must remember the selected panel width');
 assert.match(ganttJs, /renderPausedOrders\(blockedQueue = \[\], reviewQueue = \[\]\)/, 'Gantt must keep blocked and review orders accessible');
 assert.match(ganttJs, /onOrderDrop\(event, targetOrderId\)/, 'Unified Gantt rows must support drag reorder');
 assert.match(ganttJs, /TEAM_SIZE: 4/, 'Production calendar must expose the four-person team boundary');
 assert.match(ganttJs, />Открыть<\/button>/, 'Every scheduled row must expose an explicit order-open button');
+assert.match(calculatorJs, /startHour/, 'Scheduler allocations must keep their start inside the shift');
+assert.match(calculatorJs, /endHour/, 'Scheduler allocations must keep their end inside the shift');
+assert.match(styleCss, /\.gantt-priority-panel\s*\{[\s\S]*?--gantt-priority-width,\s*220px/, 'Desktop priority panel must default to about half of the former 430px width');
+assert.match(styleCss, /\.gantt-panel-resizer\s*\{/, 'Calendar must style the queue/timeline divider');
+assert.match(styleCss, /\.gantt-planner\.order-focus/, 'Worker-lane focus styling must be present');
+assert.match(styleCss, /\.gantt-day-load/, 'Daily load indicator styling must be present');
 assert.match(ganttJs, /zoom: 'week'/, 'Default gantt zoom must stay week');
 assert.doesNotMatch(ganttJs, /'day' \| 'week'/, 'Legacy day zoom comment should be removed');
 assert.match(appJs, /normalizePageAlias\(page\)/, 'Page alias normalizer missing in app');
@@ -255,6 +277,118 @@ assert.deepEqual(
     'Production capacity must never exceed the four-person team boundary'
 );
 
+const fiveShortOrders = vm.runInContext(`
+    buildProductionSchedule(
+        [1, 2, 3, 4, 5].map(id => ({
+            id,
+            order_name: 'Short order ' + id,
+            client_name: 'QA',
+            status: 'production_casting',
+            deadline_end: '2026-03-25',
+            production_hours_plastic: 4,
+            production_hours_hardware: 0,
+            production_hours_packaging: 0
+        })),
+        { planning_workers_count: 4, planning_hours_per_day: 9 }
+    )
+`, context);
+const fiveShortFirstDay = JSON.parse(JSON.stringify(fiveShortOrders.days[0].allocations));
+assert.equal(
+    new Set(fiveShortFirstDay.map(allocation => allocation.orderId)).size,
+    5,
+    'Five short orders may be touched in one day when later work starts after an earlier order finishes'
+);
+assert.deepEqual(
+    JSON.parse(JSON.stringify(fiveShortOrders.queue.slice(0, 4).map(order => order.schedule[0].workerSlot))),
+    [1, 2, 3, 4],
+    'The first four one-person orders must start on four different people'
+);
+assert.equal(fiveShortOrders.queue[4].schedule[0].workerSlot, 1, 'The fifth order must reuse a released worker line');
+assert.equal(fiveShortOrders.queue[4].schedule[0].startHour, 4, 'The fifth order must start after the first order ends, not in parallel');
+
+const firstWaveSizes = [2, 3, 4].map(workerTarget => {
+    const schedule = vm.runInContext(`
+        buildProductionSchedule([
+            {
+                id: 100,
+                order_name: 'Priority team order',
+                status: 'production_casting',
+                production_hours_plastic: ${workerTarget * 9},
+                production_hours_hardware: 0,
+                production_hours_packaging: 0,
+                production_parallel_workers: ${workerTarget}
+            },
+            ...[101, 102, 103].map(id => ({
+                id,
+                order_name: 'Following order ' + id,
+                status: 'production_casting',
+                production_hours_plastic: 9,
+                production_hours_hardware: 0,
+                production_hours_packaging: 0
+            }))
+        ], {
+            planning_workers_count: 4,
+            planning_hours_per_day: 9
+        })
+    `, context);
+    const firstDay = JSON.parse(JSON.stringify(schedule.days[0].allocations));
+    return new Set(firstDay.filter(allocation => allocation.startHour === 0).map(allocation => allocation.orderId)).size;
+});
+assert.deepEqual(
+    firstWaveSizes,
+    [3, 2, 1],
+    'Two, three, or four people on the priority order must leave room for three, two, or one simultaneous order rows'
+);
+
+const allocationsByWorkerDay = new Map();
+fiveShortOrders.days.forEach(day => {
+    day.allocations.forEach(allocation => {
+        const key = `${day.date}:${allocation.workerSlot}`;
+        if (!allocationsByWorkerDay.has(key)) allocationsByWorkerDay.set(key, []);
+        allocationsByWorkerDay.get(key).push(allocation);
+    });
+});
+allocationsByWorkerDay.forEach(allocations => {
+    allocations.sort((left, right) => left.startHour - right.startHour);
+    allocations.forEach((allocation, index) => {
+        if (index === 0) return;
+        assert.ok(
+            allocation.startHour >= allocations[index - 1].endHour,
+            `Worker ${allocation.workerSlot} must never have overlapping tasks`
+        );
+    });
+});
+
+const sequentialPhaseSchedule = vm.runInContext(`
+    buildProductionSchedule([{
+        id: 41,
+        order_name: 'One-person phased order',
+        client_name: 'QA',
+        status: 'production_casting',
+        deadline_end: '2026-03-25',
+        production_hours_plastic: 4,
+        production_hours_hardware: 4,
+        production_hours_packaging: 0,
+        production_parallel_workers: 1
+    }], {
+        planning_workers_count: 4,
+        planning_hours_per_day: 9
+    })
+`, context);
+assert.deepEqual(
+    JSON.parse(JSON.stringify(sequentialPhaseSchedule.queue[0].schedule.map(segment => ({
+        phase: segment.phase,
+        workerSlot: segment.workerSlot,
+        startHour: segment.startHour,
+        endHour: segment.endHour,
+    })))),
+    [
+        { phase: 'molding', workerSlot: 1, startHour: 0, endHour: 4 },
+        { phase: 'assembly', workerSlot: 1, startHour: 4, endHour: 8 },
+    ],
+    'One-person molding and assembly must stay sequential on the same worker line'
+);
+
 const constrainedSchedule = vm.runInContext(`
     buildProductionSchedule([
         {
@@ -334,22 +468,94 @@ const normalizedWorkerTarget = JSON.parse(JSON.stringify(vm.runInContext(`
 `, ganttContext)));
 assert.equal(normalizedWorkerTarget['55'], 4, 'Saved per-order worker targets must be capped at four');
 
-const unifiedSidebarRow = vm.runInContext(`
-    Gantt.renderOrderSidebarRow({
-        orderId: 55,
-        orderName: 'Расчёски',
-        clientName: 'QA',
-        status: 'production_casting',
-        plannedTotalHours: 36,
-        remainingTotalHours: 36,
-        parallelWorkersTarget: 3,
-        schedule: [{ date: '2026-07-28', phase: 'molding', hours: 27 }],
-        deadlineEnd: '2026-08-10'
-    }, 0)
+const compactPriorityCard = vm.runInContext(`
+    (() => {
+        const cardStart = new Date();
+        cardStart.setHours(0, 0, 0, 0);
+        const cardFinish = new Date(cardStart);
+        cardFinish.setDate(cardFinish.getDate() + 1);
+        const toLocalIso = date => [
+            date.getFullYear(),
+            String(date.getMonth() + 1).padStart(2, '0'),
+            String(date.getDate()).padStart(2, '0')
+        ].join('-');
+        return Gantt.renderPriorityCard({
+            orderId: 55,
+            orderName: 'Расчёски',
+            clientName: 'QA',
+            status: 'production_casting',
+            plannedTotalHours: 36,
+            remainingTotalHours: 36,
+            parallelWorkersTarget: 3,
+            schedule: [
+                { date: toLocalIso(cardStart), phase: 'molding', hours: 27 },
+                { date: toLocalIso(cardFinish), phase: 'assembly', hours: 9 }
+            ],
+            deadlineEnd: '2027-08-10'
+        }, 0);
+    })()
 `, ganttContext);
-assert.match(unifiedSidebarRow, /draggable="true"/, 'Scheduled order row must be draggable');
-assert.match(unifiedSidebarRow, /3 чел\./, 'Scheduled order row must show its worker allocation');
-assert.match(unifiedSidebarRow, />Открыть<\/button>/, 'Scheduled order row must expose explicit order navigation');
+assert.match(compactPriorityCard, /draggable="true"/, 'Priority card must be draggable');
+assert.match(compactPriorityCard, /data-order-id="55"/, 'Priority card must expose its order for cross-highlighting');
+assert.match(compactPriorityCard, /до 3/, 'Priority card must show the maximum worker allocation');
+assert.match(compactPriorityCard, /Старт сегодня/, 'Priority card must show when work starts');
+assert.match(compactPriorityCard, /Готово \d{1,2} [а-я]+/, 'Priority card must show the predicted finish date');
+assert.match(compactPriorityCard, />Открыть<\/button>/, 'Priority card must expose explicit order navigation');
+
+const futureQueueCard = vm.runInContext(`
+    (() => {
+        const futureStart = new Date();
+        futureStart.setDate(futureStart.getDate() + 5);
+        const futureFinish = new Date(futureStart);
+        futureFinish.setDate(futureFinish.getDate() + 2);
+        const toLocalIso = date => [
+            date.getFullYear(),
+            String(date.getMonth() + 1).padStart(2, '0'),
+            String(date.getDate()).padStart(2, '0')
+        ].join('-');
+        return Gantt.renderPriorityCard({
+            orderId: 56,
+            orderName: 'Следующий заказ',
+            plannedTotalHours: 18,
+            remainingTotalHours: 18,
+            done: true,
+            schedule: [
+                { date: toLocalIso(futureStart), phase: 'molding', hours: 9 },
+                { date: toLocalIso(futureFinish), phase: 'assembly', hours: 9 }
+            ]
+        }, 4);
+    })()
+`, ganttContext);
+assert.match(futureQueueCard, /waiting/, 'A fully forecast future order must still be visually marked as waiting');
+assert.match(futureQueueCard, /Дальше по плану/, 'Future order must explain that it is already scheduled');
+
+const laterTodayQueueCard = vm.runInContext(`
+    (() => {
+        const today = new Date();
+        const toLocalIso = date => [
+            date.getFullYear(),
+            String(date.getMonth() + 1).padStart(2, '0'),
+            String(date.getDate()).padStart(2, '0')
+        ].join('-');
+        return Gantt.renderPriorityCard({
+            orderId: 57,
+            orderName: 'Позже в смене',
+            plannedTotalHours: 4,
+            remainingTotalHours: 4,
+            done: true,
+            schedule: [{
+                date: toLocalIso(today),
+                phase: 'molding',
+                hours: 4,
+                workerSlot: 1,
+                startHour: 4,
+                endHour: 8
+            }]
+        }, 4);
+    })()
+`, ganttContext);
+assert.match(laterTodayQueueCard, /Дальше по плану/, 'An order starting later in the same shift must stay scheduled below the immediate wave');
+assert.match(laterTodayQueueCard, /Старт сегодня \+4ч/, 'Same-day waiting order must expose its offset inside the shift');
 
 const blockedState = JSON.parse(JSON.stringify(vm.runInContext(`
     Gantt.getOrderReadiness(
@@ -476,50 +682,78 @@ const workingBuffer = vm.runInContext(`
 `, ganttContext);
 assert.equal(workingBuffer, 1, 'Working-day buffer must ignore weekends and configured holidays');
 
-const splitWeekendBars = vm.runInContext(`
-    Gantt.renderOrderRow({
-        schedule: [
-            { date: '2026-03-20', phase: 'molding', hours: 8 },
-            { date: '2026-03-23', phase: 'molding', hours: 8 }
-        ]
-    }, new Date(2026, 2, 20), 6, 40)
+const halfShiftLane = vm.runInContext(`
+    Gantt.renderWorkerLane(
+        1,
+        [{
+            orderId: 55,
+            orderName: 'Half-shift order',
+            schedule: [{
+                date: '2026-03-24',
+                phase: 'molding',
+                hours: 4.5,
+                workerSlot: 1,
+                startHour: 4.5,
+                endHour: 9
+            }]
+        }],
+        new Date(2026, 2, 24),
+        2,
+        90,
+        9,
+        new Set()
+    )
 `, ganttContext);
-assert.equal(
-    (splitWeekendBars.match(/gantt-phase-bar/g) || []).length,
-    2,
-    'Same-phase work split by weekend must render as separate bars instead of spanning non-working days'
-);
+assert.match(halfShiftLane, /left:45px;width:45px/, 'Half-shift work must occupy half of the day cell');
+assert.match(halfShiftLane, /data-worker-slot="1"/, 'Rendered lane must identify its worker slot');
+assert.match(halfShiftLane, /data-order-id="55"/, 'Worker task must link back to its priority card');
 
-const mergedAdjacentBars = vm.runInContext(`
-    Gantt.renderOrderRow({
-        schedule: [
-            { date: '2026-03-24', phase: 'assembly', hours: 4 },
-            { date: '2026-03-25', phase: 'assembly', hours: 4 }
-        ]
-    }, new Date(2026, 2, 24), 3, 40)
+const halfLoadedDayAxis = vm.runInContext(`
+    Gantt.renderTimeAxis(
+        new Date(2026, 2, 24),
+        1,
+        90,
+        new Set(),
+        new Map([['2026-03-24', 18]]),
+        36
+    )
 `, ganttContext);
-assert.equal(
-    (mergedAdjacentBars.match(/gantt-phase-bar/g) || []).length,
-    1,
-    'Consecutive working days in the same phase should stay merged into one bar'
-);
+assert.match(halfLoadedDayAxis, /gantt-day-load light/, 'Working day must render a load indicator');
+assert.match(halfLoadedDayAxis, /width:50%/, 'Daily load indicator must reflect used person-hours');
+assert.match(halfLoadedDayAxis, /Занято 18ч из 36ч/, 'Daily load tooltip must explain person-hour utilization');
 
-const aggregatedParallelBars = vm.runInContext(`
-    Gantt.renderOrderRow({
+const mergedWorkerSegments = JSON.parse(JSON.stringify(vm.runInContext(`
+    Gantt.getWorkerLaneAllocations([{
+        orderId: 66,
+        orderName: 'Continuous work',
         schedule: [
-            { date: '2026-03-24', phase: 'molding', hours: 9 },
-            { date: '2026-03-24', phase: 'molding', hours: 9 },
-            { date: '2026-03-24', phase: 'molding', hours: 9 },
-            { date: '2026-03-24', phase: 'molding', hours: 9 }
+            { date: '2026-03-24', phase: 'molding', hours: 4, workerSlot: 1, startHour: 0, endHour: 4 },
+            { date: '2026-03-24', phase: 'molding', hours: 5, workerSlot: 1, startHour: 4, endHour: 9 }
         ]
-    }, new Date(2026, 2, 24), 2, 40)
+    }], 1, 9)
+`, ganttContext)));
+assert.equal(mergedWorkerSegments.length, 1, 'Uninterrupted work must render as one clean interval');
+assert.equal(mergedWorkerSegments[0].endHour, 9, 'Merged worker interval must retain the full shift end');
+
+const parallelPhaseQueue = [{
+    orderId: 77,
+    orderName: 'Pipeline order',
+    schedule: [
+        { date: '2026-03-24', phase: 'molding', hours: 9, workerSlot: 1, startHour: 0, endHour: 9 },
+        { date: '2026-03-24', phase: 'assembly', hours: 4, workerSlot: 2, startHour: 4, endHour: 8 },
+    ],
+}];
+ganttContext.parallelPhaseQueue = parallelPhaseQueue;
+const moldingLane = vm.runInContext(`
+    Gantt.renderWorkerLane(1, parallelPhaseQueue, new Date(2026, 2, 24), 2, 90, 9, new Set())
 `, ganttContext);
-assert.equal(
-    (aggregatedParallelBars.match(/gantt-phase-bar/g) || []).length,
-    1,
-    'Parallel worker allocations on the same phase and date must render as one readable bar'
-);
-assert.match(aggregatedParallelBars, /Литьё: 36ч/, 'Aggregated parallel bar must show total person-hours');
+const assemblyLane = vm.runInContext(`
+    Gantt.renderWorkerLane(2, parallelPhaseQueue, new Date(2026, 2, 24), 2, 90, 9, new Set())
+`, ganttContext);
+assert.match(moldingLane, /Литьё/, 'Molding must appear on its assigned worker line');
+assert.doesNotMatch(moldingLane, /Сборка/, 'A worker line must not render another worker’s parallel task');
+assert.match(assemblyLane, /Сборка/, 'Overlapping assembly must visibly occupy another worker line');
+assert.doesNotMatch(assemblyLane, /Литьё/, 'The second worker line must stay separate from molding');
 
 const tightRisk = JSON.parse(JSON.stringify(vm.runInContext(`
     Gantt.getDeadlineRiskSummary({

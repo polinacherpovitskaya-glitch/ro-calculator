@@ -4,10 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Recycle Object — Калькулятор заказов</title>
-  <link rel="stylesheet" href="css/style.css?v=428">
+  <link rel="stylesheet" href="css/style.css?v=430">
     <script>
         (function () {
-        const CURRENT_HTML_VERSION = 'v429';
+        const CURRENT_HTML_VERSION = 'v430';
             const ATTEMPT_KEY = 'ro_calc_force_update_attempts';
 
             function parseVersion(version) {
@@ -187,7 +187,7 @@
     <aside class="sidebar">
         <div class="sidebar-brand">
             <h2>Recycle Object</h2>
-            <span>Калькулятор <span id="app-version">v429</span></span>
+            <span>Калькулятор <span id="app-version">v430</span></span>
         </div>
         <nav class="sidebar-nav">
             <div class="sidebar-group-label">Каждый день</div>
@@ -1771,9 +1771,10 @@
             <div class="page-header">
                 <div>
                     <h1>&#128197; Производственный календарь</h1>
-                    <div class="text-muted gantt-header-note">Расставьте заказы по приоритету и укажите, сколько из четырёх сотрудников работает над каждым.</div>
+                    <div class="text-muted gantt-header-note">Распределяйте очередь между четырьмя людьми и сразу проверяйте реальный параллелизм.</div>
                 </div>
                 <div class="flex gap-8">
+                    <button class="btn btn-sm btn-outline gantt-today-btn" onclick="Gantt.scrollToToday()">Сегодня</button>
                     <button class="btn btn-sm btn-outline gantt-zoom-btn active" data-zoom="week" onclick="Gantt.setZoom('week')">Неделя</button>
                     <button class="btn btn-sm btn-outline gantt-zoom-btn" data-zoom="month" onclick="Gantt.setZoom('month')">Месяц</button>
                 </div>
@@ -1781,7 +1782,7 @@
 
             <div class="gantt-instruction">
                 <span class="gantt-instruction-handle" aria-hidden="true">&#8942;&#8942;</span>
-                <span>Тяните заказ вверх или вниз. Больше людей на верхнем заказе сокращает его срок и сдвигает остальные.</span>
+                <span><strong>Перетащите заказы — сверху выполняются раньше.</strong> Каждая горизонтальная линия — один человек; на одной линии задачи идут только последовательно.</span>
             </div>
 
             <div class="gantt-legend">
@@ -1789,6 +1790,8 @@
                 <span class="gantt-legend-item"><span class="gantt-legend-dot" style="background:#06b6d4"></span> Сборка</span>
                 <span class="gantt-legend-item"><span class="gantt-legend-dot" style="background:#8b5cf6"></span> Упаковка</span>
                 <span class="gantt-legend-item"><span style="color:#e11d48;font-weight:700">&#9670;</span> Дедлайн</span>
+                <span class="gantt-legend-item"><span class="gantt-legend-load" aria-hidden="true"></span> Загрузка дня</span>
+                <span class="gantt-legend-item">до N — максимум людей на заказ</span>
             </div>
 
             <div id="gantt-container"></div>
@@ -3609,8 +3612,8 @@
 <script src="js/bug-report-core.js?v=2"></script>
 <script src="js/supabase.js?v=422"></script>
 <script src="js/task-events.js?v=1"></script>
-<script src="js/calculator.js?v=428"></script>
-<script src="js/app.js?v=429"></script>
+<script src="js/calculator.js?v=430"></script>
+<script src="js/app.js?v=430"></script>
 <script src="js/tpa.js?v=4"></script>
 <script src="js/order-detail.js?v=412"></script>
 <script src="js/orders.js?v=426"></script>
@@ -3624,7 +3627,7 @@
 <script src="js/tasks.js?v=58"></script>
 <script src="js/bugs.js?v=7"></script>
 <script src="js/production-core.js?v=412"></script>
-<script src="js/gantt.js?v=428"></script>
+<script src="js/gantt.js?v=430"></script>
 <script src="js/fintablo.js?v=2"></script>
   <script src="js/finance.js?v=27"></script>
 <script src="js/indirect_costs.js?v=9"></script>
