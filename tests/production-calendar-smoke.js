@@ -18,6 +18,7 @@ assert.ok(sidebarNav, 'Sidebar nav not found');
 assert.equal((sidebarNav[1].match(/data-page="gantt"/g) || []).length, 1, 'Sidebar must contain exactly one production calendar link');
 assert.equal((sidebarNav[1].match(/data-page="production-plan"/g) || []).length, 0, 'Sidebar must not contain legacy production-plan link');
 assert.match(indexHtml, /id="gantt-container"/, 'Gantt page must include the unified calendar container');
+assert.match(indexHtml, /Перетащите заказы — сверху выполняются раньше/, 'Gantt page must explain how queue priority works');
 assert.match(indexHtml, /Каждая горизонтальная линия — один человек/, 'Gantt page must explain the worker-lane model');
 assert.match(indexHtml, /Загрузка дня/, 'Gantt legend must explain the daily utilization bar');
 assert.doesNotMatch(indexHtml, /id="gantt-queue"/, 'Separate launch queue must be removed');
@@ -35,18 +36,26 @@ assert.doesNotMatch(ganttJs, /adjustActiveWorkersCount\(delta\)/, 'Legacy active
 assert.match(ganttJs, /adjustParallelWorkers\(orderId, delta\)/, 'Gantt must expose per-order worker targeting');
 assert.match(ganttJs, /parallel_workers/, 'Gantt plan state must persist per-order worker targets');
 assert.match(ganttJs, /renderPriorityCard\(item, index/, 'Gantt must render compact draggable priority cards');
+assert.match(ganttJs, /getOrderScheduleWindow\(item\)/, 'Priority queue must expose each order start and finish forecast');
+assert.match(ganttJs, /isOrderWaitingForStart\(item\)/, 'Future orders must remain visibly marked as waiting');
+assert.match(ganttJs, /Дальше ждут очереди/, 'Ready future orders must remain visible below the currently starting queue');
+assert.match(ganttJs, /Распределятся после освобождения людей/, 'Waiting orders must explain when they enter production');
 assert.match(ganttJs, /renderWorkerLane\(workerSlot, queue/, 'Gantt must render work by person instead of by order');
 assert.match(ganttJs, /getWorkerLaneAllocations\(queue = \[\], workerSlot/, 'Gantt must expose worker-lane allocations');
 assert.match(ganttJs, /highlightOrder\(orderId\)/, 'Calendar must cross-highlight related order work');
 assert.match(ganttJs, /clearOrderHighlight\(\)/, 'Calendar must clear cross-highlighting');
 assert.match(ganttJs, /scrollToToday\(smooth = true\)/, 'Calendar must scroll back to today');
+assert.match(ganttJs, /startPriorityPanelResize\(event\)/, 'Calendar must expose a draggable queue/timeline divider');
+assert.match(ganttJs, /resizePriorityPanelByKey\(event\)/, 'Calendar divider must support keyboard resizing');
+assert.match(ganttJs, /PRIORITY_PANEL_STORAGE_KEY/, 'Calendar must remember the selected panel width');
 assert.match(ganttJs, /renderPausedOrders\(blockedQueue = \[\], reviewQueue = \[\]\)/, 'Gantt must keep blocked and review orders accessible');
 assert.match(ganttJs, /onOrderDrop\(event, targetOrderId\)/, 'Unified Gantt rows must support drag reorder');
 assert.match(ganttJs, /TEAM_SIZE: 4/, 'Production calendar must expose the four-person team boundary');
 assert.match(ganttJs, />Открыть<\/button>/, 'Every scheduled row must expose an explicit order-open button');
 assert.match(calculatorJs, /startHour/, 'Scheduler allocations must keep their start inside the shift');
 assert.match(calculatorJs, /endHour/, 'Scheduler allocations must keep their end inside the shift');
-assert.match(styleCss, /\.gantt-priority-panel\s*\{[\s\S]*?flex:\s*0 0 220px/, 'Desktop priority panel must be about half of the former 430px width');
+assert.match(styleCss, /\.gantt-priority-panel\s*\{[\s\S]*?--gantt-priority-width,\s*220px/, 'Desktop priority panel must default to about half of the former 430px width');
+assert.match(styleCss, /\.gantt-panel-resizer\s*\{/, 'Calendar must style the queue/timeline divider');
 assert.match(styleCss, /\.gantt-planner\.order-focus/, 'Worker-lane focus styling must be present');
 assert.match(styleCss, /\.gantt-day-load/, 'Daily load indicator styling must be present');
 assert.match(ganttJs, /zoom: 'week'/, 'Default gantt zoom must stay week');
@@ -426,22 +435,65 @@ const normalizedWorkerTarget = JSON.parse(JSON.stringify(vm.runInContext(`
 assert.equal(normalizedWorkerTarget['55'], 4, 'Saved per-order worker targets must be capped at four');
 
 const compactPriorityCard = vm.runInContext(`
-    Gantt.renderPriorityCard({
-        orderId: 55,
-        orderName: 'Расчёски',
-        clientName: 'QA',
-        status: 'production_casting',
-        plannedTotalHours: 36,
-        remainingTotalHours: 36,
-        parallelWorkersTarget: 3,
-        schedule: [{ date: '2026-07-28', phase: 'molding', hours: 27 }],
-        deadlineEnd: '2026-08-10'
-    }, 0)
+    (() => {
+        const cardStart = new Date();
+        cardStart.setHours(0, 0, 0, 0);
+        const cardFinish = new Date(cardStart);
+        cardFinish.setDate(cardFinish.getDate() + 1);
+        const toLocalIso = date => [
+            date.getFullYear(),
+            String(date.getMonth() + 1).padStart(2, '0'),
+            String(date.getDate()).padStart(2, '0')
+        ].join('-');
+        return Gantt.renderPriorityCard({
+            orderId: 55,
+            orderName: 'Расчёски',
+            clientName: 'QA',
+            status: 'production_casting',
+            plannedTotalHours: 36,
+            remainingTotalHours: 36,
+            parallelWorkersTarget: 3,
+            schedule: [
+                { date: toLocalIso(cardStart), phase: 'molding', hours: 27 },
+                { date: toLocalIso(cardFinish), phase: 'assembly', hours: 9 }
+            ],
+            deadlineEnd: '2027-08-10'
+        }, 0);
+    })()
 `, ganttContext);
 assert.match(compactPriorityCard, /draggable="true"/, 'Priority card must be draggable');
 assert.match(compactPriorityCard, /data-order-id="55"/, 'Priority card must expose its order for cross-highlighting');
 assert.match(compactPriorityCard, /до 3/, 'Priority card must show the maximum worker allocation');
+assert.match(compactPriorityCard, /Старт сегодня/, 'Priority card must show when work starts');
+assert.match(compactPriorityCard, /Готово \d{1,2} [а-я]+/, 'Priority card must show the predicted finish date');
 assert.match(compactPriorityCard, />Открыть<\/button>/, 'Priority card must expose explicit order navigation');
+
+const futureQueueCard = vm.runInContext(`
+    (() => {
+        const futureStart = new Date();
+        futureStart.setDate(futureStart.getDate() + 5);
+        const futureFinish = new Date(futureStart);
+        futureFinish.setDate(futureFinish.getDate() + 2);
+        const toLocalIso = date => [
+            date.getFullYear(),
+            String(date.getMonth() + 1).padStart(2, '0'),
+            String(date.getDate()).padStart(2, '0')
+        ].join('-');
+        return Gantt.renderPriorityCard({
+            orderId: 56,
+            orderName: 'Следующий заказ',
+            plannedTotalHours: 18,
+            remainingTotalHours: 18,
+            done: true,
+            schedule: [
+                { date: toLocalIso(futureStart), phase: 'molding', hours: 9 },
+                { date: toLocalIso(futureFinish), phase: 'assembly', hours: 9 }
+            ]
+        }, 4);
+    })()
+`, ganttContext);
+assert.match(futureQueueCard, /waiting/, 'A fully forecast future order must still be visually marked as waiting');
+assert.match(futureQueueCard, /Ждёт очереди/, 'Future order must explain that it has not started yet');
 
 const blockedState = JSON.parse(JSON.stringify(vm.runInContext(`
     Gantt.getOrderReadiness(

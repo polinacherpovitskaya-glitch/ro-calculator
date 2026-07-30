@@ -13,10 +13,16 @@ const Gantt = {
     planState: { order_ids: [], manual_start_dates: {}, active_workers_count: null, parallel_workers: {} },
     draggedOrderId: null,
     zoom: 'week',
+    priorityPanelWidth: null,
+    _priorityPanelResize: null,
     isLoading: false,
     _loadSeq: 0,
     TEAM_SIZE: 4,
     SHIFT_HOURS: 9,
+    PRIORITY_PANEL_DEFAULT_WIDTH: 220,
+    PRIORITY_PANEL_MIN_WIDTH: 180,
+    PRIORITY_PANEL_MAX_WIDTH: 400,
+    PRIORITY_PANEL_STORAGE_KEY: 'ro_gantt_priority_panel_width',
     LOADABLE_STATUSES: ['sample', 'production_casting', 'production_printing', 'production_hardware', 'production_packaging', 'delivery', 'in_production'],
     STATUS_LABELS: {
         sample: 'Образец',
@@ -381,6 +387,128 @@ const Gantt = {
         this.render();
     },
 
+    clampPriorityPanelWidth(width) {
+        const normalized = Number(width);
+        const fallback = this.PRIORITY_PANEL_DEFAULT_WIDTH;
+        return Math.round(Math.max(
+            this.PRIORITY_PANEL_MIN_WIDTH,
+            Math.min(this.PRIORITY_PANEL_MAX_WIDTH, Number.isFinite(normalized) ? normalized : fallback)
+        ));
+    },
+
+    getPriorityPanelWidth() {
+        if (this.priorityPanelWidth !== null && Number.isFinite(Number(this.priorityPanelWidth))) {
+            return this.clampPriorityPanelWidth(this.priorityPanelWidth);
+        }
+        let storedWidth = null;
+        try {
+            storedWidth = typeof localStorage !== 'undefined'
+                ? Number(localStorage.getItem(this.PRIORITY_PANEL_STORAGE_KEY))
+                : null;
+        } catch (error) {
+            storedWidth = null;
+        }
+        this.priorityPanelWidth = storedWidth > 0
+            ? this.clampPriorityPanelWidth(storedWidth)
+            : this.PRIORITY_PANEL_DEFAULT_WIDTH;
+        return this.priorityPanelWidth;
+    },
+
+    setPriorityPanelWidth(width, persist = false) {
+        const normalized = this.clampPriorityPanelWidth(width);
+        this.priorityPanelWidth = normalized;
+        const planner = document.querySelector('.gantt-planner');
+        planner?.style.setProperty('--gantt-priority-width', `${normalized}px`);
+        const resizer = planner?.querySelector('.gantt-panel-resizer');
+        resizer?.setAttribute('aria-valuenow', String(normalized));
+        if (persist) {
+            try {
+                if (typeof localStorage !== 'undefined') {
+                    localStorage.setItem(this.PRIORITY_PANEL_STORAGE_KEY, String(normalized));
+                }
+            } catch (error) {
+                console.warn('Gantt panel width save error:', error);
+            }
+        }
+        return normalized;
+    },
+
+    startPriorityPanelResize(event) {
+        if (!event || (Number.isFinite(event.button) && event.button !== 0)) return;
+        const planner = event.currentTarget?.closest('.gantt-planner');
+        const panel = planner?.querySelector('.gantt-priority-panel');
+        if (!planner || !panel || window.matchMedia('(max-width: 768px)').matches) return;
+
+        this.finishPriorityPanelResize(false);
+        event.preventDefault();
+        const resizer = event.currentTarget;
+        const pointerId = event.pointerId;
+        const startX = event.clientX;
+        const startWidth = panel.getBoundingClientRect().width;
+
+        const onMove = moveEvent => {
+            if (Number.isFinite(pointerId) && moveEvent.pointerId !== pointerId) return;
+            moveEvent.preventDefault();
+            this.setPriorityPanelWidth(startWidth + moveEvent.clientX - startX);
+        };
+        const onFinish = finishEvent => {
+            if (Number.isFinite(pointerId) && finishEvent.pointerId !== pointerId) return;
+            this.finishPriorityPanelResize(true);
+        };
+
+        this._priorityPanelResize = { planner, resizer, pointerId, onMove, onFinish };
+        planner.classList.add('is-resizing');
+        document.body.classList.add('gantt-resizing');
+        resizer.setAttribute('aria-grabbed', 'true');
+        try {
+            resizer.setPointerCapture?.(pointerId);
+        } catch (error) {
+            // Window listeners below still keep resizing reliable.
+        }
+        window.addEventListener('pointermove', onMove, { passive: false });
+        window.addEventListener('pointerup', onFinish);
+        window.addEventListener('pointercancel', onFinish);
+    },
+
+    finishPriorityPanelResize(persist = true) {
+        const resize = this._priorityPanelResize;
+        if (!resize) return;
+        window.removeEventListener('pointermove', resize.onMove);
+        window.removeEventListener('pointerup', resize.onFinish);
+        window.removeEventListener('pointercancel', resize.onFinish);
+        resize.planner?.classList.remove('is-resizing');
+        resize.resizer?.setAttribute('aria-grabbed', 'false');
+        document.body.classList.remove('gantt-resizing');
+        try {
+            if (resize.resizer?.hasPointerCapture?.(resize.pointerId)) {
+                resize.resizer.releasePointerCapture(resize.pointerId);
+            }
+        } catch (error) {
+            // Pointer capture may already be released by the browser.
+        }
+        this._priorityPanelResize = null;
+        if (persist) this.setPriorityPanelWidth(this.priorityPanelWidth, true);
+    },
+
+    resizePriorityPanelByKey(event) {
+        if (!event) return;
+        const step = event.shiftKey ? 40 : 16;
+        if (event.key === 'ArrowLeft') {
+            event.preventDefault();
+            this.setPriorityPanelWidth(this.getPriorityPanelWidth() - step, true);
+        } else if (event.key === 'ArrowRight') {
+            event.preventDefault();
+            this.setPriorityPanelWidth(this.getPriorityPanelWidth() + step, true);
+        } else if (event.key === 'Home' || event.key === 'Enter') {
+            event.preventDefault();
+            this.resetPriorityPanelWidth();
+        }
+    },
+
+    resetPriorityPanelWidth() {
+        this.setPriorityPanelWidth(this.PRIORITY_PANEL_DEFAULT_WIDTH, true);
+    },
+
     scrollToToday(smooth = true) {
         const timeline = document.getElementById('gantt-timeline');
         const todayLine = timeline?.querySelector('.gantt-today-line');
@@ -442,10 +570,10 @@ const Gantt = {
         }
 
         const { queue, days } = this.schedule;
-        const activeQueue = queue.filter(item => item.schedule.length > 0);
+        const priorityQueue = queue.filter(item => !item.done || item.schedule.length > 0);
         const pausedHtml = this.renderPausedOrders(blockedQueue, reviewQueue);
 
-        if (!days.length || !activeQueue.length) {
+        if (!days.length || !priorityQueue.length) {
             container.innerHTML = `
                 <div class="card">
                     <p class="text-muted text-center">
@@ -482,13 +610,24 @@ const Gantt = {
             dayLoadByDate,
             Number(this.schedule.dailyCapacity || 0)
         );
-        const priorityCards = activeQueue.map((item, index) => this.renderPriorityCard(item, index, holidaySet)).join('');
+        const waitingTailIndex = priorityQueue.findIndex((item, index) => (
+            this.isOrderWaitingForStart(item)
+            && priorityQueue.slice(index).every(candidate => this.isOrderWaitingForStart(candidate))
+        ));
+        const priorityCards = priorityQueue.map((item, index) => `
+            ${index === waitingTailIndex ? `
+                <div class="gantt-waiting-divider">
+                    <strong>Дальше ждут очереди</strong>
+                    <span>Распределятся после освобождения людей</span>
+                </div>` : ''}
+            ${this.renderPriorityCard(item, index, holidaySet)}
+        `).join('');
         const capacity = this.getEffectivePlanningCapacity();
         const hoursPerDay = Number(capacity.hoursPerDay || this.SHIFT_HOURS);
-        const deadlineHtml = this.renderDeadlineStrip(activeQueue, minDate, totalDays, cellWidth);
+        const deadlineHtml = this.renderDeadlineStrip(priorityQueue, minDate, totalDays, cellWidth);
         const workerRows = Array.from(
             { length: this.TEAM_SIZE },
-            (_, index) => this.renderWorkerLane(index + 1, activeQueue, minDate, totalDays, cellWidth, hoursPerDay, holidaySet)
+            (_, index) => this.renderWorkerLane(index + 1, priorityQueue, minDate, totalDays, cellWidth, hoursPerDay, holidaySet)
         ).join('');
         const workerLabels = Array.from(
             { length: this.TEAM_SIZE },
@@ -504,19 +643,33 @@ const Gantt = {
         const todayOffset = this.daysBetween(minDate, today);
         const todayLeft = todayOffset * cellWidth;
         const showToday = todayOffset >= 0 && todayOffset < totalDays;
+        const priorityPanelWidth = this.getPriorityPanelWidth();
 
         container.innerHTML = `
-            <div class="gantt-planner">
+            <div class="gantt-planner" style="--gantt-priority-width:${priorityPanelWidth}px">
                 <aside class="gantt-priority-panel">
                     <div class="gantt-priority-header">
                         <div>
                             <strong>Приоритеты</strong>
-                            <span>${activeQueue.length} заказов · перетащите</span>
+                            <span>${priorityQueue.length} заказов · меняйте порядок</span>
                         </div>
                         <span class="gantt-team-label">4 чел.</span>
                     </div>
                     <div class="gantt-priority-list">${priorityCards}</div>
                 </aside>
+                <div class="gantt-panel-resizer" role="separator" tabindex="0"
+                    aria-label="Изменить ширину очереди и календаря"
+                    aria-orientation="vertical"
+                    aria-valuemin="${this.PRIORITY_PANEL_MIN_WIDTH}"
+                    aria-valuemax="${this.PRIORITY_PANEL_MAX_WIDTH}"
+                    aria-valuenow="${priorityPanelWidth}"
+                    aria-grabbed="false"
+                    title="Тяните влево или вправо · двойной клик — вернуть ширину"
+                    onpointerdown="Gantt.startPriorityPanelResize(event)"
+                    onkeydown="Gantt.resizePriorityPanelByKey(event)"
+                    ondblclick="Gantt.resetPriorityPanelWidth()">
+                    <span aria-hidden="true"></span>
+                </div>
                 <section class="gantt-resource-board">
                     <div class="gantt-resource-labels">
                         <div class="gantt-resource-label-header">Люди</div>
@@ -540,10 +693,48 @@ const Gantt = {
         if (showToday) this.scrollToToday(false);
     },
 
+    getOrderScheduleWindow(item) {
+        const schedule = Array.isArray(item?.schedule)
+            ? item.schedule.filter(segment => segment?.date)
+            : [];
+        if (!schedule.length) return { startDate: null, finishDate: null };
+        return {
+            startDate: schedule[0].date,
+            finishDate: schedule[schedule.length - 1].date,
+        };
+    },
+
+    isOrderWaitingForStart(item) {
+        if (!item) return false;
+        const { startDate } = this.getOrderScheduleWindow(item);
+        if (!startDate) return !item.done;
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const plannedStart = this.parseLocalDate(startDate);
+        plannedStart.setHours(0, 0, 0, 0);
+        return plannedStart > today;
+    },
+
+    formatScheduleDate(dateStr, todayLabel = false) {
+        if (!dateStr) return 'за горизонтом';
+        if (todayLabel) {
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const date = this.parseLocalDate(dateStr);
+            date.setHours(0, 0, 0, 0);
+            if (date.getTime() === today.getTime()) return 'сегодня';
+        }
+        return this.formatDateStr(dateStr);
+    },
+
     renderPriorityCard(item, index, holidaySet = new Set()) {
         const orderId = Number(item.orderId || item.id);
         const progress = this.getOrderProgress(item);
         const risk = this.getNextDeliveryRiskSummary(item) || this.getDeadlineRiskSummary(item, holidaySet);
+        const scheduleWindow = this.getOrderScheduleWindow(item);
+        const isWaiting = this.isOrderWaitingForStart(item);
+        const startLabel = this.formatScheduleDate(scheduleWindow.startDate, true);
+        const finishLabel = this.formatScheduleDate(scheduleWindow.finishDate);
         const workerTarget = Math.max(
             1,
             Math.min(
@@ -561,12 +752,15 @@ const Gantt = {
             item.orderName || 'Без названия',
             item.clientName || 'Без клиента',
             `Осталось ${this.formatHours(progress.remaining)}`,
+            isWaiting ? 'Ждёт очереди' : '',
+            `Старт ${startLabel}`,
+            `Готово ${finishLabel}`,
             risk.label,
             deadlineLabel,
-        ].join(' · ');
+        ].filter(Boolean).join(' · ');
 
         return `
-            <div class="gantt-priority-card ${riskClass}" draggable="true" data-order-id="${orderId}" title="${this.esc(title)}"
+            <div class="gantt-priority-card ${riskClass} ${isWaiting ? 'waiting' : ''}" draggable="true" data-order-id="${orderId}" title="${this.esc(title)}"
                 ondragstart="Gantt.onOrderDragStart(event, ${orderId})"
                 ondragover="Gantt.onOrderDragOver(event)"
                 ondragleave="Gantt.onOrderDragLeave(event)"
@@ -580,7 +774,11 @@ const Gantt = {
                 <span class="gantt-priority-index">${index + 1}</span>
                 <div class="gantt-priority-main">
                     <div class="gantt-order-name" title="${this.esc(item.orderName)}">${this.esc(item.orderName || 'Без названия')}</div>
-                    <div class="gantt-order-meta">ост. ${this.formatHours(progress.remaining)} · ${deadlineLabel}</div>
+                    <div class="gantt-order-meta">${isWaiting ? 'Ждёт очереди' : `ост. ${this.formatHours(progress.remaining)}`} · ${deadlineLabel}</div>
+                    <div class="gantt-order-window">
+                        <span>Старт ${startLabel}</span>
+                        <span>Готово ${finishLabel}</span>
+                    </div>
                 </div>
                 <div class="gantt-priority-actions" onclick="event.stopPropagation()">
                     <span class="gantt-worker-stepper">

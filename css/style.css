@@ -6335,11 +6335,72 @@ table .text-center { text-align: center; }
 }
 
 .gantt-priority-panel {
-    flex: 0 0 220px;
-    width: 220px;
-    min-width: 220px;
-    border-right: 1px solid var(--border);
+    flex: 0 0 var(--gantt-priority-width, 220px);
+    width: var(--gantt-priority-width, 220px);
+    min-width: var(--gantt-priority-width, 220px);
     background: var(--card-bg);
+}
+
+.gantt-panel-resizer {
+    position: relative;
+    z-index: 8;
+    flex: 0 0 11px;
+    width: 11px;
+    margin: 0 -1px;
+    border: 0;
+    background: transparent;
+    cursor: col-resize;
+    touch-action: none;
+}
+
+.gantt-panel-resizer::before {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 5px;
+    width: 1px;
+    background: var(--border);
+    content: '';
+    transition: width 0.12s ease, background 0.12s ease;
+}
+
+.gantt-panel-resizer span {
+    position: absolute;
+    top: 50%;
+    left: 3px;
+    width: 5px;
+    height: 34px;
+    transform: translateY(-50%);
+    border: 1px solid #cbd5e1;
+    border-radius: 999px;
+    background: #fff;
+    box-shadow: 0 1px 4px rgba(15, 23, 42, 0.12);
+    transition: border-color 0.12s ease, background 0.12s ease, box-shadow 0.12s ease;
+}
+
+.gantt-panel-resizer:hover::before,
+.gantt-panel-resizer:focus-visible::before,
+.gantt-planner.is-resizing .gantt-panel-resizer::before {
+    width: 2px;
+    background: var(--accent);
+}
+
+.gantt-panel-resizer:hover span,
+.gantt-panel-resizer:focus-visible span,
+.gantt-planner.is-resizing .gantt-panel-resizer span {
+    border-color: var(--accent);
+    background: #eff6ff;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.gantt-panel-resizer:focus-visible {
+    outline: none;
+}
+
+body.gantt-resizing,
+body.gantt-resizing * {
+    cursor: col-resize !important;
+    user-select: none !important;
 }
 
 .gantt-priority-header {
@@ -6394,7 +6455,7 @@ table .text-center { text-align: center; }
     align-items: center;
     gap: 4px;
     box-sizing: border-box;
-    height: 67px;
+    height: 76px;
     padding: 6px;
     border-bottom: 1px solid var(--border);
     background: var(--card-bg);
@@ -6424,6 +6485,50 @@ table .text-center { text-align: center; }
     box-shadow: inset 3px 0 0 #f59e0b;
 }
 
+.gantt-priority-card.waiting {
+    background: #fafafa;
+}
+
+.gantt-priority-card.waiting .gantt-priority-index {
+    background: #f1f5f9;
+    color: #64748b;
+}
+
+.gantt-priority-card.waiting .gantt-order-meta {
+    color: #64748b;
+    font-weight: 700;
+}
+
+.gantt-priority-card.waiting .gantt-order-window {
+    color: #2563eb;
+}
+
+.gantt-waiting-divider {
+    box-sizing: border-box;
+    min-height: 38px;
+    padding: 6px 9px;
+    border-top: 1px solid #cbd5e1;
+    border-bottom: 1px solid var(--border);
+    background: #f8fafc;
+    color: #475569;
+}
+
+.gantt-waiting-divider strong,
+.gantt-waiting-divider span {
+    display: block;
+}
+
+.gantt-waiting-divider strong {
+    font-size: 9px;
+    text-transform: uppercase;
+}
+
+.gantt-waiting-divider span {
+    margin-top: 2px;
+    font-size: 9px;
+    line-height: 1.2;
+}
+
 .gantt-priority-card .gantt-drag-handle {
     grid-column: 1;
     overflow: hidden;
@@ -6450,9 +6555,27 @@ table .text-center { text-align: center; }
 }
 
 .gantt-priority-card .gantt-order-meta {
-    margin-top: 4px;
+    margin-top: 3px;
     font-size: 9px;
     line-height: 1.2;
+}
+
+.gantt-order-window {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1px;
+    margin-top: 2px;
+    color: #475569;
+    font-size: 8px;
+    font-weight: 700;
+    line-height: 1.15;
+}
+
+.gantt-order-window span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .gantt-priority-actions {
@@ -6726,12 +6849,6 @@ table .text-center { text-align: center; }
 }
 
 @media (max-width: 1100px) {
-    .gantt-priority-panel {
-        flex-basis: 210px;
-        width: 210px;
-        min-width: 210px;
-    }
-
     .gantt-priority-card {
         grid-template-columns: 11px 20px minmax(0, 1fr) 66px;
         gap: 3px;
@@ -6755,10 +6872,15 @@ table .text-center { text-align: center; }
     }
 
     .gantt-priority-panel {
+        flex: none;
         width: 100%;
         min-width: 0;
         border-right: 0;
         border-bottom: 1px solid var(--border);
+    }
+
+    .gantt-panel-resizer {
+        display: none;
     }
 
     .gantt-priority-header {
