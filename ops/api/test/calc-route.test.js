@@ -109,9 +109,9 @@ test('POST /api/calc/preview returns live calculation for typical input', async 
   assert.equal(res.status, 200);
   assert.deepEqual(body, {
     total_revenue: 10000,
-    total_cost: 7413,
-    total_margin: 2587,
-    margin_percent: 25.87,
+    total_cost: 7463,
+    total_margin: 2537,
+    margin_percent: 25.37,
     total_hours_plan: 3.3,
     production_hours_plastic: 3.3,
     production_hours_packaging: 0,

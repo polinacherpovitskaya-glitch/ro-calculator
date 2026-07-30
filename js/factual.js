@@ -46,7 +46,7 @@ const Factual = {
         { key: 'molds',               label: 'Молды',            planField: 'molds',            hint: 'FinTablo / вруч.' },
         { key: 'delivery_client',     label: 'Доставка',         planField: 'delivery',         hint: 'вручную' },
         { key: 'taxes',               label: 'Налоги',            planField: 'taxes',            hint: '7% от выручки без НДС / ФинТабло' },
-        { key: 'commercial',          label: 'Коммерческий отдел', planField: 'commercial',     hint: '6.5% от выручки без НДС' },
+        { key: 'commercial',          label: 'Коммерческий отдел', planField: 'commercial',     hint: '7% от выручки без НДС' },
         { key: 'charity',             label: 'Благотворительность', planField: 'charity',       hint: '1% от выручки без НДС / ФинТабло' },
         { key: 'other',               label: 'Прочее',           planField: 'other',            hint: 'FinTablo / вруч.' },
     ],
@@ -89,10 +89,131 @@ const Factual = {
     _vatRate(params) { const raw = Number(params?.vatRate); return Number.isFinite(raw) ? raw : 0.05; },
     _taxRate(params) { const raw = Number(params?.taxRate); return Number.isFinite(raw) ? raw : 0.07; },
     _charityRate(params) { const raw = Number(params?.charityRate); return Number.isFinite(raw) ? raw : 0.01; },
-    _commercialRate() { return 0.07; },
+    _commercialRate(params) { const raw = Number(params?.commercialRate); return Number.isFinite(raw) ? raw : 0.07; },
     _calcTaxesByRevenue(revenue, params) { return round2(this._num(revenue) * this._taxRate(params)); },
-    _calcCommercialByRevenue(revenue, params) { return round2(this._num(revenue) * this._commercialRate()); },
+    _calcCommercialByRevenue(revenue, params) { return round2(this._num(revenue) * this._commercialRate(params)); },
     _calcCharityByRevenue(revenue, params) { return round2(this._num(revenue) * this._charityRate(params)); },
+    _buildPendantPlanContribution(rawItem, params) {
+        const empty = {
+            salaryProduction: 0,
+            salaryTrim: 0,
+            salaryAssembly: 0,
+            indirect: 0,
+            hardwarePurchase: 0,
+            hardwareDelivery: 0,
+            nfcTotal: 0,
+            designPrinting: 0,
+            plastic: 0,
+            molds: 0,
+            hoursPlastic: 0,
+            hoursTrim: 0,
+            hoursAssembly: 0,
+            unlinkedHardwareTotal: 0,
+            unlinkedNfcTotal: 0,
+            totalCost: 0,
+        };
+        if (!rawItem || typeof calculatePendantCost !== 'function') return empty;
+
+        const parseJson = (value, fallback) => {
+            if (Array.isArray(value) || (value && typeof value === 'object')) return value;
+            if (typeof value !== 'string' || !value.trim()) return fallback;
+            try { return JSON.parse(value); } catch (error) { return fallback; }
+        };
+        const nested = parseJson(rawItem.item_data, {});
+        const pendant = { ...(nested && typeof nested === 'object' ? nested : {}), ...rawItem };
+        pendant.quantity = this._num(pendant.quantity);
+        pendant.elements = parseJson(pendant.elements, []);
+        pendant.cords = parseJson(pendant.cords, []);
+        pendant.carabiners = parseJson(pendant.carabiners, []);
+        if (!pendant.cord && pendant.cords[0]) pendant.cord = pendant.cords[0];
+        if (!pendant.carabiner && pendant.carabiners[0]) pendant.carabiner = pendant.carabiners[0];
+
+        const result = calculatePendantCost(pendant, params || {});
+        if (!(pendant.quantity > 0) || !(this._num(result?.totalCost) > 0)) return empty;
+
+        const elements = typeof getCountablePendantElements === 'function'
+            ? getCountablePendantElements(pendant)
+            : (pendant.elements || []).filter(element => String(element?.char || '').trim());
+        const totalElements = pendant.quantity * elements.length;
+        const letterMetrics = typeof getPendantLetterBlankMetrics === 'function'
+            ? getPendantLetterBlankMetrics(totalElements, params || {}, pendant)
+            : null;
+        const breakdown = letterMetrics?.breakdown || {};
+        const fotPerHour = this._num(params?.fotPerHour);
+        const letterSalary = this._num(breakdown.salaryTotal);
+        const letterAssemblySalary = Math.min(
+            letterSalary,
+            round2((this._num(result.hoursBuiltinHw) + this._num(result.hoursBuiltinAssembly)) * fotPerHour)
+        );
+        const letterTrimSalary = Math.min(
+            Math.max(0, letterSalary - letterAssemblySalary),
+            round2(this._num(result.hoursCutting) * fotPerHour)
+        );
+        const letterProductionSalary = round2(Math.max(0, letterSalary - letterAssemblySalary - letterTrimSalary));
+        const attachmentAssemblySalary = this._num(result.attachmentAssemblyTotal);
+
+        const explicitPrinting = round2(elements.reduce((sum, element) => {
+            if (!element?.has_print) return sum;
+            return sum + (pendant.quantity * this._num(element.print_price));
+        }, 0));
+        const letterHardware = this._num(breakdown.hardwarePurchaseTotal);
+        const letterHardwareDelivery = this._num(breakdown.hardwareDeliveryTotal);
+        const letterNfc = this._num(breakdown.nfcTotal);
+        const attachmentHardware = this._num(result.attachmentPurchaseTotal);
+        const attachmentDelivery = this._num(result.attachmentDeliveryTotal);
+
+        const allAttachments = [
+            ...(pendant.cords || []).map(entry => ({ type: 'cord', entry })),
+            ...(pendant.carabiners || []).map(entry => ({ type: 'carabiner', entry })),
+        ];
+        const linkedAttachmentTotal = round2(allAttachments.reduce((sum, item) => {
+            const { type, entry } = item;
+            const warehouseId = Number(entry?.warehouse_item_id || 0);
+            const isLinkedWarehouse = String(entry?.source || '').toLowerCase() === 'warehouse' && warehouseId > 0;
+            if (!isLinkedWarehouse) return sum;
+            const allocatedQty = typeof getPendantAttachmentAllocatedQty === 'function'
+                ? getPendantAttachmentAllocatedQty(pendant, entry)
+                : (this._num(entry?.allocated_qty) || pendant.quantity);
+            const purchasePerUnit = typeof getPendantAttachmentPurchasePerUnit === 'function'
+                ? getPendantAttachmentPurchasePerUnit(type, entry)
+                : (this._num(entry?.price_per_unit) * (this._num(entry?.qty_per_pendant) || 1));
+            const deliveryPerUnit = typeof getPendantAttachmentDeliveryPerUnit === 'function'
+                ? getPendantAttachmentDeliveryPerUnit(type, entry)
+                : (this._num(entry?.delivery_price) * (this._num(entry?.qty_per_pendant) || 1));
+            return sum + (allocatedQty * (purchasePerUnit + deliveryPerUnit));
+        }, 0));
+
+        const contribution = {
+            ...empty,
+            salaryProduction: letterProductionSalary,
+            salaryTrim: letterTrimSalary,
+            salaryAssembly: round2(letterAssemblySalary + attachmentAssemblySalary),
+            indirect: round2(this._num(breakdown.omittedIndirectTotal) + this._num(result.attachmentIndirectTotal)),
+            hardwarePurchase: round2(letterHardware + attachmentHardware),
+            hardwareDelivery: round2(letterHardwareDelivery + attachmentDelivery),
+            nfcTotal: round2(letterNfc),
+            designPrinting: round2(this._num(breakdown.printingTotal) + explicitPrinting),
+            plastic: round2(this._num(breakdown.plasticTotal)),
+            molds: round2(this._num(breakdown.moldsTotal)),
+            hoursPlastic: round2(this._num(result.hoursPlastic)),
+            hoursTrim: round2(this._num(result.hoursCutting)),
+            hoursAssembly: round2(this._num(result.assemblyHours)),
+            unlinkedHardwareTotal: round2(Math.max(0, letterHardware + letterHardwareDelivery + attachmentHardware + attachmentDelivery - linkedAttachmentTotal)),
+            unlinkedNfcTotal: round2(letterNfc),
+            totalCost: round2(this._num(result.totalCost)),
+        };
+
+        const categorizedTotal = round2(
+            contribution.salaryProduction + contribution.salaryTrim + contribution.salaryAssembly +
+            contribution.indirect + contribution.hardwarePurchase + contribution.hardwareDelivery +
+            contribution.nfcTotal + contribution.designPrinting + contribution.plastic + contribution.molds
+        );
+        // Per-unit components are rounded independently in the calculator. Keep
+        // that rounding residue inside indirect costs so the visible plan rows
+        // still add up to the pendant's exact saved calculator cost.
+        contribution.indirect = round2(contribution.indirect + contribution.totalCost - categorizedTotal);
+        return contribution;
+    },
     _planItemCost(item, ...keys) {
         for (const key of keys) {
             const value = this._num(item?.[key]);
@@ -1087,7 +1208,8 @@ _renderCompactResult(result, options = {}) {
         }
         if (rowKey === 'commercial') {
             const factRevenue = this._num(factData.fact_revenue);
-            return factRevenue > 0 ? `6.5% от ${this.fmtRub(factRevenue)} без НДС` : '';
+            const rate = this._commercialRate(App.params || {});
+            return factRevenue > 0 ? `${round2(rate * 100)}% от ${this.fmtRub(factRevenue)} без НДС` : '';
         }
         if (rowKey === 'charity') {
             const factRevenue = this._num(factData.fact_revenue);
@@ -1429,7 +1551,11 @@ async _loadFactSummaries() {
         let hardwarePurchase = 0, hardwareDelivery = 0, nfcTotal = 0, packagingPurchase = 0, packagingDelivery = 0;
         let designPrinting = 0, plastic = 0, molds = 0, delivery = 0;
         let savedIndirect = 0;
+        let pendantSalaryProduction = 0, pendantSalaryTrim = 0, pendantSalaryAssembly = 0, pendantIndirect = 0;
+        let pendantHoursPlastic = 0, pendantHoursTrim = 0, pendantHoursAssembly = 0;
+        let pendantUnlinkedHardwareTotal = 0, pendantUnlinkedNfcTotal = 0;
         let hasProductAssemblySnapshot = false;
+        let hasSavedProductSnapshot = false;
         let hasSavedSnapshot = false;
         let usedDuplicateCollapse = planItems.length !== (rawItems || []).length;
 
@@ -1491,6 +1617,7 @@ async _loadFactSummaries() {
                 const productNfc = this._planItemCost(ri, 'cost_nfc_tag');
                 if (productFot || productCutting || productIndirect || cuttingIndirect || productAssembly || productAssemblyIndirect || productPlastic || productMold || productDesign || productPrinting || productDelivery || productNfc) {
                     hasSavedSnapshot = true;
+                    hasSavedProductSnapshot = true;
                 }
                 if (productAssembly || productAssemblyIndirect || snapshotHoursAssembly > 0) {
                     hasProductAssemblySnapshot = true;
@@ -1519,6 +1646,28 @@ async _loadFactSummaries() {
                 if (savedPackagingHours > 0 || this._planItemCost(ri, 'packaging_price_per_unit', 'packaging_delivery_per_unit') > 0) {
                     hasSavedSnapshot = true;
                 }
+            } else if (ri.item_type === 'pendant') {
+                const pendant = this._buildPendantPlanContribution(ri, params);
+                if (!(pendant.totalCost > 0)) return;
+                hasSavedSnapshot = true;
+                planHoursPlastic += pendant.hoursPlastic;
+                planHoursTrim += pendant.hoursTrim;
+                planHoursAssembly += pendant.hoursAssembly;
+                pendantHoursPlastic += pendant.hoursPlastic;
+                pendantHoursTrim += pendant.hoursTrim;
+                pendantHoursAssembly += pendant.hoursAssembly;
+                pendantSalaryProduction += pendant.salaryProduction;
+                pendantSalaryTrim += pendant.salaryTrim;
+                pendantSalaryAssembly += pendant.salaryAssembly;
+                pendantIndirect += pendant.indirect;
+                hardwarePurchase += pendant.hardwarePurchase;
+                hardwareDelivery += pendant.hardwareDelivery;
+                nfcTotal += pendant.nfcTotal;
+                designPrinting += pendant.designPrinting;
+                plastic += pendant.plastic;
+                molds += pendant.molds;
+                pendantUnlinkedHardwareTotal += pendant.unlinkedHardwareTotal;
+                pendantUnlinkedNfcTotal += pendant.unlinkedNfcTotal;
             }
         });
 
@@ -1529,29 +1678,35 @@ async _loadFactSummaries() {
         const savedPackagingHours = this._num(order.production_hours_packaging);
         if (savedPackagingHours > 0) planHoursPackaging = savedPackagingHours;
 
-        const salaryProduction = round2(hasSavedSnapshot
+        const nonPendantPlasticHours = Math.max(0, planHoursPlastic - pendantHoursPlastic);
+        const nonPendantTrimHours = Math.max(0, planHoursTrim - pendantHoursTrim);
+        const salaryProduction = round2((hasSavedProductSnapshot
             ? planItems.reduce((sum, ri) => ri.item_type === 'product' ? sum + (this._num(ri.quantity) * this._planItemCost(ri, 'cost_fot')) : sum, 0)
-            : (planHoursPlastic * (params.fotPerHour || 0)));
-        const salaryTrim = round2(hasSavedSnapshot
+            : (nonPendantPlasticHours * (params.fotPerHour || 0))) + pendantSalaryProduction);
+        const salaryTrim = round2((hasSavedProductSnapshot
             ? planItems.reduce((sum, ri) => ri.item_type === 'product' ? sum + (this._num(ri.quantity) * this._planItemCost(ri, 'cost_cutting')) : sum, 0)
-            : (planHoursTrim * (params.fotPerHour || 0)));
-        const externalAssemblyHoursForSalary = Math.max(0, planHoursAssembly - planHoursAssemblyProducts);
-        const salaryAssembly = round2(hasSavedSnapshot
-            ? (hasProductAssemblySnapshot
-                ? (
-                    planItems.reduce((sum, ri) => ri.item_type === 'product'
-                        ? sum + (this._num(ri.quantity) * this._planItemCost(ri, 'cost_builtin_assembly'))
-                        : sum, 0)
-                    + (externalAssemblyHoursForSalary * (params.fotPerHour || 0))
-                )
-                : (planHoursAssembly * (params.fotPerHour || 0)))
-            : (planHoursAssembly * (params.fotPerHour || 0)));
+            : (nonPendantTrimHours * (params.fotPerHour || 0))) + pendantSalaryTrim);
+        const externalAssemblyHoursForSalary = Math.max(0, planHoursAssembly - planHoursAssemblyProducts - pendantHoursAssembly);
+        const productAssemblySalary = hasProductAssemblySnapshot
+            ? planItems.reduce((sum, ri) => ri.item_type === 'product'
+                ? sum + (this._num(ri.quantity) * this._planItemCost(ri, 'cost_builtin_assembly'))
+                : sum, 0)
+            : (planHoursAssemblyProducts * (params.fotPerHour || 0));
+        const salaryAssembly = round2(
+            productAssemblySalary +
+            (externalAssemblyHoursForSalary * (params.fotPerHour || 0)) +
+            pendantSalaryAssembly
+        );
         const salaryPackaging = round2(planHoursPackaging * (params.fotPerHour || 0));
 
         const plannedHoursTotal = planHoursPlastic + planHoursTrim + planHoursAssembly + planHoursPackaging;
-        const prodIndirect = round2(hasSavedSnapshot
-            ? (savedIndirect + ((planHoursAssemblyExternal + planHoursPackaging) * (params.indirectPerHour || 0)))
-            : (plannedHoursTotal * (params.indirectPerHour || 0)));
+        const nonPendantPlannedHours = Math.max(
+            0,
+            plannedHoursTotal - pendantHoursPlastic - pendantHoursTrim - pendantHoursAssembly
+        );
+        const prodIndirect = round2(hasSavedProductSnapshot
+            ? (savedIndirect + pendantIndirect + ((planHoursAssemblyExternal + planHoursPackaging) * (params.indirectPerHour || 0)))
+            : ((nonPendantPlannedHours * (params.indirectPerHour || 0)) + pendantIndirect));
 
         const orderRevenue = this._num(order.total_revenue_plan);
         const rowsWithoutTaxes = round2(
@@ -1617,6 +1772,10 @@ async _loadFactSummaries() {
                         ? `косвенные из текущих строк заказа${usedDuplicateCollapse ? '<br>одинаковые складские позиции объединены, чтобы не считать фурнитуру дважды' : ''}`
                         : undefined,
                     formula: hasSavedSnapshot ? 'текущие cost_indirect из строк заказа' : 'общие плановые часы × косв./ч',
+                },
+                _pendantMaterials: {
+                    hardwareTotal: round2(pendantUnlinkedHardwareTotal),
+                    nfcTotal: round2(pendantUnlinkedNfcTotal),
                 },
             },
         };
@@ -1687,8 +1846,9 @@ async _loadFactSummaries() {
         if (!hasWarehousePlan && !hardwareManualTotal && !nfcManualTotal && !packagingManualTotal) return planBuild;
 
         const planData = planBuild.planData;
-        const nextHardwareTotal = round2(hardwareWarehouseTotal + hardwareManualTotal);
-        const nextNfcTotal = round2(nfcWarehouseTotal + nfcManualTotal);
+        const pendantMaterials = planBuild.planMeta?._pendantMaterials || {};
+        const nextHardwareTotal = round2(hardwareWarehouseTotal + hardwareManualTotal + this._num(pendantMaterials.hardwareTotal));
+        const nextNfcTotal = round2(nfcWarehouseTotal + nfcManualTotal + this._num(pendantMaterials.nfcTotal));
         const nextPackagingTotal = round2(packagingWarehouseTotal + packagingManualTotal);
         planData.hardwareTotal = nextHardwareTotal;
         planData.nfcTotal = nextNfcTotal;
@@ -2028,7 +2188,13 @@ async _loadFactSummaries() {
             if (effectiveCommercial > 0) {
                 this._applyAutoFactValue(factData, 'fact_commercial', effectiveCommercial);
                 factData._auto_fintablo.fact_commercial = importedCommercial > 0;
-                this._setSourceHint(factData, 'fact_commercial', importedCommercial > 0 ? 'ФинТабло' : '6.5% от факта выручки без НДС');
+                this._setSourceHint(
+                    factData,
+                    'fact_commercial',
+                    importedCommercial > 0
+                        ? 'ФинТабло'
+                        : `${round2(this._commercialRate(params) * 100)}% от факта выручки без НДС`
+                );
             }
             const effectiveCharity = importedCharity > 0 ? importedCharity : charityByRevenue;
             if (effectiveCharity > 0) {
@@ -2673,7 +2839,10 @@ async _loadFactSummaries() {
             const rate = this._taxRate(App.params || {});
             return rate > 0 ? `${round2(rate * 100)}% от выручки без НДС` : '';
         }
-        if (rowKey === 'commercial') return '6.5% от выручки без НДС';
+        if (rowKey === 'commercial') {
+            const rate = this._commercialRate(App.params || {});
+            return rate > 0 ? `${round2(rate * 100)}% от выручки без НДС` : '';
+        }
         if (rowKey === 'charity') return '1% от выручки без НДС';
         if (rowKey === 'plastic' || rowKey === 'molds') {
             const amount = this._num(planData?.[rowKey === 'delivery_client' ? 'delivery' : rowKey]);

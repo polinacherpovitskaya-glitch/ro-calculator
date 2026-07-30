@@ -149,9 +149,9 @@ test('calcOrder live path supports products, hardware, packaging, fees, and hour
 
   assert.deepEqual(calcOrder(order), {
     total_revenue: 13000,
-    total_cost: 9061,
-    total_margin: 3939,
-    margin_percent: 30.3,
+    total_cost: 9126,
+    total_margin: 3874,
+    margin_percent: 29.8,
     total_hours_plan: 6.6,
     production_hours_plastic: 3.3,
     production_hours_packaging: 1.1,
@@ -204,7 +204,7 @@ test('calcPendant supports element, cord, carabiner, assembly, and indirect cost
     attachmentDeliveryTotal: 5,
     attachmentAssemblyTotal: 110,
     attachmentIndirectTotal: 11,
-    margin: { earned: 21.15, percent: 42.3 },
+    margin: { earned: 20.9, percent: 41.8 },
   });
 });
 
@@ -265,9 +265,9 @@ test('calcOrder live path includes pendant revenue, costs, and assembly hours', 
 
   assert.deepEqual(calcOrder(order), {
     total_revenue: 500,
-    total_cost: 288.5,
-    total_margin: 211.5,
-    margin_percent: 42.3,
+    total_cost: 291,
+    total_margin: 209,
+    margin_percent: 41.8,
     total_hours_plan: 1.1,
     production_hours_plastic: 0,
     production_hours_packaging: 0,

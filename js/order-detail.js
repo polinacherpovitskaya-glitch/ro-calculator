@@ -167,7 +167,7 @@ const OrderDetail = {
                 <div class="stat-value">${formatRub(revenue)}</div>
             </div>
             <div class="stat-card">
-                <div class="stat-label">${isNonCommercial ? 'Некоммерческие расходы' : 'Маржа'}</div>
+                <div class="stat-label">${isNonCommercial ? 'Некоммерческие расходы' : 'Чистая маржа'}</div>
                 <div class="stat-value ${isNonCommercial || marginPercent < 30 ? 'text-red' : 'text-green'}">${isNonCommercial ? '−' + formatRub(loss) : formatPercent(marginPercent)}</div>
                 ${marginNote}
             </div>
@@ -193,6 +193,26 @@ const OrderDetail = {
     renderInfoTab() {
         const o = this.currentOrder;
         const container = document.getElementById('od-tab-info');
+        const hasLegalDetails = [
+            o.client_legal_name,
+            o.client_inn,
+            o.client_legal_address,
+            o.client_bank_name,
+            o.client_bank_account,
+            o.client_bank_bik,
+        ].some(value => String(value || '').trim());
+        const legalDetailsCard = hasLegalDetails
+            ? `
+            <div class="card">
+                <div class="card-header"><h3>Юридические данные клиента</h3></div>
+                ${this._fieldRow('client_legal_name', 'Название компании', o.client_legal_name, 'text')}
+                ${this._fieldRow('client_inn', 'ИНН', o.client_inn, 'text')}
+                ${this._fieldRow('client_legal_address', 'Юридический адрес', o.client_legal_address, 'text')}
+                ${this._fieldRow('client_bank_name', 'Банк', o.client_bank_name, 'text')}
+                ${this._fieldRow('client_bank_account', 'Расчётный счёт', o.client_bank_account, 'text')}
+                ${this._fieldRow('client_bank_bik', 'БИК', o.client_bank_bik, 'text')}
+            </div>`
+            : '';
 
         container.innerHTML = `
         <div class="od-detail-grid">
@@ -211,6 +231,7 @@ const OrderDetail = {
                 ${this._fieldRow('crm_link', 'CRM', o.crm_link, 'url')}
                 ${this._fieldRow('fintablo_link', 'Финтабло', o.fintablo_link, 'url')}
             </div>
+            ${legalDetailsCard}
         </div>
         ${this._renderDeliveryScheduleCard()}
         `;
@@ -388,15 +409,24 @@ const OrderDetail = {
         const allHardware = this.currentItems.filter(i => i.item_type === 'hardware');
         const allPackaging = this.currentItems.filter(i => i.item_type === 'packaging');
         const pendantItems = this.currentItems.filter(i => i.item_type === 'pendant');
+        const extraItems = this.currentItems.filter(i => i.item_type === 'extra_cost');
 
         // Build pendant HTML (used in both grouped and non-grouped paths)
         let pendantHtml = '';
         pendantItems.forEach(pndItem => {
-            let pnd;
-            try { pnd = typeof pndItem.item_data === 'string' ? JSON.parse(pndItem.item_data) : pndItem.item_data; } catch(e) { return; }
+            let pnd = { ...pndItem };
+            try {
+                const itemData = typeof pndItem.item_data === 'string'
+                    ? JSON.parse(pndItem.item_data)
+                    : pndItem.item_data;
+                if (itemData && typeof itemData === 'object') pnd = { ...pnd, ...itemData };
+            } catch(e) { /* keep top-level local fallback fields */ }
             if (!pnd) return;
             pendantHtml += this._renderPendantDetail(pnd, pndItem);
         });
+        const extraHtml = extraItems.length > 0
+            ? `<h3 style="margin:16px 0 12px">&#10010; Доплаты</h3>${extraItems.map(item => this._renderExtraCostDetail(item)).join('')}`
+            : '';
 
         // Separate order-level vs per-item hw/pkg
         const orderHardware = allHardware.filter(i => i.hardware_parent_item_index === null || i.hardware_parent_item_index === undefined);
@@ -525,6 +555,7 @@ const OrderDetail = {
             // Pendant items
             html += pendantHtml;
         }
+        html += extraHtml;
 
         if (!html) {
             html = '<div class="empty-state"><div class="empty-icon">&#128230;</div><p>Нет позиций. Откройте в калькуляторе для добавления.</p></div>';
@@ -969,7 +1000,9 @@ const OrderDetail = {
         let sellPrice = 0;
 
         if (type === 'product') {
-            costPerUnit = item.cost_total || 0;
+            // Printing is billed as separate rows in the calculator, invoice and
+            // KP, so the product card must use the same printing-free cost base.
+            costPerUnit = Math.max(0, round2((item.cost_total || 0) - (item.cost_printing || 0)));
             sellPrice = item.sell_price_item || 0;
         } else if (type === 'hardware') {
             costPerUnit = item.cost_total || 0;
@@ -980,8 +1013,14 @@ const OrderDetail = {
         }
 
         const revenue = sellPrice * qty;
-        const cost = costPerUnit * qty;
-        const margin = revenue > 0 ? ((revenue - cost) / revenue * 100) : 0;
+        const marginResult = typeof calculateActualMargin === 'function'
+            ? calculateActualMargin(sellPrice, costPerUnit, App?.params || {})
+            : {
+                percent: sellPrice > 0
+                    ? ((sellPrice - costPerUnit) / sellPrice * 100)
+                    : null,
+            };
+        const margin = Number.isFinite(marginResult?.percent) ? marginResult.percent : null;
         const productMeta = type === 'product' ? this._renderProductMeta(item) : '';
 
         return `
@@ -994,9 +1033,22 @@ const OrderDetail = {
                 <div><span class="text-muted">Себестоимость:</span> ${formatRub(costPerUnit)}/шт</div>
                 <div><span class="text-muted">Продажа:</span> ${formatRub(sellPrice)}/шт</div>
                 <div><span class="text-muted">Выручка:</span> ${formatRub(revenue)}</div>
-                <div><span class="text-muted">Маржа:</span> <span class="${margin >= 30 ? 'text-green' : 'text-red'}">${margin.toFixed(1)}%</span></div>
+                <div><span class="text-muted">Чистая маржа:</span> <span class="${margin !== null && margin >= 30 ? 'text-green' : 'text-red'}">${margin === null ? '—' : margin.toFixed(1) + '%'}</span></div>
             </div>
             ${productMeta}
+        </div>`;
+    },
+
+    _renderExtraCostDetail(item) {
+        const name = item.product_name || 'Доп. доход';
+        const amount = Number(item.sell_price_item ?? item.cost_total ?? 0) || 0;
+        return `
+        <div class="od-item-card">
+            <div class="od-item-header">
+                <b>${this._esc(name)}</b>
+                <span style="font-size:14px;font-weight:700;">${formatRub(amount)}</span>
+            </div>
+            <div class="text-muted" style="font-size:12px;">Отдельная строка в смете и КП</div>
         </div>`;
     },
 
@@ -1004,6 +1056,44 @@ const OrderDetail = {
         const colors = this._normalizeProductColors(item);
         const attachments = this._normalizeColorAttachments(item);
         const sections = [];
+        let printings = item?.printings;
+        if (typeof printings === 'string') {
+            try {
+                printings = JSON.parse(printings);
+            } catch (e) {
+                printings = [];
+            }
+        }
+        if (!Array.isArray(printings)) printings = [];
+        if (typeof getActivePrintings === 'function') {
+            printings = getActivePrintings({ ...item, printings });
+        } else {
+            printings = printings.filter(printing => (
+                (Number(printing?.qty) || 0) > 0
+                || (Number(printing?.price) || 0) > 0
+                || (Number(printing?.sell_price) || 0) > 0
+            ));
+        }
+
+        if (printings.length > 0) {
+            sections.push(`
+                <div style="display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap;">
+                    <span class="text-muted" style="min-width:62px;">Печать:</span>
+                    <div style="display:flex;flex-direction:column;gap:4px;">
+                        ${printings.map((printing, index) => {
+                            const details = [];
+                            const purchasePrice = Number(printing?.price) || 0;
+                            const sellPrice = Number(printing?.sell_price) || 0;
+                            const deliveryTotal = Number(printing?.delivery_total) || 0;
+                            if (purchasePrice > 0) details.push(`закупка ${formatRub(purchasePrice)}/шт`);
+                            if (sellPrice > 0) details.push(`продажа ${formatRub(sellPrice)}/шт`);
+                            if (deliveryTotal > 0) details.push(`доставка ${formatRub(deliveryTotal)}`);
+                            return `<span><strong>${this._esc(printing?.name || `Нанесение ${index + 1}`)}</strong>${details.length ? ` · ${details.join(' · ')}` : ''}</span>`;
+                        }).join('')}
+                    </div>
+                </div>
+            `);
+        }
 
         if (colors.length > 0) {
             sections.push(`

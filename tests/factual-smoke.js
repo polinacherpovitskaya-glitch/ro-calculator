@@ -122,6 +122,16 @@ function smokeHiddenSalaryTotals(context) {
     assert.ok(!html.includes('250 ₽'), 'total should not double count hidden salary rows');
 }
 
+function smokeCommercialRateUsesActiveParams(context) {
+    const state = vm.runInContext(`(() => ({
+        fallback: Factual._calcCommercialByRevenue(1000, {}),
+        configured: Factual._calcCommercialByRevenue(1000, { commercialRate: 0.065 }),
+    }))()`, context);
+
+    assert.equal(state.fallback, 70, 'commercial plan should default to the current 7% business rate');
+    assert.equal(state.configured, 65, 'commercial plan should follow the active settings rate');
+}
+
 function smokeRevenueManualOverride(context) {
     vm.runInContext(`(() => {
         Factual._orderCache[5] = {
@@ -373,6 +383,103 @@ function smokeBuildPlanSeparatesProductBuiltinAssembly(context) {
     assert.equal(result.planHours.hoursHardware, 1.5, 'product built-in assembly should appear in plan assembly hours');
     assert.equal(result.planData.salaryAssembly, 15, 'product built-in assembly salary should come from saved snapshot');
     assert.equal(result.planData.indirectProduction, 15, 'product built-in assembly indirect should be added to production indirect');
+}
+
+async function smokeBuildPlanIncludesPendantBreakdown(context) {
+    const result = await vm.runInContext(`(async () => {
+        globalThis.calculatePendantCost = pendant => pendant.result;
+        globalThis.getCountablePendantElements = pendant => pendant.elements || [];
+        globalThis.getPendantLetterBlankMetrics = () => ({
+            breakdown: {
+                salaryTotal: 100,
+                hardwarePurchaseTotal: 50,
+                hardwareDeliveryTotal: 10,
+                nfcTotal: 20,
+                plasticTotal: 100,
+                moldsTotal: 100,
+                printingTotal: 30,
+                omittedIndirectTotal: 200,
+            },
+        });
+        globalThis.getPendantWarehouseDemandRows = pendant => [{
+            warehouse_item_id: pendant.cords[0].warehouse_item_id,
+            qty: pendant.quantity,
+            material_type: 'hardware',
+            name: 'Подвес · шнур',
+        }];
+
+        const order = {
+            total_revenue_plan: 2000,
+            production_hours_hardware: 1,
+            production_hours_packaging: 0,
+        };
+        const items = [
+            {
+                item_type: 'pendant',
+                quantity: 10,
+                elements: [{ char: 'A', has_print: true, print_price: 2 }],
+                cords: [{
+                    source: 'warehouse',
+                    warehouse_item_id: 88,
+                    allocated_qty: 10,
+                    qty_per_pendant: 1,
+                    price_per_unit: 4,
+                    delivery_price: 1,
+                }],
+                carabiners: [],
+                result: {
+                    totalCost: 1000,
+                    attachmentPurchaseTotal: 40,
+                    attachmentDeliveryTotal: 10,
+                    attachmentAssemblyTotal: 100,
+                    attachmentIndirectTotal: 100,
+                    hoursPlastic: 1,
+                    hoursCutting: 0.2,
+                    hoursBuiltinHw: 0,
+                    hoursBuiltinAssembly: 0.1,
+                    assemblyHours: 1,
+                },
+            },
+            {
+                item_type: 'hardware',
+                product_name: 'Ручная фурнитура',
+                quantity: 1,
+                hardware_price_per_unit: 5,
+                hardware_delivery_per_unit: 0,
+                hardware_source: 'custom',
+            },
+        ];
+        const params = {
+            fotPerHour: 100,
+            indirectPerHour: 0,
+            taxRate: 0,
+            commercialRate: 0,
+            charityRate: 0,
+        };
+        const built = Factual._buildPlan(order, items, params);
+        __warehouseItems = [{ id: 88, price_per_unit: 6 }];
+        const withCurrentMaterials = await Factual._applyCurrentPlanMaterialTotals(built, items);
+        delete globalThis.calculatePendantCost;
+        delete globalThis.getCountablePendantElements;
+        delete globalThis.getPendantLetterBlankMetrics;
+        delete globalThis.getPendantWarehouseDemandRows;
+        return withCurrentMaterials;
+    })()`, context);
+
+    assert.equal(result.planHours.hoursPlastic, 1, 'pendant casting hours should reach plan-fact');
+    assert.equal(result.planHours.hoursTrim, 0.2, 'pendant trimming hours should reach plan-fact');
+    assert.equal(result.planHours.hoursHardware, 1, 'pendant assembly hours should reach plan-fact');
+    assert.equal(result.planData.salaryProduction, 70, 'pendant casting salary should use its calculator breakdown');
+    assert.equal(result.planData.salaryTrim, 20, 'pendant trimming salary should use its calculator breakdown');
+    assert.equal(result.planData.salaryAssembly, 110, 'pendant attachment and letter assembly should not be double-counted from saved order hours');
+    assert.equal(result.planData.indirectProduction, 420, 'pendant indirect row should include the exact calculator rounding residue');
+    assert.equal(result.planData.hardwareTotal, 125, 'current material refresh should replace linked pendant stock price and preserve its unlinked letter hardware');
+    assert.equal(result.planData.nfcTotal, 20, 'pendant NFC components should reach the dedicated plan row');
+    assert.equal(result.planData.designPrinting, 50, 'pendant printing should include blank and per-letter printing');
+    assert.equal(result.planData.plastic, 100, 'pendant plastic should reach plan-fact');
+    assert.equal(result.planData.molds, 100, 'pendant mold amortization should reach plan-fact');
+    assert.equal(result.planData.totalCosts, 1015, 'plan rows should include the complete pendant cost and current linked stock price');
+    assert.equal(result.planData.planEarned, 985, 'plan profit should include the complete pendant cost at the current linked stock price');
 }
 
 function smokeBuildPlanRendersSavedSnapshotHints(context) {
@@ -1205,12 +1312,14 @@ async function main() {
     const context = createContext();
     runScript(context, 'js/factual.js');
     smokeHiddenSalaryTotals(context);
+    smokeCommercialRateUsesActiveParams(context);
     smokeSavedPlanTotalWins(context);
     smokeFactDetailShowsFinTabloBreakdown(context);
     smokeRevenueManualOverride(context);
     await smokeResetAutoFactInput(context);
     smokeBuildPlanUsesSavedSnapshotCostsAndDedupedHardware(context);
     smokeBuildPlanSeparatesProductBuiltinAssembly(context);
+    await smokeBuildPlanIncludesPendantBreakdown(context);
     smokeBuildPlanRendersSavedSnapshotHints(context);
     await smokeTaxesIncludeCharity(context);
     await smokeTaxesFallbackToRevenueWhenImportMissing(context);

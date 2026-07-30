@@ -33,7 +33,7 @@ const STALE_PATTERNS = [
 const EXPECTED_SNIPPETS = [
   { file: 'js/calculator.js', snippet: 'function getNetRevenueRetentionRate(params)' },
   { file: 'js/molds.js', snippet: 'Цена без НДС = себест / (1 - налоги - коммерческий - благотворительность - target_net_margin)' },
-  { file: 'index.html', snippet: 'Коммерческий отдел (6.5% от базы без НДС)' },
+  { file: 'index.html', snippet: 'Коммерческий отдел (7% от базы без НДС)' },
   { file: 'index.html', snippet: 'Налоги от выручки без НДС (7%)' },
   { file: 'index.html', snippet: 'Благотворительность (1% от базы без НДС)' },
   { file: 'supabase-schema.sql', snippet: "('indirect_costs_monthly', 1900000" },

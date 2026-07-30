@@ -4,7 +4,7 @@
 - Task: провести сквозной аудит сайта Recycle Object: проверить логику создания и изменения каждого заказа, сценарии цветов и комплектации, прохождение заказа через Китай, склад и готовую продукцию, пофиксить найденные проблемы и подготовить список улучшений.
 - Canonical input: пользовательский запрос в чате от 2026-03-16 ("пройти по всему сайту, проверить логику создания каждого заказа, цветов, как это кладется на сайт, на склад, заберется со склада; выявить проблемы, пофиксить их и предложить улучшения").
 - Repo context: vanilla JS SPA (`index.html` + `js/*`) с dual-write паттерном `Supabase + localStorage`, ключевыми модулями `app`, `orders`, `order-detail`, `china`, `warehouse`, `colors`, `supabase`, плюс отдельный `corporate-gift/` конструктор с отправкой в Google Sheets.
-- Last updated: 2026-03-30
+- Last updated: 2026-07-30
 
 ## Historical Context
 - План мигрирован из предыдущего трека `work-management MVP`, потому что старый `docs/plans.md` перестал быть каноном под новый продуктовый запрос.
@@ -13,6 +13,47 @@
 ## Derived Artifacts
 - Improvement backlog: `/Users/krollipolli/Documents/Github/RO calculator/docs/improvement-backlog.md`
 - Auth/data-security remediation track: `/Users/krollipolli/Documents/Github/RO calculator/docs/auth-remediation-plan.md`
+- Active calculator audit spec: `docs/specs/2026-07-30-calculator-exhaustive-audit-phase1.md`
+- Active calculator audit plan: `docs/plans/2026-07-30-calculator-exhaustive-audit-phase1.md`
+
+## Active Track — Exhaustive Calculator Audit (2026-07-30)
+
+The user requested a new field-by-field audit of the entire calculator:
+rendering, source and accuracy of prices, calculation, save/autosave,
+load/resave, all downstream representations, warehouse reservation and stock
+write-off. Historical milestones below remain the audit record; this active
+track reopens the calculator at a finer level of granularity.
+
+| ID | Slice | Status |
+| --- | --- | --- |
+| C1 | Inventory every field, output and authoritative price source | [x] |
+| C2 | Render/edit/recalculate/save/load/resave for header and all line types | [~] |
+| C3 | Cross-view parity: orders, detail, invoice/KP, plan-fact and production views | [~] |
+| C4 | Warehouse lifecycle: demand, reserve, shortage, collect/write-off, release and rollback | [ ] |
+| C5 | Live calc/calc2 parity, defect release loops and final handoff | [ ] |
+
+### C1 current execution
+
+- [x] Refresh `origin/main`; baseline is `v429` at `ddf1fc3`.
+- [x] Run syntax, code-health, data-path, order-flow, pricing-canon, molds and
+  warehouse-migration smoke tests; all passed before audit changes.
+- [x] Record the first authoritative price-source contract in the phase-1 spec.
+- [x] Add all-header persistence and representative price-source regressions.
+- [x] Complete a headed custom NFC save/load/resave pass and a 3K NFC blank
+  catalog-price parity pass.
+- [x] Fix the first five confirmed cross-view/pricing defects.
+- [ ] Continue the headed matrix with printing, color/files, hardware,
+  packaging, pendant, extra income and discounts.
+- [ ] Compare the complete fixture in invoice/KP, plan-fact and production.
+
+### Stop-and-fix rule
+
+- A discrepancy between a calculator value and its authoritative catalog or
+  warehouse source stops the current slice until the source is identified.
+- A value lost on save/load/resave, or shown differently in another order
+  surface, must receive a regression before the audit moves on.
+- Real stock is not mutated until the warehouse fixture and rollback procedure
+  are explicitly prepared.
 
 ## Execution Analysis
 - Декомпозиция следующего прогона: выделить warehouse end‑to‑end аудит как отдельный milestone, покрыть все входы (заказ, инвентаризация, приемка, ручные корректировки, готовая продукция) и проверить, что задачи/China‑связки не отваливаются рядом.

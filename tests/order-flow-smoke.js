@@ -313,6 +313,161 @@ async function buildCollectedItems(context) {
     })()`, context));
 }
 
+async function smokeCalculatorRestoresBeforeSlowCatalogRefresh() {
+    const context = createContext();
+    ['js/calculator.js', 'js/app.js'].forEach(file => runScript(context, file));
+    stubRuntime(context);
+
+    const state = clone(await vm.runInContext(`(async () => {
+        window.addEventListener = () => {};
+        Calculator.renderItemBlock = () => {};
+        Calculator.rerenderAllHardware = () => {};
+        Calculator.rerenderAllPackaging = () => {};
+        Calculator.renderExtraCosts = () => {};
+        Calculator.recalculate = () => {};
+        Calculator._updateItemsEmptyState = () => {};
+
+        localStorage.setItem(Calculator._localDraftKey, JSON.stringify({
+            app_version: 'v430',
+            saved_at: new Date().toISOString(),
+            reason: 'pagehide',
+            editing_order_id: 8801,
+            current_order_status: 'draft',
+            order_fields: {
+                order_name: 'Offline calculator draft',
+                client_name: 'Local client',
+                manager_name: 'Smoke',
+                deadline_start: '2026-07-30',
+            },
+            items: [{
+                ...Calculator.getEmptyItem(1),
+                product_name: 'Recovered product',
+                quantity: 100,
+            }],
+            hardwareItems: [],
+            packagingItems: [],
+            extraCosts: [{ name: 'Срочность', amount: 5000 }],
+            pendants: [],
+        }));
+
+        Calculator.resetForm({ preserveLocalDraft: true });
+        Colors.data = [];
+        let releaseColors;
+        loadColors = () => new Promise(resolve => { releaseColors = resolve; });
+        Calculator._ensureBlanksCatalog = async () => {};
+
+        let settled = false;
+        const initPromise = Calculator.init().finally(() => { settled = true; });
+        await Promise.resolve();
+        await Promise.resolve();
+        const beforeCatalog = {
+            settled,
+            orderName: document.getElementById('calc-order-name').value,
+            itemCount: Calculator.items.length,
+            extraCount: Calculator.extraCosts.length,
+            dirty: Calculator._isDirty,
+        };
+
+        releaseColors([]);
+        await initPromise;
+        return {
+            beforeCatalog,
+            afterCatalog: {
+                orderName: document.getElementById('calc-order-name').value,
+                itemCount: Calculator.items.length,
+            },
+        };
+    })()`, context));
+
+    assert.equal(state.beforeCatalog.settled, false, 'catalog refresh should still be pending');
+    assert.equal(state.beforeCatalog.orderName, 'Offline calculator draft');
+    assert.equal(state.beforeCatalog.itemCount, 1);
+    assert.equal(state.beforeCatalog.extraCount, 1);
+    assert.equal(state.beforeCatalog.dirty, true);
+    assert.equal(state.afterCatalog.orderName, 'Offline calculator draft');
+    assert.equal(state.afterCatalog.itemCount, 1);
+}
+
+async function smokeColorChangesAndLocalizedPricesRecalculateImmediately() {
+    const context = createContext();
+    ['js/calculator.js', 'js/app.js'].forEach(file => runScript(context, file));
+    stubRuntime(context);
+
+    const state = clone(await vm.runInContext(`(() => {
+        Colors.data = [
+            { id: 1, name: 'Красный' },
+            { id: 31, name: 'Синий' },
+        ];
+        Calculator.items = [Calculator.getEmptyItem(1)];
+        Calculator.items[0].product_name = 'Color smoke';
+        Calculator.items[0].quantity = 100;
+        Calculator.items[0].printings = [
+            { name: 'Тампо', qty: 100, price: 8, sell_price: 0, delivery_total: 0 },
+        ];
+        Calculator.hardwareItems = [{ sell_price: 0 }];
+        Calculator.packagingItems = [{ sell_price: 0 }];
+
+        let recalculateCalls = 0;
+        Calculator.renderItemBlock = () => {};
+        Calculator.recalculate = () => { recalculateCalls += 1; };
+        Calculator.scheduleAutosave = () => {};
+
+        Calculator.onColorSelect(0, 1);
+        Calculator.onColorSelect(0, 31);
+        Calculator.removeColor(0, 1);
+        Calculator.clearColors(0);
+        const colorRecalculateCalls = recalculateCalls;
+
+        Calculator.onPricingSellChange('printing', 0, '52,18', 0);
+        Calculator.onPricingSellChange('item', 0, '834,58');
+        Calculator.onPricingSellChange('hw', 0, '32,24');
+        Calculator.onPricingSellChange('pkg', 0, '16,93');
+        clearTimeout(Calculator._sellPriceTimer);
+
+        return {
+            colorRecalculateCalls,
+            colors: Calculator.items[0].colors,
+            colorId: Calculator.items[0].color_id,
+            printingSell: Calculator.items[0].printings[0].sell_price,
+            printingAggregate: Calculator.items[0].sell_price_printing,
+            itemSell: Calculator.items[0].sell_price_item,
+            hardwareSell: Calculator.hardwareItems[0].sell_price,
+            packagingSell: Calculator.packagingItems[0].sell_price,
+        };
+    })()`, context));
+
+    assert.equal(state.colorRecalculateCalls, 4, 'every color mutation must recalculate immediately');
+    assert.deepEqual(state.colors, []);
+    assert.equal(state.colorId, null);
+    assert.equal(state.printingSell, 52.18);
+    assert.equal(state.printingAggregate, 52.18);
+    assert.equal(state.itemSell, 834.58);
+    assert.equal(state.hardwareSell, 32.24);
+    assert.equal(state.packagingSell, 16.93);
+}
+
+function smokeKpPreservesCurrencyPrecision() {
+    const context = createContext();
+    runScript(context, 'js/calculator.js');
+    runScript(context, 'js/kp.js');
+
+    const state = clone(vm.runInContext(`({
+        formatted: [
+            KPGenerator.fmtRub(32.24),
+            KPGenerator.fmtRub(52.18),
+            KPGenerator.fmtRub(1395.8),
+        ],
+        pendantName: KPGenerator.pdfSafeText('Подвес "MIX❤️😊"'),
+    })`, context));
+
+    assert.deepEqual(state.formatted, [
+        '32,24 ₽',
+        '52,18 ₽',
+        '1 395,8 ₽',
+    ]);
+    assert.equal(state.pendantName, 'Подвес "MIX [сердце] [смайл]"');
+}
+
 async function smokeCalculatorPersistence(context) {
     const items = await buildCollectedItems(context);
     const productRow = items.find(item => item.item_type === 'product');
@@ -493,6 +648,61 @@ async function smokeOrderDiscountAffectsSummaryAndFinDirector(context) {
     assert.equal(data.fin.charity, 0.9);
 }
 
+async function smokeOrderSummaryUsesExactBatchCosts(context) {
+    const data = clone(await vm.runInContext(`(() => {
+        const params = {
+            taxRate: 0.07,
+            commercialRate: 0.07,
+            charityRate: 0.01,
+            vatRate: 0.05,
+        };
+        const hardware = [{
+                qty: 100,
+                sell_price: 10,
+                result: { costPerUnit: 4.33, totalCost: 432.5 },
+            }];
+        const packaging = [{
+                qty: 100,
+                sell_price: 5,
+                result: { costPerUnit: 2.01, totalCost: 201.25 },
+            }];
+        const pendants = [{
+                quantity: 3,
+                result: {
+                    sellPerUnit: 100,
+                    totalRevenue: 300,
+                    costPerUnit: 33.67,
+                    totalCost: 101,
+                },
+            }];
+        return {
+            summary: calculateOrderSummary(
+                [],
+                hardware,
+                packaging,
+                [],
+                params,
+                pendants,
+                { mode: 'none', value: 0 }
+            ),
+            nonCommercialCost: calculateNonCommercialWorkCost([], hardware, packaging, pendants),
+        };
+    })()`, context));
+
+    assert.equal(data.summary.totalRevenue, 1800);
+    assert.equal(
+        data.summary.totalEarned,
+        795.25,
+        'order profit should subtract exact batch costs instead of multiplying rounded per-unit costs',
+    );
+    assert.equal(data.summary.marginPercent, 44.18);
+    assert.equal(
+        data.nonCommercialCost,
+        734.75,
+        'non-commercial loss should use the same exact batch costs',
+    );
+}
+
 async function smokeDiscountShownInCustomerInvoice(context) {
     await vm.runInContext(`(() => {
         Calculator.resetForm();
@@ -538,6 +748,90 @@ async function smokeCalculatorSupportsMoreThanSixItems(context) {
     assert.equal(state.count, 14);
     assert.equal(state.lastNumber, 14);
     assert.notEqual(state.btnDisplay, 'none');
+}
+
+async function smokeProductCloneAndRemoveKeepPerItemBindings(context) {
+    const state = clone(await vm.runInContext(`(() => {
+        Calculator.resetForm();
+        const originalMethods = {
+            renderItemBlock: Calculator.renderItemBlock,
+            rerenderAllHardware: Calculator.rerenderAllHardware,
+            rerenderAllPackaging: Calculator.rerenderAllPackaging,
+            recalculate: Calculator.recalculate,
+            scheduleAutosave: Calculator.scheduleAutosave,
+            updateEmpty: Calculator._updateItemsEmptyState,
+        };
+        try {
+            Calculator.renderItemBlock = () => {};
+            Calculator.rerenderAllHardware = () => {};
+            Calculator.rerenderAllPackaging = () => {};
+            Calculator.recalculate = () => {};
+            Calculator.scheduleAutosave = () => {};
+            Calculator._updateItemsEmptyState = () => {};
+
+            Calculator.items = [
+                { ...Calculator.getEmptyItem(1), product_name: 'Source', quantity: 3000 },
+                { ...Calculator.getEmptyItem(2), product_name: 'Following', quantity: 25 },
+            ];
+            Calculator.hardwareItems = [
+                { ...Calculator.getEmptyHardware(0), name: 'Source hook', qty: 3000 },
+                { ...Calculator.getEmptyHardware(1), name: 'Following hook', qty: 25 },
+            ];
+            Calculator.packagingItems = [
+                { ...Calculator.getEmptyPackaging(0), name: 'Source pouch', qty: 3000 },
+                { ...Calculator.getEmptyPackaging(1), name: 'Following pouch', qty: 25 },
+            ];
+
+            Calculator.cloneItem(0);
+            const afterClone = {
+                itemNames: Calculator.items.map(item => item.product_name),
+                itemNumbers: Calculator.items.map(item => item.item_number),
+                hardware: Calculator.hardwareItems.map(item => [item.name, item.parent_item_index]),
+                packaging: Calculator.packagingItems.map(item => [item.name, item.parent_item_index]),
+            };
+
+            Calculator.removeItem(0);
+            return {
+                afterClone,
+                afterRemove: {
+                    itemNames: Calculator.items.map(item => item.product_name),
+                    itemNumbers: Calculator.items.map(item => item.item_number),
+                    hardware: Calculator.hardwareItems.map(item => [item.name, item.parent_item_index]),
+                    packaging: Calculator.packagingItems.map(item => [item.name, item.parent_item_index]),
+                },
+            };
+        } finally {
+            Calculator.renderItemBlock = originalMethods.renderItemBlock;
+            Calculator.rerenderAllHardware = originalMethods.rerenderAllHardware;
+            Calculator.rerenderAllPackaging = originalMethods.rerenderAllPackaging;
+            Calculator.recalculate = originalMethods.recalculate;
+            Calculator.scheduleAutosave = originalMethods.scheduleAutosave;
+            Calculator._updateItemsEmptyState = originalMethods.updateEmpty;
+        }
+    })()`, context));
+
+    assert.deepEqual(state.afterClone.itemNames, ['Source', 'Source', 'Following']);
+    assert.deepEqual(state.afterClone.itemNumbers, [1, 2, 3]);
+    assert.deepEqual(state.afterClone.hardware, [
+        ['Source hook', 0],
+        ['Following hook', 2],
+        ['Source hook', 1],
+    ]);
+    assert.deepEqual(state.afterClone.packaging, [
+        ['Source pouch', 0],
+        ['Following pouch', 2],
+        ['Source pouch', 1],
+    ]);
+    assert.deepEqual(state.afterRemove.itemNames, ['Source', 'Following']);
+    assert.deepEqual(state.afterRemove.itemNumbers, [1, 2]);
+    assert.deepEqual(state.afterRemove.hardware, [
+        ['Following hook', 1],
+        ['Source hook', 0],
+    ]);
+    assert.deepEqual(state.afterRemove.packaging, [
+        ['Following pouch', 1],
+        ['Source pouch', 0],
+    ]);
 }
 
 async function smokeRemovedPrintingDoesNotLeakIntoInvoiceOrSummary(context) {
@@ -586,10 +880,32 @@ async function smokeGenerateKPPassesDiscount(context) {
             costPrinting: 0,
             costPrintingDetails: [],
         };
-        Calculator.hardwareItems = [];
-        Calculator.packagingItems = [];
+        Calculator.hardwareItems = [Object.assign(Calculator.getEmptyHardware(0), {
+            parent_item_index: 0,
+            name: 'Per-item ring',
+            qty: 2,
+            sell_price: 25,
+            result: { costPerUnit: 10, hoursHardware: 0.1 },
+        })];
+        Calculator.packagingItems = [Object.assign(Calculator.getEmptyPackaging(0), {
+            parent_item_index: 0,
+            name: 'Per-item pouch',
+            qty: 2,
+            sell_price: 15,
+            result: { costPerUnit: 5, hoursPackaging: 0.1 },
+        })];
         Calculator.extraCosts = [];
-        Calculator.pendants = [];
+        Calculator.pendants = [{
+            item_type: 'pendant',
+            name: 'ABC',
+            quantity: 2,
+            result: {
+                costPerUnit: 120,
+                sellPerUnit: 300,
+                totalCost: 240,
+                totalRevenue: 600,
+            },
+        }];
         await Calculator.generateKP();
     })()`, context);
 
@@ -597,6 +913,15 @@ async function smokeGenerateKPPassesDiscount(context) {
     assert.equal(kpArgs.length, 6);
     assert.equal(kpArgs[5].discount.mode, 'percent');
     assert.equal(kpArgs[5].discount.value, 10);
+    assert.deepEqual(kpArgs[2].map(item => item.type), [
+        'product',
+        'hardware',
+        'packaging',
+        'pendant',
+    ]);
+    assert.equal(kpArgs[2][1].name, 'Фурнитура (Smoke Product) · Per-item ring');
+    assert.equal(kpArgs[2][2].name, 'Упаковка (Smoke Product) · Per-item pouch');
+    assert.equal(kpArgs[2][3].name, 'Подвес "ABC"');
 }
 
 async function smokeHardwareOnlyAutosave(context) {
@@ -1451,7 +1776,7 @@ async function smokeBlankPricingSeparatesCatalogPriceAndNetMargin(context) {
     assert.match(pricingHtml, /вручную в бланке/);
     assert.match(pricingHtml, /Чистая маржа/);
     assert.match(pricingHtml, /налога 7%/);
-    assert.match(pricingHtml, /коммерческого 6\.5%/);
+    assert.match(pricingHtml, /коммерческого 7%/);
     assert.match(pricingHtml, /pricing-grid-compact/);
     vm.runInContext(`
         Calculator._calcBlankBaseCostFromTemplate = Calculator.__blankCostSmokeOriginal;
@@ -1715,6 +2040,50 @@ async function smokeFinDirectorPendantsUseAllAttachments(context) {
     assert.equal(fin.nfcTotal, 0);
     assert.equal(fin.hardwareDelivery, 30);
     assert.equal(fin.revenue, 500);
+}
+
+async function smokeFinDirectorUsesExactPendantBatchAndPrinting(context) {
+    const data = clone(await vm.runInContext(`(() => {
+        const params = {
+            ...App.params,
+            taxRate: 0,
+            commercialRate: 0,
+            charityRate: 0,
+            vatRate: 0,
+            fotPerHour: 0,
+            indirectPerHour: 0,
+        };
+        App.templates = [{
+            id: 30,
+            category: 'blank',
+            pieces_per_hour_avg: 100,
+            weight_grams: 5,
+            mold_count: 1,
+            cost_cny: 800,
+            cny_rate: 12.5,
+            delivery_cost: 8000,
+            builtin_assembly_name: '',
+            builtin_assembly_speed: 0,
+        }];
+        const pendant = {
+            quantity: 100,
+            elements: [
+                { char: 'A', has_print: true, print_price: 6 },
+                { char: 'B', has_print: false, print_price: 0 },
+            ],
+            cords: [],
+            carabiners: [],
+            _totalSellPerUnit: 500,
+        };
+        pendant.result = calculatePendantCost(pendant, params);
+        return {
+            result: pendant.result,
+            fin: calculateFinDirectorData([], [], [], params, [pendant]),
+        };
+    })()`, context));
+
+    assert.equal(data.fin.printing, 600, 'FinDirector should include explicit per-letter pendant printing even with a blank breakdown');
+    assert.equal(data.fin.totalCosts, data.result.totalCost, 'FinDirector pendant rows should add up to the exact pendant batch cost');
 }
 
 async function smokeFinDirectorSeparatesHardwareAndNfc(context) {
@@ -3929,6 +4298,8 @@ async function smokeCloneOrderPrefersNormalizedItems(context) {
             id: 9010,
             order_name: 'Normalized Source Order',
             status: 'completed',
+            payment_status: 'paid_100',
+            deleted_at: '2026-07-29T12:00:00.000Z',
             items_snapshot: JSON.stringify([
                 { item_number: 1, item_type: 'product', product_name: 'Stale Snapshot Product', quantity: 1 },
             ]),
@@ -3982,6 +4353,8 @@ async function smokeCloneOrderPrefersNormalizedItems(context) {
     assert.ok(saved, 'normalized clone should save payload');
     assert.equal(saved.order.order_name, 'Normalized Source Order (копия)');
     assert.equal(saved.order.status, 'draft');
+    assert.equal(saved.order.payment_status, 'not_sent', 'a cloned order must start with a fresh payment status');
+    assert.equal(saved.order.deleted_at, undefined, 'a cloned order must not inherit the source trash marker');
     assert.equal(saved.items.length, 2);
     assert.deepEqual(saved.items.map(item => item.product_name), ['Normalized Product', 'Normalized Hardware']);
     assert.equal(saved.items[0].id, undefined);
@@ -5378,6 +5751,103 @@ async function smokePackagingWarehouseSaveSync(context) {
         delete context.__currentPackagingItems;
         delete context.__samplePackagingItems;
     }
+}
+
+async function smokeWarehouseReservationFollowsEditedOrderDemand(context) {
+    const firstItems = [{
+        item_type: 'hardware',
+        product_name: 'Old warehouse hook',
+        quantity: 8,
+        hardware_source: 'warehouse',
+        hardware_warehouse_item_id: 501,
+    }];
+    const replacementItems = [{
+        item_type: 'hardware',
+        product_name: 'Replacement warehouse hook',
+        quantity: 6,
+        hardware_source: 'warehouse',
+        hardware_warehouse_item_id: 502,
+    }];
+
+    context.__projectHardwareState = { checks: {}, actual_qtys: {} };
+    context.__reservations = [{
+        id: 1,
+        item_id: 501,
+        order_id: 77,
+        order_name: 'Blocking order',
+        qty: 3,
+        status: 'active',
+        source: 'project_hardware',
+        created_at: '2026-07-30T08:00:00.000Z',
+    }];
+    context.__warehouseItems = [
+        { id: 501, name: 'Old warehouse hook', qty: 10, unit: 'шт' },
+        { id: 502, name: 'Replacement warehouse hook', qty: 20, unit: 'шт' },
+    ];
+    context.__warehouseHistory = [];
+    context.__toasts = [];
+    context.loadProjectHardwareState = async () => clone(context.__projectHardwareState);
+    context.saveProjectHardwareState = async (state) => { context.__projectHardwareState = clone(state); };
+    context.loadWarehouseReservations = async () => clone(context.__reservations);
+    context.saveWarehouseReservations = async (reservations) => { context.__reservations = clone(reservations); };
+    context.loadWarehouseItems = async () => clone(context.__warehouseItems);
+    context.saveWarehouseItems = async (items) => { context.__warehouseItems = clone(items); };
+    context.loadWarehouseHistory = async () => clone(context.__warehouseHistory);
+    context.saveWarehouseHistory = async (history) => { context.__warehouseHistory = clone(history); };
+
+    vm.runInContext(`
+        Warehouse.projectHardwareState = null;
+        Warehouse.allItems = globalThis.__warehouseItems;
+        Warehouse.load = async () => {};
+        App.toast = (message) => { globalThis.__toasts.push(String(message || '')); };
+    `, context);
+
+    const firstResult = clone(await vm.runInContext(`Warehouse.syncProjectHardwareOrderState({
+        orderId: 42,
+        orderName: 'Edited reserve order',
+        managerName: 'Smoke',
+        status: 'sample',
+        currentItems: JSON.parse(${JSON.stringify(JSON.stringify(firstItems))}),
+        previousItems: []
+    })`, context));
+
+    const firstActive = context.__reservations.filter(row => row.status === 'active');
+    assert.equal(firstResult.shortage, true);
+    assert.equal(firstActive.find(row => row.order_id === 42).qty, 7);
+    assert.equal(firstActive.find(row => row.order_id === 77).qty, 3);
+
+    const replacementResult = clone(await vm.runInContext(`Warehouse.syncProjectHardwareOrderState({
+        orderId: 42,
+        orderName: 'Edited reserve order',
+        managerName: 'Smoke',
+        status: 'sample',
+        currentItems: JSON.parse(${JSON.stringify(JSON.stringify(replacementItems))}),
+        previousItems: JSON.parse(${JSON.stringify(JSON.stringify(firstItems))})
+    })`, context));
+
+    const replacementActive = context.__reservations.filter(row => row.status === 'active');
+    assert.equal(replacementResult.shortage, false);
+    assert.equal(replacementActive.some(row => row.order_id === 42 && row.item_id === 501), false);
+    assert.equal(replacementActive.find(row => row.order_id === 42 && row.item_id === 502).qty, 6);
+    assert.equal(replacementActive.find(row => row.order_id === 77 && row.item_id === 501).qty, 3);
+    assert.equal(context.__warehouseItems[0].qty, 10);
+    assert.equal(context.__warehouseItems[1].qty, 20);
+    assert.equal(context.__warehouseHistory.length, 0);
+
+    await vm.runInContext(`Warehouse.syncProjectHardwareOrderState({
+        orderId: 42,
+        orderName: 'Edited reserve order',
+        managerName: 'Smoke',
+        status: 'draft',
+        currentItems: JSON.parse(${JSON.stringify(JSON.stringify(replacementItems))}),
+        previousItems: JSON.parse(${JSON.stringify(JSON.stringify(replacementItems))})
+    })`, context);
+
+    const releasedActive = context.__reservations.filter(row => row.status === 'active');
+    assert.equal(releasedActive.some(row => row.order_id === 42), false);
+    assert.equal(releasedActive.find(row => row.order_id === 77 && row.item_id === 501).qty, 3);
+    assert.equal(context.__warehouseItems[0].qty, 10);
+    assert.equal(context.__warehouseItems[1].qty, 20);
 }
 
 async function smokeWarehouseManualAdjustment(context) {
@@ -8795,11 +9265,464 @@ async function smokeNonCommercialPurposeTurnsSalesIntoInternalLoss(context) {
     assert.equal(state.summary.marginPercent, 0);
 }
 
+async function smokeAllOrderHeaderFieldsSurviveSaveLoadResave() {
+    const context = createContext();
+    ['js/calculator.js', 'js/app.js', 'js/orders.js', 'js/warehouse.js', 'js/order-detail.js', 'js/molds.js'].forEach(file => runScript(context, file));
+    stubRuntime(context);
+
+    const state = clone(await vm.runInContext(`(async () => {
+        let savedOrder = null;
+        const writes = [];
+        const copy = value => JSON.parse(JSON.stringify(value));
+
+        globalThis.saveOrder = async (order, items) => {
+            const id = order.id || 730001;
+            savedOrder = { ...copy(order), id };
+            writes.push({ order: copy(savedOrder), items: copy(items || []) });
+            return id;
+        };
+        globalThis.loadOrder = async orderId => savedOrder && String(savedOrder.id) === String(orderId)
+            ? { order: copy(savedOrder), items: [] }
+            : null;
+        Orders.addChangeRecord = async () => {};
+        Orders.loadHistory = async () => [];
+        Warehouse.syncProjectHardwareOrderState = async () => ({ shortage: false });
+        App.editingOrderId = null;
+
+        Calculator.resetForm();
+        const firstValues = {
+            'calc-order-name': 'AUDIT / Полная шапка',
+            'calc-client-name': 'ООО Клиент',
+            'calc-manager-name': 'Полина',
+            'calc-deadline-start': '2026-08-03',
+            'calc-deadline-end': '2026-08-17',
+            'calc-notes': 'Проверить повторное открытие',
+            'calc-delivery-address': 'Москва, Тестовая, 7',
+            'calc-telegram': '@audit_client',
+            'calc-crm-link': 'https://example.test/crm/730001',
+            'calc-fintablo-link': 'https://example.test/finance/730001',
+            'calc-client-legal-name': 'ООО «Клиент»',
+            'calc-client-inn': '7701234567',
+            'calc-client-legal-address': '123456, Москва, Тестовая, 7',
+            'calc-client-bank-name': 'АО Тест Банк',
+            'calc-client-bank-account': '40702810000000000001',
+            'calc-client-bank-bik': '044525001',
+        };
+        Object.entries(firstValues).forEach(([id, value]) => {
+            document.getElementById(id).value = value;
+        });
+        document.getElementById('calc-production-purpose').value = 'leftover_assembly';
+        Calculator.productionPurpose = 'leftover_assembly';
+        Calculator.leftoverAssembly = {
+            revenue: 25000,
+            quantity: 50,
+            assemblyHours: 3.5,
+            details: 'Красные карабины и готовые фигурки',
+        };
+        Calculator.discountMode = 'percent';
+        Calculator.discountValue = 7.5;
+        await Calculator.saveOrder();
+
+        const first = copy(writes[0].order);
+        const orderId = first.id;
+        await Calculator.loadOrder(orderId);
+        const loaded = {
+            order_name: document.getElementById('calc-order-name').value,
+            client_name: document.getElementById('calc-client-name').value,
+            manager_name: document.getElementById('calc-manager-name').value,
+            deadline_start: document.getElementById('calc-deadline-start').value,
+            deadline_end: document.getElementById('calc-deadline-end').value,
+            notes: document.getElementById('calc-notes').value,
+            delivery_address: document.getElementById('calc-delivery-address').value,
+            telegram: document.getElementById('calc-telegram').value,
+            crm_link: document.getElementById('calc-crm-link').value,
+            fintablo_link: document.getElementById('calc-fintablo-link').value,
+            client_legal_name: document.getElementById('calc-client-legal-name').value,
+            client_inn: document.getElementById('calc-client-inn').value,
+            client_legal_address: document.getElementById('calc-client-legal-address').value,
+            client_bank_name: document.getElementById('calc-client-bank-name').value,
+            client_bank_account: document.getElementById('calc-client-bank-account').value,
+            client_bank_bik: document.getElementById('calc-client-bank-bik').value,
+            production_purpose: Calculator.getProductionPurpose(),
+            leftover_assembly: Calculator.getLeftoverAssembly(),
+            discount_mode: Calculator.discountMode,
+            discount_value: Calculator.discountValue,
+        };
+
+        document.getElementById('calc-notes').value = 'Проверено после повторного открытия';
+        document.getElementById('calc-client-bank-account').value = '40702810000000000002';
+        Calculator.discountMode = 'amount';
+        Calculator.discountValue = 1500;
+        await Calculator.saveOrder();
+
+        return {
+            first,
+            loaded,
+            second: copy(writes[1].order),
+            writeCount: writes.length,
+        };
+    })()`, context));
+
+    const expectedHeader = {
+        order_name: 'AUDIT / Полная шапка',
+        client_name: 'ООО Клиент',
+        manager_name: 'Полина',
+        deadline_start: '2026-08-03',
+        deadline_end: '2026-08-17',
+        notes: 'Проверить повторное открытие',
+        delivery_address: 'Москва, Тестовая, 7',
+        telegram: '@audit_client',
+        crm_link: 'https://example.test/crm/730001',
+        fintablo_link: 'https://example.test/finance/730001',
+        client_legal_name: 'ООО «Клиент»',
+        client_inn: '7701234567',
+        client_legal_address: '123456, Москва, Тестовая, 7',
+        client_bank_name: 'АО Тест Банк',
+        client_bank_account: '40702810000000000001',
+        client_bank_bik: '044525001',
+    };
+
+    Object.entries(expectedHeader).forEach(([field, expected]) => {
+        assert.equal(state.first[field], expected, field + ' must be present in the first save payload');
+        assert.equal(state.loaded[field], expected, field + ' must be restored into the calculator');
+    });
+    assert.equal(state.first.production_purpose, 'leftover_assembly');
+    assert.deepEqual(state.first.leftover_assembly, {
+        revenue: 25000,
+        quantity: 50,
+        assemblyHours: 3.5,
+        details: 'Красные карабины и готовые фигурки',
+    });
+    assert.equal(state.first.discount_mode, 'percent');
+    assert.equal(state.first.discount_value, 7.5);
+    assert.equal(state.loaded.production_purpose, 'leftover_assembly');
+    assert.deepEqual(state.loaded.leftover_assembly, state.first.leftover_assembly);
+    assert.equal(state.loaded.discount_mode, 'percent');
+    assert.equal(state.loaded.discount_value, 7.5);
+    assert.equal(state.writeCount, 2);
+    assert.equal(state.second.id, state.first.id, 'resave must update the same order');
+    assert.equal(state.second.status, 'draft', 'resave must preserve the workflow status');
+    assert.equal(state.second.notes, 'Проверено после повторного открытия');
+    assert.equal(state.second.client_bank_account, '40702810000000000002');
+    assert.equal(state.second.discount_mode, 'amount');
+    assert.equal(state.second.discount_value, 1500);
+    assert.deepEqual(state.second.leftover_assembly, state.first.leftover_assembly);
+}
+
+async function smokeBoardDeadlineDoesNotShiftAcrossTimezones(context) {
+    const html = String(vm.runInContext(`(() => {
+        Orders.metaByOrderId = {};
+        return Orders.renderBoardCard({
+            id: 730001,
+            order_name: 'AUDIT / Deadline',
+            client_name: 'ООО Аудит',
+            manager_name: 'Полина',
+            status: 'draft',
+            payment_status: 'not_sent',
+            deadline_start: '2026-08-03',
+            deadline_end: '2026-08-17',
+            production_purpose: 'commercial',
+            total_revenue_plan: 0,
+            margin_percent_plan: 0,
+        });
+    })()`, context));
+
+    assert.match(html, /17\s+авг/i, 'calendar-only deadline must render as the saved day in negative UTC offsets');
+    assert.doesNotMatch(html, /16\s+авг/i, 'calendar-only deadline must not shift to the previous day');
+}
+
+async function smokeOrderDetailShowsLegalAndBankFields(context) {
+    const html = String(vm.runInContext(`(() => {
+        OrderDetail.currentOrder = {
+            id: 730001,
+            order_name: 'AUDIT / Legal fields',
+            client_name: 'ООО Аудит',
+            manager_name: 'Полина',
+            status: 'draft',
+            client_legal_name: 'ООО «Аудит»',
+            client_inn: '7701234567',
+            client_legal_address: '123456, Москва, Тестовая, 7',
+            client_bank_name: 'АО Тест Банк',
+            client_bank_account: '40702810000000000001',
+            client_bank_bik: '044525001',
+        };
+        OrderDetail.currentItems = [];
+        OrderDetail.deliveryScheduleDraft = [];
+        OrderDetail.renderInfoTab();
+        return document.getElementById('od-tab-info').innerHTML;
+    })()`, context));
+
+    assert.match(html, /Юридические данные клиента/);
+    assert.match(html, /ООО «Аудит»/);
+    assert.match(html, /7701234567/);
+    assert.match(html, /123456, Москва, Тестовая, 7/);
+    assert.match(html, /АО Тест Банк/);
+    assert.match(html, /40702810000000000001/);
+    assert.match(html, /044525001/);
+}
+
+async function smokeOrderDetailShowsMixedCalculatorRows(context) {
+    const html = String(vm.runInContext(`(() => {
+        OrderDetail.currentItems = [{
+            item_type: 'product',
+            product_name: 'MIX брелок',
+            quantity: 100,
+            cost_total: 414.79,
+            cost_printing: 39.23,
+            sell_price_item: 835,
+            printings: JSON.stringify([
+                { name: 'УФ', qty: 100, price: 12.5, sell_price: 35, delivery_total: 250 },
+                { name: 'Тампо', qty: 100, price: 8, sell_price: 52.18, delivery_total: 0 },
+            ]),
+            colors: JSON.stringify([{ id: 1, name: 'Красный' }, { id: 31, name: 'Синий' }]),
+        }, {
+            item_type: 'pendant',
+            name: 'MIX❤️',
+            product_name: 'Подвес "MIX❤️"',
+            quantity: 100,
+            elements: [{ char: 'M', color: 'Красный', has_print: true, print_price: 6 }],
+            element_price_per_unit: 88.25,
+            result: { costPerUnit: 630.36, sellPerUnit: 1395.8 },
+            cost_total: 630.36,
+            sell_price_item: 1395.8,
+        }, {
+            item_type: 'extra_cost',
+            product_name: 'Срочность',
+            quantity: 1,
+            cost_total: 5000,
+            sell_price_item: 5000,
+        }];
+        OrderDetail.renderItemsTab();
+        return document.getElementById('od-tab-items').innerHTML;
+    })()`, context));
+
+    assert.match(html, /УФ/);
+    assert.match(html, /Тампо/);
+    assert.match(html, /закупка 12,5 ₽\/шт/);
+    assert.match(html, /продажа 52,18 ₽\/шт/);
+    assert.match(html, /Чистая маржа:<\/span> <span class="text-green">40\.0%/);
+    assert.doesNotMatch(html, /35\.3%/);
+    assert.match(html, /Подвес "MIX❤️"/);
+    assert.match(html, /Доплаты/);
+    assert.match(html, /Срочность/);
+    assert.match(html, /5 000 ₽/);
+}
+
+async function smokeOrderDetailUsesCanonicalNetMargin(context) {
+    const html = String(vm.runInContext(`(() => {
+        App.params = {
+            ...App.params,
+            taxRate: 0.07,
+            charityRate: 0.01,
+            commercialRate: 0.07,
+        };
+        return OrderDetail._renderItemCard({
+            item_type: 'product',
+            product_name: 'NFC звезда UI',
+            quantity: 3000,
+            cost_total: 124.3,
+            sell_price_item: 276.22,
+        }, 'product');
+    })()`, context));
+
+    assert.match(html, /Чистая маржа:/);
+    assert.match(html, />40\.0%</);
+    assert.doesNotMatch(html, />55\.0%</);
+}
+
+async function smokeRepresentativePriceSourcesStayExplicit(context) {
+    const state = clone(vm.runInContext(`(() => {
+        const params = {
+            ...App.params,
+            wasteFactor: 1.1,
+            fotPerHour: 100,
+            indirectCostMode: 'none',
+            indirectPerHour: 0,
+            taxRate: 0.07,
+            vatRate: 0.05,
+            charityRate: 0.01,
+            commercialRate: 0.07,
+            setupHoursBlank: 0.5,
+            setupHoursCustom: 1,
+            plasticCostPerKg: 2500,
+            moldBaseCost: 18000,
+            designCost: 0,
+            cuttingSpeed: 0,
+            nfcTagCost: 0,
+            nfcWriteSpeed: 1000,
+            deliveryCostMoscow: 0,
+            printingDeliveryCost: 4000,
+        };
+
+        const customProduct = {
+            ...Calculator.getEmptyItem(1),
+            product_name: 'Кастом',
+            quantity: 100,
+            pieces_per_hour: 100,
+            weight_grams: 10,
+            is_blank_mold: false,
+            colors: [{ id: 1, name: 'Красный' }],
+        };
+        const customProductCost = calculateItemCost(customProduct, params);
+
+        globalThis.ChinaCatalog = {
+            _cnyRate: 12.5,
+            _usdRate: 90,
+            ITEM_SURCHARGE: 0.035,
+            DELIVERY_SURCHARGE: 0.10,
+            DELIVERY_METHODS: {
+                avia: { label: 'Авиа', rate_usd: 33 },
+            },
+        };
+        const chinaHardware = {
+            ...Calculator.getEmptyHardware(null),
+            source: 'custom',
+            custom_country: 'china',
+            qty: 100,
+            price_cny: 2,
+            weight_grams: 10,
+            china_delivery_method: 'avia',
+            assembly_speed: 0,
+        };
+        Calculator._recalcChinaPricing(chinaHardware);
+        const chinaHardwareCost = calculateHardwareCost(chinaHardware, params);
+
+        const russiaPackaging = {
+            ...Calculator.getEmptyPackaging(null),
+            source: 'custom',
+            custom_country: 'russia',
+            qty: 100,
+            price: 12.5,
+            delivery_total: 250,
+            assembly_speed: 0,
+        };
+        russiaPackaging.delivery_price = round2(russiaPackaging.delivery_total / russiaPackaging.qty);
+        const russiaPackagingCost = calculatePackagingCost(russiaPackaging, params);
+
+        const explicitPrinting = {
+            ...Calculator.getEmptyItem(2),
+            product_name: 'Печать с доставкой',
+            quantity: 100,
+            pieces_per_hour: 100,
+            weight_grams: 0,
+            is_blank_mold: true,
+            printings: [{
+                name: 'УФ',
+                qty: 100,
+                price: 10,
+                delivery_total: 200,
+                sell_price: 0,
+            }],
+        };
+        const defaultDeliveryPrinting = {
+            ...explicitPrinting,
+            product_name: 'Печать с доставкой по умолчанию',
+            printings: [{
+                name: 'Тампо',
+                qty: 100,
+                price: 10,
+                delivery_total: 0,
+                sell_price: 0,
+            }],
+        };
+        const explicitPrintingCost = calculateItemCost(explicitPrinting, params);
+        const defaultPrintingCost = calculateItemCost(defaultDeliveryPrinting, params);
+
+        const freeSaleItem = {
+            ...Calculator.getEmptyItem(3),
+            quantity: 10,
+            sell_price_item: 0,
+            result: { ...getEmptyCostResult(), costTotal: 100 },
+        };
+        const freeSale = calculateOrderSummary(
+            [freeSaleItem],
+            [],
+            [],
+            [],
+            params,
+            [],
+            { mode: 'none', value: 0 }
+        );
+        const customCommercialRateFin = calculateFinDirectorData(
+            [{
+                quantity: 1,
+                sell_price_item: 100,
+                sell_price_printing: 0,
+                printings: [],
+                result: { ...getEmptyCostResult(), costTotal: 10 },
+            }],
+            [],
+            [],
+            { ...params, commercialRate: 0.065 },
+            [],
+            { mode: 'none', value: 0 }
+        );
+
+        return {
+            customProduct: {
+                costFot: customProductCost.costFot,
+                costPlastic: customProductCost.costPlastic,
+                costMoldAmortization: customProductCost.costMoldAmortization,
+                costTotal: customProductCost.costTotal,
+            },
+            chinaHardware: {
+                purchaseRub: chinaHardware.price,
+                deliveryPerUnit: chinaHardware.delivery_price,
+                deliveryTotal: chinaHardware.delivery_total,
+                costPerUnit: chinaHardwareCost.costPerUnit,
+            },
+            russiaPackaging: {
+                purchaseRub: russiaPackaging.price,
+                deliveryPerUnit: russiaPackaging.delivery_price,
+                costPerUnit: russiaPackagingCost.costPerUnit,
+            },
+            printing: {
+                explicitDelivery: explicitPrintingCost.costPrinting,
+                defaultDelivery: defaultPrintingCost.costPrinting,
+            },
+            freeSale,
+            customCommercialRateFin,
+        };
+    })()`, context));
+
+    assert.deepEqual(state.customProduct, {
+        costFot: 2.6,
+        costPlastic: 27.5,
+        costMoldAmortization: 180,
+        costTotal: 210.1,
+    });
+    assert.deepEqual(state.chinaHardware, {
+        purchaseRub: 25.88,
+        deliveryPerUnit: 32.67,
+        deliveryTotal: 3267,
+        costPerUnit: 58.55,
+    });
+    assert.deepEqual(state.russiaPackaging, {
+        purchaseRub: 12.5,
+        deliveryPerUnit: 2.5,
+        costPerUnit: 15,
+    });
+    assert.deepEqual(state.printing, {
+        explicitDelivery: 12.6,
+        defaultDelivery: 50.6,
+    });
+    assert.equal(state.freeSale.totalRevenue, 0, 'manual zero sale price must remain a deliberate free sale');
+    assert.equal(state.freeSale.totalEarned, -1000, 'free sale must expose the full production loss');
+    assert.equal(
+        state.customCommercialRateFin.commercial,
+        6.5,
+        'FinDirector commercial expense must use the active settings rate'
+    );
+}
+
 async function main() {
     const context = createContext();
     ['js/calculator.js', 'js/app.js', 'js/orders.js', 'js/warehouse.js', 'js/order-detail.js', 'js/molds.js'].forEach(file => runScript(context, file));
     stubRuntime(context);
 
+    await smokeCalculatorRestoresBeforeSlowCatalogRefresh();
+    await smokeColorChangesAndLocalizedPricesRecalculateImmediately();
+    smokeKpPreservesCurrencyPrecision();
     await smokeCalculatorPersistence(context);
     await smokeEmptyPlaceholderProductIsNotSaved(context);
     await smokeHardwareOnlyAutosave(context);
@@ -8822,11 +9745,14 @@ async function main() {
     await smokeWarehouseBackedNfcDoesNotDoubleCountFallback(context);
     await smokePendantFallbackTierMatchesVatExclusiveMargin();
     await smokeOrderDiscountAffectsSummaryAndFinDirector(context);
+    await smokeOrderSummaryUsesExactBatchCosts(context);
     await smokeDiscountShownInCustomerInvoice(context);
     await smokeCalculatorSupportsMoreThanSixItems(context);
+    await smokeProductCloneAndRemoveKeepPerItemBindings(context);
     await smokeRemovedPrintingDoesNotLeakIntoInvoiceOrSummary(context);
     await smokeGenerateKPPassesDiscount(context);
     await smokeFinDirectorPendantsUseAllAttachments(context);
+    await smokeFinDirectorUsesExactPendantBatchAndPrinting(context);
     await smokeFinDirectorSeparatesHardwareAndNfc(context);
     await smokeFinDirectorBlankMoldsUseAmortization(context);
     await smokeFinDirectorRevenueMatchesNetSummaryAndProfit(context);
@@ -8853,6 +9779,12 @@ async function main() {
     await smokeSavedBlankMoldCostSurvivesOrderReload(context);
     await smokeStandaloneLetterBlankUsesPendantTierPricing(context);
     await smokeNonCommercialPurposeTurnsSalesIntoInternalLoss(context);
+    await smokeAllOrderHeaderFieldsSurviveSaveLoadResave();
+    await smokeBoardDeadlineDoesNotShiftAcrossTimezones(context);
+    await smokeOrderDetailShowsLegalAndBankFields(context);
+    await smokeOrderDetailShowsMixedCalculatorRows(context);
+    await smokeOrderDetailUsesCanonicalNetMargin(context);
+    await smokeRepresentativePriceSourcesStayExplicit(context);
     await smokePendantFinDirectorUsesCurrentLetterCost(context);
     await smokeLegacyPendantRestore(context);
     await smokeCurrentPendantPayloadBeatsStaleNested(context);
@@ -8875,6 +9807,7 @@ async function main() {
     await smokeProjectHardwareShortageDetailsForHiddenNfc(context);
     await smokeProjectHardwareShortageDetailsShowBlockingOrders(context);
     await smokePackagingWarehouseSaveSync(context);
+    await smokeWarehouseReservationFollowsEditedOrderDemand(context);
     await smokeWarehouseManualAdjustment(context);
     await smokeWarehouseAdjustmentPersistsWithoutBulkSave(context);
     await smokeWarehouseInlineQtyUsesLatestCloudQty(context);

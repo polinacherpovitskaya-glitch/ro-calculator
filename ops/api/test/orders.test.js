@@ -336,8 +336,8 @@ test('POST /api/orders/:id/recalc supports live order items without saved snapsh
 
   assert.equal(res.status, 200);
   assert.equal(Number(body.order.total_revenue), 300);
-  assert.equal(Number(body.order.total_cost), 22.5);
-  assert.equal(Number(body.order.total_margin), 277.5);
+  assert.equal(Number(body.order.total_cost), 24);
+  assert.equal(Number(body.order.total_margin), 276);
 });
 
 test('factual endpoints create and recalc factual totals', async (t) => {

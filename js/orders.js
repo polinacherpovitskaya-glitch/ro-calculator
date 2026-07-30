@@ -938,9 +938,16 @@ const Orders = {
         let deadlineHtml = '';
         if (order.deadline_end || order.deadline_start || order.deadline) {
             const value = order.deadline_end || order.deadline_start || order.deadline;
-            const date = new Date(value);
+            const plainDateMatch = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+            const date = plainDateMatch
+                ? new Date(
+                    Number(plainDateMatch[1]),
+                    Number(plainDateMatch[2]) - 1,
+                    Number(plainDateMatch[3])
+                )
+                : new Date(value);
             if (!Number.isNaN(date.getTime())) {
-                const overdue = date < new Date() && order.status !== 'completed';
+                const overdue = this.isOverdue(order);
                 deadlineHtml = `<span style="font-size:10px;${overdue ? 'color:var(--red);font-weight:600' : 'color:var(--text-muted)'}">
                     ${overdue ? '!' : ''}${date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })}
                 </span>`;
@@ -1813,8 +1820,10 @@ const Orders = {
             delete clonedOrder.id;
             clonedOrder.order_name = (clonedOrder.order_name || 'Заказ') + ' (копия)';
             clonedOrder.status = 'draft';
+            clonedOrder.payment_status = 'not_sent';
             delete clonedOrder.created_at;
             delete clonedOrder.updated_at;
+            delete clonedOrder.deleted_at;
 
             const sourceItems = Array.isArray(data.items) && data.items.length
                 ? data.items
