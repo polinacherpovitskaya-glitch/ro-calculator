@@ -2,7 +2,7 @@
 // Recycle Object — App Core (Routing, Auth, Init)
 // =============================================
 
-const APP_VERSION = 'v428';
+const APP_VERSION = 'v429';
 
 const App = {
     currentPage: 'orders',
@@ -4804,16 +4804,22 @@ const Calculator = {
         const weight = Number(tpl.weight_grams || item.weight_grams || 0);
         if (!pph || pph <= 0) return 0;
 
-        const baseQtyForCost = 50;
+        const tierQty = typeof getBlankCatalogTierQty === 'function'
+            ? getBlankCatalogTierQty(qty)
+            : Number(qty);
+        const qtyForCost = Number(tierQty || qty);
+        const category = String(tpl.category || '').trim().toLowerCase();
+        const isCustomMold = category === 'custom' || category === 'client_custom';
+        const isNfcMold = category === 'nfc';
         const calcItem = {
-            quantity: baseQtyForCost,
+            quantity: qtyForCost,
             pieces_per_hour: pph,
             weight_grams: weight,
             extra_molds: 0,
             complex_design: false,
-            is_blank_mold: false,
-            is_nfc: false,
-            nfc_programming: false,
+            is_blank_mold: !isCustomMold,
+            is_nfc: isNfcMold,
+            nfc_programming: isNfcMold,
             delivery_included: false,
             printings: [],
             builtin_hw_name: '',
@@ -4830,17 +4836,22 @@ const Calculator = {
         let adjusted = Number(base.costTotal || 0) - Number(base.costMoldAmortization || 0) + moldAmortPerUnit;
 
         if (tpl.hw_name && (Number(tpl.hw_price_per_unit || 0) > 0 || Number(tpl.hw_speed || 0) > 0)) {
-            let hwCost = Number(tpl.hw_price_per_unit || 0) + (Number(tpl.hw_delivery_total || 0) > 0 ? Number(tpl.hw_delivery_total || 0) / baseQtyForCost : 0);
+            let hwCost = Number(tpl.hw_price_per_unit || 0) + (Number(tpl.hw_delivery_total || 0) > 0 ? Number(tpl.hw_delivery_total || 0) / qtyForCost : 0);
             const hwSpeed = Number(tpl.hw_speed || 0);
             if (hwSpeed > 0) {
-                const hwHours = baseQtyForCost / hwSpeed * (params.wasteFactor || 1.1);
-                hwCost += hwHours * params.fotPerHour / baseQtyForCost;
+                const hwHours = qtyForCost / hwSpeed * (params.wasteFactor || 1.1);
+                hwCost += hwHours * params.fotPerHour / qtyForCost;
                 if (params.indirectCostMode === 'all') {
-                    hwCost += params.indirectPerHour * hwHours / baseQtyForCost;
+                    hwCost += params.indirectPerHour * hwHours / qtyForCost;
                 }
             }
             adjusted += hwCost;
         }
+
+        const orderProcessingCost = Number.isFinite(params.orderProcessingCost)
+            ? params.orderProcessingCost
+            : 4000;
+        adjusted += orderProcessingCost / qtyForCost;
 
         return round2(Math.max(0, adjusted));
     },
@@ -4919,16 +4930,9 @@ const Calculator = {
             return Math.round(value / 5) * 5;
         };
 
-        const getBlankTierMarginLocal = (qty) => {
-            const normalizedQty = Number(qty) || 0;
-            if (normalizedQty <= 10) return 0.65;
-            if (normalizedQty <= 50) return 0.60;
-            if (normalizedQty <= 100) return 0.55;
-            if (normalizedQty <= 300) return 0.50;
-            if (normalizedQty <= 500) return 0.45;
-            if (normalizedQty <= 1000) return 0.40;
-            return 0.35;
-        };
+        const getBlankTierMarginLocal = (qty) => (
+            typeof getBlankMargin === 'function' ? getBlankMargin(qty) : 0.40
+        );
 
         const getBlankCatalogPricing = (cost, qty, tpl) => {
             if (!Number.isFinite(cost) || cost <= 0) {
@@ -4942,26 +4946,34 @@ const Calculator = {
                     const tiers = [50, 100, 300, 500, 1000, 3000];
                     return tiers.find(t => normalizedQty <= t) || tiers[tiers.length - 1];
                 })();
-            const customPrice = Number(tpl?.custom_prices?.[tierQty]);
+            const allowManualOverride = typeof hasManualBlankPriceOverride === 'function'
+                ? hasManualBlankPriceOverride(tpl)
+                : !!tpl?.use_manual_prices && !tpl?.disable_historical_blank_price_recovery;
+            const customPrice = allowManualOverride ? Number(tpl?.custom_prices?.[tierQty]) : NaN;
             if (Number.isFinite(customPrice) && customPrice > 0) {
                 return { price: customPrice, note: 'вручную в бланке', source: 'custom_price' };
             }
 
-            const customMarginRaw = tpl?.custom_margins?.[tierQty];
+            const customMarginRaw = allowManualOverride ? tpl?.custom_margins?.[tierQty] : null;
             const hasCustomMargin = customMarginRaw !== null && customMarginRaw !== undefined && customMarginRaw !== '';
             const margin = hasCustomMargin ? Number(customMarginRaw) : getBlankTierMarginLocal(tierQty || qty);
             if (!Number.isFinite(margin)) {
                 return { price: 0, note: 'прайс бланков', source: 'empty' };
             }
 
-            const keepRate = typeof getKeepRateForTargetMargin === 'function'
-                ? getKeepRateForTargetMargin(params, margin)
+            const keepRate = typeof getBlankKeepRate === 'function'
+                ? getBlankKeepRate(params, margin)
+                : typeof getKeepRateForTargetMargin === 'function'
+                    ? getKeepRateForTargetMargin(params, margin)
                 : 1 - (Number.isFinite(params?.taxRate) ? params.taxRate : 0.07) - (Number.isFinite(params?.charityRate) ? params.charityRate : 0.01) - (Number.isFinite(params?.commercialRate) ? params.commercialRate : 0.07) - margin;
             if (keepRate <= 0) {
                 return { price: 0, note: 'прайс бланков', source: 'empty' };
             }
+            const formulaPrice = !hasCustomMargin && typeof calcBlankSellPrice === 'function'
+                ? calcBlankSellPrice(cost, tierQty || qty, params)
+                : roundTo5Safe(round2(cost / keepRate));
             return {
-                price: roundTo5Safe(round2(cost / keepRate)),
+                price: formulaPrice,
                 note: hasCustomMargin ? `маржа ${Math.round(margin * 100)}% в бланке` : 'тиражный прайс бланков',
                 source: hasCustomMargin ? 'custom_margin' : 'tier',
             };
