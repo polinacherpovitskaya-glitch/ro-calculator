@@ -659,10 +659,37 @@ async function main() {
             { id: 11, item_data: JSON.stringify({ item_type: 'product', pieces_per_hour: 100 }) },
             { id: 12, item_data: { item_type: 'hardware', hardware_price_per_unit: 7 } },
             { id: 13, item_data: JSON.stringify(JSON.stringify({ item_type: 'packaging', packaging_price_per_unit: 8 })) },
+            {
+                id: 14,
+                product_name: null,
+                quantity: null,
+                template_id: null,
+                item_data: JSON.stringify({
+                    item_type: 'product',
+                    product_name: 'Legacy JSON-only product',
+                    quantity: 125,
+                    template_id: 77,
+                }),
+            },
+            {
+                id: 15,
+                product_name: 'Current physical product',
+                quantity: 0,
+                item_data: {
+                    item_type: 'product',
+                    product_name: 'Stale JSON product',
+                    quantity: 999,
+                },
+            },
         ])`, context)));
         assert.equal(hydratedItems[0].pieces_per_hour, 100, 'TEXT item_data should hydrate');
         assert.equal(hydratedItems[1].hardware_price_per_unit, 7, 'JSONB item_data should hydrate');
         assert.equal(hydratedItems[2].packaging_price_per_unit, 8, 'double-encoded legacy item_data should hydrate');
+        assert.equal(hydratedItems[3].product_name, 'Legacy JSON-only product', 'null physical fields must not hide legacy item_data values');
+        assert.equal(hydratedItems[3].quantity, 125, 'legacy JSON-only quantity must survive order reopen');
+        assert.equal(hydratedItems[3].template_id, 77, 'legacy JSON-only template link must survive order reopen');
+        assert.equal(hydratedItems[4].product_name, 'Current physical product', 'present physical fields must stay authoritative');
+        assert.equal(hydratedItems[4].quantity, 0, 'an explicit physical zero must not be replaced by stale JSON');
     }
 
     {

@@ -91,6 +91,23 @@ Every row below must be checked across the applicable dimensions:
 - [x] rounded per-unit costs drifting from exact batch totals
 - [x] explicit pendant printing absent from FinDirector
 
+### Lifecycle extension — pass 2
+
+- [x] headed product clone/remove with attached per-item hardware
+- [x] product numbering and hardware/packaging parent reindexing after removal
+- [x] completed/paid order clone starts as `draft` + `not_sent`
+- [x] clone does not inherit the source `deleted_at` trash marker
+- [x] partial reserve respects another order's active reservation
+- [x] edited order transfers its reserve from the old warehouse item to the new
+      one without changing physical stock
+- [x] returning the edited order to `draft` releases only its own reserve
+- [x] legacy `item_data` restores name, quantity and template when matching
+      physical columns are null
+- [x] present physical fields and explicit zero remain authoritative over stale
+      JSON
+- [x] three consecutive warehouse-stress iterations
+- [x] orders performance smoke after lifecycle extensions
+
 ### Pass-1 release gates
 
 - [x] all runtime JavaScript syntax checks

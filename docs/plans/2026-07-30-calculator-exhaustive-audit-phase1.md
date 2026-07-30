@@ -16,6 +16,8 @@
 - [x] Refresh from `origin/main`, bump the four version anchors and changed
       runtime cache-bust suffixes if runtime code changes.
 - [x] Run the focused and broad regression gates and document the exact result.
+- [x] Extend the lifecycle pass with clone/reset, product clone/remove,
+      edited warehouse-demand and legacy `item_data` coverage.
 - [ ] Ship the phase-1 package and verify both production mirrors if a runtime
       fix is required.
 
@@ -51,6 +53,20 @@
   `stock → reserve → resave → consume → rollback → draft release`, including
   idempotency and movement history. No production stock was mutated.
 
+## Second-pass extension
+
+- The headed calculator flow passed product clone/remove with a 3K item and
+  attached per-product hardware; numbering and parent bindings stayed correct.
+- Edited warehouse demand passed partial reserve against a competing order,
+  replacement-item reserve transfer and draft release without changing stock.
+- Confirmed and fixed:
+  - an order clone inherited `paid_100` and `deleted_at` from its source instead
+    of starting as a clean unpaid draft;
+  - nullable physical `order_items` columns could hide valid legacy values in
+    `item_data`, so old rows could reopen with an empty name or zero quantity.
+- The legacy fix keeps present physical values authoritative, including an
+  explicit numeric zero.
+
 ## Release validation
 
 - Refreshed `origin/main` remained at `v429`; this package targets `v430`.
@@ -58,6 +74,8 @@
   Supabase-fallback, pricing-canon, molds, factual, finance,
   warehouse-migration, active-order recalculation, pendant, partial-delivery,
   production-load/publish, pricing-surface, code-health and data-path checks.
+- The warehouse stress bundle passed three consecutive iterations after the
+  second-pass additions; orders performance also remained green.
 - Ops calculator TypeScript build and typecheck passed. The focused 49-test
   pricing/live-calc/plan-fact suite passed. The full ops suite additionally
   requires its PostgreSQL fixture on `127.0.0.1:5433`; those 24 integration

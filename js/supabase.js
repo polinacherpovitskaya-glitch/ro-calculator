@@ -2197,16 +2197,13 @@ function _hydrateOrderItemRow(item) {
     if (item && item.item_data) {
         const extras = _parseJsonObjectSnapshot(item.item_data);
         if (Object.keys(extras).length > 0) {
-            const hydrated = { ...extras, ...item };
-            if (
-                (item.template_id === null || item.template_id === undefined || item.template_id === '')
-                && extras
-                && extras.template_id !== null
-                && extras.template_id !== undefined
-                && extras.template_id !== ''
-            ) {
-                hydrated.template_id = extras.template_id;
-            }
+            const hydrated = { ...extras };
+            Object.entries(item).forEach(([key, value]) => {
+                const physicalValueIsMissing = value === null || value === undefined || value === '';
+                if (!physicalValueIsMissing || !(key in hydrated)) {
+                    hydrated[key] = value;
+                }
+            });
             return hydrated;
         }
     }

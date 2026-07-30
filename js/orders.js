@@ -1820,8 +1820,10 @@ const Orders = {
             delete clonedOrder.id;
             clonedOrder.order_name = (clonedOrder.order_name || 'Заказ') + ' (копия)';
             clonedOrder.status = 'draft';
+            clonedOrder.payment_status = 'not_sent';
             delete clonedOrder.created_at;
             delete clonedOrder.updated_at;
+            delete clonedOrder.deleted_at;
 
             const sourceItems = Array.isArray(data.items) && data.items.length
                 ? data.items

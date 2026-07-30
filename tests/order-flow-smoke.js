@@ -750,6 +750,90 @@ async function smokeCalculatorSupportsMoreThanSixItems(context) {
     assert.notEqual(state.btnDisplay, 'none');
 }
 
+async function smokeProductCloneAndRemoveKeepPerItemBindings(context) {
+    const state = clone(await vm.runInContext(`(() => {
+        Calculator.resetForm();
+        const originalMethods = {
+            renderItemBlock: Calculator.renderItemBlock,
+            rerenderAllHardware: Calculator.rerenderAllHardware,
+            rerenderAllPackaging: Calculator.rerenderAllPackaging,
+            recalculate: Calculator.recalculate,
+            scheduleAutosave: Calculator.scheduleAutosave,
+            updateEmpty: Calculator._updateItemsEmptyState,
+        };
+        try {
+            Calculator.renderItemBlock = () => {};
+            Calculator.rerenderAllHardware = () => {};
+            Calculator.rerenderAllPackaging = () => {};
+            Calculator.recalculate = () => {};
+            Calculator.scheduleAutosave = () => {};
+            Calculator._updateItemsEmptyState = () => {};
+
+            Calculator.items = [
+                { ...Calculator.getEmptyItem(1), product_name: 'Source', quantity: 3000 },
+                { ...Calculator.getEmptyItem(2), product_name: 'Following', quantity: 25 },
+            ];
+            Calculator.hardwareItems = [
+                { ...Calculator.getEmptyHardware(0), name: 'Source hook', qty: 3000 },
+                { ...Calculator.getEmptyHardware(1), name: 'Following hook', qty: 25 },
+            ];
+            Calculator.packagingItems = [
+                { ...Calculator.getEmptyPackaging(0), name: 'Source pouch', qty: 3000 },
+                { ...Calculator.getEmptyPackaging(1), name: 'Following pouch', qty: 25 },
+            ];
+
+            Calculator.cloneItem(0);
+            const afterClone = {
+                itemNames: Calculator.items.map(item => item.product_name),
+                itemNumbers: Calculator.items.map(item => item.item_number),
+                hardware: Calculator.hardwareItems.map(item => [item.name, item.parent_item_index]),
+                packaging: Calculator.packagingItems.map(item => [item.name, item.parent_item_index]),
+            };
+
+            Calculator.removeItem(0);
+            return {
+                afterClone,
+                afterRemove: {
+                    itemNames: Calculator.items.map(item => item.product_name),
+                    itemNumbers: Calculator.items.map(item => item.item_number),
+                    hardware: Calculator.hardwareItems.map(item => [item.name, item.parent_item_index]),
+                    packaging: Calculator.packagingItems.map(item => [item.name, item.parent_item_index]),
+                },
+            };
+        } finally {
+            Calculator.renderItemBlock = originalMethods.renderItemBlock;
+            Calculator.rerenderAllHardware = originalMethods.rerenderAllHardware;
+            Calculator.rerenderAllPackaging = originalMethods.rerenderAllPackaging;
+            Calculator.recalculate = originalMethods.recalculate;
+            Calculator.scheduleAutosave = originalMethods.scheduleAutosave;
+            Calculator._updateItemsEmptyState = originalMethods.updateEmpty;
+        }
+    })()`, context));
+
+    assert.deepEqual(state.afterClone.itemNames, ['Source', 'Source', 'Following']);
+    assert.deepEqual(state.afterClone.itemNumbers, [1, 2, 3]);
+    assert.deepEqual(state.afterClone.hardware, [
+        ['Source hook', 0],
+        ['Following hook', 2],
+        ['Source hook', 1],
+    ]);
+    assert.deepEqual(state.afterClone.packaging, [
+        ['Source pouch', 0],
+        ['Following pouch', 2],
+        ['Source pouch', 1],
+    ]);
+    assert.deepEqual(state.afterRemove.itemNames, ['Source', 'Following']);
+    assert.deepEqual(state.afterRemove.itemNumbers, [1, 2]);
+    assert.deepEqual(state.afterRemove.hardware, [
+        ['Following hook', 1],
+        ['Source hook', 0],
+    ]);
+    assert.deepEqual(state.afterRemove.packaging, [
+        ['Following pouch', 1],
+        ['Source pouch', 0],
+    ]);
+}
+
 async function smokeRemovedPrintingDoesNotLeakIntoInvoiceOrSummary(context) {
     const summary = clone(await vm.runInContext(`(() => {
         Calculator.resetForm();
@@ -4214,6 +4298,8 @@ async function smokeCloneOrderPrefersNormalizedItems(context) {
             id: 9010,
             order_name: 'Normalized Source Order',
             status: 'completed',
+            payment_status: 'paid_100',
+            deleted_at: '2026-07-29T12:00:00.000Z',
             items_snapshot: JSON.stringify([
                 { item_number: 1, item_type: 'product', product_name: 'Stale Snapshot Product', quantity: 1 },
             ]),
@@ -4267,6 +4353,8 @@ async function smokeCloneOrderPrefersNormalizedItems(context) {
     assert.ok(saved, 'normalized clone should save payload');
     assert.equal(saved.order.order_name, 'Normalized Source Order (копия)');
     assert.equal(saved.order.status, 'draft');
+    assert.equal(saved.order.payment_status, 'not_sent', 'a cloned order must start with a fresh payment status');
+    assert.equal(saved.order.deleted_at, undefined, 'a cloned order must not inherit the source trash marker');
     assert.equal(saved.items.length, 2);
     assert.deepEqual(saved.items.map(item => item.product_name), ['Normalized Product', 'Normalized Hardware']);
     assert.equal(saved.items[0].id, undefined);
@@ -5663,6 +5751,103 @@ async function smokePackagingWarehouseSaveSync(context) {
         delete context.__currentPackagingItems;
         delete context.__samplePackagingItems;
     }
+}
+
+async function smokeWarehouseReservationFollowsEditedOrderDemand(context) {
+    const firstItems = [{
+        item_type: 'hardware',
+        product_name: 'Old warehouse hook',
+        quantity: 8,
+        hardware_source: 'warehouse',
+        hardware_warehouse_item_id: 501,
+    }];
+    const replacementItems = [{
+        item_type: 'hardware',
+        product_name: 'Replacement warehouse hook',
+        quantity: 6,
+        hardware_source: 'warehouse',
+        hardware_warehouse_item_id: 502,
+    }];
+
+    context.__projectHardwareState = { checks: {}, actual_qtys: {} };
+    context.__reservations = [{
+        id: 1,
+        item_id: 501,
+        order_id: 77,
+        order_name: 'Blocking order',
+        qty: 3,
+        status: 'active',
+        source: 'project_hardware',
+        created_at: '2026-07-30T08:00:00.000Z',
+    }];
+    context.__warehouseItems = [
+        { id: 501, name: 'Old warehouse hook', qty: 10, unit: 'шт' },
+        { id: 502, name: 'Replacement warehouse hook', qty: 20, unit: 'шт' },
+    ];
+    context.__warehouseHistory = [];
+    context.__toasts = [];
+    context.loadProjectHardwareState = async () => clone(context.__projectHardwareState);
+    context.saveProjectHardwareState = async (state) => { context.__projectHardwareState = clone(state); };
+    context.loadWarehouseReservations = async () => clone(context.__reservations);
+    context.saveWarehouseReservations = async (reservations) => { context.__reservations = clone(reservations); };
+    context.loadWarehouseItems = async () => clone(context.__warehouseItems);
+    context.saveWarehouseItems = async (items) => { context.__warehouseItems = clone(items); };
+    context.loadWarehouseHistory = async () => clone(context.__warehouseHistory);
+    context.saveWarehouseHistory = async (history) => { context.__warehouseHistory = clone(history); };
+
+    vm.runInContext(`
+        Warehouse.projectHardwareState = null;
+        Warehouse.allItems = globalThis.__warehouseItems;
+        Warehouse.load = async () => {};
+        App.toast = (message) => { globalThis.__toasts.push(String(message || '')); };
+    `, context);
+
+    const firstResult = clone(await vm.runInContext(`Warehouse.syncProjectHardwareOrderState({
+        orderId: 42,
+        orderName: 'Edited reserve order',
+        managerName: 'Smoke',
+        status: 'sample',
+        currentItems: JSON.parse(${JSON.stringify(JSON.stringify(firstItems))}),
+        previousItems: []
+    })`, context));
+
+    const firstActive = context.__reservations.filter(row => row.status === 'active');
+    assert.equal(firstResult.shortage, true);
+    assert.equal(firstActive.find(row => row.order_id === 42).qty, 7);
+    assert.equal(firstActive.find(row => row.order_id === 77).qty, 3);
+
+    const replacementResult = clone(await vm.runInContext(`Warehouse.syncProjectHardwareOrderState({
+        orderId: 42,
+        orderName: 'Edited reserve order',
+        managerName: 'Smoke',
+        status: 'sample',
+        currentItems: JSON.parse(${JSON.stringify(JSON.stringify(replacementItems))}),
+        previousItems: JSON.parse(${JSON.stringify(JSON.stringify(firstItems))})
+    })`, context));
+
+    const replacementActive = context.__reservations.filter(row => row.status === 'active');
+    assert.equal(replacementResult.shortage, false);
+    assert.equal(replacementActive.some(row => row.order_id === 42 && row.item_id === 501), false);
+    assert.equal(replacementActive.find(row => row.order_id === 42 && row.item_id === 502).qty, 6);
+    assert.equal(replacementActive.find(row => row.order_id === 77 && row.item_id === 501).qty, 3);
+    assert.equal(context.__warehouseItems[0].qty, 10);
+    assert.equal(context.__warehouseItems[1].qty, 20);
+    assert.equal(context.__warehouseHistory.length, 0);
+
+    await vm.runInContext(`Warehouse.syncProjectHardwareOrderState({
+        orderId: 42,
+        orderName: 'Edited reserve order',
+        managerName: 'Smoke',
+        status: 'draft',
+        currentItems: JSON.parse(${JSON.stringify(JSON.stringify(replacementItems))}),
+        previousItems: JSON.parse(${JSON.stringify(JSON.stringify(replacementItems))})
+    })`, context);
+
+    const releasedActive = context.__reservations.filter(row => row.status === 'active');
+    assert.equal(releasedActive.some(row => row.order_id === 42), false);
+    assert.equal(releasedActive.find(row => row.order_id === 77 && row.item_id === 501).qty, 3);
+    assert.equal(context.__warehouseItems[0].qty, 10);
+    assert.equal(context.__warehouseItems[1].qty, 20);
 }
 
 async function smokeWarehouseManualAdjustment(context) {
@@ -9563,6 +9748,7 @@ async function main() {
     await smokeOrderSummaryUsesExactBatchCosts(context);
     await smokeDiscountShownInCustomerInvoice(context);
     await smokeCalculatorSupportsMoreThanSixItems(context);
+    await smokeProductCloneAndRemoveKeepPerItemBindings(context);
     await smokeRemovedPrintingDoesNotLeakIntoInvoiceOrSummary(context);
     await smokeGenerateKPPassesDiscount(context);
     await smokeFinDirectorPendantsUseAllAttachments(context);
@@ -9621,6 +9807,7 @@ async function main() {
     await smokeProjectHardwareShortageDetailsForHiddenNfc(context);
     await smokeProjectHardwareShortageDetailsShowBlockingOrders(context);
     await smokePackagingWarehouseSaveSync(context);
+    await smokeWarehouseReservationFollowsEditedOrderDemand(context);
     await smokeWarehouseManualAdjustment(context);
     await smokeWarehouseAdjustmentPersistsWithoutBulkSave(context);
     await smokeWarehouseInlineQtyUsesLatestCloudQty(context);

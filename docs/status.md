@@ -63,6 +63,14 @@
   production catalog numbers were not mutated.
 - The reversible local warehouse fixture passed reserve, idempotent resave,
   write-off, rollback and draft release. No real warehouse quantity changed.
+- The second lifecycle pass also passed headed product clone/remove with
+  per-item hardware, partial reserve against a competing order, reserve
+  transfer after changing the warehouse item and isolated draft release.
+- Two additional defects were fixed with regressions:
+  - copied orders now reset payment to `not_sent` and drop a stale
+    `deleted_at` marker;
+  - nullable physical order-item columns no longer overwrite valid legacy
+    `item_data`, while present values and explicit zero stay authoritative.
 - Browser console errors in this pass are expected network/auth noise from the
   deliberately isolated local session; no production write was attempted.
 - Release candidate is `v430`, selected after refreshing `origin/main` at
@@ -77,6 +85,9 @@
 - Passed active-order recalculation, leftover assembly, partial delivery,
   pendant color batching, production-floor publish and production-load
   rendering checks.
+- Passed product clone/remove binding coverage, edited reserve transfer,
+  legacy JSON-only order reopen, three warehouse-stress iterations and orders
+  performance.
 - Passed pricing-surface, code-health and data-path audits.
 - Passed ops calculator build, typecheck and the focused 49-test
   pricing/live-calc/plan-fact suite.
