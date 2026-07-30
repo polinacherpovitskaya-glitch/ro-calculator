@@ -3,8 +3,8 @@
 ## Snapshot
 - Current phase: C1 — exhaustive calculator audit
 - Plan file: `docs/plans/2026-07-30-calculator-exhaustive-audit-phase1.md`
-- Status: implementation and local audit complete; release validation/push is
-  in progress
+- Status: implementation, local audit and PR CI complete; PR #228 is ready for
+  review, while merge and production deployment remain pending
 - Last updated: 2026-07-30
 
 ## Exhaustive calculator audit — 2026-07-30
@@ -85,8 +85,8 @@
 
 ### Next exact task
 
-- Refresh `origin/main`, resolve the final release version, run the complete
-  local release matrix, commit/push the audit package and monitor both mirrors.
+- Review and merge PR #228, then monitor the four deployment/smoke workflows
+  and confirm `v430` on both production mirrors.
 
 ### Safety boundary
 
