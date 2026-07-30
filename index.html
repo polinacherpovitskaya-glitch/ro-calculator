@@ -1774,6 +1774,7 @@
                     <div class="text-muted gantt-header-note">Распределяйте очередь между четырьмя людьми и сразу проверяйте реальный параллелизм.</div>
                 </div>
                 <div class="flex gap-8">
+                    <button class="btn btn-sm btn-outline gantt-today-btn" onclick="Gantt.scrollToToday()">Сегодня</button>
                     <button class="btn btn-sm btn-outline gantt-zoom-btn active" data-zoom="week" onclick="Gantt.setZoom('week')">Неделя</button>
                     <button class="btn btn-sm btn-outline gantt-zoom-btn" data-zoom="month" onclick="Gantt.setZoom('month')">Месяц</button>
                 </div>
@@ -1789,6 +1790,7 @@
                 <span class="gantt-legend-item"><span class="gantt-legend-dot" style="background:#06b6d4"></span> Сборка</span>
                 <span class="gantt-legend-item"><span class="gantt-legend-dot" style="background:#8b5cf6"></span> Упаковка</span>
                 <span class="gantt-legend-item"><span style="color:#e11d48;font-weight:700">&#9670;</span> Дедлайн</span>
+                <span class="gantt-legend-item"><span class="gantt-legend-load" aria-hidden="true"></span> Загрузка дня</span>
                 <span class="gantt-legend-item">до N — максимум людей на заказ</span>
             </div>
 

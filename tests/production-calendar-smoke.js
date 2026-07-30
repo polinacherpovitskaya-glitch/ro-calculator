@@ -19,12 +19,14 @@ assert.equal((sidebarNav[1].match(/data-page="gantt"/g) || []).length, 1, 'Sideb
 assert.equal((sidebarNav[1].match(/data-page="production-plan"/g) || []).length, 0, 'Sidebar must not contain legacy production-plan link');
 assert.match(indexHtml, /id="gantt-container"/, 'Gantt page must include the unified calendar container');
 assert.match(indexHtml, /Каждая горизонтальная линия — один человек/, 'Gantt page must explain the worker-lane model');
+assert.match(indexHtml, /Загрузка дня/, 'Gantt legend must explain the daily utilization bar');
 assert.doesNotMatch(indexHtml, /id="gantt-queue"/, 'Separate launch queue must be removed');
 assert.doesNotMatch(indexHtml, /id="gantt-capacity-chart"/, 'Separate capacity chart must be removed');
 assert.doesNotMatch(indexHtml, /id="gantt-stats"/, 'Separate calendar statistic cards must be removed');
 assert.doesNotMatch(indexHtml, /id="gantt-toolbar"/, 'Current-workshop toolbar must be removed');
 assert.match(indexHtml, /data-zoom="week"/, 'Week zoom button missing');
 assert.match(indexHtml, /data-zoom="month"/, 'Month zoom button missing');
+assert.match(indexHtml, /Gantt\.scrollToToday\(\)/, 'Calendar must expose a quick return to today');
 assert.doesNotMatch(indexHtml, /data-zoom="day"/, 'Day zoom must be removed');
 assert.doesNotMatch(indexHtml, /set-planning_workers_count/, 'Settings must not expose the fixed team size');
 assert.doesNotMatch(indexHtml, /set-planning_hours_per_day/, 'Settings must not expose the fixed production shift');
@@ -35,6 +37,9 @@ assert.match(ganttJs, /parallel_workers/, 'Gantt plan state must persist per-ord
 assert.match(ganttJs, /renderPriorityCard\(item, index/, 'Gantt must render compact draggable priority cards');
 assert.match(ganttJs, /renderWorkerLane\(workerSlot, queue/, 'Gantt must render work by person instead of by order');
 assert.match(ganttJs, /getWorkerLaneAllocations\(queue = \[\], workerSlot/, 'Gantt must expose worker-lane allocations');
+assert.match(ganttJs, /highlightOrder\(orderId\)/, 'Calendar must cross-highlight related order work');
+assert.match(ganttJs, /clearOrderHighlight\(\)/, 'Calendar must clear cross-highlighting');
+assert.match(ganttJs, /scrollToToday\(smooth = true\)/, 'Calendar must scroll back to today');
 assert.match(ganttJs, /renderPausedOrders\(blockedQueue = \[\], reviewQueue = \[\]\)/, 'Gantt must keep blocked and review orders accessible');
 assert.match(ganttJs, /onOrderDrop\(event, targetOrderId\)/, 'Unified Gantt rows must support drag reorder');
 assert.match(ganttJs, /TEAM_SIZE: 4/, 'Production calendar must expose the four-person team boundary');
@@ -42,6 +47,8 @@ assert.match(ganttJs, />Открыть<\/button>/, 'Every scheduled row must exp
 assert.match(calculatorJs, /startHour/, 'Scheduler allocations must keep their start inside the shift');
 assert.match(calculatorJs, /endHour/, 'Scheduler allocations must keep their end inside the shift');
 assert.match(styleCss, /\.gantt-priority-panel\s*\{[\s\S]*?flex:\s*0 0 220px/, 'Desktop priority panel must be about half of the former 430px width');
+assert.match(styleCss, /\.gantt-planner\.order-focus/, 'Worker-lane focus styling must be present');
+assert.match(styleCss, /\.gantt-day-load/, 'Daily load indicator styling must be present');
 assert.match(ganttJs, /zoom: 'week'/, 'Default gantt zoom must stay week');
 assert.doesNotMatch(ganttJs, /'day' \| 'week'/, 'Legacy day zoom comment should be removed');
 assert.match(appJs, /normalizePageAlias\(page\)/, 'Page alias normalizer missing in app');
@@ -432,6 +439,7 @@ const compactPriorityCard = vm.runInContext(`
     }, 0)
 `, ganttContext);
 assert.match(compactPriorityCard, /draggable="true"/, 'Priority card must be draggable');
+assert.match(compactPriorityCard, /data-order-id="55"/, 'Priority card must expose its order for cross-highlighting');
 assert.match(compactPriorityCard, /до 3/, 'Priority card must show the maximum worker allocation');
 assert.match(compactPriorityCard, />Открыть<\/button>/, 'Priority card must expose explicit order navigation');
 
@@ -584,6 +592,21 @@ const halfShiftLane = vm.runInContext(`
 `, ganttContext);
 assert.match(halfShiftLane, /left:45px;width:45px/, 'Half-shift work must occupy half of the day cell');
 assert.match(halfShiftLane, /data-worker-slot="1"/, 'Rendered lane must identify its worker slot');
+assert.match(halfShiftLane, /data-order-id="55"/, 'Worker task must link back to its priority card');
+
+const halfLoadedDayAxis = vm.runInContext(`
+    Gantt.renderTimeAxis(
+        new Date(2026, 2, 24),
+        1,
+        90,
+        new Set(),
+        new Map([['2026-03-24', 18]]),
+        36
+    )
+`, ganttContext);
+assert.match(halfLoadedDayAxis, /gantt-day-load light/, 'Working day must render a load indicator');
+assert.match(halfLoadedDayAxis, /width:50%/, 'Daily load indicator must reflect used person-hours');
+assert.match(halfLoadedDayAxis, /Занято 18ч из 36ч/, 'Daily load tooltip must explain person-hour utilization');
 
 const mergedWorkerSegments = JSON.parse(JSON.stringify(vm.runInContext(`
     Gantt.getWorkerLaneAllocations([{

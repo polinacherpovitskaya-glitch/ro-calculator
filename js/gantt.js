@@ -381,6 +381,37 @@ const Gantt = {
         this.render();
     },
 
+    scrollToToday(smooth = true) {
+        const timeline = document.getElementById('gantt-timeline');
+        const todayLine = timeline?.querySelector('.gantt-today-line');
+        if (!timeline || !todayLine) {
+            App.toast('Сегодня вне текущего горизонта плана');
+            return;
+        }
+        const todayLeft = Number.parseFloat(todayLine.style.left || '0') || 0;
+        timeline.scrollTo({
+            left: Math.max(0, todayLeft - timeline.clientWidth / 3),
+            behavior: smooth ? 'smooth' : 'auto',
+        });
+    },
+
+    highlightOrder(orderId) {
+        const planner = document.querySelector('.gantt-planner');
+        const normalizedId = Number(orderId);
+        if (!planner || !Number.isFinite(normalizedId)) return;
+        planner.classList.add('order-focus');
+        planner.querySelectorAll('[data-order-id]').forEach(node => {
+            node.classList.toggle('order-focused', Number(node.dataset.orderId) === normalizedId);
+        });
+    },
+
+    clearOrderHighlight() {
+        const planner = document.querySelector('.gantt-planner');
+        if (!planner) return;
+        planner.classList.remove('order-focus');
+        planner.querySelectorAll('.order-focused').forEach(node => node.classList.remove('order-focused'));
+    },
+
     render() {
         const container = document.getElementById('gantt-container');
         if (!container) return;
@@ -442,7 +473,15 @@ const Gantt = {
         const totalWidth = totalDays * cellWidth;
 
         const holidaySet = this.getHolidaySet();
-        const headerHtml = this.renderTimeAxis(minDate, totalDays, cellWidth, holidaySet);
+        const dayLoadByDate = new Map((days || []).map(day => [day.date, Number(day.totalUsed || 0)]));
+        const headerHtml = this.renderTimeAxis(
+            minDate,
+            totalDays,
+            cellWidth,
+            holidaySet,
+            dayLoadByDate,
+            Number(this.schedule.dailyCapacity || 0)
+        );
         const priorityCards = activeQueue.map((item, index) => this.renderPriorityCard(item, index, holidaySet)).join('');
         const capacity = this.getEffectivePlanningCapacity();
         const hoursPerDay = Number(capacity.hoursPerDay || this.SHIFT_HOURS);
@@ -472,7 +511,7 @@ const Gantt = {
                     <div class="gantt-priority-header">
                         <div>
                             <strong>Приоритеты</strong>
-                            <span>перетащите заказ</span>
+                            <span>${activeQueue.length} заказов · перетащите</span>
                         </div>
                         <span class="gantt-team-label">4 чел.</span>
                     </div>
@@ -498,12 +537,7 @@ const Gantt = {
             </div>
             ${pausedHtml}`;
 
-        if (showToday) {
-            const timeline = document.getElementById('gantt-timeline');
-            if (timeline) {
-                timeline.scrollLeft = Math.max(0, todayLeft - timeline.clientWidth / 3);
-            }
-        }
+        if (showToday) this.scrollToToday(false);
     },
 
     renderPriorityCard(item, index, holidaySet = new Set()) {
@@ -532,12 +566,16 @@ const Gantt = {
         ].join(' · ');
 
         return `
-            <div class="gantt-priority-card ${riskClass}" draggable="true" title="${this.esc(title)}"
+            <div class="gantt-priority-card ${riskClass}" draggable="true" data-order-id="${orderId}" title="${this.esc(title)}"
                 ondragstart="Gantt.onOrderDragStart(event, ${orderId})"
                 ondragover="Gantt.onOrderDragOver(event)"
                 ondragleave="Gantt.onOrderDragLeave(event)"
                 ondragend="Gantt.onOrderDragEnd(event)"
-                ondrop="Gantt.onOrderDrop(event, ${orderId})">
+                ondrop="Gantt.onOrderDrop(event, ${orderId})"
+                onmouseenter="Gantt.highlightOrder(${orderId})"
+                onmouseleave="Gantt.clearOrderHighlight()"
+                onfocusin="Gantt.highlightOrder(${orderId})"
+                onfocusout="if (!this.contains(event.relatedTarget)) Gantt.clearOrderHighlight()">
                 <span class="gantt-drag-handle" title="Перетащить заказ">&#8942;&#8942;</span>
                 <span class="gantt-priority-index">${index + 1}</span>
                 <div class="gantt-priority-main">
@@ -682,7 +720,10 @@ const Gantt = {
                     : '';
                 const title = `#${priorityIndex + 1} ${item.orderName || item.order_name || 'Без названия'} · ${quantityLabel}${this.formatDateStr(milestone.date)} · ${risk.label}`;
                 markers.push(`
-                    <span class="gantt-deadline-chip ${riskClass}" style="left:${(deadlineOffset + 0.72) * cellWidth}px" title="${this.esc(title)}">
+                    <span class="gantt-deadline-chip ${riskClass}" data-order-id="${Number(item.orderId || item.id)}"
+                        style="left:${(deadlineOffset + 0.72) * cellWidth}px" title="${this.esc(title)}"
+                        onmouseenter="Gantt.highlightOrder(${Number(item.orderId || item.id)})"
+                        onmouseleave="Gantt.clearOrderHighlight()">
                         <span aria-hidden="true">&#9670;</span><strong>${priorityIndex + 1}</strong>
                     </span>`);
             });
@@ -708,8 +749,13 @@ const Gantt = {
             const intervalLabel = `${this.formatHours(allocation.startHour)}–${this.formatHours(allocation.endHour)} смены`;
             const title = `Человек ${workerSlot} · ${orderLabel} · ${phaseLabel} · ${this.formatDateStr(allocation.date)} · ${intervalLabel}`;
             return `
-                <button type="button" class="gantt-worker-task" style="left:${left}px;width:${width}px;--task-color:${color};--task-bg:${color}20"
-                    onclick="App.navigate('order-detail', true, ${allocation.orderId})" title="${this.esc(title)}">
+                <button type="button" class="gantt-worker-task" data-order-id="${allocation.orderId}"
+                    style="left:${left}px;width:${width}px;--task-color:${color};--task-bg:${color}20"
+                    onclick="App.navigate('order-detail', true, ${allocation.orderId})" title="${this.esc(title)}"
+                    onmouseenter="Gantt.highlightOrder(${allocation.orderId})"
+                    onmouseleave="Gantt.clearOrderHighlight()"
+                    onfocus="Gantt.highlightOrder(${allocation.orderId})"
+                    onblur="Gantt.clearOrderHighlight()">
                     <span>${this.esc(orderLabel)}</span>
                     <small>${this.esc(phaseLabel)}</small>
                 </button>`;
@@ -722,7 +768,14 @@ const Gantt = {
             </div>`;
     },
 
-    renderTimeAxis(minDate, totalDays, cellWidth, holidaySet = new Set()) {
+    renderTimeAxis(
+        minDate,
+        totalDays,
+        cellWidth,
+        holidaySet = new Set(),
+        dayLoadByDate = new Map(),
+        dailyCapacity = 0
+    ) {
         let html = '';
         for (let index = 0; index < totalDays; index++) {
             const date = new Date(minDate);
@@ -736,11 +789,20 @@ const Gantt = {
             const primary = this.zoom === 'week' ? weekday : String(date.getDate());
             const secondary = this.zoom === 'week' ? String(date.getDate()) : (isMonthBreak ? month : '&nbsp;');
             const tertiary = this.zoom === 'week' && isMonthBreak ? month : '';
+            const dateStr = this.formatIsoDateLocal(date);
+            const usedHours = Number(dayLoadByDate.get(dateStr) || 0);
+            const loadRatio = dailyCapacity > 0 ? Math.min(usedHours / dailyCapacity, 1) : 0;
+            const loadClass = loadRatio >= 0.95 ? 'full' : (loadRatio >= 0.65 ? 'active' : 'light');
+            const loadTitle = usedHours > 0 && dailyCapacity > 0
+                ? `Занято ${this.formatHours(usedHours)} из ${this.formatHours(dailyCapacity)}`
+                : 'Нет запланированной работы';
             html += `
-                <div class="gantt-header-cell ${isNonWorking ? 'gantt-weekend' : ''} ${isMonthBreak ? 'gantt-month-break' : ''}" style="left:${index * cellWidth}px;width:${cellWidth}px">
+                <div class="gantt-header-cell ${isNonWorking ? 'gantt-weekend' : ''} ${isMonthBreak ? 'gantt-month-break' : ''}"
+                    style="left:${index * cellWidth}px;width:${cellWidth}px" title="${this.esc(loadTitle)}">
                     <span class="gantt-header-primary">${primary}</span>
                     <span class="gantt-header-secondary">${secondary}</span>
                     ${tertiary ? `<span class="gantt-header-tertiary">${tertiary}</span>` : ''}
+                    ${!isNonWorking ? `<span class="gantt-day-load ${loadClass}"><span style="width:${loadRatio * 100}%"></span></span>` : ''}
                 </div>`;
         }
         return html;

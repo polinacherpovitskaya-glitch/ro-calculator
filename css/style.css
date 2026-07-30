@@ -6399,7 +6399,7 @@ table .text-center { text-align: center; }
     border-bottom: 1px solid var(--border);
     background: var(--card-bg);
     cursor: grab;
-    transition: background 0.12s ease, box-shadow 0.12s ease, opacity 0.12s ease;
+    transition: background 0.12s ease, box-shadow 0.12s ease, opacity 0.16s ease;
 }
 
 .gantt-priority-card:hover {
@@ -6558,6 +6558,7 @@ table .text-center { text-align: center; }
     color: #64748b;
     font-size: 12px;
     line-height: 1;
+    transition: opacity 0.16s ease, transform 0.12s ease;
 }
 
 .gantt-deadline-chip strong {
@@ -6626,13 +6627,76 @@ table .text-center { text-align: center; }
     text-align: left;
     white-space: nowrap;
     cursor: pointer;
-    transition: filter 0.12s ease, transform 0.12s ease;
+    transition: filter 0.12s ease, transform 0.12s ease, opacity 0.16s ease, box-shadow 0.16s ease;
 }
 
 .gantt-worker-task:hover {
     z-index: 5;
     filter: saturate(1.15) brightness(0.97);
     transform: translateY(-1px);
+}
+
+.gantt-day-load {
+    position: absolute;
+    right: 5px;
+    bottom: 3px;
+    left: 5px;
+    height: 3px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: #e2e8f0;
+}
+
+.gantt-day-load > span {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: #94a3b8;
+}
+
+.gantt-legend-load {
+    display: inline-block;
+    width: 22px;
+    height: 4px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: linear-gradient(90deg, #3b82f6 72%, #e2e8f0 72%);
+}
+
+.gantt-day-load.active > span {
+    background: #3b82f6;
+}
+
+.gantt-day-load.full > span {
+    background: #16a34a;
+}
+
+.gantt-planner.order-focus .gantt-priority-card,
+.gantt-planner.order-focus .gantt-worker-task,
+.gantt-planner.order-focus .gantt-deadline-chip {
+    opacity: 0.18;
+}
+
+.gantt-planner.order-focus .gantt-priority-card.order-focused,
+.gantt-planner.order-focus .gantt-worker-task.order-focused,
+.gantt-planner.order-focus .gantt-deadline-chip.order-focused {
+    opacity: 1;
+}
+
+.gantt-planner.order-focus .gantt-priority-card.order-focused {
+    z-index: 3;
+    background: #eff6ff;
+    box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.gantt-planner.order-focus .gantt-worker-task.order-focused {
+    z-index: 5;
+    box-shadow: 0 0 0 2px var(--task-color), 0 4px 12px rgba(15, 23, 42, 0.16);
+}
+
+.gantt-planner.order-focus .gantt-deadline-chip.order-focused {
+    z-index: 6;
+    transform: translateX(-50%) scale(1.12);
 }
 
 .gantt-worker-task span,
